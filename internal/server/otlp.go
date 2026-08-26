@@ -28,9 +28,15 @@ const (
 	contentTypeProtobufAlt = "application/protobuf"
 )
 
-// maxDecompressionRatio bounds a gzipped body's expansion. The configured cap
-// applies to what arrives on the wire; without a second bound a small
-// compressed body could still exhaust memory.
+// maxDecompressionRatio bounds how far one gzipped body may expand. The
+// configured cap applies to what arrives on the wire, so without this a 20
+// MiB body of zeros would decompress into gigabytes.
+//
+// It is a per-request bound, not a memory budget: handler concurrency is
+// unbounded, so N simultaneous exports can hold N decompressed bodies. What
+// keeps that finite in practice is the writer queue (spec 002 #15), which
+// stops admitting work long before the machine runs out — an aggregate cap
+// belongs with the rate limiting deferred to a later spec.
 const maxDecompressionRatio = 20
 
 // handleTraces serves both the canonical OTLP route and the Langfuse-SDK
@@ -75,20 +81,28 @@ func (s *Server) handleTraces(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resourceSpans, err := mapping.DecodeExportRequest(body)
+	resourceSpans, unreadable, err := mapping.DecodeExportRequest(body)
 	if err != nil {
 		slog.Warn("undecodable OTLP body", "project", project.Name, "err", err)
 		writeError(w, http.StatusBadRequest, "malformed OTLP body")
 		return
 	}
-	if len(resourceSpans) == 0 {
+	if len(resourceSpans) == 0 && unreadable == 0 {
 		// Per the OTLP spec an empty batch is a successful no-op; there
 		// is nothing to store and nothing to replay later.
 		writeExportResponse(w, nil)
 		return
 	}
+	if unreadable > 0 {
+		// Worth a log line even though the export still succeeds: it
+		// means an exporter is emitting something we cannot read, and
+		// the raw body below is the only way to find out what.
+		slog.Warn("skipped unreadable resource spans",
+			"project", project.Name, "count", unreadable)
+	}
 
 	result := mapping.Map(resourceSpans)
+	result.NoteUnreadable(unreadable)
 	batch := &store.IngestBatch{
 		ProjectID:    project.ID,
 		Traces:       result.Traces,

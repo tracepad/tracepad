@@ -52,6 +52,7 @@
       "metadata": {
         "gen_ai.operation.name": "chat",
         "gen_ai.response.finish_reasons": "stop",
+        "gen_ai.response.model": "gpt-4o-mini-2026-04-01",
         "gen_ai.system": "openai",
         "service.name": "changelog-writer"
       }

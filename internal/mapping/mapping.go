@@ -37,6 +37,11 @@ type Result struct {
 	Skipped int64
 	// SkipReason summarizes why, for the partial_success message.
 	SkipReason string
+	// Unreadable counts ResourceSpans blocks that did not decode. They are
+	// reported as a warning rather than added to Skipped: OTLP's
+	// rejected_spans counts spans, and how many spans an undecodable block
+	// held is exactly what we could not find out.
+	Unreadable int
 	// Dialect labels the export for `raw_batches`, so a later remap can
 	// find the bodies a changed rule affects.
 	Dialect string
@@ -206,10 +211,10 @@ func mapSpan(sc spanCtx, parents map[string]bool) (*model.Observation, *traceFie
 	a.merge(span.GetAttributes())
 
 	tf := &traceFields{dialect: dialectOf(a.values)}
-	tf.name, _ = a.firstStr(traceNameKeys...)
-	tf.userID, _ = a.firstStr(traceUserKeys...)
-	tf.sessionID, _ = a.firstStr(traceSessionKeys...)
-	tf.environment, _ = a.firstStr(traceEnvironmentKeys...)
+	tf.name, _ = a.firstString(traceNameKeys...)
+	tf.userID, _ = a.firstString(traceUserKeys...)
+	tf.sessionID, _ = a.firstString(traceSessionKeys...)
+	tf.environment, _ = a.firstString(traceEnvironmentKeys...)
 	tf.tags = mapTags(a)
 	tf.metadata = mapMetadata(a, lfTraceMetadata)
 	if spanID(span.GetParentSpanId()) == "" {
@@ -227,7 +232,7 @@ func mapSpan(sc spanCtx, parents map[string]bool) (*model.Observation, *traceFie
 
 	obs.Level = mapLevel(a, span.GetStatus())
 	obs.StatusMessage = mapStatusMessage(a, span.GetStatus())
-	obs.Model, _ = a.firstStr(obsModelKeys...)
+	obs.Model, _ = a.firstString(obsModelKeys...)
 	obs.ModelParameters = mapModelParameters(a)
 	obs.Usage = mapUsage(a)
 	obs.CostDetails = mapCost(a)
@@ -242,10 +247,13 @@ func mapSpan(sc spanCtx, parents map[string]bool) (*model.Observation, *traceFie
 }
 
 // mapLevel: an explicit level wins; otherwise an ERROR span status raises
-// the level, and everything else is DEFAULT.
+// the level, and everything else is DEFAULT. A spelling the alias table does
+// not know is left unclaimed, so it surfaces in metadata rather than being
+// swallowed by the fallback.
 func mapLevel(a *attrs, status *tracepb.Status) string {
-	if raw, ok := a.firstStr(obsLevelKeys...); ok {
-		if level, known := levelAliases[strings.ToUpper(strings.TrimSpace(raw))]; known {
+	if key, raw, ok := a.first(obsLevelKeys...); ok {
+		if level, known := levelAliases[strings.ToUpper(strings.TrimSpace(asString(raw)))]; known {
+			a.claim(key)
 			return level
 		}
 	}
@@ -256,7 +264,7 @@ func mapLevel(a *attrs, status *tracepb.Status) string {
 }
 
 func mapStatusMessage(a *attrs, status *tracepb.Status) string {
-	if msg, ok := a.firstStr(obsStatusMessageKeys...); ok {
+	if msg, ok := a.firstString(obsStatusMessageKeys...); ok {
 		return msg
 	}
 	return status.GetMessage()
@@ -268,10 +276,12 @@ func mapStatusMessage(a *attrs, status *tracepb.Status) string {
 // three collapses onto the nearest one and keeps its original spelling in
 // metadata, so nothing is lost.
 func mapType(a *attrs, obs *model.Observation, hasChildren bool, meta map[string]any) string {
-	if raw, ok := a.str(lfObsType); ok {
-		mapped, known := observationTypeAliases[strings.ToLower(strings.TrimSpace(raw))]
+	if raw, ok := a.lookup(lfObsType); ok {
+		spelling := strings.ToLower(strings.TrimSpace(asString(raw)))
+		mapped, known := observationTypeAliases[spelling]
+		a.claim(lfObsType)
 		if known {
-			if mapped != strings.ToLower(strings.TrimSpace(raw)) {
+			if mapped != spelling {
 				meta[lfObsType] = raw
 			}
 			return mapped
@@ -292,8 +302,11 @@ func mapType(a *attrs, obs *model.Observation, hasChildren bool, meta map[string
 // `gen_ai.request.*` attribute except the model name is collected.
 func mapModelParameters(a *attrs) map[string]any {
 	for _, key := range []string{lfObsModelParameters, lfObsModelParametersAlt} {
-		if raw, ok := a.get(key); ok {
+		if raw, ok := a.lookup(key); ok {
+			// Claimed only if it really is an object: an attribute
+			// that does not parse stays visible in metadata.
 			if obj, valid := parseJSONObject(raw); valid {
+				a.claim(key)
 				return obj
 			}
 		}
@@ -304,10 +317,10 @@ func mapModelParameters(a *attrs) map[string]any {
 			continue
 		}
 		name := k[len(genAIRequestPrefix):]
-		if name == "model" { // already the observation's model
+		if name == "model" { // a model name, not a parameter
 			continue
 		}
-		a.consume(k)
+		a.claim(k)
 		out[name] = v
 	}
 	if len(out) == 0 {
@@ -320,8 +333,9 @@ func mapModelParameters(a *attrs) map[string]any {
 // `gen_ai.usage.<key>` is collected verbatim, minus the cost (which is a
 // price, not a token count, and feeds the cost chain instead).
 func mapUsage(a *attrs) map[string]any {
-	if raw, ok := a.get(lfObsUsageDetails); ok {
+	if raw, ok := a.lookup(lfObsUsageDetails); ok {
 		if obj, valid := parseJSONObject(raw); valid {
+			a.claim(lfObsUsageDetails)
 			return obj
 		}
 	}
@@ -332,11 +346,11 @@ func mapUsage(a *attrs) map[string]any {
 		}
 		n, ok := asNumber(v)
 		if !ok {
-			// Not a count: leave it unconsumed so it survives in
+			// Not a count: leave it unclaimed so it survives in
 			// metadata rather than being coerced into a number.
 			continue
 		}
-		a.consume(k)
+		a.claim(k)
 		out[k[len(genAIUsagePrefix):]] = jsonNumber(n)
 	}
 	if len(out) == 0 {
@@ -349,14 +363,16 @@ func mapUsage(a *attrs) map[string]any {
 // always present (spec 002 #14: cost is never estimated, only recorded).
 func mapCost(a *attrs) map[string]any {
 	var out map[string]any
-	if raw, ok := a.get(lfObsCostDetails); ok {
+	if raw, ok := a.lookup(lfObsCostDetails); ok {
 		if obj, valid := parseJSONObject(raw); valid {
+			a.claim(lfObsCostDetails)
 			out = obj
 		}
 	}
 	if out == nil {
-		if raw, ok := a.get(genAIUsageCost); ok {
+		if raw, ok := a.lookup(genAIUsageCost); ok {
 			if n, valid := asNumber(raw); valid {
+				a.claim(genAIUsageCost)
 				out = map[string]any{"total": jsonNumber(n)}
 			}
 		}
@@ -386,14 +402,9 @@ func mapCost(a *attrs) map[string]any {
 // reassembles the flattened form (`gen_ai.prompt.0.content`) that
 // message-per-attribute instrumentations emit.
 func mapPayload(a *attrs, keys []string, flatPrefix string) any {
-	var out any
-	for _, key := range keys {
-		if v, ok := a.get(key); ok && out == nil {
-			out = looseJSON(v)
-		}
-	}
-	if out != nil {
-		return out
+	if key, v, ok := a.first(keys...); ok {
+		a.claim(key)
+		return looseJSON(v)
 	}
 	return reassemble(a, flatPrefix)
 }
@@ -402,10 +413,11 @@ func mapPayload(a *attrs, keys []string, flatPrefix string) any {
 // tried as a JSON array, then as a comma-separated list, then as a single
 // tag — the three shapes SDKs actually send.
 func mapTags(a *attrs) []string {
-	raw, ok := a.get(lfTraceTags)
+	key, raw, ok := a.first(traceTagsKeys...)
 	if !ok {
 		return nil
 	}
+	a.claim(key)
 	switch v := raw.(type) {
 	case []any:
 		out := make([]string, 0, len(v))
@@ -441,8 +453,9 @@ func mapTags(a *attrs) []string {
 // object at the bare key, and one attribute per entry underneath it.
 func mapMetadata(a *attrs, prefix string) map[string]any {
 	out := map[string]any{}
-	if raw, ok := a.get(prefix); ok {
+	if raw, ok := a.lookup(prefix); ok {
 		if obj, valid := parseJSONObject(raw); valid {
+			a.claim(prefix)
 			for k, v := range obj {
 				out[k] = v
 			}
@@ -500,7 +513,7 @@ func reassemble(a *attrs, prefix string) any {
 		if !strings.HasPrefix(k, prefix+".") || isEmpty(v) {
 			continue
 		}
-		a.consume(k)
+		a.claim(k)
 		setNested(nested, strings.Split(k[len(prefix)+1:], "."), looseJSON(v))
 		found = true
 	}
@@ -594,6 +607,21 @@ func maxDialect(a, b string) string {
 		return b
 	}
 	return a
+}
+
+// NoteUnreadable records ResourceSpans blocks the decoder had to skip, so
+// the exporter hears about them in partial_success.
+func (r *Result) NoteUnreadable(n int) {
+	if n <= 0 {
+		return
+	}
+	r.Unreadable += n
+	note := fmt.Sprintf("unreadable resource spans: %d", n)
+	if r.SkipReason == "" {
+		r.SkipReason = note
+		return
+	}
+	r.SkipReason += "; " + note
 }
 
 // summarize renders skip reasons for the OTLP partial_success message, which

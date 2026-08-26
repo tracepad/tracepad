@@ -252,6 +252,19 @@ func langfuseExtendedTypes() Fixture {
 	}
 }
 
+// SpanWith builds a minimal one-span export carrying the given string
+// attributes, for tests that probe a single mapping rule rather than a whole
+// dialect. Keys and values alternate.
+func SpanWith(keyValues ...string) []*tracepb.ResourceSpans {
+	attrs := make([]*commonpb.KeyValue, 0, len(keyValues)/2)
+	for i := 0; i+1 < len(keyValues); i += 2 {
+		attrs = append(attrs, str(keyValues[i], keyValues[i+1]))
+	}
+	probe := span("00112233445566778899aabbccddeeff", "0011223344556677", "", "probe",
+		base, base+ms, attrs...)
+	return []*tracepb.ResourceSpans{resourceSpans(nil, scope("probe", "0.0.0", probe))}
+}
+
 func resourceSpans(resourceAttrs []*commonpb.KeyValue, scopes ...*tracepb.ScopeSpans) *tracepb.ResourceSpans {
 	return &tracepb.ResourceSpans{
 		Resource:   &resourcepb.Resource{Attributes: resourceAttrs},

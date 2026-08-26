@@ -36,12 +36,18 @@ type Server struct {
 // here: its lifetime is owned by whoever opened the store, and tests tune its
 // queue to exercise backpressure.
 func New(cfg *config.Config, version string, st *store.Store, writer IngestWriter) *Server {
+	maxBody := cfg.MaxBodyBytes
+	if maxBody <= 0 {
+		// config.Load never produces this, but a hand-built Config
+		// would, and a zero cap silently 413s every export.
+		maxBody = config.DefaultMaxBodyBytes
+	}
 	s := &Server{
 		store:        st,
 		writer:       writer,
 		version:      version,
 		storeRaw:     cfg.StoreRaw,
-		maxBodyBytes: cfg.MaxBodyBytes,
+		maxBodyBytes: maxBody,
 	}
 
 	mux := http.NewServeMux()

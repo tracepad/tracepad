@@ -36,24 +36,32 @@ var ErrMalformedBody = errors.New("malformed OTLP request body")
 // DecodeExportRequest unpacks an ExportTraceServiceRequest body into its
 // ResourceSpans. Unknown fields are skipped, as protobuf requires, so a
 // newer exporter that adds a field still ingests.
-func DecodeExportRequest(body []byte) ([]*tracepb.ResourceSpans, error) {
+//
+// A ResourceSpans that does not decode is skipped and counted rather than
+// failing the export: that is the whole point of decoding the envelope
+// ourselves (Decision 18), and it is the same bargain as #13 one level up —
+// one unusable part must not destroy the usable rest, which is still on disk
+// in the raw body. Only an envelope we cannot walk at all is an error.
+func DecodeExportRequest(body []byte) ([]*tracepb.ResourceSpans, int, error) {
 	var out []*tracepb.ResourceSpans
+	var malformed int
 	for len(body) > 0 {
 		num, typ, n := protowire.ConsumeTag(body)
 		if n < 0 {
-			return nil, fmt.Errorf("%w: %v", ErrMalformedBody, protowire.ParseError(n))
+			return nil, malformed, fmt.Errorf("%w: %v", ErrMalformedBody, protowire.ParseError(n))
 		}
 		body = body[n:]
 
 		if num == fieldResourceSpans && typ == protowire.BytesType {
 			raw, n := protowire.ConsumeBytes(body)
 			if n < 0 {
-				return nil, fmt.Errorf("%w: %v", ErrMalformedBody, protowire.ParseError(n))
+				return nil, malformed, fmt.Errorf("%w: %v", ErrMalformedBody, protowire.ParseError(n))
 			}
 			body = body[n:]
 			rs := &tracepb.ResourceSpans{}
 			if err := proto.Unmarshal(raw, rs); err != nil {
-				return nil, fmt.Errorf("%w: %v", ErrMalformedBody, err)
+				malformed++
+				continue
 			}
 			out = append(out, rs)
 			continue
@@ -61,11 +69,11 @@ func DecodeExportRequest(body []byte) ([]*tracepb.ResourceSpans, error) {
 
 		n = protowire.ConsumeFieldValue(num, typ, body)
 		if n < 0 {
-			return nil, fmt.Errorf("%w: %v", ErrMalformedBody, protowire.ParseError(n))
+			return nil, malformed, fmt.Errorf("%w: %v", ErrMalformedBody, protowire.ParseError(n))
 		}
 		body = body[n:]
 	}
-	return out, nil
+	return out, malformed, nil
 }
 
 // EncodeExportResponse renders an ExportTraceServiceResponse. A fully

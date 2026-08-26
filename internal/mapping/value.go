@@ -34,12 +34,18 @@ func (a *attrs) merge(kvs []*commonpb.KeyValue) {
 	}
 }
 
-// get returns the value at key and marks the key consumed. A key present
-// with an empty value counts as absent: priority chains are "first non-empty
-// wins", and an SDK that stamps an empty string should not shadow the next
-// candidate in the chain.
-func (a *attrs) get(key string) (any, bool) {
-	a.consumed[key] = true
+// Reading and claiming are deliberately separate operations. A key is
+// claimed only once a rule has actually *used* its value, never merely
+// because a rule looked at it — otherwise an attribute a rule inspected and
+// then rejected (an unknown level spelling, a cost_details that is not JSON,
+// the loser of a priority chain) would be consumed without being stored, and
+// would appear nowhere at all. Spec 002 #11 promises the opposite.
+
+// lookup returns the value at key without claiming it. A key present with an
+// empty value counts as absent: priority chains are "first non-empty wins",
+// and an SDK that stamps an empty string should not shadow the next
+// candidate.
+func (a *attrs) lookup(key string) (any, bool) {
 	v, ok := a.values[key]
 	if !ok || isEmpty(v) {
 		return nil, false
@@ -47,40 +53,40 @@ func (a *attrs) get(key string) (any, bool) {
 	return v, true
 }
 
-// str is get plus stringification: a non-string value is rendered as JSON so
-// that a target column typed TEXT never silently loses a structured value.
-func (a *attrs) str(key string) (string, bool) {
-	v, ok := a.get(key)
+// first walks a priority chain and returns the winning key and its value,
+// claiming nothing. Losers stay unclaimed on purpose: `gen_ai.response.model`
+// is not the same fact as `gen_ai.request.model`, so the one that did not win
+// still belongs in metadata.
+func (a *attrs) first(keys ...string) (string, any, bool) {
+	for _, k := range keys {
+		if v, ok := a.lookup(k); ok {
+			return k, v, true
+		}
+	}
+	return "", nil, false
+}
+
+// firstString resolves a chain into a string column, claiming the winner.
+// A non-string value is rendered as JSON so a TEXT column never silently
+// loses a structured value.
+func (a *attrs) firstString(keys ...string) (string, bool) {
+	key, v, ok := a.first(keys...)
 	if !ok {
 		return "", false
 	}
+	a.claim(key)
 	return asString(v), true
 }
 
-// firstStr walks a priority chain and returns the first non-empty value.
-// Every key in the chain is marked consumed, including those after the hit:
-// they carry the same meaning as the winner, so repeating them in metadata
-// would be noise, not preservation.
-func (a *attrs) firstStr(keys ...string) (string, bool) {
-	var out string
-	var found bool
-	for _, k := range keys {
-		if s, ok := a.str(k); ok && !found {
-			out, found = s, true
-		}
-	}
-	return out, found
-}
-
 // prefixed returns every attribute under "<prefix>." with the prefix
-// stripped, marking each consumed.
+// stripped, claiming each — they are all carried into the result.
 func (a *attrs) prefixed(prefix string) map[string]any {
 	out := map[string]any{}
 	for k, v := range a.values {
 		if len(k) <= len(prefix)+1 || k[:len(prefix)+1] != prefix+"." {
 			continue
 		}
-		a.consumed[k] = true
+		a.claim(k)
 		out[k[len(prefix)+1:]] = v
 	}
 	if len(out) == 0 {
@@ -89,10 +95,9 @@ func (a *attrs) prefixed(prefix string) map[string]any {
 	return out
 }
 
-// consume marks a key claimed without reading it — for attributes a rule
-// handles by other means (a whole prefix, a span field) but that must not
-// reappear in metadata.
-func (a *attrs) consume(key string) { a.consumed[key] = true }
+// claim marks a key as carried into the result, so it does not reappear in
+// metadata.
+func (a *attrs) claim(key string) { a.consumed[key] = true }
 
 // rest returns every attribute no rule claimed (spec 002 #11).
 func (a *attrs) rest() map[string]any {
@@ -107,14 +112,6 @@ func (a *attrs) rest() map[string]any {
 		return nil
 	}
 	return out
-}
-
-// has reports presence of a non-empty value without consuming the key —
-// used by heuristics (spec 002 #12) that only need to know a value exists
-// while some other rule owns it.
-func (a *attrs) has(key string) bool {
-	v, ok := a.values[key]
-	return ok && !isEmpty(v)
 }
 
 // anyValue converts an OTLP AnyValue into a plain Go value. Kvlists become

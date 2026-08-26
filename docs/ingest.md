@@ -97,8 +97,11 @@ span's own.
 Two consequences worth knowing:
 
 - **Nothing is dropped.** An attribute Tracepad does not recognize shows up in
-  the observation's metadata. A new SDK convention degrades to visible
-  metadata, never to lost data.
+  the observation's metadata — and so does one it *did* recognize but could
+  not use: an unknown level spelling, a `cost_details` that is not a JSON
+  object, or the runner-up of a chain (`gen_ai.response.model` when
+  `gen_ai.request.model` won, since those are two different facts). A new SDK
+  convention degrades to visible metadata, never to lost data.
 - **Cost is never estimated.** There is no price table. `total_cost` is
   present only when the client sent one; otherwise the UI shows "no data",
   not `$0`.
