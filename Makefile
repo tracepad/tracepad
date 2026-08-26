@@ -20,6 +20,12 @@ test: ## Run all tests
 vet: ## Static checks
 	go vet ./...
 
+smoke: ## Export from real SDKs into a real binary and assert the rows
+	scripts/smoke/run.sh
+
+fixtures: ## Regenerate testdata/otlp bodies and their golden files
+	go test ./internal/mapping -run TestGoldenFixtures -update
+
 format: ## Format all Go sources
 	gofmt -w .
 
@@ -32,4 +38,4 @@ install-hooks: ## Install the pre-commit gate hook
 	printf '#!/bin/sh\nexec make precommit\n' > .git/hooks/pre-commit
 	chmod +x .git/hooks/pre-commit
 
-.PHONY: help build dev test vet format format-check precommit install-hooks
+.PHONY: help build dev test vet smoke fixtures format format-check precommit install-hooks

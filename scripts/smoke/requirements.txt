@@ -1,0 +1,7 @@
+# Pinned instrumentation for the real-SDK smoke test (spec 002, Testing #3).
+# Pinned on purpose: this test is the drift detector for SDK conventions, so
+# a bump here is a deliberate act with a visible diff, not a surprise on a
+# random CI run.
+opentelemetry-sdk==1.44.0
+opentelemetry-exporter-otlp-proto-http==1.44.0
+langfuse==4.14.5

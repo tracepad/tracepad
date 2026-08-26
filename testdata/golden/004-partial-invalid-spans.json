@@ -1,0 +1,29 @@
+{
+  "dialect": "genai",
+  "skipped": 2,
+  "skip_reason": "skipped spans (invalid span id: 1, invalid trace id: 1)",
+  "traces": [
+    {
+      "id": "cc33dd44ee55ff6677008899001122aa",
+      "name": "embed-batch"
+    }
+  ],
+  "observations": [
+    {
+      "trace_id": "cc33dd44ee55ff6677008899001122aa",
+      "id": "2122232425262728",
+      "type": "generation",
+      "name": "embed-batch",
+      "start_time": 1787738400000000000,
+      "end_time": 1787738400095000000,
+      "model": "text-embedding-3-small",
+      "level": "DEFAULT",
+      "usage": {
+        "input_tokens": 512
+      },
+      "metadata": {
+        "service.name": "indexer"
+      }
+    }
+  ]
+}

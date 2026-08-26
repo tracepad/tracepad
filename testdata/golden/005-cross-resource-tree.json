@@ -1,0 +1,101 @@
+{
+  "dialect": "langfuse",
+  "traces": [
+    {
+      "id": "dd44ee55ff6677008899001122aabb33",
+      "name": "answer-question",
+      "environment": "prod",
+      "metadata": {
+        "plan": "team",
+        "tenant": "acme"
+      }
+    }
+  ],
+  "observations": [
+    {
+      "trace_id": "dd44ee55ff6677008899001122aabb33",
+      "id": "3132333435363738",
+      "type": "span",
+      "name": "answer-question",
+      "start_time": 1787738400000000000,
+      "end_time": 1787738400900000000,
+      "level": "DEFAULT",
+      "metadata": {
+        "service.name": "agent-api"
+      }
+    },
+    {
+      "trace_id": "dd44ee55ff6677008899001122aabb33",
+      "id": "4142434445464748",
+      "parent_observation_id": "3132333435363738",
+      "type": "span",
+      "name": "tool.search",
+      "start_time": 1787738400030000000,
+      "end_time": 1787738400120000000,
+      "level": "WARNING",
+      "status_message": "no results, retrying",
+      "metadata": {
+        "service.name": "agent-worker"
+      }
+    },
+    {
+      "trace_id": "dd44ee55ff6677008899001122aabb33",
+      "id": "5152535455565758",
+      "parent_observation_id": "3132333435363738",
+      "type": "span",
+      "name": "tool.fetch",
+      "start_time": 1787738400130000000,
+      "end_time": 1787738400300000000,
+      "level": "ERROR",
+      "status_message": "upstream timeout",
+      "metadata": {
+        "events": [
+          {
+            "exception.message": "read timed out after 30s",
+            "exception.stacktrace": "tools/fetch.py, line 88, in fetch\n  response = session.get(url)",
+            "exception.type": "TimeoutError",
+            "name": "exception",
+            "time": 1787738400000500000
+          }
+        ],
+        "service.name": "agent-worker"
+      }
+    },
+    {
+      "trace_id": "dd44ee55ff6677008899001122aabb33",
+      "id": "6162636465666768",
+      "parent_observation_id": "3132333435363738",
+      "type": "event",
+      "name": "cache.miss",
+      "start_time": 1787738400310000000,
+      "end_time": 1787738400310000000,
+      "level": "DEFAULT",
+      "metadata": {
+        "service.name": "agent-worker"
+      }
+    },
+    {
+      "trace_id": "dd44ee55ff6677008899001122aabb33",
+      "id": "7071727374757677",
+      "parent_observation_id": "3132333435363738",
+      "type": "span",
+      "name": "tool.parse",
+      "start_time": 1787738400305000000,
+      "end_time": 1787738400308000000,
+      "level": "ERROR",
+      "status_message": "unparseable response",
+      "metadata": {
+        "events": [
+          {
+            "exception.message": "unparseable response",
+            "exception.stacktrace": "tools/parse.py, line 12",
+            "exception.type": "ValueError",
+            "name": "exception",
+            "time": 1787738400000500000
+          }
+        ],
+        "service.name": "agent-worker"
+      }
+    }
+  ]
+}

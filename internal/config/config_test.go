@@ -48,3 +48,44 @@ func TestStrayArgumentRejected(t *testing.T) {
 		t.Fatal("stray positional argument must be rejected, not silently ignored")
 	}
 }
+
+// Ingest defaults are the ones spec 002 documents: raw bodies kept, 20 MiB
+// body cap.
+func TestIngestDefaults(t *testing.T) {
+	cfg, err := Load(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.StoreRaw {
+		t.Error("StoreRaw must default to on")
+	}
+	if cfg.MaxBodyBytes != DefaultMaxBodyBytes {
+		t.Errorf("MaxBodyBytes = %d, want %d", cfg.MaxBodyBytes, DefaultMaxBodyBytes)
+	}
+}
+
+func TestIngestOverrides(t *testing.T) {
+	t.Setenv("TRACEPAD_STORE_RAW", "off")
+	t.Setenv("TRACEPAD_MAX_BODY_BYTES", "1024")
+	cfg, err := Load(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.StoreRaw || cfg.MaxBodyBytes != 1024 {
+		t.Fatalf("StoreRaw = %v, MaxBodyBytes = %d", cfg.StoreRaw, cfg.MaxBodyBytes)
+	}
+}
+
+// A typo in a switch is an error, not a silent fallback to the default:
+// silently ingesting without raw bodies would be discovered months later.
+func TestIngestRejectsMalformedValues(t *testing.T) {
+	t.Setenv("TRACEPAD_STORE_RAW", "maybe")
+	if _, err := Load(nil); err == nil {
+		t.Error("TRACEPAD_STORE_RAW=maybe must be rejected")
+	}
+	t.Setenv("TRACEPAD_STORE_RAW", "on")
+	t.Setenv("TRACEPAD_MAX_BODY_BYTES", "20MB")
+	if _, err := Load(nil); err == nil {
+		t.Error("TRACEPAD_MAX_BODY_BYTES=20MB must be rejected")
+	}
+}
