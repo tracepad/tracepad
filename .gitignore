@@ -30,3 +30,12 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Tracepad
+bin/
+dist/
+.dev.log
+*.db
+*.db-wal
+*.db-shm
+*.bak

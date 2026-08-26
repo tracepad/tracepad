@@ -1,0 +1,26 @@
+# Release configuration. Runs on version tags (v*) via release workflow
+# (added in the packaging stage); `goreleaser check` validates this file.
+version: 2
+
+project_name: tracepad
+
+builds:
+  - main: ./cmd/tracepad
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  use: github
