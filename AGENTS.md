@@ -12,7 +12,10 @@ API. This file routes; it does not duplicate what specs and docs say.
 - ✅ Spec 002 (trace model + OTLP ingest) shipped: `POST /v1/traces` and the
   Langfuse alias, schema 0002, attribute mapping with two dialects,
   group-commit writer, raw body storage.
-- Next: spec 003 — scores and prompts.
+- ✅ Spec 003 (scores & prompts) shipped: `/api/v1/scores` and
+  `/api/v1/prompts`, schema 0003, versioned prompts with movable labels, the
+  group-commit writer generalized to carry every durable write.
+- Next: spec 004 — native read API + CLI + MCP.
 
 ## Where things are
 

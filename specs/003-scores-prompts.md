@@ -1,6 +1,6 @@
 # Spec 003 — Scores & Prompts API
 
-**Status:** 🔄 IN PROGRESS
+**Status:** ✅ SHIPPED
 **Sprint:** August–September 2026
 
 > The first native write surface beyond telemetry: attach quality scores to
@@ -50,6 +50,10 @@ Deliverables:
 | 16 | JSON timestamps are RFC 3339 UTC; storage stays Unix nanoseconds | Spec 002 #4 keeps ns internally; rendering ISO at the API boundary is the layer split design §5.2 assigns. Score `timestamp` is client-optional (event time, e.g. when the graded interaction happened), defaulting to receive time. |
 | 17 | Unknown JSON fields are rejected with a 400 naming the field | Agent-first cuts both ways: an unattended agent that typos `commet` must get an error, not silent data loss. Server and clients are versioned together in a self-hosted binary, so strictness costs no forward compatibility. |
 | 18 | List endpoints use `limit` (default 50, max 500) + opaque `cursor` pagination and never return prompt bodies | Cursor pagination is stable under concurrent writes where offset is not; the pattern is set here exactly as the read API (spec 004) will use it. Version lists are for picking and diffing — bodies come from the single-prompt GET. |
+| 19 | **2026-08-27** — `/api/v1/*` requires no `Content-Type`: a body is parsed as JSON whatever the header says (or does not say) | #1 justifies this whole surface by its debuggability with curl, and `curl -d '{…}'` sends `application/x-www-form-urlencoded`. Demanding the header would 415 exactly the command the design uses as its bar, to prevent nothing: a body that is not JSON fails at the parser with a 400 either way, and the JSON routes have no second wire format to disambiguate — unlike ingest (spec 002 #1), where the 415 tells an exporter it guessed wrong about protobuf. |
+| 20 | **2026-08-27** — Validation that needs stored state — a prompt's existing type, whether a labelled version exists — runs inside the write transaction and comes back as a typed rejection the handler renders as 400/404 | The alternative is a read in the handler before the submit, which is a race: between the check and the commit another writer can create the name or move the label, so the handler would either reject a legal write or accept an illegal one. The writer already serializes every write (#9), so the transaction is the only place where "does this name exist yet" has an answer that is still true when it is acted on. Typing the refusal (rather than returning a plain error) is what keeps a client mistake out of the 500s and out of the error log: the writer logs a rejection as routine, a storage failure as an incident. |
+| 21 | **2026-08-27** — An unknown query parameter, and a `limit` outside 1–500, are 400s | #17 refuses unknown JSON fields so that an unattended agent's typo surfaces instead of silently dropping data; a mistyped filter is the same failure with a worse blast radius — `?trace=abc` would silently widen a listing to the whole project and the caller would act on the wrong rows. Out-of-range `limit` follows: a client asking for 5000 is reasoning about a page size it will not get, and silently handing back 500 makes it believe it has seen everything. |
+| 22 | **2026-08-27** — `scores.data_type` and `prompts.type` are `NOT NULL`, tightening the Data contract above | The contract writes them with a CHECK only, and a CHECK does not constrain NULL: `NULL IN ('numeric', …)` evaluates to NULL, which passes. That leaves the schema admitting a row the API cannot produce — #5 resolves a data type for every score before it is written, and #10 fixes a prompt's type at its first version. A column that permits an unreachable state is a trap for the first reader who trusts it (the read API, spec 004, will join on these), so the schema says what the decisions already guarantee. |
 
 ## API contract
 
@@ -74,10 +78,12 @@ serialized (#9). Request bodies are capped by `TRACEPAD_MAX_BODY_BYTES`.
 ```
 
 Response: `201 {"ids": ["…"]}` in input order (also for a single object).
-`name`: 1–200 chars.
+`name`: 1–200 chars. A client-supplied `id` must match `^[0-9a-f]{32}$` — the
+shape the server generates (#3); a client with a natural key hashes it.
 
 `GET /api/v1/scores` — filters `trace_id`, `observation_id`, `session_id`,
-`name`, `data_type`, `from`/`to` (RFC 3339, on `timestamp`); newest first.
+`name`, `data_type`, `from`/`to` (RFC 3339, on `timestamp`, half-open: `from`
+inclusive, `to` exclusive); newest first.
 Response: `{"scores": […], "next_cursor": "…"|null}`.
 
 `GET /api/v1/scores/{id}` — one full score object.
@@ -116,10 +122,14 @@ for `chat`. Response: 201 with the full prompt object (below).
 ```
 
 `GET /api/v1/prompts/{name}/versions` — all versions, newest first, without
-`prompt`/`config` bodies (#18).
+`prompt`/`config` bodies (#18). Response:
+`{"versions": […], "next_cursor": "…"|null}`.
 
 `GET /api/v1/prompts` — per name: `{"name", "type", "latest_version",
-"labels": {"production": 3}, "updated_at"}`; paginated.
+"labels": {"production": 3}, "updated_at"}`; paginated, ordered by `name`
+(which is also what the cursor walks), `updated_at` being the `created_at` of
+the name's newest version. Response:
+`{"prompts": […], "next_cursor": "…"|null}`.
 
 `PUT /api/v1/prompts/{name}/labels/{label}` — body `{"version": N}`; moves or
 creates the label; 404 if the version does not exist. `DELETE` removes the
