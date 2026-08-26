@@ -1,0 +1,75 @@
+{
+  "dialect": "langfuse",
+  "traces": [
+    {
+      "id": "ee55ff6677008899001122aabb33cc44",
+      "name": "research-agent",
+      "environment": "development"
+    }
+  ],
+  "observations": [
+    {
+      "trace_id": "ee55ff6677008899001122aabb33cc44",
+      "id": "7172737475767778",
+      "type": "span",
+      "name": "research-agent",
+      "start_time": 1787738400000000000,
+      "end_time": 1787738401200000000,
+      "level": "DEFAULT",
+      "metadata": {
+        "langfuse.observation.type": "agent",
+        "service.name": "research"
+      }
+    },
+    {
+      "trace_id": "ee55ff6677008899001122aabb33cc44",
+      "id": "8182838485868788",
+      "parent_observation_id": "7172737475767778",
+      "type": "span",
+      "name": "web-search",
+      "start_time": 1787738400010000000,
+      "end_time": 1787738400200000000,
+      "level": "DEFAULT",
+      "input": {
+        "query": "otlp partial success"
+      },
+      "metadata": {
+        "langfuse.observation.type": "tool",
+        "service.name": "research"
+      }
+    },
+    {
+      "trace_id": "ee55ff6677008899001122aabb33cc44",
+      "id": "9192939495969798",
+      "parent_observation_id": "7172737475767778",
+      "type": "generation",
+      "name": "embed-query",
+      "start_time": 1787738400210000000,
+      "end_time": 1787738400260000000,
+      "model": "text-embedding-3-large",
+      "level": "DEFAULT",
+      "usage": {
+        "input": 18,
+        "total": 18
+      },
+      "metadata": {
+        "langfuse.observation.type": "embedding",
+        "service.name": "research"
+      }
+    },
+    {
+      "trace_id": "ee55ff6677008899001122aabb33cc44",
+      "id": "a1a2a3a4a5a6a7a8",
+      "parent_observation_id": "7172737475767778",
+      "type": "span",
+      "name": "policy-gate",
+      "start_time": 1787738400270000000,
+      "end_time": 1787738400275000000,
+      "level": "DEFAULT",
+      "metadata": {
+        "langfuse.observation.type": "workflow-step",
+        "service.name": "research"
+      }
+    }
+  ]
+}

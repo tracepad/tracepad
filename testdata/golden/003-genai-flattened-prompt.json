@@ -1,0 +1,49 @@
+{
+  "dialect": "genai",
+  "traces": [
+    {
+      "id": "bb22cc33dd44ee55ff66770088990011",
+      "name": "openai.chat"
+    }
+  ],
+  "observations": [
+    {
+      "trace_id": "bb22cc33dd44ee55ff66770088990011",
+      "id": "1112131415161718",
+      "type": "generation",
+      "name": "openai.chat",
+      "start_time": 1787738400002000000,
+      "end_time": 1787738400610000000,
+      "model": "mistral-large",
+      "level": "DEFAULT",
+      "usage": {
+        "completion_tokens": 12,
+        "prompt_tokens": 61
+      },
+      "cost_details": {
+        "total": 0.00041
+      },
+      "provided_cost": true,
+      "input": [
+        {
+          "content": "You answer in one sentence.",
+          "role": "system"
+        },
+        {
+          "content": "what changed in v2?",
+          "role": "user"
+        }
+      ],
+      "output": [
+        {
+          "content": "Batching became the default.",
+          "role": "assistant"
+        }
+      ],
+      "metadata": {
+        "service.name": "release-notes",
+        "traceloop.workflow.name": "release-notes"
+      }
+    }
+  ]
+}

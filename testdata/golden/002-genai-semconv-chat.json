@@ -1,0 +1,60 @@
+{
+  "dialect": "genai",
+  "traces": [
+    {
+      "id": "aa11bb22cc33dd44ee55ff6677889900",
+      "name": "chat gpt-4o-mini",
+      "user_id": "user-1109",
+      "session_id": "session-12",
+      "environment": "staging"
+    }
+  ],
+  "observations": [
+    {
+      "trace_id": "aa11bb22cc33dd44ee55ff6677889900",
+      "id": "0102030405060708",
+      "type": "generation",
+      "name": "chat gpt-4o-mini",
+      "start_time": 1787738400005000000,
+      "end_time": 1787738400430000000,
+      "model": "gpt-4o-mini",
+      "model_parameters": {
+        "max_tokens": 256,
+        "temperature": 0.7
+      },
+      "level": "DEFAULT",
+      "usage": {
+        "input_tokens": 92,
+        "output_tokens": 33
+      },
+      "input": [
+        {
+          "parts": [
+            {
+              "content": "summarize the changelog",
+              "type": "text"
+            }
+          ],
+          "role": "user"
+        }
+      ],
+      "output": [
+        {
+          "parts": [
+            {
+              "content": "Three fixes and one new flag.",
+              "type": "text"
+            }
+          ],
+          "role": "assistant"
+        }
+      ],
+      "metadata": {
+        "gen_ai.operation.name": "chat",
+        "gen_ai.response.finish_reasons": "stop",
+        "gen_ai.system": "openai",
+        "service.name": "changelog-writer"
+      }
+    }
+  ]
+}

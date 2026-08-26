@@ -63,6 +63,10 @@ Usage:
 Flags of serve:
   --listen addr      HTTP listen address        (env TRACEPAD_LISTEN, default :4318)
   --data-dir path    data directory             (env TRACEPAD_DATA_DIR)
+
+Ingest environment:
+  TRACEPAD_STORE_RAW        keep raw OTLP bodies for remap/export (default on)
+  TRACEPAD_MAX_BODY_BYTES   request body cap in bytes             (default 20971520)
 `)
 }
 
@@ -92,7 +96,15 @@ func serve(args []string) error {
 	}
 	printCreated(boot, cfg.Listen)
 
-	srv := server.New(cfg.Listen, version, st)
+	// The writer outlives the HTTP server on purpose: it is closed after
+	// Shutdown has drained the handlers that are still waiting on a commit.
+	writer, err := st.NewWriter(store.WriterOptions{})
+	if err != nil {
+		return err
+	}
+	defer writer.Close()
+
+	srv := server.New(cfg, version, st, writer)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

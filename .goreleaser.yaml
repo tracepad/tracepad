@@ -18,6 +18,14 @@ archives:
     format_overrides:
       - goos: windows
         formats: [zip]
+    # Listed explicitly rather than left to the defaults: Apache-2.0 §4(d)
+    # requires NOTICE to travel with every distribution, and it is not one
+    # of the files GoReleaser picks up on its own.
+    files:
+      - LICENSE
+      - NOTICE
+      - README.md
+      - third_party/**/*
 
 checksum:
   name_template: checksums.txt

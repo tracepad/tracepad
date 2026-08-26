@@ -138,7 +138,7 @@ func TestBackupBeforeMigration(t *testing.T) {
 	if _, err := s.Bootstrap(nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.Exec(`DELETE FROM schema_migrations`); err != nil {
+	if _, err := s.db.Exec(`DELETE FROM schema_migrations WHERE filename = '0001_init.sql'`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.db.Exec(`DROP TABLE api_keys; DROP TABLE projects`); err != nil {

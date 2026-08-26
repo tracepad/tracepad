@@ -17,3 +17,19 @@ jobs:
         with:
           go-version-file: go.mod
       - run: make precommit
+
+  # Real instrumentation against a real binary: the drift detector for SDK
+  # attribute conventions (spec 002, Testing #3). Separate from the gate so
+  # that a network hiccup installing SDKs never blocks a code review.
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r scripts/smoke/requirements.txt
+      - run: SMOKE_PYTHON="$(which python)" scripts/smoke/run.sh

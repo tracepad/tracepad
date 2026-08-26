@@ -9,7 +9,10 @@ API. This file routes; it does not duplicate what specs and docs say.
 - ✅ Spec 001 (server skeleton) shipped: config, self-migrating SQLite store,
   project/key bootstrap, `/health`, CI gate, GoReleaser config. Go 1.27,
   `modernc.org/sqlite`.
-- Next: spec 002 — trace data model + OTLP ingest.
+- ✅ Spec 002 (trace model + OTLP ingest) shipped: `POST /v1/traces` and the
+  Langfuse alias, schema 0002, attribute mapping with two dialects,
+  group-commit writer, raw body storage.
+- Next: spec 003 — scores and prompts.
 
 ## Where things are
 
@@ -17,8 +20,15 @@ API. This file routes; it does not duplicate what specs and docs say.
 |---|---|
 | Any feature | Its spec in `specs/` (spec-first — see Process below) |
 | Storage, schema, migrations | `internal/store/`, spec 001 |
+| Write pipeline (group commit) | `internal/store/writer.go`, spec 002 #15 |
 | HTTP surface | `internal/server/` |
-| Configuration | `internal/config/`, spec 001 Configuration table |
+| OTLP ingest | `internal/server/otlp.go`, `docs/ingest.md`, spec 002 |
+| Attribute mapping | `internal/mapping/rules.go` is the table; `mapping.go` applies it |
+| Configuration | `internal/config/`, spec 001 + spec 002 Configuration tables |
+
+Attribute semantics for the `langfuse.*` dialect are derived from Langfuse
+(MIT) — see `NOTICE`. Keep new rules in the table in `rules.go`, with the
+reason in a comment; adding a dialect should be a table edit.
 
 ## Commands
 
@@ -27,6 +37,10 @@ API. This file routes; it does not duplicate what specs and docs say.
 - `make dev` — run the server, output mirrored to `.dev.log` (read that file
   first when debugging a running server).
 - `make build` — binary into `./bin`.
+- `make smoke` — export from pinned real SDKs into a real binary and assert
+  the rows. Needs network on first run (installs the SDKs).
+- `make fixtures` — regenerate `testdata/otlp/*.pb` and their goldens after a
+  deliberate mapping change. Review the golden diff; it *is* the change.
 
 ## Process
 
