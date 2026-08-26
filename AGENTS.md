@@ -20,9 +20,11 @@ API. This file routes; it does not duplicate what specs and docs say.
 |---|---|
 | Any feature | Its spec in `specs/` (spec-first — see Process below) |
 | Storage, schema, migrations | `internal/store/`, spec 001 |
-| Write pipeline (group commit) | `internal/store/writer.go`, spec 002 #15 |
+| Write pipeline (group commit) | `internal/store/writer.go`, spec 002 #15, spec 003 #9 — every durable write is a `WriteJob` |
 | HTTP surface | `internal/server/` |
 | OTLP ingest | `internal/server/otlp.go`, `docs/ingest.md`, spec 002 |
+| Scores & prompts | `internal/server/scores.go`, `prompts.go`, `docs/scores.md`, `docs/prompts.md`, spec 003 |
+| JSON API plumbing (auth, strict decode, pagination) | `internal/server/api.go`, spec 003 |
 | Attribute mapping | `internal/mapping/rules.go` is the table; `mapping.go` applies it |
 | Configuration | `internal/config/`, spec 001 + spec 002 Configuration tables |
 
