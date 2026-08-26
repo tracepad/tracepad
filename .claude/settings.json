@@ -1,5 +1,15 @@
 {
   "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$CLAUDE_PROJECT_DIR\" && make -s ensure-hooks"
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [
