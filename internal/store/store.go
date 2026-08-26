@@ -33,21 +33,26 @@ func Open(path string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("create data dir: %w", err)
 	}
-	// modernc.org/sqlite accepts pragmas in the DSN. WAL for concurrent
-	// readers with the single writer; busy_timeout instead of instant
-	// SQLITE_BUSY; incremental auto_vacuum so retention deletes (later
-	// stage) can actually return disk space.
-	dsn := "file:" + path + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(ON)&_pragma=auto_vacuum(INCREMENTAL)&_pragma=synchronous(NORMAL)"
+	// modernc.org/sqlite accepts pragmas in the DSN, applied in order per
+	// new pool connection — busy_timeout must come first so every later
+	// pragma (journal_mode included) already waits out lock contention
+	// instead of failing with SQLITE_BUSY. WAL for concurrent readers with
+	// the single writer; incremental auto_vacuum so retention deletes
+	// (later stage) can actually return disk space.
+	dsn := "file:" + path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)&_pragma=auto_vacuum(INCREMENTAL)&_pragma=synchronous(NORMAL)"
 	info, statErr := os.Stat(path)
 	fresh := statErr != nil || info.Size() == 0
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
-		return nil, fmt.Errorf("open %s: %w (latest backup, if any: %s)", path, err, latestBackup(path))
+		return nil, fmt.Errorf("open %s: %w", path, err)
 	}
 	s := &Store{db: db, path: path, fresh: fresh}
+	// sql.Open is lazy: real open failures (corrupt file, permissions)
+	// surface from the first statement inside migrate, so the recovery
+	// hint naming the DB path and the newest backup belongs here.
 	if err := s.migrate(); err != nil {
 		db.Close()
-		return nil, err
+		return nil, fmt.Errorf("open %s: %w (latest backup, if any: %s)", path, err, latestBackup(path))
 	}
 	return s, nil
 }
@@ -80,7 +85,11 @@ func (s *Store) CreateProject(name string, keys KeyPair) (*Project, error) {
 		return nil, err
 	}
 	defer tx.Rollback()
-	if _, err := tx.Exec(`INSERT INTO projects (id, name) VALUES (?, ?)`, id, name); err != nil {
+	// RETURNING keeps the returned Project in sync with schema defaults
+	// instead of duplicating them as Go literals.
+	var retention int
+	if err := tx.QueryRow(`INSERT INTO projects (id, name) VALUES (?, ?) RETURNING retention_days`, id, name).
+		Scan(&retention); err != nil {
 		return nil, fmt.Errorf("create project %q: %w", name, err)
 	}
 	hash := sha256.Sum256([]byte(keys.Secret))
@@ -91,7 +100,7 @@ func (s *Store) CreateProject(name string, keys KeyPair) (*Project, error) {
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	return &Project{ID: id, Name: name, RetentionDays: 30}, nil
+	return &Project{ID: id, Name: name, RetentionDays: retention}, nil
 }
 
 // ProjectByName returns the project or nil if absent.

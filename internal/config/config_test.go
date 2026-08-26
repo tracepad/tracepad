@@ -1,6 +1,10 @@
 package config
 
-import "testing"
+import (
+	"errors"
+	"flag"
+	"testing"
+)
 
 func TestParseProjects(t *testing.T) {
 	specs, err := ParseProjects("app:tp-pk-a:tp-sk-a, eval:tp-pk-b:tp-sk-b")
@@ -30,5 +34,17 @@ func TestFlagsOverrideEnv(t *testing.T) {
 	}
 	if cfg.Listen != ":4318" {
 		t.Fatalf("Listen = %q, flags must override env", cfg.Listen)
+	}
+}
+
+func TestHelpReturnsErrHelp(t *testing.T) {
+	if _, err := Load([]string{"--help"}); !errors.Is(err, flag.ErrHelp) {
+		t.Fatalf("err = %v, want flag.ErrHelp", err)
+	}
+}
+
+func TestStrayArgumentRejected(t *testing.T) {
+	if _, err := Load([]string{"typo"}); err == nil {
+		t.Fatal("stray positional argument must be rejected, not silently ignored")
 	}
 }

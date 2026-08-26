@@ -103,6 +103,34 @@ func TestUnknownFutureMigrationRefused(t *testing.T) {
 	}
 }
 
+func TestBackupIncludesWALData(t *testing.T) {
+	// Committed rows may still live in the WAL, not the main file; the
+	// snapshot must include them (spec 001 #11). Taken while the store is
+	// open and unsynced — the plain-file-copy regression scenario.
+	s, path := openTemp(t)
+	if _, err := s.Bootstrap(nil); err != nil {
+		t.Fatal(err)
+	}
+	s.fresh = false
+	if err := s.backupBefore("migrations/0001_init.sql"); err != nil {
+		t.Fatalf("backupBefore: %v", err)
+	}
+	b, err := Open(path + ".pre-0001_init.bak")
+	if err != nil {
+		t.Fatalf("open backup: %v", err)
+	}
+	defer b.Close()
+	if n, _ := b.CountProjects(); n != 1 {
+		t.Fatalf("backup lost WAL data: projects = %d, want 1", n)
+	}
+
+	// Re-running with an existing backup must overwrite, not fail
+	// (VACUUM INTO refuses existing targets on its own).
+	if err := s.backupBefore("migrations/0001_init.sql"); err != nil {
+		t.Fatalf("backupBefore over existing backup: %v", err)
+	}
+}
+
 func TestBackupBeforeMigration(t *testing.T) {
 	// Simulate an upgrade: open a db, then pretend 0001 is pending again by
 	// clearing the record — the runner must back the file up first.

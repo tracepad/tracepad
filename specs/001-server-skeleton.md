@@ -40,6 +40,7 @@ Deliverables:
 | 8 | One key pair (`tp-pk-…`, `tp-sk-…`) per project serves both native and compat auth | Native auth is `Bearer <tp-sk>`; the future Langfuse-SDK path uses `Basic base64(pk:sk)` with the same pair. Langfuse SDKs do not validate key prefixes, so one pair covers both wire formats. Secret lookup is by `sha256(secret)` (unique index) so Bearer auth needs no key id in the token. |
 | 9 | `TRACEPAD_PROJECTS="name:pk:sk,…"` declarative bootstrap, idempotent | docker-compose reproducibility: a restarted container must not mint new keys. Existing project names are left untouched (keys are not rotated by env), missing ones are created with the given pair. First run without the variable creates project `default` with generated keys and prints ready-to-paste OTel and Langfuse env lines. |
 | 10 | Logging is `log/slog`, text handler to stderr | stdlib, structured, zero deps. File logging with rotation is a later concern (self-diagnosis stage); stderr is correct for both `docker logs` and dev. |
+| 11 | (2026-08-26, from PR #1 review) Pre-migration backups use `VACUUM INTO`, not a file copy | A plain copy of the main DB file silently loses committed rows still sitting in the WAL (reproduced: after an unclean shutdown the copied file restored an empty database), betraying exactly the scenario backups exist for. `VACUUM INTO` produces a complete checkpointed snapshot and streams it without loading the DB into memory. The snapshot is defragmented, not byte-identical — irrelevant for restore-by-file-swap. |
 
 ## Configuration
 

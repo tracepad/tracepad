@@ -4,10 +4,14 @@ package main
 
 import (
 	"context"
+	"errors"
+	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -19,12 +23,18 @@ import (
 // version is stamped by the release build (-ldflags "-X main.version=...").
 var version = "dev"
 
-func main() {
-	args := os.Args[1:]
-	cmd := "serve"
-	if len(args) > 0 {
-		cmd, args = args[0], args[1:]
+// splitCommand separates the subcommand from its arguments. A leading flag
+// belongs to the default command, so `tracepad --listen :9999` serves
+// (spec 001 #1).
+func splitCommand(args []string) (string, []string) {
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		return args[0], args[1:]
 	}
+	return "serve", args
+}
+
+func main() {
+	cmd, args := splitCommand(os.Args[1:])
 
 	switch cmd {
 	case "serve":
@@ -59,6 +69,10 @@ Flags of serve:
 func serve(args []string) error {
 	cfg, err := config.Load(args)
 	if err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			usage()
+			return nil
+		}
 		return err
 	}
 
@@ -112,10 +126,7 @@ func provisionSpecs(cfg *config.Config) ([]store.ProvisionSpec, error) {
 // project created in this run — both plain OTel and Langfuse-SDK style
 // (spec 001 #9).
 func printCreated(boot *store.BootstrapResult, listen string) {
-	host := listen
-	if host == "" || host[0] == ':' {
-		host = "localhost" + listen
-	}
+	host := displayHost(listen)
 	for _, c := range boot.Created {
 		fmt.Printf(`
 Project %q created. Connect your app with either:
@@ -131,4 +142,19 @@ Project %q created. Connect your app with either:
 
 `, c.Project.Name, host, c.Keys.Secret, host, c.Keys.PublicKey, c.Keys.Secret)
 	}
+}
+
+// displayHost turns a listen address into a connectable host:port. Wildcard
+// bind hosts (empty, 0.0.0.0, ::) are not valid connect targets, so they are
+// shown as localhost.
+func displayHost(listen string) string {
+	host, port, err := net.SplitHostPort(listen)
+	if err != nil {
+		return listen
+	}
+	switch host {
+	case "", "0.0.0.0", "::":
+		return "localhost:" + port
+	}
+	return listen
 }

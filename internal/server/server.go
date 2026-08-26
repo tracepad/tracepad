@@ -27,6 +27,13 @@ func New(listen, version string, st *store.Store) *Server {
 		Addr:              listen,
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
+		// ReadTimeout bounds slow-dripping request bodies before OTLP
+		// ingest lands; IdleTimeout reaps abandoned keep-alives.
+		// WriteTimeout stays unset on purpose: future endpoints stream
+		// (MCP over HTTP, trace tailing) and a global write deadline
+		// would cut them off mid-response.
+		ReadTimeout: 60 * time.Second,
+		IdleTimeout: 120 * time.Second,
 	}
 	return s
 }

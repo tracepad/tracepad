@@ -5,6 +5,7 @@ package config
 import (
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -40,10 +41,16 @@ func Load(args []string) (*Config, error) {
 	}
 
 	fs := flag.NewFlagSet("tracepad", flag.ContinueOnError)
+	// The caller owns user-facing usage output; suppress the FlagSet's own
+	// printing and let the returned error (flag.ErrHelp included) drive it.
+	fs.SetOutput(io.Discard)
 	fs.StringVar(&cfg.Listen, "listen", cfg.Listen, "HTTP listen address")
 	fs.StringVar(&cfg.DataDir, "data-dir", cfg.DataDir, "data directory (database, payloads)")
 	if err := fs.Parse(args); err != nil {
 		return nil, err
+	}
+	if fs.NArg() > 0 {
+		return nil, fmt.Errorf("unexpected argument %q", fs.Arg(0))
 	}
 
 	warnUnknownEnv()
