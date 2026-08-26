@@ -1,0 +1,194 @@
+# Spec 003 — Scores & Prompts API
+
+**Status:** 🔄 IN PROGRESS
+**Sprint:** August–September 2026
+
+> The first native write surface beyond telemetry: attach quality scores to
+> traces, observations, and sessions, and manage versioned prompts with
+> movable labels. Both are designed freely (no foreign wire contracts) as
+> small JSON APIs under `/api/v1`, and both write through the same durable
+> group-commit pipeline as ingest. After this spec ships, an eval loop can
+> grade yesterday's traces and an application can fetch its production
+> prompt — from the same binary that stores its traces.
+
+---
+
+## Overview
+
+Deliverables:
+
+- Scores: `POST /api/v1/scores` (single or array), `GET /api/v1/scores`
+  (filtered list), `GET /api/v1/scores/{id}`.
+- Prompts: `GET /api/v1/prompts`, `GET /api/v1/prompts/{name}` (by label or
+  version), `POST /api/v1/prompts/{name}/versions`,
+  `GET /api/v1/prompts/{name}/versions`,
+  `PUT`/`DELETE /api/v1/prompts/{name}/labels/{label}`.
+- Schema 0003: `scores`, `prompts`, `prompt_labels`.
+- The group-commit writer generalized to carry these writes with the same
+  durability guarantee as ingest.
+- Docs: `docs/scores.md`, `docs/prompts.md` (same PR).
+
+## Decisions log
+
+| # | Decision | Why |
+|---|---|---|
+| 1 | Native surface is plain JSON under `/api/v1/*`; no protobuf | These are interactive application/SDK calls with no OTLP counterpart. JSON is debuggable with curl, which is the design's agent-first bar (design §3). |
+| 2 | Auth identical to ingest: `Bearer <tp-sk>` or `Basic base64(pk:sk)` against project keys | One credential story for the whole binary (spec 002 #2). The project resolved from the key scopes every read and write. |
+| 3 | Score ids are client-optional; omitted ⇒ server generates 32-hex (`randomHex(16)`, like project ids); writes **upsert** by `(project_id, id)` | Retry-safe by the same logic as spec 002 #5: a re-POST with the same id is idempotent, and a correction is a re-POST, not a DELETE+POST. Server-generated ids keep the common case zero-thought. |
+| 4 | A score targets at least one of `trace_id` / `session_id`; `observation_id` additionally requires `trace_id`. Target existence is **not** checked | Evals run async and may grade a trace whose spans are still in flight; refusing would force clients to poll. Dangling scores are visible in lists and get cleaned up by retention alongside their targets. |
+| 5 | `data_type` ∈ numeric\|boolean\|categorical\|text. numeric/boolean carry `value` (boolean: 0 or 1), categorical/text carry `string_value`; the other field must be absent. Omitted `data_type` is inferred: `value` present ⇒ numeric, `string_value` present ⇒ text | The common cases (a float from an eval, a text verdict from a judge) need no ceremony; boolean and categorical are semantic claims the client must make explicitly. Cross-field checks keep every row internally consistent. |
+| 6 | Score `metadata` is inline JSON TEXT, not a `payloads` row | Payload indirection exists for MB-scale LLM IO (spec 002 #8). Score metadata is judge config and eval context — small by nature, and inlining keeps score reads join-free. |
+| 7 | An array POST is all-or-nothing: one transaction, one 400 naming the first invalid item | Partial success is OTLP's world, where the sender is a fire-and-forget exporter. Here the client is an application that can fix its batch and retry; a half-applied batch is harder to reason about than a clean failure. |
+| 8 | No `config_id` column yet; `score_configs` (typed score schemas) is a later spec | Forward-only migrations make `ALTER TABLE ADD COLUMN` a one-liner later; a column referencing a table that does not exist is a trap, not future-proofing. |
+| 9 | Scores and prompt writes go through the group-commit writer (generalized to accept write jobs, not just ingest batches) | Spec 002 #23 put the only `synchronous=FULL` connection in the writer; a 200 on a score must mean "on disk" for the same reason a 200 on an export does. Serializing through one goroutine also gives prompt version assignment its atomicity for free. |
+| 10 | Prompt versions are append-only per `(project, name)`; `version` = current max + 1, assigned inside the write transaction; `type` (text\|chat) is fixed by the first version, later mismatch ⇒ 400 | Versions are an audit trail: nothing is edited in place, rollback is a label move (#12), not a rewrite. A name that changes shape between versions breaks every client that fetches by label, so the type is part of the name's contract. |
+| 11 | `latest` is virtual: always the highest version, computed at read time, reserved as a label name | A stored `latest` label is a cache that can drift from the truth it summarizes. Reserving the name means `?label=latest` and the unqualified GET are the same code path and cannot disagree. |
+| 12 | Labels are unique per `(project, name, label)` and move atomically: assignable at version creation, movable via `PUT .../labels/{label}` (the rollback path), removable via `DELETE` | Deploy-by-label is the point of prompt management: promote = move `production` to a new version, roll back = move it back — no redeploy, no new version. Uniqueness makes "which version is production" a single-row answer. |
+| 13 | `GET /api/v1/prompts/{name}` resolves `?version=N` xor `?label=L`; both ⇒ 400; neither ⇒ latest | No implicit `production` default: a convention the server invents is a support question factory. Unqualified GET meaning "newest" matches every other versioned-artifact tool. |
+| 14 | Prompt GET responses carry `Cache-Control: max-age=60` uniformly | Design §6.2 wants client caching hinted by the server, and 60 s bounds label-move propagation. A longer `immutable` for version-pinned GETs is not worth a second cache branch: a client that pins versions may cache forever regardless, and the docs say so. |
+| 15 | No server-side templating: `prompt` is stored and returned verbatim; variable interpolation is the client's job | Template syntax is a language-runtime concern (and every framework has its own). Storing opaque JSON keeps the server out of that treadmill (design §6.5 draws the same line for the SDK). |
+| 16 | JSON timestamps are RFC 3339 UTC; storage stays Unix nanoseconds | Spec 002 #4 keeps ns internally; rendering ISO at the API boundary is the layer split design §5.2 assigns. Score `timestamp` is client-optional (event time, e.g. when the graded interaction happened), defaulting to receive time. |
+| 17 | Unknown JSON fields are rejected with a 400 naming the field | Agent-first cuts both ways: an unattended agent that typos `commet` must get an error, not silent data loss. Server and clients are versioned together in a self-hosted binary, so strictness costs no forward compatibility. |
+| 18 | List endpoints use `limit` (default 50, max 500) + opaque `cursor` pagination and never return prompt bodies | Cursor pagination is stable under concurrent writes where offset is not; the pattern is set here exactly as the read API (spec 004) will use it. Version lists are for picking and diffing — bodies come from the single-prompt GET. |
+
+## API contract
+
+Errors are `{"error": "<message>"}` with 400 (validation), 401, 404;
+409 for label/version races lost inside the writer is not needed — writes are
+serialized (#9). Request bodies are capped by `TRACEPAD_MAX_BODY_BYTES`.
+
+### Scores
+
+`POST /api/v1/scores` — body: one score object or an array of them.
+
+```json
+{
+  "id": "optional 32-hex",
+  "trace_id": "…", "observation_id": null, "session_id": null,
+  "name": "helpfulness",
+  "data_type": "numeric", "value": 0.9,
+  "comment": "judge rationale…",
+  "metadata": {"judge_model": "…"},
+  "timestamp": "2026-08-27T10:00:00Z"
+}
+```
+
+Response: `201 {"ids": ["…"]}` in input order (also for a single object).
+`name`: 1–200 chars.
+
+`GET /api/v1/scores` — filters `trace_id`, `observation_id`, `session_id`,
+`name`, `data_type`, `from`/`to` (RFC 3339, on `timestamp`); newest first.
+Response: `{"scores": […], "next_cursor": "…"|null}`.
+
+`GET /api/v1/scores/{id}` — one full score object.
+
+### Prompts
+
+Prompt and label names: `^[A-Za-z0-9][A-Za-z0-9._-]*$`, ≤200 chars (one URL
+path segment). `latest` reserved (#11).
+
+`POST /api/v1/prompts/{name}/versions`
+
+```json
+{
+  "type": "chat",
+  "prompt": [{"role": "system", "content": "You are…"}],
+  "config": {"model": "gpt-5", "temperature": 0.2},
+  "commit_message": "tighten tone",
+  "labels": ["production"]
+}
+```
+
+`type` required on the first version, optional-but-checked after (#10);
+`prompt` is a JSON string for `text`, an array of `{role, content}` objects
+for `chat`. Response: 201 with the full prompt object (below).
+
+`GET /api/v1/prompts/{name}?label=…|version=…` (#13, #14):
+
+```json
+{
+  "name": "summarize", "version": 3, "type": "chat",
+  "prompt": […], "config": {…},
+  "commit_message": "tighten tone",
+  "labels": ["production"],
+  "created_at": "2026-08-27T09:58:11Z"
+}
+```
+
+`GET /api/v1/prompts/{name}/versions` — all versions, newest first, without
+`prompt`/`config` bodies (#18).
+
+`GET /api/v1/prompts` — per name: `{"name", "type", "latest_version",
+"labels": {"production": 3}, "updated_at"}`; paginated.
+
+`PUT /api/v1/prompts/{name}/labels/{label}` — body `{"version": N}`; moves or
+creates the label; 404 if the version does not exist. `DELETE` removes the
+label. Both 200 `{"label": "…", "version": N}` (DELETE: the version it
+pointed at).
+
+## Data contract (schema 0003)
+
+```sql
+scores(
+  project_id TEXT, id TEXT,                   -- PK (project_id, id); 32-hex
+  trace_id TEXT, observation_id TEXT, session_id TEXT,
+  name TEXT NOT NULL,
+  data_type TEXT CHECK (data_type IN ('numeric','boolean','categorical','text')),
+  value REAL, string_value TEXT,
+  comment TEXT, metadata TEXT,                -- JSON, inline (#6)
+  timestamp INTEGER NOT NULL,                 -- ns, event time (#16)
+  created_at INTEGER NOT NULL                 -- ns, receive time
+)
+prompts(
+  project_id TEXT, name TEXT, version INTEGER, -- PK (project_id, name, version)
+  type TEXT CHECK (type IN ('text','chat')),
+  prompt TEXT NOT NULL, config TEXT,           -- JSON
+  commit_message TEXT,
+  created_at INTEGER NOT NULL
+)
+prompt_labels(
+  project_id TEXT, name TEXT, label TEXT,      -- PK (project_id, name, label)
+  version INTEGER NOT NULL
+)
+```
+
+Indexes: `scores(project_id, timestamp DESC)`, `scores(project_id, trace_id)`,
+`scores(project_id, session_id)`, `scores(project_id, name, timestamp)`
+(trend queries, design §5.2). All STRICT (spec 001 #7).
+
+## Testing
+
+1. **Unit** — validation matrix for #5 (data_type × value/string_value),
+   name/label grammar, strict-field rejection (#17), RFC 3339 round-trip.
+2. **HTTP e2e** — in-process server: score single/array/upsert/all-or-nothing,
+   list filters + cursor walk, prompt version lifecycle (create → label →
+   move → delete → fetch by each path), type-mismatch 400, reserved `latest`,
+   404s.
+3. **Concurrency** — N parallel `POST …/versions` for one name yield versions
+   1..N with no gaps or duplicates (the #9/#10 guarantee); parallel label
+   moves end on a single winner.
+4. **Durability** — the writer-generalization keeps the existing writer tests
+   green; score/prompt acks arrive only after commit (asserted like spec 002's
+   writer tests).
+
+## Edge cases
+
+- **Score for a trace that never arrives**: stored, listed, filterable;
+  removed by retention on its own `timestamp` (retention spec).
+- **Re-POST with same id, different fields**: full-row replace (#3), like
+  observation redelivery.
+- **`DELETE` of a label that does not exist / GET of an unknown prompt**: 404.
+- **First version posted with `labels: ["latest"]`**: 400, reserved (#11).
+- **Empty array POST**: 400 — nothing to write is a client bug, not a no-op.
+- **Writer backpressure**: 429 + `Retry-After: 1`, same as ingest (spec 002 #15).
+
+## Config additions
+
+None.
+
+## Out of scope (later specs)
+
+Native read API for traces + CLI + MCP (004), `score_configs` / typed score
+schemas (#8), prompt version diff endpoint (read API/UI), deleting scores or
+prompt versions, protected labels, annotation queues, retention of scores
+(retention spec covers all tables at once).
