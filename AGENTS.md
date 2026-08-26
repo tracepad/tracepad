@@ -32,8 +32,9 @@ reason in a comment; adding a dialect should be a table edit.
 
 ## Commands
 
-- `make precommit` — full gate (format-check + vet + tests). Installed as the
-  git pre-commit hook by `make install-hooks`. Budget: under 30 seconds.
+- `make precommit` — full gate (format-check + vet + tests). Budget: under 30
+  seconds. The gate self-installs as the git pre-commit hook on first run (and
+  on Claude Code session start); `make install-hooks` force-reinstalls it.
 - `make dev` — run the server, output mirrored to `.dev.log` (read that file
   first when debugging a running server).
 - `make build` — binary into `./bin`.
