@@ -5,15 +5,21 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 )
 
-// The write pipeline (spec 002 #15). SQLite has one writer; handlers decode
-// and map concurrently, then hand the result to this single goroutine, which
-// folds a short window of submissions into one transaction. A handler is
-// released only once that transaction has committed and been fsynced, so a
-// 200 to an exporter means the spans are on disk.
+// The write pipeline (spec 002 #15). SQLite has one writer; handlers decode,
+// map and validate concurrently, then hand the result to this single
+// goroutine, which folds a short window of submissions into one transaction.
+// A handler is released only once that transaction has committed and been
+// fsynced, so a 200 to an exporter means the spans are on disk.
+//
+// Every durable write goes through here, not just ingest (spec 003 #9): a
+// 201 on a score has to mean the same thing a 200 on an export does, and
+// serializing through one goroutine is also what makes prompt version
+// numbering atomic without a lock of its own.
 
 // Writer defaults. The window is short enough to stay invisible next to an
 // exporter's own batching and long enough to amortize fsync across a burst.
@@ -25,10 +31,55 @@ const (
 
 // ErrWriterBusy means the submission queue is full. Callers turn it into a
 // 429 with Retry-After, which OTLP exporters retry natively (spec 002 #15).
-var ErrWriterBusy = errors.New("ingest writer is saturated")
+var ErrWriterBusy = errors.New("writer is saturated")
 
 // ErrWriterClosed means the server is shutting down.
-var ErrWriterClosed = errors.New("ingest writer is closed")
+var ErrWriterClosed = errors.New("writer is closed")
+
+// WriteJob is one durable unit of work. An ingest batch (spec 002), a set of
+// scores and a prompt write (spec 003) are all jobs, which is what lets one
+// goroutine, one connection and one acknowledgement rule cover them all.
+type WriteJob interface {
+	// Empty reports a job with nothing to write; the writer answers it
+	// immediately instead of opening a transaction for it.
+	Empty() bool
+	// apply issues the job's statements inside the writer's transaction.
+	// It is unexported so that SQL stays inside this package, and it must
+	// be idempotent: a window that fails is retried job by job (see
+	// flush), so one submission can be applied more than once.
+	apply(tx *sql.Tx) error
+}
+
+// Rejection is a write refused for a reason the caller can fix — a prompt
+// version whose type contradicts its name's earlier versions, a label moved
+// onto a version that does not exist. Such checks read stored state, so they
+// belong inside the write transaction rather than in a handler, where they
+// would race (spec 003 Decision 20, 2026-08-27).
+//
+// The distinction pays for itself twice: the handler renders a rejection as
+// 400 or 404 instead of 500, and the writer logs it as routine instead of as
+// a storage failure.
+type Rejection struct {
+	Kind    string
+	Message string
+}
+
+// Rejection kinds. The store does not know about HTTP; the handler maps these
+// onto statuses.
+const (
+	// RejectInvalid is a malformed or contradictory request.
+	RejectInvalid = "invalid"
+	// RejectNotFound is a reference to something that does not exist.
+	RejectNotFound = "not_found"
+)
+
+func (r *Rejection) Error() string { return r.Message }
+
+// rejected reports an error the caller caused rather than a storage failure.
+func rejected(err error) bool {
+	var rejection *Rejection
+	return errors.As(err, &rejection)
+}
 
 // WriterOptions tunes the group-commit writer. Zero fields take defaults.
 type WriterOptions struct {
@@ -38,11 +89,11 @@ type WriterOptions struct {
 }
 
 type submission struct {
-	batch *IngestBatch
-	done  chan error
+	job  WriteJob
+	done chan error
 }
 
-// Writer is the single ingest writer goroutine.
+// Writer is the single writer goroutine.
 type Writer struct {
 	store  *Store
 	conn   *sql.Conn
@@ -63,7 +114,7 @@ type Writer struct {
 // NewWriter starts the writer goroutine. It holds one connection for its
 // lifetime, which is what makes the fsync guarantee cheap to state: the
 // connection runs with `synchronous=FULL` while readers keep the NORMAL of
-// spec 001, so every ingest commit is durable without slowing anything else
+// spec 001, so every committed write is durable without slowing anything else
 // (spec 002 Decision 23, 2026-08-26).
 func (s *Store) NewWriter(opts WriterOptions) (*Writer, error) {
 	if opts.CommitWindow <= 0 {
@@ -78,11 +129,11 @@ func (s *Store) NewWriter(opts WriterOptions) (*Writer, error) {
 
 	conn, err := s.db.Conn(context.Background())
 	if err != nil {
-		return nil, fmt.Errorf("ingest writer: reserve connection: %w", err)
+		return nil, fmt.Errorf("writer: reserve connection: %w", err)
 	}
 	if _, err := conn.ExecContext(context.Background(), `PRAGMA synchronous=FULL`); err != nil {
 		conn.Close()
-		return nil, fmt.Errorf("ingest writer: set synchronous: %w", err)
+		return nil, fmt.Errorf("writer: set synchronous: %w", err)
 	}
 
 	w := &Writer{
@@ -97,14 +148,17 @@ func (s *Store) NewWriter(opts WriterOptions) (*Writer, error) {
 	return w, nil
 }
 
-// Submit queues a batch and blocks until it is committed. A full queue is
+// Submit queues a job and blocks until it is committed. A full queue is
 // reported immediately as ErrWriterBusy rather than waited on: backpressure
 // an exporter can see beats a request that silently stalls.
-func (w *Writer) Submit(ctx context.Context, batch *IngestBatch) error {
-	if batch.Empty() {
+//
+// A job that reaches its transaction and is refused there comes back as a
+// *Rejection; the handler renders it rather than retrying it.
+func (w *Writer) Submit(ctx context.Context, job WriteJob) error {
+	if job.Empty() {
 		return nil
 	}
-	sub := &submission{batch: batch, done: make(chan error, 1)}
+	sub := &submission{job: job, done: make(chan error, 1)}
 
 	w.mu.RLock()
 	if w.closed {
@@ -182,9 +236,9 @@ func (w *Writer) run() {
 }
 
 // flush commits one window. If the window fails as a whole, each submission
-// is retried alone: a batch that violates a constraint must not take its
-// neighbours down with it, and a genuine storage failure simply fails them
-// all again, one by one.
+// is retried alone: a job that violates a constraint — or that the write
+// transaction refuses (a *Rejection) — must not take its neighbours down with
+// it, and a genuine storage failure simply fails them all again, one by one.
 func (w *Writer) flush(pending []*submission) {
 	err := w.commit(pending)
 	if err == nil {
@@ -192,21 +246,31 @@ func (w *Writer) flush(pending []*submission) {
 		return
 	}
 	if len(pending) == 1 {
-		logger().Error("ingest commit failed", "err", err, "submissions", 1)
+		logFailure(err, slog.LevelError, "write commit failed", "jobs", 1)
 		answer(pending, err)
 		return
 	}
-	logger().Warn("ingest window failed, retrying submissions individually",
-		"err", err, "submissions", len(pending))
+	logFailure(err, slog.LevelWarn, "write window failed, retrying jobs individually",
+		"jobs", len(pending))
 	for _, sub := range pending {
 		one := []*submission{sub}
 		if err := w.commit(one); err != nil {
-			logger().Error("ingest commit failed", "err", err, "submissions", 1)
+			logFailure(err, slog.LevelError, "write commit failed", "jobs", 1)
 			answer(one, err)
 			continue
 		}
 		answer(one, nil)
 	}
+}
+
+// logFailure reports a failed commit, demoting a rejection: a caller asking
+// for something the stored state does not allow is routine traffic, not an
+// incident, and it is already being told so in the response.
+func logFailure(err error, level slog.Level, message string, args ...any) {
+	if rejected(err) {
+		level = slog.LevelInfo
+	}
+	logger().Log(context.Background(), level, message, append([]any{"err", err}, args...)...)
 }
 
 func (w *Writer) commit(pending []*submission) error {
@@ -216,17 +280,17 @@ func (w *Writer) commit(pending []*submission) error {
 	ctx := context.Background()
 	tx, err := w.conn.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("begin ingest transaction: %w", err)
+		return fmt.Errorf("begin write transaction: %w", err)
 	}
 	defer tx.Rollback()
 
 	for _, sub := range pending {
-		if err := sub.batch.apply(tx); err != nil {
+		if err := sub.job.apply(tx); err != nil {
 			return err
 		}
 	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit ingest transaction: %w", err)
+		return fmt.Errorf("commit write transaction: %w", err)
 	}
 	return nil
 }

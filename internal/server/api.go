@@ -1,0 +1,269 @@
+package server
+
+import (
+	"bytes"
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/url"
+	"regexp"
+	"slices"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/tracepad/tracepad/internal/store"
+)
+
+// The native JSON API (spec 003): endpoints an application, an agent or a
+// human with curl calls directly, as opposed to the OTLP surface an exporter
+// speaks. Shared plumbing lives here — authentication, strict decoding,
+// RFC 3339, pagination — so each endpoint file carries only its own rules.
+//
+// No `Content-Type` is required on these routes (Decision 19, 2026-08-27):
+// `curl -d '{…}'` sends `application/x-www-form-urlencoded`, and Decision 1
+// measures this surface by exactly that command. A body that is not JSON
+// fails at the parser with a 400 either way.
+
+// Pagination bounds (#18).
+const (
+	defaultPageSize = 50
+	maxPageSize     = 500
+)
+
+// nameGrammar is the shape of a prompt or label name: one URL path segment,
+// starting with a letter or a digit (spec 003, API contract).
+var nameGrammar = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+
+// hexID is the shape of a score id — the same 32 lower-case hex characters
+// the server generates when a client sends none (#3).
+var hexID = regexp.MustCompile(`^[0-9a-f]{32}$`)
+
+const maxNameLength = 200
+
+// apiProject authenticates a request the way ingest does — one credential
+// story for the whole binary (#2) — and answers 401 itself when the
+// credentials do not resolve to a project.
+func (s *Server) apiProject(w http.ResponseWriter, r *http.Request) (*store.Project, bool) {
+	if s.store == nil {
+		writeError(w, http.StatusServiceUnavailable, "the API is not available")
+		return nil, false
+	}
+	project, ok := s.authenticate(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return nil, false
+	}
+	return project, true
+}
+
+// submit hands a job to the group-commit writer and renders every outcome but
+// success, so a handler's happy path is the line after it (#9).
+func (s *Server) submit(w http.ResponseWriter, r *http.Request, job store.WriteJob) bool {
+	if s.writer == nil {
+		writeError(w, http.StatusServiceUnavailable, "writes are not available")
+		return false
+	}
+	err := s.writer.Submit(r.Context(), job)
+	if err == nil {
+		return true
+	}
+
+	var rejection *store.Rejection
+	switch {
+	case errors.As(err, &rejection):
+		// A refusal from inside the write transaction: the caller asked
+		// for something the stored state does not allow, which is a 4xx
+		// however deep in the pipeline it was detected.
+		status := http.StatusBadRequest
+		if rejection.Kind == store.RejectNotFound {
+			status = http.StatusNotFound
+		}
+		writeError(w, status, rejection.Message)
+	case errors.Is(err, store.ErrWriterBusy):
+		// The same backpressure ingest gives an exporter (spec 002 #15).
+		w.Header().Set("Retry-After", "1")
+		writeError(w, http.StatusTooManyRequests, "write queue is full, retry shortly")
+	case errors.Is(err, store.ErrWriterClosed):
+		writeError(w, http.StatusServiceUnavailable, "server is shutting down")
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		// The client hung up; there is nobody left to answer.
+	default:
+		slog.Error("write failed", "err", err)
+		writeError(w, http.StatusInternalServerError, "failed to store the write")
+	}
+	return false
+}
+
+// readJSON reads the request body under the configured cap and decodes it
+// into v, answering the client itself on every failure.
+func (s *Server) readJSON(w http.ResponseWriter, r *http.Request, v any) bool {
+	body, ok := s.readAPIBody(w, r)
+	if !ok {
+		return false
+	}
+	if err := decodeStrict(body, v); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return false
+	}
+	return true
+}
+
+// readAPIBody reads and size-caps a request body (spec 003, API contract).
+func (s *Server) readAPIBody(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
+	body, err := readBody(w, r, s.maxBodyBytes)
+	if err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
+			return nil, false
+		}
+		writeError(w, http.StatusBadRequest, "cannot read request body")
+		return nil, false
+	}
+	return body, true
+}
+
+// decodeStrict decodes one JSON value, refusing fields the target does not
+// declare. Agent-first cuts both ways (#17): an unattended agent that typos
+// `commet` must get an error rather than silently lose its comment.
+func decodeStrict(data []byte, v any) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(v); err != nil {
+		return decodeError(err)
+	}
+	if decoder.More() {
+		return errors.New("the body must carry exactly one JSON value")
+	}
+	return nil
+}
+
+// decodeError turns encoding/json's internal wording into a message written
+// for whoever sent the body.
+func decodeError(err error) error {
+	if errors.Is(err, io.EOF) {
+		return errors.New("the request body is empty")
+	}
+	const unknownField = "json: unknown field "
+	if message := err.Error(); strings.HasPrefix(message, unknownField) {
+		return fmt.Errorf("unknown field %s", strings.TrimPrefix(message, unknownField))
+	}
+	var typeError *json.UnmarshalTypeError
+	if errors.As(err, &typeError) && typeError.Field != "" {
+		return fmt.Errorf("field %q is a %s, want %s", typeError.Field, typeError.Value, typeError.Type)
+	}
+	return errors.New("malformed JSON body")
+}
+
+// queryParams returns the request's query after refusing any parameter the
+// endpoint does not know. A mistyped filter that silently widened a listing
+// would mislead exactly the unattended caller #17 protects, so query strings
+// are as strict as bodies (Decision 21, 2026-08-27).
+func queryParams(r *http.Request, known ...string) (url.Values, error) {
+	values, err := url.ParseQuery(r.URL.RawQuery)
+	if err != nil {
+		return nil, errors.New("malformed query string")
+	}
+	for key := range values {
+		if !slices.Contains(known, key) {
+			return nil, fmt.Errorf("unknown query parameter %q (accepted: %s)",
+				key, strings.Join(known, ", "))
+		}
+	}
+	return values, nil
+}
+
+// pageSize reads `?limit` (#18). Out of range is an error rather than a silent
+// clamp: a client asking for 5000 rows is reasoning about a page size it will
+// not get.
+func pageSize(values url.Values) (int, error) {
+	raw := values.Get("limit")
+	if raw == "" {
+		return defaultPageSize, nil
+	}
+	limit, err := strconv.Atoi(raw)
+	if err != nil || limit < 1 || limit > maxPageSize {
+		return 0, fmt.Errorf("limit must be a whole number between 1 and %d", maxPageSize)
+	}
+	return limit, nil
+}
+
+// encodeCursor renders a sort key as the opaque string clients pass back.
+// Opaque is the point: the columns behind a cursor are ours to change.
+func encodeCursor(parts ...string) string {
+	return base64.RawURLEncoding.EncodeToString([]byte(strings.Join(parts, ":")))
+}
+
+// decodeCursor restores a cursor of the expected width.
+func decodeCursor(value string, parts int) ([]string, error) {
+	raw, err := base64.RawURLEncoding.DecodeString(value)
+	if err != nil {
+		return nil, errors.New("invalid cursor")
+	}
+	fields := strings.SplitN(string(raw), ":", parts)
+	if len(fields) != parts {
+		return nil, errors.New("invalid cursor")
+	}
+	return fields, nil
+}
+
+// parseTime reads an RFC 3339 timestamp into Unix nanoseconds (#16).
+func parseTime(field, value string) (int64, error) {
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return 0, fmt.Errorf("%s must be an RFC 3339 timestamp, got %q", field, value)
+	}
+	return parsed.UnixNano(), nil
+}
+
+// formatTime renders Unix nanoseconds as RFC 3339 UTC. Storage stays in
+// nanoseconds; the API boundary speaks ISO (#16).
+func formatTime(nanoseconds int64) string {
+	return time.Unix(0, nanoseconds).UTC().Format(time.RFC3339Nano)
+}
+
+// validName checks a prompt or label name against the grammar that keeps it a
+// single, unescaped URL path segment.
+func validName(kind, value string) error {
+	if value == "" {
+		return fmt.Errorf("%s must not be empty", kind)
+	}
+	if len(value) > maxNameLength {
+		return fmt.Errorf("%s must be at most %d characters", kind, maxNameLength)
+	}
+	if !nameGrammar.MatchString(value) {
+		return fmt.Errorf("%s %q must match %s", kind, value, nameGrammar)
+	}
+	return nil
+}
+
+// writeJSON renders a response body.
+func writeJSON(w http.ResponseWriter, status int, body any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	if err := json.NewEncoder(w).Encode(body); err != nil {
+		slog.Error("failed to write response", "err", err)
+	}
+}
+
+// jsonValue reports whether raw carries a JSON value at all: an absent field
+// and an explicit `null` both mean "nothing was sent".
+func jsonValue(raw json.RawMessage) bool {
+	return len(raw) > 0 && string(raw) != "null"
+}
+
+// compactJSON strips insignificant whitespace from a value that is stored
+// verbatim, so what comes back out is not padded by how it was sent.
+func compactJSON(raw json.RawMessage) (json.RawMessage, error) {
+	var buffer bytes.Buffer
+	if err := json.Compact(&buffer, raw); err != nil {
+		return nil, err
+	}
+	return buffer.Bytes(), nil
+}

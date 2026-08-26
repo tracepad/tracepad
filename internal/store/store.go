@@ -155,6 +155,11 @@ func GenerateKeyPair() (KeyPair, error) {
 	return KeyPair{PublicKey: "tp-pk-" + pk, Secret: "tp-sk-" + sk}, nil
 }
 
+// NewID mints the identifier the API generates for a client that sent none:
+// 32 lower-case hex characters, the same shape and the same generator as a
+// project id (spec 003 #3).
+func NewID() (string, error) { return randomHex(16) }
+
 func randomHex(nbytes int) (string, error) {
 	b := make([]byte, nbytes)
 	if _, err := rand.Read(b); err != nil {

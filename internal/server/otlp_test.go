@@ -418,7 +418,7 @@ func TestIngestEmptyBatch(t *testing.T) {
 // side of the write pipeline can be tested without racing a real one.
 type stubWriter struct{ err error }
 
-func (s stubWriter) Submit(context.Context, *store.IngestBatch) error { return s.err }
+func (s stubWriter) Submit(context.Context, store.WriteJob) error { return s.err }
 
 // A saturated writer answers 429 with Retry-After rather than stalling the
 // exporter or dropping spans silently (spec 002 #15).
