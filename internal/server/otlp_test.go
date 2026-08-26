@@ -221,8 +221,31 @@ func TestIngestMergesAcrossBatches(t *testing.T) {
 	if trace.Environment != "prod" {
 		t.Errorf("environment = %q", trace.Environment)
 	}
-	if trace.ObservationCount != 4 || trace.ErrorCount != 1 {
+	// Two errors, and only one of them said so in its span status: the
+	// other is a span carrying an exception event, promoted so that
+	// error_count and the filters over it can see it (Decision 26).
+	if trace.ObservationCount != 5 || trace.ErrorCount != 2 {
 		t.Errorf("counts = %d observations, %d errors", trace.ObservationCount, trace.ErrorCount)
+	}
+	observations, err := h.store.Observations(h.project.ID, "dd44ee55ff6677008899001122aabb33")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var promoted *store.ObservationRow
+	for _, o := range observations {
+		if o.Name == "tool.parse" {
+			promoted = o
+		}
+	}
+	if promoted == nil || promoted.Level != "ERROR" {
+		t.Fatalf("tool.parse = %+v, want it promoted to ERROR by its exception event", promoted)
+	}
+	if promoted.StatusMessage != "unparseable response" {
+		t.Errorf("status_message = %q, want the exception's message", promoted.StatusMessage)
+	}
+	events, _ := promoted.Metadata["events"].([]any)
+	if len(events) != 1 {
+		t.Errorf("metadata events = %#v, want the stack trace preserved", promoted.Metadata["events"])
 	}
 	if trace.TotalCost != nil {
 		t.Errorf("total_cost = %v, want no data when nobody provided cost", trace.TotalCost)

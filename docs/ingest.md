@@ -92,7 +92,7 @@ span's own.
 | cost | `langfuse.observation.cost_details` (JSON object) · `gen_ai.usage.cost` |
 | level | `langfuse.observation.level` · span status `ERROR` ⇒ `ERROR` · otherwise `DEFAULT` |
 | status message | `langfuse.observation.status_message` · the span's status message |
-| observation metadata | `langfuse.observation.metadata` and `langfuse.observation.metadata.*`, **plus every attribute no rule above consumed** |
+| observation metadata | `langfuse.observation.metadata` and `langfuse.observation.metadata.*`, **plus every attribute no rule above consumed**, plus the span's events under `events` |
 
 Two consequences worth knowing:
 
@@ -105,6 +105,13 @@ Two consequences worth knowing:
 - **Cost is never estimated.** There is no price table. `total_cost` is
   present only when the client sent one; otherwise the UI shows "no data",
   not `$0`.
+- **Exceptions count as errors.** OTel records a failure as a span *event*,
+  not an attribute. Every event is kept under `metadata.events` with its
+  attributes intact — stack traces included — and a span carrying an
+  `exception` event is stored at level `ERROR` with the exception's message
+  as its status message, so it reaches `error_count` and error filters even
+  when the exporter never set an ERROR span status. An explicit
+  `langfuse.observation.level` still wins. Span links are not mapped.
 
 Langfuse observation types beyond `span`/`generation`/`event` (`agent`,
 `tool`, `chain`, `retriever`, `guardrail`, `evaluator`, `embedding`) are

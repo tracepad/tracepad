@@ -191,6 +191,19 @@ func crossResourceTree() Fixture {
 		Code:    tracepb.Status_STATUS_CODE_ERROR,
 		Message: "upstream timeout",
 	}
+	// A plain-OTel app records the failure itself as an event, and the
+	// stack trace lives nowhere else.
+	failing.Events = []*tracepb.Span_Event{
+		ExceptionEvent("TimeoutError", "read timed out after 30s",
+			"tools/fetch.py, line 88, in fetch\n  response = session.get(url)"),
+	}
+	// Same failure shape, but with no span status at all — the case that
+	// would silently miss error_count without the promotion rule.
+	silent := span(traceID, "7071727374757677", "3132333435363738", "tool.parse",
+		base+305*ms, base+308*ms)
+	silent.Events = []*tracepb.Span_Event{
+		ExceptionEvent("ValueError", "unparseable response", "tools/parse.py, line 12"),
+	}
 	marker := span(traceID, "6162636465666768", "3132333435363738", "cache.miss",
 		base+310*ms, base+310*ms)
 	root := span(traceID, "3132333435363738", "", "answer-question",
@@ -206,7 +219,7 @@ func crossResourceTree() Fixture {
 					str("service.name", "agent-worker"),
 					str("deployment.environment", "prod"),
 				},
-				scope("agent-tools", "1.4.0", child, failing, marker),
+				scope("agent-tools", "1.4.0", child, failing, silent, marker),
 			),
 			resourceSpans(
 				[]*commonpb.KeyValue{str("service.name", "agent-api")},
@@ -256,13 +269,41 @@ func langfuseExtendedTypes() Fixture {
 // attributes, for tests that probe a single mapping rule rather than a whole
 // dialect. Keys and values alternate.
 func SpanWith(keyValues ...string) []*tracepb.ResourceSpans {
+	return Export(ProbeSpan(keyValues...))
+}
+
+// ProbeSpan is SpanWith's span, for tests that need to decorate it further —
+// with events or a status — before exporting it.
+func ProbeSpan(keyValues ...string) *tracepb.Span {
 	attrs := make([]*commonpb.KeyValue, 0, len(keyValues)/2)
 	for i := 0; i+1 < len(keyValues); i += 2 {
 		attrs = append(attrs, str(keyValues[i], keyValues[i+1]))
 	}
-	probe := span("00112233445566778899aabbccddeeff", "0011223344556677", "", "probe",
+	return span("00112233445566778899aabbccddeeff", "0011223344556677", "", "probe",
 		base, base+ms, attrs...)
-	return []*tracepb.ResourceSpans{resourceSpans(nil, scope("probe", "0.0.0", probe))}
+}
+
+// Export wraps spans in the resource/scope envelope an exporter would.
+func Export(spans ...*tracepb.Span) []*tracepb.ResourceSpans {
+	return []*tracepb.ResourceSpans{resourceSpans(nil, scope("probe", "0.0.0", spans...))}
+}
+
+// ExceptionEvent builds the event OTel records when a span fails.
+func ExceptionEvent(exceptionType, message, stacktrace string) *tracepb.Span_Event {
+	return &tracepb.Span_Event{
+		Name:         "exception",
+		TimeUnixNano: uint64(base + ms/2),
+		Attributes: []*commonpb.KeyValue{
+			str("exception.type", exceptionType),
+			str("exception.message", message),
+			str("exception.stacktrace", stacktrace),
+		},
+	}
+}
+
+// ErrorStatus marks a span as failed the way an exporter would.
+func ErrorStatus(message string) *tracepb.Status {
+	return &tracepb.Status{Code: tracepb.Status_STATUS_CODE_ERROR, Message: message}
 }
 
 func resourceSpans(resourceAttrs []*commonpb.KeyValue, scopes ...*tracepb.ScopeSpans) *tracepb.ResourceSpans {

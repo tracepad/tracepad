@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	tracepb "go.opentelemetry.io/proto/otlp/trace/v1"
+
 	"github.com/tracepad/tracepad/internal/mapping"
 	"github.com/tracepad/tracepad/internal/otlptest"
 )
@@ -184,6 +186,101 @@ func TestChainLosersSurviveInMetadata(t *testing.T) {
 	}
 	if observation.Metadata["gen_ai.response.model"] != "gpt-4o-mini-2026-04-01" {
 		t.Errorf("metadata = %v, want the answering model preserved", observation.Metadata)
+	}
+}
+
+// Span events carry the stack traces of a plain-OTel app, and a span with an
+// exception is a failed span even when the exporter left the status unset —
+// otherwise it would miss error_count and every error filter built on it
+// (spec 002 Decision 26). An explicit level still outranks the promotion.
+func TestExceptionEvents(t *testing.T) {
+	cases := []struct {
+		name              string
+		span              func() *tracepb.Span
+		wantLevel         string
+		wantStatusMessage string
+	}{
+		{
+			name: "exception event without a span status",
+			span: func() *tracepb.Span {
+				s := otlptest.ProbeSpan()
+				s.Events = []*tracepb.Span_Event{
+					otlptest.ExceptionEvent("TimeoutError", "upstream timed out", "line 1\nline 2"),
+				}
+				return s
+			},
+			wantLevel:         "ERROR",
+			wantStatusMessage: "upstream timed out",
+		},
+		{
+			name: "exception event with a span status",
+			span: func() *tracepb.Span {
+				s := otlptest.ProbeSpan()
+				s.Status = otlptest.ErrorStatus("status says so")
+				s.Events = []*tracepb.Span_Event{
+					otlptest.ExceptionEvent("TimeoutError", "upstream timed out", ""),
+				}
+				return s
+			},
+			wantLevel: "ERROR",
+			// The span's own status message is the more deliberate
+			// of the two, so it keeps the column.
+			wantStatusMessage: "status says so",
+		},
+		{
+			name: "exception event under an explicit level",
+			span: func() *tracepb.Span {
+				s := otlptest.ProbeSpan("langfuse.observation.level", "DEBUG")
+				s.Events = []*tracepb.Span_Event{
+					otlptest.ExceptionEvent("Retryable", "retrying", ""),
+				}
+				return s
+			},
+			wantLevel:         "DEBUG",
+			wantStatusMessage: "retrying",
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			observation := mapping.Map(otlptest.Export(c.span())).Observations[0]
+			if observation.Level != c.wantLevel {
+				t.Errorf("level = %q, want %q", observation.Level, c.wantLevel)
+			}
+			if observation.StatusMessage != c.wantStatusMessage {
+				t.Errorf("status_message = %q, want %q", observation.StatusMessage, c.wantStatusMessage)
+			}
+			events, ok := observation.Metadata["events"].([]any)
+			if !ok || len(events) != 1 {
+				t.Fatalf("metadata events = %#v, want the event preserved", observation.Metadata["events"])
+			}
+			event := events[0].(map[string]any)
+			if event["name"] != "exception" || event["exception.type"] == "" {
+				t.Errorf("event = %v, want the exception preserved whole", event)
+			}
+		})
+	}
+}
+
+// Every event is kept, not just exceptions.
+func TestNonExceptionEventsReachMetadata(t *testing.T) {
+	span := otlptest.ProbeSpan()
+	span.Events = []*tracepb.Span_Event{{
+		Name:         "cache.lookup",
+		TimeUnixNano: 42,
+		Attributes:   nil,
+	}}
+	observation := mapping.Map(otlptest.Export(span)).Observations[0]
+
+	if observation.Level != "DEFAULT" {
+		t.Errorf("level = %q, an ordinary event must not raise it", observation.Level)
+	}
+	events, _ := observation.Metadata["events"].([]any)
+	if len(events) != 1 {
+		t.Fatalf("metadata events = %#v", observation.Metadata["events"])
+	}
+	if event := events[0].(map[string]any); event["name"] != "cache.lookup" || event["time"] != int64(42) {
+		t.Errorf("event = %v", event)
 	}
 }
 

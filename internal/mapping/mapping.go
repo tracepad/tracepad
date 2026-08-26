@@ -230,8 +230,21 @@ func mapSpan(sc spanCtx, parents map[string]bool) (*model.Observation, *traceFie
 		EndTime:             int64(span.GetEndTimeUnixNano()),
 	}
 
-	obs.Level = mapLevel(a, span.GetStatus())
+	level, explicitLevel := mapLevel(a, span.GetStatus())
+	obs.Level = level
 	obs.StatusMessage = mapStatusMessage(a, span.GetStatus())
+	// An exception event is how OTel reports a failure, and a span
+	// carrying one is a failed span even when the exporter left the span
+	// status unset — otherwise it would miss error_count and every error
+	// filter built on it (spec 002 Decision 26).
+	if event := exceptionEvent(span); event != nil {
+		if !explicitLevel {
+			obs.Level = model.LevelError
+		}
+		if obs.StatusMessage == "" {
+			obs.StatusMessage = exceptionMessage(event)
+		}
+	}
 	obs.Model, _ = a.firstString(obsModelKeys...)
 	obs.ModelParameters = mapModelParameters(a)
 	obs.Usage = mapUsage(a)
@@ -241,7 +254,14 @@ func mapSpan(sc spanCtx, parents map[string]bool) (*model.Observation, *traceFie
 
 	typeMetadata := map[string]any{}
 	obs.Type = mapType(a, obs, parents[id], typeMetadata)
-	obs.Metadata = mergeMetadata(mapMetadata(a, lfObsMetadata), typeMetadata, a.rest())
+
+	// Events go in last so that a span attribute literally named "events"
+	// cannot hide the span's own event list.
+	eventMetadata := map[string]any{}
+	if events := mapEvents(span); events != nil {
+		eventMetadata[metadataEventsKey] = events
+	}
+	obs.Metadata = mergeMetadata(mapMetadata(a, lfObsMetadata), typeMetadata, a.rest(), eventMetadata)
 
 	return obs, tf, ""
 }
@@ -250,17 +270,78 @@ func mapSpan(sc spanCtx, parents map[string]bool) (*model.Observation, *traceFie
 // the level, and everything else is DEFAULT. A spelling the alias table does
 // not know is left unclaimed, so it surfaces in metadata rather than being
 // swallowed by the fallback.
-func mapLevel(a *attrs, status *tracepb.Status) string {
+//
+// The second return says whether the level came from an attribute the client
+// set deliberately. Only the fallbacks may be overridden by an exception
+// event: a client that said DEBUG meant DEBUG.
+func mapLevel(a *attrs, status *tracepb.Status) (string, bool) {
 	if key, raw, ok := a.first(obsLevelKeys...); ok {
 		if level, known := levelAliases[strings.ToUpper(strings.TrimSpace(asString(raw)))]; known {
 			a.claim(key)
-			return level
+			return level, true
 		}
 	}
 	if status.GetCode() == tracepb.Status_STATUS_CODE_ERROR {
-		return model.LevelError
+		return model.LevelError, false
 	}
-	return model.LevelDefault
+	return model.LevelDefault, false
+}
+
+// mapEvents renders a span's events for metadata. Event attributes are their
+// own namespace — they never took part in the attribute mapping above — so
+// they are carried wholesale rather than consumed.
+func mapEvents(span *tracepb.Span) []any {
+	out := make([]any, 0, len(span.GetEvents()))
+	for _, event := range span.GetEvents() {
+		if event == nil {
+			continue
+		}
+		entry := map[string]any{}
+		for _, kv := range event.GetAttributes() {
+			if kv == nil || kv.Key == "" {
+				continue
+			}
+			entry[kv.Key] = anyValue(kv.Value)
+		}
+		// Written last: an event whose attribute happens to be called
+		// "name" would otherwise leave the entry unidentifiable, and
+		// the raw body still holds the original either way.
+		entry["name"] = event.GetName()
+		entry["time"] = int64(event.GetTimeUnixNano())
+		out = append(out, entry)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// exceptionEvent returns the first exception event on a span, the OTel
+// semconv way of recording a failure.
+func exceptionEvent(span *tracepb.Span) *tracepb.Span_Event {
+	for _, event := range span.GetEvents() {
+		if event.GetName() == eventException {
+			return event
+		}
+	}
+	return nil
+}
+
+// exceptionMessage renders an exception event as a status message: the
+// message if there is one, else the type, which at least names the failure.
+func exceptionMessage(event *tracepb.Span_Event) string {
+	var exceptionType string
+	for _, kv := range event.GetAttributes() {
+		switch kv.GetKey() {
+		case eventExceptionMessage:
+			if message := asString(anyValue(kv.Value)); message != "" {
+				return message
+			}
+		case eventExceptionType:
+			exceptionType = asString(anyValue(kv.Value))
+		}
+	}
+	return exceptionType
 }
 
 func mapStatusMessage(a *attrs, status *tracepb.Status) string {

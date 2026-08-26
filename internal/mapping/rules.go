@@ -89,6 +89,17 @@ const (
 // feeds the cost chain instead (spec 002 Decision 20, 2026-08-26).
 const genAIUsageCost = "gen_ai.usage.cost"
 
+// Span events. OTel records a failure as an event named `exception` rather
+// than as attributes, so this is where a plain-OTel app's stack traces live
+// (spec 002 Decision 26, 2026-08-27).
+const (
+	eventException        = "exception"
+	eventExceptionMessage = "exception.message"
+	eventExceptionType    = "exception.type"
+	// metadataEventsKey is where the whole event list lands.
+	metadataEventsKey = "events"
+)
+
 // levelAliases normalizes the many spellings instrumentations use into the
 // four levels schema 0002 allows. Ported from the reference implementation;
 // an unknown spelling maps to nothing so that the span-status fallback

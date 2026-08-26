@@ -49,6 +49,15 @@
       "level": "ERROR",
       "status_message": "upstream timeout",
       "metadata": {
+        "events": [
+          {
+            "exception.message": "read timed out after 30s",
+            "exception.stacktrace": "tools/fetch.py, line 88, in fetch\n  response = session.get(url)",
+            "exception.type": "TimeoutError",
+            "name": "exception",
+            "time": 1787738400000500000
+          }
+        ],
         "service.name": "agent-worker"
       }
     },
@@ -62,6 +71,29 @@
       "end_time": 1787738400310000000,
       "level": "DEFAULT",
       "metadata": {
+        "service.name": "agent-worker"
+      }
+    },
+    {
+      "trace_id": "dd44ee55ff6677008899001122aabb33",
+      "id": "7071727374757677",
+      "parent_observation_id": "3132333435363738",
+      "type": "span",
+      "name": "tool.parse",
+      "start_time": 1787738400305000000,
+      "end_time": 1787738400308000000,
+      "level": "ERROR",
+      "status_message": "unparseable response",
+      "metadata": {
+        "events": [
+          {
+            "exception.message": "unparseable response",
+            "exception.stacktrace": "tools/parse.py, line 12",
+            "exception.type": "ValueError",
+            "name": "exception",
+            "time": 1787738400000500000
+          }
+        ],
         "service.name": "agent-worker"
       }
     }
