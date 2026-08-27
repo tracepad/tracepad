@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -235,7 +236,23 @@ func (s *Server) renderTrace(w http.ResponseWriter, projectID string, trace *sto
 		writeError(w, http.StatusInternalServerError, "failed to render the trace")
 		return nil, false
 	}
-	budget := newPayloadBudget(budgetBytes, len(skeleton), countPayloads(observations))
+	slots := countPayloads(observations)
+	budget := newPayloadBudget(budgetBytes, len(skeleton), slots)
+	if !budget.affordable {
+		// A trace wide enough that even bare markers would not fit gets
+		// none of them, and one line saying so instead: the tree
+		// already carries every observation id, so nothing here is a
+		// dead end, and `budget_needed` is the number to retry with
+		// (Decision 30).
+		return body.put("expansion", object{}.
+			put("expanded", false).
+			put("payloads", slots).
+			put("budget_needed", budgetNeeded(len(skeleton), slots)).
+			put("reason", fmt.Sprintf(
+				"a budget of %d bytes cannot carry markers for %d payloads; retry with a larger ?budget=, "+
+					"or read one payload at a time from /api/v1/observations/{id}/io",
+				budgetBytes, slots))), true
+	}
 	return renderTraceDetail(trace, renderNodes(roots, budget, true)), true
 }
 
@@ -275,8 +292,16 @@ type observationNode struct {
 // A span whose parent is not in this trace renders at the root with its
 // `parent_observation_id` intact: the parent may still be in flight, and
 // hiding the child until it lands would make a live trace look empty (edge
-// cases). The same fallback catches a parent cycle, which no honest export
-// produces but which would otherwise make both spans vanish.
+// cases).
+//
+// A parent cycle is broken rather than merely re-rooted. `parent_span_id` is
+// client bytes stored verbatim (spec 002), so two spans naming each other is
+// something a caller can produce, and a cyclic `children` graph is not a
+// rendering glitch — the renderer recurses into it until the goroutine stack
+// is exhausted, which in Go is a fatal error the server cannot recover from
+// (found in review of PR #5). The cycle's entry node is detached from its
+// parent and rendered at the root, keeping every span visible and the graph
+// finite.
 func buildTree(rows []*store.ObservationRow) []*observationNode {
 	index := make(map[string]*observationNode, len(rows))
 	nodes := make([]*observationNode, 0, len(rows))
@@ -296,8 +321,10 @@ func buildTree(rows []*store.ObservationRow) []*observationNode {
 		parent.children = append(parent.children, node)
 	}
 
-	// Anything unreachable from a root is in a cycle; it is rendered at
-	// the root rather than dropped.
+	// Anything unreachable from a root is in a cycle. Cutting the edge that
+	// leads *into* such a node — rather than only adding it to the roots —
+	// is what makes the result a tree: the node keeps its own children, so
+	// nothing is lost, and its parent no longer points back at it.
 	reachable := make(map[*observationNode]bool, len(nodes))
 	var walk func(*observationNode)
 	walk = func(node *observationNode) {
@@ -313,10 +340,15 @@ func buildTree(rows []*store.ObservationRow) []*observationNode {
 		walk(root)
 	}
 	for _, node := range nodes {
-		if !reachable[node] {
-			roots = append(roots, node)
-			walk(node)
+		if reachable[node] {
+			continue
 		}
+		if parent, nested := index[node.row.ParentObservationID]; nested {
+			parent.children = slices.DeleteFunc(parent.children,
+				func(child *observationNode) bool { return child == node })
+		}
+		roots = append(roots, node)
+		walk(node)
 	}
 	sort.SliceStable(roots, func(i, j int) bool {
 		if roots[i].row.StartTime != roots[j].row.StartTime {
@@ -530,7 +562,11 @@ func traceFilter(values url.Values) (store.TraceFilter, error) {
 	}
 	if raw := values.Get("min_cost"); raw != "" {
 		cost, err := strconv.ParseFloat(raw, 64)
-		if err != nil || cost < 0 || math.IsInf(cost, 0) {
+		// NaN needs naming separately: every comparison against it is
+		// false, so `min_cost=NaN` would pass a `cost < 0` guard and
+		// then answer a typo with a well-formed empty listing (spec 003
+		// #21, found in review of PR #5).
+		if err != nil || math.IsNaN(cost) || math.IsInf(cost, 0) || cost < 0 {
 			return filter, fmt.Errorf("min_cost must be a non-negative number, got %q", raw)
 		}
 		filter.MinCost = &cost

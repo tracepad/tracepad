@@ -189,6 +189,22 @@ does not fit is cut on a UTF-8 boundary and replaced by a marker:
 the same target for a consumer that speaks tools rather than URLs — they are
 exactly what the MCP `get_observation_io` tool takes.
 
+Markers cost bytes too. A trace with more payloads than the budget can carry
+markers for gets none of them and one line saying so:
+
+```json
+"expansion": {
+  "expanded": false,
+  "payloads": 600,
+  "budget_needed": 178000,
+  "reason": "a budget of 51200 bytes cannot carry markers for 600 payloads; retry with a larger ?budget=, or read one payload at a time from /api/v1/observations/{id}/io"
+}
+```
+
+Nothing is lost: the tree already carries every observation id, so any payload
+is one `/observations/{id}/io` call away, and `budget_needed` is the number to
+retry `?budget=` with. The key is absent when the expansion happened normally.
+
 ## One observation's payloads
 
 ```sh

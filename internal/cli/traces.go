@@ -228,14 +228,29 @@ func (r *run) tail(ctx context.Context, args []string) error {
 	return r.follow(ctx, query, interval)
 }
 
-// follow polls the listing and prints what is newer than the last row it saw.
-// The watermark is the cursor pair, not a wall clock: a trace committed a
-// moment ago with an older timestamp is still new to this walk, and a
-// time-window poll would either miss it or print it twice (#13).
+// tailOverlap is how far behind the newest trace a follow keeps looking.
+//
+// A trace's `timestamp` is when its earliest span *started*, not when it was
+// committed, and exporters batch: the OTel SDK's default processor flushes
+// every five seconds, so a run that began at 12:00:00 can be stored after one
+// that began at 12:00:03. Following only what is newer than the newest row
+// already seen would silently skip it — missing lines in something a person
+// reads as a live log (Decision 31). Looking back over a window and skipping
+// what was already printed costs one page and produces no duplicates.
+const tailOverlap = 60 * time.Second
+
+// maxTailMemory bounds the ids remembered inside that window. Past it the
+// oldest are forgotten and the follow narrows back towards its watermark,
+// which is the honest failure mode: a bounded command that might repeat a line
+// under extreme load beats one that grows without limit.
+const maxTailMemory = 10000
+
+// follow polls the listing and prints what it has not printed before, oldest
+// first, until the context ends.
 func (r *run) follow(ctx context.Context, query url.Values, interval time.Duration) error {
-	var watermark *tailMark
+	window := &tailWindow{seen: map[string]time.Time{}}
 	for {
-		fresh, err := r.poll(ctx, query, watermark)
+		fresh, err := r.poll(ctx, query, window)
 		if err != nil {
 			if ctx.Err() != nil {
 				// Interrupted while a poll was in flight. Being
@@ -245,18 +260,11 @@ func (r *run) follow(ctx context.Context, query url.Values, interval time.Durati
 			}
 			return err
 		}
-		if len(fresh) > 0 {
-			// Oldest first: a follow reads like a log, not like a
-			// listing.
-			for i := len(fresh) - 1; i >= 0; i-- {
-				r.printTailed(fresh[i])
-			}
-			watermark = newTailMark(fresh[0].row)
-		} else if watermark == nil {
-			// Nothing at all yet: start following from now, so the
-			// first trace to arrive is printed.
-			watermark = &tailMark{}
+		// Oldest first: a follow reads like a log, not like a listing.
+		for i := len(fresh) - 1; i >= 0; i-- {
+			r.printTailed(fresh[i])
 		}
+		window.advance(fresh)
 		select {
 		case <-ctx.Done():
 			return nil
@@ -265,25 +273,62 @@ func (r *run) follow(ctx context.Context, query url.Values, interval time.Durati
 	}
 }
 
-// tailMark is the last row a follow printed. A nil mark is the first poll,
-// which prints the page it gets.
+// tailWindow is what a follow remembers: how far back it still looks, and what
+// it has already printed inside that window.
+type tailWindow struct {
+	mark *tailMark
+	seen map[string]time.Time
+}
+
+// wants reports whether a row should be printed: inside the window, and not
+// already shown. Before the first page there is no window, so that page is the
+// tail of the stream, the way tail(1) shows the end of a file before following
+// it.
+func (w *tailWindow) wants(row traceRow) bool {
+	if _, printed := w.seen[row.ID]; printed {
+		return false
+	}
+	return w.mark.after(row)
+}
+
+// advance records what was printed and moves the window to
+// (newest seen) - tailOverlap, forgetting what has fallen out of it.
+func (w *tailWindow) advance(printed []tailed) {
+	newest := time.Time{}
+	if w.mark != nil {
+		newest = w.mark.at.Add(tailOverlap)
+	}
+	for _, entry := range printed {
+		at := instantOf(entry.row)
+		w.seen[entry.row.ID] = at
+		if at.After(newest) {
+			newest = at
+		}
+	}
+	w.mark = &tailMark{at: newest.Add(-tailOverlap)}
+	for id, at := range w.seen {
+		if at.Before(w.mark.at) {
+			delete(w.seen, id)
+		}
+	}
+	for len(w.seen) > maxTailMemory {
+		oldest, oldestAt := "", time.Time{}
+		for id, at := range w.seen {
+			if oldest == "" || at.Before(oldestAt) {
+				oldest, oldestAt = id, at
+			}
+		}
+		delete(w.seen, oldest)
+	}
+}
+
+// tailMark is the oldest instant a follow still looks back to. A nil mark is
+// the first poll, which prints the page it gets.
 type tailMark struct {
 	at time.Time
-	id string
 }
 
-// newTailMark reads the cursor pair off a row. An instant that does not parse
-// leaves the mark's time zero, which sorts before everything — the same place
-// a trace whose spans never started sorts in the listing.
-func newTailMark(row traceRow) *tailMark {
-	mark := &tailMark{id: row.ID}
-	if at, err := time.Parse(time.RFC3339Nano, row.Timestamp); err == nil {
-		mark.at = at
-	}
-	return mark
-}
-
-// after reports whether a row is newer than the mark.
+// after reports whether a row falls inside the window.
 //
 // The instants are compared as times, never as their RFC 3339 text: the
 // server renders variable fractional precision, so "…:00Z" and "…:00.002Z"
@@ -293,16 +338,23 @@ func (m *tailMark) after(row traceRow) bool {
 	if m == nil {
 		return true
 	}
-	at, err := time.Parse(time.RFC3339Nano, row.Timestamp)
-	if err != nil {
+	at := instantOf(row)
+	if at.IsZero() {
 		// No usable instant: it belongs at the oldest end, which the
 		// walk has already passed.
 		return false
 	}
-	if !at.Equal(m.at) {
-		return at.After(m.at)
+	return at.After(m.at)
+}
+
+// instantOf reads a row's timestamp. A trace whose spans never started has
+// none, and the zero time is where such a trace sorts in the listing too.
+func instantOf(row traceRow) time.Time {
+	at, err := time.Parse(time.RFC3339Nano, row.Timestamp)
+	if err != nil {
+		return time.Time{}
 	}
-	return row.ID > m.id
+	return at
 }
 
 // tailed is one row of a follow, kept both parsed (for the watermark and the
@@ -313,10 +365,11 @@ type tailed struct {
 	raw json.RawMessage
 }
 
-// poll fetches the newest page and keeps what the mark has not seen. On the
-// very first poll it returns the page as it is, the way `tail` shows the end
-// of a file before following it.
-func (r *run) poll(ctx context.Context, query url.Values, mark *tailMark) ([]tailed, error) {
+// poll fetches the newest page and keeps what the window has not printed. The
+// walk stops at the first row older than the window rather than at the first
+// row already seen: inside the overlap, an unseen row can sit behind a seen
+// one, which is the whole point of looking back.
+func (r *run) poll(ctx context.Context, query url.Values, window *tailWindow) ([]tailed, error) {
 	body, err := r.api.Get(ctx, "/api/v1/traces", query)
 	if err != nil {
 		return nil, err
@@ -333,10 +386,12 @@ func (r *run) poll(ctx context.Context, query url.Values, mark *tailMark) ([]tai
 		if err != nil {
 			return nil, err
 		}
-		if !mark.after(row) {
+		if !window.mark.after(row) {
 			break
 		}
-		fresh = append(fresh, tailed{row: row, raw: raw})
+		if window.wants(row) {
+			fresh = append(fresh, tailed{row: row, raw: raw})
+		}
 	}
 	return fresh, nil
 }

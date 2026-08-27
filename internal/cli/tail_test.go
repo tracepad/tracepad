@@ -87,6 +87,42 @@ func TestTailFiltersAndJSON(t *testing.T) {
 	}
 }
 
+// TestTailShowsALateArrival is the regression for what review of PR #5 found:
+// a trace's timestamp is when its earliest span started, not when it was
+// stored, and exporters batch. A run that began before one already printed can
+// arrive after it, and a follow that only looked forward silently skipped it.
+func TestTailShowsALateArrival(t *testing.T) {
+	h := newHarness(t)
+	// Printed first: it started later.
+	h.seed(t, &model.Trace{ID: traceHex(1), Name: "started-later", Environment: "production"},
+		&model.Observation{TraceID: traceHex(1), ID: spanHex(1), Type: model.TypeSpan,
+			Level: model.LevelDefault, StartTime: seedBase + 5000*ms, EndTime: seedBase + 5001*ms})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	output := make(chan string, 1)
+	go func() {
+		got := h.run(ctx, true, "tail", "--interval", "20ms")
+		output <- got.stdout
+	}()
+	time.Sleep(60 * time.Millisecond)
+
+	// Stored second, but it started five seconds earlier — exactly what a
+	// batching exporter produces.
+	h.seed(t, &model.Trace{ID: traceHex(2), Name: "started-earlier", Environment: "production"},
+		&model.Observation{TraceID: traceHex(2), ID: spanHex(2), Type: model.TypeSpan,
+			Level: model.LevelDefault, StartTime: seedBase, EndTime: seedBase + ms})
+	time.Sleep(120 * time.Millisecond)
+	cancel()
+
+	printed := <-output
+	for _, id := range []string{traceHex(1), traceHex(2)} {
+		if count := strings.Count(printed, id); count != 1 {
+			t.Fatalf("trace %s printed %d times, want exactly once:\n%s", id, count, printed)
+		}
+	}
+}
+
 func TestTailRejectsANonPositiveInterval(t *testing.T) {
 	h := newHarness(t)
 	got := h.run(t.Context(), false, "tail", "--interval", "0s")

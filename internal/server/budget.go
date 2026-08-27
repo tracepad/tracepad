@@ -4,7 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"strings"
 	"unicode/utf8"
+
+	"github.com/tracepad/tracepad/internal/config"
 )
 
 // The response budget (spec 004 #2). The consumer's context window is a scarce
@@ -45,18 +48,26 @@ const ioKeyOverhead = len(`,"metadata":`)
 // nothing about the payload's shape and the marker alone is more honest.
 const minPreview = 32
 
+// previewKeyOverhead is what `,"preview":` costs before the string itself.
+// markerSize cannot see it — Preview is omitempty and empty when measured —
+// so a preview sized against the raw share overshoots by exactly this much.
+const previewKeyOverhead = len(`,"preview":`)
+
 // payloadBudget divides what is left of a response budget among the payloads
 // that want to be inlined. Every payload gets an equal share (#6): a debugging
 // agent usually needs the shape of every IO and the full text of one or two,
 // and an equal share plus a marker naming the follow-up serves exactly that.
 type payloadBudget struct {
 	share int
+	// affordable reports whether the share covers even a bare marker. When
+	// it does not, nothing is inlined at all: markers are not free, and a
+	// trace wide enough to make them unaffordable would otherwise blow the
+	// budget by a multiple of it (Decision 30).
+	affordable bool
 }
 
 // newPayloadBudget splits `total - skeleton` between `slots` payloads, having
-// first reserved what the payload keys themselves will cost. A budget already
-// spent by the skeleton yields a zero share: every payload becomes a bare
-// marker, which is the smallest honest thing that still names its follow-up.
+// first reserved what the payload keys themselves will cost.
 func newPayloadBudget(total, skeleton, slots int) payloadBudget {
 	if slots <= 0 {
 		return payloadBudget{}
@@ -65,7 +76,33 @@ func newPayloadBudget(total, skeleton, slots int) payloadBudget {
 	if remaining < 0 {
 		return payloadBudget{}
 	}
-	return payloadBudget{share: remaining / slots}
+	share := remaining / slots
+	return payloadBudget{share: share, affordable: share >= bareMarkerSize}
+}
+
+// bareMarkerSize is what one marker costs with no preview: the two ids, the
+// size, the flag and the URL. Computed once from the real shape rather than
+// guessed, so it stays true if the marker gains a field.
+var bareMarkerSize = markerSize(truncation{
+	Truncated:     true,
+	Size:          1 << 40,
+	TraceID:       strings.Repeat("f", 32),
+	ObservationID: strings.Repeat("f", 16),
+	Full:          ioPath(strings.Repeat("f", 32), strings.Repeat("f", 16)),
+})
+
+// budgetNeeded is what `?budget=` would have to be for this response to carry
+// a marker for every payload. Handing the number back is the difference
+// between "no payloads for you" and a request the caller can actually retry.
+func budgetNeeded(skeleton, slots int) int {
+	needed := skeleton + slots*(ioKeyOverhead+bareMarkerSize)
+	if needed < config.MinResponseBudgetBytes {
+		return config.MinResponseBudgetBytes
+	}
+	if needed > config.MaxResponseBudgetBytes {
+		return config.MaxResponseBudgetBytes
+	}
+	return needed
 }
 
 // render returns the value to inline for one payload: the value itself when it
@@ -92,7 +129,7 @@ func (b payloadBudget) render(value any, traceID, observationID string) any {
 		ObservationID: observationID,
 		Full:          ioPath(traceID, observationID),
 	}
-	room := b.share - markerSize(marker)
+	room := b.share - markerSize(marker) - previewKeyOverhead
 	if room >= minPreview {
 		marker.Preview = fitString(string(encoded), room)
 	}

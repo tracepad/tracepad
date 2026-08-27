@@ -94,9 +94,17 @@ tracepad tail --env production --error
 
 Follows the trace listing, printing each new trace on one line. It polls the
 public API (every 2 s, `--interval` to change it), so it needs no new server
-surface and inherits authentication, filters and budgets. The watermark is the
-listing's own cursor pair, not a clock, so a trace committed between two polls
-is printed exactly once.
+surface and inherits authentication, filters and budgets.
+
+A trace is timestamped by when its earliest span *started*, not by when it was
+stored, and exporters batch — the OpenTelemetry SDK's default processor flushes
+every five seconds. So a follow looks a minute back rather than only forward,
+and skips what it has already printed: a run that started before one you have
+already seen still appears when it lands, exactly once.
+
+Each poll reads one page, so on a server producing more than `--limit` traces
+per interval you see the newest page of each poll rather than everything.
+Raise `--limit`, or shorten `--interval`.
 
 In a pipe it prints one JSON row per line. Ctrl-C stops it.
 
@@ -141,9 +149,12 @@ silently overruled.
 ### `stats`
 
 ```sh
-tracepad stats --group-by day --since 7d
+tracepad stats --group-by day --since 168h
 tracepad stats --group-by model
 ```
+
+`--since` takes Go durations (`1h`, `30m`, `168h`) or an RFC 3339 instant.
+There is no day unit — `7d` is a usage error, not a week.
 
 The table's second column names what is being counted: grouping by hour, day
 or environment counts **traces**, grouping by model counts **observations**,

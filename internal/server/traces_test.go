@@ -114,6 +114,11 @@ func TestListTracesRefusesWhatItCannotMean(t *testing.T) {
 		{"unknown status", "?status=failed", "status must be"},
 		{"negative cost", "?min_cost=-1", "min_cost must be"},
 		{"unparseable cost", "?min_cost=cheap", "min_cost must be"},
+		// NaN parses as a float and loses every comparison, so a guard
+		// written as `cost < 0` lets it through and answers a typo with
+		// a well-formed empty listing (found in review of PR #5).
+		{"a cost that is not a number", "?min_cost=NaN", "min_cost must be"},
+		{"an infinite cost", "?min_cost=Inf", "min_cost must be"},
 		{"limit out of range", "?limit=5000", "limit must be"},
 		{"unknown field", "?fields=id,nope", `unknown field "nope"`},
 		{"malformed time", "?from=yesterday", "RFC 3339"},
@@ -235,6 +240,64 @@ func TestGetTraceTree(t *testing.T) {
 	}
 }
 
+// TestTraceTreeSurvivesAParentCycle is the regression for the crash found in
+// review of PR #5: two spans naming each other as parent made the rendered
+// tree cyclic, and rendering recursed until the goroutine stack was exhausted
+// — a fatal error, so the server died and died again on every retry. Parent
+// ids are client bytes stored verbatim, so this is reachable from outside.
+func TestTraceTreeSurvivesAParentCycle(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	h.seed(t, &model.Trace{ID: traceHex(1)},
+		&model.Observation{TraceID: traceHex(1), ID: spanHex(1), ParentObservationID: spanHex(2),
+			Type: model.TypeSpan, Name: "a", Level: model.LevelDefault,
+			StartTime: seedBase, EndTime: seedBase + ms},
+		&model.Observation{TraceID: traceHex(1), ID: spanHex(2), ParentObservationID: spanHex(1),
+			Type: model.TypeSpan, Name: "b", Level: model.LevelDefault,
+			StartTime: seedBase + ms, EndTime: seedBase + 2*ms},
+		// A three-span cycle too: breaking one edge has to be enough
+		// however long the loop is.
+		&model.Observation{TraceID: traceHex(1), ID: spanHex(3), ParentObservationID: spanHex(5),
+			Type: model.TypeSpan, Name: "c", Level: model.LevelDefault,
+			StartTime: seedBase, EndTime: seedBase + ms},
+		&model.Observation{TraceID: traceHex(1), ID: spanHex(4), ParentObservationID: spanHex(3),
+			Type: model.TypeSpan, Name: "d", Level: model.LevelDefault,
+			StartTime: seedBase, EndTime: seedBase + ms},
+		&model.Observation{TraceID: traceHex(1), ID: spanHex(5), ParentObservationID: spanHex(4),
+			Type: model.TypeSpan, Name: "e", Level: model.LevelDefault,
+			StartTime: seedBase, EndTime: seedBase + ms})
+
+	rec := h.get(t, "/api/v1/traces/"+traceHex(1))
+	expectStatus(t, rec, 200)
+	trace := decodeJSON[struct {
+		Observations []treeNodeJS `json:"observations"`
+	}](t, rec)
+
+	// Every span is still there, exactly once: the cycle is broken, not
+	// hidden.
+	if counted := countNodes(trace.Observations); counted != 5 {
+		t.Fatalf("tree holds %d observations, want all 5 exactly once", counted)
+	}
+	seen := map[string]bool{}
+	var walk func([]treeNodeJS)
+	walk = func(nodes []treeNodeJS) {
+		for _, node := range nodes {
+			if seen[node.ID] {
+				t.Fatalf("observation %s appears twice in the tree", node.ID)
+			}
+			seen[node.ID] = true
+			walk(node.Children)
+		}
+	}
+	walk(trace.Observations)
+
+	// And the span still says what it claimed its parent was, even though
+	// the edge was cut.
+	body := rec.Body.String()
+	if !strings.Contains(body, `"parent_observation_id":"`+spanHex(2)+`"`) {
+		t.Errorf("the broken edge erased what the span claimed:\n%s", body)
+	}
+}
+
 func TestGetTraceRefusals(t *testing.T) {
 	h := newHarness(t, nil, store.WriterOptions{})
 	seedCorpus(t, h)
@@ -307,6 +370,82 @@ func TestExpandIOBudget(t *testing.T) {
 	}](t, full)
 	if whole.Input != huge {
 		t.Errorf("the full payload came back cut (%d of %d bytes)", len(whole.Input), len(huge))
+	}
+}
+
+// TestWideTraceStaysInsideItsBudget is the second half of #2, found in review
+// of PR #5: markers are not free either. A trace with more payloads than the
+// budget can carry markers for used to answer with one marker each and overrun
+// the budget by a multiple of it — the opposite of what a byte budget is for.
+func TestWideTraceStaysInsideItsBudget(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+
+	const observations = 200
+	spans := make([]*model.Observation, 0, observations)
+	payload := strings.Repeat("x", 4096)
+	for i := 1; i <= observations; i++ {
+		spans = append(spans, &model.Observation{
+			TraceID: traceHex(1), ID: spanHex(i), Type: model.TypeGeneration,
+			Name: "step", Level: model.LevelDefault,
+			StartTime: seedBase + int64(i)*ms, EndTime: seedBase + int64(i)*ms + ms,
+			Input: payload, Output: payload, Metadata: map[string]any{"note": payload},
+		})
+	}
+	h.seed(t, &model.Trace{ID: traceHex(1)}, spans...)
+
+	rec := h.get(t, "/api/v1/traces/"+traceHex(1)+"?expand=io")
+	expectStatus(t, rec, 200)
+	if rec.Body.Len() > config.DefaultResponseBudgetBytes {
+		t.Fatalf("response is %d bytes, want it inside the %d-byte budget",
+			rec.Body.Len(), config.DefaultResponseBudgetBytes)
+	}
+
+	body := decodeJSON[struct {
+		Expansion struct {
+			Expanded     bool   `json:"expanded"`
+			Payloads     int    `json:"payloads"`
+			BudgetNeeded int    `json:"budget_needed"`
+			Reason       string `json:"reason"`
+		} `json:"expansion"`
+		Observations []struct {
+			Input any `json:"input"`
+		} `json:"observations"`
+	}](t, rec)
+
+	// Refused, and it says so rather than leaving the caller to notice.
+	if body.Expansion.Expanded || body.Expansion.Payloads != 3*observations {
+		t.Fatalf("expansion = %+v, want a refusal naming all %d payloads",
+			body.Expansion, 3*observations)
+	}
+	if body.Expansion.Reason == "" {
+		t.Errorf("the refusal does not say why")
+	}
+	if body.Observations[0].Input != nil {
+		t.Errorf("payloads were inlined anyway: %v", body.Observations[0].Input)
+	}
+
+	// `budget_needed` is a number the caller can act on: asking for it
+	// works.
+	retry := h.get(t, fmt.Sprintf("/api/v1/traces/%s?expand=io&budget=%d",
+		traceHex(1), body.Expansion.BudgetNeeded))
+	expectStatus(t, retry, 200)
+	if retry.Body.Len() > body.Expansion.BudgetNeeded {
+		t.Fatalf("the retry is %d bytes against the %d it asked for",
+			retry.Body.Len(), body.Expansion.BudgetNeeded)
+	}
+	granted := decodeJSON[struct {
+		Expansion struct {
+			Expanded bool `json:"expanded"`
+		} `json:"expansion"`
+		Observations []struct {
+			Input map[string]any `json:"input"`
+		} `json:"observations"`
+	}](t, retry)
+	if granted.Expansion.Expanded {
+		t.Errorf("the retry was refused again with %d bytes", body.Expansion.BudgetNeeded)
+	}
+	if truncated, _ := granted.Observations[0].Input["truncated"].(bool); !truncated {
+		t.Errorf("input = %v, want a truncation marker", granted.Observations[0].Input)
 	}
 }
 
