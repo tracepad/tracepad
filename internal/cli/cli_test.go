@@ -349,7 +349,9 @@ func TestStatsAndSystem(t *testing.T) {
 	if system.code != ExitOK {
 		t.Fatalf("exit = %d, stderr = %s", system.code, system.stderr)
 	}
-	for _, fragment := range []string{"tracepad test", "database", "rows", "traces"} {
+	// The endpoint map does not advertise /mcp, so `system` is where a
+	// human finds out whether it is being served (Decision 27).
+	for _, fragment := range []string{"tracepad test", "database", "rows", "traces", "mcp"} {
 		if !strings.Contains(system.stdout, fragment) {
 			t.Errorf("system output is missing %q:\n%s", fragment, system.stdout)
 		}
