@@ -243,15 +243,26 @@ func (s *Server) renderTrace(w http.ResponseWriter, projectID string, trace *sto
 		// none of them, and one line saying so instead: the tree
 		// already carries every observation id, so nothing here is a
 		// dead end, and `budget_needed` is the number to retry with
-		// (Decision 30).
+		// (Decision 31).
+		needed, retryable := budgetNeeded(len(skeleton), slots)
+		reason := fmt.Sprintf(
+			"a budget of %d bytes cannot carry markers for %d payloads; retry with ?budget=%d, "+
+				"or read one payload at a time from /api/v1/observations/{id}/io",
+			budgetBytes, slots, needed)
+		if !retryable {
+			// Naming a budget the server would refuse would be a
+			// loop rather than a next step.
+			reason = fmt.Sprintf(
+				"no budget can carry markers for %d payloads (%d bytes needed, %d is the maximum); "+
+					"read payloads one at a time from /api/v1/observations/{id}/io",
+				slots, needed, config.MaxResponseBudgetBytes)
+		}
 		return body.put("expansion", object{}.
 			put("expanded", false).
 			put("payloads", slots).
-			put("budget_needed", budgetNeeded(len(skeleton), slots)).
-			put("reason", fmt.Sprintf(
-				"a budget of %d bytes cannot carry markers for %d payloads; retry with a larger ?budget=, "+
-					"or read one payload at a time from /api/v1/observations/{id}/io",
-				budgetBytes, slots))), true
+			put("budget_needed", needed).
+			put("retryable", retryable).
+			put("reason", reason)), true
 	}
 	return renderTraceDetail(trace, renderNodes(roots, budget, true)), true
 }
@@ -361,10 +372,16 @@ func buildTree(rows []*store.ObservationRow) []*observationNode {
 
 // countPayloads counts the payload slots an expanded tree wants to inline —
 // the divisor of the equal share every observation gets (#6).
+//
+// The count has to agree with what renderNode actually emits, which is why it
+// goes through the same asAny: a nil `map[string]any` placed in an `any` is
+// not a nil `any`, so counting metadata by `!= nil` counted a slot for every
+// observation whether it had metadata or not, shrinking everyone's share and
+// truncating payloads that would have fit (found in review of PR #5).
 func countPayloads(rows []*store.ObservationRow) int {
 	slots := 0
 	for _, row := range rows {
-		for _, payload := range []any{row.Input, row.Output, row.Metadata} {
+		for _, payload := range []any{row.Input, row.Output, asAny(row.Metadata)} {
 			if payload != nil {
 				slots++
 			}

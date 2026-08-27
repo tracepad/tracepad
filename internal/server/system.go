@@ -121,10 +121,8 @@ func (c *counters) snapshot() object {
 
 // handleSystem reports what this process knows about itself.
 func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
-	// Authenticated like everything else, though the answer is about the
-	// process rather than about the project's data: an unauthenticated
-	// reader would learn the shape of someone else's traffic.
-	if _, ok := s.apiProject(w, r); !ok {
+	project, ok := s.apiProject(w, r)
+	if !ok {
 		return
 	}
 	if _, err := queryParams(r); err != nil {
@@ -132,7 +130,12 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tables, err := s.store.TableCounts()
+	// Row counts are the asking project's own. A project key is a tenant
+	// credential, and whole-table counts told one tenant how much data the
+	// others held and how many keys they had; cross-project access is what
+	// the admin token of design §6.3 is for, and it does not exist yet
+	// (Decision 33).
+	tables, err := s.store.TableCounts(project.ID)
 	if err != nil {
 		slog.Error("read table counts failed", "err", err)
 		writeError(w, http.StatusInternalServerError, "failed to read the database counts")

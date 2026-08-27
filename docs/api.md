@@ -308,11 +308,18 @@ disagree in either direction. Neither needs a key.
 curl … "http://localhost:4318/api/v1/system"
 ```
 
-Version, uptime, the database's size on disk, per-table row counts, the
-writer queue's depth, and — since this process started — how many batches and
-spans arrived per attribute dialect, how many were skipped, and every distinct
+Version, uptime, the database's size on disk, row counts, the writer queue's
+depth, and — since this process started — how many batches and spans arrived
+per attribute dialect, how many were skipped, and every distinct
 `x-langfuse-ingestion-version` seen. The counters are in memory and say so:
 `counters.since` is when they started.
+
+The row counts are **your project's**: a project key is a tenant credential, so
+it does not report how much data anybody else holds or how many keys they have.
+`payloads` is absent because that table has no project to attribute a row to,
+and `projects` is a bare count of how many tenants share this process — it
+names none of them. `size_bytes` is the file on disk, which is the whole
+deployment; it is the number an operator needs and cannot be split per project.
 
 This is the endpoint to read first when something looks wrong, and the one to
 paste into a bug report.

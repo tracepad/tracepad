@@ -491,10 +491,12 @@ func (r *run) system(ctx context.Context, args []string) error {
 		fmt.Fprintf(r.opt.Stdout, "  mcp        %s at %s\n", enabled(info.MCP.Enabled), info.MCP.Path)
 	}
 
-	fmt.Fprintln(r.opt.Stdout, "\nrows")
+	// This project's rows, not the deployment's (spec 004 Decision 33);
+	// `projects` is the exception and is only a count of tenants.
+	fmt.Fprintln(r.opt.Stdout, "\nrows in this project")
 	rows := newTable(r.opt.Stdout)
-	for _, table := range []string{"traces", "observations", "payloads", "raw_batches",
-		"scores", "prompts", "prompt_labels", "projects", "api_keys"} {
+	for _, table := range []string{"traces", "observations", "raw_batches",
+		"scores", "prompts", "prompt_labels", "api_keys", "projects"} {
 		if count, known := info.Database.Rows[table]; known {
 			rows.row("  "+table, strconv.FormatInt(count, 10))
 		}

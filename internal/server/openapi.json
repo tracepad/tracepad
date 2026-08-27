@@ -114,7 +114,7 @@
       "get": {
         "tags": ["meta"],
         "summary": "Version, uptime, database size and ingest counters since start",
-        "description": "Self-diagnosis without a metrics stack. The counters are in-memory and cover this process only, which is what `counters.since` says.",
+        "description": "Self-diagnosis without a metrics stack. The counters are in-memory and cover this process only, which is what `counters.since` says. Row counts are the asking project's own — `payloads` is absent because it cannot be attributed to one, and `projects` is how many tenants share this process, naming none of them.",
         "operationId": "system",
         "responses": {
           "200": {"description": "What this process knows about itself", "content": {"application/json": {"schema": {
@@ -125,8 +125,9 @@
               "started_at": {"type": "string", "format": "date-time"},
               "uptime_seconds": {"type": "integer"},
               "database": {"type": "object", "properties": {
-                "size_bytes": {"type": "integer", "description": "The database file plus its write-ahead log"},
-                "rows": {"type": "object", "additionalProperties": {"type": "integer"}}
+                "size_bytes": {"type": "integer", "description": "The database file plus its write-ahead log, for the whole deployment"},
+                "rows": {"type": "object", "additionalProperties": {"type": "integer"},
+                  "description": "Row counts within the asking project, plus `projects` as a bare tenant count"}
               }},
               "writer_queue": {"type": "object", "properties": {
                 "waiting": {"type": "integer"}, "capacity": {"type": "integer"}
@@ -658,7 +659,8 @@
         "description": "One span. `children` holds the spans that named it as their parent and is absent for a leaf.",
         "properties": {
           "id": {"type": "string", "pattern": "^[0-9a-f]{16}$"},
-          "parent_observation_id": {"type": "string", "pattern": "^[0-9a-f]{16}$"},
+          "parent_observation_id": {"type": "string", "pattern": "^[0-9a-f]{16}$",
+            "description": "The observation this one ran under, whenever it named one. Nested children carry it too; an observation whose parent is not in this trace renders at the root and still carries it."},
           "type": {"type": "string", "enum": ["span", "generation", "event"]},
           "name": {"type": "string"},
           "start_time": {"type": "string", "format": "date-time"},
@@ -682,10 +684,11 @@
         "properties": {
           "expanded": {"const": false},
           "payloads": {"type": "integer", "description": "How many payloads the trace holds."},
-          "budget_needed": {"type": "integer", "description": "The budget that would carry a marker for each of them."},
+          "budget_needed": {"type": "integer", "description": "The budget that would carry a marker for each of them. Never clamped to the maximum, so it may exceed what `?budget=` accepts."},
+          "retryable": {"type": "boolean", "description": "Whether `budget_needed` is a budget this server would accept. False means no budget can carry this many markers — read the payloads one at a time instead."},
           "reason": {"type": "string"}
         },
-        "required": ["expanded", "payloads", "budget_needed", "reason"]
+        "required": ["expanded", "payloads", "budget_needed", "retryable", "reason"]
       },
       "Truncation": {
         "type": "object",

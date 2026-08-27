@@ -449,6 +449,86 @@ func TestWideTraceStaysInsideItsBudget(t *testing.T) {
 	}
 }
 
+// TestPayloadsAreCountedAsRendered: the divisor of the equal share has to be
+// the number of payloads that will actually be inlined. A nil map inside an
+// `any` is not a nil `any`, so counting metadata by `!= nil` claimed a slot for
+// every observation whether it had metadata or not — a third of the budget
+// spent on payloads that do not exist (found in review of PR #5).
+func TestPayloadsAreCountedAsRendered(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+
+	const observations = 200
+	spans := make([]*model.Observation, 0, observations)
+	payload := strings.Repeat("x", 4096)
+	for i := 1; i <= observations; i++ {
+		// Input and output, deliberately no metadata.
+		spans = append(spans, &model.Observation{
+			TraceID: traceHex(1), ID: spanHex(i), Type: model.TypeGeneration,
+			Name: "step", Level: model.LevelDefault,
+			StartTime: seedBase + int64(i)*ms, EndTime: seedBase + int64(i)*ms + ms,
+			Input: payload, Output: payload,
+		})
+	}
+	h.seed(t, &model.Trace{ID: traceHex(1)}, spans...)
+
+	rec := h.get(t, "/api/v1/traces/"+traceHex(1)+"?expand=io")
+	expectStatus(t, rec, 200)
+	body := decodeJSON[struct {
+		Expansion struct {
+			Payloads int `json:"payloads"`
+		} `json:"expansion"`
+	}](t, rec)
+	if body.Expansion.Payloads != 2*observations {
+		t.Fatalf("payloads = %d, want %d: metadata nobody sent is not a payload",
+			body.Expansion.Payloads, 2*observations)
+	}
+}
+
+// TestExpandingATraceWithNoPayloadsIsNotAComplaint: a trace from a plain
+// exporter carries no IO at all, and answering `?expand=io` with "the budget
+// cannot carry markers for 0 payloads" would make the normal case look like a
+// failure (found in review of PR #5).
+func TestExpandingATraceWithNoPayloadsIsNotAComplaint(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	h.seed(t, &model.Trace{ID: traceHex(1)},
+		&model.Observation{TraceID: traceHex(1), ID: spanHex(1), Type: model.TypeSpan,
+			Name: "no-io", Level: model.LevelDefault,
+			StartTime: seedBase, EndTime: seedBase + ms})
+
+	rec := h.get(t, "/api/v1/traces/"+traceHex(1)+"?expand=io")
+	expectStatus(t, rec, 200)
+	if strings.Contains(rec.Body.String(), "expansion") {
+		t.Fatalf("a trace with nothing to expand was answered with a refusal:\n%s", rec.Body)
+	}
+}
+
+// TestBudgetNeededIsNeverALoop: a refusal that names a budget the server would
+// itself refuse is not a next step, it is a cycle an automated consumer cannot
+// leave (found in review of PR #5).
+func TestBudgetNeededIsNeverALoop(t *testing.T) {
+	// Small enough to ask for.
+	needed, retryable := budgetNeeded(2000, 50)
+	if !retryable {
+		t.Errorf("needed = %d for 50 payloads, want it retryable", needed)
+	}
+	if needed > config.MaxResponseBudgetBytes {
+		t.Errorf("needed = %d, above the maximum but reported as retryable", needed)
+	}
+	// Below the floor: the floor is what `?budget=` would accept.
+	if floor, _ := budgetNeeded(0, 0); floor != config.MinResponseBudgetBytes {
+		t.Errorf("needed = %d for nothing, want the minimum the API accepts", floor)
+	}
+	// Beyond the ceiling: reported honestly and marked unaskable rather
+	// than clamped down to a number that fails identically.
+	huge, retryable := budgetNeeded(2000, 1_000_000)
+	if retryable {
+		t.Errorf("needed = %d is above the maximum but was offered as a retry", huge)
+	}
+	if huge <= config.MaxResponseBudgetBytes {
+		t.Errorf("needed = %d, want the real figure rather than the ceiling", huge)
+	}
+}
+
 // TestExpandIOInlinesWhatFits keeps the budget from being an excuse to
 // truncate everything: payloads that fit come back untouched.
 func TestExpandIOInlinesWhatFits(t *testing.T) {

@@ -377,22 +377,24 @@ func traceRowSchema() *jsonschema.Schema {
 // so the node shape is a $defs entry the array refers to.
 func traceDetailSchema() *jsonschema.Schema {
 	node := object(map[string]*jsonschema.Schema{
-		"id":                    matching(observationIDPattern, "The observation id, for get_observation_io."),
-		"parent_observation_id": text("Set when the parent is not in this tree, e.g. it has not arrived yet."),
-		"type":                  oneOf("What kind of work this was.", "span", "generation", "event"),
-		"name":                  text("What the application called it."),
-		"start_time":            timestamp("When it started."),
-		"end_time":              timestamp("When it ended."),
-		"model":                 text("The model, for a generation."),
-		"model_parameters":      anything("Temperature, max tokens and the rest, as sent."),
-		"level":                 oneOf("Its severity.", "DEBUG", "DEFAULT", "WARNING", "ERROR"),
-		"status_message":        text("Why it failed, when it did."),
-		"usage":                 anything("Token counts as the client reported them."),
-		"cost_details":          anything("Cost as the client reported it; absent when it reported none."),
-		"input":                 anything("With expand=io: what went in, or a truncation marker."),
-		"output":                anything("With expand=io: what came out, or a truncation marker."),
-		"metadata":              anything("With expand=io: the observation's metadata, or a truncation marker."),
-		"children":              list(&jsonschema.Schema{Ref: "#/$defs/observation"}, "Nested observations; absent for a leaf."),
+		"id": matching(observationIDPattern, "The observation id, for get_observation_io."),
+		"parent_observation_id": text("The observation this one ran under, whenever it named one — " +
+			"nested children carry it too, so it is not a sign that the parent is missing. " +
+			"An observation whose parent is not in this trace renders at the root and still carries it."),
+		"type":             oneOf("What kind of work this was.", "span", "generation", "event"),
+		"name":             text("What the application called it."),
+		"start_time":       timestamp("When it started."),
+		"end_time":         timestamp("When it ended."),
+		"model":            text("The model, for a generation."),
+		"model_parameters": anything("Temperature, max tokens and the rest, as sent."),
+		"level":            oneOf("Its severity.", "DEBUG", "DEFAULT", "WARNING", "ERROR"),
+		"status_message":   text("Why it failed, when it did."),
+		"usage":            anything("Token counts as the client reported them."),
+		"cost_details":     anything("Cost as the client reported it; absent when it reported none."),
+		"input":            anything("With expand=io: what went in, or a truncation marker."),
+		"output":           anything("With expand=io: what came out, or a truncation marker."),
+		"metadata":         anything("With expand=io: the observation's metadata, or a truncation marker."),
+		"children":         list(&jsonschema.Schema{Ref: "#/$defs/observation"}, "Nested observations; absent for a leaf."),
 	}, "id", "type", "level")
 
 	schema := object(map[string]*jsonschema.Schema{

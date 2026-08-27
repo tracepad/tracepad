@@ -254,6 +254,63 @@ func TestSystemReportsIngest(t *testing.T) {
 	}
 }
 
+// TestSystemCountsOnlyTheAskingProject: a project key is a tenant credential,
+// and whole-table counts told one tenant how much data the others held and how
+// many keys they had. Cross-project access is what the admin token is for, and
+// it does not exist yet (Decision 33, found in review of PR #5).
+func TestSystemCountsOnlyTheAskingProject(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+
+	// A second tenant with traces of its own, and two keys.
+	other, err := h.store.CreateProject("other",
+		store.KeyPair{PublicKey: "tp-pk-other", Secret: "tp-sk-other"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 1; i <= 3; i++ {
+		err := h.writer.Submit(t.Context(), &store.IngestBatch{
+			ProjectID: other.ID,
+			Traces:    []*model.Trace{{ID: traceHex(100 + i)}},
+			Observations: []*model.Observation{{TraceID: traceHex(100 + i), ID: spanHex(i),
+				Type: model.TypeSpan, Level: model.LevelDefault,
+				StartTime: seedBase, EndTime: seedBase + ms}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	// One trace for the asking project.
+	h.seed(t, &model.Trace{ID: traceHex(1)},
+		&model.Observation{TraceID: traceHex(1), ID: spanHex(1), Type: model.TypeSpan,
+			Level: model.LevelDefault, StartTime: seedBase, EndTime: seedBase + ms})
+
+	rec := h.get(t, "/api/v1/system")
+	expectStatus(t, rec, 200)
+	body := decodeJSON[struct {
+		Database struct {
+			Rows map[string]int64 `json:"rows"`
+		} `json:"database"`
+	}](t, rec)
+
+	if got := body.Database.Rows["traces"]; got != 1 {
+		t.Errorf("traces = %d, want only this project's 1", got)
+	}
+	if got := body.Database.Rows["observations"]; got != 1 {
+		t.Errorf("observations = %d, want only this project's 1", got)
+	}
+	if got := body.Database.Rows["api_keys"]; got != 1 {
+		t.Errorf("api_keys = %d, want only this project's own key", got)
+	}
+	// How many tenants share the process is an operator fact and names
+	// none of them; how much data they hold is not.
+	if got := body.Database.Rows["projects"]; got != 2 {
+		t.Errorf("projects = %d, want the count of tenants", got)
+	}
+	if _, reported := body.Database.Rows["payloads"]; reported {
+		t.Errorf("payloads is reported, but it cannot be attributed to a project")
+	}
+}
+
 // TestSystemCountsRejections: a body that never decoded has no dialect, and
 // saying so is the point of a separate counter.
 func TestSystemCountsRejections(t *testing.T) {

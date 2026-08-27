@@ -337,11 +337,17 @@ func statsQuery(projectID string, filter StatsFilter) (string, []any) {
 	        FROM traces t WHERE ` + strings.Join(where, " AND "), args
 }
 
-// countedTables are the tables `GET /api/v1/system` reports row counts for,
-// in the order they are reported (spec 004 #10).
+// countedTables are the tables `GET /api/v1/system` reports row counts for, in
+// the order they are reported (spec 004 #10). Every one of them is counted
+// within the asking project.
+//
+// `payloads` is absent because it cannot be: the table has no project_id, and
+// reporting it whole would tell one project how much data the others hold
+// (spec 004 Decision 33). `projects` is reported as a plain count — how many
+// tenants share this process is an operator fact, and it names none of them.
 var countedTables = []string{
-	"projects", "api_keys", "traces", "observations",
-	"payloads", "raw_batches", "scores", "prompts", "prompt_labels",
+	"api_keys", "traces", "observations",
+	"raw_batches", "scores", "prompts", "prompt_labels",
 }
 
 // TableCount is one table's row count.
@@ -350,20 +356,25 @@ type TableCount struct {
 	Rows  int64
 }
 
-// TableCounts counts every table, in a fixed order so the answer is a stable
-// diff between two calls.
-func (s *Store) TableCounts() ([]TableCount, error) {
-	out := make([]TableCount, 0, len(countedTables))
+// TableCounts counts one project's rows, in a fixed order so the answer is a
+// stable diff between two calls.
+func (s *Store) TableCounts(projectID string) ([]TableCount, error) {
+	out := make([]TableCount, 0, len(countedTables)+1)
 	for _, table := range countedTables {
 		var rows int64
 		// The table names are the package's own constants, never
-		// anything a request carries.
-		if err := s.db.QueryRow(`SELECT COUNT(*) FROM ` + table).Scan(&rows); err != nil {
+		// anything a request carries; only the project id is bound.
+		if err := s.db.QueryRow(`SELECT COUNT(*) FROM `+table+` WHERE project_id = ?`, projectID).
+			Scan(&rows); err != nil {
 			return nil, fmt.Errorf("count %s: %w", table, err)
 		}
 		out = append(out, TableCount{Table: table, Rows: rows})
 	}
-	return out, nil
+	var projects int64
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM projects`).Scan(&projects); err != nil {
+		return nil, fmt.Errorf("count projects: %w", err)
+	}
+	return append(out, TableCount{Table: "projects", Rows: projects}), nil
 }
 
 // explainQueryPlan returns SQLite's plan for a statement, one line per step.

@@ -68,9 +68,14 @@ type payloadBudget struct {
 
 // newPayloadBudget splits `total - skeleton` between `slots` payloads, having
 // first reserved what the payload keys themselves will cost.
+//
+// A trace with no payloads at all is affordable, not refused: there is nothing
+// to spend the budget on, and answering "the budget cannot carry markers for 0
+// payloads" would turn every trace from a plain exporter into a complaint
+// (found in review of PR #5).
 func newPayloadBudget(total, skeleton, slots int) payloadBudget {
 	if slots <= 0 {
-		return payloadBudget{}
+		return payloadBudget{affordable: true}
 	}
 	remaining := total - skeleton - slots*ioKeyOverhead
 	if remaining < 0 {
@@ -94,15 +99,18 @@ var bareMarkerSize = markerSize(truncation{
 // budgetNeeded is what `?budget=` would have to be for this response to carry
 // a marker for every payload. Handing the number back is the difference
 // between "no payloads for you" and a request the caller can actually retry.
-func budgetNeeded(skeleton, slots int) int {
-	needed := skeleton + slots*(ioKeyOverhead+bareMarkerSize)
+//
+// It is never clamped up to the maximum: a number the caller would be refused
+// for asking is worse than a big one, because "retry with this" that fails
+// identically is a loop an automated consumer cannot leave (found in review of
+// PR #5). When the true need is above the ceiling, `retryable` is false and the
+// reason says so instead.
+func budgetNeeded(skeleton, slots int) (needed int, retryable bool) {
+	needed = skeleton + slots*(ioKeyOverhead+bareMarkerSize)
 	if needed < config.MinResponseBudgetBytes {
-		return config.MinResponseBudgetBytes
+		needed = config.MinResponseBudgetBytes
 	}
-	if needed > config.MaxResponseBudgetBytes {
-		return config.MaxResponseBudgetBytes
-	}
-	return needed
+	return needed, needed <= config.MaxResponseBudgetBytes
 }
 
 // render returns the value to inline for one payload: the value itself when it
