@@ -346,6 +346,68 @@ func TestScoreListFiltersAndPagination(t *testing.T) {
 	}
 }
 
+// A timestamp outside what Unix nanoseconds can represent is refused rather
+// than wrapped: year 3000 would otherwise be stored as 1830 (#23).
+func TestScoreRefusesUnrepresentableTimestamps(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+
+	rec := h.send(t, "POST", "/api/v1/scores", map[string]any{
+		"trace_id": scoreTraceID, "name": "helpfulness", "value": 0.9,
+		"timestamp": "3000-01-01T00:00:00Z",
+	})
+	expectError(t, rec, http.StatusBadRequest, "must be between")
+	expectError(t, h.get(t, "/api/v1/scores?from=1000-01-01T00:00:00Z"),
+		http.StatusBadRequest, "must be between")
+}
+
+// The epoch is a legal instant, not the absence of a bound: `to` at the epoch
+// asks for nothing before 1970 and must answer with nothing (#23).
+func TestScoreTimeFilterTreatsTheEpochAsAValue(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	expectStatus(t, h.send(t, "POST", "/api/v1/scores", map[string]any{
+		"trace_id": scoreTraceID, "name": "helpfulness", "value": 0.9,
+	}), http.StatusCreated)
+
+	before := decodeJSON[scoreListResponse](t, h.get(t, "/api/v1/scores?to=1970-01-01T00:00:00Z"))
+	if len(before.Scores) != 0 {
+		t.Errorf("scores before the epoch = %d, want none", len(before.Scores))
+	}
+	after := decodeJSON[scoreListResponse](t, h.get(t, "/api/v1/scores?from=1970-01-01T00:00:00Z"))
+	if len(after.Scores) != 1 {
+		t.Errorf("scores since the epoch = %d, want the one written", len(after.Scores))
+	}
+}
+
+// A batch that names one id twice would answer with two ids for one stored
+// row, and the client would count what it wrote wrong (#23).
+func TestScoreBatchRefusesDuplicateIDs(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	const id = "aaaabbbbccccddddeeeeffff00001111"
+
+	rec := h.send(t, "POST", "/api/v1/scores", []map[string]any{
+		{"id": id, "trace_id": scoreTraceID, "name": "helpfulness", "value": 0.1},
+		{"id": id, "trace_id": scoreTraceID, "name": "helpfulness", "value": 0.2},
+	})
+	expectError(t, rec, http.StatusBadRequest, "already used by the score at index 0")
+
+	list := decodeJSON[scoreListResponse](t, h.get(t, "/api/v1/scores"))
+	if len(list.Scores) != 0 {
+		t.Errorf("scores = %d, want none: a refused batch writes nothing", len(list.Scores))
+	}
+}
+
+// Decision 21 holds on the write routes too, and a parameter sent without a
+// value is a client whose template left a variable unset (#23).
+func TestScoreWriteRejectsQueryParameters(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+
+	body := []byte(`{"trace_id":"` + scoreTraceID + `","name":"helpfulness","value":0.9}`)
+	expectError(t, h.call(t, "POST", "/api/v1/scores?trace_id="+scoreTraceID, body),
+		http.StatusBadRequest, "unknown query parameter")
+	expectError(t, h.get(t, "/api/v1/scores?name="),
+		http.StatusBadRequest, "without a value")
+}
+
 // The list endpoint refuses a page size it will not honour rather than
 // silently clamping it (#18).
 func TestScoreListRejectsOutOfRangeLimit(t *testing.T) {

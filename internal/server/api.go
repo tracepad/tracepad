@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -170,10 +171,19 @@ func queryParams(r *http.Request, known ...string) (url.Values, error) {
 	if err != nil {
 		return nil, errors.New("malformed query string")
 	}
-	for key := range values {
+	for key, given := range values {
 		if !slices.Contains(known, key) {
 			return nil, fmt.Errorf("unknown query parameter %q (accepted: %s)",
 				key, strings.Join(known, ", "))
+		}
+		// A parameter present with no value is a client whose template
+		// left a variable unset. Reading it as "not given" is how
+		// `?label=$LABEL` silently returns the latest prompt instead of
+		// the released one (#23).
+		for _, value := range given {
+			if value == "" {
+				return nil, fmt.Errorf("query parameter %q was given without a value", key)
+			}
 		}
 	}
 	return values, nil
@@ -213,11 +223,23 @@ func decodeCursor(value string, parts int) ([]string, error) {
 	return fields, nil
 }
 
+// Unix nanoseconds in an int64 span 1678–2262; outside that window
+// time.Time.UnixNano() is undefined and wraps silently, which would turn a
+// typo'd year into a plausible-looking timestamp three centuries off (#23).
+var (
+	minTimestamp = time.Unix(0, math.MinInt64).UTC()
+	maxTimestamp = time.Unix(0, math.MaxInt64).UTC()
+)
+
 // parseTime reads an RFC 3339 timestamp into Unix nanoseconds (#16).
 func parseTime(field, value string) (int64, error) {
 	parsed, err := time.Parse(time.RFC3339, value)
 	if err != nil {
 		return 0, fmt.Errorf("%s must be an RFC 3339 timestamp, got %q", field, value)
+	}
+	if parsed.Before(minTimestamp) || parsed.After(maxTimestamp) {
+		return 0, fmt.Errorf("%s must be between %s and %s, got %q",
+			field, minTimestamp.Format(time.RFC3339), maxTimestamp.Format(time.RFC3339), value)
 	}
 	return parsed.UnixNano(), nil
 }

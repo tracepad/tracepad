@@ -3,9 +3,11 @@ package server
 import (
 	"bytes"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -15,6 +17,41 @@ import (
 // None of these helpers sets a Content-Type. That is deliberate: the API does
 // not require one (Decision 19), and a test suite that always sent the perfect
 // header would never notice if it started to.
+
+// captureLogs redirects slog for the duration of one test and replays what was
+// logged if it fails. A handler answers a failed write with a flat 500 — on
+// purpose, since the client can do nothing with the detail — so the reason a
+// write failed lives only in the log, which is exactly what a rare failure
+// needs to leave behind. Tests within a package run sequentially, so swapping
+// the default logger is safe here.
+func captureLogs(t *testing.T) {
+	t.Helper()
+	var (
+		mu       sync.Mutex
+		recorded bytes.Buffer
+	)
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&lockedWriter{mu: &mu, out: &recorded}, nil)))
+	t.Cleanup(func() {
+		slog.SetDefault(previous)
+		mu.Lock()
+		defer mu.Unlock()
+		if t.Failed() && recorded.Len() > 0 {
+			t.Logf("server log:\n%s", recorded.String())
+		}
+	})
+}
+
+type lockedWriter struct {
+	mu  *sync.Mutex
+	out *bytes.Buffer
+}
+
+func (w *lockedWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.out.Write(p)
+}
 
 // call sends a raw body, so that malformed JSON can be tested too.
 func (h *harness) call(t *testing.T, method, path string, body []byte, mutate ...func(*http.Request)) *httptest.ResponseRecorder {

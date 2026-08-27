@@ -81,6 +81,10 @@ func (s *Server) handleCreatePromptVersion(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
+	if _, err := queryParams(r); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	var request promptVersionRequest
 	if !s.readJSON(w, r, &request) {
 		return
@@ -183,8 +187,16 @@ func promptShape(raw json.RawMessage) (string, error) {
 		if err := json.Unmarshal(message["role"], &role); len(message["role"]) == 0 || err != nil || role == "" {
 			return "", fmt.Errorf(`message %d needs a non-empty "role"`, i)
 		}
-		if len(message["content"]) == 0 {
+		content, present := message["content"]
+		if !present || !jsonValue(content) {
 			return "", fmt.Errorf(`message %d needs a "content"`, i)
+		}
+		// Versions are append-only, so an empty content cannot be
+		// edited away later; the client that reads it back would only
+		// find out when the model call fails (#23).
+		var asText string
+		if err := json.Unmarshal(content, &asText); err == nil && asText == "" {
+			return "", fmt.Errorf(`message %d has an empty "content"`, i)
 		}
 	}
 	return store.PromptChat, nil

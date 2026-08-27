@@ -228,6 +228,43 @@ func TestPromptRequestValidation(t *testing.T) {
 		http.StatusBadRequest, "empty")
 }
 
+// An empty selector is a client whose template left a variable unset. Reading
+// it as "not given" would serve the latest version to a caller that believes
+// it asked for the released one (#23).
+func TestPromptRefusesValuelessSelectors(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	expectStatus(t, h.send(t, "POST", "/api/v1/prompts/summarize/versions", chatBody("You are terse.", nil)),
+		http.StatusCreated)
+
+	expectError(t, h.get(t, "/api/v1/prompts/summarize?label="), http.StatusBadRequest, "without a value")
+	expectError(t, h.get(t, "/api/v1/prompts/summarize?version="), http.StatusBadRequest, "without a value")
+	expectError(t, h.call(t, "POST", "/api/v1/prompts/summarize/versions?label=production",
+		[]byte(`{"prompt":[{"role":"user","content":"hi"}]}`)),
+		http.StatusBadRequest, "unknown query parameter")
+}
+
+// Versions are append-only, so an empty message cannot be edited away later:
+// the client that fetches it would only find out when the model call fails
+// (#23).
+func TestPromptRefusesEmptyMessageContent(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+
+	expectError(t, h.send(t, "POST", "/api/v1/prompts/summarize/versions", map[string]any{
+		"type": "chat", "prompt": []map[string]any{{"role": "system", "content": nil}},
+	}), http.StatusBadRequest, `needs a "content"`)
+	expectError(t, h.send(t, "POST", "/api/v1/prompts/summarize/versions", map[string]any{
+		"type": "chat", "prompt": []map[string]any{{"role": "system", "content": ""}},
+	}), http.StatusBadRequest, `empty "content"`)
+
+	// Structured content is still whatever the client says it is (#15).
+	expectStatus(t, h.send(t, "POST", "/api/v1/prompts/summarize/versions", map[string]any{
+		"type": "chat",
+		"prompt": []map[string]any{{"role": "user", "content": []map[string]any{
+			{"type": "text", "text": "hi"},
+		}}},
+	}), http.StatusCreated)
+}
+
 // Version and prompt listings walk by cursor without gaps or repeats (#18).
 func TestPromptListPagination(t *testing.T) {
 	h := newHarness(t, nil, store.WriterOptions{})

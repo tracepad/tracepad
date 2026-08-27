@@ -54,7 +54,7 @@ well as for a batch.
 | `string_value` | depends | The string, for `categorical` and `text`. |
 | `comment` | no | Free text — a judge's rationale, a reviewer's note. |
 | `metadata` | no | Any JSON value, stored inline and returned verbatim. |
-| `timestamp` | no | RFC 3339. **Event time**: when the graded interaction happened. Defaults to receive time. |
+| `timestamp` | no | RFC 3339, between 1678 and 2262 (what Unix nanoseconds can represent). **Event time**: when the graded interaction happened. Defaults to receive time. |
 
 `data_type` is inferred when you leave it out: a `value` makes the score
 `numeric`, a `string_value` makes it `text`. `boolean` and `categorical` are
@@ -90,7 +90,9 @@ curl -H "Authorization: Bearer tp-sk-…" http://localhost:4318/api/v1/scores -d
 ]'
 ```
 
-An empty array is a `400`: nothing to write is a client bug, not a no-op.
+An empty array is a `400`: nothing to write is a client bug, not a no-op. So is
+an array that gives the same `id` to two items — writes upsert by id, so the
+response would promise more rows than were stored.
 
 ### Scoring a trace that has not arrived yet
 
@@ -139,7 +141,9 @@ cannot make the next page skip or repeat a row. Keep passing `next_cursor`
 until it comes back `null`.
 
 An unknown query parameter is a `400` — the same reasoning as unknown JSON
-fields.
+fields. So is a known one sent without a value (`?name=`): that is a template
+with an unset variable, and reading it as "no filter" would quietly answer a
+different question than the one asked.
 
 ## Responses
 

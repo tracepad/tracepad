@@ -53,7 +53,7 @@ curl -H "Authorization: Bearer tp-sk-…" \
 | Field | Required | Notes |
 |---|---|---|
 | `type` | on the first version | `text` or `chat`. Fixed for the name from then on. |
-| `prompt` | yes | A string for `text`; an array of `{role, content}` messages for `chat`. |
+| `prompt` | yes | A string for `text`; an array of `{role, content}` messages for `chat`. Every message needs a non-empty `role` and `content` — a version cannot be edited afterwards, so an empty one would be permanent. |
 | `config` | no | A JSON object — model, temperature, whatever your runtime reads. |
 | `commit_message` | no | Why this version exists. |
 | `labels` | no | Labels to point at this version as it is created. |
@@ -84,6 +84,7 @@ curl -H "Authorization: Bearer tp-sk-…" \
 | `?label=production` | Whatever `production` currently points at |
 | `?label=latest` | The highest version — `latest` is computed, never stored |
 | `?version=…&label=…` | `400`: pick one |
+| `?label=` (no value) | `400`, never "the latest": an unset shell variable must not silently ship an unreleased prompt |
 
 There is no implicit `production` default: an unqualified fetch means "newest",
 the way every other versioned-artefact tool works.

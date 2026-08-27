@@ -35,6 +35,7 @@ type harness struct {
 
 func newHarness(t *testing.T, cfg *config.Config, writerOpts store.WriterOptions) *harness {
 	t.Helper()
+	captureLogs(t)
 
 	st, err := store.Open(filepath.Join(t.TempDir(), "tracepad.db"))
 	if err != nil {

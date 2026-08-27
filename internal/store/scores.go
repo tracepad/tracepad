@@ -98,9 +98,12 @@ type ScoreFilter struct {
 	DataType      string
 	// From and To bound `timestamp` in Unix nanoseconds as a half-open
 	// range — From inclusive, To exclusive — so that paging a day at a
-	// time never counts a score twice. Zero means unbounded.
-	From int64
-	To   int64
+	// time never counts a score twice. Nil is unbounded; a pointer rather
+	// than a zero sentinel because zero is a legal timestamp, and reading
+	// `to=1970-01-01T00:00:00Z` as "no bound" would answer a query for
+	// nothing with everything.
+	From *int64
+	To   *int64
 	// Limit caps the rows returned; the caller asks for one more than the
 	// page size to learn whether another page exists.
 	Limit int
@@ -139,11 +142,11 @@ func (s *Store) Scores(projectID string, filter ScoreFilter) ([]*Score, error) {
 	if filter.DataType != "" {
 		add("data_type = ?", filter.DataType)
 	}
-	if filter.From != 0 {
-		add("timestamp >= ?", filter.From)
+	if filter.From != nil {
+		add("timestamp >= ?", *filter.From)
 	}
-	if filter.To != 0 {
-		add("timestamp < ?", filter.To)
+	if filter.To != nil {
+		add("timestamp < ?", *filter.To)
 	}
 	if filter.After != nil {
 		// The tie-break on id keeps the order total: scores written in

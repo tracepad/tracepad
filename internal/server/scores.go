@@ -68,6 +68,12 @@ func (s *Server) handleCreateScores(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// The write routes take no query parameters at all, and one that was
+	// sent means the caller expected it to do something (#21, #23).
+	if _, err := queryParams(r); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	body, ok := s.readAPIBody(w, r)
 	if !ok {
 		return
@@ -87,12 +93,22 @@ func (s *Server) handleCreateScores(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UnixNano()
 	write := &store.ScoreWrite{ProjectID: project.ID, Scores: make([]*store.Score, 0, len(requests))}
 	ids := make([]string, 0, len(requests))
+	seen := make(map[string]int, len(requests))
 	for i, request := range requests {
 		score, err := request.validate(now)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, itemError(len(requests), i, err))
 			return
 		}
+		// Writes upsert by id (#3), so a batch naming one id twice
+		// would answer with two ids for one stored row — a client
+		// counting what it wrote would be counting wrong (#23).
+		if first, duplicate := seen[score.ID]; duplicate {
+			writeError(w, http.StatusBadRequest, itemError(len(requests), i,
+				fmt.Errorf("id %s is already used by the score at index %d", score.ID, first)))
+			return
+		}
+		seen[score.ID] = i
 		write.Scores = append(write.Scores, score)
 		ids = append(ids, score.ID)
 	}
@@ -304,17 +320,23 @@ func (s *Server) handleListScores(w http.ResponseWriter, r *http.Request) {
 	}
 	// The range is half-open — `from` inclusive, `to` exclusive — so that
 	// walking a timeline a day at a time never reports a score twice.
-	if raw := values.Get("from"); raw != "" {
-		if filter.From, err = parseTime("from", raw); err != nil {
+	for _, bound := range []struct {
+		name   string
+		target **int64
+	}{
+		{"from", &filter.From},
+		{"to", &filter.To},
+	} {
+		raw := values.Get(bound.name)
+		if raw == "" {
+			continue
+		}
+		instant, err := parseTime(bound.name, raw)
+		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-	}
-	if raw := values.Get("to"); raw != "" {
-		if filter.To, err = parseTime("to", raw); err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
+		*bound.target = &instant
 	}
 	if raw := values.Get("cursor"); raw != "" {
 		parts, err := decodeCursor(raw, 2)
