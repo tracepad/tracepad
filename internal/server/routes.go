@@ -62,6 +62,11 @@ func (s *Server) routes() []route {
 // handleAPIIndex serves the endpoint map. An agent that lands on this API
 // without documentation gets the whole surface in one response, in the order
 // the table declares it (design §3.2).
+//
+// No authentication, for the same reason as the OpenAPI document: this says
+// what the API is, never what is in it, and a consumer deciding whether to
+// talk to this server at all should not need a key to find out what it would
+// be talking to.
 func (s *Server) handleAPIIndex(w http.ResponseWriter, r *http.Request) {
 	if _, err := queryParams(r); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())

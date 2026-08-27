@@ -59,18 +59,38 @@ func TestOpenAPIMatchesRouter(t *testing.T) {
 	}
 }
 
-// TestOpenAPIIsServedWithoutAKey: deciding whether to talk to this server at
-// all should not require a credential, and the document describes the shape of
-// the API, never the data in it.
-func TestOpenAPIIsServedWithoutAKey(t *testing.T) {
+// TestSelfDescriptionIsServedWithoutAKey: deciding whether to talk to this
+// server at all should not require a credential. Both endpoints describe the
+// shape of the API and never the data in it. The second half of the test is
+// what keeps that honest — a document that claimed a key was needed where the
+// server asks for none is a lie a reader would act on.
+func TestSelfDescriptionIsServedWithoutAKey(t *testing.T) {
 	h := newHarness(t, nil, store.WriterOptions{})
 
-	rec := h.call(t, "GET", "/api/v1/openapi.json", nil, func(r *http.Request) {
-		r.Header.Del("Authorization")
-	})
-	expectStatus(t, rec, 200)
-	if !json.Valid(rec.Body.Bytes()) {
-		t.Fatalf("the document is not valid JSON")
+	for _, path := range []string{"/api/v1", "/api/v1/openapi.json"} {
+		rec := h.call(t, "GET", path, nil, func(r *http.Request) {
+			r.Header.Del("Authorization")
+		})
+		expectStatus(t, rec, 200)
+		if !json.Valid(rec.Body.Bytes()) {
+			t.Fatalf("%s did not answer with JSON", path)
+		}
+	}
+
+	// And the document agrees: both are marked as needing no security.
+	var document struct {
+		Paths map[string]map[string]struct {
+			Security *[]any `json:"security"`
+		} `json:"paths"`
+	}
+	if err := json.Unmarshal(openAPIDocument, &document); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"/api/v1", "/api/v1/openapi.json"} {
+		security := document.Paths[path]["get"].Security
+		if security == nil || len(*security) != 0 {
+			t.Errorf("openapi.json says %s needs a key; the server does not ask for one", path)
+		}
 	}
 }
 

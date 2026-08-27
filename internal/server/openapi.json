@@ -80,8 +80,9 @@
       "get": {
         "tags": ["meta"],
         "summary": "This endpoint map",
-        "description": "Where an agent that has never seen this API starts: every endpoint with a one-line description, plus the link to this document.",
+        "description": "Where an agent that has never seen this API starts: every endpoint with a one-line description, plus the link to this document. Needs no key: it says what the API is, never what is in it.",
         "operationId": "apiIndex",
+        "security": [],
         "responses": {
           "200": {"description": "The endpoint map", "content": {"application/json": {"schema": {
             "type": "object",
