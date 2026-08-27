@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
@@ -52,9 +53,28 @@ func New(version string, api API) *mcp.Server {
 			"get_last_trace to find a run, then get_trace to see what happened inside it. " +
 			"Every tool reads; none of them change anything.",
 	})
-	server.AddReceivingMiddleware(cacheableToolList)
+	server.AddReceivingMiddleware(cacheableToolList, logTraceContext)
 	register(server, api)
 	return server
+}
+
+// traceparentKey is where the 2026-07-28 spec documents incoming W3C trace
+// context: on the request's `_meta`.
+const traceparentKey = "traceparent"
+
+// logTraceContext records incoming trace context, and nothing more (#22). A
+// tracing product should at least not drop trace context on the floor; full
+// self-instrumentation is deliberately out of scope, so the request log is
+// where it lands and where it stops.
+func logTraceContext(next mcp.MethodHandler) mcp.MethodHandler {
+	return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+		if params := req.GetParams(); params != nil {
+			if traceparent, ok := params.GetMeta()[traceparentKey].(string); ok && traceparent != "" {
+				slog.Info("mcp request", "method", method, traceparentKey, traceparent)
+			}
+		}
+		return next(ctx, method, req)
+	}
 }
 
 // cacheableToolList stamps the caching hints of #18 onto `tools/list`. The SDK

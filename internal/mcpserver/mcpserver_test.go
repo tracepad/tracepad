@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -163,10 +164,13 @@ func (h *harness) rpc(t *testing.T, method string, params map[string]any) []byte
 	if params == nil {
 		params = map[string]any{}
 	}
-	params["_meta"] = map[string]any{
-		mcp.MetaKeyProtocolVersion:    mcpserver.ProtocolVersion,
-		mcp.MetaKeyClientCapabilities: map[string]any{},
+	meta, _ := params["_meta"].(map[string]any)
+	if meta == nil {
+		meta = map[string]any{}
 	}
+	meta[mcp.MetaKeyProtocolVersion] = mcpserver.ProtocolVersion
+	meta[mcp.MetaKeyClientCapabilities] = map[string]any{}
+	params["_meta"] = meta
 	body, err := json.Marshal(map[string]any{
 		"jsonrpc": "2.0", "id": 1, "method": method, "params": params,
 	})
@@ -640,6 +644,31 @@ func TestMCPCanBeTurnedOff(t *testing.T) {
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404 when MCP is off", response.StatusCode)
+	}
+}
+
+// TestIncomingTraceContextIsLogged is #22: trace context on `_meta` reaches
+// the log, and nothing more happens with it. A tracing product should not be
+// the one tool that drops trace context on the floor.
+func TestIncomingTraceContextIsLogged(t *testing.T) {
+	h := newHarness(t)
+
+	var recorded bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&recorded, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	const traceparent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+	answer := h.rpc(t, "tools/call", map[string]any{
+		"name":      "list_traces",
+		"arguments": map[string]any{"limit": 1},
+		"_meta":     map[string]any{"traceparent": traceparent},
+	})
+	if !bytes.Contains(answer, []byte(`"traces"`)) {
+		t.Fatalf("the call did not succeed: %s", answer)
+	}
+	if !strings.Contains(recorded.String(), traceparent) {
+		t.Fatalf("the trace context was dropped; log was:\n%s", recorded.String())
 	}
 }
 
