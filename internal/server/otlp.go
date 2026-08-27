@@ -62,10 +62,10 @@ func (s *Server) handleTraces(w http.ResponseWriter, r *http.Request) {
 
 	// Early drift signal, never enforcement: refusing an unknown SDK
 	// version would break users on newer SDKs for nothing, and the raw
-	// body means we can always catch up retroactively (spec 002 #17).
-	// The counter half of #17 arrives with the system endpoint that would
-	// expose it (spec 004); until then the log is the signal.
+	// body means we can always catch up retroactively (spec 002 #17). The
+	// counter half of #17 is `GET /api/v1/system` (spec 004 #10).
 	if v := r.Header.Get("x-langfuse-ingestion-version"); v != "" {
+		s.counters.observeSDKVersion(v)
 		slog.Info("langfuse ingestion version", "version", v, "project", project.Name)
 	}
 
@@ -83,6 +83,7 @@ func (s *Server) handleTraces(w http.ResponseWriter, r *http.Request) {
 
 	resourceSpans, unreadable, err := mapping.DecodeExportRequest(body)
 	if err != nil {
+		s.counters.observeRejectedBatch()
 		slog.Warn("undecodable OTLP body", "project", project.Name, "err", err)
 		writeError(w, http.StatusBadRequest, "malformed OTLP body")
 		return
@@ -118,7 +119,10 @@ func (s *Server) handleTraces(w http.ResponseWriter, r *http.Request) {
 	}
 	if batch.Empty() {
 		// Every span was skipped and raw storage is off: there is
-		// nothing to commit, and the export is still a success.
+		// nothing to commit, and the export is still a success. The
+		// skipped spans are still counted — a client whose every span
+		// is unmappable is exactly what the counters exist to surface.
+		s.counters.observeBatch(result.Dialect, 0, result.Skipped, int64(unreadable))
 		writeExportResponse(w, result)
 		return
 	}
@@ -143,6 +147,7 @@ func (s *Server) handleTraces(w http.ResponseWriter, r *http.Request) {
 
 	// 200 only now: the transaction is committed and fsynced, so this
 	// answer means the spans are on disk (spec 002 #15).
+	s.counters.observeBatch(result.Dialect, int64(len(result.Observations)), result.Skipped, int64(unreadable))
 	writeExportResponse(w, result)
 }
 

@@ -141,7 +141,7 @@ func TestIngestStoresTraceAndObservations(t *testing.T) {
 		t.Errorf("timestamp = %d", trace.Timestamp)
 	}
 
-	observations, err := h.store.Observations(h.project.ID, traceID)
+	observations, err := h.store.Observations(h.project.ID, traceID, store.WithIO)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,7 +228,7 @@ func TestIngestMergesAcrossBatches(t *testing.T) {
 	if trace.ObservationCount != 5 || trace.ErrorCount != 2 {
 		t.Errorf("counts = %d observations, %d errors", trace.ObservationCount, trace.ErrorCount)
 	}
-	observations, err := h.store.Observations(h.project.ID, "dd44ee55ff6677008899001122aabb33")
+	observations, err := h.store.Observations(h.project.ID, "dd44ee55ff6677008899001122aabb33", store.WithIO)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -266,7 +266,7 @@ func TestIngestPartialSuccess(t *testing.T) {
 		t.Fatal("a partial success must carry an ExportTraceServiceResponse body")
 	}
 
-	observations, err := h.store.Observations(h.project.ID, "cc33dd44ee55ff6677008899001122aa")
+	observations, err := h.store.Observations(h.project.ID, "cc33dd44ee55ff6677008899001122aa", store.WithIO)
 	if err != nil {
 		t.Fatal(err)
 	}

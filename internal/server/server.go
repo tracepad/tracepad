@@ -29,6 +29,12 @@ type Server struct {
 
 	storeRaw     bool
 	maxBodyBytes int64
+	// responseBudget is the default byte budget a read spends on payloads
+	// (spec 004 #2); `?budget=` overrides it per request.
+	responseBudget int64
+
+	startedAt time.Time
+	counters  *counters
 }
 
 // New builds the server around an opened store and the writer that
@@ -42,32 +48,27 @@ func New(cfg *config.Config, version string, st *store.Store, writer JobWriter) 
 		// would, and a zero cap silently 413s every export.
 		maxBody = config.DefaultMaxBodyBytes
 	}
+	budget := cfg.ResponseBudgetBytes
+	if budget <= 0 {
+		budget = config.DefaultResponseBudgetBytes
+	}
 	s := &Server{
-		store:        st,
-		writer:       writer,
-		version:      version,
-		storeRaw:     cfg.StoreRaw,
-		maxBodyBytes: maxBody,
+		store:          st,
+		writer:         writer,
+		version:        version,
+		storeRaw:       cfg.StoreRaw,
+		maxBodyBytes:   maxBody,
+		responseBudget: budget,
+		startedAt:      time.Now(),
+		counters:       newCounters(),
 	}
 
+	// One table declares the whole surface (Decision 25); the mux is built
+	// from it rather than beside it.
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /health", s.handleHealth)
-	// The canonical OTLP path and the Langfuse-SDK alias are one endpoint
-	// (spec 002 #2).
-	mux.HandleFunc("POST /v1/traces", s.handleTraces)
-	mux.HandleFunc("POST /api/public/otel/v1/traces", s.handleTraces)
-
-	// The native JSON API (spec 003): written for applications, agents and
-	// curl rather than for exporters.
-	mux.HandleFunc("POST /api/v1/scores", s.handleCreateScores)
-	mux.HandleFunc("GET /api/v1/scores", s.handleListScores)
-	mux.HandleFunc("GET /api/v1/scores/{id}", s.handleGetScore)
-	mux.HandleFunc("GET /api/v1/prompts", s.handleListPrompts)
-	mux.HandleFunc("GET /api/v1/prompts/{name}", s.handleGetPrompt)
-	mux.HandleFunc("POST /api/v1/prompts/{name}/versions", s.handleCreatePromptVersion)
-	mux.HandleFunc("GET /api/v1/prompts/{name}/versions", s.handleListPromptVersions)
-	mux.HandleFunc("PUT /api/v1/prompts/{name}/labels/{label}", s.handlePutPromptLabel)
-	mux.HandleFunc("DELETE /api/v1/prompts/{name}/labels/{label}", s.handleDeletePromptLabel)
+	for _, route := range s.routes() {
+		mux.HandleFunc(route.Method+" "+route.Path, route.handler)
+	}
 
 	s.http = &http.Server{
 		Addr:              cfg.Listen,

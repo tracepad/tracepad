@@ -1,0 +1,748 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Tracepad API",
+    "summary": "Lightweight, self-hosted, OTLP-native store for LLM and agent traces.",
+    "description": "The read API is the product's contract: the UI, the CLI and the MCP server are thin clients over exactly these endpoints, and a feature that is not here does not exist. Responses are flat snake_case JSON with RFC 3339 timestamps and opaque cursors. Every response spends a byte budget on payloads (default 51200, `?budget=` to override): a payload that does not fit is cut at a UTF-8 boundary and replaced by a truncation marker naming where the whole of it lives.",
+    "license": {"name": "Apache-2.0", "identifier": "Apache-2.0"},
+    "version": "0.1.0"
+  },
+  "servers": [{"url": "http://localhost:4318", "description": "A locally running tracepad"}],
+  "security": [{"bearerKey": []}, {"basicKeys": []}],
+  "tags": [
+    {"name": "meta", "description": "Self-description and self-diagnosis"},
+    {"name": "ingest", "description": "OTLP trace ingest"},
+    {"name": "traces", "description": "Traces, observations and sessions"},
+    {"name": "stats", "description": "Aggregates computed on the fly"},
+    {"name": "scores", "description": "Quality judgements about traces"},
+    {"name": "prompts", "description": "Versioned prompts with movable labels"}
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": ["meta"],
+        "summary": "Liveness and version, no authentication required",
+        "operationId": "health",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "The server is up",
+            "content": {"application/json": {"schema": {
+              "type": "object",
+              "properties": {"status": {"const": "ok"}, "version": {"type": "string"}},
+              "required": ["status", "version"]
+            }}}
+          }
+        }
+      }
+    },
+    "/v1/traces": {
+      "post": {
+        "tags": ["ingest"],
+        "summary": "OTLP/HTTP protobuf trace ingest",
+        "description": "The canonical OTLP endpoint. Point any OpenTelemetry SDK at it with `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` and an authorization header. A 200 means the spans are committed and fsynced.",
+        "operationId": "ingestTraces",
+        "requestBody": {"required": true, "content": {
+          "application/x-protobuf": {"schema": {"type": "string", "format": "binary",
+            "description": "An OTLP ExportTraceServiceRequest, optionally gzipped"}}
+        }},
+        "responses": {
+          "200": {"description": "Accepted; the body is an ExportTraceServiceResponse carrying partial_success when spans were skipped",
+            "content": {"application/x-protobuf": {"schema": {"type": "string", "format": "binary"}}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "413": {"description": "The body exceeded TRACEPAD_MAX_BODY_BYTES",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+          "415": {"description": "Content-Type is not application/x-protobuf",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+          "429": {"description": "The write queue is full; retry after the Retry-After delay",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}}
+        }
+      }
+    },
+    "/api/public/otel/v1/traces": {
+      "post": {
+        "tags": ["ingest"],
+        "summary": "OTLP ingest under the Langfuse SDK's path",
+        "description": "The same endpoint as `/v1/traces`, at the path a Langfuse SDK sends to. Setting `LANGFUSE_HOST` to a tracepad is the whole migration.",
+        "operationId": "ingestTracesLangfuse",
+        "requestBody": {"required": true, "content": {
+          "application/x-protobuf": {"schema": {"type": "string", "format": "binary"}}
+        }},
+        "responses": {
+          "200": {"description": "Accepted", "content": {"application/x-protobuf": {"schema": {"type": "string", "format": "binary"}}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"}
+        }
+      }
+    },
+    "/api/v1": {
+      "get": {
+        "tags": ["meta"],
+        "summary": "This endpoint map",
+        "description": "Where an agent that has never seen this API starts: every endpoint with a one-line description, plus the link to this document.",
+        "operationId": "apiIndex",
+        "responses": {
+          "200": {"description": "The endpoint map", "content": {"application/json": {"schema": {
+            "type": "object",
+            "properties": {
+              "version": {"type": "string"},
+              "openapi": {"type": "string"},
+              "endpoints": {"type": "array", "items": {"type": "object", "properties": {
+                "method": {"type": "string"}, "path": {"type": "string"}, "description": {"type": "string"}
+              }, "required": ["method", "path", "description"]}}
+            },
+            "required": ["version", "openapi", "endpoints"]
+          }}}},
+          "400": {"$ref": "#/components/responses/BadRequest"}
+        }
+      }
+    },
+    "/api/v1/openapi.json": {
+      "get": {
+        "tags": ["meta"],
+        "summary": "The OpenAPI 3.1 document for this API",
+        "operationId": "openapi",
+        "security": [],
+        "responses": {
+          "200": {"description": "This document", "content": {"application/json": {"schema": {"type": "object"}}}}
+        }
+      }
+    },
+    "/api/v1/system": {
+      "get": {
+        "tags": ["meta"],
+        "summary": "Version, uptime, database size and ingest counters since start",
+        "description": "Self-diagnosis without a metrics stack. The counters are in-memory and cover this process only, which is what `counters.since` says.",
+        "operationId": "system",
+        "responses": {
+          "200": {"description": "What this process knows about itself", "content": {"application/json": {"schema": {
+            "type": "object",
+            "properties": {
+              "version": {"type": "string"},
+              "go_version": {"type": "string"},
+              "started_at": {"type": "string", "format": "date-time"},
+              "uptime_seconds": {"type": "integer"},
+              "database": {"type": "object", "properties": {
+                "size_bytes": {"type": "integer", "description": "The database file plus its write-ahead log"},
+                "rows": {"type": "object", "additionalProperties": {"type": "integer"}}
+              }},
+              "writer_queue": {"type": "object", "properties": {
+                "waiting": {"type": "integer"}, "capacity": {"type": "integer"}
+              }},
+              "response_budget_bytes": {"type": "integer"},
+              "counters": {"type": "object", "properties": {
+                "since": {"type": "string", "format": "date-time"},
+                "dialects": {"type": "object", "additionalProperties": {"type": "object", "properties": {
+                  "batches": {"type": "integer"},
+                  "spans_stored": {"type": "integer"},
+                  "spans_skipped": {"type": "integer"}
+                }}},
+                "rejected_batches": {"type": "integer"},
+                "unreadable_resource_spans": {"type": "integer"},
+                "langfuse_ingestion_versions": {"type": "array", "items": {"type": "string"}}
+              }}
+            },
+            "required": ["version", "started_at", "uptime_seconds", "database", "counters"]
+          }}}},
+          "401": {"$ref": "#/components/responses/Unauthorized"}
+        }
+      }
+    },
+    "/api/v1/traces": {
+      "get": {
+        "tags": ["traces"],
+        "summary": "List traces newest first, filtered and cursor-paginated",
+        "description": "Rows carry the aggregate columns and never a payload — a listing is for choosing what to fetch. To read one trace whole, follow with `GET /api/v1/traces/{id}`; to go straight to the newest match, use `GET /api/v1/traces/last`.",
+        "operationId": "listTraces",
+        "parameters": [
+          {"$ref": "#/components/parameters/From"},
+          {"$ref": "#/components/parameters/To"},
+          {"$ref": "#/components/parameters/Environment"},
+          {"name": "user_id", "in": "query", "schema": {"type": "string"}, "description": "Exact match on the trace's user id"},
+          {"name": "session_id", "in": "query", "schema": {"type": "string"}, "description": "Exact match on the trace's session id"},
+          {"name": "name", "in": "query", "schema": {"type": "string"}, "description": "Exact match on the trace name"},
+          {"name": "tag", "in": "query", "schema": {"type": "array", "items": {"type": "string"}}, "style": "form", "explode": true,
+            "description": "Repeatable; a trace must carry every tag given"},
+          {"name": "status", "in": "query", "schema": {"type": "string", "enum": ["error", "ok"]},
+            "description": "`error` keeps traces with at least one failed observation, `ok` keeps the rest"},
+          {"name": "min_cost", "in": "query", "schema": {"type": "number", "minimum": 0},
+            "description": "Keeps traces whose total cost is at least this much. A trace whose client provided no cost has none and never matches."},
+          {"name": "fields", "in": "query", "schema": {"type": "string"},
+            "description": "Comma-separated subset of the row fields. An unknown name is a 400."},
+          {"$ref": "#/components/parameters/Limit"},
+          {"$ref": "#/components/parameters/Cursor"}
+        ],
+        "responses": {
+          "200": {"description": "A page of traces", "content": {"application/json": {"schema": {
+            "type": "object",
+            "properties": {
+              "traces": {"type": "array", "items": {"$ref": "#/components/schemas/TraceRow"}},
+              "next_cursor": {"type": ["string", "null"], "description": "Pass back as `?cursor=` for the next page; null on the last one"}
+            },
+            "required": ["traces", "next_cursor"]
+          }}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"}
+        }
+      }
+    },
+    "/api/v1/traces/last": {
+      "get": {
+        "tags": ["traces"],
+        "summary": "The newest trace matching the filters, whole",
+        "description": "The task shortcut: `?status=error&expand=io` answers \"why did the last run fail\" in one round trip instead of list, filter, get, and one get per observation. Takes every filter of the listing and returns exactly what `GET /api/v1/traces/{id}` returns.",
+        "operationId": "lastTrace",
+        "parameters": [
+          {"$ref": "#/components/parameters/From"},
+          {"$ref": "#/components/parameters/To"},
+          {"$ref": "#/components/parameters/Environment"},
+          {"name": "user_id", "in": "query", "schema": {"type": "string"}},
+          {"name": "session_id", "in": "query", "schema": {"type": "string"}},
+          {"name": "name", "in": "query", "schema": {"type": "string"}},
+          {"name": "tag", "in": "query", "schema": {"type": "array", "items": {"type": "string"}}, "style": "form", "explode": true},
+          {"name": "status", "in": "query", "schema": {"type": "string", "enum": ["error", "ok"]}},
+          {"name": "min_cost", "in": "query", "schema": {"type": "number", "minimum": 0}},
+          {"$ref": "#/components/parameters/Expand"},
+          {"$ref": "#/components/parameters/Budget"}
+        ],
+        "responses": {
+          "200": {"description": "The newest matching trace", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Trace"}}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"description": "Nothing matches; the message names the filters that found nothing",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}}
+        }
+      }
+    },
+    "/api/v1/traces/{id}": {
+      "get": {
+        "tags": ["traces"],
+        "summary": "One trace with its observations as a nested tree",
+        "description": "Children are nested inside their parents, siblings ordered by start time. An observation whose parent has not arrived yet renders at the root with its `parent_observation_id` intact. Payloads ride only with `?expand=io`.",
+        "operationId": "getTrace",
+        "parameters": [
+          {"name": "id", "in": "path", "required": true,
+            "schema": {"type": "string", "pattern": "^[0-9a-f]{32}$"}},
+          {"$ref": "#/components/parameters/Expand"},
+          {"$ref": "#/components/parameters/Budget"}
+        ],
+        "responses": {
+          "200": {"description": "The trace", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Trace"}}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
+    "/api/v1/observations/{id}/io": {
+      "get": {
+        "tags": ["traces"],
+        "summary": "The whole input, output and metadata of one observation",
+        "description": "The one endpoint no byte budget applies to: it exists to be the `full` target of every truncation marker, and a budget here would recurse. A span id is unique only inside its trace, so pass `?trace_id=` when the same id appears in more than one — every truncation marker already carries the pair.",
+        "operationId": "observationIO",
+        "parameters": [
+          {"name": "id", "in": "path", "required": true,
+            "schema": {"type": "string", "pattern": "^[0-9a-f]{16}$"}},
+          {"name": "trace_id", "in": "query",
+            "schema": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+            "description": "Optional; required only when the span id is ambiguous within the project"}
+        ],
+        "responses": {
+          "200": {"description": "The payloads, whole", "content": {"application/json": {"schema": {
+            "type": "object",
+            "properties": {
+              "trace_id": {"type": "string"},
+              "observation_id": {"type": "string"},
+              "input": {"description": "Whatever the client logged"},
+              "output": {"description": "Whatever the client logged"},
+              "metadata": {"type": "object"}
+            },
+            "required": ["trace_id", "observation_id"]
+          }}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "409": {"description": "The span id appears in more than one trace; the message lists the candidates",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}}
+        }
+      }
+    },
+    "/api/v1/sessions/{id}": {
+      "get": {
+        "tags": ["traces"],
+        "summary": "One session: its totals and its traces",
+        "description": "A session is not a stored entity but the set of traces that named it. Every aggregate counts traces: `error_count` is how many of the session's traces failed, not how many spans did.",
+        "operationId": "getSession",
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"$ref": "#/components/parameters/Limit"},
+          {"$ref": "#/components/parameters/Cursor"}
+        ],
+        "responses": {
+          "200": {"description": "The session", "content": {"application/json": {"schema": {
+            "type": "object",
+            "properties": {
+              "id": {"type": "string"},
+              "trace_count": {"type": "integer"},
+              "total_cost": {"type": "number", "description": "Absent when no trace of the session carried a cost"},
+              "error_count": {"type": "integer"},
+              "first_seen": {"type": "string", "format": "date-time"},
+              "last_seen": {"type": "string", "format": "date-time"},
+              "traces": {"type": "array", "items": {"$ref": "#/components/schemas/TraceRow"}},
+              "next_cursor": {"type": ["string", "null"]}
+            },
+            "required": ["id", "trace_count", "error_count", "traces", "next_cursor"]
+          }}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
+    "/api/v1/stats": {
+      "get": {
+        "tags": ["stats"],
+        "summary": "Counts, errors, cost and latency percentiles per bucket",
+        "description": "Computed on the fly, with exact percentiles. `unit` says what a bucket counts: grouping by hour, day or environment counts traces, and grouping by model counts observations, because a trace has no model. An empty range answers with no buckets rather than with fabricated zero rows.",
+        "operationId": "stats",
+        "parameters": [
+          {"$ref": "#/components/parameters/From"},
+          {"$ref": "#/components/parameters/To"},
+          {"$ref": "#/components/parameters/Environment"},
+          {"name": "group_by", "in": "query",
+            "schema": {"type": "string", "enum": ["hour", "day", "model", "environment"], "default": "day"}}
+        ],
+        "responses": {
+          "200": {"description": "The buckets", "content": {"application/json": {"schema": {
+            "type": "object",
+            "properties": {
+              "group_by": {"type": "string", "enum": ["hour", "day", "model", "environment"]},
+              "unit": {"type": "string", "enum": ["trace", "observation"]},
+              "buckets": {"type": "array", "items": {
+                "type": "object",
+                "properties": {
+                  "key": {"type": "string"},
+                  "count": {"type": "integer"},
+                  "error_count": {"type": "integer"},
+                  "total_cost": {"type": "number", "description": "Absent when nothing in the bucket carried a cost"},
+                  "latency_ms": {"type": "object", "properties": {
+                    "p50": {"type": ["integer", "null"]},
+                    "p95": {"type": ["integer", "null"]}
+                  }}
+                },
+                "required": ["key", "count", "error_count", "latency_ms"]
+              }}
+            },
+            "required": ["group_by", "unit", "buckets"]
+          }}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"}
+        }
+      }
+    },
+    "/api/v1/scores": {
+      "post": {
+        "tags": ["scores"],
+        "summary": "Write one score or an array of them",
+        "description": "An array is all-or-nothing: one transaction, and one 400 naming the first invalid item. A 201 means the rows are on disk. No Content-Type is required.",
+        "operationId": "createScores",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {
+          "oneOf": [
+            {"$ref": "#/components/schemas/ScoreInput"},
+            {"type": "array", "items": {"$ref": "#/components/schemas/ScoreInput"}}
+          ]
+        }}}},
+        "responses": {
+          "201": {"description": "Written", "content": {"application/json": {"schema": {
+            "type": "object",
+            "properties": {"ids": {"type": "array", "items": {"type": "string"}}},
+            "required": ["ids"]
+          }}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "429": {"description": "The write queue is full; retry after the Retry-After delay",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}}
+        }
+      },
+      "get": {
+        "tags": ["scores"],
+        "summary": "List scores, filtered and cursor-paginated",
+        "operationId": "listScores",
+        "parameters": [
+          {"name": "trace_id", "in": "query", "schema": {"type": "string"}},
+          {"name": "observation_id", "in": "query", "schema": {"type": "string"}},
+          {"name": "session_id", "in": "query", "schema": {"type": "string"}},
+          {"name": "name", "in": "query", "schema": {"type": "string"}},
+          {"name": "data_type", "in": "query", "schema": {"type": "string", "enum": ["numeric", "boolean", "categorical", "text"]}},
+          {"$ref": "#/components/parameters/From"},
+          {"$ref": "#/components/parameters/To"},
+          {"$ref": "#/components/parameters/Limit"},
+          {"$ref": "#/components/parameters/Cursor"}
+        ],
+        "responses": {
+          "200": {"description": "A page of scores", "content": {"application/json": {"schema": {
+            "type": "object",
+            "properties": {
+              "scores": {"type": "array", "items": {"$ref": "#/components/schemas/Score"}},
+              "next_cursor": {"type": ["string", "null"]}
+            },
+            "required": ["scores", "next_cursor"]
+          }}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"}
+        }
+      }
+    },
+    "/api/v1/scores/{id}": {
+      "get": {
+        "tags": ["scores"],
+        "summary": "Fetch one score",
+        "operationId": "getScore",
+        "parameters": [{"name": "id", "in": "path", "required": true,
+          "schema": {"type": "string", "pattern": "^[0-9a-f]{32}$"}}],
+        "responses": {
+          "200": {"description": "The score", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Score"}}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
+    "/api/v1/prompts": {
+      "get": {
+        "tags": ["prompts"],
+        "summary": "List prompt names with where their labels point",
+        "operationId": "listPrompts",
+        "parameters": [{"$ref": "#/components/parameters/Limit"}, {"$ref": "#/components/parameters/Cursor"}],
+        "responses": {
+          "200": {"description": "A page of prompt names", "content": {"application/json": {"schema": {
+            "type": "object",
+            "properties": {
+              "prompts": {"type": "array", "items": {
+                "type": "object",
+                "properties": {
+                  "name": {"type": "string"},
+                  "type": {"type": "string", "enum": ["text", "chat"]},
+                  "latest_version": {"type": "integer"},
+                  "labels": {"type": "object", "additionalProperties": {"type": "integer"}},
+                  "updated_at": {"type": "string", "format": "date-time"}
+                },
+                "required": ["name", "type", "latest_version", "labels", "updated_at"]
+              }},
+              "next_cursor": {"type": ["string", "null"]}
+            },
+            "required": ["prompts", "next_cursor"]
+          }}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"}
+        }
+      }
+    },
+    "/api/v1/prompts/{name}": {
+      "get": {
+        "tags": ["prompts"],
+        "summary": "Fetch one prompt by version, by label, or the latest",
+        "description": "With neither `version` nor `label`, the highest version. `latest` is a virtual label meaning the same thing; there is no implicit `production`.",
+        "operationId": "getPrompt",
+        "parameters": [
+          {"$ref": "#/components/parameters/PromptName"},
+          {"name": "version", "in": "query", "schema": {"type": "integer", "minimum": 1}},
+          {"name": "label", "in": "query", "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {"description": "The prompt version", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Prompt"}}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
+    "/api/v1/prompts/{name}/versions": {
+      "post": {
+        "tags": ["prompts"],
+        "summary": "Append a version to a prompt",
+        "description": "Versions are append-only and numbered inside the write transaction, so parallel creates produce 1..N with no gaps. A name's type is fixed by its first version.",
+        "operationId": "createPromptVersion",
+        "parameters": [{"$ref": "#/components/parameters/PromptName"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {
+          "type": "object",
+          "properties": {
+            "type": {"type": "string", "enum": ["text", "chat"], "description": "Required on the first version of a name"},
+            "prompt": {"description": "A string for a text prompt, an array of {role, content} messages for a chat one"},
+            "config": {"type": "object"},
+            "commit_message": {"type": "string"},
+            "labels": {"type": "array", "items": {"type": "string"}}
+          },
+          "required": ["prompt"]
+        }}}},
+        "responses": {
+          "201": {"description": "The version created", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Prompt"}}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      },
+      "get": {
+        "tags": ["prompts"],
+        "summary": "List a prompt's versions, newest first",
+        "description": "Without the bodies: a version list is for picking and diffing.",
+        "operationId": "listPromptVersions",
+        "parameters": [
+          {"$ref": "#/components/parameters/PromptName"},
+          {"$ref": "#/components/parameters/Limit"},
+          {"$ref": "#/components/parameters/Cursor"}
+        ],
+        "responses": {
+          "200": {"description": "A page of versions", "content": {"application/json": {"schema": {
+            "type": "object",
+            "properties": {
+              "versions": {"type": "array", "items": {
+                "type": "object",
+                "properties": {
+                  "version": {"type": "integer"},
+                  "commit_message": {"type": "string"},
+                  "labels": {"type": "array", "items": {"type": "string"}},
+                  "created_at": {"type": "string", "format": "date-time"}
+                },
+                "required": ["version", "labels", "created_at"]
+              }},
+              "next_cursor": {"type": ["string", "null"]}
+            },
+            "required": ["versions", "next_cursor"]
+          }}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
+    "/api/v1/prompts/{name}/diff": {
+      "get": {
+        "tags": ["prompts"],
+        "summary": "Unified diff between two versions of a prompt",
+        "description": "A unified text patch over the pretty-printed `prompt` and `config` of the two versions — the format every consumer already reads. Empty when the two versions are identical.",
+        "operationId": "promptDiff",
+        "parameters": [
+          {"$ref": "#/components/parameters/PromptName"},
+          {"name": "from", "in": "query", "required": true, "schema": {"type": "integer", "minimum": 1}},
+          {"name": "to", "in": "query", "required": true, "schema": {"type": "integer", "minimum": 1}}
+        ],
+        "responses": {
+          "200": {"description": "The diff", "content": {"application/json": {"schema": {
+            "type": "object",
+            "properties": {
+              "name": {"type": "string"},
+              "from": {"type": "integer"},
+              "to": {"type": "integer"},
+              "diff": {"type": "string"}
+            },
+            "required": ["name", "from", "to", "diff"]
+          }}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
+    "/api/v1/prompts/{name}/labels/{label}": {
+      "put": {
+        "tags": ["prompts"],
+        "summary": "Point a label at a version",
+        "description": "The deploy path: promote by moving `production` forward, roll back by moving it back. One row, no new version.",
+        "operationId": "putPromptLabel",
+        "parameters": [{"$ref": "#/components/parameters/PromptName"}, {"$ref": "#/components/parameters/PromptLabel"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {
+          "type": "object",
+          "properties": {"version": {"type": "integer", "minimum": 1}},
+          "required": ["version"]
+        }}}},
+        "responses": {
+          "200": {"description": "Where the label points now", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Label"}}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      },
+      "delete": {
+        "tags": ["prompts"],
+        "summary": "Remove a label",
+        "operationId": "deletePromptLabel",
+        "parameters": [{"$ref": "#/components/parameters/PromptName"}, {"$ref": "#/components/parameters/PromptLabel"}],
+        "responses": {
+          "200": {"description": "The version the label pointed at", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Label"}}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerKey": {"type": "http", "scheme": "bearer",
+        "description": "A project's secret key, `tp-sk-…`"},
+      "basicKeys": {"type": "http", "scheme": "basic",
+        "description": "`base64(public key:secret key)`, the shape a Langfuse SDK sends"}
+    },
+    "parameters": {
+      "From": {"name": "from", "in": "query", "schema": {"type": "string", "format": "date-time"},
+        "description": "RFC 3339, inclusive. The range is half-open, so walking a timeline never reports a row twice."},
+      "To": {"name": "to", "in": "query", "schema": {"type": "string", "format": "date-time"},
+        "description": "RFC 3339, exclusive"},
+      "Environment": {"name": "environment", "in": "query", "schema": {"type": "string"},
+        "description": "Exact match on the environment a trace ran in"},
+      "Limit": {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 500, "default": 50},
+        "description": "Out of range is a 400, not a silent clamp"},
+      "Cursor": {"name": "cursor", "in": "query", "schema": {"type": "string"},
+        "description": "The opaque `next_cursor` of the previous page"},
+      "Expand": {"name": "expand", "in": "query", "schema": {"type": "string", "enum": ["io"]},
+        "description": "`io` inlines each observation's input, output and metadata, each cut to an equal share of the remaining budget with a truncation marker naming the rest"},
+      "Budget": {"name": "budget", "in": "query", "schema": {"type": "integer", "minimum": 4096, "maximum": 5242880},
+        "description": "Byte budget for the payloads of this response; the structure is never truncated"},
+      "PromptName": {"name": "name", "in": "path", "required": true,
+        "schema": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$", "maxLength": 200}},
+      "PromptLabel": {"name": "label", "in": "path", "required": true,
+        "schema": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$", "maxLength": 200}}
+    },
+    "responses": {
+      "BadRequest": {"description": "The request cannot mean what it says: an unknown query parameter, a malformed value, a limit out of range",
+        "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+      "Unauthorized": {"description": "The credentials do not resolve to a project",
+        "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+      "NotFound": {"description": "No such thing in this project",
+        "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}}
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "description": "The one error shape the whole surface uses",
+        "properties": {"error": {"type": "string"}},
+        "required": ["error"]
+      },
+      "TraceRow": {
+        "type": "object",
+        "description": "A trace as it appears in a listing: aggregates only, never a payload. A field the trace never carried is absent rather than empty.",
+        "properties": {
+          "id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+          "name": {"type": "string"},
+          "user_id": {"type": "string"},
+          "session_id": {"type": "string"},
+          "environment": {"type": "string"},
+          "tags": {"type": "array", "items": {"type": "string"}},
+          "timestamp": {"type": "string", "format": "date-time", "description": "When the earliest observation of the trace started"},
+          "total_cost": {"type": "number", "description": "Summed over the observations whose client provided cost; absent when none did"},
+          "latency_ms": {"type": "integer"},
+          "error_count": {"type": "integer"},
+          "observation_count": {"type": "integer"}
+        },
+        "required": ["id", "environment", "error_count", "observation_count"]
+      },
+      "Trace": {
+        "allOf": [
+          {"$ref": "#/components/schemas/TraceRow"},
+          {
+            "type": "object",
+            "properties": {
+              "metadata": {"type": "object"},
+              "observations": {"type": "array", "items": {"$ref": "#/components/schemas/Observation"}}
+            },
+            "required": ["observations"]
+          }
+        ]
+      },
+      "Observation": {
+        "type": "object",
+        "description": "One span. `children` holds the spans that named it as their parent and is absent for a leaf.",
+        "properties": {
+          "id": {"type": "string", "pattern": "^[0-9a-f]{16}$"},
+          "parent_observation_id": {"type": "string", "pattern": "^[0-9a-f]{16}$"},
+          "type": {"type": "string", "enum": ["span", "generation", "event"]},
+          "name": {"type": "string"},
+          "start_time": {"type": "string", "format": "date-time"},
+          "end_time": {"type": "string", "format": "date-time"},
+          "model": {"type": "string"},
+          "model_parameters": {"type": "object"},
+          "level": {"type": "string", "enum": ["DEBUG", "DEFAULT", "WARNING", "ERROR"]},
+          "status_message": {"type": "string"},
+          "usage": {"type": "object"},
+          "cost_details": {"type": "object"},
+          "input": {"oneOf": [{"$ref": "#/components/schemas/Truncation"}, {"description": "Whatever the client logged"}]},
+          "output": {"oneOf": [{"$ref": "#/components/schemas/Truncation"}, {"description": "Whatever the client logged"}]},
+          "metadata": {"oneOf": [{"$ref": "#/components/schemas/Truncation"}, {"type": "object"}]},
+          "children": {"type": "array", "items": {"$ref": "#/components/schemas/Observation"}}
+        },
+        "required": ["id", "type", "level"]
+      },
+      "Truncation": {
+        "type": "object",
+        "description": "A payload too large for this response's budget. `full` is the URL that returns it whole; `trace_id` and `observation_id` are the same target for a consumer that speaks tools rather than URLs.",
+        "properties": {
+          "truncated": {"const": true},
+          "size": {"type": "integer", "description": "The payload's full size in bytes"},
+          "preview": {"type": "string", "description": "A prefix of the payload, cut on a UTF-8 boundary"},
+          "trace_id": {"type": "string"},
+          "observation_id": {"type": "string"},
+          "full": {"type": "string"}
+        },
+        "required": ["truncated", "trace_id", "observation_id", "full"]
+      },
+      "ScoreInput": {
+        "type": "object",
+        "description": "One judgement. A score needs a trace or a session, and either a `value` or a `string_value`.",
+        "properties": {
+          "id": {"type": "string", "pattern": "^[0-9a-f]{32}$", "description": "Generated when absent; writing the same id again replaces the score"},
+          "trace_id": {"type": "string"},
+          "observation_id": {"type": "string"},
+          "session_id": {"type": "string"},
+          "name": {"type": "string", "maxLength": 200},
+          "data_type": {"type": "string", "enum": ["numeric", "boolean", "categorical", "text"],
+            "description": "Inferred when absent: a `value` makes it numeric, a `string_value` makes it text"},
+          "value": {"type": "number"},
+          "string_value": {"type": "string"},
+          "comment": {"type": "string"},
+          "metadata": {},
+          "timestamp": {"type": "string", "format": "date-time", "description": "Event time; defaults to receive time"}
+        },
+        "required": ["name"]
+      },
+      "Score": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "string"},
+          "trace_id": {"type": "string"},
+          "observation_id": {"type": "string"},
+          "session_id": {"type": "string"},
+          "name": {"type": "string"},
+          "data_type": {"type": "string", "enum": ["numeric", "boolean", "categorical", "text"]},
+          "value": {"type": "number"},
+          "string_value": {"type": "string"},
+          "comment": {"type": "string"},
+          "metadata": {},
+          "timestamp": {"type": "string", "format": "date-time"},
+          "created_at": {"type": "string", "format": "date-time"}
+        },
+        "required": ["id", "name", "data_type", "timestamp", "created_at"]
+      },
+      "Prompt": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string"},
+          "version": {"type": "integer"},
+          "type": {"type": "string", "enum": ["text", "chat"]},
+          "prompt": {"description": "Stored and returned verbatim; interpolation is the client's job"},
+          "config": {"type": "object"},
+          "commit_message": {"type": "string"},
+          "labels": {"type": "array", "items": {"type": "string"}},
+          "created_at": {"type": "string", "format": "date-time"}
+        },
+        "required": ["name", "version", "type", "prompt", "labels", "created_at"]
+      },
+      "Label": {
+        "type": "object",
+        "properties": {"label": {"type": "string"}, "version": {"type": "integer"}},
+        "required": ["label", "version"]
+      }
+    }
+  }
+}
