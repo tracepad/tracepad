@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/tracepad/tracepad/internal/cli"
 	"github.com/tracepad/tracepad/internal/config"
 	"github.com/tracepad/tracepad/internal/server"
 	"github.com/tracepad/tracepad/internal/store"
@@ -33,24 +34,58 @@ func splitCommand(args []string) (string, []string) {
 	return "serve", args
 }
 
+// clientCommands are the subcommands served by the CLI rather than by the
+// server half of the binary. They are the same binary on purpose: for an agent
+// with a terminal, "the tool is already on PATH" is zero integration
+// (design §3.3).
+var clientCommands = map[string]bool{
+	"traces":   true,
+	"tail":     true,
+	"sessions": true,
+	"scores":   true,
+	"prompts":  true,
+	"stats":    true,
+	"system":   true,
+}
+
 func main() {
 	cmd, args := splitCommand(os.Args[1:])
 
-	switch cmd {
-	case "serve":
+	switch {
+	case cmd == "serve":
 		if err := serve(args); err != nil {
 			slog.Error("fatal", "err", err)
 			os.Exit(1)
 		}
-	case "version":
+	case clientCommands[cmd]:
+		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		defer stop()
+		os.Exit(cli.Run(ctx, cli.Options{
+			Args:    os.Args[1:],
+			Version: version,
+			Stdout:  os.Stdout,
+			Stderr:  os.Stderr,
+			TTY:     isTerminal(os.Stdout),
+			Env:     os.Getenv,
+			Now:     time.Now,
+		}))
+	case cmd == "version":
 		fmt.Println(version)
-	case "help", "-h", "--help":
+	case cmd == "help", cmd == "-h", cmd == "--help":
 		usage()
 	default:
 		fmt.Fprintf(os.Stderr, "tracepad: unknown command %q\n\n", cmd)
 		usage()
 		os.Exit(2)
 	}
+}
+
+// isTerminal reports whether output is going to a terminal rather than into a
+// pipe or a file. It is what makes agent-first the default: a pipe gets JSON
+// with no flags at all (spec 004 #12).
+func isTerminal(file *os.File) bool {
+	info, err := file.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
 func usage() {
@@ -64,10 +99,13 @@ Flags of serve:
   --listen addr      HTTP listen address        (env TRACEPAD_LISTEN, default :4318)
   --data-dir path    data directory             (env TRACEPAD_DATA_DIR)
 
-Ingest environment:
-  TRACEPAD_STORE_RAW        keep raw OTLP bodies for remap/export (default on)
-  TRACEPAD_MAX_BODY_BYTES   request body cap in bytes             (default 20971520)
-`)
+Server environment:
+  TRACEPAD_STORE_RAW              keep raw OTLP bodies for remap/export (default on)
+  TRACEPAD_MAX_BODY_BYTES         request body cap in bytes             (default 20971520)
+  TRACEPAD_RESPONSE_BUDGET_BYTES  default read response budget          (default 51200)
+  TRACEPAD_MCP                    serve MCP at /mcp                     (default on)
+
+`+cli.Usage)
 }
 
 func serve(args []string) error {

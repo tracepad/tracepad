@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/tracepad/tracepad/internal/client"
 	"github.com/tracepad/tracepad/internal/config"
 	"github.com/tracepad/tracepad/internal/store"
 )
@@ -72,7 +73,7 @@ func New(cfg *config.Config, version string, st *store.Store, writer JobWriter) 
 
 	s.http = &http.Server{
 		Addr:              cfg.Listen,
-		Handler:           mux,
+		Handler:           s.withVersion(mux),
 		ReadHeaderTimeout: 10 * time.Second,
 		// ReadTimeout bounds slow-dripping request bodies; IdleTimeout
 		// reaps abandoned keep-alives. WriteTimeout stays unset on
@@ -115,4 +116,16 @@ func writeError(w http.ResponseWriter, status int, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(map[string]string{"error": message})
+}
+
+// withVersion stamps this build on every response. A client that has to spend
+// a round trip on `/api/v1/system` to notice version skew will not spend it,
+// so the answer rides along with whatever it was already asking for
+// (Decision 28). The header name lives in the client package because that is
+// who reads it; the server is the only writer.
+func (s *Server) withVersion(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set(client.VersionHeader, s.version)
+		next.ServeHTTP(w, r)
+	})
 }
