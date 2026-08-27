@@ -48,11 +48,6 @@ type ScoreWrite struct {
 	Scores    []*Score
 }
 
-// Empty reports a job with nothing to write. The handler rejects an empty
-// array before it gets here (an empty POST is a client bug, not a no-op), so
-// this is the writer's own guard rather than a code path clients can reach.
-func (s *ScoreWrite) Empty() bool { return len(s.Scores) == 0 }
-
 // apply upserts every score by (project_id, id). A re-POST with the same id
 // replaces the row wholesale — a correction is a re-POST, not a delete and an
 // insert (#3), so `created_at` moves to the receive time of the newest
@@ -152,8 +147,12 @@ func (s *Store) Scores(projectID string, filter ScoreFilter) ([]*Score, error) {
 		// The tie-break on id keeps the order total: scores written in
 		// the same commit share a timestamp often enough that ordering
 		// by it alone would make a page boundary ambiguous.
-		add("(timestamp < ? OR (timestamp = ? AND id < ?))",
-			filter.After.Timestamp, filter.After.Timestamp, filter.After.ID)
+		//
+		// Written as a row-value comparison rather than the equivalent
+		// `timestamp < ? OR (timestamp = ? AND id < ?)`: SQLite seeks
+		// straight to the cursor with the former and scans from the
+		// newest row with the latter (Decision 25).
+		add("(timestamp, id) < (?, ?)", filter.After.Timestamp, filter.After.ID)
 	}
 	args = append(args, filter.Limit)
 

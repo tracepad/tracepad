@@ -282,10 +282,14 @@ func jsonValue(raw json.RawMessage) bool {
 
 // compactJSON strips insignificant whitespace from a value that is stored
 // verbatim, so what comes back out is not padded by how it was sent.
-func compactJSON(raw json.RawMessage) (json.RawMessage, error) {
+//
+// It cannot fail on anything a handler passes it: the input is a
+// json.RawMessage lifted out of a body the decoder already accepted. If that
+// ever stopped being true, the bytes as sent are the honest thing to store.
+func compactJSON(raw json.RawMessage) json.RawMessage {
 	var buffer bytes.Buffer
 	if err := json.Compact(&buffer, raw); err != nil {
-		return nil, err
+		return raw
 	}
-	return buffer.Bytes(), nil
+	return buffer.Bytes()
 }

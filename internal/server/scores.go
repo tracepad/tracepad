@@ -1,12 +1,12 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/tracepad/tracepad/internal/store"
@@ -17,19 +17,21 @@ import (
 // maxScoreNameLength bounds the name a score is filed under (API contract).
 const maxScoreNameLength = 200
 
-// scoreRequest is the wire shape of one score. Every field is a pointer or a
-// raw message so that "absent" is distinguishable from "sent as empty" — the
-// difference decides both the data type (#5) and half the validation.
+// scoreRequest is the wire shape of one score. A field is a pointer only
+// where "absent" and "sent as empty" lead somewhere different: an absent id is
+// generated while an empty one is refused, an absent target is not the same as
+// an empty one, and which of `value`/`string_value` arrived decides the data
+// type (#5). For the rest, empty and absent mean the same thing.
 type scoreRequest struct {
 	ID            *string         `json:"id"`
 	TraceID       *string         `json:"trace_id"`
 	ObservationID *string         `json:"observation_id"`
 	SessionID     *string         `json:"session_id"`
-	Name          *string         `json:"name"`
-	DataType      *string         `json:"data_type"`
+	Name          string          `json:"name"`
+	DataType      string          `json:"data_type"`
 	Value         *float64        `json:"value"`
 	StringValue   *string         `json:"string_value"`
-	Comment       *string         `json:"comment"`
+	Comment       string          `json:"comment"`
 	Metadata      json.RawMessage `json:"metadata"`
 	Timestamp     *string         `json:"timestamp"`
 }
@@ -123,7 +125,9 @@ func (s *Server) handleCreateScores(w http.ResponseWriter, r *http.Request) {
 // decodeScores reads the body as either one score or an array of them, keeping
 // the strictness of a single object in both shapes (#17).
 func decodeScores(body []byte) ([]*scoreRequest, error) {
-	if trimmed := strings.TrimLeft(string(body), " \t\r\n"); strings.HasPrefix(trimmed, "[") {
+	// TrimLeft on the bytes, not on a string copy of them: the body can be
+	// megabytes, and all that is needed is its first meaningful character.
+	if trimmed := bytes.TrimLeft(body, " \t\r\n"); len(trimmed) > 0 && trimmed[0] == '[' {
 		var requests []*scoreRequest
 		if err := decodeStrict(body, &requests); err != nil {
 			return nil, err
@@ -158,10 +162,10 @@ func (in *scoreRequest) validate(now int64) (*store.Score, error) {
 		TraceID:       text(in.TraceID),
 		ObservationID: text(in.ObservationID),
 		SessionID:     text(in.SessionID),
-		Name:          text(in.Name),
+		Name:          in.Name,
 		Value:         in.Value,
 		StringValue:   in.StringValue,
-		Comment:       text(in.Comment),
+		Comment:       in.Comment,
 		Timestamp:     now,
 		CreatedAt:     now,
 	}
@@ -217,12 +221,8 @@ func (in *scoreRequest) validate(now int64) (*store.Score, error) {
 	}
 	score.DataType = dataType
 
-	if in.Metadata != nil && jsonValue(in.Metadata) {
-		metadata, err := compactJSON(in.Metadata)
-		if err != nil {
-			return nil, fmt.Errorf(`"metadata" is not valid JSON`)
-		}
-		score.Metadata = metadata
+	if jsonValue(in.Metadata) {
+		score.Metadata = compactJSON(in.Metadata)
 	}
 	if in.Timestamp != nil {
 		// Event time, not receive time: when the graded interaction
@@ -243,10 +243,7 @@ func resolveDataType(in *scoreRequest) (string, error) {
 	if in.Value != nil && in.StringValue != nil {
 		return "", fmt.Errorf(`a score carries either "value" or "string_value", not both`)
 	}
-	dataType := ""
-	if in.DataType != nil {
-		dataType = *in.DataType
-	}
+	dataType := in.DataType
 	switch dataType {
 	case "":
 		// The common cases need no ceremony: a float from an eval is

@@ -34,11 +34,16 @@ CREATE TABLE scores (
     PRIMARY KEY (project_id, id)
 ) STRICT;
 
-CREATE INDEX idx_scores_timestamp ON scores(project_id, timestamp DESC);
+-- The listing sorts by (timestamp DESC, id DESC) and pages by that same key,
+-- so `id` belongs in the index next to `timestamp`: without it SQLite sorts
+-- every page through a temporary B-tree and cannot seek to the cursor, which
+-- is the one thing keyset pagination exists to avoid (spec 003 Decision 25).
+CREATE INDEX idx_scores_timestamp ON scores(project_id, timestamp DESC, id DESC);
 CREATE INDEX idx_scores_trace ON scores(project_id, trace_id);
 CREATE INDEX idx_scores_session ON scores(project_id, session_id);
--- Trend queries — one score name over time (design §5.2).
-CREATE INDEX idx_scores_name ON scores(project_id, name, timestamp);
+-- Trend queries — one score name over time (design §5.2) — paged by the same
+-- key as the unfiltered listing.
+CREATE INDEX idx_scores_name ON scores(project_id, name, timestamp, id);
 
 -- Append-only per (project, name): a version is never edited, and a rollback
 -- is a label move rather than a rewrite (spec 003 #10). The version number is

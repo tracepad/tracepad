@@ -29,62 +29,62 @@ func TestScoreValidationMatrix(t *testing.T) {
 	}{
 		{
 			name:     "value alone is numeric",
-			request:  scoreRequest{Name: str("helpfulness"), TraceID: str(scoreTraceID), Value: number(0.9)},
+			request:  scoreRequest{Name: "helpfulness", TraceID: str(scoreTraceID), Value: number(0.9)},
 			wantType: store.ScoreNumeric,
 		},
 		{
 			name:     "string_value alone is text",
-			request:  scoreRequest{Name: str("verdict"), TraceID: str(scoreTraceID), StringValue: str("solid")},
+			request:  scoreRequest{Name: "verdict", TraceID: str(scoreTraceID), StringValue: str("solid")},
 			wantType: store.ScoreText,
 		},
 		{
 			name:     "boolean carries 0 or 1",
-			request:  scoreRequest{Name: str("passed"), TraceID: str(scoreTraceID), DataType: str(store.ScoreBoolean), Value: number(1)},
+			request:  scoreRequest{Name: "passed", TraceID: str(scoreTraceID), DataType: store.ScoreBoolean, Value: number(1)},
 			wantType: store.ScoreBoolean,
 		},
 		{
 			name:     "categorical carries string_value",
-			request:  scoreRequest{Name: str("tone"), TraceID: str(scoreTraceID), DataType: str(store.ScoreCategorical), StringValue: str("friendly")},
+			request:  scoreRequest{Name: "tone", TraceID: str(scoreTraceID), DataType: store.ScoreCategorical, StringValue: str("friendly")},
 			wantType: store.ScoreCategorical,
 		},
 		{
 			name:     "a session is a target on its own",
-			request:  scoreRequest{Name: str("csat"), SessionID: str("session-77"), Value: number(5)},
+			request:  scoreRequest{Name: "csat", SessionID: str("session-77"), Value: number(5)},
 			wantType: store.ScoreNumeric,
 		},
 		{
 			name:    "boolean refuses a value that is not 0 or 1",
-			request: scoreRequest{Name: str("passed"), TraceID: str(scoreTraceID), DataType: str(store.ScoreBoolean), Value: number(0.5)},
+			request: scoreRequest{Name: "passed", TraceID: str(scoreTraceID), DataType: store.ScoreBoolean, Value: number(0.5)},
 			wantErr: "must be 0 or 1",
 		},
 		{
 			name:    "numeric refuses a string_value",
-			request: scoreRequest{Name: str("helpfulness"), TraceID: str(scoreTraceID), DataType: str(store.ScoreNumeric), Value: number(1), StringValue: str("nope")},
+			request: scoreRequest{Name: "helpfulness", TraceID: str(scoreTraceID), DataType: store.ScoreNumeric, Value: number(1), StringValue: str("nope")},
 			wantErr: "not both",
 		},
 		{
 			name:    "text refuses a value",
-			request: scoreRequest{Name: str("verdict"), TraceID: str(scoreTraceID), DataType: str(store.ScoreText), Value: number(1)},
+			request: scoreRequest{Name: "verdict", TraceID: str(scoreTraceID), DataType: store.ScoreText, Value: number(1)},
 			wantErr: `needs a "string_value"`,
 		},
 		{
 			name:    "categorical without a string_value",
-			request: scoreRequest{Name: str("tone"), TraceID: str(scoreTraceID), DataType: str(store.ScoreCategorical), Value: number(1)},
+			request: scoreRequest{Name: "tone", TraceID: str(scoreTraceID), DataType: store.ScoreCategorical, Value: number(1)},
 			wantErr: `needs a "string_value"`,
 		},
 		{
 			name:    "numeric without a value",
-			request: scoreRequest{Name: str("helpfulness"), TraceID: str(scoreTraceID), DataType: str(store.ScoreNumeric), StringValue: str("x")},
+			request: scoreRequest{Name: "helpfulness", TraceID: str(scoreTraceID), DataType: store.ScoreNumeric, StringValue: str("x")},
 			wantErr: `needs a "value"`,
 		},
 		{
 			name:    "an unknown data type",
-			request: scoreRequest{Name: str("helpfulness"), TraceID: str(scoreTraceID), DataType: str("vibes"), Value: number(1)},
+			request: scoreRequest{Name: "helpfulness", TraceID: str(scoreTraceID), DataType: "vibes", Value: number(1)},
 			wantErr: `"data_type" must be one of`,
 		},
 		{
 			name:    "no value at all",
-			request: scoreRequest{Name: str("helpfulness"), TraceID: str(scoreTraceID)},
+			request: scoreRequest{Name: "helpfulness", TraceID: str(scoreTraceID)},
 			wantErr: `needs a "value" or a "string_value"`,
 		},
 		{
@@ -94,32 +94,32 @@ func TestScoreValidationMatrix(t *testing.T) {
 		},
 		{
 			name:    "a name over 200 characters",
-			request: scoreRequest{Name: str(strings.Repeat("n", 201)), TraceID: str(scoreTraceID), Value: number(1)},
+			request: scoreRequest{Name: strings.Repeat("n", 201), TraceID: str(scoreTraceID), Value: number(1)},
 			wantErr: "at most 200 characters",
 		},
 		{
 			name:    "no target",
-			request: scoreRequest{Name: str("helpfulness"), Value: number(1)},
+			request: scoreRequest{Name: "helpfulness", Value: number(1)},
 			wantErr: `needs a "trace_id" or a "session_id"`,
 		},
 		{
 			name:    "an observation without its trace",
-			request: scoreRequest{Name: str("helpfulness"), SessionID: str("session-77"), ObservationID: str("0011223344556677"), Value: number(1)},
+			request: scoreRequest{Name: "helpfulness", SessionID: str("session-77"), ObservationID: str("0011223344556677"), Value: number(1)},
 			wantErr: `"observation_id" also needs`,
 		},
 		{
 			name:    "an empty target id",
-			request: scoreRequest{Name: str("helpfulness"), TraceID: str(""), SessionID: str("session-77"), Value: number(1)},
+			request: scoreRequest{Name: "helpfulness", TraceID: str(""), SessionID: str("session-77"), Value: number(1)},
 			wantErr: "must not be empty",
 		},
 		{
 			name:    "an id that is not 32 hex characters",
-			request: scoreRequest{ID: str("run-42"), Name: str("helpfulness"), TraceID: str(scoreTraceID), Value: number(1)},
+			request: scoreRequest{ID: str("run-42"), Name: "helpfulness", TraceID: str(scoreTraceID), Value: number(1)},
 			wantErr: "32 lower-case hex characters",
 		},
 		{
 			name:    "a timestamp that is not RFC 3339",
-			request: scoreRequest{Name: str("helpfulness"), TraceID: str(scoreTraceID), Value: number(1), Timestamp: str("yesterday")},
+			request: scoreRequest{Name: "helpfulness", TraceID: str(scoreTraceID), Value: number(1), Timestamp: str("yesterday")},
 			wantErr: "RFC 3339",
 		},
 	}

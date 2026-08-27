@@ -116,6 +116,12 @@ func (s *Server) handleTraces(w http.ResponseWriter, r *http.Request) {
 			Body:            body,
 		}
 	}
+	if batch.Empty() {
+		// Every span was skipped and raw storage is off: there is
+		// nothing to commit, and the export is still a success.
+		writeExportResponse(w, result)
+		return
+	}
 
 	if err := s.writer.Submit(r.Context(), batch); err != nil {
 		switch {

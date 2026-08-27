@@ -39,10 +39,11 @@ var ErrWriterClosed = errors.New("writer is closed")
 // WriteJob is one durable unit of work. An ingest batch (spec 002), a set of
 // scores and a prompt write (spec 003) are all jobs, which is what lets one
 // goroutine, one connection and one acknowledgement rule cover them all.
+//
+// Whether there is anything worth writing is settled before a job is
+// submitted — an export with no spans answers 200 without one, an empty score
+// array is a 400 — so the writer commits whatever it is handed.
 type WriteJob interface {
-	// Empty reports a job with nothing to write; the writer answers it
-	// immediately instead of opening a transaction for it.
-	Empty() bool
 	// apply issues the job's statements inside the writer's transaction.
 	// It is unexported so that SQL stays inside this package, and it must
 	// be idempotent: a window that fails is retried job by job (see
@@ -155,9 +156,6 @@ func (s *Store) NewWriter(opts WriterOptions) (*Writer, error) {
 // A job that reaches its transaction and is refused there comes back as a
 // *Rejection; the handler renders it rather than retrying it.
 func (w *Writer) Submit(ctx context.Context, job WriteJob) error {
-	if job.Empty() {
-		return nil
-	}
 	sub := &submission{job: job, done: make(chan error, 1)}
 
 	w.mu.RLock()

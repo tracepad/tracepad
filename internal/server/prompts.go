@@ -20,11 +20,15 @@ import (
 // longer on its own.
 const promptCacheControl = "max-age=60"
 
+// promptVersionRequest is the wire shape of a new version. Only `type` needs
+// a pointer: whether the client stated it decides what the write transaction
+// checks (#10). For the rest, an absent field and an empty one mean the same
+// thing and are stored the same way.
 type promptVersionRequest struct {
 	Type          *string         `json:"type"`
 	Prompt        json.RawMessage `json:"prompt"`
 	Config        json.RawMessage `json:"config"`
-	CommitMessage *string         `json:"commit_message"`
+	CommitMessage string          `json:"commit_message"`
 	Labels        []string        `json:"labels"`
 }
 
@@ -99,16 +103,32 @@ func (s *Server) handleCreatePromptVersion(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, promptResponse{
-		Name:          name,
+	// Rendered from the version the commit produced, through the one
+	// function that renders a prompt, so a created version and a fetched
+	// one cannot drift apart in shape.
+	writeJSON(w, http.StatusCreated, renderPrompt(&store.PromptVersion{
+		Name:          write.Name,
 		Version:       write.Version,
 		Type:          write.Type,
-		Prompt:        json.RawMessage(write.Prompt),
-		Config:        json.RawMessage(write.Config),
+		Prompt:        write.Prompt,
+		Config:        write.Config,
 		CommitMessage: write.CommitMessage,
-		Labels:        orEmpty(write.Labels),
-		CreatedAt:     formatTime(write.CreatedAt),
-	})
+		Labels:        write.Labels,
+		CreatedAt:     write.CreatedAt,
+	}))
+}
+
+func renderPrompt(prompt *store.PromptVersion) promptResponse {
+	return promptResponse{
+		Name:          prompt.Name,
+		Version:       prompt.Version,
+		Type:          prompt.Type,
+		Prompt:        json.RawMessage(prompt.Prompt),
+		Config:        json.RawMessage(prompt.Config),
+		CommitMessage: prompt.CommitMessage,
+		Labels:        orEmpty(prompt.Labels),
+		CreatedAt:     formatTime(prompt.CreatedAt),
+	}
 }
 
 // validate turns a version request into a write job. The body's own shape
@@ -136,27 +156,21 @@ func (in *promptVersionRequest) validate(projectID, name string) (*store.PromptV
 		}
 	}
 
-	body, err := compactJSON(in.Prompt)
-	if err != nil {
-		return nil, fmt.Errorf(`"prompt" is not valid JSON`)
-	}
 	write := &store.PromptVersionWrite{
 		ProjectID:     projectID,
 		Name:          name,
 		Type:          shape,
 		TypeStated:    in.Type != nil,
-		Prompt:        body,
-		CommitMessage: text(in.CommitMessage),
+		Prompt:        compactJSON(in.Prompt),
+		CommitMessage: in.CommitMessage,
 		CreatedAt:     time.Now().UnixNano(),
 	}
 	if jsonValue(in.Config) {
-		var probe map[string]any
-		if err := json.Unmarshal(in.Config, &probe); err != nil {
+		var object map[string]any
+		if err := json.Unmarshal(in.Config, &object); err != nil {
 			return nil, fmt.Errorf(`"config" must be a JSON object`)
 		}
-		if write.Config, err = compactJSON(in.Config); err != nil {
-			return nil, fmt.Errorf(`"config" is not valid JSON`)
-		}
+		write.Config = compactJSON(in.Config)
 	}
 	for _, label := range in.Labels {
 		if err := validLabel(label); err != nil {
@@ -232,7 +246,13 @@ func (s *Server) handleGetPrompt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var selector store.PromptSelector
+	// The selector and the message for when it resolves to nothing are
+	// decided together: they answer the same question, and deriving the
+	// second from the raw query a second time is how they drift apart.
+	var (
+		selector store.PromptSelector
+		missing  = fmt.Sprintf("prompt %q not found", name)
+	)
 	switch {
 	case rawVersion != "":
 		version, err := strconv.Atoi(rawVersion)
@@ -241,6 +261,7 @@ func (s *Server) handleGetPrompt(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		selector.Version = version
+		missing = fmt.Sprintf("prompt %q has no version %d", name, version)
 	case rawLabel != "" && rawLabel != store.LatestLabel:
 		// `latest` is not a stored label; it falls through to the
 		// unqualified path, which is the same query (#11).
@@ -249,6 +270,7 @@ func (s *Server) handleGetPrompt(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		selector.Label = rawLabel
+		missing = fmt.Sprintf("prompt %q has no label %q", name, rawLabel)
 	}
 
 	prompt, err := s.store.Prompt(project.ID, name, selector)
@@ -258,30 +280,11 @@ func (s *Server) handleGetPrompt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if prompt == nil {
-		writeError(w, http.StatusNotFound, promptNotFound(name, rawVersion, rawLabel))
+		writeError(w, http.StatusNotFound, missing)
 		return
 	}
 	w.Header().Set("Cache-Control", promptCacheControl)
-	writeJSON(w, http.StatusOK, promptResponse{
-		Name:          prompt.Name,
-		Version:       prompt.Version,
-		Type:          prompt.Type,
-		Prompt:        json.RawMessage(prompt.Prompt),
-		Config:        json.RawMessage(prompt.Config),
-		CommitMessage: prompt.CommitMessage,
-		Labels:        orEmpty(prompt.Labels),
-		CreatedAt:     formatTime(prompt.CreatedAt),
-	})
-}
-
-func promptNotFound(name, version, label string) string {
-	switch {
-	case version != "":
-		return fmt.Sprintf("prompt %q has no version %s", name, version)
-	case label != "" && label != store.LatestLabel:
-		return fmt.Sprintf("prompt %q has no label %q", name, label)
-	}
-	return fmt.Sprintf("prompt %q not found", name)
+	writeJSON(w, http.StatusOK, renderPrompt(prompt))
 }
 
 // handleListPromptVersions lists a name's versions newest first, without the

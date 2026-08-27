@@ -311,6 +311,74 @@ func TestPromptListPagination(t *testing.T) {
 	}
 }
 
+// Both listings read their labels in one query and group them in memory, so
+// what has to be pinned is that a version never borrows another version's
+// label and a name never borrows another name's. The summary's `type` and
+// `updated_at` come from the newest version's row for the same reason.
+func TestPromptLabelsAreGroupedByVersionAndName(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+
+	for range 3 {
+		expectStatus(t, h.send(t, "POST", "/api/v1/prompts/summarize/versions",
+			chatBody("You are terse.", nil)), http.StatusCreated)
+	}
+	expectStatus(t, h.send(t, "POST", "/api/v1/prompts/translate/versions",
+		map[string]any{"type": "text", "prompt": "Translate {{input}}."}), http.StatusCreated)
+
+	for _, pin := range []struct {
+		name    string
+		label   string
+		version int
+	}{
+		{"summarize", "production", 1},
+		{"summarize", "staging", 3},
+		{"summarize", "canary", 3},
+		{"translate", "production", 1},
+	} {
+		expectStatus(t, h.send(t, "PUT",
+			fmt.Sprintf("/api/v1/prompts/%s/labels/%s", pin.name, pin.label),
+			map[string]any{"version": pin.version}), http.StatusOK)
+	}
+
+	versions := decodeJSON[promptVersionListResponse](t, h.get(t, "/api/v1/prompts/summarize/versions"))
+	labelsByVersion := map[int]string{}
+	for _, version := range versions.Versions {
+		labelsByVersion[version.Version] = fmt.Sprint(version.Labels)
+	}
+	if labelsByVersion[3] != "[canary staging]" || labelsByVersion[2] != "[]" || labelsByVersion[1] != "[production]" {
+		t.Errorf("labels by version = %v", labelsByVersion)
+	}
+
+	third := decodeJSON[promptResponse](t, h.get(t, "/api/v1/prompts/summarize?version=3"))
+	if fmt.Sprint(third.Labels) != "[canary staging]" {
+		t.Errorf("labels of version 3 = %v", third.Labels)
+	}
+
+	prompts := decodeJSON[promptListResponse](t, h.get(t, "/api/v1/prompts")).Prompts
+	if len(prompts) != 2 {
+		t.Fatalf("prompts = %+v, want both names", prompts)
+	}
+	summarize, translate := prompts[0], prompts[1]
+	if fmt.Sprint(summarize.Labels) != "map[canary:3 production:1 staging:3]" {
+		t.Errorf("summarize labels = %v", summarize.Labels)
+	}
+	if fmt.Sprint(translate.Labels) != "map[production:1]" {
+		t.Errorf("translate labels = %v", translate.Labels)
+	}
+	if summarize.LatestVersion != 3 || summarize.Type != store.PromptChat {
+		t.Errorf("summarize summary = %+v", summarize)
+	}
+	if translate.LatestVersion != 1 || translate.Type != store.PromptText {
+		t.Errorf("translate summary = %+v", translate)
+	}
+	// updated_at describes the newest version, not whichever row the
+	// grouping happened to visit first.
+	if summarize.UpdatedAt != third.CreatedAt {
+		t.Errorf("updated_at = %q, want the newest version's created_at %q",
+			summarize.UpdatedAt, third.CreatedAt)
+	}
+}
+
 // The #9/#10 guarantee: parallel creates for one name are serialized by the
 // writer, so the versions they get are exactly 1..N — no gaps, no duplicates.
 func TestPromptConcurrentVersionsAreGapless(t *testing.T) {

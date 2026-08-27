@@ -85,9 +85,6 @@ type PromptVersionWrite struct {
 	Version int
 }
 
-// Empty is never true: a version write always has a body to store.
-func (p *PromptVersionWrite) Empty() bool { return false }
-
 func (p *PromptVersionWrite) apply(tx *sql.Tx) error {
 	var (
 		existingType string
@@ -149,9 +146,6 @@ type PromptLabelWrite struct {
 	// commit so the handler can report what it took away.
 	Removed int
 }
-
-// Empty is never true: a label write always changes a row.
-func (p *PromptLabelWrite) Empty() bool { return false }
 
 func (p *PromptLabelWrite) apply(tx *sql.Tx) error {
 	if p.Remove {
@@ -257,9 +251,11 @@ func (s *Store) Prompt(projectID, name string, selector PromptSelector) (*Prompt
 	if config.Valid {
 		prompt.Config = []byte(config.String)
 	}
-	if prompt.Labels, err = s.promptLabels(projectID, name, version); err != nil {
+	labels, err := s.promptLabelsByVersion(projectID, name)
+	if err != nil {
 		return nil, err
 	}
+	prompt.Labels = labels[version]
 	return &prompt, nil
 }
 
@@ -297,10 +293,14 @@ func (s *Store) PromptVersions(projectID, name string, limit, afterVersion int) 
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	// One query for the name's labels, not one per version on the page: a
+	// name has a handful of labels and a page has up to 500 versions.
+	labels, err := s.promptLabelsByVersion(projectID, name)
+	if err != nil {
+		return nil, err
+	}
 	for i := range out {
-		if out[i].Labels, err = s.promptLabels(projectID, name, out[i].Version); err != nil {
-			return nil, err
-		}
+		out[i].Labels = labels[out[i].Version]
 	}
 	return out, nil
 }
@@ -309,17 +309,19 @@ func (s *Store) PromptVersions(projectID, name string, limit, afterVersion int) 
 // is what makes the cursor a keyset: a version written mid-walk cannot move a
 // name to a page the client already read.
 func (s *Store) Prompts(projectID string, limit int, afterName string) ([]PromptSummary, error) {
-	query := `SELECT p.name, p.type, p.version, p.created_at
-	          FROM prompts p
-	          WHERE p.project_id = ?
-	            AND p.version = (SELECT MAX(v.version) FROM prompts v
-	                             WHERE v.project_id = p.project_id AND v.name = p.name)`
+	// GROUP BY over the primary key's own order, rather than a correlated
+	// MAX subquery evaluated once per candidate row. `type` and
+	// `created_at` are bare columns beside MAX(version), which SQLite
+	// defines as coming from the row that produced the maximum — exactly
+	// the newest version's row, which is what a summary describes.
+	query := `SELECT name, type, MAX(version), created_at FROM prompts
+	          WHERE project_id = ?`
 	args := []any{projectID}
 	if afterName != "" {
-		query += ` AND p.name > ?`
+		query += ` AND name > ?`
 		args = append(args, afterName)
 	}
-	query += ` ORDER BY p.name LIMIT ?`
+	query += ` GROUP BY name ORDER BY name LIMIT ?`
 	args = append(args, limit)
 
 	rows, err := s.db.Query(query, args...)
@@ -339,55 +341,76 @@ func (s *Store) Prompts(projectID string, limit int, afterName string) ([]Prompt
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	if len(out) == 0 {
+		return out, nil
+	}
+	// The page is a contiguous run of names, so its labels come back in one
+	// query bounded by its first and last name rather than one query per
+	// name.
+	labels, err := s.promptLabelsByName(projectID, out[0].Name, out[len(out)-1].Name)
+	if err != nil {
+		return nil, err
+	}
 	for i := range out {
-		if out[i].Labels, err = s.promptLabelMap(projectID, out[i].Name); err != nil {
-			return nil, err
+		if named := labels[out[i].Name]; named != nil {
+			out[i].Labels = named
 		}
 	}
 	return out, nil
 }
 
-// promptLabels returns the labels pointing at one version, alphabetically.
-func (s *Store) promptLabels(projectID, name string, version int) ([]string, error) {
+// promptLabelsByVersion returns one name's labels grouped by the version each
+// points at, alphabetically within a version. A name carries a handful of
+// labels — `production`, `staging` — so reading them all at once is cheaper
+// than asking per version.
+func (s *Store) promptLabelsByVersion(projectID, name string) (map[int][]string, error) {
 	rows, err := s.db.Query(
-		`SELECT label FROM prompt_labels WHERE project_id = ? AND name = ? AND version = ?
-		 ORDER BY label`, projectID, name, version)
+		`SELECT version, label FROM prompt_labels WHERE project_id = ? AND name = ?
+		 ORDER BY label`, projectID, name)
 	if err != nil {
 		return nil, fmt.Errorf("read labels of prompt %s: %w", name, err)
 	}
 	defer rows.Close()
 
-	var out []string
+	out := map[int][]string{}
 	for rows.Next() {
-		var label string
-		if err := rows.Scan(&label); err != nil {
+		var (
+			version int
+			label   string
+		)
+		if err := rows.Scan(&version, &label); err != nil {
 			return nil, err
 		}
-		out = append(out, label)
+		out[version] = append(out[version], label)
 	}
 	return out, rows.Err()
 }
 
-// promptLabelMap returns every label of a name with the version it points at.
-func (s *Store) promptLabelMap(projectID, name string) (map[string]int, error) {
+// promptLabelsByName returns the labels of every name in a range, each with
+// the version it points at.
+func (s *Store) promptLabelsByName(projectID, firstName, lastName string) (map[string]map[string]int, error) {
 	rows, err := s.db.Query(
-		`SELECT label, version FROM prompt_labels WHERE project_id = ? AND name = ?`,
-		projectID, name)
+		`SELECT name, label, version FROM prompt_labels
+		 WHERE project_id = ? AND name >= ? AND name <= ?`, projectID, firstName, lastName)
 	if err != nil {
-		return nil, fmt.Errorf("read labels of prompt %s: %w", name, err)
+		return nil, fmt.Errorf("read labels of prompts %s..%s: %w", firstName, lastName, err)
 	}
 	defer rows.Close()
 
-	out := map[string]int{}
+	out := map[string]map[string]int{}
 	for rows.Next() {
 		var (
+			name    string
 			label   string
 			version int
 		)
-		if err := rows.Scan(&label, &version); err != nil {
+		if err := rows.Scan(&name, &label, &version); err != nil {
 			return nil, err
 		}
-		out[label] = version
+		if out[name] == nil {
+			out[name] = map[string]int{}
+		}
+		out[name][label] = version
 	}
 	return out, rows.Err()
 }
