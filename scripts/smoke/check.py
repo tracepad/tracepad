@@ -1,8 +1,12 @@
 """Assert what the two real SDKs left in the database.
 
-Direct SQL, on purpose: the read API is spec 004, and until it exists the
-rows are the contract (spec 002, Testing #3). Uses only the standard library
-so it runs with any Python, including the one that never saw the SDKs.
+Direct SQL, on purpose, even now that the read API exists (spec 004): this is
+the drift detector for SDK conventions, and what it is checking is what a
+real export *stored* — the mapping, not the rendering. Reading it back through
+the API would test both at once and blame the wrong one when either moved.
+
+Uses only the standard library so it runs with any Python, including the one
+that never saw the SDKs.
 """
 
 import json
