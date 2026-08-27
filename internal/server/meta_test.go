@@ -94,6 +94,77 @@ func TestSelfDescriptionIsServedWithoutAKey(t *testing.T) {
 	}
 }
 
+// TestDocumentedQueryParametersAreAccepted closes the other half of the parity
+// gap. The router test proves the paths agree; this proves the parameters do.
+//
+// The API refuses any query parameter it does not know (spec 003 #21), so a
+// parameter that only exists in the document is not a documentation nit — it
+// is a 400 for whoever believed the document. Every documented query parameter
+// is sent, and the only answer refused here is "unknown query parameter": a
+// complaint about the *value* means the server knew the name, which is what is
+// being checked.
+func TestDocumentedQueryParametersAreAccepted(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	seedCorpus(t, h)
+
+	var document struct {
+		Paths map[string]map[string]struct {
+			Parameters []struct {
+				Name string `json:"name"`
+				In   string `json:"in"`
+				Ref  string `json:"$ref"`
+			} `json:"parameters"`
+		} `json:"paths"`
+		Components struct {
+			Parameters map[string]struct {
+				Name string `json:"name"`
+				In   string `json:"in"`
+			} `json:"parameters"`
+		} `json:"components"`
+	}
+	if err := json.Unmarshal(openAPIDocument, &document); err != nil {
+		t.Fatal(err)
+	}
+
+	// Path templates filled with values of the right shape, so the request
+	// reaches the query parsing rather than stopping at the path.
+	fill := strings.NewReplacer(
+		"/traces/{id}", "/traces/"+traceHex(1),
+		"/observations/{id}", "/observations/"+spanHex(1),
+		"/sessions/{id}", "/sessions/s1",
+		"/scores/{id}", "/scores/"+strings.Repeat("a", 32),
+		"/prompts/{name}", "/prompts/support",
+		"{label}", "production",
+	)
+
+	for path, operations := range document.Paths {
+		operation, documented := operations["get"]
+		if !documented {
+			continue
+		}
+		for _, parameter := range operation.Parameters {
+			name, in := parameter.Name, parameter.In
+			if reference, found := strings.CutPrefix(parameter.Ref, "#/components/parameters/"); found {
+				shared := document.Components.Parameters[reference]
+				name, in = shared.Name, shared.In
+			}
+			if in != "query" || name == "" {
+				continue
+			}
+			t.Run(path+"?"+name, func(t *testing.T) {
+				rec := h.get(t, fill.Replace(path)+"?"+name+"=1")
+				if rec.Code != http.StatusBadRequest {
+					return
+				}
+				message := decodeJSON[map[string]string](t, rec)["error"]
+				if strings.Contains(message, "unknown query parameter") {
+					t.Fatalf("%s documents %q but refuses it: %s", path, name, message)
+				}
+			})
+		}
+	}
+}
+
 func TestAPIIndexListsEveryRoute(t *testing.T) {
 	h := newHarness(t, nil, store.WriterOptions{})
 
