@@ -647,6 +647,89 @@ func TestMCPCanBeTurnedOff(t *testing.T) {
 	}
 }
 
+// TestLoopbackDoesNotBypassAuth: the tools call the read API in process, and
+// in-process must not mean unauthenticated. A call without the project key
+// gets the API's own 401, forwarded to the model as a tool error (#16, #20).
+func TestLoopbackDoesNotBypassAuth(t *testing.T) {
+	h := newHarness(t)
+
+	body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_traces",` +
+		`"arguments":{},"_meta":{"` + mcp.MetaKeyProtocolVersion + `":"` + mcpserver.ProtocolVersion +
+		`","` + mcp.MetaKeyClientCapabilities + `":{}}}}`
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost,
+		h.url+mcpserver.Path, strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// No Authorization header at all.
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Accept", "application/json, text/event-stream")
+	request.Header.Set("Mcp-Protocol-Version", mcpserver.ProtocolVersion)
+	request.Header.Set("Mcp-Method", "tools/call")
+	request.Header.Set("Mcp-Name", "list_traces")
+
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	answer, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unwrapped := frameBody(answer)
+	if bytes.Contains(unwrapped, []byte(`"traces"`)) {
+		t.Fatalf("an unauthenticated tool call read data: %s", unwrapped)
+	}
+	if !bytes.Contains(unwrapped, []byte("unauthorized")) {
+		t.Fatalf("want the API's own refusal, got: %s", unwrapped)
+	}
+}
+
+// TestOlderProtocolStillWorks is the edge case for a client that has not
+// caught up: it speaks 2025-11-25 (no `_meta` protocol version, no routing
+// headers) and the SDK negotiates it transparently. Tool behaviour is
+// identical, which is the whole reason the compatibility window is the SDK's
+// problem rather than ours (#14).
+func TestOlderProtocolStillWorks(t *testing.T) {
+	h := newHarness(t)
+
+	legacy := func(t *testing.T, body string) []byte {
+		t.Helper()
+		request, err := http.NewRequestWithContext(t.Context(), http.MethodPost,
+			h.url+mcpserver.Path, strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Authorization", "Bearer "+testKey)
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Accept", "application/json, text/event-stream")
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		answer, err := io.ReadAll(response.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("status %d: %s", response.StatusCode, answer)
+		}
+		return frameBody(answer)
+	}
+
+	initialized := legacy(t, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":`+
+		`{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"old","version":"1"}}}`)
+	if !bytes.Contains(initialized, []byte("tracepad")) {
+		t.Fatalf("the old handshake was refused: %s", initialized)
+	}
+	tools := legacy(t, `{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`)
+	if !bytes.Contains(tools, []byte("get_last_trace")) {
+		t.Fatalf("an old client sees no tools: %s", tools)
+	}
+}
+
 // TestIncomingTraceContextIsLogged is #22: trace context on `_meta` reaches
 // the log, and nothing more happens with it. A tracing product should not be
 // the one tool that drops trace context on the floor.

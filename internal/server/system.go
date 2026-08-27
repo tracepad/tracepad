@@ -121,11 +121,12 @@ func (c *counters) snapshot() object {
 
 // handleSystem reports what this process knows about itself.
 func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
-	project, ok := s.apiProject(w, r)
-	if !ok {
+	// Authenticated like everything else, though the answer is about the
+	// process rather than about the project's data: an unauthenticated
+	// reader would learn the shape of someone else's traffic.
+	if _, ok := s.apiProject(w, r); !ok {
 		return
 	}
-	_ = project
 	if _, err := queryParams(r); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return

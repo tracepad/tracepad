@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 )
@@ -82,7 +83,7 @@ func (s *Store) Trace(projectID, id string) (*TraceRow, error) {
 	row, err := scanTrace(s.db.QueryRow(
 		`SELECT `+traceColumns+`, metadata_id FROM traces WHERE project_id = ? AND id = ?`,
 		projectID, id), &metadataID)
-	if err == errNoRow {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
@@ -101,10 +102,9 @@ func (s *Store) Trace(projectID, id string) (*TraceRow, error) {
 // scan serves both the single read and the listing.
 type scanner interface{ Scan(dest ...any) error }
 
-// errNoRow marks the absence scanTrace saw, so callers can tell "no such
-// trace" from a real read failure.
-var errNoRow = sql.ErrNoRows
-
+// scanTrace reads one row, optionally with extra columns the caller selected
+// beyond the shared list-row shape. sql.ErrNoRows passes through unwrapped so
+// a caller can tell "no such trace" from a read that failed.
 func scanTrace(rows scanner, extra ...any) (*TraceRow, error) {
 	var (
 		row       TraceRow
@@ -119,7 +119,7 @@ func scanTrace(rows scanner, extra ...any) (*TraceRow, error) {
 	targets := []any{&row.ProjectID, &row.ID, &name, &userID, &sessionID, &row.Environment,
 		&tags, &timestamp, &totalCost, &latency, &row.ErrorCount, &row.ObservationCount}
 	if err := rows.Scan(append(targets, extra...)...); err != nil {
-		if err == errNoRow {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil, err
 		}
 		return nil, fmt.Errorf("scan trace: %w", err)

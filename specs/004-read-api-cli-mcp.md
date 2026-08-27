@@ -1,6 +1,6 @@
 # Spec 004 — Read API, CLI & MCP
 
-**Status:** 🔄 IN PROGRESS
+**Status:** ✅ SHIPPED
 **Sprint:** September 2026
 
 > The product thesis made concrete: the primary consumer of traces is an
