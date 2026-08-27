@@ -646,7 +646,8 @@
             "type": "object",
             "properties": {
               "metadata": {"type": "object"},
-              "observations": {"type": "array", "items": {"$ref": "#/components/schemas/Observation"}}
+              "observations": {"type": "array", "items": {"$ref": "#/components/schemas/Observation"}},
+              "expansion": {"$ref": "#/components/schemas/Expansion"}
             },
             "required": ["observations"]
           }
@@ -674,6 +675,17 @@
           "children": {"type": "array", "items": {"$ref": "#/components/schemas/Observation"}}
         },
         "required": ["id", "type", "level"]
+      },
+      "Expansion": {
+        "type": "object",
+        "description": "Present only when `?expand=io` was refused: a trace with more payloads than the budget can carry markers for gets none of them and this instead. Nothing is unreachable — the tree lists every observation id — and `budget_needed` is what to retry `?budget=` with.",
+        "properties": {
+          "expanded": {"const": false},
+          "payloads": {"type": "integer", "description": "How many payloads the trace holds."},
+          "budget_needed": {"type": "integer", "description": "The budget that would carry a marker for each of them."},
+          "reason": {"type": "string"}
+        },
+        "required": ["expanded", "payloads", "budget_needed", "reason"]
       },
       "Truncation": {
         "type": "object",

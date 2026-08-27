@@ -409,7 +409,16 @@ func traceDetailSchema() *jsonschema.Schema {
 		"observation_count": integer("How many observations it has."),
 		"metadata":          anything("The trace's own metadata."),
 		"observations":      list(&jsonschema.Schema{Ref: "#/$defs/observation"}, "The tree, roots ordered by start time."),
+		"expansion": object(map[string]*jsonschema.Schema{
+			"expanded":      &jsonschema.Schema{Type: "boolean", Description: "Always false; the key is absent when the expansion happened."},
+			"payloads":      integer("How many payloads the trace holds."),
+			"budget_needed": integer("The budget that would carry a marker for each of them."),
+			"reason":        text("Why nothing was expanded."),
+		}, "expanded", "payloads", "budget_needed", "reason"),
 	}, "id", "environment", "error_count", "observation_count", "observations")
+	schema.Properties["expansion"].Description = "Present only when expand=io was refused because the budget " +
+		"could not carry a marker for every payload. Nothing is unreachable — every observation id is in the " +
+		"tree, so get_observation_io still works — and budget_needed is what to retry `budget` with."
 	schema.Defs = map[string]*jsonschema.Schema{"observation": node}
 	return schema
 }

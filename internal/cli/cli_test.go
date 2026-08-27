@@ -228,6 +228,32 @@ func TestTracesShowTree(t *testing.T) {
 	}
 }
 
+// TestRenderSaysWhenPayloadsWereNotExpanded: when the server refuses an
+// expansion because the budget could not carry a marker for every payload,
+// the human output has to say so, or a reader of `--full` is left wondering
+// where the payloads went (Decision 31).
+//
+// A renderer test rather than an end-to-end one on purpose: `--full` asks for
+// the largest budget the API allows, so provoking the refusal through the
+// command would need a trace of tens of thousands of payloads. What is under
+// test here is the rendering, and the server side has its own test.
+func TestRenderSaysWhenPayloadsWereNotExpanded(t *testing.T) {
+	var out bytes.Buffer
+	trace := traceDetail{traceRow: traceRow{ID: traceHex(1), Environment: "production"}}
+	trace.Expansion = &struct {
+		Payloads     int    `json:"payloads"`
+		BudgetNeeded int    `json:"budget_needed"`
+		Reason       string `json:"reason"`
+	}{Payloads: 600, BudgetNeeded: 178000, Reason: "a budget of 51200 bytes cannot carry 600 markers"}
+
+	renderTraceDetail(&out, trace)
+	for _, fragment := range []string{"600 payloads were not expanded", "cannot carry 600 markers"} {
+		if !strings.Contains(out.String(), fragment) {
+			t.Errorf("output is missing %q:\n%s", fragment, out.String())
+		}
+	}
+}
+
 func TestTracesLast(t *testing.T) {
 	h := newHarness(t)
 	seedCorpus(t, h)

@@ -73,6 +73,13 @@ type traceDetail struct {
 	traceRow
 	Metadata     map[string]any    `json:"metadata"`
 	Observations []observationNode `json:"observations"`
+	// Expansion is present only when `--full` was refused because the
+	// budget could not carry a marker for every payload.
+	Expansion *struct {
+		Payloads     int    `json:"payloads"`
+		BudgetNeeded int    `json:"budget_needed"`
+		Reason       string `json:"reason"`
+	} `json:"expansion"`
 }
 
 func renderTraceTable(out io.Writer, rows []traceRow) {
@@ -115,6 +122,12 @@ func renderTraceDetail(out io.Writer, trace traceDetail) {
 	fmt.Fprintf(out, "  errors      %d of %d observations\n", trace.ErrorCount, trace.ObservationCount)
 	if len(trace.Metadata) > 0 {
 		fmt.Fprintf(out, "  metadata    %s\n", compact(trace.Metadata))
+	}
+	if trace.Expansion != nil {
+		// Saying nothing here would leave a reader of `--full` wondering
+		// where the payloads went.
+		fmt.Fprintf(out, "\n  %d payloads were not expanded: %s\n",
+			trace.Expansion.Payloads, trace.Expansion.Reason)
 	}
 	fmt.Fprintln(out)
 	for _, node := range trace.Observations {
