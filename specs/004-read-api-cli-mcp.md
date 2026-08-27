@@ -1,0 +1,201 @@
+# Spec 004 — Read API, CLI & MCP
+
+**Status:** 🔄 IN PROGRESS
+**Sprint:** September 2026
+
+> The product thesis made concrete: the primary consumer of traces is an
+> agent, and the read API is the product's contract — a feature does not
+> exist until it is readable over HTTP (design §3). This spec ships that API
+> with agent-first affordances (response budgets, truncation markers, task
+> shortcuts, self-description), plus the two zero-logic clients that ride on
+> it: a CLI in the same binary and an MCP server speaking the 2026-07-28
+> stateless protocol. After this spec ships, "show me the last failed trace
+> with its stack trace" is one command in a terminal, one tool call in an
+> agent, and one HTTP request in a script — all returning the same bytes.
+
+---
+
+## Overview
+
+Deliverables:
+
+- Read API: `GET /api/v1/traces` (filters, cursor, `?fields=`),
+  `GET /api/v1/traces/{id}` (observation tree, `?expand=io`),
+  `GET /api/v1/traces/last` (task shortcut),
+  `GET /api/v1/observations/{id}/io`, `GET /api/v1/sessions/{id}`,
+  `GET /api/v1/stats`, `GET /api/v1/prompts/{name}/diff`,
+  `GET /api/v1/system`, `GET /api/v1` (self-description),
+  `GET /api/v1/openapi.json`.
+- CLI (same binary, pure API client): `traces ls|show|last`, `tail`,
+  `sessions show`, `scores ls`, `prompts ls|get|push|diff`, `stats`,
+  `system`. Global `--json`; human-readable output on a TTY.
+- MCP server: streamable HTTP at `/mcp` on the running server (stateless,
+  protocol 2026-07-28, official `modelcontextprotocol/go-sdk` v1.7.0+) and
+  `tracepad mcp` stdio mode for local clients; 7 tools, each a thin wrapper
+  over one read-API call.
+- Schema 0004: read-path indexes only (no new tables).
+- Docs: `docs/api.md`, `docs/cli.md`, `docs/mcp.md` (same PR).
+
+## Decisions log
+
+| # | Decision | Why |
+|---|---|---|
+| 1 | One spec ships the API and both clients together; clients contain zero logic (call → HTTP request → formatting) | The design rule "a feature doesn't exist until it's in the read API" is only enforceable if the clients physically cannot do more than the API does. Landing all three together proves the API is sufficient — any client-side workaround is an API gap found before merge, not after. |
+| 2 | Every response respects a byte budget: default 50 KiB, `?budget=` override (min 4 KiB, max 5 MiB). Oversized payloads are cut at a UTF-8 boundary and marked `{"truncated": true, "size": N, "trace_id": …, "observation_id": …, "full": "<url>"}` | The consumer's context window is a scarce resource the API must respect (design §3.2). An explicit marker lets the agent decide whether to expand — silent truncation or unbounded responses both waste the consumer's budget, in opposite ways. The marker carries both the ready-made URL (HTTP consumers) and the raw id pair (MCP consumers, Decision 17) so every consumer type has a working follow-up. |
+| 3 | `GET /api/v1/observations/{id}/io` is the one budget-exempt endpoint and returns the payloads whole | It exists to be the `full` target of every truncation marker; a budget here would recurse. Payload size is already bounded at ingest by `TRACEPAD_MAX_BODY_BYTES`. |
+| 4 | Trace list pagination is keyset from day one: cursor over `(timestamp, id)` with a row-value predicate; migration 0004 rebuilds `idx_traces_timestamp` as `(project_id, timestamp DESC, id DESC)` | Spec 003 #25 caught the scores cursor scanning from the newest row on every page because the index lacked the tie-break; the traces list is the hottest read and gets the fix preemptively, verified by EXPLAIN QUERY PLAN in a test. |
+| 5 | `GET /api/v1/traces/{id}` returns the observation tree **nested** (children inside parents, siblings by `start_time`), with `input`/`output` omitted unless `?expand=io` | The tree is the mental model of a trace; flat lists push assembly onto every consumer. Spec 002 #6 already promises assembly at read time. Without `expand=io` a trace of hundreds of observations still fits the budget. |
+| 6 | `?expand=io` inlines payload previews: each observation gets an equal share of the remaining budget, cut per Decision 2 with per-observation markers | A debugging agent usually needs the *shape* of every IO and the *full text* of one or two; previews-plus-markers serves that in one round trip, and the markers name the follow-up (§3.2's list → filter → get → N×get collapse). |
+| 7 | `GET /api/v1/traces/last` accepts every list filter and returns the same shape as `GET /traces/{id}` (incl. `?expand=io`) | "The last failed trace, whole" is the canonical agent task (design §3.2, spec 002 #26). One round trip instead of list-then-get; implementation is `LIMIT 1` on the list query feeding the tree renderer — no new logic. |
+| 8 | `GET /api/v1/stats` computes on the fly (no rollup table): `group_by=hour\|day\|model\|environment`, returning count, error_count, total_cost, latency p50/p95 | Design §5.4: at MVP scale (30 days × tens of thousands of traces) SQLite aggregates in tens of ms; a rollup table is premature state to keep consistent. Percentiles are computed exactly in Go over the grouped scan — approximation is not worth its explanation. |
+| 9 | `GET /api/v1` returns the endpoint map with one-line descriptions; `GET /api/v1/openapi.json` serves a hand-authored, embedded OpenAPI 3.1 document; a test walks the router and fails on any route missing from the document (and vice versa) | Self-description is how an agent orients without external docs (design §3.2). Hand-authored beats generated because the document *is* the contract (reviewable in diffs); the parity test is the `docs-gen && git diff --exit-code` idea (PROCESS §3) turned inward. |
+| 10 | `GET /api/v1/system` reports version, uptime, DB file size, per-table row counts, writer queue depth, and in-process counters since start: batches/spans accepted and skipped per dialect, plus every distinct `x-langfuse-ingestion-version` seen | Self-diagnosability (design §3.4) and the counter half of spec 002 #17 finally get a surface. Counters are in-memory and say so (`"since": <start time>`): honest process-lifetime numbers now beat a metrics subsystem later. |
+| 11 | The CLI is an HTTP client of the read API — it never opens the database | Same reason as #1, plus operational truth: the server holds the SQLite writer; a second process reading the live DB file is exactly the class of corruption-adjacent cleverness this project refuses. Connection via `TRACEPAD_URL` + `TRACEPAD_API_KEY` (flags override). |
+| 12 | CLI output: human-readable tables when stdout is a TTY, JSON otherwise; `--json` forces JSON. Exit codes: 0 ok, 1 request/server error, 2 usage error | An agent piping `tracepad traces ls` gets machine JSON with zero flags — the TTY check makes agent-first the default rather than an option. The codes let scripts distinguish "no such trace" from "you typoed a flag". |
+| 13 | `tracepad tail` polls the list API (default every 2 s, `--interval`), printing traces newer than the last seen `(timestamp, id)` | A push channel (SSE/WS) is a new server surface for one command; polling through the public API needs nothing and inherits auth, filters, and budgets. The cursor pair makes polling exact, not time-window fuzzy. |
+| 14 | MCP speaks protocol **2026-07-28** via the official Go SDK ≥ v1.7.0: streamable HTTP at `/mcp` on the main listener with `Stateless = true`; older clients fall back to `2025-11-25` stateful per SDK negotiation | The month-old 2026-07-28 revision made the protocol stateless — no handshake, no `Mcp-Session-Id`, version and capabilities ride in `_meta` per request. Our tools are stateless read wrappers, so the new core fits exactly (any LB works, zero session bookkeeping); the SDK carries the compatibility window so we don't. |
+| 15 | `tracepad mcp` runs the same MCP server over stdio for clients that can't speak remote HTTP; it connects to a running server via `TRACEPAD_URL`/`TRACEPAD_API_KEY` | Design §3.3 promised the stdio path. It is the same tool registry with a different transport — no second implementation. |
+| 16 | MCP tool handlers call the HTTP read API (in-process loopback when embedded at `/mcp`), never the store | One source of truth for budgets, truncation, auth, and JSON shape. A tool result and a curl of the corresponding endpoint are byte-identical `structuredContent` — testable, and the #1 invariant holds by construction. |
+| 17 | Eight tools: `list_traces`, `get_trace`, `get_last_trace`, `get_observation_io`, `get_session`, `get_prompt`, `list_scores`, `get_stats`. No `search` tool | Each maps 1:1 onto an endpoint. `get_observation_io` must exist because truncation markers point at an HTTP URL a pure-MCP consumer cannot fetch — the expansion affordance of Decision 2 has to be reachable as a tool or the markers are dead ends. The design sketch listed `search`, but there is no search endpoint yet — a tool faking it over list filters would misrepresent capability to the model; it arrives with FTS. Descriptions are written as *when-to-use triggers* ("the user asks why the last run failed…"), not endpoint restatements. |
+| 18 | Tools declare `outputSchema` (JSON Schema 2020-12), return `structuredContent`, and carry annotations: `title` and `readOnlyHint: true` on every tool (the whole surface is reads); `tools/list` returns a deterministic order with `ttlMs: 3600000, cacheScope: "private"` | Schemas let clients validate and models plan; annotations drive host-side auto-permissions (a read-only tool should not prompt like a write); deterministic ordering plus TTL — both 2026-07-28 affordances — make the tool list prompt-cache-friendly; `private` is honest for an authenticated, per-project surface. Tight input schemas (enums for `group_by`/`status`, patterns for hex ids, bounded `limit`) are part of the contract, not decoration. |
+| 19 | Deprecated-in-2026-07-28 features are not adopted: no roots, sampling, or logging capabilities, no tasks extension, no elicitation/MRTR | Roots/sampling/logging are formally deprecated (12-month removal window) — adopting them now is building on a condemned floor. Tasks exist for long-running work; every tool here answers in milliseconds. Server logs go to stderr/log file as they already do. |
+| 20 | `/mcp` auth is the same `Bearer tp-sk-…`/Basic as the rest of the server; no OAuth | Self-hosted with pre-shared project keys — the OAuth authorization framework in the MCP spec targets multi-tenant public servers. MCP clients (Claude Code included) pass static headers to HTTP servers. Revisit only if a hosted offering ever exists. |
+| 21 | `GET /api/v1/prompts/{name}/diff?from=N&to=M` returns a unified text diff of the pretty-printed `prompt` and `config` between two versions | Design §6.3 names version diff as part of the read surface, and "what changed in the prompt between yesterday's and today's run" is an agent question. Unified text over structural JSON-diff: every consumer already reads patches, and it needs no diff vocabulary of our own. |
+| 22 | Incoming OTel trace context on `_meta` (`traceparent`) is recorded in the request log when present; nothing more | The 2026-07-28 spec documents the convention, and a tracing product should at least not drop trace context on the floor. Full self-instrumentation is deliberately out of scope. |
+
+## API contract
+
+Auth, error shape, strict query params: per specs 001–003 (unknown parameter
+⇒ 400, spec 003 #21). All list endpoints: `limit` (default 50, max 500) +
+opaque `cursor` (spec 003 #18).
+
+### Traces
+
+`GET /api/v1/traces` — filters: `from`/`to` (RFC 3339, half-open, on
+`timestamp`), `environment`, `user_id`, `session_id`, `name`, `tag`
+(repeatable, AND), `status` (`error` = error_count > 0, `ok` = 0),
+`min_cost`. `?fields=` selects top-level fields of each row. Newest first.
+Response: `{"traces": […], "next_cursor": …}` — rows carry the aggregate
+columns, never payloads.
+
+`GET /api/v1/traces/{id}` — trace fields + `"observations"` as a nested tree
+(Decision 5); each observation carries its row fields; `?expand=io` per
+Decision 6. `GET /api/v1/traces/last` — Decision 7; 404 when nothing
+matches.
+
+`GET /api/v1/observations/{id}/io?trace_id=…` — full `input`, `output`,
+`metadata` (Decision 3). `trace_id` is optional; without it, if the 16-hex
+span id appears in more than one trace of the project, 409 listing candidate
+trace ids (truncation markers always embed `trace_id`, so agent flows never
+hit the 409).
+
+### Sessions, stats, prompts diff
+
+`GET /api/v1/sessions/{id}` — `{"id", "trace_count", "total_cost",
+"error_count", "first_seen", "last_seen", "traces": [list rows]}`, traces
+paginated with the same cursor as the trace list.
+
+`GET /api/v1/stats` — filters `from`/`to`/`environment`; `group_by` per
+Decision 8. Buckets: `{"key", "count", "error_count", "total_cost",
+"latency_ms": {"p50", "p95"}}`. Cost is summed only over `provided_cost`
+rows; absent cost stays absent (spec 002 #14), never zero.
+
+`GET /api/v1/prompts/{name}/diff?from=N&to=M` — Decision 21:
+`{"name", "from", "to", "diff": "<unified>"}`; 404 on unknown versions.
+
+### Meta
+
+`GET /api/v1` — `{"endpoints": [{"method", "path", "description"}, …]}`.
+`GET /api/v1/openapi.json` — Decision 9. `GET /api/v1/system` — Decision 10.
+
+## CLI contract
+
+```
+tracepad traces ls   [--env …] [--error] [--since 1h] [--user …] [--session …] [--limit N]
+tracepad traces show <id> [--full]         # --full = ?expand=io with a large budget
+tracepad traces last [--error] [--full]
+tracepad tail        [--env …] [--error] [--interval 2s]
+tracepad sessions show <id>
+tracepad scores ls   [--trace …] [--name …] [--since …]
+tracepad prompts ls | get <name> [--label …|--version N] | push <name> [--file …] [--label …] | diff <name> --from N --to M
+tracepad stats       [--group-by day] [--since …]
+tracepad system
+```
+
+Connection: `TRACEPAD_URL` (default `http://localhost:4318`),
+`TRACEPAD_API_KEY`; `--url`/`--key` override. Output per Decision 12.
+`--since` accepts Go durations (`1h`, `30m`) and RFC 3339.
+
+## MCP contract
+
+Transport and protocol per Decisions 14–15; tools per Decisions 16–18;
+`TRACEPAD_MCP=off` disables `/mcp` on the server. Tool inputs mirror their
+endpoint's query parameters (same names, same semantics); outputs are the
+endpoint's JSON as `structuredContent` plus a short text summary in
+`content`. Truncation markers pass through untouched, and each marker's
+`observation_id`/`trace_id` pair is exactly what `get_observation_io` takes —
+the tool-side expansion path (Decision 17).
+
+## Data contract (schema 0004)
+
+No new tables. Index changes only:
+
+```sql
+DROP INDEX idx_traces_timestamp;
+CREATE INDEX idx_traces_timestamp ON traces(project_id, timestamp DESC, id DESC);
+CREATE INDEX idx_observations_span ON observations(project_id, id);
+```
+
+## Testing
+
+1. **Handler tests with golden responses** — every endpoint, including
+   budget/truncation behavior (adversarial multi-MB payloads; response size
+   asserted ≤ budget), cursor walks at `limit=1`, `?fields=`, 409 on
+   ambiguous observation id, EXPLAIN QUERY PLAN asserting the keyset seek
+   (Decision 4, method of spec 003 #25).
+2. **e2e** — seed through real OTLP ingest (spec 002 fixtures), read back
+   through every endpoint; OpenAPI↔router parity test (Decision 9).
+3. **CLI** — golden tests for both output modes (TTY simulated), exit codes,
+   `tail` against a server ingesting concurrently.
+4. **MCP** — go-sdk client in-process over both transports: every tool
+   called, `structuredContent` asserted byte-equal to the corresponding API
+   response (Decision 16); stateless HTTP verified (no session header, fresh
+   connection per call); tools/list asserted deterministic with cache
+   fields.
+5. **Race/stress** — existing suites stay green; `tail` and list reads race
+   the ingest writer under `-race`.
+
+## Edge cases
+
+- **Empty project**: lists return empty arrays, `traces/last` 404s with a
+  message naming the filters; stats return zero buckets, never fabricated
+  rows.
+- **Budget smaller than one skeleton response**: structure is never
+  truncated, only payload previews — the floor (4 KiB) guarantees the
+  skeleton fits or the request 400s honestly.
+- **Trace with observations still arriving**: reads see the committed state;
+  the tree renders whatever parent/child rows exist (orphans render at the
+  root with their `parent_observation_id` intact).
+- **`?fields=` naming an unknown field**: 400 (spec 003 #21 lineage).
+- **MCP client on 2025-11-25**: SDK negotiates the stateful session
+  transparently; tool behavior identical.
+- **CLI against an older/newer server**: version skew reported by comparing
+  CLI version with `GET /api/v1/system`; mismatch is a stderr warning, not
+  an error.
+
+## Config additions
+
+| Env | Default | Meaning |
+|---|---|---|
+| `TRACEPAD_RESPONSE_BUDGET_BYTES` | `51200` | Default response budget (Decision 2) |
+| `TRACEPAD_MCP` | `on` | Serve MCP at `/mcp` |
+| `TRACEPAD_URL` | `http://localhost:4318` | (client commands) server to talk to |
+| `TRACEPAD_API_KEY` | — | (client commands) key for requests |
+
+## Out of scope (later specs)
+
+Admin API (projects/keys/retention CRUD, `DELETE …/users/{id}/data`) and the
+retention sweeper (005); search/FTS and the MCP `search` tool; UI (§8);
+`stats` rollup table; `tracepad remap` / `export --otlp`; push-based `tail`
+(SSE/WS); MCP resources/prompts primitives, tasks extension, MCP Apps;
+OpenTelemetry self-instrumentation beyond Decision 22.
