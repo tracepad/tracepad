@@ -237,6 +237,12 @@ func (r *run) follow(ctx context.Context, query url.Values, interval time.Durati
 	for {
 		fresh, err := r.poll(ctx, query, watermark)
 		if err != nil {
+			if ctx.Err() != nil {
+				// Interrupted while a poll was in flight. Being
+				// stopped is what was asked for, so it is not a
+				// failure to report — Ctrl-C must not exit 1.
+				return nil
+			}
 			return err
 		}
 		if len(fresh) > 0 {

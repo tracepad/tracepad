@@ -15,7 +15,11 @@ API. This file routes; it does not duplicate what specs and docs say.
 - ✅ Spec 003 (scores & prompts) shipped: `/api/v1/scores` and
   `/api/v1/prompts`, schema 0003, versioned prompts with movable labels, the
   group-commit writer generalized to carry every durable write.
-- Next: spec 004 — native read API + CLI + MCP.
+- ✅ Spec 004 (read API, CLI, MCP) shipped: the read API with response
+  budgets and truncation markers, self-description and OpenAPI, schema 0004,
+  a CLI in the same binary, and an MCP server on protocol 2026-07-28. Both
+  clients are HTTP clients of the read API and contain no logic of their own.
+- Next: spec 005 — admin API and the retention sweeper.
 
 ## Where things are
 
@@ -28,6 +32,10 @@ API. This file routes; it does not duplicate what specs and docs say.
 | OTLP ingest | `internal/server/otlp.go`, `docs/ingest.md`, spec 002 |
 | Scores & prompts | `internal/server/scores.go`, `prompts.go`, `docs/scores.md`, `docs/prompts.md`, spec 003 |
 | JSON API plumbing (auth, strict decode, pagination) | `internal/server/api.go`, spec 003 |
+| Read API (traces, sessions, stats, system) | `internal/server/traces.go` and neighbours, `docs/api.md`, spec 004 — the route table in `routes.go` is the surface, and `openapi.json` must agree with it |
+| Response budgets and truncation | `internal/server/budget.go`, spec 004 #2 |
+| CLI | `internal/cli/`, `internal/client/`, `docs/cli.md`, spec 004 |
+| MCP | `internal/mcpserver/`, `docs/mcp.md`, spec 004 — tools call the read API over HTTP, never the store |
 | Attribute mapping | `internal/mapping/rules.go` is the table; `mapping.go` applies it |
 | Configuration | `internal/config/`, spec 001 + spec 002 Configuration tables |
 

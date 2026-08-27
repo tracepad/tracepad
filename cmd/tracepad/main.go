@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"os"
@@ -16,7 +17,9 @@ import (
 	"time"
 
 	"github.com/tracepad/tracepad/internal/cli"
+	"github.com/tracepad/tracepad/internal/client"
 	"github.com/tracepad/tracepad/internal/config"
+	"github.com/tracepad/tracepad/internal/mcpserver"
 	"github.com/tracepad/tracepad/internal/server"
 	"github.com/tracepad/tracepad/internal/store"
 )
@@ -57,6 +60,11 @@ func main() {
 			slog.Error("fatal", "err", err)
 			os.Exit(1)
 		}
+	case cmd == "mcp":
+		if err := serveMCP(args); err != nil {
+			slog.Error("fatal", "err", err)
+			os.Exit(1)
+		}
 	case clientCommands[cmd]:
 		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
@@ -93,6 +101,7 @@ func usage() {
 
 Usage:
   tracepad [serve] [flags]   run the server (default command)
+  tracepad mcp [flags]       serve MCP over stdio, against a running server
   tracepad version           print the version
 
 Flags of serve:
@@ -158,6 +167,47 @@ func serve(args []string) error {
 		defer cancel()
 		return srv.Shutdown(shutdownCtx)
 	}
+}
+
+// serveMCP runs the MCP server over stdin and stdout for clients that cannot
+// speak remote HTTP (spec 004 #15). It is the same tool registry the running
+// server exposes at /mcp, pointed at that server over the network instead of
+// at itself in process — one implementation, two transports.
+func serveMCP(args []string) error {
+	fs := flag.NewFlagSet("mcp", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	url := fs.String("url", envOr("TRACEPAD_URL", client.DefaultURL), "server to talk to")
+	key := fs.String("key", os.Getenv("TRACEPAD_API_KEY"), "project secret key")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			usage()
+			return nil
+		}
+		return err
+	}
+	if *key == "" {
+		return errors.New("no API key: set TRACEPAD_API_KEY or pass --key")
+	}
+	api, err := client.New(*url, *key)
+	if err != nil {
+		return err
+	}
+
+	// stdout is the transport; every diagnostic has to go to stderr or it
+	// would be read as a JSON-RPC frame.
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
+	slog.Info("serving MCP over stdio", "server", *url, "protocol", mcpserver.ProtocolVersion)
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	return mcpserver.ServeStdio(ctx, version, &mcpserver.Remote{Client: api})
+}
+
+func envOr(key, fallback string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return fallback
 }
 
 func provisionSpecs(cfg *config.Config) ([]store.ProvisionSpec, error) {

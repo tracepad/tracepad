@@ -7,6 +7,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/tracepad/tracepad/internal/mcpserver"
 )
 
 // Self-diagnosability (design §3.4, spec 004 #10): the numbers an agent needs
@@ -155,6 +157,13 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 			put("size_bytes", s.store.FileSize()).
 			put("rows", rows)).
 		put("writer_queue", queue).
+		// The endpoint map deliberately does not advertise /mcp — it is
+		// a transport, not an endpoint of this API — so this is where a
+		// caller finds out whether it is being served (Decision 27).
+		put("mcp", object{}.
+			put("enabled", s.mcp).
+			put("path", mcpserver.Path).
+			put("protocol_version", mcpserver.ProtocolVersion)).
 		put("response_budget_bytes", s.responseBudget).
 		// The counters are since this process started and say so: an
 		// honest process-lifetime number now beats a metrics subsystem

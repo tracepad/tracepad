@@ -10,6 +10,7 @@ import (
 
 	"github.com/tracepad/tracepad/internal/client"
 	"github.com/tracepad/tracepad/internal/config"
+	"github.com/tracepad/tracepad/internal/mcpserver"
 	"github.com/tracepad/tracepad/internal/store"
 )
 
@@ -33,6 +34,10 @@ type Server struct {
 	// responseBudget is the default byte budget a read spends on payloads
 	// (spec 004 #2); `?budget=` overrides it per request.
 	responseBudget int64
+	// mcp reports whether /mcp is being served, which `GET /api/v1/system`
+	// publishes because the endpoint map deliberately does not (Decision
+	// 27).
+	mcp bool
 
 	startedAt time.Time
 	counters  *counters
@@ -60,15 +65,25 @@ func New(cfg *config.Config, version string, st *store.Store, writer JobWriter) 
 		storeRaw:       cfg.StoreRaw,
 		maxBodyBytes:   maxBody,
 		responseBudget: budget,
+		mcp:            cfg.MCP,
 		startedAt:      time.Now(),
 		counters:       newCounters(),
 	}
 
-	// One table declares the whole surface (Decision 25); the mux is built
+	// One table declares the whole surface (Decision 27); the mux is built
 	// from it rather than beside it.
 	mux := http.NewServeMux()
 	for _, route := range s.routes() {
 		mux.HandleFunc(route.Method+" "+route.Path, route.handler)
+	}
+	if s.mcp {
+		// Registered outside the table: /mcp is a JSON-RPC transport
+		// rather than an endpoint of this API, so it belongs in
+		// neither the endpoint map nor the OpenAPI document
+		// (Decision 27). Its tools reach the read API through this
+		// same mux — one implementation of budgets, truncation, auth
+		// and JSON shape (spec 004 #16).
+		mux.Handle(mcpserver.Path, mcpserver.HTTPHandler(version, &mcpserver.Loopback{Handler: mux}))
 	}
 
 	s.http = &http.Server{

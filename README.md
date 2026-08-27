@@ -35,6 +35,33 @@ curl -H "Authorization: Bearer tp-sk-…" \
 
 See [docs/scores.md](docs/scores.md) and [docs/prompts.md](docs/prompts.md).
 
+## Reading traces back
+
+Everything Tracepad knows is readable over HTTP, and the read API is written
+for agents first: flat JSON, cursor pagination, a byte budget so a response
+never quietly eats a context window, and task shortcuts instead of only REST
+listings.
+
+```sh
+curl -H "Authorization: Bearer tp-sk-…" \
+  "localhost:4318/api/v1/traces/last?status=error&expand=io"
+```
+
+The same question, three ways:
+
+```sh
+tracepad traces last --error --full     # the CLI, in the same binary
+```
+
+```json
+{"mcpServers": {"tracepad": {"type": "http", "url": "http://localhost:4318/mcp",
+  "headers": {"Authorization": "Bearer tp-sk-…"}}}}
+```
+
+The CLI and the MCP server are HTTP clients of that API and contain no logic of
+their own, so all three return the same bytes. See [docs/api.md](docs/api.md),
+[docs/cli.md](docs/cli.md) and [docs/mcp.md](docs/mcp.md).
+
 ## License
 
 Apache-2.0. See [LICENSE](LICENSE); third-party attributions are in
