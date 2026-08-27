@@ -39,7 +39,15 @@ func Open(path string) (*Store, error) {
 	// instead of failing with SQLITE_BUSY. WAL for concurrent readers with
 	// the single writer; incremental auto_vacuum so retention deletes
 	// (later stage) can actually return disk space.
-	dsn := "file:" + path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)&_pragma=auto_vacuum(INCREMENTAL)&_pragma=synchronous(NORMAL)"
+	//
+	// _txlock=immediate makes every transaction take the write lock at
+	// BEGIN. Every transaction this binary opens is a write (migrations,
+	// project creation, the writer's commit windows), and a deferred one
+	// that reads before it writes — which prompt jobs do, to number a
+	// version — takes a read snapshot at its first SELECT and is then
+	// refused with SQLITE_BUSY_SNAPSHOT when it tries to upgrade, a
+	// failure busy_timeout cannot wait out (spec 003 Decision 24).
+	dsn := "file:" + path + "?_txlock=immediate&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)&_pragma=auto_vacuum(INCREMENTAL)&_pragma=synchronous(NORMAL)"
 	info, statErr := os.Stat(path)
 	fresh := statErr != nil || info.Size() == 0
 	db, err := sql.Open("sqlite", dsn)
@@ -154,6 +162,11 @@ func GenerateKeyPair() (KeyPair, error) {
 	}
 	return KeyPair{PublicKey: "tp-pk-" + pk, Secret: "tp-sk-" + sk}, nil
 }
+
+// NewID mints the identifier the API generates for a client that sent none:
+// 32 lower-case hex characters, the same shape and the same generator as a
+// project id (spec 003 #3).
+func NewID() (string, error) { return randomHex(16) }
 
 func randomHex(nbytes int) (string, error) {
 	b := make([]byte, nbytes)

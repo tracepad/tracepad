@@ -20,6 +20,21 @@ export OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer tp-sk-…"
 See [docs/ingest.md](docs/ingest.md) for the endpoints, the auth schemes, the
 attribute conventions Tracepad understands, and the ingest configuration.
 
+## Scores and prompts
+
+The same binary takes quality scores for your traces and serves the prompts
+your application runs on, over a plain JSON API — so an eval loop can grade
+yesterday's traces and a deploy can be a label move:
+
+```sh
+curl -H "Authorization: Bearer tp-sk-…" localhost:4318/api/v1/scores \
+  -d '{"trace_id":"4f8c…","name":"helpfulness","value":0.9}'
+curl -H "Authorization: Bearer tp-sk-…" \
+  "localhost:4318/api/v1/prompts/summarize?label=production"
+```
+
+See [docs/scores.md](docs/scores.md) and [docs/prompts.md](docs/prompts.md).
+
 ## License
 
 Apache-2.0. See [LICENSE](LICENSE); third-party attributions are in
