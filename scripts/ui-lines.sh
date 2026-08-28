@@ -18,7 +18,7 @@ cd "$ROOT"
 # handful of config files that shape the build.
 files() {
 	# grep exits 1 on an empty tree, which is not an error here.
-	git ls-files 'ui/src' 'ui/e2e' 'ui/*.ts' 'ui/*.js' 'ui/*.json' |
+	git ls-files 'ui/src' 'ui/tests' 'ui/*.ts' 'ui/*.js' 'ui/*.json' |
 		grep -v -e '^ui/src/lib/api/schema.d.ts$' -e '^ui/package-lock.json$' || true
 }
 

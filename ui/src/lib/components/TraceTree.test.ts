@@ -76,7 +76,8 @@ describe('walking the tree with the keyboard', () => {
 
 		await user.keyboard('{ArrowDown}');
 
-		expect(onselect).toHaveBeenLastCalledWith('a');
+		// The highlight moved; it did not ask for the observation to be opened.
+		expect(onselect).toHaveBeenLastCalledWith('a', false);
 	});
 
 	it('closes a branch with the left arrow before leaving it', async () => {
@@ -105,7 +106,7 @@ describe('walking the tree with the keyboard', () => {
 
 		await user.keyboard('{End}');
 
-		expect(onselect).toHaveBeenLastCalledWith('b');
+		expect(onselect).toHaveBeenLastCalledWith('b', false);
 	});
 
 	it('keeps exactly one tab stop', () => {

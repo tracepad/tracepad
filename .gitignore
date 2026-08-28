@@ -47,4 +47,5 @@ ui/node_modules/
 ui/.svelte-kit/
 ui/test-results/
 ui/playwright-report/
+ui/tests/e2e/.state.json
 internal/ui/dist/

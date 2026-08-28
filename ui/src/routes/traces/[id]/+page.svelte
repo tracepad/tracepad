@@ -2,6 +2,7 @@
 	import ChevronLeft from '@lucide/svelte/icons/chevron-left';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
+	import { untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { ApiError, api, type Observation, type Trace } from '$lib/api/client.svelte';
@@ -24,7 +25,11 @@
 	let failure = $state<string | null>(null);
 	// Which pane a phone is showing; on a wide screen both are visible at once
 	// (spec 006 #15).
-	let pane = $state<'tree' | 'detail'>('tree');
+	// A link that names an observation opens on it; one that names only a
+	// trace opens on the tree.
+	let pane = $state<'tree' | 'detail'>(
+		untrack(() => page.url.searchParams.get('obs')) ? 'detail' : 'tree'
+	);
 
 	$effect(() => {
 		const traceID = id;
@@ -67,11 +72,11 @@
 	// observation at a time.
 	const refused = $derived(trace?.expansion?.expanded === false);
 
-	function select(observationID: string) {
+	function select(observationID: string, activate: boolean) {
 		const search = new URLSearchParams(page.url.searchParams);
 		search.set('obs', observationID);
 		goto(`?${search}`, { replaceState: true, keepFocus: true, noScroll: true });
-		pane = 'detail';
+		if (activate) pane = 'detail';
 	}
 </script>
 

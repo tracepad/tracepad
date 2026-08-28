@@ -78,7 +78,13 @@
 	}: {
 		observations: Observation[];
 		selectedID: string | null;
-		onselect: (id: string) => void;
+		/**
+		 * `activate` separates "the highlight moved" from "open this one".
+		 * They are the same thing on a wide screen, where both panes are
+		 * visible; on a phone, where the detail replaces the tree, walking
+		 * with the arrows must not throw the reader out of the tree.
+		 */
+		onselect: (id: string, activate: boolean) => void;
 	} = $props();
 
 	const collapsed = new SvelteSet<string>();
@@ -90,9 +96,9 @@
 
 	let elements: Record<string, HTMLElement | null> = {};
 
-	function select(id: string | undefined) {
+	function select(id: string | undefined, activate = false) {
 		if (!id) return;
-		onselect(id);
+		onselect(id, activate);
 		elements[id]?.focus();
 	}
 
@@ -161,11 +167,11 @@
 			aria-expanded={row.expandable ? open : undefined}
 			tabindex={id === activeID ? 0 : -1}
 			bind:this={elements[id]}
-			onclick={() => select(id)}
+			onclick={() => select(id, true)}
 			onkeydown={(event) => {
 				if (event.key === 'Enter' || event.key === ' ') {
 					event.preventDefault();
-					select(id);
+					select(id, true);
 				}
 			}}
 			style:padding-left="{row.depth * 0.875 + 0.25}rem"

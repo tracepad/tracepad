@@ -79,7 +79,7 @@ ui-check: ui-deps ui-types-check ## Type-check the SPA and run its unit tests
 	cd $(UI) && npm run test
 
 e2e: build ## Boot the real binary on a temp database and run the Playwright smoke
-	cd $(UI) && npx playwright install --with-deps chromium
+	cd $(UI) && npx playwright install chromium
 	cd $(UI) && npm run e2e
 
 ui-lines: ## Report the line count of the web interface against its budget

@@ -29,6 +29,34 @@ jobs:
       # crossing it is a prompt to revise rather than a failed build.
       - run: make ui-lines
 
+  # The web interface against the real binary (spec 006 #10): the embed, the
+  # SPA fallback and the pre-authed URL only break at a seam the unit layer
+  # cannot see. Its own job, because browser automation does not fit the
+  # gate's 30-second budget.
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ui/package.json
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - run: npm ci
+        working-directory: ui
+      - run: npx playwright install --with-deps chromium
+        working-directory: ui
+      - run: make e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-traces
+          path: ui/test-results/
+          retention-days: 7
+
   # Real instrumentation against a real binary: the drift detector for SDK
   # attribute conventions (spec 002, Testing #3). Separate from the gate so
   # that a network hiccup installing SDKs never blocks a code review.
