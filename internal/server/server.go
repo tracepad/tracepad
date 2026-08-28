@@ -4,6 +4,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/tracepad/tracepad/internal/config"
 	"github.com/tracepad/tracepad/internal/mcpserver"
 	"github.com/tracepad/tracepad/internal/store"
+	"github.com/tracepad/tracepad/internal/ui"
 )
 
 // JobWriter is the write side every handler that changes data needs: hand
@@ -53,6 +55,14 @@ type Server struct {
 	// endpoints that need one say so rather than 401ing.
 	adminToken string
 
+	// The web interface (spec 006): the built bundle, nil in a build
+	// without the `ui` tag; the path segments the API owns, so a mistyped
+	// endpoint never resolves to a web page; and the matcher that
+	// reconstructs the 405 the catch-all would otherwise swallow.
+	assets   fs.FS
+	reserved map[string]bool
+	paths    pathMatcher
+
 	startedAt time.Time
 	counters  *counters
 }
@@ -83,9 +93,12 @@ func New(cfg *config.Config, version string, st *store.Store, writer JobWriter, 
 		responseBudget: budget,
 		mcp:            cfg.MCP,
 		adminToken:     cfg.AdminToken,
+		assets:         ui.Assets(),
 		startedAt:      time.Now(),
 		counters:       newCounters(),
 	}
+	s.reserved = reservedSegments(s.routes())
+	s.paths = newPathMatcher(s.routes())
 
 	// One table declares the whole surface (Decision 27); the mux is built
 	// from it rather than beside it.
@@ -102,6 +115,10 @@ func New(cfg *config.Config, version string, st *store.Store, writer JobWriter, 
 		// and JSON shape (spec 004 #16).
 		mux.Handle(mcpserver.Path, mcpserver.HTTPHandler(version, &mcpserver.Loopback{Handler: mux}))
 	}
+	// The web interface, also outside the table (spec 006): a catch-all
+	// that serves the SPA and its assets, and hands anything under an API
+	// prefix the JSON 404 or 405 the mux can no longer produce for itself.
+	mux.HandleFunc("/", s.handleUI)
 
 	s.http = &http.Server{
 		Addr:              cfg.Listen,

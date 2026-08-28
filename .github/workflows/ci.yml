@@ -16,7 +16,18 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      # The gate type-checks and unit-tests the web interface too (spec 006
+      # #10). Only the interface needs Node: `go test ./...` on its own does
+      # not, and the tagless build the Go half compiles carries no bundle.
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ui/package.json
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
       - run: make precommit
+      # A signal, not a rule (design §8): the interface has a line budget, and
+      # crossing it is a prompt to revise rather than a failed build.
+      - run: make ui-lines
 
   # Real instrumentation against a real binary: the drift detector for SDK
   # attribute conventions (spec 002, Testing #3). Separate from the gate so
