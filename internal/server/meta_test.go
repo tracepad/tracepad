@@ -103,6 +103,10 @@ func TestSelfDescriptionIsServedWithoutAKey(t *testing.T) {
 // is sent, and the only answer refused here is "unknown query parameter": a
 // complaint about the *value* means the server knew the name, which is what is
 // being checked.
+//
+// Every method, not only GET (spec 005): `?confirm=` is documented on a PATCH
+// and on three DELETEs, and a value that is not the echo the server wants
+// changes nothing — which is exactly what makes it safe to send here.
 func TestDocumentedQueryParametersAreAccepted(t *testing.T) {
 	h := newHarness(t, nil, store.WriterOptions{})
 	seedCorpus(t, h)
@@ -135,32 +139,35 @@ func TestDocumentedQueryParametersAreAccepted(t *testing.T) {
 		"/scores/{id}", "/scores/"+strings.Repeat("a", 32),
 		"/prompts/{name}", "/prompts/support",
 		"{label}", "production",
+		"/projects/{id}", "/projects/"+h.project.ID,
+		"{public_key}", testPublic,
+		"{user_id}", "u1",
 	)
 
 	for path, operations := range document.Paths {
-		operation, documented := operations["get"]
-		if !documented {
-			continue
-		}
-		for _, parameter := range operation.Parameters {
-			name, in := parameter.Name, parameter.In
-			if reference, found := strings.CutPrefix(parameter.Ref, "#/components/parameters/"); found {
-				shared := document.Components.Parameters[reference]
-				name, in = shared.Name, shared.In
-			}
-			if in != "query" || name == "" {
-				continue
-			}
-			t.Run(path+"?"+name, func(t *testing.T) {
-				rec := h.get(t, fill.Replace(path)+"?"+name+"=1")
-				if rec.Code != http.StatusBadRequest {
-					return
+		for method, operation := range operations {
+			for _, parameter := range operation.Parameters {
+				name, in := parameter.Name, parameter.In
+				if reference, found := strings.CutPrefix(parameter.Ref, "#/components/parameters/"); found {
+					shared := document.Components.Parameters[reference]
+					name, in = shared.Name, shared.In
 				}
-				message := decodeJSON[map[string]string](t, rec)["error"]
-				if strings.Contains(message, "unknown query parameter") {
-					t.Fatalf("%s documents %q but refuses it: %s", path, name, message)
+				if in != "query" || name == "" {
+					continue
 				}
-			})
+				t.Run(strings.ToUpper(method)+" "+path+"?"+name, func(t *testing.T) {
+					rec := h.call(t, strings.ToUpper(method),
+						fill.Replace(path)+"?"+name+"=1", nil)
+					if rec.Code != http.StatusBadRequest {
+						return
+					}
+					message := decodeJSON[map[string]string](t, rec)["error"]
+					if strings.Contains(message, "unknown query parameter") {
+						t.Fatalf("%s %s documents %q but refuses it: %s",
+							strings.ToUpper(method), path, name, message)
+					}
+				})
+			}
 		}
 	}
 }
