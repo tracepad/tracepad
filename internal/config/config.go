@@ -32,18 +32,43 @@ type Config struct {
 	// batch processors ship far below it; the cap exists to stop
 	// pathological bodies from ballooning memory.
 	MaxBodyBytes int64
+	// ResponseBudgetBytes is the default byte budget a read response
+	// spends on payloads (spec 004 #2). The consumer's context window is
+	// a scarce resource, so the API respects it by default rather than on
+	// request.
+	ResponseBudgetBytes int64
+	// MCP serves the MCP endpoint at /mcp on the main listener
+	// (spec 004 #14). On by default: it is the reason the read API exists
+	// in this shape.
+	MCP bool
 }
 
 // DefaultMaxBodyBytes is the request body cap when unset (20 MiB).
 const DefaultMaxBodyBytes = 20 * 1024 * 1024
 
+// Response budget bounds (spec 004 #2). The floor is what a skeleton response
+// needs before any payload is inlined; the ceiling is a consumer asking for
+// everything, which is a legitimate ask from a script and a mistake from an
+// agent — either way it is bounded.
+const (
+	DefaultResponseBudgetBytes = 50 * 1024
+	MinResponseBudgetBytes     = 4 * 1024
+	MaxResponseBudgetBytes     = 5 * 1024 * 1024
+)
+
 // knownEnv lists every TRACEPAD_* variable the binary understands.
 var knownEnv = map[string]bool{
-	"TRACEPAD_LISTEN":         true,
-	"TRACEPAD_DATA_DIR":       true,
-	"TRACEPAD_PROJECTS":       true,
-	"TRACEPAD_STORE_RAW":      true,
-	"TRACEPAD_MAX_BODY_BYTES": true,
+	"TRACEPAD_LISTEN":                true,
+	"TRACEPAD_DATA_DIR":              true,
+	"TRACEPAD_PROJECTS":              true,
+	"TRACEPAD_STORE_RAW":             true,
+	"TRACEPAD_MAX_BODY_BYTES":        true,
+	"TRACEPAD_RESPONSE_BUDGET_BYTES": true,
+	"TRACEPAD_MCP":                   true,
+	// Read by the client commands rather than by the server, but a typo
+	// in either is still a typo worth naming.
+	"TRACEPAD_URL":     true,
+	"TRACEPAD_API_KEY": true,
 }
 
 // Load resolves configuration from env and the given flag arguments.
@@ -56,12 +81,26 @@ func Load(args []string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	budget, err := parseBytes("TRACEPAD_RESPONSE_BUDGET_BYTES", DefaultResponseBudgetBytes)
+	if err != nil {
+		return nil, err
+	}
+	if budget < MinResponseBudgetBytes || budget > MaxResponseBudgetBytes {
+		return nil, fmt.Errorf("TRACEPAD_RESPONSE_BUDGET_BYTES: want between %d and %d, got %d",
+			MinResponseBudgetBytes, MaxResponseBudgetBytes, budget)
+	}
+	mcp, err := parseOnOff("TRACEPAD_MCP", true)
+	if err != nil {
+		return nil, err
+	}
 	cfg := &Config{
-		Listen:       envOr("TRACEPAD_LISTEN", ":4318"),
-		DataDir:      envOr("TRACEPAD_DATA_DIR", defaultDataDir()),
-		Projects:     os.Getenv("TRACEPAD_PROJECTS"),
-		StoreRaw:     storeRaw,
-		MaxBodyBytes: maxBody,
+		Listen:              envOr("TRACEPAD_LISTEN", ":4318"),
+		DataDir:             envOr("TRACEPAD_DATA_DIR", defaultDataDir()),
+		Projects:            os.Getenv("TRACEPAD_PROJECTS"),
+		StoreRaw:            storeRaw,
+		MaxBodyBytes:        maxBody,
+		ResponseBudgetBytes: budget,
+		MCP:                 mcp,
 	}
 
 	fs := flag.NewFlagSet("tracepad", flag.ContinueOnError)

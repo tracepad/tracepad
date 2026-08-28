@@ -175,6 +175,12 @@ func upsertObservation(tx *sql.Tx, projectID string, o *model.Observation) error
 // 2026-08-26): with upserts (#5) a re-delivered span would double-count every
 // delta, and the counts are what the trace list shows. The scan is bounded by
 // one trace's observations and served by idx_observations_trace.
+//
+// `timestamp` prefers the smallest *positive* start time — a span that never
+// started carries no information about when the trace did — but falls back to
+// the smallest start time of any kind rather than to NULL, because the trace
+// list pages on (timestamp, id) and a NULL sort key would hide the row from
+// every page after the first (spec 004 Decision 26, 2026-08-27).
 func refreshAggregates(tx *sql.Tx, projectID, traceID string) error {
 	_, err := tx.Exec(
 		`UPDATE traces SET
@@ -187,9 +193,12 @@ func refreshAggregates(tx *sql.Tx, projectID, traceID string) error {
 		                        FROM observations o
 		                        WHERE o.project_id = traces.project_id AND o.trace_id = traces.id
 		                          AND o.provided_cost = 1),
-		   timestamp         = (SELECT MIN(o.start_time) FROM observations o
-		                        WHERE o.project_id = traces.project_id AND o.trace_id = traces.id
-		                          AND o.start_time > 0),
+		   timestamp         = COALESCE(
+		                        (SELECT MIN(o.start_time) FROM observations o
+		                         WHERE o.project_id = traces.project_id AND o.trace_id = traces.id
+		                           AND o.start_time > 0),
+		                        (SELECT MIN(o.start_time) FROM observations o
+		                         WHERE o.project_id = traces.project_id AND o.trace_id = traces.id)),
 		   latency_ms        = (SELECT (MAX(o.end_time) - MIN(o.start_time)) / 1000000
 		                        FROM observations o
 		                        WHERE o.project_id = traces.project_id AND o.trace_id = traces.id

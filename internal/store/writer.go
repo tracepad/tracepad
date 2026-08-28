@@ -149,6 +149,13 @@ func (s *Store) NewWriter(opts WriterOptions) (*Writer, error) {
 	return w, nil
 }
 
+// QueueDepth reports how many submissions are waiting for the writer and how
+// many it can hold. It is the one number that says whether writes are keeping
+// up, which is why `GET /api/v1/system` publishes it (spec 004 #10).
+func (w *Writer) QueueDepth() (waiting, capacity int) {
+	return len(w.queue), cap(w.queue)
+}
+
 // Submit queues a job and blocks until it is committed. A full queue is
 // reported immediately as ErrWriterBusy rather than waited on: backpressure
 // an exporter can see beats a request that silently stalls.

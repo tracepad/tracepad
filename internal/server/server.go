@@ -8,7 +8,9 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/tracepad/tracepad/internal/client"
 	"github.com/tracepad/tracepad/internal/config"
+	"github.com/tracepad/tracepad/internal/mcpserver"
 	"github.com/tracepad/tracepad/internal/store"
 )
 
@@ -29,6 +31,16 @@ type Server struct {
 
 	storeRaw     bool
 	maxBodyBytes int64
+	// responseBudget is the default byte budget a read spends on payloads
+	// (spec 004 #2); `?budget=` overrides it per request.
+	responseBudget int64
+	// mcp reports whether /mcp is being served, which `GET /api/v1/system`
+	// publishes because the endpoint map deliberately does not (Decision
+	// 27).
+	mcp bool
+
+	startedAt time.Time
+	counters  *counters
 }
 
 // New builds the server around an opened store and the writer that
@@ -42,36 +54,41 @@ func New(cfg *config.Config, version string, st *store.Store, writer JobWriter) 
 		// would, and a zero cap silently 413s every export.
 		maxBody = config.DefaultMaxBodyBytes
 	}
+	budget := cfg.ResponseBudgetBytes
+	if budget <= 0 {
+		budget = config.DefaultResponseBudgetBytes
+	}
 	s := &Server{
-		store:        st,
-		writer:       writer,
-		version:      version,
-		storeRaw:     cfg.StoreRaw,
-		maxBodyBytes: maxBody,
+		store:          st,
+		writer:         writer,
+		version:        version,
+		storeRaw:       cfg.StoreRaw,
+		maxBodyBytes:   maxBody,
+		responseBudget: budget,
+		mcp:            cfg.MCP,
+		startedAt:      time.Now(),
+		counters:       newCounters(),
 	}
 
+	// One table declares the whole surface (Decision 27); the mux is built
+	// from it rather than beside it.
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /health", s.handleHealth)
-	// The canonical OTLP path and the Langfuse-SDK alias are one endpoint
-	// (spec 002 #2).
-	mux.HandleFunc("POST /v1/traces", s.handleTraces)
-	mux.HandleFunc("POST /api/public/otel/v1/traces", s.handleTraces)
-
-	// The native JSON API (spec 003): written for applications, agents and
-	// curl rather than for exporters.
-	mux.HandleFunc("POST /api/v1/scores", s.handleCreateScores)
-	mux.HandleFunc("GET /api/v1/scores", s.handleListScores)
-	mux.HandleFunc("GET /api/v1/scores/{id}", s.handleGetScore)
-	mux.HandleFunc("GET /api/v1/prompts", s.handleListPrompts)
-	mux.HandleFunc("GET /api/v1/prompts/{name}", s.handleGetPrompt)
-	mux.HandleFunc("POST /api/v1/prompts/{name}/versions", s.handleCreatePromptVersion)
-	mux.HandleFunc("GET /api/v1/prompts/{name}/versions", s.handleListPromptVersions)
-	mux.HandleFunc("PUT /api/v1/prompts/{name}/labels/{label}", s.handlePutPromptLabel)
-	mux.HandleFunc("DELETE /api/v1/prompts/{name}/labels/{label}", s.handleDeletePromptLabel)
+	for _, route := range s.routes() {
+		mux.HandleFunc(route.Method+" "+route.Path, route.handler)
+	}
+	if s.mcp {
+		// Registered outside the table: /mcp is a JSON-RPC transport
+		// rather than an endpoint of this API, so it belongs in
+		// neither the endpoint map nor the OpenAPI document
+		// (Decision 27). Its tools reach the read API through this
+		// same mux — one implementation of budgets, truncation, auth
+		// and JSON shape (spec 004 #16).
+		mux.Handle(mcpserver.Path, mcpserver.HTTPHandler(version, &mcpserver.Loopback{Handler: mux}))
+	}
 
 	s.http = &http.Server{
 		Addr:              cfg.Listen,
-		Handler:           mux,
+		Handler:           s.withVersion(mux),
 		ReadHeaderTimeout: 10 * time.Second,
 		// ReadTimeout bounds slow-dripping request bodies; IdleTimeout
 		// reaps abandoned keep-alives. WriteTimeout stays unset on
@@ -114,4 +131,16 @@ func writeError(w http.ResponseWriter, status int, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(map[string]string{"error": message})
+}
+
+// withVersion stamps this build on every response. A client that has to spend
+// a round trip on `/api/v1/system` to notice version skew will not spend it,
+// so the answer rides along with whatever it was already asking for
+// (Decision 28). The header name lives in the client package because that is
+// who reads it; the server is the only writer.
+func (s *Server) withVersion(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set(client.VersionHeader, s.version)
+		next.ServeHTTP(w, r)
+	})
 }

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -460,6 +461,91 @@ func (s *Server) handleDeletePromptLabel(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeJSON(w, http.StatusOK, labelResponse{Label: label, Version: write.Removed})
+}
+
+// handlePromptDiff serves a unified text diff between two versions of a name
+// (#21). "What changed in the prompt between yesterday's run and today's" is
+// an agent question, and a patch is the answer format every consumer already
+// reads.
+func (s *Server) handlePromptDiff(w http.ResponseWriter, r *http.Request) {
+	project, ok := s.apiProject(w, r)
+	if !ok {
+		return
+	}
+	name, ok := promptName(w, r)
+	if !ok {
+		return
+	}
+	values, err := queryParams(r, "from", "to")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	var versions [2]int
+	for i, side := range []string{"from", "to"} {
+		raw := values.Get(side)
+		if raw == "" {
+			writeError(w, http.StatusBadRequest,
+				fmt.Sprintf("%s is required: a diff needs two versions", side))
+			return
+		}
+		version, err := strconv.Atoi(raw)
+		if err != nil || version < 1 {
+			writeError(w, http.StatusBadRequest,
+				fmt.Sprintf("%s must be a positive whole number, got %q", side, raw))
+			return
+		}
+		versions[i] = version
+	}
+
+	var loaded [2]*store.PromptVersion
+	for i, version := range versions {
+		prompt, err := s.store.Prompt(project.ID, name, store.PromptSelector{Version: version})
+		if err != nil {
+			slog.Error("read prompt failed", "err", err)
+			writeError(w, http.StatusInternalServerError, "failed to read the prompt")
+			return
+		}
+		if prompt == nil {
+			writeError(w, http.StatusNotFound,
+				fmt.Sprintf("prompt %q has no version %d", name, version))
+			return
+		}
+		loaded[i] = prompt
+	}
+
+	fromLabel := fmt.Sprintf("version %d", versions[0])
+	toLabel := fmt.Sprintf("version %d", versions[1])
+	// Both halves of a version are diffed: a run can change because the
+	// text changed or because the model parameters did, and a diff that
+	// showed only one of them would answer "nothing changed" to a real
+	// change.
+	diff := unifiedDiff("prompt", fromLabel, toLabel, pretty(loaded[0].Prompt), pretty(loaded[1].Prompt)) +
+		unifiedDiff("config", fromLabel, toLabel, pretty(loaded[0].Config), pretty(loaded[1].Config))
+
+	w.Header().Set("Cache-Control", promptCacheControl)
+	writeJSON(w, http.StatusOK, object{}.
+		put("name", name).
+		put("from", versions[0]).
+		put("to", versions[1]).
+		put("diff", diff))
+}
+
+// pretty renders stored JSON as indented text, which is what makes a line diff
+// of it meaningful: the compact form stores a whole prompt on one line, and a
+// one-line diff says only that the line changed.
+func pretty(raw []byte) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var out bytes.Buffer
+	if err := json.Indent(&out, raw, "", "  "); err != nil {
+		// Stored JSON always indents; if that stopped being true, the
+		// bytes as stored are the honest thing to diff.
+		return string(raw)
+	}
+	return out.String() + "\n"
 }
 
 // labelTarget authenticates and validates the {name}/{label} pair both label

@@ -187,7 +187,7 @@ func TestWriterIsolatesAFailingBatch(t *testing.T) {
 	if goodErr != nil {
 		t.Errorf("a valid batch sharing the window failed too: %v", goodErr)
 	}
-	observations, err := s.Observations(p.ID, "aa11bb22cc33dd44ee55ff6677889900")
+	observations, err := s.Observations(p.ID, "aa11bb22cc33dd44ee55ff6677889900", WithIO)
 	if err != nil {
 		t.Fatal(err)
 	}
