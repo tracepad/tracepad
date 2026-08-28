@@ -12,7 +12,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// The eight tools (#17). Each maps 1:1 onto one endpoint, and there is no
+// The nine tools (#17). Each maps 1:1 onto one endpoint, and there is no
 // `search`: there is no search endpoint yet, and a tool faking one over list
 // filters would misrepresent to the model what this server can do. It arrives
 // with FTS.
@@ -230,6 +230,27 @@ func register(server *mcp.Server, api API) {
 	}, t.getObservationIO)
 
 	mcp.AddTool(server, &mcp.Tool{
+		Name:        "list_sessions",
+		Annotations: readOnly("List sessions"),
+		Description: "Find conversations or agent sessions — the user asks which sessions ran, which were busiest or most expensive, " +
+			"or what a given user has been doing lately. " +
+			"Returns a page of session roll-ups (id, trace count, how many of those traces failed, cost, first and last activity), " +
+			"most recently active first. Every number counts traces, not observations. " +
+			"Does NOT return the traces themselves: follow with get_session for one session's traces, then get_trace for what happened inside one. " +
+			"Page by passing the returned next_cursor back as cursor.",
+		InputSchema: object(pagingProperties(map[string]*jsonschema.Schema{
+			"from":        timestamp("Only traces at or after this RFC 3339 instant. A session appears when any of its traces falls in the window."),
+			"to":          timestamp("Only traces strictly before this RFC 3339 instant."),
+			"environment": text("Exact match on the environment the session's traces ran in, e.g. \"production\"."),
+			"user_id":     text("Exact match on the end user the session's traces were attributed to."),
+		})),
+		OutputSchema: object(map[string]*jsonschema.Schema{
+			"sessions":    list(sessionRowSchema(), "The page, most recent activity first."),
+			"next_cursor": text("Pass back as `cursor` for the next page; null on the last page."),
+		}, "sessions"),
+	}, t.listSessions)
+
+	mcp.AddTool(server, &mcp.Tool{
 		Name:        "get_session",
 		Annotations: readOnly("Get one session"),
 		Description: "Summarize a conversation or an agent session — the user asks about a session id, or about everything that happened under one session. " +
@@ -373,6 +394,19 @@ func traceRowSchema() *jsonschema.Schema {
 	}, "id", "environment", "error_count", "observation_count")
 }
 
+// sessionRowSchema is a session roll-up, the same six fields the listing and
+// the single-session tool both report.
+func sessionRowSchema() *jsonschema.Schema {
+	return object(map[string]*jsonschema.Schema{
+		"id":          text("The session id, for get_session."),
+		"trace_count": integer("How many traces name this session."),
+		"error_count": integer("How many of those traces have a failed observation."),
+		"total_cost":  number("Summed over the traces that reported a cost; absent when none did."),
+		"first_seen":  timestamp("When the session's earliest trace started."),
+		"last_seen":   timestamp("When its latest trace started."),
+	}, "id", "trace_count", "error_count")
+}
+
 // traceDetailSchema is one trace with its tree. `observations` is recursive,
 // so the node shape is a $defs entry the array refers to.
 func traceDetailSchema() *jsonschema.Schema {
@@ -474,6 +508,23 @@ func (t *toolset) getObservationIO(ctx context.Context, req *mcp.CallToolRequest
 	set(query, "trace_id", in.TraceID)
 	return t.call(ctx, req, "/api/v1/observations/"+url.PathEscape(in.ObservationID)+"/io",
 		query, summarizeIO)
+}
+
+type listSessionsInput struct {
+	pagingInput
+	From        string `json:"from"`
+	To          string `json:"to"`
+	Environment string `json:"environment"`
+	UserID      string `json:"user_id"`
+}
+
+func (t *toolset) listSessions(ctx context.Context, req *mcp.CallToolRequest, in listSessionsInput) (*mcp.CallToolResult, any, error) {
+	query := url.Values{}
+	set(query, "from", in.From)
+	set(query, "to", in.To)
+	set(query, "environment", in.Environment)
+	set(query, "user_id", in.UserID)
+	return t.call(ctx, req, "/api/v1/sessions", in.pagingInput.apply(query), summarizeSessionList)
 }
 
 type getSessionInput struct {
@@ -603,6 +654,37 @@ func summarizeIO(body json.RawMessage) string {
 	}
 	return fmt.Sprintf("Observation %s: %d bytes of input, %d bytes of output, whole.",
 		parsed.ObservationID, len(parsed.Input), len(parsed.Output))
+}
+
+func summarizeSessionList(body json.RawMessage) string {
+	var parsed struct {
+		Sessions []struct {
+			ID         string `json:"id"`
+			TraceCount int    `json:"trace_count"`
+			ErrorCount int    `json:"error_count"`
+			LastSeen   string `json:"last_seen"`
+		} `json:"sessions"`
+		NextCursor *string `json:"next_cursor"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return "a page of sessions"
+	}
+	if len(parsed.Sessions) == 0 {
+		return "No sessions match those filters."
+	}
+	traces, failing := 0, 0
+	for _, session := range parsed.Sessions {
+		traces += session.TraceCount
+		if session.ErrorCount > 0 {
+			failing++
+		}
+	}
+	summary := fmt.Sprintf("%d sessions over %d traces, most recent %s (%s); %d with errors",
+		len(parsed.Sessions), traces, parsed.Sessions[0].ID, parsed.Sessions[0].LastSeen, failing)
+	if parsed.NextCursor != nil {
+		summary += "; more pages available"
+	}
+	return summary + "."
 }
 
 func summarizeSession(body json.RawMessage) string {

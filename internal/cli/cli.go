@@ -117,6 +117,7 @@ const Usage = `Client commands (they talk to a running server over HTTP):
   tracepad traces show  <trace-id> [--full]
   tracepad traces last  [--error] [--env E] [--since 1h] [--full]
   tracepad tail         [--env E] [--error] [--interval 2s] [--limit N]
+  tracepad sessions ls   [--since 1h] [--until T] [--env E] [--user U] [--limit N]
   tracepad sessions show <session-id> [--limit N]
   tracepad scores ls    [--trace ID] [--name N] [--session S] [--since 1h] [--limit N]
   tracepad prompts ls

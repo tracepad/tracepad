@@ -40,6 +40,7 @@ func (s *Server) routes() []route {
 		{"GET", "/api/v1/observations/{id}/io", "The whole input, output and metadata of one observation", s.handleObservationIO},
 
 		// Sessions and statistics.
+		{"GET", "/api/v1/sessions", "List sessions by most recent activity, filtered and cursor-paginated", s.handleListSessions},
 		{"GET", "/api/v1/sessions/{id}", "One session: its totals and its traces", s.handleGetSession},
 		{"GET", "/api/v1/stats", "Counts, errors, cost and latency percentiles per bucket", s.handleStats},
 

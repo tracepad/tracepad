@@ -393,6 +393,61 @@ func TestStatsAndSystem(t *testing.T) {
 	}
 }
 
+// TestSessionsListBothModes is the golden pair for the listing spec 007 adds:
+// a table on a terminal, the endpoint's own bytes in a pipe.
+func TestSessionsListBothModes(t *testing.T) {
+	h := newHarness(t)
+	seedCorpus(t, h)
+	// A second session, more recently active than `s1`, so the ordering and
+	// the "no cost reported" column both have something to show.
+	h.seed(t, &model.Trace{ID: traceHex(3), Name: "batch", SessionID: "s2", Environment: "staging"},
+		&model.Observation{TraceID: traceHex(3), ID: spanHex(4), Type: model.TypeSpan,
+			Level: model.LevelError, StartTime: seedBase - 60*1000*ms, EndTime: seedBase - 59*1000*ms})
+	ctx := t.Context()
+
+	t.Run("terminal", func(t *testing.T) {
+		got := h.run(ctx, true, "sessions", "ls")
+		if got.code != ExitOK {
+			t.Fatalf("exit = %d, stderr = %s", got.code, got.stderr)
+		}
+		want := strings.Join([]string{
+			"LAST SEEN            SESSION  TRACES  ERRORS  COST       FIRST SEEN",
+			"2026-08-31 23:59:00  s2       1       1       -          2026-08-31 23:59:00",
+			"2026-08-31 23:00:00  s1       1       0       $0.001000  2026-08-31 23:00:00",
+			"",
+		}, "\n")
+		if got.stdout != want {
+			t.Fatalf("table output:\n%s\nwant:\n%s", got.stdout, want)
+		}
+	})
+
+	t.Run("pipe", func(t *testing.T) {
+		got := h.run(ctx, false, "sessions", "ls", "--env", "staging")
+		if got.code != ExitOK {
+			t.Fatalf("exit = %d, stderr = %s", got.code, got.stderr)
+		}
+		var body struct {
+			Sessions []struct {
+				ID         string `json:"id"`
+				TraceCount int    `json:"trace_count"`
+			} `json:"sessions"`
+		}
+		if err := json.Unmarshal([]byte(got.stdout), &body); err != nil {
+			t.Fatalf("piped output is not JSON: %v (%s)", err, got.stdout)
+		}
+		if len(body.Sessions) != 1 || body.Sessions[0].ID != "s2" {
+			t.Fatalf("sessions = %+v, want only the staging one", body.Sessions)
+		}
+	})
+
+	t.Run("empty", func(t *testing.T) {
+		got := h.run(ctx, true, "sessions", "ls", "--user", "nobody")
+		if got.code != ExitOK || !strings.Contains(got.stdout, "no sessions") {
+			t.Fatalf("sessions ls = %+v, want an honest empty answer", got)
+		}
+	})
+}
+
 func TestSessionsAndScores(t *testing.T) {
 	h := newHarness(t)
 	seedCorpus(t, h)

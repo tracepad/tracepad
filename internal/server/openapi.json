@@ -273,6 +273,35 @@
         }
       }
     },
+    "/api/v1/sessions": {
+      "get": {
+        "tags": ["traces"],
+        "summary": "List sessions by most recent activity, filtered and cursor-paginated",
+        "description": "Aggregated from the traces that named a session; there is no session table. `from`/`to` bound the *traces*, half-open like the trace listing, so a session appears when any of its traces falls in the window and its totals then describe those traces. To read one session's traces, follow with `GET /api/v1/sessions/{id}`.",
+        "operationId": "listSessions",
+        "parameters": [
+          {"$ref": "#/components/parameters/From"},
+          {"$ref": "#/components/parameters/To"},
+          {"$ref": "#/components/parameters/Environment"},
+          {"name": "user_id", "in": "query", "schema": {"type": "string"},
+            "description": "Exact match on the user id of a session's traces"},
+          {"$ref": "#/components/parameters/Limit"},
+          {"$ref": "#/components/parameters/Cursor"}
+        ],
+        "responses": {
+          "200": {"description": "A page of sessions", "content": {"application/json": {"schema": {
+            "type": "object",
+            "properties": {
+              "sessions": {"type": "array", "items": {"$ref": "#/components/schemas/SessionRow"}},
+              "next_cursor": {"type": ["string", "null"], "description": "Pass back as `?cursor=` for the next page; null on the last one"}
+            },
+            "required": ["sessions", "next_cursor"]
+          }}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"}
+        }
+      }
+    },
     "/api/v1/sessions/{id}": {
       "get": {
         "tags": ["traces"],
@@ -856,6 +885,19 @@
           "observation_count": {"type": "integer"}
         },
         "required": ["id", "environment", "error_count", "observation_count"]
+      },
+      "SessionRow": {
+        "type": "object",
+        "description": "The roll-up over the traces of one session. Every number counts traces, not observations: `error_count` is how many of the session's traces failed.",
+        "properties": {
+          "id": {"type": "string", "description": "The session id, as the application set it"},
+          "trace_count": {"type": "integer"},
+          "error_count": {"type": "integer"},
+          "total_cost": {"type": "number", "description": "Summed over the traces that carried a cost; absent when none did"},
+          "first_seen": {"type": "string", "format": "date-time"},
+          "last_seen": {"type": "string", "format": "date-time"}
+        },
+        "required": ["id", "trace_count", "error_count"]
       },
       "Trace": {
         "allOf": [

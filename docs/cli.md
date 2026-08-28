@@ -108,6 +108,21 @@ Raise `--limit`, or shorten `--interval`.
 
 In a pipe it prints one JSON row per line. Ctrl-C stops it.
 
+### `sessions ls`
+
+```sh
+tracepad sessions ls --since 24h --env production
+```
+
+One row per session, most recent activity first: last seen, id, how many
+traces, how many of those failed, cost and when the session started.
+
+Filters: `--since`, `--until`, `--env`, `--user`, `--limit`, `--cursor`.
+`--since` and `--until` bound the traces, so a session appears when any of
+its traces falls in the window and its totals then describe those traces.
+Paging works like `traces ls`: the last line prints the `--cursor` for the
+next page.
+
 ### `sessions show`
 
 ```sh

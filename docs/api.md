@@ -28,6 +28,7 @@ document served without authentication.
 | `GET` | `/api/v1/traces/{id}` | One trace, observations as a tree |
 | `GET` | `/api/v1/traces/last` | The newest trace matching the filters, whole |
 | `GET` | `/api/v1/observations/{id}/io` | One observation's payloads, whole |
+| `GET` | `/api/v1/sessions` | List sessions by most recent activity |
 | `GET` | `/api/v1/sessions/{id}` | One session: totals and traces |
 | `GET` | `/api/v1/stats` | Counts, errors, cost, latency percentiles |
 | `GET` | `/api/v1/prompts/{name}/diff` | Unified diff between two prompt versions |
@@ -227,6 +228,39 @@ listing the candidates — never a guess. Truncation markers always carry the
 pair, so following a marker never lands there.
 
 ## Sessions
+
+A session is not a stored entity: it is the set of traces that named it, and
+both endpoints below aggregate those traces on the way out.
+
+```sh
+curl … "http://localhost:4318/api/v1/sessions?environment=production&limit=2"
+```
+
+```json
+{
+  "sessions": [
+    {
+      "id": "session-77",
+      "trace_count": 12,
+      "error_count": 1,
+      "total_cost": 0.043,
+      "first_seen": "2026-09-01T10:00:00Z",
+      "last_seen": "2026-09-01T10:14:22Z"
+    }
+  ],
+  "next_cursor": "MTc4ODIyMDgwMDAwMDAwMDAwMDpzZXNzaW9uLTc3"
+}
+```
+
+Most recent activity first (`last_seen DESC`, with the session id as the
+tie-break), paginated by the same opaque cursor as every other listing.
+
+| Filter | Meaning |
+|---|---|
+| `from`, `to` | RFC 3339, half-open, on the **traces**: a session appears when any of its traces falls in the window, and its totals then describe those traces. |
+| `environment`, `user_id` | Exact match on the session's traces. |
+
+A trace that named no session is not a session of one and never appears.
 
 ```sh
 curl … "http://localhost:4318/api/v1/sessions/session-77"

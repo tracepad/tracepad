@@ -282,7 +282,7 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
-// TestToolListIsTheDeclaredContract: eight read-only tools, a deterministic
+// TestToolListIsTheDeclaredContract: nine read-only tools, a deterministic
 // order, and the caching hints of #18.
 func TestToolListIsTheDeclaredContract(t *testing.T) {
 	h := newHarness(t)
@@ -293,11 +293,13 @@ func TestToolListIsTheDeclaredContract(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Exactly these eight, and administration is deliberately not among
+	// Exactly these nine, and administration is deliberately not among
 	// them: spec 005 added projects, keys, retention and user-data erasure
 	// to the HTTP API and the CLI and nothing at all to MCP (spec 005 #13).
+	// `list_sessions` joined them with the endpoint it wraps, in the same
+	// PR as the CLI command and the screen (spec 007 #1).
 	want := []string{"get_last_trace", "get_observation_io", "get_prompt", "get_session",
-		"get_stats", "get_trace", "list_scores", "list_traces"}
+		"get_stats", "get_trace", "list_scores", "list_sessions", "list_traces"}
 	var names []string
 	for _, tool := range result.Tools {
 		names = append(names, tool.Name)
@@ -376,6 +378,9 @@ func TestEveryToolMatchesItsEndpoint(t *testing.T) {
 			"/api/v1/traces/last?status=error"},
 		{"get_observation_io", map[string]any{"observation_id": spanHex(2), "trace_id": traceHex(1)},
 			"/api/v1/observations/" + spanHex(2) + "/io?trace_id=" + traceHex(1)},
+		{"list_sessions", map[string]any{"environment": "production"},
+			"/api/v1/sessions?environment=production"},
+		{"list_sessions", map[string]any{"limit": 1}, "/api/v1/sessions?limit=1"},
 		{"get_session", map[string]any{"session_id": "s1"}, "/api/v1/sessions/s1"},
 		{"get_prompt", map[string]any{"name": "support", "label": "production"},
 			"/api/v1/prompts/support?label=production"},
@@ -583,8 +588,8 @@ func TestStdioTransportServesTheSameTools(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tools.Tools) != 8 {
-		t.Fatalf("tools = %d, want the same eight as over HTTP", len(tools.Tools))
+	if len(tools.Tools) != 9 {
+		t.Fatalf("tools = %d, want the same nine as over HTTP", len(tools.Tools))
 	}
 
 	result, err := session.CallTool(t.Context(), &mcp.CallToolParams{
