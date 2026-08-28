@@ -21,6 +21,14 @@ class CurrentProject {
 	}
 
 	/**
+	 * The whole project row, which the Settings screen needs: the id every
+	 * management endpoint is addressed by, and the retention windows it edits.
+	 */
+	get current() {
+		return this.#project;
+	}
+
+	/**
 	 * Loads the name once per credential. A failure is swallowed: the name is
 	 * a label, and a screen that refused to render because it could not
 	 * decorate its sidebar would be a worse answer than an unlabelled one.
@@ -28,8 +36,29 @@ class CurrentProject {
 	async load() {
 		const key = auth.key;
 		if (!key || this.#loadedFor === key) return;
-		this.#loadedFor = key;
+		// A different credential means a possibly different project, so the
+		// old row goes now rather than lingering under the new key.
 		this.#project = null;
+		await this.#read(key);
+	}
+
+	/**
+	 * Reads the project again after something changed it. The sidebar and the
+	 * Settings screen show the same row, so a rename has to reach both.
+	 *
+	 * Unlike `load`, this does not blank the row first. The Settings screen
+	 * renders its cards only when there is a project, so a momentary null
+	 * would tear all of them down and build them again — losing, among other
+	 * things, the "done" the card had just put on the screen.
+	 */
+	async refresh() {
+		const key = auth.key;
+		if (!key) return;
+		await this.#read(key);
+	}
+
+	async #read(key: string) {
+		this.#loadedFor = key;
 		try {
 			const { projects } = await api.listProjects();
 			// A key that changed again while this was in flight owns the

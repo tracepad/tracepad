@@ -76,11 +76,14 @@ describe('the token palette', () => {
 			expect(ratio).toBeGreaterThanOrEqual(4.5);
 		});
 
-		// Tinted backgrounds carry the same words as the plain ones.
+		// Tinted backgrounds carry the same words as the plain ones, and so
+		// does the one solid danger surface: spec 007's destructive buttons
+		// put `on-accent` on `danger`, which is a pairing no other screen had.
 		for (const [text, tint] of [
 			['fg', 'accent-soft'],
 			['accent', 'accent-soft'],
-			['danger', 'danger-soft']
+			['danger', 'danger-soft'],
+			['on-accent', 'danger']
 		] as const) {
 			it(`reads ${text} on ${tint} in ${theme}`, () => {
 				expect(contrast(colours[text][theme], colours[tint][theme])).toBeGreaterThanOrEqual(4.5);
