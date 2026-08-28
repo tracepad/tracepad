@@ -1,5 +1,7 @@
+import { admin } from '$lib/admin.svelte';
 import { auth } from '$lib/auth.svelte';
 import type { components, paths } from './schema';
+import type { SessionFilters } from './sessions';
 import type { TraceFilters } from './traces';
 
 // The whole data layer (spec 006 #7): a thin typed client over the read API,
@@ -24,10 +26,33 @@ export type Observation = components['schemas']['Observation'];
 export type Truncation = components['schemas']['Truncation'];
 export type Expansion = components['schemas']['Expansion'];
 export type Project = components['schemas']['Project'];
+export type SessionRow = components['schemas']['SessionRow'];
+/** What a destructive request answers before it is confirmed (spec 005 #8). */
+export type DryRun = components['schemas']['DryRun'];
+/** A freshly minted pair; the secret is in this response and nowhere else. */
+export type NewKey = components['schemas']['NewKey'];
 
 export type TracePage = JSONResponse<paths['/api/v1/traces']['get']>;
 export type ObservationIO = JSONResponse<paths['/api/v1/observations/{id}/io']['get']>;
+export type SessionPage = JSONResponse<paths['/api/v1/sessions']['get']>;
+export type Session = JSONResponse<paths['/api/v1/sessions/{id}']['get']>;
+export type Stats = JSONResponse<paths['/api/v1/stats']['get']>;
+export type KeyList = JSONResponse<paths['/api/v1/projects/{id}/keys']['get']>;
 type ProjectList = JSONResponse<paths['/api/v1/projects']['get']>;
+
+/**
+ * Which credential a request travels on (spec 007 #3). Two values rather than
+ * a boolean, and passed at every call site rather than inferred from the path,
+ * because "the admin token never touches the data plane" is a claim that has
+ * to be readable in one grep and testable in one spy.
+ */
+type Scope = 'project' | 'admin';
+
+/** The retention windows a PATCH can move. `null` is "keep forever". */
+export type RetentionUpdate = {
+	retention_days?: number | null;
+	raw_retention_days?: number | null;
+};
 
 /**
  * What a credential turns out to be (spec 006 #13). The interface reads
@@ -67,7 +92,7 @@ class Api {
 	version = $state.raw<string | null>(null);
 
 	listProjects(signal?: AbortSignal) {
-		return this.#json<ProjectList>('/api/v1/projects', {}, signal);
+		return this.#json<ProjectList>('/api/v1/projects', { signal });
 	}
 
 	listTraces(
@@ -75,15 +100,36 @@ class Api {
 		page: { cursor?: string; limit?: number } = {},
 		signal?: AbortSignal
 	) {
-		return this.#json<TracePage>(
-			'/api/v1/traces',
-			{
-				...filters,
-				cursor: page.cursor,
-				limit: page.limit === undefined ? undefined : String(page.limit)
-			},
+		return this.#json<TracePage>('/api/v1/traces', {
+			query: { ...filters, ...paging(page) },
 			signal
-		);
+		});
+	}
+
+	listSessions(
+		filters: SessionFilters,
+		page: { cursor?: string; limit?: number } = {},
+		signal?: AbortSignal
+	) {
+		return this.#json<SessionPage>('/api/v1/sessions', {
+			query: { ...filters, ...paging(page) },
+			signal
+		});
+	}
+
+	/** One session: its totals and a page of its traces. */
+	getSession(id: string, page: { cursor?: string; limit?: number } = {}, signal?: AbortSignal) {
+		return this.#json<Session>(`/api/v1/sessions/${encodeURIComponent(id)}`, {
+			query: paging(page),
+			signal
+		});
+	}
+
+	getStats(
+		query: { from?: string; to?: string; environment?: string; group_by?: string },
+		signal?: AbortSignal
+	) {
+		return this.#json<Stats>('/api/v1/stats', { query, signal });
 	}
 
 	/**
@@ -93,16 +139,120 @@ class Api {
 	 * guesses the budget.
 	 */
 	getTrace(id: string, signal?: AbortSignal) {
-		return this.#json<Trace>(`/api/v1/traces/${encodeURIComponent(id)}`, { expand: 'io' }, signal);
+		return this.#json<Trace>(`/api/v1/traces/${encodeURIComponent(id)}`, {
+			query: { expand: 'io' },
+			signal
+		});
 	}
 
 	/** The one budget-exempt endpoint: a whole payload, on request. */
 	getObservationIO(observationId: string, traceId: string, signal?: AbortSignal) {
 		return this.#json<ObservationIO>(
 			`/api/v1/observations/${encodeURIComponent(observationId)}/io`,
-			{ trace_id: traceId },
-			signal
+			{ query: { trace_id: traceId }, signal }
 		);
+	}
+
+	// --- the project's own management (spec 005 #11) -----------------------
+	//
+	// All of it on the session's project key: a project administers itself.
+	// Every destructive one is the server's dry run until `confirm` echoes
+	// what it destroys, and the screen renders that preview rather than
+	// computing one of its own (spec 007 #5).
+
+	/**
+	 * Moves a retention window. Without `confirm` a shrink answers with the
+	 * dry run instead of applying — that is the endpoint's contract, and the
+	 * discriminator is the `dry_run` field of the body.
+	 */
+	patchProject(id: string, body: RetentionUpdate, confirm?: string) {
+		return this.#json<Project | DryRun>(`/api/v1/projects/${id}`, {
+			method: 'PATCH',
+			query: { confirm },
+			body
+		});
+	}
+
+	listKeys(id: string, signal?: AbortSignal) {
+		return this.#json<KeyList>(`/api/v1/projects/${id}/keys`, { signal });
+	}
+
+	createKey(id: string) {
+		return this.#json<NewKey>(`/api/v1/projects/${id}/keys`, { method: 'POST' });
+	}
+
+	/** Revoking the last key of a project asks for the echo (spec 005 #12). */
+	revokeKey(id: string, publicKey: string, confirm?: string) {
+		return this.#json<DryRun | { dry_run: false }>(
+			`/api/v1/projects/${id}/keys/${encodeURIComponent(publicKey)}`,
+			{ method: 'DELETE', query: { confirm } }
+		);
+	}
+
+	eraseUserData(id: string, userID: string, confirm?: string) {
+		return this.#json<DryRun | { dry_run: false; deleted: Record<string, number> }>(
+			`/api/v1/projects/${id}/users/${encodeURIComponent(userID)}/data`,
+			{ method: 'DELETE', query: { confirm } }
+		);
+	}
+
+	// --- administration (spec 007 #3, #4) ----------------------------------
+	//
+	// The five calls below are the only ones in this file that carry the admin
+	// token, and they are the project lifecycle plus the rename spec 005 #11
+	// made a cross-project act. Nothing that reads trace data appears here.
+
+	/** Every project, soft-deleted ones included with their purge dates. */
+	listAllProjects(signal?: AbortSignal) {
+		return this.#json<ProjectList>('/api/v1/projects', {
+			query: { include: 'deleted' },
+			scope: 'admin',
+			signal
+		});
+	}
+
+	createProject(name: string) {
+		return this.#json<Project & NewKey>('/api/v1/projects', {
+			method: 'POST',
+			body: { name },
+			scope: 'admin'
+		});
+	}
+
+	renameProject(id: string, name: string) {
+		return this.#json<Project>(`/api/v1/projects/${id}`, {
+			method: 'PATCH',
+			body: { name },
+			scope: 'admin'
+		});
+	}
+
+	deleteProject(id: string, confirm?: string) {
+		return this.#json<DryRun | Project>(`/api/v1/projects/${id}`, {
+			method: 'DELETE',
+			query: { confirm },
+			scope: 'admin'
+		});
+	}
+
+	restoreProject(id: string) {
+		return this.#json<Project>(`/api/v1/projects/${id}/restore`, {
+			method: 'POST',
+			scope: 'admin'
+		});
+	}
+
+	/**
+	 * Decides whether a token really is the admin token before storing it.
+	 * `?include=deleted` is the probe because it is the cheapest request only
+	 * the admin token may make: a project key reaches `GET /api/v1/projects`
+	 * perfectly well and would otherwise pass for one.
+	 */
+	async probeAdmin(token: string): Promise<boolean> {
+		const response = await this.#fetch('/api/v1/projects', { include: 'deleted' }, token);
+		if (response.ok) return true;
+		if (response.status === 401 || response.status === 403) return false;
+		throw new ApiError(response.status, await message(response));
 	}
 
 	/**
@@ -120,13 +270,24 @@ class Api {
 		return projects.ok ? 'admin-token' : 'rejected';
 	}
 
-	async #json<T>(path: string, query: Query, signal?: AbortSignal): Promise<T> {
-		const response = await this.#fetch(path, query, auth.key, signal);
+	async #json<T>(path: string, options: Request = {}): Promise<T> {
+		const scope = options.scope ?? 'project';
+		const key = scope === 'admin' ? admin.token : auth.key;
+		if (scope === 'admin' && !key) {
+			throw new ApiError(0, 'the Administration section is locked');
+		}
+		const response = await this.#fetch(path, options.query ?? {}, key, options);
 		if (response.ok) return (await response.json()) as T;
 		if (response.status === 401) {
-			// The stored key is wrong, revoked, or belongs to a project that
-			// no longer exists (spec 006 #8). Keeping it would replay the
-			// same failure on every screen.
+			// Whichever credential this request travelled on is wrong,
+			// revoked, or belongs to something that no longer exists. Keeping
+			// it would replay the same failure on every screen — but a bad
+			// admin token must only lock its own section, never sign the
+			// reader out of the app (spec 006 #8, spec 007 #3).
+			if (scope === 'admin') {
+				admin.clear();
+				throw new ApiError(401, 'the server did not accept that admin token');
+			}
 			auth.reject();
 			throw new ApiError(401, 'the key was rejected — sign in again');
 		}
@@ -137,13 +298,18 @@ class Api {
 		path: string,
 		query: Query,
 		key: string | null,
-		signal?: AbortSignal
+		options: Request = {}
 	): Promise<Response> {
 		let response: Response;
 		try {
 			response = await fetch(path + search(query), {
-				headers: key ? { Authorization: `Bearer ${key}` } : {},
-				signal
+				method: options.method ?? 'GET',
+				headers: {
+					...(key ? { Authorization: `Bearer ${key}` } : {}),
+					...(options.body === undefined ? {} : { 'Content-Type': 'application/json' })
+				},
+				body: options.body === undefined ? undefined : JSON.stringify(options.body),
+				signal: options.signal
 			});
 		} catch (cause) {
 			if (cause instanceof DOMException && cause.name === 'AbortError') throw cause;
@@ -153,6 +319,23 @@ class Api {
 		if (version) this.version = version;
 		return response;
 	}
+}
+
+/** Everything one request can vary. */
+type Request = {
+	method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+	query?: Query;
+	body?: unknown;
+	scope?: Scope;
+	signal?: AbortSignal;
+};
+
+/** The two page parameters, as query values. */
+function paging(page: { cursor?: string; limit?: number }): Query {
+	return {
+		cursor: page.cursor,
+		limit: page.limit === undefined ? undefined : String(page.limit)
+	};
 }
 
 /**
