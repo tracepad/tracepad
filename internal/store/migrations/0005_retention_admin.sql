@@ -18,6 +18,11 @@
 -- `timestamp` is client bytes; only the server can say how long we have held
 -- what we received. Backfilled as min(timestamp, migration time): a client
 -- that sent the future must not buy itself immortality.
+--
+-- A non-positive `timestamp` is not a date, it is the absence of one: 0 is
+-- what migration 0004 wrote for a trace whose every span carried an unset
+-- start time. Reading it as 1970 would hand exactly those traces to the first
+-- sweep after any window is set, so they take the migration time instead.
 CREATE TABLE traces_new (
     project_id        TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     id                TEXT NOT NULL,
@@ -41,8 +46,11 @@ INSERT INTO traces_new (project_id, id, name, user_id, session_id, environment,
                         latency_ms, error_count, observation_count)
      SELECT project_id, id, name, user_id, session_id, environment,
             tags, metadata_id, timestamp,
-            MIN(COALESCE(timestamp, CAST(strftime('%s', 'now') AS INTEGER) * 1000000000),
-                CAST(strftime('%s', 'now') AS INTEGER) * 1000000000),
+            CASE
+              WHEN timestamp IS NULL OR timestamp <= 0
+                THEN CAST(strftime('%s', 'now') AS INTEGER) * 1000000000
+              ELSE MIN(timestamp, CAST(strftime('%s', 'now') AS INTEGER) * 1000000000)
+            END,
             total_cost, latency_ms, error_count, observation_count
        FROM traces;
 

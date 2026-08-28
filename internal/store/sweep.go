@@ -70,11 +70,12 @@ type jobSubmitter interface {
 
 // Sweeper deletes what the retention windows say is expired.
 type Sweeper struct {
-	store    *Store
-	writer   jobSubmitter
-	interval time.Duration
-	chunk    int
-	now      func() time.Time
+	store     *Store
+	writer    jobSubmitter
+	interval  time.Duration
+	chunk     int
+	maxChunks int
+	now       func() time.Time
 
 	stop   context.CancelFunc
 	done   chan struct{}
@@ -106,14 +107,15 @@ func (s *Store) NewSweeper(writer jobSubmitter, opts SweepOptions) *Sweeper {
 	}
 	now := opts.Now()
 	return &Sweeper{
-		store:    s,
-		writer:   writer,
-		interval: opts.Interval,
-		chunk:    opts.Chunk,
-		now:      opts.Now,
-		started:  now,
-		nextRun:  now.Add(opts.Interval),
-		deleted:  map[string]*sweepCounters{},
+		store:     s,
+		writer:    writer,
+		interval:  opts.Interval,
+		chunk:     opts.Chunk,
+		maxChunks: maxChunksPerProject,
+		now:       opts.Now,
+		started:   now,
+		nextRun:   now.Add(opts.Interval),
+		deleted:   map[string]*sweepCounters{},
 	}
 }
 
@@ -231,7 +233,7 @@ func (sw *Sweeper) sweepProject(ctx context.Context, project *Project, at time.T
 	purging := project.Deleted() && now >= project.PurgeAt()
 
 	var removed bool
-	traces, err := sw.sweepTraces(ctx, project.ID, now, purging)
+	traces, tracesDrained, err := sw.sweepTraces(ctx, project.ID, now, purging)
 	if traces > 0 {
 		removed = true
 		sw.count(project.ID, traces, 0)
@@ -240,7 +242,7 @@ func (sw *Sweeper) sweepProject(ctx context.Context, project *Project, at time.T
 		return removed, err
 	}
 
-	raw, err := sw.sweepRawBatches(ctx, project.ID, now, purging)
+	raw, rawDrained, err := sw.sweepRawBatches(ctx, project.ID, now, purging)
 	if raw > 0 {
 		removed = true
 		sw.count(project.ID, 0, raw)
@@ -249,10 +251,14 @@ func (sw *Sweeper) sweepProject(ctx context.Context, project *Project, at time.T
 		return removed, err
 	}
 
-	if purging {
-		// Everything the chunks own is gone; the project row takes the
-		// small remainder (keys, scores, prompts, labels) with it
-		// through the cascades of 0001–0003.
+	if purging && tracesDrained && rawDrained {
+		// Only once the chunks have actually run out. The project row
+		// takes the small remainder (keys, scores, prompts, labels) with
+		// it through the cascades of 0001–0003 — but `payloads` has no
+		// project column and so no cascade (spec 002 #8), so dropping
+		// the row while traces remain would strand every payload they
+		// own for the orphan pass to find a few thousand at a time.
+		// A backlog larger than one pass simply finishes next pass.
 		purge := &projectPurge{ProjectID: project.ID, Now: now}
 		if err := sw.writer.Submit(ctx, purge); err != nil {
 			return removed, err
@@ -262,40 +268,46 @@ func (sw *Sweeper) sweepProject(ctx context.Context, project *Project, at time.T
 			logger().Info("purged deleted project after its grace window",
 				"project", project.Name, "deleted_at", project.DeletedAt)
 		}
+	} else if purging {
+		logger().Info("purge of a deleted project continues next pass",
+			"project", project.Name, "traces_removed", traces, "raw_batches_removed", raw)
 	}
 	return removed, nil
 }
 
 // sweepTraces removes expired traces chunk by chunk until a chunk comes back
-// short, which is what says the window is clear.
-func (sw *Sweeper) sweepTraces(ctx context.Context, projectID string, now int64, purge bool) (int64, error) {
+// short, which is what says the window is clear. It reports whether it got
+// that far: the per-pass chunk bound stops a huge backlog from monopolising
+// the writer, and a caller that has more to do than delete rows — the purge —
+// has to know the difference between "done" and "out of chunks".
+func (sw *Sweeper) sweepTraces(ctx context.Context, projectID string, now int64, purge bool) (int64, bool, error) {
 	var total int64
-	for range maxChunksPerProject {
+	for range sw.maxChunks {
 		chunk := &traceSweep{ProjectID: projectID, Now: now, Purge: purge, Limit: sw.chunk}
 		if err := sw.writer.Submit(ctx, chunk); err != nil {
-			return total, err
+			return total, false, err
 		}
 		total += chunk.Traces
 		if chunk.Traces < int64(sw.chunk) {
-			return total, nil
+			return total, true, nil
 		}
 	}
-	return total, nil
+	return total, false, nil
 }
 
-func (sw *Sweeper) sweepRawBatches(ctx context.Context, projectID string, now int64, purge bool) (int64, error) {
+func (sw *Sweeper) sweepRawBatches(ctx context.Context, projectID string, now int64, purge bool) (int64, bool, error) {
 	var total int64
-	for range maxChunksPerProject {
+	for range sw.maxChunks {
 		chunk := &rawSweep{ProjectID: projectID, Now: now, Purge: purge, Limit: sw.chunk}
 		if err := sw.writer.Submit(ctx, chunk); err != nil {
-			return total, err
+			return total, false, err
 		}
 		total += chunk.Deleted
 		if chunk.Deleted < int64(sw.chunk) {
-			return total, nil
+			return total, true, nil
 		}
 	}
-	return total, nil
+	return total, false, nil
 }
 
 // sweepOrphanPayloads collects payload rows nothing references any more:
@@ -546,10 +558,8 @@ func sweepCutoff(tx *sql.Tx, projectID string, now int64, purge bool) (int64, bo
 		}
 		return math.MaxInt64, true, nil
 	}
-	if !retention.Valid {
-		return 0, false, nil
-	}
-	return now - retention.Int64*int64(24*time.Hour), true, nil
+	cutoff, sweeping := windowCutoff(retention, now)
+	return cutoff, sweeping, nil
 }
 
 // rawSweepCutoff is the same for raw bodies, whose window falls back to the
@@ -579,10 +589,21 @@ func rawSweepCutoff(tx *sql.Tx, projectID string, now int64, purge bool) (int64,
 	if !window.Valid {
 		window = retention
 	}
-	if !window.Valid {
-		return 0, false, nil
+	cutoff, sweeping := windowCutoff(window, now)
+	return cutoff, sweeping, nil
+}
+
+// windowCutoff resolves a stored window column into the arrival time before
+// which rows expire. NULL means keep forever (spec 005 #2), and so does a
+// window past the ceiling cutoffFor guards — the sweeper and the dry run share
+// that reading, so a preview can never promise something the sweep would do
+// differently.
+func windowCutoff(days sql.NullInt64, now int64) (int64, bool) {
+	if !days.Valid {
+		return 0, false
 	}
-	return now - window.Int64*int64(24*time.Hour), true, nil
+	window := int(days.Int64)
+	return cutoffFor(&window, now)
 }
 
 // expiredTraceIDs picks the chunk, oldest arrival first. Served by

@@ -49,9 +49,25 @@ type OptionalDays struct {
 	Value *int
 }
 
-// Cutoff turns a window into the arrival time before which rows expire.
+// MaxRetentionDays bounds a retention window, at a little over a century.
+// The real ceiling is arithmetic: a window is turned into a nanosecond cutoff,
+// and past ~106751 days that multiplication overflows int64 and wraps the
+// cutoff into the *future*, where it matches every row there is. A limit two
+// orders of magnitude below the wrap is a limit nobody meets by accident and
+// nobody reaches by mistake.
+const MaxRetentionDays = 36500
+
+// cutoffFor turns a window into the arrival time before which rows expire, and
+// reports whether there is a window at all.
+//
+// A stored window beyond the ceiling is read as "keep forever" rather than
+// clamped: it can only come from a hand-edited database, "essentially forever"
+// is what such a number means, and of the two ways to be wrong about a
+// deletion, not deleting is the recoverable one. Both the sweeper and the dry
+// run go through here, so a preview cannot promise something the sweep would
+// do differently.
 func cutoffFor(days *int, now int64) (int64, bool) {
-	if days == nil {
+	if days == nil || *days > MaxRetentionDays {
 		return 0, false
 	}
 	return now - int64(*days)*int64(24*time.Hour), true

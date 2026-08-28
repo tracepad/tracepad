@@ -650,9 +650,9 @@
           "type": "object",
           "properties": {
             "name": {"type": "string", "description": "Admin token only"},
-            "retention_days": {"type": ["integer", "null"], "minimum": 1,
-              "description": "How long a trace is kept after it arrived; null keeps it forever"},
-            "raw_retention_days": {"type": ["integer", "null"], "minimum": 1,
+            "retention_days": {"type": ["integer", "null"], "minimum": 1, "maximum": 36500,
+              "description": "How long a trace is kept after it arrived; null keeps it forever. Bounded because a window becomes a nanosecond cutoff, and a large enough one would overflow into the future and match every row — \"forever\" is null, not a big number."},
+            "raw_retention_days": {"type": ["integer", "null"], "minimum": 1, "maximum": 36500,
               "description": "The window for stored OTLP bodies; null follows retention_days"}
           }}}}},
         "responses": {
@@ -982,8 +982,8 @@
         "properties": {
           "id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
           "name": {"type": "string"},
-          "retention_days": {"type": ["integer", "null"], "description": "null means the data is kept forever, which is the default"},
-          "raw_retention_days": {"type": ["integer", "null"], "description": "null means raw follows retention_days"},
+          "retention_days": {"type": ["integer", "null"], "maximum": 36500, "description": "null means the data is kept forever, which is the default"},
+          "raw_retention_days": {"type": ["integer", "null"], "maximum": 36500, "description": "null means raw follows retention_days"},
           "created_at": {"type": "string", "format": "date-time"},
           "deleted_at": {"type": "string", "format": "date-time"},
           "purge_at": {"type": "string", "format": "date-time", "description": "When the sweeper destroys the data; seven days after the delete, and not configurable"}

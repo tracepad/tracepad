@@ -107,11 +107,6 @@ func (s *Store) migrate() error {
 			return err
 		}
 		logger().Info("applied migration", "migration", name)
-		if after := afterMigration[name]; after != nil {
-			if err := after(s); err != nil {
-				return fmt.Errorf("finish migration %s: %w", name, err)
-			}
-		}
 	}
 	return nil
 }
@@ -174,12 +169,8 @@ func checkForeignKeys(ctx context.Context, tx *sql.Tx) error {
 	return nil
 }
 
-// afterMigration holds the work a migration needs that its own SQL cannot do,
-// keyed by filename. VACUUM is why this exists: it cannot run inside a
-// transaction, and every migration file runs in one.
-var afterMigration = map[string]func(*Store) error{
-	"0005_retention_admin.sql": (*Store).ensureIncrementalVacuum,
-}
+// incrementalVacuumMode is SQLite's numbering for auto_vacuum=INCREMENTAL.
+const incrementalVacuumMode = 2
 
 // ensureIncrementalVacuum puts the database into incremental auto-vacuum mode
 // so that retention deletes can hand pages back to the filesystem (spec 005
@@ -187,26 +178,46 @@ var afterMigration = map[string]func(*Store) error{
 // actually shrinks" is the operator-visible half of retention.
 //
 // The mode is a property of the file, and the only way to change it on a
-// populated database is a full VACUUM. Databases created by this binary have
-// been incremental since spec 001 (the DSN sets the pragma before the first
-// table exists), so the check is what keeps the expensive branch unreached in
-// practice — and correct for a file that arrived from somewhere else.
+// populated one is a full VACUUM — which must run on the same connection that
+// asked for the new mode, since the pragma is a per-connection intention until
+// the VACUUM applies it. Two `db.Exec` calls take two pooled connections and
+// leave the mode exactly as it was, quietly.
+//
+// It runs on every Open rather than once, as the tail of a migration: keyed to
+// a migration it would run after that migration was already recorded as
+// applied, so a VACUUM that failed for want of disk space would be skipped
+// forever afterwards. Asked every time, it is one PRAGMA read on a database
+// that is already right, and it heals one that is not.
 func (s *Store) ensureIncrementalVacuum() error {
-	const incremental = 2
+	ctx := context.Background()
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("reserve connection for vacuum: %w", err)
+	}
+	defer conn.Close()
+
 	var mode int
-	if err := s.db.QueryRow(`PRAGMA auto_vacuum`).Scan(&mode); err != nil {
+	if err := conn.QueryRowContext(ctx, `PRAGMA auto_vacuum`).Scan(&mode); err != nil {
 		return fmt.Errorf("read auto_vacuum mode: %w", err)
 	}
-	if mode == incremental {
+	if mode == incrementalVacuumMode {
 		return nil
 	}
+
 	logger().Info("rewriting the database to enable incremental vacuum", "from_mode", mode)
-	// The pragma records the wanted mode; the VACUUM is what applies it.
-	if _, err := s.db.Exec(`PRAGMA auto_vacuum=INCREMENTAL`); err != nil {
+	if _, err := conn.ExecContext(ctx, `PRAGMA auto_vacuum=INCREMENTAL`); err != nil {
 		return fmt.Errorf("set auto_vacuum mode: %w", err)
 	}
-	if _, err := s.db.Exec(`VACUUM`); err != nil {
+	if _, err := conn.ExecContext(ctx, `VACUUM`); err != nil {
 		return fmt.Errorf("vacuum to change auto_vacuum mode: %w", err)
+	}
+	// Believing the VACUUM rather than checking it is how this failed
+	// silently the first time.
+	if err := conn.QueryRowContext(ctx, `PRAGMA auto_vacuum`).Scan(&mode); err != nil {
+		return fmt.Errorf("read auto_vacuum mode: %w", err)
+	}
+	if mode != incrementalVacuumMode {
+		return fmt.Errorf("auto_vacuum is still mode %d after a full vacuum", mode)
 	}
 	return nil
 }

@@ -284,6 +284,10 @@ func TestAdminCommandUsageErrors(t *testing.T) {
 		{"users", "wat"},
 		{"retention", "set"},
 		{"retention", "set", "--days", "30", "--forever"},
+		// A window big enough to overflow the cutoff is a typo, not a
+		// policy: "forever" is --forever.
+		{"retention", "set", "--days", "999999"},
+		{"retention", "set", "--raw-days", "999999"},
 		{"projects", "rm"},
 	} {
 		out := h.run(t.Context(), true, args...)

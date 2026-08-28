@@ -154,7 +154,8 @@ tracepad retention set --forever --raw-follow
 ```
 
 `null` — `--forever` for traces, `--raw-follow` for raw — is a value, not an
-absence: it means "keep forever" and "follow the trace window". A window that
+absence: it means "keep forever" and "follow the trace window", and it is the
+only way to say it: a day count is bounded at 36500. A window that
 **grows** applies immediately. A window that **shrinks** destroys data on the
 next sweep, so it is previewed and confirmed like any other destruction, even
 when nothing is old enough to be affected yet: what is being changed is the

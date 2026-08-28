@@ -13,7 +13,8 @@ this audience, and the wrong one for a fleet, which is why the window is one
 
 ## The two windows
 
-Each project has two, both counted in whole days and both nullable:
+Each project has two, both counted in whole days (1 to 36500) and both
+nullable:
 
 | Setting | Applies to | `null` means |
 |---|---|---|
@@ -26,6 +27,11 @@ tracepad retention set --days 90               # traces: 90 days
 tracepad retention set --raw-days 14 --yes     # raw bodies: 14 days
 tracepad retention set --forever               # back to keeping everything
 ```
+
+"Keep it essentially forever" is spelled `--forever`, not a very large number
+of days: a window is turned into a nanosecond cutoff, so the day count is
+capped at 36500 rather than allowed to overflow into a date in the future —
+where it would match every row there is.
 
 Raw follows the parsed window by default rather than being shorter, because raw
 is the insurance policy: it is what makes a mapping bug retroactively fixable

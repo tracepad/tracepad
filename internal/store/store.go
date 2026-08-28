@@ -65,6 +65,13 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("open %s: %w (latest backup, if any: %s)", path, err, latestBackup(path))
 	}
+	// Not fatal: without incremental auto-vacuum, retention still deletes
+	// rows and the file merely stops shrinking. Refusing to start over
+	// that — a full VACUUM wants room for a second copy of the database —
+	// would turn a disk-space problem into an outage.
+	if err := s.ensureIncrementalVacuum(); err != nil {
+		logger().Warn("could not enable incremental vacuum; retention will free rows but not disk", "err", err)
+	}
 	return s, nil
 }
 

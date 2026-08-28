@@ -542,3 +542,82 @@ func fileBytes(t *testing.T, path string) int64 {
 }
 
 func floatPtr(v float64) *float64 { return &v }
+
+// The findings of the code review on PR #6, each as the test that would have
+// caught it.
+
+// TestAnAbsurdWindowKeepsEverything: a window is turned into a nanosecond
+// cutoff, and past ~106751 days that multiplication overflows int64 and wraps
+// the cutoff into the *future*, where it matches every row. "Keep it for a
+// million days" must not mean "delete it all on the next pass".
+func TestAnAbsurdWindowKeepsEverything(t *testing.T) {
+	f := newSweepFixture(t)
+	f.arrive(t, f.project.ID, hexTrace(1), daysAgo(400))
+
+	// 200000 days is the value that wraps: now − 200000 days lands in 2063.
+	f.setRetention(t, f.project.ID, days(200000), nil)
+	if err := f.sweeper.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.count(t, `SELECT COUNT(*) FROM traces`); got != 1 {
+		t.Errorf("traces = %d after a 200000-day window, want the trace kept", got)
+	}
+
+	// And the dry run agrees with the sweep, rather than confirming the
+	// same wrong answer.
+	counts, err := f.store.RetentionPreview(f.project.ID, days(200000), nil, sweepNow.UnixNano())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if counts.Any() {
+		t.Errorf("the preview of a 200000-day window promises to delete %+v", counts)
+	}
+
+	// A window inside the ceiling still works exactly as before.
+	f.setRetention(t, f.project.ID, days(30), nil)
+	if err := f.sweeper.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.count(t, `SELECT COUNT(*) FROM traces`); got != 0 {
+		t.Errorf("traces = %d under a 30-day window, want the 400-day-old trace swept", got)
+	}
+}
+
+// TestPurgeWaitsForTheChunksToDrain: dropping the project row cascades the
+// traces away, but `payloads` has no project column and so no cascade
+// (spec 002 #8). Purging while chunks remain strands their payloads for the
+// orphan pass to find a few thousand at a time.
+func TestPurgeWaitsForTheChunksToDrain(t *testing.T) {
+	f := newSweepFixture(t)
+	// More traces than one pass may remove: two chunks of one.
+	f.sweeper.chunk = 1
+	f.sweeper.maxChunks = 2
+	for i := 1; i <= 5; i++ {
+		f.arrive(t, f.project.ID, hexTrace(i), daysAgo(1))
+	}
+	if _, err := f.store.db.Exec(`UPDATE projects SET deleted_at = ? WHERE id = ?`,
+		daysAgo(8), f.project.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := f.sweeper.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.count(t, `SELECT COUNT(*) FROM projects`); got != 1 {
+		t.Fatalf("the project row went while %d traces were still to sweep",
+			f.count(t, `SELECT COUNT(*) FROM traces`))
+	}
+
+	// Passes until the backlog is clear; then the project goes, and
+	// nothing is left behind with it.
+	for range 5 {
+		if err := f.sweeper.Pass(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, table := range []string{"traces", "observations", "payloads", "projects"} {
+		if got := f.count(t, `SELECT COUNT(*) FROM `+table); got != 0 {
+			t.Errorf("%s = %d after the purge finished, want nothing left", table, got)
+		}
+	}
+}

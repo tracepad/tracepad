@@ -200,3 +200,130 @@ func TestArrivalHasNoDefault(t *testing.T) {
 		t.Errorf("insert failed with %v, want a NOT NULL constraint failure", err)
 	}
 }
+
+// TestBackfillDoesNotDateAnUnknownTimestampTo1970: migration 0004 wrote
+// `timestamp = 0` for a trace whose every span carried an unset start time, and
+// reading that as a date makes `min(timestamp, migration time)` equal 0. Those
+// traces would be handed to the first sweep after any window was set, and would
+// not even show up in the dry run's "oldest" — exactly the failure the rebuild
+// of Decision 16 exists to prevent.
+func TestBackfillDoesNotDateAnUnknownTimestampTo1970(t *testing.T) {
+	path := openAtSchema0004(t)
+	func() {
+		db, err := sql.Open("sqlite", "file:"+path+"?_pragma=foreign_keys(ON)")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		for _, query := range []string{
+			`INSERT INTO projects (id, name, retention_days) VALUES ('p1', 'app', 30)`,
+			// What 0004's own backfill leaves behind.
+			`INSERT INTO traces (project_id, id, timestamp) VALUES ('p1', 'zero', 0)`,
+			`INSERT INTO traces (project_id, id, timestamp) VALUES ('p1', 'null', NULL)`,
+		} {
+			if _, err := db.Exec(query); err != nil {
+				t.Fatalf("%s: %v", query, err)
+			}
+		}
+	}()
+
+	before := time.Now().Add(-time.Second).UnixNano()
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	rows, err := s.db.Query(`SELECT id, ingested_at FROM traces`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			id      string
+			arrived int64
+		)
+		if err := rows.Scan(&id, &arrived); err != nil {
+			t.Fatal(err)
+		}
+		if arrived < before {
+			t.Errorf("trace %q arrived at %s; a timestamp of %q is the absence of a date, "+
+				"not 1970, and this row is one sweep from being deleted",
+				id, time.Unix(0, arrived).UTC(), id)
+		}
+	}
+}
+
+// TestIncrementalVacuumIsActuallyEnabled: the pragma and the VACUUM that
+// applies it have to run on the same connection, and two db.Exec calls take two
+// pooled ones and leave the mode exactly as it was — silently, since the
+// function had no reason to think it had failed.
+func TestIncrementalVacuumIsActuallyEnabled(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "legacy.db")
+
+	// A database that predates the DSN pragma of spec 001.
+	db, err := sql.Open("sqlite", "file:"+path+"?_pragma=auto_vacuum(NONE)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`CREATE TABLE legacy (a TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	var mode int
+	if err := s.db.QueryRow(`PRAGMA auto_vacuum`).Scan(&mode); err != nil {
+		t.Fatal(err)
+	}
+	if mode != incrementalVacuumMode {
+		t.Fatalf("auto_vacuum = %d after opening a legacy database, want %d: "+
+			"without it the sweeper's incremental_vacuum is a permanent no-op",
+			mode, incrementalVacuumMode)
+	}
+}
+
+// TestIncrementalVacuumHealsOnALaterOpen: the mode switch is not the tail of a
+// migration. Keyed to one it would run after that migration was recorded as
+// applied, so a VACUUM that failed once — it wants room for a second copy of
+// the file — would be skipped forever afterwards.
+func TestIncrementalVacuumHealsOnALaterOpen(t *testing.T) {
+	s, path := openTemp(t)
+	if _, err := s.Bootstrap(nil); err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+
+	// A database that has every migration applied and is nevertheless in
+	// the wrong mode, which is what a failed first attempt leaves behind.
+	db, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`PRAGMA auto_vacuum=NONE; VACUUM`); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+
+	var mode int
+	if err := reopened.db.QueryRow(`PRAGMA auto_vacuum`).Scan(&mode); err != nil {
+		t.Fatal(err)
+	}
+	if mode != incrementalVacuumMode {
+		t.Errorf("auto_vacuum = %d, want %d: a database whose migrations are all "+
+			"recorded must still be able to reach the right mode",
+			mode, incrementalVacuumMode)
+	}
+}

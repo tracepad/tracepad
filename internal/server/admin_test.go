@@ -680,3 +680,35 @@ func mustJSON(t *testing.T, v any) []byte {
 	}
 	return raw
 }
+
+// TestRetentionWindowHasACeiling: a window becomes a nanosecond cutoff, and
+// past ~106751 days that multiplication overflows int64 and wraps the cutoff
+// into the future, where it matches every row. Worse, "30 days becomes a
+// million" is not a shrink, so it would have gone through with no preview and
+// no echo — `tracepad retention set --days 999999`, meaning "keep it forever",
+// emptying the project on the next sweep.
+func TestRetentionWindowHasACeiling(t *testing.T) {
+	h := newAdminHarness(t)
+	path := "/api/v1/projects/" + h.project.ID
+
+	rec := h.send(t, "PATCH", path+"?confirm=test", map[string]any{"retention_days": 30})
+	expectStatus(t, rec, 200)
+
+	for _, field := range []string{"retention_days", "raw_retention_days"} {
+		rec := h.send(t, "PATCH", path, map[string]any{field: store.MaxRetentionDays + 1})
+		expectError(t, rec, http.StatusBadRequest, "between 1 and")
+	}
+	stored, _ := h.store.ProjectByID(h.project.ID)
+	if *stored.RetentionDays != 30 {
+		t.Fatalf("retention = %v, want the refused window to have changed nothing", stored.RetentionDays)
+	}
+
+	// The ceiling itself is a legal window, and "forever" has a spelling.
+	rec = h.send(t, "PATCH", path, map[string]any{"retention_days": store.MaxRetentionDays})
+	expectStatus(t, rec, 200)
+	rec = h.send(t, "PATCH", path, map[string]any{"retention_days": nil})
+	expectStatus(t, rec, 200)
+	if stored, _ := h.store.ProjectByID(h.project.ID); stored.RetentionDays != nil {
+		t.Errorf("retention = %v, want null to be how forever is said", stored.RetentionDays)
+	}
+}

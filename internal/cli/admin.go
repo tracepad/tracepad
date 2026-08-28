@@ -9,6 +9,8 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+
+	"github.com/tracepad/tracepad/internal/store"
 )
 
 // The administrative commands (spec 005): `projects`, `keys`, `retention` and
@@ -433,8 +435,8 @@ func (r *run) retentionSet(ctx context.Context, args []string) error {
 	case forever:
 		request["retention_days"] = nil
 	case days != 0:
-		if days < 1 {
-			return usageErrorf("--days must be a whole number of days above zero, got %d", days)
+		if err := checkWindow("--days", days); err != nil {
+			return err
 		}
 		request["retention_days"] = days
 	}
@@ -442,8 +444,8 @@ func (r *run) retentionSet(ctx context.Context, args []string) error {
 	case rawFollow:
 		request["raw_retention_days"] = nil
 	case rawDays != 0:
-		if rawDays < 1 {
-			return usageErrorf("--raw-days must be a whole number of days above zero, got %d", rawDays)
+		if err := checkWindow("--raw-days", rawDays); err != nil {
+			return err
 		}
 		request["raw_retention_days"] = rawDays
 	}
@@ -646,6 +648,18 @@ func renderProject(r *run, view projectView) {
 		fmt.Fprintf(r.opt.Stdout, "  deleted     %s\n", shortTime(view.DeletedAt))
 		fmt.Fprintf(r.opt.Stdout, "  purged at   %s\n", shortTime(view.PurgeAt))
 	}
+}
+
+// checkWindow rejects a window the server would refuse anyway, so a typo comes
+// back as a usage error rather than as a round trip. The ceiling is not taste:
+// a window becomes a nanosecond cutoff, and a big enough one overflows into the
+// future where it matches everything. "Forever" is `--forever`.
+func checkWindow(flag string, days int) error {
+	if days < 1 || days > store.MaxRetentionDays {
+		return usageErrorf("%s must be between 1 and %d days, or use --forever, got %d",
+			flag, store.MaxRetentionDays, days)
+	}
+	return nil
 }
 
 // window renders a retention setting. A nil window is not "0 days" and not

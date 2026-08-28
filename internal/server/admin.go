@@ -645,9 +645,14 @@ func optionalDays(field string, raw json.RawMessage) (store.OptionalDays, error)
 		return store.OptionalDays{Set: true}, nil
 	}
 	var days int
-	if err := json.Unmarshal(raw, &days); err != nil || days < 1 {
+	if err := json.Unmarshal(raw, &days); err != nil || days < 1 || days > store.MaxRetentionDays {
+		// The ceiling is not taste: a window is turned into a nanosecond
+		// cutoff, and a big enough one overflows int64 into the future,
+		// where it matches every row. "Keep it for a million days" is
+		// spelled null.
 		return store.OptionalDays{}, fmt.Errorf(
-			"%s must be a whole number of days above zero, or null to keep the data forever", field)
+			"%s must be a whole number of days between 1 and %d, or null to keep the data forever",
+			field, store.MaxRetentionDays)
 	}
 	return store.OptionalDays{Set: true, Value: &days}, nil
 }
