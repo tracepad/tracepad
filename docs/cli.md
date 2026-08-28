@@ -166,9 +166,50 @@ because a trace has no model.
 tracepad system
 ```
 
-Version, uptime, database size, row counts, the writer queue and the ingest
-counters since the server started. The first thing to run when something looks
-wrong, and the thing to paste into a bug report.
+Version, uptime, database size, row counts, the writer queue, the ingest
+counters and what the retention sweeper has done since the server started. The
+first thing to run when something looks wrong, and the thing to paste into a
+bug report.
+
+## Administration
+
+`projects`, `keys`, `retention` and `users rm-data` manage the server itself.
+They are clients of the same API as everything else, and they are covered in
+[admin.md](admin.md) and [retention.md](retention.md); what matters here is how
+they behave at a terminal.
+
+```sh
+tracepad projects ls
+tracepad keys create
+tracepad retention set --days 90
+tracepad users rm-data user-4711
+```
+
+Every destructive command asks the server what it would do, prints that, and
+asks you to type the name of what is being destroyed:
+
+```
+$ tracepad projects rm 9f2c…
+this would delete project 9f2c…:
+  api_keys       2
+  observations   180114
+  raw_batches    812
+  traces         41203
+  oldest         2026-03-14 08:21:00
+the keys stop working immediately; the data is restorable for seven days
+type "checkout-service" to confirm:
+```
+
+`--yes` answers that for a script. It is not a bypass: the command still asks
+the server first and still sends back the confirm value the server named — what
+`--yes` replaces is the typing. Run non-interactively **without** it and the
+command stops with the preview on stderr and exit code 1, because a script that
+deletes a project by default is a script that deletes a project by accident.
+
+Commands that act on a project take `--project <id>`; with one reachable
+project, the credential answers that by itself. The commands marked as needing
+the admin token in [admin.md](admin.md) take it as `--key` or
+`TRACEPAD_API_KEY`, since it rides in the same header as a project key.
 
 ## Version skew
 
