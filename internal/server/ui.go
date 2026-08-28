@@ -49,28 +49,49 @@ func (s *Server) handleUI(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "the web interface only answers GET")
 		return
 	}
+	// A path that names a file is never a client-side route, so it must not
+	// resolve to the document. Serving HTML for a missing `…/chunk.js` — a tab
+	// left open across an upgrade asking this binary for a bundle it no longer
+	// carries — turns a plain 404 into a syntax error inside the browser,
+	// which is a much worse thing to debug.
+	if path.Ext(r.URL.Path) != "" && !s.hasAsset(r.URL.Path) {
+		writeError(w, http.StatusNotFound, s.noSuchFile())
+		return
+	}
 	if s.assets == nil {
-		// A build without the `ui` tag (spec 006 Decision 9). Every
-		// interface route gets the one page that explains itself;
-		// asset paths get a 404, because a bundle file that resolved to
-		// an HTML apology would fail in stranger ways than missing.
-		if path.Ext(r.URL.Path) != "" {
-			writeError(w, http.StatusNotFound, "this build has no web interface")
-			return
-		}
+		// A build without the `ui` tag (spec 006 Decision 9): every interface
+		// route gets the one page that explains itself.
 		serveUIDocument(w, r, ui.Stub)
 		return
 	}
 	s.serveAsset(w, r)
 }
 
+func (s *Server) noSuchFile() string {
+	if s.assets == nil {
+		return "this build has no web interface"
+	}
+	return "no such file in the web interface"
+}
+
+// hasAsset reports whether the bundle carries this path as a file.
+func (s *Server) hasAsset(urlPath string) bool {
+	if s.assets == nil {
+		return false
+	}
+	file, err := s.assets.Open(assetName(urlPath))
+	if err != nil {
+		return false
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	return err == nil && !info.IsDir()
+}
+
 // serveAsset serves one file of the bundle, falling back to the SPA entry for
 // paths that are routes rather than files.
 func (s *Server) serveAsset(w http.ResponseWriter, r *http.Request) {
-	name := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
-	if name == "" || name == "." {
-		name = uiIndex
-	}
+	name := assetName(r.URL.Path)
 	file, err := s.assets.Open(name)
 	if err != nil {
 		if !errors.Is(err, fs.ErrNotExist) && !errors.Is(err, fs.ErrInvalid) {
@@ -95,6 +116,15 @@ func (s *Server) serveAsset(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-cache")
 	}
 	http.ServeFileFS(w, r, s.assets, name)
+}
+
+// assetName turns a URL path into the name it would have inside the bundle.
+func assetName(urlPath string) string {
+	name := strings.TrimPrefix(path.Clean(urlPath), "/")
+	if name == "" || name == "." {
+		return uiIndex
+	}
+	return name
 }
 
 // serveIndex hands back the SPA entry for a client-side route. It is

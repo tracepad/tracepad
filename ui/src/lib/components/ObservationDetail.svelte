@@ -103,6 +103,13 @@
 	{/if}
 
 	{#each [['Input', 'input'], ['Output', 'output'], ['Metadata', 'metadata']] as const as [label, key] (key)}
-		<Payload {label} value={payload(key)} {refused} {loading} onload={loadPayloads} />
+		<Payload
+			{label}
+			value={payload(key)}
+			{refused}
+			loaded={full !== null}
+			{loading}
+			onload={loadPayloads}
+		/>
 	{/each}
 </div>

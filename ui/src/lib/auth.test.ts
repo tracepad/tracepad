@@ -127,3 +127,31 @@ describe('the stored key', () => {
 		expect(auth.key).toBe('tp-sk-padded');
 	});
 });
+
+describe('where the login form sends somebody afterwards', () => {
+	const at = (search: string) => new URL(`http://server/login${search}`);
+	let returnTo: typeof import('./auth.svelte').returnTo;
+
+	beforeEach(async () => {
+		returnTo = (await import('./auth.svelte')).returnTo;
+	});
+
+	it('returns to the screen the guard interrupted', () => {
+		expect(returnTo(at('?next=%2Ftraces%3Fstatus%3Derror'))).toBe('/traces?status=error');
+	});
+
+	it('falls back when nothing was asked for', () => {
+		expect(returnTo(at(''))).toBe('/traces');
+	});
+
+	it('refuses anywhere but this origin', () => {
+		for (const hostile of ['//elsewhere.example', 'https://elsewhere.example/x', '/\\elsewhere.example']) {
+			expect(returnTo(at(`?next=${encodeURIComponent(hostile)}`))).toBe('/traces');
+		}
+	});
+
+	it('keeps a path that merely looks odd', () => {
+		// A backslash inside the path is not a scheme-relative URL.
+		expect(returnTo(at('?next=%2Ftraces%2Fa%5Cb'))).toContain('/traces/');
+	});
+});

@@ -49,17 +49,29 @@
 	// The popover edits a copy: a listing that re-queried on every keystroke
 	// would fight the person typing an id.
 	let draft = $state<TraceFilters>({});
+	// Tags are kept as the raw text somebody is typing, not as the parsed
+	// array. Round-tripping through `split(',')` and `join(', ')` rewrites the
+	// field's value on the keystroke that adds a comma, which sends the caret
+	// to the end and makes editing a list in the middle impossible.
+	let tagsText = $state('');
 
 	const active = $derived(filterCount(filters));
 
+	function edit(opening: boolean) {
+		if (!opening) return;
+		draft = { ...filters };
+		tagsText = filters.tag?.join(', ') ?? '';
+	}
+
 	function apply(event: SubmitEvent) {
 		event.preventDefault();
-		onchange(prune(draft));
+		onchange(prune({ ...draft, tag: tagsText.split(',') }));
 		open = false;
 	}
 
 	function clearAll() {
 		draft = {};
+		tagsText = '';
 		onchange({});
 		open = false;
 	}
@@ -115,7 +127,7 @@
 </script>
 
 <div class="flex min-w-0 items-center gap-1.5">
-	<Popover.Root bind:open onOpenChange={(next) => next && (draft = { ...filters })}>
+	<Popover.Root bind:open onOpenChange={edit}>
 		<Popover.Trigger>
 			{#snippet child({ props })}
 				<Button {...props}>
@@ -167,8 +179,7 @@
 									<input
 										id="filter-{name}"
 										type="text"
-										value={draft.tag?.join(', ') ?? ''}
-										oninput={(event) => (draft.tag = event.currentTarget.value.split(','))}
+										bind:value={tagsText}
 										placeholder={field.placeholder}
 										autocomplete="off"
 										class={fieldClass}

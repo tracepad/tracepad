@@ -5,7 +5,7 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { ApiError, api } from '$lib/api/client.svelte';
-	import { auth } from '$lib/auth.svelte';
+	import { auth, returnTo } from '$lib/auth.svelte';
 	import Button from '$lib/components/Button.svelte';
 
 	// The app always authenticates (spec 006 #8). This is the only screen that
@@ -17,12 +17,8 @@
 	let error = $state<string | null>(null);
 
 	// Coming back to where the guard interrupted, which is what makes a deep
-	// link survive a sign-in. Only a path of this app: an absolute URL here
-	// would be an open redirect handed to whoever wrote the link.
-	const next = $derived.by(() => {
-		const asked = page.url.searchParams.get('next');
-		return asked && asked.startsWith('/') && !asked.startsWith('//') ? asked : '/traces';
-	});
+	// link survive a sign-in.
+	const next = $derived(returnTo(page.url));
 
 	async function submit(event: SubmitEvent) {
 		event.preventDefault();

@@ -109,4 +109,27 @@ function write(name: string, value: string | null) {
 	}
 }
 
+/**
+ * Where the login form sends somebody after they sign in: back to the screen
+ * the guard interrupted, and never anywhere else.
+ *
+ * The check is an origin comparison rather than a prefix test, because the URL
+ * parser is the only thing that agrees with the URL parser: for a special
+ * scheme it treats `/\` exactly like `//`, so `?next=/\elsewhere.example`
+ * parses to a different origin while passing any "starts with one slash"
+ * rule. Nothing is redirected off-site either way — SvelteKit refuses a
+ * cross-origin `goto` — but that refusal would land as a failed sign-in on a
+ * reader who is in fact signed in.
+ */
+export function returnTo(url: URL, fallback = '/traces'): string {
+	const asked = url.searchParams.get('next');
+	if (!asked) return fallback;
+	try {
+		const target = new URL(asked, url.origin);
+		return target.origin === url.origin ? target.pathname + target.search : fallback;
+	} catch {
+		return fallback;
+	}
+}
+
 export const auth = new Auth();

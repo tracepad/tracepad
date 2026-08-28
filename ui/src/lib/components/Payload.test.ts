@@ -77,4 +77,21 @@ describe('a trace whose expansion was refused', () => {
 
 		expect(screen.queryByRole('button', { name: /load/i })).not.toBeInTheDocument();
 	});
+
+	it('stops offering once the fetch has happened and there was nothing', () => {
+		// `refused` is a fact about the trace and never changes, so an
+		// observation that genuinely carries no metadata would otherwise keep
+		// offering to load it — and the click would change nothing, forever.
+		render(Payload, {
+			label: 'Metadata',
+			value: undefined,
+			refused: true,
+			loaded: true,
+			loading: false,
+			onload: vi.fn()
+		});
+
+		expect(screen.queryByRole('button', { name: /load/i })).not.toBeInTheDocument();
+		expect(screen.getByText('—')).toBeInTheDocument();
+	});
 });

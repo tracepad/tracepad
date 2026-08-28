@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"io/fs"
 	"net/http"
 	"strings"
 	"testing"
@@ -186,7 +187,57 @@ func TestStubExplainsWhyThereIsNoInterface(t *testing.T) {
 		}
 	}
 
-	// An asset request is not a route: answering it with the apology page
-	// would make a missing bundle look like a corrupt one.
-	expectError(t, h.get(t, "/favicon.ico"), 404, "no web interface")
+}
+
+// TestMissingFileIsNotTheDocument: a path that names a file is never a
+// client-side route. Answering `…/chunk.js` with HTML — which is what a tab
+// left open across an upgrade asks for — turns a plain 404 into a syntax
+// error inside the browser, and the same holds whether the bundle is absent
+// or merely no longer carries that name.
+func TestMissingFileIsNotTheDocument(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+
+	for _, path := range []string{
+		"/favicon.ico",
+		"/_app/immutable/chunks/from-a-previous-build.js",
+		"/_app/immutable/assets/gone.css",
+	} {
+		rec := h.get(t, path)
+		expectStatus(t, rec, 404)
+		if got := rec.Header().Get("Content-Type"); !strings.HasPrefix(got, "application/json") {
+			t.Errorf("%s: Content-Type = %q, want JSON", path, got)
+		}
+	}
+}
+
+// TestBundledFilesAreStillServed guards the check above from over-reaching:
+// the entry document is a real file and must keep coming back.
+func TestBundledFilesAreStillServed(t *testing.T) {
+	if !ui.Enabled {
+		t.Skip("this build carries no bundle to serve from")
+	}
+	h := newHarness(t, nil, store.WriterOptions{})
+
+	// Whichever hashed file this build happens to carry; the names change
+	// with every bundle, so the test finds one rather than naming it.
+	var asset string
+	fs.WalkDir(ui.Assets(), ".", func(name string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() || asset != "" || name == uiIndex {
+			return err
+		}
+		asset = name
+		return fs.SkipAll
+	})
+	if asset == "" {
+		t.Fatal("the embedded bundle carries no files")
+	}
+
+	rec := h.get(t, "/"+asset)
+	expectStatus(t, rec, 200)
+	if rec.Body.Len() == 0 {
+		t.Fatalf("%s came back empty", asset)
+	}
+	if got := rec.Header().Get("Cache-Control"); !strings.Contains(got, "immutable") {
+		t.Errorf("%s: Cache-Control = %q, want the hashed-asset policy", asset, got)
+	}
 }

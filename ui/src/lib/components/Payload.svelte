@@ -27,6 +27,7 @@
 		label,
 		value,
 		refused,
+		loaded,
 		loading,
 		onload
 	}: {
@@ -34,12 +35,19 @@
 		value: unknown;
 		/** The whole trace refused expansion, so nothing was inlined at all. */
 		refused?: boolean;
+		/** The payloads have since been fetched, whatever they turned out to be. */
+		loaded?: boolean;
 		loading: boolean;
 		onload: () => void;
 	} = $props();
 
 	const marker = $derived(isTruncated(value) ? value : null);
 	const present = $derived(value !== undefined && value !== null);
+	// `refused` is a fact about the trace and never changes, so "was it
+	// refused" cannot answer "is there still something to fetch". Without
+	// `loaded`, an observation that genuinely has no metadata keeps offering
+	// to load it, forever, and the click changes nothing.
+	const pending = $derived(Boolean(refused) && !present && !loaded);
 </script>
 
 <section class="border-border border-t px-4 py-3">
@@ -66,7 +74,7 @@
 			{/if}
 			Load the whole {bytes(marker.size)}
 		</Button>
-	{:else if refused && !present}
+	{:else if pending}
 		<p class="text-muted">
 			This trace has more payloads than the response budget can carry markers for, so none were
 			inlined. Load this observation's payloads on their own instead.

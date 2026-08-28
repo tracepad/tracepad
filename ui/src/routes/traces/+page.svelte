@@ -30,6 +30,18 @@
 	let loading = $state(true);
 	let loadingMore = $state(false);
 	let failure = $state<string | null>(null);
+	// The background poll's own slot: a live tick that recovers must not erase
+	// a "load more failed" the reader still needs, and a failed tick must not
+	// masquerade as a failure of what is on screen.
+	let liveFailure = $state<string | null>(null);
+
+	/**
+	 * Every request on this screen belongs to one set of filters. Changing
+	 * them aborts the lot: a "load more" or a live tick still in flight would
+	 * otherwise answer the previous query and be merged into the new one —
+	 * appending rows that do not match, and continuing from the wrong cursor.
+	 */
+	let query: AbortController | null = null;
 
 	$effect(() => {
 		// Re-reads whenever the filters in the URL change. `filterSearch` is
@@ -37,6 +49,7 @@
 		// compare two filter sets.
 		filterSearch(filters);
 		const controller = new AbortController();
+		query = controller;
 		load(controller.signal);
 		return () => controller.abort();
 	});
@@ -53,7 +66,9 @@
 
 	async function load(signal: AbortSignal) {
 		loading = true;
+		loadingMore = false;
 		failure = null;
+		liveFailure = null;
 		try {
 			const answer = await api.listTraces(filters, { limit: PAGE_SIZE }, signal);
 			rows = answer.traces;
@@ -68,29 +83,42 @@
 	}
 
 	async function loadMore() {
-		if (!cursor || loadingMore) return;
+		const controller = query;
+		if (!cursor || loadingMore || !controller) return;
+		const { signal } = controller;
 		loadingMore = true;
+		failure = null;
 		try {
-			const answer = await api.listTraces(filters, { limit: PAGE_SIZE, cursor });
+			const answer = await api.listTraces(filters, { limit: PAGE_SIZE, cursor }, signal);
+			// The filters moved while this was in flight: `load` has already
+			// replaced the rows, and appending this page would splice the
+			// previous query's traces into the new one.
+			if (signal.aborted) return;
 			rows = [...rows, ...answer.traces];
 			cursor = answer.next_cursor;
 		} catch (cause) {
+			if (signal.aborted) return;
 			failure = describe(cause);
 		} finally {
-			loadingMore = false;
+			if (!signal.aborted) loadingMore = false;
 		}
 	}
 
 	/** One live tick: the first page again, folded into what is on screen. */
 	async function poll() {
+		const controller = query;
+		if (!controller) return;
+		const { signal } = controller;
 		try {
-			const answer = await api.listTraces(filters, { limit: PAGE_SIZE });
+			const answer = await api.listTraces(filters, { limit: PAGE_SIZE }, signal);
+			if (signal.aborted) return;
 			rows = mergeRows(rows, answer.traces);
-			failure = null;
+			liveFailure = null;
 		} catch (cause) {
+			if (signal.aborted) return;
 			// A server that went away mid-poll is worth saying once, but not
 			// worth throwing away the rows already on screen.
-			failure = describe(cause);
+			liveFailure = describe(cause);
 		}
 	}
 
@@ -137,13 +165,13 @@
 	<FilterBar {filters} onchange={(next) => navigate(next)} />
 </div>
 
-{#if failure}
+{#if failure ?? liveFailure}
 	<p
 		role="alert"
 		class="text-danger bg-danger-soft border-border flex items-center gap-2 border-b px-4 py-2"
 	>
 		<TriangleAlert class="size-4 shrink-0" />
-		{failure}
+		{failure ?? liveFailure}
 	</p>
 {/if}
 
