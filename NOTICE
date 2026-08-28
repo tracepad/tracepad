@@ -18,3 +18,29 @@ derived from the behaviour of
 
 in https://github.com/langfuse/langfuse, whose MIT license text is reproduced
 in third_party/langfuse/LICENSE.
+
+--------------------------------------------------------------------------
+
+The web interface draws its icons from Lucide (ISC License, Copyright (c)
+Lucide Icons and Contributors, https://github.com/lucide-icons/lucide), used
+through the @lucide/svelte package and tree-shaken to the icons the interface
+imports. The license text is reproduced in third_party/lucide/LICENSE.
+
+--------------------------------------------------------------------------
+
+The web interface bundles two fonts, both under the SIL Open Font License,
+Version 1.1. They are shipped inside the binary rather than fetched from a
+CDN so that a self-hosted install renders identically offline and makes no
+request to any external origin (spec 006 #5).
+
+  Inter
+  Copyright (c) 2016 The Inter Project Authors
+  https://github.com/rsms/inter — license in third_party/inter/LICENSE
+  ui/src/lib/fonts/inter-latin.woff2 is the upstream latin subset, unmodified.
+
+  JetBrains Mono
+  Copyright 2020 The JetBrains Mono Project Authors
+  https://github.com/JetBrains/JetBrainsMono — license in
+  third_party/jetbrains-mono/LICENSE
+  ui/src/lib/fonts/jetbrains-mono-latin.woff2 is the upstream latin subset,
+  unmodified.
