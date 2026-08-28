@@ -10,7 +10,7 @@
     "dev": "vite dev",
     "build": "vite build",
     "preview": "vite preview",
-    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --threshold error",
+    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --threshold warning",
     "test": "vitest run",
     "types": "openapi-typescript ../internal/server/openapi.json -o src/lib/api/schema.d.ts",
     "e2e": "playwright test"

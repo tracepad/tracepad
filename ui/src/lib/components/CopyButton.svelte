@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { Check, Copy } from '@lucide/svelte';
+	import Check from '@lucide/svelte/icons/check';
+	import Copy from '@lucide/svelte/icons/copy';
 
 	// Copying is the one action this read-only interface offers everywhere, so
 	// it behaves the same everywhere: the icon becomes a tick for a moment,

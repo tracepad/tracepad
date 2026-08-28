@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { TriangleAlert } from '@lucide/svelte';
+	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import type { TraceRow } from '$lib/api/client.svelte';
 	import { ABSENT, cost, duration, timestamp } from '$lib/format';
 

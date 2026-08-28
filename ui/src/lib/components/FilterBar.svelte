@@ -30,7 +30,8 @@
 </script>
 
 <script lang="ts">
-	import { ListFilter, X } from '@lucide/svelte';
+	import ListFilter from '@lucide/svelte/icons/list-filter';
+	import X from '@lucide/svelte/icons/x';
 	import { Popover } from 'bits-ui';
 	import { TRACE_FILTERS, filterCount, type TraceFilters } from '$lib/api/traces';
 	import Button from './Button.svelte';

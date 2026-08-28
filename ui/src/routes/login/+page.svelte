@@ -1,5 +1,7 @@
 <script lang="ts">
-	import { Eye, EyeOff, LoaderCircle } from '@lucide/svelte';
+	import Eye from '@lucide/svelte/icons/eye';
+	import EyeOff from '@lucide/svelte/icons/eye-off';
+	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { ApiError, api } from '$lib/api/client.svelte';

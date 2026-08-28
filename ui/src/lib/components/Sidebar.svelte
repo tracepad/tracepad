@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { ListTree, LogOut } from '@lucide/svelte';
+	import ListTree from '@lucide/svelte/icons/list-tree';
+	import LogOut from '@lucide/svelte/icons/log-out';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { api } from '$lib/api/client.svelte';

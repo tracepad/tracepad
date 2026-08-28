@@ -1,0 +1,63 @@
+{
+  "dialect": "langfuse",
+  "traces": [
+    {
+      "id": "0071122334455667788990aabbccddee",
+      "name": "summarise-release-notes",
+      "environment": "production"
+    }
+  ],
+  "observations": [
+    {
+      "trace_id": "0071122334455667788990aabbccddee",
+      "id": "0102030405060708",
+      "type": "span",
+      "name": "summarise-release-notes",
+      "start_time": 1787738400000000000,
+      "end_time": 1787738402100000000,
+      "level": "DEFAULT",
+      "metadata": {
+        "service.name": "release-notes"
+      }
+    },
+    {
+      "trace_id": "0071122334455667788990aabbccddee",
+      "id": "1112131415161719",
+      "parent_observation_id": "0102030405060708",
+      "type": "generation",
+      "name": "summarise",
+      "start_time": 1787738400020000000,
+      "end_time": 1787738402050000000,
+      "model": "claude-sonnet-5",
+      "level": "DEFAULT",
+      "usage": {
+        "input": 2048,
+        "output": 96,
+        "total": 2144
+      },
+      "cost_details": {
+        "input": 0.0061,
+        "output": 0.0009,
+        "total": 0.007
+      },
+      "provided_cost": true,
+      "input": [
+        {
+          "content": "Summarise the release notes below.",
+          "role": "system"
+        },
+        {
+          "content": "The exporter batches spans and flushes them on an interval; a span that arrives after its parent has been written is still stored and re-parented on read. The exporter batches spans and flushes them on an interval; a span that arrives after its parent has been written is still stored and re-parented on read. The exporter batches spans and flushes them on an interval; a span that arrives after its parent has been written is still stored and re-parented on read. The exporter batches spans and flushes them on an interval; a span that arrives after its parent has been written is still stored and re-parented on read. The exporter batches spans and flushes them on an interval; a span that arrives after its parent has been written is still stored and re-parented on read. The exporter batches spans and flushes them on an interval; a span that arrives after its parent has been written is still stored and re-parented on read. The exporter batches spans and flushes them on an interval; a span that arrives after its parent has been written is still stored and re-parented on read. The exporter batches spans and flushes them on an interval; a span that arrives after its parent has been written is still stored and re-parented on read. The exporter batches spans and flushes them on an interval; a span that arrives after its parent has been written is still stored and re-parented on read. The exporter batches spans and flushes them on an interval; a span that arrives after its parent has been written is still stored and re-parented on read. The exporter batches spans and flushes them on an interval; a span that arrives after its parent has been written is still stored and re-parented on read. The exporter batches spans and flushes them on an interval; a span that arrives after its parent has been written is still stored and re-parented on read. The exporter batches spans and flushes them on an interval; a span that arrives after its parent has been written is still stored and re-parented on read. The exporter batches spans and flushes them on an interval; a span that arrives after its parent has been written is still stored and re-parented on read. The exporter batches spans and flushes them on an interval; a span that arrives after its parent has been written is still stored and re-parented on read. The exporter batches spans and flushes them on an interval; a span that arrives after its parent has been written is still stored and re-parented on read. The exporter batches spans and flushes them on an interval; a span that arrives after its parent has been written is still stored and re-parented on read. The exporter batches spans and flushes them on an interval; a span that arrives after its parent has been written is still stored and re-parented on read. The exporter batches spans and flushes them on an interval; a span that arrives after its parent has been written is still stored and re-parented on read. The exporter batches spans and flushes them on an interval; a span that arrives after its parent has been written is still stored and re-parented on read. The exporter batches spans and flushes them on an interval; a span that arrives after its parent has been written is still stored and re-parented on read. The exporter batches spans and flushes them on an interval; a span that arrives after its parent has been written is still stored and re-parented on read. The exporter batches spans and flushes them on an interval; a span that arrives after its parent has been written is still stored and re-parented on read. The exporter batches spans and flushes them on an interval; a span that arrives after its parent has been written is still stored and re-parented on read. ",
+          "role": "user"
+        }
+      ],
+      "output": {
+        "content": "Batching became the default. Batching became the default. Batching became the default. Batching became the default. Batching became the default. Batching became the default. Batching became the default. Batching became the default. Batching became the default. Batching became the default. Batching became the default. Batching became the default. ",
+        "role": "assistant"
+      },
+      "metadata": {
+        "service.name": "release-notes"
+      }
+    }
+  ]
+}

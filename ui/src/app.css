@@ -55,6 +55,12 @@
 
 	/* Status. Every use is paired with a word or an icon: colour alone is not
 	 * a message (Testing, accessibility floor). */
+	/* The JSON viewer's two syntax colours. A payload is read by scanning for
+	 * shapes, and a wall of one colour makes that slow; these are a separate
+	 * axis from the accent, which stays reserved for interaction. */
+	--color-code-string: light-dark(#0f766e, #5eead4);
+	--color-code-number: light-dark(#9a3412, #fdba74);
+
 	--color-danger: light-dark(#b91c1c, #f87171);
 	--color-danger-soft: light-dark(#fef2f2, #2a1618);
 	--color-warn: light-dark(#a15c07, #fbbf24);

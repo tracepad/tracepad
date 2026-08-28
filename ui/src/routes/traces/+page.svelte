@@ -1,5 +1,10 @@
 <script lang="ts">
-	import { ChevronDown, Inbox, LoaderCircle, Pause, Play, TriangleAlert } from '@lucide/svelte';
+	import ChevronDown from '@lucide/svelte/icons/chevron-down';
+	import Inbox from '@lucide/svelte/icons/inbox';
+	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
+	import Pause from '@lucide/svelte/icons/pause';
+	import Play from '@lucide/svelte/icons/play';
+	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { ApiError, api, type TraceRow } from '$lib/api/client.svelte';

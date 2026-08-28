@@ -1,5 +1,7 @@
 <script lang="ts">
-	import { Monitor, Moon, Sun } from '@lucide/svelte';
+	import Monitor from '@lucide/svelte/icons/monitor';
+	import Moon from '@lucide/svelte/icons/moon';
+	import Sun from '@lucide/svelte/icons/sun';
 	import { theme } from '$lib/theme.svelte';
 
 	// One control, three states (spec 006 #4). A three-way switch as three
