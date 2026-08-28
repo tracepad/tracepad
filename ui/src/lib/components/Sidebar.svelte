@@ -57,8 +57,10 @@
 	</div>
 
 	<div class="flex w-full min-w-0 items-center gap-2 md:contents">
-		<nav class="min-w-0 flex-1 overflow-x-auto md:overflow-visible md:px-2" aria-label="Sections">
-			<ul class="flex gap-1 md:block">
+		<nav class="min-w-0 flex-1 md:px-2" aria-label="Sections">
+			<!-- The sections wrap rather than scroll: a destination pushed off the
+			     end of a scrollable strip is a destination nobody finds. -->
+			<ul class="flex flex-wrap gap-1 md:block">
 				{#each SECTIONS as section (section.href)}
 					{@const active = page.url.pathname.startsWith(section.href)}
 					{@const Glyph = section.icon}
