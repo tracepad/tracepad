@@ -4,12 +4,20 @@ version: 2
 
 project_name: tracepad
 
+# Every official artifact carries the web interface (spec 006 #9). The bundle
+# is built once, before the matrix, and staged where the `ui` build tag embeds
+# it; a build without the tag would silently ship the stub page.
+before:
+  hooks:
+    - make ui
+
 builds:
   - main: ./cmd/tracepad
     env:
       - CGO_ENABLED=0
     goos: [linux, darwin, windows]
     goarch: [amd64, arm64]
+    tags: [ui]
     ldflags:
       - -s -w -X main.version={{.Version}}
 

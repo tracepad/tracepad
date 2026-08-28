@@ -10,6 +10,8 @@ package otlptest
 
 import (
 	"encoding/hex"
+	"encoding/json"
+	"strings"
 
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
 	resourcepb "go.opentelemetry.io/proto/otlp/resource/v1"
@@ -37,6 +39,7 @@ func Fixtures() []Fixture {
 		partialInvalidSpans(),
 		crossResourceTree(),
 		langfuseExtendedTypes(),
+		largePayloads(),
 	}
 }
 
@@ -261,6 +264,60 @@ func langfuseExtendedTypes() Fixture {
 		Name: "006-langfuse-extended-types",
 		ResourceSpans: []*tracepb.ResourceSpans{
 			resourceSpans([]*commonpb.KeyValue{str("service.name", "research")}, scopeSpans),
+		},
+	}
+}
+
+// 007 — a generation whose payloads are large enough to meet a response
+// budget. Every other fixture logs a sentence or two, which is not the shape
+// that exercises truncation markers (spec 004 #2) or the interface's
+// load-the-whole-thing affordance (spec 006), so this one carries a document.
+func largePayloads() Fixture {
+	const traceID = "0071122334455667788990aabbccddee"
+
+	// One paragraph repeated: big enough to be cut by a small budget, boring
+	// enough that the golden diff stays readable.
+	const paragraph = "The exporter batches spans and flushes them on an interval; " +
+		"a span that arrives after its parent has been written is still stored " +
+		"and re-parented on read. "
+	document, err := json.Marshal([]map[string]string{
+		{"role": "system", "content": "Summarise the release notes below."},
+		{"role": "user", "content": strings.Repeat(paragraph, 24)},
+	})
+	if err != nil {
+		panic(err)
+	}
+	summary, err := json.Marshal(map[string]string{
+		"role":    "assistant",
+		"content": strings.Repeat("Batching became the default. ", 12),
+	})
+	if err != nil {
+		panic(err)
+	}
+
+	root := span(traceID, "0102030405060708", "", "summarise-release-notes",
+		base, base+2100*ms,
+		str("langfuse.trace.name", "summarise-release-notes"),
+		str("langfuse.environment", "production"),
+		str("langfuse.observation.type", "span"),
+	)
+	generation := span(traceID, "1112131415161719", "0102030405060708", "summarise",
+		base+20*ms, base+2050*ms,
+		str("langfuse.observation.type", "generation"),
+		str("langfuse.observation.model.name", "claude-sonnet-5"),
+		str("langfuse.observation.input", string(document)),
+		str("langfuse.observation.output", string(summary)),
+		str("langfuse.observation.usage_details", `{"input":2048,"output":96,"total":2144}`),
+		str("langfuse.observation.cost_details", `{"input":0.0061,"output":0.0009,"total":0.007}`),
+	)
+
+	return Fixture{
+		Name: "007-large-payloads",
+		ResourceSpans: []*tracepb.ResourceSpans{
+			resourceSpans(
+				[]*commonpb.KeyValue{str("service.name", "release-notes")},
+				scope("langfuse-sdk", "3.6.1", root, generation),
+			),
 		},
 	}
 }

@@ -5,10 +5,20 @@
 BINARY  := tracepad
 VERSION ?= dev
 
+# The web interface (spec 006). It is built by Node and staged into the
+# package the `ui` build tag embeds; neither directory is committed.
+UI       := ui
+UI_DIST  := $(UI)/dist
+UI_EMBED := internal/ui/dist
+UI_TYPES := $(UI)/src/lib/api/schema.d.ts
+
 help: ## List targets
 	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-18s %s\n", $$1, $$2}'
 
-build: ## Build the binary into ./bin
+build: ui ## Build the binary, web interface included, into ./bin
+	go build -tags ui -ldflags "-s -w -X main.version=$(VERSION)" -o bin/$(BINARY) ./cmd/tracepad
+
+build-server: ## Build without the web interface (no Node required; serves the stub page)
 	go build -ldflags "-s -w -X main.version=$(VERSION)" -o bin/$(BINARY) ./cmd/tracepad
 
 dev: ## Run the server locally, mirroring output to .dev.log
@@ -32,7 +42,50 @@ format: ## Format all Go sources
 format-check: ## Fail if any file is unformatted (read-only, used by CI/gate)
 	@out=$$(gofmt -l .); if [ -n "$$out" ]; then echo "unformatted files:"; echo "$$out"; exit 1; fi
 
-precommit: ensure-hooks format-check vet test ## Full gate (also installed as git pre-commit hook)
+# --- Web interface (spec 006) -------------------------------------------------
+#
+# Node and npm are dev prerequisites of the UI half only (Decision 10): every
+# Go target above runs without them, and so does the whole Go test suite.
+
+ui-deps: ## Install the UI toolchain if node_modules is missing
+	@if [ ! -d $(UI)/node_modules ]; then \
+		command -v npm >/dev/null || { echo "npm is required to build the web interface (see ui/package.json engines)"; exit 1; }; \
+		cd $(UI) && npm ci; \
+	fi
+
+ui: ui-deps ## Build the SPA and stage it where the `ui` build tag embeds it
+	cd $(UI) && npm run build
+	rm -rf $(UI_EMBED)
+	mkdir -p $(UI_EMBED)
+	cp -R $(UI_DIST)/. $(UI_EMBED)/
+
+ui-types: ui-deps ## Regenerate the TypeScript API types from openapi.json
+	cd $(UI) && npm run types
+
+# The drift check regenerates in place and asks git whether anything moved
+# (Decision 7): a failure leaves the corrected file in the tree, so the fix is
+# to review it and commit it. Outside a checkout there is nothing to compare
+# against, and the check is skipped rather than failed.
+ui-types-check: ui-types ## Fail if the committed API types no longer match openapi.json
+	@git rev-parse --git-dir >/dev/null 2>&1 || { echo "not a git checkout, skipping the type drift check"; exit 0; }; \
+	git diff --exit-code -- $(UI_TYPES) >/dev/null || { \
+		echo "$(UI_TYPES) is out of date with internal/server/openapi.json;"; \
+		echo "it has just been regenerated — review the diff and commit it."; \
+		exit 1; \
+	}
+
+ui-check: ui-deps ui-types-check ## Type-check the SPA and run its unit tests
+	cd $(UI) && npm run check
+	cd $(UI) && npm run test
+
+e2e: build ## Boot the real binary on a temp database and run the Playwright smoke
+	cd $(UI) && npx playwright install chromium
+	cd $(UI) && npm run e2e
+
+ui-lines: ## Report the line count of the web interface against its budget
+	scripts/ui-lines.sh
+
+precommit: ensure-hooks format-check vet test ui-check ## Full gate (also installed as git pre-commit hook)
 
 # git rev-parse --git-path resolves the hooks dir in worktrees too; empty
 # outside a git checkout (e.g. a source tarball), where hooks don't apply.
@@ -49,4 +102,6 @@ install-hooks: ## (Re)install the pre-commit gate hook
 	printf '#!/bin/sh\nexec make precommit\n' > "$(HOOKS_DIR)/pre-commit"
 	chmod +x "$(HOOKS_DIR)/pre-commit"
 
-.PHONY: help build dev test vet smoke fixtures format format-check precommit ensure-hooks install-hooks
+.PHONY: help build build-server dev test vet smoke fixtures format format-check \
+	ui ui-deps ui-types ui-types-check ui-check ui-lines e2e \
+	precommit ensure-hooks install-hooks

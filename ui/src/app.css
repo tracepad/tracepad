@@ -1,0 +1,177 @@
+@import 'tailwindcss';
+
+/* The token file design §8 asks for (spec 006 #2): one place where the whole
+ * visual language is declared, and the only place a colour value is written
+ * down. Components spend tokens through utilities and never a raw hex.
+ *
+ * Both themes live in the same declaration. `light-dark()` picks a side from
+ * the element's `color-scheme`, which is `light dark` by default — so the
+ * system preference decides — and pinned by `data-theme` when a person
+ * overrides it (#4). One line per colour, no duplicated dark block, and the
+ * browser's own widgets (scrollbars, form controls, the canvas behind the
+ * page) follow along for free.
+ *
+ * The direction is quiet dev-tool minimalism (#6): flat surfaces separated by
+ * 1px borders rather than elevation, one restrained accent that only ever
+ * marks interaction, small type, and motion on state changes only.
+ *
+ * Contrast is checked per theme and per surface: every text token below is at
+ * least 4.5:1 against both `canvas` and `surface` in light and in dark. */
+
+@font-face {
+	font-family: 'Inter';
+	font-style: normal;
+	font-weight: 400 700;
+	font-display: swap;
+	src: url('./lib/fonts/inter-latin.woff2') format('woff2');
+}
+
+@font-face {
+	font-family: 'JetBrains Mono';
+	font-style: normal;
+	font-weight: 400 600;
+	font-display: swap;
+	src: url('./lib/fonts/jetbrains-mono-latin.woff2') format('woff2');
+}
+
+@theme {
+	/* Surfaces, from the page backdrop outwards. */
+	--color-canvas: light-dark(#ffffff, #0b0c0e);
+	--color-surface: light-dark(#fafafa, #131417);
+	--color-raised: light-dark(#f4f4f5, #1c1d21);
+	--color-border: light-dark(#e4e4e7, #26272b);
+	--color-border-strong: light-dark(#d4d4d8, #35363b);
+
+	/* Text. `subtle` is the floor: nothing quieter than this carries meaning. */
+	--color-fg: light-dark(#18181b, #e9e9ec);
+	--color-muted: light-dark(#52525b, #a1a1aa);
+	--color-subtle: light-dark(#6b6b74, #8e8e97);
+
+	/* The one accent. It marks what is interactive or selected, never
+	 * decoration. `on-accent` is the only text colour allowed on top of it. */
+	--color-accent: light-dark(#4f46e5, #8f9bff);
+	--color-on-accent: light-dark(#ffffff, #0b0c0e);
+	--color-accent-soft: light-dark(#eef2ff, #1b1d33);
+
+	/* Status. Every use is paired with a word or an icon: colour alone is not
+	 * a message (Testing, accessibility floor). */
+	/* The JSON viewer's two syntax colours. A payload is read by scanning for
+	 * shapes, and a wall of one colour makes that slow; these are a separate
+	 * axis from the accent, which stays reserved for interaction. */
+	--color-code-string: light-dark(#0f766e, #5eead4);
+	--color-code-number: light-dark(#9a3412, #fdba74);
+
+	--color-danger: light-dark(#b91c1c, #f87171);
+	--color-danger-soft: light-dark(#fef2f2, #2a1618);
+	--color-warn: light-dark(#a15c07, #fbbf24);
+	--color-ok: light-dark(#15803d, #4ade80);
+
+	--font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+	--font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+	/* A small scale: 13px is the body size of a view read for hours (#6). */
+	--text-xs: 11px;
+	--text-xs--line-height: 1.45;
+	--text-sm: 12px;
+	--text-sm--line-height: 1.5;
+	--text-base: 13px;
+	--text-base--line-height: 1.55;
+	--text-lg: 14px;
+	--text-lg--line-height: 1.55;
+	--text-xl: 16px;
+	--text-xl--line-height: 1.4;
+	--text-2xl: 20px;
+	--text-2xl--line-height: 1.3;
+
+	--radius-sm: 4px;
+	--radius-md: 6px;
+	--radius-lg: 8px;
+
+	/* The single elevation in the system, and only for things that float over
+	 * the page: a dialog or a popover has to read as detached from what it
+	 * covers, which a border cannot say on its own. */
+	--shadow-overlay: 0 8px 24px light-dark(rgb(0 0 0 / 12%), rgb(0 0 0 / 50%));
+}
+
+@layer base {
+	:root {
+		color-scheme: light dark;
+	}
+	/* A manual choice pins the scheme, which is what every `light-dark()`
+	 * above reads (#4). */
+	:root[data-theme='light'] {
+		color-scheme: light;
+	}
+	:root[data-theme='dark'] {
+		color-scheme: dark;
+	}
+
+	html,
+	body {
+		height: 100%;
+	}
+
+	/* iOS zooms the whole page when a focused input is under 16px, which on a
+	 * dense layout throws the reader out of position. Sized by pointer rather
+	 * than by width: a narrow window on a laptop is still a mouse (#15). */
+	@media (pointer: coarse) {
+		input,
+		select,
+		textarea {
+			font-size: 16px;
+		}
+	}
+
+	body {
+		background: var(--color-canvas);
+		color: var(--color-fg);
+		font-family: var(--font-sans);
+		font-size: var(--text-base);
+		line-height: var(--text-base--line-height);
+		-webkit-font-smoothing: antialiased;
+	}
+
+	/* Focus is never removed, only styled: a keyboard user has no other way to
+	 * know where they are. `:focus-visible` keeps it off mouse clicks, and the
+	 * outline follows whatever radius the element already has. */
+	:focus-visible {
+		outline: 2px solid var(--color-accent);
+		outline-offset: 1px;
+	}
+
+	::selection {
+		background: var(--color-accent-soft);
+	}
+
+	/* Numbers in a live-updating column must not change width as they change
+	 * value, so figures are tabular everywhere by default (#5). */
+	table,
+	code,
+	kbd,
+	samp,
+	pre {
+		font-variant-numeric: tabular-nums;
+	}
+
+	/* Motion here only ever explains a state change (#6). Someone who has
+	 * asked the system for less of it gets none. */
+	@media (prefers-reduced-motion: reduce) {
+		*,
+		*::before,
+		*::after {
+			animation-duration: 0.01ms !important;
+			animation-iteration-count: 1 !important;
+			transition-duration: 0.01ms !important;
+			scroll-behavior: auto !important;
+		}
+	}
+}
+
+/* Scrollbars are part of a dense view's texture; the defaults are loud in
+ * dark mode and inconsistent between platforms. */
+@layer base {
+	* {
+		scrollbar-width: thin;
+		scrollbar-color: var(--color-border-strong) transparent;
+	}
+}

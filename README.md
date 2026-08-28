@@ -6,6 +6,9 @@ OpenTelemetry-instrumented app at it and browse your traces.
 
 **Status: pre-release.** Under active development; not ready for use yet.
 
+New here? [docs/quickstart.md](docs/quickstart.md) goes from nothing to a
+trace on screen.
+
 ## Sending traces
 
 Tracepad accepts standard OTLP/HTTP on `/v1/traces`, and the same endpoint
@@ -64,6 +67,22 @@ their own, so all three return the same bytes. See [docs/api.md](docs/api.md),
 
 The MCP surface reads and nothing else — administration is deliberately not
 reachable as a tool.
+
+## Browsing traces
+
+The same binary serves a web interface on the same port. The first run prints
+a link that is already signed in:
+
+```
+  # Web interface, signed in with that key
+  http://localhost:4318/#key=tp-sk-…
+```
+
+A filterable trace list, and a trace as its observation tree with the
+payloads of whichever span you are looking at. It is a client of the read API
+like the CLI and the MCP server, it keeps what you are looking at in the URL,
+and it makes no request to any origin but your own server — fonts included.
+See [docs/ui.md](docs/ui.md).
 
 ## Forgetting
 

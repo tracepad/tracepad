@@ -22,6 +22,7 @@ import (
 	"github.com/tracepad/tracepad/internal/mcpserver"
 	"github.com/tracepad/tracepad/internal/server"
 	"github.com/tracepad/tracepad/internal/store"
+	"github.com/tracepad/tracepad/internal/ui"
 )
 
 // version is stamped by the release build (-ldflags "-X main.version=...").
@@ -148,7 +149,7 @@ func serve(args []string) error {
 	if err != nil {
 		return err
 	}
-	printCreated(boot, cfg.Listen)
+	printStartup(boot, cfg.Listen)
 
 	// The writer outlives the HTTP server on purpose: it is closed after
 	// Shutdown has drained the handlers that are still waiting on a commit.
@@ -236,10 +237,18 @@ func provisionSpecs(cfg *config.Config) ([]store.ProvisionSpec, error) {
 	return specs, nil
 }
 
-// printCreated hands the operator ready-to-paste connection env for every
+// printStartup hands the operator ready-to-paste connection env for every
 // project created in this run — both plain OTel and Langfuse-SDK style
-// (spec 001 #9).
-func printCreated(boot *store.BootstrapResult, listen string) {
+// (spec 001 #9) — and says where the browser interface is.
+//
+// A freshly created project's line carries its key in the URL fragment
+// (spec 006 #8): the interface always authenticates, and this is the one
+// moment the secret is knowable, so the zero-friction first contact is
+// clicking the link the server just printed. Fragments never reach the
+// server; the app stores the key and strips it from the URL. Later startups
+// print the bare URL, because by then the key is the operator's to remember
+// and the login screen's to ask for.
+func printStartup(boot *store.BootstrapResult, listen string) {
 	host := displayHost(listen)
 	for _, c := range boot.Created {
 		fmt.Printf(`
@@ -253,8 +262,17 @@ Project %q created. Connect your app with either:
   LANGFUSE_HOST=http://%s
   LANGFUSE_PUBLIC_KEY=%s
   LANGFUSE_SECRET_KEY=%s
-
 `, c.Project.Name, host, c.Keys.Secret, host, c.Keys.PublicKey, c.Keys.Secret)
+		if ui.Enabled {
+			fmt.Printf(`
+  # Web interface, signed in with that key
+  http://%s/#key=%s
+`, host, c.Keys.Secret)
+		}
+		fmt.Println()
+	}
+	if ui.Enabled && len(boot.Created) == 0 {
+		fmt.Printf("\nWeb interface: http://%s/\n\n", host)
 	}
 }
 

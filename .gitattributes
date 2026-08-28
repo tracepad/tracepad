@@ -1,0 +1,5 @@
+# Generated, committed on purpose (spec 006 #7): the API types come out of
+# internal/server/openapi.json and the gate fails on drift. Marking them keeps
+# them collapsed in review, where the diff to read is the OpenAPI document.
+ui/src/lib/api/schema.d.ts linguist-generated=true
+ui/package-lock.json linguist-generated=true

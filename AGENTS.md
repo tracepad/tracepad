@@ -19,6 +19,11 @@ API. This file routes; it does not duplicate what specs and docs say.
   budgets and truncation markers, self-description and OpenAPI, schema 0004,
   a CLI in the same binary, and an MCP server on protocol 2026-07-28. Both
   clients are HTTP clients of the read API and contain no logic of their own.
+- ✅ Spec 006 (UI core) shipped: a SvelteKit SPA in `ui/`, embedded behind the
+  `ui` build tag and served from `/`, with key-based auth and a pre-authed
+  first-run URL, the Traces list and the Trace detail view. It is a client of
+  the read API — no endpoint was added for it. Node is a dev prerequisite of
+  the interface only; the Go suite and a tagless build never need it.
 - ✅ Spec 005 (retention & admin) shipped: schema 0005, the hourly sweeper
   writing every chunk through the group-commit writer, the admin API under
   `/api/v1/projects` with a dry-run/confirm contract on every destructive
@@ -43,6 +48,7 @@ API. This file routes; it does not duplicate what specs and docs say.
 | Retention and the sweeper | `internal/store/sweep.go`, `docs/retention.md`, spec 005 — every chunk is a `WriteJob`, never a second write connection |
 | Admin API (projects, keys, retention, erasure) | `internal/server/admin.go`, `internal/store/admin.go`, `docs/admin.md`, spec 005 — destructive endpoints are a dry run until `?confirm=` echoes the name, checked inside the write transaction |
 | Attribute mapping | `internal/mapping/rules.go` is the table; `mapping.go` applies it |
+| Web interface | `ui/` (SvelteKit SPA), `internal/ui/` (the embed and the tagless stub), `internal/server/ui.go` (delivery and the SPA fallback), `docs/ui.md`, spec 006 — the API types in `ui/src/lib/api/schema.d.ts` are generated from `openapi.json` and the gate fails on drift |
 | Configuration | `internal/config/`, spec 001 + spec 002 Configuration tables |
 
 Attribute semantics for the `langfuse.*` dialect are derived from Langfuse
@@ -51,12 +57,17 @@ reason in a comment; adding a dialect should be a table edit.
 
 ## Commands
 
-- `make precommit` — full gate (format-check + vet + tests). Budget: under 30
-  seconds. The gate self-installs as the git pre-commit hook on first run (and
-  on Claude Code session start); `make install-hooks` force-reinstalls it.
+- `make precommit` — full gate (format-check + vet + Go tests + `svelte-check`,
+  vitest and the API-type drift check). Budget: under 30 seconds. The gate
+  self-installs as the git pre-commit hook on first run (and on Claude Code
+  session start); `make install-hooks` force-reinstalls it.
 - `make dev` — run the server, output mirrored to `.dev.log` (read that file
-  first when debugging a running server).
-- `make build` — binary into `./bin`.
+  first when debugging a running server). `npm run dev` inside `ui/` serves
+  the interface with hot reload against it.
+- `make build` — binary with the web interface into `./bin`;
+  `make build-server` builds without it and needs no Node.
+- `make e2e` — boot the real binary on a temp database and run the Playwright
+  smoke. Its own CI job, never part of the gate.
 - `make smoke` — export from pinned real SDKs into a real binary and assert
   the rows. Needs network on first run (installs the SDKs).
 - `make fixtures` — regenerate `testdata/otlp/*.pb` and their goldens after a

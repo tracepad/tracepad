@@ -39,3 +39,13 @@ dist/
 *.db-wal
 *.db-shm
 *.bak
+
+# Web interface (spec 006 #9). The built bundle is never committed: it would
+# poison every UI diff, and `make ui` reproduces it. `internal/ui/dist` is
+# where `make ui` stages it for the `ui` build tag to embed.
+ui/node_modules/
+ui/.svelte-kit/
+ui/test-results/
+ui/playwright-report/
+ui/tests/e2e/.state.json
+internal/ui/dist/

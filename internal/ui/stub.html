@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>Tracepad — built without the web interface</title>
+		<style>
+			:root {
+				color-scheme: light dark;
+				--bg: #ffffff;
+				--fg: #18181b;
+				--muted: #52525b;
+				--line: #e4e4e7;
+				--code: #f4f4f5;
+			}
+			@media (prefers-color-scheme: dark) {
+				:root {
+					--bg: #0b0c0e;
+					--fg: #e9e9ec;
+					--muted: #a1a1aa;
+					--line: #26272b;
+					--code: #17181b;
+				}
+			}
+			body {
+				margin: 0;
+				background: var(--bg);
+				color: var(--fg);
+				font: 14px/1.6 ui-sans-serif, system-ui, sans-serif;
+				display: grid;
+				place-items: center;
+				min-height: 100vh;
+				padding: 24px;
+			}
+			main {
+				max-width: 34rem;
+			}
+			h1 {
+				font-size: 1.1rem;
+				margin: 0 0 0.75rem;
+			}
+			p {
+				color: var(--muted);
+				margin: 0 0 0.75rem;
+			}
+			ul {
+				color: var(--muted);
+				padding-left: 1.1rem;
+				margin: 0 0 0.75rem;
+			}
+			code {
+				font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+				background: var(--code);
+				border: 1px solid var(--line);
+				border-radius: 4px;
+				padding: 1px 5px;
+			}
+			a {
+				color: inherit;
+			}
+		</style>
+	</head>
+	<body>
+		<main>
+			<h1>This build has no web interface</h1>
+			<p>
+				The API, the CLI and the MCP server are complete — only the browser
+				interface is missing. It is compiled by Node and Vite, which a plain
+				<code>go build</code> cannot run, so a source build ships without it.
+			</p>
+			<p>Builds that carry the interface:</p>
+			<ul>
+				<li>the release binaries, Homebrew and the Docker image;</li>
+				<li>a local <code>make build</code>, which builds the bundle first.</li>
+			</ul>
+			<p>
+				Meanwhile the API describes itself at
+				<a href="/api/v1"><code>GET /api/v1</code></a>.
+			</p>
+		</main>
+	</body>
+</html>
