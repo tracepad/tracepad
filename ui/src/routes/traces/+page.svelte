@@ -94,7 +94,13 @@
 			// replaced the rows, and appending this page would splice the
 			// previous query's traces into the new one.
 			if (signal.aborted) return;
-			rows = [...rows, ...answer.traces];
+			// Merged rather than appended, for the same reason the live poll
+			// merges: with live mode on, a tick may already have pulled some
+			// of these rows in — a new arrival shifts the whole cursor window
+			// down by one — and a keyed each-block throws on a repeated id.
+			// The merge sorts on the listing's own key, so for a page that is
+			// wholly older this is exactly the append it replaces.
+			rows = mergeRows(rows, answer.traces);
 			cursor = answer.next_cursor;
 		} catch (cause) {
 			if (signal.aborted) return;

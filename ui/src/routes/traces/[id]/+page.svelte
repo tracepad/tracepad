@@ -27,15 +27,25 @@
 	// (spec 006 #15).
 	// A link that names an observation opens on it; one that names only a
 	// trace opens on the tree.
-	let pane = $state<'tree' | 'detail'>(
-		untrack(() => page.url.searchParams.get('obs')) ? 'detail' : 'tree'
-	);
+	const paneForURL = (): 'tree' | 'detail' =>
+		page.url.searchParams.get('obs') ? 'detail' : 'tree';
+	let pane = $state<'tree' | 'detail'>(untrack(paneForURL));
 
 	$effect(() => {
 		const traceID = id;
 		const controller = new AbortController();
 		load(traceID, controller.signal);
 		return () => controller.abort();
+	});
+
+	$effect(() => {
+		// SvelteKit reuses this component across trace ids, so the pane the
+		// reader chose for the previous trace would otherwise carry over —
+		// landing a phone on the detail of an observation nobody picked.
+		// Depends on the id alone: choosing an observation within one trace
+		// must not undo the choice of pane.
+		id;
+		untrack(() => (pane = paneForURL()));
 	});
 
 	async function load(traceID: string, signal: AbortSignal) {

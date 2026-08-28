@@ -135,6 +135,24 @@ describe('merging a live poll into the rows on screen', () => {
 		expect(merged.map((r) => r.id)).toEqual(['ff', 'aa']);
 	});
 
+	it('folds a cursor page in without repeating what a poll already pulled', () => {
+		// Live mode and "load more" overlap: a new arrival shifts the whole
+		// cursor window down by one, so the next page re-delivers the row the
+		// poll has already merged. A keyed each-block throws on a repeated id,
+		// which is why the page is merged rather than appended.
+		const onScreen = [
+			row('dd', '2026-08-28T12:00:04Z'), // arrived via a live tick
+			row('cc', '2026-08-28T12:00:03Z'),
+			row('bb', '2026-08-28T12:00:02Z')
+		];
+		const nextPage = [row('bb', '2026-08-28T12:00:02Z'), row('aa', '2026-08-28T12:00:01Z')];
+
+		const merged = mergeRows(onScreen, nextPage);
+
+		expect(merged.map((r) => r.id)).toEqual(['dd', 'cc', 'bb', 'aa']);
+		expect(new Set(merged.map((r) => r.id)).size).toBe(merged.length);
+	});
+
 	it('sorts a trace with no timestamp last rather than first', () => {
 		const merged = mergeRows([], [row('aa'), row('bb', '2026-08-28T12:00:00Z')]);
 

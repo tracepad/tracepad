@@ -119,6 +119,26 @@ test('a deep link reloads to the same observation', async ({ page }) => {
 	await expect(page).toHaveURL(new RegExp(`obs=${LARGE_PAYLOAD_OBSERVATION}$`));
 });
 
+test('another trace starts on the tree, not on the last one’s pane', async ({ page }) => {
+	// Only a phone shows one pane at a time; on a wide screen both are up and
+	// there is nothing to carry over.
+	test.skip(test.info().project.name !== 'mobile', 'the panes only alternate on a phone');
+	await signIn(page);
+
+	await page.goto(`/traces/${LARGE_PAYLOAD_TRACE}?obs=${LARGE_PAYLOAD_OBSERVATION}`);
+	await expect(page.getByRole('tab', { name: 'Observation' })).toHaveAttribute(
+		'aria-selected',
+		'true'
+	);
+
+	// SvelteKit reuses the component across trace ids; the previous trace's
+	// pane says nothing about this one.
+	await page.goto(`/traces/${FAILING_TRACE}`);
+
+	await expect(page.getByRole('tab', { name: 'Tree' })).toHaveAttribute('aria-selected', 'true');
+	await expect(page.getByRole('treeitem').first()).toBeVisible();
+});
+
 test('both themes render, and neither leaves the page scrolling sideways', async ({ page }) => {
 	await signIn(page);
 
