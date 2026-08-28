@@ -165,7 +165,14 @@ func (s *Server) authenticate(r *http.Request) (*store.Project, bool) {
 		slog.Error("key lookup failed", "err", err)
 		return nil, false
 	}
-	return project, project != nil
+	// A soft-deleted project's keys stop working the moment it is deleted
+	// (spec 005 #9). The two endpoints that can undo the deletion resolve
+	// their caller through the admin path instead, which is the whole of
+	// the exception (#10).
+	if project == nil || project.Deleted() {
+		return nil, false
+	}
+	return project, true
 }
 
 // credential extracts the secret from either scheme. Basic carries

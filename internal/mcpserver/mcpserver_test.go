@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -292,6 +293,9 @@ func TestToolListIsTheDeclaredContract(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Exactly these eight, and administration is deliberately not among
+	// them: spec 005 added projects, keys, retention and user-data erasure
+	// to the HTTP API and the CLI and nothing at all to MCP (spec 005 #13).
 	want := []string{"get_last_trace", "get_observation_io", "get_prompt", "get_session",
 		"get_stats", "get_trace", "list_scores", "list_traces"}
 	var names []string
@@ -765,4 +769,25 @@ func textOf(result *mcp.CallToolResult) string {
 		}
 	}
 	return strings.Join(parts, "\n")
+}
+
+// TestMCPCannotWriteAnything is spec 005 Decision 13 made structural. The admin
+// surface of that spec — projects, keys, retention, user-data erasure — adds
+// nothing to MCP on purpose: an agent should not hold destructive capability at
+// all, so that a hallucinated tool call has nothing to destroy.
+//
+// Checking the tool list would only say that today's tools are read-only. What
+// makes "the MCP surface cannot modify or delete anything" printable in bold in
+// docs/mcp.md is that the only thing a tool can reach the API with is a GET, so
+// this asserts the shape of that seam rather than its current contents.
+func TestMCPCannotWriteAnything(t *testing.T) {
+	api := reflect.TypeFor[mcpserver.API]()
+	if api.NumMethod() != 1 || api.Method(0).Name != "Get" {
+		var methods []string
+		for i := range api.NumMethod() {
+			methods = append(methods, api.Method(i).Name)
+		}
+		t.Fatalf("the MCP API seam offers %v; it must offer Get and nothing else, "+
+			"or the read-only guarantee stops being structural", methods)
+	}
 }

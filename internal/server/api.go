@@ -82,8 +82,11 @@ func (s *Server) submit(w http.ResponseWriter, r *http.Request, job store.WriteJ
 		// for something the stored state does not allow, which is a 4xx
 		// however deep in the pipeline it was detected.
 		status := http.StatusBadRequest
-		if rejection.Kind == store.RejectNotFound {
+		switch rejection.Kind {
+		case store.RejectNotFound:
 			status = http.StatusNotFound
+		case store.RejectConflict:
+			status = http.StatusConflict
 		}
 		writeError(w, status, rejection.Message)
 	case errors.Is(err, store.ErrWriterBusy):

@@ -56,6 +56,21 @@ func (s *Server) routes() []route {
 		{"GET", "/api/v1/prompts/{name}/diff", "Unified diff between two versions of a prompt", s.handlePromptDiff},
 		{"PUT", "/api/v1/prompts/{name}/labels/{label}", "Point a label at a version", s.handlePutPromptLabel},
 		{"DELETE", "/api/v1/prompts/{name}/labels/{label}", "Remove a label", s.handleDeletePromptLabel},
+
+		// Administration (spec 005). Every destructive one is a dry run
+		// until `?confirm=` echoes the name — or the user id — of what
+		// it destroys (spec 005 #8). None of this reaches MCP, which
+		// stays a read-only surface (spec 005 #13).
+		{"GET", "/api/v1/projects", "List projects: all with the admin token, its own with a project key", s.handleListProjects},
+		{"POST", "/api/v1/projects", "Create a project and its first key pair (admin token)", s.handleCreateProject},
+		{"GET", "/api/v1/projects/{id}", "One project with its retention windows", s.handleGetProject},
+		{"PATCH", "/api/v1/projects/{id}", "Rename a project or move its retention windows", s.handlePatchProject},
+		{"DELETE", "/api/v1/projects/{id}", "Soft-delete a project, restorable for seven days (admin token)", s.handleDeleteProject},
+		{"POST", "/api/v1/projects/{id}/restore", "Undo a soft delete inside its grace window", s.handleRestoreProject},
+		{"GET", "/api/v1/projects/{id}/keys", "List a project's public keys", s.handleListKeys},
+		{"POST", "/api/v1/projects/{id}/keys", "Mint a key pair; the secret is shown once", s.handleCreateKey},
+		{"DELETE", "/api/v1/projects/{id}/keys/{public_key}", "Revoke one key pair", s.handleRevokeKey},
+		{"DELETE", "/api/v1/projects/{id}/users/{user_id}/data", "Erase everything stored about one user", s.handleEraseUserData},
 	}
 }
 
