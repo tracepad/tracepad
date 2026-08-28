@@ -310,16 +310,19 @@ func (s *Server) handlePatchProject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// From here the change is destructive: what it will cost is shown
-	// first, and only an echo of the project's name applies it.
-	retention, rawWindow := update.Windows(project)
-	counts, err := s.store.RetentionPreview(project.ID, retention, rawWindow, time.Now().UnixNano())
-	if err != nil {
-		slog.Error("retention preview failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to read what the new window would delete")
-		return
-	}
+	// first, and only an echo of the project's name applies it. Counting is
+	// the dry run's job and only the dry run's — on the confirmed path the
+	// numbers would be computed and thrown away, and a read that failed
+	// would 500 a request that was going to succeed.
 	confirm := values.Get("confirm")
 	if confirm == "" {
+		retention, rawWindow := update.Windows(project)
+		counts, err := s.store.RetentionPreview(project.ID, retention, rawWindow, time.Now().UnixNano())
+		if err != nil {
+			slog.Error("retention preview failed", "err", err)
+			writeError(w, http.StatusInternalServerError, "failed to read what the new window would delete")
+			return
+		}
 		writeJSON(w, http.StatusOK, dryRun(project.Name, counts,
 			object{}.
 				put("traces", counts.Traces).
@@ -547,13 +550,17 @@ func (s *Server) handleEraseUserData(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	counts, err := s.store.UserDataPreview(project.ID, userID)
-	if err != nil {
-		slog.Error("user data preview failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to read what this user's data is")
-		return
-	}
+	// Counting is the dry run's job and only the dry run's. On the way to a
+	// confirmed erasure the numbers would be computed and thrown away, and
+	// a read that failed would 500 a request that was going to succeed —
+	// the count is what the caller is told, never what the erasure needs.
 	if values.Get("confirm") == "" {
+		counts, err := s.store.UserDataPreview(project.ID, userID)
+		if err != nil {
+			slog.Error("user data preview failed", "err", err)
+			writeError(w, http.StatusInternalServerError, "failed to read what this user's data is")
+			return
+		}
 		// The echo here is the user id, because the user is what is
 		// being erased (#8).
 		writeJSON(w, http.StatusOK, object{}.
