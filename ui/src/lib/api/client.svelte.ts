@@ -1,5 +1,6 @@
 import { auth } from '$lib/auth.svelte';
 import type { components, paths } from './schema';
+import type { TraceFilters } from './traces';
 
 // The whole data layer (spec 006 #7): a thin typed client over the read API,
 // nothing more. Every type below is derived from `internal/server/openapi.json`
@@ -27,19 +28,6 @@ export type Project = components['schemas']['Project'];
 export type TracePage = JSONResponse<paths['/api/v1/traces']['get']>;
 export type ObservationIO = JSONResponse<paths['/api/v1/observations/{id}/io']['get']>;
 type ProjectList = JSONResponse<paths['/api/v1/projects']['get']>;
-
-/** Exactly the filters `GET /api/v1/traces` accepts, and nothing else. */
-export type TraceFilters = {
-	from?: string;
-	to?: string;
-	environment?: string;
-	name?: string;
-	user_id?: string;
-	session_id?: string;
-	tag?: string[];
-	status?: 'error' | 'ok';
-	min_cost?: string;
-};
 
 /**
  * What a credential turns out to be (spec 006 #13). The interface reads
