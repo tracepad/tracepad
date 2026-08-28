@@ -46,6 +46,14 @@ func (s *Store) Bootstrap(specs []ProvisionSpec) (*BootstrapResult, error) {
 			return nil, err
 		}
 		if existing != nil {
+			// A declared project inside its deletion grace window is
+			// not recreated — its name is reserved and its keys are
+			// dead (spec 005 #9) — so say so rather than starting
+			// with an ingest surface that silently 401s.
+			if existing.Deleted() {
+				logger().Warn("declared project is deleted and its keys will not authenticate; restore it",
+					"project", spec.Name, "purge_at", existing.PurgeAt())
+			}
 			continue
 		}
 		p, err := s.CreateProject(spec.Name, KeyPair{PublicKey: spec.PublicKey, Secret: spec.SecretKey})

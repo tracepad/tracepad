@@ -350,11 +350,63 @@ type ProjectUpdate struct {
 	Name      *string
 	Retention OptionalDays
 	RawWindow OptionalDays
-	// Confirm is required when either window shrinks.
-	Shrinks bool
+	// Confirm is the echo, required when either window shrinks. Whether it
+	// is required is decided here rather than by the caller: the caller
+	// decided it against a project row it read a moment earlier, and the
+	// only reading that can gate a write is the one inside its transaction
+	// (spec 003 Decision 20).
 	Confirm string
 
 	Project *Project
+}
+
+// Windows folds this update onto a project, giving the two windows it would
+// leave behind. A field the update does not mention keeps its stored value.
+func (u *ProjectUpdate) Windows(project *Project) (retention, raw *int) {
+	retention, raw = project.RetentionDays, project.RawRetentionDays
+	if u.Retention.Set {
+		retention = u.Retention.Value
+	}
+	if u.RawWindow.Set {
+		raw = u.RawWindow.Value
+	}
+	return retention, raw
+}
+
+// Shrinks reports whether this update makes either window shorter, where "no
+// window" is the longest window of all. Shorter means data that is kept today
+// stops being kept, which is what needs confirming — including when nothing is
+// old enough to be deleted yet, because what changed is the policy.
+//
+// The API asks this to decide whether to answer with a preview; apply asks it
+// again, against the stored row, to decide whether to demand the echo.
+func (u *ProjectUpdate) Shrinks(project *Project) bool {
+	retention, raw := u.Windows(project)
+	if shorterWindow(retention, project.RetentionDays) {
+		return true
+	}
+	// Raw follows the trace window when it has none of its own (#6), so
+	// the comparison is between effective windows, not stored columns.
+	return shorterWindow(
+		effectiveWindow(raw, retention),
+		effectiveWindow(project.RawRetentionDays, project.RetentionDays))
+}
+
+func effectiveWindow(own, fallback *int) *int {
+	if own != nil {
+		return own
+	}
+	return fallback
+}
+
+// shorterWindow reports whether `next` keeps data for less time than
+// `current`. A nil window is infinite, so nothing is shorter than nil and nil
+// is shorter than nothing.
+func shorterWindow(next, current *int) bool {
+	if next == nil {
+		return false
+	}
+	return current == nil || *next < *current
 }
 
 func (u *ProjectUpdate) apply(tx *sql.Tx) error {
@@ -365,7 +417,7 @@ func (u *ProjectUpdate) apply(tx *sql.Tx) error {
 	if project == nil {
 		return &Rejection{Kind: RejectNotFound, Message: "no such project"}
 	}
-	if u.Shrinks {
+	if u.Shrinks(project) {
 		if _, err := confirmProjectName(tx, u.ProjectID, u.Confirm); err != nil {
 			return err
 		}
@@ -486,8 +538,12 @@ func (e *UserDataErase) apply(tx *sql.Tx) error {
 		return &Rejection{Kind: RejectInvalid, Message: fmt.Sprintf(
 			"confirm must be the user id being erased, %q, to erase their data", e.UserID)}
 	}
-	if _, err := projectByID(tx, e.ProjectID); err != nil {
+	project, err := projectByID(tx, e.ProjectID)
+	if err != nil {
 		return err
+	}
+	if project == nil {
+		return &Rejection{Kind: RejectNotFound, Message: "no such project"}
 	}
 
 	rows, err := tx.Query(

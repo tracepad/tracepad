@@ -370,8 +370,12 @@ func (s *Store) TableCounts(projectID string) ([]TableCount, error) {
 		}
 		out = append(out, TableCount{Table: table, Rows: rows})
 	}
+	// Live projects only: a soft-deleted one has vanished from every
+	// listing, and a count that still included it would be the one place
+	// the deletion did not take (spec 005 #9).
 	var projects int64
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM projects`).Scan(&projects); err != nil {
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM projects WHERE deleted_at IS NULL`).
+		Scan(&projects); err != nil {
 		return nil, fmt.Errorf("count projects: %w", err)
 	}
 	return append(out, TableCount{Table: "projects", Rows: projects}), nil

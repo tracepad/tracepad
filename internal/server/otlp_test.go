@@ -457,10 +457,17 @@ func rs2slice[T any](v T) []T { return []T{v} }
 
 // setRetention moves a project's trace window directly, for tests that need
 // data to be expired without waiting for it. The API path is exercised by the
-// admin tests; this is the shortcut for everyone else.
+// admin tests; this is the shortcut for everyone else — and it still carries
+// the echo, because shortening a window demands one wherever it is asked from
+// (spec 005 #8).
 func (h *harness) setRetention(projectID string, days int) error {
+	project, err := h.store.ProjectByID(projectID)
+	if err != nil {
+		return err
+	}
 	return h.writer.Submit(context.Background(), &store.ProjectUpdate{
 		ProjectID: projectID,
 		Retention: store.OptionalDays{Set: true, Value: &days},
+		Confirm:   project.Name,
 	})
 }

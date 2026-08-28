@@ -297,8 +297,11 @@ func (s *Server) handlePatchProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	retention, rawWindow := resolveWindows(project, update)
-	if !shrinks(project, retention, rawWindow) {
+	// The store decides what counts as a shrink, and decides it again from
+	// the stored row inside the write transaction; this is the same
+	// question asked early, only to choose between previewing and going
+	// ahead.
+	if !update.Shrinks(project) {
 		if !s.submit(w, r, update) {
 			return
 		}
@@ -308,6 +311,7 @@ func (s *Server) handlePatchProject(w http.ResponseWriter, r *http.Request) {
 
 	// From here the change is destructive: what it will cost is shown
 	// first, and only an echo of the project's name applies it.
+	retention, rawWindow := update.Windows(project)
 	counts, err := s.store.RetentionPreview(project.ID, retention, rawWindow, time.Now().UnixNano())
 	if err != nil {
 		slog.Error("retention preview failed", "err", err)
@@ -325,7 +329,7 @@ func (s *Server) handlePatchProject(w http.ResponseWriter, r *http.Request) {
 			put("note", "the shorter window takes effect on the next sweep"))
 		return
 	}
-	update.Shrinks, update.Confirm = true, confirm
+	update.Confirm = confirm
 	if !s.submit(w, r, update) {
 		return
 	}
@@ -646,48 +650,4 @@ func optionalDays(field string, raw json.RawMessage) (store.OptionalDays, error)
 			"%s must be a whole number of days above zero, or null to keep the data forever", field)
 	}
 	return store.OptionalDays{Set: true, Value: &days}, nil
-}
-
-// resolveWindows folds a patch onto a project's current settings, giving the
-// two windows the change would leave behind.
-func resolveWindows(project *store.Project, update *store.ProjectUpdate) (retention, raw *int) {
-	retention, raw = project.RetentionDays, project.RawRetentionDays
-	if update.Retention.Set {
-		retention = update.Retention.Value
-	}
-	if update.RawWindow.Set {
-		raw = update.RawWindow.Value
-	}
-	return retention, raw
-}
-
-// shrinks reports whether a change makes either window shorter, where "no
-// window" is the longest window of all. Shorter means data that is kept today
-// stops being kept, which is what Decision 8 asks to be confirmed — including
-// the case where nothing is old enough to be deleted yet, because the policy
-// is what is being changed.
-func shrinks(project *store.Project, retention, raw *int) bool {
-	if shorter(retention, project.RetentionDays) {
-		return true
-	}
-	// Raw follows the trace window when it has none of its own (#6), so
-	// the comparison is between effective windows, not stored columns.
-	return shorter(effective(raw, retention), effective(project.RawRetentionDays, project.RetentionDays))
-}
-
-func effective(own, fallback *int) *int {
-	if own != nil {
-		return own
-	}
-	return fallback
-}
-
-// shorter reports whether `next` keeps data for less time than `current`. A
-// nil window is infinite, so nothing is shorter than nil and nil is shorter
-// than nothing.
-func shorter(next, current *int) bool {
-	if next == nil {
-		return false
-	}
-	return current == nil || *next < *current
 }
