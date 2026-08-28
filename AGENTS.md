@@ -19,10 +19,11 @@ API. This file routes; it does not duplicate what specs and docs say.
   budgets and truncation markers, self-description and OpenAPI, schema 0004,
   a CLI in the same binary, and an MCP server on protocol 2026-07-28. Both
   clients are HTTP clients of the read API and contain no logic of their own.
-- 🔄 Spec 005 (retention & admin) in review: schema 0005, the hourly sweeper
-  writing through the group-commit writer, the admin API under
+- ✅ Spec 005 (retention & admin) shipped: schema 0005, the hourly sweeper
+  writing every chunk through the group-commit writer, the admin API under
   `/api/v1/projects` with a dry-run/confirm contract on every destructive
-  endpoint, and the `projects`/`keys`/`retention`/`users` CLI. MCP unchanged.
+  endpoint, and the `projects`/`keys`/`retention`/`users` CLI. MCP unchanged,
+  by design.
 
 ## Where things are
 

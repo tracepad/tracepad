@@ -1,6 +1,6 @@
 # Spec 005 — Retention & Admin API
 
-**Status:** 🔄 IN PROGRESS
+**Status:** ✅ SHIPPED
 **Sprint:** September 2026
 
 > Retention is a first-class feature (design §5.5): the store must be able to
