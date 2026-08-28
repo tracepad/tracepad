@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Config is the resolved runtime configuration.
@@ -41,10 +42,28 @@ type Config struct {
 	// (spec 004 #14). On by default: it is the reason the read API exists
 	// in this shape.
 	MCP bool
+	// SweepInterval is the retention sweeper's cadence (spec 005 #3).
+	// Retention changes take effect on the next pass, which is also the
+	// margin a mistaken change can be corrected in (#14).
+	SweepInterval time.Duration
+	// AdminToken authenticates everything cross-project: creating,
+	// listing, deleting and restoring any project, and reading or changing
+	// another project's settings (spec 005 #11). Unset by default, which
+	// makes those endpoints answer 403 and leaves each project's own key
+	// as the administrator of itself.
+	AdminToken string
 }
 
 // DefaultMaxBodyBytes is the request body cap when unset (20 MiB).
 const DefaultMaxBodyBytes = 20 * 1024 * 1024
+
+// Sweeper cadence bounds (spec 005 #3). The floor exists because the interval
+// is also the delay between passes: a sub-second value is a busy loop holding
+// the writer, not a configuration.
+const (
+	DefaultSweepInterval = time.Hour
+	MinSweepInterval     = time.Second
+)
 
 // Response budget bounds (spec 004 #2). The floor is what a skeleton response
 // needs before any payload is inlined; the ceiling is a consumer asking for
@@ -65,6 +84,8 @@ var knownEnv = map[string]bool{
 	"TRACEPAD_MAX_BODY_BYTES":        true,
 	"TRACEPAD_RESPONSE_BUDGET_BYTES": true,
 	"TRACEPAD_MCP":                   true,
+	"TRACEPAD_SWEEP_INTERVAL":        true,
+	"TRACEPAD_ADMIN_TOKEN":           true,
 	// Read by the client commands rather than by the server, but a typo
 	// in either is still a typo worth naming.
 	"TRACEPAD_URL":     true,
@@ -93,6 +114,13 @@ func Load(args []string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	sweep, err := parseDuration("TRACEPAD_SWEEP_INTERVAL", DefaultSweepInterval)
+	if err != nil {
+		return nil, err
+	}
+	if sweep < MinSweepInterval {
+		return nil, fmt.Errorf("TRACEPAD_SWEEP_INTERVAL: want at least %s, got %s", MinSweepInterval, sweep)
+	}
 	cfg := &Config{
 		Listen:              envOr("TRACEPAD_LISTEN", ":4318"),
 		DataDir:             envOr("TRACEPAD_DATA_DIR", defaultDataDir()),
@@ -101,6 +129,8 @@ func Load(args []string) (*Config, error) {
 		MaxBodyBytes:        maxBody,
 		ResponseBudgetBytes: budget,
 		MCP:                 mcp,
+		SweepInterval:       sweep,
+		AdminToken:          strings.TrimSpace(os.Getenv("TRACEPAD_ADMIN_TOKEN")),
 	}
 
 	fs := flag.NewFlagSet("tracepad", flag.ContinueOnError)
@@ -161,6 +191,20 @@ func parseBytes(key string, def int64) (int64, error) {
 		return 0, fmt.Errorf("%s: want a positive byte count, got %q", key, v)
 	}
 	return n, nil
+}
+
+// parseDuration reads a Go duration ("1h", "30m", "24h"), the spelling an
+// operator already knows from every other tool that takes one.
+func parseDuration(key string, def time.Duration) (time.Duration, error) {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return def, nil
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		return 0, fmt.Errorf("%s: want a duration such as 1h or 30m, got %q", key, v)
+	}
+	return d, nil
 }
 
 func defaultDataDir() string {

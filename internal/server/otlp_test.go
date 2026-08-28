@@ -30,6 +30,7 @@ type harness struct {
 	server  *Server
 	store   *store.Store
 	writer  *store.Writer
+	sweeper *store.Sweeper
 	project *store.Project
 }
 
@@ -56,10 +57,14 @@ func newHarness(t *testing.T, cfg *config.Config, writerOpts store.WriterOptions
 	if cfg == nil {
 		cfg = &config.Config{Listen: ":0", StoreRaw: true, MaxBodyBytes: config.DefaultMaxBodyBytes}
 	}
+	// The sweeper is built but never started: the tests that care drive a
+	// pass by hand, and the rest must not have rows disappear under them.
+	sweeper := st.NewSweeper(writer, store.SweepOptions{Interval: cfg.SweepInterval})
 	return &harness{
-		server:  New(cfg, "test", st, writer),
+		server:  New(cfg, "test", st, writer, sweeper),
 		store:   st,
 		writer:  writer,
+		sweeper: sweeper,
 		project: project,
 	}
 }
@@ -449,3 +454,13 @@ func TestIngestReportsWriteFailure(t *testing.T) {
 }
 
 func rs2slice[T any](v T) []T { return []T{v} }
+
+// setRetention moves a project's trace window directly, for tests that need
+// data to be expired without waiting for it. The API path is exercised by the
+// admin tests; this is the shortcut for everyone else.
+func (h *harness) setRetention(projectID string, days int) error {
+	return h.writer.Submit(context.Background(), &store.ProjectUpdate{
+		ProjectID: projectID,
+		Retention: store.OptionalDays{Set: true, Value: &days},
+	})
+}

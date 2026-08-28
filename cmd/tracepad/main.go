@@ -113,6 +113,8 @@ Server environment:
   TRACEPAD_MAX_BODY_BYTES         request body cap in bytes             (default 20971520)
   TRACEPAD_RESPONSE_BUDGET_BYTES  default read response budget          (default 51200)
   TRACEPAD_MCP                    serve MCP at /mcp                     (default on)
+  TRACEPAD_SWEEP_INTERVAL         retention sweep cadence               (default 1h)
+  TRACEPAD_ADMIN_TOKEN            bearer token for cross-project admin  (default unset)
 
 `+cli.Usage)
 }
@@ -151,7 +153,14 @@ func serve(args []string) error {
 	}
 	defer writer.Close()
 
-	srv := server.New(cfg, version, st, writer)
+	// The sweeper writes through that same writer (spec 005 #3), so it is
+	// stopped before the writer is: a pass still waiting on a commit must
+	// get its answer first.
+	sweeper := st.NewSweeper(writer, store.SweepOptions{Interval: cfg.SweepInterval})
+	sweeper.Start()
+	defer sweeper.Close()
+
+	srv := server.New(cfg, version, st, writer, sweeper)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

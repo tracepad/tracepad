@@ -9,7 +9,7 @@ import (
 )
 
 func TestHealth(t *testing.T) {
-	srv := New(&config.Config{Listen: ":0"}, "test-version", nil, nil)
+	srv := New(&config.Config{Listen: ":0"}, "test-version", nil, nil, nil)
 	req := httptest.NewRequest("GET", "/health", nil)
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)

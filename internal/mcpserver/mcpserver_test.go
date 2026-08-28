@@ -63,7 +63,8 @@ func newHarness(t *testing.T) *harness {
 	t.Cleanup(func() { writer.Close() })
 
 	cfg := &config.Config{Listen: ":0", StoreRaw: true, MaxBodyBytes: config.DefaultMaxBodyBytes, MCP: true}
-	httpServer := httptest.NewServer(server.New(cfg, testVersion, st, writer).Handler())
+	httpServer := httptest.NewServer(server.New(cfg, testVersion, st, writer,
+		st.NewSweeper(writer, store.SweepOptions{})).Handler())
 	t.Cleanup(httpServer.Close)
 
 	h := &harness{url: httpServer.URL, store: st, writer: writer}
@@ -629,7 +630,8 @@ func TestMCPCanBeTurnedOff(t *testing.T) {
 	defer writer.Close()
 
 	cfg := &config.Config{Listen: ":0", MaxBodyBytes: config.DefaultMaxBodyBytes, MCP: false}
-	httpServer := httptest.NewServer(server.New(cfg, testVersion, st, writer).Handler())
+	httpServer := httptest.NewServer(server.New(cfg, testVersion, st, writer,
+		st.NewSweeper(writer, store.SweepOptions{})).Handler())
 	defer httpServer.Close()
 
 	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost,

@@ -57,7 +57,8 @@ func newHarness(t *testing.T) *harness {
 	t.Cleanup(func() { writer.Close() })
 
 	cfg := &config.Config{Listen: ":0", StoreRaw: true, MaxBodyBytes: config.DefaultMaxBodyBytes}
-	httpServer := httptest.NewServer(server.New(cfg, testVersion, st, writer).Handler())
+	httpServer := httptest.NewServer(server.New(cfg, testVersion, st, writer,
+		st.NewSweeper(writer, store.SweepOptions{})).Handler())
 	t.Cleanup(httpServer.Close)
 
 	return &harness{

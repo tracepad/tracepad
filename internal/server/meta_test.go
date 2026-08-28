@@ -396,3 +396,63 @@ func TestSDKVersionTrackingIsBounded(t *testing.T) {
 			tracked, maxTrackedSDKVersions)
 	}
 }
+
+// TestSystemReportsTheSweeper is the observability half of spec 005 #14: with
+// no run-now endpoint, `GET /api/v1/system` is where an operator finds out
+// whether retention is running and what it has taken.
+func TestSystemReportsTheSweeper(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+
+	rec := h.get(t, "/api/v1/system")
+	expectStatus(t, rec, 200)
+	body := decodeJSON[struct {
+		Sweeper struct {
+			Enabled           bool    `json:"enabled"`
+			IntervalSeconds   int64   `json:"interval_seconds"`
+			LastRun           *string `json:"last_run"`
+			NextRun           string  `json:"next_run"`
+			TracesDeleted     int64   `json:"traces_deleted"`
+			RawBatchesDeleted int64   `json:"raw_batches_deleted"`
+		} `json:"sweeper"`
+	}](t, rec)
+
+	if !body.Sweeper.Enabled {
+		t.Fatalf("sweeper = %+v, want it reported as running", body.Sweeper)
+	}
+	if body.Sweeper.IntervalSeconds != int64(store.DefaultSweepInterval.Seconds()) {
+		t.Errorf("interval = %ds, want the default cadence", body.Sweeper.IntervalSeconds)
+	}
+	// A sweeper that has not run says so, rather than reporting the epoch.
+	if body.Sweeper.LastRun != nil {
+		t.Errorf("last_run = %q before the first pass, want null", *body.Sweeper.LastRun)
+	}
+	if body.Sweeper.NextRun == "" {
+		t.Errorf("sweeper = %+v, want the next pass named", body.Sweeper)
+	}
+
+	// After a pass that removed something, the counts are this project's.
+	h.seed(t, &model.Trace{ID: traceHex(1)},
+		&model.Observation{TraceID: traceHex(1), ID: spanHex(1), Type: model.TypeSpan,
+			Level: model.LevelDefault, StartTime: seedBase, EndTime: seedBase + ms})
+	if err := h.setRetention(h.project.ID, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.sweeper.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	rec = h.get(t, "/api/v1/system")
+	expectStatus(t, rec, 200)
+	after := decodeJSON[struct {
+		Sweeper struct {
+			LastRun       *string `json:"last_run"`
+			TracesDeleted int64   `json:"traces_deleted"`
+		} `json:"sweeper"`
+	}](t, rec)
+	if after.Sweeper.LastRun == nil {
+		t.Errorf("last_run is still null after a pass")
+	}
+	if after.Sweeper.TracesDeleted != 1 {
+		t.Errorf("traces_deleted = %d, want the one that expired", after.Sweeper.TracesDeleted)
+	}
+}
