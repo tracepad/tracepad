@@ -503,9 +503,9 @@ func (r *run) system(ctx context.Context, args []string) error {
 	}
 	rows.flush()
 
-	fmt.Fprintf(r.opt.Stdout, "\ningest since %s\n", shortTime(info.Counters.Since))
+	fmt.Fprintf(r.opt.Stdout, "\ningest in this project since %s\n", shortTime(info.Counters.Since))
 	if len(info.Counters.Dialects) == 0 {
-		fmt.Fprintln(r.opt.Stdout, "  nothing has been exported to this server yet")
+		fmt.Fprintln(r.opt.Stdout, "  nothing has been exported to this project yet")
 	} else {
 		counters := newTable(r.opt.Stdout, "  DIALECT", "BATCHES", "SPANS", "SKIPPED")
 		names := make([]string, 0, len(info.Counters.Dialects))

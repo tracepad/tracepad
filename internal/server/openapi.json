@@ -114,7 +114,7 @@
       "get": {
         "tags": ["meta"],
         "summary": "Version, uptime, database size and ingest counters since start",
-        "description": "Self-diagnosis without a metrics stack. The counters are in-memory and cover this process only, which is what `counters.since` says. Row counts are the asking project's own — `payloads` is absent because it cannot be attributed to one, and `projects` is how many tenants share this process, naming none of them.",
+        "description": "Self-diagnosis without a metrics stack. The counters are in-memory and cover this process only, which is what `counters.since` says. Row counts and counters are the asking project's own — `payloads` is absent because it cannot be attributed to one, `projects` is how many tenants share this process (naming none of them), and `size_bytes` is the whole deployment's file on disk.",
         "operationId": "system",
         "responses": {
           "200": {"description": "What this process knows about itself", "content": {"application/json": {"schema": {
@@ -133,7 +133,9 @@
                 "waiting": {"type": "integer"}, "capacity": {"type": "integer"}
               }},
               "response_budget_bytes": {"type": "integer"},
-              "counters": {"type": "object", "properties": {
+              "counters": {"type": "object",
+                "description": "This project's ingest traffic since the process started",
+                "properties": {
                 "since": {"type": "string", "format": "date-time"},
                 "dialects": {"type": "object", "additionalProperties": {"type": "object", "properties": {
                   "batches": {"type": "integer"},

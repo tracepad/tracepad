@@ -311,6 +311,63 @@ func TestSystemCountsOnlyTheAskingProject(t *testing.T) {
 	}
 }
 
+// TestSystemCountersAreScopedToTheProject: the ingest counters are the same
+// class of aggregate as the row counts. Left process-wide they would tell one
+// tenant how much traffic another was sending and which SDKs it ran
+// (Decision 33).
+func TestSystemCountersAreScopedToTheProject(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+
+	if _, err := h.store.CreateProject("other",
+		store.KeyPair{PublicKey: "tp-pk-other", Secret: "tp-sk-other"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// The other tenant exports, with an SDK version of its own.
+	h.post(t, "/v1/traces", fixtureBody(t, "001-langfuse-sdk-generation"),
+		func(r *http.Request) {
+			r.Header.Set("Authorization", "Bearer tp-sk-other")
+			r.Header.Set("x-langfuse-ingestion-version", "9.9.9-theirs")
+		})
+
+	// The asking project has sent nothing, and must be told exactly that.
+	rec := h.get(t, "/api/v1/system")
+	expectStatus(t, rec, 200)
+	mine := decodeJSON[struct {
+		Counters struct {
+			Dialects    map[string]any `json:"dialects"`
+			SDKVersions []string       `json:"langfuse_ingestion_versions"`
+		} `json:"counters"`
+	}](t, rec)
+
+	if len(mine.Counters.Dialects) != 0 {
+		t.Errorf("dialects = %v, want none: this project exported nothing", mine.Counters.Dialects)
+	}
+	if slices.Contains(mine.Counters.SDKVersions, "9.9.9-theirs") {
+		t.Errorf("sdk versions = %v, want no sight of another tenant's SDK", mine.Counters.SDKVersions)
+	}
+
+	// And the tenant that did export sees its own.
+	theirs := h.call(t, "GET", "/api/v1/system", nil, func(r *http.Request) {
+		r.Header.Set("Authorization", "Bearer tp-sk-other")
+	})
+	expectStatus(t, theirs, 200)
+	body := decodeJSON[struct {
+		Counters struct {
+			Dialects map[string]struct {
+				Batches int64 `json:"batches"`
+			} `json:"dialects"`
+			SDKVersions []string `json:"langfuse_ingestion_versions"`
+		} `json:"counters"`
+	}](t, theirs)
+	if body.Counters.Dialects["langfuse"].Batches != 1 {
+		t.Errorf("dialects = %+v, want the export it actually sent", body.Counters.Dialects)
+	}
+	if !slices.Contains(body.Counters.SDKVersions, "9.9.9-theirs") {
+		t.Errorf("sdk versions = %v, want its own", body.Counters.SDKVersions)
+	}
+}
+
 // TestSystemCountsRejections: a body that never decoded has no dialect, and
 // saying so is the point of a separate counter.
 func TestSystemCountsRejections(t *testing.T) {
@@ -332,10 +389,10 @@ func TestSystemCountsRejections(t *testing.T) {
 func TestSDKVersionTrackingIsBounded(t *testing.T) {
 	c := newCounters()
 	for i := range maxTrackedSDKVersions * 2 {
-		c.observeSDKVersion(fmt.Sprintf("v%d", i))
+		c.observeSDKVersion("project", fmt.Sprintf("v%d", i))
 	}
-	if len(c.sdkVersions) > maxTrackedSDKVersions {
+	if tracked := len(c.projects["project"].sdkVersions); tracked > maxTrackedSDKVersions {
 		t.Fatalf("tracked %d versions, want at most %d: the header is client-controlled",
-			len(c.sdkVersions), maxTrackedSDKVersions)
+			tracked, maxTrackedSDKVersions)
 	}
 }

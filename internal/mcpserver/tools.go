@@ -412,11 +412,16 @@ func traceDetailSchema() *jsonschema.Schema {
 		"metadata":          anything("The trace's own metadata."),
 		"observations":      list(&jsonschema.Schema{Ref: "#/$defs/observation"}, "The tree, roots ordered by start time."),
 		"expansion": object(map[string]*jsonschema.Schema{
-			"expanded":      &jsonschema.Schema{Type: "boolean", Description: "Always false; the key is absent when the expansion happened."},
-			"payloads":      integer("How many payloads the trace holds."),
-			"budget_needed": integer("The budget that would carry a marker for each of them."),
-			"reason":        text("Why nothing was expanded."),
-		}, "expanded", "payloads", "budget_needed", "reason"),
+			"expanded": &jsonschema.Schema{Type: "boolean",
+				Description: "Always false; the key is absent when the expansion happened."},
+			"payloads": integer("How many payloads the trace holds."),
+			"budget_needed": integer("The budget that would carry a marker for each of them. " +
+				"Not clamped, so it may be more than `budget` accepts — see retryable."),
+			"retryable": &jsonschema.Schema{Type: "boolean",
+				Description: "Whether budget_needed is a budget this server would accept. " +
+					"False means no budget will do: read the payloads one at a time with get_observation_io."},
+			"reason": text("Why nothing was expanded."),
+		}, "expanded", "payloads", "budget_needed", "retryable", "reason"),
 	}, "id", "environment", "error_count", "observation_count", "observations")
 	schema.Properties["expansion"].Description = "Present only when expand=io was refused because the budget " +
 		"could not carry a marker for every payload. Nothing is unreachable — every observation id is in the " +

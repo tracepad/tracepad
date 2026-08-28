@@ -27,9 +27,8 @@ type dialectCounter struct {
 	SpansSkipped int64
 }
 
-// counters holds every since-start number the system endpoint reports.
-type counters struct {
-	mu sync.Mutex
+// projectCounters is one tenant's share of the ingest traffic.
+type projectCounters struct {
 	// dialects is keyed by mapping.Dialect*.
 	dialects map[string]*dialectCounter
 	// rejectedBatches counts bodies that never reached a dialect: they
@@ -44,78 +43,115 @@ type counters struct {
 	sdkVersions map[string]int64
 }
 
+// counters holds every since-start number the system endpoint reports, kept
+// per project.
+//
+// Per project because a project key is a tenant credential: process-wide
+// totals would tell one tenant how much traffic another was sending and which
+// SDKs it ran (Decision 33). Every observation point is reached after the
+// request has authenticated, so there is no traffic here without a project to
+// file it under.
+type counters struct {
+	mu       sync.Mutex
+	projects map[string]*projectCounters
+}
+
 func newCounters() *counters {
-	return &counters{dialects: map[string]*dialectCounter{}, sdkVersions: map[string]int64{}}
+	return &counters{projects: map[string]*projectCounters{}}
+}
+
+// forProject returns a project's counters, creating them on first sight. The
+// map is keyed by ids that came out of the database, so it is bounded by the
+// number of projects rather than by anything a client sends.
+func (c *counters) forProject(projectID string) *projectCounters {
+	entry := c.projects[projectID]
+	if entry == nil {
+		entry = &projectCounters{
+			dialects:    map[string]*dialectCounter{},
+			sdkVersions: map[string]int64{},
+		}
+		c.projects[projectID] = entry
+	}
+	return entry
 }
 
 // observeBatch records one accepted export.
-func (c *counters) observeBatch(dialect string, stored, skipped, unreadable int64) {
+func (c *counters) observeBatch(projectID, dialect string, stored, skipped, unreadable int64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	entry := c.dialects[dialect]
+	project := c.forProject(projectID)
+	entry := project.dialects[dialect]
 	if entry == nil {
 		entry = &dialectCounter{}
-		c.dialects[dialect] = entry
+		project.dialects[dialect] = entry
 	}
 	entry.Batches++
 	entry.SpansStored += stored
 	entry.SpansSkipped += skipped
-	c.unreadableSpans += unreadable
+	project.unreadableSpans += unreadable
 }
 
 // observeRejectedBatch records a body that could not be decoded.
-func (c *counters) observeRejectedBatch() {
+func (c *counters) observeRejectedBatch(projectID string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.rejectedBatches++
+	c.forProject(projectID).rejectedBatches++
 }
 
 // observeSDKVersion records an ingestion-version header.
-func (c *counters) observeSDKVersion(version string) {
+func (c *counters) observeSDKVersion(projectID, version string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	project := c.forProject(projectID)
 	// Bounded on purpose: the header is client-controlled, and an
 	// unbounded map keyed by it is a memory leak a client can trigger.
-	if len(c.sdkVersions) >= maxTrackedSDKVersions {
-		if _, known := c.sdkVersions[version]; !known {
+	if len(project.sdkVersions) >= maxTrackedSDKVersions {
+		if _, known := project.sdkVersions[version]; !known {
 			return
 		}
 	}
-	c.sdkVersions[version]++
+	project.sdkVersions[version]++
 }
 
-// maxTrackedSDKVersions bounds the distinct header values kept.
+// maxTrackedSDKVersions bounds the distinct header values kept per project.
 const maxTrackedSDKVersions = 64
 
-// snapshot renders the counters for the system endpoint.
-func (c *counters) snapshot() object {
+// snapshot renders one project's counters for the system endpoint. A project
+// that has never exported anything gets zeroes, not an absence: "nothing has
+// arrived" is an answer.
+func (c *counters) snapshot(projectID string) object {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	names := make([]string, 0, len(c.dialects))
-	for name := range c.dialects {
+	project := c.projects[projectID]
+	if project == nil {
+		project = &projectCounters{}
+	}
+
+	names := make([]string, 0, len(project.dialects))
+	for name := range project.dialects {
 		names = append(names, name)
 	}
 	sort.Strings(names)
 	dialects := object{}
 	for _, name := range names {
-		entry := c.dialects[name]
+		entry := project.dialects[name]
 		dialects = dialects.put(name, object{}.
 			put("batches", entry.Batches).
 			put("spans_stored", entry.SpansStored).
 			put("spans_skipped", entry.SpansSkipped))
 	}
 
-	versions := make([]string, 0, len(c.sdkVersions))
-	for version := range c.sdkVersions {
+	versions := make([]string, 0, len(project.sdkVersions))
+	for version := range project.sdkVersions {
 		versions = append(versions, version)
 	}
 	sort.Strings(versions)
 
 	return object{}.
 		put("dialects", dialects).
-		put("rejected_batches", c.rejectedBatches).
-		put("unreadable_resource_spans", c.unreadableSpans).
+		put("rejected_batches", project.rejectedBatches).
+		put("unreadable_resource_spans", project.unreadableSpans).
 		put("langfuse_ingestion_versions", versions)
 }
 
@@ -171,8 +207,10 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 		put("response_budget_bytes", s.responseBudget).
 		// The counters are since this process started and say so: an
 		// honest process-lifetime number now beats a metrics subsystem
-		// later (#10).
-		put("counters", s.counters.snapshot().put("since", formatTime(s.startedAt.UnixNano())))
+		// later (#10). They are this project's, for the same reason the
+		// row counts are (Decision 33).
+		put("counters", s.counters.snapshot(project.ID).
+			put("since", formatTime(s.startedAt.UnixNano())))
 	writeJSON(w, http.StatusOK, body)
 }
 
