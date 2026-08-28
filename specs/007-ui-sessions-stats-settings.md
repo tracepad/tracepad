@@ -1,6 +1,6 @@
 # Spec 007 — Sessions, Stats & Settings: the API Grows Into All Three Clients
 
-**Status:** 🔄 IN PROGRESS
+**Status:** ✅ SHIPPED
 **Sprint:** September 2026
 
 > Spec 006 built the shell and the core value path; this spec finishes the
