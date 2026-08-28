@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -38,7 +39,9 @@ func Open(path string) (*Store, error) {
 	// pragma (journal_mode included) already waits out lock contention
 	// instead of failing with SQLITE_BUSY. WAL for concurrent readers with
 	// the single writer; incremental auto_vacuum so retention deletes
-	// (later stage) can actually return disk space.
+	// return disk space (spec 005 #5). auto_vacuum only takes on a
+	// database with no tables yet, which is why migration 0005 carries the
+	// fallback for a file that predates the pragma.
 	//
 	// _txlock=immediate makes every transaction take the write lock at
 	// BEGIN. Every transaction this binary opens is a write (migrations,
@@ -62,17 +65,62 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("open %s: %w (latest backup, if any: %s)", path, err, latestBackup(path))
 	}
+	// Not fatal: without incremental auto-vacuum, retention still deletes
+	// rows and the file merely stops shrinking. Refusing to start over
+	// that — a full VACUUM wants room for a second copy of the database —
+	// would turn a disk-space problem into an outage.
+	if err := s.ensureIncrementalVacuum(); err != nil {
+		logger().Warn("could not enable incremental vacuum; retention will free rows but not disk", "err", err)
+	}
 	return s, nil
 }
 
 // Close closes the database.
 func (s *Store) Close() error { return s.db.Close() }
 
+// GraceWindow is how long a soft-deleted project's data survives before the
+// sweeper purges it (spec 005 #9). Fixed, not configurable: the point of a
+// safety net is knowing it is there, and a knob would make the guarantee
+// depend on how the deployment was configured.
+const GraceWindow = 7 * 24 * time.Hour
+
 // Project is a tenant-lite unit of isolation: its own keys and retention.
 type Project struct {
-	ID            string
-	Name          string
-	RetentionDays int
+	ID   string
+	Name string
+	// RetentionDays is how long a trace is kept counting from its arrival.
+	// Nil means forever, and forever is the default (spec 005 #1, #2): a
+	// self-hosted tool must not discard the data of someone who installed
+	// it and configured nothing.
+	RetentionDays *int
+	// RawRetentionDays is the window for stored OTLP bodies. Nil means it
+	// follows RetentionDays, so raw lives exactly as long as the parsed
+	// data it can rebuild (#6).
+	RawRetentionDays *int
+	// DeletedAt is when the project was soft-deleted (Unix nanoseconds),
+	// nil while it is live (#9).
+	DeletedAt *int64
+	CreatedAt string
+}
+
+// Deleted reports a project inside its grace window.
+func (p *Project) Deleted() bool { return p != nil && p.DeletedAt != nil }
+
+// PurgeAt is when the sweeper will destroy a deleted project's data.
+func (p *Project) PurgeAt() int64 {
+	if p.DeletedAt == nil {
+		return 0
+	}
+	return *p.DeletedAt + int64(GraceWindow)
+}
+
+// RawWindowDays resolves the window raw batches are actually swept by: their
+// own, or the project's when they have none (#6).
+func (p *Project) RawWindowDays() *int {
+	if p.RawRetentionDays != nil {
+		return p.RawRetentionDays
+	}
+	return p.RetentionDays
 }
 
 // KeyPair is a project's API credentials. Secret is only present right after
@@ -82,7 +130,47 @@ type KeyPair struct {
 	Secret    string
 }
 
-// CreateProject inserts a project with the given key pair.
+// KeyInfo is one stored key as a listing shows it: the public half and when it
+// was made. The secret half is a hash and is never shown, because it is never
+// held (spec 005 #12).
+type KeyInfo struct {
+	PublicKey string
+	CreatedAt string
+}
+
+// projectColumns is the one SELECT list every project read shares, so a column
+// added to the table is added to every reader at once.
+const projectColumns = `id, name, retention_days, raw_retention_days, deleted_at, created_at`
+
+func scanProject(row interface{ Scan(...any) error }) (*Project, error) {
+	var (
+		p         Project
+		retention sql.NullInt64
+		raw       sql.NullInt64
+		deleted   sql.NullInt64
+	)
+	if err := row.Scan(&p.ID, &p.Name, &retention, &raw, &deleted, &p.CreatedAt); err != nil {
+		return nil, err
+	}
+	if retention.Valid {
+		days := int(retention.Int64)
+		p.RetentionDays = &days
+	}
+	if raw.Valid {
+		days := int(raw.Int64)
+		p.RawRetentionDays = &days
+	}
+	if deleted.Valid {
+		at := deleted.Int64
+		p.DeletedAt = &at
+	}
+	return &p, nil
+}
+
+// CreateProject inserts a project with the given key pair, outside the
+// group-commit writer: it runs at startup, from the bootstrap, before the
+// writer exists. The API creates projects as a job like every other write
+// (see ProjectCreate).
 func (s *Store) CreateProject(name string, keys KeyPair) (*Project, error) {
 	id, err := randomHex(16)
 	if err != nil {
@@ -93,39 +181,58 @@ func (s *Store) CreateProject(name string, keys KeyPair) (*Project, error) {
 		return nil, err
 	}
 	defer tx.Rollback()
-	// RETURNING keeps the returned Project in sync with schema defaults
-	// instead of duplicating them as Go literals.
-	var retention int
-	if err := tx.QueryRow(`INSERT INTO projects (id, name) VALUES (?, ?) RETURNING retention_days`, id, name).
-		Scan(&retention); err != nil {
-		return nil, fmt.Errorf("create project %q: %w", name, err)
-	}
-	hash := sha256.Sum256([]byte(keys.Secret))
-	if _, err := tx.Exec(`INSERT INTO api_keys (public_key, secret_hash, project_id) VALUES (?, ?, ?)`,
-		keys.PublicKey, hash[:], id); err != nil {
-		return nil, fmt.Errorf("create key for project %q: %w", name, err)
+	project, err := insertProject(tx, id, name, keys)
+	if err != nil {
+		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	return &Project{ID: id, Name: name, RetentionDays: retention}, nil
+	return project, nil
 }
 
-// ProjectByName returns the project or nil if absent.
+// ProjectByName returns the project or nil if absent. A soft-deleted project
+// is returned like any other: its name stays reserved through the grace
+// window, so that restore always has its name to come back to (spec 005 #9).
 func (s *Store) ProjectByName(name string) (*Project, error) {
-	var p Project
-	err := s.db.QueryRow(`SELECT id, name, retention_days FROM projects WHERE name = ?`, name).
-		Scan(&p.ID, &p.Name, &p.RetentionDays)
-	if err == sql.ErrNoRows {
-		return nil, nil
+	return s.oneProject(`SELECT `+projectColumns+` FROM projects WHERE name = ?`, name)
+}
+
+// ProjectByID returns the project or nil if absent, deleted ones included.
+func (s *Store) ProjectByID(id string) (*Project, error) {
+	return s.oneProject(`SELECT `+projectColumns+` FROM projects WHERE id = ?`, id)
+}
+
+// ListProjects returns every project, oldest first. Deleted ones are left out
+// unless asked for, which is what makes a deleted project vanish from listings
+// while an admin can still see it and its purge date (spec 005 #9).
+func (s *Store) ListProjects(includeDeleted bool) ([]*Project, error) {
+	query := `SELECT ` + projectColumns + ` FROM projects`
+	if !includeDeleted {
+		query += ` WHERE deleted_at IS NULL`
 	}
+	query += ` ORDER BY created_at, id`
+
+	rows, err := s.db.Query(query)
 	if err != nil {
 		return nil, err
 	}
-	return &p, nil
+	defer rows.Close()
+
+	var out []*Project
+	for rows.Next() {
+		project, err := scanProject(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, project)
+	}
+	return out, rows.Err()
 }
 
-// CountProjects returns the number of projects.
+// CountProjects returns the number of projects, deleted ones included: it
+// answers "is this database empty" for the bootstrap, and a name inside its
+// grace window is still taken.
 func (s *Store) CountProjects() (int, error) {
 	var n int
 	err := s.db.QueryRow(`SELECT COUNT(*) FROM projects`).Scan(&n)
@@ -134,20 +241,51 @@ func (s *Store) CountProjects() (int, error) {
 
 // ProjectBySecret resolves an API secret to its project, or nil if unknown.
 // Lookup is by sha256(secret) against a unique index (spec 001 #8).
+//
+// A soft-deleted project resolves too, and the caller decides what its keys
+// may still do: everything is refused during the grace window except reading
+// the project and restoring it (spec 005 #10), so the deletion is undoable in
+// a deployment that has no admin token to undo it with.
 func (s *Store) ProjectBySecret(secret string) (*Project, error) {
 	hash := sha256.Sum256([]byte(secret))
-	var p Project
-	err := s.db.QueryRow(
-		`SELECT p.id, p.name, p.retention_days FROM projects p
-		 JOIN api_keys k ON k.project_id = p.id WHERE k.secret_hash = ?`, hash[:]).
-		Scan(&p.ID, &p.Name, &p.RetentionDays)
+	// A subquery rather than a join: `secret_hash` is unique, so it can
+	// only name one project, and both tables carry a `created_at` that a
+	// join would leave ambiguous in the shared column list.
+	return s.oneProject(
+		`SELECT `+projectColumns+` FROM projects
+		  WHERE id = (SELECT project_id FROM api_keys WHERE secret_hash = ?)`, hash[:])
+}
+
+func (s *Store) oneProject(query string, args ...any) (*Project, error) {
+	project, err := scanProject(s.db.QueryRow(query, args...))
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	return &p, nil
+	return project, nil
+}
+
+// ProjectKeys lists a project's active keys, oldest first (spec 005 #12).
+func (s *Store) ProjectKeys(projectID string) ([]KeyInfo, error) {
+	rows, err := s.db.Query(
+		`SELECT public_key, created_at FROM api_keys WHERE project_id = ? ORDER BY created_at, public_key`,
+		projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	keys := []KeyInfo{}
+	for rows.Next() {
+		var key KeyInfo
+		if err := rows.Scan(&key.PublicKey, &key.CreatedAt); err != nil {
+			return nil, err
+		}
+		keys = append(keys, key)
+	}
+	return keys, rows.Err()
 }
 
 // GenerateKeyPair mints a fresh random key pair (spec 001 #8).

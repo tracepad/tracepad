@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/tracepad/tracepad/internal/model"
 )
@@ -16,6 +17,11 @@ type IngestBatch struct {
 	// Raw is the body to keep for a later remap; nil when raw storage is
 	// off (spec 002 #9).
 	Raw *RawBatch
+	// IngestedAt is the server clock at arrival, which is the clock
+	// retention counts from (spec 005 #1). Zero means "now", resolved in
+	// apply so that every path into the writer has an arrival time even
+	// when the caller did not think to set one.
+	IngestedAt int64
 }
 
 // RawBatch is the request body as received, kept verbatim for replay.
@@ -37,6 +43,10 @@ func (b *IngestBatch) Empty() bool {
 // apply writes one batch inside the caller's transaction. Traces come first
 // so the aggregate pass at the end always finds its row.
 func (b *IngestBatch) apply(tx *sql.Tx) error {
+	arrived := b.IngestedAt
+	if arrived == 0 {
+		arrived = time.Now().UnixNano()
+	}
 	if b.Raw != nil {
 		// Always zstd, unlike payloads: the table has no compression
 		// column, so one encoding keeps replay unambiguous, and an OTLP
@@ -53,7 +63,7 @@ func (b *IngestBatch) apply(tx *sql.Tx) error {
 	}
 
 	for _, t := range b.Traces {
-		if err := upsertTrace(tx, b.ProjectID, t); err != nil {
+		if err := upsertTrace(tx, b.ProjectID, t, arrived); err != nil {
 			return err
 		}
 	}
@@ -74,7 +84,11 @@ func (b *IngestBatch) apply(tx *sql.Tx) error {
 // not carry leaves the stored one alone, a value it did carry overwrites
 // (spec 002 #6). NULL is the wire for "this delivery said nothing", which is
 // why every column is bound as a nullable.
-func upsertTrace(tx *sql.Tx, projectID string, t *model.Trace) error {
+//
+// `ingested_at` is the exception: it is set when the row is created and never
+// touched again, so a trace's retention lease starts once no matter how many
+// late spans join it (spec 005 #1).
+func upsertTrace(tx *sql.Tx, projectID string, t *model.Trace, ingestedAt int64) error {
 	metadataID, err := writePayload(tx, t.Metadata)
 	if err != nil {
 		return err
@@ -89,8 +103,8 @@ func upsertTrace(tx *sql.Tx, projectID string, t *model.Trace) error {
 	}
 
 	_, err = tx.Exec(
-		`INSERT INTO traces (project_id, id, name, user_id, session_id, environment, tags, metadata_id)
-		 VALUES (?, ?, ?, ?, ?, COALESCE(?, 'default'), ?, ?)
+		`INSERT INTO traces (project_id, id, name, user_id, session_id, environment, tags, metadata_id, ingested_at)
+		 VALUES (?, ?, ?, ?, ?, COALESCE(?, 'default'), ?, ?, ?)
 		 ON CONFLICT(project_id, id) DO UPDATE SET
 		   name        = COALESCE(excluded.name, traces.name),
 		   user_id     = COALESCE(excluded.user_id, traces.user_id),
@@ -99,7 +113,7 @@ func upsertTrace(tx *sql.Tx, projectID string, t *model.Trace) error {
 		   tags        = COALESCE(excluded.tags, traces.tags),
 		   metadata_id = COALESCE(excluded.metadata_id, traces.metadata_id)`,
 		projectID, t.ID, nullString(t.Name), nullString(t.UserID), nullString(t.SessionID),
-		nullString(t.Environment), tags, metadataID,
+		nullString(t.Environment), tags, metadataID, ingestedAt,
 		nullString(t.Environment),
 	)
 	if err != nil {

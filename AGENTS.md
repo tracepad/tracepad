@@ -19,7 +19,10 @@ API. This file routes; it does not duplicate what specs and docs say.
   budgets and truncation markers, self-description and OpenAPI, schema 0004,
   a CLI in the same binary, and an MCP server on protocol 2026-07-28. Both
   clients are HTTP clients of the read API and contain no logic of their own.
-- Next: spec 005 — admin API and the retention sweeper.
+- 🔄 Spec 005 (retention & admin) in review: schema 0005, the hourly sweeper
+  writing through the group-commit writer, the admin API under
+  `/api/v1/projects` with a dry-run/confirm contract on every destructive
+  endpoint, and the `projects`/`keys`/`retention`/`users` CLI. MCP unchanged.
 
 ## Where things are
 
@@ -35,7 +38,9 @@ API. This file routes; it does not duplicate what specs and docs say.
 | Read API (traces, sessions, stats, system) | `internal/server/traces.go` and neighbours, `docs/api.md`, spec 004 — the route table in `routes.go` is the surface, and `openapi.json` must agree with it |
 | Response budgets and truncation | `internal/server/budget.go`, spec 004 #2 |
 | CLI | `internal/cli/`, `internal/client/`, `docs/cli.md`, spec 004 |
-| MCP | `internal/mcpserver/`, `docs/mcp.md`, spec 004 — tools call the read API over HTTP, never the store |
+| MCP | `internal/mcpserver/`, `docs/mcp.md`, spec 004 — tools call the read API over HTTP, never the store, and only ever with a GET (spec 005 #13) |
+| Retention and the sweeper | `internal/store/sweep.go`, `docs/retention.md`, spec 005 — every chunk is a `WriteJob`, never a second write connection |
+| Admin API (projects, keys, retention, erasure) | `internal/server/admin.go`, `internal/store/admin.go`, `docs/admin.md`, spec 005 — destructive endpoints are a dry run until `?confirm=` echoes the name, checked inside the write transaction |
 | Attribute mapping | `internal/mapping/rules.go` is the table; `mapping.go` applies it |
 | Configuration | `internal/config/`, spec 001 + spec 002 Configuration tables |
 

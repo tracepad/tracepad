@@ -205,6 +205,12 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 			put("path", mcpserver.Path).
 			put("protocol_version", mcpserver.ProtocolVersion)).
 		put("response_budget_bytes", s.responseBudget).
+		// What retention has done and when it runs next (spec 005 #14).
+		// There is no endpoint to run it now: an immediate sweep would be
+		// a destructive trigger without the dry run the rest of the admin
+		// surface insists on, and the cadence *is* the margin in which a
+		// mistaken retention change can be corrected.
+		put("sweeper", s.sweeperStatus(project.ID)).
 		// The counters are since this process started and say so: an
 		// honest process-lifetime number now beats a metrics subsystem
 		// later (#10). They are this project's, for the same reason the
@@ -212,6 +218,29 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 		put("counters", s.counters.snapshot(project.ID).
 			put("since", formatTime(s.startedAt.UnixNano())))
 	writeJSON(w, http.StatusOK, body)
+}
+
+// sweeperStatus renders the retention sweeper's state. The deletion counts are
+// the asking project's own, for the same reason the row counts are
+// (spec 004 Decision 33); the schedule is an operator fact and names nobody.
+func (s *Server) sweeperStatus(projectID string) object {
+	if s.sweeper == nil {
+		return object{}.put("enabled", false)
+	}
+	status := s.sweeper.Status(projectID)
+	body := object{}.
+		put("enabled", true).
+		put("interval_seconds", int64(status.Interval.Seconds())).
+		put("next_run", formatTime(status.NextRun)).
+		put("since", formatTime(status.Since)).
+		put("traces_deleted", status.TracesDeleted).
+		put("raw_batches_deleted", status.RawBatchesDeleted)
+	// A sweeper that has not run yet says so rather than reporting the
+	// epoch, which would read as "ran in 1970".
+	if status.LastRun == 0 {
+		return body.put("last_run", nil)
+	}
+	return body.put("last_run", formatTime(status.LastRun))
 }
 
 // queueReporter is the part of *store.Writer the system endpoint needs. The

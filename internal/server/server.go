@@ -22,11 +22,21 @@ type JobWriter interface {
 	Submit(ctx context.Context, job store.WriteJob) error
 }
 
+// SweepReporter is the retention sweeper as `GET /api/v1/system` needs it: a
+// per-project view of what the passes have removed and when the next one runs
+// (spec 005 #14). There is deliberately no method to trigger a pass — an
+// immediate-sweep endpoint would be a destructive trigger with none of the
+// dry-run semantics the rest of this spec insists on (Decision 14).
+type SweepReporter interface {
+	Status(projectID string) store.SweepStatus
+}
+
 // Server is the Tracepad HTTP server.
 type Server struct {
 	http    *http.Server
 	store   *store.Store
 	writer  JobWriter
+	sweeper SweepReporter
 	version string
 
 	storeRaw     bool
@@ -38,16 +48,21 @@ type Server struct {
 	// publishes because the endpoint map deliberately does not (Decision
 	// 27).
 	mcp bool
+	// adminToken authenticates everything cross-project (spec 005 #11).
+	// Empty means no such credential exists on this deployment, and the
+	// endpoints that need one say so rather than 401ing.
+	adminToken string
 
 	startedAt time.Time
 	counters  *counters
 }
 
-// New builds the server around an opened store and the writer that
-// serializes writes into it. The writer is passed in rather than created
-// here: its lifetime is owned by whoever opened the store, and tests tune its
-// queue to exercise backpressure.
-func New(cfg *config.Config, version string, st *store.Store, writer JobWriter) *Server {
+// New builds the server around an opened store, the writer that serializes
+// writes into it, and the sweeper it reports on. All three are passed in
+// rather than created here: their lifetimes are owned by whoever opened the
+// store, and tests tune the writer's queue to exercise backpressure and drive
+// the sweeper by hand.
+func New(cfg *config.Config, version string, st *store.Store, writer JobWriter, sweeper SweepReporter) *Server {
 	maxBody := cfg.MaxBodyBytes
 	if maxBody <= 0 {
 		// config.Load never produces this, but a hand-built Config
@@ -61,11 +76,13 @@ func New(cfg *config.Config, version string, st *store.Store, writer JobWriter) 
 	s := &Server{
 		store:          st,
 		writer:         writer,
+		sweeper:        sweeper,
 		version:        version,
 		storeRaw:       cfg.StoreRaw,
 		maxBodyBytes:   maxBody,
 		responseBudget: budget,
 		mcp:            cfg.MCP,
+		adminToken:     cfg.AdminToken,
 		startedAt:      time.Now(),
 		counters:       newCounters(),
 	}

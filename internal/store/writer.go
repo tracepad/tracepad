@@ -72,6 +72,10 @@ const (
 	RejectInvalid = "invalid"
 	// RejectNotFound is a reference to something that does not exist.
 	RejectNotFound = "not_found"
+	// RejectConflict is a request the stored state already answers
+	// differently: a project name that is taken, a deletion of something
+	// already deleted (spec 005).
+	RejectConflict = "conflict"
 )
 
 func (r *Rejection) Error() string { return r.Message }

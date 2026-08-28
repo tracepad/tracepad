@@ -4,6 +4,7 @@ import (
 	"errors"
 	"flag"
 	"testing"
+	"time"
 )
 
 func TestParseProjects(t *testing.T) {
@@ -87,5 +88,43 @@ func TestIngestRejectsMalformedValues(t *testing.T) {
 	t.Setenv("TRACEPAD_MAX_BODY_BYTES", "20MB")
 	if _, err := Load(nil); err == nil {
 		t.Error("TRACEPAD_MAX_BODY_BYTES=20MB must be rejected")
+	}
+}
+
+// Retention and admin configuration (spec 005). The interval is a duration
+// because every other tool an operator knows takes one; the floor exists
+// because an interval is also the pause between passes.
+func TestSweepIntervalAndAdminToken(t *testing.T) {
+	cfg, err := Load(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.SweepInterval != DefaultSweepInterval {
+		t.Errorf("SweepInterval = %s, want %s", cfg.SweepInterval, DefaultSweepInterval)
+	}
+	if cfg.AdminToken != "" {
+		t.Errorf("AdminToken = %q, want unset by default", cfg.AdminToken)
+	}
+
+	t.Setenv("TRACEPAD_SWEEP_INTERVAL", "15m")
+	t.Setenv("TRACEPAD_ADMIN_TOKEN", "  secret  ")
+	cfg, err = Load(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.SweepInterval != 15*time.Minute {
+		t.Errorf("SweepInterval = %s, want 15m", cfg.SweepInterval)
+	}
+	if cfg.AdminToken != "secret" {
+		t.Errorf("AdminToken = %q, want the value without the whitespace a shell leaves behind", cfg.AdminToken)
+	}
+
+	t.Setenv("TRACEPAD_SWEEP_INTERVAL", "hourly")
+	if _, err := Load(nil); err == nil {
+		t.Error("a sweep interval that is not a duration must be refused, not defaulted")
+	}
+	t.Setenv("TRACEPAD_SWEEP_INTERVAL", "10ms")
+	if _, err := Load(nil); err == nil {
+		t.Error("a sub-second sweep interval is a busy loop, not a configuration")
 	}
 }

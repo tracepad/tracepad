@@ -4,6 +4,14 @@ Tracepad serves the Model Context Protocol so an agent can read traces as
 tools rather than as HTTP. Eight tools, all reads, each a thin wrapper over one
 [read API](api.md) endpoint.
 
+**The MCP surface cannot modify or delete anything.** Not "does not today" —
+cannot: the only thing a tool can reach the API with is a `GET`, and the
+administrative surface of [admin.md](admin.md) deliberately added nothing here.
+An agent should not hold destructive capability at all, so that a hallucinated
+tool call has nothing to destroy. Deleting a project, moving a retention window
+and erasing a user's data live in the HTTP API and the CLI, where a human
+confirms them by name.
+
 The tools call the HTTP API — in process when the server serves them itself,
 over the network in stdio mode — and never the database. That is what makes a
 tool result and a `curl` of the corresponding endpoint the same bytes: budgets,
@@ -84,6 +92,9 @@ tracepad is a later question.
 There is no `search` tool. There is no search endpoint yet, and a tool faking
 one over list filters would tell the model this server can do something it
 cannot. It arrives with full-text search.
+
+There are no administrative tools either, for the reason at the top of this
+page: not a gap, a guarantee.
 
 Tool inputs mirror their endpoint's query parameters — same names, same
 meanings — with the constraints stated in the schema: enums for `status`,

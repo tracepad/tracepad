@@ -103,6 +103,10 @@ func TestSelfDescriptionIsServedWithoutAKey(t *testing.T) {
 // is sent, and the only answer refused here is "unknown query parameter": a
 // complaint about the *value* means the server knew the name, which is what is
 // being checked.
+//
+// Every method, not only GET (spec 005): `?confirm=` is documented on a PATCH
+// and on three DELETEs, and a value that is not the echo the server wants
+// changes nothing — which is exactly what makes it safe to send here.
 func TestDocumentedQueryParametersAreAccepted(t *testing.T) {
 	h := newHarness(t, nil, store.WriterOptions{})
 	seedCorpus(t, h)
@@ -135,32 +139,35 @@ func TestDocumentedQueryParametersAreAccepted(t *testing.T) {
 		"/scores/{id}", "/scores/"+strings.Repeat("a", 32),
 		"/prompts/{name}", "/prompts/support",
 		"{label}", "production",
+		"/projects/{id}", "/projects/"+h.project.ID,
+		"{public_key}", testPublic,
+		"{user_id}", "u1",
 	)
 
 	for path, operations := range document.Paths {
-		operation, documented := operations["get"]
-		if !documented {
-			continue
-		}
-		for _, parameter := range operation.Parameters {
-			name, in := parameter.Name, parameter.In
-			if reference, found := strings.CutPrefix(parameter.Ref, "#/components/parameters/"); found {
-				shared := document.Components.Parameters[reference]
-				name, in = shared.Name, shared.In
-			}
-			if in != "query" || name == "" {
-				continue
-			}
-			t.Run(path+"?"+name, func(t *testing.T) {
-				rec := h.get(t, fill.Replace(path)+"?"+name+"=1")
-				if rec.Code != http.StatusBadRequest {
-					return
+		for method, operation := range operations {
+			for _, parameter := range operation.Parameters {
+				name, in := parameter.Name, parameter.In
+				if reference, found := strings.CutPrefix(parameter.Ref, "#/components/parameters/"); found {
+					shared := document.Components.Parameters[reference]
+					name, in = shared.Name, shared.In
 				}
-				message := decodeJSON[map[string]string](t, rec)["error"]
-				if strings.Contains(message, "unknown query parameter") {
-					t.Fatalf("%s documents %q but refuses it: %s", path, name, message)
+				if in != "query" || name == "" {
+					continue
 				}
-			})
+				t.Run(strings.ToUpper(method)+" "+path+"?"+name, func(t *testing.T) {
+					rec := h.call(t, strings.ToUpper(method),
+						fill.Replace(path)+"?"+name+"=1", nil)
+					if rec.Code != http.StatusBadRequest {
+						return
+					}
+					message := decodeJSON[map[string]string](t, rec)["error"]
+					if strings.Contains(message, "unknown query parameter") {
+						t.Fatalf("%s %s documents %q but refuses it: %s",
+							strings.ToUpper(method), path, name, message)
+					}
+				})
+			}
 		}
 	}
 }
@@ -394,5 +401,65 @@ func TestSDKVersionTrackingIsBounded(t *testing.T) {
 	if tracked := len(c.projects["project"].sdkVersions); tracked > maxTrackedSDKVersions {
 		t.Fatalf("tracked %d versions, want at most %d: the header is client-controlled",
 			tracked, maxTrackedSDKVersions)
+	}
+}
+
+// TestSystemReportsTheSweeper is the observability half of spec 005 #14: with
+// no run-now endpoint, `GET /api/v1/system` is where an operator finds out
+// whether retention is running and what it has taken.
+func TestSystemReportsTheSweeper(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+
+	rec := h.get(t, "/api/v1/system")
+	expectStatus(t, rec, 200)
+	body := decodeJSON[struct {
+		Sweeper struct {
+			Enabled           bool    `json:"enabled"`
+			IntervalSeconds   int64   `json:"interval_seconds"`
+			LastRun           *string `json:"last_run"`
+			NextRun           string  `json:"next_run"`
+			TracesDeleted     int64   `json:"traces_deleted"`
+			RawBatchesDeleted int64   `json:"raw_batches_deleted"`
+		} `json:"sweeper"`
+	}](t, rec)
+
+	if !body.Sweeper.Enabled {
+		t.Fatalf("sweeper = %+v, want it reported as running", body.Sweeper)
+	}
+	if body.Sweeper.IntervalSeconds != int64(store.DefaultSweepInterval.Seconds()) {
+		t.Errorf("interval = %ds, want the default cadence", body.Sweeper.IntervalSeconds)
+	}
+	// A sweeper that has not run says so, rather than reporting the epoch.
+	if body.Sweeper.LastRun != nil {
+		t.Errorf("last_run = %q before the first pass, want null", *body.Sweeper.LastRun)
+	}
+	if body.Sweeper.NextRun == "" {
+		t.Errorf("sweeper = %+v, want the next pass named", body.Sweeper)
+	}
+
+	// After a pass that removed something, the counts are this project's.
+	h.seed(t, &model.Trace{ID: traceHex(1)},
+		&model.Observation{TraceID: traceHex(1), ID: spanHex(1), Type: model.TypeSpan,
+			Level: model.LevelDefault, StartTime: seedBase, EndTime: seedBase + ms})
+	if err := h.setRetention(h.project.ID, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.sweeper.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	rec = h.get(t, "/api/v1/system")
+	expectStatus(t, rec, 200)
+	after := decodeJSON[struct {
+		Sweeper struct {
+			LastRun       *string `json:"last_run"`
+			TracesDeleted int64   `json:"traces_deleted"`
+		} `json:"sweeper"`
+	}](t, rec)
+	if after.Sweeper.LastRun == nil {
+		t.Errorf("last_run is still null after a pass")
+	}
+	if after.Sweeper.TracesDeleted != 1 {
+		t.Errorf("traces_deleted = %d, want the one that expired", after.Sweeper.TracesDeleted)
 	}
 }

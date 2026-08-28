@@ -36,7 +36,13 @@ document served without authentication.
 | `GET` | `/api/v1/openapi.json` | The OpenAPI document |
 
 Scores and prompts have their own pages: [scores.md](scores.md),
-[prompts.md](prompts.md).
+[prompts.md](prompts.md). So does administration — projects, keys, retention
+windows and user-data erasure — under `/api/v1/projects`:
+[admin.md](admin.md) and [retention.md](retention.md).
+
+Everything under `/api/v1/projects` that destroys something is a dry run until
+`?confirm=` echoes the name of what it destroys. That contract is described
+once, in [admin.md](admin.md#dry-run-by-default).
 
 ## The one command
 
