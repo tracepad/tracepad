@@ -59,6 +59,12 @@
 	/** The button opens only on an exact echo — the server checks it again. */
 	const matches = $derived(plan !== null && echo === plan.confirm);
 	const rows = $derived(Object.entries(plan?.would_delete ?? {}));
+	/**
+	 * Whether the answer is "nothing". A column of zeros is technically the
+	 * same information and reads as a threat; the sentence reads as the
+	 * reassurance it is.
+	 */
+	const nothing = $derived(rows.every(([, howMany]) => howMany === 0));
 
 	async function run(step: 'preview' | 'execute') {
 		busy = true;
@@ -122,7 +128,7 @@
 	{:else}
 		<div class="border-border bg-surface mt-3 rounded-md border p-3">
 			<p class="text-subtle text-xs font-medium">This would delete</p>
-			{#if rows.length === 0}
+			{#if nothing}
 				<p class="text-muted mt-1 text-sm">Nothing — there is no data to remove.</p>
 			{:else}
 				<dl class="mt-1 flex flex-wrap gap-x-6 gap-y-1">

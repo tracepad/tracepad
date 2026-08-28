@@ -173,6 +173,17 @@ bodies are deliberately not touched — see
 what that means for a data-subject request and how to deploy if it is not
 acceptable.
 
+## In the web interface
+
+The Settings screen renders this whole contract (see [ui.md](ui.md#settings-and-administration)):
+a project's own management on its project key, and an **Administration**
+section that unlocks with `TRACEPAD_ADMIN_TOKEN` for project lifecycle. Every
+destructive card there is the dry run above, shown, with the same echo typed
+into a field — the browser is not a softer path to destruction than `curl`.
+
+The token is stored apart from the project key and sent only to the endpoints
+that require it. It reads no trace data, here or anywhere else.
+
 ## Not on the MCP surface
 
 None of this is reachable as an MCP tool, and that is structural rather than an

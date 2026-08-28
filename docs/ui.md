@@ -25,7 +25,8 @@ authentication off for the internet.
 
 The interface reads traces, which needs a **project key**. The admin token is
 a control-plane credential (see [admin.md](admin.md)) and the login screen
-refuses it with an explanation.
+refuses it with an explanation. It is entered further in, on the Settings
+screen, where the endpoints it can actually call live.
 
 ## Screens
 
@@ -41,6 +42,27 @@ is on screen by trace id, so nothing duplicates and nothing jumps. It is off
 by default and pauses while the tab is hidden. Same caveat as `tracepad
 tail`: traces are ordered by their own timestamps, so a span that arrives
 late appears where it belongs rather than at the top.
+
+**Sessions** — one row per session over `GET /api/v1/sessions`: last seen,
+id, how many traces, how many of them failed, cost, first seen. The filters
+are the endpoint's four (`from`, `to`, `environment`, `user_id`), and a row
+opens the session: its totals over its traces, and a trace opens from there.
+Every number counts traces, which is what a session is a collection of.
+
+**Stats** — four charts over `GET /api/v1/stats` — traces, cost, latency
+(p50 and p95) and errors — sharing one x cursor, plus breakdown tables by
+model and by environment with proportion bars. The bucket switcher is
+hourly/daily and defaults to hours for windows up to 48 hours, days above.
+
+A bucket the server did not return is drawn as a **gap**, never as a zero,
+and a bucket that reported no cost has no cost point: the API refuses to
+fabricate rows and so does the screen. An empty window says so rather than
+drawing an empty frame.
+
+Neither screen has a live mode. Both re-read on a filter change and on the
+**Refresh** control; the Traces live toggle is the only poller in the app.
+
+**Settings** — see [Settings and administration](#settings-and-administration).
 
 **Trace** — the observation tree on the left, the selected observation on the
 right. A node shows its type, name, duration, cost and whether it failed;
@@ -66,12 +88,50 @@ rather than working around them:
 
 Raising `TRACEPAD_RESPONSE_BUDGET_BYTES` inlines more of them up front.
 
+## Settings and administration
+
+Settings runs on **two credentials with disjoint powers**.
+
+The session's project key manages its own project, which is what a project
+key is for (see [admin.md](admin.md)):
+
+- **Project** — its name and id. Renaming needs the admin token, because a
+  project's name is the echo every destructive confirmation is typed against;
+  the field says so and names `tracepad projects rename`.
+- **Retention** — both windows, with `null` spelled out: "keep forever" for
+  the queryable data, "follow the window above" for the raw bodies.
+- **API keys** — the public keys with their dates, minting, and revocation.
+  A minted pair is shown **once**, in both connection formats, exactly as
+  first run prints them; the secret is stored as a hash and the dialog says
+  so rather than implying it can be found again.
+- **Danger zone** — erasing everything stored about one end user.
+
+Below them, **Administration** unlocks with this server's
+`TRACEPAD_ADMIN_TOKEN` and covers project lifecycle only: list (soft-deleted
+projects included, with their purge dates), create, delete, restore. The
+token is stored separately from the project key and is sent only to those
+endpoints — it never reads a trace. "Lock" forgets it, and so does signing
+out.
+
+Every destructive action is the server's dry-run/confirm contract rendered
+(see [admin.md](admin.md#dry-run-by-default)): the card asks the API
+what the change would delete, shows that answer, and enables its button only
+once you have typed back the identity the server named — the project's name,
+or the user id. Nothing is counted in the browser, and a refusal is reported
+in the server's own words.
+
 ## State in the URL
 
-Filters, live mode and the selected observation all live in the query string,
-so any view is a link: `/traces?status=error&environment=prod`,
-`/traces/{id}?obs={observation_id}`. Reloading, sharing and the back button
-all behave.
+Filters, live mode, the time window, the stats bucket and the selected
+observation all live in the query string, so any view is a link:
+`/traces?status=error&environment=prod`, `/traces/{id}?obs={observation_id}`,
+`/sessions?environment=prod`, `/stats?from=…&to=…&group_by=hour`. Reloading,
+sharing and the back button all behave.
+
+The time window is one control on every screen that has one — presets for the
+last hour, day, week and month, plus a calendar — and it travels as the
+`from`/`to` the API itself takes. A preset sets `from` and leaves the end
+open, so "the last 24 hours" keeps ending now.
 
 ## Appearance
 
@@ -82,8 +142,9 @@ Everything the page needs is inside the binary — fonts included. The
 interface makes **no request to any external origin**, which an air-gapped
 install depends on and which the end-to-end suite asserts.
 
-The layout is usable on a phone: the sidebar becomes a top bar, the filters
-live in a popover, and the trace screen switches between the tree and the
+The layout is usable on a phone: the sidebar becomes a two-row top bar, the
+filters live in a popover, tables scroll inside their own box rather than
+scrolling the page, and the trace screen switches between the tree and the
 observation instead of showing both.
 
 ## Builds without it
@@ -99,7 +160,8 @@ Docker image — as does a local `make build`, which builds the bundle first.
 ## Working on it
 
 The sources are in `ui/`: a SvelteKit SPA (`adapter-static`, no SSR) with
-Tailwind v4, built by Vite into `ui/dist`.
+Tailwind v4, built by Vite into `ui/dist`. The only runtime dependencies are
+bits-ui (headless primitives), Lucide (icons) and uPlot (the four charts).
 
 ```sh
 make ui          # build the bundle and stage it for embedding

@@ -75,6 +75,15 @@
 		};
 	}
 
+	/**
+	 * Whether there is anything to draw. An axis exists for any window — time
+	 * passed — but a chart of nothing but gaps is an empty frame, and an empty
+	 * frame is worse than a sentence saying the window is empty.
+	 */
+	const populated = $derived(
+		x.length > 0 && lines.some((line) => line.values.some((value) => value !== null))
+	);
+
 	function draw(node: HTMLDivElement) {
 		// Reading these here is what redraws the chart when the theme moves.
 		theme.value;
@@ -133,7 +142,7 @@
 </script>
 
 <figure class="border-border bg-surface min-w-0 rounded-lg border p-2">
-	{#if x.length > 0}
+	{#if populated}
 		<!-- The canvas is decoration to a screen reader; the sentence below it
 		     is the chart. The breakdown tables carry the same numbers per
 		     category, which is the tabular alternative for the rest. -->

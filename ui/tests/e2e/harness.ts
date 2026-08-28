@@ -17,6 +17,31 @@ export type State = {
 	key: string;
 };
 
+/**
+ * The admin token the suite boots the server with. It is a fixture, not a
+ * secret: this server lives for the length of one test run on a temporary
+ * database.
+ */
+export const ADMIN_TOKEN = 'e2e-admin-token';
+
+/**
+ * Mints a project of its own, so a test that changes retention, revokes a key
+ * or deletes something is not doing it to the project another test is reading.
+ * The two Playwright projects run the same files against one server.
+ */
+export async function createProject(name: string): Promise<{ id: string; name: string; key: string }> {
+	const { baseURL } = state();
+	const unique = `${name}-${Math.random().toString(36).slice(2, 8)}`;
+	const response = await fetch(`${baseURL}/api/v1/projects`, {
+		method: 'POST',
+		headers: { Authorization: `Bearer ${ADMIN_TOKEN}`, 'Content-Type': 'application/json' },
+		body: JSON.stringify({ name: unique })
+	});
+	if (!response.ok) throw new Error(`create project: ${response.status}`);
+	const created = (await response.json()) as { id: string; name: string; secret_key: string };
+	return { id: created.id, name: created.name, key: created.secret_key };
+}
+
 export function state(): State {
 	return JSON.parse(readFileSync(STATE, 'utf8')) as State;
 }
