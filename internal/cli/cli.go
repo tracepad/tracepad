@@ -35,6 +35,9 @@ type Options struct {
 	Version string
 	Stdout  io.Writer
 	Stderr  io.Writer
+	// Stdin is where an interactive confirmation is read from (spec 005
+	// #13). Nil outside a terminal, where `--yes` is required instead.
+	Stdin io.Reader
 	// TTY reports whether Stdout is a terminal. It decides the output
 	// mode: human-readable on a terminal, JSON everywhere else, so an
 	// agent piping `tracepad traces ls` gets machine output with no flags
@@ -87,6 +90,14 @@ func Run(ctx context.Context, opt Options) int {
 		err = r.stats(ctx, rest)
 	case "system":
 		err = r.system(ctx, rest)
+	case "projects":
+		err = r.projects(ctx, rest)
+	case "keys":
+		err = r.keys(ctx, rest)
+	case "retention":
+		err = r.retention(ctx, rest)
+	case "users":
+		err = r.users(ctx, rest)
 	default:
 		return r.fail(usageErrorf("unknown command %q", command))
 	}
@@ -115,9 +126,26 @@ const Usage = `Client commands (they talk to a running server over HTTP):
   tracepad stats        [--group-by hour|day|model|environment] [--since 1h] [--env E]
   tracepad system
 
+Administration (spec 005). Every destructive command shows what it would do
+and asks you to type the name back; --yes answers that for a script:
+  tracepad projects ls   [--deleted]
+  tracepad projects show [<project-id>]
+  tracepad projects create  <name>                     (admin token)
+  tracepad projects rename  <project-id> <new-name>    (admin token)
+  tracepad projects rm      <project-id> [--yes]       (admin token)
+  tracepad projects restore <project-id>
+  tracepad keys ls      [--project ID]
+  tracepad keys create  [--project ID]
+  tracepad keys rm      <public-key> [--project ID] [--yes]
+  tracepad retention show [--project ID]
+  tracepad retention set  [--days N | --forever] [--raw-days N | --raw-follow]
+                          [--project ID] [--yes]
+  tracepad users rm-data  <user-id> [--project ID] [--yes]
+
 Connection:
   --url URL    server to talk to   (env TRACEPAD_URL, default http://localhost:4318)
-  --key KEY    project secret key  (env TRACEPAD_API_KEY)
+  --key KEY    project secret key, or TRACEPAD_ADMIN_TOKEN for the commands
+               marked (admin token)   (env TRACEPAD_API_KEY)
 
 Output:
   --json       force JSON. Without it, output is a table on a terminal and
@@ -162,6 +190,11 @@ func (r *run) flags(name string) *flag.FlagSet {
 // errHelp is `--help` on a subcommand: not a mistake, so not an error exit.
 var errHelp = errors.New("help requested")
 
+// anyArgs lets a command count its own positionals, which is only needed where
+// one is optional — `projects show` with no id means "the one this key
+// reaches".
+const anyArgs = -1
+
 // parse reads a command's flags and then builds the connection, which cannot
 // happen earlier: `--url` is one of the flags.
 func (r *run) parse(fs *flag.FlagSet, args []string, wantArgs int) ([]string, error) {
@@ -171,7 +204,7 @@ func (r *run) parse(fs *flag.FlagSet, args []string, wantArgs int) ([]string, er
 		}
 		return nil, usageErrorf("%s: %s", fs.Name(), err)
 	}
-	if fs.NArg() != wantArgs {
+	if wantArgs >= 0 && fs.NArg() != wantArgs {
 		if wantArgs == 0 {
 			return nil, usageErrorf("%s takes no arguments, got %q", fs.Name(), fs.Arg(0))
 		}

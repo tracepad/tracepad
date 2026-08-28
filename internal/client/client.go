@@ -89,15 +89,33 @@ func (c *Client) Get(ctx context.Context, path string, query url.Values) (json.R
 
 // Post calls a write endpoint with a JSON body.
 func (c *Client) Post(ctx context.Context, path string, body any) (json.RawMessage, error) {
-	encoded, err := json.Marshal(body)
+	return c.Send(ctx, http.MethodPost, path, nil, body)
+}
+
+// Send is the general form: any method, an optional query and an optional JSON
+// body. The administrative endpoints of spec 005 are the first that are
+// neither a plain GET nor a plain POST — a PATCH carrying the wanted state and
+// a DELETE carrying only `?confirm=`.
+func (c *Client) Send(ctx context.Context, method, path string, query url.Values, body any) (json.RawMessage, error) {
+	target := c.BaseURL + path
+	if len(query) > 0 {
+		target += "?" + query.Encode()
+	}
+	var reader io.Reader
+	if body != nil {
+		encoded, err := json.Marshal(body)
+		if err != nil {
+			return nil, err
+		}
+		reader = bytes.NewReader(encoded)
+	}
+	request, err := http.NewRequestWithContext(ctx, method, target, reader)
 	if err != nil {
 		return nil, err
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+path, bytes.NewReader(encoded))
-	if err != nil {
-		return nil, err
+	if body != nil {
+		request.Header.Set("Content-Type", "application/json")
 	}
-	request.Header.Set("Content-Type", "application/json")
 	return c.do(request, path)
 }
 

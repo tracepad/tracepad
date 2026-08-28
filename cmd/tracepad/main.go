@@ -42,13 +42,17 @@ func splitCommand(args []string) (string, []string) {
 // with a terminal, "the tool is already on PATH" is zero integration
 // (design §3.3).
 var clientCommands = map[string]bool{
-	"traces":   true,
-	"tail":     true,
-	"sessions": true,
-	"scores":   true,
-	"prompts":  true,
-	"stats":    true,
-	"system":   true,
+	"traces":    true,
+	"tail":      true,
+	"sessions":  true,
+	"scores":    true,
+	"prompts":   true,
+	"stats":     true,
+	"system":    true,
+	"projects":  true,
+	"keys":      true,
+	"retention": true,
+	"users":     true,
 }
 
 func main() {
@@ -73,6 +77,7 @@ func main() {
 			Version: version,
 			Stdout:  os.Stdout,
 			Stderr:  os.Stderr,
+			Stdin:   os.Stdin,
 			TTY:     isTerminal(os.Stdout),
 			Env:     os.Getenv,
 			Now:     time.Now,

@@ -38,9 +38,15 @@ type harness struct {
 	store  *store.Store
 	writer *store.Writer
 	env    map[string]string
+	// stdin is what an interactive confirmation reads (spec 005 #13).
+	stdin string
 }
 
-func newHarness(t *testing.T) *harness {
+func newHarness(t *testing.T) *harness { return newHarnessWithToken(t, "") }
+
+// newHarnessWithToken is the same server with a cross-project admin token
+// configured, which the administrative tests need and nothing else does.
+func newHarnessWithToken(t *testing.T, token string) *harness {
 	t.Helper()
 	st, err := store.Open(filepath.Join(t.TempDir(), "tracepad.db"))
 	if err != nil {
@@ -56,7 +62,8 @@ func newHarness(t *testing.T) *harness {
 	}
 	t.Cleanup(func() { writer.Close() })
 
-	cfg := &config.Config{Listen: ":0", StoreRaw: true, MaxBodyBytes: config.DefaultMaxBodyBytes}
+	cfg := &config.Config{Listen: ":0", StoreRaw: true, MaxBodyBytes: config.DefaultMaxBodyBytes,
+		AdminToken: token}
 	httpServer := httptest.NewServer(server.New(cfg, testVersion, st, writer,
 		st.NewSweeper(writer, store.SweepOptions{})).Handler())
 	t.Cleanup(httpServer.Close)
@@ -86,6 +93,7 @@ func (h *harness) run(ctx context.Context, tty bool, args ...string) result {
 		Version: testVersion,
 		Stdout:  &out,
 		Stderr:  &errOut,
+		Stdin:   strings.NewReader(h.stdin),
 		TTY:     tty,
 		Env:     func(key string) string { return h.env[key] },
 		Now:     func() time.Time { return time.Unix(0, seedBase).UTC() },
