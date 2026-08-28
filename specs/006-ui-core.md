@@ -1,6 +1,6 @@
 # Spec 006 — UI Core: Scaffold, Design System, Traces & Trace Detail
 
-**Status:** 🔄 IN PROGRESS
+**Status:** ✅ SHIPPED
 **Sprint:** September 2026
 
 > The UI is the third client of the read API, after the CLI and MCP (design
