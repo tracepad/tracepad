@@ -101,6 +101,37 @@ test('j on the last row of a page turns it and keeps reading', async ({ page }) 
 	await expect(rows(page).first().getByRole('link')).toHaveAttribute('aria-current', 'true');
 });
 
+test('a walk from a row this page does not hold takes the nearest one', async ({ page }) => {
+	await signIn(page);
+	await page.goto('/traces?limit=2');
+
+	// A link somebody sent: a page, and a panel open on a trace that is not on
+	// it — the state retention and a live tick also leave behind. Built here by
+	// noting the second row of the first page and then turning to the second.
+	await rows(page).nth(1).getByRole('link').click();
+	const behind = new URL(page.url()).searchParams.get('peek') ?? '';
+	await page.keyboard.press('Escape');
+	await page.getByRole('button', { name: 'Next page' }).click();
+	await expect(page).toHaveURL(/cursor=/);
+	const deep = new URL(page.url());
+	deep.searchParams.set('peek', behind);
+
+	await page.goto(deep.toString());
+	// The panel's own row has to have landed: until it says where it sits, the
+	// walk has no position to walk from and deliberately does not move.
+	await expect(page.getByRole('button', { name: 'Copy the trace id' })).toBeVisible();
+	await expect(page.locator('tbody [aria-current="true"]')).toHaveCount(0);
+
+	// Every row here is older than the one in the panel, so the nearest one
+	// older — what `j` asks for — is the *first*. Landing on the oldest row on
+	// screen, as an edge-guessing walk did, skipped the page (spec 009 #13).
+	await page.keyboard.press('j');
+	await expect(rows(page).first().getByRole('link')).toHaveAttribute('aria-current', 'true');
+	// On this page, not by turning it: the row it wanted was here all along.
+	expect(new URL(page.url()).searchParams.get('cursor')).toBe(deep.searchParams.get('cursor'));
+	expect(new URL(page.url()).searchParams.get('peek')).not.toBe(behind);
+});
+
 test('live is paused off the newest page, and can still be switched off', async ({ page }) => {
 	await signIn(page);
 	await page.goto('/traces?limit=2&live=1');
@@ -136,7 +167,13 @@ test('walking back to a short page still leaves a way home', async ({ page }) =>
 	// with live mode paused (PR #11, fourth review).
 	await page.goto('/traces?limit=2&direction=prev');
 	for (let step = 0; step < 3; step++) {
+		// One turn at a time. The cursors in the bar belong to the page on
+		// screen, so a click before the next one lands would re-address the
+		// page just asked for and quietly lose a turn — the bar goes dead
+		// while a page is in flight, and this waits the same way (PR #11).
+		const here = page.url();
 		await page.getByRole('button', { name: 'Previous page' }).click();
+		await expect(page).not.toHaveURL(here);
 	}
 	await expect(page.locator('tbody tr')).toHaveCount(1);
 	await expect(page.getByRole('button', { name: 'Previous page' })).toBeDisabled();

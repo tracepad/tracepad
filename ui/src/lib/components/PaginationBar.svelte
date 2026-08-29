@@ -21,6 +21,7 @@
 		total = null,
 		hasPrev,
 		hasNext,
+		busy = false,
 		atNewest,
 		atOldest,
 		onresize,
@@ -38,6 +39,13 @@
 		/** Whether a *step* exists either way: the two cursors of this page. */
 		hasPrev: boolean;
 		hasNext: boolean;
+		/**
+		 * A page is in flight. Every control below is dead until it lands:
+		 * the cursors on screen still belong to the page being left, so a
+		 * second click would re-address the one just asked for and quietly
+		 * lose a turn (PR #11, fifth review).
+		 */
+		busy?: boolean;
 		/**
 		 * Whether this page already *is* an end, asked of the URL rather than
 		 * of the cursors that came back with it. « and » are anchors, not
@@ -117,7 +125,7 @@
 		<button
 			type="button"
 			class={step}
-			disabled={atNewest}
+			disabled={busy || atNewest}
 			aria-label="Newest page"
 			title="Newest page"
 			onclick={onfirst}
@@ -127,7 +135,7 @@
 		<button
 			type="button"
 			class={step}
-			disabled={!hasPrev}
+			disabled={busy || !hasPrev}
 			aria-label="Previous page"
 			title="Previous page"
 			onclick={onprev}
@@ -137,7 +145,7 @@
 		<button
 			type="button"
 			class={step}
-			disabled={!hasNext}
+			disabled={busy || !hasNext}
 			aria-label="Next page"
 			title="Next page"
 			onclick={onnext}
@@ -147,7 +155,7 @@
 		<button
 			type="button"
 			class={step}
-			disabled={atOldest || alone}
+			disabled={busy || atOldest || alone}
 			aria-label="Oldest page"
 			title="Oldest page"
 			onclick={onlast}

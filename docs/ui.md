@@ -92,8 +92,10 @@ Reading a listing is a loop, and this is the loop:
   rows — the buttons carry the key they answer to. On the last row of a page
   `j` turns the page and opens the first row of the next one, so a scan does
   not stop at a boundary that is an artefact of paging; both keys dim only at
-  the ends of the whole listing. A letter typed into a filter field is a
-  letter, not a shortcut.
+  the ends of the whole listing. If the panel is open on a row the page no
+  longer holds — a link somebody sent, a live tick that pushed it out of the
+  newest page — the keys still mean what they say, and go to the nearest row
+  that way. A letter typed into a filter field is a letter, not a shortcut.
 - **⤢** opens what the panel is showing as a full page — `/traces/{id}` or
   `/sessions/{id}`, the selected observation included. That is the link to
   send somebody.

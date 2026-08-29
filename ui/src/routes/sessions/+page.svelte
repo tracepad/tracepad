@@ -33,7 +33,7 @@
 		readPage,
 		type PageState
 	} from '$lib/page';
-	import { neighbour, peekSearch, readPeek } from '$lib/peek';
+	import { anchor, landing, neighbour, peekSearch, readPeek, type Ordered } from '$lib/peek';
 
 	// Sessions over `GET /api/v1/sessions`, the endpoint this spec added for
 	// all three clients at once. No live mode here (spec 007 #8): a session's
@@ -154,9 +154,16 @@
 	let peekedSession = $state.raw<Session | null>(null);
 	let peekedTrace = $state.raw<Trace | null>(null);
 
-	const ids = $derived(rows.map((row) => row.id));
-	const previous = $derived(neighbour(ids, peekID, -1));
-	const following = $derived(neighbour(ids, peekID, 1));
+	// Walked by order, not by index (spec 009 #13). The key is `last_seen`,
+	// which is the `MAX(timestamp)` this listing is sorted by.
+	const ordered = $derived(rows.map((row) => ({ id: row.id, key: row.last_seen ?? '' })));
+	const showing = $derived(
+		peekedSession?.last_seen ? { id: peekedSession.id, key: peekedSession.last_seen } : null
+	);
+	const position = $derived(anchor(ordered, peekID, showing));
+	/** A key does something when there is a row that way, or a page to turn. */
+	const walkable = (step: 1 | -1, cursor: string | null) =>
+		position !== null && (neighbour(ordered, position, step) !== null || cursor !== null);
 
 	/** Deepening pushes one history entry; moving sideways or up replaces (#6). */
 	function move(next: { peek: string | null; trace?: string | null }, deeper: boolean) {
@@ -186,14 +193,14 @@
 	const lastDrilled = $derived(visited?.session === peekID ? (visited?.trace ?? null) : null);
 
 	/**
-	 * Where to land after the page turns under a walk (spec 009 #6): `j` on
-	 * the last row opens the first row of the next page, so a scan does not
-	 * stop at a boundary that is an artefact of paging.
+	 * A walk that ran out of page and turned it (spec 009 #6). It carries the
+	 * row it walked from, so the arriving page is searched for the nearest one
+	 * to it rather than entered at a side; and the page it waits for, so an
+	 * aborted turn keeps its intent and an unrelated load cannot inherit it.
 	 */
-	/** The page it waits for, so an aborted turn keeps its intent and an
-	 * unrelated load cannot inherit it. */
 	let rolling = $state.raw<{
-		edge: 'first' | 'last';
+		from: Ordered;
+		step: 1 | -1;
 		cursor: string;
 		direction: PageState['direction'];
 	} | null>(null);
@@ -206,27 +213,23 @@
 		// Direction too: on a one-row page both cursors are the same key
 		// (PR #11, third review).
 		if (intent.cursor !== at.cursor || intent.direction !== at.direction) return;
-		if (rows.length === 0) return;
-		peek(intent.edge === 'first' ? rows[0].id : rows[rows.length - 1].id);
+		const id = landing(ordered, intent.from, intent.step);
+		if (id) peek(id);
 	}
 
 	function walk(step: 1 | -1) {
-		const id = neighbour(ids, peekID, step);
+		// Nowhere to walk from until the panel's row has said where it sits.
+		if (position === null) return;
+		const id = neighbour(ordered, position, step);
 		if (id) {
 			peek(id);
 			return;
 		}
-		// Not on this page: the row fell off the oldest end, so the oldest row
-		// here is the nearest one in both directions (see the Traces screen).
-		if (peekID !== null && !ids.includes(peekID)) {
-			if (rows.length > 0) peek(rows[rows.length - 1].id);
-			return;
-		}
 		if (step === 1 && nextCursor) {
-			rolling = { edge: 'first', cursor: nextCursor, direction: 'next' };
+			rolling = { from: position, step, cursor: nextCursor, direction: 'next' };
 			turn({ cursor: nextCursor });
 		} else if (step === -1 && prevCursor) {
-			rolling = { edge: 'last', cursor: prevCursor, direction: 'prev' };
+			rolling = { from: position, step, cursor: prevCursor, direction: 'prev' };
 			turn({ cursor: prevCursor, direction: 'prev' });
 		}
 	}
@@ -319,6 +322,7 @@
 		{total}
 		hasPrev={prevCursor !== null}
 		hasNext={nextCursor !== null}
+		busy={loading}
 		atNewest={isFirstPage(spot)}
 		atOldest={isLastPage(spot)}
 		onresize={(limit) => turn({ limit })}
@@ -365,8 +369,8 @@
 		onclose={() => peek(null)}
 		onprev={drilled ? undefined : () => walk(-1)}
 		onnext={drilled ? undefined : () => walk(1)}
-		hasPrev={previous !== null || prevCursor !== null}
-		hasNext={following !== null || nextCursor !== null}
+		hasPrev={walkable(-1, prevCursor)}
+		hasNext={walkable(1, nextCursor)}
 		fullHref={drilled
 			? `/traces/${encodeURIComponent(drilled)}${
 					selectedObs ? `?obs=${encodeURIComponent(selectedObs)}` : ''

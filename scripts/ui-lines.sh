@@ -7,17 +7,17 @@
 # the budget is code somebody has to read and maintain.
 #
 # The default is the budget of the newest spec that moved it: 7,300 after spec
-# 007 (#13), 8,300 for the peek panel (spec 008 #14), then 8,900 for listing
-# pagination and the regression tests four review rounds asked of it (spec 009
+# 007 (#13), 8,300 for the peek panel (spec 008 #14), then 9,000 for listing
+# pagination and the regression tests five review rounds asked of it (spec 009
 # #11). Design §8's 6-9k envelope for the finished MVP interface is what every
-# one of those numbers lives under — and 8,900 leaves a hundred lines of it,
-# so the constraint from here is the envelope itself.
+# one of those numbers lives under, and this one *is* its ceiling: there is no
+# raise left that a spec can grant, only an amendment to §8.
 #
 # Usage: scripts/ui-lines.sh [budget]
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BUDGET="${1:-8900}"
+BUDGET="${1:-9000}"
 
 cd "$ROOT"
 

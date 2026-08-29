@@ -26,7 +26,7 @@
 		readPage,
 		type PageState
 	} from '$lib/page';
-	import { neighbour, peekSearch, readPeek } from '$lib/peek';
+	import { anchor, landing, neighbour, peekSearch, readPeek, type Ordered } from '$lib/peek';
 
 	const POLL_MS = 5000;
 
@@ -200,24 +200,31 @@
 	const selectedObs = $derived(page.url.searchParams.get('obs'));
 	let peeked = $state.raw<Trace | null>(null);
 
-	const ids = $derived(rows.map((row) => row.id));
-	const previous = $derived(neighbour(ids, peekID, -1));
-	const following = $derived(neighbour(ids, peekID, 1));
+	// The panel walks the listing's order, not the page's indices, because its
+	// row can be off the page entirely (spec 009 #13).
+	const ordered = $derived(rows.map((row) => ({ id: row.id, key: row.timestamp ?? '' })));
+	const showing = $derived(
+		peeked?.id && peeked.timestamp ? { id: peeked.id, key: peeked.timestamp } : null
+	);
+	const position = $derived(anchor(ordered, peekID, showing));
+	/** A key does something when there is a row that way, or a page to turn. */
+	const walkable = (step: 1 | -1, cursor: string | null) =>
+		position !== null && (neighbour(ordered, position, step) !== null || cursor !== null);
 
 	/**
-	 * Where to land after the page turns under a walk: `j` on the last row of
-	 * a page turns it and opens the first row of the next one, so a scan does
-	 * not stop at a boundary that is an artefact of paging (spec 009 #6).
-	 */
-	/**
-	 * Carries the page it waits for, not just the edge to land on. Clearing
-	 * it on abort would lose it — a turn aborts the load it interrupts — and
-	 * never clearing it let a filter change inherit the intent and open the
-	 * panel on a row nobody peeked into. Matching settles both: what arrives
-	 * either is the page the walk asked for, or is not.
+	 * A walk that ran out of page and turned it (spec 009 #6): `j` on the last
+	 * row opens the first row of the next page, so a scan does not stop at a
+	 * boundary that is an artefact of paging.
+	 *
+	 * It carries the row it walked *from*, so the arriving page is searched for
+	 * the nearest one to it rather than entered at a side (see `landing`), and
+	 * the page it waits for, because clearing the intent on abort would lose it
+	 * — a turn aborts the load it interrupts — while never clearing it let a
+	 * filter change inherit it and open the panel on a row nobody peeked into.
 	 */
 	let rolling = $state.raw<{
-		edge: 'first' | 'last';
+		from: Ordered;
+		step: 1 | -1;
 		cursor: string;
 		direction: PageState['direction'];
 	} | null>(null);
@@ -230,32 +237,23 @@
 		// are the same key, so a `‹` walk and a `›` button click would match
 		// each other's intent (PR #11, third review).
 		if (intent.cursor !== at.cursor || intent.direction !== at.direction) return;
-		if (rows.length === 0) return;
-		peek(intent.edge === 'first' ? rows[0].id : rows[rows.length - 1].id);
+		const id = landing(ordered, intent.from, intent.step);
+		if (id) peek(id);
 	}
 
 	function walk(step: 1 | -1) {
-		const id = neighbour(ids, peekID, step);
+		// Nowhere to walk from until the panel's row has said where it sits.
+		if (position === null) return;
+		const id = neighbour(ordered, position, step);
 		if (id) {
 			peek(id);
 			return;
 		}
-		// The peeked row is not on this page at all: a live tick prepends
-		// newer traces and pushes it off the bottom, so it is older than
-		// everything still here. The oldest row on screen is therefore the
-		// nearest one in *both* directions — `k` steps up into the page from
-		// it, and `j` rolls on to where the lost row now is. Choosing by
-		// direction, as this did at first, sent `k` to the top of the page
-		// and skipped everything between.
-		if (peekID !== null && !ids.includes(peekID)) {
-			if (rows.length > 0) peek(rows[rows.length - 1].id);
-			return;
-		}
 		if (step === 1 && nextCursor) {
-			rolling = { edge: 'first', cursor: nextCursor, direction: 'next' };
+			rolling = { from: position, step, cursor: nextCursor, direction: 'next' };
 			turn({ cursor: nextCursor });
 		} else if (step === -1 && prevCursor) {
-			rolling = { edge: 'last', cursor: prevCursor, direction: 'prev' };
+			rolling = { from: position, step, cursor: prevCursor, direction: 'prev' };
 			turn({ cursor: prevCursor, direction: 'prev' });
 		}
 	}
@@ -335,6 +333,7 @@
 		{total}
 		hasPrev={prevCursor !== null}
 		hasNext={nextCursor !== null}
+		busy={loading}
 		atNewest={newest}
 		atOldest={isLastPage(spot)}
 		onresize={(limit) => turn({ limit })}
@@ -395,8 +394,8 @@
 		onclose={() => peek(null)}
 		onprev={() => walk(-1)}
 		onnext={() => walk(1)}
-		hasPrev={previous !== null || prevCursor !== null}
-		hasNext={following !== null || nextCursor !== null}
+		hasPrev={walkable(-1, prevCursor)}
+		hasNext={walkable(1, nextCursor)}
 		fullHref="/traces/{encodeURIComponent(peekID)}{selectedObs
 			? `?obs=${encodeURIComponent(selectedObs)}`
 			: ''}"
