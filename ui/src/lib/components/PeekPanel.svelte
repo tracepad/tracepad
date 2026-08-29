@@ -72,7 +72,15 @@
 		void fullHref;
 		// The listing marks its open row `aria-current="true"`; the sidebar's
 		// own current link is `aria-current="page"` and does not match.
-		const lit = document.querySelector('a[aria-current="true"]');
+		//
+		// Scoped out of the panel's own subtree: a listing inside it — the
+		// session kept mounted under a drilled trace — marks a row too, and
+		// that one is `display:none`. Focusing a hidden element is a silent
+		// no-op, so taking it would drop the reader on the body, which is the
+		// very thing this is here to prevent (PR #10, third review).
+		const lit = [...document.querySelectorAll('a[aria-current="true"]')].find(
+			(element) => !panel?.contains(element)
+		);
 		if (lit) opener = lit;
 	});
 
@@ -96,17 +104,21 @@
 	 */
 	function onkeydown(event: KeyboardEvent) {
 		if (event.defaultPrevented) return;
-		// Nothing here is a shortcut where text is being typed: in a filter
-		// field Escape means "abandon this edit", not "close the panel"
-		// (PR #10, second review).
-		if (typing(event.target)) return;
+		// Escape closes from anywhere, a text field included. The second
+		// review round moved it behind the `typing` guard on the reasoning
+		// that in a filter field Escape means "abandon this edit" — but
+		// nothing in this interface implements that and browsers do not do it
+		// for a plain input, so the guard left Escape meaning *nothing* there
+		// and took away the only key that closes the panel. Restored, and the
+		// promise not made (PR #10, third review).
 		if (event.key === 'Escape') {
 			onclose();
 			return;
 		}
-		// A letter is only a shortcut when it is not part of a browser or
-		// system combination.
+		// A letter, on the other hand, is only a shortcut where a letter is
+		// not being typed, and never as part of a browser combination.
 		if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+		if (typing(event.target)) return;
 		// Gated on the handler as well as on the end of the listing: a layer
 		// with nothing to walk (spec 008 #9) has no controls on screen, so a
 		// swallowed key would have nothing to explain itself with.

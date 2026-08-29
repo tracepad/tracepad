@@ -138,6 +138,23 @@
 		});
 	}
 
+	/**
+	 * The trace the panel last had open, and the session it belonged to.
+	 * Coming back up clears `trace` in the same render that un-hides the
+	 * session's table, so `drilled` is already null when the row would be
+	 * lit — this is what says "you were here" on the way back (PR #10, third
+	 * review: the second round claimed this and did not do it).
+	 *
+	 * Recorded from the URL rather than from the click, so that it survives a
+	 * reload on the trace layer; paired with its session, so that walking to
+	 * another one lights nothing rather than a row that is not there.
+	 */
+	let visited = $state.raw<{ session: string | null; trace: string } | null>(null);
+	$effect(() => {
+		if (drilled) visited = { session: peekID, trace: drilled };
+	});
+	const lastDrilled = $derived(visited?.session === peekID ? (visited?.trace ?? null) : null);
+
 	const peek = (id: string | null) => move({ peek: id }, id !== null && peekID === null);
 	const drill = (traceID: string | null) =>
 		move({ peek: peekID, trace: traceID }, traceID !== null);
@@ -314,7 +331,7 @@
 				sessionID={peekID}
 				bind:session={peekedSession}
 				onopen={drill}
-				selectedTraceID={drilled}
+				selectedTraceID={lastDrilled}
 			/>
 		</div>
 		{#if drilled}

@@ -250,6 +250,26 @@ test('a session drills one level into a trace and back', async ({ page }) => {
 	await expect(page).toHaveURL(/\/sessions\?peek=session-77$/);
 	await expect(panel.getByText('support-chat')).toBeVisible();
 	expect(reads).toBe(0);
+
+	// And the table says which trace was open, which the URL no longer can.
+	await expect(panel.locator('a[aria-current="true"]')).toHaveCount(1);
+});
+
+test('Escape closes the panel even from a filter field', async ({ page }, testInfo) => {
+	test.skip(testInfo.project.name !== 'desktop', 'the panel covers the filter bar on a phone');
+	await signIn(page);
+	await page.goto('/sessions');
+	await rows(page).first().getByRole('link').click();
+	await expect(page.getByRole('dialog')).toBeVisible();
+
+	// Nothing in the interface reverts a filter field on Escape, so guarding
+	// Escape there would leave the key meaning nothing at all.
+	await page.getByPlaceholder('Environment').click();
+	await page.keyboard.type('prod');
+	await page.keyboard.press('Escape');
+
+	await expect(page.getByRole('dialog')).toHaveCount(0);
+	await expect(page.getByPlaceholder('Environment')).toHaveValue('prod');
 });
 
 test('closing after a walk returns focus to the row on screen', async ({ page }, testInfo) => {
