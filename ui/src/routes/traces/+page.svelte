@@ -4,10 +4,9 @@
 	import Pause from '@lucide/svelte/icons/pause';
 	import Play from '@lucide/svelte/icons/play';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
-	import { untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { ApiError, api, type Trace, type TraceRow } from '$lib/api/client.svelte';
+	import { api, type Trace, type TraceRow } from '$lib/api/client.svelte';
 	import { filterCount, filterSearch, readFilters, type TraceFilters } from '$lib/api/traces';
 	import Button from '$lib/components/Button.svelte';
 	import CopyButton from '$lib/components/CopyButton.svelte';
@@ -18,224 +17,62 @@
 	import TraceDetail from '$lib/components/TraceDetail.svelte';
 	import TraceTable from '$lib/components/TraceTable.svelte';
 	import { cost, count, duration, timestamp } from '$lib/format';
-	import {
-		DEFAULT_PAGE_SIZE,
-		isFirstPage,
-		isLastPage,
-		pageSearch,
-		readPage,
-		type PageState
-	} from '$lib/page';
-	import { anchor, neighbour, peekSearch, readPeek, settled, walkable, type Rolling } from '$lib/peek';
+	import { asPage, Listing, UrlSpot, Walk } from '$lib/listing.svelte';
+	import { freshSearch } from '$lib/page';
+	import { peekSearch, readPeek } from '$lib/peek';
 
 	const POLL_MS = 5000;
 
 	// Filters, live mode and the page all live in the URL, so what somebody is
-	// looking at is a link they can send (Application contract).
+	// looking at is a link they can send (Application contract). The listing
+	// itself — rows, cursors, count, aborts — is `$lib/listing` (spec 010).
 	const filters = $derived(readFilters(page.url.searchParams));
 	const live = $derived(page.url.searchParams.get('live') === '1');
 	const filtering = $derived(filterCount(filters) > 0);
-	/**
-	 * The filters as one string, which is what the effects below depend on.
-	 * They cannot depend on `filters`: `readFilters` builds a fresh object on
-	 * every URL change and a `$derived` object is never equal to the last one,
-	 * so opening the panel — a `?peek=` on this same URL — re-ran the load and
-	 * threw away the page the reader was on (PR #10 review).
-	 */
-	const filterKey = $derived(filterSearch(filters));
 
-	const spot = $derived(readPage(page.url.searchParams));
-	const newest = $derived(isFirstPage(spot));
-	/** Everything that decides *which rows* this screen shows. */
-	const pageKey = $derived(`${filterKey}|${spot.limit}|${spot.direction}|${spot.cursor ?? ''}`);
-
-	let rows = $state.raw<TraceRow[]>([]);
-	let nextCursor = $state.raw<string | null>(null);
-	let prevCursor = $state.raw<string | null>(null);
-	let total = $state.raw<{ value: number; capped: boolean } | null>(null);
-	let loading = $state(true);
-	let failure = $state<string | null>(null);
-	// The background poll's own slot: a live tick that recovers must not erase
-	// a failure the reader still needs, and a failed tick must not masquerade
-	// as a failure of what is on screen.
-	let liveFailure = $state<string | null>(null);
-
-	/**
-	 * Every request on this screen belongs to one page of one filter set.
-	 * Changing either aborts the lot: a live tick still in flight would
-	 * otherwise answer the previous query and replace the new one's rows.
-	 */
-	let query: AbortController | null = null;
-
-	$effect(() => {
-		// Reading the key is the subscription: this re-reads when the page or
-		// the filters change and not when any other query parameter does. The
-		// filter set itself is taken untracked and passed down, because `load`
-		// reads it before its first `await` — inside this effect's own
-		// synchronous run — and reading the object there would subscribe to it
-		// after all.
-		void pageKey;
-		const controller = new AbortController();
-		query = controller;
-		load(untrack(() => filters), untrack(() => spot), controller.signal);
-		return () => controller.abort();
-	});
-
-	$effect(() => {
-		// The count is a question about the filters and not about the page
-		// (spec 009 #4), so it is asked when they move and not on every turn.
-		void filterKey;
-		const controller = new AbortController();
-		countMatches(untrack(() => filters), controller.signal);
-		return () => controller.abort();
+	const listing = new Listing<TraceRow>({
+		key: () => filterSearch(filters),
+		spot: new UrlSpot(),
+		read: async (at, counting, signal) => {
+			const answer = await api.listTraces(filters, asPage(at, counting), signal);
+			return { ...answer, rows: answer.traces };
+		},
+		failed: 'Failed to read the traces.'
 	});
 
 	$effect(() => {
 		// Live means "the newest page, again" (spec 009 #7): on any other page
-		// there is nothing for a poll to mean.
-		if (!live || !newest) return;
+		// there is nothing for a tick to mean.
+		if (!live || !listing.newest) return;
 		// Polling, not a push channel (spec 006 #12): a hidden tab is a
 		// dashboard nobody is reading, and it stops asking.
 		const timer = setInterval(() => {
-			if (!document.hidden) poll();
+			if (!document.hidden) listing.tick();
 		}, POLL_MS);
 		return () => clearInterval(timer);
 	});
 
-	async function load(active: TraceFilters, at: PageState, signal: AbortSignal) {
-		loading = true;
-		failure = null;
-		liveFailure = null;
-		try {
-			const answer = await api.listTraces(
-				active,
-				{ limit: at.limit, cursor: at.cursor ?? undefined, direction: at.direction },
-				signal
-			);
-			rows = answer.traces;
-			nextCursor = answer.next_cursor;
-			prevCursor = answer.prev_cursor;
-			settle(at);
-		} catch (cause) {
-			if (signal.aborted) return;
-			rows = [];
-			nextCursor = prevCursor = null;
-			// A page that failed cannot be landed on. An *aborted* one is a
-			// different story — the turn itself aborts what it interrupted —
-			// so the intent survives that and is settled by matching cursors.
-			rolling = null;
-			failure = describe(cause);
-		} finally {
-			if (!signal.aborted) loading = false;
-		}
-	}
-
-	async function countMatches(active: TraceFilters, signal: AbortSignal) {
-		try {
-			// One row, because the answer wanted is the count beside it.
-			const answer = await api.listTraces(active, { limit: 1, count: true }, signal);
-			if (signal.aborted) return;
-			total =
-				answer.total === undefined
-					? null
-					: { value: answer.total, capped: answer.total_capped ?? false };
-		} catch {
-			// A count nobody can produce is a number the bar leaves out, not
-			// an error over a listing that arrived perfectly well.
-			if (!signal.aborted) total = null;
-		}
-	}
-
-	/** One live tick: the newest page again, which on this page is this page. */
-	async function poll() {
-		const controller = query;
-		if (!controller) return;
-		const { signal } = controller;
-		try {
-			// Counted on the way past: live streams new traces in, and a total
-			// taken when the filters last moved would sit there going stale
-			// for the life of the URL (PR #11 review). The count is capped, so
-			// asking for it here costs nothing a poll was not already paying.
-			const answer = await api.listTraces(filters, { limit: spot.limit, count: true }, signal);
-			if (signal.aborted) return;
-			// Replaced rather than merged: with a window anchored at "newest",
-			// the page just fetched *is* the window, and merging would grow it
-			// past the size the reader asked for (spec 009 #9).
-			rows = answer.traces;
-			nextCursor = answer.next_cursor;
-			if (answer.total !== undefined) {
-				total = { value: answer.total, capped: answer.total_capped ?? false };
-			}
-			liveFailure = null;
-		} catch (cause) {
-			if (signal.aborted) return;
-			// A server that went away mid-poll is worth saying once, but not
-			// worth throwing away the rows already on screen.
-			liveFailure = describe(cause);
-		}
-	}
-
-	function describe(cause: unknown): string {
-		return cause instanceof ApiError ? cause.message : 'Failed to read the traces.';
-	}
-
-	/** A filter change is a new listing, so it starts at the newest page —
-	 * carrying the page *size*, which is a preference and not a position. */
+	/** A filter change is a new listing, so it starts at the newest page. */
 	function navigate(next: TraceFilters, nextLive = live) {
-		const extra: Record<string, string> = {};
-		if (nextLive) extra.live = '1';
-		if (spot.limit !== DEFAULT_PAGE_SIZE) extra.limit = String(spot.limit);
-		goto(`/traces${filterSearch(next, extra)}`, { keepFocus: true });
-	}
-
-	/** Turning a page keeps everything else in the URL, the panel included. */
-	function turn(to: Partial<PageState>) {
-		const search = pageSearch(page.url.searchParams, { limit: spot.limit, ...to });
-		goto(`${page.url.pathname}${search}`, { keepFocus: true, noScroll: true });
+		const extra: Record<string, string> = nextLive ? { live: '1' } : {};
+		goto(`/traces${freshSearch(filterSearch(next), page.url.searchParams, extra)}`, {
+			keepFocus: true
+		});
 	}
 
 	// The peek panel (spec 008): the trace a row opened, beside the listing
-	// that opened it.
+	// that opened it, walking that listing's order (spec 009 #13).
 	const peekID = $derived(readPeek(page.url.searchParams).peek);
 	const selectedObs = $derived(page.url.searchParams.get('obs'));
 	let peeked = $state.raw<Trace | null>(null);
 
-	// The panel walks the listing's order, not the page's indices, because its
-	// row can be off the page entirely (spec 009 #13).
-	const ordered = $derived(rows.map((row) => ({ id: row.id, key: row.timestamp ?? '' })));
-	const showing = $derived(
-		peeked?.id && peeked.timestamp ? { id: peeked.id, key: peeked.timestamp } : null
-	);
-	const position = $derived(anchor(ordered, peekID, showing));
-
-	/** A walk that ran out of page and turned it (spec 009 #6). */
-	let rolling = $state.raw<Rolling | null>(null);
-
-	function settle(at: PageState) {
-		const id = settled(rolling, at, ordered);
-		rolling = null;
-		if (id) peek(id);
-	}
-
-	function walk(step: 1 | -1) {
-		// Nowhere to walk from until the panel's row says where it sits, and
-		// nowhere while a page is in flight: the cursors still belong to the
-		// page being left, so a walk would turn back the turn already asked
-		// for (PR #11, sixth review; the bar goes dead for the same reason).
-		if (position === null || loading) return;
-		const id = neighbour(ordered, position, step);
-		if (id) {
-			peek(id);
-			return;
-		}
-		if (step === 1 && nextCursor) {
-			rolling = { from: position, step, cursor: nextCursor, direction: 'next' };
-			turn({ cursor: nextCursor });
-		} else if (step === -1 && prevCursor) {
-			rolling = { from: position, step, cursor: prevCursor, direction: 'prev' };
-			turn({ cursor: prevCursor, direction: 'prev' });
-		}
-	}
+	const walk = new Walk(listing, {
+		key: (row) => row.timestamp ?? '',
+		peekID: () => peekID,
+		showing: () =>
+			peeked?.id && peeked.timestamp ? { id: peeked.id, key: peeked.timestamp } : null,
+		open: peek
+	});
 
 	/** Opening pushes one entry; moving between rows replaces it (spec 008 #6). */
 	function peek(id: string | null) {
@@ -255,18 +92,18 @@
 
 <svelte:head><title>Traces · Tracepad</title></svelte:head>
 <!-- Coming back to a tab that was paused should not wait out the interval. -->
-<svelte:document onvisibilitychange={() => live && newest && !document.hidden && poll()} />
+<svelte:document onvisibilitychange={() => live && !document.hidden && listing.tick()} />
 
 <PageHeader title="Traces">
 	{#snippet meta()}
-		{#if loading}
+		{#if listing.loading}
 			<LoaderCircle class="size-3.5 animate-spin" />
-		{:else if total}
-			<span class="tabular-nums">{count(total.value)}{total.capped ? '+' : ''}</span>
+		{:else if listing.total}
+			<span class="tabular-nums">{count(listing.total.value)}{listing.total.capped ? '+' : ''}</span>
 		{:else}
 			<!-- The count has not landed, or could not be taken: what is on
 			     screen is still a number, and an empty slot is not (PR #11). -->
-			<span class="tabular-nums">{count(rows.length)}</span>
+			<span class="tabular-nums">{count(listing.rows.length)}</span>
 		{/if}
 	{/snippet}
 	{#snippet actions()}
@@ -274,10 +111,10 @@
 		     disabling the toggle would be disabling the only control that can
 		     unset it (PR #11 review). It says paused and still switches off. -->
 		<Button
-			variant={live && newest ? 'primary' : 'default'}
+			variant={live && listing.newest ? 'primary' : 'default'}
 			onclick={() => navigate(filters, !live)}
 			aria-pressed={live}
-			title={live && !newest
+			title={live && !listing.newest
 				? 'Paused: live follows the newest page, and this is not it. Click to switch it off'
 				: `Re-read the newest page every ${POLL_MS / 1000} seconds`}
 		>
@@ -291,43 +128,28 @@
 	<FilterBar {filters} onchange={(next) => navigate(next)} />
 </div>
 
-{#if failure ?? liveFailure}
+{#if listing.problem}
 	<p
 		role="alert"
 		class="text-danger bg-danger-soft border-border flex items-center gap-2 border-b px-4 py-2"
 	>
 		<TriangleAlert class="size-4 shrink-0" />
-		{failure ?? liveFailure}
+		{listing.problem}
 	</p>
 {/if}
 
-{#if rows.length > 0 || !newest}
+{#if listing.rows.length > 0 || !listing.newest}
 	<!-- The bar stays on an empty page that is not the first one: a cursor
 	     whose rows are gone — swept by retention, say — would otherwise leave
 	     no way back to the listing but editing the URL (PR #11 review). -->
-	<TraceTable {rows} onopen={peek} selectedID={peekID} />
-	<PaginationBar
-		limit={spot.limit}
-		rows={rows.length}
-		{total}
-		hasPrev={prevCursor !== null}
-		hasNext={nextCursor !== null}
-		busy={loading}
-		atNewest={newest}
-		atOldest={isLastPage(spot)}
-		onresize={(limit) => turn({ limit })}
-		onfirst={() => turn({})}
-		onprev={() => turn({ cursor: prevCursor ?? undefined, direction: 'prev' })}
-		onnext={() => turn({ cursor: nextCursor ?? undefined })}
-		onlast={() => turn({ direction: 'prev' })}
-		noun="trace"
-	/>
-	{#if rows.length === 0 && !loading}
+	<TraceTable rows={listing.rows} onopen={peek} selectedID={peekID} />
+	<PaginationBar {...listing.bar} noun="trace" />
+	{#if listing.rows.length === 0 && !listing.loading}
 		<p class="text-subtle flex flex-1 items-start justify-center p-8 text-center">
 			Nothing on this page any more. Use « to go back to the newest.
 		</p>
 	{/if}
-{:else if !loading && !failure}
+{:else if !listing.loading && !listing.failure}
 	<div class="flex flex-1 items-start justify-center overflow-auto p-8">
 		<div class="max-w-lg">
 			{#if filtering}
@@ -371,10 +193,10 @@
 	<PeekPanel
 		label="Trace"
 		onclose={() => peek(null)}
-		onprev={() => walk(-1)}
-		onnext={() => walk(1)}
-		hasPrev={!loading && walkable(ordered, position, -1, prevCursor)}
-		hasNext={!loading && walkable(ordered, position, 1, nextCursor)}
+		onprev={() => walk.step(-1)}
+		onnext={() => walk.step(1)}
+		hasPrev={walk.hasPrev}
+		hasNext={walk.hasNext}
 		fullHref="/traces/{encodeURIComponent(peekID)}{selectedObs
 			? `?obs=${encodeURIComponent(selectedObs)}`
 			: ''}"
