@@ -81,6 +81,25 @@ test('the next control moves to the next row on screen', async ({ page }) => {
 	await expect(panel.getByRole('button', { name: 'Previous row' })).toBeEnabled();
 });
 
+test('a value in a row can still be selected and copied', async ({ page }, testInfo) => {
+	test.skip(testInfo.project.name !== 'desktop', 'dragging a selection needs a mouse');
+	await signIn(page);
+	const cell = rows(page).filter({ hasText: 'summarise-release-notes' }).locator('td').nth(1);
+	const box = await cell.boundingBox();
+	if (!box) throw new Error('the name cell is not on screen');
+
+	// The gesture the row used to swallow: a drag across a cell (spec 008 #15).
+	await page.mouse.move(box.x + 2, box.y + box.height / 2);
+	await page.mouse.down();
+	await page.mouse.move(box.x + box.width - 2, box.y + box.height / 2, { steps: 8 });
+	await page.mouse.up();
+
+	expect(await page.evaluate(() => window.getSelection()?.toString() ?? '')).toContain('summarise');
+	// And selecting is not opening: nothing was peeked by the drag.
+	await expect(page).toHaveURL(/\/traces$/);
+	await expect(page.getByRole('dialog')).toHaveCount(0);
+});
+
 test('j and k walk the rows, and stop where the listing does', async ({ page }) => {
 	await signIn(page);
 	await rows(page).first().getByRole('link').click();

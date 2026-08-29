@@ -58,7 +58,10 @@ Reading a listing is a loop, and this is the loop:
 
 - **Click a row** to open it, and click another to swap the panel over to it;
   the row it is showing stays lit. **⌘/Ctrl-click** still opens the full page
-  in a new tab, because the row is a real link to it.
+  in a new tab, because the row is a real link to it. Dragging across a cell
+  selects its text as it would anywhere else — an id in a listing is
+  something you copy into a terminal — and a click that ended a selection
+  opens nothing.
 - **`k`** and **`j`**, or the two chevrons in the panel's header, walk the
   rows the listing has loaded — the buttons carry the key they answer to, and
   both dim when the listing has run out rather than fetching the next cursor

@@ -72,3 +72,16 @@ export function neighbour(
 export function modified(event: MouseEvent): boolean {
 	return event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey;
 }
+
+/**
+ * Whether this click is somebody selecting text in the row rather than opening
+ * it (spec 008 #15). A row is clickable end to end, and the values in it are
+ * still values somebody copies out — a trace id into a `curl`, a user id into
+ * a ticket — so a drag that ended in a selection is a selection, and the
+ * second click of a double-click is a word.
+ */
+export function selecting(event: MouseEvent): boolean {
+	if (event.detail > 1) return true;
+	const selection = typeof window === 'undefined' ? null : window.getSelection();
+	return selection !== null && !selection.isCollapsed;
+}

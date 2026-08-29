@@ -2,7 +2,7 @@
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import type { TraceRow } from '$lib/api/client.svelte';
 	import { ABSENT, cost, duration, timestamp } from '$lib/format';
-	import { modified } from '$lib/peek';
+	import { modified, selecting } from '$lib/peek';
 
 	// The listing, one row per trace, mapping 1:1 onto what
 	// `GET /api/v1/traces` returns (Application contract). Nothing is computed
@@ -24,9 +24,15 @@
 		selectedID?: string | null;
 	} = $props();
 
+	/**
+	 * The whole row opens the panel, but the row's cells stay ordinary
+	 * selectable text (spec 008 #15): a click that came out of a selection
+	 * opens nothing, and it does not follow the row's link either.
+	 */
 	function open(event: MouseEvent, id: string) {
 		if (!onopen || modified(event)) return;
 		event.preventDefault();
+		if (selecting(event)) return;
 		onopen(id);
 	}
 
@@ -54,21 +60,27 @@
 		</thead>
 		<tbody>
 			{#each rows as row (row.id)}
+				<!-- The click is on the row and the link is inside it, rather than a
+				     link stretched over the row: an overlay that covers the cells
+				     makes every value in them undraggable, and a listing whose ids
+				     cannot be copied out is a listing you have to retype from
+				     (spec 008 #15). The keyboard path is the link. -->
+				<!-- svelte-ignore a11y_click_events_have_key_events -->
+				<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 				<tr
+					onclick={(event) => open(event, row.id)}
 					class={[
-						'border-border hover:bg-raised relative border-b transition-colors duration-100',
+						'border-border hover:bg-raised border-b transition-colors duration-100',
+						onopen && 'cursor-pointer',
 						row.id === selectedID && 'bg-accent-soft'
 					]}
 				>
 					<td class="text-muted px-3 py-1.5 font-mono text-xs whitespace-nowrap tabular-nums">
-						<!-- The link covers the row, so the whole row is clickable and
-						     exactly one thing is tabbable. A plain click opens the peek
-						     panel; ⌘-click still opens the page it points at. -->
+						<!-- Exactly one thing in the row is tabbable, and it is a real
+						     link: ⌘-click still opens the page it points at. -->
 						<a
 							href="/traces/{row.id}"
-							onclick={(event) => open(event, row.id)}
 							aria-current={row.id === selectedID ? 'true' : undefined}
-							class="after:absolute after:inset-0 after:content-['']"
 							title={row.id}
 						>
 							{timestamp(row.timestamp)}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { modified, neighbour, peekSearch, readPeek } from './peek';
+import { modified, neighbour, peekSearch, readPeek, selecting } from './peek';
 
 /**
  * The peek panel is URL state (spec 008 #2), so its whole contract — open,
@@ -77,6 +77,25 @@ describe('which click belongs to the panel', () => {
 
 	it('takes a plain left click', () => {
 		expect(modified(click())).toBe(false);
+	});
+
+	it('is not a click at all once text has been selected', () => {
+		// The row is clickable end to end, and its values are still values
+		// somebody drags a cursor across to copy (spec 008 #15).
+		document.body.innerHTML = '<p id="cell">0071122334455667788990aabbccddee</p>';
+		const range = document.createRange();
+		range.selectNodeContents(document.getElementById('cell') as HTMLElement);
+		const selection = window.getSelection();
+		selection?.removeAllRanges();
+		selection?.addRange(range);
+
+		expect(selecting({ detail: 1 } as MouseEvent)).toBe(true);
+		selection?.removeAllRanges();
+		expect(selecting({ detail: 1 } as MouseEvent)).toBe(false);
+	});
+
+	it('leaves the second click of a double-click to the word it selects', () => {
+		expect(selecting({ detail: 2 } as MouseEvent)).toBe(true);
 	});
 
 	it('leaves the browser its own gestures', () => {

@@ -48,6 +48,7 @@ GETs the screens already make.
 | 12 | **2026-08-29** — **A phone gets the panel too**, not the old navigation: below `lg` it covers the viewport and, at those widths only, becomes modal — `aria-modal="true"` and Tab held inside it. There is no second interaction model for narrow screens | The panel's visible benefit (a listing beside the detail) is worth nothing at 375 px, but its mechanical one is worth most there: closing it is instant and free, where a navigation back to the listing re-runs `GET /api/v1/traces` from the first cursor page, drops every "load more" already paid for and loses the scroll position — on the slowest connection the product has. Keeping the old navigation on phones instead would fork the interaction model at exactly the width that gets tested least, and Decision 8's shared body means there is nothing to fork *into*: the same component renders either way, and only the container's classes differ. Modality follows the geometry rather than the pointer (a departure from spec 006 #15's rule, on purpose): the reason to trap focus is that the listing is *covered*, which is a fact about width, not about fingers |
 | 13 | **2026-08-29** — The previous/next controls carry the shortcuts **`k`** and **`j`**, drawn on the buttons as keycaps and dimmed along with the button when the listing has run out. They are ignored while a letter is being typed and while any modifier is held | Amends Decision 7, which ruled out only the *arrow* keys, and for a reason that does not reach here: the observation tree owns the arrows, while `j`/`k` are free — which is exactly why the tools this audience already uses settled on them. Drawing the key on the control is what makes a shortcut discoverable without a cheat sheet, and it costs nothing: the button is already there and already says what it does. Dimming the keycap with the button is the same message twice for two different readers — the one looking for a control to click, and the one who just pressed the key and needs to know why nothing moved. The guard is not optional: without it, typing `prod` into the environment filter would walk the listing four rows |
 | 14 | **2026-08-29** — The UI-line budget in `scripts/ui-lines.sh` moves from 7,300 to 8,100 | Same reasoning as spec 007 #13: the number is the budget of the newest spec that moved it, so that the warning fires when *this* spec is exceeded rather than at one two specs old. This spec lands at 8,016 — a panel, two extracted bodies, the URL helpers and their tests — and 8,100 leaves the margin a small follow-up needs without hiding the next screen-sized addition. Design §8's 6–9k envelope for the finished interface is unchanged, and this is now the second half of it: the room left is one screen, not four, which is a fact worth having the warning say out loud |
+| 15 | **2026-08-29** — The row's click handler sits on the `<tr>`; the link stays in the first cell at its own size, rather than being stretched over the row with an `::after` overlay. A click that ended a text selection, and the second click of a double-click, open nothing | The stretched link is the usual trick for "the whole row is clickable", and it quietly costs the thing a listing is read for: the overlay covers every cell, so dragging across a trace id starts a link drag instead of a selection, and the id can only be retyped into the terminal. Reported from use, and true of both listings since spec 006. Moving the handler to the row buys the same hit area without covering anything. The selection guard is what lets both be true at once — without it, a drag that ends inside the row also opens a panel nobody asked for — and the double-click case is the same argument for the gesture that selects a word. The link is still there, unstretched: it remains the keyboard's path to the trace and what ⌘-click opens (Decision 3) |
 
 ## Application contract
 
@@ -94,14 +95,16 @@ highlight moves with it because both are keyed by id.
 - **Component (vitest)**: the URL round-trip of `peek`/`trace`/`obs` — open,
   switch rows, drill, come back, close — asserted on the search string the
   helpers produce; neighbour selection at both ends of a loaded listing;
-  a modified click is not intercepted.
+  a modified click is not intercepted, and neither is a click that came out
+  of a text selection.
 - **E2E (Playwright)**: a row on `/traces` opens the panel with the listing
   still on screen and the row lit; ⤢ lands on `/traces/{id}` showing the same
   observation; Escape closes and the URL loses `peek`; a session row opens
   the session panel, a trace inside it drills in, the breadcrumb returns, and
   a reload of the drilled-in URL comes back to the same place. `j` and `k`
   walk the rows and stop at the ends, and neither does anything when typed
-  into a filter field. At 375 px the panel covers the viewport.
+  into a filter field. A drag across a cell selects its text and opens
+  nothing. At 375 px the panel covers the viewport.
 - **Accessibility floor**: the panel is labelled and focus moves into it on
   open and back to the row on close; previous/next are disabled, not hidden,
   at the ends and name their shortcut with `aria-keyshortcuts`; every
