@@ -373,8 +373,8 @@
 		onclose={() => peek(null)}
 		onprev={() => walk(-1)}
 		onnext={() => walk(1)}
-		hasPrev={walkable(ordered, position, -1, prevCursor)}
-		hasNext={walkable(ordered, position, 1, nextCursor)}
+		hasPrev={!loading && walkable(ordered, position, -1, prevCursor)}
+		hasNext={!loading && walkable(ordered, position, 1, nextCursor)}
 		fullHref="/traces/{encodeURIComponent(peekID)}{selectedObs
 			? `?obs=${encodeURIComponent(selectedObs)}`
 			: ''}"

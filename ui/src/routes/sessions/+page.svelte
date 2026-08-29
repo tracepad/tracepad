@@ -206,8 +206,8 @@
 	}
 
 	function walk(step: 1 | -1) {
-		// Nor while a page is in flight: the cursors still belong to the page
-		// being left (see the Traces screen).
+		// Nowhere to walk from until the panel's row says where it sits, and
+		// nowhere while a page is in flight (see the Traces screen).
 		if (position === null || loading) return;
 		const id = neighbour(ordered, position, step);
 		if (id) {
@@ -358,8 +358,8 @@
 		onclose={() => peek(null)}
 		onprev={drilled ? undefined : () => walk(-1)}
 		onnext={drilled ? undefined : () => walk(1)}
-		hasPrev={walkable(ordered, position, -1, prevCursor)}
-		hasNext={walkable(ordered, position, 1, nextCursor)}
+		hasPrev={!loading && walkable(ordered, position, -1, prevCursor)}
+		hasNext={!loading && walkable(ordered, position, 1, nextCursor)}
 		fullHref={drilled
 			? `/traces/${encodeURIComponent(drilled)}${
 					selectedObs ? `?obs=${encodeURIComponent(selectedObs)}` : ''

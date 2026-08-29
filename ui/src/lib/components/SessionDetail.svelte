@@ -117,7 +117,11 @@
 	);
 </script>
 
-{#if loading}
+<!-- The spinner is for a session that is not on screen yet, not for a page of
+     one that is: turning a page keeps the rows and dims the bar, which is what
+     the other two listings do and what makes `busy` mean anything here at all
+     (spec 009 #8; PR #11, seventh review). -->
+{#if loading && session?.id !== sessionID}
 	<div class="text-subtle flex flex-1 items-center justify-center gap-2">
 		<LoaderCircle class="size-4 animate-spin" />
 		Loading the session

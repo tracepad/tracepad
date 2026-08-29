@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { anchor, modified, neighbour, peekSearch, readPeek, selecting } from './peek';
+import type { PageState } from './page';
+import { anchor, modified, neighbour, peekSearch, readPeek, selecting, settled, walkable } from './peek';
 
 /**
  * The peek panel is URL state (spec 008 #2), so its whole contract — open,
@@ -51,16 +52,16 @@ describe('the panel in the URL', () => {
 	});
 });
 
-describe('walking a page by its order', () => {
-	// Newest first, as every listing is. The gaps are where a row the panel
-	// is showing can sit without being on the page.
-	const at = (minute: number) => `2026-08-29T10:${String(minute).padStart(2, '0')}:00Z`;
-	const page = [
-		{ id: 'c', key: at(30) },
-		{ id: 'b', key: at(20) },
-		{ id: 'a', key: at(10) }
-	];
+// One page, newest first as every listing is. The gaps between the minutes
+// are where a row the panel is showing can sit without being on the page.
+const at = (minute: number) => `2026-08-29T10:${String(minute).padStart(2, '0')}:00Z`;
+const page = [
+	{ id: 'c', key: at(30) },
+	{ id: 'b', key: at(20) },
+	{ id: 'a', key: at(10) }
+];
 
+describe('walking a page by its order', () => {
 	it('moves in both directions', () => {
 		expect(neighbour(page, page[1], -1)).toBe('c');
 		expect(neighbour(page, page[1], 1)).toBe('a');
@@ -139,26 +140,52 @@ describe('walking a page by its order', () => {
 	});
 });
 
+describe('a turn that has landed', () => {
+	const from = { id: 'gone', key: at(25) };
+	const intent = { from, step: 1 as const, cursor: 'X', direction: 'next' as const };
+	const spot = (over: Partial<PageState> = {}): PageState =>
+		({ limit: 2, cursor: 'X', direction: 'next', ...over });
+
+	it('opens the row nearest the one the walk came from', () => {
+		expect(settled(intent, spot(), page)).toBe('b');
+	});
+
+	it('leaves a page the walk did not ask for alone', () => {
+		expect(settled(intent, spot({ cursor: 'Y' }), page)).toBeNull();
+		expect(settled(null, spot(), page)).toBeNull();
+	});
+
+	it('tells the two cursors of a one-row page apart by direction', () => {
+		// There `prev_cursor === next_cursor`, so a `‹` walk and a `›` click
+		// would otherwise settle on each other (PR #11, third review).
+		expect(settled(intent, spot({ direction: 'prev' }), page)).toBeNull();
+	});
+
+	it('says when a key does nothing, so the control can look dead', () => {
+		expect(walkable(page, page[0], 1, null)).toBe(true);
+		expect(walkable(page, page[2], 1, null)).toBe(false);
+		expect(walkable(page, page[2], 1, 'cursor')).toBe(true);
+		// No position to walk from: a page to turn to does not rescue it.
+		expect(walkable(page, null, 1, 'cursor')).toBe(false);
+	});
+});
+
 describe('where the panel says it is', () => {
-	const page = [
-		{ id: 'b', key: '2026-08-29T10:20:00Z' },
-		{ id: 'a', key: '2026-08-29T10:10:00Z' }
-	];
+	const showing = { id: 'gone', key: at(5) };
 
 	it('reads the position off the page when the row is on it', () => {
 		// Not off the detail: that lags the URL by a fetch, and a walk held up
 		// for it would stutter under a held-down `j`.
-		expect(anchor(page, 'a', null)).toEqual(page[1]);
+		expect(anchor(page, 'a', null)).toEqual(page[2]);
 	});
 
 	it('falls back to the detail the panel is showing', () => {
-		const showing = { id: 'gone', key: '2026-08-29T09:00:00Z' };
 		expect(anchor(page, 'gone', showing)).toBe(showing);
 	});
 
 	it('says nothing when neither the page nor the detail knows the row', () => {
 		expect(anchor(page, 'gone', null)).toBeNull();
-		expect(anchor(page, 'gone', { id: 'other', key: '2026-08-29T09:00:00Z' })).toBeNull();
+		expect(anchor(page, 'gone', { id: 'other', key: at(5) })).toBeNull();
 		expect(anchor(page, null)).toBeNull();
 	});
 });
