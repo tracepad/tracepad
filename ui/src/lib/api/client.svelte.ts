@@ -97,7 +97,7 @@ class Api {
 
 	listTraces(
 		filters: TraceFilters,
-		page: { cursor?: string; limit?: number } = {},
+		page: Page = {},
 		signal?: AbortSignal
 	) {
 		return this.#json<TracePage>('/api/v1/traces', {
@@ -108,7 +108,7 @@ class Api {
 
 	listSessions(
 		filters: SessionFilters,
-		page: { cursor?: string; limit?: number } = {},
+		page: Page = {},
 		signal?: AbortSignal
 	) {
 		return this.#json<SessionPage>('/api/v1/sessions', {
@@ -118,7 +118,7 @@ class Api {
 	}
 
 	/** One session: its totals and a page of its traces. */
-	getSession(id: string, page: { cursor?: string; limit?: number } = {}, signal?: AbortSignal) {
+	getSession(id: string, page: Page = {}, signal?: AbortSignal) {
 		return this.#json<Session>(`/api/v1/sessions/${encodeURIComponent(id)}`, {
 			query: paging(page),
 			signal
@@ -337,10 +337,25 @@ type Request = {
 };
 
 /** The two page parameters, as query values. */
-function paging(page: { cursor?: string; limit?: number }): Query {
+/**
+ * Where a page sits and how big it is (spec 009). `direction` is only sent
+ * when it is `prev`, so the common request keeps the shape it had — and
+ * `count` only when the caller wants the number, because it is the filters
+ * that change it and not the page.
+ */
+export type Page = {
+	cursor?: string;
+	limit?: number;
+	direction?: 'next' | 'prev';
+	count?: boolean;
+};
+
+function paging(page: Page): Query {
 	return {
 		cursor: page.cursor,
-		limit: page.limit === undefined ? undefined : String(page.limit)
+		limit: page.limit === undefined ? undefined : String(page.limit),
+		direction: page.direction === 'prev' ? 'prev' : undefined,
+		count: page.count ? '1' : undefined
 	};
 }
 

@@ -1,10 +1,11 @@
 <script lang="ts">
-	import ChevronDown from '@lucide/svelte/icons/chevron-down';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
+	import { untrack } from 'svelte';
 	import { ApiError, api, type Session, type TraceRow } from '$lib/api/client.svelte';
 	import { ABSENT, cost, count, timestamp } from '$lib/format';
-	import Button from './Button.svelte';
+	import { DEFAULT_PAGE_SIZE, type PageState } from '$lib/page';
+	import PaginationBar from './PaginationBar.svelte';
 	import TraceTable from './TraceTable.svelte';
 
 	// One session: the totals `GET /api/v1/sessions/{id}` returns, over its
@@ -15,7 +16,20 @@
 	// Where a trace row leads is the caller's to say: the page opens it in a
 	// panel over itself, and a session panel drills into it in place (#9).
 
-	const PAGE_SIZE = 50;
+	/**
+	 * This listing pages in component state rather than in the URL, which is
+	 * the one place spec 009 #1's rule does not hold — and cannot. On
+	 * `/sessions` this table lives *inside* the peek panel, over a URL whose
+	 * `limit` and `cursor` already belong to the sessions listing behind it;
+	 * two listings on one address cannot own one set of keys. Local state
+	 * keeps them apart and keeps the component identical in both of its
+	 * homes (spec 009 #10).
+	 */
+	let spot = $state.raw<PageState>({
+		limit: DEFAULT_PAGE_SIZE,
+		cursor: null,
+		direction: 'next'
+	});
 
 	let {
 		sessionID,
@@ -31,64 +45,56 @@
 		onopen: (traceID: string) => void;
 		selectedTraceID?: string | null;
 	} = $props();
-	let cursor = $state.raw<string | null>(null);
+	let nextCursor = $state.raw<string | null>(null);
+	let prevCursor = $state.raw<string | null>(null);
 	let loading = $state(true);
-	let loadingMore = $state(false);
 	let failure = $state<string | null>(null);
-	/**
-	 * A page that failed to arrive, kept apart from the one that failed to
-	 * load: the session is on screen and readable, and replacing it with an
-	 * error line would take away the button needed to try again.
-	 */
-	let moreFailure = $state<string | null>(null);
-
-	let query: AbortController | null = null;
 
 	$effect(() => {
+		// A different session starts at its newest page; the same session
+		// re-reads whenever the page moves.
 		const wanted = sessionID;
+		const at = spot;
 		const controller = new AbortController();
-		query = controller;
-		load(wanted, controller.signal);
+		load(wanted, at, controller.signal);
 		return () => controller.abort();
 	});
 
-	async function load(wanted: string, signal: AbortSignal) {
+	$effect(() => {
+		// Landing on another session with the previous one's cursor would ask
+		// for a page of a listing that no longer exists.
+		sessionID;
+		untrack(() => {
+			spot = { ...spot, cursor: null, direction: 'next' };
+		});
+	});
+
+	async function load(wanted: string, at: PageState, signal: AbortSignal) {
 		loading = true;
-		loadingMore = false;
 		failure = null;
-		moreFailure = null;
 		try {
-			const answer = await api.getSession(wanted, { limit: PAGE_SIZE }, signal);
+			const answer = await api.getSession(
+				wanted,
+				{ limit: at.limit, cursor: at.cursor ?? undefined, direction: at.direction },
+				signal
+			);
 			session = answer;
 			traces = answer.traces;
-			cursor = answer.next_cursor;
+			nextCursor = answer.next_cursor;
+			prevCursor = answer.prev_cursor;
 		} catch (cause) {
 			if (signal.aborted) return;
 			session = null;
 			traces = [];
+			nextCursor = prevCursor = null;
 			failure = cause instanceof ApiError ? cause.message : 'Failed to read the session.';
 		} finally {
 			if (!signal.aborted) loading = false;
 		}
 	}
 
-	async function loadMore() {
-		const controller = query;
-		if (!cursor || loadingMore || !controller) return;
-		const { signal } = controller;
-		loadingMore = true;
-		moreFailure = null;
-		try {
-			const answer = await api.getSession(sessionID, { limit: PAGE_SIZE, cursor }, signal);
-			if (signal.aborted) return;
-			traces = [...traces, ...answer.traces];
-			cursor = answer.next_cursor;
-		} catch (cause) {
-			if (signal.aborted) return;
-			moreFailure = cause instanceof ApiError ? cause.message : 'Failed to read the next page.';
-		} finally {
-			if (!signal.aborted) loadingMore = false;
-		}
+	function turn(to: Partial<PageState>) {
+		spot = { limit: spot.limit, cursor: null, direction: 'next', ...to };
 	}
 
 	/** The totals header, as label/value pairs so one loop renders them. */
@@ -129,29 +135,22 @@
 
 	{#if traces.length > 0}
 		<TraceTable rows={traces} {onopen} selectedID={selectedTraceID} />
-		<div
-			class="border-border flex shrink-0 flex-col items-center justify-center gap-2 border-t
-				px-4 py-2"
-		>
-			{#if moreFailure}
-				<p role="alert" class="text-danger flex items-center gap-2 text-sm">
-					<TriangleAlert class="size-4 shrink-0" />
-					{moreFailure}
-				</p>
-			{/if}
-			{#if cursor}
-				<Button onclick={loadMore} busy={loadingMore}>
-					{#if loadingMore}
-						<LoaderCircle class="size-4 animate-spin" />
-					{:else}
-						<ChevronDown class="size-4" />
-					{/if}
-					Load more
-				</Button>
-			{:else}
-				<span class="text-subtle text-xs">End of the listing</span>
-			{/if}
-		</div>
+		<!-- The total here is exact and already known: `trace_count` is what
+		     the endpoint answers with, so this listing needs no count of its
+		     own (spec 009, API contract). -->
+		<PaginationBar
+			limit={spot.limit}
+			rows={traces.length}
+			total={{ value: session.trace_count, capped: false }}
+			hasPrev={prevCursor !== null}
+			hasNext={nextCursor !== null}
+			onresize={(limit) => turn({ limit })}
+			onfirst={() => turn({})}
+			onprev={() => turn({ cursor: prevCursor ?? undefined, direction: 'prev' })}
+			onnext={() => turn({ cursor: nextCursor ?? undefined })}
+			onlast={() => turn({ direction: 'prev' })}
+			noun="trace"
+		/>
 	{:else}
 		<p class="text-subtle p-8 text-center">{ABSENT} This session holds no traces.</p>
 	{/if}

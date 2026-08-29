@@ -35,19 +35,43 @@ screen, where the endpoints it can actually call live.
 and how many observations failed. The filter bar offers exactly the filters
 the endpoint accepts (`from`, `to`, `environment`, `user_id`, `session_id`,
 `name`, `tag`, `status`, `min_cost`) — a test reads `openapi.json` and fails
-if the two ever disagree. **Load more** follows the cursor.
+if the two ever disagree. The bar underneath turns the pages.
 
-**Live** re-reads the newest page every five seconds and merges it into what
-is on screen by trace id, so nothing duplicates and nothing jumps. It is off
-by default and pauses while the tab is hidden. Same caveat as `tracepad
-tail`: traces are ordered by their own timestamps, so a span that arrives
-late appears where it belongs rather than at the top.
+**Live** re-reads the newest page every five seconds and shows it. It is off
+by default, pauses while the tab is hidden, and only runs on the newest page
+(see [Turning pages](#turning-pages)). Same caveat as `tracepad tail`: traces
+are ordered by their own timestamps, so a span that arrives late appears
+where it belongs rather than at the top — which on a full page means it can
+push the oldest row of that page off it.
 
 **Sessions** — one row per session over `GET /api/v1/sessions`: last seen,
 id, how many traces, how many of them failed, cost, first seen. The filters
 are the endpoint's four (`from`, `to`, `environment`, `user_id`), and a row
 opens the session: its totals over its traces, and a trace opens from there.
 Every number counts traces, which is what a session is a collection of.
+
+## Turning pages
+
+Every listing sits on a bar: how many rows per page, what is on screen
+against what matches, and four ways to move — « newest, ‹ previous, next ›,
+oldest ». The page is in the URL (`?limit=&cursor=&direction=`), so a reload
+comes back to it and a link carries it.
+
+There are no page numbers, and the reason is the same one that makes the
+listing fast. Pagination is a **keyset**: a page is found by seeking to a
+cursor, so page four hundred costs what page one costs — and both ends are
+just a direction to read the index in, which is why « and » are as cheap as ‹
+and ›. An ordinal ("page 12 of 40") would need `OFFSET`, which counts and
+discards every row it skips, plus a full count on every filter change. In a
+listing sorted by time an ordinal is not an address anyway: nobody wants page
+40, they want 26 August — and the time range control answers that.
+
+The count beside the rows is capped at 1000, so a filter no index covers
+cannot make the screen slow; past that it reads `1000+`. It follows the
+filters, not the page, so turning a page does not re-count.
+
+**Live** only runs on the newest page. Anywhere else the toggle is paused and
+says why: re-reading the newest page would replace the page you navigated to.
 
 ## The peek panel
 
@@ -63,9 +87,11 @@ Reading a listing is a loop, and this is the loop:
   something you copy into a terminal — and a click that ended a selection
   opens nothing.
 - **`k`** and **`j`**, or the two chevrons in the panel's header, walk the
-  rows the listing has loaded — the buttons carry the key they answer to, and
-  both dim when the listing has run out rather than fetching the next cursor
-  page. A letter typed into a filter field is a letter, not a shortcut.
+  rows — the buttons carry the key they answer to. On the last row of a page
+  `j` turns the page and opens the first row of the next one, so a scan does
+  not stop at a boundary that is an artefact of paging; both keys dim only at
+  the ends of the whole listing. A letter typed into a filter field is a
+  letter, not a shortcut.
 - **⤢** opens what the panel is showing as a full page — `/traces/{id}` or
   `/sessions/{id}`, the selected observation included. That is the link to
   send somebody.

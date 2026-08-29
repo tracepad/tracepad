@@ -7,15 +7,17 @@
 # the budget is code somebody has to read and maintain.
 #
 # The default is the budget of the newest spec that moved it: 7,300 after spec
-# 007 (#13), then 8,300 for the peek panel (spec 008 #14). Design §8's 6-9k
-# envelope for the finished MVP interface is what every one of those numbers
-# lives under.
+# 007 (#13), 8,300 for the peek panel (spec 008 #14), then 8,700 for listing
+# pagination (spec 009 #11). Design §8's 6-9k envelope for the finished MVP
+# interface is what every one of those numbers lives under — and 8,700 leaves
+# under four hundred lines of it, so the next raise is an argument, not a
+# formality.
 #
 # Usage: scripts/ui-lines.sh [budget]
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BUDGET="${1:-8300}"
+BUDGET="${1:-8700}"
 
 cd "$ROOT"
 

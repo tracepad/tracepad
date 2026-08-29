@@ -1,8 +1,5 @@
-import type { TraceRow } from './client.svelte';
-
-// The trace listing's own logic: which filters exist, how they travel in the
-// URL, and how a live poll folds a fresh first page into the rows already on
-// screen. All of it pure, because all of it is worth testing without a DOM.
+// The trace listing's own logic: which filters exist and how they travel in
+// the URL. Pure, because that is what makes it worth testing without a DOM.
 
 /**
  * Every filter `GET /api/v1/traces` accepts, in the order the API documents
@@ -88,42 +85,7 @@ export function filterSearch(filters: TraceFilters, extra: Record<string, string
 	return encoded ? `?${encoded}` : '';
 }
 
-/**
- * Folds a re-fetched first page into the rows on screen (spec 006 #12).
- *
- * Live mode re-reads the first page rather than asking for "everything since
- * X", so the new page and the old list overlap. Merging by id keeps a trace
- * that appears in both from appearing twice, and re-sorting on the listing's
- * own key — `timestamp DESC, id DESC` — keeps a late arrival in the place the
- * server would have put it rather than at the top.
- *
- * A row present in both wins from the incoming page: its aggregates (cost,
- * latency, error count) grow while the trace is still being written.
- */
-export function mergeRows(existing: TraceRow[], incoming: TraceRow[]): TraceRow[] {
-	const byID = new Map<string, TraceRow>();
-	for (const row of existing) byID.set(row.id, row);
-	for (const row of incoming) byID.set(row.id, row);
-	return [...byID.values()].sort(compareRows);
-}
-
-function compareRows(a: TraceRow, b: TraceRow): number {
-	const left = sortKey(a.timestamp);
-	const right = sortKey(b.timestamp);
-	if (left !== right) return left < right ? 1 : -1;
-	return a.id < b.id ? 1 : a.id > b.id ? -1 : 0;
-}
-
-// RFC 3339 with a variable-length fraction does not compare as text: the
-// server prints `…:00Z` and `…:00.5Z`, and `.` sorts before `Z`, which would
-// put the later instant first. Padding the fraction to nanoseconds makes the
-// strings comparable again — and keeps the nanosecond resolution that parsing
-// into a `Date` would throw away.
-const INSTANT = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d+))?Z$/;
-
-function sortKey(timestamp: string | undefined): string {
-	if (!timestamp) return '';
-	const parts = INSTANT.exec(timestamp);
-	if (!parts) return timestamp;
-	return `${parts[1]}.${(parts[2] ?? '').padEnd(9, '0')}`;
-}
+// `mergeRows` lived here until spec 009 #9: live mode folded a re-fetched
+// first page into rows that accumulated, and with a window anchored at
+// "newest" the page just fetched *is* what should be on screen. Merging would
+// only grow the page past the size somebody chose.
