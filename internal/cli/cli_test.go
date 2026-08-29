@@ -313,6 +313,41 @@ func TestExitCodes(t *testing.T) {
 	}
 }
 
+// TestARefusalNamesTheFlagItParsed: one parser reads both ends of a window, so
+// a hardcoded flag name in its refusals is a message that sends the reader to
+// the wrong half of their own command line.
+func TestARefusalNamesTheFlagItParsed(t *testing.T) {
+	h := newHarness(t)
+	ctx := t.Context()
+
+	for _, tc := range []struct {
+		name string
+		args []string
+		says string
+	}{
+		{"sessions ls", []string{"sessions", "ls", "--until", "yesterday"}, "--until takes"},
+		{"traces ls", []string{"traces", "ls", "--until", "yesterday"}, "--until takes"},
+		{"stats", []string{"stats", "--until", "yesterday"}, "--until takes"},
+		{"a window that runs forwards", []string{"sessions", "ls", "--until=-1h"}, "--until must be"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := h.run(ctx, false, tc.args...)
+			if got.code != ExitUsage {
+				t.Fatalf("exit = %d, want %d (stderr: %s)", got.code, ExitUsage, got.stderr)
+			}
+			// The refusal itself, not the usage text under it — that lists
+			// every flag the binary has, `--since` among them.
+			reason, _, _ := strings.Cut(got.stderr, "\n")
+			if !strings.Contains(reason, tc.says) {
+				t.Errorf("stderr = %q, want it to mention %q", reason, tc.says)
+			}
+			if strings.Contains(reason, "--since") {
+				t.Errorf("stderr = %q, names a flag that was never given", reason)
+			}
+		})
+	}
+}
+
 // TestBadCredentialsAreARequestError: a wrong key is the server saying no, not
 // a typo in the command, so it exits 1.
 func TestBadCredentialsAreARequestError(t *testing.T) {

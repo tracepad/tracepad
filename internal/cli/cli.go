@@ -317,23 +317,28 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-// since turns `--since` into the `from` filter. Both spellings are accepted
-// because both are natural: a duration is what a human types at a terminal,
-// and an instant is what a script computed.
-func (r *run) since(value string) (string, error) {
+// instant turns what `--since` and `--until` accept into one end of a window.
+// Both spellings are taken because both are natural: a duration is what a
+// human types at a terminal, and an instant is what a script computed. Either
+// way the duration counts backwards from now, so `--until 1h` is an hour ago.
+//
+// The flag is passed in because the refusal has to name the flag that was
+// actually parsed: being told about `--since` when you typed `--until` sends
+// you looking at the wrong half of your own command line.
+func (r *run) instant(flag, value string) (string, error) {
 	if value == "" {
 		return "", nil
 	}
 	if duration, err := time.ParseDuration(value); err == nil {
 		if duration < 0 {
-			return "", usageErrorf("--since must be a duration in the past, got %q", value)
+			return "", usageErrorf("%s must be a duration in the past, got %q", flag, value)
 		}
 		return r.opt.Now().Add(-duration).UTC().Format(time.RFC3339), nil
 	}
-	if instant, err := time.Parse(time.RFC3339, value); err == nil {
-		return instant.UTC().Format(time.RFC3339), nil
+	if at, err := time.Parse(time.RFC3339, value); err == nil {
+		return at.UTC().Format(time.RFC3339), nil
 	}
-	return "", usageErrorf("--since takes a duration (1h, 30m) or an RFC 3339 timestamp, got %q", value)
+	return "", usageErrorf("%s takes a duration (1h, 30m) or an RFC 3339 timestamp, got %q", flag, value)
 }
 
 // addSome sets a query parameter only when there is one, so an unset flag is

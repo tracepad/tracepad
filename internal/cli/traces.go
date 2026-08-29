@@ -72,12 +72,12 @@ func (f *traceFilterFlags) query(r *run) (url.Values, error) {
 	if f.onlyErrors {
 		query.Set("status", "error")
 	}
-	from, err := r.since(f.since)
+	from, err := r.instant("--since", f.since)
 	if err != nil {
 		return nil, err
 	}
 	addSome(query, "from", from)
-	to, err := r.since(f.until)
+	to, err := r.instant("--until", f.until)
 	if err != nil {
 		return nil, err
 	}

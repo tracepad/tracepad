@@ -58,12 +58,12 @@ func (r *run) sessionsList(ctx context.Context, args []string) error {
 	addSome(query, "environment", environment)
 	addSome(query, "user_id", user)
 	addSome(query, "cursor", cursor)
-	from, err := r.since(since)
+	from, err := r.instant("--since", since)
 	if err != nil {
 		return err
 	}
 	addSome(query, "from", from)
-	to, err := r.since(until)
+	to, err := r.instant("--until", until)
 	if err != nil {
 		return err
 	}
@@ -183,7 +183,7 @@ func (r *run) scores(ctx context.Context, args []string) error {
 	addSome(query, "session_id", session)
 	addSome(query, "name", name)
 	addSome(query, "data_type", dataType)
-	from, err := r.since(since)
+	from, err := r.instant("--since", since)
 	if err != nil {
 		return err
 	}
@@ -475,12 +475,12 @@ func (r *run) stats(ctx context.Context, args []string) error {
 	query := url.Values{}
 	addSome(query, "group_by", groupBy)
 	addSome(query, "environment", environment)
-	from, err := r.since(since)
+	from, err := r.instant("--since", since)
 	if err != nil {
 		return err
 	}
 	addSome(query, "from", from)
-	to, err := r.since(until)
+	to, err := r.instant("--until", until)
 	if err != nil {
 		return err
 	}
