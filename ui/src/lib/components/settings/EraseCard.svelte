@@ -14,12 +14,13 @@
 	let { current }: { current: Project } = $props();
 
 	let userID = $state('');
+	const target = $derived(userID.trim());
 
 	async function erase(confirm?: string): Promise<DryRun | string> {
-		const answer = await api.eraseUserData(current.id, userID.trim(), confirm);
+		const answer = await api.eraseUserData(current.id, target, confirm);
 		if ('dry_run' in answer && answer.dry_run) return answer as DryRun;
 		const deleted = (answer as { deleted: Record<string, number> }).deleted;
-		return `Erased ${deleted.traces ?? 0} traces belonging to ${userID.trim()}.`;
+		return `Erased ${deleted.traces ?? 0} traces belonging to ${target}.`;
 	}
 </script>
 
@@ -35,6 +36,8 @@
 		echoLabel="user id"
 		previewLabel="Show what would go"
 		executeLabel="Erase this user's data"
+		subject={target}
+		ready={target !== ''}
 		preview={() => erase()}
 		execute={(confirm) => erase(confirm) as Promise<string>}
 	>

@@ -248,6 +248,7 @@
 					echoLabel="project name"
 					previewLabel="Show what it holds"
 					executeLabel="Delete the project"
+					subject={target.id}
 					preview={() => remove(target)}
 					execute={(confirm) => remove(target, confirm) as Promise<string>}
 					ondone={() => (deleting = null)}

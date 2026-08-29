@@ -34,6 +34,16 @@
 		preview,
 		/** The real thing, with the echo the server named. Returns what to say. */
 		execute,
+		/**
+		 * What the preview is about — the request body, the id being erased,
+		 * the row being deleted. A dry run describes one particular change,
+		 * but the echo the server asks for names the project, so nothing on
+		 * the wire ties the answer to the question. Change this and the plan
+		 * on screen is dropped: what gets confirmed is what was shown.
+		 */
+		subject,
+		/** Whether there is enough here to ask the server about yet. */
+		ready = true,
 		/** Extra controls the card needs before it can preview anything. */
 		children,
 		ondone
@@ -45,20 +55,31 @@
 		executeLabel: string;
 		preview: () => Promise<DryRun | string>;
 		execute: (confirm: string) => Promise<string>;
+		subject?: unknown;
+		ready?: boolean;
 		children?: Snippet;
 		ondone?: () => void;
 	} = $props();
 
 	let plan = $state.raw<DryRun | null>(null);
+	/** The subject the plan on hand actually describes. */
+	let planned = $state.raw<string | null>(null);
 	let echo = $state('');
 	let busy = $state(false);
 	let failure = $state<string | null>(null);
 	let done = $state<string | null>(null);
 
 	const id = $props.id();
+	const fingerprint = $derived(JSON.stringify(subject ?? null));
+	/**
+	 * The plan, but only while it still describes what is on screen. Editing
+	 * the controls above puts the card back to the preview button, because a
+	 * count from before the edit is a count for a different question.
+	 */
+	const showing = $derived(fingerprint === planned ? plan : null);
 	/** The button opens only on an exact echo — the server checks it again. */
-	const matches = $derived(plan !== null && echo === plan.confirm);
-	const rows = $derived(Object.entries(plan?.would_delete ?? {}));
+	const matches = $derived(showing !== null && echo === showing.confirm);
+	const rows = $derived(Object.entries(showing?.would_delete ?? {}));
 	/**
 	 * Whether the answer is "nothing". A column of zeros is technically the
 	 * same information and reads as a threat; the sentence reads as the
@@ -72,6 +93,9 @@
 		done = null;
 		try {
 			if (step === 'preview') {
+				// Read before the request, not after: an edit made while it is
+				// in flight makes the answer stale the moment it lands.
+				const asked = fingerprint;
 				const answer = await preview();
 				if (typeof answer === 'string') {
 					// Nothing to confirm: the server did it, because there was
@@ -81,11 +105,13 @@
 					ondone?.();
 				} else {
 					plan = answer;
+					planned = asked;
 				}
 				echo = '';
 			} else {
 				done = await execute(echo);
 				plan = null;
+				planned = null;
 				echo = '';
 				ondone?.();
 			}
@@ -101,7 +127,7 @@
 
 <!-- The card turns red when the server says something would be destroyed, and
      not before: a border that is always alarming stops meaning anything. -->
-<div class={['bg-canvas rounded-lg border p-3', plan ? 'border-danger' : 'border-border']}>
+<div class={['bg-canvas rounded-lg border p-3', showing ? 'border-danger' : 'border-border']}>
 	<h3 class="font-medium">{title}</h3>
 	<p class="text-muted mt-1 text-sm">{description}</p>
 
@@ -120,8 +146,8 @@
 		<p role="status" class="text-ok mt-3 text-sm">{done}</p>
 	{/if}
 
-	{#if plan === null}
-		<Button class="mt-3" onclick={() => run('preview')} busy={busy}>
+	{#if showing === null}
+		<Button class="mt-3" onclick={() => run('preview')} busy={busy} disabled={!ready}>
 			{#if busy}<LoaderCircle class="size-4 animate-spin" />{/if}
 			{previewLabel}
 		</Button>
@@ -140,18 +166,18 @@
 					{/each}
 				</dl>
 			{/if}
-			{#if plan.oldest}
+			{#if showing.oldest}
 				<p class="text-muted mt-1.5 text-sm">
-					Reaching back to {timestamp(plan.oldest)}.
+					Reaching back to {timestamp(showing.oldest)}.
 				</p>
 			{/if}
-			{#if plan.note}
-				<p class="text-muted mt-1.5 text-sm">{plan.note}</p>
+			{#if showing.note}
+				<p class="text-muted mt-1.5 text-sm">{showing.note}</p>
 			{/if}
 		</div>
 
 		<label for="{id}-echo" class="mt-3 mb-1.5 block text-sm font-medium">
-			Type the {echoLabel} to confirm: <code class="font-mono">{plan.confirm}</code>
+			Type the {echoLabel} to confirm: <code class="font-mono">{showing.confirm}</code>
 		</label>
 		<div class="flex flex-wrap gap-1.5">
 			<input
@@ -175,7 +201,7 @@
 				{#if busy}<LoaderCircle class="size-4 animate-spin" />{/if}
 				{executeLabel}
 			</Button>
-			<Button onclick={() => ((plan = null), (echo = ''))}>Cancel</Button>
+			<Button onclick={() => ((plan = null), (planned = null), (echo = ''))}>Cancel</Button>
 		</div>
 		<p id="{id}-hint" class="text-subtle mt-1 text-xs">
 			This cannot be undone from here.

@@ -110,6 +110,7 @@
 			echoLabel="project name"
 			previewLabel="Save"
 			executeLabel="Shorten and delete"
+			subject={body}
 			preview={() => send()}
 			execute={(confirm) => send(confirm) as Promise<string>}
 		/>

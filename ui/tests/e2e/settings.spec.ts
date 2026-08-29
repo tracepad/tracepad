@@ -54,6 +54,25 @@ test('shortening retention previews what it would delete, then asks for the name
 	expect(((await stored.json()) as { retention_days: number }).retention_days).toBe(3);
 });
 
+test('editing the window after a preview takes the preview away', async ({ page }) => {
+	const own = await createProject('repreview');
+	await signInAs(page, own.key);
+
+	await page.getByLabel('Traces, observations and scores').selectOption('Keep for');
+	await page.getByLabel('Days of retention').fill('30');
+	await page.getByRole('button', { name: 'Save', exact: true }).click();
+	await expect(page.getByText('This would delete')).toBeVisible();
+
+	// The echo the server asks for is the project's name, so it cannot tell one
+	// window from another. Confirming here has to mean confirming the numbers
+	// on screen, which means the numbers have to go when the question changes.
+	await page.getByLabel('Days of retention').fill('1');
+
+	await expect(page.getByText('This would delete')).toBeHidden();
+	await expect(page.getByRole('textbox', { name: /Type the project name/ })).toBeHidden();
+	await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeVisible();
+});
+
 test('a minted key is shown once, and can then be revoked', async ({ page }) => {
 	const own = await createProject('keys');
 	await signInAs(page, own.key);

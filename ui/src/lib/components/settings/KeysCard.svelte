@@ -138,6 +138,7 @@
 				echoLabel="project name"
 				previewLabel="Revoke"
 				executeLabel="Revoke the last key"
+				subject={publicKey}
 				preview={() => revoke(publicKey)}
 				execute={(confirm) => revoke(publicKey, confirm) as Promise<string>}
 				ondone={() => (revoking = null)}

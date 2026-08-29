@@ -30,8 +30,8 @@ function mount(over: Partial<Parameters<typeof ConfirmCard>[1]> = {}) {
 		execute,
 		...over
 	};
-	render(ConfirmCard, props as never);
-	return { execute, user: userEvent.setup() };
+	const { rerender } = render(ConfirmCard, props as never);
+	return { execute, rerender, props, user: userEvent.setup() };
 }
 
 describe('the confirm card', () => {
@@ -86,6 +86,28 @@ describe('the confirm card', () => {
 		expect(await screen.findByRole('alert')).toHaveTextContent(
 			'confirm must be the project name'
 		);
+	});
+
+	it('drops a plan once it stops describing what is on screen', async () => {
+		// The hole this closes: the echo the server asks for names the project,
+		// not the change, so a plan left standing across an edit would let
+		// "delete 412 traces" be confirmed into a window that deletes far more.
+		const { rerender, props, user } = mount({ subject: { retention_days: 30 } });
+
+		await user.click(screen.getByRole('button', { name: 'Preview' }));
+		expect(await screen.findByRole('textbox')).toBeInTheDocument();
+
+		await rerender({ ...props, subject: { retention_days: 1 } } as never);
+
+		// Back to the preview button: this change has not been priced yet.
+		expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+		expect(screen.getByRole('button', { name: 'Preview' })).toBeInTheDocument();
+	});
+
+	it('will not ask the server about a card that has nothing in it yet', async () => {
+		mount({ ready: false });
+
+		expect(screen.getByRole('button', { name: 'Preview' })).toBeDisabled();
 	});
 
 	it('says so when there was nothing to confirm', async () => {
