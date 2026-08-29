@@ -288,7 +288,13 @@ class Api {
 				admin.clear();
 				throw new ApiError(401, 'the server did not accept that admin token');
 			}
+			// The session is over, so both credentials go — the same reason
+			// `signOut` clears both. A key that stops working drops whoever
+			// was here back to the login form, and the next person to sign in
+			// on this browser must not find the management plane already
+			// unlocked behind it.
 			auth.reject();
+			admin.clear();
 			throw new ApiError(401, 'the key was rejected — sign in again');
 		}
 		throw new ApiError(response.status, await message(response));

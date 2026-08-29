@@ -159,6 +159,20 @@ describe('the management plane', () => {
 		expect(goto).not.toHaveBeenCalled();
 	});
 
+	it('leaves with the project key when that key is rejected', async () => {
+		const { api, auth, admin } = await fresh();
+		spyFetch({ error: 'unauthorized' }, 401);
+
+		await expect(api.listTraces({})).rejects.toThrow('sign in again');
+
+		// The session ended, so both credentials did. Leaving the token behind
+		// would hand the management plane to whoever signs in next on this
+		// browser — `admin.restore()` reads it back on the following load.
+		expect(auth.key).toBe(null);
+		expect(admin.unlocked).toBe(false);
+		expect(window.localStorage.getItem('tracepad.admin')).toBe(null);
+	});
+
 	it('probes a candidate token without storing it', async () => {
 		const { api, admin } = await fresh();
 		admin.clear();

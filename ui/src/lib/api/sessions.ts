@@ -40,8 +40,3 @@ export function sessionSearch(filters: SessionFilters): string {
 	const encoded = params.toString();
 	return encoded ? `?${encoded}` : '';
 }
-
-/** How many filters are narrowing the listing right now. */
-export function sessionFilterCount(filters: SessionFilters): number {
-	return SESSION_FILTERS.filter((name) => Boolean(filters[name])).length;
-}

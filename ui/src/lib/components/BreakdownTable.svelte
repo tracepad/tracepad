@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { BreakdownRow } from '$lib/api/stats';
-	import { ABSENT, cost, count } from '$lib/format';
+	import { cost, count } from '$lib/format';
 
 	// The categorical half of Stats (spec 007 #6): a table with proportion
 	// bars, not a second chart library. Model names get long, and a table row
@@ -64,9 +64,7 @@
 											class="{cell.tint} absolute inset-y-0 left-0 rounded-sm opacity-20"
 											style:width="{Math.round(cell.share * 100)}%"
 										></div>
-										<span class="relative tabular-nums">
-											{cell.text === ABSENT ? ABSENT : cell.text}
-										</span>
+										<span class="relative tabular-nums">{cell.text}</span>
 									</div>
 								</td>
 							{/each}

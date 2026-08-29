@@ -1,12 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import {
-	SESSION_FILTERS,
-	readSessionFilters,
-	sessionFilterCount,
-	sessionSearch
-} from './sessions';
+import { SESSION_FILTERS, readSessionFilters, sessionSearch } from './sessions';
 
 /**
  * The same parity idea the trace filters are held to, pointed at the endpoint
@@ -61,8 +56,4 @@ describe('filters in the URL', () => {
 		expect(readSessionFilters(new URLSearchParams('environment='))).toEqual({});
 	});
 
-	it('counts what is narrowing the listing', () => {
-		expect(sessionFilterCount({})).toBe(0);
-		expect(sessionFilterCount({ environment: 'prod', from: '2026-09-01T00:00:00Z' })).toBe(2);
-	});
 });

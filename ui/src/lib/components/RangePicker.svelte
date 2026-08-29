@@ -25,11 +25,14 @@
 	let { range, onchange }: { range: Range; onchange: (next: Range) => void } = $props();
 
 	const zone = getLocalTimeZone();
-	// Read once per mount rather than per render: a clock that ticked inside a
-	// derived expression would relabel the trigger while somebody reads it.
-	const now = new Date();
 
-	const preset = $derived(matchPreset(range, now));
+	// The clock is read when the window changes, not when the page was opened.
+	// `new Date()` is not reactive, so this recomputes on a new `range` and
+	// never on its own — the trigger cannot relabel itself under a reader, and
+	// a preset pressed on a page that has been open for an hour still matches
+	// the preset that set it. The two clocks have to agree: the buttons resolve
+	// `from` against the live one, and `matchPreset` allows a minute either way.
+	const preset = $derived(matchPreset(range, new Date()));
 	const label = $derived(
 		preset
 			? PRESETS.find((candidate) => candidate.key === preset)!.label

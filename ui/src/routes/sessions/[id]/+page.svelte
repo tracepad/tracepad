@@ -25,6 +25,12 @@
 	let loading = $state(true);
 	let loadingMore = $state(false);
 	let failure = $state<string | null>(null);
+	/**
+	 * A page that failed to arrive, kept apart from the one that failed to
+	 * load: the session is on screen and readable, and replacing it with an
+	 * error line would take away the button needed to try again.
+	 */
+	let moreFailure = $state<string | null>(null);
 
 	let query: AbortController | null = null;
 
@@ -40,6 +46,7 @@
 		loading = true;
 		loadingMore = false;
 		failure = null;
+		moreFailure = null;
 		try {
 			const answer = await api.getSession(sessionID, { limit: PAGE_SIZE }, signal);
 			session = answer;
@@ -60,6 +67,7 @@
 		if (!cursor || loadingMore || !controller) return;
 		const { signal } = controller;
 		loadingMore = true;
+		moreFailure = null;
 		try {
 			const answer = await api.getSession(id, { limit: PAGE_SIZE, cursor }, signal);
 			if (signal.aborted) return;
@@ -67,7 +75,7 @@
 			cursor = answer.next_cursor;
 		} catch (cause) {
 			if (signal.aborted) return;
-			failure = cause instanceof ApiError ? cause.message : 'Failed to read the session.';
+			moreFailure = cause instanceof ApiError ? cause.message : 'Failed to read the next page.';
 		} finally {
 			if (!signal.aborted) loadingMore = false;
 		}
@@ -124,7 +132,16 @@
 
 	{#if traces.length > 0}
 		<TraceTable rows={traces} />
-		<div class="border-border flex shrink-0 items-center justify-center border-t px-4 py-2">
+		<div
+			class="border-border flex shrink-0 flex-col items-center justify-center gap-2 border-t
+				px-4 py-2"
+		>
+			{#if moreFailure}
+				<p role="alert" class="text-danger flex items-center gap-2 text-sm">
+					<TriangleAlert class="size-4 shrink-0" />
+					{moreFailure}
+				</p>
+			{/if}
 			{#if cursor}
 				<Button onclick={loadMore} busy={loadingMore}>
 					{#if loadingMore}

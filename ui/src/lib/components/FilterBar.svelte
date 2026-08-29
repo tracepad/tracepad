@@ -88,10 +88,14 @@
 		open = false;
 	}
 
+	// Clears what this popover owns, and only that. The window is on the bar in
+	// plain sight, with its own control and its own way to be cleared; a button
+	// in here that silently reset it would undo something nobody pointed at.
 	function clearAll() {
 		draft = {};
 		tagsText = '';
-		onchange({});
+		const { from, to } = filters;
+		onchange(prune({ from, to }));
 		open = false;
 	}
 
