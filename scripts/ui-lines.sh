@@ -42,8 +42,11 @@ sources() {
 		grep -v -e '^ui/src/lib/api/schema.d.ts$' -e '^ui/package-lock.json$' || true
 }
 
-# Split in two: the application, and the tests over it — unit tests beside what
-# they test, the Playwright suite, and the harness both need.
+# Split in two by what a file *is*, not by what it is for: the test half is the
+# test sources — unit tests beside what they test, the end-to-end specs, and the
+# harness both need. The config that shapes the build stays with the
+# application, `playwright.config.ts` beside `vite.config.ts`, because a tool's
+# settings are read by whoever changes the tool and not by whoever reads a test.
 app() { sources | grep -v -e '\.test\.ts$' -e '^ui/tests/' -e '^ui/src/tests/' || true; }
 tests() { sources | grep -e '\.test\.ts$' -e '^ui/tests/' -e '^ui/src/tests/' || true; }
 
