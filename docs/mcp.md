@@ -84,6 +84,7 @@ tracepad is a later question.
 | `get_trace` | `GET /api/v1/traces/{id}` | Reading one run whole |
 | `get_last_trace` | `GET /api/v1/traces/last` | "Why did the last run fail" |
 | `get_observation_io` | `GET /api/v1/observations/{id}/io` | Following a truncation marker |
+| `list_sessions` | `GET /api/v1/sessions` | Finding conversations by filter |
 | `get_session` | `GET /api/v1/sessions/{id}` | Summarizing a conversation |
 | `get_prompt` | `GET /api/v1/prompts/{name}` | "What prompt is in production" |
 | `list_scores` | `GET /api/v1/scores` | Reading eval results |

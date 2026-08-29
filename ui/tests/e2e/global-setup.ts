@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { PORT, STATE, type State } from './harness';
+import { ADMIN_TOKEN, PORT, STATE, type State } from './harness';
 
 // Boots the real binary on a temp database and fills it from the synthetic
 // OTLP corpus in `testdata/` (spec 006, Testing). Nothing here is mocked: the
@@ -19,6 +19,9 @@ export default async function boot() {
 		env: {
 			...process.env,
 			TRACEPAD_DATA_DIR: dataDir,
+			// The management-plane credential (spec 005 #11), which the
+			// Settings screen's Administration section is entered with.
+			TRACEPAD_ADMIN_TOKEN: ADMIN_TOKEN,
 			// Small enough that the corpus's largest payload meets it, which is
 			// what puts a truncation marker on the screen to click.
 			TRACEPAD_RESPONSE_BUDGET_BYTES: '4096'
@@ -37,7 +40,7 @@ export default async function boot() {
 		if (!key) throw new Error(`no key in the pre-authed URL: ${preAuthed}`);
 
 		const baseURL = `http://127.0.0.1:${PORT}`;
-		await waitForHealth(baseURL);
+		await waitForHealth(baseURL, server);
 		await ingest(baseURL, key);
 
 		const carried: State = {
@@ -88,8 +91,18 @@ function firstRunURL(server: ChildProcess): Promise<string> {
 	});
 }
 
-async function waitForHealth(baseURL: string) {
+async function waitForHealth(baseURL: string, server: ChildProcess) {
 	for (let attempt = 0; attempt < 100; attempt++) {
+		// A server that has already exited is never going to answer, and
+		// something else may well be answering on its port — a leftover from an
+		// interrupted run, most often. Without this check the suite went on to
+		// ingest into a stranger's database and reported a bare `401`.
+		if (server.exitCode !== null) {
+			throw new Error(
+				`the server exited with ${server.exitCode} before becoming healthy; ` +
+					`is something already listening on ${PORT}?`
+			);
+		}
 		try {
 			if ((await fetch(`${baseURL}/health`)).ok) return;
 		} catch {

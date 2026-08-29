@@ -1,4 +1,5 @@
 import { redirect } from '@sveltejs/kit';
+import { admin } from '$lib/admin.svelte';
 import { auth, LOGIN_ROUTE } from '$lib/auth.svelte';
 import { theme } from '$lib/theme.svelte';
 import type { LayoutLoad } from './$types';
@@ -23,6 +24,9 @@ export const load: LayoutLoad = ({ url }) => {
 		// count as being signed in, or the link the server printed would
 		// bounce off this guard.
 		auth.restore();
+		// The second credential, restored beside the first — the Settings
+		// screen should not ask for it again on every reload (spec 007 #3).
+		admin.restore();
 		theme.restore();
 	}
 	if (!auth.authenticated && url.pathname !== LOGIN_ROUTE) {

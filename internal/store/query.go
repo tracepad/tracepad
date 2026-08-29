@@ -178,6 +178,109 @@ func (s *Store) Session(projectID, id string) (*SessionRow, error) {
 	return &row, nil
 }
 
+// SessionFilter narrows the session listing (spec 007 #2). The zero value
+// lists every session of a project, most recently active first.
+type SessionFilter struct {
+	// From and To bound the *trace* timestamp, half-open like the trace
+	// listing: a session appears when at least one of its traces falls in
+	// the window, and its aggregates then describe those traces (spec 007
+	// #10).
+	From        *int64
+	To          *int64
+	Environment string
+	UserID      string
+	// Limit caps the rows returned; the caller asks for one more than the
+	// page size to learn whether another page exists.
+	Limit int
+	// After continues a previous page. Nil starts at the newest session.
+	After *SessionCursor
+}
+
+// SessionCursor is the keyset of the last row of a page — the pair the listing
+// sorts by, exactly as TraceCursor is for traces (spec 004 #4).
+type SessionCursor struct {
+	LastSeen int64
+	ID       string
+}
+
+// sessionQuery builds the listing statement and its arguments. A function of
+// its own so that a test can hand the exact shipped SQL to EXPLAIN QUERY PLAN
+// and assert that the grouping rides `idx_traces_session` rather than sorting
+// the project's whole trace table (spec 003 #25's method).
+//
+// Sessions are aggregated from traces on every read rather than maintained at
+// ingest (spec 007 #2): a session is a grouping of traces, not a stored
+// entity, and a second source of truth is what a rollup table would be.
+func sessionQuery(projectID string, filter SessionFilter) (string, []any) {
+	// A trace that named no session is not a session of one (spec 007 #2).
+	where := []string{"project_id = ?", "session_id IS NOT NULL"}
+	args := []any{projectID}
+	add := func(clause string, values ...any) {
+		where = append(where, clause)
+		args = append(args, values...)
+	}
+	if filter.From != nil {
+		add("timestamp >= ?", *filter.From)
+	}
+	if filter.To != nil {
+		add("timestamp < ?", *filter.To)
+	}
+	if filter.Environment != "" {
+		add("environment = ?", filter.Environment)
+	}
+	if filter.UserID != "" {
+		add("user_id = ?", filter.UserID)
+	}
+
+	// The keyset is a HAVING rather than a WHERE because half of it is an
+	// aggregate: `last_seen` exists only once the group is formed. The row
+	// value keeps it one comparison, as in the trace listing.
+	having := ""
+	if filter.After != nil {
+		having = " HAVING (MAX(timestamp), session_id) < (?, ?)"
+		args = append(args, filter.After.LastSeen, filter.After.ID)
+	}
+	args = append(args, filter.Limit)
+	return `SELECT session_id, COUNT(*), SUM(total_cost), SUM(error_count > 0),
+	               MIN(timestamp), MAX(timestamp)
+	 FROM traces WHERE ` + strings.Join(where, " AND ") + `
+	 GROUP BY session_id` + having + `
+	 ORDER BY MAX(timestamp) DESC, session_id DESC LIMIT ?`, args
+}
+
+// Sessions lists a project's sessions, most recently active first.
+func (s *Store) Sessions(projectID string, filter SessionFilter) ([]*SessionRow, error) {
+	query, args := sessionQuery(projectID, filter)
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list sessions: %w", err)
+	}
+	defer rows.Close()
+
+	var out []*SessionRow
+	for rows.Next() {
+		var (
+			row        SessionRow
+			totalCost  sql.NullFloat64
+			errorCount sql.NullInt64
+			firstSeen  sql.NullInt64
+			lastSeen   sql.NullInt64
+		)
+		if err := rows.Scan(&row.ID, &row.TraceCount, &totalCost, &errorCount,
+			&firstSeen, &lastSeen); err != nil {
+			return nil, fmt.Errorf("scan session: %w", err)
+		}
+		// A cost nobody reported is absent, not zero (spec 002 #14).
+		if totalCost.Valid {
+			row.TotalCost = &totalCost.Float64
+		}
+		row.ErrorCount = int(errorCount.Int64)
+		row.FirstSeen, row.LastSeen = firstSeen.Int64, lastSeen.Int64
+		out = append(out, &row)
+	}
+	return out, rows.Err()
+}
+
 // ObservationTraces returns the ids of the traces in which a span id appears,
 // alphabetically. A span id is only unique within its trace (schema 0002), so
 // `/observations/{id}/io` needs this to tell "one obvious answer" from "the

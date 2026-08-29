@@ -75,3 +75,22 @@ describe('the project name in the sidebar', () => {
 		expect(calls).toHaveLength(0);
 	});
 });
+
+describe('re-reading the project after a change', () => {
+	it('never blanks the row on the way', async () => {
+		const { project, auth } = await fresh();
+		answers('before', 'after');
+		auth.adopt('tp-sk-one');
+		await project.load();
+
+		const inFlight = project.refresh();
+		// Settings renders its cards only when there is a project, so a row
+		// that disappeared for one tick would tear every card down and build
+		// it again — taking with it the confirmation the reader was reading.
+		expect(project.current?.name).toBe('before');
+
+		await inFlight;
+		expect(project.current?.name).toBe('after');
+	});
+});
+

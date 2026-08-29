@@ -198,6 +198,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List sessions by most recent activity, filtered and cursor-paginated
+         * @description Aggregated from the traces that named a session; there is no session table. `from`/`to` bound the *traces*, half-open like the trace listing, so a session appears when any of its traces falls in the window and its totals then describe those traces. To read one session's traces, follow with `GET /api/v1/sessions/{id}`.
+         */
+        get: operations["listSessions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sessions/{id}": {
         parameters: {
             query?: never;
@@ -540,6 +560,19 @@ export interface components {
             latency_ms?: number;
             error_count: number;
             observation_count: number;
+        };
+        /** @description The roll-up over the traces of one session. Every number counts traces, not observations: `error_count` is how many of the session's traces failed. */
+        SessionRow: {
+            /** @description The session id, as the application set it */
+            id: string;
+            trace_count: number;
+            error_count: number;
+            /** @description Summed over the traces that carried a cost; absent when none did */
+            total_cost?: number;
+            /** Format: date-time */
+            first_seen?: string;
+            /** Format: date-time */
+            last_seen?: string;
         };
         Trace: components["schemas"]["TraceRow"] & {
             metadata?: Record<string, never>;
@@ -1155,6 +1188,45 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+        };
+    };
+    listSessions: {
+        parameters: {
+            query?: {
+                /** @description RFC 3339, inclusive. The range is half-open, so walking a timeline never reports a row twice. */
+                from?: components["parameters"]["From"];
+                /** @description RFC 3339, exclusive */
+                to?: components["parameters"]["To"];
+                /** @description Exact match on the environment a trace ran in */
+                environment?: components["parameters"]["Environment"];
+                /** @description Exact match on the user id of a session's traces */
+                user_id?: string;
+                /** @description Out of range is a 400, not a silent clamp */
+                limit?: components["parameters"]["Limit"];
+                /** @description The opaque `next_cursor` of the previous page */
+                cursor?: components["parameters"]["Cursor"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of sessions */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        sessions: components["schemas"]["SessionRow"][];
+                        /** @description Pass back as `?cursor=` for the next page; null on the last one */
+                        next_cursor: string | null;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
         };
     };
     getSession: {

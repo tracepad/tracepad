@@ -108,6 +108,21 @@ Raise `--limit`, or shorten `--interval`.
 
 In a pipe it prints one JSON row per line. Ctrl-C stops it.
 
+### `sessions ls`
+
+```sh
+tracepad sessions ls --since 24h --env production
+```
+
+One row per session, most recent activity first: last seen, id, how many
+traces, how many of those failed, cost and when the session started.
+
+Filters: `--since`, `--until`, `--env`, `--user`, `--limit`, `--cursor`.
+`--since` and `--until` bound the traces, so a session appears when any of
+its traces falls in the window and its totals then describe those traces.
+Paging works like `traces ls`: the last line prints the `--cursor` for the
+next page.
+
 ### `sessions show`
 
 ```sh
@@ -154,7 +169,9 @@ tracepad stats --group-by model
 ```
 
 `--since` takes Go durations (`1h`, `30m`, `168h`) or an RFC 3339 instant.
-There is no day unit — `7d` is a usage error, not a week.
+There is no day unit — `7d` is a usage error, not a week. `--until` closes the
+other end, in the same two spellings, so a duration there is also counted back
+from now: `--since 48h --until 24h` is the day before yesterday.
 
 The table's second column names what is being counted: grouping by hour, day
 or environment counts **traces**, grouping by model counts **observations**,

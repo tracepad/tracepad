@@ -20,13 +20,101 @@ func sortStrings(values []string) { slices.Sort(values) }
 
 func (r *run) sessions(ctx context.Context, args []string) error {
 	sub, rest := split(args)
-	if sub != "show" {
-		return usageErrorf("sessions takes show, got %q", sub)
+	switch sub {
+	case "ls":
+		return r.sessionsList(ctx, rest)
+	case "show":
+		return r.sessionsShow(ctx, rest)
 	}
+	return usageErrorf("sessions takes ls or show, got %q", sub)
+}
+
+// sessionsList is `GET /api/v1/sessions` and nothing more (#1): the flags are
+// the endpoint's own filters, and the cursor is walked the way `traces ls`
+// walks it.
+func (r *run) sessionsList(ctx context.Context, args []string) error {
+	var (
+		since       string
+		until       string
+		environment string
+		user        string
+		cursor      string
+		limit       int
+	)
+	fs := r.flags("sessions ls")
+	fs.StringVar(&since, "since", "", "")
+	fs.StringVar(&until, "until", "", "")
+	// `--env` rather than `--environment`, for the same reason `traces ls`
+	// spells it that way (spec 007 #11).
+	fs.StringVar(&environment, "env", "", "")
+	fs.StringVar(&user, "user", "", "")
+	fs.StringVar(&cursor, "cursor", "", "")
+	fs.IntVar(&limit, "limit", 0, "")
+	if _, err := r.parse(fs, args, 0); err != nil {
+		return err
+	}
+
+	query := url.Values{}
+	addSome(query, "environment", environment)
+	addSome(query, "user_id", user)
+	addSome(query, "cursor", cursor)
+	from, err := r.instant("--since", since)
+	if err != nil {
+		return err
+	}
+	addSome(query, "from", from)
+	to, err := r.instant("--until", until)
+	if err != nil {
+		return err
+	}
+	addSome(query, "to", to)
+	if err := addLimit(query, limit); err != nil {
+		return err
+	}
+
+	body, err := r.api.Get(ctx, "/api/v1/sessions", query)
+	if err != nil {
+		return err
+	}
+	if r.wantJSON() {
+		return r.emit(body)
+	}
+	listing, err := decode[struct {
+		Sessions []struct {
+			ID         string   `json:"id"`
+			TraceCount int      `json:"trace_count"`
+			ErrorCount int      `json:"error_count"`
+			TotalCost  *float64 `json:"total_cost"`
+			FirstSeen  string   `json:"first_seen"`
+			LastSeen   string   `json:"last_seen"`
+		} `json:"sessions"`
+		NextCursor *string `json:"next_cursor"`
+	}](body)
+	if err != nil {
+		return err
+	}
+	if len(listing.Sessions) == 0 {
+		fmt.Fprintln(r.opt.Stdout, "no sessions")
+		return nil
+	}
+	t := newTable(r.opt.Stdout, "LAST SEEN", "SESSION", "TRACES", "ERRORS", "COST", "FIRST SEEN")
+	for _, session := range listing.Sessions {
+		t.row(shortTime(session.LastSeen), session.ID,
+			strconv.Itoa(session.TraceCount), strconv.Itoa(session.ErrorCount),
+			cost(session.TotalCost), shortTime(session.FirstSeen))
+	}
+	t.flush()
+	if listing.NextCursor != nil {
+		fmt.Fprintf(r.opt.Stdout, "\nmore: --cursor %s\n", *listing.NextCursor)
+	}
+	return nil
+}
+
+func (r *run) sessionsShow(ctx context.Context, args []string) error {
 	var limit int
 	fs := r.flags("sessions show")
 	fs.IntVar(&limit, "limit", 0, "")
-	positional, err := r.parse(fs, rest, 1)
+	positional, err := r.parse(fs, args, 1)
 	if err != nil {
 		return err
 	}
@@ -95,7 +183,7 @@ func (r *run) scores(ctx context.Context, args []string) error {
 	addSome(query, "session_id", session)
 	addSome(query, "name", name)
 	addSome(query, "data_type", dataType)
-	from, err := r.since(since)
+	from, err := r.instant("--since", since)
 	if err != nil {
 		return err
 	}
@@ -387,12 +475,12 @@ func (r *run) stats(ctx context.Context, args []string) error {
 	query := url.Values{}
 	addSome(query, "group_by", groupBy)
 	addSome(query, "environment", environment)
-	from, err := r.since(since)
+	from, err := r.instant("--since", since)
 	if err != nil {
 		return err
 	}
 	addSome(query, "from", from)
-	to, err := r.since(until)
+	to, err := r.instant("--until", until)
 	if err != nil {
 		return err
 	}

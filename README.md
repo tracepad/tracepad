@@ -78,11 +78,15 @@ a link that is already signed in:
   http://localhost:4318/#key=tp-sk-…
 ```
 
-A filterable trace list, and a trace as its observation tree with the
-payloads of whichever span you are looking at. It is a client of the read API
-like the CLI and the MCP server, it keeps what you are looking at in the URL,
-and it makes no request to any origin but your own server — fonts included.
-See [docs/ui.md](docs/ui.md).
+A filterable trace list; a trace as its observation tree with the payloads of
+whichever span you are looking at; sessions rolled up from the traces that
+named them; volume, cost, latency and errors over time; and settings, where a
+project's retention, keys and data live — with an administration section that
+unlocks with the admin token for project lifecycle.
+
+It is a client of the read API like the CLI and the MCP server, it keeps what
+you are looking at in the URL, and it makes no request to any origin but your
+own server — fonts and charts included. See [docs/ui.md](docs/ui.md).
 
 ## Forgetting
 

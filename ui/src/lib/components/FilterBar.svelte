@@ -3,17 +3,25 @@
 
 	type Field = {
 		label: string;
-		kind: 'text' | 'number' | 'instant' | 'status' | 'tags';
+		kind: 'text' | 'number' | 'status' | 'tags';
 		placeholder?: string;
 		hint?: string;
 	};
 
-	// `Record<FilterName, …>` is the second half of the parity promise: the
-	// list of filters is checked against `openapi.json` by a test, and a filter
-	// on that list with no control here does not compile.
-	const FIELDS: Record<FilterName, Field> = {
-		from: { label: 'From', kind: 'instant', hint: 'Inclusive' },
-		to: { label: 'To', kind: 'instant', hint: 'Exclusive' },
+	/**
+	 * The window is not a field in this popover: it is the shared range
+	 * control, which sits in the bar itself and means the same thing here as
+	 * it does on Stats (spec 007 #7).
+	 */
+	const RANGE: readonly FilterName[] = ['from', 'to'];
+
+	type FieldName = Exclude<FilterName, 'from' | 'to'>;
+
+	// `Record<FieldName, …>` is the second half of the parity promise: the list
+	// of filters is checked against `openapi.json` by a test, and a filter on
+	// that list with neither a control here nor a place in RANGE does not
+	// compile.
+	const FIELDS: Record<FieldName, Field> = {
 		environment: { label: 'Environment', kind: 'text', placeholder: 'production' },
 		user_id: { label: 'User', kind: 'text', placeholder: 'Exact user id' },
 		session_id: { label: 'Session', kind: 'text', placeholder: 'Exact session id' },
@@ -33,8 +41,9 @@
 	import ListFilter from '@lucide/svelte/icons/list-filter';
 	import X from '@lucide/svelte/icons/x';
 	import { Popover } from 'bits-ui';
-	import { TRACE_FILTERS, filterCount, type TraceFilters } from '$lib/api/traces';
+	import { TRACE_FILTERS, type TraceFilters } from '$lib/api/traces';
 	import Button from './Button.svelte';
+	import RangePicker from './RangePicker.svelte';
 
 	// The filter bar is a mirror of `GET /api/v1/traces` (Application
 	// contract). Everything lives in one popover rather than in a row of nine
@@ -44,6 +53,9 @@
 
 	let { filters, onchange }: { filters: TraceFilters; onchange: (next: TraceFilters) => void } =
 		$props();
+
+	/** The filters this popover owns: everything the range control does not. */
+	const FIELD_NAMES = TRACE_FILTERS.filter((name) => !RANGE.includes(name)) as FieldName[];
 
 	let open = $state(false);
 	// The popover edits a copy: a listing that re-queried on every keystroke
@@ -55,7 +67,14 @@
 	// to the end and makes editing a list in the middle impossible.
 	let tagsText = $state('');
 
-	const active = $derived(filterCount(filters));
+	// The badge counts what is behind the button, so the window — which is on
+	// the bar in plain sight — is not counted twice.
+	const active = $derived(
+		FIELD_NAMES.filter((name) => {
+			const value = filters[name];
+			return Array.isArray(value) ? value.length > 0 : Boolean(value);
+		}).length
+	);
 
 	function edit(opening: boolean) {
 		if (!opening) return;
@@ -69,23 +88,33 @@
 		open = false;
 	}
 
+	// Clears what this popover owns, and only that. The window is on the bar in
+	// plain sight, with its own control and its own way to be cleared; a button
+	// in here that silently reset it would undo something nobody pointed at.
 	function clearAll() {
 		draft = {};
 		tagsText = '';
-		onchange({});
+		const { from, to } = filters;
+		onchange(prune({ from, to }));
 		open = false;
 	}
 
-	function drop(name: FilterName) {
+	function drop(name: FieldName) {
 		const next = { ...filters };
 		delete next[name];
 		onchange(next);
 	}
 
+	/** The window, changed by the shared control, leaving the rest alone. */
+	function setRange(range: { from?: string; to?: string }) {
+		const { from: _from, to: _to, ...rest } = filters;
+		onchange({ ...rest, ...range });
+	}
+
 	// One cast, in one place: the fields are keyed by filter name, and the
 	// value type differs per key in a way the loop cannot narrow.
-	const text = (name: FilterName) => (draft[name] as string | undefined) ?? '';
-	const set = (name: FilterName, value: string) => {
+	const text = (name: FieldName) => (draft[name] as string | undefined) ?? '';
+	const set = (name: FieldName, value: string) => {
 		(draft as Record<string, unknown>)[name] = value;
 	};
 
@@ -105,19 +134,7 @@
 		return next;
 	}
 
-	/** `datetime-local` speaks local wall time; the API speaks RFC 3339 UTC. */
-	function toLocalInput(instant: string): string {
-		const at = new Date(instant);
-		if (!instant || Number.isNaN(at.getTime())) return '';
-		return new Date(at.getTime() - at.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
-	}
-
-	function fromLocalInput(value: string): string {
-		const at = new Date(value);
-		return value && !Number.isNaN(at.getTime()) ? at.toISOString() : '';
-	}
-
-	function chipLabel(name: FilterName): string {
+	function chipLabel(name: FieldName): string {
 		const value = filters[name];
 		return `${FIELDS[name].label}: ${Array.isArray(value) ? value.join(', ') : value}`;
 	}
@@ -127,6 +144,8 @@
 </script>
 
 <div class="flex min-w-0 items-center gap-1.5">
+	<RangePicker range={{ from: filters.from, to: filters.to }} onchange={setRange} />
+
 	<Popover.Root bind:open onOpenChange={edit}>
 		<Popover.Trigger>
 			{#snippet child({ props })}
@@ -150,7 +169,7 @@
 			>
 				<form onsubmit={apply}>
 					<div class="grid grid-cols-2 gap-x-2 gap-y-2.5">
-						{#each TRACE_FILTERS as name (name)}
+						{#each FIELD_NAMES as name (name)}
 							{@const field = FIELDS[name]}
 							<div class={field.kind === 'tags' ? 'col-span-2' : ''}>
 								<label for="filter-{name}" class="text-muted mb-1 block text-xs font-medium">
@@ -167,14 +186,6 @@
 										<option value="error">Error</option>
 										<option value="ok">OK</option>
 									</select>
-								{:else if field.kind === 'instant'}
-									<input
-										id="filter-{name}"
-										type="datetime-local"
-										value={toLocalInput(text(name))}
-										oninput={(event) => set(name, fromLocalInput(event.currentTarget.value))}
-										class={fieldClass}
-									/>
 								{:else if field.kind === 'tags'}
 									<input
 										id="filter-{name}"
@@ -214,7 +225,7 @@
 	</Popover.Root>
 
 	<ul class="flex min-w-0 items-center gap-1 overflow-x-auto">
-		{#each TRACE_FILTERS as name (name)}
+		{#each FIELD_NAMES as name (name)}
 			{#if filters[name] !== undefined}
 				<li>
 					<button
