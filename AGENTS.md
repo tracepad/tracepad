@@ -43,6 +43,13 @@ API. This file routes; it does not duplicate what specs and docs say.
   extracted so the page and the panel render the same component. `j`/`k`
   walk the rows; a session panel drills one level into a trace. No server
   change: it is a second arrangement of the same two GETs.
+- ✅ Spec 010 (shared listing) shipped: the page in force, the rows, both
+  cursors, the capped count and the effects that keep them true live once, in
+  `ui/src/lib/listing.svelte.ts`, under all three listings — Traces, Sessions
+  and a session's own trace table — with the panel's walk as a second layer
+  over the two that have one. No behaviour changed; the E2E suites are the
+  freeze's evidence. The interface's line budget now counts the application
+  and reports its tests beside it (#7).
 - ✅ Spec 005 (retention & admin) shipped: schema 0005, the hourly sweeper
   writing every chunk through the group-commit writer, the admin API under
   `/api/v1/projects` with a dry-run/confirm contract on every destructive
@@ -67,7 +74,8 @@ API. This file routes; it does not duplicate what specs and docs say.
 | Retention and the sweeper | `internal/store/sweep.go`, `docs/retention.md`, spec 005 — every chunk is a `WriteJob`, never a second write connection |
 | Admin API (projects, keys, retention, erasure) | `internal/server/admin.go`, `internal/store/admin.go`, `docs/admin.md`, spec 005 — destructive endpoints are a dry run until `?confirm=` echoes the name, checked inside the write transaction |
 | Attribute mapping | `internal/mapping/rules.go` is the table; `mapping.go` applies it |
-| Web interface | `ui/` (SvelteKit SPA), `internal/ui/` (the embed and the tagless stub), `internal/server/ui.go` (delivery and the SPA fallback), `docs/ui.md`, specs 006 to 009 — the API types in `ui/src/lib/api/schema.d.ts` are generated from `openapi.json` and the gate fails on drift |
+| Web interface | `ui/` (SvelteKit SPA), `internal/ui/` (the embed and the tagless stub), `internal/server/ui.go` (delivery and the SPA fallback), `docs/ui.md`, specs 006 to 010 — the API types in `ui/src/lib/api/schema.d.ts` are generated from `openapi.json` and the gate fails on drift |
+| A listing (rows, cursors, count, the bar, the panel's walk) | `ui/src/lib/listing.svelte.ts` and its tests, spec 010 — all three listings are one loader, so a listing defect is one defect. `$lib/page` and `$lib/peek` hold the pure part |
 | Configuration | `internal/config/`, spec 001 + spec 002 Configuration tables |
 
 Attribute semantics for the `langfuse.*` dialect are derived from Langfuse

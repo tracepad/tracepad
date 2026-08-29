@@ -1,6 +1,6 @@
 # Spec 010 — Shared Listing: one loader under three tables
 
-**Status:** 📝 DRAFT
+**Status:** ✅ SHIPPED
 **Sprint:** September 2026
 
 > Three listings page the same way — Traces, Sessions, and a session's own
