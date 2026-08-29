@@ -48,9 +48,10 @@
 		children: Snippet;
 	} = $props();
 
-	// The `md` breakpoint of the design system, from the other side: this is
-	// true exactly when the panel covers the viewport.
-	const narrow = new MediaQuery('(max-width: 47.99rem)');
+	// True exactly when the panel covers the viewport rather than sitting
+	// beside the listing (#5): "beside" needs room for both, and below `lg`
+	// there is none.
+	const narrow = new MediaQuery('(max-width: 63.99rem)');
 	const still = new MediaQuery('(prefers-reduced-motion: reduce)');
 	// Motion on a state change, inside the 100–200 ms band of spec 006 #6;
 	// reduced motion makes it an instant swap rather than a slower one (#11).
@@ -70,13 +71,33 @@
 	});
 
 	/**
-	 * Escape closes from anywhere, not only from inside the panel: with the
-	 * listing still live under it (#4), the last thing clicked is often a row
-	 * and focus is out there. `defaultPrevented` leaves the key to whatever
-	 * handled it first — a popover or a dialog closing itself.
+	 * Escape closes and `j`/`k` walk the rows, from anywhere rather than only
+	 * from inside the panel: with the listing still live under it (#4), the
+	 * last thing clicked is often a row and focus is out there.
+	 * `defaultPrevented` leaves the key to whatever handled it first — a
+	 * popover or a dialog closing itself.
 	 */
 	function onkeydown(event: KeyboardEvent) {
-		if (event.key === 'Escape' && !event.defaultPrevented) onclose();
+		if (event.defaultPrevented) return;
+		if (event.key === 'Escape') {
+			onclose();
+			return;
+		}
+		// A letter is only a shortcut where a letter is not being typed, and
+		// never when it is part of a browser or system combination.
+		if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+		if (typing(event.target)) return;
+		if (event.key === 'j' && hasNext) onnext?.();
+		else if (event.key === 'k' && hasPrev) onprev?.();
+		else return;
+		event.preventDefault();
+	}
+
+	function typing(target: EventTarget | null): boolean {
+		if (!(target instanceof HTMLElement)) return false;
+		return (
+			target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)
+		);
 	}
 
 	/** Below `md` the rest of the page is covered, so Tab does not go there. */
@@ -106,6 +127,18 @@
 		'text-muted hover:bg-raised hover:text-fg pointer-coarse:size-11 inline-flex size-7 ' +
 		'shrink-0 cursor-pointer items-center justify-center rounded-md transition-colors ' +
 		'duration-100 disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent';
+
+	// The two that carry a shortcut are wider than a square, because the key
+	// is drawn on them.
+	const walk =
+		'text-muted hover:bg-raised hover:text-fg pointer-coarse:h-11 pointer-coarse:px-3 ' +
+		'inline-flex h-7 shrink-0 cursor-pointer items-center gap-1 rounded-md px-1.5 ' +
+		'transition-colors duration-100 disabled:cursor-default disabled:opacity-40 ' +
+		'disabled:hover:bg-transparent';
+	/** The key as a key: a keycap, not a letter floating next to an icon. */
+	const cap =
+		'border-border bg-raised pointer-coarse:hidden rounded border px-1 font-mono text-[10px] ' +
+		'leading-4 uppercase';
 </script>
 
 <svelte:window {onkeydown} />
@@ -121,7 +154,7 @@
 	onkeydown={contain}
 	transition:fly={{ x: '100%', duration: slide, easing: cubicOut, opacity: 1 }}
 	class="border-border bg-canvas shadow-overlay fixed inset-y-0 right-0 z-40 flex w-full
-		flex-col border-l outline-none md:w-[min(60rem,72vw)]"
+		flex-col border-l outline-none lg:w-[clamp(34rem,calc(100vw-30rem),60rem)]"
 >
 	<header class="border-border flex h-12 shrink-0 items-center gap-2 border-b pr-2 pl-3">
 		{@render title()}
@@ -132,24 +165,31 @@
 		<div class="ml-auto flex items-center gap-0.5">
 			{#if onprev || onnext}
 				<!-- Disabled rather than hidden at the ends: a control that
-				     vanishes moves everything beside it (spec 008, a11y floor). -->
+				     vanishes moves everything beside it, and the dimmed key is
+				     how the panel says the listing has run out (spec 008 #13). -->
 				<button
 					type="button"
-					class={control}
+					class={walk}
 					disabled={!hasPrev}
 					aria-label="Previous row"
+					aria-keyshortcuts="k"
+					title="Previous row (k)"
 					onclick={() => onprev?.()}
 				>
 					<ChevronUp class="size-4" />
+					<kbd class={cap}>k</kbd>
 				</button>
 				<button
 					type="button"
-					class={control}
+					class={walk}
 					disabled={!hasNext}
 					aria-label="Next row"
+					aria-keyshortcuts="j"
+					title="Next row (j)"
 					onclick={() => onnext?.()}
 				>
 					<ChevronDown class="size-4" />
+					<kbd class={cap}>j</kbd>
 				</button>
 			{/if}
 			<a href={fullHref} class={control} aria-label={fullLabel} title={fullLabel}>

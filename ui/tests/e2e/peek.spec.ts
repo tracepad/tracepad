@@ -81,6 +81,38 @@ test('the next control moves to the next row on screen', async ({ page }) => {
 	await expect(panel.getByRole('button', { name: 'Previous row' })).toBeEnabled();
 });
 
+test('j and k walk the rows, and stop where the listing does', async ({ page }) => {
+	await signIn(page);
+	await rows(page).first().getByRole('link').click();
+	const panel = page.getByRole('dialog');
+
+	await page.keyboard.press('j');
+	await expect(rows(page).nth(1).getByRole('link')).toHaveAttribute('aria-current', 'true');
+	await page.keyboard.press('k');
+	await expect(rows(page).first().getByRole('link')).toHaveAttribute('aria-current', 'true');
+
+	// The top of the listing: the key is dimmed rather than gone, and pressing
+	// it again does nothing (spec 008 #13).
+	await expect(panel.getByRole('button', { name: 'Previous row' })).toBeDisabled();
+	await page.keyboard.press('k');
+	await expect(rows(page).first().getByRole('link')).toHaveAttribute('aria-current', 'true');
+});
+
+test('a letter typed into a filter stays a letter', async ({ page }, testInfo) => {
+	test.skip(testInfo.project.name !== 'desktop', 'the panel covers the filter bar on a phone');
+	await signIn(page);
+	await page.goto('/sessions');
+	await rows(page).first().getByRole('link').click();
+	const opened = page.url();
+
+	const field = page.getByPlaceholder('Environment');
+	await field.click();
+	await page.keyboard.type('jk');
+
+	await expect(field).toHaveValue('jk');
+	expect(page.url()).toBe(opened);
+});
+
 test('the panel expands to the page it points at, selection included', async ({ page }) => {
 	await signIn(page);
 	await rows(page).filter({ hasText: 'summarise-release-notes' }).getByRole('link').click();

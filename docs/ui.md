@@ -59,8 +59,10 @@ Reading a listing is a loop, and this is the loop:
 - **Click a row** to open it, and click another to swap the panel over to it;
   the row it is showing stays lit. **⌘/Ctrl-click** still opens the full page
   in a new tab, because the row is a real link to it.
-- **‹ ›** in the panel's header walk the rows the listing has loaded. They
-  stop at the ends rather than fetching the next cursor page.
+- **`k`** and **`j`**, or the two chevrons in the panel's header, walk the
+  rows the listing has loaded — the buttons carry the key they answer to, and
+  both dim when the listing has run out rather than fetching the next cursor
+  page. A letter typed into a filter field is a letter, not a shortcut.
 - **⤢** opens what the panel is showing as a full page — `/traces/{id}` or
   `/sessions/{id}`, the selected observation included. That is the link to
   send somebody.
