@@ -64,12 +64,20 @@ tracepad traces ls --env production --error --since 1h
 | `--limit` | 1–500, default 50. |
 | `--cursor` | Continue from a previous page. |
 | `--oldest` | Start at the far end of the listing instead of the newest page. |
+| `--newer` | Walk back towards newer traces from `--cursor`. |
 | `--total` | Also print how many traces match, counted up to 1000 (`847`, or `1000+`). |
 
-The table ends with the cursor for the next page when there is one.
+The table ends with the commands that continue the walk, in whichever
+direction there is one left:
+
+```
+older: --cursor MTc4ODIy…
+newer: --newer --cursor MTc4ODIx…
+```
 
 `--oldest` costs what any other page costs: pagination is a keyset, so "the
 end" is a direction to read the index in and not a count of rows to skip.
+It is also not a dead end — the `newer:` line is how you come back up.
 
 ### `traces show`
 
@@ -123,7 +131,7 @@ One row per session, most recent activity first: last seen, id, how many
 traces, how many of those failed, cost and when the session started.
 
 Filters: `--since`, `--until`, `--env`, `--user`, `--limit`, `--cursor`,
-`--oldest`, `--total`.
+`--oldest`, `--newer`, `--total`.
 `--since` and `--until` bound the traces, so a session appears when any of
 its traces falls in the window and its totals then describe those traces.
 Paging works like `traces ls`: the last line prints the `--cursor` for the

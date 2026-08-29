@@ -25,7 +25,7 @@
 	import SessionTable from '$lib/components/SessionTable.svelte';
 	import TraceDetail from '$lib/components/TraceDetail.svelte';
 	import { cost, count, duration, timestamp } from '$lib/format';
-	import { DEFAULT_PAGE_SIZE, pageSearch, readPage, type PageState } from '$lib/page';
+	import { DEFAULT_PAGE_SIZE, isFirstPage, pageSearch, readPage, type PageState } from '$lib/page';
 	import { neighbour, peekSearch, readPeek } from '$lib/peek';
 
 	// Sessions over `GET /api/v1/sessions`, the endpoint this spec added for
@@ -99,6 +99,8 @@
 			if (signal.aborted) return;
 			rows = [];
 			nextCursor = prevCursor = null;
+			// A page that never arrived cannot be landed on (PR #11 review).
+			rolling = null;
 			failure = describe(cause);
 		} finally {
 			if (!signal.aborted) loading = false;
@@ -236,6 +238,9 @@
 			<LoaderCircle class="size-3.5 animate-spin" />
 		{:else if total}
 			<span class="tabular-nums">{count(total.value)}{total.capped ? '+' : ''}</span>
+		{:else}
+			<!-- The count has not landed, or could not be taken (PR #11). -->
+			<span class="tabular-nums">{count(rows.length)}</span>
 		{/if}
 	{/snippet}
 	{#snippet actions()}
@@ -287,7 +292,9 @@
 	</p>
 {/if}
 
-{#if rows.length > 0}
+{#if rows.length > 0 || !isFirstPage(spot)}
+	<!-- The bar stays on an empty page that is not the first one, so a cursor
+	     whose rows are gone still has a way back (PR #11 review). -->
 	<SessionTable {rows} onopen={peek} selectedID={peekID} />
 	<PaginationBar
 		limit={spot.limit}
@@ -302,6 +309,11 @@
 		onlast={() => turn({ direction: 'prev' })}
 		noun="session"
 	/>
+	{#if rows.length === 0 && !loading}
+		<p class="text-subtle flex flex-1 items-start justify-center p-8 text-center">
+			Nothing on this page any more. Use « to go back to the newest.
+		</p>
+	{/if}
 {:else if !loading && !failure}
 	<div class="flex flex-1 items-start justify-center overflow-auto p-8">
 		<div class="max-w-lg">

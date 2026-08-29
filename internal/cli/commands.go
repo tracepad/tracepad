@@ -41,6 +41,7 @@ func (r *run) sessionsList(ctx context.Context, args []string) error {
 		cursor      string
 		limit       int
 		oldest      bool
+		newer       bool
 		total       bool
 	)
 	fs := r.flags("sessions ls")
@@ -53,6 +54,7 @@ func (r *run) sessionsList(ctx context.Context, args []string) error {
 	fs.StringVar(&cursor, "cursor", "", "")
 	fs.IntVar(&limit, "limit", 0, "")
 	fs.BoolVar(&oldest, "oldest", false, "")
+	fs.BoolVar(&newer, "newer", false, "")
 	fs.BoolVar(&total, "total", false, "")
 	if _, err := r.parse(fs, args, 0); err != nil {
 		return err
@@ -62,7 +64,7 @@ func (r *run) sessionsList(ctx context.Context, args []string) error {
 	addSome(query, "environment", environment)
 	addSome(query, "user_id", user)
 	addSome(query, "cursor", cursor)
-	if oldest {
+	if oldest || newer {
 		query.Set("direction", "prev")
 	}
 	if total {
@@ -99,6 +101,7 @@ func (r *run) sessionsList(ctx context.Context, args []string) error {
 			LastSeen   string   `json:"last_seen"`
 		} `json:"sessions"`
 		NextCursor  *string `json:"next_cursor"`
+		PrevCursor  *string `json:"prev_cursor"`
 		Total       *int    `json:"total"`
 		TotalCapped *bool   `json:"total_capped"`
 	}](body)
@@ -119,9 +122,7 @@ func (r *run) sessionsList(ctx context.Context, args []string) error {
 	if listing.Total != nil {
 		fmt.Fprintf(r.opt.Stdout, "\n%s matching\n", matchCount(*listing.Total, listing.TotalCapped))
 	}
-	if listing.NextCursor != nil {
-		fmt.Fprintf(r.opt.Stdout, "\nmore: --cursor %s\n", *listing.NextCursor)
-	}
+	walkOn(r, listing.NextCursor, listing.PrevCursor)
 	return nil
 }
 

@@ -76,7 +76,7 @@ func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sessions, prev, next := trimPage(sessions, limit, backward, raw != "",
+	sessions, prev, next := trimPage(sessions, limit, backward, raw,
 		func(row *store.SessionRow) string {
 			return encodeCursor(strconv.FormatInt(row.LastSeen, 10), row.ID)
 		})
@@ -215,7 +215,7 @@ func (s *Server) handleGetSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	traces, prev, next := trimPage(traces, limit, backward, raw != "",
+	traces, prev, next := trimPage(traces, limit, backward, raw,
 		func(row *store.TraceRow) string {
 			return encodeCursor(strconv.FormatInt(row.Timestamp, 10), row.ID)
 		})

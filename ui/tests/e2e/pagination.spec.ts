@@ -101,16 +101,20 @@ test('j on the last row of a page turns it and keeps reading', async ({ page }) 
 	await expect(rows(page).first().getByRole('link')).toHaveAttribute('aria-current', 'true');
 });
 
-test('live is paused off the newest page and says so', async ({ page }) => {
+test('live is paused off the newest page, and can still be switched off', async ({ page }) => {
 	await signIn(page);
 	await page.goto('/traces?limit=2&live=1');
 	const live = page.getByRole('button', { name: 'Live' });
-	await expect(live).toBeEnabled();
+	await expect(live).toHaveAttribute('title', /Re-read/);
 
 	await page.getByRole('button', { name: 'Next page' }).click();
-
-	await expect(live).toBeDisabled();
 	await expect(live).toHaveAttribute('title', /Paused/);
+
+	// Disabling the toggle here would disable the only control that can unset
+	// `live=1`, which the page turn carried along (PR #11 review).
+	await expect(live).toBeEnabled();
+	await live.click();
+	await expect(page).not.toHaveURL(/live=1/);
 });
 
 test('the sessions listing pages the same way', async ({ page }) => {

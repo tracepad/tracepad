@@ -25,7 +25,8 @@
 	 * keeps them apart and keeps the component identical in both of its
 	 * homes (spec 009 #10).
 	 */
-	let spot = $state.raw<PageState>({
+	let chosen = $state.raw<PageState & { session: string | null }>({
+		session: null,
 		limit: DEFAULT_PAGE_SIZE,
 		cursor: null,
 		direction: 'next'
@@ -50,6 +51,19 @@
 	let loading = $state(true);
 	let failure = $state<string | null>(null);
 
+	/**
+	 * The page in force. Derived rather than reset by an effect: a cursor
+	 * belongs to the session it was taken from, so one that names another
+	 * session is simply not the page — no write, no second render, and no
+	 * second request (PR #11 review found the reset effect firing a load with
+	 * the previous session's cursor before undoing itself).
+	 */
+	const spot = $derived<PageState>(
+		chosen.session === sessionID
+			? chosen
+			: { limit: chosen.limit, cursor: null, direction: 'next' }
+	);
+
 	$effect(() => {
 		// A different session starts at its newest page; the same session
 		// re-reads whenever the page moves.
@@ -58,15 +72,6 @@
 		const controller = new AbortController();
 		load(wanted, at, controller.signal);
 		return () => controller.abort();
-	});
-
-	$effect(() => {
-		// Landing on another session with the previous one's cursor would ask
-		// for a page of a listing that no longer exists.
-		sessionID;
-		untrack(() => {
-			spot = { ...spot, cursor: null, direction: 'next' };
-		});
 	});
 
 	async function load(wanted: string, at: PageState, signal: AbortSignal) {
@@ -94,7 +99,13 @@
 	}
 
 	function turn(to: Partial<PageState>) {
-		spot = { limit: spot.limit, cursor: null, direction: 'next', ...to };
+		chosen = {
+			session: sessionID,
+			limit: spot.limit,
+			cursor: null,
+			direction: 'next',
+			...to
+		};
 	}
 
 	/** The totals header, as label/value pairs so one loop renders them. */

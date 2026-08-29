@@ -197,6 +197,41 @@ func TestTracesListBothModes(t *testing.T) {
 	})
 }
 
+// TestWalkingBothWays: `--oldest` lands at the far end, and the listing has to
+// say how to come back — a jump with no way out is a dead end the docs would
+// be advertising (PR #11 review).
+func TestWalkingBothWays(t *testing.T) {
+	h := newHarness(t)
+	seedCorpus(t, h)
+	ctx := t.Context()
+
+	newest := h.run(ctx, true, "traces", "ls", "--limit", "1")
+	if !strings.Contains(newest.stdout, "older: --cursor ") {
+		t.Errorf("the newest page does not say how to go on:\n%s", newest.stdout)
+	}
+	if strings.Contains(newest.stdout, "newer:") {
+		t.Errorf("the newest page claims a page above it:\n%s", newest.stdout)
+	}
+
+	oldest := h.run(ctx, true, "traces", "ls", "--limit", "1", "--oldest")
+	if strings.Contains(oldest.stdout, "older:") {
+		t.Errorf("the oldest page claims a page below it:\n%s", oldest.stdout)
+	}
+	if !strings.Contains(oldest.stdout, "newer: --newer --cursor ") {
+		t.Errorf("the oldest page is a dead end:\n%s", oldest.stdout)
+	}
+
+	// And the way back is a command that runs.
+	fields := strings.Fields(oldest.stdout[strings.Index(oldest.stdout, "newer:"):])
+	back := h.run(ctx, true, "traces", "ls", "--limit", "1", fields[1], fields[2], fields[3])
+	if back.code != ExitOK {
+		t.Fatalf("walking back exited %d: %s", back.code, back.stderr)
+	}
+	if !strings.Contains(back.stdout, traceHex(2)) {
+		t.Errorf("walking back from the oldest page did not reach the newer trace:\n%s", back.stdout)
+	}
+}
+
 // TestCLIMatchesTheAPIByte checks the claim the whole design rests on: the CLI
 // answers with the API's bytes, not with its own rendering of them (#1).
 func TestCLIMatchesTheAPIByte(t *testing.T) {

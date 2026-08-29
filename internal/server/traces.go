@@ -104,7 +104,7 @@ func (s *Server) handleListTraces(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	traces, prev, next := trimPage(traces, limit, backward, raw != "",
+	traces, prev, next := trimPage(traces, limit, backward, raw,
 		func(row *store.TraceRow) string {
 			return encodeCursor(strconv.FormatInt(row.Timestamp, 10), row.ID)
 		})

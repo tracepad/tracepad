@@ -268,9 +268,10 @@ the other direction, because that is where the request came from.
 The two cursors are then the edges of what survives: `prev` the newest row on
 the page, `next` the oldest.
 */
-func trimPage[T any](rows []T, limit int, backward, fromCursor bool, key func(T) string) (
+func trimPage[T any](rows []T, limit int, backward bool, from string, key func(T) string) (
 	kept []T, prev *string, next *string,
 ) {
+	fromCursor := from != ""
 	more := len(rows) > limit
 	kept = rows
 	if more {
@@ -281,7 +282,18 @@ func trimPage[T any](rows []T, limit int, backward, fromCursor bool, key func(T)
 		}
 	}
 	if len(kept) == 0 {
-		return kept, nil, nil
+		// A page reached by a cursor and found empty — its rows swept by
+		// retention while somebody sat on it — still has a way back: the
+		// cursor it came from, read the other way, is the page before it.
+		// Answering with nothing at all would strand the caller on a URL
+		// whose only escape is editing it (PR #11 review).
+		if !fromCursor {
+			return kept, nil, nil
+		}
+		if backward {
+			return kept, nil, &from
+		}
+		return kept, &from, nil
 	}
 	hasPrev, hasNext := fromCursor, fromCursor
 	if backward {

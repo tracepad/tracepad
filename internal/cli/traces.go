@@ -92,6 +92,7 @@ func (r *run) tracesList(ctx context.Context, args []string) error {
 		cursor  string
 		limit   int
 		oldest  bool
+		newer   bool
 		total   bool
 	)
 	fs := r.flags("traces ls")
@@ -99,10 +100,12 @@ func (r *run) tracesList(ctx context.Context, args []string) error {
 	fs.StringVar(&fields, "fields", "", "")
 	fs.StringVar(&cursor, "cursor", "", "")
 	fs.IntVar(&limit, "limit", 0, "")
-	// The two the API grew in spec 009. `--oldest` is `direction=prev` with
-	// no cursor — the far end of the listing, which keyset pagination
-	// reaches for the price of any other page.
+	// The API's `direction=prev` under two names, because the two things a
+	// person does with it read differently: `--oldest` jumps to the far end
+	// (no cursor), `--newer` walks back up from one. Keyset reaches either
+	// for the price of any other page.
 	fs.BoolVar(&oldest, "oldest", false, "")
+	fs.BoolVar(&newer, "newer", false, "")
 	fs.BoolVar(&total, "total", false, "")
 	if _, err := r.parse(fs, args, 0); err != nil {
 		return err
@@ -114,7 +117,7 @@ func (r *run) tracesList(ctx context.Context, args []string) error {
 	}
 	addSome(query, "fields", fields)
 	addSome(query, "cursor", cursor)
-	if oldest {
+	if oldest || newer {
 		query.Set("direction", "prev")
 	}
 	if total {
@@ -134,6 +137,7 @@ func (r *run) tracesList(ctx context.Context, args []string) error {
 	listing, err := decode[struct {
 		Traces      []traceRow `json:"traces"`
 		NextCursor  *string    `json:"next_cursor"`
+		PrevCursor  *string    `json:"prev_cursor"`
 		Total       *int       `json:"total"`
 		TotalCapped *bool      `json:"total_capped"`
 	}](body)
@@ -144,10 +148,20 @@ func (r *run) tracesList(ctx context.Context, args []string) error {
 	if listing.Total != nil {
 		fmt.Fprintf(r.opt.Stdout, "\n%s matching\n", matchCount(*listing.Total, listing.TotalCapped))
 	}
-	if listing.NextCursor != nil {
-		fmt.Fprintf(r.opt.Stdout, "\nmore: --cursor %s\n", *listing.NextCursor)
-	}
+	walkOn(r, listing.NextCursor, listing.PrevCursor)
 	return nil
+}
+
+// walkOn prints the commands that continue the walk in either direction.
+// Both, because `--oldest` lands somewhere with no next page, and a listing
+// that says nothing there is a dead end (PR #11 review).
+func walkOn(r *run, next, prev *string) {
+	if next != nil {
+		fmt.Fprintf(r.opt.Stdout, "\nolder: --cursor %s\n", *next)
+	}
+	if prev != nil {
+		fmt.Fprintf(r.opt.Stdout, "newer: --newer --cursor %s\n", *prev)
+	}
 }
 
 // matchCount renders a capped count: the number, or the number and a plus

@@ -3,6 +3,7 @@ package server
 import (
 	"fmt"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/tracepad/tracepad/internal/model"
@@ -92,6 +93,47 @@ func TestBackAndForthLandsOnTheSameRows(t *testing.T) {
 	want, got := first.ids(), back.ids()
 	if fmt.Sprint(want) != fmt.Sprint(got) {
 		t.Errorf("came back to %v, want the page we left %v", got, want)
+	}
+}
+
+// TestAnEmptyCursoredPageKeepsAWayBack: the rows a cursor named can be gone
+// by the time somebody reloads — swept by retention while they sat on that
+// page. The answer is empty, but it is not a dead end: the cursor it came
+// from, read the other way, is the page before it (PR #11 review).
+func TestAnEmptyCursoredPageKeepsAWayBack(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	seedCorpus(t, h)
+
+	// A cursor below every row: what a reader is left holding when the rows
+	// it named have been swept out from under them. Built here rather than
+	// walked to, because the endpoint never hands out a cursor past its own
+	// last row — the situation only arises once the rows are gone.
+	dead := encodeCursor("1", strings.Repeat("0", 32))
+	beyond := readPage(t, h.get(t, "/api/v1/traces?limit=2&cursor="+dead))
+
+	if len(beyond.Traces) != 0 {
+		t.Fatalf("expected an empty page past the end, got %v", beyond.ids())
+	}
+	if beyond.PrevCursor == nil {
+		t.Fatal("an empty page reached by a cursor claims no way back")
+	}
+	if beyond.NextCursor != nil {
+		t.Error("an empty page claims a page after it")
+	}
+
+	// And going back from it lands on rows: the ones above the dead cursor.
+	back := readPage(t, h.get(t,
+		fmt.Sprintf("/api/v1/traces?limit=2&direction=prev&cursor=%s", *beyond.PrevCursor)))
+	if len(back.Traces) == 0 {
+		t.Error("the way back leads nowhere")
+	}
+
+	// An empty *first* page is empty in both directions: there is nothing on
+	// either side of nothing.
+	fresh := newHarness(t, nil, store.WriterOptions{})
+	blank := readPage(t, fresh.get(t, "/api/v1/traces"))
+	if blank.PrevCursor != nil || blank.NextCursor != nil {
+		t.Error("an empty listing claims pages around it")
 	}
 }
 

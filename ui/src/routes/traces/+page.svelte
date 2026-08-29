@@ -113,6 +113,10 @@
 			if (signal.aborted) return;
 			rows = [];
 			nextCursor = prevCursor = null;
+			// A page that never arrived cannot be landed on: leaving the
+			// intent set would have the *next* successful load open the panel
+			// on an unrelated row (PR #11 review).
+			rolling = null;
 			failure = describe(cause);
 		} finally {
 			if (!signal.aborted) loading = false;
@@ -141,13 +145,20 @@
 		if (!controller) return;
 		const { signal } = controller;
 		try {
-			const answer = await api.listTraces(filters, { limit: spot.limit }, signal);
+			// Counted on the way past: live streams new traces in, and a total
+			// taken when the filters last moved would sit there going stale
+			// for the life of the URL (PR #11 review). The count is capped, so
+			// asking for it here costs nothing a poll was not already paying.
+			const answer = await api.listTraces(filters, { limit: spot.limit, count: true }, signal);
 			if (signal.aborted) return;
 			// Replaced rather than merged: with a window anchored at "newest",
 			// the page just fetched *is* the window, and merging would grow it
 			// past the size the reader asked for (spec 009 #9).
 			rows = answer.traces;
 			nextCursor = answer.next_cursor;
+			if (answer.total !== undefined) {
+				total = { value: answer.total, capped: answer.total_capped ?? false };
+			}
 			liveFailure = null;
 		} catch (cause) {
 			if (signal.aborted) return;
@@ -244,16 +255,22 @@
 			<LoaderCircle class="size-3.5 animate-spin" />
 		{:else if total}
 			<span class="tabular-nums">{count(total.value)}{total.capped ? '+' : ''}</span>
+		{:else}
+			<!-- The count has not landed, or could not be taken: what is on
+			     screen is still a number, and an empty slot is not (PR #11). -->
+			<span class="tabular-nums">{count(rows.length)}</span>
 		{/if}
 	{/snippet}
 	{#snippet actions()}
+		<!-- Not disabled when paused: `live=1` survives a page turn, and
+		     disabling the toggle would be disabling the only control that can
+		     unset it (PR #11 review). It says paused and still switches off. -->
 		<Button
 			variant={live && newest ? 'primary' : 'default'}
 			onclick={() => navigate(filters, !live)}
 			aria-pressed={live}
-			disabled={live && !newest}
 			title={live && !newest
-				? 'Paused: live follows the newest page, and this is not it'
+				? 'Paused: live follows the newest page, and this is not it. Click to switch it off'
 				: `Re-read the newest page every ${POLL_MS / 1000} seconds`}
 		>
 			{#if live}<Pause class="size-4" />{:else}<Play class="size-4" />{/if}
@@ -276,7 +293,10 @@
 	</p>
 {/if}
 
-{#if rows.length > 0}
+{#if rows.length > 0 || !newest}
+	<!-- The bar stays on an empty page that is not the first one: a cursor
+	     whose rows are gone — swept by retention, say — would otherwise leave
+	     no way back to the listing but editing the URL (PR #11 review). -->
 	<TraceTable {rows} onopen={peek} selectedID={peekID} />
 	<PaginationBar
 		limit={spot.limit}
@@ -291,6 +311,11 @@
 		onlast={() => turn({ direction: 'prev' })}
 		noun="trace"
 	/>
+	{#if rows.length === 0 && !loading}
+		<p class="text-subtle flex flex-1 items-start justify-center p-8 text-center">
+			Nothing on this page any more. Use « to go back to the newest.
+		</p>
+	{/if}
 {:else if !loading && !failure}
 	<div class="flex flex-1 items-start justify-center overflow-auto p-8">
 		<div class="max-w-lg">
