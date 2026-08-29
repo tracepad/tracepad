@@ -114,10 +114,12 @@ func Run(ctx context.Context, opt Options) int {
 const Usage = `Client commands (they talk to a running server over HTTP):
   tracepad traces ls    [--env E] [--error] [--since 1h] [--until T] [--user U] [--session S]
                         [--name N] [--tag T] [--min-cost C] [--fields a,b] [--limit N]
+                        [--cursor C] [--oldest] [--newer] [--total]
   tracepad traces show  <trace-id> [--full]
   tracepad traces last  [--error] [--env E] [--since 1h] [--until T] [--full]
   tracepad tail         [--env E] [--error] [--interval 2s] [--limit N]
   tracepad sessions ls   [--since 1h] [--until T] [--env E] [--user U] [--limit N]
+                         [--cursor C] [--oldest] [--newer] [--total]
   tracepad sessions show <session-id> [--limit N]
   tracepad scores ls    [--trace ID] [--name N] [--session S] [--since 1h] [--limit N]
   tracepad prompts ls

@@ -9,7 +9,7 @@
 	import SessionDetail from '$lib/components/SessionDetail.svelte';
 	import TraceDetail from '$lib/components/TraceDetail.svelte';
 	import { cost, duration, timestamp } from '$lib/format';
-	import { neighbour, peekSearch, readPeek } from '$lib/peek';
+	import { anchor, neighbour, peekSearch, readPeek } from '$lib/peek';
 
 	// The full page of one session: the shell's header over the same body the
 	// peek panel shows (spec 008 #8). Its trace table is a listing like any
@@ -27,9 +27,15 @@
 	const selectedObs = $derived(page.url.searchParams.get('obs'));
 	let peeked = $state.raw<Trace | null>(null);
 
-	const ids = $derived(traces.map((row) => row.id));
-	const previous = $derived(neighbour(ids, peekID, -1));
-	const following = $derived(neighbour(ids, peekID, 1));
+	// By order, not by index: this table pages too (spec 009 #10), and a turn
+	// with the panel open leaves the peeked trace off the page.
+	const ordered = $derived(traces.map((row) => ({ id: row.id, key: row.timestamp ?? '' })));
+	const showing = $derived(
+		peeked?.id && peeked.timestamp ? { id: peeked.id, key: peeked.timestamp } : null
+	);
+	const position = $derived(anchor(ordered, peekID, showing));
+	const previous = $derived(neighbour(ordered, position, -1));
+	const following = $derived(neighbour(ordered, position, 1));
 
 	/** Opening pushes one entry; moving between rows replaces it (#6). */
 	function peek(traceID: string | null) {

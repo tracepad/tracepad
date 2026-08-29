@@ -197,6 +197,99 @@ func TestTracesListBothModes(t *testing.T) {
 	})
 }
 
+// TestWalkingBothWays: `--oldest` lands at the far end, and the listing has to
+// say how to come back — a jump with no way out is a dead end the docs would
+// be advertising (PR #11 review).
+func TestWalkingBothWays(t *testing.T) {
+	h := newHarness(t)
+	seedCorpus(t, h)
+	ctx := t.Context()
+
+	newest := h.run(ctx, true, "traces", "ls", "--limit", "1")
+	if !strings.Contains(newest.stdout, "older: --cursor ") {
+		t.Errorf("the newest page does not say how to go on:\n%s", newest.stdout)
+	}
+	if strings.Contains(newest.stdout, "newer:") {
+		t.Errorf("the newest page claims a page above it:\n%s", newest.stdout)
+	}
+
+	oldest := h.run(ctx, true, "traces", "ls", "--limit", "1", "--oldest")
+	if strings.Contains(oldest.stdout, "older:") {
+		t.Errorf("the oldest page claims a page below it:\n%s", oldest.stdout)
+	}
+	if !strings.Contains(oldest.stdout, "newer: --newer --cursor ") {
+		t.Errorf("the oldest page is a dead end:\n%s", oldest.stdout)
+	}
+
+	// Each flag means the far end or a step from a cursor, and the two
+	// combinations that would quietly mean the other one are refused.
+	for _, args := range [][]string{
+		{"traces", "ls", "--oldest", "--cursor", "whatever"},
+		{"traces", "ls", "--newer"},
+	} {
+		got := h.run(ctx, true, args...)
+		if got.code != ExitUsage {
+			t.Errorf("%v exited %d, want a usage error", args, got.code)
+		}
+	}
+
+	// And the way back is a command that runs.
+	fields := strings.Fields(oldest.stdout[strings.Index(oldest.stdout, "newer:"):])
+	back := h.run(ctx, true, "traces", "ls", "--limit", "1", fields[1], fields[2], fields[3])
+	if back.code != ExitOK {
+		t.Fatalf("walking back exited %d: %s", back.code, back.stderr)
+	}
+	if !strings.Contains(back.stdout, traceHex(2)) {
+		t.Errorf("walking back from the oldest page did not reach the newer trace:\n%s", back.stdout)
+	}
+}
+
+// TestAnEmptySessionPageSaysHowToLeave: `sessions ls` returned early on an
+// empty page, skipping both the count and the way back — the same dead end
+// `--oldest` had (PR #11, third review).
+//
+// The empty page has to be one a *cursor* led to, or there is no way back for
+// the command to print and the test proves nothing (PR #11, fourth review).
+func TestAnEmptySessionPageSaysHowToLeave(t *testing.T) {
+	h := newHarness(t)
+	seedCorpus(t, h)
+	ctx := t.Context()
+
+	counted := h.run(ctx, true, "sessions", "ls", "--env", "nowhere", "--total")
+	if counted.code != ExitOK {
+		t.Fatalf("exit = %d, stderr = %s", counted.code, counted.stderr)
+	}
+	if !strings.Contains(counted.stdout, "no sessions") {
+		t.Errorf("output does not say the page is empty:\n%s", counted.stdout)
+	}
+	if !strings.Contains(counted.stdout, "0 matching") {
+		t.Errorf("an empty page skipped the count it was asked for:\n%s", counted.stdout)
+	}
+
+	// Now the case the early return actually broke: a cursor, and past it a
+	// filter that matches nothing. A second session, so there is a cursor.
+	h.seed(t, &model.Trace{ID: traceHex(3), Name: "eval", SessionID: "s2",
+		Environment: "production"},
+		&model.Observation{TraceID: traceHex(3), ID: spanHex(3), Type: model.TypeSpan,
+			Level: model.LevelDefault, StartTime: seedBase - 7200*1000*ms,
+			EndTime: seedBase - 7200*1000*ms + 10*ms})
+
+	page := h.run(ctx, true, "sessions", "ls", "--limit", "1")
+	marker := strings.Index(page.stdout, "older: --cursor ")
+	if marker < 0 {
+		t.Fatalf("no cursor to walk from:\n%s", page.stdout)
+	}
+	cursor := strings.Fields(page.stdout[marker:])[2]
+
+	stranded := h.run(ctx, true, "sessions", "ls", "--cursor", cursor, "--env", "nowhere")
+	if stranded.code != ExitOK {
+		t.Fatalf("exit = %d, stderr = %s", stranded.code, stranded.stderr)
+	}
+	if !strings.Contains(stranded.stdout, "newer: --newer --cursor ") {
+		t.Errorf("an empty page reached by a cursor is a dead end:\n%s", stranded.stdout)
+	}
+}
+
 // TestCLIMatchesTheAPIByte checks the claim the whole design rests on: the CLI
 // answers with the API's bytes, not with its own rendering of them (#1).
 func TestCLIMatchesTheAPIByte(t *testing.T) {

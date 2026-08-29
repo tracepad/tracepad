@@ -15,7 +15,7 @@ function documentedFilters(): string[] {
 	const parameters = document.paths['/api/v1/sessions'].get.parameters as Array<
 		{ name: string } | { $ref: string }
 	>;
-	const plumbing = new Set(['limit', 'cursor']);
+	const plumbing = new Set(['limit', 'cursor', 'direction', 'count']);
 	return parameters
 		.map((parameter) => {
 			if ('name' in parameter) return parameter.name;

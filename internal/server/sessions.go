@@ -28,7 +28,8 @@ func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	known := append(append([]string{}, sessionListFilters...), "limit", "cursor")
+	known := append(append([]string{}, sessionListFilters...),
+		"limit", "cursor", "direction", "count")
 	values, err := queryParams(r, known...)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -39,14 +40,27 @@ func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	backward, err := pageDirection(values)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	counting, err := wantsCount(values)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	filter, err := sessionFilter(values)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	// One row beyond the page tells us whether there is a next one.
+	// One row beyond the page tells us whether there is another one in the
+	// direction we are scanning.
 	filter.Limit = limit + 1
-	if raw := values.Get("cursor"); raw != "" {
+	filter.Backward = backward
+	raw := values.Get("cursor")
+	if raw != "" {
 		cursor, err := decodeSessionCursor(raw)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
@@ -62,20 +76,29 @@ func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var next *string
-	if len(sessions) > limit {
-		sessions = sessions[:limit]
-		last := sessions[len(sessions)-1]
-		cursor := encodeCursor(strconv.FormatInt(last.LastSeen, 10), last.ID)
-		next = &cursor
-	}
+	sessions, prev, next := trimPage(sessions, limit, backward, raw,
+		func(row *store.SessionRow) string {
+			return encodeCursor(strconv.FormatInt(row.LastSeen, 10), row.ID)
+		})
 	rows := make([]object, 0, len(sessions))
 	for _, row := range sessions {
 		rows = append(rows, renderSessionRow(row))
 	}
-	writeJSON(w, http.StatusOK, object{}.
+	answer := object{}.
 		put("sessions", rows).
-		put("next_cursor", next))
+		put("next_cursor", next).
+		put("prev_cursor", prev)
+	if counting {
+		total, err := s.store.CountSessions(project.ID, filter, countCap+1)
+		if err != nil {
+			slog.Error("count sessions failed", "err", err)
+			writeError(w, http.StatusInternalServerError, "failed to count sessions")
+			return
+		}
+		value, stopped := capped(total)
+		answer = answer.put("total", value).put("total_capped", stopped)
+	}
+	writeJSON(w, http.StatusOK, answer)
 }
 
 // renderSessionRow renders one row of the listing: the same six fields
@@ -140,12 +163,20 @@ func (s *Server) handleGetSession(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	values, err := queryParams(r, "limit", "cursor")
+	// No `count` here, unlike the two listings: `trace_count` below is that
+	// number already, and exactly, so a capped second one beside it would
+	// be worse than none (spec 009, API contract).
+	values, err := queryParams(r, "limit", "cursor", "direction")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	limit, err := pageSize(values)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	backward, err := pageDirection(values)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -167,8 +198,9 @@ func (s *Server) handleGetSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	filter := store.TraceFilter{SessionID: id, Limit: limit + 1}
-	if raw := values.Get("cursor"); raw != "" {
+	filter := store.TraceFilter{SessionID: id, Limit: limit + 1, Backward: backward}
+	raw := values.Get("cursor")
+	if raw != "" {
 		cursor, err := decodeTraceCursor(raw)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
@@ -183,13 +215,10 @@ func (s *Server) handleGetSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var next *string
-	if len(traces) > limit {
-		traces = traces[:limit]
-		last := traces[len(traces)-1]
-		cursor := encodeCursor(strconv.FormatInt(last.Timestamp, 10), last.ID)
-		next = &cursor
-	}
+	traces, prev, next := trimPage(traces, limit, backward, raw,
+		func(row *store.TraceRow) string {
+			return encodeCursor(strconv.FormatInt(row.Timestamp, 10), row.ID)
+		})
 	rows := make([]object, 0, len(traces))
 	for _, row := range traces {
 		rows = append(rows, renderTraceRow(row))
@@ -205,5 +234,6 @@ func (s *Server) handleGetSession(w http.ResponseWriter, r *http.Request) {
 		putSome("first_seen", formatInstant(session.FirstSeen)).
 		putSome("last_seen", formatInstant(session.LastSeen)).
 		put("traces", rows).
-		put("next_cursor", next))
+		put("next_cursor", next).
+		put("prev_cursor", prev))
 }

@@ -1,5 +1,4 @@
 <script lang="ts">
-	import ChevronDown from '@lucide/svelte/icons/chevron-down';
 	import ChevronLeft from '@lucide/svelte/icons/chevron-left';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import MessagesSquare from '@lucide/svelte/icons/messages-square';
@@ -16,6 +15,7 @@
 		type Trace
 	} from '$lib/api/client.svelte';
 	import { readSessionFilters, sessionSearch, type SessionFilters } from '$lib/api/sessions';
+	import PaginationBar from '$lib/components/PaginationBar.svelte';
 	import Button from '$lib/components/Button.svelte';
 	import CopyButton from '$lib/components/CopyButton.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
@@ -25,7 +25,15 @@
 	import SessionTable from '$lib/components/SessionTable.svelte';
 	import TraceDetail from '$lib/components/TraceDetail.svelte';
 	import { cost, count, duration, timestamp } from '$lib/format';
-	import { neighbour, peekSearch, readPeek } from '$lib/peek';
+	import {
+		DEFAULT_PAGE_SIZE,
+		isFirstPage,
+		isLastPage,
+		pageSearch,
+		readPage,
+		type PageState
+	} from '$lib/page';
+	import { anchor, neighbour, peekSearch, readPeek, settled, walkable, type Rolling } from '$lib/peek';
 
 	// Sessions over `GET /api/v1/sessions`, the endpoint this spec added for
 	// all three clients at once. No live mode here (spec 007 #8): a session's
@@ -33,75 +41,88 @@
 	// arrival is watched. This one refetches on a filter change and on the
 	// refresh control, which is the whole of its update story.
 
-	const PAGE_SIZE = 50;
-
 	const filters = $derived(readSessionFilters(page.url.searchParams));
 	const filtering = $derived(Object.keys(filters).length > 0);
 	/**
 	 * What the load effect depends on. Not `filters`: a fresh object every
 	 * time the URL moves would re-run the listing whenever the panel opened
-	 * or drilled, discarding the pages already loaded (PR #10 review).
+	 * or drilled, discarding the page the reader was on (PR #10 review).
 	 */
 	const filterKey = $derived(sessionSearch(filters));
 
+	const spot = $derived(readPage(page.url.searchParams));
+	/** Everything that decides which rows this screen shows. */
+	const pageKey = $derived(`${filterKey}|${spot.limit}|${spot.direction}|${spot.cursor ?? ''}`);
+
 	let rows = $state.raw<SessionRow[]>([]);
-	let cursor = $state.raw<string | null>(null);
+	let nextCursor = $state.raw<string | null>(null);
+	let prevCursor = $state.raw<string | null>(null);
+	let total = $state.raw<{ value: number; capped: boolean } | null>(null);
 	let loading = $state(true);
-	let loadingMore = $state(false);
 	let failure = $state<string | null>(null);
 	/** Bumped by the refresh control to re-run the load effect. */
 	let generation = $state(0);
 
-	// Every request on this screen belongs to one set of filters; changing them
-	// aborts the lot, so a "load more" in flight cannot append the previous
-	// query's page onto the new one (the bug spec 006's review found).
-	let query: AbortController | null = null;
-
+	// The controller no longer outlives the effect: "load more" was the only
+	// thing that reached for a request in flight from outside, and a window
+	// has no such thing (PR #11, second review).
 	$effect(() => {
 		// The key, not the filter object, and the object itself untracked:
 		// `load` reads it inside this effect's own synchronous run, which
 		// would subscribe to a value that is new on every URL change.
-		void filterKey;
+		void pageKey;
 		generation;
 		const controller = new AbortController();
-		query = controller;
-		load(untrack(() => filters), controller.signal);
+		load(untrack(() => filters), untrack(() => spot), controller.signal);
 		return () => controller.abort();
 	});
 
-	async function load(active: SessionFilters, signal: AbortSignal) {
+	$effect(() => {
+		// A question about the filters, not about the page (spec 009 #4).
+		void filterKey;
+		generation;
+		const controller = new AbortController();
+		countMatches(untrack(() => filters), controller.signal);
+		return () => controller.abort();
+	});
+
+	async function load(active: SessionFilters, at: PageState, signal: AbortSignal) {
 		loading = true;
-		loadingMore = false;
 		failure = null;
 		try {
-			const answer = await api.listSessions(active, { limit: PAGE_SIZE }, signal);
+			const answer = await api.listSessions(
+				active,
+				{ limit: at.limit, cursor: at.cursor ?? undefined, direction: at.direction },
+				signal
+			);
 			rows = answer.sessions;
-			cursor = answer.next_cursor;
+			nextCursor = answer.next_cursor;
+			prevCursor = answer.prev_cursor;
+			settle(at);
 		} catch (cause) {
 			if (signal.aborted) return;
 			rows = [];
+			nextCursor = prevCursor = null;
+			// A page that never arrived cannot be landed on (PR #11 review).
+			rolling = null;
 			failure = describe(cause);
 		} finally {
 			if (!signal.aborted) loading = false;
 		}
 	}
 
-	async function loadMore() {
-		const controller = query;
-		if (!cursor || loadingMore || !controller) return;
-		const { signal } = controller;
-		loadingMore = true;
-		failure = null;
+	async function countMatches(active: SessionFilters, signal: AbortSignal) {
 		try {
-			const answer = await api.listSessions(filters, { limit: PAGE_SIZE, cursor }, signal);
+			const answer = await api.listSessions(active, { limit: 1, count: true }, signal);
 			if (signal.aborted) return;
-			rows = [...rows, ...answer.sessions];
-			cursor = answer.next_cursor;
-		} catch (cause) {
-			if (signal.aborted) return;
-			failure = describe(cause);
-		} finally {
-			if (!signal.aborted) loadingMore = false;
+			total =
+				answer.total === undefined
+					? null
+					: { value: answer.total, capped: answer.total_capped ?? false };
+		} catch {
+			// A number the bar leaves out, not an error over a listing that
+			// arrived perfectly well.
+			if (!signal.aborted) total = null;
 		}
 	}
 
@@ -109,8 +130,17 @@
 		return cause instanceof ApiError ? cause.message : 'Failed to read the sessions.';
 	}
 
+	/** A filter change starts at the newest page, carrying the page size. */
 	function navigate(next: SessionFilters) {
-		goto(`/sessions${sessionSearch(next)}`, { keepFocus: true });
+		const search = sessionSearch(next);
+		const size = spot.limit === DEFAULT_PAGE_SIZE ? '' : `${search ? '&' : '?'}limit=${spot.limit}`;
+		goto(`/sessions${search}${size}`, { keepFocus: true });
+	}
+
+	/** Turning a page keeps everything else in the URL, the panel included. */
+	function turn(to: Partial<PageState>) {
+		const search = pageSearch(page.url.searchParams, { limit: spot.limit, ...to });
+		goto(`${page.url.pathname}${search}`, { keepFocus: true, noScroll: true });
 	}
 
 	// The peek panel (spec 008). A session opens beside the listing, and a
@@ -124,9 +154,19 @@
 	let peekedSession = $state.raw<Session | null>(null);
 	let peekedTrace = $state.raw<Trace | null>(null);
 
-	const ids = $derived(rows.map((row) => row.id));
-	const previous = $derived(neighbour(ids, peekID, -1));
-	const following = $derived(neighbour(ids, peekID, 1));
+	// Walked by order, not by index (spec 009 #13). The key is `last_seen`,
+	// which is the `MAX(timestamp)` this listing is sorted by.
+	const ordered = $derived(rows.map((row) => ({ id: row.id, key: row.last_seen ?? '' })));
+	// Only unfiltered: this listing sorts by `MAX(timestamp)` over the traces
+	// the filters selected, while `GET /sessions/{id}` reports the session's
+	// whole life. Under a window those are different spans, and placing a row
+	// by the wrong one is worse than not placing it (PR #11, sixth review).
+	const showing = $derived(
+		!filtering && peekedSession?.last_seen
+			? { id: peekedSession.id, key: peekedSession.last_seen }
+			: null
+	);
+	const position = $derived(anchor(ordered, peekID, showing));
 
 	/** Deepening pushes one history entry; moving sideways or up replaces (#6). */
 	function move(next: { peek: string | null; trace?: string | null }, deeper: boolean) {
@@ -155,6 +195,34 @@
 	});
 	const lastDrilled = $derived(visited?.session === peekID ? (visited?.trace ?? null) : null);
 
+	/** A walk that ran out of page and turned it (spec 009 #6). */
+	let rolling = $state.raw<Rolling | null>(null);
+
+	/** Called by `load` once a page has landed. */
+	function settle(at: PageState) {
+		const id = settled(rolling, at, ordered);
+		rolling = null;
+		if (id) peek(id);
+	}
+
+	function walk(step: 1 | -1) {
+		// Nowhere to walk from until the panel's row says where it sits, and
+		// nowhere while a page is in flight (see the Traces screen).
+		if (position === null || loading) return;
+		const id = neighbour(ordered, position, step);
+		if (id) {
+			peek(id);
+			return;
+		}
+		if (step === 1 && nextCursor) {
+			rolling = { from: position, step, cursor: nextCursor, direction: 'next' };
+			turn({ cursor: nextCursor });
+		} else if (step === -1 && prevCursor) {
+			rolling = { from: position, step, cursor: prevCursor, direction: 'prev' };
+			turn({ cursor: prevCursor, direction: 'prev' });
+		}
+	}
+
 	const peek = (id: string | null) => move({ peek: id }, id !== null && peekID === null);
 	const drill = (traceID: string | null) =>
 		move({ peek: peekID, trace: traceID }, traceID !== null);
@@ -177,8 +245,11 @@
 	{#snippet meta()}
 		{#if loading}
 			<LoaderCircle class="size-3.5 animate-spin" />
+		{:else if total}
+			<span class="tabular-nums">{count(total.value)}{total.capped ? '+' : ''}</span>
 		{:else}
-			<span class="tabular-nums">{count(rows.length)}{cursor ? '+' : ''}</span>
+			<!-- The count has not landed, or could not be taken (PR #11). -->
+			<span class="tabular-nums">{count(rows.length)}</span>
 		{/if}
 	{/snippet}
 	{#snippet actions()}
@@ -230,22 +301,31 @@
 	</p>
 {/if}
 
-{#if rows.length > 0}
+{#if rows.length > 0 || !isFirstPage(spot)}
+	<!-- The bar stays on an empty page that is not the first one, so a cursor
+	     whose rows are gone still has a way back (PR #11 review). -->
 	<SessionTable {rows} onopen={peek} selectedID={peekID} />
-	<div class="border-border flex shrink-0 items-center justify-center border-t px-4 py-2">
-		{#if cursor}
-			<Button onclick={loadMore} busy={loadingMore}>
-				{#if loadingMore}
-					<LoaderCircle class="size-4 animate-spin" />
-				{:else}
-					<ChevronDown class="size-4" />
-				{/if}
-				Load more
-			</Button>
-		{:else}
-			<span class="text-subtle text-xs">End of the listing</span>
-		{/if}
-	</div>
+	<PaginationBar
+		limit={spot.limit}
+		rows={rows.length}
+		{total}
+		hasPrev={prevCursor !== null}
+		hasNext={nextCursor !== null}
+		busy={loading}
+		atNewest={isFirstPage(spot)}
+		atOldest={isLastPage(spot)}
+		onresize={(limit) => turn({ limit })}
+		onfirst={() => turn({})}
+		onprev={() => turn({ cursor: prevCursor ?? undefined, direction: 'prev' })}
+		onnext={() => turn({ cursor: nextCursor ?? undefined })}
+		onlast={() => turn({ direction: 'prev' })}
+		noun="session"
+	/>
+	{#if rows.length === 0 && !loading}
+		<p class="text-subtle flex flex-1 items-start justify-center p-8 text-center">
+			Nothing on this page any more. Use « to go back to the newest.
+		</p>
+	{/if}
 {:else if !loading && !failure}
 	<div class="flex flex-1 items-start justify-center overflow-auto p-8">
 		<div class="max-w-lg">
@@ -276,10 +356,10 @@
 	<PeekPanel
 		label={drilled ? 'Trace' : 'Session'}
 		onclose={() => peek(null)}
-		onprev={drilled ? undefined : () => peek(previous)}
-		onnext={drilled ? undefined : () => peek(following)}
-		hasPrev={previous !== null}
-		hasNext={following !== null}
+		onprev={drilled ? undefined : () => walk(-1)}
+		onnext={drilled ? undefined : () => walk(1)}
+		hasPrev={!loading && walkable(ordered, position, -1, prevCursor)}
+		hasNext={!loading && walkable(ordered, position, 1, nextCursor)}
 		fullHref={drilled
 			? `/traces/${encodeURIComponent(drilled)}${
 					selectedObs ? `?obs=${encodeURIComponent(selectedObs)}` : ''

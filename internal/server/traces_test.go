@@ -635,7 +635,10 @@ func TestEmptyProjectReads(t *testing.T) {
 
 	rec := h.get(t, "/api/v1/traces")
 	expectStatus(t, rec, 200)
-	if body := strings.TrimSpace(rec.Body.String()); body != `{"traces":[],"next_cursor":null}` {
+	// Both cursors are null: there is nothing on either side of nothing
+	// (spec 009 #2).
+	want := `{"traces":[],"next_cursor":null,"prev_cursor":null}`
+	if body := strings.TrimSpace(rec.Body.String()); body != want {
 		t.Errorf("body = %s, want an empty page rather than null", body)
 	}
 	expectError(t, h.get(t, "/api/v1/traces/last"), 404, "empty project")

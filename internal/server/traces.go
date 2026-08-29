@@ -51,13 +51,24 @@ func (s *Server) handleListTraces(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	known := append(append([]string{}, traceListFilters...), "fields", "limit", "cursor")
+	known := append(append([]string{}, traceListFilters...),
+		"fields", "limit", "cursor", "direction", "count")
 	values, err := queryParams(r, known...)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	limit, err := pageSize(values)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	backward, err := pageDirection(values)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	counting, err := wantsCount(values)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -72,9 +83,12 @@ func (s *Server) handleListTraces(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	// One row beyond the page tells us whether there is a next one.
+	// One row beyond the page tells us whether there is another one in the
+	// direction we are scanning.
 	filter.Limit = limit + 1
-	if raw := values.Get("cursor"); raw != "" {
+	filter.Backward = backward
+	raw := values.Get("cursor")
+	if raw != "" {
 		cursor, err := decodeTraceCursor(raw)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
@@ -90,20 +104,31 @@ func (s *Server) handleListTraces(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var next *string
-	if len(traces) > limit {
-		traces = traces[:limit]
-		last := traces[len(traces)-1]
-		cursor := encodeCursor(strconv.FormatInt(last.Timestamp, 10), last.ID)
-		next = &cursor
-	}
+	traces, prev, next := trimPage(traces, limit, backward, raw,
+		func(row *store.TraceRow) string {
+			return encodeCursor(strconv.FormatInt(row.Timestamp, 10), row.ID)
+		})
 	rows := make([]object, 0, len(traces))
 	for _, row := range traces {
 		rows = append(rows, fields.apply(renderTraceRow(row)))
 	}
-	writeJSON(w, http.StatusOK, object{}.
+	answer := object{}.
 		put("traces", rows).
-		put("next_cursor", next))
+		put("next_cursor", next).
+		put("prev_cursor", prev)
+	if counting {
+		// Counted over the filters and not over the page: the cursor is
+		// where the reader is, not what there is.
+		total, err := s.store.CountTraces(project.ID, filter, countCap+1)
+		if err != nil {
+			slog.Error("count traces failed", "err", err)
+			writeError(w, http.StatusInternalServerError, "failed to count traces")
+			return
+		}
+		value, stopped := capped(total)
+		answer = answer.put("total", value).put("total_capped", stopped)
+	}
+	writeJSON(w, http.StatusOK, answer)
 }
 
 // handleGetTrace serves one trace with its observations as a nested tree: the

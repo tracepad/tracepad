@@ -40,6 +40,9 @@ func (r *run) sessionsList(ctx context.Context, args []string) error {
 		user        string
 		cursor      string
 		limit       int
+		oldest      bool
+		newer       bool
+		total       bool
 	)
 	fs := r.flags("sessions ls")
 	fs.StringVar(&since, "since", "", "")
@@ -50,6 +53,9 @@ func (r *run) sessionsList(ctx context.Context, args []string) error {
 	fs.StringVar(&user, "user", "", "")
 	fs.StringVar(&cursor, "cursor", "", "")
 	fs.IntVar(&limit, "limit", 0, "")
+	fs.BoolVar(&oldest, "oldest", false, "")
+	fs.BoolVar(&newer, "newer", false, "")
+	fs.BoolVar(&total, "total", false, "")
 	if _, err := r.parse(fs, args, 0); err != nil {
 		return err
 	}
@@ -58,6 +64,12 @@ func (r *run) sessionsList(ctx context.Context, args []string) error {
 	addSome(query, "environment", environment)
 	addSome(query, "user_id", user)
 	addSome(query, "cursor", cursor)
+	if err := addWalk(query, cursor, oldest, newer); err != nil {
+		return err
+	}
+	if total {
+		query.Set("count", "1")
+	}
 	from, err := r.instant("--since", since)
 	if err != nil {
 		return err
@@ -88,25 +100,33 @@ func (r *run) sessionsList(ctx context.Context, args []string) error {
 			FirstSeen  string   `json:"first_seen"`
 			LastSeen   string   `json:"last_seen"`
 		} `json:"sessions"`
-		NextCursor *string `json:"next_cursor"`
+		NextCursor  *string `json:"next_cursor"`
+		PrevCursor  *string `json:"prev_cursor"`
+		Total       *int    `json:"total"`
+		TotalCapped *bool   `json:"total_capped"`
 	}](body)
 	if err != nil {
 		return err
 	}
+	// An empty page still falls through to the total and the way back: it is
+	// where `--newer` from the newest page lands, and a bare "no sessions"
+	// there is the dead end the first review found in `--oldest`
+	// (PR #11, third review).
 	if len(listing.Sessions) == 0 {
 		fmt.Fprintln(r.opt.Stdout, "no sessions")
-		return nil
+	} else {
+		t := newTable(r.opt.Stdout, "LAST SEEN", "SESSION", "TRACES", "ERRORS", "COST", "FIRST SEEN")
+		for _, session := range listing.Sessions {
+			t.row(shortTime(session.LastSeen), session.ID,
+				strconv.Itoa(session.TraceCount), strconv.Itoa(session.ErrorCount),
+				cost(session.TotalCost), shortTime(session.FirstSeen))
+		}
+		t.flush()
 	}
-	t := newTable(r.opt.Stdout, "LAST SEEN", "SESSION", "TRACES", "ERRORS", "COST", "FIRST SEEN")
-	for _, session := range listing.Sessions {
-		t.row(shortTime(session.LastSeen), session.ID,
-			strconv.Itoa(session.TraceCount), strconv.Itoa(session.ErrorCount),
-			cost(session.TotalCost), shortTime(session.FirstSeen))
+	if listing.Total != nil {
+		fmt.Fprintf(r.opt.Stdout, "\n%s matching\n", matchCount(*listing.Total, listing.TotalCapped))
 	}
-	t.flush()
-	if listing.NextCursor != nil {
-		fmt.Fprintf(r.opt.Stdout, "\nmore: --cursor %s\n", *listing.NextCursor)
-	}
+	walkOn(r, listing.NextCursor, listing.PrevCursor)
 	return nil
 }
 

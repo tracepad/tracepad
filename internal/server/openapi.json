@@ -176,16 +176,21 @@
           {"name": "fields", "in": "query", "schema": {"type": "string"},
             "description": "Comma-separated subset of the row fields. An unknown name is a 400."},
           {"$ref": "#/components/parameters/Limit"},
-          {"$ref": "#/components/parameters/Cursor"}
+          {"$ref": "#/components/parameters/Cursor"},
+          {"$ref": "#/components/parameters/Direction"},
+          {"$ref": "#/components/parameters/Count"}
         ],
         "responses": {
           "200": {"description": "A page of traces", "content": {"application/json": {"schema": {
             "type": "object",
             "properties": {
               "traces": {"type": "array", "items": {"$ref": "#/components/schemas/TraceRow"}},
-              "next_cursor": {"type": ["string", "null"], "description": "Pass back as `?cursor=` for the next page; null on the last one"}
+              "next_cursor": {"type": ["string", "null"], "description": "Pass back as `?cursor=` for the next page; null on the oldest one"},
+              "prev_cursor": {"type": ["string", "null"], "description": "Pass back with `?direction=prev` for the page before; null on the newest one"},
+              "total": {"type": "integer", "description": "Present only with `?count=`: how many rows the filters match, capped at 1000"},
+              "total_capped": {"type": "boolean", "description": "Present only with `?count=`: the count stopped at the cap and the real number is larger"}
             },
-            "required": ["traces", "next_cursor"]
+            "required": ["traces", "next_cursor", "prev_cursor"]
           }}}},
           "400": {"$ref": "#/components/responses/BadRequest"},
           "401": {"$ref": "#/components/responses/Unauthorized"}
@@ -286,16 +291,21 @@
           {"name": "user_id", "in": "query", "schema": {"type": "string"},
             "description": "Exact match on the user id of a session's traces"},
           {"$ref": "#/components/parameters/Limit"},
-          {"$ref": "#/components/parameters/Cursor"}
+          {"$ref": "#/components/parameters/Cursor"},
+          {"$ref": "#/components/parameters/Direction"},
+          {"$ref": "#/components/parameters/Count"}
         ],
         "responses": {
           "200": {"description": "A page of sessions", "content": {"application/json": {"schema": {
             "type": "object",
             "properties": {
               "sessions": {"type": "array", "items": {"$ref": "#/components/schemas/SessionRow"}},
-              "next_cursor": {"type": ["string", "null"], "description": "Pass back as `?cursor=` for the next page; null on the last one"}
+              "next_cursor": {"type": ["string", "null"], "description": "Pass back as `?cursor=` for the next page; null on the oldest one"},
+              "prev_cursor": {"type": ["string", "null"], "description": "Pass back with `?direction=prev` for the page before; null on the newest one"},
+              "total": {"type": "integer", "description": "Present only with `?count=`: how many sessions the filters match, capped at 1000"},
+              "total_capped": {"type": "boolean", "description": "Present only with `?count=`: the count stopped at the cap"}
             },
-            "required": ["sessions", "next_cursor"]
+            "required": ["sessions", "next_cursor", "prev_cursor"]
           }}}},
           "400": {"$ref": "#/components/responses/BadRequest"},
           "401": {"$ref": "#/components/responses/Unauthorized"}
@@ -311,7 +321,8 @@
         "parameters": [
           {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}},
           {"$ref": "#/components/parameters/Limit"},
-          {"$ref": "#/components/parameters/Cursor"}
+          {"$ref": "#/components/parameters/Cursor"},
+          {"$ref": "#/components/parameters/Direction"}
         ],
         "responses": {
           "200": {"description": "The session", "content": {"application/json": {"schema": {
@@ -324,9 +335,10 @@
               "first_seen": {"type": "string", "format": "date-time"},
               "last_seen": {"type": "string", "format": "date-time"},
               "traces": {"type": "array", "items": {"$ref": "#/components/schemas/TraceRow"}},
-              "next_cursor": {"type": ["string", "null"]}
+              "next_cursor": {"type": ["string", "null"]},
+              "prev_cursor": {"type": ["string", "null"]}
             },
-            "required": ["id", "trace_count", "error_count", "traces", "next_cursor"]
+            "required": ["id", "trace_count", "error_count", "traces", "next_cursor", "prev_cursor"]
           }}}},
           "400": {"$ref": "#/components/responses/BadRequest"},
           "401": {"$ref": "#/components/responses/Unauthorized"},
@@ -835,7 +847,11 @@
       "Limit": {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 500, "default": 50},
         "description": "Out of range is a 400, not a silent clamp"},
       "Cursor": {"name": "cursor", "in": "query", "schema": {"type": "string"},
-        "description": "The opaque `next_cursor` of the previous page"},
+        "description": "The opaque `next_cursor` or `prev_cursor` of a previous page"},
+      "Direction": {"name": "direction", "in": "query", "schema": {"type": "string", "enum": ["next", "prev"], "default": "next"},
+        "description": "Which way to page from the cursor. With no cursor, `next` is the newest page and `prev` the oldest — both ends are a direction rather than an offset. Rows come back newest first either way"},
+      "Count": {"name": "count", "in": "query", "schema": {"type": "string", "enum": ["1", "true"]},
+        "description": "Adds `total` and `total_capped`: how many rows the filters match, counted up to 1000. Off by default, because the count changes with the filters and not with the page"},
       "Expand": {"name": "expand", "in": "query", "schema": {"type": "string", "enum": ["io"]},
         "description": "`io` inlines each observation's input, output and metadata, each cut to an equal share of the remaining budget with a truncation marker naming the rest"},
       "Budget": {"name": "budget", "in": "query", "schema": {"type": "integer", "minimum": 4096, "maximum": 5242880},
