@@ -40,7 +40,10 @@
 		read: async (at, counting, signal) => {
 			try {
 				const answer = await api.getSession(sessionID, asPage(at, counting), signal);
-				session = answer;
+				// An aborted answer lands on nothing, this binding included: the
+				// body can parse in the window between the abort and this line,
+				// and the session it names is then the one being left (#8).
+				if (!signal.aborted) session = answer;
 				return { ...answer, rows: answer.traces };
 			} catch (cause) {
 				// The failure below renders instead of the totals, and the panel
