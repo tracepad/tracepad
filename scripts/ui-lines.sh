@@ -30,10 +30,15 @@ BUDGET="${1:-9000}"
 cd "$ROOT"
 
 # Hand-written sources only: the app, its tests, its end-to-end suite and the
-# handful of config files that shape the build.
+# handful of config files that shape the build. By extension rather than by
+# exclusion, because the tree also carries assets nobody reads: the two web
+# fonts under `ui/src/lib/fonts` were 319 "lines" of this count from the day it
+# was written, and every number the budget has ever been set against stood on
+# top of them (spec 010 #7).
 sources() {
 	# grep exits 1 on an empty tree, which is not an error here.
 	git ls-files 'ui/src' 'ui/tests' 'ui/*.ts' 'ui/*.js' 'ui/*.json' |
+		grep -E '\.(svelte|ts|js|json|css|html)$' |
 		grep -v -e '^ui/src/lib/api/schema.d.ts$' -e '^ui/package-lock.json$' || true
 }
 
