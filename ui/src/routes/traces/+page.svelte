@@ -240,14 +240,15 @@
 			peek(id);
 			return;
 		}
-		// The peeked row is not on this page at all — a live tick can push it
-		// off — so there is no "next" relative to it. Resume at the edge the
-		// direction is heading for: rows run newest first, so `j` (older,
-		// downwards) lands on the *oldest* row here and its next press rolls
-		// on to where the lost row now is. The other edge would send the
-		// reader back through everything they had already read.
+		// The peeked row is not on this page at all: a live tick prepends
+		// newer traces and pushes it off the bottom, so it is older than
+		// everything still here. The oldest row on screen is therefore the
+		// nearest one in *both* directions — `k` steps up into the page from
+		// it, and `j` rolls on to where the lost row now is. Choosing by
+		// direction, as this did at first, sent `k` to the top of the page
+		// and skipped everything between.
 		if (peekID !== null && !ids.includes(peekID)) {
-			if (rows.length > 0) peek(step === 1 ? rows[rows.length - 1].id : rows[0].id);
+			if (rows.length > 0) peek(rows[rows.length - 1].id);
 			return;
 		}
 		if (step === 1 && nextCursor) {

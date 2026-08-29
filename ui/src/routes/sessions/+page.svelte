@@ -216,10 +216,10 @@
 			peek(id);
 			return;
 		}
-		// Not on this page: resume at the edge the direction is heading for,
-		// so the next press carries on rather than doubling back.
+		// Not on this page: the row fell off the oldest end, so the oldest row
+		// here is the nearest one in both directions (see the Traces screen).
 		if (peekID !== null && !ids.includes(peekID)) {
-			if (rows.length > 0) peek(step === 1 ? rows[rows.length - 1].id : rows[0].id);
+			if (rows.length > 0) peek(rows[rows.length - 1].id);
 			return;
 		}
 		if (step === 1 && nextCursor) {

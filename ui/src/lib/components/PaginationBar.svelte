@@ -42,10 +42,15 @@
 		 * Whether this page already *is* an end, asked of the URL rather than
 		 * of the cursors that came back with it. « and » are anchors, not
 		 * steps — needing no cursor is what keeps them live on the empty page
-		 * a dead cursor strands somebody on. They go dead anyway once there
-		 * are rows and no step past them: a listing that fits on one page is
-		 * both ends at once, and » there would show the same rows under a
-		 * `?direction=prev` that quietly pauses live mode.
+		 * a dead cursor strands somebody on.
+		 *
+		 * They are not symmetrical below. « is dead only at the newest
+		 * anchor, because that is the only place it cannot help: every other
+		 * page, including one walked back to that happens to have nothing
+		 * above it, is a page somebody may need out of. » is dead there too
+		 * *and* when the whole listing is already on screen, where it would
+		 * only re-address the same rows as `?direction=prev` and pause live
+		 * mode for it.
 		 */
 		atNewest: boolean;
 		atOldest: boolean;
@@ -67,6 +72,9 @@
 		const matching = formatCount(total.value) + (total.capped ? '+' : '');
 		return `${formatCount(rows)} of ${matching} ${plural(total.value, total.capped)}`;
 	});
+
+	/** The whole listing is on screen: no step leads anywhere from here. */
+	const alone = $derived(rows > 0 && !hasPrev && !hasNext);
 
 	// The steps on offer, plus whatever size the URL actually carries: the
 	// API takes anything from 1 to 500, and a select that cannot show the
@@ -109,7 +117,7 @@
 		<button
 			type="button"
 			class={step}
-			disabled={atNewest || (rows > 0 && !hasPrev)}
+			disabled={atNewest}
 			aria-label="Newest page"
 			title="Newest page"
 			onclick={onfirst}
@@ -139,7 +147,7 @@
 		<button
 			type="button"
 			class={step}
-			disabled={atOldest || (rows > 0 && !hasNext)}
+			disabled={atOldest || alone}
 			aria-label="Oldest page"
 			title="Oldest page"
 			onclick={onlast}

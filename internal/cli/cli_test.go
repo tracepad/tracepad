@@ -247,20 +247,46 @@ func TestWalkingBothWays(t *testing.T) {
 // TestAnEmptySessionPageSaysHowToLeave: `sessions ls` returned early on an
 // empty page, skipping both the count and the way back — the same dead end
 // `--oldest` had (PR #11, third review).
+//
+// The empty page has to be one a *cursor* led to, or there is no way back for
+// the command to print and the test proves nothing (PR #11, fourth review).
 func TestAnEmptySessionPageSaysHowToLeave(t *testing.T) {
 	h := newHarness(t)
 	seedCorpus(t, h)
 	ctx := t.Context()
 
-	got := h.run(ctx, true, "sessions", "ls", "--env", "nowhere", "--total")
-	if got.code != ExitOK {
-		t.Fatalf("exit = %d, stderr = %s", got.code, got.stderr)
+	counted := h.run(ctx, true, "sessions", "ls", "--env", "nowhere", "--total")
+	if counted.code != ExitOK {
+		t.Fatalf("exit = %d, stderr = %s", counted.code, counted.stderr)
 	}
-	if !strings.Contains(got.stdout, "no sessions") {
-		t.Errorf("output does not say the page is empty:\n%s", got.stdout)
+	if !strings.Contains(counted.stdout, "no sessions") {
+		t.Errorf("output does not say the page is empty:\n%s", counted.stdout)
 	}
-	if !strings.Contains(got.stdout, "0 matching") {
-		t.Errorf("an empty page skipped the count it was asked for:\n%s", got.stdout)
+	if !strings.Contains(counted.stdout, "0 matching") {
+		t.Errorf("an empty page skipped the count it was asked for:\n%s", counted.stdout)
+	}
+
+	// Now the case the early return actually broke: a cursor, and past it a
+	// filter that matches nothing. A second session, so there is a cursor.
+	h.seed(t, &model.Trace{ID: traceHex(3), Name: "eval", SessionID: "s2",
+		Environment: "production"},
+		&model.Observation{TraceID: traceHex(3), ID: spanHex(3), Type: model.TypeSpan,
+			Level: model.LevelDefault, StartTime: seedBase - 7200*1000*ms,
+			EndTime: seedBase - 7200*1000*ms + 10*ms})
+
+	page := h.run(ctx, true, "sessions", "ls", "--limit", "1")
+	marker := strings.Index(page.stdout, "older: --cursor ")
+	if marker < 0 {
+		t.Fatalf("no cursor to walk from:\n%s", page.stdout)
+	}
+	cursor := strings.Fields(page.stdout[marker:])[2]
+
+	stranded := h.run(ctx, true, "sessions", "ls", "--cursor", cursor, "--env", "nowhere")
+	if stranded.code != ExitOK {
+		t.Fatalf("exit = %d, stderr = %s", stranded.code, stranded.stderr)
+	}
+	if !strings.Contains(stranded.stdout, "newer: --newer --cursor ") {
+		t.Errorf("an empty page reached by a cursor is a dead end:\n%s", stranded.stdout)
 	}
 }
 

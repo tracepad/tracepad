@@ -128,6 +128,26 @@ test('a listing that fits on one page has all four controls dead', async ({ page
 	}
 });
 
+test('walking back to a short page still leaves a way home', async ({ page }) => {
+	await signIn(page);
+	// Seven traces in pages of two: from the far end, walking back lands on
+	// a one-row page with nothing above it — rows, but no `prev_cursor`. « is
+	// an anchor and must stay live there, or the reader is stuck on one row
+	// with live mode paused (PR #11, fourth review).
+	await page.goto('/traces?limit=2&direction=prev');
+	for (let step = 0; step < 3; step++) {
+		await page.getByRole('button', { name: 'Previous page' }).click();
+	}
+	await expect(page.locator('tbody tr')).toHaveCount(1);
+	await expect(page.getByRole('button', { name: 'Previous page' })).toBeDisabled();
+
+	const home = page.getByRole('button', { name: 'Newest page' });
+	await expect(home).toBeEnabled();
+	await home.click();
+	await expect(page).toHaveURL(/\/traces\?limit=2$/);
+	await expect(page.locator('tbody tr')).toHaveCount(2);
+});
+
 test('an empty page off the newest one is not a dead end', async ({ page }) => {
 	await signIn(page);
 	// A filter that matches nothing, on the oldest page: no rows, and so no
