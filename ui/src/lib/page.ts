@@ -60,6 +60,25 @@ export function pageSearch(search: URLSearchParams, next: Partial<PageState> = {
 	return query ? `?${query}` : '';
 }
 
+/**
+ * A fresh listing's URL: the filters somebody just set, plus whatever else the
+ * screen keeps there, at the page size the URL they are on carries. A cursor is
+ * a position in one ordering and means nothing in another, so a filter change
+ * starts at the newest page — while the *size* is a preference and travels.
+ */
+export function freshSearch(
+	search: string,
+	from: URLSearchParams,
+	extra: Record<string, string> = {}
+): string {
+	const params = new URLSearchParams(search);
+	for (const [name, value] of Object.entries(extra)) if (value) params.set(name, value);
+	const { limit } = readPage(from);
+	if (limit !== DEFAULT_PAGE_SIZE) params.set(LIMIT, String(limit));
+	const query = params.toString();
+	return query ? `?${query}` : '';
+}
+
 /** True on the page a listing opens with, which is the only one live mode means anything on (#7). */
 export function isFirstPage(state: PageState): boolean {
 	return state.cursor === null && state.direction === 'next';

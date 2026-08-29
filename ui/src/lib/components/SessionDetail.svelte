@@ -1,10 +1,9 @@
 <script lang="ts">
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
-	import { untrack } from 'svelte';
-	import { ApiError, api, type Session, type TraceRow } from '$lib/api/client.svelte';
+	import { api, type Session, type TraceRow } from '$lib/api/client.svelte';
 	import { ABSENT, cost, count, timestamp } from '$lib/format';
-	import { DEFAULT_PAGE_SIZE, isFirstPage, isLastPage, type PageState } from '$lib/page';
+	import { asPage, Listing, StateSpot } from '$lib/listing.svelte';
 	import PaginationBar from './PaginationBar.svelte';
 	import TraceTable from './TraceTable.svelte';
 
@@ -15,19 +14,6 @@
 	// The body only, shared by the full page and the peek panel (spec 008 #8).
 	// Where a trace row leads is the caller's to say: the page opens it in a
 	// panel over itself, and a session panel drills into it in place (#9).
-
-	/**
-	 * The one listing that pages in component state rather than in the URL
-	 * (spec 009 #10): on `/sessions` this table lives inside the peek panel,
-	 * over a URL whose `limit` and `cursor` already belong to the listing
-	 * behind it, and two listings on one address cannot own one set of keys.
-	 */
-	let chosen = $state.raw<PageState & { session: string | null }>({
-		session: null,
-		limit: DEFAULT_PAGE_SIZE,
-		cursor: null,
-		direction: 'next'
-	});
 
 	let {
 		sessionID,
@@ -43,65 +29,37 @@
 		onopen: (traceID: string) => void;
 		selectedTraceID?: string | null;
 	} = $props();
-	let nextCursor = $state.raw<string | null>(null);
-	let prevCursor = $state.raw<string | null>(null);
-	let loading = $state(true);
-	let failure = $state<string | null>(null);
 
-	/**
-	 * The page in force. Derived rather than reset by an effect: a cursor
-	 * belongs to the session it was taken from, so one naming another session
-	 * simply is not the page — no write, no second render, no second request.
-	 */
-	const spot = $derived<PageState>(
-		chosen.session === sessionID
-			? chosen
-			: { limit: chosen.limit, cursor: null, direction: 'next' }
-	);
-
-	$effect(() => {
-		// A different session starts at its newest page; the same session
-		// re-reads whenever the page moves.
-		const wanted = sessionID;
-		const at = spot;
-		const controller = new AbortController();
-		load(wanted, at, controller.signal);
-		return () => controller.abort();
+	// The one listing that pages in component state rather than in the URL
+	// (spec 009 #10), and the one that needs no count of its own: `trace_count`
+	// is exact and already on screen (spec 010, divergence 6).
+	const listing = new Listing<TraceRow>({
+		key: () => sessionID,
+		spot: new StateSpot(() => sessionID),
+		count: false,
+		read: async (at, counting, signal) => {
+			try {
+				const answer = await api.getSession(sessionID, asPage(at, counting), signal);
+				// An aborted answer lands on nothing, this binding included: the
+				// body can parse in the window between the abort and this line,
+				// and the session it names is then the one being left (#8).
+				if (!signal.aborted) session = answer;
+				return { ...answer, rows: answer.traces };
+			} catch (cause) {
+				// The failure below renders instead of the totals, and the panel
+				// around it must not go on showing a session that did not arrive.
+				if (!signal.aborted) session = null;
+				throw cause;
+			}
+		},
+		failed: 'Failed to read the session.'
 	});
 
-	async function load(wanted: string, at: PageState, signal: AbortSignal) {
-		loading = true;
-		failure = null;
-		try {
-			const answer = await api.getSession(
-				wanted,
-				{ limit: at.limit, cursor: at.cursor ?? undefined, direction: at.direction },
-				signal
-			);
-			session = answer;
-			traces = answer.traces;
-			nextCursor = answer.next_cursor;
-			prevCursor = answer.prev_cursor;
-		} catch (cause) {
-			if (signal.aborted) return;
-			session = null;
-			traces = [];
-			nextCursor = prevCursor = null;
-			failure = cause instanceof ApiError ? cause.message : 'Failed to read the session.';
-		} finally {
-			if (!signal.aborted) loading = false;
-		}
-	}
-
-	function turn(to: Partial<PageState>) {
-		chosen = {
-			session: sessionID,
-			limit: spot.limit,
-			cursor: null,
-			direction: 'next',
-			...to
-		};
-	}
+	// The rows, for a caller that walks them: the loader empties them on a
+	// failure and leaves them alone on an abort, which is what the walk needs.
+	$effect(() => {
+		traces = listing.rows;
+	});
 
 	/** The totals header, as label/value pairs so one loop renders them. */
 	const totals = $derived(
@@ -121,16 +79,16 @@
      one that is: turning a page keeps the rows and dims the bar, which is what
      the other two listings do and what makes `busy` mean anything here at all
      (spec 009 #8; PR #11, seventh review). -->
-{#if loading && session?.id !== sessionID}
+{#if listing.loading && session?.id !== sessionID}
 	<div class="text-subtle flex flex-1 items-center justify-center gap-2">
 		<LoaderCircle class="size-4 animate-spin" />
 		Loading the session
 	</div>
-{:else if failure}
+{:else if listing.failure}
 	<div class="flex flex-1 items-start justify-center p-8">
 		<p role="alert" class="text-danger flex max-w-md items-start gap-2">
 			<TriangleAlert class="mt-0.5 size-4 shrink-0" />
-			{failure}
+			{listing.failure}
 		</p>
 	</div>
 {:else if session}
@@ -143,29 +101,17 @@
 		{/each}
 	</dl>
 
-	{#if traces.length > 0 || !isFirstPage(spot)}
-		<TraceTable rows={traces} {onopen} selectedID={selectedTraceID} />
-		<!-- The total here is exact and already known: `trace_count` is what
-		     the endpoint answers with, so this listing needs no count of its
-		     own (spec 009, API contract). -->
+	{#if listing.rows.length > 0 || !listing.newest}
+		<TraceTable rows={listing.rows} {onopen} selectedID={selectedTraceID} />
+		<!-- The total here is exact and already known: `trace_count` is what the
+		     endpoint answers with, so this listing asks for no count of its own. -->
 		<PaginationBar
-			limit={spot.limit}
-			rows={traces.length}
+			{...listing.bar}
 			total={{ value: session.trace_count, capped: false }}
-			hasPrev={prevCursor !== null}
-			hasNext={nextCursor !== null}
-			busy={loading}
-			atNewest={isFirstPage(spot)}
-			atOldest={isLastPage(spot)}
-			onresize={(limit) => turn({ limit })}
-			onfirst={() => turn({})}
-			onprev={() => turn({ cursor: prevCursor ?? undefined, direction: 'prev' })}
-			onnext={() => turn({ cursor: nextCursor ?? undefined })}
-			onlast={() => turn({ direction: 'prev' })}
 			noun="trace"
 		/>
-		{#if traces.length === 0 && !loading}
-			<p class="text-subtle p-8 text-center">
+		{#if listing.rows.length === 0 && !listing.loading}
+			<p class="text-subtle flex flex-1 items-start justify-center p-8 text-center">
 				Nothing on this page any more. Use « to go back to the newest.
 			</p>
 		{/if}
