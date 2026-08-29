@@ -1,6 +1,6 @@
 # Spec 009 — Listing Pagination: a page you can turn, name and come back to
 
-**Status:** 🚧 IN PROGRESS
+**Status:** ✅ SHIPPED
 **Sprint:** September 2026
 
 > Every listing ends in one button. "Load more" appends a page and forgets it:

@@ -30,6 +30,13 @@ API. This file routes; it does not duplicate what specs and docs say.
   needed it — plus the Sessions, Stats and Settings screens, a shared time
   range control, and the admin token as a second UI credential that never
   touches the data plane.
+- ✅ Spec 009 (listing pagination) shipped: the read API pages both ways
+  (`direction=prev` beside the opaque cursor, `prev_cursor` beside
+  `next_cursor`) and counts on request, capped at 1000 inside a `LIMIT`ed
+  subquery. With no cursor a direction *is* an end, so « ‹ › » cost what one
+  page costs and no offset appears anywhere. "Load more" becomes a bar with a
+  page size, and the page joins the filters in the URL. CLI (`--oldest`,
+  `--total`) and MCP moved in the same PR.
 - ✅ Spec 008 (peek panel) shipped: a row on any listing opens in a panel
   over it rather than navigating away — `?peek=` in the URL, the full-page
   routes kept as the canonical link, and the trace and session detail bodies
@@ -53,14 +60,14 @@ API. This file routes; it does not duplicate what specs and docs say.
 | OTLP ingest | `internal/server/otlp.go`, `docs/ingest.md`, spec 002 |
 | Scores & prompts | `internal/server/scores.go`, `prompts.go`, `docs/scores.md`, `docs/prompts.md`, spec 003 |
 | JSON API plumbing (auth, strict decode, pagination) | `internal/server/api.go`, spec 003 |
-| Read API (traces, sessions, stats, system) | `internal/server/traces.go` and neighbours, `docs/api.md`, spec 004 — the route table in `routes.go` is the surface, and `openapi.json` must agree with it |
+| Read API (traces, sessions, stats, system) | `internal/server/traces.go` and neighbours, `docs/api.md`, specs 004 and 009 — the route table in `routes.go` is the surface, and `openapi.json` must agree with it. Paging is keyset in both directions: `trimPage` in `api.go` owns which cursor a page may claim |
 | Response budgets and truncation | `internal/server/budget.go`, spec 004 #2 |
 | CLI | `internal/cli/`, `internal/client/`, `docs/cli.md`, spec 004 |
 | MCP | `internal/mcpserver/`, `docs/mcp.md`, spec 004 — tools call the read API over HTTP, never the store, and only ever with a GET (spec 005 #13) |
 | Retention and the sweeper | `internal/store/sweep.go`, `docs/retention.md`, spec 005 — every chunk is a `WriteJob`, never a second write connection |
 | Admin API (projects, keys, retention, erasure) | `internal/server/admin.go`, `internal/store/admin.go`, `docs/admin.md`, spec 005 — destructive endpoints are a dry run until `?confirm=` echoes the name, checked inside the write transaction |
 | Attribute mapping | `internal/mapping/rules.go` is the table; `mapping.go` applies it |
-| Web interface | `ui/` (SvelteKit SPA), `internal/ui/` (the embed and the tagless stub), `internal/server/ui.go` (delivery and the SPA fallback), `docs/ui.md`, specs 006, 007 and 008 — the API types in `ui/src/lib/api/schema.d.ts` are generated from `openapi.json` and the gate fails on drift |
+| Web interface | `ui/` (SvelteKit SPA), `internal/ui/` (the embed and the tagless stub), `internal/server/ui.go` (delivery and the SPA fallback), `docs/ui.md`, specs 006 to 009 — the API types in `ui/src/lib/api/schema.d.ts` are generated from `openapi.json` and the gate fails on drift |
 | Configuration | `internal/config/`, spec 001 + spec 002 Configuration tables |
 
 Attribute semantics for the `langfuse.*` dialect are derived from Langfuse
