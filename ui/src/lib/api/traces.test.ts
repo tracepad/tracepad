@@ -24,7 +24,7 @@ function documentedFilters(): string[] {
 	>;
 	// Pagination and field selection are how the screen talks to the API, not
 	// things a person filters on; everything else is a filter.
-	const plumbing = new Set(['fields', 'limit', 'cursor']);
+	const plumbing = new Set(['fields', 'limit', 'cursor', 'direction', 'count']);
 	return parameters
 		.map((parameter) => {
 			if ('name' in parameter) return parameter.name;

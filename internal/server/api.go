@@ -207,6 +207,99 @@ func pageSize(values url.Values) (int, error) {
 	return limit, nil
 }
 
+// The listing page parameters spec 009 adds beside `limit` and `cursor`.
+const (
+	// countCap bounds the work a count is allowed to do: `COUNT(*)` inside
+	// a `LIMIT`ed subquery reads at most this many rows on any filter,
+	// indexed or not, so the number appears at the same speed on every
+	// screen (#4). Above it the answer is "1000+", which is the question
+	// the reader was asking anyway.
+	countCap = 1000
+)
+
+// pageDirection reads `?direction`. `next` walks towards older rows, `prev`
+// towards newer ones; with no cursor they are the newest and the oldest page,
+// which is how both end anchors are a direction rather than an offset (#2).
+func pageDirection(values url.Values) (bool, error) {
+	switch raw := values.Get("direction"); raw {
+	case "", "next":
+		return false, nil
+	case "prev":
+		return true, nil
+	default:
+		return false, fmt.Errorf("direction must be next or prev, not %q", raw)
+	}
+}
+
+// wantsCount reads `?count`. Off by default: the count changes with the
+// filters and not with the page, so a client turns it on when the filters move
+// and pages without it (#4).
+func wantsCount(values url.Values) (bool, error) {
+	switch raw := values.Get("count"); raw {
+	case "":
+		return false, nil
+	case "1", "true":
+		return true, nil
+	default:
+		return false, fmt.Errorf("count must be 1 or true, not %q", raw)
+	}
+}
+
+// capped turns a raw count taken with a limit of countCap+1 into the pair the
+// response carries: the number, and whether it stopped short of the truth.
+func capped(raw int) (int, bool) {
+	if raw > countCap {
+		return countCap, true
+	}
+	return raw, false
+}
+
+/*
+trimPage drops the probe row a listing asks for and names the pages on either
+side of the one that is left.
+
+A listing fetches one row more than it means to show. Which end that extra row
+lands on is the whole of the bookkeeping here: scanning towards older rows it
+is the oldest, and scanning towards newer ones — where the store hands back a
+reversed page — it is the newest. Its presence means there is more *in the
+direction of the scan*; a cursor having been given means there is something in
+the other direction, because that is where the request came from.
+
+The two cursors are then the edges of what survives: `prev` the newest row on
+the page, `next` the oldest.
+*/
+func trimPage[T any](rows []T, limit int, backward, fromCursor bool, key func(T) string) (
+	kept []T, prev *string, next *string,
+) {
+	more := len(rows) > limit
+	kept = rows
+	if more {
+		if backward {
+			kept = rows[len(rows)-limit:]
+		} else {
+			kept = rows[:limit]
+		}
+	}
+	if len(kept) == 0 {
+		return kept, nil, nil
+	}
+	hasPrev, hasNext := fromCursor, fromCursor
+	if backward {
+		hasPrev = more
+	} else {
+		hasNext = more
+	}
+	if hasPrev {
+		edge := key(kept[0])
+		prev = &edge
+	}
+	if hasNext {
+		edge := key(kept[len(kept)-1])
+		next = &edge
+	}
+	return kept, prev, next
+}
+
 // encodeCursor renders a sort key as the opaque string clients pass back.
 // Opaque is the point: the columns behind a cursor are ours to change.
 func encodeCursor(parts ...string) string {

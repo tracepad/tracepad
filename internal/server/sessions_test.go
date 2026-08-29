@@ -160,7 +160,8 @@ func TestEmptySessionListing(t *testing.T) {
 
 	rec := h.get(t, "/api/v1/sessions")
 	expectStatus(t, rec, 200)
-	if body := strings.TrimSpace(rec.Body.String()); body != `{"sessions":[],"next_cursor":null}` {
+	want := `{"sessions":[],"next_cursor":null,"prev_cursor":null}`
+	if body := strings.TrimSpace(rec.Body.String()); body != want {
 		t.Errorf("body = %s, want an empty page", body)
 	}
 }
