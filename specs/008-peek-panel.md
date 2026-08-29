@@ -1,6 +1,6 @@
 # Spec 008 — The Peek Panel: a row opens beside the listing it came from
 
-**Status:** 🚧 IN PROGRESS
+**Status:** ✅ SHIPPED
 **Sprint:** September 2026
 
 > Reading a listing is a loop: open a row, judge it, come back, open the next
