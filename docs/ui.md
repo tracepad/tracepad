@@ -49,6 +49,30 @@ are the endpoint's four (`from`, `to`, `environment`, `user_id`), and a row
 opens the session: its totals over its traces, and a trace opens from there.
 Every number counts traces, which is what a session is a collection of.
 
+## The peek panel
+
+A row does not navigate away from its listing. It opens in a panel that
+slides in from the right, over the listing, which stays where it was — with
+its filters, the pages you already loaded and the position you scrolled to.
+Reading a listing is a loop, and this is the loop:
+
+- **Click a row** to open it, and click another to swap the panel over to it;
+  the row it is showing stays lit. **⌘/Ctrl-click** still opens the full page
+  in a new tab, because the row is a real link to it.
+- **‹ ›** in the panel's header walk the rows the listing has loaded. They
+  stop at the ends rather than fetching the next cursor page.
+- **⤢** opens what the panel is showing as a full page — `/traces/{id}` or
+  `/sessions/{id}`, the selected observation included. That is the link to
+  send somebody.
+- **Escape**, or **✕**, closes it. So does the browser's Back button: what
+  the panel shows is in the URL (`?peek=`), so a reload comes back to it.
+
+A session's panel goes one level deeper: a trace in its table replaces the
+panel's body, and **‹ Session** in the header returns to the session. On a
+phone the panel covers the screen, which is the whole reason it is there —
+closing it costs nothing, where a page navigation would read the listing
+again.
+
 **Stats** — four charts over `GET /api/v1/stats` — traces, cost, latency
 (p50 and p95) and errors — sharing one x cursor, plus breakdown tables by
 model and by environment with proportion bars. The bucket switcher is
@@ -71,7 +95,8 @@ hides a failure. Arrow keys walk the tree — up and down move, right opens,
 left closes and then leaves.
 
 The detail panel shows the observation's timings, level, model, usage and
-cost, then `input`, `output` and `metadata` as collapsible JSON.
+cost, then `input`, `output` and `metadata` as collapsible JSON. This is the
+same view the peek panel shows — one component, two frames around it.
 
 ## Payloads and the response budget
 

@@ -2,12 +2,33 @@
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import type { TraceRow } from '$lib/api/client.svelte';
 	import { ABSENT, cost, duration, timestamp } from '$lib/format';
+	import { modified } from '$lib/peek';
 
 	// The listing, one row per trace, mapping 1:1 onto what
 	// `GET /api/v1/traces` returns (Application contract). Nothing is computed
 	// here that the API did not send.
 
-	let { rows, selectedID }: { rows: TraceRow[]; selectedID?: string } = $props();
+	let {
+		rows,
+		onopen,
+		selectedID = null
+	}: {
+		rows: TraceRow[];
+		/**
+		 * What an unmodified left click does instead of following the link —
+		 * every caller opens the row in a peek panel (spec 008 #3). Left out,
+		 * the row is a plain link to the full page.
+		 */
+		onopen?: (id: string) => void;
+		/** The row the panel is showing, lit so that it is clear where it came from. */
+		selectedID?: string | null;
+	} = $props();
+
+	function open(event: MouseEvent, id: string) {
+		if (!onopen || modified(event)) return;
+		event.preventDefault();
+		onopen(id);
+	}
 
 	// A trace with a failing observation says so in words as well as in colour
 	// (accessibility floor): colour alone is not a message.
@@ -41,9 +62,12 @@
 				>
 					<td class="text-muted px-3 py-1.5 font-mono text-xs whitespace-nowrap tabular-nums">
 						<!-- The link covers the row, so the whole row is clickable and
-						     exactly one thing is tabbable. -->
+						     exactly one thing is tabbable. A plain click opens the peek
+						     panel; ⌘-click still opens the page it points at. -->
 						<a
 							href="/traces/{row.id}"
+							onclick={(event) => open(event, row.id)}
+							aria-current={row.id === selectedID ? 'true' : undefined}
 							class="after:absolute after:inset-0 after:content-['']"
 							title={row.id}
 						>

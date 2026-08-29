@@ -1,18 +1,30 @@
 <script lang="ts">
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
+	import ChevronLeft from '@lucide/svelte/icons/chevron-left';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import MessagesSquare from '@lucide/svelte/icons/messages-square';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { ApiError, api, type SessionRow } from '$lib/api/client.svelte';
+	import {
+		ApiError,
+		api,
+		type Session,
+		type SessionRow,
+		type Trace
+	} from '$lib/api/client.svelte';
 	import { readSessionFilters, sessionSearch, type SessionFilters } from '$lib/api/sessions';
 	import Button from '$lib/components/Button.svelte';
+	import CopyButton from '$lib/components/CopyButton.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
+	import PeekPanel from '$lib/components/PeekPanel.svelte';
 	import RangePicker from '$lib/components/RangePicker.svelte';
+	import SessionDetail from '$lib/components/SessionDetail.svelte';
 	import SessionTable from '$lib/components/SessionTable.svelte';
-	import { count } from '$lib/format';
+	import TraceDetail from '$lib/components/TraceDetail.svelte';
+	import { cost, count, duration, timestamp } from '$lib/format';
+	import { neighbour, peekSearch, readPeek } from '$lib/peek';
 
 	// Sessions over `GET /api/v1/sessions`, the endpoint this spec added for
 	// all three clients at once. No live mode here (spec 007 #8): a session's
@@ -91,6 +103,35 @@
 		goto(`/sessions${sessionSearch(next)}`, { keepFocus: true });
 	}
 
+	// The peek panel (spec 008). A session opens beside the listing, and a
+	// trace inside it replaces the panel's body one level deep (#9) — a
+	// session is a conversation, and reading one means walking its traces
+	// without losing the session.
+	const opened = $derived(readPeek(page.url.searchParams));
+	const peekID = $derived(opened.peek);
+	const drilled = $derived(opened.trace);
+	const selectedObs = $derived(page.url.searchParams.get('obs'));
+	let peekedSession = $state.raw<Session | null>(null);
+	let peekedTrace = $state.raw<Trace | null>(null);
+
+	const ids = $derived(rows.map((row) => row.id));
+	const previous = $derived(neighbour(ids, peekID, -1));
+	const following = $derived(neighbour(ids, peekID, 1));
+
+	/** Deepening pushes one history entry; moving sideways or up replaces (#6). */
+	function move(next: { peek: string | null; trace?: string | null }, deeper: boolean) {
+		const search = peekSearch(page.url.searchParams, next);
+		goto(`${page.url.pathname}${search}`, {
+			replaceState: !deeper,
+			keepFocus: true,
+			noScroll: true
+		});
+	}
+
+	const peek = (id: string | null) => move({ peek: id }, id !== null && peekID === null);
+	const drill = (traceID: string | null) =>
+		move({ peek: peekID, trace: traceID }, traceID !== null);
+
 	/** Commits a text filter on blur or Enter, never on every keystroke. */
 	function commit(name: 'environment' | 'user_id', value: string) {
 		const next = { ...filters };
@@ -163,7 +204,7 @@
 {/if}
 
 {#if rows.length > 0}
-	<SessionTable {rows} />
+	<SessionTable {rows} onopen={peek} selectedID={peekID} />
 	<div class="border-border flex shrink-0 items-center justify-center border-t px-4 py-2">
 		{#if cursor}
 			<Button onclick={loadMore} busy={loadingMore}>
@@ -202,4 +243,60 @@
 	</div>
 {:else}
 	<div class="flex-1"></div>
+{/if}
+
+{#if peekID}
+	<PeekPanel
+		label={drilled ? 'Trace' : 'Session'}
+		onclose={() => peek(null)}
+		onprev={drilled ? undefined : () => peek(previous)}
+		onnext={drilled ? undefined : () => peek(following)}
+		hasPrev={previous !== null}
+		hasNext={following !== null}
+		fullHref={drilled
+			? `/traces/${encodeURIComponent(drilled)}${
+					selectedObs ? `?obs=${encodeURIComponent(selectedObs)}` : ''
+				}`
+			: `/sessions/${encodeURIComponent(peekID)}`}
+		fullLabel={drilled ? 'Open this trace as a page' : 'Open this session as a page'}
+	>
+		{#snippet title()}
+			{#if drilled}
+				<!-- The way back up: this layer replaced the session's own table,
+				     so the breadcrumb is what returns to it (spec 008 #9). -->
+				<button
+					type="button"
+					onclick={() => drill(null)}
+					class="text-muted hover:text-fg pointer-coarse:min-h-11 flex shrink-0 cursor-pointer
+						items-center gap-0.5 whitespace-nowrap transition-colors duration-100"
+				>
+					<ChevronLeft class="size-3.5" />
+					Session
+				</button>
+				<h2 class="truncate text-lg font-semibold tracking-tight">
+					{peekedTrace?.name ?? 'Trace'}
+				</h2>
+			{:else}
+				<h2 class="shrink-0 text-lg font-semibold tracking-tight">Session</h2>
+			{/if}
+		{/snippet}
+		{#snippet meta()}
+			{#if drilled}
+				{#if peekedTrace}
+					<span class="hidden font-mono sm:inline">{timestamp(peekedTrace.timestamp)}</span>
+					<span class="hidden tabular-nums md:inline">{duration(peekedTrace.latency_ms)}</span>
+					<span class="hidden tabular-nums md:inline">{cost(peekedTrace.total_cost)}</span>
+				{/if}
+			{:else}
+				<span class="truncate font-mono">{peekID}</span>
+				<CopyButton text={peekID} label="Copy the session id" />
+			{/if}
+		{/snippet}
+
+		{#if drilled}
+			<TraceDetail traceID={drilled} bind:trace={peekedTrace} />
+		{:else}
+			<SessionDetail sessionID={peekID} bind:session={peekedSession} onopen={drill} />
+		{/if}
+	</PeekPanel>
 {/if}

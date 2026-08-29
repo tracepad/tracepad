@@ -2,13 +2,30 @@
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import type { SessionRow } from '$lib/api/client.svelte';
 	import { ABSENT, cost, count, timestamp } from '$lib/format';
+	import { modified } from '$lib/peek';
 
 	// The session listing, one row per session, mapping 1:1 onto what
 	// `GET /api/v1/sessions` returns. Every number counts traces, which is what
 	// a session is a collection of — the column headers say so rather than
 	// leaving it to be guessed.
 
-	let { rows }: { rows: SessionRow[] } = $props();
+	let {
+		rows,
+		onopen,
+		selectedID = null
+	}: {
+		rows: SessionRow[];
+		/** An unmodified left click opens the peek panel instead (spec 008 #3). */
+		onopen?: (id: string) => void;
+		/** The row the panel is showing. */
+		selectedID?: string | null;
+	} = $props();
+
+	function open(event: MouseEvent, id: string) {
+		if (!onopen || modified(event)) return;
+		event.preventDefault();
+		onopen(id);
+	}
 
 	const numeric = 'px-3 py-1.5 text-right tabular-nums';
 </script>
@@ -29,12 +46,20 @@
 		</thead>
 		<tbody>
 			{#each rows as row (row.id)}
-				<tr class="border-border hover:bg-raised relative border-b transition-colors duration-100">
+				<tr
+					class={[
+						'border-border hover:bg-raised relative border-b transition-colors duration-100',
+						row.id === selectedID && 'bg-accent-soft'
+					]}
+				>
 					<td class="text-muted px-3 py-1.5 font-mono text-xs whitespace-nowrap tabular-nums">
 						<!-- The link covers the row, so the whole row is clickable and
-						     exactly one thing is tabbable. -->
+						     exactly one thing is tabbable. A plain click opens the peek
+						     panel; ⌘-click still opens the page it points at. -->
 						<a
 							href="/sessions/{encodeURIComponent(row.id)}"
+							onclick={(event) => open(event, row.id)}
+							aria-current={row.id === selectedID ? 'true' : undefined}
 							class="after:absolute after:inset-0 after:content-['']"
 							title={row.id}
 						>
