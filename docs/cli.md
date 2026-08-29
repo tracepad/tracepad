@@ -169,7 +169,9 @@ tracepad stats --group-by model
 ```
 
 `--since` takes Go durations (`1h`, `30m`, `168h`) or an RFC 3339 instant.
-There is no day unit — `7d` is a usage error, not a week.
+There is no day unit — `7d` is a usage error, not a week. `--until` closes the
+other end, in the same two spellings, so a duration there is also counted back
+from now: `--since 48h --until 24h` is the day before yesterday.
 
 The table's second column names what is being counted: grouping by hour, day
 or environment counts **traces**, grouping by model counts **observations**,

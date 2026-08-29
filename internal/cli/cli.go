@@ -112,10 +112,10 @@ func Run(ctx context.Context, opt Options) int {
 
 // Usage is the client half of the binary's help text.
 const Usage = `Client commands (they talk to a running server over HTTP):
-  tracepad traces ls    [--env E] [--error] [--since 1h] [--user U] [--session S] [--name N]
-                        [--tag T] [--min-cost C] [--fields a,b] [--limit N]
+  tracepad traces ls    [--env E] [--error] [--since 1h] [--until T] [--user U] [--session S]
+                        [--name N] [--tag T] [--min-cost C] [--fields a,b] [--limit N]
   tracepad traces show  <trace-id> [--full]
-  tracepad traces last  [--error] [--env E] [--since 1h] [--full]
+  tracepad traces last  [--error] [--env E] [--since 1h] [--until T] [--full]
   tracepad tail         [--env E] [--error] [--interval 2s] [--limit N]
   tracepad sessions ls   [--since 1h] [--until T] [--env E] [--user U] [--limit N]
   tracepad sessions show <session-id> [--limit N]
@@ -124,7 +124,8 @@ const Usage = `Client commands (they talk to a running server over HTTP):
   tracepad prompts get  <name> [--label L | --version N]
   tracepad prompts push <name> --file prompt.json [--label L] [--message M]
   tracepad prompts diff <name> --from N --to M
-  tracepad stats        [--group-by hour|day|model|environment] [--since 1h] [--env E]
+  tracepad stats        [--group-by hour|day|model|environment] [--since 1h]
+                        [--until T] [--env E]
   tracepad system
 
 Administration (spec 005). Every destructive command shows what it would do
