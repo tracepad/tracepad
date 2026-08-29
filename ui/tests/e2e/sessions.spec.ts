@@ -34,23 +34,21 @@ test('a filter narrows the listing and stays in the URL', async ({ page }) => {
 	await expect(page.getByPlaceholder('Environment')).toHaveValue('staging');
 });
 
-test('a session opens onto its traces, and a trace onto its tree', async ({ page }) => {
+test('a session page opens onto its traces, and a trace into a panel', async ({ page }) => {
 	await signIn(page);
-	await page.goto('/sessions');
-	// By row rather than by position: the two sessions were last active within
-	// milliseconds of each other, and which one sorts first is the server's
-	// business.
-	await page.getByRole('row').filter({ hasText: 'session-77' }).getByRole('link').click();
+	// The page rather than the listing's panel: a row opens the panel now
+	// (spec 008), and this is the full page it points at.
+	await page.goto('/sessions/session-77');
 
-	await expect(page).toHaveURL(/\/sessions\/session-77$/);
 	// The totals header comes from `GET /api/v1/sessions/{id}`.
 	await expect(page.locator('dt').filter({ hasText: /^Traces$/ })).toBeVisible();
 	await expect(page.locator('dt').filter({ hasText: /^With errors$/ })).toBeVisible();
 	await expect(page.getByText('support-chat')).toBeVisible();
 
-	await page.getByRole('link', { name: /\d/ }).last().click();
-	await expect(page).toHaveURL(/\/traces\/[0-9a-f]{32}/);
-	await expect(page.getByRole('treeitem').first()).toBeVisible();
+	// Its trace table is a listing like any other (spec 008 #10).
+	await page.locator('tbody tr').last().getByRole('link').click();
+	await expect(page).toHaveURL(/\/sessions\/session-77\?peek=[0-9a-f]{32}$/);
+	await expect(page.getByRole('dialog').getByRole('treeitem').first()).toBeVisible();
 });
 
 test('an empty listing explains what a session is', async ({ page }) => {

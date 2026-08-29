@@ -5,16 +5,26 @@
 	import Pause from '@lucide/svelte/icons/pause';
 	import Play from '@lucide/svelte/icons/play';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
+	import { untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { ApiError, api, type TraceRow } from '$lib/api/client.svelte';
-	import { filterSearch, mergeRows, readFilters, type TraceFilters } from '$lib/api/traces';
+	import { ApiError, api, type Trace, type TraceRow } from '$lib/api/client.svelte';
+	import {
+		filterCount,
+		filterSearch,
+		mergeRows,
+		readFilters,
+		type TraceFilters
+	} from '$lib/api/traces';
 	import Button from '$lib/components/Button.svelte';
 	import CopyButton from '$lib/components/CopyButton.svelte';
 	import FilterBar from '$lib/components/FilterBar.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
+	import PeekPanel from '$lib/components/PeekPanel.svelte';
+	import TraceDetail from '$lib/components/TraceDetail.svelte';
 	import TraceTable from '$lib/components/TraceTable.svelte';
-	import { count } from '$lib/format';
+	import { cost, count, duration, timestamp } from '$lib/format';
+	import { neighbour, peekSearch, readPeek } from '$lib/peek';
 
 	const PAGE_SIZE = 50;
 	const POLL_MS = 5000;
@@ -23,7 +33,16 @@
 	// a link they can send (Application contract).
 	const filters = $derived(readFilters(page.url.searchParams));
 	const live = $derived(page.url.searchParams.get('live') === '1');
-	const filtering = $derived(page.url.search !== '' && page.url.search !== '?live=1');
+	const filtering = $derived(filterCount(filters) > 0);
+	/**
+	 * The filters as one string, which is what the load effect below depends
+	 * on. It cannot depend on `filters`: `readFilters` builds a fresh object
+	 * on every URL change and a `$derived` object is never equal to the last
+	 * one, so opening the panel — a `?peek=` on this same URL — re-ran the
+	 * load and threw away every page the reader had already paid for, which
+	 * is the one thing spec 008 #1 exists to prevent (PR #10 review).
+	 */
+	const filterKey = $derived(filterSearch(filters));
 
 	let rows = $state.raw<TraceRow[]>([]);
 	let cursor = $state.raw<string | null>(null);
@@ -44,13 +63,15 @@
 	let query: AbortController | null = null;
 
 	$effect(() => {
-		// Re-reads whenever the filters in the URL change. `filterSearch` is
-		// what makes that a dependency, and it is also the cheapest way to
-		// compare two filter sets.
-		filterSearch(filters);
+		// Reading the key is the subscription: this re-reads when the filters
+		// change and not when any other query parameter does. The filter set
+		// itself is taken untracked and passed down, because `load` reads it
+		// before its first `await` — inside this effect's own synchronous
+		// run — and reading the object there would subscribe to it after all.
+		void filterKey;
 		const controller = new AbortController();
 		query = controller;
-		load(controller.signal);
+		load(untrack(() => filters), controller.signal);
 		return () => controller.abort();
 	});
 
@@ -64,13 +85,13 @@
 		return () => clearInterval(timer);
 	});
 
-	async function load(signal: AbortSignal) {
+	async function load(active: TraceFilters, signal: AbortSignal) {
 		loading = true;
 		loadingMore = false;
 		failure = null;
 		liveFailure = null;
 		try {
-			const answer = await api.listTraces(filters, { limit: PAGE_SIZE }, signal);
+			const answer = await api.listTraces(active, { limit: PAGE_SIZE }, signal);
 			rows = answer.traces;
 			cursor = answer.next_cursor;
 		} catch (cause) {
@@ -136,6 +157,29 @@
 		goto(`/traces${filterSearch(next, nextLive ? { live: '1' } : {})}`, { keepFocus: true });
 	}
 
+	// The peek panel (spec 008): the trace a row opened, beside the listing
+	// that opened it. It is URL state like the filters are, so a reload comes
+	// back to it and Back closes it.
+	const peekID = $derived(readPeek(page.url.searchParams).peek);
+	const selectedObs = $derived(page.url.searchParams.get('obs'));
+	let peeked = $state.raw<Trace | null>(null);
+
+	// Only the rows already loaded (spec 008 #7); "next" cannot mean a cursor
+	// page nobody has fetched.
+	const ids = $derived(rows.map((row) => row.id));
+	const previous = $derived(neighbour(ids, peekID, -1));
+	const following = $derived(neighbour(ids, peekID, 1));
+
+	/** Opening pushes one entry; moving between rows replaces it (#6). */
+	function peek(id: string | null) {
+		const search = peekSearch(page.url.searchParams, { peek: id });
+		goto(`${page.url.pathname}${search}`, {
+			replaceState: id === null || peekID !== null,
+			keepFocus: true,
+			noScroll: true
+		});
+	}
+
 	const snippet = $derived(
 		`OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=${page.url.origin}/v1/traces\n` +
 			'OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer <your project key>"'
@@ -182,7 +226,7 @@
 {/if}
 
 {#if rows.length > 0}
-	<TraceTable {rows} />
+	<TraceTable {rows} onopen={peek} selectedID={peekID} />
 	<div class="border-border flex shrink-0 items-center justify-center border-t px-4 py-2">
 		{#if cursor}
 			<Button onclick={loadMore} busy={loadingMore}>
@@ -235,4 +279,35 @@
 	</div>
 {:else}
 	<div class="flex-1"></div>
+{/if}
+
+{#if peekID}
+	<PeekPanel
+		label="Trace"
+		onclose={() => peek(null)}
+		onprev={() => peek(previous)}
+		onnext={() => peek(following)}
+		hasPrev={previous !== null}
+		hasNext={following !== null}
+		fullHref="/traces/{encodeURIComponent(peekID)}{selectedObs
+			? `?obs=${encodeURIComponent(selectedObs)}`
+			: ''}"
+		fullLabel="Open this trace as a page"
+	>
+		{#snippet title()}
+			<h2 class="truncate text-lg font-semibold tracking-tight">
+				{peeked?.name ?? 'Trace'}
+			</h2>
+		{/snippet}
+		{#snippet meta()}
+			{#if peeked}
+				<span class="hidden font-mono sm:inline">{timestamp(peeked.timestamp)}</span>
+				<span class="hidden tabular-nums md:inline">{duration(peeked.latency_ms)}</span>
+				<span class="hidden tabular-nums md:inline">{cost(peeked.total_cost)}</span>
+				<span class="hidden truncate font-mono lg:inline">{peeked.id}</span>
+				<CopyButton text={peeked.id} label="Copy the trace id" />
+			{/if}
+		{/snippet}
+		<TraceDetail traceID={peekID} bind:trace={peeked} />
+	</PeekPanel>
 {/if}

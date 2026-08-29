@@ -6,15 +6,16 @@
 # it and be argued about in review. Generated files do not count — the point of
 # the budget is code somebody has to read and maintain.
 #
-# The default is the budget of the newest spec that moved it: 3,813 lines after
-# spec 006 plus the ~3,500 spec 007 allows itself (spec 007 #13). Design §8's
-# 6-9k envelope for the finished MVP interface is what both numbers live under.
+# The default is the budget of the newest spec that moved it: 7,300 after spec
+# 007 (#13), then 8,300 for the peek panel (spec 008 #14). Design §8's 6-9k
+# envelope for the finished MVP interface is what every one of those numbers
+# lives under.
 #
 # Usage: scripts/ui-lines.sh [budget]
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BUDGET="${1:-7300}"
+BUDGET="${1:-8300}"
 
 cd "$ROOT"
 

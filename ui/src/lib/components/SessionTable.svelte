@@ -2,13 +2,34 @@
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import type { SessionRow } from '$lib/api/client.svelte';
 	import { ABSENT, cost, count, timestamp } from '$lib/format';
+	import { modified, selecting } from '$lib/peek';
 
 	// The session listing, one row per session, mapping 1:1 onto what
 	// `GET /api/v1/sessions` returns. Every number counts traces, which is what
 	// a session is a collection of — the column headers say so rather than
 	// leaving it to be guessed.
 
-	let { rows }: { rows: SessionRow[] } = $props();
+	let {
+		rows,
+		onopen,
+		selectedID = null
+	}: {
+		rows: SessionRow[];
+		/** An unmodified left click opens the peek panel instead (spec 008 #3). */
+		onopen?: (id: string) => void;
+		/** The row the panel is showing. */
+		selectedID?: string | null;
+	} = $props();
+
+	/** The row opens the panel; its cells stay selectable text (spec 008 #15). */
+	function open(event: MouseEvent, id: string) {
+		if (!onopen || modified(event)) return;
+		event.preventDefault();
+		if (selecting(event)) return;
+		// So that closing the panel returns focus to the row (PR #10 review).
+		(event.currentTarget as HTMLElement).querySelector('a')?.focus();
+		onopen(id);
+	}
 
 	const numeric = 'px-3 py-1.5 text-right tabular-nums';
 </script>
@@ -29,13 +50,27 @@
 		</thead>
 		<tbody>
 			{#each rows as row (row.id)}
-				<tr class="border-border hover:bg-raised relative border-b transition-colors duration-100">
+				<!-- The click is on the row, not on a link stretched over it: an
+				     overlay across the cells would make the session id in them
+				     impossible to select and copy (spec 008 #15). -->
+				<!-- svelte-ignore a11y_click_events_have_key_events -->
+				<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+				<tr
+					onclick={(event) => open(event, row.id)}
+					class={[
+						'border-border hover:bg-raised border-b transition-colors duration-100',
+						onopen && 'cursor-pointer',
+						row.id === selectedID && 'bg-accent-soft'
+					]}
+				>
 					<td class="text-muted px-3 py-1.5 font-mono text-xs whitespace-nowrap tabular-nums">
-						<!-- The link covers the row, so the whole row is clickable and
-						     exactly one thing is tabbable. -->
+						<!-- Exactly one thing in the row is tabbable, and it is a real
+						     link: ⌘-click and anything that reads links get the page it
+						     points at. Enter opens the panel, as a plain click does
+						     (spec 008 #16). -->
 						<a
 							href="/sessions/{encodeURIComponent(row.id)}"
-							class="after:absolute after:inset-0 after:content-['']"
+							aria-current={row.id === selectedID ? 'true' : undefined}
 							title={row.id}
 						>
 							{timestamp(row.last_seen)}

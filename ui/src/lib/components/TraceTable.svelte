@@ -2,12 +2,43 @@
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import type { TraceRow } from '$lib/api/client.svelte';
 	import { ABSENT, cost, duration, timestamp } from '$lib/format';
+	import { modified, selecting } from '$lib/peek';
 
 	// The listing, one row per trace, mapping 1:1 onto what
 	// `GET /api/v1/traces` returns (Application contract). Nothing is computed
 	// here that the API did not send.
 
-	let { rows, selectedID }: { rows: TraceRow[]; selectedID?: string } = $props();
+	let {
+		rows,
+		onopen,
+		selectedID = null
+	}: {
+		rows: TraceRow[];
+		/**
+		 * What an unmodified left click does instead of following the link —
+		 * every caller opens the row in a peek panel (spec 008 #3). Left out,
+		 * the row is a plain link to the full page.
+		 */
+		onopen?: (id: string) => void;
+		/** The row the panel is showing, lit so that it is clear where it came from. */
+		selectedID?: string | null;
+	} = $props();
+
+	/**
+	 * The whole row opens the panel, but the row's cells stay ordinary
+	 * selectable text (spec 008 #15): a click that came out of a selection
+	 * opens nothing, and it does not follow the row's link either.
+	 */
+	function open(event: MouseEvent, id: string) {
+		if (!onopen || modified(event)) return;
+		event.preventDefault();
+		if (selecting(event)) return;
+		// The panel gives focus back to whatever opened it, and a click on a
+		// cell leaves it on the body; the row's own link is where the reader
+		// actually is (PR #10 review).
+		(event.currentTarget as HTMLElement).querySelector('a')?.focus();
+		onopen(id);
+	}
 
 	// A trace with a failing observation says so in words as well as in colour
 	// (accessibility floor): colour alone is not a message.
@@ -33,18 +64,29 @@
 		</thead>
 		<tbody>
 			{#each rows as row (row.id)}
+				<!-- The click is on the row and the link is inside it, rather than a
+				     link stretched over the row: an overlay that covers the cells
+				     makes every value in them undraggable, and a listing whose ids
+				     cannot be copied out is a listing you have to retype from
+				     (spec 008 #15). The keyboard path is the link. -->
+				<!-- svelte-ignore a11y_click_events_have_key_events -->
+				<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 				<tr
+					onclick={(event) => open(event, row.id)}
 					class={[
-						'border-border hover:bg-raised relative border-b transition-colors duration-100',
+						'border-border hover:bg-raised border-b transition-colors duration-100',
+						onopen && 'cursor-pointer',
 						row.id === selectedID && 'bg-accent-soft'
 					]}
 				>
 					<td class="text-muted px-3 py-1.5 font-mono text-xs whitespace-nowrap tabular-nums">
-						<!-- The link covers the row, so the whole row is clickable and
-						     exactly one thing is tabbable. -->
+						<!-- Exactly one thing in the row is tabbable, and it is a real
+						     link: ⌘-click, a middle click and anything that reads links
+						     get the page it points at. Enter opens the panel, the same
+						     as a plain click does (spec 008 #16). -->
 						<a
 							href="/traces/{row.id}"
-							class="after:absolute after:inset-0 after:content-['']"
+							aria-current={row.id === selectedID ? 'true' : undefined}
 							title={row.id}
 						>
 							{timestamp(row.timestamp)}

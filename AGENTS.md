@@ -30,6 +30,12 @@ API. This file routes; it does not duplicate what specs and docs say.
   needed it — plus the Sessions, Stats and Settings screens, a shared time
   range control, and the admin token as a second UI credential that never
   touches the data plane.
+- ✅ Spec 008 (peek panel) shipped: a row on any listing opens in a panel
+  over it rather than navigating away — `?peek=` in the URL, the full-page
+  routes kept as the canonical link, and the trace and session detail bodies
+  extracted so the page and the panel render the same component. `j`/`k`
+  walk the rows; a session panel drills one level into a trace. No server
+  change: it is a second arrangement of the same two GETs.
 - ✅ Spec 005 (retention & admin) shipped: schema 0005, the hourly sweeper
   writing every chunk through the group-commit writer, the admin API under
   `/api/v1/projects` with a dry-run/confirm contract on every destructive
@@ -54,7 +60,7 @@ API. This file routes; it does not duplicate what specs and docs say.
 | Retention and the sweeper | `internal/store/sweep.go`, `docs/retention.md`, spec 005 — every chunk is a `WriteJob`, never a second write connection |
 | Admin API (projects, keys, retention, erasure) | `internal/server/admin.go`, `internal/store/admin.go`, `docs/admin.md`, spec 005 — destructive endpoints are a dry run until `?confirm=` echoes the name, checked inside the write transaction |
 | Attribute mapping | `internal/mapping/rules.go` is the table; `mapping.go` applies it |
-| Web interface | `ui/` (SvelteKit SPA), `internal/ui/` (the embed and the tagless stub), `internal/server/ui.go` (delivery and the SPA fallback), `docs/ui.md`, specs 006 and 007 — the API types in `ui/src/lib/api/schema.d.ts` are generated from `openapi.json` and the gate fails on drift |
+| Web interface | `ui/` (SvelteKit SPA), `internal/ui/` (the embed and the tagless stub), `internal/server/ui.go` (delivery and the SPA fallback), `docs/ui.md`, specs 006, 007 and 008 — the API types in `ui/src/lib/api/schema.d.ts` are generated from `openapi.json` and the gate fails on drift |
 | Configuration | `internal/config/`, spec 001 + spec 002 Configuration tables |
 
 Attribute semantics for the `langfuse.*` dialect are derived from Langfuse
