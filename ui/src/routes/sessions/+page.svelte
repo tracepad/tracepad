@@ -303,10 +303,22 @@
 			{/if}
 		{/snippet}
 
+		<!-- Hidden rather than unmounted while a trace is open over it: the
+		     session's own listing has loaded pages and a scroll position, and
+		     the breadcrumb back would pay for both again — which is the cost
+		     Decisions 1 and 9 exist to avoid, one level down (PR #10, second
+		     review). The classes are exclusive rather than a `hidden` added to
+		     a `flex`, so that neither has to win on stylesheet order. -->
+		<div class={drilled ? 'hidden' : 'flex min-h-0 flex-1 flex-col'}>
+			<SessionDetail
+				sessionID={peekID}
+				bind:session={peekedSession}
+				onopen={drill}
+				selectedTraceID={drilled}
+			/>
+		</div>
 		{#if drilled}
 			<TraceDetail traceID={drilled} bind:trace={peekedTrace} />
-		{:else}
-			<SessionDetail sessionID={peekID} bind:session={peekedSession} onopen={drill} />
 		{/if}
 	</PeekPanel>
 {/if}

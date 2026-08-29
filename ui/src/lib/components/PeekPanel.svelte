@@ -59,16 +59,28 @@
 
 	let panel = $state<HTMLElement | null>(null);
 
-	// Whatever was focused when the panel opened is where focus goes back to,
-	// which is the row that opened it — the listing focuses its row link on
-	// the way in so that there is something to come back to. The body is not
-	// an answer: focusing it would move the reader nowhere and lose the place
-	// they were in (PR #10 review).
-	const opener = typeof document === 'undefined' ? null : document.activeElement;
+	// Where focus goes when the panel closes: the row it is showing. Captured
+	// at init — the listing focuses its row link on the way in, so there is
+	// something to come back to — and kept current as the panel walks. The
+	// panel is not remounted between rows, so a once-captured opener would
+	// send the reader back to the row they started the scan from rather than
+	// the one they are looking at (PR #10, second review).
+	let opener = typeof document === 'undefined' ? null : document.activeElement;
+
+	$effect(() => {
+		// `fullHref` is what changes when the panel moves to another row.
+		void fullHref;
+		// The listing marks its open row `aria-current="true"`; the sidebar's
+		// own current link is `aria-current="page"` and does not match.
+		const lit = document.querySelector('a[aria-current="true"]');
+		if (lit) opener = lit;
+	});
 
 	onMount(() => {
 		panel?.focus();
 		return () => {
+			// The body is not an answer: focusing it would move the reader
+			// nowhere and lose the place they were in.
 			if (opener instanceof HTMLElement && opener !== document.body && opener.isConnected) {
 				opener.focus();
 			}
@@ -84,14 +96,17 @@
 	 */
 	function onkeydown(event: KeyboardEvent) {
 		if (event.defaultPrevented) return;
+		// Nothing here is a shortcut where text is being typed: in a filter
+		// field Escape means "abandon this edit", not "close the panel"
+		// (PR #10, second review).
+		if (typing(event.target)) return;
 		if (event.key === 'Escape') {
 			onclose();
 			return;
 		}
-		// A letter is only a shortcut where a letter is not being typed, and
-		// never when it is part of a browser or system combination.
+		// A letter is only a shortcut when it is not part of a browser or
+		// system combination.
 		if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
-		if (typing(event.target)) return;
 		// Gated on the handler as well as on the end of the listing: a layer
 		// with nothing to walk (spec 008 #9) has no controls on screen, so a
 		// swallowed key would have nothing to explain itself with.

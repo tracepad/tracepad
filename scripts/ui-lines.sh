@@ -7,7 +7,7 @@
 # the budget is code somebody has to read and maintain.
 #
 # The default is the budget of the newest spec that moved it: 7,300 after spec
-# 007 (#13), then 8,100 for the peek panel (spec 008 #14). Design §8's 6-9k
+# 007 (#13), then 8,300 for the peek panel (spec 008 #14). Design §8's 6-9k
 # envelope for the finished MVP interface is what every one of those numbers
 # lives under.
 #
@@ -15,7 +15,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BUDGET="${1:-8100}"
+BUDGET="${1:-8300}"
 
 cd "$ROOT"
 

@@ -239,7 +239,32 @@ test('a session drills one level into a trace and back', async ({ page }) => {
 	await page.reload();
 	await expect(panel.getByRole('treeitem').first()).toBeVisible();
 
+	// Coming back up costs nothing: the session's own listing was hidden
+	// under the trace, not thrown away (PR #10, second review). The endpoint
+	// here is the session itself — `/sessions/{id}` — and not the listing.
+	let reads = 0;
+	page.on('request', (request) => {
+		if (/\/api\/v1\/sessions\/[^?]+/.test(request.url())) reads++;
+	});
 	await panel.getByRole('button', { name: 'Session' }).click();
 	await expect(page).toHaveURL(/\/sessions\?peek=session-77$/);
 	await expect(panel.getByText('support-chat')).toBeVisible();
+	expect(reads).toBe(0);
+});
+
+test('closing after a walk returns focus to the row on screen', async ({ page }, testInfo) => {
+	test.skip(testInfo.project.name !== 'desktop', 'a phone has no focus ring to return');
+	await signIn(page);
+	await rows(page).first().getByRole('link').click();
+	const panel = page.getByRole('dialog');
+
+	// Three rows along, the row the reader is looking at is not the one they
+	// opened, and that is where closing has to put them back.
+	await panel.getByRole('button', { name: 'Next row' }).click();
+	await panel.getByRole('button', { name: 'Next row' }).click();
+	const lit = await page.locator('a[aria-current="true"]').getAttribute('title');
+
+	await page.keyboard.press('Escape');
+	await expect(page.getByRole('dialog')).toHaveCount(0);
+	expect(await page.evaluate(() => document.activeElement?.getAttribute('title'))).toBe(lit);
 });
