@@ -40,25 +40,19 @@
 		hasPrev: boolean;
 		hasNext: boolean;
 		/**
-		 * A page is in flight. Every control below is dead until it lands:
-		 * the cursors on screen still belong to the page being left, so a
-		 * second click would re-address the one just asked for and quietly
-		 * lose a turn (PR #11, fifth review).
+		 * A page is in flight, so every control is dead until it lands: the
+		 * cursors on screen still belong to the page being left, and a second
+		 * click would re-address the one just asked for and lose a turn.
 		 */
 		busy?: boolean;
 		/**
 		 * Whether this page already *is* an end, asked of the URL rather than
 		 * of the cursors that came back with it. « and » are anchors, not
 		 * steps — needing no cursor is what keeps them live on the empty page
-		 * a dead cursor strands somebody on.
-		 *
-		 * They are not symmetrical below. « is dead only at the newest
-		 * anchor, because that is the only place it cannot help: every other
-		 * page, including one walked back to that happens to have nothing
-		 * above it, is a page somebody may need out of. » is dead there too
-		 * *and* when the whole listing is already on screen, where it would
-		 * only re-address the same rows as `?direction=prev` and pause live
-		 * mode for it.
+		 * a dead cursor strands somebody on. They are not symmetrical: « is
+		 * dead only at the newest anchor, the one place it cannot help, while
+		 * » is dead there *and* when the whole listing is already on screen,
+		 * where it would re-address the same rows and pause live mode for it.
 		 */
 		atNewest: boolean;
 		atOldest: boolean;

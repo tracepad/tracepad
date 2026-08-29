@@ -5,6 +5,8 @@
 // Everything here is a pure function over a `URLSearchParams`, so the panel's
 // whole contract is testable without a browser and without a route.
 
+import type { PageState } from './page';
+
 /** `peek` names the row the panel is showing; on `/sessions` it is a session. */
 export const PEEK = 'peek';
 /** A session panel drilled one level into a trace (spec 008 #9). */
@@ -50,22 +52,34 @@ export function peekSearch(
 
 /**
  * A row as the listing orders it: newest first by `key`, ties broken by `id`
- * — the `(timestamp, id)` pair the server itself pages by (spec 009 #2).
+ * — the `(timestamp, id)` pair the server pages by (spec 009 #2). The key must
+ * be the one *this* listing sorted by: on a filtered sessions listing that is
+ * not the same span as the session's own `last_seen`.
  */
 export type Ordered = { id: string; key: string };
 
 /**
- * That order, as a comparison. Timestamps arrive as RFC3339 with trailing
- * zeros trimmed, so they cannot be compared as strings: `…:00Z` would sort
- * *after* `…:00.5Z`, because `Z` sorts after `.`. Parsed instead, with two
- * rows inside the same millisecond falling back to the id — which is the
- * tie-break the server uses anyway, and which also catches the row that
- * arrived without a date to place it by.
+ * A key as something comparable as text. The API formats instants as UTC
+ * `RFC3339Nano`, which trims trailing zeros, so `…:00Z` sorts *after*
+ * `…:00.5Z` as it stands; padding the fraction back to nine digits restores
+ * the order, to the same nanosecond the server sorts by. `Date.parse` would
+ * not — it truncates to milliseconds, and one millisecond is a whole parallel
+ * fan-out. A row the server could not date arrives with no key at all, and
+ * sorts last here as it does there.
  */
+function sortable(key: string): string {
+	if (key === '') return '';
+	const instant = key.endsWith('Z') ? key.slice(0, -1) : key;
+	const dot = instant.indexOf('.');
+	if (dot < 0) return `${instant}.000000000`;
+	return instant.slice(0, dot + 1) + instant.slice(dot + 1).padEnd(9, '0');
+}
+
+/** That order, as a comparison: newest first, ties broken by id descending. */
 function compare(a: Ordered, b: Ordered): number {
-	const first = Date.parse(a.key);
-	const second = Date.parse(b.key);
-	if (first !== second && Number.isFinite(first) && Number.isFinite(second)) return second - first;
+	const first = sortable(a.key);
+	const second = sortable(b.key);
+	if (first !== second) return first < second ? 1 : -1;
 	return a.id === b.id ? 0 : a.id > b.id ? -1 : 1;
 }
 
@@ -73,11 +87,8 @@ function compare(a: Ordered, b: Ordered): number {
  * The row `step` places from `at` on a page ordered newest first: the nearest
  * one strictly older (`1`) or strictly newer (`-1`), or `null` when the page
  * holds no such row — which is where the caller turns the page (spec 009 #6).
- *
- * `at` need not be *on* the page, and that is the whole reason the search is
- * by order rather than by index: a live tick pushes the panel's row off the
- * oldest end, a sent link or a resized page can leave it off the newest one,
- * and one question answers every side it can go missing from (spec 009 #13).
+ * `at` need not be *on* the page, and that is the whole point: it can go
+ * missing off either end, and one question answers every side (spec 009 #13).
  */
 export function neighbour(
 	page: readonly Ordered[],
@@ -95,25 +106,56 @@ export function neighbour(
 	return newer;
 }
 
+/** Whether a walk does anything: a row that way on this page, or a page to
+ * turn to find one. */
+export function walkable(
+	page: readonly Ordered[],
+	at: Ordered | null,
+	step: 1 | -1,
+	cursor: string | null
+): boolean {
+	return at !== null && (neighbour(page, at, step) !== null || cursor !== null);
+}
+
 /**
- * Where to land once a page has turned under a walk: the nearest row in the
- * direction asked, and failing that the nearest row at all.
- *
- * The walk carries its own row across the turn rather than a side of the new
- * page to enter at: a side is right only when the row was at the edge it
- * stepped off. The second reading covers a page holding nothing at all on the
- * side the reader was heading for.
+ * A walk that ran out of page and turned it (spec 009 #6): the row it walked
+ * from, and the page it is waiting for. Held rather than acted on, because
+ * clearing it when the turn aborts the load it interrupted would lose it,
+ * while never clearing it let an unrelated load inherit it.
  */
-export function landing(page: readonly Ordered[], at: Ordered | null, step: 1 | -1): string | null {
-	return neighbour(page, at, step) ?? neighbour(page, at, -step as 1 | -1);
+export type Rolling = {
+	from: Ordered;
+	step: 1 | -1;
+	cursor: string;
+	direction: PageState['direction'];
+};
+
+/**
+ * The row a landed page should open, or `null` if this is not the page the
+ * walk asked for. Direction as well as cursor: on a page of one row the two
+ * cursors are the same key, so a `‹` walk and a `›` click would otherwise
+ * match each other's intent (PR #11, third review).
+ *
+ * It lands on the nearest row in the direction asked, and failing that the
+ * nearest row at all — the walk carries its own row across the turn rather
+ * than a side of the new page to enter at, because a side is right only when
+ * the walk began at the edge it stepped off.
+ */
+export function settled(
+	intent: Rolling | null,
+	at: PageState,
+	page: readonly Ordered[]
+): string | null {
+	if (!intent || intent.cursor !== at.cursor || intent.direction !== at.direction) return null;
+	const { from, step } = intent;
+	return neighbour(page, from, step) ?? neighbour(page, from, -step as 1 | -1);
 }
 
 /**
  * Where the panel's own row sits in that order: read off the page when it is
- * one of the rows on it, and otherwise off the detail the panel is already
- * showing. `null` when neither can say — the moment between a deep link and
- * its detail arriving — and a walk from an unknown position would be a guess,
- * so it does not move.
+ * one of the rows on it, and otherwise off the detail the panel is showing.
+ * `null` when neither can say, and a walk from an unknown position would be a
+ * guess, so it does not move.
  */
 export function anchor(
 	page: readonly Ordered[],

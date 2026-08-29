@@ -106,8 +106,7 @@ test('a walk from a row this page does not hold takes the nearest one', async ({
 	await page.goto('/traces?limit=2');
 
 	// A link somebody sent: a page, and a panel open on a trace that is not on
-	// it — the state retention and a live tick also leave behind. Built here by
-	// noting the second row of the first page and then turning to the second.
+	// it — the state retention and a live tick also leave behind.
 	await rows(page).nth(1).getByRole('link').click();
 	const behind = new URL(page.url()).searchParams.get('peek') ?? '';
 	await page.keyboard.press('Escape');
@@ -117,8 +116,8 @@ test('a walk from a row this page does not hold takes the nearest one', async ({
 	deep.searchParams.set('peek', behind);
 
 	await page.goto(deep.toString());
-	// The panel's own row has to have landed: until it says where it sits, the
-	// walk has no position to walk from and deliberately does not move.
+	// Until the panel's row says where it sits, the walk deliberately does not
+	// move, so this waits for the detail rather than for the panel.
 	await expect(page.getByRole('button', { name: 'Copy the trace id' })).toBeVisible();
 	await expect(page.locator('tbody [aria-current="true"]')).toHaveCount(0);
 

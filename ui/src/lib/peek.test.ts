@@ -107,6 +107,27 @@ describe('walking a page by its order', () => {
 		expect(neighbour(ticks, ticks[0], 1)).toBe('x');
 	});
 
+	it('separates two rows inside the same millisecond', () => {
+		// What a parallel fan-out produces. The ids run the other way to the
+		// instants, so a comparison rounded to milliseconds makes each row
+		// invisible to the other and `j` skips one (PR #11, sixth review).
+		const burst = [
+			{ id: '111', key: '2026-08-29T10:00:00.123456789Z' },
+			{ id: '999', key: '2026-08-29T10:00:00.123111111Z' }
+		];
+		expect(neighbour(burst, burst[0], 1)).toBe('999');
+		expect(neighbour(burst, burst[1], -1)).toBe('111');
+	});
+
+	it('puts a row the server could not date last, not among the dated ones', () => {
+		// The field is absent when the trace carried no start time; placing
+		// those by id instead would strand the walk on one of them.
+		const undated = [{ id: 'aaa', key: at(10) }, { id: 'bbb', key: at(9) }, { id: 'zzz', key: '' }];
+		expect(neighbour(undated, undated[1], 1)).toBe('zzz');
+		expect(neighbour(undated, undated[2], -1)).toBe('bbb');
+		expect(neighbour(undated, undated[2], 1)).toBeNull();
+	});
+
 	it('breaks a tie on the id, the way the server does', () => {
 		// Same instant, so the page is ordered by id descending (spec 009 #2).
 		const same = [

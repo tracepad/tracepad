@@ -26,7 +26,7 @@
 		readPage,
 		type PageState
 	} from '$lib/page';
-	import { anchor, landing, neighbour, peekSearch, readPeek, type Ordered } from '$lib/peek';
+	import { anchor, neighbour, peekSearch, readPeek, settled, walkable, type Rolling } from '$lib/peek';
 
 	const POLL_MS = 5000;
 
@@ -207,43 +207,22 @@
 		peeked?.id && peeked.timestamp ? { id: peeked.id, key: peeked.timestamp } : null
 	);
 	const position = $derived(anchor(ordered, peekID, showing));
-	/** A key does something when there is a row that way, or a page to turn. */
-	const walkable = (step: 1 | -1, cursor: string | null) =>
-		position !== null && (neighbour(ordered, position, step) !== null || cursor !== null);
 
-	/**
-	 * A walk that ran out of page and turned it (spec 009 #6): `j` on the last
-	 * row opens the first row of the next page, so a scan does not stop at a
-	 * boundary that is an artefact of paging.
-	 *
-	 * It carries the row it walked *from*, so the arriving page is searched for
-	 * the nearest one to it rather than entered at a side (see `landing`), and
-	 * the page it waits for, because clearing the intent on abort would lose it
-	 * — a turn aborts the load it interrupts — while never clearing it let a
-	 * filter change inherit it and open the panel on a row nobody peeked into.
-	 */
-	let rolling = $state.raw<{
-		from: Ordered;
-		step: 1 | -1;
-		cursor: string;
-		direction: PageState['direction'];
-	} | null>(null);
+	/** A walk that ran out of page and turned it (spec 009 #6). */
+	let rolling = $state.raw<Rolling | null>(null);
 
 	function settle(at: PageState) {
-		const intent = rolling;
-		if (!intent) return;
+		const id = settled(rolling, at, ordered);
 		rolling = null;
-		// Direction as well as cursor: on a page of one row the two cursors
-		// are the same key, so a `‹` walk and a `›` button click would match
-		// each other's intent (PR #11, third review).
-		if (intent.cursor !== at.cursor || intent.direction !== at.direction) return;
-		const id = landing(ordered, intent.from, intent.step);
 		if (id) peek(id);
 	}
 
 	function walk(step: 1 | -1) {
-		// Nowhere to walk from until the panel's row has said where it sits.
-		if (position === null) return;
+		// Nowhere to walk from until the panel's row says where it sits, and
+		// nowhere while a page is in flight: the cursors still belong to the
+		// page being left, so a walk would turn back the turn already asked
+		// for (PR #11, sixth review; the bar goes dead for the same reason).
+		if (position === null || loading) return;
 		const id = neighbour(ordered, position, step);
 		if (id) {
 			peek(id);
@@ -394,8 +373,8 @@
 		onclose={() => peek(null)}
 		onprev={() => walk(-1)}
 		onnext={() => walk(1)}
-		hasPrev={walkable(-1, prevCursor)}
-		hasNext={walkable(1, nextCursor)}
+		hasPrev={walkable(ordered, position, -1, prevCursor)}
+		hasNext={walkable(ordered, position, 1, nextCursor)}
 		fullHref="/traces/{encodeURIComponent(peekID)}{selectedObs
 			? `?obs=${encodeURIComponent(selectedObs)}`
 			: ''}"

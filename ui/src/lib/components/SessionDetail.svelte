@@ -150,6 +150,7 @@
 			total={{ value: session.trace_count, capped: false }}
 			hasPrev={prevCursor !== null}
 			hasNext={nextCursor !== null}
+			busy={loading}
 			atNewest={isFirstPage(spot)}
 			atOldest={isLastPage(spot)}
 			onresize={(limit) => turn({ limit })}

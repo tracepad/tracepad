@@ -33,7 +33,7 @@
 		readPage,
 		type PageState
 	} from '$lib/page';
-	import { anchor, landing, neighbour, peekSearch, readPeek, type Ordered } from '$lib/peek';
+	import { anchor, neighbour, peekSearch, readPeek, settled, walkable, type Rolling } from '$lib/peek';
 
 	// Sessions over `GET /api/v1/sessions`, the endpoint this spec added for
 	// all three clients at once. No live mode here (spec 007 #8): a session's
@@ -157,13 +157,16 @@
 	// Walked by order, not by index (spec 009 #13). The key is `last_seen`,
 	// which is the `MAX(timestamp)` this listing is sorted by.
 	const ordered = $derived(rows.map((row) => ({ id: row.id, key: row.last_seen ?? '' })));
+	// Only unfiltered: this listing sorts by `MAX(timestamp)` over the traces
+	// the filters selected, while `GET /sessions/{id}` reports the session's
+	// whole life. Under a window those are different spans, and placing a row
+	// by the wrong one is worse than not placing it (PR #11, sixth review).
 	const showing = $derived(
-		peekedSession?.last_seen ? { id: peekedSession.id, key: peekedSession.last_seen } : null
+		!filtering && peekedSession?.last_seen
+			? { id: peekedSession.id, key: peekedSession.last_seen }
+			: null
 	);
 	const position = $derived(anchor(ordered, peekID, showing));
-	/** A key does something when there is a row that way, or a page to turn. */
-	const walkable = (step: 1 | -1, cursor: string | null) =>
-		position !== null && (neighbour(ordered, position, step) !== null || cursor !== null);
 
 	/** Deepening pushes one history entry; moving sideways or up replaces (#6). */
 	function move(next: { peek: string | null; trace?: string | null }, deeper: boolean) {
@@ -192,34 +195,20 @@
 	});
 	const lastDrilled = $derived(visited?.session === peekID ? (visited?.trace ?? null) : null);
 
-	/**
-	 * A walk that ran out of page and turned it (spec 009 #6). It carries the
-	 * row it walked from, so the arriving page is searched for the nearest one
-	 * to it rather than entered at a side; and the page it waits for, so an
-	 * aborted turn keeps its intent and an unrelated load cannot inherit it.
-	 */
-	let rolling = $state.raw<{
-		from: Ordered;
-		step: 1 | -1;
-		cursor: string;
-		direction: PageState['direction'];
-	} | null>(null);
+	/** A walk that ran out of page and turned it (spec 009 #6). */
+	let rolling = $state.raw<Rolling | null>(null);
 
 	/** Called by `load` once a page has landed. */
 	function settle(at: PageState) {
-		const intent = rolling;
-		if (!intent) return;
+		const id = settled(rolling, at, ordered);
 		rolling = null;
-		// Direction too: on a one-row page both cursors are the same key
-		// (PR #11, third review).
-		if (intent.cursor !== at.cursor || intent.direction !== at.direction) return;
-		const id = landing(ordered, intent.from, intent.step);
 		if (id) peek(id);
 	}
 
 	function walk(step: 1 | -1) {
-		// Nowhere to walk from until the panel's row has said where it sits.
-		if (position === null) return;
+		// Nor while a page is in flight: the cursors still belong to the page
+		// being left (see the Traces screen).
+		if (position === null || loading) return;
 		const id = neighbour(ordered, position, step);
 		if (id) {
 			peek(id);
@@ -369,8 +358,8 @@
 		onclose={() => peek(null)}
 		onprev={drilled ? undefined : () => walk(-1)}
 		onnext={drilled ? undefined : () => walk(1)}
-		hasPrev={walkable(-1, prevCursor)}
-		hasNext={walkable(1, nextCursor)}
+		hasPrev={walkable(ordered, position, -1, prevCursor)}
+		hasNext={walkable(ordered, position, 1, nextCursor)}
 		fullHref={drilled
 			? `/traces/${encodeURIComponent(drilled)}${
 					selectedObs ? `?obs=${encodeURIComponent(selectedObs)}` : ''
