@@ -117,8 +117,8 @@ func (r *run) tracesList(ctx context.Context, args []string) error {
 	}
 	addSome(query, "fields", fields)
 	addSome(query, "cursor", cursor)
-	if oldest || newer {
-		query.Set("direction", "prev")
+	if err := addWalk(query, cursor, oldest, newer); err != nil {
+		return err
 	}
 	if total {
 		query.Set("count", "1")
@@ -162,6 +162,26 @@ func walkOn(r *run, next, prev *string) {
 	if prev != nil {
 		fmt.Fprintf(r.opt.Stdout, "newer: --newer --cursor %s\n", *prev)
 	}
+}
+
+/*
+addWalk turns the two direction flags into the API's one parameter, and
+refuses the combination that would quietly mean something else.
+
+`--oldest` is "the far end", which is `direction=prev` with *no* cursor;
+`--newer --cursor X` is "the page above X", which is `direction=prev` *with*
+one. Given both, the cursor wins and the jump silently does not happen — so
+it is an error rather than a surprise (the house rule of spec 003 #23).
+*/
+func addWalk(query url.Values, cursor string, oldest, newer bool) error {
+	if oldest && cursor != "" {
+		return usageErrorf("--oldest starts at the far end and takes no --cursor; " +
+			"use --newer --cursor to walk back towards newer rows")
+	}
+	if oldest || newer {
+		query.Set("direction", "prev")
+	}
+	return nil
 }
 
 // matchCount renders a capped count: the number, or the number and a plus

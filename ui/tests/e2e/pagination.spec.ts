@@ -117,6 +117,24 @@ test('live is paused off the newest page, and can still be switched off', async 
 	await expect(page).not.toHaveURL(/live=1/);
 });
 
+test('an empty page off the newest one is not a dead end', async ({ page }) => {
+	await signIn(page);
+	// A filter that matches nothing, on the oldest page: no rows, and so no
+	// cursors either — the state where every *step* is impossible and only
+	// the anchors can help (PR #11, second review).
+	await page.goto('/traces?limit=2&direction=prev&environment=nowhere');
+
+	await expect(page.locator('tbody tr')).toHaveCount(0);
+	await expect(page.getByRole('button', { name: 'Previous page' })).toBeDisabled();
+	await expect(page.getByRole('button', { name: 'Next page' })).toBeDisabled();
+
+	// « is an anchor, not a step: it needs no cursor and is the way out.
+	const newest = page.getByRole('button', { name: 'Newest page' });
+	await expect(newest).toBeEnabled();
+	await newest.click();
+	await expect(page).not.toHaveURL(/direction=prev/);
+});
+
 test('the sessions listing pages the same way', async ({ page }) => {
 	await signIn(page);
 	await page.goto('/sessions?limit=1');

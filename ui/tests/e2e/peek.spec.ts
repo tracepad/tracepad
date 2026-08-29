@@ -38,14 +38,18 @@ test('a trace row opens the panel and says which row it came from', async ({ pag
 async function listingRequests(page: Page): Promise<() => number> {
 	let count = 0;
 	page.on('request', (request) => {
-		// The listing, not a trace: `/api/v1/traces?…` against `/traces/{id}`.
-		if (/\/api\/v1\/traces\?/.test(request.url())) count++;
+		const url = request.url();
+		// The listing, not a trace (`/api/v1/traces?…` against `/traces/{id}`)
+		// and not the capped count, which is its own request on its own
+		// trigger (spec 009 #4).
+		if (/\/api\/v1\/traces\?/.test(url) && !url.includes('count=1')) count++;
 	});
 	return () => count;
 }
 
 test('opening the panel does not re-read the listing under it', async ({ page }) => {
 	await signIn(page);
+	await expect(rows(page).first()).toBeVisible();
 	const listings = await listingRequests(page);
 	const before = listings();
 
@@ -68,9 +72,14 @@ test('opening the panel does not re-read the listing under it', async ({ page })
 test('opening a session panel does not re-read the sessions listing', async ({ page }) => {
 	await signIn(page);
 	await page.goto('/sessions');
+	// Counted only once the listing is on screen: the screen also asks for a
+	// capped count (spec 009 #4), and starting the tally mid-flight would
+	// catch that one arriving rather than anything the panel did.
+	await expect(rows(page).first()).toBeVisible();
 	let count = 0;
 	page.on('request', (request) => {
-		if (/\/api\/v1\/sessions\?/.test(request.url())) count++;
+		const url = request.url();
+		if (/\/api\/v1\/sessions\?/.test(url) && !url.includes('count=1')) count++;
 	});
 
 	await rows(page).filter({ hasText: 'session-77' }).getByRole('link').click();

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_PAGE_SIZE, isFirstPage, pageSearch, readPage } from './page';
+import { DEFAULT_PAGE_SIZE, isFirstPage, isLastPage, pageSearch, readPage } from './page';
 
 /**
  * The page is URL state like the filters and the panel beside it (spec 009
@@ -53,5 +53,19 @@ describe('the page in the URL', () => {
 		expect(isFirstPage(readPage(new URLSearchParams('cursor=CUR')))).toBe(false);
 		// The oldest page is not the first one, even with no cursor.
 		expect(isFirstPage(readPage(new URLSearchParams('direction=prev')))).toBe(false);
+	});
+
+	it('knows the two ends, which is a question about the URL', () => {
+		// The anchors « and » are answered from here rather than from the
+		// cursors of the page that arrived — an empty page has none, and it
+		// is exactly the page somebody needs the anchors from.
+		const ends = (search: string) => {
+			const state = readPage(new URLSearchParams(search));
+			return [isFirstPage(state), isLastPage(state)];
+		};
+		expect(ends('')).toEqual([true, false]);
+		expect(ends('direction=prev')).toEqual([false, true]);
+		expect(ends('cursor=CUR')).toEqual([false, false]);
+		expect(ends('cursor=CUR&direction=prev')).toEqual([false, false]);
 	});
 });

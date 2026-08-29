@@ -221,6 +221,13 @@ func TestWalkingBothWays(t *testing.T) {
 		t.Errorf("the oldest page is a dead end:\n%s", oldest.stdout)
 	}
 
+	// `--oldest` with a cursor would quietly stop being a jump: the cursor
+	// wins and the far end is never reached. Refused rather than surprising.
+	both := h.run(ctx, true, "traces", "ls", "--oldest", "--cursor", "whatever")
+	if both.code != ExitUsage {
+		t.Errorf("--oldest --cursor exited %d, want a usage error", both.code)
+	}
+
 	// And the way back is a command that runs.
 	fields := strings.Fields(oldest.stdout[strings.Index(oldest.stdout, "newer:"):])
 	back := h.run(ctx, true, "traces", "ls", "--limit", "1", fields[1], fields[2], fields[3])

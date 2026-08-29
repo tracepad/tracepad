@@ -18,7 +18,14 @@
 	import TraceDetail from '$lib/components/TraceDetail.svelte';
 	import TraceTable from '$lib/components/TraceTable.svelte';
 	import { cost, count, duration, timestamp } from '$lib/format';
-	import { DEFAULT_PAGE_SIZE, isFirstPage, pageSearch, readPage, type PageState } from '$lib/page';
+	import {
+		DEFAULT_PAGE_SIZE,
+		isFirstPage,
+		isLastPage,
+		pageSearch,
+		readPage,
+		type PageState
+	} from '$lib/page';
 	import { neighbour, peekSearch, readPeek } from '$lib/peek';
 
 	const POLL_MS = 5000;
@@ -108,14 +115,14 @@
 			rows = answer.traces;
 			nextCursor = answer.next_cursor;
 			prevCursor = answer.prev_cursor;
-			settle();
+			settle(at);
 		} catch (cause) {
 			if (signal.aborted) return;
 			rows = [];
 			nextCursor = prevCursor = null;
-			// A page that never arrived cannot be landed on: leaving the
-			// intent set would have the *next* successful load open the panel
-			// on an unrelated row (PR #11 review).
+			// A page that failed cannot be landed on. An *aborted* one is a
+			// different story — the turn itself aborts what it interrupted —
+			// so the intent survives that and is settled by matching cursors.
 			rolling = null;
 			failure = describe(cause);
 		} finally {
@@ -202,16 +209,22 @@
 	 * a page turns it and opens the first row of the next one, so a scan does
 	 * not stop at a boundary that is an artefact of paging (spec 009 #6).
 	 */
-	let rolling = $state.raw<'first' | 'last' | null>(null);
+	/**
+	 * Carries the cursor of the page it is waiting for, not just which edge
+	 * to land on. Clearing it on abort would lose it — the turn aborts the
+	 * load it interrupted — and not clearing it at all let a filter change
+	 * inherit the intent and open the panel on a row nobody peeked into
+	 * (PR #11, second review). Matching the cursor settles both: the page
+	 * that arrives either is the one the walk asked for, or is not.
+	 */
+	let rolling = $state.raw<{ edge: 'first' | 'last'; cursor: string } | null>(null);
 
-	function settle() {
-		if (!rolling || rows.length === 0) {
-			rolling = null;
-			return;
-		}
-		const row = rolling === 'first' ? rows[0] : rows[rows.length - 1];
+	function settle(at: PageState) {
+		const intent = rolling;
+		if (!intent) return;
 		rolling = null;
-		peek(row.id);
+		if (intent.cursor !== at.cursor || rows.length === 0) return;
+		peek(intent.edge === 'first' ? rows[0].id : rows[rows.length - 1].id);
 	}
 
 	function walk(step: 1 | -1) {
@@ -220,11 +233,18 @@
 			peek(id);
 			return;
 		}
+		// The peeked row is not on this page at all — a live tick can push it
+		// off the newest page — so there is no "next" relative to it. Reading
+		// on from this page's own edge beats turning to another one.
+		if (peekID !== null && !ids.includes(peekID)) {
+			if (rows.length > 0) peek(step === 1 ? rows[0].id : rows[rows.length - 1].id);
+			return;
+		}
 		if (step === 1 && nextCursor) {
-			rolling = 'first';
+			rolling = { edge: 'first', cursor: nextCursor };
 			turn({ cursor: nextCursor });
 		} else if (step === -1 && prevCursor) {
-			rolling = 'last';
+			rolling = { edge: 'last', cursor: prevCursor };
 			turn({ cursor: prevCursor, direction: 'prev' });
 		}
 	}
@@ -304,6 +324,8 @@
 		{total}
 		hasPrev={prevCursor !== null}
 		hasNext={nextCursor !== null}
+		atNewest={newest}
+		atOldest={isLastPage(spot)}
 		onresize={(limit) => turn({ limit })}
 		onfirst={() => turn({})}
 		onprev={() => turn({ cursor: prevCursor ?? undefined, direction: 'prev' })}

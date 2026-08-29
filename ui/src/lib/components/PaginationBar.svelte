@@ -21,6 +21,8 @@
 		total = null,
 		hasPrev,
 		hasNext,
+		atNewest,
+		atOldest,
 		onresize,
 		onfirst,
 		onprev,
@@ -33,8 +35,17 @@
 		rows: number;
 		/** The capped count, when the screen has asked for one. */
 		total?: { value: number; capped: boolean } | null;
+		/** Whether a *step* exists either way: the two cursors of this page. */
 		hasPrev: boolean;
 		hasNext: boolean;
+		/**
+		 * Whether this page already *is* an end. « and » are anchors, not
+		 * steps — they need no cursor to reach, so they stay live on a page
+		 * that has none, which is exactly the page somebody is stranded on
+		 * when the rows a cursor named are gone (PR #11, second review).
+		 */
+		atNewest: boolean;
+		atOldest: boolean;
 		onresize: (limit: number) => void;
 		onfirst: () => void;
 		onprev: () => void;
@@ -95,7 +106,7 @@
 		<button
 			type="button"
 			class={step}
-			disabled={!hasPrev}
+			disabled={atNewest}
 			aria-label="Newest page"
 			title="Newest page"
 			onclick={onfirst}
@@ -125,7 +136,7 @@
 		<button
 			type="button"
 			class={step}
-			disabled={!hasNext}
+			disabled={atOldest}
 			aria-label="Oldest page"
 			title="Oldest page"
 			onclick={onlast}

@@ -25,7 +25,14 @@
 	import SessionTable from '$lib/components/SessionTable.svelte';
 	import TraceDetail from '$lib/components/TraceDetail.svelte';
 	import { cost, count, duration, timestamp } from '$lib/format';
-	import { DEFAULT_PAGE_SIZE, isFirstPage, pageSearch, readPage, type PageState } from '$lib/page';
+	import {
+		DEFAULT_PAGE_SIZE,
+		isFirstPage,
+		isLastPage,
+		pageSearch,
+		readPage,
+		type PageState
+	} from '$lib/page';
 	import { neighbour, peekSearch, readPeek } from '$lib/peek';
 
 	// Sessions over `GET /api/v1/sessions`, the endpoint this spec added for
@@ -56,11 +63,9 @@
 	/** Bumped by the refresh control to re-run the load effect. */
 	let generation = $state(0);
 
-	// Every request on this screen belongs to one set of filters; changing them
-	// aborts the lot, so a "load more" in flight cannot append the previous
-	// query's page onto the new one (the bug spec 006's review found).
-	let query: AbortController | null = null;
-
+	// The controller no longer outlives the effect: "load more" was the only
+	// thing that reached for a request in flight from outside, and a window
+	// has no such thing (PR #11, second review).
 	$effect(() => {
 		// The key, not the filter object, and the object itself untracked:
 		// `load` reads it inside this effect's own synchronous run, which
@@ -68,7 +73,6 @@
 		void pageKey;
 		generation;
 		const controller = new AbortController();
-		query = controller;
 		load(untrack(() => filters), untrack(() => spot), controller.signal);
 		return () => controller.abort();
 	});
@@ -94,7 +98,7 @@
 			rows = answer.sessions;
 			nextCursor = answer.next_cursor;
 			prevCursor = answer.prev_cursor;
-			settle();
+			settle(at);
 		} catch (cause) {
 			if (signal.aborted) return;
 			rows = [];
@@ -186,17 +190,20 @@
 	 * the last row opens the first row of the next page, so a scan does not
 	 * stop at a boundary that is an artefact of paging.
 	 */
-	let rolling = $state.raw<'first' | 'last' | null>(null);
+	/**
+	 * Carries the cursor of the page it waits for, so that an aborted turn
+	 * keeps its intent and an unrelated load cannot inherit it (PR #11,
+	 * second review).
+	 */
+	let rolling = $state.raw<{ edge: 'first' | 'last'; cursor: string } | null>(null);
 
-	/** Called by `load` once the turned-to page has landed. */
-	function settle() {
-		if (!rolling || rows.length === 0) {
-			rolling = null;
-			return;
-		}
-		const row = rolling === 'first' ? rows[0] : rows[rows.length - 1];
+	/** Called by `load` once a page has landed. */
+	function settle(at: PageState) {
+		const intent = rolling;
+		if (!intent) return;
 		rolling = null;
-		peek(row.id);
+		if (intent.cursor !== at.cursor || rows.length === 0) return;
+		peek(intent.edge === 'first' ? rows[0].id : rows[rows.length - 1].id);
 	}
 
 	function walk(step: 1 | -1) {
@@ -205,11 +212,17 @@
 			peek(id);
 			return;
 		}
+		// The peeked row is not on this page: read on from this page's own
+		// edge rather than turning to another one.
+		if (peekID !== null && !ids.includes(peekID)) {
+			if (rows.length > 0) peek(step === 1 ? rows[0].id : rows[rows.length - 1].id);
+			return;
+		}
 		if (step === 1 && nextCursor) {
-			rolling = 'first';
+			rolling = { edge: 'first', cursor: nextCursor };
 			turn({ cursor: nextCursor });
 		} else if (step === -1 && prevCursor) {
-			rolling = 'last';
+			rolling = { edge: 'last', cursor: prevCursor };
 			turn({ cursor: prevCursor, direction: 'prev' });
 		}
 	}
@@ -302,6 +315,8 @@
 		{total}
 		hasPrev={prevCursor !== null}
 		hasNext={nextCursor !== null}
+		atNewest={isFirstPage(spot)}
+		atOldest={isLastPage(spot)}
 		onresize={(limit) => turn({ limit })}
 		onfirst={() => turn({})}
 		onprev={() => turn({ cursor: prevCursor ?? undefined, direction: 'prev' })}

@@ -144,9 +144,11 @@ func traceQuery(projectID string, filter TraceFilter) (string, []any) {
 	 ORDER BY timestamp ` + order + `, id ` + order + ` LIMIT ?`, args
 }
 
-// traceCountQuery counts the matches, stopping at `cap` rows. The subquery is
-// what bounds the work: `COUNT(*)` over a `LIMIT`ed set reads at most that
-// many rows, on any filter, indexed or not (spec 009 #4).
+// traceCountQuery counts the matches, stopping at `cap` of them. The subquery
+// bounds the *answer*, and the scan with it only where matches are plentiful:
+// `LIMIT` ends a scan once that many rows have matched, so a selective filter
+// over an unindexed column still reads to the end (spec 009 #12). The listing
+// beside it reads the same rows for the same reason.
 func traceCountQuery(projectID string, filter TraceFilter, cap int) (string, []any) {
 	where, args := traceConditions(projectID, filter)
 	args = append(args, cap)
@@ -322,7 +324,13 @@ func sessionQuery(projectID string, filter SessionFilter) (string, []any) {
 
 // sessionCountQuery counts the *sessions* a filter matches, capped. The
 // grouping happens inside the subquery, so the cap bounds groups rather than
-// traces — which is what the number on screen means (spec 009 #4).
+// traces — which is what the number on screen means.
+//
+// The cap bounds the answer, not the work, and here it bounds it least: the
+// groups have to be formed before they can be counted, so a window narrow
+// enough to make most sessions irrelevant is still walked in full (measured
+// on 500k rows: 23 ms unfiltered against 719 ms inside a 1 % window). Spec
+// 009 #12 is where that trade is written down rather than wished away.
 func sessionCountQuery(projectID string, filter SessionFilter, cap int) (string, []any) {
 	where, args := sessionConditions(projectID, filter)
 	args = append(args, cap)

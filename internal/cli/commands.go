@@ -64,8 +64,8 @@ func (r *run) sessionsList(ctx context.Context, args []string) error {
 	addSome(query, "environment", environment)
 	addSome(query, "user_id", user)
 	addSome(query, "cursor", cursor)
-	if oldest || newer {
-		query.Set("direction", "prev")
+	if err := addWalk(query, cursor, oldest, newer); err != nil {
+		return err
 	}
 	if total {
 		query.Set("count", "1")

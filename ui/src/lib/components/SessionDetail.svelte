@@ -4,7 +4,7 @@
 	import { untrack } from 'svelte';
 	import { ApiError, api, type Session, type TraceRow } from '$lib/api/client.svelte';
 	import { ABSENT, cost, count, timestamp } from '$lib/format';
-	import { DEFAULT_PAGE_SIZE, type PageState } from '$lib/page';
+	import { DEFAULT_PAGE_SIZE, isFirstPage, isLastPage, type PageState } from '$lib/page';
 	import PaginationBar from './PaginationBar.svelte';
 	import TraceTable from './TraceTable.svelte';
 
@@ -144,7 +144,7 @@
 		{/each}
 	</dl>
 
-	{#if traces.length > 0}
+	{#if traces.length > 0 || !isFirstPage(spot)}
 		<TraceTable rows={traces} {onopen} selectedID={selectedTraceID} />
 		<!-- The total here is exact and already known: `trace_count` is what
 		     the endpoint answers with, so this listing needs no count of its
@@ -155,6 +155,8 @@
 			total={{ value: session.trace_count, capped: false }}
 			hasPrev={prevCursor !== null}
 			hasNext={nextCursor !== null}
+			atNewest={isFirstPage(spot)}
+			atOldest={isLastPage(spot)}
 			onresize={(limit) => turn({ limit })}
 			onfirst={() => turn({})}
 			onprev={() => turn({ cursor: prevCursor ?? undefined, direction: 'prev' })}
@@ -162,6 +164,11 @@
 			onlast={() => turn({ direction: 'prev' })}
 			noun="trace"
 		/>
+		{#if traces.length === 0 && !loading}
+			<p class="text-subtle p-8 text-center">
+				Nothing on this page any more. Use « to go back to the newest.
+			</p>
+		{/if}
 	{:else}
 		<p class="text-subtle p-8 text-center">{ABSENT} This session holds no traces.</p>
 	{/if}

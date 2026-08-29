@@ -209,11 +209,16 @@ func pageSize(values url.Values) (int, error) {
 
 // The listing page parameters spec 009 adds beside `limit` and `cursor`.
 const (
-	// countCap bounds the work a count is allowed to do: `COUNT(*)` inside
-	// a `LIMIT`ed subquery reads at most this many rows on any filter,
-	// indexed or not, so the number appears at the same speed on every
-	// screen (#4). Above it the answer is "1000+", which is the question
-	// the reader was asking anyway.
+	// countCap bounds how many rows a count will *count* — not how many the
+	// query reads to find them. `LIMIT` ends a scan early only once that
+	// many rows have matched (spec 009 #12, correcting #4). Above the cap
+	// the answer is "1000+", which is the question the reader was asking.
+	//
+	// What that buys and what it does not: on a filter with many matches the
+	// count stops almost at once, and on a selective filter over a column no
+	// index covers it scans — but so does the listing beside it, and by more
+	// (measured on 500k rows: 260 ms against the listing's 864 ms). A count
+	// is not what makes such a screen slow.
 	countCap = 1000
 )
 

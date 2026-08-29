@@ -66,9 +66,11 @@ discards every row it skips, plus a full count on every filter change. In a
 listing sorted by time an ordinal is not an address anyway: nobody wants page
 40, they want 26 August — and the time range control answers that.
 
-The count beside the rows is capped at 1000, so a filter no index covers
-cannot make the screen slow; past that it reads `1000+`. It follows the
-filters, not the page, so turning a page does not re-count.
+The count beside the rows is capped at 1000 and reads `1000+` past that. It
+follows the filters, not the page, so turning a page does not re-count. The
+cap bounds the number, not always the work behind it — see
+[Counting](api.md#counting) for where that costs something — but it is always
+a fraction of what the listing on the same filter already costs.
 
 **Live** only runs on the newest page. Anywhere else the toggle is paused and
 says why: re-reading the newest page would replace the page you navigated to.

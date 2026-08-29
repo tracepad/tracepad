@@ -64,3 +64,14 @@ export function pageSearch(search: URLSearchParams, next: Partial<PageState> = {
 export function isFirstPage(state: PageState): boolean {
 	return state.cursor === null && state.direction === 'next';
 }
+
+/**
+ * True on the far end — the page « » reaches. Paired with `isFirstPage`,
+ * these two say whether an *anchor* would move anything, which is a question
+ * about the URL and not about the cursors of the page that arrived: an empty
+ * page has no cursors at all, and it is exactly the page somebody needs the
+ * anchors from (PR #11, second review).
+ */
+export function isLastPage(state: PageState): boolean {
+	return state.cursor === null && state.direction === 'prev';
+}

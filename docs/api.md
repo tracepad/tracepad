@@ -156,11 +156,19 @@ in: the direction is how a page was found, not how it is read.
 
 `total` counts what the **filters** match — not the page, and not what is
 left after the cursor. It stops at 1000: `total_capped: true` means the real
-number is larger and the count did not go looking for it. That bound is the
-point. A count is `COUNT(*)` inside a `LIMIT`ed subquery, so it reads at most
-a thousand rows on any filter, including the ones no index covers (`name`,
-`tag`, `status`, `min_cost`) — the number appears at the same speed on every
-screen, and no filter can make a listing slow by being unusual.
+number is larger and the count did not go looking for it.
+
+That cap bounds the **answer**. It bounds the work only where matches are
+plentiful, because `LIMIT` ends a scan once that many rows have *matched*: a
+selective filter over a column no index covers (`name`, `tag`, `status`,
+`min_cost`) is read to the end, and the session count — which has to form its
+groups before it can count them — is barely bounded at all. Measured on
+500 000 rows: an unfiltered trace count 1 ms, one matching nothing 260 ms; an
+unfiltered session count 23 ms, one inside a 1 % time window 719 ms.
+
+Worth the perspective, though: the listing beside it reads the same rows and
+then sorts them — 864 ms for that same 260 ms count. A count is a fraction of
+a screen that is already expensive for that filter, never the reason it is.
 
 It is off by default because the answer changes with the filters and not with
 the page: a client asks for it when the filters move, and pages without it.
