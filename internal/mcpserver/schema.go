@@ -54,6 +54,10 @@ func integer(description string) *jsonschema.Schema {
 	return &jsonschema.Schema{Type: "integer", Description: description}
 }
 
+func boolean(description string) *jsonschema.Schema {
+	return &jsonschema.Schema{Type: "boolean", Description: description}
+}
+
 // anything is a value the API returns verbatim — whatever the client logged.
 func anything(description string) *jsonschema.Schema {
 	return &jsonschema.Schema{Description: description}

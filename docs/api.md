@@ -98,7 +98,9 @@ choosing what to fetch.
 | `min_cost` | Traces whose total cost is at least this. A trace whose client provided no cost has none and never matches. |
 | `fields` | Comma-separated subset of the row fields. |
 | `limit` | 1–500, default 50. |
-| `cursor` | The `next_cursor` of the previous page. |
+| `cursor` | The `next_cursor` or `prev_cursor` of a previous page. |
+| `direction` | `next` (default) or `prev`. See [Paging](#paging). |
+| `count` | `1` adds `total` and `total_capped`. |
 
 A parameter the endpoint does not know is a `400`, and so is one sent without
 a value (`?environment=` is what an unset shell variable expands to, and
@@ -116,9 +118,55 @@ absent means "this trace said nothing", which is not the same as zero.
 
 ### Paging
 
-`next_cursor` is opaque; pass it back as `?cursor=`. It is a keyset over
-`(timestamp, id)`, so a trace ingested mid-walk cannot make the next page skip
-or repeat a row. `null` means there is no next page.
+Cursors are opaque; pass one back as `?cursor=`. They are a keyset over
+`(timestamp, id)`, so a trace ingested mid-walk cannot make a page skip or
+repeat a row — and page four hundred costs what page one costs, which no
+`OFFSET` can promise.
+
+Every listing answers with two of them:
+
+- **`next_cursor`** — the page after this one, towards older rows. `null` on
+  the oldest page.
+- **`prev_cursor`** — the page before it, towards newer rows, fetched with
+  `?direction=prev`. `null` on the newest page.
+
+`direction` also names the two ends, because **with no cursor it is an
+anchor**:
+
+```sh
+curl … "/api/v1/traces?limit=50"                  # the newest page
+curl … "/api/v1/traces?limit=50&direction=prev"   # the oldest page
+```
+
+The oldest page is a full page ending at the oldest row, not the remainder
+that walking forward happens to stop on: with five rows and pages of two,
+walking forward ends on one row and `direction=prev` answers with two. Both
+end on the same row.
+
+Rows always come back newest first, whichever direction the page was fetched
+in: the direction is how a page was found, not how it is read.
+
+### Counting
+
+`?count=1` adds two fields to a listing:
+
+```json
+{ "traces": [ … ], "total": 847, "total_capped": false }
+```
+
+`total` counts what the **filters** match — not the page, and not what is
+left after the cursor. It stops at 1000: `total_capped: true` means the real
+number is larger and the count did not go looking for it. That bound is the
+point. A count is `COUNT(*)` inside a `LIMIT`ed subquery, so it reads at most
+a thousand rows on any filter, including the ones no index covers (`name`,
+`tag`, `status`, `min_cost`) — the number appears at the same speed on every
+screen, and no filter can make a listing slow by being unusual.
+
+It is off by default because the answer changes with the filters and not with
+the page: a client asks for it when the filters move, and pages without it.
+
+`GET /api/v1/sessions/{id}` pages the same way but takes no `count`: its
+`trace_count` is that number already, and exactly.
 
 ## One trace
 

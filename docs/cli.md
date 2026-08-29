@@ -63,8 +63,13 @@ tracepad traces ls --env production --error --since 1h
 | `--fields` | Comma-separated subset of the row fields. |
 | `--limit` | 1–500, default 50. |
 | `--cursor` | Continue from a previous page. |
+| `--oldest` | Start at the far end of the listing instead of the newest page. |
+| `--total` | Also print how many traces match, counted up to 1000 (`847`, or `1000+`). |
 
 The table ends with the cursor for the next page when there is one.
+
+`--oldest` costs what any other page costs: pagination is a keyset, so "the
+end" is a direction to read the index in and not a count of rows to skip.
 
 ### `traces show`
 
@@ -117,7 +122,8 @@ tracepad sessions ls --since 24h --env production
 One row per session, most recent activity first: last seen, id, how many
 traces, how many of those failed, cost and when the session started.
 
-Filters: `--since`, `--until`, `--env`, `--user`, `--limit`, `--cursor`.
+Filters: `--since`, `--until`, `--env`, `--user`, `--limit`, `--cursor`,
+`--oldest`, `--total`.
 `--since` and `--until` bound the traces, so a session appears when any of
 its traces falls in the window and its totals then describe those traces.
 Paging works like `traces ls`: the last line prints the `--cursor` for the

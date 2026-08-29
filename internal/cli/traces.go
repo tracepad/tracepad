@@ -91,12 +91,19 @@ func (r *run) tracesList(ctx context.Context, args []string) error {
 		fields  string
 		cursor  string
 		limit   int
+		oldest  bool
+		total   bool
 	)
 	fs := r.flags("traces ls")
 	filters.register(fs)
 	fs.StringVar(&fields, "fields", "", "")
 	fs.StringVar(&cursor, "cursor", "", "")
 	fs.IntVar(&limit, "limit", 0, "")
+	// The two the API grew in spec 009. `--oldest` is `direction=prev` with
+	// no cursor — the far end of the listing, which keyset pagination
+	// reaches for the price of any other page.
+	fs.BoolVar(&oldest, "oldest", false, "")
+	fs.BoolVar(&total, "total", false, "")
 	if _, err := r.parse(fs, args, 0); err != nil {
 		return err
 	}
@@ -107,6 +114,12 @@ func (r *run) tracesList(ctx context.Context, args []string) error {
 	}
 	addSome(query, "fields", fields)
 	addSome(query, "cursor", cursor)
+	if oldest {
+		query.Set("direction", "prev")
+	}
+	if total {
+		query.Set("count", "1")
+	}
 	if err := addLimit(query, limit); err != nil {
 		return err
 	}
@@ -119,17 +132,31 @@ func (r *run) tracesList(ctx context.Context, args []string) error {
 		return r.emit(body)
 	}
 	listing, err := decode[struct {
-		Traces     []traceRow `json:"traces"`
-		NextCursor *string    `json:"next_cursor"`
+		Traces      []traceRow `json:"traces"`
+		NextCursor  *string    `json:"next_cursor"`
+		Total       *int       `json:"total"`
+		TotalCapped *bool      `json:"total_capped"`
 	}](body)
 	if err != nil {
 		return err
 	}
 	renderTraceTable(r.opt.Stdout, listing.Traces)
+	if listing.Total != nil {
+		fmt.Fprintf(r.opt.Stdout, "\n%s matching\n", matchCount(*listing.Total, listing.TotalCapped))
+	}
 	if listing.NextCursor != nil {
 		fmt.Fprintf(r.opt.Stdout, "\nmore: --cursor %s\n", *listing.NextCursor)
 	}
 	return nil
+}
+
+// matchCount renders a capped count: the number, or the number and a plus
+// where the server stopped counting rather than kept going (spec 009 #4).
+func matchCount(total int, capped *bool) string {
+	if capped != nil && *capped {
+		return fmt.Sprintf("%d+", total)
+	}
+	return strconv.Itoa(total)
 }
 
 func (r *run) tracesShow(ctx context.Context, args []string) error {

@@ -137,7 +137,24 @@ func (e expansionInput) apply(query url.Values) url.Values {
 // pagingProperties are the page size and the cursor, shared by every listing.
 func pagingProperties(properties map[string]*jsonschema.Schema) map[string]*jsonschema.Schema {
 	properties["limit"] = bounded(minLimit, maxLimit, "Rows per page, 1 to 500. Default 50.")
-	properties["cursor"] = text("The `next_cursor` of a previous page. Opaque; pass it back unchanged.")
+	properties["cursor"] = text("A `next_cursor` or `prev_cursor` of a previous page. Opaque; pass it back unchanged.")
+	return properties
+}
+
+// walkProperties are the two the trace and session listings add on top: which
+// way to page, and whether to count (spec 009). Not part of `pagingProperties`
+// on purpose — the scores and prompts listings take neither, and offering a
+// parameter their endpoint answers with a 400 would be a tool that lies about
+// itself.
+func walkProperties(properties map[string]*jsonschema.Schema, counting bool) map[string]*jsonschema.Schema {
+	properties["direction"] = oneOf(
+		"Which way to page from the cursor. With no cursor, `next` is the newest page and `prev` the oldest — "+
+			"use `prev` alone to jump straight to the far end of the listing. Rows come back newest first either way.",
+		"next", "prev")
+	if counting {
+		properties["count"] = text("Pass `1` to also get `total`: how many rows the filters match, counted up to 1000. " +
+			"`total_capped` says the real number is larger. Ask when the size of the result matters; skip it while paging.")
+	}
 	return properties
 }
 
@@ -151,6 +168,18 @@ func (p pagingInput) apply(query url.Values) url.Values {
 		query.Set("limit", strconv.Itoa(*p.Limit))
 	}
 	set(query, "cursor", p.Cursor)
+	return query
+}
+
+// walkInput is embedded beside pagingInput by the listings that take it.
+type walkInput struct {
+	Direction string `json:"direction"`
+	Count     string `json:"count"`
+}
+
+func (w walkInput) apply(query url.Values) url.Values {
+	set(query, "direction", w.Direction)
+	set(query, "count", w.Count)
 	return query
 }
 
@@ -174,11 +203,14 @@ func register(server *mcp.Server, api API) {
 			"Returns a page of trace summaries (id, name, environment, timestamp, latency, cost, error count), newest first. " +
 			"Does NOT return the observations inside a trace, or any prompt or completion text: call get_trace with an id for that, " +
 			"or get_last_trace to go straight to the newest match without listing first. " +
-			"Page by passing the returned next_cursor back as cursor.",
-		InputSchema: object(pagingProperties(withFields(traceFilterProperties()))),
+			"Page by passing the returned next_cursor back as cursor, or prev_cursor with direction=prev to go back.",
+		InputSchema: object(walkProperties(pagingProperties(withFields(traceFilterProperties())), true)),
 		OutputSchema: object(map[string]*jsonschema.Schema{
-			"traces":      list(traceRowSchema(), "The page, newest first."),
-			"next_cursor": text("Pass back as `cursor` for the next page; null on the last page."),
+			"traces":       list(traceRowSchema(), "The page, newest first."),
+			"next_cursor":  text("Pass back as `cursor` for the next page; null on the oldest page."),
+			"prev_cursor":  text("Pass back as `cursor` with `direction=prev` for the page before; null on the newest page."),
+			"total":        integer("Only with `count=1`: how many traces the filters match, capped at 1000."),
+			"total_capped": boolean("Only with `count=1`: true when the count stopped at the cap and the real number is larger."),
 		}, "traces"),
 	}, t.listTraces)
 
@@ -238,15 +270,18 @@ func register(server *mcp.Server, api API) {
 			"most recently active first. Every number counts traces, not observations. " +
 			"Does NOT return the traces themselves: follow with get_session for one session's traces, then get_trace for what happened inside one. " +
 			"Page by passing the returned next_cursor back as cursor.",
-		InputSchema: object(pagingProperties(map[string]*jsonschema.Schema{
+		InputSchema: object(walkProperties(pagingProperties(map[string]*jsonschema.Schema{
 			"from":        timestamp("Only traces at or after this RFC 3339 instant. A session appears when any of its traces falls in the window."),
 			"to":          timestamp("Only traces strictly before this RFC 3339 instant."),
 			"environment": text("Exact match on the environment the session's traces ran in, e.g. \"production\"."),
 			"user_id":     text("Exact match on the end user the session's traces were attributed to."),
-		})),
+		}), true)),
 		OutputSchema: object(map[string]*jsonschema.Schema{
-			"sessions":    list(sessionRowSchema(), "The page, most recent activity first."),
-			"next_cursor": text("Pass back as `cursor` for the next page; null on the last page."),
+			"sessions":     list(sessionRowSchema(), "The page, most recent activity first."),
+			"next_cursor":  text("Pass back as `cursor` for the next page; null on the oldest page."),
+			"prev_cursor":  text("Pass back as `cursor` with `direction=prev` for the page before; null on the newest page."),
+			"total":        integer("Only with `count=1`: how many sessions the filters match, capped at 1000."),
+			"total_capped": boolean("Only with `count=1`: true when the count stopped at the cap."),
 		}, "sessions"),
 	}, t.listSessions)
 
@@ -257,9 +292,11 @@ func register(server *mcp.Server, api API) {
 			"Returns the session's totals (how many traces, how many of them failed, cost, first and last activity) and a page of its traces. " +
 			"Every number counts traces, not observations. " +
 			"Does NOT return what happened inside those traces: follow with get_trace.",
-		InputSchema: object(pagingProperties(map[string]*jsonschema.Schema{
+		// `direction` but no `count`: `trace_count` below is that number
+		// already, and exactly (spec 009, API contract).
+		InputSchema: object(walkProperties(pagingProperties(map[string]*jsonschema.Schema{
 			"session_id": text("The session id, as the application set it."),
-		}), "session_id"),
+		}), false), "session_id"),
 		OutputSchema: object(map[string]*jsonschema.Schema{
 			"id":          text("The session id."),
 			"trace_count": integer("How many traces name this session."),
@@ -469,11 +506,12 @@ func traceDetailSchema() *jsonschema.Schema {
 type listTracesInput struct {
 	traceFilterInput
 	pagingInput
+	walkInput
 	Fields string `json:"fields"`
 }
 
 func (t *toolset) listTraces(ctx context.Context, req *mcp.CallToolRequest, in listTracesInput) (*mcp.CallToolResult, any, error) {
-	query := in.pagingInput.apply(in.traceFilterInput.query())
+	query := in.walkInput.apply(in.pagingInput.apply(in.traceFilterInput.query()))
 	set(query, "fields", in.Fields)
 	return t.call(ctx, req, "/api/v1/traces", query, summarizeTraceList)
 }
@@ -512,6 +550,7 @@ func (t *toolset) getObservationIO(ctx context.Context, req *mcp.CallToolRequest
 
 type listSessionsInput struct {
 	pagingInput
+	walkInput
 	From        string `json:"from"`
 	To          string `json:"to"`
 	Environment string `json:"environment"`
@@ -524,17 +563,23 @@ func (t *toolset) listSessions(ctx context.Context, req *mcp.CallToolRequest, in
 	set(query, "to", in.To)
 	set(query, "environment", in.Environment)
 	set(query, "user_id", in.UserID)
-	return t.call(ctx, req, "/api/v1/sessions", in.pagingInput.apply(query), summarizeSessionList)
+	return t.call(ctx, req, "/api/v1/sessions",
+		in.walkInput.apply(in.pagingInput.apply(query)), summarizeSessionList)
 }
 
 type getSessionInput struct {
 	pagingInput
+	// Not `walkInput`: this endpoint takes no `count`, and a field that
+	// forwards one would turn a tool call into a 400 for a parameter the
+	// schema never offered.
+	Direction string `json:"direction"`
 	SessionID string `json:"session_id"`
 }
 
 func (t *toolset) getSession(ctx context.Context, req *mcp.CallToolRequest, in getSessionInput) (*mcp.CallToolResult, any, error) {
-	return t.call(ctx, req, "/api/v1/sessions/"+url.PathEscape(in.SessionID),
-		in.pagingInput.apply(url.Values{}), summarizeSession)
+	query := in.pagingInput.apply(url.Values{})
+	set(query, "direction", in.Direction)
+	return t.call(ctx, req, "/api/v1/sessions/"+url.PathEscape(in.SessionID), query, summarizeSession)
 }
 
 type getPromptInput struct {
