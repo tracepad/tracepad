@@ -17,13 +17,10 @@
 	// panel over itself, and a session panel drills into it in place (#9).
 
 	/**
-	 * This listing pages in component state rather than in the URL, which is
-	 * the one place spec 009 #1's rule does not hold — and cannot. On
-	 * `/sessions` this table lives *inside* the peek panel, over a URL whose
-	 * `limit` and `cursor` already belong to the sessions listing behind it;
-	 * two listings on one address cannot own one set of keys. Local state
-	 * keeps them apart and keeps the component identical in both of its
-	 * homes (spec 009 #10).
+	 * The one listing that pages in component state rather than in the URL
+	 * (spec 009 #10): on `/sessions` this table lives inside the peek panel,
+	 * over a URL whose `limit` and `cursor` already belong to the listing
+	 * behind it, and two listings on one address cannot own one set of keys.
 	 */
 	let chosen = $state.raw<PageState & { session: string | null }>({
 		session: null,
@@ -53,10 +50,8 @@
 
 	/**
 	 * The page in force. Derived rather than reset by an effect: a cursor
-	 * belongs to the session it was taken from, so one that names another
-	 * session is simply not the page — no write, no second render, and no
-	 * second request (PR #11 review found the reset effect firing a load with
-	 * the previous session's cursor before undoing itself).
+	 * belongs to the session it was taken from, so one naming another session
+	 * simply is not the page — no write, no second render, no second request.
 	 */
 	const spot = $derived<PageState>(
 		chosen.session === sessionID

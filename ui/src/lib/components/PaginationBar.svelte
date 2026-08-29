@@ -39,10 +39,13 @@
 		hasPrev: boolean;
 		hasNext: boolean;
 		/**
-		 * Whether this page already *is* an end. « and » are anchors, not
-		 * steps — they need no cursor to reach, so they stay live on a page
-		 * that has none, which is exactly the page somebody is stranded on
-		 * when the rows a cursor named are gone (PR #11, second review).
+		 * Whether this page already *is* an end, asked of the URL rather than
+		 * of the cursors that came back with it. « and » are anchors, not
+		 * steps — needing no cursor is what keeps them live on the empty page
+		 * a dead cursor strands somebody on. They go dead anyway once there
+		 * are rows and no step past them: a listing that fits on one page is
+		 * both ends at once, and » there would show the same rows under a
+		 * `?direction=prev` that quietly pauses live mode.
 		 */
 		atNewest: boolean;
 		atOldest: boolean;
@@ -106,7 +109,7 @@
 		<button
 			type="button"
 			class={step}
-			disabled={atNewest}
+			disabled={atNewest || (rows > 0 && !hasPrev)}
 			aria-label="Newest page"
 			title="Newest page"
 			onclick={onfirst}
@@ -136,7 +139,7 @@
 		<button
 			type="button"
 			class={step}
-			disabled={atOldest}
+			disabled={atOldest || (rows > 0 && !hasNext)}
 			aria-label="Oldest page"
 			title="Oldest page"
 			onclick={onlast}

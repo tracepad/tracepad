@@ -210,20 +210,27 @@
 	 * not stop at a boundary that is an artefact of paging (spec 009 #6).
 	 */
 	/**
-	 * Carries the cursor of the page it is waiting for, not just which edge
-	 * to land on. Clearing it on abort would lose it — the turn aborts the
-	 * load it interrupted — and not clearing it at all let a filter change
-	 * inherit the intent and open the panel on a row nobody peeked into
-	 * (PR #11, second review). Matching the cursor settles both: the page
-	 * that arrives either is the one the walk asked for, or is not.
+	 * Carries the page it waits for, not just the edge to land on. Clearing
+	 * it on abort would lose it — a turn aborts the load it interrupts — and
+	 * never clearing it let a filter change inherit the intent and open the
+	 * panel on a row nobody peeked into. Matching settles both: what arrives
+	 * either is the page the walk asked for, or is not.
 	 */
-	let rolling = $state.raw<{ edge: 'first' | 'last'; cursor: string } | null>(null);
+	let rolling = $state.raw<{
+		edge: 'first' | 'last';
+		cursor: string;
+		direction: PageState['direction'];
+	} | null>(null);
 
 	function settle(at: PageState) {
 		const intent = rolling;
 		if (!intent) return;
 		rolling = null;
-		if (intent.cursor !== at.cursor || rows.length === 0) return;
+		// Direction as well as cursor: on a page of one row the two cursors
+		// are the same key, so a `‹` walk and a `›` button click would match
+		// each other's intent (PR #11, third review).
+		if (intent.cursor !== at.cursor || intent.direction !== at.direction) return;
+		if (rows.length === 0) return;
 		peek(intent.edge === 'first' ? rows[0].id : rows[rows.length - 1].id);
 	}
 
@@ -234,17 +241,20 @@
 			return;
 		}
 		// The peeked row is not on this page at all — a live tick can push it
-		// off the newest page — so there is no "next" relative to it. Reading
-		// on from this page's own edge beats turning to another one.
+		// off — so there is no "next" relative to it. Resume at the edge the
+		// direction is heading for: rows run newest first, so `j` (older,
+		// downwards) lands on the *oldest* row here and its next press rolls
+		// on to where the lost row now is. The other edge would send the
+		// reader back through everything they had already read.
 		if (peekID !== null && !ids.includes(peekID)) {
-			if (rows.length > 0) peek(step === 1 ? rows[0].id : rows[rows.length - 1].id);
+			if (rows.length > 0) peek(step === 1 ? rows[rows.length - 1].id : rows[0].id);
 			return;
 		}
 		if (step === 1 && nextCursor) {
-			rolling = { edge: 'first', cursor: nextCursor };
+			rolling = { edge: 'first', cursor: nextCursor, direction: 'next' };
 			turn({ cursor: nextCursor });
 		} else if (step === -1 && prevCursor) {
-			rolling = { edge: 'last', cursor: prevCursor };
+			rolling = { edge: 'last', cursor: prevCursor, direction: 'prev' };
 			turn({ cursor: prevCursor, direction: 'prev' });
 		}
 	}

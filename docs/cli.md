@@ -63,8 +63,8 @@ tracepad traces ls --env production --error --since 1h
 | `--fields` | Comma-separated subset of the row fields. |
 | `--limit` | 1–500, default 50. |
 | `--cursor` | Continue from a previous page. |
-| `--oldest` | Start at the far end of the listing instead of the newest page. |
-| `--newer` | Walk back towards newer traces from `--cursor`. |
+| `--oldest` | Start at the far end of the listing instead of the newest page. Takes no `--cursor`. |
+| `--newer` | Walk back towards newer traces from a `--cursor`, which it requires. |
 | `--total` | Also print how many traces match, counted up to 1000 (`847`, or `1000+`). |
 
 The table ends with the commands that continue the walk, in whichever
@@ -78,6 +78,11 @@ newer: --newer --cursor MTc4ODIx…
 `--oldest` costs what any other page costs: pagination is a keyset, so "the
 end" is a direction to read the index in and not a count of rows to skip.
 It is also not a dead end — the `newer:` line is how you come back up.
+
+The two flags are the same direction under different names, so the two
+combinations that would quietly mean the other one are refused: `--oldest`
+with a `--cursor` (the cursor would win and the jump never happen), and
+`--newer` without one (which is the far end, not a step back).
 
 ### `traces show`
 

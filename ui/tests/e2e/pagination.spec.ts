@@ -117,6 +117,17 @@ test('live is paused off the newest page, and can still be switched off', async 
 	await expect(page).not.toHaveURL(/live=1/);
 });
 
+test('a listing that fits on one page has all four controls dead', async ({ page }) => {
+	await signIn(page);
+	// Seven traces at the default size: this page is both ends at once. A
+	// live » here would navigate to `?direction=prev`, show the same rows and
+	// quietly pause live mode (PR #11, third review).
+	await expect(page.locator('tbody tr')).toHaveCount(7);
+	for (const name of ['Newest page', 'Previous page', 'Next page', 'Oldest page']) {
+		await expect(page.getByRole('button', { name })).toBeDisabled();
+	}
+});
+
 test('an empty page off the newest one is not a dead end', async ({ page }) => {
 	await signIn(page);
 	// A filter that matches nothing, on the oldest page: no rows, and so no

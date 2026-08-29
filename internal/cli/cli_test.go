@@ -221,11 +221,16 @@ func TestWalkingBothWays(t *testing.T) {
 		t.Errorf("the oldest page is a dead end:\n%s", oldest.stdout)
 	}
 
-	// `--oldest` with a cursor would quietly stop being a jump: the cursor
-	// wins and the far end is never reached. Refused rather than surprising.
-	both := h.run(ctx, true, "traces", "ls", "--oldest", "--cursor", "whatever")
-	if both.code != ExitUsage {
-		t.Errorf("--oldest --cursor exited %d, want a usage error", both.code)
+	// Each flag means the far end or a step from a cursor, and the two
+	// combinations that would quietly mean the other one are refused.
+	for _, args := range [][]string{
+		{"traces", "ls", "--oldest", "--cursor", "whatever"},
+		{"traces", "ls", "--newer"},
+	} {
+		got := h.run(ctx, true, args...)
+		if got.code != ExitUsage {
+			t.Errorf("%v exited %d, want a usage error", args, got.code)
+		}
 	}
 
 	// And the way back is a command that runs.
@@ -236,6 +241,26 @@ func TestWalkingBothWays(t *testing.T) {
 	}
 	if !strings.Contains(back.stdout, traceHex(2)) {
 		t.Errorf("walking back from the oldest page did not reach the newer trace:\n%s", back.stdout)
+	}
+}
+
+// TestAnEmptySessionPageSaysHowToLeave: `sessions ls` returned early on an
+// empty page, skipping both the count and the way back — the same dead end
+// `--oldest` had (PR #11, third review).
+func TestAnEmptySessionPageSaysHowToLeave(t *testing.T) {
+	h := newHarness(t)
+	seedCorpus(t, h)
+	ctx := t.Context()
+
+	got := h.run(ctx, true, "sessions", "ls", "--env", "nowhere", "--total")
+	if got.code != ExitOK {
+		t.Fatalf("exit = %d, stderr = %s", got.code, got.stderr)
+	}
+	if !strings.Contains(got.stdout, "no sessions") {
+		t.Errorf("output does not say the page is empty:\n%s", got.stdout)
+	}
+	if !strings.Contains(got.stdout, "0 matching") {
+		t.Errorf("an empty page skipped the count it was asked for:\n%s", got.stdout)
 	}
 }
 

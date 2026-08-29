@@ -178,6 +178,13 @@ func addWalk(query url.Values, cursor string, oldest, newer bool) error {
 		return usageErrorf("--oldest starts at the far end and takes no --cursor; " +
 			"use --newer --cursor to walk back towards newer rows")
 	}
+	// The mirror of it: without a cursor, `direction=prev` *is* the far end,
+	// so a bare `--newer` would jump to the oldest page — the opposite of
+	// what it says (PR #11, third review).
+	if newer && cursor == "" {
+		return usageErrorf("--newer walks back from a --cursor; " +
+			"use --oldest to jump to the far end of the listing")
+	}
 	if oldest || newer {
 		query.Set("direction", "prev")
 	}

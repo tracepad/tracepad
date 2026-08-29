@@ -108,17 +108,21 @@ func (r *run) sessionsList(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	// An empty page still falls through to the total and the way back: it is
+	// where `--newer` from the newest page lands, and a bare "no sessions"
+	// there is the dead end the first review found in `--oldest`
+	// (PR #11, third review).
 	if len(listing.Sessions) == 0 {
 		fmt.Fprintln(r.opt.Stdout, "no sessions")
-		return nil
+	} else {
+		t := newTable(r.opt.Stdout, "LAST SEEN", "SESSION", "TRACES", "ERRORS", "COST", "FIRST SEEN")
+		for _, session := range listing.Sessions {
+			t.row(shortTime(session.LastSeen), session.ID,
+				strconv.Itoa(session.TraceCount), strconv.Itoa(session.ErrorCount),
+				cost(session.TotalCost), shortTime(session.FirstSeen))
+		}
+		t.flush()
 	}
-	t := newTable(r.opt.Stdout, "LAST SEEN", "SESSION", "TRACES", "ERRORS", "COST", "FIRST SEEN")
-	for _, session := range listing.Sessions {
-		t.row(shortTime(session.LastSeen), session.ID,
-			strconv.Itoa(session.TraceCount), strconv.Itoa(session.ErrorCount),
-			cost(session.TotalCost), shortTime(session.FirstSeen))
-	}
-	t.flush()
 	if listing.Total != nil {
 		fmt.Fprintf(r.opt.Stdout, "\n%s matching\n", matchCount(*listing.Total, listing.TotalCapped))
 	}

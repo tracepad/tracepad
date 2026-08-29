@@ -190,19 +190,23 @@
 	 * the last row opens the first row of the next page, so a scan does not
 	 * stop at a boundary that is an artefact of paging.
 	 */
-	/**
-	 * Carries the cursor of the page it waits for, so that an aborted turn
-	 * keeps its intent and an unrelated load cannot inherit it (PR #11,
-	 * second review).
-	 */
-	let rolling = $state.raw<{ edge: 'first' | 'last'; cursor: string } | null>(null);
+	/** The page it waits for, so an aborted turn keeps its intent and an
+	 * unrelated load cannot inherit it. */
+	let rolling = $state.raw<{
+		edge: 'first' | 'last';
+		cursor: string;
+		direction: PageState['direction'];
+	} | null>(null);
 
 	/** Called by `load` once a page has landed. */
 	function settle(at: PageState) {
 		const intent = rolling;
 		if (!intent) return;
 		rolling = null;
-		if (intent.cursor !== at.cursor || rows.length === 0) return;
+		// Direction too: on a one-row page both cursors are the same key
+		// (PR #11, third review).
+		if (intent.cursor !== at.cursor || intent.direction !== at.direction) return;
+		if (rows.length === 0) return;
 		peek(intent.edge === 'first' ? rows[0].id : rows[rows.length - 1].id);
 	}
 
@@ -212,17 +216,17 @@
 			peek(id);
 			return;
 		}
-		// The peeked row is not on this page: read on from this page's own
-		// edge rather than turning to another one.
+		// Not on this page: resume at the edge the direction is heading for,
+		// so the next press carries on rather than doubling back.
 		if (peekID !== null && !ids.includes(peekID)) {
-			if (rows.length > 0) peek(step === 1 ? rows[0].id : rows[rows.length - 1].id);
+			if (rows.length > 0) peek(step === 1 ? rows[rows.length - 1].id : rows[0].id);
 			return;
 		}
 		if (step === 1 && nextCursor) {
-			rolling = { edge: 'first', cursor: nextCursor };
+			rolling = { edge: 'first', cursor: nextCursor, direction: 'next' };
 			turn({ cursor: nextCursor });
 		} else if (step === -1 && prevCursor) {
-			rolling = { edge: 'last', cursor: prevCursor };
+			rolling = { edge: 'last', cursor: prevCursor, direction: 'prev' };
 			turn({ cursor: prevCursor, direction: 'prev' });
 		}
 	}
