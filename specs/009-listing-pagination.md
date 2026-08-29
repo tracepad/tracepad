@@ -69,6 +69,12 @@ oldest one, which is what disables « ‹ and › ». `total` is present only wh
 (1000) and the real number is larger. Rows are always newest first, whichever
 direction the page was fetched in.
 
+The oldest page is a **full page anchored at the oldest row**, not the ragged
+remainder that walking forward ends on: with five rows and pages of two, ›››
+ends on one row and » shows two. Both end on the same row, which is what "the
+end" means without a total to count backwards from — and the alternative is
+the offset arithmetic Decision 3 refuses.
+
 ## Application contract
 
 Under every listing, one bar: **Rows per page** (a select), the range on

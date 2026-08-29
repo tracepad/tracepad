@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -34,8 +35,18 @@ type TraceFilter struct {
 	// Limit caps the rows returned; the caller asks for one more than the
 	// page size to learn whether another page exists.
 	Limit int
-	// After continues a previous page. Nil starts at the newest trace.
+	// After continues a previous page. Nil starts at either end of the
+	// listing, whichever end Backward names.
 	After *TraceCursor
+	// Backward pages towards the *newer* end of the listing: the keyset
+	// comparison flips and the scan runs the same index the other way, so
+	// the previous page costs what the next one does (spec 009 #2). With
+	// no cursor it is the oldest page — which is how "jump to the end" is
+	// a direction rather than an offset.
+	//
+	// Rows still come back newest first either way: the direction is how
+	// the page was found, not how it is read.
+	Backward bool
 }
 
 // Trace status filter values.
@@ -58,10 +69,11 @@ type TraceCursor struct {
 const traceColumns = `project_id, id, name, user_id, session_id, environment, tags,
 	        timestamp, total_cost, latency_ms, error_count, observation_count`
 
-// traceQuery builds the listing statement and its arguments. It is a function
-// of its own so that a test can hand the exact shipped SQL to EXPLAIN QUERY
-// PLAN and assert the keyset seek (spec 004 #4, method of spec 003 #25).
-func traceQuery(projectID string, filter TraceFilter) (string, []any) {
+// traceConditions builds everything the filter says about *which* traces
+// match, cursor excluded. Two callers need exactly this and disagree only
+// about what follows it: the listing adds a keyset and a page, and the count
+// adds neither (spec 009 #4).
+func traceConditions(projectID string, filter TraceFilter) ([]string, []any) {
 	where := []string{"project_id = ?"}
 	args := []any{projectID}
 	add := func(clause string, values ...any) {
@@ -102,17 +114,44 @@ func traceQuery(projectID string, filter TraceFilter) (string, []any) {
 	if filter.MinCost != nil {
 		add("total_cost >= ?", *filter.MinCost)
 	}
+	return where, args
+}
+
+// traceQuery builds the listing statement and its arguments. It is a function
+// of its own so that a test can hand the exact shipped SQL to EXPLAIN QUERY
+// PLAN and assert the keyset seek (spec 004 #4, method of spec 003 #25) —
+// in both directions, since a backward page is the same index read the other
+// way and would be a sort if it were not (spec 009 #2).
+func traceQuery(projectID string, filter TraceFilter) (string, []any) {
+	where, args := traceConditions(projectID, filter)
+	// The comparison and the order flip together: they are the same
+	// statement about which way the page is being read.
+	comparison, order := "<", "DESC"
+	if filter.Backward {
+		comparison, order = ">", "ASC"
+	}
 	if filter.After != nil {
 		// A row-value comparison rather than the equivalent
 		// `timestamp < ? OR (timestamp = ? AND id < ?)`: SQLite seeks
 		// straight to the cursor with the former and scans from the
 		// newest row with the latter (spec 003 #25).
-		add("(timestamp, id) < (?, ?)", filter.After.Timestamp, filter.After.ID)
+		where = append(where, "(timestamp, id) "+comparison+" (?, ?)")
+		args = append(args, filter.After.Timestamp, filter.After.ID)
 	}
 	args = append(args, filter.Limit)
 	return `SELECT ` + traceColumns + `
 	 FROM traces WHERE ` + strings.Join(where, " AND ") + `
-	 ORDER BY timestamp DESC, id DESC LIMIT ?`, args
+	 ORDER BY timestamp ` + order + `, id ` + order + ` LIMIT ?`, args
+}
+
+// traceCountQuery counts the matches, stopping at `cap` rows. The subquery is
+// what bounds the work: `COUNT(*)` over a `LIMIT`ed set reads at most that
+// many rows, on any filter, indexed or not (spec 009 #4).
+func traceCountQuery(projectID string, filter TraceFilter, cap int) (string, []any) {
+	where, args := traceConditions(projectID, filter)
+	args = append(args, cap)
+	return `SELECT COUNT(*) FROM (SELECT 1 FROM traces WHERE ` +
+		strings.Join(where, " AND ") + ` LIMIT ?)`, args
 }
 
 // Traces lists a project's traces newest first.
@@ -132,7 +171,27 @@ func (s *Store) Traces(projectID string, filter TraceFilter) ([]*TraceRow, error
 		}
 		out = append(out, row)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// A backward page arrives oldest first, because that is the order the
+	// index was read in. Every caller reads a listing newest first.
+	if filter.Backward {
+		slices.Reverse(out)
+	}
+	return out, nil
+}
+
+// CountTraces answers "how many match", stopping at `cap`: the count is `cap`
+// exactly when there are at least that many, and the caller says "cap+" rather
+// than pretending to know (spec 009 #4).
+func (s *Store) CountTraces(projectID string, filter TraceFilter, cap int) (int, error) {
+	query, args := traceCountQuery(projectID, filter, cap)
+	var count int
+	if err := s.db.QueryRow(query, args...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count traces: %w", err)
+	}
+	return count, nil
 }
 
 // SessionRow is the roll-up over the traces of one session. Every aggregate is
@@ -192,8 +251,12 @@ type SessionFilter struct {
 	// Limit caps the rows returned; the caller asks for one more than the
 	// page size to learn whether another page exists.
 	Limit int
-	// After continues a previous page. Nil starts at the newest session.
+	// After continues a previous page. Nil starts at whichever end
+	// Backward names.
 	After *SessionCursor
+	// Backward pages towards the more recently active end, exactly as it
+	// does for traces (spec 009 #2). Rows still come back newest first.
+	Backward bool
 }
 
 // SessionCursor is the keyset of the last row of a page — the pair the listing
@@ -211,7 +274,7 @@ type SessionCursor struct {
 // Sessions are aggregated from traces on every read rather than maintained at
 // ingest (spec 007 #2): a session is a grouping of traces, not a stored
 // entity, and a second source of truth is what a rollup table would be.
-func sessionQuery(projectID string, filter SessionFilter) (string, []any) {
+func sessionConditions(projectID string, filter SessionFilter) ([]string, []any) {
 	// A trace that named no session is not a session of one (spec 007 #2).
 	where := []string{"project_id = ?", "session_id IS NOT NULL"}
 	args := []any{projectID}
@@ -231,13 +294,22 @@ func sessionQuery(projectID string, filter SessionFilter) (string, []any) {
 	if filter.UserID != "" {
 		add("user_id = ?", filter.UserID)
 	}
+	return where, args
+}
+
+func sessionQuery(projectID string, filter SessionFilter) (string, []any) {
+	where, args := sessionConditions(projectID, filter)
+	comparison, order := "<", "DESC"
+	if filter.Backward {
+		comparison, order = ">", "ASC"
+	}
 
 	// The keyset is a HAVING rather than a WHERE because half of it is an
 	// aggregate: `last_seen` exists only once the group is formed. The row
 	// value keeps it one comparison, as in the trace listing.
 	having := ""
 	if filter.After != nil {
-		having = " HAVING (MAX(timestamp), session_id) < (?, ?)"
+		having = " HAVING (MAX(timestamp), session_id) " + comparison + " (?, ?)"
 		args = append(args, filter.After.LastSeen, filter.After.ID)
 	}
 	args = append(args, filter.Limit)
@@ -245,7 +317,17 @@ func sessionQuery(projectID string, filter SessionFilter) (string, []any) {
 	               MIN(timestamp), MAX(timestamp)
 	 FROM traces WHERE ` + strings.Join(where, " AND ") + `
 	 GROUP BY session_id` + having + `
-	 ORDER BY MAX(timestamp) DESC, session_id DESC LIMIT ?`, args
+	 ORDER BY MAX(timestamp) ` + order + `, session_id ` + order + ` LIMIT ?`, args
+}
+
+// sessionCountQuery counts the *sessions* a filter matches, capped. The
+// grouping happens inside the subquery, so the cap bounds groups rather than
+// traces — which is what the number on screen means (spec 009 #4).
+func sessionCountQuery(projectID string, filter SessionFilter, cap int) (string, []any) {
+	where, args := sessionConditions(projectID, filter)
+	args = append(args, cap)
+	return `SELECT COUNT(*) FROM (SELECT session_id FROM traces WHERE ` +
+		strings.Join(where, " AND ") + ` GROUP BY session_id LIMIT ?)`, args
 }
 
 // Sessions lists a project's sessions, most recently active first.
@@ -278,7 +360,23 @@ func (s *Store) Sessions(projectID string, filter SessionFilter) ([]*SessionRow,
 		row.FirstSeen, row.LastSeen = firstSeen.Int64, lastSeen.Int64
 		out = append(out, &row)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if filter.Backward {
+		slices.Reverse(out)
+	}
+	return out, nil
+}
+
+// CountSessions answers "how many sessions match", stopping at `cap`.
+func (s *Store) CountSessions(projectID string, filter SessionFilter, cap int) (int, error) {
+	query, args := sessionCountQuery(projectID, filter, cap)
+	var count int
+	if err := s.db.QueryRow(query, args...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count sessions: %w", err)
+	}
+	return count, nil
 }
 
 // ObservationTraces returns the ids of the traces in which a span id appears,
