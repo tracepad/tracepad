@@ -15,7 +15,7 @@
 	//
 	// On a wide screen it is deliberately *not* modal (#4): no scrim, no
 	// scroll lock, and the listing underneath stays clickable so that walking
-	// down a column of rows swaps the panel in place. Below `md` it covers the
+	// down a column of rows swaps the panel in place. Below `lg` it covers the
 	// viewport, and there — where the listing is genuinely unreachable — it
 	// says so and holds the Tab key inside itself (#12).
 
@@ -60,13 +60,18 @@
 	let panel = $state<HTMLElement | null>(null);
 
 	// Whatever was focused when the panel opened is where focus goes back to,
-	// which is the row that opened it.
+	// which is the row that opened it — the listing focuses its row link on
+	// the way in so that there is something to come back to. The body is not
+	// an answer: focusing it would move the reader nowhere and lose the place
+	// they were in (PR #10 review).
 	const opener = typeof document === 'undefined' ? null : document.activeElement;
 
 	onMount(() => {
 		panel?.focus();
 		return () => {
-			if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
+			if (opener instanceof HTMLElement && opener !== document.body && opener.isConnected) {
+				opener.focus();
+			}
 		};
 	});
 
@@ -87,8 +92,11 @@
 		// never when it is part of a browser or system combination.
 		if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
 		if (typing(event.target)) return;
-		if (event.key === 'j' && hasNext) onnext?.();
-		else if (event.key === 'k' && hasPrev) onprev?.();
+		// Gated on the handler as well as on the end of the listing: a layer
+		// with nothing to walk (spec 008 #9) has no controls on screen, so a
+		// swallowed key would have nothing to explain itself with.
+		if (event.key === 'j' && onnext && hasNext) onnext();
+		else if (event.key === 'k' && onprev && hasPrev) onprev();
 		else return;
 		event.preventDefault();
 	}
@@ -100,7 +108,7 @@
 		);
 	}
 
-	/** Below `md` the rest of the page is covered, so Tab does not go there. */
+	/** Below `lg` the rest of the page is covered, so Tab does not go there. */
 	function contain(event: KeyboardEvent) {
 		if (event.key !== 'Tab' || !narrow.current || !panel) return;
 		const stops = [...panel.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(

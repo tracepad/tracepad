@@ -5,10 +5,17 @@
 	import Pause from '@lucide/svelte/icons/pause';
 	import Play from '@lucide/svelte/icons/play';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
+	import { untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { ApiError, api, type Trace, type TraceRow } from '$lib/api/client.svelte';
-	import { filterSearch, mergeRows, readFilters, type TraceFilters } from '$lib/api/traces';
+	import {
+		filterCount,
+		filterSearch,
+		mergeRows,
+		readFilters,
+		type TraceFilters
+	} from '$lib/api/traces';
 	import Button from '$lib/components/Button.svelte';
 	import CopyButton from '$lib/components/CopyButton.svelte';
 	import FilterBar from '$lib/components/FilterBar.svelte';
@@ -26,7 +33,16 @@
 	// a link they can send (Application contract).
 	const filters = $derived(readFilters(page.url.searchParams));
 	const live = $derived(page.url.searchParams.get('live') === '1');
-	const filtering = $derived(page.url.search !== '' && page.url.search !== '?live=1');
+	const filtering = $derived(filterCount(filters) > 0);
+	/**
+	 * The filters as one string, which is what the load effect below depends
+	 * on. It cannot depend on `filters`: `readFilters` builds a fresh object
+	 * on every URL change and a `$derived` object is never equal to the last
+	 * one, so opening the panel — a `?peek=` on this same URL — re-ran the
+	 * load and threw away every page the reader had already paid for, which
+	 * is the one thing spec 008 #1 exists to prevent (PR #10 review).
+	 */
+	const filterKey = $derived(filterSearch(filters));
 
 	let rows = $state.raw<TraceRow[]>([]);
 	let cursor = $state.raw<string | null>(null);
@@ -47,13 +63,15 @@
 	let query: AbortController | null = null;
 
 	$effect(() => {
-		// Re-reads whenever the filters in the URL change. `filterSearch` is
-		// what makes that a dependency, and it is also the cheapest way to
-		// compare two filter sets.
-		filterSearch(filters);
+		// Reading the key is the subscription: this re-reads when the filters
+		// change and not when any other query parameter does. The filter set
+		// itself is taken untracked and passed down, because `load` reads it
+		// before its first `await` — inside this effect's own synchronous
+		// run — and reading the object there would subscribe to it after all.
+		void filterKey;
 		const controller = new AbortController();
 		query = controller;
-		load(controller.signal);
+		load(untrack(() => filters), controller.signal);
 		return () => controller.abort();
 	});
 
@@ -67,13 +85,13 @@
 		return () => clearInterval(timer);
 	});
 
-	async function load(signal: AbortSignal) {
+	async function load(active: TraceFilters, signal: AbortSignal) {
 		loading = true;
 		loadingMore = false;
 		failure = null;
 		liveFailure = null;
 		try {
-			const answer = await api.listTraces(filters, { limit: PAGE_SIZE }, signal);
+			const answer = await api.listTraces(active, { limit: PAGE_SIZE }, signal);
 			rows = answer.traces;
 			cursor = answer.next_cursor;
 		} catch (cause) {

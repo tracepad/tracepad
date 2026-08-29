@@ -33,6 +33,10 @@
 		if (!onopen || modified(event)) return;
 		event.preventDefault();
 		if (selecting(event)) return;
+		// The panel gives focus back to whatever opened it, and a click on a
+		// cell leaves it on the body; the row's own link is where the reader
+		// actually is (PR #10 review).
+		(event.currentTarget as HTMLElement).querySelector('a')?.focus();
 		onopen(id);
 	}
 
@@ -77,7 +81,9 @@
 				>
 					<td class="text-muted px-3 py-1.5 font-mono text-xs whitespace-nowrap tabular-nums">
 						<!-- Exactly one thing in the row is tabbable, and it is a real
-						     link: ⌘-click still opens the page it points at. -->
+						     link: ⌘-click, a middle click and anything that reads links
+						     get the page it points at. Enter opens the panel, the same
+						     as a plain click does (spec 008 #16). -->
 						<a
 							href="/traces/{row.id}"
 							aria-current={row.id === selectedID ? 'true' : undefined}

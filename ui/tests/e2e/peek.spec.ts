@@ -27,6 +27,60 @@ test('a trace row opens the panel and says which row it came from', async ({ pag
 	await expect(row.getByRole('link')).toHaveAttribute('aria-current', 'true');
 });
 
+/**
+ * The regression the PR #10 review caught: the listing's load effect depended
+ * on the filter *object*, which `readFilters` rebuilds on every URL change —
+ * so `?peek=` re-ran it, and the rows on screen were replaced by a fresh
+ * first page. With two "Load more" pages behind it, opening row 120 threw
+ * away both of them and the peeked row left the listing entirely. Counting
+ * the requests is the assertion that survives a small fixture corpus.
+ */
+async function listingRequests(page: Page): Promise<() => number> {
+	let count = 0;
+	page.on('request', (request) => {
+		// The listing, not a trace: `/api/v1/traces?…` against `/traces/{id}`.
+		if (/\/api\/v1\/traces\?/.test(request.url())) count++;
+	});
+	return () => count;
+}
+
+test('opening the panel does not re-read the listing under it', async ({ page }) => {
+	await signIn(page);
+	const listings = await listingRequests(page);
+	const before = listings();
+
+	await rows(page).filter({ hasText: 'answer-question' }).getByRole('link').click();
+	const panel = page.getByRole('dialog');
+	await expect(panel.getByRole('treeitem').first()).toBeVisible();
+
+	// Selecting a node writes `?obs=` onto the same URL: also not a filter.
+	await panel.getByRole('treeitem').nth(1).click();
+	await expect(page).toHaveURL(/obs=/);
+
+	// And walking to the next row, and closing.
+	await panel.getByRole('button', { name: 'Next row' }).click();
+	await page.keyboard.press('Escape');
+	await expect(page.getByRole('dialog')).toHaveCount(0);
+
+	expect(listings() - before).toBe(0);
+});
+
+test('opening a session panel does not re-read the sessions listing', async ({ page }) => {
+	await signIn(page);
+	await page.goto('/sessions');
+	let count = 0;
+	page.on('request', (request) => {
+		if (/\/api\/v1\/sessions\?/.test(request.url())) count++;
+	});
+
+	await rows(page).filter({ hasText: 'session-77' }).getByRole('link').click();
+	await expect(page.getByRole('dialog').getByText('support-chat')).toBeVisible();
+	await page.getByRole('dialog').locator('tbody tr').first().getByRole('link').click();
+	await expect(page.getByRole('dialog').getByRole('treeitem').first()).toBeVisible();
+
+	expect(count).toBe(0);
+});
+
 test('the listing is still there under the panel', async ({ page }, testInfo) => {
 	test.skip(testInfo.project.name !== 'desktop', 'the panel covers a phone by design (#12)');
 	await signIn(page);

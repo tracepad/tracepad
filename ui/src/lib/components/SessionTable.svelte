@@ -26,6 +26,8 @@
 		if (!onopen || modified(event)) return;
 		event.preventDefault();
 		if (selecting(event)) return;
+		// So that closing the panel returns focus to the row (PR #10 review).
+		(event.currentTarget as HTMLElement).querySelector('a')?.focus();
 		onopen(id);
 	}
 
@@ -63,7 +65,9 @@
 				>
 					<td class="text-muted px-3 py-1.5 font-mono text-xs whitespace-nowrap tabular-nums">
 						<!-- Exactly one thing in the row is tabbable, and it is a real
-						     link: ⌘-click still opens the page it points at. -->
+						     link: ⌘-click and anything that reads links get the page it
+						     points at. Enter opens the panel, as a plain click does
+						     (spec 008 #16). -->
 						<a
 							href="/sessions/{encodeURIComponent(row.id)}"
 							aria-current={row.id === selectedID ? 'true' : undefined}

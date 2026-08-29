@@ -5,6 +5,7 @@
 	import MessagesSquare from '@lucide/svelte/icons/messages-square';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
+	import { untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import {
@@ -35,7 +36,13 @@
 	const PAGE_SIZE = 50;
 
 	const filters = $derived(readSessionFilters(page.url.searchParams));
-	const filtering = $derived(page.url.search !== '');
+	const filtering = $derived(Object.keys(filters).length > 0);
+	/**
+	 * What the load effect depends on. Not `filters`: a fresh object every
+	 * time the URL moves would re-run the listing whenever the panel opened
+	 * or drilled, discarding the pages already loaded (PR #10 review).
+	 */
+	const filterKey = $derived(sessionSearch(filters));
 
 	let rows = $state.raw<SessionRow[]>([]);
 	let cursor = $state.raw<string | null>(null);
@@ -51,20 +58,23 @@
 	let query: AbortController | null = null;
 
 	$effect(() => {
-		sessionSearch(filters);
+		// The key, not the filter object, and the object itself untracked:
+		// `load` reads it inside this effect's own synchronous run, which
+		// would subscribe to a value that is new on every URL change.
+		void filterKey;
 		generation;
 		const controller = new AbortController();
 		query = controller;
-		load(controller.signal);
+		load(untrack(() => filters), controller.signal);
 		return () => controller.abort();
 	});
 
-	async function load(signal: AbortSignal) {
+	async function load(active: SessionFilters, signal: AbortSignal) {
 		loading = true;
 		loadingMore = false;
 		failure = null;
 		try {
-			const answer = await api.listSessions(filters, { limit: PAGE_SIZE }, signal);
+			const answer = await api.listSessions(active, { limit: PAGE_SIZE }, signal);
 			rows = answer.sessions;
 			cursor = answer.next_cursor;
 		} catch (cause) {

@@ -56,6 +56,11 @@
 	async function load(wanted: string, signal: AbortSignal) {
 		loading = true;
 		failure = null;
+		// Dropped before the request, not after it: the caller names this
+		// trace in its own chrome, and keeping the last one there would put
+		// the previous trace's timestamp, cost and copyable id beside an
+		// expand link that already points at the new one (PR #10 review).
+		trace = null;
 		try {
 			trace = await api.getTrace(wanted, signal);
 		} catch (cause) {
