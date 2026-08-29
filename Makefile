@@ -82,7 +82,7 @@ e2e: build ## Boot the real binary on a temp database and run the Playwright smo
 	cd $(UI) && npx playwright install chromium
 	cd $(UI) && npm run e2e
 
-ui-lines: ## Report the line count of the web interface against its budget
+ui-lines: ## Report the interface's application lines against its budget, and its test lines beside them
 	scripts/ui-lines.sh
 
 precommit: ensure-hooks format-check vet test ui-check ## Full gate (also installed as git pre-commit hook)

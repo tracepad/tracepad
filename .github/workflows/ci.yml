@@ -25,8 +25,10 @@ jobs:
           cache: npm
           cache-dependency-path: ui/package-lock.json
       - run: make precommit
-      # A signal, not a rule (design §8): the interface has a line budget, and
-      # crossing it is a prompt to revise rather than a failed build.
+      # A signal, not a rule (design §8): the interface's application half has
+      # a line budget, and crossing it is a prompt to revise rather than a
+      # failed build. Its tests are counted beside it under no budget at all
+      # (spec 010 #7).
       - run: make ui-lines
 
   # The web interface against the real binary (spec 006 #10): the embed, the

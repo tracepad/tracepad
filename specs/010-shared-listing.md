@@ -27,7 +27,7 @@ Deliverables:
   behaviour they have today kept — except the ones the divergence table below
   names, each of which gets one answer.
 - The UI back **under 9,000 lines** with no change to the budget (spec 009
-  #11), measured and reported.
+  #11), measured and reported. ⚠ **What that budget counts changed — see #7.**
 
 Not here: any new listing feature. No search bar, no presets, no column
 choice, no sort. A refactor that ships a feature is two changes reviewed as
@@ -42,7 +42,9 @@ one.
 | 3 | **2026-08-30** — **Behaviour is frozen**, and the divergence table is the whole list of exceptions. Anything else the rewrite turns up where the two pages disagree is a question to the coordinator, not a judgement call in the branch | A refactor is reviewable only if the reviewer knows what is supposed to change. The pairs of defects that motivate this spec are also the reason to distrust "obviously the other page is right" — that is how each half was fixed alone. The existing E2E suites (`pagination`, `peek`, `sessions`) pass unchanged and are the freeze's evidence. |
 | 4 | **2026-08-30** — The loader hands the bar its props as **one object**, spread into `PaginationBar`; the bar's own contract does not change | Thirteen bindings, written three times, are where "the edges of the bar" defects came in pairs. The bar is the consumer with the most bindings and the least variation: only `total` and `noun` differ, and a spread with two overrides expresses exactly that. Changing `PaginationBar` to take the loader instead would couple a presentational component to a data module and lose its existing tests. |
 | 5 | **2026-08-30** — Live mode and Refresh stay features of their pages, over two named loader actions: **`tick()`** re-reads the newest page silently, replacing the rows and refreshing the count, and reports failure in its own slot; **`reload()`** re-runs the load and the count as a page turn would, with the loading state | These are two re-read semantics, not one with a flag: a live tick must not blank the count or raise the loading state (spec 006 #12; PR #11), and a Refresh must. Naming both in the loader is what lets the pages keep their controls without keeping their copies of the machinery. Neither page gains the other's control: no live on Sessions (spec 007 #8), no Refresh on Traces. |
-| 6 | **2026-08-30** — The budget is **not raised**; the DoD is that `make ui-lines` prints no warning, and the report states the count before and after. The loader's tests count, and are worth their lines | Spec 009 #11 said the next raise would be an amendment to design §8, and this spec exists so that no such amendment is needed yet. The tests are the trade this makes: the regressions that took seven review rounds to find become assertions over a fake reader, and review rounds cost more lines of somebody's attention than the tests do of the budget. |
+| 6 | **2026-08-30** — The budget is **not raised**; the DoD is that `make ui-lines` prints no warning, and the report states the count before and after. The loader's tests count, and are worth their lines. ⚠ **The premise below did not survive the measurement — see #7** | Spec 009 #11 said the next raise would be an amendment to design §8, and this spec exists so that no such amendment is needed yet. The tests are the trade this makes: the regressions that took seven review rounds to find become assertions over a fake reader, and review rounds cost more lines of somebody's attention than the tests do of the budget. |
+
+| 7 | **2026-08-30** (from the implementation) — **The budget counts the application; the tests are reported beside it under no ceiling.** Decision 6 assumed the extraction would free the forty lines the interface was over. It did not. The three listings gave up 348 lines, the module cost 309 and `page.ts` 9: the refactor is line-neutral to within a dozen lines, and the whole of the overflow is the 223 lines of tests that hold the five invariants. Design §8 is amended (owner, 2026-08-30) to count application code against 9,000 and to print the test count beside it under no budget. **The number 9,000 does not move**: 9,040 becomes 6,489 of application and 2,551 of tests, and this spec lands at 6,468 and 2,774 | The measurement says something the single number could not. What the two pages shared was real, but so is what they do not share — filters, live mode, the drill, three different empty states — and the shared third comes back as a module with a contract, paying in types and a page source what two concrete copies never had to. Line-neutral is what extracting a duplicate of that shape actually buys; what it buys besides is one place for a listing defect to be, which is what spec 009's seven review rounds were paying for in attention instead. That leaves the tests as the entire overflow, and a budget that charges for them argues for exactly one fix — write fewer — which is the opposite of what Decision 6 said they were worth. Cutting the module's prose and the tests' to sit under the number is the other way out, and it is the trade spec 009 #11 named and refused. Spec 009 #11 said the next raise had to be an amendment to §8; this is that amendment, and it changes what is counted rather than the count, because the 6–9k envelope was always a claim about how much *interface* somebody has to hold in their head, and nobody holds a test suite in their head. The count that matters did not grow: the application is twenty-one lines smaller than it was |
 
 ## Module contract
 
@@ -160,7 +162,9 @@ list changes (Decision 3).
   live on and off the first page, Refresh, a failure banner from stopping the
   server mid-session and its recovery, 375 px; console clean; no request
   fired by opening the panel (invariant 1, watched in the network panel).
-- **Budget**: `make ui-lines` before and after, both numbers in the PR.
+- **Budget**: `make ui-lines` before and after, in both layouts — the single
+  number it printed until now, and the application/tests split it prints from
+  here (#7). All four in the PR.
 
 ## Out of scope
 
