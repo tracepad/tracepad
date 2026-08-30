@@ -87,6 +87,12 @@
 			: [...PAGE_SIZES, limit].sort((a, b) => a - b)
 	);
 
+	// A form control with neither `id` nor `name` is one the browser cannot
+	// name back to you — the tools flag it on every screen the bar is on. The
+	// id is per instance, because the bar can stand twice on one page: under a
+	// listing and inside the session panel over it.
+	const sizeID = $props.id();
+
 	const step =
 		'text-muted hover:bg-raised hover:text-fg pointer-coarse:size-11 inline-flex size-7 ' +
 		'shrink-0 cursor-pointer items-center justify-center rounded-md transition-colors ' +
@@ -97,9 +103,11 @@
 	class="border-border flex shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-2
 		border-t px-4 py-2"
 >
-	<label class="text-subtle flex items-center gap-2 text-xs">
+	<label for={sizeID} class="text-subtle flex items-center gap-2 text-xs">
 		Rows per page
 		<select
+			id={sizeID}
+			name="rows-per-page"
 			value={limit}
 			onchange={(event) => onresize(Number(event.currentTarget.value))}
 			class="border-border bg-canvas text-fg rounded-md border px-1.5 py-1 text-sm tabular-nums"
