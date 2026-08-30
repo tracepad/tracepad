@@ -154,7 +154,9 @@ func (r *run) tracesList(ctx context.Context, args []string) error {
 	}
 	addSome(query, "q", search)
 	addSome(query, "fields", fields)
-	addSome(query, "cursor", cursor)
+	if err := addCursor(query, fs, cursor); err != nil {
+		return err
+	}
 	if err := addWalk(query, cursor, oldest, newer); err != nil {
 		return err
 	}

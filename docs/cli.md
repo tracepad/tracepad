@@ -88,6 +88,11 @@ combinations that would quietly mean the other one are refused: `--oldest`
 with a `--cursor` (the cursor would win and the jump never happen), and
 `--newer` without one (which is the far end, not a step back).
 
+A `--cursor` passed with nothing in it is refused for the same reason, on every
+listing that takes one: `--cursor "$NEXT"` with `NEXT` unset is a script that
+lost its place, and answering it with the newest page would restart the walk
+instead of continuing it — a loop that never ends.
+
 ### Searching
 
 ```sh
@@ -207,7 +212,17 @@ tracepad scores ls --name helpfulness --since 24h
 ```
 
 Filters: `--trace`, `--observation`, `--session`, `--name`, `--type`,
-`--since`, `--limit`.
+`--since`.
+
+Newest first, and it pages: `--limit` (1–500, default 50) and `--cursor`, with
+the last line printing the command that continues the walk.
+
+```
+older: --cursor MTc4ODEyOTQ5ODQ0…
+```
+
+One direction only — there is no `--oldest` or `--newer` here, because the
+endpoint has no other end to jump to.
 
 ### `prompts`
 
