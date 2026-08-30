@@ -417,9 +417,18 @@ type jsonFrame struct {
 // what a hand-written row or an older release left behind, and a payload it
 // cannot read is better searched crudely than not at all.
 //
-// The walk stops once it has the cap's worth of text (Decision 2 applies to
-// what is extracted), which is also what bounds the work on a payload of
-// megabytes: the leaves past the cap could never be searched.
+// The walk stops once it has the cap's worth of text, because Decision 2
+// applies to what is extracted. That bounds what is produced, not what is read:
+// a document of megabytes whose leaves never fill the cap is walked to its end
+// (20 MiB of `null` is 60 ms). What bounds the reading is the caller — the
+// ingest body cap on the way in, and on the way out a payload this process has
+// just decompressed to cut a snippet from anyway.
+//
+// The leaves are joined by a newline, which is a separator to the tokenizer and
+// not a token: two neighbouring values are therefore adjacent positions, and a
+// phrase can run from the end of one into the start of the next (spec 011 #14).
+// The alternative is an FTS row per leaf, which is the index size Decisions 2
+// and 3 exist to refuse.
 func jsonLeaves(text string) string {
 	decoder := json.NewDecoder(strings.NewReader(text))
 	decoder.UseNumber()

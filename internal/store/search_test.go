@@ -272,6 +272,15 @@ func TestSearchIndexesTheTextNotTheJSON(t *testing.T) {
 		{"a number leaf is found by its digits", "12345", []string{hexTrace(1)}},
 		{"a boolean's key is not a word", "flagged", nil},
 		{"a boolean leaf is its JSON text", "true", []string{hexTrace(1)}},
+		// The newline between two leaves is a separator and not a token,
+		// so neighbouring values sit at neighbouring positions and a
+		// phrase can cross the boundary. Written down in Decision 14 and
+		// pinned here: the only way to close it is an FTS row per leaf,
+		// which is the index size Decisions 2 and 3 refuse.
+		{"a phrase can run from one value into the next",
+			`"my password user"`, []string{hexTrace(1)}},
+		{"but not against the order the values are in",
+			`"user how do"`, nil},
 		{"the cap counts text, not JSON", "cappedleaf", []string{hexTrace(2)}},
 		{"and it is still a cap", "beyondleaf", nil},
 		{"the filler inside it is findable", "fillerword", []string{hexTrace(3)}},

@@ -233,6 +233,8 @@ answers to `?fields=`, and it is never present without a `q`.
   "content": "the refund failed"}` is found by `refund` and by `user`, and not
   by `role` or `content`. A number is found by its digits: an `order_id` of
   `12345` answers to `12345`. A payload that is not JSON is searched whole.
+  The values of one field are one text, so a `"quoted phrase"` can run from the
+  end of one value into the start of the next.
 - **Only the first 64 KiB of each payload's text is indexed** — the text inside
   the JSON, not the JSON. A word past that is stored and readable but not
   findable; `/observations/{id}/io` still returns the whole thing. See
