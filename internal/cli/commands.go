@@ -63,7 +63,9 @@ func (r *run) sessionsList(ctx context.Context, args []string) error {
 	query := url.Values{}
 	addSome(query, "environment", environment)
 	addSome(query, "user_id", user)
-	addSome(query, "cursor", cursor)
+	if err := addCursor(query, fs, cursor); err != nil {
+		return err
+	}
 	if err := addWalk(query, cursor, oldest, newer); err != nil {
 		return err
 	}
@@ -205,7 +207,9 @@ func (r *run) scores(ctx context.Context, args []string) error {
 	addSome(query, "session_id", session)
 	addSome(query, "name", name)
 	addSome(query, "data_type", dataType)
-	addSome(query, "cursor", cursor)
+	if err := addCursor(query, fs, cursor); err != nil {
+		return err
+	}
 	from, err := r.instant("--since", since)
 	if err != nil {
 		return err
@@ -289,7 +293,9 @@ func (r *run) promptsList(ctx context.Context, args []string) error {
 		return err
 	}
 	query := url.Values{}
-	addSome(query, "cursor", cursor)
+	if err := addCursor(query, fs, cursor); err != nil {
+		return err
+	}
 	if err := addLimit(query, limit); err != nil {
 		return err
 	}

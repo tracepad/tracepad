@@ -605,6 +605,42 @@ func TestSessionsAndScores(t *testing.T) {
 	}
 }
 
+// TestEmptyCursorIsRefused: `--cursor "$NEXT"` with nothing in NEXT is a
+// script that has lost its place. Dropping the parameter answers it with the
+// newest page, so a loop over the pages silently restarts and never ends —
+// the reinterpretation spec 003 #23 refuses, on the parameter the walk is made
+// of (found in review of PR #27).
+//
+// All four listings, because the flag means the same thing on each of them and
+// a rule that held on one would be the next thing somebody found missing.
+func TestEmptyCursorIsRefused(t *testing.T) {
+	h := newHarness(t)
+	seedCorpus(t, h)
+
+	for _, command := range [][]string{
+		{"traces", "ls"},
+		{"sessions", "ls"},
+		{"scores", "ls"},
+		{"prompts", "ls"},
+	} {
+		name := strings.Join(command, " ")
+		t.Run(name, func(t *testing.T) {
+			out := h.run(t.Context(), true, append(command, "--cursor", "")...)
+			if out.code != ExitUsage {
+				t.Fatalf("%s --cursor \"\" exited %d, want %d: %s",
+					name, out.code, ExitUsage, out.stderr)
+			}
+			if !strings.Contains(out.stderr, "--cursor") {
+				t.Errorf("stderr = %q, want it to name the flag that came empty", out.stderr)
+			}
+			// Passing no cursor at all still means the first page.
+			if out := h.run(t.Context(), true, command...); out.code != ExitOK {
+				t.Fatalf("%s exited %d: %s", name, out.code, out.stderr)
+			}
+		})
+	}
+}
+
 // TestScoresListPages is the same walk as TestPromptsListPages on the other
 // listing that could reach only its first page. The hint says `older` here:
 // scores come back newest first and the cursor is a timestamp, so the next

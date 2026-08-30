@@ -88,6 +88,11 @@ combinations that would quietly mean the other one are refused: `--oldest`
 with a `--cursor` (the cursor would win and the jump never happen), and
 `--newer` without one (which is the far end, not a step back).
 
+A `--cursor` passed with nothing in it is refused for the same reason, on every
+listing that takes one: `--cursor "$NEXT"` with `NEXT` unset is a script that
+lost its place, and answering it with the newest page would restart the walk
+instead of continuing it — a loop that never ends.
+
 ### Searching
 
 ```sh

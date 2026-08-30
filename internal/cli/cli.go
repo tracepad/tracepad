@@ -395,6 +395,21 @@ func addSome(query url.Values, key, value string) {
 	}
 }
 
+// addCursor passes a page cursor on, and refuses one that arrived without a
+// value. `--cursor "$NEXT"` with nothing in NEXT is a script that has lost its
+// place, and dropping the parameter answers it with the *newest* page — so the
+// walk silently restarts and a loop over the pages never ends. That is spec
+// 003 #23's rule, the one addWalk applies to the direction flags, on the
+// parameter the walk is actually made of (found in review of PR #27).
+func addCursor(query url.Values, fs *flag.FlagSet, cursor string) error {
+	if cursor == "" && wasGiven(fs, "cursor") {
+		return usageErrorf("--cursor needs the value the previous page printed; " +
+			"it was passed empty")
+	}
+	addSome(query, "cursor", cursor)
+	return nil
+}
+
 func addLimit(query url.Values, limit int) error {
 	if limit == 0 {
 		return nil
