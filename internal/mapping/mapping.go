@@ -12,9 +12,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
 	tracepb "go.opentelemetry.io/proto/otlp/trace/v1"
@@ -59,6 +61,11 @@ type spanCtx struct {
 	span     *tracepb.Span
 	resource []*commonpb.KeyValue
 	scope    []*commonpb.KeyValue
+	// scopeName and scopeVersion are the InstrumentationScope's own
+	// fields, which are not attributes at all in OTLP and are the answer
+	// to "which SDK sent this" (spec 012 #7).
+	scopeName    string
+	scopeVersion string
 }
 
 // Map converts a decoded export into the trace model. It never fails: a span
@@ -132,9 +139,11 @@ func flatten(resourceSpans []*tracepb.ResourceSpans) []spanCtx {
 					continue
 				}
 				out = append(out, spanCtx{
-					span:     span,
-					resource: rs.GetResource().GetAttributes(),
-					scope:    ss.GetScope().GetAttributes(),
+					span:         span,
+					resource:     rs.GetResource().GetAttributes(),
+					scope:        ss.GetScope().GetAttributes(),
+					scopeName:    ss.GetScope().GetName(),
+					scopeVersion: ss.GetScope().GetVersion(),
 				})
 			}
 		}
@@ -142,32 +151,75 @@ func flatten(resourceSpans []*tracepb.ResourceSpans) []spanCtx {
 	return out
 }
 
+// rankedValue is one trace-level value together with how good the key that
+// produced it was: the index of that key in its priority chain, lower being
+// better. A value nobody produced has an empty string and is ignored.
+type rankedValue struct {
+	value string
+	rank  int
+}
+
 // traceFields are the trace-level values one span contributed.
 type traceFields struct {
-	name        string
+	name        rankedValue
 	rootName    string
-	userID      string
-	sessionID   string
-	environment string
+	userID      rankedValue
+	sessionID   rankedValue
+	environment rankedValue
+	release     rankedValue
+	version     rankedValue
 	tags        []string
 	metadata    map[string]any
 	dialect     string
 }
 
-// traceAccumulator merges per-span contributions field-wise: a non-empty
-// value beats an empty one and a later non-empty value overwrites an earlier
-// one (spec 002 #6).
+// rankedField merges one trace-level field across the spans of an export.
+//
+// A chain is resolved per span, but the field belongs to the trace, and the
+// two disagree whenever the winning key is on one span and a lower-priority
+// key of the same chain is on the Resource — which every span of the export
+// can see. Merging by "last non-empty wins" alone would then let the fallback
+// beat the explicit key on any trace longer than one span, which is the
+// ordinary shape of traffic: `langfuse.release` on the root and
+// `service.version` on the resource would store the latter (spec 012 #11).
+//
+// So a lower-priority source never overwrites a higher-priority one. At equal
+// rank the later value still wins, because that is spec 002 #6 and it is the
+// right rule for two spans that genuinely disagree about the same key.
+type rankedField struct {
+	value string
+	rank  int
+	set   bool
+}
+
+func (f *rankedField) merge(v rankedValue) {
+	if v.value == "" || (f.set && v.rank > f.rank) {
+		return
+	}
+	f.value, f.rank, f.set = v.value, v.rank, true
+}
+
+// traceAccumulator merges per-span contributions field-wise (spec 002 #6,
+// spec 012 #11).
 type traceAccumulator struct {
-	trace    *model.Trace
-	rootName string
+	trace       *model.Trace
+	rootName    string
+	name        rankedField
+	userID      rankedField
+	sessionID   rankedField
+	environment rankedField
+	release     rankedField
+	version     rankedField
 }
 
 func (a *traceAccumulator) apply(tf *traceFields) {
-	setIf(&a.trace.Name, tf.name)
+	a.name.merge(tf.name)
 	setIf(&a.rootName, tf.rootName)
-	setIf(&a.trace.UserID, tf.userID)
-	setIf(&a.trace.SessionID, tf.sessionID)
-	setIf(&a.trace.Environment, tf.environment)
+	a.userID.merge(tf.userID)
+	a.sessionID.merge(tf.sessionID)
+	a.environment.merge(tf.environment)
+	a.release.merge(tf.release)
+	a.version.merge(tf.version)
 	if len(tf.tags) > 0 {
 		a.trace.Tags = tf.tags
 	}
@@ -177,6 +229,12 @@ func (a *traceAccumulator) apply(tf *traceFields) {
 }
 
 func (a *traceAccumulator) finish() *model.Trace {
+	a.trace.Name = a.name.value
+	a.trace.UserID = a.userID.value
+	a.trace.SessionID = a.sessionID.value
+	a.trace.Environment = a.environment.value
+	a.trace.Release = a.release.value
+	a.trace.Version = a.version.value
 	// An explicit trace name beats the root span's name; the root span may
 	// also simply not be in this export yet.
 	if a.trace.Name == "" {
@@ -206,15 +264,17 @@ func mapSpan(sc spanCtx, parents map[string]bool) (*model.Observation, *traceFie
 	}
 
 	a := newAttrs()
-	a.merge(sc.resource)
-	a.merge(sc.scope)
-	a.merge(span.GetAttributes())
+	a.merge(originResource, sc.resource)
+	a.merge(originScope, sc.scope)
+	a.merge(originSpan, span.GetAttributes())
 
 	tf := &traceFields{dialect: dialectOf(a.values)}
-	tf.name, _ = a.firstString(traceNameKeys...)
-	tf.userID, _ = a.firstString(traceUserKeys...)
-	tf.sessionID, _ = a.firstString(traceSessionKeys...)
-	tf.environment, _ = a.firstString(traceEnvironmentKeys...)
+	tf.name = a.firstRanked(traceNameKeys...)
+	tf.userID = a.firstRanked(traceUserKeys...)
+	tf.sessionID = a.firstRanked(traceSessionKeys...)
+	tf.environment = a.firstRanked(traceEnvironmentKeys...)
+	tf.release = a.firstRanked(traceReleaseKeys...)
+	tf.version = a.firstRanked(traceVersionKeys...)
 	tf.tags = mapTags(a)
 	tf.metadata = mapMetadata(a, lfTraceMetadata)
 	if spanID(span.GetParentSpanId()) == "" {
@@ -246,6 +306,8 @@ func mapSpan(sc spanCtx, parents map[string]bool) (*model.Observation, *traceFie
 		}
 	}
 	obs.Model, _ = a.firstString(obsModelKeys...)
+	obs.CompletionStartTime = mapCompletionStartTime(a)
+	obs.PromptName, obs.PromptVersion = mapPrompt(a)
 	obs.ModelParameters = mapModelParameters(a)
 	obs.Usage = mapUsage(a)
 	obs.CostDetails = mapCost(a)
@@ -255,13 +317,23 @@ func mapSpan(sc spanCtx, parents map[string]bool) (*model.Observation, *traceFie
 	typeMetadata := map[string]any{}
 	obs.Type = mapType(a, obs, parents[id], typeMetadata)
 
-	// Events go in last so that a span attribute literally named "events"
-	// cannot hide the span's own event list.
+	// The scope's own name and version, and the events, go in after the
+	// attributes so that an attribute literally called `scope.name` or
+	// `events` cannot hide the thing it is named after. Both are facts
+	// about the span that OTLP does not carry as attributes at all.
+	scopeMetadata := map[string]any{}
+	if sc.scopeName != "" {
+		scopeMetadata[metadataScopeName] = sc.scopeName
+	}
+	if sc.scopeVersion != "" {
+		scopeMetadata[metadataScopeVersion] = sc.scopeVersion
+	}
 	eventMetadata := map[string]any{}
 	if events := mapEvents(span); events != nil {
 		eventMetadata[metadataEventsKey] = events
 	}
-	obs.Metadata = mergeMetadata(mapMetadata(a, lfObsMetadata), typeMetadata, a.rest(), eventMetadata)
+	obs.Metadata = mergeMetadata(mapMetadata(a, lfObsMetadata), typeMetadata, a.rest(),
+		scopeMetadata, eventMetadata)
 
 	return obs, tf, ""
 }
@@ -351,21 +423,18 @@ func mapStatusMessage(a *attrs, status *tracepb.Status) string {
 	return status.GetMessage()
 }
 
-// mapType implements spec 002 #12. An explicit Langfuse type wins; a model
-// attribute in any dialect means a generation; a zero-duration childless span
-// is an event; everything else is a span. A Langfuse type richer than our
-// three collapses onto the nearest one and keeps its original spelling in
-// metadata, so nothing is lost.
+// mapType implements spec 002 #12 with the vocabulary spec 012 #2 widened it
+// to. An explicit Langfuse type wins and is stored as sent; a model attribute
+// in any dialect means a generation; a zero-duration childless span is an
+// event; everything else is a span. A spelling outside the ten is preserved
+// in metadata and left to the heuristics, exactly as before — the column
+// still cannot hold it.
 func mapType(a *attrs, obs *model.Observation, hasChildren bool, meta map[string]any) string {
 	if raw, ok := a.lookup(lfObsType); ok {
 		spelling := strings.ToLower(strings.TrimSpace(asString(raw)))
-		mapped, known := observationTypeAliases[spelling]
 		a.claim(lfObsType)
-		if known {
-			if mapped != spelling {
-				meta[lfObsType] = raw
-			}
-			return mapped
+		if observationTypes[spelling] {
+			return spelling
 		}
 		// An unknown spelling is preserved and left to the heuristics.
 		meta[lfObsType] = raw
@@ -377,6 +446,77 @@ func mapType(a *attrs, obs *model.Observation, hasChildren bool, meta map[string
 		return model.TypeEvent
 	}
 	return model.TypeSpan
+}
+
+// mapCompletionStartTime resolves when the first token came back, in Unix
+// nanoseconds (spec 012 #3). Three shapes are accepted, and the attribute is
+// claimed only for the ones that parse — anything else stays visible in
+// metadata rather than being silently dropped for having the wrong type.
+func mapCompletionStartTime(a *attrs) int64 {
+	raw, ok := a.lookup(lfObsCompletionStartTime)
+	if !ok {
+		return 0
+	}
+	instant, parsed := parseInstant(raw)
+	if !parsed {
+		return 0
+	}
+	a.claim(lfObsCompletionStartTime)
+	return instant
+}
+
+// parseInstant reads the shapes an SDK sends an instant in: an integer of
+// nanoseconds, an RFC 3339 string, and that same string with a layer of JSON
+// quoting still around it — which is what the Langfuse SDK 4.7 emits on the
+// wire (verified 2026-08-30). One layer is stripped, not all of them: a value
+// quoted twice over is a client bug, not a convention.
+func parseInstant(raw any) (int64, bool) {
+	switch value := raw.(type) {
+	case int64:
+		return value, true
+	case float64:
+		// A double large enough to hold nanoseconds has already lost
+		// precision, but the alternative is losing the value.
+		if value != math.Trunc(value) {
+			return 0, false
+		}
+		return int64(value), true
+	case string:
+		text := strings.TrimSpace(value)
+		if unquoted, err := strconv.Unquote(text); err == nil && strings.HasPrefix(text, `"`) {
+			text = strings.TrimSpace(unquoted)
+		}
+		if nanoseconds, err := strconv.ParseInt(text, 10, 64); err == nil {
+			return nanoseconds, true
+		}
+		instant, err := time.Parse(time.RFC3339Nano, text)
+		if err != nil {
+			return 0, false
+		}
+		return instant.UnixNano(), true
+	}
+	return 0, false
+}
+
+// mapPrompt reads the prompt the client said this observation ran. The name
+// and the version are independent: a version that is not an integer stays in
+// metadata and the name is still recorded, because "which prompt" is the
+// question the filter answers and half an answer beats none (spec 012 #5).
+func mapPrompt(a *attrs) (string, *int64) {
+	name, ok := a.firstString(lfObsPromptName)
+	if !ok {
+		return "", nil
+	}
+	raw, present := a.lookup(lfObsPromptVersion)
+	if !present {
+		return name, nil
+	}
+	version, integral := asInteger(raw)
+	if !integral {
+		return name, nil
+	}
+	a.claim(lfObsPromptVersion)
+	return name, &version
 }
 
 // mapModelParameters: an explicit JSON object wins; otherwise every

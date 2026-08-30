@@ -27,9 +27,11 @@
       "end_time": 1787738400820000000,
       "level": "DEFAULT",
       "metadata": {
-        "service.name": "support-bot",
-        "telemetry.sdk.language": "python",
-        "telemetry.sdk.name": "opentelemetry"
+        "resource.service.name": "support-bot",
+        "resource.telemetry.sdk.language": "python",
+        "resource.telemetry.sdk.name": "opentelemetry",
+        "scope.name": "langfuse-sdk",
+        "scope.version": "3.6.1"
       }
     },
     {
@@ -69,9 +71,11 @@
       },
       "metadata": {
         "prompt_name": "support-v3",
-        "service.name": "support-bot",
-        "telemetry.sdk.language": "python",
-        "telemetry.sdk.name": "opentelemetry"
+        "resource.service.name": "support-bot",
+        "resource.telemetry.sdk.language": "python",
+        "resource.telemetry.sdk.name": "opentelemetry",
+        "scope.name": "langfuse-sdk",
+        "scope.version": "3.6.1"
       }
     }
   ]

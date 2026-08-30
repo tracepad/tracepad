@@ -40,6 +40,7 @@ func Fixtures() []Fixture {
 		crossResourceTree(),
 		langfuseExtendedTypes(),
 		largePayloads(),
+		wireColumns(),
 	}
 }
 
@@ -322,6 +323,93 @@ func largePayloads() Fixture {
 	}
 }
 
+// 008 — what the wire already carries (spec 012): the release and version of
+// the deployment, the completion start in both of the shapes SDKs send it,
+// the prompt a generation ran, and the same attribute name at all three
+// levels of the export.
+//
+// Two resources, because `release` has two sources and they must be seen to
+// disagree: the first carries `langfuse.release` beside a `service.version`
+// that loses the chain and so keeps its own place in metadata; the second
+// carries only `service.version`, which is then what the release is.
+func wireColumns() Fixture {
+	const withDialect = "ff6677008899001122aabb33cc44dd55"
+	const plainOTel = "1122aabb33cc44dd55ee6677008899ff"
+
+	// The double-JSON-encoded instant is what the Langfuse SDK 4.7 puts on
+	// the wire; the quotes are part of the string value, not of this
+	// literal (spec 012 #3).
+	root := span(withDialect, "b1b2b3b4b5b6b7b8", "", "checkout",
+		base, base+1500*ms,
+		str("langfuse.trace.name", "checkout"),
+		str("langfuse.release", "2026.8.30-rc1"),
+		str("langfuse.version", "checkout-v9"),
+		str("langfuse.observation.type", "span"),
+	)
+	answer := span(withDialect, "c1c2c3c4c5c6c7c8", "b1b2b3b4b5b6b7b8", "answer",
+		base+100*ms, base+1400*ms,
+		str("langfuse.observation.type", "generation"),
+		str("langfuse.observation.model.name", "claude-sonnet-5"),
+		str("langfuse.observation.completion_start_time", `"2026-08-26T10:00:00.488Z"`),
+		str("langfuse.observation.prompt.name", "support-answer"),
+		i64("langfuse.observation.prompt.version", 7),
+		// The observation's own version is not the trace's, and stays
+		// where the mapper found it (spec 012 #4).
+		str("langfuse.observation.version", "answer-3"),
+		// Same key as the resource's and the scope's: three facts that
+		// used to be one (spec 012 #7).
+		str("service.name", "span-level"),
+	)
+	lookup := span(withDialect, "d1d2d3d4d5d6d7d8", "b1b2b3b4b5b6b7b8", "catalog-search",
+		base+120*ms, base+300*ms,
+		str("langfuse.observation.type", "tool"),
+		// The other accepted shape: whole nanoseconds.
+		i64("langfuse.observation.completion_start_time", base+180*ms),
+		// A version that is not an integer: the name is still the
+		// prompt, the version stays in metadata (spec 012 #5).
+		str("langfuse.observation.prompt.name", "catalog-query"),
+		str("langfuse.observation.prompt.version", "latest"),
+	)
+	gate := span(withDialect, "e1e2e3e4e5e6e7e8", "b1b2b3b4b5b6b7b8", "policy-check",
+		base+310*ms, base+330*ms,
+		str("langfuse.observation.type", "guardrail"),
+		// Neither an instant nor a number: unclaimed, and so visible.
+		str("langfuse.observation.completion_start_time", "as soon as it could"),
+	)
+
+	scopeSpans := scope("langfuse-sdk", "4.7.0", root, answer, lookup, gate)
+	scopeSpans.Scope.Attributes = []*commonpb.KeyValue{str("service.name", "scope-level")}
+
+	// A plain-OTel app that never heard of the dialect: the release comes
+	// from the resource attribute it already sets.
+	priced := span(plainOTel, "f1f2f3f4f5f6f7f8", "", "price-quote",
+		base+200*ms, base+900*ms,
+		str("gen_ai.request.model", "gpt-4o-mini"),
+		str("langfuse.observation.completion_start_time", `2026-08-26T10:00:00.640Z`),
+	)
+
+	return Fixture{
+		Name: "008-wire-columns",
+		ResourceSpans: []*tracepb.ResourceSpans{
+			resourceSpans(
+				[]*commonpb.KeyValue{
+					str("service.name", "resource-level"),
+					str("service.version", "2026.8.3"),
+					str("deployment.environment", "production"),
+				},
+				scopeSpans,
+			),
+			resourceSpans(
+				[]*commonpb.KeyValue{
+					str("service.name", "pricing"),
+					str("service.version", "1.9.0"),
+				},
+				scope("opentelemetry.instrumentation.openai", "0.42.0", priced),
+			),
+		},
+	}
+}
+
 // SpanWith builds a minimal one-span export carrying the given string
 // attributes, for tests that probe a single mapping rule rather than a whole
 // dialect. Keys and values alternate.
@@ -343,6 +431,54 @@ func ProbeSpan(keyValues ...string) *tracepb.Span {
 // Export wraps spans in the resource/scope envelope an exporter would.
 func Export(spans ...*tracepb.Span) []*tracepb.ResourceSpans {
 	return []*tracepb.ResourceSpans{resourceSpans(nil, scope("probe", "0.0.0", spans...))}
+}
+
+// Levels describes an export whose three attribute levels are set
+// independently, for the tests that are *about* the levels: which one an
+// unclaimed attribute keeps its name from, and which one wins a priority
+// chain (spec 012 #7, #11). Keys and values alternate in each list.
+type Levels struct {
+	Resource     []string
+	Scope        []string
+	ScopeName    string
+	ScopeVersion string
+	// Spans is one attribute set per span. The first span is the root and
+	// the rest are its children — the shape that puts a trace-level
+	// attribute on the root while the resource's fallback stays visible to
+	// every span below it.
+	Spans [][]string
+}
+
+// ExportLevels builds the export Levels describes.
+func ExportLevels(l Levels) []*tracepb.ResourceSpans {
+	const traceID = "aabbccddeeff00112233445566778899"
+	const rootID = "1000000000000001"
+
+	spans := make([]*tracepb.Span, 0, len(l.Spans))
+	for i, keyValues := range l.Spans {
+		id, parent := rootID, ""
+		if i > 0 {
+			id, parent = hex.EncodeToString([]byte{0x20, 0, 0, 0, 0, 0, 0, byte(i)}), rootID
+		}
+		spans = append(spans, span(traceID, id, parent, "probe", base, base+ms, pairs(keyValues)...))
+	}
+
+	scopeSpans := scope(l.ScopeName, l.ScopeVersion, spans...)
+	scopeSpans.Scope.Attributes = pairs(l.Scope)
+	return []*tracepb.ResourceSpans{resourceSpans(pairs(l.Resource), scopeSpans)}
+}
+
+// pairs turns alternating keys and values into string attributes. An empty
+// list yields nil, which is an absent attribute list rather than an empty one.
+func pairs(keyValues []string) []*commonpb.KeyValue {
+	if len(keyValues) == 0 {
+		return nil
+	}
+	out := make([]*commonpb.KeyValue, 0, len(keyValues)/2)
+	for i := 0; i+1 < len(keyValues); i += 2 {
+		out = append(out, str(keyValues[i], keyValues[i+1]))
+	}
+	return out
 }
 
 // ExceptionEvent builds the event OTel records when a span fails.

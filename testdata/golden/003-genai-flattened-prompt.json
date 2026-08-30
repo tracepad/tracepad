@@ -41,7 +41,9 @@
         }
       ],
       "metadata": {
-        "service.name": "release-notes",
+        "resource.service.name": "release-notes",
+        "scope.name": "opentelemetry.instrumentation.mistral",
+        "scope.version": "0.19.3",
         "traceloop.workflow.name": "release-notes"
       }
     }

@@ -17,7 +17,9 @@
       "end_time": 1787738402100000000,
       "level": "DEFAULT",
       "metadata": {
-        "service.name": "release-notes"
+        "resource.service.name": "release-notes",
+        "scope.name": "langfuse-sdk",
+        "scope.version": "3.6.1"
       }
     },
     {
@@ -56,7 +58,9 @@
         "role": "assistant"
       },
       "metadata": {
-        "service.name": "release-notes"
+        "resource.service.name": "release-notes",
+        "scope.name": "langfuse-sdk",
+        "scope.version": "3.6.1"
       }
     }
   ]
