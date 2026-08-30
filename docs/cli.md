@@ -156,6 +156,10 @@ Follows the trace listing, printing each new trace on one line. It polls the
 public API (every 2 s, `--interval` to change it), so it needs no new server
 surface and inherits authentication, filters and budgets.
 
+The one filter it does not take is `--until`. A follow has no far end — the
+newest page is never past it — so the flag would either do nothing or stop the
+following without saying so; a bounded range of traces is `traces ls --until`.
+
 A trace is timestamped by when its earliest span *started*, not by when it was
 stored, and exporters batch — the OpenTelemetry SDK's default processor flushes
 every five seconds. So a follow looks a minute back rather than only forward,
