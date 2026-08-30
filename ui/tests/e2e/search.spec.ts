@@ -91,6 +91,13 @@ test('clearing after typing discards the text instead of searching for it', asyn
 test('clearing an active search after typing over it turns one page, not two', async ({ page }) => {
 	await signIn(page);
 	await page.goto('/traces?q=password');
+	// The counting starts once the page's own search is on screen. `goto`
+	// returns on the load event, which is not when the application has asked
+	// for its listing: on a slow machine that request is still to come, and
+	// counted here it looks like a second page turn. CI is such a machine —
+	// this is what made it red on `main`, and a CPU throttled 20× reproduces
+	// it on either side of the merge it was blamed on.
+	await expect(page.locator('tbody td[colspan]').first()).toBeVisible();
 
 	const listings: string[] = [];
 	page.on('request', (request) => {
