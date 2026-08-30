@@ -63,15 +63,30 @@ func TestProjectsShowNamesTheProjectOnce(t *testing.T) {
 	h := newAdminCLI(t)
 	id := h.projectID(t)
 
-	for _, flagValue := range []string{id, "some-other-project"} {
+	// The empty value is in the list because `--project "$PROJ"` with nothing
+	// in PROJ is how the double naming actually arrives, and a guard that read
+	// it as "no flag" would let the positional win after all — the shape of
+	// spec 003 #23 (found in review of this PR).
+	for _, flagValue := range []string{id, "some-other-project", ""} {
 		out := h.run(t.Context(), true, "projects", "show", id, "--project", flagValue)
 		if out.code != ExitUsage {
-			t.Fatalf("projects show <id> --project %s exited %d, want %d: %s",
+			t.Fatalf("projects show <id> --project %q exited %d, want %d: %s",
 				flagValue, out.code, ExitUsage, out.stderr)
 		}
 		if !strings.Contains(out.stderr, "not both") {
 			t.Errorf("stderr = %q, want it to say the two forms are one argument", out.stderr)
 		}
+	}
+
+	// And on its own that expansion asked about whichever project the key
+	// reaches rather than about the one the caller meant to name.
+	out := h.run(t.Context(), true, "projects", "show", "--project", "")
+	if out.code != ExitUsage {
+		t.Fatalf("projects show --project \"\" exited %d, want %d: %s",
+			out.code, ExitUsage, out.stderr)
+	}
+	if !strings.Contains(out.stderr, "--project") {
+		t.Errorf("stderr = %q, want it to name the flag that came without an id", out.stderr)
 	}
 
 	// Each on its own still works, which is what makes the refusal about the

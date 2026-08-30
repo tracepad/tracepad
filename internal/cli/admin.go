@@ -122,8 +122,18 @@ func (r *run) projectsShow(ctx context.Context, args []string) error {
 	// values: the reader of `projects show a --project b` cannot tell which
 	// one the command obeys, and being right by accident when the two agree
 	// teaches the wrong rule (addWalk's, spec 003 #23).
-	if len(rest) == 1 && *project != "" {
+	//
+	// "Given" and not "non-empty", because `--project "$PROJ"` with nothing in
+	// PROJ is the shape that would otherwise slip through the guard and let
+	// the positional win after all (found in review of PR #24).
+	byFlag := wasGiven(fs, "project")
+	if len(rest) == 1 && byFlag {
 		return usageErrorf("pass either the positional id or --project, not both")
+	}
+	// The same expansion on its own asked "the one project this key reaches"
+	// instead of the project the caller meant to name.
+	if byFlag && *project == "" {
+		return usageErrorf("--project needs a project id; it was passed empty")
 	}
 	given := *project
 	if len(rest) == 1 {
