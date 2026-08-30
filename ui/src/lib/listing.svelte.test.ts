@@ -218,6 +218,25 @@ describe('a live tick', () => {
 		expect(source.counts).toHaveLength(2);
 	});
 
+	it('does not go out beside a load, which would land over it', async () => {
+		const { source, listing } = mount();
+
+		// The poll timer keeps its phase across a filter change — the page's
+		// effect depends on `live` and `newest`, not on the load — so a tick can
+		// fire while the load for the newest page is still out. Its answer would
+		// be the newer one, and the load's would land last (#9).
+		void listing.tick();
+		expect(source.asked).toHaveLength(1);
+
+		source.loads[0].ok(answer(['2', '1'], { next_cursor: 'c2' }));
+		await idle();
+		expect(listing.rows.map((row) => row.id)).toEqual(['2', '1']);
+
+		// And once the page has landed, live carries on.
+		void listing.tick();
+		expect(source.counts).toHaveLength(1);
+	});
+
 	it('is freed again by the turn that aborts it', async () => {
 		const { source, listing } = mount();
 		source.loads[0].ok(answer(['1'], { next_cursor: 'c2' }));

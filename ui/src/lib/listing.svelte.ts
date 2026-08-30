@@ -137,7 +137,8 @@ export class Listing<Row> {
 	 * Whether a tick is still out. Live fires on a timer, so a server slower
 	 * than the interval had two ticks in flight at once and the older one could
 	 * land last, rolling the rows, the cursor and the count back a whole
-	 * interval (#9).
+	 * interval (#9). The other half of that gate is `loading`, read in `tick()`:
+	 * a tick can overlap a *load* the same way.
 	 */
 	#ticking = false;
 
@@ -255,11 +256,18 @@ export class Listing<Row> {
 		// Live means "the newest page, again" (spec 009 #7); anywhere else there
 		// is nothing for a tick to mean.
 		if (!controller || !this.newest) return;
-		// One tick at a time (#9). Skipped rather than raced: the answer still
-		// out is the newer question's answer too, and cancelling it for a fresh
-		// request would leave a server slower than the interval refreshing
-		// nothing at all, every tick aborted by the next.
-		if (this.#ticking) return;
+		// One read of this page at a time (#9). Skipped rather than raced: the
+		// answer still out is the newer question's answer too, and cancelling it
+		// for a fresh request would leave a server slower than the interval
+		// refreshing nothing at all, every tick aborted by the next.
+		//
+		// A load counts, not just another tick. The timer's phase survives a
+		// filter change — the page's effect depends on `live` and `newest`, not
+		// on the load — so a tick fired at t=5 could answer before the load
+		// issued at t=0 and be overwritten by it. `loading` is always cleared by
+		// a load that settles unaborted, and an aborted one is replaced by the
+		// load that aborted it, so this cannot wedge.
+		if (this.#ticking || this.loading) return;
 		this.#ticking = true;
 		const { signal } = controller;
 		try {
