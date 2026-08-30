@@ -1,6 +1,7 @@
 package mapping_test
 
 import (
+	"math"
 	"testing"
 
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
@@ -146,6 +147,29 @@ func TestCompletionStartTime(t *testing.T) {
 		{
 			name:     "a number that is not whole",
 			value:    doubleValue(1.5),
+			inMetada: true,
+		},
+		// A double is whole at any magnitude, so the integrality check
+		// alone let this through, and converting it to int64 is
+		// implementation-defined: it would be stored as an instant and
+		// subtracted into a TTFT of some 10^12 milliseconds (found in
+		// review of PR #19).
+		{
+			name:     "a whole number past what int64 holds",
+			value:    doubleValue(1e30),
+			inMetada: true,
+		},
+		// The infinities reach this rule as text rather than as doubles,
+		// since JSON cannot spell one — the point of asserting them here
+		// is that the two screenings agree on where the value ends up.
+		{
+			name:     "a number that is not finite",
+			value:    doubleValue(math.Inf(1)),
+			inMetada: true,
+		},
+		{
+			name:     "not a number at all",
+			value:    doubleValue(math.NaN()),
 			inMetada: true,
 		},
 	}

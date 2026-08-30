@@ -476,8 +476,21 @@ func parseInstant(raw any) (int64, bool) {
 		return value, true
 	case float64:
 		// A double large enough to hold nanoseconds has already lost
-		// precision, but the alternative is losing the value.
-		if value != math.Trunc(value) {
+		// precision, but the alternative is losing the value. What no
+		// precision survives is a magnitude int64 cannot hold: `1e30` is
+		// as whole as any other double, and converting it is
+		// implementation-defined — it saturates on arm64 and wraps on
+		// amd64, either way storing an instant no clock produced and
+		// subtracting it into a TTFT of some 10^12 milliseconds. Out of
+		// range is not a nanosecond count, so it stays unclaimed and
+		// falls through to metadata with every other shape this cannot
+		// read (found in review of PR #19). The infinities are screened
+		// earlier — `attrValue` keeps a non-finite double as its textual
+		// form, because JSON has no way to spell one — and NaN would
+		// fail the integrality check anyway, every comparison against it
+		// being false. The guard covers them regardless: this function
+		// reads a value, not a wire format.
+		if value != math.Trunc(value) || value >= math.MaxInt64 || value < math.MinInt64 {
 			return 0, false
 		}
 		return int64(value), true
