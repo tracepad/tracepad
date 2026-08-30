@@ -89,6 +89,20 @@ func TestProjectsShowNamesTheProjectOnce(t *testing.T) {
 		t.Errorf("stderr = %q, want it to name the flag that came without an id", out.stderr)
 	}
 
+	// The positional spelling of the same expansion, which is this command's
+	// alone: an argument that is there and names nothing (found in review of
+	// PR #26). It cannot be answered by "the project this key reaches" —
+	// that is what passing no argument means, and the two have to stay
+	// different questions.
+	out = h.run(t.Context(), true, "projects", "show", "")
+	if out.code != ExitUsage {
+		t.Fatalf("projects show \"\" exited %d, want %d: %s",
+			out.code, ExitUsage, out.stderr)
+	}
+	if !strings.Contains(out.stderr, "empty") {
+		t.Errorf("stderr = %q, want it to say the id it was given is empty", out.stderr)
+	}
+
 	// Each on its own still works, which is what makes the refusal about the
 	// combination and not about either spelling.
 	for _, args := range [][]string{{"projects", "show", id},
@@ -97,6 +111,55 @@ func TestProjectsShowNamesTheProjectOnce(t *testing.T) {
 		if out.code != ExitOK {
 			t.Fatalf("%v exited %d: %s", args, out.code, out.stderr)
 		}
+	}
+}
+
+// TestEmptyProjectFlagIsRefusedEverywhere: `--project ""` is what an unset
+// shell variable expands to, and every command that takes the flag used to
+// read it as "no --project" and fall back to the one project the key reaches.
+// That answers a wider question than was asked — spec 003 #23's case, named
+// there in as many words — so it is a usage error on all of them.
+//
+// The destructive ones are in the list on purpose: the refusal has to come
+// before the request, or a `retention set --days 1 --project "$UNSET" --yes`
+// shortens a window on whichever project the key happens to reach.
+func TestEmptyProjectFlagIsRefusedEverywhere(t *testing.T) {
+	h := newAdminCLI(t)
+
+	for _, args := range [][]string{
+		{"projects", "show"},
+		{"keys", "ls"},
+		{"keys", "create"},
+		{"keys", "rm", "tp-pk-test"},
+		{"retention", "show"},
+		{"retention", "set", "--days", "30", "--yes"},
+		{"users", "rm-data", "user-4711", "--yes"},
+	} {
+		name := strings.Join(args[:2], " ")
+		t.Run(name, func(t *testing.T) {
+			out := h.run(t.Context(), true, append(args, "--project", "")...)
+			if out.code != ExitUsage {
+				t.Fatalf("%v --project \"\" exited %d, want %d: %s",
+					args, out.code, ExitUsage, out.stderr)
+			}
+			if !strings.Contains(out.stderr, "--project") {
+				t.Errorf("stderr = %q, want it to name the flag that came without an id",
+					out.stderr)
+			}
+		})
+	}
+
+	// Nothing was destroyed on the way: the refusal happened before the
+	// requests those two commands would otherwise have made.
+	if project, _ := h.store.ProjectByName("test"); project.RetentionDays != nil {
+		t.Errorf("retention = %v, want the window untouched", project.RetentionDays)
+	}
+	keys, err := h.store.ProjectKeys(h.projectID(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(keys) != 1 {
+		t.Errorf("keys = %+v, want the one seeded pair still there", keys)
 	}
 }
 
