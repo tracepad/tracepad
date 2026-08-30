@@ -638,6 +638,11 @@ func statsQuery(projectID string, filter StatsFilter) (string, []any) {
 var countedTables = []string{
 	"api_keys", "traces", "observations",
 	"raw_batches", "scores", "prompts", "prompt_labels", "search_entries",
+	// `stats_hourly` is counted for the reason `search_entries` is: it
+	// carries a project id, and it is a store whose size an operator
+	// cannot infer from the rows they can already see — least of all this
+	// one, which outlives them (spec 013 #8).
+	"stats_hourly",
 }
 
 // TableCount is one table's row count.

@@ -52,6 +52,7 @@ type Scope = 'project' | 'admin';
 export type RetentionUpdate = {
 	retention_days?: number | null;
 	raw_retention_days?: number | null;
+	stats_retention_days?: number | null;
 };
 
 /**

@@ -163,12 +163,12 @@ func (a *Aggregator) rollProject(ctx context.Context, project *Project, at time.
 		if err != nil {
 			return rolled, err
 		}
-		frozen := frozenBefore(project, at)
 		for _, hour := range dirty {
-			if hour < frozen {
-				continue
-			}
-			if err := a.writer.Submit(ctx, &statsRoll{ProjectID: project.ID, Hour: hour}); err != nil {
+			// Whether a dirty hour is frozen is settled by the job,
+			// inside its transaction (spec 013 #11); a pass that
+			// pre-filtered here would be a second opinion about the
+			// same rule.
+			if err := a.rollOne(ctx, project.ID, hour, at); err != nil {
 				return rolled, err
 			}
 			rolled++
@@ -197,7 +197,7 @@ func (a *Aggregator) rollProject(ctx context.Context, project *Project, at time.
 		return rolled, err
 	}
 	for _, hour := range hours {
-		if err := a.writer.Submit(ctx, &statsRoll{ProjectID: project.ID, Hour: hour}); err != nil {
+		if err := a.rollOne(ctx, project.ID, hour, at); err != nil {
 			return rolled, err
 		}
 		rolled++
@@ -222,6 +222,10 @@ func (a *Aggregator) rollProject(ctx context.Context, project *Project, at time.
 	return rolled, nil
 }
 
+func (a *Aggregator) rollOne(ctx context.Context, projectID string, hour int64, at time.Time) error {
+	return a.writer.Submit(ctx, RollHour(projectID, hour, at.UnixNano()))
+}
+
 // frozenBefore is the hour at which an already-rolled hour stops being
 // re-rollable (spec 013 #11). Past a project's trace-retention window the raw
 // rows are incomplete by design — the sweep took them and deliberately left
@@ -229,7 +233,7 @@ func (a *Aggregator) rollProject(ctx context.Context, project *Project, at time.
 // not a correction but a demolition: one late fragment arriving for a swept
 // hour would rewrite five thousand traces down to one. A project that keeps
 // its traces forever has no such hours and re-rolls everything.
-func frozenBefore(project *Project, at time.Time) int64 {
+func frozenBefore(project *Project, nowNanos int64) int64 {
 	if project.RetentionDays == nil {
 		return 0
 	}
@@ -237,7 +241,7 @@ func frozenBefore(project *Project, at time.Time) int64 {
 	if days < 1 || days > MaxRetentionDays {
 		return 0
 	}
-	return HourOf(at.Add(-time.Duration(days) * 24 * time.Hour).UnixNano())
+	return HourOf(nowNanos - int64(days)*24*int64(time.Hour))
 }
 
 func (a *Aggregator) advance(ctx context.Context, projectID string, until int64, at time.Time) error {

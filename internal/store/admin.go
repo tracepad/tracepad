@@ -26,6 +26,10 @@ type DeleteCounts struct {
 	Scores       int64
 	Payloads     int64
 	RawBatches   int64
+	// StatsHours is how many rolled hours a stats window would delete
+	// (spec 013 #6). It is counted separately because it is the one thing
+	// here that survives the trace sweep.
+	StatsHours   int64
 	Prompts      int64
 	PromptLabels int64
 	APIKeys      int64
@@ -76,7 +80,7 @@ func cutoffFor(days *int, now int64) (int64, bool) {
 // RetentionPreview counts what the given windows would delete from a project
 // right now. It is the same arithmetic the sweeper does, which is what lets
 // the dry run promise something the next pass will keep (spec 005 #8).
-func (s *Store) RetentionPreview(projectID string, retention, raw *int, now int64) (DeleteCounts, error) {
+func (s *Store) RetentionPreview(projectID string, retention, raw, stats *int, now int64) (DeleteCounts, error) {
 	var counts DeleteCounts
 	if cutoff, windowed := cutoffFor(retention, now); windowed {
 		expiring, err := s.expiredCounts(projectID, cutoff)
@@ -98,7 +102,31 @@ func (s *Store) RetentionPreview(projectID string, retention, raw *int, now int6
 		counts.RawBatches = batches
 		counts.Oldest = earliest(counts.Oldest, oldest)
 	}
+	// The rollup's own window, which is measured against the hour a row
+	// summarizes rather than against arrival: the rows carry no arrival
+	// time, and the question an operator asks of them is "how far back does
+	// my history reach" (spec 013 #6).
+	if stats != nil {
+		if cutoff, windowed := cutoffFor(stats, now); windowed {
+			hours, err := s.expiredStatsHours(projectID, cutoff/1e9)
+			if err != nil {
+				return counts, err
+			}
+			counts.StatsHours = hours
+		}
+	}
 	return counts, nil
+}
+
+// expiredStatsHours counts the rolled hours a stats window would delete.
+func (s *Store) expiredStatsHours(projectID string, cutoffSeconds int64) (int64, error) {
+	var hours int64
+	if err := s.db.QueryRow(
+		`SELECT COUNT(DISTINCT hour) FROM stats_hourly WHERE project_id = ? AND hour < ?`,
+		projectID, cutoffSeconds).Scan(&hours); err != nil {
+		return 0, fmt.Errorf("count expiring rolled hours: %w", err)
+	}
+	return hours, nil
 }
 
 func (s *Store) expiredCounts(projectID string, cutoff int64) (DeleteCounts, error) {
@@ -366,6 +394,10 @@ type ProjectUpdate struct {
 	Name      *string
 	Retention OptionalDays
 	RawWindow OptionalDays
+	// StatsWindow is the rollup's own window (spec 013 #6). It shrinks
+	// like the other two, and shrinking it destroys history that the trace
+	// sweep deliberately spares, so it is confirmed like the other two.
+	StatsWindow OptionalDays
 	// Confirm is the echo, required when either window shrinks. Whether it
 	// is required is decided here rather than by the caller: the caller
 	// decided it against a project row it read a moment earlier, and the
@@ -378,15 +410,18 @@ type ProjectUpdate struct {
 
 // Windows folds this update onto a project, giving the two windows it would
 // leave behind. A field the update does not mention keeps its stored value.
-func (u *ProjectUpdate) Windows(project *Project) (retention, raw *int) {
-	retention, raw = project.RetentionDays, project.RawRetentionDays
+func (u *ProjectUpdate) Windows(project *Project) (retention, raw, stats *int) {
+	retention, raw, stats = project.RetentionDays, project.RawRetentionDays, project.StatsRetentionDays
 	if u.Retention.Set {
 		retention = u.Retention.Value
 	}
 	if u.RawWindow.Set {
 		raw = u.RawWindow.Value
 	}
-	return retention, raw
+	if u.StatsWindow.Set {
+		stats = u.StatsWindow.Value
+	}
+	return retention, raw, stats
 }
 
 // Shrinks reports whether this update makes either window shorter, where "no
@@ -397,8 +432,14 @@ func (u *ProjectUpdate) Windows(project *Project) (retention, raw *int) {
 // The API asks this to decide whether to answer with a preview; apply asks it
 // again, against the stored row, to decide whether to demand the echo.
 func (u *ProjectUpdate) Shrinks(project *Project) bool {
-	retention, raw := u.Windows(project)
+	retention, raw, stats := u.Windows(project)
 	if shorterWindow(retention, project.RetentionDays) {
+		return true
+	}
+	// A shorter stats window destroys history the trace sweep spares by
+	// design (spec 013 #6), which is the most destructive of the three: it
+	// is the copy that was kept *because* the raw rows go.
+	if shorterWindow(stats, project.StatsRetentionDays) {
 		return true
 	}
 	// Raw follows the trace window when it has none of its own (#6), so
@@ -461,6 +502,12 @@ func (u *ProjectUpdate) apply(tx *sql.Tx) error {
 		if _, err := tx.Exec(`UPDATE projects SET raw_retention_days = ? WHERE id = ?`,
 			nullDays(u.RawWindow.Value), u.ProjectID); err != nil {
 			return fmt.Errorf("set raw retention window: %w", err)
+		}
+	}
+	if u.StatsWindow.Set {
+		if _, err := tx.Exec(`UPDATE projects SET stats_retention_days = ? WHERE id = ?`,
+			nullDays(u.StatsWindow.Value), u.ProjectID); err != nil {
+			return fmt.Errorf("set stats retention window: %w", err)
 		}
 	}
 	u.Project, err = projectByID(tx, u.ProjectID)
@@ -544,6 +591,10 @@ type UserDataErase struct {
 	Limit     int
 
 	Counts DeleteCounts
+	// Hours are the rolled hours this chunk emptied, for the caller to
+	// re-roll before it answers: a per-hour count is data derived from
+	// what was just erased (spec 013 #7).
+	Hours []int64
 }
 
 func (e *UserDataErase) apply(tx *sql.Tx) error {
@@ -562,20 +613,29 @@ func (e *UserDataErase) apply(tx *sql.Tx) error {
 		return &Rejection{Kind: RejectNotFound, Message: "no such project"}
 	}
 
+	e.Hours = nil
 	rows, err := tx.Query(
-		`SELECT id FROM traces WHERE project_id = ? AND user_id = ? LIMIT ?`,
+		`SELECT id, timestamp FROM traces WHERE project_id = ? AND user_id = ? LIMIT ?`,
 		e.ProjectID, e.UserID, e.Limit)
 	if err != nil {
 		return fmt.Errorf("select a user's traces: %w", err)
 	}
 	var ids []any
+	seen := map[int64]bool{}
 	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
+		var (
+			id        string
+			timestamp int64
+		)
+		if err := rows.Scan(&id, &timestamp); err != nil {
 			rows.Close()
 			return err
 		}
 		ids = append(ids, id)
+		if hour := HourOf(timestamp); !seen[hour] {
+			seen[hour] = true
+			e.Hours = append(e.Hours, hour)
+		}
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {

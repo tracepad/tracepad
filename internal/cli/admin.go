@@ -43,9 +43,12 @@ type projectView struct {
 	Name             string `json:"name"`
 	RetentionDays    *int   `json:"retention_days"`
 	RawRetentionDays *int   `json:"raw_retention_days"`
-	CreatedAt        string `json:"created_at"`
-	DeletedAt        string `json:"deleted_at"`
-	PurgeAt          string `json:"purge_at"`
+	// StatsRetentionDays is the rollup's own window. It outlives the traces
+	// it summarizes, so it is a window of its own (spec 013 #6).
+	StatsRetentionDays *int   `json:"stats_retention_days"`
+	CreatedAt          string `json:"created_at"`
+	DeletedAt          string `json:"deleted_at"`
+	PurgeAt            string `json:"purge_at"`
 }
 
 func (r *run) projects(ctx context.Context, args []string) error {
@@ -423,6 +426,8 @@ func (r *run) retentionShow(ctx context.Context, args []string) error {
 	fmt.Fprintf(r.opt.Stdout, "  traces      %s\n", window(view.RetentionDays, "kept forever"))
 	fmt.Fprintf(r.opt.Stdout, "  raw bodies  %s\n",
 		window(view.RawRetentionDays, "follow the trace window"))
+	fmt.Fprintf(r.opt.Stdout, "  statistics  %s\n",
+		window(view.StatsRetentionDays, "kept forever"))
 	return nil
 }
 
@@ -433,16 +438,20 @@ func (r *run) retentionSet(ctx context.Context, args []string) error {
 	var (
 		days      int
 		rawDays   int
+		statsDays int
 		forever   bool
 		rawFollow bool
+		statsKeep bool
 		yes       bool
 	)
 	fs := r.flags("retention set")
 	project := fs.String("project", "", "")
 	fs.IntVar(&days, "days", 0, "")
 	fs.IntVar(&rawDays, "raw-days", 0, "")
+	fs.IntVar(&statsDays, "stats-days", 0, "")
 	fs.BoolVar(&forever, "forever", false, "")
 	fs.BoolVar(&rawFollow, "raw-follow", false, "")
+	fs.BoolVar(&statsKeep, "stats-forever", false, "")
 	fs.BoolVar(&yes, "yes", false, "")
 	if _, err := r.parse(fs, args, 0); err != nil {
 		return err
@@ -452,6 +461,9 @@ func (r *run) retentionSet(ctx context.Context, args []string) error {
 	}
 	if rawDays != 0 && rawFollow {
 		return usageErrorf("--raw-days and --raw-follow say different things; pick one")
+	}
+	if statsDays != 0 && statsKeep {
+		return usageErrorf("--stats-days and --stats-forever say different things; pick one")
 	}
 
 	request := map[string]any{}
@@ -473,8 +485,18 @@ func (r *run) retentionSet(ctx context.Context, args []string) error {
 		}
 		request["raw_retention_days"] = rawDays
 	}
+	switch {
+	case statsKeep:
+		request["stats_retention_days"] = nil
+	case statsDays != 0:
+		if err := checkWindow("--stats-days", statsDays); err != nil {
+			return err
+		}
+		request["stats_retention_days"] = statsDays
+	}
 	if len(request) == 0 {
-		return usageErrorf("retention set needs --days, --forever, --raw-days or --raw-follow")
+		return usageErrorf("retention set needs --days, --forever, --raw-days, --raw-follow, " +
+			"--stats-days or --stats-forever")
 	}
 
 	id, err := r.projectID(ctx, fs, *project)
@@ -497,6 +519,8 @@ func (r *run) retentionSet(ctx context.Context, args []string) error {
 	fmt.Fprintf(r.opt.Stdout, "  traces      %s\n", window(view.RetentionDays, "kept forever"))
 	fmt.Fprintf(r.opt.Stdout, "  raw bodies  %s\n",
 		window(view.RawRetentionDays, "follow the trace window"))
+	fmt.Fprintf(r.opt.Stdout, "  statistics  %s\n",
+		window(view.StatsRetentionDays, "kept forever"))
 	fmt.Fprintln(r.opt.Stdout, "\nthe new window takes effect on the next sweep")
 	return nil
 }
@@ -678,6 +702,8 @@ func renderProject(r *run, view projectView) {
 	fmt.Fprintf(r.opt.Stdout, "  traces      %s\n", window(view.RetentionDays, "kept forever"))
 	fmt.Fprintf(r.opt.Stdout, "  raw bodies  %s\n",
 		window(view.RawRetentionDays, "follow the trace window"))
+	fmt.Fprintf(r.opt.Stdout, "  statistics  %s\n",
+		window(view.StatsRetentionDays, "kept forever"))
 	if view.DeletedAt != "" {
 		fmt.Fprintf(r.opt.Stdout, "  deleted     %s\n", shortTime(view.DeletedAt))
 		fmt.Fprintf(r.opt.Stdout, "  purged at   %s\n", shortTime(view.PurgeAt))

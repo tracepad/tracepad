@@ -54,6 +54,35 @@ test('shortening retention previews what it would delete, then asks for the name
 	expect(((await stored.json()) as { retention_days: number }).retention_days).toBe(3);
 });
 
+// The statistics keep a window of their own, because they outlive the traces
+// they summarize (spec 013 #6). Shortening it destroys history the trace sweep
+// spares, so it is confirmed like its siblings.
+test('the statistics window is set from Settings and survives the round trip', async ({ page }) => {
+	const own = await createProject('statswindow');
+	await signInAs(page, own.key);
+
+	await page.getByLabel('Statistics history').selectOption('Keep for');
+	await page.getByLabel('Days of statistics retention').fill('180');
+	await page.getByRole('button', { name: 'Save', exact: true }).click();
+
+	await expect(page.getByText('This would delete')).toBeVisible();
+	const echo = page.getByRole('textbox', { name: /Type the project name/ });
+	await echo.fill(own.name);
+	await page.getByRole('button', { name: 'Shorten and delete' }).click();
+	await expect(page.getByText('Retention updated.')).toBeVisible();
+
+	const stored = await fetch(`${state().baseURL}/api/v1/projects/${own.id}`, {
+		headers: { Authorization: `Bearer ${own.key}` }
+	});
+	const project = (await stored.json()) as {
+		stats_retention_days: number;
+		retention_days: number | null;
+	};
+	expect(project.stats_retention_days).toBe(180);
+	// And it moved nothing else: three windows, three promises.
+	expect(project.retention_days).toBeNull();
+});
+
 test('editing the window after a preview takes the preview away', async ({ page }) => {
 	const own = await createProject('repreview');
 	await signInAs(page, own.key);

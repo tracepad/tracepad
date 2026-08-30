@@ -159,13 +159,43 @@ func (s *Store) StatsRollupHours(projectID string) ([]int64, error) {
 type statsRoll struct {
 	ProjectID string
 	Hour      int64
+	// Now is the clock the freeze of Decision 11 is measured against
+	// (Unix nanoseconds).
+	Now int64
 
 	// Rows is how many dimension tuples the hour produced, for the log
 	// line the aggregator writes.
 	Rows int
+	// Frozen reports that the hour was left alone because retention has
+	// taken the raw rows it would have been recomputed from.
+	Frozen bool
+}
+
+// RollHour is the job that recomputes one `(project, hour)`, for the callers
+// outside this package that have to correct an hour before they answer — the
+// user-data erasure of spec 005 #7, which spec 013 #7 makes re-roll the hours
+// it emptied.
+func RollHour(projectID string, hour, now int64) WriteJob {
+	return &statsRoll{ProjectID: projectID, Hour: hour, Now: now}
 }
 
 func (r *statsRoll) apply(tx *sql.Tx) error {
+	// The freeze is read inside the transaction that would act on it,
+	// which is the only reading that can gate a write (spec 003 #20). It
+	// lives here rather than in the aggregator so that every caller —
+	// a pass, an erasure — obeys one rule in one place.
+	project, err := projectByID(tx, r.ProjectID)
+	if err != nil {
+		return err
+	}
+	if project == nil {
+		return nil
+	}
+	if r.Hour < frozenBefore(project, r.Now) {
+		r.Frozen = true
+		return nil
+	}
+
 	rows, err := rollHour(tx, r.ProjectID, r.Hour)
 	if err != nil {
 		return err
