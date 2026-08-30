@@ -145,7 +145,7 @@ const Usage = `Client commands (they talk to a running server over HTTP):
 Administration (spec 005). Every destructive command shows what it would do
 and asks you to type the name back; --yes answers that for a script:
   tracepad projects ls   [--deleted]
-  tracepad projects show [<project-id>] [--project ID]
+  tracepad projects show [<project-id> | --project ID]
   tracepad projects create  <name>                     (admin token)
   tracepad projects rename  <project-id> <new-name>    (admin token)
   tracepad projects rm      <project-id> [--yes]       (admin token)
@@ -220,6 +220,21 @@ func (r *run) flags(name string) *flag.FlagSet {
 
 // errHelp is `--help` on a subcommand: not a mistake, so not an error exit.
 var errHelp = errors.New("help requested")
+
+// wasGiven reports whether a flag was passed at all, as opposed to sitting at
+// its zero value. The two are different questions and an empty string cannot
+// tell them apart: `--project ""` is what an unset shell variable expands to,
+// and reading it as "not passed" answers a wider question than was asked —
+// which is the reinterpretation spec 003 #23 refuses.
+func wasGiven(fs *flag.FlagSet, name string) bool {
+	given := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			given = true
+		}
+	})
+	return given
+}
 
 // anyArgs lets a command count its own positionals, which is only needed where
 // one is optional — `projects show` with no id means "the one this key

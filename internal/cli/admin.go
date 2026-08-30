@@ -117,6 +117,24 @@ func (r *run) projectsShow(ctx context.Context, args []string) error {
 	if len(rest) > 1 {
 		return usageErrorf("projects show takes one project id, got %d", len(rest))
 	}
+	// Both forms at once name the project twice, and the positional would
+	// quietly win over the flag. Refused as a form rather than compared as
+	// values: the reader of `projects show a --project b` cannot tell which
+	// one the command obeys, and being right by accident when the two agree
+	// teaches the wrong rule (addWalk's, spec 003 #23).
+	//
+	// "Given" and not "non-empty", because `--project "$PROJ"` with nothing in
+	// PROJ is the shape that would otherwise slip through the guard and let
+	// the positional win after all (found in review of PR #24).
+	byFlag := wasGiven(fs, "project")
+	if len(rest) == 1 && byFlag {
+		return usageErrorf("pass either the positional id or --project, not both")
+	}
+	// The same expansion on its own asked "the one project this key reaches"
+	// instead of the project the caller meant to name.
+	if byFlag && *project == "" {
+		return usageErrorf("--project needs a project id; it was passed empty")
+	}
 	given := *project
 	if len(rest) == 1 {
 		given = rest[0]
