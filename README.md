@@ -9,6 +9,28 @@ OpenTelemetry-instrumented app at it and browse your traces.
 New here? [docs/quickstart.md](docs/quickstart.md) goes from nothing to a
 trace on screen.
 
+## What it is built for
+
+One binary over one embedded database, sized for the traces of a team rather
+than of a fleet. Up to roughly **10 GB of data and a million spans a day** is
+the range Tracepad is written to serve well, on one ordinary machine and with
+nothing else to run. Past that you are looking for a platform on a column
+store — ClickHouse and its neighbours — and the honest answer is that this is
+not that.
+
+Rough figures, measured on a synthetic corpus of about 2,000 traces:
+
+- **Binary** — 15.6 MiB, 6.2 MiB gzipped.
+- **Memory** — ~27 MiB resident at rest, ~63 MiB under ingest.
+- **Ingest** — ~1,900 spans/s from one sequential client.
+- **Disk** — ~5 KB per trace, the raw OTLP archive included.
+- **Reads** — 8–23 ms per API query.
+
+Distrust the disk figure first: that corpus has short payloads, and on real
+prompts and completions it is the payloads and the raw batches that the file
+is made of. Size it against your own traffic, and give it a retention
+window — see [docs/retention.md](docs/retention.md).
+
 ## Sending traces
 
 Tracepad accepts standard OTLP/HTTP on `/v1/traces`, and the same endpoint
