@@ -1,6 +1,6 @@
 # Spec 011 — Search: find the trace by what was said in it
 
-**Status:** 📝 DRAFT
+**Status:** ✅ SHIPPED
 **Sprint:** September 2026
 
 > Every filter so far asks about a trace's labels — who, when, where, how
@@ -48,6 +48,8 @@ scores, a query language beyond words, phrases and a trailing `*`.
 | 8 | **2026-08-30** — Existing databases are indexed **synchronously on the first start** after the migration that creates the tables, before the server listens; the backfill is idempotent and resumable, and reports progress in the log | Every migration so far leaves the database consistent before a single request is served, and this one keeps that: a search that answers "nothing" because the index is half-built is worse than a start that takes a minute. The backfill is Go code, not SQL — it decompresses payloads — so it runs after `migrate()` the way `ensureIncrementalVacuum` does, guarded by a marker it writes only when done, skipping observations already indexed; a crash halfway resumes. The rate is measured on a fixture and written into the retention docs beside the thresholds, so an operator with a large store knows what the first start costs. |
 | 9 | **2026-08-30** — Three clients in one PR (REPOS §2): the API filter; `traces ls --search` and `traces last --search` in the CLI, the snippet printed under the row; an MCP tool **`search`** that is the trace listing with `q` required and `match` in its rows. `list_traces` does not grow `q` | Spec 004 #17 declined a `search` tool until there was a search endpoint, so that the tool would never claim a capability the server lacked; this is the endpoint. A tool of its own rather than one more parameter on `list_traces` because the descriptions are triggers (spec 004 #17): "the user quotes text they saw" is a different question from "the user asks what ran", and a model choosing tools by description is better served by two. Both still map onto one endpoint. |
 | 10 | **2026-08-30** — No `q` on the sessions listing, no search over scores, prompts or raw batches | A session is a grouping of traces (spec 007 #2); "sessions whose traces mention X" is a reasonable question and a later spec's, once the trace-level search has been used. Scores and prompts are small and structured; their filters are exact. Raw batches are not user text. |
+| 11 | **2026-08-30** (from the implementation) — Schema 0006 carries two things the data contract below did not name: `idx_search_entries_trace` is `(project_id, trace_id, observation_id)` rather than the first two columns alone, and a one-row `search_backfill(id, done_at)` table holds the marker Decision 8 asks for | The third column is what the ingest path addresses an entry by: every delivery replaces one span's entries (Decision 7), and on the first two columns alone that delete is a scan of the whole trace's entries — quadratic inside a batch of twenty spans of one trace, which is the ordinary shape of an export. The two columns the deletion paths and the listing use are still the index's prefix, so nothing else changes. The marker had to live somewhere, and a table of its own says what it is: a row in `schema_migrations` would have made the backfill look like a migration, which is precisely what it is not — it runs *after* `migrate()`, because it decompresses payloads. |
+| 12 | **2026-08-30** (from the implementation) — `GET /api/v1/traces/last` takes `q` as a filter, and its answer carries no `match` | The shortcut returns a trace rather than a listing row, and with `?expand=io` it returns the payloads themselves — a snippet cut from text the response already carries in full would be a second, worse copy of it. The edge case that gives this endpoint a `q` asks for "the newest matching trace", and that is what it answers; `docs/api.md` says so rather than leaving a reader to notice the field is missing. |
 
 ## API contract
 
@@ -94,8 +96,10 @@ What is and is not matched, written once and repeated in `docs/api.md`:
 `traces ls --search "…"` and `traces last --search "…"` map to `q`. With
 `--search`, the table gains a second line under each row: the field and the
 snippet, indented, dimmed. `tail` does not take `--search` (it follows the
-newest page and is not a question about text). The usage lines and the
-parity test that keeps flags and usage aligned (spec 004 #9) grow with it.
+newest page and is not a question about text). The usage lines grow with it,
+and so does the parity spec 004 #9 gave the HTTP surface, pointed at the
+command line for the first time: a test walks the usage text and refuses a
+flag it offers that the command does not define.
 
 ## MCP contract
 
@@ -118,13 +122,20 @@ CREATE TABLE search_entries (
     observation_id TEXT,               -- NULL for the trace name
     field          TEXT NOT NULL
 ) STRICT;
-CREATE INDEX idx_search_entries_trace ON search_entries(project_id, trace_id);
+CREATE INDEX idx_search_entries_trace
+    ON search_entries(project_id, trace_id, observation_id);   -- Decision 11
 
 CREATE VIRTUAL TABLE search_fts USING fts5(
     body,
     content='', contentless_delete=1,
     tokenize='unicode61 remove_diacritics 2'
 );
+
+-- Whether the one-off backfill has finished (Decision 8, Decision 11).
+CREATE TABLE search_backfill (
+    id      INTEGER PRIMARY KEY CHECK (id = 1),
+    done_at INTEGER
+) STRICT;
 ```
 
 `search_fts.rowid = search_entries.id`. No foreign key: FTS5 virtual tables
