@@ -13,18 +13,34 @@ async function signIn(page: Page) {
 
 const rows = (page: Page) => page.locator('tbody tr');
 
+/**
+ * The top row's link, whose href carries the trace id: the identity of the
+ * page on screen.
+ *
+ * A page turn does not empty the table — `Listing` keeps the rows it has until
+ * the next page lands (`listing.svelte.ts`, `#load`) — so a count of two is
+ * equally true of the page being left, and reading the rows on it is reading
+ * the page before the turn. Every test here that compares rows across a turn
+ * waits for this to change first.
+ */
+const top = (page: Page) => rows(page).first().getByRole('link');
+const identity = (page: Page) => top(page).getAttribute('href');
+
 test('a page is turned, and turned back to the same rows', async ({ page }) => {
 	await signIn(page);
 	await page.goto('/traces?limit=2');
 	await expect(rows(page)).toHaveCount(2);
 	const first = await rows(page).allInnerTexts();
+	const newest = (await identity(page)) ?? '';
 
 	await page.getByRole('button', { name: 'Next page' }).click();
+	await expect(top(page)).not.toHaveAttribute('href', newest);
 	await expect(rows(page)).toHaveCount(2);
 	expect(await rows(page).allInnerTexts()).not.toEqual(first);
 	await expect(page).toHaveURL(/cursor=/);
 
 	await page.getByRole('button', { name: 'Previous page' }).click();
+	await expect(top(page)).toHaveAttribute('href', newest);
 	await expect(rows(page)).toHaveCount(2);
 	expect(await rows(page).allInnerTexts()).toEqual(first);
 });
@@ -47,13 +63,20 @@ test('the newest page has nowhere back, the oldest nowhere on', async ({ page })
 test('a page survives a reload, because it is in the URL', async ({ page }) => {
 	await signIn(page);
 	await page.goto('/traces?limit=2');
+	await expect(rows(page)).toHaveCount(2);
+	const newest = (await identity(page)) ?? '';
+
 	await page.getByRole('button', { name: 'Next page' }).click();
+	await expect(top(page)).not.toHaveAttribute('href', newest);
 	const deep = page.url();
 	const shown = await rows(page).allInnerTexts();
 
 	await page.reload();
 
 	await expect(page).toHaveURL(deep);
+	// A reload starts from an empty table, so the rows are the reloaded page's
+	// as soon as there are any.
+	await expect(rows(page)).toHaveCount(shown.length);
 	expect(await rows(page).allInnerTexts()).toEqual(shown);
 });
 
@@ -97,8 +120,11 @@ test('j on the last row of a page turns it and keeps reading', async ({ page }) 
 	// stopping at a boundary that is an artefact of paging (spec 009 #6).
 	await expect(page).toHaveURL(/cursor=/);
 	await expect(panel).toBeVisible();
+	// The walk moves when the turned page lands, not when its URL appears, and
+	// the row it lights is what says it has: read before that, `peek` is still
+	// the row the walk started on.
+	await expect(top(page)).toHaveAttribute('aria-current', 'true');
 	expect(new URL(page.url()).searchParams.get('peek')).not.toBe(opened);
-	await expect(rows(page).first().getByRole('link')).toHaveAttribute('aria-current', 'true');
 });
 
 test('a walk from a row this page does not hold takes the nearest one', async ({ page }) => {
