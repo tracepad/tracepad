@@ -31,12 +31,17 @@ screen, where the endpoints it can actually call live.
 ## Screens
 
 **Traces** — the listing. One row per trace, mapping onto
-`GET /api/v1/traces`: time, name, environment, user, session, cost, latency
-and how many observations failed. The filter bar offers exactly the filters
-the endpoint accepts (`q`, `from`, `to`, `environment`, `user_id`,
-`session_id`, `name`, `tag`, `status`, `min_cost`) — a test reads
-`openapi.json` and fails if the two ever disagree. The bar underneath turns
-the pages.
+`GET /api/v1/traces`: time, name, environment, user, session, cost, latency,
+TTFT and how many observations failed. TTFT sits beside latency because the
+two answer the same question from opposite ends — how long the whole run took,
+and how long somebody waited before anything appeared. The filter bar offers
+exactly the filters the endpoint accepts (`q`, `from`, `to`, `environment`,
+`user_id`, `session_id`, `name`, `tag`, `status`, `min_cost`, `release`,
+`version`, `type`, `prompt`) — a test reads `openapi.json` and fails if the
+two ever disagree. The bar underneath turns the pages.
+
+There is no release column: release is a filter, and it is shown in the header
+of a trace rather than in every row of the listing.
 
 **Search** — the box on the bar, beside the time window. It searches what the
 observations carried, not their labels: prompts, answers, metadata, names and
@@ -125,8 +130,10 @@ again.
 
 **Stats** — four charts over `GET /api/v1/stats` — traces, cost, latency
 (p50 and p95) and errors — sharing one x cursor, plus breakdown tables by
-model and by environment with proportion bars. The bucket switcher is
-hourly/daily and defaults to hours for windows up to 48 hours, days above.
+model, by environment and by release with proportion bars. The bucket switcher
+is hourly/daily and defaults to hours for windows up to 48 hours, days above.
+In the release table, the traces that named none are one row called
+*(no release)* rather than a row that is missing.
 
 A bucket the server did not return is drawn as a **gap**, never as a zero,
 and a bucket that reported no cost has no cost point: the API refuses to
@@ -139,14 +146,27 @@ Neither screen has a live mode. Both re-read on a filter change and on the
 **Settings** — see [Settings and administration](#settings-and-administration).
 
 **Trace** — the observation tree on the left, the selected observation on the
-right. A node shows its type, name, duration, cost and whether it failed;
+right. A node shows its kind, name, duration, cost and whether it failed;
 a parent whose descendant failed is marked too, so collapsing a subtree never
 hides a failure. Arrow keys walk the tree — up and down move, right opens,
 left closes and then leaves.
 
-The detail panel shows the observation's timings, level, model, usage and
-cost, then `input`, `output` and `metadata` as collapsible JSON. This is the
-same view the peek panel shows — one component, two frames around it.
+The kind is an icon — a wrench for a tool call, a shield for a guardrail, a
+box for a plain span — each carrying its name for a tooltip and for a screen
+reader. There are ten kinds, which is more than a three-letter label can keep
+readable.
+
+The detail panel shows the observation's timings (including TTFT, when the
+client reported when its first token came back), level, model, usage and cost,
+then `input`, `output` and `metadata` as collapsible JSON with each payload's
+size beside its heading. A generation that ran a named prompt carries a badge
+saying which — `support-answer · v7` — that leads to the traces which ran it.
+The badge is a link to a filtered listing, not a lookup: this store need not
+manage that prompt for the link to work. This is the same view the peek panel
+shows — one component, two frames around it.
+
+The header above the trace names its release when it has one, beside the
+timestamp, latency and cost.
 
 ## Payloads and the response budget
 
