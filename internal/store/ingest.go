@@ -118,18 +118,22 @@ func upsertTrace(tx *sql.Tx, projectID string, t *model.Trace, ingestedAt int64,
 	// index has to hold what the row actually says (spec 011 #2).
 	var stored sql.NullString
 	err = tx.QueryRow(
-		`INSERT INTO traces (project_id, id, name, user_id, session_id, environment, tags, metadata_id, ingested_at)
-		 VALUES (?, ?, ?, ?, ?, COALESCE(?, 'default'), ?, ?, ?)
+		`INSERT INTO traces (project_id, id, name, user_id, session_id, environment,
+		                     release, version, tags, metadata_id, ingested_at)
+		 VALUES (?, ?, ?, ?, ?, COALESCE(?, 'default'), ?, ?, ?, ?, ?)
 		 ON CONFLICT(project_id, id) DO UPDATE SET
 		   name        = COALESCE(excluded.name, traces.name),
 		   user_id     = COALESCE(excluded.user_id, traces.user_id),
 		   session_id  = COALESCE(excluded.session_id, traces.session_id),
 		   environment = COALESCE(?, traces.environment),
+		   release     = COALESCE(excluded.release, traces.release),
+		   version     = COALESCE(excluded.version, traces.version),
 		   tags        = COALESCE(excluded.tags, traces.tags),
 		   metadata_id = COALESCE(excluded.metadata_id, traces.metadata_id)
 		 RETURNING name`,
 		projectID, t.ID, nullString(t.Name), nullString(t.UserID), nullString(t.SessionID),
-		nullString(t.Environment), tags, metadataID, ingestedAt,
+		nullString(t.Environment), nullString(t.Release), nullString(t.Version),
+		tags, metadataID, ingestedAt,
 		nullString(t.Environment),
 	).Scan(&stored)
 	if err != nil {
@@ -172,15 +176,17 @@ func upsertObservation(tx *sql.Tx, projectID string, o *model.Observation, index
 	_, err = tx.Exec(
 		`INSERT INTO observations (
 		   project_id, trace_id, id, parent_observation_id, type, name,
-		   start_time, end_time, model, model_parameters, level, status_message,
-		   usage, cost_details, provided_cost, input_id, output_id, metadata_id)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		   start_time, end_time, completion_start_time, model, model_parameters,
+		   level, status_message, usage, cost_details, provided_cost,
+		   prompt_name, prompt_version, input_id, output_id, metadata_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(project_id, trace_id, id) DO UPDATE SET
 		   parent_observation_id = excluded.parent_observation_id,
 		   type                  = excluded.type,
 		   name                  = excluded.name,
 		   start_time            = excluded.start_time,
 		   end_time              = excluded.end_time,
+		   completion_start_time = excluded.completion_start_time,
 		   model                 = excluded.model,
 		   model_parameters      = excluded.model_parameters,
 		   level                 = excluded.level,
@@ -188,12 +194,15 @@ func upsertObservation(tx *sql.Tx, projectID string, o *model.Observation, index
 		   usage                 = excluded.usage,
 		   cost_details          = excluded.cost_details,
 		   provided_cost         = excluded.provided_cost,
+		   prompt_name           = excluded.prompt_name,
+		   prompt_version        = excluded.prompt_version,
 		   input_id              = excluded.input_id,
 		   output_id             = excluded.output_id,
 		   metadata_id           = excluded.metadata_id`,
 		projectID, o.TraceID, o.ID, nullString(o.ParentObservationID), o.Type, nullString(o.Name),
-		o.StartTime, o.EndTime, nullString(o.Model), modelParameters, o.Level, nullString(o.StatusMessage),
-		usage, costDetails, boolToInt(o.ProvidedCost()), inputID, outputID, metadataID,
+		o.StartTime, o.EndTime, nullInstant(o.CompletionStartTime), nullString(o.Model), modelParameters,
+		o.Level, nullString(o.StatusMessage), usage, costDetails, boolToInt(o.ProvidedCost()),
+		nullString(o.PromptName), nullNumber(o.PromptVersion), inputID, outputID, metadataID,
 	)
 	if err != nil {
 		return fmt.Errorf("upsert observation %s: %w", o.ID, err)
@@ -223,6 +232,18 @@ func upsertObservation(tx *sql.Tx, projectID string, o *model.Observation, index
 // the smallest start time of any kind rather than to NULL, because the trace
 // list pages on (timestamp, id) and a NULL sort key would hide the row from
 // every page after the first (spec 004 Decision 26, 2026-08-27).
+//
+// `ttft_ms` is the earliest completion start minus the moment the user's wait
+// began, which is the trace's own start (spec 012 #3). Both halves come from
+// one pass over the same rows: MIN ignores NULLs, so a trace no observation of
+// which carried a completion start gets NULL rather than a number derived from
+// nothing. The subtrahend is the positive minimum, which is what `timestamp`
+// resolves to whenever any span said when it started; a trace where none did
+// has no wait to measure and gets NULL here too.
+//
+// Like every aggregate it is recomputed on each delivery, so a trace whose
+// generations arrive in several batches converges on the earliest completion
+// start seen so far (spec 002 #22).
 func refreshAggregates(tx *sql.Tx, projectID, traceID string) error {
 	_, err := tx.Exec(
 		`UPDATE traces SET
@@ -244,7 +265,11 @@ func refreshAggregates(tx *sql.Tx, projectID, traceID string) error {
 		   latency_ms        = (SELECT (MAX(o.end_time) - MIN(o.start_time)) / 1000000
 		                        FROM observations o
 		                        WHERE o.project_id = traces.project_id AND o.trace_id = traces.id
-		                          AND o.start_time > 0 AND o.end_time >= o.start_time)
+		                          AND o.start_time > 0 AND o.end_time >= o.start_time),
+		   ttft_ms           = (SELECT (MIN(o.completion_start_time)
+		                                - MIN(CASE WHEN o.start_time > 0 THEN o.start_time END)) / 1000000
+		                        FROM observations o
+		                        WHERE o.project_id = traces.project_id AND o.trace_id = traces.id)
 		 WHERE project_id = ? AND id = ?`,
 		projectID, traceID,
 	)
@@ -311,6 +336,26 @@ func nullString(s string) any {
 		return nil
 	}
 	return s
+}
+
+// nullInstant binds an instant the client did not send as NULL rather than as
+// the epoch: a column that says 1970 is a stored lie a reader would act on
+// (spec 003 #23), and NULL is what "no completion start" has to be for the
+// trace's ttft_ms to come out NULL too.
+func nullInstant(n int64) any {
+	if n == 0 {
+		return nil
+	}
+	return n
+}
+
+// nullNumber binds an absent optional integer — a prompt whose version the
+// client did not send, or sent unusably (spec 012 #5).
+func nullNumber(n *int64) any {
+	if n == nil {
+		return nil
+	}
+	return *n
 }
 
 func boolToInt(b bool) int {

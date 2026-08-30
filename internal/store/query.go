@@ -24,6 +24,18 @@ type TraceFilter struct {
 	UserID      string
 	SessionID   string
 	Name        string
+	// Release and Version match the trace's own columns exactly: "did the
+	// deploy break it" is a filter, and a filter needs a column
+	// (spec 012 #4).
+	Release string
+	Version string
+	// Type keeps traces with at least one observation of that kind. It is
+	// exact — `generation` does not match `embedding`, whatever the
+	// aggregates do with the two (spec 012, edge cases).
+	Type string
+	// Prompt keeps traces one of whose observations ran that prompt. A nil
+	// Version matches any version of the name.
+	Prompt *PromptFilter
 	// Tags are ANDed: a trace matches only if it carries all of them.
 	Tags []string
 	// Status is "", TraceStatusError or TraceStatusOK.
@@ -60,6 +72,13 @@ const (
 	TraceStatusOK    = "ok"
 )
 
+// PromptFilter is "which traces ran this prompt" (spec 012 #5). Version is
+// nil for `prompt=name`, which asks about every version of it.
+type PromptFilter struct {
+	Name    string
+	Version *int64
+}
+
 // TraceCursor is the keyset of the last row of a page. Pagination follows the
 // sort key rather than an offset, so a trace ingested concurrently cannot make
 // the next page skip or repeat a row (spec 004 #4).
@@ -71,8 +90,9 @@ type TraceCursor struct {
 // traceColumns is the row shape both the listing and the single-trace read
 // scan. Payload columns are absent on purpose: a list row never carries a
 // payload (spec 004, API contract).
-const traceColumns = `project_id, id, name, user_id, session_id, environment, tags,
-	        timestamp, total_cost, latency_ms, error_count, observation_count`
+const traceColumns = `project_id, id, name, user_id, session_id, environment,
+	        release, version, tags,
+	        timestamp, total_cost, latency_ms, ttft_ms, error_count, observation_count`
 
 // traceConditions builds everything the filter says about *which* traces
 // match, cursor excluded. Two callers need exactly this and disagree only
@@ -102,6 +122,36 @@ func traceConditions(projectID string, filter TraceFilter) ([]string, []any) {
 	}
 	if filter.Name != "" {
 		add("name = ?", filter.Name)
+	}
+	if filter.Release != "" {
+		add("release = ?", filter.Release)
+	}
+	if filter.Version != "" {
+		add("version = ?", filter.Version)
+	}
+	// The two observation filters are EXISTS subqueries, each backed by an
+	// index of its own (spec 012 #8): a subquery that scanned a trace's
+	// observations per listed row would be fine on a page of fifty and a
+	// disaster on the capped count (spec 009 #4). The outer scan still
+	// seeks idx_traces_timestamp with the keyset, which the plan test
+	// asserts.
+	if filter.Type != "" {
+		add(`EXISTS (SELECT 1 FROM observations o
+		             WHERE o.project_id = traces.project_id AND o.trace_id = traces.id
+		               AND o.type = ?)`, filter.Type)
+	}
+	if filter.Prompt != nil {
+		// `prompt=name` asks about every version of it, so the version
+		// is a second condition rather than a second filter.
+		clause := `EXISTS (SELECT 1 FROM observations o
+		             WHERE o.project_id = traces.project_id AND o.trace_id = traces.id
+		               AND o.prompt_name = ?`
+		values := []any{filter.Prompt.Name}
+		if filter.Prompt.Version != nil {
+			clause += ` AND o.prompt_version = ?`
+			values = append(values, *filter.Prompt.Version)
+		}
+		add(clause+`)`, values...)
 	}
 	for _, tag := range filter.Tags {
 		// Tags are stored as a JSON array in one TEXT column (schema
@@ -433,7 +483,8 @@ func (s *Store) ObservationTraces(projectID, observationID string) ([]string, er
 func (s *Store) Observation(projectID, traceID, id string) (*ObservationRow, error) {
 	rows, err := s.db.Query(
 		`SELECT `+observationColumns+`
-		 FROM observations WHERE project_id = ? AND trace_id = ? AND id = ?`,
+		 `+observationFrom+`
+		 WHERE o.project_id = ? AND o.trace_id = ? AND o.id = ?`,
 		projectID, traceID, id)
 	if err != nil {
 		return nil, fmt.Errorf("read observation %s: %w", id, err)
@@ -454,6 +505,11 @@ const (
 	GroupByDay         = "day"
 	GroupByModel       = "model"
 	GroupByEnvironment = "environment"
+	// GroupByRelease answers "did cost or latency move with the release",
+	// which is a chart rather than a list (spec 012 #4). A trace with no
+	// release groups under the empty key, which the clients render as
+	// *(no release)*.
+	GroupByRelease = "release"
 )
 
 // StatsFilter bounds the statistics scan. From/To always bound the *trace*
@@ -556,6 +612,10 @@ func statsQuery(projectID string, filter StatsFilter) (string, []any) {
 		key = `strftime('%Y-%m-%dT%H:00:00Z', t.timestamp / 1000000000, 'unixepoch')`
 	case GroupByDay:
 		key = `strftime('%Y-%m-%d', t.timestamp / 1000000000, 'unixepoch')`
+	case GroupByRelease:
+		// NULL survives the scan as the empty key: a trace that named no
+		// release is a bucket, not an omission (spec 012, API contract).
+		key = `t.release`
 	default:
 		key = `t.environment`
 	}

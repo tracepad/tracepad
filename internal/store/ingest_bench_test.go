@@ -90,6 +90,79 @@ func BenchmarkIngestBatch(b *testing.B) {
 	}
 }
 
+// What the two indexes spec 012 #8 adds cost the write path, measured the way
+// spec 011 #7 set the precedent for: the same batches ingested with them and
+// without them, so "two indexes on the biggest table" is a pair of numbers in
+// the PR rather than a shrug.
+//
+// The batches carry a prompt on half their observations, which is what makes
+// the partial index do work: an index on `prompt_name IS NOT NULL` is free for
+// the observations that carry none, and measuring only those would measure
+// nothing.
+//
+//	go test ./internal/store -run '^$' -bench BenchmarkIngestWireIndexes -benchtime 200x
+func BenchmarkIngestWireIndexes(b *testing.B) {
+	for _, indexed := range []bool{true, false} {
+		name := "with-wire-indexes"
+		if !indexed {
+			name = "without-wire-indexes"
+		}
+		b.Run(name, func(b *testing.B) {
+			s, err := Open(filepath.Join(b.TempDir(), "bench.db"))
+			if err != nil {
+				b.Fatal(err)
+			}
+			b.Cleanup(func() { s.Close() })
+			if !indexed {
+				for _, index := range []string{"idx_observations_type", "idx_observations_prompt"} {
+					if _, err := s.db.Exec(`DROP INDEX ` + index); err != nil {
+						b.Fatal(err)
+					}
+				}
+			}
+			project, err := s.CreateProject("bench",
+				KeyPair{PublicKey: "tp-pk-bench", Secret: "tp-sk-bench"})
+			if err != nil {
+				b.Fatal(err)
+			}
+
+			b.ResetTimer()
+			for i := 0; b.Loop(); i++ {
+				tx, err := s.db.Begin()
+				if err != nil {
+					b.Fatal(err)
+				}
+				if err := wireBenchBatch(project.ID, i).apply(tx); err != nil {
+					tx.Rollback()
+					b.Fatal(err)
+				}
+				if err := tx.Commit(); err != nil {
+					b.Fatal(err)
+				}
+			}
+			b.StopTimer()
+			b.ReportMetric(float64(benchObservations), "spans/batch")
+		})
+	}
+}
+
+// wireBenchBatch is benchBatch with the columns spec 012 adds: the type
+// vocabulary spread over the batch and a prompt on every second observation.
+func wireBenchBatch(projectID string, n int) *IngestBatch {
+	batch := benchBatch(projectID, n, true)
+	kinds := []string{model.TypeGeneration, model.TypeTool, model.TypeAgent, model.TypeEmbedding}
+	for i, observation := range batch.Observations {
+		observation.Type = kinds[i%len(kinds)]
+		observation.CompletionStartTime = observation.StartTime + int64(i)
+		if i%2 == 0 {
+			version := int64(i%7 + 1)
+			observation.PromptName, observation.PromptVersion = "support-answer", &version
+		}
+	}
+	batch.Traces[0].Release, batch.Traces[0].Version = "2026.8.30", "checkout-v9"
+	return batch
+}
+
 // BenchmarkSearchBackfill is the rate spec 011 #8 asks to be written into the
 // retention docs: how long the first start after the upgrade takes per trace.
 //
