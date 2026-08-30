@@ -64,11 +64,16 @@ test('a search that matches nothing names the query back', async ({ page }) => {
 test('the search box clears itself and the listing comes back', async ({ page }) => {
 	await signIn(page);
 	await page.goto('/traces?q=password');
+	// Both counts are read once their listing is on screen. `count()` waits
+	// for nothing, and a table still loading has no rows: read too early, the
+	// narrowed count is 0 and "more than before" is true of anything.
+	await expect(page.locator('tbody td[colspan]').first()).toBeVisible();
 	const narrowed = await page.locator('tbody').count();
 
 	await page.getByRole('button', { name: 'Clear the search box' }).click();
 
 	await expect(page).not.toHaveURL(/q=/);
+	await expect(page.locator('tbody')).not.toHaveCount(narrowed);
 	expect(await page.locator('tbody').count()).toBeGreaterThan(narrowed);
 });
 
@@ -78,6 +83,9 @@ test('the search box clears itself and the listing comes back', async ({ page })
 // click never reached it (found in review of PR #16).
 test('clearing after typing discards the text instead of searching for it', async ({ page }) => {
 	await signIn(page);
+	// `signIn` waits for the URL, which is not the listing: the count of what
+	// the screen holds is taken once it holds it.
+	await expect(page.locator('tbody tr').first()).toBeVisible();
 	const all = await page.locator('tbody').count();
 
 	await page.getByLabel('Search prompts, answers and errors').fill('aardvark');
