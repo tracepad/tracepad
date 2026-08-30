@@ -117,6 +117,14 @@ func (r *run) projectsShow(ctx context.Context, args []string) error {
 	if len(rest) > 1 {
 		return usageErrorf("projects show takes one project id, got %d", len(rest))
 	}
+	// Both forms at once name the project twice, and the positional would
+	// quietly win over the flag. Refused as a form rather than compared as
+	// values: the reader of `projects show a --project b` cannot tell which
+	// one the command obeys, and being right by accident when the two agree
+	// teaches the wrong rule (addWalk's, spec 003 #23).
+	if len(rest) == 1 && *project != "" {
+		return usageErrorf("pass either the positional id or --project, not both")
+	}
 	given := *project
 	if len(rest) == 1 {
 		given = rest[0]
