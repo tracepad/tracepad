@@ -198,14 +198,25 @@
 			     accessible label. Ten kinds do not fit in three letters, and
 			     `RETR` / `GUAR` / `EVAL` stop being scannable at exactly the
 			     moment there are enough of them to be worth scanning
-			     (spec 012, Application contract). The name is an SVG
-			     `<title>`, not a `title` attribute: on an SVG element the
-			     attribute names nothing and no browser draws a tooltip from
-			     it, which left ten unlabelled glyphs for anybody reading
-			     with a mouse (found in review of PR #19). -->
-			<Icon class="text-subtle size-3.5 shrink-0" aria-label={typeLabel(row.observation.type)}>
-				<title>{typeLabel(row.observation.type)}</title>
-			</Icon>
+			     (spec 012, Application contract).
+
+			     The name is carried by an HTML wrapper rather than by the
+			     glyph. A `title` attribute on an SVG element names nothing,
+			     and an SVG `<title>` cannot be written here at all: Svelte
+			     compiles a component's children in the namespace of the
+			     source that wrote them, which is HTML — so the element that
+			     reaches the DOM is an `HTMLTitleElement` inside an `<svg>`,
+			     which draws no tooltip either. The wrapper is the one form
+			     that does. It carries the accessible name too, and the glyph
+			     inside it is decorative (found in review of PR #19). -->
+			<span
+				role="img"
+				class="flex shrink-0"
+				title={typeLabel(row.observation.type)}
+				aria-label={typeLabel(row.observation.type)}
+			>
+				<Icon class="text-subtle size-3.5" />
+			</span>
 
 			<span class="min-w-0 flex-1 truncate" title={row.observation.name ?? id}>
 				{row.observation.name ?? id}

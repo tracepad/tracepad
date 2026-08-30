@@ -55,10 +55,15 @@ test('the tree draws the kind of every step', async ({ page }) => {
 	for (const kind of ['span', 'generation', 'tool', 'guardrail']) {
 		const icon = tree.getByLabel(kind).first();
 		await expect(icon).toBeVisible();
-		// The name is an SVG `<title>` as well as an `aria-label`, because
+		// The name is a `title` attribute as well as an `aria-label`, because
 		// that is what draws the tooltip: ten glyphs and no visible label
-		// leave a mouse reader nothing to hover (found in review of PR #19).
-		await expect(icon.locator('title')).toHaveText(kind);
+		// leave a mouse reader nothing to hover. Asserted on the attribute
+		// rather than on a `<title>` element, which is what the first attempt
+		// at this did — a CSS type selector ignores namespaces, so it matched
+		// the HTML `<title>` Svelte had put inside the `<svg>` and passed
+		// while no tooltip existed (found in review of PR #19).
+		await expect(icon).toHaveAttribute('title', kind);
+		await expect(tree.getByTitle(kind).first()).toBeVisible();
 	}
 });
 
