@@ -89,6 +89,20 @@ func TestProjectsShowNamesTheProjectOnce(t *testing.T) {
 		t.Errorf("stderr = %q, want it to name the flag that came without an id", out.stderr)
 	}
 
+	// The positional spelling of the same expansion, which is this command's
+	// alone: an argument that is there and names nothing (found in review of
+	// PR #26). It cannot be answered by "the project this key reaches" —
+	// that is what passing no argument means, and the two have to stay
+	// different questions.
+	out = h.run(t.Context(), true, "projects", "show", "")
+	if out.code != ExitUsage {
+		t.Fatalf("projects show \"\" exited %d, want %d: %s",
+			out.code, ExitUsage, out.stderr)
+	}
+	if !strings.Contains(out.stderr, "empty") {
+		t.Errorf("stderr = %q, want it to say the id it was given is empty", out.stderr)
+	}
+
 	// Each on its own still works, which is what makes the refusal about the
 	// combination and not about either spelling.
 	for _, args := range [][]string{{"projects", "show", id},

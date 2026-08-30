@@ -130,11 +130,19 @@ func (r *run) projectsShow(ctx context.Context, args []string) error {
 	if len(rest) == 1 && wasGiven(fs, "project") {
 		return usageErrorf("pass either the positional id or --project, not both")
 	}
-	// The other half of that expansion — `--project ""` on its own, naming no
-	// project at all — is refused by projectID, which every command taking the
-	// flag goes through.
 	given := *project
 	if len(rest) == 1 {
+		// The same expansion again, this time as the positional: an
+		// argument that is there and says nothing. `projectID` cannot
+		// refuse it — from inside, an empty id and no id at all look the
+		// same — and this is the one command where "no id" is a legal
+		// question, so the difference has to be kept here (found in review
+		// of PR #26). The flag's half is refused by `projectID`, which
+		// every command taking `--project` goes through.
+		if rest[0] == "" {
+			return usageErrorf("the project id is empty; pass one, " +
+				"or no argument at all to use the project this key reaches")
+		}
 		given = rest[0]
 	}
 	id, err := r.projectID(ctx, fs, given)
