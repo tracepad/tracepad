@@ -608,7 +608,8 @@ func (e *UserDataErase) apply(tx *sql.Tx) error {
 		`DELETE FROM payloads WHERE id IN`, nil, payloads); err != nil {
 		return fmt.Errorf("erase payloads: %w", err)
 	}
-	return nil
+	// Text erased under spec 005 #7 must not remain findable (spec 011 #7).
+	return deleteTraceSearchEntries(tx, e.ProjectID, ids)
 }
 
 // confirmProjectName is Decision 8 in one function: a destructive job executes

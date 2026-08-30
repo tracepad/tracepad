@@ -11,6 +11,7 @@
 export const TRACE_FILTERS = [
 	'from',
 	'to',
+	'q',
 	'environment',
 	'user_id',
 	'session_id',
@@ -26,6 +27,8 @@ export type FilterName = (typeof TRACE_FILTERS)[number];
 export type TraceFilters = {
 	from?: string;
 	to?: string;
+	/** Full-text search (spec 011): a filter like the others, in the URL like the others. */
+	q?: string;
 	environment?: string;
 	user_id?: string;
 	session_id?: string;

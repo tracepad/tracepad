@@ -72,6 +72,14 @@ func Open(path string) (*Store, error) {
 	if err := s.ensureIncrementalVacuum(); err != nil {
 		logger().Warn("could not enable incremental vacuum; retention will free rows but not disk", "err", err)
 	}
+	// Fatal, unlike the vacuum above: a half-built index answers a search
+	// with traces that are not there and hides the ones that are, and there
+	// is no way for a reader to tell (spec 011 #8). It runs once, before the
+	// server listens, and finds nothing to do on every start after that.
+	if err := s.backfillSearchIndex(); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("open %s: %w", path, err)
+	}
 	return s, nil
 }
 

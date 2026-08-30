@@ -30,16 +30,20 @@ var traceID = regexp.MustCompile(`^[0-9a-f]{32}$`)
 // traceRowFields is the full shape of a list row, in the order a row renders
 // it. `?fields=` selects from this list, so it is also what an unknown field
 // is reported against.
+// `match` is last because it is the only row field that is not a column of the
+// trace: it says where the search hit, and it is present only with `q`
+// (spec 011 #6).
 var traceRowFields = []string{
 	"id", "name", "user_id", "session_id", "environment", "tags",
 	"timestamp", "total_cost", "latency_ms", "error_count", "observation_count",
+	"match",
 }
 
 // traceListFilters is every query parameter the listing accepts. `traces/last`
 // accepts the same set (#7) plus the two that shape a single trace.
 var traceListFilters = []string{
 	"from", "to", "environment", "user_id", "session_id", "name", "tag",
-	"status", "min_cost",
+	"status", "min_cost", "q",
 }
 
 // handleListTraces serves the filtered, cursor-paginated listing, newest
@@ -108,9 +112,30 @@ func (s *Server) handleListTraces(w http.ResponseWriter, r *http.Request) {
 		func(row *store.TraceRow) string {
 			return encodeCursor(strconv.FormatInt(row.Timestamp, 10), row.ID)
 		})
+	// Where each row matched: one statement for the page and one payload
+	// read per matching row, paid only when there is a `q` and only when the
+	// caller kept `match` in its `?fields=` (spec 011 #6).
+	var matches map[string]*store.TraceMatch
+	if filter.Search != nil && fields.wants("match") {
+		ids := make([]string, 0, len(traces))
+		for _, row := range traces {
+			ids = append(ids, row.ID)
+		}
+		matches, err = s.store.SearchMatches(project.ID, ids, filter.Search)
+		if err != nil {
+			slog.Error("read the search matches failed", "err", err)
+			writeError(w, http.StatusInternalServerError, "failed to list traces")
+			return
+		}
+	}
+
 	rows := make([]object, 0, len(traces))
 	for _, row := range traces {
-		rows = append(rows, fields.apply(renderTraceRow(row)))
+		rendered := renderTraceRow(row)
+		if match := matches[row.ID]; match != nil {
+			rendered = rendered.put("match", renderMatch(match))
+		}
+		rows = append(rows, fields.apply(rendered))
 	}
 	answer := object{}.
 		put("traces", rows).
@@ -313,6 +338,24 @@ func renderTraceRow(row *store.TraceRow) object {
 		putSome("latency_ms", row.LatencyMs).
 		put("error_count", row.ErrorCount).
 		put("observation_count", row.ObservationCount)
+}
+
+// renderMatch renders where a search hit. `observation_id` is null rather than
+// absent when the trace's own name matched: a client reads the field to decide
+// which observation to open, and "the trace itself" is an answer to that.
+//
+// The snippet is plain text, hits unmarked: the API answers with data, not
+// markup, and a client that highlights folds the query terms the way the
+// tokenizer does (spec 011 #6).
+func renderMatch(match *store.TraceMatch) object {
+	observation := any(nil)
+	if match.ObservationID != "" {
+		observation = match.ObservationID
+	}
+	return object{}.
+		put("observation_id", observation).
+		put("field", match.Field).
+		put("snippet", match.Snippet)
 }
 
 // observationNode is one span with the spans that named it as their parent.
@@ -601,6 +644,17 @@ func traceFilter(values url.Values) (store.TraceFilter, error) {
 			return filter, err
 		}
 		*bound.target = &instant
+	}
+	if raw := values.Get("q"); raw != "" {
+		// The user's text never reaches FTS5 as written (spec 011 #4);
+		// what a query with no word in it gets is a 400, because
+		// "nothing matched" would be a lie about a search that was
+		// never asked.
+		query, err := store.ParseSearch(raw)
+		if err != nil {
+			return filter, fmt.Errorf("q: %w", err)
+		}
+		filter.Search = query
 	}
 	if raw := values.Get("min_cost"); raw != "" {
 		cost, err := strconv.ParseFloat(raw, 64)

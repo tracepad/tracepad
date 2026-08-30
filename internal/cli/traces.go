@@ -88,6 +88,7 @@ func (f *traceFilterFlags) query(r *run) (url.Values, error) {
 func (r *run) tracesList(ctx context.Context, args []string) error {
 	var (
 		filters traceFilterFlags
+		search  string
 		fields  string
 		cursor  string
 		limit   int
@@ -97,6 +98,10 @@ func (r *run) tracesList(ctx context.Context, args []string) error {
 	)
 	fs := r.flags("traces ls")
 	filters.register(fs)
+	// Registered here and on `traces last` rather than with the shared
+	// filters: `tail` takes those too, and following the newest page is not a
+	// question about text (spec 011, CLI contract).
+	fs.StringVar(&search, "search", "", "")
 	fs.StringVar(&fields, "fields", "", "")
 	fs.StringVar(&cursor, "cursor", "", "")
 	fs.IntVar(&limit, "limit", 0, "")
@@ -115,6 +120,7 @@ func (r *run) tracesList(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	addSome(query, "q", search)
 	addSome(query, "fields", fields)
 	addSome(query, "cursor", cursor)
 	if err := addWalk(query, cursor, oldest, newer); err != nil {
@@ -144,7 +150,7 @@ func (r *run) tracesList(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	renderTraceTable(r.opt.Stdout, listing.Traces)
+	renderTraceTable(r.opt.Stdout, listing.Traces, r.opt.TTY)
 	if listing.Total != nil {
 		fmt.Fprintf(r.opt.Stdout, "\n%s matching\n", matchCount(*listing.Total, listing.TotalCapped))
 	}
@@ -218,10 +224,12 @@ func (r *run) tracesShow(ctx context.Context, args []string) error {
 func (r *run) tracesLast(ctx context.Context, args []string) error {
 	var (
 		filters traceFilterFlags
+		search  string
 		full    bool
 	)
 	fs := r.flags("traces last")
 	filters.register(fs)
+	fs.StringVar(&search, "search", "", "")
 	fs.BoolVar(&full, "full", false, "")
 	if _, err := r.parse(fs, args, 0); err != nil {
 		return err
@@ -230,6 +238,7 @@ func (r *run) tracesLast(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	addSome(query, "q", search)
 	for key, values := range expansion(full) {
 		query[key] = values
 	}

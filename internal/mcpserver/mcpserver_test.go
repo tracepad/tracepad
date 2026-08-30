@@ -282,7 +282,7 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
-// TestToolListIsTheDeclaredContract: nine read-only tools, a deterministic
+// TestToolListIsTheDeclaredContract: ten read-only tools, a deterministic
 // order, and the caching hints of #18.
 func TestToolListIsTheDeclaredContract(t *testing.T) {
 	h := newHarness(t)
@@ -293,24 +293,20 @@ func TestToolListIsTheDeclaredContract(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Exactly these nine, and administration is deliberately not among
+	// Exactly these ten, and administration is deliberately not among
 	// them: spec 005 added projects, keys, retention and user-data erasure
 	// to the HTTP API and the CLI and nothing at all to MCP (spec 005 #13).
 	// `list_sessions` joined them with the endpoint it wraps, in the same
-	// PR as the CLI command and the screen (spec 007 #1).
+	// PR as the CLI command and the screen (spec 007 #1), and `search`
+	// with the endpoint #17 said it would wait for (spec 011 #9).
 	want := []string{"get_last_trace", "get_observation_io", "get_prompt", "get_session",
-		"get_stats", "get_trace", "list_scores", "list_sessions", "list_traces"}
+		"get_stats", "get_trace", "list_scores", "list_sessions", "list_traces", "search"}
 	var names []string
 	for _, tool := range result.Tools {
 		names = append(names, tool.Name)
 	}
 	if !slices.Equal(names, want) {
 		t.Fatalf("tools = %v, want exactly %v in that order", names, want)
-	}
-	// There is no `search`: no search endpoint exists yet, and a tool
-	// faking one over list filters would misrepresent capability (#17).
-	if slices.Contains(names, "search") {
-		t.Errorf("a search tool exists without a search endpoint behind it")
 	}
 
 	for _, tool := range result.Tools {
@@ -372,6 +368,9 @@ func TestEveryToolMatchesItsEndpoint(t *testing.T) {
 			"/api/v1/traces?environment=production"},
 		{"list_traces", map[string]any{"status": "error", "limit": 10},
 			"/api/v1/traces?limit=10&status=error"},
+		{"search", map[string]any{"q": "password"}, "/api/v1/traces?q=password"},
+		{"search", map[string]any{"q": "password", "environment": "production", "limit": 5},
+			"/api/v1/traces?environment=production&limit=5&q=password"},
 		{"get_trace", map[string]any{"trace_id": traceHex(1), "expand": "io"},
 			"/api/v1/traces/" + traceHex(1) + "?expand=io"},
 		{"get_last_trace", map[string]any{"status": "error"},
@@ -588,8 +587,8 @@ func TestStdioTransportServesTheSameTools(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tools.Tools) != 9 {
-		t.Fatalf("tools = %d, want the same nine as over HTTP", len(tools.Tools))
+	if len(tools.Tools) != 10 {
+		t.Fatalf("tools = %d, want the same ten as over HTTP", len(tools.Tools))
 	}
 
 	result, err := session.CallTool(t.Context(), &mcp.CallToolParams{

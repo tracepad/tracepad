@@ -33,9 +33,24 @@ screen, where the endpoints it can actually call live.
 **Traces** — the listing. One row per trace, mapping onto
 `GET /api/v1/traces`: time, name, environment, user, session, cost, latency
 and how many observations failed. The filter bar offers exactly the filters
-the endpoint accepts (`from`, `to`, `environment`, `user_id`, `session_id`,
-`name`, `tag`, `status`, `min_cost`) — a test reads `openapi.json` and fails
-if the two ever disagree. The bar underneath turns the pages.
+the endpoint accepts (`q`, `from`, `to`, `environment`, `user_id`,
+`session_id`, `name`, `tag`, `status`, `min_cost`) — a test reads
+`openapi.json` and fails if the two ever disagree. The bar underneath turns
+the pages.
+
+**Search** — the box on the bar, beside the time window. It searches what the
+observations carried, not their labels: prompts, answers, metadata, names and
+error messages. It commits on Enter and on leaving the box, never on a
+keystroke, and it lives in the URL like every other filter.
+
+A row that matched grows a second line under it: which observation and field
+the hit was in, and the text around it, with the words of the query marked.
+Clicking such a row opens the panel **on that observation** rather than at the
+top of the trace — which is the whole reason the row says where it matched.
+The matching rules are the API's, and worth knowing at the box: words rather
+than substrings (`err*` for a prefix), `"quoted words"` must be adjacent, and
+all the words have to occur in the same field of the same observation. See
+[api.md](api.md#search).
 
 **Live** re-reads the newest page every five seconds and shows it. It is off
 by default, pauses while the tab is hidden, and only runs on the newest page
@@ -182,9 +197,10 @@ in the server's own words.
 
 ## State in the URL
 
-Filters, live mode, the time window, the stats bucket and the selected
-observation all live in the query string, so any view is a link:
-`/traces?status=error&environment=prod`, `/traces/{id}?obs={observation_id}`,
+Filters, the search, live mode, the time window, the stats bucket and the
+selected observation all live in the query string, so any view is a link:
+`/traces?q=refund+failed`, `/traces?status=error&environment=prod`,
+`/traces/{id}?obs={observation_id}`,
 `/sessions?environment=prod`, `/stats?from=…&to=…&group_by=hour`. Reloading,
 sharing and the back button all behave.
 

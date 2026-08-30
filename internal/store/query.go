@@ -32,6 +32,11 @@ type TraceFilter struct {
 	// with no provided cost has no total cost and never matches (spec 002
 	// #14: absent cost stays absent, it is not zero).
 	MinCost *float64
+	// Search keeps traces one of whose observations has a field matching
+	// every word of the query — or whose own name does (spec 011 #5). It is
+	// one more condition, not an ordering: rows stay newest first and the
+	// cursors mean what they meant.
+	Search *SearchQuery
 	// Limit caps the rows returned; the caller asks for one more than the
 	// page size to learn whether another page exists.
 	Limit int
@@ -113,6 +118,18 @@ func traceConditions(projectID string, filter TraceFilter) ([]string, []any) {
 	}
 	if filter.MinCost != nil {
 		add("total_cost >= ?", *filter.MinCost)
+	}
+	if filter.Search != nil {
+		// The index is one table across every project, and the side
+		// table's `project_id` is the only scope there is: a hit in
+		// another project is discarded here and never returned. The
+		// subquery materializes once per statement, so the outer scan
+		// still seeks `idx_traces_timestamp` with the keyset (spec 011,
+		// data contract).
+		add(`id IN (SELECT trace_id FROM search_entries
+		             WHERE project_id = ? AND id IN (
+		               SELECT rowid FROM search_fts WHERE search_fts MATCH ?))`,
+			projectID, filter.Search.Match)
 	}
 	return where, args
 }
@@ -554,9 +571,13 @@ func statsQuery(projectID string, filter StatsFilter) (string, []any) {
 // reporting it whole would tell one project how much data the others hold
 // (spec 004 Decision 33). `projects` is reported as a plain count — how many
 // tenants share this process is an operator fact, and it names none of them.
+// `search_entries` is reported for the same reason the others are and the
+// reason `payloads` is not: it carries a project id, so it can be counted
+// within the asking project, and it is the one store whose size an operator
+// cannot infer from the rows they can already see (spec 011 Decision 13).
 var countedTables = []string{
 	"api_keys", "traces", "observations",
-	"raw_batches", "scores", "prompts", "prompt_labels",
+	"raw_batches", "scores", "prompts", "prompt_labels", "search_entries",
 }
 
 // TableCount is one table's row count.

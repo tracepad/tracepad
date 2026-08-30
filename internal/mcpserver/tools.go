@@ -12,10 +12,15 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// The nine tools (#17). Each maps 1:1 onto one endpoint, and there is no
-// `search`: there is no search endpoint yet, and a tool faking one over list
-// filters would misrepresent to the model what this server can do. It arrives
-// with FTS.
+// The ten tools (#17). Each maps 1:1 onto one endpoint.
+//
+// `search` is the tenth, and it is the one spec 004 #17 declined to ship until
+// there was a search endpoint behind it — so that the tool would never claim a
+// capability the server lacked. Spec 011 is that endpoint. It is a tool of its
+// own rather than one more parameter on `list_traces` because the descriptions
+// are triggers: "the user quotes text they saw" is a different question from
+// "the user asks what ran", and a model choosing by description is better
+// served by two. Both map onto the same endpoint.
 //
 // Descriptions are written as when-to-use triggers rather than as restatements
 // of the endpoint — what question this answers, what comes back, what it does
@@ -213,6 +218,28 @@ func register(server *mcp.Server, api API) {
 			"total_capped": boolean("Only with `count=1`: true when the count stopped at the cap and the real number is larger."),
 		}, "traces"),
 	}, t.listTraces)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "search",
+		Annotations: readOnly("Search traces by their text"),
+		Description: "Find traces by what was said in them — the user quotes or paraphrases text they saw: " +
+			"an error message, a phrase in an answer, an id from a support ticket — and wants the traces where it appears. " +
+			"Searches the prompts, completions, metadata, names and status messages of every observation, and the trace names. " +
+			"Words, not substrings: `error` does not find `errors`, `err*` finds both; \"quoted words\" must be adjacent; " +
+			"all the words must occur in the same field of the same observation. Case and diacritics are folded. " +
+			"Returns the same rows as list_traces, newest first, each carrying `match`: where the hit was and a short snippet, " +
+			"so the next call can be get_observation_io on that observation. " +
+			"Takes every filter list_traces takes, so a search can be narrowed to an environment, a user or a time window. " +
+			"Use list_traces instead when the question is about labels — what ran, what failed, what it cost — rather than about text.",
+		InputSchema: object(walkProperties(pagingProperties(withFields(withSearch(traceFilterProperties()))), true), "q"),
+		OutputSchema: object(map[string]*jsonschema.Schema{
+			"traces":       list(searchRowSchema(), "The page, newest first — not by relevance."),
+			"next_cursor":  text("Pass back as `cursor` for the next page; null on the oldest page. A cursor is valid only with the same `q`."),
+			"prev_cursor":  text("Pass back as `cursor` with `direction=prev` for the page before; null on the newest page."),
+			"total":        integer("Only with `count=1`: how many traces the search matches, capped at 1000."),
+			"total_capped": boolean("Only with `count=1`: true when the count stopped at the cap and the real number is larger."),
+		}, "traces"),
+	}, t.search)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "get_trace",
@@ -414,6 +441,18 @@ func withFields(properties map[string]*jsonschema.Schema) map[string]*jsonschema
 	return properties
 }
 
+// withSearch adds `q`, which only the search tool offers: `list_traces` does
+// not grow one (spec 011 #9).
+func withSearch(properties map[string]*jsonschema.Schema) map[string]*jsonschema.Schema {
+	properties["q"] = &jsonschema.Schema{Type: "string", MaxLength: pointer(512), Description: "The text to find. " +
+		"Words — all of them must occur in one field of one observation — plus \"quoted phrases\" for adjacent words " +
+		"and a trailing * for a prefix. Everything else is literal text: there is no operator syntax to escape, " +
+		"and no way to write a query this server refuses except one with no word in it."}
+	return properties
+}
+
+func pointer[T any](value T) *T { return &value }
+
 // traceRowSchema is a listing row: aggregates, never payloads.
 func traceRowSchema() *jsonschema.Schema {
 	return object(map[string]*jsonschema.Schema{
@@ -429,6 +468,25 @@ func traceRowSchema() *jsonschema.Schema {
 		"error_count":       integer("How many of its observations failed."),
 		"observation_count": integer("How many observations it has."),
 	}, "id", "environment", "error_count", "observation_count")
+}
+
+// searchRowSchema is a listing row with the one field a search adds: where the
+// trace matched. Its own schema rather than a field on `traceRowSchema`,
+// because `match` is never present without a `q` and a listing tool that
+// advertised it would be describing a row it cannot return.
+func searchRowSchema() *jsonschema.Schema {
+	row := traceRowSchema()
+	row.Properties["match"] = object(map[string]*jsonschema.Schema{
+		"observation_id": text("The observation whose text matched, for get_observation_io. " +
+			"Null when it was the trace's own name."),
+		"field": oneOf("Which of the observation's fields matched.",
+			"input", "output", "metadata", "name", "status_message", "trace_name"),
+		"snippet": text("Up to 160 characters of the field's text around the hit, cut on word boundaries. " +
+			"Plain text: the hit is not marked up, and only the first 64 KiB of a payload is searched at all."),
+	}, "field", "snippet")
+	row.Properties["match"].Description = "Where this trace matched: the observation and field with the best score " +
+		"among its hits, and the text around the first term."
+	return row
 }
 
 // sessionRowSchema is a session roll-up, the same six fields the listing and
@@ -514,6 +572,18 @@ func (t *toolset) listTraces(ctx context.Context, req *mcp.CallToolRequest, in l
 	query := in.walkInput.apply(in.pagingInput.apply(in.traceFilterInput.query()))
 	set(query, "fields", in.Fields)
 	return t.call(ctx, req, "/api/v1/traces", query, summarizeTraceList)
+}
+
+type searchInput struct {
+	listTracesInput
+	Q string `json:"q"`
+}
+
+func (t *toolset) search(ctx context.Context, req *mcp.CallToolRequest, in searchInput) (*mcp.CallToolResult, any, error) {
+	query := in.walkInput.apply(in.pagingInput.apply(in.traceFilterInput.query()))
+	set(query, "fields", in.Fields)
+	set(query, "q", in.Q)
+	return t.call(ctx, req, "/api/v1/traces", query, summarizeSearch)
 }
 
 type getTraceInput struct {
@@ -666,6 +736,36 @@ func summarizeTraceList(body json.RawMessage) string {
 	}
 	summary := fmt.Sprintf("%d traces, newest %s (%s); %d with errors",
 		len(parsed.Traces), parsed.Traces[0].ID, parsed.Traces[0].Timestamp, failed)
+	if parsed.NextCursor != nil {
+		summary += "; more pages available"
+	}
+	return summary + "."
+}
+
+// summarizeSearch says where the hits were, not only how many: the whole point
+// of the tool is that the next call is about one observation.
+func summarizeSearch(body json.RawMessage) string {
+	var parsed struct {
+		Traces []struct {
+			ID    string `json:"id"`
+			Match *struct {
+				Field   string `json:"field"`
+				Snippet string `json:"snippet"`
+			} `json:"match"`
+		} `json:"traces"`
+		NextCursor *string `json:"next_cursor"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return "a page of matching traces"
+	}
+	if len(parsed.Traces) == 0 {
+		return "Nothing matches that text."
+	}
+	summary := fmt.Sprintf("%d traces match", len(parsed.Traces))
+	if match := parsed.Traces[0].Match; match != nil {
+		summary += fmt.Sprintf("; the newest is %s, matched in its %s: %q",
+			parsed.Traces[0].ID, match.Field, match.Snippet)
+	}
 	if parsed.NextCursor != nil {
 		summary += "; more pages available"
 	}

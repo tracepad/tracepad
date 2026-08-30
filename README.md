@@ -50,6 +50,15 @@ curl -H "Authorization: Bearer tp-sk-…" \
   "localhost:4318/api/v1/traces/last?status=error&expand=io"
 ```
 
+The question people actually arrive with is a piece of text — an error message
+somebody pasted, a sentence the model should not have said — so the listing
+searches what the observations carried, and every row says where it matched:
+
+```sh
+curl -H "Authorization: Bearer tp-sk-…" \
+  "localhost:4318/api/v1/traces?q=%22refund+failed%22"
+```
+
 The same question, three ways:
 
 ```sh
@@ -78,11 +87,13 @@ a link that is already signed in:
   http://localhost:4318/#key=tp-sk-…
 ```
 
-A filterable trace list; a trace as its observation tree with the payloads of
-whichever span you are looking at; sessions rolled up from the traces that
-named them; volume, cost, latency and errors over time; and settings, where a
-project's retention, keys and data live — with an administration section that
-unlocks with the admin token for project lifecycle.
+A filterable, searchable trace list — a hit shows the text it matched under
+the row and opens the panel on the observation it came from; a trace as its
+observation tree with the payloads of whichever span you are looking at;
+sessions rolled up from the traces that named them; volume, cost, latency and
+errors over time; and settings, where a project's retention, keys and data
+live — with an administration section that unlocks with the admin token for
+project lifecycle.
 
 It is a client of the read API like the CLI and the MCP server, it keeps what
 you are looking at in the URL, and it makes no request to any origin but your

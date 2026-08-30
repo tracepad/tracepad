@@ -81,6 +81,7 @@ tracepad is a later question.
 | Tool | Endpoint | Use it when |
 |---|---|---|
 | `list_traces` | `GET /api/v1/traces` | Finding runs by filter |
+| `search` | `GET /api/v1/traces` with `q` | Finding runs by what was said in them |
 | `get_trace` | `GET /api/v1/traces/{id}` | Reading one run whole |
 | `get_last_trace` | `GET /api/v1/traces/last` | "Why did the last run fail" |
 | `get_observation_io` | `GET /api/v1/observations/{id}/io` | Following a truncation marker |
@@ -90,12 +91,17 @@ tracepad is a later question.
 | `list_scores` | `GET /api/v1/scores` | Reading eval results |
 | `get_stats` | `GET /api/v1/stats` | Counts, cost, latency, trends |
 
-There is no `search` tool. There is no search endpoint yet, and a tool faking
-one over list filters would tell the model this server can do something it
-cannot. It arrives with full-text search.
+`search` and `list_traces` are the same endpoint under two descriptions, and
+that is the point: "the user quotes text they saw" is a different question from
+"the user asks what ran", and a model choosing tools by description is better
+served by two than by one with a mode. `search` requires its `q`, takes every
+filter `list_traces` takes, and its rows carry `match` — which observation and
+field the hit was in, and a snippet of the text — so the next call can be
+`get_observation_io` on that observation. The matching rules are the API's:
+[api.md](api.md#search).
 
-There are no administrative tools either, for the reason at the top of this
-page: not a gap, a guarantee.
+There are no administrative tools, for the reason at the top of this page: not
+a gap, a guarantee.
 
 Tool inputs mirror their endpoint's query parameters — same names, same
 meanings — with the constraints stated in the schema: enums for `status`,

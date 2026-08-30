@@ -32,6 +32,12 @@ func (t *table) row(cells ...string) {
 	fmt.Fprintln(t.writer, strings.Join(cells, "\t"))
 }
 
+// line writes a line that is not a row: one trailing cell, which tabwriter
+// keeps out of the column widths above and below it.
+func (t *table) line(text string) {
+	fmt.Fprintln(t.writer, text)
+}
+
 func (t *table) flush() { t.writer.Flush() }
 
 // traceRow is a listing row as the API renders it. Absent fields stay absent,
@@ -48,6 +54,16 @@ type traceRow struct {
 	LatencyMs        *int64   `json:"latency_ms"`
 	ErrorCount       int      `json:"error_count"`
 	ObservationCount int      `json:"observation_count"`
+	// Match is where a search hit, present only with `--search` (spec 011).
+	Match *traceMatch `json:"match"`
+}
+
+// traceMatch is the `match` field of a row taken with a search.
+type traceMatch struct {
+	// ObservationID is null when the trace's own name matched.
+	ObservationID *string `json:"observation_id"`
+	Field         string  `json:"field"`
+	Snippet       string  `json:"snippet"`
 }
 
 // observationNode is one node of the tree the trace endpoint returns.
@@ -82,7 +98,10 @@ type traceDetail struct {
 	} `json:"expansion"`
 }
 
-func renderTraceTable(out io.Writer, rows []traceRow) {
+// renderTraceTable prints a listing. With a search, each row gains a second
+// line naming the field that matched and the snippet around the hit (spec 011,
+// CLI contract) — dimmed on a terminal, so the table still reads as a table.
+func renderTraceTable(out io.Writer, rows []traceRow, colour bool) {
 	if len(rows) == 0 {
 		fmt.Fprintln(out, "no traces")
 		return
@@ -99,8 +118,36 @@ func renderTraceTable(out io.Writer, rows []traceRow) {
 			duration(row.LatencyMs),
 			cost(row.TotalCost),
 		)
+		if row.Match != nil {
+			// A line with no tab in it is one trailing cell, which
+			// tabwriter leaves out of every column: the snippet cannot
+			// widen the table it sits under.
+			t.line(dim(matchLine(*row.Match), colour))
+		}
 	}
 	t.flush()
+}
+
+// matchLine is the second line under a matching row: where it hit, and what the
+// text says around the hit.
+func matchLine(match traceMatch) string {
+	where := match.Field
+	if match.ObservationID != nil {
+		where = fmt.Sprintf("%s %s", *match.ObservationID, match.Field)
+	}
+	return fmt.Sprintf("    %s: %s", where, match.Snippet)
+}
+
+// dim renders text in the terminal's faint style, and plainly everywhere else.
+// The one place this binary colours anything: the snippet is annotation under a
+// row, and on a terminal the difference between annotation and data is what
+// keeps the table readable. Piped output is bytes somebody parses (#12), so it
+// gets none of it.
+func dim(text string, colour bool) string {
+	if !colour {
+		return text
+	}
+	return "\x1b[2m" + text + "\x1b[0m"
 }
 
 func renderTraceDetail(out io.Writer, trace traceDetail) {

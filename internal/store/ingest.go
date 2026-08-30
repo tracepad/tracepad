@@ -22,6 +22,12 @@ type IngestBatch struct {
 	// apply so that every path into the writer has an arrival time even
 	// when the caller did not think to set one.
 	IngestedAt int64
+	// skipSearchIndex writes the batch without indexing it, which is the
+	// "without it" half of the pair of numbers spec 011, Testing #5 asks
+	// for. Unexported on purpose: it is reachable only from inside this
+	// package, so no caller can produce a store whose index silently
+	// disagrees with its rows.
+	skipSearchIndex bool
 }
 
 // RawBatch is the request body as received, kept verbatim for replay.
@@ -42,6 +48,10 @@ func (b *IngestBatch) Empty() bool {
 
 // apply writes one batch inside the caller's transaction. Traces come first
 // so the aggregate pass at the end always finds its row.
+//
+// The search index (spec 011 #7) is written here too, in this same
+// transaction: an index that lags the data answers with traces that are not
+// there.
 func (b *IngestBatch) apply(tx *sql.Tx) error {
 	arrived := b.IngestedAt
 	if arrived == 0 {
@@ -62,13 +72,14 @@ func (b *IngestBatch) apply(tx *sql.Tx) error {
 		}
 	}
 
+	indexing := !b.skipSearchIndex
 	for _, t := range b.Traces {
-		if err := upsertTrace(tx, b.ProjectID, t, arrived); err != nil {
+		if err := upsertTrace(tx, b.ProjectID, t, arrived, indexing); err != nil {
 			return err
 		}
 	}
 	for _, o := range b.Observations {
-		if err := upsertObservation(tx, b.ProjectID, o); err != nil {
+		if err := upsertObservation(tx, b.ProjectID, o, indexing); err != nil {
 			return err
 		}
 	}
@@ -88,8 +99,8 @@ func (b *IngestBatch) apply(tx *sql.Tx) error {
 // `ingested_at` is the exception: it is set when the row is created and never
 // touched again, so a trace's retention lease starts once no matter how many
 // late spans join it (spec 005 #1).
-func upsertTrace(tx *sql.Tx, projectID string, t *model.Trace, ingestedAt int64) error {
-	metadataID, err := writePayload(tx, t.Metadata)
+func upsertTrace(tx *sql.Tx, projectID string, t *model.Trace, ingestedAt int64, indexing bool) error {
+	metadataID, _, err := writePayload(tx, t.Metadata)
 	if err != nil {
 		return err
 	}
@@ -102,7 +113,11 @@ func upsertTrace(tx *sql.Tx, projectID string, t *model.Trace, ingestedAt int64)
 		tags = string(encoded)
 	}
 
-	_, err = tx.Exec(
+	// RETURNING the merged name rather than binding t.Name into the index:
+	// a delivery that carried no name leaves the stored one alone, and the
+	// index has to hold what the row actually says (spec 011 #2).
+	var stored sql.NullString
+	err = tx.QueryRow(
 		`INSERT INTO traces (project_id, id, name, user_id, session_id, environment, tags, metadata_id, ingested_at)
 		 VALUES (?, ?, ?, ?, ?, COALESCE(?, 'default'), ?, ?, ?)
 		 ON CONFLICT(project_id, id) DO UPDATE SET
@@ -111,29 +126,33 @@ func upsertTrace(tx *sql.Tx, projectID string, t *model.Trace, ingestedAt int64)
 		   session_id  = COALESCE(excluded.session_id, traces.session_id),
 		   environment = COALESCE(?, traces.environment),
 		   tags        = COALESCE(excluded.tags, traces.tags),
-		   metadata_id = COALESCE(excluded.metadata_id, traces.metadata_id)`,
+		   metadata_id = COALESCE(excluded.metadata_id, traces.metadata_id)
+		 RETURNING name`,
 		projectID, t.ID, nullString(t.Name), nullString(t.UserID), nullString(t.SessionID),
 		nullString(t.Environment), tags, metadataID, ingestedAt,
 		nullString(t.Environment),
-	)
+	).Scan(&stored)
 	if err != nil {
 		return fmt.Errorf("upsert trace %s: %w", t.ID, err)
 	}
-	return nil
+	if !indexing {
+		return nil
+	}
+	return indexTraceName(tx, projectID, t.ID, stored.String)
 }
 
 // upsertObservation replaces the row wholesale: a re-delivered span is the
 // same span, and the latest delivery is the truth (spec 002 #5).
-func upsertObservation(tx *sql.Tx, projectID string, o *model.Observation) error {
-	inputID, err := writePayload(tx, o.Input)
+func upsertObservation(tx *sql.Tx, projectID string, o *model.Observation, indexing bool) error {
+	inputID, input, err := writePayload(tx, o.Input)
 	if err != nil {
 		return err
 	}
-	outputID, err := writePayload(tx, o.Output)
+	outputID, output, err := writePayload(tx, o.Output)
 	if err != nil {
 		return err
 	}
-	metadataID, err := writePayload(tx, o.Metadata)
+	metadataID, metadata, err := writePayload(tx, o.Metadata)
 	if err != nil {
 		return err
 	}
@@ -179,7 +198,16 @@ func upsertObservation(tx *sql.Tx, projectID string, o *model.Observation) error
 	if err != nil {
 		return fmt.Errorf("upsert observation %s: %w", o.ID, err)
 	}
-	return nil
+	if !indexing {
+		return nil
+	}
+	return indexObservation(tx, projectID, o.TraceID, o.ID, observationText{
+		Name:          o.Name,
+		StatusMessage: o.StatusMessage,
+		Input:         string(input),
+		Output:        string(output),
+		Metadata:      string(metadata),
+	})
 }
 
 // refreshAggregates recomputes the trace row's denormalized columns from the
@@ -229,13 +257,17 @@ func refreshAggregates(tx *sql.Tx, projectID, traceID string) error {
 // writePayload stores a value in `payloads` and returns its id, or NULL for
 // an absent value. Payload rows are never updated: an overwriting upsert
 // leaves the previous row orphaned for the retention stage to collect.
-func writePayload(tx *sql.Tx, value any) (any, error) {
+//
+// The encoded bytes come back beside the id because they are also what the
+// search index holds (spec 011 #2): re-encoding them for the index would risk
+// producing a text the payload does not carry.
+func writePayload(tx *sql.Tx, value any) (any, []byte, error) {
 	if isBlank(value) {
-		return nil, nil
+		return nil, nil, nil
 	}
 	raw, err := json.Marshal(value)
 	if err != nil {
-		return nil, fmt.Errorf("encode payload: %w", err)
+		return nil, nil, fmt.Errorf("encode payload: %w", err)
 	}
 	compression, body, sizeRaw := compress(raw)
 	var id int64
@@ -243,9 +275,9 @@ func writePayload(tx *sql.Tx, value any) (any, error) {
 		`INSERT INTO payloads (compression, size_raw, body) VALUES (?, ?, ?) RETURNING id`,
 		compression, sizeRaw, body,
 	).Scan(&id); err != nil {
-		return nil, fmt.Errorf("store payload: %w", err)
+		return nil, nil, fmt.Errorf("store payload: %w", err)
 	}
-	return id, nil
+	return id, raw, nil
 }
 
 func encodeJSON(v map[string]any) (any, error) {

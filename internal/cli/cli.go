@@ -112,11 +112,11 @@ func Run(ctx context.Context, opt Options) int {
 
 // Usage is the client half of the binary's help text.
 const Usage = `Client commands (they talk to a running server over HTTP):
-  tracepad traces ls    [--env E] [--error] [--since 1h] [--until T] [--user U] [--session S]
-                        [--name N] [--tag T] [--min-cost C] [--fields a,b] [--limit N]
-                        [--cursor C] [--oldest] [--newer] [--total]
+  tracepad traces ls    [--search "text"] [--env E] [--error] [--since 1h] [--until T]
+                        [--user U] [--session S] [--name N] [--tag T] [--min-cost C]
+                        [--fields a,b] [--limit N] [--cursor C] [--oldest] [--newer] [--total]
   tracepad traces show  <trace-id> [--full]
-  tracepad traces last  [--error] [--env E] [--since 1h] [--until T] [--full]
+  tracepad traces last  [--search "text"] [--error] [--env E] [--since 1h] [--until T] [--full]
   tracepad tail         [--env E] [--error] [--interval 2s] [--limit N]
   tracepad sessions ls   [--since 1h] [--until T] [--env E] [--user U] [--limit N]
                          [--cursor C] [--oldest] [--newer] [--total]
@@ -150,6 +150,11 @@ Connection:
   --url URL    server to talk to   (env TRACEPAD_URL, default http://localhost:4318)
   --key KEY    project secret key, or TRACEPAD_ADMIN_TOKEN for the commands
                marked (admin token)   (env TRACEPAD_API_KEY)
+
+Search (spec 011): --search takes words (all must occur), "quoted phrases" and
+prefix*. Words, not substrings: error does not find errors, err* finds both.
+Each matching row gains a second line saying which observation and field it
+matched and what the text says around the hit.
 
 Output:
   --json       force JSON. Without it, output is a table on a terminal and

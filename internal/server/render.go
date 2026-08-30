@@ -126,6 +126,13 @@ func parseSelection(raw string, known []string) (selection, error) {
 	return out, nil
 }
 
+// wants reports whether a field is in the selection — which every field is when
+// there is none. Asked before a field is *computed*, for the one field that
+// costs a query to produce (spec 011 #6).
+func (s selection) wants(field string) bool {
+	return s == nil || slices.Contains(s, field)
+}
+
 // apply keeps the selected members, in the row's own order rather than the
 // order they were asked for: the shape of a row is the API's to fix.
 func (s selection) apply(o object) object {
