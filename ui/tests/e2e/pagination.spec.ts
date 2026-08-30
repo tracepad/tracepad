@@ -60,6 +60,9 @@ test('the newest page has nowhere back, the oldest nowhere on', async ({ page })
 	await signIn(page);
 	await page.goto('/traces?limit=2');
 
+	// No gate needed on this half: the bar is not rendered at all until the
+	// newest page has rows (`{#if listing.rows.length > 0 || !listing.newest}`),
+	// so these wait for the listing by waiting for the buttons to exist.
 	await expect(page.getByRole('button', { name: 'Previous page' })).toBeDisabled();
 	await expect(page.getByRole('button', { name: 'Newest page' })).toBeDisabled();
 	await expect(page.getByRole('button', { name: 'Next page' })).toBeEnabled();
@@ -85,10 +88,11 @@ test('a page survives a reload, because it is in the URL', async ({ page }) => {
 	await expect(top(page)).not.toHaveAttribute('href', newest);
 	const deep = page.url();
 	// The size is asserted before the rows are read, because everything after
-	// this is derived from them: a page two that came back empty satisfies the
-	// guard above (a missing link has no href), makes `shown` empty, and turns
-	// the count below into the empty table a reload starts from — green from
-	// end to end (found in review of this PR).
+	// this is derived from them: a page two that came back one row short would
+	// be compared against itself — `shown` is what it held, and the count after
+	// the reload was `shown.length`. An empty page two is caught by the guard
+	// above already: a negated matcher does not pass on a missing element, it
+	// times out.
 	await expect(rows(page)).toHaveCount(2);
 	const shown = await rows(page).allInnerTexts();
 
@@ -243,13 +247,15 @@ test('an empty page off the newest one is not a dead end', async ({ page }) => {
 	// the anchors can help (PR #11, second review).
 	await page.goto('/traces?limit=2&direction=prev&environment=nowhere');
 
+	// « is an anchor, not a step: it needs no cursor and is the way out — and
+	// it is also the only thing here that a landed page says, since no rows
+	// and two dead steps are equally true of the load that has yet to answer.
+	const newest = page.getByRole('button', { name: 'Newest page' });
+	await expect(newest).toBeEnabled();
+
 	await expect(page.locator('tbody tr')).toHaveCount(0);
 	await expect(page.getByRole('button', { name: 'Previous page' })).toBeDisabled();
 	await expect(page.getByRole('button', { name: 'Next page' })).toBeDisabled();
-
-	// « is an anchor, not a step: it needs no cursor and is the way out.
-	const newest = page.getByRole('button', { name: 'Newest page' });
-	await expect(newest).toBeEnabled();
 	await newest.click();
 	await expect(page).not.toHaveURL(/direction=prev/);
 });
