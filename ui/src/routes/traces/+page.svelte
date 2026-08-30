@@ -74,9 +74,13 @@
 		open: peek
 	});
 
-	/** Opening pushes one entry; moving between rows replaces it (spec 008 #6). */
-	function peek(id: string | null) {
-		const search = peekSearch(page.url.searchParams, { peek: id });
+	/**
+	 * Opening pushes one entry; moving between rows replaces it (spec 008 #6).
+	 * A row opened out of a search opens on the observation that matched, which
+	 * is the whole point of the row saying where it did (spec 011 #6).
+	 */
+	function peek(id: string | null, observationID: string | null = null) {
+		const search = peekSearch(page.url.searchParams, { peek: id, obs: observationID });
 		goto(`${page.url.pathname}${search}`, {
 			replaceState: id === null || peekID !== null,
 			keepFocus: true,
@@ -142,7 +146,7 @@
 	<!-- The bar stays on an empty page that is not the first one: a cursor
 	     whose rows are gone — swept by retention, say — would otherwise leave
 	     no way back to the listing but editing the URL (PR #11 review). -->
-	<TraceTable rows={listing.rows} onopen={peek} selectedID={peekID} />
+	<TraceTable rows={listing.rows} onopen={peek} selectedID={peekID} search={filters.q ?? ''} />
 	<PaginationBar {...listing.bar} noun="trace" />
 	{#if listing.rows.length === 0 && !listing.loading}
 		<p class="text-subtle flex flex-1 items-start justify-center p-8 text-center">
@@ -152,7 +156,22 @@
 {:else if !listing.loading && !listing.failure}
 	<div class="flex flex-1 items-start justify-center overflow-auto p-8">
 		<div class="max-w-lg">
-			{#if filtering}
+			{#if filters.q}
+				<!-- The query is named back, because "nothing matches" is only
+				     useful when it says what found nothing (spec 011). -->
+				<h2 class="font-medium">Nothing matches “{filters.q}”</h2>
+				<p class="text-muted mt-1">
+					Search finds whole words, not parts of them: <code class="font-mono">err</code> does not
+					find <code class="font-mono">errors</code>, <code class="font-mono">err*</code> does.
+					Quote words to keep them together.
+				</p>
+				<div class="mt-3 flex gap-2">
+					{#if filterCount(filters) > 1}
+						<Button onclick={() => navigate({ q: filters.q })}>Keep the search, clear filters</Button>
+					{/if}
+					<Button onclick={() => navigate({ ...filters, q: undefined })}>Clear the search</Button>
+				</div>
+			{:else if filtering}
 				<h2 class="font-medium">No trace matches these filters</h2>
 				<p class="text-muted mt-1">
 					The filters are in the URL, so this is a link you can share — or clear.

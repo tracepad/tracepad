@@ -61,7 +61,7 @@
 			<button
 				type="button"
 				onclick={clear}
-				aria-label="Clear the search"
+				aria-label="Clear the search box"
 				class="text-subtle hover:text-fg absolute right-1.5 cursor-pointer p-0.5"
 			>
 				<X class="size-3.5" />

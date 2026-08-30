@@ -44,7 +44,8 @@ describe('filters in the URL', () => {
 		const filters = readFilters(
 			new URLSearchParams(
 				'environment=prod&status=error&tag=a&tag=b&min_cost=0.01&user_id=u1&' +
-					'session_id=s1&name=chat&from=2026-08-01T00:00:00Z&to=2026-08-02T00:00:00Z'
+					'session_id=s1&name=chat&from=2026-08-01T00:00:00Z&to=2026-08-02T00:00:00Z&' +
+					'q=%22refund+failed%22'
 			)
 		);
 
@@ -57,10 +58,18 @@ describe('filters in the URL', () => {
 			session_id: 's1',
 			name: 'chat',
 			from: '2026-08-01T00:00:00Z',
-			to: '2026-08-02T00:00:00Z'
+			to: '2026-08-02T00:00:00Z',
+			q: '"refund failed"'
 		});
-		expect(filterCount(filters)).toBe(9);
+		expect(filterCount(filters)).toBe(10);
 		expect(readFilters(new URLSearchParams(filterSearch(filters)))).toEqual(filters);
+	});
+
+	// The search is a filter like the others: in the URL, so a search is a
+	// link somebody can send (spec 011, Application contract).
+	it('carries a search on its own', () => {
+		expect(filterSearch({ q: 'refund failed' })).toBe('?q=refund+failed');
+		expect(readFilters(new URLSearchParams('q=refund+failed')).q).toBe('refund failed');
 	});
 
 	it('drops empties so a link carries only what is filtered on', () => {
