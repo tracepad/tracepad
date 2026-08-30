@@ -269,22 +269,11 @@ func usageFlags(t *testing.T) map[string]map[string]bool {
 }
 
 // undocumented is what this parity does not hold yet: flags a command
-// registers and its usage block does not name, found by the test above the
-// first time it ran (`go test -run TestEveryFlagIsNamedInTheUsageText` on
-// c2fcb8c reports these and `tail --until`).
+// registers and its usage block does not name. Empty, and meant to stay that
+// way — an entry here is a flag somebody can use and nobody can find.
 //
-// They are listed rather than fixed because each is a question with two
-// answers — write the flag into the usage text, or take it away — and which
-// one is right is the owner's call, not this test's. `tail --until` was such a
-// question and was answered by taking it away (INBOX, PR #9); these are open.
-// Listing them is what makes the test useful in the meantime: the debt is
-// enumerated, and a *new* undocumented flag cannot arrive unnoticed.
-var undocumented = map[string]map[string]bool{
-	// The filters `traces ls` documents and its two siblings inherit.
-	"traces last": {"min-cost": true, "name": true, "session": true, "tag": true, "user": true},
-	"tail": {"min-cost": true, "name": true, "session": true, "since": true,
-		"tag": true, "user": true},
-	"scores ls":     {"observation": true, "type": true},
-	"prompts ls":    {"limit": true},
-	"projects show": {"project": true},
-}
+// It held sixteen once (`tail --until` and fifteen more, PR #22). Each was
+// answered the same way: on the running binary, does the flag do anything? The
+// fifteen did and were written into the usage text; `tail --until` did not and
+// was taken away.
+var undocumented = map[string]map[string]bool{}

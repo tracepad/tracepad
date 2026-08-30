@@ -123,15 +123,18 @@ const Usage = `Client commands (they talk to a running server over HTTP):
                         [--release R] [--version V] [--type T] [--prompt N[@V]]
                         [--fields a,b] [--limit N] [--cursor C] [--oldest] [--newer] [--total]
   tracepad traces show  <trace-id> [--full]
-  tracepad traces last  [--search "text"] [--error] [--env E] [--since 1h] [--until T]
+  tracepad traces last  [--search "text"] [--env E] [--error] [--since 1h] [--until T]
+                        [--user U] [--session S] [--name N] [--tag T] [--min-cost C]
                         [--release R] [--version V] [--type T] [--prompt N[@V]] [--full]
-  tracepad tail         [--env E] [--error] [--release R] [--version V] [--type T]
-                        [--prompt N[@V]] [--interval 2s] [--limit N]
+  tracepad tail         [--env E] [--error] [--since 1h] [--user U] [--session S]
+                        [--name N] [--tag T] [--min-cost C] [--release R] [--version V]
+                        [--type T] [--prompt N[@V]] [--interval 2s] [--limit N]
   tracepad sessions ls   [--since 1h] [--until T] [--env E] [--user U] [--limit N]
                          [--cursor C] [--oldest] [--newer] [--total]
   tracepad sessions show <session-id> [--limit N]
-  tracepad scores ls    [--trace ID] [--name N] [--session S] [--since 1h] [--limit N]
-  tracepad prompts ls
+  tracepad scores ls    [--trace ID] [--observation ID] [--session S] [--name N]
+                        [--type numeric|boolean|categorical|text] [--since 1h] [--limit N]
+  tracepad prompts ls   [--limit N]
   tracepad prompts get  <name> [--label L | --version N]
   tracepad prompts push <name> --file prompt.json [--label L] [--message M]
   tracepad prompts diff <name> --from N --to M
@@ -142,7 +145,7 @@ const Usage = `Client commands (they talk to a running server over HTTP):
 Administration (spec 005). Every destructive command shows what it would do
 and asks you to type the name back; --yes answers that for a script:
   tracepad projects ls   [--deleted]
-  tracepad projects show [<project-id>]
+  tracepad projects show [<project-id>] [--project ID]
   tracepad projects create  <name>                     (admin token)
   tracepad projects rename  <project-id> <new-name>    (admin token)
   tracepad projects rm      <project-id> [--yes]       (admin token)
