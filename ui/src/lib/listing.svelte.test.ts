@@ -199,6 +199,84 @@ describe('a live tick', () => {
 		expect(listing.loading).toBe(false);
 	});
 
+	it('runs one at a time, so a late answer cannot land over a newer one', async () => {
+		const { source, listing } = mount();
+		source.loads[0].ok(answer(['1'], { next_cursor: 'c2' }));
+		await idle();
+
+		// The interval fires again while the first tick is still out (#9).
+		void listing.tick();
+		void listing.tick();
+		expect(source.counts).toHaveLength(1);
+
+		source.counts[0].ok(answer(['2', '1'], { next_cursor: 'c3', total: 9 }));
+		await idle();
+		expect(listing.rows.map((row) => row.id)).toEqual(['2', '1']);
+
+		// And the one after it goes out as usual.
+		void listing.tick();
+		expect(source.counts).toHaveLength(2);
+	});
+
+	it('takes the total from under a count issued before it', async () => {
+		const { source, listing } = mount(true);
+		source.loads[0].ok(answer(['1'], { next_cursor: 'c2' }));
+		await idle();
+
+		// The count taken at the key change is still out — it is the one read
+		// the load's controller does not hold — when the tick lands its own,
+		// later number (#9).
+		void listing.tick();
+		source.counts[1].ok(answer(['2', '1'], { next_cursor: 'c3', total: 9 }));
+		await idle();
+		expect(listing.total).toEqual({ value: 9, capped: false });
+
+		expect(source.counts[0].signal.aborted).toBe(true);
+		source.counts[0].ok(answer(['1'], { total: 3 }));
+		await idle();
+		expect(listing.total).toEqual({ value: 9, capped: false });
+	});
+
+	it('does not go out beside a load, which would land over it', async () => {
+		const { source, listing } = mount();
+
+		// The poll timer keeps its phase across a filter change — the page's
+		// effect depends on `live` and `newest`, not on the load — so a tick can
+		// fire while the load for the newest page is still out. Its answer would
+		// be the newer one, and the load's would land last (#9).
+		void listing.tick();
+		expect(source.asked).toHaveLength(1);
+
+		source.loads[0].ok(answer(['2', '1'], { next_cursor: 'c2' }));
+		await idle();
+		expect(listing.rows.map((row) => row.id)).toEqual(['2', '1']);
+
+		// And once the page has landed, live carries on.
+		void listing.tick();
+		expect(source.counts).toHaveLength(1);
+	});
+
+	it('is freed again by the turn that aborts it', async () => {
+		const { source, listing } = mount();
+		source.loads[0].ok(answer(['1'], { next_cursor: 'c2' }));
+		await idle();
+
+		void listing.tick();
+		listing.turn({ cursor: 'c2' });
+		flushSync();
+		expect(source.counts[0].signal.aborted).toBe(true);
+		source.counts[0].ok(answer(['9']));
+		await idle();
+		expect(listing.rows.map((row) => row.id)).toEqual(['1']);
+
+		listing.turn({});
+		flushSync();
+		source.loads[2].ok(answer(['2', '1'], { next_cursor: 'c3' }));
+		await idle();
+		void listing.tick();
+		expect(source.counts).toHaveLength(2);
+	});
+
 	it('does nothing off the newest page', async () => {
 		const { source, listing } = mount();
 		source.loads[0].ok(answer(['1'], { next_cursor: 'c2' }));

@@ -133,6 +133,21 @@ export class Listing<Row> {
 	 * the lot: a tick still in flight would answer the previous question.
 	 */
 	#query: AbortController | null = null;
+	/**
+	 * Whether a tick is still out. Live fires on a timer, so a server slower
+	 * than the interval had two ticks in flight at once and the older one could
+	 * land last, rolling the rows, the cursor and the count back a whole
+	 * interval (#9). The other half of that gate is `loading`, read in `tick()`:
+	 * a tick can overlap a *load* the same way.
+	 */
+	#ticking = false;
+	/**
+	 * The count still in flight, if there is one. It is the one read the load's
+	 * controller does not cover — its own effect owns it — so a count taken at
+	 * the last key change could answer after a tick's fresher number and roll
+	 * `total` back (#9). A tick that lands a total abandons it.
+	 */
+	#counting: AbortController | null = null;
 
 	#at = $derived(this.#spec.spot.at);
 	/**
@@ -187,6 +202,7 @@ export class Listing<Row> {
 			void this.#which;
 			void this.#again;
 			const controller = new AbortController();
+			this.#counting = controller;
 			void this.#count(controller.signal);
 			return () => controller.abort();
 		});
@@ -248,6 +264,19 @@ export class Listing<Row> {
 		// Live means "the newest page, again" (spec 009 #7); anywhere else there
 		// is nothing for a tick to mean.
 		if (!controller || !this.newest) return;
+		// One read of this page at a time (#9). Skipped rather than raced: the
+		// answer still out is the newer question's answer too, and cancelling it
+		// for a fresh request would leave a server slower than the interval
+		// refreshing nothing at all, every tick aborted by the next.
+		//
+		// A load counts, not just another tick. The timer's phase survives a
+		// filter change — the page's effect depends on `live` and `newest`, not
+		// on the load — so a tick fired at t=5 could answer before the load
+		// issued at t=0 and be overwritten by it. `loading` is always cleared by
+		// a load that settles unaborted, and an aborted one is replaced by the
+		// load that aborted it, so this cannot wedge.
+		if (this.#ticking || this.loading) return;
+		this.#ticking = true;
 		const { signal } = controller;
 		try {
 			// Counted on the way past: live streams rows in, and a total taken
@@ -260,13 +289,21 @@ export class Listing<Row> {
 			// page just fetched *is* the window (spec 009 #9).
 			this.rows = answer.rows;
 			this.nextCursor = answer.next_cursor;
-			if (answer.total !== undefined) this.total = counted(answer);
+			if (answer.total !== undefined) {
+				// This number was taken later than any count still out, which is
+				// therefore stale the moment it lands — the same rule as the rows,
+				// over the one read the load's controller never held (#9).
+				this.#counting?.abort();
+				this.total = counted(answer);
+			}
 			this.liveFailure = null;
 		} catch (cause) {
 			if (signal.aborted) return;
 			// A server that went away mid-tick is worth saying once, but not
 			// worth throwing away the rows already on screen.
 			this.liveFailure = this.#describe(cause);
+		} finally {
+			this.#ticking = false;
 		}
 	}
 
