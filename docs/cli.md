@@ -207,7 +207,17 @@ tracepad scores ls --name helpfulness --since 24h
 ```
 
 Filters: `--trace`, `--observation`, `--session`, `--name`, `--type`,
-`--since`, `--limit`.
+`--since`.
+
+Newest first, and it pages: `--limit` (1–500, default 50) and `--cursor`, with
+the last line printing the command that continues the walk.
+
+```
+older: --cursor MTc4ODEyOTQ5ODQ0…
+```
+
+One direction only — there is no `--oldest` or `--newer` here, because the
+endpoint has no other end to jump to.
 
 ### `prompts`
 

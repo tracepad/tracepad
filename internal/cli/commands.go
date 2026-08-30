@@ -183,6 +183,7 @@ func (r *run) scores(ctx context.Context, args []string) error {
 		name        string
 		dataType    string
 		since       string
+		cursor      string
 		limit       int
 	)
 	fs := r.flags("scores ls")
@@ -192,6 +193,7 @@ func (r *run) scores(ctx context.Context, args []string) error {
 	fs.StringVar(&name, "name", "", "")
 	fs.StringVar(&dataType, "type", "", "")
 	fs.StringVar(&since, "since", "", "")
+	fs.StringVar(&cursor, "cursor", "", "")
 	fs.IntVar(&limit, "limit", 0, "")
 	if _, err := r.parse(fs, rest, 0); err != nil {
 		return err
@@ -203,6 +205,7 @@ func (r *run) scores(ctx context.Context, args []string) error {
 	addSome(query, "session_id", session)
 	addSome(query, "name", name)
 	addSome(query, "data_type", dataType)
+	addSome(query, "cursor", cursor)
 	from, err := r.instant("--since", since)
 	if err != nil {
 		return err
@@ -230,6 +233,7 @@ func (r *run) scores(ctx context.Context, args []string) error {
 			Comment     string   `json:"comment"`
 			Timestamp   string   `json:"timestamp"`
 		} `json:"scores"`
+		NextCursor *string `json:"next_cursor"`
 	}](body)
 	if err != nil {
 		return err
@@ -251,6 +255,10 @@ func (r *run) scores(ctx context.Context, args []string) error {
 			orDash(score.TraceID), orDash(score.Comment))
 	}
 	t.flush()
+	// `older`, because this listing is newest first and its cursor is a
+	// timestamp — but only the one line: the endpoint has no `direction`, so
+	// there is no far end to jump to and no page above to come back to.
+	walkOn(r, "older", listing.NextCursor, nil)
 	return nil
 }
 

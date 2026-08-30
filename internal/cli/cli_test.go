@@ -605,6 +605,68 @@ func TestSessionsAndScores(t *testing.T) {
 	}
 }
 
+// TestScoresListPages is the same walk as TestPromptsListPages on the other
+// listing that could reach only its first page. The hint says `older` here:
+// scores come back newest first and the cursor is a timestamp, so the next
+// page really is older — but there is one line and not two, because the
+// endpoint has no `direction` to walk back with.
+func TestScoresListPages(t *testing.T) {
+	h := newHarness(t)
+	ctx := t.Context()
+
+	var want []string
+	scores := make([]*store.Score, 0, 5)
+	for i := 1; i <= 5; i++ {
+		value := float64(i) / 10
+		name := fmt.Sprintf("s%02d", i)
+		// Newest first, so the walk meets them in reverse.
+		want = append([]string{name}, want...)
+		scores = append(scores, &store.Score{
+			ID: traceHex(100 + i), TraceID: traceHex(1), Name: name,
+			DataType: store.ScoreNumeric, Value: &value,
+			Timestamp: seedBase + int64(i)*ms, CreatedAt: seedBase + int64(i)*ms,
+		})
+	}
+	err := h.writer.Submit(ctx, &store.ScoreWrite{ProjectID: h.projectID(t), Scores: scores})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var seen []string
+	cursor := ""
+	for page := 1; ; page++ {
+		if page > len(want) {
+			t.Fatalf("the walk did not end after %d pages; seen %v", page, seen)
+		}
+		args := []string{"scores", "ls", "--limit", "2"}
+		if cursor != "" {
+			args = append(args, "--cursor", cursor)
+		}
+		out := h.run(ctx, true, args...)
+		if out.code != ExitOK {
+			t.Fatalf("page %d exited %d: %s", page, out.code, out.stderr)
+		}
+		cursor = ""
+		for _, line := range strings.Split(out.stdout, "\n") {
+			if after, found := strings.CutPrefix(line, "older: --cursor "); found {
+				cursor = after
+				continue
+			}
+			if fields := strings.Fields(line); len(fields) > 2 &&
+				strings.HasPrefix(fields[2], "s0") {
+				seen = append(seen, fields[2])
+			}
+		}
+		if cursor == "" {
+			break
+		}
+	}
+
+	if strings.Join(seen, ",") != strings.Join(want, ",") {
+		t.Errorf("the walk saw %v, want every score once, newest first: %v", seen, want)
+	}
+}
+
 // TestPromptsListPages walks the whole listing a page at a time, which is what
 // `--cursor` is for: without it the command could reach only the first page,
 // and a `--limit` raised until everything fits is not pagination.
