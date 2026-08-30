@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/tracepad/tracepad/internal/model"
 )
 
 // Migration 0005 rebuilds two tables (spec 005, Data contract), which is the
@@ -326,4 +328,84 @@ func TestIncrementalVacuumHealsOnALaterOpen(t *testing.T) {
 			"recorded must still be able to reach the right mode",
 			mode, incrementalVacuumMode)
 	}
+}
+
+// TestMigration0007RebuildsTheIndexOverLeaves: the index 0006 built holds the
+// JSON text of every payload, keys included, and there is no way to edit an
+// index into a different opinion of what a word is (spec 011 #14). So 0007
+// changes no schema: it empties both halves and puts the backfill marker back,
+// and the first start after the upgrade rebuilds the index from the leaves.
+func TestMigration0007RebuildsTheIndexOverLeaves(t *testing.T) {
+	s, path := openTemp(t)
+	project, err := s.CreateProject("app", KeyPair{PublicKey: "tp-pk-1", Secret: "tp-sk-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedTrace(t, s, project.ID, &model.Trace{ID: hexTrace(1), Name: "support-chat"},
+		&model.Observation{TraceID: hexTrace(1), ID: hexSpan(1), Type: model.TypeSpan,
+			Level: model.LevelDefault, StartTime: day, EndTime: day + 1,
+			Output: []any{map[string]any{"role": "assistant", "content": "the refund failed"}}})
+
+	// The database the previous release left behind: 0007 unapplied, the
+	// backfill marked done, and one entry holding the payload's JSON text.
+	exec := func(query string, args ...any) {
+		t.Helper()
+		if _, err := s.db.Exec(query, args...); err != nil {
+			t.Fatalf("%s: %v", query, err)
+		}
+	}
+	exec(`DELETE FROM schema_migrations WHERE filename = '0007_search_leaves.sql'`)
+	exec(`INSERT INTO search_fts(search_fts) VALUES('delete-all')`)
+	exec(`DELETE FROM search_entries`)
+	var entry int64
+	if err := s.db.QueryRow(
+		`INSERT INTO search_entries (project_id, trace_id, observation_id, field)
+		 VALUES (?, ?, ?, ?) RETURNING id`,
+		project.ID, hexTrace(1), hexSpan(1), FieldOutput).Scan(&entry); err != nil {
+		t.Fatal(err)
+	}
+	exec(`INSERT INTO search_fts (rowid, body) VALUES (?, ?)`, entry,
+		`[{"content":"the refund failed","role":"assistant"}]`)
+	exec(`UPDATE search_backfill SET done_at = 1 WHERE id = 1`)
+	if got := matchingTraces(t, s, project.ID, "role"); len(got) != 1 {
+		t.Fatalf("the fixture is not an index of the JSON: q=role matched %v", got)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	upgraded, err := Open(path)
+	if err != nil {
+		t.Fatalf("upgrade: %v", err)
+	}
+	defer upgraded.Close()
+
+	if got := matchingTraces(t, upgraded, project.ID, "role"); len(got) != 0 {
+		t.Errorf("after the upgrade the envelope is still findable: %v", got)
+	}
+	if got := matchingTraces(t, upgraded, project.ID, "refund"); len(got) != 1 {
+		t.Errorf("after the upgrade what was said is not findable: %v", got)
+	}
+	if got := matchingTraces(t, upgraded, project.ID, "support-chat"); len(got) != 1 {
+		t.Errorf("the rebuild lost the trace names: %v", got)
+	}
+
+	// And it is a rebuild, not a start of one: the marker is set again, so
+	// the next start does nothing, and no trace is left unindexed.
+	var doneAt sql.NullInt64
+	if err := upgraded.db.QueryRow(`SELECT done_at FROM search_backfill WHERE id = 1`).
+		Scan(&doneAt); err != nil {
+		t.Fatal(err)
+	}
+	if !doneAt.Valid {
+		t.Error("the backfill marker is unset after the upgrade; every later start would walk again")
+	}
+	pending, err := upgraded.unindexedTraces([2]string{"", ""}, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) != 0 {
+		t.Errorf("the rebuild left %d traces unindexed", len(pending))
+	}
+	checkIntegrity(t, upgraded)
 }

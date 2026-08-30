@@ -400,8 +400,10 @@ func rawPayload(db searchDB, id sql.NullInt64) (string, error) {
 // cost disappears next to the decompression.
 const backfillBatch = 200
 
-// backfillSearchIndex indexes everything written before schema 0006, before the
-// server listens.
+// backfillSearchIndex indexes what the index does not hold yet, before the
+// server listens: the rows written before schema 0006, and — since 0007 empties
+// the index to rebuild it over the leaves (spec 011 #14) — every row again
+// after that upgrade.
 //
 // Synchronous, like every migration this store has: a search that answers
 // "nothing" because the index is half-built is worse than a start that takes a
