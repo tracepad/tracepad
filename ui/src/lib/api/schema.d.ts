@@ -560,6 +560,16 @@ export interface components {
             latency_ms?: number;
             error_count: number;
             observation_count: number;
+            match?: components["schemas"]["Match"];
+        };
+        /** @description Where the search hit, present only with `?q=`: the observation and field with the best score among the trace's hits, and a window of the text around the first term. Hits are not marked up — a client that highlights folds the query terms the way the tokenizer does. */
+        Match: {
+            /** @description The observation that matched; null when the trace's own name did */
+            observation_id: string | null;
+            /** @enum {string} */
+            field: "input" | "output" | "metadata" | "name" | "status_message" | "trace_name";
+            /** @description At most 160 characters, cut on word boundaries */
+            snippet: string;
         };
         /** @description The roll-up over the traces of one session. Every number counts traces, not observations: `error_count` is how many of the session's traces failed. */
         SessionRow: {
@@ -797,6 +807,8 @@ export interface components {
         Direction: "next" | "prev";
         /** @description Adds `total` and `total_capped`: how many rows the filters match, counted up to 1000. Off by default, because the count changes with the filters and not with the page */
         Count: "1" | "true";
+        /** @description Full-text search over one field of one observation — input, output, metadata, name or status message — or over the trace name. Words (all must occur), `"quoted phrases"`, `prefix*`. Words, not substrings: `error` does not find `errors`, `err*` finds both. Case and diacritics are folded, identifiers split on punctuation, and only the first 64 KiB of each payload is indexed. A `q` with no word in it is a 400 */
+        Search: string;
         /** @description `io` inlines each observation's input, output and metadata, each cut to an equal share of the remaining budget with a truncation marker naming the rest */
         Expand: "io";
         /** @description Byte budget for the payloads of this response; the structure is never truncated */
@@ -1041,6 +1053,8 @@ export interface operations {
                 status?: "error" | "ok";
                 /** @description Keeps traces whose total cost is at least this much. A trace whose client provided no cost has none and never matches. */
                 min_cost?: number;
+                /** @description Full-text search over one field of one observation — input, output, metadata, name or status message — or over the trace name. Words (all must occur), `"quoted phrases"`, `prefix*`. Words, not substrings: `error` does not find `errors`, `err*` finds both. Case and diacritics are folded, identifiers split on punctuation, and only the first 64 KiB of each payload is indexed. A `q` with no word in it is a 400 */
+                q?: components["parameters"]["Search"];
                 /** @description Comma-separated subset of the row fields. An unknown name is a 400. */
                 fields?: string;
                 /** @description Out of range is a 400, not a silent clamp */
@@ -1096,6 +1110,8 @@ export interface operations {
                 tag?: string[];
                 status?: "error" | "ok";
                 min_cost?: number;
+                /** @description Full-text search over one field of one observation — input, output, metadata, name or status message — or over the trace name. Words (all must occur), `"quoted phrases"`, `prefix*`. Words, not substrings: `error` does not find `errors`, `err*` finds both. Case and diacritics are folded, identifiers split on punctuation, and only the first 64 KiB of each payload is indexed. A `q` with no word in it is a 400 */
+                q?: components["parameters"]["Search"];
                 /** @description `io` inlines each observation's input, output and metadata, each cut to an equal share of the remaining budget with a truncation marker naming the rest */
                 expand?: components["parameters"]["Expand"];
                 /** @description Byte budget for the payloads of this response; the structure is never truncated */

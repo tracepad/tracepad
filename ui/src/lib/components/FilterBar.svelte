@@ -9,17 +9,19 @@
 	};
 
 	/**
-	 * The window is not a field in this popover: it is the shared range
-	 * control, which sits in the bar itself and means the same thing here as
-	 * it does on Stats (spec 007 #7).
+	 * Not fields in this popover: the window is the shared range control,
+	 * which sits in the bar itself and means the same thing here as it does on
+	 * Stats (spec 007 #7), and the search text is the box beside it — a filter
+	 * people arrive with, not one they go looking for (spec 011, Application
+	 * contract).
 	 */
-	const RANGE: readonly FilterName[] = ['from', 'to'];
+	const ON_THE_BAR: readonly FilterName[] = ['from', 'to', 'q'];
 
-	type FieldName = Exclude<FilterName, 'from' | 'to'>;
+	type FieldName = Exclude<FilterName, 'from' | 'to' | 'q'>;
 
 	// `Record<FieldName, …>` is the second half of the parity promise: the list
 	// of filters is checked against `openapi.json` by a test, and a filter on
-	// that list with neither a control here nor a place in RANGE does not
+	// that list with neither a control here nor a place on the bar does not
 	// compile.
 	const FIELDS: Record<FieldName, Field> = {
 		environment: { label: 'Environment', kind: 'text', placeholder: 'production' },
@@ -44,6 +46,7 @@
 	import { TRACE_FILTERS, type TraceFilters } from '$lib/api/traces';
 	import Button from './Button.svelte';
 	import RangePicker from './RangePicker.svelte';
+	import SearchBox from './SearchBox.svelte';
 
 	// The filter bar is a mirror of `GET /api/v1/traces` (Application
 	// contract). Everything lives in one popover rather than in a row of nine
@@ -54,8 +57,8 @@
 	let { filters, onchange }: { filters: TraceFilters; onchange: (next: TraceFilters) => void } =
 		$props();
 
-	/** The filters this popover owns: everything the range control does not. */
-	const FIELD_NAMES = TRACE_FILTERS.filter((name) => !RANGE.includes(name)) as FieldName[];
+	/** The filters this popover owns: everything the bar itself does not. */
+	const FIELD_NAMES = TRACE_FILTERS.filter((name) => !ON_THE_BAR.includes(name)) as FieldName[];
 
 	let open = $state(false);
 	// The popover edits a copy: a listing that re-queried on every keystroke
@@ -88,14 +91,15 @@
 		open = false;
 	}
 
-	// Clears what this popover owns, and only that. The window is on the bar in
-	// plain sight, with its own control and its own way to be cleared; a button
-	// in here that silently reset it would undo something nobody pointed at.
+	// Clears what this popover owns, and only that. The window and the search
+	// text are on the bar in plain sight, each with its own control and its own
+	// way to be cleared; a button in here that silently reset them would undo
+	// something nobody pointed at.
 	function clearAll() {
 		draft = {};
 		tagsText = '';
-		const { from, to } = filters;
-		onchange(prune({ from, to }));
+		const { from, to, q } = filters;
+		onchange(prune({ from, to, q }));
 		open = false;
 	}
 
@@ -109,6 +113,12 @@
 	function setRange(range: { from?: string; to?: string }) {
 		const { from: _from, to: _to, ...rest } = filters;
 		onchange({ ...rest, ...range });
+	}
+
+	/** The search text, changed by the box beside it, leaving the rest alone. */
+	function setSearch(q: string) {
+		const { q: _q, ...rest } = filters;
+		onchange(q ? { ...rest, q } : rest);
 	}
 
 	// One cast, in one place: the fields are keyed by filter name, and the
@@ -144,6 +154,8 @@
 </script>
 
 <div class="flex min-w-0 items-center gap-1.5">
+	<SearchBox value={filters.q ?? ''} onchange={setSearch} />
+
 	<RangePicker range={{ from: filters.from, to: filters.to }} onchange={setRange} />
 
 	<Popover.Root bind:open onOpenChange={edit}>

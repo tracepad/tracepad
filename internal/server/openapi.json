@@ -173,6 +173,7 @@
             "description": "`error` keeps traces with at least one failed observation, `ok` keeps the rest"},
           {"name": "min_cost", "in": "query", "schema": {"type": "number", "minimum": 0},
             "description": "Keeps traces whose total cost is at least this much. A trace whose client provided no cost has none and never matches."},
+          {"$ref": "#/components/parameters/Search"},
           {"name": "fields", "in": "query", "schema": {"type": "string"},
             "description": "Comma-separated subset of the row fields. An unknown name is a 400."},
           {"$ref": "#/components/parameters/Limit"},
@@ -213,6 +214,7 @@
           {"name": "tag", "in": "query", "schema": {"type": "array", "items": {"type": "string"}}, "style": "form", "explode": true},
           {"name": "status", "in": "query", "schema": {"type": "string", "enum": ["error", "ok"]}},
           {"name": "min_cost", "in": "query", "schema": {"type": "number", "minimum": 0}},
+          {"$ref": "#/components/parameters/Search"},
           {"$ref": "#/components/parameters/Expand"},
           {"$ref": "#/components/parameters/Budget"}
         ],
@@ -852,6 +854,8 @@
         "description": "Which way to page from the cursor. With no cursor, `next` is the newest page and `prev` the oldest — both ends are a direction rather than an offset. Rows come back newest first either way"},
       "Count": {"name": "count", "in": "query", "schema": {"type": "string", "enum": ["1", "true"]},
         "description": "Adds `total` and `total_capped`: how many rows the filters match, counted up to 1000. Off by default, because the count changes with the filters and not with the page"},
+      "Search": {"name": "q", "in": "query", "schema": {"type": "string", "maxLength": 512},
+        "description": "Full-text search over one field of one observation — input, output, metadata, name or status message — or over the trace name. Words (all must occur), `\"quoted phrases\"`, `prefix*`. Words, not substrings: `error` does not find `errors`, `err*` finds both. Case and diacritics are folded, identifiers split on punctuation, and only the first 64 KiB of each payload is indexed. A `q` with no word in it is a 400"},
       "Expand": {"name": "expand", "in": "query", "schema": {"type": "string", "enum": ["io"]},
         "description": "`io` inlines each observation's input, output and metadata, each cut to an equal share of the remaining budget with a truncation marker naming the rest"},
       "Budget": {"name": "budget", "in": "query", "schema": {"type": "integer", "minimum": 4096, "maximum": 5242880},
@@ -898,9 +902,22 @@
           "total_cost": {"type": "number", "description": "Summed over the observations whose client provided cost; absent when none did"},
           "latency_ms": {"type": "integer"},
           "error_count": {"type": "integer"},
-          "observation_count": {"type": "integer"}
+          "observation_count": {"type": "integer"},
+          "match": {"$ref": "#/components/schemas/Match"}
         },
         "required": ["id", "environment", "error_count", "observation_count"]
+      },
+      "Match": {
+        "type": "object",
+        "description": "Where the search hit, present only with `?q=`: the observation and field with the best score among the trace's hits, and a window of the text around the first term. Hits are not marked up — a client that highlights folds the query terms the way the tokenizer does.",
+        "properties": {
+          "observation_id": {"type": ["string", "null"], "pattern": "^[0-9a-f]{16}$",
+            "description": "The observation that matched; null when the trace's own name did"},
+          "field": {"type": "string",
+            "enum": ["input", "output", "metadata", "name", "status_message", "trace_name"]},
+          "snippet": {"type": "string", "description": "At most 160 characters, cut on word boundaries"}
+        },
+        "required": ["observation_id", "field", "snippet"]
       },
       "SessionRow": {
         "type": "object",
