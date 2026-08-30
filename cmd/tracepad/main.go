@@ -166,6 +166,13 @@ func serve(args []string) error {
 	sweeper.Start()
 	defer sweeper.Close()
 
+	// The statistics aggregator runs beside it, on the same terms and for
+	// the same reason: it writes through the one writer (spec 013 #3), so
+	// it stops before the writer does.
+	aggregator := st.NewAggregator(writer, store.RollupOptions{Interval: cfg.RollupInterval})
+	aggregator.Start()
+	defer aggregator.Close()
+
 	srv := server.New(cfg, version, st, writer, sweeper)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

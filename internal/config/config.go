@@ -46,6 +46,11 @@ type Config struct {
 	// Retention changes take effect on the next pass, which is also the
 	// margin a mistaken change can be corrected in (#14).
 	SweepInterval time.Duration
+	// RollupInterval is the statistics aggregator's cadence (spec 013 #3),
+	// and with it the lag the docs publish: a closed hour reaches the
+	// rollup within one of these, and the hour in progress is always
+	// answered live.
+	RollupInterval time.Duration
 	// AdminToken authenticates everything cross-project: creating,
 	// listing, deleting and restoring any project, and reading or changing
 	// another project's settings (spec 005 #11). Unset by default, which
@@ -63,6 +68,15 @@ const DefaultMaxBodyBytes = 20 * 1024 * 1024
 const (
 	DefaultSweepInterval = time.Hour
 	MinSweepInterval     = time.Second
+)
+
+// Aggregator cadence bounds (spec 013 #3). The interval is also how long a
+// closed hour waits before the rollup holds it, so the floor is there for the
+// reason the sweeper's is: below a second this is a busy loop holding the
+// writer, not a configuration.
+const (
+	DefaultRollupInterval = 5 * time.Minute
+	MinRollupInterval     = time.Second
 )
 
 // Response budget bounds (spec 004 #2). The floor is what a skeleton response
@@ -121,6 +135,14 @@ func Load(args []string) (*Config, error) {
 	if sweep < MinSweepInterval {
 		return nil, fmt.Errorf("TRACEPAD_SWEEP_INTERVAL: want at least %s, got %s", MinSweepInterval, sweep)
 	}
+	rollup, err := parseDuration("TRACEPAD_ROLLUP_INTERVAL", DefaultRollupInterval)
+	if err != nil {
+		return nil, err
+	}
+	if rollup < MinRollupInterval {
+		return nil, fmt.Errorf("TRACEPAD_ROLLUP_INTERVAL: want at least %s, got %s",
+			MinRollupInterval, rollup)
+	}
 	cfg := &Config{
 		Listen:              envOr("TRACEPAD_LISTEN", ":4318"),
 		DataDir:             envOr("TRACEPAD_DATA_DIR", defaultDataDir()),
@@ -130,6 +152,7 @@ func Load(args []string) (*Config, error) {
 		ResponseBudgetBytes: budget,
 		MCP:                 mcp,
 		SweepInterval:       sweep,
+		RollupInterval:      rollup,
 		AdminToken:          strings.TrimSpace(os.Getenv("TRACEPAD_ADMIN_TOKEN")),
 	}
 

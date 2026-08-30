@@ -8,14 +8,21 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/tracepad/tracepad/internal/store"
 )
 
-// Statistics (spec 004 #8): computed on the fly, no rollup table. At MVP scale
-// SQLite scans the rows in tens of milliseconds, and a rollup is premature
-// state to keep consistent. Percentiles are exact — computed in Go over the
-// grouped scan — because an approximation is not worth its explanation.
+// Statistics (spec 004 #8, spec 013): answered from the hourly rollup for the
+// hours behind a project's watermark and from the live scan for the tail. The
+// seam is invisible because both halves produce the same thing — dimension
+// tuples with counts and a latency histogram — and because percentiles are
+// histogram-based on both sides (spec 013 #2).
+//
+// The exact sort this file used to do, over every latency of a bucket
+// buffered in Go, is gone. Two paths would have answered the same question
+// with two numbers, and the number *changing* when the raw rows expire is
+// exactly the surprise a chart must not spring.
 
 // defaultGroupBy is what `GET /api/v1/stats` groups by when the caller says
 // nothing. A day is the bucket a human and an agent both reach for first.
@@ -29,17 +36,17 @@ var statsGroupings = []string{
 	store.GroupByEnvironment, store.GroupByRelease,
 }
 
-// bucket accumulates one group of the scan.
+// bucket accumulates one group, from either side of the seam.
 type bucket struct {
 	key        string
-	count      int
-	errorCount int
+	count      int64
+	errorCount int64
 	totalCost  float64
 	// costed reports whether anything in this bucket carried a cost:
 	// summing over rows that provided none would report zero where the
 	// truth is "nobody said" (spec 002 #14).
-	costed    bool
-	latencies []int64
+	costed  bool
+	latency store.Histogram
 }
 
 // handleStats serves count, errors, cost and latency percentiles per bucket.
@@ -87,25 +94,15 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	}
 
 	buckets := map[string]*bucket{}
-	err = s.store.StatsSamples(project.ID, filter, func(sample store.StatsSample) {
-		b := buckets[sample.Key]
+	at := func(key string) *bucket {
+		b := buckets[key]
 		if b == nil {
-			b = &bucket{key: sample.Key}
-			buckets[sample.Key] = b
+			b = &bucket{key: key}
+			buckets[key] = b
 		}
-		b.count++
-		if sample.Errored {
-			b.errorCount++
-		}
-		if sample.Cost != nil {
-			b.totalCost += *sample.Cost
-			b.costed = true
-		}
-		if sample.LatencyMs != nil {
-			b.latencies = append(b.latencies, *sample.LatencyMs)
-		}
-	})
-	if err != nil {
+		return b
+	}
+	if err := s.readStats(project.ID, filter, at); err != nil {
 		slog.Error("read stats failed", "err", err)
 		writeError(w, http.StatusInternalServerError, "failed to compute the statistics")
 		return
@@ -131,8 +128,8 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 			row = row.put("total_cost", b.totalCost)
 		}
 		rows = append(rows, row.put("latency_ms", object{}.
-			put("p50", percentile(b.latencies, 50)).
-			put("p95", percentile(b.latencies, 95))))
+			put("p50", percentile(b.latency, 50)).
+			put("p95", percentile(b.latency, 95))))
 	}
 
 	writeJSON(w, http.StatusOK, object{}.
@@ -144,20 +141,146 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		put("buckets", rows))
 }
 
-// percentile returns the nearest-rank percentile of the samples, or nothing
-// when the bucket has no latency to report.
-func percentile(samples []int64, p int) any {
-	if len(samples) == 0 {
+// readStats fills the buckets from both sides of the watermark: the rolled
+// hours fully inside the asked range, and the live scan for everything else —
+// the tail past the watermark, and the partial hours at either edge that no
+// hourly row can answer (spec 013 #5).
+//
+// A project nobody has rolled has a watermark of zero, so every query is the
+// live scan and the first pass is the backfill.
+func (s *Server) readStats(projectID string, filter store.StatsFilter, at func(string) *bucket) error {
+	state, err := s.store.RollupState(projectID)
+	if err != nil {
+		return err
+	}
+
+	from, to := unbounded, int64(math.MaxInt64)
+	if filter.From != nil {
+		from = *filter.From
+	}
+	if filter.To != nil {
+		to = *filter.To
+	}
+
+	// Only whole hours can come from the rollup, only hours the aggregator
+	// has closed, and only if it has ever run.
+	rolledFrom, rolledTo := int64(0), int64(0)
+	if state.RolledUntil > 0 {
+		rolledFrom = hourCeiling(max(from, 0))
+		rolledTo = min(state.RolledUntil, store.HourOf(to))
+	}
+	if rolledTo <= rolledFrom {
+		return s.liveStats(projectID, filter, from, to, at)
+	}
+
+	if err := s.rolledStats(projectID, filter, rolledFrom, rolledTo, at); err != nil {
+		return err
+	}
+	// The partial hour at the head, and everything from the watermark on.
+	// The two live segments and the rolled range are disjoint by
+	// construction: a row counted twice would be a chart that doubles at
+	// the seam.
+	head := rolledFrom * int64(time.Second)
+	if from < head {
+		if err := s.liveStats(projectID, filter, from, head, at); err != nil {
+			return err
+		}
+	}
+	if tail := rolledTo * int64(time.Second); tail < to {
+		return s.liveStats(projectID, filter, tail, to, at)
+	}
+	return nil
+}
+
+// unbounded is what an absent `from` means to the seam: before every trace
+// there is. It is not `math.MinInt64`, which would overflow the moment it was
+// turned into an hour.
+const unbounded = int64(0)
+
+// rolledStats folds the stored rows of a range into the buckets. Which rows
+// count is the unit: the model grouping reads observation rows, everything
+// else reads trace rows, which is the one table carrying both (spec 013 #1).
+func (s *Server) rolledStats(projectID string, filter store.StatsFilter, fromHour, toHour int64, at func(string) *bucket) error {
+	wantModel := filter.GroupBy == store.GroupByModel
+	return s.store.StatsRollupRows(projectID, fromHour, toHour, filter.Environment,
+		func(row store.StatsRow) {
+			if (row.Model != "") != wantModel {
+				return
+			}
+			b := at(rollupKey(filter.GroupBy, row))
+			b.count += row.Count
+			b.errorCount += row.ErrorCount
+			if row.TotalCost != nil {
+				b.totalCost += *row.TotalCost
+				b.costed = true
+			}
+			b.latency.Merge(row.Latency)
+		})
+}
+
+// liveStats folds a half-open range of raw rows into the same buckets.
+func (s *Server) liveStats(projectID string, filter store.StatsFilter, from, to int64, at func(string) *bucket) error {
+	window := filter
+	window.From, window.To = &from, &to
+	if from == unbounded {
+		window.From = nil
+	}
+	if to == math.MaxInt64 {
+		window.To = nil
+	}
+	return s.store.StatsSamples(projectID, window, func(sample store.StatsSample) {
+		b := at(sample.Key)
+		b.count++
+		if sample.Errored {
+			b.errorCount++
+		}
+		if sample.Cost != nil {
+			b.totalCost += *sample.Cost
+			b.costed = true
+		}
+		if sample.LatencyMs != nil {
+			b.latency.Add(*sample.LatencyMs)
+		}
+	})
+}
+
+// rollupKey is the bucket key a stored row belongs to, spelled exactly as the
+// live scan spells it: the two halves of one answer must not disagree about
+// what a bucket is called.
+func rollupKey(groupBy string, row store.StatsRow) string {
+	hour := time.Unix(row.Hour, 0).UTC()
+	switch groupBy {
+	case store.GroupByHour:
+		return hour.Format("2006-01-02T15:00:00Z")
+	case store.GroupByDay:
+		return hour.Format("2006-01-02")
+	case store.GroupByModel:
+		return row.Model
+	case store.GroupByRelease:
+		return row.Release
+	default:
+		return row.Environment
+	}
+}
+
+// hourCeiling is the first whole hour at or after an instant: the rollup can
+// only answer hours it holds entirely.
+func hourCeiling(nanos int64) int64 {
+	hour := store.HourOf(nanos)
+	if hour*int64(time.Second) < nanos {
+		hour += store.SecondsPerHour
+	}
+	return hour
+}
+
+// percentile reads a percentile out of a bucket's histogram, or nothing when
+// the bucket has no latency to report. Histogram-based on both sides of the
+// seam, by decision: two paths would answer the same question with two
+// numbers (spec 013 #2).
+func percentile(h store.Histogram, p int) any {
+	value, ok := h.Percentile(p)
+	if !ok {
 		return nil
 	}
-	sorted := append([]int64(nil), samples...)
-	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
-	// Nearest rank: the smallest value at or above which p% of the samples
-	// lie. Exact, no interpolation, and it always returns a value that was
-	// actually measured.
-	rank := int(math.Ceil(float64(p) / 100 * float64(len(sorted))))
-	if rank < 1 {
-		rank = 1
-	}
-	return sorted[rank-1]
+	return value
 }

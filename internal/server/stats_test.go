@@ -97,7 +97,7 @@ func TestStatsGroupings(t *testing.T) {
 
 // TestStatsPercentilesAreExact: nearest rank over the real samples, never an
 // approximation whose error would have to be explained.
-func TestStatsPercentilesAreExact(t *testing.T) {
+func TestStatsPercentilesComeFromTheHistogram(t *testing.T) {
 	h := newHarness(t, nil, store.WriterOptions{})
 	for i := 1; i <= 10; i++ {
 		h.seed(t, &model.Trace{ID: traceHex(i), Environment: "production"},
@@ -110,11 +110,25 @@ func TestStatsPercentilesAreExact(t *testing.T) {
 	expectStatus(t, rec, 200)
 	latency := decodeJSON[statsBody](t, rec).Buckets[0].LatencyMs
 	// Latencies are 100..1000 ms: the 5th value is p50, the 10th is p95.
-	if latency.P50 == nil || *latency.P50 != 500 {
-		t.Errorf("p50 = %v, want 500", latency.P50)
+	// The answer is read out of a histogram now, on both sides of the
+	// watermark (spec 013 #2), so it is within a bucket of those rather
+	// than equal to them — and it stays that way when the raw rows expire,
+	// which is what the one path buys.
+	expectWithinABucket(t, "p50", latency.P50, 500)
+	expectWithinABucket(t, "p95", latency.P95, 1000)
+}
+
+// expectWithinABucket is the ±12% the API documents: the value is the
+// geometric middle of a bucket whose width is the ratio, so half a ratio
+// either way is the whole error budget.
+func expectWithinABucket(t *testing.T, name string, got *int64, exact int64) {
+	t.Helper()
+	if got == nil {
+		t.Fatalf("%s is absent, want about %d", name, exact)
 	}
-	if latency.P95 == nil || *latency.P95 != 1000 {
-		t.Errorf("p95 = %v, want 1000", latency.P95)
+	if ratio := float64(*got) / float64(exact); ratio < 0.88 || ratio > 1.13 {
+		t.Errorf("%s = %d, exact = %d (ratio %.3f), want within a bucket",
+			name, *got, exact, ratio)
 	}
 }
 
