@@ -47,10 +47,19 @@ CREATE TABLE stats_rollup (
     last_pass    INTEGER NOT NULL
 ) STRICT;
 
--- No index is added for the dirty-hour query: finding the traces that arrived
--- since the last pass is a range read over `(project_id, ingested_at)`, which
--- is the sweeper's own question asked from the other end, and
--- `idx_traces_ingested` from 0005 already answers it.
+-- When a trace was last written to, which is not when it arrived. The two
+-- differ for the ordinary shape of traffic: spans of one trace come in several
+-- exports, and `ingested_at` deliberately does not move for them, because a
+-- retention lease starts once (spec 005 #1). The rollup asks the opposite
+-- question — "what changed since my last pass" — and only this column answers
+-- it (spec 013 #15).
+--
+-- Backfilled from `ingested_at`: before this migration nothing was rolled, so
+-- every hour is rolled for the first time anyway.
+ALTER TABLE traces ADD COLUMN updated_at INTEGER;
+UPDATE traces SET updated_at = ingested_at;
+
+CREATE INDEX idx_traces_updated ON traces(project_id, updated_at);
 
 -- The aggregates are the cheap thing and they outlive the expensive thing
 -- (spec 013 #6), so they get a window of their own. NULL — the default, and

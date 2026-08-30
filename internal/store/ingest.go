@@ -98,7 +98,10 @@ func (b *IngestBatch) apply(tx *sql.Tx) error {
 //
 // `ingested_at` is the exception: it is set when the row is created and never
 // touched again, so a trace's retention lease starts once no matter how many
-// late spans join it (spec 005 #1).
+// late spans join it (spec 005 #1). `updated_at` is the opposite stamp and
+// exists because of it: the rollup has to know which hours changed since its
+// last pass, and a span joining an existing trace changes one without moving
+// its arrival (spec 013 #15).
 func upsertTrace(tx *sql.Tx, projectID string, t *model.Trace, ingestedAt int64, indexing bool) error {
 	metadataID, _, err := writePayload(tx, t.Metadata)
 	if err != nil {
@@ -119,9 +122,10 @@ func upsertTrace(tx *sql.Tx, projectID string, t *model.Trace, ingestedAt int64,
 	var stored sql.NullString
 	err = tx.QueryRow(
 		`INSERT INTO traces (project_id, id, name, user_id, session_id, environment,
-		                     release, version, tags, metadata_id, ingested_at)
-		 VALUES (?, ?, ?, ?, ?, COALESCE(?, 'default'), ?, ?, ?, ?, ?)
+		                     release, version, tags, metadata_id, ingested_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, COALESCE(?, 'default'), ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(project_id, id) DO UPDATE SET
+		   updated_at  = excluded.updated_at,
 		   name        = COALESCE(excluded.name, traces.name),
 		   user_id     = COALESCE(excluded.user_id, traces.user_id),
 		   session_id  = COALESCE(excluded.session_id, traces.session_id),
@@ -133,7 +137,7 @@ func upsertTrace(tx *sql.Tx, projectID string, t *model.Trace, ingestedAt int64,
 		 RETURNING name`,
 		projectID, t.ID, nullString(t.Name), nullString(t.UserID), nullString(t.SessionID),
 		nullString(t.Environment), nullString(t.Release), nullString(t.Version),
-		tags, metadataID, ingestedAt,
+		tags, metadataID, ingestedAt, ingestedAt,
 		nullString(t.Environment),
 	).Scan(&stored)
 	if err != nil {

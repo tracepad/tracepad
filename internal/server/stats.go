@@ -212,7 +212,13 @@ func statsFloor(project *store.Project, now time.Time) int64 {
 	if days < 1 || days > store.MaxRetentionDays {
 		return 0
 	}
-	return store.HourOf(now.Add(-time.Duration(days) * 24 * time.Hour).UnixNano())
+	// The ceiling, not the floor: the aggregator sweeps `hour < cutoff`
+	// with a cutoff that is not hour-aligned, so the hour the cutoff falls
+	// inside is already gone. Rounding down would leave that one hour
+	// inside the range asked of the rollup and outside the live head that
+	// stops at it — an hour neither half answers, and not transiently
+	// (found in review of PR #28).
+	return hourCeiling(now.Add(-time.Duration(days) * 24 * time.Hour).UnixNano())
 }
 
 // rolledStats folds the stored rows of a range into the buckets. Which rows

@@ -163,12 +163,21 @@ func (a *Aggregator) rollProject(ctx context.Context, project *Project, at time.
 		if err != nil {
 			return rolled, err
 		}
+		// Bounded like the forward roll, and for the same reason: a bulk
+		// import of backdated history behind the watermark would
+		// otherwise hand the one writer thousands of serial
+		// transactions with ingest queued behind them. What is left is
+		// dirty again next pass, because `last_pass` only moves past
+		// what this one examined.
+		if len(dirty) > maxHoursPerPass {
+			dirty = dirty[:maxHoursPerPass]
+		}
 		for _, hour := range dirty {
 			// Whether a dirty hour is frozen is settled by the job,
 			// inside its transaction (spec 013 #11); a pass that
 			// pre-filtered here would be a second opinion about the
 			// same rule.
-			if err := a.rollOne(ctx, project.ID, hour, at); err != nil {
+			if _, err := a.rollOne(ctx, project.ID, hour, at); err != nil {
 				return rolled, err
 			}
 			rolled++
@@ -196,11 +205,19 @@ func (a *Aggregator) rollProject(ctx context.Context, project *Project, at time.
 	if err != nil {
 		return rolled, err
 	}
+	// The newest hour this pass actually wrote rows for. A frozen hour
+	// wrote none, and the watermark must not step over it (spec 013 #14).
+	var newest int64
 	for _, hour := range hours {
-		if err := a.rollOne(ctx, project.ID, hour, at); err != nil {
+		job, err := a.rollOne(ctx, project.ID, hour, at)
+		if err != nil {
 			return rolled, err
 		}
+		if job.Frozen {
+			continue
+		}
 		rolled++
+		newest = hour
 	}
 
 	// (4): the watermark, which moves to just past the newest hour this
@@ -218,8 +235,8 @@ func (a *Aggregator) rollProject(ctx context.Context, project *Project, at time.
 	// A pass that rolled nothing leaves the watermark alone; `last_pass`
 	// still moves, so the dirty-hour window stays bounded.
 	until := state.RolledUntil
-	if len(hours) > 0 {
-		until = min(closed, hours[len(hours)-1]+SecondsPerHour)
+	if newest > 0 {
+		until = min(closed, newest+SecondsPerHour)
 	}
 	if err := a.advance(ctx, project.ID, until, at); err != nil {
 		return rolled, err
@@ -232,8 +249,11 @@ func (a *Aggregator) rollProject(ctx context.Context, project *Project, at time.
 	return rolled, nil
 }
 
-func (a *Aggregator) rollOne(ctx context.Context, projectID string, hour int64, at time.Time) error {
-	return a.writer.Submit(ctx, RollHour(projectID, hour, at.UnixNano()))
+// rollOne submits one hour and hands back the job, which is the only place
+// that knows whether the hour was frozen rather than rolled.
+func (a *Aggregator) rollOne(ctx context.Context, projectID string, hour int64, at time.Time) (*statsRoll, error) {
+	job := &statsRoll{ProjectID: projectID, Hour: hour, Now: at.UnixNano()}
+	return job, a.writer.Submit(ctx, job)
 }
 
 // frozenBefore is the hour at which an already-rolled hour stops being
@@ -276,15 +296,19 @@ func (a *Aggregator) sweepRollup(ctx context.Context, project *Project, at time.
 	return a.writer.Submit(ctx, &statsRollupSweep{ProjectID: project.ID, Before: cutoff})
 }
 
-// dirtyHours are the already-rolled hours that gained rows since the last
-// pass. The read is a range over `(project_id, ingested_at)`, which
-// `idx_traces_ingested` answers (spec 005 #1 built it for the other end of
-// the same question).
+// dirtyHours are the already-rolled hours that changed since the last pass.
+//
+// The question is asked of `updated_at`, not of `ingested_at`: arrival is set
+// once and never moves (spec 005 #1), so a span joining an existing trace —
+// which is how the spans of one trace ordinarily arrive — would never make
+// its hour dirty, and the hour would keep its first answer for ever. That is
+// the defect this column exists to close (spec 013 #15, found in review of
+// PR #28).
 func (s *Store) dirtyHours(projectID string, since, before int64) ([]int64, error) {
 	rows, err := s.db.Query(
 		`SELECT DISTINCT (timestamp / 1000000000 / ?) * ? AS hour
 		 FROM traces
-		 WHERE project_id = ? AND ingested_at > ? AND timestamp < ?
+		 WHERE project_id = ? AND updated_at > ? AND timestamp < ?
 		 ORDER BY hour`,
 		SecondsPerHour, SecondsPerHour, projectID, since, before*1e9)
 	if err != nil {

@@ -103,27 +103,79 @@ func TestTheOpenHourIsLeftToTheLiveTail(t *testing.T) {
 }
 
 // A span that arrives for an hour already rolled dirties it, and the next
-// pass corrects it (spec 013 #4).
+// pass corrects it (spec 013 #4). Both shapes are checked, because only one
+// of them used to work: a *new* trace moves `ingested_at`, while a span
+// joining an *existing* trace does not — and the second is how the spans of
+// one trace ordinarily arrive (spec 013 #15, found in review of PR #28).
 func TestAPassCorrectsTheHourALateSpanTouched(t *testing.T) {
-	s, project := readStore(t)
-	rollupFixture(t, s, project.ID)
-	passAt(t, s, afterTheHour())
-	before := rolledRows(t, s, project.ID, rollupHour)["production|2026.8.30|"]
+	t.Run("a new trace in a rolled hour", func(t *testing.T) {
+		s, project := readStore(t)
+		rollupFixture(t, s, project.ID)
+		passAt(t, s, afterTheHour())
+		before := rolledRows(t, s, project.ID, rollupHour)["production|2026.8.30|"]
 
-	lateStart := rollupHour*1e9 + 45*1e9
-	late := &model.Trace{ID: hexTrace(21), Name: "late",
-		Environment: "production", Release: "2026.8.30"}
-	seedTrace(t, s, project.ID, late, &model.Observation{
-		TraceID: late.ID, ID: hexSpan(21), Type: model.TypeSpan, Name: "step",
-		Level: model.LevelDefault, StartTime: lateStart, EndTime: lateStart + 7e6})
+		lateStart := rollupHour*1e9 + 45*1e9
+		late := &model.Trace{ID: hexTrace(21), Name: "late",
+			Environment: "production", Release: "2026.8.30"}
+		seedTrace(t, s, project.ID, late, &model.Observation{
+			TraceID: late.ID, ID: hexSpan(21), Type: model.TypeSpan, Name: "step",
+			Level: model.LevelDefault, StartTime: lateStart, EndTime: lateStart + 7e6})
 
-	passAt(t, s, afterTheHour().Add(time.Minute))
+		passAt(t, s, afterTheHour().Add(time.Minute))
 
-	after := rolledRows(t, s, project.ID, rollupHour)["production|2026.8.30|"]
-	if after.Count != before.Count+1 {
-		t.Errorf("count = %d after the correcting pass, want %d",
-			after.Count, before.Count+1)
-	}
+		after := rolledRows(t, s, project.ID, rollupHour)["production|2026.8.30|"]
+		if after.Count != before.Count+1 {
+			t.Errorf("count = %d after the correcting pass, want %d",
+				after.Count, before.Count+1)
+		}
+	})
+
+	// This one runs on the real clock, deliberately. `ingested_at` is
+	// stamped by the writer with `time.Now()`, so a pass driven by a
+	// simulated clock years earlier finds every trace "arrived since the
+	// last pass" and the test passes whatever the code does — which is
+	// what the first draft of it did (found in review of PR #28).
+	t.Run("another span of a trace that was already rolled", func(t *testing.T) {
+		s, project := readStore(t)
+		hour := HourOf(time.Now().Add(-2 * time.Hour).UnixNano())
+		start := hour * int64(time.Second)
+
+		seedTrace(t, s, project.ID,
+			&model.Trace{ID: hexTrace(1), Environment: "production", Release: "r1"},
+			&model.Observation{
+				TraceID: hexTrace(1), ID: hexSpan(1), Type: model.TypeGeneration,
+				Name: "answer", Level: model.LevelDefault, Model: "claude-sonnet-5",
+				StartTime: start, EndTime: start + 200*1e6,
+			})
+		// The pass clock is read *after* the seed, so `last_pass` is
+		// genuinely later than the trace's arrival. Reading it before
+		// makes every trace look newly arrived and the test vacuous,
+		// which is how the first two drafts of this passed without the
+		// fix they exist to check.
+		passAt(t, s, time.Now())
+
+		before := rolledRows(t, s, project.ID, hour)["production|r1|claude-sonnet-5"]
+		if before.Count != 1 {
+			t.Fatalf("the generation rolled as %d rows, want 1", before.Count)
+		}
+
+		// The same trace, one more generation: no new trace row, and so
+		// no new arrival time anywhere.
+		seedTrace(t, s, project.ID,
+			&model.Trace{ID: hexTrace(1), Environment: "production", Release: "r1"},
+			&model.Observation{
+				TraceID: hexTrace(1), ID: hexSpan(2), Type: model.TypeGeneration,
+				Name: "retry", Level: model.LevelDefault, Model: "claude-sonnet-5",
+				StartTime: start + 60*int64(time.Second), EndTime: start + 60*int64(time.Second) + 300*1e6,
+			})
+		passAt(t, s, time.Now())
+
+		after := rolledRows(t, s, project.ID, hour)["production|r1|claude-sonnet-5"]
+		if after.Count != 2 {
+			t.Errorf("the model row counts %d after the correcting pass, want 2: "+
+				"a span joining an existing trace must dirty its hour", after.Count)
+		}
+	})
 }
 
 // A pass that rolled nothing moves `last_pass` and leaves the watermark
@@ -262,6 +314,44 @@ func TestAFrozenHourSurvivesALateFragment(t *testing.T) {
 		})
 	}
 }
+
+// Freezing protects a stored summary from being recomputed out of rows
+// retention has taken. An hour with no stored summary has nothing to protect,
+// and must be rolled — otherwise a year of history imported today, with a
+// thirty-day window, is frozen while completely intact, and the watermark
+// walks over hours that no half of the read seam can answer (spec 013 #14,
+// found in review of PR #28).
+func TestBackdatedHistoryIsRolledRatherThanFrozen(t *testing.T) {
+	s, project := readStore(t)
+	// Imported now, but stamped a year ago by the client — which is what
+	// an import is. Retention sweeps by arrival, so nothing is missing.
+	rollupFixture(t, s, project.ID)
+	if _, err := s.db.Exec(
+		`UPDATE projects SET retention_days = 30 WHERE id = ?`, project.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	passAt(t, s, time.Unix(rollupHour, 0).Add(365*24*time.Hour))
+
+	rows := rolledRows(t, s, project.ID, rollupHour)
+	if len(rows) == 0 {
+		t.Fatal("the imported hour was frozen although the rollup had nothing to protect")
+	}
+	state, err := s.RollupState(project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.RolledUntil != rollupHour+SecondsPerHour {
+		t.Errorf("rolled_until = %d, want just past the hour that was rolled (%d)",
+			state.RolledUntil, rollupHour+SecondsPerHour)
+	}
+}
+
+// That an hour *with* a summary stays frozen past the window is
+// TestAFrozenHourSurvivesALateFragment above; the refinement narrows what is
+// frozen, it does not loosen what is protected. The watermark cannot walk
+// over an unanswerable hour any more, because a frozen hour now always has
+// rows behind it.
 
 // The rollup's own window deletes rolled rows and nothing else (spec 013 #6).
 func TestStatsRetentionSweepsTheRollupOnly(t *testing.T) {

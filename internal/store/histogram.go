@@ -15,10 +15,13 @@ import (
 // Bucket i covers [1.25^i, 1.25^(i+1)) milliseconds for i = 0…73, with one
 // underflow bucket below 1 ms — 75 counts in all (spec 013 #10). The ratio
 // bounds the relative error at ±12% worst case and about ±6% typical, which
-// is inside the noise of a latency chart. The top bucket is open: a trace's
-// latency is the span of a whole run and nothing at ingest bounds it, so
-// everything from 1.25^74 (about 4.1 hours) up lands there and reads back as
-// that edge rather than being lost.
+// is inside the noise of a latency chart. The last of those 74 is open: a
+// trace's latency is the span of a whole run and nothing at ingest bounds it,
+// so everything from 1.25^73 — about 3.3 hours — up lands there and reads
+// back as that edge rather than being lost. The bounded error therefore holds
+// from 1 ms to 3.3 hours, and above it the answer is a floor rather than an
+// estimate (corrected in review of PR #28, where the comment claimed the
+// bound reached one bucket further than it does).
 const (
 	histogramRatio = 1.25
 	// histogramBuckets counts the underflow bucket plus the 74 log ones.

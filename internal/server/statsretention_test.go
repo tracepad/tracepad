@@ -117,6 +117,36 @@ func TestAShortStatsWindowFallsBackToTheLiveScan(t *testing.T) {
 	}
 }
 
+// The hour the stats cutoff falls inside is swept — the aggregator deletes
+// `hour < cutoff` and the cutoff is not hour-aligned — so the read must not
+// ask the rollup about it. Rounding the floor down left exactly that hour
+// answered by neither half (found in review of PR #28, spec 013 #13).
+func TestTheHourOnTheStatsWindowEdgeIsStillAnswered(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	// The hour a one-day window cuts through, on the real clock, so the
+	// sweep and the read see the same edge.
+	edge := store.HourOf(time.Now().Add(-24 * time.Hour).UnixNano())
+	h.seedHour(t, edge, 1, 3, "production")
+	h.rollTheCorpus(t, time.Now())
+
+	truth := h.statsBuckets(t, "/api/v1/stats?group_by=hour")
+	if len(truth) != 1 || truth[0].Count != 3 {
+		t.Fatalf("buckets = %+v, want the three seeded traces", truth)
+	}
+
+	rec := h.send(t, "PATCH", "/api/v1/projects/"+h.project.ID+"?confirm="+h.project.Name,
+		map[string]any{"stats_retention_days": 1})
+	expectStatus(t, rec, 200)
+	h.rollTheCorpus(t, time.Now())
+
+	after := h.statsBuckets(t, "/api/v1/stats?group_by=hour")
+	if len(after) != 1 || after[0].Count != truth[0].Count {
+		t.Errorf("buckets = %+v, want the live truth %+v: the hour the window cuts "+
+			"through is swept from the rollup and must fall to the live scan",
+			after, truth)
+	}
+}
+
 // And when both windows have passed, the emptiness is real: nothing is
 // stored, nothing is recomputed, and the honest answer is no buckets.
 func TestWhenBothWindowsHavePassedTheAnswerIsEmpty(t *testing.T) {

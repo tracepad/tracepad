@@ -25,7 +25,8 @@ func TestHistogramBucketEdges(t *testing.T) {
 		{2, 4, "1.25^3 = 1.95, so 2 ms opens the fourth"},
 		{1_274_473, 63, "just under 1.25^63 — the edge the spec's first draft stopped at"},
 		{1_274_474, 64, "and just over it, in the bucket that edge opens"},
-		{14_836_825, histogramBuckets - 1, "1.25^74 ≈ 4.1 h opens the open bucket"},
+		{11_869_459, histogramBuckets - 2, "just under 1.25^73, the last bounded bucket"},
+		{11_869_460, histogramBuckets - 1, "1.25^73 ≈ 3.3 h opens the open bucket"},
 		{math.MaxInt32, histogramBuckets - 1, "and everything above stays in it"},
 	} {
 		if got := histogramIndex(tc.ms); got != tc.index {

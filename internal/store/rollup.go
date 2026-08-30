@@ -191,7 +191,11 @@ func (r *statsRoll) apply(tx *sql.Tx) error {
 	if project == nil {
 		return nil
 	}
-	if r.Hour < frozenBefore(project, r.Now) {
+	frozen, err := r.frozen(tx, project)
+	if err != nil {
+		return err
+	}
+	if frozen {
 		r.Frozen = true
 		return nil
 	}
@@ -222,6 +226,29 @@ func (r *statsRoll) apply(tx *sql.Tx) error {
 	}
 	r.Rows = len(rows)
 	return nil
+}
+
+// frozen reports whether this hour must be left as it stands: it is past the
+// project's trace-retention window *and* the rollup already holds rows for it
+// (spec 013 #11, #14).
+//
+// Both halves matter. The window alone is measured against the client's
+// timestamp while the sweep deletes by arrival, so a year of history imported
+// this morning is "past the window" and completely intact — freezing it would
+// leave hours that no half of the read seam can answer. Stored rows are the
+// thing worth protecting, and their absence is what says there is nothing to
+// protect.
+func (r *statsRoll) frozen(tx *sql.Tx, project *Project) (bool, error) {
+	if r.Hour >= frozenBefore(project, r.Now) {
+		return false, nil
+	}
+	var rows int
+	if err := tx.QueryRow(
+		`SELECT COUNT(*) FROM stats_hourly WHERE project_id = ? AND hour = ?`,
+		r.ProjectID, r.Hour).Scan(&rows); err != nil {
+		return false, fmt.Errorf("look for hour %d in the rollup: %w", r.Hour, err)
+	}
+	return rows > 0, nil
 }
 
 // rollHour aggregates one hour out of the raw tables. Both halves read the
