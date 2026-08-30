@@ -167,7 +167,7 @@ func (r *run) sessionsShow(ctx context.Context, args []string) error {
 	fmt.Fprintf(r.opt.Stdout, "  cost    %s\n", cost(session.TotalCost))
 	fmt.Fprintf(r.opt.Stdout, "  window  %s .. %s\n\n",
 		shortTime(session.FirstSeen), shortTime(session.LastSeen))
-	renderTraceTable(r.opt.Stdout, session.Traces)
+	renderTraceTable(r.opt.Stdout, session.Traces, r.opt.TTY)
 	return nil
 }
 
