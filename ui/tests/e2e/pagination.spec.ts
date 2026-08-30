@@ -84,6 +84,12 @@ test('a page survives a reload, because it is in the URL', async ({ page }) => {
 	await page.getByRole('button', { name: 'Next page' }).click();
 	await expect(top(page)).not.toHaveAttribute('href', newest);
 	const deep = page.url();
+	// The size is asserted before the rows are read, because everything after
+	// this is derived from them: a page two that came back empty satisfies the
+	// guard above (a missing link has no href), makes `shown` empty, and turns
+	// the count below into the empty table a reload starts from — green from
+	// end to end (found in review of this PR).
+	await expect(rows(page)).toHaveCount(2);
 	const shown = await rows(page).allInnerTexts();
 
 	await page.reload();
@@ -157,6 +163,11 @@ test('a walk from a row this page does not hold takes the nearest one', async ({
 	deep.searchParams.set('peek', behind);
 
 	await page.goto(deep.toString());
+	// The listing and the panel's detail are two loads of one navigation, and
+	// only the second is what the detail button says landed. The walk stands
+	// down while the listing is in flight (`Walk.step`), so a `j` pressed then
+	// is dropped and nothing retries it — the rows are waited for as well.
+	await expect(rows(page)).toHaveCount(2);
 	// Until the panel's row says where it sits, the walk deliberately does not
 	// move, so this waits for the detail rather than for the panel.
 	await expect(page.getByRole('button', { name: 'Copy the trace id' })).toBeVisible();
