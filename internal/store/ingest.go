@@ -239,7 +239,10 @@ func upsertObservation(tx *sql.Tx, projectID string, o *model.Observation, index
 // which carried a completion start gets NULL rather than a number derived from
 // nothing. The subtrahend is the positive minimum, which is what `timestamp`
 // resolves to whenever any span said when it started; a trace where none did
-// has no wait to measure and gets NULL here too.
+// has no wait to measure and gets NULL here too, where `timestamp` falls back
+// to zero so the trace still has a place in a listing ordered by time. A
+// duration has no such fallback — measured from the epoch it would be some
+// 10^12 ms — and `latency_ms` above is NULL on those same rows (spec 012 #14).
 //
 // Like every aggregate it is recomputed on each delivery, so a trace whose
 // generations arrive in several batches converges on the earliest completion

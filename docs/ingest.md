@@ -166,6 +166,10 @@ the trace started. Both are stored as sent — no clamping and no clock
 correction — so a client whose completion start precedes its own span produces
 a negative TTFT rather than a silently corrected one.
 
+The trace's is null when no observation carried a completion start, and also
+when none of them said when it started: a wait needs a moment to be measured
+from, and a trace like that has no latency either.
+
 ## Configuration
 
 | Environment variable | Default | Meaning |

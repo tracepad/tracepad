@@ -80,6 +80,34 @@ func TestTraceTTFTAggregate(t *testing.T) {
 		}
 	})
 
+	// A wait is measured from a moment, and a span that never said when it
+	// started did not give one. The trace's `timestamp` falls back to the
+	// minimum start of any span, zero included (spec 004 #26), but zero is
+	// the epoch rather than a start, and subtracting it would answer a wait
+	// of some 10^12 milliseconds. `latency_ms` is NULL on the same rows for
+	// the same reason (spec 012 #14, found in review of PR #19).
+	t.Run("no observation said when it started", func(t *testing.T) {
+		id := hexTrace(5)
+		seedTrace(t, s, project.ID, wireTrace(id),
+			wireObservation(id, hexSpan(7), model.TypeGeneration, func(o *model.Observation) {
+				o.StartTime, o.EndTime = 0, 0
+				o.CompletionStartTime = day + 250_000_000
+			}))
+
+		trace, err := s.Trace(project.ID, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if trace.TTFTMs != nil {
+			t.Errorf("ttft_ms = %d, want NULL: there is no moment to measure the wait from",
+				*trace.TTFTMs)
+		}
+		if trace.LatencyMs != nil {
+			t.Errorf("latency_ms = %d, want NULL — the two must agree about such a trace",
+				*trace.LatencyMs)
+		}
+	})
+
 	t.Run("a completion earlier than the span is stored unclamped", func(t *testing.T) {
 		id := hexTrace(3)
 		seedTrace(t, s, project.ID, wireTrace(id),
