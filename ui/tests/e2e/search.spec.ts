@@ -115,7 +115,13 @@ test('clearing an active search after typing over it turns one page, not two', a
 	await page.getByLabel('Search prompts, answers and errors').fill('aardvark');
 	await page.getByRole('button', { name: 'Clear the search box' }).click();
 	await expect(page).not.toHaveURL(/q=/);
+	// And the counting ends once the cleared listing is on screen. A visible
+	// row is not that: `Listing` leaves the rows it has while the next page
+	// loads, so the searched row — snippet cell and all — is still there, and
+	// waiting for it waits for nothing (found in review of this PR). The
+	// snippet cells are what only the search had.
 	await expect(page.locator('tbody tr').first()).toBeVisible();
+	await expect(page.locator('tbody td[colspan]')).toHaveCount(0);
 
 	// One listing and its count, for the one page turn ✕ asked for — never a
 	// search for "aardvark" on the way.
