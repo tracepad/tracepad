@@ -71,3 +71,39 @@ test('the search box clears itself and the listing comes back', async ({ page })
 	await expect(page).not.toHaveURL(/q=/);
 	expect(await page.locator('tbody').count()).toBeGreaterThan(narrowed);
 });
+
+// ✕ after typing must discard what was typed. The box commits on blur, and
+// clicking the button blurs it, so without care the click ran the very search
+// it was pressed to throw away — and unmounted the button on the way, so the
+// click never reached it (found in review of PR #16).
+test('clearing after typing discards the text instead of searching for it', async ({ page }) => {
+	await signIn(page);
+	const all = await page.locator('tbody').count();
+
+	await page.getByLabel('Search prompts, answers and errors').fill('aardvark');
+	await page.getByRole('button', { name: 'Clear the search box' }).click();
+
+	await expect(page).not.toHaveURL(/q=/);
+	await expect(page.getByLabel('Search prompts, answers and errors')).toHaveValue('');
+	expect(await page.locator('tbody').count()).toBe(all);
+});
+
+test('clearing an active search after typing over it turns one page, not two', async ({ page }) => {
+	await signIn(page);
+	await page.goto('/traces?q=password');
+
+	const listings: string[] = [];
+	page.on('request', (request) => {
+		if (request.url().includes('/api/v1/traces?')) listings.push(request.url());
+	});
+
+	await page.getByLabel('Search prompts, answers and errors').fill('aardvark');
+	await page.getByRole('button', { name: 'Clear the search box' }).click();
+	await expect(page).not.toHaveURL(/q=/);
+	await expect(page.locator('tbody tr').first()).toBeVisible();
+
+	// One listing and its count, for the one page turn ✕ asked for — never a
+	// search for "aardvark" on the way.
+	expect(listings.filter((url) => url.includes('aardvark'))).toEqual([]);
+	expect(listings.filter((url) => !url.includes('count=1'))).toHaveLength(1);
+});

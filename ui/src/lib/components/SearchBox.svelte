@@ -57,9 +57,16 @@
 		/>
 		{#if draft}
 			<!-- Its own control, because the box is on the bar in plain sight and
-			     the filter popover's "Clear all" deliberately leaves it alone. -->
+			     the filter popover's "Clear all" deliberately leaves it alone.
+			     `mousedown` is swallowed so the box never blurs: a blur here
+			     commits, and committing what was just typed re-derives `draft`
+			     from the URL, which unmounts this button before its own click is
+			     dispatched — so ✕ ran the search it was pressed to discard
+			     (found in review of PR #16). With a search already on, it cost
+			     two navigations instead of one. -->
 			<button
 				type="button"
+				onmousedown={(event) => event.preventDefault()}
 				onclick={clear}
 				aria-label="Clear the search box"
 				class="text-subtle hover:text-fg absolute right-1.5 cursor-pointer p-0.5"
