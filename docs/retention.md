@@ -109,13 +109,17 @@ The full-text index ([api.md](api.md#search)) is the one store beside the
 payloads themselves, and it is worth knowing what it is made of before a large
 deployment upgrades into it.
 
-**Each payload contributes its first 64 KiB.** The rest is stored and readable
-— `/observations/{id}/io` still returns all of it — but not searched. This is a
-size decision, not a quality one: a 500 KB document on one observation's input
-would otherwise cost the index as much as a hundred ordinary traces, while the
-error messages, refusals and answers people search for live in the first
-kilobytes. It is written here rather than left to be discovered by a search
-that came back empty.
+**Each payload contributes the first 64 KiB of its text.** What is indexed of a
+payload is the values inside its JSON, not the JSON around them
+([api.md](api.md#what-is-and-is-not-matched)), and the 64 KiB is counted on
+that text: a message array's keys and brackets cost the index nothing and take
+none of the budget. The rest is stored and readable — `/observations/{id}/io`
+still returns all of it — but not searched. This is a size decision, not a
+quality one: a 500 KB document on one observation's input would otherwise cost
+the index as much as a hundred ordinary traces, while the error messages,
+refusals and answers people search for live in the first kilobytes. It is
+written here rather than left to be discovered by a search that came back
+empty.
 
 **Ingest pays for it.** Measured on an Apple M1 Pro over a synthetic corpus of
 one trace and twenty generations per batch, each carrying about 2.5 KB of
@@ -131,6 +135,12 @@ minute, and it is resumable: a crash halfway carries on where it stopped. On
 the same machine and the same corpus it indexes about **260 traces — 5 200
 observations — a second**, so a store of a million observations spends roughly
 three minutes there, once. The log says it is happening and reports progress.
+
+**An upgrade that changes what a word is rebuilds the index the same way.**
+Schema 0007 is such an upgrade — it is what moved the index off the JSON text
+and onto the text inside it — so a store upgrading into it pays that first
+start again, at the same rate, once. There is nothing to run and nothing to
+decide: the start after the upgrade does it, and says so in the log.
 
 ## Deleting a user's data
 
