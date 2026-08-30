@@ -53,6 +53,7 @@ tracepad traces ls --env production --error --since 1h
 
 | Flag | Meaning |
 |---|---|
+| `--search` | Find traces by what was said in them. See [Searching](#searching). |
 | `--env` | Environment. |
 | `--error` | Only traces with a failed observation. |
 | `--since` | A Go duration (`1h`, `30m`) or an RFC 3339 instant. |
@@ -84,6 +85,33 @@ combinations that would quietly mean the other one are refused: `--oldest`
 with a `--cursor` (the cursor would win and the jump never happen), and
 `--newer` without one (which is the far end, not a step back).
 
+### Searching
+
+```sh
+tracepad traces ls --search "refund failed"
+```
+
+```
+TIME                 ID                                NAME          ENV         OBS  ERR  LATENCY  COST
+2026-09-01 10:00:00  4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f  support-chat  production  2    0    820ms    $0.001000
+    2b3c4d5e6f7a8b9c output: …the refund failed for the order because the card issuer…
+```
+
+The second line under a row says where the trace matched — the observation and
+the field — and what the text says around the hit. It is dimmed on a terminal
+and plain in a pipe; with `--json` the row carries the same thing as a `match`
+object.
+
+`--search` maps to the API's `q`, so the rules are the API's:
+[docs/api.md](api.md#search). Words, not substrings; `"quoted phrases"` for
+adjacent words; a trailing `*` for a prefix; everything else is literal text.
+A search with no word in it is refused rather than answered with an empty
+table.
+
+`traces last --search "…"` is the same search, answered with the newest
+matching trace and its whole tree. `tail` does not take it: it follows the
+newest page, which is not a question about text.
+
 ### `traces show`
 
 ```sh
@@ -101,8 +129,8 @@ the URL that returns the rest.
 tracepad traces last --error --full
 ```
 
-"Why did the last run fail" — every filter of `traces ls`, the newest match,
-the whole tree. One request.
+"Why did the last run fail" — every filter of `traces ls`, `--search`
+included, the newest match, the whole tree. One request.
 
 ### `tail`
 

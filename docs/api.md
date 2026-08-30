@@ -96,6 +96,7 @@ choosing what to fetch.
 | `tag` | Repeatable; a trace must carry **every** tag given. |
 | `status` | `error` (at least one failed observation) or `ok`. |
 | `min_cost` | Traces whose total cost is at least this. A trace whose client provided no cost has none and never matches. |
+| `q` | Full-text search over what the observations carried. See [Search](#search). |
 | `fields` | Comma-separated subset of the row fields. |
 | `limit` | 1–500, default 50. |
 | `cursor` | The `next_cursor` or `prev_cursor` of a previous page. |
@@ -175,6 +176,74 @@ the page: a client asks for it when the filters move, and pages without it.
 
 `GET /api/v1/sessions/{id}` pages the same way but takes no `count`: its
 `trace_count` is that number already, and exactly.
+
+## Search
+
+Every filter above asks about a trace's labels — who, when, where, how much.
+`q` asks about what was *said*: the error message somebody pasted, a sentence
+the model should not have produced, an order id from a support ticket.
+
+```sh
+curl -H "Authorization: Bearer tp-sk-…" \
+  "http://localhost:4318/api/v1/traces?q=%22refund+failed%22&status=error"
+```
+
+It searches, per observation, the `input`, `output` and `metadata` payloads,
+the observation's `name` and its `status_message` — and the trace's own `name`.
+A trace matches when **one field of one of its observations** matches.
+
+Each row then carries `match`: where the hit was, and the text around it.
+
+```json
+{
+  "id": "4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f",
+  "name": "support-chat",
+  "match": {
+    "observation_id": "2b3c4d5e6f7a8b9c",
+    "field": "output",
+    "snippet": "…the refund failed for the order because the card issuer declined the…"
+  }
+}
+```
+
+`field` is one of `input`, `output`, `metadata`, `name`, `status_message` or
+`trace_name`; with `trace_name` the `observation_id` is `null` and the trace
+itself is what matched. The snippet is at most 160 characters, cut on word
+boundaries around the first term, and it is **plain text** — the hit is not
+marked up, because the API answers with data and a client that highlights
+folds the query terms itself. `match` is a row field like the others: it
+answers to `?fields=`, and it is never present without a `q`.
+
+### What is and is not matched
+
+- **Words, not substrings.** `error` does not find `errors`; `err*` finds both.
+- **Case and diacritics are folded.** `Refund`, `refund` and `réfund` are one
+  word.
+- **Several words are ANDed, in any order.** `refund order` finds a field
+  containing both; `"refund order"` finds them adjacent, in that order.
+- **Identifiers split on punctuation** and are found whole or by part:
+  `user_id_42` is found by `user_id_42`, by `user` and by `42`.
+- **Only the first 64 KiB of each payload is indexed.** A word past that is
+  stored and readable but not findable; `/observations/{id}/io` still returns
+  the whole thing. See [retention.md](retention.md#what-search-costs).
+- **All the words must occur in the same field of the same observation.** Two
+  words in two different observations of one trace are not a match.
+
+There is no operator syntax and nothing to escape: words, `"quoted phrases"`
+and a trailing `*` are the whole language, and everything else — `AND`, `OR`,
+`NOT`, parentheses, `:`, `^`, `-` — is literal text. The only `q` this endpoint
+refuses is one with no word in it, or one over 512 characters, and both are a
+`400` rather than an empty listing.
+
+`q` changes what is listed and nothing else: the rows stay newest first, the
+cursors are the same keyset, and the count is the count with the search. A
+cursor taken with a `q` is valid only with the same `q`, which is already how
+every other filter behaves. There is no relevance ordering — the useful order
+for "when did this last happen?" is the one the listing already has.
+
+`GET /api/v1/traces/last` takes `q` too, which is "the last trace that said
+this", whole, in one request. It returns the trace as `GET /traces/{id}` does,
+without a `match`: the payloads are in the response already.
 
 ## One trace
 

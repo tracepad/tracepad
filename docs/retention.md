@@ -73,6 +73,9 @@ Each pass also:
 
 - collects **orphaned payloads** — rows left behind when a re-delivered span
   overwrote its input, output or metadata with a new one;
+- collects **orphaned search-index entries**, for the same reason: the three
+  paths that delete observations take the index with them inside their own
+  transactions, and this is the belt to those braces;
 - **purges** projects whose seven-day deletion grace has run out (below);
 - runs an incremental vacuum, so the file on disk actually shrinks. Deleting
   rows without one returns nothing to the filesystem.
@@ -100,6 +103,35 @@ What the sweeper has done is in `GET /api/v1/system`:
 The counts are this project's own and since this process started, like every
 other counter that endpoint reports.
 
+## What search costs
+
+The full-text index ([api.md](api.md#search)) is the one store beside the
+payloads themselves, and it is worth knowing what it is made of before a large
+deployment upgrades into it.
+
+**Each payload contributes its first 64 KiB.** The rest is stored and readable
+— `/observations/{id}/io` still returns all of it — but not searched. This is a
+size decision, not a quality one: a 500 KB document on one observation's input
+would otherwise cost the index as much as a hundred ordinary traces, while the
+error messages, refusals and answers people search for live in the first
+kilobytes. It is written here rather than left to be discovered by a search
+that came back empty.
+
+**Ingest pays for it.** Measured on an Apple M1 Pro over a synthetic corpus of
+one trace and twenty generations per batch, each carrying about 2.5 KB of
+prompt, completion and metadata text: 3.7 ms per batch without the index and
+7.2 ms with it — roughly 5 400 spans a second against 2 700. The index halves
+the write path and leaves it two orders of magnitude above the ceiling this
+product is built for.
+
+**The first start after the upgrade builds the index for what is already
+stored.** It runs before the server listens, because a search that answers
+"nothing" because the index is half-built is worse than a start that takes a
+minute, and it is resumable: a crash halfway carries on where it stopped. On
+the same machine and the same corpus it indexes about **260 traces — 5 200
+observations — a second**, so a store of a million observations spends roughly
+three minutes there, once. The log says it is happening and reports progress.
+
 ## Deleting a user's data
 
 ```sh
@@ -118,8 +150,9 @@ You are the controller; tracepad is the tool. Two things are worth stating
 plainly rather than leaving to be discovered:
 
 **Erasure covers the queryable stores immediately.** After the call, no read
-endpoint, CLI command or MCP tool can return that user's traces. This lands
-well inside the one-month response window Article 12(3) allows.
+endpoint, CLI command or MCP tool can return that user's traces, and no search
+finds their text: the index is deleted in the same transaction as the rows.
+This lands well inside the one-month response window Article 12(3) allows.
 
 **Raw OTLP bodies are not erased.** They are an archive: not served by any read
 endpoint, not searchable, expiring on their own schedule — the same posture as
