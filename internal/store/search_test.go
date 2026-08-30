@@ -181,6 +181,165 @@ func TestSearchIndexContract(t *testing.T) {
 	}
 }
 
+// TestJSONLeaves is what a payload contributes to the index (spec 011 #14):
+// the scalar leaves of its JSON, in the order the document holds them, and the
+// whole text of anything that is not JSON.
+func TestJSONLeaves(t *testing.T) {
+	for _, tc := range []struct{ name, in, want string }{
+		{"a bare string is its text", `"how do I reset my password"`,
+			"how do I reset my password"},
+		{"an object keeps its values and drops its keys",
+			`{"content":"the refund failed","role":"user"}`,
+			"the refund failed\nuser"},
+		{"an array of messages, in order",
+			`[{"role":"system","content":"be brief"},{"role":"user","content":"hello"}]`,
+			"system\nbe brief\nuser\nhello"},
+		{"numbers are their JSON text", `{"order_id":12345,"cost":0.0031}`,
+			"12345\n0.0031"},
+		{"booleans are their JSON text", `{"flagged":true}`, "true"},
+		{"null is not text", `{"error":null,"note":"fine"}`, "fine"},
+		{"nested containers are walked",
+			`{"choices":[{"message":{"content":"click the link","tools":[]}}]}`,
+			"click the link"},
+		{"a document of nothing but structure is nothing", `{"a":{},"b":[null]}`, ""},
+		{"an empty string is not a leaf", `{"a":"","b":"there"}`, "there"},
+		{"text that is not JSON is kept whole", `refund failed: card declined`,
+			"refund failed: card declined"},
+		{"a truncated document is kept whole", `{"content":"cut off here`,
+			`{"content":"cut off here`},
+		{"a second value is not one document", `{"a":"one"} {"b":"two"}`,
+			`{"a":"one"} {"b":"two"}`},
+		{"nothing is nothing", "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := jsonLeaves(tc.in); got != tc.want {
+				t.Errorf("jsonLeaves(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+	// The two fields that were never JSON are untouched by any of it.
+	if got := searchableField(FieldStatusMessage, `{"a":"b"}`); got != `{"a":"b"}` {
+		t.Errorf("a status message was parsed as a payload: %q", got)
+	}
+}
+
+// TestSearchIndexesTheTextNotTheJSON is Decision 14 through the shipped path:
+// what the index holds of a payload is what was said in it, and the keys and
+// brackets around it are not words anybody can search for.
+func TestSearchIndexesTheTextNotTheJSON(t *testing.T) {
+	s, project := readStore(t)
+	seed := func(n int, o *model.Observation) {
+		o.TraceID = hexTrace(n)
+		o.ID = hexSpan(n)
+		o.Type = model.TypeSpan
+		o.Level = model.LevelDefault
+		o.StartTime = int64(n) * day
+		o.EndTime = o.StartTime + 1
+		seedTrace(t, s, project.ID, &model.Trace{ID: hexTrace(n)}, o)
+	}
+	seed(1, &model.Observation{
+		Input: []any{map[string]any{"role": "user", "content": "how do I reset my password"}},
+		Output: map[string]any{"choices": []any{
+			map[string]any{"message": map[string]any{"content": "click the link in the email"}}}},
+		Metadata: map[string]any{"order_id": 12345, "flagged": true, "note": nil},
+	})
+	// 70 KiB of JSON carrying no text at all, and then the word: past the
+	// cap while the cap counted the JSON, the first word of the field now
+	// that it counts what the JSON says.
+	structure := make([]any, 15000)
+	seed(2, &model.Observation{Input: append(structure, "cappedleaf")})
+	// And the cap itself, on the text: 90 KiB of leaves, and the word past
+	// it is not findable.
+	long := make([]any, 0, 9001)
+	for range 9000 {
+		long = append(long, "fillerword")
+	}
+	seed(3, &model.Observation{Input: append(long, "beyondleaf")})
+
+	for _, tc := range []struct {
+		name  string
+		query string
+		want  []string
+	}{
+		{"a key of the envelope is not a word", "role", nil},
+		{"nor is the key every message carries", "content", nil},
+		{"nor are the keys of a completion", "choices message", nil},
+		{"nor is the key of the metadata", "order_id", nil},
+		{"what the user said is", "reset my password", []string{hexTrace(1)}},
+		{"as a phrase, too", `"reset my password"`, []string{hexTrace(1)}},
+		{"what the model answered is", "click the link", []string{hexTrace(1)}},
+		{"a value under a key is a value", "user", []string{hexTrace(1)}},
+		{"a number leaf is found by its digits", "12345", []string{hexTrace(1)}},
+		{"a boolean's key is not a word", "flagged", nil},
+		{"a boolean leaf is its JSON text", "true", []string{hexTrace(1)}},
+		// The newline between two leaves is a separator and not a token,
+		// so neighbouring values sit at neighbouring positions and a
+		// phrase can cross the boundary. Written down in Decision 14 and
+		// pinned here: the only way to close it is an FTS row per leaf,
+		// which is the index size Decisions 2 and 3 refuse.
+		{"a phrase can run from one value into the next",
+			`"my password user"`, []string{hexTrace(1)}},
+		{"but not against the order the values are in",
+			`"user how do"`, nil},
+		{"the cap counts text, not JSON", "cappedleaf", []string{hexTrace(2)}},
+		{"and it is still a cap", "beyondleaf", nil},
+		{"the filler inside it is findable", "fillerword", []string{hexTrace(3)}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := matchingTraces(t, s, project.ID, tc.query)
+			if strings.Join(got, ",") != strings.Join(tc.want, ",") {
+				t.Errorf("q=%q matched %v, want %v", tc.query, got, tc.want)
+			}
+		})
+	}
+
+	// The snippet is cut from the same text, so it reads as a sentence
+	// rather than as the envelope it arrived in.
+	query, err := ParseSearch("password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	matches, err := s.SearchMatches(project.ID, []string{hexTrace(1)}, query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	match := matches[hexTrace(1)]
+	if match == nil || match.Field != FieldInput {
+		t.Fatalf("match = %+v, want the input that carried the question", match)
+	}
+	if !strings.Contains(match.Snippet, "how do I reset my password") {
+		t.Errorf("snippet = %q, want the sentence around the hit", match.Snippet)
+	}
+	if strings.ContainsAny(match.Snippet, `{}[]":,`) || strings.Contains(match.Snippet, "role") {
+		t.Errorf("snippet = %q, want no trace of the JSON around the text", match.Snippet)
+	}
+	checkIntegrity(t, s)
+}
+
+// TestSearchIndexesANonJSONPayloadWhole: the fallback of Decision 14, on the
+// path that would meet it — a payload an older release or a hand-written row
+// left behind. Searched crudely rather than not at all.
+func TestSearchIndexesANonJSONPayloadWhole(t *testing.T) {
+	s, project := readStore(t)
+	seedTrace(t, s, project.ID, &model.Trace{ID: hexTrace(1)},
+		&model.Observation{TraceID: hexTrace(1), ID: hexSpan(1), Type: model.TypeSpan,
+			Level: model.LevelDefault, StartTime: day, EndTime: day + 1})
+	if err := insertEntries(s.db, project.ID, hexTrace(1), hexSpan(1),
+		[]searchEntry{{FieldInput, `{"unterminated": "notjsonleaf`}}); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := matchingTraces(t, s, project.ID, "notjsonleaf"); len(got) != 1 {
+		t.Errorf("text in an unparsable payload is not findable: %v", got)
+	}
+	// Whole means whole: the structure of something that is not a document
+	// is indexed with the rest of it, and that is the price of reading it.
+	if got := matchingTraces(t, s, project.ID, "unterminated"); len(got) != 1 {
+		t.Errorf("an unparsable payload was not indexed whole: %v", got)
+	}
+	checkIntegrity(t, s)
+}
+
 // TestSearchIsScopedToItsProject: the index is one table across every project,
 // and the side table's project id is the only scope there is.
 func TestSearchIsScopedToItsProject(t *testing.T) {

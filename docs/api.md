@@ -192,6 +192,11 @@ It searches, per observation, the `input`, `output` and `metadata` payloads,
 the observation's `name` and its `status_message` — and the trace's own `name`.
 A trace matches when **one field of one of its observations** matches.
 
+Of a payload it searches the **values**, not the JSON around them: the strings,
+numbers and booleans it carries, wherever they are nested. `role`, `content`
+and every other key of a message array are structure, not text, and they match
+nothing.
+
 Each row then carries `match`: where the hit was, and the text around it.
 
 ```json
@@ -209,9 +214,10 @@ Each row then carries `match`: where the hit was, and the text around it.
 `field` is one of `input`, `output`, `metadata`, `name`, `status_message` or
 `trace_name`; with `trace_name` the `observation_id` is `null` and the trace
 itself is what matched. The snippet is at most 160 characters, cut on word
-boundaries around the first term, and it is **plain text** — the hit is not
-marked up, because the API answers with data and a client that highlights
-folds the query terms itself. `match` is a row field like the others: it
+boundaries around the first term and out of the same text the index searched —
+so it reads as a sentence rather than as the JSON it arrived in — and it is
+**plain text**: the hit is not marked up, because the API answers with data and
+a client that highlights folds the query terms itself. `match` is a row field like the others: it
 answers to `?fields=`, and it is never present without a `q`.
 
 ### What is and is not matched
@@ -223,9 +229,16 @@ answers to `?fields=`, and it is never present without a `q`.
   containing both; `"refund order"` finds them adjacent, in that order.
 - **Identifiers split on punctuation** and are found whole or by part:
   `user_id_42` is found by `user_id_42`, by `user` and by `42`.
-- **Only the first 64 KiB of each payload is indexed.** A word past that is
-  stored and readable but not findable; `/observations/{id}/io` still returns
-  the whole thing. See [retention.md](retention.md#what-search-costs).
+- **A payload's keys and structure are not searched.** `{"role": "user",
+  "content": "the refund failed"}` is found by `refund` and by `user`, and not
+  by `role` or `content`. A number is found by its digits: an `order_id` of
+  `12345` answers to `12345`. A payload that is not JSON is searched whole.
+  The values of one field are one text, so a `"quoted phrase"` can run from the
+  end of one value into the start of the next.
+- **Only the first 64 KiB of each payload's text is indexed** — the text inside
+  the JSON, not the JSON. A word past that is stored and readable but not
+  findable; `/observations/{id}/io` still returns the whole thing. See
+  [retention.md](retention.md#what-search-costs).
 - **All the words must occur in the same field of the same observation.** Two
   words in two different observations of one trace are not a match.
 

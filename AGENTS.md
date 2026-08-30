@@ -59,7 +59,9 @@ API. This file routes; it does not duplicate what specs and docs say.
   and a snippet of the text. The CLI grew `--search`, MCP grew the `search`
   tool spec 004 #17 was waiting for an endpoint to justify, and the Traces
   screen grew a search box, the snippet under the row and a click that lands on
-  the observation that matched.
+  the observation that matched. Schema 0007 (Decision 14) rebuilt that index
+  over the **scalar leaves** of a payload's JSON rather than its text: the keys
+  and brackets are not words, and the snippet reads as a sentence.
 - ✅ Spec 005 (retention & admin) shipped: schema 0005, the hourly sweeper
   writing every chunk through the group-commit writer, the admin API under
   `/api/v1/projects` with a dry-run/confirm contract on every destructive
@@ -81,7 +83,7 @@ API. This file routes; it does not duplicate what specs and docs say.
 | Response budgets and truncation | `internal/server/budget.go`, spec 004 #2 |
 | CLI | `internal/cli/`, `internal/client/`, `docs/cli.md`, spec 004 |
 | MCP | `internal/mcpserver/`, `docs/mcp.md`, spec 004 — tools call the read API over HTTP, never the store, and only ever with a GET (spec 005 #13) |
-| Search | `internal/store/search.go` (the query language and the snippet) and `searchindex.go` (the index's lifetime), `docs/api.md#search`, spec 011 — the user's text never reaches `MATCH` as written, and every path that deletes observations deletes their entries in the same transaction |
+| Search | `internal/store/search.go` (the query language, what of a field is indexed, and the snippet) and `searchindex.go` (the index's lifetime), `docs/api.md#search`, spec 011 — the user's text never reaches `MATCH` as written, `searchableField` is what both the index and the snippet see of a payload, and every path that deletes observations deletes their entries in the same transaction |
 | Retention and the sweeper | `internal/store/sweep.go`, `docs/retention.md`, spec 005 — every chunk is a `WriteJob`, never a second write connection |
 | Admin API (projects, keys, retention, erasure) | `internal/server/admin.go`, `internal/store/admin.go`, `docs/admin.md`, spec 005 — destructive endpoints are a dry run until `?confirm=` echoes the name, checked inside the write transaction |
 | Attribute mapping | `internal/mapping/rules.go` is the table; `mapping.go` applies it |
