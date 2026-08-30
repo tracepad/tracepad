@@ -247,7 +247,7 @@ export interface paths {
         };
         /**
          * Counts, errors, cost and latency percentiles per bucket
-         * @description Computed on the fly, with exact percentiles. `unit` says what a bucket counts: grouping by hour, day or environment counts traces, and grouping by model counts observations, because a trace has no model. An empty range answers with no buckets rather than with fabricated zero rows.
+         * @description Computed on the fly, with exact percentiles. `unit` says what a bucket counts: grouping by hour, day, environment or release counts traces, and grouping by model counts observations, because a trace has no model. Grouped by release, a trace that named none falls in the bucket with the empty key. An empty range answers with no buckets rather than with fabricated zero rows.
          */
         get: operations["stats"];
         put?: never;
@@ -549,6 +549,10 @@ export interface components {
             user_id?: string;
             session_id?: string;
             environment: string;
+            /** @description The deployment the trace ran in, from `langfuse.release` or the resource's `service.version` */
+            release?: string;
+            /** @description The version of the trace's own logic, from `langfuse.version` */
+            version?: string;
             tags?: string[];
             /**
              * Format: date-time
@@ -558,6 +562,8 @@ export interface components {
             /** @description Summed over the observations whose client provided cost; absent when none did */
             total_cost?: number;
             latency_ms?: number;
+            /** @description The wait before the first token: the earliest completion start among the trace's observations, minus the trace's own start. Absent when no observation carried one, and negative when a client's completion start precedes its span */
+            ttft_ms?: number;
             error_count: number;
             observation_count: number;
             match?: components["schemas"]["Match"];
@@ -594,13 +600,23 @@ export interface components {
             id: string;
             /** @description The observation this one ran under, whenever it named one. Nested children carry it too; an observation whose parent is not in this trace renders at the root and still carries it. */
             parent_observation_id?: string;
-            /** @enum {string} */
-            type: "span" | "generation" | "event";
+            /**
+             * @description What kind of step this was. A span whose client named no type is classified: a model attribute makes it a generation, a zero-duration childless span an event, anything else a span
+             * @enum {string}
+             */
+            type: "span" | "generation" | "event" | "agent" | "tool" | "chain" | "retriever" | "guardrail" | "evaluator" | "embedding";
             name?: string;
             /** Format: date-time */
             start_time?: string;
             /** Format: date-time */
             end_time?: string;
+            /**
+             * Format: date-time
+             * @description When the first token came back, as the client reported it — stored uncorrected, so it may precede `start_time`
+             */
+            completion_start_time?: string;
+            /** @description `completion_start_time` minus `start_time`; absent when either is missing */
+            ttft_ms?: number;
             model?: string;
             model_parameters?: Record<string, never>;
             /** @enum {string} */
@@ -608,10 +624,21 @@ export interface components {
             status_message?: string;
             usage?: Record<string, never>;
             cost_details?: Record<string, never>;
+            prompt?: components["schemas"]["PromptLink"];
+            /** @description The uncompressed size of `input`, present whether or not the payload itself is inlined */
+            input_bytes?: number;
+            /** @description The uncompressed size of `output` */
+            output_bytes?: number;
             input?: components["schemas"]["Truncation"] | unknown;
             output?: components["schemas"]["Truncation"] | unknown;
             metadata?: components["schemas"]["Truncation"] | Record<string, never>;
             children?: components["schemas"]["Observation"][];
+        };
+        /** @description The prompt the client said this observation ran. Recorded as sent and resolved against no registry — the store may not manage this prompt at all, and a label that points at nothing is still a label. Absent when the client named none. */
+        PromptLink: {
+            name: string;
+            /** @description Null when the client named a prompt without a whole-number version */
+            version: number | null;
         };
         /** @description Present only when `?expand=io` was refused: a trace with more payloads than the budget can carry markers for gets none of them and this instead. Nothing is unreachable — the tree lists every observation id — and `budget_needed` is what to retry `?budget=` with. */
         Expansion: {
@@ -809,6 +836,14 @@ export interface components {
         Count: "1" | "true";
         /** @description Full-text search over one field of one observation — input, output, metadata, name or status message — or over the trace name. Words (all must occur), `"quoted phrases"`, `prefix*`. Words, not substrings: `error` does not find `errors`, `err*` finds both. Case and diacritics are folded, identifiers split on punctuation, and only the first 64 KiB of each payload is indexed. A `q` with no word in it is a 400 */
         Search: string;
+        /** @description Exact match on the deployment the trace ran in, from `langfuse.release` or the resource's `service.version` */
+        Release: string;
+        /** @description Exact match on the version of the trace's own logic, from `langfuse.version` */
+        Version: string;
+        /** @description Keeps traces with at least one observation of this kind. Exact: `generation` does not match `embedding`. A value outside the list is a 400 */
+        ObservationType: "span" | "generation" | "event" | "agent" | "tool" | "chain" | "retriever" | "guardrail" | "evaluator" | "embedding";
+        /** @description `name` or `name@version`: keeps traces with at least one observation that ran this prompt, at any version or at that one. A version that is not a whole number is a 400 */
+        Prompt: string;
         /** @description `io` inlines each observation's input, output and metadata, each cut to an equal share of the remaining budget with a truncation marker naming the rest */
         Expand: "io";
         /** @description Byte budget for the payloads of this response; the structure is never truncated */
@@ -1055,6 +1090,14 @@ export interface operations {
                 min_cost?: number;
                 /** @description Full-text search over one field of one observation — input, output, metadata, name or status message — or over the trace name. Words (all must occur), `"quoted phrases"`, `prefix*`. Words, not substrings: `error` does not find `errors`, `err*` finds both. Case and diacritics are folded, identifiers split on punctuation, and only the first 64 KiB of each payload is indexed. A `q` with no word in it is a 400 */
                 q?: components["parameters"]["Search"];
+                /** @description Exact match on the deployment the trace ran in, from `langfuse.release` or the resource's `service.version` */
+                release?: components["parameters"]["Release"];
+                /** @description Exact match on the version of the trace's own logic, from `langfuse.version` */
+                version?: components["parameters"]["Version"];
+                /** @description Keeps traces with at least one observation of this kind. Exact: `generation` does not match `embedding`. A value outside the list is a 400 */
+                type?: components["parameters"]["ObservationType"];
+                /** @description `name` or `name@version`: keeps traces with at least one observation that ran this prompt, at any version or at that one. A version that is not a whole number is a 400 */
+                prompt?: components["parameters"]["Prompt"];
                 /** @description Comma-separated subset of the row fields. An unknown name is a 400. */
                 fields?: string;
                 /** @description Out of range is a 400, not a silent clamp */
@@ -1112,6 +1155,14 @@ export interface operations {
                 min_cost?: number;
                 /** @description Full-text search over one field of one observation — input, output, metadata, name or status message — or over the trace name. Words (all must occur), `"quoted phrases"`, `prefix*`. Words, not substrings: `error` does not find `errors`, `err*` finds both. Case and diacritics are folded, identifiers split on punctuation, and only the first 64 KiB of each payload is indexed. A `q` with no word in it is a 400 */
                 q?: components["parameters"]["Search"];
+                /** @description Exact match on the deployment the trace ran in, from `langfuse.release` or the resource's `service.version` */
+                release?: components["parameters"]["Release"];
+                /** @description Exact match on the version of the trace's own logic, from `langfuse.version` */
+                version?: components["parameters"]["Version"];
+                /** @description Keeps traces with at least one observation of this kind. Exact: `generation` does not match `embedding`. A value outside the list is a 400 */
+                type?: components["parameters"]["ObservationType"];
+                /** @description `name` or `name@version`: keeps traces with at least one observation that ran this prompt, at any version or at that one. A version that is not a whole number is a 400 */
+                prompt?: components["parameters"]["Prompt"];
                 /** @description `io` inlines each observation's input, output and metadata, each cut to an equal share of the remaining budget with a truncation marker naming the rest */
                 expand?: components["parameters"]["Expand"];
                 /** @description Byte budget for the payloads of this response; the structure is never truncated */
@@ -1323,7 +1374,7 @@ export interface operations {
                 to?: components["parameters"]["To"];
                 /** @description Exact match on the environment a trace ran in */
                 environment?: components["parameters"]["Environment"];
-                group_by?: "hour" | "day" | "model" | "environment";
+                group_by?: "hour" | "day" | "model" | "environment" | "release";
             };
             header?: never;
             path?: never;

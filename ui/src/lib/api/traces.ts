@@ -18,7 +18,11 @@ export const TRACE_FILTERS = [
 	'name',
 	'tag',
 	'status',
-	'min_cost'
+	'min_cost',
+	'release',
+	'version',
+	'type',
+	'prompt'
 ] as const;
 
 export type FilterName = (typeof TRACE_FILTERS)[number];
@@ -36,6 +40,14 @@ export type TraceFilters = {
 	tag?: string[];
 	status?: 'error' | 'ok';
 	min_cost?: string;
+	/** The deployment the trace ran in (spec 012 #4). */
+	release?: string;
+	/** The version of the trace's own logic. */
+	version?: string;
+	/** Traces containing at least one observation of this kind. */
+	type?: string;
+	/** `name` or `name@version`, which is also what the panel's badge links to. */
+	prompt?: string;
 };
 
 /**

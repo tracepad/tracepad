@@ -12,8 +12,10 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/tracepad/tracepad/internal/config"
+	"github.com/tracepad/tracepad/internal/model"
 	"github.com/tracepad/tracepad/internal/store"
 )
 
@@ -34,8 +36,8 @@ var traceID = regexp.MustCompile(`^[0-9a-f]{32}$`)
 // trace: it says where the search hit, and it is present only with `q`
 // (spec 011 #6).
 var traceRowFields = []string{
-	"id", "name", "user_id", "session_id", "environment", "tags",
-	"timestamp", "total_cost", "latency_ms", "error_count", "observation_count",
+	"id", "name", "user_id", "session_id", "environment", "release", "version", "tags",
+	"timestamp", "total_cost", "latency_ms", "ttft_ms", "error_count", "observation_count",
 	"match",
 }
 
@@ -43,7 +45,7 @@ var traceRowFields = []string{
 // accepts the same set (#7) plus the two that shape a single trace.
 var traceListFilters = []string{
 	"from", "to", "environment", "user_id", "session_id", "name", "tag",
-	"status", "min_cost", "q",
+	"status", "min_cost", "q", "release", "version", "type", "prompt",
 }
 
 // handleListTraces serves the filtered, cursor-paginated listing, newest
@@ -332,10 +334,13 @@ func renderTraceRow(row *store.TraceRow) object {
 		putSome("user_id", row.UserID).
 		putSome("session_id", row.SessionID).
 		put("environment", row.Environment).
+		putSome("release", row.Release).
+		putSome("version", row.Version).
 		putSome("tags", row.Tags).
 		putSome("timestamp", formatInstant(row.Timestamp)).
 		putSome("total_cost", row.TotalCost).
 		putSome("latency_ms", row.LatencyMs).
+		putSome("ttft_ms", row.TTFTMs).
 		put("error_count", row.ErrorCount).
 		put("observation_count", row.ObservationCount)
 }
@@ -480,12 +485,17 @@ func renderNode(node *observationNode, budget payloadBudget, expand bool) object
 		putSome("name", row.Name).
 		putSome("start_time", formatInstant(row.StartTime)).
 		putSome("end_time", formatInstant(row.EndTime)).
+		putSome("completion_start_time", formatInstant(row.CompletionStartTime)).
+		putSome("ttft_ms", observationTTFT(row)).
 		putSome("model", row.Model).
 		putSome("model_parameters", row.ModelParameters).
 		put("level", row.Level).
 		putSome("status_message", row.StatusMessage).
 		putSome("usage", row.Usage).
-		putSome("cost_details", row.CostDetails)
+		putSome("cost_details", row.CostDetails).
+		putSome("prompt", renderPromptLink(row)).
+		putSome("input_bytes", row.InputBytes).
+		putSome("output_bytes", row.OutputBytes)
 	if expand {
 		for _, payload := range []struct {
 			key   string
@@ -505,6 +515,37 @@ func renderNode(node *observationNode, budget payloadBudget, expand bool) object
 		out = out.put("children", renderNodes(node.children, budget, expand))
 	}
 	return out
+}
+
+// observationTTFT is the wait this observation's caller had: the completion
+// start minus the span's own start, in milliseconds (spec 012 #3). The
+// difference is derived here rather than stored, because the raw fact is the
+// instant and the subtraction is one line.
+//
+// A span that never said when it started has no wait to report, and neither
+// does one that carried no completion start.
+func observationTTFT(row *store.ObservationRow) *int64 {
+	if row.CompletionStartTime == 0 || row.StartTime <= 0 {
+		return nil
+	}
+	ttft := (row.CompletionStartTime - row.StartTime) / int64(time.Millisecond)
+	return &ttft
+}
+
+// renderPromptLink renders the prompt an observation ran, or nothing when it
+// carried no name. The version is null rather than absent when the client
+// labelled a name without a usable version: a client reads the field to
+// decide whether it can link to one version, and "the prompt, unversioned" is
+// an answer to that (spec 012 #5).
+func renderPromptLink(row *store.ObservationRow) any {
+	if row.PromptName == "" {
+		return nil
+	}
+	version := any(nil)
+	if row.PromptVersion != nil {
+		version = *row.PromptVersion
+	}
+	return object{}.put("name", row.PromptName).put("version", version)
 }
 
 // asAny keeps a nil map nil through an interface conversion, so that "no
@@ -617,8 +658,27 @@ func traceFilter(values url.Values) (store.TraceFilter, error) {
 		UserID:      values.Get("user_id"),
 		SessionID:   values.Get("session_id"),
 		Name:        values.Get("name"),
+		Release:     values.Get("release"),
+		Version:     values.Get("version"),
 		Tags:        values["tag"],
 		Status:      values.Get("status"),
+	}
+	if raw := values.Get("type"); raw != "" {
+		// A spelling outside the vocabulary is a 400 rather than an
+		// empty listing: "no trace contains a tol call" would be a
+		// well-formed answer to a typo (spec 012, API contract).
+		if !model.IsObservationType(raw) {
+			return filter, fmt.Errorf("type must be one of %s, got %q",
+				strings.Join(model.ObservationTypes, ", "), raw)
+		}
+		filter.Type = raw
+	}
+	if raw := values.Get("prompt"); raw != "" {
+		prompt, err := parsePrompt(raw)
+		if err != nil {
+			return filter, err
+		}
+		filter.Prompt = prompt
 	}
 	switch filter.Status {
 	case "", store.TraceStatusError, store.TraceStatusOK:
@@ -668,6 +728,33 @@ func traceFilter(values url.Values) (store.TraceFilter, error) {
 		filter.MinCost = &cost
 	}
 	return filter, nil
+}
+
+// parsePrompt reads `name` or `name@version`. The version has to be a whole
+// number, because that is what the column holds: `name@latest` is a label the
+// client may well use, but it is not something this filter can answer, and a
+// 400 says so rather than returning nothing (spec 012, API contract).
+//
+// The name is split on the last `@` so that a prompt whose own name contains
+// one keeps it.
+func parsePrompt(raw string) (*store.PromptFilter, error) {
+	name, version := raw, ""
+	at := strings.LastIndex(raw, "@")
+	versioned := at >= 0
+	if versioned {
+		name, version = raw[:at], raw[at+1:]
+	}
+	if name == "" {
+		return nil, fmt.Errorf("prompt must name a prompt, got %q", raw)
+	}
+	if !versioned {
+		return &store.PromptFilter{Name: name}, nil
+	}
+	number, err := strconv.ParseInt(version, 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("prompt version must be a whole number, got %q", version)
+	}
+	return &store.PromptFilter{Name: name, Version: &number}, nil
 }
 
 func decodeTraceCursor(raw string) (*store.TraceCursor, error) {
