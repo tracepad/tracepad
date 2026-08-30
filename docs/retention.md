@@ -11,6 +11,14 @@ single-app deployment — roughly 22 MB a month — that is the right default fo
 this audience, and the wrong one for a fleet, which is why the window is one
 `PATCH` away.
 
+That rate is what the default is sized for: a small deployment, where keeping
+everything costs a few hundred megabytes a year. It is not sized for the top
+of the envelope this is built to serve — around 10 GB of data on the disk, and
+a million spans a day arriving — where that stock is spent in days and a window
+is not optional but the thing that keeps the file a size your disk has. Those
+two figures are a stock and a flow, and they are the README's:
+[What it is built for](../README.md#what-it-is-built-for).
+
 ## The two windows
 
 Each project has two, both counted in whole days (1 to 36500) and both
