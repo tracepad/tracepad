@@ -23,7 +23,9 @@ Rough figures, measured on a synthetic corpus of about 2,000 traces:
 - **Binary** — 15.6 MiB on `darwin/arm64`, 6.2 MiB gzipped; about half a MiB
   more for `linux/amd64`.
 - **Memory** — ~27 MiB resident at rest, ~63 MiB under ingest.
-- **Ingest** — ~1,900 spans/s from one sequential client.
+- **Ingest** — ~1,900 spans/s from one sequential client, which is headroom
+  rather than the ceiling: the envelope above is set by what the file and the
+  queries carry, not by what the intake keeps up with.
 - **Disk** — ~5 KB per trace, the raw OTLP archive included
   (`TRACEPAD_STORE_RAW`, on by default).
 - **Reads** — 8–23 ms per API query.
@@ -34,11 +36,13 @@ is made of. The read and memory figures were taken at that corpus's size too,
 and they move with it — `/api/v1/stats` aggregates on the fly with no rollup
 table, so a wider window costs more than a narrow one. Size all of it against
 your own traffic, and give it a retention window — near the top of this
-envelope that is not optional, because the two ceilings are a stock and a
-flow, and at ~5 KB a trace the flow fills the stock in a matter of weeks.
-Nothing is deleted until you set one, which is a default for a small
-deployment rather than for this range: see
-[docs/retention.md](docs/retention.md).
+envelope that is not optional. The two ceilings are a stock and a flow, and
+they are counted in different units: the flow is spans, the disk figure above
+is per trace. At a handful of spans a trace, a million spans a day is on the
+order of a gigabyte a day, and more once the payloads are real ones — so the
+stock is spent in days, not months. Nothing is deleted until you set that
+window, which is a default for a small deployment rather than for this range:
+see [docs/retention.md](docs/retention.md).
 
 ## Sending traces
 
