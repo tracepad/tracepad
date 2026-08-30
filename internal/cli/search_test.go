@@ -97,6 +97,26 @@ func TestTailTakesNoSearch(t *testing.T) {
 	}
 }
 
+// TestTailTakesNoUntil: the refusal itself, and not only the parity around it.
+// Both directions of that parity stay green if `--until` comes back *and* the
+// usage line grows `[--until T]` — which is the decision undone, quietly and
+// in one commit (INBOX, PR #9; found in review of PR #22).
+func TestTailTakesNoUntil(t *testing.T) {
+	h := newHarness(t)
+	got := h.run(t.Context(), true, "tail", "--until", "1h")
+	if got.code != ExitUsage {
+		t.Fatalf("exit = %d, want a usage error", got.code)
+	}
+	if !strings.Contains(got.stderr, "not defined") {
+		t.Errorf("stderr = %q, want the flag refused", got.stderr)
+	}
+	// And the bound it should be reaching for still works where it belongs.
+	if listing := h.run(t.Context(), true, "traces", "ls", "--until", "1h"); listing.code != ExitOK {
+		t.Errorf("traces ls --until = %d (%s), want the listing to keep its bound",
+			listing.code, listing.stderr)
+	}
+}
+
 // TestSearchRefusalIsTheServersOwn: a query with no word in it is a 400 the
 // CLI passes through, rather than an empty table (spec 011 #4).
 func TestSearchRefusalIsTheServersOwn(t *testing.T) {
@@ -171,6 +191,18 @@ func TestEveryFlagIsNamedInTheUsageText(t *testing.T) {
 	// are documented once, where the client commands are introduced.
 	global := map[string]bool{"url": true, "key": true, "json": true}
 
+	// What the table below still claims, struck off as it is met: an entry
+	// nobody reports is debt already paid, and a list that outlives its debt
+	// exempts a *future* flag of that name on that command (found in review
+	// of PR #22).
+	unmet := map[string]map[string]bool{}
+	for command, names := range undocumented {
+		unmet[command] = map[string]bool{}
+		for name := range names {
+			unmet[command][name] = true
+		}
+	}
+
 	for command, offered := range usageFlags(t) {
 		var sets []*flag.FlagSet
 		h.observeFlags = func(fs *flag.FlagSet) { sets = append(sets, fs) }
@@ -183,13 +215,26 @@ func TestEveryFlagIsNamedInTheUsageText(t *testing.T) {
 		}
 		for _, fs := range sets {
 			fs.VisitAll(func(f *flag.Flag) {
-				if global[f.Name] || offered[f.Name] || undocumented[command][f.Name] {
+				if global[f.Name] || offered[f.Name] {
+					return
+				}
+				if undocumented[command][f.Name] {
+					delete(unmet[command], f.Name)
 					return
 				}
 				t.Errorf("`tracepad %s` takes --%s, which its usage block does not name: "+
 					"a flag that is not offered is one nobody can find and nobody promised",
 					command, f.Name)
 			})
+		}
+	}
+
+	for command, names := range unmet {
+		for name := range names {
+			t.Errorf("the table still lists `tracepad %s --%s` as undocumented, and it is not: "+
+				"the flag is named in the usage text now, or gone, or the command is — "+
+				"strike the entry, so the list stays the debt and not a licence",
+				command, name)
 		}
 	}
 }
