@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"net/http/httptest"
 	"path/filepath"
@@ -40,6 +41,10 @@ type harness struct {
 	env    map[string]string
 	// stdin is what an interactive confirmation reads (spec 005 #13).
 	stdin string
+	// observeFlags is handed every flag set the commands of this harness
+	// build. The parity test sets it; it lives here rather than in a
+	// package variable so that it cannot outlive the test that wanted it.
+	observeFlags func(*flag.FlagSet)
 }
 
 func newHarness(t *testing.T) *harness { return newHarnessWithToken(t, "") }
@@ -96,7 +101,9 @@ func (h *harness) run(ctx context.Context, tty bool, args ...string) result {
 		Stdin:   strings.NewReader(h.stdin),
 		TTY:     tty,
 		Env:     func(key string) string { return h.env[key] },
-		Now:     func() time.Time { return time.Unix(0, seedBase).UTC() },
+		// Set by the parity test only; nil everywhere else.
+		observeFlags: h.observeFlags,
+		Now:          func() time.Time { return time.Unix(0, seedBase).UTC() },
 	})
 	return result{stdout: out.String(), stderr: errOut.String(), code: code}
 }

@@ -131,20 +131,8 @@ func TestUsageAndFlagsAgree(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
-	command := ""
-	for _, line := range strings.Split(Usage, "\n") {
-		if match := usageCommand.FindStringSubmatch(line); match != nil {
-			command = match[1]
-		}
-		if command == "" {
-			continue
-		}
-		if strings.TrimSpace(line) == "" {
-			command = ""
-			continue
-		}
-		for _, flag := range usageFlag.FindAllStringSubmatch(line, -1) {
-			name := flag[1]
+	for command, offered := range usageFlags(t) {
+		for name := range offered {
 			t.Run(command+" --"+name, func(t *testing.T) {
 				args := append(strings.Fields(command), "--"+name+"=1")
 				got := h.run(ctx, false, args...)
@@ -154,9 +142,6 @@ func TestUsageAndFlagsAgree(t *testing.T) {
 				}
 			})
 		}
-	}
-	if command != "" {
-		t.Fatal("the usage text ended inside a command block; the parser did not walk it")
 	}
 }
 
@@ -186,11 +171,11 @@ func TestEveryFlagIsNamedInTheUsageText(t *testing.T) {
 	// are documented once, where the client commands are introduced.
 	global := map[string]bool{"url": true, "key": true, "json": true}
 
-	for command, offered := range usageFlags() {
+	for command, offered := range usageFlags(t) {
 		var sets []*flag.FlagSet
-		observeFlags = func(fs *flag.FlagSet) { sets = append(sets, fs) }
+		h.observeFlags = func(fs *flag.FlagSet) { sets = append(sets, fs) }
 		h.run(ctx, false, strings.Fields(command)...)
-		observeFlags = nil
+		h.observeFlags = nil
 		if len(sets) == 0 {
 			t.Errorf("`tracepad %s` built no flag set; the usage text names a command "+
 				"that never reaches its flags", command)
@@ -210,8 +195,10 @@ func TestEveryFlagIsNamedInTheUsageText(t *testing.T) {
 }
 
 // usageFlags is the usage text read as what it is: a table of commands and the
-// flags each one offers.
-func usageFlags() map[string]map[string]bool {
+// flags each one offers. One parser for both directions of the parity, so that
+// they can never disagree about what the text says.
+func usageFlags(t *testing.T) map[string]map[string]bool {
+	t.Helper()
 	offered := map[string]map[string]bool{}
 	command := ""
 	for _, line := range strings.Split(Usage, "\n") {
@@ -229,6 +216,9 @@ func usageFlags() map[string]map[string]bool {
 		for _, flag := range usageFlag.FindAllStringSubmatch(line, -1) {
 			offered[command][flag[1]] = true
 		}
+	}
+	if command != "" {
+		t.Fatal("the usage text ended inside a command block; the parser did not walk it")
 	}
 	return offered
 }

@@ -50,27 +50,25 @@ type traceFilterFlags struct {
 	onlyErrors  bool
 }
 
-// register adds every filter, including the upper bound of a time range.
+// register adds the filters a listing takes: every one of them, the upper
+// bound of a time range included.
 func (f *traceFilterFlags) register(fs *flag.FlagSet) {
-	f.registerFilters(fs)
+	f.registerFollowing(fs)
 	fs.StringVar(&f.until, "until", "", "")
 }
 
-// registerFollowing is `register` without `--until`, for a command that
-// follows rather than lists.
+// registerFollowing adds the filters a *follow* takes, which is all of them
+// but `--until` — and it is where a new shared filter belongs, so that `tail`
+// keeps getting them.
 //
 // An upper bound on a tail is either nothing — the newest page is never past
 // it — or a silent end to the following, and neither is what somebody typing
-// it meant; the bound on a range of traces is `traces ls --until`. It was
-// registered here because the three commands share their filters so they
-// cannot drift apart, and the one thing they must differ by had no usage line
-// to disagree with. Now `tail --until` is an unknown flag, which is the answer
-// a reader can act on (INBOX, PR #9).
+// it meant; the bound on a range of traces is `traces ls --until`. It used to
+// be registered here with the rest because the three commands share their
+// filters so they cannot drift apart, and the one thing they must differ by
+// had no usage line to disagree with. Now `tail --until` is an unknown flag,
+// which is the answer a reader can act on (INBOX, PR #9).
 func (f *traceFilterFlags) registerFollowing(fs *flag.FlagSet) {
-	f.registerFilters(fs)
-}
-
-func (f *traceFilterFlags) registerFilters(fs *flag.FlagSet) {
 	fs.StringVar(&f.environment, "env", "", "")
 	fs.StringVar(&f.user, "user", "", "")
 	fs.StringVar(&f.session, "session", "", "")
