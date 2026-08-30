@@ -1,8 +1,11 @@
 package store
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -379,6 +382,101 @@ func wordEnd(words []indexedWord, at int) int {
 // is still a snippet under a row.
 func collapseSpace(text string) string {
 	return strings.TrimSpace(strings.Join(strings.FieldsFunc(text, unicode.IsSpace), " "))
+}
+
+// searchableField is what one field contributes to the index, and what the
+// snippet is later cut from: the same function on both sides, so that a window
+// can never be cut from a text the index never saw.
+//
+// The three payloads are JSON, and what is searched is the text inside them
+// rather than the text `json.Marshal` produced (spec 011 #14). Names and status
+// messages are already the text.
+func searchableField(field, text string) string {
+	switch field {
+	case FieldInput, FieldOutput, FieldMetadata:
+		return searchable(jsonLeaves(text))
+	}
+	return searchable(text)
+}
+
+// jsonFrame is one open container of the walk: an object alternates keys and
+// values, an array is values all the way down.
+type jsonFrame struct {
+	object bool
+	key    bool
+}
+
+// jsonLeaves is the text of a JSON payload: its scalar leaves — strings as
+// their text, numbers and booleans as their JSON text — in the order the
+// document holds them, one per line. Keys, brackets, quotes and `null` are not
+// text anybody said, and a search that matches them matches the envelope
+// instead of the message (spec 011 #14).
+//
+// A payload that does not parse is returned whole, which is what it was before
+// there was anything to parse: this store writes JSON, but the index is also
+// what a hand-written row or an older release left behind, and a payload it
+// cannot read is better searched crudely than not at all.
+//
+// The walk stops once it has the cap's worth of text (Decision 2 applies to
+// what is extracted), which is also what bounds the work on a payload of
+// megabytes: the leaves past the cap could never be searched.
+func jsonLeaves(text string) string {
+	decoder := json.NewDecoder(strings.NewReader(text))
+	decoder.UseNumber()
+
+	var (
+		out    strings.Builder
+		frames []jsonFrame
+		whole  bool // a complete top-level value has been read
+	)
+	write := func(leaf string) {
+		if leaf == "" {
+			return
+		}
+		if out.Len() > 0 {
+			out.WriteByte('\n')
+		}
+		out.WriteString(leaf)
+	}
+
+	for out.Len() < SearchIndexCap {
+		token, err := decoder.Token()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		// A syntax error, or a second value after the first: not the one
+		// JSON document a payload is.
+		if err != nil || whole {
+			return text
+		}
+
+		key := false
+		if top := len(frames) - 1; top >= 0 && frames[top].object {
+			key = frames[top].key
+			frames[top].key = !key
+		}
+		switch value := token.(type) {
+		case json.Delim:
+			switch value {
+			case '{':
+				frames = append(frames, jsonFrame{object: true, key: true})
+			case '[':
+				frames = append(frames, jsonFrame{})
+			default:
+				frames = frames[:len(frames)-1]
+			}
+		case string:
+			if !key {
+				write(value)
+			}
+		case json.Number:
+			write(value.String())
+		case bool:
+			write(strconv.FormatBool(value))
+		}
+		whole = len(frames) == 0
+	}
+	return out.String()
 }
 
 // searchable is what of a value goes into the index: its first SearchIndexCap

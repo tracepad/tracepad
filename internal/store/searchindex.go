@@ -88,14 +88,15 @@ type searchEntry struct{ field, body string }
 // undefined, and an observation has at most one entry per field, so the field
 // is a key and the position is not.
 //
-// A field carrying nothing gets no entry at all: an empty row in a full-text
-// index is a row that can never match.
+// A field with no text in it gets no entry at all — an empty row in a
+// full-text index is a row that can never match — and a payload of nothing but
+// structure (`{}`, `[null]`) is such a field once its leaves are taken.
 func insertEntries(db searchDB, projectID, traceID string, observationID any, entries []searchEntry) error {
 	bodies := make(map[string]string, len(entries))
 	values := make([]string, 0, len(entries))
 	args := make([]any, 0, 4*len(entries))
 	for _, entry := range entries {
-		body := searchable(entry.body)
+		body := searchableField(entry.field, entry.body)
 		if body == "" {
 			continue
 		}
@@ -259,9 +260,10 @@ type TraceMatch struct {
 //
 // `bm25` picks the entry; the snippet cannot come from FTS5 — a contentless
 // table has no text to cut it from — so the field's own text is read back and
-// cut here, one payload per matching row, as Decision 6 says. Only the indexed
-// prefix is searched, because that is the only part the index could have
-// matched.
+// cut here, one payload per matching row, as Decision 6 says. It is cut from
+// what `searchableField` makes of that field — the leaves of a payload, the
+// indexed prefix of either — because that is the only text the index could
+// have matched.
 func (s *Store) SearchMatches(projectID string, traceIDs []string, query *SearchQuery) (
 	map[string]*TraceMatch, error,
 ) {
@@ -314,7 +316,7 @@ func (s *Store) SearchMatches(projectID string, traceIDs []string, query *Search
 		if err != nil {
 			return nil, err
 		}
-		match.Snippet = Snippet(searchable(text), query)
+		match.Snippet = Snippet(searchableField(match.Field, text), query)
 	}
 	return found, nil
 }
@@ -363,10 +365,11 @@ func (s *Store) matchedText(projectID, traceID, observationID, field string) (st
 	return "", fmt.Errorf("unknown search field %q", field)
 }
 
-// rawPayload reads a payload as the text that was indexed: the stored JSON,
-// decompressed and not decoded. The index holds what `json.Marshal` produced,
-// so re-encoding a decoded value could differ from it by a space or by a key
-// order, and the snippet would then be cut from a text that was never searched.
+// rawPayload reads a payload back as the index read it: the stored JSON,
+// decompressed and not decoded, for `searchableField` to take the leaves of
+// exactly as it did on the way in. Decoding and re-encoding it here would risk
+// a text differing from the stored one by a space or by a key order, and the
+// snippet would then be cut from something that was never searched.
 func rawPayload(db searchDB, id sql.NullInt64) (string, error) {
 	if !id.Valid {
 		return "", nil
