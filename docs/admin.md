@@ -84,7 +84,7 @@ on stderr and exit code 1.
 | `GET` | `/api/v1/projects` | All with the token, its own with a key. `?include=deleted` (token only). |
 | `POST` | `/api/v1/projects` | Create; the secret is in the response and nowhere else. |
 | `GET` | `/api/v1/projects/{id}` | One project with its windows. |
-| `PATCH` | `/api/v1/projects/{id}` | `name` (token only), `retention_days`, `raw_retention_days`. |
+| `PATCH` | `/api/v1/projects/{id}` | `name` (token only), `retention_days`, `raw_retention_days`, `stats_retention_days`. |
 | `DELETE` | `/api/v1/projects/{id}` | Soft delete; `202` with the purge date. |
 | `POST` | `/api/v1/projects/{id}/restore` | Undo it inside the grace window. |
 | `GET` | `/api/v1/projects/{id}/keys` | Public keys and their creation dates. |

@@ -140,6 +140,12 @@ and a bucket that reported no cost has no cost point: the API refuses to
 fabricate rows and so does the screen. An empty window says so rather than
 drawing an empty frame.
 
+The numbers behind the charts come from an hourly rollup for closed hours and
+from the live rows for the hour in progress, which is why a month reads as
+fast as a day and why the charts keep answering about data retention has
+since deleted. The latency percentiles are histogram-based, accurate to a few
+percent — see [api.md](api.md#where-the-numbers-come-from).
+
 Neither screen has a live mode. Both re-read on a filter change and on the
 **Refresh** control; the Traces live toggle is the only poller in the app.
 
@@ -194,8 +200,11 @@ key is for (see [admin.md](admin.md)):
 - **Project** — its name and id. Renaming needs the admin token, because a
   project's name is the echo every destructive confirmation is typed against;
   the field says so and names `tracepad projects rename`.
-- **Retention** — both windows, with `null` spelled out: "keep forever" for
-  the queryable data, "follow the window above" for the raw bodies.
+- **Retention** — all three windows, with `null` spelled out: "keep forever"
+  for the queryable data, "follow the window above" for the raw bodies, and
+  "keep forever" again for the statistics history, which outlives the traces
+  it summarizes and so has a window of its own (see
+  [retention.md](retention.md#what-outlives-what)).
 - **API keys** — the public keys with their dates, minting, and revocation.
   A minted pair is shown **once**, in both connection formats, exactly as
   first run prints them; the secret is stored as a hash and the dialog says
