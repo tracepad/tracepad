@@ -1,6 +1,6 @@
 # Spec 012 — What the wire already carries: types, timings, releases, prompt links, provenance
 
-**Status:** 📝 DRAFT
+**Status:** ✅ SHIPPED
 **Sprint:** September 2026
 
 > The SDKs already send more than the model keeps. Time to first token, the
@@ -123,7 +123,8 @@ rendered as *(no release)* by the clients.
 
 `traces ls`, `traces last`, `traces tail`: `--release`, `--version`,
 `--type`, `--prompt name[@version]`. The listing table gets a `ttft` column
-after `latency`, blank when null. `traces get` prints, per observation, its
+after `latency`, `-` when null, like every empty cell of that table.
+`traces get` prints, per observation, its
 type (already printed) in the widened vocabulary, `ttft` when present and
 `prompt name@version` when present. `stats --group-by release`. Usage lines
 and the flag-parity test (spec 011, CLI contract) cover the new flags.
