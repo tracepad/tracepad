@@ -1,7 +1,7 @@
 <script lang="ts">
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import type { TraceRow } from '$lib/api/client.svelte';
-	import { ABSENT, cost, duration, timestamp } from '$lib/format';
+	import { ABSENT, cost, duration, timestamp, wait } from '$lib/format';
 	import { modified, selecting } from '$lib/peek';
 	import { highlight, searchTerms } from '$lib/search';
 
@@ -120,7 +120,7 @@
 					<td class="text-muted {cell}">{row.session_id ?? ABSENT}</td>
 					<td class="text-muted {numeric}">{cost(row.total_cost)}</td>
 					<td class="text-muted {numeric}">{duration(row.latency_ms)}</td>
-					<td class="text-muted {numeric}">{duration(row.ttft_ms)}</td>
+					<td class="text-muted {numeric}">{wait(row.ttft_ms)}</td>
 					<td class="px-3 py-1.5">
 						{#if row.error_count > 0}
 							<span

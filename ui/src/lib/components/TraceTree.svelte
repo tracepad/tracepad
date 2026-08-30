@@ -198,11 +198,14 @@
 			     accessible label. Ten kinds do not fit in three letters, and
 			     `RETR` / `GUAR` / `EVAL` stop being scannable at exactly the
 			     moment there are enough of them to be worth scanning
-			     (spec 012, Application contract). -->
-			<Icon
-				class="text-subtle size-3.5 shrink-0"
-				aria-label={typeLabel(row.observation.type)}
-			/>
+			     (spec 012, Application contract). The name is an SVG
+			     `<title>`, not a `title` attribute: on an SVG element the
+			     attribute names nothing and no browser draws a tooltip from
+			     it, which left ten unlabelled glyphs for anybody reading
+			     with a mouse (found in review of PR #19). -->
+			<Icon class="text-subtle size-3.5 shrink-0" aria-label={typeLabel(row.observation.type)}>
+				<title>{typeLabel(row.observation.type)}</title>
+			</Icon>
 
 			<span class="min-w-0 flex-1 truncate" title={row.observation.name ?? id}>
 				{row.observation.name ?? id}

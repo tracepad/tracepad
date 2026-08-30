@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ABSENT, bytes, cost, count, duration, elapsed, timestamp } from './format';
+import { ABSENT, bytes, cost, count, duration, elapsed, timestamp, wait } from './format';
 
 describe('duration', () => {
 	it('changes unit with magnitude', () => {
@@ -15,6 +15,28 @@ describe('duration', () => {
 		expect(duration(null)).toBe(ABSENT);
 		expect(duration(undefined)).toBe(ABSENT);
 		expect(duration(Number.NaN)).toBe(ABSENT);
+	});
+});
+
+describe('wait', () => {
+	it('reads like a duration', () => {
+		expect(wait(388)).toBe('388 ms');
+		expect(wait(1234)).toBe('1.23 s');
+	});
+
+	// The API stores a completion start that precedes its span as sent and
+	// documents the sign; a screen that renders it as `—` reports a
+	// disagreeing clock as a missing measurement, and the CLI, which prints
+	// the number, would disagree with the screen about the same row.
+	it('keeps the sign of a wait that ran backwards', () => {
+		expect(wait(-388)).toBe('-388 ms');
+		expect(wait(-1234)).toBe('-1.23 s');
+	});
+
+	it('renders a missing value as absent', () => {
+		expect(wait(null)).toBe(ABSENT);
+		expect(wait(undefined)).toBe(ABSENT);
+		expect(wait(Number.NaN)).toBe(ABSENT);
 	});
 });
 

@@ -53,7 +53,12 @@ test('the tree draws the kind of every step', async ({ page }) => {
 	// An icon per kind, each carrying its name for a reader and for a screen
 	// reader (spec 012, Application contract).
 	for (const kind of ['span', 'generation', 'tool', 'guardrail']) {
-		await expect(tree.getByLabel(kind)).toBeVisible();
+		const icon = tree.getByLabel(kind).first();
+		await expect(icon).toBeVisible();
+		// The name is an SVG `<title>` as well as an `aria-label`, because
+		// that is what draws the tooltip: ten glyphs and no visible label
+		// leave a mouse reader nothing to hover (found in review of PR #19).
+		await expect(icon.locator('title')).toHaveText(kind);
 	}
 });
 

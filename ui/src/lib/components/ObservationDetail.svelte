@@ -2,7 +2,7 @@
 	import FileText from '@lucide/svelte/icons/file-text';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import { ApiError, api, type Observation, type ObservationIO } from '$lib/api/client.svelte';
-	import { ABSENT, duration, elapsed, timestampPrecise } from '$lib/format';
+	import { ABSENT, duration, elapsed, timestampPrecise, wait } from '$lib/format';
 	import CopyButton from './CopyButton.svelte';
 	import JsonNode from './JsonNode.svelte';
 	import Payload from './Payload.svelte';
@@ -58,7 +58,7 @@
 		// block somebody reads line by line (spec 012, Application contract).
 		...(observation.ttft_ms == null
 			? []
-			: ([['TTFT', duration(observation.ttft_ms)]] as const)),
+			: ([['TTFT', wait(observation.ttft_ms)]] as const)),
 		['Level', observation.level ?? ABSENT],
 		['Model', observation.model ?? ABSENT]
 	] as const);

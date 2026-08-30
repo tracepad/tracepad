@@ -157,7 +157,8 @@ reader. There are ten kinds, which is more than a three-letter label can keep
 readable.
 
 The detail panel shows the observation's timings (including TTFT, when the
-client reported when its first token came back), level, model, usage and cost,
+client reported when its first token came back — negative if its clocks
+disagreed, shown as sent rather than hidden), level, model, usage and cost,
 then `input`, `output` and `metadata` as collapsible JSON with each payload's
 size beside its heading. A generation that ran a named prompt carries a badge
 saying which — `support-answer · v7` — that leads to the traces which ran it.
