@@ -33,7 +33,11 @@ prompts and completions it is the payloads and the raw batches that the file
 is made of. The read and memory figures were taken at that corpus's size too,
 and they move with it — `/api/v1/stats` aggregates on the fly with no rollup
 table, so a wider window costs more than a narrow one. Size all of it against
-your own traffic, and give it a retention window — see
+your own traffic, and give it a retention window — near the top of this
+envelope that is not optional, because the two ceilings are a stock and a
+flow, and at ~5 KB a trace the flow fills the stock in a matter of weeks.
+Nothing is deleted until you set one, which is a default for a small
+deployment rather than for this range: see
 [docs/retention.md](docs/retention.md).
 
 ## Sending traces
