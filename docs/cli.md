@@ -305,7 +305,10 @@ command stops with the preview on stderr and exit code 1, because a script that
 deletes a project by default is a script that deletes a project by accident.
 
 Commands that act on a project take `--project <id>`; with one reachable
-project, the credential answers that by itself. The commands marked as needing
+project, the credential answers that by itself. `projects show` also takes the
+id as a positional, which is the same argument under a second spelling — so
+passing both is a usage error rather than one of them quietly winning, and that
+holds when the two agree as well. The commands marked as needing
 the admin token in [admin.md](admin.md) take it as `--key` or
 `TRACEPAD_API_KEY`, since it rides in the same header as a project key.
 
