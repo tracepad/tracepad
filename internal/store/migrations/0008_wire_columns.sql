@@ -66,7 +66,11 @@ CREATE TABLE observations_new (
     cost_details          TEXT,
     provided_cost         INTEGER NOT NULL DEFAULT 0,
     prompt_name           TEXT,
-    prompt_version        INTEGER,
+    -- Versions count from one. The filter's grammar reads a version as a run
+    -- of digits (spec 012 #15), so a zero or negative one would be a value
+    -- the store holds and no `prompt=` string can ask for; the mapper refuses
+    -- it and this keeps every other writer honest.
+    prompt_version        INTEGER CHECK (prompt_version IS NULL OR prompt_version >= 1),
     input_id              INTEGER REFERENCES payloads(id),
     output_id             INTEGER REFERENCES payloads(id),
     metadata_id           INTEGER REFERENCES payloads(id),

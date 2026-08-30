@@ -2,6 +2,7 @@ package mapping_test
 
 import (
 	"math"
+	"strconv"
 	"testing"
 
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
@@ -250,6 +251,35 @@ func TestPromptLink(t *testing.T) {
 		}
 		if observation.Metadata["langfuse.observation.prompt.version"] != "latest" {
 			t.Errorf("metadata = %v, want the unusable version preserved", observation.Metadata)
+		}
+	})
+
+	// Versions count from one. `prompt=` reads a version as a run of digits
+	// (spec 012 #15), so a zero or negative one would sit in the column with
+	// no filter string able to ask for it — and the panel's badge would link
+	// at an empty listing (found in review of PR #19).
+	t.Run("a version below one", func(t *testing.T) {
+		for _, raw := range []int64{0, -1} {
+			t.Run(strconv.FormatInt(raw, 10), func(t *testing.T) {
+				span := otlptest.ProbeSpan("langfuse.observation.prompt.name", "svc")
+				span.Attributes = append(span.Attributes, &commonpb.KeyValue{
+					Key: "langfuse.observation.prompt.version", Value: intValue(raw),
+				})
+				observation := mapping.Map(otlptest.Export(span)).Observations[0]
+
+				if observation.PromptName != "svc" {
+					t.Errorf("prompt_name = %q, want the name recorded anyway",
+						observation.PromptName)
+				}
+				if observation.PromptVersion != nil {
+					t.Errorf("prompt_version = %d, want none: a version counts from one",
+						*observation.PromptVersion)
+				}
+				if observation.Metadata["langfuse.observation.prompt.version"] != raw {
+					t.Errorf("metadata = %v, want the unusable version preserved",
+						observation.Metadata)
+				}
+			})
 		}
 	})
 

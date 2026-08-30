@@ -87,7 +87,7 @@ span's own.
 | trace metadata | `langfuse.trace.metadata` (JSON object) and `langfuse.trace.metadata.*` |
 | observation type | `langfuse.observation.type` · a model attribute ⇒ `generation` · a zero-duration childless span ⇒ `event` · otherwise `span` |
 | completion start | `langfuse.observation.completion_start_time` (RFC 3339, or whole nanoseconds) |
-| prompt | `langfuse.observation.prompt.name` and `langfuse.observation.prompt.version` |
+| prompt | `langfuse.observation.prompt.name` and `langfuse.observation.prompt.version` (a whole number from 1; anything else stays in metadata and the name is still recorded) |
 | model | `langfuse.observation.model.name` · `gen_ai.request.model` · `gen_ai.response.model` · `llm.model_name` · `model` |
 | model parameters | `langfuse.observation.model.parameters` (JSON object) · every `gen_ai.request.*` except the model |
 | input | `langfuse.observation.input` · `gen_ai.input.messages` · `gen_ai.prompt` (including the flattened `gen_ai.prompt.0.content` form) |

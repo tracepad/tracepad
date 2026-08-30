@@ -515,6 +515,12 @@ func parseInstant(raw any) (int64, bool) {
 // and the version are independent: a version that is not an integer stays in
 // metadata and the name is still recorded, because "which prompt" is the
 // question the filter answers and half an answer beats none (spec 012 #5).
+//
+// A version has to count from one. `prompt=` reads a version as a run of
+// digits (spec 012 #15), so a zero or negative one would be a value the store
+// holds and no filter string can ask for — the interface would build a badge
+// linking at an empty listing. It stays in metadata like every other shape
+// this cannot use (found in review of PR #19).
 func mapPrompt(a *attrs) (string, *int64) {
 	name, ok := a.firstString(lfObsPromptName)
 	if !ok {
@@ -525,7 +531,7 @@ func mapPrompt(a *attrs) (string, *int64) {
 		return name, nil
 	}
 	version, integral := asInteger(raw)
-	if !integral {
+	if !integral || version < 1 {
 		return name, nil
 	}
 	a.claim(lfObsPromptVersion)

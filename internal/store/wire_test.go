@@ -522,6 +522,37 @@ func TestObservationTypeCheck(t *testing.T) {
 	}
 }
 
+// Prompt versions count from one, and the column says so rather than trusting
+// the mapper to be the only writer. A version below one is one no `prompt=`
+// string can ask for, since the filter reads a version as a run of digits
+// (spec 012 #15, found in review of PR #19).
+func TestPromptVersionCheck(t *testing.T) {
+	s, project := readStore(t)
+	if _, err := s.db.Exec(
+		`INSERT INTO traces (project_id, id, ingested_at) VALUES (?, ?, 1)`,
+		project.ID, hexTrace(71)); err != nil {
+		t.Fatal(err)
+	}
+	insert := func(id string, version any) error {
+		_, err := s.db.Exec(
+			`INSERT INTO observations (project_id, trace_id, id, type, prompt_name, prompt_version)
+			 VALUES (?, ?, ?, 'generation', 'svc', ?)`,
+			project.ID, hexTrace(71), id, version)
+		return err
+	}
+	if err := insert(hexSpan(710), 1); err != nil {
+		t.Errorf("the column refused version 1: %v", err)
+	}
+	if err := insert(hexSpan(711), nil); err != nil {
+		t.Errorf("the column refused an absent version: %v", err)
+	}
+	for _, version := range []int64{0, -1} {
+		if err := insert(hexSpan(712), version); err == nil {
+			t.Errorf("version %d was stored; nothing can filter for it", version)
+		}
+	}
+}
+
 // openAtSchemas builds a database as an earlier release left it: the named
 // migrations applied and recorded, and nothing after them.
 func openAtSchemas(t *testing.T, names ...string) string {
