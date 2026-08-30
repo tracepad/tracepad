@@ -229,8 +229,8 @@ and out of shell quoting:
 does not already set them — the file wins, so a script that sets both is never
 silently overruled.
 
-`ls` pages like every other listing: `--limit` (1–500, default 50) and
-`--cursor`, with the last line printing the command that continues the walk.
+`ls` pages: `--limit` (1–500, default 50) and `--cursor`, with the last line
+printing the command that continues the walk.
 
 ```
 more: --cursor c3VwcG9ydA
