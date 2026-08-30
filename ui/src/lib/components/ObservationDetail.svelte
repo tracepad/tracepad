@@ -1,7 +1,8 @@
 <script lang="ts">
+	import FileText from '@lucide/svelte/icons/file-text';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import { ApiError, api, type Observation, type ObservationIO } from '$lib/api/client.svelte';
-	import { ABSENT, duration, elapsed, timestampPrecise } from '$lib/format';
+	import { ABSENT, duration, elapsed, timestampPrecise, wait } from '$lib/format';
 	import CopyButton from './CopyButton.svelte';
 	import JsonNode from './JsonNode.svelte';
 	import Payload from './Payload.svelte';
@@ -52,9 +53,28 @@
 		['Started', timestampPrecise(observation.start_time)],
 		['Ended', timestampPrecise(observation.end_time)],
 		['Duration', duration(ms)],
+		// Only when the client reported a completion start: a row saying
+		// "TTFT —" on every span that is not a generation is noise in the one
+		// block somebody reads line by line (spec 012, Application contract).
+		...(observation.ttft_ms == null
+			? []
+			: ([['TTFT', wait(observation.ttft_ms)]] as const)),
 		['Level', observation.level ?? ABSENT],
 		['Model', observation.model ?? ABSENT]
 	] as const);
+
+	/**
+	 * Where the prompt badge leads: the listing filtered by this prompt, at
+	 * this version when there is one. It resolves against no registry — the
+	 * store may not manage this prompt at all — and the filtered listing needs
+	 * none (spec 012 #5).
+	 */
+	const promptHref = $derived.by(() => {
+		const prompt = observation.prompt;
+		if (!prompt) return null;
+		const label = prompt.version == null ? prompt.name : `${prompt.name}@${prompt.version}`;
+		return `/traces?prompt=${encodeURIComponent(label)}`;
+	});
 </script>
 
 <div class="flex min-h-0 flex-1 flex-col overflow-y-auto">
@@ -68,6 +88,26 @@
 				</p>
 			</div>
 		</div>
+		{#if observation.prompt && promptHref}
+			<!-- The prompt this ran, and a way to ask what else ran it. A badge
+			     rather than a row in the timings block: it is the one thing in
+			     the panel that leads somewhere. -->
+			<p class="mt-2">
+				<a
+					href={promptHref}
+					class="border-border bg-surface text-muted hover:bg-raised hover:text-fg
+						inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs
+						transition-colors duration-100"
+					title="Traces that ran this prompt"
+				>
+					<FileText class="size-3.5 shrink-0" />
+					<span class="truncate">{observation.prompt.name}</span>
+					{#if observation.prompt.version != null}
+						<span class="text-subtle tabular-nums">v{observation.prompt.version}</span>
+					{/if}
+				</a>
+			</p>
+		{/if}
 		{#if failed}
 			<p
 				class="text-danger bg-danger-soft mt-2 flex items-start gap-1.5 rounded-md px-2 py-1.5"
@@ -102,9 +142,10 @@
 		</p>
 	{/if}
 
-	{#each [['Input', 'input'], ['Output', 'output'], ['Metadata', 'metadata']] as const as [label, key] (key)}
+	{#each [['Input', 'input', observation.input_bytes], ['Output', 'output', observation.output_bytes], ['Metadata', 'metadata', null]] as const as [label, key, size] (key)}
 		<Payload
 			{label}
+			{size}
 			value={payload(key)}
 			{refused}
 			loaded={full !== null}

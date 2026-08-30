@@ -52,3 +52,15 @@ export const LARGE_PAYLOAD_TRACE = '0071122334455667788990aabbccddee';
 export const LARGE_PAYLOAD_OBSERVATION = '1112131415161719';
 /** The fixture with two failing observations under a healthy root. */
 export const FAILING_TRACE = 'dd44ee55ff6677008899001122aabb33';
+
+/**
+ * The fixture that carries what the wire already sends (spec 012): a release,
+ * a tool call, and a generation with a completion start and a prompt link.
+ */
+export const WIRE_TRACE = 'ff6677008899001122aabb33cc44dd55';
+/** Its generation — prompt `support-answer@7`, first token at +388 ms. */
+export const WIRE_GENERATION = 'c1c2c3c4c5c6c7c8';
+/** Its tool call, which the `type=tool` filter finds the trace by. */
+export const WIRE_TOOL = 'd1d2d3d4d5d6d7d8';
+/** Its guardrail — prompt `team@acme/answer`, an `@` inside a name and no version. */
+export const WIRE_GUARDRAIL = 'e1e2e3e4e5e6e7e8';

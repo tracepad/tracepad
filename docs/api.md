@@ -71,10 +71,13 @@ curl -H "Authorization: Bearer tp-sk-…" \
       "user_id": "user-4821",
       "session_id": "session-77",
       "environment": "production",
+      "release": "2026.8.30",
+      "version": "support-v9",
       "tags": ["beta", "support"],
       "timestamp": "2026-09-01T10:00:00Z",
       "total_cost": 0.001,
       "latency_ms": 820,
+      "ttft_ms": 388,
       "error_count": 1,
       "observation_count": 7
     }
@@ -85,6 +88,11 @@ curl -H "Authorization: Bearer tp-sk-…" \
 
 Rows carry the aggregate columns and never a payload: a listing is for
 choosing what to fetch.
+
+`release` and `version` are what the deployment called itself and what the
+trace's own logic called itself; `ttft_ms` is the wait before the first token
+— the earliest completion start among the trace's observations, minus when the
+trace began. Each is absent when nothing reported it.
 
 ### Filters
 
@@ -97,6 +105,9 @@ choosing what to fetch.
 | `status` | `error` (at least one failed observation) or `ok`. |
 | `min_cost` | Traces whose total cost is at least this. A trace whose client provided no cost has none and never matches. |
 | `q` | Full-text search over what the observations carried. See [Search](#search). |
+| `release`, `version` | Exact match on the deployment, and on the version of the trace's own logic. |
+| `type` | Traces with at least one observation of this kind — one of `span`, `generation`, `event`, `agent`, `tool`, `chain`, `retriever`, `guardrail`, `evaluator`, `embedding`. Exact: `generation` does not match `embedding`. Anything else is a `400`. |
+| `prompt` | `name`, or `name@version`: traces with at least one observation that ran this prompt, at any version or at that one. A version is a **run of digits after the last `@`, with a name in front of it**; every other string is a name, `@` included — `@acme/support`, `team@acme/answer`, `name@latest` and `svc@-1` all filter as names. Labels are not versions: `name@latest` matches a prompt literally called that, and otherwise returns nothing. |
 | `fields` | Comma-separated subset of the row fields. |
 | `limit` | 1–500, default 50. |
 | `cursor` | The `next_cursor` or `prev_cursor` of a previous page. |
@@ -288,11 +299,16 @@ tree**: children inside their parents, siblings ordered by start time.
           "parent_observation_id": "1a2b3c4d5e6f7a8b",
           "type": "generation",
           "name": "chat-completion",
+          "completion_start_time": "2026-09-01T10:00:00.428Z",
+          "ttft_ms": 388,
           "model": "claude-sonnet-5",
           "model_parameters": {"temperature": 0.2},
           "level": "DEFAULT",
           "usage": {"input": 128, "output": 41, "total": 169},
-          "cost_details": {"input": 0.00038, "output": 0.00062}
+          "cost_details": {"input": 0.00038, "output": 0.00062},
+          "prompt": {"name": "support-answer", "version": 7},
+          "input_bytes": 12480,
+          "output_bytes": 3011
         }
       ]
     }
@@ -303,6 +319,14 @@ tree**: children inside their parents, siblings ordered by start time.
 An observation whose parent has not arrived yet renders at the root with its
 `parent_observation_id` intact — a trace still being written looks incomplete,
 not empty. `children` is absent for a leaf.
+
+`prompt` is the prompt your client said this observation ran, recorded as sent
+and resolved against no registry: this store may not manage that prompt at
+all, and a label pointing at nothing is still a label. Its `version` is null
+when the client named a prompt without a whole-number version.
+`input_bytes` and `output_bytes` are the uncompressed payload sizes — present
+whether or not `?expand=io` inlined the payloads themselves, because they are
+what you decide with before asking for the rest.
 
 ### `?expand=io`
 
@@ -443,11 +467,15 @@ curl … "http://localhost:4318/api/v1/stats?group_by=day&from=2026-09-01T00:00:
 }
 ```
 
-`group_by` is `hour`, `day`, `model` or `environment` (default `day`), and
-`unit` says what a bucket counts. Grouping by hour, day or environment counts
-**traces**; grouping by model counts **observations**, because a trace has no
-model. The two counts are not comparable, which is why the response says which
-one you are looking at.
+`group_by` is `hour`, `day`, `model`, `environment` or `release` (default
+`day`), and `unit` says what a bucket counts. Grouping by hour, day,
+environment or release counts **traces**; grouping by model counts
+**observations**, because a trace has no model. The two counts are not
+comparable, which is why the response says which one you are looking at.
+
+Grouped by release, the traces that named none fall in the bucket whose `key`
+is the empty string — that is a group, not a gap, and dropping it would make
+the numbers stop adding up.
 
 Percentiles are exact — nearest rank over the real samples, computed on the
 fly. `total_cost` is summed only over rows whose client provided a cost and is

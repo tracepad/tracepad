@@ -253,6 +253,9 @@
 			{#if drilled}
 				{#if peekedTrace}
 					<span class="hidden font-mono sm:inline">{timestamp(peekedTrace.timestamp)}</span>
+					{#if peekedTrace.release}
+						<span class="hidden truncate md:inline" title="Release">{peekedTrace.release}</span>
+					{/if}
 					<span class="hidden tabular-nums md:inline">{duration(peekedTrace.latency_ms)}</span>
 					<span class="hidden tabular-nums md:inline">{cost(peekedTrace.total_cost)}</span>
 				{/if}

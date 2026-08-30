@@ -27,6 +27,20 @@ export function duration(ms: number | null | undefined): string {
 }
 
 /**
+ * A wait — time to first token — formatted like a duration but keeping its
+ * sign. `duration` renders a negative as absent, and it is right to: a
+ * negative latency is a corrupt row. A negative TTFT is not. The client said
+ * its first token came back before its span began, the API stores that as
+ * sent and documents the sign, and a screen that renders it as `—` reports a
+ * disagreeing clock as a missing measurement (spec 012 edge cases, found in
+ * review of PR #19).
+ */
+export function wait(ms: number | null | undefined): string {
+	if (ms == null || !Number.isFinite(ms)) return ABSENT;
+	return ms < 0 ? `-${duration(-ms)}` : duration(ms);
+}
+
+/**
  * Costs are compared across orders of magnitude — a cent and a hundredth of a
  * cent sit in the same column — so small amounts keep the digits that
  * distinguish them instead of rounding to `$0.00`.

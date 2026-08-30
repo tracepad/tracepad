@@ -174,6 +174,10 @@
           {"name": "min_cost", "in": "query", "schema": {"type": "number", "minimum": 0},
             "description": "Keeps traces whose total cost is at least this much. A trace whose client provided no cost has none and never matches."},
           {"$ref": "#/components/parameters/Search"},
+          {"$ref": "#/components/parameters/Release"},
+          {"$ref": "#/components/parameters/Version"},
+          {"$ref": "#/components/parameters/ObservationType"},
+          {"$ref": "#/components/parameters/Prompt"},
           {"name": "fields", "in": "query", "schema": {"type": "string"},
             "description": "Comma-separated subset of the row fields. An unknown name is a 400."},
           {"$ref": "#/components/parameters/Limit"},
@@ -215,6 +219,10 @@
           {"name": "status", "in": "query", "schema": {"type": "string", "enum": ["error", "ok"]}},
           {"name": "min_cost", "in": "query", "schema": {"type": "number", "minimum": 0}},
           {"$ref": "#/components/parameters/Search"},
+          {"$ref": "#/components/parameters/Release"},
+          {"$ref": "#/components/parameters/Version"},
+          {"$ref": "#/components/parameters/ObservationType"},
+          {"$ref": "#/components/parameters/Prompt"},
           {"$ref": "#/components/parameters/Expand"},
           {"$ref": "#/components/parameters/Budget"}
         ],
@@ -352,14 +360,14 @@
       "get": {
         "tags": ["stats"],
         "summary": "Counts, errors, cost and latency percentiles per bucket",
-        "description": "Computed on the fly, with exact percentiles. `unit` says what a bucket counts: grouping by hour, day or environment counts traces, and grouping by model counts observations, because a trace has no model. An empty range answers with no buckets rather than with fabricated zero rows.",
+        "description": "Computed on the fly, with exact percentiles. `unit` says what a bucket counts: grouping by hour, day, environment or release counts traces, and grouping by model counts observations, because a trace has no model. Grouped by release, a trace that named none falls in the bucket with the empty key. An empty range answers with no buckets rather than with fabricated zero rows.",
         "operationId": "stats",
         "parameters": [
           {"$ref": "#/components/parameters/From"},
           {"$ref": "#/components/parameters/To"},
           {"$ref": "#/components/parameters/Environment"},
           {"name": "group_by", "in": "query",
-            "schema": {"type": "string", "enum": ["hour", "day", "model", "environment"], "default": "day"}}
+            "schema": {"type": "string", "enum": ["hour", "day", "model", "environment", "release"], "default": "day"}}
         ],
         "responses": {
           "200": {"description": "The buckets", "content": {"application/json": {"schema": {
@@ -856,6 +864,15 @@
         "description": "Adds `total` and `total_capped`: how many rows the filters match, counted up to 1000. Off by default, because the count changes with the filters and not with the page"},
       "Search": {"name": "q", "in": "query", "schema": {"type": "string", "maxLength": 512},
         "description": "Full-text search over one field of one observation — input, output, metadata, name or status message — or over the trace name. Words (all must occur), `\"quoted phrases\"`, `prefix*`. Words, not substrings: `error` does not find `errors`, `err*` finds both. Case and diacritics are folded, identifiers split on punctuation, and only the first 64 KiB of each payload is indexed. A `q` with no word in it is a 400"},
+      "Release": {"name": "release", "in": "query", "schema": {"type": "string"},
+        "description": "Exact match on the deployment the trace ran in, from `langfuse.release` or the resource's `service.version`"},
+      "Version": {"name": "version", "in": "query", "schema": {"type": "string"},
+        "description": "Exact match on the version of the trace's own logic, from `langfuse.version`"},
+      "ObservationType": {"name": "type", "in": "query",
+        "schema": {"type": "string", "enum": ["span", "generation", "event", "agent", "tool", "chain", "retriever", "guardrail", "evaluator", "embedding"]},
+        "description": "Keeps traces with at least one observation of this kind. Exact: `generation` does not match `embedding`. A value outside the list is a 400"},
+      "Prompt": {"name": "prompt", "in": "query", "schema": {"type": "string"},
+        "description": "`name` or `name@version`: keeps traces with at least one observation that ran this prompt, at any version or at that one. A version is a run of digits after the last `@` with a name in front of it; every other string is a name, `@` included — `@acme/support`, `team@acme/answer`, `name@latest` and `svc@-1` all filter as names. A label is not a version"},
       "Expand": {"name": "expand", "in": "query", "schema": {"type": "string", "enum": ["io"]},
         "description": "`io` inlines each observation's input, output and metadata, each cut to an equal share of the remaining budget with a truncation marker naming the rest"},
       "Budget": {"name": "budget", "in": "query", "schema": {"type": "integer", "minimum": 4096, "maximum": 5242880},
@@ -897,10 +914,13 @@
           "user_id": {"type": "string"},
           "session_id": {"type": "string"},
           "environment": {"type": "string"},
+          "release": {"type": "string", "description": "The deployment the trace ran in, from `langfuse.release` or the resource's `service.version`"},
+          "version": {"type": "string", "description": "The version of the trace's own logic, from `langfuse.version`"},
           "tags": {"type": "array", "items": {"type": "string"}},
           "timestamp": {"type": "string", "format": "date-time", "description": "When the earliest observation of the trace started"},
           "total_cost": {"type": "number", "description": "Summed over the observations whose client provided cost; absent when none did"},
           "latency_ms": {"type": "integer"},
+          "ttft_ms": {"type": "integer", "description": "The wait before the first token: the earliest completion start among the trace's observations, minus the trace's own start. Absent when no observation carried one, and negative when a client's completion start precedes its span"},
           "error_count": {"type": "integer"},
           "observation_count": {"type": "integer"},
           "match": {"$ref": "#/components/schemas/Match"}
@@ -953,22 +973,38 @@
           "id": {"type": "string", "pattern": "^[0-9a-f]{16}$"},
           "parent_observation_id": {"type": "string", "pattern": "^[0-9a-f]{16}$",
             "description": "The observation this one ran under, whenever it named one. Nested children carry it too; an observation whose parent is not in this trace renders at the root and still carries it."},
-          "type": {"type": "string", "enum": ["span", "generation", "event"]},
+          "type": {"type": "string", "enum": ["span", "generation", "event", "agent", "tool", "chain", "retriever", "guardrail", "evaluator", "embedding"],
+            "description": "What kind of step this was. A span whose client named no type is classified: a model attribute makes it a generation, a zero-duration childless span an event, anything else a span"},
           "name": {"type": "string"},
           "start_time": {"type": "string", "format": "date-time"},
           "end_time": {"type": "string", "format": "date-time"},
+          "completion_start_time": {"type": "string", "format": "date-time",
+            "description": "When the first token came back, as the client reported it — stored uncorrected, so it may precede `start_time`"},
+          "ttft_ms": {"type": "integer", "description": "`completion_start_time` minus `start_time`; absent when either is missing"},
           "model": {"type": "string"},
           "model_parameters": {"type": "object"},
           "level": {"type": "string", "enum": ["DEBUG", "DEFAULT", "WARNING", "ERROR"]},
           "status_message": {"type": "string"},
           "usage": {"type": "object"},
           "cost_details": {"type": "object"},
+          "prompt": {"$ref": "#/components/schemas/PromptLink"},
+          "input_bytes": {"type": "integer", "description": "The uncompressed size of `input`, present whether or not the payload itself is inlined"},
+          "output_bytes": {"type": "integer", "description": "The uncompressed size of `output`"},
           "input": {"oneOf": [{"$ref": "#/components/schemas/Truncation"}, {"description": "Whatever the client logged"}]},
           "output": {"oneOf": [{"$ref": "#/components/schemas/Truncation"}, {"description": "Whatever the client logged"}]},
           "metadata": {"oneOf": [{"$ref": "#/components/schemas/Truncation"}, {"type": "object"}]},
           "children": {"type": "array", "items": {"$ref": "#/components/schemas/Observation"}}
         },
         "required": ["id", "type", "level"]
+      },
+      "PromptLink": {
+        "type": "object",
+        "description": "The prompt the client said this observation ran. Recorded as sent and resolved against no registry — the store may not manage this prompt at all, and a label that points at nothing is still a label. Absent when the client named none.",
+        "properties": {
+          "name": {"type": "string"},
+          "version": {"type": ["integer", "null"], "description": "Null when the client named a prompt without a whole-number version"}
+        },
+        "required": ["name", "version"]
       },
       "Expansion": {
         "type": "object",

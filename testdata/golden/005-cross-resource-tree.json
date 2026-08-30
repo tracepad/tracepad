@@ -21,7 +21,9 @@
       "end_time": 1787738400900000000,
       "level": "DEFAULT",
       "metadata": {
-        "service.name": "agent-api"
+        "resource.service.name": "agent-api",
+        "scope.name": "langfuse-sdk",
+        "scope.version": "3.6.1"
       }
     },
     {
@@ -35,7 +37,9 @@
       "level": "WARNING",
       "status_message": "no results, retrying",
       "metadata": {
-        "service.name": "agent-worker"
+        "resource.service.name": "agent-worker",
+        "scope.name": "agent-tools",
+        "scope.version": "1.4.0"
       }
     },
     {
@@ -58,7 +62,9 @@
             "time": 1787738400000500000
           }
         ],
-        "service.name": "agent-worker"
+        "resource.service.name": "agent-worker",
+        "scope.name": "agent-tools",
+        "scope.version": "1.4.0"
       }
     },
     {
@@ -71,7 +77,9 @@
       "end_time": 1787738400310000000,
       "level": "DEFAULT",
       "metadata": {
-        "service.name": "agent-worker"
+        "resource.service.name": "agent-worker",
+        "scope.name": "agent-tools",
+        "scope.version": "1.4.0"
       }
     },
     {
@@ -94,7 +102,9 @@
             "time": 1787738400000500000
           }
         ],
-        "service.name": "agent-worker"
+        "resource.service.name": "agent-worker",
+        "scope.name": "agent-tools",
+        "scope.version": "1.4.0"
       }
     }
   ]

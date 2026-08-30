@@ -11,21 +11,22 @@
     {
       "trace_id": "ee55ff6677008899001122aabb33cc44",
       "id": "7172737475767778",
-      "type": "span",
+      "type": "agent",
       "name": "research-agent",
       "start_time": 1787738400000000000,
       "end_time": 1787738401200000000,
       "level": "DEFAULT",
       "metadata": {
-        "langfuse.observation.type": "agent",
-        "service.name": "research"
+        "resource.service.name": "research",
+        "scope.name": "langfuse-sdk",
+        "scope.version": "3.6.1"
       }
     },
     {
       "trace_id": "ee55ff6677008899001122aabb33cc44",
       "id": "8182838485868788",
       "parent_observation_id": "7172737475767778",
-      "type": "span",
+      "type": "tool",
       "name": "web-search",
       "start_time": 1787738400010000000,
       "end_time": 1787738400200000000,
@@ -34,15 +35,16 @@
         "query": "otlp partial success"
       },
       "metadata": {
-        "langfuse.observation.type": "tool",
-        "service.name": "research"
+        "resource.service.name": "research",
+        "scope.name": "langfuse-sdk",
+        "scope.version": "3.6.1"
       }
     },
     {
       "trace_id": "ee55ff6677008899001122aabb33cc44",
       "id": "9192939495969798",
       "parent_observation_id": "7172737475767778",
-      "type": "generation",
+      "type": "embedding",
       "name": "embed-query",
       "start_time": 1787738400210000000,
       "end_time": 1787738400260000000,
@@ -53,8 +55,9 @@
         "total": 18
       },
       "metadata": {
-        "langfuse.observation.type": "embedding",
-        "service.name": "research"
+        "resource.service.name": "research",
+        "scope.name": "langfuse-sdk",
+        "scope.version": "3.6.1"
       }
     },
     {
@@ -68,7 +71,9 @@
       "level": "DEFAULT",
       "metadata": {
         "langfuse.observation.type": "workflow-step",
-        "service.name": "research"
+        "resource.service.name": "research",
+        "scope.name": "langfuse-sdk",
+        "scope.version": "3.6.1"
       }
     }
   ]

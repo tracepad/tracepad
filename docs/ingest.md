@@ -81,9 +81,13 @@ span's own.
 | user | `langfuse.user.id` · `user.id` |
 | session | `langfuse.session.id` · `session.id` · `gen_ai.conversation.id` |
 | environment | `langfuse.environment` · `deployment.environment.name` · `deployment.environment` · `default` |
+| release | `langfuse.release` · the resource's `service.version` |
+| version | `langfuse.version` |
 | tags | `langfuse.trace.tags` (JSON array, comma-separated list, or single value) |
 | trace metadata | `langfuse.trace.metadata` (JSON object) and `langfuse.trace.metadata.*` |
 | observation type | `langfuse.observation.type` · a model attribute ⇒ `generation` · a zero-duration childless span ⇒ `event` · otherwise `span` |
+| completion start | `langfuse.observation.completion_start_time` (RFC 3339, or whole nanoseconds) |
+| prompt | `langfuse.observation.prompt.name` and `langfuse.observation.prompt.version` (a whole number from 1; anything else stays in metadata and the name is still recorded) |
 | model | `langfuse.observation.model.name` · `gen_ai.request.model` · `gen_ai.response.model` · `llm.model_name` · `model` |
 | model parameters | `langfuse.observation.model.parameters` (JSON object) · every `gen_ai.request.*` except the model |
 | input | `langfuse.observation.input` · `gen_ai.input.messages` · `gen_ai.prompt` (including the flattened `gen_ai.prompt.0.content` form) |
@@ -92,7 +96,7 @@ span's own.
 | cost | `langfuse.observation.cost_details` (JSON object) · `gen_ai.usage.cost` |
 | level | `langfuse.observation.level` · span status `ERROR` ⇒ `ERROR` · otherwise `DEFAULT` |
 | status message | `langfuse.observation.status_message` · the span's status message |
-| observation metadata | `langfuse.observation.metadata` and `langfuse.observation.metadata.*`, **plus every attribute no rule above consumed**, plus the span's events under `events` |
+| observation metadata | `langfuse.observation.metadata` and `langfuse.observation.metadata.*`, **plus every attribute no rule above consumed**, plus the span's events under `events`, plus the instrumentation scope's own name and version under `scope.name` and `scope.version` |
 
 Two consequences worth knowing:
 
@@ -113,10 +117,58 @@ Two consequences worth knowing:
   when the exporter never set an ERROR span status. An explicit
   `langfuse.observation.level` still wins. Span links are not mapped.
 
-Langfuse observation types beyond `span`/`generation`/`event` (`agent`,
-`tool`, `chain`, `retriever`, `guardrail`, `evaluator`, `embedding`) are
-stored as the closest of the three, with the original spelling kept in the
-observation's metadata.
+### The kind of each step
+
+`type` holds the whole Langfuse vocabulary, stored as your client sent it:
+`span`, `generation`, `event`, `agent`, `tool`, `chain`, `retriever`,
+`guardrail`, `evaluator`, `embedding`. A spelling outside those ten is kept in
+the observation's metadata and the span is classified by the heuristics above.
+
+The trace listing can be asked for the traces that contain one of them
+(`?type=tool`). The match is exact: `generation` does not find an `embedding`,
+even though the cost and model breakdowns count both as calls to a model.
+
+### Where an attribute came from
+
+The three levels of an OTLP export — Resource, InstrumentationScope and the
+span — are one namespace to the priority chains above: `deployment.environment`
+sets the environment whether it sits on the resource or on the span.
+
+One name is the exception. `service.version` is read from the Resource only,
+because on a span it is the version of whatever that span talked to rather
+than of the service that produced the trace; a span carrying one keeps it in
+metadata and does not name the release.
+
+What no rule claims keeps its origin instead of being merged:
+
+| It arrived on | It lands in metadata as |
+|---|---|
+| the span | `<key>` |
+| the InstrumentationScope | `scope.<key>` |
+| the Resource | `resource.<key>` |
+
+So a `service.name` on the resource and a `service.name` on the span are two
+entries — `resource.service.name` and `service.name` — rather than one
+overwriting the other. The scope's own name and version, which are not
+attributes in OTLP at all, are `scope.name` and `scope.version`: they are what
+says which SDK sent the span.
+
+### Time to first token
+
+`langfuse.observation.completion_start_time` is when the first token came
+back. Tracepad accepts it as an RFC 3339 instant or as whole nanoseconds, and
+it accepts the doubly-quoted form (`"\"2026-08-30T10:15:03.412Z\""`) some SDK
+versions put on the wire. Anything else stays in metadata.
+
+From it come two numbers: the observation's own `ttft_ms`, and the trace's,
+which is the earliest completion start among its observations minus the moment
+the trace started. Both are stored as sent — no clamping and no clock
+correction — so a client whose completion start precedes its own span produces
+a negative TTFT rather than a silently corrected one.
+
+The trace's is null when no observation carried a completion start, and also
+when none of them said when it started: a wait needs a moment to be measured
+from, and a trace like that has no latency either.
 
 ## Configuration
 

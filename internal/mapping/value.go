@@ -8,29 +8,80 @@ import (
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
 )
 
+// origin is the level an attribute arrived at. The mapping chains never see
+// it — `deployment.environment` on the Resource sets the environment exactly
+// as it would on the span — but what no rule claims keeps it, as the prefix
+// it lands in metadata under (spec 012 #7).
+type origin int
+
+// The three levels of an OTLP export, in the order they are merged.
+const (
+	originResource origin = iota
+	originScope
+	originSpan
+)
+
+// levels lists them in merge order, which is also the order rest() writes
+// them: the span level goes last, so an attribute literally named
+// `resource.x` on the span beats a resource attribute named `x`.
+var levels = []origin{originResource, originScope, originSpan}
+
+// prefix is what an unclaimed attribute of this origin is filed under in
+// metadata. Span attributes keep their bare names — that is what every
+// metadata key looked like before spec 012, and the span is the level a
+// reader means when they say "this attribute".
+//
+// The spelling is ours, not the reference platform's `resourceAttributes.`:
+// this is a metadata contract of our own (spec 012 #7).
+func (o origin) prefix() string {
+	switch o {
+	case originResource:
+		return "resource."
+	case originScope:
+		return "scope."
+	}
+	return ""
+}
+
 // attrs is one span's effective attribute set — resource, scope and span
 // attributes flattened into plain Go values — plus a record of which keys a
 // mapping rule has already claimed. Everything left unclaimed at the end
 // lands in the observation's metadata (spec 002 #11), so "reading" an
 // attribute through this type is what marks it consumed.
+//
+// The flattening is kept beside the three levels it came from rather than
+// instead of them: merged, a resource `service.name` and a span attribute of
+// the same name are indistinguishable and whichever came last is the only one
+// left, which breaks the promise that nothing is lost (spec 012 #7). Chains
+// read the merged view; what falls through falls through per level.
 type attrs struct {
 	values   map[string]any
+	byLevel  map[origin]map[string]any
 	consumed map[string]bool
 }
 
 func newAttrs() *attrs {
-	return &attrs{values: map[string]any{}, consumed: map[string]bool{}}
+	return &attrs{
+		values: map[string]any{},
+		byLevel: map[origin]map[string]any{
+			originResource: {}, originScope: {}, originSpan: {},
+		},
+		consumed: map[string]bool{},
+	}
 }
 
-// merge folds a KeyValue list in. Later calls win, which is how the
-// resource < scope < span precedence of spec 002 ("resource attributes are
-// merged at lower priority than the span's own") is expressed.
-func (a *attrs) merge(kvs []*commonpb.KeyValue) {
+// merge folds a KeyValue list in at one level. Later calls win in the merged
+// view, which is how the resource < scope < span precedence of spec 002
+// ("resource attributes are merged at lower priority than the span's own") is
+// expressed.
+func (a *attrs) merge(level origin, kvs []*commonpb.KeyValue) {
 	for _, kv := range kvs {
 		if kv == nil || kv.Key == "" {
 			continue
 		}
-		a.values[kv.Key] = anyValue(kv.Value)
+		value := anyValue(kv.Value)
+		a.values[kv.Key] = value
+		a.byLevel[level][kv.Key] = value
 	}
 }
 
@@ -41,12 +92,26 @@ func (a *attrs) merge(kvs []*commonpb.KeyValue) {
 // the loser of a priority chain) would be consumed without being stored, and
 // would appear nowhere at all. Spec 002 #11 promises the opposite.
 
+// keyLevel binds an attribute name to the one level it means something at.
+// Most names mean the same thing wherever they arrive, and a rule reading the
+// merged view is right not to care — but `service.version` is not one of
+// them. On the Resource it is the version of the service that produced the
+// trace, which is what the release chain falls back to (spec 012 #4, "then
+// the resource's `service.version`"); on a span it describes whatever that
+// span talked to, and reading it there is wrong twice over, because claiming
+// it would take the Resource's own value out of metadata as well (found in
+// review of PR #19).
+var keyLevel = map[string]origin{"service.version": originResource}
+
 // lookup returns the value at key without claiming it. A key present with an
 // empty value counts as absent: priority chains are "first non-empty wins",
 // and an SDK that stamps an empty string should not shadow the next
 // candidate.
 func (a *attrs) lookup(key string) (any, bool) {
 	v, ok := a.values[key]
+	if level, bound := keyLevel[key]; bound {
+		v, ok = a.byLevel[level][key]
+	}
 	if !ok || isEmpty(v) {
 		return nil, false
 	}
@@ -78,6 +143,19 @@ func (a *attrs) firstString(keys ...string) (string, bool) {
 	return asString(v), true
 }
 
+// firstRanked is firstString for a trace-level chain: it also reports how far
+// down the chain the winner was found, which is what keeps the chain's
+// priority alive when the spans of one export disagree (spec 012 #11).
+func (a *attrs) firstRanked(keys ...string) rankedValue {
+	for rank, key := range keys {
+		if v, ok := a.lookup(key); ok {
+			a.claim(key)
+			return rankedValue{value: asString(v), rank: rank}
+		}
+	}
+	return rankedValue{}
+}
+
 // prefixed returns every attribute under "<prefix>." with the prefix
 // stripped, claiming each — they are all carried into the result.
 func (a *attrs) prefixed(prefix string) map[string]any {
@@ -96,17 +174,39 @@ func (a *attrs) prefixed(prefix string) map[string]any {
 }
 
 // claim marks a key as carried into the result, so it does not reappear in
-// metadata.
+// metadata. It claims the key at every level: a rule reads the merged view,
+// so it cannot say which level answered it, and a rule that wants a resource
+// key should not have to know it is one (spec 012 #7). Where a key *is* bound
+// to a level, claimedAt narrows that back down.
 func (a *attrs) claim(key string) { a.consumed[key] = true }
 
-// rest returns every attribute no rule claimed (spec 002 #11).
+// claimedAt reports whether this level's value is the one a rule took. For an
+// ordinary key that is every level, since the rule read the merged view. For
+// a key bound to a level (see keyLevel), only that level could have answered,
+// so the same name at another level is a different fact and keeps its place
+// in metadata — which is the whole promise of spec 012 #7.
+func (a *attrs) claimedAt(level origin, key string) bool {
+	if !a.consumed[key] {
+		return false
+	}
+	bound, isBound := keyLevel[key]
+	return !isBound || bound == level
+}
+
+// rest returns every attribute no rule claimed, each under the key its origin
+// gives it (spec 002 #11, spec 012 #7). The same name at two levels yields two
+// entries, which is the point: `resource.service.name` and `service.name` are
+// different facts and used to be one.
 func (a *attrs) rest() map[string]any {
 	out := map[string]any{}
-	for k, v := range a.values {
-		if a.consumed[k] || isEmpty(v) {
-			continue
+	for _, level := range levels {
+		prefix := level.prefix()
+		for k, v := range a.byLevel[level] {
+			if a.claimedAt(level, k) || isEmpty(v) {
+				continue
+			}
+			out[prefix+k] = v
 		}
-		out[k] = v
 	}
 	if len(out) == 0 {
 		return nil
@@ -204,6 +304,19 @@ func asNumber(v any) (float64, bool) {
 		return n, err == nil
 	}
 	return 0, false
+}
+
+// asInteger coerces an attribute value to a whole number for an INTEGER
+// column. It accepts the three shapes asNumber does and refuses anything with
+// a fractional part: a prompt version of 7.5 is not a version, and coercing
+// it would file the observation under a prompt release that never existed
+// (spec 012 #5).
+func asInteger(v any) (int64, bool) {
+	n, ok := asNumber(v)
+	if !ok || n != math.Trunc(n) || math.Abs(n) >= 1<<53 {
+		return 0, false
+	}
+	return int64(n), true
 }
 
 // jsonNumber returns a number as an int64 when it is integral, so that token

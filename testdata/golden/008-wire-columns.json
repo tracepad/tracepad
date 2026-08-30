@@ -1,0 +1,110 @@
+{
+  "dialect": "langfuse",
+  "traces": [
+    {
+      "id": "1122aabb33cc44dd55ee6677008899ff",
+      "name": "price-quote",
+      "release": "1.9.0"
+    },
+    {
+      "id": "ff6677008899001122aabb33cc44dd55",
+      "name": "checkout",
+      "environment": "production",
+      "release": "2026.8.30-rc1",
+      "version": "checkout-v9"
+    }
+  ],
+  "observations": [
+    {
+      "trace_id": "1122aabb33cc44dd55ee6677008899ff",
+      "id": "f1f2f3f4f5f6f7f8",
+      "type": "generation",
+      "name": "price-quote",
+      "start_time": 1787738400200000000,
+      "end_time": 1787738400900000000,
+      "completion_start_time": 1787738400640000000,
+      "model": "gpt-4o-mini",
+      "level": "DEFAULT",
+      "metadata": {
+        "resource.service.name": "pricing",
+        "scope.name": "opentelemetry.instrumentation.openai",
+        "scope.version": "0.42.0"
+      }
+    },
+    {
+      "trace_id": "ff6677008899001122aabb33cc44dd55",
+      "id": "b1b2b3b4b5b6b7b8",
+      "type": "span",
+      "name": "checkout",
+      "start_time": 1787738400000000000,
+      "end_time": 1787738401500000000,
+      "level": "DEFAULT",
+      "metadata": {
+        "resource.service.name": "resource-level",
+        "resource.service.version": "2026.8.3",
+        "scope.name": "langfuse-sdk",
+        "scope.service.name": "scope-level",
+        "scope.version": "4.7.0"
+      }
+    },
+    {
+      "trace_id": "ff6677008899001122aabb33cc44dd55",
+      "id": "c1c2c3c4c5c6c7c8",
+      "parent_observation_id": "b1b2b3b4b5b6b7b8",
+      "type": "generation",
+      "name": "answer",
+      "start_time": 1787738400100000000,
+      "end_time": 1787738401400000000,
+      "completion_start_time": 1787738400488000000,
+      "model": "claude-sonnet-5",
+      "level": "DEFAULT",
+      "prompt_name": "support-answer",
+      "prompt_version": 7,
+      "metadata": {
+        "langfuse.observation.version": "answer-3",
+        "resource.service.name": "resource-level",
+        "scope.name": "langfuse-sdk",
+        "scope.service.name": "scope-level",
+        "scope.version": "4.7.0",
+        "service.name": "span-level"
+      }
+    },
+    {
+      "trace_id": "ff6677008899001122aabb33cc44dd55",
+      "id": "d1d2d3d4d5d6d7d8",
+      "parent_observation_id": "b1b2b3b4b5b6b7b8",
+      "type": "tool",
+      "name": "catalog-search",
+      "start_time": 1787738400120000000,
+      "end_time": 1787738400300000000,
+      "completion_start_time": 1787738400180000000,
+      "level": "DEFAULT",
+      "prompt_name": "catalog-query",
+      "metadata": {
+        "langfuse.observation.prompt.version": "latest",
+        "resource.service.name": "resource-level",
+        "scope.name": "langfuse-sdk",
+        "scope.service.name": "scope-level",
+        "scope.version": "4.7.0"
+      }
+    },
+    {
+      "trace_id": "ff6677008899001122aabb33cc44dd55",
+      "id": "e1e2e3e4e5e6e7e8",
+      "parent_observation_id": "b1b2b3b4b5b6b7b8",
+      "type": "guardrail",
+      "name": "policy-check",
+      "start_time": 1787738400310000000,
+      "end_time": 1787738400330000000,
+      "level": "DEFAULT",
+      "prompt_name": "team@acme/answer",
+      "metadata": {
+        "langfuse.observation.completion_start_time": "as soon as it could",
+        "resource.service.name": "resource-level",
+        "scope.name": "langfuse-sdk",
+        "scope.service.name": "scope-level",
+        "scope.version": "4.7.0"
+      }
+    }
+  ]
+}

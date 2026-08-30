@@ -22,7 +22,9 @@
         "input_tokens": 512
       },
       "metadata": {
-        "service.name": "indexer"
+        "resource.service.name": "indexer",
+        "scope.name": "opentelemetry.instrumentation.openai",
+        "scope.version": "0.42.0"
       }
     }
   ]

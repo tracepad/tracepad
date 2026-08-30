@@ -1,5 +1,7 @@
 package mapping
 
+import "github.com/tracepad/tracepad/internal/model"
+
 // The mapping table (spec 002 #10): one priority chain per target field,
 // explicit `langfuse.*` before OTel GenAI semconv before bare fallbacks.
 // Chains are data, so adding a dialect is an edit here rather than a
@@ -19,6 +21,10 @@ const (
 	lfUserID        = "langfuse.user.id"
 	lfSessionID     = "langfuse.session.id"
 	lfEnvironment   = "langfuse.environment"
+	// The deployment a trace ran in and the version of its own logic. The
+	// SDK distinguishes them, so they are two targets (spec 012 #4).
+	lfRelease = "langfuse.release"
+	lfVersion = "langfuse.version"
 )
 
 // Langfuse dialect: observation-level.
@@ -36,6 +42,13 @@ const (
 	// Spelling used by the spec's mapping table. The SDKs emit the dotted
 	// form above; both are accepted so neither reading loses data.
 	lfObsModelParametersAlt = "langfuse.observation.model_parameters"
+	// When the first token came back — the number a person means by "time
+	// to first token" (spec 012 #3).
+	lfObsCompletionStartTime = "langfuse.observation.completion_start_time"
+	// The prompt this observation ran, as the client labelled it
+	// (spec 012 #5).
+	lfObsPromptName    = "langfuse.observation.prompt.name"
+	lfObsPromptVersion = "langfuse.observation.prompt.version"
 )
 
 // Priority chains. First non-empty wins; every key in a chain is consumed,
@@ -56,6 +69,17 @@ var (
 	traceEnvironmentKeys = []string{lfEnvironment, "deployment.environment.name", "deployment.environment"}
 
 	traceTagsKeys = []string{lfTraceTags}
+
+	// `service.version` is the OTel resource attribute every plain-OTel
+	// app already sets, so the fallback makes the release filter work for
+	// people who never heard of the Langfuse dialect (spec 012 #4). It is
+	// read from the Resource only — see keyLevel in value.go for why the
+	// same name on a span is a different fact.
+	traceReleaseKeys = []string{lfRelease, "service.version"}
+
+	// Not `langfuse.observation.version`: that is the observation's own
+	// version and stays in metadata (spec 012 #4).
+	traceVersionKeys = []string{lfVersion}
 
 	// Explicit model name beats the requested one beats the one the
 	// provider answered with; bare `model` is the last-resort guess.
@@ -100,6 +124,13 @@ const (
 	metadataEventsKey = "events"
 )
 
+// The InstrumentationScope's own fields in metadata. They are not attributes
+// in OTLP, and they are the answer to "which SDK sent this" (spec 012 #7).
+const (
+	metadataScopeName    = "scope.name"
+	metadataScopeVersion = "scope.version"
+)
+
 // levelAliases normalizes the many spellings instrumentations use into the
 // four levels schema 0002 allows. Ported from the reference implementation;
 // an unknown spelling maps to nothing so that the span-status fallback
@@ -121,20 +152,19 @@ var levelAliases = map[string]string{
 	"CRITICAL": "ERROR",
 }
 
-// observationTypeAliases collapses the Langfuse observation-type vocabulary
-// onto the three types schema 0002 allows (spec 002 Decision 21,
-// 2026-08-26). An embedding call is a model call, so it is a generation;
-// every other structural type is a span. The original value is preserved in
-// metadata, so nothing is lost and a later spec can widen the column.
-var observationTypeAliases = map[string]string{
-	"span":       "span",
-	"generation": "generation",
-	"event":      "event",
-	"embedding":  "generation",
-	"agent":      "span",
-	"tool":       "span",
-	"chain":      "span",
-	"retriever":  "span",
-	"guardrail":  "span",
-	"evaluator":  "span",
-}
+// observationTypes is the Langfuse observation-type vocabulary, stored as
+// sent (spec 012 #2, superseding spec 002 Decision 21). Schema 0002 closed
+// the column at three values and the mapper collapsed the rest, keeping the
+// original spelling in metadata precisely so that schema 0008 could widen it;
+// now that it has, a type the client named is the type the column holds and
+// nothing has to be recovered from metadata.
+//
+// The set is the model package's, so the vocabulary the CHECK constraint
+// allows, the filter validates and the clients enumerate is one list.
+var observationTypes = func() map[string]bool {
+	out := make(map[string]bool, len(model.ObservationTypes))
+	for _, t := range model.ObservationTypes {
+		out[t] = true
+	}
+	return out
+}()

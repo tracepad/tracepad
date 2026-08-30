@@ -21,6 +21,8 @@ type debugTrace struct {
 	UserID      string         `json:"user_id,omitempty"`
 	SessionID   string         `json:"session_id,omitempty"`
 	Environment string         `json:"environment,omitempty"`
+	Release     string         `json:"release,omitempty"`
+	Version     string         `json:"version,omitempty"`
 	Tags        []string       `json:"tags,omitempty"`
 	Metadata    map[string]any `json:"metadata,omitempty"`
 }
@@ -33,6 +35,7 @@ type debugObservation struct {
 	Name                string         `json:"name,omitempty"`
 	StartTime           int64          `json:"start_time"`
 	EndTime             int64          `json:"end_time"`
+	CompletionStartTime int64          `json:"completion_start_time,omitempty"`
 	Model               string         `json:"model,omitempty"`
 	ModelParameters     map[string]any `json:"model_parameters,omitempty"`
 	Level               string         `json:"level"`
@@ -40,6 +43,8 @@ type debugObservation struct {
 	Usage               map[string]any `json:"usage,omitempty"`
 	CostDetails         map[string]any `json:"cost_details,omitempty"`
 	ProvidedCost        bool           `json:"provided_cost,omitempty"`
+	PromptName          string         `json:"prompt_name,omitempty"`
+	PromptVersion       *int64         `json:"prompt_version,omitempty"`
 	Input               any            `json:"input,omitempty"`
 	Output              any            `json:"output,omitempty"`
 	Metadata            map[string]any `json:"metadata,omitempty"`
@@ -61,6 +66,8 @@ func (r *Result) DebugJSON() ([]byte, error) {
 			UserID:      t.UserID,
 			SessionID:   t.SessionID,
 			Environment: t.Environment,
+			Release:     t.Release,
+			Version:     t.Version,
 			Tags:        t.Tags,
 			Metadata:    t.Metadata,
 		})
@@ -74,6 +81,7 @@ func (r *Result) DebugJSON() ([]byte, error) {
 			Name:                o.Name,
 			StartTime:           o.StartTime,
 			EndTime:             o.EndTime,
+			CompletionStartTime: o.CompletionStartTime,
 			Model:               o.Model,
 			ModelParameters:     o.ModelParameters,
 			Level:               o.Level,
@@ -81,6 +89,8 @@ func (r *Result) DebugJSON() ([]byte, error) {
 			Usage:               o.Usage,
 			CostDetails:         o.CostDetails,
 			ProvidedCost:        o.ProvidedCost(),
+			PromptName:          o.PromptName,
+			PromptVersion:       o.PromptVersion,
 			Input:               o.Input,
 			Output:              o.Output,
 			Metadata:            o.Metadata,

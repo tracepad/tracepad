@@ -14,17 +14,24 @@ import (
 
 // TraceRow is a stored trace with its denormalized aggregates.
 type TraceRow struct {
-	ProjectID        string
-	ID               string
-	Name             string
-	UserID           string
-	SessionID        string
-	Environment      string
-	Tags             []string
-	Metadata         map[string]any
-	Timestamp        int64
-	TotalCost        *float64
-	LatencyMs        *int64
+	ProjectID   string
+	ID          string
+	Name        string
+	UserID      string
+	SessionID   string
+	Environment string
+	// Release is the deployment the trace ran in, Version the version of
+	// its own logic; both are empty when no delivery said (spec 012 #4).
+	Release   string
+	Version   string
+	Tags      []string
+	Metadata  map[string]any
+	Timestamp int64
+	TotalCost *float64
+	LatencyMs *int64
+	// TTFTMs is the wait before the first token of the trace's earliest
+	// completion, nil when no observation carried a completion start.
+	TTFTMs           *int64
 	ErrorCount       int
 	ObservationCount int
 }
@@ -41,6 +48,9 @@ type ObservationRow struct {
 	Name                string
 	StartTime           int64
 	EndTime             int64
+	// CompletionStartTime is when the first token came back, zero when the
+	// client did not say; TTFTMs is the wait it implies (spec 012 #3).
+	CompletionStartTime int64
 	Model               string
 	ModelParameters     map[string]any
 	Level               string
@@ -48,8 +58,18 @@ type ObservationRow struct {
 	Usage               map[string]any
 	CostDetails         map[string]any
 	ProvidedCost        bool
-	Input               any
-	Output              any
+	// PromptName and PromptVersion are the label the client put on this
+	// observation, resolved against no registry (spec 012 #5).
+	PromptName    string
+	PromptVersion *int64
+	// InputBytes and OutputBytes are the uncompressed sizes of the two
+	// payloads, read from `payloads` rather than stored a second time
+	// (spec 012 #6). Nil when there is no payload — which is not the same
+	// as a payload of zero bytes.
+	InputBytes  *int64
+	OutputBytes *int64
+	Input       any
+	Output      any
 	// Metadata is always an object: mapping builds it from attributes
 	// (spec 002), unlike Input and Output, which are whatever the client
 	// logged.
@@ -111,13 +131,17 @@ func scanTrace(rows scanner, extra ...any) (*TraceRow, error) {
 		name      sql.NullString
 		userID    sql.NullString
 		sessionID sql.NullString
+		release   sql.NullString
+		version   sql.NullString
 		tags      sql.NullString
 		timestamp sql.NullInt64
 		totalCost sql.NullFloat64
 		latency   sql.NullInt64
+		ttft      sql.NullInt64
 	)
 	targets := []any{&row.ProjectID, &row.ID, &name, &userID, &sessionID, &row.Environment,
-		&tags, &timestamp, &totalCost, &latency, &row.ErrorCount, &row.ObservationCount}
+		&release, &version, &tags, &timestamp, &totalCost, &latency, &ttft,
+		&row.ErrorCount, &row.ObservationCount}
 	if err := rows.Scan(append(targets, extra...)...); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, err
@@ -125,12 +149,16 @@ func scanTrace(rows scanner, extra ...any) (*TraceRow, error) {
 		return nil, fmt.Errorf("scan trace: %w", err)
 	}
 	row.Name, row.UserID, row.SessionID = name.String, userID.String, sessionID.String
+	row.Release, row.Version = release.String, version.String
 	row.Timestamp = timestamp.Int64
 	if totalCost.Valid {
 		row.TotalCost = &totalCost.Float64
 	}
 	if latency.Valid {
 		row.LatencyMs = &latency.Int64
+	}
+	if ttft.Valid {
+		row.TTFTMs = &ttft.Int64
 	}
 	if tags.Valid {
 		if err := json.Unmarshal([]byte(tags.String), &row.Tags); err != nil {
@@ -140,16 +168,27 @@ func scanTrace(rows scanner, extra ...any) (*TraceRow, error) {
 	return &row, nil
 }
 
-const observationColumns = `project_id, trace_id, id, parent_observation_id, type, name,
-	        start_time, end_time, model, model_parameters, level, status_message,
-	        usage, cost_details, provided_cost, input_id, output_id, metadata_id`
+const observationColumns = `o.project_id, o.trace_id, o.id, o.parent_observation_id, o.type, o.name,
+	        o.start_time, o.end_time, o.completion_start_time, o.model, o.model_parameters,
+	        o.level, o.status_message, o.usage, o.cost_details, o.provided_cost,
+	        o.prompt_name, o.prompt_version, i.size_raw, u.size_raw,
+	        o.input_id, o.output_id, o.metadata_id`
+
+// observationFrom joins the payload rows the sizes come from. Two outer joins
+// on the primary key of `payloads`, which the row already references: the
+// sizes are one select away, and a denormalized copy would be two columns to
+// keep in step with a number nothing filters on (spec 012 #6).
+const observationFrom = `FROM observations o
+	        LEFT JOIN payloads i ON i.id = o.input_id
+	        LEFT JOIN payloads u ON u.id = o.output_id`
 
 // Observations returns a trace's spans ordered by start time.
 func (s *Store) Observations(projectID, traceID string, io IOMode) ([]*ObservationRow, error) {
 	rows, err := s.db.Query(
 		`SELECT `+observationColumns+`
-		 FROM observations WHERE project_id = ? AND trace_id = ?
-		 ORDER BY start_time, id`, projectID, traceID)
+		 `+observationFrom+`
+		 WHERE o.project_id = ? AND o.trace_id = ?
+		 ORDER BY o.start_time, o.id`, projectID, traceID)
 	if err != nil {
 		return nil, fmt.Errorf("read observations of %s: %w", traceID, err)
 	}
@@ -171,23 +210,40 @@ func (s *Store) scanObservation(rows *sql.Rows, io IOMode) (*ObservationRow, err
 		row             ObservationRow
 		parent          sql.NullString
 		name            sql.NullString
+		completionStart sql.NullInt64
 		modelName       sql.NullString
 		modelParameters sql.NullString
 		statusMessage   sql.NullString
 		usage           sql.NullString
 		costDetails     sql.NullString
 		providedCost    int
+		promptName      sql.NullString
+		promptVersion   sql.NullInt64
+		inputBytes      sql.NullInt64
+		outputBytes     sql.NullInt64
 		inputID         sql.NullInt64
 		outputID        sql.NullInt64
 		metadataID      sql.NullInt64
 	)
 	if err := rows.Scan(&row.ProjectID, &row.TraceID, &row.ID, &parent, &row.Type, &name,
-		&row.StartTime, &row.EndTime, &modelName, &modelParameters, &row.Level, &statusMessage,
-		&usage, &costDetails, &providedCost, &inputID, &outputID, &metadataID); err != nil {
+		&row.StartTime, &row.EndTime, &completionStart, &modelName, &modelParameters,
+		&row.Level, &statusMessage, &usage, &costDetails, &providedCost,
+		&promptName, &promptVersion, &inputBytes, &outputBytes,
+		&inputID, &outputID, &metadataID); err != nil {
 		return nil, fmt.Errorf("scan observation: %w", err)
 	}
 	row.ParentObservationID, row.Name, row.Model = parent.String, name.String, modelName.String
 	row.StatusMessage, row.ProvidedCost = statusMessage.String, providedCost != 0
+	row.CompletionStartTime, row.PromptName = completionStart.Int64, promptName.String
+	if promptVersion.Valid {
+		row.PromptVersion = &promptVersion.Int64
+	}
+	if inputBytes.Valid {
+		row.InputBytes = &inputBytes.Int64
+	}
+	if outputBytes.Valid {
+		row.OutputBytes = &outputBytes.Int64
+	}
 
 	var err error
 	if row.ModelParameters, err = decodeObject(modelParameters); err != nil {

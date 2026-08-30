@@ -114,10 +114,13 @@ func Run(ctx context.Context, opt Options) int {
 const Usage = `Client commands (they talk to a running server over HTTP):
   tracepad traces ls    [--search "text"] [--env E] [--error] [--since 1h] [--until T]
                         [--user U] [--session S] [--name N] [--tag T] [--min-cost C]
+                        [--release R] [--version V] [--type T] [--prompt N[@V]]
                         [--fields a,b] [--limit N] [--cursor C] [--oldest] [--newer] [--total]
   tracepad traces show  <trace-id> [--full]
-  tracepad traces last  [--search "text"] [--error] [--env E] [--since 1h] [--until T] [--full]
-  tracepad tail         [--env E] [--error] [--interval 2s] [--limit N]
+  tracepad traces last  [--search "text"] [--error] [--env E] [--since 1h] [--until T]
+                        [--release R] [--version V] [--type T] [--prompt N[@V]] [--full]
+  tracepad tail         [--env E] [--error] [--release R] [--version V] [--type T]
+                        [--prompt N[@V]] [--interval 2s] [--limit N]
   tracepad sessions ls   [--since 1h] [--until T] [--env E] [--user U] [--limit N]
                          [--cursor C] [--oldest] [--newer] [--total]
   tracepad sessions show <session-id> [--limit N]
@@ -126,7 +129,7 @@ const Usage = `Client commands (they talk to a running server over HTTP):
   tracepad prompts get  <name> [--label L | --version N]
   tracepad prompts push <name> --file prompt.json [--label L] [--message M]
   tracepad prompts diff <name> --from N --to M
-  tracepad stats        [--group-by hour|day|model|environment] [--since 1h]
+  tracepad stats        [--group-by hour|day|model|environment|release] [--since 1h]
                         [--until T] [--env E]
   tracepad system
 
@@ -150,6 +153,13 @@ Connection:
   --url URL    server to talk to   (env TRACEPAD_URL, default http://localhost:4318)
   --key KEY    project secret key, or TRACEPAD_ADMIN_TOKEN for the commands
                marked (admin token)   (env TRACEPAD_API_KEY)
+
+What the wire carried (spec 012): --type keeps traces containing one kind of
+step — span, generation, event, agent, tool, chain, retriever, guardrail,
+evaluator or embedding — and --prompt keeps the traces that ran a prompt, at
+any version or at name@7. A version is a number, so an @ inside a name is part
+of it. The listing's ttft column is the wait before the first token of the
+trace's earliest completion.
 
 Search (spec 011): --search takes words (all must occur), "quoted phrases" and
 prefix*. Words, not substrings: error does not find errors, err* finds both.

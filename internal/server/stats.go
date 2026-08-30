@@ -5,7 +5,9 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
+	"slices"
 	"sort"
+	"strings"
 
 	"github.com/tracepad/tracepad/internal/store"
 )
@@ -18,6 +20,14 @@ import (
 // defaultGroupBy is what `GET /api/v1/stats` groups by when the caller says
 // nothing. A day is the bucket a human and an agent both reach for first.
 const defaultGroupBy = store.GroupByDay
+
+// statsGroupings is every value `group_by` accepts, in the order the error
+// message and `openapi.json` list them. One list, so a grouping the store
+// knows and the API rejects cannot happen (spec 012 #4 added `release`).
+var statsGroupings = []string{
+	store.GroupByHour, store.GroupByDay, store.GroupByModel,
+	store.GroupByEnvironment, store.GroupByRelease,
+}
 
 // bucket accumulates one group of the scan.
 type bucket struct {
@@ -51,13 +61,10 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	if filter.GroupBy == "" {
 		filter.GroupBy = defaultGroupBy
 	}
-	switch filter.GroupBy {
-	case store.GroupByHour, store.GroupByDay, store.GroupByModel, store.GroupByEnvironment:
-	default:
+	if !slices.Contains(statsGroupings, filter.GroupBy) {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf(
-			"group_by must be one of %s, %s, %s, %s, got %q",
-			store.GroupByHour, store.GroupByDay, store.GroupByModel,
-			store.GroupByEnvironment, filter.GroupBy))
+			"group_by must be one of %s, got %q",
+			strings.Join(statsGroupings, ", "), filter.GroupBy))
 		return
 	}
 	for _, bound := range []struct {

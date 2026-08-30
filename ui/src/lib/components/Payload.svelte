@@ -26,6 +26,7 @@
 	let {
 		label,
 		value,
+		size,
 		refused,
 		loaded,
 		loading,
@@ -33,6 +34,13 @@
 	}: {
 		label: string;
 		value: unknown;
+		/**
+		 * The payload's size as the API reports it, shown beside the heading
+		 * (spec 012 #6). It is there whether or not the payload itself was
+		 * inlined, which is the point: "12 KB in" is what somebody decides
+		 * with before asking for the rest.
+		 */
+		size?: number | null;
 		/** The whole trace refused expansion, so nothing was inlined at all. */
 		refused?: boolean;
 		/** The payloads have since been fetched, whatever they turned out to be. */
@@ -53,6 +61,9 @@
 <section class="border-border border-t px-4 py-3">
 	<div class="mb-2 flex items-center gap-1.5">
 		<h3 class="text-muted text-xs font-medium tracking-wide uppercase">{label}</h3>
+		{#if size != null}
+			<span class="text-subtle text-xs tabular-nums">{bytes(size)}</span>
+		{/if}
 		{#if present && !marker}
 			<CopyButton text={() => JSON.stringify(value, null, 2)} label="Copy the whole {label}" />
 		{/if}

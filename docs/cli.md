@@ -61,6 +61,9 @@ tracepad traces ls --env production --error --since 1h
 | `--user`, `--session`, `--name` | Exact matches. |
 | `--tag` | A tag the trace must carry. |
 | `--min-cost` | Traces costing at least this much. |
+| `--release`, `--version` | The deployment, and the version of the trace's own logic. Exact matches. |
+| `--type` | Traces containing a step of this kind: `span`, `generation`, `event`, `agent`, `tool`, `chain`, `retriever`, `guardrail`, `evaluator`, `embedding`. Exact — `generation` does not match `embedding`. |
+| `--prompt` | Traces that ran a prompt: `name`, or `name@7` for one version of it. A version is a number, so an `@` in a name is just part of it — `@acme/support` and `team@acme/answer` work as written, and `name@latest` is read as a name rather than as a label. |
 | `--fields` | Comma-separated subset of the row fields. |
 | `--limit` | 1–500, default 50. |
 | `--cursor` | Continue from a previous page. |
@@ -92,8 +95,8 @@ tracepad traces ls --search "refund failed"
 ```
 
 ```
-TIME                 ID                                NAME          ENV         OBS  ERR  LATENCY  COST
-2026-09-01 10:00:00  4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f  support-chat  production  2    0    820ms    $0.001000
+TIME                 ID                                NAME          ENV         OBS  ERR  LATENCY  TTFT   COST
+2026-09-01 10:00:00  4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f  support-chat  production  2    0    820ms    388ms  $0.001000
     2b3c4d5e6f7a8b9c output: …the refund failed for the order because the card issuer…
 ```
 
@@ -122,6 +125,17 @@ tracepad traces show 4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f --full
 The observation tree. `--full` adds every payload, asking for the largest
 budget the API allows; a payload still too large for it prints its preview and
 the URL that returns the rest.
+
+Each observation's line names its kind, and — where the client sent them —
+`ttft` and the prompt it ran:
+
+```
+· generation  chat-completion  claude-sonnet-5  740ms  ttft 388ms  169 tokens  $0.001000  prompt support-answer@7  [2b3c4d5e6f7a8b9c]
+```
+
+The header above the tree carries the trace's release and version when it
+named them, beside its latency, TTFT and cost. `ttft` is the wait before the
+first token; the trace's is the earliest one among its observations.
 
 ### `traces last`
 
@@ -213,6 +227,7 @@ silently overruled.
 ```sh
 tracepad stats --group-by day --since 168h
 tracepad stats --group-by model
+tracepad stats --group-by release
 ```
 
 `--since` takes Go durations (`1h`, `30m`, `168h`) or an RFC 3339 instant.
@@ -220,9 +235,10 @@ There is no day unit — `7d` is a usage error, not a week. `--until` closes the
 other end, in the same two spellings, so a duration there is also counted back
 from now: `--since 48h --until 24h` is the day before yesterday.
 
-The table's second column names what is being counted: grouping by hour, day
-or environment counts **traces**, grouping by model counts **observations**,
-because a trace has no model.
+The table's second column names what is being counted: grouping by hour, day,
+environment or release counts **traces**, grouping by model counts
+**observations**, because a trace has no model. Grouped by release, the traces
+that named none share one bucket with an empty key.
 
 ### `system`
 

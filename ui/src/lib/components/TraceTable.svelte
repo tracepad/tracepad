@@ -1,7 +1,7 @@
 <script lang="ts">
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import type { TraceRow } from '$lib/api/client.svelte';
-	import { ABSENT, cost, duration, timestamp } from '$lib/format';
+	import { ABSENT, cost, duration, timestamp, wait } from '$lib/format';
 	import { modified, selecting } from '$lib/peek';
 	import { highlight, searchTerms } from '$lib/search';
 
@@ -67,6 +67,13 @@
 				<th scope="col" class="w-36 px-3 py-2 font-medium">Session</th>
 				<th scope="col" class="w-24 px-3 py-2 text-right font-medium">Cost</th>
 				<th scope="col" class="w-24 px-3 py-2 text-right font-medium">Latency</th>
+				<!-- Beside latency, because they answer the same question from two
+				     ends: how long the whole thing took, and how long the person
+				     waited before anything appeared (spec 012, Application
+				     contract). -->
+				<th scope="col" class="w-24 px-3 py-2 text-right font-medium" title="Time to first token">
+					TTFT
+				</th>
 				<th scope="col" class="w-24 px-3 py-2 font-medium">Errors</th>
 			</tr>
 		</thead>
@@ -113,6 +120,7 @@
 					<td class="text-muted {cell}">{row.session_id ?? ABSENT}</td>
 					<td class="text-muted {numeric}">{cost(row.total_cost)}</td>
 					<td class="text-muted {numeric}">{duration(row.latency_ms)}</td>
+					<td class="text-muted {numeric}">{wait(row.ttft_ms)}</td>
 					<td class="px-3 py-1.5">
 						{#if row.error_count > 0}
 							<span
@@ -139,7 +147,7 @@
 							lit && 'bg-accent-soft'
 						]}
 					>
-						<td class="text-muted px-3 pt-0 pb-1.5 font-mono text-xs" colspan="8">
+						<td class="text-muted px-3 pt-0 pb-1.5 font-mono text-xs" colspan="9">
 							<span class="text-subtle">{row.match.field}</span>
 							{#each highlight(row.match.snippet, terms) as piece, i (i)}
 								{#if piece.hit}<mark class="bg-accent-soft text-fg rounded-sm px-0.5"

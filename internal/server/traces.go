@@ -12,8 +12,10 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/tracepad/tracepad/internal/config"
+	"github.com/tracepad/tracepad/internal/model"
 	"github.com/tracepad/tracepad/internal/store"
 )
 
@@ -34,8 +36,8 @@ var traceID = regexp.MustCompile(`^[0-9a-f]{32}$`)
 // trace: it says where the search hit, and it is present only with `q`
 // (spec 011 #6).
 var traceRowFields = []string{
-	"id", "name", "user_id", "session_id", "environment", "tags",
-	"timestamp", "total_cost", "latency_ms", "error_count", "observation_count",
+	"id", "name", "user_id", "session_id", "environment", "release", "version", "tags",
+	"timestamp", "total_cost", "latency_ms", "ttft_ms", "error_count", "observation_count",
 	"match",
 }
 
@@ -43,7 +45,7 @@ var traceRowFields = []string{
 // accepts the same set (#7) plus the two that shape a single trace.
 var traceListFilters = []string{
 	"from", "to", "environment", "user_id", "session_id", "name", "tag",
-	"status", "min_cost", "q",
+	"status", "min_cost", "q", "release", "version", "type", "prompt",
 }
 
 // handleListTraces serves the filtered, cursor-paginated listing, newest
@@ -332,10 +334,13 @@ func renderTraceRow(row *store.TraceRow) object {
 		putSome("user_id", row.UserID).
 		putSome("session_id", row.SessionID).
 		put("environment", row.Environment).
+		putSome("release", row.Release).
+		putSome("version", row.Version).
 		putSome("tags", row.Tags).
 		putSome("timestamp", formatInstant(row.Timestamp)).
 		putSome("total_cost", row.TotalCost).
 		putSome("latency_ms", row.LatencyMs).
+		putSome("ttft_ms", row.TTFTMs).
 		put("error_count", row.ErrorCount).
 		put("observation_count", row.ObservationCount)
 }
@@ -480,12 +485,17 @@ func renderNode(node *observationNode, budget payloadBudget, expand bool) object
 		putSome("name", row.Name).
 		putSome("start_time", formatInstant(row.StartTime)).
 		putSome("end_time", formatInstant(row.EndTime)).
+		putSome("completion_start_time", formatInstant(row.CompletionStartTime)).
+		putSome("ttft_ms", observationTTFT(row)).
 		putSome("model", row.Model).
 		putSome("model_parameters", row.ModelParameters).
 		put("level", row.Level).
 		putSome("status_message", row.StatusMessage).
 		putSome("usage", row.Usage).
-		putSome("cost_details", row.CostDetails)
+		putSome("cost_details", row.CostDetails).
+		putSome("prompt", renderPromptLink(row)).
+		putSome("input_bytes", row.InputBytes).
+		putSome("output_bytes", row.OutputBytes)
 	if expand {
 		for _, payload := range []struct {
 			key   string
@@ -505,6 +515,37 @@ func renderNode(node *observationNode, budget payloadBudget, expand bool) object
 		out = out.put("children", renderNodes(node.children, budget, expand))
 	}
 	return out
+}
+
+// observationTTFT is the wait this observation's caller had: the completion
+// start minus the span's own start, in milliseconds (spec 012 #3). The
+// difference is derived here rather than stored, because the raw fact is the
+// instant and the subtraction is one line.
+//
+// A span that never said when it started has no wait to report, and neither
+// does one that carried no completion start.
+func observationTTFT(row *store.ObservationRow) *int64 {
+	if row.CompletionStartTime == 0 || row.StartTime <= 0 {
+		return nil
+	}
+	ttft := (row.CompletionStartTime - row.StartTime) / int64(time.Millisecond)
+	return &ttft
+}
+
+// renderPromptLink renders the prompt an observation ran, or nothing when it
+// carried no name. The version is null rather than absent when the client
+// labelled a name without a usable version: a client reads the field to
+// decide whether it can link to one version, and "the prompt, unversioned" is
+// an answer to that (spec 012 #5).
+func renderPromptLink(row *store.ObservationRow) any {
+	if row.PromptName == "" {
+		return nil
+	}
+	version := any(nil)
+	if row.PromptVersion != nil {
+		version = *row.PromptVersion
+	}
+	return object{}.put("name", row.PromptName).put("version", version)
 }
 
 // asAny keeps a nil map nil through an interface conversion, so that "no
@@ -617,8 +658,27 @@ func traceFilter(values url.Values) (store.TraceFilter, error) {
 		UserID:      values.Get("user_id"),
 		SessionID:   values.Get("session_id"),
 		Name:        values.Get("name"),
+		Release:     values.Get("release"),
+		Version:     values.Get("version"),
 		Tags:        values["tag"],
 		Status:      values.Get("status"),
+	}
+	if raw := values.Get("type"); raw != "" {
+		// A spelling outside the vocabulary is a 400 rather than an
+		// empty listing: "no trace contains a tol call" would be a
+		// well-formed answer to a typo (spec 012, API contract).
+		if !model.IsObservationType(raw) {
+			return filter, fmt.Errorf("type must be one of %s, got %q",
+				strings.Join(model.ObservationTypes, ", "), raw)
+		}
+		filter.Type = raw
+	}
+	if raw := values.Get("prompt"); raw != "" {
+		prompt, err := parsePrompt(raw)
+		if err != nil {
+			return filter, err
+		}
+		filter.Prompt = prompt
 	}
 	switch filter.Status {
 	case "", store.TraceStatusError, store.TraceStatusOK:
@@ -668,6 +728,47 @@ func traceFilter(values url.Values) (store.TraceFilter, error) {
 		filter.MinCost = &cost
 	}
 	return filter, nil
+}
+
+// parsePrompt reads `name` or `name@version`. A version is a run of digits
+// after the last `@`, with a name in front of it. Anything else is part of the
+// name, `@` included — so `@acme/support`, `team@acme/answer` and
+// `name@latest` are all names, and every one of them filters (spec 012 #15).
+//
+// The rule has no exceptions on purpose. Prompt names are somebody else's
+// namespace and `@` is ordinary inside one, so any rule that reads an `@` as a
+// separator before knowing what follows it makes a whole family of names
+// unfilterable — and the interface's own badge, built from whatever the client
+// sent, links straight at them.
+func parsePrompt(raw string) (*store.PromptFilter, error) {
+	if raw == "" {
+		return nil, fmt.Errorf("prompt must name a prompt, got %q", raw)
+	}
+	if at := strings.LastIndex(raw, "@"); at > 0 && digits(raw[at+1:]) {
+		if version, err := strconv.ParseInt(raw[at+1:], 10, 64); err == nil {
+			return &store.PromptFilter{Name: raw[:at], Version: &version}, nil
+		}
+	}
+	return &store.PromptFilter{Name: raw}, nil
+}
+
+// digits reports whether a string is one or more ASCII digits and nothing
+// else. `strconv.ParseInt` alone is more generous than the grammar: it takes a
+// sign, so `svc@-1` would read as a version and leave a prompt named `svc@-1`
+// unfilterable, while `name@+7` would quietly answer about version 7 of
+// `name`. That is the "an `@` that is not a separator" defect of Decision 15
+// at a third position (found in review of PR #19). A run of digits too long
+// for int64 still falls through to being a name, which is right.
+func digits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func decodeTraceCursor(raw string) (*store.TraceCursor, error) {

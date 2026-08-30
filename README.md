@@ -94,6 +94,14 @@ curl -H "Authorization: Bearer tp-sk-…" \
   "localhost:4318/api/v1/traces?q=%22refund+failed%22"
 ```
 
+The rest of what the SDKs already send is a filter too — which deployment a
+trace ran in, what kind of step it contains, which prompt produced an answer:
+
+```sh
+curl … "localhost:4318/api/v1/traces?release=2026.8.30&type=tool"
+curl … "localhost:4318/api/v1/traces?prompt=support-answer@7"
+```
+
 The same question, three ways:
 
 ```sh

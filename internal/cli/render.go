@@ -48,10 +48,13 @@ type traceRow struct {
 	UserID           string   `json:"user_id"`
 	SessionID        string   `json:"session_id"`
 	Environment      string   `json:"environment"`
+	Release          string   `json:"release"`
+	Version          string   `json:"version"`
 	Tags             []string `json:"tags"`
 	Timestamp        string   `json:"timestamp"`
 	TotalCost        *float64 `json:"total_cost"`
 	LatencyMs        *int64   `json:"latency_ms"`
+	TTFTMs           *int64   `json:"ttft_ms"`
 	ErrorCount       int      `json:"error_count"`
 	ObservationCount int      `json:"observation_count"`
 	// Match is where a search hit, present only with `--search` (spec 011).
@@ -68,20 +71,40 @@ type traceMatch struct {
 
 // observationNode is one node of the tree the trace endpoint returns.
 type observationNode struct {
-	ID            string            `json:"id"`
-	Type          string            `json:"type"`
-	Name          string            `json:"name"`
-	StartTime     string            `json:"start_time"`
-	EndTime       string            `json:"end_time"`
-	Model         string            `json:"model"`
-	Level         string            `json:"level"`
-	StatusMessage string            `json:"status_message"`
-	Usage         map[string]any    `json:"usage"`
-	CostDetails   map[string]any    `json:"cost_details"`
-	Input         json.RawMessage   `json:"input"`
-	Output        json.RawMessage   `json:"output"`
-	Metadata      json.RawMessage   `json:"metadata"`
-	Children      []observationNode `json:"children"`
+	ID            string          `json:"id"`
+	Type          string          `json:"type"`
+	Name          string          `json:"name"`
+	StartTime     string          `json:"start_time"`
+	EndTime       string          `json:"end_time"`
+	TTFTMs        *int64          `json:"ttft_ms"`
+	Model         string          `json:"model"`
+	Level         string          `json:"level"`
+	StatusMessage string          `json:"status_message"`
+	Usage         map[string]any  `json:"usage"`
+	CostDetails   map[string]any  `json:"cost_details"`
+	Prompt        *promptLink     `json:"prompt"`
+	InputBytes    *int64          `json:"input_bytes"`
+	OutputBytes   *int64          `json:"output_bytes"`
+	Input         json.RawMessage `json:"input"`
+	Output        json.RawMessage `json:"output"`
+	Metadata      json.RawMessage `json:"metadata"`
+
+	Children []observationNode `json:"children"`
+}
+
+// promptLink is the prompt an observation ran, as the client labelled it.
+type promptLink struct {
+	Name    string `json:"name"`
+	Version *int64 `json:"version"`
+}
+
+// String renders the label the way a person writes it into `--prompt`, so the
+// line a reader sees is the query they would type next.
+func (p promptLink) String() string {
+	if p.Version == nil {
+		return p.Name
+	}
+	return fmt.Sprintf("%s@%d", p.Name, *p.Version)
 }
 
 // traceDetail is one trace with its tree.
@@ -106,7 +129,7 @@ func renderTraceTable(out io.Writer, rows []traceRow, colour bool) {
 		fmt.Fprintln(out, "no traces")
 		return
 	}
-	t := newTable(out, "TIME", "ID", "NAME", "ENV", "OBS", "ERR", "LATENCY", "COST")
+	t := newTable(out, "TIME", "ID", "NAME", "ENV", "OBS", "ERR", "LATENCY", "TTFT", "COST")
 	for _, row := range rows {
 		t.row(
 			shortTime(row.Timestamp),
@@ -116,6 +139,10 @@ func renderTraceTable(out io.Writer, rows []traceRow, colour bool) {
 			strconv.Itoa(row.ObservationCount),
 			strconv.Itoa(row.ErrorCount),
 			duration(row.LatencyMs),
+			// After latency, and formatted like it: the two are the
+			// same kind of number and are read side by side (spec 012,
+			// CLI contract).
+			duration(row.TTFTMs),
 			cost(row.TotalCost),
 		)
 		if row.Match != nil {
@@ -154,6 +181,14 @@ func renderTraceDetail(out io.Writer, trace traceDetail) {
 	fmt.Fprintf(out, "trace %s\n", trace.ID)
 	fmt.Fprintf(out, "  name        %s\n", orDash(trace.Name))
 	fmt.Fprintf(out, "  environment %s\n", orDash(trace.Environment))
+	// Beside the environment, and only when the trace carried them: a
+	// deployment nobody named is not a deployment called "-".
+	if trace.Release != "" {
+		fmt.Fprintf(out, "  release     %s\n", trace.Release)
+	}
+	if trace.Version != "" {
+		fmt.Fprintf(out, "  version     %s\n", trace.Version)
+	}
 	if trace.UserID != "" {
 		fmt.Fprintf(out, "  user        %s\n", trace.UserID)
 	}
@@ -165,6 +200,7 @@ func renderTraceDetail(out io.Writer, trace traceDetail) {
 	}
 	fmt.Fprintf(out, "  started     %s\n", shortTime(trace.Timestamp))
 	fmt.Fprintf(out, "  latency     %s\n", duration(trace.LatencyMs))
+	fmt.Fprintf(out, "  ttft        %s\n", duration(trace.TTFTMs))
 	fmt.Fprintf(out, "  cost        %s\n", cost(trace.TotalCost))
 	fmt.Fprintf(out, "  errors      %d of %d observations\n", trace.ErrorCount, trace.ObservationCount)
 	if len(trace.Metadata) > 0 {
@@ -198,11 +234,19 @@ func renderObservation(out io.Writer, node observationNode, indent string) {
 	if span := spanDuration(node.StartTime, node.EndTime); span != "" {
 		parts = append(parts, span)
 	}
+	// The wait before the first token, named because a bare second duration
+	// beside the span's would be unreadable (spec 012, CLI contract).
+	if node.TTFTMs != nil {
+		parts = append(parts, "ttft "+duration(node.TTFTMs))
+	}
 	if tokens := totalTokens(node.Usage); tokens != "" {
 		parts = append(parts, tokens)
 	}
 	if amount := detailCost(node.CostDetails); amount != "" {
 		parts = append(parts, amount)
+	}
+	if node.Prompt != nil {
+		parts = append(parts, "prompt "+node.Prompt.String())
 	}
 	fmt.Fprintf(out, "%s%s %s  [%s]\n", indent, marker, strings.Join(parts, "  "), node.ID)
 	if node.StatusMessage != "" {

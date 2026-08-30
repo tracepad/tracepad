@@ -105,9 +105,25 @@ a gap, a guarantee.
 
 Tool inputs mirror their endpoint's query parameters — same names, same
 meanings — with the constraints stated in the schema: enums for `status`,
-`group_by` and `data_type`, hex patterns for ids, `limit` bounded at 500. Every
-tool declares an `outputSchema` and returns the endpoint's JSON as
+`type`, `group_by` and `data_type`, hex patterns for ids, `limit` bounded at
+500. Every tool declares an `outputSchema` and returns the endpoint's JSON as
 `structuredContent`, with a one-line summary in `content`.
+
+`list_traces`, `search` and `get_last_trace` take four filters for what the
+wire already carries:
+
+| Parameter | Reach for it when |
+|---|---|
+| `release`, `version` | The user names a deployment, or asks whether a release changed something. |
+| `type` | The user asks about a kind of step — a tool call, a guardrail, a retrieval — and wants the traces that contain one. One of ten values, exact: `generation` does not match `embedding`. |
+| `prompt` | The user names a prompt and wants what it produced. `"support-answer"` for every version, `"support-answer@7"` for one. A version is a number, so a name that contains an `@` is passed as it stands. |
+
+The rows they return carry `release`, `version` and `ttft_ms`; the tree from
+`get_trace` and `get_last_trace` carries each observation's kind,
+`completion_start_time`, its own `ttft_ms`, the `prompt` it ran and the sizes
+of its payloads — the last of these whether or not `expand` inlined them, so
+"is this worth fetching" is answerable without fetching it. `get_stats` takes
+`release` in `group_by`.
 
 Every tool is annotated `readOnlyHint: true` with a display title, so a host
 can auto-approve reads instead of prompting for them. `tools/list` is returned

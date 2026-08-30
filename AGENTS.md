@@ -62,6 +62,17 @@ API. This file routes; it does not duplicate what specs and docs say.
   the observation that matched. Schema 0007 (Decision 14) rebuilt that index
   over the **scalar leaves** of a payload's JSON rather than its text: the keys
   and brackets are not words, and the snippet reads as a sentence.
+- ✅ Spec 012 (wire columns) shipped: schema 0008 — the observation type
+  widened to the ten-value Langfuse vocabulary, `completion_start_time`,
+  `prompt_name`/`prompt_version`, and `release`/`version`/`ttft_ms` on the
+  trace. What the SDKs already send stops landing in `metadata` where nothing
+  could filter on it: four filters (`release`, `version`, `type`, `prompt`),
+  a TTFT column, `group_by=release`, and payload sizes read from the payload
+  table rather than stored twice. Everything an unclaimed attribute keeps now
+  says where it came from — `resource.<key>`, `scope.<key>`, bare for a span
+  attribute — so a resource `service.name` and a span one stop overwriting
+  each other. No backfill: the release is deferred, so the migration is free
+  (#1).
 - ✅ Spec 005 (retention & admin) shipped: schema 0005, the hourly sweeper
   writing every chunk through the group-commit writer, the admin API under
   `/api/v1/projects` with a dry-run/confirm contract on every destructive
@@ -86,7 +97,7 @@ API. This file routes; it does not duplicate what specs and docs say.
 | Search | `internal/store/search.go` (the query language, what of a field is indexed, and the snippet) and `searchindex.go` (the index's lifetime), `docs/api.md#search`, spec 011 — the user's text never reaches `MATCH` as written, `searchableField` is what both the index and the snippet see of a payload, and every path that deletes observations deletes their entries in the same transaction |
 | Retention and the sweeper | `internal/store/sweep.go`, `docs/retention.md`, spec 005 — every chunk is a `WriteJob`, never a second write connection |
 | Admin API (projects, keys, retention, erasure) | `internal/server/admin.go`, `internal/store/admin.go`, `docs/admin.md`, spec 005 — destructive endpoints are a dry run until `?confirm=` echoes the name, checked inside the write transaction |
-| Attribute mapping | `internal/mapping/rules.go` is the table; `mapping.go` applies it |
+| Attribute mapping | `internal/mapping/rules.go` is the table; `mapping.go` applies it; `value.go` holds `attrs`, where reading and claiming are separate and an unclaimed attribute keeps the origin it arrived at (spec 012 #7) |
 | Web interface | `ui/` (SvelteKit SPA), `internal/ui/` (the embed and the tagless stub), `internal/server/ui.go` (delivery and the SPA fallback), `docs/ui.md`, specs 006 to 010 — the API types in `ui/src/lib/api/schema.d.ts` are generated from `openapi.json` and the gate fails on drift |
 | A listing (rows, cursors, count, the bar, the panel's walk) | `ui/src/lib/listing.svelte.ts` and its tests, spec 010 — all three listings are one loader, so a listing defect is one defect. `$lib/page` and `$lib/peek` hold the pure part |
 | Configuration | `internal/config/`, spec 001 + spec 002 Configuration tables |

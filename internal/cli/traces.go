@@ -43,6 +43,10 @@ type traceFilterFlags struct {
 	since       string
 	until       string
 	minCost     string
+	release     string
+	version     string
+	kind        string
+	prompt      string
 	onlyErrors  bool
 }
 
@@ -55,6 +59,13 @@ func (f *traceFilterFlags) register(fs *flag.FlagSet) {
 	fs.StringVar(&f.since, "since", "", "")
 	fs.StringVar(&f.until, "until", "", "")
 	fs.StringVar(&f.minCost, "min-cost", "", "")
+	fs.StringVar(&f.release, "release", "", "")
+	fs.StringVar(&f.version, "version", "", "")
+	// `--type`, not `--kind`: the parameter is `type` and the CLI's flags
+	// are named after the API's (#1). The field is `kind` because `type` is
+	// a keyword.
+	fs.StringVar(&f.kind, "type", "", "")
+	fs.StringVar(&f.prompt, "prompt", "", "")
 	fs.BoolVar(&f.onlyErrors, "error", false, "")
 }
 
@@ -69,6 +80,10 @@ func (f *traceFilterFlags) query(r *run) (url.Values, error) {
 	addSome(query, "name", f.name)
 	addSome(query, "tag", f.tag)
 	addSome(query, "min_cost", f.minCost)
+	addSome(query, "release", f.release)
+	addSome(query, "version", f.version)
+	addSome(query, "type", f.kind)
+	addSome(query, "prompt", f.prompt)
 	if f.onlyErrors {
 		query.Set("status", "error")
 	}

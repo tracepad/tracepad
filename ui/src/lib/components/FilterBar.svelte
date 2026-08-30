@@ -1,11 +1,14 @@
 <script lang="ts" module>
 	import type { FilterName } from '$lib/api/traces';
+	import { OBSERVATION_TYPES } from '$lib/observations';
 
 	type Field = {
 		label: string;
-		kind: 'text' | 'number' | 'status' | 'tags';
+		kind: 'text' | 'number' | 'status' | 'tags' | 'choice';
 		placeholder?: string;
 		hint?: string;
+		/** For `choice`: the values, offered beside an "Any" that clears it. */
+		options?: readonly string[];
 	};
 
 	/**
@@ -35,7 +38,21 @@
 			hint: 'A trace must carry every tag'
 		},
 		status: { label: 'Status', kind: 'status' },
-		min_cost: { label: 'Min cost', kind: 'number', placeholder: '0.01' }
+		min_cost: { label: 'Min cost', kind: 'number', placeholder: '0.01' },
+		release: { label: 'Release', kind: 'text', placeholder: '2026.8.30' },
+		version: { label: 'Version', kind: 'text', placeholder: 'checkout-v9' },
+		type: {
+			label: 'Type',
+			kind: 'choice',
+			options: OBSERVATION_TYPES,
+			hint: 'Traces containing one'
+		},
+		prompt: {
+			label: 'Prompt',
+			kind: 'text',
+			placeholder: 'support-answer@7',
+			hint: 'Name, or name@version'
+		}
 	};
 </script>
 
@@ -197,6 +214,18 @@
 										<option value="">Any</option>
 										<option value="error">Error</option>
 										<option value="ok">OK</option>
+									</select>
+								{:else if field.kind === 'choice'}
+									<select
+										id="filter-{name}"
+										value={text(name)}
+										onchange={(event) => set(name, event.currentTarget.value)}
+										class={fieldClass}
+									>
+										<option value="">Any</option>
+										{#each field.options ?? [] as option (option)}
+											<option value={option}>{option}</option>
+										{/each}
 									</select>
 								{:else if field.kind === 'tags'}
 									<input
