@@ -319,4 +319,16 @@ func TestPromptFilterSplitsOnTheLastAt(t *testing.T) {
 			t.Error("parsePrompt(``) returned a filter, want a refusal")
 		}
 	})
+
+	// An `@` further inside a name survives only with a version behind it,
+	// as the row above shows. On its own the tail reads as a version, and a
+	// version that is not a whole number is a 400 by decision (spec 012 #5)
+	// — nothing here can tell this spelling from the `name@latest` that
+	// decision is about. Asserted so the limit is a documented one rather
+	// than a surprise (found in review of PR #19).
+	t.Run("an @ inside a name with no version behind it", func(t *testing.T) {
+		if _, err := parsePrompt("team@acme/answer"); err == nil {
+			t.Error("parsePrompt(`team@acme/answer`) returned a filter, want the documented refusal")
+		}
+	})
 }

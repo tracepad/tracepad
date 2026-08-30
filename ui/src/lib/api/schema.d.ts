@@ -842,7 +842,7 @@ export interface components {
         Version: string;
         /** @description Keeps traces with at least one observation of this kind. Exact: `generation` does not match `embedding`. A value outside the list is a 400 */
         ObservationType: "span" | "generation" | "event" | "agent" | "tool" | "chain" | "retriever" | "guardrail" | "evaluator" | "embedding";
-        /** @description `name` or `name@version`: keeps traces with at least one observation that ran this prompt, at any version or at that one. A version that is not a whole number is a 400. The version is split off the last `@` with a name in front of it, so `@acme/support` is a name and not a version */
+        /** @description `name` or `name@version`: keeps traces with at least one observation that ran this prompt, at any version or at that one. A version that is not a whole number is a 400. The version is split off the last `@` with a name in front of it, so a name beginning with one (`@acme/support`) is filtered whole, while a name containing one elsewhere needs its version (`team@acme/answer@3`) */
         Prompt: string;
         /** @description `io` inlines each observation's input, output and metadata, each cut to an equal share of the remaining budget with a truncation marker naming the rest */
         Expand: "io";
@@ -1096,7 +1096,7 @@ export interface operations {
                 version?: components["parameters"]["Version"];
                 /** @description Keeps traces with at least one observation of this kind. Exact: `generation` does not match `embedding`. A value outside the list is a 400 */
                 type?: components["parameters"]["ObservationType"];
-                /** @description `name` or `name@version`: keeps traces with at least one observation that ran this prompt, at any version or at that one. A version that is not a whole number is a 400. The version is split off the last `@` with a name in front of it, so `@acme/support` is a name and not a version */
+                /** @description `name` or `name@version`: keeps traces with at least one observation that ran this prompt, at any version or at that one. A version that is not a whole number is a 400. The version is split off the last `@` with a name in front of it, so a name beginning with one (`@acme/support`) is filtered whole, while a name containing one elsewhere needs its version (`team@acme/answer@3`) */
                 prompt?: components["parameters"]["Prompt"];
                 /** @description Comma-separated subset of the row fields. An unknown name is a 400. */
                 fields?: string;
@@ -1161,7 +1161,7 @@ export interface operations {
                 version?: components["parameters"]["Version"];
                 /** @description Keeps traces with at least one observation of this kind. Exact: `generation` does not match `embedding`. A value outside the list is a 400 */
                 type?: components["parameters"]["ObservationType"];
-                /** @description `name` or `name@version`: keeps traces with at least one observation that ran this prompt, at any version or at that one. A version that is not a whole number is a 400. The version is split off the last `@` with a name in front of it, so `@acme/support` is a name and not a version */
+                /** @description `name` or `name@version`: keeps traces with at least one observation that ran this prompt, at any version or at that one. A version that is not a whole number is a 400. The version is split off the last `@` with a name in front of it, so a name beginning with one (`@acme/support`) is filtered whole, while a name containing one elsewhere needs its version (`team@acme/answer@3`) */
                 prompt?: components["parameters"]["Prompt"];
                 /** @description `io` inlines each observation's input, output and metadata, each cut to an equal share of the remaining budget with a truncation marker naming the rest */
                 expand?: components["parameters"]["Expand"];

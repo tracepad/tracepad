@@ -735,12 +735,16 @@ func traceFilter(values url.Values) (store.TraceFilter, error) {
 // client may well use, but it is not something this filter can answer, and a
 // 400 says so rather than returning nothing (spec 012, API contract).
 //
-// The name is split on the last `@` so that a prompt whose own name contains
-// one keeps it — and on the last `@` that has a name in front of it, because
-// a leading one is part of the name rather than a separator. `@acme/support`
-// is a prompt somebody has, the interface's own badge links to it, and
-// answering that link with a 400 was the bug this guard fixes (found in
-// review of PR #19).
+// The name is split on the last `@` that has a name in front of it: a leading
+// one is part of the name rather than a separator. `@acme/support` is a prompt
+// somebody has, the interface's own badge links to it, and answering that link
+// with a 400 was the bug this guard fixes (found in review of PR #19).
+//
+// An `@` further inside a name survives only when a version follows it
+// (`team@acme/answer@3`). On its own, `team@acme/answer` reads as the version
+// `acme/answer` and is refused, because a version that is not a whole number
+// is a 400 by decision (spec 012 #5) and nothing here can tell that spelling
+// apart from the `name@latest` that decision is about.
 func parsePrompt(raw string) (*store.PromptFilter, error) {
 	name, version := raw, ""
 	at := strings.LastIndex(raw, "@")

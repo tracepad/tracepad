@@ -110,7 +110,7 @@ one of the ten values of Decision 2.
 | `release` | Exact match on the trace's release. |
 | `version` | Exact match on the trace's version. |
 | `type` | Traces with at least one observation of this type. One of the ten values; anything else is a `400`. |
-| `prompt` | `name` or `name@version`: traces with at least one observation that ran this prompt (any version, or that version). A `version` that is not an integer is a `400`. The version is split off the last `@` with a name before it, so a scoped name (`@acme/support`) filters whole. |
+| `prompt` | `name` or `name@version`: traces with at least one observation that ran this prompt (any version, or that version). A `version` that is not an integer is a `400`. The version is split off the last `@` with a name before it, so a scoped name (`@acme/support`) filters whole; a name with an `@` inside it needs its version to be filtered (`team@acme/answer@3`), the versionless form reading as a version that is not a number. |
 
 All are one more condition on the same keyset listing (spec 004 #4); a
 cursor is valid only with the same filters, as today.
