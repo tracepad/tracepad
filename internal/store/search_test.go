@@ -506,10 +506,11 @@ func TestSearchMatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	match, err := s.SearchMatch(project.ID, hexTrace(1), query)
+	matches, err := s.SearchMatches(project.ID, []string{hexTrace(1)}, query)
 	if err != nil {
 		t.Fatal(err)
 	}
+	match := matches[hexTrace(1)]
 	if match == nil {
 		t.Fatal("a trace the listing matched carries no match")
 	}
@@ -525,12 +526,27 @@ func TestSearchMatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	byName, err := s.SearchMatch(project.ID, hexTrace(1), nameQuery)
+	named, err := s.SearchMatches(project.ID, []string{hexTrace(1)}, nameQuery)
 	if err != nil {
 		t.Fatal(err)
 	}
+	byName := named[hexTrace(1)]
 	if byName == nil || byName.Field != FieldTraceName || byName.ObservationID != "" {
 		t.Errorf("match = %+v, want the trace name with no observation", byName)
+	}
+
+	// A page is one statement, and a trace with no hit is simply absent
+	// from what comes back rather than present and empty.
+	page := []string{hexTrace(1), hexTrace(2), hexTrace(3)}
+	over, err := s.SearchMatches(project.ID, page, query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(over) != 2 || over[hexTrace(1)] == nil || over[hexTrace(3)] == nil {
+		t.Errorf("matches = %v, want only the two traces of the page that match", over)
+	}
+	if over[hexTrace(2)] != nil {
+		t.Errorf("a trace with no hit came back with a match: %+v", over[hexTrace(2)])
 	}
 }
 
@@ -574,6 +590,41 @@ func TestSnippetWindow(t *testing.T) {
 			source := collapseSpace(string([]rune(tc.text)))
 			if body != "" && !strings.Contains(source, body) {
 				t.Errorf("snippet %q is not a window of the text", body)
+			}
+		})
+	}
+}
+
+// TestSnippetOnATokenLongerThanTheWindow: a matched token longer than the
+// snippet is a word both edges of the window land inside, and snapping them to
+// its boundaries crossed them over — `runes[start:end]` with start past end,
+// which panicked the handler goroutine (found in review of PR #16).
+//
+// Not a curiosity: payload text carries such tokens routinely — a base64 blob,
+// a JWT, an opaque id — and a prefix search is what finds them. The window has
+// no word boundary to land on, so it is the budget from the hit.
+func TestSnippetOnATokenLongerThanTheWindow(t *testing.T) {
+	query, err := ParseSearch("needle*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	long := "needle" + strings.Repeat("z", 300)
+
+	for _, tc := range []struct{ name, text string }{
+		{"after other words", "some leading words here " + long + " trailing"},
+		{"at the very start", long + " trailing"},
+		{"as the whole text", long},
+		{"twice its length again", strings.Repeat("filler ", 40) + long + strings.Repeat(" tail", 40)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			snippet := Snippet(tc.text, query)
+			if got := utf8.RuneCountInString(snippet); got > SearchSnippetLength {
+				t.Errorf("snippet is %d characters, over the %d limit", got, SearchSnippetLength)
+			}
+			// The point of the window is the hit; a snippet of nothing
+			// but an ellipsis is the other way to get this wrong.
+			if !strings.Contains(snippet, "needle") {
+				t.Errorf("snippet = %q, want the matched token in it", snippet)
 			}
 		})
 	}

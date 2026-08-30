@@ -323,11 +323,25 @@ func window(runes []rune, words []indexedWord, hit, hitEnd int) string {
 	end = min(len(runes), start+budget)
 	start = max(0, end-budget)
 
-	if start > 0 {
-		start = wordStart(words, start)
+	// Snapped to word boundaries, and then checked: a token longer than the
+	// budget is a word both edges land inside, so snapping pushes the start
+	// past the end and the slice below is a panic (found in review of
+	// PR #16). Payload text is full of such tokens — a base64 blob, a JWT,
+	// an opaque id — and a search that matches one of them is exactly the
+	// search somebody types. There is no window on a word boundary to be
+	// had, so the answer is the budget from the hit: cutting inside a word
+	// nothing else fits beside is what a reader wanted anyway.
+	snapped, snappedEnd := start, end
+	if snapped > 0 {
+		snapped = wordStart(words, snapped)
 	}
-	if end < len(runes) {
-		end = wordEnd(words, end)
+	if snappedEnd < len(runes) {
+		snappedEnd = wordEnd(words, snappedEnd)
+	}
+	if snapped < snappedEnd {
+		start, end = snapped, snappedEnd
+	} else {
+		start, end = hit, min(len(runes), hit+budget)
 	}
 	body := collapseSpace(string(runes[start:end]))
 	if start > 0 {
@@ -339,10 +353,12 @@ func window(runes []rune, words []indexedWord, hit, hitEnd int) string {
 	return body
 }
 
-// wordStart moves an edge forward off the middle of a word.
+// wordStart moves an edge forward off the middle of a word. Strictly inside:
+// an edge already on a word's first character is on a boundary, and skipping
+// that whole word would drop text the window had room for.
 func wordStart(words []indexedWord, at int) int {
 	for _, word := range words {
-		if word.start <= at && at < word.end {
+		if word.start < at && at < word.end {
 			return word.end
 		}
 	}

@@ -243,47 +243,80 @@ type TraceMatch struct {
 	Snippet       string
 }
 
-// SearchMatch answers "where in this trace" for one row of a listing taken with
-// `q`. It is one indexed lookup and at most one payload read, paid only when
-// `q` is set (spec 011 #6).
+// SearchMatches answers "where in it" for a whole page of a listing taken with
+// `q`: the observation and field with the best `bm25` among each trace's hits,
+// and the window of text around the hit. Traces with no match are absent from
+// the map rather than present and nil.
+//
+// One statement for the page, not one per row. Asked per row, the MATCH has
+// nothing to narrow it — SQLite walks the whole posting list and filters the
+// project and trace after the join, so a page cost a full scan of the index per
+// row, linear in how many entries the word matches (measured on ten thousand
+// matching entries: 151 ms for fifty rows, against 4 ms for the statement
+// below; found in review of PR #16). Constraining the FTS side by rowid instead
+// was measured too and changed nothing — the scan is the plan whatever is
+// joined to it, so the fix is to do it once.
 //
 // `bm25` picks the entry; the snippet cannot come from FTS5 — a contentless
 // table has no text to cut it from — so the field's own text is read back and
-// cut here. Only the indexed prefix is searched, because that is the only part
-// the index could have matched.
-func (s *Store) SearchMatch(projectID, traceID string, query *SearchQuery) (*TraceMatch, error) {
-	var (
-		observationID sql.NullString
-		field         string
-	)
+// cut here, one payload per matching row, as Decision 6 says. Only the indexed
+// prefix is searched, because that is the only part the index could have
+// matched.
+func (s *Store) SearchMatches(projectID string, traceIDs []string, query *SearchQuery) (
+	map[string]*TraceMatch, error,
+) {
+	found := make(map[string]*TraceMatch, len(traceIDs))
+	ids := make([]any, 0, len(traceIDs))
+	for _, id := range traceIDs {
+		ids = append(ids, id)
+	}
 	// The tie-break on `e.id` is what makes the answer stable: bm25 over a
 	// contentless index scores two one-hit fields identically, and a row
 	// that named a different observation on every read would look like a
-	// listing that changes when nothing has.
-	err := s.db.QueryRow(
-		`SELECT e.observation_id, e.field
-		   FROM search_fts JOIN search_entries e ON e.id = search_fts.rowid
-		  WHERE search_fts MATCH ? AND e.project_id = ? AND e.trace_id = ?
-		  ORDER BY bm25(search_fts), e.id LIMIT 1`,
-		query.Match, projectID, traceID).Scan(&observationID, &field)
-	if errors.Is(err, sql.ErrNoRows) {
-		// The index and the listing disagree only if a delete landed
-		// between the two reads, and a row without a match is better
-		// than a failed page.
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("read the match in trace %s: %w", traceID, err)
-	}
-	text, err := s.matchedText(projectID, traceID, observationID.String, field)
+	// listing that changes when nothing has. Ordered, the first row of each
+	// trace is its best hit.
+	err := eachIn(ids, func(batch []any) error {
+		args := append([]any{query.Match, projectID}, batch...)
+		rows, err := s.db.Query(
+			`SELECT e.trace_id, e.observation_id, e.field
+			   FROM search_fts JOIN search_entries e ON e.id = search_fts.rowid
+			  WHERE search_fts MATCH ? AND e.project_id = ?
+			    AND e.trace_id IN (`+placeholders(len(batch))+`)
+			  ORDER BY bm25(search_fts), e.id`, args...)
+		if err != nil {
+			return fmt.Errorf("read the matches of a page: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var (
+				traceID       string
+				observationID sql.NullString
+				field         string
+			)
+			if err := rows.Scan(&traceID, &observationID, &field); err != nil {
+				return err
+			}
+			if _, better := found[traceID]; better {
+				continue
+			}
+			found[traceID] = &TraceMatch{
+				ObservationID: observationID.String, Field: field,
+			}
+		}
+		return rows.Err()
+	})
 	if err != nil {
 		return nil, err
 	}
-	return &TraceMatch{
-		ObservationID: observationID.String,
-		Field:         field,
-		Snippet:       Snippet(searchable(text), query),
-	}, nil
+
+	for traceID, match := range found {
+		text, err := s.matchedText(projectID, traceID, match.ObservationID, match.Field)
+		if err != nil {
+			return nil, err
+		}
+		match.Snippet = Snippet(searchable(text), query)
+	}
+	return found, nil
 }
 
 // matchedText reads back the one field the match named.

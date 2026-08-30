@@ -112,22 +112,28 @@ func (s *Server) handleListTraces(w http.ResponseWriter, r *http.Request) {
 		func(row *store.TraceRow) string {
 			return encodeCursor(strconv.FormatInt(row.Timestamp, 10), row.ID)
 		})
+	// Where each row matched: one statement for the page and one payload
+	// read per matching row, paid only when there is a `q` and only when the
+	// caller kept `match` in its `?fields=` (spec 011 #6).
+	var matches map[string]*store.TraceMatch
+	if filter.Search != nil && fields.wants("match") {
+		ids := make([]string, 0, len(traces))
+		for _, row := range traces {
+			ids = append(ids, row.ID)
+		}
+		matches, err = s.store.SearchMatches(project.ID, ids, filter.Search)
+		if err != nil {
+			slog.Error("read the search matches failed", "err", err)
+			writeError(w, http.StatusInternalServerError, "failed to list traces")
+			return
+		}
+	}
+
 	rows := make([]object, 0, len(traces))
 	for _, row := range traces {
 		rendered := renderTraceRow(row)
-		// One indexed lookup and at most one payload read per row, paid
-		// only when there is a `q` and only when the caller kept `match`
-		// in its `?fields=` (spec 011 #6).
-		if filter.Search != nil && fields.wants("match") {
-			match, err := s.store.SearchMatch(project.ID, row.ID, filter.Search)
-			if err != nil {
-				slog.Error("read the search match failed", "err", err)
-				writeError(w, http.StatusInternalServerError, "failed to list traces")
-				return
-			}
-			if match != nil {
-				rendered = rendered.put("match", renderMatch(match))
-			}
+		if match := matches[row.ID]; match != nil {
+			rendered = rendered.put("match", renderMatch(match))
 		}
 		rows = append(rows, fields.apply(rendered))
 	}
