@@ -79,6 +79,20 @@ func traceFilterProperties() map[string]*jsonschema.Schema {
 		"status": oneOf("\"error\" keeps traces with at least one failed observation, \"ok\" keeps the rest.",
 			"error", "ok"),
 		"min_cost": atLeast(0, "Only traces costing at least this much. A trace whose client reported no cost never matches."),
+		// Descriptions are triggers, not field lists (spec 004 #17): they
+		// say when to reach for the filter, because a model choosing
+		// between nine of them is answering "which one does this
+		// question need".
+		"release": text("Use when the user names a deployment or asks whether a release changed something — " +
+			"\"did 2026.8.30 make it slower\". Exact match on the release the trace ran in."),
+		"version": text("Use when the user names a version of the application's own logic rather than a " +
+			"deployment. Exact match."),
+		"type": oneOf("Use when the user asks about a kind of step — a tool call, a guardrail, a retrieval — "+
+			"and wants the traces that contain one. Exact: \"generation\" does not match \"embedding\".",
+			"span", "generation", "event", "agent", "tool", "chain",
+			"retriever", "guardrail", "evaluator", "embedding"),
+		"prompt": text("Use when the user names a prompt and wants what it produced — \"which traces ran " +
+			"support-answer\". Either \"name\" for every version of it, or \"name@7\" for one."),
 	}
 }
 
@@ -93,6 +107,10 @@ type traceFilterInput struct {
 	Tag         []string `json:"tag"`
 	Status      string   `json:"status"`
 	MinCost     *float64 `json:"min_cost"`
+	Release     string   `json:"release"`
+	Version     string   `json:"version"`
+	Type        string   `json:"type"`
+	Prompt      string   `json:"prompt"`
 }
 
 func (f traceFilterInput) query() url.Values {
@@ -104,6 +122,10 @@ func (f traceFilterInput) query() url.Values {
 	set(query, "session_id", f.SessionID)
 	set(query, "name", f.Name)
 	set(query, "status", f.Status)
+	set(query, "release", f.Release)
+	set(query, "version", f.Version)
+	set(query, "type", f.Type)
+	set(query, "prompt", f.Prompt)
 	for _, tag := range f.Tag {
 		if tag != "" {
 			query.Add("tag", tag)
@@ -400,22 +422,24 @@ func register(server *mcp.Server, api API) {
 		Description: "Aggregate traffic, failures, cost and latency — the user asks how many runs there were, how much they cost, how slow they are, " +
 			"or how any of that changed over time or differs per model. " +
 			"Returns buckets with count, error_count, total_cost and exact p50/p95 latency. " +
-			"Read the `unit` field before comparing counts: grouping by hour, day or environment counts traces, " +
-			"grouping by model counts observations, because a trace has no model. " +
+			"Read the `unit` field before comparing counts: grouping by hour, day, environment or release " +
+			"counts traces, grouping by model counts observations, because a trace has no model. " +
+			"Group by release when the user asks whether a deployment moved cost or latency. " +
 			"Does NOT return individual traces — use list_traces for those.",
 		InputSchema: object(map[string]*jsonschema.Schema{
 			"group_by": oneOf("What each bucket collects. Default \"day\".",
-				"hour", "day", "model", "environment"),
+				"hour", "day", "model", "environment", "release"),
 			"from":        timestamp("Only traces at or after this RFC 3339 instant."),
 			"to":          timestamp("Only traces strictly before this RFC 3339 instant."),
 			"environment": text("Only traces from this environment."),
 		}),
 		OutputSchema: object(map[string]*jsonschema.Schema{
-			"group_by": oneOf("What each bucket collects.", "hour", "day", "model", "environment"),
+			"group_by": oneOf("What each bucket collects.", "hour", "day", "model", "environment", "release"),
 			"unit": oneOf("What `count` counts. Counts of different units are not comparable.",
 				"trace", "observation"),
 			"buckets": list(object(map[string]*jsonschema.Schema{
-				"key":         text("The hour, day, model or environment this bucket is."),
+				"key": text("The hour, day, model, environment or release this bucket is. " +
+					"Empty when grouping by release and the traces named none."),
 				"count":       integer("How many of `unit` fell in this bucket."),
 				"error_count": integer("How many of those failed."),
 				"total_cost":  number("Summed over what reported a cost; absent when nothing did."),
@@ -461,10 +485,13 @@ func traceRowSchema() *jsonschema.Schema {
 		"user_id":           text("The end user it was attributed to."),
 		"session_id":        text("The session it belongs to, for get_session."),
 		"environment":       text("Where it ran."),
+		"release":           text("The deployment it ran in, which list_traces takes as its release filter."),
+		"version":           text("The version of the application's own logic."),
 		"tags":              list(text("A tag."), "Tags the application set."),
 		"timestamp":         timestamp("When its earliest observation started."),
 		"total_cost":        number("Summed over observations whose client reported a cost; absent when none did."),
 		"latency_ms":        integer("End to end, in milliseconds."),
+		"ttft_ms":           integer("The wait before the first token of its earliest completion; absent when no observation reported one."),
 		"error_count":       integer("How many of its observations failed."),
 		"observation_count": integer("How many observations it has."),
 	}, "id", "environment", "error_count", "observation_count")
@@ -510,20 +537,31 @@ func traceDetailSchema() *jsonschema.Schema {
 		"parent_observation_id": text("The observation this one ran under, whenever it named one — " +
 			"nested children carry it too, so it is not a sign that the parent is missing. " +
 			"An observation whose parent is not in this trace renders at the root and still carries it."),
-		"type":             oneOf("What kind of work this was.", "span", "generation", "event"),
-		"name":             text("What the application called it."),
-		"start_time":       timestamp("When it started."),
-		"end_time":         timestamp("When it ended."),
-		"model":            text("The model, for a generation."),
+		"type": oneOf("What kind of work this was.",
+			"span", "generation", "event", "agent", "tool", "chain",
+			"retriever", "guardrail", "evaluator", "embedding"),
+		"name":       text("What the application called it."),
+		"start_time": timestamp("When it started."),
+		"end_time":   timestamp("When it ended."),
+		"completion_start_time": timestamp("When the first token came back, as the client reported it. " +
+			"Uncorrected, so it can precede start_time."),
+		"ttft_ms":          integer("The wait before that first token, in milliseconds."),
+		"model":            text("The model, for a generation or an embedding."),
 		"model_parameters": anything("Temperature, max tokens and the rest, as sent."),
 		"level":            oneOf("Its severity.", "DEBUG", "DEFAULT", "WARNING", "ERROR"),
 		"status_message":   text("Why it failed, when it did."),
 		"usage":            anything("Token counts as the client reported them."),
 		"cost_details":     anything("Cost as the client reported it; absent when it reported none."),
-		"input":            anything("With expand=io: what went in, or a truncation marker."),
-		"output":           anything("With expand=io: what came out, or a truncation marker."),
-		"metadata":         anything("With expand=io: the observation's metadata, or a truncation marker."),
-		"children":         list(&jsonschema.Schema{Ref: "#/$defs/observation"}, "Nested observations; absent for a leaf."),
+		"prompt": object(map[string]*jsonschema.Schema{
+			"name":    text("The prompt name, which list_traces takes as its prompt filter."),
+			"version": integer("The version, or null when the client named none."),
+		}, "name", "version"),
+		"input_bytes":  integer("How large the input is, whether or not it was inlined."),
+		"output_bytes": integer("How large the output is."),
+		"input":        anything("With expand=io: what went in, or a truncation marker."),
+		"output":       anything("With expand=io: what came out, or a truncation marker."),
+		"metadata":     anything("With expand=io: the observation's metadata, or a truncation marker."),
+		"children":     list(&jsonschema.Schema{Ref: "#/$defs/observation"}, "Nested observations; absent for a leaf."),
 	}, "id", "type", "level")
 
 	schema := object(map[string]*jsonschema.Schema{
@@ -532,10 +570,13 @@ func traceDetailSchema() *jsonschema.Schema {
 		"user_id":           text("The end user it was attributed to."),
 		"session_id":        text("The session it belongs to."),
 		"environment":       text("Where it ran."),
+		"release":           text("The deployment it ran in, which list_traces takes as its release filter."),
+		"version":           text("The version of the application's own logic."),
 		"tags":              list(text("A tag."), "Tags the application set."),
 		"timestamp":         timestamp("When its earliest observation started."),
 		"total_cost":        number("Summed over observations whose client reported a cost."),
 		"latency_ms":        integer("End to end, in milliseconds."),
+		"ttft_ms":           integer("The wait before the first token of its earliest completion; absent when no observation reported one."),
 		"error_count":       integer("How many of its observations failed."),
 		"observation_count": integer("How many observations it has."),
 		"metadata":          anything("The trace's own metadata."),

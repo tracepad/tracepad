@@ -15,10 +15,15 @@ import (
 // schema is as much of a JSON Schema as these assertions read. The client
 // receives the schemas as JSON, so they are read as JSON.
 type schema struct {
-	Type       string             `json:"type"`
-	Required   []string           `json:"required"`
-	Properties map[string]*schema `json:"properties"`
-	Items      *schema            `json:"items"`
+	Type        string             `json:"type"`
+	Description string             `json:"description"`
+	Required    []string           `json:"required"`
+	Properties  map[string]*schema `json:"properties"`
+	Items       *schema            `json:"items"`
+	Enum        []string           `json:"enum"`
+	// Defs is where a recursive shape lives: the observation node the trace
+	// tree refers to (spec 012's fields are asserted through it).
+	Defs map[string]*schema `json:"$defs"`
 }
 
 func schemaOf(t *testing.T, raw any) *schema {

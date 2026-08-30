@@ -135,10 +135,13 @@ func seedCorpus(t *testing.T, h *harness) {
 		&model.Observation{TraceID: traceHex(1), ID: spanHex(2), ParentObservationID: spanHex(1),
 			Type: model.TypeGeneration, Name: "chat-completion", Model: "claude-sonnet-5",
 			Level: model.LevelDefault, StartTime: seedBase - 3600*1000*ms + 40*ms,
-			EndTime:     seedBase - 3600*1000*ms + 780*ms,
-			Usage:       map[string]any{"total": 169},
-			CostDetails: map[string]any{"total": 0.001},
-			Input:       []any{map[string]any{"role": "user", "content": "how do I reset my password?"}}})
+			EndTime: seedBase - 3600*1000*ms + 780*ms,
+			// The wait before the first token, so the ttft column of the
+			// listing has something to show (spec 012, CLI contract).
+			CompletionStartTime: seedBase - 3600*1000*ms + 300*ms,
+			Usage:               map[string]any{"total": 169},
+			CostDetails:         map[string]any{"total": 0.001},
+			Input:               []any{map[string]any{"role": "user", "content": "how do I reset my password?"}}})
 	h.seed(t, &model.Trace{ID: traceHex(2), Name: "nightly-eval", Environment: "staging"},
 		&model.Observation{TraceID: traceHex(2), ID: spanHex(3), Type: model.TypeGeneration,
 			Name: "judge", Level: model.LevelError, StatusMessage: "rate limited",
@@ -158,9 +161,9 @@ func TestTracesListBothModes(t *testing.T) {
 			t.Fatalf("exit = %d, stderr = %s", got.code, got.stderr)
 		}
 		want := strings.Join([]string{
-			"TIME                 ID                                NAME          ENV         OBS  ERR  LATENCY  COST",
-			"2026-08-31 23:50:00  " + traceHex(2) + "  nightly-eval  staging     1    1    1.5s     -",
-			"2026-08-31 23:00:00  " + traceHex(1) + "  support-chat  production  2    0    820ms    $0.001000",
+			"TIME                 ID                                NAME          ENV         OBS  ERR  LATENCY  TTFT   COST",
+			"2026-08-31 23:50:00  " + traceHex(2) + "  nightly-eval  staging     1    1    1.5s     -      -",
+			"2026-08-31 23:00:00  " + traceHex(1) + "  support-chat  production  2    0    820ms    300ms  $0.001000",
 			"",
 		}, "\n")
 		if got.stdout != want {
