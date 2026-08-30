@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"flag"
 	"regexp"
 	"strings"
 	"testing"
@@ -157,4 +158,98 @@ func TestUsageAndFlagsAgree(t *testing.T) {
 	if command != "" {
 		t.Fatal("the usage text ended inside a command block; the parser did not walk it")
 	}
+}
+
+// TestEveryFlagIsNamedInTheUsageText is that parity walked the other way:
+// every flag a command registers is a flag its usage block names.
+//
+// The direction above catches a usage line that promises what nobody defined.
+// This one catches its mirror — a flag a command quietly takes and never
+// offers — which is how `tail` came to accept `--until`: the filters of
+// `traces ls`, `traces last` and `tail` are registered once so the three
+// cannot drift, and the one they must differ by went unnoticed for having no
+// usage line to disagree with. A flag nobody documents is either a promise
+// nobody made or a behaviour nobody can find; both are worse than the error a
+// reader gets for a flag that does not exist.
+//
+// What a command registers is read from the command itself, through
+// `observeFlags`: a list written out here would be the same guess the usage
+// text already is.
+func TestEveryFlagIsNamedInTheUsageText(t *testing.T) {
+	h := newHarness(t)
+	// Already over, for the same reason as above: `tail` would follow for
+	// ever, and every flag is registered before anything is asked.
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	// The global flags belong to every command and to no usage line: they
+	// are documented once, where the client commands are introduced.
+	global := map[string]bool{"url": true, "key": true, "json": true}
+
+	for command, offered := range usageFlags() {
+		var sets []*flag.FlagSet
+		observeFlags = func(fs *flag.FlagSet) { sets = append(sets, fs) }
+		h.run(ctx, false, strings.Fields(command)...)
+		observeFlags = nil
+		if len(sets) == 0 {
+			t.Errorf("`tracepad %s` built no flag set; the usage text names a command "+
+				"that never reaches its flags", command)
+			continue
+		}
+		for _, fs := range sets {
+			fs.VisitAll(func(f *flag.Flag) {
+				if global[f.Name] || offered[f.Name] || undocumented[command][f.Name] {
+					return
+				}
+				t.Errorf("`tracepad %s` takes --%s, which its usage block does not name: "+
+					"a flag that is not offered is one nobody can find and nobody promised",
+					command, f.Name)
+			})
+		}
+	}
+}
+
+// usageFlags is the usage text read as what it is: a table of commands and the
+// flags each one offers.
+func usageFlags() map[string]map[string]bool {
+	offered := map[string]map[string]bool{}
+	command := ""
+	for _, line := range strings.Split(Usage, "\n") {
+		if match := usageCommand.FindStringSubmatch(line); match != nil {
+			command = match[1]
+			offered[command] = map[string]bool{}
+		}
+		if command == "" {
+			continue
+		}
+		if strings.TrimSpace(line) == "" {
+			command = ""
+			continue
+		}
+		for _, flag := range usageFlag.FindAllStringSubmatch(line, -1) {
+			offered[command][flag[1]] = true
+		}
+	}
+	return offered
+}
+
+// undocumented is what this parity does not hold yet: flags a command
+// registers and its usage block does not name, found by the test above the
+// first time it ran (`go test -run TestEveryFlagIsNamedInTheUsageText` on
+// c2fcb8c reports these and `tail --until`).
+//
+// They are listed rather than fixed because each is a question with two
+// answers — write the flag into the usage text, or take it away — and which
+// one is right is the owner's call, not this test's. `tail --until` was such a
+// question and was answered by taking it away (INBOX, PR #9); these are open.
+// Listing them is what makes the test useful in the meantime: the debt is
+// enumerated, and a *new* undocumented flag cannot arrive unnoticed.
+var undocumented = map[string]map[string]bool{
+	// The filters `traces ls` documents and its two siblings inherit.
+	"traces last": {"min-cost": true, "name": true, "session": true, "tag": true, "user": true},
+	"tail": {"min-cost": true, "name": true, "session": true, "since": true,
+		"tag": true, "user": true},
+	"scores ls":     {"observation": true, "type": true},
+	"prompts ls":    {"limit": true},
+	"projects show": {"project": true},
 }

@@ -194,12 +194,21 @@ func (r *run) fail(err error) int {
 	return ExitFailure
 }
 
+// observeFlags, when set, is handed every flag set a command builds. It is how
+// the parity test reads what a command actually registers (spec 004 #9): the
+// sets are filled inside the commands themselves, and a test that listed them
+// again by hand would be checking its own list. Nil in the binary.
+var observeFlags func(*flag.FlagSet)
+
 // flags builds a flag set carrying the global flags every command accepts, so
 // that `--json` and `--url` work wherever a user thinks to put them.
 func (r *run) flags(name string) *flag.FlagSet {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	// The caller owns user-facing usage output.
 	fs.SetOutput(io.Discard)
+	if observeFlags != nil {
+		observeFlags(fs)
+	}
 	fs.StringVar(&r.url, "url", r.url, "")
 	fs.StringVar(&r.key, "key", r.key, "")
 	fs.BoolVar(&r.forceJSON, "json", r.forceJSON, "")
