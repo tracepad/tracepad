@@ -218,6 +218,25 @@ describe('a live tick', () => {
 		expect(source.counts).toHaveLength(2);
 	});
 
+	it('takes the total from under a count issued before it', async () => {
+		const { source, listing } = mount(true);
+		source.loads[0].ok(answer(['1'], { next_cursor: 'c2' }));
+		await idle();
+
+		// The count taken at the key change is still out — it is the one read
+		// the load's controller does not hold — when the tick lands its own,
+		// later number (#9).
+		void listing.tick();
+		source.counts[1].ok(answer(['2', '1'], { next_cursor: 'c3', total: 9 }));
+		await idle();
+		expect(listing.total).toEqual({ value: 9, capped: false });
+
+		expect(source.counts[0].signal.aborted).toBe(true);
+		source.counts[0].ok(answer(['1'], { total: 3 }));
+		await idle();
+		expect(listing.total).toEqual({ value: 9, capped: false });
+	});
+
 	it('does not go out beside a load, which would land over it', async () => {
 		const { source, listing } = mount();
 

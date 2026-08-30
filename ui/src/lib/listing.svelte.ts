@@ -141,6 +141,13 @@ export class Listing<Row> {
 	 * a tick can overlap a *load* the same way.
 	 */
 	#ticking = false;
+	/**
+	 * The count still in flight, if there is one. It is the one read the load's
+	 * controller does not cover — its own effect owns it — so a count taken at
+	 * the last key change could answer after a tick's fresher number and roll
+	 * `total` back (#9). A tick that lands a total abandons it.
+	 */
+	#counting: AbortController | null = null;
 
 	#at = $derived(this.#spec.spot.at);
 	/**
@@ -195,6 +202,7 @@ export class Listing<Row> {
 			void this.#which;
 			void this.#again;
 			const controller = new AbortController();
+			this.#counting = controller;
 			void this.#count(controller.signal);
 			return () => controller.abort();
 		});
@@ -281,7 +289,13 @@ export class Listing<Row> {
 			// page just fetched *is* the window (spec 009 #9).
 			this.rows = answer.rows;
 			this.nextCursor = answer.next_cursor;
-			if (answer.total !== undefined) this.total = counted(answer);
+			if (answer.total !== undefined) {
+				// This number was taken later than any count still out, which is
+				// therefore stale the moment it lands — the same rule as the rows,
+				// over the one read the load's controller never held (#9).
+				this.#counting?.abort();
+				this.total = counted(answer);
+			}
 			this.liveFailure = null;
 		} catch (cause) {
 			if (signal.aborted) return;
