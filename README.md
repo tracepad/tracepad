@@ -20,16 +20,21 @@ not that.
 
 Rough figures, measured on a synthetic corpus of about 2,000 traces:
 
-- **Binary** — 15.6 MiB, 6.2 MiB gzipped.
+- **Binary** — 15.6 MiB on `darwin/arm64`, 6.2 MiB gzipped; about half a MiB
+  more for `linux/amd64`.
 - **Memory** — ~27 MiB resident at rest, ~63 MiB under ingest.
 - **Ingest** — ~1,900 spans/s from one sequential client.
-- **Disk** — ~5 KB per trace, the raw OTLP archive included.
+- **Disk** — ~5 KB per trace, the raw OTLP archive included
+  (`TRACEPAD_STORE_RAW`, on by default).
 - **Reads** — 8–23 ms per API query.
 
 Distrust the disk figure first: that corpus has short payloads, and on real
 prompts and completions it is the payloads and the raw batches that the file
-is made of. Size it against your own traffic, and give it a retention
-window — see [docs/retention.md](docs/retention.md).
+is made of. The read and memory figures were taken at that corpus's size too,
+and they move with it — `/api/v1/stats` aggregates on the fly with no rollup
+table, so a wider window costs more than a narrow one. Size all of it against
+your own traffic, and give it a retention window — see
+[docs/retention.md](docs/retention.md).
 
 ## Sending traces
 
