@@ -347,6 +347,57 @@ func TestBackdatedHistoryIsRolledRatherThanFrozen(t *testing.T) {
 	}
 }
 
+// A trace's timestamp is the minimum start of its observations, so a late
+// span with an earlier start moves the trace to an earlier hour — and the
+// hour it left keeps counting it unless that one is re-rolled too. Both hours
+// must come back, and the trace must be counted once (spec 013 #16, found in
+// review of PR #28).
+func TestATraceThatMovesHoursIsCountedOnce(t *testing.T) {
+	s, project := readStore(t)
+	// The real clock, so the pass and the writer agree about what
+	// "since the last pass" means.
+	second := HourOf(time.Now().Add(-2 * time.Hour).UnixNano())
+	first := second - SecondsPerHour
+
+	// The children arrive first and put the trace in the later hour.
+	seedTrace(t, s, project.ID,
+		&model.Trace{ID: hexTrace(1), Environment: "production", Release: "r1"},
+		&model.Observation{
+			TraceID: hexTrace(1), ID: hexSpan(1), Type: model.TypeGeneration,
+			Name: "answer", Level: model.LevelDefault, Model: "claude-sonnet-5",
+			StartTime: second*int64(time.Second) + 2*int64(time.Second),
+			EndTime:   second*int64(time.Second) + 3*int64(time.Second),
+		})
+	passAt(t, s, time.Now())
+	if rows := rolledRows(t, s, project.ID, second); len(rows) == 0 {
+		t.Fatal("the later hour did not roll")
+	}
+
+	// The root arrives late, starting in the hour before: the trace moves.
+	seedTrace(t, s, project.ID,
+		&model.Trace{ID: hexTrace(1), Environment: "production", Release: "r1"},
+		&model.Observation{
+			TraceID: hexTrace(1), ID: hexSpan(2), Type: model.TypeSpan,
+			Name: "root", Level: model.LevelDefault,
+			StartTime: first*int64(time.Second) + 30*int64(time.Second),
+			EndTime:   second*int64(time.Second) + 3*int64(time.Second),
+		})
+	passAt(t, s, time.Now())
+
+	var counted int64
+	for _, hour := range []int64{first, second} {
+		for _, row := range rolledRows(t, s, project.ID, hour) {
+			if row.Model == "" {
+				counted += row.Count
+			}
+		}
+	}
+	if counted != 1 {
+		t.Errorf("the trace is counted %d times across the two hours, want once: "+
+			"the hour it left must be re-rolled with it", counted)
+	}
+}
+
 // That an hour *with* a summary stays frozen past the window is
 // TestAFrozenHourSurvivesALateFragment above; the refinement narrows what is
 // frozen, it does not loosen what is protected. The watermark cannot walk

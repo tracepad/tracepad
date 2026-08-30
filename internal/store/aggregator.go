@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 )
@@ -163,24 +164,28 @@ func (a *Aggregator) rollProject(ctx context.Context, project *Project, at time.
 		if err != nil {
 			return rolled, err
 		}
-		// Bounded like the forward roll, and for the same reason: a bulk
-		// import of backdated history behind the watermark would
-		// otherwise hand the one writer thousands of serial
-		// transactions with ingest queued behind them. What is left is
-		// dirty again next pass, because `last_pass` only moves past
-		// what this one examined.
-		if len(dirty) > maxHoursPerPass {
-			dirty = dirty[:maxHoursPerPass]
-		}
+		// Not bounded, unlike the forward roll. The bound there exists
+		// because a first pass walks the whole history once and the
+		// walk has no other end; here the set is exactly the hours that
+		// changed since the last pass, and cutting it would lose those
+		// corrections rather than defer them — `last_pass` moves on
+		// whatever this loop does, so an hour dropped here never comes
+		// back (found in review of PR #28, where the code did cut it and
+		// this comment claimed the opposite). A long pass costs
+		// background time; a dropped correction costs a wrong number for
+		// ever, and the group commit keeps ingest from waiting on either.
 		for _, hour := range dirty {
 			// Whether a dirty hour is frozen is settled by the job,
 			// inside its transaction (spec 013 #11); a pass that
 			// pre-filtered here would be a second opinion about the
 			// same rule.
-			if _, err := a.rollOne(ctx, project.ID, hour, at); err != nil {
+			job, err := a.rollOne(ctx, project.ID, hour, at)
+			if err != nil {
 				return rolled, err
 			}
-			rolled++
+			if !job.Frozen {
+				rolled++
+			}
 		}
 	}
 
@@ -205,19 +210,29 @@ func (a *Aggregator) rollProject(ctx context.Context, project *Project, at time.
 	if err != nil {
 		return rolled, err
 	}
-	// The newest hour this pass actually wrote rows for. A frozen hour
-	// wrote none, and the watermark must not step over it (spec 013 #14).
-	var newest int64
+	// The newest hour this pass examined, and whether it examined any.
+	//
+	// A frozen hour counts here even though it wrote nothing: freezing
+	// requires stored rows (spec 013 #14), so the rollup does answer for
+	// it and the watermark may stand past it. Skipping it would wedge the
+	// watermark for ever — the next pass sees the same list, freezes the
+	// same hour, and never moves (found in review of PR #28). The flag
+	// exists because hour zero is a real hour: a trace no span of which
+	// said when it started is stamped there deliberately (spec 004 #26),
+	// and `newest > 0` would have read that as "nothing was rolled".
+	var (
+		newest   int64
+		examined bool
+	)
 	for _, hour := range hours {
 		job, err := a.rollOne(ctx, project.ID, hour, at)
 		if err != nil {
 			return rolled, err
 		}
-		if job.Frozen {
-			continue
+		if !job.Frozen {
+			rolled++
 		}
-		rolled++
-		newest = hour
+		newest, examined = hour, true
 	}
 
 	// (4): the watermark, which moves to just past the newest hour this
@@ -235,7 +250,7 @@ func (a *Aggregator) rollProject(ctx context.Context, project *Project, at time.
 	// A pass that rolled nothing leaves the watermark alone; `last_pass`
 	// still moves, so the dirty-hour window stays bounded.
 	until := state.RolledUntil
-	if newest > 0 {
+	if examined {
 		until = min(closed, newest+SecondsPerHour)
 	}
 	if err := a.advance(ctx, project.ID, until, at); err != nil {
@@ -304,17 +319,58 @@ func (a *Aggregator) sweepRollup(ctx context.Context, project *Project, at time.
 // its hour dirty, and the hour would keep its first answer for ever. That is
 // the defect this column exists to close (spec 013 #15, found in review of
 // PR #28).
+// A changed trace dirties every hour between the one it is in now and the one
+// its last observation started in — not just its current hour. A trace's
+// `timestamp` is the minimum start of its observations and is recomputed on
+// every delivery, so a late span with an earlier start *moves the trace to an
+// earlier hour*, and the hour it left keeps counting it. The move is always
+// backwards, and the hour it left was the minimum of a subset of the same
+// observations, so it lies inside `[MIN(start), MAX(start)]` — which makes
+// the range exact rather than a guess. It is bounded by the trace's own
+// duration, one hour for almost every trace (spec 013 #16, found in review of
+// PR #28).
 func (s *Store) dirtyHours(projectID string, since, before int64) ([]int64, error) {
 	rows, err := s.db.Query(
-		`SELECT DISTINCT (timestamp / 1000000000 / ?) * ? AS hour
-		 FROM traces
-		 WHERE project_id = ? AND updated_at > ? AND timestamp < ?
-		 ORDER BY hour`,
-		SecondsPerHour, SecondsPerHour, projectID, since, before*1e9)
+		`SELECT t.timestamp,
+		        (SELECT MAX(o.start_time) FROM observations o
+		         WHERE o.project_id = t.project_id AND o.trace_id = t.id)
+		 FROM traces t
+		 WHERE t.project_id = ? AND t.updated_at > ? AND t.timestamp < ?`,
+		projectID, since, before*1e9)
 	if err != nil {
 		return nil, fmt.Errorf("find the hours late spans touched: %w", err)
 	}
-	return scanHours(rows)
+	defer rows.Close()
+
+	seen := map[int64]bool{}
+	for rows.Next() {
+		var (
+			timestamp int64
+			latest    sql.NullInt64
+		)
+		if err := rows.Scan(&timestamp, &latest); err != nil {
+			return nil, err
+		}
+		last := HourOf(timestamp)
+		if latest.Valid && latest.Int64 > timestamp {
+			last = HourOf(latest.Int64)
+		}
+		for hour := HourOf(timestamp); hour <= last; hour += SecondsPerHour {
+			if hour < before {
+				seen[hour] = true
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	hours := make([]int64, 0, len(seen))
+	for hour := range seen {
+		hours = append(hours, hour)
+	}
+	sort.Slice(hours, func(i, j int) bool { return hours[i] < hours[j] })
+	return hours, nil
 }
 
 // hoursWithTraces lists the hours of a half-open range that hold anything to
