@@ -212,6 +212,17 @@ func (sw *Sweeper) Pass(ctx context.Context) error {
 		freed = true
 	}
 
+	entries, err := sw.sweepOrphanSearchEntries(ctx)
+	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, ErrWriterClosed) {
+			return err
+		}
+		failures = append(failures, fmt.Errorf("orphaned search entries: %w", err))
+	}
+	if entries > 0 {
+		freed = true
+	}
+
 	if freed {
 		if err := sw.writer.Submit(ctx, &incrementalVacuum{Pages: vacuumPages}); err != nil {
 			failures = append(failures, fmt.Errorf("incremental vacuum: %w", err))
@@ -337,6 +348,29 @@ func (sw *Sweeper) sweepOrphanPayloads(ctx context.Context) (int64, error) {
 	return job.Deleted, nil
 }
 
+// sweepOrphanSearchEntries collects index entries whose observation — or whose
+// trace — is gone (spec 011, data contract). The three deletion paths keep the
+// index in step inside their own transactions; this is the belt to those
+// braces, and the only thing that would ever find an entry a hand-edited
+// database left behind.
+func (sw *Sweeper) sweepOrphanSearchEntries(ctx context.Context) (int64, error) {
+	ids, err := sw.store.orphanSearchEntries(orphanScanLimit)
+	if err != nil {
+		return 0, err
+	}
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	job := &searchEntrySweep{IDs: ids}
+	if err := sw.writer.Submit(ctx, job); err != nil {
+		return 0, err
+	}
+	if job.Deleted > 0 {
+		logger().Info("collected orphaned search entries", "entries", job.Deleted)
+	}
+	return job.Deleted, nil
+}
+
 func (sw *Sweeper) count(projectID string, traces, raw int64) {
 	sw.mu.Lock()
 	defer sw.mu.Unlock()
@@ -444,7 +478,9 @@ func (t *traceSweep) apply(tx *sql.Tx) error {
 		`DELETE FROM payloads WHERE id IN`, nil, payloads); err != nil {
 		return fmt.Errorf("sweep payloads: %w", err)
 	}
-	return nil
+	// In the same transaction as the rows themselves: an index that outlives
+	// a deletion is a retention promise broken (spec 011 #7).
+	return deleteTraceSearchEntries(tx, t.ProjectID, ids)
 }
 
 // rawSweep deletes one chunk of a project's expired raw bodies. Raw has its
@@ -519,8 +555,16 @@ func (p *projectPurge) apply(tx *sql.Tx) error {
 		return fmt.Errorf("purge project: %w", err)
 	}
 	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
 	p.Purged = rows > 0
-	return err
+	if !p.Purged {
+		return nil
+	}
+	// `search_entries` has no foreign key to cascade from (schema 0006), so
+	// the remainder the drained chunks left behind goes here (spec 011 #7).
+	return deleteProjectSearchEntries(tx, p.ProjectID)
 }
 
 // incrementalVacuum hands freed pages back to the filesystem. It runs as a
