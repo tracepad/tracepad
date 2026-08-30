@@ -145,7 +145,7 @@ const Usage = `Client commands (they talk to a running server over HTTP):
 Administration (spec 005). Every destructive command shows what it would do
 and asks you to type the name back; --yes answers that for a script:
   tracepad projects ls   [--deleted]
-  tracepad projects show [<project-id> | --project ID]
+  tracepad projects show [<project-id>] [--project ID]
   tracepad projects create  <name>                     (admin token)
   tracepad projects rename  <project-id> <new-name>    (admin token)
   tracepad projects rm      <project-id> [--yes]       (admin token)
