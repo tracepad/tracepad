@@ -84,6 +84,66 @@ func TestTheStatsWindowPreviewNamesTheRolledHours(t *testing.T) {
 	}
 }
 
+// A stats window shorter than the trace window must not hide data the store
+// still holds (spec 013 #13): those hours go back to the live scan, which is
+// what answered them before this spec existed.
+func TestAShortStatsWindowFallsBackToTheLiveScan(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	h.seedHour(t, statsHour, 1, 3, "production")
+	h.rollTheCorpus(t, time.Unix(statsHour+3*3600, 0))
+
+	truth := h.statsBuckets(t, "/api/v1/stats?group_by=day")
+	if len(truth) != 1 || truth[0].Count != 3 {
+		t.Fatalf("buckets = %+v, want the three seeded traces", truth)
+	}
+
+	// One day of statistics, traces kept forever — and a fixture hour that
+	// is far older than a day, so the aggregator sweeps its rolled rows.
+	rec := h.send(t, "PATCH", "/api/v1/projects/"+h.project.ID+"?confirm="+h.project.Name,
+		map[string]any{"stats_retention_days": 1})
+	expectStatus(t, rec, 200)
+	h.rollTheCorpus(t, time.Now())
+
+	if hours, err := h.store.StatsRollupHours(h.project.ID); err != nil {
+		t.Fatal(err)
+	} else if len(hours) != 0 {
+		t.Fatalf("rolled hours = %v, want the window to have swept them", hours)
+	}
+
+	after := h.statsBuckets(t, "/api/v1/stats?group_by=day")
+	if len(after) != 1 || after[0].Count != truth[0].Count {
+		t.Errorf("buckets = %+v, want the live truth %+v: deleting the summary of an "+
+			"hour must not hide the rows behind it", after, truth)
+	}
+}
+
+// And when both windows have passed, the emptiness is real: nothing is
+// stored, nothing is recomputed, and the honest answer is no buckets.
+func TestWhenBothWindowsHavePassedTheAnswerIsEmpty(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	h.seedHour(t, statsHour, 1, 3, "production")
+	h.rollTheCorpus(t, time.Unix(statsHour+3*3600, 0))
+
+	rec := h.send(t, "PATCH", "/api/v1/projects/"+h.project.ID+"?confirm="+h.project.Name,
+		map[string]any{"stats_retention_days": 1, "retention_days": 1})
+	expectStatus(t, rec, 200)
+
+	// The traces go through retention's own path, the rolled rows through
+	// the aggregator's. Retention counts from arrival and these arrived a
+	// moment ago (spec 005 #1), so the sweep runs on a clock two days on.
+	sweeper := h.store.NewSweeper(h.writer, store.SweepOptions{
+		Now: func() time.Time { return time.Now().Add(2 * 24 * time.Hour) },
+	})
+	if err := sweeper.Pass(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	h.rollTheCorpus(t, time.Now())
+
+	if buckets := h.statsBuckets(t, "/api/v1/stats?group_by=day"); len(buckets) != 0 {
+		t.Errorf("buckets = %+v, want none: both windows have passed", buckets)
+	}
+}
+
 // Erasing a user's data corrects the hours their traces occupied, before the
 // request answers (spec 013 #7).
 func TestErasingAUserCorrectsTheRolledHours(t *testing.T) {

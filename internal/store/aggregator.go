@@ -185,9 +185,9 @@ func (a *Aggregator) rollProject(ctx context.Context, project *Project, at time.
 			return rolled, err
 		}
 		if !ok {
-			// No traces at all: nothing to roll, and the watermark
-			// still moves so the tail stays the tail.
-			return rolled, a.advance(ctx, project.ID, closed, at)
+			// No traces at all. The watermark stays where it is —
+			// see below for why moving it would be a lie.
+			return rolled, a.advance(ctx, project.ID, state.RolledUntil, at)
 		}
 		from = oldest
 	}
@@ -203,13 +203,23 @@ func (a *Aggregator) rollProject(ctx context.Context, project *Project, at time.
 		rolled++
 	}
 
-	// (4): the watermark. When the pass ran out of its budget it advances
-	// only as far as it actually rolled, so the next pass continues rather
-	// than skipping the rest — the backfill converges instead of losing
-	// hours to its own bound.
-	until := closed
-	if len(hours) == maxHoursPerPass {
-		until = hours[len(hours)-1] + SecondsPerHour
+	// (4): the watermark, which moves to just past the newest hour this
+	// pass actually rolled and no further.
+	//
+	// Advancing it to `closed` instead — over hours the pass never wrote a
+	// row for — is a claim that the rollup can answer for them, and it is
+	// false for any hour whose data arrives afterwards: the read seam would
+	// ask the rollup, find nothing, and report zero where the live scan
+	// would have reported the truth. That is not the interval's lag the
+	// docs promise, it is a wrong answer, and it is what a first pass over
+	// an empty database followed by an import of history does (found in the
+	// live check of this PR — spec 013 #12).
+	//
+	// A pass that rolled nothing leaves the watermark alone; `last_pass`
+	// still moves, so the dirty-hour window stays bounded.
+	until := state.RolledUntil
+	if len(hours) > 0 {
+		until = min(closed, hours[len(hours)-1]+SecondsPerHour)
 	}
 	if err := a.advance(ctx, project.ID, until, at); err != nil {
 		return rolled, err

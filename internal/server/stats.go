@@ -102,7 +102,7 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		}
 		return b
 	}
-	if err := s.readStats(project.ID, filter, at); err != nil {
+	if err := s.readStats(project, filter, at); err != nil {
 		slog.Error("read stats failed", "err", err)
 		writeError(w, http.StatusInternalServerError, "failed to compute the statistics")
 		return
@@ -148,7 +148,8 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 //
 // A project nobody has rolled has a watermark of zero, so every query is the
 // live scan and the first pass is the backfill.
-func (s *Server) readStats(projectID string, filter store.StatsFilter, at func(string) *bucket) error {
+func (s *Server) readStats(project *store.Project, filter store.StatsFilter, at func(string) *bucket) error {
+	projectID := project.ID
 	state, err := s.store.RollupState(projectID)
 	if err != nil {
 		return err
@@ -166,7 +167,7 @@ func (s *Server) readStats(projectID string, filter store.StatsFilter, at func(s
 	// has closed, and only if it has ever run.
 	rolledFrom, rolledTo := int64(0), int64(0)
 	if state.RolledUntil > 0 {
-		rolledFrom = hourCeiling(max(from, 0))
+		rolledFrom = max(hourCeiling(max(from, 0)), statsFloor(project, time.Now()))
 		rolledTo = min(state.RolledUntil, store.HourOf(to))
 	}
 	if rolledTo <= rolledFrom {
@@ -196,6 +197,23 @@ func (s *Server) readStats(projectID string, filter store.StatsFilter, at func(s
 // there is. It is not `math.MinInt64`, which would overflow the moment it was
 // turned into an hour.
 const unbounded = int64(0)
+
+// statsFloor is the oldest hour the rollup may be asked about: past the
+// project's `stats_retention_days` the aggregator has deleted its rows, and
+// asking a swept table is how a chart reports nothing about data the store
+// still holds (spec 013 #13). Those hours go to the live scan instead — the
+// pre-rollup answer at the pre-rollup cost. When the traces are gone too, the
+// live scan finds nothing and the emptiness is the truth.
+func statsFloor(project *store.Project, now time.Time) int64 {
+	if project == nil || project.StatsRetentionDays == nil {
+		return 0
+	}
+	days := *project.StatsRetentionDays
+	if days < 1 || days > store.MaxRetentionDays {
+		return 0
+	}
+	return store.HourOf(now.Add(-time.Duration(days) * 24 * time.Hour).UnixNano())
+}
 
 // rolledStats folds the stored rows of a range into the buckets. Which rows
 // count is the unit: the model grouping reads observation rows, everything

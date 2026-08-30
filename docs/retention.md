@@ -30,6 +30,12 @@ nullable:
 | `raw_retention_days` | The stored OTLP bodies of `TRACEPAD_STORE_RAW` | Follow `retention_days` |
 | `stats_retention_days` | The hourly statistics rollup | Keep forever (the default) |
 
+Setting `stats_retention_days` deletes the *stored summaries* past it; it does
+not hide the traces. While the raw rows are still there, statistics for those
+hours are computed from them on the fly, exactly as they were before the
+rollup existed — slower, and correct. Once both windows have passed there is
+nothing left to compute from, and the charts are empty because the data is.
+
 ```sh
 tracepad retention show
 tracepad retention set --days 90               # traces: 90 days

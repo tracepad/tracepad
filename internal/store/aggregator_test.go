@@ -126,9 +126,11 @@ func TestAPassCorrectsTheHourALateSpanTouched(t *testing.T) {
 	}
 }
 
-// A pass over a project with nothing new writes nothing and still moves the
-// watermark forward, so the tail stays the tail.
-func TestAQuietPassStillMovesTheWatermark(t *testing.T) {
+// A pass that rolled nothing moves `last_pass` and leaves the watermark
+// alone. The watermark is a claim that the rollup can answer for the hours
+// behind it, and a pass that wrote no row for an hour has made no such claim
+// (spec 013 #12).
+func TestAQuietPassMovesTheCutoffAndNotTheWatermark(t *testing.T) {
 	s, project := readStore(t)
 	rollupFixture(t, s, project.ID)
 
@@ -145,12 +147,55 @@ func TestAQuietPassStillMovesTheWatermark(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if second.RolledUntil <= first.RolledUntil {
-		t.Errorf("rolled_until stayed at %d over a later pass", second.RolledUntil)
+	if second.RolledUntil != first.RolledUntil {
+		t.Errorf("rolled_until moved from %d to %d over a pass that rolled nothing",
+			first.RolledUntil, second.RolledUntil)
 	}
 	if second.LastPass <= first.LastPass {
 		t.Errorf("last_pass stayed at %d, so the next pass would re-examine everything",
 			second.LastPass)
+	}
+}
+
+// The defect the live check of this PR found: a pass over an empty database
+// used to move the watermark to now, and history imported afterwards then sat
+// *behind* a watermark whose rollup knew nothing about it — so the statistics
+// answered zero while the listing showed the traces. The watermark must never
+// outrun what the pass actually rolled.
+func TestHistoryImportedAfterAnEmptyPassIsStillCounted(t *testing.T) {
+	s, project := readStore(t)
+
+	// A pass with nothing to do, as happens on every fresh install.
+	passAt(t, s, afterTheHour())
+	state, err := s.RollupState(project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.RolledUntil != 0 {
+		t.Fatalf("rolled_until = %d after a pass over an empty project, want 0: "+
+			"every hour must still be answered live", state.RolledUntil)
+	}
+
+	// Now an import of history, whose hours are behind that pass.
+	rollupFixture(t, s, project.ID)
+	state, err = s.RollupState(project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.RolledUntil > rollupHour {
+		t.Fatalf("rolled_until = %d is past the imported hour %d, so the seam would "+
+			"ask an empty rollup about it", state.RolledUntil, rollupHour)
+	}
+
+	// And once a pass has rolled it, the watermark covers it and no more.
+	passAt(t, s, afterTheHour())
+	state, err = s.RollupState(project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.RolledUntil != rollupHour+SecondsPerHour {
+		t.Errorf("rolled_until = %d, want just past the one hour that was rolled (%d)",
+			state.RolledUntil, rollupHour+SecondsPerHour)
 	}
 }
 
