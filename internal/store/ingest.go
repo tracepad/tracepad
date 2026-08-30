@@ -22,6 +22,12 @@ type IngestBatch struct {
 	// apply so that every path into the writer has an arrival time even
 	// when the caller did not think to set one.
 	IngestedAt int64
+	// skipSearchIndex writes the batch without indexing it, which is the
+	// "without it" half of the pair of numbers spec 011, Testing #5 asks
+	// for. Unexported on purpose: it is reachable only from inside this
+	// package, so no caller can produce a store whose index silently
+	// disagrees with its rows.
+	skipSearchIndex bool
 }
 
 // RawBatch is the request body as received, kept verbatim for replay.
@@ -66,13 +72,14 @@ func (b *IngestBatch) apply(tx *sql.Tx) error {
 		}
 	}
 
+	indexing := !b.skipSearchIndex
 	for _, t := range b.Traces {
-		if err := upsertTrace(tx, b.ProjectID, t, arrived); err != nil {
+		if err := upsertTrace(tx, b.ProjectID, t, arrived, indexing); err != nil {
 			return err
 		}
 	}
 	for _, o := range b.Observations {
-		if err := upsertObservation(tx, b.ProjectID, o); err != nil {
+		if err := upsertObservation(tx, b.ProjectID, o, indexing); err != nil {
 			return err
 		}
 	}
@@ -92,7 +99,7 @@ func (b *IngestBatch) apply(tx *sql.Tx) error {
 // `ingested_at` is the exception: it is set when the row is created and never
 // touched again, so a trace's retention lease starts once no matter how many
 // late spans join it (spec 005 #1).
-func upsertTrace(tx *sql.Tx, projectID string, t *model.Trace, ingestedAt int64) error {
+func upsertTrace(tx *sql.Tx, projectID string, t *model.Trace, ingestedAt int64, indexing bool) error {
 	metadataID, _, err := writePayload(tx, t.Metadata)
 	if err != nil {
 		return err
@@ -128,12 +135,15 @@ func upsertTrace(tx *sql.Tx, projectID string, t *model.Trace, ingestedAt int64)
 	if err != nil {
 		return fmt.Errorf("upsert trace %s: %w", t.ID, err)
 	}
+	if !indexing {
+		return nil
+	}
 	return indexTraceName(tx, projectID, t.ID, stored.String)
 }
 
 // upsertObservation replaces the row wholesale: a re-delivered span is the
 // same span, and the latest delivery is the truth (spec 002 #5).
-func upsertObservation(tx *sql.Tx, projectID string, o *model.Observation) error {
+func upsertObservation(tx *sql.Tx, projectID string, o *model.Observation, indexing bool) error {
 	inputID, input, err := writePayload(tx, o.Input)
 	if err != nil {
 		return err
@@ -187,6 +197,9 @@ func upsertObservation(tx *sql.Tx, projectID string, o *model.Observation) error
 	)
 	if err != nil {
 		return fmt.Errorf("upsert observation %s: %w", o.ID, err)
+	}
+	if !indexing {
+		return nil
 	}
 	return indexObservation(tx, projectID, o.TraceID, o.ID, observationText{
 		Name:          o.Name,

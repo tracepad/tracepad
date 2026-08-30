@@ -47,21 +47,11 @@ func (t observationText) fields() []searchEntry {
 	}
 }
 
-// searchIndexEnabled is what the ingest benchmark turns off to measure what the
-// index costs the write path (spec 011, Testing #5) — the "without it" half of
-// the pair of numbers that decision asks for. It is never false in a running
-// server: nothing but the benchmark assigns it, and a store opened with it off
-// would answer searches with a lie.
-var searchIndexEnabled = true
-
 // indexObservation replaces an observation's entries. Deleted first and then
 // re-inserted, because a re-delivered span is the same span and the latest
 // delivery is the truth (spec 002 #5): merging would leave the text of a
 // previous delivery findable.
 func indexObservation(db searchDB, projectID, traceID, observationID string, text observationText) error {
-	if !searchIndexEnabled {
-		return nil
-	}
 	if err := dropEntries(db,
 		`WHERE project_id = ? AND trace_id = ? AND observation_id = ?`,
 		projectID, traceID, observationID); err != nil {
@@ -75,9 +65,6 @@ func indexObservation(db searchDB, projectID, traceID, observationID string, tex
 // changed would cost a read of the row we have just written, and one contentless
 // delete plus one insert is cheaper than that read.
 func indexTraceName(db searchDB, projectID, traceID, name string) error {
-	if !searchIndexEnabled {
-		return nil
-	}
 	if err := dropEntries(db,
 		`WHERE project_id = ? AND trace_id = ? AND observation_id IS NULL`,
 		projectID, traceID); err != nil {

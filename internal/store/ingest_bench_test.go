@@ -25,15 +25,16 @@ const (
 	benchPayloadBytes = 1200
 )
 
-func benchBatch(projectID string, n int) *IngestBatch {
+func benchBatch(projectID string, n int, indexed bool) *IngestBatch {
 	traceID := fmt.Sprintf("%032x", n)
 	prompt := "summarise the ticket and decide whether a refund is owed: " +
 		strings.Repeat("the customer wrote in about an order that never arrived. ", 20)
 	completion := "the refund was approved because the carrier confirmed the loss. " +
 		strings.Repeat("here is the reasoning in full. ", 30)
 	batch := &IngestBatch{
-		ProjectID: projectID,
-		Traces:    []*model.Trace{{ID: traceID, Name: "support-chat", UserID: "u1", SessionID: "s1"}},
+		ProjectID:       projectID,
+		Traces:          []*model.Trace{{ID: traceID, Name: "support-chat", UserID: "u1", SessionID: "s1"}},
+		skipSearchIndex: !indexed,
 	}
 	for i := range benchObservations {
 		batch.Observations = append(batch.Observations, &model.Observation{
@@ -55,10 +56,6 @@ func BenchmarkIngestBatch(b *testing.B) {
 			name = "without-search-index"
 		}
 		b.Run(name, func(b *testing.B) {
-			was := searchIndexEnabled
-			searchIndexEnabled = indexed
-			b.Cleanup(func() { searchIndexEnabled = was })
-
 			s, err := Open(filepath.Join(b.TempDir(), "bench.db"))
 			if err != nil {
 				b.Fatal(err)
@@ -79,7 +76,7 @@ func BenchmarkIngestBatch(b *testing.B) {
 				if err != nil {
 					b.Fatal(err)
 				}
-				if err := benchBatch(project.ID, i).apply(tx); err != nil {
+				if err := benchBatch(project.ID, i, indexed).apply(tx); err != nil {
 					tx.Rollback()
 					b.Fatal(err)
 				}
@@ -114,7 +111,7 @@ func BenchmarkSearchBackfill(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
-		if err := benchBatch(project.ID, i).apply(tx); err != nil {
+		if err := benchBatch(project.ID, i, true).apply(tx); err != nil {
 			b.Fatal(err)
 		}
 		if err := tx.Commit(); err != nil {
