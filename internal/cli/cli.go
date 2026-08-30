@@ -134,7 +134,7 @@ const Usage = `Client commands (they talk to a running server over HTTP):
   tracepad sessions show <session-id> [--limit N]
   tracepad scores ls    [--trace ID] [--observation ID] [--session S] [--name N]
                         [--type numeric|boolean|categorical|text] [--since 1h] [--limit N]
-  tracepad prompts ls   [--limit N]
+  tracepad prompts ls   [--limit N] [--cursor C]
   tracepad prompts get  <name> [--label L | --version N]
   tracepad prompts push <name> --file prompt.json [--label L] [--message M]
   tracepad prompts diff <name> --from N --to M

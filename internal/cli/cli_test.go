@@ -605,6 +605,68 @@ func TestSessionsAndScores(t *testing.T) {
 	}
 }
 
+// TestPromptsListPages walks the whole listing a page at a time, which is what
+// `--cursor` is for: without it the command could reach only the first page,
+// and a `--limit` raised until everything fits is not pagination.
+//
+// The hint says `more` and not `older`: this listing is alphabetical, and the
+// endpoint has no `direction`, so there is no far end and nothing true to say
+// about time. The test reads the hint rather than assuming it, because a hint
+// nobody can paste back is worse than none.
+func TestPromptsListPages(t *testing.T) {
+	h := newHarness(t)
+	ctx := t.Context()
+
+	var want []string
+	for i := 1; i <= 5; i++ {
+		name := fmt.Sprintf("p%02d", i)
+		want = append(want, name)
+		err := h.writer.Submit(ctx, &store.PromptVersionWrite{
+			ProjectID: h.projectID(t), Name: name,
+			Type: store.PromptText, TypeStated: true,
+			Prompt: []byte(`"Be brief."`), CreatedAt: seedBase,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var seen []string
+	cursor := ""
+	for page := 1; ; page++ {
+		if page > len(want) {
+			t.Fatalf("the walk did not end after %d pages; seen %v", page, seen)
+		}
+		args := []string{"prompts", "ls", "--limit", "2"}
+		if cursor != "" {
+			args = append(args, "--cursor", cursor)
+		}
+		out := h.run(ctx, true, args...)
+		if out.code != ExitOK {
+			t.Fatalf("page %d exited %d: %s", page, out.code, out.stderr)
+		}
+		cursor = ""
+		for _, line := range strings.Split(out.stdout, "\n") {
+			switch {
+			case strings.HasPrefix(line, "more: --cursor "):
+				cursor = strings.TrimPrefix(line, "more: --cursor ")
+			case strings.HasPrefix(line, "p0"):
+				seen = append(seen, strings.Fields(line)[0])
+			}
+		}
+		if strings.Contains(out.stdout, "older:") {
+			t.Errorf("page %d offered an older page:\n%s", page, out.stdout)
+		}
+		if cursor == "" {
+			break
+		}
+	}
+
+	if strings.Join(seen, ",") != strings.Join(want, ",") {
+		t.Errorf("the walk saw %v, want every prompt once, in order: %v", seen, want)
+	}
+}
+
 func TestPromptsRoundTrip(t *testing.T) {
 	h := newHarness(t)
 	ctx := t.Context()

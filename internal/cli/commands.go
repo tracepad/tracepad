@@ -126,7 +126,7 @@ func (r *run) sessionsList(ctx context.Context, args []string) error {
 	if listing.Total != nil {
 		fmt.Fprintf(r.opt.Stdout, "\n%s matching\n", matchCount(*listing.Total, listing.TotalCapped))
 	}
-	walkOn(r, listing.NextCursor, listing.PrevCursor)
+	walkOn(r, "older", listing.NextCursor, listing.PrevCursor)
 	return nil
 }
 
@@ -270,13 +270,18 @@ func (r *run) prompts(ctx context.Context, args []string) error {
 }
 
 func (r *run) promptsList(ctx context.Context, args []string) error {
-	var limit int
+	var (
+		cursor string
+		limit  int
+	)
 	fs := r.flags("prompts ls")
+	fs.StringVar(&cursor, "cursor", "", "")
 	fs.IntVar(&limit, "limit", 0, "")
 	if _, err := r.parse(fs, args, 0); err != nil {
 		return err
 	}
 	query := url.Values{}
+	addSome(query, "cursor", cursor)
 	if err := addLimit(query, limit); err != nil {
 		return err
 	}
@@ -296,6 +301,7 @@ func (r *run) promptsList(ctx context.Context, args []string) error {
 			Labels        map[string]int `json:"labels"`
 			UpdatedAt     string         `json:"updated_at"`
 		} `json:"prompts"`
+		NextCursor *string `json:"next_cursor"`
 	}](body)
 	if err != nil {
 		return err
@@ -315,6 +321,10 @@ func (r *run) promptsList(ctx context.Context, args []string) error {
 			orDash(strings.Join(labels, " ")), shortTime(prompt.UpdatedAt))
 	}
 	t.flush()
+	// `more`, not `older`: this listing is alphabetical by name, and it walks
+	// one way only — the endpoint has no `direction`, so there is no page to
+	// come back up to and nothing true to say about time.
+	walkOn(r, "more", listing.NextCursor, nil)
 	return nil
 }
 

@@ -186,16 +186,22 @@ func (r *run) tracesList(ctx context.Context, args []string) error {
 	if listing.Total != nil {
 		fmt.Fprintf(r.opt.Stdout, "\n%s matching\n", matchCount(*listing.Total, listing.TotalCapped))
 	}
-	walkOn(r, listing.NextCursor, listing.PrevCursor)
+	walkOn(r, "older", listing.NextCursor, listing.PrevCursor)
 	return nil
 }
 
 // walkOn prints the commands that continue the walk in either direction.
 // Both, because `--oldest` lands somewhere with no next page, and a listing
 // that says nothing there is a dead end (PR #11 review).
-func walkOn(r *run, next, prev *string) {
+//
+// `forward` is what the next page is in this listing's own order: `older` for
+// the time-ordered ones, `more` for a listing sorted by something that is not
+// a clock. The word has to be the listing's, not the mechanism's — `prompts
+// ls` is alphabetical by name, where "older" would name a direction it does
+// not have.
+func walkOn(r *run, forward string, next, prev *string) {
 	if next != nil {
-		fmt.Fprintf(r.opt.Stdout, "\nolder: --cursor %s\n", *next)
+		fmt.Fprintf(r.opt.Stdout, "\n%s: --cursor %s\n", forward, *next)
 	}
 	if prev != nil {
 		fmt.Fprintf(r.opt.Stdout, "newer: --newer --cursor %s\n", *prev)
