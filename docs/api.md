@@ -107,7 +107,7 @@ trace began. Each is absent when nothing reported it.
 | `q` | Full-text search over what the observations carried. See [Search](#search). |
 | `release`, `version` | Exact match on the deployment, and on the version of the trace's own logic. |
 | `type` | Traces with at least one observation of this kind — one of `span`, `generation`, `event`, `agent`, `tool`, `chain`, `retriever`, `guardrail`, `evaluator`, `embedding`. Exact: `generation` does not match `embedding`. Anything else is a `400`. |
-| `prompt` | `name`, or `name@version`: traces with at least one observation that ran this prompt, at any version or at that one. A version that is not a whole number is a `400`. |
+| `prompt` | `name`, or `name@version`: traces with at least one observation that ran this prompt, at any version or at that one. A version that is not a whole number is a `400`. The version is split off the last `@` that has a name in front of it, so a name containing one (`team@acme/answer`) or beginning with one (`@acme/support`) is filtered whole. |
 | `fields` | Comma-separated subset of the row fields. |
 | `limit` | 1–500, default 50. |
 | `cursor` | The `next_cursor` or `prev_cursor` of a previous page. |

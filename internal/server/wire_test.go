@@ -40,7 +40,11 @@ func seedWireCorpus(t *testing.T, h *harness) {
 	h.seed(t, &model.Trace{ID: traceHex(3), Name: "quote", Environment: "staging"},
 		&model.Observation{TraceID: traceHex(3), ID: spanHex(4), Type: model.TypeEmbedding,
 			Name: "embed", Level: model.LevelDefault, Model: "text-embedding-3-large",
-			StartTime: seedBase + 2000*ms, EndTime: seedBase + 2100*ms})
+			StartTime: seedBase + 2000*ms, EndTime: seedBase + 2100*ms,
+			// A scoped name, the shape a registry that namespaces its
+			// prompts produces. The `@` it starts with is part of the
+			// name, not a version separator.
+			PromptName: "@acme/embed", PromptVersion: version(2)})
 }
 
 func TestWireFiltersOnTheListing(t *testing.T) {
@@ -60,6 +64,8 @@ func TestWireFiltersOnTheListing(t *testing.T) {
 		{"prompt at any version", "?prompt=support-answer", []string{traceHex(2), traceHex(1)}},
 		{"prompt at a version", "?prompt=support-answer@7", []string{traceHex(1)}},
 		{"prompt at a version nobody ran", "?prompt=support-answer@5", nil},
+		{"a prompt name that starts with @", "?prompt=@acme/embed", []string{traceHex(3)}},
+		{"a scoped prompt name at a version", "?prompt=@acme/embed@2", []string{traceHex(3)}},
 		{"a filter over observations beside one over the trace",
 			"?type=generation&release=2026.8.31", []string{traceHex(2)}},
 	} {
@@ -86,7 +92,6 @@ func TestWireFiltersRefuseNonsense(t *testing.T) {
 		{"a type outside the vocabulary", "?type=workflow-step", "type must be one of"},
 		{"a prompt version that is not a number", "?prompt=support-answer@latest", "whole number"},
 		{"a prompt version that is empty", "?prompt=support-answer@", "whole number"},
-		{"a prompt with no name", "?prompt=@7", "must name a prompt"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			for _, path := range []string{"/api/v1/traces", "/api/v1/traces/last"} {
@@ -271,7 +276,10 @@ func TestStatsRefusesAnUnknownGrouping(t *testing.T) {
 }
 
 // A prompt name may contain an `@`, so the version is split off the last one
-// rather than the first.
+// rather than the first — and a name may *begin* with one, so a leading `@`
+// is part of the name and not a separator at all (found in review of PR #19:
+// the interface's own prompt badge linked to `?prompt=@acme/support`, and the
+// API answered its own link with a 400).
 func TestPromptFilterSplitsOnTheLastAt(t *testing.T) {
 	for _, tc := range []struct {
 		raw     string
@@ -281,6 +289,9 @@ func TestPromptFilterSplitsOnTheLastAt(t *testing.T) {
 		{"support-answer", "support-answer", nil},
 		{"support-answer@7", "support-answer", version(7)},
 		{"team@acme/answer@3", "team@acme/answer", version(3)},
+		{"@acme/support", "@acme/support", nil},
+		{"@acme/support@7", "@acme/support", version(7)},
+		{"@", "@", nil},
 	} {
 		t.Run(tc.raw, func(t *testing.T) {
 			got, err := parsePrompt(tc.raw)
@@ -298,4 +309,14 @@ func TestPromptFilterSplitsOnTheLastAt(t *testing.T) {
 			}
 		})
 	}
+
+	// An empty `prompt=` never reaches this far, the handler treating an
+	// empty parameter as absent — but a filter on no name is not a filter,
+	// and the guard refuses it rather than building one that matches
+	// whatever the column happens to hold.
+	t.Run("no name at all", func(t *testing.T) {
+		if _, err := parsePrompt(""); err == nil {
+			t.Error("parsePrompt(``) returned a filter, want a refusal")
+		}
+	})
 }
