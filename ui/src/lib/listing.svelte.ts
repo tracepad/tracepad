@@ -133,6 +133,13 @@ export class Listing<Row> {
 	 * the lot: a tick still in flight would answer the previous question.
 	 */
 	#query: AbortController | null = null;
+	/**
+	 * Whether a tick is still out. Live fires on a timer, so a server slower
+	 * than the interval had two ticks in flight at once and the older one could
+	 * land last, rolling the rows, the cursor and the count back a whole
+	 * interval (#9).
+	 */
+	#ticking = false;
 
 	#at = $derived(this.#spec.spot.at);
 	/**
@@ -248,6 +255,12 @@ export class Listing<Row> {
 		// Live means "the newest page, again" (spec 009 #7); anywhere else there
 		// is nothing for a tick to mean.
 		if (!controller || !this.newest) return;
+		// One tick at a time (#9). Skipped rather than raced: the answer still
+		// out is the newer question's answer too, and cancelling it for a fresh
+		// request would leave a server slower than the interval refreshing
+		// nothing at all, every tick aborted by the next.
+		if (this.#ticking) return;
+		this.#ticking = true;
 		const { signal } = controller;
 		try {
 			// Counted on the way past: live streams rows in, and a total taken
@@ -267,6 +280,8 @@ export class Listing<Row> {
 			// A server that went away mid-tick is worth saying once, but not
 			// worth throwing away the rows already on screen.
 			this.liveFailure = this.#describe(cause);
+		} finally {
+			this.#ticking = false;
 		}
 	}
 

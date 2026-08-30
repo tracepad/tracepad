@@ -199,6 +199,46 @@ describe('a live tick', () => {
 		expect(listing.loading).toBe(false);
 	});
 
+	it('runs one at a time, so a late answer cannot land over a newer one', async () => {
+		const { source, listing } = mount();
+		source.loads[0].ok(answer(['1'], { next_cursor: 'c2' }));
+		await idle();
+
+		// The interval fires again while the first tick is still out (#9).
+		void listing.tick();
+		void listing.tick();
+		expect(source.counts).toHaveLength(1);
+
+		source.counts[0].ok(answer(['2', '1'], { next_cursor: 'c3', total: 9 }));
+		await idle();
+		expect(listing.rows.map((row) => row.id)).toEqual(['2', '1']);
+
+		// And the one after it goes out as usual.
+		void listing.tick();
+		expect(source.counts).toHaveLength(2);
+	});
+
+	it('is freed again by the turn that aborts it', async () => {
+		const { source, listing } = mount();
+		source.loads[0].ok(answer(['1'], { next_cursor: 'c2' }));
+		await idle();
+
+		void listing.tick();
+		listing.turn({ cursor: 'c2' });
+		flushSync();
+		expect(source.counts[0].signal.aborted).toBe(true);
+		source.counts[0].ok(answer(['9']));
+		await idle();
+		expect(listing.rows.map((row) => row.id)).toEqual(['1']);
+
+		listing.turn({});
+		flushSync();
+		source.loads[2].ok(answer(['2', '1'], { next_cursor: 'c3' }));
+		await idle();
+		void listing.tick();
+		expect(source.counts).toHaveLength(2);
+	});
+
 	it('does nothing off the newest page', async () => {
 		const { source, listing } = mount();
 		source.loads[0].ok(answer(['1'], { next_cursor: 'c2' }));
