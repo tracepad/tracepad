@@ -105,6 +105,12 @@ type Project struct {
 	// follows RetentionDays, so raw lives exactly as long as the parsed
 	// data it can rebuild (#6).
 	RawRetentionDays *int
+	// StatsRetentionDays is the window for the hourly rollup. Nil means
+	// forever, which is the default and what every project takes on the
+	// upgrade: the aggregates are the cheap thing, and "no trace older
+	// than 30 days" and "no *record* older than 30 days" are different
+	// promises (spec 013 #6).
+	StatsRetentionDays *int
 	// DeletedAt is when the project was soft-deleted (Unix nanoseconds),
 	// nil while it is live (#9).
 	DeletedAt *int64
@@ -148,17 +154,22 @@ type KeyInfo struct {
 
 // projectColumns is the one SELECT list every project read shares, so a column
 // added to the table is added to every reader at once.
-const projectColumns = `id, name, retention_days, raw_retention_days, deleted_at, created_at`
+const projectColumns = `id, name, retention_days, raw_retention_days, stats_retention_days, deleted_at, created_at`
 
 func scanProject(row interface{ Scan(...any) error }) (*Project, error) {
 	var (
 		p         Project
 		retention sql.NullInt64
 		raw       sql.NullInt64
+		stats     sql.NullInt64
 		deleted   sql.NullInt64
 	)
-	if err := row.Scan(&p.ID, &p.Name, &retention, &raw, &deleted, &p.CreatedAt); err != nil {
+	if err := row.Scan(&p.ID, &p.Name, &retention, &raw, &stats, &deleted, &p.CreatedAt); err != nil {
 		return nil, err
+	}
+	if stats.Valid {
+		days := int(stats.Int64)
+		p.StatsRetentionDays = &days
 	}
 	if retention.Valid {
 		days := int(retention.Int64)
