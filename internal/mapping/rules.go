@@ -72,7 +72,9 @@ var (
 
 	// `service.version` is the OTel resource attribute every plain-OTel
 	// app already sets, so the fallback makes the release filter work for
-	// people who never heard of the Langfuse dialect (spec 012 #4).
+	// people who never heard of the Langfuse dialect (spec 012 #4). It is
+	// read from the Resource only — see keyLevel in value.go for why the
+	// same name on a span is a different fact.
 	traceReleaseKeys = []string{lfRelease, "service.version"}
 
 	// Not `langfuse.observation.version`: that is the observation's own

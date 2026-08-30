@@ -287,6 +287,50 @@ func TestReleaseFromServiceVersion(t *testing.T) {
 	}
 }
 
+// The fallback is the *resource's* `service.version` (spec 012 #4). The same
+// name on a span is the version of whatever that span talked to — a peer
+// service, a model gateway — and naming this deployment after it would be a
+// wrong answer to "did the deploy break it". It stays in metadata, where an
+// unclaimed span attribute belongs (spec 012 #7, found in review of PR #19).
+func TestServiceVersionOnASpanIsNotTheRelease(t *testing.T) {
+	t.Run("with no resource version to fall back to", func(t *testing.T) {
+		result := mapping.Map(otlptest.ExportLevels(otlptest.Levels{
+			Resource:  []string{"service.name", "gateway"},
+			ScopeName: "probe", ScopeVersion: "0.0.0",
+			Spans: [][]string{{"service.version", "3.1.4"}},
+		}))
+
+		if release := result.Traces[0].Release; release != "" {
+			t.Errorf("release = %q, want none: a span's service.version names a peer", release)
+		}
+		if got := result.Observations[0].Metadata["service.version"]; got != "3.1.4" {
+			t.Errorf("metadata[service.version] = %v, want the span's own value kept",
+				result.Observations[0].Metadata)
+		}
+	})
+
+	// The one the release came from is claimed; the other is not the same
+	// fact and keeps its place, which is the invariant #7 exists for.
+	t.Run("beside a resource version that is the release", func(t *testing.T) {
+		result := mapping.Map(otlptest.ExportLevels(otlptest.Levels{
+			Resource:  []string{"service.name", "gateway", "service.version", "1.9.0"},
+			ScopeName: "probe", ScopeVersion: "0.0.0",
+			Spans: [][]string{{"service.version", "3.1.4"}},
+		}))
+
+		if release := result.Traces[0].Release; release != "1.9.0" {
+			t.Errorf("release = %q, want the resource's", release)
+		}
+		metadata := result.Observations[0].Metadata
+		if got := metadata["service.version"]; got != "3.1.4" {
+			t.Errorf("metadata = %v, want the span's service.version kept", metadata)
+		}
+		if _, kept := metadata["resource.service.version"]; kept {
+			t.Errorf("metadata = %v, want the resource's claimed once it is the release", metadata)
+		}
+	})
+}
+
 // The observation's own version is not the trace's, and stays where the
 // mapper found it (spec 012 #4).
 func TestObservationVersionStaysInMetadata(t *testing.T) {

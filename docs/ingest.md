@@ -81,7 +81,7 @@ span's own.
 | user | `langfuse.user.id` · `user.id` |
 | session | `langfuse.session.id` · `session.id` · `gen_ai.conversation.id` |
 | environment | `langfuse.environment` · `deployment.environment.name` · `deployment.environment` · `default` |
-| release | `langfuse.release` · `service.version` |
+| release | `langfuse.release` · the resource's `service.version` |
 | version | `langfuse.version` |
 | tags | `langfuse.trace.tags` (JSON array, comma-separated list, or single value) |
 | trace metadata | `langfuse.trace.metadata` (JSON object) and `langfuse.trace.metadata.*` |
@@ -133,6 +133,11 @@ even though the cost and model breakdowns count both as calls to a model.
 The three levels of an OTLP export — Resource, InstrumentationScope and the
 span — are one namespace to the priority chains above: `deployment.environment`
 sets the environment whether it sits on the resource or on the span.
+
+One name is the exception. `service.version` is read from the Resource only,
+because on a span it is the version of whatever that span talked to rather
+than of the service that produced the trace; a span carrying one keeps it in
+metadata and does not name the release.
 
 What no rule claims keeps its origin instead of being merged:
 

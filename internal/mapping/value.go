@@ -92,12 +92,26 @@ func (a *attrs) merge(level origin, kvs []*commonpb.KeyValue) {
 // the loser of a priority chain) would be consumed without being stored, and
 // would appear nowhere at all. Spec 002 #11 promises the opposite.
 
+// keyLevel binds an attribute name to the one level it means something at.
+// Most names mean the same thing wherever they arrive, and a rule reading the
+// merged view is right not to care — but `service.version` is not one of
+// them. On the Resource it is the version of the service that produced the
+// trace, which is what the release chain falls back to (spec 012 #4, "then
+// the resource's `service.version`"); on a span it describes whatever that
+// span talked to, and reading it there is wrong twice over, because claiming
+// it would take the Resource's own value out of metadata as well (found in
+// review of PR #19).
+var keyLevel = map[string]origin{"service.version": originResource}
+
 // lookup returns the value at key without claiming it. A key present with an
 // empty value counts as absent: priority chains are "first non-empty wins",
 // and an SDK that stamps an empty string should not shadow the next
 // candidate.
 func (a *attrs) lookup(key string) (any, bool) {
 	v, ok := a.values[key]
+	if level, bound := keyLevel[key]; bound {
+		v, ok = a.byLevel[level][key]
+	}
 	if !ok || isEmpty(v) {
 		return nil, false
 	}
@@ -162,8 +176,22 @@ func (a *attrs) prefixed(prefix string) map[string]any {
 // claim marks a key as carried into the result, so it does not reappear in
 // metadata. It claims the key at every level: a rule reads the merged view,
 // so it cannot say which level answered it, and a rule that wants a resource
-// key should not have to know it is one (spec 012 #7).
+// key should not have to know it is one (spec 012 #7). Where a key *is* bound
+// to a level, claimedAt narrows that back down.
 func (a *attrs) claim(key string) { a.consumed[key] = true }
+
+// claimedAt reports whether this level's value is the one a rule took. For an
+// ordinary key that is every level, since the rule read the merged view. For
+// a key bound to a level (see keyLevel), only that level could have answered,
+// so the same name at another level is a different fact and keeps its place
+// in metadata — which is the whole promise of spec 012 #7.
+func (a *attrs) claimedAt(level origin, key string) bool {
+	if !a.consumed[key] {
+		return false
+	}
+	bound, isBound := keyLevel[key]
+	return !isBound || bound == level
+}
 
 // rest returns every attribute no rule claimed, each under the key its origin
 // gives it (spec 002 #11, spec 012 #7). The same name at two levels yields two
@@ -174,7 +202,7 @@ func (a *attrs) rest() map[string]any {
 	for _, level := range levels {
 		prefix := level.prefix()
 		for k, v := range a.byLevel[level] {
-			if a.consumed[k] || isEmpty(v) {
+			if a.claimedAt(level, k) || isEmpty(v) {
 				continue
 			}
 			out[prefix+k] = v
