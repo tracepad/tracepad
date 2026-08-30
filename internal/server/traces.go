@@ -730,15 +730,10 @@ func traceFilter(values url.Values) (store.TraceFilter, error) {
 	return filter, nil
 }
 
-// parsePrompt reads `name` or `name@version`. The version has to be a whole
-// number, because that is what the column holds: `name@latest` is a label the
-// client may well use, but it is not something this filter can answer, and a
-// 400 says so rather than returning nothing (spec 012, API contract).
-//
-// A version is a whole number after the last `@`, with a name in front of it.
-// Anything else is part of the name, `@` included — so `@acme/support`,
-// `team@acme/answer` and `name@latest` are all names, and every one of them
-// filters (spec 012 #15).
+// parsePrompt reads `name` or `name@version`. A version is a run of digits
+// after the last `@`, with a name in front of it. Anything else is part of the
+// name, `@` included — so `@acme/support`, `team@acme/answer` and
+// `name@latest` are all names, and every one of them filters (spec 012 #15).
 //
 // The rule has no exceptions on purpose. Prompt names are somebody else's
 // namespace and `@` is ordinary inside one, so any rule that reads an `@` as a
@@ -749,12 +744,31 @@ func parsePrompt(raw string) (*store.PromptFilter, error) {
 	if raw == "" {
 		return nil, fmt.Errorf("prompt must name a prompt, got %q", raw)
 	}
-	if at := strings.LastIndex(raw, "@"); at > 0 {
+	if at := strings.LastIndex(raw, "@"); at > 0 && digits(raw[at+1:]) {
 		if version, err := strconv.ParseInt(raw[at+1:], 10, 64); err == nil {
 			return &store.PromptFilter{Name: raw[:at], Version: &version}, nil
 		}
 	}
 	return &store.PromptFilter{Name: raw}, nil
+}
+
+// digits reports whether a string is one or more ASCII digits and nothing
+// else. `strconv.ParseInt` alone is more generous than the grammar: it takes a
+// sign, so `svc@-1` would read as a version and leave a prompt named `svc@-1`
+// unfilterable, while `name@+7` would quietly answer about version 7 of
+// `name`. That is the "an `@` that is not a separator" defect of Decision 15
+// at a third position (found in review of PR #19). A run of digits too long
+// for int64 still falls through to being a name, which is right.
+func digits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func decodeTraceCursor(raw string) (*store.TraceCursor, error) {

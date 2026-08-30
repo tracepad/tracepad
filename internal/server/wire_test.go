@@ -309,6 +309,15 @@ func TestPromptFilterReadsAVersionOnlyWhenItIsANumber(t *testing.T) {
 		// No name in front of the number, so the number is not a version
 		// either — the whole thing is one odd name.
 		{"@7", "@7", nil},
+		// A version is digits, not whatever `strconv.ParseInt` will take.
+		// A sign made `svc@-1` unfilterable and made `name@+7` answer
+		// about a different prompt (found in review of PR #19).
+		{"svc@-1", "svc@-1", nil},
+		{"name@+7", "name@+7", nil},
+		{"name@007", "name", version(7)},
+		// Too large for the column, so it is not a version — and the name
+		// stays typeable.
+		{"name@99999999999999999999", "name@99999999999999999999", nil},
 	} {
 		t.Run(tc.raw, func(t *testing.T) {
 			got, err := parsePrompt(tc.raw)
