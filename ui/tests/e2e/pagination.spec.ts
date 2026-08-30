@@ -24,14 +24,25 @@ const rows = (page: Page) => page.locator('tbody tr');
  * waits for this to change first.
  */
 const top = (page: Page) => rows(page).first().getByRole('link');
-const identity = (page: Page) => top(page).getAttribute('href');
+
+/**
+ * Reading that identity asserts it. A guard written against `''` is no guard:
+ * `not.toHaveAttribute('href', '')` is true of the page being left as well as
+ * of the one arriving, and the race would come back as a silent green (found
+ * in review of this PR).
+ */
+async function identity(page: Page): Promise<string> {
+	const href = await top(page).getAttribute('href');
+	expect(href).toMatch(/^\/traces\/\w/);
+	return href ?? '';
+}
 
 test('a page is turned, and turned back to the same rows', async ({ page }) => {
 	await signIn(page);
 	await page.goto('/traces?limit=2');
 	await expect(rows(page)).toHaveCount(2);
 	const first = await rows(page).allInnerTexts();
-	const newest = (await identity(page)) ?? '';
+	const newest = await identity(page);
 
 	await page.getByRole('button', { name: 'Next page' }).click();
 	await expect(top(page)).not.toHaveAttribute('href', newest);
@@ -56,15 +67,19 @@ test('the newest page has nowhere back, the oldest nowhere on', async ({ page })
 	// Straight to the far end: a direction, not an offset (spec 009 #2).
 	await page.getByRole('button', { name: 'Oldest page' }).click();
 	await expect(page).toHaveURL(/direction=prev/);
-	await expect(page.getByRole('button', { name: 'Next page' })).toBeDisabled();
+	// The enabled one first, and not for tidiness: every control is disabled
+	// while a page is in flight (`PaginationBar`, `busy || !hasNext`), so a
+	// dead ✕ Next is true of a turn that has not landed, while a live ‹ is
+	// only true of one that has (found in review of this PR).
 	await expect(page.getByRole('button', { name: 'Previous page' })).toBeEnabled();
+	await expect(page.getByRole('button', { name: 'Next page' })).toBeDisabled();
 });
 
 test('a page survives a reload, because it is in the URL', async ({ page }) => {
 	await signIn(page);
 	await page.goto('/traces?limit=2');
 	await expect(rows(page)).toHaveCount(2);
-	const newest = (await identity(page)) ?? '';
+	const newest = await identity(page);
 
 	await page.getByRole('button', { name: 'Next page' }).click();
 	await expect(top(page)).not.toHaveAttribute('href', newest);
@@ -236,6 +251,8 @@ test('the sessions listing pages the same way', async ({ page }) => {
 	await expect(page.getByText('1 of 2 sessions')).toBeVisible();
 	await page.getByRole('button', { name: 'Next page' }).click();
 	await expect(page).toHaveURL(/cursor=/);
+	// ‹ live is the turn having landed; ✕ dead before that is only `busy`.
+	await expect(page.getByRole('button', { name: 'Previous page' })).toBeEnabled();
 	await expect(page.getByRole('button', { name: 'Next page' })).toBeDisabled();
 });
 
