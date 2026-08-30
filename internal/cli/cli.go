@@ -157,8 +157,9 @@ Connection:
 What the wire carried (spec 012): --type keeps traces containing one kind of
 step — span, generation, event, agent, tool, chain, retriever, guardrail,
 evaluator or embedding — and --prompt keeps the traces that ran a prompt, at
-any version or at name@7. The listing's ttft column is the wait before the
-first token of the trace's earliest completion.
+any version or at name@7. A version is a number, so an @ inside a name is part
+of it. The listing's ttft column is the wait before the first token of the
+trace's earliest completion.
 
 Search (spec 011): --search takes words (all must occur), "quoted phrases" and
 prefix*. Words, not substrings: error does not find errors, err* finds both.

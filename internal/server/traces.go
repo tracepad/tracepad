@@ -735,34 +735,26 @@ func traceFilter(values url.Values) (store.TraceFilter, error) {
 // client may well use, but it is not something this filter can answer, and a
 // 400 says so rather than returning nothing (spec 012, API contract).
 //
-// The name is split on the last `@` that has a name in front of it: a leading
-// one is part of the name rather than a separator. `@acme/support` is a prompt
-// somebody has, the interface's own badge links to it, and answering that link
-// with a 400 was the bug this guard fixes (found in review of PR #19).
+// A version is a whole number after the last `@`, with a name in front of it.
+// Anything else is part of the name, `@` included — so `@acme/support`,
+// `team@acme/answer` and `name@latest` are all names, and every one of them
+// filters (spec 012 #15).
 //
-// An `@` further inside a name survives only when a version follows it
-// (`team@acme/answer@3`). On its own, `team@acme/answer` reads as the version
-// `acme/answer` and is refused, because a version that is not a whole number
-// is a 400 by decision (spec 012 #5) and nothing here can tell that spelling
-// apart from the `name@latest` that decision is about.
+// The rule has no exceptions on purpose. Prompt names are somebody else's
+// namespace and `@` is ordinary inside one, so any rule that reads an `@` as a
+// separator before knowing what follows it makes a whole family of names
+// unfilterable — and the interface's own badge, built from whatever the client
+// sent, links straight at them.
 func parsePrompt(raw string) (*store.PromptFilter, error) {
-	name, version := raw, ""
-	at := strings.LastIndex(raw, "@")
-	versioned := at > 0
-	if versioned {
-		name, version = raw[:at], raw[at+1:]
-	}
-	if name == "" {
+	if raw == "" {
 		return nil, fmt.Errorf("prompt must name a prompt, got %q", raw)
 	}
-	if !versioned {
-		return &store.PromptFilter{Name: name}, nil
+	if at := strings.LastIndex(raw, "@"); at > 0 {
+		if version, err := strconv.ParseInt(raw[at+1:], 10, 64); err == nil {
+			return &store.PromptFilter{Name: raw[:at], Version: &version}, nil
+		}
 	}
-	number, err := strconv.ParseInt(version, 10, 64)
-	if err != nil {
-		return nil, fmt.Errorf("prompt version must be a whole number, got %q", version)
-	}
-	return &store.PromptFilter{Name: name, Version: &number}, nil
+	return &store.PromptFilter{Name: raw}, nil
 }
 
 func decodeTraceCursor(raw string) (*store.TraceCursor, error) {

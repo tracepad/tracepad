@@ -116,7 +116,7 @@ wire already carries:
 |---|---|
 | `release`, `version` | The user names a deployment, or asks whether a release changed something. |
 | `type` | The user asks about a kind of step — a tool call, a guardrail, a retrieval — and wants the traces that contain one. One of ten values, exact: `generation` does not match `embedding`. |
-| `prompt` | The user names a prompt and wants what it produced. `"support-answer"` for every version, `"support-answer@7"` for one. |
+| `prompt` | The user names a prompt and wants what it produced. `"support-answer"` for every version, `"support-answer@7"` for one. A version is a number, so a name that contains an `@` is passed as it stands. |
 
 The rows they return carry `release`, `version` and `ttft_ms`; the tree from
 `get_trace` and `get_last_trace` carries each observation's kind,

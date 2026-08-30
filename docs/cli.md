@@ -63,7 +63,7 @@ tracepad traces ls --env production --error --since 1h
 | `--min-cost` | Traces costing at least this much. |
 | `--release`, `--version` | The deployment, and the version of the trace's own logic. Exact matches. |
 | `--type` | Traces containing a step of this kind: `span`, `generation`, `event`, `agent`, `tool`, `chain`, `retriever`, `guardrail`, `evaluator`, `embedding`. Exact — `generation` does not match `embedding`. |
-| `--prompt` | Traces that ran a prompt: `name`, or `name@7` for one version of it. |
+| `--prompt` | Traces that ran a prompt: `name`, or `name@7` for one version of it. A version is a number, so an `@` in a name is just part of it — `@acme/support` and `team@acme/answer` work as written, and `name@latest` is read as a name rather than as a label. |
 | `--fields` | Comma-separated subset of the row fields. |
 | `--limit` | 1–500, default 50. |
 | `--cursor` | Continue from a previous page. |

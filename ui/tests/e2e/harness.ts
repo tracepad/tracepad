@@ -62,3 +62,5 @@ export const WIRE_TRACE = 'ff6677008899001122aabb33cc44dd55';
 export const WIRE_GENERATION = 'c1c2c3c4c5c6c7c8';
 /** Its tool call, which the `type=tool` filter finds the trace by. */
 export const WIRE_TOOL = 'd1d2d3d4d5d6d7d8';
+/** Its guardrail — prompt `team@acme/answer`, an `@` inside a name and no version. */
+export const WIRE_GUARDRAIL = 'e1e2e3e4e5e6e7e8';

@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { WIRE_GENERATION, WIRE_TRACE, state } from './harness';
+import { WIRE_GENERATION, WIRE_GUARDRAIL, WIRE_TRACE, state } from './harness';
 
 // What the wire already carries, end to end against the real binary
 // (spec 012, Testing): the type filter, the TTFT column, the icons in the
@@ -89,6 +89,30 @@ test('the panel shows the wait, the sizes and the prompt, and the badge leads to
 	await badge.click();
 	await expect(page).toHaveURL(/[?&]prompt=support-answer%407/);
 	await expect(page.getByRole('button', { name: /Remove filter Prompt: support-answer@7/ })).toBeVisible();
+	await expect(page.locator('tbody')).toHaveCount(1);
+});
+
+// A prompt name out of somebody else's namespace, with an `@` inside it and
+// no version to tell that `@` from a separator. The badge is built from
+// whatever the client sent, so a filter grammar that cannot read the name back
+// makes the interface link at its own error (spec 012 #15, found in review of
+// PR #19).
+test('a prompt name with an @ inside it is a name, and its badge leads to the traces', async ({
+	page
+}) => {
+	await signIn(page);
+	await page.goto(`/traces?peek=${WIRE_TRACE}&obs=${WIRE_GUARDRAIL}`);
+
+	const badge = page.getByRole('dialog').getByRole('link', { name: /team@acme\/answer/ });
+	await expect(badge).toBeVisible();
+
+	await badge.click();
+	await expect(page).toHaveURL(/[?&]prompt=team%40acme%2Fanswer/);
+	await expect(
+		page.getByRole('button', { name: /Remove filter Prompt: team@acme\/answer/ })
+	).toBeVisible();
+	// The listing answers with the trace, rather than with the 400 the old
+	// grammar produced.
 	await expect(page.locator('tbody')).toHaveCount(1);
 });
 

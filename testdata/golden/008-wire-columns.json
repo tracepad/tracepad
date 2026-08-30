@@ -97,6 +97,7 @@
       "start_time": 1787738400310000000,
       "end_time": 1787738400330000000,
       "level": "DEFAULT",
+      "prompt_name": "team@acme/answer",
       "metadata": {
         "langfuse.observation.completion_start_time": "as soon as it could",
         "resource.service.name": "resource-level",

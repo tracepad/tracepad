@@ -44,7 +44,14 @@ func seedWireCorpus(t *testing.T, h *harness) {
 			// A scoped name, the shape a registry that namespaces its
 			// prompts produces. The `@` it starts with is part of the
 			// name, not a version separator.
-			PromptName: "@acme/embed", PromptVersion: version(2)})
+			PromptName: "@acme/embed", PromptVersion: version(2)},
+		// An `@` in the middle of a name, with no version to disambiguate
+		// it. Nothing about the filter's grammar may make this name
+		// unfilterable (spec 012 #15).
+		&model.Observation{TraceID: traceHex(3), ID: spanHex(5), Type: model.TypeChain,
+			Name: "compose", Level: model.LevelDefault,
+			StartTime: seedBase + 2200*ms, EndTime: seedBase + 2400*ms,
+			PromptName: "team@acme/answer"})
 }
 
 func TestWireFiltersOnTheListing(t *testing.T) {
@@ -66,6 +73,10 @@ func TestWireFiltersOnTheListing(t *testing.T) {
 		{"prompt at a version nobody ran", "?prompt=support-answer@5", nil},
 		{"a prompt name that starts with @", "?prompt=@acme/embed", []string{traceHex(3)}},
 		{"a scoped prompt name at a version", "?prompt=@acme/embed@2", []string{traceHex(3)}},
+		{"a prompt name with an @ in the middle", "?prompt=team@acme/answer", []string{traceHex(3)}},
+		// A label is not a version, so this is a name — one nothing ran
+		// (spec 012 #15).
+		{"a version that is a label", "?prompt=support-answer@latest", nil},
 		{"a filter over observations beside one over the trace",
 			"?type=generation&release=2026.8.31", []string{traceHex(2)}},
 	} {
@@ -90,8 +101,6 @@ func TestWireFiltersRefuseNonsense(t *testing.T) {
 		says  string
 	}{
 		{"a type outside the vocabulary", "?type=workflow-step", "type must be one of"},
-		{"a prompt version that is not a number", "?prompt=support-answer@latest", "whole number"},
-		{"a prompt version that is empty", "?prompt=support-answer@", "whole number"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			for _, path := range []string{"/api/v1/traces", "/api/v1/traces/last"} {
@@ -275,12 +284,13 @@ func TestStatsRefusesAnUnknownGrouping(t *testing.T) {
 	}
 }
 
-// A prompt name may contain an `@`, so the version is split off the last one
-// rather than the first — and a name may *begin* with one, so a leading `@`
-// is part of the name and not a separator at all (found in review of PR #19:
-// the interface's own prompt badge linked to `?prompt=@acme/support`, and the
-// API answered its own link with a 400).
-func TestPromptFilterSplitsOnTheLastAt(t *testing.T) {
+// A version is a whole number after the last `@`, with a name in front of it;
+// everything else is the name, `@` included (spec 012 #15). The rule has no
+// exceptions, because prompt names are somebody else's namespace: a grammar
+// that reads an `@` as a separator before knowing what follows makes a family
+// of real names unfilterable, and the interface's own badge — built from
+// whatever the client sent — links straight at them.
+func TestPromptFilterReadsAVersionOnlyWhenItIsANumber(t *testing.T) {
 	for _, tc := range []struct {
 		raw     string
 		name    string
@@ -292,6 +302,13 @@ func TestPromptFilterSplitsOnTheLastAt(t *testing.T) {
 		{"@acme/support", "@acme/support", nil},
 		{"@acme/support@7", "@acme/support", version(7)},
 		{"@", "@", nil},
+		// The three the grammar used to refuse or mis-split.
+		{"team@acme/answer", "team@acme/answer", nil},
+		{"support-answer@latest", "support-answer@latest", nil},
+		{"support-answer@", "support-answer@", nil},
+		// No name in front of the number, so the number is not a version
+		// either — the whole thing is one odd name.
+		{"@7", "@7", nil},
 	} {
 		t.Run(tc.raw, func(t *testing.T) {
 			got, err := parsePrompt(tc.raw)
@@ -310,25 +327,13 @@ func TestPromptFilterSplitsOnTheLastAt(t *testing.T) {
 		})
 	}
 
-	// An empty `prompt=` never reaches this far, the handler treating an
-	// empty parameter as absent — but a filter on no name is not a filter,
-	// and the guard refuses it rather than building one that matches
+	// The one thing left to refuse, and the handler never sends it: an
+	// empty parameter is an absent one. A filter on no name is not a
+	// filter, and the guard says so rather than building one that matches
 	// whatever the column happens to hold.
 	t.Run("no name at all", func(t *testing.T) {
 		if _, err := parsePrompt(""); err == nil {
 			t.Error("parsePrompt(``) returned a filter, want a refusal")
-		}
-	})
-
-	// An `@` further inside a name survives only with a version behind it,
-	// as the row above shows. On its own the tail reads as a version, and a
-	// version that is not a whole number is a 400 by decision (spec 012 #5)
-	// — nothing here can tell this spelling from the `name@latest` that
-	// decision is about. Asserted so the limit is a documented one rather
-	// than a surprise (found in review of PR #19).
-	t.Run("an @ inside a name with no version behind it", func(t *testing.T) {
-		if _, err := parsePrompt("team@acme/answer"); err == nil {
-			t.Error("parsePrompt(`team@acme/answer`) returned a filter, want the documented refusal")
 		}
 	})
 }

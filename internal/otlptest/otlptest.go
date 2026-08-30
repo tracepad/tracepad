@@ -375,6 +375,10 @@ func wireColumns() Fixture {
 		str("langfuse.observation.type", "guardrail"),
 		// Neither an instant nor a number: unclaimed, and so visible.
 		str("langfuse.observation.completion_start_time", "as soon as it could"),
+		// A name from somebody else's namespace, with no version to tell
+		// the `@` inside it from a separator. The filter must still find
+		// it, and the panel's badge must still link to it (spec 012 #15).
+		str("langfuse.observation.prompt.name", "team@acme/answer"),
 	)
 
 	scopeSpans := scope("langfuse-sdk", "4.7.0", root, answer, lookup, gate)

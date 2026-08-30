@@ -92,7 +92,8 @@ func traceFilterProperties() map[string]*jsonschema.Schema {
 			"span", "generation", "event", "agent", "tool", "chain",
 			"retriever", "guardrail", "evaluator", "embedding"),
 		"prompt": text("Use when the user names a prompt and wants what it produced — \"which traces ran " +
-			"support-answer\". Either \"name\" for every version of it, or \"name@7\" for one."),
+			"support-answer\". Either \"name\" for every version of it, or \"name@7\" for one. A version is " +
+			"a number, so pass a name containing an \"@\" as it stands."),
 	}
 }
 
