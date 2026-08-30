@@ -51,6 +51,7 @@ scores, a query language beyond words, phrases and a trailing `*`.
 | 11 | **2026-08-30** (from the implementation) — Schema 0006 carries two things the data contract below did not name: `idx_search_entries_trace` is `(project_id, trace_id, observation_id)` rather than the first two columns alone, and a one-row `search_backfill(id, done_at)` table holds the marker Decision 8 asks for | The third column is what the ingest path addresses an entry by: every delivery replaces one span's entries (Decision 7), and on the first two columns alone that delete is a scan of the whole trace's entries — quadratic inside a batch of twenty spans of one trace, which is the ordinary shape of an export. The two columns the deletion paths and the listing use are still the index's prefix, so nothing else changes. The marker had to live somewhere, and a table of its own says what it is: a row in `schema_migrations` would have made the backfill look like a migration, which is precisely what it is not — it runs *after* `migrate()`, because it decompresses payloads. |
 | 12 | **2026-08-30** (from the implementation) — `GET /api/v1/traces/last` takes `q` as a filter, and its answer carries no `match` | The shortcut returns a trace rather than a listing row, and with `?expand=io` it returns the payloads themselves — a snippet cut from text the response already carries in full would be a second, worse copy of it. The edge case that gives this endpoint a `q` asks for "the newest matching trace", and that is what it answers; `docs/api.md` says so rather than leaving a reader to notice the field is missing. |
 | 13 | **2026-08-30** (from the implementation) — `search_entries` joins the tables `GET /api/v1/system` reports row counts for | The index is a store of its own beside the payloads, and an operator deciding whether their disk can carry it has nothing else to read it from: `size_bytes` is the whole file and every other count is of rows they already knew about. It qualifies where `payloads` does not for exactly the reason spec 004 Decision 33 gives — it carries a project id, so it is counted within the asking project rather than telling one tenant how much the others hold. |
+| 14 | **2026-08-30** — What `input`, `output` and `metadata` contribute is the **scalar leaves of their JSON**, not the JSON text: the payload is parsed, and its strings, numbers and booleans are taken in traversal order — recursively through objects and arrays — and joined by newlines. Object keys, brackets, quotes and `null` are not indexed. A payload that does not parse as JSON is indexed whole, as before. `name`, `status_message` and `trace_name` are unchanged. The cap of Decision 2 applies to the **extracted text**, and the snippet of Decision 6 is cut from the same extracted text the index saw. Migration **0007** empties both halves of the index and resets the backfill marker | The index was built from the text `json.Marshal` produced, so `role`, `content`, `type` and every other key of every message array is a word of the corpus: `q=content` matches every observation that has ever carried a chat message, and the snippet it answers with is `[{"content":"…","role":"user"}]` — the envelope, where the reader asked for what was said. Both are searches of the structure rather than of what the observations carried, and the structure is not what anybody arrives with. Leaves are cheaper as well as truer: those keys repeat on every message of every span and cost a posting list each, and the cap now buys 64 KiB of text instead of 64 KiB of quoting. Numbers stay in because the id from a support ticket is the search this spec opens with, and it is as often `12345` as `INV-12345`; keys stay out because a field name is a filter's question, not a search's. This is a rebuild of every existing index, which is free while no database outside a developer's machine holds one and will not be free later — hence now, and hence a migration that clears the tables rather than a reindex command Out of scope refused: the first start after the upgrade rebuilds the index with the backfill Decision 8 already owns, at the rate the docs already publish. |
 
 ## API contract
 
@@ -89,7 +90,11 @@ What is and is not matched, written once and repeated in `docs/api.md`:
   `"refund order"` finds them adjacent, in that order.
 - Identifiers split on punctuation and are found whole or by part:
   `user_id_42` is found by `user_id_42`, `user` and `42`.
-- Only the first 64 KiB of each payload is indexed (Decision 2).
+- A JSON payload is searched by its values, not by its shape: the keys, the
+  brackets and the quotes are not words of the index, and `role` finds a trace
+  only if something *said* it (Decision 14).
+- Only the first 64 KiB of each payload's text is indexed (Decision 2,
+  Decision 14).
 - All words must occur in the **same** field of the **same** observation.
 
 ## CLI contract
@@ -144,6 +149,11 @@ cannot carry one, and the deletion paths of Decision 7 are what keep the two
 in step; the sweeper's orphan pass (spec 005) learns to drop entries whose
 observation is gone, as a belt to those braces.
 
+Schema 0007 (Decision 14) adds nothing: it empties `search_entries`, deletes
+the FTS rows (`INSERT INTO search_fts(search_fts) VALUES('delete-all')`) and
+sets `search_backfill.done_at` back to `NULL`, so that the first start after
+the upgrade rebuilds the index by the path that already exists.
+
 The listing with `q` is, in shape:
 
 ```sql
@@ -188,6 +198,12 @@ snippet and the highlight are the whole of the UI growth.
   and adjacency, `user_id_42` whole and by part, the 64 KiB cap (a word at
   63 KiB is found, the same word at 65 KiB is not), and the same-field rule
   (two words split across two observations of one trace do not match).
+- **Go, leaves** (Decision 14): a payload's keys and structure are not
+  findable and its values are — `role` and `content` match nothing, the text
+  of the message matches, a number leaf is found by its digits, nested arrays
+  and objects are walked; the cap counts extracted text, so a word past 64 KiB
+  of JSON but inside 64 KiB of text is found; a payload that is not JSON is
+  indexed whole; the snippet carries no braces and no keys.
 - **Go, lifecycle**: a re-delivered observation leaves exactly one set of
   entries; after the retention sweep, user-data erasure and project purge
   respectively, `search_entries` holds nothing for the deleted rows and
@@ -195,7 +211,9 @@ snippet and the highlight are the whole of the UI growth.
 - **Go, backfill**: a database written before the migration is fully
   searchable after `Open`; a second `Open` does no indexing work (asserted by
   a counter); an `Open` interrupted after part of the work resumes and
-  finishes.
+  finishes; a 0006 database whose index was built from the JSON text comes out
+  of the 0007 upgrade indexed by leaves, with `role` no longer findable
+  (Decision 14).
 - **Go, plan and cost**: `EXPLAIN QUERY PLAN` on the shipped listing with
   `q` shows the keyset seek. Ingest throughput with the index on, measured
   on the store's benchmark fixture against the same run without it, both
