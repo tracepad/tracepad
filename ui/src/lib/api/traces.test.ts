@@ -65,6 +65,28 @@ describe('filters in the URL', () => {
 		expect(readFilters(new URLSearchParams(filterSearch(filters)))).toEqual(filters);
 	});
 
+	// The four spec 012 added travel the same way. `prompt` is the one the
+	// observation panel's badge writes into a link, so its `@` has to survive
+	// the round trip.
+	it('round-trips what the wire carried', () => {
+		const filters = readFilters(
+			new URLSearchParams('release=2026.8.30&version=checkout-v9&type=tool&prompt=support-answer%407')
+		);
+
+		expect(filters).toEqual({
+			release: '2026.8.30',
+			version: 'checkout-v9',
+			type: 'tool',
+			prompt: 'support-answer@7'
+		});
+		expect(filterCount(filters)).toBe(4);
+		expect(readFilters(new URLSearchParams(filterSearch(filters)))).toEqual(filters);
+	});
+
+	it('carries a prompt on its own, as the panel badge links to it', () => {
+		expect(readFilters(new URLSearchParams('prompt=support-answer')).prompt).toBe('support-answer');
+	});
+
 	// The search is a filter like the others: in the URL, so a search is a
 	// link somebody can send (spec 011, Application contract).
 	it('carries a search on its own', () => {

@@ -229,6 +229,9 @@
 		{#snippet meta()}
 			{#if peeked}
 				<span class="hidden font-mono sm:inline">{timestamp(peeked.timestamp)}</span>
+				{#if peeked.release}
+					<span class="hidden truncate md:inline" title="Release">{peeked.release}</span>
+				{/if}
 				<span class="hidden tabular-nums md:inline">{duration(peeked.latency_ms)}</span>
 				<span class="hidden tabular-nums md:inline">{cost(peeked.total_cost)}</span>
 				<span class="hidden truncate font-mono lg:inline">{peeked.id}</span>

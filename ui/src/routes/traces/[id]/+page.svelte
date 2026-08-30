@@ -28,6 +28,13 @@
 		</a>
 		{#if trace}
 			<span class="hidden font-mono sm:inline">{timestamp(trace.timestamp)}</span>
+			<!-- The release, when the trace named one: it is a filter rather
+			     than a column, so the header is where a reader finds out which
+			     deployment they are looking at (spec 012, Application
+			     contract). -->
+			{#if trace.release}
+				<span class="hidden truncate md:inline" title="Release">{trace.release}</span>
+			{/if}
 			<span class="hidden tabular-nums md:inline">{duration(trace.latency_ms)}</span>
 			<span class="hidden tabular-nums md:inline">{cost(trace.total_cost)}</span>
 			<span class="hidden truncate font-mono lg:inline">{trace.id}</span>

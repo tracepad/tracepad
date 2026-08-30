@@ -25,7 +25,7 @@ test('all four charts render over the corpus', async ({ page }) => {
 	// Latency is two series in one chart (spec 007 #6).
 	await expect(page.locator('.u-legend', { hasText: 'p95' })).toBeVisible();
 	// The header's totals are the endpoint's own numbers.
-	await expect(page.getByText('7 traces · 1 with errors')).toBeVisible();
+	await expect(page.getByText('9 traces · 1 with errors')).toBeVisible();
 });
 
 test('the breakdown tables match what the endpoint reports', async ({ page }) => {

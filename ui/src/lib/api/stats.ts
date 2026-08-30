@@ -124,9 +124,13 @@ export type BreakdownRow = {
  * the same invisible sliver. The number beside the bar is the absolute value,
  * so nothing is only expressed as a proportion.
  */
-export function breakdown(buckets: StatsBucket[]): BreakdownRow[] {
+export function breakdown(buckets: StatsBucket[], unnamed = ''): BreakdownRow[] {
 	const rows = buckets.map((bucket) => ({
-		key: bucket.key,
+		// The empty key is a group, not a gap: grouped by release, it is
+		// every trace whose client named none, and dropping the row would
+		// make the breakdown's numbers stop adding up (spec 012 #4). It
+		// needs a name a person can read, which the caller supplies.
+		key: bucket.key === '' && unnamed ? unnamed : bucket.key,
 		count: bucket.count,
 		errorCount: bucket.error_count,
 		cost: bucket.total_cost ?? null,

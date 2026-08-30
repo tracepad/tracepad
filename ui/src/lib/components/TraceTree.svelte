@@ -52,12 +52,6 @@
 		return rows;
 	}
 
-	/** Three letters of vertical rhythm instead of a word of ragged width. */
-	export const TYPE_LABELS: Record<string, string> = {
-		span: 'SPAN',
-		generation: 'GEN',
-		event: 'EVENT'
-	};
 </script>
 
 <script lang="ts">
@@ -66,6 +60,7 @@
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { cost, duration, elapsed } from '$lib/format';
+	import { typeIcon, typeLabel } from '$lib/observations';
 
 	// The observation tree (design §8, hand-written). Keyboard behaviour
 	// follows the ARIA tree pattern: one tab stop, arrows walk it, left and
@@ -160,6 +155,7 @@
 		{@const id = row.observation.id}
 		{@const open = !collapsed.has(id)}
 		{@const selected = id === selectedID}
+		{@const Icon = typeIcon(row.observation.type)}
 		<div
 			role="treeitem"
 			aria-level={row.depth + 1}
@@ -198,12 +194,15 @@
 				<span class="w-3.5 shrink-0"></span>
 			{/if}
 
-			<span
-				class="border-border text-subtle shrink-0 rounded border px-1 font-mono text-[10px]
-					uppercase"
-			>
-				{TYPE_LABELS[row.observation.type] ?? row.observation.type}
-			</span>
+			<!-- The kind, as an icon with its name in the tooltip and in the
+			     accessible label. Ten kinds do not fit in three letters, and
+			     `RETR` / `GUAR` / `EVAL` stop being scannable at exactly the
+			     moment there are enough of them to be worth scanning
+			     (spec 012, Application contract). -->
+			<Icon
+				class="text-subtle size-3.5 shrink-0"
+				aria-label={typeLabel(row.observation.type)}
+			/>
 
 			<span class="min-w-0 flex-1 truncate" title={row.observation.name ?? id}>
 				{row.observation.name ?? id}

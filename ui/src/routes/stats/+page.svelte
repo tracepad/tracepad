@@ -31,6 +31,9 @@
 	let timeline = $state.raw<StatsBucket[]>([]);
 	let models = $state.raw<Stats | null>(null);
 	let environments = $state.raw<Stats | null>(null);
+	// "Did cost or latency move with the release" is a chart, not a list
+	// (spec 012 #4), and it is the same shape as the two breakdowns beside it.
+	let releases = $state.raw<Stats | null>(null);
 	let loading = $state(true);
 	let failure = $state<string | null>(null);
 	let generation = $state(0);
@@ -61,20 +64,23 @@
 		loading = true;
 		failure = null;
 		try {
-			const [series, byModel, byEnvironment] = await Promise.all([
+			const [series, byModel, byEnvironment, byRelease] = await Promise.all([
 				api.getStats({ ...query, group_by: group }, signal),
 				api.getStats({ ...query, group_by: 'model' }, signal),
-				api.getStats({ ...query, group_by: 'environment' }, signal)
+				api.getStats({ ...query, group_by: 'environment' }, signal),
+				api.getStats({ ...query, group_by: 'release' }, signal)
 			]);
 			if (signal.aborted) return;
 			timeline = series.buckets as StatsBucket[];
 			models = byModel;
 			environments = byEnvironment;
+			releases = byRelease;
 		} catch (cause) {
 			if (signal.aborted) return;
 			timeline = [];
 			models = null;
 			environments = null;
+			releases = null;
 			failure = cause instanceof ApiError ? cause.message : 'Failed to read the statistics.';
 		} finally {
 			if (!signal.aborted) loading = false;
@@ -228,6 +234,12 @@
 			label="Environment"
 			unit={environments?.unit ?? 'trace'}
 			rows={breakdown((environments?.buckets ?? []) as StatsBucket[])}
+		/>
+		<BreakdownTable
+			title="By release"
+			label="Release"
+			unit={releases?.unit ?? 'trace'}
+			rows={breakdown((releases?.buckets ?? []) as StatsBucket[], '(no release)')}
 		/>
 	</div>
 </div>
