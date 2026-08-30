@@ -50,14 +50,31 @@ type traceFilterFlags struct {
 	onlyErrors  bool
 }
 
+// register adds the filters a listing takes: every one of them, the upper
+// bound of a time range included.
 func (f *traceFilterFlags) register(fs *flag.FlagSet) {
+	f.registerFollowing(fs)
+	fs.StringVar(&f.until, "until", "", "")
+}
+
+// registerFollowing adds the filters a *follow* takes, which is all of them
+// but `--until` — and it is where a new shared filter belongs, so that `tail`
+// keeps getting them.
+//
+// An upper bound on a tail is either nothing — the newest page is never past
+// it — or a silent end to the following, and neither is what somebody typing
+// it meant; the bound on a range of traces is `traces ls --until`. It used to
+// be registered here with the rest because the three commands share their
+// filters so they cannot drift apart, and the one thing they must differ by
+// had no usage line to disagree with. Now `tail --until` is an unknown flag,
+// which is the answer a reader can act on (INBOX, PR #9).
+func (f *traceFilterFlags) registerFollowing(fs *flag.FlagSet) {
 	fs.StringVar(&f.environment, "env", "", "")
 	fs.StringVar(&f.user, "user", "", "")
 	fs.StringVar(&f.session, "session", "", "")
 	fs.StringVar(&f.name, "name", "", "")
 	fs.StringVar(&f.tag, "tag", "", "")
 	fs.StringVar(&f.since, "since", "", "")
-	fs.StringVar(&f.until, "until", "", "")
 	fs.StringVar(&f.minCost, "min-cost", "", "")
 	fs.StringVar(&f.release, "release", "", "")
 	fs.StringVar(&f.version, "version", "", "")
@@ -301,7 +318,7 @@ func (r *run) tail(ctx context.Context, args []string) error {
 		limit    int
 	)
 	fs := r.flags("tail")
-	filters.register(fs)
+	filters.registerFollowing(fs)
 	fs.DurationVar(&interval, "interval", defaultTailInterval, "")
 	fs.IntVar(&limit, "limit", 0, "")
 	if _, err := r.parse(fs, args, 0); err != nil {

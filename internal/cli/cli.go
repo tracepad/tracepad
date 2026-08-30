@@ -47,6 +47,12 @@ type Options struct {
 	Env func(string) string
 	// Now is the clock `--since 1h` counts back from.
 	Now func() time.Time
+	// observeFlags, when set, is handed every flag set a command builds.
+	// Unexported because it is for the parity test in this package, which
+	// reads what a command registers rather than listing it again by hand
+	// (spec 004 #9) — and because it belongs to one run rather than to the
+	// process, which a package-level hook would not.
+	observeFlags func(*flag.FlagSet)
 }
 
 // run carries the resolved connection and output mode through one command.
@@ -200,6 +206,9 @@ func (r *run) flags(name string) *flag.FlagSet {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	// The caller owns user-facing usage output.
 	fs.SetOutput(io.Discard)
+	if r.opt.observeFlags != nil {
+		r.opt.observeFlags(fs)
+	}
 	fs.StringVar(&r.url, "url", r.url, "")
 	fs.StringVar(&r.key, "key", r.key, "")
 	fs.BoolVar(&r.forceJSON, "json", r.forceJSON, "")

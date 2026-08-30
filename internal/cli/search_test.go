@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"flag"
 	"regexp"
 	"strings"
 	"testing"
@@ -96,6 +97,26 @@ func TestTailTakesNoSearch(t *testing.T) {
 	}
 }
 
+// TestTailTakesNoUntil: the refusal itself, and not only the parity around it.
+// Both directions of that parity stay green if `--until` comes back *and* the
+// usage line grows `[--until T]` — which is the decision undone, quietly and
+// in one commit (INBOX, PR #9; found in review of PR #22).
+func TestTailTakesNoUntil(t *testing.T) {
+	h := newHarness(t)
+	got := h.run(t.Context(), true, "tail", "--until", "1h")
+	if got.code != ExitUsage {
+		t.Fatalf("exit = %d, want a usage error", got.code)
+	}
+	if !strings.Contains(got.stderr, "not defined") {
+		t.Errorf("stderr = %q, want the flag refused", got.stderr)
+	}
+	// And the bound it should be reaching for still works where it belongs.
+	if listing := h.run(t.Context(), true, "traces", "ls", "--until", "1h"); listing.code != ExitOK {
+		t.Errorf("traces ls --until = %d (%s), want the listing to keep its bound",
+			listing.code, listing.stderr)
+	}
+}
+
 // TestSearchRefusalIsTheServersOwn: a query with no word in it is a 400 the
 // CLI passes through, rather than an empty table (spec 011 #4).
 func TestSearchRefusalIsTheServersOwn(t *testing.T) {
@@ -130,20 +151,8 @@ func TestUsageAndFlagsAgree(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
-	command := ""
-	for _, line := range strings.Split(Usage, "\n") {
-		if match := usageCommand.FindStringSubmatch(line); match != nil {
-			command = match[1]
-		}
-		if command == "" {
-			continue
-		}
-		if strings.TrimSpace(line) == "" {
-			command = ""
-			continue
-		}
-		for _, flag := range usageFlag.FindAllStringSubmatch(line, -1) {
-			name := flag[1]
+	for command, offered := range usageFlags(t) {
+		for name := range offered {
 			t.Run(command+" --"+name, func(t *testing.T) {
 				args := append(strings.Fields(command), "--"+name+"=1")
 				got := h.run(ctx, false, args...)
@@ -154,7 +163,128 @@ func TestUsageAndFlagsAgree(t *testing.T) {
 			})
 		}
 	}
+}
+
+// TestEveryFlagIsNamedInTheUsageText is that parity walked the other way:
+// every flag a command registers is a flag its usage block names.
+//
+// The direction above catches a usage line that promises what nobody defined.
+// This one catches its mirror — a flag a command quietly takes and never
+// offers — which is how `tail` came to accept `--until`: the filters of
+// `traces ls`, `traces last` and `tail` are registered once so the three
+// cannot drift, and the one they must differ by went unnoticed for having no
+// usage line to disagree with. A flag nobody documents is either a promise
+// nobody made or a behaviour nobody can find; both are worse than the error a
+// reader gets for a flag that does not exist.
+//
+// What a command registers is read from the command itself, through
+// `observeFlags`: a list written out here would be the same guess the usage
+// text already is.
+func TestEveryFlagIsNamedInTheUsageText(t *testing.T) {
+	h := newHarness(t)
+	// Already over, for the same reason as above: `tail` would follow for
+	// ever, and every flag is registered before anything is asked.
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	// The global flags belong to every command and to no usage line: they
+	// are documented once, where the client commands are introduced.
+	global := map[string]bool{"url": true, "key": true, "json": true}
+
+	// What the table below still claims, struck off as it is met: an entry
+	// nobody reports is debt already paid, and a list that outlives its debt
+	// exempts a *future* flag of that name on that command (found in review
+	// of PR #22).
+	unmet := map[string]map[string]bool{}
+	for command, names := range undocumented {
+		unmet[command] = map[string]bool{}
+		for name := range names {
+			unmet[command][name] = true
+		}
+	}
+
+	for command, offered := range usageFlags(t) {
+		var sets []*flag.FlagSet
+		h.observeFlags = func(fs *flag.FlagSet) { sets = append(sets, fs) }
+		h.run(ctx, false, strings.Fields(command)...)
+		h.observeFlags = nil
+		if len(sets) == 0 {
+			t.Errorf("`tracepad %s` built no flag set; the usage text names a command "+
+				"that never reaches its flags", command)
+			continue
+		}
+		for _, fs := range sets {
+			fs.VisitAll(func(f *flag.Flag) {
+				if global[f.Name] || offered[f.Name] {
+					return
+				}
+				if undocumented[command][f.Name] {
+					delete(unmet[command], f.Name)
+					return
+				}
+				t.Errorf("`tracepad %s` takes --%s, which its usage block does not name: "+
+					"a flag that is not offered is one nobody can find and nobody promised",
+					command, f.Name)
+			})
+		}
+	}
+
+	for command, names := range unmet {
+		for name := range names {
+			t.Errorf("the table still lists `tracepad %s --%s` as undocumented, and it is not: "+
+				"the flag is named in the usage text now, or gone, or the command is — "+
+				"strike the entry, so the list stays the debt and not a licence",
+				command, name)
+		}
+	}
+}
+
+// usageFlags is the usage text read as what it is: a table of commands and the
+// flags each one offers. One parser for both directions of the parity, so that
+// they can never disagree about what the text says.
+func usageFlags(t *testing.T) map[string]map[string]bool {
+	t.Helper()
+	offered := map[string]map[string]bool{}
+	command := ""
+	for _, line := range strings.Split(Usage, "\n") {
+		if match := usageCommand.FindStringSubmatch(line); match != nil {
+			command = match[1]
+			offered[command] = map[string]bool{}
+		}
+		if command == "" {
+			continue
+		}
+		if strings.TrimSpace(line) == "" {
+			command = ""
+			continue
+		}
+		for _, flag := range usageFlag.FindAllStringSubmatch(line, -1) {
+			offered[command][flag[1]] = true
+		}
+	}
 	if command != "" {
 		t.Fatal("the usage text ended inside a command block; the parser did not walk it")
 	}
+	return offered
+}
+
+// undocumented is what this parity does not hold yet: flags a command
+// registers and its usage block does not name, found by the test above the
+// first time it ran (`go test -run TestEveryFlagIsNamedInTheUsageText` on
+// c2fcb8c reports these and `tail --until`).
+//
+// They are listed rather than fixed because each is a question with two
+// answers — write the flag into the usage text, or take it away — and which
+// one is right is the owner's call, not this test's. `tail --until` was such a
+// question and was answered by taking it away (INBOX, PR #9); these are open.
+// Listing them is what makes the test useful in the meantime: the debt is
+// enumerated, and a *new* undocumented flag cannot arrive unnoticed.
+var undocumented = map[string]map[string]bool{
+	// The filters `traces ls` documents and its two siblings inherit.
+	"traces last": {"min-cost": true, "name": true, "session": true, "tag": true, "user": true},
+	"tail": {"min-cost": true, "name": true, "session": true, "since": true,
+		"tag": true, "user": true},
+	"scores ls":     {"observation": true, "type": true},
+	"prompts ls":    {"limit": true},
+	"projects show": {"project": true},
 }
