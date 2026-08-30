@@ -571,9 +571,13 @@ func statsQuery(projectID string, filter StatsFilter) (string, []any) {
 // reporting it whole would tell one project how much data the others hold
 // (spec 004 Decision 33). `projects` is reported as a plain count — how many
 // tenants share this process is an operator fact, and it names none of them.
+// `search_entries` is reported for the same reason the others are and the
+// reason `payloads` is not: it carries a project id, so it can be counted
+// within the asking project, and it is the one store whose size an operator
+// cannot infer from the rows they can already see (spec 011 Decision 13).
 var countedTables = []string{
 	"api_keys", "traces", "observations",
-	"raw_batches", "scores", "prompts", "prompt_labels",
+	"raw_batches", "scores", "prompts", "prompt_labels", "search_entries",
 }
 
 // TableCount is one table's row count.

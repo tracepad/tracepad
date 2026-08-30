@@ -204,6 +204,52 @@ func TestSearchKeepsTheOrderAndTheCursors(t *testing.T) {
 	}
 }
 
+// TestSystemReportsTheSearchIndex is Decision 13: the index is a store of its
+// own, and an operator deciding whether their disk can carry it has nothing
+// else to read its size from. Counted within the asking project, like every
+// other table there (spec 004 Decision 33).
+func TestSystemReportsTheSearchIndex(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	seedSearchable(t, h)
+
+	other, err := h.store.CreateProject("other",
+		store.KeyPair{PublicKey: "tp-pk-other", Secret: "tp-sk-other"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.writer.Submit(t.Context(), &store.IngestBatch{
+		ProjectID: other.ID,
+		Traces:    []*model.Trace{{ID: traceHex(9), Name: "theirs"}},
+		Observations: []*model.Observation{{TraceID: traceHex(9), ID: spanHex(9),
+			Type: model.TypeSpan, Level: model.LevelDefault,
+			StartTime: seedBase, EndTime: seedBase + ms, Output: "their own text"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := h.get(t, "/api/v1/system")
+	expectStatus(t, rec, 200)
+	rows := decodeJSON[struct {
+		Database struct {
+			Rows map[string]int64 `json:"rows"`
+		} `json:"database"`
+	}](t, rec).Database.Rows
+
+	entries, reported := rows["search_entries"]
+	if !reported {
+		t.Fatalf("rows = %v, want the search index among them", rows)
+	}
+	// Two traces of this project: names, one output, one observation name,
+	// one status message — and nothing of the neighbour's.
+	if entries < 4 {
+		t.Errorf("search_entries = %d, want this project's own entries", entries)
+	}
+	if entries > 8 {
+		t.Errorf("search_entries = %d, want only this project's — the neighbour's are not ours to count",
+			entries)
+	}
+}
+
 // TestLastTraceTakesSearch is the edge case: the newest matching trace, and a
 // 404 naming the query when there is none.
 func TestLastTraceTakesSearch(t *testing.T) {
