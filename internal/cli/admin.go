@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -126,20 +127,17 @@ func (r *run) projectsShow(ctx context.Context, args []string) error {
 	// "Given" and not "non-empty", because `--project "$PROJ"` with nothing in
 	// PROJ is the shape that would otherwise slip through the guard and let
 	// the positional win after all (found in review of PR #24).
-	byFlag := wasGiven(fs, "project")
-	if len(rest) == 1 && byFlag {
+	if len(rest) == 1 && wasGiven(fs, "project") {
 		return usageErrorf("pass either the positional id or --project, not both")
 	}
-	// The same expansion on its own asked "the one project this key reaches"
-	// instead of the project the caller meant to name.
-	if byFlag && *project == "" {
-		return usageErrorf("--project needs a project id; it was passed empty")
-	}
+	// The other half of that expansion — `--project ""` on its own, naming no
+	// project at all — is refused by projectID, which every command taking the
+	// flag goes through.
 	given := *project
 	if len(rest) == 1 {
 		given = rest[0]
 	}
-	id, err := r.projectID(ctx, given)
+	id, err := r.projectID(ctx, fs, given)
 	if err != nil {
 		return err
 	}
@@ -286,7 +284,7 @@ func (r *run) keysList(ctx context.Context, args []string) error {
 	if _, err := r.parse(fs, args, 0); err != nil {
 		return err
 	}
-	id, err := r.projectID(ctx, *project)
+	id, err := r.projectID(ctx, fs, *project)
 	if err != nil {
 		return err
 	}
@@ -325,7 +323,7 @@ func (r *run) keysCreate(ctx context.Context, args []string) error {
 	if _, err := r.parse(fs, args, 0); err != nil {
 		return err
 	}
-	id, err := r.projectID(ctx, *project)
+	id, err := r.projectID(ctx, fs, *project)
 	if err != nil {
 		return err
 	}
@@ -362,7 +360,7 @@ func (r *run) keysRemove(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	id, err := r.projectID(ctx, *project)
+	id, err := r.projectID(ctx, fs, *project)
 	if err != nil {
 		return err
 	}
@@ -397,7 +395,7 @@ func (r *run) retentionShow(ctx context.Context, args []string) error {
 	if _, err := r.parse(fs, args, 0); err != nil {
 		return err
 	}
-	id, err := r.projectID(ctx, *project)
+	id, err := r.projectID(ctx, fs, *project)
 	if err != nil {
 		return err
 	}
@@ -471,7 +469,7 @@ func (r *run) retentionSet(ctx context.Context, args []string) error {
 		return usageErrorf("retention set needs --days, --forever, --raw-days or --raw-follow")
 	}
 
-	id, err := r.projectID(ctx, *project)
+	id, err := r.projectID(ctx, fs, *project)
 	if err != nil {
 		return err
 	}
@@ -508,7 +506,7 @@ func (r *run) users(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	id, err := r.projectID(ctx, *project)
+	id, err := r.projectID(ctx, fs, *project)
 	if err != nil {
 		return err
 	}
@@ -626,7 +624,17 @@ func (r *run) askToConfirm(want string) error {
 // wins; otherwise the API is asked, and a credential that reaches exactly one
 // project answers the question by itself — which is the whole of it for the
 // single-project install most deployments are.
-func (r *run) projectID(ctx context.Context, given string) (string, error) {
+//
+// A `--project` that arrived without an id is refused rather than read as "no
+// --project": an unset shell variable expands to exactly that, and falling
+// back to the one project the key reaches would answer a wider question than
+// the caller asked (spec 003 #23). The rule lives here so that every command
+// taking the flag gets it, which is how the six besides `projects show` were
+// found to be missing it.
+func (r *run) projectID(ctx context.Context, fs *flag.FlagSet, given string) (string, error) {
+	if given == "" && wasGiven(fs, "project") {
+		return "", usageErrorf("--project needs a project id; it was passed empty")
+	}
 	if given != "" {
 		return given, nil
 	}
