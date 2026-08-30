@@ -1,6 +1,6 @@
 # Spec 013 — Stats rollup: history that outlives the raw data
 
-**Status:** 📝 DRAFT
+**Status:** ✅ SHIPPED
 **Sprint:** September 2026
 
 > The statistics screen answers from a full scan of the raw rows, twice over
