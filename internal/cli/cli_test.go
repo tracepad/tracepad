@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -93,20 +95,98 @@ type result struct {
 // without a pseudo-terminal (#12).
 func (h *harness) run(ctx context.Context, tty bool, args ...string) result {
 	var out, errOut bytes.Buffer
-	code := Run(ctx, Options{
+	code := Run(ctx, h.options(&out, &errOut, tty, args))
+	return result{stdout: out.String(), stderr: errOut.String(), code: code}
+}
+
+// options is one command's whole environment, shared by run and follow.
+func (h *harness) options(stdout, stderr io.Writer, tty bool, args []string) Options {
+	return Options{
 		Args:    args,
 		Version: testVersion,
-		Stdout:  &out,
-		Stderr:  &errOut,
+		Stdout:  stdout,
+		Stderr:  stderr,
 		Stdin:   strings.NewReader(h.stdin),
 		TTY:     tty,
 		Env:     func(key string) string { return h.env[key] },
 		// Set by the parity test only; nil everywhere else.
 		observeFlags: h.observeFlags,
 		Now:          func() time.Time { return time.Unix(0, seedBase).UTC() },
-	})
-	return result{stdout: out.String(), stderr: errOut.String(), code: code}
+	}
 }
+
+// follow starts a command that runs until its context is cancelled. `tail` is
+// the only such command, and it is the reason this exists: its assertions are
+// about what has been printed *so far*, so the test can wait for the event it
+// is about instead of sleeping for a duration that is usually long enough.
+func (h *harness) follow(ctx context.Context, tty bool, args ...string) *following {
+	out, errOut := &syncBuffer{}, &syncBuffer{}
+	done := make(chan result, 1)
+	go func() {
+		code := Run(ctx, h.options(out, errOut, tty, args))
+		done <- result{stdout: out.String(), stderr: errOut.String(), code: code}
+	}()
+	return &following{out: out, done: done}
+}
+
+// following is a command that is still running: what it has printed so far,
+// and the result it will finish with once its context ends.
+type following struct {
+	out  *syncBuffer
+	done <-chan result
+}
+
+// syncBuffer is an output buffer that can be read while it is being written.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// await blocks until the follow has printed want.
+//
+// The deadline is a backstop against a hang, not the thing being measured: on
+// a healthy run this returns as soon as the poll that prints it lands, and on
+// a loaded machine it waits as long as that takes rather than failing at a
+// duration somebody guessed. That is the whole point — a sleep long enough for
+// a laptop is a coin toss on a busy CI runner (INBOX, gate of PR #28).
+//
+// A follow that has *exited* is the other way this can end, and waiting out
+// the backstop for it would be both slow and mute: whatever it printed is all
+// there will be, and the reason it stopped is in the result. So the wait ends
+// there and reports it, the way the timed version used to report the exit
+// code of a command that had already returned.
+func (f *following) await(t *testing.T, want, what string) {
+	t.Helper()
+	const backstop = 30 * time.Second
+	expired := time.After(backstop)
+	for !strings.Contains(f.out.String(), want) {
+		select {
+		case got := <-f.done:
+			t.Fatalf("the follow stopped before %s appeared: exit = %d, stderr = %s\nit printed:\n%s",
+				what, got.code, got.stderr, got.stdout)
+		case <-expired:
+			t.Fatalf("%s never appeared in %s; the follow printed:\n%s",
+				what, backstop, f.out.String())
+		default:
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// wait hands back the result of a follow whose context has been cancelled.
+func (f *following) wait() result { return <-f.done }
 
 func (h *harness) seed(t *testing.T, trace *model.Trace, observations ...*model.Observation) {
 	t.Helper()
