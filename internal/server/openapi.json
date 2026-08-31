@@ -704,7 +704,9 @@
             "retention_days": {"type": ["integer", "null"], "minimum": 1, "maximum": 36500,
               "description": "How long a trace is kept after it arrived; null keeps it forever. Bounded because a window becomes a nanosecond cutoff, and a large enough one would overflow into the future and match every row — \"forever\" is null, not a big number."},
             "raw_retention_days": {"type": ["integer", "null"], "minimum": 1, "maximum": 36500,
-              "description": "The window for stored OTLP bodies; null follows retention_days"}
+              "description": "The window for stored OTLP bodies; null follows retention_days"},
+            "stats_retention_days": {"type": ["integer", "null"], "minimum": 1, "maximum": 36500,
+              "description": "The window for the hourly statistics rollup, measured by the hour a row summarizes; null keeps it forever, which is the default. The rollup outlives the traces it summarizes, so shortening this window destroys history the trace sweep spares — it asks for the same confirmation the other two do."}
           }}}}},
         "responses": {
           "200": {"description": "The project as it is now, or the dry run of a window that shrinks",
@@ -1095,11 +1097,12 @@
           "name": {"type": "string"},
           "retention_days": {"type": ["integer", "null"], "maximum": 36500, "description": "null means the data is kept forever, which is the default"},
           "raw_retention_days": {"type": ["integer", "null"], "maximum": 36500, "description": "null means raw follows retention_days"},
+          "stats_retention_days": {"type": ["integer", "null"], "maximum": 36500, "description": "The window for the statistics rollup, which outlives the traces it summarizes; null means it is kept forever, which is the default"},
           "created_at": {"type": "string", "format": "date-time"},
           "deleted_at": {"type": "string", "format": "date-time"},
           "purge_at": {"type": "string", "format": "date-time", "description": "When the sweeper destroys the data; seven days after the delete, and not configurable"}
         },
-        "required": ["id", "name", "retention_days", "raw_retention_days", "created_at"]
+        "required": ["id", "name", "retention_days", "raw_retention_days", "stats_retention_days", "created_at"]
       },
       "NewKey": {
         "type": "object",

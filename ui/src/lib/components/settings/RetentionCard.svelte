@@ -5,11 +5,13 @@
 	import ConfirmCard from '../ConfirmCard.svelte';
 	import Card from './Card.svelte';
 
-	// The retention windows (spec 005). Two numbers, each of which may be
-	// absent, and absent means two different things: no window on the queryable
-	// data is "keep it forever", while no window on the raw bodies is "follow
-	// whatever the queryable window is". The controls say which, because a
-	// blank field would say neither.
+	// The retention windows (spec 005, spec 013 #6). Three numbers, each of
+	// which may be absent, and absent means three different things: no window
+	// on the queryable data is "keep it forever", no window on the raw bodies
+	// is "follow whatever the queryable window is", and no window on the
+	// statistics is "keep the history forever" — which is the point of having
+	// it, since the rollup is what stays when the traces go. The controls say
+	// which, because a blank field would say none of them.
 	//
 	// A window that shrinks destroys data on the next sweep, so the server
 	// answers with its dry run first and this card renders it. A window that
@@ -27,11 +29,14 @@
 	let days = $state(stored.retention_days ?? 30);
 	let rawMode = $state<'follow' | 'days'>(stored.raw_retention_days === null ? 'follow' : 'days');
 	let rawDays = $state(stored.raw_retention_days ?? 7);
+	let statsMode = $state<Mode>(stored.stats_retention_days === null ? 'forever' : 'days');
+	let statsDays = $state(stored.stats_retention_days ?? 365);
 
-	/** The PATCH body: both windows, as the endpoint spells them. */
+	/** The PATCH body: all three windows, as the endpoint spells them. */
 	const body = $derived<RetentionUpdate>({
 		retention_days: mode === 'forever' ? null : Math.trunc(days),
-		raw_retention_days: rawMode === 'follow' ? null : Math.trunc(rawDays)
+		raw_retention_days: rawMode === 'follow' ? null : Math.trunc(rawDays),
+		stats_retention_days: statsMode === 'forever' ? null : Math.trunc(statsDays)
 	});
 
 	async function send(confirm?: string): Promise<DryRun | string> {
@@ -48,7 +53,8 @@
 <Card
 	title="Retention"
 	description="How long this project keeps its data. The sweeper runs hourly and deletes what has
-		fallen outside the window; shortening one destroys data, so it is previewed first."
+		fallen outside the window; shortening one destroys data, so it is previewed first. The
+		statistics outlive the traces they summarize, which is why they have a window of their own."
 >
 	<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
 		<div>
@@ -94,6 +100,31 @@
 						max="36500"
 						bind:value={rawDays}
 						disabled={rawMode === 'follow'}
+						class="{field} w-24"
+					/>
+					<span class="text-muted text-sm">days</span>
+				</div>
+			</div>
+		</div>
+
+		<div>
+			<label for="stats-mode" class="text-muted mb-1 block text-xs font-medium">
+				Statistics history
+			</label>
+			<div class="flex gap-1.5">
+				<select id="stats-mode" bind:value={statsMode} class={field}>
+					<option value="forever">Keep forever</option>
+					<option value="days">Keep for</option>
+				</select>
+				<div class="flex items-center gap-1.5">
+					<label class="sr-only" for="stats-days">Days of statistics retention</label>
+					<input
+						id="stats-days"
+						type="number"
+						min="1"
+						max="36500"
+						bind:value={statsDays}
+						disabled={statsMode === 'forever'}
 						class="{field} w-24"
 					/>
 					<span class="text-muted text-sm">days</span>

@@ -19,20 +19,28 @@ is not optional but the thing that keeps the file a size your disk has. Those
 two figures are a stock and a flow, and they are the README's:
 [What it is built for](../README.md#what-it-is-built-for).
 
-## The two windows
+## The three windows
 
-Each project has two, both counted in whole days (1 to 36500) and both
+Each project has three, all counted in whole days (1 to 36500) and all
 nullable:
 
 | Setting | Applies to | `null` means |
 |---|---|---|
 | `retention_days` | Traces, and everything hanging off them: observations, payloads, scores | Keep forever (the default) |
 | `raw_retention_days` | The stored OTLP bodies of `TRACEPAD_STORE_RAW` | Follow `retention_days` |
+| `stats_retention_days` | The hourly statistics rollup | Keep forever (the default) |
+
+Setting `stats_retention_days` deletes the *stored summaries* past it; it does
+not hide the traces. While the raw rows are still there, statistics for those
+hours are computed from them on the fly, exactly as they were before the
+rollup existed — slower, and correct. Once both windows have passed there is
+nothing left to compute from, and the charts are empty because the data is.
 
 ```sh
 tracepad retention show
 tracepad retention set --days 90               # traces: 90 days
 tracepad retention set --raw-days 14 --yes     # raw bodies: 14 days
+tracepad retention set --stats-days 730 --yes  # statistics: two years
 tracepad retention set --forever               # back to keeping everything
 ```
 
@@ -49,6 +57,33 @@ the sensitive part shorten them deliberately.
 
 A batch is swept by its own age and never because the traces it fed were swept:
 one export body feeds many traces with different fates.
+
+## What outlives what
+
+The statistics are **not** deleted with the traces they summarize. That is
+deliberate: a month of history is a few thousand rows where the traces behind
+it are millions, and deleting the cheap thing along with the expensive one is
+what used to make configuring retention silently amputate the charts.
+
+So a project with `retention_days = 30` keeps answering `/api/v1/stats` about
+last year — counts, errors, cost and latency percentiles — while the traces
+behind those numbers are long gone. An operator who means "no *record* older
+than 30 days", which is a different promise, sets `stats_retention_days` too.
+
+Two consequences follow, and both are stated here rather than left to be
+discovered:
+
+1. **A frozen hour cannot be corrected.** Once an hour is older than
+   `retention_days`, its raw rows are gone by design, so the rollup stops
+   recomputing it — a single late fragment arriving for that hour would
+   otherwise replace five thousand summarized traces with itself. The hour's
+   stored numbers stand as the archive of what was there.
+2. **Erasing a user's data corrects the hours it can reach.** The rolled hours
+   the erased traces occupied are recomputed before the request answers, so
+   the counts drop. Hours already frozen are not recomputed: the aggregates
+   carry no user id, no name and no text — they are counts, sums and latency
+   buckets — which is the same archive posture the raw bodies have below, and
+   the same reasoning regulators accept for a backup.
 
 ## The clock is arrival, not the client's
 
@@ -77,7 +112,15 @@ through the same group-commit writer that ingest uses, so a sweep serializes
 with incoming exports for milliseconds at a time instead of holding a lock
 against them.
 
-Each pass also:
+Beside it runs the **statistics aggregator** (`TRACEPAD_ROLLUP_INTERVAL`,
+five minutes), which rolls closed hours into the summary the charts read and
+re-rolls the hours late spans touched. It writes through the same writer, in
+jobs bounded to one hour of one project, and it deletes nothing except what
+`stats_retention_days` says. Its first pass on an existing database is the
+backfill: it walks from the oldest trace forward, logging progress, while
+every query keeps being answered from the raw rows meanwhile.
+
+Each sweep pass also:
 
 - collects **orphaned payloads** — rows left behind when a re-delivered span
   overwrote its input, output or metadata with a new one;
@@ -172,6 +215,11 @@ endpoint, CLI command or MCP tool can return that user's traces, and no search
 finds their text: the index is deleted in the same transaction as the rows.
 This lands well inside the one-month response window Article 12(3) allows.
 
+**The statistics are corrected where they can be.** The rolled hours the
+erased traces occupied are recomputed before the call returns; hours whose raw
+rows retention already took are frozen and keep their totals. Those rows hold
+no user id, no name and no text — see [What outlives what](#what-outlives-what).
+
 **Raw OTLP bodies are not erased.** They are an archive: not served by any read
 endpoint, not searchable, expiring on their own schedule — the same posture as
 a database backup, which regulators accept. Two caveats follow from that, and
@@ -216,6 +264,7 @@ deployment was configured is a safety net nobody can rely on.
 | Variable | Default | Purpose |
 |---|---|---|
 | `TRACEPAD_SWEEP_INTERVAL` | `1h` | How often a pass runs. A Go duration; at least `1s`. |
+| `TRACEPAD_ROLLUP_INTERVAL` | `5m` | How often the statistics aggregator runs, and so how long a closed hour waits before the rollup holds it. A Go duration; at least `1s`. |
 | `TRACEPAD_STORE_RAW` | `on` | Keep raw OTLP bodies at all. `off` removes the archive caveats above. |
 
 The windows themselves are per project and live in the database, so changing

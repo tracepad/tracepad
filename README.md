@@ -33,8 +33,9 @@ Rough figures, measured on a synthetic corpus of about 2,000 traces:
 Distrust the disk figure first: that corpus has short payloads, and on real
 prompts and completions it is the payloads and the raw batches that the file
 is made of. The read and memory figures were taken at that corpus's size too,
-and they move with it — `/api/v1/stats` aggregates on the fly with no rollup
-table, so a wider window costs more than a narrow one. Size all of it against
+and they move with it — though `/api/v1/stats` answers closed hours from an
+hourly rollup, so a month's chart costs about what a day's does, and it keeps
+answering about data the retention window has since deleted. Size all of it against
 your own traffic, and give it a retention window — near the top of this
 envelope that is not optional. The two ceilings are a stock and a flow, and
 they are counted in different units: the flow is spans, the disk figure above
@@ -153,7 +154,9 @@ tracepad users rm-data user-4711       # one user, everywhere it is queryable
 ```
 
 An hourly sweeper removes what has expired, in chunks through the same writer
-as ingest, and hands the freed pages back so the file shrinks. Projects, keys
+as ingest, and hands the freed pages back so the file shrinks. The statistics
+survive it: the hourly rollup keeps answering about a window whose traces are
+gone, until you give it a window of its own with `--stats-days`. Projects, keys
 and retention windows are managed over the same API; every destructive call is
 a dry run until you echo the name of what it destroys, and deleting a project
 is undoable for a week. See [docs/retention.md](docs/retention.md) and

@@ -477,10 +477,31 @@ Grouped by release, the traces that named none fall in the bucket whose `key`
 is the empty string — that is a group, not a gap, and dropping it would make
 the numbers stop adding up.
 
-Percentiles are exact — nearest rank over the real samples, computed on the
-fly. `total_cost` is summed only over rows whose client provided a cost and is
-absent when none did. A range with nothing in it comes back with no buckets
-rather than with fabricated zeroes.
+Latency percentiles are **histogram-based**: accurate to a few percent, and
+stable across the expiry of the rows they came from. `total_cost` is summed
+only over rows whose client provided a cost and is absent when none did. A
+range with nothing in it comes back with no buckets rather than with
+fabricated zeroes.
+
+### Where the numbers come from
+
+Closed hours are rolled up in the background and answered from that rollup;
+the hour in progress is always answered live. Three consequences worth
+knowing:
+
+- The statistics **trail the raw data by up to twice the rollup interval**
+  (`TRACEPAD_ROLLUP_INTERVAL`, five minutes by default, so ten in the worst
+  case) for hours that have closed: an hour becomes eligible one interval
+  after it ends, and the pass that takes it can be a further interval away.
+  The current hour is never stale — it is answered live.
+- Ranges older than the project's `retention_days` **keep answering** — from
+  the rollup — for as long as `stats_retention_days` allows. This is the
+  point of the rollup: configuring retention no longer amputates the charts.
+- A trace that arrives late for an hour already rolled is picked up by the
+  next pass. Past the retention window that hour is **frozen**: the raw rows
+  behind it are gone by design, so the late fragment appears in the listings
+  but does not rewrite the history. See
+  [retention.md](retention.md#what-outlives-what).
 
 ## Prompt version diff
 

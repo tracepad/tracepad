@@ -729,6 +729,8 @@ export interface components {
             retention_days: number | null;
             /** @description null means raw follows retention_days */
             raw_retention_days: number | null;
+            /** @description The window for the statistics rollup, which outlives the traces it summarizes; null means it is kept forever, which is the default */
+            stats_retention_days: number | null;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -1894,6 +1896,8 @@ export interface operations {
                     retention_days?: number | null;
                     /** @description The window for stored OTLP bodies; null follows retention_days */
                     raw_retention_days?: number | null;
+                    /** @description The window for the hourly statistics rollup, measured by the hour a row summarizes; null keeps it forever, which is the default. The rollup outlives the traces it summarizes, so shortening this window destroys history the trace sweep spares — it asks for the same confirmation the other two do. */
+                    stats_retention_days?: number | null;
                 };
             };
         };

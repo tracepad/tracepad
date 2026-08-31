@@ -264,9 +264,10 @@ func (s *Server) handlePatchProject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var request struct {
-		Name             string          `json:"name"`
-		RetentionDays    json.RawMessage `json:"retention_days"`
-		RawRetentionDays json.RawMessage `json:"raw_retention_days"`
+		Name               string          `json:"name"`
+		RetentionDays      json.RawMessage `json:"retention_days"`
+		RawRetentionDays   json.RawMessage `json:"raw_retention_days"`
+		StatsRetentionDays json.RawMessage `json:"stats_retention_days"`
 	}
 	if !s.readJSON(w, r, &request) {
 		return
@@ -291,9 +292,14 @@ func (s *Server) handlePatchProject(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if update.Name == nil && !update.Retention.Set && !update.RawWindow.Set {
+	if update.StatsWindow, err = optionalDays("stats_retention_days", request.StatsRetentionDays); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if update.Name == nil && !update.Retention.Set && !update.RawWindow.Set && !update.StatsWindow.Set {
 		writeError(w, http.StatusBadRequest,
-			`nothing to change: send "name", "retention_days" or "raw_retention_days"`)
+			`nothing to change: send "name", "retention_days", "raw_retention_days" `+
+				`or "stats_retention_days"`)
 		return
 	}
 
@@ -316,8 +322,9 @@ func (s *Server) handlePatchProject(w http.ResponseWriter, r *http.Request) {
 	// would 500 a request that was going to succeed.
 	confirm := values.Get("confirm")
 	if confirm == "" {
-		retention, rawWindow := update.Windows(project)
-		counts, err := s.store.RetentionPreview(project.ID, retention, rawWindow, time.Now().UnixNano())
+		retention, rawWindow, statsWindow := update.Windows(project)
+		counts, err := s.store.RetentionPreview(
+			project.ID, retention, rawWindow, statsWindow, time.Now().UnixNano())
 		if err != nil {
 			slog.Error("retention preview failed", "err", err)
 			writeError(w, http.StatusInternalServerError, "failed to read what the new window would delete")
@@ -328,7 +335,11 @@ func (s *Server) handlePatchProject(w http.ResponseWriter, r *http.Request) {
 				put("traces", counts.Traces).
 				put("observations", counts.Observations).
 				put("scores", counts.Scores).
-				put("raw_batches", counts.RawBatches)).
+				put("raw_batches", counts.RawBatches).
+				// The rolled hours are named separately because they
+				// are the one thing here the trace sweep spares by
+				// design (spec 013 #6).
+				put("stats_hours", counts.StatsHours)).
 			put("note", "the shorter window takes effect on the next sweep"))
 		return
 	}
@@ -576,6 +587,7 @@ func (s *Server) handleEraseUserData(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var erased store.DeleteCounts
+	touched := map[int64]bool{}
 	for {
 		chunk := &store.UserDataErase{
 			ProjectID: project.ID,
@@ -590,10 +602,27 @@ func (s *Server) handleEraseUserData(w http.ResponseWriter, r *http.Request) {
 		erased.Observations += chunk.Counts.Observations
 		erased.Scores += chunk.Counts.Scores
 		erased.Payloads += chunk.Counts.Payloads
+		for _, hour := range chunk.Hours {
+			touched[hour] = true
+		}
 		if chunk.Counts.Traces < int64(eraseChunk) {
 			break
 		}
 	}
+
+	// The statistics are data derived from what was just erased, so the
+	// hours it emptied are recomputed before the 200 that promises the
+	// user's data is gone (spec 013 #7). An hour whose raw rows retention
+	// already took is frozen and the job leaves it alone (#11) — the
+	// aggregates carry no user id, and `docs/retention.md` states that
+	// position rather than hiding it.
+	now := time.Now().UnixNano()
+	for hour := range touched {
+		if !s.submit(w, r, store.RollHour(project.ID, hour, now)) {
+			return
+		}
+	}
+
 	writeJSON(w, http.StatusOK, object{}.
 		put("dry_run", false).
 		put("deleted", object{}.
@@ -632,6 +661,9 @@ func projectResponse(p *store.Project) object {
 		// "kept forever", which is the default (#2).
 		put("retention_days", p.RetentionDays).
 		put("raw_retention_days", p.RawRetentionDays).
+		// The rollup's own window: null is forever here too, and it is
+		// what keeps the charts when the traces go (spec 013 #6).
+		put("stats_retention_days", p.StatsRetentionDays).
 		put("created_at", p.CreatedAt)
 	if p.Deleted() {
 		body = body.

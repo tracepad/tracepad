@@ -565,7 +565,7 @@ func TestAnAbsurdWindowKeepsEverything(t *testing.T) {
 
 	// And the dry run agrees with the sweep, rather than confirming the
 	// same wrong answer.
-	counts, err := f.store.RetentionPreview(f.project.ID, days(200000), nil, sweepNow.UnixNano())
+	counts, err := f.store.RetentionPreview(f.project.ID, days(200000), nil, nil, sweepNow.UnixNano())
 	if err != nil {
 		t.Fatal(err)
 	}

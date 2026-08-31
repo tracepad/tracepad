@@ -120,6 +120,7 @@ Server environment:
   TRACEPAD_RESPONSE_BUDGET_BYTES  default read response budget          (default 51200)
   TRACEPAD_MCP                    serve MCP at /mcp                     (default on)
   TRACEPAD_SWEEP_INTERVAL         retention sweep cadence               (default 1h)
+  TRACEPAD_ROLLUP_INTERVAL        statistics rollup cadence             (default 5m)
   TRACEPAD_ADMIN_TOKEN            bearer token for cross-project admin  (default unset)
 
 `+cli.Usage)
@@ -165,6 +166,13 @@ func serve(args []string) error {
 	sweeper := st.NewSweeper(writer, store.SweepOptions{Interval: cfg.SweepInterval})
 	sweeper.Start()
 	defer sweeper.Close()
+
+	// The statistics aggregator runs beside it, on the same terms and for
+	// the same reason: it writes through the one writer (spec 013 #3), so
+	// it stops before the writer does.
+	aggregator := st.NewAggregator(writer, store.RollupOptions{Interval: cfg.RollupInterval})
+	aggregator.Start()
+	defer aggregator.Close()
 
 	srv := server.New(cfg, version, st, writer, sweeper)
 
