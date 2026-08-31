@@ -200,8 +200,15 @@ func (a *Aggregator) rollProject(ctx context.Context, project *Project, at time.
 		}
 		if !ok {
 			// No traces at all. The watermark stays where it is —
-			// see below for why moving it would be a lie.
-			return rolled, a.advance(ctx, project.ID, state.RolledUntil, at)
+			// see below for why moving it would be a lie — but the
+			// rollup's own window still applies: a project whose
+			// traces retention has taken is exactly one whose
+			// history is left to age on its own (found in review of
+			// PR #28, by a test written for the chunking).
+			if err := a.advance(ctx, project.ID, state.RolledUntil, at); err != nil {
+				return rolled, err
+			}
+			return rolled, a.sweepRollup(ctx, project, at)
 		}
 		from = oldest
 	}
@@ -289,9 +296,21 @@ func frozenBefore(project *Project, nowNanos int64) int64 {
 	return HourOf(nowNanos - int64(days)*24*int64(time.Hour))
 }
 
+// commitMargin is how far back the pass dates its own cutoff. `updated_at` is
+// stamped inside the write transaction, and the group commit lands after it —
+// so a batch stamped just before this pass began can commit just after its
+// dirty query has read, and would be invisible to this pass and to every one
+// after it, since the cutoff had already moved past its stamp. Re-rolling an
+// hour costs nothing and is idempotent; missing one is permanent, so the
+// cutoff is deliberately conservative (found in review of PR #28).
+const commitMargin = time.Second
+
 func (a *Aggregator) advance(ctx context.Context, projectID string, until int64, at time.Time) error {
 	return a.writer.Submit(ctx, &statsRollupAdvance{
-		ProjectID: projectID, RolledUntil: until, LastPass: at.UnixNano()})
+		ProjectID:   projectID,
+		RolledUntil: until,
+		LastPass:    at.Add(-commitMargin).UnixNano(),
+	})
 }
 
 // sweepRollup applies `stats_retention_days` when it is set. NULL is keep
@@ -308,7 +327,21 @@ func (a *Aggregator) sweepRollup(ctx context.Context, project *Project, at time.
 		return nil
 	}
 	cutoff := at.Add(-time.Duration(days) * 24 * time.Hour).Unix()
-	return a.writer.Submit(ctx, &statsRollupSweep{ProjectID: project.ID, Before: cutoff})
+	// Chunk by chunk until a chunk comes back short, bounded per pass like
+	// the trace sweeper's own loop. One chunk per pass would have cleared a
+	// large backlog at a thousand rows every five minutes — days of it —
+	// while the operator believed the window they set was in force (found
+	// in review of PR #28).
+	for range maxChunksPerProject {
+		chunk := &statsRollupSweep{ProjectID: project.ID, Before: cutoff}
+		if err := a.writer.Submit(ctx, chunk); err != nil {
+			return err
+		}
+		if chunk.Deleted < int64(DefaultSweepChunk) {
+			return nil
+		}
+	}
+	return nil
 }
 
 // dirtyHours are the already-rolled hours that changed since the last pass.
@@ -335,7 +368,8 @@ func (s *Store) dirtyHours(projectID string, since, before int64) ([]int64, erro
 		        (SELECT MAX(o.start_time) FROM observations o
 		         WHERE o.project_id = t.project_id AND o.trace_id = t.id)
 		 FROM traces t
-		 WHERE t.project_id = ? AND t.updated_at > ? AND t.timestamp < ?`,
+		 WHERE t.project_id = ? AND t.updated_at > ? AND t.timestamp < ?
+		   AND t.timestamp >= 0`,
 		projectID, since, before*1e9)
 	if err != nil {
 		return nil, fmt.Errorf("find the hours late spans touched: %w", err)
@@ -380,9 +414,16 @@ func (s *Store) hoursWithTraces(projectID string, from, to int64, limit int) ([]
 		return nil, nil
 	}
 	rows, err := s.db.Query(
+		// The floor here is not only the range's: a timestamp before the
+		// epoch would be truncated toward zero by this division while
+		// `HourOf` floors, so the two would disagree about which hour a
+		// row belongs to. Such a timestamp is a client's bytes gone
+		// wrong rather than a time, and leaving it out of the rollup
+		// leaves it to the live scan, which reads it correctly (found in
+		// review of PR #28).
 		`SELECT DISTINCT (timestamp / 1000000000 / ?) * ? AS hour
 		 FROM traces
-		 WHERE project_id = ? AND timestamp >= ? AND timestamp < ?
+		 WHERE project_id = ? AND timestamp >= ? AND timestamp < ? AND timestamp >= 0
 		 ORDER BY hour LIMIT ?`,
 		SecondsPerHour, SecondsPerHour, projectID, from*1e9, to*1e9, limit)
 	if err != nil {

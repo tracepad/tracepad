@@ -489,9 +489,11 @@ Closed hours are rolled up in the background and answered from that rollup;
 the hour in progress is always answered live. Three consequences worth
 knowing:
 
-- The statistics **trail the raw data by up to the rollup interval**
-  (`TRACEPAD_ROLLUP_INTERVAL`, five minutes by default) for hours that have
-  closed. The current hour is never stale.
+- The statistics **trail the raw data by up to twice the rollup interval**
+  (`TRACEPAD_ROLLUP_INTERVAL`, five minutes by default, so ten in the worst
+  case) for hours that have closed: an hour becomes eligible one interval
+  after it ends, and the pass that takes it can be a further interval away.
+  The current hour is never stale — it is answered live.
 - Ranges older than the project's `retention_days` **keep answering** — from
   the rollup — for as long as `stats_retention_days` allows. This is the
   point of the rollup: configuring retention no longer amputates the charts.

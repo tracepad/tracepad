@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -430,6 +431,45 @@ func TestStatsRetentionSweepsTheRollupOnly(t *testing.T) {
 	}
 	if traces == 0 {
 		t.Error("the stats window deleted traces; it owns the rollup and nothing else")
+	}
+}
+
+// The stats window clears its backlog chunk by chunk within one pass, the way
+// the trace sweeper does. One chunk a pass would have taken days over a large
+// rollup while the operator believed the window was in force (found in review
+// of PR #28).
+func TestTheStatsWindowClearsMoreThanOneChunkPerPass(t *testing.T) {
+	s, project := readStore(t)
+	if _, err := s.db.Exec(
+		`UPDATE projects SET stats_retention_days = 1 WHERE id = ?`, project.ID); err != nil {
+		t.Fatal(err)
+	}
+	// More rows than one chunk holds, spread over hours old enough to be
+	// swept. Written directly: the point is the deletion loop, not how they
+	// came to be there.
+	rows := DefaultSweepChunk + 500
+	for i := range rows {
+		if _, err := s.db.Exec(
+			`INSERT INTO stats_hourly
+			   (project_id, hour, environment, release, model, count, error_count, latency)
+			 VALUES (?, ?, ?, '', '', 1, 0, '[1]')`,
+			project.ID, rollupHour+int64(i/50)*SecondsPerHour,
+			fmt.Sprintf("env-%d", i%50)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	passAt(t, s, time.Unix(rollupHour, 0).Add(400*24*time.Hour))
+
+	var left int
+	if err := s.db.QueryRow(
+		`SELECT COUNT(*) FROM stats_hourly WHERE project_id = ?`, project.ID).
+		Scan(&left); err != nil {
+		t.Fatal(err)
+	}
+	if left != 0 {
+		t.Errorf("%d rolled rows survived one pass of %d, want the backlog cleared",
+			left, rows)
 	}
 }
 

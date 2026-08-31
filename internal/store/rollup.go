@@ -131,6 +131,29 @@ func (s *Store) StatsRollupRows(projectID string, fromHour, toHour int64, enviro
 	return rows.Err()
 }
 
+// OldestRolledHour is the oldest hour the rollup actually holds for a
+// project, and whether it holds anything at all.
+//
+// The read seam asks this rather than deriving a floor from
+// `stats_retention_days`, because the window can be lengthened and the sweep
+// cannot be undone: a project swept to one day and then set back to "keep
+// forever" would otherwise have the seam trusting the rollup for hours whose
+// rows are gone, permanently and silently (spec 013 #17, found in review of
+// PR #28). The table itself is the only honest answer to "how far back can
+// you speak for".
+//
+// It is a `MIN` over the primary key's leading columns, so it costs an index
+// seek.
+func (s *Store) OldestRolledHour(projectID string) (int64, bool, error) {
+	var oldest sql.NullInt64
+	if err := s.db.QueryRow(
+		`SELECT MIN(hour) FROM stats_hourly WHERE project_id = ?`, projectID).
+		Scan(&oldest); err != nil {
+		return 0, false, fmt.Errorf("read the oldest rolled hour: %w", err)
+	}
+	return oldest.Int64, oldest.Valid, nil
+}
+
 // StatsRollupHours reports which hours of a project hold rolled rows. The
 // tests and the system endpoint ask; the read path never needs to.
 func (s *Store) StatsRollupHours(projectID string) ([]int64, error) {

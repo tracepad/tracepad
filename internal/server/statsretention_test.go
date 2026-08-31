@@ -147,6 +147,43 @@ func TestTheHourOnTheStatsWindowEdgeIsStillAnswered(t *testing.T) {
 	}
 }
 
+// Lengthening the window again must not leave a hole. The sweep cannot be
+// undone, so a floor derived from the *current* window would send the seam
+// back to a table whose rows are gone — permanently, since nothing re-rolls
+// an hour nobody has touched (spec 013 #17, found in review of PR #28).
+func TestWideningTheStatsWindowDoesNotLeaveAHole(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	h.seedHour(t, statsHour, 1, 3, "production")
+	h.rollTheCorpus(t, time.Unix(statsHour+3*3600, 0))
+	truth := h.statsBuckets(t, "/api/v1/stats?group_by=day")
+	if len(truth) != 1 || truth[0].Count != 3 {
+		t.Fatalf("buckets = %+v, want the three seeded traces", truth)
+	}
+
+	// One day of statistics: the fixture's hour is swept from the rollup.
+	rec := h.send(t, "PATCH", "/api/v1/projects/"+h.project.ID+"?confirm="+h.project.Name,
+		map[string]any{"stats_retention_days": 1})
+	expectStatus(t, rec, 200)
+	h.rollTheCorpus(t, time.Now())
+	if hours, err := h.store.StatsRollupHours(h.project.ID); err != nil {
+		t.Fatal(err)
+	} else if len(hours) != 0 {
+		t.Fatalf("rolled hours = %v, want the window to have swept them", hours)
+	}
+
+	// And back to keeping them forever, which deletes nothing and looks
+	// harmless — the traces are all still here.
+	rec = h.send(t, "PATCH", "/api/v1/projects/"+h.project.ID,
+		map[string]any{"stats_retention_days": nil})
+	expectStatus(t, rec, 200)
+
+	after := h.statsBuckets(t, "/api/v1/stats?group_by=day")
+	if len(after) != 1 || after[0].Count != truth[0].Count {
+		t.Errorf("buckets = %+v, want the live truth %+v: the rollup can only speak "+
+			"for the hours it still holds", after, truth)
+	}
+}
+
 // And when both windows have passed, the emptiness is real: nothing is
 // stored, nothing is recomputed, and the honest answer is no buckets.
 func TestWhenBothWindowsHavePassedTheAnswerIsEmpty(t *testing.T) {

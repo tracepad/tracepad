@@ -167,8 +167,17 @@ func (s *Server) readStats(project *store.Project, filter store.StatsFilter, at 
 	// has closed, and only if it has ever run.
 	rolledFrom, rolledTo := int64(0), int64(0)
 	if state.RolledUntil > 0 {
-		rolledFrom = max(hourCeiling(max(from, 0)), statsFloor(project, time.Now()))
-		rolledTo = min(state.RolledUntil, store.HourOf(to))
+		// How far back the rollup can speak for is what it holds, not
+		// what the retention window says it should hold: the window can
+		// be lengthened and a sweep cannot be undone (spec 013 #17).
+		oldest, held, err := s.store.OldestRolledHour(projectID)
+		if err != nil {
+			return err
+		}
+		if held {
+			rolledFrom = max(hourCeiling(max(from, 0)), oldest)
+			rolledTo = min(state.RolledUntil, store.HourOf(to))
+		}
 	}
 	if rolledTo <= rolledFrom {
 		return s.liveStats(projectID, filter, from, to, at)
@@ -197,29 +206,6 @@ func (s *Server) readStats(project *store.Project, filter store.StatsFilter, at 
 // there is. It is not `math.MinInt64`, which would overflow the moment it was
 // turned into an hour.
 const unbounded = int64(0)
-
-// statsFloor is the oldest hour the rollup may be asked about: past the
-// project's `stats_retention_days` the aggregator has deleted its rows, and
-// asking a swept table is how a chart reports nothing about data the store
-// still holds (spec 013 #13). Those hours go to the live scan instead — the
-// pre-rollup answer at the pre-rollup cost. When the traces are gone too, the
-// live scan finds nothing and the emptiness is the truth.
-func statsFloor(project *store.Project, now time.Time) int64 {
-	if project == nil || project.StatsRetentionDays == nil {
-		return 0
-	}
-	days := *project.StatsRetentionDays
-	if days < 1 || days > store.MaxRetentionDays {
-		return 0
-	}
-	// The ceiling, not the floor: the aggregator sweeps `hour < cutoff`
-	// with a cutoff that is not hour-aligned, so the hour the cutoff falls
-	// inside is already gone. Rounding down would leave that one hour
-	// inside the range asked of the rollup and outside the live head that
-	// stops at it — an hour neither half answers, and not transiently
-	// (found in review of PR #28).
-	return hourCeiling(now.Add(-time.Duration(days) * 24 * time.Hour).UnixNano())
-}
 
 // rolledStats folds the stored rows of a range into the buckets. Which rows
 // count is the unit: the model grouping reads observation rows, everything
