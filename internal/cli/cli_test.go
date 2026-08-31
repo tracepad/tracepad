@@ -115,20 +115,25 @@ func (h *harness) options(stdout, stderr io.Writer, tty bool, args []string) Opt
 	}
 }
 
-// follow starts a command that runs until its context is cancelled and hands
-// back its output as it is written, plus a channel carrying the finished
-// result. `tail` is the only such command, and it is the reason this exists:
-// its assertions are about what has been printed *so far*, so the test can
-// wait for the event it is about instead of sleeping for a duration that is
-// usually long enough.
-func (h *harness) follow(ctx context.Context, tty bool, args ...string) (*syncBuffer, <-chan result) {
+// follow starts a command that runs until its context is cancelled. `tail` is
+// the only such command, and it is the reason this exists: its assertions are
+// about what has been printed *so far*, so the test can wait for the event it
+// is about instead of sleeping for a duration that is usually long enough.
+func (h *harness) follow(ctx context.Context, tty bool, args ...string) *following {
 	out, errOut := &syncBuffer{}, &syncBuffer{}
 	done := make(chan result, 1)
 	go func() {
 		code := Run(ctx, h.options(out, errOut, tty, args))
 		done <- result{stdout: out.String(), stderr: errOut.String(), code: code}
 	}()
-	return out, done
+	return &following{out: out, done: done}
+}
+
+// following is a command that is still running: what it has printed so far,
+// and the result it will finish with once its context ends.
+type following struct {
+	out  *syncBuffer
+	done <-chan result
 }
 
 // syncBuffer is an output buffer that can be read while it is being written.
@@ -149,25 +154,39 @@ func (b *syncBuffer) String() string {
 	return b.buf.String()
 }
 
-// awaitOutput blocks until a follow has printed want.
+// await blocks until the follow has printed want.
 //
 // The deadline is a backstop against a hang, not the thing being measured: on
 // a healthy run this returns as soon as the poll that prints it lands, and on
 // a loaded machine it waits as long as that takes rather than failing at a
 // duration somebody guessed. That is the whole point — a sleep long enough for
 // a laptop is a coin toss on a busy CI runner (INBOX, gate of PR #28).
-func awaitOutput(t *testing.T, out *syncBuffer, want, what string) {
+//
+// A follow that has *exited* is the other way this can end, and waiting out
+// the backstop for it would be both slow and mute: whatever it printed is all
+// there will be, and the reason it stopped is in the result. So the wait ends
+// there and reports it, the way the timed version used to report the exit
+// code of a command that had already returned.
+func (f *following) await(t *testing.T, want, what string) {
 	t.Helper()
 	const backstop = 30 * time.Second
-	deadline := time.Now().Add(backstop)
-	for !strings.Contains(out.String(), want) {
-		if time.Now().After(deadline) {
+	expired := time.After(backstop)
+	for !strings.Contains(f.out.String(), want) {
+		select {
+		case got := <-f.done:
+			t.Fatalf("the follow stopped before %s appeared: exit = %d, stderr = %s\nit printed:\n%s",
+				what, got.code, got.stderr, got.stdout)
+		case <-expired:
 			t.Fatalf("%s never appeared in %s; the follow printed:\n%s",
-				what, backstop, out.String())
+				what, backstop, f.out.String())
+		default:
 		}
 		time.Sleep(time.Millisecond)
 	}
 }
+
+// wait hands back the result of a follow whose context has been cancelled.
+func (f *following) wait() result { return <-f.done }
 
 func (h *harness) seed(t *testing.T, trace *model.Trace, observations ...*model.Observation) {
 	t.Helper()

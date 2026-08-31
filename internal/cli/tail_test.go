@@ -29,7 +29,7 @@ func TestTailFollowsAnIngestingServer(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
-	out, done := h.follow(ctx, true, "tail", "--interval", "20ms")
+	follow := h.follow(ctx, true, "tail", "--interval", "20ms")
 
 	// Write while the follow is running: this is the race the command has
 	// to survive, not just a sequence it has to render. The writes are paced
@@ -45,10 +45,16 @@ func TestTailFollowsAnIngestingServer(t *testing.T) {
 	// Wait for the last write to be printed rather than for a duration that
 	// is usually one poll: on a loaded runner it is not, and the trace that
 	// had not been polled yet was read as one the follow had missed.
-	awaitOutput(t, out, traceHex(6), "the last trace written during the follow")
+	follow.await(t, traceHex(6), "the last trace written during the follow")
 	cancel()
 
-	printed := (<-done).stdout
+	got := follow.wait()
+	// Being stopped is what was asked for: a follow that exits 1 on Ctrl-C
+	// is a broken pipeline for everyone who ends one that way.
+	if got.code != ExitOK {
+		t.Fatalf("exit = %d after the follow was cancelled, stderr = %s", got.code, got.stderr)
+	}
+	printed := got.stdout
 	for i := 1; i <= 6; i++ {
 		if count := strings.Count(printed, traceHex(i)); count != 1 {
 			t.Fatalf("trace %d printed %d times, want exactly once:\n%s", i, count, printed)
@@ -75,20 +81,39 @@ func TestTailFiltersAndJSON(t *testing.T) {
 	defer cancel()
 	// Ended when the follow has printed, not after a deadline that is a
 	// guess about how long a poll takes.
-	out, done := h.follow(ctx, false, "tail", "--error", "--interval", "20ms")
-	awaitOutput(t, out, traceHex(2), "the failed trace")
+	follow := h.follow(ctx, false, "tail", "--error", "--interval", "20ms")
+	follow.await(t, traceHex(2), "the failed trace")
+
+	// A second failure, stored after the first has been printed and so
+	// necessarily read by a later poll. It is what keeps the assertions
+	// below about a follow that has looked at the listing more than once —
+	// stopping at the first match would make "the passing trace never
+	// appeared" and "the failed one appeared once" true of a single page,
+	// which is not the claim.
+	h.seed(t, &model.Trace{ID: traceHex(3), Name: "broken-again", Environment: "production"},
+		&model.Observation{TraceID: traceHex(3), ID: spanHex(3), Type: model.TypeSpan,
+			Level: model.LevelError, StartTime: seedBase + 2*ms, EndTime: seedBase + 3*ms})
+	follow.await(t, traceHex(3), "the second failed trace")
 	cancel()
-	got := <-done
+	got := follow.wait()
 
 	if got.code != ExitOK {
 		t.Fatalf("exit = %d, stderr = %s", got.code, got.stderr)
 	}
-	lines := strings.Split(strings.TrimSpace(got.stdout), "\n")
-	if len(lines) != 1 || !strings.Contains(lines[0], traceHex(2)) {
-		t.Fatalf("output = %q, want only the failed trace", got.stdout)
+	if strings.Contains(got.stdout, traceHex(1)) {
+		t.Errorf("the trace that did not fail was printed:\n%s", got.stdout)
 	}
-	if !strings.HasPrefix(lines[0], `{"id":`) {
-		t.Errorf("line = %q, want one JSON row per line in a pipe", lines[0])
+	lines := strings.Split(strings.TrimSpace(got.stdout), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("output = %q, want the two failed traces and nothing else", got.stdout)
+	}
+	for i, want := range []string{traceHex(2), traceHex(3)} {
+		if !strings.Contains(lines[i], want) {
+			t.Errorf("line %d = %q, want the failed trace %s", i, lines[i], want)
+		}
+		if !strings.HasPrefix(lines[i], `{"id":`) {
+			t.Errorf("line %d = %q, want one JSON row per line in a pipe", i, lines[i])
+		}
 	}
 }
 
@@ -105,13 +130,13 @@ func TestTailShowsALateArrival(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	out, done := h.follow(ctx, true, "tail", "--interval", "20ms")
+	follow := h.follow(ctx, true, "tail", "--interval", "20ms")
 
 	// The late trace has to be stored *after* the follow has printed the
 	// first one, or there is nothing late about it: both would land on the
 	// same poll and the test would pass without exercising anything. That is
 	// what the sleep here was for, and a sleep cannot say it happened.
-	awaitOutput(t, out, traceHex(1), "the trace that started later")
+	follow.await(t, traceHex(1), "the trace that started later")
 
 	// Stored second, but it started five seconds earlier — exactly what a
 	// batching exporter produces.
@@ -121,10 +146,14 @@ func TestTailShowsALateArrival(t *testing.T) {
 	// And the follow has to be given until it polls, not until a duration
 	// somebody measured on a quiet laptop: this is the wait that made the
 	// test flaky on CI (INBOX, gate of PR #28).
-	awaitOutput(t, out, traceHex(2), "the late arrival")
+	follow.await(t, traceHex(2), "the late arrival")
 	cancel()
 
-	printed := (<-done).stdout
+	got := follow.wait()
+	if got.code != ExitOK {
+		t.Fatalf("exit = %d after the follow was cancelled, stderr = %s", got.code, got.stderr)
+	}
+	printed := got.stdout
 	for _, id := range []string{traceHex(1), traceHex(2)} {
 		if count := strings.Count(printed, id); count != 1 {
 			t.Fatalf("trace %s printed %d times, want exactly once:\n%s", id, count, printed)
