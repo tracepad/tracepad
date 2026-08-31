@@ -262,6 +262,16 @@ func (r *statsRoll) apply(tx *sql.Tx) error {
 // thing worth protecting, and their absence is what says there is nothing to
 // protect.
 func (r *statsRoll) frozen(tx *sql.Tx, project *Project) (bool, error) {
+	// The epoch hour is never frozen. It is not a time: it is where a trace
+	// lands when no span of it said when it started (spec 004 #26), so its
+	// rows are as young as any other and retention cannot have taken them —
+	// there is nothing to protect from a recomputation. Freezing it instead
+	// pinned the phantom 1970 bucket that #16 exists to remove, for every
+	// project with a retention window, which is every ordinary one (found
+	// in the fifth review of PR #28).
+	if r.Hour <= 0 {
+		return false, nil
+	}
 	if r.Hour >= frozenBefore(project, r.Now) {
 		return false, nil
 	}

@@ -405,8 +405,29 @@ func TestATraceThatMovesHoursIsCountedOnce(t *testing.T) {
 // moves it *forwards*. The epoch hour then keeps counting it — a phantom
 // 1970 bucket on every chart — unless it is re-rolled too (spec 013 #16,
 // found in review of PR #28).
+// Both retention shapes, because the first version of this test used only
+// the one where nothing freezes: hour 0 is below *every* retention boundary,
+// so with a window set the correction was scheduled and then discarded by the
+// freeze, and the phantom survived in exactly the configuration an ordinary
+// deployment runs (found in the fifth review of PR #28).
 func TestATraceThatMovesForwardFromTheEpochIsCountedOnce(t *testing.T) {
+	for _, retention := range []*int{nil, intPtr(7)} {
+		name := "traces kept forever"
+		if retention != nil {
+			name = "a retention window set"
+		}
+		t.Run(name, func(t *testing.T) { epochMoveIsCountedOnce(t, retention) })
+	}
+}
+
+func epochMoveIsCountedOnce(t *testing.T, retention *int) {
 	s, project := readStore(t)
+	if retention != nil {
+		if _, err := s.db.Exec(`UPDATE projects SET retention_days = ? WHERE id = ?`,
+			*retention, project.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
 	hour := HourOf(time.Now().Add(-2 * time.Hour).UnixNano())
 
 	// A first delivery that says nothing about when anything started.

@@ -362,13 +362,21 @@ func (a *Aggregator) sweepRollup(ctx context.Context, project *Project, at time.
 // one does (spec 004 #26). Either way the hour the trace left goes on
 // counting it until that hour is rolled again.
 //
-// So the set to mark is the hours of the observations themselves. It is exact
-// — the trace can only ever have been stamped at one of those starts — and it
-// is bounded by the trace's own observation count rather than by the distance
-// between them, which matters because a start time is unvalidated client
+// So the set to mark is the hours of the observations themselves, and it is
+// bounded by the trace's own observation count rather than by the distance
+// between them — which matters because a start time is unvalidated client
 // input: walking an *hour range* between two of them let one span with a
 // far-future start mark every hour of a year's history (spec 013 #16,
 // corrected in review of PR #28).
+//
+// It is not quite complete, and the limit is named rather than implied: a
+// re-delivered span overwrites `start_time` (spec 002 #5, the latest delivery
+// is the truth), so if the same span id comes back with a start in a
+// different hour, the hour it used to put the trace in is no longer derivable
+// from anything stored, and that hour keeps counting the trace until
+// something else dirties it. Recording each trace's rolled hour would close
+// it, at the price of a write per trace on the ingest path for a shape that
+// needs one span id re-sent with a moved start.
 func (s *Store) dirtyHours(projectID string, since, before int64) ([]int64, error) {
 	rows, err := s.db.Query(
 		`SELECT DISTINCT (o.start_time / 1000000000 / ?) * ? AS hour
