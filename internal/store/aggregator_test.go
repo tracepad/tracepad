@@ -399,6 +399,53 @@ func TestATraceThatMovesHoursIsCountedOnce(t *testing.T) {
 	}
 }
 
+// The other direction, which the first version of the fix above missed and
+// its comment denied: a trace whose first delivery carried no usable start is
+// stamped at the epoch (spec 004 #26), and a later span with a real start
+// moves it *forwards*. The epoch hour then keeps counting it — a phantom
+// 1970 bucket on every chart — unless it is re-rolled too (spec 013 #16,
+// found in review of PR #28).
+func TestATraceThatMovesForwardFromTheEpochIsCountedOnce(t *testing.T) {
+	s, project := readStore(t)
+	hour := HourOf(time.Now().Add(-2 * time.Hour).UnixNano())
+
+	// A first delivery that says nothing about when anything started.
+	seedTrace(t, s, project.ID,
+		&model.Trace{ID: hexTrace(1), Environment: "production"},
+		&model.Observation{
+			TraceID: hexTrace(1), ID: hexSpan(1), Type: model.TypeSpan,
+			Name: "root", Level: model.LevelDefault,
+		})
+	passAt(t, s, time.Now())
+	if rows := rolledRows(t, s, project.ID, 0); len(rows) == 0 {
+		t.Fatal("the epoch hour did not roll, so this test proves nothing")
+	}
+
+	// And a later one that does, moving the trace out of the epoch.
+	seedTrace(t, s, project.ID,
+		&model.Trace{ID: hexTrace(1), Environment: "production"},
+		&model.Observation{
+			TraceID: hexTrace(1), ID: hexSpan(2), Type: model.TypeGeneration,
+			Name: "answer", Level: model.LevelDefault,
+			StartTime: hour*int64(time.Second) + int64(time.Second),
+			EndTime:   hour*int64(time.Second) + 2*int64(time.Second),
+		})
+	passAt(t, s, time.Now())
+
+	var counted int64
+	for _, at := range []int64{0, hour} {
+		for _, row := range rolledRows(t, s, project.ID, at) {
+			if row.Model == "" {
+				counted += row.Count
+			}
+		}
+	}
+	if counted != 1 {
+		t.Errorf("the trace is counted %d times, want once: the epoch hour it left "+
+			"must be re-rolled with it", counted)
+	}
+}
+
 // That an hour *with* a summary stays frozen past the window is
 // TestAFrozenHourSurvivesALateFragment above; the refinement narrows what is
 // frozen, it does not loosen what is protected. The watermark cannot walk

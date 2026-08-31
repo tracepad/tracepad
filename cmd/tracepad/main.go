@@ -120,6 +120,7 @@ Server environment:
   TRACEPAD_RESPONSE_BUDGET_BYTES  default read response budget          (default 51200)
   TRACEPAD_MCP                    serve MCP at /mcp                     (default on)
   TRACEPAD_SWEEP_INTERVAL         retention sweep cadence               (default 1h)
+  TRACEPAD_ROLLUP_INTERVAL        statistics rollup cadence             (default 5m)
   TRACEPAD_ADMIN_TOKEN            bearer token for cross-project admin  (default unset)
 
 `+cli.Usage)

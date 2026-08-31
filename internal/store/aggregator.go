@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"sort"
 	"sync"
 	"time"
 )
@@ -352,58 +351,49 @@ func (a *Aggregator) sweepRollup(ctx context.Context, project *Project, at time.
 // its hour dirty, and the hour would keep its first answer for ever. That is
 // the defect this column exists to close (spec 013 #15, found in review of
 // PR #28).
-// A changed trace dirties every hour between the one it is in now and the one
-// its last observation started in — not just its current hour. A trace's
-// `timestamp` is the minimum start of its observations and is recomputed on
-// every delivery, so a late span with an earlier start *moves the trace to an
-// earlier hour*, and the hour it left keeps counting it. The move is always
-// backwards, and the hour it left was the minimum of a subset of the same
-// observations, so it lies inside `[MIN(start), MAX(start)]` — which makes
-// the range exact rather than a guess. It is bounded by the trace's own
-// duration, one hour for almost every trace (spec 013 #16, found in review of
-// PR #28).
+// A changed trace dirties **every hour one of its observations starts in**,
+// not just the hour the trace sits in now.
+//
+// A trace's `timestamp` is derived — `COALESCE(MIN(start > 0), MIN(start))`,
+// recomputed on every delivery — so it is always equal to the start of one of
+// its own observations, and it moves as observations arrive. Backwards, when
+// a late span starts earlier than any seen so far; and *forwards*, from the
+// epoch, when the first delivery carried no usable start at all and a later
+// one does (spec 004 #26). Either way the hour the trace left goes on
+// counting it until that hour is rolled again.
+//
+// So the set to mark is the hours of the observations themselves. It is exact
+// — the trace can only ever have been stamped at one of those starts — and it
+// is bounded by the trace's own observation count rather than by the distance
+// between them, which matters because a start time is unvalidated client
+// input: walking an *hour range* between two of them let one span with a
+// far-future start mark every hour of a year's history (spec 013 #16,
+// corrected in review of PR #28).
 func (s *Store) dirtyHours(projectID string, since, before int64) ([]int64, error) {
 	rows, err := s.db.Query(
-		`SELECT t.timestamp,
-		        (SELECT MAX(o.start_time) FROM observations o
-		         WHERE o.project_id = t.project_id AND o.trace_id = t.id)
-		 FROM traces t
-		 WHERE t.project_id = ? AND t.updated_at > ? AND t.timestamp < ?
-		   AND t.timestamp >= 0`,
-		projectID, since, before*1e9)
+		`SELECT DISTINCT (o.start_time / 1000000000 / ?) * ? AS hour
+		 FROM observations o
+		 JOIN traces t ON t.project_id = o.project_id AND t.id = o.trace_id
+		 WHERE t.project_id = ? AND t.updated_at > ? AND o.start_time >= 0
+		 ORDER BY hour`,
+		SecondsPerHour, SecondsPerHour, projectID, since)
 	if err != nil {
 		return nil, fmt.Errorf("find the hours late spans touched: %w", err)
 	}
-	defer rows.Close()
-
-	seen := map[int64]bool{}
-	for rows.Next() {
-		var (
-			timestamp int64
-			latest    sql.NullInt64
-		)
-		if err := rows.Scan(&timestamp, &latest); err != nil {
-			return nil, err
-		}
-		last := HourOf(timestamp)
-		if latest.Valid && latest.Int64 > timestamp {
-			last = HourOf(latest.Int64)
-		}
-		for hour := HourOf(timestamp); hour <= last; hour += SecondsPerHour {
-			if hour < before {
-				seen[hour] = true
-			}
-		}
-	}
-	if err := rows.Err(); err != nil {
+	all, err := scanHours(rows)
+	if err != nil {
 		return nil, err
 	}
-
-	hours := make([]int64, 0, len(seen))
-	for hour := range seen {
-		hours = append(hours, hour)
+	// Only the rolled part of the timeline: an hour at or past the
+	// watermark is the live tail's, and the forward roll will take it when
+	// it closes. The filter is on the hour rather than on the trace,
+	// because a trace that moved into the tail still left a row behind.
+	hours := make([]int64, 0, len(all))
+	for _, hour := range all {
+		if hour < before {
+			hours = append(hours, hour)
+		}
 	}
-	sort.Slice(hours, func(i, j int) bool { return hours[i] < hours[j] })
 	return hours, nil
 }
 

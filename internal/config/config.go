@@ -99,6 +99,7 @@ var knownEnv = map[string]bool{
 	"TRACEPAD_RESPONSE_BUDGET_BYTES": true,
 	"TRACEPAD_MCP":                   true,
 	"TRACEPAD_SWEEP_INTERVAL":        true,
+	"TRACEPAD_ROLLUP_INTERVAL":       true,
 	"TRACEPAD_ADMIN_TOKEN":           true,
 	// Read by the client commands rather than by the server, but a typo
 	// in either is still a typo worth naming.
