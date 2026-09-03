@@ -52,7 +52,33 @@ type ScoreWrite struct {
 // replaces the row wholesale — a correction is a re-POST, not a delete and an
 // insert (#3), so `created_at` moves to the receive time of the newest
 // delivery just like every other column.
+//
+// A score whose name has a config is checked against it first, here rather
+// than in the handler, because a config can be replaced between a
+// handler-side read and the commit (spec 014 #15, spec 003 Decision 20). One
+// violating item refuses the whole batch with a message naming it (#7).
 func (s *ScoreWrite) apply(tx *sql.Tx) error {
+	configs := map[string]*ScoreConfig{}
+	for i, score := range s.Scores {
+		config, known := configs[score.Name]
+		if !known {
+			var err error
+			if config, err = scoreConfigByName(tx, s.ProjectID, score.Name); err != nil {
+				return err
+			}
+			configs[score.Name] = config
+		}
+		if config == nil {
+			continue
+		}
+		if err := config.check(score); err != nil {
+			message := err.Error()
+			if len(s.Scores) > 1 {
+				message = fmt.Sprintf("score at index %d: %s", i, message)
+			}
+			return &Rejection{Kind: RejectInvalid, Message: message}
+		}
+	}
 	for _, score := range s.Scores {
 		_, err := tx.Exec(
 			`INSERT INTO scores (
