@@ -191,9 +191,9 @@ screens write item bodies in. It is a text document, not a tree:
 - **The gutter folds.** A document over 400 lines opens with everything more
   than two levels deep folded, which is what makes a megabyte navigable; a
   short one opens flat. Searching for text inside a fold opens it. Folding
-  happens once the document is on screen and within a fixed slice of a
-  frame, so a payload of several megabytes opens with its head folded and
-  the rest flat rather than making you wait for all of it.
+  happens once the document is on screen rather than before, so the payload
+  is there to read either way; a document too large to fold in the time
+  allowed opens with its head folded and the rest flat.
 - **Copy** takes the whole document, not the part on screen. A preview under
   a truncation banner has no Copy at all: what is on screen there is a
   prefix, and the banner is how you get the rest.

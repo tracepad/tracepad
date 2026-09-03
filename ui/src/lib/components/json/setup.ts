@@ -42,14 +42,15 @@ const OPEN_DEPTH = 2;
  * mount that blocks for as long as the document is big; what parsed in time is
  * folded and the rest opens flat, which is the old tree's behaviour anyway.
  *
- * The bound is a frame budget rather than a patience budget (#16): this walk
- * runs after the document is on screen, so what it spends is time the panel
- * does not answer in, and a screen carries several payloads that each want
- * it — a second of it, four times over, is a panel that opens and freezes.
- * Measured at 3.9 MB: ~155 ms of blocking here against ~325 ms at a second,
- * for a document whose head folds and whose tail opens flat.
+ * It is a ceiling for the pathological document rather than a price the
+ * ordinary one pays (#16): a parse that finishes inside the budget costs the
+ * same whatever the budget is, so the number only decides where folding gives
+ * up. Measured at 3.9 MB, folding whole costs ~330 ms of blocking and needs
+ * between 250 and 300 ms of this to get there; 400 leaves that headroom for a
+ * slower machine and still bounds a screen of four payloads at 1.6 s rather
+ * than the 4 s a second each would allow.
  */
-const PARSE_BUDGET_MS = 150;
+const PARSE_BUDGET_MS = 400;
 
 /**
  * How a value becomes a document. A string is its own text — the API returns a
