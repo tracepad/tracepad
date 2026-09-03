@@ -291,10 +291,14 @@ above and no summary: a page of runs is for choosing one.
 - `total_cost` is `null` when no attempt carried a cost. Absent cost is not
   zero.
 - Score names report `mean`/`min`/`max` when they are numeric or boolean, a
-  `distribution` when categorical, and `count` alone for text. `data_type` and
-  `direction` come from the name's [config](scores.md#score-configs);
-  `direction` is `null` for a name that has none, which is what makes a
-  comparison say *changed* rather than *improved*.
+  `distribution` when categorical, and `count` alone for text. `data_type` is
+  the type the run's scores under that name actually used — the commonest one
+  if they used more than one — which is not always what the name's
+  [config](scores.md#score-configs) declares: a config governs what is accepted
+  from now on and never re-types a score already stored. `direction` does come
+  from the config, and only for a numeric or boolean name; it is `null`
+  otherwise, which is what makes a comparison say *changed* rather than
+  *improved*.
 - `models` and `prompts` are derived from the run's observations — what it
   actually ran, not what the harness declared.
 

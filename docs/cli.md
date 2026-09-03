@@ -317,10 +317,15 @@ RUN=$(tracepad runs create support-golden --json)
 
 `datasets show --json` walks every page rather than printing the first: it is
 the dataset's export, and an export that looks complete and is not would be
-worse than none. `runs compare` walks every page too — the cases worth reading
-are the ones that moved, and the regression may be on page two. Both are the
-only commands here that stitch pages; everything else prints the endpoint's own
-bytes.
+worse than none. It is the one command whose JSON stitches pages; every other
+`--json` prints the endpoint's own bytes, cursors included, so a script pages
+exactly the way an HTTP client does.
+
+The `runs compare` **table** walks every page too — the cases worth reading are
+the ones that moved, and the regression may be on page two. `runs compare
+--json` does not: it prints the one page the endpoint returned, next to counts
+(`improved`, `regressed`, `same`) that are always about the whole pair, and
+`next_cursor` for the rest of the cases.
 
 `runs show --items` is the case-by-case view: expected output beside what was
 produced, with the scores each attempt got. Add `--unknown` to see the run's

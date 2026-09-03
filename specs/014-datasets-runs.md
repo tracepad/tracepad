@@ -297,7 +297,9 @@ ordered by `seq`, paginated:
 
 `output` is the trace's root observation's output (the earliest-starting
 observation without a parent); a trace with no payload there shows `null`.
-`?unknown=true` appends the unknown-item traces as items with `"id": null`.
+`?unknown=true` appends the unknown-item traces as rows marked `"unknown":
+true`, grouped by the id they named — `"id": null` for the traces that named
+none (Decision 29).
 
 `DELETE /api/v1/runs/{id}` — 200 `{"id", "released_traces": n}` (Decision
 20).
