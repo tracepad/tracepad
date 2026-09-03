@@ -1,6 +1,6 @@
 # Spec 014 — Datasets, runs & score configs: evals that live in the trace store
 
-**Status:** IN PROGRESS
+**Status:** ✅ SHIPPED
 **Sprint:** September 2026
 
 > Today an eval is a directory of JSON files, a runner per harness, and a
