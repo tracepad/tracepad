@@ -168,9 +168,9 @@ tracepad users rm-data user-4711
 ```
 
 The echo is the user id. The response reports what went, per store. When an
-eval run holds any of the user's traces, the preview names it — erasure
-outranks the pin, and the run shows those items as missing afterwards
-([datasets.md](datasets.md#what-a-run-keeps)). Raw OTLP
+eval run holds any of the user's traces, the preview names it under
+`affected_runs` — erasure outranks the pin, and the run shows those items as
+missing afterwards ([datasets.md](datasets.md#what-a-run-keeps)). Raw OTLP
 bodies are deliberately not touched — see
 [retention.md](retention.md#what-this-means-for-a-data-subject-request) for
 what that means for a data-subject request and how to deploy if it is not

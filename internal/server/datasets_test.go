@@ -628,10 +628,15 @@ func TestUserDataPreviewNamesAffectedRuns(t *testing.T) {
 			ID      string `json:"id"`
 			Dataset string `json:"dataset"`
 			Traces  int64  `json:"traces"`
-		} `json:"runs"`
+		} `json:"affected_runs"`
 	}](t, rec)
 	if len(body.Runs) != 1 || body.Runs[0].ID != run.ID || body.Runs[0].Dataset != "golden" || body.Runs[0].Traces != 1 {
-		t.Errorf("runs = %+v, want the one run named with its one trace", body.Runs)
+		t.Errorf("affected_runs = %+v, want the one run named with its one trace", body.Runs)
+	}
+	// Not under `runs`: the dataset deletion's dry run spends that key on a
+	// count, and one client type reads every preview.
+	if strings.Contains(rec.Body.String(), `"runs"`) {
+		t.Errorf("the erasure preview took the `runs` key: %s", rec.Body.String())
 	}
 
 	expectStatus(t, h.send(t, "DELETE", "/api/v1/projects/"+h.project.ID+"/users/u1/data?confirm=u1", nil), http.StatusOK)

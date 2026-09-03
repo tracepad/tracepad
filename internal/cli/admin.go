@@ -38,8 +38,10 @@ type preview struct {
 	// Runs are the eval runs an erasure would take traces from
 	// (spec 014 #14). Only the user-data preview carries them; every other
 	// destructive endpoint leaves the field absent, and an absent field
-	// prints nothing.
-	Runs []affectedRun `json:"runs"`
+	// prints nothing. The wire name is `affected_runs` because a dataset
+	// deletion answers with a `runs` count, and this struct is what reads
+	// every preview.
+	Runs []affectedRun `json:"affected_runs"`
 }
 
 // affectedRun is one run that loses traces to an erasure.

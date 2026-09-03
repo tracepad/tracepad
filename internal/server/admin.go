@@ -591,7 +591,12 @@ func (s *Server) handleEraseUserData(w http.ResponseWriter, r *http.Request) {
 				put("observations", counts.Observations).
 				put("scores", counts.Scores)).
 			putSome("oldest", oldestTime(counts)).
-			put("runs", affected).
+			// `affected_runs`, not `runs`: the dataset deletion's dry
+			// run already answers with a `runs` count, and one key
+			// that is a number on one destructive preview and a list
+			// of objects on another is a trap for the shared client
+			// type that reads both.
+			put("affected_runs", affected).
 			put("confirm", userID).
 			put("note", "raw OTLP bodies are not erased; they expire on the raw retention window"))
 		return

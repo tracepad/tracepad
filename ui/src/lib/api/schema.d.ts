@@ -979,6 +979,13 @@ export interface components {
              * @description Arrival of the oldest affected row; absent when nothing is affected
              */
             oldest?: string;
+            /** @description User-data erasure only: the dataset runs that would lose traces to it, because erasure overrides the pin a run puts on them */
+            affected_runs?: {
+                id: string;
+                dataset: string;
+                /** @description How many of the run's traces this erasure would take */
+                traces: number;
+            }[];
             /** @description Send this back as `?confirm=` to make it happen */
             confirm: string;
             note?: string;

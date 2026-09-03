@@ -1492,6 +1492,15 @@
           "dry_run": {"const": true},
           "would_delete": {"type": "object", "additionalProperties": {"type": "integer"}},
           "oldest": {"type": "string", "format": "date-time", "description": "Arrival of the oldest affected row; absent when nothing is affected"},
+          "affected_runs": {"type": "array",
+            "description": "User-data erasure only: the dataset runs that would lose traces to it, because erasure overrides the pin a run puts on them",
+            "items": {"type": "object",
+              "properties": {
+                "id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+                "dataset": {"type": "string"},
+                "traces": {"type": "integer", "description": "How many of the run's traces this erasure would take"}
+              },
+              "required": ["id", "dataset", "traces"]}},
           "confirm": {"type": "string", "description": "Send this back as `?confirm=` to make it happen"},
           "note": {"type": "string"}
         },
