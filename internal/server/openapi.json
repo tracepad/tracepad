@@ -186,6 +186,8 @@
           {"$ref": "#/components/parameters/Version"},
           {"$ref": "#/components/parameters/ObservationType"},
           {"$ref": "#/components/parameters/Prompt"},
+          {"$ref": "#/components/parameters/RunFilter"},
+          {"$ref": "#/components/parameters/ItemFilter"},
           {"name": "fields", "in": "query", "schema": {"type": "string"},
             "description": "Comma-separated subset of the row fields. An unknown name is a 400."},
           {"$ref": "#/components/parameters/Limit"},
@@ -231,6 +233,8 @@
           {"$ref": "#/components/parameters/Version"},
           {"$ref": "#/components/parameters/ObservationType"},
           {"$ref": "#/components/parameters/Prompt"},
+          {"$ref": "#/components/parameters/RunFilter"},
+          {"$ref": "#/components/parameters/ItemFilter"},
           {"$ref": "#/components/parameters/Expand"},
           {"$ref": "#/components/parameters/Budget"}
         ],
@@ -874,12 +878,12 @@
     "/api/v1/runs/{id}": {
       "get": {
         "tags": ["datasets"],
-        "summary": "One run",
-        "description": "The run object. Its summary — item coverage, score aggregates, the models and prompts it ran — is not here yet.",
+        "summary": "One run with its summary",
+        "description": "The run object with `summary`: how much of the dataset it covered, what its traffic cost, what its scores came to, and which models and prompts it actually ran. The listing leaves the summary out.",
         "operationId": "getRun",
         "parameters": [{"$ref": "#/components/parameters/RunID"}],
         "responses": {
-          "200": {"description": "The run", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Run"}}}},
+          "200": {"description": "The run and its summary", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/RunWithSummary"}}}},
           "400": {"$ref": "#/components/responses/BadRequest"},
           "401": {"$ref": "#/components/responses/Unauthorized"},
           "404": {"$ref": "#/components/responses/NotFound"}
@@ -900,6 +904,50 @@
             },
             "required": ["id", "released_traces"]
           }}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
+    "/api/v1/runs/{id}/items": {
+      "get": {
+        "tags": ["datasets"],
+        "summary": "The run's items with the attempts it made at each",
+        "description": "The items of the run's dataset version in first-appearance order, each with the traces of the run that answered it. `output` is the trace's root observation's output; `expected_output` and `output` are budgeted and cut with a marker naming where the whole payload lives. `?unknown=true` appends the run's traces that no item of its version accounts for.",
+        "operationId": "getRunItems",
+        "parameters": [
+          {"$ref": "#/components/parameters/RunID"},
+          {"name": "unknown", "in": "query", "schema": {"type": "string", "enum": ["true", "false"]},
+            "description": "`true` appends the traces whose item is not in the run's dataset version, after the known items"},
+          {"$ref": "#/components/parameters/Budget"},
+          {"$ref": "#/components/parameters/Limit"},
+          {"$ref": "#/components/parameters/Cursor"},
+          {"$ref": "#/components/parameters/Direction"}
+        ],
+        "responses": {
+          "200": {"description": "One page of items", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/RunItems"}}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
+    "/api/v1/runs/{a}/compare/{b}": {
+      "get": {
+        "tags": ["datasets"],
+        "summary": "Two runs of one dataset side by side",
+        "description": "Per score name: each run's aggregate, the delta between the means, and how many items improved, regressed or stayed — `improved` and `regressed` only for names whose config gives a direction, `changed` for the rest. Then the items, paginated, each with its per-name pair and verdict. Equality is exact. Runs of different datasets, and a run against itself, are a 400.",
+        "operationId": "compareRuns",
+        "parameters": [
+          {"name": "a", "in": "path", "required": true, "schema": {"type": "string", "pattern": "^[0-9a-f]{32}$"}},
+          {"name": "b", "in": "path", "required": true, "schema": {"type": "string", "pattern": "^[0-9a-f]{32}$"}},
+          {"$ref": "#/components/parameters/Limit"},
+          {"$ref": "#/components/parameters/Cursor"},
+          {"$ref": "#/components/parameters/Direction"}
+        ],
+        "responses": {
+          "200": {"description": "The comparison", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/RunComparison"}}}},
           "400": {"$ref": "#/components/responses/BadRequest"},
           "401": {"$ref": "#/components/responses/Unauthorized"},
           "404": {"$ref": "#/components/responses/NotFound"}
@@ -1229,6 +1277,10 @@
         "description": "Keeps traces with at least one observation of this kind. Exact: `generation` does not match `embedding`. A value outside the list is a 400"},
       "Prompt": {"name": "prompt", "in": "query", "schema": {"type": "string"},
         "description": "`name` or `name@version`: keeps traces with at least one observation that ran this prompt, at any version or at that one. A version is a run of digits after the last `@` with a name in front of it; every other string is a name, `@` included — `@acme/support`, `team@acme/answer`, `name@latest` and `svc@-1` all filter as names. A label is not a version"},
+      "RunFilter": {"name": "run_id", "in": "query", "schema": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+        "description": "Keeps the traces of one dataset run. A value of another shape is a 400: the ingest mapper claims nothing else into the column, so it could only match nothing"},
+      "ItemFilter": {"name": "item_id", "in": "query", "schema": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+        "description": "Keeps the attempts at one dataset item, across runs unless `run_id` narrows it"},
       "Expand": {"name": "expand", "in": "query", "schema": {"type": "string", "enum": ["io"]},
         "description": "`io` inlines each observation's input, output and metadata, each cut to an equal share of the remaining budget with a truncation marker naming the rest"},
       "Budget": {"name": "budget", "in": "query", "schema": {"type": "integer", "minimum": 4096, "maximum": 5242880},
@@ -1575,6 +1627,229 @@
           "finished_at": {"type": ["string", "null"], "format": "date-time"}
         },
         "required": ["id", "dataset", "dataset_version", "name", "metadata", "status", "error", "created_at", "finished_at"]
+      },
+      "RunWithSummary": {
+        "allOf": [
+          {"$ref": "#/components/schemas/Run"},
+          {
+            "type": "object",
+            "properties": {"summary": {"$ref": "#/components/schemas/RunSummary"}},
+            "required": ["summary"]
+          }
+        ]
+      },
+      "RunSummary": {
+        "type": "object",
+        "description": "How the run went, computed at read time: a run keeps taking late spans, and a stored summary would be wrong in exactly the window somebody is watching.",
+        "properties": {
+          "items": {
+            "type": "object",
+            "description": "Coverage of the dataset at the run's version. `unknown` counts the run's traces that no item of that version accounts for — a harness that ran newer cases, a mistyped id, or a trace that named a run and no item.",
+            "properties": {
+              "total": {"type": "integer"},
+              "covered": {"type": "integer"},
+              "missing": {"type": "integer"},
+              "unknown": {"type": "integer"}
+            },
+            "required": ["total", "covered", "missing", "unknown"]
+          },
+          "traces": {
+            "type": "object",
+            "description": "The run's traffic. `error_count` counts traces that failed, not observations; percentiles are exact over the run's traces, not the bucketed ones of `/stats`.",
+            "properties": {
+              "count": {"type": "integer"},
+              "attempts_max": {"type": "integer", "description": "The largest number of traces one item got"},
+              "error_count": {"type": "integer"},
+              "total_cost": {"type": ["number", "null"], "description": "Null when no attempt carried a cost"},
+              "latency_ms": {
+                "type": "object",
+                "properties": {
+                  "p50": {"type": ["integer", "null"]},
+                  "p95": {"type": ["integer", "null"]}
+                },
+                "required": ["p50", "p95"]
+              }
+            },
+            "required": ["count", "attempts_max", "error_count", "total_cost", "latency_ms"]
+          },
+          "scores": {
+            "type": "object",
+            "description": "One entry per score name the run carried. `mean`/`min`/`max` for numeric and boolean names, `distribution` for categorical ones, and `count` alone for text.",
+            "additionalProperties": {"$ref": "#/components/schemas/RunScoreStat"}
+          },
+          "models": {"type": "array", "items": {"type": "string"},
+            "description": "Derived from the run's observations, not from what the harness declared"},
+          "prompts": {"type": "array", "items": {"$ref": "#/components/schemas/PromptRef"}}
+        },
+        "required": ["items", "traces", "scores", "models", "prompts"]
+      },
+      "RunScoreStat": {
+        "type": "object",
+        "properties": {
+          "data_type": {"type": "string", "enum": ["numeric", "boolean", "categorical", "text"]},
+          "direction": {"type": ["string", "null"], "enum": ["higher", "lower", "none", null],
+            "description": "From the name's config; null when it has none, which is what makes a comparison say `changed` rather than `improved`"},
+          "count": {"type": "integer"},
+          "mean": {"type": ["number", "null"]},
+          "min": {"type": ["number", "null"]},
+          "max": {"type": ["number", "null"]},
+          "distribution": {"type": "object", "additionalProperties": {"type": "integer"}}
+        },
+        "required": ["data_type", "direction", "count"]
+      },
+      "PromptRef": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string"},
+          "version": {"type": ["integer", "null"]}
+        },
+        "required": ["name", "version"]
+      },
+      "RunItems": {
+        "type": "object",
+        "description": "The run's items with their attempts, in first-appearance order.",
+        "properties": {
+          "run": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+          "dataset": {"type": "string"},
+          "dataset_version": {"type": "integer"},
+          "items": {"type": "array", "items": {"$ref": "#/components/schemas/RunItem"}},
+          "next_cursor": {"type": ["string", "null"]},
+          "prev_cursor": {"type": ["string", "null"]}
+        },
+        "required": ["run", "dataset", "dataset_version", "items", "next_cursor", "prev_cursor"]
+      },
+      "RunItem": {
+        "type": "object",
+        "description": "One case and the attempts the run made at it. An unknown row — a trace whose item is not in the run's version — carries `unknown: true`, no `seq` and no case body; a trace that named no item at all has a null `id`.",
+        "properties": {
+          "id": {"type": ["string", "null"]},
+          "seq": {"type": ["integer", "null"]},
+          "unknown": {"type": "boolean"},
+          "input": {},
+          "expected_output": {"oneOf": [{"$ref": "#/components/schemas/Truncation"}, {}]},
+          "attempts": {"type": "array", "items": {"$ref": "#/components/schemas/RunAttempt"}}
+        },
+        "required": ["id", "attempts"]
+      },
+      "RunAttempt": {
+        "type": "object",
+        "description": "One trace of the run: what it cost, how it went, what its root observation answered and how it was scored.",
+        "properties": {
+          "trace_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+          "timestamp": {"type": "string", "format": "date-time"},
+          "error_count": {"type": "integer"},
+          "total_cost": {"type": ["number", "null"]},
+          "latency_ms": {"type": ["integer", "null"]},
+          "output": {"oneOf": [{"$ref": "#/components/schemas/Truncation"}, {}],
+            "description": "The trace's root observation's output — the earliest starting observation with no parent — or null when it carried none"},
+          "scores": {"type": "array", "items": {"$ref": "#/components/schemas/AttemptScore"}}
+        },
+        "required": ["trace_id", "error_count", "total_cost", "latency_ms", "output", "scores"]
+      },
+      "AttemptScore": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "string"},
+          "name": {"type": "string"},
+          "data_type": {"type": "string", "enum": ["numeric", "boolean", "categorical", "text"]},
+          "value": {"type": "number"},
+          "string_value": {"type": "string"},
+          "comment": {"type": "string"}
+        },
+        "required": ["id", "name", "data_type"]
+      },
+      "RunComparison": {
+        "type": "object",
+        "description": "Two runs of one dataset side by side. `same_version` is false when the dataset moved between them, and the items outside the intersection are labelled rather than dropped.",
+        "properties": {
+          "a": {"$ref": "#/components/schemas/ComparedRun"},
+          "b": {"$ref": "#/components/schemas/ComparedRun"},
+          "dataset": {"type": "string"},
+          "same_version": {"type": "boolean"},
+          "metadata": {
+            "type": "object",
+            "description": "Only the metadata keys the two runs disagree about, both values",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {"a": {}, "b": {}},
+              "required": ["a", "b"]
+            }
+          },
+          "models": {
+            "type": "object",
+            "properties": {
+              "a": {"type": "array", "items": {"type": "string"}},
+              "b": {"type": "array", "items": {"type": "string"}}
+            },
+            "required": ["a", "b"]
+          },
+          "prompts": {
+            "type": "object",
+            "properties": {
+              "a": {"type": "array", "items": {"$ref": "#/components/schemas/PromptRef"}},
+              "b": {"type": "array", "items": {"$ref": "#/components/schemas/PromptRef"}}
+            },
+            "required": ["a", "b"]
+          },
+          "traces": {"type": "object", "description": "Both runs' traffic, and the cost delta"},
+          "scores": {"type": "array", "items": {"$ref": "#/components/schemas/ComparedScore"}},
+          "items": {"type": "array", "items": {"$ref": "#/components/schemas/ComparedItem"}},
+          "next_cursor": {"type": ["string", "null"]},
+          "prev_cursor": {"type": ["string", "null"]}
+        },
+        "required": ["a", "b", "dataset", "same_version", "metadata", "models", "prompts", "traces", "scores", "items", "next_cursor", "prev_cursor"]
+      },
+      "ComparedRun": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+          "name": {"type": ["string", "null"]},
+          "dataset_version": {"type": "integer"},
+          "status": {"type": "string", "enum": ["running", "finished", "failed"]},
+          "created_at": {"type": "string", "format": "date-time"}
+        },
+        "required": ["id", "name", "dataset_version", "status", "created_at"]
+      },
+      "ComparedScore": {
+        "type": "object",
+        "description": "One score name across both runs. A name with a direction reports `improved`/`regressed`/`same`; one without reports `changed`/`same`, because without a direction there is no better.",
+        "properties": {
+          "name": {"type": "string"},
+          "data_type": {"type": "string"},
+          "direction": {"type": ["string", "null"]},
+          "a": {"type": ["object", "null"], "description": "Null when that run never carried the name"},
+          "b": {"type": ["object", "null"]},
+          "delta": {"type": ["number", "null"], "description": "b's mean minus a's; null unless both are numbers"},
+          "improved": {"type": "integer"},
+          "regressed": {"type": "integer"},
+          "changed": {"type": "integer"},
+          "same": {"type": "integer"}
+        },
+        "required": ["name", "data_type", "direction", "a", "b", "delta", "same"]
+      },
+      "ComparedItem": {
+        "type": "object",
+        "description": "One case in both runs. `in` says which side had it: `both`, `a` or `b` when the item is in both versions, and `only_in_version_a` / `only_in_version_b` when the dataset moved between the runs.",
+        "properties": {
+          "id": {"type": "string"},
+          "seq": {"type": "integer"},
+          "in": {"type": "string", "enum": ["both", "a", "b", "only_in_version_a", "only_in_version_b"]},
+          "scores": {
+            "type": "object",
+            "description": "Per score name both runs scored: the two values, the delta for numbers, and the verdict",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "a": {},
+                "b": {},
+                "delta": {"type": ["number", "null"]},
+                "verdict": {"type": "string", "enum": ["improved", "regressed", "changed", "same"]}
+              },
+              "required": ["a", "b", "verdict"]
+            }
+          }
+        },
+        "required": ["id", "seq", "in", "scores"]
       },
       "DatasetDeletion": {
         "type": "object",

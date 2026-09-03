@@ -309,6 +309,8 @@ func TestDatasetRoutesAreStrict(t *testing.T) {
 	fill := strings.NewReplacer(
 		"{name}", "golden",
 		"{id}", strings.Repeat("a", 32),
+		"{a}", strings.Repeat("a", 32),
+		"{b}", strings.Repeat("b", 32),
 	)
 	var covered int
 	for _, route := range h.server.routes() {
@@ -329,8 +331,8 @@ func TestDatasetRoutesAreStrict(t *testing.T) {
 			}
 		})
 	}
-	if covered != 18 {
-		t.Errorf("covered %d routes, want the 18 spec 014 adds", covered)
+	if covered != 20 {
+		t.Errorf("covered %d routes, want the 20 spec 014 adds", covered)
 	}
 }
 

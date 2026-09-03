@@ -52,6 +52,18 @@
 			kind: 'text',
 			placeholder: 'support-answer@7',
 			hint: 'Name, or name@version'
+		},
+		run_id: {
+			label: 'Run',
+			kind: 'text',
+			placeholder: '32 hex characters',
+			hint: 'The traces of one eval run'
+		},
+		item_id: {
+			label: 'Item',
+			kind: 'text',
+			placeholder: '32 hex characters',
+			hint: 'The attempts at one case'
 		}
 	};
 </script>

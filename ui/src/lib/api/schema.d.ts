@@ -534,8 +534,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * One run
-         * @description The run object. Its summary — item coverage, score aggregates, the models and prompts it ran — is not here yet.
+         * One run with its summary
+         * @description The run object with `summary`: how much of the dataset it covered, what its traffic cost, what its scores came to, and which models and prompts it actually ran. The listing leaves the summary out.
          */
         get: operations["getRun"];
         put?: never;
@@ -545,6 +545,46 @@ export interface paths {
          * @description One row of bookkeeping. The traces it held are not deleted; they stop being pinned and live as long as retention says.
          */
         delete: operations["deleteRun"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runs/{id}/items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The run's items with the attempts it made at each
+         * @description The items of the run's dataset version in first-appearance order, each with the traces of the run that answered it. `output` is the trace's root observation's output; `expected_output` and `output` are budgeted and cut with a marker naming where the whole payload lives. `?unknown=true` appends the run's traces that no item of its version accounts for.
+         */
+        get: operations["getRunItems"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runs/{a}/compare/{b}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Two runs of one dataset side by side
+         * @description Per score name: each run's aggregate, the delta between the means, and how many items improved, regressed or stayed — `improved` and `regressed` only for names whose config gives a direction, `changed` for the rest. Then the items, paginated, each with its per-name pair and verdict. Equality is exact. Runs of different datasets, and a run against itself, are a 400.
+         */
+        get: operations["compareRuns"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -1053,6 +1093,167 @@ export interface components {
             /** Format: date-time */
             finished_at: string | null;
         };
+        RunWithSummary: components["schemas"]["Run"] & {
+            summary: components["schemas"]["RunSummary"];
+        };
+        /** @description How the run went, computed at read time: a run keeps taking late spans, and a stored summary would be wrong in exactly the window somebody is watching. */
+        RunSummary: {
+            /** @description Coverage of the dataset at the run's version. `unknown` counts the run's traces that no item of that version accounts for — a harness that ran newer cases, a mistyped id, or a trace that named a run and no item. */
+            items: {
+                total: number;
+                covered: number;
+                missing: number;
+                unknown: number;
+            };
+            /** @description The run's traffic. `error_count` counts traces that failed, not observations; percentiles are exact over the run's traces, not the bucketed ones of `/stats`. */
+            traces: {
+                count: number;
+                /** @description The largest number of traces one item got */
+                attempts_max: number;
+                error_count: number;
+                /** @description Null when no attempt carried a cost */
+                total_cost: number | null;
+                latency_ms: {
+                    p50: number | null;
+                    p95: number | null;
+                };
+            };
+            /** @description One entry per score name the run carried. `mean`/`min`/`max` for numeric and boolean names, `distribution` for categorical ones, and `count` alone for text. */
+            scores: {
+                [key: string]: components["schemas"]["RunScoreStat"];
+            };
+            /** @description Derived from the run's observations, not from what the harness declared */
+            models: string[];
+            prompts: components["schemas"]["PromptRef"][];
+        };
+        RunScoreStat: {
+            /** @enum {string} */
+            data_type: "numeric" | "boolean" | "categorical" | "text";
+            /**
+             * @description From the name's config; null when it has none, which is what makes a comparison say `changed` rather than `improved`
+             * @enum {string|null}
+             */
+            direction: "higher" | "lower" | "none" | null;
+            count: number;
+            mean?: number | null;
+            min?: number | null;
+            max?: number | null;
+            distribution?: {
+                [key: string]: number;
+            };
+        };
+        PromptRef: {
+            name: string;
+            version: number | null;
+        };
+        /** @description The run's items with their attempts, in first-appearance order. */
+        RunItems: {
+            run: string;
+            dataset: string;
+            dataset_version: number;
+            items: components["schemas"]["RunItem"][];
+            next_cursor: string | null;
+            prev_cursor: string | null;
+        };
+        /** @description One case and the attempts the run made at it. An unknown row — a trace whose item is not in the run's version — carries `unknown: true`, no `seq` and no case body; a trace that named no item at all has a null `id`. */
+        RunItem: {
+            id: string | null;
+            seq?: number | null;
+            unknown?: boolean;
+            input?: unknown;
+            expected_output?: components["schemas"]["Truncation"] | unknown;
+            attempts: components["schemas"]["RunAttempt"][];
+        };
+        /** @description One trace of the run: what it cost, how it went, what its root observation answered and how it was scored. */
+        RunAttempt: {
+            trace_id: string;
+            /** Format: date-time */
+            timestamp?: string;
+            error_count: number;
+            total_cost: number | null;
+            latency_ms: number | null;
+            /** @description The trace's root observation's output — the earliest starting observation with no parent — or null when it carried none */
+            output: components["schemas"]["Truncation"] | unknown;
+            scores: components["schemas"]["AttemptScore"][];
+        };
+        AttemptScore: {
+            id: string;
+            name: string;
+            /** @enum {string} */
+            data_type: "numeric" | "boolean" | "categorical" | "text";
+            value?: number;
+            string_value?: string;
+            comment?: string;
+        };
+        /** @description Two runs of one dataset side by side. `same_version` is false when the dataset moved between them, and the items outside the intersection are labelled rather than dropped. */
+        RunComparison: {
+            a: components["schemas"]["ComparedRun"];
+            b: components["schemas"]["ComparedRun"];
+            dataset: string;
+            same_version: boolean;
+            /** @description Only the metadata keys the two runs disagree about, both values */
+            metadata: {
+                [key: string]: {
+                    a: unknown;
+                    b: unknown;
+                };
+            };
+            models: {
+                a: string[];
+                b: string[];
+            };
+            prompts: {
+                a: components["schemas"]["PromptRef"][];
+                b: components["schemas"]["PromptRef"][];
+            };
+            /** @description Both runs' traffic, and the cost delta */
+            traces: Record<string, never>;
+            scores: components["schemas"]["ComparedScore"][];
+            items: components["schemas"]["ComparedItem"][];
+            next_cursor: string | null;
+            prev_cursor: string | null;
+        };
+        ComparedRun: {
+            id: string;
+            name: string | null;
+            dataset_version: number;
+            /** @enum {string} */
+            status: "running" | "finished" | "failed";
+            /** Format: date-time */
+            created_at: string;
+        };
+        /** @description One score name across both runs. A name with a direction reports `improved`/`regressed`/`same`; one without reports `changed`/`same`, because without a direction there is no better. */
+        ComparedScore: {
+            name: string;
+            data_type: string;
+            direction: string | null;
+            /** @description Null when that run never carried the name */
+            a: Record<string, never> | null;
+            b: Record<string, never> | null;
+            /** @description b's mean minus a's; null unless both are numbers */
+            delta: number | null;
+            improved?: number;
+            regressed?: number;
+            changed?: number;
+            same: number;
+        };
+        /** @description One case in both runs. `in` says which side had it: `both`, `a` or `b` when the item is in both versions, and `only_in_version_a` / `only_in_version_b` when the dataset moved between the runs. */
+        ComparedItem: {
+            id: string;
+            seq: number;
+            /** @enum {string} */
+            in: "both" | "a" | "b" | "only_in_version_a" | "only_in_version_b";
+            /** @description Per score name both runs scored: the two values, the delta for numbers, and the verdict */
+            scores: {
+                [key: string]: {
+                    a: unknown;
+                    b: unknown;
+                    delta?: number | null;
+                    /** @enum {string} */
+                    verdict: "improved" | "regressed" | "changed" | "same";
+                };
+            };
+        };
         /** @description What deleting a dataset takes: its live items, its runs, and the traces those runs were pinning — which are released, not deleted. `confirm` is present on the dry run only. */
         DatasetDeletion: {
             dry_run: boolean;
@@ -1167,6 +1368,10 @@ export interface components {
         ObservationType: "span" | "generation" | "event" | "agent" | "tool" | "chain" | "retriever" | "guardrail" | "evaluator" | "embedding";
         /** @description `name` or `name@version`: keeps traces with at least one observation that ran this prompt, at any version or at that one. A version is a run of digits after the last `@` with a name in front of it; every other string is a name, `@` included — `@acme/support`, `team@acme/answer`, `name@latest` and `svc@-1` all filter as names. A label is not a version */
         Prompt: string;
+        /** @description Keeps the traces of one dataset run. A value of another shape is a 400: the ingest mapper claims nothing else into the column, so it could only match nothing */
+        RunFilter: string;
+        /** @description Keeps the attempts at one dataset item, across runs unless `run_id` narrows it */
+        ItemFilter: string;
         /** @description `io` inlines each observation's input, output and metadata, each cut to an equal share of the remaining budget with a truncation marker naming the rest */
         Expand: "io";
         /** @description Byte budget for the payloads of this response; the structure is never truncated */
@@ -1438,6 +1643,10 @@ export interface operations {
                 type?: components["parameters"]["ObservationType"];
                 /** @description `name` or `name@version`: keeps traces with at least one observation that ran this prompt, at any version or at that one. A version is a run of digits after the last `@` with a name in front of it; every other string is a name, `@` included — `@acme/support`, `team@acme/answer`, `name@latest` and `svc@-1` all filter as names. A label is not a version */
                 prompt?: components["parameters"]["Prompt"];
+                /** @description Keeps the traces of one dataset run. A value of another shape is a 400: the ingest mapper claims nothing else into the column, so it could only match nothing */
+                run_id?: components["parameters"]["RunFilter"];
+                /** @description Keeps the attempts at one dataset item, across runs unless `run_id` narrows it */
+                item_id?: components["parameters"]["ItemFilter"];
                 /** @description Comma-separated subset of the row fields. An unknown name is a 400. */
                 fields?: string;
                 /** @description Out of range is a 400, not a silent clamp */
@@ -1503,6 +1712,10 @@ export interface operations {
                 type?: components["parameters"]["ObservationType"];
                 /** @description `name` or `name@version`: keeps traces with at least one observation that ran this prompt, at any version or at that one. A version is a run of digits after the last `@` with a name in front of it; every other string is a name, `@` included — `@acme/support`, `team@acme/answer`, `name@latest` and `svc@-1` all filter as names. A label is not a version */
                 prompt?: components["parameters"]["Prompt"];
+                /** @description Keeps the traces of one dataset run. A value of another shape is a 400: the ingest mapper claims nothing else into the column, so it could only match nothing */
+                run_id?: components["parameters"]["RunFilter"];
+                /** @description Keeps the attempts at one dataset item, across runs unless `run_id` narrows it */
+                item_id?: components["parameters"]["ItemFilter"];
                 /** @description `io` inlines each observation's input, output and metadata, each cut to an equal share of the remaining budget with a truncation marker naming the rest */
                 expand?: components["parameters"]["Expand"];
                 /** @description Byte budget for the payloads of this response; the structure is never truncated */
@@ -2494,13 +2707,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The run */
+            /** @description The run and its summary */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Run"];
+                    "application/json": components["schemas"]["RunWithSummary"];
                 };
             };
             400: components["responses"]["BadRequest"];
@@ -2530,6 +2743,75 @@ export interface operations {
                         /** @description How many traces the run was keeping out of the sweep */
                         released_traces: number;
                     };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getRunItems: {
+        parameters: {
+            query?: {
+                /** @description `true` appends the traces whose item is not in the run's dataset version, after the known items */
+                unknown?: "true" | "false";
+                /** @description Byte budget for the payloads of this response; the structure is never truncated */
+                budget?: components["parameters"]["Budget"];
+                /** @description Out of range is a 400, not a silent clamp */
+                limit?: components["parameters"]["Limit"];
+                /** @description The opaque `next_cursor` or `prev_cursor` of a previous page */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description Which way to page from the cursor. With no cursor, `next` is the newest page and `prev` the oldest — both ends are a direction rather than an offset. Rows come back newest first either way */
+                direction?: components["parameters"]["Direction"];
+            };
+            header?: never;
+            path: {
+                id: components["parameters"]["RunID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One page of items */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunItems"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    compareRuns: {
+        parameters: {
+            query?: {
+                /** @description Out of range is a 400, not a silent clamp */
+                limit?: components["parameters"]["Limit"];
+                /** @description The opaque `next_cursor` or `prev_cursor` of a previous page */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description Which way to page from the cursor. With no cursor, `next` is the newest page and `prev` the oldest — both ends are a direction rather than an offset. Rows come back newest first either way */
+                direction?: components["parameters"]["Direction"];
+            };
+            header?: never;
+            path: {
+                a: string;
+                b: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The comparison */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunComparison"];
                 };
             };
             400: components["responses"]["BadRequest"];

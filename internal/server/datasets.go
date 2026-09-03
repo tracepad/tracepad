@@ -109,8 +109,9 @@ type runFinishRequest struct {
 	Error  string `json:"error"`
 }
 
-// runResponse is the run object without its summary: the summary, the item
-// view and the compare are the second half of spec 014.
+// runResponse is one run. `summary` rides only on `GET /api/v1/runs/{id}`:
+// the listing is for choosing a run, and summarizing every row of a page would
+// make choosing cost what reading costs (API contract → Runs).
 type runResponse struct {
 	ID             string          `json:"id"`
 	Dataset        string          `json:"dataset"`
@@ -121,6 +122,7 @@ type runResponse struct {
 	Error          *string         `json:"error"`
 	CreatedAt      string          `json:"created_at"`
 	FinishedAt     *string         `json:"finished_at"`
+	Summary        any             `json:"summary,omitempty"`
 }
 
 type runListResponse struct {
@@ -689,9 +691,9 @@ func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, runListResponse{Runs: out, NextCursor: next, PrevCursor: prev})
 }
 
-// handleGetRun serves one run. Its summary — the counts, the score
-// aggregates, the models and prompts it ran — is the second half of spec 014
-// and is not here yet.
+// handleGetRun serves one run with its summary: the coverage, the traffic, the
+// score aggregates and what it actually ran. The listing leaves the summary
+// out — a page of runs would pay for a summary nobody read.
 func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
 	project, ok := s.apiProject(w, r)
 	if !ok {
@@ -709,7 +711,15 @@ func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	writeJSON(w, http.StatusOK, renderRun(run))
+	summary, err := s.store.RunSummary(project.ID, run)
+	if err != nil {
+		slog.Error("read run summary failed", "err", err)
+		writeError(w, http.StatusInternalServerError, "failed to summarize the run")
+		return
+	}
+	body := renderRun(run)
+	body.Summary = renderSummary(summary)
+	writeJSON(w, http.StatusOK, body)
 }
 
 // handleFinishRun closes a run the way the harness says it ended (#8). The
@@ -791,7 +801,13 @@ func (s *Server) datasetTarget(w http.ResponseWriter, r *http.Request) (*store.P
 
 // hexPathID validates a 32-hex {id} path segment.
 func hexPathID(w http.ResponseWriter, r *http.Request, kind string) (string, bool) {
-	id := r.PathValue("id")
+	return hexPathValue(w, r, "id", kind)
+}
+
+// hexPathValue is hexPathID for a route with more than one id in it — the
+// comparison, whose two runs are `{a}` and `{b}`.
+func hexPathValue(w http.ResponseWriter, r *http.Request, name, kind string) (string, bool) {
+	id := r.PathValue(name)
 	if !hexID.MatchString(id) {
 		writeError(w, http.StatusBadRequest,
 			fmt.Sprintf("%s must be 32 lower-case hex characters, got %q", kind, id))
