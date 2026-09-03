@@ -92,6 +92,12 @@ func Run(ctx context.Context, opt Options) int {
 		err = r.scores(ctx, rest)
 	case "prompts":
 		err = r.prompts(ctx, rest)
+	case "datasets":
+		err = r.datasets(ctx, rest)
+	case "runs":
+		err = r.runs(ctx, rest)
+	case "score-configs":
+		err = r.scoreConfigs(ctx, rest)
 	case "stats":
 		err = r.stats(ctx, rest)
 	case "system":
@@ -142,6 +148,33 @@ const Usage = `Client commands (they talk to a running server over HTTP):
   tracepad stats        [--group-by hour|day|model|environment|release] [--since 1h]
                         [--until T] [--env E]
   tracepad system
+
+Evals (spec 014). The loop is: declare the configs, push the cases, open the
+run, stamp each trace with tracepad.run_id and tracepad.item_id, post the
+scores, finish, compare:
+  tracepad datasets ls        [--limit N] [--cursor C]
+  tracepad datasets show      <name> [--version N] [--limit N] [--cursor C]
+  tracepad datasets push      <name> --file cases.jsonl [--description D]
+  tracepad datasets rm-item   <name> <item-id>
+  tracepad datasets rm        <name> [--yes]
+  tracepad runs ls            <dataset> [--limit N] [--cursor C]
+  tracepad runs create        <dataset> [--name N] [--id ID] [--dataset-version N]
+                              [--metadata-file run.json]
+  tracepad runs show          <id> [--items [--unknown] [--limit N] [--cursor C]]
+  tracepad runs finish        <id> [--failed "reason"]
+  tracepad runs compare       <a> <b> [--all]
+  tracepad runs rm            <id>
+  tracepad score-configs ls
+  tracepad score-configs show <name>
+  tracepad score-configs push <name> --file cfg.json
+  tracepad score-configs rm   <name>
+
+datasets push takes a .jsonl (one case per line) or a .json array and sends it
+as one batch, which is one version tick; it prints the version it landed on and
+how many cases changed. datasets show --json walks every page, so it is the
+dataset's export. runs create --json answers with the whole run, so a script
+reads both the id and the version it pinned. runs compare lists the items whose
+verdict is not "same"; --all lists them all.
 
 Administration (spec 005). Every destructive command shows what it would do
 and asks you to type the name back; --yes answers that for a script:
