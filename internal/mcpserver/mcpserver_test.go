@@ -113,11 +113,53 @@ func (h *harness) seed(t *testing.T, projectID string) {
 	h.post(t, "/api/v1/scores", scores)
 	prompt := []byte(`{"type":"text","prompt":"Be brief.","labels":["production"]}`)
 	h.post(t, "/api/v1/prompts/support/versions", prompt)
+	h.seedEval(t, projectID)
 }
 
-func (h *harness) post(t *testing.T, path string, body []byte) {
+// evalRunID and evalItemID name the fixture's one dataset run and its two
+// cases, so the eval tools have something to read.
+func evalRunID(n int) string  { return fmt.Sprintf("%032x", 0xe000+n) }
+func evalItemID(n int) string { return fmt.Sprintf("%032x", 0xd000+n) }
+
+// seedEval adds a dataset, two runs over it and the traces that answered them:
+// the six tools of spec 014 #22 read this.
+func (h *harness) seedEval(t *testing.T, projectID string) {
 	t.Helper()
-	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, h.url+path, bytes.NewReader(body))
+	h.post(t, "/api/v1/score-configs/accuracy",
+		[]byte(`{"data_type":"numeric","direction":"higher"}`), http.MethodPut)
+	h.post(t, "/api/v1/datasets/golden/items", []byte(`[
+		{"id":"`+evalItemID(1)+`","input":{"q":"one"},"expected_output":{"a":"1"}},
+		{"id":"`+evalItemID(2)+`","input":{"q":"two"}}]`))
+
+	for run, values := range map[string][2]float64{evalRunID(1): {0.5, 1}, evalRunID(2): {1, 1}} {
+		h.post(t, "/api/v1/datasets/golden/runs", []byte(`{"id":"`+run+`"}`))
+		for item, value := range values {
+			traceID := run[:24] + run[28:] + fmt.Sprintf("%04x", item)
+			batch := &store.IngestBatch{
+				ProjectID: projectID,
+				Traces: []*model.Trace{{ID: traceID, Name: "case",
+					RunID: run, ItemID: evalItemID(item + 1)}},
+				Observations: []*model.Observation{{TraceID: traceID, ID: traceID[:16],
+					Type: model.TypeGeneration, Name: "answer", Model: "claude-sonnet-5",
+					Level: model.LevelDefault, StartTime: seedBase, EndTime: seedBase + 100*ms,
+					Output: map[string]any{"answer": "because"}}},
+			}
+			if err := h.writer.Submit(t.Context(), batch); err != nil {
+				t.Fatal(err)
+			}
+			h.post(t, "/api/v1/scores", fmt.Appendf(nil,
+				`{"trace_id":%q,"name":"accuracy","value":%v}`, traceID, value))
+		}
+	}
+}
+
+func (h *harness) post(t *testing.T, path string, body []byte, method ...string) {
+	t.Helper()
+	verb := http.MethodPost
+	if len(method) == 1 {
+		verb = method[0]
+	}
+	request, err := http.NewRequestWithContext(t.Context(), verb, h.url+path, bytes.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +171,7 @@ func (h *harness) post(t *testing.T, path string, body []byte) {
 	defer response.Body.Close()
 	if response.StatusCode >= 300 {
 		answer, _ := io.ReadAll(response.Body)
-		t.Fatalf("POST %s: %d %s", path, response.StatusCode, answer)
+		t.Fatalf("%s %s: %d %s", verb, path, response.StatusCode, answer)
 	}
 }
 
@@ -282,7 +324,7 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
-// TestToolListIsTheDeclaredContract: ten read-only tools, a deterministic
+// TestToolListIsTheDeclaredContract: sixteen read-only tools, a deterministic
 // order, and the caching hints of #18.
 func TestToolListIsTheDeclaredContract(t *testing.T) {
 	h := newHarness(t)
@@ -293,14 +335,17 @@ func TestToolListIsTheDeclaredContract(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Exactly these ten, and administration is deliberately not among
-	// them: spec 005 added projects, keys, retention and user-data erasure
-	// to the HTTP API and the CLI and nothing at all to MCP (spec 005 #13).
+	// Exactly these, and administration is deliberately not among them:
+	// spec 005 added projects, keys, retention and user-data erasure to the
+	// HTTP API and the CLI and nothing at all to MCP (spec 005 #13).
 	// `list_sessions` joined them with the endpoint it wraps, in the same
-	// PR as the CLI command and the screen (spec 007 #1), and `search`
-	// with the endpoint #17 said it would wait for (spec 011 #9).
-	want := []string{"get_last_trace", "get_observation_io", "get_prompt", "get_session",
-		"get_stats", "get_trace", "list_scores", "list_sessions", "list_traces", "search"}
+	// PR as the CLI command and the screen (spec 007 #1), `search` with the
+	// endpoint #17 said it would wait for (spec 011 #9), and the six eval
+	// tools with the reads spec 014 #22 asks for — read-only there too: a
+	// run is created by a harness or a person, never by a model.
+	want := []string{"compare_runs", "get_dataset_items", "get_last_trace", "get_observation_io",
+		"get_prompt", "get_run", "get_run_items", "get_session", "get_stats", "get_trace",
+		"list_datasets", "list_runs", "list_scores", "list_sessions", "list_traces", "search"}
 	var names []string
 	for _, tool := range result.Tools {
 		names = append(names, tool.Name)
@@ -386,6 +431,18 @@ func TestEveryToolMatchesItsEndpoint(t *testing.T) {
 		{"list_scores", map[string]any{"trace_id": traceHex(1)},
 			"/api/v1/scores?trace_id=" + traceHex(1)},
 		{"get_stats", map[string]any{"group_by": "model"}, "/api/v1/stats?group_by=model"},
+		{"list_datasets", map[string]any{}, "/api/v1/datasets"},
+		{"get_dataset_items", map[string]any{"name": "golden"}, "/api/v1/datasets/golden/items"},
+		{"get_dataset_items", map[string]any{"name": "golden", "version": 1},
+			"/api/v1/datasets/golden/items?version=1"},
+		{"list_runs", map[string]any{"dataset": "golden"}, "/api/v1/datasets/golden/runs"},
+		{"get_run", map[string]any{"id": evalRunID(1)}, "/api/v1/runs/" + evalRunID(1)},
+		{"get_run_items", map[string]any{"id": evalRunID(1)},
+			"/api/v1/runs/" + evalRunID(1) + "/items"},
+		{"get_run_items", map[string]any{"id": evalRunID(1), "unknown": "true"},
+			"/api/v1/runs/" + evalRunID(1) + "/items?unknown=true"},
+		{"compare_runs", map[string]any{"a": evalRunID(1), "b": evalRunID(2)},
+			"/api/v1/runs/" + evalRunID(1) + "/compare/" + evalRunID(2)},
 	} {
 		t.Run(tc.tool+" "+tc.endpoint, func(t *testing.T) {
 			structured := h.callRaw(t, tc.tool, tc.arguments)
@@ -587,8 +644,8 @@ func TestStdioTransportServesTheSameTools(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tools.Tools) != 10 {
-		t.Fatalf("tools = %d, want the same ten as over HTTP", len(tools.Tools))
+	if len(tools.Tools) != 16 {
+		t.Fatalf("tools = %d, want the same sixteen as over HTTP", len(tools.Tools))
 	}
 
 	result, err := session.CallTool(t.Context(), &mcp.CallToolParams{
