@@ -165,8 +165,10 @@ readable.
 The detail panel shows the observation's timings (including TTFT, when the
 client reported when its first token came back — negative if its clocks
 disagreed, shown as sent rather than hidden), level, model, usage and cost,
-then `input`, `output` and `metadata` as collapsible JSON with each payload's
-size beside its heading. A generation that ran a named prompt carries a badge
+then `input`, `output` and `metadata` as documents with each payload's size
+beside its heading (see [Payloads](#payloads)). Usage,
+cost and model parameters are short flat records, and read as two-column lists
+rather than as JSON. A generation that ran a named prompt carries a badge
 saying which — `support-answer · v7` — that leads to the traces which ran it.
 The badge is a link to a filtered listing, not a lookup: this store need not
 manage that prompt for the link to work. This is the same view the peek panel
@@ -175,20 +177,46 @@ shows — one component, two frames around it.
 The header above the trace names its release when it has one, beside the
 timestamp, latency and cost.
 
-## Payloads and the response budget
+## Payloads
+
+Every payload — an observation's `input`, `output` and `metadata`, and a
+trace's own metadata — is shown in one editor surface, the same one the eval
+screens write item bodies in. It is a text document, not a tree:
+
+- **Long strings are whole and wrapped.** A prompt is the thing you came to
+  read; nothing is cut at a character count and nothing scrolls sideways.
+- **⌘F / Ctrl-F searches inside the payload**, while it has focus. A large
+  document is drawn a screenful at a time, so the browser's own find would
+  miss what is scrolled away; this one searches the document itself.
+- **The gutter folds.** A document over 400 lines opens with everything more
+  than two levels deep folded, which is what makes a megabyte navigable; a
+  short one opens flat. Searching for text inside a fold opens it.
+- **Copy** takes the whole document, not the part on screen.
+- A payload that is not JSON at all — a plain-text prompt on a span that sent
+  one — is shown as the text it is, with no quotes and no escapes.
+
+Light and dark share one set of colours with the rest of the interface: keys,
+strings, numbers and punctuation, all of them from `app.css`.
+
+### The response budget
 
 A trace is fetched with `?expand=io`, so the server spends its byte budget on
 the payloads and replaces the ones that do not fit with truncation markers
 (see [api.md](api.md#the-response-budget)). The interface consumes those markers
 rather than working around them:
 
-- a truncated payload renders as its preview plus **Load the whole N KB**,
-  which fetches `GET /api/v1/observations/{id}/io` — the one endpoint no
-  budget applies to — and swaps the whole value in;
+- a truncated payload shows the preview the marker carried, under a banner
+  reading **showing 589 B of 3.8 KB · Load the whole payload**. The banner is
+  the button: it fetches `GET /api/v1/observations/{id}/io` — the one endpoint
+  no budget applies to — and swaps the whole document in. The preview is a
+  prefix cut on a byte boundary, so it is shown as text rather than parsed;
+- a marker the budget left no room for a preview in is the banner alone;
 - a trace with more payloads than the budget can carry markers for gets none
   of them, and each payload offers a load button of its own.
 
-Raising `TRACEPAD_RESPONSE_BUDGET_BYTES` inlines more of them up front.
+Nothing is fetched unasked: a wide trace would pull megabytes on open, and
+which payload is worth that is the reader's call. Raising
+`TRACEPAD_RESPONSE_BUDGET_BYTES` inlines more of them up front.
 
 ## Settings and administration
 
@@ -267,7 +295,10 @@ Docker image — as does a local `make build`, which builds the bundle first.
 
 The sources are in `ui/`: a SvelteKit SPA (`adapter-static`, no SSR) with
 Tailwind v4, built by Vite into `ui/dist`. The only runtime dependencies are
-bits-ui (headless primitives), Lucide (icons) and uPlot (the four charts).
+bits-ui (headless primitives), Lucide (icons), uPlot (the four charts) and
+CodeMirror 6 (the payload surface, imported statically and pinned by exact
+version; there is no `basicSetup` — the extensions are listed by hand in
+`ui/src/lib/components/json/setup.ts`).
 
 ```sh
 make ui          # build the bundle and stage it for embedding

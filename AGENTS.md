@@ -93,6 +93,19 @@ API. This file routes; it does not duplicate what specs and docs say.
   once, server-side, for the CLI and the MCP tools alike. A live run's traces
   are the one thing retention spares (#13), which `/system` reports so the
   operator can see the exception's size. Tracepad still executes nothing.
+- ✅ Spec 015 (JSON on CodeMirror) shipped: every payload the interface shows
+  — an observation's input, output and metadata, and a trace's own metadata —
+  goes through one CodeMirror 6 surface that reads *and* writes, replacing the
+  hand-written lazy tree everywhere. A prompt is shown whole and wrapped rather
+  than cut at 180 characters, `Cmd/Ctrl-F` searches the document rather than
+  the part of it that is drawn, a long document opens folded two levels deep,
+  and the four syntax colours are `app.css` tokens under the contrast test like
+  every other colour. `JsonEditor` ships with tests and no consumer — spec 016
+  is its first — because it is the viewer with `readOnly` off (#2). Truncation
+  stays the marker's business: `Payload` shows the preview as text under a
+  banner that names both sizes and loads the whole payload (#3). The UI line
+  budget moves to 14,000 (#9) and the bundle's ceiling is stated at 1.2 MB
+  (#10). No server change.
 - ✅ Spec 005 (retention & admin) shipped: schema 0005, the hourly sweeper
   writing every chunk through the group-commit writer, the admin API under
   `/api/v1/projects` with a dry-run/confirm contract on every destructive
@@ -120,7 +133,8 @@ API. This file routes; it does not duplicate what specs and docs say.
 | Statistics rollup | `internal/store/rollup.go` (the table and one hour's recomputation), `aggregator.go` (the pass, the watermark, the freeze), `histogram.go` (why a percentile is summable), the seam in `internal/server/stats.go`, spec 013 — an hour is recomputed whole and never delta-maintained, and the rollup is the one store the trace sweep spares |
 | Admin API (projects, keys, retention, erasure) | `internal/server/admin.go`, `internal/store/admin.go`, `docs/admin.md`, spec 005 — destructive endpoints are a dry run until `?confirm=` echoes the name, checked inside the write transaction |
 | Attribute mapping | `internal/mapping/rules.go` is the table; `mapping.go` applies it; `value.go` holds `attrs`, where reading and claiming are separate and an unclaimed attribute keeps the origin it arrived at (spec 012 #7) |
-| Web interface | `ui/` (SvelteKit SPA), `internal/ui/` (the embed and the tagless stub), `internal/server/ui.go` (delivery and the SPA fallback), `docs/ui.md`, specs 006 to 010 — the API types in `ui/src/lib/api/schema.d.ts` are generated from `openapi.json` and the gate fails on drift |
+| Web interface | `ui/` (SvelteKit SPA), `internal/ui/` (the embed and the tagless stub), `internal/server/ui.go` (delivery and the SPA fallback), `docs/ui.md`, specs 006 to 010 and 015 — the API types in `ui/src/lib/api/schema.d.ts` are generated from `openapi.json` and the gate fails on drift, and the application-line budget is 14,000 (`scripts/ui-lines.sh`, spec 015 #9) |
+| A payload, shown or edited | `ui/src/lib/components/json/` — `setup.ts` is everything that is not a DOM node (the document a value becomes, where it stops being JSON, which nodes a long one folds, the extension list and the themed chrome), `CodeArea.svelte` is the instance, `JsonView`/`JsonEditor` are the two modes, spec 015 — one surface for reading and writing, so there is one answer to "what does this payload look like"; the mode is the `readOnly` facet and nothing else, `indentWithTab` is deliberately absent (#7), and truncation belongs to `Payload.svelte` rather than to the editor (#3) |
 | A listing (rows, cursors, count, the bar, the panel's walk) | `ui/src/lib/listing.svelte.ts` and its tests, spec 010 — all three listings are one loader, so a listing defect is one defect. `$lib/page` and `$lib/peek` hold the pure part |
 | Configuration | `internal/config/`, spec 001 + spec 002 Configuration tables |
 

@@ -6,6 +6,7 @@
 	import { page } from '$app/state';
 	import { ApiError, api, type Observation, type Trace } from '$lib/api/client.svelte';
 	import { ABSENT } from '$lib/format';
+	import JsonView from './json/JsonView.svelte';
 	import ObservationDetail from './ObservationDetail.svelte';
 	import TraceTree from './TraceTree.svelte';
 
@@ -90,6 +91,14 @@
 	// observation at a time.
 	const refused = $derived(trace?.expansion?.expanded === false);
 
+	// What the exporter said about the run as a whole, as opposed to about any
+	// one span. It belongs under the tree because that is the pane that is
+	// about the trace; the pane beside it is about one observation.
+	const traceMetadata = $derived.by(() => {
+		const metadata = trace?.metadata;
+		return metadata && Object.keys(metadata).length > 0 ? metadata : null;
+	});
+
 	function select(observationID: string, activate: boolean) {
 		const search = new URLSearchParams(page.url.searchParams);
 		search.set('obs', observationID);
@@ -145,6 +154,12 @@
 			]}
 		>
 			<TraceTree observations={roots} selectedID={selected?.id ?? null} onselect={select} />
+			{#if traceMetadata}
+				<section class="border-border shrink-0 border-t px-3 py-2 [&_.cm-editor]:max-h-52">
+					<h3 class="text-muted mb-1.5 text-xs font-medium tracking-wide uppercase">Metadata</h3>
+					<JsonView value={traceMetadata} label="Trace metadata" />
+				</section>
+			{/if}
 		</div>
 		<div
 			class={[

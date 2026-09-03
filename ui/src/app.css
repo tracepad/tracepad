@@ -55,11 +55,18 @@
 
 	/* Status. Every use is paired with a word or an icon: colour alone is not
 	 * a message (Testing, accessibility floor). */
-	/* The JSON viewer's two syntax colours. A payload is read by scanning for
-	 * shapes, and a wall of one colour makes that slow; these are a separate
-	 * axis from the accent, which stays reserved for interaction. */
+	/* The JSON surface's four syntax colours (spec 015 #6). A payload is read
+	 * by scanning for shapes, and a wall of one colour makes that slow; these
+	 * are a separate axis from the accent, which stays reserved for
+	 * interaction — none of them ever appears on a control.
+	 *
+	 * Keys and punctuation are what a reader tells a JSON document by at a
+	 * glance, so they are colours rather than `fg` and `muted`: the keys carry
+	 * the structure and the brackets and commas step back out of the way. */
 	--color-code-string: light-dark(#0f766e, #5eead4);
 	--color-code-number: light-dark(#9a3412, #fdba74);
+	--color-code-key: light-dark(#1e40af, #93c5fd);
+	--color-code-punct: light-dark(#546678, #94a3b8);
 
 	--color-danger: light-dark(#b91c1c, #f87171);
 	--color-danger-soft: light-dark(#fef2f2, #2a1618);
