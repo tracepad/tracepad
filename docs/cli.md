@@ -273,6 +273,65 @@ environment or release counts **traces**, grouping by model counts
 **observations**, because a trace has no model. Grouped by release, the traces
 that named none share one bucket with an empty key.
 
+### `datasets`, `runs`, `score-configs`
+
+The eval commands. The loop they make — declare, push, run, close, compare —
+is written out end to end in [datasets.md](datasets.md#the-same-loop-from-a-shell).
+
+```sh
+tracepad datasets ls
+tracepad datasets show support-golden --version 12
+tracepad datasets push support-golden --file cases.jsonl --description "the golden set"
+tracepad datasets rm-item support-golden a1b2c3d4e5f60718293a4b5c6d7e8f90
+tracepad datasets rm support-golden --yes
+
+tracepad runs ls support-golden
+tracepad runs create support-golden --name "prompt v8" --metadata-file run.json
+tracepad runs show 0e5a7c1d2b3f4a6980c1d2e3f4a5b6c7 --items
+tracepad runs finish 0e5a7c1d2b3f4a6980c1d2e3f4a5b6c7 --failed "judge timed out"
+tracepad runs compare 0e5a… 1f6b… --all
+tracepad runs rm 0e5a7c1d2b3f4a6980c1d2e3f4a5b6c7
+
+tracepad score-configs ls
+tracepad score-configs push accuracy --file accuracy.json
+tracepad score-configs rm accuracy
+```
+
+`datasets push` takes a `.jsonl` — one case per line, which is the shape a
+dataset is edited by hand in — or a `.json` array, which is the shape a script
+generates. Either way it is **one** batch on the wire, because the dataset's
+version advances once per write: a file sent case by case would leave a version
+per case and no number that names the file. It prints where it landed:
+
+```
+version 12: 3 items changed, 200 in the batch
+unchanged at version 12
+```
+
+`runs create --json` answers with the whole run, so a script reads the id and
+the version it pinned from one call:
+
+```sh
+RUN=$(tracepad runs create support-golden --json)
+```
+
+`datasets show --json` walks every page rather than printing the first: it is
+the dataset's export, and an export that looks complete and is not would be
+worse than none. `runs compare` walks every page too — the cases worth reading
+are the ones that moved, and the regression may be on page two. Both are the
+only commands here that stitch pages; everything else prints the endpoint's own
+bytes.
+
+`runs show --items` is the case-by-case view: expected output beside what was
+produced, with the scores each attempt got. Add `--unknown` to see the run's
+traces that name a case its dataset version does not have.
+
+`datasets rm` is destructive — it takes the dataset's runs with it and releases
+every trace they were keeping out of retention — so it shows the preview and
+asks you to type the name back, and needs `--yes` off a terminal. `runs rm` and
+`score-configs rm` do not: one row each, and the traces of a deleted run are
+released, not deleted.
+
 ### `system`
 
 ```sh

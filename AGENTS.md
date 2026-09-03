@@ -84,6 +84,15 @@ API. This file routes; it does not duplicate what specs and docs say.
   window is frozen, because recomputing it from rows the sweep deliberately
   took would replace the history with a fragment (#11). The rollup gets a
   window of its own, `stats_retention_days`, null by default.
+- ✅ Spec 014 (datasets, runs & score configs) shipped: schema 0010 —
+  `datasets` with one version clock over append-only `dataset_items`,
+  `dataset_runs`, `score_configs`, and `run_id`/`item_id` on the trace. An eval
+  now lives where its evidence does: the harness stamps two attributes on the
+  traces it exports, the store links them to the cases they answered, and
+  `GET /api/v1/runs/{a}/compare/{b}` answers "did this change make it better"
+  once, server-side, for the CLI and the MCP tools alike. A live run's traces
+  are the one thing retention spares (#13), which `/system` reports so the
+  operator can see the exception's size. Tracepad still executes nothing.
 - ✅ Spec 005 (retention & admin) shipped: schema 0005, the hourly sweeper
   writing every chunk through the group-commit writer, the admin API under
   `/api/v1/projects` with a dry-run/confirm contract on every destructive
@@ -100,7 +109,7 @@ API. This file routes; it does not duplicate what specs and docs say.
 | HTTP surface | `internal/server/` |
 | OTLP ingest | `internal/server/otlp.go`, `docs/ingest.md`, spec 002 |
 | Scores & prompts | `internal/server/scores.go`, `prompts.go`, `docs/scores.md`, `docs/prompts.md`, spec 003 |
-| Datasets, runs, score configs | `internal/store/datasets.go` (the version clock, "items at V", the pin's release), `scoreconfigs.go` (the binding by name, checked inside `ScoreWrite.apply`), `internal/server/datasets.go`, `scoreconfigs.go`, `docs/datasets.md`, spec 014 — the store executes nothing; a trace joins a run through two columns the mapper claims from `tracepad.run_id`/`tracepad.item_id`, and `notPinned` in `sweep.go` is the one predicate the sweep and the retention dry run share |
+| Datasets, runs, score configs | `internal/store/datasets.go` (the version clock, "items at V", the pin's release), `runs.go` (the summary, the item view, the values a comparison needs), `scoreconfigs.go` (the binding by name, checked inside `ScoreWrite.apply`), `internal/server/datasets.go`, `runs.go`, `scoreconfigs.go`, `internal/cli/datasets.go`, `internal/mcpserver/evals.go`, `docs/datasets.md`, spec 014 — the store executes nothing; a trace joins a run through two columns the mapper claims from `tracepad.run_id`/`tracepad.item_id`, `notPinned` in `sweep.go` is the one predicate the sweep and the retention dry run share, and every number a comparison reports is computed server-side so that two clients cannot disagree about what improved means |
 | JSON API plumbing (auth, strict decode, pagination) | `internal/server/api.go`, spec 003 |
 | Read API (traces, sessions, stats, system) | `internal/server/traces.go` and neighbours, `docs/api.md`, specs 004 and 009 — the route table in `routes.go` is the surface, and `openapi.json` must agree with it. Paging is keyset in both directions: `trimPage` in `api.go` owns which cursor a page may claim |
 | Response budgets and truncation | `internal/server/budget.go`, spec 004 #2 |

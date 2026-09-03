@@ -22,10 +22,10 @@ function, exports the traces over OTLP exactly as in production, and posts
 scores exactly as today. Two span attributes tie each trace to its run and to
 the item it answered. Everything here is a JSON API that works with `curl`.
 
-The reading side — a run's summary, its items with their attempts, and the
-comparison of two runs — is the second half of this feature and is not in
-this release yet. What is here is the write side and the link: it is what a
-harness needs to start producing evidence the comparison will read.
+The reading side is here too: a run's summary, its items with the attempts
+they got, and the comparison of two runs. Every number in it is computed by
+the server, so the CLI, the MCP tools and anything else you write cannot
+disagree about what "improved" means.
 
 ## Endpoints
 
@@ -42,7 +42,9 @@ harness needs to start producing evidence the comparison will read.
 | `DELETE` | `/api/v1/datasets/{name}/items/{id}` | Archive an item at a new version |
 | `POST` | `/api/v1/datasets/{name}/runs` | Open a run |
 | `GET` | `/api/v1/datasets/{name}/runs` | List a dataset's runs, newest first |
-| `GET` | `/api/v1/runs/{id}` | One run |
+| `GET` | `/api/v1/runs/{id}` | One run with its summary |
+| `GET` | `/api/v1/runs/{id}/items` | The run's cases with the attempts it made at each |
+| `GET` | `/api/v1/runs/{a}/compare/{b}` | Two runs of one dataset side by side |
 | `POST` | `/api/v1/runs/{id}/finish` | Close a run as finished or failed |
 | `DELETE` | `/api/v1/runs/{id}` | Delete a run, releasing its traces |
 
@@ -248,8 +250,135 @@ curl -H "$AUTH" $TP/api/v1/datasets/support-golden/runs -d '{
 - Linking does not stop at `finish`: a late span of a trace that started
   inside the run still belongs to it.
 
-`GET /api/v1/datasets/{name}/runs` lists newest first; `GET /api/v1/runs/{id}`
-reads one. Both answer with the run object above.
+`GET /api/v1/datasets/{name}/runs` lists newest first, with the run object
+above and no summary: a page of runs is for choosing one.
+
+## Reading a run back
+
+`GET /api/v1/runs/{id}` adds the summary — how the run went:
+
+```json
+{
+  "id": "0e5a…", "dataset": "support-golden", "dataset_version": 12,
+  "status": "finished",
+  "summary": {
+    "items":  {"total": 200, "covered": 198, "missing": 2, "unknown": 0},
+    "traces": {"count": 214, "attempts_max": 3, "error_count": 3,
+               "total_cost": 1.42, "latency_ms": {"p50": 812, "p95": 2410}},
+    "scores": {
+      "accuracy": {"data_type": "numeric", "direction": "higher",
+                   "count": 214, "mean": 0.81, "min": 0, "max": 1},
+      "verdict":  {"data_type": "categorical", "direction": null,
+                   "count": 214, "distribution": {"fail": 44, "pass": 170}}
+    },
+    "models":  ["gpt-5", "gpt-5-mini"],
+    "prompts": [{"name": "support-answer", "version": 7}]
+  }
+}
+```
+
+- `covered` is how many of the version's cases got at least one trace, and
+  `missing` the rest. `unknown` counts **traces**, not cases: the run's traces
+  that no case of its version accounts for — a harness that ran newer cases, a
+  mistyped id, or a trace that named the run and no case. `?unknown=true` on
+  the items view lists exactly those.
+- `error_count` counts **traces** that failed, the same meaning the session
+  roll-up gives the word. `attempts_max` is the largest number of traces one
+  case got, so a run that retried something three times says so.
+- Percentiles are **exact** over the run's traces — a run is hundreds of them,
+  and at that size the exact number beats the ±12% of the bucketed ones in
+  [`/stats`](api.md#stats).
+- `total_cost` is `null` when no attempt carried a cost. Absent cost is not
+  zero.
+- Score names report `mean`/`min`/`max` when they are numeric or boolean, a
+  `distribution` when categorical, and `count` alone for text. `data_type` and
+  `direction` come from the name's [config](scores.md#score-configs);
+  `direction` is `null` for a name that has none, which is what makes a
+  comparison say *changed* rather than *improved*.
+- `models` and `prompts` are derived from the run's observations — what it
+  actually ran, not what the harness declared.
+
+Everything is computed at read time. A run keeps taking late spans after it is
+finished, and a stored summary would be wrong in exactly the window somebody
+is watching.
+
+### The cases and what was answered
+
+`GET /api/v1/runs/{id}/items` puts the expected output beside the produced one:
+
+```json
+{"run": "0e5a…", "dataset": "support-golden", "dataset_version": 12,
+ "items": [{
+   "id": "a1b2…", "seq": 3,
+   "input": {"question": "how do I reset my password?"},
+   "expected_output": {"answer": "Settings, then Reset."},
+   "attempts": [{
+     "trace_id": "4f8c…", "timestamp": "2026-09-03T10:00:02Z",
+     "error_count": 0, "total_cost": 0.007, "latency_ms": 640,
+     "output": {"answer": "Open Settings and choose Reset."},
+     "scores": [{"id": "…", "name": "accuracy", "data_type": "numeric", "value": 1}]
+   }]
+ }], "next_cursor": null, "prev_cursor": null}
+```
+
+- `output` is the trace's **root observation's** output — the earliest starting
+  observation with no parent, which is where a harness puts the answer for the
+  case. A trace whose root carried no output shows `null` rather than reaching
+  down the tree for another span's business.
+- `expected_output` and `output` are budgeted: one too large for the response
+  arrives as a marker with `trace_id` and `observation_id`, which
+  `/api/v1/observations/{id}/io` takes. The scores ride whole.
+- A case with no attempt is still a row, with an empty `attempts`: that is what
+  "missing" looks like from here.
+- `?unknown=true` appends the run's unaccounted traces, grouped by the id they
+  named, each row marked `"unknown": true` and carrying no case body. They come
+  after every known case, so a cursor walk stays a walk.
+
+### Comparing two runs
+
+`GET /api/v1/runs/{a}/compare/{b}` is the question the whole feature exists
+for:
+
+```json
+{
+  "a": {"id": "0e5a…", "name": "prompt v7", "dataset_version": 12,
+        "status": "finished", "created_at": "…"},
+  "b": {"id": "1f6b…", "name": "prompt v8", "dataset_version": 12, "…": "…"},
+  "dataset": "support-golden", "same_version": true,
+  "metadata": {"prompt": {"a": "support-answer@7", "b": "support-answer@8"}},
+  "traces": {"count": {"a": 214, "b": 200}, "error_count": {"a": 3, "b": 0},
+             "total_cost": {"a": 1.42, "b": 1.10, "delta": -0.32},
+             "latency_ms": {"p50": {"a": 812, "b": 700}, "p95": {"a": 2410, "b": 2100}}},
+  "scores": [{"name": "accuracy", "data_type": "numeric", "direction": "higher",
+              "a": {"mean": 0.81, "count": 214}, "b": {"mean": 0.86, "count": 200},
+              "delta": 0.05, "improved": 14, "regressed": 3, "same": 181}],
+  "items": [{"id": "a1b2…", "seq": 3, "in": "both",
+             "scores": {"accuracy": {"a": 0.5, "b": 1, "delta": 0.5, "verdict": "improved"}}}],
+  "next_cursor": null, "prev_cursor": null
+}
+```
+
+- A case answered **N times** has one value per score name: the **mean** of its
+  attempts for a number, so the item rows and the header cannot disagree; for a
+  category or a piece of text, the **newest** attempt's value, because there is
+  no mean of a word.
+- **Equality is exact.** A tolerance would be a number Tracepad invented, so
+  `0.7999999` and `0.8` are a change. Round in your judge if that matters.
+- `verdict` is `improved` or `regressed` only for names whose config gives a
+  direction; without one it is `changed` or `same`, and the header row counts
+  `changed` instead of `improved`/`regressed`. A name only one run carried has
+  no verdict at all — there is nothing to compare it against.
+- `metadata` lists only the keys the two runs disagree about, both values.
+- `in` says which run had the case: `both`, `a`, `b` — or
+  `only_in_version_a` / `only_in_version_b` when the dataset moved between the
+  runs, which `same_version: false` also announces. The version labels win:
+  a case missing from the other run's version was never that run's to answer.
+- Runs of **different datasets** are a `400`, and so is a run compared with
+  itself. Two runs where one is still `running` compare fine — its numbers
+  will move.
+
+The header counts are about the whole pair, so they do not change as you page
+through `items`.
 
 ### What a run keeps
 
@@ -315,6 +444,47 @@ curl -X DELETE -H "$AUTH" "$TP/api/v1/datasets/support-golden?confirm=support-go
 Every version of every item and every run go. The traces stay, unpinned.
 Deleting a run or a score config needs no confirmation: one row each, and
 nothing else is touched.
+
+## The same loop from a shell
+
+Every step above is a command, and the CLI is nothing but a client of the API
+([cli.md](cli.md)). This is the whole of it:
+
+```sh
+# 1. Declare what the score names mean. Idempotent.
+tracepad score-configs push accuracy --file accuracy.json
+
+# 2. Push the cases: a .jsonl (one case per line) or a .json array, one batch,
+#    one version tick. Re-running an unchanged file prints "unchanged at
+#    version 12" and writes nothing.
+tracepad datasets push support-golden --file cases.jsonl
+# → version 12: 3 items changed, 200 in the batch
+
+# 3. Open the run and read back the version it pinned.
+RUN=$(tracepad runs create support-golden --name "prompt v8" --json)
+RUN_ID=$(echo "$RUN" | jq -r .id)
+VERSION=$(echo "$RUN" | jq -r .dataset_version)
+
+# 4. Fetch the cases at that version. --json walks every page, so this is the
+#    dataset's export as well as the harness's input.
+tracepad datasets show support-golden --version "$VERSION" --json > cases.json
+
+# 5. Run your function per case, stamping tracepad.run_id and
+#    tracepad.item_id on the trace, and post the scores as always.
+
+# 6. Close the run, then read it back.
+tracepad runs finish "$RUN_ID"
+tracepad runs show "$RUN_ID"
+tracepad runs show "$RUN_ID" --items          # the cases and what was answered
+
+# 7. The question this was all for.
+tracepad runs compare "$BASELINE" "$RUN_ID"
+```
+
+`runs compare` prints the header, one line per score name with the delta and
+how many cases moved, and then the cases whose verdict is not `same`; `--all`
+lists every case. A run that failed closes with its reason:
+`tracepad runs finish "$RUN_ID" --failed "judge timed out"`.
 
 ## Responses
 
