@@ -2,7 +2,12 @@
 
 A store that only grows is a store you eventually delete by hand. Tracepad
 forgets on a schedule, on request, and when a project goes — without an
-operator ever running SQL.
+operator ever running SQL. One exception is chosen rather than scheduled: a
+trace that belongs to a **live eval run is kept past the window**, because the
+run is the evidence for a number somebody will act on, and the run you want
+to look at is the old one. Retention bounds the file *plus what you chose to
+keep*; `GET /api/v1/system` shows the size of that choice, and deleting the
+run releases it. See [What a run keeps](#what-a-run-keeps).
 
 Nothing is deleted by default. A new install keeps everything forever until
 somebody sets a window, because a self-hosted tool must not quietly discard the
@@ -84,6 +89,45 @@ discovered:
    carry no user id, no name and no text — they are counts, sums and latency
    buckets — which is the same archive posture the raw bodies have below, and
    the same reasoning regulators accept for a backup.
+
+## What a run keeps
+
+A trace whose `run_id` names an existing run of its project
+([datasets.md](datasets.md)) is **not swept**, however old it is. The sweep
+skips it; the retention dry run leaves it out of its counts, so a preview
+never promises to take what the pass would keep; and the retention window can
+be shortened below the age of the pinned traces without touching them. When
+the file does not shrink after a window change, this is where to look:
+
+```json
+"runs": {"pinned_traces": 2996, "orphan_traces": 0}
+```
+
+The pin is per trace and per run, not per dataset: eval traffic is hundreds of
+traces per pass, not a million a day, and its payloads are worth their disk.
+The size is a choice the operator makes per run rather than a window that
+quietly amputates the baseline.
+
+What releases a pinned trace:
+
+- **Deleting the run** (`DELETE /api/v1/runs/{id}`). The traces are not
+  deleted; they return to the ordinary window and go on the next pass if they
+  are past it. The response says how many.
+- **Deleting the dataset**, which takes its runs with it.
+- **Erasing a user's data**, which outranks the pin: the user's traces go
+  whether or not a run holds them, and the dry run names the runs affected.
+  An eval trace ordinarily carries no user id, but a harness that replays
+  production sessions under their real ids is exactly the harness that will
+  receive the request.
+
+What is not pinned:
+
+- **Raw bodies.** A batch feeds many traces with different fates, and raw is
+  the archive, not the evidence. After the raw window a pinned trace keeps its
+  parsed rows and loses its raw body.
+- **Orphans.** A trace naming a run that does not exist — a typo, or a run
+  whose dataset was deleted — is stored and counted (`orphan_traces`), and
+  lives on the ordinary window.
 
 ## The clock is arrival, not the client's
 
@@ -203,7 +247,8 @@ tracepad users rm-data user-4711
 queryable stores hold about one user — the traces filed under that id, their
 observations, payloads and scores — synchronously, and answers with the counts.
 Like every destructive endpoint it is a dry run until confirmed; the echo here
-is the user id itself.
+is the user id itself. Traces an eval run is keeping go with the rest, and the
+dry run lists those runs under `runs` so the hole is visible before it opens.
 
 ### What this means for a data-subject request
 
