@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/tracepad/tracepad/internal/model"
 	"github.com/tracepad/tracepad/internal/store"
@@ -320,6 +321,62 @@ func TestEvalCommandsAreJSONOffATerminal(t *testing.T) {
 				t.Errorf("%v printed something that is not a JSON object: %q", args, got.stdout)
 			}
 		})
+	}
+}
+
+// `--version 0` is a version like any other — the dataset before its first
+// item — and reading it as "not passed" answers a wider question than was
+// asked: the caller gets today's cases where they asked for none (spec 003
+// #23, found in review of PR #31).
+func TestDatasetsShowTakesVersionZero(t *testing.T) {
+	h := newHarness(t)
+	h.pushCases(t, "golden", jsonlCases, ".jsonl")
+
+	got := h.run(t.Context(), false, "datasets", "show", "golden", "--version", "0")
+	if got.code != ExitOK {
+		t.Fatalf("show = %+v", got)
+	}
+	export, err := decode[struct {
+		Version int `json:"version"`
+		Items   []struct {
+			ID string `json:"id"`
+		} `json:"items"`
+	}](json.RawMessage(got.stdout))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if export.Version != 0 || len(export.Items) != 0 {
+		t.Errorf("version 0 = %+v, want the dataset before its first item", export)
+	}
+}
+
+// A table cell cuts on a character, not on a byte, and unwraps a payload the
+// server already cut rather than printing the marker's bookkeeping (found in
+// review of PR #31).
+func TestCompactJSONCutsCleanly(t *testing.T) {
+	wide := `{"a":"` + strings.Repeat("日本語", 40) + `"}`
+	got := compactJSON(json.RawMessage(wide))
+	if !utf8.ValidString(got) {
+		t.Errorf("compactJSON split a character: %q", got)
+	}
+	if n := utf8.RuneCountInString(got); n != 48 {
+		t.Errorf("width = %d characters, want 48", n)
+	}
+
+	marker, err := json.Marshal(map[string]any{
+		"truncated": true, "size": 20000, "preview": `{"answer":"because 0a1b`,
+		"trace_id": strings.Repeat("a", 32), "observation_id": strings.Repeat("a", 16),
+		"full": "/api/v1/observations/" + strings.Repeat("a", 16) + "/io?trace_id=" + strings.Repeat("a", 32),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cell := compactJSON(marker)
+	if !strings.Contains(cell, `because 0a1b`) || !strings.Contains(cell, "19.5 KiB truncated") {
+		t.Errorf("cell = %q, want the preview and the real size", cell)
+	}
+	if strings.Contains(cell, "truncated\":") || strings.Contains(cell, "observation_id") {
+		t.Errorf("cell = %q, want the marker read rather than printed", cell)
 	}
 }
 

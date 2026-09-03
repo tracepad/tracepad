@@ -133,7 +133,10 @@ func (r *run) datasetsShow(ctx context.Context, args []string) error {
 	if err := addCursor(query, fs, cursor); err != nil {
 		return err
 	}
-	if fs.Lookup("version").Value.String() != "0" || version != 0 {
+	// `--version 0` is a version like any other — the dataset before its
+	// first item — so what decides is whether the flag was passed, not
+	// whether it landed on its zero value (the rule `wasGiven` exists for).
+	if wasGiven(fs, "version") {
 		query.Set("version", strconv.Itoa(version))
 	}
 
@@ -1171,16 +1174,38 @@ func addSomeBody(request map[string]any, key, value string) {
 
 // compactJSON renders an opaque body for a table cell: one line, cut where it
 // stops being readable. The whole of it is one `--json` away.
+//
+// A payload the server already cut is unwrapped rather than printed as the
+// marker's own JSON, the way `payloadText` unwraps it elsewhere: a cell of raw
+// `{"truncated":true,…}` buries the preview under the bookkeeping and then
+// cuts the URL in half anyway. What the cell can hold is the preview and the
+// real size; the URL rides in `--json` (found in review of PR #31).
 func compactJSON(raw json.RawMessage) string {
 	if len(raw) == 0 || string(raw) == "null" {
 		return "—"
 	}
-	text := strings.Join(strings.Fields(string(raw)), " ")
 	const width = 48
-	if len(text) <= width {
+	if marker, cut := truncationOf(raw); cut {
+		suffix := fmt.Sprintf(" (%s truncated)", byteSize(marker.Size))
+		return oneLine(marker.Preview, width-len([]rune(suffix))) + suffix
+	}
+	return oneLine(string(raw), width)
+}
+
+// oneLine folds a body onto a single line and cuts it to width *characters*.
+// Counting runes rather than bytes is what keeps a cell of Japanese or an
+// accented word from ending in a half-written character (found in review of
+// PR #31); the server cuts payloads the same way, for the same reason.
+func oneLine(text string, width int) string {
+	text = strings.Join(strings.Fields(text), " ")
+	if width < 1 {
+		return ""
+	}
+	runes := []rune(text)
+	if len(runes) <= width {
 		return text
 	}
-	return text[:width-1] + "…"
+	return string(runes[:width-1]) + "…"
 }
 
 func plural(count int, noun string) string {
