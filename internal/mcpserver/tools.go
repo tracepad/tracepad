@@ -451,6 +451,10 @@ func register(server *mcp.Server, api API) {
 			}, "key", "count", "error_count", "latency_ms"), "One bucket per group, ascending by key."),
 		}, "group_by", "unit", "buckets"),
 	}, t.getStats)
+
+	// The eval tools are declared in evals.go, in their own file because
+	// they are their own surface: six reads over datasets and runs.
+	registerEvals(server, t)
 }
 
 // readOnly is the annotation every tool here carries: the whole surface reads,

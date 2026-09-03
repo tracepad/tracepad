@@ -270,17 +270,31 @@ func renderObservation(out io.Writer, node observationNode, indent string) {
 	}
 }
 
+// truncationMarker is what the server puts in place of a payload too big for
+// the response budget (spec 004 #2), as much of it as a renderer needs.
+type truncationMarker struct {
+	Truncated bool   `json:"truncated"`
+	Size      int    `json:"size"`
+	Preview   string `json:"preview"`
+	Full      string `json:"full"`
+}
+
+// truncationOf reads a marker out of a payload slot, and reports false for a
+// payload that arrived whole — including one that is not an object at all, on
+// which the decode simply fails.
+func truncationOf(raw json.RawMessage) (truncationMarker, bool) {
+	var marker truncationMarker
+	if err := json.Unmarshal(raw, &marker); err != nil || !marker.Truncated {
+		return truncationMarker{}, false
+	}
+	return marker, true
+}
+
 // payloadText renders a payload, or what a truncation marker says about the
 // one that did not fit. The marker is not noise to hide: it is the affordance
 // that says the rest is one command away.
 func payloadText(raw json.RawMessage) string {
-	var marker struct {
-		Truncated bool   `json:"truncated"`
-		Size      int    `json:"size"`
-		Preview   string `json:"preview"`
-		Full      string `json:"full"`
-	}
-	if err := json.Unmarshal(raw, &marker); err == nil && marker.Truncated {
+	if marker, cut := truncationOf(raw); cut {
 		return fmt.Sprintf("%s… (%s truncated; whole payload at %s)",
 			marker.Preview, byteSize(marker.Size), marker.Full)
 	}

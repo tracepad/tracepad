@@ -22,7 +22,9 @@ export const TRACE_FILTERS = [
 	'release',
 	'version',
 	'type',
-	'prompt'
+	'prompt',
+	'run_id',
+	'item_id'
 ] as const;
 
 export type FilterName = (typeof TRACE_FILTERS)[number];
@@ -48,6 +50,10 @@ export type TraceFilters = {
 	type?: string;
 	/** `name` or `name@version`, which is also what the panel's badge links to. */
 	prompt?: string;
+	/** The dataset run a trace belongs to (spec 014 #2). */
+	run_id?: string;
+	/** The dataset item it answered. */
+	item_id?: string;
 };
 
 /**

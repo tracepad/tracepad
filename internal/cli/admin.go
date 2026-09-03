@@ -42,6 +42,13 @@ type preview struct {
 	// deletion answers with a `runs` count, and this struct is what reads
 	// every preview.
 	Runs []affectedRun `json:"affected_runs"`
+	// The dataset deletion's own counts (spec 014 #20). Pointers, because
+	// this one struct reads every preview and zero is a real answer: a
+	// dataset with no runs would otherwise look like an erasure preview
+	// that never mentioned runs at all.
+	Items        *int64 `json:"items"`
+	DatasetRuns  *int64 `json:"runs"`
+	PinnedTraces *int64 `json:"pinned_traces"`
 }
 
 // affectedRun is one run that loses traces to an erasure.
@@ -642,6 +649,21 @@ func (r *run) renderPreview(dry preview, what string) {
 	}
 	if dry.Oldest != "" {
 		fmt.Fprintf(out, "  %-14s %s\n", "oldest", shortTime(dry.Oldest))
+	}
+	// A dataset deletion counts its own three things rather than a table of
+	// stores, and the third is the one that matters: the traces its runs
+	// were keeping out of the sweep are released, not deleted (#20).
+	for _, counted := range []struct {
+		label string
+		value *int64
+	}{
+		{"items", dry.Items},
+		{"runs", dry.DatasetRuns},
+		{"pinned traces", dry.PinnedTraces},
+	} {
+		if counted.value != nil {
+			fmt.Fprintf(out, "  %-14s %d\n", counted.label, *counted.value)
+		}
 	}
 	// Erasure outranks the pin an eval run puts on its traces, and the run
 	// then shows those items as missing (spec 014 #14). The operator sees

@@ -117,6 +117,7 @@ traffic, and `item_id` never appears without `run_id`. See
 | `release`, `version` | Exact match on the deployment, and on the version of the trace's own logic. |
 | `type` | Traces with at least one observation of this kind — one of `span`, `generation`, `event`, `agent`, `tool`, `chain`, `retriever`, `guardrail`, `evaluator`, `embedding`. Exact: `generation` does not match `embedding`. Anything else is a `400`. |
 | `prompt` | `name`, or `name@version`: traces with at least one observation that ran this prompt, at any version or at that one. A version is a **run of digits after the last `@`, with a name in front of it**; every other string is a name, `@` included — `@acme/support`, `team@acme/answer`, `name@latest` and `svc@-1` all filter as names. Labels are not versions: `name@latest` matches a prompt literally called that, and otherwise returns nothing. |
+| `run_id`, `item_id` | The traces of one eval run, and the attempts at one case ([datasets.md](datasets.md)). Both take the 32-hex ids this API issues; another shape is a `400`, because nothing else can be in those columns and an empty listing would report a typo as a fact. |
 | `fields` | Comma-separated subset of the row fields. |
 | `limit` | 1–500, default 50. |
 | `cursor` | The `next_cursor` or `prev_cursor` of a previous page. |

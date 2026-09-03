@@ -73,7 +73,9 @@ func (s *Server) routes() []route {
 		{"DELETE", "/api/v1/datasets/{name}/items/{id}", "Archive an item at a new version", s.handleDeleteItem},
 		{"POST", "/api/v1/datasets/{name}/runs", "Open a run over the dataset at its current or a named version", s.handleCreateRun},
 		{"GET", "/api/v1/datasets/{name}/runs", "List a dataset's runs newest first, cursor-paginated", s.handleListRuns},
-		{"GET", "/api/v1/runs/{id}", "One run", s.handleGetRun},
+		{"GET", "/api/v1/runs/{id}", "One run with its summary: coverage, traffic, scores, models and prompts", s.handleGetRun},
+		{"GET", "/api/v1/runs/{id}/items", "The run's items with the attempts it made at each", s.handleRunItems},
+		{"GET", "/api/v1/runs/{a}/compare/{b}", "Two runs of one dataset side by side, per score name and per item", s.handleCompareRuns},
 		{"POST", "/api/v1/runs/{id}/finish", "Close a run as finished, or as failed with a reason", s.handleFinishRun},
 		{"DELETE", "/api/v1/runs/{id}", "Delete a run, releasing its traces to the retention window", s.handleDeleteRun},
 

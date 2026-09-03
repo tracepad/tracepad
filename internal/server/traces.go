@@ -47,6 +47,7 @@ var traceRowFields = []string{
 var traceListFilters = []string{
 	"from", "to", "environment", "user_id", "session_id", "name", "tag",
 	"status", "min_cost", "q", "release", "version", "type", "prompt",
+	"run_id", "item_id",
 }
 
 // handleListTraces serves the filtered, cursor-paginated listing, newest
@@ -684,6 +685,26 @@ func traceFilter(values url.Values) (store.TraceFilter, error) {
 			return filter, err
 		}
 		filter.Prompt = prompt
+	}
+	// The two link filters take ids this API issued, and the mapper claims
+	// nothing else into the columns (spec 014 #2), so a value of another
+	// shape cannot match a row. Answering that with an empty listing would
+	// report a typo as a fact about the data (spec 003 #23).
+	for _, link := range []struct {
+		name   string
+		target *string
+	}{
+		{"run_id", &filter.RunID},
+		{"item_id", &filter.ItemID},
+	} {
+		raw := values.Get(link.name)
+		if raw == "" {
+			continue
+		}
+		if !hexID.MatchString(raw) {
+			return filter, fmt.Errorf("%s must be 32 lower-case hex characters, got %q", link.name, raw)
+		}
+		*link.target = raw
 	}
 	switch filter.Status {
 	case "", store.TraceStatusError, store.TraceStatusOK:

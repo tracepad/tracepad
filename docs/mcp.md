@@ -90,6 +90,12 @@ tracepad is a later question.
 | `get_prompt` | `GET /api/v1/prompts/{name}` | "What prompt is in production" |
 | `list_scores` | `GET /api/v1/scores` | Reading eval results |
 | `get_stats` | `GET /api/v1/stats` | Counts, cost, latency, trends |
+| `list_datasets` | `GET /api/v1/datasets` | "What test sets are there" |
+| `get_dataset_items` | `GET /api/v1/datasets/{name}/items` | Reading the cases in one |
+| `list_runs` | `GET /api/v1/datasets/{name}/runs` | "What has been tried" |
+| `get_run` | `GET /api/v1/runs/{id}` | How one eval run went |
+| `get_run_items` | `GET /api/v1/runs/{id}/items` | Which cases failed, and what was said |
+| `compare_runs` | `GET /api/v1/runs/{a}/compare/{b}` | "Did this change make it better" |
 
 `search` and `list_traces` are the same endpoint under two descriptions, and
 that is the point: "the user quotes text they saw" is a different question from
@@ -99,6 +105,16 @@ filter `list_traces` takes, and its rows carry `match` — which observation and
 field the hit was in, and a snippet of the text — so the next call can be
 `get_observation_io` on that observation. The matching rules are the API's:
 [api.md](api.md#search).
+
+The six eval tools read [datasets and runs](datasets.md) and write nothing —
+a run is opened by a harness or a person, and creating one from a model's guess
+would leave a container in the store that nobody meant. `compare_runs` is the
+one to reach for when the question is whether a change helped: it returns both
+runs' aggregates per score name with the delta and how many cases improved,
+regressed or stayed, then the cases themselves with their verdicts. A name says
+*improved* only when its config gives it a direction; otherwise the verdict is
+*changed*. `get_run_items` is the follow-up — what the model actually said for
+a case — and its payload markers feed `get_observation_io` like every other.
 
 There are no administrative tools, for the reason at the top of this page: not
 a gap, a guarantee.

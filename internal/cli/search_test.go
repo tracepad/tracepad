@@ -132,7 +132,10 @@ func TestSearchRefusalIsTheServersOwn(t *testing.T) {
 
 // usageFlag finds the flags the usage text names, per command.
 var (
-	usageCommand = regexp.MustCompile(`^\s+tracepad ([a-z]+(?: [a-z-]+)?)`)
+	// The group name may be hyphenated too — `score-configs` is one —
+	// or the parser would read it as the command `score` and report a
+	// command that builds no flags.
+	usageCommand = regexp.MustCompile(`^\s+tracepad ([a-z][a-z-]*(?: [a-z-]+)?)`)
 	usageFlag    = regexp.MustCompile(`--([a-z][a-z-]*)`)
 )
 
