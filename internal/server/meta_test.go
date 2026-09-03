@@ -142,6 +142,10 @@ func TestDocumentedQueryParametersAreAccepted(t *testing.T) {
 		"/projects/{id}", "/projects/"+h.project.ID,
 		"{public_key}", testPublic,
 		"{user_id}", "u1",
+		"/datasets/{name}", "/datasets/golden",
+		"/items/{id}", "/items/"+strings.Repeat("b", 32),
+		"/runs/{id}", "/runs/"+strings.Repeat("c", 32),
+		"/score-configs/{name}", "/score-configs/accuracy",
 	)
 
 	for path, operations := range document.Paths {

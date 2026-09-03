@@ -16,6 +16,7 @@
     {"name": "stats", "description": "Aggregates computed on the fly"},
     {"name": "scores", "description": "Quality judgements about traces"},
     {"name": "prompts", "description": "Versioned prompts with movable labels"},
+    {"name": "datasets", "description": "Datasets of versioned test cases, the runs over them, and the score configs that pin what a score name means"},
     {"name": "admin", "description": "Projects, keys, retention windows and user-data erasure"}
   ],
   "paths": {
@@ -134,6 +135,13 @@
                 "waiting": {"type": "integer"}, "capacity": {"type": "integer"}
               }},
               "response_budget_bytes": {"type": "integer"},
+              "runs": {"type": "object",
+                "description": "The link between traces and dataset runs, as this project sees it",
+                "properties": {
+                  "pinned_traces": {"type": "integer", "description": "Traces a live run keeps out of the retention sweep — the size of retention's one exception"},
+                  "orphan_traces": {"type": "integer", "description": "Trace deliveries since start that named a run this project does not have; they are stored, and each unknown id is logged once"}
+                },
+                "required": ["pinned_traces", "orphan_traces"]},
               "counters": {"type": "object",
                 "description": "This project's ingest traffic since the process started",
                 "properties": {
@@ -633,6 +641,352 @@
         }
       }
     },
+    "/api/v1/datasets": {
+      "get": {
+        "tags": ["datasets"],
+        "summary": "List datasets by name, cursor-paginated",
+        "operationId": "listDatasets",
+        "parameters": [{"$ref": "#/components/parameters/Limit"}, {"$ref": "#/components/parameters/Cursor"}, {"$ref": "#/components/parameters/Direction"}],
+        "responses": {
+          "200": {"description": "A page of datasets", "content": {"application/json": {"schema": {
+            "type": "object",
+            "properties": {
+              "datasets": {"type": "array", "items": {"$ref": "#/components/schemas/Dataset"}},
+              "next_cursor": {"type": ["string", "null"]},
+              "prev_cursor": {"type": ["string", "null"]}
+            },
+            "required": ["datasets", "next_cursor", "prev_cursor"]
+          }}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"}
+        }
+      }
+    },
+    "/api/v1/datasets/{name}": {
+      "put": {
+        "tags": ["datasets"],
+        "summary": "Create a dataset or replace its description and metadata",
+        "description": "The envelope only: the items and the version clock are untouched. A dataset also comes into being on the first POST of items to its name.",
+        "operationId": "putDataset",
+        "parameters": [{"$ref": "#/components/parameters/DatasetName"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {
+          "type": "object",
+          "properties": {"description": {"type": "string"}, "metadata": {"type": "object"}}
+        }}}},
+        "responses": {
+          "200": {"description": "The dataset", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Dataset"}}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"}
+        }
+      },
+      "get": {
+        "tags": ["datasets"],
+        "summary": "One dataset: its version and counts",
+        "operationId": "getDataset",
+        "parameters": [{"$ref": "#/components/parameters/DatasetName"}],
+        "responses": {
+          "200": {"description": "The dataset", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Dataset"}}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      },
+      "delete": {
+        "tags": ["datasets"],
+        "summary": "Delete a dataset with its items and runs; a dry run until `?confirm=` echoes the name",
+        "description": "The one destructive act here: every version of every item and every run go with the dataset, and the traces the runs were pinning return to the retention window — they are not deleted. Without `confirm` it answers with the counts and changes nothing.",
+        "operationId": "deleteDataset",
+        "parameters": [{"$ref": "#/components/parameters/DatasetName"}, {"$ref": "#/components/parameters/ConfirmName"}],
+        "responses": {
+          "200": {"description": "What went, or the dry run of what would", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/DatasetDeletion"}}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
+    "/api/v1/datasets/{name}/items": {
+      "post": {
+        "tags": ["datasets"],
+        "summary": "Add or edit items, one or an array, one version tick for the batch",
+        "description": "All or nothing. The dataset's version advances by exactly one if any item in the batch changed and not at all if none did, so re-posting the same cases is idempotent; `changed` says how many produced a row. An item's id is the idempotency key; an edit is a new row of the same id, and the old one stays readable at every earlier version.",
+        "operationId": "createDatasetItems",
+        "parameters": [{"$ref": "#/components/parameters/DatasetName"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {
+          "oneOf": [
+            {"$ref": "#/components/schemas/DatasetItemInput"},
+            {"type": "array", "items": {"$ref": "#/components/schemas/DatasetItemInput"}}
+          ]
+        }}}},
+        "responses": {
+          "201": {"description": "Written, or found unchanged", "content": {"application/json": {"schema": {
+            "type": "object",
+            "properties": {
+              "ids": {"type": "array", "items": {"type": "string"}, "description": "In input order"},
+              "version": {"type": "integer", "description": "The dataset's version after the write"},
+              "changed": {"type": "integer", "description": "How many items produced a row; 0 leaves `version` where it was"}
+            },
+            "required": ["ids", "version", "changed"]
+          }}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "413": {"description": "The body exceeded TRACEPAD_MAX_BODY_BYTES",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+          "429": {"description": "The write queue is full; retry after the Retry-After delay",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}}
+        }
+      },
+      "get": {
+        "tags": ["datasets"],
+        "summary": "The items at a version, whole, in first-appearance order",
+        "description": "Budget-exempt: the consumer is the harness, and a truncated test case is a different test case. Bounded by `limit` and by the body cap at write time. Default `version` is the current one; a version above it is a 400.",
+        "operationId": "listDatasetItems",
+        "parameters": [
+          {"$ref": "#/components/parameters/DatasetName"},
+          {"$ref": "#/components/parameters/DatasetVersion"},
+          {"$ref": "#/components/parameters/Limit"},
+          {"$ref": "#/components/parameters/Cursor"},
+          {"$ref": "#/components/parameters/Direction"}
+        ],
+        "responses": {
+          "200": {"description": "A page of items", "content": {"application/json": {"schema": {
+            "type": "object",
+            "properties": {
+              "dataset": {"type": "string"},
+              "version": {"type": "integer", "description": "The version the items were resolved at"},
+              "items": {"type": "array", "items": {"$ref": "#/components/schemas/DatasetItem"}},
+              "next_cursor": {"type": ["string", "null"]},
+              "prev_cursor": {"type": ["string", "null"]}
+            },
+            "required": ["dataset", "version", "items", "next_cursor", "prev_cursor"]
+          }}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
+    "/api/v1/datasets/{name}/items/{id}": {
+      "get": {
+        "tags": ["datasets"],
+        "summary": "One item as of a version",
+        "operationId": "getDatasetItem",
+        "parameters": [{"$ref": "#/components/parameters/DatasetName"}, {"$ref": "#/components/parameters/ItemID"}, {"$ref": "#/components/parameters/DatasetVersion"}],
+        "responses": {
+          "200": {"description": "The item", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/DatasetItem"}}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      },
+      "delete": {
+        "tags": ["datasets"],
+        "summary": "Archive an item at a new version",
+        "description": "Nothing is destroyed: the item is gone from the current version and still there at every earlier one. A 404 when the item is unknown or already archived at the current version.",
+        "operationId": "deleteDatasetItem",
+        "parameters": [{"$ref": "#/components/parameters/DatasetName"}, {"$ref": "#/components/parameters/ItemID"}],
+        "responses": {
+          "200": {"description": "The version the archive landed on", "content": {"application/json": {"schema": {
+            "type": "object",
+            "properties": {"id": {"type": "string"}, "version": {"type": "integer"}},
+            "required": ["id", "version"]
+          }}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
+    "/api/v1/datasets/{name}/items/{id}/versions": {
+      "get": {
+        "tags": ["datasets"],
+        "summary": "Every row of one item's history, newest first",
+        "description": "Archived rows included, each flagged: an edit is a row and a delete is a row.",
+        "operationId": "listDatasetItemVersions",
+        "parameters": [{"$ref": "#/components/parameters/DatasetName"}, {"$ref": "#/components/parameters/ItemID"}],
+        "responses": {
+          "200": {"description": "The item's history", "content": {"application/json": {"schema": {
+            "type": "object",
+            "properties": {
+              "dataset": {"type": "string"},
+              "id": {"type": "string"},
+              "versions": {"type": "array", "items": {"$ref": "#/components/schemas/DatasetItem"}}
+            },
+            "required": ["dataset", "id", "versions"]
+          }}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
+    "/api/v1/datasets/{name}/runs": {
+      "post": {
+        "tags": ["datasets"],
+        "summary": "Open a run over the dataset at its current or a named version",
+        "description": "The run pins the dataset version the harness must fetch its items at, and the response carries it. A client-supplied `id` makes the call retry-safe: a known id answers 200 with the existing run unchanged. The store never executes anything — the harness stamps `tracepad.run_id` and `tracepad.item_id` on the spans it exports, and closes the run with `/finish`.",
+        "operationId": "createRun",
+        "parameters": [{"$ref": "#/components/parameters/DatasetName"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {
+          "type": "object",
+          "properties": {
+            "id": {"type": "string", "pattern": "^[0-9a-f]{32}$", "description": "Generated when absent"},
+            "name": {"type": "string", "description": "A free label, not unique"},
+            "metadata": {"type": "object", "description": "What was being tried, in the harness's own terms"},
+            "dataset_version": {"type": "integer", "minimum": 0, "description": "The version to pin; the current one when absent, and a 400 above it"}
+          }
+        }}}},
+        "responses": {
+          "201": {"description": "The run created", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Run"}}}},
+          "200": {"description": "The run that already had this id", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Run"}}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "409": {"$ref": "#/components/responses/Conflict"}
+        }
+      },
+      "get": {
+        "tags": ["datasets"],
+        "summary": "List a dataset's runs newest first, cursor-paginated",
+        "operationId": "listRuns",
+        "parameters": [
+          {"$ref": "#/components/parameters/DatasetName"},
+          {"$ref": "#/components/parameters/Limit"},
+          {"$ref": "#/components/parameters/Cursor"},
+          {"$ref": "#/components/parameters/Direction"}
+        ],
+        "responses": {
+          "200": {"description": "A page of runs", "content": {"application/json": {"schema": {
+            "type": "object",
+            "properties": {
+              "runs": {"type": "array", "items": {"$ref": "#/components/schemas/Run"}},
+              "next_cursor": {"type": ["string", "null"]},
+              "prev_cursor": {"type": ["string", "null"]}
+            },
+            "required": ["runs", "next_cursor", "prev_cursor"]
+          }}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
+    "/api/v1/runs/{id}": {
+      "get": {
+        "tags": ["datasets"],
+        "summary": "One run",
+        "description": "The run object. Its summary — item coverage, score aggregates, the models and prompts it ran — is not here yet.",
+        "operationId": "getRun",
+        "parameters": [{"$ref": "#/components/parameters/RunID"}],
+        "responses": {
+          "200": {"description": "The run", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Run"}}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      },
+      "delete": {
+        "tags": ["datasets"],
+        "summary": "Delete a run, releasing its traces to the retention window",
+        "description": "One row of bookkeeping. The traces it held are not deleted; they stop being pinned and live as long as retention says.",
+        "operationId": "deleteRun",
+        "parameters": [{"$ref": "#/components/parameters/RunID"}],
+        "responses": {
+          "200": {"description": "The run is gone", "content": {"application/json": {"schema": {
+            "type": "object",
+            "properties": {
+              "id": {"type": "string"},
+              "released_traces": {"type": "integer", "description": "How many traces the run was keeping out of the sweep"}
+            },
+            "required": ["id", "released_traces"]
+          }}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
+    "/api/v1/runs/{id}/finish": {
+      "post": {
+        "tags": ["datasets"],
+        "summary": "Close a run as finished, or as failed with a reason",
+        "description": "The store never infers completion: a run stays `running` until the harness says otherwise. A run closed twice is a 409. Linking does not stop at finish — a late span of a trace that started inside the run still belongs to it.",
+        "operationId": "finishRun",
+        "parameters": [{"$ref": "#/components/parameters/RunID"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {
+          "type": "object",
+          "properties": {
+            "status": {"type": "string", "enum": ["finished", "failed"], "default": "finished"},
+            "error": {"type": "string", "description": "The harness's reason, with `failed` only"}
+          }
+        }}}},
+        "responses": {
+          "200": {"description": "The run as closed", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Run"}}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "409": {"$ref": "#/components/responses/Conflict"}
+        }
+      }
+    },
+    "/api/v1/score-configs": {
+      "get": {
+        "tags": ["datasets"],
+        "summary": "List score configs by name",
+        "description": "Whole, not paged: a project declares a handful of names.",
+        "operationId": "listScoreConfigs",
+        "responses": {
+          "200": {"description": "Every config", "content": {"application/json": {"schema": {
+            "type": "object",
+            "properties": {"configs": {"type": "array", "items": {"$ref": "#/components/schemas/ScoreConfig"}}},
+            "required": ["configs"]
+          }}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"}
+        }
+      }
+    },
+    "/api/v1/score-configs/{name}": {
+      "put": {
+        "tags": ["datasets"],
+        "summary": "Create or replace the config that binds a score name",
+        "description": "Declarative: the whole config, every time, and a re-PUT of the same body is a no-op. From then on a score posted under this name must have the config's `data_type`, a numeric value inside `min`/`max`, a categorical value among `categories`; a violating score fails its batch with a 400 naming it. Scores already stored are never re-validated.",
+        "operationId": "putScoreConfig",
+        "parameters": [{"$ref": "#/components/parameters/ScoreConfigName"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ScoreConfigInput"}}}},
+        "responses": {
+          "200": {"description": "The config as stored", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ScoreConfig"}}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"}
+        }
+      },
+      "get": {
+        "tags": ["datasets"],
+        "summary": "One score config",
+        "operationId": "getScoreConfig",
+        "parameters": [{"$ref": "#/components/parameters/ScoreConfigName"}],
+        "responses": {
+          "200": {"description": "The config", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ScoreConfig"}}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      },
+      "delete": {
+        "tags": ["datasets"],
+        "summary": "Remove a score config; the scores it admitted stay",
+        "operationId": "deleteScoreConfig",
+        "parameters": [{"$ref": "#/components/parameters/ScoreConfigName"}],
+        "responses": {
+          "200": {"description": "The config is gone", "content": {"application/json": {"schema": {
+            "type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]
+          }}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
     "/api/v1/projects": {
       "get": {
         "tags": ["admin"],
@@ -886,7 +1240,21 @@
       "ProjectID": {"name": "id", "in": "path", "required": true,
         "schema": {"type": "string", "pattern": "^[0-9a-f]{32}$"}},
       "Confirm": {"name": "confirm", "in": "query", "schema": {"type": "string"},
-        "description": "The name of the project — or the id of the user — being destroyed. Without it the endpoint changes nothing and answers with a preview; a value that does not match is a 400 that also changes nothing."}
+        "description": "The name of the project — or the id of the user — being destroyed. Without it the endpoint changes nothing and answers with a preview; a value that does not match is a 400 that also changes nothing."},
+      "ConfirmName": {"name": "confirm", "in": "query", "schema": {"type": "string"},
+        "description": "The name of the dataset being destroyed. Without it the endpoint changes nothing and answers with the counts; a value that does not match is a 400 that also changes nothing."},
+      "DatasetName": {"name": "name", "in": "path", "required": true,
+        "schema": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$", "maxLength": 200},
+        "description": "The prompt-name grammar: one URL path segment"},
+      "DatasetVersion": {"name": "version", "in": "query", "schema": {"type": "integer", "minimum": 0},
+        "description": "The dataset version to resolve the items at; the current one when absent. Above the current version it is a 400. A run's `dataset_version` is what to pass here"},
+      "ItemID": {"name": "id", "in": "path", "required": true,
+        "schema": {"type": "string", "pattern": "^[0-9a-f]{32}$"}},
+      "RunID": {"name": "id", "in": "path", "required": true,
+        "schema": {"type": "string", "pattern": "^[0-9a-f]{32}$"}},
+      "ScoreConfigName": {"name": "name", "in": "path", "required": true,
+        "schema": {"type": "string", "maxLength": 200},
+        "description": "A score name: any name a score may carry can have a config"}
     },
     "responses": {
       "BadRequest": {"description": "The request cannot mean what it says: an unknown query parameter, a malformed value, a limit out of range",
@@ -1135,6 +1503,109 @@
           "deleted": {"type": "object", "additionalProperties": {"type": "integer"}}
         },
         "required": ["dry_run", "deleted"]
+      },
+      "Dataset": {
+        "type": "object",
+        "description": "A named, versioned set of test cases. `version` advances by one on every write that changes the item set; `item_count` is the live items at that version.",
+        "properties": {
+          "name": {"type": "string"},
+          "description": {"type": ["string", "null"]},
+          "metadata": {"type": ["object", "null"]},
+          "version": {"type": "integer"},
+          "item_count": {"type": "integer"},
+          "run_count": {"type": "integer"},
+          "created_at": {"type": "string", "format": "date-time"},
+          "updated_at": {"type": "string", "format": "date-time"}
+        },
+        "required": ["name", "description", "metadata", "version", "item_count", "run_count", "created_at", "updated_at"]
+      },
+      "DatasetItemInput": {
+        "type": "object",
+        "description": "One test case. The three bodies are opaque JSON the store never reads inside; the source pair is a note about where the case came from, not a reference.",
+        "properties": {
+          "id": {"type": "string", "pattern": "^[0-9a-f]{32}$", "description": "Generated when absent; the same id again is an edit of the same item"},
+          "input": {"description": "Any JSON value"},
+          "expected_output": {"description": "Any JSON value"},
+          "metadata": {"description": "Any JSON value"},
+          "source_trace_id": {"type": "string"},
+          "source_observation_id": {"type": "string"}
+        },
+        "required": ["input"]
+      },
+      "DatasetItem": {
+        "type": "object",
+        "description": "One item as of a version. `version` is the dataset version the row was written at, which may be earlier than the version it was read at; `seq` is the item's place in the listing, fixed at its first appearance. `archived` appears on the history listing only.",
+        "properties": {
+          "id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+          "seq": {"type": "integer"},
+          "version": {"type": "integer"},
+          "archived": {"type": "boolean"},
+          "input": {},
+          "expected_output": {},
+          "metadata": {},
+          "source_trace_id": {"type": ["string", "null"]},
+          "source_observation_id": {"type": ["string", "null"]},
+          "created_at": {"type": "string", "format": "date-time"}
+        },
+        "required": ["id", "seq", "version", "input", "expected_output", "metadata", "source_trace_id", "source_observation_id", "created_at"]
+      },
+      "Run": {
+        "type": "object",
+        "description": "A run of a dataset: the container the harness opened, the version it pinned, and how it ended. `finished_at` is null while it is running.",
+        "properties": {
+          "id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+          "dataset": {"type": "string"},
+          "dataset_version": {"type": "integer"},
+          "name": {"type": ["string", "null"]},
+          "metadata": {"type": ["object", "null"]},
+          "status": {"type": "string", "enum": ["running", "finished", "failed"]},
+          "error": {"type": ["string", "null"]},
+          "created_at": {"type": "string", "format": "date-time"},
+          "finished_at": {"type": ["string", "null"], "format": "date-time"}
+        },
+        "required": ["id", "dataset", "dataset_version", "name", "metadata", "status", "error", "created_at", "finished_at"]
+      },
+      "DatasetDeletion": {
+        "type": "object",
+        "description": "What deleting a dataset takes: its live items, its runs, and the traces those runs were pinning — which are released, not deleted. `confirm` is present on the dry run only.",
+        "properties": {
+          "dry_run": {"type": "boolean"},
+          "dataset": {"type": "string"},
+          "items": {"type": "integer"},
+          "runs": {"type": "integer"},
+          "pinned_traces": {"type": "integer"},
+          "confirm": {"type": "string", "description": "Send this back as `?confirm=` to make it happen"},
+          "note": {"type": "string"}
+        },
+        "required": ["dry_run", "dataset", "items", "runs", "pinned_traces"]
+      },
+      "ScoreConfigInput": {
+        "type": "object",
+        "description": "What a score name means. `direction` is required for numeric and boolean names and forbidden for categorical and text ones; `min`/`max` are numeric only, with `min` at most `max`; `categories` is required for categorical names and forbidden otherwise.",
+        "properties": {
+          "data_type": {"type": "string", "enum": ["numeric", "boolean", "categorical", "text"]},
+          "direction": {"type": "string", "enum": ["higher", "lower", "none"], "description": "Which way is better; `none` for a number that is typed and bounded but not judged"},
+          "min": {"type": "number"},
+          "max": {"type": "number"},
+          "categories": {"type": "array", "items": {"type": "string"}, "minItems": 1, "description": "Distinct, non-empty"},
+          "description": {"type": "string"}
+        },
+        "required": ["data_type"]
+      },
+      "ScoreConfig": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string"},
+          "data_type": {"type": "string", "enum": ["numeric", "boolean", "categorical", "text"]},
+          "direction": {"type": ["string", "null"], "enum": ["higher", "lower", "none", null]},
+          "min": {"type": ["number", "null"]},
+          "max": {"type": ["number", "null"]},
+          "categories": {"type": ["array", "null"], "items": {"type": "string"}},
+          "description": {"type": ["string", "null"]},
+          "created_at": {"type": "string", "format": "date-time"},
+          "updated_at": {"type": "string", "format": "date-time"}
+        },
+        "required": ["name", "data_type", "direction", "min", "max", "categories", "description", "created_at", "updated_at"]
       }
     }
   }
