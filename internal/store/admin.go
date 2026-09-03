@@ -129,14 +129,16 @@ func (s *Store) expiredStatsHours(projectID string, cutoffSeconds int64) (int64,
 	return hours, nil
 }
 
+// expiredCounts counts what the trace window would take: the same predicate
+// the sweep uses, pinned traces excluded (spec 014 #13).
 func (s *Store) expiredCounts(projectID string, cutoff int64) (DeleteCounts, error) {
 	var (
 		counts DeleteCounts
 		oldest sql.NullInt64
 	)
-	const expiring = `SELECT id FROM traces WHERE project_id = ? AND ingested_at < ?`
+	const expiring = `SELECT id FROM traces t WHERE t.project_id = ? AND t.ingested_at < ? AND ` + notPinned
 	err := s.db.QueryRow(
-		`SELECT COUNT(*), MIN(ingested_at) FROM traces WHERE project_id = ? AND ingested_at < ?`,
+		`SELECT COUNT(*), MIN(t.ingested_at) FROM traces t WHERE t.project_id = ? AND t.ingested_at < ? AND `+notPinned,
 		projectID, cutoff).Scan(&counts.Traces, &oldest)
 	if err != nil {
 		return counts, fmt.Errorf("count expiring traces: %w", err)
@@ -171,10 +173,21 @@ func (s *Store) expiredRawCounts(projectID string, cutoff int64) (int64, int64, 
 	return batches, oldest.Int64, nil
 }
 
+// AffectedRun is a live run some of whose traces an erasure would take
+// (spec 014 #14): the run then shows those items as missing, and the dry run
+// names it so the operator sees the hole before it opens.
+type AffectedRun struct {
+	ID      string
+	Dataset string
+	Traces  int64
+}
+
 // UserDataPreview counts one user's parsed data: what an erasure request would
 // remove (spec 005 #7). Raw bodies are not counted because they are not
 // touched — `docs/retention.md` states that position rather than hiding it.
-func (s *Store) UserDataPreview(projectID, userID string) (DeleteCounts, error) {
+// The runs holding any of the traces come back beside the counts: erasure
+// overrides the pin (spec 014 #14), and the preview is where that is said.
+func (s *Store) UserDataPreview(projectID, userID string) (DeleteCounts, []AffectedRun, error) {
 	var (
 		counts DeleteCounts
 		oldest sql.NullInt64
@@ -184,7 +197,7 @@ func (s *Store) UserDataPreview(projectID, userID string) (DeleteCounts, error) 
 		`SELECT COUNT(*), MIN(ingested_at) FROM traces WHERE project_id = ? AND user_id = ?`,
 		projectID, userID).Scan(&counts.Traces, &oldest)
 	if err != nil {
-		return counts, fmt.Errorf("count a user's traces: %w", err)
+		return counts, nil, fmt.Errorf("count a user's traces: %w", err)
 	}
 	if oldest.Valid {
 		counts.Oldest = oldest.Int64
@@ -192,14 +205,31 @@ func (s *Store) UserDataPreview(projectID, userID string) (DeleteCounts, error) 
 	if err := s.db.QueryRow(
 		`SELECT COUNT(*) FROM observations WHERE project_id = ? AND trace_id IN (`+owned+`)`,
 		projectID, projectID, userID).Scan(&counts.Observations); err != nil {
-		return counts, fmt.Errorf("count a user's observations: %w", err)
+		return counts, nil, fmt.Errorf("count a user's observations: %w", err)
 	}
 	if err := s.db.QueryRow(
 		`SELECT COUNT(*) FROM scores WHERE project_id = ? AND trace_id IN (`+owned+`)`,
 		projectID, projectID, userID).Scan(&counts.Scores); err != nil {
-		return counts, fmt.Errorf("count a user's scores: %w", err)
+		return counts, nil, fmt.Errorf("count a user's scores: %w", err)
 	}
-	return counts, nil
+	rows, err := s.db.Query(
+		`SELECT r.id, r.dataset, COUNT(*) FROM traces t
+		   JOIN dataset_runs r ON r.project_id = t.project_id AND r.id = t.run_id
+		  WHERE t.project_id = ? AND t.user_id = ?
+		  GROUP BY r.id, r.dataset ORDER BY r.dataset, r.id`, projectID, userID)
+	if err != nil {
+		return counts, nil, fmt.Errorf("find a user's runs: %w", err)
+	}
+	defer rows.Close()
+	var runs []AffectedRun
+	for rows.Next() {
+		var run AffectedRun
+		if err := rows.Scan(&run.ID, &run.Dataset, &run.Traces); err != nil {
+			return counts, nil, err
+		}
+		runs = append(runs, run)
+	}
+	return counts, runs, rows.Err()
 }
 
 // ProjectPreview counts everything a project holds: what deleting it will
