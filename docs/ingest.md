@@ -83,6 +83,8 @@ span's own.
 | environment | `langfuse.environment` · `deployment.environment.name` · `deployment.environment` · `default` |
 | release | `langfuse.release` · the resource's `service.version` |
 | version | `langfuse.version` |
+| run | `tracepad.run_id` (a 32-hex run id; see [The run link](#the-run-link)) |
+| item | `tracepad.item_id` (a 32-hex item id, claimed only beside a run id) |
 | tags | `langfuse.trace.tags` (JSON array, comma-separated list, or single value) |
 | trace metadata | `langfuse.trace.metadata` (JSON object) and `langfuse.trace.metadata.*` |
 | observation type | `langfuse.observation.type` · a model attribute ⇒ `generation` · a zero-duration childless span ⇒ `event` · otherwise `span` |
@@ -152,6 +154,34 @@ entries — `resource.service.name` and `service.name` — rather than one
 overwriting the other. The scope's own name and version, which are not
 attributes in OTLP at all, are `scope.name` and `scope.version`: they are what
 says which SDK sent the span.
+
+### The run link
+
+An eval harness ties each trace to the run it belongs to and the dataset item
+it answered with two attributes ([datasets.md](datasets.md)):
+
+```
+tracepad.run_id  = 0e5a7c1d2b3f4a6980c1d2e3f4a5b6c7
+tracepad.item_id = a1b2c3d4e5f60718293a4b5c6d7e8f90
+```
+
+They are trace-level, resolved like `session.id`: any span may carry them and
+the root span is the convention, at any of the three levels. Both must be the
+32 lower-case hex characters the API handed out. Any other shape — a run's
+name, a case's label — is left in metadata unclaimed and sets neither column,
+and an item without a run on the same trace is left in metadata too: an item
+is a position inside a run. One namespace: `langfuse.experiment.*` is not
+mapped and stays in metadata.
+
+The run is not required to exist. A trace naming a run this project does not
+have is stored with its columns as sent, counted under
+`runs.orphan_traces` in `GET /api/v1/system`, and logged once per unknown id
+per process — so a harness that stamps a wrong id finds out before it reads an
+empty run. What the link costs the write path is one primary-key lookup per
+trace that carries it, paid by eval traffic only.
+
+A trace re-delivered with a different `tracepad.run_id` moves to the new run:
+per-field upsert, last delivery wins, like every other trace field.
 
 ### Time to first token
 

@@ -58,6 +58,32 @@ func (s *Server) routes() []route {
 		{"PUT", "/api/v1/prompts/{name}/labels/{label}", "Point a label at a version", s.handlePutPromptLabel},
 		{"DELETE", "/api/v1/prompts/{name}/labels/{label}", "Remove a label", s.handleDeletePromptLabel},
 
+		// Datasets, items and runs (spec 014): the cases an eval ran,
+		// versioned, and the container that groups the traces one pass
+		// produced. The store executes nothing; the harness stays the
+		// client's (spec 014 #1).
+		{"GET", "/api/v1/datasets", "List datasets by name, cursor-paginated", s.handleListDatasets},
+		{"PUT", "/api/v1/datasets/{name}", "Create a dataset or replace its description and metadata", s.handlePutDataset},
+		{"GET", "/api/v1/datasets/{name}", "One dataset: its version and counts", s.handleGetDataset},
+		{"DELETE", "/api/v1/datasets/{name}", "Delete a dataset with its items and runs; a dry run until `?confirm=` echoes the name", s.handleDeleteDataset},
+		{"POST", "/api/v1/datasets/{name}/items", "Add or edit items, one or an array, one version tick for the batch", s.handleCreateItems},
+		{"GET", "/api/v1/datasets/{name}/items", "The items at a version, whole, in first-appearance order", s.handleListItems},
+		{"GET", "/api/v1/datasets/{name}/items/{id}", "One item as of a version", s.handleGetItem},
+		{"GET", "/api/v1/datasets/{name}/items/{id}/versions", "Every row of one item's history, newest first", s.handleListItemVersions},
+		{"DELETE", "/api/v1/datasets/{name}/items/{id}", "Archive an item at a new version", s.handleDeleteItem},
+		{"POST", "/api/v1/datasets/{name}/runs", "Open a run over the dataset at its current or a named version", s.handleCreateRun},
+		{"GET", "/api/v1/datasets/{name}/runs", "List a dataset's runs newest first, cursor-paginated", s.handleListRuns},
+		{"GET", "/api/v1/runs/{id}", "One run", s.handleGetRun},
+		{"POST", "/api/v1/runs/{id}/finish", "Close a run as finished, or as failed with a reason", s.handleFinishRun},
+		{"DELETE", "/api/v1/runs/{id}", "Delete a run, releasing its traces to the retention window", s.handleDeleteRun},
+
+		// Score configs (spec 014 #15–#17): what a score's name means,
+		// bound by name and checked on every write that uses it.
+		{"GET", "/api/v1/score-configs", "List score configs by name", s.handleListScoreConfigs},
+		{"PUT", "/api/v1/score-configs/{name}", "Create or replace the config that binds a score name", s.handlePutScoreConfig},
+		{"GET", "/api/v1/score-configs/{name}", "One score config", s.handleGetScoreConfig},
+		{"DELETE", "/api/v1/score-configs/{name}", "Remove a score config; the scores it admitted stay", s.handleDeleteScoreConfig},
+
 		// Administration (spec 005). Every destructive one is a dry run
 		// until `?confirm=` echoes the name — or the user id — of what
 		// it destroys (spec 005 #8). None of this reaches MCP, which

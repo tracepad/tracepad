@@ -566,11 +566,21 @@ func (s *Server) handleEraseUserData(w http.ResponseWriter, r *http.Request) {
 	// a read that failed would 500 a request that was going to succeed —
 	// the count is what the caller is told, never what the erasure needs.
 	if values.Get("confirm") == "" {
-		counts, err := s.store.UserDataPreview(project.ID, userID)
+		counts, runs, err := s.store.UserDataPreview(project.ID, userID)
 		if err != nil {
 			slog.Error("user data preview failed", "err", err)
 			writeError(w, http.StatusInternalServerError, "failed to read what this user's data is")
 			return
+		}
+		// Erasure overrides the pin a run puts on its traces (spec 014
+		// #14): the runs that will lose traces are named here, so the
+		// operator sees the hole before it opens.
+		affected := make([]object, 0, len(runs))
+		for _, run := range runs {
+			affected = append(affected, object{}.
+				put("id", run.ID).
+				put("dataset", run.Dataset).
+				put("traces", run.Traces))
 		}
 		// The echo here is the user id, because the user is what is
 		// being erased (#8).
@@ -581,6 +591,12 @@ func (s *Server) handleEraseUserData(w http.ResponseWriter, r *http.Request) {
 				put("observations", counts.Observations).
 				put("scores", counts.Scores)).
 			putSome("oldest", oldestTime(counts)).
+			// `affected_runs`, not `runs`: the dataset deletion's dry
+			// run already answers with a `runs` count, and one key
+			// that is a number on one destructive preview and a list
+			// of objects on another is a trap for the shared client
+			// type that reads both.
+			put("affected_runs", affected).
 			put("confirm", userID).
 			put("note", "raw OTLP bodies are not erased; they expire on the raw retention window"))
 		return

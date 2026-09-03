@@ -100,6 +100,7 @@ API. This file routes; it does not duplicate what specs and docs say.
 | HTTP surface | `internal/server/` |
 | OTLP ingest | `internal/server/otlp.go`, `docs/ingest.md`, spec 002 |
 | Scores & prompts | `internal/server/scores.go`, `prompts.go`, `docs/scores.md`, `docs/prompts.md`, spec 003 |
+| Datasets, runs, score configs | `internal/store/datasets.go` (the version clock, "items at V", the pin's release), `scoreconfigs.go` (the binding by name, checked inside `ScoreWrite.apply`), `internal/server/datasets.go`, `scoreconfigs.go`, `docs/datasets.md`, spec 014 — the store executes nothing; a trace joins a run through two columns the mapper claims from `tracepad.run_id`/`tracepad.item_id`, and `notPinned` in `sweep.go` is the one predicate the sweep and the retention dry run share |
 | JSON API plumbing (auth, strict decode, pagination) | `internal/server/api.go`, spec 003 |
 | Read API (traces, sessions, stats, system) | `internal/server/traces.go` and neighbours, `docs/api.md`, specs 004 and 009 — the route table in `routes.go` is the surface, and `openapi.json` must agree with it. Paging is keyset in both directions: `trimPage` in `api.go` owns which cursor a page may claim |
 | Response budgets and truncation | `internal/server/budget.go`, spec 004 #2 |

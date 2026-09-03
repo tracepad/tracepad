@@ -3,7 +3,7 @@ import { state } from './harness';
 
 // Sessions, end to end against the real binary and the endpoint spec 007 added
 // (Testing): the listing's aggregates, the session view, and a trace opened
-// from it. The corpus carries two sessions and five traces that name none, so
+// from it. The corpus carries two sessions and nine traces that name none, so
 // "aggregated from traces" is testable rather than merely asserted.
 
 async function signIn(page: Page) {

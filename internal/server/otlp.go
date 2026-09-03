@@ -149,6 +149,15 @@ func (s *Server) handleTraces(w http.ResponseWriter, r *http.Request) {
 	// answer means the spans are on disk (spec 002 #15).
 	s.counters.observeBatch(project.ID, result.Dialect,
 		int64(len(result.Observations)), result.Skipped, int64(unreadable))
+	// A trace that named a run the project does not have was stored all
+	// the same; it is counted, and each unknown id is logged once per
+	// process (spec 014 #3). `GET /api/v1/system` carries the count.
+	if len(batch.UnknownRuns) > 0 {
+		for _, id := range s.counters.observeOrphanRuns(project.ID, batch.UnknownRuns) {
+			slog.Warn("trace names a run that does not exist; it is stored but belongs to no run",
+				"project", project.Name, "run_id", id)
+		}
+	}
 	writeExportResponse(w, result)
 }
 

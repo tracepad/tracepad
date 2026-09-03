@@ -22,8 +22,13 @@ type TraceRow struct {
 	Environment string
 	// Release is the deployment the trace ran in, Version the version of
 	// its own logic; both are empty when no delivery said (spec 012 #4).
-	Release   string
-	Version   string
+	Release string
+	Version string
+	// RunID and ItemID are the link to a dataset run and the item the
+	// trace answered, as the client stamped them (spec 014 #2); empty when
+	// it stamped none. No foreign key stands behind either.
+	RunID     string
+	ItemID    string
 	Tags      []string
 	Metadata  map[string]any
 	Timestamp int64
@@ -133,6 +138,8 @@ func scanTrace(rows scanner, extra ...any) (*TraceRow, error) {
 		sessionID sql.NullString
 		release   sql.NullString
 		version   sql.NullString
+		runID     sql.NullString
+		itemID    sql.NullString
 		tags      sql.NullString
 		timestamp sql.NullInt64
 		totalCost sql.NullFloat64
@@ -140,7 +147,7 @@ func scanTrace(rows scanner, extra ...any) (*TraceRow, error) {
 		ttft      sql.NullInt64
 	)
 	targets := []any{&row.ProjectID, &row.ID, &name, &userID, &sessionID, &row.Environment,
-		&release, &version, &tags, &timestamp, &totalCost, &latency, &ttft,
+		&release, &version, &runID, &itemID, &tags, &timestamp, &totalCost, &latency, &ttft,
 		&row.ErrorCount, &row.ObservationCount}
 	if err := rows.Scan(append(targets, extra...)...); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -150,6 +157,7 @@ func scanTrace(rows scanner, extra ...any) (*TraceRow, error) {
 	}
 	row.Name, row.UserID, row.SessionID = name.String, userID.String, sessionID.String
 	row.Release, row.Version = release.String, version.String
+	row.RunID, row.ItemID = runID.String, itemID.String
 	row.Timestamp = timestamp.Int64
 	if totalCost.Valid {
 		row.TotalCost = &totalCost.Float64

@@ -398,6 +398,220 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/datasets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List datasets by name, cursor-paginated */
+        get: operations["listDatasets"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/datasets/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One dataset: its version and counts */
+        get: operations["getDataset"];
+        /**
+         * Create a dataset or replace its description and metadata
+         * @description The envelope only: the items and the version clock are untouched. A dataset also comes into being on the first POST of items to its name.
+         */
+        put: operations["putDataset"];
+        post?: never;
+        /**
+         * Delete a dataset with its items and runs; a dry run until `?confirm=` echoes the name
+         * @description The one destructive act here: every version of every item and every run go with the dataset, and the traces the runs were pinning return to the retention window — they are not deleted. Without `confirm` it answers with the counts and changes nothing.
+         */
+        delete: operations["deleteDataset"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/datasets/{name}/items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The items at a version, whole, in first-appearance order
+         * @description Budget-exempt: the consumer is the harness, and a truncated test case is a different test case. Bounded by `limit` and by the body cap at write time. Default `version` is the current one; a version above it is a 400.
+         */
+        get: operations["listDatasetItems"];
+        put?: never;
+        /**
+         * Add or edit items, one or an array, one version tick for the batch
+         * @description All or nothing. The dataset's version advances by exactly one if any item in the batch changed and not at all if none did, so re-posting the same cases is idempotent; `changed` says how many produced a row. An item's id is the idempotency key; an edit is a new row of the same id, and the old one stays readable at every earlier version.
+         */
+        post: operations["createDatasetItems"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/datasets/{name}/items/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One item as of a version */
+        get: operations["getDatasetItem"];
+        put?: never;
+        post?: never;
+        /**
+         * Archive an item at a new version
+         * @description Nothing is destroyed: the item is gone from the current version and still there at every earlier one. A 404 when the item is unknown or already archived at the current version.
+         */
+        delete: operations["deleteDatasetItem"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/datasets/{name}/items/{id}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Every row of one item's history, newest first
+         * @description Archived rows included, each flagged: an edit is a row and a delete is a row.
+         */
+        get: operations["listDatasetItemVersions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/datasets/{name}/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List a dataset's runs newest first, cursor-paginated */
+        get: operations["listRuns"];
+        put?: never;
+        /**
+         * Open a run over the dataset at its current or a named version
+         * @description The run pins the dataset version the harness must fetch its items at, and the response carries it. A client-supplied `id` makes the call retry-safe: a known id answers 200 with the existing run unchanged. The store never executes anything — the harness stamps `tracepad.run_id` and `tracepad.item_id` on the spans it exports, and closes the run with `/finish`.
+         */
+        post: operations["createRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runs/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One run
+         * @description The run object. Its summary — item coverage, score aggregates, the models and prompts it ran — is not here yet.
+         */
+        get: operations["getRun"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a run, releasing its traces to the retention window
+         * @description One row of bookkeeping. The traces it held are not deleted; they stop being pinned and live as long as retention says.
+         */
+        delete: operations["deleteRun"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runs/{id}/finish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Close a run as finished, or as failed with a reason
+         * @description The store never infers completion: a run stays `running` until the harness says otherwise. A run closed twice is a 409. Linking does not stop at finish — a late span of a trace that started inside the run still belongs to it.
+         */
+        post: operations["finishRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/score-configs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List score configs by name
+         * @description Whole, not paged: a project declares a handful of names.
+         */
+        get: operations["listScoreConfigs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/score-configs/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One score config */
+        get: operations["getScoreConfig"];
+        /**
+         * Create or replace the config that binds a score name
+         * @description Declarative: the whole config, every time, and a re-PUT of the same body is a no-op. From then on a score posted under this name must have the config's `data_type`, a numeric value inside `min`/`max`, a categorical value among `categories`; a violating score fails its batch with a 400 naming it. Scores already stored are never re-validated.
+         */
+        put: operations["putScoreConfig"];
+        post?: never;
+        /** Remove a score config; the scores it admitted stay */
+        delete: operations["deleteScoreConfig"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects": {
         parameters: {
             query?: never;
@@ -553,6 +767,10 @@ export interface components {
             release?: string;
             /** @description The version of the trace's own logic, from `langfuse.version` */
             version?: string;
+            /** @description The dataset run this trace belongs to, from `tracepad.run_id`; absent on ordinary traffic. No foreign key stands behind it: a trace may name a run the project does not have */
+            run_id?: string;
+            /** @description The dataset item this trace answered, from `tracepad.item_id`; never present without `run_id` */
+            item_id?: string;
             tags?: string[];
             /**
              * Format: date-time
@@ -761,6 +979,13 @@ export interface components {
              * @description Arrival of the oldest affected row; absent when nothing is affected
              */
             oldest?: string;
+            /** @description User-data erasure only: the dataset runs that would lose traces to it, because erasure overrides the pin a run puts on them */
+            affected_runs?: {
+                id: string;
+                dataset: string;
+                /** @description How many of the run's traces this erasure would take */
+                traces: number;
+            }[];
             /** @description Send this back as `?confirm=` to make it happen */
             confirm: string;
             note?: string;
@@ -772,6 +997,102 @@ export interface components {
             deleted: {
                 [key: string]: number;
             };
+        };
+        /** @description A named, versioned set of test cases. `version` advances by one on every write that changes the item set; `item_count` is the live items at that version. */
+        Dataset: {
+            name: string;
+            description: string | null;
+            metadata: Record<string, never> | null;
+            version: number;
+            item_count: number;
+            run_count: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /** @description One test case. The three bodies are opaque JSON the store never reads inside; the source pair is a note about where the case came from, not a reference. */
+        DatasetItemInput: {
+            /** @description Generated when absent; the same id again is an edit of the same item */
+            id?: string;
+            /** @description Any JSON value */
+            input: unknown;
+            /** @description Any JSON value */
+            expected_output?: unknown;
+            /** @description Any JSON value */
+            metadata?: unknown;
+            source_trace_id?: string;
+            source_observation_id?: string;
+        };
+        /** @description One item as of a version. `version` is the dataset version the row was written at, which may be earlier than the version it was read at; `seq` is the item's place in the listing, fixed at its first appearance. `archived` appears on the history listing only. */
+        DatasetItem: {
+            id: string;
+            seq: number;
+            version: number;
+            archived?: boolean;
+            input: unknown;
+            expected_output: unknown;
+            metadata: unknown;
+            source_trace_id: string | null;
+            source_observation_id: string | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        /** @description A run of a dataset: the container the harness opened, the version it pinned, and how it ended. `finished_at` is null while it is running. */
+        Run: {
+            id: string;
+            dataset: string;
+            dataset_version: number;
+            name: string | null;
+            metadata: Record<string, never> | null;
+            /** @enum {string} */
+            status: "running" | "finished" | "failed";
+            error: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            finished_at: string | null;
+        };
+        /** @description What deleting a dataset takes: its live items, its runs, and the traces those runs were pinning — which are released, not deleted. `confirm` is present on the dry run only. */
+        DatasetDeletion: {
+            dry_run: boolean;
+            dataset: string;
+            items: number;
+            runs: number;
+            pinned_traces: number;
+            /** @description Send this back as `?confirm=` to make it happen */
+            confirm?: string;
+            note?: string;
+        };
+        /** @description What a score name means. `direction` is required for numeric and boolean names and forbidden for categorical and text ones; `min`/`max` are numeric only, with `min` at most `max`; `categories` is required for categorical names and forbidden otherwise. */
+        ScoreConfigInput: {
+            /** @enum {string} */
+            data_type: "numeric" | "boolean" | "categorical" | "text";
+            /**
+             * @description Which way is better; `none` for a number that is typed and bounded but not judged
+             * @enum {string}
+             */
+            direction?: "higher" | "lower" | "none";
+            min?: number;
+            max?: number;
+            /** @description Distinct, non-empty */
+            categories?: string[];
+            description?: string;
+        };
+        ScoreConfig: {
+            name: string;
+            /** @enum {string} */
+            data_type: "numeric" | "boolean" | "categorical" | "text";
+            /** @enum {string|null} */
+            direction: "higher" | "lower" | "none" | null;
+            min: number | null;
+            max: number | null;
+            categories: string[] | null;
+            description: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
         };
     };
     responses: {
@@ -855,6 +1176,16 @@ export interface components {
         ProjectID: string;
         /** @description The name of the project — or the id of the user — being destroyed. Without it the endpoint changes nothing and answers with a preview; a value that does not match is a 400 that also changes nothing. */
         Confirm: string;
+        /** @description The name of the dataset being destroyed. Without it the endpoint changes nothing and answers with the counts; a value that does not match is a 400 that also changes nothing. */
+        ConfirmName: string;
+        /** @description The prompt-name grammar: one URL path segment */
+        DatasetName: string;
+        /** @description The dataset version to resolve the items at; the current one when absent. Above the current version it is a 400. A run's `dataset_version` is what to pass here */
+        DatasetVersion: number;
+        ItemID: string;
+        RunID: string;
+        /** @description A score name: any name a score may carry can have a config */
+        ScoreConfigName: string;
     };
     requestBodies: never;
     headers: never;
@@ -1048,6 +1379,13 @@ export interface operations {
                             capacity?: number;
                         };
                         response_budget_bytes?: number;
+                        /** @description The link between traces and dataset runs, as this project sees it */
+                        runs?: {
+                            /** @description Traces a live run keeps out of the retention sweep — the size of retention's one exception */
+                            pinned_traces: number;
+                            /** @description Trace deliveries since start that named a run this project does not have; they are stored, and each unknown id is logged once */
+                            orphan_traces: number;
+                        };
                         /** @description This project's ingest traffic since the process started */
                         counters: {
                             /** Format: date-time */
@@ -1745,6 +2083,598 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Label"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listDatasets: {
+        parameters: {
+            query?: {
+                /** @description Out of range is a 400, not a silent clamp */
+                limit?: components["parameters"]["Limit"];
+                /** @description The opaque `next_cursor` or `prev_cursor` of a previous page */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description Which way to page from the cursor. With no cursor, `next` is the newest page and `prev` the oldest — both ends are a direction rather than an offset. Rows come back newest first either way */
+                direction?: components["parameters"]["Direction"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of datasets */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        datasets: components["schemas"]["Dataset"][];
+                        next_cursor: string | null;
+                        prev_cursor: string | null;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    getDataset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The prompt-name grammar: one URL path segment */
+                name: components["parameters"]["DatasetName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The dataset */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Dataset"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    putDataset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The prompt-name grammar: one URL path segment */
+                name: components["parameters"]["DatasetName"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    description?: string;
+                    metadata?: Record<string, never>;
+                };
+            };
+        };
+        responses: {
+            /** @description The dataset */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Dataset"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    deleteDataset: {
+        parameters: {
+            query?: {
+                /** @description The name of the dataset being destroyed. Without it the endpoint changes nothing and answers with the counts; a value that does not match is a 400 that also changes nothing. */
+                confirm?: components["parameters"]["ConfirmName"];
+            };
+            header?: never;
+            path: {
+                /** @description The prompt-name grammar: one URL path segment */
+                name: components["parameters"]["DatasetName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description What went, or the dry run of what would */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DatasetDeletion"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listDatasetItems: {
+        parameters: {
+            query?: {
+                /** @description The dataset version to resolve the items at; the current one when absent. Above the current version it is a 400. A run's `dataset_version` is what to pass here */
+                version?: components["parameters"]["DatasetVersion"];
+                /** @description Out of range is a 400, not a silent clamp */
+                limit?: components["parameters"]["Limit"];
+                /** @description The opaque `next_cursor` or `prev_cursor` of a previous page */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description Which way to page from the cursor. With no cursor, `next` is the newest page and `prev` the oldest — both ends are a direction rather than an offset. Rows come back newest first either way */
+                direction?: components["parameters"]["Direction"];
+            };
+            header?: never;
+            path: {
+                /** @description The prompt-name grammar: one URL path segment */
+                name: components["parameters"]["DatasetName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of items */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        dataset: string;
+                        /** @description The version the items were resolved at */
+                        version: number;
+                        items: components["schemas"]["DatasetItem"][];
+                        next_cursor: string | null;
+                        prev_cursor: string | null;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    createDatasetItems: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The prompt-name grammar: one URL path segment */
+                name: components["parameters"]["DatasetName"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DatasetItemInput"] | components["schemas"]["DatasetItemInput"][];
+            };
+        };
+        responses: {
+            /** @description Written, or found unchanged */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description In input order */
+                        ids: string[];
+                        /** @description The dataset's version after the write */
+                        version: number;
+                        /** @description How many items produced a row; 0 leaves `version` where it was */
+                        changed: number;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description The body exceeded TRACEPAD_MAX_BODY_BYTES */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The write queue is full; retry after the Retry-After delay */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getDatasetItem: {
+        parameters: {
+            query?: {
+                /** @description The dataset version to resolve the items at; the current one when absent. Above the current version it is a 400. A run's `dataset_version` is what to pass here */
+                version?: components["parameters"]["DatasetVersion"];
+            };
+            header?: never;
+            path: {
+                /** @description The prompt-name grammar: one URL path segment */
+                name: components["parameters"]["DatasetName"];
+                id: components["parameters"]["ItemID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The item */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DatasetItem"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteDatasetItem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The prompt-name grammar: one URL path segment */
+                name: components["parameters"]["DatasetName"];
+                id: components["parameters"]["ItemID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The version the archive landed on */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        id: string;
+                        version: number;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listDatasetItemVersions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The prompt-name grammar: one URL path segment */
+                name: components["parameters"]["DatasetName"];
+                id: components["parameters"]["ItemID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The item's history */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        dataset: string;
+                        id: string;
+                        versions: components["schemas"]["DatasetItem"][];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listRuns: {
+        parameters: {
+            query?: {
+                /** @description Out of range is a 400, not a silent clamp */
+                limit?: components["parameters"]["Limit"];
+                /** @description The opaque `next_cursor` or `prev_cursor` of a previous page */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description Which way to page from the cursor. With no cursor, `next` is the newest page and `prev` the oldest — both ends are a direction rather than an offset. Rows come back newest first either way */
+                direction?: components["parameters"]["Direction"];
+            };
+            header?: never;
+            path: {
+                /** @description The prompt-name grammar: one URL path segment */
+                name: components["parameters"]["DatasetName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of runs */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        runs: components["schemas"]["Run"][];
+                        next_cursor: string | null;
+                        prev_cursor: string | null;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    createRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The prompt-name grammar: one URL path segment */
+                name: components["parameters"]["DatasetName"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Generated when absent */
+                    id?: string;
+                    /** @description A free label, not unique */
+                    name?: string;
+                    /** @description What was being tried, in the harness's own terms */
+                    metadata?: Record<string, never>;
+                    /** @description The version to pin; the current one when absent, and a 400 above it */
+                    dataset_version?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The run that already had this id */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Run"];
+                };
+            };
+            /** @description The run created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Run"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    getRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["RunID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The run */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Run"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["RunID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The run is gone */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        id: string;
+                        /** @description How many traces the run was keeping out of the sweep */
+                        released_traces: number;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    finishRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["RunID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * @default finished
+                     * @enum {string}
+                     */
+                    status?: "finished" | "failed";
+                    /** @description The harness's reason, with `failed` only */
+                    error?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The run as closed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Run"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    listScoreConfigs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every config */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        configs: components["schemas"]["ScoreConfig"][];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    getScoreConfig: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A score name: any name a score may carry can have a config */
+                name: components["parameters"]["ScoreConfigName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The config */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScoreConfig"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    putScoreConfig: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A score name: any name a score may carry can have a config */
+                name: components["parameters"]["ScoreConfigName"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScoreConfigInput"];
+            };
+        };
+        responses: {
+            /** @description The config as stored */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScoreConfig"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    deleteScoreConfig: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A score name: any name a score may carry can have a config */
+                name: components["parameters"]["ScoreConfigName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The config is gone */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        name: string;
+                    };
                 };
             };
             400: components["responses"]["BadRequest"];

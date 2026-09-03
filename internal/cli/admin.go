@@ -35,6 +35,20 @@ type preview struct {
 	Oldest      string           `json:"oldest"`
 	Confirm     string           `json:"confirm"`
 	Note        string           `json:"note"`
+	// Runs are the eval runs an erasure would take traces from
+	// (spec 014 #14). Only the user-data preview carries them; every other
+	// destructive endpoint leaves the field absent, and an absent field
+	// prints nothing. The wire name is `affected_runs` because a dataset
+	// deletion answers with a `runs` count, and this struct is what reads
+	// every preview.
+	Runs []affectedRun `json:"affected_runs"`
+}
+
+// affectedRun is one run that loses traces to an erasure.
+type affectedRun struct {
+	ID      string `json:"id"`
+	Dataset string `json:"dataset"`
+	Traces  int64  `json:"traces"`
 }
 
 // projectView is a project as the API renders it.
@@ -628,6 +642,14 @@ func (r *run) renderPreview(dry preview, what string) {
 	}
 	if dry.Oldest != "" {
 		fmt.Fprintf(out, "  %-14s %s\n", "oldest", shortTime(dry.Oldest))
+	}
+	// Erasure outranks the pin an eval run puts on its traces, and the run
+	// then shows those items as missing (spec 014 #14). The operator sees
+	// the hole before it opens, which is the whole reason the server names
+	// the runs.
+	for _, affected := range dry.Runs {
+		fmt.Fprintf(out, "  %-14s %s of %s loses %d\n",
+			"run", affected.ID, affected.Dataset, affected.Traces)
 	}
 	if dry.Note != "" {
 		fmt.Fprintf(out, "%s\n", dry.Note)

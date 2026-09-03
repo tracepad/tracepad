@@ -36,14 +36,17 @@ document served without authentication.
 | `GET` | `/api/v1` | This endpoint map |
 | `GET` | `/api/v1/openapi.json` | The OpenAPI document |
 
-Scores and prompts have their own pages: [scores.md](scores.md),
-[prompts.md](prompts.md). So does administration — projects, keys, retention
-windows and user-data erasure — under `/api/v1/projects`:
-[admin.md](admin.md) and [retention.md](retention.md).
+Scores and prompts have their own pages: [scores.md](scores.md) (score
+configs included), [prompts.md](prompts.md). So do datasets and runs — the
+cases an eval ran and the container that groups the traces one pass produced,
+under `/api/v1/datasets` and `/api/v1/runs`: [datasets.md](datasets.md). So
+does administration — projects, keys, retention windows and user-data erasure
+— under `/api/v1/projects`: [admin.md](admin.md) and
+[retention.md](retention.md).
 
 Everything under `/api/v1/projects` that destroys something is a dry run until
-`?confirm=` echoes the name of what it destroys. That contract is described
-once, in [admin.md](admin.md#dry-run-by-default).
+`?confirm=` echoes the name of what it destroys, and so is deleting a dataset.
+That contract is described once, in [admin.md](admin.md#dry-run-by-default).
 
 ## The one command
 
@@ -93,6 +96,12 @@ choosing what to fetch.
 trace's own logic called itself; `ttft_ms` is the wait before the first token
 — the earliest completion start among the trace's observations, minus when the
 trace began. Each is absent when nothing reported it.
+
+A trace produced by an eval also carries `run_id` and `item_id` — the run it
+belongs to and the case it answered, from the `tracepad.run_id` and
+`tracepad.item_id` attributes the harness stamped. Both are absent on ordinary
+traffic, and `item_id` never appears without `run_id`. See
+[Datasets and runs](datasets.md).
 
 ### Filters
 
@@ -540,6 +549,11 @@ depth, and — since this process started — how many batches and spans arrived
 per attribute dialect, how many were skipped, and every distinct
 `x-langfuse-ingestion-version` seen. The counters are in memory and say so:
 `counters.since` is when they started.
+
+`runs` is the link between traces and eval runs ([datasets.md](datasets.md)):
+`pinned_traces` is how many traces a live run is keeping out of the retention
+sweep — the size of retention's one exception — and `orphan_traces` how many
+trace deliveries since start named a run this project does not have.
 
 The row counts and the ingest counters are **your project's**: a project key is
 a tenant credential, so this does not report how much data anybody else holds,

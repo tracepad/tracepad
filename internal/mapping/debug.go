@@ -23,6 +23,8 @@ type debugTrace struct {
 	Environment string         `json:"environment,omitempty"`
 	Release     string         `json:"release,omitempty"`
 	Version     string         `json:"version,omitempty"`
+	RunID       string         `json:"run_id,omitempty"`
+	ItemID      string         `json:"item_id,omitempty"`
 	Tags        []string       `json:"tags,omitempty"`
 	Metadata    map[string]any `json:"metadata,omitempty"`
 }
@@ -68,6 +70,8 @@ func (r *Result) DebugJSON() ([]byte, error) {
 			Environment: t.Environment,
 			Release:     t.Release,
 			Version:     t.Version,
+			RunID:       t.RunID,
+			ItemID:      t.ItemID,
 			Tags:        t.Tags,
 			Metadata:    t.Metadata,
 		})

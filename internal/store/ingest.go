@@ -28,6 +28,13 @@ type IngestBatch struct {
 	// package, so no caller can produce a store whose index silently
 	// disagrees with its rows.
 	skipSearchIndex bool
+
+	// UnknownRuns is filled by apply: the run id of every trace in the
+	// batch that named a run this project does not have, one entry per
+	// such trace (spec 014 #3). The trace is stored with its columns all
+	// the same — refusing it would drop the one artifact that shows what
+	// went wrong — and the handler counts and logs what it finds here.
+	UnknownRuns []string
 }
 
 // RawBatch is the request body as received, kept verbatim for replay.
@@ -73,9 +80,21 @@ func (b *IngestBatch) apply(tx *sql.Tx) error {
 	}
 
 	indexing := !b.skipSearchIndex
+	b.UnknownRuns = b.UnknownRuns[:0]
 	for _, t := range b.Traces {
 		if err := upsertTrace(tx, b.ProjectID, t, arrived, indexing); err != nil {
 			return err
+		}
+		// One primary-key lookup per trace that carries the attribute,
+		// paid only by eval traffic (spec 014 #3).
+		if t.RunID != "" {
+			known, err := runExists(tx, b.ProjectID, t.RunID)
+			if err != nil {
+				return err
+			}
+			if !known {
+				b.UnknownRuns = append(b.UnknownRuns, t.RunID)
+			}
 		}
 	}
 	for _, o := range b.Observations {
@@ -119,11 +138,22 @@ func upsertTrace(tx *sql.Tx, projectID string, t *model.Trace, ingestedAt int64,
 	// RETURNING the merged name rather than binding t.Name into the index:
 	// a delivery that carried no name leaves the stored one alone, and the
 	// index has to hold what the row actually says (spec 011 #2).
+	//
+	// `run_id` and `item_id` are per-field like the rest (spec 014 #2): a
+	// re-delivery naming a different run moves the trace, and one naming
+	// none leaves it where it was.
+	//
+	// The pair moves together, though. Merged independently, a delivery that
+	// named a new run and no item would keep the old run's item, and the row
+	// would claim that run B answered an item of run A — a made-up fact,
+	// which is worse than the missing one it replaces. So a delivery that
+	// changes the run says what the item is, including that there is none.
 	var stored sql.NullString
 	err = tx.QueryRow(
 		`INSERT INTO traces (project_id, id, name, user_id, session_id, environment,
-		                     release, version, tags, metadata_id, ingested_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, COALESCE(?, 'default'), ?, ?, ?, ?, ?, ?)
+		                     release, version, run_id, item_id, tags, metadata_id,
+		                     ingested_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, COALESCE(?, 'default'), ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(project_id, id) DO UPDATE SET
 		   updated_at  = excluded.updated_at,
 		   name        = COALESCE(excluded.name, traces.name),
@@ -132,11 +162,18 @@ func upsertTrace(tx *sql.Tx, projectID string, t *model.Trace, ingestedAt int64,
 		   environment = COALESCE(?, traces.environment),
 		   release     = COALESCE(excluded.release, traces.release),
 		   version     = COALESCE(excluded.version, traces.version),
+		   run_id      = COALESCE(excluded.run_id, traces.run_id),
+		   item_id     = CASE
+		                   WHEN excluded.run_id IS NOT NULL
+		                    AND excluded.run_id IS NOT traces.run_id THEN excluded.item_id
+		                   ELSE COALESCE(excluded.item_id, traces.item_id)
+		                 END,
 		   tags        = COALESCE(excluded.tags, traces.tags),
 		   metadata_id = COALESCE(excluded.metadata_id, traces.metadata_id)
 		 RETURNING name`,
 		projectID, t.ID, nullString(t.Name), nullString(t.UserID), nullString(t.SessionID),
 		nullString(t.Environment), nullString(t.Release), nullString(t.Version),
+		nullString(t.RunID), nullString(t.ItemID),
 		tags, metadataID, ingestedAt, ingestedAt,
 		nullString(t.Environment),
 	).Scan(&stored)
@@ -147,6 +184,20 @@ func upsertTrace(tx *sql.Tx, projectID string, t *model.Trace, ingestedAt int64,
 		return nil
 	}
 	return indexTraceName(tx, projectID, t.ID, stored.String)
+}
+
+// runExists is the run-existence lookup of spec 014 #3: a seek on the primary
+// key of `dataset_runs`, inside the ingest transaction.
+func runExists(tx *sql.Tx, projectID, runID string) (bool, error) {
+	var one int
+	err := tx.QueryRow(`SELECT 1 FROM dataset_runs WHERE project_id = ? AND id = ?`, projectID, runID).Scan(&one)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("look up run %s: %w", runID, err)
+	}
+	return true, nil
 }
 
 // upsertObservation replaces the row wholesale: a re-delivered span is the

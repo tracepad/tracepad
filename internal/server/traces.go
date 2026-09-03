@@ -36,7 +36,8 @@ var traceID = regexp.MustCompile(`^[0-9a-f]{32}$`)
 // trace: it says where the search hit, and it is present only with `q`
 // (spec 011 #6).
 var traceRowFields = []string{
-	"id", "name", "user_id", "session_id", "environment", "release", "version", "tags",
+	"id", "name", "user_id", "session_id", "environment", "release", "version",
+	"run_id", "item_id", "tags",
 	"timestamp", "total_cost", "latency_ms", "ttft_ms", "error_count", "observation_count",
 	"match",
 }
@@ -336,6 +337,10 @@ func renderTraceRow(row *store.TraceRow) object {
 		put("environment", row.Environment).
 		putSome("release", row.Release).
 		putSome("version", row.Version).
+		// The eval link, absent on ordinary traffic like every other
+		// field the trace did not carry (spec 014 #2).
+		putSome("run_id", row.RunID).
+		putSome("item_id", row.ItemID).
 		putSome("tags", row.Tags).
 		putSome("timestamp", formatInstant(row.Timestamp)).
 		putSome("total_cost", row.TotalCost).

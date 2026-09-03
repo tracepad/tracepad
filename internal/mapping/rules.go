@@ -27,6 +27,15 @@ const (
 	lfVersion = "langfuse.version"
 )
 
+// Tracepad's own namespace (spec 014 #2): the run a trace belongs to and the
+// dataset item it answered. Trace-level, ranked like `session_id`; any span
+// may carry them, the root is the convention. `langfuse.experiment.*` stays
+// unclaimed in metadata — one namespace (spec 014, ingest contract).
+const (
+	tpRunID  = "tracepad.run_id"
+	tpItemID = "tracepad.item_id"
+)
+
 // Langfuse dialect: observation-level.
 const (
 	lfObsType            = "langfuse.observation.type"
@@ -80,6 +89,11 @@ var (
 	// Not `langfuse.observation.version`: that is the observation's own
 	// version and stays in metadata (spec 012 #4).
 	traceVersionKeys = []string{lfVersion}
+
+	// The run link (spec 014 #2). One key each: there is no dialect to
+	// fall back to, and the shape is checked before the key is claimed.
+	traceRunKeys  = []string{tpRunID}
+	traceItemKeys = []string{tpItemID}
 
 	// Explicit model name beats the requested one beats the one the
 	// provider answered with; bare `model` is the last-resort guess.
