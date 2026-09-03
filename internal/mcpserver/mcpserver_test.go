@@ -151,6 +151,19 @@ func (h *harness) seedEval(t *testing.T, projectID string) {
 				`{"trace_id":%q,"name":"accuracy","value":%v}`, traceID, value))
 		}
 	}
+	// One trace of the first run that names a case the dataset does not
+	// have, so that `unknown=true` is a question with two answers.
+	orphan := evalRunID(1)[:24] + evalRunID(1)[28:] + "ffff"
+	if err := h.writer.Submit(t.Context(), &store.IngestBatch{
+		ProjectID: projectID,
+		Traces: []*model.Trace{{ID: orphan, Name: "case",
+			RunID: evalRunID(1), ItemID: evalItemID(9)}},
+		Observations: []*model.Observation{{TraceID: orphan, ID: orphan[:16],
+			Type: model.TypeGeneration, Name: "answer", Level: model.LevelDefault,
+			StartTime: seedBase, EndTime: seedBase + 100*ms}},
+	}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func (h *harness) post(t *testing.T, path string, body []byte, method ...string) {

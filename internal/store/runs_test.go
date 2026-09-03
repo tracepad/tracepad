@@ -117,26 +117,29 @@ func TestRunSummaryIsHandComputable(t *testing.T) {
 		// Item 2, attempted once and failed, with no cost at all.
 		{trace: hexTrace(3), item: itemID(2), latencyMs: 900, failed: true, model: "gpt-5-mini",
 			scores: []*Score{numeric("accuracy", 0)}},
-		// A trace of an item the dataset does not have.
+		// A trace of an item the dataset does not have, and one that named
+		// the run and no item at all. Both are unaccounted traffic, and
+		// Decision 29 counts both.
 		{trace: hexTrace(4), item: itemID(9), latencyMs: 200, model: "gpt-5"},
+		{trace: hexTrace(5), latencyMs: 200, model: "gpt-5"},
 	})
 
 	summary, err := f.store.RunSummary(f.project.ID, run)
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantItems := RunItemCounts{Total: 3, Covered: 2, Missing: 1, Unknown: 1}
+	wantItems := RunItemCounts{Total: 3, Covered: 2, Missing: 1, Unknown: 2}
 	if summary.Items != wantItems {
 		t.Errorf("items = %+v, want %+v", summary.Items, wantItems)
 	}
-	if summary.Traces.Count != 4 || summary.Traces.AttemptsMax != 2 || summary.Traces.ErrorCount != 1 {
-		t.Errorf("traces = %+v, want 4 traces, 2 attempts at most, 1 failed", summary.Traces)
+	if summary.Traces.Count != 5 || summary.Traces.AttemptsMax != 2 || summary.Traces.ErrorCount != 1 {
+		t.Errorf("traces = %+v, want 5 traces, 2 attempts at most, 1 failed", summary.Traces)
 	}
 	if got := summary.Traces.TotalCost; got == nil || *got != 0.03 {
 		t.Errorf("total_cost = %v, want the two attempts that carried one", got)
 	}
-	// Latencies sorted: 100, 200, 300, 900. Nearest rank puts p50 at the
-	// 2nd and p95 at the 4th.
+	// Latencies sorted: 100, 200, 200, 300, 900. Nearest rank puts p50 at
+	// the 3rd and p95 at the 5th.
 	if got := summary.Traces.LatencyP50; got == nil || *got != 200 {
 		t.Errorf("p50 = %v, want 200", got)
 	}

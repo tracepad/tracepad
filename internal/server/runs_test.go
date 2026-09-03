@@ -57,7 +57,8 @@ func seedRun(t *testing.T, h *harness, runID string, scores map[string]float64) 
 		map[string]any{"id": itemHex(1), "input": map[string]any{"q": "one"},
 			"expected_output": map[string]any{"a": "1"}},
 		item(itemHex(2), `{"q":"two"}`))
-	h.createRun(t, "golden", map[string]any{"id": runID, "name": "prompt v7"})
+	h.createRun(t, "golden", map[string]any{"id": runID, "name": "prompt v7",
+		"metadata": map[string]any{"prompt": "v7", "judge": "claude-sonnet-5"}})
 	first, second := traceOf(runID, 1), traceOf(runID, 2)
 	h.evalTrace(t, runID, itemHex(1), first)
 	h.evalTrace(t, runID, itemHex(2), second)
@@ -301,7 +302,10 @@ func TestCompareRuns(t *testing.T) {
 	seedRun(t, h, a, map[string]float64{"first": 0.5, "second": 1})
 	// The second run answers the same two items: item 1 improves, item 2
 	// stays.
-	h.createRun(t, "golden", map[string]any{"id": b, "metadata": map[string]any{"prompt": "v8"}})
+	// The same judge, a different prompt: the diff must name the one they
+	// disagree about and leave the one they share alone.
+	h.createRun(t, "golden", map[string]any{"id": b,
+		"metadata": map[string]any{"prompt": "v8", "judge": "claude-sonnet-5"}})
 	h.evalTrace(t, b, itemHex(1), traceOf(b, 1))
 	h.evalTrace(t, b, itemHex(2), traceOf(b, 2))
 	h.score(t, traceOf(b, 1), "accuracy", 1.0)
