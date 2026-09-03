@@ -97,6 +97,12 @@ trace's own logic called itself; `ttft_ms` is the wait before the first token
 — the earliest completion start among the trace's observations, minus when the
 trace began. Each is absent when nothing reported it.
 
+A trace produced by an eval also carries `run_id` and `item_id` — the run it
+belongs to and the case it answered, from the `tracepad.run_id` and
+`tracepad.item_id` attributes the harness stamped. Both are absent on ordinary
+traffic, and `item_id` never appears without `run_id`. See
+[Datasets and runs](datasets.md).
+
 ### Filters
 
 | Parameter | Meaning |

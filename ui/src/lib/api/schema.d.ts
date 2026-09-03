@@ -767,6 +767,10 @@ export interface components {
             release?: string;
             /** @description The version of the trace's own logic, from `langfuse.version` */
             version?: string;
+            /** @description The dataset run this trace belongs to, from `tracepad.run_id`; absent on ordinary traffic. No foreign key stands behind it: a trace may name a run the project does not have */
+            run_id?: string;
+            /** @description The dataset item this trace answered, from `tracepad.item_id`; never present without `run_id` */
+            item_id?: string;
             tags?: string[];
             /**
              * Format: date-time

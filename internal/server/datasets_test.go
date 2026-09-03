@@ -527,6 +527,69 @@ func TestIngestLinksTracesToTheirRun(t *testing.T) {
 	}
 }
 
+// TestTraceReadsCarryTheLink: the link is on the trace, so the three ways of
+// reading a trace show it — the listing row, the row under `?fields=`, and the
+// whole trace — and a trace that carries none says nothing rather than null,
+// which is how every other field a trace did not carry renders (spec 014 #2).
+func TestTraceReadsCarryTheLink(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	linked, plain := traceHex(1), traceHex(2)
+	h.seed(t, &model.Trace{ID: linked, Name: "attempt", Environment: "production",
+		RunID: runHex(1), ItemID: itemHex(1)},
+		&model.Observation{TraceID: linked, ID: spanHex(1), Type: model.TypeSpan,
+			Name: "case", Level: model.LevelDefault,
+			StartTime: seedBase, EndTime: seedBase + 100*ms})
+	h.seed(t, &model.Trace{ID: plain, Environment: "production"},
+		&model.Observation{TraceID: plain, ID: spanHex(2), Type: model.TypeSpan,
+			Name: "chat", Level: model.LevelDefault,
+			StartTime: seedBase + 1000*ms, EndTime: seedBase + 1100*ms})
+
+	type link struct {
+		ID     string `json:"id"`
+		RunID  string `json:"run_id"`
+		ItemID string `json:"item_id"`
+	}
+	rec := h.get(t, "/api/v1/traces")
+	expectStatus(t, rec, http.StatusOK)
+	rows := decodeJSON[struct {
+		Traces []link `json:"traces"`
+	}](t, rec).Traces
+	for _, row := range rows {
+		want := link{ID: linked, RunID: runHex(1), ItemID: itemHex(1)}
+		if row.ID == plain {
+			want = link{ID: plain}
+		}
+		if row != want {
+			t.Errorf("listing row = %+v, want %+v", row, want)
+		}
+	}
+
+	// `?fields=` selects them by name, and the untouched trace keeps them
+	// out of its row entirely rather than answering null.
+	rec = h.get(t, "/api/v1/traces?fields=id,run_id,item_id")
+	expectStatus(t, rec, http.StatusOK)
+	raw := decodeJSON[struct {
+		Traces []json.RawMessage `json:"traces"`
+	}](t, rec).Traces
+	if got, want := string(raw[0]), fmt.Sprintf(`{"id":"%s"}`, plain); got != want {
+		t.Errorf("unlinked row = %s, want %s", got, want)
+	}
+	if got, want := string(raw[1]),
+		fmt.Sprintf(`{"id":"%s","run_id":"%s","item_id":"%s"}`, linked, runHex(1), itemHex(1)); got != want {
+		t.Errorf("linked row = %s, want %s", got, want)
+	}
+
+	// The whole trace, both ways in: by id and through the shortcut, which
+	// promises the same shape.
+	for _, path := range []string{"/api/v1/traces/" + linked, "/api/v1/traces/last?name=attempt"} {
+		rec := h.get(t, path)
+		expectStatus(t, rec, http.StatusOK)
+		if got := decodeJSON[link](t, rec); got.RunID != runHex(1) || got.ItemID != itemHex(1) {
+			t.Errorf("%s = %+v, want the link", path, got)
+		}
+	}
+}
+
 // The system endpoint counts the new tables within the asking project.
 func TestSystemCountsEvalTables(t *testing.T) {
 	h := newHarness(t, nil, store.WriterOptions{})
