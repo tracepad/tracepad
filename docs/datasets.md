@@ -91,19 +91,22 @@ RUN_ID=$(echo "$RUN" | jq -r .id)
 VERSION=$(echo "$RUN" | jq -r .dataset_version)
 
 # 4. Fetch the items at that version — not "the current one" — page by page.
-CURSOR=
+PAGE_URL="$TP/api/v1/datasets/support-golden/items?version=$VERSION&limit=500"
 while :; do
-  PAGE=$(curl -sH "$AUTH" \
-    "$TP/api/v1/datasets/support-golden/items?version=$VERSION&limit=500&cursor=$CURSOR")
+  PAGE=$(curl -sH "$AUTH" "$PAGE_URL")
   echo "$PAGE" | jq -c '.items[]'          # your harness runs these
   CURSOR=$(echo "$PAGE" | jq -r '.next_cursor // empty')
   [ -n "$CURSOR" ] || break
+  PAGE_URL="$TP/api/v1/datasets/support-golden/items?version=$VERSION&limit=500&cursor=$CURSOR"
 done
 ```
 
 `limit` caps at 500, so a dataset larger than that needs the loop: a pass that
 silently stopped at the first page would be recorded as a whole run over a
-fraction of the cases.
+fraction of the cases. The first request omits `cursor` rather than sending it
+empty — a parameter given without a value is a `400` everywhere in this API,
+so the shorter loop that always appends `&cursor=$CURSOR` fails on its first
+page.
 
 Then, for each item, run your function under a trace whose **root span**
 carries two attributes:
@@ -118,7 +121,13 @@ the span you start for the case; with the Langfuse SDK it is the same call on
 the trace's root observation. Both must be the 32-hex ids the API handed out —
 a run *name* or a case *label* in their place stays visible in the trace's
 metadata and links nothing. The item goes only where the run goes: an item id
-on a trace with no run id is left alone.
+on a trace that carries no run id anywhere links nothing and is left where you
+put it, in the span's metadata.
+
+The two need not sit on the same span. Both are trace-level and may be set at
+any level — span, scope or resource — so a run id in the OTel resource of an
+eval process and an item id on the span that answered the case link the same
+way the recipe above does.
 
 ```sh
 # 5. Post the scores against the trace ids your exporter produced, as always.
