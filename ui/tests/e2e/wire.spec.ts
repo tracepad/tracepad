@@ -120,7 +120,10 @@ test('the statistics group by release, with the unnamed traces in their own row'
 	page
 }) => {
 	await signIn(page);
-	await page.goto('/stats');
+	// The window is named, as stats.spec.ts names it: the fixtures carry
+	// fixed timestamps, and the default preset is the last seven days, which
+	// they fell out of a week after this test was written.
+	await page.goto('/stats?from=2026-08-01T00:00:00Z&to=2026-09-30T00:00:00Z');
 
 	const releases = page.locator('section', { hasText: 'By release' });
 	await expect(releases).toBeVisible();

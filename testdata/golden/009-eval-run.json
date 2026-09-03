@@ -63,16 +63,16 @@
         "total": 0.0007
       },
       "provided_cost": true,
-      "prompt_name": "support-answer",
-      "prompt_version": 7,
+      "prompt_name": "support-eval-answer",
+      "prompt_version": 3,
       "input": [
         {
-          "content": "how do I reset my password?",
+          "content": "which plan includes priority routing?",
           "role": "user"
         }
       ],
       "output": {
-        "content": "Open Settings and choose Reset.",
+        "content": "The Team plan and above.",
         "role": "assistant"
       },
       "metadata": {
@@ -116,16 +116,16 @@
         "total": 0.0007
       },
       "provided_cost": true,
-      "prompt_name": "support-answer",
-      "prompt_version": 7,
+      "prompt_name": "support-eval-answer",
+      "prompt_version": 3,
       "input": [
         {
-          "content": "how do I reset my password?",
+          "content": "which plan includes priority routing?",
           "role": "user"
         }
       ],
       "output": {
-        "content": "Ask an administrator to unlock the account.",
+        "content": "Priority routing is a Team plan feature; Starter queues normally.",
         "role": "assistant"
       },
       "metadata": {
@@ -169,16 +169,16 @@
         "total": 0.0007
       },
       "provided_cost": true,
-      "prompt_name": "support-answer",
-      "prompt_version": 7,
+      "prompt_name": "support-eval-answer",
+      "prompt_version": 3,
       "input": [
         {
-          "content": "how do I reset my password?",
+          "content": "which plan includes priority routing?",
           "role": "user"
         }
       ],
       "output": {
-        "content": "Open Settings, then Security, then Reset.",
+        "content": "Team and Enterprise.",
         "role": "assistant"
       },
       "metadata": {

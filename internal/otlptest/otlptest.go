@@ -422,6 +422,10 @@ func wireColumns() Fixture {
 // them attempted twice, and a third trace whose ids are not ids at all — a
 // harness that stamped the run's *name* — which the mapper leaves in
 // metadata unclaimed.
+//
+// The question, the answers and the prompt name are this fixture's own: the
+// end-to-end suite searches the corpus for 001's phrase and filters it by
+// 008's prompt, and expects one trace each time.
 func evalRun() Fixture {
 	const runID = "0e5a7c1d2b3f4a6980c1d2e3f4a5b6c7"
 	const itemA = "a1b2c3d4e5f60718293a4b5c6d7e8f90"
@@ -440,9 +444,9 @@ func evalRun() Fixture {
 			base+at+20*ms, base+at+680*ms,
 			str("langfuse.observation.type", "generation"),
 			str("langfuse.observation.model.name", "claude-sonnet-5"),
-			str("langfuse.observation.prompt.name", "support-answer"),
-			i64("langfuse.observation.prompt.version", 7),
-			str("langfuse.observation.input", `[{"role":"user","content":"how do I reset my password?"}]`),
+			str("langfuse.observation.prompt.name", "support-eval-answer"),
+			i64("langfuse.observation.prompt.version", 3),
+			str("langfuse.observation.input", `[{"role":"user","content":"which plan includes priority routing?"}]`),
 			str("langfuse.observation.output", `{"role":"assistant","content":"`+answer+`"}`),
 			str("langfuse.observation.usage_details", `{"input":96,"output":24,"total":120}`),
 			str("langfuse.observation.cost_details", `{"input":0.0003,"output":0.0004}`),
@@ -452,13 +456,13 @@ func evalRun() Fixture {
 
 	var spans []*tracepb.Span
 	spans = append(spans, attempt("e0a1b2c3d4e5f60718293a4b5c6d7e8f", "e1e2e3e4e5e6e7e8", "e2e3e4e5e6e7e8e9",
-		itemA, "Open Settings and choose Reset.", 0)...)
+		itemA, "The Team plan and above.", 0)...)
 	spans = append(spans, attempt("e1b2c3d4e5f60718293a4b5c6d7e8f90", "f1f2f3f4f5f6f7f8", "f2f3f4f5f6f7f8f9",
-		itemB, "Ask an administrator to unlock the account.", 1000*ms)...)
+		itemB, "Priority routing is a Team plan feature; Starter queues normally.", 1000*ms)...)
 	// The same item again: a retry after a crash, or a second sample of a
 	// non-deterministic case. Both attempts are kept (spec 014 #2).
 	spans = append(spans, attempt("e2c3d4e5f60718293a4b5c6d7e8f90a1", "0a0b0c0d0e0f1011", "1a1b1c1d1e1f2021",
-		itemA, "Open Settings, then Security, then Reset.", 2000*ms)...)
+		itemA, "Team and Enterprise.", 2000*ms)...)
 
 	// Not ids: the harness stamped what it calls the run and the case. The
 	// columns stay empty and the attributes stay visible in metadata.
