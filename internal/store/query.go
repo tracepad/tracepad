@@ -91,7 +91,7 @@ type TraceCursor struct {
 // scan. Payload columns are absent on purpose: a list row never carries a
 // payload (spec 004, API contract).
 const traceColumns = `project_id, id, name, user_id, session_id, environment,
-	        release, version, tags,
+	        release, version, run_id, item_id, tags,
 	        timestamp, total_cost, latency_ms, ttft_ms, error_count, observation_count`
 
 // traceConditions builds everything the filter says about *which* traces
@@ -643,6 +643,10 @@ var countedTables = []string{
 	// cannot infer from the rows they can already see — least of all this
 	// one, which outlives them (spec 013 #8).
 	"stats_hourly",
+	// The eval tables (spec 014): each carries a project id, and their
+	// sizes are the operator's first question when the pinned-trace count
+	// beside them explains why the file did not shrink.
+	"datasets", "dataset_items", "dataset_runs", "score_configs",
 }
 
 // TableCount is one table's row count.

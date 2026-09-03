@@ -67,8 +67,13 @@ type Trace struct {
 	// Release is the deployment the trace ran in and Version is the
 	// version of the trace's own logic; the SDK distinguishes them, so
 	// they are two fields rather than one (spec 012 #4).
-	Release  string
-	Version  string
+	Release string
+	Version string
+	// RunID and ItemID link the trace to a dataset run and the item it
+	// answered, from `tracepad.run_id` / `tracepad.item_id` (spec 014 #2).
+	// Both are 32-hex; ItemID is never set without RunID.
+	RunID    string
+	ItemID   string
 	Tags     []string
 	Metadata map[string]any
 }
