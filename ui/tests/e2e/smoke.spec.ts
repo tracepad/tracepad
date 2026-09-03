@@ -93,14 +93,16 @@ test('a payload the budget refused is fetched on request', async ({ page }) => {
 	await signIn(page);
 	await page.goto(`/traces/${LARGE_PAYLOAD_TRACE}?obs=${LARGE_PAYLOAD_OBSERVATION}`);
 
-	// The marker: a preview and the size of what is missing (spec 004 #2).
+	// The marker, as the banner over its preview: how much is here, how much
+	// there is, and the click that spends the budget on the rest (spec 004 #2,
+	// spec 015 #3).
 	const load = page.getByRole('button', { name: /Load the whole/ });
 	await expect(load).toBeVisible();
 	await load.click();
 
-	// Swapped for the real value, rendered as a tree.
+	// Swapped for the whole payload, in the document surface (spec 015 #1).
 	await expect(load).toHaveCount(0);
-	await expect(page.getByText('role:').first()).toBeVisible();
+	await expect(page.getByLabel('Input', { exact: true })).toContainText('"content"');
 });
 
 test('a deep link reloads to the same observation', async ({ page }) => {

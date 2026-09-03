@@ -19,8 +19,7 @@
 	import Download from '@lucide/svelte/icons/download';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import Button from './Button.svelte';
-	import CopyButton from './CopyButton.svelte';
-	import JsonNode from './JsonNode.svelte';
+	import JsonView from './json/JsonView.svelte';
 	import { ABSENT, bytes } from '$lib/format';
 
 	let {
@@ -56,7 +55,56 @@
 	// `loaded`, an observation that genuinely has no metadata keeps offering
 	// to load it, forever, and the click changes nothing.
 	const pending = $derived(Boolean(refused) && !present && !loaded);
+
+	/**
+	 * How much of the payload the preview actually is. The marker reports the
+	 * whole size in bytes and the server cut the prefix to fit a byte share,
+	 * so the two numbers beside each other are counted the same way.
+	 */
+	const previewBytes = $derived(
+		marker?.preview ? new TextEncoder().encode(marker.preview).length : 0
+	);
 </script>
+
+{#snippet spinner()}
+	{#if loading}
+		<LoaderCircle class="size-4 shrink-0 animate-spin" />
+	{:else}
+		<Download class="size-4 shrink-0" />
+	{/if}
+{/snippet}
+
+<!--
+	The truncation banner (spec 015 #3). The whole strip is the button, because
+	the sentence *is* the choice spec 004 #2 leaves to the consumer: how much of
+	the payload is on screen, how much of it there is, and the one click that
+	spends the budget on the rest. Pressing it again after a failure is the
+	retry — the owner reports the failure and nothing here was thrown away.
+-->
+{#snippet markerBanner()}
+	{#if marker}
+		<button
+			type="button"
+			onclick={onload}
+			disabled={loading}
+			aria-busy={loading || undefined}
+			class="border-border bg-raised text-muted hover:not-disabled:bg-surface hover:not-disabled:text-fg
+				pointer-coarse:min-h-11 flex w-full cursor-pointer items-center gap-1.5 rounded-md border px-2
+				py-1.5 text-left transition-colors duration-100 disabled:cursor-default disabled:opacity-60"
+		>
+			{@render spinner()}
+			{#if previewBytes > 0}
+				<span class="tabular-nums">showing {bytes(previewBytes)} of {bytes(marker.size)}</span>
+				<span class="text-subtle" aria-hidden="true">·</span>
+				<span class="text-accent">Load the whole payload</span>
+			{:else}
+				<!-- Nothing fit under the share, so there is no document to
+				     put a proportion on (spec 004 #25). -->
+				<span class="text-accent">Load the whole {bytes(marker.size)}</span>
+			{/if}
+		</button>
+	{/if}
+{/snippet}
 
 <section class="border-border border-t px-4 py-3">
 	<div class="mb-2 flex items-center gap-1.5">
@@ -64,44 +112,35 @@
 		{#if size != null}
 			<span class="text-subtle text-xs tabular-nums">{bytes(size)}</span>
 		{/if}
-		{#if present && !marker}
-			<CopyButton text={() => JSON.stringify(value, null, 2)} label="Copy the whole {label}" />
-		{/if}
 	</div>
 
 	{#if marker}
 		<!-- The preview is a prefix of the payload's JSON cut on a UTF-8
-		     boundary, so it is text rather than a value to parse. -->
+		     boundary, so it is text and not a value to parse — which is
+		     exactly why the surface is a document and not a tree (#3). It is
+		     `whole={false}` for the same reason: the banner is how the rest of
+		     it is got, and a Copy here would put a prefix on the clipboard. -->
 		{#if marker.preview}
-			<pre
-				class="text-muted border-border bg-surface max-h-40 overflow-auto rounded-md border p-2
-					font-mono text-xs break-all whitespace-pre-wrap">{marker.preview}…</pre>
+			<JsonView
+				value={marker.preview}
+				label="{label} preview"
+				banner={markerBanner}
+				whole={false}
+			/>
+		{:else}
+			{@render markerBanner()}
 		{/if}
-		<Button class="mt-2" onclick={onload} busy={loading}>
-			{#if loading}
-				<LoaderCircle class="size-4 animate-spin" />
-			{:else}
-				<Download class="size-4" />
-			{/if}
-			Load the whole {bytes(marker.size)}
-		</Button>
 	{:else if pending}
 		<p class="text-muted">
 			This trace has more payloads than the response budget can carry markers for, so none were
 			inlined. Load this observation's payloads on their own instead.
 		</p>
 		<Button class="mt-2" onclick={onload} busy={loading}>
-			{#if loading}
-				<LoaderCircle class="size-4 animate-spin" />
-			{:else}
-				<Download class="size-4" />
-			{/if}
+			{@render spinner()}
 			Load {label.toLowerCase()}
 		</Button>
 	{:else if present}
-		<div class="overflow-x-auto font-mono text-xs">
-			<JsonNode {value} />
-		</div>
+		<JsonView {value} {label} />
 	{:else}
 		<p class="text-subtle">{ABSENT}</p>
 	{/if}

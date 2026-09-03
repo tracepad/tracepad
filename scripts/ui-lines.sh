@@ -9,9 +9,16 @@
 # The default is the budget of the newest spec that moved it: 7,300 after spec
 # 007 (#13), 8,300 for the peek panel (spec 008 #14), then 9,000 for listing
 # pagination and the regression tests five review rounds asked of it (spec 009
-# #11). Design §8's 6-9k envelope for the finished MVP interface is what every
-# one of those numbers lives under, and 9,000 *is* its ceiling: no spec raises
-# it, and the number does not move again.
+# #11), and now 14,000 (spec 015 #9).
+#
+# 9,000 was design §8's 6-9k envelope for the *MVP* interface, and it held for
+# five specs. Spec 015 amends the envelope rather than quietly overrunning it:
+# the eval screens of spec 016 are six screens, an editor and a comparison —
+# the argument §8 asked the next feature to make — and a payload surface that
+# both reads and writes replaces 219 lines with more. The number is `main`'s
+# 6,678 plus a measured estimate for 016 with room for one review cycle, and it
+# was raised by the spec before the one that spends it, because a budget raised
+# by the spec that spends it is no budget.
 #
 # What it counts, though, has: the budget covers the application, and the tests
 # are reported beside it under no ceiling at all (design §8, amended; spec 010
@@ -25,7 +32,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BUDGET="${1:-9000}"
+BUDGET="${1:-14000}"
 
 cd "$ROOT"
 

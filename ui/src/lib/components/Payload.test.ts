@@ -7,10 +7,12 @@ import Payload, { isTruncated } from './Payload.svelte';
 // The viewer consumes the truncation contract of spec 004; it never
 // re-implements the budget that produced it.
 
+const preview = '[{"role":"user","content":"the first two hundred characters of it';
+
 const marker: Truncation = {
 	truncated: true,
 	size: 45_600,
-	preview: '[{"role":"user","content":"the first two hundred characters of it',
+	preview,
 	trace_id: 'a'.repeat(32),
 	observation_id: 'b'.repeat(16),
 	full: '/api/v1/observations/bbbbbbbbbbbbbbbb/io?trace_id=' + 'a'.repeat(32)
@@ -28,14 +30,42 @@ describe('recognising a truncation marker', () => {
 });
 
 describe('a payload the budget could not carry', () => {
-	it('shows the preview and offers the whole of it, by size', async () => {
+	it('shows the preview as a document and offers the whole of it, by size', async () => {
 		const onload = vi.fn();
 		render(Payload, { label: 'Input', value: marker, loading: false, onload });
 
-		expect(screen.getByText(/the first two hundred characters/)).toBeInTheDocument();
-		const button = screen.getByRole('button', { name: /load the whole 46 KB/i });
+		// The preview is a prefix cut on a UTF-8 boundary, so it is text and
+		// not a value to parse (spec 015 #3) — and it is the whole preview,
+		// which is what the region holds rather than what is drawn in it.
+		const region = screen.getByLabelText('Input preview');
+		expect(region.closest('.cm-editor')).not.toBeNull();
+		expect(region.textContent).toContain('the first two hundred characters');
 
-		await userEvent.setup().click(button);
+		const banner = screen.getByRole('button', { name: /showing 65 B of 46 KB/i });
+		expect(banner).toHaveAccessibleName(/Load the whole payload/i);
+
+		// And no Copy over a prefix: the banner is how the whole payload is
+		// got, and a button offering to copy it that put 65 B of it on the
+		// clipboard would be worse than no button at all (spec 015 #3).
+		expect(screen.queryByRole('button', { name: /copy/i })).not.toBeInTheDocument();
+
+		await userEvent.setup().click(banner);
+		expect(onload).toHaveBeenCalledOnce();
+	});
+
+	it('is the banner alone when nothing fit under the share', async () => {
+		// spec 004 #25: a marker whose share left no room for a preview.
+		const onload = vi.fn();
+		render(Payload, {
+			label: 'Input',
+			value: { ...marker, preview: undefined },
+			loading: false,
+			onload
+		});
+
+		expect(screen.queryByLabelText('Input preview')).not.toBeInTheDocument();
+		await userEvent.setup().click(screen.getByRole('button', { name: /load the whole 46 KB/i }));
+
 		expect(onload).toHaveBeenCalledOnce();
 	});
 
@@ -49,7 +79,9 @@ describe('a payload the budget could not carry', () => {
 		});
 
 		expect(screen.queryByRole('button', { name: /load the whole/i })).not.toBeInTheDocument();
-		expect(screen.getByText('content:')).toBeInTheDocument();
+		expect(screen.getByLabelText('Input').textContent).toContain('"content"');
+		// And now that what is on screen *is* the whole payload, Copy is back.
+		expect(screen.getByRole('button', { name: /copy the whole input/i })).toBeInTheDocument();
 	});
 
 	it('says it is working and stops accepting clicks', () => {

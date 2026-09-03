@@ -46,7 +46,9 @@ const TEXT = [
 	'warn',
 	'ok',
 	'code-string',
-	'code-number'
+	'code-number',
+	'code-key',
+	'code-punct'
 ];
 
 /** Colours a screen paints behind those words. */

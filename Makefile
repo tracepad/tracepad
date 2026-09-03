@@ -82,8 +82,12 @@ e2e: build ## Boot the real binary on a temp database and run the Playwright smo
 	cd $(UI) && npx playwright install chromium
 	cd $(UI) && npm run e2e
 
+# The budget is named here as well as defaulted in the script (spec 015 #9), so
+# that the number a build reports is visible in the target that reports it.
+UI_BUDGET := 14000
+
 ui-lines: ## Report the interface's application lines against its budget, and its test lines beside them
-	scripts/ui-lines.sh
+	scripts/ui-lines.sh $(UI_BUDGET)
 
 precommit: ensure-hooks format-check vet test ui-check ## Full gate (also installed as git pre-commit hook)
 

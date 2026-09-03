@@ -4,7 +4,6 @@
 	import { ApiError, api, type Observation, type ObservationIO } from '$lib/api/client.svelte';
 	import { ABSENT, duration, elapsed, timestampPrecise, wait } from '$lib/format';
 	import CopyButton from './CopyButton.svelte';
-	import JsonNode from './JsonNode.svelte';
 	import Payload from './Payload.svelte';
 
 	// The right-hand panel: one observation, whole. Everything on it came out
@@ -62,6 +61,14 @@
 		['Level', observation.level ?? ABSENT],
 		['Model', observation.model ?? ABSENT]
 	] as const);
+
+	/**
+	 * A record's value as one line. These blocks are flat by construction —
+	 * token counts, prices, sampling parameters — and the rare nested one is
+	 * still shorter as compact JSON than as a second list (spec 015 #11).
+	 */
+	const scalar = (value: unknown) =>
+		typeof value === 'object' && value !== null ? JSON.stringify(value) : String(value);
 
 	/**
 	 * Where the prompt badge leads: the listing filtered by this prompt, at
@@ -127,11 +134,19 @@
 		{/each}
 	</dl>
 
-	{#each [['Usage', observation.usage], ['Cost', observation.cost_details], ['Model parameters', observation.model_parameters]] as const as [label, value] (label)}
-		{#if value}
+	<!-- Three records, not three documents (spec 015 #11): each is a handful of
+	     scalars, and a list reads better than JSON does — where a payload is
+	     nested and as big as the model made it, and gets the editor surface. -->
+	{#each [['Usage', observation.usage], ['Cost', observation.cost_details], ['Model parameters', observation.model_parameters]] as const as [label, record] (label)}
+		{#if record}
 			<section class="border-border border-t px-4 py-3">
 				<h3 class="text-muted mb-2 text-xs font-medium tracking-wide uppercase">{label}</h3>
-				<div class="overflow-x-auto font-mono text-xs"><JsonNode {value} /></div>
+				<dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
+					{#each Object.entries(record as Record<string, unknown>) as [key, value] (key)}
+						<dt class="text-subtle text-xs">{key}</dt>
+						<dd class="min-w-0 font-mono text-xs break-all tabular-nums">{scalar(value)}</dd>
+					{/each}
+				</dl>
 			</section>
 		{/if}
 	{/each}
