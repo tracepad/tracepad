@@ -801,15 +801,19 @@ func (s *Store) Run(projectID, id string) (*DatasetRun, error) {
 // of the exception.
 func (s *Store) PinnedTraces(projectID string) (int64, error) {
 	var n int64
-	err := s.db.QueryRow(
-		`SELECT COUNT(*) FROM traces t WHERE t.project_id = ? AND t.run_id IS NOT NULL
-		    AND EXISTS (SELECT 1 FROM dataset_runs r WHERE r.project_id = t.project_id AND r.id = t.run_id)`,
-		projectID).Scan(&n)
-	if err != nil {
+	if err := s.db.QueryRow(pinnedTracesQuery, projectID).Scan(&n); err != nil {
 		return 0, fmt.Errorf("count pinned traces: %w", err)
 	}
 	return n, nil
 }
+
+// pinnedTracesQuery counts one project's pinned traces. `run_id IS NOT NULL`
+// is not only a filter: it is what lets the count seek the partial
+// `idx_traces_run` (Decision 26) instead of scanning the project's traces,
+// which a test on this constant holds to.
+const pinnedTracesQuery = `SELECT COUNT(*) FROM traces t
+	 WHERE t.project_id = ? AND t.run_id IS NOT NULL
+	   AND EXISTS (SELECT 1 FROM dataset_runs r WHERE r.project_id = t.project_id AND r.id = t.run_id)`
 
 const runColumns = `id, dataset, dataset_version, name, metadata, status, error, created_at, finished_at`
 

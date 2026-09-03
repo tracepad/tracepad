@@ -104,6 +104,10 @@ CREATE TABLE score_configs (
 ALTER TABLE traces ADD COLUMN run_id  TEXT;
 ALTER TABLE traces ADD COLUMN item_id TEXT;
 
--- Every read of a run is a walk over its traces by item; the sweep's pin check
--- and the pinned count are seeks on `run_id` (spec 014 #13).
-CREATE INDEX idx_traces_run ON traces(project_id, run_id, item_id);
+-- Every read of a run is a walk over its traces by item, and the pinned count
+-- `/system` reports is a seek on `run_id` (spec 014 #13).
+--
+-- Partial, because ordinary traffic carries no run id and should not pay for
+-- the index (spec 014 #26): every reader that seeks it filters
+-- `run_id IS NOT NULL` or `run_id IN (…)`, and no NULL row matches either.
+CREATE INDEX idx_traces_run ON traces(project_id, run_id, item_id) WHERE run_id IS NOT NULL;

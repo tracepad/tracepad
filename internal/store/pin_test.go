@@ -90,6 +90,26 @@ func TestSweepPickStillSeeks(t *testing.T) {
 	}
 }
 
+// TestPinnedCountSeeksThePartialIndex: `idx_traces_run` is partial so that
+// ordinary traffic does not pay for it (spec 014 #26), which is only free if
+// every reader of the column still seeks it. The pinned count is the reader
+// `/system` calls on every request, and a partial index SQLite cannot prove
+// applicable turns it into a scan of the project's traces.
+func TestPinnedCountSeeksThePartialIndex(t *testing.T) {
+	f := newSweepFixture(t)
+	plan, err := f.store.explainQueryPlan(pinnedTracesQuery, f.project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(plan, "\n")
+	if !strings.Contains(joined, "idx_traces_run") {
+		t.Errorf("the pinned count does not use the run index:\n%s", joined)
+	}
+	if !strings.Contains(plan[0], "SEARCH") {
+		t.Errorf("the pinned count scans rather than seeks:\n%s", joined)
+	}
+}
+
 // TestRetentionPreviewExcludesPinnedTraces: the dry run counts what the sweep
 // would take, so it leaves the pinned trace out (spec 014 #13).
 func TestRetentionPreviewExcludesPinnedTraces(t *testing.T) {
