@@ -1,6 +1,6 @@
 # Spec 015 — JSON on CodeMirror: one surface for reading and writing payloads
 
-**Status:** IN PROGRESS
+**Status:** ✅ SHIPPED
 **Sprint:** September 2026
 
 > Every payload the web interface shows — an observation's input, output and
