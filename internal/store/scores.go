@@ -203,11 +203,15 @@ func (s *Store) Scores(projectID string, filter ScoreFilter) ([]*Score, error) {
 	return out, rows.Err()
 }
 
+// scoreColumns is the SELECT list every score read shares, in the order
+// scanScore expects.
+const scoreColumns = `id, trace_id, observation_id, session_id, name, data_type, value,
+	        string_value, comment, metadata, timestamp, created_at`
+
 // Score returns one score, or nil when it does not exist.
 func (s *Store) Score(projectID, id string) (*Score, error) {
 	rows, err := s.db.Query(
-		`SELECT id, trace_id, observation_id, session_id, name, data_type, value,
-		        string_value, comment, metadata, timestamp, created_at
+		`SELECT `+scoreColumns+`
 		 FROM scores WHERE project_id = ? AND id = ?`, projectID, id)
 	if err != nil {
 		return nil, fmt.Errorf("read score %s: %w", id, err)

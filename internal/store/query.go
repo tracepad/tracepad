@@ -33,6 +33,11 @@ type TraceFilter struct {
 	// exact — `generation` does not match `embedding`, whatever the
 	// aggregates do with the two (spec 012, edge cases).
 	Type string
+	// RunID and ItemID match the eval link exactly (spec 014 #2): "the
+	// traces of this run", and "the attempts at this case". Both are
+	// columns, so both are a seek rather than a scan.
+	RunID  string
+	ItemID string
 	// Prompt keeps traces one of whose observations ran that prompt. A nil
 	// Version matches any version of the name.
 	Prompt *PromptFilter
@@ -128,6 +133,12 @@ func traceConditions(projectID string, filter TraceFilter) ([]string, []any) {
 	}
 	if filter.Version != "" {
 		add("version = ?", filter.Version)
+	}
+	if filter.RunID != "" {
+		add("run_id = ?", filter.RunID)
+	}
+	if filter.ItemID != "" {
+		add("item_id = ?", filter.ItemID)
 	}
 	// The two observation filters are EXISTS subqueries, each backed by an
 	// index of its own (spec 012 #8): a subquery that scanned a trace's
