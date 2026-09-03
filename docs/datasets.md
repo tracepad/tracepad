@@ -50,6 +50,12 @@ Authentication is the same as everywhere: `Authorization: Bearer <secret key>`
 or `Basic base64(<public key>:<secret key>)`. Everything lives inside one
 project; nothing here crosses a project boundary.
 
+The `metadata` of a **dataset** and of a **run** must be a JSON object when it
+is sent at all — these are your own dimensions, keyed, and a bare string or
+number would be a label with nowhere to put the next one. An **item**'s three
+bodies are the exception: `input`, `expected_output` and `metadata` are any
+JSON value, because a test case is whatever your function takes.
+
 ## The whole loop
 
 The recipe, in the order that makes the numbers trustworthy: declare the
@@ -165,8 +171,9 @@ curl -H "$AUTH" "$TP/api/v1/datasets/support-golden/items/a1b2…/versions"
 ```
 
 The last one lists every row of one item, newest first, archived rows
-flagged. Version `0` is the dataset before its first item; a version above the
-current one is a `400`.
+flagged, and it lists them all: an item has as many rows as the dataset had
+ticks it took part in, so there is nothing to page. Version `0` is the dataset
+before its first item; a version above the current one is a `400`.
 
 ### Item fields
 

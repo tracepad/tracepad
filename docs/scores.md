@@ -165,6 +165,10 @@ re-validated**: replacing a config changes what is accepted from now on and
 nothing else, a config for a name that scores already used with another type
 is accepted, and deleting a config touches no score.
 
+`GET /api/v1/score-configs` returns them **all**, in name order, with no
+`limit` and no cursor — a project has as many configs as it has score names,
+and a loop over a list that only a person can grow would be ceremony.
+
 `direction` is also what a run comparison will read to say *improved* or
 *regressed* rather than merely *changed* — see [datasets.md](datasets.md).
 

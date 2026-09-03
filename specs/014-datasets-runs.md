@@ -25,15 +25,16 @@ and two nullable columns on `traces` — `run_id`, `item_id`. JSON API under
 `/api/v1` for datasets, items, runs and score configs. Ingest claims
 `tracepad.run_id` / `tracepad.item_id` into the trace columns. The retention
 sweeper spares traces that belong to a live run. `POST /api/v1/scores`
-validates a score against its name's config when one exists. Docs:
+validates a score against its name's config when one exists.
+`GET /api/v1/system` counts the new tables and reports the pinned and orphan
+run traces. Docs:
 `docs/datasets.md` (new), `docs/scores.md`, `docs/retention.md`,
 `docs/ingest.md`, `docs/api.md`, `openapi.json`.
 
 **PR 2 — reading it back.** `GET /api/v1/runs/{id}` with the run's summary,
 `GET /api/v1/runs/{id}/items` with per-item attempts, and
 `GET /api/v1/runs/{a}/compare/{b}`. CLI groups `datasets`, `runs`,
-`score-configs`; six read-only MCP tools. `GET /api/v1/system` counts the new
-tables and reports orphan run traces. Docs: `docs/cli.md`, `docs/mcp.md`.
+`score-configs`; six read-only MCP tools. Docs: `docs/cli.md`, `docs/mcp.md`.
 
 Not here: a UI for any of it (spec 015), annotation queues, quality trends
 over the rollup, the server executing anything, `langfuse.experiment.*`
@@ -67,6 +68,8 @@ compatibility.
 | 22 | **2026-09-03** — MCP gains six **read-only** tools — `list_datasets`, `get_dataset_items`, `list_runs`, `get_run`, `get_run_items`, `compare_runs` — and no write; score configs are not a tool (spec 005 #13 stands) | "Why did the eval regress" is an agent question in the same class as "why did the last run fail" (spec 004 #17), and compare is the answer to it. Every tool is one GET through `API.Get` (`internal/mcpserver/api.go:23`); creating runs and posting items stays in the CLI and the HTTP API, where a hallucinated call has a human or a script to answer to. Score configs are read by nobody but the config author, and `list_score_configs` would be a tool with no question behind it. |
 | 23 | **2026-09-03** — The "changes nothing" comparison of #6 covers the **source pair** as well as the three bodies: an item re-posted with the same `input`, `expected_output` and `metadata` but a different `source_trace_id` / `source_observation_id` is a change, one row and one tick (found implementing PR 1) | #6 reads "byte-equal to its current row", and the source pair is part of the row. A case that learned where it came from has changed — the pair is what an annotation queue will fill when a production trace is promoted (#4), and a write that could not record it without also touching a body would leave that fact nowhere. The harness that re-declares its cases is unaffected: it sends the same pair every time. |
 | 24 | **2026-09-03** — A `POST …/{name}/runs` with an `id` that already exists **in another dataset** of the project is a **409**, not the 200-with-the-existing-run of #9 (found implementing PR 1) | #9's retry-safety is for the harness that re-sends the create it already made; answering with a run of a different dataset would hand that harness the wrong container without a word, and its traces would land in the other dataset's run. Two harnesses that hash the same natural key into an id are the collision, and the conflict is the message that names it. |
+| 25 | **2026-09-03** — `GET /api/v1/score-configs` and `GET /api/v1/datasets/{name}/items/{id}/versions` return their lists **whole**, with no `limit` and no `cursor` — a stated exception to spec 003 #18, which every other list endpoint here keeps (found implementing PR 1) | Both lists are bounded by the shape of the data rather than by a page: a project has as many configs as it has score names — the names a human chose and a harness reuses — and an item has as many versions as the dataset has ticks it took part in, each one a deliberate edit someone wrote. A cursor over a list that cannot grow without a person growing it is ceremony with a cost: the caller writes a loop it will never take twice, and a first page that is the whole answer is indistinguishable from a first page that is not. The response budget (spec 004 #2) still applies, so a list that does become long is cut and says so, which is the honest failure — a page that silently ends is not. |
+| 26 | **2026-09-03** — `idx_traces_run` is **partial** (`WHERE run_id IS NOT NULL`) (owner decision 2026-09-03, from review of PR 1) | Eval traffic is a slice of what a project ingests, and a full index would make every ordinary trace — the ones that will never name a run — pay a B-tree entry on write for a row no reader will ever seek. Every reader that seeks the column filters `run_id IS NOT NULL` (the pinned count) or `run_id IN (…)` (the per-dataset count, and PR 2's run reads), and neither form matches a NULL, so the partial index is the whole index for them; `PinnedTraces` has an `EXPLAIN QUERY PLAN` test that fails if the seek is ever lost. The sweep is the one place that asks about NULLs — `run_id IS NULL OR NOT EXISTS (…)`, which is true of nearly every row — and it never wanted this index: it seeks `idx_traces_ingested` for its window and evaluates the pin per row, which #13's plan test already holds it to. Migration 0010 is edited in place rather than followed by an 0011 because it has not shipped (the precedent of spec 003 #25). |
 
 ## Data contract (schema 0010)
 
@@ -133,7 +136,8 @@ CREATE TABLE score_configs (
 
 ALTER TABLE traces ADD COLUMN run_id  TEXT;   -- Decision 2, no FK
 ALTER TABLE traces ADD COLUMN item_id TEXT;
-CREATE INDEX idx_traces_run ON traces(project_id, run_id, item_id);
+CREATE INDEX idx_traces_run ON traces(project_id, run_id, item_id)
+    WHERE run_id IS NOT NULL;                 -- Decision 26
 ```
 
 `traces.run_id`/`item_id` join the per-field upsert in `upsertTrace`
