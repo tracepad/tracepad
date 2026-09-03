@@ -305,4 +305,27 @@ func TestIngestRecordsTheLinkAndTheOrphan(t *testing.T) {
 	if row.RunID != live || row.ItemID != itemID(1) {
 		t.Errorf("a silent delivery cleared the link: run %q item %q", row.RunID, row.ItemID)
 	}
+
+	// A delivery that moves the trace to another run and names no item
+	// takes the old item with it. Merged field by field the row would say
+	// the new run answered the old run's item — an invented pair, and the
+	// one the run view would show as an attempt that never happened.
+	if err := f.writer.Submit(t.Context(), link(hexTrace(1), unknown, "")); err != nil {
+		t.Fatal(err)
+	}
+	row, _ = f.store.Trace(f.project.ID, hexTrace(1))
+	if row.RunID != unknown || row.ItemID != "" {
+		t.Errorf("moved trace = run %q item %q, want the item to move with the run", row.RunID, row.ItemID)
+	}
+
+	// The item still survives a re-delivery of the *same* run that carries
+	// only the trace's other fields: that is the per-field rule, and it is
+	// how a late span of a linked trace arrives.
+	if err := f.writer.Submit(t.Context(), link(hexTrace(2), live, "")); err != nil {
+		t.Fatal(err)
+	}
+	row, _ = f.store.Trace(f.project.ID, hexTrace(2))
+	if row.RunID != live || row.ItemID != itemID(1) {
+		t.Errorf("same-run re-delivery = run %q item %q, want the item kept", row.RunID, row.ItemID)
+	}
 }

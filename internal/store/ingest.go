@@ -142,6 +142,12 @@ func upsertTrace(tx *sql.Tx, projectID string, t *model.Trace, ingestedAt int64,
 	// `run_id` and `item_id` are per-field like the rest (spec 014 #2): a
 	// re-delivery naming a different run moves the trace, and one naming
 	// none leaves it where it was.
+	//
+	// The pair moves together, though. Merged independently, a delivery that
+	// named a new run and no item would keep the old run's item, and the row
+	// would claim that run B answered an item of run A — a made-up fact,
+	// which is worse than the missing one it replaces. So a delivery that
+	// changes the run says what the item is, including that there is none.
 	var stored sql.NullString
 	err = tx.QueryRow(
 		`INSERT INTO traces (project_id, id, name, user_id, session_id, environment,
@@ -157,7 +163,11 @@ func upsertTrace(tx *sql.Tx, projectID string, t *model.Trace, ingestedAt int64,
 		   release     = COALESCE(excluded.release, traces.release),
 		   version     = COALESCE(excluded.version, traces.version),
 		   run_id      = COALESCE(excluded.run_id, traces.run_id),
-		   item_id     = COALESCE(excluded.item_id, traces.item_id),
+		   item_id     = CASE
+		                   WHEN excluded.run_id IS NOT NULL
+		                    AND excluded.run_id IS NOT traces.run_id THEN excluded.item_id
+		                   ELSE COALESCE(excluded.item_id, traces.item_id)
+		                 END,
 		   tags        = COALESCE(excluded.tags, traces.tags),
 		   metadata_id = COALESCE(excluded.metadata_id, traces.metadata_id)
 		 RETURNING name`,

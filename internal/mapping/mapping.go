@@ -242,8 +242,10 @@ func (a *traceAccumulator) finish() *model.Trace {
 	a.trace.Release = a.release.value
 	a.trace.Version = a.version.value
 	a.trace.RunID = a.runID.value
-	// An item is a position inside a run: without the run it names
-	// nothing, and the column stays empty (spec 014, ingest contract).
+	// An item is a position inside a run: without a run on the trace it
+	// names nothing, and the column stays empty (spec 014, ingest
+	// contract). This is where that rule is applied, because it is the
+	// first point at which every span of the export has been seen.
 	if a.trace.RunID != "" {
 		a.trace.ItemID = a.itemID.value
 	}
@@ -355,19 +357,25 @@ func mapSpan(sc spanCtx, parents map[string]bool) (*model.Observation, *traceFie
 // (spec 014 #2). Either is claimed only when it has the shape of an id the
 // store hands out — 32 lower-case hex characters — and any other shape stays
 // in metadata unclaimed, where a harness that stamped a run *name* rather
-// than the id will find it. An item without a run on the same span claims
-// nothing: an item is a position inside a run, and the trace-level merge
-// applies the same rule once every span has been seen.
+// than the id will find it.
+//
+// The rule for the item is trace-level, not span-level (spec 014, ingest
+// contract): a harness may put the run on the root span and the item on the
+// span that did the work, and the two meet in the trace merge. So an item on
+// a span with no run of its own is still read — but not claimed, because
+// whether it names anything is not known until every span has been seen. If
+// no run turns up, `traceAccumulator.finish` drops it and the attribute is
+// where the harness left it, in the span's metadata; if one does, the item
+// links the trace and stays visible beside it, which is the honest price of
+// reading it before its run exists.
 func mapRunLink(a *attrs) (run, item rankedValue) {
-	run = firstHexID(a, traceRunKeys...)
-	if run.value == "" {
-		return run, rankedValue{}
-	}
-	return run, firstHexID(a, traceItemKeys...)
+	run = firstHexID(a, true, traceRunKeys...)
+	return run, firstHexID(a, run.value != "", traceItemKeys...)
 }
 
 // firstHexID is firstRanked for a chain whose value must be a 32-hex id.
-func firstHexID(a *attrs, keys ...string) rankedValue {
+// `claim` says whether the winning key leaves the metadata with its value.
+func firstHexID(a *attrs, claim bool, keys ...string) rankedValue {
 	for rank, key := range keys {
 		raw, ok := a.lookup(key)
 		if !ok {
@@ -377,7 +385,9 @@ func firstHexID(a *attrs, keys ...string) rankedValue {
 		if !valid || !isHexID(id) {
 			continue
 		}
-		a.claim(key)
+		if claim {
+			a.claim(key)
+		}
 		return rankedValue{value: id, rank: rank}
 	}
 	return rankedValue{}

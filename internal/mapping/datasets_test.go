@@ -110,6 +110,22 @@ func TestRunLinkSurvivesTheTraceMerge(t *testing.T) {
 	}
 }
 
+// TestRunAndItemOnDifferentSpans: the contract binds the item to a run on the
+// *trace*, not on the span it was stamped on (spec 014, ingest contract). A
+// harness that puts the run on the root span and the item on the span that
+// answered the case is the shape the docs' recipe grows into, and reading the
+// item only beside its own run would file that trace under the run with no
+// item — a hole part 2's run view would report as a missing case.
+func TestRunAndItemOnDifferentSpans(t *testing.T) {
+	result := mapping.Map(otlptest.ExportLevels(otlptest.Levels{
+		ScopeName: "langfuse-sdk", ScopeVersion: "4.7.0",
+		Spans: [][]string{{"tracepad.run_id", runID}, {"tracepad.item_id", itemID}},
+	}))
+	if trace := result.Traces[0]; trace.RunID != runID || trace.ItemID != itemID {
+		t.Errorf("link = run %q item %q, want both: the rule is trace-level", trace.RunID, trace.ItemID)
+	}
+}
+
 // The Langfuse experiment namespace is not mapped: one namespace for the link
 // (spec 014, ingest contract).
 func TestLangfuseExperimentStaysInMetadata(t *testing.T) {
