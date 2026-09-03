@@ -307,8 +307,21 @@ func (s *Store) scoreDistribution(projectID, runID, name string) (map[string]int
 }
 
 // attachScoreConfigs fills in what the configs say about the names a run
-// scored: the type they are supposed to be, and the direction a comparison
-// needs to say `improved` rather than `changed` (#15, #16).
+// scored: the direction a comparison needs to say `improved` rather than
+// `changed` (#15, #16).
+//
+// The type is *not* taken from the config. A config governs what is accepted
+// from now on and never re-validates what is stored (#15), so a name can carry
+// scores of one type under a config declaring another — the spec lists that
+// case among its edge cases — and Decision 30 says the summary reports the
+// type most of the run's scores actually used. Overwriting it would label a
+// column of numbers `text`, after which compare reads the string side of every
+// item, finds it empty, and reports `same` for a pair whose means differ
+// (found in review of PR #31).
+//
+// For the same reason a direction only rides a type that has an axis: #16
+// forbids one on `categorical` and `text`, and a config that disagrees with
+// the stored scores must not smuggle one in through the back door.
 func (s *Store) attachScoreConfigs(projectID string, stats []RunScoreStat) error {
 	if len(stats) == 0 {
 		return nil
@@ -326,8 +339,9 @@ func (s *Store) attachScoreConfigs(projectID string, stats []RunScoreStat) error
 		if !ok {
 			continue
 		}
-		stats[i].DataType = config.DataType
-		stats[i].Direction = config.Direction
+		if stats[i].DataType == ScoreNumeric || stats[i].DataType == ScoreBoolean {
+			stats[i].Direction = config.Direction
+		}
 	}
 	return nil
 }
@@ -789,7 +803,19 @@ func (s *Store) RunValues(projectID, runID string) (*RunItemValues, error) {
 	}
 	defer rows.Close()
 
-	sums := map[string]map[string]float64{}
+	// The mean divides by the rows that carried a number, not by every row
+	// of the name. A name that carried two data types in one run — which
+	// #15 allows and Decision 30 names — has rows with no `value` at all,
+	// and counting those into the divisor would halve the item's value
+	// while the run's mean above it, which SQL's `AVG` takes over the
+	// numeric rows only, stayed right: the item rows would stop summing to
+	// the header, which is the one thing #18 asks of them (found in review
+	// of PR #31).
+	type accumulator struct {
+		sum   float64
+		count int64
+	}
+	numeric := map[string]map[string]accumulator{}
 	for rows.Next() {
 		var (
 			itemID, name, dataType string
@@ -801,13 +827,15 @@ func (s *Store) RunValues(projectID, runID string) (*RunItemValues, error) {
 		}
 		if values.Scores[itemID] == nil {
 			values.Scores[itemID] = map[string]ItemScore{}
-			sums[itemID] = map[string]float64{}
+			numeric[itemID] = map[string]accumulator{}
 		}
 		score := values.Scores[itemID][name]
 		score.DataType, score.Count = dataType, score.Count+1
 		if value.Valid {
-			sums[itemID][name] += value.Float64
-			mean := sums[itemID][name] / float64(score.Count)
+			running := numeric[itemID][name]
+			running.sum, running.count = running.sum+value.Float64, running.count+1
+			numeric[itemID][name] = running
+			mean := running.sum / float64(running.count)
 			score.Mean = &mean
 		}
 		if text.Valid {

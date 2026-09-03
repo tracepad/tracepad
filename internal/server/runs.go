@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -160,7 +161,7 @@ func (s *Server) handleRunItems(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	skeleton, err := json.Marshal(renderRunItems(run, items, payloadBudget{}, prev, next))
+	skeleton, err := json.Marshal(renderRunItems(run, items, payloadBudget{}, false, prev, next))
 	if err != nil {
 		slog.Error("render run items failed", "err", err)
 		writeError(w, http.StatusInternalServerError, "failed to render the run's items")
@@ -177,45 +178,48 @@ func (s *Server) handleRunItems(w http.ResponseWriter, r *http.Request) {
 			"this page's payloads do not fit the response budget: "+reason)
 		return
 	}
-	writeJSON(w, http.StatusOK, renderRunItems(run, items, budget, prev, next))
+	writeJSON(w, http.StatusOK, renderRunItems(run, items, budget, true, prev, next))
 }
 
 // renderRunItems renders one page of the item view. It is called twice — once
-// to measure the skeleton, once for real — so it must not depend on anything
-// but its arguments.
+// with `inline` false to measure the skeleton, once for real — so it must not
+// depend on anything but its arguments.
 func renderRunItems(run *store.DatasetRun, items []*store.RunItem,
-	budget payloadBudget, prev, next *string) object {
+	budget payloadBudget, inline bool, prev, next *string) object {
 	rows := make([]object, 0, len(items))
 	for _, item := range items {
-		row := object{}.put("id", nil).put("seq", nil)
-		if item.Item != nil {
+		var row object
+		switch {
+		case item.Item != nil:
 			row = object{}.
 				put("id", item.Item.ID).
 				put("seq", item.Item.Seq).
 				put("input", rawJSON(item.Item.Input))
-			// An unknown item has no case to show: the traces named
-			// an id the dataset does not have at this version, and
-			// inventing an empty body for it would read as "the case
-			// is blank" rather than "there is no case" (#3).
-			row = row.put("expected_output",
-				budgetPayload(budget, rawJSON(item.Item.ExpectedOutput), "", ""))
-		} else if item.ItemID != "" {
-			row = row.put("id", item.ItemID).put("unknown", true)
-		} else {
-			row = row.put("unknown", true)
+			row = putPayload(row, "expected_output",
+				rawJSON(item.Item.ExpectedOutput), budget, inline, "", "")
+		// An unknown item has no case to show: the traces named an id
+		// the dataset does not have at this version, and inventing an
+		// empty body for it would read as "the case is blank" rather
+		// than "there is no case" (#3). The row is keyed by the id the
+		// traces named, and by nothing when they named none
+		// (Decision 29).
+		case item.ItemID != "":
+			row = object{}.put("id", item.ItemID).put("seq", nil).put("unknown", true)
+		default:
+			row = object{}.put("id", nil).put("seq", nil).put("unknown", true)
 		}
 
 		attempts := make([]object, 0, len(item.Attempts))
 		for _, attempt := range item.Attempts {
-			attempts = append(attempts, object{}.
+			entry := object{}.
 				put("trace_id", attempt.TraceID).
 				putSome("timestamp", formatInstant(attempt.Timestamp)).
 				put("error_count", attempt.ErrorCount).
 				put("total_cost", attempt.TotalCost).
-				put("latency_ms", attempt.LatencyMs).
-				put("output", budgetPayload(budget, attempt.Output,
-					attempt.TraceID, attempt.ObservationID)).
-				put("scores", renderAttemptScores(attempt.Scores)))
+				put("latency_ms", attempt.LatencyMs)
+			entry = putPayload(entry, "output", attempt.Output, budget, inline,
+				attempt.TraceID, attempt.ObservationID)
+			attempts = append(attempts, entry.put("scores", renderAttemptScores(attempt.Scores)))
 		}
 		rows = append(rows, row.put("attempts", attempts))
 	}
@@ -228,15 +232,28 @@ func renderRunItems(run *store.DatasetRun, items []*store.RunItem,
 		put("prev_cursor", prev)
 }
 
-// budgetPayload inlines a payload or replaces it with a marker. The pair of
-// ids in the marker is what `/observations/{id}/io` takes, so a cut answer
-// still names where the whole of it lives (spec 004 #2); an item's expected
-// output has no observation behind it and is cut without one.
-func budgetPayload(budget payloadBudget, value any, traceID, observationID string) any {
+// putPayload adds one budgeted payload: the value when it fits, a marker when
+// it does not. The pair of ids in the marker is what `/observations/{id}/io`
+// takes, so a cut answer still names where the whole of it lives (spec 004
+// #2); an item's expected output has no observation behind it and is cut
+// without one.
+//
+// While the skeleton is being measured the key is left out entirely, the way
+// `?expand=io` leaves it out of a trace's skeleton: a marker counted into the
+// skeleton is charged twice — once as structure, once out of the share it
+// shrank — and at fifty items that phantom weight is enough to refuse a page
+// that fits, with a `?budget=` to retry with that is wrong by the same amount
+// (found in review of PR #31). A payload that is simply absent still costs its
+// `null`, which is structure and stays.
+func putPayload(o object, key string, value any, budget payloadBudget, inline bool,
+	traceID, observationID string) object {
 	if value == nil {
-		return nil
+		return o.put(key, nil)
 	}
-	return budget.render(value, traceID, observationID)
+	if !inline {
+		return o
+	}
+	return o.put(key, budget.render(value, traceID, observationID))
 }
 
 // renderAttemptScores renders an attempt's scores whole: a score is a name and
@@ -386,7 +403,11 @@ func (s *Server) handleCompareRuns(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	page, prev, next := pageCompared(items, limit, backward, values.Get("cursor"))
+	page, prev, next, err := pageCompared(items, limit, backward, values.Get("cursor"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	rows := make([]object, 0, len(page))
 	for _, item := range page {
 		scores := object{}
@@ -706,23 +727,33 @@ func comparedIn(item *store.CompareItem, a, b *store.RunItemValues) string {
 // pageCompared cuts the page out of the compared items. The keyset is `seq`,
 // the same order the item view walks, so a reader can hold one cursor in mind
 // for both.
+//
+// A cursor it cannot read is an error, not a silent restart from the first
+// page: that is spec 003 #23's rule, and the walk it would restart never ends
+// (the reasoning under `addCursor` in the CLI). The item view refuses the same
+// input, and one of the two answering 200 was the inconsistency review of PR
+// #31 caught.
 func pageCompared(items []*store.CompareItem, limit int, backward bool, cursor string) (
-	page []*store.CompareItem, prev, next *string,
+	page []*store.CompareItem, prev, next *string, err error,
 ) {
 	if cursor != "" {
 		parts, err := decodeCursor(cursor, 1)
-		if err == nil {
-			if seq, err := strconv.ParseInt(parts[0], 10, 64); err == nil {
-				items = filterBySeq(items, seq, backward)
-			}
+		if err != nil {
+			return nil, nil, nil, err
 		}
+		seq, err := strconv.ParseInt(parts[0], 10, 64)
+		if err != nil {
+			return nil, nil, nil, errors.New("invalid cursor")
+		}
+		items = filterBySeq(items, seq, backward)
 	}
 	if backward && len(items) > limit {
 		items = items[len(items)-limit-1:]
 	}
-	return trimPage(items, limit, backward, cursor, func(item *store.CompareItem) string {
+	page, prev, next = trimPage(items, limit, backward, cursor, func(item *store.CompareItem) string {
 		return encodeCursor(strconv.FormatInt(item.Seq, 10))
 	})
+	return page, prev, next, nil
 }
 
 func filterBySeq(items []*store.CompareItem, seq int64, backward bool) []*store.CompareItem {

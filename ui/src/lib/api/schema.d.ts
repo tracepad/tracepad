@@ -1127,10 +1127,13 @@ export interface components {
             prompts: components["schemas"]["PromptRef"][];
         };
         RunScoreStat: {
-            /** @enum {string} */
+            /**
+             * @description The type the run's scores under this name actually used — the commonest one when they used more than a single type. A config declares what is accepted next and never re-types what is stored, so this can differ from `GET /score-configs/{name}`.
+             * @enum {string}
+             */
             data_type: "numeric" | "boolean" | "categorical" | "text";
             /**
-             * @description From the name's config; null when it has none, which is what makes a comparison say `changed` rather than `improved`
+             * @description From the name's config, and only for a numeric or boolean `data_type`, the two that have an axis; null otherwise, which is what makes a comparison say `changed` rather than `improved`
              * @enum {string|null}
              */
             direction: "higher" | "lower" | "none" | null;

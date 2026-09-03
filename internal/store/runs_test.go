@@ -390,3 +390,51 @@ func TestItemValueIsTheMeanOfItsAttempts(t *testing.T) {
 		}
 	}
 }
+
+// One name, two data types, one item: the mean is over the rows that carried a
+// number. #15 lets a name that already carried one type accept another, so a
+// run can hold both (Decision 30) — and a divisor that counted the wordy rows
+// too would halve the item's value while the header above it, which SQL's
+// `AVG` takes over the numeric rows only, stayed right. The item rows must sum
+// to the header (#18), and that is the invariant this states (found in review
+// of PR #31).
+func TestItemMeanCountsOnlyTheNumbers(t *testing.T) {
+	f := newSweepFixture(t)
+	f.postItems(t, "golden", itemInput(itemID(1), `1`))
+	// The wordy attempt comes first, which is where a divisor counting it
+	// does damage: last, its row lands after the mean is already right.
+	run := f.seedRun(t, "golden", strings.Repeat("b", 32), []attempt{
+		{trace: hexTrace(1), item: itemID(1), latencyMs: 10,
+			scores: []*Score{categorical("accuracy", "pass")}},
+		{trace: hexTrace(2), item: itemID(1), latencyMs: 10,
+			scores: []*Score{numeric("accuracy", 1)}},
+		{trace: hexTrace(3), item: itemID(1), latencyMs: 10,
+			scores: []*Score{numeric("accuracy", 0)}},
+	})
+
+	values, err := f.store.RunValues(f.project.ID, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	accuracy := values.Scores[itemID(1)]["accuracy"]
+	if accuracy.Mean == nil {
+		t.Fatalf("accuracy = %+v, want the mean of its two numbers", accuracy)
+	}
+	if *accuracy.Mean != 0.5 {
+		t.Errorf("mean = %v, want the mean of 1 and 0 — the wordy row is not a zero",
+			*accuracy.Mean)
+	}
+
+	summary, err := f.store.RunSummary(f.project.ID, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, stat := range summary.Scores {
+		if stat.Name != "accuracy" {
+			continue
+		}
+		if stat.Mean == nil || *stat.Mean != *accuracy.Mean {
+			t.Errorf("header mean %v disagrees with the item mean %v", stat.Mean, *accuracy.Mean)
+		}
+	}
+}

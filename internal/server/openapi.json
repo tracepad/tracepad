@@ -1686,9 +1686,10 @@
       "RunScoreStat": {
         "type": "object",
         "properties": {
-          "data_type": {"type": "string", "enum": ["numeric", "boolean", "categorical", "text"]},
+          "data_type": {"type": "string", "enum": ["numeric", "boolean", "categorical", "text"],
+            "description": "The type the run's scores under this name actually used — the commonest one when they used more than a single type. A config declares what is accepted next and never re-types what is stored, so this can differ from `GET /score-configs/{name}`."},
           "direction": {"type": ["string", "null"], "enum": ["higher", "lower", "none", null],
-            "description": "From the name's config; null when it has none, which is what makes a comparison say `changed` rather than `improved`"},
+            "description": "From the name's config, and only for a numeric or boolean `data_type`, the two that have an axis; null otherwise, which is what makes a comparison say `changed` rather than `improved`"},
           "count": {"type": "integer"},
           "mean": {"type": ["number", "null"]},
           "min": {"type": ["number", "null"]},

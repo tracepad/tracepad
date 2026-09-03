@@ -546,3 +546,168 @@ func walkIDs(t *testing.T, h *harness, path, direction string) []string {
 	}
 	return seen
 }
+
+// Every row of the item view carries each key once. The renderer appends
+// members rather than replacing them, so a row assembled in two steps can
+// carry `id` twice — JSON that Go's decoder forgives, by keeping the last
+// occurrence, and a strict parser rejects outright (found in review of PR #31).
+func TestItemRowsCarryEachKeyOnce(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	runID := runHex(1)
+	seedRun(t, h, runID, map[string]float64{"first": 1, "second": 0})
+	h.evalTrace(t, runID, itemHex(9), traceOf(runID, 3))
+	// And a trace that named the run and no item at all (Decision 29).
+	h.seed(t, &model.Trace{ID: traceOf(runID, 4), Name: "case",
+		Environment: "production", RunID: runID})
+
+	rec := h.get(t, "/api/v1/runs/"+runID+"/items?unknown=true")
+	expectStatus(t, rec, http.StatusOK)
+	page := decodeJSON[struct {
+		Items []json.RawMessage `json:"items"`
+	}](t, rec)
+	if len(page.Items) != 4 {
+		t.Fatalf("items = %d, want the two known rows and the two unknown ones", len(page.Items))
+	}
+	for i, row := range page.Items {
+		if key, twice := repeatedKey(row); twice {
+			t.Errorf("item %d carries %q twice: %s", i, key, row)
+		}
+	}
+}
+
+// repeatedKey reports a key an object carries more than once. It reads the
+// tokens because `json.Unmarshal` cannot see the duplicate: it keeps the last
+// value and says nothing.
+func repeatedKey(raw json.RawMessage) (string, bool) {
+	decoder := json.NewDecoder(strings.NewReader(string(raw)))
+	if _, err := decoder.Token(); err != nil {
+		return "", false
+	}
+	seen := map[string]bool{}
+	for decoder.More() {
+		token, err := decoder.Token()
+		if err != nil {
+			return "", false
+		}
+		key, ok := token.(string)
+		if !ok {
+			return "", false
+		}
+		if seen[key] {
+			return key, true
+		}
+		seen[key] = true
+		var value json.RawMessage
+		if err := decoder.Decode(&value); err != nil {
+			return "", false
+		}
+	}
+	return "", false
+}
+
+// The skeleton the budget is measured against carries no payloads, so a page
+// whose payloads fit is served rather than refused. Measuring the skeleton with
+// markers in it charges every payload twice — once as structure, once out of
+// the share that structure shrank — and a page of ordinary answers comes back
+// as a 400 with a `?budget=` that is wrong by the same amount (found in review
+// of PR #31).
+func TestRunItemsSkeletonExcludesThePayloads(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	runID := runHex(1)
+	var cases []map[string]any
+	for i := 1; i <= 4; i++ {
+		cases = append(cases, map[string]any{"id": itemHex(i),
+			"input":           map[string]any{"q": strings.Repeat("q", 40)},
+			"expected_output": map[string]any{"a": strings.Repeat("a", 120)}})
+	}
+	h.postItems(t, "golden", cases...)
+	h.createRun(t, "golden", map[string]any{"id": runID})
+	for i := 1; i <= 4; i++ {
+		h.evalTrace(t, runID, itemHex(i), traceOf(runID, i), func(o *model.Observation) {
+			o.Output = map[string]any{"answer": strings.Repeat("y", 120)}
+		})
+	}
+
+	rec := h.get(t, "/api/v1/runs/"+runID+"/items?budget=4096")
+	expectStatus(t, rec, http.StatusOK)
+	body := decodeJSON[runItemsBody](t, rec)
+	if len(body.Items) != 4 {
+		t.Fatalf("items = %d, want four", len(body.Items))
+	}
+	for i, item := range body.Items {
+		if !strings.Contains(string(item.ExpectedOutput), strings.Repeat("a", 120)) {
+			t.Errorf("item %d expected_output was cut: %s", i, item.ExpectedOutput)
+		}
+		if !strings.Contains(string(item.Attempts[0].Output), strings.Repeat("y", 120)) {
+			t.Errorf("item %d output was cut: %s", i, item.Attempts[0].Output)
+		}
+	}
+}
+
+// A config that disagrees with the scores already stored does not relabel
+// them. #15 lets a name carry scores of one type under a config declaring
+// another — the config governs what comes next and never re-validates the past
+// — and Decision 30 reports the type most of the run's scores used. Taking the
+// config's type instead makes compare read the string side of a column of
+// numbers, find it empty, and call every case `same` (found in review of PR
+// #31).
+func TestSummaryKeepsTheTypeItsScoresUsed(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	first, second := runHex(1), runHex(2)
+	seedRun(t, h, first, map[string]float64{"first": 0, "second": 0})
+	h.createRun(t, "golden", map[string]any{"id": second})
+	for i := 1; i <= 2; i++ {
+		h.evalTrace(t, second, itemHex(i), traceOf(second, i))
+		h.score(t, traceOf(second, i), "accuracy", 1)
+	}
+	// Only now does a config arrive, declaring the name a categorical one.
+	expectStatus(t, h.send(t, "PUT", "/api/v1/score-configs/accuracy",
+		map[string]any{"data_type": "categorical", "categories": []string{"pass", "fail"}}),
+		http.StatusOK)
+
+	summary := decodeJSON[struct {
+		Summary struct {
+			Scores map[string]struct {
+				DataType  string   `json:"data_type"`
+				Direction *string  `json:"direction"`
+				Mean      *float64 `json:"mean"`
+			} `json:"scores"`
+		} `json:"summary"`
+	}](t, h.get(t, "/api/v1/runs/"+second))
+	accuracy := summary.Summary.Scores["accuracy"]
+	if accuracy.DataType != "numeric" {
+		t.Errorf("data_type = %q, want the numeric type its scores used", accuracy.DataType)
+	}
+	if accuracy.Mean == nil || *accuracy.Mean != 1 {
+		t.Errorf("mean = %v, want the 1 both scores carried", accuracy.Mean)
+	}
+	if accuracy.Direction != nil {
+		t.Errorf("direction = %v, want none: a categorical config has no axis to lend", *accuracy.Direction)
+	}
+
+	compared := decodeJSON[compareBody](t, h.get(t,
+		"/api/v1/runs/"+first+"/compare/"+second))
+	for _, item := range compared.Items {
+		verdict := item.Scores["accuracy"]
+		if verdict.Verdict != "changed" || verdict.Delta == nil || *verdict.Delta != 1 {
+			t.Errorf("item %s = %+v, want the numbers compared, not two empty strings",
+				item.ID, verdict)
+		}
+	}
+}
+
+// A cursor the comparison cannot read is a 400, the way it is on every other
+// listing: dropping it and serving the first page turns a walk into a loop
+// (spec 003 #23).
+func TestCompareRefusesAnUnreadableCursor(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	first, second := runHex(1), runHex(2)
+	seedRun(t, h, first, map[string]float64{"first": 1, "second": 1})
+	h.createRun(t, "golden", map[string]any{"id": second})
+	h.evalTrace(t, second, itemHex(1), traceOf(second, 1))
+
+	for _, cursor := range []string{"nonsense", encodeCursor("not-a-number")} {
+		expectError(t, h.get(t, "/api/v1/runs/"+first+"/compare/"+second+"?cursor="+cursor),
+			http.StatusBadRequest, "cursor")
+	}
+}
