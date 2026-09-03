@@ -44,6 +44,11 @@ describe('a payload the budget could not carry', () => {
 		const banner = screen.getByRole('button', { name: /showing 65 B of 46 KB/i });
 		expect(banner).toHaveAccessibleName(/Load the whole payload/i);
 
+		// And no Copy over a prefix: the banner is how the whole payload is
+		// got, and a button offering to copy it that put 65 B of it on the
+		// clipboard would be worse than no button at all (spec 015 #3).
+		expect(screen.queryByRole('button', { name: /copy/i })).not.toBeInTheDocument();
+
 		await userEvent.setup().click(banner);
 		expect(onload).toHaveBeenCalledOnce();
 	});
@@ -75,6 +80,8 @@ describe('a payload the budget could not carry', () => {
 
 		expect(screen.queryByRole('button', { name: /load the whole/i })).not.toBeInTheDocument();
 		expect(screen.getByLabelText('Input').textContent).toContain('"content"');
+		// And now that what is on screen *is* the whole payload, Copy is back.
+		expect(screen.getByRole('button', { name: /copy the whole input/i })).toBeInTheDocument();
 	});
 
 	it('says it is working and stops accepting clicks', () => {

@@ -18,11 +18,17 @@
 		value,
 		label,
 		folded,
+		whole = true,
 		banner
 	}: {
 		value: unknown;
 		label: string;
 		folded?: boolean;
+		/**
+		 * Whether this value is the whole payload. A truncation marker's
+		 * preview is a prefix of one, and gets no Copy (#3).
+		 */
+		whole?: boolean;
 		/** Shown above the toolbar; the truncation banner of #3 is one. */
 		banner?: Snippet;
 	} = $props();
@@ -30,4 +36,4 @@
 	const shown = $derived(asDocument(value));
 </script>
 
-<CodeArea text={shown.text} plain={shown.plain} {label} {folded} {banner} readonly />
+<CodeArea text={shown.text} plain={shown.plain} {label} {folded} {whole} {banner} readonly />

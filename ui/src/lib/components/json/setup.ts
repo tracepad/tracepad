@@ -10,10 +10,10 @@ import {
 	syntaxHighlighting,
 	syntaxTree
 } from '@codemirror/language';
-import { linter } from '@codemirror/lint';
+import { diagnosticCount, linter, setDiagnosticsEffect } from '@codemirror/lint';
 import { search, searchKeymap } from '@codemirror/search';
-import { EditorState, type Extension } from '@codemirror/state';
-import { EditorView, highlightActiveLine, keymap } from '@codemirror/view';
+import { Compartment, EditorState, type Extension } from '@codemirror/state';
+import { EditorView, highlightActiveLine, keymap, type ViewUpdate } from '@codemirror/view';
 import { tags } from '@lezer/highlight';
 
 // The one CodeMirror setup the whole interface reads and writes JSON through
@@ -41,8 +41,15 @@ const OPEN_DEPTH = 2;
  * of it has been loaded can be megabytes, and the alternative to a bound is a
  * mount that blocks for as long as the document is big; what parsed in time is
  * folded and the rest opens flat, which is the old tree's behaviour anyway.
+ *
+ * The bound is a frame budget rather than a patience budget (#16): this walk
+ * runs after the document is on screen, so what it spends is time the panel
+ * does not answer in, and a screen carries several payloads that each want
+ * it — a second of it, four times over, is a panel that opens and freezes.
+ * Measured at 3.9 MB: ~155 ms of blocking here against ~325 ms at a second,
+ * for a document whose head folds and whose tail opens flat.
  */
-const PARSE_BUDGET_MS = 1000;
+const PARSE_BUDGET_MS = 150;
 
 /**
  * How a value becomes a document. A string is its own text — the API returns a
@@ -238,21 +245,61 @@ const surface = EditorView.theme({
 });
 
 /**
+ * The compartment `disabled` is reconfigured through. A consumer that turns
+ * an editor off while it saves is not asking for a different editor, and
+ * rebuilding one would throw away the cursor, the undo history, an open
+ * search panel and every fold the reader had opened by hand.
+ */
+const locking = new Compartment();
+
+/** What being locked decides: the facet, and the affordance that offers typing. */
+function locked(isLocked: boolean, editing: boolean): Extension {
+	return [
+		EditorState.readOnly.of(isLocked),
+		...(editing && !isLocked ? [highlightActiveLine()] : [])
+	];
+}
+
+/** Turns an instance off and on again in place, keeping everything else. */
+export function relock(view: EditorView, isLocked: boolean, editing: boolean) {
+	if (view.state.readOnly === isLocked) return;
+	view.dispatch({ effects: locking.reconfigure(locked(isLocked, editing)) });
+}
+
+/**
+ * The linter's answer, when a transaction carried one. It is the only parse
+ * of the document there is: `valid` is what the diagnostic already knows, so
+ * an author gets one parse per pause rather than one per keystroke, and the
+ * mark on screen and the flag the consumer reads can never disagree (#8).
+ */
+export function lintAnswer(update: ViewUpdate): boolean | null {
+	const answered = update.transactions.some((tr) =>
+		tr.effects.some((effect) => effect.is(setDiagnosticsEffect))
+	);
+	return answered ? diagnosticCount(update.state) === 0 : null;
+}
+
+/**
  * Everything one instance is made of. The mode is the `readOnly` facet and
  * nothing else (#2): the viewer stays a focusable, selectable, searchable
  * document, because a payload nobody can put the cursor in is a payload
  * `Cmd-F` cannot reach (#5).
+ *
+ * `editing` is what this instance *is* — an editor rather than a viewer, over
+ * a document that is JSON at all — and is fixed for its lifetime; `isLocked`
+ * is whether it will take a keystroke right now, and is not.
  */
 export function extensions(options: {
 	label: string;
-	readOnly: boolean;
+	editing: boolean;
+	isLocked: boolean;
 	plain: boolean;
 }): Extension[] {
-	const { label, readOnly, plain } = options;
+	const { label, editing, isLocked, plain } = options;
 	return [
 		EditorView.lineWrapping,
 		EditorView.contentAttributes.of({ 'aria-label': label }),
-		EditorState.readOnly.of(readOnly),
+		locking.of(locked(isLocked, editing)),
 		foldGutter(),
 		search({ top: true }),
 		history(),
@@ -265,7 +312,10 @@ export function extensions(options: {
 		syntaxHighlighting(highlight),
 		surface,
 		...(plain ? [] : [json()]),
-		...(readOnly || plain ? [] : [highlightActiveLine(), diagnostics])
+		// The linter stays installed while the editor is off: a document does
+		// not stop being invalid because the consumer is saving, and `valid`
+		// is read from what it finds.
+		...(editing ? [diagnostics] : [])
 	];
 }
 

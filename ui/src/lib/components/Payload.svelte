@@ -117,9 +117,16 @@
 	{#if marker}
 		<!-- The preview is a prefix of the payload's JSON cut on a UTF-8
 		     boundary, so it is text and not a value to parse — which is
-		     exactly why the surface is a document and not a tree (#3). -->
+		     exactly why the surface is a document and not a tree (#3). It is
+		     `whole={false}` for the same reason: the banner is how the rest of
+		     it is got, and a Copy here would put a prefix on the clipboard. -->
 		{#if marker.preview}
-			<JsonView value={marker.preview} label="{label} preview" banner={markerBanner} />
+			<JsonView
+				value={marker.preview}
+				label="{label} preview"
+				banner={markerBanner}
+				whole={false}
+			/>
 		{:else}
 			{@render markerBanner()}
 		{/if}

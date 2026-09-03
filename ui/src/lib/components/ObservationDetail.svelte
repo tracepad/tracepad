@@ -63,12 +63,6 @@
 	] as const);
 
 	/**
-	 * Where the prompt badge leads: the listing filtered by this prompt, at
-	 * this version when there is one. It resolves against no registry — the
-	 * store may not manage this prompt at all — and the filtered listing needs
-	 * none (spec 012 #5).
-	 */
-	/**
 	 * A record's value as one line. These blocks are flat by construction —
 	 * token counts, prices, sampling parameters — and the rare nested one is
 	 * still shorter as compact JSON than as a second list (spec 015 #11).
@@ -76,6 +70,12 @@
 	const scalar = (value: unknown) =>
 		typeof value === 'object' && value !== null ? JSON.stringify(value) : String(value);
 
+	/**
+	 * Where the prompt badge leads: the listing filtered by this prompt, at
+	 * this version when there is one. It resolves against no registry — the
+	 * store may not manage this prompt at all — and the filtered listing needs
+	 * none (spec 012 #5).
+	 */
 	const promptHref = $derived.by(() => {
 		const prompt = observation.prompt;
 		if (!prompt) return null;
