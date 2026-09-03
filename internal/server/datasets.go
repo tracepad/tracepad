@@ -318,6 +318,15 @@ func (s *Server) handleCreateItems(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, indexedError("item", len(requests), i, err))
 			return
 		}
+		if item.ID == "" {
+			generated, err := store.NewID()
+			if err != nil {
+				slog.Error("id generation failed", "err", err)
+				writeError(w, http.StatusInternalServerError, "cannot generate an item id")
+				return
+			}
+			item.ID = generated
+		}
 		// Two items with one id in a batch would be one row with two
 		// claims on it, and `changed` would count wrong (spec 003 #23).
 		if first, duplicate := seen[item.ID]; duplicate {
@@ -396,18 +405,16 @@ func (in *itemRequest) validate() (*store.DatasetItemInput, error) {
 		}
 		*source.target = *source.value
 	}
+	// An id the client did not send is minted by the caller, not here: a
+	// generator that failed is this server's problem and a 500, while
+	// everything else validate can say is the client's and a 400 (found in
+	// review of PR #30).
 	if in.ID != nil {
 		if !hexID.MatchString(*in.ID) {
 			return nil, fmt.Errorf(`"id" must be 32 lower-case hex characters, got %q`, *in.ID)
 		}
 		item.ID = *in.ID
-		return item, nil
 	}
-	generated, err := store.NewID()
-	if err != nil {
-		return nil, fmt.Errorf("cannot generate an item id: %w", err)
-	}
-	item.ID = generated
 	return item, nil
 }
 

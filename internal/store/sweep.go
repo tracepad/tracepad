@@ -446,7 +446,7 @@ func (t *traceSweep) apply(tx *sql.Tx) error {
 		return err
 	}
 
-	ids, err := expiredTraceIDs(tx, t.ProjectID, cutoff, t.Limit)
+	ids, err := expiredTraceIDs(tx, t.ProjectID, cutoff, t.Limit, t.Purge)
 	if err != nil || len(ids) == 0 {
 		return err
 	}
@@ -663,8 +663,19 @@ const notPinned = `(t.run_id IS NULL OR NOT EXISTS
 // ones. Served by idx_traces_ingested; the plan is asserted in the tests,
 // because a sweep that scans the project every hour is a sweep that will be
 // turned off.
-func expiredTraceIDs(tx *sql.Tx, projectID string, cutoff int64, limit int) ([]any, error) {
-	rows, err := tx.Query(expiredTracesQuery, projectID, cutoff, limit)
+//
+// A purge takes them all. The pin is a choice somebody made inside a project
+// (spec 014 #13), and a project whose grace window has run out is a project
+// whose runs are going too — leaving its pinned traces behind would stall the
+// drain `sweepProject` waits for, and dropping the `projects` row with them
+// still there would strand their payloads, which is the whole reason it waits
+// (spec 005 #4, found in review of PR #30).
+func expiredTraceIDs(tx *sql.Tx, projectID string, cutoff int64, limit int, purge bool) ([]any, error) {
+	query := expiredTracesQuery
+	if purge {
+		query = purgedTracesQuery
+	}
+	rows, err := tx.Query(query, projectID, cutoff, limit)
 	if err != nil {
 		return nil, fmt.Errorf("select expired traces: %w", err)
 	}
@@ -685,6 +696,12 @@ func expiredTraceIDs(tx *sql.Tx, projectID string, cutoff int64, limit int) ([]a
 // the exact statement. Binds the project, the cutoff and the chunk size.
 const expiredTracesQuery = `SELECT id FROM traces t
 	  WHERE t.project_id = ? AND t.ingested_at < ? AND ` + notPinned + `
+	  ORDER BY t.ingested_at LIMIT ?`
+
+// purgedTracesQuery is the same pick without the pin, for a project that is
+// being destroyed rather than swept.
+const purgedTracesQuery = `SELECT id FROM traces t
+	  WHERE t.project_id = ? AND t.ingested_at < ?
 	  ORDER BY t.ingested_at LIMIT ?`
 
 // referencedPayloads gathers the payload rows the chunk's traces and their

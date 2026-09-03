@@ -132,13 +132,21 @@ func (c *counters) observeOrphanRuns(projectID string, runIDs []string) []string
 	project := c.forProject(projectID)
 	project.orphanTraces += int64(len(runIDs))
 	var fresh []string
+	seen := make(map[string]bool, len(runIDs))
 	for _, id := range runIDs {
-		if project.unknownRuns[id] {
+		// Two passes of dedup, because they answer different questions.
+		// `seen` is this export's own: a batch of a hundred traces
+		// stamped with one wrong id is one mistake and one log line,
+		// which has to hold whether or not the id fits in the map below.
+		if seen[id] || project.unknownRuns[id] {
 			continue
 		}
-		// Bounded like the SDK versions: the id is client-controlled.
-		// Past the bound every new id is logged, which is the noisier
-		// failure and the one a client cannot turn into a leak.
+		seen[id] = true
+		// Bounded like the SDK versions: the id is client-controlled,
+		// and an unbounded map keyed by it is a memory leak a client can
+		// trigger. Past the bound an id is logged again on its next
+		// export — noisier, and the failure that cannot be turned into
+		// a leak.
 		if len(project.unknownRuns) < maxTrackedUnknownRuns {
 			project.unknownRuns[id] = true
 		}

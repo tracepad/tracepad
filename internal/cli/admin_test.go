@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/tracepad/tracepad/internal/model"
+	"github.com/tracepad/tracepad/internal/store"
 )
 
 // The administrative commands (spec 005). What is worth testing here is not
@@ -362,6 +363,24 @@ func TestUsersRemoveData(t *testing.T) {
 		&model.Observation{TraceID: traceHex(2), ID: spanHex(2), Type: model.TypeSpan,
 			Level: model.LevelDefault, StartTime: seedBase, EndTime: seedBase + ms})
 
+	// A run holding one of the user's traces: erasure outranks its pin, and
+	// the preview has to name the run that will lose it (spec 014 #14).
+	if err := h.writer.Submit(t.Context(), &store.DatasetItemsWrite{
+		ProjectID: h.projectID(t), Dataset: "golden", Now: 1,
+		Items: []*store.DatasetItemInput{{ID: strings.Repeat("d", 32), Input: []byte(`{}`)}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	runID := strings.Repeat("e", 32)
+	if err := h.writer.Submit(t.Context(), &store.RunCreate{
+		ProjectID: h.projectID(t), Dataset: "golden", ID: runID, Now: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	h.seed(t, &model.Trace{ID: traceHex(3), UserID: "u1", RunID: runID},
+		&model.Observation{TraceID: traceHex(3), ID: spanHex(3), Type: model.TypeSpan,
+			Level: model.LevelDefault, StartTime: seedBase, EndTime: seedBase + ms})
+
 	h.stdin = "u1\n"
 	out := h.run(t.Context(), true, "users", "rm-data", "u1")
 	if out.code != ExitOK {
@@ -369,6 +388,9 @@ func TestUsersRemoveData(t *testing.T) {
 	}
 	if !strings.Contains(out.stderr, `type "u1" to confirm`) {
 		t.Errorf("stderr = %q, want the user id as the echo, not the project name", out.stderr)
+	}
+	if !strings.Contains(out.stderr, runID) || !strings.Contains(out.stderr, "golden") {
+		t.Errorf("stderr = %q, want the run that loses a trace named before the echo", out.stderr)
 	}
 	if !strings.Contains(out.stdout, "raw OTLP bodies are not erased") {
 		t.Errorf("stdout = %q, want the raw archive position stated", out.stdout)

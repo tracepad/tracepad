@@ -397,6 +397,47 @@ func TestSystemCountsRejections(t *testing.T) {
 	}
 }
 
+// TestOrphanRunLoggingIsOncePerBatch: the counter takes every trace, and the
+// ids handed back to be logged are deduplicated within the call as well as
+// across calls. Both halves matter past the bound, where an id is no longer
+// remembered between exports: a hundred traces of one wrong id are one
+// mistake and must not be a hundred log lines (found in review of PR #30).
+func TestOrphanRunLoggingIsOncePerBatch(t *testing.T) {
+	c := newCounters()
+	const project = "p"
+
+	repeated := make([]string, 20)
+	for i := range repeated {
+		repeated[i] = "run-a"
+	}
+	if fresh := c.observeOrphanRuns(project, repeated); len(fresh) != 1 {
+		t.Errorf("first batch logged %d lines, want one for the one id", len(fresh))
+	}
+	if fresh := c.observeOrphanRuns(project, repeated); len(fresh) != 0 {
+		t.Errorf("second batch logged %d lines, want none: the id is known", len(fresh))
+	}
+	if got := c.orphanTraces(project); got != 40 {
+		t.Errorf("orphan_traces = %d, want every trace counted", got)
+	}
+
+	// Past the bound the map stops growing, and the per-call dedup is what
+	// is left standing.
+	for i := range maxTrackedUnknownRuns * 2 {
+		c.observeOrphanRuns(project, []string{fmt.Sprintf("run-%d", i)})
+	}
+	if tracked := len(c.projects[project].unknownRuns); tracked > maxTrackedUnknownRuns {
+		t.Fatalf("tracked %d ids, want at most %d: the id is client-controlled",
+			tracked, maxTrackedUnknownRuns)
+	}
+	beyond := make([]string, 20)
+	for i := range beyond {
+		beyond[i] = "run-past-the-bound"
+	}
+	if fresh := c.observeOrphanRuns(project, beyond); len(fresh) != 1 {
+		t.Errorf("a batch past the bound logged %d lines, want one", len(fresh))
+	}
+}
+
 func TestSDKVersionTrackingIsBounded(t *testing.T) {
 	c := newCounters()
 	for i := range maxTrackedSDKVersions * 2 {

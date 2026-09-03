@@ -169,6 +169,56 @@ func TestProjectPurgeLeavesNoDatasetRows(t *testing.T) {
 			t.Errorf("%s = %d after the purge, want nothing left", table, got)
 		}
 	}
+	// `payloads` has no project column and no cascade, so the pass has to
+	// have taken them itself. This is the end state and holds either way —
+	// the orphan collector at the tail of the same pass would find them if
+	// the chunks did not, a few thousand at a time. What the chunk must do
+	// is the test below.
+	if got := f.count(t, `SELECT COUNT(*) FROM payloads`); got != 0 {
+		t.Errorf("payloads = %d after the purge, want the pinned trace's taken with it", got)
+	}
+}
+
+// TestPurgeTakesPinnedTracesInItsChunks: the chunk itself must contain the
+// pinned trace. A purge that honoured the pin would report drained on a chunk
+// that came back short only because everything left was pinned, and
+// `sweepProject` would then drop the `projects` row with those traces still
+// there — they go by cascade, but their payloads have no cascade to go by and
+// are left for the orphan pass, which is exactly what the drain exists to
+// prevent (spec 005 #4, found in review of PR #30).
+func TestPurgeTakesPinnedTracesInItsChunks(t *testing.T) {
+	f := newSweepFixture(t)
+	live := strings.Repeat("a", 32)
+	f.createRun(t, "golden", live)
+	f.arrive(t, f.project.ID, hexTrace(1), daysAgo(1), func(tr *modelTrace) { tr.RunID = live })
+
+	// Deleted past its grace window: everything goes, pin or no pin.
+	if _, err := f.store.db.Exec(`UPDATE projects SET deleted_at = ? WHERE id = ?`, daysAgo(8), f.project.ID); err != nil {
+		t.Fatal(err)
+	}
+	chunk := &traceSweep{ProjectID: f.project.ID, Now: sweepNow.UnixNano(), Purge: true, Limit: 1000}
+	if err := f.writer.Submit(t.Context(), chunk); err != nil {
+		t.Fatal(err)
+	}
+	if chunk.Traces != 1 {
+		t.Errorf("the purge chunk took %d traces, want the pinned one", chunk.Traces)
+	}
+	if chunk.Payloads == 0 {
+		t.Errorf("the purge chunk took no payloads, so the trace's would have been stranded")
+	}
+
+	// And an ordinary sweep of a live project still spares it.
+	f2 := newSweepFixture(t)
+	f2.createRun(t, "golden", live)
+	f2.setRetention(t, f2.project.ID, days(30), nil)
+	f2.arrive(t, f2.project.ID, hexTrace(1), daysAgo(40), func(tr *modelTrace) { tr.RunID = live })
+	ordinary := &traceSweep{ProjectID: f2.project.ID, Now: sweepNow.UnixNano(), Limit: 1000}
+	if err := f2.writer.Submit(t.Context(), ordinary); err != nil {
+		t.Fatal(err)
+	}
+	if ordinary.Traces != 0 {
+		t.Errorf("an ordinary chunk took %d traces, want the pin to have spared it", ordinary.Traces)
+	}
 }
 
 // TestIngestRecordsTheLinkAndTheOrphan is Testing — ingest, at the store: a

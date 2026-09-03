@@ -84,9 +84,20 @@ RUN=$(curl -H "$AUTH" $TP/api/v1/datasets/support-golden/runs \
 RUN_ID=$(echo "$RUN" | jq -r .id)
 VERSION=$(echo "$RUN" | jq -r .dataset_version)
 
-# 4. Fetch the items at that version — not "the current one".
-curl -H "$AUTH" "$TP/api/v1/datasets/support-golden/items?version=$VERSION&limit=500"
+# 4. Fetch the items at that version — not "the current one" — page by page.
+CURSOR=
+while :; do
+  PAGE=$(curl -sH "$AUTH" \
+    "$TP/api/v1/datasets/support-golden/items?version=$VERSION&limit=500&cursor=$CURSOR")
+  echo "$PAGE" | jq -c '.items[]'          # your harness runs these
+  CURSOR=$(echo "$PAGE" | jq -r '.next_cursor // empty')
+  [ -n "$CURSOR" ] || break
+done
 ```
+
+`limit` caps at 500, so a dataset larger than that needs the loop: a pass that
+silently stopped at the first page would be recorded as a whole run over a
+fraction of the cases.
 
 Then, for each item, run your function under a trace whose **root span**
 carries two attributes:
