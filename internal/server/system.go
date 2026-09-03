@@ -41,6 +41,12 @@ type projectCounters struct {
 	// with how often. An SDK that starts sending a version we have never
 	// mapped shows up here before it shows up as a bug report.
 	sdkVersions map[string]int64
+	// orphanTraces counts trace deliveries that named a run this project
+	// does not have (spec 014 #3): a harness that stamps a wrong id must
+	// find out before it reads an empty run. unknownRuns is which ids,
+	// so each is logged once per process rather than once per span.
+	orphanTraces int64
+	unknownRuns  map[string]bool
 }
 
 // counters holds every since-start number the system endpoint reports, kept
@@ -69,6 +75,7 @@ func (c *counters) forProject(projectID string) *projectCounters {
 		entry = &projectCounters{
 			dialects:    map[string]*dialectCounter{},
 			sdkVersions: map[string]int64{},
+			unknownRuns: map[string]bool{},
 		}
 		c.projects[projectID] = entry
 	}
@@ -116,6 +123,33 @@ func (c *counters) observeSDKVersion(projectID, version string) {
 // maxTrackedSDKVersions bounds the distinct header values kept per project.
 const maxTrackedSDKVersions = 64
 
+// observeOrphanRuns records the traces of one export that named a run the
+// project does not have, and returns the ids not seen before, for the caller
+// to log once each (spec 014 #3).
+func (c *counters) observeOrphanRuns(projectID string, runIDs []string) []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	project := c.forProject(projectID)
+	project.orphanTraces += int64(len(runIDs))
+	var fresh []string
+	for _, id := range runIDs {
+		if project.unknownRuns[id] {
+			continue
+		}
+		// Bounded like the SDK versions: the id is client-controlled.
+		// Past the bound every new id is logged, which is the noisier
+		// failure and the one a client cannot turn into a leak.
+		if len(project.unknownRuns) < maxTrackedUnknownRuns {
+			project.unknownRuns[id] = true
+		}
+		fresh = append(fresh, id)
+	}
+	return fresh
+}
+
+// maxTrackedUnknownRuns bounds the distinct unknown run ids kept per project.
+const maxTrackedUnknownRuns = 256
+
 // snapshot renders one project's counters for the system endpoint. A project
 // that has never exported anything gets zeroes, not an absence: "nothing has
 // arrived" is an answer.
@@ -155,6 +189,17 @@ func (c *counters) snapshot(projectID string) object {
 		put("langfuse_ingestion_versions", versions)
 }
 
+// orphanTraces reports one project's count of trace deliveries that named a
+// run it does not have.
+func (c *counters) orphanTraces(projectID string) int64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if project := c.projects[projectID]; project != nil {
+		return project.orphanTraces
+	}
+	return 0
+}
+
 // handleSystem reports what this process knows about itself.
 func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 	project, ok := s.apiProject(w, r)
@@ -187,6 +232,16 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 		waiting, capacity := writer.QueueDepth()
 		queue = queue.put("waiting", waiting).put("capacity", capacity)
 	}
+	// How many traces the project's runs keep out of the sweep (spec 014
+	// #13) — the size of retention's one exception, so the operator sees
+	// why the file did not shrink — beside how many traces named a run
+	// that does not exist (spec 014 #3).
+	pinned, err := s.store.PinnedTraces(project.ID)
+	if err != nil {
+		slog.Error("count pinned traces failed", "err", err)
+		writeError(w, http.StatusInternalServerError, "failed to count the pinned traces")
+		return
+	}
 
 	body := object{}.
 		put("version", s.version).
@@ -211,6 +266,9 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 		// surface insists on, and the cadence *is* the margin in which a
 		// mistaken retention change can be corrected.
 		put("sweeper", s.sweeperStatus(project.ID)).
+		put("runs", object{}.
+			put("pinned_traces", pinned).
+			put("orphan_traces", s.counters.orphanTraces(project.ID))).
 		// The counters are since this process started and say so: an
 		// honest process-lifetime number now beats a metrics subsystem
 		// later (#10). They are this project's, for the same reason the

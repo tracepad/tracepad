@@ -168,6 +168,8 @@ type traceFields struct {
 	environment rankedValue
 	release     rankedValue
 	version     rankedValue
+	runID       rankedValue
+	itemID      rankedValue
 	tags        []string
 	metadata    map[string]any
 	dialect     string
@@ -210,6 +212,8 @@ type traceAccumulator struct {
 	environment rankedField
 	release     rankedField
 	version     rankedField
+	runID       rankedField
+	itemID      rankedField
 }
 
 func (a *traceAccumulator) apply(tf *traceFields) {
@@ -220,6 +224,8 @@ func (a *traceAccumulator) apply(tf *traceFields) {
 	a.environment.merge(tf.environment)
 	a.release.merge(tf.release)
 	a.version.merge(tf.version)
+	a.runID.merge(tf.runID)
+	a.itemID.merge(tf.itemID)
 	if len(tf.tags) > 0 {
 		a.trace.Tags = tf.tags
 	}
@@ -235,6 +241,12 @@ func (a *traceAccumulator) finish() *model.Trace {
 	a.trace.Environment = a.environment.value
 	a.trace.Release = a.release.value
 	a.trace.Version = a.version.value
+	a.trace.RunID = a.runID.value
+	// An item is a position inside a run: without the run it names
+	// nothing, and the column stays empty (spec 014, ingest contract).
+	if a.trace.RunID != "" {
+		a.trace.ItemID = a.itemID.value
+	}
 	// An explicit trace name beats the root span's name; the root span may
 	// also simply not be in this export yet.
 	if a.trace.Name == "" {
@@ -275,6 +287,7 @@ func mapSpan(sc spanCtx, parents map[string]bool) (*model.Observation, *traceFie
 	tf.environment = a.firstRanked(traceEnvironmentKeys...)
 	tf.release = a.firstRanked(traceReleaseKeys...)
 	tf.version = a.firstRanked(traceVersionKeys...)
+	tf.runID, tf.itemID = mapRunLink(a)
 	tf.tags = mapTags(a)
 	tf.metadata = mapMetadata(a, lfTraceMetadata)
 	if spanID(span.GetParentSpanId()) == "" {
@@ -336,6 +349,52 @@ func mapSpan(sc spanCtx, parents map[string]bool) (*model.Observation, *traceFie
 		scopeMetadata, eventMetadata)
 
 	return obs, tf, ""
+}
+
+// mapRunLink reads the run and the item a span says its trace belongs to
+// (spec 014 #2). Either is claimed only when it has the shape of an id the
+// store hands out — 32 lower-case hex characters — and any other shape stays
+// in metadata unclaimed, where a harness that stamped a run *name* rather
+// than the id will find it. An item without a run on the same span claims
+// nothing: an item is a position inside a run, and the trace-level merge
+// applies the same rule once every span has been seen.
+func mapRunLink(a *attrs) (run, item rankedValue) {
+	run = firstHexID(a, traceRunKeys...)
+	if run.value == "" {
+		return run, rankedValue{}
+	}
+	return run, firstHexID(a, traceItemKeys...)
+}
+
+// firstHexID is firstRanked for a chain whose value must be a 32-hex id.
+func firstHexID(a *attrs, keys ...string) rankedValue {
+	for rank, key := range keys {
+		raw, ok := a.lookup(key)
+		if !ok {
+			continue
+		}
+		id, valid := raw.(string)
+		if !valid || !isHexID(id) {
+			continue
+		}
+		a.claim(key)
+		return rankedValue{value: id, rank: rank}
+	}
+	return rankedValue{}
+}
+
+// isHexID reports the shape of a store-issued id: 32 lower-case hex digits.
+func isHexID(s string) bool {
+	if len(s) != 32 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 // mapLevel: an explicit level wins; otherwise an ERROR span status raises

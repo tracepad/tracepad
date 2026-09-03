@@ -41,6 +41,7 @@ func Fixtures() []Fixture {
 		langfuseExtendedTypes(),
 		largePayloads(),
 		wireColumns(),
+		evalRun(),
 	}
 }
 
@@ -409,6 +410,72 @@ func wireColumns() Fixture {
 					str("service.version", "1.9.0"),
 				},
 				scope("opentelemetry.instrumentation.openai", "0.42.0", priced),
+			),
+		},
+	}
+}
+
+// 009 — an eval harness's export (spec 014): the two attributes that link a
+// trace to a run and to the dataset item it answered, stamped on the root
+// span the way `docs/datasets.md` prescribes, beside the generation the case
+// produced and the prompt it ran. Three traces of one run: two items, one of
+// them attempted twice, and a third trace whose ids are not ids at all — a
+// harness that stamped the run's *name* — which the mapper leaves in
+// metadata unclaimed.
+func evalRun() Fixture {
+	const runID = "0e5a7c1d2b3f4a6980c1d2e3f4a5b6c7"
+	const itemA = "a1b2c3d4e5f60718293a4b5c6d7e8f90"
+	const itemB = "b2c3d4e5f60718293a4b5c6d7e8f90a1"
+
+	attempt := func(traceID, root, generation, item, answer string, at int64) []*tracepb.Span {
+		rootSpan := span(traceID, root, "", "answer-case",
+			base+at, base+at+700*ms,
+			str("langfuse.trace.name", "support-eval"),
+			str("langfuse.environment", "eval"),
+			str("tracepad.run_id", runID),
+			str("tracepad.item_id", item),
+			str("langfuse.observation.type", "span"),
+		)
+		call := span(traceID, generation, root, "answer",
+			base+at+20*ms, base+at+680*ms,
+			str("langfuse.observation.type", "generation"),
+			str("langfuse.observation.model.name", "claude-sonnet-5"),
+			str("langfuse.observation.prompt.name", "support-answer"),
+			i64("langfuse.observation.prompt.version", 7),
+			str("langfuse.observation.input", `[{"role":"user","content":"how do I reset my password?"}]`),
+			str("langfuse.observation.output", `{"role":"assistant","content":"`+answer+`"}`),
+			str("langfuse.observation.usage_details", `{"input":96,"output":24,"total":120}`),
+			str("langfuse.observation.cost_details", `{"input":0.0003,"output":0.0004}`),
+		)
+		return []*tracepb.Span{rootSpan, call}
+	}
+
+	var spans []*tracepb.Span
+	spans = append(spans, attempt("e0a1b2c3d4e5f60718293a4b5c6d7e8f", "e1e2e3e4e5e6e7e8", "e2e3e4e5e6e7e8e9",
+		itemA, "Open Settings and choose Reset.", 0)...)
+	spans = append(spans, attempt("e1b2c3d4e5f60718293a4b5c6d7e8f90", "f1f2f3f4f5f6f7f8", "f2f3f4f5f6f7f8f9",
+		itemB, "Ask an administrator to unlock the account.", 1000*ms)...)
+	// The same item again: a retry after a crash, or a second sample of a
+	// non-deterministic case. Both attempts are kept (spec 014 #2).
+	spans = append(spans, attempt("e2c3d4e5f60718293a4b5c6d7e8f90a1", "0a0b0c0d0e0f1011", "1a1b1c1d1e1f2021",
+		itemA, "Open Settings, then Security, then Reset.", 2000*ms)...)
+
+	// Not ids: the harness stamped what it calls the run and the case. The
+	// columns stay empty and the attributes stay visible in metadata.
+	named := span("e3d4e5f60718293a4b5c6d7e8f90a1b2", "2a2b2c2d2e2f3031", "", "answer-case",
+		base+3000*ms, base+3400*ms,
+		str("tracepad.run_id", "nightly-2026-09-03"),
+		str("tracepad.item_id", "case-17"),
+		str("langfuse.observation.type", "span"),
+	)
+	spans = append(spans, named)
+
+	return Fixture{
+		Name: "009-eval-run",
+		ResourceSpans: []*tracepb.ResourceSpans{
+			resourceSpans(
+				[]*commonpb.KeyValue{str("service.name", "support-eval")},
+				scope("langfuse-sdk", "4.7.0", spans...),
 			),
 		},
 	}
