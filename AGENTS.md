@@ -120,6 +120,20 @@ API. This file routes; it does not duplicate what specs and docs say.
   observation, the score-config form, and deletions that wear the echo
   ceremony exactly where the server has a dry run and a named consequence
   where it has none.
+- ✅ Spec 017 (the Python package) shipped: `tracepad` on PyPI, source in
+  `sdk/python/`, a thin layer over `opentelemetry-sdk` that owns no transport
+  and all of the ergonomics — `init` *adapts* to the provider it finds rather
+  than replacing it (#2), `@observe` and the three context managers capture
+  arguments and return values by default (#4), the generation helper reads an
+  OpenAI-compatible response including the cost the provider actually charged
+  (#5), scores go through a queue and a thread (#6), prompts through a cache
+  that honours the server's `max-age` and serves stale when it is away (#8).
+  The mapper gained the `tracepad` dialect — the handful of attributes the
+  GenAI conventions have no word for, each ranked beside the `langfuse.*` key
+  it mirrors, `langfuse.*` never written (#3) — and with it a golden fixture
+  that is not synthetic: `010-tracepad-sdk.pb` is the package's own export.
+  Failure semantics are split by path: the tracing half never raises into
+  application code, the REST half raises `TracepadError` (#9).
 - ✅ Spec 005 (retention & admin) shipped: schema 0005, the hourly sweeper
   writing every chunk through the group-commit writer, the admin API under
   `/api/v1/projects` with a dry-run/confirm contract on every destructive
@@ -152,6 +166,7 @@ API. This file routes; it does not duplicate what specs and docs say.
 | A listing (rows, cursors, count, the bar, the panel's walk) | `ui/src/lib/listing.svelte.ts` and its tests, spec 010 — all three listings are one loader, so a listing defect is one defect. `$lib/page` and `$lib/peek` hold the pure part; a listing read oldest first (a dataset's items, a run's) sets `ascending` on its walk (spec 016 #19) |
 | The Evals screens (datasets, runs, the comparison) | `ui/src/routes/{datasets,runs,score-configs}/`, `ui/src/lib/components/evals/` (the tables, the three peek bodies, the summary cards), `ui/src/lib/evals.ts` (the pure part: the checkbox rule, the *changed only* filter, the words a cell uses), `ui/src/lib/api/runs.ts` (the run filters, held to `openapi.json`), `docs/ui.md#evals`, spec 016 — every number on these screens is the server's (spec 014 #18); the client decides which rows to draw and never what a verdict is |
 | Writing an eval (the item editor, the forms, the deletions) | `ui/src/lib/components/evals/ItemEditor.svelte` over the routes `datasets/items/new` and `datasets/[name]/items/[id]/edit` (spec 016 #21), `ScoreConfigDialog.svelte` with `ui/src/lib/api/score-configs.ts` (the vocabularies and the rules, held to `openapi.json`), `NewDatasetDialog`/`DeleteDatasetDialog`, `ui/src/lib/components/ConfirmDialog.svelte`, `itemBody`/`savedMessage` in `$lib/evals`, `docs/datasets.md#the-same-loop-from-the-web-interface` — a write is one of spec 014's endpoints and never a verb of the screen's own; the echo ceremony (`ConfirmCard`) is only where the server has a dry run, and the dialog is where it does not (#6) |
+| The Python package | `sdk/python/` (`src/tracepad/` is the package, `tests/` its suite and `tests/e2e/` the run against a real binary), `docs/sdk-python.md`, spec 017 — two dependencies and no third, no provider-client wrapper ever (design §6.5); `_tracing.py` holds the provider adaptation and defers the SDK's own imports into `init`, `_attributes.py` is the vocabulary that `internal/mapping/rules.go` reads back, and the application-line budget is 1,500 shared with spec 018 (`scripts/sdk-lines.sh`). `scripts/fixtures/tracepad_sdk.py` rewrites `testdata/otlp/010-tracepad-sdk.pb` from the package's own exporter |
 | Configuration | `internal/config/`, spec 001 + spec 002 Configuration tables |
 
 Attribute semantics for the `langfuse.*` dialect are derived from Langfuse
@@ -171,10 +186,16 @@ reason in a comment; adding a dialect should be a table edit.
   `make build-server` builds without it and needs no Node.
 - `make e2e` — boot the real binary on a temp database and run the Playwright
   smoke. Its own CI job, never part of the gate.
-- `make smoke` — export from pinned real SDKs into a real binary and assert
-  the rows. Needs network on first run (installs the SDKs).
+- `make smoke` — export from pinned real SDKs and from our own package into a
+  real binary and assert the rows. Needs network on first run (installs them).
+- `make sdk-test` — the Python package's unit suite, then its end-to-end suite
+  against a binary it builds. `uv` if present, `venv` otherwise;
+  `SDK_SKIP_E2E=1` runs the unit half alone. `make sdk-lines` reports its
+  budget.
 - `make fixtures` — regenerate `testdata/otlp/*.pb` and their goldens after a
-  deliberate mapping change. Review the golden diff; it *is* the change.
+  deliberate mapping change. Review the golden diff; it *is* the change. The
+  one body that is not synthetic (`010-tracepad-sdk.pb`) is rewritten from the
+  package first, which needs `uv`; without it that body stands as committed.
 
 ## Process
 

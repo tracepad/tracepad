@@ -52,6 +52,7 @@ type Result struct {
 // Dialect labels.
 const (
 	DialectLangfuse = "langfuse"
+	DialectTracepad = "tracepad"
 	DialectGenAI    = "genai"
 	DialectOTel     = "otel"
 )
@@ -291,7 +292,7 @@ func mapSpan(sc spanCtx, parents map[string]bool) (*model.Observation, *traceFie
 	tf.version = a.firstRanked(traceVersionKeys...)
 	tf.runID, tf.itemID = mapRunLink(a)
 	tf.tags = mapTags(a)
-	tf.metadata = mapMetadata(a, lfTraceMetadata)
+	tf.metadata = mapMetadata(a, traceMetadataKeys...)
 	if spanID(span.GetParentSpanId()) == "" {
 		tf.rootName = span.GetName()
 	}
@@ -347,7 +348,7 @@ func mapSpan(sc spanCtx, parents map[string]bool) (*model.Observation, *traceFie
 	if events := mapEvents(span); events != nil {
 		eventMetadata[metadataEventsKey] = events
 	}
-	obs.Metadata = mergeMetadata(mapMetadata(a, lfObsMetadata), typeMetadata, a.rest(),
+	obs.Metadata = mergeMetadata(mapMetadata(a, obsMetadataKeys...), typeMetadata, a.rest(),
 		scopeMetadata, eventMetadata)
 
 	return obs, tf, ""
@@ -499,14 +500,14 @@ func mapStatusMessage(a *attrs, status *tracepb.Status) string {
 // in metadata and left to the heuristics, exactly as before — the column
 // still cannot hold it.
 func mapType(a *attrs, obs *model.Observation, hasChildren bool, meta map[string]any) string {
-	if raw, ok := a.lookup(lfObsType); ok {
+	if key, raw, ok := a.first(obsTypeKeys...); ok {
 		spelling := strings.ToLower(strings.TrimSpace(asString(raw)))
-		a.claim(lfObsType)
+		a.claim(key)
 		if observationTypes[spelling] {
 			return spelling
 		}
 		// An unknown spelling is preserved and left to the heuristics.
-		meta[lfObsType] = raw
+		meta[key] = raw
 	}
 	if obs.Model != "" {
 		return model.TypeGeneration
@@ -522,16 +523,19 @@ func mapType(a *attrs, obs *model.Observation, hasChildren bool, meta map[string
 // claimed only for the ones that parse — anything else stays visible in
 // metadata rather than being silently dropped for having the wrong type.
 func mapCompletionStartTime(a *attrs) int64 {
-	raw, ok := a.lookup(lfObsCompletionStartTime)
-	if !ok {
-		return 0
+	for _, key := range obsCompletionStartKeys {
+		raw, ok := a.lookup(key)
+		if !ok {
+			continue
+		}
+		instant, parsed := parseInstant(raw)
+		if !parsed {
+			continue
+		}
+		a.claim(key)
+		return instant
 	}
-	instant, parsed := parseInstant(raw)
-	if !parsed {
-		return 0
-	}
-	a.claim(lfObsCompletionStartTime)
-	return instant
+	return 0
 }
 
 // parseInstant reads the shapes an SDK sends an instant in: an integer of
@@ -591,11 +595,11 @@ func parseInstant(raw any) (int64, bool) {
 // linking at an empty listing. It stays in metadata like every other shape
 // this cannot use (found in review of PR #19).
 func mapPrompt(a *attrs) (string, *int64) {
-	name, ok := a.firstString(lfObsPromptName)
+	name, ok := a.firstString(obsPromptNameKeys...)
 	if !ok {
 		return "", nil
 	}
-	raw, present := a.lookup(lfObsPromptVersion)
+	key, raw, present := a.first(obsPromptVersionKeys...)
 	if !present {
 		return name, nil
 	}
@@ -603,7 +607,7 @@ func mapPrompt(a *attrs) (string, *int64) {
 	if !integral || version < 1 {
 		return name, nil
 	}
-	a.claim(lfObsPromptVersion)
+	a.claim(key)
 	return name, &version
 }
 
@@ -758,20 +762,25 @@ func mapTags(a *attrs) []string {
 	return nil
 }
 
-// mapMetadata collects a metadata prefix in both shapes SDKs use: a JSON
-// object at the bare key, and one attribute per entry underneath it.
-func mapMetadata(a *attrs, prefix string) map[string]any {
+// mapMetadata collects metadata prefixes in both shapes SDKs use: a JSON
+// object at the bare key, and one attribute per entry underneath it. Prefixes
+// come highest-priority first and are read in reverse, so that where two
+// dialects name the same entry the higher-priority one is what stays.
+func mapMetadata(a *attrs, prefixes ...string) map[string]any {
 	out := map[string]any{}
-	if raw, ok := a.lookup(prefix); ok {
-		if obj, valid := parseJSONObject(raw); valid {
-			a.claim(prefix)
-			for k, v := range obj {
-				out[k] = v
+	for i := len(prefixes) - 1; i >= 0; i-- {
+		prefix := prefixes[i]
+		if raw, ok := a.lookup(prefix); ok {
+			if obj, valid := parseJSONObject(raw); valid {
+				a.claim(prefix)
+				for k, v := range obj {
+					out[k] = v
+				}
 			}
 		}
-	}
-	for k, v := range a.prefixed(prefix) {
-		out[k] = looseJSON(v)
+		for k, v := range a.prefixed(prefix) {
+			out[k] = looseJSON(v)
+		}
 	}
 	if len(out) == 0 {
 		return nil
@@ -896,14 +905,21 @@ func allZero(b []byte) bool {
 	return true
 }
 
-// dialectOf labels a span by the richest dialect its attributes speak.
+// dialectOf labels a span by the richest dialect its attributes speak. The run
+// link is not a dialect: `tracepad.run_id` is stamped by any harness, in any
+// language, over whatever SDK the application already runs (spec 014 #2), so
+// it says nothing about who wrote the span (spec 017 #3).
 func dialectOf(values map[string]any) string {
 	dialect := DialectOTel
 	for k := range values {
 		if strings.HasPrefix(k, "langfuse.") {
 			return DialectLangfuse
 		}
-		if strings.HasPrefix(k, "gen_ai.") {
+		if strings.HasPrefix(k, "tracepad.") && k != tpRunID && k != tpItemID {
+			dialect = DialectTracepad
+			continue
+		}
+		if strings.HasPrefix(k, "gen_ai.") && dialect == DialectOTel {
 			dialect = DialectGenAI
 		}
 	}
@@ -911,7 +927,7 @@ func dialectOf(values map[string]any) string {
 }
 
 func maxDialect(a, b string) string {
-	rank := map[string]int{DialectOTel: 0, DialectGenAI: 1, DialectLangfuse: 2}
+	rank := map[string]int{DialectOTel: 0, DialectGenAI: 1, DialectTracepad: 2, DialectLangfuse: 3}
 	if rank[b] > rank[a] {
 		return b
 	}

@@ -49,3 +49,12 @@ ui/test-results/
 ui/playwright-report/
 ui/tests/e2e/.state.json
 internal/ui/dist/
+
+# The Python package (spec 017). Nothing a build or a test run leaves behind:
+# the wheel is built by the release workflow and the virtualenv by `uv`.
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/

@@ -56,8 +56,25 @@ export OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://localhost:4318/v1/traces
 export OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer tp-sk-…"
 ```
 
+In Python there is also a package — a thin layer over the same OpenTelemetry
+SDK, which adds an exporter to the provider your application already has
+rather than replacing it:
+
+```sh
+pip install tracepad
+```
+
+```python
+import tracepad
+tracepad.init()
+
+@tracepad.observe
+def answer(question: str) -> str: ...
+```
+
 See [docs/ingest.md](docs/ingest.md) for the endpoints, the auth schemes, the
-attribute conventions Tracepad understands, and the ingest configuration.
+attribute conventions Tracepad understands, and the ingest configuration, and
+[docs/sdk-python.md](docs/sdk-python.md) for the package.
 
 ## Scores and prompts
 

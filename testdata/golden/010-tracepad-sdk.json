@@ -1,0 +1,127 @@
+{
+  "dialect": "tracepad",
+  "traces": [
+    {
+      "id": "a0b1c2d3e4f5a6b7c8d9ea0000000001",
+      "name": "support-chat",
+      "user_id": "user-4821",
+      "session_id": "session-77",
+      "environment": "production",
+      "release": "2026.9.4",
+      "tags": [
+        "support",
+        "beta"
+      ],
+      "metadata": {
+        "channel": "web"
+      }
+    }
+  ],
+  "observations": [
+    {
+      "trace_id": "a0b1c2d3e4f5a6b7c8d9ea0000000001",
+      "id": "1a2b3c4d5e6f0001",
+      "type": "span",
+      "name": "answer-question",
+      "start_time": 1787738400000000000,
+      "end_time": 1787738400060000000,
+      "level": "DEFAULT",
+      "input": {
+        "question": "how do I reset my password?"
+      },
+      "metadata": {
+        "resource.service.name": "support-bot",
+        "resource.telemetry.sdk.language": "python",
+        "resource.telemetry.sdk.name": "opentelemetry",
+        "scope.name": "tracepad",
+        "scope.version": "0.1.0"
+      }
+    },
+    {
+      "trace_id": "a0b1c2d3e4f5a6b7c8d9ea0000000001",
+      "id": "1a2b3c4d5e6f0002",
+      "parent_observation_id": "1a2b3c4d5e6f0001",
+      "type": "tool",
+      "name": "catalog-search",
+      "start_time": 1787738400010000000,
+      "end_time": 1787738400020000000,
+      "level": "WARNING",
+      "status_message": "one result",
+      "input": {
+        "query": "password reset"
+      },
+      "output": [
+        "the reset page"
+      ],
+      "metadata": {
+        "attempt": 2,
+        "resource.service.name": "support-bot",
+        "resource.telemetry.sdk.language": "python",
+        "resource.telemetry.sdk.name": "opentelemetry",
+        "scope.name": "tracepad",
+        "scope.version": "0.1.0"
+      }
+    },
+    {
+      "trace_id": "a0b1c2d3e4f5a6b7c8d9ea0000000001",
+      "id": "1a2b3c4d5e6f0003",
+      "parent_observation_id": "1a2b3c4d5e6f0001",
+      "type": "event",
+      "name": "cache.miss",
+      "start_time": 1787738400030000000,
+      "end_time": 1787738400030000000,
+      "level": "DEFAULT",
+      "metadata": {
+        "key": "support-answer",
+        "resource.service.name": "support-bot",
+        "resource.telemetry.sdk.language": "python",
+        "resource.telemetry.sdk.name": "opentelemetry",
+        "scope.name": "tracepad",
+        "scope.version": "0.1.0"
+      }
+    },
+    {
+      "trace_id": "a0b1c2d3e4f5a6b7c8d9ea0000000001",
+      "id": "1a2b3c4d5e6f0004",
+      "parent_observation_id": "1a2b3c4d5e6f0001",
+      "type": "generation",
+      "name": "chat-completion",
+      "start_time": 1787738400040000000,
+      "end_time": 1787738400050000000,
+      "completion_start_time": 1787738400045000000,
+      "model": "claude-sonnet-5",
+      "model_parameters": {
+        "max_tokens": 512,
+        "temperature": 0.2
+      },
+      "level": "DEFAULT",
+      "usage": {
+        "cache_read_input_tokens": 96,
+        "input_tokens": 128,
+        "output_tokens": 41,
+        "reasoning_tokens": 12
+      },
+      "cost_details": {
+        "total": 0.0011
+      },
+      "provided_cost": true,
+      "prompt_name": "support-answer",
+      "prompt_version": 7,
+      "input": [
+        {
+          "content": "how do I reset my password?",
+          "role": "user"
+        }
+      ],
+      "output": "Open Settings and choose Reset.",
+      "metadata": {
+        "gen_ai.response.model": "claude-sonnet-5-2026-08-01",
+        "resource.service.name": "support-bot",
+        "resource.telemetry.sdk.language": "python",
+        "resource.telemetry.sdk.name": "opentelemetry",
+        "scope.name": "tracepad",
+        "scope.version": "0.1.0"
+      }
+    }
+  ]
+}

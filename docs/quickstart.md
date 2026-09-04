@@ -48,8 +48,37 @@ python your_app.py
 
 The Langfuse SDKs work too, against the same endpoint under their own path —
 set `LANGFUSE_HOST`, `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` instead.
-Both dialects of attribute naming are understood; see
-[ingest.md](ingest.md) for what is mapped and how.
+Every dialect of attribute naming is understood; see [ingest.md](ingest.md)
+for what is mapped and how.
+
+**In Python, with a decorator instead.** The `tracepad` package is a thin
+layer over the same OpenTelemetry SDK — one call to point the process at the
+store, and the shapes a person writes every time:
+
+```sh
+pip install tracepad
+export TRACEPAD_HOST=http://localhost:4318
+export TRACEPAD_API_KEY=tp-sk-…
+```
+
+```python
+import tracepad
+
+tracepad.init()
+
+@tracepad.observe
+def answer(question: str) -> str:
+    tracepad.update_trace(user_id="u-42", tags=["support"])
+    with tracepad.generation("chat", model="gpt-4o-mini", input=question) as call:
+        response = client.chat.completions.create(model="gpt-4o-mini", messages=…)
+        call.end(response=response)          # model, usage, and the cost as charged
+    tracepad.score("helpful", 1)             # against the trace in flight
+    return response.choices[0].message.content
+```
+
+It adds an exporter to a `TracerProvider` your application already has rather
+than replacing it, so it sits beside FastAPI instrumentation and the Langfuse
+SDK instead of competing with them. See [sdk-python.md](sdk-python.md).
 
 A `200` from the export means the spans are committed and fsynced, so a
 trace is queryable the moment its exporter's batch returns.
@@ -86,6 +115,8 @@ curl -H "Authorization: Bearer tp-sk-…" \
 ## Next
 
 - [ingest.md](ingest.md) — endpoints, authentication, attribute conventions.
+- [sdk-python.md](sdk-python.md) — the `tracepad` package: `init`, `@observe`,
+  generations, prompts and scores.
 - [api.md](api.md) — the read API, its filters, and the response budget.
 - [retention.md](retention.md) — how long data is kept and how to change it.
 - [admin.md](admin.md) — more projects, more keys, erasing one user's data.

@@ -33,7 +33,17 @@ vet: ## Static checks
 smoke: ## Export from real SDKs into a real binary and assert the rows
 	scripts/smoke/run.sh
 
+# One body in the corpus is not synthetic: `010-tracepad-sdk.pb` is what the
+# Python package puts on the wire (spec 017, Testing). It is rewritten first,
+# by the package's own exporter under the pinned SDKs of the smoke test, and
+# the Go pass then regenerates every golden — including that one's, from the
+# bytes on disk. Without `uv` the committed body stands and only the goldens
+# move, which is what a Go-only checkout wants anyway.
 fixtures: ## Regenerate testdata/otlp bodies and their golden files
+	@command -v uv >/dev/null 2>&1 \
+		&& uv run --quiet --isolated --with-requirements scripts/smoke/requirements.txt \
+			--with-editable sdk/python python scripts/fixtures/tracepad_sdk.py \
+		|| echo "uv is missing: keeping testdata/otlp/010-tracepad-sdk.pb as committed"
 	go test ./internal/mapping -run TestGoldenFixtures -update
 
 format: ## Format all Go sources
@@ -89,6 +99,20 @@ UI_BUDGET := 14000
 ui-lines: ## Report the interface's application lines against its budget, and its test lines beside them
 	scripts/ui-lines.sh $(UI_BUDGET)
 
+# --- The Python package (specs 017, 018) --------------------------------------
+#
+# `uv` is a dev prerequisite of the package half only, the way Node is of the
+# interface: every target above runs without it.
+
+sdk-test: ## Unit-test the Python package, and end-to-end against a real binary
+	scripts/sdk-test.sh
+
+# The budget spec 017 #1 set, shared with the harness of spec 018.
+SDK_BUDGET := 1500
+
+sdk-lines: ## Report the Python package's application lines against its budget
+	scripts/sdk-lines.sh $(SDK_BUDGET)
+
 precommit: ensure-hooks format-check vet test ui-check ## Full gate (also installed as git pre-commit hook)
 
 # git rev-parse --git-path resolves the hooks dir in worktrees too; empty
@@ -107,5 +131,5 @@ install-hooks: ## (Re)install the pre-commit gate hook
 	chmod +x "$(HOOKS_DIR)/pre-commit"
 
 .PHONY: help build build-server dev test vet smoke fixtures format format-check \
-	ui ui-deps ui-types ui-types-check ui-check ui-lines e2e \
+	ui ui-deps ui-types ui-types-check ui-check ui-lines e2e sdk-test sdk-lines \
 	precommit ensure-hooks install-hooks

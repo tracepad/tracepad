@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # Real-SDK smoke test (spec 002, Testing #3).
 #
-# Builds the binary, runs it, points a pinned opentelemetry-sdk script and a
-# pinned Langfuse SDK script at it, and asserts the rows they produced. This
-# is the drift detector for SDK conventions: when an SDK changes what it
-# emits, this fails before a user notices.
+# Builds the binary, runs it, points a pinned opentelemetry-sdk script, a
+# pinned Langfuse SDK script and our own package at it, and asserts the rows
+# they produced. This is the drift detector for SDK conventions: when an SDK
+# changes what it emits, this fails before a user notices. Our own package is
+# installed from this checkout rather than pinned, because the drift it detects
+# is between the package and the mapper of the same commit (spec 017 #12).
 #
 #   scripts/smoke/run.sh
 #
@@ -31,10 +33,12 @@ if [ -z "$python_bin" ]; then
     echo "==> preparing python environment"
     if command -v uv >/dev/null 2>&1; then
         uv venv "$work/venv" >/dev/null
-        uv pip install --quiet --python "$work/venv/bin/python" -r "$smoke_dir/requirements.txt"
+        uv pip install --quiet --python "$work/venv/bin/python" \
+            -r "$smoke_dir/requirements.txt" -e "$repo_root/sdk/python"
     else
         python3 -m venv "$work/venv"
-        "$work/venv/bin/pip" install --quiet -r "$smoke_dir/requirements.txt"
+        "$work/venv/bin/pip" install --quiet \
+            -r "$smoke_dir/requirements.txt" -e "$repo_root/sdk/python"
     fi
     python_bin="$work/venv/bin/python"
 fi
@@ -75,9 +79,12 @@ echo "==> exporting with opentelemetry-sdk"
 echo "==> exporting with the langfuse SDK"
 "$python_bin" "$smoke_dir/export_langfuse.py" "$work/langfuse-trace-id"
 
+echo "==> exporting with the tracepad package"
+"$python_bin" "$smoke_dir/export_tracepad.py" "$work/tracepad-trace-id"
+
 echo "==> checking the database"
 python3 "$smoke_dir/check.py" "$TRACEPAD_DATA_DIR/tracepad.db" \
-    "$work/otel-trace-id" "$work/langfuse-trace-id"
+    "$work/otel-trace-id" "$work/langfuse-trace-id" "$work/tracepad-trace-id"
 
 echo "==> server log"
 cat "$work/server.log"
