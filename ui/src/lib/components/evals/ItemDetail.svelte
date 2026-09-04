@@ -3,6 +3,8 @@
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import { ApiError, api, type DatasetItem, type ItemVersions } from '$lib/api/client.svelte';
 	import { ABSENT, timestamp } from '$lib/format';
+	import Button from '../Button.svelte';
+	import ConfirmDialog from '../ConfirmDialog.svelte';
 	import JsonView from '../json/JsonView.svelte';
 
 	// One dataset item, whole: the three bodies as documents (spec 015), where
@@ -14,12 +16,22 @@
 	let {
 		dataset,
 		id,
-		version
+		version,
+		writable = false,
+		onarchived
 	}: {
 		dataset: string;
 		id: string;
 		/** The version the page is reading at; the current one when absent. */
 		version?: number;
+		/**
+		 * Whether the head is what is on screen. A write lands at the head
+		 * (spec 014 #5), so offering one while an older version is being read
+		 * would edit something other than what the reader is looking at (#4).
+		 */
+		writable?: boolean;
+		/** The item was archived: the listing behind this panel is a version out. */
+		onarchived?: () => void;
 	} = $props();
 
 	let item = $state.raw<DatasetItem | null>(null);
@@ -61,6 +73,12 @@
 		const newest = history?.versions[0];
 		return newest?.archived ? newest.version : null;
 	});
+
+	// The two writes an item has (spec 016 #6): the editor page, and the
+	// archive — which destroys nothing, so it asks once in a dialog rather
+	// than through the echo ceremony a dataset's deletion wears.
+	const editable = $derived(writable && archivedAt === null);
+	let archiving = $state(false);
 </script>
 
 {#if loading}
@@ -115,6 +133,32 @@
 			<p class="text-warn border-border border-b px-4 py-2 text-sm">
 				Archived at version {archivedAt}: this item is not in the current dataset.
 			</p>
+		{/if}
+
+		{#if editable}
+			<div class="border-border flex gap-1.5 border-b px-4 py-2">
+				<a
+					href="/datasets/{encodeURIComponent(dataset)}/items/{encodeURIComponent(id)}/edit"
+					class="border-border bg-surface text-fg hover:bg-raised pointer-coarse:h-11
+						pointer-coarse:px-4 inline-flex h-7 items-center gap-1.5 rounded-md border px-2.5
+						text-sm font-medium whitespace-nowrap transition-colors duration-100"
+				>
+					Edit
+				</a>
+				<Button onclick={() => (archiving = true)}>Archive</Button>
+			</div>
+			<ConfirmDialog
+				open={archiving}
+				title="Archive this item?"
+				description="It leaves the dataset at a new version and stays readable at every earlier
+					one — nothing is destroyed, and posting the same id again brings it back."
+				confirmLabel="Archive it"
+				onconfirm={async () => {
+					await api.archiveItem(dataset, id);
+					onarchived?.();
+				}}
+				onclose={() => (archiving = false)}
+			/>
 		{/if}
 
 		{#each [['Input', item.input], ['Expected output', item.expected_output], ['Metadata', item.metadata]] as [label, value] (label)}

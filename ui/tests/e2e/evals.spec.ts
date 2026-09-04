@@ -302,6 +302,141 @@ test('score configs are listed read-only', async ({ page }) => {
 	await expect(row).toContainText('0 … 1');
 });
 
+// --- the write half (spec 016, PR 2) -----------------------------------------
+//
+// Every one of these tests owns what it writes to. The two Playwright projects
+// run this file against one server, and the tests of the read half assert
+// exact numbers of the corpus above — so a dataset created here, deleted here
+// and named after nothing else is what keeps a write from moving a count
+// somebody is reading.
+
+/** A dataset of this test's own, with one case in it, at version 1. */
+async function freshDataset(prefix: string): Promise<string> {
+	const name = `${prefix}-${Math.random().toString(36).slice(2, 8)}`;
+	await must('POST', `/api/v1/datasets/${name}/items`, {
+		input: { question: 'what is the refund window?' },
+		expected_output: { answer: '30 days.' }
+	});
+	return name;
+}
+
+/** Replaces a pane's document, the way an author would after selecting all. */
+async function type(page: Page, label: string, text: string) {
+	const pane = page.getByLabel(label, { exact: true });
+	await pane.click();
+	await page.keyboard.press('ControlOrMeta+a');
+	await page.keyboard.type(text);
+}
+
+test('an item is edited into a new version, and saving it again changes nothing', async ({
+	page
+}) => {
+	const name = await freshDataset('edit');
+	await signIn(page);
+	await page.goto(`/datasets/${name}`);
+
+	// In through the peek panel, which is where a reader finds the case.
+	await page.locator('tbody tr').first().getByRole('link').click();
+	await page.getByRole('dialog').getByRole('link', { name: 'Edit', exact: true }).click();
+	await expect(page).toHaveURL(/\/items\/[0-9a-f]{32}\/edit$/);
+	await expect(page.getByLabel('Input', { exact: true })).toContainText('refund window');
+
+	await type(page, 'Expected output', '{"answer": "30 days from delivery."}');
+	await page.getByRole('button', { name: 'Save' }).click();
+	await expect(page.getByText('Saved as version 2.')).toBeVisible();
+
+	// The same body again: the store writes nothing and says so (spec 014 #6).
+	await page.getByRole('button', { name: 'Save' }).click();
+	await expect(page.getByText(/^Unchanged/)).toContainText('version 2');
+
+	// And the new version is what the dataset now reads at.
+	await page.goto(`/datasets/${name}`);
+	await expect(page.locator('tbody tr').first()).toContainText('30 days from delivery');
+});
+
+test('a case is cut from an observation into a dataset, whole', async ({ page }) => {
+	const name = await freshDataset('cut');
+	await signIn(page);
+	await page.goto(`/traces/${A_TRACES[0][0]}`);
+
+	// The generation, not the root: in an agent trace the case is usually one
+	// generation (#8).
+	await page.getByRole('treeitem', { name: /^generation answer/ }).click();
+	await page.getByRole('link', { name: 'Add to dataset' }).click();
+
+	await expect(page).toHaveURL(/\/datasets\/items\/new\?/);
+	// The payloads are the observation's own, fetched whole rather than taken
+	// from a preview: the input becomes the case, the output what it should
+	// have said.
+	await expect(page.getByLabel('Input', { exact: true })).toContainText('priority routing');
+	await expect(page.getByLabel('Expected output', { exact: true })).toContainText('Team plan');
+
+	await page.getByLabel('Dataset').selectOption(name);
+	await page.getByRole('button', { name: 'Save' }).click();
+	await expect(page.getByText('Saved as version 2.')).toBeVisible();
+
+	// The saved case knows where it was cut from.
+	await page.getByRole('link', { name: 'Open it in the dataset' }).click();
+	await expect(page.getByRole('dialog').getByText('Cut from')).toBeVisible();
+});
+
+test('deleting a dataset shows the dry run and refuses a wrong echo', async ({ page }) => {
+	const name = await freshDataset('doomed');
+	await signIn(page);
+	await page.goto(`/datasets/${name}`);
+	await page.getByRole('button', { name: 'Delete dataset' }).click();
+
+	const card = page.getByRole('dialog');
+	await card.getByRole('button', { name: 'Show what would go' }).click();
+	// The server's own counts, not the screen's (spec 007 #5).
+	await expect(card.getByText('This would delete')).toBeVisible();
+	// Including what is *not* deleted: the traces the runs were pinning.
+	await expect(card.getByText(/pinned traces/)).toBeVisible();
+
+	const execute = card.getByRole('button', { name: 'Delete this dataset' });
+	await expect(execute).toBeDisabled();
+	await card.getByRole('textbox').fill(`${name}x`);
+	await expect(execute).toBeDisabled();
+
+	await card.getByRole('textbox').fill(name);
+	await expect(execute).toBeEnabled();
+	await execute.click();
+	await expect(page).toHaveURL(/\/datasets$/);
+	await expect(page.getByRole('link', { name })).toHaveCount(0);
+});
+
+test('a score config is written, edited and removed through the form', async ({ page }) => {
+	const name = `helpfulness-${Math.random().toString(36).slice(2, 8)}`;
+	await signIn(page);
+	await page.goto('/score-configs');
+
+	await page.getByRole('button', { name: 'New score config' }).click();
+	const form = page.getByRole('dialog');
+	await form.getByLabel('Name').fill(name);
+	await form.getByLabel('Type').selectOption('categorical');
+	// A categorical name has no direction and must have its categories: the
+	// form says so before the round trip does (spec 014 #16).
+	await expect(form.getByLabel('Direction')).toHaveCount(0);
+	await expect(form.getByRole('button', { name: 'Save' })).toBeDisabled();
+	await form.getByLabel('Categories, one per line').fill('helpful\nunhelpful');
+	await form.getByRole('button', { name: 'Save' }).click();
+
+	const row = page.locator('tbody tr').filter({ hasText: name });
+	await expect(row).toContainText('categorical');
+	await expect(row).toContainText('helpful, unhelpful');
+
+	// The same form edits it, and the name is not a thing an edit changes.
+	await row.getByRole('button', { name: 'Edit' }).click();
+	await expect(form.getByLabel('Name')).toHaveAttribute('readonly', '');
+	await form.getByLabel('Description').fill('Whether the answer helped');
+	await form.getByRole('button', { name: 'Save' }).click();
+	await expect(row).toContainText('Whether the answer helped');
+
+	await row.getByRole('button', { name: 'Remove' }).click();
+	await page.getByRole('alertdialog').getByRole('button', { name: 'Remove the config' }).click();
+	await expect(page.locator('tbody tr').filter({ hasText: name })).toHaveCount(0);
+});
+
 test('no screen scrolls the page sideways', async ({ page }) => {
 	await signIn(page);
 	for (const path of [
@@ -311,7 +446,9 @@ test('no screen scrolls the page sideways', async ({ page }) => {
 		'/runs',
 		`/runs/${RUN_A}`,
 		`/runs/${RUN_A}/compare/${RUN_B}`,
-		'/score-configs'
+		'/score-configs',
+		`/datasets/items/new?dataset=${DATASET}`,
+		`/datasets/${DATASET}/items/${ITEM_1}/edit`
 	]) {
 		await page.goto(path);
 		await expect(page.getByRole('heading').first()).toBeVisible();

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import FileText from '@lucide/svelte/icons/file-text';
+	import Plus from '@lucide/svelte/icons/plus';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import { ApiError, api, type Observation, type ObservationIO } from '$lib/api/client.svelte';
 	import { ABSENT, duration, elapsed, timestampPrecise, wait } from '$lib/format';
@@ -94,6 +95,24 @@
 					<CopyButton text={observation.id} label="Copy the observation id" />
 				</p>
 			</div>
+			<!-- The loop from production back to the test set (spec 016 #8): any
+			     observation, because in an agent trace the case is often one
+			     generation and not the whole run. It lands in the editor rather
+			     than in a "saved" toast — a golden case is what the model
+			     *should* have said, which is usually this output with a
+			     correction — and the editor fetches both payloads whole, since
+			     a preview is a cut document and a cut document saved as a test
+			     case is a wrong test case. -->
+			<a
+				href="/datasets/items/new?trace={encodeURIComponent(traceID)}&obs={encodeURIComponent(observation.id)}"
+				title="Cut this observation into a dataset as a test case"
+				class="border-border bg-surface text-fg hover:bg-raised pointer-coarse:h-11
+					pointer-coarse:px-4 inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border
+					px-2.5 text-sm font-medium whitespace-nowrap transition-colors duration-100"
+			>
+				<Plus class="size-4" />
+				Add to dataset
+			</a>
 		</div>
 		{#if observation.prompt && promptHref}
 			<!-- The prompt this ran, and a way to ask what else ran it. A badge
