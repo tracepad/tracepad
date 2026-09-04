@@ -132,6 +132,21 @@ def test_observe_as_a_generation_reads_the_return_value(spans: Any) -> None:
     assert attributes[attrs.OUTPUT] == "pong"
 
 
+def test_observe_as_a_generation_over_a_generator_keeps_what_it_yielded(spans: Any) -> None:
+    # A generator's result is the list of its chunks, not a model's answer:
+    # handing that list to the response reader recorded nothing at all
+    # (found in review of PR #35).
+    @tracepad.observe(type="generation")
+    def stream() -> Any:
+        yield "po"
+        yield "ng"
+
+    assert "".join(stream()) == "pong"
+    attributes = spans.attributes("stream")
+    assert attributes[attrs.OBSERVATION_TYPE] == "generation"
+    assert json.loads(attributes[attrs.OUTPUT]) == ["po", "ng"]
+
+
 def test_observe_as_a_generation_without_capturing_the_output(spans: Any) -> None:
     @tracepad.observe(type="generation", capture_output=False)
     def call() -> dict[str, Any]:

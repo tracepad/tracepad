@@ -64,7 +64,8 @@ select = ["E", "F", "I", "UP", "B", "A", "RUF"]
 # package read like the documents it implements (spec 017, Package contract).
 ignore = ["A002", "A001"]
 
-# The package is first-party wherever it is linted from, including the scripts
-# beside it in the repository that import it.
+# Named rather than discovered, so that the answer does not depend on which
+# directory `ruff` was run from: the package is first-party to the scripts
+# beside it in the repository, and `conftest` to the suite.
 [tool.ruff.lint.isort]
-known-first-party = ["tracepad"]
+known-first-party = ["tracepad", "conftest"]

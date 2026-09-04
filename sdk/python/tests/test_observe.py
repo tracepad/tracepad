@@ -8,6 +8,7 @@ import logging
 from typing import Any
 
 import pytest
+from opentelemetry import trace as otel_api
 from opentelemetry.trace import StatusCode
 
 import tracepad
@@ -194,3 +195,71 @@ def test_update_outside_a_span_warns_and_writes_nothing(
 def test_dumps_of_a_string_is_the_string() -> None:
     assert attrs.dumps("plain text") == "plain text"
     assert attrs.dumps({"a": 1}) == '{"a":1}'
+
+
+def test_a_value_json_cannot_express_at_all_is_still_a_string(spans: Any) -> None:
+    # `default=repr` is never consulted for a dict key, nor for a cycle, so
+    # these two are what is left under it. The decorator serializes its
+    # arguments *before* the call, so a raise here would break the function.
+    cycle: list[Any] = []
+    cycle.append(cycle)
+    keyed = {("a", "b"): 1}
+
+    assert attrs.dumps(cycle) == "[[...]]"
+    assert "'a', 'b'" in attrs.dumps(keyed)
+
+    @tracepad.observe
+    def step(loop: Any, mapping: Any) -> str:
+        return "ok"
+
+    assert step(cycle, keyed) == "ok"
+    assert attrs.INPUT in spans.attributes("step")
+
+
+def test_a_partly_read_generator_does_not_leave_its_span_current(spans: Any) -> None:
+    # A generator runs in its consumer's context: a span held current across a
+    # `yield` would parent the consumer's next span to a step it merely
+    # touched, and two of them would restore each other out of order.
+    @tracepad.observe
+    def stream(label: str) -> Any:
+        yield f"{label}-1"
+        yield f"{label}-2"
+
+    first, second = stream("a"), stream("b")
+    assert (next(first), next(second)) == ("a-1", "b-1")
+    assert not otel_api.get_current_span().get_span_context().is_valid
+
+    with tracepad.span("after"):
+        pass
+    list(first)
+    list(second)
+
+    after = spans.one("after")
+    assert after.parent is None
+    assert len({span.context.trace_id for span in spans.all()}) == 3
+
+
+def test_a_span_started_inside_a_generator_step_is_its_child(spans: Any) -> None:
+    @tracepad.observe
+    def stream() -> Any:
+        with tracepad.span("inner"):
+            pass
+        yield "a"
+
+    list(stream())
+    assert spans.one("inner").parent.span_id == spans.one("stream").context.span_id
+
+
+def test_a_generator_that_raises_ends_its_span_as_an_error(spans: Any) -> None:
+    @tracepad.observe
+    def stream() -> Any:
+        yield "a"
+        raise ValueError("no")
+
+    with pytest.raises(ValueError, match="no"):
+        list(stream())
+
+    span = spans.one("stream")
+    assert span.status.status_code is StatusCode.ERROR
+    assert [event.name for event in span.events] == ["exception"]
+    assert json.loads(span.attributes[attrs.OUTPUT]) == ["a"]

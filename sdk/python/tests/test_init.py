@@ -6,11 +6,11 @@ import logging
 from typing import Any
 
 import pytest
-from conftest import HOST, KEY
 from opentelemetry import trace as otel_api
 from opentelemetry.sdk.trace import TracerProvider
 
 import tracepad
+from conftest import HOST, KEY
 from tracepad import _tracing
 
 

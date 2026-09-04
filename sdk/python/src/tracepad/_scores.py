@@ -20,7 +20,6 @@ from typing import Any
 from opentelemetry import trace as otel
 
 from . import _config
-from ._errors import TracepadError
 from ._http import request
 from ._log import logger
 
@@ -76,7 +75,7 @@ class ScoreQueue:
     def flush(self, timeout: float) -> None:
         """Wait until everything queued before this call has been sent."""
         with self._lock:
-            if self._thread is None or self._closed:
+            if self._thread is None or self._closed or not self._thread.is_alive():
                 return
         marker = _Flush()
         self._queue.put(marker)
@@ -126,14 +125,19 @@ class ScoreQueue:
         return False
 
     def _deliver(self, batch: list[dict[str, Any]]) -> None:
+        # Anything, not just a `TracepadError`: a score value the JSON encoder
+        # refuses raises a `TypeError` here, and an exception that escaped
+        # would end the only thread there is — after which every later score
+        # is lost in silence and every `flush` waits out its whole timeout
+        # (found in review of PR #35). The batch is dropped; the sender lives.
         for attempt in (1, 2):
             try:
                 self._send(batch)
                 return
-            except TracepadError as error:
+            except Exception as error:
                 if attempt == 1:
                     continue
-                logger.warning("tracepad: %d score(s) dropped: %s", len(batch), error)
+                logger.warning("tracepad: %d score(s) dropped: %r", len(batch), error)
 
 
 def _post(batch: list[dict[str, Any]]) -> None:

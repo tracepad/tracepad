@@ -40,10 +40,12 @@ smoke: ## Export from real SDKs into a real binary and assert the rows
 # bytes on disk. Without `uv` the committed body stands and only the goldens
 # move, which is what a Go-only checkout wants anyway.
 fixtures: ## Regenerate testdata/otlp bodies and their golden files
-	@command -v uv >/dev/null 2>&1 \
-		&& uv run --quiet --isolated --with-requirements scripts/smoke/requirements.txt \
-			--with-editable sdk/python python scripts/fixtures/tracepad_sdk.py \
-		|| echo "uv is missing: keeping testdata/otlp/010-tracepad-sdk.pb as committed"
+	@if command -v uv >/dev/null 2>&1; then \
+		uv run --quiet --isolated --with-requirements scripts/smoke/requirements.txt \
+			--with-editable sdk/python python scripts/fixtures/tracepad_sdk.py; \
+	else \
+		echo "uv is missing: keeping testdata/otlp/010-tracepad-sdk.pb as committed"; \
+	fi
 	go test ./internal/mapping -run TestGoldenFixtures -update
 
 format: ## Format all Go sources

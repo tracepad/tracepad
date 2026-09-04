@@ -23,6 +23,7 @@ from contextvars import ContextVar
 from time import time_ns
 from typing import Any
 
+from opentelemetry import context as otel_context
 from opentelemetry import trace as otel
 
 from . import _attributes as attrs
@@ -119,11 +120,24 @@ def _exporter(config: Config) -> Any:
 
 
 def flush(timeout: float = 10.0) -> None:
-    """Deliver everything queued: the scores, then the spans."""
+    """Deliver everything queued: the scores, then the spans.
+
+    The timeout is one budget over both, and the spans are the half that
+    matters more — so a score queue that spent all of it is said out loud
+    rather than leaving `force_flush` a deadline of zero, which returns
+    at once and exports nothing (found in review of PR #35).
+    """
     left = flush_scores(timeout)
     force = getattr(otel.get_tracer_provider(), "force_flush", None)
-    if force is not None:
-        force(int(max(left, 0.0) * 1000))
+    if force is None:
+        return
+    if left <= 0:
+        logger.warning(
+            "tracepad.flush(): the score queue used the whole %ss budget; the spans were "
+            "not flushed and are left to their exporter's own schedule", timeout
+        )
+        return
+    force(int(left * 1000))
 
 
 def _tracer() -> otel.Tracer:
@@ -357,9 +371,39 @@ def _open(
             yield handle
     finally:
         _current.reset(token)
-        if not handle._ended:
-            handle._ended = True
-            span.end(end_time)
+        _end(handle, end_time)
+
+
+@contextmanager
+def _stepping(handle: Observation) -> Iterator[None]:
+    """Make the span current for one step of a generator, and no longer.
+
+    A generator runs in the context of whoever advances it, so a block held
+    open across a `yield` leaves the span attached to the *consumer*: the
+    caller's next span becomes a child of a generator it merely touched, and
+    two generators consumed in turn restore each other's contexts out of order
+    — after which a later span is parented to a span that has ended (found in
+    review of PR #35). Attaching per step is what keeps the stack a stack.
+    """
+    token = otel_context.attach(otel.set_span_in_context(handle.span))
+    current = _current.set(handle)
+    try:
+        yield
+    finally:
+        _current.reset(current)
+        otel_context.detach(token)
+
+
+def _failed(handle: Observation, error: BaseException) -> None:
+    """Record an exception the way `use_span` does for the other shapes."""
+    handle.span.record_exception(error)
+    handle.span.set_status(otel.Status(otel.StatusCode.ERROR, str(error)))
+
+
+def _end(handle: Observation, end_time: int | None = None) -> None:
+    if not handle._ended:
+        handle._ended = True
+        handle.span.end(end_time)
 
 
 def span(name: str, *, input: Any = None, metadata: dict[str, Any] | None = None) -> Any:
@@ -414,21 +458,32 @@ def observe(
         label = name or fn.__name__
         is_generation = type == "generation"
 
-        def start() -> Any:
+        def attributes() -> dict[str, Any]:
             if is_generation:
-                return _open(label, _generation_attributes(None, None, None, None),
-                             lambda span: Generation(span, capture_output))
-            return _open(label, _observation_attributes(type))
+                return _generation_attributes(None, None, None, None)
+            return _observation_attributes(type)
+
+        def make(span: otel.Span) -> Observation:
+            return Generation(span, capture_output) if is_generation else Observation(span)
+
+        def start() -> Any:
+            return _open(label, attributes(), make)
+
+        def begin() -> Observation:
+            return make(_tracer().start_span(label, attributes=attributes()))
 
         def enter(observation: Observation, args: tuple[Any, ...], kwargs: dict[str, Any]) -> None:
             if signature is not None:
                 _set(observation.span, attrs.INPUT,
                      attrs.dumps(_arguments(signature, args, kwargs)))
 
-        def leave(observation: Any, result: Any) -> None:
+        def leave(observation: Any, result: Any, *, as_response: bool = True) -> None:
             # What the function said about itself wins over what was captured
-            # from it (spec 017 #4): `update` replaces, it is not replaced.
-            if is_generation:
+            # from it (spec 017 #4): `update` replaces, it is not replaced. A
+            # generator's result is the list of what it yielded, which is not
+            # a model's answer however the step is typed — so the reader of
+            # Decision 5 is only asked about a value returned whole.
+            if is_generation and as_response:
                 observation.end(response=result)
             elif capture_output and "output" not in observation._explicit:
                 _set(observation.span, attrs.OUTPUT, attrs.dumps(result))
@@ -437,15 +492,26 @@ def observe(
 
             @functools.wraps(fn)
             async def async_generator(*args: Any, **kwargs: Any) -> AsyncIterator[Any]:
-                with start() as observation:
-                    enter(observation, args, kwargs)
-                    yielded: list[Any] = []
-                    try:
-                        async for value in fn(*args, **kwargs):
-                            yielded.append(value)
-                            yield value
-                    finally:
-                        leave(observation, yielded)
+                observation = begin()
+                yielded: list[Any] = []
+                try:
+                    with _stepping(observation):
+                        enter(observation, args, kwargs)
+                        steps = fn(*args, **kwargs).__aiter__()
+                    while True:
+                        with _stepping(observation):
+                            try:
+                                value = await steps.__anext__()
+                            except StopAsyncIteration:
+                                break
+                        yielded.append(value)
+                        yield value
+                except Exception as error:
+                    _failed(observation, error)
+                    raise
+                finally:
+                    leave(observation, yielded, as_response=False)
+                    _end(observation)
 
             return async_generator
 
@@ -453,15 +519,26 @@ def observe(
 
             @functools.wraps(fn)
             def generator(*args: Any, **kwargs: Any) -> Iterator[Any]:
-                with start() as observation:
-                    enter(observation, args, kwargs)
-                    yielded = []
-                    try:
-                        for value in fn(*args, **kwargs):
-                            yielded.append(value)
-                            yield value
-                    finally:
-                        leave(observation, yielded)
+                observation = begin()
+                yielded: list[Any] = []
+                try:
+                    with _stepping(observation):
+                        enter(observation, args, kwargs)
+                        steps = iter(fn(*args, **kwargs))
+                    while True:
+                        with _stepping(observation):
+                            try:
+                                value = next(steps)
+                            except StopIteration:
+                                break
+                        yielded.append(value)
+                        yield value
+                except Exception as error:
+                    _failed(observation, error)
+                    raise
+                finally:
+                    leave(observation, yielded, as_response=False)
+                    _end(observation)
 
             return generator
 

@@ -161,7 +161,10 @@ first chunk arrives — that is where the TTFT column comes from. Only the first
 call counts. Leaving the block without `end` ends the span with what it has.
 
 `@tracepad.observe(type="generation")` is the same reader over a function's
-return value, for a helper that already returns the provider's response.
+return value, for a helper that already returns the provider's response. A
+generator is the exception: what it returns is the list of its chunks rather
+than an answer, so that list is recorded as the `output` and nothing is read
+from it.
 
 ## The trace around a step
 

@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 
 import tracepad
-from tracepad import _scores
+from tracepad import _scores, _tracing
 from tracepad._errors import TracepadHTTPError
 from tracepad._scores import ScoreQueue
 
@@ -153,6 +153,51 @@ def test_a_score_after_the_queue_closed_is_logged_as_dropped(
 
     assert "'late' dropped" in caplog.text
     assert [item["name"] for batch in sender.batches for item in batch] == ["early"]
+
+
+def test_the_sender_survives_an_error_that_is_not_ours(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # A score value the JSON encoder refuses raises a TypeError, not a
+    # TracepadError; an exception that escaped would end the only thread there
+    # is, losing every later score in silence (found in review of PR #35).
+    refused: list[list[dict[str, Any]]] = []
+
+    def send(batch: list[dict[str, Any]]) -> None:
+        refused.append(list(batch))
+        if batch[0]["name"] == "undeliverable":
+            raise TypeError("Object of type Decimal is not JSON serializable")
+
+    made = queue(send)  # type: ignore[arg-type]
+    with caplog.at_level(logging.WARNING, logger="tracepad"):
+        tracepad.score("undeliverable", 1, trace_id="a" * 32)
+        made.flush(2.0)
+        tracepad.score("later", 1, trace_id="a" * 32)
+        made.flush(2.0)
+
+    assert "Decimal" in caplog.text
+    assert [batch[0]["name"] for batch in refused] == ["undeliverable", "undeliverable", "later"]
+
+
+def test_flush_says_so_when_the_scores_spent_the_whole_budget(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    flushed: list[int] = []
+
+    class Provider:
+        def force_flush(self, timeout_millis: int) -> None:
+            flushed.append(timeout_millis)
+
+    monkeypatch.setattr(_tracing.otel, "get_tracer_provider", Provider)
+    monkeypatch.setattr(_tracing, "flush_scores", lambda timeout: -0.5)
+
+    with caplog.at_level(logging.WARNING, logger="tracepad"):
+        tracepad.flush(2.0)
+
+    # A deadline of zero returns at once and exports nothing; saying so beats
+    # reporting a flush that did not happen (found in review of PR #35).
+    assert flushed == []
+    assert "were not flushed" in caplog.text
 
 
 def test_flush_drains_the_queue_and_the_spans(spans: Any, sender: Sender) -> None:

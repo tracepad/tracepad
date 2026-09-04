@@ -73,10 +73,19 @@ def dumps(value: Any) -> str:
     `default=repr`, the rule that never raises: a value the encoder cannot
     express is still a string in the trace, and the alternative is a decorator
     that breaks the function it decorates (spec 017 #4).
+
+    `default` alone is not that rule, though. It is never consulted for a
+    dict's *key*, and never for a cycle, so a value that reaches the encoder
+    with either still raises — on the decorator's path, before the decorated
+    function has run at all. `repr` is the floor under it (found in review of
+    PR #35): it renders both, cycles as `[...]`.
     """
     if isinstance(value, str):
         return value
-    return json.dumps(value, default=repr, ensure_ascii=False, separators=(",", ":"))
+    try:
+        return json.dumps(value, default=repr, ensure_ascii=False, separators=(",", ":"))
+    except (TypeError, ValueError):
+        return repr(value)
 
 
 def scalar(value: Any) -> Any:
