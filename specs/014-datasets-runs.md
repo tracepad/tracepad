@@ -252,7 +252,10 @@ without `summary`], …cursors}`.
 > `(created_at, id)`, with filters `dataset` (exact name) and `status`,
 > cursors both ways and `count`, over schema 0011's
 > `idx_dataset_runs_created`. `tracepad runs ls` without a dataset and MCP
-> `list_runs` without `dataset` read it.
+> `list_runs` without `dataset` read it. In the same change the comparison's
+> response schemas in `openapi.json` — `traces`, and `ComparedScore.a`/`b`
+> as `ComparedSide` — were tightened to the shape the server already
+> answers with; no behaviour changed.
 
 `GET /api/v1/runs/{id}` — the run object with its summary:
 
