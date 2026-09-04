@@ -1,0 +1,432 @@
+"""The eval harness: the run, the block that stamps it, the scores (spec 018)."""
+
+from __future__ import annotations
+
+import asyncio
+import contextvars
+import hashlib
+import logging
+import threading
+from typing import Any
+
+import pytest
+from opentelemetry import trace as otel_api
+
+import tracepad
+from tracepad import _config, _datasets, _harness, _scores, _tracing
+from tracepad._attributes import ITEM_ID, RUN_ID
+from tracepad._errors import TracepadHTTPError
+from tracepad._http import Response
+
+CASE = "a1b2c3d4e5f60718293a4b5c6d7e8f90"
+OTHER = "b2c3d4e5f60718293a4b5c6d7e8f90a1"
+RUN = "0e5a7c1d2b3f4a6980c1d2e3f4a5b6c7"
+
+
+class Store:
+    """A fake `_http.request`: it records every call and answers by path."""
+
+    def __init__(self, **answers: Any) -> None:
+        self.answers = answers
+        self.calls: list[tuple[str, str, Any, dict[str, Any]]] = []
+
+    def __call__(self, config: Any, method: str, path: str, **kwargs: Any) -> Response:
+        # A snapshot, not the caller's own dict: the paging loop reuses one
+        # query, and a fake that recorded it by reference would show three
+        # requests that all look like the last.
+        self.calls.append((method, path, kwargs.get("body"), dict(kwargs.get("params") or {})))
+        answer = self.answers.get(path, {})
+        if isinstance(answer, list):
+            answer = answer.pop(0)
+        if isinstance(answer, Exception):
+            raise answer
+        return Response(200, answer)
+
+    def paths(self) -> list[str]:
+        return [f"{method} {path}" for method, path, _, _ in self.calls]
+
+
+@pytest.fixture
+def store(monkeypatch: pytest.MonkeyPatch) -> Any:
+    fake = Store()
+    for module in (_harness, _datasets):
+        monkeypatch.setattr(module, "request", fake)
+    _config.adopt(_config.Config(host="http://x", key="tp-sk-x"))
+    return fake
+
+
+def opened(store: Store, version: int = 12) -> tracepad.Run:
+    store.answers["/api/v1/datasets/golden/runs"] = {
+        "id": RUN, "name": "a run", "dataset_version": version
+    }
+    return tracepad.dataset("golden").run("a run")
+
+
+# --- the dataset ----------------------------------------------------------
+
+
+def test_a_dataset_makes_no_request(store: Store) -> None:
+    tracepad.dataset("golden")
+    assert store.calls == []
+
+
+def test_put_items_sends_dicts_and_items_as_one_body(store: Store) -> None:
+    store.answers["/api/v1/datasets/golden/items"] = {"ids": [CASE, OTHER],
+                                                      "version": 4, "changed": 2}
+
+    version, changed = tracepad.dataset("golden").put_items([
+        tracepad.Item(id=CASE, input={"q": 1}, dataset_version=99),
+        {"id": OTHER, "input": {"q": 2}},
+    ])
+
+    assert (version, changed) == (4, 2)
+    _, _, body, _ = store.calls[0]
+    # Unset fields are omitted rather than sent as null, and the version a
+    # row was read at is never sent back: it is not a field of the API.
+    assert body == [{"id": CASE, "input": {"q": 1}}, {"id": OTHER, "input": {"q": 2}}]
+
+
+def test_items_follow_the_cursor_to_the_end(store: Store) -> None:
+    # The rows are the store's own shape: it calls the version `version`, and
+    # sends fields an `Item` has no room for.
+    store.answers["/api/v1/datasets/golden/items"] = [
+        {"items": [{"id": CASE, "input": 1, "version": 3, "seq": 1,
+                    "created_at": "2026-09-04T10:00:00Z"}], "next_cursor": "c1"},
+        {"items": [{"id": OTHER, "input": 2, "version": 2}], "next_cursor": "c2"},
+        {"items": [], "next_cursor": None},
+    ]
+
+    items = list(tracepad.dataset("golden").items(version=3))
+
+    assert [item.id for item in items] == [CASE, OTHER]
+    assert items[0].input == 1 and items[0].dataset_version == 3
+    # The first request omits `cursor`: a parameter without a value is a 400
+    # everywhere in this API.
+    assert [params for _, _, _, params in store.calls] == [
+        {"limit": 500, "version": 3},
+        {"limit": 500, "version": 3, "cursor": "c1"},
+        {"limit": 500, "version": 3, "cursor": "c2"},
+    ]
+
+
+def test_a_run_carries_the_version_it_pinned(store: Store) -> None:
+    run = opened(store, version=12)
+    assert (run.id, run.dataset_version, run.dataset.name) == (RUN, 12, "golden")
+    assert store.calls[0][2] == {"name": "a run"}
+
+
+def test_delete_echoes_the_name(store: Store) -> None:
+    tracepad.dataset("golden").delete(confirm="golden")
+    assert store.calls[0][3] == {"confirm": "golden"}
+
+
+# --- the run --------------------------------------------------------------
+
+
+def test_the_block_finishes_a_clean_run(store: Store) -> None:
+    with opened(store):
+        pass
+    assert store.paths()[-1] == f"POST /api/v1/runs/{RUN}/finish"
+    assert store.calls[-1][2] == {}
+
+
+def test_the_block_fails_a_run_and_re_raises(store: Store) -> None:
+    with pytest.raises(RuntimeError, match="judge"), opened(store):
+        raise RuntimeError("judge timed out")
+
+    body = store.calls[-1][2]
+    assert body["status"] == "failed"
+    assert "judge timed out" in body["error"]
+
+
+def test_a_run_finished_by_hand_is_not_finished_twice(store: Store) -> None:
+    with opened(store) as run:
+        run.finish()
+    assert store.paths().count(f"POST /api/v1/runs/{RUN}/finish") == 1
+
+
+def test_finish_flushes_before_it_posts(store: Store, monkeypatch: pytest.MonkeyPatch) -> None:
+    order: list[str] = []
+
+    class Provider:
+        def force_flush(self, timeout_millis: int) -> None:
+            order.append("spans")
+
+    monkeypatch.setattr(_tracing, "flush_scores", lambda timeout: order.append("scores") or 0.5)
+    monkeypatch.setattr(_tracing.otel, "get_tracer_provider", Provider)
+
+    run = opened(store)
+    run.finish(timeout=5.0)
+
+    # The summary a CI step prints on the next line must be over every trace
+    # and score the run produced (spec 018 #5).
+    assert order == ["scores", "spans"]
+    assert store.paths()[-1] == f"POST /api/v1/runs/{RUN}/finish"
+
+
+def test_the_read_side_is_the_server_s_json(store: Store) -> None:
+    summary = {"id": RUN, "status": "finished", "summary": {"items": {"total": 2}}}
+    store.answers[f"/api/v1/runs/{RUN}"] = summary
+    store.answers[f"/api/v1/runs/{RUN}/items"] = {"items": [{"id": CASE}], "next_cursor": None}
+    store.answers[f"/api/v1/runs/{RUN}/compare/{OTHER}"] = {"items": []}
+
+    run = opened(store)
+
+    assert run.get() == summary
+    assert [row["id"] for row in run.items(unknown=True)] == [CASE]
+    assert tracepad.compare(RUN, OTHER) == {"items": []}
+    # No `limit` of ours: this listing inlines every row's payloads and is
+    # budget-checked, so the server's own page size is the safe one.
+    assert store.calls[-2][3] == {"unknown": "true"}
+    assert list(run.items(limit=25)) and store.calls[-1][3] == {"limit": 25}
+
+
+# --- the stamping ---------------------------------------------------------
+
+
+def test_a_span_inside_the_block_carries_the_run_and_the_item(
+    spans: Any, store: Store
+) -> None:
+    run = opened(store)
+
+    with tracepad.span("before"):
+        pass
+    with run.item(tracepad.Item(id=CASE)) as attempt:
+        with tracepad.span("inside") as observation:
+            with tracepad.span("child"):
+                pass
+            assert observation.trace_id == attempt.trace_id
+    with tracepad.span("after"):
+        pass
+
+    assert spans.attributes("inside")[RUN_ID] == RUN
+    assert spans.attributes("inside")[ITEM_ID] == CASE
+    # A child started inside inherits through its parent's context — and is
+    # stamped without being a trace of its own: only a root starts one.
+    assert spans.attributes("child")[ITEM_ID] == CASE
+    assert attempt.traces == [attempt.trace_id]
+    for name in ("before", "after"):
+        assert RUN_ID not in spans.attributes(name)
+
+
+def test_the_block_opens_no_span_of_its_own(spans: Any, store: Store) -> None:
+    with opened(store).item(CASE):
+        pass
+    assert spans.all() == []
+
+
+def test_every_root_is_recorded_and_the_last_is_the_trace(spans: Any, store: Store) -> None:
+    with opened(store).item(CASE) as attempt:
+        for _ in range(3):
+            with tracepad.span("attempt"):
+                pass
+
+    roots = [format(span.context.trace_id, "032x") for span in spans.all()]
+    assert attempt.traces == roots
+    assert attempt.trace_id == roots[-1]
+    assert attempt.attributes() == {RUN_ID: RUN, ITEM_ID: CASE}
+
+
+def test_a_case_begins_where_the_block_does_not_where_the_trace_does(
+    spans: Any, store: Store
+) -> None:
+    # A harness whose loop already runs under a span of its own — a traced
+    # `main`, an instrumented test runner — has no root span to start inside
+    # the block, and used to have no trace to score (spec 018 #13).
+    run = opened(store)
+    with tracepad.span("the harness itself"):
+        with run.item(CASE) as first:
+            with tracepad.span("case-1"):
+                with tracepad.span("step"):
+                    pass
+            # A second attempt at the same case, and still one trace: the
+            # summary counts traces, and these spans are all in one.
+            with tracepad.span("case-1-again"):
+                pass
+        with run.item(OTHER) as second:
+            with tracepad.span("case-2"):
+                pass
+
+    case_1 = spans.one("case-1")
+    assert first.traces == [format(case_1.context.trace_id, "032x")]
+    # One trace, recorded once, however many of its spans the block opened.
+    assert first.trace_id == second.trace_id
+    assert spans.attributes("step")[ITEM_ID] == CASE
+    assert spans.attributes("case-2")[ITEM_ID] == OTHER
+    assert RUN_ID not in spans.attributes("the harness itself")
+
+
+def test_nested_blocks_replace_and_restore(spans: Any, store: Store) -> None:
+    run = opened(store)
+    with run.item(CASE), tracepad.span("outer-1"):
+        pass
+    with run.item(CASE):
+        with run.item(OTHER), tracepad.span("inner"):
+            pass
+        with tracepad.span("outer-2"):
+            pass
+
+    assert spans.attributes("inner")[ITEM_ID] == OTHER
+    assert spans.attributes("outer-2")[ITEM_ID] == CASE
+
+
+def test_a_span_after_the_block_is_not_stamped(spans: Any, store: Store) -> None:
+    with opened(store).item(CASE) as attempt:
+        pass
+    with tracepad.span("after"):
+        pass
+
+    assert RUN_ID not in spans.attributes("after")
+    assert attempt.traces == []
+
+
+def test_an_async_task_spawned_inside_the_block_is_stamped(spans: Any, store: Store) -> None:
+    run = opened(store)
+
+    async def answer() -> None:
+        with tracepad.span("in-a-task"):
+            pass
+
+    async def drive() -> None:
+        with run.item(CASE):
+            await asyncio.create_task(answer())
+
+    asyncio.run(drive())
+    assert spans.attributes("in-a-task")[ITEM_ID] == CASE
+
+
+def test_a_thread_is_stamped_only_with_the_context_copied(spans: Any, store: Store) -> None:
+    run = opened(store)
+
+    def answer(name: str) -> None:
+        with tracepad.span(name):
+            pass
+
+    with run.item(CASE):
+        carried = threading.Thread(target=contextvars.copy_context().run, args=(answer, "carried"))
+        bare = threading.Thread(target=answer, args=("bare",))
+        for thread in (carried, bare):
+            thread.start()
+            thread.join()
+
+    # The documented distinction (spec 018 #3): `contextvars` is what asyncio
+    # inherits and what a thread copies when asked, and nothing else.
+    assert spans.attributes("carried")[ITEM_ID] == CASE
+    assert RUN_ID not in spans.attributes("bare")
+
+
+def test_a_score_before_any_trace_raises(spans: Any, store: Store) -> None:
+    # A span that started *outside* the block is not this attempt's, however
+    # current it is: scoring the trace one happens to be standing in would
+    # attach the run's numbers to somebody else's trace.
+    with tracepad.span("started before the block"), opened(store).item(CASE) as attempt:
+        with pytest.raises(ValueError, match="no trace has started inside this item block"):
+            attempt.score("accuracy", 1)
+
+
+def test_a_score_goes_against_the_trace_the_block_saw(spans: Any, store: Store) -> None:
+    sent: list[list[dict[str, Any]]] = []
+    _scores.reset(_scores.ScoreQueue(sent.append))
+
+    with opened(store).item(CASE) as attempt:
+        with tracepad.span("answer"):
+            pass
+        attempt.score("accuracy", 1)
+        attempt.score("verdict", string_value="pass", data_type="categorical")
+    _scores.flush_scores(2.0)
+
+    assert [item["trace_id"] for batch in sent for item in batch] == [attempt.trace_id] * 2
+    assert sent[-1][-1]["string_value"] == "pass"
+
+
+# --- the rest -------------------------------------------------------------
+
+
+def test_a_case_without_an_id_is_refused(store: Store) -> None:
+    run = opened(store)
+    # Stamping an item id the store cannot read links nothing and says
+    # nothing: the run would summarize as zero cases covered.
+    for case in ({"input": {"q": 1}}, tracepad.Item(input={"q": 1}), "", None):
+        with pytest.raises(ValueError, match="needs an item id"):
+            with run.item(case):  # type: ignore[arg-type]
+                pass
+
+
+def test_a_case_may_be_a_dict_an_item_or_a_bare_id(spans: Any, store: Store) -> None:
+    run = opened(store)
+    for case in ({"id": CASE, "input": 1}, tracepad.Item(id=CASE), CASE):
+        with run.item(case), tracepad.span("case"):  # type: ignore[arg-type]
+            pass
+    assert [span.attributes[ITEM_ID] for span in spans.all()] == [CASE] * 3
+
+
+def test_a_run_the_store_refused_to_close_is_still_open(store: Store) -> None:
+    run = opened(store)
+    store.answers[f"/api/v1/runs/{RUN}/finish"] = [
+        TracepadHTTPError(503, "the write queue is saturated"), {"status": "failed"},
+    ]
+
+    with pytest.raises(TracepadHTTPError), run:
+        run.finish()
+
+    # `__exit__` must not step over the failure just because `finish` was
+    # attempted: the run would stay `running` in the store forever.
+    posted = [body for method, path, body, _ in store.calls if path.endswith("/finish")]
+    assert [body.get("status") for body in posted] == [None, "failed"]
+
+
+def test_score_configs_are_put_in_order(store: Store) -> None:
+    tracepad.score_configs([
+        {"name": "accuracy", "data_type": "numeric", "direction": "higher", "min": 0, "max": 1},
+        tracepad.ScoreConfig(name="verdict", data_type="categorical",
+                             categories=["pass", "fail"]),
+    ])
+
+    assert store.paths() == [
+        "PUT /api/v1/score-configs/accuracy",
+        "PUT /api/v1/score-configs/verdict",
+    ]
+    assert store.calls[0][2] == {"data_type": "numeric", "direction": "higher",
+                                 "min": 0, "max": 1}
+    assert store.calls[1][2] == {"data_type": "categorical", "categories": ["pass", "fail"]}
+
+
+def test_score_configs_raise_on_the_first_refusal_with_the_name(store: Store) -> None:
+    store.answers["/api/v1/score-configs/accuracy"] = TracepadHTTPError(
+        400, '{"error":"direction is required for a numeric config"}'
+    )
+
+    with pytest.raises(TracepadHTTPError, match="'accuracy'") as refused:
+        tracepad.score_configs([{"name": "accuracy", "data_type": "numeric"},
+                                {"name": "verdict", "data_type": "categorical"}])
+
+    # The name, and what the store said, and the status it said it with.
+    assert refused.value.status == 400
+    assert "direction is required" in refused.value.body
+
+    # It stops the job at the top rather than running the cases (spec 018 #6).
+    assert store.paths() == ["PUT /api/v1/score-configs/accuracy"]
+
+
+def test_item_id_is_the_documented_derivation() -> None:
+    assert tracepad.item_id("cases/refund.json") == hashlib.sha256(
+        b"cases/refund.json"
+    ).hexdigest()[:32]
+
+
+def test_the_processor_ignores_a_span_started_outside_any_block(
+    spans: Any, store: Store, caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level(logging.WARNING, logger="tracepad"):
+        with tracepad.span("plain"):
+            pass
+    assert RUN_ID not in spans.attributes("plain")
+    assert caplog.text == ""
+
+
+def test_the_run_link_is_not_a_dialect_of_its_own(spans: Any, store: Store) -> None:
+    """The two keys the processor writes are the ones spec 014 defined."""
+    assert (RUN_ID, ITEM_ID) == ("tracepad.run_id", "tracepad.item_id")
+    with opened(store).item(CASE), tracepad.span("case"):
+        pass
+    assert otel_api.get_current_span().get_span_context().is_valid is False

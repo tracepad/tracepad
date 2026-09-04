@@ -12,24 +12,14 @@ it. Without it the suite skips, so `pytest` on its own stays a unit run.
 
 from __future__ import annotations
 
-import json
-import os
-import socket
-import subprocess
-import time
-import urllib.error
-import urllib.request
 from pathlib import Path
-from typing import Any
 
 import pytest
+from harness import BINARY, KEY, Store, trace_of, walk
 from opentelemetry import trace as otel_api
 from opentelemetry.sdk.trace import TracerProvider
 
 import tracepad
-
-BINARY = os.environ.get("TRACEPAD_BINARY", "")
-KEY = "tp-sk-e2e"
 
 pytestmark = pytest.mark.skipif(not BINARY, reason="TRACEPAD_BINARY is not set")
 
@@ -38,87 +28,6 @@ ANSWER = {
     "choices": [{"message": {"role": "assistant", "content": "Open Settings and choose Reset."}}],
     "usage": {"prompt_tokens": 128, "completion_tokens": 41, "cost": 0.0011},
 }
-
-
-class Store:
-    """A running binary, and the read API as a person would call it."""
-
-    def __init__(self, host: str) -> None:
-        self.host = host
-
-    def call(self, method: str, path: str, body: Any = None) -> Any:
-        request = urllib.request.Request(
-            self.host + path,
-            data=None if body is None else json.dumps(body).encode(),
-            method=method,
-            headers={"Authorization": f"Bearer {KEY}"},
-        )
-        with urllib.request.urlopen(request, timeout=10) as answer:
-            raw = answer.read()
-        return json.loads(raw) if raw else None
-
-
-@pytest.fixture(scope="module")
-def store(tmp_path_factory: pytest.TempPathFactory) -> Any:
-    data = tmp_path_factory.mktemp("store")
-    port = free_port()
-    process = subprocess.Popen(
-        [BINARY, "serve"],
-        env={
-            **os.environ,
-            "TRACEPAD_DATA_DIR": str(data),
-            "TRACEPAD_LISTEN": f"127.0.0.1:{port}",
-            "TRACEPAD_PROJECTS": f"e2e:tp-pk-e2e:{KEY}",
-        },
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-    )
-    running = Store(f"http://127.0.0.1:{port}")
-    try:
-        await_health(running, process)
-        yield running
-    finally:
-        process.terminate()
-        process.wait(timeout=10)
-
-
-def free_port() -> int:
-    with socket.socket() as taken:
-        taken.bind(("127.0.0.1", 0))
-        return int(taken.getsockname()[1])
-
-
-def await_health(store: Store, process: subprocess.Popen[bytes]) -> None:
-    for _ in range(100):
-        if process.poll() is not None:
-            output = process.stdout.read().decode() if process.stdout else ""
-            raise AssertionError(f"the server exited: {output}")
-        try:
-            store.call("GET", "/health")
-            return
-        except (urllib.error.URLError, OSError):
-            time.sleep(0.1)
-    raise AssertionError("the server never became healthy")
-
-
-def trace_of(store: Store, trace_id: str) -> dict[str, Any]:
-    """The trace, once the export has landed."""
-    for _ in range(50):
-        try:
-            return dict(store.call("GET", f"/api/v1/traces/{trace_id}?expand=io"))
-        except urllib.error.HTTPError as missing:
-            if missing.code != 404:
-                raise
-            time.sleep(0.1)
-    raise AssertionError(f"trace {trace_id} never arrived")
-
-
-def walk(observations: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    out: list[dict[str, Any]] = []
-    for observation in observations:
-        out.append(observation)
-        out.extend(walk(observation.get("children") or []))
-    return out
 
 
 def test_a_traced_call_arrives_whole(store: Store) -> None:

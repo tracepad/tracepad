@@ -230,12 +230,94 @@ answer is served stale with a warning, because a restart of your observability
 must not take your chat down. With nothing cached the call raises: a fallback
 prompt baked into the code is a prompt the trace cannot name.
 
+## Evals
+
+The package is also the harness of [datasets.md](datasets.md): a dataset
+object, a run that opens and closes itself, and a block inside which every
+span carries the run and the case it answered. It runs nothing — the cases are
+your program.
+
+```python
+golden = tracepad.dataset("support-golden")
+golden.put_items(cases)          # same cases → same version, nothing written
+
+with golden.run("prompt v7", metadata={"prompt": "support-answer@7"}) as run:
+    for case in golden.items(version=run.dataset_version):
+        with run.item(case) as attempt:
+            answer = app.answer(case.input["question"])
+            attempt.score("accuracy", judge(answer, case.expected_output))
+
+print(run.get()["summary"])
+```
+
+| Name | What it is |
+|---|---|
+| `dataset(name)` | A `Dataset`. No request is made here — it is a name. |
+| `Dataset.create(description=…, metadata=…)` | Create it, or replace those two. |
+| `Dataset.put_items(items)` | One batch, one version tick → `(version, changed)`. |
+| `Dataset.items(version=…)` | A generator of `Item`s over every page, whole. |
+| `Dataset.run(name, *, metadata=…, id=…, dataset_version=…)` | Opens a `Run`. |
+| `Dataset.runs()`, `Run.get()`, `Run.items(unknown=…, limit=…)`, `compare(a, b)` | The server's JSON as `dict`s — no number is computed here. A run's items inline their payloads and are budget-checked, so that listing pages at the server's own size unless you name one. |
+| `Dataset.delete(confirm=name)` | The name must be echoed, as the API asks. |
+| `score_configs([...])`, `ScoreConfig` | `PUT` each, in order, synchronously. |
+| `item_id(key)` | `sha256(key)[:32]`, for a natural key of your own. |
+
+**The run pins a version, and `run.dataset_version` is it.** Fetching by that
+number rather than by "the current one" is what makes the version the harness
+*fetched* and the version it *ran* one number.
+
+**`with … as run` closes it**: `finished` on a clean exit, `failed` with the
+exception's `repr` on an error, which is then re-raised. A run finished by
+hand is not finished twice. `finish(timeout=30.0)` flushes the scores and then
+the spans *before* it posts, so `run.get()` on the next line is over
+everything the run produced; a late span still links, so a flush that timed
+out is a number read early rather than a trace lost.
+
+**`run.item(case)` opens no span of its own.** It sets a `contextvars` value
+that a span processor reads at every span's start — so the root span may be
+the framework's, another SDK's or a decorator's, and it is still stamped. That
+also says exactly how far the block reaches:
+
+| Where the work runs | Stamped |
+|---|---|
+| the same function, and anything it calls | yes |
+| an `await`, and a task spawned inside the block | yes — `asyncio` inherits the context |
+| a thread started with `contextvars.copy_context().run(fn)` | yes |
+| a thread started bare (`Thread(target=fn)`) | **no** — it has no context to inherit |
+| another process, over HTTP | **no** — see below |
+| the loop itself already inside a span of yours | stamped, but see below |
+
+**Do not trace the harness.** If the loop runs inside a span of your own — a
+`@observe`d driver, an instrumented test runner — then the case's spans are
+children of it, and one trace covers the whole run. Everything is still
+stamped and `attempt.score(...)` still has a trace to score (the block's first
+span starts the case, not the trace's root), but the run then has one trace
+for every case, and a trace links to one item: its coverage collapses to the
+last case stamped. A case wants a trace of its own.
+
+The two attributes do not travel with the trace context, by design. For a
+service the block cannot reach, `attempt.attributes()` is the `dict` to
+forward by your own means:
+
+```python
+requests.post(url, json=payload, headers={"x-eval": json.dumps(attempt.attributes())})
+```
+
+`attempt.traces` is every root span that started inside the block, in order —
+a case run three times is three traces of one item, and the run's summary
+counts them all — and `attempt.trace_id` is the last of them, which is what
+`attempt.score(...)` scores. Scoring before anything has run raises
+`ValueError`; after the block, the `Attempt` is a record and stamps nothing.
+
+`init(export=False)` still registers the processor: an application exporting
+through another SDK wants its spans stamped all the same.
+
 ## What raises and what does not
 
 | Path | On failure |
 |---|---|
 | `init` after configuration, the decorators, `update`, `end`, the exporter, the score queue | Logged through the `tracepad` logger; never raised into your code |
-| `prompt`, `flush` | `TracepadError`, or `TracepadHTTPError(status, body)` for a non-2xx |
+| `prompt`, `flush`, and every call of the harness above | `TracepadError`, or `TracepadHTTPError(status, body)` for a non-2xx |
 | `init` with no host or key | `TracepadConfigError` |
 | `score` with no target at all | `ValueError` — a programming error, visible at the call site |
 
@@ -269,3 +351,6 @@ written.
   handler — a score — is queued instead.
 - **No price table**, no prompt templating beyond `{placeholders}`, and no
   JavaScript twin yet.
+- **The harness runs nothing.** No judge, no retries, no concurrency helpers,
+  no `pytest` plugin and no `tracepad eval …` command: the loop is your
+  program, and this is the part of it that talks to the store.

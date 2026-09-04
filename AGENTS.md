@@ -134,6 +134,19 @@ API. This file routes; it does not duplicate what specs and docs say.
   that is not synthetic: `010-tracepad-sdk.pb` is the package's own export.
   Failure semantics are split by path: the tracing half never raises into
   application code, the REST half raises `TracepadError` (#9).
+- ✅ Spec 018 (the eval harness in Python) shipped: the loop
+  `docs/datasets.md` prints in forty lines of shell, in ten of Python — a
+  `Dataset` that pages its items on its own, a `Run` that pins a version and
+  closes itself (`finished`, or `failed` with the exception's `repr`), and
+  `with run.item(case):`, inside which every span the *application* starts
+  carries `tracepad.run_id` and `tracepad.item_id` because a `SpanProcessor`
+  writes them at `on_start` (#3). The block opens no span of its own: the root
+  is the framework's, another SDK's or a decorator's, and it is stamped all
+  the same — as far as `contextvars` reaches, which is an `await` and a copied
+  context but not a bare thread or another process (`Attempt.attributes()` is
+  for those). `finish` flushes the scores and then the spans before it posts,
+  so the summary on the next line is over everything the run produced (#5).
+  Nothing is computed here: every number is the server's (#8).
 - ✅ Spec 005 (retention & admin) shipped: schema 0005, the hourly sweeper
   writing every chunk through the group-commit writer, the admin API under
   `/api/v1/projects` with a dry-run/confirm contract on every destructive
@@ -167,6 +180,7 @@ API. This file routes; it does not duplicate what specs and docs say.
 | The Evals screens (datasets, runs, the comparison) | `ui/src/routes/{datasets,runs,score-configs}/`, `ui/src/lib/components/evals/` (the tables, the three peek bodies, the summary cards), `ui/src/lib/evals.ts` (the pure part: the checkbox rule, the *changed only* filter, the words a cell uses), `ui/src/lib/api/runs.ts` (the run filters, held to `openapi.json`), `docs/ui.md#evals`, spec 016 — every number on these screens is the server's (spec 014 #18); the client decides which rows to draw and never what a verdict is |
 | Writing an eval (the item editor, the forms, the deletions) | `ui/src/lib/components/evals/ItemEditor.svelte` over the routes `datasets/items/new` and `datasets/[name]/items/[id]/edit` (spec 016 #21), `ScoreConfigDialog.svelte` with `ui/src/lib/api/score-configs.ts` (the vocabularies and the rules, held to `openapi.json`), `NewDatasetDialog`/`DeleteDatasetDialog`, `ui/src/lib/components/ConfirmDialog.svelte`, `itemBody`/`savedMessage` in `$lib/evals`, `docs/datasets.md#the-same-loop-from-the-web-interface` — a write is one of spec 014's endpoints and never a verb of the screen's own; the echo ceremony (`ConfirmCard`) is only where the server has a dry run, and the dialog is where it does not (#6) |
 | The Python package | `sdk/python/` (`src/tracepad/` is the package, `tests/` its suite and `tests/e2e/` the run against a real binary), `docs/sdk-python.md`, spec 017 — two dependencies and no third, no provider-client wrapper ever (design §6.5); `_tracing.py` holds the provider adaptation and defers the SDK's own imports into `init`, `_attributes.py` is the vocabulary that `internal/mapping/rules.go` reads back, and the application-line budget is 1,500 shared with spec 018 (`scripts/sdk-lines.sh`). `scripts/fixtures/tracepad_sdk.py` rewrites `testdata/otlp/010-tracepad-sdk.pb` from the package's own exporter |
+| The eval harness in Python | `sdk/python/src/tracepad/_harness.py` (the processor, `Run`, `Attempt`, the score configs, `compare`, the paging loop) and `_datasets.py` (`Dataset`, `Item`), `docs/datasets.md#the-same-loop-from-python`, `docs/sdk-python.md#evals`, spec 018 — the stamping is a `ContextVar` read at `on_start` and never a span the harness opened (#3), `init` registers the processor before the exporting one and under `export=False` too, and the read side is the server's JSON as `dict`s because a model layer is a place to start disagreeing with it (#8) |
 | Configuration | `internal/config/`, spec 001 + spec 002 Configuration tables |
 
 Attribute semantics for the `langfuse.*` dialect are derived from Langfuse
