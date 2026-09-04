@@ -29,7 +29,7 @@ import sys
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 from opentelemetry import trace as otel_api
 from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
@@ -48,7 +48,7 @@ TARGET = ROOT / "testdata" / "otlp" / "010-tracepad-sdk.pb"
 
 ANSWER = {
     "model": "claude-sonnet-5-2026-08-01",
-    "choices": [{"message": {"role": "assistant", "content": "Open Settings and choose Reset."}}],
+    "choices": [{"message": {"role": "assistant", "content": "In the trace you are reading."}}],
     "usage": {
         "prompt_tokens": 128,
         "completion_tokens": 41,
@@ -56,6 +56,16 @@ ANSWER = {
         "completion_tokens_details": {"reasoning_tokens": 12},
         "cost": 0.0011,
     },
+}
+
+# The second trace's answer. Its model name is deliberately unrelated to every
+# other name in the corpus: the interface's end-to-end suite matches a model
+# breakdown's rows by substring, and a name that contained another's would make
+# two rows one (found running that suite).
+REWRITTEN = {
+    "model": "claude-haiku-4-5",
+    "choices": [{"message": {"content": "Where does a span land?"}}],
+    "usage": {"prompt_tokens": 18, "completion_tokens": 9},
 }
 
 
@@ -76,9 +86,10 @@ class FixedIds(IdGenerator):
 
 
 class Collector(BaseHTTPRequestHandler):
-    bodies: list[bytes] = []
+    bodies: ClassVar[list[bytes]] = []
 
-    def do_POST(self) -> None:  # noqa: N802 — BaseHTTPRequestHandler's spelling
+    # `do_POST` is BaseHTTPRequestHandler's spelling, not ours.
+    def do_POST(self) -> None:
         length = int(self.headers.get("Content-Length", "0"))
         Collector.bodies.append(self.rfile.read(length))
         assert self.headers.get("Authorization") == "Bearer tp-sk-fixture"
@@ -91,35 +102,54 @@ class Collector(BaseHTTPRequestHandler):
 
 
 def application() -> None:
-    """The trace the fixture is of: every row of the Ingest contract."""
+    """The two traces the fixture is of: every row of the Ingest contract.
 
-    @tracepad.observe(type="tool", name="catalog-search")
+    The question, the answer, the prompt, the observation kind, the user and
+    the session are all this fixture's own. The corpus is seeded whole into the
+    interface's end-to-end suite, which searches it for one fixture's phrase,
+    filters it by another's prompt and counts the traces of a third's kind —
+    so a value shared with a neighbour would silently change what that suite
+    counts (found running it).
+    """
+
+    @tracepad.observe(type="retriever", name="docs-search")
     def search(query: str) -> list[str]:
         tracepad.update(level="WARNING", status_message="one result", metadata={"attempt": 2})
-        return ["the reset page"]
+        return ["the ingest page"]
 
-    support = tracepad.Prompt(name="support-answer", version=7, type="text", text="Answer {topic}.")
+    @tracepad.observe(type="generation", name="rewrite-question")
+    def rewrite(question: str) -> dict[str, Any]:
+        """The decorator reading a response, rather than a block ending one."""
+        return REWRITTEN
 
-    with tracepad.span("answer-question", input={"question": "how do I reset my password?"}):
+    docs = tracepad.Prompt(name="tracepad-answer", version=3, type="text", text="Answer {topic}.")
+    question = "where does a span land?"
+
+    with tracepad.span("answer-question", input={"question": question}):
         tracepad.update_trace(
-            name="support-chat",
-            user_id="user-4821",
-            session_id="session-77",
-            tags=["support", "beta"],
+            name="docs-chat",
+            user_id="user-9001",
+            session_id="session-91",
+            tags=["docs", "beta"],
             metadata={"channel": "web"},
         )
-        search("password reset")
-        with tracepad.event("cache.miss", metadata={"key": "support-answer"}):
+        search("span")
+        with tracepad.event("cache.miss", metadata={"key": "tracepad-answer"}):
             pass
         with tracepad.generation(
             "chat-completion",
             model="claude-sonnet-5",
-            prompt=support,
+            prompt=docs,
             model_parameters={"temperature": 0.2, "max_tokens": 512},
-            input=[{"role": "user", "content": "how do I reset my password?"}],
+            input=[{"role": "user", "content": question}],
         ) as call:
             call.first_token()
             call.end(response=ANSWER)
+
+    # A second trace, on the decorator's own path.
+    with tracepad.span("prepare-question"):
+        tracepad.update_trace(name="docs-rewrite", user_id="user-9001", session_id="session-91")
+        rewrite("where does span land")
 
 
 def flatten(export: ExportTraceServiceRequest) -> list[Any]:
@@ -134,12 +164,8 @@ def flatten(export: ExportTraceServiceRequest) -> list[Any]:
 def fix_clocks(export: ExportTraceServiceRequest) -> None:
     """Lay every instant in the export out on a fixed grid, in order."""
     spans = flatten(export)
-    grid = {
-        instant: BASE + rank * STEP
-        for rank, instant in enumerate(
-            sorted({t for span in spans for t in (span.start_time_unix_nano, span.end_time_unix_nano)})
-        )
-    }
+    instants = {t for span in spans for t in (span.start_time_unix_nano, span.end_time_unix_nano)}
+    grid = {instant: BASE + rank * STEP for rank, instant in enumerate(sorted(instants))}
     for span in spans:
         span.start_time_unix_nano = grid[span.start_time_unix_nano]
         span.end_time_unix_nano = grid[span.end_time_unix_nano]
@@ -180,7 +206,7 @@ def main() -> int:
     otel_api.get_tracer_provider().shutdown()
     server.shutdown()
 
-    if len(Collector.bodies) != 1:
+    if len(Collector.bodies) != 1:  # one batch, or the spans would not be one body
         print(f"expected one export, got {len(Collector.bodies)}", file=sys.stderr)
         return 1
 

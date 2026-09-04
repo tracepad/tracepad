@@ -94,7 +94,9 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: pip install -e ./sdk/python pytest "ruff==0.16.6"
-      - run: ruff check sdk/python scripts/fixtures scripts/smoke
+      # One rule set for every Python file in the repository, named rather
+      # than discovered: the scripts sit outside the package that configures it.
+      - run: ruff check --config sdk/python/pyproject.toml sdk/python scripts
       - run: SDK_PYTHON="$(which python)" scripts/sdk-test.sh
       # A signal, not a rule (design §8), the same instrument the interface has.
       - run: make sdk-lines

@@ -63,3 +63,8 @@ select = ["E", "F", "I", "UP", "B", "A", "RUF"]
 # score API; shadowing the builtins inside these signatures is what makes the
 # package read like the documents it implements (spec 017, Package contract).
 ignore = ["A002", "A001"]
+
+# The package is first-party wherever it is linted from, including the scripts
+# beside it in the repository that import it.
+[tool.ruff.lint.isort]
+known-first-party = ["tracepad"]

@@ -12,7 +12,6 @@ that never saw the SDKs.
 import json
 import sqlite3
 import sys
-import zlib
 
 db_path, otel_trace_id_file, langfuse_trace_id_file, tracepad_trace_id_file = sys.argv[1:5]
 

@@ -109,8 +109,8 @@ test('the bar counts what the filters match, not what is on the page', async ({ 
 	await signIn(page);
 	await page.goto('/traces?limit=2');
 
-	// Thirteen in the corpus, two on screen.
-	await expect(page.getByText('2 of 13 traces')).toBeVisible();
+	// Fifteen in the corpus, two on screen.
+	await expect(page.getByText('2 of 15 traces')).toBeVisible();
 
 	await page.goto('/traces?limit=2&environment=staging');
 	await expect(page.getByText(/of 1 trace\b/)).toBeVisible();
@@ -127,7 +127,7 @@ test('changing the page size starts again at the newest page', async ({ page }) 
 	// A cursor is a position in one paging of one listing; at another size it
 	// points into a page that no longer exists.
 	await expect(page).not.toHaveURL(/cursor=/);
-	await expect(rows(page)).toHaveCount(13);
+	await expect(rows(page)).toHaveCount(15);
 });
 
 test('j on the last row of a page turns it and keeps reading', async ({ page }) => {
@@ -205,10 +205,10 @@ test('live is paused off the newest page, and can still be switched off', async 
 
 test('a listing that fits on one page has all four controls dead', async ({ page }) => {
 	await signIn(page);
-	// Thirteen traces at the default size: this page is both ends at once. A
+	// The whole corpus at the default size: this page is both ends at once. A
 	// live » here would navigate to `?direction=prev`, show the same rows and
 	// quietly pause live mode (PR #11, third review).
-	await expect(page.locator('tbody tr')).toHaveCount(13);
+	await expect(page.locator('tbody tr')).toHaveCount(15);
 	for (const name of ['Newest page', 'Previous page', 'Next page', 'Oldest page']) {
 		await expect(page.getByRole('button', { name })).toBeDisabled();
 	}
@@ -216,12 +216,12 @@ test('a listing that fits on one page has all four controls dead', async ({ page
 
 test('walking back to a short page still leaves a way home', async ({ page }) => {
 	await signIn(page);
-	// Thirteen traces in pages of two: from the far end, walking back lands on
+	// Fifteen traces in pages of two: from the far end, walking back lands on
 	// a one-row page with nothing above it — rows, but no `prev_cursor`. « is
 	// an anchor and must stay live there, or the reader is stuck on one row
 	// with live mode paused (PR #11, fourth review).
 	await page.goto('/traces?limit=2&direction=prev');
-	for (let step = 0; step < 6; step++) {
+	for (let step = 0; step < 7; step++) {
 		// One turn at a time. The cursors in the bar belong to the page on
 		// screen, so a click before the next one lands would re-address the
 		// page just asked for and quietly lose a turn — the bar goes dead
@@ -262,10 +262,12 @@ test('an empty page off the newest one is not a dead end', async ({ page }) => {
 
 test('the sessions listing pages the same way', async ({ page }) => {
 	await signIn(page);
-	await page.goto('/sessions?limit=1');
+	// Three sessions in pages of two: one turn is the whole listing, so the
+	// far end is one click away and both cursors are exercised.
+	await page.goto('/sessions?limit=2');
 
-	await expect(rows(page)).toHaveCount(1);
-	await expect(page.getByText('1 of 2 sessions')).toBeVisible();
+	await expect(rows(page)).toHaveCount(2);
+	await expect(page.getByText('2 of 3 sessions')).toBeVisible();
 	await page.getByRole('button', { name: 'Next page' }).click();
 	await expect(page).toHaveURL(/cursor=/);
 	// ‹ live is the turn having landed; ✕ dead before that is only `busy`.

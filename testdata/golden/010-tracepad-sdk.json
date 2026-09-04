@@ -3,18 +3,26 @@
   "traces": [
     {
       "id": "a0b1c2d3e4f5a6b7c8d9ea0000000001",
-      "name": "support-chat",
-      "user_id": "user-4821",
-      "session_id": "session-77",
+      "name": "docs-chat",
+      "user_id": "user-9001",
+      "session_id": "session-91",
       "environment": "production",
       "release": "2026.9.4",
       "tags": [
-        "support",
+        "docs",
         "beta"
       ],
       "metadata": {
         "channel": "web"
       }
+    },
+    {
+      "id": "a0b1c2d3e4f5a6b7c8d9ea0000000002",
+      "name": "docs-rewrite",
+      "user_id": "user-9001",
+      "session_id": "session-91",
+      "environment": "production",
+      "release": "2026.9.4"
     }
   ],
   "observations": [
@@ -27,7 +35,7 @@
       "end_time": 1787738400060000000,
       "level": "DEFAULT",
       "input": {
-        "question": "how do I reset my password?"
+        "question": "where does a span land?"
       },
       "metadata": {
         "resource.service.name": "support-bot",
@@ -41,17 +49,17 @@
       "trace_id": "a0b1c2d3e4f5a6b7c8d9ea0000000001",
       "id": "1a2b3c4d5e6f0002",
       "parent_observation_id": "1a2b3c4d5e6f0001",
-      "type": "tool",
-      "name": "catalog-search",
+      "type": "retriever",
+      "name": "docs-search",
       "start_time": 1787738400010000000,
       "end_time": 1787738400020000000,
       "level": "WARNING",
       "status_message": "one result",
       "input": {
-        "query": "password reset"
+        "query": "span"
       },
       "output": [
-        "the reset page"
+        "the ingest page"
       ],
       "metadata": {
         "attempt": 2,
@@ -72,7 +80,7 @@
       "end_time": 1787738400030000000,
       "level": "DEFAULT",
       "metadata": {
-        "key": "support-answer",
+        "key": "tracepad-answer",
         "resource.service.name": "support-bot",
         "resource.telemetry.sdk.language": "python",
         "resource.telemetry.sdk.name": "opentelemetry",
@@ -105,17 +113,59 @@
         "total": 0.0011
       },
       "provided_cost": true,
-      "prompt_name": "support-answer",
-      "prompt_version": 7,
+      "prompt_name": "tracepad-answer",
+      "prompt_version": 3,
       "input": [
         {
-          "content": "how do I reset my password?",
+          "content": "where does a span land?",
           "role": "user"
         }
       ],
-      "output": "Open Settings and choose Reset.",
+      "output": "In the trace you are reading.",
       "metadata": {
         "gen_ai.response.model": "claude-sonnet-5-2026-08-01",
+        "resource.service.name": "support-bot",
+        "resource.telemetry.sdk.language": "python",
+        "resource.telemetry.sdk.name": "opentelemetry",
+        "scope.name": "tracepad",
+        "scope.version": "0.1.0"
+      }
+    },
+    {
+      "trace_id": "a0b1c2d3e4f5a6b7c8d9ea0000000002",
+      "id": "1a2b3c4d5e6f0005",
+      "type": "span",
+      "name": "prepare-question",
+      "start_time": 1787738400070000000,
+      "end_time": 1787738400100000000,
+      "level": "DEFAULT",
+      "metadata": {
+        "resource.service.name": "support-bot",
+        "resource.telemetry.sdk.language": "python",
+        "resource.telemetry.sdk.name": "opentelemetry",
+        "scope.name": "tracepad",
+        "scope.version": "0.1.0"
+      }
+    },
+    {
+      "trace_id": "a0b1c2d3e4f5a6b7c8d9ea0000000002",
+      "id": "1a2b3c4d5e6f0006",
+      "parent_observation_id": "1a2b3c4d5e6f0005",
+      "type": "generation",
+      "name": "rewrite-question",
+      "start_time": 1787738400080000000,
+      "end_time": 1787738400090000000,
+      "model": "claude-haiku-4-5",
+      "level": "DEFAULT",
+      "usage": {
+        "input_tokens": 18,
+        "output_tokens": 9
+      },
+      "input": {
+        "question": "where does span land"
+      },
+      "output": "Where does a span land?",
+      "metadata": {
         "resource.service.name": "support-bot",
         "resource.telemetry.sdk.language": "python",
         "resource.telemetry.sdk.name": "opentelemetry",
