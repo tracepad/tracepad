@@ -66,6 +66,13 @@ export function asDocument(value: unknown): { text: string; plain: boolean } {
 /** Where a document stops being JSON, and what the engine called it (#8). */
 export type Problem = { message: string; at: number };
 
+/**
+ * Whether a document is not there at all. An empty pane is how a consumer's
+ * author says a field is absent (spec 016 #22), and "" is not invalid JSON —
+ * it is no JSON, which is a different answer.
+ */
+export const blank = (text: string) => text.trim() === '';
+
 export function problem(text: string): Problem | null {
 	try {
 		JSON.parse(text);
@@ -295,8 +302,10 @@ export function extensions(options: {
 	editing: boolean;
 	isLocked: boolean;
 	plain: boolean;
+	/** Whether an empty document is a legitimate state of this one (#22). */
+	optional?: boolean;
 }): Extension[] {
-	const { label, editing, isLocked, plain } = options;
+	const { label, editing, isLocked, plain, optional = false } = options;
 	return [
 		EditorView.lineWrapping,
 		EditorView.contentAttributes.of({ 'aria-label': label }),
@@ -316,7 +325,7 @@ export function extensions(options: {
 		// The linter stays installed while the editor is off: a document does
 		// not stop being invalid because the consumer is saving, and `valid`
 		// is read from what it finds.
-		...(editing ? [diagnostics] : [])
+		...(editing ? [diagnostics(optional)] : [])
 	];
 }
 
@@ -324,19 +333,23 @@ export function extensions(options: {
  * The parse error, in place (#8). An author told only "invalid JSON" goes
  * hunting; the position is what turns the message into a destination.
  */
-const diagnostics = linter(
-	(view) => {
-		const found = problem(view.state.doc.toString());
-		if (!found) return [];
-		const at = Math.min(found.at, view.state.doc.length);
-		return [
-			{
-				from: at,
-				to: Math.min(at + 1, view.state.doc.length),
-				severity: 'error' as const,
-				message: found.message
-			}
-		];
-	},
-	{ delay: 300 }
-);
+function diagnostics(optional: boolean) {
+	return linter(
+		(view) => {
+			const text = view.state.doc.toString();
+			if (optional && blank(text)) return [];
+			const found = problem(text);
+			if (!found) return [];
+			const at = Math.min(found.at, view.state.doc.length);
+			return [
+				{
+					from: at,
+					to: Math.min(at + 1, view.state.doc.length),
+					severity: 'error' as const,
+					message: found.message
+				}
+			];
+		},
+		{ delay: 300 }
+	);
+}

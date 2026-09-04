@@ -21,6 +21,13 @@ type JSONResponse<T> = T extends {
 	? Body
 	: never;
 
+/** What a write that creates something answers; the items POST is the one here. */
+type CreatedResponse<T> = T extends {
+	responses: { 201: { content: { 'application/json': infer Body } } };
+}
+	? Body
+	: never;
+
 export type TraceRow = components['schemas']['TraceRow'];
 export type Trace = components['schemas']['Trace'];
 export type Observation = components['schemas']['Observation'];
@@ -45,6 +52,15 @@ export type RunComparison = components['schemas']['RunComparison'];
 export type ComparedItem = components['schemas']['ComparedItem'];
 export type ComparedScore = components['schemas']['ComparedScore'];
 export type ScoreConfig = components['schemas']['ScoreConfig'];
+
+// What the write half sends and gets back (spec 016, PR 2).
+export type DatasetItemInput = components['schemas']['DatasetItemInput'];
+export type ScoreConfigInput = components['schemas']['ScoreConfigInput'];
+/** What deleting a dataset takes — the dry run, and what it took. */
+export type DatasetDeletion = components['schemas']['DatasetDeletion'];
+export type ItemsWritten = CreatedResponse<paths['/api/v1/datasets/{name}/items']['post']>;
+export type ItemArchived = JSONResponse<paths['/api/v1/datasets/{name}/items/{id}']['delete']>;
+export type RunDeleted = JSONResponse<paths['/api/v1/runs/{id}']['delete']>;
 
 export type TracePage = JSONResponse<paths['/api/v1/traces']['get']>;
 export type DatasetPage = JSONResponse<paths['/api/v1/datasets']['get']>;
@@ -248,6 +264,66 @@ class Api {
 		return this.#json<ScoreConfigList>('/api/v1/score-configs', { signal });
 	}
 
+	// --- writing the eval nouns (spec 016, PR 2) ---------------------------
+	//
+	// The same endpoints the CLI pushes through, in the same shapes: the
+	// screens add no verb of their own. Two of them are declarative `PUT`s —
+	// the whole envelope, the whole config — and the item write is a POST
+	// whose answer says what it did (spec 014 #6): a version, and how many
+	// items produced a row.
+
+	/** The envelope only; the items and the version clock are untouched. */
+	putDataset(name: string, body: { description?: string; metadata?: object }) {
+		return this.#json<Dataset>(`/api/v1/datasets/${encodeURIComponent(name)}`, {
+			method: 'PUT',
+			body
+		});
+	}
+
+	/** A dry run until `confirm` echoes the name (spec 014 #20, spec 005 #8). */
+	deleteDataset(name: string, confirm?: string) {
+		return this.#json<DatasetDeletion>(`/api/v1/datasets/${encodeURIComponent(name)}`, {
+			method: 'DELETE',
+			query: { confirm }
+		});
+	}
+
+	/** One item, added or edited; the id in the body is what makes it an edit. */
+	putItem(name: string, item: DatasetItemInput) {
+		return this.#json<ItemsWritten>(`/api/v1/datasets/${encodeURIComponent(name)}/items`, {
+			method: 'POST',
+			body: item
+		});
+	}
+
+	/** Archives an item at a new version; every earlier version still has it. */
+	archiveItem(name: string, id: string) {
+		return this.#json<ItemArchived>(
+			`/api/v1/datasets/${encodeURIComponent(name)}/items/${encodeURIComponent(id)}`,
+			{ method: 'DELETE' }
+		);
+	}
+
+	/** One row of bookkeeping; the traces it pinned return to the retention window. */
+	deleteRun(id: string) {
+		return this.#json<RunDeleted>(`/api/v1/runs/${encodeURIComponent(id)}`, { method: 'DELETE' });
+	}
+
+	/** Declarative (spec 014 #17): the whole config, so one form creates and edits. */
+	putScoreConfig(name: string, body: ScoreConfigInput) {
+		return this.#json<ScoreConfig>(`/api/v1/score-configs/${encodeURIComponent(name)}`, {
+			method: 'PUT',
+			body
+		});
+	}
+
+	/** The scores the config admitted stay; only the binding goes. */
+	deleteScoreConfig(name: string) {
+		return this.#json<{ name: string }>(`/api/v1/score-configs/${encodeURIComponent(name)}`, {
+			method: 'DELETE'
+		});
+	}
+
 	// --- the project's own management (spec 005 #11) -----------------------
 	//
 	// All of it on the session's project key: a project administers itself.
@@ -424,7 +500,7 @@ class Api {
 
 /** Everything one request can vary. */
 type Request = {
-	method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+	method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 	query?: Query;
 	body?: unknown;
 	scope?: Scope;

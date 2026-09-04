@@ -1,6 +1,7 @@
 <script lang="ts">
 	import ChevronLeft from '@lucide/svelte/icons/chevron-left';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
+	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
@@ -13,6 +14,7 @@
 		type Trace
 	} from '$lib/api/client.svelte';
 	import Button from '$lib/components/Button.svelte';
+	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import CopyButton from '$lib/components/CopyButton.svelte';
 	import RunItemDetail from '$lib/components/evals/RunItemDetail.svelte';
 	import StatusChip from '$lib/components/evals/StatusChip.svelte';
@@ -201,6 +203,12 @@
 		`tracepad.run_id  = ${id}\ntracepad.item_id = <item id>\n\n` +
 			`curl -H "Authorization: Bearer <your project key>" ${page.url.origin}/api/v1/runs/${id}/finish -d '{}'`
 	);
+	// Deleting a run is one row of bookkeeping (spec 014 #20): the traces it
+	// held are not deleted, they stop being pinned — which is the consequence
+	// the dialog names (#6), because it is the one a reader cannot see from
+	// here.
+	let deleting = $state(false);
+
 	const fieldClass = 'border-border bg-canvas text-fg rounded-md border px-2 py-1 text-sm';
 </script>
 
@@ -252,9 +260,26 @@
 					{/each}
 				</select>
 			</label>
+			<Button aria-label="Delete run" onclick={() => (deleting = true)}>
+				<Trash2 class="size-4" />
+				<span class="hidden sm:inline">Delete</span>
+			</Button>
 		{/if}
 	{/snippet}
 </PageHeader>
+
+<ConfirmDialog
+	open={deleting}
+	title="Delete this run?"
+	description="The run and its bookkeeping go. Its traces are not deleted — they stop being pinned
+		and return to the retention window, so they live as long as retention says."
+	confirmLabel="Delete the run"
+	onconfirm={async () => {
+		await api.deleteRun(id);
+		await goto('/runs');
+	}}
+	onclose={() => (deleting = false)}
+/>
 
 {#if failure}
 	<div class="flex flex-1 items-start justify-center p-8">

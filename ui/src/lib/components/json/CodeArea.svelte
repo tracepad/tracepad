@@ -4,7 +4,7 @@
 	import { untrack, type Snippet } from 'svelte';
 	import type { Attachment } from 'svelte/attachments';
 	import CopyButton from '../CopyButton.svelte';
-	import { FOLD_OVER_LINES, extensions, foldDeep, lintAnswer, problem, relock } from './setup';
+	import { FOLD_OVER_LINES, blank, extensions, foldDeep, lintAnswer, problem, relock } from './setup';
 
 	// The surface itself: a CodeMirror instance, a toolbar over it, and the
 	// caller's banner over that (spec 015, Component contract). It is internal
@@ -21,6 +21,7 @@
 		folded,
 		valid = $bindable(true),
 		disabled = false,
+		optional = false,
 		whole = true,
 		banner,
 		actions
@@ -41,6 +42,12 @@
 		 */
 		valid?: boolean;
 		disabled?: boolean;
+		/**
+		 * Whether an empty document is a state this field may be in (spec 016
+		 * #22). It is then neither marked nor reported invalid: "" is not
+		 * broken JSON, it is a field the author left out.
+		 */
+		optional?: boolean;
 		/**
 		 * Whether what is on screen is the whole of what the caller has. A
 		 * truncated payload's preview is not, and Copy is not offered for it:
@@ -67,14 +74,14 @@
 	 * different editor: a different language, a different name for the region,
 	 * a viewer rather than an editor.
 	 */
-	function mount(label: string, editing: boolean, plain: boolean): Attachment {
+	function mount(label: string, editing: boolean, plain: boolean, optional: boolean): Attachment {
 		return (node) => {
 			const created = new EditorView({
 				parent: node,
 				state: EditorState.create({
 					doc: untrack(() => text),
 					extensions: [
-						extensions({ label, editing, isLocked: untrack(() => locked), plain }),
+						extensions({ label, editing, isLocked: untrack(() => locked), plain, optional }),
 						EditorView.updateListener.of((update) => {
 							if (update.docChanged) text = update.state.doc.toString();
 							const answer = lintAnswer(update);
@@ -86,7 +93,10 @@
 			// The one parse this component does itself, so that a consumer
 			// reading `valid` on mount is not told "yes" for the 300 ms it
 			// takes the linter to have an opinion.
-			if (editing) valid = problem(created.state.doc.toString()) === null;
+			if (editing) {
+				const doc = created.state.doc.toString();
+				valid = (optional && blank(doc)) || problem(doc) === null;
+			}
 
 			// Folded after the browser has painted the document, not before:
 			// finding the folds means parsing the whole payload, and a
@@ -142,5 +152,8 @@
 		</div>
 	{/if}
 
-	<div class={['min-w-0', disabled && 'opacity-60']} {@attach mount(label, editing, plain)}></div>
+	<div
+		class={['min-w-0', disabled && 'opacity-60']}
+		{@attach mount(label, editing, plain, optional)}
+	></div>
 </div>

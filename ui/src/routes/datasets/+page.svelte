@@ -3,7 +3,9 @@
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import { api, type Dataset } from '$lib/api/client.svelte';
+	import Button from '$lib/components/Button.svelte';
 	import CopyButton from '$lib/components/CopyButton.svelte';
+	import NewDatasetDialog from '$lib/components/evals/NewDatasetDialog.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import PaginationBar from '$lib/components/PaginationBar.svelte';
 	import { count, timestamp } from '$lib/format';
@@ -35,6 +37,8 @@
 		'tracepad runs finish "$(echo "$RUN" | jq -r .id)"'
 	].join('\n');
 
+	let creating = $state(false);
+
 	const cell = 'truncate px-3 py-1.5';
 	const numeric = 'px-3 py-1.5 text-right tabular-nums';
 </script>
@@ -49,7 +53,12 @@
 			<span class="tabular-nums">{count(listing.rows.length)}</span>
 		{/if}
 	{/snippet}
+	{#snippet actions()}
+		<Button variant="primary" onclick={() => (creating = true)}>New dataset</Button>
+	{/snippet}
 </PageHeader>
+
+<NewDatasetDialog open={creating} onclose={() => (creating = false)} />
 
 {#if listing.problem}
 	<p role="alert" class="text-danger bg-danger-soft border-border flex items-center gap-2 border-b px-4 py-2">

@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import type { ComparedItem } from '$lib/api/client.svelte';
-import { age, changedOnly, compareChoice, deltaText, preview, scoreText } from './evals';
+import {
+	age,
+	changedOnly,
+	compareChoice,
+	deltaText,
+	itemBody,
+	preview,
+	savedMessage,
+	scoreText
+} from './evals';
 
 const run = (id: string, dataset: string) => ({ id, dataset });
 
@@ -72,5 +81,60 @@ describe('the words a cell uses', () => {
 		expect(deltaText(0.05)).toBe('+0.05');
 		expect(deltaText(-0.25)).toBe('-0.25');
 		expect(deltaText(null)).toBe('—');
+	});
+});
+
+// The item editor's submit (spec 016 #5). The three panes are text, and this
+// is the parse that decides what — if anything — goes on the wire: the
+// re-check spec 015 #15 asks a consumer to do rather than trusting a `valid`
+// that settles 300 ms after the last keystroke.
+describe('the item a draft becomes', () => {
+	const draft = { input: '{"q": 1}', expected: '', metadata: '' };
+
+	it('leaves an empty pane out rather than sending null', () => {
+		expect(itemBody(draft)).toEqual({ item: { input: { q: 1 } } });
+	});
+
+	it('carries the id, the source pair and the two other bodies', () => {
+		expect(
+			itemBody({
+				...draft,
+				id: 'a'.repeat(32),
+				expected: '{"a": "yes"}',
+				metadata: '{"note": "cut from prod"}',
+				sourceTraceID: 't1',
+				sourceObservationID: 'o1'
+			})
+		).toEqual({
+			item: {
+				id: 'a'.repeat(32),
+				input: { q: 1 },
+				expected_output: { a: 'yes' },
+				metadata: { note: 'cut from prod' },
+				source_trace_id: 't1',
+				source_observation_id: 'o1'
+			}
+		});
+	});
+
+	it('refuses an empty input, which is what a case is', () => {
+		expect(itemBody({ ...draft, input: '  ' })).toEqual({
+			problem: 'Input is what a case is; it cannot be empty.'
+		});
+	});
+
+	it('names the pane that does not parse', () => {
+		const answer = itemBody({ ...draft, expected: '{"a": }' });
+		expect('problem' in answer && answer.problem).toMatch(/^Expected output is not JSON/);
+	});
+});
+
+// The store's own answer, shown rather than hidden (spec 014 #6): a save that
+// changed nothing wrote nothing, and only the server can say so.
+describe('what a save is told', () => {
+	it('distinguishes a write from a no-op', () => {
+		expect(savedMessage({ version: 4, changed: 1 })).toBe('Saved as version 4.');
+		expect(savedMessage({ version: 4, changed: 0 })).toMatch(/^Unchanged/);
+		expect(savedMessage({ version: 4, changed: 0 })).toMatch(/version 4/);
 	});
 });

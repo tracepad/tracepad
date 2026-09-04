@@ -177,6 +177,29 @@ describe('the editor', () => {
 		expect(props.valid).toBe(false);
 	});
 
+	// An empty pane is how the item editor's author says "this case has no
+	// expected output" (spec 016 #5, #22). "" is not broken JSON — it is no
+	// JSON — so an optional editor neither marks it nor reports it invalid,
+	// and the moment anything is typed the ordinary rule is back.
+	it('lets an optional document be empty, and only an optional one', async () => {
+		const props = $state({ text: '', label: 'Expected output', valid: false, optional: true });
+		render(JsonEditor, props);
+		flushSync();
+
+		expect(props.valid).toBe(true);
+		expect(await marks('Expected output')).toEqual([]);
+
+		props.text = '{"a": ';
+		flushSync();
+		await linted('Expected output');
+		expect(props.valid).toBe(false);
+
+		const required = $state({ text: '', label: 'Input', valid: true });
+		render(JsonEditor, required);
+		flushSync();
+		expect(required.valid).toBe(false);
+	});
+
 	it('parses the document once a pause, not once a keystroke', async () => {
 		const props = $state({ text: '{"a": 1}', label: 'Item', valid: true });
 		render(JsonEditor, props);

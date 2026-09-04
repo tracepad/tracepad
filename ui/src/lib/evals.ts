@@ -3,7 +3,7 @@
 // screen shows — a mean, a verdict, a delta — comes from the server (spec 014
 // #18); what lives here is which rows to draw, and how to say a thing.
 
-import type { ComparedItem, Run } from '$lib/api/client.svelte';
+import type { ComparedItem, DatasetItemInput, ItemsWritten, Run } from '$lib/api/client.svelte';
 
 /**
  * Whether two ticked runs can be compared, and if not, why (spec 016 #11).
@@ -99,6 +99,68 @@ export function scoreText(value: unknown): string {
 export function deltaText(delta: number | null | undefined): string {
 	if (delta === null || delta === undefined) return '—';
 	return delta > 0 ? `+${trim(delta)}` : trim(delta);
+}
+
+/**
+ * What the item editor holds (spec 016 #5): three documents as text, because
+ * a document being edited may not parse and no value can hold a syntax error,
+ * plus the id that makes a save an edit and the pair saying where the case was
+ * cut from.
+ */
+export type ItemDraft = {
+	id?: string;
+	input: string;
+	expected: string;
+	metadata: string;
+	sourceTraceID?: string | null;
+	sourceObservationID?: string | null;
+};
+
+/**
+ * The three documents as one item, or the first reason they are not one. The
+ * editors report their own validity as the linter settles (spec 015 #15), and
+ * this is the re-check on submit that decision asks for: it parses what is
+ * actually about to be sent.
+ *
+ * Only `input` is required (spec 014 #4); an empty pane means the field is
+ * left out of the write rather than sent as `null`, because "no expected
+ * output" and "an expected output of null" are two different cases.
+ */
+export function itemBody(draft: ItemDraft): { item: DatasetItemInput } | { problem: string } {
+	const fields: [string, string][] = [
+		['Input', draft.input],
+		['Expected output', draft.expected],
+		['Metadata', draft.metadata]
+	];
+	const parsed: Record<string, unknown> = {};
+	for (const [label, text] of fields) {
+		if (text.trim() === '') continue;
+		try {
+			parsed[label] = JSON.parse(text);
+		} catch (cause) {
+			return { problem: `${label} is not JSON: ${(cause as Error).message}` };
+		}
+	}
+	if (!('Input' in parsed)) return { problem: 'Input is what a case is; it cannot be empty.' };
+	const item: DatasetItemInput = { input: parsed['Input'] };
+	if (draft.id) item.id = draft.id;
+	if ('Expected output' in parsed) item.expected_output = parsed['Expected output'];
+	if ('Metadata' in parsed) item.metadata = parsed['Metadata'];
+	if (draft.sourceTraceID) item.source_trace_id = draft.sourceTraceID;
+	if (draft.sourceObservationID) item.source_observation_id = draft.sourceObservationID;
+	return { item };
+}
+
+/**
+ * What the store answered, in a sentence (spec 014 #6, spec 016 #5). A write
+ * that changed nothing writes nothing and leaves the version where it was, and
+ * saying so is the only proof the author's edit was a no-op — a silent save is
+ * the confusion the store's answer exists to prevent.
+ */
+export function savedMessage(answer: Pick<ItemsWritten, 'version' | 'changed'>): string {
+	return answer.changed === 0
+		? `Unchanged — nothing was written, and the dataset stays at version ${answer.version}.`
+		: `Saved as version ${answer.version}.`;
 }
 
 /** A number the way a person writes it: no trailing zeros, four places at most. */

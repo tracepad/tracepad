@@ -17,7 +17,19 @@
 	// force over the shared listing (#3), walked oldest first in `seq` order,
 	// and a row's peek — the item whole.
 
-	let { dataset, version }: { dataset: Dataset; version: number } = $props();
+	let {
+		dataset,
+		version,
+		onchanged
+	}: {
+		dataset: Dataset;
+		version: number;
+		/** A write landed: the envelope above this tab is a version out of date. */
+		onchanged?: () => void;
+	} = $props();
+
+	/** Whether the head is in force, which is where a write would land (#4). */
+	const head = $derived(version === dataset.version);
 
 	const listing = new Listing<DatasetItem>({
 		key: () => `${dataset.name}|${version}`,
@@ -52,9 +64,14 @@
 
 	// The exact count is on the dataset at the head; an older version has no
 	// number of its own, and the bar counts the page (spec 010, divergence 6).
-	const total = $derived(
-		version === dataset.version ? { value: dataset.item_count, capped: false } : null
-	);
+	const total = $derived(head ? { value: dataset.item_count, capped: false } : null);
+
+	/** An archive is a new version of the dataset: the tab and its header both move. */
+	function archived() {
+		peek(null);
+		listing.reload();
+		onchanged?.();
+	}
 
 	const push = $derived(`tracepad datasets push ${dataset.name} --file cases.jsonl`);
 </script>
@@ -111,8 +128,10 @@
 		onnext={() => walk.step(1)}
 		hasPrev={walk.hasPrev}
 		hasNext={walk.hasNext}
-		fullHref="/datasets/{encodeURIComponent(dataset.name)}?version={version}&peek={peekID}"
-		fullLabel="Link to this item"
+		fullHref={head
+			? `/datasets/${encodeURIComponent(dataset.name)}/items/${encodeURIComponent(peekID)}/edit`
+			: `/datasets/${encodeURIComponent(dataset.name)}?version=${version}&peek=${peekID}`}
+		fullLabel={head ? 'Open this item in the editor' : 'Link to this item'}
 	>
 		{#snippet title()}
 			<h2 class="shrink-0 text-lg font-semibold tracking-tight">Item {short(peekID)}</h2>
@@ -121,6 +140,6 @@
 			<span class="hidden truncate font-mono md:inline">{peekID}</span>
 			<CopyButton text={peekID} label="Copy the item id" />
 		{/snippet}
-		<ItemDetail dataset={dataset.name} id={peekID} {version} />
+		<ItemDetail dataset={dataset.name} id={peekID} {version} writable={head} onarchived={archived} />
 	</PeekPanel>
 {/if}
