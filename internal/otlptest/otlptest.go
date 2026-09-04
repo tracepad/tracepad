@@ -42,6 +42,7 @@ func Fixtures() []Fixture {
 		largePayloads(),
 		wireColumns(),
 		evalRun(),
+		plainTextPrompt(),
 	}
 }
 
@@ -480,6 +481,63 @@ func evalRun() Fixture {
 			resourceSpans(
 				[]*commonpb.KeyValue{str("service.name", "support-eval")},
 				scope("langfuse-sdk", "4.7.0", spans...),
+			),
+		},
+	}
+}
+
+// 011 — a payload that is not JSON: the bare `gen_ai.prompt` and
+// `gen_ai.completion` keys carrying plain multi-line text, the way a span
+// instrumented by hand around a completion call sends them.
+//
+// The mapper stores such a value as the string it is, the API answers with a
+// bare string, and the interface shows it as text rather than as JSON (spec
+// 015 Decision 12). Every fixture beside this one carries JSON in both
+// payloads, so without it that path is exercised nowhere the corpus reaches —
+// neither in the interface's end-to-end suite nor in a browser.
+//
+// Its user, session, model and wording are its own, so that it joins the
+// corpus without changing what any other fixture's search or filter matches.
+func plainTextPrompt() Fixture {
+	// No JSON envelope and no escapes: newlines are newlines, and the
+	// indented list is indentation. This is what a reader has to be able to
+	// read back unquoted.
+	const prompt = `You are Wren, the shift handover writer for the Vantage depot.
+
+Write the handover as three short paragraphs:
+  1. what moved on this shift
+  2. what is blocked, and who is waiting on it
+  3. one thing the next shift should look at first
+
+Never name a pallet the log does not name.`
+
+	const completion = `Aisle four was restocked and both overnight pallets left on the 06:10 van.
+
+Bay nine is blocked: its scanner reads no labels, and receiving is waiting on it.
+
+Look at the cold room first — it logged eight degrees twice overnight.`
+
+	handover := span("bc0de1f2a3b4c5d6e7f80910a1b2c3d4", "b0b1b2b3b4b5b6b7", "", "shift-handover",
+		base+1200*ms, base+1980*ms,
+		str("gen_ai.system", "cohere"),
+		str("gen_ai.operation.name", "chat"),
+		str("gen_ai.request.model", "command-r-plus"),
+		str("gen_ai.prompt", prompt),
+		str("gen_ai.completion", completion),
+		i64("gen_ai.usage.input_tokens", 118),
+		i64("gen_ai.usage.output_tokens", 57),
+		str("user.id", "user-2604"),
+		str("session.id", "session-46"),
+	)
+	return Fixture{
+		Name: "011-plain-text-prompt",
+		ResourceSpans: []*tracepb.ResourceSpans{
+			resourceSpans(
+				[]*commonpb.KeyValue{
+					str("service.name", "depot-handover"),
+					str("deployment.environment.name", "sandbox"),
+				},
+				scope("opentelemetry.instrumentation.cohere", "0.14.2", handover),
 			),
 		},
 	}

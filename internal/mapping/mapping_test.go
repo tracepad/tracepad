@@ -229,6 +229,40 @@ func TestChainLosersSurviveInMetadata(t *testing.T) {
 	}
 }
 
+// A payload that is not JSON stays the string it was. `gen_ai.prompt` carries
+// plain text often enough — a system prompt written by hand, an answer logged
+// as it was streamed — and the whole chain from here to the screen rests on
+// the mapper not wrapping it in anything: the interface shows a bare string as
+// text precisely because the API answers with one (spec 015 Decision 12).
+// Fixture 011 is the corpus's example, so it is what this asserts on.
+func TestPlainTextPayloadStaysAString(t *testing.T) {
+	var fixture otlptest.Fixture
+	for _, candidate := range otlptest.Fixtures() {
+		if candidate.Name == "011-plain-text-prompt" {
+			fixture = candidate
+		}
+	}
+	if fixture.Name == "" {
+		t.Fatal("the plain-text fixture is gone from the corpus")
+	}
+
+	observation := mapping.Map(fixture.ResourceSpans).Observations[0]
+
+	input, ok := observation.Input.(string)
+	if !ok {
+		t.Fatalf("input = %#v, want the string the span sent", observation.Input)
+	}
+	if !strings.Contains(input, "\n") {
+		t.Errorf("input = %q, want its newlines intact", input)
+	}
+	if strings.HasPrefix(input, `"`) {
+		t.Errorf("input = %q, want the text itself and not a JSON string of it", input)
+	}
+	if _, ok := observation.Output.(string); !ok {
+		t.Fatalf("output = %#v, want a string as well", observation.Output)
+	}
+}
+
 // Span events carry the stack traces of a plain-OTel app, and a span with an
 // exception is a failed span even when the exporter left the status unset —
 // otherwise it would miss error_count and every error filter built on it

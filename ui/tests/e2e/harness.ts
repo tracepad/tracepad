@@ -54,6 +54,16 @@ export const LARGE_PAYLOAD_OBSERVATION = '1112131415161719';
 export const FAILING_TRACE = 'dd44ee55ff6677008899001122aabb33';
 
 /**
+ * The fixture whose payloads are not JSON: a bare multi-line prompt and its
+ * answer, the shape spec 015 #12 shows as text rather than as a document.
+ */
+export const PLAIN_TEXT_TRACE = 'bc0de1f2a3b4c5d6e7f80910a1b2c3d4';
+/** Its only observation, the generation carrying both. */
+export const PLAIN_TEXT_OBSERVATION = 'b0b1b2b3b4b5b6b7';
+/** How many lines that prompt has, blank ones between paragraphs included. */
+export const PLAIN_TEXT_PROMPT_LINES = 8;
+
+/**
  * The fixture that carries what the wire already sends (spec 012): a release,
  * a tool call, and a generation with a completion start and a prompt link.
  */
