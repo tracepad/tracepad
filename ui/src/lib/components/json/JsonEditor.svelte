@@ -14,13 +14,16 @@
 		text = $bindable(''),
 		label,
 		valid = $bindable(true),
-		disabled = false
+		disabled = false,
+		optional = false
 	}: {
 		text?: string;
 		label: string;
-		/** Out: whether the text parses. */
+		/** Out: whether the text parses — or is empty and allowed to be. */
 		valid?: boolean;
 		disabled?: boolean;
+		/** An empty document is a field left out, not a broken one (spec 016 #22). */
+		optional?: boolean;
 	} = $props();
 
 	/**
@@ -35,7 +38,7 @@
 	}
 </script>
 
-<CodeArea bind:text bind:valid {label} {disabled}>
+<CodeArea bind:text bind:valid {label} {disabled} {optional}>
 	{#snippet actions()}
 		<Button variant="ghost" onclick={pretty} {disabled}>Format</Button>
 	{/snippet}
