@@ -39,8 +39,12 @@ class Item:
 
     @classmethod
     def read(cls, row: dict[str, Any]) -> Item:
-        known = {f.name for f in fields(cls)}
-        return cls(**{k: v for k, v in row.items() if k in known})
+        # The store calls it `version` — the version this row was written at.
+        # Reading it under its own name is what filled `dataset_version` with
+        # `None` on every item (found in review of PR #36).
+        known = {f.name for f in fields(cls)} - {"dataset_version"}
+        return cls(dataset_version=row.get("version"),
+                   **{k: v for k, v in row.items() if k in known})
 
 
 class Dataset:

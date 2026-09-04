@@ -52,7 +52,13 @@ def serve(data_dir: str) -> tuple[subprocess.Popen[bytes], Store]:
         stderr=subprocess.STDOUT,
     )
     running = Store(f"http://127.0.0.1:{port}")
-    await_health(running, process)
+    try:
+        await_health(running, process)
+    except BaseException:
+        # A server that never came up is still a process holding a port.
+        process.terminate()
+        process.wait(timeout=10)
+        raise
     return process, running
 
 

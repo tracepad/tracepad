@@ -87,9 +87,12 @@ def test_put_items_sends_dicts_and_items_as_one_body(store: Store) -> None:
 
 
 def test_items_follow_the_cursor_to_the_end(store: Store) -> None:
+    # The rows are the store's own shape: it calls the version `version`, and
+    # sends fields an `Item` has no room for.
     store.answers["/api/v1/datasets/golden/items"] = [
-        {"items": [{"id": CASE, "input": 1, "dataset_version": 3}], "next_cursor": "c1"},
-        {"items": [{"id": OTHER, "input": 2}], "next_cursor": "c2"},
+        {"items": [{"id": CASE, "input": 1, "version": 3, "seq": 1,
+                    "created_at": "2026-09-04T10:00:00Z"}], "next_cursor": "c1"},
+        {"items": [{"id": OTHER, "input": 2, "version": 2}], "next_cursor": "c2"},
         {"items": [], "next_cursor": None},
     ]
 
@@ -172,7 +175,10 @@ def test_the_read_side_is_the_server_s_json(store: Store) -> None:
     assert run.get() == summary
     assert [row["id"] for row in run.items(unknown=True)] == [CASE]
     assert tracepad.compare(RUN, OTHER) == {"items": []}
-    assert store.calls[-2][3] == {"limit": 500, "unknown": "true"}
+    # No `limit` of ours: this listing inlines every row's payloads and is
+    # budget-checked, so the server's own page size is the safe one.
+    assert store.calls[-2][3] == {"unknown": "true"}
+    assert list(run.items(limit=25)) and store.calls[-1][3] == {"limit": 25}
 
 
 # --- the stamping ---------------------------------------------------------
@@ -219,6 +225,35 @@ def test_every_root_is_recorded_and_the_last_is_the_trace(spans: Any, store: Sto
     assert attempt.traces == roots
     assert attempt.trace_id == roots[-1]
     assert attempt.attributes() == {RUN_ID: RUN, ITEM_ID: CASE}
+
+
+def test_a_case_begins_where_the_block_does_not_where_the_trace_does(
+    spans: Any, store: Store
+) -> None:
+    # A harness whose loop already runs under a span of its own — a traced
+    # `main`, an instrumented test runner — has no root span to start inside
+    # the block, and used to have no trace to score (spec 018 #13).
+    run = opened(store)
+    with tracepad.span("the harness itself"):
+        with run.item(CASE) as first:
+            with tracepad.span("case-1"):
+                with tracepad.span("step"):
+                    pass
+            # A second attempt at the same case, and still one trace: the
+            # summary counts traces, and these spans are all in one.
+            with tracepad.span("case-1-again"):
+                pass
+        with run.item(OTHER) as second:
+            with tracepad.span("case-2"):
+                pass
+
+    case_1 = spans.one("case-1")
+    assert first.traces == [format(case_1.context.trace_id, "032x")]
+    # One trace, recorded once, however many of its spans the block opened.
+    assert first.trace_id == second.trace_id
+    assert spans.attributes("step")[ITEM_ID] == CASE
+    assert spans.attributes("case-2")[ITEM_ID] == OTHER
+    assert RUN_ID not in spans.attributes("the harness itself")
 
 
 def test_nested_blocks_replace_and_restore(spans: Any, store: Store) -> None:
@@ -307,6 +342,39 @@ def test_a_score_goes_against_the_trace_the_block_saw(spans: Any, store: Store) 
 # --- the rest -------------------------------------------------------------
 
 
+def test_a_case_without_an_id_is_refused(store: Store) -> None:
+    run = opened(store)
+    # Stamping an item id the store cannot read links nothing and says
+    # nothing: the run would summarize as zero cases covered.
+    for case in ({"input": {"q": 1}}, tracepad.Item(input={"q": 1}), "", None):
+        with pytest.raises(ValueError, match="needs an item id"):
+            with run.item(case):  # type: ignore[arg-type]
+                pass
+
+
+def test_a_case_may_be_a_dict_an_item_or_a_bare_id(spans: Any, store: Store) -> None:
+    run = opened(store)
+    for case in ({"id": CASE, "input": 1}, tracepad.Item(id=CASE), CASE):
+        with run.item(case), tracepad.span("case"):  # type: ignore[arg-type]
+            pass
+    assert [span.attributes[ITEM_ID] for span in spans.all()] == [CASE] * 3
+
+
+def test_a_run_the_store_refused_to_close_is_still_open(store: Store) -> None:
+    run = opened(store)
+    store.answers[f"/api/v1/runs/{RUN}/finish"] = [
+        TracepadHTTPError(503, "the write queue is saturated"), {"status": "failed"},
+    ]
+
+    with pytest.raises(TracepadHTTPError), run:
+        run.finish()
+
+    # `__exit__` must not step over the failure just because `finish` was
+    # attempted: the run would stay `running` in the store forever.
+    posted = [body for method, path, body, _ in store.calls if path.endswith("/finish")]
+    assert [body.get("status") for body in posted] == [None, "failed"]
+
+
 def test_score_configs_are_put_in_order(store: Store) -> None:
     tracepad.score_configs([
         {"name": "accuracy", "data_type": "numeric", "direction": "higher", "min": 0, "max": 1},
@@ -328,9 +396,13 @@ def test_score_configs_raise_on_the_first_refusal_with_the_name(store: Store) ->
         400, '{"error":"direction is required for a numeric config"}'
     )
 
-    with pytest.raises(tracepad.TracepadError, match="'accuracy'"):
+    with pytest.raises(TracepadHTTPError, match="'accuracy'") as refused:
         tracepad.score_configs([{"name": "accuracy", "data_type": "numeric"},
                                 {"name": "verdict", "data_type": "categorical"}])
+
+    # The name, and what the store said, and the status it said it with.
+    assert refused.value.status == 400
+    assert "direction is required" in refused.value.body
 
     # It stops the job at the top rather than running the cases (spec 018 #6).
     assert store.paths() == ["PUT /api/v1/score-configs/accuracy"]

@@ -255,9 +255,9 @@ print(run.get()["summary"])
 | `dataset(name)` | A `Dataset`. No request is made here — it is a name. |
 | `Dataset.create(description=…, metadata=…)` | Create it, or replace those two. |
 | `Dataset.put_items(items)` | One batch, one version tick → `(version, changed)`. |
-| `Dataset.items(version=…)` | A generator of `Item`s over every page. |
+| `Dataset.items(version=…)` | A generator of `Item`s over every page, whole. |
 | `Dataset.run(name, *, metadata=…, id=…, dataset_version=…)` | Opens a `Run`. |
-| `Dataset.runs()`, `Run.get()`, `Run.items(unknown=…)`, `compare(a, b)` | The server's JSON as `dict`s — no number is computed here. |
+| `Dataset.runs()`, `Run.get()`, `Run.items(unknown=…, limit=…)`, `compare(a, b)` | The server's JSON as `dict`s — no number is computed here. A run's items inline their payloads and are budget-checked, so that listing pages at the server's own size unless you name one. |
 | `Dataset.delete(confirm=name)` | The name must be echoed, as the API asks. |
 | `score_configs([...])`, `ScoreConfig` | `PUT` each, in order, synchronously. |
 | `item_id(key)` | `sha256(key)[:32]`, for a natural key of your own. |
@@ -285,6 +285,15 @@ also says exactly how far the block reaches:
 | a thread started with `contextvars.copy_context().run(fn)` | yes |
 | a thread started bare (`Thread(target=fn)`) | **no** — it has no context to inherit |
 | another process, over HTTP | **no** — see below |
+| the loop itself already inside a span of yours | stamped, but see below |
+
+**Do not trace the harness.** If the loop runs inside a span of your own — a
+`@observe`d driver, an instrumented test runner — then the case's spans are
+children of it, and one trace covers the whole run. Everything is still
+stamped and `attempt.score(...)` still has a trace to score (the block's first
+span starts the case, not the trace's root), but the run then has one trace
+for every case, and a trace links to one item: its coverage collapses to the
+last case stamped. A case wants a trace of its own.
 
 The two attributes do not travel with the trace context, by design. For a
 service the block cannot reach, `attempt.attributes()` is the `dict` to

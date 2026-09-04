@@ -112,7 +112,11 @@ def test_the_same_cases_again_change_nothing(store: Store) -> None:
 
     assert changed == 2
     assert (again_version, again) == (first_version, 0)
-    assert [item.id for item in golden.items()] == [case["id"] for case in CASES]
+
+    stored = list(golden.items())
+    assert [item.id for item in stored] == [case["id"] for case in CASES]
+    # The version each row was written at, under the name the store sends it.
+    assert {item.dataset_version for item in stored} == {first_version}
 
 
 def test_a_run_that_raised_is_closed_as_failed(store: Store) -> None:

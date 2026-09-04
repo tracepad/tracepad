@@ -24,7 +24,7 @@ from opentelemetry.sdk.trace import SpanProcessor
 
 from . import _config
 from ._attributes import ITEM_ID, RUN_ID
-from ._errors import TracepadError
+from ._errors import TracepadError, TracepadHTTPError
 from ._http import request
 from ._scores import score
 from ._tracing import flush
@@ -61,10 +61,7 @@ class RunContextProcessor(SpanProcessor):
             return
         span.set_attribute(RUN_ID, attempt.run_id)
         span.set_attribute(ITEM_ID, attempt.item_id)
-        # A root is where a trace begins, and the block records every one it
-        # saw start (spec 018 #4).
-        if span.parent is None:
-            attempt.traces.append(format(span.get_span_context().trace_id, "032x"))
+        attempt.saw(span)
 
 
 @dataclass
@@ -73,15 +70,36 @@ class Attempt:
 
     run_id: str
     item_id: str
-    #: Every root span the processor saw start inside the block, in order. A
-    #: case run three times inside one block is three traces of one item, and
-    #: the run's summary counts them all (spec 014 #2).
+    #: Every trace the block started, in order. A case run three times inside
+    #: one block is three traces of one item, and the run's summary counts
+    #: them all (spec 014 #2).
     traces: list[str] = field(default_factory=list)
+    #: The spans stamped so far, so that a child can be told from a beginning.
+    _spans: set[int] = field(default_factory=set, repr=False)
 
     @property
     def trace_id(self) -> str | None:
         """The last trace to start — the one a harness would quote."""
         return self.traces[-1] if self.traces else None
+
+    def saw(self, span: Any) -> None:
+        """Record a span the processor stamped, and the trace it began.
+
+        A case begins where the *block* does, not where the trace does
+        (spec 018 #13): a span whose parent is not itself inside the block
+        starts the case, so a harness whose loop already runs under a span of
+        its own still has a trace to score. One trace is recorded once,
+        however many spans of it the block opened.
+        """
+        context = span.get_span_context()
+        parent = span.parent
+        inside = parent is not None and parent.span_id in self._spans
+        self._spans.add(context.span_id)
+        if inside:
+            return
+        trace = format(context.trace_id, "032x")
+        if trace not in self.traces:
+            self.traces.append(trace)
 
     def attributes(self) -> dict[str, str]:
         """The two attributes, for a service the block cannot reach.
@@ -120,7 +138,7 @@ class Run:
         The block opens no span of its own — a root span the harness opened
         would make every eval trace look like a trace of the harness.
         """
-        attempt = Attempt(self.id, getattr(case, "id", case) or "")
+        attempt = Attempt(self.id, case_id(case))
         token = otel_context.attach(otel_context.set_value(ATTEMPT_KEY, attempt))
         try:
             yield attempt
@@ -141,17 +159,30 @@ class Run:
         # every trace and score the run produced (spec 018 #5). A late span
         # still links, so a flush that timed out is a number read early.
         flush(timeout)
+        closed = request(_config.current(), "POST", f"/api/v1/runs/{self.id}/finish",
+                         body=body).body or {}
+        # Only now: a `finish` the store refused has not closed anything, and
+        # marking it closed would make `__exit__` step over the `fail` that
+        # the raised error is about to ask for.
         self._closed = True
-        return dict(request(_config.current(), "POST", f"/api/v1/runs/{self.id}/finish",
-                            body=body).body or {})
+        return dict(closed)
 
     def get(self) -> dict[str, Any]:
         """The run with its summary, as the server computes it (spec 018 #8)."""
         return dict(request(_config.current(), "GET", f"/api/v1/runs/{self.id}").body or {})
 
-    def items(self, unknown: bool = False) -> Iterator[dict[str, Any]]:
-        """The run's cases with the attempts made at each."""
-        params: dict[str, Any] = {"limit": PAGE}
+    def items(self, unknown: bool = False, limit: int | None = None) -> Iterator[dict[str, Any]]:
+        """The run's cases with the attempts made at each.
+
+        Unlike a dataset's items, these are budget-checked: every row inlines
+        its input, its output and its scores, so the store's page has to fit
+        `TRACEPAD_RESPONSE_BUDGET_BYTES` and a page of 500 will not. The
+        server's own default is what this asks for; `limit=` is for a caller
+        who knows its rows are small.
+        """
+        params: dict[str, Any] = {}
+        if limit is not None:
+            params["limit"] = limit
         if unknown:
             params["unknown"] = "true"
         return pages(f"/api/v1/runs/{self.id}/items", params, "items")
@@ -201,8 +232,27 @@ def score_configs(configs: Any) -> None:
             else config.body()
         try:
             request(_config.current(), "PUT", f"/api/v1/score-configs/{name}", body=body)
+        except TracepadHTTPError as refused:
+            # The name in the message, and the status and the body kept: a
+            # caller that catches this is entitled to what the store said.
+            raise TracepadHTTPError(
+                refused.status, f"score config {name!r}: {refused.body}") from None
         except TracepadError as error:
             raise TracepadError(f"tracepad: score config {name!r}: {error}") from None
+
+
+def case_id(case: Any) -> str:
+    """The item id of a case, however the harness is holding it.
+
+    An `Item`, a `dict` in the API's shape, or a bare id. Anything else — a
+    case with no id, an input the caller meant to wrap — raises here rather
+    than being stamped as an attribute the store cannot read, which would
+    link nothing and say nothing (found in review of PR #36).
+    """
+    found = case.get("id") if isinstance(case, dict) else getattr(case, "id", case)
+    if not isinstance(found, str) or not found:
+        raise ValueError(f"tracepad: run.item() needs an item id, got {case!r}")
+    return found
 
 
 def item_id(key: str) -> str:
