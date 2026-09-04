@@ -72,5 +72,31 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - run: pip install -r scripts/smoke/requirements.txt
+      - run: pip install -r scripts/smoke/requirements.txt -e ./sdk/python
       - run: SMOKE_PYTHON="$(which python)" scripts/smoke/run.sh
+
+  # The Python package (spec 017 #12): its unit suite on both ends of the
+  # supported range — 3.10 is the floor and the newest is where the OTel SDK
+  # moves first — and its end-to-end suite against a real binary. Its own job,
+  # because the gate needs neither Python nor a network.
+  sdk:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -e ./sdk/python pytest "ruff==0.16.6"
+      # One rule set for every Python file in the repository, named rather
+      # than discovered: the scripts sit outside the package that configures it.
+      - run: ruff check --config sdk/python/pyproject.toml sdk/python scripts
+      - run: SDK_PYTHON="$(which python)" scripts/sdk-test.sh
+      # A signal, not a rule (design §8), the same instrument the interface has.
+      - run: make sdk-lines

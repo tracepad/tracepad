@@ -1,0 +1,225 @@
+"""The package against a real binary (spec 017, Testing).
+
+Everything below the package — the OTLP encoding, the transport, the auth, the
+mapper's table, the columns — only breaks at a seam the unit layer cannot see.
+So this boots the store on a temporary database, exports a trace through the
+package's own exporter, posts a score and fetches a prompt, and then reads all
+three back through the API a person would read them with.
+
+`TRACEPAD_BINARY` names the binary; `scripts/sdk-test.sh` builds it and sets
+it. Without it the suite skips, so `pytest` on its own stays a unit run.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import socket
+import subprocess
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
+from typing import Any
+
+import pytest
+from opentelemetry import trace as otel_api
+from opentelemetry.sdk.trace import TracerProvider
+
+import tracepad
+
+BINARY = os.environ.get("TRACEPAD_BINARY", "")
+KEY = "tp-sk-e2e"
+
+pytestmark = pytest.mark.skipif(not BINARY, reason="TRACEPAD_BINARY is not set")
+
+ANSWER = {
+    "model": "claude-sonnet-5-2026-08-01",
+    "choices": [{"message": {"role": "assistant", "content": "Open Settings and choose Reset."}}],
+    "usage": {"prompt_tokens": 128, "completion_tokens": 41, "cost": 0.0011},
+}
+
+
+class Store:
+    """A running binary, and the read API as a person would call it."""
+
+    def __init__(self, host: str) -> None:
+        self.host = host
+
+    def call(self, method: str, path: str, body: Any = None) -> Any:
+        request = urllib.request.Request(
+            self.host + path,
+            data=None if body is None else json.dumps(body).encode(),
+            method=method,
+            headers={"Authorization": f"Bearer {KEY}"},
+        )
+        with urllib.request.urlopen(request, timeout=10) as answer:
+            raw = answer.read()
+        return json.loads(raw) if raw else None
+
+
+@pytest.fixture(scope="module")
+def store(tmp_path_factory: pytest.TempPathFactory) -> Any:
+    data = tmp_path_factory.mktemp("store")
+    port = free_port()
+    process = subprocess.Popen(
+        [BINARY, "serve"],
+        env={
+            **os.environ,
+            "TRACEPAD_DATA_DIR": str(data),
+            "TRACEPAD_LISTEN": f"127.0.0.1:{port}",
+            "TRACEPAD_PROJECTS": f"e2e:tp-pk-e2e:{KEY}",
+        },
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    running = Store(f"http://127.0.0.1:{port}")
+    try:
+        await_health(running, process)
+        yield running
+    finally:
+        process.terminate()
+        process.wait(timeout=10)
+
+
+def free_port() -> int:
+    with socket.socket() as taken:
+        taken.bind(("127.0.0.1", 0))
+        return int(taken.getsockname()[1])
+
+
+def await_health(store: Store, process: subprocess.Popen[bytes]) -> None:
+    for _ in range(100):
+        if process.poll() is not None:
+            output = process.stdout.read().decode() if process.stdout else ""
+            raise AssertionError(f"the server exited: {output}")
+        try:
+            store.call("GET", "/health")
+            return
+        except (urllib.error.URLError, OSError):
+            time.sleep(0.1)
+    raise AssertionError("the server never became healthy")
+
+
+def trace_of(store: Store, trace_id: str) -> dict[str, Any]:
+    """The trace, once the export has landed."""
+    for _ in range(50):
+        try:
+            return dict(store.call("GET", f"/api/v1/traces/{trace_id}?expand=io"))
+        except urllib.error.HTTPError as missing:
+            if missing.code != 404:
+                raise
+            time.sleep(0.1)
+    raise AssertionError(f"trace {trace_id} never arrived")
+
+
+def walk(observations: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for observation in observations:
+        out.append(observation)
+        out.extend(walk(observation.get("children") or []))
+    return out
+
+
+def test_a_traced_call_arrives_whole(store: Store) -> None:
+    store.call("POST", "/api/v1/prompts/support-answer/versions",
+               {"type": "text", "prompt": "Answer {topic}.", "labels": ["production"]})
+    tracepad.init(store.host, KEY, environment="e2e", release="2026.9.4")
+
+    support = tracepad.prompt("support-answer", label="production")
+    assert support.version == 1
+    assert support.compile(topic="password resets") == "Answer password resets."
+
+    @tracepad.observe(name="answer-question")
+    def answer(question: str) -> str:
+        tracepad.update_trace(name="support-chat", user_id="user-4821",
+                              session_id="session-77", tags=["support", "beta"])
+        with tracepad.generation("chat-completion", model="claude-sonnet-5", prompt=support,
+                                 model_parameters={"temperature": 0.2},
+                                 input=[{"role": "user", "content": question}]) as call:
+            call.first_token()
+            call.end(response=ANSWER)
+            trace_id.append(call.trace_id)
+        tracepad.score("helpful", 0.9, comment="cited the source")
+        return "done"
+
+    trace_id: list[str] = []
+    answer("how do I reset my password?")
+    tracepad.flush(20.0)
+
+    stored = trace_of(store, trace_id[0])
+    assert stored["name"] == "support-chat"
+    assert stored["user_id"] == "user-4821"
+    assert stored["session_id"] == "session-77"
+    assert sorted(stored["tags"]) == ["beta", "support"]
+    assert stored["environment"] == "e2e"
+    assert stored["release"] == "2026.9.4"
+
+    observations = walk(stored["observations"])
+    assert [o["name"] for o in observations] == ["answer-question", "chat-completion"]
+    root, generation = observations
+    assert root["input"] == {"question": "how do I reset my password?"}
+
+    assert generation["type"] == "generation"
+    assert generation["model"] == "claude-sonnet-5"
+    assert generation["usage"] == {"input_tokens": 128, "output_tokens": 41}
+    assert generation["model_parameters"] == {"temperature": 0.2}
+    assert generation["prompt"] == {"name": "support-answer", "version": 1}
+    assert generation["ttft_ms"] is not None
+    assert generation["output"] == "Open Settings and choose Reset."
+
+    # The cost is the one the provider charged, never a computed one.
+    assert abs(stored["total_cost"] - 0.0011) < 1e-12
+
+    scores = store.call("GET", f"/api/v1/scores?trace_id={trace_id[0]}")["scores"]
+    assert [(s["name"], s["value"], s["comment"]) for s in scores] == [
+        ("helpful", 0.9, "cited the source")
+    ]
+
+
+def test_the_application_s_own_spans_share_the_trace(store: Store) -> None:
+    """`init` under a provider somebody else set: one pipeline, one trace."""
+    otel_api.set_tracer_provider(TracerProvider())
+    tracepad.init(store.host, KEY)
+    framework = otel_api.get_tracer("the.framework")
+
+    with framework.start_as_current_span("GET /answer") as request:
+        trace_id = format(request.get_span_context().trace_id, "032x")
+        with tracepad.span("answer-question"):
+            pass
+
+    tracepad.flush(20.0)
+
+    stored = trace_of(store, trace_id)
+    assert [o["name"] for o in walk(stored["observations"])] == [
+        "GET /answer",
+        "answer-question",
+    ]
+    # The trace's name is the root span's: nothing claimed it (docs/ingest.md).
+    assert stored["name"] == "GET /answer"
+
+
+def test_a_failing_step_is_stored_as_an_error(store: Store) -> None:
+    tracepad.init(store.host, KEY)
+
+    @tracepad.observe
+    def fails() -> None:
+        raise RuntimeError("upstream timeout")
+
+    with tracepad.span("attempt") as observation:
+        trace_id = observation.trace_id
+        with pytest.raises(RuntimeError):
+            fails()
+
+    tracepad.flush(20.0)
+
+    stored = trace_of(store, trace_id)
+    failed = next(o for o in walk(stored["observations"]) if o["name"] == "fails")
+    assert failed["level"] == "ERROR"
+    assert "upstream timeout" in failed["status_message"]
+    assert stored["error_count"] == 1
+
+
+def test_the_package_is_installed_from_this_checkout() -> None:
+    """A guard against testing a `tracepad` from PyPI by accident."""
+    assert Path(tracepad.__file__).resolve().is_relative_to(Path(__file__).resolve().parents[3])

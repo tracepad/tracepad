@@ -1,0 +1,71 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "tracepad"
+description = "The Python package for Tracepad: a thin layer of ergonomics over the OpenTelemetry SDK"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.10"
+authors = [{ name = "Tracepad" }]
+keywords = ["opentelemetry", "otlp", "llm", "observability", "tracing", "evals"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: System :: Monitoring",
+    "Typing :: Typed",
+]
+# Two dependencies is what "thin" means in a `pip install` line (spec 017 #1).
+dependencies = [
+    "opentelemetry-sdk>=1.44,<2",
+    "opentelemetry-exporter-otlp-proto-http>=1.44,<2",
+]
+dynamic = ["version"]
+
+[project.urls]
+Homepage = "https://github.com/tracepad/tracepad"
+Documentation = "https://github.com/tracepad/tracepad/blob/main/docs/sdk-python.md"
+Source = "https://github.com/tracepad/tracepad"
+
+# No `[project.scripts]`: `tracepad` on a PATH is the Go binary, and a console
+# script of the same name inside a virtualenv would shadow it (spec 017 #1).
+
+# The linter is pinned like the smoke test's SDKs and for the same reason: a
+# new rule landing on a release day is a broken build nobody changed anything
+# for. `pytest` is not — a test runner that moved is a test that fails.
+[dependency-groups]
+dev = ["pytest>=8", "ruff==0.16.6"]
+
+[tool.hatch.version]
+path = "src/tracepad/_config.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tracepad"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src", "tests", "README.md", "pyproject.toml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "A", "RUF"]
+# `input`, `type` and `id` are the vocabulary of the trace model and of the
+# score API; shadowing the builtins inside these signatures is what makes the
+# package read like the documents it implements (spec 017, Package contract).
+ignore = ["A002", "A001"]
+
+# Named rather than discovered, so that the answer does not depend on which
+# directory `ruff` was run from: the package is first-party to the scripts
+# beside it in the repository, and `conftest` to the suite.
+[tool.ruff.lint.isort]
+known-first-party = ["tracepad", "conftest"]

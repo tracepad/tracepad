@@ -1,8 +1,9 @@
 # Sending traces to Tracepad
 
 Tracepad speaks OTLP. Any OpenTelemetry-instrumented application can send to
-it by changing an endpoint and an auth header — there is no Tracepad SDK to
-install.
+it by changing an endpoint and an auth header — nothing has to be installed.
+There *is* a Python package ([sdk-python.md](sdk-python.md)), and it is a
+convenience over exactly this endpoint, not a way around it.
 
 ## Endpoints
 
@@ -48,8 +49,17 @@ export LANGFUSE_PUBLIC_KEY=tp-pk-…
 export LANGFUSE_SECRET_KEY=tp-sk-…
 ```
 
-Working examples of both live in [`scripts/smoke`](../scripts/smoke), which is
-also the test that keeps them working.
+**The `tracepad` package** — the same exporter with the ergonomics on top
+([sdk-python.md](sdk-python.md)):
+
+```sh
+pip install tracepad
+export TRACEPAD_HOST=http://localhost:4318
+export TRACEPAD_API_KEY=tp-sk-…
+```
+
+Working examples of all three live in [`scripts/smoke`](../scripts/smoke),
+which is also the test that keeps them working.
 
 ## Responses
 
@@ -71,13 +81,13 @@ Its bytes are still in the stored raw body, so nothing is lost.
 ## What Tracepad reads from your spans
 
 Attributes are resolved by a priority chain per field: an explicit
-`langfuse.*` attribute beats an OTel GenAI semconv one, which beats a bare
-fallback. Resource and scope attributes participate at lower priority than the
-span's own.
+`langfuse.*` attribute beats the `tracepad.*` one that mirrors it, which beats
+an OTel GenAI semconv one, which beats a bare fallback. Resource and scope
+attributes participate at lower priority than the span's own.
 
 | Field | Attributes, highest priority first |
 |---|---|
-| trace name | `langfuse.trace.name` · the root span's name |
+| trace name | `langfuse.trace.name` · `tracepad.trace.name` · the root span's name |
 | user | `langfuse.user.id` · `user.id` |
 | session | `langfuse.session.id` · `session.id` · `gen_ai.conversation.id` |
 | environment | `langfuse.environment` · `deployment.environment.name` · `deployment.environment` · `default` |
@@ -85,20 +95,20 @@ span's own.
 | version | `langfuse.version` |
 | run | `tracepad.run_id` (a 32-hex run id; see [The run link](#the-run-link)) |
 | item | `tracepad.item_id` (a 32-hex item id, claimed only beside a run id) |
-| tags | `langfuse.trace.tags` (JSON array, comma-separated list, or single value) |
-| trace metadata | `langfuse.trace.metadata` (JSON object) and `langfuse.trace.metadata.*` |
-| observation type | `langfuse.observation.type` · a model attribute ⇒ `generation` · a zero-duration childless span ⇒ `event` · otherwise `span` |
-| completion start | `langfuse.observation.completion_start_time` (RFC 3339, or whole nanoseconds) |
-| prompt | `langfuse.observation.prompt.name` and `langfuse.observation.prompt.version` (a whole number from 1; anything else stays in metadata and the name is still recorded) |
+| tags | `langfuse.trace.tags` · `tracepad.trace.tags` (JSON array, comma-separated list, or single value) |
+| trace metadata | `langfuse.trace.metadata` and `langfuse.trace.metadata.*` · `tracepad.trace.metadata` and `tracepad.trace.metadata.*` (JSON objects, merged) |
+| observation type | `langfuse.observation.type` · `tracepad.observation.type` · a model attribute ⇒ `generation` · a zero-duration childless span ⇒ `event` · otherwise `span` |
+| completion start | `langfuse.observation.completion_start_time` · `tracepad.observation.completion_start_time` (RFC 3339, or whole nanoseconds) |
+| prompt | `langfuse.observation.prompt.name`/`.version` · `tracepad.prompt.name`/`tracepad.prompt.version` (a whole number from 1; anything else stays in metadata and the name is still recorded) |
 | model | `langfuse.observation.model.name` · `gen_ai.request.model` · `gen_ai.response.model` · `llm.model_name` · `model` |
 | model parameters | `langfuse.observation.model.parameters` (JSON object) · every `gen_ai.request.*` except the model |
 | input | `langfuse.observation.input` · `gen_ai.input.messages` · `gen_ai.prompt` (including the flattened `gen_ai.prompt.0.content` form) |
 | output | `langfuse.observation.output` · `gen_ai.output.messages` · `gen_ai.completion` (same flattened form) |
 | usage | `langfuse.observation.usage_details` (JSON object) · every `gen_ai.usage.*` count, key kept as sent |
 | cost | `langfuse.observation.cost_details` (JSON object) · `gen_ai.usage.cost` |
-| level | `langfuse.observation.level` · span status `ERROR` ⇒ `ERROR` · otherwise `DEFAULT` |
-| status message | `langfuse.observation.status_message` · the span's status message |
-| observation metadata | `langfuse.observation.metadata` and `langfuse.observation.metadata.*`, **plus every attribute no rule above consumed**, plus the span's events under `events`, plus the instrumentation scope's own name and version under `scope.name` and `scope.version` |
+| level | `langfuse.observation.level` · `tracepad.observation.level` · span status `ERROR` ⇒ `ERROR` · otherwise `DEFAULT` |
+| status message | `langfuse.observation.status_message` · `tracepad.observation.status_message` · the span's status message |
+| observation metadata | `langfuse.observation.metadata` and `langfuse.observation.metadata.*` · the same two under `tracepad.`, **plus every attribute no rule above consumed**, plus the span's events under `events`, plus the instrumentation scope's own name and version under `scope.name` and `scope.version` |
 
 Two consequences worth knowing:
 
@@ -118,6 +128,38 @@ Two consequences worth knowing:
   as its status message, so it reaches `error_count` and error filters even
   when the exporter never set an ERROR span status. An explicit
   `langfuse.observation.level` still wins. Span links are not mapped.
+
+### The `tracepad` dialect
+
+The GenAI semantic conventions have no name for a trace name, for tags, for
+free metadata, for the kind of a step or for the prompt one ran. Where they do
+have a name, the [Python package](sdk-python.md) uses it — `gen_ai.*`,
+`user.id`, `session.id`, `deployment.environment.name`, the resource's
+`service.version` — and where they do not, it writes these:
+
+| Attribute | What it sets |
+|---|---|
+| `tracepad.trace.name` | the trace's name |
+| `tracepad.trace.tags` | its tags, as a JSON array |
+| `tracepad.trace.metadata` | its metadata, as a JSON object |
+| `tracepad.observation.type` | the [kind](#the-kind-of-each-step) of this step |
+| `tracepad.observation.level` | its level |
+| `tracepad.observation.status_message` | why |
+| `tracepad.observation.metadata` | its metadata, as a JSON object |
+| `tracepad.observation.completion_start_time` | when the first token came back |
+| `tracepad.prompt.name`, `tracepad.prompt.version` | the prompt it ran |
+
+Each sits at the same rank as the `langfuse.*` key it mirrors, and a span
+carrying both resolves to the `langfuse.*` one — a span written by two SDKs was
+configured by the operator in that order. All of them are read at any of the
+three levels of an export, and none of them is a signature: a `tracepad.*` key
+on a span some other SDK exported is claimed exactly the same, because the
+dialect is a vocabulary rather than a marker.
+
+`tracepad.run_id` and `tracepad.item_id` are the exception. They are
+[the run link](#the-run-link), stamped by an eval harness in any language over
+whatever SDK the application already runs, so they say nothing about who wrote
+the span and do not label a batch `tracepad`.
 
 ### The kind of each step
 

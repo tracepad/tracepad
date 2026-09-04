@@ -36,6 +36,31 @@ const (
 	tpItemID = "tracepad.item_id"
 )
 
+// The `tracepad` dialect (spec 017 #3): what our own Python package writes
+// where the GenAI semantic conventions have no name — a trace name, tags, free
+// metadata, an observation kind, a prompt reference. Everything the
+// conventions *do* name (`gen_ai.*`, `user.id`, `session.id`,
+// `deployment.environment.name`, the resource's `service.version`) it writes
+// under their names, which the chains above already read; these are the gaps.
+//
+// Each key enters its field's chain beside the `langfuse.*` key it mirrors and
+// after it: a span carrying both was written by two SDKs, and the older one is
+// the one the operator configured first. `langfuse.*` is never written by us.
+const (
+	tpTraceName              = "tracepad.trace.name"
+	tpTraceTags              = "tracepad.trace.tags"
+	tpTraceMetadata          = "tracepad.trace.metadata"
+	tpObsType                = "tracepad.observation.type"
+	tpObsLevel               = "tracepad.observation.level"
+	tpObsStatusMessage       = "tracepad.observation.status_message"
+	tpObsMetadata            = "tracepad.observation.metadata"
+	tpObsCompletionStartTime = "tracepad.observation.completion_start_time"
+	// Not under `observation.`: the prompt is a fact about the call, and the
+	// package names it the way the store's own API does (spec 017 #3).
+	tpPromptName    = "tracepad.prompt.name"
+	tpPromptVersion = "tracepad.prompt.version"
+)
+
 // Langfuse dialect: observation-level.
 const (
 	lfObsType            = "langfuse.observation.type"
@@ -65,7 +90,7 @@ const (
 var (
 	// trace.name falls back to the root span's name, which is not an
 	// attribute and is handled by the mapper.
-	traceNameKeys = []string{lfTraceName}
+	traceNameKeys = []string{lfTraceName, tpTraceName}
 
 	traceUserKeys = []string{lfUserID, "user.id"}
 
@@ -77,7 +102,14 @@ var (
 	// by deployed SDKs; the reference reads both.
 	traceEnvironmentKeys = []string{lfEnvironment, "deployment.environment.name", "deployment.environment"}
 
-	traceTagsKeys = []string{lfTraceTags}
+	traceTagsKeys = []string{lfTraceTags, tpTraceTags}
+
+	// The metadata chains are prefixes rather than single keys: both shapes
+	// SDKs use — a JSON object at the bare key and one attribute per entry
+	// under it — are collected, and the higher-priority dialect's entries win
+	// where the two name the same thing.
+	traceMetadataKeys = []string{lfTraceMetadata, tpTraceMetadata}
+	obsMetadataKeys   = []string{lfObsMetadata, tpObsMetadata}
 
 	// `service.version` is the OTel resource attribute every plain-OTel
 	// app already sets, so the fallback makes the release filter work for
@@ -105,8 +137,12 @@ var (
 		"model",
 	}
 
-	obsStatusMessageKeys = []string{lfObsStatusMessage}
-	obsLevelKeys         = []string{lfObsLevel}
+	obsStatusMessageKeys   = []string{lfObsStatusMessage, tpObsStatusMessage}
+	obsLevelKeys           = []string{lfObsLevel, tpObsLevel}
+	obsTypeKeys            = []string{lfObsType, tpObsType}
+	obsCompletionStartKeys = []string{lfObsCompletionStartTime, tpObsCompletionStartTime}
+	obsPromptNameKeys      = []string{lfObsPromptName, tpPromptName}
+	obsPromptVersionKeys   = []string{lfObsPromptVersion, tpPromptVersion}
 
 	// Input/output chains. The bare `gen_ai.prompt`/`gen_ai.completion`
 	// keys are read directly; the flattened `gen_ai.prompt.0.content` form

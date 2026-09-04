@@ -16,9 +16,9 @@ test('the listing rolls the corpus up by session', async ({ page }) => {
 	await page.getByRole('link', { name: 'Sessions' }).click();
 
 	await expect(page).toHaveURL(/\/sessions$/);
-	// Two sessions, and only two: the traces that named none are not sessions
-	// of one.
-	await expect(page.getByRole('row')).toHaveCount(3);
+	// Three sessions, and only three: the traces that named none are not
+	// sessions of one.
+	await expect(page.getByRole('row')).toHaveCount(4);
 	const row = page.getByRole('row').filter({ hasText: 'session-77' });
 	await expect(row).toContainText('$0.0010');
 });

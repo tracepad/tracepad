@@ -80,6 +80,7 @@ func writeFixtures(t *testing.T) {
 	if err := os.MkdirAll(goldenDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	built := map[string]bool{}
 	for _, fixture := range otlptest.Fixtures() {
 		body, err := mapping.EncodeExportRequest(fixture.ResourceSpans)
 		if err != nil {
@@ -93,6 +94,45 @@ func writeFixtures(t *testing.T) {
 			t.Fatalf("map %s: %v", fixture.Name, err)
 		}
 		if err := os.WriteFile(filepath.Join(goldenDir, fixture.Name+".json"), golden, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		built[fixture.Name] = true
+	}
+	writeForeignGoldens(t, built)
+}
+
+// writeForeignGoldens regenerates the goldens of bodies no builder produced.
+//
+// One body in the corpus is not synthetic: `010-tracepad-sdk.pb` is what our
+// own Python package puts on the wire, written by `scripts/fixtures` (spec
+// 017, Testing). Its bytes are the evidence, so they are kept as they arrived
+// and only the golden beside them is rewritten — which is what makes a change
+// to the mapper visible against a real export rather than against a builder
+// that would have been edited to agree with it.
+func writeForeignGoldens(t *testing.T, built map[string]bool) {
+	t.Helper()
+	bodies, err := filepath.Glob(filepath.Join(fixtureDir, "*.pb"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, body := range bodies {
+		name := strings.TrimSuffix(filepath.Base(body), ".pb")
+		if built[name] {
+			continue
+		}
+		raw, err := os.ReadFile(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resourceSpans, _, err := mapping.DecodeExportRequest(raw)
+		if err != nil {
+			t.Fatalf("decode %s: %v", name, err)
+		}
+		golden, err := mapping.Map(resourceSpans).DebugJSON()
+		if err != nil {
+			t.Fatalf("map %s: %v", name, err)
+		}
+		if err := os.WriteFile(filepath.Join(goldenDir, name+".json"), golden, 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -2,6 +2,10 @@
 # Pinned on purpose: this test is the drift detector for SDK conventions, so
 # a bump here is a deliberate act with a visible diff, not a surprise on a
 # random CI run.
+#
+# Our own package is not here: `run.sh` installs it from `sdk/python` in this
+# checkout (`pip install -e`), because the drift it detects is between the
+# package and the mapper of the same commit (spec 017 #12).
 opentelemetry-sdk==1.44.0
 opentelemetry-exporter-otlp-proto-http==1.44.0
 langfuse==4.14.5

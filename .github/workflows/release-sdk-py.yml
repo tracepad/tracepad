@@ -1,0 +1,51 @@
+# Publishing the Python package (spec 017 #12).
+#
+# The tag is the trigger and the version is the package's own: `sdk-py/v0.2.0`
+# releases what `sdk/python/src/tracepad/_config.py` calls 0.2.0, and a tag
+# that says anything else fails before a build happens — a version on PyPI
+# cannot be taken back.
+#
+# Credentials: none. PyPI trusted publishing exchanges this workflow's OIDC
+# token for an upload token, so there is no API token in the repository to
+# leak or to rotate. The publisher (owner `tracepad`, repository `tracepad`,
+# workflow `release-sdk-py.yml`, environment `pypi`) is configured once on
+# PyPI by the project's owner.
+name: Release the Python package
+
+on:
+  push:
+    tags: ["sdk-py/v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install uv
+
+      - name: The tag and the package must agree about the version
+        run: |
+          tagged="${GITHUB_REF_NAME#sdk-py/v}"
+          declared="$(sed -n 's/^VERSION = "\(.*\)"$/\1/p' sdk/python/src/tracepad/_config.py)"
+          if [ "$tagged" != "$declared" ]; then
+            echo "tag says $tagged, the package says $declared" >&2
+            exit 1
+          fi
+
+      # The suite runs here too. CI ran it on the commit, but a tag can be
+      # moved, and what is published must be what passed.
+      - run: pip install -e ./sdk/python pytest
+      - run: SDK_PYTHON="$(which python)" SDK_SKIP_E2E=1 scripts/sdk-test.sh
+
+      - run: uv build --out-dir dist sdk/python
+      - run: uv publish --trusted-publishing always dist/*
