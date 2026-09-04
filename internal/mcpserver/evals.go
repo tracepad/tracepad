@@ -77,14 +77,15 @@ func registerEvals(server *mcp.Server, t *toolset) {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "list_runs",
-		Annotations: readOnly("List a dataset's runs"),
-		Description: "Find the runs over one dataset — the user asks what has been tried, when, or which run to look at. " +
-			"Returns a page of runs newest first, each with the dataset version it pinned, its status and its metadata. " +
+		Annotations: readOnly("List runs"),
+		Description: "Find eval runs — the user asks what has been tried, when, what ran lately, or which run to look at. " +
+			"Returns a page of runs newest first, each with its dataset, the version it pinned, its status and its metadata. " +
+			"Pass dataset to list one dataset's runs; without it the whole project's runs come back, across every dataset. " +
 			"Does NOT include the summaries: call get_run with an id for coverage, scores, models and cost, " +
 			"or compare_runs with two ids to see what changed between them.",
 		InputSchema: object(walkProperties(pagingProperties(map[string]*jsonschema.Schema{
-			"dataset": text("The dataset whose runs to list."),
-		}), false), "dataset"),
+			"dataset": text("The dataset whose runs to list. Omit for every dataset's runs."),
+		}), false)),
 		OutputSchema: object(map[string]*jsonschema.Schema{
 			"runs":        list(runSchema(), "The page, newest first."),
 			"next_cursor": text("Pass back as `cursor` for the next page; null on the oldest."),
@@ -276,9 +277,16 @@ type listRunsInput struct {
 	Dataset string `json:"dataset"`
 }
 
+// listRuns reads one dataset's runs, or — with no dataset — the project's
+// (spec 016 #2). Two endpoints under one tool, because the question is the
+// same one and the rows are the same object; the dataset only narrows it.
 func (t *toolset) listRuns(ctx context.Context, req *mcp.CallToolRequest,
 	in listRunsInput) (*mcp.CallToolResult, any, error) {
-	return t.call(ctx, req, "/api/v1/datasets/"+url.PathEscape(in.Dataset)+"/runs",
+	path := "/api/v1/runs"
+	if in.Dataset != "" {
+		path = "/api/v1/datasets/" + url.PathEscape(in.Dataset) + "/runs"
+	}
+	return t.call(ctx, req, path,
 		in.walkInput.apply(in.pagingInput.apply(url.Values{})), summarizeRuns)
 }
 
@@ -362,7 +370,7 @@ func summarizeRuns(body json.RawMessage) string {
 		return "a page of runs"
 	}
 	if len(parsed.Runs) == 0 {
-		return "That dataset has no runs yet."
+		return "No runs yet."
 	}
 	return fmt.Sprintf("%d runs, newest %s (%s).", len(parsed.Runs), parsed.Runs[0].ID, parsed.Runs[0].Status)
 }

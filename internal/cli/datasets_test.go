@@ -307,6 +307,7 @@ func TestEvalCommandsAreJSONOffATerminal(t *testing.T) {
 	for _, args := range [][]string{
 		{"datasets", "ls"},
 		{"runs", "ls", "golden"},
+		{"runs", "ls"},
 		{"runs", "show", cliRunID(1)},
 		{"runs", "show", cliRunID(1), "--items"},
 		{"score-configs", "ls"},
@@ -392,5 +393,40 @@ func TestEvalSubcommandsAreStrict(t *testing.T) {
 		if got.code != ExitUsage {
 			t.Errorf("%v = %+v, want a usage error", args, got)
 		}
+	}
+}
+
+// `runs ls` with no dataset lists the whole project's runs (spec 016 #2): the
+// table gains the dataset column the rows now differ in, and two datasets is
+// what makes that visible.
+func TestRunsListWithoutADatasetSpansTheProject(t *testing.T) {
+	h := newHarness(t)
+	h.pushCases(t, "golden", jsonlCases, ".jsonl")
+	h.pushCases(t, "silver", jsonlCases, ".jsonl")
+	h.run(t.Context(), false, "runs", "create", "golden", "--id", cliRunID(1))
+	h.run(t.Context(), false, "runs", "create", "silver", "--id", cliRunID(2))
+
+	got := h.run(t.Context(), true, "runs", "ls")
+	if got.code != ExitOK {
+		t.Fatalf("runs ls = %+v", got)
+	}
+	for _, want := range []string{"DATASET", "golden", "silver", cliRunID(1), cliRunID(2)} {
+		if !strings.Contains(got.stdout, want) {
+			t.Errorf("runs ls is missing %q:\n%s", want, got.stdout)
+		}
+	}
+	// Newest first across datasets: the silver run was created second.
+	if strings.Index(got.stdout, cliRunID(2)) > strings.Index(got.stdout, cliRunID(1)) {
+		t.Errorf("runs ls is not newest first:\n%s", got.stdout)
+	}
+
+	// Under one dataset the column would say the same word down the table.
+	one := h.run(t.Context(), true, "runs", "ls", "golden")
+	if strings.Contains(one.stdout, "DATASET") || strings.Contains(one.stdout, cliRunID(2)) {
+		t.Errorf("runs ls golden = %q, want only golden's runs and no dataset column", one.stdout)
+	}
+
+	if got := h.run(t.Context(), true, "runs", "ls", "golden", "silver"); got.code != ExitUsage {
+		t.Errorf("two datasets = %+v, want a usage error", got)
 	}
 }

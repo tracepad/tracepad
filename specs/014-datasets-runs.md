@@ -245,8 +245,16 @@ is a 400.
 object.
 
 `GET /api/v1/datasets/{name}/runs` — newest first, `{"runs": [run objects
-without `summary`], …cursors}`. `GET /api/v1/runs/{id}` — the run object with
-its summary:
+without `summary`], …cursors}`.
+
+> **2026-09-04 (spec 016 #2):** `GET /api/v1/runs` is added beside it — the
+> same rows across every dataset of the project, newest first by
+> `(created_at, id)`, with filters `dataset` (exact name) and `status`,
+> cursors both ways and `count`, over schema 0011's
+> `idx_dataset_runs_created`. `tracepad runs ls` without a dataset and MCP
+> `list_runs` without `dataset` read it.
+
+`GET /api/v1/runs/{id}` — the run object with its summary:
 
 ```json
 {

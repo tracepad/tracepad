@@ -711,3 +711,87 @@ func TestCompareRefusesAnUnreadableCursor(t *testing.T) {
 			http.StatusBadRequest, "cursor")
 	}
 }
+
+// The project-wide listing (spec 016 #2, Testing — Go): newest first across
+// datasets, the two filters, the capped count, and the cursor walk in both
+// directions at `limit=1` — the same walk every listing is held to.
+func TestProjectRunsListing(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	h.postItems(t, "a-set", item(itemHex(1), `1`))
+	h.postItems(t, "b-set", item(itemHex(2), `2`))
+	h.createRun(t, "a-set", map[string]any{"id": runHex(1)})
+	h.createRun(t, "a-set", map[string]any{"id": runHex(2)})
+	h.createRun(t, "b-set", map[string]any{"id": runHex(3)})
+	expectStatus(t, h.send(t, "POST", "/api/v1/runs/"+runHex(2)+"/finish", map[string]any{}), http.StatusOK)
+
+	ids := func(t *testing.T, path string) ([]string, runListResponse) {
+		t.Helper()
+		rec := h.get(t, path)
+		expectStatus(t, rec, http.StatusOK)
+		page := decodeJSON[runListResponse](t, rec)
+		var out []string
+		for _, run := range page.Runs {
+			out = append(out, run.ID)
+		}
+		return out, page
+	}
+
+	all, page := ids(t, "/api/v1/runs")
+	if want := []string{runHex(3), runHex(2), runHex(1)}; strings.Join(all, ",") != strings.Join(want, ",") {
+		t.Errorf("runs = %v, want newest first across datasets %v", all, want)
+	}
+	if page.Total != nil || page.TotalCapped != nil {
+		t.Errorf("a count rode along unasked: total=%v capped=%v", page.Total, page.TotalCapped)
+	}
+	if page.Runs[0].Dataset != "b-set" {
+		t.Errorf("the row does not say which dataset it belongs to: %+v", page.Runs[0])
+	}
+
+	byDataset, _ := ids(t, "/api/v1/runs?dataset=a-set")
+	if want := []string{runHex(2), runHex(1)}; strings.Join(byDataset, ",") != strings.Join(want, ",") {
+		t.Errorf("dataset=a-set = %v, want %v", byDataset, want)
+	}
+	byStatus, _ := ids(t, "/api/v1/runs?status=finished")
+	if want := []string{runHex(2)}; strings.Join(byStatus, ",") != strings.Join(want, ",") {
+		t.Errorf("status=finished = %v, want %v", byStatus, want)
+	}
+	both, _ := ids(t, "/api/v1/runs?dataset=b-set&status=finished")
+	if len(both) != 0 {
+		t.Errorf("dataset=b-set&status=finished = %v, want nothing", both)
+	}
+	// A dataset that does not exist is an empty page, not a 404: the name is
+	// a filter here, not an address.
+	unknown, _ := ids(t, "/api/v1/runs?dataset=nope")
+	if len(unknown) != 0 {
+		t.Errorf("dataset=nope = %v, want nothing", unknown)
+	}
+
+	_, counted := ids(t, "/api/v1/runs?count=1&limit=1&dataset=a-set")
+	if counted.Total == nil || *counted.Total != 2 || counted.TotalCapped == nil || *counted.TotalCapped {
+		t.Errorf("count=1 → total=%v capped=%v, want 2 and false", counted.Total, counted.TotalCapped)
+	}
+
+	expectError(t, h.get(t, "/api/v1/runs?status=done"), http.StatusBadRequest, "status must be")
+	expectError(t, h.get(t, "/api/v1/runs?dataset=not%20a%20name"), http.StatusBadRequest, "dataset")
+	expectError(t, h.get(t, "/api/v1/runs?cursor=nope"), http.StatusBadRequest, "cursor")
+
+	forward := walkCursor(t, h, "/api/v1/runs?limit=1", false, runIDs)
+	backward := walkCursor(t, h, "/api/v1/runs?limit=1", true, runIDs)
+	if strings.Join(forward, ",") != strings.Join(all, ",") {
+		t.Errorf("forward walk = %v, want %v", forward, all)
+	}
+	if strings.Join(backward, ",") != strings.Join(all, ",") {
+		t.Errorf("backward walk = %v, want %v", backward, all)
+	}
+}
+
+// runIDs reads the ids off a page of runs, for the cursor walk.
+func runIDs(body []byte) []string {
+	var page runListResponse
+	json.Unmarshal(body, &page)
+	var out []string
+	for _, run := range page.Runs {
+		out = append(out, run.ID)
+	}
+	return out
+}

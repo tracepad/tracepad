@@ -438,3 +438,42 @@ func TestItemMeanCountsOnlyTheNumbers(t *testing.T) {
 		}
 	}
 }
+
+// TestRunListingsSeekTheirIndex holds both run listings to the index built
+// for each: the project-wide one (spec 016 #2) to `idx_dataset_runs_created`,
+// the per-dataset one to spec 014's `idx_dataset_runs_dataset` — seeking,
+// with the cursor and without, and never sorting through a temporary B-tree.
+func TestRunListingsSeekTheirIndex(t *testing.T) {
+	f := newSweepFixture(t)
+	cursor := &RunCursor{CreatedAt: sweepNow.UnixNano(), ID: strings.Repeat("a", 32)}
+	for _, tc := range []struct {
+		name   string
+		filter RunFilter
+		index  string
+	}{
+		{"project-wide", RunFilter{Limit: 50}, "idx_dataset_runs_created"},
+		{"project-wide after a cursor", RunFilter{Limit: 50, After: cursor}, "idx_dataset_runs_created"},
+		{"project-wide backward", RunFilter{Limit: 50, After: cursor, Backward: true}, "idx_dataset_runs_created"},
+		{"project-wide by status", RunFilter{Limit: 50, Status: RunRunning}, "idx_dataset_runs_created"},
+		{"one dataset", RunFilter{Limit: 50, Dataset: "golden"}, "idx_dataset_runs_dataset"},
+		{"one dataset after a cursor", RunFilter{Limit: 50, Dataset: "golden", After: cursor}, "idx_dataset_runs_dataset"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			query, args := runsQuery(f.project.ID, tc.filter)
+			plan, err := f.store.explainQueryPlan(query, args...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			joined := strings.Join(plan, "\n")
+			if !strings.Contains(joined, tc.index) {
+				t.Errorf("the listing does not use %s:\n%s", tc.index, joined)
+			}
+			if !strings.Contains(joined, "SEARCH") {
+				t.Errorf("the listing scans rather than seeks:\n%s", joined)
+			}
+			if strings.Contains(joined, "TEMP B-TREE") {
+				t.Errorf("the listing sorts through a temporary B-tree:\n%s", joined)
+			}
+		})
+	}
+}

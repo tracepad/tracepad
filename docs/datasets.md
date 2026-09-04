@@ -42,6 +42,7 @@ disagree about what "improved" means.
 | `DELETE` | `/api/v1/datasets/{name}/items/{id}` | Archive an item at a new version |
 | `POST` | `/api/v1/datasets/{name}/runs` | Open a run |
 | `GET` | `/api/v1/datasets/{name}/runs` | List a dataset's runs, newest first |
+| `GET` | `/api/v1/runs` | List the project's runs across every dataset, newest first |
 | `GET` | `/api/v1/runs/{id}` | One run with its summary |
 | `GET` | `/api/v1/runs/{id}/items` | The run's cases with the attempts it made at each |
 | `GET` | `/api/v1/runs/{a}/compare/{b}` | Two runs of one dataset side by side |
@@ -252,6 +253,21 @@ curl -H "$AUTH" $TP/api/v1/datasets/support-golden/runs -d '{
 
 `GET /api/v1/datasets/{name}/runs` lists newest first, with the run object
 above and no summary: a page of runs is for choosing one.
+
+`GET /api/v1/runs` is the same listing across **every dataset** of the
+project — "what ran lately", whichever set it ran — in the same order and
+with the same rows, which already say which dataset each belongs to. It takes
+two filters, `dataset` (an exact name) and `status` (`running`, `finished` or
+`failed`), pages both ways with the same cursor shape, and answers `?count=1`
+with the capped total the filters match, as the trace and session listings do
+([api.md](api.md#counting)):
+
+```sh
+curl -H "$AUTH" "$TP/api/v1/runs?status=running&count=1"
+```
+
+A `dataset` that does not exist is an empty page, not a `404`: here the name
+is a filter, not an address.
 
 ## Reading a run back
 

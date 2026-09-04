@@ -92,7 +92,7 @@ tracepad is a later question.
 | `get_stats` | `GET /api/v1/stats` | Counts, cost, latency, trends |
 | `list_datasets` | `GET /api/v1/datasets` | "What test sets are there" |
 | `get_dataset_items` | `GET /api/v1/datasets/{name}/items` | Reading the cases in one |
-| `list_runs` | `GET /api/v1/datasets/{name}/runs` | "What has been tried" |
+| `list_runs` | `GET /api/v1/datasets/{name}/runs`, or `GET /api/v1/runs` without `dataset` | "What has been tried" |
 | `get_run` | `GET /api/v1/runs/{id}` | How one eval run went |
 | `get_run_items` | `GET /api/v1/runs/{id}/items` | Which cases failed, and what was said |
 | `compare_runs` | `GET /api/v1/runs/{a}/compare/{b}` | "Did this change make it better" |

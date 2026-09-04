@@ -526,6 +526,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the project's runs newest first, filtered by dataset and status, cursor-paginated
+         * @description Every dataset's runs in one listing, ordered by `(created_at, id)` like the per-dataset one and paged by the same cursor shape. The rows are the run objects without `summary`: a page of runs is for choosing one. `?count=` adds the capped total the filters match.
+         */
+        get: operations["listProjectRuns"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/runs/{id}": {
         parameters: {
             query?: never;
@@ -2697,6 +2717,51 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+        };
+    };
+    listProjectRuns: {
+        parameters: {
+            query?: {
+                /** @description Exact dataset name; a name outside the grammar is a 400 */
+                dataset?: string;
+                /** @description Keeps the runs in one state */
+                status?: "running" | "finished" | "failed";
+                /** @description Out of range is a 400, not a silent clamp */
+                limit?: components["parameters"]["Limit"];
+                /** @description The opaque `next_cursor` or `prev_cursor` of a previous page */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description Which way to page from the cursor. With no cursor, `next` is the newest page and `prev` the oldest — both ends are a direction rather than an offset. Rows come back newest first either way */
+                direction?: components["parameters"]["Direction"];
+                /** @description Adds `total` and `total_capped`: how many rows the filters match, counted up to 1000. Off by default, because the count changes with the filters and not with the page */
+                count?: components["parameters"]["Count"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of runs */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        runs: components["schemas"]["Run"][];
+                        /** @description Pass back as `?cursor=` for the next page; null on the oldest one */
+                        next_cursor: string | null;
+                        /** @description Pass back with `?direction=prev` for the page before; null on the newest one */
+                        prev_cursor: string | null;
+                        /** @description Present only with `?count=`: how many runs the filters match, capped at 1000 */
+                        total?: number;
+                        /** @description Present only with `?count=`: the count stopped at the cap */
+                        total_capped?: boolean;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
         };
     };
     getRun: {

@@ -419,6 +419,10 @@ type runObject struct {
 	FinishedAt     string          `json:"finished_at"`
 }
 
+// runsList lists one dataset's runs, or — with no dataset named — the whole
+// project's, newest first either way (spec 016 #2). Two endpoints, one
+// command: the row is the same object and so is the walk, and which set of
+// runs the reader wants is what the argument says.
 func (r *run) runsList(ctx context.Context, args []string) error {
 	var (
 		cursor string
@@ -427,9 +431,12 @@ func (r *run) runsList(ctx context.Context, args []string) error {
 	fs := r.flags("runs ls")
 	fs.StringVar(&cursor, "cursor", "", "")
 	fs.IntVar(&limit, "limit", 0, "")
-	rest, err := r.parse(fs, args, 1)
+	rest, err := r.parse(fs, args, -1)
 	if err != nil {
 		return err
+	}
+	if len(rest) > 1 {
+		return usageErrorf("runs ls takes at most one dataset, got %d arguments", len(rest))
 	}
 	query := url.Values{}
 	if err := addCursor(query, fs, cursor); err != nil {
@@ -438,8 +445,12 @@ func (r *run) runsList(ctx context.Context, args []string) error {
 	if err := addLimit(query, limit); err != nil {
 		return err
 	}
+	path := "/api/v1/runs"
+	if len(rest) == 1 {
+		path = "/api/v1/datasets/" + url.PathEscape(rest[0]) + "/runs"
+	}
 
-	body, err := r.api.Get(ctx, "/api/v1/datasets/"+url.PathEscape(rest[0])+"/runs", query)
+	body, err := r.api.Get(ctx, path, query)
 	if err != nil {
 		return err
 	}
@@ -458,12 +469,23 @@ func (r *run) runsList(ctx context.Context, args []string) error {
 		fmt.Fprintln(r.opt.Stdout, "no runs")
 		return nil
 	}
-	t := newTable(r.opt.Stdout, "ID", "NAME", "VERSION", "STATUS", "CREATED")
-	for _, item := range listing.Runs {
-		t.row(item.ID, orDash(item.Name), strconv.Itoa(item.DatasetVersion),
-			item.Status, shortTime(item.CreatedAt))
+	// The dataset column only where the rows can differ in it: under one
+	// dataset it would be the same word down the whole table.
+	if len(rest) == 1 {
+		t := newTable(r.opt.Stdout, "ID", "NAME", "VERSION", "STATUS", "CREATED")
+		for _, item := range listing.Runs {
+			t.row(item.ID, orDash(item.Name), strconv.Itoa(item.DatasetVersion),
+				item.Status, shortTime(item.CreatedAt))
+		}
+		t.flush()
+	} else {
+		t := newTable(r.opt.Stdout, "ID", "DATASET", "NAME", "VERSION", "STATUS", "CREATED")
+		for _, item := range listing.Runs {
+			t.row(item.ID, item.Dataset, orDash(item.Name), strconv.Itoa(item.DatasetVersion),
+				item.Status, shortTime(item.CreatedAt))
+		}
+		t.flush()
 	}
-	t.flush()
 	walkOn(r, "older", listing.NextCursor, listing.PrevCursor)
 	return nil
 }

@@ -875,6 +875,47 @@
         }
       }
     },
+    "/api/v1/runs": {
+      "get": {
+        "tags": ["datasets"],
+        "summary": "List the project's runs newest first, filtered by dataset and status, cursor-paginated",
+        "description": "Every dataset's runs in one listing, ordered by `(created_at, id)` like the per-dataset one and paged by the same cursor shape. The rows are the run objects without `summary`: a page of runs is for choosing one. `?count=` adds the capped total the filters match.",
+        "operationId": "listProjectRuns",
+        "parameters": [
+          {
+            "name": "dataset",
+            "in": "query",
+            "schema": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$", "maxLength": 200},
+            "description": "Exact dataset name; a name outside the grammar is a 400"
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {"type": "string", "enum": ["running", "finished", "failed"]},
+            "description": "Keeps the runs in one state"
+          },
+          {"$ref": "#/components/parameters/Limit"},
+          {"$ref": "#/components/parameters/Cursor"},
+          {"$ref": "#/components/parameters/Direction"},
+          {"$ref": "#/components/parameters/Count"}
+        ],
+        "responses": {
+          "200": {"description": "A page of runs", "content": {"application/json": {"schema": {
+            "type": "object",
+            "properties": {
+              "runs": {"type": "array", "items": {"$ref": "#/components/schemas/Run"}},
+              "next_cursor": {"type": ["string", "null"], "description": "Pass back as `?cursor=` for the next page; null on the oldest one"},
+              "prev_cursor": {"type": ["string", "null"], "description": "Pass back with `?direction=prev` for the page before; null on the newest one"},
+              "total": {"type": "integer", "description": "Present only with `?count=`: how many runs the filters match, capped at 1000"},
+              "total_capped": {"type": "boolean", "description": "Present only with `?count=`: the count stopped at the cap"}
+            },
+            "required": ["runs", "next_cursor", "prev_cursor"]
+          }}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"}
+        }
+      }
+    },
     "/api/v1/runs/{id}": {
       "get": {
         "tags": ["datasets"],

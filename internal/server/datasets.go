@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -125,10 +126,16 @@ type runResponse struct {
 	Summary        any             `json:"summary,omitempty"`
 }
 
+// runListResponse is a page of either run listing. The count rides only on the
+// project-wide one, and only when asked for (spec 009): the per-dataset page
+// has `run_count` on its dataset, exact, and a capped second number beside it
+// would be worse than none.
 type runListResponse struct {
-	Runs       []runResponse `json:"runs"`
-	NextCursor *string       `json:"next_cursor"`
-	PrevCursor *string       `json:"prev_cursor"`
+	Runs        []runResponse `json:"runs"`
+	NextCursor  *string       `json:"next_cursor"`
+	PrevCursor  *string       `json:"prev_cursor"`
+	Total       *int          `json:"total,omitempty"`
+	TotalCapped *bool         `json:"total_capped,omitempty"`
 }
 
 type runDeletedResponse struct {
@@ -662,17 +669,10 @@ func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {
 	var after *store.RunCursor
 	raw := values.Get("cursor")
 	if raw != "" {
-		parts, err := decodeCursor(raw, 2)
-		if err != nil {
+		if after, err = decodeRunCursor(raw); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		createdAt, err := strconv.ParseInt(parts[0], 10, 64)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid cursor")
-			return
-		}
-		after = &store.RunCursor{CreatedAt: createdAt, ID: parts[1]}
 	}
 
 	runs, err := s.store.Runs(project.ID, name, limit+1, after, backward)
@@ -689,6 +689,109 @@ func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {
 		out = append(out, renderRun(run))
 	}
 	writeJSON(w, http.StatusOK, runListResponse{Runs: out, NextCursor: next, PrevCursor: prev})
+}
+
+// projectRunFilters is every filter the project-wide run listing accepts.
+var projectRunFilters = []string{"dataset", "status"}
+
+// handleListProjectRuns lists the project's runs across every dataset, newest
+// first (spec 016 #2). The rows are the per-dataset listing's rows — they
+// already carry `dataset` — and the count is the capped one every listing
+// that a screen sits on offers (spec 009).
+func (s *Server) handleListProjectRuns(w http.ResponseWriter, r *http.Request) {
+	project, ok := s.apiProject(w, r)
+	if !ok {
+		return
+	}
+	known := append(append([]string{}, projectRunFilters...), "limit", "cursor", "direction", "count")
+	values, err := queryParams(r, known...)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	limit, err := pageSize(values)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	backward, err := pageDirection(values)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	counting, err := wantsCount(values)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	filter := store.RunFilter{Dataset: values.Get("dataset"), Status: values.Get("status")}
+	// A dataset name outside the grammar can match nothing, and a status
+	// outside the three the schema admits likewise: both are refused rather
+	// than answered with an empty page (spec 003 #23).
+	if filter.Dataset != "" {
+		if err := validName("dataset", filter.Dataset); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	switch filter.Status {
+	case "", store.RunRunning, store.RunFinished, store.RunFailed:
+	default:
+		writeError(w, http.StatusBadRequest,
+			fmt.Sprintf("status must be %s, %s or %s, got %q",
+				store.RunRunning, store.RunFinished, store.RunFailed, filter.Status))
+		return
+	}
+	filter.Limit = limit + 1
+	filter.Backward = backward
+	raw := values.Get("cursor")
+	if raw != "" {
+		after, err := decodeRunCursor(raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		filter.After = after
+	}
+
+	runs, err := s.store.ListRuns(project.ID, filter)
+	if err != nil {
+		slog.Error("list runs failed", "err", err)
+		writeError(w, http.StatusInternalServerError, "failed to list the runs")
+		return
+	}
+	runs, prev, next := trimPage(runs, limit, backward, raw, func(run *store.DatasetRun) string {
+		return encodeCursor(strconv.FormatInt(run.CreatedAt, 10), run.ID)
+	})
+	answer := runListResponse{Runs: make([]runResponse, 0, len(runs)), NextCursor: next, PrevCursor: prev}
+	for _, run := range runs {
+		answer.Runs = append(answer.Runs, renderRun(run))
+	}
+	if counting {
+		total, err := s.store.CountRuns(project.ID, filter, countCap+1)
+		if err != nil {
+			slog.Error("count runs failed", "err", err)
+			writeError(w, http.StatusInternalServerError, "failed to count the runs")
+			return
+		}
+		value, stopped := capped(total)
+		answer.Total, answer.TotalCapped = &value, &stopped
+	}
+	writeJSON(w, http.StatusOK, answer)
+}
+
+// decodeRunCursor restores the `(created_at, id)` keyset a page of runs ends
+// on, for both run listings.
+func decodeRunCursor(raw string) (*store.RunCursor, error) {
+	parts, err := decodeCursor(raw, 2)
+	if err != nil {
+		return nil, err
+	}
+	createdAt, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil {
+		return nil, errors.New("invalid cursor")
+	}
+	return &store.RunCursor{CreatedAt: createdAt, ID: parts[1]}, nil
 }
 
 // handleGetRun serves one run with its summary: the coverage, the traffic, the
