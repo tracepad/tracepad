@@ -20,7 +20,9 @@ and it wraps no provider client.
 from __future__ import annotations
 
 from ._config import VERSION as __version__
+from ._datasets import Dataset, Item, dataset
 from ._errors import TracepadConfigError, TracepadError, TracepadHTTPError
+from ._harness import Attempt, Run, ScoreConfig, compare, item_id, score_configs
 from ._prompts import Prompt, prompt
 from ._scores import score
 from ._tracing import (
@@ -37,20 +39,29 @@ from ._tracing import (
 )
 
 __all__ = [
+    "Attempt",
+    "Dataset",
     "Generation",
+    "Item",
     "Observation",
     "Prompt",
+    "Run",
+    "ScoreConfig",
     "TracepadConfigError",
     "TracepadError",
     "TracepadHTTPError",
     "__version__",
+    "compare",
+    "dataset",
     "event",
     "flush",
     "generation",
     "init",
+    "item_id",
     "observe",
     "prompt",
     "score",
+    "score_configs",
     "span",
     "update",
     "update_trace",

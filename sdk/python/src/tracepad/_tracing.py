@@ -80,6 +80,13 @@ def init(
             "process already has a TracerProvider; set deployment.environment.name and "
             "service.version on its resource (OTEL_RESOURCE_ATTRIBUTES) instead"
         )
+    # Before the exporting one, so that every span the exporter batches
+    # already carries the run and the item an eval stamped (spec 018 #3). It
+    # is registered under `export=False` too: an application exporting
+    # through another SDK still wants its spans stamped.
+    from ._harness import RunContextProcessor
+
+    provider.add_span_processor(RunContextProcessor())
     if export:
         provider.add_span_processor(_exporter(config))
     adopt(config)

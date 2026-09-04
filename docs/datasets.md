@@ -465,6 +465,48 @@ Every version of every item and every run go. The traces stay, unpinned.
 Deleting a run or a score config needs no confirmation: one row each, and
 nothing else is touched.
 
+## The same loop from Python
+
+The [`tracepad` package](sdk-python.md) is the same endpoints with the loop's
+one hard part done for you: inside `run.item(case)`, every span the
+application starts — its own, a framework's, another SDK's — carries the run
+and the item, because a span processor writes them as each span starts. The
+harness never touches a span it does not hold.
+
+```python
+import tracepad
+
+tracepad.init()  # TRACEPAD_HOST / TRACEPAD_API_KEY from the environment
+
+tracepad.score_configs([
+    {"name": "accuracy", "data_type": "numeric", "direction": "higher", "min": 0, "max": 1},
+    {"name": "verdict", "data_type": "categorical", "categories": ["pass", "fail"]},
+])
+
+golden = tracepad.dataset("support-golden")
+golden.put_items(cases)          # same cases → same version, nothing written
+
+with golden.run("prompt v7 / claude-sonnet-5", metadata={"prompt": "support-answer@7"}) as run:
+    for case in golden.items(version=run.dataset_version):
+        with run.item(case) as attempt:
+            answer = app.answer(case.input["question"])   # its spans carry the run and the item
+            attempt.score("accuracy", judge(answer, case.expected_output))
+            attempt.score("verdict", string_value="pass" if ok else "fail",
+                          data_type="categorical")
+
+print(run.get()["summary"])
+```
+
+`golden.items(version=…)` walks every page on its own — the loop step 4 spells
+out in shell — and `with … as run` closes the run on the way out: `finished`
+on a clean exit, `failed` with the exception's `repr` on an error, which is
+then re-raised. `finish` flushes the scores and the spans before it posts, so
+the summary on the next line is over everything the run produced.
+
+`tracepad.item_id("cases/refund.json")` is the `sha256(key)[:32]` this page
+recommends for an id of your own, and `tracepad.compare(a, b)` returns the
+comparison below exactly as the server computed it.
+
 ## The same loop from a shell
 
 Every step above is a command, and the CLI is nothing but a client of the API

@@ -10,29 +10,37 @@ from opentelemetry import trace as otel_api
 from opentelemetry.sdk.trace import TracerProvider
 
 import tracepad
-from conftest import HOST, KEY
 from tracepad import _tracing
 
+HOST = "http://tracepad.test:4318"
+KEY = "tp-sk-test"
 
-def processors(provider: Any) -> list[Any]:
-    return list(provider._active_span_processor._span_processors)
+
+def processors(provider: Any) -> list[str]:
+    """What `init` attached, in the order it attached them."""
+    return [type(p).__name__ for p in provider._active_span_processor._span_processors]
+
+
+# The stamping processor of spec 018 goes on first, so that every span the
+# exporter batches already carries the run and the item it was stamped with.
+ATTACHED = ["RunContextProcessor", "BatchSpanProcessor"]
 
 
 def test_creates_a_provider_when_there_is_none() -> None:
     tracepad.init(HOST, KEY)
     provider = otel_api.get_tracer_provider()
     assert isinstance(provider, TracerProvider)
-    assert len(processors(provider)) == 1
+    assert processors(provider) == ATTACHED
 
 
-def test_adds_a_processor_to_the_application_s_provider() -> None:
+def test_adds_its_processors_to_the_application_s_provider() -> None:
     application = TracerProvider()
     otel_api.set_tracer_provider(application)
 
     tracepad.init(HOST, KEY)
 
     assert otel_api.get_tracer_provider() is application
-    assert len(processors(application)) == 1
+    assert processors(application) == ATTACHED
 
 
 def test_a_second_init_is_a_no_op() -> None:
@@ -41,13 +49,15 @@ def test_a_second_init_is_a_no_op() -> None:
 
     tracepad.init("http://elsewhere.test", "tp-sk-other")
 
-    assert len(processors(provider)) == 1
+    assert processors(provider) == ATTACHED
     assert tracepad._config.current().host == HOST
 
 
-def test_export_false_attaches_no_exporter() -> None:
+def test_export_false_attaches_no_exporter_and_still_stamps() -> None:
+    # The application exporting through another SDK still wants its spans
+    # stamped by an eval (spec 018 #3, edge cases).
     tracepad.init(HOST, KEY, export=False)
-    assert processors(otel_api.get_tracer_provider()) == []
+    assert processors(otel_api.get_tracer_provider()) == ["RunContextProcessor"]
 
 
 def test_the_environment_supplies_host_and_key(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -45,6 +45,12 @@ COMPLETION_START_TIME = "tracepad.observation.completion_start_time"
 PROMPT_NAME = "tracepad.prompt.name"
 PROMPT_VERSION = "tracepad.prompt.version"
 
+# The run link (spec 014 #2): trace-level, stamped on every span of an eval
+# by the processor of spec 018, and not a dialect of its own — any harness in
+# any language writes these over whatever SDK the application already runs.
+RUN_ID = "tracepad.run_id"
+ITEM_ID = "tracepad.item_id"
+
 #: The ten kinds an observation may be (`docs/ingest.md`). A spelling outside
 #: them is stored in metadata and the span is classified by the mapper's
 #: heuristics, so this list warns rather than rejects.
