@@ -39,13 +39,19 @@
 	let failure = $state<string | null>(null);
 
 	async function loadExpected() {
-		if (!item?.id || expectedLoading) return;
+		const wanted = item?.id;
+		if (!wanted || expectedLoading) return;
 		expectedLoading = true;
 		failure = null;
 		try {
-			const whole = await api.getItem(dataset, item.id, version);
-			expected = { id: item.id, value: whole.expected_output };
+			const whole = await api.getItem(dataset, wanted, version);
+			// The case this answers, not the one on screen: `item` is a prop, and
+			// walking to the next row while the read is out would otherwise stamp
+			// this payload with the new row's id and render it as its expected
+			// output (spec 010 #8's rule, one layer up).
+			expected = { id: wanted, value: whole.expected_output };
 		} catch (cause) {
+			if (item?.id !== wanted) return;
 			failure = cause instanceof ApiError ? cause.message : 'Failed to read the item.';
 		} finally {
 			expectedLoading = false;

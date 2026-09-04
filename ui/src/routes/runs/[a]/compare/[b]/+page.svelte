@@ -78,7 +78,11 @@
 		peekID: () => peekID,
 		showing: () => null,
 		open: peek,
-		ascending: true
+		ascending: true,
+		// The rows the table draws, not the ones the endpoint sent: with the
+		// toggle on, `j`/`k` would otherwise walk into the `same` cases the
+		// reader has just asked to hide (found in review of this PR).
+		rows: () => rows
 	});
 
 	function peek(id: string | null) {
@@ -305,7 +309,7 @@
 								<td class="text-muted px-3 py-1.5 text-right tabular-nums">{row.seq}</td>
 								<td class="truncate px-3 py-1.5 font-mono text-xs">
 									<a
-										href="?{changed ? 'changed=1&' : ''}peek={row.id}"
+										href={peekSearch(page.url.searchParams, { peek: row.id })}
 										aria-current={lit ? 'true' : undefined}
 										title={row.id}
 										onclick={(event) => {

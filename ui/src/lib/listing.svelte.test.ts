@@ -69,7 +69,7 @@ beforeEach(() => {
 afterEach(() => stop());
 
 /** A listing and its walk, driven the way a component would drive them. */
-function mount(count = false, ascending = false) {
+function mount(count = false, ascending = false, rows?: () => Row[]) {
 	const source = reader();
 	const opened: string[] = [];
 	let listing!: Listing<Row>;
@@ -93,7 +93,8 @@ function mount(count = false, ascending = false) {
 				peeked = id;
 				opened.push(id);
 			},
-			ascending
+			ascending,
+			rows
 		});
 	});
 	flushSync();
@@ -330,6 +331,27 @@ describe('a walk that ran out of page', () => {
 		// A page that failed cannot be landed on, and neither can the walk.
 		expect(opened).toEqual(['1']);
 		expect(listing.rows).toEqual([]);
+	});
+
+	// A page that draws fewer rows than the loader landed — the comparison with
+	// its unchanged rows hidden (spec 016 #10) — is walked as it is drawn: a
+	// step must not open a row the reader cannot see.
+	it('walks the rows the page draws, not the ones the loader landed', async () => {
+		const { source, listing, walk, opened } = mount(false, false, () =>
+			listing.rows.filter((row) => row.id !== '2')
+		);
+		source.loads[0].ok(answer(['3', '2', '1']));
+		await idle();
+		peeked = '3';
+		flushSync();
+
+		walk.step(1);
+		flushSync();
+		expect(opened).toEqual(['1']);
+		// And the hidden row is not counted at the end of the listing either.
+		peeked = '1';
+		flushSync();
+		expect(walk.hasNext).toBe(false);
 	});
 
 	// A listing read oldest first — a dataset's items, in `seq` order — walks

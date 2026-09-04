@@ -28,12 +28,21 @@
 		now?: number;
 	} = $props();
 
-	// The ticked runs, in the order they were ticked: the first is `a`.
-	let chosen = $state.raw<Run[]>([]);
+	// The ticked runs, in the order they were ticked: the first is `a`. Kept as
+	// ids and resolved against the rows on screen, because a page turn or a
+	// filter change leaves a tick behind a listing the reader is no longer
+	// looking at — and Compare going live for a row nobody can see would be a
+	// comparison of two runs somebody cannot check (#11).
+	let ticked = $state.raw<string[]>([]);
+	const chosen = $derived(
+		ticked
+			.map((id) => rows.find((row) => row.id === id))
+			.filter((run): run is Run => run !== undefined)
+	);
 	const choice = $derived(compareChoice(chosen));
 
 	function tick(run: Run, on: boolean) {
-		chosen = on ? [...chosen, run] : chosen.filter((each) => each.id !== run.id);
+		ticked = on ? [...ticked, run.id] : ticked.filter((id) => id !== run.id);
 	}
 
 	const cell = 'truncate px-3 py-1.5';
@@ -82,17 +91,17 @@
 		</thead>
 		<tbody>
 			{#each rows as row (row.id)}
-				{@const ticked = chosen.some((each) => each.id === row.id)}
+				{@const lit = chosen.some((each) => each.id === row.id)}
 				<tr
 					class={[
 						'border-border hover:bg-raised border-b transition-colors duration-100',
-						ticked && 'bg-accent-soft'
+						lit && 'bg-accent-soft'
 					]}
 				>
 					<td class="px-3 py-1.5">
 						<input
 							type="checkbox"
-							checked={ticked}
+							checked={lit}
 							onchange={(event) => tick(row, event.currentTarget.checked)}
 							aria-label="Tick run {short(row.id)} to compare"
 							class="accent-accent size-4 cursor-pointer align-middle"

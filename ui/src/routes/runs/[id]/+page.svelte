@@ -40,8 +40,16 @@
 
 	let run = $state.raw<RunWithSummary | null>(null);
 	let failure = $state<string | null>(null);
+	/**
+	 * A poll's own failure slot, the loader's `liveFailure` one layer up
+	 * (spec 010 #5): a run being watched must not become an error page because
+	 * one re-read of it answered badly, and the rows on screen are still true.
+	 */
+	let liveFailure = $state<string | null>(null);
 	/** The instant the ages are measured from; moved by every poll. */
 	let now = $state(Date.now());
+	/** Whether a poll is still out, so two of them never overlap (spec 010 #9). */
+	let polling = false;
 
 	$effect(() => {
 		const controller = new AbortController();
@@ -50,7 +58,7 @@
 	});
 
 	async function load(wanted: string, signal: AbortSignal) {
-		failure = null;
+		failure = liveFailure = null;
 		try {
 			const answer = await api.getRun(wanted, signal);
 			if (signal.aborted) return;
@@ -60,6 +68,29 @@
 			if (signal.aborted) return;
 			run = null;
 			failure = cause instanceof ApiError ? cause.message : 'Failed to read the run.';
+		}
+	}
+
+	/**
+	 * One poll: the run again, silently. It replaces nothing on a failure and
+	 * reports in its own slot, so a transient answer cannot tear down the page
+	 * — and with it the timer that would have recovered from it (found in
+	 * review of this PR).
+	 */
+	async function poll(wanted: string, signal: AbortSignal) {
+		if (polling) return;
+		polling = true;
+		try {
+			const answer = await api.getRun(wanted, signal);
+			if (signal.aborted) return;
+			run = answer;
+			now = Date.now();
+			liveFailure = null;
+		} catch (cause) {
+			if (signal.aborted) return;
+			liveFailure = cause instanceof ApiError ? cause.message : 'Failed to re-read the run.';
+		} finally {
+			polling = false;
 		}
 	}
 
@@ -79,14 +110,26 @@
 
 	// Polling (#7): the summary and the newest page, silently, while the run
 	// is open and the tab is looked at — the trace listing's own gate.
+	//
+	// Depends on the *status* rather than on the run: a poll assigns a new run
+	// object every five seconds, and an effect that re-ran on it would rebuild
+	// the timer each time and restart its phase. It stops when the harness
+	// closes the run, and the controller it owns is what aborts a poll still
+	// out when the id changes underneath it.
+	const running = $derived(run?.status === 'running');
 	$effect(() => {
-		if (run?.status !== 'running') return;
+		if (!running) return;
+		const wanted = id;
+		const controller = new AbortController();
 		const timer = setInterval(() => {
 			if (document.hidden) return;
-			void load(id, new AbortController().signal);
+			void poll(wanted, controller.signal);
 			void listing.tick();
 		}, POLL_MS);
-		return () => clearInterval(timer);
+		return () => {
+			clearInterval(timer);
+			controller.abort();
+		};
 	});
 
 	// The peek panel (spec 008): a case beside the listing, and an attempt's
@@ -233,6 +276,14 @@
 				{run.error}
 			</p>
 		{/if}
+		{#if liveFailure}
+			<!-- A poll that failed: what is on screen is the last good answer,
+			     and the next tick is what recovers from this. -->
+			<p role="alert" class="text-danger bg-danger-soft border-border flex items-center gap-2 border-b px-4 py-2">
+				<TriangleAlert class="size-4 shrink-0" />
+				{liveFailure}
+			</p>
+		{/if}
 
 		<Summary summary={run.summary} metadata={run.metadata} />
 
@@ -297,7 +348,7 @@
 									<!-- Enter opens the panel, as a click does; ⌘-click gets a
 									     link to this same view with the case open. -->
 									<a
-										href="?{unknown ? 'unknown=true&' : ''}peek={row.id}"
+										href={peekSearch(page.url.searchParams, { peek: row.id })}
 										aria-current={lit ? 'true' : undefined}
 										title={row.id}
 										onclick={(event) => {

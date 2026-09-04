@@ -197,6 +197,18 @@ test('the dataset page lists items and switches versions', async ({ page }) => {
 	await expect(page.locator('tbody tr')).toHaveCount(2);
 });
 
+// A row's link is where a ⌘-click lands, and it has to carry the version in
+// force: at the head the item is the same either way, but an item read at an
+// older version and opened at the head is another item — or none.
+test('an item row links to the version being read', async ({ page }) => {
+	await signIn(page);
+	await page.goto(`/datasets/${DATASET}?version=1`);
+
+	const link = page.locator('tbody tr').first().getByRole('link');
+	await expect(link).toHaveAttribute('href', /version=1/);
+	await expect(link).toHaveAttribute('href', new RegExp(`peek=${ITEM_1}`));
+});
+
 test('an item opens in the panel, whole', async ({ page }) => {
 	await signIn(page);
 	await page.goto(`/datasets/${DATASET}`);
@@ -254,6 +266,15 @@ test('the compare page renders header and verdicts, the toggle hides same, swap 
 	await expect(page).toHaveURL(/changed=1/);
 	await expect(rows).toHaveCount(1);
 	await expect(page.getByText('1 improved · 0 regressed · 1 same')).toBeVisible();
+
+	// The panel walks what the table draws: with the toggle on, the hidden
+	// `same` case is not a row `j`/`k` can reach.
+	await rows.first().getByRole('link').click();
+	const panel = page.getByRole('dialog');
+	await expect(panel).toBeVisible();
+	await expect(panel.getByRole('button', { name: 'Next row' })).toBeDisabled();
+	await expect(panel.getByRole('button', { name: 'Previous row' })).toBeDisabled();
+	await page.keyboard.press('Escape');
 
 	await page.getByRole('link', { name: 'Swap' }).click();
 	await expect(page).toHaveURL(new RegExp(`/runs/${RUN_B}/compare/${RUN_A}`));

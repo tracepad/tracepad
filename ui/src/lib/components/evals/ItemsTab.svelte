@@ -67,7 +67,12 @@
 {/if}
 
 {#if listing.rows.length > 0 || !listing.newest}
-	<ItemTable rows={listing.rows} onopen={peek} selectedID={peekID} />
+	<ItemTable
+		rows={listing.rows}
+		onopen={peek}
+		href={(id) => peekSearch(page.url.searchParams, { peek: id })}
+		selectedID={peekID}
+	/>
 	<PaginationBar {...listing.bar} {total} noun="item" />
 	{#if listing.rows.length === 0 && !listing.loading}
 		<p class="text-subtle flex flex-1 items-start justify-center p-8 text-center">

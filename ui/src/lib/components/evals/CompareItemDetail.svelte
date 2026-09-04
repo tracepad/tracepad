@@ -88,16 +88,23 @@
 	}
 
 	async function loadOutput(which: 'a' | 'b') {
+		const wanted = item?.id;
 		const current = sides[which];
 		const marker = isTruncated(current.output) ? current.output : null;
 		if (!marker || current.loading) return;
 		sides = { ...sides, [which]: { ...current, loading: true } };
 		try {
 			const whole = await api.getObservationIO(marker.observation_id, marker.trace_id);
-			sides = { ...sides, [which]: { ...current, output: whole.output, loading: false } };
+			// A late payload lands on nothing: the panel may have walked to
+			// another case, whose `load` has already replaced `sides` — and the
+			// side captured above is the previous case's trace, its attempt count
+			// and its answer (spec 010 #8's rule).
+			if (item?.id !== wanted) return;
+			sides = { ...sides, [which]: { ...sides[which], output: whole.output, loading: false } };
 		} catch (cause) {
+			if (item?.id !== wanted) return;
 			failure = cause instanceof ApiError ? cause.message : 'Failed to read the payload.';
-			sides = { ...sides, [which]: { ...current, loading: false } };
+			sides = { ...sides, [which]: { ...sides[which], loading: false } };
 		}
 	}
 

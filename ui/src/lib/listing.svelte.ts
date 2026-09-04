@@ -332,6 +332,13 @@ export type WalkSpec<Row> = {
 	 * key (spec 016 #3).
 	 */
 	ascending?: boolean;
+	/**
+	 * The rows the walk steps through, when the page draws fewer of them than
+	 * the loader landed: the comparison hides its unchanged rows on the page
+	 * (spec 016 #10), and `j`/`k` must not step into a row that is not there.
+	 * Defaults to the listing's own rows.
+	 */
+	rows?: () => Row[];
 };
 
 /**
@@ -351,7 +358,8 @@ export class Walk<Row extends { id: string }> {
 	// listing is handed over reversed, so `neighbour` and `settled` see the
 	// order they were written for and the steps below are turned round to match.
 	#ordered = $derived.by(() => {
-		const ordered = this.#listing.rows.map((row) => ({ id: row.id, key: this.#spec.key(row) }));
+		const rows = this.#spec.rows?.() ?? this.#listing.rows;
+		const ordered = rows.map((row) => ({ id: row.id, key: this.#spec.key(row) }));
 		return this.#down === 1 ? ordered : ordered.reverse();
 	});
 

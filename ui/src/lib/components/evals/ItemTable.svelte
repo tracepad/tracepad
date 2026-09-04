@@ -11,11 +11,20 @@
 	let {
 		rows,
 		onopen,
+		href,
 		selectedID = null
 	}: {
 		rows: DatasetItem[];
 		/** An unmodified left click opens the peek panel (spec 008 #3). */
 		onopen: (id: string) => void;
+		/**
+		 * Where the row's link leads. Caller-supplied because it must carry the
+		 * rest of the screen's state — the version in force above all: a
+		 * ⌘-click that dropped `?version=` would open the item at the head, or
+		 * at nothing when it has since been archived (found in review of this
+		 * PR).
+		 */
+		href: (id: string) => string;
 		selectedID?: string | null;
 	} = $props();
 
@@ -59,7 +68,7 @@
 						<!-- The row's one tabbable thing is a link to this same view
 						     with the item open; the editor page of spec 016 #5
 						     replaces it as the canonical link when it lands. -->
-						<a href="?peek={row.id}" aria-current={lit ? 'true' : undefined} title={row.id}>
+						<a href={href(row.id)} aria-current={lit ? 'true' : undefined} title={row.id}>
 							{short(row.id)}
 						</a>
 					</td>
