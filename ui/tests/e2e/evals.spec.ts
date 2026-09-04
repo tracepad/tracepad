@@ -371,13 +371,44 @@ test('a case is cut from an observation into a dataset, whole', async ({ page })
 	await expect(page.getByLabel('Input', { exact: true })).toContainText('priority routing');
 	await expect(page.getByLabel('Expected output', { exact: true })).toContainText('Team plan');
 
+	// The correction first, the dataset second — which is the order the gesture
+	// is actually used in, and the order that catches a page re-seeding its
+	// panes when `?dataset=` changes under it (found in review of this PR).
+	await type(page, 'Expected output', '{"answer": "The Team plan and above, plus Enterprise."}');
 	await page.getByLabel('Dataset').selectOption(name);
+	await expect(page.getByLabel('Expected output', { exact: true })).toContainText('Enterprise');
+
 	await page.getByRole('button', { name: 'Save' }).click();
 	await expect(page.getByText('Saved as version 2.')).toBeVisible();
 
-	// The saved case knows where it was cut from.
+	// The case that was stored is the corrected one, and it knows where it was
+	// cut from.
 	await page.getByRole('link', { name: 'Open it in the dataset' }).click();
-	await expect(page.getByRole('dialog').getByText('Cut from')).toBeVisible();
+	const panel = page.getByRole('dialog');
+	await expect(panel.getByText('Cut from')).toBeVisible();
+	await expect(panel.getByLabel('Expected output', { exact: true })).toContainText('Enterprise');
+});
+
+// A `?dataset=` that names nothing is a stale link or a typo, and the items
+// endpoint would bring that name into being on the first write (spec 014).
+test('the editor refuses to save into a dataset the project does not have', async ({ page }) => {
+	const name = await freshDataset('typo');
+	await signIn(page);
+	await page.goto(`/datasets/items/new?dataset=${name}x`);
+
+	await expect(page.getByText(/no dataset called/)).toBeVisible();
+	await type(page, 'Input', '{"question": "anything"}');
+	// The linter settles about 300 ms after the last keystroke (spec 015 #15),
+	// so the wait is what makes "still disabled" mean anything; the control
+	// below is what proves the wait is long enough.
+	await page.waitForTimeout(1000);
+	const save = page.getByRole('button', { name: 'Save' });
+	await expect(save).toBeDisabled();
+
+	// Choosing a real one opens it — and keeps what was typed, which is the
+	// same promise the `?dataset=` rewrite makes above.
+	await page.getByLabel('Dataset').selectOption(name);
+	await expect(save).toBeEnabled();
 });
 
 test('deleting a dataset shows the dry run and refuses a wrong echo', async ({ page }) => {

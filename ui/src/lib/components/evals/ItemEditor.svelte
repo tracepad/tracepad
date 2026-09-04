@@ -2,6 +2,7 @@
 	import ChevronLeft from '@lucide/svelte/icons/chevron-left';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
+	import { untrack } from 'svelte';
 	import { ApiError, api, type Dataset } from '$lib/api/client.svelte';
 	import { itemBody, savedMessage, short } from '$lib/evals';
 	import Button from '../Button.svelte';
@@ -59,8 +60,15 @@
 	let saved = $state.raw<{ message: string; version: number; id: string } | null>(null);
 
 	$effect(() => {
+		// What the panes are seeded from is *what is being edited* — an item, or
+		// an observation — and never where the case will be filed. Depending on
+		// `dataset` here meant that picking one from the select threw away
+		// whatever had been typed, including the correction *Add to dataset*
+		// exists to make (found in review of this PR). An item's dataset is in
+		// its path and does move it to another item, so it is tracked there.
 		const controller = new AbortController();
-		void prefill(dataset, id, trace, obs, controller.signal);
+		const name = id ? dataset : untrack(() => dataset);
+		void prefill(name, id, trace, obs, controller.signal);
 		return () => controller.abort();
 	});
 
@@ -119,14 +127,19 @@
 	// yet. Only when the path has no dataset of its own: an item being edited
 	// belongs where it is, and moving it is not an edit (spec 014 has no such
 	// write).
+	const CHOICES = 250;
 	let datasets = $state.raw<Dataset[]>([]);
+	/** Whether there are datasets this select is not offering (found in review). */
+	let more = $state(false);
 	$effect(() => {
 		if (id) return;
 		const controller = new AbortController();
 		api
-			.listDatasets({ limit: 250 }, controller.signal)
+			.listDatasets({ limit: CHOICES }, controller.signal)
 			.then((answer) => {
-				if (!controller.signal.aborted) datasets = answer.datasets;
+				if (controller.signal.aborted) return;
+				datasets = answer.datasets;
+				more = answer.next_cursor !== null;
 			})
 			.catch(() => {
 				// The select stays empty and Save stays shut; the panes are
@@ -135,8 +148,33 @@
 		return () => controller.abort();
 	});
 
+	/**
+	 * Whether the name in the URL is one the project actually has. A `?dataset=`
+	 * that names nothing — a stale link, a typo — must not be savable: the items
+	 * endpoint brings a dataset into being on the first write to its name
+	 * (spec 014), so a misspelling would quietly create a misspelled dataset
+	 * (found in review of this PR). An item being edited is not chosen from a
+	 * list at all, so this is asked only where the select is.
+	 */
+	const known = $derived(id !== null || datasets.some((row) => row.name === dataset));
+	const unknown = $derived(id === null && dataset !== '' && !known && datasets.length > 0);
+
+	/**
+	 * Whether the panes take a keystroke. Not while the case they are about to
+	 * hold is still being read: the prefill assigns all three documents when it
+	 * lands, so anything typed into them before that is thrown away without a
+	 * word (found alongside the review of this PR).
+	 */
+	const shut = $derived(busy || loading);
+
 	const ready = $derived(
-		dataset !== '' && input.trim() !== '' && inputValid && expectedValid && metadataValid && !loading
+		dataset !== '' &&
+			known &&
+			input.trim() !== '' &&
+			inputValid &&
+			expectedValid &&
+			metadataValid &&
+			!loading
 	);
 
 	async function save() {
@@ -206,7 +244,7 @@
 					id="item-dataset"
 					name="dataset"
 					class="{fieldClass} max-w-sm"
-					value={dataset}
+					value={known ? dataset : ''}
 					onchange={(event) => onpick?.(event.currentTarget.value)}
 				>
 					<option value="">Choose a dataset…</option>
@@ -214,11 +252,25 @@
 						<option value={row.name}>{row.name}</option>
 					{/each}
 				</select>
-				{#if datasets.length === 0 && dataset === ''}
+				{#if unknown}
+					<span class="text-warn text-xs">
+						This project has no dataset called <code class="font-mono">{dataset}</code>. Choose one
+						above, or <a class="text-accent underline underline-offset-2" href="/datasets">make it</a>
+						first — saving here would not.
+					</span>
+				{:else if datasets.length === 0 && dataset === ''}
 					<span class="text-subtle text-xs">
 						This project has no dataset yet — <a class="text-accent underline underline-offset-2" href="/datasets">
 							make one
 						</a> and come back; nothing here is lost by opening it in another tab.
+					</span>
+				{:else if more}
+					<!-- One page of names, and the reader is told so rather than
+					     left to conclude their dataset is gone (found in review). -->
+					<span class="text-subtle text-xs">
+						The first {CHOICES} datasets by name. If this case belongs to another, open it from
+						<a class="text-accent underline underline-offset-2" href="/datasets">Datasets</a>
+						and use <em>New item</em>.
 					</span>
 				{/if}
 			</label>
@@ -274,7 +326,7 @@
 		     somewhere to write one. -->
 		<section class="flex flex-col gap-1.5 [&_.cm-editor]:min-h-28">
 			{@render heading('Input', 'What the case is. Required.')}
-			<JsonEditor bind:text={input} bind:valid={inputValid} label="Input" disabled={busy} />
+			<JsonEditor bind:text={input} bind:valid={inputValid} label="Input" disabled={shut} />
 		</section>
 		<section class="flex flex-col gap-1.5 [&_.cm-editor]:min-h-28">
 			{@render heading('Expected output', 'What a good answer looks like. Optional.')}
@@ -282,7 +334,7 @@
 				bind:text={expected}
 				bind:valid={expectedValid}
 				label="Expected output"
-				disabled={busy}
+				disabled={shut}
 				optional
 			/>
 		</section>
@@ -292,7 +344,7 @@
 				bind:text={metadata}
 				bind:valid={metadataValid}
 				label="Metadata"
-				disabled={busy}
+				disabled={shut}
 				optional
 			/>
 		</section>

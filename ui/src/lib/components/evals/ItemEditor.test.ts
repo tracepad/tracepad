@@ -17,9 +17,12 @@ vi.mock('$app/state', () => ({ page: { url: new URL('http://tracepad.test/datase
 vi.mock('$lib/api/client.svelte', () => ({
 	ApiError: class extends Error {},
 	api: {
-		listDatasets: async () => ({ datasets: [{ name: 'golden' }] }),
+		listDatasets: async () => ({ datasets: [{ name: 'golden' }], next_cursor: null }),
 		getItem: vi.fn(),
-		getObservationIO: vi.fn(),
+		getObservationIO: async () => ({
+			input: { question: 'which plan?' },
+			output: { answer: 'the raw one the model gave' }
+		}),
 		putItem: (...args: unknown[]) => putItem(...(args as [])),
 	}
 }));
@@ -31,12 +34,20 @@ function editor(label: string): EditorView {
 	return found;
 }
 
+/**
+ * The pause the linter answers in, which is what `valid` settles on (spec 015
+ * #15) — including for a pane the editor filled in rather than the author.
+ */
+async function lint(label: string) {
+	forceLinting(editor(label));
+	await new Promise((wake) => setTimeout(wake, 0));
+}
+
 /** Types a whole document, then waits for the linter that answers `valid`. */
 async function write(label: string, text: string) {
 	const view = editor(label);
 	view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } });
-	forceLinting(view);
-	await new Promise((wake) => setTimeout(wake, 0));
+	await lint(label);
 }
 
 const save = () => screen.getByRole('button', { name: 'Save' });
@@ -65,6 +76,17 @@ describe('the save gate', () => {
 
 		expect(save()).toBeDisabled();
 	});
+
+	// The items endpoint brings a dataset into being on the first write to its
+	// name, so a `?dataset=` naming nothing — a stale link, a typo — would
+	// quietly create a misspelled dataset (found in review of this PR).
+	it('stays shut for a dataset the project does not have', async () => {
+		render(ItemEditor, { dataset: 'ghost' } as never);
+		await write('Input', '{"q": 1}');
+
+		expect(await screen.findByText(/no dataset called/)).toBeInTheDocument();
+		expect(save()).toBeDisabled();
+	});
 });
 
 describe('what a save sends and says', () => {
@@ -81,6 +103,29 @@ describe('what a save sends and says', () => {
 			metadata: { note: 'seen in prod' }
 		});
 		expect(await screen.findByText('Saved as version 2.')).toBeInTheDocument();
+	});
+
+	// The panes are the observation's, whole, and the source pair travels with
+	// them (spec 016 #8). That the panes survive *picking a dataset* is the
+	// same promise one URL change later, and is asserted end to end, where the
+	// route really does rewrite `?dataset=` under a mounted editor.
+	it('posts the observation it was opened on, with where it came from', async () => {
+		const user = userEvent.setup();
+		render(ItemEditor, { dataset: 'golden', trace: 'e0a1', obs: 'e2e3' } as never);
+		// Only once the payloads are in the panes: they take no keystroke before
+		// that, because the prefill assigns all three when it lands.
+		await screen.findByText(/which plan\?/);
+		await write('Expected output', '{"answer": "the one it should have given"}');
+		await lint('Input');
+
+		await user.click(save());
+
+		expect(putItem).toHaveBeenCalledWith('golden', {
+			input: { question: 'which plan?' },
+			expected_output: { answer: 'the one it should have given' },
+			source_trace_id: 'e0a1',
+			source_observation_id: 'e2e3'
+		});
 	});
 
 	it('says so when the write changed nothing', async () => {

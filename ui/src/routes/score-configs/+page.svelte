@@ -28,7 +28,13 @@
 		api
 			.listScoreConfigs(controller.signal)
 			.then((answer) => {
-				if (!controller.signal.aborted) configs = answer.configs;
+				if (controller.signal.aborted) return;
+				configs = answer.configs;
+				// A read that succeeded clears the last one's failure: the list
+				// reloads after every write now, and a banner that outlived the
+				// failure would stand over a table that is already correct
+				// (found in review of this PR).
+				failure = null;
 			})
 			.catch((cause: unknown) => {
 				if (controller.signal.aborted) return;
