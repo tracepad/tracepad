@@ -268,11 +268,15 @@
 			</div>
 		{/snippet}
 
-		<section class="flex flex-col gap-1.5">
+		<!-- A minimum height on the three surfaces, which grow with their
+		     document: an empty editor is otherwise a 24-pixel strip, and a
+		     pane somebody is about to write a test case into should look like
+		     somewhere to write one. -->
+		<section class="flex flex-col gap-1.5 [&_.cm-editor]:min-h-28">
 			{@render heading('Input', 'What the case is. Required.')}
 			<JsonEditor bind:text={input} bind:valid={inputValid} label="Input" disabled={busy} />
 		</section>
-		<section class="flex flex-col gap-1.5">
+		<section class="flex flex-col gap-1.5 [&_.cm-editor]:min-h-28">
 			{@render heading('Expected output', 'What a good answer looks like. Optional.')}
 			<JsonEditor
 				bind:text={expected}
@@ -282,7 +286,7 @@
 				optional
 			/>
 		</section>
-		<section class="flex flex-col gap-1.5">
+		<section class="flex flex-col gap-1.5 [&_.cm-editor]:min-h-20">
 			{@render heading('Metadata', 'Anything the harness or a reader should know. Optional.')}
 			<JsonEditor
 				bind:text={metadata}
