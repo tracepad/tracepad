@@ -506,6 +506,35 @@ how many cases moved, and then the cases whose verdict is not `same`; `--all`
 lists every case. A run that failed closes with its reason:
 `tracepad runs finish "$RUN_ID" --failed "judge timed out"`.
 
+## The same loop from the web interface
+
+The screens are the third client of these endpoints and add nothing to them
+([ui.md](ui.md), *Evals*). What the browser is good for is the half of the
+loop a person does by hand:
+
+1. **Declare the score names.** *Evals → Score configs → New score config*:
+   the type, which direction is better, the bounds or the categories. It
+   `PUT`s the whole config, so editing one later is the same form.
+2. **Build the set.** *Datasets → New dataset*, then *New item* for a case
+   typed by hand — or, far more often, **open a trace where the model got it
+   right (or nearly right), pick the observation, and press *Add to
+   dataset***. The editor opens with that observation's input as the case and
+   its output as the expected answer, both whole, with the trace and
+   observation recorded as the source. Correct the expected answer and save.
+   The dataset's version ticks once per save that changed something, and
+   *unchanged* is what a save that changed nothing says.
+   For a set that already exists as a file, `datasets push` is still the
+   import — the browser writes one case at a time.
+3. **Run it.** From the harness, exactly as above: the interface opens no run
+   and closes none. The run page shows the two attributes to stamp while
+   nothing has arrived, and follows the run as its traces land.
+4. **Read it back.** The run page for one pass, *Compare with…* or two ticked
+   checkboxes for two of them.
+
+Deleting is where the browser is deliberately not quicker than `curl`:
+deleting a dataset shows the same dry run and asks for the same echo, and
+deleting a run says what happens to its traces before it happens.
+
 ## Responses
 
 | Status | Meaning |

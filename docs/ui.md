@@ -81,7 +81,10 @@ server's, so the screen, the CLI and the MCP tools cannot disagree about
 whether a change made it better.
 
 **Datasets** — one row per dataset over `GET /api/v1/datasets`: name,
-description, version, items, runs, updated. A row opens the dataset.
+description, version, items, runs, updated. A row opens the dataset. *New
+dataset* takes a name and a sentence and nothing else — that is the whole
+envelope — and lands on the empty dataset; a name the project already has is
+a link, not a silent replacement of its description.
 
 **Dataset** — the envelope in the header, and two tabs in the URL
 (`?tab=items`, `?tab=runs`). *Items* lists the cases at the version in force,
@@ -97,6 +100,24 @@ the dataset at that version. An item reached from an older version that has
 since been archived says so. *Runs* is the dataset's runs, newest first, with
 the checkboxes below.
 
+**Editing a case** — *New item* in the dataset header, *Edit* in an item's
+panel, or *Add to dataset* on any observation (below) all land on the same
+page: three editors — *Input*, *Expected output*, *Metadata* — over the
+payload surface with the parse error in place. *Save* opens once the input is
+a document and neither other pane is a broken one; an empty pane is a field
+left out, not a syntax error. What a save reports is the store's own answer:
+*saved as version V*, or *unchanged* when the write changed nothing, because
+a write that changes nothing writes nothing and only the server can say so.
+Saving again edits the same item — an id re-posted is an edit — and every
+earlier version keeps the row it had. Writes land at the head, so *New item*,
+*Edit* and *Archive* are offered only while the head is the version on
+screen; *Archive* asks once and removes the case from the current version
+while leaving it readable at every earlier one. *Delete* on the dataset is
+the one act here with a blast radius, and wears the same ceremony as the rest
+of the interface: the server's dry run on screen — items, runs, and the
+traces those runs were pinning, which are released rather than deleted — and
+the dataset's name typed back.
+
 **Runs** — every dataset's runs over `GET /api/v1/runs`, newest first, with
 the two filters the endpoint takes (`dataset`, `status`) and the capped count.
 There is no coverage column: a page of runs is for choosing one, and the
@@ -110,7 +131,9 @@ and the empty listing shows the request that opens one.
 **Run** — the header names the run, links `dataset@version` to the items tab
 at that version, shows the status the harness said (and, beside `running`,
 how long it has been open), and offers *Compare with…*, a select of the
-dataset's other runs. The cards are the summary `GET /api/v1/runs/{id}`
+dataset's other runs, and *Delete* — which asks once and names what it does:
+the run's bookkeeping goes, and the traces it was keeping stop being pinned
+and live as long as retention says. The cards are the summary `GET /api/v1/runs/{id}`
 computes: coverage (items, covered, missing, unknown traces), traffic (count,
 attempts max, failed, cost, p50/p95 — exact over the run's traces), the
 **scores** table (type and direction, count, mean, range or a distribution
@@ -145,9 +168,25 @@ trace each run made at the case, with a link to all of its attempts when there
 were several — beside the per-name pair. The comparison is reachable from a
 run's *Compare with…* and from two ticked checkboxes on any runs table.
 
-**Score configs** — read-only: name, type, direction, what the name admits
-(bounds or categories), description. Editing is the CLI's
-(`tracepad score-configs push`) until the form lands.
+**Score configs** — name, type, direction, what the name admits (bounds or
+categories), description. The form writes one: it offers the vocabularies the
+API takes and applies the rules between them before the round trip — a
+direction is required for a numeric or boolean name and refused for a
+categorical or text one, bounds belong to a number, categories to a
+categorical name — with the server as the oracle either way. It `PUT`s the
+whole config, so the same form creates and edits and a re-save of an
+unchanged config writes nothing. *Remove* takes the binding only: the scores
+already posted under that name stay exactly as they are.
+
+**Adding a case from a trace** — every observation panel has *Add to
+dataset*. It opens the editor with that observation's input as the case and
+its output as what a good answer looks like — both fetched whole, never from
+a preview, because a cut document saved as a test case is a wrong test case —
+and with the trace and observation recorded as where the case came from. The
+dataset is chosen on the editor page, since the reader arrives from a trace
+with no dataset in mind. The output arrives as a starting point: a golden
+case is usually what the model said with a correction, which is why the
+gesture lands in an editor rather than in a *saved* toast.
 
 Every empty state teaches the CLI: a project with no datasets shows the whole
 loop in six lines, a dataset with no items the `push` that fills it, a run

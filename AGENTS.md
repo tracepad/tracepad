@@ -106,6 +106,20 @@ API. This file routes; it does not duplicate what specs and docs say.
   banner that names both sizes and loads the whole payload (#3). The UI line
   budget moves to 14,000 (#9) and the bundle's ceiling is stated at 1.2 MB
   (#10). No server change.
+- ✅ Spec 016 (evals in the web interface) shipped: the *Evals* section —
+  datasets, runs, score configs — and with it the screens spec 014's nouns had
+  been waiting for: a dataset with its items and versions, a run with the
+  summary the server computes and the traces that answered each case, and the
+  comparison rendered exactly as `GET /runs/{a}/compare/{b}` returns it, with
+  no arithmetic of its own. One endpoint was added, `GET /api/v1/runs`
+  (schema 0011), because *Runs* is "what ran lately, whatever the set" and
+  fanning out per dataset would be logic in a client; the CLI and MCP moved in
+  the same PR. The write half follows the same rule — every write is one of
+  spec 014's endpoints: the item editor over spec 015's surface (a save
+  answers "saved as version V" or "unchanged"), *Add to dataset* on any
+  observation, the score-config form, and deletions that wear the echo
+  ceremony exactly where the server has a dry run and a named consequence
+  where it has none.
 - ✅ Spec 005 (retention & admin) shipped: schema 0005, the hourly sweeper
   writing every chunk through the group-commit writer, the admin API under
   `/api/v1/projects` with a dry-run/confirm contract on every destructive
@@ -134,9 +148,10 @@ API. This file routes; it does not duplicate what specs and docs say.
 | Admin API (projects, keys, retention, erasure) | `internal/server/admin.go`, `internal/store/admin.go`, `docs/admin.md`, spec 005 — destructive endpoints are a dry run until `?confirm=` echoes the name, checked inside the write transaction |
 | Attribute mapping | `internal/mapping/rules.go` is the table; `mapping.go` applies it; `value.go` holds `attrs`, where reading and claiming are separate and an unclaimed attribute keeps the origin it arrived at (spec 012 #7) |
 | Web interface | `ui/` (SvelteKit SPA), `internal/ui/` (the embed and the tagless stub), `internal/server/ui.go` (delivery and the SPA fallback), `docs/ui.md`, specs 006 to 010 and 015 — the API types in `ui/src/lib/api/schema.d.ts` are generated from `openapi.json` and the gate fails on drift, and the application-line budget is 14,000 (`scripts/ui-lines.sh`, spec 015 #9) |
-| A payload, shown or edited | `ui/src/lib/components/json/` — `setup.ts` is everything that is not a DOM node (the document a value becomes, where it stops being JSON, which nodes a long one folds, the extension list and the themed chrome), `CodeArea.svelte` is the instance, `JsonView`/`JsonEditor` are the two modes, spec 015 — one surface for reading and writing, so there is one answer to "what does this payload look like"; the mode is the `readOnly` facet and nothing else, `indentWithTab` is deliberately absent (#7), and truncation belongs to `Payload.svelte` rather than to the editor (#3) |
+| A payload, shown or edited | `ui/src/lib/components/json/` — `setup.ts` is everything that is not a DOM node (the document a value becomes, where it stops being JSON, which nodes a long one folds, the extension list and the themed chrome), `CodeArea.svelte` is the instance, `JsonView`/`JsonEditor` are the two modes, spec 015 — one surface for reading and writing, so there is one answer to "what does this payload look like"; the mode is the `readOnly` facet and nothing else, `indentWithTab` is deliberately absent (#7), truncation belongs to `Payload.svelte` rather than to the editor (#3), and an editor over a field that may be absent takes `optional`, where an empty document is valid and unmarked (spec 016 #22) |
 | A listing (rows, cursors, count, the bar, the panel's walk) | `ui/src/lib/listing.svelte.ts` and its tests, spec 010 — all three listings are one loader, so a listing defect is one defect. `$lib/page` and `$lib/peek` hold the pure part; a listing read oldest first (a dataset's items, a run's) sets `ascending` on its walk (spec 016 #19) |
 | The Evals screens (datasets, runs, the comparison) | `ui/src/routes/{datasets,runs,score-configs}/`, `ui/src/lib/components/evals/` (the tables, the three peek bodies, the summary cards), `ui/src/lib/evals.ts` (the pure part: the checkbox rule, the *changed only* filter, the words a cell uses), `ui/src/lib/api/runs.ts` (the run filters, held to `openapi.json`), `docs/ui.md#evals`, spec 016 — every number on these screens is the server's (spec 014 #18); the client decides which rows to draw and never what a verdict is |
+| Writing an eval (the item editor, the forms, the deletions) | `ui/src/lib/components/evals/ItemEditor.svelte` over the routes `datasets/items/new` and `datasets/[name]/items/[id]/edit` (spec 016 #21), `ScoreConfigDialog.svelte` with `ui/src/lib/api/score-configs.ts` (the vocabularies and the rules, held to `openapi.json`), `NewDatasetDialog`/`DeleteDatasetDialog`, `ui/src/lib/components/ConfirmDialog.svelte`, `itemBody`/`savedMessage` in `$lib/evals`, `docs/datasets.md#the-same-loop-from-the-web-interface` — a write is one of spec 014's endpoints and never a verb of the screen's own; the echo ceremony (`ConfirmCard`) is only where the server has a dry run, and the dialog is where it does not (#6) |
 | Configuration | `internal/config/`, spec 001 + spec 002 Configuration tables |
 
 Attribute semantics for the `langfuse.*` dialect are derived from Langfuse
