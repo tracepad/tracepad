@@ -246,7 +246,14 @@ func TestPlainTextPayloadStaysAString(t *testing.T) {
 		t.Fatal("the plain-text fixture is gone from the corpus")
 	}
 
-	observation := mapping.Map(fixture.ResourceSpans).Observations[0]
+	// Counted before it is indexed: a rule that stopped mapping the span at
+	// all would panic here rather than fail, and a panic takes the package's
+	// other tests — TestGoldenFixtures among them — down with it.
+	result := mapping.Map(fixture.ResourceSpans)
+	if len(result.Observations) != 1 {
+		t.Fatalf("mapped %d observations, want the fixture's one", len(result.Observations))
+	}
+	observation := result.Observations[0]
 
 	input, ok := observation.Input.(string)
 	if !ok {

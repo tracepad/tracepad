@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 
 /** The port the suite boots the binary on. */
 export const PORT = Number(process.env.TRACEPAD_E2E_PORT ?? 47318);
@@ -60,8 +60,27 @@ export const FAILING_TRACE = 'dd44ee55ff6677008899001122aabb33';
 export const PLAIN_TEXT_TRACE = 'bc0de1f2a3b4c5d6e7f80910a1b2c3d4';
 /** Its only observation, the generation carrying both. */
 export const PLAIN_TEXT_OBSERVATION = 'b0b1b2b3b4b5b6b7';
-/** How many lines that prompt has, blank ones between paragraphs included. */
-export const PLAIN_TEXT_PROMPT_LINES = 8;
+
+/**
+ * What that observation's payloads say, read from the golden the mapper writes
+ * rather than copied here. They are a Go string literal (`internal/otlptest`,
+ * `plainTextPrompt`), and a copy of one would go stale silently: rewording the
+ * prompt regenerates the body and its golden through `make fixtures` and says
+ * nothing about a constant in this file, so only the separate e2e job would
+ * notice, pointing at a line nobody touched.
+ */
+export function plainTextPayloads(): { input: string; output: string } {
+	const golden = join(
+		resolve(process.cwd(), '..'),
+		'testdata',
+		'golden',
+		'011-plain-text-prompt.json'
+	);
+	const mapped = JSON.parse(readFileSync(golden, 'utf8')) as {
+		observations: { input: string; output: string }[];
+	};
+	return mapped.observations[0];
+}
 
 /**
  * The fixture that carries what the wire already sends (spec 012): a release,

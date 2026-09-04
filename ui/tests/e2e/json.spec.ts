@@ -4,8 +4,8 @@ import {
 	LARGE_PAYLOAD_OBSERVATION,
 	LARGE_PAYLOAD_TRACE,
 	PLAIN_TEXT_OBSERVATION,
-	PLAIN_TEXT_PROMPT_LINES,
 	PLAIN_TEXT_TRACE,
+	plainTextPayloads,
 	state
 } from './harness';
 
@@ -199,28 +199,27 @@ test('a payload that is not JSON is shown as text, not as a quoted string', asyn
 	await page.goto(`/traces?peek=${PLAIN_TEXT_TRACE}&obs=${PLAIN_TEXT_OBSERVATION}`);
 	await expect(page.getByRole('dialog')).toBeVisible();
 
+	const { input: prompt, output: answer } = plainTextPayloads();
 	const input = page.getByLabel('Input', { exact: true });
-	await expect(input).toContainText('You are Wren');
+	await expect(input).toContainText(prompt.split('\n')[0]);
 
 	// No language, so no tokens: the highlighter above finds four colours in a
 	// JSON document and there is nothing here for it to paint at all.
 	const tokens = await input.evaluate((node) => node.querySelectorAll('span').length);
 	expect(tokens).toBe(0);
 
-	// The prompt's own lines, one CodeMirror line each: the blank lines
-	// between its paragraphs and the indentation of its numbered list are the
-	// document, not something a JSON encoder spelled `\n` and `  `.
-	await expect(area(page, 'Input').locator('.cm-line')).toHaveCount(PLAIN_TEXT_PROMPT_LINES);
-
-	const text = await input.evaluate((node) => node.textContent ?? '');
-	expect(text.startsWith('You are Wren')).toBe(true);
-	expect(text).not.toContain('\\n');
-	expect(text).not.toContain('"');
+	// The document is the string the mapper stored, line for line: the blank
+	// lines between the prompt's paragraphs and the indentation of its
+	// numbered list are the document, and nothing along the way spelled them
+	// `\n` and `  ` or put quotes around the whole.
+	const lines = await area(page, 'Input').locator('.cm-line').allTextContents();
+	expect(lines.join('\n')).toBe(prompt);
 
 	// And the answer beside it is the same kind of value.
 	const output = page.getByLabel('Output', { exact: true });
-	await expect(output).toContainText('Aisle four was restocked');
+	await expect(output).toContainText(answer.split('\n')[0]);
 	expect(await output.evaluate((node) => node.querySelectorAll('span').length)).toBe(0);
+	expect((await area(page, 'Output').locator('.cm-line').allTextContents()).join('\n')).toBe(answer);
 });
 
 test('Cmd-F searches a plain-text payload the same way', async ({ page }) => {
@@ -229,8 +228,12 @@ test('Cmd-F searches a plain-text payload the same way', async ({ page }) => {
 	await signIn(page);
 	await page.goto(`/traces?peek=${PLAIN_TEXT_TRACE}&obs=${PLAIN_TEXT_OBSERVATION}`);
 
+	// The prompt's opening line, taken from the fixture rather than copied:
+	// a whole line of it is in the document once, and stays there whatever the
+	// prompt is reworded to.
+	const phrase = plainTextPayloads().input.split('\n')[0];
 	const input = page.getByLabel('Input', { exact: true });
-	await expect(input).toContainText('You are Wren');
+	await expect(input).toContainText(phrase);
 	await input.click();
 	await page.keyboard.press('ControlOrMeta+f');
 
@@ -239,9 +242,8 @@ test('Cmd-F searches a plain-text payload the same way', async ({ page }) => {
 	await expect(find).toBeVisible();
 
 	// Typed rather than filled, for the reason the JSON case above gives.
-	await find.pressSequentially('Vantage depot');
+	await find.pressSequentially(phrase);
 	await find.press('Enter');
 
-	// The phrase is in the prompt once, and the match is the document's.
 	await expect(area_.locator('.cm-searchMatch-selected')).toHaveCount(1);
 });
