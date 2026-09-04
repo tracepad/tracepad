@@ -10,6 +10,7 @@ import ConfirmDialog from './ConfirmDialog.svelte';
 // dialog with the server's own words, rather than closing over the failure.
 
 function mount(onconfirm: () => Promise<void>) {
+	const closed = vi.fn();
 	render(ConfirmDialog, {
 		open: true,
 		title: 'Delete this run?',
@@ -18,15 +19,13 @@ function mount(onconfirm: () => Promise<void>) {
 		onconfirm,
 		onclose: closed
 	} as never);
-	return userEvent.setup();
+	return { user: userEvent.setup(), closed };
 }
 
-const closed = vi.fn();
-
 describe('the confirmation dialog', () => {
-	it('names the consequence and runs the act once', async () => {
+	it('names the consequence and runs the act once, then closes', async () => {
 		const act = vi.fn(async () => {});
-		const user = mount(act);
+		const { user, closed } = mount(act);
 
 		expect(screen.getByText(/return to the retention window/)).toBeInTheDocument();
 		await user.click(screen.getByRole('button', { name: 'Delete the run' }));
@@ -36,13 +35,16 @@ describe('the confirmation dialog', () => {
 	});
 
 	it("keeps the question open on a refusal, in the server's words", async () => {
-		const user = mount(async () => {
+		const { user, closed } = mount(async () => {
 			throw new ApiError(409, 'run 0e5a is still running');
 		});
 
 		await user.click(screen.getByRole('button', { name: 'Delete the run' }));
 
 		expect(await screen.findByRole('alert')).toHaveTextContent('run 0e5a is still running');
+		// Still here, and still asking: closing over the failure would take the
+		// reason off the screen with it, and the retry with it.
+		expect(closed).not.toHaveBeenCalled();
 		expect(screen.getByRole('button', { name: 'Delete the run' })).toBeEnabled();
 	});
 });
