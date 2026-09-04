@@ -157,7 +157,7 @@ scores, finish, compare:
   tracepad datasets push      <name> --file cases.jsonl [--description D]
   tracepad datasets rm-item   <name> <item-id>
   tracepad datasets rm        <name> [--yes]
-  tracepad runs ls            <dataset> [--limit N] [--cursor C]
+  tracepad runs ls            [dataset] [--limit N] [--cursor C]
   tracepad runs create        <dataset> [--name N] [--id ID] [--dataset-version N]
                               [--metadata-file run.json]
   tracepad runs show          <id> [--items [--unknown] [--limit N] [--cursor C]]
@@ -173,7 +173,8 @@ datasets push takes a .jsonl (one case per line) or a .json array and sends it
 as one batch, which is one version tick; it prints the version it landed on and
 how many cases changed. datasets show --json walks every page, so it is the
 dataset's export. runs create --json answers with the whole run, so a script
-reads both the id and the version it pinned. runs compare lists the items whose
+reads both the id and the version it pinned. runs ls without a dataset lists
+the whole project's runs, newest first. runs compare lists the items whose
 verdict is not "same"; --all lists them all.
 
 Administration (spec 005). Every destructive command shows what it would do

@@ -875,6 +875,47 @@
         }
       }
     },
+    "/api/v1/runs": {
+      "get": {
+        "tags": ["datasets"],
+        "summary": "List the project's runs newest first, filtered by dataset and status, cursor-paginated",
+        "description": "Every dataset's runs in one listing, ordered by `(created_at, id)` like the per-dataset one and paged by the same cursor shape. The rows are the run objects without `summary`: a page of runs is for choosing one. `?count=` adds the capped total the filters match.",
+        "operationId": "listProjectRuns",
+        "parameters": [
+          {
+            "name": "dataset",
+            "in": "query",
+            "schema": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$", "maxLength": 200},
+            "description": "Exact dataset name; a name outside the grammar is a 400"
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {"type": "string", "enum": ["running", "finished", "failed"]},
+            "description": "Keeps the runs in one state"
+          },
+          {"$ref": "#/components/parameters/Limit"},
+          {"$ref": "#/components/parameters/Cursor"},
+          {"$ref": "#/components/parameters/Direction"},
+          {"$ref": "#/components/parameters/Count"}
+        ],
+        "responses": {
+          "200": {"description": "A page of runs", "content": {"application/json": {"schema": {
+            "type": "object",
+            "properties": {
+              "runs": {"type": "array", "items": {"$ref": "#/components/schemas/Run"}},
+              "next_cursor": {"type": ["string", "null"], "description": "Pass back as `?cursor=` for the next page; null on the oldest one"},
+              "prev_cursor": {"type": ["string", "null"], "description": "Pass back with `?direction=prev` for the page before; null on the newest one"},
+              "total": {"type": "integer", "description": "Present only with `?count=`: how many runs the filters match, capped at 1000"},
+              "total_capped": {"type": "boolean", "description": "Present only with `?count=`: the count stopped at the cap"}
+            },
+            "required": ["runs", "next_cursor", "prev_cursor"]
+          }}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"}
+        }
+      }
+    },
     "/api/v1/runs/{id}": {
       "get": {
         "tags": ["datasets"],
@@ -1792,7 +1833,32 @@
             },
             "required": ["a", "b"]
           },
-          "traces": {"type": "object", "description": "Both runs' traffic, and the cost delta"},
+          "traces": {
+            "type": "object",
+            "description": "Both runs' traffic, and the cost delta",
+            "properties": {
+              "count": {"$ref": "#/components/schemas/ComparedCount"},
+              "error_count": {"$ref": "#/components/schemas/ComparedCount"},
+              "total_cost": {
+                "type": "object",
+                "properties": {
+                  "a": {"type": ["number", "null"]},
+                  "b": {"type": ["number", "null"]},
+                  "delta": {"type": ["number", "null"], "description": "b minus a; null when either side carried no cost"}
+                },
+                "required": ["a", "b", "delta"]
+              },
+              "latency_ms": {
+                "type": "object",
+                "properties": {
+                  "p50": {"$ref": "#/components/schemas/ComparedLatency"},
+                  "p95": {"$ref": "#/components/schemas/ComparedLatency"}
+                },
+                "required": ["p50", "p95"]
+              }
+            },
+            "required": ["count", "error_count", "total_cost", "latency_ms"]
+          },
           "scores": {"type": "array", "items": {"$ref": "#/components/schemas/ComparedScore"}},
           "items": {"type": "array", "items": {"$ref": "#/components/schemas/ComparedItem"}},
           "next_cursor": {"type": ["string", "null"]},
@@ -1811,6 +1877,26 @@
         },
         "required": ["id", "name", "dataset_version", "status", "created_at"]
       },
+      "ComparedCount": {
+        "type": "object",
+        "properties": {"a": {"type": "integer"}, "b": {"type": "integer"}},
+        "required": ["a", "b"]
+      },
+      "ComparedLatency": {
+        "type": "object",
+        "properties": {"a": {"type": ["integer", "null"]}, "b": {"type": ["integer", "null"]}},
+        "required": ["a", "b"]
+      },
+      "ComparedSide": {
+        "type": "object",
+        "description": "One run's aggregate for a score name: the mean for a numeric or boolean name, the distribution for a categorical one, the count alone for text.",
+        "properties": {
+          "count": {"type": "integer"},
+          "mean": {"type": ["number", "null"]},
+          "distribution": {"type": "object", "additionalProperties": {"type": "integer"}}
+        },
+        "required": ["count"]
+      },
       "ComparedScore": {
         "type": "object",
         "description": "One score name across both runs. A name with a direction reports `improved`/`regressed`/`same`; one without reports `changed`/`same`, because without a direction there is no better.",
@@ -1818,8 +1904,8 @@
           "name": {"type": "string"},
           "data_type": {"type": "string"},
           "direction": {"type": ["string", "null"]},
-          "a": {"type": ["object", "null"], "description": "Null when that run never carried the name"},
-          "b": {"type": ["object", "null"]},
+          "a": {"oneOf": [{"$ref": "#/components/schemas/ComparedSide"}, {"type": "null"}], "description": "Null when that run never carried the name"},
+          "b": {"oneOf": [{"$ref": "#/components/schemas/ComparedSide"}, {"type": "null"}]},
           "delta": {"type": ["number", "null"], "description": "b's mean minus a's; null unless both are numbers"},
           "improved": {"type": "integer"},
           "regressed": {"type": "integer"},

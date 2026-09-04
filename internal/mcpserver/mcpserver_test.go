@@ -449,6 +449,11 @@ func TestEveryToolMatchesItsEndpoint(t *testing.T) {
 		{"get_dataset_items", map[string]any{"name": "golden", "version": 1},
 			"/api/v1/datasets/golden/items?version=1"},
 		{"list_runs", map[string]any{"dataset": "golden"}, "/api/v1/datasets/golden/runs"},
+		// Without a dataset the tool reads the project-wide listing
+		// (spec 016 #2), byte for byte.
+		{"list_runs", map[string]any{}, "/api/v1/runs"},
+		{"list_runs", map[string]any{"limit": 1, "direction": "prev"},
+			"/api/v1/runs?direction=prev&limit=1"},
 		{"get_run", map[string]any{"id": evalRunID(1)}, "/api/v1/runs/" + evalRunID(1)},
 		{"get_run_items", map[string]any{"id": evalRunID(1)},
 			"/api/v1/runs/" + evalRunID(1) + "/items"},

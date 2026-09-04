@@ -285,6 +285,7 @@ tracepad datasets push support-golden --file cases.jsonl --description "the gold
 tracepad datasets rm-item support-golden a1b2c3d4e5f60718293a4b5c6d7e8f90
 tracepad datasets rm support-golden --yes
 
+tracepad runs ls                                   # every dataset's runs, newest first
 tracepad runs ls support-golden
 tracepad runs create support-golden --name "prompt v8" --metadata-file run.json
 tracepad runs show 0e5a7c1d2b3f4a6980c1d2e3f4a5b6c7 --items
@@ -307,6 +308,10 @@ per case and no number that names the file. It prints where it landed:
 version 12: 3 items changed, 200 in the batch
 unchanged at version 12
 ```
+
+`runs ls` without a dataset reads `GET /api/v1/runs` — the whole project's
+runs, newest first, with a dataset column the per-dataset table has no need
+of. With one it reads that dataset's own listing.
 
 `runs create --json` answers with the whole run, so a script reads the id and
 the version it pinned from one call:

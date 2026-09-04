@@ -747,25 +747,65 @@ type RunCursor struct {
 	ID        string
 }
 
+// RunFilter narrows a listing of runs. With a Dataset it is the per-dataset
+// listing of spec 014; without one it is the project-wide listing of spec 016
+// #2, which walks `idx_dataset_runs_created` instead of the dataset's own
+// index. Status is exact and optional.
+type RunFilter struct {
+	Dataset  string
+	Status   string
+	Limit    int
+	After    *RunCursor
+	Backward bool
+}
+
+// runConditions is the WHERE clause both the listing and its count share, so
+// the number beside a page counts the rows the page is cut from.
+func runConditions(projectID string, filter RunFilter) ([]string, []any) {
+	where := []string{"project_id = ?"}
+	args := []any{projectID}
+	if filter.Dataset != "" {
+		where = append(where, "dataset = ?")
+		args = append(args, filter.Dataset)
+	}
+	if filter.Status != "" {
+		where = append(where, "status = ?")
+		args = append(args, filter.Status)
+	}
+	return where, args
+}
+
+// runsQuery builds the listing: newest first by `(created_at, id)`, seeking
+// past the cursor when there is one. Exposed to the plan test, which holds
+// the project-wide shape to the index spec 016 #2 added for it.
+func runsQuery(projectID string, filter RunFilter) (string, []any) {
+	comparison, order := "<", "DESC"
+	if filter.Backward {
+		comparison, order = ">", "ASC"
+	}
+	where, args := runConditions(projectID, filter)
+	if filter.After != nil {
+		where = append(where, "(created_at, id) "+comparison+" (?, ?)")
+		args = append(args, filter.After.CreatedAt, filter.After.ID)
+	}
+	query := `SELECT ` + runColumns + ` FROM dataset_runs WHERE ` + strings.Join(where, " AND ") +
+		` ORDER BY created_at ` + order + `, id ` + order + ` LIMIT ?`
+	return query, append(args, filter.Limit)
+}
+
 // Runs lists a dataset's runs newest first, paged both ways like every other
 // listing (spec 009 #2).
 func (s *Store) Runs(projectID, dataset string, limit int, after *RunCursor, backward bool) ([]*DatasetRun, error) {
-	comparison, order := "<", "DESC"
-	if backward {
-		comparison, order = ">", "ASC"
-	}
-	query := `SELECT ` + runColumns + ` FROM dataset_runs WHERE project_id = ? AND dataset = ?`
-	args := []any{projectID, dataset}
-	if after != nil {
-		query += ` AND (created_at, id) ` + comparison + ` (?, ?)`
-		args = append(args, after.CreatedAt, after.ID)
-	}
-	query += ` ORDER BY created_at ` + order + `, id ` + order + ` LIMIT ?`
-	args = append(args, limit)
+	return s.ListRuns(projectID, RunFilter{Dataset: dataset, Limit: limit, After: after, Backward: backward})
+}
 
+// ListRuns lists runs by the filter, newest first: one dataset's, or the
+// whole project's (spec 016 #2).
+func (s *Store) ListRuns(projectID string, filter RunFilter) ([]*DatasetRun, error) {
+	query, args := runsQuery(projectID, filter)
 	rows, err := s.db.Query(query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("list runs of dataset %s: %w", dataset, err)
+		return nil, fmt.Errorf("list runs: %w", err)
 	}
 	defer rows.Close()
 
@@ -780,10 +820,23 @@ func (s *Store) Runs(projectID, dataset string, limit int, after *RunCursor, bac
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	if backward {
+	if filter.Backward {
 		slices.Reverse(out)
 	}
 	return out, nil
+}
+
+// CountRuns counts the runs a filter matches, up to cap — the capped count of
+// spec 009, over the same conditions the listing is cut from.
+func (s *Store) CountRuns(projectID string, filter RunFilter, cap int) (int, error) {
+	where, args := runConditions(projectID, filter)
+	var count int
+	if err := s.db.QueryRow(
+		`SELECT COUNT(*) FROM (SELECT 1 FROM dataset_runs WHERE `+strings.Join(where, " AND ")+` LIMIT ?)`,
+		append(args, cap)...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count runs: %w", err)
+	}
+	return count, nil
 }
 
 // Run returns one run, or nil when the id is unknown.
