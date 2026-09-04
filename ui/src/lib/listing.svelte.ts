@@ -325,6 +325,13 @@ export type WalkSpec<Row> = {
 	 */
 	showing: () => Ordered | null;
 	open: (id: string) => void;
+	/**
+	 * A listing read oldest first — a dataset's items and a run's, which walk
+	 * `seq` (spec 014 #21). The pure part orders newest first by `key`, so the
+	 * walk turns its steps round rather than asking each caller to invert its
+	 * key (spec 016 #3).
+	 */
+	ascending?: boolean;
 };
 
 /**
@@ -338,22 +345,38 @@ export class Walk<Row extends { id: string }> {
 	#spec!: WalkSpec<Row>;
 	/** A walk that ran out of page and turned it (spec 009 #6). */
 	#rolling = $state.raw<Rolling | null>(null);
-	#ordered = $derived(this.#listing.rows.map((row) => ({ id: row.id, key: this.#spec.key(row) })));
+	/** Which way "down the page" is in the pure part's newest-first terms. */
+	#down: 1 | -1 = 1;
+	// The page as the pure part reads it: newest first by key. An ascending
+	// listing is handed over reversed, so `neighbour` and `settled` see the
+	// order they were written for and the steps below are turned round to match.
+	#ordered = $derived.by(() => {
+		const ordered = this.#listing.rows.map((row) => ({ id: row.id, key: this.#spec.key(row) }));
+		return this.#down === 1 ? ordered : ordered.reverse();
+	});
 
 	position = $derived(anchor(this.#ordered, this.#spec.peekID(), this.#spec.showing()));
 	// Dead while a page is in flight: the cursors on screen belong to the page
 	// being left, so a walk would turn back the turn already asked for (PR #11,
 	// sixth review; the bar goes dead for the same reason).
 	hasPrev = $derived(
-		!this.#listing.loading && walkable(this.#ordered, this.position, -1, this.#listing.prevCursor)
+		!this.#listing.loading &&
+			walkable(this.#ordered, this.position, this.#step(-1), this.#listing.prevCursor)
 	);
 	hasNext = $derived(
-		!this.#listing.loading && walkable(this.#ordered, this.position, 1, this.#listing.nextCursor)
+		!this.#listing.loading &&
+			walkable(this.#ordered, this.position, this.#step(1), this.#listing.nextCursor)
 	);
+
+	/** A step down the page, in the order the rows are actually in. */
+	#step(by: 1 | -1): 1 | -1 {
+		return (by * this.#down) as 1 | -1;
+	}
 
 	constructor(listing: Listing<Row>, spec: WalkSpec<Row>) {
 		this.#listing = listing;
 		this.#spec = spec;
+		this.#down = spec.ascending ? -1 : 1;
 		listing.watch((at) => {
 			const id = at && settled(this.#rolling, at, this.#ordered);
 			this.#rolling = null;
@@ -365,12 +388,14 @@ export class Walk<Row extends { id: string }> {
 		// Nowhere to walk from until the panel's row says where it sits, and
 		// nowhere while a page is in flight.
 		if (this.position === null || this.#listing.loading) return;
-		const id = neighbour(this.#ordered, this.position, by);
+		const id = neighbour(this.#ordered, this.position, this.#step(by));
 		if (id) return this.#spec.open(id);
+		// The cursor is the page's, whichever way its rows read: `next` is
+		// always the page after this one.
 		const cursor = by === 1 ? this.#listing.nextCursor : this.#listing.prevCursor;
 		if (cursor === null) return;
 		const direction = by === 1 ? 'next' : 'prev';
-		this.#rolling = { from: this.position, step: by, cursor, direction };
+		this.#rolling = { from: this.position, step: this.#step(by), cursor, direction };
 		this.#listing.turn({ cursor, direction });
 	}
 }

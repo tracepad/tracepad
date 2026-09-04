@@ -1,6 +1,7 @@
 import { admin } from '$lib/admin.svelte';
 import { auth } from '$lib/auth.svelte';
 import type { components, paths } from './schema';
+import type { RunFilters } from './runs';
 import type { SessionFilters } from './sessions';
 import type { TraceFilters } from './traces';
 
@@ -32,7 +33,26 @@ export type DryRun = components['schemas']['DryRun'];
 /** A freshly minted pair; the secret is in this response and nowhere else. */
 export type NewKey = components['schemas']['NewKey'];
 
+// The eval nouns (spec 014), read by the Evals screens (spec 016).
+export type Dataset = components['schemas']['Dataset'];
+export type DatasetItem = components['schemas']['DatasetItem'];
+export type Run = components['schemas']['Run'];
+export type RunWithSummary = components['schemas']['RunWithSummary'];
+export type RunScoreStat = components['schemas']['RunScoreStat'];
+export type RunItem = components['schemas']['RunItem'];
+export type RunAttempt = components['schemas']['RunAttempt'];
+export type RunComparison = components['schemas']['RunComparison'];
+export type ComparedItem = components['schemas']['ComparedItem'];
+export type ComparedScore = components['schemas']['ComparedScore'];
+export type ScoreConfig = components['schemas']['ScoreConfig'];
+
 export type TracePage = JSONResponse<paths['/api/v1/traces']['get']>;
+export type DatasetPage = JSONResponse<paths['/api/v1/datasets']['get']>;
+export type ItemPage = JSONResponse<paths['/api/v1/datasets/{name}/items']['get']>;
+export type ItemVersions = JSONResponse<paths['/api/v1/datasets/{name}/items/{id}/versions']['get']>;
+export type RunPage = JSONResponse<paths['/api/v1/runs']['get']>;
+export type RunItemPage = JSONResponse<paths['/api/v1/runs/{id}/items']['get']>;
+export type ScoreConfigList = JSONResponse<paths['/api/v1/score-configs']['get']>;
 export type ObservationIO = JSONResponse<paths['/api/v1/observations/{id}/io']['get']>;
 export type SessionPage = JSONResponse<paths['/api/v1/sessions']['get']>;
 export type Session = JSONResponse<paths['/api/v1/sessions/{id}']['get']>;
@@ -152,6 +172,80 @@ class Api {
 			`/api/v1/observations/${encodeURIComponent(observationId)}/io`,
 			{ query: { trace_id: traceId }, signal }
 		);
+	}
+
+	// --- datasets, runs and score configs (spec 014, read by spec 016) ------
+	//
+	// One method per endpoint of spec 014's API contract plus the project-wide
+	// run listing of spec 016 #2. Every listing pages the same way; the two
+	// that take a `version` take it as a query, because "the dataset at V" is
+	// the same listing at another instant, not another listing.
+
+	listDatasets(page: Page = {}, signal?: AbortSignal) {
+		return this.#json<DatasetPage>('/api/v1/datasets', { query: paging(page), signal });
+	}
+
+	getDataset(name: string, signal?: AbortSignal) {
+		return this.#json<Dataset>(`/api/v1/datasets/${encodeURIComponent(name)}`, { signal });
+	}
+
+	/** The items at a version, whole (spec 014 #19); the current one by default. */
+	listItems(name: string, version: number | undefined, page: Page = {}, signal?: AbortSignal) {
+		return this.#json<ItemPage>(`/api/v1/datasets/${encodeURIComponent(name)}/items`, {
+			query: { version: version === undefined ? undefined : String(version), ...paging(page) },
+			signal
+		});
+	}
+
+	getItem(name: string, id: string, version?: number, signal?: AbortSignal) {
+		return this.#json<DatasetItem>(
+			`/api/v1/datasets/${encodeURIComponent(name)}/items/${encodeURIComponent(id)}`,
+			{ query: { version: version === undefined ? undefined : String(version) }, signal }
+		);
+	}
+
+	/** Every row of one item's history, newest first, archived rows flagged. */
+	listItemVersions(name: string, id: string, signal?: AbortSignal) {
+		return this.#json<ItemVersions>(
+			`/api/v1/datasets/${encodeURIComponent(name)}/items/${encodeURIComponent(id)}/versions`,
+			{ signal }
+		);
+	}
+
+	listDatasetRuns(name: string, page: Page = {}, signal?: AbortSignal) {
+		return this.#json<RunPage>(`/api/v1/datasets/${encodeURIComponent(name)}/runs`, {
+			query: paging(page),
+			signal
+		});
+	}
+
+	/** Every dataset's runs, newest first (spec 016 #2). */
+	listRuns(filters: RunFilters, page: Page = {}, signal?: AbortSignal) {
+		return this.#json<RunPage>('/api/v1/runs', { query: { ...filters, ...paging(page) }, signal });
+	}
+
+	getRun(id: string, signal?: AbortSignal) {
+		return this.#json<RunWithSummary>(`/api/v1/runs/${encodeURIComponent(id)}`, { signal });
+	}
+
+	/** The run's items with their attempts; `unknown` appends the traces no item accounts for. */
+	listRunItems(id: string, unknown: boolean, page: Page = {}, signal?: AbortSignal) {
+		return this.#json<RunItemPage>(`/api/v1/runs/${encodeURIComponent(id)}/items`, {
+			query: { unknown: unknown ? 'true' : undefined, ...paging(page) },
+			signal
+		});
+	}
+
+	compareRuns(a: string, b: string, page: Page = {}, signal?: AbortSignal) {
+		return this.#json<RunComparison>(
+			`/api/v1/runs/${encodeURIComponent(a)}/compare/${encodeURIComponent(b)}`,
+			{ query: paging(page), signal }
+		);
+	}
+
+	/** Whole, not paged (spec 014 #25). */
+	listScoreConfigs(signal?: AbortSignal) {
+		return this.#json<ScoreConfigList>('/api/v1/score-configs', { signal });
 	}
 
 	// --- the project's own management (spec 005 #11) -----------------------

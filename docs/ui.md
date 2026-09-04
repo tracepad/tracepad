@@ -70,6 +70,89 @@ are the endpoint's four (`from`, `to`, `environment`, `user_id`), and a row
 opens the session: its totals over its traces, and a trace opens from there.
 Every number counts traces, which is what a session is a collection of.
 
+## Evals
+
+The sidebar's *Evals* section is the eval nouns of [datasets.md](datasets.md)
+on screen: **Datasets**, **Runs** and **Score configs**. Every table is the
+shared listing (pages in the URL, the bar underneath), every row opens in the
+peek panel, and every payload is the same surface as a trace's. Nothing is
+computed here that the API did not send: a mean, a verdict, a delta are the
+server's, so the screen, the CLI and the MCP tools cannot disagree about
+whether a change made it better.
+
+**Datasets** — one row per dataset over `GET /api/v1/datasets`: name,
+description, version, items, runs, updated. A row opens the dataset.
+
+**Dataset** — the envelope in the header, and two tabs in the URL
+(`?tab=items`, `?tab=runs`). *Items* lists the cases at the version in force,
+oldest first in first-appearance order: position, id, the first characters of
+the input and the expected output as compact JSON, and the version the row
+was written at. The **version** control in the header is a number, not a
+menu — a dataset edited in CI has hundreds — and rewrites the tab to
+`?version=V`; an older version is read-only and says so, because an edit *is*
+a new version at the head. A row opens the item whole: the three bodies as
+documents, where the case was cut from (a link, offered rather than promised —
+the trace may be gone), and every row of the item's history, each linking to
+the dataset at that version. An item reached from an older version that has
+since been archived says so. *Runs* is the dataset's runs, newest first, with
+the checkboxes below.
+
+**Runs** — every dataset's runs over `GET /api/v1/runs`, newest first, with
+the two filters the endpoint takes (`dataset`, `status`) and the capped count.
+There is no coverage column: a page of runs is for choosing one, and the
+listing's rows carry no summary. Two **checkboxes** and *Compare* are the
+second way into a comparison: the button is disabled — with the reason as its
+tooltip — unless exactly two runs of one dataset are ticked, so the mistake
+the server would refuse stays a tooltip rather than becoming a page. Runs are
+not created here: a run is opened by the harness that will stamp its traces,
+and the empty listing shows the request that opens one.
+
+**Run** — the header names the run, links `dataset@version` to the items tab
+at that version, shows the status the harness said (and, beside `running`,
+how long it has been open), and offers *Compare with…*, a select of the
+dataset's other runs. The cards are the summary `GET /api/v1/runs/{id}`
+computes: coverage (items, covered, missing, unknown traces), traffic (count,
+attempts max, failed, cost, p50/p95 — exact over the run's traces), the
+**scores** table (type and direction, count, mean, range or a distribution
+bar), what actually ran (models, prompts — derived from the traces, not
+declared), and the harness's metadata. Below them the run's items from
+`GET /api/v1/runs/{id}/items`: position, id, how many attempts, and every
+attempt's value per score name in order — not a mean, which is the server's
+to take. *Unknown* appends the traces that named a case the dataset does not
+have at this version. A row opens the case: the expected output, and each
+attempt with its trace, latency, cost, errors, scores and the output its root
+observation produced. A cut payload loads whole from where it lives — the
+item from its dataset, the output from `/observations/{id}/io`. An attempt's
+trace opens **one level deeper in the same panel**, and *‹ Item* in the
+header returns, the way a session panel drills into a trace.
+
+While a run is `running` the page re-reads the summary and the newest page of
+items every five seconds and stops when the harness closes it; a hidden tab
+does not poll. A run with no trace yet shows the two attributes to stamp and
+the request that closes it.
+
+**Compare** — `/runs/{a}/compare/{b}` renders `GET /api/v1/runs/{a}/compare/{b}`
+and nothing else: both runs with what they ran, the traffic side by side with
+the cost delta, the metadata keys the two disagree about, and per score name
+both aggregates, the delta and how many cases improved, regressed or stayed —
+*changed* rather than *improved* for a name without a direction. The cases
+follow, each with its two values and a verdict chip per name. **Changed only**
+(`?changed=1`) hides the rows whose every verdict is `same` on the page — the
+counts in the header are about the whole pair and do not move — and **Swap**
+is the same comparison the other way round. A row opens the case: the
+expected output, and *Output A* / *Output B* — the root output of the newest
+trace each run made at the case, with a link to all of its attempts when there
+were several — beside the per-name pair. The comparison is reachable from a
+run's *Compare with…* and from two ticked checkboxes on any runs table.
+
+**Score configs** — read-only: name, type, direction, what the name admits
+(bounds or categories), description. Editing is the CLI's
+(`tracepad score-configs push`) until the form lands.
+
+Every empty state teaches the CLI: a project with no datasets shows the whole
+loop in six lines, a dataset with no items the `push` that fills it, a run
+with no traces the attributes that link them.
+
 ## Turning pages
 
 Every listing sits on a bar: how many rows per page, what is on screen

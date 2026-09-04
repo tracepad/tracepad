@@ -1833,7 +1833,32 @@
             },
             "required": ["a", "b"]
           },
-          "traces": {"type": "object", "description": "Both runs' traffic, and the cost delta"},
+          "traces": {
+            "type": "object",
+            "description": "Both runs' traffic, and the cost delta",
+            "properties": {
+              "count": {"$ref": "#/components/schemas/ComparedCount"},
+              "error_count": {"$ref": "#/components/schemas/ComparedCount"},
+              "total_cost": {
+                "type": "object",
+                "properties": {
+                  "a": {"type": ["number", "null"]},
+                  "b": {"type": ["number", "null"]},
+                  "delta": {"type": ["number", "null"], "description": "b minus a; null when either side carried no cost"}
+                },
+                "required": ["a", "b", "delta"]
+              },
+              "latency_ms": {
+                "type": "object",
+                "properties": {
+                  "p50": {"$ref": "#/components/schemas/ComparedLatency"},
+                  "p95": {"$ref": "#/components/schemas/ComparedLatency"}
+                },
+                "required": ["p50", "p95"]
+              }
+            },
+            "required": ["count", "error_count", "total_cost", "latency_ms"]
+          },
           "scores": {"type": "array", "items": {"$ref": "#/components/schemas/ComparedScore"}},
           "items": {"type": "array", "items": {"$ref": "#/components/schemas/ComparedItem"}},
           "next_cursor": {"type": ["string", "null"]},
@@ -1852,6 +1877,26 @@
         },
         "required": ["id", "name", "dataset_version", "status", "created_at"]
       },
+      "ComparedCount": {
+        "type": "object",
+        "properties": {"a": {"type": "integer"}, "b": {"type": "integer"}},
+        "required": ["a", "b"]
+      },
+      "ComparedLatency": {
+        "type": "object",
+        "properties": {"a": {"type": ["integer", "null"]}, "b": {"type": ["integer", "null"]}},
+        "required": ["a", "b"]
+      },
+      "ComparedSide": {
+        "type": "object",
+        "description": "One run's aggregate for a score name: the mean for a numeric or boolean name, the distribution for a categorical one, the count alone for text.",
+        "properties": {
+          "count": {"type": "integer"},
+          "mean": {"type": ["number", "null"]},
+          "distribution": {"type": "object", "additionalProperties": {"type": "integer"}}
+        },
+        "required": ["count"]
+      },
       "ComparedScore": {
         "type": "object",
         "description": "One score name across both runs. A name with a direction reports `improved`/`regressed`/`same`; one without reports `changed`/`same`, because without a direction there is no better.",
@@ -1859,8 +1904,8 @@
           "name": {"type": "string"},
           "data_type": {"type": "string"},
           "direction": {"type": ["string", "null"]},
-          "a": {"type": ["object", "null"], "description": "Null when that run never carried the name"},
-          "b": {"type": ["object", "null"]},
+          "a": {"oneOf": [{"$ref": "#/components/schemas/ComparedSide"}, {"type": "null"}], "description": "Null when that run never carried the name"},
+          "b": {"oneOf": [{"$ref": "#/components/schemas/ComparedSide"}, {"type": "null"}]},
           "delta": {"type": ["number", "null"], "description": "b's mean minus a's; null unless both are numbers"},
           "improved": {"type": "integer"},
           "regressed": {"type": "integer"},

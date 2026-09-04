@@ -1230,7 +1230,20 @@ export interface components {
                 b: components["schemas"]["PromptRef"][];
             };
             /** @description Both runs' traffic, and the cost delta */
-            traces: Record<string, never>;
+            traces: {
+                count: components["schemas"]["ComparedCount"];
+                error_count: components["schemas"]["ComparedCount"];
+                total_cost: {
+                    a: number | null;
+                    b: number | null;
+                    /** @description b minus a; null when either side carried no cost */
+                    delta: number | null;
+                };
+                latency_ms: {
+                    p50: components["schemas"]["ComparedLatency"];
+                    p95: components["schemas"]["ComparedLatency"];
+                };
+            };
             scores: components["schemas"]["ComparedScore"][];
             items: components["schemas"]["ComparedItem"][];
             next_cursor: string | null;
@@ -1245,14 +1258,30 @@ export interface components {
             /** Format: date-time */
             created_at: string;
         };
+        ComparedCount: {
+            a: number;
+            b: number;
+        };
+        ComparedLatency: {
+            a: number | null;
+            b: number | null;
+        };
+        /** @description One run's aggregate for a score name: the mean for a numeric or boolean name, the distribution for a categorical one, the count alone for text. */
+        ComparedSide: {
+            count: number;
+            mean?: number | null;
+            distribution?: {
+                [key: string]: number;
+            };
+        };
         /** @description One score name across both runs. A name with a direction reports `improved`/`regressed`/`same`; one without reports `changed`/`same`, because without a direction there is no better. */
         ComparedScore: {
             name: string;
             data_type: string;
             direction: string | null;
             /** @description Null when that run never carried the name */
-            a: Record<string, never> | null;
-            b: Record<string, never> | null;
+            a: components["schemas"]["ComparedSide"] | null;
+            b: components["schemas"]["ComparedSide"] | null;
             /** @description b's mean minus a's; null unless both are numbers */
             delta: number | null;
             improved?: number;
