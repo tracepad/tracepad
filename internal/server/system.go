@@ -251,6 +251,16 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// What the archive holds and how far back it reaches (spec 019 #4):
+	// the numbers the export's report ends with, and the ones an operator
+	// deciding whether to shorten `raw_retention_days` needs before.
+	raw, err := s.rawBlock(project.ID)
+	if err != nil {
+		slog.Error("summarise raw batches failed", "err", err)
+		writeError(w, http.StatusInternalServerError, "failed to summarise the raw archive")
+		return
+	}
+
 	body := object{}.
 		put("version", s.version).
 		put("go_version", runtime.Version()).
@@ -277,6 +287,7 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 		put("runs", object{}.
 			put("pinned_traces", pinned).
 			put("orphan_traces", s.counters.orphanTraces(project.ID))).
+		put("raw", raw).
 		// The counters are since this process started and say so: an
 		// honest process-lifetime number now beats a metrics subsystem
 		// later (#10). They are this project's, for the same reason the

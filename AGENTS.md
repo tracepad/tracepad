@@ -147,6 +147,22 @@ API. This file routes; it does not duplicate what specs and docs say.
   for those). `finish` flushes the scores and then the spans before it posts,
   so the summary on the next line is over everything the run produced (#5).
   Nothing is computed here: every number is the server's (#8).
+- ✅ Spec 019 (the way out) shipped: the archive finally has a reader other
+  than the sweeper. Schema 0012 adds `raw_batches.content_type` (NULL reads as
+  protobuf, so nothing is backfilled); `GET /api/v1/raw` pages it **oldest
+  first** — the one listing in the API whose natural order is forward, because
+  a replay must preserve the order the world produced the spans in — and
+  `GET /api/v1/raw/{id}` answers one body in the type it arrived in,
+  budget-exempt like `/observations/{id}/io`. `tracepad export --otlp` is their
+  first client: `--to <url>` posts each body to an OTLP receiver with retry on
+  `429`/`5xx` and a stop-with-a-cursor on anything else `4xx`, `--dir <path>`
+  writes `<received_at_ms>-<id>.pb|.json` beside `manifest.jsonl`. It
+  synthesizes nothing — a trace older than the raw window is parsed rows only,
+  and `traces_before_window` in `/system`'s new `raw` block is the honest edge
+  of the promise. `POST /v1/traces` also learned the OTLP/JSON encoding (hex
+  ids, not protobuf-JSON's base64), through the same mapper, archived as it
+  arrived; the whole fixture corpus is replayed through that door and diffed
+  against the protobuf rows.
 - ✅ Spec 005 (retention & admin) shipped: schema 0005, the hourly sweeper
   writing every chunk through the group-commit writer, the admin API under
   `/api/v1/projects` with a dry-run/confirm contract on every destructive
@@ -170,7 +186,9 @@ API. This file routes; it does not duplicate what specs and docs say.
 | CLI | `internal/cli/`, `internal/client/`, `docs/cli.md`, spec 004 |
 | MCP | `internal/mcpserver/`, `docs/mcp.md`, spec 004 — tools call the read API over HTTP, never the store, and only ever with a GET (spec 005 #13) |
 | Search | `internal/store/search.go` (the query language, what of a field is indexed, and the snippet) and `searchindex.go` (the index's lifetime), `docs/api.md#search`, spec 011 — the user's text never reaches `MATCH` as written, `searchableField` is what both the index and the snippet see of a payload, and every path that deletes observations deletes their entries in the same transaction |
-| Retention and the sweeper | `internal/store/sweep.go`, `docs/retention.md`, spec 005 — every chunk is a `WriteJob`, never a second write connection |
+| Retention and the sweeper | `internal/store/sweep.go`, `docs/retention.md`, spec 005 — every chunk is a `WriteJob`, never a second write connection. `raw_retention_days` is now also the export's reach (spec 019 #1) |
+| The raw archive and the way out | `internal/store/raw.go` (the listing, one body, the counters, and where `size_bytes` comes from), `internal/server/raw.go` (the two endpoints and `/system`'s `raw` block), `internal/cli/export.go` + `exportsink.go` (the walk, the two destinations, the retry), `docs/export.md`, spec 019 — the export replays **bodies**, never a synthesis from parsed rows, and it is a client of the API like every other command; the listing runs oldest first on purpose, and the resume cursor names the last batch the receiver *took*, so `--after` starts again at the one that failed |
+| OTLP/JSON | `internal/mapping/otlpjson.go`, spec 019 #7 — one mapper for both encodings; the only difference is that OTLP/JSON writes ids as hex where `protojson` writes base64, which is rewritten by field name on the way in and out. A JSON batch is archived as JSON (#8): converting at ingest would make the archive the converter's output |
 | Statistics rollup | `internal/store/rollup.go` (the table and one hour's recomputation), `aggregator.go` (the pass, the watermark, the freeze), `histogram.go` (why a percentile is summable), the seam in `internal/server/stats.go`, spec 013 — an hour is recomputed whole and never delta-maintained, and the rollup is the one store the trace sweep spares |
 | Admin API (projects, keys, retention, erasure) | `internal/server/admin.go`, `internal/store/admin.go`, `docs/admin.md`, spec 005 — destructive endpoints are a dry run until `?confirm=` echoes the name, checked inside the write transaction |
 | Attribute mapping | `internal/mapping/rules.go` is the table; `mapping.go` applies it; `value.go` holds `attrs`, where reading and claiming are separate and an unclaimed attribute keeps the origin it arrived at (spec 012 #7) |

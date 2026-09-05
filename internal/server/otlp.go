@@ -12,13 +12,16 @@ import (
 	"strings"
 	"time"
 
+	tracepb "go.opentelemetry.io/proto/otlp/trace/v1"
+
 	"github.com/tracepad/tracepad/internal/mapping"
 	"github.com/tracepad/tracepad/internal/store"
 )
 
-// OTLP/HTTP trace ingest (spec 002). Transport is protobuf only (#1): both
-// SDK families we target speak it, and adding JSON or gRPC would widen the
-// surface for no known consumer.
+// OTLP/HTTP trace ingest (spec 002, widened by spec 019 #7). Two encodings
+// now: the protobuf both SDK families we target speak, and the JSON every
+// OpenTelemetry SDK can emit with `OTEL_EXPORTER_OTLP_PROTOCOL=http/json`.
+// gRPC is still out — it is a second transport rather than a second spelling.
 
 // contentTypeProtobuf is what the OTLP spec prescribes. `application/protobuf`
 // is accepted too — some exporters send it, and refusing a body we can decode
@@ -26,6 +29,7 @@ import (
 const (
 	contentTypeProtobuf    = "application/x-protobuf"
 	contentTypeProtobufAlt = "application/protobuf"
+	contentTypeJSON        = mapping.ContentTypeJSON
 )
 
 // maxDecompressionRatio bounds how far one gzipped body may expand. The
@@ -54,11 +58,16 @@ func (s *Server) handleTraces(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !acceptableContentType(r.Header.Get("Content-Type")) {
+	mediaType, ok := acceptableContentType(r.Header.Get("Content-Type"))
+	if !ok {
 		writeError(w, http.StatusUnsupportedMediaType,
-			"expected Content-Type "+contentTypeProtobuf)
+			"expected Content-Type "+contentTypeProtobuf+" or "+contentTypeJSON)
 		return
 	}
+	// The encoding is transport: it decides how the bytes are read and how
+	// the answer is written, and nothing between those two points
+	// (spec 019 #7).
+	jsonEncoding := mediaType == contentTypeJSON
 
 	// Early drift signal, never enforcement: refusing an unknown SDK
 	// version would break users on newer SDKs for nothing, and the raw
@@ -81,17 +90,29 @@ func (s *Server) handleTraces(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resourceSpans, unreadable, err := mapping.DecodeExportRequest(body)
+	var (
+		resourceSpans []*tracepb.ResourceSpans
+		unreadable    int
+	)
+	if jsonEncoding {
+		resourceSpans, unreadable, err = mapping.DecodeExportRequestJSON(body)
+	} else {
+		resourceSpans, unreadable, err = mapping.DecodeExportRequest(body)
+	}
 	if err != nil {
 		s.counters.observeRejectedBatch(project.ID)
 		slog.Warn("undecodable OTLP body", "project", project.Name, "err", err)
-		writeError(w, http.StatusBadRequest, "malformed OTLP body")
+		// The JSON path names the field, because it can: a body that is
+		// protobuf-JSON rather than OTLP/JSON differs in one place, and
+		// saying which one is the difference between a fixable answer
+		// and a shrug (spec 019, API contract).
+		writeError(w, http.StatusBadRequest, decodeFailure(jsonEncoding, err))
 		return
 	}
 	if len(resourceSpans) == 0 && unreadable == 0 {
 		// Per the OTLP spec an empty batch is a successful no-op; there
 		// is nothing to store and nothing to replay later.
-		writeExportResponse(w, nil)
+		writeExportResponse(w, nil, jsonEncoding)
 		return
 	}
 	if unreadable > 0 {
@@ -111,8 +132,14 @@ func (s *Server) handleTraces(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.storeRaw {
 		batch.Raw = &store.RawBatch{
-			ReceivedAt:      time.Now().UnixNano(),
-			Dialect:         result.Dialect,
+			ReceivedAt: time.Now().UnixNano(),
+			Dialect:    result.Dialect,
+			// As received, never converted (spec 019 #8): a JSON batch
+			// is kept as JSON, and the column is what tells a replay
+			// which it is holding. The parsed media type rather than
+			// the header verbatim, so a charset parameter does not
+			// end up on the wire of a replay.
+			ContentType:     mediaType,
 			ContentEncoding: encoding,
 			Body:            body,
 		}
@@ -123,7 +150,7 @@ func (s *Server) handleTraces(w http.ResponseWriter, r *http.Request) {
 		// skipped spans are still counted — a client whose every span
 		// is unmappable is exactly what the counters exist to surface.
 		s.counters.observeBatch(project.ID, result.Dialect, 0, result.Skipped, int64(unreadable))
-		writeExportResponse(w, result)
+		writeExportResponse(w, result, jsonEncoding)
 		return
 	}
 
@@ -158,7 +185,7 @@ func (s *Server) handleTraces(w http.ResponseWriter, r *http.Request) {
 				"project", project.Name, "run_id", id)
 		}
 	}
-	writeExportResponse(w, result)
+	writeExportResponse(w, result, jsonEncoding)
 }
 
 // authenticate resolves the request's credentials to a project. Both schemes
@@ -207,15 +234,35 @@ func credential(header string) (string, bool) {
 	return "", false
 }
 
-func acceptableContentType(header string) bool {
+// acceptableContentType resolves the request's declared encoding, answering
+// the media type the body is in and whether this endpoint speaks it. The media
+// type comes back parsed because it is also what the archive stores: a replay
+// posts a body under the type it arrived in (spec 019 #8), and `; charset=utf-8`
+// is a fact about that one request rather than about the bytes.
+func acceptableContentType(header string) (string, bool) {
 	if header == "" {
-		return false
+		return "", false
 	}
 	mediaType, _, err := mime.ParseMediaType(header)
 	if err != nil {
-		return false
+		return "", false
 	}
-	return mediaType == contentTypeProtobuf || mediaType == contentTypeProtobufAlt
+	switch mediaType {
+	case contentTypeProtobuf, contentTypeProtobufAlt, contentTypeJSON:
+		return mediaType, true
+	}
+	return mediaType, false
+}
+
+// decodeFailure is what a body that would not decode is told. The protobuf
+// path has one sentence for every failure — there is nothing in a wire-format
+// error a client can act on — and the JSON path passes its own message
+// through, which names the field.
+func decodeFailure(asJSON bool, err error) string {
+	if !asJSON {
+		return "malformed OTLP body"
+	}
+	return strings.TrimPrefix(err.Error(), mapping.ErrMalformedBody.Error()+": ")
 }
 
 // readBody reads the request body under the configured cap, transparently
@@ -244,11 +291,26 @@ func readBody(w http.ResponseWriter, r *http.Request, maxBytes int64) ([]byte, e
 }
 
 // writeExportResponse answers with an ExportTraceServiceResponse, carrying
-// partial_success when spans were skipped (spec 002 #13).
-func writeExportResponse(w http.ResponseWriter, result *mapping.Result) {
+// partial_success when spans were skipped (spec 002 #13), in the encoding the
+// request arrived in (spec 019 #7): a client that sent JSON gets JSON, so the
+// one response shape it can parse is the one it gets.
+func writeExportResponse(w http.ResponseWriter, result *mapping.Result, asJSON bool) {
+	var (
+		skipped int64
+		reason  string
+	)
+	if result != nil {
+		skipped, reason = result.Skipped, result.SkipReason
+	}
+	if asJSON {
+		w.Header().Set("Content-Type", contentTypeJSON)
+		w.WriteHeader(http.StatusOK)
+		w.Write(mapping.EncodeExportResponseJSON(skipped, reason))
+		return
+	}
 	var body []byte
 	if result != nil {
-		body = mapping.EncodeExportResponse(result.Skipped, result.SkipReason)
+		body = mapping.EncodeExportResponse(skipped, reason)
 	}
 	w.Header().Set("Content-Type", contentTypeProtobuf)
 	w.WriteHeader(http.StatusOK)

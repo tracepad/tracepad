@@ -348,10 +348,37 @@ released, not deleted.
 tracepad system
 ```
 
-Version, uptime, database size, row counts, the writer queue, the ingest
-counters and what the retention sweeper has done since the server started. The
-first thing to run when something looks wrong, and the thing to paste into a
-bug report.
+Version, uptime, database size, row counts, the raw archive, the writer queue,
+the ingest counters and what the retention sweeper has done since the server
+started. The first thing to run when something looks wrong, and the thing to
+paste into a bug report.
+
+The `raw archive` block is what an export can carry out, and how far back:
+
+```
+raw archive in this project
+  storage       on
+  batches       12400
+  on disk       3.1 GiB
+  covering      2026-08-06 04:12:19 .. 2026-09-05 09:44:02
+  not covered   214 traces started before it begins
+```
+
+### `export`
+
+```sh
+tracepad export --otlp --to http://collector:4318/v1/traces
+tracepad export --otlp --dir ./tracepad-export
+```
+
+Replays the archive — every export body as it arrived — into any OTLP receiver
+or onto disk, in arrival order, resumably. `--dry-run` prints what would go and
+sends nothing; a receiver that answers `429` or `5xx` is retried, anything else
+`4xx` stops the export with the cursor to pass as `--after`. The summary ends
+with how many traces started before the archive begins, which are the ones no
+export can carry.
+
+It has a page of its own: [export.md](export.md).
 
 ## Administration
 

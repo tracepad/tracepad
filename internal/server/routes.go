@@ -39,6 +39,14 @@ func (s *Server) routes() []route {
 		{"GET", "/api/v1/traces/{id}", "One trace with its observations as a nested tree", s.handleGetTrace},
 		{"GET", "/api/v1/observations/{id}/io", "The whole input, output and metadata of one observation", s.handleObservationIO},
 
+		// The raw archive (spec 019): what arrived, in the order it
+		// arrived, and one body exactly as the client sent it. This is
+		// what `tracepad export --otlp` replays, and what any other
+		// client — a script, a backup job, a second Tracepad — reads to
+		// take the data out (#2, #9).
+		{"GET", "/api/v1/raw", "List the raw export bodies oldest first, cursor-paginated", s.handleListRaw},
+		{"GET", "/api/v1/raw/{id}", "One raw export body, in the Content-Type it was received in", s.handleGetRawBatch},
+
 		// Sessions and statistics.
 		{"GET", "/api/v1/sessions", "List sessions by most recent activity, filtered and cursor-paginated", s.handleListSessions},
 		{"GET", "/api/v1/sessions/{id}", "One session: its totals and its traces", s.handleGetSession},

@@ -47,6 +47,12 @@ type Options struct {
 	Env func(string) string
 	// Now is the clock `--since 1h` counts back from.
 	Now func() time.Time
+	// retryBackoff is the first delay `export --otlp` waits before asking a
+	// receiver again (spec 019 #6); it doubles from there. Unexported and
+	// zero in production, where the constant applies: it exists so the
+	// retry tests exercise the real loop without spending half a minute in
+	// it, and so it belongs to one run rather than to the process.
+	retryBackoff time.Duration
 	// observeFlags, when set, is handed every flag set a command builds.
 	// Unexported because it is for the parity test in this package, which
 	// reads what a command registers rather than listing it again by hand
@@ -102,6 +108,8 @@ func Run(ctx context.Context, opt Options) int {
 		err = r.stats(ctx, rest)
 	case "system":
 		err = r.system(ctx, rest)
+	case "export":
+		err = r.export(ctx, rest)
 	case "projects":
 		err = r.projects(ctx, rest)
 	case "keys":
@@ -148,6 +156,21 @@ const Usage = `Client commands (they talk to a running server over HTTP):
   tracepad stats        [--group-by hour|day|model|environment|release] [--since 1h]
                         [--until T] [--env E]
   tracepad system
+
+Taking the data out (spec 019). The archive is every export body as it arrived,
+and this replays it into any OTLP receiver — this server included — or writes
+it to disk beside a manifest:
+  tracepad export --otlp (--to <url> | --dir <path>)
+                        [--header k=v]... [--gzip] [--since 1h] [--until T]
+                        [--after <cursor>] [--dry-run]
+
+--to posts each body under the content type it was received in, retrying a
+receiver that answers 429 or 5xx and stopping on anything else with the cursor
+to resume from; --dir writes <received_at_ms>-<id>.pb (or .json) plus
+manifest.jsonl, so ls is in replay order. --dry-run prints what would be sent
+and sends nothing. The summary ends with how many traces started before the
+archive begins, which are the ones no export can carry. OTEL_EXPORTER_OTLP_HEADERS
+is honoured; --header wins over it.
 
 Evals (spec 014). The loop is: declare the configs, push the cases, open the
 run, stamp each trace with tracepad.run_id and tracepad.item_id, post the
@@ -414,10 +437,15 @@ func (r *run) instant(flag, value string) (string, error) {
 		if duration < 0 {
 			return "", usageErrorf("%s must be a duration in the past, got %q", flag, value)
 		}
-		return r.opt.Now().Add(-duration).UTC().Format(time.RFC3339), nil
+		return r.opt.Now().Add(-duration).UTC().Format(time.RFC3339Nano), nil
 	}
 	if at, err := time.Parse(time.RFC3339, value); err == nil {
-		return at.UTC().Format(time.RFC3339), nil
+		// Nano rather than second precision: the sub-second part of what
+		// the user typed is part of what they asked for, and dropping it
+		// silently widens the window. The archive's arrivals are
+		// milliseconds apart (spec 019 #3), which is where a truncated
+		// bound stops being harmless.
+		return at.UTC().Format(time.RFC3339Nano), nil
 	}
 	return "", usageErrorf("%s takes a duration (1h, 30m) or an RFC 3339 timestamp, got %q", flag, value)
 }

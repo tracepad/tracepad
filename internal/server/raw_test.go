@@ -1,0 +1,417 @@
+package server
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/tracepad/tracepad/internal/config"
+	"github.com/tracepad/tracepad/internal/model"
+	"github.com/tracepad/tracepad/internal/store"
+)
+
+// The raw archive as an API (spec 019 #2, #3). The listing is the one in this
+// API that runs forward, the body endpoint answers what the client sent, and
+// both are the project's own.
+
+// rawRow is one row of the listing as a caller reads it.
+type rawRow struct {
+	ID              int64  `json:"id"`
+	ReceivedAt      string `json:"received_at"`
+	Dialect         string `json:"dialect"`
+	ContentType     string `json:"content_type"`
+	ContentEncoding string `json:"content_encoding"`
+	SizeBytes       int64  `json:"size_bytes"`
+}
+
+type rawListing struct {
+	Batches     []rawRow `json:"batches"`
+	NextCursor  *string  `json:"next_cursor"`
+	PrevCursor  *string  `json:"prev_cursor"`
+	Total       int      `json:"total"`
+	TotalCapped bool     `json:"total_capped"`
+}
+
+func (h *harness) listRaw(t *testing.T, query string) rawListing {
+	t.Helper()
+	rec := h.get(t, "/api/v1/raw"+query)
+	expectStatus(t, rec, 200)
+	return decodeJSON[rawListing](t, rec)
+}
+
+// seedRaw writes n batches a millisecond apart, so the keyset has both columns
+// to work with and the window filters have boundaries to land on.
+func seedRaw(t *testing.T, h *harness, projectID string, n int, contentType string) []int64 {
+	t.Helper()
+	ids := make([]int64, 0, n)
+	for i := range n {
+		body := []byte(strings.Repeat(fmt.Sprintf("batch-%03d;", i), 40))
+		err := h.writer.Submit(t.Context(), &store.IngestBatch{
+			ProjectID: projectID,
+			Raw: &store.RawBatch{
+				ReceivedAt:  seedBase + int64(i)*ms,
+				Dialect:     "langfuse",
+				ContentType: contentType,
+				Body:        body,
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	rows, err := h.store.RawBatches(projectID, store.RawFilter{Limit: n + 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range rows {
+		ids = append(ids, row.ID)
+	}
+	// Sorted here rather than trusted from the listing: the ids are an
+	// autoincrement and the batches were written in arrival order, so
+	// ascending *is* arrival order — and reading it off the listing would
+	// make every order assertion below agree with whatever the listing did.
+	slices.Sort(ids)
+	return ids
+}
+
+func instantOf(t *testing.T, value string) time.Time {
+	t.Helper()
+	parsed, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil {
+		t.Fatalf("received_at %q is not RFC 3339: %v", value, err)
+	}
+	return parsed
+}
+
+// The listing runs oldest first and pages forward across three pages, then
+// back with `prev_cursor` onto the rows it came from (spec 019 #3).
+func TestRawListingPagesForward(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	ids := seedRaw(t, h, h.project.ID, 7, "")
+
+	var walked []int64
+	var arrivals []string
+	cursor := ""
+	for page := range 4 {
+		query := "?limit=3"
+		if cursor != "" {
+			query += "&cursor=" + cursor
+		}
+		listing := h.listRaw(t, query)
+		for _, row := range listing.Batches {
+			walked = append(walked, row.ID)
+			arrivals = append(arrivals, row.ReceivedAt)
+		}
+		if listing.NextCursor == nil {
+			if page != 2 {
+				t.Fatalf("the walk ended on page %d, want three pages of 3+3+1", page)
+			}
+			break
+		}
+		cursor = *listing.NextCursor
+	}
+	if len(walked) != 7 {
+		t.Fatalf("walked %d batches, want all 7", len(walked))
+	}
+	for i, id := range walked {
+		if id != ids[i] {
+			t.Fatalf("page order = %v, want arrival order %v", walked, ids)
+		}
+	}
+	// The order named in its own terms, so that a listing which reversed
+	// itself consistently could not pass by agreeing with the ids above.
+	//
+	// Compared as instants, not as text: RFC 3339 omits an all-zero
+	// fraction, and `…:00Z` sorts *after* `…:00.001Z` as a string.
+	for i := 1; i < len(arrivals); i++ {
+		if instantOf(t, arrivals[i]).Before(instantOf(t, arrivals[i-1])) {
+			t.Fatalf("received_at across the walk = %v, want oldest first", arrivals)
+		}
+	}
+
+	// And back. The last page's `prev_cursor` reads the page before it,
+	// which is the middle three.
+	last := h.listRaw(t, "?limit=3&cursor="+cursor)
+	if last.PrevCursor == nil {
+		t.Fatal("a page reached by a cursor must offer the way back")
+	}
+	back := h.listRaw(t, "?limit=3&direction=prev&cursor="+*last.PrevCursor)
+	if len(back.Batches) != 3 || back.Batches[0].ID != ids[3] || back.Batches[2].ID != ids[5] {
+		t.Errorf("the page back = %+v, want %v", back.Batches, ids[3:6])
+	}
+}
+
+// `since` is inclusive and `until` exclusive, so walking a timeline a window at
+// a time never replays a batch twice.
+func TestRawListingWindowIsHalfOpen(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	ids := seedRaw(t, h, h.project.ID, 5, "")
+
+	at := func(i int) string {
+		return time.Unix(0, seedBase+int64(i)*ms).UTC().Format(time.RFC3339Nano)
+	}
+	listing := h.listRaw(t, "?since="+at(1)+"&until="+at(4))
+	if len(listing.Batches) != 3 {
+		t.Fatalf("batches = %d, want the three inside [1, 4)", len(listing.Batches))
+	}
+	if listing.Batches[0].ID != ids[1] || listing.Batches[2].ID != ids[3] {
+		t.Errorf("window = %+v, want batches 1..3", listing.Batches)
+	}
+	// The two halves of a split window cover the whole of it, once each.
+	first := h.listRaw(t, "?until="+at(2))
+	second := h.listRaw(t, "?since="+at(2))
+	if len(first.Batches)+len(second.Batches) != 5 {
+		t.Errorf("a split window covered %d+%d batches, want 5 exactly once",
+			len(first.Batches), len(second.Batches))
+	}
+}
+
+// The count is over the filters and not over the page, and its cap is this
+// listing's own: it answers "how much is this export about to send".
+func TestRawListingCounts(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	other, err := h.store.CreateProject("other", store.KeyPair{PublicKey: "tp-pk-other", Secret: "tp-sk-other"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedRaw(t, h, h.project.ID, 5, "")
+	seedRaw(t, h, other.ID, 3, "")
+
+	// Over the filters and not over the page: the cursor is where the
+	// reader is, not what there is.
+	listing := h.listRaw(t, "?limit=2&count=1")
+	if len(listing.Batches) != 2 {
+		t.Fatalf("batches = %d, want the page", len(listing.Batches))
+	}
+	if listing.Total != 5 || listing.TotalCapped {
+		t.Errorf("total = %d capped = %v, want this project's 5", listing.Total, listing.TotalCapped)
+	}
+
+	// And bounded by the window, which is the number an export is about to
+	// act on rather than the size of the archive.
+	at := func(i int) string {
+		return time.Unix(0, seedBase+int64(i)*ms).UTC().Format(time.RFC3339Nano)
+	}
+	windowed := h.listRaw(t, "?limit=2&count=1&since="+at(1)+"&until="+at(4))
+	if windowed.Total != 3 {
+		t.Errorf("total inside [1, 4) = %d, want 3", windowed.Total)
+	}
+}
+
+// A project key reaches its own archive and nothing else: the batches are the
+// project's data exactly as its traces are (spec 019 #9).
+func TestRawIsScopedToTheProject(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	other, err := h.store.CreateProject("other", store.KeyPair{PublicKey: "tp-pk-other", Secret: "tp-sk-other"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedRaw(t, h, h.project.ID, 2, "")
+	strangers := seedRaw(t, h, other.ID, 2, "")
+
+	listing := h.listRaw(t, "")
+	if len(listing.Batches) != 2 {
+		t.Fatalf("batches = %d, want only this project's two", len(listing.Batches))
+	}
+	for _, row := range listing.Batches {
+		for _, id := range strangers {
+			if row.ID == id {
+				t.Fatalf("the listing carries another project's batch %d", id)
+			}
+		}
+	}
+	rec := h.get(t, fmt.Sprintf("/api/v1/raw/%d", strangers[0]))
+	expectStatus(t, rec, 404)
+}
+
+// The body comes back as the client sent it, under the type it was sent in,
+// with the two headers a client needs to name a file without a second request.
+func TestRawBodyIsWhatArrived(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	sent := fixtureBody(t, "001-langfuse-sdk-generation")
+	if rec := h.post(t, "/v1/traces", sent); rec.Code != http.StatusOK {
+		t.Fatalf("ingest status = %d", rec.Code)
+	}
+
+	listing := h.listRaw(t, "")
+	if len(listing.Batches) != 1 {
+		t.Fatalf("batches = %d", len(listing.Batches))
+	}
+	row := listing.Batches[0]
+	if row.ContentType != "application/x-protobuf" {
+		t.Errorf("content_type = %q", row.ContentType)
+	}
+	if row.SizeBytes != int64(len(sent)) {
+		t.Errorf("size_bytes = %d, want the decoded length %d", row.SizeBytes, len(sent))
+	}
+	if row.Dialect != "langfuse" {
+		t.Errorf("dialect = %q", row.Dialect)
+	}
+
+	rec := h.get(t, fmt.Sprintf("/api/v1/raw/%d", row.ID))
+	expectStatus(t, rec, 200)
+	if !bytes.Equal(rec.Body.Bytes(), sent) {
+		t.Error("the body endpoint did not answer the bytes the client sent")
+	}
+	if got := rec.Header().Get("Content-Type"); got != "application/x-protobuf" {
+		t.Errorf("Content-Type = %q", got)
+	}
+	if got := rec.Header().Get(headerReceivedAt); got == "" {
+		t.Error("the received-at header is missing")
+	}
+	if got := rec.Header().Get(headerDialect); got != "langfuse" {
+		t.Errorf("%s = %q", headerDialect, got)
+	}
+}
+
+// A body larger than the response budget comes back whole. The budget exists
+// so a consumer's context window is not spent on payloads; a cut export body
+// is not a smaller batch, it is a broken one (spec 019 #3).
+func TestRawBodyIsExemptFromTheBudget(t *testing.T) {
+	cfg := &config.Config{Listen: ":0", StoreRaw: true, MaxBodyBytes: config.DefaultMaxBodyBytes,
+		ResponseBudgetBytes: config.MinResponseBudgetBytes}
+	h := newHarness(t, cfg, store.WriterOptions{})
+
+	body := bytes.Repeat([]byte("the archive is what arrived; "), 4000)
+	if int64(len(body)) <= cfg.ResponseBudgetBytes {
+		t.Fatalf("the fixture body is %d bytes, which does not exceed the budget", len(body))
+	}
+	err := h.writer.Submit(t.Context(), &store.IngestBatch{
+		ProjectID: h.project.ID,
+		Raw:       &store.RawBatch{ReceivedAt: seedBase, Body: body},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	listing := h.listRaw(t, "")
+	rec := h.get(t, fmt.Sprintf("/api/v1/raw/%d", listing.Batches[0].ID))
+	expectStatus(t, rec, 200)
+	if rec.Body.Len() != len(body) {
+		t.Errorf("body = %d bytes, want the whole %d", rec.Body.Len(), len(body))
+	}
+}
+
+// A batch written before schema 0012 has no content type, and reads as the one
+// encoding the endpoint accepted then.
+func TestRawContentTypeDefaultsToProtobuf(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	// An empty content type is stored as NULL, which is the state every row
+	// written before schema 0012 is in.
+	seedRaw(t, h, h.project.ID, 1, "")
+
+	listing := h.listRaw(t, "")
+	if got := listing.Batches[0].ContentType; got != "application/x-protobuf" {
+		t.Errorf("content_type of a pre-0012 row = %q, want the protobuf encoding", got)
+	}
+	rec := h.get(t, fmt.Sprintf("/api/v1/raw/%d", listing.Batches[0].ID))
+	expectStatus(t, rec, 200)
+	if got := rec.Header().Get("Content-Type"); got != "application/x-protobuf" {
+		t.Errorf("Content-Type = %q", got)
+	}
+}
+
+// A swept batch and a malformed id are answered plainly rather than with a
+// stack trace or an empty 200.
+func TestRawBodyRefusals(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	for _, c := range []struct {
+		path   string
+		status int
+	}{
+		{"/api/v1/raw/999999", 404},
+		{"/api/v1/raw/nope", 400},
+		{"/api/v1/raw/0", 400},
+		{"/api/v1/raw/-1", 400},
+	} {
+		if rec := h.get(t, c.path); rec.Code != c.status {
+			t.Errorf("GET %s = %d, want %d (%s)", c.path, rec.Code, c.status, rec.Body)
+		}
+	}
+}
+
+// The system block is what the export reports at its end and what an operator
+// reads before shortening the raw window (spec 019 #4).
+func TestSystemReportsTheRawArchive(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	// A trace that started before the archive begins, and one after: only
+	// the first is beyond an export's reach.
+	h.seed(t, &model.Trace{ID: traceHex(1)},
+		&model.Observation{TraceID: traceHex(1), ID: spanHex(1), Type: model.TypeSpan,
+			Level: model.LevelDefault, StartTime: seedBase - 5*ms, EndTime: seedBase - 4*ms})
+	h.seed(t, &model.Trace{ID: traceHex(2)},
+		&model.Observation{TraceID: traceHex(2), ID: spanHex(2), Type: model.TypeSpan,
+			Level: model.LevelDefault, StartTime: seedBase + 10*ms, EndTime: seedBase + 11*ms})
+	seedRaw(t, h, h.project.ID, 3, "")
+
+	block := h.systemRaw(t)
+	if !block.Enabled {
+		t.Error("enabled = false with TRACEPAD_STORE_RAW on")
+	}
+	if block.Batches != 3 {
+		t.Errorf("batches = %d, want 3", block.Batches)
+	}
+	if block.Bytes == 0 {
+		t.Error("bytes = 0, want what the archive occupies")
+	}
+	if block.Oldest == nil || block.Newest == nil || *block.Oldest == *block.Newest {
+		t.Errorf("window = %v..%v, want the archive's two ends", block.Oldest, block.Newest)
+	}
+	if block.TracesBeforeWindow != 1 {
+		t.Errorf("traces_before_window = %d, want the one trace older than the archive",
+			block.TracesBeforeWindow)
+	}
+}
+
+// With raw storage off and the table empty, the block says so and every trace
+// is beyond reach — which is what makes `export` able to refuse with a reason
+// rather than with an empty result (spec 019, edge cases).
+func TestSystemRawWithStorageOff(t *testing.T) {
+	cfg := &config.Config{Listen: ":0", StoreRaw: false, MaxBodyBytes: config.DefaultMaxBodyBytes}
+	h := newHarness(t, cfg, store.WriterOptions{})
+	h.seed(t, &model.Trace{ID: traceHex(1)},
+		&model.Observation{TraceID: traceHex(1), ID: spanHex(1), Type: model.TypeSpan,
+			Level: model.LevelDefault, StartTime: seedBase, EndTime: seedBase + ms})
+
+	block := h.systemRaw(t)
+	if block.Enabled || block.Batches != 0 || block.Bytes != 0 {
+		t.Errorf("raw block = %+v, want an empty, disabled archive", block)
+	}
+	if block.Oldest != nil || block.Newest != nil {
+		t.Errorf("window = %v..%v, want null on both ends", block.Oldest, block.Newest)
+	}
+	if block.TracesBeforeWindow != 1 {
+		t.Errorf("traces_before_window = %d, want every trace", block.TracesBeforeWindow)
+	}
+}
+
+type systemRawBlock struct {
+	Enabled            bool    `json:"enabled"`
+	Batches            int64   `json:"batches"`
+	Bytes              int64   `json:"bytes"`
+	Oldest             *string `json:"oldest_received_at"`
+	Newest             *string `json:"newest_received_at"`
+	TracesBeforeWindow int64   `json:"traces_before_window"`
+}
+
+func (h *harness) systemRaw(t *testing.T) systemRawBlock {
+	t.Helper()
+	rec := h.get(t, "/api/v1/system")
+	expectStatus(t, rec, 200)
+	var body struct {
+		Raw json.RawMessage `json:"raw"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	var block systemRawBlock
+	if err := json.Unmarshal(body.Raw, &block); err != nil {
+		t.Fatalf("the raw block is not the documented shape: %v (%s)", err, body.Raw)
+	}
+	return block
+}

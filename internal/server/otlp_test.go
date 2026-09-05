@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/tracepad/tracepad/internal/config"
@@ -81,6 +82,35 @@ func (h *harness) post(t *testing.T, path string, body []byte, mutate ...func(*h
 	rec := httptest.NewRecorder()
 	h.server.Handler().ServeHTTP(rec, req)
 	return rec
+}
+
+// archived is the whole of a project's raw archive, oldest first, each row
+// with the body it holds. The listing and the body endpoint are what the API
+// exposes (spec 019 #3); this is the same pair read straight from the store,
+// so an ingest test can assert what was kept without going back through HTTP.
+type archivedBatch struct {
+	*store.RawBatchRow
+	Body []byte
+}
+
+func archived(t *testing.T, h *harness) []archivedBatch {
+	t.Helper()
+	rows, err := h.store.RawBatches(h.project.ID, store.RawFilter{Limit: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := make([]archivedBatch, 0, len(rows))
+	for _, row := range rows {
+		body, err := h.store.RawBatchBody(h.project.ID, row.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if body == nil {
+			t.Fatalf("raw batch %d vanished between the listing and the body", row.ID)
+		}
+		out = append(out, archivedBatch{RawBatchRow: row, Body: body.Body})
+	}
+	return out
 }
 
 func fixtureBody(t *testing.T, name string) []byte {
@@ -297,10 +327,7 @@ func TestIngestStoresRawBody(t *testing.T) {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body)
 	}
 
-	batches, err := h.store.RawBatches(h.project.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	batches := archived(t, h)
 	if len(batches) != 1 {
 		t.Fatalf("raw batches = %d", len(batches))
 	}
@@ -321,11 +348,7 @@ func TestIngestRawStorageCanBeDisabled(t *testing.T) {
 	if rec := h.post(t, "/v1/traces", fixtureBody(t, "002-genai-semconv-chat")); rec.Code != http.StatusOK {
 		t.Fatalf("status = %d", rec.Code)
 	}
-	batches, err := h.store.RawBatches(h.project.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(batches) != 0 {
+	if batches := archived(t, h); len(batches) != 0 {
 		t.Errorf("raw batches with TRACEPAD_STORE_RAW=off = %d", len(batches))
 	}
 	// Ingest itself still works.
@@ -377,14 +400,26 @@ func TestIngestRejectsBadCredentials(t *testing.T) {
 	}
 }
 
+// A content type this endpoint does not speak is a 415, and the message names
+// the two it does. `application/json` used to be one of these; since spec 019
+// #7 it is an encoding, and a body that lies about being it is a 400 about the
+// body rather than a 415 about the header.
 func TestIngestRejectsWrongContentType(t *testing.T) {
 	h := newHarness(t, nil, store.WriterOptions{})
+
 	rec := h.post(t, "/v1/traces", fixtureBody(t, "002-genai-semconv-chat"), func(r *http.Request) {
+		r.Header.Set("Content-Type", "application/yaml")
+	})
+	expectStatus(t, rec, http.StatusUnsupportedMediaType)
+	message := decodeJSON[map[string]string](t, rec)["error"]
+	if !strings.Contains(message, "x-protobuf") || !strings.Contains(message, "json") {
+		t.Errorf("the refusal = %q, want both accepted encodings named", message)
+	}
+
+	protobufAsJSON := h.post(t, "/v1/traces", fixtureBody(t, "002-genai-semconv-chat"), func(r *http.Request) {
 		r.Header.Set("Content-Type", "application/json")
 	})
-	if rec.Code != http.StatusUnsupportedMediaType {
-		t.Fatalf("status = %d, want 415", rec.Code)
-	}
+	expectStatus(t, protobufAsJSON, http.StatusBadRequest)
 }
 
 func TestIngestRejectsUndecodableBody(t *testing.T) {
@@ -414,9 +449,8 @@ func TestIngestEmptyBatch(t *testing.T) {
 	if rec.Code != http.StatusOK || rec.Body.Len() != 0 {
 		t.Fatalf("status = %d, body = %d bytes", rec.Code, rec.Body.Len())
 	}
-	batches, err := h.store.RawBatches(h.project.ID)
-	if err != nil || len(batches) != 0 {
-		t.Fatalf("raw batches = %d, err = %v", len(batches), err)
+	if batches := archived(t, h); len(batches) != 0 {
+		t.Fatalf("raw batches = %d", len(batches))
 	}
 }
 

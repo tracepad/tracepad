@@ -47,13 +47,29 @@ type harness struct {
 	// build. The parity test sets it; it lives here rather than in a
 	// package variable so that it cannot outlive the test that wanted it.
 	observeFlags func(*flag.FlagSet)
+	// retryBackoff shortens `export --otlp`'s first retry delay, so the
+	// retry tests walk the real loop rather than a stubbed one and still
+	// finish in milliseconds (spec 019 #6).
+	retryBackoff time.Duration
 }
 
 func newHarness(t *testing.T) *harness { return newHarnessWithToken(t, "") }
 
+// newHarnessWithoutRaw is the same server with TRACEPAD_STORE_RAW off: the
+// deployment `export --otlp` has to refuse with a reason rather than with an
+// empty result (spec 019, edge cases).
+func newHarnessWithoutRaw(t *testing.T) *harness {
+	return newHarnessConfigured(t, "", false)
+}
+
 // newHarnessWithToken is the same server with a cross-project admin token
 // configured, which the administrative tests need and nothing else does.
 func newHarnessWithToken(t *testing.T, token string) *harness {
+	return newHarnessConfigured(t, token, true)
+}
+
+// newHarnessConfigured is the two knobs the harness has, in one place.
+func newHarnessConfigured(t *testing.T, token string, storeRaw bool) *harness {
 	t.Helper()
 	st, err := store.Open(filepath.Join(t.TempDir(), "tracepad.db"))
 	if err != nil {
@@ -69,7 +85,7 @@ func newHarnessWithToken(t *testing.T, token string) *harness {
 	}
 	t.Cleanup(func() { writer.Close() })
 
-	cfg := &config.Config{Listen: ":0", StoreRaw: true, MaxBodyBytes: config.DefaultMaxBodyBytes,
+	cfg := &config.Config{Listen: ":0", StoreRaw: storeRaw, MaxBodyBytes: config.DefaultMaxBodyBytes,
 		AdminToken: token}
 	httpServer := httptest.NewServer(server.New(cfg, testVersion, st, writer,
 		st.NewSweeper(writer, store.SweepOptions{})).Handler())
@@ -111,6 +127,7 @@ func (h *harness) options(stdout, stderr io.Writer, tty bool, args []string) Opt
 		Env:     func(key string) string { return h.env[key] },
 		// Set by the parity test only; nil everywhere else.
 		observeFlags: h.observeFlags,
+		retryBackoff: h.retryBackoff,
 		Now:          func() time.Time { return time.Unix(0, seedBase).UTC() },
 	}
 }

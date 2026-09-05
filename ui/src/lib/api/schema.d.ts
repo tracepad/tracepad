@@ -31,8 +31,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * OTLP/HTTP protobuf trace ingest
-         * @description The canonical OTLP endpoint. Point any OpenTelemetry SDK at it with `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` and an authorization header. A 200 means the spans are committed and fsynced.
+         * OTLP/HTTP trace ingest, protobuf or JSON
+         * @description The canonical OTLP endpoint. Point any OpenTelemetry SDK at it with `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` and an authorization header. Both OTLP encodings are accepted — `application/x-protobuf` and, per `OTEL_EXPORTER_OTLP_PROTOCOL=http/json`, `application/json` with the ids hex-encoded as the OTLP specification prescribes. The response mirrors the request's encoding. A 200 means the spans are committed and fsynced.
          */
         post: operations["ingestTraces"];
         delete?: never;
@@ -190,6 +190,46 @@ export interface paths {
          * @description The one endpoint no byte budget applies to: it exists to be the `full` target of every truncation marker, and a budget here would recurse. A span id is unique only inside its trace, so pass `?trace_id=` when the same id appears in more than one — every truncation marker already carries the pair.
          */
         get: operations["observationIO"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/raw": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the raw export bodies oldest first, cursor-paginated
+         * @description The archive: every accepted export, kept as it arrived. This is the one listing here whose natural order is forward, because a replay has to preserve arrival order — a receiver that does not upsert by span id must see the spans in the order the world produced them. Follow with `GET /api/v1/raw/{id}` for a body; `tracepad export --otlp` is these two endpoints in a loop.
+         */
+        get: operations["listRawBatches"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/raw/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One raw export body, in the Content-Type it was received in
+         * @description The bytes the client posted, gzip already removed. Exempt from the response budget for the reason `/observations/{id}/io` is: a cut body is not a smaller batch, it is a broken one. `X-Tracepad-Received-At` and `X-Tracepad-Dialect` carry what a client needs to name a file or label a manifest without a second request.
+         */
+        get: operations["rawBatch"];
         put?: never;
         post?: never;
         delete?: never;
@@ -868,6 +908,24 @@ export interface components {
             /** Format: date-time */
             last_seen?: string;
         };
+        /** @description One archived export body, described. The bytes themselves are at `GET /api/v1/raw/{id}`. */
+        RawBatch: {
+            /** @description The batch's id; the path segment of the body endpoint */
+            id: number;
+            /**
+             * Format: date-time
+             * @description When the server accepted it, which is the order a replay preserves
+             */
+            received_at: string;
+            /** @description Which attribute vocabulary the mapper recognised in it; empty when it claimed nothing */
+            dialect: string;
+            /** @description The media type the body is in, which is what a replay posts it under. Batches stored before schema 0012 read as `application/x-protobuf`. */
+            content_type: string;
+            /** @description How the client compressed it on the wire, for provenance. The stored body is decoded, so a replay does not have to unwrap two layers. */
+            content_encoding: string;
+            /** @description The decoded length — what a fetch of the body returns — and not the compressed length the row occupies */
+            size_bytes: number;
+        };
         Trace: components["schemas"]["TraceRow"] & {
             metadata?: Record<string, never>;
             observations: components["schemas"]["Observation"][];
@@ -1484,16 +1542,18 @@ export interface operations {
         requestBody: {
             content: {
                 "application/x-protobuf": string;
+                "application/json": Record<string, never>;
             };
         };
         responses: {
-            /** @description Accepted; the body is an ExportTraceServiceResponse carrying partial_success when spans were skipped */
+            /** @description Accepted; the body is an ExportTraceServiceResponse carrying partial_success when spans were skipped, in the encoding the request arrived in */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/x-protobuf": string;
+                    "application/json": Record<string, never>;
                 };
             };
             400: components["responses"]["BadRequest"];
@@ -1507,7 +1567,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Content-Type is not application/x-protobuf */
+            /** @description Content-Type is neither application/x-protobuf nor application/json */
             415: {
                 headers: {
                     [name: string]: unknown;
@@ -1537,6 +1597,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/x-protobuf": string;
+                "application/json": Record<string, never>;
             };
         };
         responses: {
@@ -1547,6 +1608,7 @@ export interface operations {
                 };
                 content: {
                     "application/x-protobuf": string;
+                    "application/json": Record<string, never>;
                 };
             };
             400: components["responses"]["BadRequest"];
@@ -1642,6 +1704,20 @@ export interface operations {
                             pinned_traces: number;
                             /** @description Trace deliveries since start that named a run this project does not have; they are stored, and each unknown id is logged once */
                             orphan_traces: number;
+                        };
+                        /** @description The archive of export bodies: what an export can replay, and what it cannot. Unlike the counters this is on disk, not since start. */
+                        raw?: {
+                            /** @description Whether accepted bodies are still being kept (TRACEPAD_STORE_RAW) */
+                            enabled: boolean;
+                            batches: number;
+                            /** @description What the archive occupies on disk, compressed — the number an operator moving `raw_retention_days` is deciding about */
+                            bytes: number;
+                            /** Format: date-time */
+                            oldest_received_at: string | null;
+                            /** Format: date-time */
+                            newest_received_at: string | null;
+                            /** @description Traces whose earliest span started before the oldest batch arrived, and which an export therefore cannot cover. A lower bound: a late export of an old trace lands after the batch line. */
+                            traces_before_window: number;
                         };
                         /** @description This project's ingest traffic since the process started */
                         counters: {
@@ -1874,6 +1950,76 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+        };
+    };
+    listRawBatches: {
+        parameters: {
+            query?: {
+                /** @description RFC 3339, inclusive, on `received_at` */
+                since?: string;
+                /** @description RFC 3339, exclusive, on `received_at` */
+                until?: string;
+                /** @description Out of range is a 400, not a silent clamp */
+                limit?: number;
+                /** @description The opaque `next_cursor` or `prev_cursor` of a previous page */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description Which way to page from the cursor. This listing runs oldest first, so `next` walks towards newer batches and `prev` back towards older ones; with no cursor, `next` is the oldest page and `prev` the newest. Rows come back oldest first either way */
+                direction?: "next" | "prev";
+                /** @description Adds `total` and `total_capped`: how many batches the filters match, counted up to 100000 — high, because this count answers "how much is this export about to send" */
+                count?: "1" | "true";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One page of the archive */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        batches: components["schemas"]["RawBatch"][];
+                        next_cursor: string | null;
+                        prev_cursor: string | null;
+                        total?: number;
+                        total_capped?: boolean;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    rawBatch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The body as received */
+            200: {
+                headers: {
+                    "X-Tracepad-Received-At"?: string;
+                    /** @description Absent when the mapper claimed nothing */
+                    "X-Tracepad-Dialect"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/x-protobuf": string;
+                    "application/json": string;
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
         };
     };
     listSessions: {

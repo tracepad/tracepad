@@ -1,0 +1,16 @@
+-- The archive learns what it is holding (spec 019 #8).
+--
+-- `POST /v1/traces` now accepts the OTLP/JSON encoding beside the protobuf
+-- one, and a JSON batch is kept as it arrived — raw-first means the archive is
+-- what the client sent, never a conversion of it. Replaying such a batch needs
+-- the `Content-Type` it came in under, and sniffing cannot supply it: the first
+-- byte of a protobuf message can perfectly well be `{`.
+--
+-- NULL is `application/x-protobuf`: every row written before this migration
+-- arrived under the one encoding the endpoint accepted, so backfilling would
+-- rewrite the whole table to say what its absence already says.
+--
+-- No index changes. `idx_raw_batches_received (project_id, received_at)`
+-- already serves the listing of spec 019 #3, and the `(received_at, id)`
+-- keyset gets its tiebreak from the primary key.
+ALTER TABLE raw_batches ADD COLUMN content_type TEXT;

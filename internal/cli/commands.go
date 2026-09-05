@@ -599,6 +599,14 @@ func (r *run) system(ctx context.Context, args []string) error {
 			Enabled bool   `json:"enabled"`
 			Path    string `json:"path"`
 		} `json:"mcp"`
+		Raw struct {
+			Enabled            bool    `json:"enabled"`
+			Batches            int64   `json:"batches"`
+			Bytes              int64   `json:"bytes"`
+			OldestReceivedAt   *string `json:"oldest_received_at"`
+			NewestReceivedAt   *string `json:"newest_received_at"`
+			TracesBeforeWindow int64   `json:"traces_before_window"`
+		} `json:"raw"`
 		Counters struct {
 			Since    string `json:"since"`
 			Dialects map[string]struct {
@@ -634,6 +642,25 @@ func (r *run) system(ctx context.Context, args []string) error {
 		}
 	}
 	rows.flush()
+
+	// The archive, which is what `export --otlp` can carry out (spec 019
+	// #4). On disk rather than since start, unlike the counters below, so
+	// it reads beside the row counts rather than under them.
+	fmt.Fprintln(r.opt.Stdout, "\nraw archive in this project")
+	archive := newTable(r.opt.Stdout)
+	archive.row("  storage", enabled(info.Raw.Enabled))
+	archive.row("  batches", strconv.FormatInt(info.Raw.Batches, 10))
+	archive.row("  on disk", byteSize(int(info.Raw.Bytes)))
+	if info.Raw.OldestReceivedAt != nil && info.Raw.NewestReceivedAt != nil {
+		archive.row("  covering", shortTime(*info.Raw.OldestReceivedAt)+
+			" .. "+shortTime(*info.Raw.NewestReceivedAt))
+	}
+	// Named as the edge of the promise rather than as a failure: these
+	// traces are parsed rows only, and an export says so rather than
+	// letting the receiver's gap say it (spec 019 #1).
+	archive.row("  not covered", fmt.Sprintf("%d traces started before it begins",
+		info.Raw.TracesBeforeWindow))
+	archive.flush()
 
 	fmt.Fprintf(r.opt.Stdout, "\ningest in this project since %s\n", shortTime(info.Counters.Since))
 	if len(info.Counters.Dialects) == 0 {

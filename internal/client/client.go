@@ -87,6 +87,43 @@ func (c *Client) Get(ctx context.Context, path string, query url.Values) (json.R
 	return c.do(request, path)
 }
 
+// Fetch calls a read endpoint that does not answer with JSON and returns the
+// body with the response headers. The archive's body endpoint is the first
+// such: what it answers is an OTLP export in the encoding it arrived in, and
+// two headers carry what a replay needs to send it on (spec 019 #3).
+//
+// ErrNotFound is what a 404 becomes, because for this endpoint that is not a
+// failure: a batch the sweeper took between the listing and the fetch is a
+// thing the caller counts and walks past.
+func (c *Client) Fetch(ctx context.Context, path string) ([]byte, http.Header, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+path, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	if c.Key != "" {
+		request.Header.Set("Authorization", "Bearer "+c.Key)
+	}
+	response, err := c.HTTP.Do(request)
+	if err != nil {
+		return nil, nil, fmt.Errorf("cannot reach %s: %w", c.BaseURL, err)
+	}
+	defer response.Body.Close()
+
+	if c.OnVersion != nil {
+		if version := response.Header.Get(VersionHeader); version != "" {
+			c.OnVersion(version)
+		}
+	}
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		return nil, nil, fmt.Errorf("cannot read the response from %s: %w", path, err)
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return nil, nil, &Error{Status: response.StatusCode, Message: errorMessage(body), Path: path}
+	}
+	return body, response.Header, nil
+}
+
 // Post calls a write endpoint with a JSON body.
 func (c *Client) Post(ctx context.Context, path string, body any) (json.RawMessage, error) {
 	return c.Send(ctx, http.MethodPost, path, nil, body)

@@ -90,16 +90,6 @@ const (
 	WithIO IOMode = true
 )
 
-// RawBatchRow is a stored export body, decompressed.
-type RawBatchRow struct {
-	ID              int64
-	ProjectID       string
-	ReceivedAt      int64
-	Dialect         string
-	ContentEncoding string
-	Body            []byte
-}
-
 // Trace returns one trace with its metadata, or nil when it does not exist.
 // Metadata is a payload and so is absent from a list row (spec 004, API
 // contract); a single trace is where it belongs.
@@ -281,36 +271,6 @@ func (s *Store) scanObservation(rows *sql.Rows, io IOMode) (*ObservationRow, err
 		row.Metadata = object
 	}
 	return &row, nil
-}
-
-// RawBatches returns the stored export bodies for a project, oldest first.
-func (s *Store) RawBatches(projectID string) ([]RawBatchRow, error) {
-	rows, err := s.db.Query(
-		`SELECT id, project_id, received_at, dialect, content_encoding, body
-		 FROM raw_batches WHERE project_id = ? ORDER BY received_at, id`, projectID)
-	if err != nil {
-		return nil, fmt.Errorf("read raw batches: %w", err)
-	}
-	defer rows.Close()
-
-	var out []RawBatchRow
-	for rows.Next() {
-		var (
-			row      RawBatchRow
-			dialect  sql.NullString
-			encoding sql.NullString
-			body     []byte
-		)
-		if err := rows.Scan(&row.ID, &row.ProjectID, &row.ReceivedAt, &dialect, &encoding, &body); err != nil {
-			return nil, err
-		}
-		row.Dialect, row.ContentEncoding = dialect.String, encoding.String
-		if row.Body, err = Decompress(CompressionZstd, body); err != nil {
-			return nil, err
-		}
-		out = append(out, row)
-	}
-	return out, rows.Err()
 }
 
 // FileSize reports the database's footprint on disk: the main file plus the

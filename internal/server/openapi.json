@@ -13,6 +13,7 @@
     {"name": "meta", "description": "Self-description and self-diagnosis"},
     {"name": "ingest", "description": "OTLP trace ingest"},
     {"name": "traces", "description": "Traces, observations and sessions"},
+    {"name": "raw", "description": "The archive of export bodies as they arrived, which is what an export replays"},
     {"name": "stats", "description": "Aggregates computed on the fly"},
     {"name": "scores", "description": "Quality judgements about traces"},
     {"name": "prompts", "description": "Versioned prompts with movable labels"},
@@ -41,21 +42,26 @@
     "/v1/traces": {
       "post": {
         "tags": ["ingest"],
-        "summary": "OTLP/HTTP protobuf trace ingest",
-        "description": "The canonical OTLP endpoint. Point any OpenTelemetry SDK at it with `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` and an authorization header. A 200 means the spans are committed and fsynced.",
+        "summary": "OTLP/HTTP trace ingest, protobuf or JSON",
+        "description": "The canonical OTLP endpoint. Point any OpenTelemetry SDK at it with `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` and an authorization header. Both OTLP encodings are accepted — `application/x-protobuf` and, per `OTEL_EXPORTER_OTLP_PROTOCOL=http/json`, `application/json` with the ids hex-encoded as the OTLP specification prescribes. The response mirrors the request's encoding. A 200 means the spans are committed and fsynced.",
         "operationId": "ingestTraces",
         "requestBody": {"required": true, "content": {
           "application/x-protobuf": {"schema": {"type": "string", "format": "binary",
-            "description": "An OTLP ExportTraceServiceRequest, optionally gzipped"}}
+            "description": "An OTLP ExportTraceServiceRequest, optionally gzipped"}},
+          "application/json": {"schema": {"type": "object",
+            "description": "The same message in the OTLP/JSON encoding, optionally gzipped: `traceId`, `spanId`, `parentSpanId` and the ids inside a link are hex, not base64, and 64-bit integers may be strings or numbers"}}
         }},
         "responses": {
-          "200": {"description": "Accepted; the body is an ExportTraceServiceResponse carrying partial_success when spans were skipped",
-            "content": {"application/x-protobuf": {"schema": {"type": "string", "format": "binary"}}}},
+          "200": {"description": "Accepted; the body is an ExportTraceServiceResponse carrying partial_success when spans were skipped, in the encoding the request arrived in",
+            "content": {
+              "application/x-protobuf": {"schema": {"type": "string", "format": "binary"}},
+              "application/json": {"schema": {"type": "object"}}
+            }},
           "400": {"$ref": "#/components/responses/BadRequest"},
           "401": {"$ref": "#/components/responses/Unauthorized"},
           "413": {"description": "The body exceeded TRACEPAD_MAX_BODY_BYTES",
             "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
-          "415": {"description": "Content-Type is not application/x-protobuf",
+          "415": {"description": "Content-Type is neither application/x-protobuf nor application/json",
             "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
           "429": {"description": "The write queue is full; retry after the Retry-After delay",
             "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}}
@@ -69,10 +75,14 @@
         "description": "The same endpoint as `/v1/traces`, at the path a Langfuse SDK sends to. Setting `LANGFUSE_HOST` to a tracepad is the whole migration.",
         "operationId": "ingestTracesLangfuse",
         "requestBody": {"required": true, "content": {
-          "application/x-protobuf": {"schema": {"type": "string", "format": "binary"}}
+          "application/x-protobuf": {"schema": {"type": "string", "format": "binary"}},
+          "application/json": {"schema": {"type": "object"}}
         }},
         "responses": {
-          "200": {"description": "Accepted", "content": {"application/x-protobuf": {"schema": {"type": "string", "format": "binary"}}}},
+          "200": {"description": "Accepted", "content": {
+            "application/x-protobuf": {"schema": {"type": "string", "format": "binary"}},
+            "application/json": {"schema": {"type": "object"}}
+          }},
           "400": {"$ref": "#/components/responses/BadRequest"},
           "401": {"$ref": "#/components/responses/Unauthorized"}
         }
@@ -142,6 +152,18 @@
                   "orphan_traces": {"type": "integer", "description": "Trace deliveries since start that named a run this project does not have; they are stored, and each unknown id is logged once"}
                 },
                 "required": ["pinned_traces", "orphan_traces"]},
+              "raw": {"type": "object",
+                "description": "The archive of export bodies: what an export can replay, and what it cannot. Unlike the counters this is on disk, not since start.",
+                "properties": {
+                  "enabled": {"type": "boolean", "description": "Whether accepted bodies are still being kept (TRACEPAD_STORE_RAW)"},
+                  "batches": {"type": "integer"},
+                  "bytes": {"type": "integer", "description": "What the archive occupies on disk, compressed — the number an operator moving `raw_retention_days` is deciding about"},
+                  "oldest_received_at": {"type": ["string", "null"], "format": "date-time"},
+                  "newest_received_at": {"type": ["string", "null"], "format": "date-time"},
+                  "traces_before_window": {"type": "integer",
+                    "description": "Traces whose earliest span started before the oldest batch arrived, and which an export therefore cannot cover. A lower bound: a late export of an old trace lands after the batch line."}
+                },
+                "required": ["enabled", "batches", "bytes", "oldest_received_at", "newest_received_at", "traces_before_window"]},
               "counters": {"type": "object",
                 "description": "This project's ingest traffic since the process started",
                 "properties": {
@@ -297,6 +319,74 @@
           "404": {"$ref": "#/components/responses/NotFound"},
           "409": {"description": "The span id appears in more than one trace; the message lists the candidates",
             "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}}
+        }
+      }
+    },
+    "/api/v1/raw": {
+      "get": {
+        "tags": ["raw"],
+        "summary": "List the raw export bodies oldest first, cursor-paginated",
+        "description": "The archive: every accepted export, kept as it arrived. This is the one listing here whose natural order is forward, because a replay has to preserve arrival order — a receiver that does not upsert by span id must see the spans in the order the world produced them. Follow with `GET /api/v1/raw/{id}` for a body; `tracepad export --otlp` is these two endpoints in a loop.",
+        "operationId": "listRawBatches",
+        "parameters": [
+          {"name": "since", "in": "query",
+            "schema": {"type": "string", "format": "date-time"},
+            "description": "RFC 3339, inclusive, on `received_at`"},
+          {"name": "until", "in": "query",
+            "schema": {"type": "string", "format": "date-time"},
+            "description": "RFC 3339, exclusive, on `received_at`"},
+          {"name": "limit", "in": "query",
+            "schema": {"type": "integer", "minimum": 1, "maximum": 500, "default": 100},
+            "description": "Out of range is a 400, not a silent clamp"},
+          {"$ref": "#/components/parameters/Cursor"},
+          {"name": "direction", "in": "query",
+            "schema": {"type": "string", "enum": ["next", "prev"], "default": "next"},
+            "description": "Which way to page from the cursor. This listing runs oldest first, so `next` walks towards newer batches and `prev` back towards older ones; with no cursor, `next` is the oldest page and `prev` the newest. Rows come back oldest first either way"},
+          {"name": "count", "in": "query",
+            "schema": {"type": "string", "enum": ["1", "true"]},
+            "description": "Adds `total` and `total_capped`: how many batches the filters match, counted up to 100000 — high, because this count answers \"how much is this export about to send\""}
+        ],
+        "responses": {
+          "200": {"description": "One page of the archive", "content": {"application/json": {"schema": {
+            "type": "object",
+            "properties": {
+              "batches": {"type": "array", "items": {"$ref": "#/components/schemas/RawBatch"}},
+              "next_cursor": {"type": ["string", "null"]},
+              "prev_cursor": {"type": ["string", "null"]},
+              "total": {"type": "integer"},
+              "total_capped": {"type": "boolean"}
+            },
+            "required": ["batches", "next_cursor", "prev_cursor"]
+          }}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"}
+        }
+      }
+    },
+    "/api/v1/raw/{id}": {
+      "get": {
+        "tags": ["raw"],
+        "summary": "One raw export body, in the Content-Type it was received in",
+        "description": "The bytes the client posted, gzip already removed. Exempt from the response budget for the reason `/observations/{id}/io` is: a cut body is not a smaller batch, it is a broken one. `X-Tracepad-Received-At` and `X-Tracepad-Dialect` carry what a client needs to name a file or label a manifest without a second request.",
+        "operationId": "rawBatch",
+        "parameters": [
+          {"name": "id", "in": "path", "required": true,
+            "schema": {"type": "integer", "minimum": 1}}
+        ],
+        "responses": {
+          "200": {"description": "The body as received",
+            "headers": {
+              "X-Tracepad-Received-At": {"schema": {"type": "string", "format": "date-time"}},
+              "X-Tracepad-Dialect": {"schema": {"type": "string"},
+                "description": "Absent when the mapper claimed nothing"}
+            },
+            "content": {
+              "application/x-protobuf": {"schema": {"type": "string", "format": "binary"}},
+              "application/json": {"schema": {"type": "string", "format": "binary"}}
+            }},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
         }
       }
     },
@@ -1416,6 +1506,24 @@
           "last_seen": {"type": "string", "format": "date-time"}
         },
         "required": ["id", "trace_count", "error_count"]
+      },
+      "RawBatch": {
+        "type": "object",
+        "description": "One archived export body, described. The bytes themselves are at `GET /api/v1/raw/{id}`.",
+        "properties": {
+          "id": {"type": "integer", "description": "The batch's id; the path segment of the body endpoint"},
+          "received_at": {"type": "string", "format": "date-time",
+            "description": "When the server accepted it, which is the order a replay preserves"},
+          "dialect": {"type": "string",
+            "description": "Which attribute vocabulary the mapper recognised in it; empty when it claimed nothing"},
+          "content_type": {"type": "string",
+            "description": "The media type the body is in, which is what a replay posts it under. Batches stored before schema 0012 read as `application/x-protobuf`."},
+          "content_encoding": {"type": "string",
+            "description": "How the client compressed it on the wire, for provenance. The stored body is decoded, so a replay does not have to unwrap two layers."},
+          "size_bytes": {"type": "integer",
+            "description": "The decoded length — what a fetch of the body returns — and not the compressed length the row occupies"}
+        },
+        "required": ["id", "received_at", "dialect", "content_type", "content_encoding", "size_bytes"]
       },
       "Trace": {
         "allOf": [

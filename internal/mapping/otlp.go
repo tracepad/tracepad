@@ -99,6 +99,71 @@ func EncodeExportResponse(rejectedSpans int64, errorMessage string) []byte {
 	return out
 }
 
+// DecodeExportResponse reads the partial success out of an
+// ExportTraceServiceResponse. It exists for the export command (spec 019 #5),
+// which is a *client* of somebody else's OTLP receiver and has to be able to
+// say what that receiver reported: a 2xx carrying rejected spans means the
+// bytes arrived and some of them were refused, which is the receiver's
+// business to explain and ours to pass on rather than to retry.
+//
+// A body it cannot walk reports nothing rather than failing: the export
+// succeeded, and a receiver whose response we cannot parse has still taken the
+// batch.
+func DecodeExportResponse(body []byte) (rejectedSpans int64, errorMessage string) {
+	for len(body) > 0 {
+		num, typ, n := protowire.ConsumeTag(body)
+		if n < 0 {
+			return rejectedSpans, errorMessage
+		}
+		body = body[n:]
+		if num == fieldPartialSuccess && typ == protowire.BytesType {
+			raw, n := protowire.ConsumeBytes(body)
+			if n < 0 {
+				return rejectedSpans, errorMessage
+			}
+			body = body[n:]
+			return decodePartialSuccess(raw)
+		}
+		n = protowire.ConsumeFieldValue(num, typ, body)
+		if n < 0 {
+			return rejectedSpans, errorMessage
+		}
+		body = body[n:]
+	}
+	return rejectedSpans, errorMessage
+}
+
+func decodePartialSuccess(body []byte) (rejectedSpans int64, errorMessage string) {
+	for len(body) > 0 {
+		num, typ, n := protowire.ConsumeTag(body)
+		if n < 0 {
+			return rejectedSpans, errorMessage
+		}
+		body = body[n:]
+		switch {
+		case num == fieldRejectedSpans && typ == protowire.VarintType:
+			value, n := protowire.ConsumeVarint(body)
+			if n < 0 {
+				return rejectedSpans, errorMessage
+			}
+			rejectedSpans, body = int64(value), body[n:]
+		case num == fieldErrorMessage && typ == protowire.BytesType:
+			value, n := protowire.ConsumeString(body)
+			if n < 0 {
+				return rejectedSpans, errorMessage
+			}
+			errorMessage, body = value, body[n:]
+		default:
+			n = protowire.ConsumeFieldValue(num, typ, body)
+			if n < 0 {
+				return rejectedSpans, errorMessage
+			}
+			body = body[n:]
+		}
+	}
+	return rejectedSpans, errorMessage
+}
+
 // EncodeExportRequest is the inverse of DecodeExportRequest. It exists for
 // tests and fixture generation; the server never encodes a request.
 func EncodeExportRequest(resourceSpans []*tracepb.ResourceSpans) ([]byte, error) {

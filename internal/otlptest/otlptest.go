@@ -16,6 +16,8 @@ import (
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
 	resourcepb "go.opentelemetry.io/proto/otlp/resource/v1"
 	tracepb "go.opentelemetry.io/proto/otlp/trace/v1"
+
+	"github.com/tracepad/tracepad/internal/mapping"
 )
 
 // Fixture is one named export body.
@@ -541,6 +543,14 @@ Look at the cold room first — it logged eight degrees twice overnight.`
 			),
 		},
 	}
+}
+
+// JSONBody renders an export in the OTLP/JSON encoding, ids hex-encoded as the
+// specification prescribes (spec 019 #7). It is how the corpus is replayed
+// through the JSON door: the same fixtures, the same expected rows, one
+// encoding apart — which is the whole claim Decision 7 makes.
+func JSONBody(resourceSpans []*tracepb.ResourceSpans) ([]byte, error) {
+	return mapping.EncodeExportRequestJSON(resourceSpans)
 }
 
 // SpanWith builds a minimal one-span export carrying the given string

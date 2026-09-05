@@ -14,11 +14,53 @@ convenience over exactly this endpoint, not a way around it.
 
 Both routes are the same endpoint and accept the same credentials.
 
-- **Body**: `ExportTraceServiceRequest` protobuf.
+- **Body**: `ExportTraceServiceRequest`, in either OTLP encoding.
 - **Content-Type**: `application/x-protobuf` (`application/protobuf` is
-  accepted too). Anything else is `415`.
-- **Content-Encoding**: `gzip` is supported and transparently decoded.
-- OTLP/JSON and OTLP over gRPC are not implemented.
+  accepted too), or `application/json` for the OTLP/JSON encoding — see
+  [The JSON encoding](#the-json-encoding). Anything else is `415`.
+- **Content-Encoding**: `gzip` is supported and transparently decoded, in
+  either encoding.
+- OTLP over gRPC is not implemented.
+
+## The JSON encoding
+
+Any OpenTelemetry SDK can send JSON instead of protobuf:
+
+```sh
+export OTEL_EXPORTER_OTLP_PROTOCOL=http/json
+```
+
+Same endpoints, same credentials, same mapping — the encoding is transport, not
+meaning, and a span arrives as the same row either way. The response comes back
+in the encoding the request was sent in, so a JSON export gets a JSON
+`ExportTraceServiceResponse` with `partialSuccess` when spans were skipped.
+
+Two things the OTLP/JSON encoding prescribes and that Tracepad holds you to:
+
+- **Ids are hex, not base64.** `traceId`, `spanId`, `parentSpanId` and the ids
+  inside a span link are hex strings — `"4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f"`,
+  not `"T4wdLjpbbH2OnwobLD1OXw=="`. This is the one place OTLP/JSON departs
+  from protobuf-JSON, and it is the departure every collector implements; a
+  base64 id is a `400` that names the field. Accepting both would make one body
+  mean two things.
+- **64-bit integers may be strings or numbers.** `"startTimeUnixNano":
+  "1787738400000000000"` and `"startTimeUnixNano": 1787738400000000000` are
+  both read, exactly.
+
+Unknown fields are ignored, as they are on the protobuf path: an exporter on a
+newer OTLP version keeps working.
+
+A JSON batch is **archived as JSON**, under its own content type, and
+[`tracepad export --otlp`](export.md) replays it as JSON. The archive is what
+arrived; converting at ingest would make it the converter's output instead, and
+a bug in that conversion would be unfixable because the original would be gone.
+
+```sh
+curl -X POST http://localhost:4318/v1/traces \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer tp-sk-…" \
+  --data @export.json
+```
 
 ## Authentication
 
@@ -69,7 +111,7 @@ which is also the test that keeps them working.
 | `400` | The body is not a decodable OTLP export. |
 | `401` | Unknown credentials. |
 | `413` | The body is over `TRACEPAD_MAX_BODY_BYTES`. |
-| `415` | Wrong `Content-Type`. |
+| `415` | `Content-Type` is neither `application/x-protobuf` nor `application/json`. |
 | `429` | The write queue is saturated; retry after the `Retry-After` delay. Standard OTLP exporters do this on their own. |
 
 A `200` means the spans are committed and fsynced, not merely queued.
@@ -77,6 +119,30 @@ A `200` means the spans are committed and fsynced, not merely queued.
 A span that cannot be mapped — a missing or malformed trace/span id — is
 skipped and counted in `partial_success` rather than failing the whole export.
 Its bytes are still in the stored raw body, so nothing is lost.
+
+## What is kept, and for how long
+
+Every accepted body is stored as it arrived, compressed, under the project's
+raw retention window (`TRACEPAD_STORE_RAW`, `raw_retention_days` — see
+[retention.md](retention.md)). That archive is what
+[`tracepad export --otlp`](export.md) replays, and it is readable through
+`GET /api/v1/raw` ([api.md](api.md#the-raw-archive)).
+
+`GET /api/v1/system` reports its size and its reach:
+
+```json
+"raw": {
+  "enabled": true,
+  "batches": 12400,
+  "bytes": 3328599654,
+  "oldest_received_at": "2026-08-06T04:12:19Z",
+  "newest_received_at": "2026-09-05T09:44:02Z",
+  "traces_before_window": 214
+}
+```
+
+`traces_before_window` is the honest edge of the promise: those traces still
+have rows, but no body to replay. `tracepad system` prints the same block.
 
 ## What Tracepad reads from your spans
 
