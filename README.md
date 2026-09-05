@@ -179,6 +179,21 @@ a dry run until you echo the name of what it destroys, and deleting a project
 is undoable for a week. See [docs/retention.md](docs/retention.md) and
 [docs/admin.md](docs/admin.md).
 
+## Taking the data out
+
+Every export body Tracepad accepts is kept byte for byte, and one command
+replays it into any OTLP receiver — another Tracepad, a Collector, a vendor's
+endpoint — or onto disk:
+
+```sh
+tracepad export --otlp --to http://collector:4318/v1/traces
+tracepad export --otlp --dir ./tracepad-export
+```
+
+In arrival order, resumably, and it reports what it could not cover: a trace
+older than the raw retention window has rows but no body, and nothing here
+invents one. See [docs/export.md](docs/export.md).
+
 ## License
 
 Apache-2.0. See [LICENSE](LICENSE); third-party attributions are in

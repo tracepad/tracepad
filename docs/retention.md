@@ -56,9 +56,18 @@ where it would match every row there is.
 
 Raw follows the parsed window by default rather than being shorter, because raw
 is the insurance policy: it is what makes a mapping bug retroactively fixable
-and what `export --otlp` will replay. A default that expired it sooner would
-silently cap all of that. Operators for whom the raw bodies are the heavy or
-the sensitive part shorten them deliberately.
+and what [`tracepad export --otlp`](export.md) replays. A default that expired
+it sooner would silently cap all of that. Operators for whom the raw bodies are
+the heavy or the sensitive part shorten them deliberately.
+
+**`raw_retention_days` is the export's reach.** A trace older than that window
+still exists — its rows are in the database and every screen shows it — but the
+body it arrived in is gone, and an export replays bodies. Shortening this window
+is therefore shortening how far back the data can leave whole; nothing else
+about the trace changes. `GET /api/v1/system` reports the archive's size and its
+two ends beside `traces_before_window`, which is how many traces already fall
+outside it, and `tracepad export --otlp --dry-run` prints the same before
+sending anything. Read those before shortening this window, not after.
 
 A batch is swept by its own age and never because the traces it fed were swept:
 one export body feeds many traces with different fates.

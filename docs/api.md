@@ -400,6 +400,83 @@ same id appears in more than one trace of the project the answer is a `409`
 listing the candidates — never a guess. Truncation markers always carry the
 pair, so following a marker never lands there.
 
+## The raw archive
+
+Every export body Tracepad accepts is kept as it arrived, and these two
+endpoints are how it leaves. They are the project's own reads under the
+project's own keys — a key that reads traces reads the batches they came from —
+and they are what [`tracepad export --otlp`](export.md) is a client of. Anything
+else can be one too: a backup job, a script, a second Tracepad.
+
+```sh
+curl … "http://localhost:4318/api/v1/raw?limit=2&count=1"
+```
+
+```json
+{
+  "batches": [
+    {"id": 1, "received_at": "2026-09-01T00:00:00Z", "dialect": "langfuse",
+     "content_type": "application/x-protobuf", "content_encoding": "gzip",
+     "size_bytes": 1274},
+    {"id": 2, "received_at": "2026-09-01T00:00:00.001Z", "dialect": "genai",
+     "content_type": "application/json", "content_encoding": "",
+     "size_bytes": 3810}
+  ],
+  "next_cursor": "MTc4ODIyMDgwMDAwMTAwMDAwMDoy",
+  "prev_cursor": null,
+  "total": 12400,
+  "total_capped": false
+}
+```
+
+**This is the one listing here that runs forward.** Everything else in this API
+is newest first, because that is how a person reads. A replay is not reading: a
+receiver that does not upsert by span id — a file, a stream — has to see the
+spans in the order the world produced them, and `received_at` is the only order
+this server knows. So `next` walks towards *newer* batches and `prev` back
+towards older ones, and rows come back oldest first either way.
+
+| Parameter | |
+|---|---|
+| `since`, `until` | RFC 3339, on `received_at`. Half-open: `since` inclusive, `until` exclusive. |
+| `limit` | 1–500, default 100. |
+| `cursor`, `direction` | Keyset over `(received_at, id)`. |
+| `count` | Adds `total` and `total_capped`, counted up to 100000 — high, because this count answers "how much is this export about to send". |
+
+`size_bytes` is the **decoded** length, which is what a fetch of the body
+returns; the row itself is compressed and smaller. `content_type` is what the
+body is in, and a batch stored before schema 0012 reads as
+`application/x-protobuf`, which is the only thing it can be. `dialect` is which
+attribute vocabulary the mapper recognised, and is empty when it claimed
+nothing.
+
+A cursor and a `since` that contradict each other are a `400` rather than a
+reconciliation: the cursor says where the page starts and so does the window,
+and guessing which was meant is worse than asking.
+
+### One body
+
+```sh
+curl … -o batch.pb "http://localhost:4318/api/v1/raw/1"
+```
+
+The bytes the client posted, with gzip already removed — the stored body is the
+decoded one, so a replay does not have to unwrap two layers. The response
+carries:
+
+| | |
+|---|---|
+| `Content-Type` | The type it was received in, which is what a replay posts it under |
+| `X-Tracepad-Received-At` | RFC 3339 |
+| `X-Tracepad-Dialect` | Absent when the mapper claimed nothing |
+
+Like `/observations/{id}/io`, this endpoint is **exempt from the response
+budget**: a cut body is not a smaller batch, it is a broken one.
+
+A `404` means the id is not this project's, or the retention sweeper has
+already taken it. Both answer the same way, because a batch that is not yours
+does not exist to you.
+
 ## Sessions
 
 A session is not a stored entity: it is the set of traces that named it, and
@@ -556,6 +633,28 @@ per attribute dialect, how many were skipped, and every distinct
 `pinned_traces` is how many traces a live run is keeping out of the retention
 sweep — the size of retention's one exception — and `orphan_traces` how many
 trace deliveries since start named a run this project does not have.
+
+`raw` is the archive of export bodies — what an export can carry out, and what
+it cannot:
+
+```json
+"raw": {
+  "enabled": true,
+  "batches": 12400,
+  "bytes": 3328599654,
+  "oldest_received_at": "2026-08-06T04:12:19Z",
+  "newest_received_at": "2026-09-05T09:44:02Z",
+  "traces_before_window": 214
+}
+```
+
+Unlike the counters below it, these are on disk rather than since start.
+`enabled` is `TRACEPAD_STORE_RAW`; `bytes` is what the archive occupies
+compressed, which is the number an operator moving `raw_retention_days` is
+deciding about; `traces_before_window` counts the traces whose earliest span
+started before the oldest batch arrived, and which therefore have rows but no
+body to replay. It is a lower bound — a late export of an old trace lands after
+the batch line — and [export.md](export.md) says what to do about it.
 
 The row counts and the ingest counters are **your project's**: a project key is
 a tenant credential, so this does not report how much data anybody else holds,
