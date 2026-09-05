@@ -3,7 +3,7 @@ import { state } from './harness';
 
 // Sessions, end to end against the real binary and the endpoint spec 007 added
 // (Testing): the listing's aggregates, the session view, and a trace opened
-// from it. The corpus carries two sessions and nine traces that name none, so
+// from it. The corpus carries four sessions and traces that name none, so
 // "aggregated from traces" is testable rather than merely asserted.
 
 async function signIn(page: Page) {
@@ -16,9 +16,9 @@ test('the listing rolls the corpus up by session', async ({ page }) => {
 	await page.getByRole('link', { name: 'Sessions' }).click();
 
 	await expect(page).toHaveURL(/\/sessions$/);
-	// Three sessions, and only three: the traces that named none are not
-	// sessions of one.
-	await expect(page.getByRole('row')).toHaveCount(4);
+	// Four sessions, and only four: the traces that named none are not
+	// sessions of one. The header is the fifth row.
+	await expect(page.getByRole('row')).toHaveCount(5);
 	const row = page.getByRole('row').filter({ hasText: 'session-77' });
 	await expect(row).toContainText('$0.0010');
 });

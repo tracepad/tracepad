@@ -1,10 +1,19 @@
 import { expect, test, type Page } from '@playwright/test';
-import { FAILING_TRACE, LARGE_PAYLOAD_OBSERVATION, LARGE_PAYLOAD_TRACE, state } from './harness';
+import {
+	FAILING_TRACE,
+	LARGE_PAYLOAD_OBSERVATION,
+	LARGE_PAYLOAD_TRACE,
+	PLAIN_TEXT_OBSERVATION,
+	PLAIN_TEXT_TRACE,
+	plainTextPayloads,
+	state
+} from './harness';
 
 // The payload surface against the real binary (spec 015, Testing): a marker
 // loaded from the banner, folding, a search that reaches what folding hid,
-// a prompt that wraps rather than scrolling the page sideways, and four
-// syntax colours that both themes really do paint differently.
+// a prompt that wraps rather than scrolling the page sideways, four syntax
+// colours that both themes really do paint differently, and a payload that is
+// not JSON at all.
 //
 // The suite boots with a 4 KiB response budget (`global-setup.ts`), which is
 // what puts a truncation marker on the screen to click.
@@ -178,4 +187,63 @@ test('both themes paint the four code colours, and paint them differently', asyn
 	expect(dark.length).toBe(light.length);
 	// The theme reaches inside the editor: no shipped palette of its own.
 	expect(dark).not.toEqual(light);
+});
+
+// The other half of that: a payload that is not JSON is not shown as JSON
+// (#12). A bare string is what the API answers with for a hand-instrumented
+// `gen_ai.prompt`, and quoting it would put an escape on every newline of the
+// thing the reader came to read. The unit layer covers `asDocument`; this is
+// the same value arriving through the binary, the corpus and the panel.
+test('a payload that is not JSON is shown as text, not as a quoted string', async ({ page }) => {
+	await signIn(page);
+	await page.goto(`/traces?peek=${PLAIN_TEXT_TRACE}&obs=${PLAIN_TEXT_OBSERVATION}`);
+	await expect(page.getByRole('dialog')).toBeVisible();
+
+	const { input: prompt, output: answer } = plainTextPayloads();
+	const input = page.getByLabel('Input', { exact: true });
+	await expect(input).toContainText(prompt.split('\n')[0]);
+
+	// No language, so no tokens: the highlighter above finds four colours in a
+	// JSON document and there is nothing here for it to paint at all.
+	const tokens = await input.evaluate((node) => node.querySelectorAll('span').length);
+	expect(tokens).toBe(0);
+
+	// The document is the string the mapper stored, line for line: the blank
+	// lines between the prompt's paragraphs and the indentation of its
+	// numbered list are the document, and nothing along the way spelled them
+	// `\n` and `  ` or put quotes around the whole.
+	const lines = await area(page, 'Input').locator('.cm-line').allTextContents();
+	expect(lines.join('\n')).toBe(prompt);
+
+	// And the answer beside it is the same kind of value.
+	const output = page.getByLabel('Output', { exact: true });
+	await expect(output).toContainText(answer.split('\n')[0]);
+	expect(await output.evaluate((node) => node.querySelectorAll('span').length)).toBe(0);
+	expect((await area(page, 'Output').locator('.cm-line').allTextContents()).join('\n')).toBe(answer);
+});
+
+test('Cmd-F searches a plain-text payload the same way', async ({ page }) => {
+	// The search panel belongs to the surface rather than to the JSON language
+	// (#5), so it has to reach a document that has no language at all.
+	await signIn(page);
+	await page.goto(`/traces?peek=${PLAIN_TEXT_TRACE}&obs=${PLAIN_TEXT_OBSERVATION}`);
+
+	// The prompt's opening line, taken from the fixture rather than copied:
+	// a whole line of it is in the document once, and stays there whatever the
+	// prompt is reworded to.
+	const phrase = plainTextPayloads().input.split('\n')[0];
+	const input = page.getByLabel('Input', { exact: true });
+	await expect(input).toContainText(phrase);
+	await input.click();
+	await page.keyboard.press('ControlOrMeta+f');
+
+	const area_ = area(page, 'Input');
+	const find = area_.getByLabel('Find', { exact: true });
+	await expect(find).toBeVisible();
+
+	// Typed rather than filled, for the reason the JSON case above gives.
+	await find.pressSequentially(phrase);
+	await find.press('Enter');
+
+	await expect(area_.locator('.cm-searchMatch-selected')).toHaveCount(1);
 });
