@@ -268,10 +268,16 @@ reason in a comment; adding a dialect should be a table edit.
 ## Releasing
 
 A version tag is the one act that publishes anything. `v0.2.0` runs
-`release-server.yml`: GoReleaser puts the archives and checksums on GitHub
+`release-server.yml`: a `check` job validates the tag and works out which image
+tags it may move, GoReleaser puts the archives and checksums on GitHub
 Releases, then `buildx` pushes `ghcr.io/tracepad/tracepad` as `0.2.0`, `0.2`
 and `latest`. A pre-release tag (`v0.2.0-rc.1`) publishes its exact tag alone —
 no `X.Y`, no `latest`. Nothing about this runs on a push to `main`.
+
+**A back-patch is safe to tag.** `latest` and `X.Y` move only when the tag is
+the newest of its kind, so releasing `v0.2.5` after `v0.3.0` publishes `0.2.5`
+and `0.2` and leaves `latest` where it is (spec 020 #16). The workflow logs
+which moving tags it declined and why.
 
 Before tagging:
 

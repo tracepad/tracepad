@@ -102,10 +102,16 @@ USER nonroot:nonroot
 # The probe is the binary, because the image has nothing else to probe with: no
 # shell, no curl, no wget. `/health` is the one route that authenticates
 # nothing, so the probe needs no key either (#4).
+#
+# It finds the server through TRACEPAD_LISTEN, so moving the port with
+# `-e TRACEPAD_LISTEN=:8080` moves the probe with it. A `--listen` flag appended
+# to `docker run` does not: a flag on the server's command line is not something
+# a second process can read, and the container would run correctly while
+# reporting itself unhealthy for ever (#15).
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s CMD ["/tracepad", "health"]
 
 # Arguments are the server's flags: `docker run … tracepad --data-dir /data/x`
 # reaches `serve`, because a leading flag belongs to the default command
-# (spec 001 #1).
+# (spec 001 #1). The port is the exception above — set it in the environment.
 ENTRYPOINT ["/tracepad"]
 CMD []

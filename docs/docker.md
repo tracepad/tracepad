@@ -41,17 +41,33 @@ deliberately no file under `/data` holding it: that would put a secret on a
 volume outliving the container, and give anyone who can read the volume a way
 to learn a key that a host install does not have.
 
-A lost key is replaced rather than recovered, and the CLI in the image is the
-one that does it:
+Any command can be run against the server from inside its own container —
+`/tracepad` is the same binary, and `--url http://localhost:4318` points it at
+the server it is sharing with:
 
 ```sh
-docker exec tracepad /tracepad keys create \
-  --url http://localhost:4318 --key tp-sk-…
+docker exec tracepad /tracepad keys create --url http://localhost:4318 \
+  --key tp-sk-…            # mint a second pair, to rotate onto
 ```
 
-Any command works that way — `/tracepad` is the same binary, and `--url
-http://localhost:4318` points it at the server it is sharing a container with.
-See [cli.md](cli.md).
+**If the key is lost rather than being rotated**, that command has nothing to
+authenticate with — every CLI command but `health` needs a credential, and the
+one you would pass is the one you do not have. The credential that still works
+is the admin token, which is why a deployment you cannot afford to lock
+yourself out of should be started with one:
+
+```sh
+docker run -d --name tracepad -v tracepad:/data -p 4318:4318 \
+  --env-file ./tracepad.env \        # TRACEPAD_ADMIN_TOKEN=…
+  ghcr.io/tracepad/tracepad
+
+docker exec tracepad /tracepad keys create \
+  --url http://localhost:4318 --key "$TRACEPAD_ADMIN_TOKEN"
+```
+
+Without one, the remaining route is the declarative bootstrap: set
+`TRACEPAD_PROJECTS` and restart, which re-adds the keys it names. See
+[admin.md](admin.md) and [cli.md](cli.md).
 
 ## What the image is
 
@@ -135,6 +151,16 @@ server would answer its own health check and nothing else, and `-p` would
 publish a port nothing accepts on. Bind to `:4318` — the container **is** the
 isolation boundary — and control who can reach it with `-p 127.0.0.1:4318:4318`
 on the host side instead.
+
+**To change the port, set `TRACEPAD_LISTEN`; do not pass `--listen`.** Both
+move the server, but only the variable moves the health check with it: the
+probe reads `TRACEPAD_LISTEN` (and `TRACEPAD_URL` ahead of it) and cannot see a
+flag you appended to the command line, so a container started with `--listen
+:8080` runs correctly and is marked `unhealthy` for ever.
+
+```sh
+docker run -d -e TRACEPAD_LISTEN=:8080 -p 8080:8080 … ghcr.io/tracepad/tracepad
+```
 
 ## Health
 

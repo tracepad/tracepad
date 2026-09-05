@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"slices"
@@ -580,6 +581,19 @@ func (r *run) stats(ctx context.Context, args []string) error {
 // curl, no wget and no shell to write one in, so the binary is the probe
 // (spec 020 #2).
 func (r *run) health(ctx context.Context, args []string) error {
+	// Where to probe, when nobody said. Every other command asks a server
+	// somewhere else; this one is usually asking about the process beside
+	// it, and in the image that process's port is `TRACEPAD_LISTEN` —
+	// which the probe would otherwise not read, so `-e TRACEPAD_LISTEN=:8080`
+	// would produce a healthy server marked unhealthy for ever (#15).
+	//
+	// Before the flag set is built, because that captures this as `--url`'s
+	// default; `--url` and `TRACEPAD_URL` still win, in that order.
+	if r.opt.Env("TRACEPAD_URL") == "" {
+		if target := listenTarget(r.opt.Env("TRACEPAD_LISTEN")); target != "" {
+			r.url = target
+		}
+	}
 	fs := r.flags("health")
 	if _, err := r.parseUnauthenticated(fs, args, 0); err != nil {
 		return err
@@ -619,6 +633,30 @@ func (r *run) health(ctx context.Context, args []string) error {
 	}
 	fmt.Fprintln(r.opt.Stdout, answer.Version)
 	return nil
+}
+
+// listenTarget turns a server's listen address into a URL a probe on the same
+// host can reach, or "" if it is not one it can make sense of.
+//
+// A wildcard bind is not a connectable address, so it becomes loopback —
+// 127.0.0.1 rather than `localhost`, because the probe should not depend on
+// what a container's resolver thinks that name means, or on which of IPv4 and
+// IPv6 it answers with first when the server bound only one of them.
+func listenTarget(listen string) string {
+	if listen == "" {
+		return ""
+	}
+	host, port, err := net.SplitHostPort(listen)
+	if err != nil || port == "" {
+		// Not an address this can read. The default stands, and the
+		// server will have its own complaint about it.
+		return ""
+	}
+	switch host {
+	case "", "0.0.0.0", "::":
+		host = "127.0.0.1"
+	}
+	return "http://" + net.JoinHostPort(host, port)
 }
 
 func (r *run) system(ctx context.Context, args []string) error {

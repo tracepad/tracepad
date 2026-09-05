@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -86,43 +87,11 @@ func Run(ctx context.Context, opt Options) int {
 	}
 
 	command, rest := split(opt.Args)
-	var err error
-	switch command {
-	case "traces":
-		err = r.traces(ctx, rest)
-	case "tail":
-		err = r.tail(ctx, rest)
-	case "sessions":
-		err = r.sessions(ctx, rest)
-	case "scores":
-		err = r.scores(ctx, rest)
-	case "prompts":
-		err = r.prompts(ctx, rest)
-	case "datasets":
-		err = r.datasets(ctx, rest)
-	case "runs":
-		err = r.runs(ctx, rest)
-	case "score-configs":
-		err = r.scoreConfigs(ctx, rest)
-	case "stats":
-		err = r.stats(ctx, rest)
-	case "system":
-		err = r.system(ctx, rest)
-	case "health":
-		err = r.health(ctx, rest)
-	case "export":
-		err = r.export(ctx, rest)
-	case "projects":
-		err = r.projects(ctx, rest)
-	case "keys":
-		err = r.keys(ctx, rest)
-	case "retention":
-		err = r.retention(ctx, rest)
-	case "users":
-		err = r.users(ctx, rest)
-	default:
+	handler, known := r.handlers()[command]
+	if !known {
 		return r.fail(usageErrorf("unknown command %q", command))
 	}
+	err := handler(ctx, rest)
 	switch {
 	case errors.Is(err, errHelp):
 		fmt.Fprint(opt.Stdout, Usage)
@@ -130,6 +99,49 @@ func Run(ctx context.Context, opt Options) int {
 		return r.fail(err)
 	}
 	return ExitOK
+}
+
+// handlers is every subcommand this package dispatches, in one table.
+//
+// A table rather than a switch because there are two readers of it: this
+// package, which runs the command, and `cmd/tracepad`, which has to decide
+// whether a word on the command line belongs to the CLI at all. That second
+// list used to be written out by hand, and it drifted — `datasets`, `runs`,
+// `score-configs` and `export` shipped for three specs answering "unknown
+// command" from the real binary, because the tests call Run directly and never
+// go through the binary's routing (spec 020 #14). One table, read by both, is
+// the shape in which that cannot happen again.
+func (r *run) handlers() map[string]func(context.Context, []string) error {
+	return map[string]func(context.Context, []string) error{
+		"traces":        r.traces,
+		"tail":          r.tail,
+		"sessions":      r.sessions,
+		"scores":        r.scores,
+		"prompts":       r.prompts,
+		"datasets":      r.datasets,
+		"runs":          r.runs,
+		"score-configs": r.scoreConfigs,
+		"stats":         r.stats,
+		"system":        r.system,
+		"health":        r.health,
+		"export":        r.export,
+		"projects":      r.projects,
+		"keys":          r.keys,
+		"retention":     r.retention,
+		"users":         r.users,
+	}
+}
+
+// Commands is every subcommand the CLI serves, sorted. `cmd/tracepad` routes on
+// it, so the binary dispatches exactly what this package implements.
+func Commands() []string {
+	handlers := (&run{}).handlers()
+	names := make([]string, 0, len(handlers))
+	for name := range handlers {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	return names
 }
 
 // Usage is the client half of the binary's help text.

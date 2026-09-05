@@ -57,7 +57,10 @@ owner's), Windows containers, a Helm chart, a
 | 10 | **2026-09-05** — Both builder stages run on `--platform=$BUILDPLATFORM` and cross-compile to `$TARGETOS/$TARGETARCH`; the release workflow therefore sets up no QEMU | `CGO_ENABLED=0` is what makes cross-compiling exact rather than a compromise (#1), and the bundle is static files with no architecture at all — so under `--platform linux/amd64,linux/arm64` the Node stage runs once instead of twice, and neither Go build runs under emulation. Emulating a Go toolchain for arm64 turns a one-minute build into a fifteen-minute one, and the runtime stage only copies, so nothing in the whole build ever executes a foreign binary. |
 | 11 | **2026-09-05** — `.dockerignore` excludes `ui/dist` and `internal/ui/dist`, which are what this tree's build outputs are called; #8 said `ui/build` | `ui/build` is SvelteKit's default name and not this project's: `make ui` builds `ui/dist` and stages it at `internal/ui/dist` (`Makefile`). Both are excluded rather than only the first, and the Go stage takes the bundle from the Node stage — so what an image serves cannot depend on whether the person building it had run `make ui` that day, which is the same reproducibility #1 is about. |
 | 12 | **2026-09-05** — A second build argument, `REVISION`, fills `org.opencontainers.image.revision`; it defaults to empty and only the release workflow passes it (`github.sha`) | The image contract asks for that label and #1 named only `VERSION`. A build context carries no commit — `.git` is not even in it (#8) — so there is nothing for a plain `docker build .` to claim, and an empty label is the honest answer where a fabricated one would be worse than none. |
-| 13 | **2026-09-05** — Two of the three mutations Testing names do not kill the assertion they were paired with, and the section is corrected: (a) removing the `USER` line changes nothing, because `gcr.io/distroless/static-debian12:nonroot` sets `User=65532` itself — the mutation that does kill the uid assertion is dropping the `nonroot` tag from the base image, which is the regression that assertion is actually for; (b) removing `ENV TRACEPAD_DATA_DIR` does **not** fail the boot: Docker sets `HOME` from the image's passwd entry, `/home/nonroot` is writable, and the server starts healthy while writing to `/home/nonroot/.local/share/tracepad` in the container's writable layer. `image-check` therefore also asserts that `tracepad.db` is on the volume | Found by running them (the PR's table). The `USER` line stays even though it is inert, because the file should state its own contract rather than inherit it silently from a tag someone may change. The second finding is the more serious one and is why the assertion was added: an image whose data quietly does not survive `docker rm` is a worse failure than one that refuses to start, and the boot test as specified would have passed it. |
+| 13 | **2026-09-05** — Two of the three mutations Testing names do not kill the assertion they were paired with, and the section is corrected: (a) removing the `USER` line changes nothing on its own, because `gcr.io/distroless/static-debian12:nonroot` sets `User=65532` itself — and dropping the `nonroot` tag from the base image changes nothing on its own either, because the `USER` line then supplies it. The two say the same thing twice on purpose, and the uid assertion is what catches losing **both**, which is the mutation the PR shows; (b) removing `ENV TRACEPAD_DATA_DIR` does **not** fail the boot: Docker sets `HOME` from the image's passwd entry, `/home/nonroot` is writable, and the server starts healthy while writing to `/home/nonroot/.local/share/tracepad` in the container's writable layer. `image-check` therefore also asserts that `tracepad.db` is on the volume | Found by running them (the PR's table). The `USER` line stays beside the `nonroot` tag rather than being pruned as redundant, because the file should state its own contract rather than inherit it silently from a tag someone may change — and because either one alone still holds the line if the other is lost. The second finding is the more serious one and is why the assertion was added: an image whose data quietly does not survive `docker rm` is a worse failure than one that refuses to start, and the boot test as specified would have passed it. |
+| 14 | **2026-09-05** — **The release PR ships no binary with unreachable commands.** `cmd/tracepad` no longer keeps its own copy of the command list: it routes on `cli.Commands()`, which is the same table `cli.Run` dispatches from, and `datasets`, `runs`, `score-configs` and `export` become reachable for the first time. A test in `cmd/tracepad` holds the two sides equal and refuses a CLI command that collides with `serve`, `mcp`, `version` or `help` | Found while wiring `health` in, and out of scope until this spec's own subject changed what it costs: this is the PR that makes a version tag publish a binary and an image, so a defect that ships four documented command families answering `unknown command` ships *here*. It also undercut the `docker` job's own justification — the job is defended as the seam that proves the real binary dispatches at all, and it exercised one command while four were broken. One table read by both sides is the shape in which the drift cannot recur; the hand-written copy is what let it happen through three specs, because every CLI test calls `cli.Run` directly and skips the binary's routing entirely. |
+| 15 | **2026-09-05** — With neither `--url` nor `TRACEPAD_URL`, `tracepad health` takes its target from **`TRACEPAD_LISTEN`** (a wildcard or empty bind host reads as `127.0.0.1`), and only then falls back to `client.DefaultURL`. The `--listen` flag is deliberately not consulted; `docs/docker.md` and the Dockerfile say to move the port with `-e TRACEPAD_LISTEN` | #4 gave the probe the same default every command has, and for this one command that default is wrong: every other command asks a server elsewhere, while this one almost always asks about the process beside it. As specified, `docker run … -e TRACEPAD_LISTEN=:8080` produced a server that worked and a `HEALTHCHECK` that probed 4318 for ever — a container permanently `unhealthy` while perfectly healthy, which is the failure mode a probe exists to prevent. A flag cannot be read the same way: it lives on another process's command line, so the environment is the only place a server and its probe can both look. |
+| 16 | **2026-09-05** — `latest` and `X.Y` move only when the tag being released is the newest of its kind — the highest non-pre-release tag overall, and the highest on its own `X.Y` line, by `git tag --sort=-v:refname`. A back-patch publishes its exact version and whichever of those it is still newest for. The tag-shape check and this computation move into a `check` job that both `release` and `image` depend on | #6 said `latest` moves on a release and not on a push, which answers "what may move it" and not "may it move backwards". Tagging `v0.2.5` after `v0.3.0` would have republished `latest` at the older build — a silent downgrade for everyone tracking it, landing them in exactly the older-binary-meets-newer-schema case `docs/docker.md` says is unsupported. Pre-releases are excluded from the comparison because git's version sort places `v0.3.0-rc.1` after `v0.3.0`. The `check` job exists because the guard was previously in `image`, which is `needs: release` — so a refused tag would already have had its archives published, and a half-published release is worse than a refused one. |
 
 ---
 
@@ -80,7 +83,8 @@ owner's), Windows containers, a Helm chart, a
 Every other `TRACEPAD_*` variable (`cmd/tracepad/main.go`'s usage) is the
 operator's to pass with `-e`. The CLI inside the image works against the
 server with `docker exec … /tracepad <command> --url http://localhost:4318`
-— the docs show it for `keys new`.
+— the docs show it for `keys create` (there is no `keys new`; the CLI's
+subcommands are `ls`, `create` and `rm`).
 
 ## CLI contract
 
@@ -92,6 +96,11 @@ Exit `0` and the version on stdout for a `200`; `1` and the reason on
 stderr for anything else (connection refused, a non-200, a body without
 `version`). `--json`: `{"version": "…", "ok": true}`. Listed in
 `docs/cli.md` under *Administration*, covered by the usage parity test.
+
+Where it looks, in order: `--url`, `TRACEPAD_URL`, **`TRACEPAD_LISTEN`**
+(a wildcard or empty bind host read as `127.0.0.1`), then
+`client.DefaultURL` (#15). The `--listen` flag is not consulted — it is on
+another process's command line.
 
 ## Workflow contract
 
@@ -109,7 +118,15 @@ Nothing in it runs on `main`.
 
 - **Go**: `tracepad health` against a test server (`200` → exit 0 and the
   version; a `500` → exit 1; a refused connection → exit 1 with the
-  address in the message; `--json` shape); the usage parity test.
+  address in the message; `--json` shape); the usage parity test; the
+  precedence of `--url` over `TRACEPAD_URL` over `TRACEPAD_LISTEN`, and
+  the listen-address mapping itself (#15).
+- **Dispatch parity** (#14), in `cmd/tracepad`: every command
+  `cli.Commands()` serves is routed by the binary, the four that were
+  unreachable are named by hand as the regression they were, none of them
+  collides with `serve`/`mcp`/`version`/`help`, and `splitCommand` hands
+  each one over. The CLI's own suite cannot cover this: it calls `cli.Run`,
+  which is the path that skips the binary's routing.
 - **The `docker` CI job** is the image's test (Decision 7); it also asserts
   the licence files are present in the image and that `docker run --rm
   ghcr… health --url http://127.0.0.1:1` exits 1 (the probe fails
@@ -119,7 +136,8 @@ Nothing in it runs on `main`.
   locally. Both documented in AGENTS.md's Commands.
 - **Mutation** for the Go part; the image contract by the CI job's
   assertions, each of which must fail on the corresponding Dockerfile edit
-  (the base image's `nonroot` tag dropped → the uid assertion;
+  (the `USER` line **and** the base image's `nonroot` tag both dropped →
+  the uid assertion;
   `HEALTHCHECK` removed → the wait never reaches `healthy`;
   `ENV TRACEPAD_DATA_DIR` removed → the database is not on the volume).
   The PR shows each; #13 records what the first and third of these looked

@@ -7,9 +7,11 @@
 #
 #   scripts/image-check.sh [image]        (default: tracepad:dev)
 #
-# The image must have been built with VERSION set to what EXPECT_VERSION says
-# (default `ci`), which is how the run proves the build argument reached the
-# binary rather than merely reached the build.
+# The image must have been built with VERSION set to what EXPECT_VERSION says,
+# which is how the run proves the build argument reached the binary rather than
+# merely reached the build. Both defaults are the Makefile's, so that
+# `make image && scripts/image-check.sh` agrees with itself; `make image-check`
+# passes whatever VERSION is in force, and CI passes `ci`.
 #
 # Every assertion here is one the Dockerfile can fail: the mutations named in
 # the spec's Testing section (drop USER, drop HEALTHCHECK, drop
@@ -17,7 +19,7 @@
 set -euo pipefail
 
 image="${1:-tracepad:dev}"
-expect_version="${EXPECT_VERSION:-ci}"
+expect_version="${EXPECT_VERSION:-dev}"
 
 # Distroless has no shell, so nothing here may `docker exec sh`. Everything is
 # asked of the daemon (`inspect`, `top`, `cp`) or of the binary itself, which
@@ -90,11 +92,21 @@ echo "==> the server runs as uid 65532"
 # process: there is no shell in the image to ask `id` of. The column is found
 # by its header rather than by position, because the daemon chooses the `ps`
 # arguments and a fixed index is a guess about someone else's default.
+#
+# An absent column is its own failure rather than a default: awk reads an unset
+# variable as 0, so `$column` would silently become `$0` and the check would
+# report the whole process line as the uid — a wrong answer wearing the costume
+# of a real regression.
 uid="$(docker top "$container" | awk '
     NR == 1 { for (i = 1; i <= NF; i++) if ($i == "UID") column = i; next }
-    NR == 2 { print $column }')"
-[ "$uid" = "65532" ] ||
-    fail "the server runs as uid ${uid:-unknown}, want 65532 — a container that writes /data as root is the bind-mount permission problem every operator hits once"
+    NR == 2 { if (column) print $column; else print "no-UID-column" }')"
+case "$uid" in
+    65532) ;;
+    no-UID-column)
+        fail "docker top printed no UID column, so this check cannot answer; its header was: $(docker top "$container" | head -1)" ;;
+    *)
+        fail "the server runs as uid ${uid:-unknown}, want 65532 — a container that writes /data as root is the bind-mount permission problem every operator hits once" ;;
+esac
 echo "    uid $uid"
 
 echo "==> the data directory is the volume"

@@ -41,7 +41,7 @@ Project "default" created. Connect your app with either:
 ```
 
 **Copy the secret key somewhere.** It is stored hashed, so this is the only
-time it is printable; a lost key is replaced with `tracepad keys new`, not
+time it is printable; a lost key is replaced with `tracepad keys create`, not
 recovered.
 
 Data lives in `~/.local/share/tracepad` by default (`/data` in the Docker

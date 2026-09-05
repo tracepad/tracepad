@@ -450,6 +450,21 @@ unit or a load balancer can ask whether the process is alive without holding a
 project secret to do it. It is what the [Docker image](docker.md) declares as
 its `HEALTHCHECK`.
 
+It is also the one command that will look for the server rather than assume it.
+With neither `--url` nor `TRACEPAD_URL`, it reads **`TRACEPAD_LISTEN`** — the
+variable that told the server where to bind — and probes that, treating a
+wildcard bind as `127.0.0.1`; only with neither of those does it fall back to
+`http://localhost:4318`. A probe usually runs beside the process it is asking
+about, and on a server moved to another port it should move too.
+
+```sh
+TRACEPAD_LISTEN=:8080 tracepad health     # probes http://127.0.0.1:8080
+```
+
+The `--listen` **flag** is not consulted, because a flag on the server's command
+line is not visible to a second process. Where both a server and its probe read
+the configuration, put the port in the environment.
+
 ## Version skew
 
 Every API response carries the server's build. When it differs from the CLI's,

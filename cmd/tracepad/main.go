@@ -42,20 +42,25 @@ func splitCommand(args []string) (string, []string) {
 // server half of the binary. They are the same binary on purpose: for an agent
 // with a terminal, "the tool is already on PATH" is zero integration
 // (design §3.3).
-var clientCommands = map[string]bool{
-	"traces":    true,
-	"tail":      true,
-	"sessions":  true,
-	"scores":    true,
-	"prompts":   true,
-	"stats":     true,
-	"system":    true,
-	"health":    true,
-	"projects":  true,
-	"keys":      true,
-	"retention": true,
-	"users":     true,
-}
+//
+// Asked of the CLI rather than listed here. Listing them here is what shipped
+// `datasets`, `runs`, `score-configs` and `export` unreachable through three
+// specs: the package grew a command, this copy did not, and every test calls
+// cli.Run directly and so never noticed (spec 020 #14).
+var clientCommands = func() map[string]bool {
+	names := cli.Commands()
+	set := make(map[string]bool, len(names))
+	for _, name := range names {
+		set[name] = true
+	}
+	return set
+}()
+
+// serverCommands are the words this file answers itself. The CLI must not claim
+// one of them: `clientCommands` is consulted first, so a collision would take
+// `serve` away from the server and hand it to a client command of the same
+// name. Nothing enforces this at compile time, so the test does.
+var serverCommands = []string{"serve", "mcp", "version", "help"}
 
 func main() {
 	cmd, args := splitCommand(os.Args[1:])
