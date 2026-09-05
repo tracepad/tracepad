@@ -84,6 +84,17 @@ func (s *Server) handleListRaw(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		// A cursor and a `since` that contradict each other are a client
+		// that changed the window and kept its place. The cursor wins for
+		// position and the filters still bound the end, so a cursor
+		// *before* `since` is not a narrower request — it is two answers
+		// to "where does this page start", and answering either would be
+		// guessing which one the caller meant (spec 019, edge cases).
+		if filter.Since != nil && cursor.ReceivedAt < *filter.Since {
+			writeError(w, http.StatusBadRequest,
+				"the cursor points at a batch older than since; drop one of the two")
+			return
+		}
 		filter.After = cursor
 	}
 

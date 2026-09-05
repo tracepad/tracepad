@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	tracepb "go.opentelemetry.io/proto/otlp/trace/v1"
@@ -130,6 +131,31 @@ func EncodeExportResponseJSON(rejectedSpans int64, errorMessage string) []byte {
 		return []byte("{}")
 	}
 	return encoded
+}
+
+// DecodeExportResponseJSON is DecodeExportResponse for a receiver that
+// answered in the JSON encoding. `rejectedSpans` may be a string or a number,
+// as 64-bit integers may be throughout the encoding.
+func DecodeExportResponseJSON(body []byte) (rejectedSpans int64, errorMessage string) {
+	var response struct {
+		PartialSuccess struct {
+			// Raw rather than a number: our own server writes the
+			// protojson spelling, which is a quoted integer, and
+			// another receiver may write a bare one. Both are the
+			// encoding, so both are read.
+			RejectedSpans json.RawMessage `json:"rejectedSpans"`
+			ErrorMessage  string          `json:"errorMessage"`
+		} `json:"partialSuccess"`
+	}
+	if err := json.Unmarshal(body, &response); err != nil {
+		return 0, ""
+	}
+	rejected, err := strconv.ParseInt(
+		strings.Trim(string(response.PartialSuccess.RejectedSpans), `"`), 10, 64)
+	if err != nil {
+		rejected = 0
+	}
+	return rejected, response.PartialSuccess.ErrorMessage
 }
 
 // EncodeExportRequestJSON is the inverse of DecodeExportRequestJSON. Like its
