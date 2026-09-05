@@ -41,9 +41,13 @@ type IngestBatch struct {
 type RawBatch struct {
 	ReceivedAt int64
 	Dialect    string
+	// ContentType is the encoding the body is in — the media type the
+	// client sent it under (spec 019 #8). Empty means the protobuf
+	// encoding, which is what every row written before schema 0012 holds.
+	ContentType string
 	// ContentEncoding records how the client sent it, for provenance; the
-	// stored bytes are always the decoded protobuf, so a remap does not
-	// have to unwrap two layers.
+	// stored bytes are always the decoded body, so a remap does not have to
+	// unwrap two layers.
 	ContentEncoding string
 	Body            []byte
 }
@@ -70,10 +74,11 @@ func (b *IngestBatch) apply(tx *sql.Tx) error {
 		// body small enough for the threshold to matter is not a body
 		// worth a special case.
 		if _, err := tx.Exec(
-			`INSERT INTO raw_batches (project_id, received_at, dialect, content_encoding, body)
-			 VALUES (?, ?, ?, ?, ?)`,
+			`INSERT INTO raw_batches (project_id, received_at, dialect, content_type, content_encoding, body)
+			 VALUES (?, ?, ?, ?, ?, ?)`,
 			b.ProjectID, b.Raw.ReceivedAt, b.Raw.Dialect,
-			nullString(b.Raw.ContentEncoding), zstdEncoder.EncodeAll(b.Raw.Body, nil),
+			nullString(b.Raw.ContentType), nullString(b.Raw.ContentEncoding),
+			zstdEncoder.EncodeAll(b.Raw.Body, nil),
 		); err != nil {
 			return fmt.Errorf("store raw batch: %w", err)
 		}
