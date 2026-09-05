@@ -414,9 +414,11 @@ The interface is compiled by Node and Vite, which `go build` cannot run. A
 plain source build therefore ships without it and serves a page that says so;
 the API, the CLI and the MCP server of such a build are complete.
 
-Every official artifact carries it — the release binaries, Homebrew and the
-Docker image — as does a local `make build`, which builds the bundle first.
-`go install` is not a supported channel for this reason.
+Every official artifact carries it — the release binaries and the
+[Docker image](docker.md), whose own build runs Node before Go for exactly this
+reason, and the Homebrew tap when there is one — as does a local `make build`,
+which builds the bundle first. `go install` is not a supported channel for this
+reason.
 
 ## Working on it
 

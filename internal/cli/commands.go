@@ -570,6 +570,57 @@ func (r *run) stats(ctx context.Context, args []string) error {
 	return nil
 }
 
+// health is the liveness probe (spec 020 #4): `GET /health`, which is the one
+// route on the server that authenticates nothing, so this is the one command
+// that needs no key. That is what makes it usable where a probe lives — a
+// container's HEALTHCHECK, a systemd unit, a load balancer — none of which
+// should hold a project secret to learn whether a process is up.
+//
+// It is also the only probe the image can have: a distroless runtime has no
+// curl, no wget and no shell to write one in, so the binary is the probe
+// (spec 020 #2).
+func (r *run) health(ctx context.Context, args []string) error {
+	fs := r.flags("health")
+	if _, err := r.parseUnauthenticated(fs, args, 0); err != nil {
+		return err
+	}
+	body, err := r.api.Get(ctx, "/health", nil)
+	if err != nil {
+		return err
+	}
+	answer, err := decode[struct {
+		Status  string `json:"status"`
+		Version string `json:"version"`
+	}](body)
+	if err != nil {
+		return err
+	}
+	// A 200 from something that is not this server — a proxy's splash page,
+	// a different service on the port — is not health. The version is what
+	// makes the answer this server's, so its absence is a failure and not
+	// an empty column.
+	if answer.Version == "" {
+		return fmt.Errorf("%s answered /health without a version", r.url)
+	}
+	if r.wantJSON() {
+		// The one place the CLI does not pass the server's bytes through
+		// (#1): what this command reports is its own verdict, and the
+		// verdict is the exit code. The JSON restates it in a field so
+		// that a script reading stdout does not have to know which
+		// spellings of `status` count as healthy.
+		out, err := json.Marshal(struct {
+			Version string `json:"version"`
+			OK      bool   `json:"ok"`
+		}{Version: answer.Version, OK: true})
+		if err != nil {
+			return err
+		}
+		return r.emit(out)
+	}
+	fmt.Fprintln(r.opt.Stdout, answer.Version)
+	return nil
+}
+
 func (r *run) system(ctx context.Context, args []string) error {
 	fs := r.flags("system")
 	if _, err := r.parse(fs, args, 0); err != nil {

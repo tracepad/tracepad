@@ -163,6 +163,21 @@ API. This file routes; it does not duplicate what specs and docs say.
   ids, not protobuf-JSON's base64), through the same mapper, archived as it
   arrived; the whole fixture corpus is replayed through that door and diffed
   against the protobuf rows.
+- ✅ Spec 020 (packaging) shipped: the docs stop describing something that is
+  not there. A multi-stage `Dockerfile` at the root builds the interface and
+  the binary from a checkout and ships them on distroless static as uid 65532
+  with `/data` as its volume — self-contained on purpose (#1), so a fork or an
+  operator with a patch builds the artifact the docs describe rather than one
+  only a release pipeline can produce. `release-server.yml` splits a version
+  tag between GoReleaser (archives and checksums on GitHub Releases) and
+  `buildx` (one multi-arch manifest on `ghcr.io/tracepad/tracepad`, with `X.Y`
+  and `latest` moving only for a full release). `tracepad health` is the new
+  CLI command and the image's `HEALTHCHECK`: distroless has no shell to write a
+  probe in, so the binary is the probe, and `/health` needs no key so neither
+  does it. The `docker` CI job builds and *boots* the image on every push,
+  which is the seam nothing else covers — the Go suite calls `cli.Run`
+  directly, so only a running container proves the real binary dispatches a
+  command at all.
 - ✅ Spec 005 (retention & admin) shipped: schema 0005, the hourly sweeper
   writing every chunk through the group-commit writer, the admin API under
   `/api/v1/projects` with a dry-run/confirm contract on every destructive
@@ -199,6 +214,7 @@ API. This file routes; it does not duplicate what specs and docs say.
 | Writing an eval (the item editor, the forms, the deletions) | `ui/src/lib/components/evals/ItemEditor.svelte` over the routes `datasets/items/new` and `datasets/[name]/items/[id]/edit` (spec 016 #21), `ScoreConfigDialog.svelte` with `ui/src/lib/api/score-configs.ts` (the vocabularies and the rules, held to `openapi.json`), `NewDatasetDialog`/`DeleteDatasetDialog`, `ui/src/lib/components/ConfirmDialog.svelte`, `itemBody`/`savedMessage` in `$lib/evals`, `docs/datasets.md#the-same-loop-from-the-web-interface` — a write is one of spec 014's endpoints and never a verb of the screen's own; the echo ceremony (`ConfirmCard`) is only where the server has a dry run, and the dialog is where it does not (#6) |
 | The Python package | `sdk/python/` (`src/tracepad/` is the package, `tests/` its suite and `tests/e2e/` the run against a real binary), `docs/sdk-python.md`, spec 017 — two dependencies and no third, no provider-client wrapper ever (design §6.5); `_tracing.py` holds the provider adaptation and defers the SDK's own imports into `init`, `_attributes.py` is the vocabulary that `internal/mapping/rules.go` reads back, and the application-line budget is 1,500 shared with spec 018 (`scripts/sdk-lines.sh`). `scripts/fixtures/tracepad_sdk.py` rewrites `testdata/otlp/010-tracepad-sdk.pb` from the package's own exporter |
 | The eval harness in Python | `sdk/python/src/tracepad/_harness.py` (the processor, `Run`, `Attempt`, the score configs, `compare`, the paging loop) and `_datasets.py` (`Dataset`, `Item`), `docs/datasets.md#the-same-loop-from-python`, `docs/sdk-python.md#evals`, spec 018 — the stamping is a `ContextVar` read at `on_start` and never a span the harness opened (#3), `init` registers the processor before the exporting one and under `export=False` too, and the read side is the server's JSON as `dict`s because a model layer is a place to start disagreeing with it (#8) |
+| Packaging: the image and the release | `Dockerfile` + `.dockerignore` (the whole recipe — the image builds both halves from the checkout and copies no prebuilt binary), `scripts/image-check.sh` (the contract, asserted from outside because the image has no shell), `.github/workflows/release-server.yml` (GoReleaser for the archives, `buildx` for one multi-arch manifest on GHCR), the `docker` job in `ci.yml`, `docs/docker.md`, spec 020 — `tracepad health` (`internal/cli/commands.go`) is the container's `HEALTHCHECK` and the one command that needs no key |
 | Configuration | `internal/config/`, spec 001 + spec 002 Configuration tables |
 
 Attribute semantics for the `langfuse.*` dialect are derived from Langfuse
@@ -218,6 +234,11 @@ reason in a comment; adding a dialect should be a table edit.
   `make build-server` builds without it and needs no Node.
 - `make e2e` — boot the real binary on a temp database and run the Playwright
   smoke. Its own CI job, never part of the gate.
+- `make image` — build the Docker image as `tracepad:dev`; `make image-check`
+  boots it on an ephemeral volume and asserts the contract (healthy through the
+  container's own `HEALTHCHECK`, the version, uid 65532, the database on the
+  volume, the licence files). Docker is a prerequisite of these two only. Both
+  are the `docker` CI job, so a local run and CI prove the same thing.
 - `make smoke` — export from pinned real SDKs and from our own package into a
   real binary and assert the rows. Needs network on first run (installs them).
 - `make sdk-test` — the Python package's unit suite, then its end-to-end suite
@@ -243,3 +264,28 @@ reason in a comment; adding a dialect should be a table edit.
   follow Conventional Commits (they become the commit history).
 - Stage git changes with explicit paths (never `git add -A`); review
   `git diff --cached --name-only` before committing.
+
+## Releasing
+
+A version tag is the one act that publishes anything. `v0.2.0` runs
+`release-server.yml`: GoReleaser puts the archives and checksums on GitHub
+Releases, then `buildx` pushes `ghcr.io/tracepad/tracepad` as `0.2.0`, `0.2`
+and `latest`. A pre-release tag (`v0.2.0-rc.1`) publishes its exact tag alone —
+no `X.Y`, no `latest`. Nothing about this runs on a push to `main`.
+
+Before tagging:
+
+- **Tag a green commit.** The workflow does not check CI and cannot: a tag is
+  yours to place, and it runs on whatever commit it names. What a release
+  publishes should be what passed, so look at the commit's checks first —
+  `gate`, `e2e`, `smoke`, `sdk` and `docker`.
+- The Python package has its own tag and its own workflow
+  (`sdk-py/v*`, `release-sdk-py.yml`); the server's tag does not move it.
+
+One-time, and the owner's to do by hand:
+
+- **Make the GHCR package public.** The first push creates
+  `ghcr.io/tracepad/tracepad` as a *private* package, which means the
+  quickstart's `docker run` fails for everyone but you. It is a switch in the
+  package's settings on GitHub, and it has to be flipped once before the beta.
+- Keep `docker` a required check on `main` alongside the other jobs.

@@ -1,0 +1,36 @@
+# What the image build does not read (spec 020 #8). The context is the Go
+# sources, the interface's sources, go.mod/go.sum, the Makefile and the licence
+# files; everything else is upload time the daemon spends for nothing.
+
+.git
+.github/
+bin/
+dist/
+
+# The interface is built inside the image from its own sources. Sending a
+# checkout's node_modules is the difference between a two-second and a
+# two-minute context upload, and sending a host's bundle would let a stale
+# `make ui` decide what the image serves — so both build outputs stay out and
+# the Node stage's is the only one there is (#11).
+ui/node_modules/
+ui/dist/
+ui/.svelte-kit/
+ui/test-results/
+ui/playwright-report/
+internal/ui/dist/
+
+# Neither half of the build reads these.
+testdata/
+specs/
+docs/
+sdk/
+scratch
+
+# What a working checkout accumulates and an image has no use for.
+*.db
+*.db-wal
+*.db-shm
+*.bak
+.dev.log
+.ruff_cache/
+__pycache__/

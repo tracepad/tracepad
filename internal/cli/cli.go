@@ -108,6 +108,8 @@ func Run(ctx context.Context, opt Options) int {
 		err = r.stats(ctx, rest)
 	case "system":
 		err = r.system(ctx, rest)
+	case "health":
+		err = r.health(ctx, rest)
 	case "export":
 		err = r.export(ctx, rest)
 	case "projects":
@@ -217,6 +219,12 @@ and asks you to type the name back; --yes answers that for a script:
                           [--project ID] [--yes]
   tracepad users rm-data  <user-id> [--project ID] [--yes]
 
+Liveness (spec 020). The one command that needs no key, because the route it
+calls needs none. It prints the server's version and exits 0, or says what went
+wrong on stderr and exits 1 — which is what a container's HEALTHCHECK, a
+systemd unit or a load balancer reads:
+  tracepad health
+
 Connection:
   --url URL    server to talk to   (env TRACEPAD_URL, default http://localhost:4318)
   --key KEY    project secret key, or TRACEPAD_ADMIN_TOKEN for the commands
@@ -303,6 +311,22 @@ const anyArgs = -1
 // parse reads a command's flags and then builds the connection, which cannot
 // happen earlier: `--url` is one of the flags.
 func (r *run) parse(fs *flag.FlagSet, args []string, wantArgs int) ([]string, error) {
+	rest, err := r.parseUnauthenticated(fs, args, wantArgs)
+	if err != nil {
+		return nil, err
+	}
+	if r.key == "" {
+		return nil, usageErrorf("no API key: set TRACEPAD_API_KEY or pass --key")
+	}
+	return rest, nil
+}
+
+// parseUnauthenticated is the same without the key requirement, for the one
+// command that calls the one route that has none: `health` is what a container
+// probe, a systemd unit or a load balancer runs, and asking those for a
+// project secret to learn whether the process is up would be a key pasted into
+// three more places for nothing (spec 020 #4).
+func (r *run) parseUnauthenticated(fs *flag.FlagSet, args []string, wantArgs int) ([]string, error) {
 	if err := fs.Parse(permute(fs, args)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil, errHelp
@@ -318,9 +342,6 @@ func (r *run) parse(fs *flag.FlagSet, args []string, wantArgs int) ([]string, er
 	api, err := client.New(r.url, r.key)
 	if err != nil {
 		return nil, usageErrorf("%s", err)
-	}
-	if r.key == "" {
-		return nil, usageErrorf("no API key: set TRACEPAD_API_KEY or pass --key")
 	}
 	api.OnVersion = r.noteServerVersion
 	r.api = api

@@ -59,6 +59,33 @@ jobs:
           path: ui/test-results/
           retention-days: 7
 
+  # The image (spec 020 #7). A Dockerfile that nothing builds rots the day a
+  # base image or a Makefile target moves — and the build is not the proof: an
+  # image that builds and then exits on start because /data is not writable is
+  # the failure this job exists for, and the one a release would otherwise be
+  # the first to find. Needs neither Go nor Node on the runner: both halves are
+  # built inside the image, which is the point of the Dockerfile being the
+  # whole recipe (#1).
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: make image VERSION=ci
+      # Boots it on an ephemeral volume, waits for the container's own
+      # HEALTHCHECK, and asserts the version, the uid, the volume and the
+      # licence files. Single-arch, because a runner can only run its own.
+      - run: make image-check VERSION=ci
+
+      # Build-only, and once: what can break the release's multi-arch manifest
+      # is a stage that does not cross-compile, and building both architectures
+      # is what catches that. Booting them is not on offer here and is not what
+      # this step is for.
+      - uses: docker/setup-buildx-action@v3
+      - name: The Dockerfile builds for both release architectures
+        run: |
+          docker buildx build --platform linux/amd64,linux/arm64 \
+            --build-arg VERSION=ci .
+
   # Real instrumentation against a real binary: the drift detector for SDK
   # attribute conventions (spec 002, Testing #3). Separate from the gate so
   # that a network hiccup installing SDKs never blocks a code review.

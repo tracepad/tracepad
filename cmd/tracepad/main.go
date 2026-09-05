@@ -50,6 +50,7 @@ var clientCommands = map[string]bool{
 	"prompts":   true,
 	"stats":     true,
 	"system":    true,
+	"health":    true,
 	"projects":  true,
 	"keys":      true,
 	"retention": true,
