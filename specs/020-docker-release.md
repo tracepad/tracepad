@@ -1,6 +1,6 @@
 # Spec 020 — Packaging: the Docker image and the release workflow
 
-**Status:** 🚧 IN PROGRESS
+**Status:** ✅ SHIPPED
 **Sprint:** September 2026
 
 > The docs have promised a Docker image since spec 006 — "every official
