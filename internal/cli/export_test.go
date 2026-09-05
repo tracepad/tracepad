@@ -64,6 +64,9 @@ type stub struct {
 	// answer decides each request's fate by its ordinal, so a test can say
 	// "503, 503, then 200" without a clock.
 	answer func(n int) (status int, body []byte, contentType string)
+	// onRequest runs before the answer, for a test that needs the world to
+	// change while the export is walking it.
+	onRequest func()
 }
 
 func newStub(t *testing.T, answer func(n int) (int, []byte, string)) *stub {
@@ -82,6 +85,9 @@ func newStub(t *testing.T, answer func(n int) (int, []byte, string)) *stub {
 		s.headers = append(s.headers, r.Header.Clone())
 		s.mu.Unlock()
 
+		if s.onRequest != nil {
+			s.onRequest()
+		}
 		status, answer, contentType := http.StatusOK, []byte(nil), ""
 		if s.answer != nil {
 			status, answer, contentType = s.answer(n)
@@ -245,6 +251,59 @@ func TestExportStopsWhenRetriesRunOut(t *testing.T) {
 	}
 	if summary := decodeSummary(t, got.stdout); summary.Sent != 0 {
 		t.Errorf("sent = %d, want nothing delivered", summary.Sent)
+	}
+}
+
+// A batch the sweeper takes between the listing page and the body fetch is the
+// one thing this command skips, and it says so rather than stopping: the
+// archive moved, not the receiver (spec 019, edge cases).
+func TestExportSkipsABatchSweptUnderIt(t *testing.T) {
+	h := newHarness(t)
+	seedArchive(t, h, 3)
+
+	// The receiver sweeps the archive out from under the export as soon as
+	// the first batch lands. The page was already fetched, so the walk goes
+	// on to two ids that no longer resolve.
+	var once sync.Once
+	sink := newStub(t, nil)
+	sink.onRequest = func() {
+		once.Do(func() { sweepRawAway(t, h) })
+	}
+
+	got := h.run(t.Context(), false, "export", "--otlp", "--to", sink.server.URL)
+	if got.code != ExitOK {
+		t.Fatalf("exit = %d, want the walk to finish (stderr: %s)", got.code, got.stderr)
+	}
+	summary := decodeSummary(t, got.stdout)
+	if summary.Sent != 1 || summary.Swept != 2 {
+		t.Errorf("summary = %+v, want one sent and two counted as swept", summary)
+	}
+	if !strings.Contains(got.stderr, "swept") {
+		t.Errorf("stderr = %q, want the skipped ids named", got.stderr)
+	}
+}
+
+// sweepRawAway shortens the raw window to nothing and runs one pass, which is
+// what retention does to an archive while an export is walking it.
+func sweepRawAway(t *testing.T, h *harness) {
+	t.Helper()
+	project, err := h.store.ProjectByName("test")
+	if err != nil || project == nil {
+		t.Errorf("project = %v, err = %v", project, err)
+		return
+	}
+	one := 1
+	update := &store.ProjectUpdate{
+		ProjectID: project.ID,
+		RawWindow: store.OptionalDays{Set: true, Value: &one},
+		Confirm:   project.Name,
+	}
+	if err := h.writer.Submit(t.Context(), update); err != nil {
+		t.Errorf("shorten the raw window: %v", err)
+		return
+	}
+	if err := h.store.NewSweeper(h.writer, store.SweepOptions{}).Pass(t.Context()); err != nil {
+		t.Errorf("sweep: %v", err)
 	}
 }
 

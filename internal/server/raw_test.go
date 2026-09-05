@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -70,7 +71,21 @@ func seedRaw(t *testing.T, h *harness, projectID string, n int, contentType stri
 	for _, row := range rows {
 		ids = append(ids, row.ID)
 	}
+	// Sorted here rather than trusted from the listing: the ids are an
+	// autoincrement and the batches were written in arrival order, so
+	// ascending *is* arrival order — and reading it off the listing would
+	// make every order assertion below agree with whatever the listing did.
+	slices.Sort(ids)
 	return ids
+}
+
+func instantOf(t *testing.T, value string) time.Time {
+	t.Helper()
+	parsed, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil {
+		t.Fatalf("received_at %q is not RFC 3339: %v", value, err)
+	}
+	return parsed
 }
 
 // The listing runs oldest first and pages forward across three pages, then
@@ -80,6 +95,7 @@ func TestRawListingPagesForward(t *testing.T) {
 	ids := seedRaw(t, h, h.project.ID, 7, "")
 
 	var walked []int64
+	var arrivals []string
 	cursor := ""
 	for page := range 4 {
 		query := "?limit=3"
@@ -89,6 +105,7 @@ func TestRawListingPagesForward(t *testing.T) {
 		listing := h.listRaw(t, query)
 		for _, row := range listing.Batches {
 			walked = append(walked, row.ID)
+			arrivals = append(arrivals, row.ReceivedAt)
 		}
 		if listing.NextCursor == nil {
 			if page != 2 {
@@ -104,6 +121,16 @@ func TestRawListingPagesForward(t *testing.T) {
 	for i, id := range walked {
 		if id != ids[i] {
 			t.Fatalf("page order = %v, want arrival order %v", walked, ids)
+		}
+	}
+	// The order named in its own terms, so that a listing which reversed
+	// itself consistently could not pass by agreeing with the ids above.
+	//
+	// Compared as instants, not as text: RFC 3339 omits an all-zero
+	// fraction, and `…:00Z` sorts *after* `…:00.001Z` as a string.
+	for i := 1; i < len(arrivals); i++ {
+		if instantOf(t, arrivals[i]).Before(instantOf(t, arrivals[i-1])) {
+			t.Fatalf("received_at across the walk = %v, want oldest first", arrivals)
 		}
 	}
 
@@ -148,14 +175,31 @@ func TestRawListingWindowIsHalfOpen(t *testing.T) {
 // listing's own: it answers "how much is this export about to send".
 func TestRawListingCounts(t *testing.T) {
 	h := newHarness(t, nil, store.WriterOptions{})
+	other, err := h.store.CreateProject("other", store.KeyPair{PublicKey: "tp-pk-other", Secret: "tp-sk-other"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	seedRaw(t, h, h.project.ID, 5, "")
+	seedRaw(t, h, other.ID, 3, "")
 
+	// Over the filters and not over the page: the cursor is where the
+	// reader is, not what there is.
 	listing := h.listRaw(t, "?limit=2&count=1")
 	if len(listing.Batches) != 2 {
 		t.Fatalf("batches = %d, want the page", len(listing.Batches))
 	}
 	if listing.Total != 5 || listing.TotalCapped {
-		t.Errorf("total = %d capped = %v, want the filters' 5", listing.Total, listing.TotalCapped)
+		t.Errorf("total = %d capped = %v, want this project's 5", listing.Total, listing.TotalCapped)
+	}
+
+	// And bounded by the window, which is the number an export is about to
+	// act on rather than the size of the archive.
+	at := func(i int) string {
+		return time.Unix(0, seedBase+int64(i)*ms).UTC().Format(time.RFC3339Nano)
+	}
+	windowed := h.listRaw(t, "?limit=2&count=1&since="+at(1)+"&until="+at(4))
+	if windowed.Total != 3 {
+		t.Errorf("total inside [1, 4) = %d, want 3", windowed.Total)
 	}
 }
 
