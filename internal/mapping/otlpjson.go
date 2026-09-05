@@ -214,7 +214,16 @@ func rewriteIDs(value any, path string, convert func(string) (string, error)) er
 			if idFields[key] {
 				text, ok := child.(string)
 				if !ok {
-					return fmt.Errorf("%w: %s must be a string", ErrMalformedBody, where)
+					// Not a string, so not an id this rewrite has
+					// anything to say about. `null` is proto3 JSON's
+					// spelling of "the default value" and an exporter
+					// may well write `"parentSpanId": null` for a root
+					// span; anything else here is a document protojson
+					// will refuse on its own, which costs that one
+					// ResourceSpans and not the batch (spec 002 #13).
+					// Refusing here would fail the whole export over a
+					// span the mapper would have skipped.
+					continue
 				}
 				converted, err := convert(text)
 				if err != nil {

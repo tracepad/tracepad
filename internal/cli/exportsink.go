@@ -68,8 +68,14 @@ type receiver struct {
 }
 
 func (r *run) receiver(target string, headers headerList, compress bool) (destination, error) {
+	// The scheme is checked and not merely required to be present: a
+	// receiver is an OTLP/HTTP endpoint, and `ftp://host/x` parses into a
+	// scheme and a host perfectly well. Left to the transport it would
+	// become an error the retry loop reads as "the receiver is busy" and
+	// spends half a minute backing off before failing obscurely.
 	parsed, err := url.Parse(target)
-	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+	if err != nil || parsed.Host == "" ||
+		(parsed.Scheme != "http" && parsed.Scheme != "https") {
 		return nil, usageErrorf("--to %q is not an http(s) url", target)
 	}
 	resolved, err := exportHeaders(r.opt.Env("OTEL_EXPORTER_OTLP_HEADERS"), headers)
@@ -224,19 +230,42 @@ func (r *run) directory(path string, resuming bool) (destination, error) {
 		return nil, usageErrorf("%s is not empty; export into an empty directory, "+
 			"or pass --after to resume the export that filled it", path)
 	}
-	manifest, err := os.OpenFile(filepath.Join(path, "manifest.jsonl"),
-		os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err != nil {
-		return nil, fmt.Errorf("cannot open the manifest: %w", err)
-	}
-	return &directory{path: path, manifest: manifest}, nil
+	// The manifest is opened on the first batch, not here. Creating it up
+	// front makes the directory non-empty before anything has been written
+	// to it, so an export that fails on its first batch — or matches none —
+	// leaves behind exactly enough to make the emptiness check above refuse
+	// the re-run, while printing no cursor to pass as `--after`. The user
+	// would be told to resume an export that never started.
+	return &directory{path: path}, nil
 }
 
-func (d *directory) close() error { return d.manifest.Close() }
+func (d *directory) close() error {
+	if d.manifest == nil {
+		return nil
+	}
+	return d.manifest.Close()
+}
+
+// open resolves the manifest on first use.
+func (d *directory) open() error {
+	if d.manifest != nil {
+		return nil
+	}
+	manifest, err := os.OpenFile(filepath.Join(d.path, "manifest.jsonl"),
+		os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return fmt.Errorf("cannot open the manifest: %w", err)
+	}
+	d.manifest = manifest
+	return nil
+}
 
 // send writes the body and then the manifest line, in that order: a line in
 // the manifest is a promise that the file beside it is whole.
 func (d *directory) send(_ context.Context, row rawBatchRow, body []byte) (string, error) {
+	if err := d.open(); err != nil {
+		return "", &stopError{id: row.ID, message: err.Error()}
+	}
 	name, err := batchFileName(row)
 	if err != nil {
 		return "", &stopError{id: row.ID, message: err.Error()}
@@ -283,7 +312,14 @@ func exportHeaders(environment string, flags headerList) (map[string]string, err
 		}
 		// The OTLP specification percent-encodes the values in this
 		// variable; a value with nothing to decode survives unchanged.
-		if decoded, err := url.QueryUnescape(value); err == nil {
+		//
+		// PathUnescape and not QueryUnescape: the latter is the
+		// *form* encoding, where `+` means a space. These values are
+		// RFC 3986 percent-encoding, where `+` is a literal — and a
+		// bearer token is base64, whose alphabet contains `+`. Reading
+		// it as a space corrupts the credential into a 401 the export
+		// then treats as fatal.
+		if decoded, err := url.PathUnescape(value); err == nil {
 			value = decoded
 		}
 		out[strings.TrimSpace(key)] = value

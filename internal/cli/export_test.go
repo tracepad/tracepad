@@ -356,6 +356,26 @@ func TestExportReadsTheOTLPHeadersVariable(t *testing.T) {
 	}
 }
 
+// The values in that variable are RFC 3986 percent-encoding, not the form
+// encoding, so `+` is a literal. A base64 bearer token contains `+`, and
+// reading it as a space corrupts the credential into a 401 — which the export
+// treats as fatal, so the whole run dies on a header nobody mistyped.
+func TestExportKeepsAPlusInAnEnvironmentHeader(t *testing.T) {
+	h := newHarness(t)
+	seedArchive(t, h, 1)
+	sink := newStub(t, nil)
+	const token = "Bearer YWJj+ZGVm/Z2hp=="
+	h.env["OTEL_EXPORTER_OTLP_HEADERS"] = "authorization=" + token
+
+	got := h.run(t.Context(), false, "export", "--otlp", "--to", sink.server.URL)
+	if got.code != ExitOK {
+		t.Fatalf("exit = %d, stderr = %s", got.code, got.stderr)
+	}
+	if header := sink.headers[0].Get("Authorization"); header != token {
+		t.Errorf("Authorization = %q, want %q", header, token)
+	}
+}
+
 // A 2xx that reports rejected spans is the receiver describing its own
 // mapping: it has the bytes, so the batch is counted and the export goes on.
 func TestExportCountsPartialSuccessWithoutRetrying(t *testing.T) {
@@ -481,11 +501,52 @@ func TestExportDryRun(t *testing.T) {
 		t.Errorf("a dry run sent %d batches", len(sink.received()))
 	}
 	summary := decodeSummary(t, got.stdout)
-	if summary.Matching == nil || *summary.Matching != 3 {
-		t.Errorf("matching = %v, want the three batches", summary.Matching)
+	if summary.MatchingWindow == nil || *summary.MatchingWindow != 3 {
+		t.Errorf("matching_window = %v, want the three batches", summary.MatchingWindow)
 	}
 	if summary.Sent != 0 {
 		t.Errorf("sent = %d, want nothing", summary.Sent)
+	}
+	if summary.Resuming {
+		t.Error("resuming = true without --after")
+	}
+}
+
+// The API's count is over the filters and never over the page (spec 009 #4),
+// so `--after` does not narrow it. A dry run therefore reports the *window*,
+// and says so — a number called "matching" beside a cursor would be read as
+// what is left to send, and acted on.
+func TestExportDryRunNamesTheWindowWhenResuming(t *testing.T) {
+	h := newHarness(t)
+	seedArchive(t, h, 4)
+
+	// A cursor two batches in: the run would send two, the window holds four.
+	first := h.run(t.Context(), false, "export", "--otlp", "--dir", t.TempDir(),
+		"--until", instantAfter(2))
+	if first.code != ExitOK {
+		t.Fatalf("exit = %d, stderr = %s", first.code, first.stderr)
+	}
+	cursor := decodeSummary(t, first.stdout).LastCursor
+
+	got := h.run(t.Context(), false, "export", "--otlp", "--dir", t.TempDir(),
+		"--after", cursor, "--dry-run")
+	if got.code != ExitOK {
+		t.Fatalf("exit = %d, stderr = %s", got.code, got.stderr)
+	}
+	summary := decodeSummary(t, got.stdout)
+	if summary.MatchingWindow == nil || *summary.MatchingWindow != 4 {
+		t.Errorf("matching_window = %v, want the whole window's 4", summary.MatchingWindow)
+	}
+	if !summary.Resuming {
+		t.Error("resuming = false with --after; nothing marks the number as more than will be sent")
+	}
+
+	// And a person reading the terminal is told the same thing.
+	human := h.run(t.Context(), true, "export", "--otlp", "--dir", t.TempDir(),
+		"--after", cursor, "--dry-run")
+	if !strings.Contains(human.stdout, "in the window") ||
+		!strings.Contains(human.stdout, "resume starts inside it") {
+		t.Errorf("stdout = %q, want the number named as the window's", human.stdout)
 	}
 }
 
@@ -527,6 +588,11 @@ func TestExportUsageRefusals(t *testing.T) {
 		"header on a dir": {"export", "--otlp", "--dir", "/tmp/x", "--header", "a=b"},
 		"gzip on a dir":   {"export", "--otlp", "--dir", "/tmp/x", "--gzip"},
 		"a bad --to":      {"export", "--otlp", "--to", "not-a-url"},
+		// A scheme that parses but is not one a receiver speaks. Left to
+		// the transport it becomes an error the retry loop reads as "the
+		// receiver is busy" and backs off half a minute over.
+		"a non-http --to": {"export", "--otlp", "--to", "ftp://host/v1/traces"},
+		"a file:// --to":  {"export", "--otlp", "--to", "file:///tmp/traces"},
 		"an empty cursor": {"export", "--otlp", "--to", "http://x/y", "--after", ""},
 		"a bad --since":   {"export", "--otlp", "--to", "http://x/y", "--since", "yesterday"},
 	} {
@@ -535,6 +601,40 @@ func TestExportUsageRefusals(t *testing.T) {
 				t.Errorf("exit = %d, want %d (stderr: %s)", got.code, ExitUsage, got.stderr)
 			}
 		})
+	}
+}
+
+// A `--dir` export that never wrote a batch leaves nothing behind. Creating
+// the manifest up front made the directory non-empty before anything had been
+// written to it, so a run that failed on its first batch — or matched none —
+// left exactly enough to make the re-run refuse, while printing no cursor to
+// resume from: a dead end with instructions that could not be followed.
+func TestExportToADirectoryLeavesNothingWhenItSendsNothing(t *testing.T) {
+	h := newHarness(t)
+	seedArchive(t, h, 2)
+	dir := filepath.Join(t.TempDir(), "archive")
+
+	// A window that matches nothing: the walk finds no batch to write.
+	empty := h.run(t.Context(), false, "export", "--otlp", "--dir", dir,
+		"--until", instantAfter(0))
+	if empty.code != ExitOK {
+		t.Fatalf("exit = %d, stderr = %s", empty.code, empty.stderr)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("the directory holds %v after an export that wrote nothing", entries)
+	}
+
+	// So the ordinary re-run is not refused.
+	again := h.run(t.Context(), false, "export", "--otlp", "--dir", dir)
+	if again.code != ExitOK {
+		t.Fatalf("the re-run exit = %d, want it accepted (stderr: %s)", again.code, again.stderr)
+	}
+	if rows := manifestRows(t, dir); len(rows) != 2 {
+		t.Errorf("manifest rows = %d, want both batches", len(rows))
 	}
 }
 

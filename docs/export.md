@@ -39,14 +39,31 @@ recorded on Monday, flushed on Wednesday — lands after the batch line and is
 not counted, so the real gap can only be smaller than the number shown.
 
 `tracepad system` shows the same numbers without sending anything, and
-`--dry-run` shows them beside the count of batches the filters match:
+`--dry-run` shows them beside how many batches the window holds:
 
-```sh
-tracepad export --otlp --to http://collector:4318/v1/traces --dry-run
+```
+$ tracepad export --otlp --to http://collector:4318/v1/traces --dry-run
+12400 batches in the window
+  nothing was sent
+  not covered 214 traces started before the archive begins
 ```
 
 Run that before pointing the command at a receiver, and before shortening
 `raw_retention_days`.
+
+The number is the **window's**, not the remainder. `--since`/`--until` narrow
+it; `--after` does not, because the API counts what the filters match and never
+what is left after a cursor — one meaning for `count` across the whole read API.
+A dry run resumed with `--after` says so rather than letting the number be read
+as what it is about to send:
+
+```
+$ tracepad export --otlp --to … --after MTc4… --dry-run
+12400 batches in the window; the resume starts inside it, so fewer will be sent
+```
+
+With `--json` the field is `matching_window` for the same reason, beside
+`resuming: true`. An archive larger than the count's cap reports `100000+`.
 
 If the server has never kept bodies — `TRACEPAD_STORE_RAW` off since day one —
 the command exits 1 saying so, and reports every trace as uncovered. There is
@@ -65,7 +82,9 @@ Each batch is posted under the `Content-Type` it was received in, which is what
 makes it acceptable to a receiver that took it once. `--header k=v` repeats.
 `OTEL_EXPORTER_OTLP_HEADERS` is honoured — if you have already configured an
 exporter on this machine, its credentials are already there — and a `--header`
-on the command line wins over it.
+on the command line wins over it. Its values are percent-decoded as the OTLP
+specification prescribes, which leaves a `+` alone: a base64 bearer token comes
+through as written.
 
 `--gzip` compresses on the wire. It is off by default because whether the
 receiver supports it is the one thing this command cannot know, and the bytes

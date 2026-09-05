@@ -169,6 +169,46 @@ func TestJSONSkipsMalformedResourceSpans(t *testing.T) {
 	}
 }
 
+// `null` is proto3 JSON's spelling of "the default value", so an exporter that
+// writes `"parentSpanId": null` on a root span is writing valid OTLP/JSON. It
+// used to fail the *whole* batch with a 400 — one root span costing every span
+// beside it, which is the opposite of the bargain the decoder is built on.
+func TestJSONAcceptsANullID(t *testing.T) {
+	body := []byte(`{"resourceSpans":[{"scopeSpans":[{"spans":[
+	  {"traceId":"00112233445566778899aabbccddeeff","spanId":"0011223344556677",
+	   "parentSpanId":null,"name":"probe","startTimeUnixNano":"1787738400000000000",
+	   "endTimeUnixNano":"1787738400001000000"}]}]}]}`)
+	spans, unreadable, err := mapping.DecodeExportRequestJSON(body)
+	if err != nil {
+		t.Fatalf("a null parent span id must not fail the batch: %v", err)
+	}
+	if len(spans) != 1 || unreadable != 0 {
+		t.Fatalf("spans = %d, unreadable = %d", len(spans), unreadable)
+	}
+	span := spans[0].ScopeSpans[0].Spans[0]
+	if len(span.ParentSpanId) != 0 {
+		t.Errorf("parentSpanId = %x, want the empty default", span.ParentSpanId)
+	}
+	if got := mapping.Map(spans); len(got.Observations) != 1 {
+		t.Errorf("observations = %d, want the span mapped", len(got.Observations))
+	}
+}
+
+// An id that is neither a string nor null is a document protojson refuses on
+// its own: that costs the one ResourceSpans and is counted, rather than the
+// batch (spec 002 #13).
+func TestJSONCountsAnIDOfTheWrongType(t *testing.T) {
+	body := []byte(`{"resourceSpans":[{"scopeSpans":[{"spans":[
+	  {"traceId":12345,"spanId":"0011223344556677","name":"probe"}]}]}]}`)
+	spans, unreadable, err := mapping.DecodeExportRequestJSON(body)
+	if err != nil {
+		t.Fatalf("err = %v, want the element counted rather than the batch refused", err)
+	}
+	if len(spans) != 0 || unreadable != 1 {
+		t.Errorf("spans = %d, unreadable = %d, want the one element counted", len(spans), unreadable)
+	}
+}
+
 // An unknown field is skipped, not refused: that is what the protobuf path
 // does, and an exporter on a newer OTLP version has to keep ingesting.
 func TestJSONIgnoresUnknownFields(t *testing.T) {

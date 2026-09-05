@@ -125,11 +125,13 @@ func (r *run) export(ctx context.Context, args []string) error {
 	}
 
 	if dryRun {
-		matching, err := r.countBatches(ctx, window, after)
+		matching, capped, err := r.countBatches(ctx, window)
 		if err != nil {
 			return err
 		}
-		summary.Matching = &matching
+		summary.MatchingWindow = &matching
+		summary.MatchingCapped = capped
+		summary.Resuming = after != ""
 		r.reportExport(summary, true)
 		return nil
 	}
@@ -172,9 +174,10 @@ type rawBatchRow struct {
 }
 
 type rawListing struct {
-	Batches    []rawBatchRow `json:"batches"`
-	NextCursor *string       `json:"next_cursor"`
-	Total      int64         `json:"total"`
+	Batches     []rawBatchRow `json:"batches"`
+	NextCursor  *string       `json:"next_cursor"`
+	Total       int64         `json:"total"`
+	TotalCapped bool          `json:"total_capped"`
 }
 
 // rawArchive is the `raw` block of `GET /api/v1/system` (spec 019 #4).
@@ -201,22 +204,28 @@ func (r *run) rawArchive(ctx context.Context) (rawArchive, error) {
 	return system.Raw, nil
 }
 
-// countBatches answers what a dry run reports: how many batches the filters
-// match, without fetching one.
-func (r *run) countBatches(ctx context.Context, window exportWindow, after string) (int64, error) {
+// countBatches answers what a dry run reports: how many batches the **window**
+// holds, without fetching one.
+//
+// The window and not the remainder. The API's count is over the filters and
+// never over the page — one meaning for `count` across the whole read API
+// (spec 009 #4) — so a cursor does not narrow it, and a dry run resumed with
+// `--after` would otherwise read as "this many left to send" when it is "this
+// many in the window". The cursor is therefore not sent at all, and both the
+// summary's field name and the line printed beside it say which number this is.
+func (r *run) countBatches(ctx context.Context, window exportWindow) (int64, bool, error) {
 	query := url.Values{"limit": {"1"}, "count": {"1"}}
 	addSome(query, "since", window.since)
 	addSome(query, "until", window.until)
-	addSome(query, "cursor", after)
 	body, err := r.api.Get(ctx, "/api/v1/raw", query)
 	if err != nil {
-		return 0, listingError(err)
+		return 0, false, listingError(err)
 	}
 	listing, err := decode[rawListing](body)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
-	return listing.Total, nil
+	return listing.Total, listing.TotalCapped, nil
 }
 
 // replay walks the archive and hands each body to the destination. It is the
@@ -335,9 +344,18 @@ type exportSummary struct {
 	LastCursor         string     `json:"last_cursor"`
 	TracesBeforeWindow int64      `json:"traces_before_window"`
 	StoppedAt          *stoppedAt `json:"stopped_at"`
-	// Matching is a dry run's answer and is absent from a real one, where
-	// `sent` is the number that matters.
-	Matching *int64 `json:"matching,omitempty"`
+	// MatchingWindow is a dry run's answer and is absent from a real one,
+	// where `sent` is the number that matters. Named for the window rather
+	// than "matching" because that is exactly what it counts: `--after`
+	// does not narrow it, and a field called `matching` beside a cursor
+	// would read as the remainder (spec 009 #4).
+	MatchingWindow *int64 `json:"matching_window,omitempty"`
+	// MatchingCapped says the count stopped at the API's cap, so the number
+	// above is a floor rather than the total.
+	MatchingCapped bool `json:"matching_window_capped,omitempty"`
+	// Resuming records that `--after` was given, which is what makes the
+	// window count larger than what this run would actually send.
+	Resuming bool `json:"resuming,omitempty"`
 }
 
 type stoppedAt struct {
@@ -360,10 +378,25 @@ func (r *run) reportExport(summary exportSummary, dryRun bool) {
 	}
 
 	if dryRun {
-		if summary.Matching != nil {
-			fmt.Fprintf(r.opt.Stdout, "%d batches match; nothing was sent\n", *summary.Matching)
-		} else {
+		switch {
+		case summary.MatchingWindow == nil:
 			fmt.Fprintln(r.opt.Stdout, "the archive is empty; nothing to send")
+		default:
+			// Named as the window's count, never as a remainder: the
+			// API's count is over the filters and not over the page, so
+			// `--after` does not narrow it.
+			count := fmt.Sprintf("%d", *summary.MatchingWindow)
+			if summary.MatchingCapped {
+				count += "+"
+			}
+			if summary.Resuming {
+				fmt.Fprintf(r.opt.Stdout,
+					"%s batches in the window; the resume starts inside it, so fewer will be sent\n",
+					count)
+			} else {
+				fmt.Fprintf(r.opt.Stdout, "%s batches in the window\n", count)
+			}
+			fmt.Fprintln(r.opt.Stdout, "  nothing was sent")
 		}
 	} else {
 		fmt.Fprintf(r.opt.Stdout, "%d batches, %s\n", summary.Sent, byteSize(int(summary.Bytes)))
