@@ -103,7 +103,7 @@ func rawQuery(projectID string, filter RawFilter) (string, []any) {
 	}
 	args = append(args, filter.Limit)
 	return `SELECT id, received_at, dialect, content_type, content_encoding,
-	               length(body), substr(body, 1, ` + fmt.Sprint(zstdHeaderPrefix) + `)
+	               substr(body, 1, ` + fmt.Sprint(zstdHeaderPrefix) + `)
 	 FROM raw_batches WHERE ` + strings.Join(where, " AND ") + `
 	 ORDER BY received_at ` + order + `, id ` + order + ` LIMIT ?`, args
 }
@@ -123,11 +123,10 @@ func (s *Store) RawBatches(projectID string, filter RawFilter) ([]*RawBatchRow, 
 		var (
 			row                          RawBatchRow
 			dialect, contentType, coding sql.NullString
-			stored                       int64
 			prefix                       []byte
 		)
 		if err := rows.Scan(&row.ID, &row.ReceivedAt, &dialect, &contentType, &coding,
-			&stored, &prefix); err != nil {
+			&prefix); err != nil {
 			return nil, err
 		}
 		row.Dialect = dialect.String
