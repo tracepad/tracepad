@@ -138,16 +138,33 @@ $ head -1 tracepad-export/manifest.jsonl
  "content_type":"application/x-protobuf","content_encoding":"","size_bytes":1274}
 ```
 
-The manifest is what a script needs to replay the files by hand:
+The names carry the order and the extension carries the encoding, so replaying
+the files by hand needs no parsing at all:
 
 ```sh
-while read -r row; do
-  file=$(jq -r '"\(.received_at|fromdateiso8601*1000|floor)-\(.id)"' <<<"$row")
-  type=$(jq -r .content_type <<<"$row")
+for file in tracepad-export/*.pb tracepad-export/*.json; do
+  [ -e "$file" ] || continue
+  case "$file" in
+    *.json) type=application/json ;;
+    *)      type=application/x-protobuf ;;
+  esac
   curl -sS -X POST http://collector:4318/v1/traces \
     -H "Content-Type: $type" -H "Authorization: Bearer $TOKEN" \
-    --data-binary "@tracepad-export/$file".* >/dev/null
-done < tracepad-export/manifest.jsonl
+    --data-binary "@$file" >/dev/null
+done
+```
+
+That replays `.pb` before `.json` rather than in strict arrival order. When the
+order matters — a receiver that does not upsert — walk the manifest, which is in
+arrival order by construction:
+
+```sh
+jq -r '"\(.id) \(.content_type)"' tracepad-export/manifest.jsonl |
+while read -r id type; do
+  curl -sS -X POST http://collector:4318/v1/traces \
+    -H "Content-Type: $type" -H "Authorization: Bearer $TOKEN" \
+    --data-binary "@$(ls tracepad-export/*-"$id".*)" >/dev/null
+done
 ```
 
 The directory must be empty unless you pass `--after`, so that two exports never
