@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/klauspost/compress/zstd"
@@ -156,15 +157,9 @@ func (s *Store) RawBatches(projectID string, filter RawFilter) ([]*RawBatchRow, 
 	// A backward page arrives newest first, because that is the order the
 	// index was read in. Every caller reads this listing oldest first.
 	if filter.Backward {
-		reverseRows(out)
+		slices.Reverse(out)
 	}
 	return out, nil
-}
-
-func reverseRows(rows []*RawBatchRow) {
-	for i, j := 0, len(rows)-1; i < j; i, j = i+1, j-1 {
-		rows[i], rows[j] = rows[j], rows[i]
-	}
 }
 
 // CountRawBatches answers "how many match", stopping at `cap`, the way every

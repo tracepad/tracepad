@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -214,11 +215,11 @@ func decodeRawCursor(value string) (*store.RawCursor, error) {
 	}
 	receivedAt, err := strconv.ParseInt(parts[0], 10, 64)
 	if err != nil {
-		return nil, fmt.Errorf("invalid cursor")
+		return nil, errors.New("invalid cursor")
 	}
 	id, err := strconv.ParseInt(parts[1], 10, 64)
 	if err != nil {
-		return nil, fmt.Errorf("invalid cursor")
+		return nil, errors.New("invalid cursor")
 	}
 	return &store.RawCursor{ReceivedAt: receivedAt, ID: id}, nil
 }

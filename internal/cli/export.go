@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"net/url"
 	"strconv"
@@ -100,7 +99,7 @@ func (r *run) export(ctx context.Context, args []string) error {
 		return usageErrorf("--after needs the cursor the previous run printed; it was passed empty")
 	}
 
-	window, err := r.exportWindow(fs, since, until)
+	window, err := r.exportWindow(since, until)
 	if err != nil {
 		return err
 	}
@@ -149,7 +148,7 @@ func (r *run) export(ctx context.Context, args []string) error {
 // exportWindow resolves `--since` and `--until` into the listing's parameters.
 type exportWindow struct{ since, until string }
 
-func (r *run) exportWindow(fs *flag.FlagSet, since, until string) (exportWindow, error) {
+func (r *run) exportWindow(since, until string) (exportWindow, error) {
 	var window exportWindow
 	var err error
 	if window.since, err = r.instant("--since", since); err != nil {
@@ -246,8 +245,13 @@ func (r *run) replay(ctx context.Context, sink destination, window exportWindow,
 			}
 			// Only after the batch is through: the cursor is where a
 			// resume starts *after*, so it may never name a batch the
-			// receiver has not taken (spec 019 #6).
-			summary.LastCursor = cursorOf(row)
+			// receiver has not taken (spec 019 #6). A row whose arrival
+			// will not parse leaves the previous cursor standing, which
+			// resumes earlier rather than later — the safe direction,
+			// because re-sending is safe and a gap is not.
+			if at := cursorOf(row); at != "" {
+				summary.LastCursor = at
+			}
 		}
 		if listing.NextCursor == nil {
 			return nil
@@ -380,9 +384,16 @@ func (r *run) reportExport(summary exportSummary, dryRun bool) {
 	// rather than from a gap at the receiver.
 	fmt.Fprintf(r.opt.Stdout, "  not covered %d traces started before the archive begins\n",
 		summary.TracesBeforeWindow)
-	if summary.StoppedAt != nil {
-		fmt.Fprintf(r.opt.Stdout, "  stopped at batch %d: %d %s\n",
-			summary.StoppedAt.ID, summary.StoppedAt.Status, summary.StoppedAt.Message)
+	if stop := summary.StoppedAt; stop != nil {
+		// A status of zero is a destination that never answered — a
+		// transport error, or a directory that could not be written —
+		// and printing "0" for it would read as a status code.
+		if stop.Status == 0 {
+			fmt.Fprintf(r.opt.Stdout, "  stopped at batch %d: %s\n", stop.ID, stop.Message)
+		} else {
+			fmt.Fprintf(r.opt.Stdout, "  stopped at batch %d: %d %s\n",
+				stop.ID, stop.Status, stop.Message)
+		}
 	}
 	if summary.LastCursor != "" {
 		fmt.Fprintf(r.opt.Stdout, "--after %s\n", summary.LastCursor)

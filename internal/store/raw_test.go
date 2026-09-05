@@ -80,6 +80,38 @@ func TestRawSizeIsTheDecodedLength(t *testing.T) {
 	}
 }
 
+// The count stops at its cap rather than counting the archive out, and the cap
+// bounds the *answer* rather than the scan — the `LIMIT` inside the subquery
+// ends the scan only once that many rows have matched (spec 009 #12). The
+// endpoint's own cap is 100 000, which is too many rows to seed; what is under
+// test here is the mechanism it uses.
+func TestRawCountStopsAtItsCap(t *testing.T) {
+	s, project := readStore(t)
+	for i := range 5 {
+		seedRawBatch(t, s, project.ID, &RawBatch{ReceivedAt: int64(i + 1), Body: []byte("x")})
+	}
+
+	for _, c := range []struct{ cap, want int }{{3, 3}, {5, 5}, {9, 5}} {
+		got, err := s.CountRawBatches(project.ID, RawFilter{}, c.cap)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != c.want {
+			t.Errorf("count with cap %d = %d, want %d", c.cap, got, c.want)
+		}
+	}
+	// And the window still bounds it, so a capped count is a count of what
+	// an export would send rather than of what is stored.
+	since, until := int64(2), int64(5)
+	got, err := s.CountRawBatches(project.ID, RawFilter{Since: &since, Until: &until}, 9)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 3 {
+		t.Errorf("count inside [2, 5) = %d, want 3", got)
+	}
+}
+
 // The page seeks rather than scans, in both directions: a listing that read the
 // project from one end every time would be a listing an export outgrows on its
 // first real archive (the method of spec 003 #25).
