@@ -423,6 +423,48 @@ holds when the two agree as well. The commands marked as needing
 the admin token in [admin.md](admin.md) take it as `--key` or
 `TRACEPAD_API_KEY`, since it rides in the same header as a project key.
 
+### `health`
+
+```sh
+tracepad health [--url URL] [--json]
+```
+
+Is the server up, and which build is it? Exit `0` and the version on stdout;
+exit `1` and the reason on stderr for anything else — a refused connection, a
+non-200, or a 200 whose body carries no version, which is what a proxy's splash
+page on the wrong port looks like.
+
+```sh
+$ tracepad health
+0.2.0
+$ tracepad health --json
+{"version": "0.2.0", "ok": true}
+$ tracepad health --url http://localhost:9999 ; echo $?
+tracepad: cannot reach http://localhost:9999: … connection refused
+1
+```
+
+**It is the one command that needs no key**, because `/health` is the one route
+that needs none. That is the point of it: a container's health check, a systemd
+unit or a load balancer can ask whether the process is alive without holding a
+project secret to do it. It is what the [Docker image](docker.md) declares as
+its `HEALTHCHECK`.
+
+It is also the one command that will look for the server rather than assume it.
+With neither `--url` nor `TRACEPAD_URL`, it reads **`TRACEPAD_LISTEN`** — the
+variable that told the server where to bind — and probes that, treating a
+wildcard bind as `127.0.0.1`; only with neither of those does it fall back to
+`http://localhost:4318`. A probe usually runs beside the process it is asking
+about, and on a server moved to another port it should move too.
+
+```sh
+TRACEPAD_LISTEN=:8080 tracepad health     # probes http://127.0.0.1:8080
+```
+
+The `--listen` **flag** is not consulted, because a flag on the server's command
+line is not visible to a second process. Where both a server and its probe read
+the configuration, put the port in the environment.
+
 ## Version skew
 
 Every API response carries the server's build. When it differs from the CLI's,

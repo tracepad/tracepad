@@ -9,6 +9,18 @@ needs no configuration.
 tracepad
 ```
 
+Or in Docker, which needs nothing installed but Docker:
+
+```sh
+docker run -d --name tracepad -v tracepad:/data -p 4318:4318 \
+  ghcr.io/tracepad/tracepad
+docker logs tracepad
+```
+
+Everything below is the same either way; the container prints to its log what
+the binary prints to your terminal. See [docker.md](docker.md) for the volume,
+the permissions and upgrades.
+
 The first run creates the database, a project called `default`, and its key
 pair — then prints them, once:
 
@@ -29,11 +41,11 @@ Project "default" created. Connect your app with either:
 ```
 
 **Copy the secret key somewhere.** It is stored hashed, so this is the only
-time it is printable; a lost key is replaced with `tracepad keys new`, not
+time it is printable; a lost key is replaced with `tracepad keys create`, not
 recovered.
 
 Data lives in `~/.local/share/tracepad` by default (`/data` in the Docker
-image); `TRACEPAD_DATA_DIR` moves it.
+image, which is where the volume goes); `TRACEPAD_DATA_DIR` moves it.
 
 ## 2. Point an application at it
 

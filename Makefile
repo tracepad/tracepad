@@ -90,6 +90,22 @@ ui-check: ui-deps ui-types-check ## Type-check the SPA and run its unit tests
 	cd $(UI) && npm run check
 	cd $(UI) && npm run test
 
+# --- The image (spec 020) -----------------------------------------------------
+#
+# Docker is a prerequisite of these two targets only, the way Node is of the
+# interface and `uv` is of the package: nothing above needs a daemon.
+
+IMAGE     := tracepad
+IMAGE_TAG := dev
+
+image: ## Build the Docker image as tracepad:dev
+	docker build --build-arg VERSION=$(VERSION) -t $(IMAGE):$(IMAGE_TAG) .
+
+# The version the check expects is the one `image` stamped, so the two targets
+# cannot disagree about what a passing run proves.
+image-check: ## Boot the image on an ephemeral volume and assert the contract
+	EXPECT_VERSION=$(VERSION) scripts/image-check.sh $(IMAGE):$(IMAGE_TAG)
+
 e2e: build ## Boot the real binary on a temp database and run the Playwright smoke
 	cd $(UI) && npx playwright install chromium
 	cd $(UI) && npm run e2e
@@ -133,5 +149,5 @@ install-hooks: ## (Re)install the pre-commit gate hook
 	chmod +x "$(HOOKS_DIR)/pre-commit"
 
 .PHONY: help build build-server dev test vet smoke fixtures format format-check \
-	ui ui-deps ui-types ui-types-check ui-check ui-lines e2e sdk-test sdk-lines \
-	precommit ensure-hooks install-hooks
+	ui ui-deps ui-types ui-types-check ui-check ui-lines image image-check \
+	e2e sdk-test sdk-lines precommit ensure-hooks install-hooks

@@ -9,6 +9,25 @@ OpenTelemetry-instrumented app at it and browse your traces.
 New here? [docs/quickstart.md](docs/quickstart.md) goes from nothing to a
 trace on screen.
 
+## Getting it
+
+In Docker, which needs nothing else installed:
+
+```sh
+docker run -d --name tracepad -v tracepad:/data -p 4318:4318 \
+  ghcr.io/tracepad/tracepad
+docker logs tracepad          # the first run prints the keys, once
+```
+
+Or as a binary: the archives for Linux, macOS and Windows on
+[Releases](https://github.com/tracepad/tracepad/releases) — one file, nothing
+to install alongside it. Both carry the web interface; both keep everything in
+one directory you choose. See [docs/docker.md](docs/docker.md) for the volume,
+the permissions and upgrades.
+
+From a checkout, `make build` produces the same binary and `make image` the
+same image.
+
 ## What it is built for
 
 One binary over one embedded database, sized for the traces of a team rather

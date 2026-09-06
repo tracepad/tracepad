@@ -1,0 +1,159 @@
+# Releasing the server (spec 020 #5). A version tag publishes two things, and
+# each tool does the one it is good at: GoReleaser owns the six archives and
+# their checksums on GitHub Releases, `buildx` owns one multi-arch manifest on
+# GHCR. The image is not built by GoReleaser — its Docker support wants a
+# prebuilt binary copied into a per-architecture Dockerfile, which is the shape
+# Decision 1 refuses: the Dockerfile in this repository is the whole recipe, so
+# that a contributor, a fork or an operator with a patch can build the artifact
+# the docs describe.
+#
+# Credentials: none of ours. GoReleaser publishes with the repository's own
+# token, and the image is pushed to GHCR with the same one under
+# `packages: write`.
+#
+# Nothing here runs on `main`. The tag is the one act the owner performs
+# deliberately, and `latest` moves only with it (#6).
+name: Release the server
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  # Everything that can refuse the tag, before anything is published. It is its
+  # own job because `release` publishes on GitHub the moment it runs: a check
+  # living in `image` would fire after the archives were already public, and a
+  # half-published release is worse than a refused one.
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      tags: ${{ steps.meta.outputs.tags }}
+    steps:
+      # Tags and all of them: which image tags this release may move is a
+      # question about the ones already published (#16).
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: The tag, and the image tags it moves
+        id: meta
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          # A tag that is not a version would otherwise publish an image named
+          # after it. A tag on GHCR is as public as a version on PyPI.
+          case "$version" in
+            [0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "tag $GITHUB_REF_NAME is not vX.Y.Z" >&2; exit 1 ;;
+          esac
+
+          image="ghcr.io/${GITHUB_REPOSITORY}"
+          tags="$image:$version"
+
+          # A pre-release publishes under its exact tag and nothing else: it is
+          # for the person who asked for it, and neither `X.Y` — what an
+          # operator pins to for patches but not surprises — nor `latest` is
+          # that (#6).
+          case "$version" in
+            *-*)
+              echo "pre-release: publishing $version alone"
+              ;;
+            *)
+              # A moving tag may only move forward. Releasing a back-patch
+              # (v0.2.5 after v0.3.0) must not walk `latest` backwards onto an
+              # older build: that is a silent downgrade for everyone tracking
+              # it, and it lands them in the older-binary-newer-schema case
+              # docs/docker.md says is not supported (#16).
+              #
+              # Pre-release tags are excluded from the comparison because git's
+              # version sort puts `v0.3.0-rc.1` *after* `v0.3.0`. Dropped with
+              # awk rather than `grep -v -- -`, where the pattern is a lone
+              # dash and not every grep agrees that `--` ended the options.
+              newest="$(git tag --list 'v[0-9]*' --sort=-v:refname |
+                        awk '!/-/' | head -1)"
+              line="v${version%.*}"
+              newest_on_line="$(git tag --list "$line.[0-9]*" --sort=-v:refname |
+                                awk '!/-/' | head -1)"
+
+              if [ "$newest_on_line" = "$GITHUB_REF_NAME" ]; then
+                tags="$tags,$image:${version%.*}"
+              else
+                echo "not moving ${version%.*}: $newest_on_line is newer on that line"
+              fi
+
+              if [ "$newest" = "$GITHUB_REF_NAME" ]; then
+                tags="$tags,$image:latest"
+              else
+                echo "not moving latest: $newest is newer"
+              fi
+              ;;
+          esac
+
+          echo "publishing: $tags"
+          {
+            echo "version=$version"
+            echo "tags=$tags"
+          } >> "$GITHUB_OUTPUT"
+
+  release:
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # The whole history, because GoReleaser's changelog is built from it.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      # `.goreleaser.yaml` runs `make ui` before the matrix: every official
+      # artifact carries the web interface (spec 006 #9), and a build without
+      # the tag would silently ship the stub page.
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ui/package.json
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  image:
+    needs: [check, release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      # No QEMU: both builder stages run on the build platform and
+      # cross-compile (Dockerfile, #10), and the runtime stage only copies —
+      # so nothing in this build ever executes an arm64 binary.
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Both decided in `check`, before the release was published.
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ needs.check.outputs.tags }}
+          build-args: |
+            VERSION=${{ needs.check.outputs.version }}
+            REVISION=${{ github.sha }}
