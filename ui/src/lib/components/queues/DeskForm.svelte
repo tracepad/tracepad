@@ -85,7 +85,9 @@
 	const fieldClass = 'border-border bg-canvas text-fg w-full rounded-md border px-2 py-1 text-sm';
 </script>
 
-<div class="flex min-h-0 flex-1 flex-col overflow-y-auto p-4">
+<!-- The form scrolls inside its own column on a desktop; on a phone the desk
+     scrolls as a whole and this simply takes the height it needs. -->
+<div class="flex min-h-0 flex-1 flex-col p-4 md:overflow-y-auto">
 	{#each fields as field, index (field.name)}
 		<section class={['border-border', index > 0 && 'mt-4 border-t pt-3']}>
 			<div class="flex items-baseline gap-2">

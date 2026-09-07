@@ -136,6 +136,10 @@ test('one trace goes in by hand and the rest by filter', async ({ page }) => {
 
 	await page.goto(`/queues/${QUEUE}`);
 	await expect(page.getByRole('row')).toHaveCount(TRACES + 1); // the head and the items
+
+	// The bar is on the listing at every width; the queue's own header drops
+	// it on a phone, where the title and both actions need the room.
+	await page.goto('/queues');
 	await expect(page.getByRole('progressbar')).toHaveAttribute('aria-valuemax', String(TRACES));
 });
 

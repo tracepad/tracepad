@@ -25,7 +25,13 @@
 		filters = undefined,
 		matched = undefined,
 		blocked = null,
-		label = 'Add to queue'
+		label = 'Add to queue',
+		/**
+		 * Show the icon alone. The observation panel's header already carries a
+		 * name, an id and *Add to dataset*, and a third word there truncates
+		 * the name of the thing being read to two characters.
+		 */
+		compact = false
 	}: {
 		target?: QueueTarget;
 		filters?: TraceFilters;
@@ -33,6 +39,7 @@
 		/** Why the filtered add may not run — above the cap, say. */
 		blocked?: string | null;
 		label?: string;
+		compact?: boolean;
 	} = $props();
 
 	let open = $state(false);
@@ -91,7 +98,9 @@
 			     disappears with its text is a button nothing can address. -->
 			<Button {...props} aria-label={label} title="Put this in a review queue">
 				<ClipboardCheck class="size-4" />
-				<span class="hidden sm:inline">{label}</span>
+				{#if !compact}
+					<span class="hidden sm:inline">{label}</span>
+				{/if}
 			</Button>
 		{/snippet}
 	</Popover.Trigger>

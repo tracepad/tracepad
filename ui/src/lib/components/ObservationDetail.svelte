@@ -141,6 +141,7 @@
 			<AddToQueue
 				target={{ trace_id: traceID, observation_id: observation.id }}
 				label="Queue this observation"
+				compact
 			/>
 			<a
 				href="/datasets/items/new?trace={encodeURIComponent(traceID)}&obs={encodeURIComponent(observation.id)}"

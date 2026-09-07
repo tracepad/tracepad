@@ -150,7 +150,10 @@
 					</span>
 				{/each}
 			</div>
-			<ProgressBar {queue} />
+			<!-- Not at a phone's width: the bar and its count would push the
+			     title and both actions into each other, and the statuses are
+			     in the table under it either way. -->
+			<span class="hidden sm:block"><ProgressBar {queue} /></span>
 		{/if}
 	{/snippet}
 	{#snippet actions()}

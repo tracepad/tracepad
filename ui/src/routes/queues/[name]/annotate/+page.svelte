@@ -221,15 +221,25 @@
 		Taking the next item
 	</div>
 {:else if item && queue}
-	<!-- The trace over the form on a phone, side by side on a desktop: at
-	     375 px the page must not scroll sideways (Application contract). -->
-	<div class="flex min-h-0 flex-1 flex-col md:flex-row">
-		<div class="border-border flex min-h-0 flex-1 flex-col md:w-3/5 md:border-r">
+	<!-- Side by side on a desktop, and the trace *over* the form on a phone
+	     (Application contract) — where "over" means the desk scrolls: the trace
+	     takes a screenful, the form follows under it, and neither is squeezed
+	     into a third of a phone. Sideways it never scrolls at all.
+	     `overflow-hidden` on the trace either way: it is a two-pane screen of
+	     its own, and unclipped its blocks are drawn over the form. -->
+	<div class="flex min-h-0 flex-1 flex-col overflow-y-auto md:flex-row md:overflow-hidden">
+		<div
+			class="border-border flex h-[60vh] shrink-0 flex-col overflow-hidden
+				md:h-auto md:min-h-0 md:w-3/5 md:shrink md:border-r"
+		>
 			{#key item.id}
 				<TraceDetail traceID={item.trace_id} bind:trace={peeked} />
 			{/key}
 		</div>
-		<div class="border-border flex min-h-0 flex-col border-t md:w-2/5 md:border-t-0">
+		<div
+			class="border-border flex flex-col border-t
+				md:min-h-0 md:w-2/5 md:overflow-hidden md:border-t-0"
+		>
 			<!-- Not before the target's scores have landed: the form is
 			     *prefilled* from them (#12), and a form drawn empty and filled
 			     in afterwards would overwrite whatever the reviewer had already
