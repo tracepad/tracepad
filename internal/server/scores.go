@@ -406,12 +406,10 @@ func (s *Server) handleDeleteScore(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	id := r.PathValue("id")
 	// The id's shape is checked before the queue: an id that no score can
 	// have is a client bug, and saying so costs nothing.
-	if !hexID.MatchString(id) {
-		writeError(w, http.StatusBadRequest,
-			fmt.Sprintf("score id must be 32 lower-case hex characters, got %q", id))
+	id, ok := hexPathID(w, r, "score id")
+	if !ok {
 		return
 	}
 	if !s.submit(w, r, &store.ScoreDelete{ProjectID: project.ID, ID: id}) {

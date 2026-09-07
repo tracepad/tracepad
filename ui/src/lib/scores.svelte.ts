@@ -20,6 +20,8 @@ export class Scores {
 
 	#filter: () => ScoreFilters;
 	#written = $state(0);
+	/** The target the rows on hand came from, so a change can be told apart. */
+	#read_from = '';
 
 	constructor(filter: () => ScoreFilters) {
 		this.#filter = filter;
@@ -44,6 +46,19 @@ export class Scores {
 	}
 
 	async #read(filter: ScoreFilters, signal: AbortSignal) {
+		const from = JSON.stringify(filter);
+		if (from !== this.#read_from) {
+			// Dropped before the request, not after it — the same reason
+			// `TraceDetail` drops the trace before loading the next one. A chip
+			// carries live Edit and Delete, so the previous target's rows left
+			// under the new one's heading are an offer to correct or retract a
+			// judgement about something else; and the trace header would draw
+			// them against the new trace's observation ids, which marks every
+			// one of them *unknown observation* (found in review of PR #41).
+			this.rows = [];
+			this.more = false;
+			this.#read_from = from;
+		}
 		this.loading = true;
 		this.failure = null;
 		try {

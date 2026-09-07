@@ -109,9 +109,11 @@ must still be able to score. Saving posts one score stamped
 **Edit** is the same dialog over an existing score, re-posted with its id:
 spec 003's correction, which replaces the row rather than adding a second one.
 It is offered on every score, not only the ones written here — a judge's
-verdict overruled by a person is the review the eval loop exists for. The
-score's own `metadata` and `timestamp` are resent unchanged, so an edit
-invents neither a new author nor a new event time.
+verdict overruled by a person is the review the eval loop exists for. What the
+dialog does not show, it resends as it was: the score's `metadata`, its
+`timestamp`, and what it is about — so an edit invents neither a new author nor
+a new event time, and it never moves a score off the observation or the session
+it grades.
 
 **Delete** asks once, naming the score and its value, and then calls
 `DELETE /api/v1/scores/{id}`. There is no name to type back: a score is one

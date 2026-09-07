@@ -2,6 +2,7 @@
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import { Dialog } from 'bits-ui';
+	import { untrack } from 'svelte';
 	import { ApiError, api, type Score, type ScoreConfig } from '$lib/api/client.svelte';
 	import { DATA_TYPES, typeLabel, type DataType } from '$lib/api/score-configs';
 	import {
@@ -51,10 +52,19 @@
 
 	// Opening seeds the form: one dialog serves every chip, and a value
 	// half-typed for one score must not follow the reader to the next.
+	//
+	// Opening, and nothing else. The configs arrive on a second, sequential
+	// request, so a reader who presses *Score* and types straight away is
+	// typing before they land — and seeding again when they do would empty the
+	// form under their hands and jump the name off *other…*. They are read
+	// here but not depended on (found in review of PR #41).
 	$effect(() => {
 		if (!open) return;
-		form = score ? formOfScore(score, configs) : emptyScoreForm(configs);
-		failure = null;
+		const correcting = score;
+		untrack(() => {
+			form = correcting ? formOfScore(correcting, configs) : emptyScoreForm(configs);
+			failure = null;
+		});
 	});
 
 	const config = $derived(configOf(form, configs));
@@ -158,10 +168,14 @@
 					<div class="mt-1 flex flex-wrap gap-x-4 gap-y-1">
 						{#each DATA_TYPES as value (value)}
 							<label class="flex items-center gap-1.5 text-sm">
+								<!-- The word is what a reader picks by; what it means is
+								     the accessible name, rather than a second copy of
+								     the word beside it. -->
 								<input
 									type="radio"
 									name="data_type"
 									{value}
+									aria-label={typeLabel(value)}
 									checked={form.dataType === value}
 									onchange={() => {
 										form.dataType = value as DataType;
@@ -170,7 +184,6 @@
 									}}
 								/>
 								{value}
-								<span class="sr-only">{typeLabel(value)}</span>
 							</label>
 						{/each}
 					</div>

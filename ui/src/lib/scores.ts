@@ -197,6 +197,18 @@ export function formOfScore(score: Score, configs: ScoreConfig[]): ScoreForm {
 }
 
 /**
+ * What a stored score is *about*, as a target. The absent ids stay absent:
+ * the API refuses an empty `trace_id` rather than reading it as "no trace".
+ */
+export function targetOf(score: Score): ScoreTarget {
+	const target: ScoreTarget = {};
+	if (score.trace_id) target.trace_id = score.trace_id;
+	if (score.observation_id) target.observation_id = score.observation_id;
+	if (score.session_id) target.session_id = score.session_id;
+	return target;
+}
+
+/**
  * Why the server would refuse this form, or `null`. It mirrors the rules
  * spec 003 already gives rather than inventing any: a name, a type on the free
  * path, and a value of the shape the type takes. The `400` stays the oracle —
@@ -221,11 +233,16 @@ export function scoreProblem(form: ScoreForm, configs: ScoreConfig[]): string | 
  * The body of the POST (#4, #5). A new score is stamped `source: "web"` and
  * carries no `timestamp`, so it is received now — a judgement made now.
  *
- * An edit resends the score being corrected: its id, and with it the
- * `metadata` and `timestamp` it already had (Decision 10). A re-POST replaces
- * the row whole, so a field left out is a field deleted, and relabelling a
- * judge's verdict as written *here* — or moving its event time to now —
- * would be two facts an edit invented.
+ * An edit resends the score being corrected: its id, its own **target**, and
+ * with it the `metadata` and `timestamp` it already had (Decision 10). A
+ * re-POST replaces the row whole, so a field left out is a field deleted:
+ * taking the target from the block that happened to draw the chip would move
+ * a score off the observation it grades — the *unknown observation* chip is
+ * on the trace header, and the trace header's target names no observation —
+ * and would drop the second id of a score that carries a trace and a session
+ * both, which is a score the API takes and `scores add` writes. None of the
+ * three ids is a field the dialog shows, so none of them is the reader's to
+ * change (found in review of PR #41).
  */
 export function scoreBody(
 	target: ScoreTarget,
@@ -235,7 +252,7 @@ export function scoreBody(
 ): ScoreInput {
 	const type = typeOf(form, configs);
 	const body: ScoreInput = {
-		...target,
+		...(editing ? targetOf(editing) : target),
 		name: nameOf(form),
 		// Stated rather than inferred, on every type: the inference of
 		// spec 003 #5 would read a boolean as numeric and a category as text,

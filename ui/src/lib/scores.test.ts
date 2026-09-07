@@ -279,6 +279,45 @@ describe('the dialog form', () => {
 		expect(body.timestamp).toBe('2026-09-01T08:00:00Z');
 	});
 
+	// The target is not one of the fields the dialog shows, so it is not the
+	// reader's to change (#10) — and a re-POST replaces the row whole, so a
+	// target field left out is a target field erased (found in review of
+	// PR #41).
+	it('edits a score under its own target, not the block that drew it', () => {
+		const stray = score({
+			id: 'c'.repeat(32),
+			trace_id: 'trace-1',
+			observation_id: 'not-in-this-trace',
+			name: 'accuracy'
+		});
+
+		// The header block draws this chip, so the target it hands over names
+		// the trace alone.
+		const body = scoreBody({ trace_id: 'trace-1' }, formOfScore(stray, configs), configs, stray);
+
+		expect(body.observation_id).toBe('not-in-this-trace');
+		expect(body.trace_id).toBe('trace-1');
+	});
+
+	it('keeps both ids of a score that carries a trace and a session', () => {
+		// The API takes either or both, and `scores add --trace X --session Y`
+		// writes both; an edit from one block must not delete the other.
+		const both = score({
+			id: 'd'.repeat(32),
+			trace_id: 'trace-1',
+			session_id: 'session-77',
+			name: 'accuracy'
+		});
+
+		expect(scoreBody({ trace_id: 'trace-1' }, formOfScore(both, configs), configs, both)).toMatchObject({
+			trace_id: 'trace-1',
+			session_id: 'session-77'
+		});
+		expect(
+			scoreBody({ session_id: 'session-77' }, formOfScore(both, configs), configs, both)
+		).toMatchObject({ trace_id: 'trace-1', session_id: 'session-77' });
+	});
+
 	it('opens a score whose name has no config on the free path, filled', () => {
 		const seeded = formOfScore(
 			score({ name: 'vibes', data_type: 'text', value: undefined, string_value: 'fine' }),

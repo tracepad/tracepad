@@ -52,18 +52,17 @@ const configs = [
 
 const onsaved = vi.fn();
 
-function dialog(score: Score | null = null) {
+function dialog(score: Score | null = null, seeded: ScoreConfig[] = configs) {
+	const props = {
+		open: true,
+		target: { trace_id: 'trace-1' },
+		configs: seeded,
+		score,
+		onclose: vi.fn(),
+		onsaved
+	};
 	// Under `props`, because `target` is also one of render's own options.
-	render(ScoreDialog, {
-		props: {
-			open: true,
-			target: { trace_id: 'trace-1' },
-			configs,
-			score,
-			onclose: vi.fn(),
-			onsaved
-		}
-	} as never);
+	render(ScoreDialog, { props } as never);
 	// No delay between keystrokes: typing a value a character at a time over
 	// a real second leaves the dialog open long enough for bits-ui's overlay
 	// to race the content out from under the assertions.
@@ -101,6 +100,21 @@ describe('the control the config dictates', () => {
 			'correct',
 			'wrong'
 		]);
+	});
+
+	// A project that declared no configs has only the free path, and the
+	// dialog opens on it. That the form then survives the configs *landing*
+	// is not testable here — `@testing-library/svelte` keeps every prop in
+	// one `$state.raw` object, so a rerender invalidates every prop read and
+	// not only the one it changed — so that regression is held in the e2e
+	// suite, where the two requests really are sequential.
+	it('opens on the free path when the project declared nothing', () => {
+		dialog(null, []);
+
+		expect(screen.getByLabelText('Score name')).toBeVisible();
+		// `other…` is the whole of the select, and its value is the empty name.
+		expect(screen.getByLabelText('Name')).toHaveValue('');
+		expect(screen.getAllByRole('option')).toHaveLength(1);
 	});
 
 	it('asks the free-name path for a type before it asks for a value', async () => {

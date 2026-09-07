@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
-import { createProject, state } from './harness';
+import { createProject, state, WIRE_TRACE } from './harness';
 
 // Scores where their target is (spec 022, Testing — e2e), against the real
 // binary. The corpus is seeded through the API in a project of its own
@@ -17,6 +17,8 @@ test.describe.configure({ mode: 'serial' });
 
 /** Fixture 001: one trace, a span and the generation under it. */
 const TRACE = '4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f';
+/** Fixture 008's trace: the second one, for the walk between two of them. */
+const OTHER_TRACE = WIRE_TRACE;
 const GENERATION = '2b3c4d5e6f7a8b9c';
 const SESSION = 'session-77';
 
@@ -69,10 +71,12 @@ let seeded: Promise<void> | null = null;
  */
 function seed(): Promise<void> {
 	seeded ??= (async () => {
-		const fixture = readFileSync(
-			join(resolve(process.cwd(), '..'), 'testdata', 'otlp', '001-langfuse-sdk-generation.pb')
-		);
-		await must('POST', '/v1/traces', fixture, 'application/x-protobuf');
+		for (const name of ['001-langfuse-sdk-generation', '008-wire-columns']) {
+			const fixture = readFileSync(
+				join(resolve(process.cwd(), '..'), 'testdata', 'otlp', `${name}.pb`)
+			);
+			await must('POST', '/v1/traces', fixture, 'application/x-protobuf');
+		}
 		await must('PUT', '/api/v1/score-configs/verdict', {
 			data_type: 'categorical',
 			categories: ['correct', 'partial', 'wrong'],
@@ -195,6 +199,83 @@ test('the free-name path scores a name the project never declared', async ({ pag
 
 	await expect(page.getByRole('button', { name: /vibes/ })).toContainText('0.25');
 	await must('DELETE', `/api/v1/scores/${(await ids('vibes'))[0]}`);
+});
+
+// The block reads the scores first and the configs after, so a reader who
+// presses *Score* and types straight away is typing before the configs land.
+// Seeding the form again when they do empties it under their hands and jumps
+// the name off *other…* (found in review of PR #41).
+test('the configs landing under an open dialog do not empty it', async ({ page }) => {
+	await signIn(page);
+
+	// Hold the config read until the form has something in it.
+	let release = () => {};
+	const held = new Promise<void>((wake) => (release = wake));
+	await page.route('**/api/v1/score-configs*', async (route) => {
+		await held;
+		await route.continue();
+	});
+
+	await page.goto(`/traces/${TRACE}`);
+	await page.getByRole('button', { name: 'Score', exact: true }).click();
+	await page.getByLabel('Score name').fill('vibes');
+	await page.getByRole('radio', { name: 'text' }).check();
+	await page.getByLabel('Value').fill('worth keeping');
+
+	release();
+	// Long enough for the answer to arrive and be applied.
+	await expect(page.getByRole('option', { name: /verdict/ })).toBeAttached();
+
+	await expect(page.getByLabel('Score name')).toHaveValue('vibes');
+	await expect(page.getByLabel('Value')).toHaveValue('worth keeping');
+	// Still on *other…*, which is where the reader put it.
+	await expect(page.getByLabel('Name', { exact: true })).toHaveValue('');
+});
+
+// One `Scores` reader serves every trace the panel walks to, and a chip
+// carries live Edit and Delete — so trace B must never be drawn wearing trace
+// A's judgements (found in review of PR #41).
+test('a trace opened over another does not wear its scores', async ({ page }) => {
+	await signIn(page);
+
+	// The second trace of the seed, with a score of its own under the same
+	// name, so the two answers can be told apart.
+	await must('POST', '/api/v1/scores', {
+		id: 'aa000000000000000000000000000005',
+		trace_id: OTHER_TRACE,
+		name: 'helpfulness',
+		value: 0.125
+	});
+
+	// Hold the second trace's score read, so the swap is caught mid-flight.
+	let release = () => {};
+	const held = new Promise<void>((wake) => (release = wake));
+	await page.route(
+		(url) => url.pathname === '/api/v1/scores' && url.searchParams.get('trace_id') === OTHER_TRACE,
+		async (route) => {
+			await held;
+			await route.continue();
+		}
+	);
+
+	// The panel's own walk, which is what swaps `traceID` without unmounting.
+	// A fresh page load would remount the reader and start it empty, which is
+	// the one arrangement that cannot go wrong.
+	await page.goto(`/traces?peek=${TRACE}`);
+	await expect(page.getByRole('button', { name: /helpfulness/ })).toContainText('0.875');
+
+	await page.keyboard.press('k');
+	// The row above this one, asserted rather than assumed: on another one the
+	// checks below would pass over an empty block and prove nothing.
+	await expect(page.getByRole('heading', { name: 'checkout' }).first()).toBeVisible();
+
+	// Nothing of the first trace is on screen while the second is in flight:
+	// its chips carry Edit and Delete, and they would act on its scores here.
+	await expect(page.getByRole('button', { name: /helpfulness/ })).toHaveCount(0);
+	await expect(page.getByRole('button', { name: /stray/ })).toHaveCount(0);
+
+	release();
+	await expect(page.getByRole('button', { name: /helpfulness/ })).toContainText('0.125');
 });
 
 test('no screen with a score block scrolls the page sideways', async ({ page }) => {
