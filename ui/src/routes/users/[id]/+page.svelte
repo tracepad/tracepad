@@ -4,6 +4,7 @@
 	import Maximize2 from '@lucide/svelte/icons/maximize-2';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
+	import { untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { ApiError, api, type DryRun, type Stats, type User } from '$lib/api/client.svelte';
@@ -58,14 +59,29 @@
 	let failure = $state<string | null>(null);
 	let erasing = $state(false);
 
+	/**
+	 * The question this page asks, as a value that compares. Not the objects
+	 * behind it: `viewed` is rebuilt on every URL change, and a `$derived`
+	 * object is never equal to the last one — so an effect that read it
+	 * re-asked all four requests on `?peek=`, `?cursor=` and `?limit=`, every
+	 * one of which belongs to the tab underneath rather than to the charts.
+	 * Turning a page in the Traces tab fetched the summary, the timeline and
+	 * both breakdowns again, aborting the last set each time.
+	 *
+	 * This is spec 010's own lesson (`listing.svelte.ts`, `#stamp`) in the one
+	 * screen that carries two listings' state in its URL beside its own
+	 * (found in the second review of PR #42).
+	 */
+	const asked = $derived(`${id}|${viewed.from ?? ''}|${viewed.to ?? ''}|${bucket}`);
+
 	$effect(() => {
-		// Everything the question is made of is read here, before the first
-		// await, so all of it is a dependency of this effect.
-		const who = id;
-		const query = { user_id: who, from: viewed.from, to: viewed.to };
-		const group = bucket;
+		// The stamp is the whole subscription; everything else is read
+		// untracked, in this effect's own run and before the first await.
+		void asked;
 		const controller = new AbortController();
-		load(who, query, group, controller.signal);
+		untrack(() =>
+			load(id, { user_id: id, from: viewed.from, to: viewed.to }, bucket, controller.signal)
+		);
 		return () => controller.abort();
 	});
 

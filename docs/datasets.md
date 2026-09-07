@@ -303,7 +303,7 @@ is a filter, not an address.
   case got, so a run that retried something three times says so.
 - Percentiles are **exact** over the run's traces — a run is hundreds of them,
   and at that size the exact number beats the ±12% of the bucketed ones in
-  [`/stats`](api.md#stats).
+  [`/stats`](api.md#statistics).
 - `total_cost` is `null` when no attempt carried a cost. Absent cost is not
   zero.
 - Score names report `mean`/`min`/`max` when they are numeric or boolean, a

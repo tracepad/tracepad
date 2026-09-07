@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -375,6 +376,87 @@ func TestTheDirtySetReachesTheSessionsOtherHours(t *testing.T) {
 		// Without this the later hour keeps a `sessions_started` that is no
 		// longer true, and nothing would ever revisit it.
 		t.Errorf("dirty hours %v do not include the hour the session start left", dirty)
+	}
+}
+
+// TestAnAnonymousSessionDirtiesNothing: the dirty set is for `sessions_started`,
+// and an anonymous trace can never move one — the start predicate requires a
+// user id on both sides. Without the restriction, a deployment that sets
+// `session_id` and never `user_id` re-rolled every hour of a session for one
+// late span, and a chat left open across a day re-rolled all of its hours on
+// every pass (found in the second review of PR #42).
+func TestAnAnonymousSessionDirtiesNothing(t *testing.T) {
+	s, project := readStore(t)
+	// A session spanning three hours, no user id on any of its traces. Well
+	// away from the named session below, so the two sets do not overlap and
+	// the counts mean something.
+	for i := range 3 {
+		seedUserTrace(t, s, project.ID, userSeed{n: i + 1, user: "", session: "anon",
+			environment: "production", model: "m", latencyMs: 10,
+			hour: rollupHour + int64(10+i)*SecondsPerHour, offsetSeconds: 30})
+	}
+	hours, err := s.dirtySessionHours(project.ID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hours) != 0 {
+		t.Errorf("an anonymous session dirtied %v; none of its hours can hold a start", hours)
+	}
+
+	// And a session that does carry a user id still dirties all of its hours,
+	// which is what Decision 2 is for.
+	for i := range 3 {
+		seedUserTrace(t, s, project.ID, userSeed{n: i + 10, user: "alice", session: "named",
+			environment: "production", model: "m", latencyMs: 10,
+			hour: rollupHour + int64(i)*SecondsPerHour, offsetSeconds: 40})
+	}
+	hours, err = s.dirtySessionHours(project.ID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hours) != 3 {
+		t.Errorf("a named session dirtied %v, want its three hours", hours)
+	}
+
+	// The half that makes the restriction safe rather than a trade: ingest
+	// writes `COALESCE(excluded.user_id, traces.user_id)`, so an anonymous
+	// trace can only ever *gain* a user id — and gaining one has to reach
+	// the hours of the session it is now part of.
+	// Only *its* hour joins, not the whole anonymous session: the other two
+	// traces still name nobody, so they still cannot hold a start.
+	seedUserTrace(t, s, project.ID, userSeed{n: 1, user: "bob", session: "anon",
+		environment: "production", model: "m", latencyMs: 10,
+		hour: rollupHour + 10*SecondsPerHour, offsetSeconds: 30})
+	hours, err = s.dirtySessionHours(project.ID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []int64{rollupHour, rollupHour + SecondsPerHour, rollupHour + 2*SecondsPerHour,
+		rollupHour + 10*SecondsPerHour}
+	if !slices.Equal(hours, want) {
+		t.Errorf("dirtied %v, want %v: the newly named trace's hour beside the named "+
+			"session's three", hours, want)
+	}
+
+	// The other half of the restriction, which the assertions above cannot
+	// see: a change to an anonymous trace of a session that *does* have named
+	// traces elsewhere. It cannot move a start either, so it dirties nothing —
+	// where an unrestricted subquery would select the session and re-roll the
+	// hours of its named traces for nothing.
+	var cutoff int64
+	if err := s.db.QueryRow(`SELECT MAX(updated_at) FROM traces WHERE project_id = ?`,
+		project.ID).Scan(&cutoff); err != nil {
+		t.Fatal(err)
+	}
+	seedUserTrace(t, s, project.ID, userSeed{n: 20, user: "", session: "named",
+		environment: "production", model: "m", latencyMs: 10,
+		hour: rollupHour + 20*SecondsPerHour, offsetSeconds: 30})
+	hours, err = s.dirtySessionHours(project.ID, cutoff)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hours) != 0 {
+		t.Errorf("an anonymous trace joining a named session dirtied %v, want nothing", hours)
 	}
 }
 

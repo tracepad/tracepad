@@ -8,7 +8,7 @@ to avoid.
 
 So users get a rollup of their own: the same hourly grain, one dimension over.
 A listing of who is there, a page for each of them, and the same charts and
-breakdowns the [Stats](ui.md#stats) screen draws, restricted to one account.
+breakdowns the [Stats](ui.md#screens) screen draws, restricted to one account.
 
 ## What a user is
 
@@ -120,7 +120,7 @@ is a number rather than a guess.
   listing entirely.
 - **Erasure.** `DELETE /api/v1/projects/{id}/users/{user_id}/data` deletes the
   user's rows in both tables outright, in the same request that erases their
-  traces — see [admin.md](admin.md#erasing-one-users-data). They are *about*
+  traces — see [admin.md](admin.md#erasing-a-users-data). They are *about*
   the user, so they go rather than being recomputed: for an hour past the trace
   retention window there is nothing left to recompute them from. The
   project-wide `stats_hourly` for such a frozen hour goes on counting the
@@ -142,7 +142,7 @@ tracepad stats --user user-4821 --group-by day --since 30d
 
 `users ls` walks with `--cursor`, `--oldest` and `--newer` like every other
 listing, and `--total` adds the capped count. `--json` prints the endpoint's
-own bytes. Full flags: [cli.md](cli.md#users).
+own bytes. Full flags: [cli.md](cli.md#users-ls).
 
 ## From an agent
 
@@ -161,4 +161,4 @@ See [mcp.md](mcp.md).
 
 *Users* sits between *Sessions* and *Stats*, which is what it joins: a user is
 a set of sessions, and their page is Stats for one of them. See
-[ui.md](ui.md#users).
+[ui.md](ui.md#screens).

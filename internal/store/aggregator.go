@@ -514,13 +514,31 @@ func (s *Store) dirtySessionHours(projectID string, since int64) ([]int64, error
 // timestamp — a client's bytes gone wrong rather than a time — would name an
 // hour the roll does not use. Such a trace is left to the live scan, exactly as
 // `hoursWithTraces` leaves it.
+// Both halves are restricted to traces that carry a user id, and that is
+// correctness-preserving rather than a trade: `sessionStartCondition` ignores
+// an anonymous trace entirely — it requires `t.user_id` non-empty and matches
+// `x.user_id = t.user_id` — so a change to one can never move a count, and an
+// hour holding only anonymous traces of the session can never hold a start.
+//
+// A trace cannot *lose* its user id, which is what makes the first half safe:
+// ingest writes `user_id = COALESCE(excluded.user_id, traces.user_id)`
+// (`ingest.go`), so an anonymous trace can only ever gain one — and gaining one
+// stamps `updated_at`, which is what puts it in this subquery.
+//
+// Without the restriction, a deployment that sets `session_id` and never
+// `user_id` re-rolled every hour of a session for one late span — writing
+// `stats_hourly` again for each — and a chat left open across a day re-rolled
+// all of its hours on every pass while it was still receiving spans. Neither
+// measured corpus has that shape (found in the second review of PR #42).
 const dirtySessionHoursQuery = `SELECT DISTINCT (other.timestamp / 1000000000 / ?) * ? AS hour
 	 FROM traces other
 	 WHERE other.project_id = ? AND +other.timestamp >= 0
+	   AND other.user_id IS NOT NULL AND other.user_id != ''
 	   AND other.session_id IN (
 	         SELECT t.session_id FROM traces t
 	          WHERE t.project_id = ? AND t.updated_at > ?
-	            AND t.session_id IS NOT NULL)
+	            AND t.session_id IS NOT NULL
+	            AND t.user_id IS NOT NULL AND t.user_id != '')
 	 ORDER BY hour`
 
 // hoursWithTraces lists the hours of a half-open range that hold anything to

@@ -223,6 +223,35 @@ test('the user page draws the cards, the charts, the breakdowns and both tabs', 
 	await expect(page.getByText('answer').first()).toBeVisible();
 });
 
+// The page's URL carries two listings' cursors and the panel's key beside its
+// own window, so the effect behind the header and the charts has to depend on
+// what it actually asks — not on an object rebuilt whenever any of that moves.
+// It did, and turning a page in a tab re-fetched the summary, the timeline and
+// both breakdowns (found in the second review of PR #42).
+test('turning a page in a tab does not re-ask for the charts', async ({ page }) => {
+	await signIn(page);
+	// `limit=1` so alice's two traces are two pages.
+	await page.goto(`/users/${encodeURIComponent(ALICE)}?tab=traces&limit=1`);
+	await expect(page.locator('.uplot canvas').first()).toBeVisible();
+
+	const asked: string[] = [];
+	page.on('request', (request) => {
+		const url = new URL(request.url());
+		if (url.pathname.startsWith('/api/v1/')) asked.push(url.pathname);
+	});
+
+	await page.getByRole('button', { name: 'Next page' }).click();
+	await expect(page).toHaveURL(/cursor=/);
+	// Give anything the turn would have triggered time to go out.
+	await expect.poll(() => asked.length, { timeout: 3000 }).toBeGreaterThan(0);
+	await page.waitForTimeout(500);
+
+	// The turn is one request: the tab's own listing.
+	expect(asked.filter((path) => path.startsWith('/api/v1/stats'))).toEqual([]);
+	expect(asked.filter((path) => path.startsWith('/api/v1/users/'))).toEqual([]);
+	expect(asked).toContain('/api/v1/traces');
+});
+
 test('a user id in the traces table links to the page', async ({ page }) => {
 	await signIn(page);
 	await page.goto(`/traces?user_id=${encodeURIComponent(BOB)}`);
