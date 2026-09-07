@@ -149,6 +149,8 @@ was created.
 `GET /api/v1/prompts/{name}/versions` lists a name's versions newest first,
 with their commit messages and labels but **without** the bodies — version
 lists are for picking and diffing; bodies come from the single-prompt fetch.
+It also answers with `"labels"`: every label of the *name* and the version it
+points at, so "where is production" is answered on any page of a long history.
 
 Both listings take `limit` (1–500, default 50), a `cursor` and a `direction`
 (`next` or `prev`), and answer with `next_cursor` and `prev_cursor`. Keep
@@ -217,6 +219,19 @@ response = client.messages.create(model=prompt["config"]["model"], messages=mess
 ```
 
 Deploying a new prompt is then a label move, not a release.
+
+## From the web interface
+
+Everything on this page has a screen: *Prompts* in the sidebar is the listing,
+a name opens its versions with the body of the one you are reading, `?diff=A..B`
+shows the patch the endpoint above returns, and the editor appends a version
+from the one on screen — an edit *is* a new version, so there is no other kind.
+The label control is the deploy path: attaching a label that points nowhere is
+immediate, and moving or removing one asks first and names the move
+(*production: v6 → v7*). *Delete* is the endpoint above, dry run and all.
+
+The interface does nothing the API does not, and nothing the CLI cannot: every
+button here is one of the requests on this page. See [ui.md](ui.md#prompts).
 
 ## Responses
 
