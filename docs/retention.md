@@ -33,7 +33,7 @@ nullable:
 |---|---|---|
 | `retention_days` | Traces, and everything hanging off them: observations, payloads, scores | Keep forever (the default) |
 | `raw_retention_days` | The stored OTLP bodies of `TRACEPAD_STORE_RAW` | Follow `retention_days` |
-| `stats_retention_days` | The hourly statistics rollup | Keep forever (the default) |
+| `stats_retention_days` | The hourly statistics rollup, and the per-user one beside it ([users.md](users.md)) | Keep forever (the default) |
 
 Setting `stats_retention_days` deletes the *stored summaries* past it; it does
 not hide the traces. While the raw rows are still there, statistics for those
@@ -98,6 +98,13 @@ discovered:
    carry no user id, no name and no text — they are counts, sums and latency
    buckets — which is the same archive posture the raw bodies have below, and
    the same reasoning regulators accept for a backup.
+
+   The **per-user** rollup is the exception to that exception. Those rows are
+   about the user by construction, so an erasure deletes them outright rather
+   than recomputing them — in every hour, frozen ones included, where a
+   recompute could not have run at all. The user leaves `/api/v1/users`
+   immediately; only the project-wide totals for a frozen hour go on counting
+   the traces.
 
 ## What a run keeps
 
@@ -273,6 +280,8 @@ This lands well inside the one-month response window Article 12(3) allows.
 erased traces occupied are recomputed before the call returns; hours whose raw
 rows retention already took are frozen and keep their totals. Those rows hold
 no user id, no name and no text — see [What outlives what](#what-outlives-what).
+The **per-user** rows, which do hold the id, are deleted outright in the same
+request, frozen hours included.
 
 **Raw OTLP bodies are not erased.** They are an archive: not served by any read
 endpoint, not searchable, expiring on their own schedule — the same posture as

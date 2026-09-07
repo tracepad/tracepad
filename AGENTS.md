@@ -211,6 +211,23 @@ API. This file routes; it does not duplicate what specs and docs say.
   and no echo because a re-POST puts the row back (#6). `tracepad scores add`
   and `scores rm` land in the same PR, since the interface may do nothing the
   CLI cannot (#7).
+- ✅ Spec 023 (users) shipped: schema 0013 — `users_hourly`, spec 013's tuple
+  plus `user_id`, and a `users` summary row per account — rolled by the *same*
+  aggregator pass, in the same `(project, hour)` job, under the same watermark
+  and the same freeze (#2). A user id rode on most traces and the store could
+  filter by it, erase by it and nothing else; now "who are my heaviest users",
+  "when did this one last show up" and "what does this account cost me" are
+  index seeks. `sessions_started` is counted where a session *begins*, because
+  a start sums exactly over a range and a distinct count does not (#1, #12),
+  which costs the dirty set one addition: a changed trace with a session id
+  also dirties the hours the rest of that session sits in. `GET /api/v1/users`
+  answers from the rollup alone and trails it by the published lag; `GET
+  /api/v1/users/{id}` merges the live tail and is exact for any id (#4).
+  `/stats` gains `user_id`, and with it `sessions` per bucket on a timeline
+  (#6). Erasure deletes the per-user rows outright rather than re-rolling them
+  — they are *about* the user, and a frozen hour could not recompute them at
+  all (#10). The *Users* screens, `users ls`/`show`, `stats --user`,
+  `list_users`/`get_user`; the interface's line ceiling rises to 16,000 (#11).
 - ✅ Spec 005 (retention & admin) shipped: schema 0005, the hourly sweeper
   writing every chunk through the group-commit writer, the admin API under
   `/api/v1/projects` with a dry-run/confirm contract on every destructive
@@ -239,9 +256,10 @@ API. This file routes; it does not duplicate what specs and docs say.
 | The raw archive and the way out | `internal/store/raw.go` (the listing, one body, the counters, and where `size_bytes` comes from), `internal/server/raw.go` (the two endpoints and `/system`'s `raw` block), `internal/cli/export.go` + `exportsink.go` (the walk, the two destinations, the retry), `docs/export.md`, spec 019 — the export replays **bodies**, never a synthesis from parsed rows, and it is a client of the API like every other command; the listing runs oldest first on purpose, and the resume cursor names the last batch the receiver *took*, so `--after` starts again at the one that failed |
 | OTLP/JSON | `internal/mapping/otlpjson.go`, spec 019 #7 — one mapper for both encodings; the only difference is that OTLP/JSON writes ids as hex where `protojson` writes base64, which is rewritten by field name on the way in and out. A JSON batch is archived as JSON (#8): converting at ingest would make the archive the converter's output |
 | Statistics rollup | `internal/store/rollup.go` (the table and one hour's recomputation), `aggregator.go` (the pass, the watermark, the freeze), `histogram.go` (why a percentile is summable), the seam in `internal/server/stats.go`, spec 013 — an hour is recomputed whole and never delta-maintained, and the rollup is the one store the trace sweep spares |
+| The per-user rollup and the Users screens | `internal/store/users.go` (both tables, one hour's per-user recomputation, the summary, the listing's four keysets and the live tail), the `statsRoll` job that writes it in `rollup.go` and the session half of `dirtyHours` in `aggregator.go`, `internal/server/users.go` (the two endpoints and the merge) with `user_id` in `stats.go`, `ui/src/routes/users/`, `ui/src/lib/components/users/` + `UserTable.svelte`, `ui/src/lib/api/users.ts` (the pure part: the filters held to `openapi.json`, the sorts, the page's URL), `docs/users.md`, spec 023 — one aggregator writes both tables in one transaction, a session is counted in the hour its user's earliest trace of it starts (#12), the listing is the rollup alone while one user merges the live tail (#4), and an erasure *deletes* the per-user rows rather than re-rolling them (#10) |
 | Admin API (projects, keys, retention, erasure) | `internal/server/admin.go`, `internal/store/admin.go`, `docs/admin.md`, spec 005 — destructive endpoints are a dry run until `?confirm=` echoes the name, checked inside the write transaction |
 | Attribute mapping | `internal/mapping/rules.go` is the table; `mapping.go` applies it; `value.go` holds `attrs`, where reading and claiming are separate and an unclaimed attribute keeps the origin it arrived at (spec 012 #7) |
-| Web interface | `ui/` (SvelteKit SPA), `internal/ui/` (the embed and the tagless stub), `internal/server/ui.go` (delivery and the SPA fallback), `docs/ui.md`, specs 006 to 010 and 015 — the API types in `ui/src/lib/api/schema.d.ts` are generated from `openapi.json` and the gate fails on drift, and the application-line budget is 14,000 (`scripts/ui-lines.sh`, spec 015 #9) |
+| Web interface | `ui/` (SvelteKit SPA), `internal/ui/` (the embed and the tagless stub), `internal/server/ui.go` (delivery and the SPA fallback), `docs/ui.md`, specs 006 to 010 and 015 — the API types in `ui/src/lib/api/schema.d.ts` are generated from `openapi.json` and the gate fails on drift, and the application-line budget is 16,000 (`scripts/ui-lines.sh`, spec 023 #11) |
 | A payload, shown or edited | `ui/src/lib/components/json/` — `setup.ts` is everything that is not a DOM node (the document a value becomes, where it stops being JSON, which nodes a long one folds, the extension list and the themed chrome), `CodeArea.svelte` is the instance, `JsonView`/`JsonEditor` are the two modes, spec 015 — one surface for reading and writing, so there is one answer to "what does this payload look like"; the mode is the `readOnly` facet and nothing else, `indentWithTab` is deliberately absent (#7), truncation belongs to `Payload.svelte` rather than to the editor (#3), and an editor over a field that may be absent takes `optional`, where an empty document is valid and unmarked (spec 016 #22) |
 | A listing (rows, cursors, count, the bar, the panel's walk) | `ui/src/lib/listing.svelte.ts` and its tests, spec 010 — all three listings are one loader, so a listing defect is one defect. `$lib/page` and `$lib/peek` hold the pure part; a listing read oldest first (a dataset's items, a run's) sets `ascending` on its walk (spec 016 #19) |
 | The Evals screens (datasets, runs, the comparison) | `ui/src/routes/{datasets,runs,score-configs}/`, `ui/src/lib/components/evals/` (the tables, the three peek bodies, the summary cards), `ui/src/lib/evals.ts` (the pure part: the checkbox rule, the *changed only* filter, the words a cell uses), `ui/src/lib/api/runs.ts` (the run filters, held to `openapi.json`), `docs/ui.md#evals`, spec 016 — every number on these screens is the server's (spec 014 #18); the client decides which rows to draw and never what a verdict is |

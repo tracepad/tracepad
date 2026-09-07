@@ -205,6 +205,40 @@ tracepad sessions show session-77
 The session's totals — traces, how many failed, cost, the window it
 spans — and its traces.
 
+### `users ls`
+
+```sh
+tracepad users ls
+tracepad users ls --sort cost --limit 20
+tracepad users ls --prefix acme:
+```
+
+One row per end user: id, traces, sessions, how many of those traces failed,
+cost, first and last seen. `--sort` is `last_seen` (the default), `traces`,
+`cost` or `errors` — always descending, with the user id as the tie-break, and
+a user with no costed trace sorting last under `cost`. `--prefix` keeps ids
+starting with it, case-sensitively; it is a prefix, not a search.
+
+Paging is `traces ls`'s: `--limit`, `--cursor`, `--oldest`, `--newer`, and
+`--total` for the capped count.
+
+This listing is built from an hourly roll-up and trails live traffic by a few
+minutes, so a user first seen just now is not on it yet — `users show` is
+exact for any id. Both are explained in [users.md](users.md).
+
+### `users show`
+
+```sh
+tracepad users show user-4821
+```
+
+That user's totals — traces, sessions, cost, p50/p95 latency and the window
+they span — merged with the traffic too recent for the roll-up. An id nothing
+was ever filed under exits 1 with the server's `404`.
+
+For their activity over time, or a split by model or environment, use
+`tracepad stats --user`.
+
 ### `scores ls`
 
 ```sh
@@ -310,6 +344,7 @@ outright. Traces that ran the prompt keep the name and version they recorded.
 tracepad stats --group-by day --since 168h
 tracepad stats --group-by model
 tracepad stats --group-by release
+tracepad stats --group-by day --user user-4821
 ```
 
 `--since` takes Go durations (`1h`, `30m`, `168h`) or an RFC 3339 instant.
@@ -321,6 +356,11 @@ The table's second column names what is being counted: grouping by hour, day,
 environment or release counts **traces**, grouping by model counts
 **observations**, because a trace has no model. Grouped by release, the traces
 that named none share one bucket with an empty key.
+
+`--user` restricts every bucket to one end user, with the groupings and the
+counts unchanged. On an `hour` or `day` timeline it also adds a SESSIONS
+column: how many of that user's sessions began in the bucket, counted where
+they start so a sum is exact ([users.md](users.md)).
 
 ### `datasets`, `runs`, `score-configs`
 

@@ -176,7 +176,19 @@ bodies are deliberately not touched — see
 what that means for a data-subject request and how to deploy if it is not
 acceptable.
 
+The user's rows in the **per-user rollup** ([users.md](users.md)) go in the
+same request, outright rather than by recomputation: they are about the user,
+and for an hour past the trace-retention window there would be nothing left to
+recompute them from. So the account leaves `/api/v1/users` immediately, and
+`GET /api/v1/users/{id}` answers `404`. The project-wide statistics are
+corrected where they can be, which is the rule
+[retention.md](retention.md#what-outlives-what) states.
+
 ## In the web interface
+
+The same card sits on the user's own page (`/users/{id}` → *Erase data*), with
+the id already filled in; on success the page leaves for the listing. It is
+the Settings card with one field fewer — one contract, rendered twice.
 
 The Settings screen renders this whole contract (see [ui.md](ui.md#settings-and-administration)):
 a project's own management on its project key, and an **Administration**

@@ -30,6 +30,8 @@ document served without authentication.
 | `GET` | `/api/v1/observations/{id}/io` | One observation's payloads, whole |
 | `GET` | `/api/v1/sessions` | List sessions by most recent activity |
 | `GET` | `/api/v1/sessions/{id}` | One session: totals and traces |
+| `GET` | `/api/v1/users` | List users by last seen, traffic, cost or errors |
+| `GET` | `/api/v1/users/{id}` | One user: traffic, sessions, cost, errors, latency |
 | `GET` | `/api/v1/runs` | List the project's eval runs, newest first, across datasets |
 | `GET` | `/api/v1/stats` | Counts, errors, cost, latency percentiles |
 | `GET` | `/api/v1/prompts/{name}/diff` | Unified diff between two prompt versions |
@@ -537,6 +539,44 @@ Every number counts traces: `error_count` is how many of the session's traces
 failed, not how many spans did. `traces` pages with the same `limit`/`cursor`
 as the listing.
 
+## Users
+
+The two endpoints and everything they promise are on their own page:
+[users.md](users.md). In short:
+
+```sh
+curl … "http://localhost:4318/api/v1/users?sort=cost&limit=3"
+```
+
+```json
+{
+  "users": [
+    {
+      "user_id": "user-4821",
+      "traces": 312,
+      "error_count": 4,
+      "total_cost": 6.10,
+      "sessions": 28,
+      "first_seen": "2026-08-14T09:00:00Z",
+      "last_seen": "2026-09-01T10:00:00Z"
+    }
+  ],
+  "next_cursor": "Ni4xOnVzZXItNDgyMQ",
+  "prev_cursor": null
+}
+```
+
+`sort` is `last_seen` (the default), `traces`, `cost` or `errors`, always
+descending, with the user id as the tie-break; `prefix` keeps ids starting
+with it, case-sensitively. `limit`, `cursor`, `direction` and `count` are the
+same as on every other listing.
+
+The listing is answered from the per-user rollup **only**, so it trails live
+traffic by the same lag the statistics do (below) — a user first seen minutes
+ago is not on it yet. `GET /api/v1/users/{id}` merges the live rows and is
+exact for any id, listed or not; it answers `404` when neither half has seen
+it, and adds `latency_ms` to the row shape above.
+
 ## Statistics
 
 ```sh
@@ -568,6 +608,17 @@ comparable, which is why the response says which one you are looking at.
 Grouped by release, the traces that named none fall in the bucket whose `key`
 is the empty string — that is a group, not a gap, and dropping it would make
 the numbers stop adding up.
+
+`user_id` restricts every bucket to one end user. The shape, the groupings and
+`unit` do not change; with `group_by=hour` or `group_by=day` each bucket
+additionally carries `sessions` — how many of that user's sessions *began* in
+it, so a sum over any range is exact. Without the filter the key is absent
+rather than zero, because the statistics rollup holds no such number. The
+per-user answer trails the raw data by the same lag as the rest.
+
+```sh
+curl … "http://localhost:4318/api/v1/stats?group_by=day&user_id=user-4821"
+```
 
 Latency percentiles are **histogram-based**: accurate to a few percent, and
 stable across the expiry of the rows they came from. `total_cost` is summed
