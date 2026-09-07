@@ -9,6 +9,7 @@
 	import { observationIDs, splitScores } from '$lib/scores';
 	import { Scores } from '$lib/scores.svelte';
 	import JsonView from './json/JsonView.svelte';
+	import AddToQueue from './queues/AddToQueue.svelte';
 	import ObservationDetail from './ObservationDetail.svelte';
 	import ScoresBlock from './scores/ScoresBlock.svelte';
 	import TraceTree from './TraceTree.svelte';
@@ -155,7 +156,13 @@
 		failure={scores.failure}
 		truncated={scores.more}
 		onchanged={() => scores.refresh()}
-	/>
+	>
+		{#snippet actions()}
+			<!-- The reader's own gesture (spec 024 #13): this trace deserves a
+			     human verdict, and this is which programme it belongs to. -->
+			<AddToQueue target={{ trace_id: traceID }} />
+		{/snippet}
+	</ScoresBlock>
 
 	<!-- Two panes side by side; on a phone one at a time, switched here. -->
 	<div class="border-border flex shrink-0 gap-1 border-b px-3 py-1.5 md:hidden" role="tablist">

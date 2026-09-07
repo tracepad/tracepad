@@ -267,7 +267,16 @@ export function scoreBody(
 	target: ScoreTarget,
 	form: ScoreForm,
 	configs: ScoreConfig[],
-	editing: Score | null = null
+	editing: Score | null = null,
+	/**
+	 * What to write into `metadata`, when the caller has something to say
+	 * about where the verdict came from. The annotation desk does
+	 * (spec 024 #6): a score it writes says which queue and which annotator,
+	 * on a new row and on a correction alike, because the reviewer *is* now
+	 * the author. Left out, this is spec 022's own stamp on a new score and
+	 * the row's own metadata on a correction.
+	 */
+	stamp?: Record<string, unknown>
 ): ScoreInput {
 	const type = typeOf(form, configs);
 	const body: ScoreInput = {
@@ -284,10 +293,11 @@ export function scoreBody(
 
 	if (editing) {
 		body.id = editing.id;
-		if (editing.metadata != null) body.metadata = editing.metadata;
+		if (stamp) body.metadata = stamp;
+		else if (editing.metadata != null) body.metadata = editing.metadata;
 		body.timestamp = editing.timestamp;
 	} else {
-		body.metadata = { source: 'web' };
+		body.metadata = stamp ?? { source: 'web' };
 	}
 	return body;
 }

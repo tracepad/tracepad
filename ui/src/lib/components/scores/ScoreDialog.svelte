@@ -19,6 +19,7 @@
 		type ScoreTarget
 	} from '$lib/scores';
 	import Button from '../Button.svelte';
+	import ScoreControl from './ScoreControl.svelte';
 
 	// Scoring by hand (spec 022 #4): one dialog over `POST /api/v1/scores`,
 	// which is the endpoint an eval harness posts through and the only write
@@ -209,73 +210,8 @@
 				<p role="alert" class="text-danger mt-1 text-sm">{failure}</p>
 			{/if}
 
-			{#if type !== ''}
-				<!-- `for` only where there is a control to point at: a boolean's
-				     value is two buttons, and a label pointing at an id nothing
-				     carries names nothing. That branch borrows this element as
-				     its group label instead. -->
-				<label
-					id="score-value-label"
-					for={type === 'boolean' ? undefined : 'score-value'}
-					class={labelClass}
-				>
-					Value
-				</label>
-			{/if}
-			{#if type === 'numeric'}
-				<!-- Bounded by the config, so the control says what the name
-				     admits before the round trip does; the server still
-				     decides (#4). -->
-				<input
-					id="score-value"
-					name="value"
-					type="number"
-					step="any"
-					min={config?.min ?? undefined}
-					max={config?.max ?? undefined}
-					value={form.number}
-					oninput={(event) => (form.number = event.currentTarget.value)}
-					class="{fieldClass} tabular-nums"
-				/>
-				{#if config?.min != null || config?.max != null}
-					<p class="text-subtle mt-1 text-xs">
-						{config?.min ?? 'anything'} … {config?.max ?? 'anything'}
-					</p>
-				{/if}
-			{:else if type === 'boolean'}
-				<div class="flex gap-1.5" role="group" aria-labelledby="score-value-label">
-					{#each [['1', 'yes'], ['0', 'no']] as const as [value, label] (value)}
-						<Button
-							variant={form.number === value ? 'primary' : 'default'}
-							aria-pressed={form.number === value}
-							onclick={() => (form.number = value)}
-						>
-							{label}
-						</Button>
-					{/each}
-				</div>
-			{:else if type === 'categorical'}
-				<select id="score-value" name="value" class={fieldClass} bind:value={form.text}>
-					<option value="" disabled>Pick one…</option>
-					{#each config?.categories ?? [] as category (category)}
-						<option value={category}>{category}</option>
-					{/each}
-				</select>
-				{#if (config?.categories ?? []).length === 0}
-					<p class="text-warn mt-1 text-xs">
-						This name is categorical and its config lists no categories.
-					</p>
-				{/if}
-			{:else if type === 'text'}
-				<textarea
-					id="score-value"
-					name="value"
-					rows="3"
-					bind:value={form.text}
-					placeholder="cites its sources"
-					class={fieldClass}
-				></textarea>
-			{/if}
+			<ScoreControl {type} {config} bind:form />
+
 			{#if at === 'value' && failure}
 				<p role="alert" class="text-danger mt-1 text-sm">{failure}</p>
 			{/if}

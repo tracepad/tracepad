@@ -1,6 +1,7 @@
 import { admin } from '$lib/admin.svelte';
 import { auth } from '$lib/auth.svelte';
 import type { components, paths } from './schema';
+import type { QueueItemFilters } from './queues';
 import type { RunFilters } from './runs';
 import type { SessionFilters } from './sessions';
 import type { TraceFilters } from './traces';
@@ -55,6 +56,20 @@ export type RunComparison = components['schemas']['RunComparison'];
 export type ComparedItem = components['schemas']['ComparedItem'];
 export type ComparedScore = components['schemas']['ComparedScore'];
 export type ScoreConfig = components['schemas']['ScoreConfig'];
+
+// The annotation nouns (spec 024): a review programme and the pointers in it.
+export type AnnotationQueue = components['schemas']['AnnotationQueue'];
+export type AnnotationItem = components['schemas']['AnnotationItem'];
+export type QueueTarget = components['schemas']['QueueTarget'];
+/** What deleting a queue takes — the dry run, and what it took. */
+export type QueueDeletion = components['schemas']['QueueDeletion'];
+export type QueueList = JSONResponse<paths['/api/v1/queues']['get']>;
+export type QueueItemPage = JSONResponse<paths['/api/v1/queues/{name}/items']['get']>;
+export type NextItem = JSONResponse<paths['/api/v1/queues/{name}/next']['get']>;
+export type ItemsAdded = CreatedResponse<paths['/api/v1/queues/{name}/items']['post']>;
+export type TracesQueued = CreatedResponse<
+	paths['/api/v1/queues/{name}/items/from-traces']['post']
+>;
 
 // The scores of spec 003, on screen and written by hand in spec 022.
 export type Score = components['schemas']['Score'];
@@ -380,6 +395,98 @@ class Api {
 		return this.#json<{ name: string }>(`/api/v1/score-configs/${encodeURIComponent(name)}`, {
 			method: 'DELETE'
 		});
+	}
+
+	// --- annotation queues (spec 024) --------------------------------------
+	//
+	// One method per endpoint of the spec's API contract, in the shapes the
+	// CLI uses: the screens add no verb of their own. `next` is a GET that
+	// claims — being handed an item *is* the claim (#5) — and the three
+	// finishing writes carry the annotator, because the store has no users
+	// and this spec does not invent them (#6).
+
+	/** Whole, not paged: a project has as many queues as review programmes. */
+	listQueues(signal?: AbortSignal) {
+		return this.#json<QueueList>('/api/v1/queues', { signal });
+	}
+
+	getQueue(name: string, signal?: AbortSignal) {
+		return this.#json<AnnotationQueue>(`/api/v1/queues/${encodeURIComponent(name)}`, { signal });
+	}
+
+	/** Declarative (#1): the whole queue, so one form creates and replaces. */
+	putQueue(name: string, body: { description?: string; score_configs: string[] }) {
+		return this.#json<AnnotationQueue>(`/api/v1/queues/${encodeURIComponent(name)}`, {
+			method: 'PUT',
+			body
+		});
+	}
+
+	/** A dry run until `confirm` echoes the name; the scores stay (#3, #8). */
+	deleteQueue(name: string, confirm?: string) {
+		return this.#json<QueueDeletion>(`/api/v1/queues/${encodeURIComponent(name)}`, {
+			method: 'DELETE',
+			query: { confirm }
+		});
+	}
+
+	/** One target or many, all or nothing; a repeat counts as `existing`. */
+	addQueueItems(name: string, targets: QueueTarget | QueueTarget[]) {
+		return this.#json<ItemsAdded>(`/api/v1/queues/${encodeURIComponent(name)}/items`, {
+			method: 'POST',
+			body: targets
+		});
+	}
+
+	/** Every trace the listing's filters match, newest first, capped (#4). */
+	queueFromTraces(name: string, filters: TraceFilters, limit: number) {
+		return this.#json<TracesQueued>(
+			`/api/v1/queues/${encodeURIComponent(name)}/items/from-traces`,
+			{ method: 'POST', query: { ...filters, limit: String(limit) } }
+		);
+	}
+
+	listQueueItems(name: string, filters: QueueItemFilters, page: Page = {}, signal?: AbortSignal) {
+		return this.#json<QueueItemPage>(`/api/v1/queues/${encodeURIComponent(name)}/items`, {
+			query: { ...filters, ...paging(page) },
+			signal
+		});
+	}
+
+	/** The item to work on, claimed for ten minutes; null when there is none. */
+	nextQueueItem(name: string, annotator: string, signal?: AbortSignal) {
+		return this.#json<NextItem>(`/api/v1/queues/${encodeURIComponent(name)}/next`, {
+			query: { annotator },
+			signal
+		});
+	}
+
+	/** Refused with `missing` until the queue's scores are on the target (#7). */
+	completeQueueItem(name: string, id: string, annotator: string) {
+		return this.#finishItem(name, id, 'complete', { annotator });
+	}
+
+	skipQueueItem(name: string, id: string, annotator: string, reason: string) {
+		return this.#finishItem(name, id, 'skip', { annotator, reason });
+	}
+
+	reopenQueueItem(name: string, id: string, annotator: string) {
+		return this.#finishItem(name, id, 'reopen', { annotator });
+	}
+
+	/** One row out of the list; a re-add recreates it, so no ceremony (#8). */
+	deleteQueueItem(name: string, id: string) {
+		return this.#json<{ id: string }>(
+			`/api/v1/queues/${encodeURIComponent(name)}/items/${encodeURIComponent(id)}`,
+			{ method: 'DELETE' }
+		);
+	}
+
+	#finishItem(name: string, id: string, verb: string, body: object) {
+		return this.#json<AnnotationItem>(
+			`/api/v1/queues/${encodeURIComponent(name)}/items/${encodeURIComponent(id)}/${verb}`,
+			{ method: 'POST', body }
+		);
 	}
 
 	// --- scores (spec 003, on screen and written in spec 022) --------------

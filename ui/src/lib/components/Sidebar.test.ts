@@ -4,7 +4,8 @@ import Sidebar from './Sidebar.svelte';
 
 // The sidebar's first section (spec 016 #1): a labelled group whose label is
 // not a link, whose children are, and whose active state belongs to the child
-// the URL is under — `aria-current="page"` keeps meaning what it means.
+// the URL is under — `aria-current="page"` keeps meaning what it means. Its
+// fourth child is Queues (spec 024 #10).
 
 const url = { current: new URL('http://tracepad.test/runs/abc') };
 
@@ -22,7 +23,7 @@ vi.mock('$lib/admin.svelte', () => ({ admin: { clear: vi.fn() } }));
 vi.mock('$lib/project.svelte', () => ({ project: { name: 'demo', forget: vi.fn() } }));
 
 describe('the Evals section', () => {
-	it('renders the group with its three children as links and the label as text', () => {
+	it('renders the group with its four children as links and the label as text', () => {
 		render(Sidebar);
 		const nav = screen.getByRole('navigation', { name: 'Sections' });
 
@@ -31,14 +32,15 @@ describe('the Evals section', () => {
 		for (const [name, href] of [
 			['Datasets', '/datasets'],
 			['Runs', '/runs'],
-			['Score configs', '/score-configs']
+			['Score configs', '/score-configs'],
+			['Queues', '/queues']
 		]) {
 			expect(screen.getByRole('link', { name })).toHaveAttribute('href', href);
 		}
-		// Nine destinations in all: the four that were there, the three the
+		// Ten destinations in all: the four that were there, the four the
 		// section holds, Prompts beside them (spec 021 #1) and Users
 		// (spec 023 #8).
-		expect(nav.querySelectorAll('a')).toHaveLength(9);
+		expect(nav.querySelectorAll('a')).toHaveLength(10);
 	});
 
 	it('marks the active child and nothing else', () => {
@@ -77,10 +79,10 @@ describe('the Prompts item', () => {
 		// Users sits between Sessions and Stats, which is the two screens it
 		// joins (spec 023 #8).
 		expect(order.slice(0, 5)).toEqual(['Traces', 'Sessions', 'Users', 'Stats', 'Prompts']);
-		// And the group still holds the three eval screens and no more.
+		// And the group holds the eval screens and no more.
 		const group = nav.querySelector('li > ul');
 		expect([...(group?.querySelectorAll('a') ?? [])].map((link) => link.textContent?.trim())).toEqual(
-			['Datasets', 'Runs', 'Score configs']
+			['Datasets', 'Runs', 'Score configs', 'Queues']
 		);
 	});
 

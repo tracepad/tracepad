@@ -947,7 +947,7 @@ export interface paths {
         put?: never;
         /**
          * Return a completed or skipped item to pending
-         * @description For the manager who disagrees with a verdict or wants a skip looked at again. An item that is already pending is a 409. The scores stay where they are: reopening asks for another look, not for a retraction.
+         * @description For the manager who disagrees with a verdict or wants a skip looked at again. An item that is already pending is not refused: what reopening does to it is release the claim, which is what the desk's *Later* asks for. The scores stay where they are — reopening asks for another look, not for a retraction.
          */
         post: operations["reopenQueueItem"];
         delete?: never;
@@ -4187,7 +4187,6 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
         };
     };
     listProjects: {
