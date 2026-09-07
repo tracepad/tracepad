@@ -74,3 +74,12 @@ CREATE INDEX idx_annotation_items_next  ON annotation_items(project_id, queue, s
 -- makes, and the erasure path's. Without it a sweep chunk would scan every
 -- item in the project per trace it takes.
 CREATE INDEX idx_annotation_items_trace ON annotation_items(project_id, trace_id);
+-- The queue's clock, and the reason it is a third index rather than the two the
+-- spec's data contract listed (Decision 19). `MAX(seq)` cannot be a seek on
+-- `_next`: `status` sits between the prefix and `seq`, so for one queue the
+-- entries are ordered by status first and the largest `seq` is not the last of
+-- them — SQLite has to read the whole `(project_id, queue)` range. That is one
+-- index entry per item already queued, on every add, inside the transaction
+-- that serialises every other write in the store. With `seq` straight after the
+-- prefix it is one step to the end of the range.
+CREATE INDEX idx_annotation_items_seq   ON annotation_items(project_id, queue, seq);

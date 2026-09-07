@@ -230,6 +230,66 @@ test('the desk prefills from a verdict already on the trace', async ({ page }) =
 	await must('DELETE', '/api/v1/queues/second-look?confirm=second-look');
 });
 
+// Found in review: `act` cleared the failure but not the `missing` of the last
+// refusal, and the top banner is drawn only when there is no `missing` — so a
+// second attempt refused differently was told at the controls that a score it
+// had nothing to say about was missing, and the real sentence appeared nowhere.
+test('a second refusal replaces the first, at the top and at the controls', async ({ page }) => {
+	await must('PUT', '/api/v1/queues/two-refusals', { score_configs: ['accuracy', 'tone'] });
+	await must('POST', '/api/v1/queues/two-refusals/items', { trace_id: OTHER_TRACE });
+
+	// The server is stood in for here on purpose: what is under test is what
+	// the desk does with two different refusals, and the second one has to
+	// land while the first is still on screen.
+	let attempt = 0;
+	await page.route('**/items/*/complete', async (route) => {
+		attempt += 1;
+		await route.fulfill({
+			status: 409,
+			contentType: 'application/json',
+			body:
+				attempt === 1
+					? JSON.stringify({ error: 'item is missing a score for tone', missing: ['tone'] })
+					: JSON.stringify({ error: 'item was already completed by bob' })
+		});
+	});
+
+	await signIn(page);
+	await page.goto('/queues/two-refusals/annotate');
+	await page.getByLabel('Name').fill('ada');
+	await page.getByRole('button', { name: 'Start' }).click();
+
+	await page.getByLabel('accuracy', { exact: true }).fill('0.9');
+	await page.getByLabel('tone', { exact: true }).selectOption('warm');
+	await page.getByRole('button', { name: /Complete/ }).click();
+	await expect(page.getByText('the server has no score for this')).toBeVisible();
+
+	await page.getByRole('button', { name: /Complete/ }).click();
+	// The new sentence is on screen, and the old marker is not.
+	await expect(page.getByText(/already completed by bob/)).toBeVisible();
+	await expect(page.getByText('the server has no score for this')).toHaveCount(0);
+
+	await page.unroute('**/items/*/complete');
+	await must('DELETE', '/api/v1/queues/two-refusals?confirm=two-refusals');
+});
+
+// Found in review: the dialog can be dismissed, and with nobody to claim as
+// `start` never runs — the desk sat on its spinner for ever.
+test('dismissing the name dialog leaves a way back in, not a spinner', async ({ page }) => {
+	await signIn(page);
+	await page.goto(`/queues/${QUEUE}/annotate`);
+	await page.getByLabel('Name').press('Escape');
+
+	await expect(page.getByText('Taking the next item')).toHaveCount(0);
+	await expect(page.getByText('The desk needs a name to sign with')).toBeVisible();
+
+	// And it is a way back in, not only a message.
+	await page.getByRole('button', { name: 'Say who you are' }).click();
+	await page.getByLabel('Name').fill('cleo');
+	await page.getByRole('button', { name: 'Start' }).click();
+	await expect(page.getByRole('button', { name: 'cleo', exact: true })).toBeVisible();
+});
+
 test('a completed item is reopened from the queue page', async ({ page }) => {
 	await signIn(page);
 	await page.goto(`/queues/${QUEUE}?status=completed`);

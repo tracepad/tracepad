@@ -49,7 +49,9 @@
 	let naming = $state(false);
 
 	// The name is asked for once and kept in the browser (#6). Until there is
-	// one there is nothing to claim an item as.
+	// one there is nothing to claim an item as — and the dialog can be
+	// dismissed, so "nobody has said" is a state of the page and not merely a
+	// dialog that is open (found in review).
 	$effect(() => {
 		if (annotator.name === null) naming = true;
 	});
@@ -118,7 +120,14 @@
 	async function act(what: () => Promise<unknown>) {
 		if (!item) return;
 		busy = true;
+		// Both, and for the same reason: what is on screen is about the
+		// attempt that is starting. A `missing` left over from the last one
+		// hides the banner (which is drawn only when there is no `missing`)
+		// and goes on marking a control the server has stopped complaining
+		// about — so a second attempt refused differently, or failing at the
+		// network, told the reviewer the wrong thing (found in review).
 		failure = null;
+		missing = [];
 		try {
 			await what();
 			await take();
@@ -177,6 +186,19 @@
 
 <AnnotatorDialog open={naming} onclose={() => (naming = false)} />
 
+{#snippet nobody()}
+	<div class="flex flex-1 items-start justify-center overflow-auto p-8">
+		<div class="max-w-lg">
+			<h2 class="font-medium">The desk needs a name to sign with</h2>
+			<p class="text-muted mt-1">
+				Every verdict you complete is written down beside it, so the team can see who said
+				what. It stays in this browser.
+			</p>
+			<Button class="mt-3" variant="primary" onclick={() => (naming = true)}>Say who you are</Button>
+		</div>
+	</div>
+{/snippet}
+
 <header class="border-border flex h-12 shrink-0 items-center gap-3 border-b px-4">
 	<a
 		href="/queues/{encodeURIComponent(name)}"
@@ -215,7 +237,12 @@
 	</p>
 {/if}
 
-{#if loading}
+{#if annotator.name === null}
+	<!-- Before the spinner, not after it: with nobody to claim as, `start`
+	     never runs and a page that only ever cleared `loading` inside it sat
+	     on "Taking the next item" for ever once the dialog was dismissed. -->
+	{@render nobody()}
+{:else if loading}
 	<div class="text-subtle flex flex-1 items-center justify-center gap-2">
 		<LoaderCircle class="size-4 animate-spin" />
 		Taking the next item

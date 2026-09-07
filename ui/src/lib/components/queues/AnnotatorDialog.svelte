@@ -12,7 +12,12 @@
 	// spec does not invent them. What it buys is a team being able to read
 	// "who said this", which is all a small team needs.
 
-	let { open = false, onclose }: { open?: boolean; onclose: (named: boolean) => void } = $props();
+	// `onclose` says only that the dialog is shut. Whether a name was adopted
+	// is `annotator.name`, which the caller has to branch on anyway: the
+	// dialog can be dismissed with Escape or the overlay, and a desk that
+	// believed a close meant a name sat on its spinner for ever (found in
+	// review).
+	let { open = false, onclose }: { open?: boolean; onclose: () => void } = $props();
 
 	let name = $state('');
 
@@ -21,11 +26,11 @@
 	});
 
 	function keep() {
-		if (annotator.adopt(name)) onclose(true);
+		if (annotator.adopt(name)) onclose();
 	}
 </script>
 
-<Dialog.Root {open} onOpenChange={(next) => !next && onclose(annotator.name !== null)}>
+<Dialog.Root {open} onOpenChange={(next) => !next && onclose()}>
 	<Dialog.Portal>
 		<Dialog.Overlay class="fixed inset-0 z-50 bg-black/50" />
 		<Dialog.Content

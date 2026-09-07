@@ -5,8 +5,8 @@ import (
 	"testing"
 )
 
-// The store half of spec 024: the two indexes the new queries were given, and
-// the three paths that take a trace away — the sweep, the erasure and the
+// The store half of spec 024: the three indexes the new queries were given,
+// and the three paths that take a trace away — the sweep, the erasure and the
 // purge — which items must follow (#3).
 
 // queue puts a queue over one config, so a fixture can add items to it.
@@ -49,8 +49,10 @@ func (f *sweepFixture) enqueue(t *testing.T, queue, traceID string) *AnnotationI
 // TestQueueQueriesSeekTheirIndexes is the EXPLAIN check spec 023 asked every
 // new query for: this store never runs ANALYZE, so an index that is not
 // actually chosen is an index that is not there. `next` and the items listing
-// go through `idx_annotation_items_next`; the sweep's delete joins
-// `idx_annotation_items_trace`.
+// go through `idx_annotation_items_next`, the sweep's delete joins
+// `idx_annotation_items_trace`, and the `seq` clock rides
+// `idx_annotation_items_seq` — the one this test did not cover on the first
+// push, which is how it went out as a scan of the whole queue per add.
 func TestQueueQueriesSeekTheirIndexes(t *testing.T) {
 	f := newSweepFixture(t)
 	seq := int64(7)
@@ -97,6 +99,16 @@ func TestQueueQueriesSeekTheirIndexes(t *testing.T) {
 			query: `DELETE FROM annotation_items WHERE project_id = ? AND trace_id IN (?)`,
 			args:  []any{f.project.ID, hexTrace(1)},
 			index: "idx_annotation_items_trace",
+		},
+		{
+			// The queue's clock, on every add. On `_next` it read one
+			// entry per item already queued, because `status` sits
+			// between the prefix and `seq` and the largest `seq` is
+			// therefore not the last entry of the range (Decision 19).
+			name:  "the seq clock",
+			query: nextSeqQuery,
+			args:  []any{f.project.ID, "review"},
+			index: "idx_annotation_items_seq",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

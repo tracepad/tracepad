@@ -413,6 +413,40 @@ func TestSkipReopenAndRemove(t *testing.T) {
 	}
 }
 
+// TestSkipDoesNotOverwriteACompletion is Decision 18, and the mirror of the
+// second-completion `409`: the columns a skip writes are the ones a completion
+// filled, so a stale tab pressing *Skip* would destroy the record of who gave
+// the verdict — and drop the item out of the completed count while its scores
+// sat on the trace.
+func TestSkipDoesNotOverwriteACompletion(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	h.putConfigs(t, "accuracy")
+	expectStatus(t, h.putQueue(t, "review", "accuracy"), 201)
+	item := h.addTarget(t, "review", map[string]any{"trace_id": traceHex(1)})
+	h.postScore(t, map[string]any{"trace_id": traceHex(1), "name": "accuracy", "value": 1})
+	expectStatus(t, h.send(t, "POST", "/api/v1/queues/review/items/"+item+"/complete",
+		map[string]any{"annotator": "ada"}), 200)
+
+	// The refusal names who is being overwritten and the door that is open.
+	rec := h.send(t, "POST", "/api/v1/queues/review/items/"+item+"/skip",
+		map[string]any{"annotator": "bob", "reason": "stale tab"})
+	expectError(t, rec, 409, "ada")
+	if counts := h.queueCounts(t, "review"); counts.Completed != 1 || counts.Skipped != 0 {
+		t.Fatalf("counts = %+v, want the completion to stand", counts)
+	}
+
+	// Reopen is that door, and after it the skip is allowed.
+	expectStatus(t, h.send(t, "POST", "/api/v1/queues/review/items/"+item+"/reopen",
+		map[string]any{"annotator": "bob"}), 200)
+	expectStatus(t, h.send(t, "POST", "/api/v1/queues/review/items/"+item+"/skip",
+		map[string]any{"annotator": "bob", "reason": "on reflection, nothing to judge"}), 200)
+
+	// A skipped item is not a verdict, so skipping it again is not a race
+	// anybody lost.
+	expectStatus(t, h.send(t, "POST", "/api/v1/queues/review/items/"+item+"/skip",
+		map[string]any{"annotator": "cleo", "reason": "still nothing"}), 200)
+}
+
 func TestQueueItemsListingPagesBothWays(t *testing.T) {
 	h := newHarness(t, nil, store.WriterOptions{})
 	h.putConfigs(t, "accuracy")
@@ -434,6 +468,21 @@ func TestQueueItemsListingPagesBothWays(t *testing.T) {
 	}
 	if got := h.items(t, "review", "?annotator=ada"); len(got) != 1 || got[0].ID != ids[1] {
 		t.Errorf("ada's items = %+v, want the one she skipped", got)
+	}
+	// And what she is holding right now (Decision 20): `completed_by` alone
+	// made this answer "ada has nothing open" for a queue she is working
+	// through, which is a well-formed answer to a different question.
+	h.next(t, "review", "ada")
+	if got := h.items(t, "review", "?status=pending&annotator=ada"); len(got) != 1 {
+		t.Errorf("ada's pending items = %+v, want the one she has claimed", got)
+	}
+	if got := h.items(t, "review", "?status=pending&annotator=bob"); len(got) != 0 {
+		t.Errorf("bob's pending items = %+v, want none: he is holding nothing", got)
+	}
+	// The claim is not a verdict: a completed item is ada's by `completed_by`
+	// and nobody's by claim.
+	if got := h.items(t, "review", "?annotator=ada"); len(got) != 2 {
+		t.Errorf("ada's items = %+v, want the skip and the claim", got)
 	}
 	expectError(t, h.get(t, "/api/v1/queues/review/items?status=maybe"), 400, "status")
 

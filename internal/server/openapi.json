@@ -1405,7 +1405,7 @@
           {"name": "status", "in": "query", "schema": {"type": "string", "enum": ["pending", "completed", "skipped"]},
             "description": "Keeps items in one state. A spelling outside the list is a 400"},
           {"name": "annotator", "in": "query", "schema": {"type": "string", "maxLength": 200},
-            "description": "Keeps the items this name completed or skipped"},
+            "description": "Keeps the items this name has: the ones it completed or skipped, and the pending ones it is holding a claim on. `completed_by` is empty on a pending item, so matching it alone would answer \"nothing open\" for somebody who is working through the queue"},
           {"$ref": "#/components/parameters/Limit"},
           {"$ref": "#/components/parameters/Cursor"},
           {"$ref": "#/components/parameters/Direction"},
@@ -1566,7 +1566,7 @@
       "post": {
         "tags": ["queues"],
         "summary": "Mark an item skipped, with the reason",
-        "description": "Not every trace deserves a verdict, and the reason is what makes that readable on the queue page afterwards. The claim is released.",
+        "description": "Not every trace deserves a verdict, and the reason is what makes that readable on the queue page afterwards. The claim is released. A *completed* item is refused with a 409 naming who completed it: a skip writes the same columns a completion filled, so it would destroy the record rather than add to it — reopen it first.",
         "operationId": "skipQueueItem",
         "parameters": [{"$ref": "#/components/parameters/QueueName"}, {"$ref": "#/components/parameters/ItemID"}],
         "requestBody": {"required": true, "content": {"application/json": {"schema": {
@@ -1581,7 +1581,8 @@
           "200": {"description": "The skipped item", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AnnotationItem"}}}},
           "400": {"$ref": "#/components/responses/BadRequest"},
           "401": {"$ref": "#/components/responses/Unauthorized"},
-          "404": {"$ref": "#/components/responses/NotFound"}
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "409": {"$ref": "#/components/responses/Conflict"}
         }
       }
     },

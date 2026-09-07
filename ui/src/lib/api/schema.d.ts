@@ -927,7 +927,7 @@ export interface paths {
         put?: never;
         /**
          * Mark an item skipped, with the reason
-         * @description Not every trace deserves a verdict, and the reason is what makes that readable on the queue page afterwards. The claim is released.
+         * @description Not every trace deserves a verdict, and the reason is what makes that readable on the queue page afterwards. The claim is released. A *completed* item is refused with a 409 naming who completed it: a skip writes the same columns a completion filled, so it would destroy the record rather than add to it — reopen it first.
          */
         post: operations["skipQueueItem"];
         delete?: never;
@@ -3836,7 +3836,7 @@ export interface operations {
             query?: {
                 /** @description Keeps items in one state. A spelling outside the list is a 400 */
                 status?: "pending" | "completed" | "skipped";
-                /** @description Keeps the items this name completed or skipped */
+                /** @description Keeps the items this name has: the ones it completed or skipped, and the pending ones it is holding a claim on. `completed_by` is empty on a pending item, so matching it alone would answer "nothing open" for somebody who is working through the queue */
                 annotator?: string;
                 /** @description Out of range is a 400, not a silent clamp */
                 limit?: components["parameters"]["Limit"];
@@ -4154,6 +4154,7 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     reopenQueueItem: {

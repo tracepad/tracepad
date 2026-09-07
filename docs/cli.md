@@ -473,8 +473,13 @@ every score the queue names is on the item's target, whoever wrote it: post
 them with `scores add` first. `queues reopen` on an item that is already
 pending simply releases the claim.
 
+`queues skip` refuses an item somebody has already completed — it writes the
+same columns the completion filled — so reopen it first.
+
 `queues items` reads oldest first, which is the order the items are worked in;
-`--newer --cursor` walks back up. `queues rm` is destructive — it takes the
+`--newer --cursor` walks back up. `--annotator` is "what has this person got":
+what they completed or skipped, plus the pending items they are holding, so
+`--status pending --annotator ada` is ada's desk right now. `queues rm` is destructive — it takes the
 queue's items — so it shows the preview and asks you to type the name back,
 and needs `--yes` off a terminal. The scores written while annotating stay.
 

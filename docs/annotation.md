@@ -216,10 +216,14 @@ curl … /items/{id}/reopen -d '{"annotator": "ada"}'
 ```
 
 Not every trace deserves a verdict, and the reason is what makes that readable
-afterwards. `reopen` puts a completed or skipped item back to pending — for a
-manager who disagrees with a verdict, or wants a skip looked at again; the
-scores stay where they are, because reopening asks for another look and not
-for a retraction.
+afterwards. Skipping an item somebody has already **completed** is a `409`
+naming them: a skip writes the same columns a completion filled, so it would
+destroy the record of who decided what rather than add to it. Reopen it first.
+
+`reopen` puts a completed or skipped item back to pending — for a manager who
+disagrees with a verdict, or wants a skip looked at again; the scores stay
+where they are, because reopening asks for another look and not for a
+retraction.
 
 `reopen` on an item that is *already* pending is not refused: what it does to
 one is release the claim. That is how the desk's *Later* puts an item back
@@ -236,8 +240,13 @@ curl -H "Authorization: Bearer tp-sk-…" \
 ```
 
 Items come back oldest first, in the order they were added, which is the order
-they are worked in. `?status=` and `?annotator=` narrow it; paging is the
-same keyset both ways as every other listing ([api.md](api.md#paging)).
+they are worked in. `?status=` and `?annotator=` narrow it; paging is the same
+keyset both ways as every other listing ([api.md](api.md#paging)).
+
+`annotator=` is "what has this person got": the items they completed or
+skipped, and the pending ones they are holding a claim on. So
+`?status=pending&annotator=ada` is ada's desk right now, and
+`?status=completed&annotator=ada` is her work.
 
 The **verdicts** are read where every score is read — filtered by name, by
 target, or by time:

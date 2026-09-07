@@ -449,6 +449,12 @@ func (c *QueueItemComplete) apply(tx *sql.Tx) error {
 
 // QueueItemSkip is POST …/items/{id}/skip (#7): not every trace deserves a
 // verdict, and the reason is what makes that readable afterwards.
+//
+// A *completed* item is refused, exactly as a second completion is (Decision
+// 18): the columns a skip writes are the ones the completion filled, so a
+// stale tab pressing *Skip* would overwrite who gave the verdict and when, and
+// drop the item out of the completed count while its scores sat on the trace.
+// Reopen is the documented door for undoing a verdict.
 type QueueItemSkip struct {
 	ProjectID string
 	Queue     string
@@ -465,6 +471,11 @@ func (s *QueueItemSkip) apply(tx *sql.Tx) error {
 	item, _, err := itemForWrite(tx, s.ProjectID, s.Queue, s.ID)
 	if err != nil {
 		return err
+	}
+	if item.Status == ItemCompleted {
+		return &Rejection{Kind: RejectConflict, Message: fmt.Sprintf(
+			"item %s was completed by %s; reopen it before skipping it",
+			item.ID, orSomebody(item.CompletedBy))}
 	}
 	// The skipper is written to `completed_by`: the column says who
 	// finished with the item, and a skip is one of the two ways to.
@@ -718,10 +729,14 @@ func itemConditions(projectID, queue string, filter QueueItemFilter) ([]string, 
 		args = append(args, filter.Status)
 	}
 	if filter.Annotator != "" {
-		// Who finished with the item, completed or skipped: the column
-		// the listing shows under *by*.
-		where = append(where, "completed_by = ?")
-		args = append(args, filter.Annotator)
+		// Who has the item: whoever finished with it, and — for one still
+		// pending — whoever is holding it (Decision 20). `completed_by`
+		// alone made `status=pending&annotator=ada` answer "ada has
+		// nothing open" for a queue ada is working through, which is a
+		// well-formed answer to a different question (spec 003 #23).
+		where = append(where,
+			"(completed_by = ? OR (status = ? AND claimed_by = ?))")
+		args = append(args, filter.Annotator, ItemPending, filter.Annotator)
 	}
 	return where, args
 }
@@ -828,13 +843,17 @@ func oneItem(tx *sql.Tx, query string, args ...any) (*AnnotationItem, error) {
 // rule spec 003 #5 gave prompt versions).
 func nextSeq(tx *sql.Tx, projectID, queue string) (int64, error) {
 	var seq sql.NullInt64
-	if err := tx.QueryRow(
-		`SELECT MAX(seq) FROM annotation_items WHERE project_id = ? AND queue = ?`,
-		projectID, queue).Scan(&seq); err != nil {
+	if err := tx.QueryRow(nextSeqQuery, projectID, queue).Scan(&seq); err != nil {
 		return 0, fmt.Errorf("read the sequence of queue %s: %w", queue, err)
 	}
 	return seq.Int64 + 1, nil
 }
+
+// nextSeqQuery is named so that a test can hand the shipped SQL to EXPLAIN
+// QUERY PLAN: it rides `idx_annotation_items_seq` and nothing else, and on the
+// index the spec's data contract listed it was a scan of the whole queue on
+// every add (Decision 19, found in review of PR #43).
+const nextSeqQuery = `SELECT MAX(seq) FROM annotation_items WHERE project_id = ? AND queue = ?`
 
 func insertItem(tx *sql.Tx, projectID, queue string, target QueueTarget,
 	seq, now int64) (*AnnotationItem, error) {
