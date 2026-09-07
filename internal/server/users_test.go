@@ -351,6 +351,61 @@ func TestStatsByUserEqualsThatUsersCorpus(t *testing.T) {
 	}
 }
 
+// TestStatsByUserFiltersSessionsByEnvironment: `environment` is a filter, and a
+// filter that only one half of the seam applies makes the series step at the
+// watermark. The rolled half files `sessions_started` on the environment cell
+// of the trace that began the session, and the live half has to agree (found
+// in review of PR #42).
+func TestStatsByUserFiltersSessionsByEnvironment(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	// Two sessions in the rolled hour, one production and one staging; two
+	// more in the live hour, split the same way.
+	h.seedUserHour(t, 1, "alice", "s-prod-old", statsHour, 10, "production", false, nil)
+	h.seedUserHour(t, 2, "alice", "s-stage-old", statsHour, 20, "staging", false, nil)
+	h.rollTheCorpus(t, time.Unix(statsHour+3*3600, 0))
+	h.seedUserHour(t, 3, "alice", "s-prod-new", statsHour+3*3600, 10, "production", false, nil)
+	h.seedUserHour(t, 4, "alice", "s-stage-new", statsHour+3*3600, 20, "staging", false, nil)
+
+	filtered := h.userStats(t,
+		"/api/v1/stats?group_by=hour&user_id=alice&environment=production")
+	if len(filtered.Buckets) != 2 {
+		t.Fatalf("buckets = %d, want the rolled hour and the live one", len(filtered.Buckets))
+	}
+	for i, bucket := range filtered.Buckets {
+		half := "rolled"
+		if i == 1 {
+			half = "live"
+		}
+		if bucket.Sessions == nil || *bucket.Sessions != 1 {
+			t.Errorf("the %s half counts %d production session starts, want 1",
+				half, deref(bucket.Sessions))
+		}
+		// And the count beside it is the one trace of that environment: a
+		// bucket that carries a session but no trace is the fabricated row
+		// the endpoint promises never to answer with.
+		if bucket.Count != 1 {
+			t.Errorf("the %s half counts %d traces, want 1", half, bucket.Count)
+		}
+	}
+
+	// An environment nothing started in produces no buckets at all, rather
+	// than buckets holding a session and no traces.
+	empty := h.userStats(t,
+		"/api/v1/stats?group_by=hour&user_id=alice&environment=development")
+	if len(empty.Buckets) != 0 {
+		t.Errorf("buckets = %+v, want none", empty.Buckets)
+	}
+}
+
+// deref reads an optional count for a failure message; a nil one is the
+// absence the assertion above has already reported.
+func deref(value *int) int {
+	if value == nil {
+		return 0
+	}
+	return *value
+}
+
 func (h *harness) userStats(t *testing.T, path string) userStatsBody {
 	t.Helper()
 	rec := h.get(t, path)

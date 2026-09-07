@@ -469,27 +469,51 @@ func (s *Store) UserTail(projectID, userID string, fromNanos int64) (*UserSummar
 // sessions: the earliest trace that user filed under that session id, ties
 // broken by trace id so that two traces sharing an instant cannot both count.
 //
-// It takes the project id as its one placeholder and rides `idx_traces_session`
-// for the subquery.
+// It takes the project id as its one placeholder.
+//
+// The unary `+` in front of the comparison is load-bearing and is SQLite's own
+// mechanism for it: it makes the expression unusable as an index key, which is
+// the point. Without it the planner takes the `OR` apart into a MULTI-INDEX OR
+// over `idx_traces_timestamp` and walks **every older trace in the project**
+// for each candidate — because nothing here ever runs `ANALYZE`, so a shipped
+// database has no `sqlite_stat1` and the planner has no way to know that
+// `session_id = ?` is the selective term and `timestamp < ?` is half the table.
+// Measured on the real schema at 20k traces, one hour of this query: 13.35 s
+// without the `+`, 0.01 s with it. `TestSessionStartSeeksTheSessionIndex`
+// asserts the plan so that "simplifying" it away fails a test rather than a
+// deployment (found in review of PR #42).
 const sessionStartCondition = `t.project_id = ?
 	   AND t.user_id IS NOT NULL AND t.user_id != '' AND t.session_id IS NOT NULL
 	   AND NOT EXISTS (
 	         SELECT 1 FROM traces x
 	          WHERE x.project_id = t.project_id AND x.session_id = t.session_id
 	            AND x.user_id = t.user_id
-	            AND (x.timestamp < t.timestamp
-	                 OR (x.timestamp = t.timestamp AND x.id < t.id)))`
+	            AND +(x.timestamp < t.timestamp
+	                  OR (x.timestamp = t.timestamp AND x.id < t.id)))`
 
 // UserSessionStarts yields the instant each of a user's sessions began, within
 // a half-open range. It is what puts `sessions` on the live half of a
 // `/stats?user_id=` answer (spec 023 #6), and it is the same predicate the
 // rollup counts by, so the seam does not double-count a session.
-func (s *Store) UserSessionStarts(projectID, userID string, from, to int64, yield func(int64)) error {
-	rows, err := s.db.Query(
-		`SELECT t.timestamp FROM traces t
-		 WHERE `+sessionStartCondition+`
-		   AND t.user_id = ? AND t.timestamp >= ? AND t.timestamp < ?`,
-		projectID, userID, from, to)
+//
+// `environment` filters the *starting* trace, which is where the rollup files
+// the count: `sessions_started` sits on the `(user, environment, release)` cell
+// of the trace that began the session. Filtering it anywhere else — or, as this
+// first shipped, not at all — makes the two halves of one answer count
+// different things, and the step is at the watermark (found in review of
+// PR #42). Whether a session *started* is still decided over the whole of it:
+// a session that began in staging and continued in production began in
+// staging, on both sides of the seam.
+func (s *Store) UserSessionStarts(projectID, userID, environment string, from, to int64, yield func(int64)) error {
+	query := `SELECT t.timestamp FROM traces t
+	          WHERE ` + sessionStartCondition + `
+	            AND t.user_id = ? AND t.timestamp >= ? AND t.timestamp < ?`
+	args := []any{projectID, userID, from, to}
+	if environment != "" {
+		query += ` AND t.environment = ?`
+		args = append(args, environment)
+	}
+	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		return fmt.Errorf("read a user's session starts: %w", err)
 	}

@@ -15,6 +15,19 @@ const BOB = 'bob@e2e';
 const HOUR_A = 1787738400000000000n; // 2026-08-26T10:00:00Z
 const HOUR_B = 1787745600000000000n; // 2026-08-26T12:00:00Z
 
+/**
+ * Now, in nanoseconds — where a test puts a trace it wants to read back
+ * *without* waiting for a pass.
+ *
+ * The hour in progress is never rolled (an hour is closed one interval after it
+ * ends), so the watermark cannot reach it and `GET /api/v1/users/{id}` answers
+ * it from the live tail. A trace dropped into one of the fixed hours above has
+ * no such guarantee: that hour is already behind the watermark, so the trace is
+ * in the rollup's half of the seam but not in the rollup until the pass that
+ * re-rolls the hour it made dirty — a race, and the reason this exists.
+ */
+const nowNanos = () => BigInt(Date.now()) * 1_000_000n;
+
 let own: ReturnType<typeof createProject> | null = null;
 const project = () => (own ??= createProject('users'));
 
@@ -232,6 +245,37 @@ test('an unknown id says so and points at the traces filter', async ({ page }) =
 	);
 });
 
+// A user id is whatever the application set, and applications set odd things.
+// The route decoded its param a second time, which threw `URIError` inside a
+// `$derived` on a bare `%` — the page did not render at all — and quietly
+// resolved a literal `%2F` to a different id (found in review of PR #42).
+test('a user id carrying a per-cent sign is read as it stands', async ({ page }) => {
+	const odd = '50%-off@e2e';
+	await deliver([
+		{
+			trace: 'cc'.padEnd(32, '7'),
+			user: odd,
+			session: 'sess-odd',
+			at: nowNanos(),
+			cost: 0.002,
+			environment: 'production'
+		}
+	]);
+
+	await signIn(page);
+	// The live tail answers without a pass, so this is the page proper and
+	// not the not-found state.
+	await page.goto(`/users/${encodeURIComponent(odd)}`);
+
+	await expect(page.locator('dt').filter({ hasText: /^Traces$/ })).toBeVisible();
+	await expect(page.getByTitle(odd).first()).toBeVisible();
+	// And the id survived the round trip into the tab's filter.
+	await expect(page.getByRole('link', { name: /Open the full sessions listing/ })).toHaveAttribute(
+		'href',
+		`/sessions?user_id=${encodeURIComponent(odd)}`
+	);
+});
+
 test('erasing a user shows the dry run, refuses a wrong echo, and lands on /users', async ({
 	page
 }) => {
@@ -242,7 +286,7 @@ test('erasing a user shows the dry run, refuses a wrong echo, and lands on /user
 			trace: Math.random().toString(16).slice(2, 10).padEnd(32, 'f'),
 			user: victim,
 			session: `sess-${victim}`,
-			at: HOUR_A + 30_000_000_000n,
+			at: nowNanos(),
 			cost: 0.01,
 			environment: 'production'
 		}

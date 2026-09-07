@@ -490,21 +490,38 @@ func (s *Store) dirtyHours(projectID string, since, before int64) ([]int64, erro
 // else. The hour it used to be counted in is no longer derivable from anything
 // stored.
 func (s *Store) dirtySessionHours(projectID string, since int64) ([]int64, error) {
-	rows, err := s.db.Query(
-		`SELECT DISTINCT (other.timestamp / 1000000000 / ?) * ? AS hour
-		 FROM traces other
-		 WHERE other.project_id = ? AND other.timestamp >= 0
-		   AND other.session_id IN (
-		         SELECT t.session_id FROM traces t
-		          WHERE t.project_id = ? AND t.updated_at > ?
-		            AND t.session_id IS NOT NULL)
-		 ORDER BY hour`,
+	rows, err := s.db.Query(dirtySessionHoursQuery,
 		SecondsPerHour, SecondsPerHour, projectID, projectID, since)
 	if err != nil {
 		return nil, fmt.Errorf("find the hours a changed session touched: %w", err)
 	}
 	return scanHours(rows)
 }
+
+// dirtySessionHoursQuery is that statement, named so that a test can hand the
+// shipped SQL to EXPLAIN QUERY PLAN (the method of spec 003 #25).
+//
+// The `+` before `other.timestamp` is load-bearing, and the reason is the one
+// `sessionStartCondition` gives: without it the planner reads `timestamp >= 0`
+// as an index term and drives the whole query off `idx_traces_timestamp`, which
+// is a scan of every trace the project holds — on **every** pass, five minutes
+// apart, however little changed. With it the only usable term is
+// `session_id IN (…)`, which is the seek the design intends: one per changed
+// session (found in review of PR #42).
+//
+// The guard itself stays because it is about correctness, not speed: this
+// division truncates towards zero where `HourOf` floors, so a pre-epoch
+// timestamp — a client's bytes gone wrong rather than a time — would name an
+// hour the roll does not use. Such a trace is left to the live scan, exactly as
+// `hoursWithTraces` leaves it.
+const dirtySessionHoursQuery = `SELECT DISTINCT (other.timestamp / 1000000000 / ?) * ? AS hour
+	 FROM traces other
+	 WHERE other.project_id = ? AND +other.timestamp >= 0
+	   AND other.session_id IN (
+	         SELECT t.session_id FROM traces t
+	          WHERE t.project_id = ? AND t.updated_at > ?
+	            AND t.session_id IS NOT NULL)
+	 ORDER BY hour`
 
 // hoursWithTraces lists the hours of a half-open range that hold anything to
 // roll, oldest first, at most limit of them.

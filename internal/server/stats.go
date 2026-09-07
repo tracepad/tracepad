@@ -289,14 +289,22 @@ func (s *Server) liveStats(projectID string, filter store.StatsFilter, from, to 
 // in the bucket its earliest trace of this user falls in — the same predicate
 // the rollup counts by, so a session straddling the seam is counted once and
 // on the same side both halves would put it (spec 023 #6).
+//
+// It takes the environment filter for the same reason: the rolled half reads
+// `sessions_started` off the environment cell of the starting trace, so a live
+// half that ignored it would count a different set of sessions past the
+// watermark than before it — and, because a bucket exists as soon as anything
+// is put in it, would invent a `count: 0, sessions: 1` bucket for a session
+// whose traces the filter removed (found in review of PR #42).
 func (s *Server) liveSessions(projectID string, filter store.StatsFilter, from, to int64, at func(string) *bucket) error {
 	if filter.UserID == "" ||
 		(filter.GroupBy != store.GroupByHour && filter.GroupBy != store.GroupByDay) {
 		return nil
 	}
-	return s.store.UserSessionStarts(projectID, filter.UserID, from, to, func(start int64) {
-		at(rollupKey(filter.GroupBy, store.StatsRow{Hour: store.HourOf(start)})).sessions++
-	})
+	return s.store.UserSessionStarts(projectID, filter.UserID, filter.Environment, from, to,
+		func(start int64) {
+			at(rollupKey(filter.GroupBy, store.StatsRow{Hour: store.HourOf(start)})).sessions++
+		})
 }
 
 // rollupKey is the bucket key a stored row belongs to, spelled exactly as the

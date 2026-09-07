@@ -700,6 +700,56 @@ func TestUserSortsRideTheirIndexes(t *testing.T) {
 	}
 }
 
+// TestSessionStartSeeksTheSessionIndex is the plan check the session-start
+// predicate needs by name (spec 003 #25's method), and it exists because the
+// shipped form did the opposite: the planner took the `OR` apart into a
+// MULTI-INDEX OR over `idx_traces_timestamp` and walked every older trace in
+// the project, per candidate trace — 13.35 s against 0.01 s for one hour at 20k
+// traces (found in review of PR #42).
+//
+// Nothing in this store runs `ANALYZE`, so there is no `sqlite_stat1` to make
+// the planner prefer the selective term on its own. The `+` is what settles it,
+// and this test is what keeps it there.
+func TestSessionStartSeeksTheSessionIndex(t *testing.T) {
+	s, project := readStore(t)
+	for _, tc := range []struct {
+		name  string
+		query string
+		args  []any
+	}{
+		{"the hour's session starts",
+			`SELECT t.user_id, COUNT(*) FROM traces t
+			 WHERE ` + sessionStartCondition + `
+			   AND t.timestamp >= ? AND t.timestamp < ?
+			 GROUP BY t.user_id`,
+			[]any{project.ID, int64(0), int64(1)}},
+		{"one user's session starts",
+			`SELECT t.timestamp FROM traces t
+			 WHERE ` + sessionStartCondition + `
+			   AND t.user_id = ? AND t.timestamp >= ? AND t.timestamp < ?`,
+			[]any{project.ID, "u", int64(0), int64(1)}},
+		{"the hours a changed session touched",
+			dirtySessionHoursQuery,
+			[]any{SecondsPerHour, SecondsPerHour, project.ID, project.ID, int64(0)}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			plan, err := s.explainQueryPlan(tc.query, tc.args...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			joined := strings.Join(plan, "\n")
+			if !strings.Contains(joined, "idx_traces_session") {
+				t.Errorf("the session index is not used:\n%s", joined)
+			}
+			// The shape the `+` exists to prevent: an index chosen for the
+			// comparison rather than for the session.
+			if strings.Contains(joined, "MULTI-INDEX OR") {
+				t.Errorf("the planner split the comparison into an index scan:\n%s", joined)
+			}
+		})
+	}
+}
+
 // TestTheLiveTailIsExact: the user page's other half (spec 023 #4).
 func TestTheLiveTailIsExact(t *testing.T) {
 	s, project := readStore(t)

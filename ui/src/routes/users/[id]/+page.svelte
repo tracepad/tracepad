@@ -29,7 +29,12 @@
 	// and Sessions tables under the shared loader. Nothing here computes a
 	// number the API did not send.
 
-	const id = $derived(decodeURIComponent(page.params.id ?? ''));
+	// Raw, as every other dynamic route in this app reads its param: SvelteKit
+	// has already decoded it. Decoding a second time threw `URIError` on any id
+	// carrying a bare `%` — inside a `$derived`, so the page did not render at
+	// all — and quietly resolved an id containing `%2F` to a different one
+	// (found in review of PR #42).
+	const id = $derived(page.params.id ?? '');
 	/**
 	 * When this page was opened, read once. The default window is resolved
 	 * against it rather than against the clock: a `$derived` reading `new
