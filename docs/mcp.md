@@ -87,6 +87,8 @@ tracepad is a later question.
 | `get_observation_io` | `GET /api/v1/observations/{id}/io` | Following a truncation marker |
 | `list_sessions` | `GET /api/v1/sessions` | Finding conversations by filter |
 | `get_session` | `GET /api/v1/sessions/{id}` | Summarizing a conversation |
+| `list_users` | `GET /api/v1/users` | "Who are my heaviest users" |
+| `get_user` | `GET /api/v1/users/{id}` | "What does this account cost me" |
 | `get_prompt` | `GET /api/v1/prompts/{name}` | "What prompt is in production" |
 | `list_scores` | `GET /api/v1/scores` | Reading eval results |
 | `get_stats` | `GET /api/v1/stats` | Counts, cost, latency, trends |

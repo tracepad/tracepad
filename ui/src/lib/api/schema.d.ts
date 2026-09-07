@@ -287,9 +287,49 @@ export interface paths {
         };
         /**
          * Counts, errors, cost and latency percentiles per bucket
-         * @description Computed on the fly, with exact percentiles. `unit` says what a bucket counts: grouping by hour, day, environment or release counts traces, and grouping by model counts observations, because a trace has no model. Grouped by release, a trace that named none falls in the bucket with the empty key. An empty range answers with no buckets rather than with fabricated zero rows.
+         * @description `unit` says what a bucket counts: grouping by hour, day, environment or release counts traces, and grouping by model counts observations, because a trace has no model. Grouped by release, a trace that named none falls in the bucket with the empty key. An empty range answers with no buckets rather than with fabricated zero rows. Latency percentiles are histogram-based: accurate to a few percent, and stable across the expiry of the raw rows.
          */
         get: operations["stats"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List users by last seen, traffic, cost or errors, cursor-paginated
+         * @description Answered from the per-user rollup alone, so it trails the raw data by up to twice the rollup interval: a user first seen minutes ago is not listed yet, and `GET /api/v1/users/{id}` is exact for any id. Every number counts traces, not observations, and `sessions` counts sessions where they started. Sorting is always descending, with ties broken by `user_id`; a user with no costed trace sorts last under `sort=cost`.
+         */
+        get: operations["listUsers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/users/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One user: traffic, sessions, cost, errors and latency
+         * @description The rollup plus the live tail — the traces past the rollup's watermark — so the answer is exact for any id, including one the listing has not caught up with. `404` when neither half has seen it. For this user's activity over time, and the breakdown by environment or model, ask `GET /api/v1/stats?user_id=`.
+         */
+        get: operations["getUser"];
         put?: never;
         post?: never;
         delete?: never;
@@ -915,6 +955,24 @@ export interface components {
             /** @description Summed over the traces that carried a cost; absent when none did */
             total_cost?: number;
             /** Format: date-time */
+            first_seen?: string;
+            /** Format: date-time */
+            last_seen?: string;
+        };
+        /** @description The roll-up over one end user's traffic. Every number counts traces, not observations: `error_count` is how many of the user's traces failed. `first_seen` and `last_seen` are rounded down to the hour the rollup keeps, except on `GET /api/v1/users/{id}`, where the live tail makes them exact to the second. */
+        UserRow: {
+            /** @description The user id, as the application set it */
+            user_id: string;
+            traces: number;
+            error_count: number;
+            /** @description Summed over the traces that carried a cost; absent when none did */
+            total_cost?: number;
+            /** @description How many sessions of this user have begun. A session with no user id on its traces belongs to no user and is not counted here */
+            sessions: number;
+            /**
+             * Format: date-time
+             * @description The start of the earliest hour the rollup still holds for this user; it moves forward as `stats_retention_days` sweeps
+             */
             first_seen?: string;
             /** Format: date-time */
             last_seen?: string;
@@ -2152,6 +2210,8 @@ export interface operations {
                 to?: components["parameters"]["To"];
                 /** @description Exact match on the environment a trace ran in */
                 environment?: components["parameters"]["Environment"];
+                /** @description Restricts every bucket to one end user. The shape, the groupings and `unit` are unchanged; a `hour` or `day` timeline additionally carries `sessions` per bucket. Statistics for one user trail the raw data by the same rollup lag as the rest */
+                user_id?: string;
                 group_by?: "hour" | "day" | "model" | "environment" | "release";
             };
             header?: never;
@@ -2177,6 +2237,8 @@ export interface operations {
                             error_count: number;
                             /** @description Absent when nothing in the bucket carried a cost */
                             total_cost?: number;
+                            /** @description Present only with `user_id` and an `hour` or `day` grouping: how many of that user's sessions began in this bucket. A session is counted where it starts, so a sum over any range is exact */
+                            sessions?: number;
                             latency_ms: {
                                 p50?: number | null;
                                 p95?: number | null;
@@ -2187,6 +2249,82 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+        };
+    };
+    listUsers: {
+        parameters: {
+            query?: {
+                /** @description Which of the four questions this listing is answering: who was here recently, who runs the most, who costs the most, who fails the most */
+                sort?: "last_seen" | "traces" | "cost" | "errors";
+                /** @description Keeps ids starting with this, case-sensitively. A prefix rather than a substring, because an index answers a prefix; the listing is not search */
+                prefix?: string;
+                /** @description Out of range is a 400, not a silent clamp */
+                limit?: components["parameters"]["Limit"];
+                /** @description The opaque `next_cursor` or `prev_cursor` of a previous page */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description Which way to page from the cursor. With no cursor, `next` is the newest page and `prev` the oldest — both ends are a direction rather than an offset. Rows come back newest first either way */
+                direction?: components["parameters"]["Direction"];
+                /** @description Adds `total` and `total_capped`: how many rows the filters match, counted up to 1000. Off by default, because the count changes with the filters and not with the page */
+                count?: components["parameters"]["Count"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of users */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        users: components["schemas"]["UserRow"][];
+                        /** @description Pass back as `?cursor=` for the next page; null on the last one */
+                        next_cursor: string | null;
+                        /** @description Pass back with `?direction=prev` for the page before; null on the first one */
+                        prev_cursor: string | null;
+                        /** @description Present only with `?count=`: how many users the filters match, capped at 1000 */
+                        total?: number;
+                        /** @description Present only with `?count=`: the count stopped at the cap */
+                        total_capped?: boolean;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    getUser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The user id, as the application set it */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The user */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserRow"] & {
+                        latency_ms: {
+                            p50?: number | null;
+                            p95?: number | null;
+                        };
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
         };
     };
     listScores: {

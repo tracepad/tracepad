@@ -11,6 +11,12 @@ export type StatsBucket = {
 	error_count: number;
 	/** Absent when nothing in the bucket reported a cost — not zero. */
 	total_cost?: number;
+	/**
+	 * How many of one user's sessions began in the bucket. Present only on a
+	 * `user_id` timeline (spec 023 #6): `stats_hourly` has no such number, so
+	 * without the filter the key is absent rather than zero.
+	 */
+	sessions?: number;
 	latency_ms: { p50?: number | null; p95?: number | null };
 };
 
@@ -21,6 +27,8 @@ export type Series = {
 	count: (number | null)[];
 	cost: (number | null)[];
 	errors: (number | null)[];
+	/** Null everywhere the answer carried no `sessions` at all (spec 023 #6). */
+	sessions: (number | null)[];
 	p50: (number | null)[];
 	p95: (number | null)[];
 };
@@ -67,7 +75,15 @@ export function buildSeries(
 		for (let at = start; at <= to; at += step) instants.add(at);
 	}
 
-	const series: Series = { x: [], count: [], cost: [], errors: [], p50: [], p95: [] };
+	const series: Series = {
+		x: [],
+		count: [],
+		cost: [],
+		errors: [],
+		sessions: [],
+		p50: [],
+		p95: []
+	};
 	for (const at of [...instants].sort((a, b) => a - b)) {
 		const bucket = byKey.get(key(at, window.bucket));
 		series.x.push(at / 1000);
@@ -75,6 +91,10 @@ export function buildSeries(
 		series.errors.push(bucket ? bucket.error_count : null);
 		// A bucket with traffic but no priced trace has no cost at all.
 		series.cost.push(bucket?.total_cost ?? null);
+		// `sessions` is either on every bucket or on none; a bucket the
+		// window drew and the server did not return is a gap here as it is
+		// everywhere else.
+		series.sessions.push(bucket?.sessions ?? null);
 		series.p50.push(bucket?.latency_ms?.p50 ?? null);
 		series.p95.push(bucket?.latency_ms?.p95 ?? null);
 	}

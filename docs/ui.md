@@ -378,6 +378,39 @@ percent — see [api.md](api.md#where-the-numbers-come-from).
 Neither screen has a live mode. Both re-read on a filter change and on the
 **Refresh** control; the Traces live toggle is the only poller in the app.
 
+**Users** — sits between Sessions and Stats, which is what it joins: a user is
+a set of sessions, and their page is Stats for one of them.
+
+The listing is `GET /api/v1/users`: id, traces, sessions, errors, cost, first
+and last seen. A sort select offers the four questions the endpoint answers —
+last seen, traces, cost, errors, always descending — and a box narrows by a
+**case-sensitive prefix** of the id; both live in the URL. A long id is cut in
+the middle, with the whole of it in the title and a copy button beside it.
+
+It is built from an hourly roll-up, so it trails live traffic by a few minutes
+and the empty state says so rather than claiming there are no users: a user
+first seen just now is on the Traces screen, filtered by their id, and not yet
+here. See [users.md](users.md).
+
+**A user** (`/users/{id}`) is composed of parts the other screens already
+have: the summary cards from `GET /api/v1/users/{id}` — traces, sessions,
+errors, cost, p50/p95, first and last seen, exact including the traffic too
+recent for the listing — then a time window governing an **activity** chart
+(traces, sessions started and failing traces) and a **cost** chart, both over
+`GET /api/v1/stats?user_id=`, then the environment and model breakdowns with
+the same filter. Under them, two tabs (`?tab=sessions|traces`) hold the
+Sessions and Traces tables filtered by this user, each with a ⤢ to the full
+listing with the filter set — so the peek panel and its `j`/`k` walk come
+along rather than being reimplemented.
+
+*Erase data* in the header is the Settings card with the id already filled in:
+the server's own dry run, the id typed back to confirm, and the listing
+afterwards ([admin.md](admin.md#erasing-a-users-data)).
+
+The user id in the Traces table and in a trace's header is a link here. It is
+the second link in a trace row — the row's own link, the one `j`/`k` and Enter
+use, stays first.
+
 **Settings** — see [Settings and administration](#settings-and-administration).
 
 **Trace** — the observation tree on the left, the selected observation on the
@@ -493,8 +526,9 @@ Filters, the search, live mode, the time window, the stats bucket and the
 selected observation all live in the query string, so any view is a link:
 `/traces?q=refund+failed`, `/traces?status=error&environment=prod`,
 `/traces/{id}?obs={observation_id}`,
-`/sessions?environment=prod`, `/stats?from=…&to=…&group_by=hour`. Reloading,
-sharing and the back button all behave.
+`/sessions?environment=prod`, `/users?sort=cost&prefix=acme:`,
+`/users/{id}?tab=traces&from=…`, `/stats?from=…&to=…&group_by=hour`.
+Reloading, sharing and the back button all behave.
 
 The time window is one control on every screen that has one — presets for the
 last hour, day, week and month, plus a calendar — and it travels as the

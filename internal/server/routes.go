@@ -52,6 +52,12 @@ func (s *Server) routes() []route {
 		{"GET", "/api/v1/sessions/{id}", "One session: its totals and its traces", s.handleGetSession},
 		{"GET", "/api/v1/stats", "Counts, errors, cost and latency percentiles per bucket", s.handleStats},
 
+		// Users (spec 023): the rollup one dimension over. The listing
+		// answers from it alone and trails the raw rows by the rollup's
+		// lag; one user merges the live tail and is exact (#4).
+		{"GET", "/api/v1/users", "List users by last seen, traffic, cost or errors, cursor-paginated", s.handleListUsers},
+		{"GET", "/api/v1/users/{id}", "One user: traffic, sessions, cost, errors and latency", s.handleGetUser},
+
 		// Scores (spec 003).
 		{"POST", "/api/v1/scores", "Write one score or an array of them", s.handleCreateScores},
 		{"GET", "/api/v1/scores", "List scores, filtered and cursor-paginated", s.handleListScores},

@@ -10,13 +10,20 @@ async function signIn(page: Page) {
 	await expect(page).toHaveURL(/\/traces$/);
 }
 
-/** The rows of a listing, header excluded. */
+/**
+ * The rows of a listing, header excluded.
+ *
+ * A row's *first* link is its own — the timestamp cell, whose href is the full
+ * page it stands for (spec 008 #16). A trace row carries a second one since
+ * spec 023: the user id is a destination too, and it stops the click from
+ * reaching the row. So every locator here takes the first.
+ */
 const rows = (page: Page) => page.locator('tbody tr');
 
 test('a trace row opens the panel and says which row it came from', async ({ page }) => {
 	await signIn(page);
 	const row = rows(page).filter({ hasText: 'summarise-release-notes' });
-	await row.getByRole('link').click();
+	await row.getByRole('link').first().click();
 
 	const panel = page.getByRole('dialog');
 	await expect(panel).toBeVisible();
@@ -24,7 +31,7 @@ test('a trace row opens the panel and says which row it came from', async ({ pag
 	await expect(panel.getByRole('treeitem').first()).toBeVisible();
 	// With no scrim under it, the lit row is the only thing that says where
 	// the panel's contents came from (spec 008 #10).
-	await expect(row.getByRole('link')).toHaveAttribute('aria-current', 'true');
+	await expect(row.getByRole('link').first()).toHaveAttribute('aria-current', 'true');
 });
 
 /**
@@ -53,7 +60,7 @@ test('opening the panel does not re-read the listing under it', async ({ page })
 	const listings = await listingRequests(page);
 	const before = listings();
 
-	await rows(page).filter({ hasText: 'answer-question' }).getByRole('link').click();
+	await rows(page).filter({ hasText: 'answer-question' }).getByRole('link').first().click();
 	const panel = page.getByRole('dialog');
 	await expect(panel.getByRole('treeitem').first()).toBeVisible();
 
@@ -82,9 +89,9 @@ test('opening a session panel does not re-read the sessions listing', async ({ p
 		if (/\/api\/v1\/sessions\?/.test(url) && !url.includes('count=1')) count++;
 	});
 
-	await rows(page).filter({ hasText: 'session-77' }).getByRole('link').click();
+	await rows(page).filter({ hasText: 'session-77' }).getByRole('link').first().click();
 	await expect(page.getByRole('dialog').getByText('support-chat')).toBeVisible();
-	await page.getByRole('dialog').locator('tbody tr').first().getByRole('link').click();
+	await page.getByRole('dialog').locator('tbody tr').first().getByRole('link').first().click();
 	await expect(page.getByRole('dialog').getByRole('treeitem').first()).toBeVisible();
 
 	expect(count).toBe(0);
@@ -93,20 +100,20 @@ test('opening a session panel does not re-read the sessions listing', async ({ p
 test('the listing is still there under the panel', async ({ page }, testInfo) => {
 	test.skip(testInfo.project.name !== 'desktop', 'the panel covers a phone by design (#12)');
 	await signIn(page);
-	await rows(page).first().getByRole('link').click();
+	await rows(page).first().getByRole('link').first().click();
 
 	await expect(page.getByRole('dialog')).toBeVisible();
 	// Not merely mounted: reachable, which is the whole point of #4.
 	await expect(page.getByRole('button', { name: 'Live' })).toBeVisible();
 	const second = rows(page).nth(1);
-	await second.getByRole('link').click();
-	await expect(second.getByRole('link')).toHaveAttribute('aria-current', 'true');
+	await second.getByRole('link').first().click();
+	await expect(second.getByRole('link').first()).toHaveAttribute('aria-current', 'true');
 });
 
 test('the panel covers the viewport on a phone', async ({ page }, testInfo) => {
 	test.skip(testInfo.project.name !== 'mobile', 'a wide screen keeps the listing beside it');
 	await signIn(page);
-	await rows(page).first().getByRole('link').click();
+	await rows(page).first().getByRole('link').first().click();
 
 	const panel = page.getByRole('dialog');
 	await expect(panel).toHaveAttribute('aria-modal', 'true');
@@ -116,7 +123,7 @@ test('the panel covers the viewport on a phone', async ({ page }, testInfo) => {
 
 test('walking the rows leaves one entry behind, not one per row', async ({ page }) => {
 	await signIn(page);
-	await rows(page).first().getByRole('link').click();
+	await rows(page).first().getByRole('link').first().click();
 	const first = page.url();
 	// Through the panel's own control, which is how a phone walks the rows at
 	// all: there, the panel covers the listing (#12).
@@ -133,14 +140,14 @@ test('walking the rows leaves one entry behind, not one per row', async ({ page 
 
 test('the next control moves to the next row on screen', async ({ page }) => {
 	await signIn(page);
-	await rows(page).first().getByRole('link').click();
+	await rows(page).first().getByRole('link').first().click();
 	const panel = page.getByRole('dialog');
 	// The first row has nothing above it, and the control says so rather than
 	// disappearing.
 	await expect(panel.getByRole('button', { name: 'Previous row' })).toBeDisabled();
 
 	await panel.getByRole('button', { name: 'Next row' }).click();
-	await expect(rows(page).nth(1).getByRole('link')).toHaveAttribute('aria-current', 'true');
+	await expect(rows(page).nth(1).getByRole('link').first()).toHaveAttribute('aria-current', 'true');
 	await expect(panel.getByRole('button', { name: 'Previous row' })).toBeEnabled();
 });
 
@@ -165,26 +172,26 @@ test('a value in a row can still be selected and copied', async ({ page }, testI
 
 test('j and k walk the rows, and stop where the listing does', async ({ page }) => {
 	await signIn(page);
-	await rows(page).first().getByRole('link').click();
+	await rows(page).first().getByRole('link').first().click();
 	const panel = page.getByRole('dialog');
 
 	await page.keyboard.press('j');
-	await expect(rows(page).nth(1).getByRole('link')).toHaveAttribute('aria-current', 'true');
+	await expect(rows(page).nth(1).getByRole('link').first()).toHaveAttribute('aria-current', 'true');
 	await page.keyboard.press('k');
-	await expect(rows(page).first().getByRole('link')).toHaveAttribute('aria-current', 'true');
+	await expect(rows(page).first().getByRole('link').first()).toHaveAttribute('aria-current', 'true');
 
 	// The top of the listing: the key is dimmed rather than gone, and pressing
 	// it again does nothing (spec 008 #13).
 	await expect(panel.getByRole('button', { name: 'Previous row' })).toBeDisabled();
 	await page.keyboard.press('k');
-	await expect(rows(page).first().getByRole('link')).toHaveAttribute('aria-current', 'true');
+	await expect(rows(page).first().getByRole('link').first()).toHaveAttribute('aria-current', 'true');
 });
 
 test('a letter typed into a filter stays a letter', async ({ page }, testInfo) => {
 	test.skip(testInfo.project.name !== 'desktop', 'the panel covers the filter bar on a phone');
 	await signIn(page);
 	await page.goto('/sessions');
-	await rows(page).first().getByRole('link').click();
+	await rows(page).first().getByRole('link').first().click();
 	const opened = page.url();
 
 	const field = page.getByPlaceholder('Environment');
@@ -197,7 +204,7 @@ test('a letter typed into a filter stays a letter', async ({ page }, testInfo) =
 
 test('the panel expands to the page it points at, selection included', async ({ page }) => {
 	await signIn(page);
-	await rows(page).filter({ hasText: 'summarise-release-notes' }).getByRole('link').click();
+	await rows(page).filter({ hasText: 'summarise-release-notes' }).getByRole('link').first().click();
 	const panel = page.getByRole('dialog');
 
 	// Pick a node so the link has a selection to carry.
@@ -212,7 +219,7 @@ test('the panel expands to the page it points at, selection included', async ({ 
 
 test('Escape closes the panel and the URL forgets it', async ({ page }) => {
 	await signIn(page);
-	await rows(page).first().getByRole('link').click();
+	await rows(page).first().getByRole('link').first().click();
 	await expect(page.getByRole('dialog')).toBeVisible();
 
 	await page.keyboard.press('Escape');
@@ -222,7 +229,7 @@ test('Escape closes the panel and the URL forgets it', async ({ page }) => {
 
 test('a reload comes back to the panel it was showing', async ({ page }) => {
 	await signIn(page);
-	await rows(page).first().getByRole('link').click();
+	await rows(page).first().getByRole('link').first().click();
 	const deep = page.url();
 
 	await page.reload();
@@ -233,14 +240,14 @@ test('a reload comes back to the panel it was showing', async ({ page }) => {
 test('a session drills one level into a trace and back', async ({ page }) => {
 	await signIn(page);
 	await page.goto('/sessions');
-	await rows(page).filter({ hasText: 'session-77' }).getByRole('link').click();
+	await rows(page).filter({ hasText: 'session-77' }).getByRole('link').first().click();
 
 	const panel = page.getByRole('dialog');
 	await expect(page).toHaveURL(/\/sessions\?peek=session-77$/);
 	await expect(panel.getByText('support-chat')).toBeVisible();
 
 	// The session's own table, one level down, in the same panel (#9).
-	await panel.locator('tbody tr').first().getByRole('link').click();
+	await panel.locator('tbody tr').first().getByRole('link').first().click();
 	await expect(page).toHaveURL(/peek=session-77&trace=[0-9a-f]{32}$/);
 	await expect(panel.getByRole('treeitem').first()).toBeVisible();
 
@@ -268,7 +275,7 @@ test('Escape closes the panel even from a filter field', async ({ page }, testIn
 	test.skip(testInfo.project.name !== 'desktop', 'the panel covers the filter bar on a phone');
 	await signIn(page);
 	await page.goto('/sessions');
-	await rows(page).first().getByRole('link').click();
+	await rows(page).first().getByRole('link').first().click();
 	await expect(page.getByRole('dialog')).toBeVisible();
 
 	// Nothing in the interface reverts a filter field on Escape, so guarding
@@ -284,7 +291,7 @@ test('Escape closes the panel even from a filter field', async ({ page }, testIn
 test('closing after a walk returns focus to the row on screen', async ({ page }, testInfo) => {
 	test.skip(testInfo.project.name !== 'desktop', 'a phone has no focus ring to return');
 	await signIn(page);
-	await rows(page).first().getByRole('link').click();
+	await rows(page).first().getByRole('link').first().click();
 	const panel = page.getByRole('dialog');
 
 	// Three rows along, the row the reader is looking at is not the one they

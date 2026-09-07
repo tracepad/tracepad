@@ -100,10 +100,15 @@
 					]}
 				>
 					<td class="text-muted px-3 py-1.5 font-mono text-xs whitespace-nowrap tabular-nums">
-						<!-- Exactly one thing in the row is tabbable, and it is a real
-						     link: ⌘-click, a middle click and anything that reads links
-						     get the page it points at. Enter opens the panel, the same
-						     as a plain click does (spec 008 #16). -->
+						<!-- The row's own link, and the first in it: ⌘-click, a middle
+						     click and anything that reads links get the page it points
+						     at. Enter opens the panel, the same as a plain click does
+						     (spec 008 #16).
+
+						     It was the *only* tabbable thing in the row until spec 023
+						     made the user id a link too. Two stops rather than one, on
+						     purpose: "everything this account did" is a destination, and
+						     a destination reachable only with a mouse is not one. -->
 						<a
 							href="/traces/{row.id}{row.match?.observation_id
 								? `?obs=${encodeURIComponent(row.match.observation_id)}`
@@ -116,7 +121,25 @@
 					</td>
 					<td class={cell}>{row.name ?? ABSENT}</td>
 					<td class="text-muted {cell}">{row.environment}</td>
-					<td class="text-muted {cell}">{row.user_id ?? ABSENT}</td>
+					<td class="text-muted {cell}">
+						<!-- The user id is a link to their page (spec 023, Application
+						     contract). It is the second tabbable thing in the row, and
+						     deliberately so: "everything this account did" is a
+						     destination, not a decoration. The row's own click still
+						     opens the panel, which is why the link stops the event. -->
+						{#if row.user_id}
+							<a
+								href="/users/{encodeURIComponent(row.user_id)}"
+								onclick={(event) => event.stopPropagation()}
+								title="Everything about {row.user_id}"
+								class="hover:text-fg hover:underline"
+							>
+								{row.user_id}
+							</a>
+						{:else}
+							{ABSENT}
+						{/if}
+					</td>
 					<td class="text-muted {cell}">{row.session_id ?? ABSENT}</td>
 					<td class="text-muted {numeric}">{cost(row.total_cost)}</td>
 					<td class="text-muted {numeric}">{duration(row.latency_ms)}</td>

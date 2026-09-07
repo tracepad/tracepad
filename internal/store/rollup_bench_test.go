@@ -17,10 +17,17 @@ import (
 // holds while the rollup's is linear in the hours.
 
 const (
-	benchHours          = 24 * 30
-	benchTracesPerHour  = 50
-	benchSpansPerTrace  = 1 // each carrying a model and a cost
-	benchStartHourEpoch = int64(1780000000) / SecondsPerHour * SecondsPerHour
+	benchHours         = 24 * 30
+	benchTracesPerHour = 50
+	benchSpansPerTrace = 1 // each carrying a model and a cost
+	// benchUsers is how many distinct end users the corpus spreads over, and
+	// benchTracesPerSession how many traces one session of theirs holds. The
+	// per-user rollup's cost is what these two decide (spec 023 #1): rows are
+	// active-user-hours, and a pass with a user id on every trace is what the
+	// PR times against one without.
+	benchUsers            = 200
+	benchTracesPerSession = 5
+	benchStartHourEpoch   = int64(1780000000) / SecondsPerHour * SecondsPerHour
 )
 
 // seedMonth writes the corpus once and hands back the store.
@@ -52,6 +59,9 @@ func seedMonth(b *testing.B) (*Store, *Project) {
 			at := start + int64(i)*int64(time.Second)
 			batch.Traces = append(batch.Traces, &model.Trace{
 				ID: id, Name: "run", Environment: "production", Release: "2026.8.30",
+				UserID: fmt.Sprintf("user-%04d", n%benchUsers),
+				SessionID: fmt.Sprintf("sess-%04d-%d",
+					n%benchUsers, n/(benchUsers*benchTracesPerSession)),
 			})
 			for j := range benchSpansPerTrace {
 				batch.Observations = append(batch.Observations, &model.Observation{

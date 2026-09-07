@@ -35,6 +35,17 @@
 			{#if trace.release}
 				<span class="hidden truncate md:inline" title="Release">{trace.release}</span>
 			{/if}
+			<!-- Whose trace this is, and a way to everything else they did
+			     (spec 023, Application contract). -->
+			{#if trace.user_id}
+				<a
+					href="/users/{encodeURIComponent(trace.user_id)}"
+					title="Everything about {trace.user_id}"
+					class="hover:text-fg hidden truncate font-mono hover:underline md:inline"
+				>
+					{trace.user_id}
+				</a>
+			{/if}
 			<span class="hidden tabular-nums md:inline">{duration(trace.latency_ms)}</span>
 			<span class="hidden tabular-nums md:inline">{cost(trace.total_cost)}</span>
 			<span class="hidden truncate font-mono lg:inline">{trace.id}</span>

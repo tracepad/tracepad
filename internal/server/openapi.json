@@ -462,12 +462,14 @@
       "get": {
         "tags": ["stats"],
         "summary": "Counts, errors, cost and latency percentiles per bucket",
-        "description": "Computed on the fly, with exact percentiles. `unit` says what a bucket counts: grouping by hour, day, environment or release counts traces, and grouping by model counts observations, because a trace has no model. Grouped by release, a trace that named none falls in the bucket with the empty key. An empty range answers with no buckets rather than with fabricated zero rows.",
+        "description": "`unit` says what a bucket counts: grouping by hour, day, environment or release counts traces, and grouping by model counts observations, because a trace has no model. Grouped by release, a trace that named none falls in the bucket with the empty key. An empty range answers with no buckets rather than with fabricated zero rows. Latency percentiles are histogram-based: accurate to a few percent, and stable across the expiry of the raw rows.",
         "operationId": "stats",
         "parameters": [
           {"$ref": "#/components/parameters/From"},
           {"$ref": "#/components/parameters/To"},
           {"$ref": "#/components/parameters/Environment"},
+          {"name": "user_id", "in": "query", "schema": {"type": "string"},
+            "description": "Restricts every bucket to one end user. The shape, the groupings and `unit` are unchanged; a `hour` or `day` timeline additionally carries `sessions` per bucket. Statistics for one user trail the raw data by the same rollup lag as the rest"},
           {"name": "group_by", "in": "query",
             "schema": {"type": "string", "enum": ["hour", "day", "model", "environment", "release"], "default": "day"}}
         ],
@@ -484,6 +486,8 @@
                   "count": {"type": "integer"},
                   "error_count": {"type": "integer"},
                   "total_cost": {"type": "number", "description": "Absent when nothing in the bucket carried a cost"},
+                  "sessions": {"type": "integer",
+                    "description": "Present only with `user_id` and an `hour` or `day` grouping: how many of that user's sessions began in this bucket. A session is counted where it starts, so a sum over any range is exact"},
                   "latency_ms": {"type": "object", "properties": {
                     "p50": {"type": ["integer", "null"]},
                     "p95": {"type": ["integer", "null"]}
@@ -496,6 +500,76 @@
           }}}},
           "400": {"$ref": "#/components/responses/BadRequest"},
           "401": {"$ref": "#/components/responses/Unauthorized"}
+        }
+      }
+    },
+    "/api/v1/users": {
+      "get": {
+        "tags": ["stats"],
+        "summary": "List users by last seen, traffic, cost or errors, cursor-paginated",
+        "description": "Answered from the per-user rollup alone, so it trails the raw data by up to twice the rollup interval: a user first seen minutes ago is not listed yet, and `GET /api/v1/users/{id}` is exact for any id. Every number counts traces, not observations, and `sessions` counts sessions where they started. Sorting is always descending, with ties broken by `user_id`; a user with no costed trace sorts last under `sort=cost`.",
+        "operationId": "listUsers",
+        "parameters": [
+          {"name": "sort", "in": "query",
+            "schema": {"type": "string", "enum": ["last_seen", "traces", "cost", "errors"], "default": "last_seen"},
+            "description": "Which of the four questions this listing is answering: who was here recently, who runs the most, who costs the most, who fails the most"},
+          {"name": "prefix", "in": "query", "schema": {"type": "string"},
+            "description": "Keeps ids starting with this, case-sensitively. A prefix rather than a substring, because an index answers a prefix; the listing is not search"},
+          {"$ref": "#/components/parameters/Limit"},
+          {"$ref": "#/components/parameters/Cursor"},
+          {"$ref": "#/components/parameters/Direction"},
+          {"$ref": "#/components/parameters/Count"}
+        ],
+        "responses": {
+          "200": {"description": "A page of users", "content": {"application/json": {"schema": {
+            "type": "object",
+            "properties": {
+              "users": {"type": "array", "items": {"$ref": "#/components/schemas/UserRow"}},
+              "next_cursor": {"type": ["string", "null"],
+                "description": "Pass back as `?cursor=` for the next page; null on the last one"},
+              "prev_cursor": {"type": ["string", "null"],
+                "description": "Pass back with `?direction=prev` for the page before; null on the first one"},
+              "total": {"type": "integer",
+                "description": "Present only with `?count=`: how many users the filters match, capped at 1000"},
+              "total_capped": {"type": "boolean",
+                "description": "Present only with `?count=`: the count stopped at the cap"}
+            },
+            "required": ["users", "next_cursor", "prev_cursor"]
+          }}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"}
+        }
+      }
+    },
+    "/api/v1/users/{id}": {
+      "get": {
+        "tags": ["stats"],
+        "summary": "One user: traffic, sessions, cost, errors and latency",
+        "description": "The rollup plus the live tail — the traces past the rollup's watermark — so the answer is exact for any id, including one the listing has not caught up with. `404` when neither half has seen it. For this user's activity over time, and the breakdown by environment or model, ask `GET /api/v1/stats?user_id=`.",
+        "operationId": "getUser",
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"},
+            "description": "The user id, as the application set it"}
+        ],
+        "responses": {
+          "200": {"description": "The user", "content": {"application/json": {"schema": {
+            "allOf": [
+              {"$ref": "#/components/schemas/UserRow"},
+              {
+                "type": "object",
+                "properties": {
+                  "latency_ms": {"type": "object", "properties": {
+                    "p50": {"type": ["integer", "null"]},
+                    "p95": {"type": ["integer", "null"]}
+                  }}
+                },
+                "required": ["latency_ms"]
+              }
+            ]
+          }}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
         }
       }
     },
@@ -1568,6 +1642,23 @@
           "last_seen": {"type": "string", "format": "date-time"}
         },
         "required": ["id", "trace_count", "error_count"]
+      },
+      "UserRow": {
+        "type": "object",
+        "description": "The roll-up over one end user's traffic. Every number counts traces, not observations: `error_count` is how many of the user's traces failed. `first_seen` and `last_seen` are rounded down to the hour the rollup keeps, except on `GET /api/v1/users/{id}`, where the live tail makes them exact to the second.",
+        "properties": {
+          "user_id": {"type": "string", "description": "The user id, as the application set it"},
+          "traces": {"type": "integer"},
+          "error_count": {"type": "integer"},
+          "total_cost": {"type": "number",
+            "description": "Summed over the traces that carried a cost; absent when none did"},
+          "sessions": {"type": "integer",
+            "description": "How many sessions of this user have begun. A session with no user id on its traces belongs to no user and is not counted here"},
+          "first_seen": {"type": "string", "format": "date-time",
+            "description": "The start of the earliest hour the rollup still holds for this user; it moves forward as `stats_retention_days` sweeps"},
+          "last_seen": {"type": "string", "format": "date-time"}
+        },
+        "required": ["user_id", "traces", "error_count", "sessions"]
       },
       "RawBatch": {
         "type": "object",

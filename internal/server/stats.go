@@ -47,6 +47,10 @@ type bucket struct {
 	// truth is "nobody said" (spec 002 #14).
 	costed  bool
 	latency store.Histogram
+	// sessions is how many of the user's sessions began in this bucket. It
+	// rides only a `user_id` timeline (spec 023 #6): `stats_hourly` has no
+	// such number, so without the filter the key is absent rather than zero.
+	sessions int64
 }
 
 // handleStats serves count, errors, cost and latency percentiles per bucket.
@@ -55,7 +59,7 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	values, err := queryParams(r, "from", "to", "environment", "group_by")
+	values, err := queryParams(r, "from", "to", "environment", "user_id", "group_by")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -63,6 +67,7 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 
 	filter := store.StatsFilter{
 		Environment: values.Get("environment"),
+		UserID:      values.Get("user_id"),
 		GroupBy:     values.Get("group_by"),
 	}
 	if filter.GroupBy == "" {
@@ -102,6 +107,11 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		}
 		return b
 	}
+	// A count of sessions has no meaning in `stats_hourly` and no bucket to
+	// live in outside a timeline, so it rides exactly the one question it
+	// answers: this user's activity over time (spec 023 #6).
+	sessions := filter.UserID != "" &&
+		(filter.GroupBy == store.GroupByHour || filter.GroupBy == store.GroupByDay)
 	if err := s.readStats(project, filter, at); err != nil {
 		slog.Error("read stats failed", "err", err)
 		writeError(w, http.StatusInternalServerError, "failed to compute the statistics")
@@ -126,6 +136,9 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 			put("error_count", b.errorCount)
 		if b.costed {
 			row = row.put("total_cost", b.totalCost)
+		}
+		if sessions {
+			row = row.put("sessions", b.sessions)
 		}
 		rows = append(rows, row.put("latency_ms", object{}.
 			put("p50", percentile(b.latency, 50)).
@@ -210,22 +223,37 @@ const unbounded = int64(0)
 // rolledStats folds the stored rows of a range into the buckets. Which rows
 // count is the unit: the model grouping reads observation rows, everything
 // else reads trace rows, which is the one table carrying both (spec 013 #1).
+//
+// With a `user_id` the rows come from `users_hourly` instead — the same tuple
+// with the user in it, so the fold below is the same fold (spec 023 #6).
 func (s *Server) rolledStats(projectID string, filter store.StatsFilter, fromHour, toHour int64, at func(string) *bucket) error {
 	wantModel := filter.GroupBy == store.GroupByModel
+	fold := func(row store.StatsRow) *bucket {
+		if (row.Model != "") != wantModel {
+			return nil
+		}
+		b := at(rollupKey(filter.GroupBy, row))
+		b.count += row.Count
+		b.errorCount += row.ErrorCount
+		if row.TotalCost != nil {
+			b.totalCost += *row.TotalCost
+			b.costed = true
+		}
+		b.latency.Merge(row.Latency)
+		return b
+	}
+	if filter.UserID != "" {
+		return s.store.UsersRollupRows(projectID, filter.UserID, fromHour, toHour,
+			filter.Environment, func(row store.UserStatsRow) {
+				if b := fold(row.StatsRow); b != nil {
+					// Only trace-unit rows carry it, and only those
+					// reach here when the grouping is not by model.
+					b.sessions += row.SessionsStarted
+				}
+			})
+	}
 	return s.store.StatsRollupRows(projectID, fromHour, toHour, filter.Environment,
-		func(row store.StatsRow) {
-			if (row.Model != "") != wantModel {
-				return
-			}
-			b := at(rollupKey(filter.GroupBy, row))
-			b.count += row.Count
-			b.errorCount += row.ErrorCount
-			if row.TotalCost != nil {
-				b.totalCost += *row.TotalCost
-				b.costed = true
-			}
-			b.latency.Merge(row.Latency)
-		})
+		func(row store.StatsRow) { fold(row) })
 }
 
 // liveStats folds a half-open range of raw rows into the same buckets.
@@ -238,7 +266,7 @@ func (s *Server) liveStats(projectID string, filter store.StatsFilter, from, to 
 	if to == math.MaxInt64 {
 		window.To = nil
 	}
-	return s.store.StatsSamples(projectID, window, func(sample store.StatsSample) {
+	if err := s.store.StatsSamples(projectID, window, func(sample store.StatsSample) {
 		b := at(sample.Key)
 		b.count++
 		if sample.Errored {
@@ -251,7 +279,32 @@ func (s *Server) liveStats(projectID string, filter store.StatsFilter, from, to 
 		if sample.LatencyMs != nil {
 			b.latency.Add(*sample.LatencyMs)
 		}
-	})
+	}); err != nil {
+		return err
+	}
+	return s.liveSessions(projectID, filter, from, to, at)
+}
+
+// liveSessions is the live half of `sessions` per bucket. It counts a session
+// in the bucket its earliest trace of this user falls in — the same predicate
+// the rollup counts by, so a session straddling the seam is counted once and
+// on the same side both halves would put it (spec 023 #6).
+//
+// It takes the environment filter for the same reason: the rolled half reads
+// `sessions_started` off the environment cell of the starting trace, so a live
+// half that ignored it would count a different set of sessions past the
+// watermark than before it — and, because a bucket exists as soon as anything
+// is put in it, would invent a `count: 0, sessions: 1` bucket for a session
+// whose traces the filter removed (found in review of PR #42).
+func (s *Server) liveSessions(projectID string, filter store.StatsFilter, from, to int64, at func(string) *bucket) error {
+	if filter.UserID == "" ||
+		(filter.GroupBy != store.GroupByHour && filter.GroupBy != store.GroupByDay) {
+		return nil
+	}
+	return s.store.UserSessionStarts(projectID, filter.UserID, filter.Environment, from, to,
+		func(start int64) {
+			at(rollupKey(filter.GroupBy, store.StatsRow{Hour: store.HourOf(start)})).sessions++
+		})
 }
 
 // rollupKey is the bucket key a stored row belongs to, spelled exactly as the
