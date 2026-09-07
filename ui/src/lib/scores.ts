@@ -82,9 +82,10 @@ export type HeaderScore = { score: Score; unknown: boolean };
  * went elsewhere.
  *
  * A score whose `observation_id` is in no observation of this trace — a late
- * span, or a wrong id — would otherwise be shown nowhere at all, so the
- * header takes it with a note while still counting it among the ones on
- * observations (edge cases).
+ * span, or a wrong id — would otherwise be shown nowhere at all, so the header
+ * takes it with a note. It is not counted among the ones on observations
+ * (Decision 11): the count is an invitation to open panels, so it has to be
+ * what is behind them, and this one is on screen already.
  */
 export function splitScores(scores: Score[], known: ReadonlySet<string>) {
 	const header: HeaderScore[] = [];
@@ -96,14 +97,14 @@ export function splitScores(scores: Score[], known: ReadonlySet<string>) {
 			header.push({ score, unknown: false });
 			continue;
 		}
+		if (!known.has(at)) {
+			header.push({ score, unknown: true });
+			continue;
+		}
 		onObservations++;
 		const seen = byObservation.get(at);
-		if (known.has(at)) {
-			if (seen) seen.push(score);
-			else byObservation.set(at, [score]);
-		} else {
-			header.push({ score, unknown: true });
-		}
+		if (seen) seen.push(score);
+		else byObservation.set(at, [score]);
 	}
 	return { header, byObservation, onObservations };
 }

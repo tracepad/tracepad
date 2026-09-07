@@ -47,6 +47,8 @@ trends in *Stats*, scoring from the MCP.
 | 9 | **2026-09-07** — The application-line budget stays **14,000** (spec 016 #14); spec 021 and this spec land under it together (spec 021 #10) | Same ceiling, two specs. |
 | 10 | **2026-09-07** — Decision 4's `metadata: {"source": "web"}` and its absent `timestamp` are what a **new** score is stamped with. An **edit** (Decision 5) resends the score's own `metadata`, `timestamp` and **target** — `trace_id`, `observation_id`, `session_id` — unchanged along with its id; only the fields the dialog shows are the reader's to change | "Every field resent" is about a re-POST replacing the row whole, not about overwriting what the row already said. A judge's verdict corrected by a person is still the judge's verdict, and relabelling its source as *web* would make the chip lie about where it came from; moving its event time to now would slide it to the top of a listing ordered by when the graded interaction happened. The target is the same rule one field further: taking it from the block that drew the chip would move an *unknown observation* score onto the trace — the header's target names no observation — and would drop the second id of a score carrying a trace and a session both, which is a score the API takes and `scores add` writes. All of them are facts an edit would have invented. |
 
+| 11 | **2026-09-07** — ***N more on observations* counts only the scores a panel will show.** A score whose `observation_id` is in no observation of this trace is drawn on the header with its *unknown observation* note and is **not** in the count. Supersedes the Edge cases bullet below, which said it was counted | The count is an invitation to go and open panels, so the number has to be what is found behind them. Counting a chip the reader is looking at sends them hunting for a score that is already on screen — and the same sentence that set the count also put the chip in the header, so the bullet contradicted itself. Raised in review of PR #41. |
+
 ## Application contract
 
 - **Trace header** (`TraceDetail`): after the existing summary line, a
@@ -108,8 +110,11 @@ the id or the `404`. Usage block, usage parity test, `docs/cli.md`.
 - **More than 500 scores on a target**: the block shows the page and *and
   more* when `next_cursor` is not null; no second page is fetched.
 - **A score whose `observation_id` is not in the trace** (a late or wrong
-  id): counted in *N more on observations*, shown on no panel; the header
-  chip list gets it with an *unknown observation* note.
+  id): shown on no panel; the header chip list gets it with an *unknown
+  observation* note. **Amended 2026-09-07 by Decision 11**, which supersedes
+  this bullet's original clause — it is *not* counted in *N more on
+  observations*, because that count is what the panels hold and this is not
+  behind one.
 - **A config replaced between opening the dialog and saving**: the
   server's `400` is shown at the value field.
 - **Editing a score whose name has a config it no longer satisfies**: the

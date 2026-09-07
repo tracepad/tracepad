@@ -93,10 +93,12 @@ widget wrote otherwise — and `api` when it did not.
 
 The trace header carries the scores of the *trace*; a score that names an
 observation belongs to that observation's panel, and the header says how many
-went there. The tree badges each observation with how many it has, so "which
-step was graded" is answered before any panel is opened. A score naming an
+went there. That count is what opening the panels will find, so it can be
+acted on. The tree badges each observation with how many it has, so "which step
+was graded" is answered before any panel is opened. A score naming an
 observation this trace does not carry — a late span, a wrong id — is shown in
-the header marked *unknown observation*, because no panel would ever show it.
+the header marked *unknown observation*, because no panel would ever show it,
+and it is not in the count for the same reason.
 
 **Score** opens a dialog. The name is a select over the project's [score
 configs](scores.md#score-configs), and the control under it is the one the

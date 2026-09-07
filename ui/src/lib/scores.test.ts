@@ -147,8 +147,9 @@ describe('splitting one response between the two surfaces', () => {
 
 		expect(split.header).toEqual([{ score: expect.objectContaining({ id: '9' }), unknown: true }]);
 		expect(split.byObservation.size).toBe(0);
-		// Still counted among the ones on observations: it names one.
-		expect(split.onObservations).toBe(1);
+		// And not counted (Decision 11): the count is what opening the panels
+		// would find, and this chip is already on the header being read.
+		expect(split.onObservations).toBe(0);
 	});
 
 	it('collects every observation id of a trace, however deep', () => {

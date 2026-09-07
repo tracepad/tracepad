@@ -113,7 +113,10 @@ test('the trace header shows its own scores and counts the ones on observations'
 	const chip = page.getByRole('button', { name: /helpfulness/ });
 	await expect(chip).toContainText('0.875');
 	await expect(chip).toContainText('api');
-	await expect(page.getByText('2 more on observations')).toBeVisible();
+	// One, not two: the stray below names an observation as well, but it is on
+	// this header rather than behind a panel, so counting it would send the
+	// reader hunting for a score they are looking at (Decision 11).
+	await expect(page.getByText('1 more on observation', { exact: true })).toBeVisible();
 
 	// The stray one is in the header, because no panel will ever show it.
 	await expect(page.getByRole('button', { name: /stray/ })).toContainText('unknown observation');
