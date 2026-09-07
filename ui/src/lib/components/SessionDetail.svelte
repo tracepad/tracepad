@@ -4,7 +4,9 @@
 	import { api, type Session, type TraceRow } from '$lib/api/client.svelte';
 	import { ABSENT, cost, count, timestamp } from '$lib/format';
 	import { asPage, Listing, StateSpot } from '$lib/listing.svelte';
+	import { Scores } from '$lib/scores.svelte';
 	import PaginationBar from './PaginationBar.svelte';
+	import ScoresBlock from './scores/ScoresBlock.svelte';
 	import TraceTable from './TraceTable.svelte';
 
 	// One session: the totals `GET /api/v1/sessions/{id}` returns, over its
@@ -61,6 +63,12 @@
 		traces = listing.rows;
 	});
 
+	// A session's own scores — a CSAT rating, a conversation-level verdict —
+	// over `?session_id=` (spec 022 #2). Each trace's own are one click away,
+	// on the trace, which is what they grade.
+	const scores = new Scores(() => ({ session_id: sessionID }));
+	$effect(() => scores.watch());
+
 	/** The totals header, as label/value pairs so one loop renders them. */
 	const totals = $derived(
 		session
@@ -100,6 +108,16 @@
 			</div>
 		{/each}
 	</dl>
+
+	<ScoresBlock
+		scores={scores.rows.map((score) => ({ score, unknown: false }))}
+		target={{ session_id: sessionID }}
+		configs={scores.configs}
+		loading={scores.loading}
+		failure={scores.failure}
+		truncated={scores.more}
+		onchanged={() => scores.refresh()}
+	/>
 
 	{#if listing.rows.length > 0 || !listing.newest}
 		<TraceTable rows={listing.rows} {onopen} selectedID={selectedTraceID} />

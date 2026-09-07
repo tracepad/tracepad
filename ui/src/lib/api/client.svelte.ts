@@ -53,6 +53,13 @@ export type ComparedItem = components['schemas']['ComparedItem'];
 export type ComparedScore = components['schemas']['ComparedScore'];
 export type ScoreConfig = components['schemas']['ScoreConfig'];
 
+// The scores of spec 003, on screen and written by hand in spec 022.
+export type Score = components['schemas']['Score'];
+export type ScoreInput = components['schemas']['ScoreInput'];
+export type ScorePage = JSONResponse<paths['/api/v1/scores']['get']>;
+/** Which target a score listing is about; at most one of the three is set. */
+export type ScoreFilters = { trace_id?: string; observation_id?: string; session_id?: string };
+
 // The prompt nouns (spec 003), read and written by the Prompts screens
 // (spec 021).
 export type Prompt = components['schemas']['Prompt'];
@@ -343,6 +350,32 @@ class Api {
 	/** The scores the config admitted stay; only the binding goes. */
 	deleteScoreConfig(name: string) {
 		return this.#json<{ name: string }>(`/api/v1/score-configs/${encodeURIComponent(name)}`, {
+			method: 'DELETE'
+		});
+	}
+
+	// --- scores (spec 003, on screen and written in spec 022) --------------
+	//
+	// One read and two writes, all three of them endpoints `curl` has had
+	// since spec 003 or gained beside these screens (spec 022 #6). The read
+	// is filtered by target and asked for once per screen, and the split
+	// between the header and the observation panels is rendering (#1).
+
+	listScores(filters: ScoreFilters, page: Page = {}, signal?: AbortSignal) {
+		return this.#json<ScorePage>('/api/v1/scores', {
+			query: { ...filters, ...paging(page) },
+			signal
+		});
+	}
+
+	/** One score. An `id` in the body makes it a correction rather than a new row. */
+	createScore(body: ScoreInput) {
+		return this.#json<{ ids: string[] }>('/api/v1/scores', { method: 'POST', body });
+	}
+
+	/** A retraction; posting the same id again puts the row back (spec 022 #6). */
+	deleteScore(id: string) {
+		return this.#json<{ id: string }>(`/api/v1/scores/${encodeURIComponent(id)}`, {
 			method: 'DELETE'
 		});
 	}

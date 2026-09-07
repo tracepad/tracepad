@@ -69,10 +69,18 @@
 	let {
 		observations,
 		selectedID,
-		onselect
+		onselect,
+		scored = new Map()
 	}: {
 		observations: Observation[];
 		selectedID: string | null;
+		/**
+		 * The scores of each observation, from the trace's one score read
+		 * (spec 022 #8). "Which step was graded" is what a reader of an agent
+		 * trace asks before opening panels one by one, and a number off a
+		 * loaded document is rendering.
+		 */
+		scored?: ReadonlyMap<string, unknown[]>;
 		/**
 		 * `activate` separates "the highlight moved" from "open this one".
 		 * They are the same thing on a wide screen, where both panes are
@@ -221,6 +229,17 @@
 			<span class="min-w-0 flex-1 truncate" title={row.observation.name ?? id}>
 				{row.observation.name ?? id}
 			</span>
+
+			{#if scored.get(id)?.length}
+				{@const n = scored.get(id)?.length ?? 0}
+				<span
+					class="border-border bg-surface text-muted shrink-0 rounded border px-1 text-xs
+						tabular-nums"
+					title="{n} {n === 1 ? 'score' : 'scores'} on this observation"
+				>
+					{n}
+				</span>
+			{/if}
 
 			{#if row.failing}
 				<TriangleAlert

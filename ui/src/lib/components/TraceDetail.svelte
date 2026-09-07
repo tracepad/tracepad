@@ -6,8 +6,11 @@
 	import { page } from '$app/state';
 	import { ApiError, api, type Observation, type Trace } from '$lib/api/client.svelte';
 	import { ABSENT } from '$lib/format';
+	import { observationIDs, splitScores } from '$lib/scores';
+	import { Scores } from '$lib/scores.svelte';
 	import JsonView from './json/JsonView.svelte';
 	import ObservationDetail from './ObservationDetail.svelte';
+	import ScoresBlock from './scores/ScoresBlock.svelte';
 	import TraceTree from './TraceTree.svelte';
 
 	// The trace as a tree on the left and the selected observation on the
@@ -42,6 +45,21 @@
 		load(wanted, controller.signal);
 		return () => controller.abort();
 	});
+
+	// One read beside the trace answers both surfaces (spec 022 #1): the
+	// header takes the scores of the trace itself, each observation panel
+	// takes its own, and the tree counts them. Splitting one loaded document
+	// by a field is rendering, not the client logic spec 004 #1 forbids.
+	const scores = new Scores(() => ({ trace_id: traceID }));
+	$effect(() => scores.watch());
+
+	const split = $derived(splitScores(scores.rows, observationIDs(trace?.observations)));
+	/** What the header says about the ones it is not showing (#1). */
+	const elsewhere = $derived(
+		split.onObservations === 0
+			? null
+			: `${split.onObservations} more on observation${split.onObservations === 1 ? '' : 's'}`
+	);
 
 	$effect(() => {
 		// One component serves every trace — the route reuses it across ids,
@@ -128,6 +146,17 @@
 		</p>
 	{/if}
 
+	<ScoresBlock
+		scores={split.header}
+		target={{ trace_id: trace.id }}
+		configs={scores.configs}
+		note={elsewhere}
+		loading={scores.loading}
+		failure={scores.failure}
+		truncated={scores.more}
+		onchanged={() => scores.refresh()}
+	/>
+
 	<!-- Two panes side by side; on a phone one at a time, switched here. -->
 	<div class="border-border flex shrink-0 gap-1 border-b px-3 py-1.5 md:hidden" role="tablist">
 		{#each [['tree', 'Tree'], ['detail', 'Observation']] as const as [value, label] (value)}
@@ -153,7 +182,12 @@
 				pane === 'tree' ? 'flex flex-1' : 'hidden'
 			]}
 		>
-			<TraceTree observations={roots} selectedID={selected?.id ?? null} onselect={select} />
+			<TraceTree
+				observations={roots}
+				selectedID={selected?.id ?? null}
+				onselect={select}
+				scored={split.byObservation}
+			/>
 			{#if traceMetadata}
 				<section class="border-border shrink-0 border-t px-3 py-2 [&_.cm-editor]:max-h-52">
 					<h3 class="text-muted mb-1.5 text-xs font-medium tracking-wide uppercase">Metadata</h3>
@@ -169,7 +203,14 @@
 		>
 			{#if selected}
 				{#key selected.id}
-					<ObservationDetail observation={selected} traceID={trace.id} {refused} />
+					<ObservationDetail
+						observation={selected}
+						traceID={trace.id}
+						{refused}
+						scores={split.byObservation.get(selected.id) ?? []}
+						configs={scores.configs}
+						onscored={() => scores.refresh()}
+					/>
 				{/key}
 			{:else}
 				<p class="text-subtle p-8 text-center">

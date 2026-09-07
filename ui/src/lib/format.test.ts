@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { ABSENT, bytes, cost, count, duration, elapsed, timestamp, wait } from './format';
+import {
+	ABSENT,
+	bytes,
+	cost,
+	count,
+	duration,
+	elapsed,
+	relative,
+	timestamp,
+	wait
+} from './format';
 
 describe('duration', () => {
 	it('changes unit with magnitude', () => {
@@ -80,6 +90,28 @@ describe('timestamp', () => {
 
 	it('renders a real instant', () => {
 		expect(timestamp('2026-08-28T12:34:56Z')).not.toBe(ABSENT);
+	});
+});
+
+describe('relative', () => {
+	const now = Date.parse('2026-09-07T12:00:00Z');
+	const ago = (iso: string) => relative(iso, now);
+
+	it('picks the coarsest unit that still says something', () => {
+		expect(ago('2026-09-07T11:59:30Z')).toMatch(/30 seconds ago/);
+		expect(ago('2026-09-07T11:00:00Z')).toMatch(/1 hour ago/);
+		expect(ago('2026-09-05T12:00:00Z')).toMatch(/2 days ago/);
+		expect(ago('2026-06-07T12:00:00Z')).toMatch(/3 months ago/);
+		expect(ago('2024-09-07T12:00:00Z')).toMatch(/2 years ago/);
+	});
+
+	it('reads a clock ahead of the browser as the future, not as absent', () => {
+		expect(ago('2026-09-07T12:02:00Z')).toMatch(/in 2 minutes/);
+	});
+
+	it('answers the em dash for an instant that is not one', () => {
+		expect(relative(null)).toBe(ABSENT);
+		expect(relative('whenever')).toBe(ABSENT);
 	});
 });
 

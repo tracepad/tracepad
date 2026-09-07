@@ -70,6 +70,53 @@ are the endpoint's four (`from`, `to`, `environment`, `user_id`), and a row
 opens the session: its totals over its traces, and a trace opens from there.
 Every number counts traces, which is what a session is a collection of.
 
+## Scores
+
+A judgement about a trace, an observation or a session is shown where its
+target is read, and can be written from there. It is
+[scores.md](scores.md) on screen: every chip came out of
+`GET /api/v1/scores`, and *Score* is one `POST` — the same write an eval
+harness makes.
+
+**The block** — a *Scores* row on the trace header (wherever a trace is read:
+the page, the peek panel, a session's drill-down, a run item's), on the
+observation panel between the payloads and the metadata, and on the session
+header. One chip per score: the name, the value, where it came from and how
+long ago, newest first. Expanding a chip shows the comment — and the whole of
+a long text score — with *Edit* and *Delete* under it.
+
+The value is rendered by its type: a number to three significant digits with
+the config's range as its tooltip, a boolean as *yes* or *no*, a category as
+itself, a text score cut at 120 characters. The source is `metadata.source`
+when the writer set one — `web` for this screen, whatever the SDK or the
+widget wrote otherwise — and `api` when it did not.
+
+The trace header carries the scores of the *trace*; a score that names an
+observation belongs to that observation's panel, and the header says how many
+went there. The tree badges each observation with how many it has, so "which
+step was graded" is answered before any panel is opened. A score naming an
+observation this trace does not carry — a late span, a wrong id — is shown in
+the header marked *unknown observation*, because no panel would ever show it.
+
+**Score** opens a dialog. The name is a select over the project's [score
+configs](scores.md#score-configs), and the control under it is the one the
+config dictates: a number input bounded by its `min`/`max`, two buttons for a
+boolean, a select over the categories, a text area. *other…* takes a free name
+and asks what kind of value it carries — a project that declared no configs
+must still be able to score. Saving posts one score stamped
+`metadata: {"source": "web"}` and no `timestamp`, so it is received now.
+
+**Edit** is the same dialog over an existing score, re-posted with its id:
+spec 003's correction, which replaces the row rather than adding a second one.
+It is offered on every score, not only the ones written here — a judge's
+verdict overruled by a person is the review the eval loop exists for. The
+score's own `metadata` and `timestamp` are resent unchanged, so an edit
+invents neither a new author nor a new event time.
+
+**Delete** asks once, naming the score and its value, and then calls
+`DELETE /api/v1/scores/{id}`. There is no name to type back: a score is one
+row that writing the same id again puts straight back.
+
 ## Prompts
 
 *Prompts* is a top-level section, between *Stats* and *Evals*: a prompt is a

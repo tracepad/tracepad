@@ -118,3 +118,31 @@ describe('walking the tree with the keyboard', () => {
 		expect(stops).toHaveLength(1);
 	});
 });
+
+// "Which step was graded" answered without opening panels one by one
+// (spec 022 #8). The number is the one the trace's own score read produced, so
+// the badge is rendering and never a request of the tree's.
+describe('the score badge', () => {
+	const withScores = (scored: Map<string, unknown[]>) =>
+		render(TraceTree, { observations: tree, selectedID: 'root', onselect: vi.fn(), scored });
+
+	it('counts the scores of the observation it sits on', () => {
+		withScores(new Map([['a', [{}, {}]]]));
+
+		expect(screen.getByTitle('2 scores on this observation')).toHaveTextContent('2');
+		// And nowhere else: a badge on every row would say nothing.
+		expect(screen.getAllByTitle(/scores? on this observation/)).toHaveLength(1);
+	});
+
+	it('says score in the singular, and draws nothing for none', () => {
+		withScores(new Map([['b', [{}]]]));
+
+		expect(screen.getByTitle('1 score on this observation')).toHaveTextContent('1');
+	});
+
+	it('draws no badge at all when nothing was graded', () => {
+		withScores(new Map());
+
+		expect(screen.queryByTitle(/on this observation/)).toBeNull();
+	});
+});
