@@ -903,6 +903,35 @@ func TestPromptsRoundTrip(t *testing.T) {
 	}
 }
 
+// `--expect` is the optimistic append from the command line (spec 021 #14):
+// a push that means "add to the name as I last saw it" says so, and a name
+// that moved under it is a refusal rather than a silent extension.
+func TestPromptsPushExpect(t *testing.T) {
+	h := newHarness(t)
+	ctx := t.Context()
+
+	file := filepath.Join(t.TempDir(), "prompt.json")
+	writeFile(t, file, `{"type":"text","prompt":"Be brief."}`)
+	if got := h.run(ctx, true, "prompts", "push", "support", "--file", file, "--expect", "0"); got.code != ExitOK {
+		t.Fatalf("--expect 0 on a new name = %+v", got)
+	}
+	// The same push again believes the name is new, and it is not.
+	again := h.run(ctx, true, "prompts", "push", "support", "--file", file, "--expect", "0")
+	if again.code != ExitFailure || !strings.Contains(again.stderr, "already exists, at version 1") {
+		t.Errorf("--expect 0 on a name that exists = %+v, want the server's 409", again)
+	}
+	// And a stale expectation names what it is actually at.
+	stale := h.run(ctx, true, "prompts", "push", "support", "--file", file, "--expect", "7")
+	if stale.code != ExitFailure || !strings.Contains(stale.stderr, "is at version 1, not 7") {
+		t.Errorf("a stale --expect = %+v", stale)
+	}
+	// Without the flag the push appends, the way every push did before it.
+	if got := h.run(ctx, true, "prompts", "push", "support", "--file", file); got.code != ExitOK ||
+		!strings.Contains(got.stdout, "support version 2 created") {
+		t.Errorf("a push with no --expect = %+v", got)
+	}
+}
+
 // A label is created, moved and retired from the command line (spec 021 #8):
 // the deploy path the interface offers may do nothing the CLI cannot.
 func TestPromptsLabel(t *testing.T) {

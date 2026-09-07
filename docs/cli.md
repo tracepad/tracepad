@@ -243,9 +243,15 @@ and out of shell quoting:
 {"type": "text", "prompt": "You are a support agent.", "config": {"temperature": 0.2}}
 ```
 
-`--label` and `--message` fill in `labels` and `commit_message` when the file
-does not already set them — the file wins, so a script that sets both is never
-silently overruled.
+`--label`, `--message` and `--expect` fill in `labels`, `commit_message` and
+`expect_version` when the file does not already set them — the file wins, so a
+script that sets both is never silently overruled.
+
+`--expect N` says which version you believe the name is at (`--expect 0` for a
+name you believe is new). A name that moved under you is then a `409` naming
+where it actually is, rather than a version quietly appended onto somebody
+else's work — see
+[prompts.md](prompts.md#appending-to-the-version-you-meant).
 
 `ls` pages: `--limit` (1–500, default 50) and `--cursor`, with the last line
 printing the command that continues the walk.

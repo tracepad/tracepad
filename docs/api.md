@@ -679,9 +679,17 @@ One shape everywhere:
 {"error": "unknown query parameter \"trace\" (accepted: from, to, environment, …)"}
 ```
 
+A refusal a client has to *act* on carries what it needs beside the sentence —
+a prompt append refused by `expect_version` says which version the name is
+actually at ([prompts.md](prompts.md#appending-to-the-version-you-meant)):
+
+```json
+{"error": "prompt \"summarize\" is at version 9, not 7: it changed while this one was being written", "version": 9}
+```
+
 | Status | Meaning |
 |---|---|
 | `400` | The request cannot mean what it says: an unknown parameter, a malformed value, a `limit` out of range. |
 | `401` | The credentials do not resolve to a project. |
 | `404` | No such thing in this project. On `traces/last`, the message names the filters that found nothing. |
-| `409` | An observation id that is ambiguous without a `trace_id`. |
+| `409` | An observation id that is ambiguous without a `trace_id`; a prompt append whose `expect_version` disagrees with the name's current state. |

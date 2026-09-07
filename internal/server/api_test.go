@@ -110,10 +110,15 @@ func expectStatus(t *testing.T, rec *httptest.ResponseRecorder, want int) {
 }
 
 // expectError asserts a status and that the message names what went wrong.
+//
+// The envelope is read loosely because a refusal may carry more than its
+// sentence: an optimistic append answers `409` with the version the name is
+// actually at beside the `error` (spec 021 #14), and a helper that insisted on
+// a map of strings would fail on the number rather than on the assertion.
 func expectError(t *testing.T, rec *httptest.ResponseRecorder, want int, fragment string) {
 	t.Helper()
 	expectStatus(t, rec, want)
-	message := decodeJSON[map[string]string](t, rec)["error"]
+	message, _ := decodeJSON[map[string]any](t, rec)["error"].(string)
 	if !strings.Contains(message, fragment) {
 		t.Fatalf("error = %q, want it to mention %q", message, fragment)
 	}

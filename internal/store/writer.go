@@ -63,6 +63,15 @@ type WriteJob interface {
 type Rejection struct {
 	Kind    string
 	Message string
+	// Details are extra fields the refusal's body carries beside `error`,
+	// for a caller that has to *act* on the refusal rather than only show
+	// it. The optimistic append of spec 021 #14 is the one so far: a `409`
+	// says which version the name is actually at, so the editor can offer
+	// to open it rather than making the reader go and look.
+	//
+	// Rendered in key order, so one refusal is one body however the map was
+	// built.
+	Details map[string]any
 }
 
 // Rejection kinds. The store does not know about HTTP; the handler maps these

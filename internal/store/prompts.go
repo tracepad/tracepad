@@ -74,8 +74,16 @@ type PromptVersionWrite struct {
 	// and only the stored versions can say whether this is the first, so
 	// that check happens here rather than in the handler, where it would
 	// race (Decision 20, 2026-08-27).
-	Type          string
-	TypeStated    bool
+	Type       string
+	TypeStated bool
+	// ExpectVersion is the version the author believed the name was at when
+	// they composed this one — 0 for "this name is new" (spec 021 #14). A
+	// mismatch is a conflict rather than an append: the alternative for a
+	// client is to ask first and post second, which is a race the store can
+	// settle here for free, inside the transaction that assigns the number.
+	// Absent (nil) means "append whatever the current state is", which is
+	// what every caller before this field did.
+	ExpectVersion *int
 	Prompt        []byte
 	Config        []byte
 	CommitMessage string
@@ -94,6 +102,14 @@ func (p *PromptVersionWrite) apply(tx *sql.Tx) error {
 	err := tx.QueryRow(
 		`SELECT type, version FROM prompts WHERE project_id = ? AND name = ?
 		 ORDER BY version DESC LIMIT 1`, p.ProjectID, p.Name).Scan(&existingType, &latest)
+	if err != nil && err != sql.ErrNoRows {
+		return fmt.Errorf("read prompt %s: %w", p.Name, err)
+	}
+	// The precondition first: everything below is about a name whose current
+	// state the author has already been shown to disagree with.
+	if refusal := p.precondition(latest); refusal != nil {
+		return refusal
+	}
 	switch {
 	case err == sql.ErrNoRows:
 		if !p.TypeStated {
@@ -102,8 +118,6 @@ func (p *PromptVersionWrite) apply(tx *sql.Tx) error {
 				Message: fmt.Sprintf(`prompt %q does not exist yet: its first version must state a "type"`, p.Name),
 			}
 		}
-	case err != nil:
-		return fmt.Errorf("read prompt %s: %w", p.Name, err)
 	case p.Type != existingType:
 		// A name that changes shape between versions breaks every
 		// client fetching it by label, so the type is part of the
@@ -130,6 +144,36 @@ func (p *PromptVersionWrite) apply(tx *sql.Tx) error {
 	}
 	p.Version = version
 	return nil
+}
+
+// precondition checks what the author believed the name was at against what it
+// is, inside the transaction that is about to assign the next number
+// (spec 021 #14). Three situations, because they are three different things to
+// have got wrong, and the refusal is what a person reads before deciding what
+// to do with the text they have just written.
+//
+// The `version` in Details is the *actual* current one, so a client can offer
+// to open it or to reload from it rather than sending the reader to look.
+func (p *PromptVersionWrite) precondition(latest int) *Rejection {
+	if p.ExpectVersion == nil || *p.ExpectVersion == latest {
+		return nil
+	}
+	var message string
+	switch {
+	case *p.ExpectVersion == 0:
+		message = fmt.Sprintf("prompt %q already exists, at version %d", p.Name, latest)
+	case latest == 0:
+		message = fmt.Sprintf("prompt %q does not exist yet, so it is not at version %d",
+			p.Name, *p.ExpectVersion)
+	default:
+		message = fmt.Sprintf("prompt %q is at version %d, not %d: it changed while this one was being written",
+			p.Name, latest, *p.ExpectVersion)
+	}
+	return &Rejection{
+		Kind:    RejectConflict,
+		Message: message,
+		Details: map[string]any{"version": latest},
+	}
 }
 
 // PromptLabelWrite creates, moves or removes one label (#12). Moving a label

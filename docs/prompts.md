@@ -58,6 +58,7 @@ curl -H "Authorization: Bearer tp-sk-…" \
 | `config` | no | A JSON object — model, temperature, whatever your runtime reads. |
 | `commit_message` | no | Why this version exists. |
 | `labels` | no | Labels to point at this version as it is created. |
+| `expect_version` | no | The version you believe this name is at — `0` for a name you believe is new. See below. |
 
 The version number is `current max + 1`, assigned inside the write transaction.
 Concurrent creates for one name therefore produce `1..N` with no gaps and no
@@ -70,6 +71,35 @@ between versions would break every client that fetches it by label.
 Nothing is interpreted inside `prompt` — `{{variables}}` and any other template
 syntax are stored and returned verbatim. Interpolation belongs to your
 framework, not to the store.
+
+### Appending to the version you meant
+
+There is no create-only endpoint: a first version and a seventh are the same
+`POST`, so a client that means to *create* `summarize` and finds it taken
+would quietly extend somebody else's prompt — and, with `labels`, move their
+`production` while doing it. `expect_version` is how a client says what it
+believed:
+
+```sh
+# "this name is new"
+curl … /api/v1/prompts/summarize/versions -d '{"type":"text","prompt":"…","expect_version":0}'
+
+# "add to the version I was looking at"
+curl … /api/v1/prompts/summarize/versions -d '{"prompt":"…","expect_version":7}'
+```
+
+If the name is not where you said, nothing is written and the answer is a
+`409` naming where it actually is:
+
+```json
+{"error": "prompt \"summarize\" is at version 9, not 7: it changed while this one was being written", "version": 9}
+```
+
+The check runs inside the same transaction that assigns the next number, so
+asking first and posting second — which is a race — is never necessary. The
+field is optional: leave it out and the append is unconditional, which is what
+every client did before it existed. `tracepad prompts push --expect N` sends
+it; the web interface always does.
 
 ## Fetching a prompt
 
@@ -242,5 +272,6 @@ button here is one of the requests on this page. See [ui.md](ui.md#prompts).
 | `400` | Validation: a type mismatch, a malformed name, an unknown field or parameter, `latest` used as a label, a `confirm` that does not echo the name. |
 | `401` | Unknown credentials. |
 | `404` | No such prompt, version or label in this project. |
+| `409` | `expect_version` disagrees with where the name actually is; nothing was written, and the body says where that is. |
 | `413` | The body is over `TRACEPAD_MAX_BODY_BYTES`. |
 | `429` | The write queue is saturated; retry after the `Retry-After` delay. |

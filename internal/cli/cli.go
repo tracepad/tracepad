@@ -166,6 +166,7 @@ const Usage = `Client commands (they talk to a running server over HTTP):
   tracepad prompts ls   [--limit N] [--cursor C]
   tracepad prompts get  <name> [--label L | --version N]
   tracepad prompts push <name> --file prompt.json [--label L] [--message M]
+                        [--expect N]
   tracepad prompts diff <name> --from N --to M
   tracepad prompts label <name> <label> (--version N | --rm)
   tracepad prompts rm   <name> [--yes]

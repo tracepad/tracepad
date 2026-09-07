@@ -411,11 +411,15 @@ func (r *run) promptsPush(ctx context.Context, args []string) error {
 		file    string
 		label   string
 		message string
+		// -1 is "not given": 0 is a real expectation, and it means "I
+		// believe this name is new" (spec 021 #14).
+		expect int
 	)
 	fs := r.flags("prompts push")
 	fs.StringVar(&file, "file", "", "")
 	fs.StringVar(&label, "label", "", "")
 	fs.StringVar(&message, "message", "", "")
+	fs.IntVar(&expect, "expect", -1, "")
 	rest, err := r.parse(fs, args, 1)
 	if err != nil {
 		return err
@@ -441,6 +445,14 @@ func (r *run) promptsPush(ctx context.Context, args []string) error {
 	if message != "" {
 		if _, given := request["commit_message"]; !given {
 			request["commit_message"] = message
+		}
+	}
+	// The push a script means: "add a version to the name as I last saw it".
+	// A mismatch is a `409` naming the version it is actually at, rather than
+	// a silent append onto somebody else's work (spec 021 #14).
+	if expect >= 0 {
+		if _, given := request["expect_version"]; !given {
+			request["expect_version"] = expect
 		}
 	}
 

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"math"
 	"net/http"
 	"net/url"
@@ -88,7 +89,17 @@ func (s *Server) submit(w http.ResponseWriter, r *http.Request, job store.WriteJ
 		case store.RejectConflict:
 			status = http.StatusConflict
 		}
-		writeError(w, status, rejection.Message)
+		if len(rejection.Details) == 0 {
+			writeError(w, status, rejection.Message)
+			return false
+		}
+		// A refusal the caller has to act on carries what it needs to
+		// (spec 021 #14). Keys in order, so one refusal is one body.
+		body := object{}.put("error", rejection.Message)
+		for _, key := range slices.Sorted(maps.Keys(rejection.Details)) {
+			body = body.put(key, rejection.Details[key])
+		}
+		writeJSON(w, status, body)
 	case errors.Is(err, store.ErrWriterBusy):
 		// The same backpressure ingest gives an exporter (spec 002 #15).
 		w.Header().Set("Retry-After", "1")

@@ -26,11 +26,16 @@ const promptCacheControl = "max-age=60"
 // checks (#10). For the rest, an absent field and an empty one mean the same
 // thing and are stored the same way.
 type promptVersionRequest struct {
-	Type          *string         `json:"type"`
-	Prompt        json.RawMessage `json:"prompt"`
-	Config        json.RawMessage `json:"config"`
-	CommitMessage string          `json:"commit_message"`
-	Labels        []string        `json:"labels"`
+	Type   *string         `json:"type"`
+	Prompt json.RawMessage `json:"prompt"`
+	Config json.RawMessage `json:"config"`
+	// ExpectVersion is the optimistic append of spec 021 #14: the version
+	// the author believed the name was at, 0 for a name they believe is
+	// new. Absent means "append to whatever is there", which is what every
+	// client did before the field existed.
+	ExpectVersion *int     `json:"expect_version"`
+	CommitMessage string   `json:"commit_message"`
+	Labels        []string `json:"labels"`
 }
 
 type promptResponse struct {
@@ -163,11 +168,16 @@ func (in *promptVersionRequest) validate(projectID, name string) (*store.PromptV
 		}
 	}
 
+	if in.ExpectVersion != nil && *in.ExpectVersion < 0 {
+		return nil, fmt.Errorf(`"expect_version" must be 0 or a positive whole number`)
+	}
+
 	write := &store.PromptVersionWrite{
 		ProjectID:     projectID,
 		Name:          name,
 		Type:          shape,
 		TypeStated:    in.Type != nil,
+		ExpectVersion: in.ExpectVersion,
 		Prompt:        compactJSON(in.Prompt),
 		CommitMessage: in.CommitMessage,
 		CreatedAt:     time.Now().UnixNano(),

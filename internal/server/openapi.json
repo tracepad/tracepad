@@ -642,7 +642,7 @@
       "post": {
         "tags": ["prompts"],
         "summary": "Append a version to a prompt",
-        "description": "Versions are append-only and numbered inside the write transaction, so parallel creates produce 1..N with no gaps. A name's type is fixed by its first version.",
+        "description": "Versions are append-only and numbered inside the write transaction, so parallel creates produce 1..N with no gaps. A name's type is fixed by its first version. `expect_version` makes the append conditional on the name still being where the author left it.",
         "operationId": "createPromptVersion",
         "parameters": [{"$ref": "#/components/parameters/PromptName"}],
         "requestBody": {"required": true, "content": {"application/json": {"schema": {
@@ -651,6 +651,11 @@
             "type": {"type": "string", "enum": ["text", "chat"], "description": "Required on the first version of a name"},
             "prompt": {"description": "A string for a text prompt, an array of {role, content} messages for a chat one"},
             "config": {"type": "object"},
+            "expect_version": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "The version the author believed this name was at — `0` for a name they believe is new. A mismatch is a `409` naming the version it is actually at, and writes nothing. Absent means append to whatever is there."
+            },
             "commit_message": {"type": "string"},
             "labels": {"type": "array", "items": {"type": "string"}}
           },
@@ -660,7 +665,18 @@
           "201": {"description": "The version created", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Prompt"}}}},
           "400": {"$ref": "#/components/responses/BadRequest"},
           "401": {"$ref": "#/components/responses/Unauthorized"},
-          "404": {"$ref": "#/components/responses/NotFound"}
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "409": {
+            "description": "`expect_version` disagrees with the name's current state; nothing was written",
+            "content": {"application/json": {"schema": {
+              "type": "object",
+              "properties": {
+                "error": {"type": "string"},
+                "version": {"type": "integer", "description": "The version the name is actually at; 0 when it does not exist"}
+              },
+              "required": ["error", "version"]
+            }}}
+          }
         }
       },
       "get": {

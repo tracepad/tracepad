@@ -395,7 +395,7 @@ export interface paths {
         put?: never;
         /**
          * Append a version to a prompt
-         * @description Versions are append-only and numbered inside the write transaction, so parallel creates produce 1..N with no gaps. A name's type is fixed by its first version.
+         * @description Versions are append-only and numbered inside the write transaction, so parallel creates produce 1..N with no gaps. A name's type is fixed by its first version. `expect_version` makes the append conditional on the name still being where the author left it.
          */
         post: operations["createPromptVersion"];
         delete?: never;
@@ -2451,6 +2451,8 @@ export interface operations {
                     /** @description A string for a text prompt, an array of {role, content} messages for a chat one */
                     prompt: unknown;
                     config?: Record<string, never>;
+                    /** @description The version the author believed this name was at — `0` for a name they believe is new. A mismatch is a `409` naming the version it is actually at, and writes nothing. Absent means append to whatever is there. */
+                    expect_version?: number;
                     commit_message?: string;
                     labels?: string[];
                 };
@@ -2469,6 +2471,19 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+            /** @description `expect_version` disagrees with the name's current state; nothing was written */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        /** @description The version the name is actually at; 0 when it does not exist */
+                        version: number;
+                    };
+                };
+            };
         };
     };
     promptDiff: {

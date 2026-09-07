@@ -473,6 +473,76 @@ func TestPromptConcurrentLabelMovesHaveOneWinner(t *testing.T) {
 	}
 }
 
+// The optimistic append (spec 021 #14). `expect_version` is what turns
+// "append" into "append to *this*": without it a client that means to create a
+// name silently extends somebody else's, and a client editing v7 silently
+// buries the v8 that landed while it was typing.
+func TestPromptExpectVersion(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+
+	// 0 on a name that is not there is exactly right, and it creates.
+	created := h.send(t, "POST", "/api/v1/prompts/summarize/versions",
+		chatBody("You are terse.", map[string]any{"expect_version": 0}))
+	expectStatus(t, created, http.StatusCreated)
+
+	// 0 on a name that *is* there is the "New prompt" screen aimed at a
+	// name somebody already published: a conflict, not an append.
+	taken := h.send(t, "POST", "/api/v1/prompts/summarize/versions",
+		chatBody("Mine now.", map[string]any{"expect_version": 0}))
+	expectError(t, taken, http.StatusConflict, `already exists, at version 1`)
+	// The body says where it actually is, so a client can offer to open it
+	// rather than sending the reader to look.
+	if at := decodeJSON[struct {
+		Version int `json:"version"`
+	}](t, taken); at.Version != 1 {
+		t.Errorf("the conflict reports version %d, want the version the name is at", at.Version)
+	}
+
+	// The stale-editor case: two versions land while one is being written.
+	for range 2 {
+		expectStatus(t, h.send(t, "POST", "/api/v1/prompts/summarize/versions",
+			chatBody("Somebody else's.", nil)), http.StatusCreated)
+	}
+	stale := h.send(t, "POST", "/api/v1/prompts/summarize/versions",
+		chatBody("Composed against version 1.", map[string]any{"expect_version": 1}))
+	expectError(t, stale, http.StatusConflict, "is at version 3, not 1")
+	if at := decodeJSON[struct {
+		Version int `json:"version"`
+	}](t, stale); at.Version != 3 {
+		t.Errorf("the conflict reports version %d, want 3", at.Version)
+	}
+	// Neither conflict wrote anything.
+	if latest := decodeJSON[promptResponse](t, h.get(t, "/api/v1/prompts/summarize")); latest.Version != 3 {
+		t.Fatalf("after two refused appends the name is at version %d, want 3", latest.Version)
+	}
+
+	// The right number appends, and the field is optional: a client that
+	// does not send it appends to whatever is there, as every client did
+	// before the field existed.
+	expectStatus(t, h.send(t, "POST", "/api/v1/prompts/summarize/versions",
+		chatBody("Composed against version 3.", map[string]any{"expect_version": 3})), http.StatusCreated)
+	expectStatus(t, h.send(t, "POST", "/api/v1/prompts/summarize/versions",
+		chatBody("No opinion.", nil)), http.StatusCreated)
+	if latest := decodeJSON[promptResponse](t, h.get(t, "/api/v1/prompts/summarize")); latest.Version != 5 {
+		t.Errorf("the name is at version %d, want 5", latest.Version)
+	}
+
+	// A positive expectation of a name that is not there at all.
+	absent := h.send(t, "POST", "/api/v1/prompts/nowhere/versions",
+		chatBody("Composed against nothing.", map[string]any{"expect_version": 2}))
+	expectError(t, absent, http.StatusConflict, "does not exist yet")
+
+	// The precondition is checked before the shape, because a client that
+	// disagrees about the name's state is not owed an opinion about its type.
+	shape := h.send(t, "POST", "/api/v1/prompts/summarize/versions",
+		map[string]any{"type": "text", "prompt": "not a chat body", "expect_version": 1})
+	expectError(t, shape, http.StatusConflict, "is at version 5, not 1")
+
+	expectError(t, h.send(t, "POST", "/api/v1/prompts/summarize/versions",
+		chatBody("Negative.", map[string]any{"expect_version": -1})),
+		http.StatusBadRequest, `"expect_version" must be 0 or a positive whole number`)
+}
+
 // promptDeletion is the shape of the dry run and of what it becomes
 // (spec 021 #7).
 type promptDeletion struct {
