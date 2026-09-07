@@ -574,6 +574,18 @@ func TestPromptDelete(t *testing.T) {
 		t.Errorf("?prompt=summarize = %+v after the delete, want the trace that ran it", rows.Traces)
 	}
 
+	// The labels went with the versions rather than outliving them as rows:
+	// a name published again under the same spelling starts clean, and cannot
+	// inherit a `production` pointing at a version somebody else wrote.
+	expectStatus(t, h.send(t, "POST", "/api/v1/prompts/summarize/versions",
+		chatBody("A new prompt that happens to share the name.", nil)), http.StatusCreated)
+	reborn := decodeJSON[promptVersionListResponse](t, h.get(t, "/api/v1/prompts/summarize/versions"))
+	if len(reborn.Versions) != 1 || reborn.Versions[0].Version != 1 || len(reborn.Labels) != 0 {
+		t.Errorf("the name published again = %+v, labels %v; want one version and no labels",
+			reborn.Versions, reborn.Labels)
+	}
+	expectStatus(t, h.send(t, "DELETE", "/api/v1/prompts/summarize?confirm=summarize", nil), http.StatusOK)
+
 	expectError(t, h.send(t, "DELETE", "/api/v1/prompts/summarize", nil), http.StatusNotFound, "not found")
 	expectError(t, h.send(t, "DELETE", "/api/v1/prompts/unknown?confirm=unknown", nil),
 		http.StatusNotFound, "not found")
