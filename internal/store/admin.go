@@ -643,6 +643,16 @@ func (e *UserDataErase) apply(tx *sql.Tx) error {
 		return &Rejection{Kind: RejectNotFound, Message: "no such project"}
 	}
 
+	// The per-user rollup goes outright, in this same request (spec 023
+	// #10): those rows are *about* the user, and a re-roll would recompute
+	// them to nothing from raw rows that are gone — or, for a frozen hour
+	// (spec 013 #11), could not recompute them at all. Done on every chunk
+	// because deleting them is idempotent and the last chunk is not known
+	// in advance.
+	if err := deleteUserRollup(tx, e.ProjectID, e.UserID); err != nil {
+		return err
+	}
+
 	e.Hours = nil
 	rows, err := tx.Query(
 		`SELECT id, timestamp FROM traces WHERE project_id = ? AND user_id = ? LIMIT ?`,

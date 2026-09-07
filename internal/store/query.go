@@ -530,7 +530,13 @@ type StatsFilter struct {
 	From        *int64
 	To          *int64
 	Environment string
-	GroupBy     string
+	// UserID restricts every bucket to one end user (spec 023 #6). The
+	// rolled half of the seam reads `users_hourly` instead of
+	// `stats_hourly`; this is the live half's own condition, and it is a
+	// filter like `environment` — it changes which rows count, never what a
+	// bucket is.
+	UserID  string
+	GroupBy string
 }
 
 // StatsSample is one row of the scan: the bucket it falls in and the three
@@ -601,6 +607,9 @@ func statsQuery(projectID string, filter StatsFilter) (string, []any) {
 	if filter.Environment != "" {
 		add("t.environment = ?", filter.Environment)
 	}
+	if filter.UserID != "" {
+		add("t.user_id = ?", filter.UserID)
+	}
 
 	if filter.GroupBy == GroupByModel {
 		// The join exists for the filters, which are all trace-level;
@@ -654,6 +663,11 @@ var countedTables = []string{
 	// cannot infer from the rows they can already see — least of all this
 	// one, which outlives them (spec 013 #8).
 	"stats_hourly",
+	// The per-user rollup, counted for the same reason and separately from
+	// it: `users_hourly` is the table whose size an operator has to watch —
+	// it is the one that multiplies by the user count — and `users` is the
+	// answer to "how many users has this project ever seen" (spec 023).
+	"users_hourly", "users",
 	// The eval tables (spec 014): each carries a project id, and their
 	// sizes are the operator's first question when the pinned-trace count
 	// beside them explains why the file did not shrink.

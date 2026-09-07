@@ -175,6 +175,134 @@ func (r *run) sessionsShow(ctx context.Context, args []string) error {
 	return nil
 }
 
+// usersList is `GET /api/v1/users` and nothing more (#1): the flags are the
+// endpoint's own, and the walk is the one `traces ls` and `sessions ls` walk.
+func (r *run) usersList(ctx context.Context, args []string) error {
+	var (
+		sortBy string
+		prefix string
+		cursor string
+		limit  int
+		oldest bool
+		newer  bool
+		total  bool
+	)
+	fs := r.flags("users ls")
+	fs.StringVar(&sortBy, "sort", "", "")
+	fs.StringVar(&prefix, "prefix", "", "")
+	fs.StringVar(&cursor, "cursor", "", "")
+	fs.IntVar(&limit, "limit", 0, "")
+	fs.BoolVar(&oldest, "oldest", false, "")
+	fs.BoolVar(&newer, "newer", false, "")
+	fs.BoolVar(&total, "total", false, "")
+	if _, err := r.parse(fs, args, 0); err != nil {
+		return err
+	}
+
+	query := url.Values{}
+	addSome(query, "sort", sortBy)
+	addSome(query, "prefix", prefix)
+	if err := addCursor(query, fs, cursor); err != nil {
+		return err
+	}
+	if err := addWalk(query, cursor, oldest, newer); err != nil {
+		return err
+	}
+	if total {
+		query.Set("count", "1")
+	}
+	if err := addLimit(query, limit); err != nil {
+		return err
+	}
+
+	body, err := r.api.Get(ctx, "/api/v1/users", query)
+	if err != nil {
+		return err
+	}
+	if r.wantJSON() {
+		return r.emit(body)
+	}
+	listing, err := decode[struct {
+		Users       []userRow `json:"users"`
+		NextCursor  *string   `json:"next_cursor"`
+		PrevCursor  *string   `json:"prev_cursor"`
+		Total       *int      `json:"total"`
+		TotalCapped *bool     `json:"total_capped"`
+	}](body)
+	if err != nil {
+		return err
+	}
+	// An empty page still falls through to the total and the way back, for
+	// the reason `sessions ls` does: it is where `--newer` from the first
+	// page lands.
+	if len(listing.Users) == 0 {
+		fmt.Fprintln(r.opt.Stdout, "no users")
+	} else {
+		t := newTable(r.opt.Stdout,
+			"USER", "TRACES", "SESSIONS", "ERRORS", "COST", "FIRST SEEN", "LAST SEEN")
+		for _, user := range listing.Users {
+			t.row(user.UserID, strconv.Itoa(user.Traces), strconv.Itoa(user.Sessions),
+				strconv.Itoa(user.ErrorCount), cost(user.TotalCost),
+				shortTime(user.FirstSeen), shortTime(user.LastSeen))
+		}
+		t.flush()
+	}
+	if listing.Total != nil {
+		fmt.Fprintf(r.opt.Stdout, "\n%s matching\n", matchCount(*listing.Total, listing.TotalCapped))
+	}
+	// "older" would be a lie under three of the four sorts: the listing runs
+	// down whatever key was asked for, and only `last_seen` makes that a
+	// timeline.
+	walkOn(r, "next", listing.NextCursor, listing.PrevCursor)
+	return nil
+}
+
+// userRow is what both user endpoints render, which is the point of the shape
+// being one shape (spec 023 #5).
+type userRow struct {
+	UserID     string   `json:"user_id"`
+	Traces     int      `json:"traces"`
+	ErrorCount int      `json:"error_count"`
+	TotalCost  *float64 `json:"total_cost"`
+	Sessions   int      `json:"sessions"`
+	FirstSeen  string   `json:"first_seen"`
+	LastSeen   string   `json:"last_seen"`
+}
+
+func (r *run) usersShow(ctx context.Context, args []string) error {
+	fs := r.flags("users show")
+	positional, err := r.parse(fs, args, 1)
+	if err != nil {
+		return err
+	}
+	body, err := r.api.Get(ctx, "/api/v1/users/"+url.PathEscape(positional[0]), url.Values{})
+	if err != nil {
+		return err
+	}
+	if r.wantJSON() {
+		return r.emit(body)
+	}
+	user, err := decode[struct {
+		userRow
+		LatencyMs struct {
+			P50 *int64 `json:"p50"`
+			P95 *int64 `json:"p95"`
+		} `json:"latency_ms"`
+	}](body)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(r.opt.Stdout, "user %s\n", user.UserID)
+	fmt.Fprintf(r.opt.Stdout, "  traces    %d (%d with errors)\n", user.Traces, user.ErrorCount)
+	fmt.Fprintf(r.opt.Stdout, "  sessions  %d\n", user.Sessions)
+	fmt.Fprintf(r.opt.Stdout, "  cost      %s\n", cost(user.TotalCost))
+	fmt.Fprintf(r.opt.Stdout, "  latency   p50 %s, p95 %s\n",
+		duration(user.LatencyMs.P50), duration(user.LatencyMs.P95))
+	fmt.Fprintf(r.opt.Stdout, "  window    %s .. %s\n",
+		shortTime(user.FirstSeen), shortTime(user.LastSeen))
+	return nil
+}
+
 func (r *run) scores(ctx context.Context, args []string) error {
 	sub, rest := split(args)
 	switch sub {
@@ -717,18 +845,23 @@ func (r *run) stats(ctx context.Context, args []string) error {
 		since       string
 		until       string
 		environment string
+		user        string
 	)
 	fs := r.flags("stats")
 	fs.StringVar(&groupBy, "group-by", "", "")
 	fs.StringVar(&since, "since", "", "")
 	fs.StringVar(&until, "until", "", "")
 	fs.StringVar(&environment, "env", "", "")
+	// `--user`, spelled as `traces ls` and `sessions ls` spell it (spec 007
+	// #11): the same question about one end user's traffic (spec 023 #7).
+	fs.StringVar(&user, "user", "", "")
 	if _, err := r.parse(fs, args, 0); err != nil {
 		return err
 	}
 	query := url.Values{}
 	addSome(query, "group_by", groupBy)
 	addSome(query, "environment", environment)
+	addSome(query, "user_id", user)
 	from, err := r.instant("--since", since)
 	if err != nil {
 		return err
@@ -755,7 +888,10 @@ func (r *run) stats(ctx context.Context, args []string) error {
 			Count      int      `json:"count"`
 			ErrorCount int      `json:"error_count"`
 			TotalCost  *float64 `json:"total_cost"`
-			LatencyMs  struct {
+			// Sessions rides only a `--user` timeline (spec 023 #6), so
+			// the column appears only when the answer carries it.
+			Sessions  *int `json:"sessions"`
+			LatencyMs struct {
 				P50 *int64 `json:"p50"`
 				P95 *int64 `json:"p95"`
 			} `json:"latency_ms"`
@@ -770,14 +906,29 @@ func (r *run) stats(ctx context.Context, args []string) error {
 	}
 	// The header names the unit, because a count of traces and a count of
 	// observations are not comparable (spec 004 Decision 23).
-	t := newTable(r.opt.Stdout,
-		strings.ToUpper(result.GroupBy), strings.ToUpper(result.Unit)+"S", "ERRORS", "COST", "P50", "P95")
+	headers := []string{strings.ToUpper(result.GroupBy), strings.ToUpper(result.Unit) + "S"}
+	sessions := result.Buckets[0].Sessions != nil
+	if sessions {
+		headers = append(headers, "SESSIONS")
+	}
+	t := newTable(r.opt.Stdout, append(headers, "ERRORS", "COST", "P50", "P95")...)
 	for _, bucket := range result.Buckets {
-		t.row(bucket.Key, strconv.Itoa(bucket.Count), strconv.Itoa(bucket.ErrorCount),
-			cost(bucket.TotalCost), duration(bucket.LatencyMs.P50), duration(bucket.LatencyMs.P95))
+		cells := []string{bucket.Key, strconv.Itoa(bucket.Count)}
+		if sessions {
+			cells = append(cells, strconv.Itoa(deref(bucket.Sessions)))
+		}
+		t.row(append(cells, strconv.Itoa(bucket.ErrorCount), cost(bucket.TotalCost),
+			duration(bucket.LatencyMs.P50), duration(bucket.LatencyMs.P95))...)
 	}
 	t.flush()
 	return nil
+}
+
+func deref(value *int) int {
+	if value == nil {
+		return 0
+	}
+	return *value
 }
 
 // health is the liveness probe (spec 020 #4): `GET /health`, which is the one

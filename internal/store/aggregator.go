@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 )
@@ -156,6 +157,12 @@ func (a *Aggregator) rollProject(ctx context.Context, project *Project, at time.
 	closed := HourOf(at.Add(-a.interval).UnixNano())
 
 	var rolled int
+	// Every user any hour of this pass touched, summarized once at the end
+	// (spec 023 #3). Held here rather than recomputed by each hour's job
+	// because a user active in n rolled hours would otherwise have their
+	// whole history summed n times in one pass, which made a backfill
+	// quadratic in the history it was walking.
+	touched := map[string]bool{}
 	// (1) and (2): the hours that changed under an already-rolled part of
 	// the timeline. A pass that has never run has nothing behind it.
 	if state.RolledUntil > 0 {
@@ -184,6 +191,9 @@ func (a *Aggregator) rollProject(ctx context.Context, project *Project, at time.
 			}
 			if !job.Frozen {
 				rolled++
+			}
+			for _, id := range job.Touched {
+				touched[id] = true
 			}
 		}
 	}
@@ -238,7 +248,18 @@ func (a *Aggregator) rollProject(ctx context.Context, project *Project, at time.
 		if !job.Frozen {
 			rolled++
 		}
+		for _, id := range job.Touched {
+			touched[id] = true
+		}
 		newest, examined = hour, true
+	}
+
+	// The per-user summaries of everyone this pass touched, before the
+	// watermark moves: a crash between the two leaves `last_pass` where it
+	// was, so the next pass finds the same dirty hours and summarizes them
+	// again (spec 023 #3).
+	if err := a.summarize(ctx, project.ID, touched); err != nil {
+		return rolled, err
 	}
 
 	// (4): the watermark, which moves to just past the newest hour this
@@ -271,10 +292,36 @@ func (a *Aggregator) rollProject(ctx context.Context, project *Project, at time.
 }
 
 // rollOne submits one hour and hands back the job, which is the only place
-// that knows whether the hour was frozen rather than rolled.
+// that knows whether the hour was frozen rather than rolled — and which users
+// it touched, for the summary the pass writes once at the end.
 func (a *Aggregator) rollOne(ctx context.Context, projectID string, hour int64, at time.Time) (*statsRoll, error) {
-	job := &statsRoll{ProjectID: projectID, Hour: hour, Now: at.UnixNano()}
+	job := &statsRoll{ProjectID: projectID, Hour: hour, Now: at.UnixNano(), DeferSummary: true}
 	return job, a.writer.Submit(ctx, job)
+}
+
+// summarizeChunk bounds one summary job, so that a backfill touching every
+// user of a large project is many bounded transactions rather than one long
+// one — the same rule every deletion in this store follows.
+const summarizeChunk = 2000
+
+// summarize recomputes the summaries of everyone the pass touched.
+func (a *Aggregator) summarize(ctx context.Context, projectID string, touched map[string]bool) error {
+	if len(touched) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(touched))
+	for id := range touched {
+		ids = append(ids, id)
+	}
+	// A stable order makes a failure reproducible and the chunks the same
+	// chunks on a retry.
+	slices.Sort(ids)
+	for chunk := range slices.Chunk(ids, summarizeChunk) {
+		if err := a.writer.Submit(ctx, &usersSummary{ProjectID: projectID, UserIDs: chunk}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // frozenBefore is the hour at which an already-rolled hour stops being
@@ -337,6 +384,19 @@ func (a *Aggregator) sweepRollup(ctx context.Context, project *Project, at time.
 			return err
 		}
 		if chunk.Deleted < int64(DefaultSweepChunk) {
+			break
+		}
+	}
+	// The per-user rows live under the same window (spec 023: no config of
+	// their own), swept the same way. Their own loop rather than the same
+	// chunk, because the two tables are of different sizes and one running
+	// short says nothing about the other.
+	for range maxChunksPerProject {
+		chunk := &usersRollupSweep{ProjectID: project.ID, Before: cutoff}
+		if err := a.writer.Submit(ctx, chunk); err != nil {
+			return err
+		}
+		if chunk.Deleted < int64(DefaultSweepChunk) {
 			return nil
 		}
 	}
@@ -392,6 +452,14 @@ func (s *Store) dirtyHours(projectID string, since, before int64) ([]int64, erro
 	if err != nil {
 		return nil, err
 	}
+	sessions, err := s.dirtySessionHours(projectID, since)
+	if err != nil {
+		return nil, err
+	}
+	all = append(all, sessions...)
+	slices.Sort(all)
+	all = slices.Compact(all)
+
 	// Only the rolled part of the timeline: an hour at or past the
 	// watermark is the live tail's, and the forward roll will take it when
 	// it closes. The filter is on the hour rather than on the trace,
@@ -403,6 +471,39 @@ func (s *Store) dirtyHours(projectID string, since, before int64) ([]int64, erro
 		}
 	}
 	return hours, nil
+}
+
+// dirtySessionHours is the addition spec 023 #2 makes to the set above: a
+// changed trace that carries a session id also dirties the hours the *other*
+// traces of that session sit in.
+//
+// It exists because `sessions_started` in hour H depends on rows outside H. A
+// session is counted in the hour its earliest trace of that user starts in, so
+// a late trace starting before the earliest one seen so far moves the count out
+// of H — and H, which nothing else touched, would go on reporting it. The set
+// is bounded by the session's trace count, the way spec 013 #16's is by the
+// observation count.
+//
+// *Known limit*, the same shape as #16's: a session whose start moved because
+// one of its traces was re-delivered with an earlier start keeps its
+// `sessions_started` in the old hour until that hour is dirtied by something
+// else. The hour it used to be counted in is no longer derivable from anything
+// stored.
+func (s *Store) dirtySessionHours(projectID string, since int64) ([]int64, error) {
+	rows, err := s.db.Query(
+		`SELECT DISTINCT (other.timestamp / 1000000000 / ?) * ? AS hour
+		 FROM traces other
+		 WHERE other.project_id = ? AND other.timestamp >= 0
+		   AND other.session_id IN (
+		         SELECT t.session_id FROM traces t
+		          WHERE t.project_id = ? AND t.updated_at > ?
+		            AND t.session_id IS NOT NULL)
+		 ORDER BY hour`,
+		SecondsPerHour, SecondsPerHour, projectID, projectID, since)
+	if err != nil {
+		return nil, fmt.Errorf("find the hours a changed session touched: %w", err)
+	}
+	return scanHours(rows)
 }
 
 // hoursWithTraces lists the hours of a half-open range that hold anything to

@@ -12,7 +12,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// The ten tools (#17). Each maps 1:1 onto one endpoint.
+// The tools (#17). Each maps 1:1 onto one endpoint.
 //
 // `search` is the tenth, and it is the one spec 004 #17 declined to ship until
 // there was a search endpoint behind it — so that the tool would never claim a
@@ -360,6 +360,45 @@ func register(server *mcp.Server, api API) {
 	}, t.getSession)
 
 	mcp.AddTool(server, &mcp.Tool{
+		Name:        "list_users",
+		Annotations: readOnly("List users"),
+		Description: "Find end users — the user asks who the heaviest, most expensive or most error-prone users are, " +
+			"or who has been active lately. " +
+			"Returns a page of user roll-ups (id, traces, sessions, how many of those traces failed, cost, first and last activity), " +
+			"sorted by the chosen key, always descending. Every number counts traces, not observations. " +
+			"Answered from an hourly rollup, so it trails live traffic by a few minutes: a user first seen just now may not be listed, " +
+			"and get_user is exact for any id. " +
+			"Does NOT return the traces themselves: follow with list_traces filtered by user_id, or get_user for one user's totals. " +
+			"Page by passing the returned next_cursor back as cursor.",
+		InputSchema: object(walkProperties(pagingProperties(map[string]*jsonschema.Schema{
+			"sort": oneOf("Which question this is. Default \"last_seen\".",
+				"last_seen", "traces", "cost", "errors"),
+			"prefix": text("Keeps ids starting with this, case-sensitively. A prefix, not a substring, and not a search."),
+		}), true)),
+		OutputSchema: object(map[string]*jsonschema.Schema{
+			"users":        list(userRowSchema(), "The page, in the chosen order."),
+			"next_cursor":  text("Pass back as `cursor` for the next page; null on the last page."),
+			"prev_cursor":  text("Pass back as `cursor` with `direction=prev` for the page before; null on the first page."),
+			"total":        integer("Only with `count=1`: how many users match, capped at 1000."),
+			"total_capped": boolean("Only with `count=1`: true when the count stopped at the cap."),
+		}, "users"),
+	}, t.listUsers)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "get_user",
+		Annotations: readOnly("Get one user"),
+		Description: "Summarize one end user — the user asks what an account has been doing, what it costs, or when it was last seen. " +
+			"Returns that user's totals (traces, sessions, failures, cost, first and last activity, p50/p95 latency), " +
+			"exact including traffic too recent for the rollup, and 404 when nothing was ever filed under the id. " +
+			"Does NOT return their traces or a timeline: use list_traces with user_id for the traces, " +
+			"and get_stats with user_id for activity over time or a breakdown by model or environment.",
+		InputSchema: object(map[string]*jsonschema.Schema{
+			"user_id": text("The user id, as the application set it."),
+		}, "user_id"),
+		OutputSchema: userSummarySchema(),
+	}, t.getUser)
+
+	mcp.AddTool(server, &mcp.Tool{
 		Name:        "get_prompt",
 		Annotations: readOnly("Get a prompt version"),
 		Description: "Read a stored prompt version — the user asks what prompt is in production, what a named prompt says, or which version a label points at. " +
@@ -426,6 +465,8 @@ func register(server *mcp.Server, api API) {
 			"Read the `unit` field before comparing counts: grouping by hour, day, environment or release " +
 			"counts traces, grouping by model counts observations, because a trace has no model. " +
 			"Group by release when the user asks whether a deployment moved cost or latency. " +
+			"Pass user_id when the question is about one end user — the same buckets, restricted to them, " +
+			"which is how to answer \"what does this account cost me\" or \"when is this user active\". " +
 			"Does NOT return individual traces — use list_traces for those.",
 		InputSchema: object(map[string]*jsonschema.Schema{
 			"group_by": oneOf("What each bucket collects. Default \"day\".",
@@ -433,6 +474,8 @@ func register(server *mcp.Server, api API) {
 			"from":        timestamp("Only traces at or after this RFC 3339 instant."),
 			"to":          timestamp("Only traces strictly before this RFC 3339 instant."),
 			"environment": text("Only traces from this environment."),
+			"user_id": text("Only traces attributed to this end user. With an \"hour\" or \"day\" grouping, " +
+				"each bucket also carries `sessions`: how many of that user's sessions began in it."),
 		}),
 		OutputSchema: object(map[string]*jsonschema.Schema{
 			"group_by": oneOf("What each bucket collects.", "hour", "day", "model", "environment", "release"),
@@ -444,6 +487,8 @@ func register(server *mcp.Server, api API) {
 				"count":       integer("How many of `unit` fell in this bucket."),
 				"error_count": integer("How many of those failed."),
 				"total_cost":  number("Summed over what reported a cost; absent when nothing did."),
+				"sessions": integer("Only with `user_id` and an \"hour\" or \"day\" grouping: how many of that " +
+					"user's sessions began in this bucket. A session is counted where it starts, so a sum is exact."),
 				"latency_ms": object(map[string]*jsonschema.Schema{
 					"p50": integer("Median latency in milliseconds; null when nothing timed."),
 					"p95": integer("95th percentile latency in milliseconds; null when nothing timed."),
@@ -532,6 +577,30 @@ func sessionRowSchema() *jsonschema.Schema {
 		"first_seen":  timestamp("When the session's earliest trace started."),
 		"last_seen":   timestamp("When its latest trace started."),
 	}, "id", "trace_count", "error_count")
+}
+
+// userRowSchema is one end user's roll-up, the shape both user tools report
+// (spec 023 #5).
+func userRowSchema() *jsonschema.Schema {
+	return object(map[string]*jsonschema.Schema{
+		"user_id":     text("The user id, for get_user and as list_traces' user_id filter."),
+		"traces":      integer("How many traces are attributed to this user."),
+		"error_count": integer("How many of those traces have a failed observation."),
+		"total_cost":  number("Summed over the traces that reported a cost; absent when none did."),
+		"sessions":    integer("How many sessions of this user have begun."),
+		"first_seen":  timestamp("When the earliest hour the rollup still holds for them starts."),
+		"last_seen":   timestamp("When they were last active."),
+	}, "user_id", "traces", "error_count", "sessions")
+}
+
+// userSummarySchema is that row with the latency the single-user read adds.
+func userSummarySchema() *jsonschema.Schema {
+	schema := userRowSchema()
+	schema.Properties["latency_ms"] = object(map[string]*jsonschema.Schema{
+		"p50": integer("Median trace latency in milliseconds; null when nothing timed."),
+		"p95": integer("95th percentile trace latency in milliseconds; null when nothing timed."),
+	})
+	return schema
 }
 
 // traceDetailSchema is one trace with its tree. `observations` is recursive,
@@ -698,6 +767,29 @@ func (t *toolset) getSession(ctx context.Context, req *mcp.CallToolRequest, in g
 	return t.call(ctx, req, "/api/v1/sessions/"+url.PathEscape(in.SessionID), query, summarizeSession)
 }
 
+type listUsersInput struct {
+	pagingInput
+	walkInput
+	Sort   string `json:"sort"`
+	Prefix string `json:"prefix"`
+}
+
+func (t *toolset) listUsers(ctx context.Context, req *mcp.CallToolRequest, in listUsersInput) (*mcp.CallToolResult, any, error) {
+	query := url.Values{}
+	set(query, "sort", in.Sort)
+	set(query, "prefix", in.Prefix)
+	return t.call(ctx, req, "/api/v1/users",
+		in.walkInput.apply(in.pagingInput.apply(query)), summarizeUserList)
+}
+
+type getUserInput struct {
+	UserID string `json:"user_id"`
+}
+
+func (t *toolset) getUser(ctx context.Context, req *mcp.CallToolRequest, in getUserInput) (*mcp.CallToolResult, any, error) {
+	return t.call(ctx, req, "/api/v1/users/"+url.PathEscape(in.UserID), url.Values{}, summarizeUser)
+}
+
 type getPromptInput struct {
 	Name    string `json:"name"`
 	Version *int   `json:"version"`
@@ -741,6 +833,7 @@ type getStatsInput struct {
 	From        string `json:"from"`
 	To          string `json:"to"`
 	Environment string `json:"environment"`
+	UserID      string `json:"user_id"`
 }
 
 func (t *toolset) getStats(ctx context.Context, req *mcp.CallToolRequest, in getStatsInput) (*mcp.CallToolResult, any, error) {
@@ -749,6 +842,7 @@ func (t *toolset) getStats(ctx context.Context, req *mcp.CallToolRequest, in get
 	set(query, "from", in.From)
 	set(query, "to", in.To)
 	set(query, "environment", in.Environment)
+	set(query, "user_id", in.UserID)
 	return t.call(ctx, req, "/api/v1/stats", query, summarizeStats)
 }
 
@@ -889,6 +983,47 @@ func summarizeSession(body json.RawMessage) string {
 	}
 	return fmt.Sprintf("Session %s: %d traces, %d with errors.",
 		parsed.ID, parsed.TraceCount, parsed.ErrorCount)
+}
+
+func summarizeUserList(body json.RawMessage) string {
+	var parsed struct {
+		Users []struct {
+			UserID string `json:"user_id"`
+			Traces int    `json:"traces"`
+		} `json:"users"`
+		NextCursor *string `json:"next_cursor"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return "a page of users"
+	}
+	if len(parsed.Users) == 0 {
+		return "No users match that."
+	}
+	traces := 0
+	for _, user := range parsed.Users {
+		traces += user.Traces
+	}
+	summary := fmt.Sprintf("%d users over %d traces, first %s (%d traces)",
+		len(parsed.Users), traces, parsed.Users[0].UserID, parsed.Users[0].Traces)
+	if parsed.NextCursor != nil {
+		summary += "; more pages available"
+	}
+	return summary + "."
+}
+
+func summarizeUser(body json.RawMessage) string {
+	var parsed struct {
+		UserID     string `json:"user_id"`
+		Traces     int    `json:"traces"`
+		Sessions   int    `json:"sessions"`
+		ErrorCount int    `json:"error_count"`
+		LastSeen   string `json:"last_seen"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return "one user"
+	}
+	return fmt.Sprintf("User %s: %d traces over %d sessions, %d with errors, last seen %s.",
+		parsed.UserID, parsed.Traces, parsed.Sessions, parsed.ErrorCount, orUnnamed(parsed.LastSeen))
 }
 
 func summarizePrompt(body json.RawMessage) string {

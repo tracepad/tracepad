@@ -337,7 +337,7 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
-// TestToolListIsTheDeclaredContract: sixteen read-only tools, a deterministic
+// TestToolListIsTheDeclaredContract: eighteen read-only tools, a deterministic
 // order, and the caching hints of #18.
 func TestToolListIsTheDeclaredContract(t *testing.T) {
 	h := newHarness(t)
@@ -355,10 +355,13 @@ func TestToolListIsTheDeclaredContract(t *testing.T) {
 	// PR as the CLI command and the screen (spec 007 #1), `search` with the
 	// endpoint #17 said it would wait for (spec 011 #9), and the six eval
 	// tools with the reads spec 014 #22 asks for — read-only there too: a
-	// run is created by a harness or a person, never by a model.
+	// run is created by a harness or a person, never by a model. The two
+	// user tools came with the endpoints spec 023 #7 added, in the same PR
+	// as the CLI commands and the screens.
 	want := []string{"compare_runs", "get_dataset_items", "get_last_trace", "get_observation_io",
 		"get_prompt", "get_run", "get_run_items", "get_session", "get_stats", "get_trace",
-		"list_datasets", "list_runs", "list_scores", "list_sessions", "list_traces", "search"}
+		"get_user", "list_datasets", "list_runs", "list_scores", "list_sessions", "list_traces",
+		"list_users", "search"}
 	var names []string
 	for _, tool := range result.Tools {
 		names = append(names, tool.Name)
@@ -662,8 +665,8 @@ func TestStdioTransportServesTheSameTools(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tools.Tools) != 16 {
-		t.Fatalf("tools = %d, want the same sixteen as over HTTP", len(tools.Tools))
+	if len(tools.Tools) != 18 {
+		t.Fatalf("tools = %d, want the same eighteen as over HTTP", len(tools.Tools))
 	}
 
 	result, err := session.CallTool(t.Context(), &mcp.CallToolParams{

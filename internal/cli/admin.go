@@ -546,11 +546,24 @@ func (r *run) retentionSet(ctx context.Context, args []string) error {
 	return nil
 }
 
+// users is the one command that spans both halves of the CLI: two reads over
+// the per-user rollup (spec 023 #7) and the erasure spec 005 #7 put here first.
+// They share a noun, so they share a command; `rm-data` is the only one that
+// carries the admin ceremony.
 func (r *run) users(ctx context.Context, args []string) error {
 	sub, rest := split(args)
-	if sub != "rm-data" {
-		return usageErrorf("users takes rm-data, got %q", sub)
+	switch sub {
+	case "ls":
+		return r.usersList(ctx, rest)
+	case "show":
+		return r.usersShow(ctx, rest)
+	case "rm-data":
+		return r.usersRemoveData(ctx, rest)
 	}
+	return usageErrorf("users takes ls, show or rm-data, got %q", sub)
+}
+
+func (r *run) usersRemoveData(ctx context.Context, rest []string) error {
 	var yes bool
 	fs := r.flags("users rm-data")
 	project := fs.String("project", "", "")

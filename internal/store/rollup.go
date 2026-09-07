@@ -189,6 +189,19 @@ type statsRoll struct {
 	// Rows is how many dimension tuples the hour produced, for the log
 	// line the aggregator writes.
 	Rows int
+	// UserRows is the same count for `users_hourly`, which the same job
+	// writes in the same transaction (spec 023 #2).
+	UserRows int
+	// Touched are the user ids this hour holds or held — the set whose
+	// summary has to be recomputed (spec 023 #3).
+	Touched []string
+	// DeferSummary hands that recompute back to the caller instead of doing
+	// it here. The aggregator sets it and recomputes once per *pass*: a user
+	// active in five hundred rolled hours would otherwise have their whole
+	// history summed five hundred times in one backfill. A caller that
+	// corrects a single hour and then answers — the user-data erasure — does
+	// not set it, because there is no pass to defer to.
+	DeferSummary bool
 	// Frozen reports that the hour was left alone because retention has
 	// taken the raw rows it would have been recomputed from.
 	Frozen bool
@@ -248,7 +261,24 @@ func (r *statsRoll) apply(tx *sql.Tx) error {
 		}
 	}
 	r.Rows = len(rows)
-	return nil
+
+	// The per-user tables ride the same job (spec 023 #2): the same hour, the
+	// same transaction, the same freeze above. Two aggregators would be two
+	// watermarks and two seams, where this is one more `DELETE`/`INSERT` and a
+	// bounded recompute of the summaries the hour touched.
+	perUser, err := rollUserHour(tx, r.ProjectID, r.Hour)
+	if err != nil {
+		return err
+	}
+	r.Touched, err = writeUserHour(tx, r.ProjectID, r.Hour, perUser)
+	if err != nil {
+		return err
+	}
+	r.UserRows = len(perUser)
+	if r.DeferSummary {
+		return nil
+	}
+	return recomputeUsers(tx, r.ProjectID, r.Touched)
 }
 
 // frozen reports whether this hour must be left as it stands: it is past the

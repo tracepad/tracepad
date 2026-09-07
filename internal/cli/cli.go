@@ -160,6 +160,9 @@ const Usage = `Client commands (they talk to a running server over HTTP):
   tracepad sessions ls   [--since 1h] [--until T] [--env E] [--user U] [--limit N]
                          [--cursor C] [--oldest] [--newer] [--total]
   tracepad sessions show <session-id> [--limit N]
+  tracepad users ls      [--sort last_seen|traces|cost|errors] [--prefix P]
+                         [--limit N] [--cursor C] [--oldest] [--newer] [--total]
+  tracepad users show    <user-id>
   tracepad scores ls    [--trace ID] [--observation ID] [--session S] [--name N]
                         [--type numeric|boolean|categorical|text] [--since 1h]
                         [--limit N] [--cursor C]
@@ -176,7 +179,7 @@ const Usage = `Client commands (they talk to a running server over HTTP):
   tracepad prompts label <name> <label> (--version N | --rm)
   tracepad prompts rm   <name> [--yes]
   tracepad stats        [--group-by hour|day|model|environment|release] [--since 1h]
-                        [--until T] [--env E]
+                        [--until T] [--env E] [--user U]
   tracepad system
 
 Taking the data out (spec 019). The archive is every export body as it arrived,
