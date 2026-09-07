@@ -106,8 +106,13 @@
 
 	/** The highest version there is, for the diff inputs' ceiling. */
 	const latest = $derived(versions.rows.length > 0 ? Math.max(...versions.rows.map((r) => r.version)) : undefined);
-	/** A name with one version has nothing to compare it with (#9). */
-	const comparable = $derived(versions.rows.length > 1 || !versions.newest);
+	/**
+	 * A name with one version has nothing to compare it with (#9). Unknown
+	 * while the first page is in flight, and treated as comparable then: the
+	 * *no diff yet* line is a statement about the name, and flashing it under
+	 * every prompt on the way in would make it one about the network.
+	 */
+	const comparable = $derived(versions.loading || versions.rows.length > 1 || !versions.newest);
 
 	const numberField =
 		'border-border bg-canvas text-fg w-16 rounded-md border px-1.5 py-1 text-sm tabular-nums';
