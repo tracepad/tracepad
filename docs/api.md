@@ -33,6 +33,7 @@ document served without authentication.
 | `GET` | `/api/v1/runs` | List the project's eval runs, newest first, across datasets |
 | `GET` | `/api/v1/stats` | Counts, errors, cost, latency percentiles |
 | `GET` | `/api/v1/prompts/{name}/diff` | Unified diff between two prompt versions |
+| `DELETE` | `/api/v1/prompts/{name}` | Delete a prompt name whole; a dry run until confirmed |
 | `GET` | `/api/v1/system` | Version, uptime, database size, ingest counters |
 | `GET` | `/api/v1` | This endpoint map |
 | `GET` | `/api/v1/openapi.json` | The OpenAPI document |

@@ -343,7 +343,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List prompt names with where their labels point */
+        /**
+         * List prompt names with where their labels point
+         * @description Alphabetically by name. `direction` reads towards the start of the alphabet, so both ends of the listing cost what one page costs.
+         */
         get: operations["listPrompts"];
         put?: never;
         post?: never;
@@ -367,7 +370,11 @@ export interface paths {
         get: operations["getPrompt"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Delete a prompt with every version and label; a dry run until `?confirm=` echoes the name
+         * @description The name's whole history goes at once — versions are never deleted alone. Traces that ran the prompt keep the name and version they recorded: that is a string pair the client sent, not a reference into this table. Without `confirm` it answers with the counts and changes nothing.
+         */
+        delete: operations["deletePrompt"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1375,6 +1382,20 @@ export interface components {
             confirm?: string;
             note?: string;
         };
+        /** @description What deleting a prompt name takes: every version of it and every label pointing into it. `confirm` and `note` are present on the dry run only; `deleted` on the confirmed answer only. */
+        PromptDeletion: {
+            dry_run: boolean;
+            name: string;
+            would_delete: {
+                versions: number;
+                labels: number;
+            };
+            /** @constant */
+            deleted?: true;
+            /** @description Send this back as `?confirm=` to make it happen */
+            confirm?: string;
+            note?: string;
+        };
         /** @description What a score name means. `direction` is required for numeric and boolean names and forbidden for categorical and text ones; `min`/`max` are numeric only, with `min` at most `max`; `categories` is required for categorical names and forbidden otherwise. */
         ScoreConfigInput: {
             /** @enum {string} */
@@ -1493,6 +1514,8 @@ export interface components {
         Confirm: string;
         /** @description The name of the dataset being destroyed. Without it the endpoint changes nothing and answers with the counts; a value that does not match is a 400 that also changes nothing. */
         ConfirmName: string;
+        /** @description The name of the prompt being destroyed. Without it the endpoint changes nothing and answers with the counts; a value that does not match is a 400 that also changes nothing. */
+        ConfirmPromptName: string;
         /** @description The prompt-name grammar: one URL path segment */
         DatasetName: string;
         /** @description The dataset version to resolve the items at; the current one when absent. Above the current version it is a 400. A run's `dataset_version` is what to pass here */
@@ -2270,6 +2293,8 @@ export interface operations {
                 limit?: components["parameters"]["Limit"];
                 /** @description The opaque `next_cursor` or `prev_cursor` of a previous page */
                 cursor?: components["parameters"]["Cursor"];
+                /** @description Which way to page from the cursor. With no cursor, `next` is the newest page and `prev` the oldest — both ends are a direction rather than an offset. Rows come back newest first either way */
+                direction?: components["parameters"]["Direction"];
             };
             header?: never;
             path?: never;
@@ -2296,6 +2321,7 @@ export interface operations {
                             updated_at: string;
                         }[];
                         next_cursor: string | null;
+                        prev_cursor: string | null;
                     };
                 };
             };
@@ -2331,6 +2357,34 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
+    deletePrompt: {
+        parameters: {
+            query?: {
+                /** @description The name of the prompt being destroyed. Without it the endpoint changes nothing and answers with the counts; a value that does not match is a 400 that also changes nothing. */
+                confirm?: components["parameters"]["ConfirmPromptName"];
+            };
+            header?: never;
+            path: {
+                name: components["parameters"]["PromptName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description What went, or the dry run of what would */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PromptDeletion"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     listPromptVersions: {
         parameters: {
             query?: {
@@ -2338,6 +2392,8 @@ export interface operations {
                 limit?: components["parameters"]["Limit"];
                 /** @description The opaque `next_cursor` or `prev_cursor` of a previous page */
                 cursor?: components["parameters"]["Cursor"];
+                /** @description Which way to page from the cursor. With no cursor, `next` is the newest page and `prev` the oldest — both ends are a direction rather than an offset. Rows come back newest first either way */
+                direction?: components["parameters"]["Direction"];
             };
             header?: never;
             path: {
@@ -2362,6 +2418,7 @@ export interface operations {
                             created_at: string;
                         }[];
                         next_cursor: string | null;
+                        prev_cursor: string | null;
                     };
                 };
             };

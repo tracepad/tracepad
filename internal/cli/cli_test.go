@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http/httptest"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -899,5 +900,99 @@ func TestPromptsRoundTrip(t *testing.T) {
 	both := h.run(ctx, true, "prompts", "get", "support", "--label", "production", "--version", "2")
 	if both.code != ExitUsage {
 		t.Fatalf("exit = %d, want a usage error for two selectors", both.code)
+	}
+}
+
+// A label is created, moved and retired from the command line (spec 021 #8):
+// the deploy path the interface offers may do nothing the CLI cannot.
+func TestPromptsLabel(t *testing.T) {
+	h := newHarness(t)
+	ctx := t.Context()
+
+	file := filepath.Join(t.TempDir(), "prompt.json")
+	writeFile(t, file, `{"type":"text","prompt":"Be brief."}`)
+	h.run(ctx, true, "prompts", "push", "support", "--file", file)
+	writeFile(t, file, `{"prompt":"Be brief and cite the source."}`)
+	h.run(ctx, true, "prompts", "push", "support", "--file", file)
+
+	set := h.run(ctx, true, "prompts", "label", "support", "production", "--version", "1")
+	if set.code != ExitOK || !strings.Contains(set.stdout, "production now points at version 1") {
+		t.Fatalf("label --version 1 = %+v", set)
+	}
+	// Promote: the same command, a different number — no new version.
+	moved := h.run(ctx, true, "prompts", "label", "support", "production", "--version", "2")
+	if moved.code != ExitOK || !strings.Contains(moved.stdout, "version 2") {
+		t.Fatalf("the move = %+v", moved)
+	}
+	if got := h.run(ctx, true, "prompts", "ls"); !strings.Contains(got.stdout, "production=2") {
+		t.Errorf("prompts ls = %s, want the label where it was moved to", got.stdout)
+	}
+
+	// A removal reports the version the label had been on, which is what a
+	// rollback reads.
+	gone := h.run(ctx, true, "prompts", "label", "support", "production", "--rm")
+	if gone.code != ExitOK || !strings.Contains(gone.stdout, "production removed from version 2") {
+		t.Fatalf("--rm = %+v", gone)
+	}
+
+	for _, args := range [][]string{
+		{"prompts", "label", "support", "production"},
+		{"prompts", "label", "support", "production", "--version", "1", "--rm"},
+		{"prompts", "label", "support"},
+	} {
+		if got := h.run(ctx, true, args...); got.code != ExitUsage {
+			t.Errorf("%v = %+v, want a usage error", args, got)
+		}
+	}
+	// The server's own refusals travel through unchanged.
+	if got := h.run(ctx, true, "prompts", "label", "support", "latest", "--version", "1"); got.code != ExitFailure ||
+		!strings.Contains(got.stderr, "reserved") {
+		t.Errorf("`latest` as a label = %+v, want the server's refusal", got)
+	}
+	if got := h.run(ctx, true, "prompts", "label", "support", "production", "--version", "9"); got.code != ExitFailure {
+		t.Errorf("a version that is not there = %+v, want the server's 404", got)
+	}
+}
+
+// Deleting a name wears the ceremony every destructive command wears: the
+// server's preview, and --yes off a terminal (spec 021 #7, #8).
+func TestPromptsRemoveNeedsConfirmation(t *testing.T) {
+	h := newHarness(t)
+	ctx := t.Context()
+
+	file := filepath.Join(t.TempDir(), "prompt.json")
+	writeFile(t, file, `{"type":"text","prompt":"Be brief."}`)
+	h.run(ctx, true, "prompts", "push", "support", "--file", file, "--label", "production")
+	writeFile(t, file, `{"prompt":"Be brief and cite the source."}`)
+	h.run(ctx, true, "prompts", "push", "support", "--file", file)
+
+	refused := h.run(ctx, false, "prompts", "rm", "support")
+	if refused.code != ExitFailure {
+		t.Fatalf("rm without --yes = %+v, want a refusal", refused)
+	}
+	// The counts and the note, as the server sent them; the spacing between
+	// a name and its number is the preview renderer's business.
+	for _, want := range []*regexp.Regexp{
+		regexp.MustCompile(`versions\s+2`),
+		regexp.MustCompile(`labels\s+1`),
+		regexp.MustCompile(`traces that ran this prompt keep`),
+	} {
+		if !want.MatchString(refused.stderr) {
+			t.Errorf("the preview is missing %s:\n%s", want, refused.stderr)
+		}
+	}
+	if got := h.run(ctx, true, "prompts", "ls"); !strings.Contains(got.stdout, "support") {
+		t.Errorf("the prompt went without a confirmation")
+	}
+
+	done := h.run(ctx, true, "prompts", "rm", "support", "--yes")
+	if done.code != ExitOK || !strings.Contains(done.stdout, "2 versions and 1 label gone") {
+		t.Errorf("rm --yes = %+v", done)
+	}
+	if got := h.run(ctx, true, "prompts", "ls"); !strings.Contains(got.stdout, "no prompts") {
+		t.Errorf("the prompt survived its deletion: %q", got.stdout)
+	}
+	if got := h.run(ctx, true, "prompts", "rm", "support", "--yes"); got.code != ExitFailure {
+		t.Errorf("removing it twice = %+v, want the server's 404", got)
 	}
 }

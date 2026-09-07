@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/tracepad/tracepad/internal/model"
 	"github.com/tracepad/tracepad/internal/store"
 )
 
@@ -457,6 +458,167 @@ func TestPromptConcurrentLabelMovesHaveOneWinner(t *testing.T) {
 	if len(summary.Labels) != 1 || summary.Labels["production"] != winner.Version {
 		t.Fatalf("labels = %v, want exactly one row pointing at version %d", summary.Labels, winner.Version)
 	}
+}
+
+// promptDeletion is the shape of the dry run and of what it becomes
+// (spec 021 #7).
+type promptDeletion struct {
+	DryRun      bool   `json:"dry_run"`
+	Name        string `json:"name"`
+	WouldDelete struct {
+		Versions int `json:"versions"`
+		Labels   int `json:"labels"`
+	} `json:"would_delete"`
+	Deleted bool   `json:"deleted"`
+	Confirm string `json:"confirm"`
+	Note    string `json:"note"`
+}
+
+// Deleting a name is spec 005 #8's ceremony over a prompt's whole history
+// (spec 021 #7): a dry run that changes nothing, a wrong echo that changes
+// nothing either, and one transaction that takes the versions and the labels
+// together.
+func TestPromptDelete(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+
+	for range 3 {
+		expectStatus(t, h.send(t, "POST", "/api/v1/prompts/summarize/versions",
+			chatBody("You are terse.", nil)), http.StatusCreated)
+	}
+	expectStatus(t, h.send(t, "PUT", "/api/v1/prompts/summarize/labels/production",
+		map[string]any{"version": 2}), http.StatusOK)
+	// A second name, to pin that the delete takes one and only one.
+	expectStatus(t, h.send(t, "POST", "/api/v1/prompts/translate/versions",
+		map[string]any{"type": "text", "prompt": "Translate {{input}}."}), http.StatusCreated)
+	expectStatus(t, h.send(t, "PUT", "/api/v1/prompts/translate/labels/production",
+		map[string]any{"version": 1}), http.StatusOK)
+
+	// A trace that ran the prompt. Its columns are what the client said it
+	// ran (spec 012), not a reference into the prompt table.
+	h.seed(t, &model.Trace{ID: traceHex(1), Name: "answer", Environment: "production"},
+		&model.Observation{TraceID: traceHex(1), ID: spanHex(1), Type: model.TypeGeneration,
+			Name: "answer", Level: model.LevelDefault,
+			StartTime: seedBase, EndTime: seedBase + 100*ms,
+			PromptName: "summarize", PromptVersion: version(2)})
+
+	dry := decodeJSON[promptDeletion](t, h.send(t, "DELETE", "/api/v1/prompts/summarize", nil))
+	if !dry.DryRun || dry.Name != "summarize" || dry.Deleted {
+		t.Fatalf("dry run = %+v", dry)
+	}
+	if dry.WouldDelete.Versions != 3 || dry.WouldDelete.Labels != 1 {
+		t.Errorf("would delete = %+v, want three versions and one label", dry.WouldDelete)
+	}
+	if dry.Confirm != "summarize" || !strings.Contains(dry.Note, "traces") {
+		t.Errorf("dry run = %+v, want the echo to ask for and a word about the traces", dry)
+	}
+	// It changed nothing.
+	if versions := decodeJSON[promptVersionListResponse](t,
+		h.get(t, "/api/v1/prompts/summarize/versions")); len(versions.Versions) != 3 {
+		t.Fatalf("after the dry run there are %d versions, want all three", len(versions.Versions))
+	}
+
+	// The echo is checked inside the write transaction, and a wrong one
+	// changes nothing either.
+	expectError(t, h.send(t, "DELETE", "/api/v1/prompts/summarize?confirm=summarise", nil),
+		http.StatusBadRequest, `confirm must be the prompt's name`)
+	if versions := decodeJSON[promptVersionListResponse](t,
+		h.get(t, "/api/v1/prompts/summarize/versions")); len(versions.Versions) != 3 {
+		t.Fatalf("after a wrong echo there are %d versions, want all three", len(versions.Versions))
+	}
+
+	gone := decodeJSON[promptDeletion](t, h.send(t, "DELETE", "/api/v1/prompts/summarize?confirm=summarize", nil))
+	if gone.DryRun || !gone.Deleted || gone.WouldDelete.Versions != 3 || gone.WouldDelete.Labels != 1 {
+		t.Fatalf("deletion = %+v", gone)
+	}
+	expectError(t, h.get(t, "/api/v1/prompts/summarize"), http.StatusNotFound, "not found")
+	expectError(t, h.get(t, "/api/v1/prompts/summarize/versions"), http.StatusNotFound, "not found")
+	// The label went with the name rather than outliving it as a row
+	// pointing at a version that is not there.
+	expectError(t, h.get(t, "/api/v1/prompts/summarize?label=production"), http.StatusNotFound, `no label "production"`)
+	names := decodeJSON[promptListResponse](t, h.get(t, "/api/v1/prompts")).Prompts
+	if len(names) != 1 || names[0].Name != "translate" || names[0].Labels["production"] != 1 {
+		t.Errorf("prompts = %+v, want the other name with its label untouched", names)
+	}
+
+	// The trace still records what it ran, and the filter still answers.
+	trace := decodeJSON[struct {
+		Observations []struct {
+			Prompt *struct {
+				Name    string `json:"name"`
+				Version *int   `json:"version"`
+			} `json:"prompt"`
+		} `json:"observations"`
+	}](t, h.get(t, "/api/v1/traces/"+traceHex(1)))
+	if len(trace.Observations) != 1 || trace.Observations[0].Prompt == nil ||
+		trace.Observations[0].Prompt.Name != "summarize" {
+		t.Errorf("observation after the delete = %+v, want its prompt columns intact", trace.Observations)
+	}
+	if rows := decodeJSON[struct {
+		Traces []struct {
+			ID string `json:"id"`
+		} `json:"traces"`
+	}](t, h.get(t, "/api/v1/traces?prompt=summarize")); len(rows.Traces) != 1 {
+		t.Errorf("?prompt=summarize = %+v after the delete, want the trace that ran it", rows.Traces)
+	}
+
+	expectError(t, h.send(t, "DELETE", "/api/v1/prompts/summarize", nil), http.StatusNotFound, "not found")
+	expectError(t, h.send(t, "DELETE", "/api/v1/prompts/unknown?confirm=unknown", nil),
+		http.StatusNotFound, "not found")
+	expectError(t, h.send(t, "DELETE", "/api/v1/prompts/-bad", nil), http.StatusBadRequest, "prompt name")
+}
+
+// Both prompt listings page in both directions (spec 021 #11), which is what
+// lets the interface's « ‹ › » cost what one page costs here too.
+func TestPromptListingsPageBothWays(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+
+	for _, name := range []string{"alpha", "beta", "gamma"} {
+		expectStatus(t, h.send(t, "POST", "/api/v1/prompts/"+name+"/versions",
+			chatBody("You are "+name, nil)), http.StatusCreated)
+	}
+	for range 2 {
+		expectStatus(t, h.send(t, "POST", "/api/v1/prompts/alpha/versions",
+			chatBody("again", nil)), http.StatusCreated)
+	}
+
+	// With no cursor, `prev` is the far end: the last name alphabetically,
+	// and the oldest version of a name.
+	end := decodeJSON[promptListResponse](t, h.get(t, "/api/v1/prompts?limit=1&direction=prev"))
+	if len(end.Prompts) != 1 || end.Prompts[0].Name != "gamma" {
+		t.Fatalf("the far end of the prompt listing = %+v, want gamma", end.Prompts)
+	}
+	if end.PrevCursor == nil || end.NextCursor != nil {
+		t.Errorf("far-end cursors = %v / %v, want a page before it and none after", end.PrevCursor, end.NextCursor)
+	}
+	back := decodeJSON[promptListResponse](t,
+		h.get(t, "/api/v1/prompts?limit=1&direction=prev&cursor="+*end.PrevCursor))
+	if len(back.Prompts) != 1 || back.Prompts[0].Name != "beta" {
+		t.Errorf("one page back from gamma = %+v, want beta", back.Prompts)
+	}
+
+	oldest := decodeJSON[promptVersionListResponse](t,
+		h.get(t, "/api/v1/prompts/alpha/versions?limit=2&direction=prev"))
+	if len(oldest.Versions) != 2 || oldest.Versions[0].Version != 2 || oldest.Versions[1].Version != 1 {
+		t.Fatalf("the oldest page of versions = %+v, want [2 1] — newest first within the page", oldest.Versions)
+	}
+	if oldest.PrevCursor == nil {
+		t.Fatalf("the oldest page names no page before it")
+	}
+	newer := decodeJSON[promptVersionListResponse](t,
+		h.get(t, "/api/v1/prompts/alpha/versions?limit=2&direction=prev&cursor="+*oldest.PrevCursor))
+	if len(newer.Versions) != 1 || newer.Versions[0].Version != 3 {
+		t.Errorf("one page towards the newest = %+v, want [3]", newer.Versions)
+	}
+
+	// The forward walk still says what it said, and the two agree about the
+	// cursors between them.
+	first := decodeJSON[promptVersionListResponse](t, h.get(t, "/api/v1/prompts/alpha/versions?limit=2"))
+	if first.NextCursor == nil || first.PrevCursor != nil {
+		t.Errorf("first page cursors = %v / %v", first.PrevCursor, first.NextCursor)
+	}
+	expectError(t, h.get(t, "/api/v1/prompts?direction=sideways"), http.StatusBadRequest, "direction must be")
+	expectError(t, h.get(t, "/api/v1/prompts/alpha/versions?direction=sideways"),
+		http.StatusBadRequest, "direction must be")
 }
 
 // The credential story is the one ingest uses (#2).

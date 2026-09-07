@@ -54,11 +54,13 @@ type promptVersionSummaryResponse struct {
 type promptVersionListResponse struct {
 	Versions   []promptVersionSummaryResponse `json:"versions"`
 	NextCursor *string                        `json:"next_cursor"`
+	PrevCursor *string                        `json:"prev_cursor"`
 }
 
 type promptListResponse struct {
 	Prompts    []promptSummaryResponse `json:"prompts"`
 	NextCursor *string                 `json:"next_cursor"`
+	PrevCursor *string                 `json:"prev_cursor"`
 }
 
 type promptSummaryResponse struct {
@@ -299,12 +301,17 @@ func (s *Server) handleListPromptVersions(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
-	values, err := queryParams(r, "limit", "cursor")
+	values, err := queryParams(r, "limit", "cursor", "direction")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	limit, err := pageSize(values)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	backward, err := pageDirection(values)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -323,7 +330,7 @@ func (s *Server) handleListPromptVersions(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	versions, err := s.store.PromptVersions(project.ID, name, limit+1, after)
+	versions, err := s.store.PromptVersions(project.ID, name, limit+1, after, backward)
 	if err != nil {
 		slog.Error("list prompt versions failed", "err", err)
 		writeError(w, http.StatusInternalServerError, "failed to list the versions")
@@ -336,12 +343,8 @@ func (s *Server) handleListPromptVersions(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	var next *string
-	if len(versions) > limit {
-		versions = versions[:limit]
-		encoded := encodeCursor(strconv.Itoa(versions[len(versions)-1].Version))
-		next = &encoded
-	}
+	versions, prev, next := trimPage(versions, limit, backward, cursor,
+		func(v store.PromptVersionSummary) string { return encodeCursor(strconv.Itoa(v.Version)) })
 	out := make([]promptVersionSummaryResponse, 0, len(versions))
 	for _, version := range versions {
 		out = append(out, promptVersionSummaryResponse{
@@ -352,7 +355,7 @@ func (s *Server) handleListPromptVersions(w http.ResponseWriter, r *http.Request
 		})
 	}
 	w.Header().Set("Cache-Control", promptCacheControl)
-	writeJSON(w, http.StatusOK, promptVersionListResponse{Versions: out, NextCursor: next})
+	writeJSON(w, http.StatusOK, promptVersionListResponse{Versions: out, NextCursor: next, PrevCursor: prev})
 }
 
 // handleListPrompts lists names alphabetically with where their labels point.
@@ -362,7 +365,7 @@ func (s *Server) handleListPrompts(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	values, err := queryParams(r, "limit", "cursor")
+	values, err := queryParams(r, "limit", "cursor", "direction")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -372,8 +375,14 @@ func (s *Server) handleListPrompts(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	backward, err := pageDirection(values)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	after := ""
-	if cursor := values.Get("cursor"); cursor != "" {
+	cursor := values.Get("cursor")
+	if cursor != "" {
 		parts, err := decodeCursor(cursor, 1)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
@@ -382,19 +391,15 @@ func (s *Server) handleListPrompts(w http.ResponseWriter, r *http.Request) {
 		after = parts[0]
 	}
 
-	prompts, err := s.store.Prompts(project.ID, limit+1, after)
+	prompts, err := s.store.Prompts(project.ID, limit+1, after, backward)
 	if err != nil {
 		slog.Error("list prompts failed", "err", err)
 		writeError(w, http.StatusInternalServerError, "failed to list prompts")
 		return
 	}
 
-	var next *string
-	if len(prompts) > limit {
-		prompts = prompts[:limit]
-		encoded := encodeCursor(prompts[len(prompts)-1].Name)
-		next = &encoded
-	}
+	prompts, prev, next := trimPage(prompts, limit, backward, cursor,
+		func(p store.PromptSummary) string { return encodeCursor(p.Name) })
 	out := make([]promptSummaryResponse, 0, len(prompts))
 	for _, prompt := range prompts {
 		labels := prompt.Labels
@@ -410,7 +415,69 @@ func (s *Server) handleListPrompts(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	w.Header().Set("Cache-Control", promptCacheControl)
-	writeJSON(w, http.StatusOK, promptListResponse{Prompts: out, NextCursor: next})
+	writeJSON(w, http.StatusOK, promptListResponse{Prompts: out, NextCursor: next, PrevCursor: prev})
+}
+
+// promptDeletionNote is why a trace that ran this prompt is untouched by the
+// delete. It is part of the dry run because "what happens to the traces" is
+// the question a person asks before typing the name back (spec 021 #7).
+const promptDeletionNote = "traces that ran this prompt keep the name and version they recorded; " +
+	"the trace filter goes on answering for it"
+
+// handleDeletePrompt removes a name whole — every version and every label —
+// following the dry-run/confirm contract of spec 005 #8 (spec 021 #7). Full
+// management includes removing a prompt that was a mistake or a
+// rename-by-recreation, and the store had no write for it.
+func (s *Server) handleDeletePrompt(w http.ResponseWriter, r *http.Request) {
+	project, ok := s.apiProject(w, r)
+	if !ok {
+		return
+	}
+	name, ok := promptName(w, r)
+	if !ok {
+		return
+	}
+	values, err := queryParams(r, "confirm")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	confirm := values.Get("confirm")
+	if confirm == "" {
+		counts, err := s.store.PromptPreview(project.ID, name)
+		if err != nil {
+			slog.Error("prompt preview failed", "err", err)
+			writeError(w, http.StatusInternalServerError, "failed to read what the prompt holds")
+			return
+		}
+		// A name exists only by having versions, the same rule the version
+		// listing reads a 404 off.
+		if counts.Versions == 0 {
+			writeError(w, http.StatusNotFound, fmt.Sprintf("prompt %q not found", name))
+			return
+		}
+		writeJSON(w, http.StatusOK, renderPromptDeletion(true, name, counts).
+			put("confirm", name).
+			put("note", promptDeletionNote))
+		return
+	}
+
+	deletion := &store.PromptDelete{ProjectID: project.ID, Name: name, Confirm: confirm}
+	if !s.submit(w, r, deletion) {
+		return
+	}
+	writeJSON(w, http.StatusOK, renderPromptDeletion(false, name, deletion.Counts).
+		put("deleted", true))
+}
+
+func renderPromptDeletion(dryRun bool, name string, counts store.PromptCounts) object {
+	return object{}.
+		put("dry_run", dryRun).
+		put("name", name).
+		put("would_delete", object{}.
+			put("versions", counts.Versions).
+			put("labels", counts.Labels))
 }
 
 // handlePutPromptLabel points a label at a version, creating or moving it.

@@ -278,8 +278,12 @@ func (r *run) prompts(ctx context.Context, args []string) error {
 		return r.promptsPush(ctx, rest)
 	case "diff":
 		return r.promptsDiff(ctx, rest)
+	case "label":
+		return r.promptsLabel(ctx, rest)
+	case "rm":
+		return r.promptsRemove(ctx, rest)
 	}
-	return usageErrorf("prompts takes ls, get, push or diff, got %q", sub)
+	return usageErrorf("prompts takes ls, get, push, diff, label or rm, got %q", sub)
 }
 
 func (r *run) promptsList(ctx context.Context, args []string) error {
@@ -499,6 +503,94 @@ func (r *run) promptsDiff(ctx context.Context, args []string) error {
 		return nil
 	}
 	fmt.Fprint(r.opt.Stdout, result.Diff)
+	return nil
+}
+
+// promptsLabel moves a label onto a version or retires it (spec 021 #8).
+// `push --label` covered creation-time labels only; promoting an already
+// published version — and rolling back to it — had no command, though it is
+// the deploy path the whole design rests on (spec 003 #12).
+func (r *run) promptsLabel(ctx context.Context, args []string) error {
+	var (
+		version int
+		remove  bool
+	)
+	fs := r.flags("prompts label")
+	fs.IntVar(&version, "version", 0, "")
+	fs.BoolVar(&remove, "rm", false, "")
+	rest, err := r.parse(fs, args, 2)
+	if err != nil {
+		return err
+	}
+	if remove == (version > 0) {
+		return usageErrorf("prompts label takes --version N or --rm, not both and not neither")
+	}
+	name, label := rest[0], rest[1]
+	path := "/api/v1/prompts/" + url.PathEscape(name) + "/labels/" + url.PathEscape(label)
+
+	var body json.RawMessage
+	if remove {
+		body, err = r.api.Send(ctx, "DELETE", path, nil, nil)
+	} else {
+		body, err = r.api.Send(ctx, "PUT", path, nil, map[string]any{"version": version})
+	}
+	if err != nil {
+		return err
+	}
+	if r.wantJSON() {
+		return r.emit(body)
+	}
+	answer, err := decode[labelObject](body)
+	if err != nil {
+		return err
+	}
+	// Both answers name the version: a move names where the label landed, a
+	// removal where it had been — which is the number a rollback needs.
+	if remove {
+		fmt.Fprintf(r.opt.Stdout, "%s: %s removed from version %d\n", name, answer.Label, answer.Version)
+		return nil
+	}
+	fmt.Fprintf(r.opt.Stdout, "%s: %s now points at version %d\n", name, answer.Label, answer.Version)
+	return nil
+}
+
+// labelObject is what both label endpoints answer with.
+type labelObject struct {
+	Label   string `json:"label"`
+	Version int    `json:"version"`
+}
+
+// promptsRemove deletes a name whole, wearing spec 005's ceremony: the
+// server's dry run, then the name typed back (spec 021 #7, #8).
+func (r *run) promptsRemove(ctx context.Context, args []string) error {
+	var yes bool
+	fs := r.flags("prompts rm")
+	fs.BoolVar(&yes, "yes", false, "")
+	rest, err := r.parse(fs, args, 1)
+	if err != nil {
+		return err
+	}
+	name := rest[0]
+	body, err := r.destructive(ctx, "DELETE", "/api/v1/prompts/"+url.PathEscape(name),
+		nil, nil, yes, "delete prompt "+name+" with every version and label")
+	if err != nil {
+		return err
+	}
+	if r.wantJSON() {
+		return r.emit(body)
+	}
+	deleted, err := decode[struct {
+		Name        string `json:"name"`
+		WouldDelete struct {
+			Versions int `json:"versions"`
+			Labels   int `json:"labels"`
+		} `json:"would_delete"`
+	}](body)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(r.opt.Stdout, "deleted %s: %s and %s gone\n", deleted.Name,
+		plural(deleted.WouldDelete.Versions, "version"), plural(deleted.WouldDelete.Labels, "label"))
 	return nil
 }
 

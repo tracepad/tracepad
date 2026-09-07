@@ -231,6 +231,9 @@ tracepad prompts ls
 tracepad prompts get support --label production
 tracepad prompts push support --file prompt.json --label staging
 tracepad prompts diff support --from 1 --to 3
+tracepad prompts label support production --version 4
+tracepad prompts label support production --rm
+tracepad prompts rm support --yes
 ```
 
 `push` sends the file as the version's request body, so the prompt stays JSON
@@ -252,8 +255,20 @@ more: --cursor c3VwcG9ydA
 ```
 
 It says `more` rather than `older` because this listing is alphabetical by
-name, not newest-first, and it walks one way only — there is no `--oldest` or
-`--newer` here, because the endpoint has no other end to jump to.
+name, not newest-first. The command walks that way only: the endpoint does page
+in both directions, and the web interface uses it, but a terminal walk that
+started at `a` has nothing to go back to that it has not just printed.
+
+`label` is the deploy path (see [prompts.md](prompts.md#labels)): promote by
+pointing `production` at a newer version, roll back by pointing it at an older
+one, retire it with `--rm`. Neither writes a version, and both print where the
+label ended up — a removal printing the version it was taken from, which is
+what you point it back at.
+
+`rm` deletes a name with every version and every label it has, so it wears the
+same ceremony as the administrative commands: without `--yes` it prints what
+would go and asks you to type the name back, and off a terminal it refuses
+outright. Traces that ran the prompt keep the name and version they recorded.
 
 ### `stats`
 

@@ -19,6 +19,7 @@ required.
 | `GET` | `/api/v1/prompts/{name}/versions` | List a name's versions |
 | `PUT` | `/api/v1/prompts/{name}/labels/{label}` | Create or move a label |
 | `DELETE` | `/api/v1/prompts/{name}/labels/{label}` | Remove a label |
+| `DELETE` | `/api/v1/prompts/{name}` | Delete a name with every version and label |
 
 Prompt and label names match `^[A-Za-z0-9][A-Za-z0-9._-]*$` and are at most 200
 characters — one URL path segment, no escaping. `latest` is reserved as a label
@@ -149,8 +150,52 @@ was created.
 with their commit messages and labels but **without** the bodies — version
 lists are for picking and diffing; bodies come from the single-prompt fetch.
 
-Both listings take `limit` (1–500, default 50) and a `cursor`; keep passing
-`next_cursor` until it comes back `null`.
+Both listings take `limit` (1–500, default 50), a `cursor` and a `direction`
+(`next` or `prev`), and answer with `next_cursor` and `prev_cursor`. Keep
+passing `next_cursor` until it comes back `null`; with no cursor at all,
+`direction=prev` is the far end — the last name alphabetically, the oldest
+version of a name — which is what makes "jump to the end" cost one page.
+
+## Deleting a prompt
+
+A name that was a mistake, or a rename done by re-creating it under the right
+name, is removed whole. There is no way to delete one version: versions are the
+audit trail, and a hole in it would leave a label pointing at nothing.
+
+Like every destructive endpoint here, it is a dry run until `?confirm=` echoes
+the name (see [admin.md](admin.md#dry-run-by-default)):
+
+```sh
+# what would go
+curl -X DELETE -H "Authorization: Bearer tp-sk-…" \
+  http://localhost:4318/api/v1/prompts/summarize
+```
+
+```json
+{
+  "dry_run": true,
+  "name": "summarize",
+  "would_delete": {"versions": 4, "labels": 1},
+  "confirm": "summarize",
+  "note": "traces that ran this prompt keep the name and version they recorded; the trace filter goes on answering for it"
+}
+```
+
+```sh
+# and for real
+curl -X DELETE -H "Authorization: Bearer tp-sk-…" \
+  "http://localhost:4318/api/v1/prompts/summarize?confirm=summarize"
+```
+
+The confirmed call answers with the same shape plus `"deleted": true`, and the
+versions and the labels go in one transaction. A `confirm` that does not match
+is a `400` that changes nothing; an unknown name is a `404` either way.
+
+**Traces are untouched.** An observation's `prompt` is a name and a version
+the client said it ran, recorded as sent and resolved against no registry
+(see [api.md](api.md#one-trace)) — not a reference into this table. So
+`?prompt=summarize` on the trace listing goes on finding the runs of a prompt
+whose definition is gone, which is the honest answer: they did run it.
 
 ## Using a prompt from an application
 
@@ -178,8 +223,8 @@ Deploying a new prompt is then a label move, not a release.
 | Status | Meaning |
 |---|---|
 | `201` | The version is committed and fsynced to disk. |
-| `200` | The read, the label move or the label removal succeeded. |
-| `400` | Validation: a type mismatch, a malformed name, an unknown field or parameter, `latest` used as a label. |
+| `200` | The read, the label move, the label removal, or the deletion — or its dry run — succeeded. |
+| `400` | Validation: a type mismatch, a malformed name, an unknown field or parameter, `latest` used as a label, a `confirm` that does not echo the name. |
 | `401` | Unknown credentials. |
 | `404` | No such prompt, version or label in this project. |
 | `413` | The body is over `TRACEPAD_MAX_BODY_BYTES`. |

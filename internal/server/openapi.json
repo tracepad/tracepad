@@ -571,8 +571,13 @@
       "get": {
         "tags": ["prompts"],
         "summary": "List prompt names with where their labels point",
+        "description": "Alphabetically by name. `direction` reads towards the start of the alphabet, so both ends of the listing cost what one page costs.",
         "operationId": "listPrompts",
-        "parameters": [{"$ref": "#/components/parameters/Limit"}, {"$ref": "#/components/parameters/Cursor"}],
+        "parameters": [
+          {"$ref": "#/components/parameters/Limit"},
+          {"$ref": "#/components/parameters/Cursor"},
+          {"$ref": "#/components/parameters/Direction"}
+        ],
         "responses": {
           "200": {"description": "A page of prompt names", "content": {"application/json": {"schema": {
             "type": "object",
@@ -588,9 +593,10 @@
                 },
                 "required": ["name", "type", "latest_version", "labels", "updated_at"]
               }},
-              "next_cursor": {"type": ["string", "null"]}
+              "next_cursor": {"type": ["string", "null"]},
+              "prev_cursor": {"type": ["string", "null"]}
             },
-            "required": ["prompts", "next_cursor"]
+            "required": ["prompts", "next_cursor", "prev_cursor"]
           }}}},
           "400": {"$ref": "#/components/responses/BadRequest"},
           "401": {"$ref": "#/components/responses/Unauthorized"}
@@ -610,6 +616,22 @@
         ],
         "responses": {
           "200": {"description": "The prompt version", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Prompt"}}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      },
+      "delete": {
+        "tags": ["prompts"],
+        "summary": "Delete a prompt with every version and label; a dry run until `?confirm=` echoes the name",
+        "description": "The name's whole history goes at once — versions are never deleted alone. Traces that ran the prompt keep the name and version they recorded: that is a string pair the client sent, not a reference into this table. Without `confirm` it answers with the counts and changes nothing.",
+        "operationId": "deletePrompt",
+        "parameters": [
+          {"$ref": "#/components/parameters/PromptName"},
+          {"$ref": "#/components/parameters/ConfirmPromptName"}
+        ],
+        "responses": {
+          "200": {"description": "What went, or the dry run of what would", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PromptDeletion"}}}},
           "400": {"$ref": "#/components/responses/BadRequest"},
           "401": {"$ref": "#/components/responses/Unauthorized"},
           "404": {"$ref": "#/components/responses/NotFound"}
@@ -649,7 +671,8 @@
         "parameters": [
           {"$ref": "#/components/parameters/PromptName"},
           {"$ref": "#/components/parameters/Limit"},
-          {"$ref": "#/components/parameters/Cursor"}
+          {"$ref": "#/components/parameters/Cursor"},
+          {"$ref": "#/components/parameters/Direction"}
         ],
         "responses": {
           "200": {"description": "A page of versions", "content": {"application/json": {"schema": {
@@ -665,9 +688,10 @@
                 },
                 "required": ["version", "labels", "created_at"]
               }},
-              "next_cursor": {"type": ["string", "null"]}
+              "next_cursor": {"type": ["string", "null"]},
+              "prev_cursor": {"type": ["string", "null"]}
             },
-            "required": ["versions", "next_cursor"]
+            "required": ["versions", "next_cursor", "prev_cursor"]
           }}}},
           "400": {"$ref": "#/components/responses/BadRequest"},
           "401": {"$ref": "#/components/responses/Unauthorized"},
@@ -1426,6 +1450,8 @@
         "description": "The name of the project — or the id of the user — being destroyed. Without it the endpoint changes nothing and answers with a preview; a value that does not match is a 400 that also changes nothing."},
       "ConfirmName": {"name": "confirm", "in": "query", "schema": {"type": "string"},
         "description": "The name of the dataset being destroyed. Without it the endpoint changes nothing and answers with the counts; a value that does not match is a 400 that also changes nothing."},
+      "ConfirmPromptName": {"name": "confirm", "in": "query", "schema": {"type": "string"},
+        "description": "The name of the prompt being destroyed. Without it the endpoint changes nothing and answers with the counts; a value that does not match is a 400 that also changes nothing."},
       "DatasetName": {"name": "name", "in": "path", "required": true,
         "schema": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$", "maxLength": 200},
         "description": "The prompt-name grammar: one URL path segment"},
@@ -2059,6 +2085,23 @@
           "note": {"type": "string"}
         },
         "required": ["dry_run", "dataset", "items", "runs", "pinned_traces"]
+      },
+      "PromptDeletion": {
+        "type": "object",
+        "description": "What deleting a prompt name takes: every version of it and every label pointing into it. `confirm` and `note` are present on the dry run only; `deleted` on the confirmed answer only.",
+        "properties": {
+          "dry_run": {"type": "boolean"},
+          "name": {"type": "string"},
+          "would_delete": {
+            "type": "object",
+            "properties": {"versions": {"type": "integer"}, "labels": {"type": "integer"}},
+            "required": ["versions", "labels"]
+          },
+          "deleted": {"const": true},
+          "confirm": {"type": "string", "description": "Send this back as `?confirm=` to make it happen"},
+          "note": {"type": "string"}
+        },
+        "required": ["dry_run", "name", "would_delete"]
       },
       "ScoreConfigInput": {
         "type": "object",

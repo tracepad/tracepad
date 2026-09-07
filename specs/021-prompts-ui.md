@@ -46,6 +46,7 @@ version in place (the store is append-only, spec 003), prompt-level stats.
 | 8 | **2026-09-07** — The CLI grows **`tracepad prompts rm <name> [--confirm]`** (dry run without the flag, spec 005's shape) and **`tracepad prompts label <name> <label> (--version N \| --rm)`**. MCP is unchanged | The interface may do nothing the CLI cannot (spec 004 #1). `push --label` covered creation-time labels only; a label move or removal had no command, and the new endpoint needs its client. MCP tools are stateless read wrappers over the read API by design (spec 004 #14, #16). |
 | 9 | **2026-09-07** — Empty states teach the other clients: `/prompts` with no prompts shows `tracepad prompts push <name> --file prompt.json --label production` and the SDK line `tracepad.prompt("name", label="production")`; a prompt with one version shows *no diff yet* in place of the diff selects | Spec 016 #15's rule: the person on an empty screen is the one about to write the client. |
 | 10 | **2026-09-07** — The application-line budget stays **14,000** (spec 016 #14) and this spec and spec 022 must land under it together; the PR reports the number per screen | Two UI specs are in flight against one ceiling; each landing "under" alone could still land over together. |
+| 11 | **2026-09-07** — Both prompt listings — `GET /prompts` and `GET /prompts/{name}/versions` — gain **`direction`** and **`prev_cursor`**, the paging spec 009 gave the read API. An amendment to this spec's Server contract, which named only the deletion. The CLI keeps its one-way walk (no `--oldest`/`--newer`), as `datasets ls` does | The Application contract asks for the shared listing "cursor both ways", and spec 010's loader *is* the bar with « ‹ › on it. The two prompt listings were the last one-way ones in the read API — written before spec 009 — so the alternative was a screen whose bar has two dead buttons on it, or a second listing component for one screen. It is the change spec 016 already made to `GET /datasets` for the same reason, in the same shape: `trimPage` owns which cursor a page may claim, and the store reverses a backward page. |
 
 ## Application contract
 
@@ -70,6 +71,10 @@ label ceremony; `docs/prompts.md` gains the deletion and a *From the web
 interface* paragraph.
 
 ## Server contract (Decisions 7, 8)
+
+Both listings page in both directions (Decision 11): `direction=next|prev`
+beside `cursor`, `prev_cursor` beside `next_cursor`, `trimPage` owning which
+cursor a page may claim, as every other listing in the read API does.
 
 `DELETE /api/v1/prompts/{name}[?confirm=<name>]` as Decision 7. One
 transaction over `prompts`, `prompt_versions` and `prompt_labels` (or
