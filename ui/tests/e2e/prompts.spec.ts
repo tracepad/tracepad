@@ -135,12 +135,15 @@ test('the diff keeps the version being read, and closing comes back to it', asyn
 	await page.goto(`/prompts/${CHAT}?version=1`);
 	await page.getByRole('button', { name: 'Diff' }).click();
 
-	// v1 against the one before it, which there is not: bounded at 1.
+	// On v1 there is no version before it, so the pair is v1 against the one
+	// after it rather than a comparison of v1 with itself (#40 review).
 	await expect(page).toHaveURL(/version=1/);
-	await expect(page).toHaveURL(/diff=1\.\.1/);
-	await page.getByLabel('Diff to version').fill('2');
+	await expect(page).toHaveURL(/diff=1\.\.2/);
+	await expect(page.getByText(/identical/)).toHaveCount(0);
+	await page.getByLabel('Diff to version').fill('3');
 	await page.getByLabel('Diff to version').press('Enter');
 	await expect(page).toHaveURL(/version=1/);
+	await expect(page).toHaveURL(/diff=1\.\.3/);
 
 	await page.getByRole('button', { name: 'Close the diff' }).click();
 	await expect(page).toHaveURL(new RegExp(`/prompts/${CHAT}\\?version=1$`));
@@ -188,6 +191,85 @@ test('promoting a label asks first and names the move', async ({ page }) => {
 	);
 });
 
+// A refresh after a label move used to run without a signal, so it could land
+// after a click on another version and overwrite it — the URL saying v1 while
+// the pane and the label control were still v3 (found in review of PR #40).
+test('a refresh in flight cannot overwrite the version navigated to', async ({ page }) => {
+	await signIn(page);
+	await page.goto(`/prompts/${CHAT}?version=3`);
+	await expect(page.getByRole('heading', { name: 'v3' })).toBeVisible();
+
+	// Hold the re-read of v3 that the label write triggers.
+	await page.route(
+		(url) => url.pathname.endsWith(`/prompts/${CHAT}`) && url.searchParams.get('version') === '3',
+		async (route) => {
+			await new Promise((wake) => setTimeout(wake, 2000));
+			await route.continue();
+		}
+	);
+
+	// A label that points nowhere lands straight away and refreshes the page.
+	await page.getByRole('button', { name: /Add label/ }).click();
+	await page.getByLabel('Label to add').fill('canary');
+	await page.getByRole('button', { name: 'Add', exact: true }).click();
+
+	// Off to another version while that re-read is still out.
+	await page.getByRole('table', { name: 'Versions' }).getByRole('link', { name: /v1/ }).click();
+	await expect(page).toHaveURL(/version=1/);
+	await expect(page.getByRole('heading', { name: 'v1' })).toBeVisible();
+
+	// Long enough for the held response to arrive and be ignored.
+	await page.waitForTimeout(2500);
+	await expect(page.getByRole('heading', { name: 'v1' })).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'v3' })).toHaveCount(0);
+});
+
+// The optimistic append (spec 021 #14). Without it the *New prompt* screen
+// posts to the same endpoint an append does, and quietly extends a name
+// somebody else published — moving their labels with it.
+test('a name that is taken refuses the create and offers to open it', async ({ page }) => {
+	await signIn(page);
+	await page.goto('/prompts/new');
+	await page.getByLabel('Name').fill(CHAT);
+	await page.getByLabel('Content of message 1').fill('Mine now.');
+	await page.getByRole('button', { name: 'Save' }).click();
+
+	await expect(page.getByText(/already has a prompt called/)).toBeVisible();
+	await expect(page.getByRole('link', { name: 'Open it' })).toHaveAttribute(
+		'href',
+		new RegExp(`/prompts/${CHAT}\\?version=`)
+	);
+	// Nothing was written, and Save stays shut until the name is a different
+	// one — which is the way out of this particular refusal.
+	await expect(page.getByRole('button', { name: 'Save' })).toBeDisabled();
+	await page.getByLabel('Name').fill(`${CHAT}-mine`);
+	await expect(page.getByRole('button', { name: 'Save' })).toBeEnabled();
+});
+
+test('a version that landed under the editor refuses the append', async ({ page }) => {
+	await signIn(page);
+	await page.goto(`/prompts/${CHAT}/versions/new`);
+	await expect(page.getByLabel('Content of message 1')).not.toHaveValue('');
+
+	// Somebody else publishes while this page is open.
+	const landed = await call('POST', `/api/v1/prompts/${CHAT}/versions`, {
+		prompt: [{ role: 'system', content: 'Published from somewhere else.' }],
+		commit_message: 'somebody else'
+	});
+	expect(landed.ok).toBeTruthy();
+
+	await page.getByLabel('Commit message').fill('composed against the old head');
+	await page.getByRole('button', { name: 'Save' }).click();
+	await expect(page.getByText(/landed while this was being written/)).toBeVisible();
+
+	// The only way on is to take the version that landed.
+	await page.getByRole('button', { name: /Reload from v/ }).click();
+	await expect(page.getByLabel('Content of message 1')).toHaveValue(
+		'Published from somewhere else.'
+	);
+	await expect(page.getByRole('button', { name: 'Save' })).toBeEnabled();
+});
+
 test('a text prompt is created from the editor', async ({ page }) => {
 	await signIn(page);
 	await page.goto('/prompts/new');
@@ -230,11 +312,20 @@ test('deleting a prompt shows the dry run, refuses a wrong echo, and empties the
 	await page.getByRole('button', { name: 'Delete prompt' }).click();
 	await page.getByRole('button', { name: 'Show what would go' }).click();
 
-	// The server's own counts, on screen (spec 005 #8).
+	// The server's own counts, on screen (spec 005 #8) — asked of the API
+	// rather than written down here, because the tests above this one add
+	// versions and labels and the card must report what is actually there.
+	const listing = (await (await call('GET', `/api/v1/prompts/${CHAT}/versions?limit=500`)).json()) as {
+		versions: { version: number }[];
+		labels: Record<string, number>;
+	};
 	const card = page.getByRole('dialog');
 	await expect(card).toContainText('versions');
-	await expect(card.getByText('3', { exact: true })).toBeVisible();
+	await expect(card.getByText(String(listing.versions.length), { exact: true })).toBeVisible();
 	await expect(card).toContainText('labels');
+	await expect(
+		card.getByText(String(Object.keys(listing.labels).length), { exact: true })
+	).toBeVisible();
 
 	const echo = card.getByRole('textbox');
 	const remove = card.getByRole('button', { name: 'Delete this prompt' });

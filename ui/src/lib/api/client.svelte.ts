@@ -117,11 +117,19 @@ export type Credential = 'project-key' | 'admin-token' | 'rejected';
 /** A request the server answered with something other than success. */
 export class ApiError extends Error {
 	readonly status: number;
+	/**
+	 * What the refusal carried beside its sentence. Most carry nothing; a
+	 * refusal a client has to *act* on carries what it needs — an append
+	 * refused by `expect_version` says which version the name is actually at,
+	 * so the screen can offer to open it (spec 021 #14).
+	 */
+	readonly details: Record<string, unknown>;
 
-	constructor(status: number, message: string) {
+	constructor(status: number, message: string, details: Record<string, unknown> = {}) {
 		super(message);
 		this.name = 'ApiError';
 		this.status = status;
+		this.details = details;
 	}
 
 	/** True when the server could not be reached at all. */
@@ -503,7 +511,7 @@ class Api {
 		const response = await this.#fetch('/api/v1/projects', { include: 'deleted' }, token);
 		if (response.ok) return true;
 		if (response.status === 401 || response.status === 403) return false;
-		throw new ApiError(response.status, await message(response));
+		throw await refusal(response);
 	}
 
 	/**
@@ -516,7 +524,7 @@ class Api {
 	async probe(key: string): Promise<Credential> {
 		const traces = await this.#fetch('/api/v1/traces', { limit: '1' }, key);
 		if (traces.ok) return 'project-key';
-		if (traces.status !== 401) throw new ApiError(traces.status, await message(traces));
+		if (traces.status !== 401) throw await refusal(traces);
 		const projects = await this.#fetch('/api/v1/projects', {}, key);
 		return projects.ok ? 'admin-token' : 'rejected';
 	}
@@ -548,7 +556,7 @@ class Api {
 			admin.clear();
 			throw new ApiError(401, 'the key was rejected — sign in again');
 		}
-		throw new ApiError(response.status, await message(response));
+		throw await refusal(response);
 	}
 
 	async #fetch(
@@ -637,15 +645,18 @@ export function search(query: Query): string {
 
 // The API answers every failure with `{"error": "…"}`; anything else is a
 // server that is not this one (a proxy, a captive portal), and then the status
-// is the only true thing we can say.
-async function message(response: Response): Promise<string> {
+// is the only true thing we can say. Whatever else the envelope carries travels
+// with it as `details`, for the refusals a screen has to act on rather than
+// only show (spec 021 #14).
+async function refusal(response: Response): Promise<ApiError> {
 	try {
-		const body = (await response.json()) as { error?: unknown };
-		if (typeof body.error === 'string' && body.error) return body.error;
+		const body = (await response.json()) as Record<string, unknown>;
+		const { error, ...rest } = body;
+		if (typeof error === 'string' && error) return new ApiError(response.status, error, rest);
 	} catch {
 		// Fall through to the status line.
 	}
-	return `the server answered ${response.status}`;
+	return new ApiError(response.status, `the server answered ${response.status}`);
 }
 
 export const api = new Api();

@@ -21,16 +21,18 @@ vi.mock('$lib/api/client.svelte', () => ({
 
 const onchanged = vi.fn();
 
-function control(props: {
-	labels?: string[];
-	named?: Record<string, number>;
-	version?: number;
-} = {}) {
+function control(
+	props: {
+		labels?: string[];
+		named?: Record<string, number> | null;
+		version?: number;
+	} = {}
+) {
 	render(LabelControl, {
 		name: 'support',
 		version: props.version ?? 7,
 		labels: props.labels ?? [],
-		named: props.named ?? {},
+		named: props.named === undefined ? {} : props.named,
 		onchanged
 	} as never);
 }
@@ -99,6 +101,40 @@ describe('attaching a label', () => {
 			expect(putPromptLabel).toHaveBeenCalledWith('support', label, 7);
 		}
 	);
+});
+
+// Spec 021 #15. An empty map is what a name with no labels looks like *and*
+// what a read that has not happened looks like; reading the second as the
+// first turned a *move* into an immediate `PUT` with no dialog at all — on a
+// page whose version view is still drawn from a prompt fetch that succeeded,
+// so nothing on screen says the labels are unknown.
+describe('a label map that has not loaded', () => {
+	it('writes nothing and says why', async () => {
+		control({ labels: ['production'], named: null });
+
+		const add = screen.getByRole('button', { name: /Add label/ });
+		expect(add).toBeDisabled();
+		expect(add).toHaveAttribute('title', expect.stringContaining('have not loaded'));
+
+		const remove = screen.getByRole('button', { name: 'Remove production' });
+		expect(remove).toBeDisabled();
+		expect(remove).toHaveAttribute('title', expect.stringContaining('have not loaded'));
+
+		await userEvent.click(add);
+		expect(screen.queryByLabelText('Label to add')).toBeNull();
+		expect(putPromptLabel).not.toHaveBeenCalled();
+		expect(deletePromptLabel).not.toHaveBeenCalled();
+	});
+
+	// "Loaded" is "a response arrived", never "the map has something in it":
+	// a name with no labels is a perfectly ordinary name to add one to.
+	it('opens up for a name that really has no labels', async () => {
+		control({ named: {} });
+
+		expect(screen.getByRole('button', { name: /Add label/ })).toBeEnabled();
+		await type('production');
+		expect(putPromptLabel).toHaveBeenCalledWith('support', 'production', 7);
+	});
 });
 
 describe('removing a label', () => {

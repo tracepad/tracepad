@@ -304,3 +304,18 @@ export function readDiff(raw: string | null): { from: number; to: number } | nul
 }
 
 export const diffParam = (from: number, to: number) => `${from}..${to}`;
+
+/**
+ * The pair *Diff* opens with (#3): this version against the one before it —
+ * and, on the first version, against the one after it, because `1..1` is a
+ * comparison of a thing with itself and *Diff* would answer "identical" to a
+ * name that has plenty to show (found in review of PR #40).
+ *
+ * v2 is there whenever v1 is not the only version: numbers are `max + 1`
+ * assigned in the write transaction, so a name's versions are 1..N with no
+ * gaps (spec 003 #9). The button is shut on a name that *is* one version, and
+ * on one whose version is not known yet.
+ */
+export function defaultDiff(version: number): { from: number; to: number } {
+	return version <= 1 ? { from: 1, to: 2 } : { from: version - 1, to: version };
+}

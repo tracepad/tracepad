@@ -19,14 +19,19 @@
 		version,
 		/** The labels on this version. */
 		labels,
-		/** Every label of the name and where it points (spec 021 #12). */
+		/**
+		 * Every label of the name and where it points (spec 021 #12), or
+		 * `null` while no version listing has answered yet — which is not the
+		 * same as a name with no labels, and reading it as one is how a *move*
+		 * came to happen without the dialog (spec 021 #15).
+		 */
 		named,
 		onchanged
 	}: {
 		name: string;
 		version: number;
 		labels: string[];
-		named: Record<string, number>;
+		named: Record<string, number> | null;
 		onchanged: () => void;
 	} = $props();
 
@@ -38,8 +43,21 @@
 	let wanted = $state('');
 	let failure = $state<string | null>(null);
 
+	/**
+	 * Whether this control may write at all (spec 021 #15). Every write here
+	 * depends on knowing where the name's labels point — a move has to be
+	 * told apart from a first attachment, and a removal has to be worth
+	 * asking about — so until a listing has answered, both controls are shut
+	 * and say why. "Answered" is the test, never "the map is non-empty": a
+	 * name with no labels looks exactly like a read that has not happened.
+	 */
+	const shut = $derived(named === null);
+	const why = 'The labels of this prompt have not loaded, so nothing here can be changed yet.';
+
 	/** The name's other labels, offered before a new one is typed. */
-	const known = $derived(orderLabels(Object.keys(named).filter((label) => !labels.includes(label))));
+	const known = $derived(
+		orderLabels(Object.keys(named ?? {}).filter((label) => !labels.includes(label)))
+	);
 
 	async function run(act: () => Promise<unknown>) {
 		failure = null;
@@ -54,7 +72,9 @@
 	function add(event: SubmitEvent) {
 		event.preventDefault();
 		const label = wanted.trim();
-		if (label === '') return;
+		// Belt as well as braces: the button is disabled, and the form can
+		// still be submitted by a return key in the field.
+		if (label === '' || named === null) return;
 		// `Object.hasOwn`, not `named[label]`: `toString`, `constructor` and
 		// `valueOf` are all label names the server accepts, and a plain lookup
 		// finds them on `Object.prototype` — which read as a label already
@@ -75,6 +95,7 @@
 	}
 
 	function remove(label: string) {
+		if (named === null) return;
 		pending = {
 			run: () => api.deletePromptLabel(name, label),
 			title: `Remove ${label}`,
@@ -86,10 +107,10 @@
 
 <div class="flex flex-wrap items-center gap-1.5">
 	{#each orderLabels(labels) as label (label)}
-		<LabelChip {label} onremove={() => remove(label)} />
+		<LabelChip {label} onremove={() => remove(label)} disabled={shut} reason={why} />
 	{/each}
 
-	{#if adding}
+	{#if adding && !shut}
 		<form onsubmit={add} class="flex items-center gap-1">
 			<!-- svelte-ignore a11y_autofocus -->
 			<input
@@ -113,7 +134,12 @@
 			<Button onclick={() => ((adding = false), (wanted = ''))}>Cancel</Button>
 		</form>
 	{:else}
-		<Button variant="ghost" onclick={() => (adding = true)}>
+		<Button
+			variant="ghost"
+			disabled={shut}
+			title={shut ? why : undefined}
+			onclick={() => (adding = true)}
+		>
 			<Plus class="size-3.5" />
 			Add label…
 		</Button>

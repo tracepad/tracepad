@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+	defaultDiff,
 	diffCeiling,
 	diffParam,
 	diffable,
@@ -280,6 +281,16 @@ describe('the ?diff= parameter', () => {
 
 	it('writes what it reads', () => {
 		expect(readDiff(diffParam(4, 7))).toEqual({ from: 4, to: 7 });
+	});
+
+	// `1..1` is a comparison of a thing with itself, and *Diff* answering
+	// "identical" on v1 of a six-version name is a dead button (found in
+	// review of PR #40). Versions are gapless, so v2 exists whenever v1 is
+	// not the only one — and the button is shut when it is.
+	it('opens on the version before, or on the one after when there is none', () => {
+		expect(defaultDiff(7)).toEqual({ from: 6, to: 7 });
+		expect(defaultDiff(2)).toEqual({ from: 1, to: 2 });
+		expect(defaultDiff(1)).toEqual({ from: 1, to: 2 });
 	});
 });
 

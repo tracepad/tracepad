@@ -11,8 +11,17 @@
 	let {
 		label,
 		version,
-		onremove
-	}: { label: string; version?: number; onremove?: () => void } = $props();
+		onremove,
+		/** Whether the × may be pressed, and what to say when it may not. */
+		disabled = false,
+		reason
+	}: {
+		label: string;
+		version?: number;
+		onremove?: () => void;
+		disabled?: boolean;
+		reason?: string;
+	} = $props();
 
 	const live = $derived(label === 'production');
 </script>
@@ -28,9 +37,11 @@
 		<button
 			type="button"
 			onclick={onremove}
+			{disabled}
 			aria-label="Remove {label}"
-			title="Remove {label}"
-			class="hover:text-danger -mr-0.5 cursor-pointer rounded-full transition-colors duration-100"
+			title={disabled ? (reason ?? `Remove ${label}`) : `Remove ${label}`}
+			class="hover:not-disabled:text-danger -mr-0.5 cursor-pointer rounded-full transition-colors
+				duration-100 disabled:cursor-default disabled:opacity-45"
 		>
 			<X class="size-3" />
 		</button>

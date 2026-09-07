@@ -18,7 +18,12 @@
 		prompt,
 		named,
 		onchanged
-	}: { prompt: Prompt; named: Record<string, number>; onchanged: () => void } = $props();
+	}: {
+		prompt: Prompt;
+		/** The name's labels, or `null` until a version listing has answered. */
+		named: Record<string, number> | null;
+		onchanged: () => void;
+	} = $props();
 
 	const messages = $derived(prompt.type === 'chat' ? messagesOf(prompt.prompt) : []);
 	const text = $derived(

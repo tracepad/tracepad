@@ -47,8 +47,25 @@
 	let busy = $state(false);
 	let failure = $state<string | null>(null);
 	let wanted = $state('');
+	/**
+	 * The version this editor believes the name is at, which the save sends as
+	 * `expect_version` (spec 021 #14): 0 for a name it believes is new, and
+	 * otherwise the **latest** — not the `?from=` it is prefilled with, which
+	 * is what is being edited rather than what is being appended to. `null`
+	 * means the editor has not established it yet, and *Save* waits.
+	 */
+	let expect = $state.raw<number | null>(null);
+	/**
+	 * Where the server said the name actually is when it refused the save, and
+	 * which name that was about — so that typing a different one is a way out
+	 * of "this name is taken" without a round trip, while "a version landed
+	 * under you" has only the one way out, which is to reload.
+	 */
+	let conflict = $state.raw<{ at: number; name: string } | null>(null);
+	let reload = $state(0);
 
 	$effect(() => {
+		void reload;
 		const controller = new AbortController();
 		void prefill(name, from, controller.signal);
 		return () => controller.abort();
@@ -58,21 +75,30 @@
 	 * What the form starts as. A new name starts empty; a new version starts as
 	 * a copy of the one it is made from, because that is what "edit this
 	 * prompt" means where nothing can be edited in place.
+	 *
+	 * Two reads when — and only when — an older version is being copied: the
+	 * latest establishes the precondition, the named one fills the form. At the
+	 * head they are the same request.
 	 */
 	async function prefill(named: string, version: number | null, signal: AbortSignal) {
 		failure = null;
+		conflict = null;
 		if (named === '') {
 			draft = emptyDraft();
+			expect = 0;
 			return;
 		}
 		loading = true;
+		expect = null;
 		try {
-			const prompt = await api.getPrompt(
-				named,
-				version === null ? {} : { version },
-				signal
-			);
-			if (!signal.aborted) draft = draftFrom(prompt);
+			const latest = await api.getPrompt(named, {}, signal);
+			const source =
+				version === null || version === latest.version
+					? latest
+					: await api.getPrompt(named, { version }, signal);
+			if (signal.aborted) return;
+			draft = draftFrom(source);
+			expect = latest.version;
 		} catch (cause) {
 			if (signal.aborted) return;
 			failure = cause instanceof ApiError ? cause.message : 'Failed to read the prompt.';
@@ -81,8 +107,15 @@
 		}
 	}
 
+	/** The name this editor is writing to. */
+	const target = $derived(naming ? draft.name.trim() : name);
+	/** Whether the refusal on screen still applies to what is on screen. */
+	const refused = $derived(conflict !== null && conflict.name === target);
+
 	const found = $derived(problems(draft, naming));
-	const ready = $derived(Object.keys(found).length === 0 && !loading && !busy);
+	const ready = $derived(
+		Object.keys(found).length === 0 && expect !== null && !loading && !busy && !refused
+	);
 	/**
 	 * Whether anything has been typed yet. A blank form is not a wrong one:
 	 * "a prompt needs a name" in red over a page nobody has touched reads as a
@@ -112,16 +145,29 @@
 	}
 
 	async function save() {
+		if (expect === null) return;
 		busy = true;
 		failure = null;
+		conflict = null;
+		const to = target;
 		try {
-			const target = naming ? draft.name.trim() : name;
-			const created = await api.createPromptVersion(target, versionBody(draft));
-			await goto(`/prompts/${encodeURIComponent(target)}?version=${created.version}`);
+			const created = await api.createPromptVersion(to, {
+				...versionBody(draft),
+				expect_version: expect
+			});
+			await goto(`/prompts/${encodeURIComponent(to)}?version=${created.version}`);
 		} catch (cause) {
 			// Including the `404` of a prompt deleted while this page was open
 			// (edge cases): the server is the oracle, and it says so here.
 			failure = cause instanceof ApiError ? cause.message : 'Failed to save the version.';
+			// A `409` means the name is not where this editor thought (#14):
+			// somebody else published it, or a version landed while this one
+			// was being written. The server says where it is; the offer below
+			// is made out of that number rather than out of a guess.
+			if (cause instanceof ApiError && cause.status === 409) {
+				const at = cause.details.version;
+				conflict = { at: typeof at === 'number' ? at : 0, name: to };
+			}
 		} finally {
 			busy = false;
 		}
@@ -162,6 +208,38 @@
 			<p role="alert" class="text-danger flex items-start gap-2 text-sm">
 				<TriangleAlert class="mt-0.5 size-4 shrink-0" />
 				{failure}
+			</p>
+		{/if}
+
+		{#if refused && conflict}
+			<!-- Nothing was written, and what to do next depends on which
+			     disagreement it was: somebody else owns the name, or somebody
+			     else has moved it on. Neither is answered by pressing Save
+			     again, which is why it stays shut until this is dealt with —
+			     and for a name, typing a different one deals with it. -->
+			<p class="text-warn text-sm">
+				{#if naming}
+					This project already has a prompt called <code class="font-mono">{conflict.name}</code>,
+					at v{conflict.at}. Nothing here was saved.
+					<a
+						class="text-accent underline underline-offset-2"
+						href="/prompts/{encodeURIComponent(conflict.name)}?version={conflict.at}"
+					>
+						Open it
+					</a>
+					and add a version there, or pick another name above.
+				{:else}
+					v{conflict.at} landed while this was being written, so nothing here was saved —
+					appending now would bury it.
+					<button
+						type="button"
+						class="text-accent cursor-pointer underline underline-offset-2"
+						onclick={() => reload++}
+					>
+						Reload from v{conflict.at}
+					</button>
+					— what is on this page goes with it, so copy anything worth keeping first.
+				{/if}
 			</p>
 		{/if}
 

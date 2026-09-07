@@ -18,6 +18,7 @@
 	import { timestamp } from '$lib/format';
 	import { asPage, Listing, UrlSpot } from '$lib/listing.svelte';
 	import {
+		defaultDiff,
 		diffCeiling,
 		diffParam,
 		diffable,
@@ -38,8 +39,13 @@
 	const asked = $derived(page.url.searchParams.get('version'));
 	const diff = $derived(readDiff(page.url.searchParams.get('diff')));
 
-	/** Every label of the name and where it points, from the version listing (#12). */
-	let named = $state.raw<Record<string, number>>({});
+	/**
+	 * Every label of the name and where it points, from the version listing
+	 * (#12) — `null` until one has answered. Not `{}`: that is what a name
+	 * with no labels looks like, and the label control must be able to tell
+	 * the two apart before it writes anything (#15).
+	 */
+	let named = $state.raw<Record<string, number> | null>(null);
 
 	const versions = new Listing<PromptVersionRow & { id: string }>({
 		key: () => name,
@@ -56,22 +62,29 @@
 	let prompt = $state.raw<Prompt | null>(null);
 	let missing = $state<string | null>(null);
 	let deleting = $state(false);
+	/** Bumped by `refresh()`, which is a re-read of the version on screen. */
+	let again = $state(0);
 
 	$effect(() => {
+		// Through the effect, so a re-read is aborted by the navigation that
+		// interrupts it like every other read here. A signal-less `load` could
+		// land after a click on another version and overwrite it — the URL
+		// saying v3 while the pane, the highlighted row and the label
+		// control's writes were all v7 (found in review of PR #40).
+		void again;
 		const controller = new AbortController();
 		void load(name, asked, controller.signal);
 		return () => controller.abort();
 	});
 
-	/** Without a signal: a refresh after a label move, which nothing aborts. */
-	async function load(wanted: string, version: string | null, signal?: AbortSignal) {
+	async function load(wanted: string, version: string | null, signal: AbortSignal) {
 		missing = null;
 		try {
 			const at = version === null ? {} : { version: Number(version) };
 			const answer = await api.getPrompt(wanted, at, signal);
-			if (!signal?.aborted) prompt = answer;
+			if (!signal.aborted) prompt = answer;
 		} catch (cause) {
-			if (signal?.aborted) return;
+			if (signal.aborted) return;
 			prompt = null;
 			// A `?version=` that is not there is the page's own not-found
 			// state, with the versions list still on screen (edge cases).
@@ -81,7 +94,7 @@
 
 	/** After a label move: the version and the name's map both changed. */
 	function refresh() {
-		void load(name, asked);
+		again++;
 		versions.reload();
 	}
 
@@ -99,8 +112,9 @@
 
 	/** Opening the diff: this version against the one before it (#3). */
 	function openDiff() {
-		const to = shown ?? 1;
-		goto(at(undefined, diffParam(Math.max(1, to - 1), to)));
+		if (shown === null) return;
+		const pair = defaultDiff(shown);
+		goto(at(undefined, diffParam(pair.from, pair.to)));
 	}
 
 	function pick(side: 'from' | 'to', raw: string) {
@@ -141,7 +155,7 @@
 			</span>
 		{/if}
 		<div class="hidden flex-wrap gap-1 md:flex">
-			{#each orderLabelEntries(named) as [label, version] (label)}
+			{#each orderLabelEntries(named ?? {}) as [label, version] (label)}
 				<a href={at(version)} class="hover:opacity-80"><LabelChip {label} {version} /></a>
 			{/each}
 		</div>
@@ -164,7 +178,10 @@
 				<span class="hidden sm:inline">Close diff</span>
 			</Button>
 		{:else}
-			<Button aria-label="Diff" disabled={!comparable} onclick={openDiff}>
+			<!-- Also dead while the version on screen is unknown: the pair it
+			     would open with is "this one and the one before it", and there
+			     is no this one yet. -->
+			<Button aria-label="Diff" disabled={!comparable || shown === null} onclick={openDiff}>
 				<GitCompare class="size-4" />
 				<span class="hidden sm:inline">Diff</span>
 			</Button>
