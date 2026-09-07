@@ -19,6 +19,7 @@ required.
 | `GET` | `/api/v1/prompts/{name}/versions` | List a name's versions |
 | `PUT` | `/api/v1/prompts/{name}/labels/{label}` | Create or move a label |
 | `DELETE` | `/api/v1/prompts/{name}/labels/{label}` | Remove a label |
+| `DELETE` | `/api/v1/prompts/{name}` | Delete a name with every version and label |
 
 Prompt and label names match `^[A-Za-z0-9][A-Za-z0-9._-]*$` and are at most 200
 characters — one URL path segment, no escaping. `latest` is reserved as a label
@@ -57,6 +58,7 @@ curl -H "Authorization: Bearer tp-sk-…" \
 | `config` | no | A JSON object — model, temperature, whatever your runtime reads. |
 | `commit_message` | no | Why this version exists. |
 | `labels` | no | Labels to point at this version as it is created. |
+| `expect_version` | no | The version you believe this name is at — `0` for a name you believe is new. See below. |
 
 The version number is `current max + 1`, assigned inside the write transaction.
 Concurrent creates for one name therefore produce `1..N` with no gaps and no
@@ -69,6 +71,35 @@ between versions would break every client that fetches it by label.
 Nothing is interpreted inside `prompt` — `{{variables}}` and any other template
 syntax are stored and returned verbatim. Interpolation belongs to your
 framework, not to the store.
+
+### Appending to the version you meant
+
+There is no create-only endpoint: a first version and a seventh are the same
+`POST`, so a client that means to *create* `summarize` and finds it taken
+would quietly extend somebody else's prompt — and, with `labels`, move their
+`production` while doing it. `expect_version` is how a client says what it
+believed:
+
+```sh
+# "this name is new"
+curl … /api/v1/prompts/summarize/versions -d '{"type":"text","prompt":"…","expect_version":0}'
+
+# "add to the version I was looking at"
+curl … /api/v1/prompts/summarize/versions -d '{"prompt":"…","expect_version":7}'
+```
+
+If the name is not where you said, nothing is written and the answer is a
+`409` naming where it actually is:
+
+```json
+{"error": "prompt \"summarize\" is at version 9, not 7: it changed while this one was being written", "version": 9}
+```
+
+The check runs inside the same transaction that assigns the next number, so
+asking first and posting second — which is a race — is never necessary. The
+field is optional: leave it out and the append is unconditional, which is what
+every client did before it existed. `tracepad prompts push --expect N` sends
+it; the web interface always does.
 
 ## Fetching a prompt
 
@@ -148,9 +179,55 @@ was created.
 `GET /api/v1/prompts/{name}/versions` lists a name's versions newest first,
 with their commit messages and labels but **without** the bodies — version
 lists are for picking and diffing; bodies come from the single-prompt fetch.
+It also answers with `"labels"`: every label of the *name* and the version it
+points at, so "where is production" is answered on any page of a long history.
 
-Both listings take `limit` (1–500, default 50) and a `cursor`; keep passing
-`next_cursor` until it comes back `null`.
+Both listings take `limit` (1–500, default 50), a `cursor` and a `direction`
+(`next` or `prev`), and answer with `next_cursor` and `prev_cursor`. Keep
+passing `next_cursor` until it comes back `null`; with no cursor at all,
+`direction=prev` is the far end — the last name alphabetically, the oldest
+version of a name — which is what makes "jump to the end" cost one page.
+
+## Deleting a prompt
+
+A name that was a mistake, or a rename done by re-creating it under the right
+name, is removed whole. There is no way to delete one version: versions are the
+audit trail, and a hole in it would leave a label pointing at nothing.
+
+Like every destructive endpoint here, it is a dry run until `?confirm=` echoes
+the name (see [admin.md](admin.md#dry-run-by-default)):
+
+```sh
+# what would go
+curl -X DELETE -H "Authorization: Bearer tp-sk-…" \
+  http://localhost:4318/api/v1/prompts/summarize
+```
+
+```json
+{
+  "dry_run": true,
+  "name": "summarize",
+  "would_delete": {"versions": 4, "labels": 1},
+  "confirm": "summarize",
+  "note": "traces that ran this prompt keep the name and version they recorded; the trace filter goes on answering for it"
+}
+```
+
+```sh
+# and for real
+curl -X DELETE -H "Authorization: Bearer tp-sk-…" \
+  "http://localhost:4318/api/v1/prompts/summarize?confirm=summarize"
+```
+
+The confirmed call answers with the same shape plus `"deleted": true`, and the
+versions and the labels go in one transaction. A `confirm` that does not match
+is a `400` that changes nothing; an unknown name is a `404` either way.
+
+**Traces are untouched.** An observation's `prompt` is a name and a version
+the client said it ran, recorded as sent and resolved against no registry
+(see [api.md](api.md#one-trace)) — not a reference into this table. So
+`?prompt=summarize` on the trace listing goes on finding the runs of a prompt
+whose definition is gone, which is the honest answer: they did run it.
 
 ## Using a prompt from an application
 
@@ -173,14 +250,28 @@ response = client.messages.create(model=prompt["config"]["model"], messages=mess
 
 Deploying a new prompt is then a label move, not a release.
 
+## From the web interface
+
+Everything on this page has a screen: *Prompts* in the sidebar is the listing,
+a name opens its versions with the body of the one you are reading, `?diff=A..B`
+shows the patch the endpoint above returns, and the editor appends a version
+from the one on screen — an edit *is* a new version, so there is no other kind.
+The label control is the deploy path: attaching a label that points nowhere is
+immediate, and moving or removing one asks first and names the move
+(*production: v6 → v7*). *Delete* is the endpoint above, dry run and all.
+
+The interface does nothing the API does not, and nothing the CLI cannot: every
+button here is one of the requests on this page. See [ui.md](ui.md#prompts).
+
 ## Responses
 
 | Status | Meaning |
 |---|---|
 | `201` | The version is committed and fsynced to disk. |
-| `200` | The read, the label move or the label removal succeeded. |
-| `400` | Validation: a type mismatch, a malformed name, an unknown field or parameter, `latest` used as a label. |
+| `200` | The read, the label move, the label removal, or the deletion — or its dry run — succeeded. |
+| `400` | Validation: a type mismatch, a malformed name, an unknown field or parameter, `latest` used as a label, a `confirm` that does not echo the name. |
 | `401` | Unknown credentials. |
 | `404` | No such prompt, version or label in this project. |
+| `409` | `expect_version` disagrees with where the name actually is; nothing was written, and the body says where that is. |
 | `413` | The body is over `TRACEPAD_MAX_BODY_BYTES`. |
 | `429` | The write queue is saturated; retry after the `Retry-After` delay. |

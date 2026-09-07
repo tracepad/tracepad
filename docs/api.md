@@ -33,6 +33,7 @@ document served without authentication.
 | `GET` | `/api/v1/runs` | List the project's eval runs, newest first, across datasets |
 | `GET` | `/api/v1/stats` | Counts, errors, cost, latency percentiles |
 | `GET` | `/api/v1/prompts/{name}/diff` | Unified diff between two prompt versions |
+| `DELETE` | `/api/v1/prompts/{name}` | Delete a prompt name whole; a dry run until confirmed |
 | `GET` | `/api/v1/system` | Version, uptime, database size, ingest counters |
 | `GET` | `/api/v1` | This endpoint map |
 | `GET` | `/api/v1/openapi.json` | The OpenAPI document |
@@ -678,9 +679,17 @@ One shape everywhere:
 {"error": "unknown query parameter \"trace\" (accepted: from, to, environment, …)"}
 ```
 
+A refusal a client has to *act* on carries what it needs beside the sentence —
+a prompt append refused by `expect_version` says which version the name is
+actually at ([prompts.md](prompts.md#appending-to-the-version-you-meant)):
+
+```json
+{"error": "prompt \"summarize\" is at version 9, not 7: it changed while this one was being written", "version": 9}
+```
+
 | Status | Meaning |
 |---|---|
 | `400` | The request cannot mean what it says: an unknown parameter, a malformed value, a `limit` out of range. |
 | `401` | The credentials do not resolve to a project. |
 | `404` | No such thing in this project. On `traces/last`, the message names the filters that found nothing. |
-| `409` | An observation id that is ambiguous without a `trace_id`. |
+| `409` | An observation id that is ambiguous without a `trace_id`; a prompt append whose `expect_version` disagrees with the name's current state. |

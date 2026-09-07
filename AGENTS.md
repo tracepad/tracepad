@@ -178,6 +178,24 @@ API. This file routes; it does not duplicate what specs and docs say.
   which is the seam nothing else covers — the Go suite calls `cli.Run`
   directly, so only a running container proves the real binary dispatches a
   command at all.
+- ✅ Spec 021 (prompts in the web interface) shipped: the *Prompts* section —
+  a listing, a prompt page with its versions and the body of the one being
+  read, the server's diff between any two painted per line, an editor that
+  appends a version, and a label control on which promoting and rolling back
+  are the one-line operation spec 003 designed them to be. Top-level in the
+  sidebar rather than under *Evals* (#1): a prompt is what the application
+  ships, not an eval noun. One write was missing from the API and is added
+  here — `DELETE /api/v1/prompts/{name}`, a name whole, dry run until
+  `?confirm=` echoes it (#7) — with `tracepad prompts rm` and `prompts label`
+  beside it, because the interface may do nothing the CLI cannot (spec 004 #1).
+  Traces that ran a deleted prompt keep the columns they recorded: those are a
+  string pair the client sent (spec 012), not a reference into the table, and
+  the filter goes on answering. Three amendments the screens paid for: both
+  prompt listings page **both ways** (#11), the version listing answers with
+  the name's whole `labels` map (#12), and the API client fetches
+  `no-store` (#13) — the prompt reads are the only ones carrying
+  `Cache-Control`, and a screen that had just moved a label was re-reading the
+  minute-old answer.
 - ✅ Spec 005 (retention & admin) shipped: schema 0005, the hourly sweeper
   writing every chunk through the group-commit writer, the admin API under
   `/api/v1/projects` with a dry-run/confirm contract on every destructive
@@ -193,7 +211,7 @@ API. This file routes; it does not duplicate what specs and docs say.
 | Write pipeline (group commit) | `internal/store/writer.go`, spec 002 #15, spec 003 #9 — every durable write is a `WriteJob` |
 | HTTP surface | `internal/server/` |
 | OTLP ingest | `internal/server/otlp.go`, `docs/ingest.md`, spec 002 |
-| Scores & prompts | `internal/server/scores.go`, `prompts.go`, `docs/scores.md`, `docs/prompts.md`, spec 003 |
+| Scores & prompts | `internal/server/scores.go`, `prompts.go`, `docs/scores.md`, `docs/prompts.md`, spec 003 — a version is never edited and never deleted alone; `PromptDelete` in `internal/store/prompts.go` takes a name whole, and the echo is checked inside its transaction (spec 021 #7) |
 | Datasets, runs, score configs | `internal/store/datasets.go` (the version clock, "items at V", the pin's release), `runs.go` (the summary, the item view, the values a comparison needs), `scoreconfigs.go` (the binding by name, checked inside `ScoreWrite.apply`), `internal/server/datasets.go`, `runs.go`, `scoreconfigs.go`, `internal/cli/datasets.go`, `internal/mcpserver/evals.go`, `docs/datasets.md`, spec 014 — the store executes nothing; a trace joins a run through two columns the mapper claims from `tracepad.run_id`/`tracepad.item_id`, `notPinned` in `sweep.go` is the one predicate the sweep and the retention dry run share, and every number a comparison reports is computed server-side so that two clients cannot disagree about what improved means |
 | JSON API plumbing (auth, strict decode, pagination) | `internal/server/api.go`, spec 003 |
 | Read API (traces, sessions, stats, system) | `internal/server/traces.go` and neighbours, `docs/api.md`, specs 004 and 009 — the route table in `routes.go` is the surface, and `openapi.json` must agree with it. Paging is keyset in both directions: `trimPage` in `api.go` owns which cursor a page may claim |
@@ -212,6 +230,7 @@ API. This file routes; it does not duplicate what specs and docs say.
 | A listing (rows, cursors, count, the bar, the panel's walk) | `ui/src/lib/listing.svelte.ts` and its tests, spec 010 — all three listings are one loader, so a listing defect is one defect. `$lib/page` and `$lib/peek` hold the pure part; a listing read oldest first (a dataset's items, a run's) sets `ascending` on its walk (spec 016 #19) |
 | The Evals screens (datasets, runs, the comparison) | `ui/src/routes/{datasets,runs,score-configs}/`, `ui/src/lib/components/evals/` (the tables, the three peek bodies, the summary cards), `ui/src/lib/evals.ts` (the pure part: the checkbox rule, the *changed only* filter, the words a cell uses), `ui/src/lib/api/runs.ts` (the run filters, held to `openapi.json`), `docs/ui.md#evals`, spec 016 — every number on these screens is the server's (spec 014 #18); the client decides which rows to draw and never what a verdict is |
 | Writing an eval (the item editor, the forms, the deletions) | `ui/src/lib/components/evals/ItemEditor.svelte` over the routes `datasets/items/new` and `datasets/[name]/items/[id]/edit` (spec 016 #21), `ScoreConfigDialog.svelte` with `ui/src/lib/api/score-configs.ts` (the vocabularies and the rules, held to `openapi.json`), `NewDatasetDialog`/`DeleteDatasetDialog`, `ui/src/lib/components/ConfirmDialog.svelte`, `itemBody`/`savedMessage` in `$lib/evals`, `docs/datasets.md#the-same-loop-from-the-web-interface` — a write is one of spec 014's endpoints and never a verb of the screen's own; the echo ceremony (`ConfirmCard`) is only where the server has a dry run, and the dialog is where it does not (#6) |
+| The Prompts screens (the listing, the versions, the diff, the editor) | `ui/src/routes/prompts/`, `ui/src/lib/components/prompts/` (the chip, the label control, the version view, the painted diff, the editor, the delete card), `ui/src/lib/prompts.ts` (the pure part: the Save gate per field, the chip order, the diff painter's classification, the two conversions between a stored body and the form), `docs/ui.md#prompts`, spec 021 — the diff is the server's and is only painted here (#3), the gate mirrors the `400`s spec 003 already gives and never replaces them (#5), a move or a removal of a label goes through `ConfirmDialog` naming it and a new label does not (#6), and the editor is only ever "new version from this one" because the store is append-only |
 | The Python package | `sdk/python/` (`src/tracepad/` is the package, `tests/` its suite and `tests/e2e/` the run against a real binary), `docs/sdk-python.md`, spec 017 — two dependencies and no third, no provider-client wrapper ever (design §6.5); `_tracing.py` holds the provider adaptation and defers the SDK's own imports into `init`, `_attributes.py` is the vocabulary that `internal/mapping/rules.go` reads back, and the application-line budget is 1,500 shared with spec 018 (`scripts/sdk-lines.sh`). `scripts/fixtures/tracepad_sdk.py` rewrites `testdata/otlp/010-tracepad-sdk.pb` from the package's own exporter |
 | The eval harness in Python | `sdk/python/src/tracepad/_harness.py` (the processor, `Run`, `Attempt`, the score configs, `compare`, the paging loop) and `_datasets.py` (`Dataset`, `Item`), `docs/datasets.md#the-same-loop-from-python`, `docs/sdk-python.md#evals`, spec 018 — the stamping is a `ContextVar` read at `on_start` and never a span the harness opened (#3), `init` registers the processor before the exporting one and under `export=False` too, and the read side is the server's JSON as `dict`s because a model layer is a place to start disagreeing with it (#8) |
 | Packaging: the image and the release | `Dockerfile` + `.dockerignore` (the whole recipe — the image builds both halves from the checkout and copies no prebuilt binary), `scripts/image-check.sh` (the contract, asserted from outside because the image has no shell), `.github/workflows/release-server.yml` (GoReleaser for the archives, `buildx` for one multi-arch manifest on GHCR), the `docker` job in `ci.yml`, `docs/docker.md`, spec 020 — `tracepad health` (`internal/cli/commands.go`) is the container's `HEALTHCHECK` and the one command that needs no key |

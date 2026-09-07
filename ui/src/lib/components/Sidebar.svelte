@@ -5,6 +5,7 @@
 	import ListTree from '@lucide/svelte/icons/list-tree';
 	import MessagesSquare from '@lucide/svelte/icons/messages-square';
 	import Ruler from '@lucide/svelte/icons/ruler';
+	import ScrollText from '@lucide/svelte/icons/scroll-text';
 	import Settings from '@lucide/svelte/icons/settings';
 	import type { Component } from 'svelte';
 
@@ -22,6 +23,10 @@
 		{ href: '/traces', label: 'Traces', icon: ListTree },
 		{ href: '/sessions', label: 'Sessions', icon: MessagesSquare },
 		{ href: '/stats', label: 'Stats', icon: ChartLine },
+		// Top level, not under *Evals* (spec 021 #1): a prompt is what the
+		// application ships, and filing it under the test loop would say it
+		// belongs to the eval nouns.
+		{ href: '/prompts', label: 'Prompts', icon: ScrollText },
 		{
 			label: 'Evals',
 			children: [

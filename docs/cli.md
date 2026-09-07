@@ -231,6 +231,9 @@ tracepad prompts ls
 tracepad prompts get support --label production
 tracepad prompts push support --file prompt.json --label staging
 tracepad prompts diff support --from 1 --to 3
+tracepad prompts label support production --version 4
+tracepad prompts label support production --rm
+tracepad prompts rm support --yes
 ```
 
 `push` sends the file as the version's request body, so the prompt stays JSON
@@ -240,9 +243,15 @@ and out of shell quoting:
 {"type": "text", "prompt": "You are a support agent.", "config": {"temperature": 0.2}}
 ```
 
-`--label` and `--message` fill in `labels` and `commit_message` when the file
-does not already set them — the file wins, so a script that sets both is never
-silently overruled.
+`--label`, `--message` and `--expect` fill in `labels`, `commit_message` and
+`expect_version` when the file does not already set them — the file wins, so a
+script that sets both is never silently overruled.
+
+`--expect N` says which version you believe the name is at (`--expect 0` for a
+name you believe is new). A name that moved under you is then a `409` naming
+where it actually is, rather than a version quietly appended onto somebody
+else's work — see
+[prompts.md](prompts.md#appending-to-the-version-you-meant).
 
 `ls` pages: `--limit` (1–500, default 50) and `--cursor`, with the last line
 printing the command that continues the walk.
@@ -252,8 +261,20 @@ more: --cursor c3VwcG9ydA
 ```
 
 It says `more` rather than `older` because this listing is alphabetical by
-name, not newest-first, and it walks one way only — there is no `--oldest` or
-`--newer` here, because the endpoint has no other end to jump to.
+name, not newest-first. The command walks that way only: the endpoint does page
+in both directions, and the web interface uses it, but a terminal walk that
+started at `a` has nothing to go back to that it has not just printed.
+
+`label` is the deploy path (see [prompts.md](prompts.md#labels)): promote by
+pointing `production` at a newer version, roll back by pointing it at an older
+one, retire it with `--rm`. Neither writes a version, and both print where the
+label ended up — a removal printing the version it was taken from, which is
+what you point it back at.
+
+`rm` deletes a name with every version and every label it has, so it wears the
+same ceremony as the administrative commands: without `--yes` it prints what
+would go and asks you to type the name back, and off a terminal it refuses
+outright. Traces that ran the prompt keep the name and version they recorded.
 
 ### `stats`
 

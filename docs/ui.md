@@ -70,6 +70,62 @@ are the endpoint's four (`from`, `to`, `environment`, `user_id`), and a row
 opens the session: its totals over its traces, and a trace opens from there.
 Every number counts traces, which is what a session is a collection of.
 
+## Prompts
+
+*Prompts* is a top-level section, between *Stats* and *Evals*: a prompt is a
+production artefact — what the application ships — rather than an eval noun.
+It is [prompts.md](prompts.md) on screen, and it writes through exactly the
+endpoints described there.
+
+**Prompts** — one row per name over `GET /api/v1/prompts`: name, type, the
+latest version, the labels as chips with the version each points at
+(`production` first, then alphabetical), and when the name last gained a
+version. A row opens the prompt. An empty listing shows the `push` that fills
+it and the SDK line that reads it back.
+
+**Prompt** — the versions down the left, the version the URL names on the
+right. The header carries the name, the type, where each label points, and
+*New version*, *Diff* and *Delete*. `?version=V` picks a version — absent
+means the latest — and the version list is the shared listing, so a name with
+hundreds of versions pages like everything else. The view is the body as it
+is: role-labelled blocks for a chat prompt, one block for a text one — prose,
+not an escaped JSON string — with `config` as a document, and two links that
+answer where it ran: *Traces with v7* and *Traces with any version*, which are
+the `prompt=` filter [spec 012 added](api.md#filters). A `?version=` the name
+does not have says so, with the version list still beside it.
+
+**Labels** — the control lives on the version being read: the labels on it as
+chips with a ×, and *Add label…*, which offers the name's other labels or
+takes a new one. Attaching a label that points nowhere is immediate — a new
+label is a note. Moving one that points at another version, and removing one,
+ask first, and the question names the move: *production: v6 → v7*, which is
+what a rollback reads before confirming. A move writes no version: promoting
+and rolling back are the same one-line operation the API describes.
+
+**Diff** — `?diff=A..B` replaces the version view with the patch
+`GET /api/v1/prompts/{name}/diff` returns, painted per line: additions,
+removals, hunk headers. The interface computes no diff, so the screen, the CLI
+and an agent all read the same one. The two selects are number inputs bounded
+by the latest version, not menus of every version. `?diff=3..3` says
+*identical*; a name with one version says there is no diff yet.
+
+**Writing a version** — *New prompt* takes a name and a type; *New version*
+opens a copy of the version on screen, because an edit *is* a new version. The
+bodies are plain text areas — a prompt has no syntax to lint — one for a text
+prompt, one per message for a chat one, each with a role beside it (`system`,
+`user`, `assistant` offered, anything accepted) and *add*, *remove*, *up*,
+*down*. `config` is the same JSON surface every payload uses. *Save* posts one
+version and lands on it. The gate is the server's own rules mirrored at the
+fields — the name's grammar, a non-empty body, a role and content per message,
+a config that parses, and `latest` refused as a label — so that a `400` naming
+one of them is not how you find out; the server still decides.
+
+**Delete** takes the name whole: every version and every label, in one
+transaction. It wears the ceremony every act with a blast radius wears here —
+the server's dry run on screen, with what it would take and what it would not,
+and the name typed back. Traces that ran the prompt keep the name and version
+they recorded, so the trace filter goes on answering for it.
+
 ## Evals
 
 The sidebar's *Evals* section is the eval nouns of [datasets.md](datasets.md)

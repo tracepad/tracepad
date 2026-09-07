@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"slices"
 )
 
 // Versioned prompts (spec 003). Versions are an append-only audit trail per
@@ -73,8 +74,16 @@ type PromptVersionWrite struct {
 	// and only the stored versions can say whether this is the first, so
 	// that check happens here rather than in the handler, where it would
 	// race (Decision 20, 2026-08-27).
-	Type          string
-	TypeStated    bool
+	Type       string
+	TypeStated bool
+	// ExpectVersion is the version the author believed the name was at when
+	// they composed this one — 0 for "this name is new" (spec 021 #14). A
+	// mismatch is a conflict rather than an append: the alternative for a
+	// client is to ask first and post second, which is a race the store can
+	// settle here for free, inside the transaction that assigns the number.
+	// Absent (nil) means "append whatever the current state is", which is
+	// what every caller before this field did.
+	ExpectVersion *int
 	Prompt        []byte
 	Config        []byte
 	CommitMessage string
@@ -93,6 +102,14 @@ func (p *PromptVersionWrite) apply(tx *sql.Tx) error {
 	err := tx.QueryRow(
 		`SELECT type, version FROM prompts WHERE project_id = ? AND name = ?
 		 ORDER BY version DESC LIMIT 1`, p.ProjectID, p.Name).Scan(&existingType, &latest)
+	if err != nil && err != sql.ErrNoRows {
+		return fmt.Errorf("read prompt %s: %w", p.Name, err)
+	}
+	// The precondition first: everything below is about a name whose current
+	// state the author has already been shown to disagree with.
+	if refusal := p.precondition(latest); refusal != nil {
+		return refusal
+	}
 	switch {
 	case err == sql.ErrNoRows:
 		if !p.TypeStated {
@@ -101,8 +118,6 @@ func (p *PromptVersionWrite) apply(tx *sql.Tx) error {
 				Message: fmt.Sprintf(`prompt %q does not exist yet: its first version must state a "type"`, p.Name),
 			}
 		}
-	case err != nil:
-		return fmt.Errorf("read prompt %s: %w", p.Name, err)
 	case p.Type != existingType:
 		// A name that changes shape between versions breaks every
 		// client fetching it by label, so the type is part of the
@@ -129,6 +144,36 @@ func (p *PromptVersionWrite) apply(tx *sql.Tx) error {
 	}
 	p.Version = version
 	return nil
+}
+
+// precondition checks what the author believed the name was at against what it
+// is, inside the transaction that is about to assign the next number
+// (spec 021 #14). Three situations, because they are three different things to
+// have got wrong, and the refusal is what a person reads before deciding what
+// to do with the text they have just written.
+//
+// The `version` in Details is the *actual* current one, so a client can offer
+// to open it or to reload from it rather than sending the reader to look.
+func (p *PromptVersionWrite) precondition(latest int) *Rejection {
+	if p.ExpectVersion == nil || *p.ExpectVersion == latest {
+		return nil
+	}
+	var message string
+	switch {
+	case *p.ExpectVersion == 0:
+		message = fmt.Sprintf("prompt %q already exists, at version %d", p.Name, latest)
+	case latest == 0:
+		message = fmt.Sprintf("prompt %q does not exist yet, so it is not at version %d",
+			p.Name, *p.ExpectVersion)
+	default:
+		message = fmt.Sprintf("prompt %q is at version %d, not %d: it changed while this one was being written",
+			p.Name, latest, *p.ExpectVersion)
+	}
+	return &Rejection{
+		Kind:    RejectConflict,
+		Message: message,
+		Details: map[string]any{"version": latest},
+	}
 }
 
 // PromptLabelWrite creates, moves or removes one label (#12). Moving a label
@@ -184,6 +229,83 @@ func (p *PromptLabelWrite) apply(tx *sql.Tx) error {
 		return fmt.Errorf("read prompt %s version %d: %w", p.Name, p.Version, err)
 	}
 	return setPromptLabel(tx, p.ProjectID, p.Name, p.Label, p.Version)
+}
+
+// PromptCounts is what deleting a name would take with it (spec 021 #7).
+type PromptCounts struct {
+	Versions int
+	Labels   int
+}
+
+// PromptDelete is the confirmed half of DELETE /api/v1/prompts/{name}
+// (spec 021 #7): the name's whole history, and the labels pointing into it, in
+// one transaction. There is no cascade to lean on — `prompt_labels` names a
+// version by value rather than by foreign key, deliberately (schema 0003) — so
+// both tables are swept here.
+//
+// The traces that ran this prompt keep their `prompt_name`/`prompt_version`
+// columns: they record what a client said it ran (spec 012), not a reference
+// into this table, and severing them would be a second deletion nobody asked
+// for.
+type PromptDelete struct {
+	ProjectID string
+	Name      string
+	Confirm   string
+
+	// Counts is what went, filled by apply.
+	Counts PromptCounts
+}
+
+func (p *PromptDelete) apply(tx *sql.Tx) error {
+	p.Counts = PromptCounts{}
+	counts, err := promptCounts(tx, p.ProjectID, p.Name)
+	if err != nil {
+		return err
+	}
+	if counts.Versions == 0 {
+		return &Rejection{
+			Kind:    RejectNotFound,
+			Message: fmt.Sprintf("prompt %q not found", p.Name),
+		}
+	}
+	// Inside the transaction, like every other destructive job (spec 005 #8).
+	if p.Confirm != p.Name {
+		return &Rejection{Kind: RejectInvalid, Message: fmt.Sprintf(
+			"confirm must be the prompt's name, %q, for this to happen", p.Name)}
+	}
+	if _, err := tx.Exec(`DELETE FROM prompt_labels WHERE project_id = ? AND name = ?`,
+		p.ProjectID, p.Name); err != nil {
+		return fmt.Errorf("delete labels of prompt %s: %w", p.Name, err)
+	}
+	if _, err := tx.Exec(`DELETE FROM prompts WHERE project_id = ? AND name = ?`,
+		p.ProjectID, p.Name); err != nil {
+		return fmt.Errorf("delete prompt %s: %w", p.Name, err)
+	}
+	p.Counts = counts
+	return nil
+}
+
+// PromptPreview is the dry run's half: what deleting the name would take, or a
+// zero version count when the name is unknown.
+func (s *Store) PromptPreview(projectID, name string) (PromptCounts, error) {
+	return promptCounts(s.db, projectID, name)
+}
+
+// rows is the part of *sql.DB and *sql.Tx both counters need, so the preview
+// and the commit count the same way rather than twice.
+type rows interface {
+	QueryRow(query string, args ...any) *sql.Row
+}
+
+func promptCounts(from rows, projectID, name string) (PromptCounts, error) {
+	var counts PromptCounts
+	if err := from.QueryRow(
+		`SELECT (SELECT COUNT(*) FROM prompts WHERE project_id = ? AND name = ?),
+		        (SELECT COUNT(*) FROM prompt_labels WHERE project_id = ? AND name = ?)`,
+		projectID, name, projectID, name).Scan(&counts.Versions, &counts.Labels); err != nil {
+		return PromptCounts{}, fmt.Errorf("count prompt %s: %w", name, err)
+	}
+	return counts, nil
 }
 
 // setPromptLabel points a label at a version, moving it if it already exists.
@@ -260,21 +382,32 @@ func (s *Store) Prompt(projectID, name string, selector PromptSelector) (*Prompt
 }
 
 // PromptVersions lists a name's versions, newest first and without bodies
-// (#18). afterVersion continues a previous page; zero starts at the newest.
-func (s *Store) PromptVersions(projectID, name string, limit, afterVersion int) ([]PromptVersionSummary, error) {
+// (#18). afterVersion continues a previous page; zero starts at the end the
+// direction reads from. `backward` walks towards newer versions, which is what
+// lets « ‹ › » cost what one page costs on this listing too (spec 021 #11).
+//
+// It also returns **every** label of the name with the version it points at,
+// not only the labels of the versions on the page: the map is read whole
+// anyway, and a reader asking "where is production" must not have to page to
+// the version it happens to be on (spec 021 #12).
+func (s *Store) PromptVersions(projectID, name string, limit, afterVersion int, backward bool) ([]PromptVersionSummary, map[string]int, error) {
+	comparison, order := "<", "DESC"
+	if backward {
+		comparison, order = ">", "ASC"
+	}
 	query := `SELECT version, commit_message, created_at FROM prompts
 	          WHERE project_id = ? AND name = ?`
 	args := []any{projectID, name}
 	if afterVersion > 0 {
-		query += ` AND version < ?`
+		query += ` AND version ` + comparison + ` ?`
 		args = append(args, afterVersion)
 	}
-	query += ` ORDER BY version DESC LIMIT ?`
+	query += ` ORDER BY version ` + order + ` LIMIT ?`
 	args = append(args, limit)
 
 	rows, err := s.db.Query(query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("list versions of prompt %s: %w", name, err)
+		return nil, nil, fmt.Errorf("list versions of prompt %s: %w", name, err)
 	}
 	defer rows.Close()
 
@@ -285,43 +418,58 @@ func (s *Store) PromptVersions(projectID, name string, limit, afterVersion int) 
 			commitMessage sql.NullString
 		)
 		if err := rows.Scan(&summary.Version, &commitMessage, &summary.CreatedAt); err != nil {
-			return nil, fmt.Errorf("scan version of prompt %s: %w", name, err)
+			return nil, nil, fmt.Errorf("scan version of prompt %s: %w", name, err)
 		}
 		summary.CommitMessage = commitMessage.String
 		out = append(out, summary)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+	if backward {
+		slices.Reverse(out)
 	}
 	// One query for the name's labels, not one per version on the page: a
 	// name has a handful of labels and a page has up to 500 versions.
 	labels, err := s.promptLabelsByVersion(projectID, name)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+	named := map[string]int{}
+	for version, names := range labels {
+		for _, label := range names {
+			named[label] = version
+		}
 	}
 	for i := range out {
 		out[i].Labels = labels[out[i].Version]
 	}
-	return out, nil
+	return out, named, nil
 }
 
 // Prompts lists names alphabetically. Ordering by name rather than by recency
 // is what makes the cursor a keyset: a version written mid-walk cannot move a
-// name to a page the client already read.
-func (s *Store) Prompts(projectID string, limit int, afterName string) ([]PromptSummary, error) {
+// name to a page the client already read. `backward` walks towards the start
+// of the alphabet, so the listing has a far end and a page before this one
+// (spec 021 #11).
+func (s *Store) Prompts(projectID string, limit int, afterName string, backward bool) ([]PromptSummary, error) {
 	// GROUP BY over the primary key's own order, rather than a correlated
 	// MAX subquery evaluated once per candidate row. `type` and
 	// `created_at` are bare columns beside MAX(version), which SQLite
 	// defines as coming from the row that produced the maximum — exactly
 	// the newest version's row, which is what a summary describes.
+	comparison, order := ">", "ASC"
+	if backward {
+		comparison, order = "<", "DESC"
+	}
 	query := `SELECT name, type, MAX(version), created_at FROM prompts
 	          WHERE project_id = ?`
 	args := []any{projectID}
 	if afterName != "" {
-		query += ` AND name > ?`
+		query += ` AND name ` + comparison + ` ?`
 		args = append(args, afterName)
 	}
-	query += ` GROUP BY name ORDER BY name LIMIT ?`
+	query += ` GROUP BY name ORDER BY name ` + order + ` LIMIT ?`
 	args = append(args, limit)
 
 	rows, err := s.db.Query(query, args...)
@@ -340,6 +488,9 @@ func (s *Store) Prompts(projectID string, limit int, afterName string) ([]Prompt
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
+	}
+	if backward {
+		slices.Reverse(out)
 	}
 	if len(out) == 0 {
 		return out, nil

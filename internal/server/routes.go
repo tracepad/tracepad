@@ -63,6 +63,7 @@ func (s *Server) routes() []route {
 		{"POST", "/api/v1/prompts/{name}/versions", "Append a version to a prompt", s.handleCreatePromptVersion},
 		{"GET", "/api/v1/prompts/{name}/versions", "List a prompt's versions, newest first", s.handleListPromptVersions},
 		{"GET", "/api/v1/prompts/{name}/diff", "Unified diff between two versions of a prompt", s.handlePromptDiff},
+		{"DELETE", "/api/v1/prompts/{name}", "Delete a prompt with every version and label; a dry run until `?confirm=` echoes the name", s.handleDeletePrompt},
 		{"PUT", "/api/v1/prompts/{name}/labels/{label}", "Point a label at a version", s.handlePutPromptLabel},
 		{"DELETE", "/api/v1/prompts/{name}/labels/{label}", "Remove a label", s.handleDeletePromptLabel},
 
