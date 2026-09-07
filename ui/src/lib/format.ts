@@ -88,6 +88,39 @@ export function timestamp(iso: string | null | undefined): string {
 	});
 }
 
+// One formatter, not one per call: a score block draws a dozen of these and
+// building an Intl formatter is the expensive half of the work.
+const AGO = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' });
+
+const UNITS: [seconds: number, unit: Intl.RelativeTimeFormatUnit][] = [
+	[31_536_000, 'year'],
+	[2_592_000, 'month'],
+	[86_400, 'day'],
+	[3_600, 'hour'],
+	[60, 'minute'],
+	[1, 'second']
+];
+
+/**
+ * How long ago, in the coarsest unit that still says something — *3 hours
+ * ago*, *yesterday*. It is what a judgement wants beside it: whether a verdict
+ * is from this run or from last month is the question, and the exact instant
+ * is one hover away (spec 022 #3).
+ *
+ * `now` is a parameter so that the rendering is testable without a clock.
+ */
+export function relative(iso: string | null | undefined, now = Date.now()): string {
+	const at = instant(iso);
+	if (!at) return ABSENT;
+	const seconds = Math.round((now - at.getTime()) / 1000);
+	const size = Math.abs(seconds);
+	const [span, unit] = UNITS.find(([each]) => size >= each) ?? [1, 'second'];
+	// Negative is the past, which is what an API timestamp almost always is;
+	// a clock ahead of the browser's reads as "in 2 minutes" rather than as a
+	// missing value.
+	return AGO.format(-Math.trunc(seconds / span), unit);
+}
+
 /** The same instant with milliseconds, for the detail panel's timings. */
 export function timestampPrecise(iso: string | null | undefined): string {
 	const at = instant(iso);

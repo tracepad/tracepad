@@ -565,6 +565,24 @@
           "401": {"$ref": "#/components/responses/Unauthorized"},
           "404": {"$ref": "#/components/responses/NotFound"}
         }
+      },
+      "delete": {
+        "tags": ["scores"],
+        "summary": "Retract one score; no dry run, a re-POST puts it back",
+        "description": "A score is one row, so there is no echo to type: writing the same id again recreates it.",
+        "operationId": "deleteScore",
+        "parameters": [{"name": "id", "in": "path", "required": true,
+          "schema": {"type": "string", "pattern": "^[0-9a-f]{32}$"}}],
+        "responses": {
+          "200": {"description": "The score is gone", "content": {"application/json": {"schema": {
+            "type": "object",
+            "properties": {"id": {"type": "string"}},
+            "required": ["id"]
+          }}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
       }
     },
     "/api/v1/prompts": {

@@ -196,6 +196,21 @@ API. This file routes; it does not duplicate what specs and docs say.
   `no-store` (#13) — the prompt reads are the only ones carrying
   `Cache-Control`, and a screen that had just moved a label was re-reading the
   minute-old answer.
+- ✅ Spec 022 (scores on screen) shipped: the judgements have been in the API
+  since spec 003 and on the eval screens since spec 016, and were invisible on
+  the screens where the graded thing itself is read. A *Scores* block now sits
+  on the trace header, the observation panel and the session header — one chip
+  per score, the value rendered by the type its config pins, the source it
+  claims, the comment on expand — off **one** read per trace, split between the
+  header and the panels by a field and counted into the tree's badge, because
+  splitting a loaded document is rendering and not the client logic spec 004 #1
+  forbids (#1, #8). The write half is the one a reviewer needs: *Score* is a
+  dialog that builds its control from the name's config, *Edit* is spec 003's
+  correction — the same POST carrying the row's id — and *Delete* is the
+  endpoint retraction was missing, `DELETE /api/v1/scores/{id}`, with no dry run
+  and no echo because a re-POST puts the row back (#6). `tracepad scores add`
+  and `scores rm` land in the same PR, since the interface may do nothing the
+  CLI cannot (#7).
 - ✅ Spec 005 (retention & admin) shipped: schema 0005, the hourly sweeper
   writing every chunk through the group-commit writer, the admin API under
   `/api/v1/projects` with a dry-run/confirm contract on every destructive
@@ -211,7 +226,8 @@ API. This file routes; it does not duplicate what specs and docs say.
 | Write pipeline (group commit) | `internal/store/writer.go`, spec 002 #15, spec 003 #9 — every durable write is a `WriteJob` |
 | HTTP surface | `internal/server/` |
 | OTLP ingest | `internal/server/otlp.go`, `docs/ingest.md`, spec 002 |
-| Scores & prompts | `internal/server/scores.go`, `prompts.go`, `docs/scores.md`, `docs/prompts.md`, spec 003 — a version is never edited and never deleted alone; `PromptDelete` in `internal/store/prompts.go` takes a name whole, and the echo is checked inside its transaction (spec 021 #7) |
+| Scores & prompts | `internal/server/scores.go`, `prompts.go`, `docs/scores.md`, `docs/prompts.md`, spec 003 — a version is never edited and never deleted alone; `PromptDelete` in `internal/store/prompts.go` takes a name whole, and the echo is checked inside its transaction (spec 021 #7). A score is the opposite: `ScoreDelete` takes one row with no echo at all, because a re-POST with the same id puts it back (spec 022 #6) |
+| The Scores block (the chips, the dialog, the tree badge) | `ui/src/lib/components/scores/` (the block on all three surfaces, the create/edit dialog), `ui/src/lib/scores.ts` (the pure part: the value per type, the source, the split of one response between the header and the observation panels, the form and the body it posts), `ui/src/lib/scores.svelte.ts` (the one read a trace or a session makes), `docs/ui.md#scores`, spec 022 — the trace reads its scores **once** and the split between the header, the panels and the tree's badge is rendering (#1); a new score is stamped `source: "web"` and an edit resends the row's own `metadata` and `timestamp` (#10) |
 | Datasets, runs, score configs | `internal/store/datasets.go` (the version clock, "items at V", the pin's release), `runs.go` (the summary, the item view, the values a comparison needs), `scoreconfigs.go` (the binding by name, checked inside `ScoreWrite.apply`), `internal/server/datasets.go`, `runs.go`, `scoreconfigs.go`, `internal/cli/datasets.go`, `internal/mcpserver/evals.go`, `docs/datasets.md`, spec 014 — the store executes nothing; a trace joins a run through two columns the mapper claims from `tracepad.run_id`/`tracepad.item_id`, `notPinned` in `sweep.go` is the one predicate the sweep and the retention dry run share, and every number a comparison reports is computed server-side so that two clients cannot disagree about what improved means |
 | JSON API plumbing (auth, strict decode, pagination) | `internal/server/api.go`, spec 003 |
 | Read API (traces, sessions, stats, system) | `internal/server/traces.go` and neighbours, `docs/api.md`, specs 004 and 009 — the route table in `routes.go` is the surface, and `openapi.json` must agree with it. Paging is keyset in both directions: `trimPage` in `api.go` owns which cursor a page may claim |

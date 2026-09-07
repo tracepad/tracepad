@@ -14,6 +14,7 @@ with `curl`.
 | `POST` | `/api/v1/scores` | Write one score or an array of them |
 | `GET` | `/api/v1/scores` | List scores, filtered and paginated |
 | `GET` | `/api/v1/scores/{id}` | Fetch one score |
+| `DELETE` | `/api/v1/scores/{id}` | Retract one score — see [Deleting a score](#deleting-a-score) |
 | `PUT` | `/api/v1/score-configs/{name}` | Pin what a score name means — see [Score configs](#score-configs) |
 | `GET` | `/api/v1/score-configs` | List the configs |
 | `GET` | `/api/v1/score-configs/{name}` | One config |
@@ -84,6 +85,28 @@ If your eval loop already has a natural key, hash it into the id:
 ```python
 score_id = hashlib.sha256(f"{run_id}:{trace_id}:helpfulness".encode()).hexdigest()[:32]
 ```
+
+### Deleting a score
+
+A correction is a re-POST, but a retraction — *this verdict should not be
+here at all* — is a delete:
+
+```sh
+curl -X DELETE -H "Authorization: Bearer tp-sk-…" \
+  http://localhost:4318/api/v1/scores/8673743e8ca15b9213d541a703786e86
+```
+
+```json
+{"id": "8673743e8ca15b9213d541a703786e86"}
+```
+
+`404` when this project has no score with that id, which is also what an id
+belonging to another project answers. There is no dry run and no `?confirm=`:
+a score is a single row, and posting the same id again puts it back. The row
+goes through the same write queue as every other write, so a `200` means it is
+off the disk.
+
+`tracepad scores rm <id>` is the same call — see [cli.md](cli.md#scores-add-scores-rm).
 
 ### Batches
 
@@ -215,6 +238,20 @@ An unknown query parameter is a `400` — the same reasoning as unknown JSON
 fields. So is a known one sent without a value (`?name=`): that is a template
 with an unset variable, and reading it as "no filter" would quietly answer a
 different question than the one asked.
+
+## From the web interface
+
+The three endpoints above are also three buttons. A trace, an observation and
+a session each carry a **Scores** block: one chip per score — the name, the
+value rendered by its type, where it came from — with the comment on expand.
+*Score* opens a dialog that offers the project's [configured](#score-configs)
+names and builds the control the config dictates, and every chip carries
+*Edit* — the same dialog, re-posting the score's own id — and *Delete*.
+
+A score written there carries `metadata: {"source": "web"}` and no
+`timestamp`, so it is stamped at receive time: a judgement made now happened
+now. Nothing else is different — it is this API, called from a browser. See
+[ui.md](ui.md#scores).
 
 ## Responses
 

@@ -34,6 +34,7 @@ document served without authentication.
 | `GET` | `/api/v1/stats` | Counts, errors, cost, latency percentiles |
 | `GET` | `/api/v1/prompts/{name}/diff` | Unified diff between two prompt versions |
 | `DELETE` | `/api/v1/prompts/{name}` | Delete a prompt name whole; a dry run until confirmed |
+| `DELETE` | `/api/v1/scores/{id}` | Retract one score; no dry run, a re-POST puts it back |
 | `GET` | `/api/v1/system` | Version, uptime, database size, ingest counters |
 | `GET` | `/api/v1` | This endpoint map |
 | `GET` | `/api/v1/openapi.json` | The OpenAPI document |
@@ -49,6 +50,8 @@ does administration — projects, keys, retention windows and user-data erasure
 Everything under `/api/v1/projects` that destroys something is a dry run until
 `?confirm=` echoes the name of what it destroys, and so is deleting a dataset.
 That contract is described once, in [admin.md](admin.md#dry-run-by-default).
+The ceremony is for what cannot be undone: deleting one score takes no
+`?confirm=`, because writing its id again recreates it.
 
 ## The one command
 

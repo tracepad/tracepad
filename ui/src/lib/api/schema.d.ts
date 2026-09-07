@@ -330,7 +330,11 @@ export interface paths {
         get: operations["getScore"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Retract one score; no dry run, a re-POST puts it back
+         * @description A score is one row, so there is no echo to type: writing the same id again recreates it.
+         */
+        delete: operations["deleteScore"];
         options?: never;
         head?: never;
         patch?: never;
@@ -2279,6 +2283,33 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Score"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteScore: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The score is gone */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        id: string;
+                    };
                 };
             };
             400: components["responses"]["BadRequest"];

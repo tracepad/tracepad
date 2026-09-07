@@ -486,3 +486,60 @@ func TestScoreMetadataIsInlineJSON(t *testing.T) {
 		t.Errorf("metadata = %v, want %v", out, metadata)
 	}
 }
+
+// Retraction (spec 022 #6): the row goes and the endpoint says which, a second
+// attempt is a 404 rather than a cheerful 200, and a re-POST puts it back —
+// which is the whole reason there is no echo to type.
+func TestScoreDeleteRemovesTheRow(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	const id = "aaaabbbbccccddddeeeeffff00002222"
+
+	written := h.send(t, "POST", "/api/v1/scores", map[string]any{
+		"id": id, "trace_id": scoreTraceID, "name": "helpfulness", "value": 0.9,
+	})
+	expectStatus(t, written, http.StatusCreated)
+
+	rec := h.send(t, "DELETE", "/api/v1/scores/"+id, nil)
+	expectStatus(t, rec, http.StatusOK)
+	if got := decodeJSON[scoreDeletedResponse](t, rec).ID; got != id {
+		t.Errorf("id = %q, want %q", got, id)
+	}
+	expectError(t, h.get(t, "/api/v1/scores/"+id), http.StatusNotFound, "not found")
+
+	// An id that is not there is a 404, never a 200 over nothing: a client
+	// retracting a verdict must be able to tell "removed" from "was never
+	// yours" (Testing, mutations).
+	expectError(t, h.send(t, "DELETE", "/api/v1/scores/"+id, nil), http.StatusNotFound, "not found")
+
+	back := h.send(t, "POST", "/api/v1/scores", map[string]any{
+		"id": id, "trace_id": scoreTraceID, "name": "helpfulness", "value": 0.9,
+	})
+	expectStatus(t, back, http.StatusCreated)
+	expectStatus(t, h.get(t, "/api/v1/scores/"+id), http.StatusOK)
+}
+
+// A malformed id never reaches the queue, and another project's id reads as no
+// score at all — the row is that project's data exactly as its traces are.
+func TestScoreDeleteIsScopedAndShaped(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	other, err := h.store.CreateProject("other", store.KeyPair{PublicKey: "tp-pk-other", Secret: "tp-sk-other"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const id = "aaaabbbbccccddddeeeeffff00003333"
+	value := 0.5
+	if err := h.writer.Submit(t.Context(), &store.ScoreWrite{ProjectID: other.ID, Scores: []*store.Score{{
+		ID: id, TraceID: scoreTraceID, Name: "helpfulness", DataType: store.ScoreNumeric, Value: &value,
+	}}}); err != nil {
+		t.Fatal(err)
+	}
+
+	expectError(t, h.send(t, "DELETE", "/api/v1/scores/NOTHEX", nil),
+		http.StatusBadRequest, "32 lower-case hex")
+	expectError(t, h.send(t, "DELETE", "/api/v1/scores/"+id, nil), http.StatusNotFound, "not found")
+
+	// And the stranger's row is still there.
+	if got, err := h.store.Score(other.ID, id); err != nil || got == nil {
+		t.Fatalf("score(other) = %v, %v, want it untouched", got, err)
+	}
+}

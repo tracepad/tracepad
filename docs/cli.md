@@ -224,6 +224,34 @@ older: --cursor MTc4ODEyOTQ5ODQ0…
 One direction only — there is no `--oldest` or `--newer` here, because the
 endpoint has no other end to jump to.
 
+### `scores add`, `scores rm`
+
+```sh
+tracepad scores add --trace 4f8c… --name helpfulness --value 0.9 \
+  --comment "answered the question"
+tracepad scores add --trace 4f8c… --observation 0011… --name step-ok \
+  --type boolean --value 1
+tracepad scores add --session support-42 --name csat --value 5
+tracepad scores add --trace 4f8c… --name tone --type categorical --string friendly
+tracepad scores rm 8673743e8ca15b9213d541a703786e86
+```
+
+`add` posts one score and prints the id it was written under; with `--json` it
+prints the endpoint's answer whole. The target is `--trace` (with an optional
+`--observation` inside it) or `--session`; the value is `--value` for a number
+and `--string` for a word or a sentence, exactly one of the two. `--type`
+states `boolean` or `categorical`, which cannot be inferred — a bare `--value`
+is `numeric` and a bare `--string` is `text`. `--comment` carries the
+rationale.
+
+`--id` writes the score under an id you choose, which is how a correction is
+made: the same id posted again replaces the row whole. See
+[scores.md](scores.md#idempotency-and-corrections).
+
+`rm` takes one id and retracts it, printing the id it took, or reporting the
+server's `404` when there is no such score in this project. There is no echo
+to type: a score is one row that `add --id` puts straight back.
+
 ### `prompts`
 
 ```sh

@@ -2,10 +2,18 @@
 	import FileText from '@lucide/svelte/icons/file-text';
 	import Plus from '@lucide/svelte/icons/plus';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
-	import { ApiError, api, type Observation, type ObservationIO } from '$lib/api/client.svelte';
+	import {
+		ApiError,
+		api,
+		type Observation,
+		type ObservationIO,
+		type Score,
+		type ScoreConfig
+	} from '$lib/api/client.svelte';
 	import { ABSENT, duration, elapsed, timestampPrecise, wait } from '$lib/format';
 	import CopyButton from './CopyButton.svelte';
 	import Payload from './Payload.svelte';
+	import ScoresBlock from './scores/ScoresBlock.svelte';
 
 	// The right-hand panel: one observation, whole. Everything on it came out
 	// of `GET /api/v1/traces/{id}`, except the payloads a budget refused to
@@ -14,8 +22,31 @@
 	let {
 		observation,
 		traceID,
-		refused
-	}: { observation: Observation; traceID: string; refused: boolean } = $props();
+		refused,
+		/**
+		 * This observation's own scores, out of the trace's one read (#1) —
+		 * and the state of that read, because the panel is showing a slice of
+		 * it: without them it would say *No scores* while the read is in
+		 * flight, go on saying it after the read failed, and drop what a
+		 * second page holds without a word.
+		 */
+		scores = [],
+		configs = [],
+		scoresLoading = false,
+		scoresFailure = null,
+		scoresTruncated = false,
+		onscored
+	}: {
+		observation: Observation;
+		traceID: string;
+		refused: boolean;
+		scores?: Score[];
+		configs?: ScoreConfig[];
+		scoresLoading?: boolean;
+		scoresFailure?: string | null;
+		scoresTruncated?: boolean;
+		onscored?: () => void;
+	} = $props();
 
 	let full = $state.raw<ObservationIO | null>(null);
 	let loading = $state(false);
@@ -176,7 +207,7 @@
 		</p>
 	{/if}
 
-	{#each [['Input', 'input', observation.input_bytes], ['Output', 'output', observation.output_bytes], ['Metadata', 'metadata', null]] as const as [label, key, size] (key)}
+	{#each [['Input', 'input', observation.input_bytes], ['Output', 'output', observation.output_bytes]] as const as [label, key, size] (key)}
 		<Payload
 			{label}
 			{size}
@@ -187,4 +218,29 @@
 			onload={loadPayloads}
 		/>
 	{/each}
+
+	<!-- Between the payloads and the metadata (spec 022, Application
+	     contract): a verdict about this step is read right after what the
+	     step said, and before the bookkeeping under it. -->
+	<ScoresBlock
+		scores={scores.map((score) => ({ score, unknown: false }))}
+		target={{ trace_id: traceID, observation_id: observation.id }}
+		{configs}
+		addLabel="Score this observation"
+		level={3}
+		loading={scoresLoading}
+		failure={scoresFailure}
+		truncated={scoresTruncated}
+		onchanged={() => onscored?.()}
+	/>
+
+	<Payload
+		label="Metadata"
+		size={null}
+		value={payload('metadata')}
+		{refused}
+		loaded={full !== null}
+		{loading}
+		onload={loadPayloads}
+	/>
 </div>

@@ -394,6 +394,36 @@ func (s *Server) handleGetScore(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, renderScore(score))
 }
 
+// handleDeleteScore retracts one score (spec 022 #6). No dry run and no echo:
+// the row is one a re-POST with the same id puts back, so spec 005 #8's
+// ceremony would be theatre over something that is not lost.
+func (s *Server) handleDeleteScore(w http.ResponseWriter, r *http.Request) {
+	project, ok := s.apiProject(w, r)
+	if !ok {
+		return
+	}
+	if _, err := queryParams(r); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	// The id's shape is checked before the queue: an id that no score can
+	// have is a client bug, and saying so costs nothing.
+	id, ok := hexPathID(w, r, "score id")
+	if !ok {
+		return
+	}
+	if !s.submit(w, r, &store.ScoreDelete{ProjectID: project.ID, ID: id}) {
+		return
+	}
+	writeJSON(w, http.StatusOK, scoreDeletedResponse{ID: id})
+}
+
+// scoreDeletedResponse names what went, and nothing else: there is no echo to
+// repeat and no count to report (#6).
+type scoreDeletedResponse struct {
+	ID string `json:"id"`
+}
+
 func renderScore(score *store.Score) scoreResponse {
 	return scoreResponse{
 		ID:            score.ID,
