@@ -228,7 +228,7 @@ API. This file routes; it does not duplicate what specs and docs say.
   — they are *about* the user, and a frozen hour could not recompute them at
   all (#10). The *Users* screens, `users ls`/`show`, `stats --user`,
   `list_users`/`get_user`; the interface's line ceiling rises to 16,000 (#11).
-- 🚧 Spec 024 (annotation queues) in progress: schema 0014 —
+- ✅ Spec 024 (annotation queues) shipped: schema 0014 —
   `annotation_queues` and `annotation_items`, the list of what a team decided
   deserves a human verdict and the bookkeeping of who gave one. The verdicts
   are *scores*, unchanged: a queue names the score configs a reviewer must

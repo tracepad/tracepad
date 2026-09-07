@@ -1,6 +1,6 @@
 # Spec 024 — Annotation queues: what to review, who reviewed it, and the desk to do it at
 
-**Status:** 🚧 DRAFT
+**Status:** ✅ SHIPPED
 **Sprint:** September 2026
 
 > Spec 022 lets a person score the trace they happen to be reading. A
