@@ -52,6 +52,21 @@ export function cost(usd: number | null | undefined): string {
 	return `$${usd.toFixed(usd < 1 ? 4 : 2)}`;
 }
 
+/**
+ * A long identifier cut in the middle rather than at the end. Applied to user
+ * ids (spec 023, edge cases), which are the one identifier in this interface a
+ * customer chooses the shape of: `customer_9f2a…:prod` and `customer_9f2a…:eu`
+ * are one cell apart, and an end-truncated column renders both as the same
+ * string. The whole of it is the cell's `title` and one copy button away.
+ */
+export function middleEllipsis(value: string, max = 28): string {
+	if (value.length <= max) return value;
+	// The head carries the shape of the id and the tail carries what usually
+	// distinguishes two of them, so the split leans towards the front.
+	const head = Math.ceil((max - 1) / 2);
+	return `${value.slice(0, head)}…${value.slice(value.length - (max - 1 - head))}`;
+}
+
 /** Whole counts, grouped, so a five-figure token count is readable. */
 export function count(value: number | null | undefined): string {
 	if (value == null || !Number.isFinite(value)) return ABSENT;

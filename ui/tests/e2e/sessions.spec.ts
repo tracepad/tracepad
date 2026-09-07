@@ -45,8 +45,9 @@ test('a session page opens onto its traces, and a trace into a panel', async ({ 
 	await expect(page.locator('dt').filter({ hasText: /^With errors$/ })).toBeVisible();
 	await expect(page.getByText('support-chat')).toBeVisible();
 
-	// Its trace table is a listing like any other (spec 008 #10).
-	await page.locator('tbody tr').last().getByRole('link').click();
+	// Its trace table is a listing like any other (spec 008 #10). The row's
+	// own link is the first one; the second is the user id (spec 023).
+	await page.locator('tbody tr').last().getByRole('link').first().click();
 	await expect(page).toHaveURL(/\/sessions\/session-77\?peek=[0-9a-f]{32}$/);
 	await expect(page.getByRole('dialog').getByRole('treeitem').first()).toBeVisible();
 });

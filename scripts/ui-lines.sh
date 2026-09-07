@@ -9,7 +9,8 @@
 # The default is the budget of the newest spec that moved it: 7,300 after spec
 # 007 (#13), 8,300 for the peek panel (spec 008 #14), then 9,000 for listing
 # pagination and the regression tests five review rounds asked of it (spec 009
-# #11), and now 14,000 (spec 015 #9).
+# #11), 14,000 for the eval screens (spec 015 #9), and now 16,000 (spec 023
+# #11).
 #
 # 9,000 was design §8's 6-9k envelope for the *MVP* interface, and it held for
 # five specs. Spec 015 amends the envelope rather than quietly overrunning it:
@@ -19,6 +20,14 @@
 # 6,678 plus a measured estimate for 016 with room for one review cycle, and it
 # was raised by the spec before the one that spends it, because a budget raised
 # by the spec that spends it is no budget.
+#
+# 16,000 is the owner's decision of 2026-09-07, taken for the *known* set
+# rather than for this spec: 14,000 was reached at 13,895 with two screens
+# landed and nothing left to cut, and the design's own list still holds the
+# annotation queue and the quality trends. Raising it once for that set is the
+# honest move; raising it per spec would be exactly the drift the number exists
+# to catch. It stays a warning either way (design §8.2): a signal to revise,
+# not a rule to satisfy.
 #
 # What it counts, though, has: the budget covers the application, and the tests
 # are reported beside it under no ceiling at all (design §8, amended; spec 010
@@ -32,7 +41,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BUDGET="${1:-14000}"
+BUDGET="${1:-16000}"
 
 cd "$ROOT"
 

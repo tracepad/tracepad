@@ -35,9 +35,10 @@ describe('the Evals section', () => {
 		]) {
 			expect(screen.getByRole('link', { name })).toHaveAttribute('href', href);
 		}
-		// Eight destinations in all: the four that were there, the three the
-		// section holds, and Prompts beside them (spec 021 #1).
-		expect(nav.querySelectorAll('a')).toHaveLength(8);
+		// Nine destinations in all: the four that were there, the three the
+		// section holds, Prompts beside them (spec 021 #1) and Users
+		// (spec 023 #8).
+		expect(nav.querySelectorAll('a')).toHaveLength(9);
 	});
 
 	it('marks the active child and nothing else', () => {
@@ -73,7 +74,9 @@ describe('the Prompts item', () => {
 
 		expect(screen.getByRole('link', { name: 'Prompts' })).toHaveAttribute('href', '/prompts');
 		const order = [...nav.querySelectorAll('a')].map((link) => link.textContent?.trim());
-		expect(order.slice(0, 4)).toEqual(['Traces', 'Sessions', 'Stats', 'Prompts']);
+		// Users sits between Sessions and Stats, which is the two screens it
+		// joins (spec 023 #8).
+		expect(order.slice(0, 5)).toEqual(['Traces', 'Sessions', 'Users', 'Stats', 'Prompts']);
 		// And the group still holds the three eval screens and no more.
 		const group = nav.querySelector('li > ul');
 		expect([...(group?.querySelectorAll('a') ?? [])].map((link) => link.textContent?.trim())).toEqual(

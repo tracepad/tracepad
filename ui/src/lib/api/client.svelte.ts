@@ -4,6 +4,7 @@ import type { components, paths } from './schema';
 import type { RunFilters } from './runs';
 import type { SessionFilters } from './sessions';
 import type { TraceFilters } from './traces';
+import type { UserFilters } from './users';
 
 // The whole data layer (spec 006 #7): a thin typed client over the read API,
 // nothing more. Every type below is derived from `internal/server/openapi.json`
@@ -35,6 +36,8 @@ export type Truncation = components['schemas']['Truncation'];
 export type Expansion = components['schemas']['Expansion'];
 export type Project = components['schemas']['Project'];
 export type SessionRow = components['schemas']['SessionRow'];
+/** One end user's roll-up (spec 023); the same shape the listing and the page read. */
+export type UserRow = components['schemas']['UserRow'];
 /** What a destructive request answers before it is confirmed (spec 005 #8). */
 export type DryRun = components['schemas']['DryRun'];
 /** A freshly minted pair; the secret is in this response and nowhere else. */
@@ -94,6 +97,8 @@ export type ScoreConfigList = JSONResponse<paths['/api/v1/score-configs']['get']
 export type ObservationIO = JSONResponse<paths['/api/v1/observations/{id}/io']['get']>;
 export type SessionPage = JSONResponse<paths['/api/v1/sessions']['get']>;
 export type Session = JSONResponse<paths['/api/v1/sessions/{id}']['get']>;
+export type UserPage = JSONResponse<paths['/api/v1/users']['get']>;
+export type User = JSONResponse<paths['/api/v1/users/{id}']['get']>;
 export type Stats = JSONResponse<paths['/api/v1/stats']['get']>;
 export type KeyList = JSONResponse<paths['/api/v1/projects/{id}/keys']['get']>;
 type ProjectList = JSONResponse<paths['/api/v1/projects']['get']>;
@@ -192,8 +197,31 @@ class Api {
 		});
 	}
 
+	/**
+	 * The user listing (spec 023). It answers from the rollup alone, so a user
+	 * first seen minutes ago is not on it yet — which is why the empty state
+	 * and `docs/users.md` both say so, and why `getUser` exists for any id.
+	 */
+	listUsers(filters: UserFilters, page: Page = {}, signal?: AbortSignal) {
+		return this.#json<UserPage>('/api/v1/users', {
+			query: { ...filters, ...paging(page) },
+			signal
+		});
+	}
+
+	/** One user: the rollup merged with the live tail, exact for any id. */
+	getUser(id: string, signal?: AbortSignal) {
+		return this.#json<User>(`/api/v1/users/${encodeURIComponent(id)}`, { signal });
+	}
+
 	getStats(
-		query: { from?: string; to?: string; environment?: string; group_by?: string },
+		query: {
+			from?: string;
+			to?: string;
+			environment?: string;
+			user_id?: string;
+			group_by?: string;
+		},
 		signal?: AbortSignal
 	) {
 		return this.#json<Stats>('/api/v1/stats', { query, signal });

@@ -14,8 +14,9 @@ async function signIn(page: Page) {
 const rows = (page: Page) => page.locator('tbody tr');
 
 /**
- * The top row's link, whose href carries the trace id: the identity of the
- * page on screen.
+ * The top row's own link — the first in the row, whose href carries the trace
+ * id: the identity of the page on screen. (A trace row's second link is the
+ * user id, added by spec 023.)
  *
  * A page turn does not empty the table — `Listing` keeps the rows it has until
  * the next page lands (`listing.svelte.ts`, `#load`) — so a count of two is
@@ -23,7 +24,7 @@ const rows = (page: Page) => page.locator('tbody tr');
  * the page before the turn. Every test here that compares rows across a turn
  * waits for this to change first.
  */
-const top = (page: Page) => rows(page).first().getByRole('link');
+const top = (page: Page) => rows(page).first().getByRole('link').first();
 
 /**
  * Reading that identity asserts it. A guard written against `''` is no guard:
@@ -134,7 +135,7 @@ test('j on the last row of a page turns it and keeps reading', async ({ page }) 
 	await signIn(page);
 	await page.goto('/traces?limit=2');
 	// Open the second — and last — row of the page.
-	await rows(page).nth(1).getByRole('link').click();
+	await rows(page).nth(1).getByRole('link').first().click();
 	const panel = page.getByRole('dialog');
 	await expect(panel).toBeVisible();
 	const opened = new URL(page.url()).searchParams.get('peek');
@@ -158,7 +159,7 @@ test('a walk from a row this page does not hold takes the nearest one', async ({
 
 	// A link somebody sent: a page, and a panel open on a trace that is not on
 	// it — the state retention and a live tick also leave behind.
-	await rows(page).nth(1).getByRole('link').click();
+	await rows(page).nth(1).getByRole('link').first().click();
 	const behind = new URL(page.url()).searchParams.get('peek') ?? '';
 	await page.keyboard.press('Escape');
 	await page.getByRole('button', { name: 'Next page' }).click();
@@ -181,7 +182,7 @@ test('a walk from a row this page does not hold takes the nearest one', async ({
 	// older — what `j` asks for — is the *first*. Landing on the oldest row on
 	// screen, as an edge-guessing walk did, skipped the page (spec 009 #13).
 	await page.keyboard.press('j');
-	await expect(rows(page).first().getByRole('link')).toHaveAttribute('aria-current', 'true');
+	await expect(rows(page).first().getByRole('link').first()).toHaveAttribute('aria-current', 'true');
 	// On this page, not by turning it: the row it wanted was here all along.
 	expect(new URL(page.url()).searchParams.get('cursor')).toBe(deep.searchParams.get('cursor'));
 	expect(new URL(page.url()).searchParams.get('peek')).not.toBe(behind);

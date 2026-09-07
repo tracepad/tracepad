@@ -24,7 +24,12 @@ export default async function boot() {
 			TRACEPAD_ADMIN_TOKEN: ADMIN_TOKEN,
 			// Small enough that the corpus's largest payload meets it, which is
 			// what puts a truncation marker on the screen to click.
-			TRACEPAD_RESPONSE_BUDGET_BYTES: '4096'
+			TRACEPAD_RESPONSE_BUDGET_BYTES: '4096',
+			// The aggregator at its floor (spec 023, Testing). The Users
+			// listing answers from the rollup alone, so without a pass there
+			// is nothing on it; the fixtures are stamped in the past, so
+			// every hour they fall in is closed from the first pass on.
+			TRACEPAD_ROLLUP_INTERVAL: '1s'
 		},
 		stdio: ['ignore', 'pipe', 'pipe']
 	});

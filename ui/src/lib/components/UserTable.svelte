@@ -1,0 +1,83 @@
+<script lang="ts">
+	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
+	import type { UserRow } from '$lib/api/client.svelte';
+	import { ABSENT, cost, count, middleEllipsis, timestamp } from '$lib/format';
+	import CopyButton from './CopyButton.svelte';
+
+	// The user listing, one row per user, mapping 1:1 onto what
+	// `GET /api/v1/users` returns (spec 023 #8). Every number counts traces,
+	// which is what the column headers say rather than leave to be guessed —
+	// except `Sessions`, which counts sessions where they began.
+	//
+	// A row is a link to the user's page rather than a peek panel: the page is
+	// a chart, two breakdowns and two tables, which is not a panel's worth of
+	// screen (spec 008 #3 is about rows whose detail *is* panel-sized).
+
+	let { rows }: { rows: UserRow[] } = $props();
+
+	const numeric = 'px-3 py-1.5 text-right tabular-nums';
+</script>
+
+<!-- The table scrolls inside its own box; the page never scrolls sideways
+     (spec 006 #15). -->
+<div class="min-h-0 flex-1 overflow-auto">
+	<table class="w-full min-w-2xl border-collapse text-left">
+		<thead class="bg-canvas text-subtle sticky top-0 z-10 text-xs whitespace-nowrap">
+			<tr class="border-border border-b">
+				<th scope="col" class="px-3 py-2 font-medium">User</th>
+				<th scope="col" class="w-24 px-3 py-2 text-right font-medium">Traces</th>
+				<th scope="col" class="w-24 px-3 py-2 text-right font-medium">Sessions</th>
+				<th scope="col" class="w-28 px-3 py-2 font-medium">Errors</th>
+				<th scope="col" class="w-24 px-3 py-2 text-right font-medium">Cost</th>
+				<th scope="col" class="w-44 px-3 py-2 font-medium">First seen</th>
+				<th scope="col" class="w-44 px-3 py-2 font-medium">Last seen</th>
+			</tr>
+		</thead>
+		<tbody>
+			{#each rows as row (row.user_id)}
+				<tr class="border-border hover:bg-raised border-b transition-colors duration-100">
+					<td class="px-3 py-1.5 font-mono">
+						<div class="flex min-w-0 items-center gap-1">
+							<!-- Cut in the middle, not at the end: two ids that share a
+							     long prefix are told apart by their tails, and the whole
+							     of it is the title and the button beside it (spec 023,
+							     edge cases). -->
+							<a
+								href="/users/{encodeURIComponent(row.user_id)}"
+								title={row.user_id}
+								class="truncate hover:underline"
+							>
+								{middleEllipsis(row.user_id)}
+							</a>
+							<CopyButton text={row.user_id} label="Copy the user id" />
+						</div>
+					</td>
+					<td class="text-muted {numeric}">{count(row.traces)}</td>
+					<td class="text-muted {numeric}">{count(row.sessions)}</td>
+					<td class="px-3 py-1.5">
+						{#if row.error_count > 0}
+							<!-- Colour is never the message on its own. -->
+							<span
+								class="text-danger bg-danger-soft inline-flex items-center gap-1 rounded px-1.5
+									py-0.5 text-xs font-medium tabular-nums"
+							>
+								<TriangleAlert class="size-3.5" />
+								{row.error_count}
+								{row.error_count === 1 ? 'trace' : 'traces'}
+							</span>
+						{:else}
+							<span class="text-subtle text-xs">{ABSENT}</span>
+						{/if}
+					</td>
+					<td class="text-muted {numeric}">{cost(row.total_cost)}</td>
+					<td class="text-muted px-3 py-1.5 font-mono text-xs whitespace-nowrap tabular-nums">
+						{timestamp(row.first_seen)}
+					</td>
+					<td class="text-muted px-3 py-1.5 font-mono text-xs whitespace-nowrap tabular-nums">
+						{timestamp(row.last_seen)}
+					</td>
+				</tr>
+			{/each}
+		</tbody>
+	</table>
+</div>

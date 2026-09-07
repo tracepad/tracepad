@@ -7,6 +7,7 @@
 	import Ruler from '@lucide/svelte/icons/ruler';
 	import ScrollText from '@lucide/svelte/icons/scroll-text';
 	import Settings from '@lucide/svelte/icons/settings';
+	import Users from '@lucide/svelte/icons/users';
 	import type { Component } from 'svelte';
 
 	type Item = { href: string; label: string; icon: Component<{ class?: string }> };
@@ -22,6 +23,9 @@
 	export const SECTIONS: (Item | Group)[] = [
 		{ href: '/traces', label: 'Traces', icon: ListTree },
 		{ href: '/sessions', label: 'Sessions', icon: MessagesSquare },
+		// Between the two screens it joins (spec 023 #8): a user is a set of
+		// sessions, and the user page is Stats for one of them.
+		{ href: '/users', label: 'Users', icon: Users },
 		{ href: '/stats', label: 'Stats', icon: ChartLine },
 		// Top level, not under *Evals* (spec 021 #1): a prompt is what the
 		// application ships, and filing it under the test loop would say it
