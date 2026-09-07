@@ -65,6 +65,21 @@ The web interface says the same thing in the place it matters: the empty
 listing does not claim there are no users, it names the lag and links to the
 Traces screen, which is live.
 
+### On an upgrade
+
+An existing install already has its statistics rolled up to now, so nothing
+about the history would look "changed" and these two tables would stay empty.
+The migration therefore asks the aggregator to walk the rolled history once:
+the first pass after the upgrade re-rolls every hour it holds, which fills the
+per-user tables and rewrites the identical statistics rows. It is background
+work, it happens once, and the statistics keep answering from the rollup
+throughout.
+
+One thing that pass cannot reach: an hour older than the project's
+`retention_days` is **frozen** ([retention.md](retention.md#what-outlives-what))
+— its raw rows are gone by design, so it never gets per-user rows. Such a
+user's `first_seen` therefore starts where their retained traces do.
+
 ## How much it costs
 
 One row per `(user, hour, environment, release, model)`, plus a trace-unit row

@@ -315,38 +315,86 @@ func scanUserRow(row scanner) (*UserRow, error) {
 	return &out, nil
 }
 
-// UserRollup is what the rollup holds about one user, or nil when it holds
-// nothing. The latency is merged out of the user's trace-unit hourly rows.
-func (s *Store) UserRollup(projectID, userID string) (*UserSummary, error) {
-	row, err := scanUserRow(s.db.QueryRow(
-		`SELECT `+userColumns+` FROM users WHERE project_id = ? AND user_id = ?`,
-		projectID, userID))
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	summary := &UserSummary{UserRow: *row}
+// UserRollup is what the rollup holds about one user in the hours *before*
+// `beforeHour`, or nil when it holds nothing there.
+//
+// The bound is the watermark, and it is the same bound `/api/v1/stats` puts on
+// its rolled half (spec 013 #5). It matters because the rollup can hold a row
+// for an hour the watermark has not reached: a user-data erasure re-rolls the
+// hours it emptied *in the same request* (spec 013 #7), and one of those can be
+// the hour in progress. Summing the table whole and then adding the live tail
+// on top of it would count that hour twice, in the one place that adds the two
+// halves together.
+//
+// It reads the hourly rows rather than the `users` summary for the same
+// reason: the summary is the listing's keyset — one row per user with the sort
+// key on it (spec 023 #3) — and it has no notion of a watermark. One user's
+// hours are an index seek, which is what the page can afford and the listing
+// cannot.
+func (s *Store) UserRollup(projectID, userID string, beforeHour int64) (*UserSummary, error) {
 	rows, err := s.db.Query(
-		`SELECT latency FROM users_hourly
-		 WHERE project_id = ? AND user_id = ? AND model = ''`, projectID, userID)
+		// Trace-unit rows only: an observation row is one model of one of
+		// those traces, and summing both would count every trace twice.
+		`SELECT hour, count, error_count, total_cost, latency, sessions_started
+		 FROM users_hourly
+		 WHERE project_id = ? AND user_id = ? AND hour < ? AND model = ''
+		 ORDER BY hour`, projectID, userID, beforeHour)
 	if err != nil {
-		return nil, fmt.Errorf("read a user's latency: %w", err)
+		return nil, fmt.Errorf("read a user's rolled hours: %w", err)
 	}
 	defer rows.Close()
+
+	summary := &UserSummary{UserRow: UserRow{UserID: userID}}
+	var held bool
 	for rows.Next() {
-		var encoded string
-		if err := rows.Scan(&encoded); err != nil {
-			return nil, err
+		var (
+			hour, count, errored, sessions int64
+			cost                           sql.NullFloat64
+			latency                        string
+		)
+		if err := rows.Scan(&hour, &count, &errored, &cost, &latency, &sessions); err != nil {
+			return nil, fmt.Errorf("scan a user's rolled hour: %w", err)
 		}
-		hist, err := decodeHistogram(encoded)
+		if !held {
+			summary.FirstSeen, held = hour, true
+		}
+		summary.LastSeen = hour
+		summary.Traces += count
+		summary.ErrorCount += errored
+		summary.Sessions += sessions
+		if cost.Valid {
+			total := cost.Float64
+			if summary.TotalCost != nil {
+				total += *summary.TotalCost
+			}
+			summary.TotalCost = &total
+		}
+		hist, err := decodeHistogram(latency)
 		if err != nil {
 			return nil, err
 		}
 		summary.Latency.Merge(hist)
 	}
-	return summary, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if !held {
+		return nil, nil
+	}
+	return summary, nil
+}
+
+// UserSummaryRow is the stored summary of one user, or nil when there is none.
+// The listing's own row, read by id — what the tests check the recompute
+// against, and nothing on the read path uses.
+func (s *Store) UserSummaryRow(projectID, userID string) (*UserRow, error) {
+	row, err := scanUserRow(s.db.QueryRow(
+		`SELECT `+userColumns+` FROM users WHERE project_id = ? AND user_id = ?`,
+		projectID, userID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return row, err
 }
 
 // UserTail is what the raw rows say about one user from an instant onwards:

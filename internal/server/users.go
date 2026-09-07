@@ -194,13 +194,15 @@ func (s *Server) readUser(projectID, userID string) (*store.UserSummary, bool, e
 	if err != nil {
 		return nil, false, err
 	}
-	rolled, err := s.store.UserRollup(projectID, userID)
+	// Everything at or past the watermark is the live tail's, and everything
+	// before it the rollup's — the same split `/stats` makes (spec 013 #5),
+	// on both sides, so that an hour the erasure path re-rolled early cannot
+	// be counted twice. A project nobody has rolled has a watermark of zero,
+	// so the whole of it is live.
+	rolled, err := s.store.UserRollup(projectID, userID, state.RolledUntil)
 	if err != nil {
 		return nil, false, err
 	}
-	// Everything at or past the watermark is the live tail's, which is the
-	// same split `/stats` makes (spec 013 #5). A project nobody has rolled
-	// has a watermark of zero, so the whole of it is live.
 	tail, err := s.store.UserTail(projectID, userID, state.RolledUntil*int64(time.Second))
 	if err != nil {
 		return nil, false, err

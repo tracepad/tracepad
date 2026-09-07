@@ -211,7 +211,7 @@ func TestUserSummaryEqualsItsHourlyRows(t *testing.T) {
 	roll(t, s, project.ID, rollupHour)
 	roll(t, s, project.ID, rollupHour+SecondsPerHour)
 
-	alice, err := s.UserRollup(project.ID, "alice")
+	alice, err := s.UserSummaryRow(project.ID, "alice")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,8 +232,47 @@ func TestUserSummaryEqualsItsHourlyRows(t *testing.T) {
 	if alice.TotalCost == nil || *alice.TotalCost < 0.0599 || *alice.TotalCost > 0.0601 {
 		t.Errorf("alice: cost %v, want 0.06", alice.TotalCost)
 	}
-	if alice.Latency.Count() != 4 {
-		t.Errorf("alice: %d latencies, want 4", alice.Latency.Count())
+	// The latency is not in the summary table: it is merged out of the hours
+	// themselves, which is what the user page reads.
+	rolled, err := s.UserRollup(project.ID, "alice", rollupHour+2*SecondsPerHour)
+	if err != nil || rolled == nil {
+		t.Fatalf("no rolled hours for alice: %v", err)
+	}
+	if rolled.Latency.Count() != 4 {
+		t.Errorf("alice: %d latencies, want 4", rolled.Latency.Count())
+	}
+	if rolled.Traces != alice.Traces || rolled.Sessions != alice.Sessions {
+		t.Errorf("the summary (%d/%d) and the hours (%d/%d) disagree",
+			alice.Traces, alice.Sessions, rolled.Traces, rolled.Sessions)
+	}
+}
+
+// TestTheUserPageDoesNotCountAnHourTwice: the erasure path re-rolls the hours
+// it emptied in the same request (spec 013 #7), and one of those can be the
+// hour in progress — above the watermark, where the live tail also reads. The
+// rolled half of the user page is bounded by the watermark for exactly that
+// reason.
+func TestTheUserPageDoesNotCountAnHourTwice(t *testing.T) {
+	s, project := readStore(t)
+	usersFixture(t, s, project.ID)
+	// A watermark that stops before the fixture's hour, as it does for the
+	// hour still in progress.
+	roll(t, s, project.ID, rollupHour)
+
+	rolled, err := s.UserRollup(project.ID, "alice", rollupHour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rolled != nil {
+		t.Errorf("an hour at or past the watermark was read from the rollup: %+v", rolled.UserRow)
+	}
+	// And below it, the same hour is the rollup's.
+	behind, err := s.UserRollup(project.ID, "alice", rollupHour+SecondsPerHour)
+	if err != nil || behind == nil {
+		t.Fatalf("the hour behind the watermark is not in the rollup: %v", err)
+	}
+	if behind.Traces != 3 {
+		t.Errorf("behind the watermark: %d traces, want 3", behind.Traces)
 	}
 }
 
@@ -258,7 +297,7 @@ func TestSessionIsCountedOnceInItsFirstHour(t *testing.T) {
 	if second.SessionsStarted != 0 {
 		t.Errorf("second hour started %d sessions, want 0", second.SessionsStarted)
 	}
-	alice, err := s.UserRollup(project.ID, "alice")
+	alice, err := s.UserSummaryRow(project.ID, "alice")
 	if err != nil || alice == nil {
 		t.Fatalf("no summary: %v", err)
 	}
@@ -293,7 +332,7 @@ func TestALaterEarlierTraceMovesTheSessionStart(t *testing.T) {
 	if got := userRows(t, s, project.ID, "alice", rollupHour+SecondsPerHour)["production||"]; got.SessionsStarted != 0 {
 		t.Errorf("the later hour still starts %d sessions, want 0", got.SessionsStarted)
 	}
-	alice, err := s.UserRollup(project.ID, "alice")
+	alice, err := s.UserSummaryRow(project.ID, "alice")
 	if err != nil || alice == nil {
 		t.Fatalf("no summary: %v", err)
 	}
@@ -345,7 +384,7 @@ func TestUserRollIsIdempotent(t *testing.T) {
 	s, project := readStore(t)
 	usersFixture(t, s, project.ID)
 	roll(t, s, project.ID, rollupHour)
-	before, err := s.UserRollup(project.ID, "alice")
+	before, err := s.UserSummaryRow(project.ID, "alice")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -353,7 +392,7 @@ func TestUserRollIsIdempotent(t *testing.T) {
 	// The same spans again, as a retry would send them.
 	usersFixture(t, s, project.ID)
 	roll(t, s, project.ID, rollupHour)
-	after, err := s.UserRollup(project.ID, "alice")
+	after, err := s.UserSummaryRow(project.ID, "alice")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -393,7 +432,7 @@ func TestAFrozenHourKeepsItsUserRows(t *testing.T) {
 	if !job.Frozen {
 		t.Fatal("the hour was not frozen")
 	}
-	alice, err := s.UserRollup(project.ID, "alice")
+	alice, err := s.UserSummaryRow(project.ID, "alice")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -424,14 +463,14 @@ func TestTheSweepOfTheLastRowForgetsTheUser(t *testing.T) {
 	if err := writer.Submit(context.Background(), sweep); err != nil {
 		t.Fatal(err)
 	}
-	bob, err := s.UserRollup(project.ID, "bob")
+	bob, err := s.UserSummaryRow(project.ID, "bob")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if bob != nil {
 		t.Errorf("bob survived the sweep of his only hour: %v", bob)
 	}
-	alice, err := s.UserRollup(project.ID, "alice")
+	alice, err := s.UserSummaryRow(project.ID, "alice")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -456,7 +495,7 @@ func TestAPassSummarizesEveryUserItRolled(t *testing.T) {
 
 	passAt(t, s, time.Unix(rollupHour+4*SecondsPerHour, 0))
 
-	alice, err := s.UserRollup(project.ID, "alice")
+	alice, err := s.UserSummaryRow(project.ID, "alice")
 	if err != nil || alice == nil {
 		t.Fatalf("alice has no summary after a pass: %v", err)
 	}
@@ -467,7 +506,7 @@ func TestAPassSummarizesEveryUserItRolled(t *testing.T) {
 		t.Errorf("alice: window %d..%d, want %d..%d",
 			alice.FirstSeen, alice.LastSeen, rollupHour, rollupHour+SecondsPerHour)
 	}
-	bob, err := s.UserRollup(project.ID, "bob")
+	bob, err := s.UserSummaryRow(project.ID, "bob")
 	if err != nil || bob == nil || bob.Traces != 1 {
 		t.Errorf("bob = %v, err = %v; want one trace", bob, err)
 	}
@@ -704,7 +743,7 @@ func TestErasureTakesThePerUserRows(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	alice, err := s.UserRollup(project.ID, "alice")
+	alice, err := s.UserSummaryRow(project.ID, "alice")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -715,7 +754,7 @@ func TestErasureTakesThePerUserRows(t *testing.T) {
 		t.Errorf("alice still has %d rolled rows", len(rows))
 	}
 	// Bob is untouched: an erasure is about one user.
-	bob, err := s.UserRollup(project.ID, "bob")
+	bob, err := s.UserSummaryRow(project.ID, "bob")
 	if err != nil {
 		t.Fatal(err)
 	}
