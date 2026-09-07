@@ -53,6 +53,21 @@ export type ComparedItem = components['schemas']['ComparedItem'];
 export type ComparedScore = components['schemas']['ComparedScore'];
 export type ScoreConfig = components['schemas']['ScoreConfig'];
 
+// The prompt nouns (spec 003), read and written by the Prompts screens
+// (spec 021).
+export type Prompt = components['schemas']['Prompt'];
+/** What deleting a name takes — the dry run, and what it took. */
+export type PromptDeletion = components['schemas']['PromptDeletion'];
+export type PromptPage = JSONResponse<paths['/api/v1/prompts']['get']>;
+export type PromptRow = PromptPage['prompts'][number];
+export type PromptVersionPage = JSONResponse<paths['/api/v1/prompts/{name}/versions']['get']>;
+export type PromptVersionRow = PromptVersionPage['versions'][number];
+export type PromptDiff = JSONResponse<paths['/api/v1/prompts/{name}/diff']['get']>;
+/** What a new version is posted as; the one write these screens make. */
+export type PromptVersionInput = NonNullable<
+	paths['/api/v1/prompts/{name}/versions']['post']['requestBody']
+>['content']['application/json'];
+
 // What the write half sends and gets back (spec 016, PR 2).
 export type DatasetItemInput = components['schemas']['DatasetItemInput'];
 export type ScoreConfigInput = components['schemas']['ScoreConfigInput'];
@@ -324,6 +339,71 @@ class Api {
 		});
 	}
 
+	// --- prompts (spec 003, on screen in spec 021) -------------------------
+	//
+	// One method per endpoint, the write half included: a version is appended
+	// (the store is append-only, so there is no edit), a label is pointed or
+	// unpointed, and a name is deleted whole behind the echo. The screens add
+	// no verb of their own — every one of these is a `curl` in docs/prompts.md.
+
+	listPrompts(page: Page = {}, signal?: AbortSignal) {
+		return this.#json<PromptPage>('/api/v1/prompts', { query: paging(page), signal });
+	}
+
+	/** One version: the one named, the one a label points at, or the latest. */
+	getPrompt(name: string, at: { version?: number; label?: string } = {}, signal?: AbortSignal) {
+		return this.#json<Prompt>(`/api/v1/prompts/${encodeURIComponent(name)}`, {
+			query: { version: at.version === undefined ? undefined : String(at.version), label: at.label },
+			signal
+		});
+	}
+
+	/** Newest first, without the bodies: a version list is for picking and diffing. */
+	listPromptVersions(name: string, page: Page = {}, signal?: AbortSignal) {
+		return this.#json<PromptVersionPage>(
+			`/api/v1/prompts/${encodeURIComponent(name)}/versions`,
+			{ query: paging(page), signal }
+		);
+	}
+
+	/** The server's unified patch; the interface computes no diff (spec 021 #3). */
+	promptDiff(name: string, from: number, to: number, signal?: AbortSignal) {
+		return this.#json<PromptDiff>(`/api/v1/prompts/${encodeURIComponent(name)}/diff`, {
+			query: { from: String(from), to: String(to) },
+			signal
+		});
+	}
+
+	createPromptVersion(name: string, body: PromptVersionInput) {
+		return this.#json<Prompt>(`/api/v1/prompts/${encodeURIComponent(name)}/versions`, {
+			method: 'POST',
+			body
+		});
+	}
+
+	/** The deploy path: promote by moving it forward, roll back by moving it back. */
+	putPromptLabel(name: string, label: string, version: number) {
+		return this.#json<{ label: string; version: number }>(
+			`/api/v1/prompts/${encodeURIComponent(name)}/labels/${encodeURIComponent(label)}`,
+			{ method: 'PUT', body: { version } }
+		);
+	}
+
+	deletePromptLabel(name: string, label: string) {
+		return this.#json<{ label: string; version: number }>(
+			`/api/v1/prompts/${encodeURIComponent(name)}/labels/${encodeURIComponent(label)}`,
+			{ method: 'DELETE' }
+		);
+	}
+
+	/** A dry run until `confirm` echoes the name (spec 021 #7, spec 005 #8). */
+	deletePrompt(name: string, confirm?: string) {
+		return this.#json<PromptDeletion>(`/api/v1/prompts/${encodeURIComponent(name)}`, {
+			method: 'DELETE',
+			query: { confirm }
+		});
+	}
+
 	// --- the project's own management (spec 005 #11) -----------------------
 	//
 	// All of it on the session's project key: a project administers itself.
@@ -481,6 +561,14 @@ class Api {
 		try {
 			response = await fetch(path + search(query), {
 				method: options.method ?? 'GET',
+				// Never from the browser's cache (spec 021 #13). The prompt
+				// reads carry `Cache-Control: max-age=60` for the SDKs that
+				// poll them by label (spec 003 #14), and a screen that has
+				// just moved a label would otherwise re-read the minute-old
+				// answer and show the move as not having happened. Every other
+				// endpoint sends no caching headers, so this changes nothing
+				// for them and states what the data plane is: live.
+				cache: 'no-store',
 				headers: {
 					...(key ? { Authorization: `Bearer ${key}` } : {}),
 					...(options.body === undefined ? {} : { 'Content-Type': 'application/json' })

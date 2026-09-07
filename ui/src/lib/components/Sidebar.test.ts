@@ -35,9 +35,9 @@ describe('the Evals section', () => {
 		]) {
 			expect(screen.getByRole('link', { name })).toHaveAttribute('href', href);
 		}
-		// Seven destinations in all: the four that were there and the three
-		// the section holds.
-		expect(nav.querySelectorAll('a')).toHaveLength(7);
+		// Eight destinations in all: the four that were there, the three the
+		// section holds, and Prompts beside them (spec 021 #1).
+		expect(nav.querySelectorAll('a')).toHaveLength(8);
 	});
 
 	it('marks the active child and nothing else', () => {
@@ -59,5 +59,36 @@ describe('the Evals section', () => {
 			.filter((link) => link.getAttribute('aria-current') === 'page')
 			.map((link) => link.textContent?.trim());
 		expect(current).toEqual(['Score configs']);
+	});
+});
+
+// Spec 021 #1: a prompt is a production artefact — what the application ships
+// — not an eval noun, so it is a top-level item between Stats and the section
+// rather than a fourth child of it, which is the mistake the decision rules
+// out.
+describe('the Prompts item', () => {
+	it('sits at the top level, between Stats and Evals', () => {
+		render(Sidebar);
+		const nav = screen.getByRole('navigation', { name: 'Sections' });
+
+		expect(screen.getByRole('link', { name: 'Prompts' })).toHaveAttribute('href', '/prompts');
+		const order = [...nav.querySelectorAll('a')].map((link) => link.textContent?.trim());
+		expect(order.slice(0, 4)).toEqual(['Traces', 'Sessions', 'Stats', 'Prompts']);
+		// And the group still holds the three eval screens and no more.
+		const group = nav.querySelector('li > ul');
+		expect([...(group?.querySelectorAll('a') ?? [])].map((link) => link.textContent?.trim())).toEqual(
+			['Datasets', 'Runs', 'Score configs']
+		);
+	});
+
+	it('is the active one on a prompt page', () => {
+		url.current = new URL('http://tracepad.test/prompts/support-answer?version=2');
+		render(Sidebar);
+
+		const current = screen
+			.getAllByRole('link')
+			.filter((link) => link.getAttribute('aria-current') === 'page')
+			.map((link) => link.textContent?.trim());
+		expect(current).toEqual(['Prompts']);
 	});
 });

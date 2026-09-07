@@ -85,6 +85,7 @@ describe('the token palette', () => {
 			['fg', 'accent-soft'],
 			['accent', 'accent-soft'],
 			['danger', 'danger-soft'],
+			['ok', 'ok-soft'],
 			['on-accent', 'danger']
 		] as const) {
 			it(`reads ${text} on ${tint} in ${theme}`, () => {

@@ -72,6 +72,10 @@
 	--color-danger-soft: light-dark(#fef2f2, #2a1618);
 	--color-warn: light-dark(#a15c07, #fbbf24);
 	--color-ok: light-dark(#15803d, #4ade80);
+	/* The tint an addition is painted on, beside `danger-soft` for a removal:
+	 * a diff is the one place in the interface where a *line* is good or bad
+	 * rather than a word (spec 021 #3). */
+	--color-ok-soft: light-dark(#f0fdf4, #0d2318);
 
 	--font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
 	--font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;

@@ -1,0 +1,361 @@
+<script lang="ts">
+	import ChevronDown from '@lucide/svelte/icons/chevron-down';
+	import ChevronLeft from '@lucide/svelte/icons/chevron-left';
+	import ChevronUp from '@lucide/svelte/icons/chevron-up';
+	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
+	import Plus from '@lucide/svelte/icons/plus';
+	import Trash2 from '@lucide/svelte/icons/trash-2';
+	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
+	import { goto } from '$app/navigation';
+	import { ApiError, api } from '$lib/api/client.svelte';
+	import {
+		draftFrom,
+		emptyDraft,
+		problems,
+		versionBody,
+		type Draft,
+		type PromptType
+	} from '$lib/prompts';
+	import Button from '../Button.svelte';
+	import JsonEditor from '../json/JsonEditor.svelte';
+	import LabelChip from './LabelChip.svelte';
+	import PageHeader from '../PageHeader.svelte';
+
+	// The editor as a full page (spec 021 #4), for both routes: a new name and
+	// a new version of an existing one. An edit *is* a new version — the store
+	// is append-only — so there is only ever one editor, and it is "new version
+	// from this one".
+	//
+	// The bodies are textareas: a prompt has no syntax to lint, and the cost of
+	// a CodeMirror instance is paid once, for `config`, where JSON is what is
+	// being typed. A page rather than a panel, because a chat prompt is several
+	// long texts.
+
+	let {
+		/** The name being appended to; empty when this creates one (#4). */
+		name = '',
+		/** The version to prefill from; the latest when absent. */
+		from = null,
+		/** The name's existing labels, offered as chips to point at this version. */
+		known = []
+	}: { name?: string; from?: number | null; known?: string[] } = $props();
+
+	const naming = $derived(name === '');
+
+	let draft = $state<Draft>(emptyDraft());
+	let loading = $state(false);
+	let busy = $state(false);
+	let failure = $state<string | null>(null);
+	let wanted = $state('');
+
+	$effect(() => {
+		const controller = new AbortController();
+		void prefill(name, from, controller.signal);
+		return () => controller.abort();
+	});
+
+	/**
+	 * What the form starts as. A new name starts empty; a new version starts as
+	 * a copy of the one it is made from, because that is what "edit this
+	 * prompt" means where nothing can be edited in place.
+	 */
+	async function prefill(named: string, version: number | null, signal: AbortSignal) {
+		failure = null;
+		if (named === '') {
+			draft = emptyDraft();
+			return;
+		}
+		loading = true;
+		try {
+			const prompt = await api.getPrompt(
+				named,
+				version === null ? {} : { version },
+				signal
+			);
+			if (!signal.aborted) draft = draftFrom(prompt);
+		} catch (cause) {
+			if (signal.aborted) return;
+			failure = cause instanceof ApiError ? cause.message : 'Failed to read the prompt.';
+		} finally {
+			if (!signal.aborted) loading = false;
+		}
+	}
+
+	const found = $derived(problems(draft, naming));
+	const ready = $derived(Object.keys(found).length === 0 && !loading && !busy);
+	/**
+	 * Whether anything has been typed yet. A blank form is not a wrong one:
+	 * "a prompt needs a name" in red over a page nobody has touched reads as a
+	 * failure rather than as the rule it is, and the dead *Save* already says
+	 * the form is not finished. The rules appear at the fields from the first
+	 * keystroke on.
+	 *
+	 * Set by the plain fields rather than by the form: CodeMirror emits an
+	 * `input` of its own as it mounts, so a listener on the form would count
+	 * the editor's own arrival as typing.
+	 */
+	let touched = $state(false);
+	const type = () => (touched = true);
+
+	function move(i: number, by: -1 | 1) {
+		const next = [...draft.messages];
+		const [message] = next.splice(i, 1);
+		next.splice(i + by, 0, message);
+		draft.messages = next;
+	}
+
+	function addLabel(event: SubmitEvent) {
+		event.preventDefault();
+		const label = wanted.trim();
+		if (label !== '' && !draft.labels.includes(label)) draft.labels = [...draft.labels, label];
+		wanted = '';
+	}
+
+	async function save() {
+		busy = true;
+		failure = null;
+		try {
+			const target = naming ? draft.name.trim() : name;
+			const created = await api.createPromptVersion(target, versionBody(draft));
+			await goto(`/prompts/${encodeURIComponent(target)}?version=${created.version}`);
+		} catch (cause) {
+			// Including the `404` of a prompt deleted while this page was open
+			// (edge cases): the server is the oracle, and it says so here.
+			failure = cause instanceof ApiError ? cause.message : 'Failed to save the version.';
+		} finally {
+			busy = false;
+		}
+	}
+
+	const back = $derived(naming ? '/prompts' : `/prompts/${encodeURIComponent(name)}`);
+	const field = 'border-border bg-canvas text-fg rounded-md border px-2 py-1 text-sm';
+	const area = `${field} min-h-24 w-full resize-y font-mono`;
+</script>
+
+<svelte:head><title>{naming ? 'New prompt' : `New version · ${name}`} · Tracepad</title></svelte:head>
+
+<PageHeader title={naming ? 'New prompt' : `${name} — new version`}>
+	{#snippet meta()}
+		<a href={back} class="hover:text-fg flex items-center gap-0.5 whitespace-nowrap">
+			<ChevronLeft class="size-3.5" />
+			{naming ? 'Prompts' : name}
+		</a>
+		{#if loading}
+			<LoaderCircle class="size-3.5 animate-spin" />
+		{:else if !naming}
+			<span class="text-subtle text-xs">
+				{draft.type} · from v{from ?? 'latest'}
+			</span>
+		{/if}
+	{/snippet}
+	{#snippet actions()}
+		<Button variant="primary" disabled={!ready} {busy} onclick={save}>
+			{#if busy}<LoaderCircle class="size-4 animate-spin" />{/if}
+			Save
+		</Button>
+	{/snippet}
+</PageHeader>
+
+<div class="min-h-0 flex-1 overflow-auto p-4">
+	<form class="mx-auto flex max-w-3xl flex-col gap-4" onsubmit={(event) => event.preventDefault()}>
+		{#if failure}
+			<p role="alert" class="text-danger flex items-start gap-2 text-sm">
+				<TriangleAlert class="mt-0.5 size-4 shrink-0" />
+				{failure}
+			</p>
+		{/if}
+
+		<!-- `always` for the two that cannot be wrong without somebody having
+		     made them so: a config only fails once it holds something, and a
+		     label only exists once it was added. -->
+		{#snippet problem(key: string, always = false)}
+			{#if found[key] && (touched || always)}
+				<span class="text-danger text-xs">{found[key]}</span>
+			{/if}
+		{/snippet}
+
+		{#if naming}
+			<label class="flex flex-col gap-1">
+				<span class="text-muted text-xs font-medium">Name</span>
+				<input
+					id="prompt-name"
+					name="name"
+					bind:value={draft.name}
+					oninput={type}
+					autocomplete="off"
+					spellcheck="false"
+					placeholder="support-answer"
+					class="{field} max-w-sm font-mono"
+				/>
+				{@render problem('name')}
+			</label>
+
+			<fieldset class="flex flex-col gap-1">
+				<legend class="text-muted text-xs font-medium">Type</legend>
+				<div class="flex gap-4">
+					{#each ['text', 'chat'] as const as choice (choice)}
+						<label class="flex items-center gap-1.5 text-sm">
+							<input
+								type="radio"
+								name="type"
+								value={choice}
+								checked={draft.type === choice}
+								onchange={() => (draft.type = choice as PromptType)}
+							/>
+							{choice}
+						</label>
+					{/each}
+				</div>
+				<span class="text-subtle text-xs">
+					A name keeps one shape for its whole life: a text prompt is one body, a chat prompt is
+					messages.
+				</span>
+			</fieldset>
+		{/if}
+
+		<section class="flex flex-col gap-1.5">
+			<h2 class="text-muted text-xs font-medium tracking-wide uppercase">Prompt</h2>
+			{#if draft.type === 'text'}
+				<textarea
+					id="prompt-text"
+					name="prompt"
+					bind:value={draft.text}
+					oninput={type}
+					aria-label="Prompt"
+					class={area}
+				></textarea>
+			{:else}
+				{#each draft.messages as message, i (i)}
+					<div class="border-border bg-surface flex flex-col gap-1.5 rounded-md border p-2">
+						<div class="flex items-center gap-1.5">
+							<input
+								name="role"
+								list="prompt-roles"
+								bind:value={message.role}
+								oninput={type}
+								autocomplete="off"
+								spellcheck="false"
+								aria-label="Role of message {i + 1}"
+								class="{field} w-32 font-mono"
+							/>
+							<div class="ml-auto flex items-center gap-0.5">
+								<Button
+									variant="ghost"
+									aria-label="Move message {i + 1} up"
+									disabled={i === 0}
+									onclick={() => move(i, -1)}
+								>
+									<ChevronUp class="size-4" />
+								</Button>
+								<Button
+									variant="ghost"
+									aria-label="Move message {i + 1} down"
+									disabled={i === draft.messages.length - 1}
+									onclick={() => move(i, 1)}
+								>
+									<ChevronDown class="size-4" />
+								</Button>
+								<Button
+									variant="ghost"
+									aria-label="Remove message {i + 1}"
+									onclick={() =>
+										(draft.messages = draft.messages.filter((_, at) => at !== i))}
+								>
+									<Trash2 class="size-4" />
+								</Button>
+							</div>
+						</div>
+						{@render problem(`role:${i}`)}
+						<textarea
+							name="content"
+							bind:value={message.content}
+							oninput={type}
+							aria-label="Content of message {i + 1}"
+							class={area}
+						></textarea>
+						{@render problem(`content:${i}`)}
+					</div>
+				{/each}
+				<!-- The three a person means; the API stores any non-empty role,
+				     so `tool` and `function` are typed rather than offered. -->
+				<datalist id="prompt-roles">
+					<option value="system"></option>
+					<option value="user"></option>
+					<option value="assistant"></option>
+				</datalist>
+				<div>
+					<Button
+						onclick={() => (draft.messages = [...draft.messages, { role: 'user', content: '' }])}
+					>
+						<Plus class="size-4" />
+						Add message
+					</Button>
+				</div>
+			{/if}
+			{@render problem('body')}
+		</section>
+
+		<section class="flex flex-col gap-1.5">
+			<div class="flex items-baseline gap-2">
+				<h2 class="text-muted text-xs font-medium tracking-wide uppercase">Config</h2>
+				<span class="text-subtle text-xs">Model parameters your runtime reads. Optional.</span>
+			</div>
+			<JsonEditor bind:text={draft.config} label="Config" disabled={loading} optional />
+			{@render problem('config', true)}
+		</section>
+
+		<label class="flex flex-col gap-1">
+			<span class="text-muted text-xs font-medium">Commit message</span>
+			<input
+				id="prompt-commit"
+				name="commit_message"
+				bind:value={draft.commit}
+				autocomplete="off"
+				placeholder="why this version exists"
+				class={field}
+			/>
+		</label>
+
+		<div class="flex flex-col gap-1.5">
+			<span class="text-muted text-xs font-medium">Labels to point at this version</span>
+			<div class="flex flex-wrap items-center gap-1.5">
+				{#each draft.labels as label (label)}
+					<LabelChip
+						{label}
+						onremove={() => (draft.labels = draft.labels.filter((one) => one !== label))}
+					/>
+				{/each}
+			</div>
+			<div class="flex flex-wrap items-center gap-1.5">
+				<input
+					id="prompt-label"
+					name="label"
+					list="prompt-known-labels"
+					bind:value={wanted}
+					autocomplete="off"
+					spellcheck="false"
+					placeholder="production"
+					aria-label="Label to point at this version"
+					onkeydown={(event) => {
+						if (event.key === 'Enter') addLabel(event as unknown as SubmitEvent);
+					}}
+					class="{field} w-40"
+				/>
+				<datalist id="prompt-known-labels">
+					{#each known as label (label)}
+						<option value={label}></option>
+					{/each}
+				</datalist>
+				<Button disabled={wanted.trim() === ''} onclick={(event) => addLabel(event as unknown as SubmitEvent)}>
+					Add label
+				</Button>
+			</div>
+			{@render problem('labels', true)}
+		</div>
+
+		<p class="text-subtle text-xs">
+			Saving appends a version — nothing here is edited in place. A label named above moves onto
+			the new version as it is created.
+		</p>
+	</form>
+</div>
