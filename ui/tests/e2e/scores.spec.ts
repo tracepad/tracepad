@@ -278,6 +278,53 @@ test('a trace opened over another does not wear its scores', async ({ page }) =>
 	await expect(page.getByRole('button', { name: /helpfulness/ })).toContainText('0.125');
 });
 
+// The observation panel is a slice of the trace's one read, so it has to
+// report that read: without it the panel asserts *No scores* while the request
+// is out and goes on asserting it after the request failed, with the header
+// right above showing the error (found in review of PR #41).
+test('a failed score read is reported on the observation panel too', async ({ page }) => {
+	await signIn(page);
+	await page.route(`**/api/v1/scores?trace_id=${TRACE}*`, (route) =>
+		route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"nope"}' })
+	);
+
+	await page.goto(`/traces/${TRACE}`);
+	await page.getByRole('treeitem', { name: /chat-completion/ }).click();
+
+	await expect(page.getByText('nope')).toHaveCount(2);
+	await expect(page.getByText('No scores')).toHaveCount(0);
+});
+
+// A number field answers `''` for what it cannot parse *yet* — the `e` of
+// `1e-3`, a lone `-` — and the value is pushed back onto the element from the
+// form, so the question is whether that write clears what is being typed. It
+// does not: the element already reads `''` at that moment, and Svelte does not
+// write a value the element already has. Held here because the whole of that
+// argument is somebody else's behaviour (raised in review of PR #41).
+test('a number that is typed through an unparseable state survives', async ({ page }) => {
+	await signIn(page);
+	await page.goto(`/traces/${TRACE}`);
+	await page.getByRole('button', { name: 'Score', exact: true }).click();
+	await page.getByLabel('Name', { exact: true }).selectOption('other…');
+	await page.getByLabel('Score name').fill('drift');
+	await page.getByRole('radio', { name: 'numeric' }).check();
+
+	const value = page.getByLabel('Value');
+	await value.pressSequentially('1e-3');
+	await expect(value).toHaveValue('1e-3');
+
+	// A leading `-`, typed over a value that was already there: the state goes
+	// from `0.001` to `''` while the element holds a `-` nothing can parse.
+	await value.selectText();
+	await value.pressSequentially('-0.25');
+	await expect(value).toHaveValue('-0.25');
+
+	// And what the form posts is what the field shows.
+	await page.getByRole('button', { name: 'Save' }).click();
+	await expect(page.getByRole('button', { name: /drift/ })).toContainText('-0.25');
+	await must('DELETE', `/api/v1/scores/${(await ids('drift'))[0]}`);
+});
+
 test('no screen with a score block scrolls the page sideways', async ({ page }) => {
 	await signIn(page);
 	for (const path of [

@@ -23,9 +23,18 @@
 		observation,
 		traceID,
 		refused,
-		/** This observation's own scores, out of the trace's one read (#1). */
+		/**
+		 * This observation's own scores, out of the trace's one read (#1) —
+		 * and the state of that read, because the panel is showing a slice of
+		 * it: without them it would say *No scores* while the read is in
+		 * flight, go on saying it after the read failed, and drop what a
+		 * second page holds without a word.
+		 */
 		scores = [],
 		configs = [],
+		scoresLoading = false,
+		scoresFailure = null,
+		scoresTruncated = false,
 		onscored
 	}: {
 		observation: Observation;
@@ -33,6 +42,9 @@
 		refused: boolean;
 		scores?: Score[];
 		configs?: ScoreConfig[];
+		scoresLoading?: boolean;
+		scoresFailure?: string | null;
+		scoresTruncated?: boolean;
 		onscored?: () => void;
 	} = $props();
 
@@ -216,6 +228,9 @@
 		{configs}
 		addLabel="Score this observation"
 		level={3}
+		loading={scoresLoading}
+		failure={scoresFailure}
+		truncated={scoresTruncated}
 		onchanged={() => onscored?.()}
 	/>
 

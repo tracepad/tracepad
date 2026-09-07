@@ -10,6 +10,7 @@
 		configOf,
 		emptyScoreForm,
 		formOfScore,
+		isPristine,
 		refusedField,
 		scoreBody,
 		scoreProblem,
@@ -64,6 +65,19 @@
 		untrack(() => {
 			form = correcting ? formOfScore(correcting, configs) : emptyScoreForm(configs);
 			failure = null;
+		});
+	});
+
+	// The configs are read beside the scores rather than after them, but they
+	// can still land while this is open — and then a project that declared
+	// names is sitting on the free-name path. Seeding again is safe exactly
+	// while nothing has been said on the form; once it has, what is typed wins
+	// and the reader can pick a name themselves.
+	$effect(() => {
+		if (!open || configs.length === 0) return;
+		const known = configs;
+		untrack(() => {
+			if (isPristine(form)) form = emptyScoreForm(known);
 		});
 	});
 
@@ -196,7 +210,17 @@
 			{/if}
 
 			{#if type !== ''}
-				<label for="score-value" class={labelClass}>Value</label>
+				<!-- `for` only where there is a control to point at: a boolean's
+				     value is two buttons, and a label pointing at an id nothing
+				     carries names nothing. That branch borrows this element as
+				     its group label instead. -->
+				<label
+					id="score-value-label"
+					for={type === 'boolean' ? undefined : 'score-value'}
+					class={labelClass}
+				>
+					Value
+				</label>
 			{/if}
 			{#if type === 'numeric'}
 				<!-- Bounded by the config, so the control says what the name
@@ -219,7 +243,7 @@
 					</p>
 				{/if}
 			{:else if type === 'boolean'}
-				<div class="flex gap-1.5" role="group" aria-label="Value">
+				<div class="flex gap-1.5" role="group" aria-labelledby="score-value-label">
 					{#each [['1', 'yes'], ['0', 'no']] as const as [value, label] (value)}
 						<Button
 							variant={form.number === value ? 'primary' : 'default'}

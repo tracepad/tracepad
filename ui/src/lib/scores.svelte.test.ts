@@ -10,7 +10,7 @@ import { Scores } from './scores.svelte';
 // target's judgement (found in review of PR #41).
 
 const listScores = vi.fn();
-const listScoreConfigs = vi.fn(async () => ({ configs: [] }));
+const listScoreConfigs = vi.fn(async () => ({ configs: [] as { name: string }[] }));
 
 vi.mock('$lib/api/client.svelte', () => ({
 	ApiError: class extends Error {},
@@ -103,6 +103,23 @@ describe('reading one target’s scores', () => {
 		scores.watch();
 		await vi.waitFor(() => expect(scores.failure).not.toBeNull());
 		expect(scores.rows).toEqual([]);
+	});
+
+	// *Score* is on screen from the first paint and the dialog builds its
+	// controls out of the configs, so waiting for the scores before asking for
+	// them opens a window where a project that declared names has none (found
+	// in review of PR #41).
+	it('asks for the configs beside the scores, not after them', async () => {
+		const scores = new Scores(() => ({ trace_id: 'trace-a' }));
+		const held = new Promise(() => {});
+		listScores.mockReturnValueOnce(held);
+		listScoreConfigs.mockResolvedValueOnce({ configs: [{ name: 'accuracy' }] });
+
+		scores.watch();
+
+		// The scores read never answers; the configs arrive all the same.
+		await vi.waitFor(() => expect(scores.configs).toHaveLength(1));
+		expect(scores.loading).toBe(true);
 	});
 
 	it('lets an abandoned read answer onto nothing', async () => {

@@ -47,7 +47,8 @@ const configs = [
 		min: null,
 		max: null,
 		categories: ['correct', 'wrong']
-	})
+	}),
+	config({ name: 'passed', data_type: 'boolean', min: null, max: null })
 ];
 
 const onsaved = vi.fn();
@@ -115,6 +116,19 @@ describe('the control the config dictates', () => {
 		// `other…` is the whole of the select, and its value is the empty name.
 		expect(screen.getByLabelText('Name')).toHaveValue('');
 		expect(screen.getAllByRole('option')).toHaveLength(1);
+	});
+
+	// A boolean's value is two buttons, so there is no `#score-value` for a
+	// `for` to point at — the group borrows the label instead of leaving it
+	// dangling (found in review of PR #41).
+	it('labels the boolean value group with the label above it', async () => {
+		const user = dialog();
+		await user.selectOptions(screen.getByLabelText('Name'), 'passed');
+
+		const group = screen.getByRole('group', { name: 'Value' });
+		expect(group).toContainElement(screen.getByRole('button', { name: 'yes' }));
+		// Nothing claims an id nothing carries.
+		expect(document.querySelector('label[for="score-value"]')).toBeNull();
 	});
 
 	it('asks the free-name path for a type before it asks for a value', async () => {

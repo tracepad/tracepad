@@ -209,6 +209,9 @@
 						{refused}
 						scores={split.byObservation.get(selected.id) ?? []}
 						configs={scores.configs}
+						scoresLoading={scores.loading}
+						scoresFailure={scores.failure}
+						scoresTruncated={scores.more}
 						onscored={() => scores.refresh()}
 					/>
 				{/key}

@@ -61,6 +61,13 @@ export class Scores {
 		}
 		this.loading = true;
 		this.failure = null;
+		// Both at once, not one after the other. *Score* is on screen from the
+		// first paint, and the dialog builds its controls out of the configs —
+		// so a reader who presses it while they are still in flight gets the
+		// free-name path for a project that declared names, and the dialog will
+		// not take it back from under them once they land (found in review of
+		// PR #41). One round trip is a window; two is an invitation.
+		const configs = this.#configs(signal);
 		try {
 			const page = await api.listScores(filter, { limit: PAGE }, signal);
 			this.rows = page.scores;
@@ -72,8 +79,13 @@ export class Scores {
 		} finally {
 			if (!signal.aborted) this.loading = false;
 		}
+		await configs;
+	}
+
+	async #configs(signal: AbortSignal) {
 		try {
-			this.configs = (await api.listScoreConfigs(signal)).configs;
+			const answer = await api.listScoreConfigs(signal);
+			if (!signal.aborted) this.configs = answer.configs;
 		} catch {
 			// A name without its config still renders: the config only adds
 			// the declared range to a tooltip and the controls to the dialog,

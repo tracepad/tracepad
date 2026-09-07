@@ -163,6 +163,24 @@ export function emptyScoreForm(configs: ScoreConfig[] = []): ScoreForm {
 	};
 }
 
+/**
+ * Whether nothing has been said on this form yet. It is what makes it safe to
+ * seed it a second time: the configs can land after the dialog is open, and a
+ * form still showing the free-name path for a project that declared names is
+ * worth correcting — a form somebody has started typing into is not (found in
+ * review of PR #41).
+ */
+export function isPristine(form: ScoreForm): boolean {
+	return (
+		form.picked === OTHER &&
+		form.name === '' &&
+		form.dataType === '' &&
+		form.number === '' &&
+		form.text === '' &&
+		form.comment === ''
+	);
+}
+
 /** The config a form is bound by, or undefined on the free-name path. */
 export function configOf(form: ScoreForm, configs: ScoreConfig[]): ScoreConfig | undefined {
 	return form.picked === OTHER ? undefined : configs.find((one) => one.name === form.picked);

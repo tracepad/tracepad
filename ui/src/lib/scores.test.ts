@@ -8,6 +8,7 @@ import {
 	emptyScoreForm,
 	formOfScore,
 	isCut,
+	isPristine,
 	nameOf,
 	observationIDs,
 	refusedField,
@@ -187,6 +188,23 @@ describe('the dialog form', () => {
 	const form = (extra: Partial<ScoreForm> = {}): ScoreForm => ({
 		...emptyScoreForm(),
 		...extra
+	});
+
+	// What makes it safe to seed a second time when the configs land late.
+	it('knows a form nobody has said anything on yet', () => {
+		expect(isPristine(emptyScoreForm([]))).toBe(true);
+		// Opened on a declared name, it is already saying something.
+		expect(isPristine(emptyScoreForm(configs))).toBe(false);
+
+		for (const typed of [
+			{ name: 'v' },
+			{ dataType: 'text' as const },
+			{ number: '0' },
+			{ text: 'x' },
+			{ comment: 'why' }
+		]) {
+			expect(isPristine({ ...emptyScoreForm([]), ...typed }), JSON.stringify(typed)).toBe(false);
+		}
 	});
 
 	it('opens on the first declared name, and on the free path when there is none', () => {
