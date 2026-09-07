@@ -109,6 +109,36 @@ func (s *ScoreWrite) apply(tx *sql.Tx) error {
 	return nil
 }
 
+// ScoreDelete is DELETE /api/v1/scores/{id} (spec 022 #6): one row, gone. It
+// wears none of spec 005 #8's ceremony — a score is a single row that a re-POST
+// with the same id recreates, so the act is undoable by the same client that
+// undid it, and a retraction the store refused would leave a wrong verdict on a
+// trace with no way off it but retention.
+//
+// A write like every other, so it travels the group-commit queue (spec 001)
+// rather than opening a second connection to the database.
+type ScoreDelete struct {
+	ProjectID string
+	ID        string
+}
+
+func (d *ScoreDelete) apply(tx *sql.Tx) error {
+	// Scoped by project as well as by id: an id from another project must
+	// read as "no such score", never as a row this caller may take.
+	result, err := tx.Exec(`DELETE FROM scores WHERE project_id = ? AND id = ?`, d.ProjectID, d.ID)
+	if err != nil {
+		return fmt.Errorf("delete score %s: %w", d.ID, err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return &Rejection{Kind: RejectNotFound, Message: fmt.Sprintf("score %q not found", d.ID)}
+	}
+	return nil
+}
+
 // ScoreFilter narrows a score listing (spec 003, API contract). The zero value
 // lists a project's newest scores.
 type ScoreFilter struct {

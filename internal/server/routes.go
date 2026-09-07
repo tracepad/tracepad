@@ -56,6 +56,7 @@ func (s *Server) routes() []route {
 		{"POST", "/api/v1/scores", "Write one score or an array of them", s.handleCreateScores},
 		{"GET", "/api/v1/scores", "List scores, filtered and cursor-paginated", s.handleListScores},
 		{"GET", "/api/v1/scores/{id}", "Fetch one score", s.handleGetScore},
+		{"DELETE", "/api/v1/scores/{id}", "Retract one score; no dry run, a re-POST puts it back", s.handleDeleteScore},
 
 		// Prompts (spec 003) and the version diff (spec 004 #21).
 		{"GET", "/api/v1/prompts", "List prompt names with where their labels point", s.handleListPrompts},

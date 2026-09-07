@@ -801,6 +801,107 @@ func TestScoresListPages(t *testing.T) {
 	}
 }
 
+// TestScoresAddAndRemove is spec 022 #7 on the command line: every data type
+// goes in through `add`, comes back out through `ls`, and `rm` takes it away
+// again. The interface may do nothing this cannot, so the write half the
+// screens gained has to be here first.
+func TestScoresAddAndRemove(t *testing.T) {
+	h := newHarness(t)
+	ctx := t.Context()
+	trace := traceHex(1)
+
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"numeric", []string{"--trace", trace, "--name", "helpfulness", "--value", "0.9"}, "0.9"},
+		{"boolean", []string{"--trace", trace, "--name", "grounded", "--type", "boolean", "--value", "1"}, "1"},
+		{"categorical", []string{"--trace", trace, "--name", "tone", "--type", "categorical", "--string", "friendly"}, "friendly"},
+		{"text", []string{"--trace", trace, "--name", "verdict", "--string", "cites its sources"}, "cites its sources"},
+		{"on an observation", []string{"--trace", trace, "--observation", spanHex(1), "--name", "step-ok", "--value", "1"}, "1"},
+		{"on a session", []string{"--session", "s1", "--name", "csat", "--value", "5"}, "5"},
+	}
+
+	ids := map[string]string{}
+	for _, one := range cases {
+		out := h.run(ctx, true, append([]string{"scores", "add"}, one.args...)...)
+		if out.code != ExitOK {
+			t.Fatalf("%s: exit = %d, stderr = %s", one.name, out.code, out.stderr)
+		}
+		id := strings.TrimSpace(out.stdout)
+		if len(id) != 32 {
+			t.Fatalf("%s: printed %q, want the id the server assigned", one.name, id)
+		}
+		ids[one.name] = id
+	}
+
+	listed := h.run(ctx, true, "scores", "ls", "--limit", "20")
+	if listed.code != ExitOK {
+		t.Fatalf("scores ls exited %d: %s", listed.code, listed.stderr)
+	}
+	for _, one := range cases {
+		if !strings.Contains(listed.stdout, one.want) {
+			t.Errorf("%s: the listing does not carry %q:\n%s", one.name, one.want, listed.stdout)
+		}
+	}
+	// The session score is on the session and reachable by it alone.
+	bySession := h.run(ctx, true, "scores", "ls", "--session", "s1")
+	if !strings.Contains(bySession.stdout, "csat") {
+		t.Errorf("scores ls --session s1 = %s, want the session's own score", bySession.stdout)
+	}
+
+	// A correction is a re-post with the id (spec 003 #3), which is what the
+	// dialog's edit does too.
+	fixed := h.run(ctx, true, "scores", "add", "--trace", trace, "--name", "helpfulness",
+		"--value", "0.4", "--id", ids["numeric"], "--comment", "on reflection")
+	if fixed.code != ExitOK || strings.TrimSpace(fixed.stdout) != ids["numeric"] {
+		t.Fatalf("re-post = %+v, want the same id back", fixed)
+	}
+	again := h.run(ctx, true, "scores", "ls", "--name", "helpfulness")
+	if strings.Contains(again.stdout, "0.9") || !strings.Contains(again.stdout, "on reflection") {
+		t.Errorf("the correction did not replace the row:\n%s", again.stdout)
+	}
+
+	removed := h.run(ctx, true, "scores", "rm", ids["numeric"])
+	if removed.code != ExitOK || !strings.Contains(removed.stdout, ids["numeric"]) {
+		t.Fatalf("scores rm = %+v, want the id it took", removed)
+	}
+	gone := h.run(ctx, true, "scores", "ls", "--name", "helpfulness")
+	if !strings.Contains(gone.stdout, "no scores") {
+		t.Errorf("after rm the listing still says:\n%s", gone.stdout)
+	}
+	// A second removal is the server's 404, not a cheerful nothing.
+	twice := h.run(ctx, true, "scores", "rm", ids["numeric"])
+	if twice.code != ExitFailure || !strings.Contains(twice.stderr, "not found") {
+		t.Errorf("a second rm = %+v, want the 404 reported", twice)
+	}
+}
+
+// The two flags that carry the value are exclusive and one of them is
+// required, and an empty `--string` is a text score of the empty string rather
+// than a missing value (mutations).
+func TestScoresAddValueFlags(t *testing.T) {
+	h := newHarness(t)
+	ctx := t.Context()
+	trace := traceHex(1)
+
+	for _, args := range [][]string{
+		{"scores", "add", "--trace", trace, "--name", "n"},
+		{"scores", "add", "--trace", trace, "--name", "n", "--value", "1", "--string", "x"},
+		{"scores", "add", "--trace", trace, "--name", "n", "--value", "high"},
+	} {
+		if out := h.run(ctx, true, args...); out.code != ExitUsage {
+			t.Errorf("%v exited %d, want %d: %s", args, out.code, ExitUsage, out.stderr)
+		}
+	}
+
+	empty := h.run(ctx, true, "scores", "add", "--trace", trace, "--name", "note", "--string", "")
+	if empty.code != ExitOK {
+		t.Fatalf("--string \"\" exited %d: %s", empty.code, empty.stderr)
+	}
+}
+
 // TestPromptsListPages walks the whole listing a page at a time, which is what
 // `--cursor` is for: without it the command could reach only the first page,
 // and a `--limit` raised until everything fits is not pagination.

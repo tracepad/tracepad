@@ -163,6 +163,11 @@ const Usage = `Client commands (they talk to a running server over HTTP):
   tracepad scores ls    [--trace ID] [--observation ID] [--session S] [--name N]
                         [--type numeric|boolean|categorical|text] [--since 1h]
                         [--limit N] [--cursor C]
+  tracepad scores add   (--trace ID [--observation ID] | --session S) --name N
+                        (--value V | --string S)
+                        [--type numeric|boolean|categorical|text] [--comment C]
+                        [--id ID]
+  tracepad scores rm    <score-id>
   tracepad prompts ls   [--limit N] [--cursor C]
   tracepad prompts get  <name> [--label L | --version N]
   tracepad prompts push <name> --file prompt.json [--label L] [--message M]

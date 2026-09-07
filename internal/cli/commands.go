@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"net"
 	"net/url"
@@ -176,9 +177,113 @@ func (r *run) sessionsShow(ctx context.Context, args []string) error {
 
 func (r *run) scores(ctx context.Context, args []string) error {
 	sub, rest := split(args)
-	if sub != "ls" {
-		return usageErrorf("scores takes ls, got %q", sub)
+	switch sub {
+	case "ls":
+		return r.scoresList(ctx, rest)
+	case "add":
+		return r.scoresAdd(ctx, rest)
+	case "rm":
+		return r.scoresRemove(ctx, rest)
 	}
+	return usageErrorf("scores takes ls, add or rm, got %q", sub)
+}
+
+// scoresAdd is one `POST /api/v1/scores` with one object in it (spec 022 #7).
+// The interface may do nothing the command line cannot, and spec 022 scores
+// from a screen — so the command line scores too.
+func (r *run) scoresAdd(ctx context.Context, args []string) error {
+	var (
+		trace       string
+		observation string
+		session     string
+		name        string
+		value       string
+		stringValue string
+		dataType    string
+		comment     string
+		id          string
+	)
+	fs := r.flags("scores add")
+	fs.StringVar(&trace, "trace", "", "")
+	fs.StringVar(&observation, "observation", "", "")
+	fs.StringVar(&session, "session", "", "")
+	fs.StringVar(&name, "name", "", "")
+	fs.StringVar(&value, "value", "", "")
+	fs.StringVar(&stringValue, "string", "", "")
+	fs.StringVar(&dataType, "type", "", "")
+	fs.StringVar(&comment, "comment", "", "")
+	fs.StringVar(&id, "id", "", "")
+	if _, err := r.parse(fs, args, 0); err != nil {
+		return err
+	}
+	// Which flags were *given*, not which are non-empty: `--string ""` is a
+	// text score of the empty string, and reading it as "no value" would
+	// refuse a score the API accepts.
+	given := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { given[f.Name] = true })
+	if given["value"] == given["string"] {
+		return usageErrorf("scores add takes one of --value and --string")
+	}
+
+	request := map[string]any{"name": name}
+	addSomeBody(request, "trace_id", trace)
+	addSomeBody(request, "observation_id", observation)
+	addSomeBody(request, "session_id", session)
+	addSomeBody(request, "data_type", dataType)
+	addSomeBody(request, "comment", comment)
+	addSomeBody(request, "id", id)
+	if given["value"] {
+		number, err := strconv.ParseFloat(value, 64)
+		if err != nil {
+			return usageErrorf("--value takes a number, got %q", value)
+		}
+		request["value"] = number
+	} else {
+		request["string_value"] = stringValue
+	}
+	// Everything else the API checks — a target, the name's length, the
+	// type's own rules, the name's config — is checked where it is decided,
+	// which is inside the write (#1).
+	body, err := r.api.Post(ctx, "/api/v1/scores", request)
+	if err != nil {
+		return err
+	}
+	if r.wantJSON() {
+		return r.emit(body)
+	}
+	written, err := decode[struct {
+		IDs []string `json:"ids"`
+	}](body)
+	if err != nil {
+		return err
+	}
+	if len(written.IDs) == 0 {
+		return fmt.Errorf("the server wrote the score and named no id")
+	}
+	fmt.Fprintln(r.opt.Stdout, written.IDs[0])
+	return nil
+}
+
+// scoresRemove retracts one score by id (spec 022 #6). No echo: a re-`add`
+// with the same `--id` puts the row back.
+func (r *run) scoresRemove(ctx context.Context, args []string) error {
+	fs := r.flags("scores rm")
+	rest, err := r.parse(fs, args, 1)
+	if err != nil {
+		return err
+	}
+	body, err := r.api.Send(ctx, "DELETE", "/api/v1/scores/"+url.PathEscape(rest[0]), nil, nil)
+	if err != nil {
+		return err
+	}
+	if r.wantJSON() {
+		return r.emit(body)
+	}
+	fmt.Fprintf(r.opt.Stdout, "removed the score %s\n", rest[0])
+	return nil
+}
+
+func (r *run) scoresList(ctx context.Context, args []string) error {
 	var (
 		trace       string
 		observation string
@@ -198,7 +303,7 @@ func (r *run) scores(ctx context.Context, args []string) error {
 	fs.StringVar(&since, "since", "", "")
 	fs.StringVar(&cursor, "cursor", "", "")
 	fs.IntVar(&limit, "limit", 0, "")
-	if _, err := r.parse(fs, rest, 0); err != nil {
+	if _, err := r.parse(fs, args, 0); err != nil {
 		return err
 	}
 
