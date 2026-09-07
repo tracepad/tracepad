@@ -86,7 +86,10 @@
 <Popover.Root bind:open>
 	<Popover.Trigger>
 		{#snippet child({ props })}
-			<Button {...props} title="Put this in a review queue">
+			<!-- The name is on the control rather than only in it: the word is
+			     hidden at a phone's width, and a button whose accessible name
+			     disappears with its text is a button nothing can address. -->
+			<Button {...props} aria-label={label} title="Put this in a review queue">
 				<ClipboardCheck class="size-4" />
 				<span class="hidden sm:inline">{label}</span>
 			</Button>

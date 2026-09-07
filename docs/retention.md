@@ -31,7 +31,7 @@ nullable:
 
 | Setting | Applies to | `null` means |
 |---|---|---|
-| `retention_days` | Traces, and everything hanging off them: observations, payloads, scores | Keep forever (the default) |
+| `retention_days` | Traces, and everything hanging off them: observations, payloads, scores, and the annotation-queue items that point at them | Keep forever (the default) |
 | `raw_retention_days` | The stored OTLP bodies of `TRACEPAD_STORE_RAW` | Follow `retention_days` |
 | `stats_retention_days` | The hourly statistics rollup, and the per-user one beside it ([users.md](users.md)) | Keep forever (the default) |
 
@@ -105,6 +105,19 @@ discovered:
    recompute could not have run at all. The user leaves `/api/v1/users`
    immediately; only the project-wide totals for a frozen hour go on counting
    the traces.
+
+## What an annotation queue keeps
+
+Nothing. A queue item is a pointer at a trace ([annotation.md](annotation.md)),
+and the sweep that deletes the trace deletes its items in the same job — a
+pointer to a deleted trace is a desk showing an empty page. The queue itself
+stays, with a smaller list.
+
+The **verdicts** are not items and do not go with them: they are scores on the
+trace, and they expire on their own timestamps like every other score, which
+here means with the trace they are about. Deleting a queue by hand takes its
+items and nothing else, for the same reason — the scores are the work, and the
+queue was only the list of what to do.
 
 ## What a run keeps
 
@@ -261,7 +274,8 @@ tracepad users rm-data user-4711
 
 `DELETE /api/v1/projects/{id}/users/{user_id}/data` erases everything the
 queryable stores hold about one user — the traces filed under that id, their
-observations, payloads and scores — synchronously, and answers with the counts.
+observations, payloads, scores and the annotation-queue items pointing at them
+— synchronously, and answers with the counts.
 Like every destructive endpoint it is a dry run until confirmed; the echo here
 is the user id itself. Traces an eval run is keeping go with the rest, and the
 dry run lists those runs under `runs` so the hole is visible before it opens.

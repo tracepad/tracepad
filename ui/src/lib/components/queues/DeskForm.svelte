@@ -1,5 +1,6 @@
 <script lang="ts">
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
+	import { untrack } from 'svelte';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import type { AnnotationItem, Score, ScoreConfig } from '$lib/api/client.svelte';
 	import Button from '$lib/components/Button.svelte';
@@ -52,14 +53,19 @@
 	let skipping = $state(false);
 	let reason = $state('');
 
-	// A new item is a new form. Seeded from the item's id and the scores that
-	// came with it, so a value typed for one trace never follows the reviewer
-	// to the next one.
+	// A new item is a new form, and *only* a new item is. Everything the
+	// seeding reads is untracked: the queue is re-read after every write, so
+	// its `score_configs` arrive as a new array each time, and depending on
+	// that would empty the form under the reviewer between the write and the
+	// answer. The caller mounts this once the scores of the target have
+	// landed, which is what makes one seeding enough (found in the e2e).
 	$effect(() => {
 		item.id;
-		fields = deskFields(names, configs, scores);
-		skipping = false;
-		reason = '';
+		untrack(() => {
+			fields = deskFields(names, configs, scores);
+			skipping = false;
+			reason = '';
+		});
 	});
 
 	const waiting = $derived(unfilled(fields, configs));

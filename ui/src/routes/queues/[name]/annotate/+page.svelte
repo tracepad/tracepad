@@ -11,6 +11,7 @@
 		api,
 		type AnnotationItem,
 		type AnnotationQueue,
+		type ScoreConfig,
 		type ScoreInput,
 		type Trace
 	} from '$lib/api/client.svelte';
@@ -34,6 +35,10 @@
 	const name = $derived(page.params.name ?? '');
 
 	let queue = $state.raw<AnnotationQueue | null>(null);
+	// Read with the queue rather than off the scores block beside it: the
+	// configs are what the controls are *built* from, so the form cannot be
+	// drawn before they land, and `loading` below is what says so.
+	let configs = $state.raw<ScoreConfig[]>([]);
 	let item = $state.raw<AnnotationItem | null>(null);
 	let pending = $state(0);
 	let peeked = $state.raw<Trace | null>(null);
@@ -61,7 +66,12 @@
 		loading = true;
 		failure = null;
 		try {
-			queue = await api.getQueue(wanted, signal);
+			const [declared, opened] = await Promise.all([
+				api.listScoreConfigs(signal),
+				api.getQueue(wanted, signal)
+			]);
+			configs = declared.configs;
+			queue = opened;
 			await take(signal);
 		} catch (cause) {
 			if (signal.aborted) return;
@@ -179,7 +189,12 @@
 		<span class="text-subtle text-sm tabular-nums">{at.label}</span>
 	{/if}
 	{#if item}
-		<span class="text-subtle hidden truncate font-mono text-xs md:inline">#{item.seq}</span>
+		<!-- At every width: it is the one thing on the desk that says *which*
+		     item is in front of you, and a reviewer coming back to a reloaded
+		     tab reads it before anything else. -->
+		<span class="text-subtle shrink-0 font-mono text-xs" title="Its place in the queue">
+			#{item.seq}
+		</span>
 	{/if}
 	<div class="ml-auto flex items-center gap-1.5">
 		<!-- Changeable from the header (#12): a shared machine is where the
@@ -215,19 +230,32 @@
 			{/key}
 		</div>
 		<div class="border-border flex min-h-0 flex-col border-t md:w-2/5 md:border-t-0">
-			<DeskForm
-				queue={name}
-				{item}
-				configs={scores.configs}
-				names={queue.score_configs}
-				scores={onTarget}
-				annotator={annotator.name ?? ''}
-				{missing}
-				{busy}
-				onsave={complete}
-				onskip={skip}
-				onlater={later}
-			/>
+			<!-- Not before the target's scores have landed: the form is
+			     *prefilled* from them (#12), and a form drawn empty and filled
+			     in afterwards would overwrite whatever the reviewer had already
+			     typed. Keyed on the item, so each one gets a fresh form. -->
+			{#key item.id}
+				{#if scores.loading}
+					<p class="text-subtle flex items-center gap-2 p-4 text-sm">
+						<LoaderCircle class="size-4 animate-spin" />
+						Reading what has already been said about this trace
+					</p>
+				{:else}
+					<DeskForm
+						queue={name}
+						{item}
+						{configs}
+						names={queue.score_configs}
+						scores={onTarget}
+						annotator={annotator.name ?? ''}
+						{missing}
+						{busy}
+						onsave={complete}
+						onskip={skip}
+						onlater={later}
+					/>
+				{/if}
+			{/key}
 		</div>
 	</div>
 {:else}

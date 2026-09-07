@@ -228,6 +228,21 @@ API. This file routes; it does not duplicate what specs and docs say.
   — they are *about* the user, and a frozen hour could not recompute them at
   all (#10). The *Users* screens, `users ls`/`show`, `stats --user`,
   `list_users`/`get_user`; the interface's line ceiling rises to 16,000 (#11).
+- 🚧 Spec 024 (annotation queues) in progress: schema 0014 —
+  `annotation_queues` and `annotation_items`, the list of what a team decided
+  deserves a human verdict and the bookkeeping of who gave one. The verdicts
+  are *scores*, unchanged: a queue names the score configs a reviewer must
+  fill, and `complete` is the server checking those scores are on the item's
+  target, whoever wrote them (#7) — so a judge's verdict prefills the desk and
+  is confirmed rather than repeated. Two ways in, both idempotent (#4): one
+  target, or every trace a *listing filter* matches, capped — the filters are
+  `traces.go`'s own, so "queue what I am looking at" needs no second grammar.
+  `next` is a GET that writes: being handed an item claims it for ten minutes,
+  resume-first so a reload does not move a reviewer mid-verdict (#5). Items
+  follow their trace through the sweep, the erasure and the purge (#3), and
+  deleting a queue takes its items and no scores. The *Queues* screens, the
+  desk, both *Add to queue* gestures, `queues …`, `list_queues` /
+  `get_queue_items`; the interface's ceiling rises to 18,000 (#17).
 - ✅ Spec 005 (retention & admin) shipped: schema 0005, the hourly sweeper
   writing every chunk through the group-commit writer, the admin API under
   `/api/v1/projects` with a dry-run/confirm contract on every destructive
@@ -258,6 +273,7 @@ API. This file routes; it does not duplicate what specs and docs say.
 | Statistics rollup | `internal/store/rollup.go` (the table and one hour's recomputation), `aggregator.go` (the pass, the watermark, the freeze), `histogram.go` (why a percentile is summable), the seam in `internal/server/stats.go`, spec 013 — an hour is recomputed whole and never delta-maintained, and the rollup is the one store the trace sweep spares |
 | The per-user rollup and the Users screens | `internal/store/users.go` (both tables, one hour's per-user recomputation, the summary, the listing's four keysets and the live tail), the `statsRoll` job that writes it in `rollup.go` and the session half of `dirtyHours` in `aggregator.go`, `internal/server/users.go` (the two endpoints and the merge) with `user_id` in `stats.go`, `ui/src/routes/users/`, `ui/src/lib/components/users/` + `UserTable.svelte`, `ui/src/lib/api/users.ts` (the pure part: the filters held to `openapi.json`, the sorts, the page's URL), `docs/users.md`, spec 023 — one aggregator writes both tables in one transaction, a session is counted in the hour its user's earliest trace of it starts (#12), the listing is the rollup alone while one user merges the live tail (#4), and an erasure *deletes* the per-user rows rather than re-rolling them (#10) |
 | Admin API (projects, keys, retention, erasure) | `internal/server/admin.go`, `internal/store/admin.go`, `docs/admin.md`, spec 005 — destructive endpoints are a dry run until `?confirm=` echoes the name, checked inside the write transaction |
+| Annotation queues and the desk | `internal/store/queues.go` (the queue, the two adds and their dedupe, the claim and its TTL, the completeness check), `internal/server/queues.go`, `internal/cli/queues.go`, the two tools in `internal/mcpserver/evals.go`, `ui/src/routes/queues/`, `ui/src/lib/components/queues/` + `scores/ScoreControl.svelte`, `ui/src/lib/queues.ts` (the pure part: the New-queue gate, the progress, the desk's prefilled form and what it posts) and `annotator.svelte.ts`, `docs/annotation.md`, spec 024 — a queue stores no verdicts: `complete` checks the *scores* on the target and a trace item ignores an observation's scores of the same name (#7); `from-traces` runs `traceQuery` inside the write transaction so two clients composing one filter enqueue the same traces (#4); `next` claims resume-first and `reopen` releases a claim (#5, #16); items are deleted by `traceSweep` and `UserDataErase` in the same job as their trace (#3) |
 | Attribute mapping | `internal/mapping/rules.go` is the table; `mapping.go` applies it; `value.go` holds `attrs`, where reading and claiming are separate and an unclaimed attribute keeps the origin it arrived at (spec 012 #7) |
 | Web interface | `ui/` (SvelteKit SPA), `internal/ui/` (the embed and the tagless stub), `internal/server/ui.go` (delivery and the SPA fallback), `docs/ui.md`, specs 006 to 010 and 015 — the API types in `ui/src/lib/api/schema.d.ts` are generated from `openapi.json` and the gate fails on drift, and the application-line budget is 18,000 (`scripts/ui-lines.sh`, spec 024 #17) |
 | A payload, shown or edited | `ui/src/lib/components/json/` — `setup.ts` is everything that is not a DOM node (the document a value becomes, where it stops being JSON, which nodes a long one folds, the extension list and the themed chrome), `CodeArea.svelte` is the instance, `JsonView`/`JsonEditor` are the two modes, spec 015 — one surface for reading and writing, so there is one answer to "what does this payload look like"; the mode is the `readOnly` facet and nothing else, `indentWithTab` is deliberately absent (#7), truncation belongs to `Payload.svelte` rather than to the editor (#3), and an editor over a field that may be absent takes `optional`, where an empty document is valid and unmarked (spec 016 #22) |

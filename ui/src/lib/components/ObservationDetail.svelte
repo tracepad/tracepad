@@ -138,7 +138,10 @@
 			<!-- The other half of spec 024 #13: in an agent trace the thing to
 			     judge is often one generation, so the queue takes this step
 			     rather than the whole run. -->
-			<AddToQueue target={{ trace_id: traceID, observation_id: observation.id }} label="Queue" />
+			<AddToQueue
+				target={{ trace_id: traceID, observation_id: observation.id }}
+				label="Queue this observation"
+			/>
 			<a
 				href="/datasets/items/new?trace={encodeURIComponent(traceID)}&obs={encodeURIComponent(observation.id)}"
 				title="Cut this observation into a dataset as a test case"

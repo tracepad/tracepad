@@ -483,6 +483,12 @@ func (s *QueueItemSkip) apply(tx *sql.Tx) error {
 // QueueItemReopen is POST …/items/{id}/reopen (#7): a completed or skipped
 // item back to pending, for the manager who disagrees with a verdict or wants
 // a skip looked at again.
+//
+// An item that is *already* pending is not refused: what reopen does to it is
+// release the claim, which is the one thing #5 says every finishing write
+// does and the only door the desk's *Later* has (Decision 16). Idempotent
+// either way — the end state is "pending, unclaimed", and asking for it twice
+// is asking for the same thing.
 type QueueItemReopen struct {
 	ProjectID string
 	Queue     string
@@ -497,10 +503,6 @@ func (r *QueueItemReopen) apply(tx *sql.Tx) error {
 	item, _, err := itemForWrite(tx, r.ProjectID, r.Queue, r.ID)
 	if err != nil {
 		return err
-	}
-	if item.Status == ItemPending {
-		return &Rejection{Kind: RejectConflict, Message: fmt.Sprintf(
-			"item %s is already pending", item.ID)}
 	}
 	if _, err := tx.Exec(
 		`UPDATE annotation_items

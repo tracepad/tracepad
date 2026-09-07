@@ -431,6 +431,53 @@ asks you to type the name back, and needs `--yes` off a terminal. `runs rm` and
 `score-configs rm` do not: one row each, and the traces of a deleted run are
 released, not deleted.
 
+### `queues`
+
+The annotation commands. The loop they make — declare the queue, fill it, take
+the next item, post the scores, complete — is written out end to end in
+[annotation.md](annotation.md#the-same-loop-from-the-command-line).
+
+```sh
+tracepad queues ls
+tracepad queues put weekly-review --config accuracy --config tone \
+  --description "Did support answer the question?"
+
+tracepad queues add weekly-review --trace 4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f
+tracepad queues add weekly-review --trace 4f8c… --observation 2b3c4d5e6f7a8b9c
+tracepad queues add weekly-review --from-traces --error --env production --limit 200
+
+tracepad queues next     weekly-review --annotator ada
+tracepad queues complete weekly-review c0ffee00c0ffee00c0ffee00c0ffee00 --annotator ada
+tracepad queues skip     weekly-review c0ffee00c0ffee00c0ffee00c0ffee00 --annotator ada \
+  --reason "not a support conversation"
+tracepad queues reopen   weekly-review c0ffee00c0ffee00c0ffee00c0ffee00 --annotator ada
+
+tracepad queues items weekly-review --status completed --annotator ada
+tracepad queues rm    weekly-review --yes
+```
+
+`queues put` is declarative: the whole queue in one call, and the same call
+twice writes nothing. Every `--config` must be a declared score config, in the
+order a reviewer will be asked for them.
+
+`queues add --from-traces` takes the same filters as `traces ls` and adds the
+newest matches, at most `--limit` (100 by default, 1000 at most). It prints how
+many matched and whether the cap bit; run it again with `--until` at the oldest
+one added to continue. Adding a target the queue already holds is not an error
+and adds nothing, so a filter is safe to re-run.
+
+`queues next` claims the item it hands out for ten minutes, and hands the same
+one back on a second call from the same `--annotator` — a script that crashes
+and restarts resumes rather than skipping. `queues complete` is refused until
+every score the queue names is on the item's target, whoever wrote it: post
+them with `scores add` first. `queues reopen` on an item that is already
+pending simply releases the claim.
+
+`queues items` reads oldest first, which is the order the items are worked in;
+`--newer --cursor` walks back up. `queues rm` is destructive — it takes the
+queue's items — so it shows the preview and asks you to type the name back,
+and needs `--yes` off a terminal. The scores written while annotating stay.
+
 ### `system`
 
 ```sh

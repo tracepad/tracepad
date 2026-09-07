@@ -640,7 +640,9 @@ func (s *Server) handleSkipItem(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, renderQueueItem(write.Item))
 }
 
-// handleReopenItem returns a completed or skipped item to pending (#7).
+// handleReopenItem returns a completed or skipped item to pending (#7), and
+// releases the claim on one that is pending already — the desk's *Later*
+// (Decision 16).
 func (s *Server) handleReopenItem(w http.ResponseWriter, r *http.Request) {
 	project, name, id, ok := s.itemTarget(w, r)
 	if !ok {

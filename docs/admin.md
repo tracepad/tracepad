@@ -176,6 +176,11 @@ bodies are deliberately not touched — see
 what that means for a data-subject request and how to deploy if it is not
 acceptable.
 
+The **annotation-queue items** pointing at the erased traces go with them
+([annotation.md](annotation.md)) — an item is a pointer, and the queues keep
+their shape with shorter lists. The verdicts already given are scores on those
+traces and go with the traces.
+
 The user's rows in the **per-user rollup** ([users.md](users.md)) go in the
 same request, outright rather than by recomputation: they are about the user,
 and for an hour past the trace-retention window there would be nothing left to

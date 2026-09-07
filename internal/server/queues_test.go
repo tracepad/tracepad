@@ -395,9 +395,16 @@ func TestSkipReopenAndRemove(t *testing.T) {
 	if reopened.Status != "pending" || reopened.SkipReason != "" || reopened.CompletedBy != "" {
 		t.Fatalf("item = %+v, want it pending again with the skip cleared", reopened)
 	}
-	// Reopening what is already pending is a 409, not a quiet no-op.
-	expectError(t, h.send(t, "POST", "/api/v1/queues/review/items/"+item+"/reopen",
-		map[string]any{"annotator": "bob"}), 409, "already pending")
+	// Reopening what is already pending is not refused: what it does to a
+	// pending item is release the claim, which is the desk's *Later*
+	// (Decision 16).
+	expectStatus(t, h.get(t, "/api/v1/queues/review/next?annotator=ada"), 200)
+	rec = h.send(t, "POST", "/api/v1/queues/review/items/"+item+"/reopen",
+		map[string]any{"annotator": "bob"})
+	expectStatus(t, rec, 200)
+	if released := decodeJSON[queueItemResponse](t, rec); released.ClaimedBy != "" {
+		t.Errorf("item = %+v, want the claim released", released)
+	}
 
 	expectStatus(t, h.send(t, "DELETE", "/api/v1/queues/review/items/"+item, nil), 200)
 	expectStatus(t, h.send(t, "DELETE", "/api/v1/queues/review/items/"+item, nil), 404)

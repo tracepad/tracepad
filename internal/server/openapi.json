@@ -1589,7 +1589,7 @@
       "post": {
         "tags": ["queues"],
         "summary": "Return a completed or skipped item to pending",
-        "description": "For the manager who disagrees with a verdict or wants a skip looked at again. An item that is already pending is a 409. The scores stay where they are: reopening asks for another look, not for a retraction.",
+        "description": "For the manager who disagrees with a verdict or wants a skip looked at again. An item that is already pending is not refused: what reopening does to it is release the claim, which is what the desk's *Later* asks for. The scores stay where they are — reopening asks for another look, not for a retraction.",
         "operationId": "reopenQueueItem",
         "parameters": [{"$ref": "#/components/parameters/QueueName"}, {"$ref": "#/components/parameters/ItemID"}],
         "requestBody": {"required": true, "content": {"application/json": {"schema": {
@@ -1601,8 +1601,7 @@
           "200": {"description": "The item, pending again", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AnnotationItem"}}}},
           "400": {"$ref": "#/components/responses/BadRequest"},
           "401": {"$ref": "#/components/responses/Unauthorized"},
-          "404": {"$ref": "#/components/responses/NotFound"},
-          "409": {"$ref": "#/components/responses/Conflict"}
+          "404": {"$ref": "#/components/responses/NotFound"}
         }
       }
     },
