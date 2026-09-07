@@ -126,6 +126,27 @@ test('the diff is the server-rendered patch, painted', async ({ page }) => {
 	await expect(page.getByText(/identical/)).toBeVisible();
 });
 
+// Opening a diff is about the diff. The page went on reading the version it
+// was reading — which is what *Diff*'s own default, the version list's
+// highlight, *New version*'s prefill and *Close diff* all stand on (found in
+// review of PR #40).
+test('the diff keeps the version being read, and closing comes back to it', async ({ page }) => {
+	await signIn(page);
+	await page.goto(`/prompts/${CHAT}?version=1`);
+	await page.getByRole('button', { name: 'Diff' }).click();
+
+	// v1 against the one before it, which there is not: bounded at 1.
+	await expect(page).toHaveURL(/version=1/);
+	await expect(page).toHaveURL(/diff=1\.\.1/);
+	await page.getByLabel('Diff to version').fill('2');
+	await page.getByLabel('Diff to version').press('Enter');
+	await expect(page).toHaveURL(/version=1/);
+
+	await page.getByRole('button', { name: 'Close the diff' }).click();
+	await expect(page).toHaveURL(new RegExp(`/prompts/${CHAT}\\?version=1$`));
+	await expect(page.getByRole('heading', { name: 'v1' })).toBeVisible();
+});
+
 test('a new version is written from the one on screen', async ({ page }) => {
 	await signIn(page);
 	await page.goto(`/prompts/${CHAT}?version=2`);

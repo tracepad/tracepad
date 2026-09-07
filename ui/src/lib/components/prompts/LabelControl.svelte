@@ -55,7 +55,12 @@
 		event.preventDefault();
 		const label = wanted.trim();
 		if (label === '') return;
-		const at = named[label];
+		// `Object.hasOwn`, not `named[label]`: `toString`, `constructor` and
+		// `valueOf` are all label names the server accepts, and a plain lookup
+		// finds them on `Object.prototype` — which read as a label already
+		// pointing somewhere and opened a dialog offering to move a function
+		// (found in review of PR #40).
+		const at = Object.hasOwn(named, label) ? named[label] : undefined;
 		wanted = '';
 		adding = false;
 		if (at === undefined) return void run(() => api.putPromptLabel(name, label, version));

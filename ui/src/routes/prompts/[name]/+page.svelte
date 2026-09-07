@@ -17,7 +17,15 @@
 	import VersionView from '$lib/components/prompts/VersionView.svelte';
 	import { timestamp } from '$lib/format';
 	import { asPage, Listing, UrlSpot } from '$lib/listing.svelte';
-	import { diffParam, orderLabelEntries, orderLabels, readDiff } from '$lib/prompts';
+	import {
+		diffCeiling,
+		diffParam,
+		diffable,
+		orderLabelEntries,
+		orderLabels,
+		promptSearch,
+		readDiff
+	} from '$lib/prompts';
 
 	// One prompt (spec 021 #2): the versions down the left as the shared
 	// listing, and the version the URL names on the right — the two are one
@@ -81,38 +89,39 @@
 	/** The version on screen; the diff's right-hand side when one is open. */
 	const shown = $derived(prompt?.version ?? (diff ? diff.to : null));
 
-	/** A link to a version of this name, keeping the page the reader is on. */
-	function at(version: number | null, comparing: string | null = null): string {
-		const params = new URLSearchParams(page.url.searchParams);
-		params.delete('version');
-		params.delete('diff');
-		if (version !== null) params.set('version', String(version));
-		if (comparing !== null) params.set('diff', comparing);
-		const search = params.toString();
-		return `${here}${search ? `?${search}` : ''}`;
-	}
+	/**
+	 * A link to this prompt, keeping the listing page the reader is on. The
+	 * rule for the two keys this page owns is `promptSearch`; `version` left
+	 * out means "whichever version is being read".
+	 */
+	const at = (version?: number | null, comparing: string | null = null) =>
+		here + promptSearch(page.url.searchParams, { version, diff: comparing });
 
 	/** Opening the diff: this version against the one before it (#3). */
 	function openDiff() {
 		const to = shown ?? 1;
-		goto(at(null, diffParam(Math.max(1, to - 1), to)));
+		goto(at(undefined, diffParam(Math.max(1, to - 1), to)));
 	}
 
 	function pick(side: 'from' | 'to', raw: string) {
 		const value = Number(raw);
 		if (!diff || !Number.isInteger(value) || value < 1) return;
-		goto(at(null, diffParam(side === 'from' ? value : diff.from, side === 'to' ? value : diff.to)));
+		goto(
+			at(undefined, diffParam(side === 'from' ? value : diff.from, side === 'to' ? value : diff.to))
+		);
 	}
 
-	/** The highest version there is, for the diff inputs' ceiling. */
-	const latest = $derived(versions.rows.length > 0 ? Math.max(...versions.rows.map((r) => r.version)) : undefined);
-	/**
-	 * A name with one version has nothing to compare it with (#9). Unknown
-	 * while the first page is in flight, and treated as comparable then: the
-	 * *no diff yet* line is a statement about the name, and flashing it under
-	 * every prompt on the way in would make it one about the network.
-	 */
-	const comparable = $derived(versions.loading || versions.rows.length > 1 || !versions.newest);
+	/** The ceiling the diff inputs may claim, where this page can know it. */
+	const latest = $derived(diffCeiling(versions.rows, versions.newest));
+	/** Whether this name has anything to compare with (#9). */
+	const comparable = $derived(
+		diffable({
+			loading: versions.loading,
+			problem: versions.problem,
+			rows: versions.rows.length,
+			newest: versions.newest
+		})
+	);
 
 	const numberField =
 		'border-border bg-canvas text-fg w-16 rounded-md border px-1.5 py-1 text-sm tabular-nums';
@@ -148,7 +157,9 @@
 			<span class="hidden sm:inline">New version</span>
 		</Button>
 		{#if diff}
-			<Button aria-label="Close the diff" onclick={() => goto(at(shown))}>
+			<!-- Just the diff: whichever version was being read before it opened
+			     is still the one to come back to. -->
+			<Button aria-label="Close the diff" onclick={() => goto(at())}>
 				<GitCompare class="size-4" />
 				<span class="hidden sm:inline">Close diff</span>
 			</Button>

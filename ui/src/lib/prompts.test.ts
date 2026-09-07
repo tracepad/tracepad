@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+	diffCeiling,
 	diffParam,
+	diffable,
 	draftFrom,
 	emptyDraft,
 	messagesOf,
@@ -8,6 +10,7 @@ import {
 	orderLabels,
 	paintDiff,
 	problems,
+	promptSearch,
 	readDiff,
 	versionBody,
 	type Draft,
@@ -110,6 +113,44 @@ describe('the version a draft becomes', () => {
 			prompt: 'Be terse.'
 		});
 	});
+
+	// The API stores any JSON value as a message's content and returns it
+	// verbatim (spec 003 #15). The editor is a text area, so a structured
+	// content is *shown* as its document — and opening a prompt and saving it
+	// untouched must give the array back, not a string of it (found in review
+	// of PR #40).
+	it('puts a structured content back as the value it was rendered from', () => {
+		const parts = [{ type: 'text', text: 'hi' }];
+		const draft = { ...emptyDraft('chat'), messages: messagesOf([{ role: 'user', content: parts }]) };
+
+		expect(versionBody(draft)).toEqual({
+			type: 'chat',
+			prompt: [{ role: 'user', content: parts }]
+		});
+	});
+
+	// Once it is edited, the text is what the author wrote: guessing at its
+	// structure would be the editor having an opinion about their document.
+	it('sends the text once the author has changed it', () => {
+		const draft = {
+			...emptyDraft('chat'),
+			messages: messagesOf([{ role: 'user', content: [{ type: 'text', text: 'hi' }] }])
+		};
+		draft.messages[0].content = 'just words now';
+
+		expect(versionBody(draft).prompt).toEqual([{ role: 'user', content: 'just words now' }]);
+	});
+
+	// The ordinary case is untouched: a string content stays a string, and
+	// nothing is parsed on the way out.
+	it('leaves a plain string content alone, whatever it looks like', () => {
+		const draft = {
+			...emptyDraft('chat'),
+			messages: messagesOf([{ role: 'user', content: '{"looks": "like JSON"}' }])
+		};
+
+		expect(versionBody(draft).prompt).toEqual([{ role: 'user', content: '{"looks": "like JSON"}' }]);
+	});
 });
 
 describe('the label chips', () => {
@@ -169,6 +210,62 @@ describe('the diff painter', () => {
 	});
 });
 
+describe("the prompt page's URL", () => {
+	const url = (search: string) => new URLSearchParams(search);
+
+	it('leaves the listing keys where they are', () => {
+		expect(promptSearch(url('limit=25&cursor=abc&direction=prev'), { version: 4 })).toBe(
+			'?limit=25&cursor=abc&direction=prev&version=4'
+		);
+	});
+
+	// The whole of finding (2): opening a diff is about the diff, and the
+	// version being read is not its business.
+	it('keeps the version being read when it is not told about one', () => {
+		expect(promptSearch(url('version=1'), { diff: '1..2' })).toBe('?version=1&diff=1..2');
+		expect(promptSearch(url('version=1&diff=1..2'))).toBe('?version=1');
+		// And with no version in the URL there is still none: the page reads
+		// the latest, and says so by saying nothing.
+		expect(promptSearch(url(''), { diff: '1..2' })).toBe('?diff=1..2');
+	});
+
+	it('sets a version when given one and drops it when given null', () => {
+		expect(promptSearch(url('version=1&diff=1..2'), { version: 3 })).toBe('?version=3');
+		expect(promptSearch(url('version=1'), { version: null })).toBe('');
+	});
+
+	// A diff is never carried by accident: every link that is not about it
+	// leaves it behind.
+	it('drops the diff unless it is the thing being set', () => {
+		expect(promptSearch(url('diff=1..2'), { version: 5 })).toBe('?version=5');
+		expect(promptSearch(url('diff=1..2'))).toBe('');
+	});
+});
+
+describe('what the page may claim to know', () => {
+	const rows = (...versions: number[]) => versions.map((version) => ({ version }));
+
+	// Finding (3): the listing is newest first, so only its first page carries
+	// the highest version. Page two of a long history caps at a page boundary.
+	it('bounds the diff inputs only on the newest page', () => {
+		expect(diffCeiling(rows(120, 119, 118), true)).toBe(120);
+		expect(diffCeiling(rows(70, 69, 68), false)).toBeUndefined();
+		expect(diffCeiling([], true)).toBeUndefined();
+	});
+
+	// Finding (5): a listing in flight and a listing that failed both look
+	// like "one version" from the rows alone.
+	it.each([
+		['a name with one version', { loading: false, problem: null, rows: 1, newest: true }, false],
+		['a name with two', { loading: false, problem: null, rows: 2, newest: true }, true],
+		['a later page', { loading: false, problem: null, rows: 1, newest: false }, true],
+		['a page in flight', { loading: true, problem: null, rows: 0, newest: true }, true],
+		['a page that failed', { loading: false, problem: 'nope', rows: 0, newest: true }, true]
+	])('says %s is comparable: %o → %s', (_, listing, want) => {
+		expect(diffable(listing)).toBe(want);
+	});
+});
+
 describe('the ?diff= parameter', () => {
 	it('reads a pair and refuses everything else', () => {
 		expect(readDiff('1..2')).toEqual({ from: 1, to: 2 });
@@ -219,8 +316,14 @@ describe('the draft a version opens as', () => {
 	// verbatim by the API, so the editor keeps them rather than flattening them
 	// (edge cases).
 	it('keeps a role it does not know and content that is not a string', () => {
-		expect(messagesOf([{ role: 'tool', content: [{ type: 'text', text: 'hi' }] }])).toEqual([
-			{ role: 'tool', content: '[\n  {\n    "type": "text",\n    "text": "hi"\n  }\n]' }
+		const parts = [{ type: 'text', text: 'hi' }];
+		expect(messagesOf([{ role: 'tool', content: parts }])).toEqual([
+			{
+				role: 'tool',
+				content: '[\n  {\n    "type": "text",\n    "text": "hi"\n  }\n]',
+				// What the document was rendered from, so a save can put it back.
+				structured: parts
+			}
 		]);
 	});
 });

@@ -83,6 +83,22 @@ describe('attaching a label', () => {
 		expect(dialog()).toBeNull();
 		expect(putPromptLabel).not.toHaveBeenCalled();
 	});
+
+	// `toString`, `constructor` and `valueOf` are label names the server takes
+	// — the grammar is letters, digits, dot, dash and underscore — and a plain
+	// `named[label]` finds them on `Object.prototype`. That read as a label
+	// already pointing somewhere, and offered to move a function (found in
+	// review of PR #40).
+	it.each(['toString', 'constructor', 'valueOf', 'hasOwnProperty'])(
+		'treats %s as the new label it is',
+		async (label) => {
+			control({ named: { production: 6 } });
+			await type(label);
+
+			expect(dialog()).toBeNull();
+			expect(putPromptLabel).toHaveBeenCalledWith('support', label, 7);
+		}
+	);
 });
 
 describe('removing a label', () => {

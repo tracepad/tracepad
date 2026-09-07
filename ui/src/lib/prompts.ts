@@ -16,7 +16,19 @@ export const NAME_MAX = 200;
 export const RESERVED_LABEL = 'latest';
 
 /** One message of a chat body, as the editor holds it. */
-export type Message = { role: string; content: string };
+export type Message = {
+	role: string;
+	content: string;
+	/**
+	 * The value `content` was rendered from, when the stored content was not a
+	 * string. The API keeps any JSON value there and returns it verbatim
+	 * (spec 003 #15), the editor is a text area, and a document rendered into
+	 * one has to be able to go back as what it was: without this, opening a
+	 * chat prompt whose content is an array of parts and saving it untouched
+	 * would rewrite that array as a *string* of it (found in review of PR #40).
+	 */
+	structured?: unknown;
+};
 
 /**
  * What the editor is editing. `name` is empty on the page where the name is
@@ -54,6 +66,10 @@ export function emptyDraft(type: PromptType = 'chat'): Draft {
 export function draftFrom(prompt: Prompt): Draft {
 	const draft = emptyDraft(prompt.type as PromptType);
 	if (prompt.type === 'text') {
+		// A text prompt's body is always a JSON string: that is what makes it a
+		// text prompt (`promptShape`, spec 003), and every stored version went
+		// through that check. The fallback is for a body this client cannot
+		// account for, and it is shown rather than silently dropped.
 		draft.text = typeof prompt.prompt === 'string' ? prompt.prompt : stringify(prompt.prompt);
 	} else {
 		draft.messages = messagesOf(prompt.prompt);
@@ -72,11 +88,22 @@ export function messagesOf(body: unknown): Message[] {
 	if (!Array.isArray(body)) return [{ role: 'system', content: '' }];
 	return body.map((message) => {
 		const one = (message ?? {}) as { role?: unknown; content?: unknown };
-		return {
-			role: typeof one.role === 'string' ? one.role : '',
-			content: typeof one.content === 'string' ? one.content : stringify(one.content)
-		};
+		const role = typeof one.role === 'string' ? one.role : '';
+		if (typeof one.content === 'string') return { role, content: one.content };
+		return { role, content: stringify(one.content), structured: one.content };
 	});
+}
+
+/**
+ * What a message's content goes back as. The value it was rendered from, while
+ * the rendering is still on screen unedited; the text itself the moment
+ * somebody changes it, because then the text is what they wrote and a guess at
+ * its structure would be this editor's opinion rather than their document.
+ */
+export function contentOf(message: Message): unknown {
+	const { structured } = message;
+	if (structured !== undefined && message.content === stringify(structured)) return structured;
+	return message.content;
 }
 
 function stringify(value: unknown): string {
@@ -137,7 +164,7 @@ function isObject(text: string): boolean {
 export function versionBody(draft: Draft) {
 	const body: {
 		type: PromptType;
-		prompt: string | Message[];
+		prompt: string | { role: string; content: unknown }[];
 		config?: Record<string, never>;
 		commit_message?: string;
 		labels?: string[];
@@ -148,7 +175,7 @@ export function versionBody(draft: Draft) {
 				? draft.text
 				: draft.messages.map((message) => ({
 						role: message.role.trim(),
-						content: message.content
+						content: contentOf(message)
 					}))
 	};
 	// `Record<string, never>` is what `openapi-typescript` makes of an object
@@ -204,6 +231,67 @@ function classify(text: string): DiffLine {
 	if (text.startsWith('+')) return { kind: 'add', text };
 	if (text.startsWith('-')) return { kind: 'remove', text };
 	return { kind: 'context', text };
+}
+
+/**
+ * The prompt page's own two query keys, rewritten (Application contract). The
+ * listing's keys — `limit`, `cursor`, `direction` — are somebody else's and are
+ * carried through untouched, the way `$lib/page` and `$lib/peek` share a URL.
+ *
+ * `version` is three-valued on purpose: a number sets it, `null` removes it,
+ * and leaving it out keeps whatever the URL already says. Opening and re-aiming
+ * the diff take the third — they are about the diff and have no opinion about
+ * which version is being read — and dropping `?version=` there moved the whole
+ * page to the latest behind the reader's back: the version list highlighted
+ * another row, *New version* prefilled from another version, and the diff of
+ * "this one against the one before it" became `3..3` (found in review of
+ * PR #40).
+ */
+export function promptSearch(
+	current: URLSearchParams,
+	next: { version?: number | null; diff?: string | null } = {}
+): string {
+	const params = new URLSearchParams(current);
+	params.delete('diff');
+	if (next.version !== undefined) {
+		params.delete('version');
+		if (next.version !== null) params.set('version', String(next.version));
+	}
+	if (next.diff) params.set('diff', next.diff);
+	const search = params.toString();
+	return search ? `?${search}` : '';
+}
+
+/**
+ * The ceiling the diff's number inputs may claim, or nothing when this page
+ * cannot know it. The version listing is newest first, so its *first* page
+ * carries the highest version; from page two the maximum on screen is a page
+ * boundary, and capping the inputs at it would refuse v120 on exactly the
+ * CI-edited names the number inputs exist for (found in review of PR #40). An
+ * unbounded input is honest: the server answers for a version that is not
+ * there, and the page shows what it said.
+ */
+export function diffCeiling(versions: readonly { version: number }[], newest: boolean) {
+	if (!newest || versions.length === 0) return undefined;
+	return Math.max(...versions.map((row) => row.version));
+}
+
+/**
+ * Whether this name has anything to compare — a statement about the *name*
+ * (#9), which is why it is false only when the page actually knows. A listing
+ * still in flight and a listing that failed both look like "one version" from
+ * the rows alone, and *no diff yet* under a red banner is a sentence about the
+ * network wearing the words of a sentence about the prompt (found in review of
+ * PR #40).
+ */
+export function diffable(listing: {
+	loading: boolean;
+	problem: string | null;
+	rows: number;
+	newest: boolean;
+}): boolean {
+	if (listing.loading || listing.problem !== null) return true;
+	return listing.rows > 1 || !listing.newest;
 }
 
 /** `?diff=A..B` as two versions, or null when it names no pair. */
