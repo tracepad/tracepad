@@ -341,7 +341,12 @@ func (s *Store) Prompt(projectID, name string, selector PromptSelector) (*Prompt
 // (#18). afterVersion continues a previous page; zero starts at the end the
 // direction reads from. `backward` walks towards newer versions, which is what
 // lets « ‹ › » cost what one page costs on this listing too (spec 021 #11).
-func (s *Store) PromptVersions(projectID, name string, limit, afterVersion int, backward bool) ([]PromptVersionSummary, error) {
+//
+// It also returns **every** label of the name with the version it points at,
+// not only the labels of the versions on the page: the map is read whole
+// anyway, and a reader asking "where is production" must not have to page to
+// the version it happens to be on (spec 021 #12).
+func (s *Store) PromptVersions(projectID, name string, limit, afterVersion int, backward bool) ([]PromptVersionSummary, map[string]int, error) {
 	comparison, order := "<", "DESC"
 	if backward {
 		comparison, order = ">", "ASC"
@@ -358,7 +363,7 @@ func (s *Store) PromptVersions(projectID, name string, limit, afterVersion int, 
 
 	rows, err := s.db.Query(query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("list versions of prompt %s: %w", name, err)
+		return nil, nil, fmt.Errorf("list versions of prompt %s: %w", name, err)
 	}
 	defer rows.Close()
 
@@ -369,13 +374,13 @@ func (s *Store) PromptVersions(projectID, name string, limit, afterVersion int, 
 			commitMessage sql.NullString
 		)
 		if err := rows.Scan(&summary.Version, &commitMessage, &summary.CreatedAt); err != nil {
-			return nil, fmt.Errorf("scan version of prompt %s: %w", name, err)
+			return nil, nil, fmt.Errorf("scan version of prompt %s: %w", name, err)
 		}
 		summary.CommitMessage = commitMessage.String
 		out = append(out, summary)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if backward {
 		slices.Reverse(out)
@@ -384,12 +389,18 @@ func (s *Store) PromptVersions(projectID, name string, limit, afterVersion int, 
 	// name has a handful of labels and a page has up to 500 versions.
 	labels, err := s.promptLabelsByVersion(projectID, name)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+	named := map[string]int{}
+	for version, names := range labels {
+		for _, label := range names {
+			named[label] = version
+		}
 	}
 	for i := range out {
 		out[i].Labels = labels[out[i].Version]
 	}
-	return out, nil
+	return out, named, nil
 }
 
 // Prompts lists names alphabetically. Ordering by name rather than by recency

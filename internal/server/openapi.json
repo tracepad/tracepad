@@ -666,7 +666,7 @@
       "get": {
         "tags": ["prompts"],
         "summary": "List a prompt's versions, newest first",
-        "description": "Without the bodies: a version list is for picking and diffing.",
+        "description": "Without the bodies: a version list is for picking and diffing. `labels` is every label of the name with the version it points at — the whole map, not the part of it that falls on this page.",
         "operationId": "listPromptVersions",
         "parameters": [
           {"$ref": "#/components/parameters/PromptName"},
@@ -688,10 +688,12 @@
                 },
                 "required": ["version", "labels", "created_at"]
               }},
+              "labels": {"type": "object", "additionalProperties": {"type": "integer"},
+                "description": "Every label of the name and the version it points at"},
               "next_cursor": {"type": ["string", "null"]},
               "prev_cursor": {"type": ["string", "null"]}
             },
-            "required": ["versions", "next_cursor", "prev_cursor"]
+            "required": ["versions", "labels", "next_cursor", "prev_cursor"]
           }}}},
           "400": {"$ref": "#/components/responses/BadRequest"},
           "401": {"$ref": "#/components/responses/Unauthorized"},

@@ -349,6 +349,19 @@ func TestPromptLabelsAreGroupedByVersionAndName(t *testing.T) {
 	if labelsByVersion[3] != "[canary staging]" || labelsByVersion[2] != "[]" || labelsByVersion[1] != "[production]" {
 		t.Errorf("labels by version = %v", labelsByVersion)
 	}
+	// The name's whole map comes back beside the page, so "where is
+	// production" is answered without paging to the version it is on (#12).
+	if fmt.Sprint(versions.Labels) != "map[canary:3 production:1 staging:3]" {
+		t.Errorf("the name's labels = %v", versions.Labels)
+	}
+	page := decodeJSON[promptVersionListResponse](t, h.get(t, "/api/v1/prompts/summarize/versions?limit=1"))
+	if len(page.Versions) != 1 || fmt.Sprint(page.Labels) != "map[canary:3 production:1 staging:3]" {
+		t.Errorf("on a one-row page the labels = %v, want the name's whole map", page.Labels)
+	}
+	if bare := decodeJSON[promptVersionListResponse](t,
+		h.get(t, "/api/v1/prompts/translate/versions")); len(bare.Labels) != 1 {
+		t.Errorf("the other name's labels = %v", bare.Labels)
+	}
 
 	third := decodeJSON[promptResponse](t, h.get(t, "/api/v1/prompts/summarize?version=3"))
 	if fmt.Sprint(third.Labels) != "[canary staging]" {

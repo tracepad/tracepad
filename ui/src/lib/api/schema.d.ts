@@ -389,7 +389,7 @@ export interface paths {
         };
         /**
          * List a prompt's versions, newest first
-         * @description Without the bodies: a version list is for picking and diffing.
+         * @description Without the bodies: a version list is for picking and diffing. `labels` is every label of the name with the version it points at — the whole map, not the part of it that falls on this page.
          */
         get: operations["listPromptVersions"];
         put?: never;
@@ -2417,6 +2417,10 @@ export interface operations {
                             /** Format: date-time */
                             created_at: string;
                         }[];
+                        /** @description Every label of the name and the version it points at */
+                        labels: {
+                            [key: string]: number;
+                        };
                         next_cursor: string | null;
                         prev_cursor: string | null;
                     };

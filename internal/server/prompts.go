@@ -52,9 +52,13 @@ type promptVersionSummaryResponse struct {
 }
 
 type promptVersionListResponse struct {
-	Versions   []promptVersionSummaryResponse `json:"versions"`
-	NextCursor *string                        `json:"next_cursor"`
-	PrevCursor *string                        `json:"prev_cursor"`
+	Versions []promptVersionSummaryResponse `json:"versions"`
+	// Labels is every label of the name with the version it points at —
+	// the whole map, not the part of it that happens to be on this page
+	// (spec 021 #12).
+	Labels     map[string]int `json:"labels"`
+	NextCursor *string        `json:"next_cursor"`
+	PrevCursor *string        `json:"prev_cursor"`
 }
 
 type promptListResponse struct {
@@ -330,7 +334,7 @@ func (s *Server) handleListPromptVersions(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	versions, err := s.store.PromptVersions(project.ID, name, limit+1, after, backward)
+	versions, labels, err := s.store.PromptVersions(project.ID, name, limit+1, after, backward)
 	if err != nil {
 		slog.Error("list prompt versions failed", "err", err)
 		writeError(w, http.StatusInternalServerError, "failed to list the versions")
@@ -354,8 +358,12 @@ func (s *Server) handleListPromptVersions(w http.ResponseWriter, r *http.Request
 			CreatedAt:     formatTime(version.CreatedAt),
 		})
 	}
+	if labels == nil {
+		labels = map[string]int{}
+	}
 	w.Header().Set("Cache-Control", promptCacheControl)
-	writeJSON(w, http.StatusOK, promptVersionListResponse{Versions: out, NextCursor: next, PrevCursor: prev})
+	writeJSON(w, http.StatusOK, promptVersionListResponse{
+		Versions: out, Labels: labels, NextCursor: next, PrevCursor: prev})
 }
 
 // handleListPrompts lists names alphabetically with where their labels point.
