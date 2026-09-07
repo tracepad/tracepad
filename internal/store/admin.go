@@ -699,6 +699,13 @@ func (e *UserDataErase) apply(tx *sql.Tx) error {
 		[]any{e.ProjectID}, ids); err != nil {
 		return fmt.Errorf("erase scores: %w", err)
 	}
+	// The queues keep their shape; what pointed at the erased traces goes
+	// with them (spec 024 #3), for the same reason the scores do.
+	if _, err := deleteIn(tx,
+		`DELETE FROM annotation_items WHERE project_id = ? AND trace_id IN`,
+		[]any{e.ProjectID}, ids); err != nil {
+		return fmt.Errorf("erase annotation items: %w", err)
+	}
 	if e.Counts.Traces, err = deleteIn(tx,
 		`DELETE FROM traces WHERE project_id = ? AND id IN`,
 		[]any{e.ProjectID}, ids); err != nil {

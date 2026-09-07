@@ -436,10 +436,14 @@ type traceSweep struct {
 	Observations int64
 	Scores       int64
 	Payloads     int64
+	// Items are the annotation queue items pointing at the swept traces
+	// (spec 024 #3): an item is a pointer, and a pointer to a deleted trace
+	// is a desk showing an empty page.
+	Items int64
 }
 
 func (t *traceSweep) apply(tx *sql.Tx) error {
-	t.Traces, t.Observations, t.Scores, t.Payloads = 0, 0, 0, 0
+	t.Traces, t.Observations, t.Scores, t.Payloads, t.Items = 0, 0, 0, 0, 0
 
 	cutoff, sweeping, err := sweepCutoff(tx, t.ProjectID, t.Now, t.Purge)
 	if err != nil || !sweeping {
@@ -468,6 +472,14 @@ func (t *traceSweep) apply(tx *sql.Tx) error {
 		`DELETE FROM scores WHERE project_id = ? AND trace_id IN`,
 		[]any{t.ProjectID}, ids); err != nil {
 		return fmt.Errorf("sweep scores: %w", err)
+	}
+	// In the same job as the traces themselves (spec 024 #3), through
+	// `idx_annotation_items_trace`: items follow their trace, and a queue
+	// that outlived its evidence would hand a reviewer a not-found page.
+	if t.Items, err = deleteIn(tx,
+		`DELETE FROM annotation_items WHERE project_id = ? AND trace_id IN`,
+		[]any{t.ProjectID}, ids); err != nil {
+		return fmt.Errorf("sweep annotation items: %w", err)
 	}
 	if t.Traces, err = deleteIn(tx,
 		`DELETE FROM traces WHERE project_id = ? AND id IN`,

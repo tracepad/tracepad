@@ -18,6 +18,7 @@
     {"name": "scores", "description": "Quality judgements about traces"},
     {"name": "prompts", "description": "Versioned prompts with movable labels"},
     {"name": "datasets", "description": "Datasets of versioned test cases, the runs over them, and the score configs that pin what a score name means"},
+    {"name": "queues", "description": "Annotation queues: what to review, the desk that walks it, and who completed what"},
     {"name": "admin", "description": "Projects, keys, retention windows and user-data erasure"}
   ],
   "paths": {
@@ -1300,6 +1301,311 @@
         }
       }
     },
+    "/api/v1/queues": {
+      "get": {
+        "tags": ["queues"],
+        "summary": "List the annotation queues with their progress",
+        "description": "Whole, in name order, with no paging: a project has as many review programmes as somebody named. Each carries the score configs a reviewer must fill and the counts of what is pending, completed and skipped.",
+        "operationId": "listQueues",
+        "responses": {
+          "200": {"description": "Every queue", "content": {"application/json": {"schema": {
+            "type": "object",
+            "properties": {"queues": {"type": "array", "items": {"$ref": "#/components/schemas/AnnotationQueue"}}},
+            "required": ["queues"]
+          }}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"}
+        }
+      }
+    },
+    "/api/v1/queues/{name}": {
+      "put": {
+        "tags": ["queues"],
+        "summary": "Create an annotation queue or replace it whole",
+        "description": "Declarative, like a score config: the body is the queue, and a re-PUT of the same body writes nothing and answers 200. Every name in `score_configs` must already exist, or the call is a 400 naming the missing one. Changing the list later governs the items not yet completed; nothing re-validates what is already done.",
+        "operationId": "putQueue",
+        "parameters": [{"$ref": "#/components/parameters/QueueName"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {
+          "type": "object",
+          "properties": {
+            "description": {"type": "string", "description": "What this queue is for, as its author wrote it"},
+            "score_configs": {"type": "array", "items": {"type": "string"}, "minItems": 1,
+              "description": "The score names a reviewer must set on every item, in the order the desk asks for them. Each must be a declared score config, and no name twice."}
+          },
+          "required": ["score_configs"]
+        }}}},
+        "responses": {
+          "201": {"description": "The queue was created", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AnnotationQueue"}}}},
+          "200": {"description": "The queue was replaced, or the body said what it already said", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AnnotationQueue"}}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"}
+        }
+      },
+      "get": {
+        "tags": ["queues"],
+        "summary": "One queue: its score configs and its counts",
+        "operationId": "getQueue",
+        "parameters": [{"$ref": "#/components/parameters/QueueName"}],
+        "responses": {
+          "200": {"description": "The queue", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AnnotationQueue"}}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      },
+      "delete": {
+        "tags": ["queues"],
+        "summary": "Delete a queue with its items; a dry run until `?confirm=` echoes the name",
+        "description": "The list goes and the scores written while annotating stay: they are attached to the trace, not to the queue. Without `confirm` it answers with the count and changes nothing.",
+        "operationId": "deleteQueue",
+        "parameters": [{"$ref": "#/components/parameters/QueueName"}, {"$ref": "#/components/parameters/ConfirmQueueName"}],
+        "responses": {
+          "200": {"description": "What went, or the dry run of what would", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/QueueDeletion"}}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
+    "/api/v1/queues/{name}/items": {
+      "post": {
+        "tags": ["queues"],
+        "summary": "Add one target or an array of them; a target already queued counts as existing",
+        "description": "All or nothing, and idempotent: a trace or observation the queue already holds comes back as the item it already is, whatever its status, so a retried script does not double the queue. The target need not exist yet — an item may be queued for a trace whose spans are still in flight.",
+        "operationId": "addQueueItems",
+        "parameters": [{"$ref": "#/components/parameters/QueueName"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {
+          "oneOf": [
+            {"$ref": "#/components/schemas/QueueTarget"},
+            {"type": "array", "items": {"$ref": "#/components/schemas/QueueTarget"}, "maxItems": 1000}
+          ]
+        }}}},
+        "responses": {
+          "201": {"description": "The items the targets resolve to", "content": {"application/json": {"schema": {
+            "type": "object",
+            "properties": {
+              "ids": {"type": "array", "items": {"type": "string"}, "description": "In input order, the id of each target's item — the one just added or the one already there"},
+              "added": {"type": "integer"},
+              "existing": {"type": "integer", "description": "Targets the queue already held"}
+            },
+            "required": ["ids", "added", "existing"]
+          }}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      },
+      "get": {
+        "tags": ["queues"],
+        "summary": "The queue's items oldest first, filtered and cursor-paginated",
+        "description": "In `seq` order — the order they were added is the order they are worked in — and paging both ways like every other listing.",
+        "operationId": "listQueueItems",
+        "parameters": [
+          {"$ref": "#/components/parameters/QueueName"},
+          {"name": "status", "in": "query", "schema": {"type": "string", "enum": ["pending", "completed", "skipped"]},
+            "description": "Keeps items in one state. A spelling outside the list is a 400"},
+          {"name": "annotator", "in": "query", "schema": {"type": "string", "maxLength": 200},
+            "description": "Keeps the items this name completed or skipped"},
+          {"$ref": "#/components/parameters/Limit"},
+          {"$ref": "#/components/parameters/Cursor"},
+          {"$ref": "#/components/parameters/Direction"},
+          {"$ref": "#/components/parameters/Count"}
+        ],
+        "responses": {
+          "200": {"description": "A page of items", "content": {"application/json": {"schema": {
+            "type": "object",
+            "properties": {
+              "queue": {"type": "string"},
+              "items": {"type": "array", "items": {"$ref": "#/components/schemas/AnnotationItem"}},
+              "next_cursor": {"type": ["string", "null"], "description": "Pass back as `?cursor=` for the next page; null on the last one"},
+              "prev_cursor": {"type": ["string", "null"], "description": "Pass back with `?direction=prev` for the page before; null on the first one"},
+              "total": {"type": "integer", "description": "Present only with `?count=`: how many items the filters match, capped at 1000"},
+              "total_capped": {"type": "boolean", "description": "Present only with `?count=`: the count stopped at the cap"}
+            },
+            "required": ["queue", "items", "next_cursor", "prev_cursor"]
+          }}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
+    "/api/v1/queues/{name}/items/from-traces": {
+      "post": {
+        "tags": ["queues"],
+        "summary": "Add the newest traces a listing filter matches, capped by `limit`",
+        "description": "The filters are the trace listing's own, with the same names and the same validation, so \"queue what I am looking at\" is one call with no second grammar. The newest `limit` matches are added as trace items; `capped` says more matched than were taken, and a second call with `to=` set at the oldest added continues. With no filter at all it takes the newest `limit` traces of the project.",
+        "operationId": "addQueueItemsFromTraces",
+        "parameters": [
+          {"$ref": "#/components/parameters/QueueName"},
+          {"$ref": "#/components/parameters/From"},
+          {"$ref": "#/components/parameters/To"},
+          {"$ref": "#/components/parameters/Environment"},
+          {"name": "user_id", "in": "query", "schema": {"type": "string"}, "description": "Exact match on the trace's user id"},
+          {"name": "session_id", "in": "query", "schema": {"type": "string"}, "description": "Exact match on the trace's session id"},
+          {"name": "name", "in": "query", "schema": {"type": "string"}, "description": "Exact match on the trace name"},
+          {"name": "tag", "in": "query", "schema": {"type": "array", "items": {"type": "string"}}, "style": "form", "explode": true,
+            "description": "Repeatable; a trace must carry every tag given"},
+          {"name": "status", "in": "query", "schema": {"type": "string", "enum": ["error", "ok"]},
+            "description": "`error` keeps traces with at least one failed observation, `ok` keeps the rest"},
+          {"name": "min_cost", "in": "query", "schema": {"type": "number", "minimum": 0},
+            "description": "Keeps traces whose total cost is at least this much"},
+          {"$ref": "#/components/parameters/Search"},
+          {"$ref": "#/components/parameters/Release"},
+          {"$ref": "#/components/parameters/Version"},
+          {"$ref": "#/components/parameters/ObservationType"},
+          {"$ref": "#/components/parameters/Prompt"},
+          {"$ref": "#/components/parameters/RunFilter"},
+          {"$ref": "#/components/parameters/ItemFilter"},
+          {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 100},
+            "description": "How many traces this call may add. Out of range is a 400, not a silent clamp"}
+        ],
+        "responses": {
+          "201": {"description": "What the filter matched and what was added", "content": {"application/json": {"schema": {
+            "type": "object",
+            "properties": {
+              "matched": {"type": "integer", "description": "How many traces the filter matches, counted exactly"},
+              "added": {"type": "integer"},
+              "existing": {"type": "integer", "description": "Matches the queue already held"},
+              "capped": {"type": "boolean", "description": "More matched than `limit` allowed; the rest are still waiting"}
+            },
+            "required": ["matched", "added", "existing", "capped"]
+          }}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
+    "/api/v1/queues/{name}/next": {
+      "get": {
+        "tags": ["queues"],
+        "summary": "The next item to annotate, claimed for ten minutes",
+        "description": "Hands out the annotator's own unexpired claim if they have one — a reload must not hand a reviewer a different trace mid-verdict — and otherwise the oldest pending item nobody holds, claiming it for ten minutes. The window is a constant, not a setting. `item` is null when nothing is claimable, and `pending` then counts what other people are holding. Any completion, skip or reopen clears the claim; reading an item does not take one.",
+        "operationId": "nextQueueItem",
+        "parameters": [
+          {"$ref": "#/components/parameters/QueueName"},
+          {"name": "annotator", "in": "query", "required": true, "schema": {"type": "string", "minLength": 1, "maxLength": 200},
+            "description": "Who is asking. Written to `claimed_by`, and to `completed_by` when they finish"}
+        ],
+        "responses": {
+          "200": {"description": "The item to work on, or nothing to work on", "content": {"application/json": {"schema": {
+            "type": "object",
+            "properties": {
+              "item": {"oneOf": [{"$ref": "#/components/schemas/AnnotationItem"}, {"type": "null"}]},
+              "pending": {"type": "integer", "description": "Pending items in the queue, other people's claims included"}
+            },
+            "required": ["item", "pending"]
+          }}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
+    "/api/v1/queues/{name}/items/{id}": {
+      "get": {
+        "tags": ["queues"],
+        "summary": "One item",
+        "description": "A read, and only a read: it takes no claim.",
+        "operationId": "getQueueItem",
+        "parameters": [{"$ref": "#/components/parameters/QueueName"}, {"$ref": "#/components/parameters/ItemID"}],
+        "responses": {
+          "200": {"description": "The item", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AnnotationItem"}}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      },
+      "delete": {
+        "tags": ["queues"],
+        "summary": "Remove one item from the queue",
+        "description": "No dry run and no echo: a re-add recreates the row, and the scores it was about were never in this table.",
+        "operationId": "deleteQueueItem",
+        "parameters": [{"$ref": "#/components/parameters/QueueName"}, {"$ref": "#/components/parameters/ItemID"}],
+        "responses": {
+          "200": {"description": "The item is gone", "content": {"application/json": {"schema": {
+            "type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]
+          }}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
+    "/api/v1/queues/{name}/items/{id}/complete": {
+      "post": {
+        "tags": ["queues"],
+        "summary": "Mark an item done; refused unless every score the queue asks for is on its target",
+        "description": "The queue promised a shape, and *completed* means the shape was filled — checked here, against the scores actually stored, whoever wrote them: a judge's verdict already on the trace counts, which is what lets a reviewer confirm one rather than repeat it. A trace item needs scores that name no observation, and an observation item scores that name its own. A 409 carries `missing` with the names that are not there; a second completion is a 409 naming who got there first.",
+        "operationId": "completeQueueItem",
+        "parameters": [{"$ref": "#/components/parameters/QueueName"}, {"$ref": "#/components/parameters/ItemID"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {
+          "type": "object",
+          "properties": {"annotator": {"type": "string", "minLength": 1, "maxLength": 200}},
+          "required": ["annotator"]
+        }}}},
+        "responses": {
+          "200": {"description": "The completed item", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AnnotationItem"}}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "409": {"description": "A score the queue asks for is missing, or somebody else completed it first",
+            "content": {"application/json": {"schema": {
+              "type": "object",
+              "properties": {
+                "error": {"type": "string"},
+                "missing": {"type": "array", "items": {"type": "string"}, "description": "The score config names with no score on the target"}
+              },
+              "required": ["error"]
+            }}}}
+        }
+      }
+    },
+    "/api/v1/queues/{name}/items/{id}/skip": {
+      "post": {
+        "tags": ["queues"],
+        "summary": "Mark an item skipped, with the reason",
+        "description": "Not every trace deserves a verdict, and the reason is what makes that readable on the queue page afterwards. The claim is released.",
+        "operationId": "skipQueueItem",
+        "parameters": [{"$ref": "#/components/parameters/QueueName"}, {"$ref": "#/components/parameters/ItemID"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {
+          "type": "object",
+          "properties": {
+            "annotator": {"type": "string", "minLength": 1, "maxLength": 200},
+            "reason": {"type": "string", "description": "Why it was skipped; shown on the queue page"}
+          },
+          "required": ["annotator"]
+        }}}},
+        "responses": {
+          "200": {"description": "The skipped item", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AnnotationItem"}}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
+    "/api/v1/queues/{name}/items/{id}/reopen": {
+      "post": {
+        "tags": ["queues"],
+        "summary": "Return a completed or skipped item to pending",
+        "description": "For the manager who disagrees with a verdict or wants a skip looked at again. An item that is already pending is a 409. The scores stay where they are: reopening asks for another look, not for a retraction.",
+        "operationId": "reopenQueueItem",
+        "parameters": [{"$ref": "#/components/parameters/QueueName"}, {"$ref": "#/components/parameters/ItemID"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {
+          "type": "object",
+          "properties": {"annotator": {"type": "string", "minLength": 1, "maxLength": 200}},
+          "required": ["annotator"]
+        }}}},
+        "responses": {
+          "200": {"description": "The item, pending again", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AnnotationItem"}}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "409": {"$ref": "#/components/responses/Conflict"}
+        }
+      }
+    },
     "/api/v1/projects": {
       "get": {
         "tags": ["admin"],
@@ -1571,6 +1877,11 @@
         "schema": {"type": "string", "pattern": "^[0-9a-f]{32}$"}},
       "RunID": {"name": "id", "in": "path", "required": true,
         "schema": {"type": "string", "pattern": "^[0-9a-f]{32}$"}},
+      "QueueName": {"name": "name", "in": "path", "required": true,
+        "schema": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$", "maxLength": 200},
+        "description": "The prompt-name grammar: one URL path segment"},
+      "ConfirmQueueName": {"name": "confirm", "in": "query", "schema": {"type": "string"},
+        "description": "The name of the queue being destroyed. Without it the endpoint changes nothing and answers with the count; a value that does not match is a 400 that also changes nothing."},
       "ScoreConfigName": {"name": "name", "in": "path", "required": true,
         "schema": {"type": "string", "maxLength": 200},
         "description": "A score name: any name a score may carry can have a config"}
@@ -1838,6 +2149,71 @@
           "note": {"type": "string"}
         },
         "required": ["public_key", "secret_key"]
+      },
+      "AnnotationQueue": {
+        "type": "object",
+        "description": "One review programme: a named list of traces or observations and the score names a reviewer must set on each of them (spec 024).",
+        "properties": {
+          "name": {"type": "string"},
+          "description": {"type": "string"},
+          "score_configs": {"type": "array", "items": {"type": "string"},
+            "description": "The score names a reviewer must fill, in the order the desk asks for them. A name whose config was deleted since stays here: the queue keeps asking for it, and a PUT is how to drop it"},
+          "counts": {"type": "object",
+            "properties": {
+              "pending": {"type": "integer"},
+              "completed": {"type": "integer"},
+              "skipped": {"type": "integer"}
+            },
+            "required": ["pending", "completed", "skipped"]},
+          "created_at": {"type": "string", "format": "date-time"},
+          "updated_at": {"type": "string", "format": "date-time"}
+        },
+        "required": ["name", "description", "score_configs", "counts", "created_at", "updated_at"]
+      },
+      "QueueTarget": {
+        "type": "object",
+        "description": "What an add names: one trace, or one observation of it. Neither id is looked up — an item may be queued for a trace still in flight — but both are checked for shape, because nothing else can ever be a trace of this store.",
+        "properties": {
+          "trace_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+          "observation_id": {"type": "string", "pattern": "^[0-9a-f]{16}$",
+            "description": "Absent means the item is the trace itself"}
+        },
+        "required": ["trace_id"]
+      },
+      "AnnotationItem": {
+        "type": "object",
+        "description": "One trace, or one observation of a trace, waiting for a verdict. A field it has nothing to say about is absent rather than empty.",
+        "properties": {
+          "id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+          "trace_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+          "observation_id": {"type": "string", "pattern": "^[0-9a-f]{16}$", "description": "Absent when the item is the trace itself"},
+          "status": {"type": "string", "enum": ["pending", "completed", "skipped"]},
+          "seq": {"type": "integer", "description": "Its place in the queue, monotonic per queue and never reused"},
+          "added_at": {"type": "string", "format": "date-time"},
+          "claimed_by": {"type": "string", "description": "Who `next` handed it to; absent when nothing holds it"},
+          "claimed_until": {"type": "string", "format": "date-time", "description": "When the claim expires and the item is claimable again"},
+          "completed_by": {"type": "string", "description": "Who completed or skipped it"},
+          "completed_at": {"type": "string", "format": "date-time"},
+          "skip_reason": {"type": "string"}
+        },
+        "required": ["id", "trace_id", "status", "seq", "added_at"]
+      },
+      "QueueDeletion": {
+        "type": "object",
+        "description": "What deleting a queue takes: its items, and nothing else. `confirm` and `note` are present on the dry run only; `deleted` on the confirmed answer only.",
+        "properties": {
+          "dry_run": {"type": "boolean"},
+          "name": {"type": "string"},
+          "would_delete": {
+            "type": "object",
+            "properties": {"items": {"type": "integer"}},
+            "required": ["items"]
+          },
+          "deleted": {"const": true},
+          "confirm": {"type": "string", "description": "Send this back as `?confirm=` to make it happen"},
+          "note": {"type": "string"}
+        },
+        "required": ["dry_run", "name", "would_delete"]
       },
       "DryRun": {
         "type": "object",
