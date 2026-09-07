@@ -1,6 +1,6 @@
 # Spec 022 — Scores on the trace, the observation and the session, and scoring by hand
 
-**Status:** 🚧 DRAFT
+**Status:** ✅ SHIPPED
 **Sprint:** September 2026
 
 > Scores exist since spec 003 and the eval screens of spec 016 render them
