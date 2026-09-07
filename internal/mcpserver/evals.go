@@ -179,6 +179,125 @@ func registerEvals(server *mcp.Server, t *toolset) {
 			"prev_cursor": text("Pass back as `cursor` with `direction=prev`; null on the first."),
 		}, "a", "b", "dataset", "same_version", "scores", "items"),
 	}, t.compareRuns)
+
+	registerQueues(server, t)
+}
+
+// registerQueues adds the two annotation-queue tools (spec 024 #9), read-only
+// like the rest. "What is left to review" and "what did the reviewers say" are
+// agent questions of the same kind as "why did the eval regress"; *annotating*
+// stays in the CLI, the desk and the HTTP API, where a hallucinated verdict
+// has a human or a script to answer to (spec 004 #16, #17).
+func registerQueues(server *mcp.Server, t *toolset) {
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "list_queues",
+		Annotations: readOnly("List annotation queues"),
+		Description: "Find the human-review programmes a project has — the user asks what is being reviewed, " +
+			"how far a review has got, or which queue to look at. " +
+			"Returns every queue by name with the score names a reviewer must fill and the counts of " +
+			"pending, completed and skipped items. " +
+			"Does NOT return the items: call get_queue_items with a name for those.",
+		InputSchema: object(map[string]*jsonschema.Schema{}),
+		OutputSchema: object(map[string]*jsonschema.Schema{
+			"queues": list(object(map[string]*jsonschema.Schema{
+				"name":          text("The queue's name, unique in the project."),
+				"description":   text("What it is for, as its author wrote it."),
+				"score_configs": list(text("A score name."), "The scores a reviewer must set on every item, in order."),
+				"counts":        anything("How many items are pending, completed and skipped."),
+				"created_at":    timestamp("When it was created."),
+				"updated_at":    timestamp("When it last changed."),
+			}, "name", "score_configs", "counts"), "Every queue, alphabetical by name."),
+		}, "queues"),
+	}, t.listQueues)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "get_queue_items",
+		Annotations: readOnly("Get a queue's items"),
+		Description: "Read what a review queue holds — the user asks what is left to review, what has been done, " +
+			"who did it, or why something was skipped. " +
+			"Returns a page of items oldest first: the trace (and the observation, when the item is about one), " +
+			"the status, who completed or skipped it and when, and the skip reason. " +
+			"Pass status to see one state, or annotator to see one person's work. " +
+			"Does NOT return the verdicts themselves: those are scores on the traces — call list_scores with a trace_id.",
+		InputSchema: object(walkProperties(pagingProperties(map[string]*jsonschema.Schema{
+			"name":      matching(namePattern, "The queue's name."),
+			"status":    oneOf("Keep items in one state.", "pending", "completed", "skipped"),
+			"annotator": text("Keep the items this name completed or skipped."),
+		}), true), "name"),
+		OutputSchema: object(map[string]*jsonschema.Schema{
+			"queue": text("The queue's name."),
+			"items": list(object(map[string]*jsonschema.Schema{
+				"id":             text("The item's id."),
+				"trace_id":       text("The trace it points at."),
+				"observation_id": text("The observation inside it, when the item is about one."),
+				"status":         oneOf("Where it stands.", "pending", "completed", "skipped"),
+				"seq":            integer("Its place in the queue, in the order items were added."),
+				"added_at":       timestamp("When it was queued."),
+				"claimed_by":     text("Who is working on it right now, if anybody."),
+				"claimed_until":  timestamp("When that claim expires."),
+				"completed_by":   text("Who completed or skipped it."),
+				"completed_at":   timestamp("When they did."),
+				"skip_reason":    text("Why it was skipped."),
+			}, "id", "trace_id", "status", "seq", "added_at"), "The page, oldest first."),
+			"next_cursor": text("Pass back as `cursor` for the next page; null on the last."),
+			"prev_cursor": text("Pass back as `cursor` with `direction=prev`; null on the first."),
+			"total":       integer("Present only with `count`: how many items match, capped at 1000."),
+		}, "queue", "items"),
+	}, t.getQueueItems)
+}
+
+type listQueuesInput struct{}
+
+func (t *toolset) listQueues(ctx context.Context, req *mcp.CallToolRequest,
+	in listQueuesInput) (*mcp.CallToolResult, any, error) {
+	return t.call(ctx, req, "/api/v1/queues", nil, summarizeQueues)
+}
+
+type getQueueItemsInput struct {
+	pagingInput
+	walkInput
+	Name      string `json:"name"`
+	Status    string `json:"status"`
+	Annotator string `json:"annotator"`
+}
+
+func (t *toolset) getQueueItems(ctx context.Context, req *mcp.CallToolRequest,
+	in getQueueItemsInput) (*mcp.CallToolResult, any, error) {
+	query := url.Values{}
+	set(query, "status", in.Status)
+	set(query, "annotator", in.Annotator)
+	return t.call(ctx, req, "/api/v1/queues/"+url.PathEscape(in.Name)+"/items",
+		in.walkInput.apply(in.pagingInput.apply(query)), summarizeQueueItems)
+}
+
+func summarizeQueues(body json.RawMessage) string {
+	var parsed struct {
+		Queues []struct {
+			Name   string `json:"name"`
+			Counts struct {
+				Pending int64 `json:"pending"`
+			} `json:"counts"`
+		} `json:"queues"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return "the annotation queues"
+	}
+	if len(parsed.Queues) == 0 {
+		return "This project has no annotation queues."
+	}
+	return fmt.Sprintf("%d queues, first %q with %d pending.",
+		len(parsed.Queues), parsed.Queues[0].Name, parsed.Queues[0].Counts.Pending)
+}
+
+func summarizeQueueItems(body json.RawMessage) string {
+	var parsed struct {
+		Queue string `json:"queue"`
+		Items []any  `json:"items"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return "a page of queue items"
+	}
+	return fmt.Sprintf("%d items of %q.", len(parsed.Items), parsed.Queue)
 }
 
 // runSchema is a run without its summary, as the listing renders it.

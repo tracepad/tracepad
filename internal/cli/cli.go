@@ -121,6 +121,7 @@ func (r *run) handlers() map[string]func(context.Context, []string) error {
 		"datasets":      r.datasets,
 		"runs":          r.runs,
 		"score-configs": r.scoreConfigs,
+		"queues":        r.queues,
 		"stats":         r.stats,
 		"system":        r.system,
 		"health":        r.health,
@@ -216,6 +217,34 @@ scores, finish, compare:
   tracepad score-configs show <name>
   tracepad score-configs push <name> --file cfg.json
   tracepad score-configs rm   <name>
+
+Review programmes (spec 024). A queue is a named list of traces or observations
+and the score names a reviewer must set on each of them; the loop is: declare
+the queue, fill it, take the next item, post the scores, complete:
+  tracepad queues ls
+  tracepad queues put      <name> --config N [--config M]... [--description D]
+  tracepad queues rm       <name> [--yes]
+  tracepad queues add      <name> (--trace ID [--observation ID] | --from-traces
+                                   [--search "text"] [--env E] [--error]
+                                   [--since 1h] [--until T] [--user U]
+                                   [--session S] [--name N] [--tag T]
+                                   [--min-cost C] [--release R] [--version V]
+                                   [--type T] [--prompt N[@V]] [--limit N])
+  tracepad queues items    <name> [--status pending|completed|skipped]
+                                  [--annotator A] [--limit N] [--cursor C]
+                                  [--newer] [--total]
+  tracepad queues next     <name> --annotator A
+  tracepad queues complete <name> <item-id> --annotator A
+  tracepad queues skip     <name> <item-id> --annotator A [--reason R]
+  tracepad queues reopen   <name> <item-id> --annotator A
+
+queues add --from-traces takes the same filters as traces ls and adds the
+newest matches, at most --limit (100 by default, 1000 at most); it says how
+many matched and whether the cap bit. queues next claims the item it hands out
+for ten minutes, and hands the same one back on a second call from the same
+annotator. queues complete is refused until every score the queue names is on
+the item's target, whoever wrote it — post them with scores add first. The
+items listing reads oldest first, which is the order they are worked in.
 
 datasets push takes a .jsonl (one case per line) or a .json array and sends it
 as one batch, which is one version tick; it prints the version it landed on and

@@ -151,6 +151,13 @@ func (h *harness) seedEval(t *testing.T, projectID string) {
 				`{"trace_id":%q,"name":"accuracy","value":%v}`, traceID, value))
 		}
 	}
+	// A review queue over the same config, with one item in each state, so
+	// the two annotation tools of spec 024 #9 have something to read.
+	h.post(t, "/api/v1/queues/review",
+		[]byte(`{"description":"the nightly sample","score_configs":["accuracy"]}`), http.MethodPut)
+	h.post(t, "/api/v1/queues/review/items",
+		[]byte(`[{"trace_id":"`+traceHex(1)+`"},{"trace_id":"`+traceHex(2)+`"}]`))
+
 	// One trace of the first run that names a case the dataset does not
 	// have, so that `unknown=true` is a question with two answers.
 	orphan := evalRunID(1)[:24] + evalRunID(1)[28:] + "ffff"
@@ -337,7 +344,7 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
-// TestToolListIsTheDeclaredContract: eighteen read-only tools, a deterministic
+// TestToolListIsTheDeclaredContract: twenty read-only tools, a deterministic
 // order, and the caching hints of #18.
 func TestToolListIsTheDeclaredContract(t *testing.T) {
 	h := newHarness(t)
@@ -357,11 +364,13 @@ func TestToolListIsTheDeclaredContract(t *testing.T) {
 	// tools with the reads spec 014 #22 asks for — read-only there too: a
 	// run is created by a harness or a person, never by a model. The two
 	// user tools came with the endpoints spec 023 #7 added, in the same PR
-	// as the CLI commands and the screens.
+	// as the CLI commands and the screens. The two queue tools are the same
+	// bargain one spec further on (spec 024 #9): reading what is left to
+	// review is an agent question, and posting a verdict is not.
 	want := []string{"compare_runs", "get_dataset_items", "get_last_trace", "get_observation_io",
-		"get_prompt", "get_run", "get_run_items", "get_session", "get_stats", "get_trace",
-		"get_user", "list_datasets", "list_runs", "list_scores", "list_sessions", "list_traces",
-		"list_users", "search"}
+		"get_prompt", "get_queue_items", "get_run", "get_run_items", "get_session", "get_stats",
+		"get_trace", "get_user", "list_datasets", "list_queues", "list_runs", "list_scores",
+		"list_sessions", "list_traces", "list_users", "search"}
 	var names []string
 	for _, tool := range result.Tools {
 		names = append(names, tool.Name)
@@ -464,6 +473,10 @@ func TestEveryToolMatchesItsEndpoint(t *testing.T) {
 			"/api/v1/runs/" + evalRunID(1) + "/items?unknown=true"},
 		{"compare_runs", map[string]any{"a": evalRunID(1), "b": evalRunID(2)},
 			"/api/v1/runs/" + evalRunID(1) + "/compare/" + evalRunID(2)},
+		{"list_queues", map[string]any{}, "/api/v1/queues"},
+		{"get_queue_items", map[string]any{"name": "review"}, "/api/v1/queues/review/items"},
+		{"get_queue_items", map[string]any{"name": "review", "status": "pending", "limit": 1},
+			"/api/v1/queues/review/items?limit=1&status=pending"},
 	} {
 		t.Run(tc.tool+" "+tc.endpoint, func(t *testing.T) {
 			structured := h.callRaw(t, tc.tool, tc.arguments)
@@ -665,8 +678,8 @@ func TestStdioTransportServesTheSameTools(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tools.Tools) != 18 {
-		t.Fatalf("tools = %d, want the same eighteen as over HTTP", len(tools.Tools))
+	if len(tools.Tools) != 20 {
+		t.Fatalf("tools = %d, want the same twenty as over HTTP", len(tools.Tools))
 	}
 
 	result, err := session.CallTool(t.Context(), &mcp.CallToolParams{
