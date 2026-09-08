@@ -107,7 +107,13 @@ check() {
 				broken=$((broken + 1))
 				continue
 			fi
-			if ! slugs "$path" | grep -qxF -- "$anchor"; then
+			# The list is captured and then searched, rather than piped into
+			# `grep -q` (spec 026 #14): `grep -q` stops reading at its first
+			# match, `slugs` takes SIGPIPE on its next write, and `pipefail`
+			# hands the `if` a 141 — which reads as "no match" and reports a
+			# healthy anchor as broken. Invisible until a file's headings
+			# outrun the buffers, which is what `--self-test` builds.
+			if ! grep -qxF -- "$anchor" <<<"$(slugs "$path")"; then
 				printf '%s:%s: broken anchor: %s\n' "$source" "$line" "$target"
 				broken=$((broken + 1))
 			fi
@@ -134,8 +140,36 @@ $FIXTURE/guide.md:13: broken anchor: #running-the-server"
 	printf 'doc-anchors: the fixture'"'"'s two broken anchors are found and its traps are not\n'
 }
 
+# The one case the fixture cannot hold (spec 026 #14). What the pipe bug needs
+# is a file whose headings outrun the buffers on either side of the pipe, and
+# that is two thousand headings — the largest file in the repository twice over,
+# written to assert one line of another file. A three-hundred-heading fixture is
+# no cheaper an answer: it reproduces the bug on macOS and hides it on Linux,
+# where the pipe alone holds 64 KiB, so a green run there would mean nothing. So
+# the file is built, read once and thrown away.
+long_file_test() {
+	local dir file i got
+	dir="$(mktemp -d)"
+	file="$dir/long.md"
+	{
+		printf '# The first heading\n\n'
+		printf '[the first heading](#the-first-heading)\n\n'
+		for ((i = 1; i <= 2000; i++)); do
+			printf '## Heading %04d, long enough that two thousand of them are past a buffer\n' "$i"
+		done
+	} >"$file"
+	got="$(check "$file")"
+	rm -rf "$dir"
+	if [ -n "$got" ]; then
+		printf 'doc-anchors: an anchor on a long file was reported broken:\n%s\n' "$got" >&2
+		exit 1
+	fi
+	printf 'doc-anchors: the first of two thousand headings still answers its anchor\n'
+}
+
 if [ "${1:-}" = "--self-test" ]; then
 	self_test
+	long_file_test
 	exit 0
 fi
 

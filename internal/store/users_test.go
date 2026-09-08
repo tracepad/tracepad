@@ -678,8 +678,12 @@ func TestASweptHourGetsNoUserRows(t *testing.T) {
 	}
 }
 
-// TestAFrozenHourKeepsItsUserRows: the freeze is one rule in one place, and it
-// covers both tables because they are written by one job (spec 013 #11).
+// TestAFrozenHourKeepsItsUserRows: a frozen hour keeps the per-user rows it was
+// rolled with, long after the traces they were computed from are swept (spec
+// 013 #11). The two tables answer the freeze for themselves since spec 026 #7 —
+// `job.Frozen` is `stats_hourly`'s answer, `job.UsersRolled` is this table's —
+// and the ordinary case, asserted here, is that one pass wrote both, so both
+// are frozen and neither is rewritten.
 func TestAFrozenHourKeepsItsUserRows(t *testing.T) {
 	s, project := readStore(t)
 	usersFixture(t, s, project.ID)
@@ -706,7 +710,10 @@ func TestAFrozenHourKeepsItsUserRows(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !job.Frozen {
-		t.Fatal("the hour was not frozen")
+		t.Fatal("the hour was not frozen in the statistics")
+	}
+	if job.UsersRolled {
+		t.Fatal("the hour was not frozen in the per-user table, so the rows below prove nothing")
 	}
 	alice, err := s.UserSummaryRow(project.ID, "alice")
 	if err != nil {

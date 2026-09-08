@@ -278,9 +278,10 @@ API. This file routes; it does not duplicate what specs and docs say.
   `ListingShell`, with the table and the empty state as snippets and the
   three real differences as props (#1, #3); the header's count is
   `ListingCount` (#2) and a trace panel's five spans are `TracePeekMeta`
-  (#4). `PageHeader` wraps at a phone's width instead of squeezing the meta
-  to an ellipsis, with the wrap one level in so the actions cannot be the
-  thing that moves (#5, #9, #10). `scripts/doc-anchors.sh` reads the
+  (#4). `PageHeader` wraps at a phone's width — and only there — instead of
+  squeezing the meta to an ellipsis, with the wrap one level in so the
+  actions cannot be the thing that moves (#5, #9, #10, #14).
+  `scripts/doc-anchors.sh` reads the
   hundred cross-references nothing read before, in the gate and against its
   own fixture (#6, #13). `users_hourly` is the third table to ask the freeze
   of its own rows, which closes spec 023 #15 (#7). Measured rather than
@@ -331,7 +332,7 @@ API. This file routes; it does not duplicate what specs and docs say.
 | The eval harness in Python | `sdk/python/src/tracepad/_harness.py` (the processor, `Run`, `Attempt`, the score configs, `compare`, the paging loop) and `_datasets.py` (`Dataset`, `Item`), `docs/datasets.md#the-same-loop-from-python`, `docs/sdk-python.md#evals`, spec 018 — the stamping is a `ContextVar` read at `on_start` and never a span the harness opened (#3), `init` registers the processor before the exporting one and under `export=False` too, and the read side is the server's JSON as `dict`s because a model layer is a place to start disagreeing with it (#8) |
 | Packaging: the image and the release | `Dockerfile` + `.dockerignore` (the whole recipe — the image builds both halves from the checkout and copies no prebuilt binary), `scripts/image-check.sh` (the contract, asserted from outside because the image has no shell), `.github/workflows/release-server.yml` (GoReleaser for the archives, `buildx` for one multi-arch manifest on GHCR), the `docker` job in `ci.yml`, `docs/docker.md`, spec 020 — `tracepad health` (`internal/cli/commands.go`) is the container's `HEALTHCHECK` and the one command that needs no key |
 | Configuration | `internal/config/`, spec 001 + spec 002 Configuration tables |
-| The docs' cross-references | `scripts/doc-anchors.sh` and `scripts/doc-anchors-fixture/`, spec 026 #6 — every `[…](file.md#anchor)` in `docs/*.md`, `README.md` and `AGENTS.md` is checked against the target's headings under GitHub's slug rule, fenced code blocks read as neither headings nor links. It runs in `make precommit`; the fixture run is its own CI step |
+| The docs' cross-references | `scripts/doc-anchors.sh` and `scripts/doc-anchors-fixture/`, spec 026 #6 — every `[…](file.md#anchor)` in `docs/*.md`, `README.md` and `AGENTS.md` is checked against the target's headings under GitHub's slug rule, fenced code blocks and inline code spans read as neither headings nor links. It runs in `make precommit`; the fixture run is its own CI step, and it also builds a file long enough that a pipe would break the check (#13, #14) |
 
 Attribute semantics for the `langfuse.*` dialect are derived from Langfuse
 (MIT) — see `NOTICE`. Keep new rules in the table in `rules.go`, with the
