@@ -13,7 +13,8 @@
 		rows,
 		onopen,
 		selectedID = null,
-		search = ''
+		search = '',
+		linkSession = true
 	}: {
 		rows: TraceRow[];
 		/**
@@ -28,6 +29,13 @@
 		selectedID?: string | null;
 		/** The search these rows answer, for marking its terms in the snippets. */
 		search?: string;
+		/**
+		 * Whether the session id is a link (spec 023 #16). It is not on a table
+		 * that is already inside the session: a link to where the reader stands
+		 * is not a destination, and from a peek panel it tears down the listing
+		 * to arrive at it (spec 023 #17, from review).
+		 */
+		linkSession?: boolean;
 	} = $props();
 
 	const terms = $derived(searchTerms(search));
@@ -145,8 +153,12 @@
 						<!-- And the session id is a link to the session (spec 023 #16),
 						     built the same way for the same reason: a session is the
 						     reading unit, and the trace table is where a reader meets
-						     one. The third tab stop in the row. -->
-						{#if row.session_id}
+						     one. The third tab stop in the row — except where the
+						     reader is already in that session, and the cell stays the
+						     text it was (#17). -->
+						{#if !row.session_id}
+							{ABSENT}
+						{:else if linkSession}
 							<a
 								href="/sessions/{encodeURIComponent(row.session_id)}"
 								onclick={(event) => event.stopPropagation()}
@@ -156,7 +168,7 @@
 								{row.session_id}
 							</a>
 						{:else}
-							{ABSENT}
+							{row.session_id}
 						{/if}
 					</td>
 					<td class="text-muted {numeric}">{cost(row.total_cost)}</td>

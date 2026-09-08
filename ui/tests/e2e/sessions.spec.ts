@@ -49,8 +49,8 @@ test('a session page opens onto its traces, and a trace into a panel', async ({ 
 	await expect(page.getByText('support-chat')).toBeVisible();
 
 	// Its trace table is a listing like any other (spec 008 #10). The row's
-	// own link is the first one; the user id and the session id follow it
-	// (spec 023 #14, #16).
+	// own link is the first one; the user id follows it (spec 023 #14). The
+	// session id does not, here — see below.
 	await page.locator('tbody tr').last().getByRole('link').first().click();
 	await expect(page).toHaveURL(/\/sessions\/session-77\?peek=[0-9a-f]{32}$/);
 	await expect(page.getByRole('dialog').getByRole('treeitem').first()).toBeVisible();
@@ -68,8 +68,34 @@ test('a session id in the traces table opens the session, not the panel', async 
 	await expect(page.locator('dt').filter({ hasText: /^Traces$/ })).toBeVisible();
 });
 
-// The header carries the session beside the user id from the width the meta
-// survives at; below it the whole meta is out, so this case is a desk.
+// A table already inside the session it would link to: the cell stays the text
+// it was, because a link to where the reader stands is not a destination — and
+// from a panel, following it would tear down the listing to arrive at it
+// (spec 023 #17).
+test('a trace table inside a session does not link to that session', async ({ page }) => {
+	await signIn(page);
+	await page.goto('/sessions/session-77');
+
+	await expect(page.getByText('support-chat')).toBeVisible();
+	const table = page.locator('tbody');
+	await expect(table.getByRole('link', { name: 'session-77', exact: true })).toHaveCount(0);
+	// Still on screen — text, not a destination.
+	await expect(table.getByText('session-77').first()).toBeVisible();
+
+	// The same table in the listing's panel, and the trace drilled out of it:
+	// its meta leaves the session out for the same reason.
+	await page.goto('/sessions?peek=session-77');
+	const panel = page.getByRole('dialog');
+	await expect(panel.getByText('support-chat')).toBeVisible();
+	await expect(panel.getByRole('link', { name: 'session-77', exact: true })).toHaveCount(0);
+
+	await panel.locator('tbody tr').first().getByRole('link').first().click();
+	await expect(panel.getByRole('treeitem').first()).toBeVisible();
+	await expect(panel.getByRole('link', { name: 'session-77', exact: true })).toHaveCount(0);
+});
+
+// The header and a panel's meta carry the session from the width the meta
+// survives at; below it the whole meta is out, so these cases are a desk.
 test.describe('at a desk', () => {
 	test.use({ viewport: { width: 1280, height: 800 } });
 
@@ -77,10 +103,28 @@ test.describe('at a desk', () => {
 		await signIn(page);
 		await page.goto(`/traces/${SESSION_TRACE}`);
 
+		await page.locator('header').getByRole('link', { name: 'session-77', exact: true }).click();
+		await expect(page).toHaveURL(/\/sessions\/session-77$/);
+		await expect(page.locator('dt').filter({ hasText: /^Traces$/ })).toBeVisible();
+	});
+
+	// The panel is the path spec 008 #3 calls the normal one, so the same
+	// destination is in it (spec 023 #17).
+	test("a trace panel's session id opens the session", async ({ page }) => {
+		await signIn(page);
+		await page.goto('/traces');
+
 		await page
-			.locator('header')
-			.getByRole('link', { name: 'session-77', exact: true })
+			.locator('tbody tr')
+			.filter({ hasText: 'session-77' })
+			.first()
+			.getByRole('link')
+			.first()
 			.click();
+		const panel = page.getByRole('dialog');
+		await expect(panel.getByRole('treeitem').first()).toBeVisible();
+
+		await panel.getByRole('link', { name: 'session-77', exact: true }).click();
 		await expect(page).toHaveURL(/\/sessions\/session-77$/);
 		await expect(page.locator('dt').filter({ hasText: /^Traces$/ })).toBeVisible();
 	});

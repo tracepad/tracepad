@@ -4,8 +4,8 @@
 	import CopyButton from './CopyButton.svelte';
 
 	// What a panel says about the trace it has open (spec 026 #4): when it
-	// happened, which release, how long, how much, and the id with the button
-	// that copies it — each at the width it earns its place at.
+	// happened, which release, which session, how long, how much, and the id
+	// with the button that copies it — each at the width it earns its place at.
 	//
 	// The same five spans with the same five breakpoint classes stood in six
 	// files, and a site that showed four of them showed them by leaving two
@@ -26,7 +26,7 @@
 		/** The trace id, when it is not the loaded trace's own. */
 		id?: string | null;
 		/** The parts this site does not render today, and still does not. */
-		hide?: ('timestamp' | 'release' | 'latency' | 'cost' | 'id' | 'copy')[];
+		hide?: ('timestamp' | 'release' | 'session' | 'latency' | 'cost' | 'id' | 'copy')[];
 	} = $props();
 
 	const traceID = $derived(id ?? trace?.id ?? null);
@@ -34,8 +34,12 @@
 </script>
 
 {#if trace}
+	<!-- The short parts do not shrink; the two ids, which carry `truncate`, are
+	     what gives way when the row runs out of room. A sixth part made a flex
+	     row of six shrinkable items, and the first thing it cost was a
+	     timestamp broken over two lines inside a 48 px bar (spec 023 #17). -->
 	{#if shown('timestamp')}
-		<span class="hidden font-mono sm:inline">{timestamp(trace.timestamp)}</span>
+		<span class="hidden shrink-0 font-mono sm:inline">{timestamp(trace.timestamp)}</span>
 	{/if}
 	<!-- The release, when the trace named one: it is a filter rather than a
 	     column, so a panel is where a reader finds out which deployment they
@@ -43,11 +47,25 @@
 	{#if shown('release') && trace.release}
 		<span class="hidden truncate md:inline" title="Release">{trace.release}</span>
 	{/if}
+	<!-- Which session it belongs to, as a link to it (spec 023 #17): the panel
+	     is the path spec 008 #3 calls the normal one, and the destination the
+	     trace table and the full page offer cannot stop at its door. No
+	     `stopPropagation` — a panel's meta has no row click over it. Hidden
+	     where the reader is already in that session. -->
+	{#if shown('session') && trace.session_id}
+		<a
+			href="/sessions/{encodeURIComponent(trace.session_id)}"
+			title="Everything in {trace.session_id}"
+			class="hover:text-fg hidden truncate font-mono hover:underline md:inline"
+		>
+			{trace.session_id}
+		</a>
+	{/if}
 	{#if shown('latency')}
-		<span class="hidden tabular-nums md:inline">{duration(trace.latency_ms)}</span>
+		<span class="hidden shrink-0 tabular-nums md:inline">{duration(trace.latency_ms)}</span>
 	{/if}
 	{#if shown('cost')}
-		<span class="hidden tabular-nums md:inline">{cost(trace.total_cost)}</span>
+		<span class="hidden shrink-0 tabular-nums md:inline">{cost(trace.total_cost)}</span>
 	{/if}
 {/if}
 {#if traceID}

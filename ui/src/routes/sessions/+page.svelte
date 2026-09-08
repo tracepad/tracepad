@@ -228,8 +228,10 @@
 			{#if drilled}
 				<!-- No id and no copy here: the session's own id is what this
 				     panel's other layer carries, and two ids in one line would
-				     be two ids nobody can tell apart. -->
-				<TracePeekMeta trace={peekedTrace} hide={['id', 'copy']} />
+				     be two ids nobody can tell apart. No session either — this
+				     layer was drilled into out of that very session, and the
+				     breadcrumb above is the way back to it (spec 023 #17). -->
+				<TracePeekMeta trace={peekedTrace} hide={['session', 'id', 'copy']} />
 			{:else}
 				<span class="truncate font-mono">{peekID}</span>
 				<CopyButton text={peekID} label="Copy the session id" />
