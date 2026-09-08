@@ -203,6 +203,48 @@ func queryParams(r *http.Request, known ...string) (url.Values, error) {
 	return values, nil
 }
 
+// filterList reads a filter that takes a comma-separated list — *any of* its
+// items (spec 027 #1) — and answers nothing at all when the parameter is
+// absent.
+//
+// One parameter reads as one filter in a URL, a shell and a chip, which is
+// where these values are typed and shown; `?environment=production,staging` is
+// the string a person writes unprompted. `tag` keeps its repeatable form and
+// its AND, because two spellings for two semantics is clearer than one
+// spelling for both.
+//
+// Items are trimmed, so `a, b` is the pair it looks like. An empty item is a
+// `400` on spec 003 #23's rule and for its reason: `?environment=$ENV,staging`
+// with the variable unset is a template that did not fill in, and reading it
+// as "just staging" would answer a broken request with a well-formed listing.
+// Duplicates collapse, which costs the SQL one placeholder and the reader
+// nothing.
+//
+// A value with a comma in it is not expressible this way, and `docs/api.md`
+// says so: an identifier with a comma in it is a choice its owner made against
+// every tool that will ever list it.
+func filterList(values url.Values, name string) ([]string, error) {
+	raw := values.Get(name)
+	if raw == "" {
+		return nil, nil
+	}
+	items := strings.Split(raw, ",")
+	seen := make(map[string]bool, len(items))
+	list := make([]string, 0, len(items))
+	for _, item := range items {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			return nil, fmt.Errorf("%s: empty item in list", name)
+		}
+		if seen[item] {
+			continue
+		}
+		seen[item] = true
+		list = append(list, item)
+	}
+	return list, nil
+}
+
 // pageSize reads `?limit` (#18). Out of range is an error rather than a silent
 // clamp: a client asking for 5000 rows is reasoning about a page size it will
 // not get.

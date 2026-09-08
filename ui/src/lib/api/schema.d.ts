@@ -318,6 +318,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/facets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The environments, releases and trace names in a range, each with its trace count
+         * @description What the three many-valued filters can be set to, for the range in view: the distinct values of `environment`, `release` and `name` among the traces between `from` and `to`, each with the number of traces carrying it, sorted by count descending and then by value. It answers the range and nothing else — the counts do not respect the other filters, so the list does not change as boxes are ticked. At most 100 values per column; `omitted` says how many were left out, rarest first. A trace with no release is not a release, and a trace with no name is not a name. Answered from the hourly roll-up behind the watermark and from the raw rows for the tail, so a value first seen a minute ago is already here.
+         */
+        get: operations["facets"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/users": {
         parameters: {
             query?: never;
@@ -1190,6 +1210,13 @@ export interface components {
             /** Format: date-time */
             last_seen?: string;
         };
+        /** @description One value a filter can be set to, and how many traces of the range carry it */
+        FacetValue: {
+            /** @description The value, exactly as `?environment=`, `?release=` or `?name=` takes it */
+            value: string;
+            /** @description How many traces of the range carry it */
+            count: number;
+        };
         /** @description One score name over the asked buckets. A name graded two ways — numerically here, categorically there — is two series with the same name, told apart by `data_type`. */
         ScoreSeries: {
             /** @description What is being measured, e.g. "hallucination" */
@@ -1844,7 +1871,7 @@ export interface components {
         From: string;
         /** @description RFC 3339, exclusive */
         To: string;
-        /** @description Exact match on the environment a trace ran in */
+        /** @description The environment a trace ran in. A comma-separated list matches **any** of them: `?environment=production,staging`. Items are trimmed and duplicates collapse; an empty item (`a,,b`, `a,`) is a 400, as an empty value is. An environment whose name contains a comma is not expressible here. `GET /api/v1/facets` lists the values in a range with their counts */
         Environment: string;
         /** @description Out of range is a 400, not a silent clamp */
         Limit: number;
@@ -1856,7 +1883,7 @@ export interface components {
         Count: "1" | "true";
         /** @description Full-text search over one field of one observation — input, output, metadata, name or status message — or over the trace name. Words (all must occur), `"quoted phrases"`, `prefix*`. Words, not substrings: `error` does not find `errors`, `err*` finds both. Case and diacritics are folded, identifiers split on punctuation, and only the first 64 KiB of each payload is indexed. A `q` with no word in it is a 400 */
         Search: string;
-        /** @description Exact match on the deployment the trace ran in, from `langfuse.release` or the resource's `service.version` */
+        /** @description The deployment the trace ran in, from `langfuse.release` or the resource's `service.version`. A comma-separated list matches **any** of them; items are trimmed, duplicates collapse, an empty item is a 400, and a release whose name contains a comma is not expressible here. `GET /api/v1/facets` lists the values in a range with their counts */
         Release: string;
         /** @description Exact match on the version of the trace's own logic, from `langfuse.version` */
         Version: string;
@@ -2139,13 +2166,13 @@ export interface operations {
                 from?: components["parameters"]["From"];
                 /** @description RFC 3339, exclusive */
                 to?: components["parameters"]["To"];
-                /** @description Exact match on the environment a trace ran in */
+                /** @description The environment a trace ran in. A comma-separated list matches **any** of them: `?environment=production,staging`. Items are trimmed and duplicates collapse; an empty item (`a,,b`, `a,`) is a 400, as an empty value is. An environment whose name contains a comma is not expressible here. `GET /api/v1/facets` lists the values in a range with their counts */
                 environment?: components["parameters"]["Environment"];
                 /** @description Exact match on the trace's user id */
                 user_id?: string;
                 /** @description Exact match on the trace's session id */
                 session_id?: string;
-                /** @description Exact match on the trace name */
+                /** @description The trace name. A comma-separated list matches **any** of them; items are trimmed, duplicates collapse, an empty item is a 400, and a name containing a comma is not expressible here. A trace with no name never matches. `GET /api/v1/facets` lists the values in a range with their counts */
                 name?: string;
                 /** @description Repeatable; a trace must carry every tag given */
                 tag?: string[];
@@ -2155,7 +2182,7 @@ export interface operations {
                 min_cost?: number;
                 /** @description Full-text search over one field of one observation — input, output, metadata, name or status message — or over the trace name. Words (all must occur), `"quoted phrases"`, `prefix*`. Words, not substrings: `error` does not find `errors`, `err*` finds both. Case and diacritics are folded, identifiers split on punctuation, and only the first 64 KiB of each payload is indexed. A `q` with no word in it is a 400 */
                 q?: components["parameters"]["Search"];
-                /** @description Exact match on the deployment the trace ran in, from `langfuse.release` or the resource's `service.version` */
+                /** @description The deployment the trace ran in, from `langfuse.release` or the resource's `service.version`. A comma-separated list matches **any** of them; items are trimmed, duplicates collapse, an empty item is a 400, and a release whose name contains a comma is not expressible here. `GET /api/v1/facets` lists the values in a range with their counts */
                 release?: components["parameters"]["Release"];
                 /** @description Exact match on the version of the trace's own logic, from `langfuse.version` */
                 version?: components["parameters"]["Version"];
@@ -2214,17 +2241,18 @@ export interface operations {
                 from?: components["parameters"]["From"];
                 /** @description RFC 3339, exclusive */
                 to?: components["parameters"]["To"];
-                /** @description Exact match on the environment a trace ran in */
+                /** @description The environment a trace ran in. A comma-separated list matches **any** of them: `?environment=production,staging`. Items are trimmed and duplicates collapse; an empty item (`a,,b`, `a,`) is a 400, as an empty value is. An environment whose name contains a comma is not expressible here. `GET /api/v1/facets` lists the values in a range with their counts */
                 environment?: components["parameters"]["Environment"];
                 user_id?: string;
                 session_id?: string;
+                /** @description The trace name, or a comma-separated list matching any of them */
                 name?: string;
                 tag?: string[];
                 status?: "error" | "ok";
                 min_cost?: number;
                 /** @description Full-text search over one field of one observation — input, output, metadata, name or status message — or over the trace name. Words (all must occur), `"quoted phrases"`, `prefix*`. Words, not substrings: `error` does not find `errors`, `err*` finds both. Case and diacritics are folded, identifiers split on punctuation, and only the first 64 KiB of each payload is indexed. A `q` with no word in it is a 400 */
                 q?: components["parameters"]["Search"];
-                /** @description Exact match on the deployment the trace ran in, from `langfuse.release` or the resource's `service.version` */
+                /** @description The deployment the trace ran in, from `langfuse.release` or the resource's `service.version`. A comma-separated list matches **any** of them; items are trimmed, duplicates collapse, an empty item is a 400, and a release whose name contains a comma is not expressible here. `GET /api/v1/facets` lists the values in a range with their counts */
                 release?: components["parameters"]["Release"];
                 /** @description Exact match on the version of the trace's own logic, from `langfuse.version` */
                 version?: components["parameters"]["Version"];
@@ -2421,7 +2449,7 @@ export interface operations {
                 from?: components["parameters"]["From"];
                 /** @description RFC 3339, exclusive */
                 to?: components["parameters"]["To"];
-                /** @description Exact match on the environment a trace ran in */
+                /** @description The environment a trace ran in. A comma-separated list matches **any** of them: `?environment=production,staging`. Items are trimmed and duplicates collapse; an empty item (`a,,b`, `a,`) is a 400, as an empty value is. An environment whose name contains a comma is not expressible here. `GET /api/v1/facets` lists the values in a range with their counts */
                 environment?: components["parameters"]["Environment"];
                 /** @description Exact match on the user id of a session's traces */
                 user_id?: string;
@@ -2515,7 +2543,7 @@ export interface operations {
                 from?: components["parameters"]["From"];
                 /** @description RFC 3339, exclusive */
                 to?: components["parameters"]["To"];
-                /** @description Exact match on the environment a trace ran in */
+                /** @description The environment a trace ran in. A comma-separated list matches **any** of them: `?environment=production,staging`. Items are trimmed and duplicates collapse; an empty item (`a,,b`, `a,`) is a 400, as an empty value is. An environment whose name contains a comma is not expressible here. `GET /api/v1/facets` lists the values in a range with their counts */
                 environment?: components["parameters"]["Environment"];
                 /** @description Restricts every bucket to one end user. The shape, the groupings and `unit` are unchanged; a `hour` or `day` timeline additionally carries `sessions` per bucket. Statistics for one user trail the raw data by the same rollup lag as the rest */
                 user_id?: string;
@@ -2565,7 +2593,7 @@ export interface operations {
                 from?: components["parameters"]["From"];
                 /** @description RFC 3339, exclusive */
                 to?: components["parameters"]["To"];
-                /** @description Exact match on the environment a trace ran in */
+                /** @description The environment a trace ran in. A comma-separated list matches **any** of them: `?environment=production,staging`. Items are trimmed and duplicates collapse; an empty item (`a,,b`, `a,`) is a 400, as an empty value is. An environment whose name contains a comma is not expressible here. `GET /api/v1/facets` lists the values in a range with their counts */
                 environment?: components["parameters"]["Environment"];
                 /** @description Only the score filed under this name. Absent, every name in the range comes back as its own series */
                 name?: string;
@@ -2596,6 +2624,53 @@ export interface operations {
                         /** @description How many score names `limit` left out, rarest first; 0 when every name in the range is here */
                         omitted: number;
                         series: components["schemas"]["ScoreSeries"][];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    facets: {
+        parameters: {
+            query?: {
+                /** @description RFC 3339, inclusive. Defaults to 30 days ago — the listing's own default window */
+                from?: string;
+                /** @description RFC 3339, exclusive. Defaults to now */
+                to?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The values */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /**
+                         * Format: date-time
+                         * @description The start of the range these counts are for
+                         */
+                        from: string;
+                        /**
+                         * Format: date-time
+                         * @description Its exclusive end
+                         */
+                        to: string;
+                        environment: components["schemas"]["FacetValue"][];
+                        release: components["schemas"]["FacetValue"][];
+                        name: components["schemas"]["FacetValue"][];
+                        /** @description How many values the cap left out of each column; 0 when the list is the whole truth */
+                        omitted: {
+                            environment: number;
+                            release: number;
+                            name: number;
+                        };
                     };
                 };
             };
@@ -4019,13 +4094,13 @@ export interface operations {
                 from?: components["parameters"]["From"];
                 /** @description RFC 3339, exclusive */
                 to?: components["parameters"]["To"];
-                /** @description Exact match on the environment a trace ran in */
+                /** @description The environment a trace ran in. A comma-separated list matches **any** of them: `?environment=production,staging`. Items are trimmed and duplicates collapse; an empty item (`a,,b`, `a,`) is a 400, as an empty value is. An environment whose name contains a comma is not expressible here. `GET /api/v1/facets` lists the values in a range with their counts */
                 environment?: components["parameters"]["Environment"];
                 /** @description Exact match on the trace's user id */
                 user_id?: string;
                 /** @description Exact match on the trace's session id */
                 session_id?: string;
-                /** @description Exact match on the trace name */
+                /** @description The trace name. A comma-separated list matches **any** of them; items are trimmed, duplicates collapse, an empty item is a 400, and a name containing a comma is not expressible here. A trace with no name never matches. `GET /api/v1/facets` lists the values in a range with their counts */
                 name?: string;
                 /** @description Repeatable; a trace must carry every tag given */
                 tag?: string[];
@@ -4035,7 +4110,7 @@ export interface operations {
                 min_cost?: number;
                 /** @description Full-text search over one field of one observation — input, output, metadata, name or status message — or over the trace name. Words (all must occur), `"quoted phrases"`, `prefix*`. Words, not substrings: `error` does not find `errors`, `err*` finds both. Case and diacritics are folded, identifiers split on punctuation, and only the first 64 KiB of each payload is indexed. A `q` with no word in it is a 400 */
                 q?: components["parameters"]["Search"];
-                /** @description Exact match on the deployment the trace ran in, from `langfuse.release` or the resource's `service.version` */
+                /** @description The deployment the trace ran in, from `langfuse.release` or the resource's `service.version`. A comma-separated list matches **any** of them; items are trimmed, duplicates collapse, an empty item is a 400, and a release whose name contains a comma is not expressible here. `GET /api/v1/facets` lists the values in a range with their counts */
                 release?: components["parameters"]["Release"];
                 /** @description Exact match on the version of the trace's own logic, from `langfuse.version` */
                 version?: components["parameters"]["Version"];

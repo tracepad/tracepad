@@ -69,7 +69,7 @@ func roll(t *testing.T, s *Store, projectID string, hour int64) *statsRoll {
 func rolledRows(t *testing.T, s *Store, projectID string, hour int64) map[string]StatsRow {
 	t.Helper()
 	rows := map[string]StatsRow{}
-	err := s.StatsRollupRows(projectID, hour, hour+SecondsPerHour, "", func(row StatsRow) {
+	err := s.StatsRollupRows(projectID, hour, hour+SecondsPerHour, nil, func(row StatsRow) {
 		rows[row.Environment+"|"+row.Release+"|"+row.Model] = row
 	})
 	if err != nil {

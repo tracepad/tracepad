@@ -71,10 +71,10 @@ func traceFilterProperties() map[string]*jsonschema.Schema {
 	return map[string]*jsonschema.Schema{
 		"from":        timestamp("Only traces at or after this RFC 3339 instant."),
 		"to":          timestamp("Only traces strictly before this RFC 3339 instant."),
-		"environment": text("Exact match on the environment a trace ran in, e.g. \"production\"."),
+		"environment": text("The environment a trace ran in, e.g. \"production\". A comma-separated list keeps traces from any of them, e.g. \"production,staging\"; get_facets lists what a range holds."),
 		"user_id":     text("Exact match on the end user the trace was attributed to."),
 		"session_id":  text("Exact match on the session the trace belongs to."),
-		"name":        text("Exact match on the trace name."),
+		"name":        text("The trace name, or a comma-separated list of them, which keeps traces named any one. A trace with no name never matches; get_facets lists what a range holds."),
 		"tag":         list(text("A tag."), "A trace must carry every tag listed."),
 		"status": oneOf("\"error\" keeps traces with at least one failed observation, \"ok\" keeps the rest.",
 			"error", "ok"),
@@ -84,7 +84,8 @@ func traceFilterProperties() map[string]*jsonschema.Schema {
 		// between nine of them is answering "which one does this
 		// question need".
 		"release": text("Use when the user names a deployment or asks whether a release changed something — " +
-			"\"did 2026.8.30 make it slower\". Exact match on the release the trace ran in."),
+			"\"did 2026.8.30 make it slower\". The release the trace ran in, or a comma-separated list of them, " +
+			"which keeps traces from any one. get_facets lists what a range holds."),
 		"version": text("Use when the user names a version of the application's own logic rather than a " +
 			"deployment. Exact match."),
 		"type": oneOf("Use when the user asks about a kind of step — a tool call, a guardrail, a retrieval — "+
@@ -323,7 +324,7 @@ func register(server *mcp.Server, api API) {
 		InputSchema: object(walkProperties(pagingProperties(map[string]*jsonschema.Schema{
 			"from":        timestamp("Only traces at or after this RFC 3339 instant. A session appears when any of its traces falls in the window."),
 			"to":          timestamp("Only traces strictly before this RFC 3339 instant."),
-			"environment": text("Exact match on the environment the session's traces ran in, e.g. \"production\"."),
+			"environment": text("The environment the session's traces ran in, e.g. \"production\", or a comma-separated list keeping any of them."),
 			"user_id":     text("Exact match on the end user the session's traces were attributed to."),
 		}), true)),
 		OutputSchema: object(map[string]*jsonschema.Schema{
@@ -473,7 +474,7 @@ func register(server *mcp.Server, api API) {
 				"hour", "day", "model", "environment", "release"),
 			"from":        timestamp("Only traces at or after this RFC 3339 instant."),
 			"to":          timestamp("Only traces strictly before this RFC 3339 instant."),
-			"environment": text("Only traces from this environment."),
+			"environment": text("Only traces from this environment, or from any of a comma-separated list of them."),
 			"user_id": text("Only traces attributed to this end user. With an \"hour\" or \"day\" grouping, " +
 				"each bucket also carries `sessions`: how many of that user's sessions began in it."),
 		}),
@@ -515,7 +516,7 @@ func register(server *mcp.Server, api API) {
 			"name":        text("Only the score filed under this name, e.g. \"hallucination\". Absent, every name is a series."),
 			"from":        timestamp("Only scores on traces at or after this RFC 3339 instant."),
 			"to":          timestamp("Only scores on traces strictly before this RFC 3339 instant."),
-			"environment": text("Only scores on traces from this environment."),
+			"environment": text("Only scores on traces from this environment, or from any of a comma-separated list of them."),
 			"limit": bounded(minLimit, maxLimit, "How many series to return, 1 to 500. Default 50, "+
 				"the busiest names first; `omitted` says how many were left out."),
 		}),
@@ -542,6 +543,35 @@ func register(server *mcp.Server, api API) {
 			}, "name", "data_type", "buckets"), "One series per score name, by name."),
 		}, "group_by", "targets", "omitted", "series"),
 	}, t.getScoreTrends)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "get_facets",
+		Annotations: readOnly("List the filter values"),
+		Description: "List what environment, release and name can be set to before filtering by them — the user asks which environments exist, " +
+			"what releases have run, what the traces are called, or you are about to guess at a value for list_traces and would rather not. " +
+			"Returns the distinct values of each of the three columns among the traces of a range, each with its trace count, " +
+			"busiest first; the counts are what tell a typo (\"prod: 1\") from the real thing (\"production: 4656\"). " +
+			"The range is the only thing it takes: the counts do not respect any other filter. " +
+			"At most 100 values per column, with `omitted` saying how many were left out. " +
+			"A trace with no release is not a release and one with no name is not a name. " +
+			"Does NOT list users, sessions, versions or tags — those are unbounded or have listings of their own.",
+		InputSchema: object(map[string]*jsonschema.Schema{
+			"from": timestamp("Only traces at or after this RFC 3339 instant. Default: 30 days ago."),
+			"to":   timestamp("Only traces strictly before this RFC 3339 instant. Default: now."),
+		}),
+		OutputSchema: object(map[string]*jsonschema.Schema{
+			"from":        timestamp("The start of the range these counts are for."),
+			"to":          timestamp("Its exclusive end."),
+			"environment": list(facetValueSchema(), "The environments, busiest first. Pass one, or several comma-separated, as the environment filter."),
+			"release":     list(facetValueSchema(), "The releases, busiest first. Pass one, or several comma-separated, as the release filter."),
+			"name":        list(facetValueSchema(), "The trace names, busiest first. Pass one, or several comma-separated, as the name filter."),
+			"omitted": object(map[string]*jsonschema.Schema{
+				"environment": integer("How many environments the 100-value cap left out."),
+				"release":     integer("How many releases it left out."),
+				"name":        integer("How many trace names it left out."),
+			}, "environment", "release", "name"),
+		}, "from", "to", "environment", "release", "name", "omitted"),
+	}, t.getFacets)
 
 	// The eval tools are declared in evals.go, in their own file because
 	// they are their own surface: six reads over datasets and runs.
@@ -892,6 +922,26 @@ func (t *toolset) getStats(ctx context.Context, req *mcp.CallToolRequest, in get
 	return t.call(ctx, req, "/api/v1/stats", query, summarizeStats)
 }
 
+// facetValueSchema is one value of one column, the shape all three lists hold.
+func facetValueSchema() *jsonschema.Schema {
+	return object(map[string]*jsonschema.Schema{
+		"value": text("The value, exactly as the matching filter takes it."),
+		"count": integer("How many traces of the range carry it."),
+	}, "value", "count")
+}
+
+type getFacetsInput struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+}
+
+func (t *toolset) getFacets(ctx context.Context, req *mcp.CallToolRequest, in getFacetsInput) (*mcp.CallToolResult, any, error) {
+	query := url.Values{}
+	set(query, "from", in.From)
+	set(query, "to", in.To)
+	return t.call(ctx, req, "/api/v1/facets", query, summarizeFacets)
+}
+
 type getScoreTrendsInput struct {
 	GroupBy     string `json:"group_by"`
 	Name        string `json:"name"`
@@ -1178,6 +1228,52 @@ func summarizeScoreTrends(body json.RawMessage) string {
 		summary += fmt.Sprintf("; %d rarer names not shown", parsed.Omitted)
 	}
 	return summary + "."
+}
+
+// summarizeFacets says how many values each column holds, which is the one
+// thing a model has to know before it decides whether to read the structured
+// half: three empty lists and a hundred-value one are different situations.
+func summarizeFacets(body json.RawMessage) string {
+	type value struct {
+		Value string `json:"value"`
+	}
+	var parsed struct {
+		Environment []value `json:"environment"`
+		Release     []value `json:"release"`
+		Name        []value `json:"name"`
+		Omitted     struct {
+			Environment int `json:"environment"`
+			Release     int `json:"release"`
+			Name        int `json:"name"`
+		} `json:"omitted"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return "the filter values"
+	}
+	parts := make([]string, 0, 3)
+	for _, column := range []struct {
+		noun    string
+		values  []value
+		omitted int
+	}{
+		{"environment", parsed.Environment, parsed.Omitted.Environment},
+		{"release", parsed.Release, parsed.Omitted.Release},
+		{"trace name", parsed.Name, parsed.Omitted.Name},
+	} {
+		part := fmt.Sprintf("%d %s", len(column.values), column.noun)
+		if len(column.values) != 1 {
+			part += "s"
+		}
+		// A capped list that said nothing about it would be a wrong one.
+		if column.omitted > 0 {
+			part += fmt.Sprintf(" (%d more not shown)", column.omitted)
+		}
+		parts = append(parts, part)
+	}
+	if len(parsed.Environment)+len(parsed.Release)+len(parsed.Name) == 0 {
+		return "No traces in that range, so nothing to filter by."
+	}
+	return "In that range: " + strings.Join(parts, ", ") + "."
 }
 
 func orUnnamed(value string) string {

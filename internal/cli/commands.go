@@ -1102,6 +1102,93 @@ func (r *run) stats(ctx context.Context, args []string) error {
 	return nil
 }
 
+// facets is `GET /api/v1/facets` and nothing more (#1): what the three
+// many-valued filters can be set to, over a range (spec 027 #5).
+//
+// It is a command of its own rather than a flag on `stats` because it answers a
+// different question — not "how much traffic" but "what is there to ask about"
+// — and because it is what a person reaches for before writing `--env`. The
+// window flags are spelled as every other command spells them (spec 007 #11).
+func (r *run) facets(ctx context.Context, args []string) error {
+	var since, until string
+	fs := r.flags("facets")
+	fs.StringVar(&since, "since", "", "")
+	fs.StringVar(&until, "until", "", "")
+	if _, err := r.parse(fs, args, 0); err != nil {
+		return err
+	}
+
+	query := url.Values{}
+	from, err := r.instant("--since", since)
+	if err != nil {
+		return err
+	}
+	addSome(query, "from", from)
+	to, err := r.instant("--until", until)
+	if err != nil {
+		return err
+	}
+	addSome(query, "to", to)
+
+	body, err := r.api.Get(ctx, "/api/v1/facets", query)
+	if err != nil {
+		return err
+	}
+	if r.wantJSON() {
+		return r.emit(body)
+	}
+	type facetValue struct {
+		Value string `json:"value"`
+		Count int    `json:"count"`
+	}
+	result, err := decode[struct {
+		From        string       `json:"from"`
+		To          string       `json:"to"`
+		Environment []facetValue `json:"environment"`
+		Release     []facetValue `json:"release"`
+		Name        []facetValue `json:"name"`
+		Omitted     struct {
+			Environment int `json:"environment"`
+			Release     int `json:"release"`
+			Name        int `json:"name"`
+		} `json:"omitted"`
+	}](body)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(r.opt.Stdout, "%s .. %s\n", shortTime(result.From), shortTime(result.To))
+	// One block per column, in the order the answer lists them and the
+	// filter bar shows them. A column with nothing in it says so rather
+	// than printing a header over an empty table.
+	for _, column := range []struct {
+		flag    string
+		values  []facetValue
+		omitted int
+	}{
+		{"--env", result.Environment, result.Omitted.Environment},
+		{"--release", result.Release, result.Omitted.Release},
+		{"--name", result.Name, result.Omitted.Name},
+	} {
+		fmt.Fprintln(r.opt.Stdout)
+		if len(column.values) == 0 {
+			fmt.Fprintf(r.opt.Stdout, "%s: nothing in this range\n", column.flag)
+			continue
+		}
+		t := newTable(r.opt.Stdout, strings.ToUpper(strings.TrimPrefix(column.flag, "--")), "TRACES")
+		for _, value := range column.values {
+			t.row(value.Value, strconv.Itoa(value.Count))
+		}
+		t.flush()
+		// A truncated list that said nothing about it would be a wrong
+		// one (spec 027 #2). The busiest values are the ones shown.
+		if column.omitted > 0 {
+			fmt.Fprintf(r.opt.Stdout, "and %s not shown; narrow the range to see them\n",
+				plural(column.omitted, "rarer value"))
+		}
+	}
+	return nil
+}
+
 func deref(value *int) int {
 	if value == nil {
 		return 0

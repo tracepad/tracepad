@@ -65,8 +65,13 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	environment, err := filterList(values, "environment")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	filter := store.StatsFilter{
-		Environment: values.Get("environment"),
+		Environment: environment,
 		UserID:      values.Get("user_id"),
 		GroupBy:     values.Get("group_by"),
 	}

@@ -75,7 +75,7 @@ const (
 type scoreTrendFilter struct {
 	From        *int64
 	To          *int64
-	Environment string
+	Environment []string
 	// Name narrows the answer to one score name — what the detail view
 	// asks. Without it every name in the range is a series, which is what
 	// the overview needs in one request.
@@ -124,8 +124,16 @@ func (s *Server) handleScoreTrends(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// `environment` takes the list every trace filter takes (spec 027 #1).
+	// `name` here is the **score** name, not the trace name, and is
+	// unchanged: one score name is what a series is.
+	environment, err := filterList(values, "environment")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	filter := scoreTrendFilter{
-		Environment: values.Get("environment"),
+		Environment: environment,
 		Name:        values.Get("name"),
 		GroupBy:     values.Get("group_by"),
 	}

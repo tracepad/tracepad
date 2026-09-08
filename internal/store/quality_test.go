@@ -121,7 +121,7 @@ func scoreKey(row ScoreStatsRow) string {
 func rolledScoreRows(t *testing.T, s *Store, projectID string, hour int64) map[string]ScoreStatsRow {
 	t.Helper()
 	rows := map[string]ScoreStatsRow{}
-	if err := s.ScoresRollupRows(projectID, hour, hour+SecondsPerHour, "", "",
+	if err := s.ScoresRollupRows(projectID, hour, hour+SecondsPerHour, nil, "",
 		func(row ScoreStatsRow) { rows[scoreKey(row)] = row }); err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +133,7 @@ func rolledScoreRows(t *testing.T, s *Store, projectID string, hour int64) map[s
 func liveScoreRows(t *testing.T, s *Store, projectID string, from, to int64) map[string]ScoreStatsRow {
 	t.Helper()
 	rows := map[string]ScoreStatsRow{}
-	if err := s.ScoreSamples(projectID, from, to, "", "", func(sample ScoreStatsRow) {
+	if err := s.ScoreSamples(projectID, from, to, nil, "", func(sample ScoreStatsRow) {
 		row, held := rows[scoreKey(sample)]
 		if !held {
 			row = ScoreStatsRow{Hour: sample.Hour, Environment: sample.Environment,
@@ -611,11 +611,11 @@ func TestScoreQueriesSeekTheirIndexes(t *testing.T) {
 	scoreFixture(t, s, project.ID)
 	roll(t, s, project.ID, rollupHour)
 
-	rangeQuery, rangeArgs := scoreRollupQuery(project.ID, rollupHour, rollupHour+SecondsPerHour, "", "")
-	namedQuery, namedArgs := scoreRollupQuery(project.ID, rollupHour, rollupHour+SecondsPerHour, "", nameHallucination)
-	liveQuery, liveArgs := scoreLiveQuery(project.ID, rollupHour*1e9, (rollupHour+SecondsPerHour)*1e9, "", "")
+	rangeQuery, rangeArgs := scoreRollupQuery(project.ID, rollupHour, rollupHour+SecondsPerHour, nil, "")
+	namedQuery, namedArgs := scoreRollupQuery(project.ID, rollupHour, rollupHour+SecondsPerHour, nil, nameHallucination)
+	liveQuery, liveArgs := scoreLiveQuery(project.ID, rollupHour*1e9, (rollupHour+SecondsPerHour)*1e9, nil, "")
 	liveNamed, liveNamedArgs := scoreLiveQuery(project.ID, rollupHour*1e9,
-		(rollupHour+SecondsPerHour)*1e9, "production", nameHallucination)
+		(rollupHour+SecondsPerHour)*1e9, []string{"production"}, nameHallucination)
 
 	for _, tc := range []struct {
 		name    string

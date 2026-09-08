@@ -55,6 +55,11 @@ func (s *Server) routes() []route {
 		// name over the same seam, the same filters and the same
 		// buckets as the statistics next to it.
 		{"GET", "/api/v1/stats/scores", "Score means, rates and category shares per bucket, one series per score name", s.handleScoreTrends},
+		// The values the three many-valued filters can take (spec
+		// 027 #2), answered through the same seam: the rollup behind
+		// the watermark and the live scan past it, so a value first
+		// seen a minute ago is already on the list.
+		{"GET", "/api/v1/facets", "The environments, releases and trace names in a range, each with its trace count", s.handleFacets},
 
 		// Users (spec 023): the rollup one dimension over. The listing
 		// answers from it alone and trails the raw rows by the rollup's

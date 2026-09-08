@@ -79,7 +79,7 @@ func usersFixture(t *testing.T, s *Store, projectID string) {
 func userRows(t *testing.T, s *Store, projectID, userID string, hour int64) map[string]UserStatsRow {
 	t.Helper()
 	rows := map[string]UserStatsRow{}
-	err := s.UsersRollupRows(projectID, userID, hour, hour+SecondsPerHour, "",
+	err := s.UsersRollupRows(projectID, userID, hour, hour+SecondsPerHour, nil,
 		func(row UserStatsRow) {
 			rows[row.Environment+"|"+row.Release+"|"+row.Model] = row
 		})

@@ -249,8 +249,8 @@ func TestWireFilters(t *testing.T) {
 		filter TraceFilter
 		want   []string
 	}{
-		{"release", TraceFilter{Release: "2026.8.30"}, []string{hexTrace(20)}},
-		{"release that nothing carries", TraceFilter{Release: "nope"}, nil},
+		{"release", TraceFilter{Release: []string{"2026.8.30"}}, []string{hexTrace(20)}},
+		{"release that nothing carries", TraceFilter{Release: []string{"nope"}}, nil},
 		{"version", TraceFilter{Version: "checkout-v9"}, []string{hexTrace(21), hexTrace(20)}},
 		{"type", TraceFilter{Type: model.TypeTool}, []string{hexTrace(21), hexTrace(20)}},
 		{"type nothing carries", TraceFilter{Type: model.TypeGuardrail}, nil},
@@ -271,7 +271,7 @@ func TestWireFilters(t *testing.T) {
 		},
 		{
 			name:   "a filter over observations beside one over the trace",
-			filter: TraceFilter{Type: model.TypeTool, Release: "2026.8.31"},
+			filter: TraceFilter{Type: model.TypeTool, Release: []string{"2026.8.31"}},
 			want:   []string{hexTrace(21)},
 		},
 	}
@@ -405,7 +405,7 @@ func TestWireFilterPlans(t *testing.T) {
 	// there. The count has no ordering to preserve, and it is the read
 	// spec 009 #4 caps precisely because it is the expensive one.
 	t.Run("the release filter has an index where it can use one", func(t *testing.T) {
-		query, args := traceCountQuery(project.ID, TraceFilter{Release: "2026.8.30"}, 1000)
+		query, args := traceCountQuery(project.ID, TraceFilter{Release: []string{"2026.8.30"}}, 1000)
 		plan, err := s.explainQueryPlan(query, args...)
 		if err != nil {
 			t.Fatal(err)
@@ -415,7 +415,7 @@ func TestWireFilterPlans(t *testing.T) {
 		}
 
 		query, args = traceQuery(project.ID, TraceFilter{
-			Release: "2026.8.30",
+			Release: []string{"2026.8.30"},
 			Limit:   50,
 			After:   &TraceCursor{Timestamp: day, ID: hexTrace(1)},
 		})

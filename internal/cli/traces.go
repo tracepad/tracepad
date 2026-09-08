@@ -89,6 +89,11 @@ func (f *traceFilterFlags) registerFollowing(fs *flag.FlagSet) {
 // query turns the flags into the endpoint's own query parameters. The mapping
 // is the whole of the CLI's "logic": every filter is a parameter the API
 // already has (#1).
+//
+// `--env`, `--name` and `--release` pass their string through untouched, which
+// is what makes `--env production,staging` the list spec 027 #1 defines: what
+// the flag accepts is exactly what the parameter accepts, and a CLI that split
+// the string here would be a second parser to disagree with the server's.
 func (f *traceFilterFlags) query(r *run) (url.Values, error) {
 	query := url.Values{}
 	addSome(query, "environment", f.environment)

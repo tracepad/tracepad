@@ -164,7 +164,7 @@ func BenchmarkStatsMonth(b *testing.B) {
 		for range b.N {
 			var rows int
 			err := s.StatsRollupRows(project.ID,
-				benchStartHourEpoch, benchStartHourEpoch+int64(benchHours)*SecondsPerHour, "",
+				benchStartHourEpoch, benchStartHourEpoch+int64(benchHours)*SecondsPerHour, nil,
 				func(StatsRow) { rows++ })
 			if err != nil {
 				b.Fatal(err)
