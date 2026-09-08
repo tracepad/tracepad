@@ -359,6 +359,63 @@ func vacatedScoreHour(tx *sql.Tx, projectID, id, target string) (int64, bool, er
 	return hour.Int64, hour.Valid, nil
 }
 
+// correctScoreHours re-rolls the `scores_hourly` rows a write left wrong, in
+// the very transaction that wrote it (spec 025 #22).
+//
+// Two writes leave an hour that no later question finds: a deletion, whose row
+// `created_at > last_pass` cannot see because it is gone (#4), and a re-POST
+// that moves a score off the trace it was counted under (#20). Both used to be
+// corrected by the handler afterwards, submitting the whole `RollHour` job —
+// which rewrites `stats_hourly` and `users_hourly` too and then re-aggregates
+// the entire history of every user the hour touched, the exact fan-out the
+// aggregator defers with `DeferSummary`. It was also a second transaction: one
+// that failed left the correction lost and the request answering 500 over a
+// write that had committed, and the client's retry could not find it again.
+//
+// Here it is neither. Only the third table is touched, at a cost of the hour's
+// own scores, and the correction commits with the write or not at all.
+//
+// The two gates are the ones the job itself applies, read from the same
+// transaction. An hour at or past the watermark is the live half of the read
+// seam's, and the raw rows it scans are already right. A frozen hour is left as
+// it stands, because past the retention window a recompute from what the sweep
+// left is a demolition rather than a correction (spec 013 #11, asked per table
+// by #21).
+func correctScoreHours(tx *sql.Tx, projectID string, now int64, hours ...int64) error {
+	if len(hours) == 0 {
+		return nil
+	}
+	state, err := rollupState(tx, projectID)
+	if err != nil {
+		return err
+	}
+	project, err := projectByID(tx, projectID)
+	if err != nil || project == nil {
+		return err
+	}
+	// One recompute per distinct hour: a batch that re-points fifty scores
+	// off one trace has one hour to correct, not fifty.
+	seen := map[int64]bool{}
+	for _, hour := range hours {
+		if hour >= state.RolledUntil || seen[hour] {
+			continue
+		}
+		seen[hour] = true
+		frozen, err := hourFrozenIn(tx, "scores_hourly", projectID, hour,
+			hourPastWindow(project, hour, now))
+		if err != nil {
+			return err
+		}
+		if frozen {
+			continue
+		}
+		if _, err := rollScoreHour(tx, projectID, hour); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // scoresRollupSweep deletes rolled score rows older than the project's stats
 // window. One chunk per job, like every other deletion this store does; the
 // window is `stats_retention_days` and there is no knob of its own, because

@@ -233,8 +233,8 @@ func (r *statsRoll) apply(tx *sql.Tx) error {
 	// Past the retention window, the freeze is asked of **each table this job
 	// writes**, because spec 013 #14's rule is about the rows being protected
 	// and every table has its own (spec 025 #21).
-	past := r.pastWindow(project)
-	frozen, err := r.frozenFor(tx, "stats_hourly", past)
+	past := hourPastWindow(project, r.Hour, r.Now)
+	frozen, err := hourFrozenIn(tx, "stats_hourly", r.ProjectID, r.Hour, past)
 	if err != nil {
 		return err
 	}
@@ -251,7 +251,7 @@ func (r *statsRoll) apply(tx *sql.Tx) error {
 	// An hour whose traces are *intact* past the window — history imported
 	// into an install that had already rolled it — gets its score rows,
 	// which the one shared gate refused it for ever.
-	scoresFrozen, err := r.frozenFor(tx, "scores_hourly", past)
+	scoresFrozen, err := hourFrozenIn(tx, "scores_hourly", r.ProjectID, r.Hour, past)
 	if err != nil {
 		return err
 	}
@@ -313,9 +313,9 @@ func (r *statsRoll) rollTraffic(tx *sql.Tx) error {
 	return nil
 }
 
-// pastWindow reports whether this hour lies past the project's trace-retention
-// window — the first half of spec 013 #11's rule, and the half that is the
-// same for every table this job writes.
+// hourPastWindow reports whether an hour lies past the project's
+// trace-retention window — the first half of spec 013 #11's rule, and the half
+// that is the same for every table the rollup writes.
 //
 // The epoch hour is never past it. It is not a time: it is where a trace lands
 // when no span of it said when it started (spec 004 #26), so its rows are as
@@ -323,14 +323,14 @@ func (r *statsRoll) rollTraffic(tx *sql.Tx) error {
 // pinned the phantom 1970 bucket that spec 013 #16 exists to remove, for every
 // project with a retention window, which is every ordinary one (found in the
 // fifth review of PR #28).
-func (r *statsRoll) pastWindow(project *Project) bool {
-	if r.Hour <= 0 {
+func hourPastWindow(project *Project, hour, now int64) bool {
+	if hour <= 0 {
 		return false
 	}
-	return r.Hour < frozenBefore(project, r.Now)
+	return hour < frozenBefore(project, now)
 }
 
-// frozenFor is spec 013 #14's second half asked of **one** table: past the
+// hourFrozenIn is spec 013 #14's second half asked of **one** table: past the
 // window, an hour is frozen for a table exactly when that table already holds
 // rows for it.
 //
@@ -350,15 +350,15 @@ func (r *statsRoll) pastWindow(project *Project) bool {
 //
 // The table name is this package's own constant, never anything a request
 // carries; only the project id and the hour are bound.
-func (r *statsRoll) frozenFor(tx *sql.Tx, table string, past bool) (bool, error) {
+func hourFrozenIn(tx *sql.Tx, table, projectID string, hour int64, past bool) (bool, error) {
 	if !past {
 		return false, nil
 	}
 	var rows int
 	if err := tx.QueryRow(
 		`SELECT COUNT(*) FROM `+table+` WHERE project_id = ? AND hour = ?`,
-		r.ProjectID, r.Hour).Scan(&rows); err != nil {
-		return false, fmt.Errorf("look for hour %d in %s: %w", r.Hour, table, err)
+		projectID, hour).Scan(&rows); err != nil {
+		return false, fmt.Errorf("look for hour %d in %s: %w", hour, table, err)
 	}
 	return rows > 0, nil
 }

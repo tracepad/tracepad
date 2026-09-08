@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"sort"
 	"strings"
@@ -404,12 +405,128 @@ func TestATraceMovingHourCarriesItsScores(t *testing.T) {
 	}
 }
 
-// A deletion names the hour it has to correct, read before the row goes: after
-// it, nothing does (spec 025 #4).
-func TestDeletingAScoreNamesItsHour(t *testing.T) {
+// A deletion corrects its hour inside its own transaction, and corrects
+// nothing else (spec 025 #22).
+//
+// The two tables the correction must not touch are wrong on purpose before it
+// runs. The full `RollHour` job would repair them — rewriting `stats_hourly`,
+// `users_hourly` and then the whole-history summary of every user of the hour —
+// and that is precisely the fan-out a single `DELETE /scores/{id}` must not
+// carry: it holds the one writer for as long as it takes. Substitute
+// `RollHour` back into `correctScoreHours` and the two survival assertions
+// below fail.
+func TestDeletingAScoreCorrectsOnlyTheScoreRollup(t *testing.T) {
+	s, project := readStore(t)
+	rollupFixture(t, s, project.ID)
+	// A graded trace with a user on it, so the hour has a summary the full
+	// job would rewrite.
+	start := rollupHour*1e9 + 5e9
+	seedTrace(t, s, project.ID,
+		&model.Trace{ID: hexTrace(5), Name: "run", UserID: "u-1",
+			Environment: "production", Release: "2026.8.30"},
+		&model.Observation{TraceID: hexTrace(5), ID: hexSpan(5), Type: model.TypeGeneration,
+			Name: "call", Level: model.LevelDefault, StartTime: start, EndTime: start + 1e8,
+			Model: "claude-sonnet-5"})
+	scoreFixture(t, s, project.ID)
+	stampTraces(t, s, project.ID, rollupHour*1e9)
+	passAt(t, s, afterTheHour())
+
+	numeric := "production|2026.8.30||" + nameHallucination + "|numeric|"
+	if row := rolledScoreRows(t, s, project.ID, rollupHour)[numeric]; row.Count != 2 {
+		t.Fatalf("the pass rolled %+v, want the two scores of that release", row)
+	}
+
+	for _, statement := range []string{
+		`UPDATE stats_hourly SET count = 999 WHERE project_id = ?`,
+		`UPDATE users SET traces = 999 WHERE project_id = ?`,
+	} {
+		if _, err := s.db.Exec(statement, project.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	writer, err := s.NewWriter(WriterOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writer.Close()
+	// Score 1 is `hallucination` 0.2 on trace 1; score 2 is 0.6 on trace 2,
+	// the same tuple. Retracting the first leaves the second.
+	if err := writer.Submit(context.Background(),
+		&ScoreDelete{ProjectID: project.ID, ID: scoreID(1)}); err != nil {
+		t.Fatal(err)
+	}
+
+	row := rolledScoreRows(t, s, project.ID, rollupHour)[numeric]
+	if row.Count != 1 || row.Sum != 0.6 {
+		t.Errorf("after the retraction the row is %+v, want the one score that is left", row)
+	}
+	for _, want := range []struct {
+		what  string
+		query string
+	}{
+		{"stats_hourly", `SELECT MIN(count) FROM stats_hourly WHERE project_id = ?`},
+		{"the user summaries", `SELECT MIN(traces) FROM users WHERE project_id = ?`},
+	} {
+		var value sql.NullInt64
+		if err := s.db.QueryRow(want.query, project.ID).Scan(&value); err != nil {
+			t.Fatal(err)
+		}
+		if !value.Valid {
+			t.Fatalf("%s holds no rows; the assertion below would be vacuous", want.what)
+		}
+		if value.Int64 != 999 {
+			t.Errorf("%s was rewritten by a score retraction (%d): only the score rollup is its business",
+				want.what, value.Int64)
+		}
+	}
+}
+
+// The three scores a deletion has no hour to correct, and must not fail over:
+// one with no trace, one whose trace has not arrived, and a `text` one.
+func TestDeletingAScoreTheRollupNeverHeld(t *testing.T) {
 	s, project := readStore(t)
 	rollupFixture(t, s, project.ID)
 	scoreFixture(t, s, project.ID)
+	stampTraces(t, s, project.ID, rollupHour*1e9)
+	passAt(t, s, afterTheHour())
+	before := rolledScoreRows(t, s, project.ID, rollupHour)
+
+	writer, err := s.NewWriter(WriterOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writer.Close()
+	for _, tc := range []struct {
+		name string
+		id   string
+	}{
+		{"a session-only score", scoreID(10)},
+		{"a text score", scoreID(11)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := writer.Submit(context.Background(),
+				&ScoreDelete{ProjectID: project.ID, ID: tc.id}); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+	if after := rolledScoreRows(t, s, project.ID, rollupHour); len(after) != len(before) {
+		t.Errorf("the rollup went from %d rows to %d over scores it never held",
+			len(before), len(after))
+	}
+}
+
+// Receive time is the transaction's, not the handler's (spec 025 #23).
+//
+// The dirty set asks `created_at > last_pass`, and `commitMargin` is a second
+// — sized for a stamp taken *inside* the write transaction, as
+// `traces.updated_at` is. Stamped before the group-commit queue instead, a
+// write that waited longer than that in it carried a `created_at` already
+// behind the next pass's cutoff, and no pass ever looked at that hour again.
+func TestAScoreTakesItsReceiveTimeFromTheTransaction(t *testing.T) {
+	s, project := readStore(t)
+	rollupFixture(t, s, project.ID)
 
 	writer, err := s.NewWriter(WriterOptions{})
 	if err != nil {
@@ -417,27 +534,37 @@ func TestDeletingAScoreNamesItsHour(t *testing.T) {
 	}
 	defer writer.Close()
 
-	for _, tc := range []struct {
-		name   string
-		id     string
-		rolled bool
-	}{
-		{"a score on a trace", scoreID(1), true},
-		{"a session-only score", scoreID(10), false},
-		{"a text score", scoreID(11), false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			deletion := &ScoreDelete{ProjectID: project.ID, ID: tc.id}
-			if err := writer.Submit(context.Background(), deletion); err != nil {
-				t.Fatal(err)
-			}
-			if deletion.Rolled != tc.rolled {
-				t.Fatalf("rolled = %v, want %v", deletion.Rolled, tc.rolled)
-			}
-			if tc.rolled && deletion.Hour != rollupHour {
-				t.Errorf("hour = %d, want %d", deletion.Hour, rollupHour)
-			}
-		})
+	// One score the caller stamped and one it did not.
+	stamped := numericScore(1, hexTrace(1), "", nameHallucination, 0.2)
+	stamped.Timestamp, stamped.CreatedAt = rollupHour*1e9, rollupHour*1e9
+	fresh := numericScore(2, hexTrace(2), "", nameHallucination, 0.6)
+	fresh.Timestamp = rollupHour * 1e9
+
+	before := time.Now().UnixNano()
+	if err := writer.Submit(context.Background(), &ScoreWrite{
+		ProjectID: project.ID, Scores: []*Score{stamped, fresh}}); err != nil {
+		t.Fatal(err)
+	}
+	after := time.Now().UnixNano()
+
+	created := func(id string) int64 {
+		t.Helper()
+		var at int64
+		if err := s.db.QueryRow(
+			`SELECT created_at FROM scores WHERE project_id = ? AND id = ?`,
+			project.ID, id).Scan(&at); err != nil {
+			t.Fatal(err)
+		}
+		return at
+	}
+	if at := created(scoreID(2)); at < before || at > after {
+		t.Errorf("created_at = %d, want the moment the transaction stored it, in [%d, %d]",
+			at, before, after)
+	}
+	// A caller with a clock of its own keeps it: every fixture in this
+	// package dates its rows, and the sweep reads the column.
+	if at := created(scoreID(1)); at != rollupHour*1e9 {
+		t.Errorf("created_at = %d, want the %d the caller stamped", at, rollupHour*1e9)
 	}
 }
 
