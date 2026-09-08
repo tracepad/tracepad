@@ -668,6 +668,10 @@ var countedTables = []string{
 	// it is the one that multiplies by the user count — and `users` is the
 	// answer to "how many users has this project ever seen" (spec 023).
 	"users_hourly", "users",
+	// The score rollup (spec 025), counted for the same reason: it is the
+	// table that multiplies by the number of score names a project files,
+	// and by the categories a categorical one has seen.
+	"scores_hourly",
 	// The eval tables (spec 014): each carries a project id, and their
 	// sizes are the operator's first question when the pinned-trace count
 	// beside them explains why the file did not shrink.

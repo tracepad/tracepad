@@ -192,6 +192,9 @@ type statsRoll struct {
 	// UserRows is the same count for `users_hourly`, which the same job
 	// writes in the same transaction (spec 023 #2).
 	UserRows int
+	// ScoreRows is the same count for `scores_hourly`, the third table the
+	// job writes (spec 025 #3).
+	ScoreRows int
 	// Touched are the user ids this hour holds or held — the set whose
 	// summary has to be recomputed (spec 023 #3).
 	Touched []string
@@ -275,6 +278,15 @@ func (r *statsRoll) apply(tx *sql.Tx) error {
 		return err
 	}
 	r.UserRows = len(perUser)
+
+	// And the third table (spec 025 #3): the same hour, the same
+	// transaction, the same freeze. A score is filed under the hour of the
+	// trace it names, so the rows the freeze above protects and the rows
+	// this writes are about the same hour of the same traffic.
+	if r.ScoreRows, err = rollScoreHour(tx, r.ProjectID, r.Hour); err != nil {
+		return err
+	}
+
 	if r.DeferSummary {
 		return nil
 	}

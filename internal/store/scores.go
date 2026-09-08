@@ -120,9 +120,28 @@ func (s *ScoreWrite) apply(tx *sql.Tx) error {
 type ScoreDelete struct {
 	ProjectID string
 	ID        string
+
+	// Hour is the hour of the trace this score was filed under, and Rolled
+	// says whether there was one. The caller re-rolls it before it answers
+	// (spec 025 #4): a deleted row is not found by `created_at > last_pass`,
+	// because it is gone, so the correction has to be made here — the way a
+	// user-data erasure re-rolls the hours it emptied (spec 013 #7).
+	Hour   int64
+	Rolled bool
 }
 
 func (d *ScoreDelete) apply(tx *sql.Tx) error {
+	// Read before the delete: afterwards nothing names the hour. Three
+	// scores answer nothing here, and each of them is one the rollup never
+	// held — a session-only score, one whose trace has not arrived, and a
+	// `text` one.
+	var hour sql.NullInt64
+	err := tx.QueryRow(scoreHourOfQuery, SecondsPerHour, SecondsPerHour, d.ProjectID, d.ID).Scan(&hour)
+	if err != nil && err != sql.ErrNoRows {
+		return fmt.Errorf("find the hour of score %s: %w", d.ID, err)
+	}
+	d.Hour, d.Rolled = hour.Int64, hour.Valid
+
 	// Scoped by project as well as by id: an id from another project must
 	// read as "no such score", never as a row this caller may take.
 	result, err := tx.Exec(`DELETE FROM scores WHERE project_id = ? AND id = ?`, d.ProjectID, d.ID)
