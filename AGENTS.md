@@ -288,7 +288,7 @@ API. This file routes; it does not duplicate what specs and docs say.
   promised: the application half is eighteen lines smaller and the tests are
   264 larger (#8, #12) — the win is that a listing defect now has one place
   to be, not the budget.
-- 🟡 Spec 027 (facets) in flight: `environment`, `release` and `name` take a
+- ✅ Spec 027 (facets) shipped: `environment`, `release` and `name` take a
   comma-separated list on every endpoint that takes them as a trace filter, and
   a trace matches when its column equals **any** item (#1) — one parameter reads
   as one filter in a URL, a shell and a chip, which is where these values are

@@ -1,6 +1,6 @@
 # Spec 027 — Facets: many-valued filters, and the values to pick from
 
-**Status:** 🟡 DRAFT
+**Status:** ✅ SHIPPED
 **Sprint:** September 2026
 
 > The filter panel asks for an environment as text, in a box whose
