@@ -412,10 +412,42 @@ func (s *Server) handleDeleteScore(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !s.submit(w, r, &store.ScoreDelete{ProjectID: project.ID, ID: id}) {
+	deletion := &store.ScoreDelete{ProjectID: project.ID, ID: id}
+	if !s.submit(w, r, deletion) {
+		return
+	}
+	if !s.rerollDeletedScore(w, r, project.ID, deletion) {
 		return
 	}
 	writeJSON(w, http.StatusOK, scoreDeletedResponse{ID: id})
+}
+
+// rerollDeletedScore corrects the quality rollup before the delete answers
+// (spec 025 #4). A deleted row is not found by the dirty query — `created_at >
+// last_pass` cannot see a row that is gone — so the one hour it was counted in
+// is recomputed here, exactly as a user-data erasure recomputes the hours it
+// emptied (spec 013 #7).
+//
+// Only when the hour lies behind the watermark: at or past it the live half of
+// the seam reads the raw rows, which no longer hold the score. And a frozen
+// hour (spec 013 #11) stays as it is, because the job settles that rule inside
+// its own transaction — `docs/quality.md` says so rather than leaving it to be
+// discovered.
+func (s *Server) rerollDeletedScore(w http.ResponseWriter, r *http.Request,
+	projectID string, deletion *store.ScoreDelete) bool {
+	if !deletion.Rolled {
+		return true
+	}
+	state, err := s.store.RollupState(projectID)
+	if err != nil {
+		slog.Error("read the rollup state failed", "err", err)
+		writeError(w, http.StatusInternalServerError, "failed to correct the score rollup")
+		return false
+	}
+	if deletion.Hour >= state.RolledUntil {
+		return true
+	}
+	return s.submit(w, r, store.RollHour(projectID, deletion.Hour, time.Now().UnixNano()))
 }
 
 // scoreDeletedResponse names what went, and nothing else: there is no echo to

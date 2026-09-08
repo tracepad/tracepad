@@ -51,6 +51,10 @@ func (s *Server) routes() []route {
 		{"GET", "/api/v1/sessions", "List sessions by most recent activity, filtered and cursor-paginated", s.handleListSessions},
 		{"GET", "/api/v1/sessions/{id}", "One session: its totals and its traces", s.handleGetSession},
 		{"GET", "/api/v1/stats", "Counts, errors, cost and latency percentiles per bucket", s.handleStats},
+		// Quality beside the traffic (spec 025): a series per score
+		// name over the same seam, the same filters and the same
+		// buckets as the statistics next to it.
+		{"GET", "/api/v1/stats/scores", "Score means, rates and category shares per bucket, one series per score name", s.handleScoreTrends},
 
 		// Users (spec 023): the rollup one dimension over. The listing
 		// answers from it alone and trails the raw rows by the rollup's

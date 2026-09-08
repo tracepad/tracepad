@@ -298,6 +298,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/stats/scores": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Score means, rates and category shares per bucket, one series per score name
+         * @description The quality curve beside the traffic one. A score is counted in the hour of the **trace it names** — not in the hour it was graded — and takes that trace's environment, release and model, so the buckets line up with `GET /api/v1/stats`. A score that names no trace, and a `text` score, are not counted at all. Without `name` every score name in the range is a series; with it, one. `targets` says what was counted: grouping by model counts only the scores that name an observation, because a trace-level score has no model to sit under; every other grouping counts each score once. A numeric series carries `mean`, `min` and `max` per bucket, a boolean series the `rate` of true values, and a categorical series the `categories` seen. Answered from the hourly roll-up behind the watermark and from the raw rows for the tail, so it trails live traffic by the same lag as the statistics.
+         */
+        get: operations["scoreTrends"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/users": {
         parameters: {
             query?: never;
@@ -1169,6 +1189,36 @@ export interface components {
             first_seen?: string;
             /** Format: date-time */
             last_seen?: string;
+        };
+        /** @description One score name over the asked buckets. A name graded two ways — numerically here, categorically there — is two series with the same name, told apart by `data_type`. */
+        ScoreSeries: {
+            /** @description What is being measured, e.g. "hallucination" */
+            name: string;
+            /**
+             * @description Which of the three summaries each bucket carries. `text` scores have nothing to add up and are never a series
+             * @enum {string}
+             */
+            data_type: "numeric" | "boolean" | "categorical";
+            buckets: components["schemas"]["ScoreBucket"][];
+        };
+        /** @description One group of one series. `count` is how many scores fell in it; the rest depends on the series' `data_type` — `mean`/`min`/`max` for numeric, `rate` for boolean, `categories` for categorical. A bucket with no scores does not exist rather than reporting zero. */
+        ScoreBucket: {
+            /** @description The hour, day, environment, release or model this bucket is */
+            key: string;
+            /** @description How many scores fell in this bucket */
+            count: number;
+            /** @description Numeric series only: the mean of the values in this bucket */
+            mean?: number | null;
+            /** @description Numeric series only: the smallest value in this bucket */
+            min?: number | null;
+            /** @description Numeric series only: the largest value in this bucket */
+            max?: number | null;
+            /** @description Boolean series only: the share of scores in this bucket whose value is 1, between 0 and 1 */
+            rate?: number | null;
+            /** @description Categorical series only: how many scores in this bucket carried each value seen. The counts sum to `count` */
+            categories?: {
+                [key: string]: number;
+            };
         };
         /** @description One archived export body, described. The bytes themselves are at `GET /api/v1/raw/{id}`. */
         RawBatch: {
@@ -2501,6 +2551,47 @@ export interface operations {
                                 p95?: number | null;
                             };
                         }[];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    scoreTrends: {
+        parameters: {
+            query?: {
+                /** @description RFC 3339, inclusive. The range is half-open, so walking a timeline never reports a row twice. */
+                from?: components["parameters"]["From"];
+                /** @description RFC 3339, exclusive */
+                to?: components["parameters"]["To"];
+                /** @description Exact match on the environment a trace ran in */
+                environment?: components["parameters"]["Environment"];
+                /** @description Only the score filed under this name. Absent, every name in the range comes back as its own series */
+                name?: string;
+                group_by?: "hour" | "day" | "environment" | "release" | "model";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The series */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        group_by: "hour" | "day" | "environment" | "release" | "model";
+                        /**
+                         * @description `observation` when grouping by model, where only scores naming an observation can be counted; `any` otherwise, where every score counts once
+                         * @enum {string}
+                         */
+                        targets: "any" | "observation";
+                        series: components["schemas"]["ScoreSeries"][];
                     };
                 };
             };
