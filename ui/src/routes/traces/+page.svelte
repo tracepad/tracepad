@@ -1,9 +1,7 @@
 <script lang="ts">
 	import Inbox from '@lucide/svelte/icons/inbox';
-	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import Pause from '@lucide/svelte/icons/pause';
 	import Play from '@lucide/svelte/icons/play';
-	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { api, type Trace, type TraceRow } from '$lib/api/client.svelte';
@@ -11,13 +9,14 @@
 	import Button from '$lib/components/Button.svelte';
 	import CopyButton from '$lib/components/CopyButton.svelte';
 	import FilterBar from '$lib/components/FilterBar.svelte';
+	import ListingCount from '$lib/components/ListingCount.svelte';
+	import ListingShell from '$lib/components/ListingShell.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
-	import PaginationBar from '$lib/components/PaginationBar.svelte';
 	import PeekPanel from '$lib/components/PeekPanel.svelte';
 	import AddToQueue from '$lib/components/queues/AddToQueue.svelte';
 	import TraceDetail from '$lib/components/TraceDetail.svelte';
+	import TracePeekMeta from '$lib/components/TracePeekMeta.svelte';
 	import TraceTable from '$lib/components/TraceTable.svelte';
-	import { cost, count, duration, timestamp } from '$lib/format';
 	import { asPage, Listing, UrlSpot, Walk } from '$lib/listing.svelte';
 	import { freshSearch } from '$lib/page';
 	import { peekSearch, readPeek } from '$lib/peek';
@@ -108,15 +107,7 @@
 
 <PageHeader title="Traces">
 	{#snippet meta()}
-		{#if listing.loading}
-			<LoaderCircle class="size-3.5 animate-spin" />
-		{:else if listing.total}
-			<span class="tabular-nums">{count(listing.total.value)}{listing.total.capped ? '+' : ''}</span>
-		{:else}
-			<!-- The count has not landed, or could not be taken: what is on
-			     screen is still a number, and an empty slot is not (PR #11). -->
-			<span class="tabular-nums">{count(listing.rows.length)}</span>
-		{/if}
+		<ListingCount {listing} />
 	{/snippet}
 	{#snippet actions()}
 		<!-- Not disabled when paused: `live=1` survives a page turn, and
@@ -148,81 +139,63 @@
 	/>
 </div>
 
-{#if listing.problem}
-	<p
-		role="alert"
-		class="text-danger bg-danger-soft border-border flex items-center gap-2 border-b px-4 py-2"
-	>
-		<TriangleAlert class="size-4 shrink-0" />
-		{listing.problem}
-	</p>
-{/if}
-
-{#if listing.rows.length > 0 || !listing.newest}
-	<!-- The bar stays on an empty page that is not the first one: a cursor
-	     whose rows are gone — swept by retention, say — would otherwise leave
-	     no way back to the listing but editing the URL (PR #11 review). -->
-	<TraceTable rows={listing.rows} onopen={peek} selectedID={peekID} search={filters.q ?? ''} />
-	<PaginationBar {...listing.bar} noun="trace" />
-	{#if listing.rows.length === 0 && !listing.loading}
-		<p class="text-subtle flex flex-1 items-start justify-center p-8 text-center">
-			Nothing on this page any more. Use « to go back to the newest.
-		</p>
-	{/if}
-{:else if !listing.loading && !listing.failure}
-	<div class="flex flex-1 items-start justify-center overflow-auto p-8">
-		<div class="max-w-lg">
-			{#if filters.q}
-				<!-- The query is named back, because "nothing matches" is only
-				     useful when it says what found nothing (spec 011). -->
-				<h2 class="font-medium">Nothing matches “{filters.q}”</h2>
-				<p class="text-muted mt-1">
-					Search finds whole words, not parts of them: <code class="font-mono">err</code> does not
-					find <code class="font-mono">errors</code>, <code class="font-mono">err*</code> does.
-					Quote words to keep them together.
-				</p>
-				<div class="mt-3 flex gap-2">
-					{#if filterCount(filters) > 1}
-						<Button onclick={() => navigate({ q: filters.q })}>Keep the search, clear filters</Button>
-					{/if}
-					<Button onclick={() => navigate({ ...filters, q: undefined })}>Clear the search</Button>
-				</div>
-			{:else if filtering}
-				<h2 class="font-medium">No trace matches these filters</h2>
-				<p class="text-muted mt-1">
-					The filters are in the URL, so this is a link you can share — or clear.
-				</p>
-				<Button class="mt-3" onclick={() => navigate({})}>Clear filters</Button>
-			{:else}
-				<h2 class="flex items-center gap-2 font-medium">
-					<Inbox class="text-subtle size-4" />
-					No traces yet
-				</h2>
-				<p class="text-muted mt-1">
-					Point an OpenTelemetry-instrumented app at this server and reload.
-				</p>
-				<div class="border-border bg-surface mt-3 flex items-start gap-2 rounded-md border p-3">
-					<pre class="min-w-0 flex-1 overflow-x-auto font-mono text-xs">{snippet}</pre>
-					<CopyButton text={() => snippet} label="Copy the exporter settings" />
-				</div>
-				<p class="text-subtle mt-2 text-xs">
-					The key is the one printed when this project was created; nobody else, including this
-					page, can read it back.
-				</p>
-				<a
-					class="text-accent mt-3 inline-block underline underline-offset-2"
-					href="https://github.com/tracepad/tracepad/blob/main/docs/quickstart.md"
-					target="_blank"
-					rel="noreferrer"
-				>
-					Quickstart
-				</a>
-			{/if}
+<ListingShell {listing} noun="trace">
+	{#snippet table()}
+		<TraceTable rows={listing.rows} onopen={peek} selectedID={peekID} search={filters.q ?? ''} />
+	{/snippet}
+	{#snippet empty()}
+		<div class="flex flex-1 items-start justify-center overflow-auto p-8">
+			<div class="max-w-lg">
+				{#if filters.q}
+					<!-- The query is named back, because "nothing matches" is only
+					     useful when it says what found nothing (spec 011). -->
+					<h2 class="font-medium">Nothing matches “{filters.q}”</h2>
+					<p class="text-muted mt-1">
+						Search finds whole words, not parts of them: <code class="font-mono">err</code> does not
+						find <code class="font-mono">errors</code>, <code class="font-mono">err*</code> does.
+						Quote words to keep them together.
+					</p>
+					<div class="mt-3 flex gap-2">
+						{#if filterCount(filters) > 1}
+							<Button onclick={() => navigate({ q: filters.q })}>Keep the search, clear filters</Button>
+						{/if}
+						<Button onclick={() => navigate({ ...filters, q: undefined })}>Clear the search</Button>
+					</div>
+				{:else if filtering}
+					<h2 class="font-medium">No trace matches these filters</h2>
+					<p class="text-muted mt-1">
+						The filters are in the URL, so this is a link you can share — or clear.
+					</p>
+					<Button class="mt-3" onclick={() => navigate({})}>Clear filters</Button>
+				{:else}
+					<h2 class="flex items-center gap-2 font-medium">
+						<Inbox class="text-subtle size-4" />
+						No traces yet
+					</h2>
+					<p class="text-muted mt-1">
+						Point an OpenTelemetry-instrumented app at this server and reload.
+					</p>
+					<div class="border-border bg-surface mt-3 flex items-start gap-2 rounded-md border p-3">
+						<pre class="min-w-0 flex-1 overflow-x-auto font-mono text-xs">{snippet}</pre>
+						<CopyButton text={() => snippet} label="Copy the exporter settings" />
+					</div>
+					<p class="text-subtle mt-2 text-xs">
+						The key is the one printed when this project was created; nobody else, including this
+						page, can read it back.
+					</p>
+					<a
+						class="text-accent mt-3 inline-block underline underline-offset-2"
+						href="https://github.com/tracepad/tracepad/blob/main/docs/quickstart.md"
+						target="_blank"
+						rel="noreferrer"
+					>
+						Quickstart
+					</a>
+				{/if}
+			</div>
 		</div>
-	</div>
-{:else}
-	<div class="flex-1"></div>
-{/if}
+	{/snippet}
+</ListingShell>
 
 {#if peekID}
 	<PeekPanel
@@ -243,16 +216,7 @@
 			</h2>
 		{/snippet}
 		{#snippet meta()}
-			{#if peeked}
-				<span class="hidden font-mono sm:inline">{timestamp(peeked.timestamp)}</span>
-				{#if peeked.release}
-					<span class="hidden truncate md:inline" title="Release">{peeked.release}</span>
-				{/if}
-				<span class="hidden tabular-nums md:inline">{duration(peeked.latency_ms)}</span>
-				<span class="hidden tabular-nums md:inline">{cost(peeked.total_cost)}</span>
-				<span class="hidden truncate font-mono lg:inline">{peeked.id}</span>
-				<CopyButton text={peeked.id} label="Copy the trace id" />
-			{/if}
+			<TracePeekMeta trace={peeked} />
 		{/snippet}
 		<TraceDetail traceID={peekID} bind:trace={peeked} />
 	</PeekPanel>
