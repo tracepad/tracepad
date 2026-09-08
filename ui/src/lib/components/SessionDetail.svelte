@@ -130,7 +130,16 @@
 		problem={null}
 	>
 		{#snippet table()}
-			<TraceTable rows={listing.rows} {onopen} selectedID={selectedTraceID} />
+			<!-- The session id stays text here: every row of this table belongs to
+			     the session already on screen, and a link to where the reader
+			     stands is not a destination — from a panel it would tear down the
+			     listing behind it to arrive at it (spec 023 #17). -->
+			<TraceTable
+				rows={listing.rows}
+				{onopen}
+				selectedID={selectedTraceID}
+				linkSession={false}
+			/>
 		{/snippet}
 		{#snippet empty()}
 			<p class="text-subtle p-8 text-center">{ABSENT} This session holds no traces.</p>

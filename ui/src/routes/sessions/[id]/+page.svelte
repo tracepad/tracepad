@@ -87,8 +87,9 @@
 		{/snippet}
 		{#snippet meta()}
 			<!-- No id span: the header above this panel already carries one, and
-			     it is the session's. -->
-			<TracePeekMeta trace={peeked} hide={['id']} />
+			     it is the session's. No session link either — this page is that
+			     session (spec 023 #17). -->
+			<TracePeekMeta trace={peeked} hide={['session', 'id']} />
 		{/snippet}
 		<TraceDetail traceID={peekID} bind:trace={peeked} />
 	</PeekPanel>

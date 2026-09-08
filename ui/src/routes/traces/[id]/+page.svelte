@@ -27,7 +27,11 @@
 			Traces
 		</a>
 		{#if trace}
-			<span class="hidden font-mono sm:inline">{timestamp(trace.timestamp)}</span>
+			<!-- The short parts do not shrink; the release and the two ids, which
+			     carry `truncate`, are what gives way. `TracePeekMeta` carries the
+			     same rule, and this header carries it by hand: that is the price
+			     of not folding the two together (spec 023 #17c). -->
+			<span class="hidden shrink-0 font-mono sm:inline">{timestamp(trace.timestamp)}</span>
 			<!-- The release, when the trace named one: it is a filter rather
 			     than a column, so the header is where a reader finds out which
 			     deployment they are looking at (spec 012, Application
@@ -46,8 +50,19 @@
 					{trace.user_id}
 				</a>
 			{/if}
-			<span class="hidden tabular-nums md:inline">{duration(trace.latency_ms)}</span>
-			<span class="hidden tabular-nums md:inline">{cost(trace.total_cost)}</span>
+			<!-- And which session it belongs to, which the header never said at
+			     all until spec 023 #16. -->
+			{#if trace.session_id}
+				<a
+					href="/sessions/{encodeURIComponent(trace.session_id)}"
+					title="Everything in {trace.session_id}"
+					class="hover:text-fg hidden truncate font-mono hover:underline md:inline"
+				>
+					{trace.session_id}
+				</a>
+			{/if}
+			<span class="hidden shrink-0 tabular-nums md:inline">{duration(trace.latency_ms)}</span>
+			<span class="hidden shrink-0 tabular-nums md:inline">{cost(trace.total_cost)}</span>
 			<span class="hidden truncate font-mono lg:inline">{trace.id}</span>
 			<CopyButton text={trace.id} label="Copy the trace id" />
 		{/if}
