@@ -118,19 +118,16 @@ They are written by one pass in one transaction and swept together, so the
 Stats, Users and Quality screens can never disagree about how far back the
 history reaches.
 
-**Freezing is asked of each table separately**, because what a freeze protects
-is the rows that already stand. An hour past the window whose rows the score
-roll-up already holds is left alone, exactly as the statistics are. An hour it
+**Freezing is asked of each of the three separately**, because what a freeze
+protects is the rows that already stand. An hour past the window whose rows a
+table already holds is left alone, exactly as the statistics are. An hour it
 holds *nothing* for has nothing to protect, so the roll may still write it —
 and what it writes is whatever the raw rows say. Usually that is nothing: past
-the window the sweep has taken the traces and the scores with them. But the
-window is measured against the client's timestamp while the sweep deletes by
-*arrival*, so a year of history imported this morning is "past the window" and
-completely intact — and it gets its score rows rather than a permanent gap.
-
-The per-user roll-up of [users.md](users.md) still follows the statistics'
-freeze rather than its own; that is spec 023's documented limit, not this
-rule.
+the window the sweep has taken the traces, and the scores and the per-user
+traffic with them. But the window is measured against the client's timestamp
+while the sweep deletes by *arrival*, so a year of history imported this
+morning is "past the window" and completely intact — and it gets its per-user
+and score rows rather than a permanent gap.
 
 ## What an annotation queue keeps
 
