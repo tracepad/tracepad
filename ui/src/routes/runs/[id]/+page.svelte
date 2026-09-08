@@ -19,12 +19,13 @@
 	import RunItemDetail from '$lib/components/evals/RunItemDetail.svelte';
 	import StatusChip from '$lib/components/evals/StatusChip.svelte';
 	import Summary from '$lib/components/evals/Summary.svelte';
+	import ListingShell from '$lib/components/ListingShell.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
-	import PaginationBar from '$lib/components/PaginationBar.svelte';
 	import PeekPanel from '$lib/components/PeekPanel.svelte';
 	import TraceDetail from '$lib/components/TraceDetail.svelte';
+	import TracePeekMeta from '$lib/components/TracePeekMeta.svelte';
 	import { compareHref, NO_ITEM, runItemKey, scoreText, short } from '$lib/evals';
-	import { cost, count, duration, timestamp } from '$lib/format';
+	import { count, timestamp } from '$lib/format';
 	import { asPage, Listing, UrlSpot, Walk } from '$lib/listing.svelte';
 	import { freshSearch } from '$lib/page';
 	import { peekSearch, readPeek } from '$lib/peek';
@@ -341,76 +342,66 @@
 			</Button>
 		</div>
 
-		{#if listing.problem}
-			<p role="alert" class="text-danger bg-danger-soft border-border flex items-center gap-2 border-b px-4 py-2">
-				<TriangleAlert class="size-4 shrink-0" />
-				{listing.problem}
-			</p>
-		{/if}
-
-		{#if listing.rows.length > 0 || !listing.newest}
-			<div class="min-h-0 shrink-0 overflow-x-auto">
-				<table aria-label="Items" class="w-full min-w-2xl table-fixed border-collapse text-left">
-					<thead class="bg-canvas text-subtle text-xs whitespace-nowrap">
-						<tr class="border-border border-b">
-							<th scope="col" class="w-14 px-3 py-2 text-right font-medium">#</th>
-							<th scope="col" class="w-28 px-3 py-2 font-medium">Item</th>
-							<th scope="col" class="w-24 px-3 py-2 text-right font-medium">Attempts</th>
-							<th scope="col" class="px-3 py-2 font-medium">Scores</th>
-						</tr>
-					</thead>
-					<tbody>
-						{#each listing.rows as row (row.id)}
-							{@const lit = row.id === peekID}
-							<tr
-								class={[
-									'border-border hover:bg-raised border-b transition-colors duration-100',
-									lit && 'bg-accent-soft'
-								]}
-							>
-								<td class="text-muted px-3 py-1.5 text-right tabular-nums">{row.seq ?? '—'}</td>
-								<td class="truncate px-3 py-1.5 font-mono text-xs">
-									<!-- Enter opens the panel, as a click does; ⌘-click gets a
-									     link to this same view with the case open. -->
-									<a
-										href={peekSearch(page.url.searchParams, { peek: row.id })}
-										aria-current={lit ? 'true' : undefined}
-										title={row.id}
-										onclick={(event) => {
-											if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-											event.preventDefault();
-											peek(row.id);
-										}}
-									>
-										{row.id === NO_ITEM ? 'no item' : short(row.id)}
-									</a>
-									{#if row.unknown}<span class="text-warn ml-1">unknown</span>{/if}
-								</td>
-								<td class="text-muted px-3 py-1.5 text-right tabular-nums">{row.attempts.length}</td>
-								<td class="px-3 py-1.5">
-									<ul class="flex flex-wrap gap-1.5">
-										{#each values(row) as [name, value] (name)}
-											<li class="border-border bg-surface rounded border px-1.5 py-0.5 text-xs">
-												<span class="text-muted">{name}</span>
-												<span class="font-medium tabular-nums">{value}</span>
-											</li>
-										{/each}
-									</ul>
-								</td>
+		<ListingShell {listing} noun="item" back="first">
+			{#snippet table()}
+				<div class="min-h-0 shrink-0 overflow-x-auto">
+					<table aria-label="Items" class="w-full min-w-2xl table-fixed border-collapse text-left">
+						<thead class="bg-canvas text-subtle text-xs whitespace-nowrap">
+							<tr class="border-border border-b">
+								<th scope="col" class="w-14 px-3 py-2 text-right font-medium">#</th>
+								<th scope="col" class="w-28 px-3 py-2 font-medium">Item</th>
+								<th scope="col" class="w-24 px-3 py-2 text-right font-medium">Attempts</th>
+								<th scope="col" class="px-3 py-2 font-medium">Scores</th>
 							</tr>
-						{/each}
-					</tbody>
-				</table>
-			</div>
-			<PaginationBar {...listing.bar} noun="item" />
-			{#if listing.rows.length === 0 && !listing.loading}
-				<p class="text-subtle flex flex-1 items-start justify-center p-8 text-center">
-					Nothing on this page any more. Use « to go back to the first.
-				</p>
-			{/if}
-		{:else if !listing.loading && !listing.failure}
-			<p class="text-subtle p-8 text-center">— This run's dataset version holds no items.</p>
-		{/if}
+						</thead>
+						<tbody>
+							{#each listing.rows as row (row.id)}
+								{@const lit = row.id === peekID}
+								<tr
+									class={[
+										'border-border hover:bg-raised border-b transition-colors duration-100',
+										lit && 'bg-accent-soft'
+									]}
+								>
+									<td class="text-muted px-3 py-1.5 text-right tabular-nums">{row.seq ?? '—'}</td>
+									<td class="truncate px-3 py-1.5 font-mono text-xs">
+										<!-- Enter opens the panel, as a click does; ⌘-click gets a
+										     link to this same view with the case open. -->
+										<a
+											href={peekSearch(page.url.searchParams, { peek: row.id })}
+											aria-current={lit ? 'true' : undefined}
+											title={row.id}
+											onclick={(event) => {
+												if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+												event.preventDefault();
+												peek(row.id);
+											}}
+										>
+											{row.id === NO_ITEM ? 'no item' : short(row.id)}
+										</a>
+										{#if row.unknown}<span class="text-warn ml-1">unknown</span>{/if}
+									</td>
+									<td class="text-muted px-3 py-1.5 text-right tabular-nums">{row.attempts.length}</td>
+									<td class="px-3 py-1.5">
+										<ul class="flex flex-wrap gap-1.5">
+											{#each values(row) as [name, value] (name)}
+												<li class="border-border bg-surface rounded border px-1.5 py-0.5 text-xs">
+													<span class="text-muted">{name}</span>
+													<span class="font-medium tabular-nums">{value}</span>
+												</li>
+											{/each}
+										</ul>
+									</td>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</div>
+			{/snippet}
+			{#snippet empty()}
+				<p class="text-subtle p-8 text-center">— This run's dataset version holds no items.</p>
+			{/snippet}
+		</ListingShell>
 	</div>
 {/if}
 
@@ -449,11 +440,9 @@
 		{/snippet}
 		{#snippet meta()}
 			{#if drilled}
-				{#if peekedTrace}
-					<span class="hidden font-mono sm:inline">{timestamp(peekedTrace.timestamp)}</span>
-					<span class="hidden tabular-nums md:inline">{duration(peekedTrace.latency_ms)}</span>
-					<span class="hidden tabular-nums md:inline">{cost(peekedTrace.total_cost)}</span>
-				{/if}
+				<!-- No release and no id: the attempt is one of this case's, and
+				     what names it here is the item above, not the trace. -->
+				<TracePeekMeta trace={peekedTrace} hide={['release', 'id', 'copy']} />
 			{:else if peekID !== NO_ITEM}
 				<span class="hidden truncate font-mono md:inline">{peekID}</span>
 				<CopyButton text={peekID} label="Copy the item id" />

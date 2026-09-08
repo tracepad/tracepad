@@ -1,17 +1,15 @@
 <script lang="ts">
-	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
-	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import UsersIcon from '@lucide/svelte/icons/users';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { api, type UserRow } from '$lib/api/client.svelte';
 	import { readUserFilters, sortInForce, USER_SORTS, userSearch, type UserFilters } from '$lib/api/users';
 	import Button from '$lib/components/Button.svelte';
+	import ListingCount from '$lib/components/ListingCount.svelte';
+	import ListingShell from '$lib/components/ListingShell.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
-	import PaginationBar from '$lib/components/PaginationBar.svelte';
 	import UserTable from '$lib/components/UserTable.svelte';
-	import { count } from '$lib/format';
 	import { asPage, Listing, UrlSpot } from '$lib/listing.svelte';
 	import { freshSearch } from '$lib/page';
 
@@ -55,13 +53,7 @@
 
 <PageHeader title="Users">
 	{#snippet meta()}
-		{#if listing.loading}
-			<LoaderCircle class="size-3.5 animate-spin" />
-		{:else if listing.total}
-			<span class="tabular-nums">{count(listing.total.value)}{listing.total.capped ? '+' : ''}</span>
-		{:else}
-			<span class="tabular-nums">{count(listing.rows.length)}</span>
-		{/if}
+		<ListingCount {listing} />
 	{/snippet}
 	{#snippet actions()}
 		<Button onclick={() => listing.reload()} busy={listing.loading} title="Read the listing again">
@@ -98,59 +90,42 @@
 	</div>
 </div>
 
-{#if listing.problem}
-	<p
-		role="alert"
-		class="text-danger bg-danger-soft border-border flex items-center gap-2 border-b px-4 py-2"
-	>
-		<TriangleAlert class="size-4 shrink-0" />
-		{listing.problem}
-	</p>
-{/if}
-
-{#if listing.rows.length > 0 || !listing.newest}
-	<!-- The bar stays on an empty page that is not the first one, so a cursor
-	     whose rows are gone still has a way back (PR #11 review). -->
-	<UserTable rows={listing.rows} />
-	<PaginationBar {...listing.bar} noun="user" />
-	{#if listing.rows.length === 0 && !listing.loading}
-		<p class="text-subtle flex flex-1 items-start justify-center p-8 text-center">
-			Nothing on this page any more. Use « to go back to the first.
-		</p>
-	{/if}
-{:else if !listing.loading && !listing.failure}
-	<div class="flex flex-1 items-start justify-center overflow-auto p-8">
-		<div class="max-w-lg">
-			{#if filtering}
-				<h2 class="font-medium">No user id starts with that</h2>
-				<p class="text-muted mt-1">
-					The prefix is case-sensitive and is in the URL, so this is a link you can share — or
-					clear.
-				</p>
-				<Button class="mt-3" onclick={() => navigate({ sort: filters.sort })}>Clear the prefix</Button>
-			{:else}
-				<!-- Never "there are no users": this listing is the rollup, and a
-				     user first seen minutes ago is not in it yet (spec 023 #4). The
-				     link is where those traces already are. -->
-				<h2 class="flex items-center gap-2 font-medium">
-					<UsersIcon class="text-subtle size-4" />
-					No user has been seen yet
-				</h2>
-				<p class="text-muted mt-1">
-					A user is any trace carrying <code class="font-mono">user.id</code> or
-					<code class="font-mono">langfuse.user.id</code>. Set it on your traces — in our SDK that is
-					<code class="font-mono">update_trace(user_id=…)</code> — and every account shows up here as
-					one row.
-				</p>
-				<p class="text-muted mt-2">
-					This listing is built from an hourly roll-up and trails live traffic by a few minutes, so a
-					user first seen just now is not on it yet. The
-					<a href="/traces" class="text-accent hover:underline">Traces</a> screen filters by user id
-					and is live.
-				</p>
-			{/if}
+<ListingShell {listing} noun="user" back="first">
+	{#snippet table()}
+		<UserTable rows={listing.rows} />
+	{/snippet}
+	{#snippet empty()}
+		<div class="flex flex-1 items-start justify-center overflow-auto p-8">
+			<div class="max-w-lg">
+				{#if filtering}
+					<h2 class="font-medium">No user id starts with that</h2>
+					<p class="text-muted mt-1">
+						The prefix is case-sensitive and is in the URL, so this is a link you can share — or
+						clear.
+					</p>
+					<Button class="mt-3" onclick={() => navigate({ sort: filters.sort })}>Clear the prefix</Button>
+				{:else}
+					<!-- Never "there are no users": this listing is the rollup, and a
+					     user first seen minutes ago is not in it yet (spec 023 #4). The
+					     link is where those traces already are. -->
+					<h2 class="flex items-center gap-2 font-medium">
+						<UsersIcon class="text-subtle size-4" />
+						No user has been seen yet
+					</h2>
+					<p class="text-muted mt-1">
+						A user is any trace carrying <code class="font-mono">user.id</code> or
+						<code class="font-mono">langfuse.user.id</code>. Set it on your traces — in our SDK that is
+						<code class="font-mono">update_trace(user_id=…)</code> — and every account shows up here as
+						one row.
+					</p>
+					<p class="text-muted mt-2">
+						This listing is built from an hourly roll-up and trails live traffic by a few minutes, so a
+						user first seen just now is not on it yet. The
+						<a href="/traces" class="text-accent hover:underline">Traces</a> screen filters by user id
+						and is live.
+					</p>
+				{/if}
+			</div>
 		</div>
-	</div>
-{:else}
-	<div class="flex-1"></div>
-{/if}
+	{/snippet}
+</ListingShell>

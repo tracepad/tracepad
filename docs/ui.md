@@ -652,7 +652,12 @@ install depends on and which the end-to-end suite asserts.
 The layout is usable on a phone: the sidebar becomes a two-row top bar, the
 filters live in a popover, tables scroll inside their own box rather than
 scrolling the page, and the trace screen switches between the tree and the
-observation instead of showing both.
+observation instead of showing both. A screen's own header keeps its 48 px as
+a floor rather than a height: at a phone's width, what it carries beside the
+title — a breadcrumb, an identifier, a count — takes a second line under it,
+and the screen's controls stay on the first one. Wider than that it is the
+single row it has always been, and a name too long for the line is shortened
+to an ellipsis rather than moved.
 
 ## Builds without it
 

@@ -5,7 +5,7 @@
 	import { ABSENT, cost, count, timestamp } from '$lib/format';
 	import { asPage, Listing, StateSpot } from '$lib/listing.svelte';
 	import { Scores } from '$lib/scores.svelte';
-	import PaginationBar from './PaginationBar.svelte';
+	import ListingShell from './ListingShell.svelte';
 	import ScoresBlock from './scores/ScoresBlock.svelte';
 	import TraceTable from './TraceTable.svelte';
 
@@ -119,21 +119,21 @@
 		onchanged={() => scores.refresh()}
 	/>
 
-	{#if listing.rows.length > 0 || !listing.newest}
-		<TraceTable rows={listing.rows} {onopen} selectedID={selectedTraceID} />
-		<!-- The total here is exact and already known: `trace_count` is what the
-		     endpoint answers with, so this listing asks for no count of its own. -->
-		<PaginationBar
-			{...listing.bar}
-			total={{ value: session.trace_count, capped: false }}
-			noun="trace"
-		/>
-		{#if listing.rows.length === 0 && !listing.loading}
-			<p class="text-subtle flex flex-1 items-start justify-center p-8 text-center">
-				Nothing on this page any more. Use « to go back to the newest.
-			</p>
-		{/if}
-	{:else}
-		<p class="text-subtle p-8 text-center">{ABSENT} This session holds no traces.</p>
-	{/if}
+	<!-- The total here is exact and already known: `trace_count` is what the
+	     endpoint answers with, so this listing asks for no count of its own.
+	     No failure line either: a failed session is the branch above, and the
+	     panel around this one must not show a table under a banner. -->
+	<ListingShell
+		{listing}
+		noun="trace"
+		total={{ value: session.trace_count, capped: false }}
+		problem={null}
+	>
+		{#snippet table()}
+			<TraceTable rows={listing.rows} {onopen} selectedID={selectedTraceID} />
+		{/snippet}
+		{#snippet empty()}
+			<p class="text-subtle p-8 text-center">{ABSENT} This session holds no traces.</p>
+		{/snippet}
+	</ListingShell>
 {/if}

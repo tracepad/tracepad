@@ -17,13 +17,14 @@
 	import { annotator } from '$lib/annotator.svelte';
 	import Button from '$lib/components/Button.svelte';
 	import CopyButton from '$lib/components/CopyButton.svelte';
+	import ListingShell from '$lib/components/ListingShell.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
-	import PaginationBar from '$lib/components/PaginationBar.svelte';
 	import PeekPanel from '$lib/components/PeekPanel.svelte';
 	import DeleteQueueDialog from '$lib/components/queues/DeleteQueueDialog.svelte';
 	import ProgressBar from '$lib/components/queues/ProgressBar.svelte';
 	import QueueItemTable from '$lib/components/queues/QueueItemTable.svelte';
 	import TraceDetail from '$lib/components/TraceDetail.svelte';
+	import TracePeekMeta from '$lib/components/TracePeekMeta.svelte';
 	import { asPage, Listing, UrlSpot, Walk } from '$lib/listing.svelte';
 	import { freshSearch } from '$lib/page';
 	import { peekSearch, readPeek } from '$lib/peek';
@@ -227,56 +228,44 @@
 		{/if}
 	</div>
 
-	{#if listing.problem || failure}
-		<p
-			role="alert"
-			class="text-danger bg-danger-soft border-border flex items-center gap-2 border-b px-4 py-2"
-		>
-			<TriangleAlert class="size-4 shrink-0" />
-			{listing.problem ?? failure}
-		</p>
-	{/if}
-
-	{#if listing.rows.length > 0 || !listing.newest}
-		<QueueItemTable
-			rows={listing.rows}
-			onopen={peek}
-			href={(id) => itemHref(id)}
-			selectedID={peekID}
-			{busyID}
-			onreopen={(item) => act(item, 'reopen')}
-			onremove={(item) => act(item, 'remove')}
-		/>
-		<PaginationBar {...listing.bar} noun="item" />
-		{#if listing.rows.length === 0 && !listing.loading}
-			<p class="text-subtle flex flex-1 items-start justify-center p-8 text-center">
-				Nothing on this page any more. Use « to go back to the first.
-			</p>
-		{/if}
-	{:else if !listing.loading && !listing.failure}
-		<div class="flex flex-1 items-start justify-center overflow-auto p-8">
-			<div class="max-w-lg">
-				<h2 class="font-medium">
-					{filters.status ? `Nothing is ${filters.status}` : 'This queue is empty'}
-				</h2>
-				<p class="text-muted mt-1">
-					Add a trace from its own page, add a filtered listing from <a
-						class="text-accent underline underline-offset-2"
-						href="/traces">Traces</a
-					>, or fill it from a script:
-				</p>
-				<div class="border-border bg-surface mt-3 flex items-start gap-2 rounded-md border p-3">
-					<pre class="min-w-0 flex-1 overflow-x-auto font-mono text-xs">{`tracepad queues add ${name} --from-traces --error --since 168h`}</pre>
-					<CopyButton
-						text={`tracepad queues add ${name} --from-traces --error --since 168h`}
-						label="Copy the add command"
-					/>
+	<!-- One line for two failures: the listing's, and the queue's own — a write
+	     on a row that the server refused, which leaves the rows on screen true
+	     and needs saying beside them all the same. -->
+	<ListingShell {listing} noun="item" back="first" problem={listing.problem ?? failure}>
+		{#snippet table()}
+			<QueueItemTable
+				rows={listing.rows}
+				onopen={peek}
+				href={(id) => itemHref(id)}
+				selectedID={peekID}
+				{busyID}
+				onreopen={(item) => act(item, 'reopen')}
+				onremove={(item) => act(item, 'remove')}
+			/>
+		{/snippet}
+		{#snippet empty()}
+			<div class="flex flex-1 items-start justify-center overflow-auto p-8">
+				<div class="max-w-lg">
+					<h2 class="font-medium">
+						{filters.status ? `Nothing is ${filters.status}` : 'This queue is empty'}
+					</h2>
+					<p class="text-muted mt-1">
+						Add a trace from its own page, add a filtered listing from <a
+							class="text-accent underline underline-offset-2"
+							href="/traces">Traces</a
+						>, or fill it from a script:
+					</p>
+					<div class="border-border bg-surface mt-3 flex items-start gap-2 rounded-md border p-3">
+						<pre class="min-w-0 flex-1 overflow-x-auto font-mono text-xs">{`tracepad queues add ${name} --from-traces --error --since 168h`}</pre>
+						<CopyButton
+							text={`tracepad queues add ${name} --from-traces --error --since 168h`}
+							label="Copy the add command"
+						/>
+					</div>
 				</div>
 			</div>
-		</div>
-	{:else}
-		<div class="flex-1"></div>
-	{/if}
+		{/snippet}
+	</ListingShell>
 {/if}
 
 {#if peekID && peeked}
@@ -300,8 +289,9 @@
 		{#snippet meta()}
 			<span class="shrink-0">#{peeked.seq}</span>
 			<span class="shrink-0">{peeked.status}</span>
-			<span class="hidden truncate font-mono lg:inline">{peeked.trace_id}</span>
-			<CopyButton text={peeked.trace_id} label="Copy the trace id" />
+			<!-- The id comes from the row rather than from the trace: the item
+			     names what it points at before the trace itself has landed. -->
+			<TracePeekMeta id={peeked.trace_id} />
 		{/snippet}
 		<TraceDetail traceID={peeked.trace_id} bind:trace={peekedTrace} />
 	</PeekPanel>

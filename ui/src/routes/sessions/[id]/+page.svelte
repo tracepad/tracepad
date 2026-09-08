@@ -8,7 +8,7 @@
 	import PeekPanel from '$lib/components/PeekPanel.svelte';
 	import SessionDetail from '$lib/components/SessionDetail.svelte';
 	import TraceDetail from '$lib/components/TraceDetail.svelte';
-	import { cost, duration, timestamp } from '$lib/format';
+	import TracePeekMeta from '$lib/components/TracePeekMeta.svelte';
 	import { anchor, neighbour, peekSearch, readPeek } from '$lib/peek';
 
 	// The full page of one session: the shell's header over the same body the
@@ -86,15 +86,9 @@
 			<h2 class="truncate text-lg font-semibold tracking-tight">{peeked?.name ?? 'Trace'}</h2>
 		{/snippet}
 		{#snippet meta()}
-			{#if peeked}
-				<span class="hidden font-mono sm:inline">{timestamp(peeked.timestamp)}</span>
-				{#if peeked.release}
-					<span class="hidden truncate md:inline" title="Release">{peeked.release}</span>
-				{/if}
-				<span class="hidden tabular-nums md:inline">{duration(peeked.latency_ms)}</span>
-				<span class="hidden tabular-nums md:inline">{cost(peeked.total_cost)}</span>
-				<CopyButton text={peeked.id} label="Copy the trace id" />
-			{/if}
+			<!-- No id span: the header above this panel already carries one, and
+			     it is the session's. -->
+			<TracePeekMeta trace={peeked} hide={['id']} />
 		{/snippet}
 		<TraceDetail traceID={peekID} bind:trace={peeked} />
 	</PeekPanel>

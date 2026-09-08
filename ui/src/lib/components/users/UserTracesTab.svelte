@@ -3,13 +3,12 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { api, type Trace, type TraceRow } from '$lib/api/client.svelte';
-	import { cost, duration, timestamp } from '$lib/format';
 	import { asPage, Listing, UrlSpot, Walk } from '$lib/listing.svelte';
 	import { peekSearch, readPeek } from '$lib/peek';
-	import CopyButton from '../CopyButton.svelte';
 	import PaginationBar from '../PaginationBar.svelte';
 	import PeekPanel from '../PeekPanel.svelte';
 	import TraceDetail from '../TraceDetail.svelte';
+	import TracePeekMeta from '../TracePeekMeta.svelte';
 	import TraceTable from '../TraceTable.svelte';
 
 	// One user's traces, which is the Traces screen's own table under the
@@ -79,12 +78,9 @@
 			<h2 class="truncate text-lg font-semibold tracking-tight">{peeked?.name ?? 'Trace'}</h2>
 		{/snippet}
 		{#snippet meta()}
-			{#if peeked}
-				<span class="hidden font-mono sm:inline">{timestamp(peeked.timestamp)}</span>
-				<span class="hidden tabular-nums md:inline">{duration(peeked.latency_ms)}</span>
-				<span class="hidden tabular-nums md:inline">{cost(peeked.total_cost)}</span>
-				<CopyButton text={peeked.id} label="Copy the trace id" />
-			{/if}
+			<!-- No release and no id span: the tab is narrow, and the page around
+			     it already says whose traces these are. -->
+			<TracePeekMeta trace={peeked} hide={['release', 'id']} />
 		{/snippet}
 		<TraceDetail traceID={peekID} bind:trace={peeked} />
 	</PeekPanel>

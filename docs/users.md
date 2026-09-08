@@ -75,10 +75,14 @@ per-user tables and rewrites the identical statistics rows. It is background
 work, it happens once, and the statistics keep answering from the rollup
 throughout.
 
-One thing that pass cannot reach: an hour older than the project's
-`retention_days` is **frozen** ([retention.md](retention.md#what-outlives-what))
-— its raw rows are gone by design, so it never gets per-user rows. Such a
-user's `first_seen` therefore starts where their retained traces do.
+An hour older than the project's `retention_days` is **frozen**
+([retention.md](retention.md#what-outlives-what)), and the freeze is asked of
+this table's own rows: an hour it already holds is left alone, and an hour it
+holds nothing for is rolled from whatever raw rows are still there. Ordinarily
+there are none — that is what the window means — so such a user's `first_seen`
+starts where their retained traces do. Where the raw rows *are* still there,
+which is history imported into an install that had already rolled those hours,
+the pass fills them rather than leaving a permanent gap.
 
 ## How much it costs
 

@@ -484,8 +484,206 @@ func TestUserRollIsIdempotent(t *testing.T) {
 	}
 }
 
-// TestAFrozenHourKeepsItsUserRows: the freeze is one rule in one place, and it
-// covers both tables because they are written by one job (spec 013 #11).
+// rolledUserKeys is every per-user row of one hour, as `user|env|release|model`
+// and in that order — the shape of what the hour holds, for the three tests
+// below, which are about *whether* rows are there rather than about their
+// numbers.
+func rolledUserKeys(t *testing.T, s *Store, projectID string, hour int64) []string {
+	t.Helper()
+	found, err := s.db.Query(
+		`SELECT user_id, environment, release, model FROM users_hourly
+		 WHERE project_id = ? AND hour = ? ORDER BY 1, 2, 3, 4`, projectID, hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer found.Close()
+	var keys []string
+	for found.Next() {
+		var user, environment, release, model string
+		if err := found.Scan(&user, &environment, &release, &model); err != nil {
+			t.Fatal(err)
+		}
+		keys = append(keys, strings.Join([]string{user, environment, release, model}, "|"))
+	}
+	if err := found.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return keys
+}
+
+// The hour a shared freeze gate refused for ever (spec 023 #15, closed by spec
+// 026 #7), which is spec 025 #21's case one table further along.
+//
+// The window is measured against the client's timestamp while the sweep deletes
+// by arrival, so history imported into an install that had already rolled it is
+// "past the window" and completely intact. Under one gate for both tables,
+// `stats_hourly` already held such an hour, so the job returned early and
+// `users_hourly` got nothing for it — ever, with the traces sitting right
+// there, and `/users` blind to every user in them.
+func TestABackfillFillsAFrozenHoursUserRows(t *testing.T) {
+	s, project := readStore(t)
+	usersFixture(t, s, project.ID)
+
+	// Rolled before the per-user tables existed: the statistics hold the hour
+	// and the per-user rows do not, which is what an upgrade finds.
+	passAt(t, s, afterTheHour())
+	for _, statement := range []string{
+		`DELETE FROM users_hourly WHERE project_id = ?`,
+		`DELETE FROM users WHERE project_id = ?`,
+	} {
+		if _, err := s.db.Exec(statement, project.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if rows := rolledRows(t, s, project.ID, rollupHour); len(rows) == 0 {
+		t.Fatal("the statistics were not rolled, so the test proves nothing")
+	}
+
+	// A retention window the fixture's own hour is long past — by the client's
+	// clock. Nothing has swept: `ingested_at` is a moment ago.
+	if _, err := s.db.Exec(
+		`UPDATE projects SET retention_days = 1 WHERE id = ?`, project.ID); err != nil {
+		t.Fatal(err)
+	}
+	var traces int
+	if err := s.db.QueryRow(
+		`SELECT COUNT(*) FROM traces WHERE project_id = ?`, project.ID).Scan(&traces); err != nil {
+		t.Fatal(err)
+	}
+	if traces == 0 {
+		t.Fatal("the traces are gone, which is the other case entirely")
+	}
+
+	// Migration 0013's own line, and the pass it buys. Ten days on, so the
+	// fixture's hour really is past a one-day window — which is what makes it
+	// frozen, and what the first pass was not.
+	if _, err := s.db.Exec(`UPDATE stats_rollup SET last_pass = 0`); err != nil {
+		t.Fatal(err)
+	}
+	passAt(t, s, pastTheWindow())
+
+	keys := rolledUserKeys(t, s, project.ID, rollupHour)
+	if len(keys) == 0 {
+		t.Fatal("the backfill left a frozen hour with no per-user rows although its traces are intact")
+	}
+	if !slices.Contains(keys, "alice|production||") {
+		t.Errorf("the frozen hour's per-user rows are wrong: %v", keys)
+	}
+	// And the summary the listing pages over, which is their sum.
+	alice, err := s.UserSummaryRow(project.ID, "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if alice == nil || alice.Traces != 3 {
+		t.Errorf("the summary was not recomputed with the rows: %v", alice)
+	}
+}
+
+// The other half of the same rule: once `users_hourly` holds an hour, a re-roll
+// past the window must not touch it — which is what spec 013 #11 protects,
+// asked of this table.
+//
+// The traces stay, and one more arrives: that is what makes the hour dirty, so
+// the pass really does reach the job and the freeze is what stops it. Deleting
+// them instead would leave the aggregator nothing to find and the assertion
+// true of a pass that did nothing at all.
+func TestAFrozenUserHourIsNotRewritten(t *testing.T) {
+	s, project := readStore(t)
+	usersFixture(t, s, project.ID)
+
+	passAt(t, s, afterTheHour())
+	before := rolledUserKeys(t, s, project.ID, rollupHour)
+	if len(before) == 0 {
+		t.Fatal("the pass wrote no per-user rows")
+	}
+
+	// Past the window now, with rows standing — and a late trace of a user the
+	// hour has never held.
+	if _, err := s.db.Exec(
+		`UPDATE projects SET retention_days = 1 WHERE id = ?`, project.ID); err != nil {
+		t.Fatal(err)
+	}
+	seedUserTrace(t, s, project.ID, userSeed{n: 7, user: "carol", session: "s-f",
+		environment: "production", model: "claude-sonnet-5", latencyMs: 80,
+		hour: rollupHour, offsetSeconds: 55})
+	if _, err := s.db.Exec(`UPDATE stats_rollup SET last_pass = 0`); err != nil {
+		t.Fatal(err)
+	}
+	passAt(t, s, pastTheWindow())
+
+	after := rolledUserKeys(t, s, project.ID, rollupHour)
+	if !slices.Equal(before, after) {
+		t.Errorf("the frozen hour was rewritten: %v, was %v", after, before)
+	}
+	carol, err := s.UserSummaryRow(project.ID, "carol")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if carol != nil {
+		t.Errorf("a frozen hour grew a summary for a user it never held: %v", carol)
+	}
+}
+
+// And the case the rule does *not* change: an hour past the window whose traces
+// retention really did take writes nothing, because the scan finds nothing —
+// which is the truth, since the traffic went with the traces.
+//
+// The job is submitted directly rather than through a pass: with no traces left
+// there is no dirty hour and nothing to roll forward, so a pass would do
+// nothing at all and the assertion would hold of a run that never reached the
+// gate.
+func TestASweptHourGetsNoUserRows(t *testing.T) {
+	s, project := readStore(t)
+	usersFixture(t, s, project.ID)
+	passAt(t, s, afterTheHour())
+
+	// The state an install upgrading into spec 023 is in, on an hour the sweep
+	// has already emptied: the statistics stand, the per-user rows are absent,
+	// and the raw rows they would be recomputed from are gone (spec 013 #6).
+	for _, statement := range []string{
+		`DELETE FROM users_hourly WHERE project_id = ?`,
+		`DELETE FROM users WHERE project_id = ?`,
+		`DELETE FROM observations WHERE project_id = ?`,
+		`DELETE FROM traces WHERE project_id = ?`,
+	} {
+		if _, err := s.db.Exec(statement, project.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.db.Exec(
+		`UPDATE projects SET retention_days = 1 WHERE id = ?`, project.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	writer, err := s.NewWriter(WriterOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writer.Close()
+	job := &statsRoll{ProjectID: project.ID, Hour: rollupHour,
+		Now: pastTheWindow().UnixNano()}
+	if err := writer.Submit(context.Background(), job); err != nil {
+		t.Fatal(err)
+	}
+	if !job.UsersRolled {
+		t.Fatal("the per-user table was frozen, so the test proves nothing about a swept hour")
+	}
+
+	if keys := rolledUserKeys(t, s, project.ID, rollupHour); len(keys) != 0 {
+		t.Errorf("a swept hour grew per-user rows out of nothing: %v", keys)
+	}
+	// And the statistics it stands beside were not demolished either.
+	if rows := rolledRows(t, s, project.ID, rollupHour); len(rows) == 0 {
+		t.Error("the statistics of a frozen hour were recomputed away")
+	}
+}
+
+// TestAFrozenHourKeepsItsUserRows: a frozen hour keeps the per-user rows it was
+// rolled with, long after the traces they were computed from are swept (spec
+// 013 #11). The two tables answer the freeze for themselves since spec 026 #7 —
+// `job.Frozen` is `stats_hourly`'s answer, `job.UsersRolled` is this table's —
+// and the ordinary case, asserted here, is that one pass wrote both, so both
+// are frozen and neither is rewritten.
 func TestAFrozenHourKeepsItsUserRows(t *testing.T) {
 	s, project := readStore(t)
 	usersFixture(t, s, project.ID)
@@ -512,7 +710,10 @@ func TestAFrozenHourKeepsItsUserRows(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !job.Frozen {
-		t.Fatal("the hour was not frozen")
+		t.Fatal("the hour was not frozen in the statistics")
+	}
+	if job.UsersRolled {
+		t.Fatal("the hour was not frozen in the per-user table, so the rows below prove nothing")
 	}
 	alice, err := s.UserSummaryRow(project.ID, "alice")
 	if err != nil {

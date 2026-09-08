@@ -192,6 +192,10 @@ type statsRoll struct {
 	// UserRows is the same count for `users_hourly`, which the same job
 	// writes in the same transaction (spec 023 #2).
 	UserRows int
+	// UsersRolled reports that `users_hourly` was written — its own freeze
+	// let the hour through (spec 026 #7) — and with it that the summaries of
+	// `Touched` are a sum that has changed.
+	UsersRolled bool
 	// ScoreRows is the same count for `scores_hourly`, the third table the
 	// job writes (spec 025 #3).
 	ScoreRows int
@@ -205,8 +209,11 @@ type statsRoll struct {
 	// corrects a single hour and then answers — the user-data erasure — does
 	// not set it, because there is no pass to defer to.
 	DeferSummary bool
-	// Frozen reports that the hour was left alone because retention has
-	// taken the raw rows it would have been recomputed from.
+	// Frozen reports that `stats_hourly` was left alone because retention
+	// has taken the raw rows it would have been recomputed from. It is the
+	// statistics' own answer since spec 026 #7 gave each table its own: it
+	// is what the aggregator counts as an hour rolled, and what its log line
+	// has always meant.
 	Frozen bool
 }
 
@@ -232,17 +239,10 @@ func (r *statsRoll) apply(tx *sql.Tx) error {
 	}
 	// Past the retention window, the freeze is asked of **each table this job
 	// writes**, because spec 013 #14's rule is about the rows being protected
-	// and every table has its own (spec 025 #21).
+	// and every table has its own (spec 025 #21, spec 026 #7).
 	past := hourPastWindow(project, r.Hour, r.Now)
-	frozen, err := hourFrozenIn(tx, "stats_hourly", r.ProjectID, r.Hour, past)
-	if err != nil {
+	if err := r.rollTraffic(tx, past); err != nil {
 		return err
-	}
-	r.Frozen = frozen
-	if !frozen {
-		if err := r.rollTraffic(tx); err != nil {
-			return err
-		}
 	}
 
 	// The third table's own freeze (spec 025 #21). An hour whose traces
@@ -261,16 +261,51 @@ func (r *statsRoll) apply(tx *sql.Tx) error {
 		}
 	}
 
-	if frozen || r.DeferSummary {
+	// The summary is a sum of the per-user rows, so it is recomputed exactly
+	// when they were written (#7): an hour frozen in `users_hourly` left them
+	// as they stand, and there is nothing to add up again.
+	if !r.UsersRolled || r.DeferSummary {
 		return nil
 	}
 	return recomputeUsers(tx, r.ProjectID, r.Touched)
 }
 
-// rollTraffic writes the two tables the traffic freeze protects: the
-// statistics of spec 013 and the per-user rows of spec 023, which stay tied to
-// them (spec 023 #15's known limit is spec 023's to revisit).
-func (r *statsRoll) rollTraffic(tx *sql.Tx) error {
+// rollTraffic writes the two tables the traffic freeze protects — the
+// statistics of spec 013 and the per-user rows of spec 023 — each on its own
+// answer to the freeze (spec 026 #7).
+//
+// They rode one gate until now, and the gate was `stats_hourly`'s. That is the
+// approximation spec 023 #15 wrote down as a known limit: history imported into
+// an install that had already rolled those hours is "past the window" and
+// completely intact, `stats_hourly` holds the hour, and `/users` was blind to
+// the imported traffic for ever. Asked per table it is the same rule — the rows
+// a table holds are the rows that table protects — which is what spec 025 #21
+// did for the scores and what this does for the third.
+func (r *statsRoll) rollTraffic(tx *sql.Tx, past bool) error {
+	statsFrozen, err := hourFrozenIn(tx, "stats_hourly", r.ProjectID, r.Hour, past)
+	if err != nil {
+		return err
+	}
+	r.Frozen = statsFrozen
+	usersFrozen, err := hourFrozenIn(tx, "users_hourly", r.ProjectID, r.Hour, past)
+	if err != nil {
+		return err
+	}
+	r.UsersRolled = !usersFrozen
+
+	if !statsFrozen {
+		if err := r.rollStats(tx); err != nil {
+			return err
+		}
+	}
+	if usersFrozen {
+		return nil
+	}
+	return r.rollUsers(tx)
+}
+
+// rollStats recomputes one hour of `stats_hourly` whole (spec 013 #3).
+func (r *statsRoll) rollStats(tx *sql.Tx) error {
 	rows, err := rollHour(tx, r.ProjectID, r.Hour)
 	if err != nil {
 		return err
@@ -296,11 +331,14 @@ func (r *statsRoll) rollTraffic(tx *sql.Tx) error {
 		}
 	}
 	r.Rows = len(rows)
+	return nil
+}
 
-	// The per-user tables ride the same job (spec 023 #2): the same hour, the
-	// same transaction, the same freeze. Two aggregators would be two
-	// watermarks and two seams, where this is one more `DELETE`/`INSERT` and a
-	// bounded recompute of the summaries the hour touched.
+// rollUsers is the same hour one dimension over (spec 023 #2): the same job,
+// the same transaction, its own freeze. Two aggregators would be two watermarks
+// and two seams, where this is one more `DELETE`/`INSERT` and a bounded
+// recompute of the summaries the hour touched.
+func (r *statsRoll) rollUsers(tx *sql.Tx) error {
 	perUser, err := rollUserHour(tx, r.ProjectID, r.Hour)
 	if err != nil {
 		return err

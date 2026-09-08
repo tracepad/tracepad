@@ -272,6 +272,22 @@ API. This file routes; it does not duplicate what specs and docs say.
   `limit`/`omitted` over series, the twenty busiest categories and an `other`
   key inside one (#24); and `scores trend` prints three significant digits
   without an exponent, as the screen does (#25).
+- ✅ Spec 026 (revision: the listing shell) shipped: no feature. The `{#if}`
+  ladder eleven listings each wrote out — the failure line, the table, the
+  bar, the page a stale cursor found empty, the empty state — is
+  `ListingShell`, with the table and the empty state as snippets and the
+  three real differences as props (#1, #3); the header's count is
+  `ListingCount` (#2) and a trace panel's five spans are `TracePeekMeta`
+  (#4). `PageHeader` wraps at a phone's width — and only there — instead of
+  squeezing the meta to an ellipsis, with the wrap one level in so the
+  actions cannot be the thing that moves (#5, #9, #10, #14).
+  `scripts/doc-anchors.sh` reads the
+  hundred cross-references nothing read before, in the gate and against its
+  own fixture (#6, #13). `users_hourly` is the third table to ask the freeze
+  of its own rows, which closes spec 023 #15 (#7). Measured rather than
+  promised: the application half is eighteen lines smaller and the tests are
+  264 larger (#8, #12) — the win is that a listing defect now has one place
+  to be, not the budget.
 - ✅ Spec 005 (retention & admin) shipped: schema 0005, the hourly sweeper
   writing every chunk through the group-commit writer, the admin API under
   `/api/v1/projects` with a dry-run/confirm contract on every destructive
@@ -308,6 +324,7 @@ API. This file routes; it does not duplicate what specs and docs say.
 | Web interface | `ui/` (SvelteKit SPA), `internal/ui/` (the embed and the tagless stub), `internal/server/ui.go` (delivery and the SPA fallback), `docs/ui.md`, specs 006 to 010 and 015 — the API types in `ui/src/lib/api/schema.d.ts` are generated from `openapi.json` and the gate fails on drift, and the application-line budget is 18,000 (`scripts/ui-lines.sh`, spec 024 #17) |
 | A payload, shown or edited | `ui/src/lib/components/json/` — `setup.ts` is everything that is not a DOM node (the document a value becomes, where it stops being JSON, which nodes a long one folds, the extension list and the themed chrome), `CodeArea.svelte` is the instance, `JsonView`/`JsonEditor` are the two modes, spec 015 — one surface for reading and writing, so there is one answer to "what does this payload look like"; the mode is the `readOnly` facet and nothing else, `indentWithTab` is deliberately absent (#7), truncation belongs to `Payload.svelte` rather than to the editor (#3), and an editor over a field that may be absent takes `optional`, where an empty document is valid and unmarked (spec 016 #22) |
 | A listing (rows, cursors, count, the bar, the panel's walk) | `ui/src/lib/listing.svelte.ts` and its tests, spec 010 — all three listings are one loader, so a listing defect is one defect. `$lib/page` and `$lib/peek` hold the pure part; a listing read oldest first (a dataset's items, a run's) sets `ascending` on its walk (spec 016 #19) |
+| What a listing draws around the loader | `ui/src/lib/components/ListingShell.svelte` (the failure line, the table snippet, the bar, the emptied-page line, the empty-state snippet, the spacer) and `ListingCount.svelte` (the header's number), with their tests, spec 026 — the fifteen listings' ladder is one component, so a ladder defect is one defect. A caller keeps its own table and empty state as snippets and passes what genuinely differs: `back` (« goes to the newest or the first), `total` (an exact count the loader never asked for), `problem` (a second failure to fold in, or none). `TracePeekMeta.svelte` is the same move for the five spans a trace's panel shows, with `hide` for the sites that show four |
 | The Evals screens (datasets, runs, the comparison) | `ui/src/routes/{datasets,runs,score-configs}/`, `ui/src/lib/components/evals/` (the tables, the three peek bodies, the summary cards), `ui/src/lib/evals.ts` (the pure part: the checkbox rule, the *changed only* filter, the words a cell uses), `ui/src/lib/api/runs.ts` (the run filters, held to `openapi.json`), `docs/ui.md#evals`, spec 016 — every number on these screens is the server's (spec 014 #18); the client decides which rows to draw and never what a verdict is |
 | Writing an eval (the item editor, the forms, the deletions) | `ui/src/lib/components/evals/ItemEditor.svelte` over the routes `datasets/items/new` and `datasets/[name]/items/[id]/edit` (spec 016 #21), `ScoreConfigDialog.svelte` with `ui/src/lib/api/score-configs.ts` (the vocabularies and the rules, held to `openapi.json`), `NewDatasetDialog`/`DeleteDatasetDialog`, `ui/src/lib/components/ConfirmDialog.svelte`, `itemBody`/`savedMessage` in `$lib/evals`, `docs/datasets.md#the-same-loop-from-the-web-interface` — a write is one of spec 014's endpoints and never a verb of the screen's own; the echo ceremony (`ConfirmCard`) is only where the server has a dry run, and the dialog is where it does not (#6) |
 | The Prompts screens (the listing, the versions, the diff, the editor) | `ui/src/routes/prompts/`, `ui/src/lib/components/prompts/` (the chip, the label control, the version view, the painted diff, the editor, the delete card), `ui/src/lib/prompts.ts` (the pure part: the Save gate per field, the chip order, the diff painter's classification, the two conversions between a stored body and the form), `docs/ui.md#prompts`, spec 021 — the diff is the server's and is only painted here (#3), the gate mirrors the `400`s spec 003 already gives and never replaces them (#5), a move or a removal of a label goes through `ConfirmDialog` naming it and a new label does not (#6), and the editor is only ever "new version from this one" because the store is append-only |
@@ -315,6 +332,7 @@ API. This file routes; it does not duplicate what specs and docs say.
 | The eval harness in Python | `sdk/python/src/tracepad/_harness.py` (the processor, `Run`, `Attempt`, the score configs, `compare`, the paging loop) and `_datasets.py` (`Dataset`, `Item`), `docs/datasets.md#the-same-loop-from-python`, `docs/sdk-python.md#evals`, spec 018 — the stamping is a `ContextVar` read at `on_start` and never a span the harness opened (#3), `init` registers the processor before the exporting one and under `export=False` too, and the read side is the server's JSON as `dict`s because a model layer is a place to start disagreeing with it (#8) |
 | Packaging: the image and the release | `Dockerfile` + `.dockerignore` (the whole recipe — the image builds both halves from the checkout and copies no prebuilt binary), `scripts/image-check.sh` (the contract, asserted from outside because the image has no shell), `.github/workflows/release-server.yml` (GoReleaser for the archives, `buildx` for one multi-arch manifest on GHCR), the `docker` job in `ci.yml`, `docs/docker.md`, spec 020 — `tracepad health` (`internal/cli/commands.go`) is the container's `HEALTHCHECK` and the one command that needs no key |
 | Configuration | `internal/config/`, spec 001 + spec 002 Configuration tables |
+| The docs' cross-references | `scripts/doc-anchors.sh` and `scripts/doc-anchors-fixture/`, spec 026 #6 — every `[…](file.md#anchor)` in `docs/*.md`, `README.md` and `AGENTS.md` is checked against the target's headings under GitHub's slug rule, fenced code blocks and inline code spans read as neither headings nor links. It runs in `make precommit`; the fixture run is its own CI step, and it also builds a file long enough that a pipe would break the check (#13, #14) |
 
 Attribute semantics for the `langfuse.*` dialect are derived from Langfuse
 (MIT) — see `NOTICE`. Keep new rules in the table in `rules.go`, with the
@@ -322,10 +340,13 @@ reason in a comment; adding a dialect should be a table edit.
 
 ## Commands
 
-- `make precommit` — full gate (format-check + vet + Go tests + `svelte-check`,
-  vitest and the API-type drift check). Budget: under 30 seconds. The gate
-  self-installs as the git pre-commit hook on first run (and on Claude Code
-  session start); `make install-hooks` force-reinstalls it.
+- `make precommit` — full gate (format-check + vet + Go tests + the doc-anchor
+  sweep + `svelte-check`, vitest and the API-type drift check). Budget: under
+  30 seconds. The gate self-installs as the git pre-commit hook on first run
+  (and on Claude Code session start); `make install-hooks` force-reinstalls it.
+- `make doc-anchors` — check every anchor in `docs/`, `README.md` and
+  `AGENTS.md` against the heading it names (part of the gate);
+  `make doc-anchors-self-test` runs the checker over its fixture.
 - `make dev` — run the server, output mirrored to `.dev.log` (read that file
   first when debugging a running server). `npm run dev` inside `ui/` serves
   the interface with hot reload against it.

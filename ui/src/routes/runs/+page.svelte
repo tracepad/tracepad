@@ -1,8 +1,6 @@
 <script lang="ts">
 	import FlaskConical from '@lucide/svelte/icons/flask-conical';
-	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
-	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { api, type Run } from '$lib/api/client.svelte';
@@ -10,9 +8,9 @@
 	import Button from '$lib/components/Button.svelte';
 	import CopyButton from '$lib/components/CopyButton.svelte';
 	import RunTable from '$lib/components/evals/RunTable.svelte';
+	import ListingCount from '$lib/components/ListingCount.svelte';
+	import ListingShell from '$lib/components/ListingShell.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
-	import PaginationBar from '$lib/components/PaginationBar.svelte';
-	import { count } from '$lib/format';
 	import { asPage, Listing, UrlSpot } from '$lib/listing.svelte';
 	import { freshSearch } from '$lib/page';
 
@@ -83,13 +81,7 @@
 
 <PageHeader title="Runs">
 	{#snippet meta()}
-		{#if listing.loading}
-			<LoaderCircle class="size-3.5 animate-spin" />
-		{:else if listing.total}
-			<span class="tabular-nums">{count(listing.total.value)}{listing.total.capped ? '+' : ''}</span>
-		{:else}
-			<span class="tabular-nums">{count(listing.rows.length)}</span>
-		{/if}
+		<ListingCount {listing} />
 	{/snippet}
 	{#snippet actions()}
 		<Button onclick={() => listing.reload()} busy={listing.loading} title="Read the listing again">
@@ -128,55 +120,43 @@
 	</div>
 </div>
 
-{#if listing.problem}
-	<p role="alert" class="text-danger bg-danger-soft border-border flex items-center gap-2 border-b px-4 py-2">
-		<TriangleAlert class="size-4 shrink-0" />
-		{listing.problem}
-	</p>
-{/if}
-
-{#if listing.rows.length > 0 || !listing.newest}
-	<RunTable rows={listing.rows} withDataset />
-	<PaginationBar {...listing.bar} noun="run" />
-	{#if listing.rows.length === 0 && !listing.loading}
-		<p class="text-subtle flex flex-1 items-start justify-center p-8 text-center">
-			Nothing on this page any more. Use « to go back to the newest.
-		</p>
-	{/if}
-{:else if !listing.loading && !listing.failure}
-	<div class="flex flex-1 items-start justify-center overflow-auto p-8">
-		<div class="max-w-lg">
-			{#if filtering}
-				<h2 class="font-medium">No run matches these filters</h2>
-				<p class="text-muted mt-1">The filters are in the URL, so this is a link you can share — or clear.</p>
-				<Button class="mt-3" onclick={() => navigate({})}>Clear filters</Button>
-			{:else}
-				<h2 class="flex items-center gap-2 font-medium">
-					<FlaskConical class="text-subtle size-4" />
-					No runs yet
-				</h2>
-				<!-- Runs are not created here (#9): a run opened by hand would sit
-				     `running` for ever, with nothing to fill it. -->
-				<p class="text-muted mt-1">
-					A run is a container your harness opens around one pass over a dataset, then fills by
-					stamping <code class="font-mono">tracepad.run_id</code> and
-					<code class="font-mono">tracepad.item_id</code> on the traces it exports:
-				</p>
-				<div class="border-border bg-surface mt-3 flex items-start gap-2 rounded-md border p-3">
-					<pre class="min-w-0 flex-1 overflow-x-auto font-mono text-xs">{open}</pre>
-					<CopyButton text={() => open} label="Copy the request" />
-				</div>
-				<a
-					class="text-accent mt-3 inline-block underline underline-offset-2"
-					href="https://github.com/tracepad/tracepad/blob/main/docs/datasets.md"
-					target="_blank"
-					rel="noreferrer"
-				>
-					Datasets and runs
-				</a>
-			{/if}
+<ListingShell {listing} noun="run">
+	{#snippet table()}
+		<RunTable rows={listing.rows} withDataset />
+	{/snippet}
+	{#snippet empty()}
+		<div class="flex flex-1 items-start justify-center overflow-auto p-8">
+			<div class="max-w-lg">
+				{#if filtering}
+					<h2 class="font-medium">No run matches these filters</h2>
+					<p class="text-muted mt-1">The filters are in the URL, so this is a link you can share — or clear.</p>
+					<Button class="mt-3" onclick={() => navigate({})}>Clear filters</Button>
+				{:else}
+					<h2 class="flex items-center gap-2 font-medium">
+						<FlaskConical class="text-subtle size-4" />
+						No runs yet
+					</h2>
+					<!-- Runs are not created here (#9): a run opened by hand would sit
+					     `running` for ever, with nothing to fill it. -->
+					<p class="text-muted mt-1">
+						A run is a container your harness opens around one pass over a dataset, then fills by
+						stamping <code class="font-mono">tracepad.run_id</code> and
+						<code class="font-mono">tracepad.item_id</code> on the traces it exports:
+					</p>
+					<div class="border-border bg-surface mt-3 flex items-start gap-2 rounded-md border p-3">
+						<pre class="min-w-0 flex-1 overflow-x-auto font-mono text-xs">{open}</pre>
+						<CopyButton text={() => open} label="Copy the request" />
+					</div>
+					<a
+						class="text-accent mt-3 inline-block underline underline-offset-2"
+						href="https://github.com/tracepad/tracepad/blob/main/docs/datasets.md"
+						target="_blank"
+						rel="noreferrer"
+					>
+						Datasets and runs
+					</a>
+				{/if}
+			</div>
 		</div>
-	</div>
-{:else}
-	<div class="flex-1"></div>
-{/if}
+	{/snippet}
+</ListingShell>
