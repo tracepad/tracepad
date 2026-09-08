@@ -92,6 +92,7 @@ tracepad is a later question.
 | `get_prompt` | `GET /api/v1/prompts/{name}` | "What prompt is in production" |
 | `list_scores` | `GET /api/v1/scores` | Reading eval results |
 | `get_stats` | `GET /api/v1/stats` | Counts, cost, latency, trends |
+| `get_score_trends` | `GET /api/v1/stats/scores` | "Did hallucination drop after 2.5.0", "which model scores best" |
 | `list_datasets` | `GET /api/v1/datasets` | "What test sets are there" |
 | `get_dataset_items` | `GET /api/v1/datasets/{name}/items` | Reading the cases in one |
 | `list_runs` | `GET /api/v1/datasets/{name}/runs`, or `GET /api/v1/runs` without `dataset` | "What has been tried" |
@@ -127,6 +128,17 @@ one — is a person's or a script's, with somebody to answer to. What a queue
 holds is pointers; the verdicts themselves are scores, so `list_scores` with a
 `trace_id` is the follow-up, and a score written from a queue carries
 `metadata.queue` and `metadata.annotator`.
+
+`get_score_trends` is the quality question `list_scores` cannot answer: it
+returns one series per score name over the asked buckets — a mean for a numeric
+name, the rate of true for a boolean one, the count of each value for a
+categorical one — where `list_scores` returns the individual judgements. Its
+`targets` field is the honesty `unit` is on `get_stats`: grouped by model it
+counts only the scores that name an observation, because a trace-level score has
+no model. Scores that name only a session, and `text` scores, are never on a
+timeline. It returns the fifty busiest names by default — `limit` raises that
+to 500, and `omitted` says how many are still not there — so a model reading
+the list never mistakes it for the whole list. See [quality.md](quality.md).
 
 There are no administrative tools, for the reason at the top of this page: not
 a gap, a guarantee.

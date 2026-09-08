@@ -312,8 +312,186 @@ func (r *run) scores(ctx context.Context, args []string) error {
 		return r.scoresAdd(ctx, rest)
 	case "rm":
 		return r.scoresRemove(ctx, rest)
+	case "trend":
+		return r.scoresTrend(ctx, rest)
 	}
-	return usageErrorf("scores takes ls, add or rm, got %q", sub)
+	return usageErrorf("scores takes ls, add, rm or trend, got %q", sub)
+}
+
+// scoresTrend is `GET /api/v1/stats/scores` and nothing more (#1): how a score
+// has moved, in the same buckets `stats` groups the traffic into (spec 025 #8).
+//
+// The verb sits under `scores` because that is the noun; `stats` keeps
+// answering the traffic question it always did. The window flags are spelled
+// as every other command spells them — `--since`, `--until`, `--env` (spec 007
+// #11, spec 025 #15) — so that a person moving between `stats` and this does
+// not have to learn a second name for the same window.
+func (r *run) scoresTrend(ctx context.Context, args []string) error {
+	var (
+		name        string
+		groupBy     string
+		since       string
+		until       string
+		environment string
+		limit       string
+	)
+	fs := r.flags("scores trend")
+	fs.StringVar(&name, "name", "", "")
+	fs.StringVar(&groupBy, "group-by", "", "")
+	fs.StringVar(&since, "since", "", "")
+	fs.StringVar(&until, "until", "", "")
+	fs.StringVar(&environment, "env", "", "")
+	fs.StringVar(&limit, "limit", "", "")
+	if _, err := r.parse(fs, args, 0); err != nil {
+		return err
+	}
+
+	query := url.Values{}
+	addSome(query, "name", name)
+	addSome(query, "group_by", groupBy)
+	addSome(query, "environment", environment)
+	addSome(query, "limit", limit)
+	from, err := r.instant("--since", since)
+	if err != nil {
+		return err
+	}
+	addSome(query, "from", from)
+	to, err := r.instant("--until", until)
+	if err != nil {
+		return err
+	}
+	addSome(query, "to", to)
+
+	body, err := r.api.Get(ctx, "/api/v1/stats/scores", query)
+	if err != nil {
+		return err
+	}
+	if r.wantJSON() {
+		return r.emit(body)
+	}
+	result, err := decode[struct {
+		GroupBy string `json:"group_by"`
+		Targets string `json:"targets"`
+		Omitted int    `json:"omitted"`
+		Series  []struct {
+			Name     string `json:"name"`
+			DataType string `json:"data_type"`
+			Buckets  []struct {
+				Key        string           `json:"key"`
+				Count      int              `json:"count"`
+				Mean       *float64         `json:"mean"`
+				Min        *float64         `json:"min"`
+				Max        *float64         `json:"max"`
+				Rate       *float64         `json:"rate"`
+				Categories map[string]int64 `json:"categories"`
+			} `json:"buckets"`
+		} `json:"series"`
+	}](body)
+	if err != nil {
+		return err
+	}
+	if len(result.Series) == 0 {
+		fmt.Fprintln(r.opt.Stdout, "no score names a trace in this range")
+		return nil
+	}
+	for i, series := range result.Series {
+		if i > 0 {
+			fmt.Fprintln(r.opt.Stdout)
+		}
+		// The header names what was counted, because grouping by model
+		// counts only the scores that name an observation (spec 025 #6)
+		// and a reader comparing two runs of this command has to see it.
+		fmt.Fprintf(r.opt.Stdout, "%s (%s, %s scores)\n",
+			series.Name, series.DataType, result.Targets)
+		key := strings.ToUpper(result.GroupBy)
+		t := newTable(r.opt.Stdout, key, "SCORES", scoreTrendColumn(series.DataType))
+		for _, bucket := range series.Buckets {
+			t.row(bucket.Key, strconv.Itoa(bucket.Count),
+				scoreTrendValue(series.DataType, bucket.Mean, bucket.Min, bucket.Max,
+					bucket.Rate, bucket.Categories))
+		}
+		t.flush()
+	}
+	// A truncated answer that said nothing about it would be a wrong one
+	// (spec 025 #24). The busiest names are the ones shown, and `--limit`
+	// reaches the rest.
+	if result.Omitted > 0 {
+		noun := "names"
+		if result.Omitted == 1 {
+			noun = "name"
+		}
+		fmt.Fprintf(r.opt.Stdout,
+			"\n%d rarer score %s not shown; raise --limit to see them\n",
+			result.Omitted, noun)
+	}
+	return nil
+}
+
+// scoreTrendColumn and scoreTrendValue are the one column whose meaning
+// depends on the series' type: a mean with its extremes, a rate, or the
+// distribution the bucket saw.
+func scoreTrendColumn(dataType string) string {
+	switch dataType {
+	case "boolean":
+		return "RATE"
+	case "categorical":
+		return "CATEGORIES"
+	default:
+		return "MEAN (MIN..MAX)"
+	}
+}
+
+func scoreTrendValue(dataType string, mean, min, max, rate *float64, categories map[string]int64) string {
+	switch dataType {
+	case "boolean":
+		if rate == nil {
+			return "-"
+		}
+		return fmt.Sprintf("%.0f%%", *rate*100)
+	case "categorical":
+		names := make([]string, 0, len(categories))
+		for value := range categories {
+			names = append(names, value)
+		}
+		sortStrings(names)
+		parts := make([]string, 0, len(names))
+		for _, value := range names {
+			parts = append(parts, fmt.Sprintf("%s %d", value, categories[value]))
+		}
+		return orDash(strings.Join(parts, " · "))
+	default:
+		if mean == nil {
+			return "-"
+		}
+		if min == nil || max == nil {
+			return scoreFigure(*mean)
+		}
+		return fmt.Sprintf("%s (%s..%s)", scoreFigure(*mean), scoreFigure(*min), scoreFigure(*max))
+	}
+}
+
+// scoreFigure prints a score value the way somebody reads it back: three
+// significant digits, which is what the interface renders too (spec 022 #3).
+// `trimFloat` beside it is exact, which is right for a stored value and wrong
+// for a mean — the mean of three thirds would otherwise arrive as sixteen
+// digits of arithmetic nobody asked about.
+//
+// Rounded with `'g'` and printed with `'f'`, because those are two different
+// questions. Nothing bounds a numeric score to 0..1 — a config's `min` and
+// `max` are free and a name without a config has none — so `output_tokens` or
+// `latency_ms` is an ordinary score, and `'g'` alone rendered 1234.5 as
+// `1.23e+03` in a column the interface fills with `1230` (found in the second
+// review of PR #44).
+func scoreFigure(value float64) string {
+	rounded, err := strconv.ParseFloat(strconv.FormatFloat(value, 'g', 3, 64), 64)
+	if err != nil {
+		rounded = value
+	}
+	if rounded == 0 {
+		// Including a negative zero, which is a way of writing nothing.
+		return "0"
+	}
+	return strconv.FormatFloat(rounded, 'f', -1, 64)
 }
 
 // scoresAdd is one `POST /api/v1/scores` with one object in it (spec 022 #7).

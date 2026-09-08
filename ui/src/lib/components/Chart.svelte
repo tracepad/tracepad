@@ -22,7 +22,9 @@
 		lines,
 		format,
 		summary,
-		height = 150
+		height = 150,
+		range,
+		sync = 'tracepad-stats'
 	}: {
 		title: string;
 		/** Bucket starts, seconds since the epoch. */
@@ -33,6 +35,25 @@
 		/** What the chart says, for somebody who cannot see it. */
 		summary: string;
 		height?: number;
+		/**
+		 * A y axis pinned to these bounds instead of to the data's own. A
+		 * score config that declares `min` and `max` is a claim about the
+		 * scale the values live on, and drawing 0.2..0.3 across the full
+		 * height would make a stable score look like a cliff (spec 025 #10).
+		 */
+		range?: [number, number];
+		/**
+		 * Which group of charts share the x cursor. Charts of one question are
+		 * stacked and read together — reading "cost at 14:00" off the second
+		 * while the first says 14:00 is the whole reason they are stacked — so
+		 * they take one key. Cards about *different* scores are not one
+		 * question, and each takes a key of its own; a cursor moving on six of
+		 * them at once is a cursor nobody put there.
+		 *
+		 * The default is the Stats screen's group, which is where every chart
+		 * written before this prop existed belongs.
+		 */
+		sync?: string;
 	} = $props();
 
 	/**
@@ -100,9 +121,10 @@
 				// off the second chart while the first says 14:00 is the whole
 				// reason they are stacked.
 				cursor: {
-					sync: { key: 'tracepad-stats', scales: ['x', null] },
+					sync: { key: sync, scales: ['x', null] },
 					drag: { x: false, y: false }
 				},
+				...(range ? { scales: { y: { range } } } : {}),
 				legend: { live: true },
 				axes: [
 					{ ...axis(colours), space: 64 },

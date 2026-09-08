@@ -1,5 +1,6 @@
 <script lang="ts" module>
 	import ChartLine from '@lucide/svelte/icons/chart-line';
+	import ChartSpline from '@lucide/svelte/icons/chart-spline';
 	import ClipboardCheck from '@lucide/svelte/icons/clipboard-check';
 	import Database from '@lucide/svelte/icons/database';
 	import FlaskConical from '@lucide/svelte/icons/flask-conical';
@@ -41,7 +42,11 @@
 				// Fourth, and last (spec 024 #10): a queue is an eval noun —
 				// the design lists it beside datasets and runs — and it is
 				// what the section was made to hold.
-				{ href: '/queues', label: 'Queues', icon: ClipboardCheck }
+				{ href: '/queues', label: 'Queues', icon: ClipboardCheck },
+				// Fifth, after the queue (spec 025 #9): quality is what evals
+				// produce, so it sits with the datasets, the runs and the
+				// annotation desk rather than with the traffic on Stats.
+				{ href: '/quality', label: 'Quality', icon: ChartSpline }
 			]
 		},
 		{ href: '/settings', label: 'Settings', icon: Settings }

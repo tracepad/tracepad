@@ -651,6 +651,79 @@ knowing:
   but does not rewrite the history. See
   [retention.md](retention.md#what-outlives-what).
 
+## Score trends
+
+```sh
+curl … "http://localhost:4318/api/v1/stats/scores?group_by=day&from=2026-09-01T00:00:00Z"
+```
+
+```json
+{
+  "group_by": "day",
+  "targets": "any",
+  "omitted": 0,
+  "series": [
+    {
+      "name": "hallucination",
+      "data_type": "numeric",
+      "buckets": [
+        {"key": "2026-09-01", "count": 412, "mean": 0.18, "min": 0.0, "max": 0.9}
+      ]
+    },
+    {
+      "name": "verdict",
+      "data_type": "categorical",
+      "buckets": [
+        {"key": "2026-09-01", "count": 412, "categories": {"pass": 380, "fail": 32}}
+      ]
+    }
+  ]
+}
+```
+
+The quality curve beside the traffic one. A score is counted in the hour of the
+**trace it names** — not in the hour it was graded — and takes that trace's
+environment, release and model, so these buckets line up with `/api/v1/stats`'
+own. A score that names only a session, and a `text` score, are not counted at
+all: [quality.md](quality.md#what-is-counted-and-what-is-not) says why.
+
+`from`, `to` and `environment` are the statistics' own filters, and `group_by`
+is `hour`, `day`, `environment`, `release` or `model` (default `day`).
+Without `name` every score name in the range is a series; with it, one:
+
+```sh
+curl … "http://localhost:4318/api/v1/stats/scores?name=hallucination&group_by=release"
+```
+
+What a bucket carries depends on the series' `data_type`: a `numeric` name
+reports `mean`, `min` and `max`, a `boolean` name the `rate` of true values
+between 0 and 1, and a `categorical` name the `categories` seen with their
+counts. All three carry `count`, which is what the mean or the rate is out of.
+A bucket with no scores does not exist rather than reporting zero, and one name
+graded two ways is two series with the same name.
+
+`targets` says what was counted. Grouped by model it is `observation`, because
+only a score that names an observation has a model to sit under; every other
+grouping counts each score once and it is `any`. It is here for the reason
+`unit` is on the statistics: two counts that are not comparable must not look
+alike.
+
+Both sides of the answer are bounded, because both are unbounded client input:
+a score name needs no `score_config`, and a `categorical` value is whatever the
+client sent. `limit` caps how many series come back — 1 to 500, default 50, the
+busiest names first — and `omitted` says how many that left out. Inside one
+series only the twenty busiest values of the range are named; the rest are
+summed under `other`, so a bucket's `categories` still add up to its `count`.
+
+An unknown parameter, or a parameter given without a value, is a `400`.
+
+The numbers come from the same seam and carry the same lag as the statistics
+above, plus one addition: a score's own arrival dirties the hour of its trace,
+so a judge grading yesterday's traffic is picked up by the next pass rather
+than never. Deleting a score, or moving one onto another trace, corrects the
+hour it leaves in the same transaction as the write itself. See
+[quality.md](quality.md#the-lag).
+
 ## Prompt version diff
 
 ```sh

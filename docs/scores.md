@@ -108,6 +108,14 @@ off the disk.
 
 `tracepad scores rm <id>` is the same call — see [cli.md](cli.md#scores-add-scores-rm).
 
+Deleting a score also **corrects the quality rollup**, in the same transaction
+that removes the row. A score's arrival is noticed by its `created_at`, and a
+deleted row has none to notice — so the one hour it was counted in is
+recomputed with the deletion, the way erasing a user's data recomputes the
+hours it emptied. Only that table: the traffic statistics of the hour are not
+its business. An hour past the project's retention window is frozen and stays
+as it is ([quality.md](quality.md#the-lag)).
+
 ### Batches
 
 An array is all-or-nothing: one transaction, and one `400` naming the first
@@ -252,6 +260,23 @@ A score written there carries `metadata: {"source": "web"}` and no
 `timestamp`, so it is stamped at receive time: a judgement made now happened
 now. Nothing else is different — it is this API, called from a browser. See
 [ui.md](ui.md#scores).
+
+## Trends over time
+
+"Did hallucination drop after 2.5.0" is not a listing question, and the listing
+does not answer it: `GET /api/v1/stats/scores` does, from an hourly roll-up
+beside the statistics'. One series per score name, a mean for a numeric name, a
+rate for a boolean one, the distribution for a categorical one, grouped by day,
+hour, environment, release or model:
+
+```sh
+curl … "http://localhost:4318/api/v1/stats/scores?name=hallucination&group_by=release"
+tracepad scores trend --name hallucination --group-by release
+```
+
+A score is counted in the hour of the **trace** it names, so the curve lines up
+with the traffic. Scores that name only a session, and `text` scores, are not on
+a timeline at all. See [quality.md](quality.md).
 
 ## From an annotation queue
 

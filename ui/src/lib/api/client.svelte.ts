@@ -75,6 +75,10 @@ export type TracesQueued = CreatedResponse<
 export type Score = components['schemas']['Score'];
 export type ScoreInput = components['schemas']['ScoreInput'];
 export type ScorePage = JSONResponse<paths['/api/v1/scores']['get']>;
+/** The quality trend (spec 025): one series per score name, each with buckets. */
+export type ScoreSeries = components['schemas']['ScoreSeries'];
+export type ScoreBucket = components['schemas']['ScoreBucket'];
+export type ScoreTrends = JSONResponse<paths['/api/v1/stats/scores']['get']>;
 /** Which target a score listing is about; at most one of the three is set. */
 export type ScoreFilters = { trace_id?: string; observation_id?: string; session_id?: string };
 
@@ -240,6 +244,24 @@ class Api {
 		signal?: AbortSignal
 	) {
 		return this.#json<Stats>('/api/v1/stats', { query, signal });
+	}
+
+	/**
+	 * The quality trend (spec 025): a series per score name over the same
+	 * window the statistics answer for. Without `name` every name in the range
+	 * comes back, which is the one request the overview needs.
+	 */
+	getScoreTrends(
+		query: {
+			from?: string;
+			to?: string;
+			environment?: string;
+			name?: string;
+			group_by?: string;
+		},
+		signal?: AbortSignal
+	) {
+		return this.#json<ScoreTrends>('/api/v1/stats/scores', { query, signal });
 	}
 
 	/**

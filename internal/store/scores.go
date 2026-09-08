@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // Scores (spec 003): a quality judgement about a trace, an observation or a
@@ -36,6 +37,10 @@ type Score struct {
 	Metadata []byte
 	// Timestamp is event time — when the graded interaction happened —
 	// and CreatedAt is receive time. Both Unix nanoseconds (#16).
+	//
+	// A zero CreatedAt on a write means "stamp it in the transaction": see
+	// ScoreWrite.apply, which is where receive time is actually decided
+	// (spec 025 #23).
 	Timestamp int64
 	CreatedAt int64
 }
@@ -79,8 +84,34 @@ func (s *ScoreWrite) apply(tx *sql.Tx) error {
 			return &Rejection{Kind: RejectInvalid, Message: message}
 		}
 	}
+	// Receive time is stamped here rather than in the handler, for the reason
+	// `traces.updated_at` is (`ingest.go`): the rollup's dirty set asks
+	// `created_at > last_pass`, and that question is only sound if the stamp
+	// and the commit are the same moment to within `commitMargin`. Stamped
+	// before the group-commit queue, a write that waited a second in it
+	// carried a `created_at` already behind the next pass's cutoff and was
+	// missed by every pass afterwards — permanently, since nothing else
+	// dirties the hour of a score (spec 025 #23).
+	//
+	// A caller that stamped its own — a fixture dating rows on its clock — is
+	// left alone.
+	receivedAt := time.Now().UnixNano()
+
+	var vacated []int64
 	for _, score := range s.Scores {
-		_, err := tx.Exec(
+		// Read before the upsert overwrites it: afterwards nothing names the
+		// hour this score is leaving (spec 025 #20).
+		hour, moved, err := vacatedScoreHour(tx, s.ProjectID, score.ID, score.TraceID)
+		if err != nil {
+			return err
+		}
+		if moved {
+			vacated = append(vacated, hour)
+		}
+		if score.CreatedAt == 0 {
+			score.CreatedAt = receivedAt
+		}
+		_, err = tx.Exec(
 			`INSERT INTO scores (
 			   project_id, id, trace_id, observation_id, session_id, name,
 			   data_type, value, string_value, comment, metadata, timestamp, created_at)
@@ -106,7 +137,9 @@ func (s *ScoreWrite) apply(tx *sql.Tx) error {
 			return fmt.Errorf("upsert score %s: %w", score.ID, err)
 		}
 	}
-	return nil
+	// The hours the moved scores left, corrected in this transaction so that
+	// the correction cannot outlive the write that needed it (spec 025 #22).
+	return correctScoreHours(tx, s.ProjectID, receivedAt, vacated...)
 }
 
 // ScoreDelete is DELETE /api/v1/scores/{id} (spec 022 #6): one row, gone. It
@@ -123,6 +156,16 @@ type ScoreDelete struct {
 }
 
 func (d *ScoreDelete) apply(tx *sql.Tx) error {
+	// Read before the delete: afterwards nothing names the hour. Three
+	// scores answer nothing here, and each of them is one the rollup never
+	// held — a session-only score, one whose trace has not arrived, and a
+	// `text` one.
+	var hour sql.NullInt64
+	err := tx.QueryRow(scoreHourOfQuery, SecondsPerHour, SecondsPerHour, d.ProjectID, d.ID).Scan(&hour)
+	if err != nil && err != sql.ErrNoRows {
+		return fmt.Errorf("find the hour of score %s: %w", d.ID, err)
+	}
+
 	// Scoped by project as well as by id: an id from another project must
 	// read as "no such score", never as a row this caller may take.
 	result, err := tx.Exec(`DELETE FROM scores WHERE project_id = ? AND id = ?`, d.ProjectID, d.ID)
@@ -136,7 +179,15 @@ func (d *ScoreDelete) apply(tx *sql.Tx) error {
 	if rows == 0 {
 		return &Rejection{Kind: RejectNotFound, Message: fmt.Sprintf("score %q not found", d.ID)}
 	}
-	return nil
+	// The hour this score was counted in, recomputed here rather than by the
+	// handler afterwards (spec 025 #22): a deleted row is not found by
+	// `created_at > last_pass`, because it is gone, so the correction has to
+	// travel with the deletion — the way a user-data erasure re-rolls the
+	// hours it emptied (spec 013 #7).
+	if !hour.Valid {
+		return nil
+	}
+	return correctScoreHours(tx, d.ProjectID, time.Now().UnixNano(), hour.Int64)
 }
 
 // ScoreFilter narrows a score listing (spec 003, API contract). The zero value

@@ -504,6 +504,42 @@
         }
       }
     },
+    "/api/v1/stats/scores": {
+      "get": {
+        "tags": ["stats"],
+        "summary": "Score means, rates and category shares per bucket, one series per score name",
+        "description": "The quality curve beside the traffic one. A score is counted in the hour of the **trace it names** — not in the hour it was graded — and takes that trace's environment, release and model, so the buckets line up with `GET /api/v1/stats`. A score that names no trace, and a `text` score, are not counted at all. Without `name` every score name in the range is a series; with it, one. `targets` says what was counted: grouping by model counts only the scores that name an observation, because a trace-level score has no model to sit under; every other grouping counts each score once. A numeric series carries `mean`, `min` and `max` per bucket, a boolean series the `rate` of true values, and a categorical series the `categories` seen. Answered from the hourly roll-up behind the watermark and from the raw rows for the tail, so it trails live traffic by the same lag as the statistics.",
+        "operationId": "scoreTrends",
+        "parameters": [
+          {"$ref": "#/components/parameters/From"},
+          {"$ref": "#/components/parameters/To"},
+          {"$ref": "#/components/parameters/Environment"},
+          {"name": "name", "in": "query", "schema": {"type": "string"},
+            "description": "Only the score filed under this name. Absent, every name in the range comes back as its own series"},
+          {"name": "group_by", "in": "query",
+            "schema": {"type": "string", "enum": ["hour", "day", "environment", "release", "model"], "default": "day"}},
+          {"name": "limit", "in": "query",
+            "schema": {"type": "integer", "minimum": 1, "maximum": 500, "default": 50},
+            "description": "How many series to return, the busiest score names first. A score name needs no config, so the number of them is unbounded client input; `omitted` says how many this left out"}
+        ],
+        "responses": {
+          "200": {"description": "The series", "content": {"application/json": {"schema": {
+            "type": "object",
+            "properties": {
+              "group_by": {"type": "string", "enum": ["hour", "day", "environment", "release", "model"]},
+              "targets": {"type": "string", "enum": ["any", "observation"],
+                "description": "`observation` when grouping by model, where only scores naming an observation can be counted; `any` otherwise, where every score counts once"},
+              "omitted": {"type": "integer",
+                "description": "How many score names `limit` left out, rarest first; 0 when every name in the range is here"},
+              "series": {"type": "array", "items": {"$ref": "#/components/schemas/ScoreSeries"}}
+            },
+            "required": ["group_by", "targets", "omitted", "series"]
+          }}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"}
+        }
+      }
+    },
     "/api/v1/users": {
       "get": {
         "tags": ["stats"],
@@ -1970,6 +2006,33 @@
           "last_seen": {"type": "string", "format": "date-time"}
         },
         "required": ["user_id", "traces", "error_count", "sessions"]
+      },
+      "ScoreSeries": {
+        "type": "object",
+        "description": "One score name over the asked buckets. A name graded two ways — numerically here, categorically there — is two series with the same name, told apart by `data_type`.",
+        "properties": {
+          "name": {"type": "string", "description": "What is being measured, e.g. \"hallucination\""},
+          "data_type": {"type": "string", "enum": ["numeric", "boolean", "categorical"],
+            "description": "Which of the three summaries each bucket carries. `text` scores have nothing to add up and are never a series"},
+          "buckets": {"type": "array", "items": {"$ref": "#/components/schemas/ScoreBucket"}}
+        },
+        "required": ["name", "data_type", "buckets"]
+      },
+      "ScoreBucket": {
+        "type": "object",
+        "description": "One group of one series. `count` is how many scores fell in it; the rest depends on the series' `data_type` — `mean`/`min`/`max` for numeric, `rate` for boolean, `categories` for categorical. A bucket with no scores does not exist rather than reporting zero.",
+        "properties": {
+          "key": {"type": "string", "description": "The hour, day, environment, release or model this bucket is"},
+          "count": {"type": "integer", "description": "How many scores fell in this bucket"},
+          "mean": {"type": ["number", "null"], "description": "Numeric series only: the mean of the values in this bucket"},
+          "min": {"type": ["number", "null"], "description": "Numeric series only: the smallest value in this bucket"},
+          "max": {"type": ["number", "null"], "description": "Numeric series only: the largest value in this bucket"},
+          "rate": {"type": ["number", "null"],
+            "description": "Boolean series only: the share of scores in this bucket whose value is 1, between 0 and 1"},
+          "categories": {"type": "object", "additionalProperties": {"type": "integer"},
+            "description": "Categorical series only: how many scores in this bucket carried each value seen. The counts sum to `count`. Only the twenty busiest values of the range are named; the rest are summed under `other`, so the sum still holds — and a series that really has a category called `other` merges with them"}
+        },
+        "required": ["key", "count"]
       },
       "RawBatch": {
         "type": "object",

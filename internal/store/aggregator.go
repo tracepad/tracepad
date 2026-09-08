@@ -397,6 +397,19 @@ func (a *Aggregator) sweepRollup(ctx context.Context, project *Project, at time.
 			return err
 		}
 		if chunk.Deleted < int64(DefaultSweepChunk) {
+			break
+		}
+	}
+	// The score rows live under the same window for the same reason (spec
+	// 025: no config of their own), and get their own loop for the same
+	// one: three tables of different sizes, and one running short says
+	// nothing about the others.
+	for range maxChunksPerProject {
+		chunk := &scoresRollupSweep{ProjectID: project.ID, Before: cutoff}
+		if err := a.writer.Submit(ctx, chunk); err != nil {
+			return err
+		}
+		if chunk.Deleted < int64(DefaultSweepChunk) {
 			return nil
 		}
 	}
@@ -457,6 +470,15 @@ func (s *Store) dirtyHours(projectID string, since, before int64) ([]int64, erro
 		return nil, err
 	}
 	all = append(all, sessions...)
+	// And the hours whose *scores* changed (spec 025 #3). A judge grading
+	// yesterday's traffic today writes only `scores`, so neither of the two
+	// questions above hears of it: `updated_at` belongs to the trace, and
+	// the trace did not move.
+	scores, err := s.dirtyScoreHours(projectID, since)
+	if err != nil {
+		return nil, err
+	}
+	all = append(all, scores...)
 	slices.Sort(all)
 	all = slices.Compact(all)
 

@@ -118,6 +118,10 @@ func (s *Server) handleCreateScores(w http.ResponseWriter, r *http.Request) {
 	if !s.submit(w, r, write) {
 		return
 	}
+	// The hour a re-POST moved a score out of is corrected inside that same
+	// transaction, by the job itself (spec 025 #22) — there is nothing left
+	// for the handler to do after the writer answers.
+	//
 	// 201 only now: the transaction is committed and fsynced (#9).
 	writeJSON(w, http.StatusCreated, scoreIDsResponse{IDs: ids})
 }
@@ -166,8 +170,10 @@ func (in *scoreRequest) validate(now int64) (*store.Score, error) {
 		Value:         in.Value,
 		StringValue:   in.StringValue,
 		Comment:       in.Comment,
-		Timestamp:     now,
-		CreatedAt:     now,
+		// Event time defaults to the moment the request was read. Receive
+		// time is left at zero on purpose: the store stamps it inside the
+		// write transaction, which is where it becomes true (spec 025 #23).
+		Timestamp: now,
 	}
 
 	// An empty string is never a meaningful id; reading it as "absent"
@@ -412,6 +418,9 @@ func (s *Server) handleDeleteScore(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// The score's hour is re-rolled inside the deletion's own transaction
+	// (spec 025 #22), so a committed retraction cannot answer 500 over a
+	// correction that is already on disk with it.
 	if !s.submit(w, r, &store.ScoreDelete{ProjectID: project.ID, ID: id}) {
 		return
 	}

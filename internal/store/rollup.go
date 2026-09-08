@@ -192,6 +192,9 @@ type statsRoll struct {
 	// UserRows is the same count for `users_hourly`, which the same job
 	// writes in the same transaction (spec 023 #2).
 	UserRows int
+	// ScoreRows is the same count for `scores_hourly`, the third table the
+	// job writes (spec 025 #3).
+	ScoreRows int
 	// Touched are the user ids this hour holds or held — the set whose
 	// summary has to be recomputed (spec 023 #3).
 	Touched []string
@@ -227,15 +230,47 @@ func (r *statsRoll) apply(tx *sql.Tx) error {
 	if project == nil {
 		return nil
 	}
-	frozen, err := r.frozen(tx, project)
+	// Past the retention window, the freeze is asked of **each table this job
+	// writes**, because spec 013 #14's rule is about the rows being protected
+	// and every table has its own (spec 025 #21).
+	past := hourPastWindow(project, r.Hour, r.Now)
+	frozen, err := hourFrozenIn(tx, "stats_hourly", r.ProjectID, r.Hour, past)
 	if err != nil {
 		return err
 	}
-	if frozen {
-		r.Frozen = true
-		return nil
+	r.Frozen = frozen
+	if !frozen {
+		if err := r.rollTraffic(tx); err != nil {
+			return err
+		}
 	}
 
+	// The third table's own freeze (spec 025 #21). An hour whose traces
+	// retention has taken writes nothing here either — the join finds no
+	// trace, which is the truth, since the scores went with their targets.
+	// An hour whose traces are *intact* past the window — history imported
+	// into an install that had already rolled it — gets its score rows,
+	// which the one shared gate refused it for ever.
+	scoresFrozen, err := hourFrozenIn(tx, "scores_hourly", r.ProjectID, r.Hour, past)
+	if err != nil {
+		return err
+	}
+	if !scoresFrozen {
+		if r.ScoreRows, err = rollScoreHour(tx, r.ProjectID, r.Hour); err != nil {
+			return err
+		}
+	}
+
+	if frozen || r.DeferSummary {
+		return nil
+	}
+	return recomputeUsers(tx, r.ProjectID, r.Touched)
+}
+
+// rollTraffic writes the two tables the traffic freeze protects: the
+// statistics of spec 013 and the per-user rows of spec 023, which stay tied to
+// them (spec 023 #15's known limit is spec 023's to revisit).
+func (r *statsRoll) rollTraffic(tx *sql.Tx) error {
 	rows, err := rollHour(tx, r.ProjectID, r.Hour)
 	if err != nil {
 		return err
@@ -263,7 +298,7 @@ func (r *statsRoll) apply(tx *sql.Tx) error {
 	r.Rows = len(rows)
 
 	// The per-user tables ride the same job (spec 023 #2): the same hour, the
-	// same transaction, the same freeze above. Two aggregators would be two
+	// same transaction, the same freeze. Two aggregators would be two
 	// watermarks and two seams, where this is one more `DELETE`/`INSERT` and a
 	// bounded recompute of the summaries the hour touched.
 	perUser, err := rollUserHour(tx, r.ProjectID, r.Hour)
@@ -275,41 +310,55 @@ func (r *statsRoll) apply(tx *sql.Tx) error {
 		return err
 	}
 	r.UserRows = len(perUser)
-	if r.DeferSummary {
-		return nil
-	}
-	return recomputeUsers(tx, r.ProjectID, r.Touched)
+	return nil
 }
 
-// frozen reports whether this hour must be left as it stands: it is past the
-// project's trace-retention window *and* the rollup already holds rows for it
-// (spec 013 #11, #14).
+// hourPastWindow reports whether an hour lies past the project's
+// trace-retention window — the first half of spec 013 #11's rule, and the half
+// that is the same for every table the rollup writes.
 //
-// Both halves matter. The window alone is measured against the client's
-// timestamp while the sweep deletes by arrival, so a year of history imported
-// this morning is "past the window" and completely intact — freezing it would
-// leave hours that no half of the read seam can answer. Stored rows are the
-// thing worth protecting, and their absence is what says there is nothing to
-// protect.
-func (r *statsRoll) frozen(tx *sql.Tx, project *Project) (bool, error) {
-	// The epoch hour is never frozen. It is not a time: it is where a trace
-	// lands when no span of it said when it started (spec 004 #26), so its
-	// rows are as young as any other and retention cannot have taken them —
-	// there is nothing to protect from a recomputation. Freezing it instead
-	// pinned the phantom 1970 bucket that #16 exists to remove, for every
-	// project with a retention window, which is every ordinary one (found
-	// in the fifth review of PR #28).
-	if r.Hour <= 0 {
-		return false, nil
+// The epoch hour is never past it. It is not a time: it is where a trace lands
+// when no span of it said when it started (spec 004 #26), so its rows are as
+// young as any other and retention cannot have taken them. Freezing it instead
+// pinned the phantom 1970 bucket that spec 013 #16 exists to remove, for every
+// project with a retention window, which is every ordinary one (found in the
+// fifth review of PR #28).
+func hourPastWindow(project *Project, hour, now int64) bool {
+	if hour <= 0 {
+		return false
 	}
-	if r.Hour >= frozenBefore(project, r.Now) {
+	return hour < frozenBefore(project, now)
+}
+
+// hourFrozenIn is spec 013 #14's second half asked of **one** table: past the
+// window, an hour is frozen for a table exactly when that table already holds
+// rows for it.
+//
+// Both halves matter, and #14 spells out why. The window is measured against
+// the client's timestamp while the sweep deletes by arrival, so a year of
+// history imported this morning is "past the window" and completely intact;
+// freezing it would leave hours that no half of the read seam can answer.
+// Stored rows are the thing #11 protects, and their absence is what says there
+// is nothing to protect.
+//
+// Asked per table it is the same rule; asked once for all of them it was an
+// approximation that happened to be exact while there was one table. Spec 023
+// inherited the approximation and wrote its cost down as a known limit (#15);
+// spec 025 #21 asks the rule of its own table instead — so a migration's
+// backfill can fill an hour whose traces are intact, and cannot demolish one
+// whose rows already stand.
+//
+// The table name is this package's own constant, never anything a request
+// carries; only the project id and the hour are bound.
+func hourFrozenIn(tx *sql.Tx, table, projectID string, hour int64, past bool) (bool, error) {
+	if !past {
 		return false, nil
 	}
 	var rows int
 	if err := tx.QueryRow(
-		`SELECT COUNT(*) FROM stats_hourly WHERE project_id = ? AND hour = ?`,
-		r.ProjectID, r.Hour).Scan(&rows); err != nil {
-		return false, fmt.Errorf("look for hour %d in the rollup: %w", r.Hour, err)
+		`SELECT COUNT(*) FROM `+table+` WHERE project_id = ? AND hour = ?`,
+		projectID, hour).Scan(&rows); err != nil {
+		return false, fmt.Errorf("look for hour %d in %s: %w", hour, table, err)
 	}
 	return rows > 0, nil
 }
