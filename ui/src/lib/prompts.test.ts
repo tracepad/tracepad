@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+	CUSTOM_ROLE,
 	defaultDiff,
 	diffCeiling,
 	diffParam,
@@ -10,11 +11,14 @@ import {
 	orderLabelEntries,
 	orderLabels,
 	paintDiff,
+	pickRole,
 	problems,
 	promptSearch,
 	readDiff,
+	roleAfter,
 	versionBody,
 	type Draft,
+	type Message,
 	type Prompt
 } from './prompts';
 
@@ -22,7 +26,7 @@ import {
 // Testing): the Save gate per rule, the chip order, the diff painter's
 // classification and the two conversions between a stored body and the form.
 
-const chat = (messages: { role: string; content: string }[]): Draft => ({
+const chat = (messages: Message[]): Draft => ({
 	...emptyDraft('chat'),
 	messages
 });
@@ -86,6 +90,97 @@ describe('the Save gate', () => {
 		expect(problems({ ...draft, name: '-leading' }, true).name).toMatch(/letters, digits/i);
 		expect(problems({ ...draft, name: 'a'.repeat(201) }, true).name).toMatch(/200/);
 		expect(problems({ ...draft, name: 'support.answer_v2-b' }, true)).toEqual({});
+	});
+});
+
+// The role is a select of the roles the runtimes name, with a *Custom…* entry
+// for the rest (spec 021 #16). What is saved is a string either way — `custom`
+// is form state, and the body never carries it.
+describe('the role of a message', () => {
+	it('alternates from the role of the message before it', () => {
+		expect(roleAfter([{ role: 'system', content: '' }])).toBe('user');
+		expect(roleAfter([{ role: 'user', content: '' }])).toBe('assistant');
+		expect(roleAfter([{ role: 'assistant', content: '' }])).toBe('user');
+		// Anything else — a role that is not a turn, a custom one, or no
+		// message at all — opens a `user`; the other five are one click away.
+		expect(roleAfter([{ role: 'tool', content: '' }])).toBe('user');
+		expect(roleAfter([{ role: 'critic', content: '', custom: true }])).toBe('user');
+		expect(roleAfter([])).toBe('user');
+		// By the role, not by the widget it was typed in: a custom role that
+		// reads `user` is a user's turn, and an assistant's follows it.
+		expect(roleAfter([{ role: 'user', content: '', custom: true }])).toBe('assistant');
+	});
+
+	it('opens a role outside the select in custom mode, and the six in it', () => {
+		expect(messagesOf([{ role: 'function', content: 'called' }])).toEqual([
+			{ role: 'function', content: 'called', custom: true }
+		]);
+		// `tool` and `model` are in the select now, so they are not custom.
+		expect(messagesOf([{ role: 'tool', content: 'ok' }])).toEqual([
+			{ role: 'tool', content: 'ok' }
+		]);
+		// A message that arrives with no role at all is a custom one waiting to
+		// be typed, which is what the Save gate then says at the field.
+		expect(messagesOf([{ content: 'orphan' }])).toEqual([
+			{ role: '', content: 'orphan', custom: true }
+		]);
+	});
+
+	it('empties the role when Custom… is picked, and fills it when a role is', () => {
+		const message = { role: 'assistant', content: 'Answering.' };
+		const custom = pickRole(message, CUSTOM_ROLE);
+		expect(custom).toEqual({ role: '', content: 'Answering.', custom: true });
+		// The Save gate is the one of #5: a message needs a role, custom or not.
+		expect(problems(chat([custom]), false)['role:0']).toMatch(/role/i);
+		expect(pickRole(custom, 'developer')).toEqual({
+			role: 'developer',
+			content: 'Answering.',
+			custom: false
+		});
+	});
+
+	// A mis-pick is undoable: straying onto a role in the select — a wheel tick
+	// over a focused one does that — and picking Custom… again brings back what
+	// was typed, rather than costing it (found in review of PR #45).
+	it('brings back the custom role a message strayed off', () => {
+		const [message] = messagesOf([{ role: 'function', content: 'called' }]);
+		const strayed = pickRole(message, 'tool');
+		expect(strayed.role).toBe('tool');
+		expect(strayed.custom).toBe(false);
+
+		const back = pickRole(strayed, CUSTOM_ROLE);
+		expect(back.role).toBe('function');
+		expect(back.custom).toBe(true);
+		expect(versionBody(chat([back])).prompt).toEqual([{ role: 'function', content: 'called' }]);
+	});
+
+	// Only a custom role is remembered. A role from the select is not one, so
+	// Custom… over an `assistant` opens the field empty rather than offering a
+	// role the menu already has.
+	it('remembers nothing from the select itself', () => {
+		const picked = pickRole({ role: 'user', content: 'Asking.' }, 'assistant');
+		expect(picked.typed).toBeUndefined();
+		expect(pickRole(picked, CUSTOM_ROLE).role).toBe('');
+	});
+
+	it('sends a custom role as the string it is', () => {
+		const draft = chat([{ role: ' function ', content: 'called', custom: true }]);
+		expect(problems(draft, false)).toEqual({});
+		expect(versionBody(draft).prompt).toEqual([{ role: 'function', content: 'called' }]);
+	});
+
+	// The `system` a fresh draft opens with is a prefill, and nothing asks for
+	// one: a single `user` turn is a prompt like any other (#16).
+	it('takes a body that holds no system message', () => {
+		const draft = chat([
+			{ role: 'user', content: 'Summarize this.' },
+			{ role: 'assistant', content: 'Sure.' }
+		]);
+		expect(problems(draft, false)).toEqual({});
+		expect(versionBody(draft).prompt).toEqual([
+			{ role: 'user', content: 'Summarize this.' },
+			{ role: 'assistant', content: 'Sure.' }
+		]);
 	});
 });
 
@@ -323,14 +418,16 @@ describe('the draft a version opens as', () => {
 		expect(draft.text).toBe('Be terse.');
 	});
 
-	// A role outside the datalist and a structured content are both stored
+	// A role outside the select and a structured content are both stored
 	// verbatim by the API, so the editor keeps them rather than flattening them
-	// (edge cases).
+	// (edge cases). `function` rather than `tool`: `tool` is one of the six the
+	// select offers now, and this case is about the roles it does not.
 	it('keeps a role it does not know and content that is not a string', () => {
 		const parts = [{ type: 'text', text: 'hi' }];
-		expect(messagesOf([{ role: 'tool', content: parts }])).toEqual([
+		expect(messagesOf([{ role: 'function', content: parts }])).toEqual([
 			{
-				role: 'tool',
+				role: 'function',
+				custom: true,
 				content: '[\n  {\n    "type": "text",\n    "text": "hi"\n  }\n]',
 				// What the document was rendered from, so a save can put it back.
 				structured: parts

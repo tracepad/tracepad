@@ -15,10 +15,45 @@ export const NAME_MAX = 200;
 /** The one label name the server reserves: it always names the highest version. */
 export const RESERVED_LABEL = 'latest';
 
+/**
+ * The roles the runtimes name, offered in the role select (Decision 16): the
+ * union of what they accept — OpenAI's `system`/`developer`/`user`/
+ * `assistant`/`tool`, Anthropic's `user`/`assistant`, Gemini's `user`/`model`.
+ * The API stores any non-empty string (spec 003), which is what *Custom…* is
+ * for.
+ */
+export const ROLES = ['system', 'user', 'assistant', 'developer', 'tool', 'model'] as const;
+
+/**
+ * The select's *Custom…* entry, as a value. Not a role: a message is in custom
+ * mode because it says so (`Message.custom`), never because of what its role
+ * reads — otherwise typing `user` into the custom field would fold the field
+ * away mid-word.
+ *
+ * It opens with U+001F, which no role anybody types can carry, so the entry
+ * cannot be a role by construction rather than by luck — the API stores any
+ * non-empty string. `NUL` would say the same thing and be wrong: an HTML
+ * parser rewrites it to U+FFFD, so a value that ever reached the DOM as markup
+ * would read back as a different string than this constant.
+ */
+export const CUSTOM_ROLE = `${String.fromCharCode(0x1f)}custom`;
+
 /** One message of a chat body, as the editor holds it. */
 export type Message = {
 	role: string;
 	content: string;
+	/**
+	 * Whether the role is edited in the *Custom…* text input rather than picked
+	 * from the select (Decision 16). Form state, not body: what is saved is the
+	 * role string either way.
+	 */
+	custom?: boolean;
+	/**
+	 * The last role typed in the custom field, kept while a role from the select
+	 * is chosen so that coming back to *Custom…* does not lose it. Form state
+	 * like `custom`, and never part of a body.
+	 */
+	typed?: string;
 	/**
 	 * The value `content` was rendered from, when the stored content was not a
 	 * string. The API keeps any JSON value there and returns it verbatim
@@ -79,19 +114,59 @@ export function draftFrom(prompt: Prompt): Draft {
 }
 
 /**
- * A chat body as messages. A role outside the datalist (`tool`, `function`) is
- * the string it is, and content that is not a string — the structured content
- * the API stores verbatim — is kept as its JSON so that saving preserves it
- * rather than flattening it to `[object Object]` (edge cases).
+ * A chat body as messages. A role outside the select (`function`, `critic`) is
+ * the string it is and opens in custom mode (Decision 16), and content that is
+ * not a string — the structured content the API stores verbatim — is kept as
+ * its JSON so that saving preserves it rather than flattening it to
+ * `[object Object]` (edge cases).
  */
 export function messagesOf(body: unknown): Message[] {
 	if (!Array.isArray(body)) return [{ role: 'system', content: '' }];
 	return body.map((message) => {
 		const one = (message ?? {}) as { role?: unknown; content?: unknown };
 		const role = typeof one.role === 'string' ? one.role : '';
-		if (typeof one.content === 'string') return { role, content: one.content };
-		return { role, content: stringify(one.content), structured: one.content };
+		const held = known(role) ? {} : { custom: true };
+		if (typeof one.content === 'string') return { role, content: one.content, ...held };
+		return { role, content: stringify(one.content), structured: one.content, ...held };
 	});
+}
+
+function known(role: string): boolean {
+	return (ROLES as readonly string[]).includes(role);
+}
+
+/**
+ * The role a message added below `messages` opens with (Decision 16): after a
+ * message whose role *reads* `user` an `assistant`, after any other role — and
+ * after no message at all — a `user`. The role, not the widget: a custom role
+ * somebody typed as `user` is a user's turn, and what follows a user's turn is
+ * an assistant's. A conversation alternates; the `system` a fresh draft opens
+ * with is a prefill, and a body that never holds one is valid, so nothing here
+ * reaches for it.
+ */
+export function roleAfter(messages: readonly Message[]): string {
+	return messages.at(-1)?.role === 'user' ? 'assistant' : 'user';
+}
+
+/**
+ * What picking an entry of the role select does to a message. *Custom…* opens
+ * the text input on the custom role this message last had, and empty when it
+ * never had one — an empty role is the Save gate's own sentence at the field
+ * until it is typed (Decision 5). It does not carry a role from the select
+ * over: the entry exists to type another one, and *Custom…* prefilled with
+ * `assistant` says the wrong thing.
+ *
+ * The remembering is what makes a mis-pick undoable: straying onto `tool` over
+ * a message whose role is `function` — a wheel tick over a focused select does
+ * that — is taken back by picking *Custom…* again, rather than costing the
+ * role (found in review of PR #45).
+ */
+export function pickRole(message: Message, choice: string): Message {
+	if (choice === CUSTOM_ROLE) {
+		return { ...message, role: message.custom ? message.role : (message.typed ?? ''), custom: true };
+	}
+	const typed = message.custom && message.role !== '' ? message.role : message.typed;
+	return { ...message, role: choice, custom: false, ...(typed === undefined ? {} : { typed }) };
 }
 
 /**

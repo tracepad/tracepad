@@ -40,6 +40,16 @@ async function call(method: string, path: string, body?: unknown) {
 
 let seeded: Promise<void> | null = null;
 
+/**
+ * The version whose first message carries a custom role, filled in by the
+ * scenario that writes it. The sideways check reads the editor of *that*
+ * version, and a number written down here instead would go on passing once the
+ * tests above it shifted — the editor's failure state renders a heading and
+ * overflows nothing, so the widest role row would quietly stop being checked
+ * (found in review of PR #45).
+ */
+let customRole: number | null = null;
+
 /** Two versions of a chat prompt, `production` left on the first. */
 function seed(): Promise<void> {
 	seeded ??= (async () => {
@@ -170,6 +180,88 @@ test('a new version is written from the one on screen', async ({ page }) => {
 	await expect(page.getByText('You are terse, cite the source, and never guess.')).toBeVisible();
 });
 
+// The role is a select of the roles the runtimes name, and an added message
+// alternates (spec 021 #16). The datalist this replaces was unusable for the
+// one thing it existed for: a browser filters its suggestions by the text
+// already in the field, and the field is never empty.
+test('a role is picked from the select, and an added message alternates', async ({ page }) => {
+	await signIn(page);
+	await page.goto(`/prompts/${CHAT}/versions/new`);
+
+	const role = (n: number) => page.getByLabel(`Role of message ${n}`);
+	await expect(role(1)).toHaveValue('system');
+	await page.getByRole('button', { name: 'Add message' }).click();
+	await expect(role(2)).toHaveValue('user');
+	// And after that `user`, an `assistant` — the conversation, not a column
+	// of the same role.
+	await page.getByRole('button', { name: 'Add message' }).click();
+	await expect(role(3)).toHaveValue('assistant');
+	await page.getByRole('button', { name: 'Remove message 3' }).click();
+
+	await role(2).selectOption('assistant');
+	await page.getByLabel('Content of message 2').fill('Certainly.');
+	await page.getByLabel('Commit message').fill('an assistant turn');
+	await page.getByRole('button', { name: 'Save' }).click();
+
+	await expect(page).toHaveURL(new RegExp(`/prompts/${CHAT}\\?version=4`));
+	await expect(page.getByText('assistant', { exact: true })).toBeVisible();
+	await expect(page.getByText('Certainly.')).toBeVisible();
+});
+
+test('a custom role is saved as it is and opens in the custom field', async ({ page }) => {
+	await signIn(page);
+	await page.goto(`/prompts/${CHAT}/versions/new`);
+
+	await page.getByLabel('Role of message 1').selectOption({ label: 'Custom…' });
+	// The field opens empty, and the Save gate says so at it until it is typed.
+	const custom = page.getByLabel('Message 1 custom role');
+	await expect(custom).toHaveValue('');
+	await expect(page.getByText('A message needs a role.')).toBeVisible();
+	await expect(page.getByRole('button', { name: 'Save' })).toBeDisabled();
+
+	await custom.fill('function');
+	// Strayed onto a role from the menu and back: what was typed is still there
+	// (found in review of PR #45).
+	await page.getByLabel('Role of message 1').selectOption('tool');
+	await expect(page.getByLabel('Message 1 custom role')).toHaveCount(0);
+	await page.getByLabel('Role of message 1').selectOption({ label: 'Custom…' });
+	await expect(page.getByLabel('Message 1 custom role')).toHaveValue('function');
+
+	await page.getByLabel('Commit message').fill('a role the menu does not have');
+	await page.getByRole('button', { name: 'Save' }).click();
+
+	await expect(page).toHaveURL(new RegExp(`/prompts/${CHAT}\\?version=\\d+`));
+	customRole = Number(new URL(page.url()).searchParams.get('version'));
+	await expect(page.getByText('function', { exact: true })).toBeVisible();
+
+	// And the editor of the next version opens it where it was typed, rather
+	// than losing it to the menu (edge cases).
+	await page.getByRole('button', { name: 'New version' }).click();
+	await expect(page.getByLabel('Role of message 1').locator('option:checked')).toHaveText('Custom…');
+	await expect(page.getByLabel('Message 1 custom role')).toHaveValue('function');
+});
+
+// Nothing asks for a `system` message: the one a fresh draft opens with is a
+// prefill, and a body that is a single `user` turn is a prompt like any other.
+test('a chat prompt with no system message is written and read back', async ({ page }) => {
+	const name = 'user-only';
+	await signIn(page);
+	await page.goto('/prompts/new');
+	await page.getByLabel('Name').fill(name);
+	await page.getByLabel('Role of message 1').selectOption('user');
+	await page.getByLabel('Content of message 1').fill('Summarize {{input}}.');
+	await page.getByRole('button', { name: 'Save' }).click();
+
+	await expect(page).toHaveURL(new RegExp(`/prompts/${name}\\?version=1`));
+	await expect(page.getByText('user', { exact: true })).toBeVisible();
+	await expect(page.getByText('Summarize {{input}}.')).toBeVisible();
+
+	// This suite ends on an empty listing and this name has no part in that
+	// story, so it goes back out the way it came in — through the API.
+	const gone = await call('DELETE', `/api/v1/prompts/${name}?confirm=${name}`);
+	expect(gone.ok).toBeTruthy();
+});
+
 test('promoting a label asks first and names the move', async ({ page }) => {
 	await signIn(page);
 	await page.goto(`/prompts/${CHAT}?version=3`);
@@ -286,16 +378,30 @@ test('a text prompt is created from the editor', async ({ page }) => {
 });
 
 test('no screen scrolls the page sideways', async ({ page }) => {
+	// The version the custom-role scenario wrote, not a number written down
+	// here: an editor aimed at a version that is not there renders its failure
+	// state, which has a heading and no overflow either.
+	expect(customRole, 'the version carrying the custom role').not.toBeNull();
+	const widest = `/prompts/${CHAT}/versions/new?from=${customRole}`;
+
 	await signIn(page);
 	for (const path of [
 		'/prompts',
 		`/prompts/${CHAT}`,
 		`/prompts/${CHAT}?diff=1..3`,
 		'/prompts/new',
-		`/prompts/${CHAT}/versions/new?from=3`
+		`/prompts/${CHAT}/versions/new?from=3`,
+		// The custom role (#16) is the widest the role row gets: the select, the
+		// field it reveals and the three buttons beside them.
+		widest
 	]) {
 		await page.goto(path);
 		await expect(page.getByRole('heading').first()).toBeVisible();
+		// And that row is actually on screen, rather than an editor that failed
+		// to load being measured instead.
+		if (path === widest) {
+			await expect(page.getByLabel('Message 1 custom role')).toHaveValue('function');
+		}
 		const overflow = await page.evaluate(() => {
 			const root = document.scrollingElement ?? document.documentElement;
 			return root.scrollWidth - root.clientWidth;
