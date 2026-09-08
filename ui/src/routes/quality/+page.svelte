@@ -137,6 +137,13 @@
 	);
 	/** The detail view is about one series, and shows every type the name has. */
 	const detail = $derived(name ? series : []);
+	/**
+	 * How many score names the endpoint's ceiling left out (spec 025 #24). The
+	 * overview says so rather than passing a `limit` of its own: a screen that
+	 * silently shows the busiest fifty of a hundred names is a screen that
+	 * answers a different question than the one it was asked.
+	 */
+	const omitted = $derived(name ? 0 : (trends?.omitted ?? 0));
 	/** How many scores the detail view is looking at, across its types. */
 	const graded = $derived(
 		detail.reduce((sum, one) => sum + one.buckets.reduce((n, bucket) => n + bucket.count, 0), 0)
@@ -179,7 +186,10 @@
 			<span class="tabular-nums whitespace-nowrap">{count(graded)} scores</span>
 		{:else}
 			<span class="tabular-nums whitespace-nowrap">
-				{count(series.length)} score {series.length === 1 ? 'name' : 'names'}
+				{#if omitted > 0}{count(series.length)} of {count(series.length + omitted)}{:else}{count(
+						series.length
+					)}{/if}
+				score {series.length + omitted === 1 ? 'name' : 'names'}
 			</span>
 		{/if}
 	{/snippet}
@@ -322,5 +332,15 @@
 				</a>
 			{/each}
 		</div>
+		{#if omitted > 0}
+			<p class="text-muted mt-3 text-sm">
+				{count(omitted)} rarer score {omitted === 1 ? 'name' : 'names'} not shown. A narrower window,
+				or an environment, brings the rest within reach — see
+				<a
+					href="https://github.com/tracepad/tracepad/blob/main/docs/quality.md"
+					class="text-accent hover:underline">the quality guide</a
+				>.
+			</p>
+		{/if}
 	{/if}
 </div>

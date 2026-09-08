@@ -57,7 +57,14 @@ const numeric: ScoreSeries = {
 
 describe('parity with the read API', () => {
 	it('offers exactly the parameters the endpoint accepts', () => {
-		expect([...QUALITY_FILTERS].sort()).toEqual(parameters().map((one) => one.name).sort());
+		// `limit` is the one the screen does not carry in its URL, and the
+		// exception is named rather than implied: it caps the size of the
+		// answer instead of narrowing it, so the screen takes the default and
+		// renders `omitted` (spec 025 #24). A new *filter* still fails here.
+		const filters = parameters()
+			.map((one) => one.name)
+			.filter((name) => name !== 'limit');
+		expect([...QUALITY_FILTERS].sort()).toEqual(filters.sort());
 	});
 
 	it('offers exactly the groupings the endpoint accepts, with the same default', () => {
@@ -219,6 +226,16 @@ describe('a score value as somebody reads it', () => {
 		expect(figure(0.25)).toBe('0.25');
 		expect(figure(12.3456)).toBe('12.3');
 		expect(figure(0)).toBe('0');
+	});
+
+	// Nothing bounds a numeric score to 0..1, so `output_tokens` and
+	// `latency_ms` are ordinary names. The command line prints the same cell,
+	// and `internal/cli/quality_test.go` asserts these very numbers there
+	// (spec 025 #25).
+	it('stays a plain decimal above a thousand', () => {
+		expect(figure(1234.5)).toBe('1230');
+		expect(figure(98765)).toBe('98800');
+		expect(figure(-1234.5)).toBe('-1230');
 	});
 });
 

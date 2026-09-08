@@ -15,10 +15,20 @@ const HOUR_B = 1787745600000000000n; // 2026-08-26T12:00:00Z
 /** A window wide enough to hold both, for the URLs that ask for them. */
 const WINDOW = 'from=2026-08-01T00:00:00Z&to=2026-09-30T00:00:00Z';
 
+/**
+ * A third hour, deliberately *outside* `WINDOW`: it holds the fifty-one names
+ * the ceiling of spec 025 #24 truncates, and the tests above count the cards of
+ * their own window.
+ */
+const HOUR_C = 1784109600000000000n; // 2026-07-15T10:00:00Z
+const CROWDED_WINDOW = 'from=2026-07-01T00:00:00Z&to=2026-07-31T00:00:00Z';
+
 const GRADED = 'a0'.padEnd(32, '1');
 const GRADED_SPAN = 'a0'.padEnd(16, '1');
 const SECOND = 'b0'.padEnd(32, '2');
 const SECOND_SPAN = 'b0'.padEnd(16, '2');
+const CROWDED = 'c0'.padEnd(32, '3');
+const CROWDED_SPAN = 'c0'.padEnd(16, '3');
 
 let own: ReturnType<typeof createProject> | null = null;
 const project = () => (own ??= createProject('quality'));
@@ -145,8 +155,19 @@ function seed(): Promise<void> {
 	seeded ??= (async () => {
 		await deliver([
 			{ trace: GRADED, span: GRADED_SPAN, at: HOUR_A + 10_000_000_000n, environment: 'production', release: '2.5.0' },
-			{ trace: SECOND, span: SECOND_SPAN, at: HOUR_B + 10_000_000_000n, environment: 'staging', release: '2.6.0' }
+			{ trace: SECOND, span: SECOND_SPAN, at: HOUR_B + 10_000_000_000n, environment: 'staging', release: '2.6.0' },
+			{ trace: CROWDED, span: CROWDED_SPAN, at: HOUR_C + 10_000_000_000n, environment: 'production', release: '2.4.0' }
 		]);
+		// Fifty-one names on one trace, an hour outside `WINDOW`: one more than
+		// the endpoint returns, which is what the overview has to admit to.
+		await score(
+			Array.from({ length: 51 }, (_, i) => ({
+				id: `c${i.toString(16).padStart(2, '0')}`.padEnd(32, '9'),
+				trace_id: CROWDED,
+				name: `metric-${i.toString().padStart(2, '0')}`,
+				value: 0.5
+			}))
+		);
 		await score([
 			// Numeric on the trace, twice, so a mean is a mean of something.
 			{ id: 'aa'.padEnd(32, '1'), trace_id: GRADED, name: 'hallucination', value: 0.2 },
@@ -294,6 +315,18 @@ test('a score posted after the pass appears after the next one', async ({ page }
 			{ timeout: 30_000, message: 'the late score never reached the rollup' }
 		)
 		.toBe(1);
+});
+
+// A grid of fifty that looked complete would be the one thing worse than a
+// truncated one (spec 025 #24).
+test('the overview admits what the ceiling left out', async ({ page }) => {
+	await signIn(page);
+	await page.goto(`/quality?${CROWDED_WINDOW}&group_by=day`);
+
+	await expect(page.getByText('50 of 51 score names')).toBeVisible();
+	await expect(page.getByText('1 rarer score name not shown')).toBeVisible();
+	// The busiest fifty are what came back, and every one of them is a card.
+	await expect(page.locator('.uplot canvas')).toHaveCount(50);
 });
 
 test('an empty window says how a score is recorded', async ({ page }) => {
