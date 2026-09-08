@@ -9,9 +9,13 @@
 	import { goto } from '$app/navigation';
 	import { ApiError, api } from '$lib/api/client.svelte';
 	import {
+		CUSTOM_ROLE,
+		ROLES,
 		draftFrom,
 		emptyDraft,
+		pickRole,
 		problems,
+		roleAfter,
 		versionBody,
 		type Draft,
 		type PromptType
@@ -305,17 +309,36 @@
 			{:else}
 				{#each draft.messages as message, i (i)}
 					<div class="border-border bg-surface flex flex-col gap-1.5 rounded-md border p-2">
-						<div class="flex items-center gap-1.5">
-							<input
+						<div class="flex flex-wrap items-center gap-1.5">
+							<!-- The roles the runtimes name, plus *Custom…* for the
+							     string the API will store either way (#16). -->
+							<select
 								name="role"
-								list="prompt-roles"
-								bind:value={message.role}
-								oninput={type}
-								autocomplete="off"
-								spellcheck="false"
+								value={message.custom ? CUSTOM_ROLE : message.role}
+								onchange={(event) => {
+									draft.messages[i] = pickRole(message, event.currentTarget.value);
+									type();
+								}}
 								aria-label="Role of message {i + 1}"
 								class="{field} w-32 font-mono"
-							/>
+							>
+								{#each ROLES as role (role)}
+									<option value={role}>{role}</option>
+								{/each}
+								<option value={CUSTOM_ROLE}>Custom…</option>
+							</select>
+							{#if message.custom}
+								<input
+									name="custom-role"
+									bind:value={message.role}
+									oninput={type}
+									autocomplete="off"
+									spellcheck="false"
+									placeholder="function"
+									aria-label="Custom role of message {i + 1}"
+									class="{field} w-28 font-mono"
+								/>
+							{/if}
 							<div class="ml-auto flex items-center gap-0.5">
 								<Button
 									variant="ghost"
@@ -354,16 +377,14 @@
 						{@render problem(`content:${i}`)}
 					</div>
 				{/each}
-				<!-- The three a person means; the API stores any non-empty role,
-				     so `tool` and `function` are typed rather than offered. -->
-				<datalist id="prompt-roles">
-					<option value="system"></option>
-					<option value="user"></option>
-					<option value="assistant"></option>
-				</datalist>
 				<div>
+					<!-- The role alternates from the last message's (#16). -->
 					<Button
-						onclick={() => (draft.messages = [...draft.messages, { role: 'user', content: '' }])}
+						onclick={() =>
+							(draft.messages = [
+								...draft.messages,
+								{ role: roleAfter(draft.messages), content: '' }
+							])}
 					>
 						<Plus class="size-4" />
 						Add message

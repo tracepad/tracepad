@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+	CUSTOM_ROLE,
 	defaultDiff,
 	diffCeiling,
 	diffParam,
@@ -10,11 +11,14 @@ import {
 	orderLabelEntries,
 	orderLabels,
 	paintDiff,
+	pickRole,
 	problems,
 	promptSearch,
 	readDiff,
+	roleAfter,
 	versionBody,
 	type Draft,
+	type Message,
 	type Prompt
 } from './prompts';
 
@@ -22,7 +26,7 @@ import {
 // Testing): the Save gate per rule, the chip order, the diff painter's
 // classification and the two conversions between a stored body and the form.
 
-const chat = (messages: { role: string; content: string }[]): Draft => ({
+const chat = (messages: Message[]): Draft => ({
 	...emptyDraft('chat'),
 	messages
 });
@@ -86,6 +90,70 @@ describe('the Save gate', () => {
 		expect(problems({ ...draft, name: '-leading' }, true).name).toMatch(/letters, digits/i);
 		expect(problems({ ...draft, name: 'a'.repeat(201) }, true).name).toMatch(/200/);
 		expect(problems({ ...draft, name: 'support.answer_v2-b' }, true)).toEqual({});
+	});
+});
+
+// The role is a select of the roles the runtimes name, with a *Custom…* entry
+// for the rest (spec 021 #16). What is saved is a string either way — `custom`
+// is form state, and the body never carries it.
+describe('the role of a message', () => {
+	it('alternates from the role of the message before it', () => {
+		expect(roleAfter([{ role: 'system', content: '' }])).toBe('user');
+		expect(roleAfter([{ role: 'user', content: '' }])).toBe('assistant');
+		expect(roleAfter([{ role: 'assistant', content: '' }])).toBe('user');
+		// Anything else — a role that is not a turn, a custom one, or no
+		// message at all — opens a `user`; the other five are one click away.
+		expect(roleAfter([{ role: 'tool', content: '' }])).toBe('user');
+		expect(roleAfter([{ role: 'critic', content: '', custom: true }])).toBe('user');
+		expect(roleAfter([])).toBe('user');
+	});
+
+	it('opens a role outside the select in custom mode, and the six in it', () => {
+		expect(messagesOf([{ role: 'function', content: 'called' }])).toEqual([
+			{ role: 'function', content: 'called', custom: true }
+		]);
+		// `tool` and `model` are in the select now, so they are not custom.
+		expect(messagesOf([{ role: 'tool', content: 'ok' }])).toEqual([
+			{ role: 'tool', content: 'ok' }
+		]);
+		// A message that arrives with no role at all is a custom one waiting to
+		// be typed, which is what the Save gate then says at the field.
+		expect(messagesOf([{ content: 'orphan' }])).toEqual([
+			{ role: '', content: 'orphan', custom: true }
+		]);
+	});
+
+	it('empties the role when Custom… is picked, and fills it when a role is', () => {
+		const message = { role: 'assistant', content: 'Answering.' };
+		const custom = pickRole(message, CUSTOM_ROLE);
+		expect(custom).toEqual({ role: '', content: 'Answering.', custom: true });
+		// The Save gate is the one of #5: a message needs a role, custom or not.
+		expect(problems(chat([custom]), false)['role:0']).toMatch(/role/i);
+		expect(pickRole(custom, 'developer')).toEqual({
+			role: 'developer',
+			content: 'Answering.',
+			custom: false
+		});
+	});
+
+	it('sends a custom role as the string it is', () => {
+		const draft = chat([{ role: ' function ', content: 'called', custom: true }]);
+		expect(problems(draft, false)).toEqual({});
+		expect(versionBody(draft).prompt).toEqual([{ role: 'function', content: 'called' }]);
+	});
+
+	// The `system` a fresh draft opens with is a prefill, and nothing asks for
+	// one: a single `user` turn is a prompt like any other (#16).
+	it('takes a body that holds no system message', () => {
+		const draft = chat([
+			{ role: 'user', content: 'Summarize this.' },
+			{ role: 'assistant', content: 'Sure.' }
+		]);
+		expect(problems(draft, false)).toEqual({});
+		expect(versionBody(draft).prompt).toEqual([
+			{ role: 'user', content: 'Summarize this.' },
+			{ role: 'assistant', content: 'Sure.' }
+		]);
 	});
 });
 

@@ -163,9 +163,14 @@ by the latest version, not menus of every version. `?diff=3..3` says
 **Writing a version** — *New prompt* takes a name and a type; *New version*
 opens a copy of the version on screen, because an edit *is* a new version. The
 bodies are plain text areas — a prompt has no syntax to lint — one for a text
-prompt, one per message for a chat one, each with a role beside it (`system`,
-`user`, `assistant` offered, anything accepted) and *add*, *remove*, *up*,
-*down*. `config` is the same JSON surface every payload uses. *Save* posts one
+prompt, one per message for a chat one, each with a role beside it and *add*,
+*remove*, *up*, *down*. The role is a menu of the roles the runtimes name —
+`system`, `user`, `assistant`, `developer`, `tool`, `model` — plus *Custom…*,
+which opens a field for any other string, because the API stores whatever role
+you give it; a message that arrives with a role outside the menu opens in that
+field. An added message alternates: after a `user` an `assistant`, after
+anything else a `user`. Nothing requires a `system` message — a body that is
+one `user` turn is a prompt like any other. `config` is the same JSON surface every payload uses. *Save* posts one
 version and lands on it. The gate is the server's own rules mirrored at the
 fields — the name's grammar, a non-empty body, a role and content per message,
 a config that parses, and `latest` refused as a label — so that a `400` naming
