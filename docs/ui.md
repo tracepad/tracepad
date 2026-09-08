@@ -70,6 +70,9 @@ are the endpoint's four (`from`, `to`, `environment`, `user_id`), and a row
 opens the session: its totals over its traces, and a trace opens from there.
 Every number counts traces, which is what a session is a collection of.
 
+The session id in the Traces table and in a trace's header is a link here,
+after the row's own link and the user id.
+
 ## Scores
 
 A judgement about a trace, an observation or a session is shown where its

@@ -106,9 +106,10 @@
 						     (spec 008 #16).
 
 						     It was the *only* tabbable thing in the row until spec 023
-						     made the user id a link too. Two stops rather than one, on
-						     purpose: "everything this account did" is a destination, and
-						     a destination reachable only with a mouse is not one. -->
+						     made the user and the session ids links too. Three stops
+						     rather than one, on purpose: "everything this account did"
+						     and "everything in this session" are destinations, and a
+						     destination reachable only with a mouse is not one. -->
 						<a
 							href="/traces/{row.id}{row.match?.observation_id
 								? `?obs=${encodeURIComponent(row.match.observation_id)}`
@@ -140,7 +141,24 @@
 							{ABSENT}
 						{/if}
 					</td>
-					<td class="text-muted {cell}">{row.session_id ?? ABSENT}</td>
+					<td class="text-muted {cell}">
+						<!-- And the session id is a link to the session (spec 023 #16),
+						     built the same way for the same reason: a session is the
+						     reading unit, and the trace table is where a reader meets
+						     one. The third tab stop in the row. -->
+						{#if row.session_id}
+							<a
+								href="/sessions/{encodeURIComponent(row.session_id)}"
+								onclick={(event) => event.stopPropagation()}
+								title="Everything in {row.session_id}"
+								class="hover:text-fg hover:underline"
+							>
+								{row.session_id}
+							</a>
+						{:else}
+							{ABSENT}
+						{/if}
+					</td>
 					<td class="text-muted {numeric}">{cost(row.total_cost)}</td>
 					<td class="text-muted {numeric}">{duration(row.latency_ms)}</td>
 					<td class="text-muted {numeric}">{wait(row.ttft_ms)}</td>

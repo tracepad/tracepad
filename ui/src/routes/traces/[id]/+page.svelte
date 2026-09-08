@@ -46,6 +46,17 @@
 					{trace.user_id}
 				</a>
 			{/if}
+			<!-- And which session it belongs to, which the header never said at
+			     all until spec 023 #16. -->
+			{#if trace.session_id}
+				<a
+					href="/sessions/{encodeURIComponent(trace.session_id)}"
+					title="Everything in {trace.session_id}"
+					class="hover:text-fg hidden truncate font-mono hover:underline md:inline"
+				>
+					{trace.session_id}
+				</a>
+			{/if}
 			<span class="hidden tabular-nums md:inline">{duration(trace.latency_ms)}</span>
 			<span class="hidden tabular-nums md:inline">{cost(trace.total_cost)}</span>
 			<span class="hidden truncate font-mono lg:inline">{trace.id}</span>

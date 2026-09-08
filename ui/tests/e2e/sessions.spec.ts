@@ -6,6 +6,9 @@ import { state } from './harness';
 // from it. The corpus carries four sessions and traces that name none, so
 // "aggregated from traces" is testable rather than merely asserted.
 
+/** The fixture trace of `session-77`, whose header names both ids. */
+const SESSION_TRACE = '4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f';
+
 async function signIn(page: Page) {
 	await page.goto(state().preAuthed);
 	await expect(page).toHaveURL(/\/traces$/);
@@ -46,10 +49,41 @@ test('a session page opens onto its traces, and a trace into a panel', async ({ 
 	await expect(page.getByText('support-chat')).toBeVisible();
 
 	// Its trace table is a listing like any other (spec 008 #10). The row's
-	// own link is the first one; the second is the user id (spec 023).
+	// own link is the first one; the user id and the session id follow it
+	// (spec 023 #14, #16).
 	await page.locator('tbody tr').last().getByRole('link').first().click();
 	await expect(page).toHaveURL(/\/sessions\/session-77\?peek=[0-9a-f]{32}$/);
 	await expect(page.getByRole('dialog').getByRole('treeitem').first()).toBeVisible();
+});
+
+test('a session id in the traces table opens the session, not the panel', async ({ page }) => {
+	await signIn(page);
+	await page.goto('/traces');
+
+	// The cell's own link stops the row's click, so the reader lands on the
+	// session rather than on a panel over the trace (spec 023 #16).
+	await page.getByRole('link', { name: 'session-77', exact: true }).first().click();
+	await expect(page).toHaveURL(/\/sessions\/session-77$/);
+	await expect(page.getByRole('dialog')).toHaveCount(0);
+	await expect(page.locator('dt').filter({ hasText: /^Traces$/ })).toBeVisible();
+});
+
+// The header carries the session beside the user id from the width the meta
+// survives at; below it the whole meta is out, so this case is a desk.
+test.describe('at a desk', () => {
+	test.use({ viewport: { width: 1280, height: 800 } });
+
+	test("a trace header's session id opens the session", async ({ page }) => {
+		await signIn(page);
+		await page.goto(`/traces/${SESSION_TRACE}`);
+
+		await page
+			.locator('header')
+			.getByRole('link', { name: 'session-77', exact: true })
+			.click();
+		await expect(page).toHaveURL(/\/sessions\/session-77$/);
+		await expect(page.locator('dt').filter({ hasText: /^Traces$/ })).toBeVisible();
+	});
 });
 
 test('an empty listing explains what a session is', async ({ page }) => {
