@@ -497,6 +497,47 @@ func register(server *mcp.Server, api API) {
 		}, "group_by", "unit", "buckets"),
 	}, t.getStats)
 
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "get_score_trends",
+		Annotations: readOnly("Trend the scores"),
+		Description: "Trend quality over time — the user asks whether a score moved, whether a release made the judge happier, " +
+			"which model scores best, or how a metric has been doing lately. " +
+			"Returns one series per score name, each with buckets: a numeric name carries mean, min and max, " +
+			"a boolean name the rate of true, a categorical name the count of each value. " +
+			"A score is counted in the hour of the trace it grades, so these buckets line up with get_stats'. " +
+			"Read `targets`: grouping by model counts only scores that name an observation, because a trace-level score has no model. " +
+			"Pass name to trend one score; without it every name in the range comes back. " +
+			"Does NOT return the individual scores — use list_scores for those — and never counts text scores or " +
+			"scores that name only a session, which have no trace to place them.",
+		InputSchema: object(map[string]*jsonschema.Schema{
+			"group_by": oneOf("What each bucket collects. Default \"day\".",
+				"hour", "day", "environment", "release", "model"),
+			"name":        text("Only the score filed under this name, e.g. \"hallucination\". Absent, every name is a series."),
+			"from":        timestamp("Only scores on traces at or after this RFC 3339 instant."),
+			"to":          timestamp("Only scores on traces strictly before this RFC 3339 instant."),
+			"environment": text("Only scores on traces from this environment."),
+		}),
+		OutputSchema: object(map[string]*jsonschema.Schema{
+			"group_by": oneOf("What each bucket collects.",
+				"hour", "day", "environment", "release", "model"),
+			"targets": oneOf("What was counted: \"observation\" when grouping by model, where a trace-level score cannot appear; "+
+				"\"any\" otherwise, where every score counts once.", "any", "observation"),
+			"series": list(object(map[string]*jsonschema.Schema{
+				"name":      text("What is being measured."),
+				"data_type": oneOf("Which summary each bucket carries.", "numeric", "boolean", "categorical"),
+				"buckets": list(object(map[string]*jsonschema.Schema{
+					"key":        text("The hour, day, environment, release or model this bucket is."),
+					"count":      integer("How many scores fell in this bucket."),
+					"mean":       number("Numeric names only: the mean of the values."),
+					"min":        number("Numeric names only: the smallest value."),
+					"max":        number("Numeric names only: the largest value."),
+					"rate":       number("Boolean names only: the share whose value is 1, between 0 and 1."),
+					"categories": counters("Categorical names only: how many scores carried each value seen."),
+				}, "key", "count"), "One bucket per group, ascending by key."),
+			}, "name", "data_type", "buckets"), "One series per score name, by name."),
+		}, "group_by", "targets", "series"),
+	}, t.getScoreTrends)
+
 	// The eval tools are declared in evals.go, in their own file because
 	// they are their own surface: six reads over datasets and runs.
 	registerEvals(server, t)
@@ -846,6 +887,24 @@ func (t *toolset) getStats(ctx context.Context, req *mcp.CallToolRequest, in get
 	return t.call(ctx, req, "/api/v1/stats", query, summarizeStats)
 }
 
+type getScoreTrendsInput struct {
+	GroupBy     string `json:"group_by"`
+	Name        string `json:"name"`
+	From        string `json:"from"`
+	To          string `json:"to"`
+	Environment string `json:"environment"`
+}
+
+func (t *toolset) getScoreTrends(ctx context.Context, req *mcp.CallToolRequest, in getScoreTrendsInput) (*mcp.CallToolResult, any, error) {
+	query := url.Values{}
+	set(query, "group_by", in.GroupBy)
+	set(query, "name", in.Name)
+	set(query, "from", in.From)
+	set(query, "to", in.To)
+	set(query, "environment", in.Environment)
+	return t.call(ctx, req, "/api/v1/stats/scores", query, summarizeScoreTrends)
+}
+
 // --- summaries ------------------------------------------------------------
 //
 // One line of text beside the structured result: enough for a client that
@@ -1075,6 +1134,35 @@ func summarizeStats(body json.RawMessage) string {
 	}
 	return fmt.Sprintf("%d buckets by %s, %d %ss in total.",
 		len(parsed.Buckets), parsed.GroupBy, total, parsed.Unit)
+}
+
+func summarizeScoreTrends(body json.RawMessage) string {
+	var parsed struct {
+		GroupBy string `json:"group_by"`
+		Targets string `json:"targets"`
+		Series  []struct {
+			Name    string `json:"name"`
+			Buckets []struct {
+				Count int `json:"count"`
+			} `json:"buckets"`
+		} `json:"series"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return "score trends"
+	}
+	if len(parsed.Series) == 0 {
+		return "No score names a trace in that range."
+	}
+	total := 0
+	names := make([]string, 0, len(parsed.Series))
+	for _, series := range parsed.Series {
+		names = append(names, series.Name)
+		for _, bucket := range series.Buckets {
+			total += bucket.Count
+		}
+	}
+	return fmt.Sprintf("%d series by %s (%s), %d scores in total: %s.",
+		len(parsed.Series), parsed.GroupBy, parsed.Targets, total, strings.Join(names, ", "))
 }
 
 func orUnnamed(value string) string {

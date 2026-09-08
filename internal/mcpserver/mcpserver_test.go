@@ -344,8 +344,8 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
-// TestToolListIsTheDeclaredContract: twenty read-only tools, a deterministic
-// order, and the caching hints of #18.
+// TestToolListIsTheDeclaredContract: twenty-one read-only tools, a
+// deterministic order, and the caching hints of #18.
 func TestToolListIsTheDeclaredContract(t *testing.T) {
 	h := newHarness(t)
 	session := h.connect(t)
@@ -367,10 +367,12 @@ func TestToolListIsTheDeclaredContract(t *testing.T) {
 	// as the CLI commands and the screens. The two queue tools are the same
 	// bargain one spec further on (spec 024 #9): reading what is left to
 	// review is an agent question, and posting a verdict is not.
+	// `get_score_trends` came with the endpoint spec 025 #8 added, in the
+	// same PR as the command and the screen.
 	want := []string{"compare_runs", "get_dataset_items", "get_last_trace", "get_observation_io",
-		"get_prompt", "get_queue_items", "get_run", "get_run_items", "get_session", "get_stats",
-		"get_trace", "get_user", "list_datasets", "list_queues", "list_runs", "list_scores",
-		"list_sessions", "list_traces", "list_users", "search"}
+		"get_prompt", "get_queue_items", "get_run", "get_run_items", "get_score_trends",
+		"get_session", "get_stats", "get_trace", "get_user", "list_datasets", "list_queues",
+		"list_runs", "list_scores", "list_sessions", "list_traces", "list_users", "search"}
 	var names []string
 	for _, tool := range result.Tools {
 		names = append(names, tool.Name)
@@ -678,8 +680,8 @@ func TestStdioTransportServesTheSameTools(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tools.Tools) != 20 {
-		t.Fatalf("tools = %d, want the same twenty as over HTTP", len(tools.Tools))
+	if len(tools.Tools) != 21 {
+		t.Fatalf("tools = %d, want the same twenty-one as over HTTP", len(tools.Tools))
 	}
 
 	result, err := session.CallTool(t.Context(), &mcp.CallToolParams{

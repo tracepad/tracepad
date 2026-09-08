@@ -63,6 +63,16 @@ func anything(description string) *jsonschema.Schema {
 	return &jsonschema.Schema{Description: description}
 }
 
+// counters is an object whose keys are data — a categorical score's own values,
+// which no schema can enumerate — and whose values are counts.
+func counters(description string) *jsonschema.Schema {
+	return &jsonschema.Schema{
+		Type:                 "object",
+		AdditionalProperties: integer("How many scores carried this value."),
+		Description:          description,
+	}
+}
+
 // The two id shapes, stated once so a tool and the endpoint behind it cannot
 // disagree about what an id looks like.
 const (
