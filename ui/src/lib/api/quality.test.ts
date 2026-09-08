@@ -241,3 +241,31 @@ describe('the URL state', () => {
 		expect(qualitySearch(new URLSearchParams(), {})).toBe('/quality');
 	});
 });
+
+// A window that starts before anything this server has is a URL somebody can
+// type, and it used to build about 1.1 million instants per series — each one a
+// `Date` and an ISO string — instead of drawing (found in review of PR #44).
+describe('an absurd window', () => {
+	const hourly: ScoreSeries = {
+		name: 'hallucination',
+		data_type: 'numeric',
+		buckets: [{ key: '2026-09-03T10:00:00Z', count: 3, mean: 0.4, min: 0.2, max: 0.6 }]
+	};
+
+	it('anchors the axis to the window end rather than building millions of points', () => {
+		const started = Date.now();
+		const shape = buildScoreSeries(hourly, {
+			from: '1900-01-01T00:00:00Z',
+			to: '2026-09-04T00:00:00Z',
+			bucket: 'hour',
+			now: new Date('2026-09-04T00:00:00Z')
+		});
+
+		expect(shape.x.length).toBeLessThanOrEqual(100_000);
+		expect(Date.now() - started).toBeLessThan(2000);
+		// The window end is what the grid is anchored to, so the data — which
+		// is the one thing here that is not a derivation — is still on it.
+		expect(shape.total).toBe(3);
+		expect(shape.primary[0].values.filter((value) => value !== null)).toEqual([0.4]);
+	});
+});

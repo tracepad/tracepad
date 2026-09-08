@@ -64,6 +64,19 @@ export type ScoreShape = {
 const STEP_MS: Record<Bucket, number> = { hour: 3_600_000, day: 86_400_000 };
 
 /**
+ * A ceiling on how many points one series is asked to hold, the same one
+ * `stats.ts` puts on its own axis. It exists for the absurd window rather than
+ * for the realistic one — 30 days of hours is 720 points — so hitting it means
+ * the window starts before anything this server has, and the grid is anchored
+ * to its end.
+ *
+ * Without it `?from=1900-01-01&group_by=hour` builds about 1.1 million instants
+ * *per series*, each one a `Date` and an ISO string in `key()`, and the tab
+ * stops responding instead of drawing (found in review of PR #44).
+ */
+const MAX_POINTS = 100_000;
+
+/**
  * Builds the aligned lines of one series over the window, one point per bucket
  * the window spans.
  *
@@ -91,7 +104,8 @@ export function buildScoreSeries(
 	// containing the instant just before it.
 	const to = window.to ? boundary(window.to, step, -1) : boundary(window.now.toISOString(), step);
 	if (from !== null && to !== null && to >= from) {
-		for (let at = from; at <= to; at += step) instants.add(at);
+		const start = Math.max(from, to - (MAX_POINTS - 1) * step);
+		for (let at = start; at <= to; at += step) instants.add(at);
 	}
 
 	const x: number[] = [];

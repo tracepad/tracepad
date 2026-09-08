@@ -43,10 +43,15 @@
 		 */
 		range?: [number, number];
 		/**
-		 * Which group of charts share the x cursor. Charts of the same
-		 * question are stacked and read together; two cards about two
-		 * different scores are not, and syncing them would move a cursor a
-		 * reader did not put there.
+		 * Which group of charts share the x cursor. Charts of one question are
+		 * stacked and read together — reading "cost at 14:00" off the second
+		 * while the first says 14:00 is the whole reason they are stacked — so
+		 * they take one key. Cards about *different* scores are not one
+		 * question, and each takes a key of its own; a cursor moving on six of
+		 * them at once is a cursor nobody put there.
+		 *
+		 * The default is the Stats screen's group, which is where every chart
+		 * written before this prop existed belongs.
 		 */
 		sync?: string;
 	} = $props();

@@ -267,6 +267,7 @@
 						format={formatter(one)}
 						range={axisRange(configOf(one))}
 						summary="{one.name} per {bucket} over {count(shape.total)} scores."
+						sync="quality-detail"
 						height={220}
 					/>
 				</div>
@@ -276,6 +277,7 @@
 					lines={[{ label: 'Scores', values: shape.counts, token: 'muted' }]}
 					format={(value) => count(value)}
 					summary="How many scores of this name fell in each {bucket}."
+					sync="quality-detail"
 					height={220}
 				/>
 			</div>
@@ -314,7 +316,7 @@
 						format={formatter(one)}
 						range={axisRange(configOf(one))}
 						summary="{one.name} per {bucket} over {count(shape.total)} scores. Open for the breakdowns."
-						sync="quality-card"
+						sync="quality-card-{one.name}-{one.data_type}"
 						height={120}
 					/>
 				</a>
