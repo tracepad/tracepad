@@ -131,7 +131,16 @@ SDK_BUDGET := 1500
 sdk-lines: ## Report the Python package's application lines against its budget
 	scripts/sdk-lines.sh $(SDK_BUDGET)
 
-precommit: ensure-hooks format-check vet test ui-check ## Full gate (also installed as git pre-commit hook)
+# The documentation's own cross-references (spec 026 #6): a hundred anchors
+# nothing read until now. Cheap enough for the gate — it is awk over seventeen
+# files — and the failure it catches is invisible in review.
+doc-anchors: ## Check every anchor in docs/, README.md and AGENTS.md against its heading
+	scripts/doc-anchors.sh
+
+doc-anchors-self-test: ## Assert the anchor checker against its fixture
+	scripts/doc-anchors.sh --self-test
+
+precommit: ensure-hooks format-check vet test doc-anchors ui-check ## Full gate (also installed as git pre-commit hook)
 
 # git rev-parse --git-path resolves the hooks dir in worktrees too; empty
 # outside a git checkout (e.g. a source tarball), where hooks don't apply.
@@ -150,4 +159,5 @@ install-hooks: ## (Re)install the pre-commit gate hook
 
 .PHONY: help build build-server dev test vet smoke fixtures format format-check \
 	ui ui-deps ui-types ui-types-check ui-check ui-lines image image-check \
-	e2e sdk-test sdk-lines precommit ensure-hooks install-hooks
+	e2e sdk-test sdk-lines doc-anchors doc-anchors-self-test precommit \
+	ensure-hooks install-hooks
