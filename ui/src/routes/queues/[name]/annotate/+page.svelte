@@ -4,7 +4,7 @@
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import { untrack } from 'svelte';
-	import { goto, replaceState } from '$app/navigation';
+	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import {
 		ApiError,
@@ -56,11 +56,20 @@
 		if (annotator.name === null) naming = true;
 	});
 
+	/** Whether anybody has said who they are; the desk opens once this flips. */
+	const anonymous = $derived(annotator.name === null);
+
 	$effect(() => {
 		const wanted = name;
-		if (annotator.name === null) return;
+		if (anonymous) return;
 		const controller = new AbortController();
-		void start(wanted, controller.signal);
+		// The dependency is the *boolean*, and `start` runs untracked: changing
+		// who is reviewing from the header must not restart the desk. It did —
+		// `next` under the new name skipped the item still claimed by the old
+		// one and handed out a different trace, throwing away a filled form and
+		// leaving the abandoned item locked for ten minutes (found in review).
+		// The name is a signature, and signing differently is not a new session.
+		untrack(() => void start(wanted, controller.signal));
 		return () => controller.abort();
 	});
 
@@ -95,8 +104,26 @@
 		item = answer.item;
 		pending = answer.pending;
 		missing = [];
-		const search = answer.item ? `?item=${encodeURIComponent(answer.item.id)}` : '';
-		replaceState(`/queues/${encodeURIComponent(name)}/annotate${search}`, {});
+		// `obs` beside `item`, because that is where `TraceDetail` reads the
+		// observation to open from: an item that names one is about that step
+		// and not the whole run (#12). Without it the desk opened every item on
+		// the tree, and the "an observation that is not in the trace" note had
+		// no way to appear at all (found in review).
+		const search = new URLSearchParams();
+		if (answer.item) {
+			search.set('item', answer.item.id);
+			if (answer.item.observation_id) search.set('obs', answer.item.observation_id);
+		}
+		const query = search.toString();
+		// `goto`, not shallow `replaceState`: every other screen turns a page
+		// this way, and `TraceDetail` reads `obs` off `page.url` — which a
+		// shallow replace leaves where it was, so the panel stayed on the
+		// trace's first span however right the address bar looked.
+		await goto(`/queues/${encodeURIComponent(name)}/annotate${query ? `?${query}` : ''}`, {
+			replaceState: true,
+			keepFocus: true,
+			noScroll: true
+		});
 	}
 
 	// The scores on the item's trace, read once beside it — the same read the

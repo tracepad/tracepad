@@ -96,6 +96,20 @@
 		});
 	}
 
+	/**
+	 * Where a row's link leads — the same place clicking it goes. `peekSearch`
+	 * clears the keys it is not given, so a link built with `peek` alone
+	 * dropped `obs` and a ⌘-click on an observation item opened a tab showing
+	 * the trace tree rather than the step being judged (found in review).
+	 */
+	function itemHref(id: string): string {
+		const row = listing.rows.find((one) => one.id === id);
+		return peekSearch(page.url.searchParams, {
+			peek: id,
+			obs: row?.observation_id ?? null
+		});
+	}
+
 	/** A status filter is a fresh listing: first page, same size. */
 	function narrow(status: string) {
 		const next = status === '' ? {} : { ...filters, status: status as never };
@@ -227,7 +241,7 @@
 		<QueueItemTable
 			rows={listing.rows}
 			onopen={peek}
-			href={(id) => peekSearch(page.url.searchParams, { peek: id })}
+			href={(id) => itemHref(id)}
 			selectedID={peekID}
 			{busyID}
 			onreopen={(item) => act(item, 'reopen')}

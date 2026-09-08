@@ -19,6 +19,8 @@ test.describe.configure({ mode: 'serial' });
 
 /** Fixture 001: one trace, a span and the generation under it. */
 const TRACE = '4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f';
+/** Its generation, which is what an *observation* item points at. */
+const GENERATION = '2b3c4d5e6f7a8b9c';
 /** Fixture 008's traces, so the filter has more than one thing to match. */
 const OTHER_TRACE = WIRE_TRACE;
 /** The three traces the two fixtures land, which is what the filter queues. */
@@ -206,6 +208,124 @@ test('the verdicts are on the trace, and say they came from the queue', async ({
 	// The chip is honest about which surface wrote it (#6).
 	await expect(accuracy).toContainText('annotation');
 	await expect(page.getByRole('button', { name: /tone/ })).toContainText('warm');
+});
+
+// Found in review: `take` wrote only `?item=`, and `TraceDetail` reads the
+// observation to open from `?obs=` — so an observation item opened the desk on
+// the tree, and the step actually being judged was never on screen.
+test('an observation item opens the desk on that observation', async ({ page }) => {
+	await must('PUT', '/api/v1/queues/one-step', { score_configs: ['accuracy'] });
+	await must('POST', '/api/v1/queues/one-step/items', {
+		trace_id: TRACE,
+		observation_id: GENERATION
+	});
+
+	await signIn(page);
+	await page.goto('/queues/one-step/annotate');
+	await page.getByLabel('Name').fill('ada');
+	await page.getByRole('button', { name: 'Start' }).click();
+
+	await expect(page).toHaveURL(new RegExp(`obs=${GENERATION}`));
+	// The panel is on that observation, not on the trace's first span.
+	await expect(page.getByRole('heading', { name: 'chat-completion' })).toBeVisible();
+
+	// And the row on the queue page links to it too: `peekSearch` clears what
+	// it is not given, so the link used to drop `obs` and a ⌘-click landed on
+	// the tree.
+	await page.goto('/queues/one-step');
+	await expect(page.getByRole('row').nth(1).getByRole('link')).toHaveAttribute(
+		'href',
+		new RegExp(`obs=${GENERATION}`)
+	);
+	await must('DELETE', '/api/v1/queues/one-step?confirm=one-step');
+});
+
+// Found in review: the desk's effect depended on the annotator's name, so
+// changing it restarted `start()` — `next` under the new name skipped the item
+// still claimed by the old one and handed out a different trace.
+test('changing who is reviewing keeps the item in hand', async ({ page }) => {
+	await must('PUT', '/api/v1/queues/two-names', { score_configs: ['accuracy'] });
+	await must('POST', '/api/v1/queues/two-names/items', [
+		{ trace_id: TRACE },
+		{ trace_id: OTHER_TRACE }
+	]);
+
+	await signIn(page);
+	await page.goto('/queues/two-names/annotate');
+	await page.getByLabel('Name').fill('ada');
+	await page.getByRole('button', { name: 'Start' }).click();
+	await expect(page.getByTitle('Its place in the queue')).toHaveText('#1');
+	await page.getByLabel('accuracy', { exact: true }).fill('0.7');
+
+	await page.getByRole('button', { name: 'ada', exact: true }).click();
+	await page.getByLabel('Name').fill('bob');
+	await page.getByRole('button', { name: 'Start' }).click();
+
+	// The same item, and the same half-filled form: a signature changed, not a
+	// session.
+	await expect(page.getByRole('button', { name: 'bob', exact: true })).toBeVisible();
+	await expect(page.getByTitle('Its place in the queue')).toHaveText('#1');
+	await expect(page.getByLabel('accuracy', { exact: true })).toHaveValue('0.7');
+	await must('DELETE', '/api/v1/queues/two-names?confirm=two-names');
+});
+
+// Found in review: the desk posted new scores with no id, so a retry after a
+// failed `complete` wrote a *second* row of the same name — two `accuracy`
+// verdicts on one trace, and every mean over that name counting it twice.
+test('a retry after a failed completion writes one score, not two', async ({ page }) => {
+	await must('PUT', '/api/v1/queues/retry', { score_configs: ['accuracy'] });
+	await must('POST', '/api/v1/queues/retry/items', { trace_id: OTHER_TRACE });
+
+	// The completion fails once, after the scores have already been posted —
+	// which is the window the duplicate lived in.
+	let first = true;
+	await page.route('**/items/*/complete', async (route) => {
+		if (!first) return route.continue();
+		first = false;
+		await route.fulfill({
+			status: 409,
+			contentType: 'application/json',
+			body: JSON.stringify({ error: 'item was already completed by bob' })
+		});
+	});
+	// What each attempt posted, because that is where the bug is: the row
+	// count alone cannot tell "posted once, with an id" from "posted twice,
+	// upserting the same id".
+	const posted: (string | undefined)[] = [];
+	await page.route('**/api/v1/scores', async (route) => {
+		if (route.request().method() === 'POST') {
+			posted.push(route.request().postDataJSON()?.id);
+		}
+		await route.continue();
+	});
+
+	await signIn(page);
+	await page.goto('/queues/retry/annotate');
+	await page.getByLabel('Name').fill('ada');
+	await page.getByRole('button', { name: 'Start' }).click();
+	await page.getByLabel('accuracy', { exact: true }).fill('0.25');
+
+	await page.getByRole('button', { name: /Complete/ }).click();
+	await expect(page.getByText(/already completed by bob/)).toBeVisible();
+	await page.getByRole('button', { name: /Complete/ }).click();
+	await expect(page.getByText(/already completed by bob/)).toHaveCount(0);
+
+	// Both attempts posted, and both under the id the form minted — which is
+	// what makes the second one an upsert of the first (spec 003 #3).
+	expect(posted).toHaveLength(2);
+	expect(posted[0]).toMatch(/^[0-9a-f]{32}$/);
+	expect(posted[1]).toBe(posted[0]);
+
+	const scores = await (
+		await call('GET', `/api/v1/scores?trace_id=${OTHER_TRACE}&name=accuracy`)
+	).json();
+	expect(scores.scores).toHaveLength(1);
+	expect(scores.scores[0].value).toBe(0.25);
+
+	await page.unroute('**/api/v1/scores');
+	await page.unroute('**/items/*/complete');
+	await must('DELETE', '/api/v1/queues/retry?confirm=retry');
+	await must('DELETE', `/api/v1/scores/${scores.scores[0].id}`);
 });
 
 test('the desk prefills from a verdict already on the trace', async ({ page }) => {

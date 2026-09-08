@@ -61,6 +61,19 @@ export type DeskField = {
 	form: ScoreForm;
 	/** The score already on the target under this name, when there is one. */
 	existing: Score | null;
+	/**
+	 * The id a *new* score of this name will be written under, minted when the
+	 * field is built and stable for as long as it is on screen.
+	 *
+	 * It is what makes saving retry-safe (found in review). The desk posts the
+	 * scores and then completes, and the completion can fail — the shape was
+	 * not filled, somebody else got there first, the network went. Pressing
+	 * *Complete & next* again re-posts, and without an id `POST /api/v1/scores`
+	 * mints one per call: the second attempt wrote a *second* `accuracy` row on
+	 * the same trace, and every mean over that name counted the verdict twice.
+	 * With an id the re-post is the upsert spec 003 #3 designed it to be.
+	 */
+	newID: string;
 };
 
 /**
@@ -87,6 +100,7 @@ export function deskFields(
 			name,
 			config,
 			existing,
+			newID: newScoreID(),
 			form: existing
 				? formOfScore(existing, configs)
 				: {
@@ -99,6 +113,17 @@ export function deskFields(
 					}
 		};
 	});
+}
+
+/**
+ * A score id of the shape the API mints for itself: 32 lower-case hex
+ * characters (spec 003 #3). Minted here so that a re-post is a correction of
+ * the row this desk already wrote rather than a second one.
+ */
+function newScoreID(): string {
+	const bytes = new Uint8Array(16);
+	crypto.getRandomValues(bytes);
+	return [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
 /**
@@ -144,11 +169,15 @@ export function deskBody(
 	target: { trace_id?: string; observation_id?: string },
 	by: { queue: string; annotator: string }
 ): ScoreInput {
-	return scoreBody(target, field.form, configs, field.existing, {
+	const body = scoreBody(target, field.form, configs, field.existing, {
 		source: 'annotation',
 		queue: by.queue,
 		annotator: by.annotator
 	});
+	// A correction carries the row's own id; a new score carries the one this
+	// field was built with, so posting it twice writes one row.
+	body.id = field.existing ? field.existing.id : field.newID;
+	return body;
 }
 
 /**

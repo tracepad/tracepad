@@ -178,8 +178,9 @@ acceptable.
 
 The **annotation-queue items** pointing at the erased traces go with them
 ([annotation.md](annotation.md)) — an item is a pointer, and the queues keep
-their shape with shorter lists. The verdicts already given are scores on those
-traces and go with the traces.
+their shape with shorter lists. Both the dry run and the answer count them
+under `annotation_items`, beside the traces and the scores. The verdicts
+already given are scores on those traces and go with the traces.
 
 The user's rows in the **per-user rollup** ([users.md](users.md)) go in the
 same request, outright rather than by recomputation: they are about the user,

@@ -33,6 +33,11 @@ type DeleteCounts struct {
 	Prompts      int64
 	PromptLabels int64
 	APIKeys      int64
+	// AnnotationItems are the queue items pointing at the affected traces
+	// (spec 024 #3). Counted because the erasure's answer is what the
+	// operator shows for "everything about this person is gone", and
+	// `docs/admin.md` says these go with the rest.
+	AnnotationItems int64
 	// Oldest is the arrival time of the oldest affected row (Unix
 	// nanoseconds), or zero when nothing is affected.
 	Oldest int64
@@ -211,6 +216,11 @@ func (s *Store) UserDataPreview(projectID, userID string) (DeleteCounts, []Affec
 		`SELECT COUNT(*) FROM scores WHERE project_id = ? AND trace_id IN (`+owned+`)`,
 		projectID, projectID, userID).Scan(&counts.Scores); err != nil {
 		return counts, nil, fmt.Errorf("count a user's scores: %w", err)
+	}
+	if err := s.db.QueryRow(
+		`SELECT COUNT(*) FROM annotation_items WHERE project_id = ? AND trace_id IN (`+owned+`)`,
+		projectID, projectID, userID).Scan(&counts.AnnotationItems); err != nil {
+		return counts, nil, fmt.Errorf("count a user's annotation items: %w", err)
 	}
 	rows, err := s.db.Query(
 		`SELECT r.id, r.dataset, COUNT(*) FROM traces t
@@ -700,8 +710,10 @@ func (e *UserDataErase) apply(tx *sql.Tx) error {
 		return fmt.Errorf("erase scores: %w", err)
 	}
 	// The queues keep their shape; what pointed at the erased traces goes
-	// with them (spec 024 #3), for the same reason the scores do.
-	if _, err := deleteIn(tx,
+	// with them (spec 024 #3), for the same reason the scores do. Counted,
+	// because the response is what an operator shows for "everything about
+	// this person is gone".
+	if e.Counts.AnnotationItems, err = deleteIn(tx,
 		`DELETE FROM annotation_items WHERE project_id = ? AND trace_id IN`,
 		[]any{e.ProjectID}, ids); err != nil {
 		return fmt.Errorf("erase annotation items: %w", err)

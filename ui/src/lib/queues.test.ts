@@ -131,7 +131,15 @@ describe("the desk's form", () => {
 		fresh[0].form.number = '0.9';
 		const created = deskBody(fresh[0], configs, target, { queue: 'weekly', annotator: 'ada' });
 		expect(created.metadata).toEqual(stamp);
-		expect(created.id).toBeUndefined();
+		// A new score carries an id the field minted, not none: the desk posts
+		// the scores and then completes, and a completion that fails is
+		// retried from the same form. Without the id the second post wrote a
+		// second `accuracy` row on the trace (found in review).
+		expect(created.id).toMatch(/^[0-9a-f]{32}$/);
+		fresh[0].form.number = '0.8';
+		expect(deskBody(fresh[0], configs, target, { queue: 'weekly', annotator: 'ada' }).id).toBe(
+			created.id
+		);
 
 		const editing = deskFields(['accuracy'], configs, [score({ metadata: { source: 'api' } })]);
 		editing[0].form.number = '1';

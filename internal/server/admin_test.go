@@ -481,6 +481,15 @@ func TestEraseUserData(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// A review queue holding the trace about to be erased (spec 024 #3): the
+	// item goes with the trace, and the preview and the answer both say so —
+	// they are what an operator shows for "everything about this person is
+	// gone" (found in review of PR #43).
+	h.putConfigs(t, "accuracy")
+	expectStatus(t, h.putQueue(t, "review", "accuracy"), 201)
+	h.addTarget(t, "review", map[string]any{"trace_id": traceHex(1)})
+	h.addTarget(t, "review", map[string]any{"trace_id": traceHex(2)})
+
 	path := "/api/v1/projects/" + h.project.ID + "/users/erase-me/data"
 
 	rec := h.call(t, "DELETE", path, nil)
@@ -496,6 +505,10 @@ func TestEraseUserData(t *testing.T) {
 	}
 	if preview.WouldDelete["traces"] != 1 || preview.WouldDelete["observations"] != 1 {
 		t.Errorf("would_delete = %v, want the one trace and its span", preview.WouldDelete)
+	}
+	// One of the two queued items: the other trace's stays.
+	if preview.WouldDelete["annotation_items"] != 1 {
+		t.Errorf("would_delete = %v, want the erased trace's queue item counted", preview.WouldDelete)
 	}
 	if got := h.countTraces(t); got != 2 {
 		t.Fatalf("traces = %d after a dry run, want both still there", got)
@@ -515,6 +528,13 @@ func TestEraseUserData(t *testing.T) {
 	}](t, rec)
 	if erased.DryRun || erased.Deleted["traces"] != 1 {
 		t.Fatalf("erased = %+v, want the one trace reported as gone", erased)
+	}
+	if erased.Deleted["annotation_items"] != 1 {
+		t.Errorf("erased = %+v, want the queue item reported gone with its trace", erased)
+	}
+	// And the queue itself, with the other trace's item, stands.
+	if counts := h.queueCounts(t, "review"); counts.Pending != 1 {
+		t.Errorf("queue counts = %+v, want the other trace's item to survive", counts)
 	}
 
 	// The other user in this project is untouched, and so is the same id in
