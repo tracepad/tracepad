@@ -25,10 +25,10 @@ jobs:
           cache: npm
           cache-dependency-path: ui/package-lock.json
       - run: make precommit
-      # The anchor checker against its own fixture (spec 026 #6). `precommit`
-      # above runs it over the tree; this run is what says the checker still
-      # finds a broken anchor at all — five cases, two of which must be
-      # reported and three of which must not.
+      # The anchor checker against its own fixture (spec 026 #6, #13).
+      # `precommit` above runs it over the tree; this run is what says the
+      # checker still finds a broken anchor at all: two of the fixture's
+      # links must be reported and the four traps beside them must not.
       - run: make doc-anchors-self-test
       # A signal, not a rule (design §8): the interface's application half has
       # a line budget, and crossing it is a prompt to revise rather than a
