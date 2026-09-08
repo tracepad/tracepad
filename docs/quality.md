@@ -32,10 +32,16 @@ the same discriminator `stats_hourly` uses. So a breakdown by model can only
 show observation-level scores, and the answer says so in its `targets` field
 rather than quietly counting a trace-level score under an empty model.
 
-A **frozen hour** (see [retention.md](retention.md#what-outlives-what)) never
-gains score rows: the traces that would give a score its hour and its tuple are
-gone. Such a score is still listed on its trace and is simply absent from the
-trend.
+A **frozen hour** — one past the project's `retention_days` that this table
+already holds rows for — is left as it stands, the way the statistics of such
+an hour are (see [retention.md](retention.md#what-outlives-what)). An hour past
+the window that this table holds *nothing* for is not frozen: there is nothing
+to protect, so the roll writes whatever the raw rows still say. Usually that is
+nothing, because the sweep took the traces and the scores with them — and such
+a score is absent from the trend while still being listed on its trace, right
+up until retention takes it too. But a year of history *imported* into an
+existing install is past the window by its client timestamps and completely
+intact, and it gets its rows rather than a permanent gap.
 
 ## The four numbers
 
@@ -76,10 +82,18 @@ moves — so each pass also asks which scores were written since the last one an
 re-rolls the hours of the traces they name. An **upsert** of a score moves its
 `created_at` too, so a correction is found by the same question.
 
-**Deleting a score** is the one case a "what changed" question cannot answer,
-because the row is gone. `DELETE /api/v1/scores/{id}` therefore re-rolls that
-score's hour before it answers, the way erasing a user's data does. A frozen
-hour stays as it is.
+Two writes a "what changed" question cannot answer on its own, because both
+leave an hour that nothing afterwards points at:
+
+- **Deleting a score.** The row is gone, so `created_at` can say nothing about
+  it. `DELETE /api/v1/scores/{id}` re-rolls that score's hour before it
+  answers, the way erasing a user's data does.
+- **Moving a score.** A re-POST that re-points a score at a different trace —
+  or drops the target for a session-only one — dirties the hour it moved *to*
+  and leaves the hour it came from counting it. The write re-rolls that hour
+  too, before the `201`.
+
+A frozen hour stays as it is in both cases.
 
 ### On an upgrade
 
