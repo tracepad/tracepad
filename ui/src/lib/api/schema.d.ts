@@ -763,6 +763,199 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/queues": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the annotation queues with their progress
+         * @description Whole, in name order, with no paging: a project has as many review programmes as somebody named. Each carries the score configs a reviewer must fill and the counts of what is pending, completed and skipped.
+         */
+        get: operations["listQueues"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/queues/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One queue: its score configs and its counts */
+        get: operations["getQueue"];
+        /**
+         * Create an annotation queue or replace it whole
+         * @description Declarative, like a score config: the body is the queue, and a re-PUT of the same body writes nothing and answers 200. Every name in `score_configs` must already exist, or the call is a 400 naming the missing one. Changing the list later governs the items not yet completed; nothing re-validates what is already done.
+         */
+        put: operations["putQueue"];
+        post?: never;
+        /**
+         * Delete a queue with its items; a dry run until `?confirm=` echoes the name
+         * @description The list goes and the scores written while annotating stay: they are attached to the trace, not to the queue. Without `confirm` it answers with the count and changes nothing.
+         */
+        delete: operations["deleteQueue"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/queues/{name}/items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The queue's items oldest first, filtered and cursor-paginated
+         * @description In `seq` order — the order they were added is the order they are worked in — and paging both ways like every other listing.
+         */
+        get: operations["listQueueItems"];
+        put?: never;
+        /**
+         * Add one target or an array of them; a target already queued counts as existing
+         * @description All or nothing, and idempotent: a trace or observation the queue already holds comes back as the item it already is, whatever its status, so a retried script does not double the queue. The target need not exist yet — an item may be queued for a trace whose spans are still in flight.
+         */
+        post: operations["addQueueItems"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/queues/{name}/items/from-traces": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add the newest traces a listing filter matches, capped by `limit`
+         * @description The filters are the trace listing's own, with the same names and the same validation, so "queue what I am looking at" is one call with no second grammar. The newest `limit` matches are added as trace items; `capped` says more matched than were taken, and a second call with `to=` set at the oldest added continues. With no filter at all it takes the newest `limit` traces of the project.
+         */
+        post: operations["addQueueItemsFromTraces"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/queues/{name}/next": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The next item to annotate, claimed for ten minutes
+         * @description Hands out the annotator's own unexpired claim if they have one — a reload must not hand a reviewer a different trace mid-verdict — and otherwise the oldest pending item nobody holds, claiming it for ten minutes. The window is a constant, not a setting. `item` is null when nothing is claimable, and `pending` then counts what other people are holding. Any completion, skip or reopen clears the claim; reading an item does not take one.
+         */
+        get: operations["nextQueueItem"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/queues/{name}/items/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One item
+         * @description A read, and only a read: it takes no claim.
+         */
+        get: operations["getQueueItem"];
+        put?: never;
+        post?: never;
+        /**
+         * Remove one item from the queue
+         * @description No dry run and no echo: a re-add recreates the row, and the scores it was about were never in this table.
+         */
+        delete: operations["deleteQueueItem"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/queues/{name}/items/{id}/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark an item done; refused unless every score the queue asks for is on its target
+         * @description The queue promised a shape, and *completed* means the shape was filled — checked here, against the scores actually stored, whoever wrote them: a judge's verdict already on the trace counts, which is what lets a reviewer confirm one rather than repeat it. A trace item needs scores that name no observation, and an observation item scores that name its own. A 409 carries `missing` with the names that are not there; a second completion is a 409 naming who got there first.
+         */
+        post: operations["completeQueueItem"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/queues/{name}/items/{id}/skip": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark an item skipped, with the reason
+         * @description Not every trace deserves a verdict, and the reason is what makes that readable on the queue page afterwards. The claim is released. A *completed* item is refused with a 409 naming who completed it: a skip writes the same columns a completion filled, so it would destroy the record rather than add to it — reopen it first.
+         */
+        post: operations["skipQueueItem"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/queues/{name}/items/{id}/reopen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Return a completed or skipped item to pending
+         * @description For the manager who disagrees with a verdict or wants a skip looked at again. An item that is already pending is not refused: what reopening does to it is release the claim, which is what the desk's *Later* asks for. The scores stay where they are — reopening asks for another look, not for a retraction.
+         */
+        post: operations["reopenQueueItem"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects": {
         parameters: {
             query?: never;
@@ -891,7 +1084,7 @@ export interface paths {
         post?: never;
         /**
          * Erase everything stored about one user
-         * @description Erases the queryable stores synchronously: the traces filed under the user id, their observations, payloads and scores. Raw OTLP bodies are not touched — they are an archive expiring on the raw retention window, which docs/retention.md documents together with what that means for an erasure request. Without `confirm` it answers with the preview; the echo here is the user id.
+         * @description Erases the queryable stores synchronously: the traces filed under the user id, their observations, payloads and scores, and the annotation-queue items pointing at those traces — counted under `annotation_items` in both the preview and the answer. Raw OTLP bodies are not touched — they are an archive expiring on the raw retention window, which docs/retention.md documents together with what that means for an erasure request. Without `confirm` it answers with the preview; the echo here is the user id.
          */
         delete: operations["eraseUserData"];
         options?: never;
@@ -1152,6 +1345,66 @@ export interface components {
             secret_key: string;
             /** Format: date-time */
             created_at?: string;
+            note?: string;
+        };
+        /** @description One review programme: a named list of traces or observations and the score names a reviewer must set on each of them (spec 024). */
+        AnnotationQueue: {
+            name: string;
+            description: string;
+            /** @description The score names a reviewer must fill, in the order the desk asks for them. A name whose config was deleted since stays here: the queue keeps asking for it, and a PUT is how to drop it */
+            score_configs: string[];
+            counts: {
+                pending: number;
+                completed: number;
+                skipped: number;
+            };
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /** @description What an add names: one trace, or one observation of it. Neither id is looked up — an item may be queued for a trace still in flight — but both are checked for shape, because nothing else can ever be a trace of this store. */
+        QueueTarget: {
+            trace_id: string;
+            /** @description Absent means the item is the trace itself */
+            observation_id?: string;
+        };
+        /** @description One trace, or one observation of a trace, waiting for a verdict. A field it has nothing to say about is absent rather than empty. */
+        AnnotationItem: {
+            id: string;
+            trace_id: string;
+            /** @description Absent when the item is the trace itself */
+            observation_id?: string;
+            /** @enum {string} */
+            status: "pending" | "completed" | "skipped";
+            /** @description Its place in the queue, monotonic per queue and never reused */
+            seq: number;
+            /** Format: date-time */
+            added_at: string;
+            /** @description Who `next` handed it to; absent when nothing holds it */
+            claimed_by?: string;
+            /**
+             * Format: date-time
+             * @description When the claim expires and the item is claimable again
+             */
+            claimed_until?: string;
+            /** @description Who completed or skipped it */
+            completed_by?: string;
+            /** Format: date-time */
+            completed_at?: string;
+            skip_reason?: string;
+        };
+        /** @description What deleting a queue takes: its items, and nothing else. `confirm` and `note` are present on the dry run only; `deleted` on the confirmed answer only. */
+        QueueDeletion: {
+            dry_run: boolean;
+            name: string;
+            would_delete: {
+                items: number;
+            };
+            /** @constant */
+            deleted?: true;
+            /** @description Send this back as `?confirm=` to make it happen */
+            confirm?: string;
             note?: string;
         };
         /** @description What a destructive request would do, which is what it does until it is confirmed */
@@ -1584,6 +1837,10 @@ export interface components {
         DatasetVersion: number;
         ItemID: string;
         RunID: string;
+        /** @description The prompt-name grammar: one URL path segment */
+        QueueName: string;
+        /** @description The name of the queue being destroyed. Without it the endpoint changes nothing and answers with the count; a value that does not match is a 400 that also changes nothing. */
+        ConfirmQueueName: string;
         /** @description A score name: any name a score may carry can have a config */
         ScoreConfigName: string;
     };
@@ -3445,6 +3702,487 @@ export interface operations {
                     "application/json": {
                         name: string;
                     };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listQueues: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every queue */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        queues: components["schemas"]["AnnotationQueue"][];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    getQueue: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The prompt-name grammar: one URL path segment */
+                name: components["parameters"]["QueueName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The queue */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnnotationQueue"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    putQueue: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The prompt-name grammar: one URL path segment */
+                name: components["parameters"]["QueueName"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description What this queue is for, as its author wrote it */
+                    description?: string;
+                    /** @description The score names a reviewer must set on every item, in the order the desk asks for them. Each must be a declared score config, and no name twice. */
+                    score_configs: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description The queue was replaced, or the body said what it already said */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnnotationQueue"];
+                };
+            };
+            /** @description The queue was created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnnotationQueue"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    deleteQueue: {
+        parameters: {
+            query?: {
+                /** @description The name of the queue being destroyed. Without it the endpoint changes nothing and answers with the count; a value that does not match is a 400 that also changes nothing. */
+                confirm?: components["parameters"]["ConfirmQueueName"];
+            };
+            header?: never;
+            path: {
+                /** @description The prompt-name grammar: one URL path segment */
+                name: components["parameters"]["QueueName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description What went, or the dry run of what would */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QueueDeletion"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listQueueItems: {
+        parameters: {
+            query?: {
+                /** @description Keeps items in one state. A spelling outside the list is a 400 */
+                status?: "pending" | "completed" | "skipped";
+                /** @description Keeps the items this name has: the ones it completed or skipped, and the pending ones it is holding a claim on. `completed_by` is empty on a pending item, so matching it alone would answer "nothing open" for somebody who is working through the queue */
+                annotator?: string;
+                /** @description Out of range is a 400, not a silent clamp */
+                limit?: components["parameters"]["Limit"];
+                /** @description The opaque `next_cursor` or `prev_cursor` of a previous page */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description Which way to page from the cursor. With no cursor, `next` is the newest page and `prev` the oldest — both ends are a direction rather than an offset. Rows come back newest first either way */
+                direction?: components["parameters"]["Direction"];
+                /** @description Adds `total` and `total_capped`: how many rows the filters match, counted up to 1000. Off by default, because the count changes with the filters and not with the page */
+                count?: components["parameters"]["Count"];
+            };
+            header?: never;
+            path: {
+                /** @description The prompt-name grammar: one URL path segment */
+                name: components["parameters"]["QueueName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of items */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        queue: string;
+                        items: components["schemas"]["AnnotationItem"][];
+                        /** @description Pass back as `?cursor=` for the next page; null on the last one */
+                        next_cursor: string | null;
+                        /** @description Pass back with `?direction=prev` for the page before; null on the first one */
+                        prev_cursor: string | null;
+                        /** @description Present only with `?count=`: how many items the filters match, capped at 1000 */
+                        total?: number;
+                        /** @description Present only with `?count=`: the count stopped at the cap */
+                        total_capped?: boolean;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    addQueueItems: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The prompt-name grammar: one URL path segment */
+                name: components["parameters"]["QueueName"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QueueTarget"] | components["schemas"]["QueueTarget"][];
+            };
+        };
+        responses: {
+            /** @description The items the targets resolve to */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description In input order, the id of each target's item — the one just added or the one already there */
+                        ids: string[];
+                        added: number;
+                        /** @description Targets the queue already held */
+                        existing: number;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    addQueueItemsFromTraces: {
+        parameters: {
+            query?: {
+                /** @description RFC 3339, inclusive. The range is half-open, so walking a timeline never reports a row twice. */
+                from?: components["parameters"]["From"];
+                /** @description RFC 3339, exclusive */
+                to?: components["parameters"]["To"];
+                /** @description Exact match on the environment a trace ran in */
+                environment?: components["parameters"]["Environment"];
+                /** @description Exact match on the trace's user id */
+                user_id?: string;
+                /** @description Exact match on the trace's session id */
+                session_id?: string;
+                /** @description Exact match on the trace name */
+                name?: string;
+                /** @description Repeatable; a trace must carry every tag given */
+                tag?: string[];
+                /** @description `error` keeps traces with at least one failed observation, `ok` keeps the rest */
+                status?: "error" | "ok";
+                /** @description Keeps traces whose total cost is at least this much */
+                min_cost?: number;
+                /** @description Full-text search over one field of one observation — input, output, metadata, name or status message — or over the trace name. Words (all must occur), `"quoted phrases"`, `prefix*`. Words, not substrings: `error` does not find `errors`, `err*` finds both. Case and diacritics are folded, identifiers split on punctuation, and only the first 64 KiB of each payload is indexed. A `q` with no word in it is a 400 */
+                q?: components["parameters"]["Search"];
+                /** @description Exact match on the deployment the trace ran in, from `langfuse.release` or the resource's `service.version` */
+                release?: components["parameters"]["Release"];
+                /** @description Exact match on the version of the trace's own logic, from `langfuse.version` */
+                version?: components["parameters"]["Version"];
+                /** @description Keeps traces with at least one observation of this kind. Exact: `generation` does not match `embedding`. A value outside the list is a 400 */
+                type?: components["parameters"]["ObservationType"];
+                /** @description `name` or `name@version`: keeps traces with at least one observation that ran this prompt, at any version or at that one. A version is a run of digits after the last `@` with a name in front of it; every other string is a name, `@` included — `@acme/support`, `team@acme/answer`, `name@latest` and `svc@-1` all filter as names. A label is not a version */
+                prompt?: components["parameters"]["Prompt"];
+                /** @description Keeps the traces of one dataset run. A value of another shape is a 400: the ingest mapper claims nothing else into the column, so it could only match nothing */
+                run_id?: components["parameters"]["RunFilter"];
+                /** @description Keeps the attempts at one dataset item, across runs unless `run_id` narrows it */
+                item_id?: components["parameters"]["ItemFilter"];
+                /** @description How many traces this call may add. Out of range is a 400, not a silent clamp */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                /** @description The prompt-name grammar: one URL path segment */
+                name: components["parameters"]["QueueName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description What the filter matched and what was added */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description How many traces the filter matches, counted exactly */
+                        matched: number;
+                        added: number;
+                        /** @description Matches the queue already held */
+                        existing: number;
+                        /** @description More matched than `limit` allowed; the rest are still waiting */
+                        capped: boolean;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    nextQueueItem: {
+        parameters: {
+            query: {
+                /** @description Who is asking. Written to `claimed_by`, and to `completed_by` when they finish */
+                annotator: string;
+            };
+            header?: never;
+            path: {
+                /** @description The prompt-name grammar: one URL path segment */
+                name: components["parameters"]["QueueName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The item to work on, or nothing to work on */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        item: components["schemas"]["AnnotationItem"] | null;
+                        /** @description Pending items in the queue, other people's claims included */
+                        pending: number;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getQueueItem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The prompt-name grammar: one URL path segment */
+                name: components["parameters"]["QueueName"];
+                id: components["parameters"]["ItemID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The item */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnnotationItem"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteQueueItem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The prompt-name grammar: one URL path segment */
+                name: components["parameters"]["QueueName"];
+                id: components["parameters"]["ItemID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The item is gone */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        id: string;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    completeQueueItem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The prompt-name grammar: one URL path segment */
+                name: components["parameters"]["QueueName"];
+                id: components["parameters"]["ItemID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    annotator: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The completed item */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnnotationItem"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            /** @description A score the queue asks for is missing, or somebody else completed it first */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        /** @description The score config names with no score on the target */
+                        missing?: string[];
+                    };
+                };
+            };
+        };
+    };
+    skipQueueItem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The prompt-name grammar: one URL path segment */
+                name: components["parameters"]["QueueName"];
+                id: components["parameters"]["ItemID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    annotator: string;
+                    /** @description Why it was skipped; shown on the queue page */
+                    reason?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The skipped item */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnnotationItem"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    reopenQueueItem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The prompt-name grammar: one URL path segment */
+                name: components["parameters"]["QueueName"];
+                id: components["parameters"]["ItemID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    annotator: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The item, pending again */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnnotationItem"];
                 };
             };
             400: components["responses"]["BadRequest"];

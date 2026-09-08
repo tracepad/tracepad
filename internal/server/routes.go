@@ -103,6 +103,24 @@ func (s *Server) routes() []route {
 		{"GET", "/api/v1/score-configs/{name}", "One score config", s.handleGetScoreConfig},
 		{"DELETE", "/api/v1/score-configs/{name}", "Remove a score config; the scores it admitted stay", s.handleDeleteScoreConfig},
 
+		// Annotation queues (spec 024): what to review, who reviewed
+		// it, and the hand-out that keeps two people off one trace.
+		// `next` is a GET that writes — it claims — because claiming is
+		// what being handed an item means (#5).
+		{"GET", "/api/v1/queues", "List the annotation queues with their progress", s.handleListQueues},
+		{"PUT", "/api/v1/queues/{name}", "Create an annotation queue or replace it whole", s.handlePutQueue},
+		{"GET", "/api/v1/queues/{name}", "One queue: its score configs and its counts", s.handleGetQueue},
+		{"DELETE", "/api/v1/queues/{name}", "Delete a queue with its items; a dry run until `?confirm=` echoes the name. The scores stay", s.handleDeleteQueue},
+		{"POST", "/api/v1/queues/{name}/items", "Add one target or an array of them; a target already queued counts as existing", s.handleAddItems},
+		{"POST", "/api/v1/queues/{name}/items/from-traces", "Add the newest traces a listing filter matches, capped by `limit`", s.handleAddItemsFromTraces},
+		{"GET", "/api/v1/queues/{name}/items", "The queue's items oldest first, filtered and cursor-paginated", s.handleListQueueItems},
+		{"GET", "/api/v1/queues/{name}/next", "The next item to annotate, claimed for ten minutes", s.handleNextItem},
+		{"GET", "/api/v1/queues/{name}/items/{id}", "One item", s.handleGetQueueItem},
+		{"POST", "/api/v1/queues/{name}/items/{id}/complete", "Mark an item done; refused unless every score the queue asks for is on its target", s.handleCompleteItem},
+		{"POST", "/api/v1/queues/{name}/items/{id}/skip", "Mark an item skipped, with the reason", s.handleSkipItem},
+		{"POST", "/api/v1/queues/{name}/items/{id}/reopen", "Return a completed or skipped item to pending", s.handleReopenItem},
+		{"DELETE", "/api/v1/queues/{name}/items/{id}", "Remove one item from the queue", s.handleDeleteQueueItem},
+
 		// Administration (spec 005). Every destructive one is a dry run
 		// until `?confirm=` echoes the name — or the user id — of what
 		// it destroys (spec 005 #8). None of this reaches MCP, which

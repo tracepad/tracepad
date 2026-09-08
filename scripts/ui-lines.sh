@@ -21,13 +21,22 @@
 # was raised by the spec before the one that spends it, because a budget raised
 # by the spec that spends it is no budget.
 #
-# 16,000 is the owner's decision of 2026-09-07, taken for the *known* set
-# rather than for this spec: 14,000 was reached at 13,895 with two screens
+# 16,000 was the owner's decision of 2026-09-07, taken for the *known* set
+# rather than for one spec: 14,000 was reached at 13,895 with two screens
 # landed and nothing left to cut, and the design's own list still holds the
 # annotation queue and the quality trends. Raising it once for that set is the
 # honest move; raising it per spec would be exactly the drift the number exists
 # to catch. It stays a warning either way (design §8.2): a signal to revise,
 # not a rule to satisfy.
+#
+# 18,000 is the owner's decision of 2026-09-08 (spec 024 #17), and it is what
+# the estimate above was measured against: the annotation queues came to ~1,750
+# lines where ~1,250 was planned, and the saving spec 024 #14 expected from
+# extracting `ScoreControl` was not there — the component boundary costs props
+# and types, and its second consumer arrived in the same spec that made it. The
+# quality trends are still on the list. The revision the warning asked for is a
+# PR of its own: the traces and sessions listings are twins at ~400 lines each
+# and have never been read side by side.
 #
 # What it counts, though, has: the budget covers the application, and the tests
 # are reported beside it under no ceiling at all (design §8, amended; spec 010
@@ -41,7 +50,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BUDGET="${1:-16000}"
+BUDGET="${1:-18000}"
 
 cd "$ROOT"
 

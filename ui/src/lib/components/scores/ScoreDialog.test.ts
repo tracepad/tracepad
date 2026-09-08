@@ -78,31 +78,7 @@ beforeEach(() => {
 	document.body.style.pointerEvents = '';
 });
 
-describe('the control the config dictates', () => {
-	it('gives a bounded number field to a numeric name', async () => {
-		dialog();
-
-		// `accuracy` is the first config, which is what a fresh dialog opens on.
-		const value = screen.getByLabelText('Value');
-		expect(value).toHaveAttribute('type', 'number');
-		expect(value).toHaveAttribute('min', '0');
-		expect(value).toHaveAttribute('max', '1');
-		// No type radio: the config already says what the name means.
-		expect(screen.queryByRole('radio')).toBeNull();
-	});
-
-	it('gives a categorical name its categories and nothing else', async () => {
-		const user = dialog();
-		await user.selectOptions(screen.getByLabelText('Name'), 'verdict');
-
-		const value = screen.getByLabelText('Value');
-		expect([...value.querySelectorAll('option')].map((one) => one.value)).toEqual([
-			'',
-			'correct',
-			'wrong'
-		]);
-	});
-
+describe('the name the control comes from', () => {
 	// A project that declared no configs has only the free path, and the
 	// dialog opens on it. That the form then survives the configs *landing*
 	// is not testable here — `@testing-library/svelte` keeps every prop in
@@ -118,19 +94,9 @@ describe('the control the config dictates', () => {
 		expect(screen.getAllByRole('option')).toHaveLength(1);
 	});
 
-	// A boolean's value is two buttons, so there is no `#score-value` for a
-	// `for` to point at — the group borrows the label instead of leaving it
-	// dangling (found in review of PR #41).
-	it('labels the boolean value group with the label above it', async () => {
-		const user = dialog();
-		await user.selectOptions(screen.getByLabelText('Name'), 'passed');
-
-		const group = screen.getByRole('group', { name: 'Value' });
-		expect(group).toContainElement(screen.getByRole('button', { name: 'yes' }));
-		// Nothing claims an id nothing carries.
-		expect(document.querySelector('label[for="score-value"]')).toBeNull();
-	});
-
+	// The control itself is `ScoreControl` and is tested beside it
+	// (spec 024 #12); what is the dialog's own is which config is picked, and
+	// that a name the project never declared has to say what it means first.
 	it('asks the free-name path for a type before it asks for a value', async () => {
 		const user = dialog();
 		// The dialog opens on the first declared name; *other…* is the way
@@ -147,6 +113,15 @@ describe('the control the config dictates', () => {
 		await user.click(screen.getByRole('button', { name: 'yes' }));
 
 		expect(save()).toBeEnabled();
+	});
+
+	it('rebuilds the control when another name is picked', async () => {
+		const user = dialog();
+		expect(screen.getByLabelText('Value')).toHaveAttribute('type', 'number');
+
+		await user.selectOptions(screen.getByLabelText('Name'), 'verdict');
+
+		expect(screen.getByLabelText('Value').tagName).toBe('SELECT');
 	});
 });
 

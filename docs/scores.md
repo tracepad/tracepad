@@ -253,6 +253,20 @@ A score written there carries `metadata: {"source": "web"}` and no
 now. Nothing else is different — it is this API, called from a browser. See
 [ui.md](ui.md#scores).
 
+## From an annotation queue
+
+A review programme — a named list of traces and the score names a reviewer
+must set on each of them — is [annotation.md](annotation.md). It stores no
+verdicts of its own: a queue item is *completed* exactly when the scores it
+asked for are on its target, checked here, whoever wrote them. A judge's
+verdict already on the trace therefore counts, and the reviewer confirms it
+rather than repeating it.
+
+Scores written from the annotation desk carry
+`metadata: {"source": "annotation", "queue": …, "annotator": …}`, so the chip
+on the trace says where the verdict came from and "everything ada decided in
+the weekly review" is a filter over the scores you already have.
+
 ## Responses
 
 | Status | Meaning |

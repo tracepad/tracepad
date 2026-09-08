@@ -180,8 +180,10 @@ they recorded, so the trace filter goes on answering for it.
 ## Evals
 
 The sidebar's *Evals* section is the eval nouns of [datasets.md](datasets.md)
-on screen: **Datasets**, **Runs** and **Score configs**. Every table is the
-shared listing (pages in the URL, the bar underneath), every row opens in the
+on screen — **Datasets**, **Runs** and **Score configs** — and the review
+queues of [annotation.md](annotation.md) beside them ([Queues](#queues)).
+Every table is the shared listing (pages in the URL, the bar underneath),
+every row opens in the
 peek panel, and every payload is the same surface as a trace's. Nothing is
 computed here that the API did not send: a mean, a verdict, a delta are the
 server's, so the screen, the CLI and the MCP tools cannot disagree about
@@ -298,6 +300,61 @@ gesture lands in an editor rather than in a *saved* toast.
 Every empty state teaches the CLI: a project with no datasets shows the whole
 loop in six lines, a dataset with no items the `push` that fills it, a run
 with no traces the attributes that link them.
+
+## Queues
+
+The fourth child of *Evals* is the review programmes of
+[annotation.md](annotation.md): a named list of traces somebody decided
+deserve a human verdict, and the score names that verdict is made of.
+
+**Queues** — one row per queue over `GET /api/v1/queues`, whole and in name
+order (a project has as many queues as review programmes, so there is nothing
+to page): name, description, the scores as chips, and a bar of how far it has
+got — completed filled, skipped hatched. A skip is progress that produced no
+verdict, which is why it is not the same colour. *New queue* takes a name and
+a multi-select over the project's [score configs](#evals), in the order a
+reviewer will be asked for them; a project that has declared none is sent to
+declare one, because a queue may only name a config that exists.
+
+**Queue** — the header carries the description, the score chips and the same
+progress bar, plus *Start annotating* and *Delete*. Under it, the items in the
+order they were added, which is the order they are worked in: position,
+target, status, who finished with it, when, and the skip reason. `?status=`
+narrows it. A row opens **the trace** in the peek panel — that is what an item
+points at — and an item that names an observation opens on it. *Reopen* puts a
+completed or skipped item back in the queue; *Remove* takes it out of the list
+and touches no score. *Delete* is the echo ceremony every destructive act
+wears, and its note says the part that matters: the scores written while
+annotating stay.
+
+**The desk** (`/queues/{name}/annotate`) is the point of the section: read,
+judge, next, with nothing to navigate. It asks once for a name to sign
+verdicts with and keeps it in the browser — a signature, not a credential,
+changeable from the header, which is what a shared machine needs. Then the
+trace on the left, exactly as every other screen shows it, and on the right
+one control per score the queue asks for, built by the same rule the *Score*
+dialog uses: the config decides the field.
+
+The form arrives **prefilled** from the scores already on the target, whoever
+wrote them — a judge's verdict is a verdict, and the reviewer confirms or
+edits it rather than repeating it. *Complete & next* posts what changed and
+then completes the item; the server checks the shape against the stored scores
+and a refusal marks the controls it names. *Skip…* asks for a reason. *Later*
+releases the claim and leaves, so nobody waits out its ten minutes.
+
+An item is claimed for ten minutes when it is handed out, so two people at one
+desk do not review one trace twice; a reload resumes the same item rather than
+moving the reviewer mid-verdict, and `?item=` in the URL says which. When
+there is nothing to take, the screen says whether the queue is finished or
+whether the rest is claimed by somebody else.
+
+**Adding to a queue** — two gestures, each where the choice is made. A trace
+header and an observation panel carry *Add to queue*: pick the programme, and
+the answer says *added* or *already in the queue*. The traces listing carries
+*Add to queue…* beside the filter bar: it names how many traces the filters
+match before the call, queues the newest of them up to the endpoint's cap of
+1,000, and above that cap it is disabled with the reason — a queue is a list
+somebody has to work through.
 
 ## Turning pages
 

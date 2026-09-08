@@ -1,5 +1,6 @@
 <script lang="ts" module>
 	import ChartLine from '@lucide/svelte/icons/chart-line';
+	import ClipboardCheck from '@lucide/svelte/icons/clipboard-check';
 	import Database from '@lucide/svelte/icons/database';
 	import FlaskConical from '@lucide/svelte/icons/flask-conical';
 	import ListTree from '@lucide/svelte/icons/list-tree';
@@ -36,7 +37,11 @@
 			children: [
 				{ href: '/datasets', label: 'Datasets', icon: Database },
 				{ href: '/runs', label: 'Runs', icon: FlaskConical },
-				{ href: '/score-configs', label: 'Score configs', icon: Ruler }
+				{ href: '/score-configs', label: 'Score configs', icon: Ruler },
+				// Fourth, and last (spec 024 #10): a queue is an eval noun —
+				// the design lists it beside datasets and runs — and it is
+				// what the section was made to hold.
+				{ href: '/queues', label: 'Queues', icon: ClipboardCheck }
 			]
 		},
 		{ href: '/settings', label: 'Settings', icon: Settings }

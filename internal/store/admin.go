@@ -33,6 +33,12 @@ type DeleteCounts struct {
 	Prompts      int64
 	PromptLabels int64
 	APIKeys      int64
+	// AnnotationQueues and AnnotationItems are spec 024's two stores.
+	// Counted because a destruction preview is what says how big the hole
+	// will be before it opens (spec 005 #8): the erasure takes the items
+	// pointing at the erased traces, and deleting a project takes both.
+	AnnotationQueues int64
+	AnnotationItems  int64
 	// Oldest is the arrival time of the oldest affected row (Unix
 	// nanoseconds), or zero when nothing is affected.
 	Oldest int64
@@ -41,7 +47,8 @@ type DeleteCounts struct {
 // Any reports whether the operation would remove anything at all.
 func (c DeleteCounts) Any() bool {
 	return c.Traces+c.Observations+c.Scores+c.Payloads+c.RawBatches+
-		c.Prompts+c.PromptLabels+c.APIKeys > 0
+		c.Prompts+c.PromptLabels+c.APIKeys+
+		c.AnnotationQueues+c.AnnotationItems > 0
 }
 
 // OptionalDays is a retention window as a PATCH carries it. Absent, cleared
@@ -212,6 +219,11 @@ func (s *Store) UserDataPreview(projectID, userID string) (DeleteCounts, []Affec
 		projectID, projectID, userID).Scan(&counts.Scores); err != nil {
 		return counts, nil, fmt.Errorf("count a user's scores: %w", err)
 	}
+	if err := s.db.QueryRow(
+		`SELECT COUNT(*) FROM annotation_items WHERE project_id = ? AND trace_id IN (`+owned+`)`,
+		projectID, projectID, userID).Scan(&counts.AnnotationItems); err != nil {
+		return counts, nil, fmt.Errorf("count a user's annotation items: %w", err)
+	}
 	rows, err := s.db.Query(
 		`SELECT r.id, r.dataset, COUNT(*) FROM traces t
 		   JOIN dataset_runs r ON r.project_id = t.project_id AND r.id = t.run_id
@@ -258,6 +270,8 @@ func (s *Store) ProjectPreview(projectID string) (DeleteCounts, error) {
 		{"prompts", &counts.Prompts},
 		{"prompt_labels", &counts.PromptLabels},
 		{"api_keys", &counts.APIKeys},
+		{"annotation_queues", &counts.AnnotationQueues},
+		{"annotation_items", &counts.AnnotationItems},
 	} {
 		// The table names are this package's own constants; only the
 		// project id is bound.
@@ -698,6 +712,15 @@ func (e *UserDataErase) apply(tx *sql.Tx) error {
 		`DELETE FROM scores WHERE project_id = ? AND trace_id IN`,
 		[]any{e.ProjectID}, ids); err != nil {
 		return fmt.Errorf("erase scores: %w", err)
+	}
+	// The queues keep their shape; what pointed at the erased traces goes
+	// with them (spec 024 #3), for the same reason the scores do. Counted,
+	// because the response is what an operator shows for "everything about
+	// this person is gone".
+	if e.Counts.AnnotationItems, err = deleteIn(tx,
+		`DELETE FROM annotation_items WHERE project_id = ? AND trace_id IN`,
+		[]any{e.ProjectID}, ids); err != nil {
+		return fmt.Errorf("erase annotation items: %w", err)
 	}
 	if e.Counts.Traces, err = deleteIn(tx,
 		`DELETE FROM traces WHERE project_id = ? AND id IN`,

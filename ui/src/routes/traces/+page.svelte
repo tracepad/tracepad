@@ -14,12 +14,14 @@
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import PaginationBar from '$lib/components/PaginationBar.svelte';
 	import PeekPanel from '$lib/components/PeekPanel.svelte';
+	import AddToQueue from '$lib/components/queues/AddToQueue.svelte';
 	import TraceDetail from '$lib/components/TraceDetail.svelte';
 	import TraceTable from '$lib/components/TraceTable.svelte';
 	import { cost, count, duration, timestamp } from '$lib/format';
 	import { asPage, Listing, UrlSpot, Walk } from '$lib/listing.svelte';
 	import { freshSearch } from '$lib/page';
 	import { peekSearch, readPeek } from '$lib/peek';
+	import { queueable } from '$lib/queues';
 
 	const POLL_MS = 5000;
 
@@ -88,6 +90,12 @@
 		});
 	}
 
+	// What *Add to queue…* may take (spec 024 #13). The count is the one the
+	// listing already holds, so the number is on screen before the call — and
+	// a filter matching more than the endpoint's cap is refused with the
+	// reason rather than silently truncated to the newest thousand.
+	const takeable = $derived(queueable(listing.total));
+
 	const snippet = $derived(
 		`OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=${page.url.origin}/v1/traces\n` +
 			'OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer <your project key>"'
@@ -128,8 +136,16 @@
 	{/snippet}
 </PageHeader>
 
-<div class="border-border overflow-x-auto border-b px-4 py-2">
+<div class="border-border flex items-center gap-2 overflow-x-auto border-b px-4 py-2">
 	<FilterBar {filters} onchange={(next) => navigate(next)} />
+	<!-- The manager's gesture, at the surface where the choice is made: this
+	     filtered list is what deserves a human verdict (spec 024 #13). -->
+	<AddToQueue
+		{filters}
+		matched={takeable.label}
+		blocked={takeable.blocked}
+		label="Add to queue…"
+	/>
 </div>
 
 {#if listing.problem}

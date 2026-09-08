@@ -384,7 +384,12 @@ func (s *Server) handleDeleteProject(w http.ResponseWriter, r *http.Request) {
 				put("scores", counts.Scores).
 				put("prompts", counts.Prompts).
 				put("raw_batches", counts.RawBatches).
-				put("api_keys", counts.APIKeys)).
+				put("api_keys", counts.APIKeys).
+				// The cascade takes both of spec 024's tables, so the
+				// preview names both: a review backlog somebody else
+				// is working through is a reason not to press this.
+				put("annotation_queues", counts.AnnotationQueues).
+				put("annotation_items", counts.AnnotationItems)).
 			put("note", "the keys stop working immediately; the data is restorable for seven days"))
 		return
 	}
@@ -589,7 +594,11 @@ func (s *Server) handleEraseUserData(w http.ResponseWriter, r *http.Request) {
 			put("would_delete", object{}.
 				put("traces", counts.Traces).
 				put("observations", counts.Observations).
-				put("scores", counts.Scores)).
+				put("scores", counts.Scores).
+				// The queue items pointing at those traces (spec 024 #3):
+				// they go with the traces, so the preview says so rather
+				// than leaving the docs to promise it alone.
+				put("annotation_items", counts.AnnotationItems)).
 			putSome("oldest", oldestTime(counts)).
 			// `affected_runs`, not `runs`: the dataset deletion's dry
 			// run already answers with a `runs` count, and one key
@@ -618,6 +627,7 @@ func (s *Server) handleEraseUserData(w http.ResponseWriter, r *http.Request) {
 		erased.Observations += chunk.Counts.Observations
 		erased.Scores += chunk.Counts.Scores
 		erased.Payloads += chunk.Counts.Payloads
+		erased.AnnotationItems += chunk.Counts.AnnotationItems
 		for _, hour := range chunk.Hours {
 			touched[hour] = true
 		}
@@ -645,7 +655,8 @@ func (s *Server) handleEraseUserData(w http.ResponseWriter, r *http.Request) {
 			put("traces", erased.Traces).
 			put("observations", erased.Observations).
 			put("scores", erased.Scores).
-			put("payloads", erased.Payloads)).
+			put("payloads", erased.Payloads).
+			put("annotation_items", erased.AnnotationItems)).
 		put("user_id", userID))
 }
 

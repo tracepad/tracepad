@@ -33,6 +33,8 @@ document served without authentication.
 | `GET` | `/api/v1/users` | List users by last seen, traffic, cost or errors |
 | `GET` | `/api/v1/users/{id}` | One user: traffic, sessions, cost, errors, latency |
 | `GET` | `/api/v1/runs` | List the project's eval runs, newest first, across datasets |
+| `GET` | `/api/v1/queues` | List the annotation queues with their progress |
+| `GET` | `/api/v1/queues/{name}/next` | The next item to annotate, claimed for ten minutes |
 | `GET` | `/api/v1/stats` | Counts, errors, cost, latency percentiles |
 | `GET` | `/api/v1/prompts/{name}/diff` | Unified diff between two prompt versions |
 | `DELETE` | `/api/v1/prompts/{name}` | Delete a prompt name whole; a dry run until confirmed |
@@ -47,10 +49,13 @@ cases an eval ran and the container that groups the traces one pass produced,
 under `/api/v1/datasets` and `/api/v1/runs`: [datasets.md](datasets.md). So
 does administration — projects, keys, retention windows and user-data erasure
 — under `/api/v1/projects`: [admin.md](admin.md) and
-[retention.md](retention.md).
+[retention.md](retention.md). And so do the annotation queues — what a team
+has decided deserves a human verdict, and who has given one — under
+`/api/v1/queues`: [annotation.md](annotation.md).
 
 Everything under `/api/v1/projects` that destroys something is a dry run until
-`?confirm=` echoes the name of what it destroys, and so is deleting a dataset.
+`?confirm=` echoes the name of what it destroys, and so is deleting a dataset
+or an annotation queue.
 That contract is described once, in [admin.md](admin.md#dry-run-by-default).
 The ceremony is for what cannot be undone: deleting one score takes no
 `?confirm=`, because writing its id again recreates it.

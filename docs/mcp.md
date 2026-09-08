@@ -98,6 +98,8 @@ tracepad is a later question.
 | `get_run` | `GET /api/v1/runs/{id}` | How one eval run went |
 | `get_run_items` | `GET /api/v1/runs/{id}/items` | Which cases failed, and what was said |
 | `compare_runs` | `GET /api/v1/runs/{a}/compare/{b}` | "Did this change make it better" |
+| `list_queues` | `GET /api/v1/queues` | "What is being reviewed, and how far has it got" |
+| `get_queue_items` | `GET /api/v1/queues/{name}/items` | What is left to review, who did what, why something was skipped |
 
 `search` and `list_traces` are the same endpoint under two descriptions, and
 that is the point: "the user quotes text they saw" is a different question from
@@ -108,7 +110,7 @@ field the hit was in, and a snippet of the text — so the next call can be
 `get_observation_io` on that observation. The matching rules are the API's:
 [api.md](api.md#search).
 
-The six eval tools read [datasets and runs](datasets.md) and write nothing —
+The eval tools read [datasets and runs](datasets.md) and write nothing —
 a run is opened by a harness or a person, and creating one from a model's guess
 would leave a container in the store that nobody meant. `compare_runs` is the
 one to reach for when the question is whether a change helped: it returns both
@@ -117,6 +119,14 @@ regressed or stayed, then the cases themselves with their verdicts. A name says
 *improved* only when its config gives it a direction; otherwise the verdict is
 *changed*. `get_run_items` is the follow-up — what the model actually said for
 a case — and its payload markers feed `get_observation_io` like every other.
+
+The two annotation tools read [the review queues](annotation.md) and, for the
+same reason, write nothing: reading what is left to review is an agent
+question, and posting a verdict — or completing an item on the strength of
+one — is a person's or a script's, with somebody to answer to. What a queue
+holds is pointers; the verdicts themselves are scores, so `list_scores` with a
+`trace_id` is the follow-up, and a score written from a queue carries
+`metadata.queue` and `metadata.annotator`.
 
 There are no administrative tools, for the reason at the top of this page: not
 a gap, a guarantee.

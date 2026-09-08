@@ -51,7 +51,8 @@ Without it, the endpoint answers `200` with a preview:
 {
   "dry_run": true,
   "would_delete": {"traces": 41203, "observations": 180114, "scores": 96,
-                   "prompts": 4, "raw_batches": 812, "api_keys": 2},
+                   "prompts": 4, "raw_batches": 812, "api_keys": 2,
+                   "annotation_queues": 3, "annotation_items": 1408},
   "oldest": "2026-03-14T08:21:00Z",
   "confirm": "checkout-service",
   "note": "the keys stop working immediately; the data is restorable for seven days"
@@ -175,6 +176,12 @@ bodies are deliberately not touched — see
 [retention.md](retention.md#what-this-means-for-a-data-subject-request) for
 what that means for a data-subject request and how to deploy if it is not
 acceptable.
+
+The **annotation-queue items** pointing at the erased traces go with them
+([annotation.md](annotation.md)) — an item is a pointer, and the queues keep
+their shape with shorter lists. Both the dry run and the answer count them
+under `annotation_items`, beside the traces and the scores. The verdicts
+already given are scores on those traces and go with the traces.
 
 The user's rows in the **per-user rollup** ([users.md](users.md)) go in the
 same request, outright rather than by recomputation: they are about the user,

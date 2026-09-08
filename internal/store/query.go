@@ -672,6 +672,10 @@ var countedTables = []string{
 	// sizes are the operator's first question when the pinned-trace count
 	// beside them explains why the file did not shrink.
 	"datasets", "dataset_items", "dataset_runs", "score_configs",
+	// The annotation tables (spec 024): the queues are a handful, and the
+	// items are what a filter fills a thousand at a time — the number an
+	// operator wants beside the traces they point at.
+	"annotation_queues", "annotation_items",
 }
 
 // TableCount is one table's row count.

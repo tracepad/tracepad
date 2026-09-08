@@ -2,6 +2,7 @@
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import Plus from '@lucide/svelte/icons/plus';
+	import type { Snippet } from 'svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { api, type Score, type ScoreConfig } from '$lib/api/client.svelte';
 	import { relative, timestampPrecise } from '$lib/format';
@@ -41,6 +42,13 @@
 		failure = null,
 		/** The target has more scores than one page carries (edge cases). */
 		truncated = false,
+		/**
+		 * What else this surface offers about the thing being read — *Add to
+		 * queue* on a trace (spec 024 #13). It rides here rather than in a bar
+		 * of its own because this row is already the one control strip a trace
+		 * header has, and a second would cost the tree beside it its height.
+		 */
+		actions,
 		onchanged
 	}: {
 		scores: HeaderScore[];
@@ -52,6 +60,7 @@
 		loading?: boolean;
 		failure?: string | null;
 		truncated?: boolean;
+		actions?: Snippet;
 		onchanged: () => void;
 	} = $props();
 
@@ -97,10 +106,13 @@
 			<span class="text-subtle text-sm">and more</span>
 		{/if}
 
-		<Button class="ml-auto shrink-0" onclick={() => (editing = null)}>
-			<Plus class="size-4" />
-			{addLabel}
-		</Button>
+		<div class="ml-auto flex shrink-0 items-center gap-1.5">
+			<Button onclick={() => (editing = null)}>
+				<Plus class="size-4" />
+				{addLabel}
+			</Button>
+			{@render actions?.()}
+		</div>
 	</div>
 
 	<!-- Capped above what a typical trace carries, so the cap does not bite on
