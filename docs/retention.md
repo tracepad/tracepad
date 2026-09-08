@@ -106,6 +106,21 @@ discovered:
    immediately; only the project-wide totals for a frozen hour go on counting
    the traces.
 
+The rollup is **three tables**, and one window governs all of them:
+
+| Table | Holds | Swept by |
+|---|---|---|
+| `stats_hourly` | traffic, errors, cost and latency per hour | `stats_retention_days` |
+| `users_hourly`, `users` | the same per end user, plus their summary | `stats_retention_days` |
+| `scores_hourly` | score means, rates and category counts per hour ([quality.md](quality.md)) | `stats_retention_days` |
+
+They are written by one pass in one transaction and swept together, so the
+Stats, Users and Quality screens can never disagree about how far back the
+history reaches. A frozen hour gets no score rows either: a score is filed
+under the hour of the trace it grades, and past the window that trace is gone.
+Such a score is still listed on its trace — the sweep takes a score with its
+target, not before — and is simply absent from the trend.
+
 ## What an annotation queue keeps
 
 Nothing. A queue item is a pointer at a trace ([annotation.md](annotation.md)),

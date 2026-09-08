@@ -286,6 +286,43 @@ made: the same id posted again replaces the row whole. See
 server's `404` when there is no such score in this project. There is no echo
 to type: a score is one row that `add --id` puts straight back.
 
+### `scores trend`
+
+```sh
+tracepad scores trend                                    # every name, by day
+tracepad scores trend --name hallucination --since 30d
+tracepad scores trend --name hallucination --group-by release
+tracepad scores trend --group-by model --env production
+```
+
+`GET /api/v1/stats/scores`: how a score has moved, in the buckets `stats`
+groups the traffic into. One block per score name, headed by the name, its
+data type and what was counted, and one table under it:
+
+```
+hallucination (numeric, any scores)
+DAY         SCORES  MEAN (MIN..MAX)
+2026-09-01  412     0.18 (0..0.9)
+2026-09-02  389     0.14 (0..0.7)
+
+verdict (categorical, any scores)
+DAY         SCORES  CATEGORIES
+2026-09-01  412     pass 380 · fail 32
+```
+
+The third column is what the type says: a mean with its extremes, a rate as a
+percentage, or the distribution. `--group-by` is `hour`, `day`, `environment`,
+`release` or `model`; the window is `--since` and `--until`, and `--env`
+narrows it, exactly as `stats` spells them. Grouped by model only the scores
+that name an observation can be counted, and the header says
+`observation scores` rather than `any scores` so that two runs of the command
+are not read as the same question.
+
+Without `--name` every score name in the range gets a block. A range that holds
+none prints *no score names a trace in this range* — a score that grades only a
+session, and a `text` score, are never on a timeline. See
+[quality.md](quality.md).
+
 ### `prompts`
 
 ```sh

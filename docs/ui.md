@@ -180,8 +180,9 @@ they recorded, so the trace filter goes on answering for it.
 ## Evals
 
 The sidebar's *Evals* section is the eval nouns of [datasets.md](datasets.md)
-on screen — **Datasets**, **Runs** and **Score configs** — and the review
-queues of [annotation.md](annotation.md) beside them ([Queues](#queues)).
+on screen — **Datasets**, **Runs** and **Score configs** — with the review
+queues of [annotation.md](annotation.md) beside them ([Queues](#queues)) and
+what they all produce, over time, at the end ([Quality](#quality)).
 Every table is the shared listing (pages in the URL, the bar underneath),
 every row opens in the
 peek panel, and every payload is the same surface as a trace's. Nothing is
@@ -355,6 +356,41 @@ the answer says *added* or *already in the queue*. The traces listing carries
 match before the call, queues the newest of them up to the endpoint's cap of
 1,000, and above that cap it is disabled with the reason — a queue is a list
 somebody has to work through.
+
+## Quality
+
+The fifth child of *Evals* is what the evals and the reviewers have been
+saying, over time: [quality.md](quality.md) in a screen. It sits with the eval
+nouns rather than with the traffic on *Stats*, because quality is what evals
+produce.
+
+The filter bar is Stats': the time window (`?from=&to=`, the last 30 days by
+default), the environment box, and the hourly/daily choice (`?group_by=`).
+
+**Quality** (`/quality`) is a card per score name in the window, over one
+request. A card is the name, its data type, how many scores it holds, and a
+small chart of what the name says: the mean for a numeric one, the rate of true
+for a boolean one, and one line per category — as a share of the bucket — for a
+categorical one. A numeric name whose [score config](#evals) pins a `min` and a
+`max` is drawn against that axis rather than against its own spread, so a stable
+score does not read as a cliff; a name without a config still shows, because the
+trend is real whether or not anybody declared it. Configured names come first,
+in the configs' order. The whole card is a link.
+
+**One score** (`/quality?name=X`) is the Stats screen's composition for one
+name: the trend full width — with the minimum and the maximum as two fainter
+lines behind a numeric mean — a count chart beside it, and three breakdown
+tables under them: by model, by environment, by release. Each row is the key,
+how many scores, and the same summary the card draws.
+
+The model breakdown is the question a judge score on generations exists to
+answer, and it is empty for a score written on the trace: a trace has no model.
+That is not a bug in the screen — the API says so in its `targets` field, and
+[quality.md](quality.md#what-is-counted-and-what-is-not) says why.
+
+A window with no scores in it says so and shows the SDK line that starts
+recording one; a `?name=` the window does not hold gets the same answer for that
+name rather than a not-found page.
 
 ## Turning pages
 
