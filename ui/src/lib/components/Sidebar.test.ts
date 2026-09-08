@@ -23,7 +23,7 @@ vi.mock('$lib/admin.svelte', () => ({ admin: { clear: vi.fn() } }));
 vi.mock('$lib/project.svelte', () => ({ project: { name: 'demo', forget: vi.fn() } }));
 
 describe('the Evals section', () => {
-	it('renders the group with its four children as links and the label as text', () => {
+	it('renders the group with its five children as links and the label as text', () => {
 		render(Sidebar);
 		const nav = screen.getByRole('navigation', { name: 'Sections' });
 
@@ -33,14 +33,15 @@ describe('the Evals section', () => {
 			['Datasets', '/datasets'],
 			['Runs', '/runs'],
 			['Score configs', '/score-configs'],
-			['Queues', '/queues']
+			['Queues', '/queues'],
+			['Quality', '/quality']
 		]) {
 			expect(screen.getByRole('link', { name })).toHaveAttribute('href', href);
 		}
-		// Ten destinations in all: the four that were there, the four the
+		// Eleven destinations in all: the four that were there, the five the
 		// section holds, Prompts beside them (spec 021 #1) and Users
 		// (spec 023 #8).
-		expect(nav.querySelectorAll('a')).toHaveLength(10);
+		expect(nav.querySelectorAll('a')).toHaveLength(11);
 	});
 
 	it('marks the active child and nothing else', () => {
@@ -82,7 +83,7 @@ describe('the Prompts item', () => {
 		// And the group holds the eval screens and no more.
 		const group = nav.querySelector('li > ul');
 		expect([...(group?.querySelectorAll('a') ?? [])].map((link) => link.textContent?.trim())).toEqual(
-			['Datasets', 'Runs', 'Score configs', 'Queues']
+			['Datasets', 'Runs', 'Score configs', 'Queues', 'Quality']
 		);
 	});
 
