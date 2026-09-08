@@ -106,6 +106,9 @@ describe('the role of a message', () => {
 		expect(roleAfter([{ role: 'tool', content: '' }])).toBe('user');
 		expect(roleAfter([{ role: 'critic', content: '', custom: true }])).toBe('user');
 		expect(roleAfter([])).toBe('user');
+		// By the role, not by the widget it was typed in: a custom role that
+		// reads `user` is a user's turn, and an assistant's follows it.
+		expect(roleAfter([{ role: 'user', content: '', custom: true }])).toBe('assistant');
 	});
 
 	it('opens a role outside the select in custom mode, and the six in it', () => {
@@ -134,6 +137,30 @@ describe('the role of a message', () => {
 			content: 'Answering.',
 			custom: false
 		});
+	});
+
+	// A mis-pick is undoable: straying onto a role in the select — a wheel tick
+	// over a focused one does that — and picking Custom… again brings back what
+	// was typed, rather than costing it (found in review of PR #45).
+	it('brings back the custom role a message strayed off', () => {
+		const [message] = messagesOf([{ role: 'function', content: 'called' }]);
+		const strayed = pickRole(message, 'tool');
+		expect(strayed.role).toBe('tool');
+		expect(strayed.custom).toBe(false);
+
+		const back = pickRole(strayed, CUSTOM_ROLE);
+		expect(back.role).toBe('function');
+		expect(back.custom).toBe(true);
+		expect(versionBody(chat([back])).prompt).toEqual([{ role: 'function', content: 'called' }]);
+	});
+
+	// Only a custom role is remembered. A role from the select is not one, so
+	// Custom… over an `assistant` opens the field empty rather than offering a
+	// role the menu already has.
+	it('remembers nothing from the select itself', () => {
+		const picked = pickRole({ role: 'user', content: 'Asking.' }, 'assistant');
+		expect(picked.typed).toBeUndefined();
+		expect(pickRole(picked, CUSTOM_ROLE).role).toBe('');
 	});
 
 	it('sends a custom role as the string it is', () => {
@@ -391,14 +418,16 @@ describe('the draft a version opens as', () => {
 		expect(draft.text).toBe('Be terse.');
 	});
 
-	// A role outside the datalist and a structured content are both stored
+	// A role outside the select and a structured content are both stored
 	// verbatim by the API, so the editor keeps them rather than flattening them
-	// (edge cases).
+	// (edge cases). `function` rather than `tool`: `tool` is one of the six the
+	// select offers now, and this case is about the roles it does not.
 	it('keeps a role it does not know and content that is not a string', () => {
 		const parts = [{ type: 'text', text: 'hi' }];
-		expect(messagesOf([{ role: 'tool', content: parts }])).toEqual([
+		expect(messagesOf([{ role: 'function', content: parts }])).toEqual([
 			{
-				role: 'tool',
+				role: 'function',
+				custom: true,
 				content: '[\n  {\n    "type": "text",\n    "text": "hi"\n  }\n]',
 				// What the document was rendered from, so a save can put it back.
 				structured: parts

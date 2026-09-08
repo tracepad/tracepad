@@ -40,6 +40,16 @@ async function call(method: string, path: string, body?: unknown) {
 
 let seeded: Promise<void> | null = null;
 
+/**
+ * The version whose first message carries a custom role, filled in by the
+ * scenario that writes it. The sideways check reads the editor of *that*
+ * version, and a number written down here instead would go on passing once the
+ * tests above it shifted — the editor's failure state renders a heading and
+ * overflows nothing, so the widest role row would quietly stop being checked
+ * (found in review of PR #45).
+ */
+let customRole: number | null = null;
+
 /** Two versions of a chat prompt, `production` left on the first. */
 function seed(): Promise<void> {
 	seeded ??= (async () => {
@@ -204,23 +214,31 @@ test('a custom role is saved as it is and opens in the custom field', async ({ p
 
 	await page.getByLabel('Role of message 1').selectOption({ label: 'Custom…' });
 	// The field opens empty, and the Save gate says so at it until it is typed.
-	const custom = page.getByLabel('Custom role of message 1');
+	const custom = page.getByLabel('Message 1 custom role');
 	await expect(custom).toHaveValue('');
 	await expect(page.getByText('A message needs a role.')).toBeVisible();
 	await expect(page.getByRole('button', { name: 'Save' })).toBeDisabled();
 
 	await custom.fill('function');
+	// Strayed onto a role from the menu and back: what was typed is still there
+	// (found in review of PR #45).
+	await page.getByLabel('Role of message 1').selectOption('tool');
+	await expect(page.getByLabel('Message 1 custom role')).toHaveCount(0);
+	await page.getByLabel('Role of message 1').selectOption({ label: 'Custom…' });
+	await expect(page.getByLabel('Message 1 custom role')).toHaveValue('function');
+
 	await page.getByLabel('Commit message').fill('a role the menu does not have');
 	await page.getByRole('button', { name: 'Save' }).click();
 
-	await expect(page).toHaveURL(new RegExp(`/prompts/${CHAT}\\?version=5`));
+	await expect(page).toHaveURL(new RegExp(`/prompts/${CHAT}\\?version=\\d+`));
+	customRole = Number(new URL(page.url()).searchParams.get('version'));
 	await expect(page.getByText('function', { exact: true })).toBeVisible();
 
 	// And the editor of the next version opens it where it was typed, rather
 	// than losing it to the menu (edge cases).
 	await page.getByRole('button', { name: 'New version' }).click();
 	await expect(page.getByLabel('Role of message 1').locator('option:checked')).toHaveText('Custom…');
-	await expect(page.getByLabel('Custom role of message 1')).toHaveValue('function');
+	await expect(page.getByLabel('Message 1 custom role')).toHaveValue('function');
 });
 
 // Nothing asks for a `system` message: the one a fresh draft opens with is a
@@ -360,6 +378,12 @@ test('a text prompt is created from the editor', async ({ page }) => {
 });
 
 test('no screen scrolls the page sideways', async ({ page }) => {
+	// The version the custom-role scenario wrote, not a number written down
+	// here: an editor aimed at a version that is not there renders its failure
+	// state, which has a heading and no overflow either.
+	expect(customRole, 'the version carrying the custom role').not.toBeNull();
+	const widest = `/prompts/${CHAT}/versions/new?from=${customRole}`;
+
 	await signIn(page);
 	for (const path of [
 		'/prompts',
@@ -367,12 +391,17 @@ test('no screen scrolls the page sideways', async ({ page }) => {
 		`/prompts/${CHAT}?diff=1..3`,
 		'/prompts/new',
 		`/prompts/${CHAT}/versions/new?from=3`,
-		// v5 is the custom role (#16), so this is the widest the role row gets:
-		// the select, the field it reveals and the three buttons beside them.
-		`/prompts/${CHAT}/versions/new?from=5`
+		// The custom role (#16) is the widest the role row gets: the select, the
+		// field it reveals and the three buttons beside them.
+		widest
 	]) {
 		await page.goto(path);
 		await expect(page.getByRole('heading').first()).toBeVisible();
+		// And that row is actually on screen, rather than an editor that failed
+		// to load being measured instead.
+		if (path === widest) {
+			await expect(page.getByLabel('Message 1 custom role')).toHaveValue('function');
+		}
 		const overflow = await page.evaluate(() => {
 			const root = document.scrollingElement ?? document.documentElement;
 			return root.scrollWidth - root.clientWidth;

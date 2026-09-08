@@ -170,10 +170,11 @@ which opens a field for any other string, because the API stores whatever role
 you give it; a message that arrives with a role outside the menu opens in that
 field. An added message alternates: after a `user` an `assistant`, after
 anything else a `user`. Nothing requires a `system` message — a body that is
-one `user` turn is a prompt like any other. `config` is the same JSON surface every payload uses. *Save* posts one
-version and lands on it. The gate is the server's own rules mirrored at the
-fields — the name's grammar, a non-empty body, a role and content per message,
-a config that parses, and `latest` refused as a label — so that a `400` naming
+one `user` turn is a prompt like any other. `config` is the same JSON surface
+every payload uses. *Save* posts one version and lands on it. The gate is the
+server's own rules mirrored at the fields — the name's grammar, a non-empty
+body, a role and content per message, a config that parses, and `latest`
+refused as a label — so that a `400` naming
 one of them is not how you find out; the server still decides.
 
 **Delete** takes the name whole: every version and every label, in one

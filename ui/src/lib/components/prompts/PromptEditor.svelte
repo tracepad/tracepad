@@ -328,6 +328,11 @@
 								<option value={CUSTOM_ROLE}>Custom…</option>
 							</select>
 							{#if message.custom}
+								<!-- Named so that the select's own name is not a
+								     substring of this one: a label lookup matches on
+								     substrings, and two controls one query cannot
+								     tell apart is a test that passes on the wrong
+								     one (found in review of PR #45). -->
 								<input
 									name="custom-role"
 									bind:value={message.role}
@@ -335,7 +340,7 @@
 									autocomplete="off"
 									spellcheck="false"
 									placeholder="function"
-									aria-label="Custom role of message {i + 1}"
+									aria-label="Message {i + 1} custom role"
 									class="{field} w-28 font-mono"
 								/>
 							{/if}
