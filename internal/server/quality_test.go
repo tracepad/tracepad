@@ -37,6 +37,7 @@ type scoreTrendSeries struct {
 type scoreTrendBody struct {
 	GroupBy string             `json:"group_by"`
 	Targets string             `json:"targets"`
+	Omitted int                `json:"omitted"`
 	Series  []scoreTrendSeries `json:"series"`
 }
 
@@ -85,6 +86,27 @@ func (h *harness) seedScoredHour(t *testing.T, hour int64, n int, environment, r
 }
 
 func scoreHex(n int) string { return fmt.Sprintf("%032x", 5000+n) }
+
+// seedGradedTrace puts one trace with one generation in an hour, for the tests
+// that then grade it themselves.
+func (h *harness) seedGradedTrace(t *testing.T, hour int64, n int) string {
+	t.Helper()
+	start := hour*int64(time.Second) + int64(n)*int64(time.Second)
+	trace := &model.Trace{ID: traceHex(n), Environment: "production", Release: "2.5.0"}
+	h.seed(t, trace, &model.Observation{
+		TraceID: trace.ID, ID: spanHex(n), Type: model.TypeGeneration,
+		Level: model.LevelDefault, Model: "claude-sonnet-5",
+		StartTime: start, EndTime: start + 100*ms,
+	})
+	return trace.ID
+}
+
+// postScores files a batch in one request, which is how a client that grades in
+// bulk writes.
+func (h *harness) postScores(t *testing.T, body []map[string]any) {
+	t.Helper()
+	expectStatus(t, h.send(t, "POST", "/api/v1/scores", body), 201)
+}
 
 // derefFloat makes a failure message readable: `%v` of a pointer is an address,
 // which says nothing about the number that was wrong.
@@ -356,6 +378,86 @@ func TestScoreTrendsAnswerAnEmptyWindowWithNoSeries(t *testing.T) {
 	}
 }
 
+// The first of the two ceilings of Decision 24: a score name needs no config,
+// so the number of them is unbounded client input. What is kept is what was
+// busiest; what it is *written* in is name order, so a reader scanning an
+// alphabetical list does not have to re-find their place because a name grew.
+func TestScoreTrendsKeepTheBusiestNames(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	trace := h.seedGradedTrace(t, statsHour, 1)
+	// The i-th name is filed i+1 times, so the busiest names are the last
+	// ones alphabetically and "kept by size" cannot pass as "kept by name".
+	var body []map[string]any
+	for i := range 5 {
+		for range i + 1 {
+			body = append(body, map[string]any{
+				"id": scoreHex(1000 + len(body)), "trace_id": trace,
+				"name": fmt.Sprintf("name-%02d", i), "value": 1.0})
+		}
+	}
+	h.postScores(t, body)
+
+	whole := h.scoreTrends(t, "/api/v1/stats/scores")
+	if len(whole.Series) != 5 || whole.Omitted != 0 {
+		t.Fatalf("the whole answer is %d series, omitted %d; want 5 and 0",
+			len(whole.Series), whole.Omitted)
+	}
+
+	capped := h.scoreTrends(t, "/api/v1/stats/scores?limit=3")
+	if capped.Omitted != 2 {
+		t.Errorf("omitted = %d, want the 2 names the limit left out", capped.Omitted)
+	}
+	got := make([]string, 0, len(capped.Series))
+	for _, one := range capped.Series {
+		got = append(got, one.Name)
+	}
+	want := []string{"name-02", "name-03", "name-04"}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("series = %v, want the three busiest in name order %v", got, want)
+	}
+}
+
+// The second ceiling: a categorical `string_value` that is really free text
+// would otherwise grow a bucket a value at a time. The rarest fold into one
+// `other` key rather than disappearing, so the distribution still adds up to
+// the `count` a reader divides by.
+func TestScoreTrendsFoldTheRarestCategories(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	trace := h.seedGradedTrace(t, statsHour, 1)
+	var body []map[string]any
+	for i := range 25 {
+		for range i + 1 {
+			body = append(body, map[string]any{
+				"id": scoreHex(1000 + len(body)), "trace_id": trace,
+				"name": "verdict", "data_type": "categorical",
+				"string_value": fmt.Sprintf("v%02d", i)})
+		}
+	}
+	h.postScores(t, body)
+
+	buckets := h.scoreTrends(t, "/api/v1/stats/scores").series(t, "verdict").Buckets
+	if len(buckets) != 1 {
+		t.Fatalf("buckets = %+v, want the one day the corpus is in", buckets)
+	}
+	bucket := buckets[0]
+	if len(bucket.Categories) != 21 {
+		t.Errorf("categories = %d, want the twenty busiest and one `other`", len(bucket.Categories))
+	}
+	// v00..v04 were filed 1, 2, 3, 4 and 5 times.
+	if bucket.Categories["other"] != 15 {
+		t.Errorf("other = %d, want the 15 scores the five rarest values carried",
+			bucket.Categories["other"])
+	}
+	var total int64
+	for _, count := range bucket.Categories {
+		total += count
+	}
+	if total != bucket.Count {
+		t.Errorf("the categories sum to %d over a bucket of %d: a folded value was lost",
+			total, bucket.Count)
+	}
+}
+
 // Spec 003 #21 and #23, on the new endpoint: an unknown parameter and a
 // parameter given without a value are both refusals.
 func TestScoreTrendsRefuseUnknownAndEmptyParameters(t *testing.T) {
@@ -366,6 +468,10 @@ func TestScoreTrendsRefuseUnknownAndEmptyParameters(t *testing.T) {
 		"/api/v1/stats/scores?group_by=",
 		"/api/v1/stats/scores?group_by=user",
 		"/api/v1/stats/scores?from=yesterday",
+		"/api/v1/stats/scores?limit=",
+		"/api/v1/stats/scores?limit=0",
+		"/api/v1/stats/scores?limit=501",
+		"/api/v1/stats/scores?limit=all",
 	} {
 		t.Run(path, func(t *testing.T) {
 			expectStatus(t, h.get(t, path), 400)

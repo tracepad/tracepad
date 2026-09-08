@@ -5,8 +5,10 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
+	"net/url"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -36,6 +38,32 @@ var scoreGroupings = []string{
 // defaultScoreGroupBy is what the endpoint groups by when the caller says
 // nothing — the same bucket `/api/v1/stats` reaches for first.
 const defaultScoreGroupBy = store.GroupByDay
+
+// The two bounds on the size of an answer (spec 025 #24).
+//
+// Both dimensions are unvalidated client input. A score name needs no
+// `score_config` — `ScoreWrite.apply` checks against one only where one
+// exists — so an application that files `accuracy-<request id>`, or a
+// categorical name whose `string_value` is really free text, grows the
+// response by one series or one category per request. Unbounded, that is a
+// body without a ceiling, and on the Quality overview one uPlot instance per
+// series.
+//
+// The cut is by size, so what is dropped is what was rarest: the busiest
+// `limit` names, and inside a categorical series the busiest
+// `maxScoreCategories` values. `omitted` on the answer says how many names
+// were left out, and the folded categories keep their counts under one
+// `other` key rather than vanishing — a distribution that no longer adds up to
+// its own `count` would be a worse answer than a truncated one.
+const (
+	defaultScoreSeries = 50
+	maxScoreSeries     = 500
+	maxScoreCategories = 20
+	// otherCategory collects the values past the cap. A series that really
+	// has a category of this name merges with them, which keeps the sum
+	// right and is the reason to prefer merging to a made-up key.
+	otherCategory = "other"
+)
 
 // The two answers to "what did these scores grade" (Decision 6).
 const (
@@ -85,7 +113,12 @@ func (s *Server) handleScoreTrends(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	values, err := queryParams(r, "from", "to", "environment", "name", "group_by")
+	values, err := queryParams(r, "from", "to", "environment", "name", "group_by", "limit")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	limit, err := scoreSeriesLimit(values)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -160,10 +193,27 @@ func (s *Server) handleScoreTrends(w http.ResponseWriter, r *http.Request) {
 	if byModel {
 		targets = targetsObservation
 	}
+	rendered, omitted := renderScoreSeries(series, limit)
 	writeJSON(w, http.StatusOK, object{}.
 		put("group_by", filter.GroupBy).
 		put("targets", targets).
-		put("series", renderScoreSeries(series)))
+		put("omitted", omitted).
+		put("series", rendered))
+}
+
+// scoreSeriesLimit reads the cap on how many series the answer carries. It is
+// not `pageSize`: this is not a page — there is no cursor and no second
+// request that would fetch the rest — so its own default and its own ceiling.
+func scoreSeriesLimit(values url.Values) (int, error) {
+	raw := values.Get("limit")
+	if raw == "" {
+		return defaultScoreSeries, nil
+	}
+	limit, err := strconv.Atoi(raw)
+	if err != nil || limit < 1 || limit > maxScoreSeries {
+		return 0, fmt.Errorf("limit must be a whole number between 1 and %d", maxScoreSeries)
+	}
+	return limit, nil
 }
 
 // add folds one row — a stored hour or one live score — into a bucket.
@@ -188,11 +238,33 @@ func (b *scoreBucket) add(row store.ScoreStatsRow) {
 // renderScoreSeries writes the answer: series ordered by name and then by type,
 // buckets ascending by key — a timeline reads as a timeline and a breakdown as
 // a list, and both are the same rule.
-func renderScoreSeries(series map[string]*scoreSeries) []object {
+//
+// It also applies the two ceilings of #24, and reports how many series the
+// first one left out. The *choice* of which to keep is by size and the
+// *order* they are written in is by name: a reader scanning an alphabetical
+// list should not have to re-find where they were because a name grew busier.
+func renderScoreSeries(series map[string]*scoreSeries, limit int) ([]object, int) {
 	ordered := make([]*scoreSeries, 0, len(series))
 	for _, one := range series {
 		ordered = append(ordered, one)
 	}
+	// By what each series counts, so a truncated answer keeps the names the
+	// project actually grades and drops the long tail of one-off ones.
+	sort.Slice(ordered, func(i, j int) bool {
+		if left, right := ordered[i].total(), ordered[j].total(); left != right {
+			return left > right
+		}
+		if ordered[i].name != ordered[j].name {
+			return ordered[i].name < ordered[j].name
+		}
+		return ordered[i].dataType < ordered[j].dataType
+	})
+	omitted := 0
+	if len(ordered) > limit {
+		omitted = len(ordered) - limit
+		ordered = ordered[:limit]
+	}
+
 	sort.Slice(ordered, func(i, j int) bool {
 		if ordered[i].name != ordered[j].name {
 			return ordered[i].name < ordered[j].name
@@ -202,6 +274,7 @@ func renderScoreSeries(series map[string]*scoreSeries) []object {
 
 	out := make([]object, 0, len(ordered))
 	for _, one := range ordered {
+		capCategories(one)
 		buckets := make([]*scoreBucket, 0, len(one.buckets))
 		for _, bucket := range one.buckets {
 			buckets = append(buckets, bucket)
@@ -217,7 +290,65 @@ func renderScoreSeries(series map[string]*scoreSeries) []object {
 			put("data_type", one.dataType).
 			put("buckets", rows))
 	}
-	return out
+	return out, omitted
+}
+
+// total is how many scores the series counts over the whole range — the size
+// the cap of #24 ranks by.
+func (s *scoreSeries) total() int64 {
+	var count int64
+	for _, bucket := range s.buckets {
+		count += bucket.count
+	}
+	return count
+}
+
+// capCategories folds a categorical series' rarest values into one `other`
+// key, so that a "category" that is really free text cannot grow the answer a
+// value at a time (#24).
+//
+// The counts move rather than disappear: every bucket's categories still add
+// up to that bucket's `count`, which is what a reader divides by.
+func capCategories(one *scoreSeries) {
+	totals := map[string]int64{}
+	for _, bucket := range one.buckets {
+		for name, count := range bucket.categories {
+			totals[name] += count
+		}
+	}
+	if len(totals) <= maxScoreCategories {
+		return
+	}
+	// Ranked over the whole range rather than per bucket, so one value is
+	// kept or folded on every point of the timeline and a line does not
+	// appear and vanish along it.
+	names := make([]string, 0, len(totals))
+	for name := range totals {
+		names = append(names, name)
+	}
+	sort.Slice(names, func(i, j int) bool {
+		if totals[names[i]] != totals[names[j]] {
+			return totals[names[i]] > totals[names[j]]
+		}
+		return names[i] < names[j]
+	})
+	kept := make(map[string]bool, maxScoreCategories)
+	for _, name := range names[:maxScoreCategories] {
+		kept[name] = true
+	}
+	for _, bucket := range one.buckets {
+		var folded int64
+		for name, count := range bucket.categories {
+			if kept[name] {
+				continue
+			}
+			folded += count
+			delete(bucket.categories, name)
+		}
+		if folded > 0 {
+			bucket.categories[otherCategory] += folded
+		}
+	}
 }
 
 // render is one bucket in the shape its data type reads in: a mean and the

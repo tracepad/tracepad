@@ -173,7 +173,7 @@ const Usage = `Client commands (they talk to a running server over HTTP):
                         [--id ID]
   tracepad scores rm    <score-id>
   tracepad scores trend [--name N] [--group-by hour|day|environment|release|model]
-                        [--since 30d] [--until T] [--env E]
+                        [--since 30d] [--until T] [--env E] [--limit N]
   tracepad prompts ls   [--limit N] [--cursor C]
   tracepad prompts get  <name> [--label L | --version N]
   tracepad prompts push <name> --file prompt.json [--label L] [--message M]

@@ -333,6 +333,7 @@ func (r *run) scoresTrend(ctx context.Context, args []string) error {
 		since       string
 		until       string
 		environment string
+		limit       string
 	)
 	fs := r.flags("scores trend")
 	fs.StringVar(&name, "name", "", "")
@@ -340,6 +341,7 @@ func (r *run) scoresTrend(ctx context.Context, args []string) error {
 	fs.StringVar(&since, "since", "", "")
 	fs.StringVar(&until, "until", "", "")
 	fs.StringVar(&environment, "env", "", "")
+	fs.StringVar(&limit, "limit", "", "")
 	if _, err := r.parse(fs, args, 0); err != nil {
 		return err
 	}
@@ -348,6 +350,7 @@ func (r *run) scoresTrend(ctx context.Context, args []string) error {
 	addSome(query, "name", name)
 	addSome(query, "group_by", groupBy)
 	addSome(query, "environment", environment)
+	addSome(query, "limit", limit)
 	from, err := r.instant("--since", since)
 	if err != nil {
 		return err
@@ -369,6 +372,7 @@ func (r *run) scoresTrend(ctx context.Context, args []string) error {
 	result, err := decode[struct {
 		GroupBy string `json:"group_by"`
 		Targets string `json:"targets"`
+		Omitted int    `json:"omitted"`
 		Series  []struct {
 			Name     string `json:"name"`
 			DataType string `json:"data_type"`
@@ -407,6 +411,18 @@ func (r *run) scoresTrend(ctx context.Context, args []string) error {
 					bucket.Rate, bucket.Categories))
 		}
 		t.flush()
+	}
+	// A truncated answer that said nothing about it would be a wrong one
+	// (spec 025 #24). The busiest names are the ones shown, and `--limit`
+	// reaches the rest.
+	if result.Omitted > 0 {
+		noun := "names"
+		if result.Omitted == 1 {
+			noun = "name"
+		}
+		fmt.Fprintf(r.opt.Stdout,
+			"\n%d rarer score %s not shown; raise --limit to see them\n",
+			result.Omitted, noun)
 	}
 	return nil
 }
@@ -459,8 +475,23 @@ func scoreTrendValue(dataType string, mean, min, max, rate *float64, categories 
 // `trimFloat` beside it is exact, which is right for a stored value and wrong
 // for a mean — the mean of three thirds would otherwise arrive as sixteen
 // digits of arithmetic nobody asked about.
+//
+// Rounded with `'g'` and printed with `'f'`, because those are two different
+// questions. Nothing bounds a numeric score to 0..1 — a config's `min` and
+// `max` are free and a name without a config has none — so `output_tokens` or
+// `latency_ms` is an ordinary score, and `'g'` alone rendered 1234.5 as
+// `1.23e+03` in a column the interface fills with `1230` (found in the second
+// review of PR #44).
 func scoreFigure(value float64) string {
-	return strconv.FormatFloat(value, 'g', 3, 64)
+	rounded, err := strconv.ParseFloat(strconv.FormatFloat(value, 'g', 3, 64), 64)
+	if err != nil {
+		rounded = value
+	}
+	if rounded == 0 {
+		// Including a negative zero, which is a way of writing nothing.
+		return "0"
+	}
+	return strconv.FormatFloat(rounded, 'f', -1, 64)
 }
 
 // scoresAdd is one `POST /api/v1/scores` with one object in it (spec 022 #7).

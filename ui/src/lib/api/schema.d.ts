@@ -1215,7 +1215,7 @@ export interface components {
             max?: number | null;
             /** @description Boolean series only: the share of scores in this bucket whose value is 1, between 0 and 1 */
             rate?: number | null;
-            /** @description Categorical series only: how many scores in this bucket carried each value seen. The counts sum to `count` */
+            /** @description Categorical series only: how many scores in this bucket carried each value seen. The counts sum to `count`. Only the twenty busiest values of the range are named; the rest are summed under `other`, so the sum still holds — and a series that really has a category called `other` merges with them */
             categories?: {
                 [key: string]: number;
             };
@@ -2570,6 +2570,8 @@ export interface operations {
                 /** @description Only the score filed under this name. Absent, every name in the range comes back as its own series */
                 name?: string;
                 group_by?: "hour" | "day" | "environment" | "release" | "model";
+                /** @description How many series to return, the busiest score names first. A score name needs no config, so the number of them is unbounded client input; `omitted` says how many this left out */
+                limit?: number;
             };
             header?: never;
             path?: never;
@@ -2591,6 +2593,8 @@ export interface operations {
                          * @enum {string}
                          */
                         targets: "any" | "observation";
+                        /** @description How many score names `limit` left out, rarest first; 0 when every name in the range is here */
+                        omitted: number;
                         series: components["schemas"]["ScoreSeries"][];
                     };
                 };

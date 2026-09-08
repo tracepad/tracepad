@@ -21,6 +21,7 @@ func TestScoreTrendToolIsItsEndpoint(t *testing.T) {
 		{map[string]any{"name": "hallucination"}, "/api/v1/stats/scores?name=hallucination"},
 		{map[string]any{"environment": "production", "group_by": "release"},
 			"/api/v1/stats/scores?environment=production&group_by=release"},
+		{map[string]any{"limit": 5}, "/api/v1/stats/scores?limit=5"},
 	} {
 		t.Run(tc.path, func(t *testing.T) {
 			structured := h.callRaw(t, "get_score_trends", tc.arguments)
@@ -50,7 +51,7 @@ func TestScoreTrendToolDeclaresWhatItReturns(t *testing.T) {
 	tool := toolByName(t, tools.Tools, "get_score_trends")
 
 	in := schemaOf(t, tool.InputSchema)
-	for _, field := range []string{"group_by", "name", "from", "to", "environment"} {
+	for _, field := range []string{"group_by", "name", "from", "to", "environment", "limit"} {
 		if _, offered := in.Properties[field]; !offered {
 			t.Errorf("the tool does not offer %q, which the endpoint accepts", field)
 		}
@@ -64,6 +65,11 @@ func TestScoreTrendToolDeclaresWhatItReturns(t *testing.T) {
 	out := schemaOf(t, tool.OutputSchema)
 	if _, declared := out.Properties["targets"]; !declared {
 		t.Error("the tool does not declare targets, which is how it says what was counted")
+	}
+	// A model that cannot see `omitted` reads a truncated list as the whole
+	// list (spec 025 #24).
+	if _, declared := out.Properties["omitted"]; !declared {
+		t.Error("the tool does not declare omitted, which is how it says the list is not all of it")
 	}
 	bucket := out.Properties["series"].Items.Properties["buckets"].Items
 	for _, field := range []string{"key", "count", "mean", "min", "max", "rate", "categories"} {

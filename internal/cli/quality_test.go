@@ -64,6 +64,50 @@ func TestScoresTrendRendersASeriesPerName(t *testing.T) {
 	}
 }
 
+// A truncated answer that said nothing about being truncated would be a wrong
+// one, so the count comes out under the tables (spec 025 #24).
+func TestScoresTrendSaysWhatTheLimitLeftOut(t *testing.T) {
+	h := newHarness(t)
+	seedCorpus(t, h)
+	seedScores(t, h)
+
+	got := h.run(t.Context(), true, "scores", "trend", "--limit", "1")
+	if got.code != ExitOK {
+		t.Fatalf("exit = %d, stderr = %s", got.code, got.stderr)
+	}
+	if !strings.Contains(got.stdout, "2 rarer score names not shown; raise --limit to see them") {
+		t.Errorf("output does not say what was left out:\n%s", got.stdout)
+	}
+	// And nothing at all when the whole answer fits.
+	whole := h.run(t.Context(), true, "scores", "trend")
+	if strings.Contains(whole.stdout, "not shown") {
+		t.Errorf("a complete answer claims to be truncated:\n%s", whole.stdout)
+	}
+}
+
+// A numeric score is not bounded to 0..1 — `output_tokens` and `latency_ms` are
+// ordinary names — and the column has to read the way the interface's does
+// (spec 025 #25). `ui/src/lib/api/quality.test.ts` asserts the same numbers of
+// `figure`, which is the other half of this claim.
+func TestAScoreValueReadsTheSameInBothClients(t *testing.T) {
+	for _, tc := range []struct {
+		value float64
+		want  string
+	}{
+		{1.0 / 3.0, "0.333"},
+		{0.25, "0.25"},
+		{12.3456, "12.3"},
+		{0, "0"},
+		{1234.5, "1230"},
+		{98765, "98800"},
+		{-1234.5, "-1230"},
+	} {
+		if got := scoreFigure(tc.value); got != tc.want {
+			t.Errorf("scoreFigure(%v) = %q, want %q", tc.value, got, tc.want)
+		}
+	}
+}
+
 // A window the corpus does not reach says so rather than printing an empty
 // table, which is the command line's half of the screen's empty state.
 func TestScoresTrendSaysWhenNothingNamesATrace(t *testing.T) {
@@ -98,6 +142,8 @@ func TestScoresTrendIsTheEndpoint(t *testing.T) {
 			"/api/v1/stats/scores?group_by=model"},
 		{"one environment", []string{"scores", "trend", "--env", "production"},
 			"/api/v1/stats/scores?environment=production"},
+		{"a limit", []string{"scores", "trend", "--limit", "2"},
+			"/api/v1/stats/scores?limit=2"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := h.run(t.Context(), false, append(tc.args, "--json")...)

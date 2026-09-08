@@ -516,26 +516,31 @@ func register(server *mcp.Server, api API) {
 			"from":        timestamp("Only scores on traces at or after this RFC 3339 instant."),
 			"to":          timestamp("Only scores on traces strictly before this RFC 3339 instant."),
 			"environment": text("Only scores on traces from this environment."),
+			"limit": bounded(minLimit, maxLimit, "How many series to return, 1 to 500. Default 50, "+
+				"the busiest names first; `omitted` says how many were left out."),
 		}),
 		OutputSchema: object(map[string]*jsonschema.Schema{
 			"group_by": oneOf("What each bucket collects.",
 				"hour", "day", "environment", "release", "model"),
 			"targets": oneOf("What was counted: \"observation\" when grouping by model, where a trace-level score cannot appear; "+
 				"\"any\" otherwise, where every score counts once.", "any", "observation"),
+			"omitted": integer("How many score names the limit left out; 0 when every name is here. " +
+				"Raise limit, or narrow the range, to see them."),
 			"series": list(object(map[string]*jsonschema.Schema{
 				"name":      text("What is being measured."),
 				"data_type": oneOf("Which summary each bucket carries.", "numeric", "boolean", "categorical"),
 				"buckets": list(object(map[string]*jsonschema.Schema{
-					"key":        text("The hour, day, environment, release or model this bucket is."),
-					"count":      integer("How many scores fell in this bucket."),
-					"mean":       number("Numeric names only: the mean of the values."),
-					"min":        number("Numeric names only: the smallest value."),
-					"max":        number("Numeric names only: the largest value."),
-					"rate":       number("Boolean names only: the share whose value is 1, between 0 and 1."),
-					"categories": counters("Categorical names only: how many scores carried each value seen."),
+					"key":   text("The hour, day, environment, release or model this bucket is."),
+					"count": integer("How many scores fell in this bucket."),
+					"mean":  number("Numeric names only: the mean of the values."),
+					"min":   number("Numeric names only: the smallest value."),
+					"max":   number("Numeric names only: the largest value."),
+					"rate":  number("Boolean names only: the share whose value is 1, between 0 and 1."),
+					"categories": counters("Categorical names only: how many scores carried each value seen. " +
+						"Past the twentieth value the rest are summed under \"other\", so the counts still add up to `count`."),
 				}, "key", "count"), "One bucket per group, ascending by key."),
 			}, "name", "data_type", "buckets"), "One series per score name, by name."),
-		}, "group_by", "targets", "series"),
+		}, "group_by", "targets", "omitted", "series"),
 	}, t.getScoreTrends)
 
 	// The eval tools are declared in evals.go, in their own file because
@@ -893,6 +898,7 @@ type getScoreTrendsInput struct {
 	From        string `json:"from"`
 	To          string `json:"to"`
 	Environment string `json:"environment"`
+	Limit       *int   `json:"limit"`
 }
 
 func (t *toolset) getScoreTrends(ctx context.Context, req *mcp.CallToolRequest, in getScoreTrendsInput) (*mcp.CallToolResult, any, error) {
@@ -902,6 +908,9 @@ func (t *toolset) getScoreTrends(ctx context.Context, req *mcp.CallToolRequest, 
 	set(query, "from", in.From)
 	set(query, "to", in.To)
 	set(query, "environment", in.Environment)
+	if in.Limit != nil {
+		query.Set("limit", strconv.Itoa(*in.Limit))
+	}
 	return t.call(ctx, req, "/api/v1/stats/scores", query, summarizeScoreTrends)
 }
 
@@ -1140,6 +1149,7 @@ func summarizeScoreTrends(body json.RawMessage) string {
 	var parsed struct {
 		GroupBy string `json:"group_by"`
 		Targets string `json:"targets"`
+		Omitted int    `json:"omitted"`
 		Series  []struct {
 			Name    string `json:"name"`
 			Buckets []struct {
@@ -1161,8 +1171,13 @@ func summarizeScoreTrends(body json.RawMessage) string {
 			total += bucket.Count
 		}
 	}
-	return fmt.Sprintf("%d series by %s (%s), %d scores in total: %s.",
+	summary := fmt.Sprintf("%d series by %s (%s), %d scores in total: %s",
 		len(parsed.Series), parsed.GroupBy, parsed.Targets, total, strings.Join(names, ", "))
+	// A model reading this has to know the list is not the whole list.
+	if parsed.Omitted > 0 {
+		summary += fmt.Sprintf("; %d rarer names not shown", parsed.Omitted)
+	}
+	return summary + "."
 }
 
 func orUnnamed(value string) string {

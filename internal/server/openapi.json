@@ -517,7 +517,10 @@
           {"name": "name", "in": "query", "schema": {"type": "string"},
             "description": "Only the score filed under this name. Absent, every name in the range comes back as its own series"},
           {"name": "group_by", "in": "query",
-            "schema": {"type": "string", "enum": ["hour", "day", "environment", "release", "model"], "default": "day"}}
+            "schema": {"type": "string", "enum": ["hour", "day", "environment", "release", "model"], "default": "day"}},
+          {"name": "limit", "in": "query",
+            "schema": {"type": "integer", "minimum": 1, "maximum": 500, "default": 50},
+            "description": "How many series to return, the busiest score names first. A score name needs no config, so the number of them is unbounded client input; `omitted` says how many this left out"}
         ],
         "responses": {
           "200": {"description": "The series", "content": {"application/json": {"schema": {
@@ -526,9 +529,11 @@
               "group_by": {"type": "string", "enum": ["hour", "day", "environment", "release", "model"]},
               "targets": {"type": "string", "enum": ["any", "observation"],
                 "description": "`observation` when grouping by model, where only scores naming an observation can be counted; `any` otherwise, where every score counts once"},
+              "omitted": {"type": "integer",
+                "description": "How many score names `limit` left out, rarest first; 0 when every name in the range is here"},
               "series": {"type": "array", "items": {"$ref": "#/components/schemas/ScoreSeries"}}
             },
-            "required": ["group_by", "targets", "series"]
+            "required": ["group_by", "targets", "omitted", "series"]
           }}}},
           "400": {"$ref": "#/components/responses/BadRequest"},
           "401": {"$ref": "#/components/responses/Unauthorized"}
@@ -2025,7 +2030,7 @@
           "rate": {"type": ["number", "null"],
             "description": "Boolean series only: the share of scores in this bucket whose value is 1, between 0 and 1"},
           "categories": {"type": "object", "additionalProperties": {"type": "integer"},
-            "description": "Categorical series only: how many scores in this bucket carried each value seen. The counts sum to `count`"}
+            "description": "Categorical series only: how many scores in this bucket carried each value seen. The counts sum to `count`. Only the twenty busiest values of the range are named; the rest are summed under `other`, so the sum still holds — and a series that really has a category called `other` merges with them"}
         },
         "required": ["key", "count"]
       },
