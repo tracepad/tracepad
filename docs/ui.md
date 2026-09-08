@@ -377,6 +377,12 @@ score does not read as a cliff; a name without a config still shows, because the
 trend is real whether or not anybody declared it. Configured names come first,
 in the configs' order. The whole card is a link.
 
+The endpoint returns the fifty busiest names, so a project that files more than
+that gets "N of M score names" in the header and a line under the cards saying
+how many are not shown — a shorter grid that looked complete would be the one
+thing worse than a truncated one
+([quality.md](quality.md#two-ceilings-on-an-answer)).
+
 **One score** (`/quality?name=X`) is the Stats screen's composition for one
 name: the trend full width — with the minimum and the maximum as two fainter
 lines behind a numeric mean — a count chart beside it, and three breakdown

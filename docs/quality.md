@@ -86,14 +86,22 @@ Two writes a "what changed" question cannot answer on its own, because both
 leave an hour that nothing afterwards points at:
 
 - **Deleting a score.** The row is gone, so `created_at` can say nothing about
-  it. `DELETE /api/v1/scores/{id}` re-rolls that score's hour before it
-  answers, the way erasing a user's data does.
+  it. `DELETE /api/v1/scores/{id}` re-rolls that score's hour.
 - **Moving a score.** A re-POST that re-points a score at a different trace —
   or drops the target for a session-only one — dirties the hour it moved *to*
   and leaves the hour it came from counting it. The write re-rolls that hour
-  too, before the `201`.
+  too.
 
-A frozen hour stays as it is in both cases.
+Both corrections happen **inside the write's own transaction**, so they commit
+with it or not at all: a retry that found the write already applied would find
+nothing left to correct, and there is no window in which the row is on disk and
+the rollup still counts it. Only this table is recomputed — the traffic
+statistics and the per-user rows of that hour are nobody's business here, and
+rewriting them would put a whole hour's aggregation inside a single `DELETE`.
+
+A frozen hour stays as it is in both cases, and an hour at or past the
+watermark needs nothing: there the live scan reads the raw rows the write just
+changed.
 
 ### On an upgrade
 
@@ -127,6 +135,31 @@ linearly — the same bargain unbounded release strings make in the statistics.
 If a "category" is really free text, it is a `text` score, and a text score is
 not in this table at all.
 
+## Two ceilings on an answer
+
+Rows are one thing; the size of a reply is another. Neither the number of score
+names nor the number of categories inside one is bounded by anything the server
+decides — a name needs no config, and a categorical `string_value` is whatever
+the client sent — so an application filing `accuracy-<request id>` would grow
+the reply by a series per request, and the Quality overview by a chart.
+
+So the answer is cut on both sides, by size, and says so:
+
+- **Series.** `limit` on `GET /api/v1/stats/scores` — 1 to 500, default 50 —
+  keeps the busiest names of the range, and `omitted` counts what it left out.
+  The overview reads `omitted` and prints "N rarer score names not shown"; the
+  command line prints the same line and takes `--limit`.
+- **Categories.** Only the twenty busiest values of the range are named in a
+  series; the rest are summed under one `other` key. The counts move rather
+  than disappear, so a bucket's categories still add up to its `count` — a
+  distribution that no longer summed to its own total would be a worse answer
+  than a folded one. A series that really has a value called `other` merges
+  with them, for the same reason.
+
+The choice of what to keep is by size; the order it is written in is by name,
+so a reader scanning an alphabetical list does not lose their place because a
+name grew busier.
+
 Reading one name over a long window is an indexed range over this table, which
 is the whole point: on a synthetic month of 36,000 graded traces the roll-up
 answers in about **2 ms** where the same question asked of the raw rows takes
@@ -153,6 +186,7 @@ tracepad scores trend                                    # every name, by day
 tracepad scores trend --name hallucination --since 30d   # one name
 tracepad scores trend --name hallucination --group-by release
 tracepad scores trend --group-by model --env production
+tracepad scores trend --limit 200                        # past the first fifty
 ```
 
 `--json` prints the endpoint's own bytes. Full flags:

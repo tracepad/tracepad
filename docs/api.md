@@ -661,6 +661,7 @@ curl … "http://localhost:4318/api/v1/stats/scores?group_by=day&from=2026-09-01
 {
   "group_by": "day",
   "targets": "any",
+  "omitted": 0,
   "series": [
     {
       "name": "hallucination",
@@ -707,13 +708,21 @@ grouping counts each score once and it is `any`. It is here for the reason
 `unit` is on the statistics: two counts that are not comparable must not look
 alike.
 
+Both sides of the answer are bounded, because both are unbounded client input:
+a score name needs no `score_config`, and a `categorical` value is whatever the
+client sent. `limit` caps how many series come back — 1 to 500, default 50, the
+busiest names first — and `omitted` says how many that left out. Inside one
+series only the twenty busiest values of the range are named; the rest are
+summed under `other`, so a bucket's `categories` still add up to its `count`.
+
 An unknown parameter, or a parameter given without a value, is a `400`.
 
 The numbers come from the same seam and carry the same lag as the statistics
 above, plus one addition: a score's own arrival dirties the hour of its trace,
 so a judge grading yesterday's traffic is picked up by the next pass rather
-than never. Deleting a score corrects its hour before the `DELETE` answers.
-See [quality.md](quality.md#the-lag).
+than never. Deleting a score, or moving one onto another trace, corrects the
+hour it leaves in the same transaction as the write itself. See
+[quality.md](quality.md#the-lag).
 
 ## Prompt version diff
 

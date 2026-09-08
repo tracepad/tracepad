@@ -136,7 +136,9 @@ categorical one — where `list_scores` returns the individual judgements. Its
 `targets` field is the honesty `unit` is on `get_stats`: grouped by model it
 counts only the scores that name an observation, because a trace-level score has
 no model. Scores that name only a session, and `text` scores, are never on a
-timeline. See [quality.md](quality.md).
+timeline. It returns the fifty busiest names by default — `limit` raises that
+to 500, and `omitted` says how many are still not there — so a model reading
+the list never mistakes it for the whole list. See [quality.md](quality.md).
 
 There are no administrative tools, for the reason at the top of this page: not
 a gap, a guarantee.

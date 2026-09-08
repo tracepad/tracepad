@@ -318,6 +318,10 @@ that name an observation can be counted, and the header says
 `observation scores` rather than `any scores` so that two runs of the command
 are not read as the same question.
 
+`--limit` is how many names come back — 50 by default, the busiest first, at
+most 500. A project that files more than that gets a line under the tables
+saying how many were left out, rather than a shorter list that looks complete.
+
 Without `--name` every score name in the range gets a block. A range that holds
 none prints *no score names a trace in this range* — a score that grades only a
 session, and a `text` score, are never on a timeline. See

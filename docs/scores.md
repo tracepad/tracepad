@@ -108,12 +108,13 @@ off the disk.
 
 `tracepad scores rm <id>` is the same call — see [cli.md](cli.md#scores-add-scores-rm).
 
-Deleting a score also **corrects the quality rollup** before it answers. A
-score's arrival is noticed by its `created_at`, and a deleted row has none to
-notice — so the one hour it was counted in is recomputed in the same request,
-the way erasing a user's data recomputes the hours it emptied. An hour past the
-project's retention window is frozen and stays as it is
-([quality.md](quality.md#the-lag)).
+Deleting a score also **corrects the quality rollup**, in the same transaction
+that removes the row. A score's arrival is noticed by its `created_at`, and a
+deleted row has none to notice — so the one hour it was counted in is
+recomputed with the deletion, the way erasing a user's data recomputes the
+hours it emptied. Only that table: the traffic statistics of the hour are not
+its business. An hour past the project's retention window is frozen and stays
+as it is ([quality.md](quality.md#the-lag)).
 
 ### Batches
 
