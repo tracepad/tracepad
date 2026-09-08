@@ -315,6 +315,50 @@ const scoreHourOfQuery = `SELECT (t.timestamp / 1000000000 / ?) * ?
 	 JOIN traces t ON t.project_id = s.project_id AND t.id = s.trace_id
 	 WHERE s.project_id = ? AND s.id = ? AND s.data_type != 'text' AND t.timestamp >= 0`
 
+// traceHourQuery is the hour one trace sits in, for the caller that knows a
+// trace id and needs the `scores_hourly` row it governs (spec 025 #20).
+const traceHourQuery = `SELECT (t.timestamp / 1000000000 / ?) * ?
+	 FROM traces t
+	 WHERE t.project_id = ? AND t.id = ? AND t.timestamp >= 0`
+
+// vacatedScoreHour is the hour a score is *leaving*, read before an upsert
+// replaces it, and nothing when it is leaving none (spec 025 #20).
+//
+// A write is found by `created_at > last_pass` and dirties the hour of the
+// trace it names **now**. When a re-POST re-points a score at another trace —
+// or drops the target for a session-only one — the hour it used to be counted
+// in is named by nothing at all afterwards, exactly as a deleted score's is
+// (#4). So it is read here, while the old row still says it.
+//
+// It answers only when the target actually changed: a correction that leaves
+// `trace_id` alone cannot move the hour, because what decides the hour is the
+// trace's timestamp and a score write does not touch it.
+func vacatedScoreHour(tx *sql.Tx, projectID, id, target string) (int64, bool, error) {
+	var previous sql.NullString
+	err := tx.QueryRow(
+		`SELECT trace_id FROM scores WHERE project_id = ? AND id = ?`, projectID, id).
+		Scan(&previous)
+	if err == sql.ErrNoRows {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, fmt.Errorf("read the target of score %s: %w", id, err)
+	}
+	if previous.String == "" || previous.String == target {
+		return 0, false, nil
+	}
+	var hour sql.NullInt64
+	err = tx.QueryRow(traceHourQuery, SecondsPerHour, SecondsPerHour, projectID, previous.String).
+		Scan(&hour)
+	if err == sql.ErrNoRows {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, fmt.Errorf("find the hour score %s is leaving: %w", id, err)
+	}
+	return hour.Int64, hour.Valid, nil
+}
+
 // scoresRollupSweep deletes rolled score rows older than the project's stats
 // window. One chunk per job, like every other deletion this store does; the
 // window is `stats_retention_days` and there is no knob of its own, because

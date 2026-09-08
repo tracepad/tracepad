@@ -460,3 +460,80 @@ func TestTheEndpointMapNamesTheScoreTrends(t *testing.T) {
 	}
 	t.Errorf("the endpoint map does not name /api/v1/stats/scores: %+v", index.Endpoints)
 }
+
+// A re-POST that moves a score to another trace, or off one, leaves a row in
+// the hour it came from that the dirty query can never find: the write is
+// found by `created_at`, and it dirties the hour of the trace the score names
+// *now* (spec 025 #20). Both shapes, and both would double-count for ever.
+func TestMovingAScoreCorrectsTheHourItLeaves(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		moved map[string]any
+	}{
+		{
+			name: "re-pointed at a trace in another hour",
+			moved: map[string]any{"id": scoreHex(11), "trace_id": traceHex(2),
+				"name": "hallucination", "value": 0.9},
+		},
+		{
+			// The API takes a score that names only a session (spec 003 #4),
+			// and such a score is on no timeline at all.
+			name: "re-pointed off its trace onto a session",
+			moved: map[string]any{"id": scoreHex(11), "session_id": "sess-moved",
+				"name": "hallucination", "value": 0.9},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t, nil, store.WriterOptions{})
+			h.seedScoredHour(t, statsHour, 1, "production", "2.5.0", "claude-sonnet-5", 0.2, "pass")
+			h.seedScoredHour(t, statsHour+3600, 2, "production", "2.5.0", "claude-sonnet-5", 0.6, "fail")
+			h.rollTheCorpus(t, time.Unix(statsHour+3*3600, 0))
+
+			before := h.scoreTrends(t, "/api/v1/stats/scores?name=hallucination&group_by=hour")
+			if len(before.series(t, "hallucination").Buckets) != 2 {
+				t.Fatalf("buckets = %+v before the move, want the two hours",
+					before.series(t, "hallucination").Buckets)
+			}
+
+			rec := h.send(t, "POST", "/api/v1/scores", []map[string]any{tc.moved})
+			expectStatus(t, rec, 201)
+
+			after := h.scoreTrends(t, "/api/v1/stats/scores?name=hallucination&group_by=hour")
+			hours := map[string]int64{}
+			var total int64
+			for _, bucket := range after.series(t, "hallucination").Buckets {
+				hours[bucket.Key] = bucket.Count
+				total += bucket.Count
+			}
+			// The score is in one place or in none — never in both.
+			if total != 1 {
+				t.Errorf("the range counts %d scores after the move, want 1: %v", total, hours)
+			}
+			if hours[before.series(t, "hallucination").Buckets[0].Key] != 0 {
+				t.Errorf("the hour it left still counts it: %v", hours)
+			}
+		})
+	}
+}
+
+// A correction that leaves the target alone must not pay for the rule above:
+// the hour cannot move, because what decides it is the trace's timestamp.
+func TestCorrectingAScoreInPlaceLeavesItsHourAlone(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	h.seedScoredHour(t, statsHour, 1, "production", "2.5.0", "claude-sonnet-5", 0.2, "pass")
+	h.rollTheCorpus(t, time.Unix(statsHour+3*3600, 0))
+
+	rec := h.send(t, "POST", "/api/v1/scores", []map[string]any{
+		{"id": scoreHex(11), "trace_id": traceHex(1), "name": "hallucination", "value": 0.9},
+	})
+	expectStatus(t, rec, 201)
+
+	// The pass has not run again, so this is the live half correcting nothing
+	// and the rolled half still holding the old value — which is the lag the
+	// docs publish, not a hole.
+	body := h.scoreTrends(t, "/api/v1/stats/scores?name=hallucination&group_by=day")
+	if body.Series[0].Buckets[0].Count != 1 {
+		t.Errorf("count = %d after an in-place correction, want the one score",
+			body.Series[0].Buckets[0].Count)
+	}
+}

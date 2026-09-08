@@ -46,6 +46,12 @@ type Score struct {
 type ScoreWrite struct {
 	ProjectID string
 	Scores    []*Score
+
+	// Vacated are the hours whose `scores_hourly` rows this write invalidated
+	// without dirtying them: the hour a score was counted in *before* a
+	// re-POST moved it to another trace, or off one. The caller re-rolls them
+	// before it answers, exactly as it does for a deletion (spec 025 #20).
+	Vacated []int64
 }
 
 // apply upserts every score by (project_id, id). A re-POST with the same id
@@ -79,8 +85,18 @@ func (s *ScoreWrite) apply(tx *sql.Tx) error {
 			return &Rejection{Kind: RejectInvalid, Message: message}
 		}
 	}
+	s.Vacated = nil
 	for _, score := range s.Scores {
-		_, err := tx.Exec(
+		// Read before the upsert overwrites it: afterwards nothing names the
+		// hour this score is leaving (spec 025 #20).
+		hour, moved, err := vacatedScoreHour(tx, s.ProjectID, score.ID, score.TraceID)
+		if err != nil {
+			return err
+		}
+		if moved {
+			s.Vacated = append(s.Vacated, hour)
+		}
+		_, err = tx.Exec(
 			`INSERT INTO scores (
 			   project_id, id, trace_id, observation_id, session_id, name,
 			   data_type, value, string_value, comment, metadata, timestamp, created_at)

@@ -704,3 +704,145 @@ func TestPurgingAProjectLeavesNoScoreRows(t *testing.T) {
 		t.Errorf("%d score rows survived the project, want none", left)
 	}
 }
+
+// pastTheWindow is a clock far enough past the fixture's hour that a one-day
+// retention window has closed over it. `afterTheHour` is two hours on, which
+// closes the hour for the aggregator and freezes nothing at all — the mistake
+// the first draft of these three tests made.
+func pastTheWindow() time.Time { return time.Unix(rollupHour, 0).Add(10 * 24 * time.Hour) }
+
+// The hour a shared freeze gate refused for ever (spec 025 #21).
+//
+// The window is measured against the client's timestamp while the sweep
+// deletes by arrival, so history imported into an install that had already
+// rolled it is "past the window" and completely intact. Under one gate for all
+// three tables, `stats_hourly` already held rows for such an hour, so the whole
+// job returned early and migration 0015's backfill wrote no score rows for it —
+// ever, with the traces and the scores sitting right there.
+func TestABackfillFillsAFrozenHourWhoseTracesAreIntact(t *testing.T) {
+	s, project := readStore(t)
+	rollupFixture(t, s, project.ID)
+	scoreFixture(t, s, project.ID)
+	stampTraces(t, s, project.ID, rollupHour*1e9)
+
+	// Rolled before the score table existed: the statistics hold the hour and
+	// the score rollup does not, which is what an upgrade finds.
+	base := afterTheHour()
+	passAt(t, s, base)
+	if _, err := s.db.Exec(`DELETE FROM scores_hourly WHERE project_id = ?`, project.ID); err != nil {
+		t.Fatal(err)
+	}
+	if rows := rolledRows(t, s, project.ID, rollupHour); len(rows) == 0 {
+		t.Fatal("the statistics were not rolled, so the test proves nothing")
+	}
+
+	// A retention window the fixture's own hour is long past — by the client's
+	// clock. Nothing has swept: `ingested_at` is a moment ago.
+	if _, err := s.db.Exec(
+		`UPDATE projects SET retention_days = 1 WHERE id = ?`, project.ID); err != nil {
+		t.Fatal(err)
+	}
+	var traces int
+	if err := s.db.QueryRow(
+		`SELECT COUNT(*) FROM traces WHERE project_id = ?`, project.ID).Scan(&traces); err != nil {
+		t.Fatal(err)
+	}
+	if traces == 0 {
+		t.Fatal("the traces are gone, which is the other case entirely")
+	}
+
+	// The migration's own line, and the pass it buys.
+	if _, err := s.db.Exec(`UPDATE stats_rollup SET last_pass = 0`); err != nil {
+		t.Fatal(err)
+	}
+	// Ten days on, so the fixture's hour really is past a one-day window —
+	// which is what makes it frozen, and what the first pass was not.
+	passAt(t, s, pastTheWindow())
+
+	rows := rolledScoreRows(t, s, project.ID, rollupHour)
+	if len(rows) == 0 {
+		t.Fatal("the backfill left a frozen hour empty although its traces are intact")
+	}
+	if row, ok := rows["production|2026.8.30||"+nameHallucination+"|numeric|"]; !ok || row.Count != 2 {
+		t.Errorf("the frozen hour's score rows are wrong: %v", keysSorted(rows))
+	}
+}
+
+// The other half of the same rule: once the score rollup holds an hour, a
+// re-roll past the window must not touch it — which is what spec 013 #11
+// protects, asked of this table.
+func TestAFrozenScoreHourIsNotRecomputed(t *testing.T) {
+	s, project := readStore(t)
+	rollupFixture(t, s, project.ID)
+	scoreFixture(t, s, project.ID)
+	stampTraces(t, s, project.ID, rollupHour*1e9)
+
+	base := afterTheHour()
+	passAt(t, s, base)
+	before := rolledScoreRows(t, s, project.ID, rollupHour)
+	if len(before) == 0 {
+		t.Fatal("the pass wrote no score rows")
+	}
+
+	// Past the window now, with rows standing — and the raw scores taken, the
+	// way retention takes them with their targets.
+	if _, err := s.db.Exec(
+		`UPDATE projects SET retention_days = 1 WHERE id = ?`, project.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`DELETE FROM scores WHERE project_id = ?`, project.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`UPDATE stats_rollup SET last_pass = 0`); err != nil {
+		t.Fatal(err)
+	}
+	passAt(t, s, pastTheWindow())
+
+	after := rolledScoreRows(t, s, project.ID, rollupHour)
+	if len(after) != len(before) {
+		t.Errorf("the frozen hour was demolished: %d rows, was %d", len(after), len(before))
+	}
+}
+
+// And the case the rule does *not* change: an hour past the window whose
+// traces retention really did take writes nothing, because the join finds
+// nothing — which is the truth, since the scores went with their targets.
+func TestASweptHourGetsNoScoreRows(t *testing.T) {
+	s, project := readStore(t)
+	rollupFixture(t, s, project.ID)
+	scoreFixture(t, s, project.ID)
+	stampTraces(t, s, project.ID, rollupHour*1e9)
+
+	base := afterTheHour()
+	passAt(t, s, base)
+	if _, err := s.db.Exec(`DELETE FROM scores_hourly WHERE project_id = ?`, project.ID); err != nil {
+		t.Fatal(err)
+	}
+	// The sweep's work, done here directly: the traces and their scores gone,
+	// the statistics standing (spec 013 #6).
+	for _, statement := range []string{
+		`DELETE FROM scores WHERE project_id = ?`,
+		`DELETE FROM observations WHERE project_id = ?`,
+		`DELETE FROM traces WHERE project_id = ?`,
+	} {
+		if _, err := s.db.Exec(statement, project.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.db.Exec(
+		`UPDATE projects SET retention_days = 1 WHERE id = ?`, project.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`UPDATE stats_rollup SET last_pass = 0`); err != nil {
+		t.Fatal(err)
+	}
+	passAt(t, s, pastTheWindow())
+
+	if rows := rolledScoreRows(t, s, project.ID, rollupHour); len(rows) != 0 {
+		t.Errorf("a swept hour grew score rows out of nothing: %v", keysSorted(rows))
+	}
+	// And the statistics it stands beside were not demolished either.
+	if rows := rolledRows(t, s, project.ID, rollupHour); len(rows) == 0 {
+		t.Error("the statistics of a frozen hour were recomputed away")
+	}
+}

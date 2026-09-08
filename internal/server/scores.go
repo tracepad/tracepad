@@ -118,6 +118,12 @@ func (s *Server) handleCreateScores(w http.ResponseWriter, r *http.Request) {
 	if !s.submit(w, r, write) {
 		return
 	}
+	// A re-POST that moved a score to another trace — or off one — left a row
+	// in the hour it came from that nothing else will ever correct, exactly as
+	// a deletion does (spec 025 #20).
+	if !s.rerollScoreHours(w, r, project.ID, write.Vacated) {
+		return
+	}
 	// 201 only now: the transaction is committed and fsynced (#9).
 	writeJSON(w, http.StatusCreated, scoreIDsResponse{IDs: ids})
 }
@@ -427,15 +433,24 @@ func (s *Server) handleDeleteScore(w http.ResponseWriter, r *http.Request) {
 // last_pass` cannot see a row that is gone — so the one hour it was counted in
 // is recomputed here, exactly as a user-data erasure recomputes the hours it
 // emptied (spec 013 #7).
-//
-// Only when the hour lies behind the watermark: at or past it the live half of
-// the seam reads the raw rows, which no longer hold the score. And a frozen
-// hour (spec 013 #11) stays as it is, because the job settles that rule inside
-// its own transaction — `docs/quality.md` says so rather than leaving it to be
-// discovered.
 func (s *Server) rerollDeletedScore(w http.ResponseWriter, r *http.Request,
 	projectID string, deletion *store.ScoreDelete) bool {
 	if !deletion.Rolled {
+		return true
+	}
+	return s.rerollScoreHours(w, r, projectID, []int64{deletion.Hour})
+}
+
+// rerollScoreHours recomputes the hours a score write or a deletion left
+// behind, before the request answers.
+//
+// Only those behind the watermark: at or past it the live half of the seam
+// reads the raw rows, which already say the truth. And a frozen hour stays as
+// it is, because the job settles that rule inside its own transaction —
+// `docs/quality.md` says so rather than leaving it to be discovered.
+func (s *Server) rerollScoreHours(w http.ResponseWriter, r *http.Request,
+	projectID string, hours []int64) bool {
+	if len(hours) == 0 {
 		return true
 	}
 	state, err := s.store.RollupState(projectID)
@@ -444,10 +459,20 @@ func (s *Server) rerollDeletedScore(w http.ResponseWriter, r *http.Request,
 		writeError(w, http.StatusInternalServerError, "failed to correct the score rollup")
 		return false
 	}
-	if deletion.Hour >= state.RolledUntil {
-		return true
+	now := time.Now().UnixNano()
+	// One job per distinct hour: a batch that re-points fifty scores onto one
+	// trace has one hour to correct, not fifty.
+	seen := map[int64]bool{}
+	for _, hour := range hours {
+		if hour >= state.RolledUntil || seen[hour] {
+			continue
+		}
+		seen[hour] = true
+		if !s.submit(w, r, store.RollHour(projectID, hour, now)) {
+			return false
+		}
 	}
-	return s.submit(w, r, store.RollHour(projectID, deletion.Hour, time.Now().UnixNano()))
+	return true
 }
 
 // scoreDeletedResponse names what went, and nothing else: there is no echo to
