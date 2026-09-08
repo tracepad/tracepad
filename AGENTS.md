@@ -285,7 +285,7 @@ API. This file routes; it does not duplicate what specs and docs say.
   own fixture (#6, #13). `users_hourly` is the third table to ask the freeze
   of its own rows, which closes spec 023 #15 (#7). Measured rather than
   promised: the application half is eighteen lines smaller and the tests are
-  261 larger (#8, #12) — the win is that a listing defect now has one place
+  264 larger (#8, #12) — the win is that a listing defect now has one place
   to be, not the budget.
 - ✅ Spec 005 (retention & admin) shipped: schema 0005, the hourly sweeper
   writing every chunk through the group-commit writer, the admin API under
