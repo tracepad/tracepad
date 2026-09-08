@@ -120,13 +120,15 @@ traffic, and `item_id` never appears without `run_id`. See
 | Parameter | Meaning |
 |---|---|
 | `from`, `to` | RFC 3339. Half-open — `from` inclusive, `to` exclusive — so walking a timeline never reports a trace twice. |
-| `environment` | Exact match. |
-| `user_id`, `session_id`, `name` | Exact match. |
+| `environment` | The environment a trace ran in, or a comma-separated list matching **any** of them: `?environment=production,staging`. See [Lists](#lists). |
+| `user_id`, `session_id` | Exact match. |
+| `name` | The trace name, or a comma-separated list matching any of them. A trace with no name never matches. See [Lists](#lists). |
 | `tag` | Repeatable; a trace must carry **every** tag given. |
 | `status` | `error` (at least one failed observation) or `ok`. |
 | `min_cost` | Traces whose total cost is at least this. A trace whose client provided no cost has none and never matches. |
 | `q` | Full-text search over what the observations carried. See [Search](#search). |
-| `release`, `version` | Exact match on the deployment, and on the version of the trace's own logic. |
+| `release` | The deployment the trace ran in, or a comma-separated list matching any of them. See [Lists](#lists). |
+| `version` | Exact match on the version of the trace's own logic. |
 | `type` | Traces with at least one observation of this kind — one of `span`, `generation`, `event`, `agent`, `tool`, `chain`, `retriever`, `guardrail`, `evaluator`, `embedding`. Exact: `generation` does not match `embedding`. Anything else is a `400`. |
 | `prompt` | `name`, or `name@version`: traces with at least one observation that ran this prompt, at any version or at that one. A version is a **run of digits after the last `@`, with a name in front of it**; every other string is a name, `@` included — `@acme/support`, `team@acme/answer`, `name@latest` and `svc@-1` all filter as names. Labels are not versions: `name@latest` matches a prompt literally called that, and otherwise returns nothing. |
 | `run_id`, `item_id` | The traces of one eval run, and the attempts at one case ([datasets.md](datasets.md)). Both take the 32-hex ids this API issues; another shape is a `400`, because nothing else can be in those columns and an empty listing would report a typo as a fact. |
@@ -140,6 +142,32 @@ A parameter the endpoint does not know is a `400`, and so is one sent without
 a value (`?environment=` is what an unset shell variable expands to, and
 answering it with the whole project would be a wider answer to a narrower
 question).
+
+#### Lists
+
+`environment`, `release` and `name` take **one value or a comma-separated
+list**, and a trace matches when its column equals any item:
+
+```sh
+curl … "http://localhost:4318/api/v1/traces?environment=production,staging"
+```
+
+One value behaves exactly as it always did. Items are trimmed, so
+`a, b` is the pair it looks like, and duplicates collapse. An **empty item**
+— `a,,b`, `a,` — is a `400` for the reason an empty value is: it is a template
+that did not fill in, and reading it as "just the rest" would answer a broken
+request with a well-formed listing.
+
+A value that **contains a comma** is not expressible through these parameters.
+An environment, a release or a trace name is an identifier, and an identifier
+with a comma in it is a choice its owner made against every tool that will
+ever list it.
+
+`tag` is not a list of this kind: it stays repeatable and stays an **AND**, so
+`?tag=a&tag=b` keeps the traces carrying both. Two spellings for two semantics
+is clearer than one spelling for both.
+
+[`GET /api/v1/facets`](#filter-values) lists what these three can be set to.
 
 `?fields=` keeps the row's own field order and drops the rest:
 
@@ -519,7 +547,8 @@ tie-break), paginated by the same opaque cursor as every other listing.
 | Filter | Meaning |
 |---|---|
 | `from`, `to` | RFC 3339, half-open, on the **traces**: a session appears when any of its traces falls in the window, and its totals then describe those traces. |
-| `environment`, `user_id` | Exact match on the session's traces. |
+| `environment` | The environment of the session's traces, or a comma-separated list matching any of them ([Lists](#lists)). |
+| `user_id` | Exact match on the session's traces. |
 
 A trace that named no session is not a session of one and never appears.
 
@@ -723,6 +752,51 @@ so a judge grading yesterday's traffic is picked up by the next pass rather
 than never. Deleting a score, or moving one onto another trace, corrects the
 hour it leaves in the same transaction as the write itself. See
 [quality.md](quality.md#the-lag).
+
+## Filter values
+
+```sh
+curl … "http://localhost:4318/api/v1/facets?from=2026-09-01T00:00:00Z"
+```
+
+```json
+{
+  "from": "2026-09-01T00:00:00Z",
+  "to": "2026-09-09T12:00:00Z",
+  "environment": [
+    {"value": "production", "count": 4656},
+    {"value": "staging", "count": 218},
+    {"value": "prod", "count": 1}
+  ],
+  "release": [{"value": "2026.9.1", "count": 3120}],
+  "name": [{"value": "support-chat", "count": 2984}],
+  "omitted": {"environment": 0, "release": 0, "name": 0}
+}
+```
+
+What the three many-valued filters can be set to: the distinct values of
+`environment`, `release` and `name` among the traces of a range, each with the
+number of traces carrying it. It is what a filter panel asks before it offers a
+list, and what saves a client guessing at a value it could have read.
+
+The counts are the point as much as the values are: `prod: 1` beside
+`production: 4656` is a typo, and nothing but the count says so.
+
+`from` and `to` are the statistics' own bounds — RFC 3339, half-open — and
+default to **the last 30 days**, which is the listing's own default window. The
+range is the *only* thing this endpoint takes: the counts do not respect the
+other filters, so the list does not move as boxes are ticked. An unknown
+parameter, or one given without a value, is a `400`.
+
+Values are sorted by count descending and then by value ascending, and each
+column carries at most **100** of them; `omitted` says how many were left out,
+rarest first. A trace with no release is not a release, and a trace with no
+name is not a name — neither is a value anything can be filtered by.
+
+The numbers come from the same seam as the statistics, so a range behind the
+watermark is answered from the rollup and outlives the traces it summarizes.
+The tail is answered live, which is what keeps the list *complete*: an
+environment first seen a minute ago is already here.
 
 ## Prompt version diff
 

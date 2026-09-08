@@ -79,6 +79,10 @@ export type ScorePage = JSONResponse<paths['/api/v1/scores']['get']>;
 export type ScoreSeries = components['schemas']['ScoreSeries'];
 export type ScoreBucket = components['schemas']['ScoreBucket'];
 export type ScoreTrends = JSONResponse<paths['/api/v1/stats/scores']['get']>;
+
+/** The filter values of a range, and what the cap left out (spec 027 #2). */
+export type Facets = JSONResponse<paths['/api/v1/facets']['get']>;
+export type FacetValue = components['schemas']['FacetValue'];
 /** Which target a score listing is about; at most one of the three is set. */
 export type ScoreFilters = { trace_id?: string; observation_id?: string; session_id?: string };
 
@@ -244,6 +248,16 @@ class Api {
 		signal?: AbortSignal
 	) {
 		return this.#json<Stats>('/api/v1/stats', { query, signal });
+	}
+
+	/**
+	 * What the three many-valued filters can be set to, for the range in view
+	 * (spec 027 #2): one request, three lists with counts. It takes only the
+	 * range — the counts do not respect the other filters, so the list does
+	 * not move as boxes are ticked.
+	 */
+	getFacets(query: { from?: string; to?: string }, signal?: AbortSignal) {
+		return this.#json<Facets>('/api/v1/facets', { query, signal });
 	}
 
 	/**

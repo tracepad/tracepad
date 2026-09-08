@@ -38,6 +38,17 @@
 # PR of its own: the traces and sessions listings are twins at ~400 lines each
 # and have never been read side by side.
 #
+# 18,500 is the owner's decision of 2026-09-09 (spec 027 #9), and it is the
+# first raise since 018 measured against a spec that came in on its estimate:
+# the facet field, its chip, the facets client and the sessions panel's share
+# were estimated at 350-450 lines and came to 436 (`main` 17,600 -> 18,036). A checkbox
+# list *is* its lines — there is no cheaper shape for "these, not this" — and
+# the 500 is `main` plus that measurement plus room for one review cycle, which
+# is how every raise since spec 015 #9 has been justified. Spec 026 is why the
+# arithmetic starts where it does: the revision the warning asked for came out
+# neutral, so the duplication it removed paid for the header fix and the
+# checker rather than for this.
+#
 # What it counts, though, has: the budget covers the application, and the tests
 # are reported beside it under no ceiling at all (design §8, amended; spec 010
 # #7). Spec 010 measured what a budget over both actually buys — extracting the
@@ -50,7 +61,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BUDGET="${1:-18000}"
+BUDGET="${1:-18500}"
 
 cd "$ROOT"
 

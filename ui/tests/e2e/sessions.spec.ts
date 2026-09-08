@@ -33,8 +33,9 @@ test('a filter narrows the listing and stays in the URL', async ({ page }) => {
 	await expect(page.getByText('session-12')).toBeVisible();
 	await expect(page.getByText('session-77')).toHaveCount(0);
 
-	// The environment field is a link somebody can send, not hidden state.
-	await expect(page.getByPlaceholder('Environment')).toHaveValue('staging');
+	// The environment control is a link somebody can send, not hidden state:
+	// it names what is filtering on its face (spec 027 #8).
+	await expect(page.getByRole('button', { name: 'Environment: staging' })).toBeVisible();
 });
 
 test('a session page opens onto its traces, and a trace into a panel', async ({ page }) => {

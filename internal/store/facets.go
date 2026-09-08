@@ -42,8 +42,8 @@ type FacetRow struct {
 // facetRollupQueries is the rolled half: three statements over two tables.
 //
 // `environment` and `release` come from the **trace-unit** rows of
-// `stats_hourly` (`model = ”`), which is the discriminator spec 013 #1 put
-// there — summing the observation rows too would count a trace once per model
+// `stats_hourly` — the ones with an empty `model`, which is the discriminator
+// spec 013 #1 put there — summing the observation rows too would count a trace once per model
 // it used. `name` comes from `names_hourly`, whose every row is a trace unit.
 //
 // The empty release is left out here rather than by the caller: a trace whose

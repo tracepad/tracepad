@@ -184,7 +184,7 @@ const Usage = `Client commands (they talk to a running server over HTTP):
   tracepad prompts rm   <name> [--yes]
   tracepad stats        [--group-by hour|day|model|environment|release] [--since 1h]
                         [--until T] [--env E] [--user U]
-  tracepad facets       [--since 30d] [--until T]
+  tracepad facets       [--since 1h] [--until T]
   tracepad system
 
 --env, --release and --name take a comma-separated list — --env production,staging

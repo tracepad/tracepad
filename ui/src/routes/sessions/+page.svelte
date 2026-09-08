@@ -1,13 +1,18 @@
 <script lang="ts">
 	import ChevronLeft from '@lucide/svelte/icons/chevron-left';
+	import ListFilter from '@lucide/svelte/icons/list-filter';
 	import MessagesSquare from '@lucide/svelte/icons/messages-square';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
+	import { Popover } from 'bits-ui';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { api, type Session, type SessionRow, type Trace } from '$lib/api/client.svelte';
+	import { facetChip, readList, writeList } from '$lib/api/facets';
 	import { readSessionFilters, sessionSearch, type SessionFilters } from '$lib/api/sessions';
+	import { FacetValues } from '$lib/facets.svelte';
 	import Button from '$lib/components/Button.svelte';
 	import CopyButton from '$lib/components/CopyButton.svelte';
+	import FacetField from '$lib/components/FacetField.svelte';
 	import ListingCount from '$lib/components/ListingCount.svelte';
 	import ListingShell from '$lib/components/ListingShell.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
@@ -111,6 +116,19 @@
 		navigate(next);
 	}
 
+	// The environment, as the list of what there is (spec 027 #8). Only this
+	// one: a session's user id is unbounded and has a screen of its own, and
+	// this listing takes no other filter that a facet could answer.
+	let environmentOpen = $state(false);
+	const environments = new FacetValues(
+		() => ({ from: filters.from, to: filters.to }),
+		() => environmentOpen
+	);
+	$effect(() => environments.watch());
+
+	const picked = $derived(readList(filters.environment));
+	const environmentChip = $derived(facetChip('Environment', picked));
+
 	const fieldClass =
 		'border-border bg-canvas placeholder:text-subtle w-40 rounded-md border px-2 py-1 text-sm';
 </script>
@@ -135,17 +153,43 @@
 			range={{ from: filters.from, to: filters.to }}
 			onchange={(range) => navigate({ environment: filters.environment, user_id: filters.user_id, ...range })}
 		/>
-		<label class="sr-only" for="session-environment">Environment</label>
-		<input
-			id="session-environment"
-			type="text"
-			value={filters.environment ?? ''}
-			onchange={(event) => commit('environment', event.currentTarget.value)}
-			placeholder="Environment"
-			autocomplete="off"
-			spellcheck="false"
-			class={fieldClass}
-		/>
+		<Popover.Root bind:open={environmentOpen}>
+			<Popover.Trigger>
+				{#snippet child({ props })}
+					<Button {...props} title={picked.length ? environmentChip.title : undefined}>
+						<ListFilter class="size-4" />
+						<span class="max-w-48 truncate">
+							{picked.length ? environmentChip.text : 'Environment'}
+						</span>
+					</Button>
+				{/snippet}
+			</Popover.Trigger>
+			<!-- Portalled for the reason the filter popover is: the bar it sits in
+			     scrolls sideways on a narrow screen. -->
+			<Popover.Portal>
+				<Popover.Content
+					sideOffset={6}
+					align="start"
+					class="border-border bg-canvas shadow-overlay z-50 w-[min(18rem,calc(100vw-1.5rem))]
+						rounded-lg border p-3"
+				>
+					<p id="session-environment-label" class="text-muted mb-1 text-xs font-medium">
+						Environment
+					</p>
+					<FacetField
+						id="session-environment"
+						label="Environment"
+						name="environment"
+						values={environments.values.environment}
+						omitted={environments.omitted.environment}
+						loading={environments.loading}
+						failure={environments.failure}
+						checked={picked}
+						onchange={(next) => commit('environment', writeList(next) ?? '')}
+					/>
+				</Popover.Content>
+			</Popover.Portal>
+		</Popover.Root>
 		<label class="sr-only" for="session-user">User</label>
 		<input
 			id="session-user"

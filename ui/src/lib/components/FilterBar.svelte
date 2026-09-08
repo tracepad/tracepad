@@ -4,7 +4,7 @@
 
 	type Field = {
 		label: string;
-		kind: 'text' | 'number' | 'status' | 'tags' | 'choice';
+		kind: 'text' | 'number' | 'status' | 'tags' | 'choice' | 'facet';
 		placeholder?: string;
 		hint?: string;
 		/** For `choice`: the values, offered beside an "Any" that clears it. */
@@ -27,10 +27,13 @@
 	// that list with neither a control here nor a place on the bar does not
 	// compile.
 	const FIELDS: Record<FieldName, Field> = {
-		environment: { label: 'Environment', kind: 'text', placeholder: 'production' },
+		// The three that take a list, offered as the list (spec 027 #6). A
+		// checkbox is how a person says *these* rather than *this*, and the
+		// values come from `GET /api/v1/facets` for the window in view.
+		environment: { label: 'Environment', kind: 'facet' },
 		user_id: { label: 'User', kind: 'text', placeholder: 'Exact user id' },
 		session_id: { label: 'Session', kind: 'text', placeholder: 'Exact session id' },
-		name: { label: 'Name', kind: 'text', placeholder: 'Exact trace name' },
+		name: { label: 'Name', kind: 'facet' },
 		tag: {
 			label: 'Tags',
 			kind: 'tags',
@@ -39,7 +42,7 @@
 		},
 		status: { label: 'Status', kind: 'status' },
 		min_cost: { label: 'Min cost', kind: 'number', placeholder: '0.01' },
-		release: { label: 'Release', kind: 'text', placeholder: '2026.8.30' },
+		release: { label: 'Release', kind: 'facet' },
 		version: { label: 'Version', kind: 'text', placeholder: 'checkout-v9' },
 		type: {
 			label: 'Type',
@@ -72,8 +75,11 @@
 	import ListFilter from '@lucide/svelte/icons/list-filter';
 	import X from '@lucide/svelte/icons/x';
 	import { Popover } from 'bits-ui';
+	import { facetChip, readList, writeList, type FacetField } from '$lib/api/facets';
 	import { TRACE_FILTERS, type TraceFilters } from '$lib/api/traces';
+	import { FacetValues } from '$lib/facets.svelte';
 	import Button from './Button.svelte';
+	import FacetField_ from './FacetField.svelte';
 	import RangePicker from './RangePicker.svelte';
 	import SearchBox from './SearchBox.svelte';
 
@@ -98,6 +104,11 @@
 	// field's value on the keystroke that adds a comma, which sends the caret
 	// to the end and makes editing a list in the middle impossible.
 	let tagsText = $state('');
+	// The values the three facet fields offer, read when the panel opens and
+	// again when the window moves under it (spec 027 #6). The listing's first
+	// paint pays nothing for it: a minority of visits open the panel.
+	const facets = new FacetValues(() => ({ from: filters.from, to: filters.to }), () => open);
+	$effect(() => facets.watch());
 
 	// The badge counts what is behind the button, so the window — which is on
 	// the bar in plain sight — is not counted twice.
@@ -157,6 +168,14 @@
 		(draft as Record<string, unknown>)[name] = value;
 	};
 
+	// A facet field holds the comma form the URL carries and the API takes
+	// (Decision 7), so nothing between the checkbox and the query string parses
+	// it twice.
+	const picked = (name: FieldName) => readList(text(name));
+	const pick = (name: FieldName, values: string[]) => {
+		(draft as Record<string, unknown>)[name] = writeList(values) ?? '';
+	};
+
 	/** Blank fields are not filters; the API refuses a parameter with no value. */
 	function prune(input: TraceFilters): TraceFilters {
 		const next: TraceFilters = {};
@@ -173,9 +192,19 @@
 		return next;
 	}
 
-	function chipLabel(name: FieldName): string {
+	/**
+	 * What a chip says and what its tooltip says. They differ only for a
+	 * many-valued filter above two values, where the number is the information
+	 * and the names stay one hover away (Decision 7).
+	 */
+	function chip(name: FieldName): { text: string; title: string } {
+		const label = FIELDS[name].label;
 		const value = filters[name];
-		return `${FIELDS[name].label}: ${Array.isArray(value) ? value.join(', ') : value}`;
+		if (FIELDS[name].kind === 'facet' && typeof value === 'string') {
+			return facetChip(label, readList(value));
+		}
+		const text = `${label}: ${Array.isArray(value) ? value.join(', ') : value}`;
+		return { text, title: text };
 	}
 
 	const fieldClass =
@@ -208,15 +237,43 @@
 				class="border-border bg-canvas shadow-overlay z-50 w-[min(22rem,calc(100vw-1.5rem))]
 					rounded-lg border p-3"
 			>
-				<form onsubmit={apply}>
-					<div class="grid grid-cols-2 gap-x-2 gap-y-2.5">
+				<!-- The fields scroll and the two buttons do not: with three
+				     checkbox lists in it the panel is taller than a laptop's
+				     viewport, and Apply below the fold is a panel that cannot be
+				     used (spec 027 #6). -->
+				<form
+					onsubmit={apply}
+					class="flex max-h-[calc(var(--bits-popover-content-available-height,100vh)-1.5rem)] flex-col"
+				>
+					<div class="grid grid-cols-2 gap-x-2 gap-y-2.5 overflow-y-auto px-0.5 py-0.5">
 						{#each FIELD_NAMES as name (name)}
 							{@const field = FIELDS[name]}
-							<div class={field.kind === 'tags' ? 'col-span-2' : ''}>
-								<label for="filter-{name}" class="text-muted mb-1 block text-xs font-medium">
-									{field.label}
-								</label>
-								{#if field.kind === 'status'}
+							<div class={field.kind === 'tags' || field.kind === 'facet' ? 'col-span-2' : ''}>
+								{#if field.kind === 'facet'}
+									<!-- A heading rather than a `<label>`: a facet is a group
+									     of checkboxes and not one control, so there is nothing
+									     for `for` to point at, and a label that labels no field
+									     is one a screen reader announces into the void. The
+									     group takes it by `aria-labelledby`. -->
+									<p id="filter-{name}-label" class="text-muted mb-1 text-xs font-medium">
+										{field.label}
+									</p>
+									<FacetField_
+										id="filter-{name}"
+										label={field.label}
+										{name}
+										values={facets.values[name as FacetField]}
+										omitted={facets.omitted[name as FacetField]}
+										loading={facets.loading}
+										failure={facets.failure}
+										checked={picked(name)}
+										onchange={(next) => pick(name, next)}
+									/>
+								{:else}
+									<label for="filter-{name}" class="text-muted mb-1 block text-xs font-medium">
+										{field.label}
+									</label>
+									{#if field.kind === 'status'}
 									<select
 										id="filter-{name}"
 										value={draft.status ?? ''}
@@ -261,6 +318,7 @@
 										spellcheck="false"
 										class={fieldClass}
 									/>
+									{/if}
 								{/if}
 								{#if field.hint}
 									<p class="text-subtle mt-0.5 text-xs">{field.hint}</p>
@@ -268,7 +326,7 @@
 							</div>
 						{/each}
 					</div>
-					<div class="mt-3 flex justify-end gap-1.5">
+					<div class="mt-3 flex shrink-0 justify-end gap-1.5">
 						<Button onclick={clearAll} disabled={active === 0}>Clear all</Button>
 						<Button type="submit" variant="primary">Apply</Button>
 					</div>
@@ -280,16 +338,18 @@
 	<ul class="flex min-w-0 items-center gap-1 overflow-x-auto">
 		{#each FIELD_NAMES as name (name)}
 			{#if filters[name] !== undefined}
+				{@const label = chip(name)}
 				<li>
 					<button
 						type="button"
 						onclick={() => drop(name)}
-						aria-label="Remove filter {chipLabel(name)}"
+						aria-label="Remove filter {label.title}"
+						title={label.title}
 						class="border-border bg-surface text-muted hover:bg-raised hover:text-fg
 							pointer-coarse:min-h-11 flex max-w-56 cursor-pointer items-center gap-1 rounded-md
 							border px-2 py-1 text-sm whitespace-nowrap transition-colors duration-100"
 					>
-						<span class="truncate">{chipLabel(name)}</span>
+						<span class="truncate">{label.text}</span>
 						<X class="size-3.5 shrink-0" />
 					</button>
 				</li>
