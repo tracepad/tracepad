@@ -16,7 +16,7 @@
 # has nine), and a naive heading grep takes every one of them for a heading it
 # can then be linked to.
 #
-# Every broken anchor is reported, not just the first (spec 026 #10): a run
+# Every broken anchor is reported, not just the first (spec 026 #13): a run
 # that stops at one turns a documentation sweep into as many runs as there are
 # breakages, and the fixture below asserts two in a single pass.
 #
