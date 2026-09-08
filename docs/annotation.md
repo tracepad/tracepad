@@ -311,6 +311,9 @@ header or an observation panel, and *Add to queue…* beside the filter bar on
   deletes its items in the same job, and erasing a user's data
   ([retention.md](retention.md)) takes the items of their traces. An item is a
   pointer, and a pointer to a deleted trace is a desk showing an empty page.
+  Both destructive endpoints count what they take under `annotation_items` in
+  the dry run and in the answer, and deleting a **project** names the queues
+  themselves too ([admin.md](admin.md#dry-run-by-default)).
 - **Deleting a queue takes its items and nothing else.** The scores written
   while annotating stay on their traces and expire on their own timestamps,
   like every other score.

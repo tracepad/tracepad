@@ -315,6 +315,13 @@ func TestSoftDeleteAndRestore(t *testing.T) {
 		&model.Observation{TraceID: traceHex(1), ID: spanHex(1), Type: model.TypeSpan,
 			Level: model.LevelDefault, StartTime: seedBase, EndTime: seedBase + ms})
 
+	// A review queue with an item in it, because the cascade takes both of
+	// spec 024's tables and the preview is what says so before the fact
+	// (spec 005 #8; found in review of PR #43).
+	h.putConfigs(t, "accuracy")
+	expectStatus(t, h.putQueue(t, "review", "accuracy"), 201)
+	h.addTarget(t, "review", map[string]any{"trace_id": traceHex(1)})
+
 	// The dry run first: it names what would go and changes nothing.
 	rec := h.call(t, "DELETE", "/api/v1/projects/"+h.project.ID, nil, asAdmin)
 	expectStatus(t, rec, 200)
@@ -325,6 +332,9 @@ func TestSoftDeleteAndRestore(t *testing.T) {
 	}](t, rec)
 	if !preview.DryRun || preview.Confirm != "test" || preview.WouldDelete["traces"] != 1 {
 		t.Fatalf("preview = %+v, want a dry run naming the trace and the echo", preview)
+	}
+	if preview.WouldDelete["annotation_queues"] != 1 || preview.WouldDelete["annotation_items"] != 1 {
+		t.Errorf("would_delete = %v, want the queue and its item named too", preview.WouldDelete)
 	}
 	if stored, _ := h.store.ProjectByID(h.project.ID); stored.Deleted() {
 		t.Fatal("the dry run deleted the project")

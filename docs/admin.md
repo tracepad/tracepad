@@ -51,7 +51,8 @@ Without it, the endpoint answers `200` with a preview:
 {
   "dry_run": true,
   "would_delete": {"traces": 41203, "observations": 180114, "scores": 96,
-                   "prompts": 4, "raw_batches": 812, "api_keys": 2},
+                   "prompts": 4, "raw_batches": 812, "api_keys": 2,
+                   "annotation_queues": 3, "annotation_items": 1408},
   "oldest": "2026-03-14T08:21:00Z",
   "confirm": "checkout-service",
   "note": "the keys stop working immediately; the data is restorable for seven days"

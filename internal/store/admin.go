@@ -33,11 +33,12 @@ type DeleteCounts struct {
 	Prompts      int64
 	PromptLabels int64
 	APIKeys      int64
-	// AnnotationItems are the queue items pointing at the affected traces
-	// (spec 024 #3). Counted because the erasure's answer is what the
-	// operator shows for "everything about this person is gone", and
-	// `docs/admin.md` says these go with the rest.
-	AnnotationItems int64
+	// AnnotationQueues and AnnotationItems are spec 024's two stores.
+	// Counted because a destruction preview is what says how big the hole
+	// will be before it opens (spec 005 #8): the erasure takes the items
+	// pointing at the erased traces, and deleting a project takes both.
+	AnnotationQueues int64
+	AnnotationItems  int64
 	// Oldest is the arrival time of the oldest affected row (Unix
 	// nanoseconds), or zero when nothing is affected.
 	Oldest int64
@@ -46,7 +47,8 @@ type DeleteCounts struct {
 // Any reports whether the operation would remove anything at all.
 func (c DeleteCounts) Any() bool {
 	return c.Traces+c.Observations+c.Scores+c.Payloads+c.RawBatches+
-		c.Prompts+c.PromptLabels+c.APIKeys > 0
+		c.Prompts+c.PromptLabels+c.APIKeys+
+		c.AnnotationQueues+c.AnnotationItems > 0
 }
 
 // OptionalDays is a retention window as a PATCH carries it. Absent, cleared
@@ -268,6 +270,8 @@ func (s *Store) ProjectPreview(projectID string) (DeleteCounts, error) {
 		{"prompts", &counts.Prompts},
 		{"prompt_labels", &counts.PromptLabels},
 		{"api_keys", &counts.APIKeys},
+		{"annotation_queues", &counts.AnnotationQueues},
+		{"annotation_items", &counts.AnnotationItems},
 	} {
 		// The table names are this package's own constants; only the
 		// project id is bound.

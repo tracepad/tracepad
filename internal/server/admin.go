@@ -384,7 +384,12 @@ func (s *Server) handleDeleteProject(w http.ResponseWriter, r *http.Request) {
 				put("scores", counts.Scores).
 				put("prompts", counts.Prompts).
 				put("raw_batches", counts.RawBatches).
-				put("api_keys", counts.APIKeys)).
+				put("api_keys", counts.APIKeys).
+				// The cascade takes both of spec 024's tables, so the
+				// preview names both: a review backlog somebody else
+				// is working through is a reason not to press this.
+				put("annotation_queues", counts.AnnotationQueues).
+				put("annotation_items", counts.AnnotationItems)).
 			put("note", "the keys stop working immediately; the data is restorable for seven days"))
 		return
 	}
