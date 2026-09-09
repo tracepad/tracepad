@@ -41,6 +41,12 @@
 >
 	<div class="relative flex min-w-0 items-center">
 		<SearchIcon class="text-subtle pointer-events-none absolute left-2 size-4" />
+		<!-- `min-w-0` beside the width: a form control's automatic minimum size
+		     is its intrinsic width, so without it the two boxes above collapse
+		     to nothing on a narrow bar and the field alone goes on standing at
+		     `w-40`, painted over whatever the bar put next to it (spec 027
+		     #22). The width stays the preferred one; it is now allowed to be
+		     less. -->
 		<input
 			type="search"
 			name="q"
@@ -51,9 +57,9 @@
 			onblur={commit}
 			autocomplete="off"
 			spellcheck="false"
-			class="border-border bg-canvas placeholder:text-subtle pointer-coarse:min-h-11 w-40 rounded-md
-				border py-1 pr-7 pl-7 text-sm transition-[width] duration-150 focus:w-64 sm:w-56 sm:focus:w-80
-				[&::-webkit-search-cancel-button]:hidden"
+			class="border-border bg-canvas placeholder:text-subtle pointer-coarse:min-h-11 w-40 min-w-0
+				rounded-md border py-1 pr-7 pl-7 text-sm transition-[width] duration-150 focus:w-64 sm:w-56
+				sm:focus:w-80 [&::-webkit-search-cancel-button]:hidden"
 		/>
 		{#if draft}
 			<!-- Its own control, because the box is on the bar in plain sight and

@@ -266,6 +266,77 @@ test('the panel is usable at a phone width and the page never scrolls sideways',
 	expect(overflow).toBeLessThanOrEqual(0);
 });
 
+/**
+ * A window written out in full rather than picked from the presets, which is
+ * what a link somebody was sent carries. It is the longest label the trigger
+ * ever wears, and the reason the bar had to be told what may shrink (Decision
+ * 22). Ending now and forty days wide, so the corpus is inside it.
+ */
+function wideWindow(): string {
+	const now = Date.now();
+	return new URLSearchParams({
+		from: new Date(now - 40 * 86_400_000).toISOString(),
+		to: new Date(now).toISOString()
+	}).toString();
+}
+
+/**
+ * The pin for Decision 22. Before it, the bar's controls were laid out at the
+ * width they wanted and painted outside the box they were given: *Add to
+ * queue…* landed on top of *Filters* and swallowed its clicks, so the panel
+ * could not be opened at all on a phone whose URL carried a window.
+ *
+ * `elementFromPoint` rather than the click alone, because the click's failure
+ * is a thirty-second timeout that reads like a slow page.
+ */
+test('a long window label leaves the Filters button clickable at a phone width', async ({
+	page
+}, testInfo) => {
+	test.skip(testInfo.project.name !== 'mobile', 'the narrow width is the test');
+	await signIn(page);
+	await page.goto(`/traces?${wideWindow()}`);
+
+	const trigger = page.getByRole('button', { name: /^Filters/ });
+	const covered = await trigger.evaluate((button) => {
+		const box = button.getBoundingClientRect();
+		const at = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+		return { hit: !!at && button.contains(at), right: box.right, viewport: window.innerWidth };
+	});
+	expect(covered.hit).toBe(true);
+	expect(covered.right).toBeLessThanOrEqual(covered.viewport);
+
+	// The label gives up the room, and gives up only what it shows: the window
+	// it stands for is still the trigger's name.
+	const range = page.getByRole('button', { name: /^Time range: / });
+	await expect(range).toHaveAccessibleName(/→/);
+	expect(await range.locator('span').evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
+
+	await openPanel(page);
+});
+
+/** The same bar, one screen over (Decision 22): the same three answers. */
+test('the sessions bar keeps its controls inside it at a phone width', async ({
+	page
+}, testInfo) => {
+	test.skip(testInfo.project.name !== 'mobile', 'the narrow width is the test');
+	await signIn(page);
+	await page.goto(`/sessions?${wideWindow()}`);
+
+	const trigger = page.getByRole('button', { name: 'Environment' });
+	const hit = await trigger.evaluate((button) => {
+		const box = button.getBoundingClientRect();
+		const at = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+		return !!at && button.contains(at);
+	});
+	expect(hit).toBe(true);
+
+	const range = page.getByRole('button', { name: /^Time range: / });
+	expect(await range.locator('span').evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
+
+	await trigger.click();
+	await expect(page.getByRole('group', { name: 'Environment' })).toBeVisible();
+});
+
 // What the live tail is for (Decision 3), and why a closed panel forgets what
 // it read (Decision 15): an environment first seen a minute ago is on the list
 // the next time the panel opens, without a reload. The window did not move —

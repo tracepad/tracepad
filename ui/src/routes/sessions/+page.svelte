@@ -149,8 +149,11 @@
 		commit('environment', writeList(next) ?? '');
 	}
 
+	// `min-w-0` for the reason the search box carries it (spec 027 #22): this
+	// bar is the same bar, and a field that refuses to be narrower than its
+	// intrinsic width pushes the window's label out of the row.
 	const fieldClass =
-		'border-border bg-canvas placeholder:text-subtle w-40 rounded-md border px-2 py-1 text-sm';
+		'border-border bg-canvas placeholder:text-subtle w-40 min-w-0 rounded-md border px-2 py-1 text-sm';
 </script>
 
 <svelte:head><title>Sessions · Tracepad</title></svelte:head>
@@ -176,7 +179,14 @@
 		<Popover.Root bind:open={environmentOpen}>
 			<Popover.Trigger>
 				{#snippet child({ props })}
-					<Button {...props} title={picked.length ? environmentChip.title : undefined}>
+					<!-- `shrink-0` for the reason the Traces bar's own trigger
+					     carries it (spec 027 #22): a target with a name is not
+					     what should give up room. -->
+					<Button
+						{...props}
+						class="shrink-0"
+						title={picked.length ? environmentChip.title : undefined}
+					>
 						<ListFilter class="size-4" />
 						<span class="max-w-48 truncate">
 							{picked.length ? environmentChip.text : 'Environment'}

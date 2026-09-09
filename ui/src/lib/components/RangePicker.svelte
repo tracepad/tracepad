@@ -88,17 +88,26 @@
 		'justify-center rounded-md transition-colors duration-100';
 </script>
 
+<!-- `min-w-0` on the root and `max-w-full` on the trigger are what keep a long
+     label inside its own box on a narrow bar (spec 027 #22). Both are needed:
+     the root is a flex item, whose automatic minimum size is otherwise the
+     whole label, because `truncate` is `white-space: nowrap` and nowrap text
+     has no smaller size to fall back to; and a `<button>` sizes `width: auto`
+     to fit its content rather than to its container, so only a maximum makes
+     it obey the room it was given. Then the span truncates, and the full
+     window stays in the trigger's accessible name. -->
 <DateRangePicker.Root
 	bind:open
 	{value}
 	onValueChange={pick}
 	weekdayFormat="short"
 	numberOfMonths={1}
+	class="min-w-0"
 >
 	<DateRangePicker.Trigger>
 		{#snippet child({ props })}
-			<Button {...props} aria-label="Time range: {label}">
-				<CalendarDays class="size-4" />
+			<Button {...props} class="max-w-full" aria-label="Time range: {label}">
+				<CalendarDays class="size-4 shrink-0" />
 				<span class="max-w-56 truncate">{label}</span>
 			</Button>
 		{/snippet}
