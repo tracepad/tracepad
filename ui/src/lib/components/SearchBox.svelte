@@ -32,8 +32,17 @@
 	}
 </script>
 
+<!-- `min-w-20` on the box rather than `min-w-0`: the field may be narrower than
+     the width it asks for, but not narrower than a field. Without a floor a
+     375 px bar took it to 58 px, which is `pl-7 + pr-7` and the border — no
+     placeholder, and a letter typed into it invisible. Eighty is what the row
+     can afford beside a window that also has to stay readable (spec 027 #22).
+     The floor is on the box, not on the field inside it: the box is the bar's
+     flex item, and a minimum on the field alone leaves it standing at its own
+     width while the box collapses out from under it, which is the overlap this
+     decision is about. -->
 <form
-	class="flex min-w-0 items-center"
+	class="flex min-w-20 items-center"
 	onsubmit={(event) => {
 		event.preventDefault();
 		commit();
@@ -41,6 +50,12 @@
 >
 	<div class="relative flex min-w-0 items-center">
 		<SearchIcon class="text-subtle pointer-events-none absolute left-2 size-4" />
+		<!-- `min-w-0` beside the width: a form control's automatic minimum size
+		     is its intrinsic width, so without it the two boxes above collapse
+		     to nothing on a narrow bar and the field alone goes on standing at
+		     `w-40`, painted over whatever the bar put next to it (spec 027
+		     #22). The width stays the preferred one; it is now allowed to be
+		     less. -->
 		<input
 			type="search"
 			name="q"
@@ -51,9 +66,9 @@
 			onblur={commit}
 			autocomplete="off"
 			spellcheck="false"
-			class="border-border bg-canvas placeholder:text-subtle pointer-coarse:min-h-11 w-40 rounded-md
-				border py-1 pr-7 pl-7 text-sm transition-[width] duration-150 focus:w-64 sm:w-56 sm:focus:w-80
-				[&::-webkit-search-cancel-button]:hidden"
+			class="border-border bg-canvas placeholder:text-subtle pointer-coarse:min-h-11 w-40 min-w-0
+				rounded-md border py-1 pr-7 pl-7 text-sm transition-[width] duration-150 focus:w-64 sm:w-56
+				sm:focus:w-80 [&::-webkit-search-cancel-button]:hidden"
 		/>
 		{#if draft}
 			<!-- Its own control, because the box is on the bar in plain sight and

@@ -141,7 +141,7 @@ tracepad users ls                          # by last seen
 tracepad users ls --sort cost --limit 20   # the expensive ones
 tracepad users ls --prefix acme:           # case-sensitive prefix
 tracepad users show user-4821
-tracepad stats --user user-4821 --group-by day --since 30d
+tracepad stats --user user-4821 --group-by day --since 168h
 ```
 
 `users ls` walks with `--cursor`, `--oldest` and `--newer` like every other
