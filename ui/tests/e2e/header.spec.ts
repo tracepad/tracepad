@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { state } from './harness';
+import { createProject, state } from './harness';
 
 // The page header at both ends of the rule (spec 026 #5, #14), against the real
 // binary.
@@ -39,6 +39,14 @@ async function signIn(page: Page) {
 	await expect(page).toHaveURL(/\/traces$/);
 }
 
+/** Into a project of this file's own making rather than the pre-authed one. */
+async function signInTo(page: Page, key: string) {
+	await page.goto('/login');
+	await page.getByLabel('Project key').fill(key);
+	await page.getByRole('button', { name: 'Sign in' }).click();
+	await expect(page).toHaveURL(/\/traces$/);
+}
+
 async function header(page: Page) {
 	await expect(page.locator('header h1')).toBeVisible();
 	return page.evaluate(() => {
@@ -63,6 +71,127 @@ async function header(page: Page) {
 		};
 	});
 }
+
+// --- the trace whose header is the measurement -------------------------------
+//
+// A trace of this file's own, in a project of its own (spec 016 #18): the two
+// long identifiers are the pressure the header has to survive, and the shared
+// corpus carries short ones on purpose.
+
+const TRACE = 'aa11bb22cc33dd44ee55ff6600778899';
+const SESSION = 'checkout-eu-west-1-2026-09-09-7c1d4e88-4d51-11ef-9c2d-0242ac120002';
+
+const attribute = (key: string, value: string) => ({ key, value: { stringValue: value } });
+
+let sown: Promise<string> | null = null;
+
+/**
+ * One span in the OTLP/JSON encoding, which is what an SDK on
+ * `OTEL_EXPORTER_OTLP_PROTOCOL=http/json` writes (spec 019 #7) — and a body
+ * this file can spell out, where the protobuf the other suites build takes a
+ * varint encoder to say the same thing. Returns the project's key.
+ */
+function sow(): Promise<string> {
+	sown ??= (async () => {
+		const own = await createProject('header');
+		const { baseURL } = state();
+		const at = (BigInt(Date.now()) - 60_000n) * 1_000_000n;
+		const response = await fetch(`${baseURL}/v1/traces`, {
+			method: 'POST',
+			headers: { Authorization: `Bearer ${own.key}`, 'Content-Type': 'application/json' },
+			body: JSON.stringify({
+				resourceSpans: [
+					{
+						resource: { attributes: [attribute('service.name', 'header-e2e')] },
+						scopeSpans: [
+							{
+								scope: { name: 'e2e' },
+								spans: [
+									{
+										traceId: TRACE,
+										spanId: 'a1b2c3d4e5f60718',
+										name: 'answer-question',
+										startTimeUnixNano: String(at),
+										endTimeUnixNano: String(at + 1_234_000_000n),
+										attributes: [
+											attribute('user.id', USER),
+											attribute('session.id', SESSION)
+										]
+									}
+								]
+							}
+						]
+					}
+				]
+			})
+		});
+		if (!response.ok) throw new Error(`ingest: ${response.status} ${await response.text()}`);
+		// Delivery is not readability: the export returns when the batch is
+		// accepted and the writer commits it after.
+		await expect
+			.poll(
+				async () =>
+					(
+						await fetch(`${baseURL}/api/v1/traces/${TRACE}`, {
+							headers: { Authorization: `Bearer ${own.key}` }
+						})
+					).status,
+				{ timeout: 15_000, message: 'the sown trace never became readable' }
+			)
+			.toBe(200);
+		return own.key;
+	})();
+	return sown;
+}
+
+// A trace's own header carries the rule spec 023 #17c decided not to fold into
+// `TracePeekMeta`: the short parts do not shrink, and the ids are what gives
+// way. `TracePeekMeta` has that pinned by a unit test over its classes, and
+// this header — the one that actually shipped the defect, in PR #47 — had
+// nothing. Ten hundred pixels wide is where it bites: wide enough for the two
+// ids to be shown at all (`md`), narrow enough that they do not fit.
+test.describe('a trace at 900 px', () => {
+	test.use({ viewport: { width: 900, height: 800 } });
+
+	test('the timestamp stays on one line and the bar stays one row tall', async ({ page }) => {
+		await signInTo(page, await sow());
+		await page.goto(`/traces/${TRACE}`);
+		await expect(page.locator('header h1')).toHaveText('answer-question');
+
+		const bar = await page.evaluate(() => {
+			const header = document.querySelector('header') as HTMLElement;
+			const meta = header.querySelector('h1 + div') as HTMLElement;
+			// The timestamp is the meta's first span, after the breadcrumb
+			// link: the release and the two ids that follow are what may be
+			// cut, and this is not one of them.
+			const stamp = meta.querySelector('span.font-mono') as HTMLElement;
+			const clipped = (element: Element | null) =>
+				element ? element.scrollWidth > element.clientWidth : false;
+			return {
+				height: header.getBoundingClientRect().height,
+				// Height against line height, because a timestamp allowed to
+				// shrink does not clip: it has spaces in it, so it wraps, and
+				// the row it is in grows to hold both lines.
+				stamp: {
+					text: stamp.textContent?.trim() ?? '',
+					height: stamp.getBoundingClientRect().height,
+					lineHeight: parseFloat(getComputedStyle(stamp).lineHeight)
+				},
+				// The ids really did run out of room, which is what makes the
+				// rest of this a measurement rather than a coincidence.
+				squeezed: [...meta.querySelectorAll('a.font-mono')].filter(clipped).length,
+				scrollWidth: document.documentElement.scrollWidth,
+				clientWidth: document.documentElement.clientWidth
+			};
+		});
+
+		expect(bar.squeezed).toBe(2);
+		expect(bar.stamp.text).not.toBe('');
+		expect(bar.stamp.height).toBeLessThanOrEqual(bar.stamp.lineHeight);
+		expect(bar.height).toBeLessThanOrEqual(ROW);
+		expect(bar.scrollWidth).toBe(bar.clientWidth);
+	});
+});
 
 test.describe('at a phone', () => {
 	test.use({ viewport: { width: 375, height: 812 } });
