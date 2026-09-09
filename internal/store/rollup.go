@@ -93,14 +93,14 @@ func rollupState(q querier, projectID string) (RollupState, error) {
 //
 // `environment` filters when set, for the same reason the live scan filters
 // before it groups: a filter is not a grouping.
-func (s *Store) StatsRollupRows(projectID string, fromHour, toHour int64, environment string, yield func(StatsRow)) error {
+func (s *Store) StatsRollupRows(projectID string, fromHour, toHour int64, environment []string, yield func(StatsRow)) error {
 	query := `SELECT hour, environment, release, model, count, error_count, total_cost, latency
 	          FROM stats_hourly
 	          WHERE project_id = ? AND hour >= ? AND hour < ?`
 	args := []any{projectID, fromHour, toHour}
-	if environment != "" {
-		query += ` AND environment = ?`
-		args = append(args, environment)
+	if clause, bound := matchAny("environment", environment); clause != "" {
+		query += ` AND ` + clause
+		args = append(args, bound...)
 	}
 	query += ` ORDER BY hour`
 
@@ -199,6 +199,9 @@ type statsRoll struct {
 	// ScoreRows is the same count for `scores_hourly`, the third table the
 	// job writes (spec 025 #3).
 	ScoreRows int
+	// NameRows is the same count for `names_hourly`, the fourth (spec 027
+	// #3).
+	NameRows int
 	// Touched are the user ids this hour holds or held — the set whose
 	// summary has to be recomputed (spec 023 #3).
 	Touched []string
@@ -257,6 +260,21 @@ func (r *statsRoll) apply(tx *sql.Tx) error {
 	}
 	if !scoresFrozen {
 		if r.ScoreRows, err = rollScoreHour(tx, r.ProjectID, r.Hour); err != nil {
+			return err
+		}
+	}
+
+	// And the fourth table's own freeze (spec 027 #3), on the same rule: the
+	// rows a table holds are the rows that table protects. It is what lets
+	// migration 0016's backfill fill an hour whose traces are intact past
+	// the window, and what stops it from demolishing one whose name rows
+	// already stand.
+	namesFrozen, err := hourFrozenIn(tx, "names_hourly", r.ProjectID, r.Hour, past)
+	if err != nil {
+		return err
+	}
+	if !namesFrozen {
+		if r.NameRows, err = rollNameHour(tx, r.ProjectID, r.Hour); err != nil {
 			return err
 		}
 	}

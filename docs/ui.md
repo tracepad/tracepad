@@ -40,6 +40,23 @@ exactly the filters the endpoint accepts (`q`, `from`, `to`, `environment`,
 `version`, `type`, `prompt`) — a test reads `openapi.json` and fails if the
 two ever disagree. The bar underneath turns the pages.
 
+Three of them — **environment**, **release** and **name** — are checkbox lists
+rather than boxes to type in. The values come from
+[`GET /api/v1/facets`](api.md#filter-values) for the window in view, read when
+the panel opens and again when the window moves under it, and each carries how
+many traces of that window have it: `prod 1` beside `production 4656` is a
+typo, and nothing but the count says so. Ticking two means *either*, which
+travels as the comma form the API takes (`?environment=production,staging`).
+Above eight values the list gets a box that narrows it by substring, and past a
+hundred it says how many it left out. A value that arrived in a link and is not
+in the list — `?environment=canary`, from before canary was retired — is shown
+checked at the top without a count, because a filter that cannot be seen cannot
+be undone.
+
+A chip names up to two values in full and counts beyond that
+(*Environment: 3 values*), with all of them in its tooltip: the chip row is
+read at a glance, and a glance holds two names.
+
 There is no release column: release is a filter, and it is shown in the header
 of a trace rather than in every row of the listing.
 
@@ -66,7 +83,9 @@ push the oldest row of that page off it.
 
 **Sessions** — one row per session over `GET /api/v1/sessions`: last seen,
 id, how many traces, how many of them failed, cost, first seen. The filters
-are the endpoint's four (`from`, `to`, `environment`, `user_id`), and a row
+are the endpoint's four (`from`, `to`, `environment`, `user_id`) — the
+environment as the same checkbox list the Traces panel offers, and the user id
+as a box, because a user id is not a short finite set — and a row
 opens the session: its totals over its traces, and a trace opens from there.
 Every number counts traces, which is what a session is a collection of.
 
@@ -636,7 +655,8 @@ Filters, the search, live mode, the time window, the stats bucket and the
 selected observation all live in the query string, so any view is a link:
 `/traces?q=refund+failed`, `/traces?status=error&environment=prod`,
 `/traces/{id}?obs={observation_id}`,
-`/sessions?environment=prod`, `/users?sort=cost&prefix=acme:`,
+`/sessions?environment=prod`, `/traces?environment=production,staging`,
+`/users?sort=cost&prefix=acme:`,
 `/users/{id}?tab=traces&from=…`, `/stats?from=…&to=…&group_by=hour`.
 Reloading, sharing and the back button all behave.
 

@@ -194,8 +194,11 @@ test('a letter typed into a filter stays a letter', async ({ page }, testInfo) =
 	await rows(page).first().getByRole('link').first().click();
 	const opened = page.url();
 
-	const field = page.getByPlaceholder('Environment');
-	await field.click();
+	// Focused rather than clicked: what this test is about is where the
+	// keystrokes go, and the sessions bar's right-hand end sits under the
+	// panel at this width, so a click there is a click on the panel.
+	const field = page.getByPlaceholder('User id');
+	await field.focus();
 	await page.keyboard.type('jk');
 
 	await expect(field).toHaveValue('jk');
@@ -280,12 +283,12 @@ test('Escape closes the panel even from a filter field', async ({ page }, testIn
 
 	// Nothing in the interface reverts a filter field on Escape, so guarding
 	// Escape there would leave the key meaning nothing at all.
-	await page.getByPlaceholder('Environment').click();
+	await page.getByPlaceholder('User id').focus();
 	await page.keyboard.type('prod');
 	await page.keyboard.press('Escape');
 
 	await expect(page.getByRole('dialog')).toHaveCount(0);
-	await expect(page.getByPlaceholder('Environment')).toHaveValue('prod');
+	await expect(page.getByPlaceholder('User id')).toHaveValue('prod');
 });
 
 test('closing after a walk returns focus to the row on screen', async ({ page }, testInfo) => {

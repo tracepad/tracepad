@@ -90,7 +90,7 @@ func TestSessionListingFilters(t *testing.T) {
 		want   []string
 	}{
 		{"all", SessionFilter{}, []string{"s1", "s2"}},
-		{"environment", SessionFilter{Environment: "staging"}, []string{"s2"}},
+		{"environment", SessionFilter{Environment: []string{"staging"}}, []string{"s2"}},
 		{"user", SessionFilter{UserID: "u1"}, []string{"s1"}},
 		// The window bounds the traces; a session appears when any of
 		// them falls inside it.

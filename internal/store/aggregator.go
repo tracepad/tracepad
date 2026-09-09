@@ -402,10 +402,21 @@ func (a *Aggregator) sweepRollup(ctx context.Context, project *Project, at time.
 	}
 	// The score rows live under the same window for the same reason (spec
 	// 025: no config of their own), and get their own loop for the same
-	// one: three tables of different sizes, and one running short says
+	// one: four tables of different sizes, and one running short says
 	// nothing about the others.
 	for range maxChunksPerProject {
 		chunk := &scoresRollupSweep{ProjectID: project.ID, Before: cutoff}
+		if err := a.writer.Submit(ctx, chunk); err != nil {
+			return err
+		}
+		if chunk.Deleted < int64(DefaultSweepChunk) {
+			break
+		}
+	}
+	// And the trace names (spec 027 #3), on the same window and in a loop
+	// of their own for the same reason.
+	for range maxChunksPerProject {
+		chunk := &namesRollupSweep{ProjectID: project.ID, Before: cutoff}
 		if err := a.writer.Submit(ctx, chunk); err != nil {
 			return err
 		}

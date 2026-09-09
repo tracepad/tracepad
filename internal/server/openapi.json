@@ -197,7 +197,7 @@
           {"$ref": "#/components/parameters/Environment"},
           {"name": "user_id", "in": "query", "schema": {"type": "string"}, "description": "Exact match on the trace's user id"},
           {"name": "session_id", "in": "query", "schema": {"type": "string"}, "description": "Exact match on the trace's session id"},
-          {"name": "name", "in": "query", "schema": {"type": "string"}, "description": "Exact match on the trace name"},
+          {"name": "name", "in": "query", "schema": {"type": "string"}, "description": "The trace name. A comma-separated list matches **any** of them; items are trimmed, duplicates collapse, an empty item is a 400, repeating the parameter is a 400, at most 100 items, and a name containing a comma is not expressible here. A trace with no name never matches. `GET /api/v1/facets` lists the values in a range with their counts"},
           {"name": "tag", "in": "query", "schema": {"type": "array", "items": {"type": "string"}}, "style": "form", "explode": true,
             "description": "Repeatable; a trace must carry every tag given"},
           {"name": "status", "in": "query", "schema": {"type": "string", "enum": ["error", "ok"]},
@@ -247,7 +247,8 @@
           {"$ref": "#/components/parameters/Environment"},
           {"name": "user_id", "in": "query", "schema": {"type": "string"}},
           {"name": "session_id", "in": "query", "schema": {"type": "string"}},
-          {"name": "name", "in": "query", "schema": {"type": "string"}},
+          {"name": "name", "in": "query", "schema": {"type": "string"},
+            "description": "The trace name, or a comma-separated list matching any of them"},
           {"name": "tag", "in": "query", "schema": {"type": "array", "items": {"type": "string"}}, "style": "form", "explode": true},
           {"name": "status", "in": "query", "schema": {"type": "string", "enum": ["error", "ok"]}},
           {"name": "min_cost", "in": "query", "schema": {"type": "number", "minimum": 0}},
@@ -534,6 +535,43 @@
               "series": {"type": "array", "items": {"$ref": "#/components/schemas/ScoreSeries"}}
             },
             "required": ["group_by", "targets", "omitted", "series"]
+          }}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"}
+        }
+      }
+    },
+    "/api/v1/facets": {
+      "get": {
+        "tags": ["stats"],
+        "summary": "The environments, releases and trace names in a range, each with its trace count",
+        "description": "What the three many-valued filters can be set to, for the range in view: the distinct values of `environment`, `release` and `name` among the traces between `from` and `to`, each with the number of traces carrying it, sorted by count descending and then by value. It answers the range and nothing else — the counts do not respect the other filters, so the list does not change as boxes are ticked. At most 100 values per column; `omitted` says how many were left out, rarest first. A trace with no release is not a release, and a trace with no name is not a name. Answered from the hourly roll-up behind the watermark and from the raw rows for the tail, so a value first seen a minute ago is already here.",
+        "operationId": "facets",
+        "parameters": [
+          {"name": "from", "in": "query", "schema": {"type": "string", "format": "date-time"},
+            "description": "RFC 3339, inclusive. Defaults to the oldest hour the rollup holds, which is also as far back as this endpoint looks: it does not scan the raw traces for hours the rollup no longer covers. A window whose `from` is not before its `to` is a 400"},
+          {"name": "to", "in": "query", "schema": {"type": "string", "format": "date-time"},
+            "description": "RFC 3339, exclusive. Defaults to now"}
+        ],
+        "responses": {
+          "200": {"description": "The values", "content": {"application/json": {"schema": {
+            "type": "object",
+            "properties": {
+              "from": {"type": "string", "format": "date-time", "description": "The start of the range these counts are for"},
+              "to": {"type": "string", "format": "date-time", "description": "Its exclusive end"},
+              "environment": {"type": "array", "items": {"$ref": "#/components/schemas/FacetValue"}},
+              "release": {"type": "array", "items": {"$ref": "#/components/schemas/FacetValue"}},
+              "name": {"type": "array", "items": {"$ref": "#/components/schemas/FacetValue"}},
+              "omitted": {"type": "object",
+                "description": "How many values the cap left out of each column; 0 when the list is the whole truth",
+                "properties": {
+                  "environment": {"type": "integer"},
+                  "release": {"type": "integer"},
+                  "name": {"type": "integer"}
+                },
+                "required": ["environment", "release", "name"]}
+            },
+            "required": ["from", "to", "environment", "release", "name", "omitted"]
           }}}},
           "400": {"$ref": "#/components/responses/BadRequest"},
           "401": {"$ref": "#/components/responses/Unauthorized"}
@@ -1479,7 +1517,7 @@
           {"$ref": "#/components/parameters/Environment"},
           {"name": "user_id", "in": "query", "schema": {"type": "string"}, "description": "Exact match on the trace's user id"},
           {"name": "session_id", "in": "query", "schema": {"type": "string"}, "description": "Exact match on the trace's session id"},
-          {"name": "name", "in": "query", "schema": {"type": "string"}, "description": "Exact match on the trace name"},
+          {"name": "name", "in": "query", "schema": {"type": "string"}, "description": "The trace name. A comma-separated list matches **any** of them; items are trimmed, duplicates collapse, an empty item is a 400, repeating the parameter is a 400, at most 100 items, and a name containing a comma is not expressible here. A trace with no name never matches. `GET /api/v1/facets` lists the values in a range with their counts"},
           {"name": "tag", "in": "query", "schema": {"type": "array", "items": {"type": "string"}}, "style": "form", "explode": true,
             "description": "Repeatable; a trace must carry every tag given"},
           {"name": "status", "in": "query", "schema": {"type": "string", "enum": ["error", "ok"]},
@@ -1864,7 +1902,7 @@
       "To": {"name": "to", "in": "query", "schema": {"type": "string", "format": "date-time"},
         "description": "RFC 3339, exclusive"},
       "Environment": {"name": "environment", "in": "query", "schema": {"type": "string"},
-        "description": "Exact match on the environment a trace ran in"},
+        "description": "The environment a trace ran in. A comma-separated list matches **any** of them: `?environment=production,staging`. Items are trimmed and duplicates collapse; an empty item (`a,,b`, `a,`) is a 400, as an empty value is, and so is repeating the parameter — one list, one parameter. At most 100 items; beyond that, a 400. An environment whose name contains a comma is not expressible here. `GET /api/v1/facets` lists the values in a range with their counts"},
       "Limit": {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 500, "default": 50},
         "description": "Out of range is a 400, not a silent clamp"},
       "Cursor": {"name": "cursor", "in": "query", "schema": {"type": "string"},
@@ -1876,7 +1914,7 @@
       "Search": {"name": "q", "in": "query", "schema": {"type": "string", "maxLength": 512},
         "description": "Full-text search over one field of one observation — input, output, metadata, name or status message — or over the trace name. Words (all must occur), `\"quoted phrases\"`, `prefix*`. Words, not substrings: `error` does not find `errors`, `err*` finds both. Case and diacritics are folded, identifiers split on punctuation, and only the first 64 KiB of each payload is indexed. A `q` with no word in it is a 400"},
       "Release": {"name": "release", "in": "query", "schema": {"type": "string"},
-        "description": "Exact match on the deployment the trace ran in, from `langfuse.release` or the resource's `service.version`"},
+        "description": "The deployment the trace ran in, from `langfuse.release` or the resource's `service.version`. A comma-separated list matches **any** of them; items are trimmed, duplicates collapse, an empty item is a 400, repeating the parameter is a 400, at most 100 items, and a release whose name contains a comma is not expressible here. `GET /api/v1/facets` lists the values in a range with their counts"},
       "Version": {"name": "version", "in": "query", "schema": {"type": "string"},
         "description": "Exact match on the version of the trace's own logic, from `langfuse.version`"},
       "ObservationType": {"name": "type", "in": "query",
@@ -2006,6 +2044,15 @@
           "last_seen": {"type": "string", "format": "date-time"}
         },
         "required": ["user_id", "traces", "error_count", "sessions"]
+      },
+      "FacetValue": {
+        "type": "object",
+        "description": "One value a filter can be set to, and how many traces of the range carry it",
+        "properties": {
+          "value": {"type": "string", "description": "The value, exactly as `?environment=`, `?release=` or `?name=` takes it"},
+          "count": {"type": "integer", "description": "How many traces of the range carry it"}
+        },
+        "required": ["value", "count"]
       },
       "ScoreSeries": {
         "type": "object",

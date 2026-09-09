@@ -18,16 +18,19 @@ type TraceFilter struct {
 	// From and To bound `timestamp` in Unix nanoseconds as a half-open
 	// range — From inclusive, To exclusive — so walking a timeline a day
 	// at a time never reports a trace twice. Nil is unbounded.
-	From        *int64
-	To          *int64
-	Environment string
+	From *int64
+	To   *int64
+	// Environment, Name and Release are *any of* (spec 027 #1): a trace
+	// matches when its column equals one of the values. One value is the
+	// single condition it always was; empty is no condition at all.
+	Environment []string
 	UserID      string
 	SessionID   string
-	Name        string
+	Name        []string
 	// Release and Version match the trace's own columns exactly: "did the
 	// deploy break it" is a filter, and a filter needs a column
 	// (spec 012 #4).
-	Release string
+	Release []string
 	Version string
 	// Type keeps traces with at least one observation of that kind. It is
 	// exact — `generation` does not match `embedding`, whatever the
@@ -99,6 +102,35 @@ const traceColumns = `project_id, id, name, user_id, session_id, environment,
 	        release, version, run_id, item_id, tags,
 	        timestamp, total_cost, latency_ms, ttft_ms, error_count, observation_count`
 
+// matchAny renders one column's *any of* condition (spec 027 #1), and nothing
+// at all for an empty list.
+//
+// One value stays `col = ?` rather than becoming a one-element `IN`. The rows
+// are the same either way — that is the point of the decision — but the plan
+// tests spec 004 #4 and spec 012 #8 wrote name the index a `=` seeks, and a
+// filter that reads differently in EXPLAIN for the ordinary case would make
+// those assertions about a shape nobody uses.
+//
+// Beyond one it is `col IN (?, …)`, which SQLite answers off the same index as
+// a `=`: the cost is the single-value cost times the length of the list. The
+// column names are this package's own constants, never anything a request
+// carries; every value is bound.
+func matchAny(column string, values []string) (string, []any) {
+	switch len(values) {
+	case 0:
+		return "", nil
+	case 1:
+		return column + " = ?", []any{values[0]}
+	}
+	bound := make([]any, 0, len(values))
+	placeholders := make([]string, 0, len(values))
+	for _, value := range values {
+		bound = append(bound, value)
+		placeholders = append(placeholders, "?")
+	}
+	return column + " IN (" + strings.Join(placeholders, ", ") + ")", bound
+}
+
 // traceConditions builds everything the filter says about *which* traces
 // match, cursor excluded. Two callers need exactly this and disagree only
 // about what follows it: the listing adds a keyset and a page, and the count
@@ -116,21 +148,20 @@ func traceConditions(projectID string, filter TraceFilter) ([]string, []any) {
 	if filter.To != nil {
 		add("timestamp < ?", *filter.To)
 	}
-	if filter.Environment != "" {
-		add("environment = ?", filter.Environment)
+	addAny := func(column string, values []string) {
+		if clause, bound := matchAny(column, values); clause != "" {
+			add(clause, bound...)
+		}
 	}
+	addAny("environment", filter.Environment)
 	if filter.UserID != "" {
 		add("user_id = ?", filter.UserID)
 	}
 	if filter.SessionID != "" {
 		add("session_id = ?", filter.SessionID)
 	}
-	if filter.Name != "" {
-		add("name = ?", filter.Name)
-	}
-	if filter.Release != "" {
-		add("release = ?", filter.Release)
-	}
+	addAny("name", filter.Name)
+	addAny("release", filter.Release)
 	if filter.Version != "" {
 		add("version = ?", filter.Version)
 	}
@@ -324,9 +355,10 @@ type SessionFilter struct {
 	// listing: a session appears when at least one of its traces falls in
 	// the window, and its aggregates then describe those traces (spec 007
 	// #10).
-	From        *int64
-	To          *int64
-	Environment string
+	From *int64
+	To   *int64
+	// Environment is *any of*, as it is on the trace listing (spec 027 #1).
+	Environment []string
 	UserID      string
 	// Limit caps the rows returned; the caller asks for one more than the
 	// page size to learn whether another page exists.
@@ -368,8 +400,8 @@ func sessionConditions(projectID string, filter SessionFilter) ([]string, []any)
 	if filter.To != nil {
 		add("timestamp < ?", *filter.To)
 	}
-	if filter.Environment != "" {
-		add("environment = ?", filter.Environment)
+	if clause, bound := matchAny("environment", filter.Environment); clause != "" {
+		add(clause, bound...)
 	}
 	if filter.UserID != "" {
 		add("user_id = ?", filter.UserID)
@@ -527,9 +559,10 @@ const (
 // timestamp, whatever the grouping — one rule for the time window is worth
 // more than a per-grouping clock.
 type StatsFilter struct {
-	From        *int64
-	To          *int64
-	Environment string
+	From *int64
+	To   *int64
+	// Environment is *any of*, as it is on the trace listing (spec 027 #1).
+	Environment []string
 	// UserID restricts every bucket to one end user (spec 023 #6). The
 	// rolled half of the seam reads `users_hourly` instead of
 	// `stats_hourly`; this is the live half's own condition, and it is a
@@ -604,8 +637,8 @@ func statsQuery(projectID string, filter StatsFilter) (string, []any) {
 	if filter.To != nil {
 		add("t.timestamp < ?", *filter.To)
 	}
-	if filter.Environment != "" {
-		add("t.environment = ?", filter.Environment)
+	if clause, bound := matchAny("t.environment", filter.Environment); clause != "" {
+		add(clause, bound...)
 	}
 	if filter.UserID != "" {
 		add("t.user_id = ?", filter.UserID)
@@ -672,6 +705,11 @@ var countedTables = []string{
 	// table that multiplies by the number of score names a project files,
 	// and by the categories a categorical one has seen.
 	"scores_hourly",
+	// The name rollup (spec 027 #10), counted for the same reason again: it
+	// multiplies by the number of distinct trace names, and a deployment
+	// that puts an id in the trace name is exactly the shape an operator
+	// wants to see before the file grows.
+	"names_hourly",
 	// The eval tables (spec 014): each carries a project id, and their
 	// sizes are the operator's first question when the pinned-trace count
 	// beside them explains why the file did not shrink.

@@ -105,10 +105,10 @@ func TestTraceFilters(t *testing.T) {
 		want   []string
 	}{
 		{"all newest first", TraceFilter{}, []string{hexTrace(2), hexTrace(1)}},
-		{"environment", TraceFilter{Environment: "production"}, []string{hexTrace(1)}},
+		{"environment", TraceFilter{Environment: []string{"production"}}, []string{hexTrace(1)}},
 		{"user", TraceFilter{UserID: "u2"}, []string{hexTrace(2)}},
 		{"session", TraceFilter{SessionID: "s1"}, []string{hexTrace(1)}},
-		{"name", TraceFilter{Name: "eval"}, []string{hexTrace(2)}},
+		{"name", TraceFilter{Name: []string{"eval"}}, []string{hexTrace(2)}},
 		{"one tag", TraceFilter{Tags: []string{"beta"}}, []string{hexTrace(2), hexTrace(1)}},
 		{"tags are ANDed", TraceFilter{Tags: []string{"beta", "support"}}, []string{hexTrace(1)}},
 		{"status error", TraceFilter{Status: TraceStatusError}, []string{hexTrace(2)}},

@@ -368,11 +368,14 @@ func TestToolListIsTheDeclaredContract(t *testing.T) {
 	// bargain one spec further on (spec 024 #9): reading what is left to
 	// review is an agent question, and posting a verdict is not.
 	// `get_score_trends` came with the endpoint spec 025 #8 added, in the
-	// same PR as the command and the screen.
-	want := []string{"compare_runs", "get_dataset_items", "get_last_trace", "get_observation_io",
-		"get_prompt", "get_queue_items", "get_run", "get_run_items", "get_score_trends",
-		"get_session", "get_stats", "get_trace", "get_user", "list_datasets", "list_queues",
-		"list_runs", "list_scores", "list_sessions", "list_traces", "list_users", "search"}
+	// same PR as the command and the screen, and `get_facets` with spec
+	// 027 #5's — what a filter can be set to is the question a model asks
+	// before it guesses at a value.
+	want := []string{"compare_runs", "get_dataset_items", "get_facets", "get_last_trace",
+		"get_observation_io", "get_prompt", "get_queue_items", "get_run", "get_run_items",
+		"get_score_trends", "get_session", "get_stats", "get_trace", "get_user",
+		"list_datasets", "list_queues", "list_runs", "list_scores", "list_sessions",
+		"list_traces", "list_users", "search"}
 	var names []string
 	for _, tool := range result.Tools {
 		names = append(names, tool.Name)
@@ -680,8 +683,8 @@ func TestStdioTransportServesTheSameTools(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tools.Tools) != 21 {
-		t.Fatalf("tools = %d, want the same twenty-one as over HTTP", len(tools.Tools))
+	if len(tools.Tools) != 22 {
+		t.Fatalf("tools = %d, want the same twenty-two as over HTTP", len(tools.Tools))
 	}
 
 	result, err := session.CallTool(t.Context(), &mcp.CallToolParams{

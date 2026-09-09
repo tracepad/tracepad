@@ -123,6 +123,7 @@ func (r *run) handlers() map[string]func(context.Context, []string) error {
 		"score-configs": r.scoreConfigs,
 		"queues":        r.queues,
 		"stats":         r.stats,
+		"facets":        r.facets,
 		"system":        r.system,
 		"health":        r.health,
 		"export":        r.export,
@@ -183,7 +184,11 @@ const Usage = `Client commands (they talk to a running server over HTTP):
   tracepad prompts rm   <name> [--yes]
   tracepad stats        [--group-by hour|day|model|environment|release] [--since 1h]
                         [--until T] [--env E] [--user U]
+  tracepad facets       [--since 1h] [--until T]
   tracepad system
+
+--env, --release and --name take a comma-separated list — --env production,staging
+keeps traces from either — and facets is what lists the values with their counts.
 
 Taking the data out (spec 019). The archive is every export body as it arrived,
 and this replays it into any OTLP receiver — this server included — or writes

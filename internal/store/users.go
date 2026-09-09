@@ -504,14 +504,14 @@ const sessionStartCondition = `t.project_id = ?
 // PR #42). Whether a session *started* is still decided over the whole of it:
 // a session that began in staging and continued in production began in
 // staging, on both sides of the seam.
-func (s *Store) UserSessionStarts(projectID, userID, environment string, from, to int64, yield func(int64)) error {
+func (s *Store) UserSessionStarts(projectID, userID string, environment []string, from, to int64, yield func(int64)) error {
 	query := `SELECT t.timestamp FROM traces t
 	          WHERE ` + sessionStartCondition + `
 	            AND t.user_id = ? AND t.timestamp >= ? AND t.timestamp < ?`
 	args := []any{projectID, userID, from, to}
-	if environment != "" {
-		query += ` AND t.environment = ?`
-		args = append(args, environment)
+	if clause, bound := matchAny("t.environment", environment); clause != "" {
+		query += ` AND ` + clause
+		args = append(args, bound...)
 	}
 	rows, err := s.db.Query(query, args...)
 	if err != nil {
@@ -532,15 +532,15 @@ func (s *Store) UserSessionStarts(projectID, userID, environment string, from, t
 // oldest first — the rolled half of `/stats?user_id=` (spec 023 #6). It is
 // `StatsRollupRows` with the user in the seek, riding `idx_users_hourly_user`.
 func (s *Store) UsersRollupRows(projectID, userID string, fromHour, toHour int64,
-	environment string, yield func(UserStatsRow)) error {
+	environment []string, yield func(UserStatsRow)) error {
 	query := `SELECT hour, environment, release, model, count, error_count,
 	                 total_cost, latency, sessions_started
 	          FROM users_hourly
 	          WHERE project_id = ? AND user_id = ? AND hour >= ? AND hour < ?`
 	args := []any{projectID, userID, fromHour, toHour}
-	if environment != "" {
-		query += ` AND environment = ?`
-		args = append(args, environment)
+	if clause, bound := matchAny("environment", environment); clause != "" {
+		query += ` AND ` + clause
+		args = append(args, bound...)
 	}
 	query += ` ORDER BY hour`
 

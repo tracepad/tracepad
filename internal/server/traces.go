@@ -660,14 +660,27 @@ func (s *Server) expansion(values url.Values) (bool, int, error) {
 // traceFilter reads the filters the listing and the shortcut share.
 func traceFilter(values url.Values) (store.TraceFilter, error) {
 	filter := store.TraceFilter{
-		Environment: values.Get("environment"),
-		UserID:      values.Get("user_id"),
-		SessionID:   values.Get("session_id"),
-		Name:        values.Get("name"),
-		Release:     values.Get("release"),
-		Version:     values.Get("version"),
-		Tags:        values["tag"],
-		Status:      values.Get("status"),
+		UserID:    values.Get("user_id"),
+		SessionID: values.Get("session_id"),
+		Version:   values.Get("version"),
+		Tags:      values["tag"],
+		Status:    values.Get("status"),
+	}
+	// The three that take a list (spec 027 #1). They are read together
+	// because they are one rule: any of the items, one parameter, one chip.
+	for _, list := range []struct {
+		name   string
+		target *[]string
+	}{
+		{"environment", &filter.Environment},
+		{"name", &filter.Name},
+		{"release", &filter.Release},
+	} {
+		items, err := filterList(values, list.name)
+		if err != nil {
+			return filter, err
+		}
+		*list.target = items
 	}
 	if raw := values.Get("type"); raw != "" {
 		// A spelling outside the vocabulary is a 400 rather than an

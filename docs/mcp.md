@@ -93,6 +93,7 @@ tracepad is a later question.
 | `list_scores` | `GET /api/v1/scores` | Reading eval results |
 | `get_stats` | `GET /api/v1/stats` | Counts, cost, latency, trends |
 | `get_score_trends` | `GET /api/v1/stats/scores` | "Did hallucination drop after 2.5.0", "which model scores best" |
+| `get_facets` | `GET /api/v1/facets` | "Which environments exist", "what are the traces called" — before guessing at a filter value |
 | `list_datasets` | `GET /api/v1/datasets` | "What test sets are there" |
 | `get_dataset_items` | `GET /api/v1/datasets/{name}/items` | Reading the cases in one |
 | `list_runs` | `GET /api/v1/datasets/{name}/runs`, or `GET /api/v1/runs` without `dataset` | "What has been tried" |
@@ -139,6 +140,19 @@ no model. Scores that name only a session, and `text` scores, are never on a
 timeline. It returns the fifty busiest names by default — `limit` raises that
 to 500, and `omitted` says how many are still not there — so a model reading
 the list never mistakes it for the whole list. See [quality.md](quality.md).
+
+`get_facets` is what to call before guessing at a value for `list_traces`. It
+returns the environments, releases and trace names of a range with the number
+of traces carrying each, busiest first — and the counts are the point as much
+as the values: `prod: 1` beside `production: 4656` is a typo, and nothing but
+the count says so. It takes the range and nothing else, so the answer does not
+change with the other filters. At most a hundred values per column, with
+`omitted` saying how many were left out.
+
+Its answers go straight back in: `environment`, `release` and `name` each take
+**one value or a comma-separated list**, and a trace matches when its column
+equals any item — `{"environment": "production,staging"}` keeps both. `tag` is
+the exception and stays an AND: a trace must carry every tag listed.
 
 There are no administrative tools, for the reason at the top of this page: not
 a gap, a guarantee.

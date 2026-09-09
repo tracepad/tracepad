@@ -118,7 +118,7 @@ func rollScoreHour(tx *sql.Tx, projectID string, hour int64) (int, error) {
 // which index answers it, and the EXPLAIN test asserts both: without a name it
 // seeks the primary key, whose leading columns are exactly `(project, hour)`;
 // with one it seeks `idx_scores_hourly_name`, which is why that index exists.
-func scoreRollupQuery(projectID string, fromHour, toHour int64, environment, name string) (string, []any) {
+func scoreRollupQuery(projectID string, fromHour, toHour int64, environment []string, name string) (string, []any) {
 	query := `SELECT hour, environment, release, model, name, data_type, category,
 	                 count, sum, min, max
 	          FROM scores_hourly
@@ -128,18 +128,18 @@ func scoreRollupQuery(projectID string, fromHour, toHour int64, environment, nam
 		query += ` AND name = ?`
 		args = append(args, name)
 	}
-	if environment != "" {
+	if clause, bound := matchAny("environment", environment); clause != "" {
 		// A filter, not a grouping — the same rule the statistics follow:
 		// filter first, group after.
-		query += ` AND environment = ?`
-		args = append(args, environment)
+		query += ` AND ` + clause
+		args = append(args, bound...)
 	}
 	return query + ` ORDER BY hour`, args
 }
 
 // ScoresRollupRows reads the stored rows of a half-open hour range.
 func (s *Store) ScoresRollupRows(projectID string, fromHour, toHour int64,
-	environment, name string, yield func(ScoreStatsRow)) error {
+	environment []string, name string, yield func(ScoreStatsRow)) error {
 	query, args := scoreRollupQuery(projectID, fromHour, toHour, environment, name)
 	rows, err := s.db.Query(query, args...)
 	if err != nil {
@@ -185,7 +185,7 @@ func (s *Store) ScoresRollupRows(projectID string, fromHour, toHour int64,
 // side. Measured on the month fixture, one name over 30 days: 1,100 s without
 // the `+`, 0.9 s with it. `TestScoreQueriesSeekTheirIndexes` asserts the plan,
 // so "simplifying" the `+` away fails a test rather than a deployment.
-func scoreLiveQuery(projectID string, from, to int64, environment, name string) (string, []any) {
+func scoreLiveQuery(projectID string, from, to int64, environment []string, name string) (string, []any) {
 	query := `SELECT t.timestamp, t.environment, COALESCE(t.release, ''),
 	                 COALESCE(o.model, ''), s.name, s.data_type,
 	                 COALESCE(s.string_value, ''), s.value
@@ -200,9 +200,9 @@ func scoreLiveQuery(projectID string, from, to int64, environment, name string) 
 		query += ` AND +s.name = ?`
 		args = append(args, name)
 	}
-	if environment != "" {
-		query += ` AND t.environment = ?`
-		args = append(args, environment)
+	if clause, bound := matchAny("t.environment", environment); clause != "" {
+		query += ` AND ` + clause
+		args = append(args, bound...)
 	}
 	return query, args
 }
@@ -211,7 +211,7 @@ func scoreLiveQuery(projectID string, from, to int64, environment, name string) 
 // timestamps, shaped as a one-sample rollup row so that the caller folds both
 // halves of the seam with one function.
 func (s *Store) ScoreSamples(projectID string, from, to int64,
-	environment, name string, yield func(ScoreStatsRow)) error {
+	environment []string, name string, yield func(ScoreStatsRow)) error {
 	query, args := scoreLiveQuery(projectID, from, to, environment, name)
 	rows, err := s.db.Query(query, args...)
 	if err != nil {

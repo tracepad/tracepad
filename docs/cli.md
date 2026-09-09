@@ -54,14 +54,16 @@ tracepad traces ls --env production --error --since 1h
 | Flag | Meaning |
 |---|---|
 | `--search` | Find traces by what was said in them. See [Searching](#searching). |
-| `--env` | Environment. |
+| `--env` | Environment, or a comma-separated list of them. See [Lists](#lists). |
 | `--error` | Only traces with a failed observation. |
 | `--since` | A Go duration (`1h`, `30m`) or an RFC 3339 instant. |
 | `--until` | The other end of the range, same spellings. |
-| `--user`, `--session`, `--name` | Exact matches. |
+| `--user`, `--session` | Exact matches. |
+| `--name` | The trace name, or a comma-separated list of them. See [Lists](#lists). |
 | `--tag` | A tag the trace must carry. |
 | `--min-cost` | Traces costing at least this much. |
-| `--release`, `--version` | The deployment, and the version of the trace's own logic. Exact matches. |
+| `--release` | The deployment, or a comma-separated list of them. See [Lists](#lists). |
+| `--version` | The version of the trace's own logic. Exact match. |
 | `--type` | Traces containing a step of this kind: `span`, `generation`, `event`, `agent`, `tool`, `chain`, `retriever`, `guardrail`, `evaluator`, `embedding`. Exact — `generation` does not match `embedding`. |
 | `--prompt` | Traces that ran a prompt: `name`, or `name@7` for one version of it. A version is a number, so an `@` in a name is just part of it — `@acme/support` and `team@acme/answer` work as written, and `name@latest` is read as a name rather than as a label. |
 | `--fields` | Comma-separated subset of the row fields. |
@@ -92,6 +94,29 @@ A `--cursor` passed with nothing in it is refused for the same reason, on every
 listing that takes one: `--cursor "$NEXT"` with `NEXT` unset is a script that
 lost its place, and answering it with the newest page would restart the walk
 instead of continuing it — a loop that never ends.
+
+### Lists
+
+`--env`, `--release` and `--name` take one value or a comma-separated list, and
+a trace matches when its column equals any item:
+
+```sh
+tracepad traces ls --env production,staging
+```
+
+The flag passes its string through to the query parameter untouched, so what it
+accepts is exactly what the [API](api.md#lists) accepts: items are trimmed,
+duplicates collapse, an empty item (`--env production,`) is refused by the
+server, and a value containing a comma is not expressible. Give the flag once:
+the last `--env` wins, the way it does for every other string flag, and the
+server refuses a repeated query parameter outright rather than guess which one
+was meant. The same three flags mean the same thing on `traces last`, `tail`,
+`sessions ls` (`--env` only) and `stats` (`--env` only).
+
+`--tag` is not a list of this kind: it is repeatable and it is an AND, so a
+trace must carry every tag given.
+
+[`facets`](#facets) prints what the three can be set to.
 
 ### Searching
 
@@ -189,7 +214,8 @@ tracepad sessions ls --since 24h --env production
 One row per session, most recent activity first: last seen, id, how many
 traces, how many of those failed, cost and when the session started.
 
-Filters: `--since`, `--until`, `--env`, `--user`, `--limit`, `--cursor`,
+Filters: `--since`, `--until`, `--env` (one or a comma-separated list —
+[Lists](#lists)), `--user`, `--limit`, `--cursor`,
 `--oldest`, `--newer`, `--total`.
 `--since` and `--until` bound the traces, so a session appears when any of
 its traces falls in the window and its totals then describe those traces.
@@ -398,10 +424,50 @@ environment or release counts **traces**, grouping by model counts
 **observations**, because a trace has no model. Grouped by release, the traces
 that named none share one bucket with an empty key.
 
+`--env` takes the list every other command takes it as
+([Lists](#lists)): `--env production,staging` counts both.
+
 `--user` restricts every bucket to one end user, with the groupings and the
 counts unchanged. On an `hour` or `day` timeline it also adds a SESSIONS
 column: how many of that user's sessions began in the bucket, counted where
 they start so a sum is exact ([users.md](users.md)).
+
+### `facets`
+
+```sh
+tracepad facets
+tracepad facets --since 168h
+```
+
+```
+2026-09-02 12:00:00 .. 2026-09-09 12:00:00
+
+ENV         TRACES
+production  4656
+staging     218
+prod        1
+
+RELEASE   TRACES
+2026.9.1  3120
+
+NAME          TRACES
+support-chat  2984
+```
+
+What `--env`, `--release` and `--name` can be set to over a range, busiest
+first, with how many traces carry each. The counts are the point as much as the
+values: `prod 1` beside `production 4656` is a typo, and nothing but the count
+says so.
+
+`--since` and `--until` are the window, spelled as everywhere else — a Go
+duration or an RFC 3339 instant, and there is no day unit, so a week is `168h`.
+Given neither, the endpoint answers from **the oldest hour it has summaries
+for** up to now — as far back as `stats_retention_days` keeps, and no further:
+it does not read the raw traces for hours the summaries no longer cover. A
+column with nothing in it says so instead of printing an empty table, and a
+column the 100-value cap truncated says how many it left out. Values that
+cannot be spelled as a filter — one with a comma in it, one padded with spaces
+— are left out of the list, since ticking them could not work.
 
 ### `datasets`, `runs`, `score-configs`
 

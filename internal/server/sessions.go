@@ -120,10 +120,12 @@ func renderSessionRow(row *store.SessionRow) object {
 // half-open like everywhere else, so a session appears when any of its traces
 // falls inside it.
 func sessionFilter(values url.Values) (store.SessionFilter, error) {
-	filter := store.SessionFilter{
-		Environment: values.Get("environment"),
-		UserID:      values.Get("user_id"),
+	filter := store.SessionFilter{UserID: values.Get("user_id")}
+	environment, err := filterList(values, "environment")
+	if err != nil {
+		return filter, err
 	}
+	filter.Environment = environment
 	for _, bound := range []struct {
 		name   string
 		target **int64
