@@ -73,6 +73,20 @@ func (s *Server) handleFacets(w http.ResponseWriter, r *http.Request) {
 		}
 		*bound.target = instant
 	}
+	// An inverted window is a `400` rather than three empty lists with a
+	// `200` (spec 027 #13). It is reachable by accident here and nowhere else:
+	// `from` defaults to thirty days ago while `to` defaults to now, so
+	// `?to=` alone — some instant in the past — names a window whose start is
+	// after its end, and an empty answer to it is indistinguishable from an
+	// empty project. `/stats` cannot hit it because its `from` is unbounded.
+	//
+	// The default is left where it is rather than re-anchored to `to`: moving
+	// a bound the caller did not name, to make a request mean something else,
+	// is a wider change than saying what is wrong with it.
+	if from >= to {
+		writeError(w, http.StatusBadRequest, "from must be before to")
+		return
+	}
 
 	counts := map[string]map[string]int64{}
 	fold := func(row store.FacetRow) {
@@ -147,9 +161,20 @@ func (s *Server) readFacets(projectID string, from, to int64, fold func(store.Fa
 	if state.RolledUntil > 0 {
 		// How far back the rollup can speak for is what it holds, not what
 		// a retention window says it should (spec 013 #17). The floor is
-		// `stats_hourly`'s own oldest row, which is the same floor for all
-		// four tables: one pass writes them together and one sweep takes
-		// them together.
+		// `stats_hourly`'s own oldest row, which is where one pass wrote all
+		// four tables and where one sweep will take them.
+		//
+		// *Known limit* (spec 027 #17, the shape of spec 023 #15's and spec
+		// 025 #21's): `names_hourly` arrived with migration 0016, and its
+		// backfill can only fill an hour whose raw traces are still there. On
+		// an install whose `retention_days` is shorter than its
+		// `stats_retention_days`, the hours between the two windows have
+		// environments and releases in `stats_hourly` and no name rows at all
+		// — so a range reaching into them answers a full environment list
+		// beside a shorter name list. `docs/api.md` says so. Flooring the name
+		// column at its own `MIN(hour)` instead would not help: the answer
+		// would be just as short, and the two other columns would shrink to
+		// match it for no reason.
 		oldest, held, err := s.store.OldestRolledHour(projectID)
 		if err != nil {
 			return err

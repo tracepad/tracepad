@@ -3,6 +3,7 @@ package server
 import (
 	"fmt"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -239,12 +240,77 @@ func TestFacetsParameterValidation(t *testing.T) {
 	expectError(t, h.get(t, "/api/v1/facets?from="), 400, "without a value")
 	expectError(t, h.get(t, "/api/v1/facets?from=yesterday"), 400, "from")
 
+	// An inverted window is a broken question, and three empty lists with a
+	// `200` would be a well-formed answer to it (spec 027 #13). It is
+	// reachable by accident: `?to=` alone, some instant in the past, sits
+	// before the default `from`.
+	expectError(t, h.get(t,
+		"/api/v1/facets?from=2026-09-01T00:00:00Z&to=2026-08-01T00:00:00Z"), 400,
+		"from must be before to")
+	expectError(t, h.get(t, "/api/v1/facets?to=2020-01-01T00:00:00Z"), 400,
+		"from must be before to")
+
 	// With no range at all it answers the last 30 days, which for a fixture
 	// dated in the past is nothing at all — and nothing is an empty list,
 	// never a failure.
 	body := h.facets(t, "")
 	if body.From == "" || body.To == "" {
 		t.Error("the default range is not reported")
+	}
+}
+
+// A repeated many-valued parameter is a `400`, not a silent first-wins
+// (spec 027 #14). `tag` beside it is repeatable on purpose, which is exactly
+// what makes the wrong spelling likely.
+func TestARepeatedListParameterIsRefused(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	h.seedFacetCorpus(t, statsHour)
+
+	expectError(t, h.get(t, "/api/v1/traces?environment=production&environment=staging"),
+		400, "pass one comma-separated list")
+
+	// And `tag`, which means something else by the same spelling, is
+	// untouched: two tags are an AND.
+	expectStatus(t, h.get(t, "/api/v1/traces?tag=a&tag=b"), 200)
+}
+
+// The parsing itself, at the one place every endpoint reaches it through.
+func TestFilterListParsing(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		query string
+		want  []string
+		fails string
+	}{
+		{"absent", "", nil, ""},
+		{"one value", "environment=production", []string{"production"}, ""},
+		{"a list", "environment=production,staging", []string{"production", "staging"}, ""},
+		{"trimmed", "environment=production,%20staging", []string{"production", "staging"}, ""},
+		{"deduped", "environment=a,b,a", []string{"a", "b"}, ""},
+		{"an empty item", "environment=a,,b", nil, "empty item in list"},
+		{"a trailing comma", "environment=a,", nil, "empty item in list"},
+		{"whitespace as an item", "environment=a,%20", nil, "empty item in list"},
+		{"repeated", "environment=a&environment=b", nil, "pass one comma-separated list"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			values, err := url.ParseQuery(tc.query)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := filterList(values, "environment")
+			if tc.fails != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.fails) {
+					t.Fatalf("err = %v, want it to mention %q", err, tc.fails)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Join(got, "|") != strings.Join(tc.want, "|") {
+				t.Errorf("filterList = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 

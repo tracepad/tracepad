@@ -126,8 +126,28 @@
 	);
 	$effect(() => environments.watch());
 
-	const picked = $derived(readList(filters.environment));
+	// What is ticked: the URL, unless a tick is still on its way into it. A box
+	// commits with a `goto` and `goto` is asynchronous, so a second tick made
+	// before the first navigation lands would compose against the old URL and
+	// write the first value back out. The text field this control replaces
+	// committed once, on blur, so the window was never open; ticking several
+	// boxes in a row is the ordinary use of a checkbox list (spec 027 #16).
+	//
+	// The pending list is dropped the moment the URL moves — which is what our
+	// own `goto` does, and also what a link, the back button or Clear does. So
+	// the URL stays the source of truth and this only covers the gap.
+	let pending = $state<string[] | null>(null);
+	$effect(() => {
+		filters.environment;
+		pending = null;
+	});
+	const picked = $derived(pending ?? readList(filters.environment));
 	const environmentChip = $derived(facetChip('Environment', picked));
+
+	function pickEnvironments(next: string[]) {
+		pending = next;
+		commit('environment', writeList(next) ?? '');
+	}
 
 	const fieldClass =
 		'border-border bg-canvas placeholder:text-subtle w-40 rounded-md border px-2 py-1 text-sm';
@@ -185,7 +205,7 @@
 						loading={environments.loading}
 						failure={environments.failure}
 						checked={picked}
-						onchange={(next) => commit('environment', writeList(next) ?? '')}
+						onchange={pickEnvironments}
 					/>
 				</Popover.Content>
 			</Popover.Portal>

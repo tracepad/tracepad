@@ -158,6 +158,11 @@ One value behaves exactly as it always did. Items are trimmed, so
 that did not fill in, and reading it as "just the rest" would answer a broken
 request with a well-formed listing.
 
+**Repeating the parameter** is a `400` too: `?environment=a&environment=b` is
+one list spelled the way `tag` is spelled, and answering it with the traces of
+`a` alone would be a listing narrower than the one that was asked for. One
+list, one parameter.
+
 A value that **contains a comma** is not expressible through these parameters.
 An environment, a release or a trace name is an identifier, and an identifier
 with a comma in it is a choice its owner made against every tool that will
@@ -786,7 +791,10 @@ The counts are the point as much as the values are: `prod: 1` beside
 default to **the last 30 days**, which is the listing's own default window. The
 range is the *only* thing this endpoint takes: the counts do not respect the
 other filters, so the list does not move as boxes are ticked. An unknown
-parameter, or one given without a value, is a `400`.
+parameter, or one given without a value, is a `400`; so is a window whose
+`from` is not before its `to`, which is what `?to=` alone in the past makes of
+the default — an empty answer there would be indistinguishable from an empty
+project.
 
 Values are sorted by count descending and then by value ascending, and each
 column carries at most **100** of them; `omitted` says how many were left out,
@@ -797,6 +805,15 @@ The numbers come from the same seam as the statistics, so a range behind the
 watermark is answered from the rollup and outlives the traces it summarizes.
 The tail is answered live, which is what keeps the list *complete*: an
 environment first seen a minute ago is already here.
+
+One caveat, on an install that was upgraded and keeps its summaries longer than
+its traces. `environment` and `release` have been in the rollup since it
+existed; the trace name got a table of its own with this feature, and its
+backfill can only fill an hour whose raw traces are still there. So where
+`retention_days` is shorter than `stats_retention_days`, a range reaching into
+the gap between the two answers the full environment and release lists beside a
+name list that starts where the traces do. Everything ingested after the
+upgrade has all three.
 
 ## Prompt version diff
 

@@ -107,9 +107,11 @@ tracepad traces ls --env production,staging
 The flag passes its string through to the query parameter untouched, so what it
 accepts is exactly what the [API](api.md#lists) accepts: items are trimmed,
 duplicates collapse, an empty item (`--env production,`) is refused by the
-server, and a value containing a comma is not expressible. The same three flags
-mean the same thing on `traces last`, `tail`, `sessions ls` (`--env` only) and
-`stats` (`--env` only).
+server, and a value containing a comma is not expressible. Give the flag once:
+the last `--env` wins, the way it does for every other string flag, and the
+server refuses a repeated query parameter outright rather than guess which one
+was meant. The same three flags mean the same thing on `traces last`, `tail`,
+`sessions ls` (`--env` only) and `stats` (`--env` only).
 
 `--tag` is not a list of this kind: it is repeatable and it is an AND, so a
 trace must carry every tag given.
@@ -460,9 +462,10 @@ says so.
 `--since` and `--until` are the window, spelled as everywhere else — a Go
 duration or an RFC 3339 instant, and there is no day unit, so a week is `168h`.
 Given neither, the endpoint answers for **the last 30 days**, which is the
-listing's own default window. A column with nothing in it says so instead of printing an
-empty table, and a column the 100-value cap truncated says how many it left
-out.
+listing's own default window — so `--until` alone, naming an instant more than
+thirty days back, is refused rather than answered with nothing. A column with
+nothing in it says so instead of printing an empty table, and a column the
+100-value cap truncated says how many it left out.
 
 ### `datasets`, `runs`, `score-configs`
 

@@ -224,7 +224,20 @@ func queryParams(r *http.Request, known ...string) (url.Values, error) {
 // says so: an identifier with a comma in it is a choice its owner made against
 // every tool that will ever list it.
 func filterList(values url.Values, name string) ([]string, error) {
-	raw := values.Get(name)
+	given := values[name]
+	if len(given) == 0 {
+		return nil, nil
+	}
+	// Repeating the parameter is a `400` rather than a silent first-wins.
+	// `tag` beside it *is* repeatable and *is* an AND, so `?environment=a&
+	// environment=b` is a client that reached for the wrong spelling of a
+	// filter this endpoint advertises as many-valued — and answering it with
+	// the traces of `a` alone is a listing narrower than the one that was
+	// asked for, which is the failure spec 003 #23 refuses everywhere else.
+	if len(given) > 1 {
+		return nil, fmt.Errorf("%s was given more than once; pass one comma-separated list", name)
+	}
+	raw := given[0]
 	if raw == "" {
 		return nil, nil
 	}

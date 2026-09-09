@@ -24,8 +24,8 @@ const HOUR = (() => {
 let own: ReturnType<typeof createProject> | null = null;
 const project = () => (own ??= createProject('filters'));
 
-async function signIn(page: Page) {
-	const { key } = await project();
+async function signIn(page: Page, into?: string) {
+	const key = into ?? (await project()).key;
 	await page.goto('/login');
 	await page.getByLabel('Project key').fill(key);
 	await page.getByRole('button', { name: 'Sign in' }).click();
@@ -81,9 +81,9 @@ function exportOf(spans: Span[]): Uint8Array {
 	return Uint8Array.from(bytes(1, [...resource, ...bytes(2, [...scope, ...encoded.flat()])]));
 }
 
-async function deliver(spans: Span[]) {
+async function deliver(spans: Span[], into?: string) {
 	const { baseURL } = state();
-	const { key } = await project();
+	const key = into ?? (await project()).key;
 	const response = await fetch(`${baseURL}/v1/traces`, {
 		method: 'POST',
 		headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/x-protobuf' },
@@ -240,4 +240,47 @@ test('the panel is usable at a phone width and the page never scrolls sideways',
 		() => document.documentElement.scrollWidth - document.documentElement.clientWidth
 	);
 	expect(overflow).toBeLessThanOrEqual(0);
+});
+
+// What the live tail is for (Decision 3), and why a closed panel forgets what
+// it read (Decision 15): an environment first seen a minute ago is on the list
+// the next time the panel opens, without a reload. The window did not move —
+// on the listing's default range there is no `from` or `to` in the URL at all
+// — so a memory that survived the closing would freeze the lists for the life
+// of the page.
+//
+// In a project of its own, because this one ingests while a page is open and
+// every other case here counts the shared corpus.
+test('an environment first seen after the panel closed is on the list when it reopens', async ({
+	page
+}) => {
+	const fresh = await createProject('facet-reopen');
+	await deliver(
+		[{ trace: id('f', 1), span: span('f', 1), at: HOUR, name: 'chat', environment: 'production' }],
+		fresh.key
+	);
+	await signIn(page, fresh.key);
+
+	await openPanel(page);
+	await expect(box(page, 'Environment', 'production')).toBeVisible();
+	await expect(box(page, 'Environment', 'canary')).toHaveCount(0);
+
+	await page.keyboard.press('Escape');
+	await expect(page.getByRole('group', { name: 'Environment' })).toBeHidden();
+
+	await deliver(
+		[
+			{
+				trace: id('f', 2),
+				span: span('f', 2),
+				at: HOUR + 1_000_000_000n,
+				name: 'chat',
+				environment: 'canary'
+			}
+		],
+		fresh.key
+	);
+
+	await openPanel(page);
+	await expect(box(page, 'Environment', 'canary')).toBeVisible();
 });

@@ -40,8 +40,21 @@ export class FacetValues {
 	 */
 	watch() {
 		const window = this.#window();
-		if (!this.#open()) return;
+		if (!this.#open()) {
+			// A closed panel forgets what it read. The key is the *window*, and
+			// on the listing's default range there is no `from` or `to` in the
+			// URL at all — so the key is one constant string, and remembering
+			// it across openings would fetch the lists once per page load and
+			// freeze them there. "The range did not change" is not the same
+			// claim as "nothing arrived in it", and the whole point of the live
+			// tail is that an environment first seen a minute ago is on the
+			// list the next time the panel opens (spec 027 #15).
+			this.#read_for = null;
+			return;
+		}
 		const key = `${window.from ?? ''}|${window.to ?? ''}`;
+		// Within one opening the key still guards: a re-render that did not
+		// move the window must not re-ask.
 		if (key === this.#read_for) return;
 		const controller = new AbortController();
 		this.#read(window, key, controller.signal);

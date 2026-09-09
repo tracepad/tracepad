@@ -1871,7 +1871,7 @@ export interface components {
         From: string;
         /** @description RFC 3339, exclusive */
         To: string;
-        /** @description The environment a trace ran in. A comma-separated list matches **any** of them: `?environment=production,staging`. Items are trimmed and duplicates collapse; an empty item (`a,,b`, `a,`) is a 400, as an empty value is. An environment whose name contains a comma is not expressible here. `GET /api/v1/facets` lists the values in a range with their counts */
+        /** @description The environment a trace ran in. A comma-separated list matches **any** of them: `?environment=production,staging`. Items are trimmed and duplicates collapse; an empty item (`a,,b`, `a,`) is a 400, as an empty value is, and so is repeating the parameter — one list, one parameter. An environment whose name contains a comma is not expressible here. `GET /api/v1/facets` lists the values in a range with their counts */
         Environment: string;
         /** @description Out of range is a 400, not a silent clamp */
         Limit: number;
@@ -1883,7 +1883,7 @@ export interface components {
         Count: "1" | "true";
         /** @description Full-text search over one field of one observation — input, output, metadata, name or status message — or over the trace name. Words (all must occur), `"quoted phrases"`, `prefix*`. Words, not substrings: `error` does not find `errors`, `err*` finds both. Case and diacritics are folded, identifiers split on punctuation, and only the first 64 KiB of each payload is indexed. A `q` with no word in it is a 400 */
         Search: string;
-        /** @description The deployment the trace ran in, from `langfuse.release` or the resource's `service.version`. A comma-separated list matches **any** of them; items are trimmed, duplicates collapse, an empty item is a 400, and a release whose name contains a comma is not expressible here. `GET /api/v1/facets` lists the values in a range with their counts */
+        /** @description The deployment the trace ran in, from `langfuse.release` or the resource's `service.version`. A comma-separated list matches **any** of them; items are trimmed, duplicates collapse, an empty item is a 400, repeating the parameter is a 400, and a release whose name contains a comma is not expressible here. `GET /api/v1/facets` lists the values in a range with their counts */
         Release: string;
         /** @description Exact match on the version of the trace's own logic, from `langfuse.version` */
         Version: string;
@@ -2166,13 +2166,13 @@ export interface operations {
                 from?: components["parameters"]["From"];
                 /** @description RFC 3339, exclusive */
                 to?: components["parameters"]["To"];
-                /** @description The environment a trace ran in. A comma-separated list matches **any** of them: `?environment=production,staging`. Items are trimmed and duplicates collapse; an empty item (`a,,b`, `a,`) is a 400, as an empty value is. An environment whose name contains a comma is not expressible here. `GET /api/v1/facets` lists the values in a range with their counts */
+                /** @description The environment a trace ran in. A comma-separated list matches **any** of them: `?environment=production,staging`. Items are trimmed and duplicates collapse; an empty item (`a,,b`, `a,`) is a 400, as an empty value is, and so is repeating the parameter — one list, one parameter. An environment whose name contains a comma is not expressible here. `GET /api/v1/facets` lists the values in a range with their counts */
                 environment?: components["parameters"]["Environment"];
                 /** @description Exact match on the trace's user id */
                 user_id?: string;
                 /** @description Exact match on the trace's session id */
                 session_id?: string;
-                /** @description The trace name. A comma-separated list matches **any** of them; items are trimmed, duplicates collapse, an empty item is a 400, and a name containing a comma is not expressible here. A trace with no name never matches. `GET /api/v1/facets` lists the values in a range with their counts */
+                /** @description The trace name. A comma-separated list matches **any** of them; items are trimmed, duplicates collapse, an empty item is a 400, repeating the parameter is a 400, and a name containing a comma is not expressible here. A trace with no name never matches. `GET /api/v1/facets` lists the values in a range with their counts */
                 name?: string;
                 /** @description Repeatable; a trace must carry every tag given */
                 tag?: string[];
@@ -2182,7 +2182,7 @@ export interface operations {
                 min_cost?: number;
                 /** @description Full-text search over one field of one observation — input, output, metadata, name or status message — or over the trace name. Words (all must occur), `"quoted phrases"`, `prefix*`. Words, not substrings: `error` does not find `errors`, `err*` finds both. Case and diacritics are folded, identifiers split on punctuation, and only the first 64 KiB of each payload is indexed. A `q` with no word in it is a 400 */
                 q?: components["parameters"]["Search"];
-                /** @description The deployment the trace ran in, from `langfuse.release` or the resource's `service.version`. A comma-separated list matches **any** of them; items are trimmed, duplicates collapse, an empty item is a 400, and a release whose name contains a comma is not expressible here. `GET /api/v1/facets` lists the values in a range with their counts */
+                /** @description The deployment the trace ran in, from `langfuse.release` or the resource's `service.version`. A comma-separated list matches **any** of them; items are trimmed, duplicates collapse, an empty item is a 400, repeating the parameter is a 400, and a release whose name contains a comma is not expressible here. `GET /api/v1/facets` lists the values in a range with their counts */
                 release?: components["parameters"]["Release"];
                 /** @description Exact match on the version of the trace's own logic, from `langfuse.version` */
                 version?: components["parameters"]["Version"];
@@ -2241,7 +2241,7 @@ export interface operations {
                 from?: components["parameters"]["From"];
                 /** @description RFC 3339, exclusive */
                 to?: components["parameters"]["To"];
-                /** @description The environment a trace ran in. A comma-separated list matches **any** of them: `?environment=production,staging`. Items are trimmed and duplicates collapse; an empty item (`a,,b`, `a,`) is a 400, as an empty value is. An environment whose name contains a comma is not expressible here. `GET /api/v1/facets` lists the values in a range with their counts */
+                /** @description The environment a trace ran in. A comma-separated list matches **any** of them: `?environment=production,staging`. Items are trimmed and duplicates collapse; an empty item (`a,,b`, `a,`) is a 400, as an empty value is, and so is repeating the parameter — one list, one parameter. An environment whose name contains a comma is not expressible here. `GET /api/v1/facets` lists the values in a range with their counts */
                 environment?: components["parameters"]["Environment"];
                 user_id?: string;
                 session_id?: string;
@@ -2252,7 +2252,7 @@ export interface operations {
                 min_cost?: number;
                 /** @description Full-text search over one field of one observation — input, output, metadata, name or status message — or over the trace name. Words (all must occur), `"quoted phrases"`, `prefix*`. Words, not substrings: `error` does not find `errors`, `err*` finds both. Case and diacritics are folded, identifiers split on punctuation, and only the first 64 KiB of each payload is indexed. A `q` with no word in it is a 400 */
                 q?: components["parameters"]["Search"];
-                /** @description The deployment the trace ran in, from `langfuse.release` or the resource's `service.version`. A comma-separated list matches **any** of them; items are trimmed, duplicates collapse, an empty item is a 400, and a release whose name contains a comma is not expressible here. `GET /api/v1/facets` lists the values in a range with their counts */
+                /** @description The deployment the trace ran in, from `langfuse.release` or the resource's `service.version`. A comma-separated list matches **any** of them; items are trimmed, duplicates collapse, an empty item is a 400, repeating the parameter is a 400, and a release whose name contains a comma is not expressible here. `GET /api/v1/facets` lists the values in a range with their counts */
                 release?: components["parameters"]["Release"];
                 /** @description Exact match on the version of the trace's own logic, from `langfuse.version` */
                 version?: components["parameters"]["Version"];
@@ -2449,7 +2449,7 @@ export interface operations {
                 from?: components["parameters"]["From"];
                 /** @description RFC 3339, exclusive */
                 to?: components["parameters"]["To"];
-                /** @description The environment a trace ran in. A comma-separated list matches **any** of them: `?environment=production,staging`. Items are trimmed and duplicates collapse; an empty item (`a,,b`, `a,`) is a 400, as an empty value is. An environment whose name contains a comma is not expressible here. `GET /api/v1/facets` lists the values in a range with their counts */
+                /** @description The environment a trace ran in. A comma-separated list matches **any** of them: `?environment=production,staging`. Items are trimmed and duplicates collapse; an empty item (`a,,b`, `a,`) is a 400, as an empty value is, and so is repeating the parameter — one list, one parameter. An environment whose name contains a comma is not expressible here. `GET /api/v1/facets` lists the values in a range with their counts */
                 environment?: components["parameters"]["Environment"];
                 /** @description Exact match on the user id of a session's traces */
                 user_id?: string;
@@ -2543,7 +2543,7 @@ export interface operations {
                 from?: components["parameters"]["From"];
                 /** @description RFC 3339, exclusive */
                 to?: components["parameters"]["To"];
-                /** @description The environment a trace ran in. A comma-separated list matches **any** of them: `?environment=production,staging`. Items are trimmed and duplicates collapse; an empty item (`a,,b`, `a,`) is a 400, as an empty value is. An environment whose name contains a comma is not expressible here. `GET /api/v1/facets` lists the values in a range with their counts */
+                /** @description The environment a trace ran in. A comma-separated list matches **any** of them: `?environment=production,staging`. Items are trimmed and duplicates collapse; an empty item (`a,,b`, `a,`) is a 400, as an empty value is, and so is repeating the parameter — one list, one parameter. An environment whose name contains a comma is not expressible here. `GET /api/v1/facets` lists the values in a range with their counts */
                 environment?: components["parameters"]["Environment"];
                 /** @description Restricts every bucket to one end user. The shape, the groupings and `unit` are unchanged; a `hour` or `day` timeline additionally carries `sessions` per bucket. Statistics for one user trail the raw data by the same rollup lag as the rest */
                 user_id?: string;
@@ -2593,7 +2593,7 @@ export interface operations {
                 from?: components["parameters"]["From"];
                 /** @description RFC 3339, exclusive */
                 to?: components["parameters"]["To"];
-                /** @description The environment a trace ran in. A comma-separated list matches **any** of them: `?environment=production,staging`. Items are trimmed and duplicates collapse; an empty item (`a,,b`, `a,`) is a 400, as an empty value is. An environment whose name contains a comma is not expressible here. `GET /api/v1/facets` lists the values in a range with their counts */
+                /** @description The environment a trace ran in. A comma-separated list matches **any** of them: `?environment=production,staging`. Items are trimmed and duplicates collapse; an empty item (`a,,b`, `a,`) is a 400, as an empty value is, and so is repeating the parameter — one list, one parameter. An environment whose name contains a comma is not expressible here. `GET /api/v1/facets` lists the values in a range with their counts */
                 environment?: components["parameters"]["Environment"];
                 /** @description Only the score filed under this name. Absent, every name in the range comes back as its own series */
                 name?: string;
@@ -2634,7 +2634,7 @@ export interface operations {
     facets: {
         parameters: {
             query?: {
-                /** @description RFC 3339, inclusive. Defaults to 30 days ago — the listing's own default window */
+                /** @description RFC 3339, inclusive. Defaults to 30 days ago — the listing's own default window. A window whose `from` is not before its `to` is a 400, which is what `?to=` alone in the past makes */
                 from?: string;
                 /** @description RFC 3339, exclusive. Defaults to now */
                 to?: string;
@@ -4094,13 +4094,13 @@ export interface operations {
                 from?: components["parameters"]["From"];
                 /** @description RFC 3339, exclusive */
                 to?: components["parameters"]["To"];
-                /** @description The environment a trace ran in. A comma-separated list matches **any** of them: `?environment=production,staging`. Items are trimmed and duplicates collapse; an empty item (`a,,b`, `a,`) is a 400, as an empty value is. An environment whose name contains a comma is not expressible here. `GET /api/v1/facets` lists the values in a range with their counts */
+                /** @description The environment a trace ran in. A comma-separated list matches **any** of them: `?environment=production,staging`. Items are trimmed and duplicates collapse; an empty item (`a,,b`, `a,`) is a 400, as an empty value is, and so is repeating the parameter — one list, one parameter. An environment whose name contains a comma is not expressible here. `GET /api/v1/facets` lists the values in a range with their counts */
                 environment?: components["parameters"]["Environment"];
                 /** @description Exact match on the trace's user id */
                 user_id?: string;
                 /** @description Exact match on the trace's session id */
                 session_id?: string;
-                /** @description The trace name. A comma-separated list matches **any** of them; items are trimmed, duplicates collapse, an empty item is a 400, and a name containing a comma is not expressible here. A trace with no name never matches. `GET /api/v1/facets` lists the values in a range with their counts */
+                /** @description The trace name. A comma-separated list matches **any** of them; items are trimmed, duplicates collapse, an empty item is a 400, repeating the parameter is a 400, and a name containing a comma is not expressible here. A trace with no name never matches. `GET /api/v1/facets` lists the values in a range with their counts */
                 name?: string;
                 /** @description Repeatable; a trace must carry every tag given */
                 tag?: string[];
@@ -4110,7 +4110,7 @@ export interface operations {
                 min_cost?: number;
                 /** @description Full-text search over one field of one observation — input, output, metadata, name or status message — or over the trace name. Words (all must occur), `"quoted phrases"`, `prefix*`. Words, not substrings: `error` does not find `errors`, `err*` finds both. Case and diacritics are folded, identifiers split on punctuation, and only the first 64 KiB of each payload is indexed. A `q` with no word in it is a 400 */
                 q?: components["parameters"]["Search"];
-                /** @description The deployment the trace ran in, from `langfuse.release` or the resource's `service.version`. A comma-separated list matches **any** of them; items are trimmed, duplicates collapse, an empty item is a 400, and a release whose name contains a comma is not expressible here. `GET /api/v1/facets` lists the values in a range with their counts */
+                /** @description The deployment the trace ran in, from `langfuse.release` or the resource's `service.version`. A comma-separated list matches **any** of them; items are trimmed, duplicates collapse, an empty item is a 400, repeating the parameter is a 400, and a release whose name contains a comma is not expressible here. `GET /api/v1/facets` lists the values in a range with their counts */
                 release?: components["parameters"]["Release"];
                 /** @description Exact match on the version of the trace's own logic, from `langfuse.version` */
                 version?: components["parameters"]["Version"];

@@ -115,6 +115,12 @@ The rollup is **four tables**, and one window governs all of them:
 | `scores_hourly` | score means, rates and category counts per hour ([quality.md](quality.md)) | `stats_retention_days` |
 | `names_hourly` | how many traces of each name per hour, and how many failed — what [`GET /api/v1/facets`](api.md#filter-values) lists | `stats_retention_days` |
 
+`names_hourly` is the youngest of the four, and on an upgraded install it starts
+where the *traces* do rather than where the other three do: its backfill reads
+the raw rows, and past `retention_days` there are none to read. If your
+`stats_retention_days` is the longer of the two, the filter values for that gap
+name the environments and releases and not the trace names.
+
 They are written by one pass in one transaction and swept together, so the
 Stats, Users, Quality and filter-value answers can never disagree about how far
 back the history reaches.
