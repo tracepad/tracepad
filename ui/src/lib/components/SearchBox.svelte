@@ -32,8 +32,17 @@
 	}
 </script>
 
+<!-- `min-w-20` on the box rather than `min-w-0`: the field may be narrower than
+     the width it asks for, but not narrower than a field. Without a floor a
+     375 px bar took it to 58 px, which is `pl-7 + pr-7` and the border — no
+     placeholder, and a letter typed into it invisible. Eighty is what the row
+     can afford beside a window that also has to stay readable (spec 027 #22).
+     The floor is on the box, not on the field inside it: the box is the bar's
+     flex item, and a minimum on the field alone leaves it standing at its own
+     width while the box collapses out from under it, which is the overlap this
+     decision is about. -->
 <form
-	class="flex min-w-0 items-center"
+	class="flex min-w-20 items-center"
 	onsubmit={(event) => {
 		event.preventDefault();
 		commit();

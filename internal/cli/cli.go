@@ -534,7 +534,11 @@ func (r *run) instant(flag, value string) (string, error) {
 	// list and then to multiply.
 	if days, found := strings.CutSuffix(value, "d"); found {
 		if count, err := strconv.ParseFloat(days, 64); err == nil && count > 0 {
-			return "", usageErrorf("%s has no day unit: %s is %gh", flag, value, count*24)
+			// `'f'` rather than `%g`: the number is there to be retyped, and
+			// `2.4e+06h` is not a duration the parser two lines up would take
+			// either (the rule spec 025 #25 set for `scores trend`).
+			hours := strconv.FormatFloat(count*24, 'f', -1, 64)
+			return "", usageErrorf("%s has no day unit: %s is %sh", flag, value, hours)
 		}
 	}
 	return "", usageErrorf("%s takes a duration (1h, 30m) or an RFC 3339 timestamp, got %q", flag, value)

@@ -172,9 +172,12 @@
 
 <div class="border-border overflow-x-auto border-b px-4 py-2">
 	<div class="flex min-w-0 items-center gap-1.5">
+		<!-- `min-w-24` for the reason the Traces bar passes it (spec 027 #22):
+		     this row also has a control that cannot shrink beside one that can. -->
 		<RangePicker
 			range={{ from: filters.from, to: filters.to }}
 			onchange={(range) => navigate({ environment: filters.environment, user_id: filters.user_id, ...range })}
+			class="min-w-24"
 		/>
 		<Popover.Root bind:open={environmentOpen}>
 			<Popover.Trigger>

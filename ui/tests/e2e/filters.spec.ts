@@ -337,6 +337,31 @@ test('the sessions bar keeps its controls inside it at a phone width', async ({
 	await expect(page.getByRole('group', { name: 'Environment' })).toBeVisible();
 });
 
+/**
+ * The other side of Decision 22: the window control is shared by five bars,
+ * and only the two that pass it a minimum may make it narrow. On Stats and
+ * Quality the field and the bucket buttons beside it cannot shrink at all, so
+ * a picker allowed to shrink there absorbs the whole deficit — for one commit
+ * on this branch it was 34 px wide with **no label at all**, on the default
+ * window, which is not even a narrow one. Those two bars scroll instead, which
+ * is what they have always done.
+ */
+for (const screen of ['/stats', '/quality'] as const) {
+	test(`the window keeps its label on ${screen} at a phone width`, async ({ page }, testInfo) => {
+		test.skip(testInfo.project.name !== 'mobile', 'the narrow width is the test');
+		await signIn(page);
+		await page.goto(screen);
+
+		const label = page.getByRole('button', { name: /^Time range: / }).locator('span');
+		const shown = await label.evaluate((el) => ({
+			width: el.getBoundingClientRect().width,
+			text: el.textContent?.trim() ?? ''
+		}));
+		expect(shown.text).not.toBe('');
+		expect(shown.width).toBeGreaterThan(0);
+	});
+}
+
 // What the live tail is for (Decision 3), and why a closed panel forgets what
 // it read (Decision 15): an environment first seen a minute ago is on the list
 // the next time the panel opens, without a reload. The window did not move —

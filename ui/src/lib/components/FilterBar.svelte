@@ -214,7 +214,16 @@
 <div class="flex min-w-0 items-center gap-1.5">
 	<SearchBox value={filters.q ?? ''} onchange={setSearch} />
 
-	<RangePicker range={{ from: filters.from, to: filters.to }} onchange={setRange} />
+	<!-- `min-w-24`: the window may be narrower than its label, down to a floor
+	     that still says a date. Ninety-six pixels is what the row can afford —
+	     at 375 px this bar has 176 px for the search box and the window
+	     together, so two floors of 96 would push *Filters* back out of the box
+	     this decision is about. -->
+	<RangePicker
+		range={{ from: filters.from, to: filters.to }}
+		onchange={setRange}
+		class="min-w-24"
+	/>
 
 	<Popover.Root bind:open onOpenChange={edit}>
 		<Popover.Trigger>

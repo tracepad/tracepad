@@ -22,7 +22,18 @@
 	// A preset sets `from` and leaves the end open, because the window it names
 	// keeps ending now.
 
-	let { range, onchange }: { range: Range; onchange: (next: Range) => void } = $props();
+	// `class` is the bar's say in how this control behaves in its row, and only
+	// its bar can have that say (Decision 22, corrected): the five bars this
+	// sits in put different things beside it, and a shrink hint that travelled
+	// with the component would be a hint about rows it has never seen. The one
+	// that gave the trouble is a floor — `min-w-24` on Traces and Sessions,
+	// which says both *you may be narrower than your label* and *not so narrow
+	// that there is no label left*.
+	let {
+		range,
+		onchange,
+		class: extra
+	}: { range: Range; onchange: (next: Range) => void; class?: string } = $props();
 
 	const zone = getLocalTimeZone();
 
@@ -88,21 +99,25 @@
 		'justify-center rounded-md transition-colors duration-100';
 </script>
 
-<!-- `min-w-0` on the root and `max-w-full` on the trigger are what keep a long
-     label inside its own box on a narrow bar (spec 027 #22). Both are needed:
-     the root is a flex item, whose automatic minimum size is otherwise the
-     whole label, because `truncate` is `white-space: nowrap` and nowrap text
-     has no smaller size to fall back to; and a `<button>` sizes `width: auto`
-     to fit its content rather than to its container, so only a maximum makes
-     it obey the room it was given. Then the span truncates, and the full
-     window stays in the trigger's accessible name. -->
+<!-- `max-w-full` on the trigger is half of what keeps a long label inside its
+     own box on a narrow bar (spec 027 #22); the other half is the minimum a
+     bar sets through `class`. Both are needed, and neither works alone: the
+     root is a flex item whose automatic minimum size is otherwise the whole
+     label, because `truncate` is `white-space: nowrap` and nowrap text has no
+     smaller size to fall back to — so any explicit minimum, floor included, is
+     also the permission to be narrower than the label; and a `<button>` sizes
+     `width: auto` to fit its content rather than its container, so only a
+     maximum makes it obey the room it was given. With both, the span truncates
+     and the whole window stays in the trigger's accessible name. Carrying
+     `max-w-full` unconditionally is safe where no bar set a minimum: there the
+     root is as wide as the button wanted, and 100% of that is the button. -->
 <DateRangePicker.Root
 	bind:open
 	{value}
 	onValueChange={pick}
 	weekdayFormat="short"
 	numberOfMonths={1}
-	class="min-w-0"
+	class={extra}
 >
 	<DateRangePicker.Trigger>
 		{#snippet child({ props })}

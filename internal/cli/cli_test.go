@@ -502,6 +502,9 @@ func TestExitCodes(t *testing.T) {
 		// says which unit is missing and what the value is in hours, because
 		// "takes a duration (1h, 30m)" leaves both to the reader.
 		{"a day unit", []string{"scores", "trend", "--since", "30d"}, ExitUsage, "--since has no day unit: 30d is 720h"},
+		// The number is there to be retyped, so it is never an exponent
+		// (spec 025 #25, and #26's own review).
+		{"a day unit too big for %g", []string{"scores", "trend", "--since", "100000d"}, ExitUsage, "--since has no day unit: 100000d is 2400000h"},
 		{"nothing found", []string{"traces", "last"}, ExitFailure, "no trace matches"},
 		{"no such trace", []string{"traces", "show", traceHex(9)}, ExitFailure, "not found"},
 		{"a listing that works", []string{"traces", "ls"}, ExitOK, ""},
