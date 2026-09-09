@@ -556,7 +556,7 @@ func register(server *mcp.Server, api API) {
 			"A trace with no release is not a release and one with no name is not a name. " +
 			"Does NOT list users, sessions, versions or tags — those are unbounded or have listings of their own.",
 		InputSchema: object(map[string]*jsonschema.Schema{
-			"from": timestamp("Only traces at or after this RFC 3339 instant. Default: 30 days ago."),
+			"from": timestamp("Only traces at or after this RFC 3339 instant. Default: the oldest hour the rollup holds, which is as far back as this endpoint looks."),
 			"to":   timestamp("Only traces strictly before this RFC 3339 instant. Default: now."),
 		}),
 		OutputSchema: object(map[string]*jsonschema.Schema{

@@ -163,6 +163,12 @@ one list spelled the way `tag` is spelled, and answering it with the traces of
 `a` alone would be a listing narrower than the one that was asked for. One
 list, one parameter.
 
+A list carries **at most 100 items**; beyond that the request is a `400`
+(`environment: at most 100 values in a list`). That is the same hundred
+[`/facets`](#filter-values) offers per column, so it is not a limit the
+interface can reach — and out of range is an error rather than a silent
+truncation, exactly as it is for `limit`.
+
 A value that **contains a comma** is not expressible through these parameters.
 An environment, a release or a trace name is an identifier, and an identifier
 with a comma in it is a choice its owner made against every tool that will
@@ -787,19 +793,37 @@ list, and what saves a client guessing at a value it could have read.
 The counts are the point as much as the values are: `prod: 1` beside
 `production: 4656` is a typo, and nothing but the count says so.
 
-`from` and `to` are the statistics' own bounds — RFC 3339, half-open — and
-default to **the last 30 days**, which is the listing's own default window. The
-range is the *only* thing this endpoint takes: the counts do not respect the
-other filters, so the list does not move as boxes are ticked. An unknown
+`from` and `to` are the statistics' own bounds — RFC 3339, half-open. `to`
+defaults to now. `from` defaults to **the oldest hour the rollup holds**, so
+with no range at all the answer covers as much history as
+[`stats_retention_days`](retention.md) keeps — which is what the listing covers
+when its own range is unset. On a project nothing has rolled yet there is no
+floor and the answer is all of history.
+
+The `from` in the answer is the range that was actually covered, not the one
+that was asked for: with no `from` given it reads back as the rollup's oldest
+hour rather than the beginning of time.
+
+That floor is also a ceiling on how far back the endpoint looks: unlike
+`/stats`, it does **not** scan the raw traces for hours the rollup no longer
+holds. Everywhere else that scan answers a question about a specific window; a
+list of values to pick from is not worth an unbounded pass over `traces`, and
+the values it would add are the ones outside the window this install chose to
+keep.
+
+The range is the *only* thing this endpoint takes: the counts do not respect
+the other filters, so the list does not move as boxes are ticked. An unknown
 parameter, or one given without a value, is a `400`; so is a window whose
-`from` is not before its `to`, which is what `?to=` alone in the past makes of
-the default — an empty answer there would be indistinguishable from an empty
-project.
+`from` is not before its `to`.
 
 Values are sorted by count descending and then by value ascending, and each
 column carries at most **100** of them; `omitted` says how many were left out,
 rarest first. A trace with no release is not a release, and a trace with no
-name is not a name — neither is a value anything can be filtered by.
+name is not a name — neither is a value anything can be filtered by. For the
+same reason the list leaves out a value that the filter could not be *given*: a
+value containing a comma, or one with space at either end, cannot be spelled in
+the list form, so offering it would be offering a filter that does not work.
+Those traces are still reachable through `q=`.
 
 The numbers come from the same seam as the statistics, so a range behind the
 watermark is answered from the rollup and outlives the traces it summarizes.

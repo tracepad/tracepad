@@ -461,11 +461,13 @@ says so.
 
 `--since` and `--until` are the window, spelled as everywhere else — a Go
 duration or an RFC 3339 instant, and there is no day unit, so a week is `168h`.
-Given neither, the endpoint answers for **the last 30 days**, which is the
-listing's own default window — so `--until` alone, naming an instant more than
-thirty days back, is refused rather than answered with nothing. A column with
-nothing in it says so instead of printing an empty table, and a column the
-100-value cap truncated says how many it left out.
+Given neither, the endpoint answers from **the oldest hour it has summaries
+for** up to now — as far back as `stats_retention_days` keeps, and no further:
+it does not read the raw traces for hours the summaries no longer cover. A
+column with nothing in it says so instead of printing an empty table, and a
+column the 100-value cap truncated says how many it left out. Values that
+cannot be spelled as a filter — one with a comma in it, one padded with spaces
+— are left out of the list, since ticking them could not work.
 
 ### `datasets`, `runs`, `score-configs`
 

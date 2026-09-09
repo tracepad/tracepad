@@ -64,6 +64,14 @@ export class FacetValues {
 	async #read(window: { from?: string; to?: string }, key: string, signal: AbortSignal) {
 		this.loading = true;
 		this.failure = null;
+		// Every read starts from nothing, not only the first (spec 027 #21).
+		// Moving the range with the panel open used to leave the previous
+		// window's values and counts on screen until the answer landed, which
+		// is not "while loading, the checked values render alone" (#6) — and a
+		// count for a range that is no longer on screen is worse than no count
+		// at all, because there is nothing to say it is the wrong one.
+		this.values = EMPTY;
+		this.omitted = NONE;
 		try {
 			const answer = await api.getFacets(window, signal);
 			if (signal.aborted) return;

@@ -255,6 +255,19 @@ func filterList(values url.Values, name string) ([]string, error) {
 		seen[item] = true
 		list = append(list, item)
 	}
+	// A list longer than this is a `400`, not a `500` (spec 027 #20). Each
+	// item becomes one bound parameter, and SQLite's limit on those is a few
+	// tens of thousands: without the cap a long enough list reached the
+	// driver and came back as `too many SQL variables`, which is an internal
+	// error answering a malformed request. The number is `facetCap`: the
+	// endpoint that fills these boxes in never offers more than a hundred
+	// values, so a longer list is not something the interface can produce.
+	// Out of range is an error rather than a silent truncation for the reason
+	// `?limit=5000` is (#18): a client reasoning about a filter it will not
+	// get should be told.
+	if len(list) > facetCap {
+		return nil, fmt.Errorf("%s: at most %d values in a list", name, facetCap)
+	}
 	return list, nil
 }
 

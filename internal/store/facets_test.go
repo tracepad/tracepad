@@ -447,3 +447,26 @@ func TestMatchAnyRendersOneConditionPerShape(t *testing.T) {
 		})
 	}
 }
+
+// Which values a facet list may carry (spec 027 #19): only the ones the filter
+// can be given. The list form is comma-separated and its items are trimmed, so
+// offering a value with a comma or with space at either end would be offering
+// a filter that does not work.
+func TestOnlyExpressibleValuesAreOffered(t *testing.T) {
+	for _, tc := range []struct {
+		value string
+		want  bool
+	}{
+		{"production", true},
+		{"", false},
+		{"search,web", false},
+		{" padded", false},
+		{"padded ", false},
+		{"two words", true},
+		{"a-b_c.d/e", true},
+	} {
+		if got := expressible(tc.value); got != tc.want {
+			t.Errorf("expressible(%q) = %v, want %v", tc.value, got, tc.want)
+		}
+	}
+}

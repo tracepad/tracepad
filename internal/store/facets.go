@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 )
 
 // The facets (spec 027): the distinct values of `environment`, `release` and
@@ -122,6 +123,21 @@ func (s *Store) FacetTail(projectID string, from, to int64, yield func(FacetRow)
 // halves' `WHERE` clauses already do — belt and braces for `environment`,
 // whose column is `NOT NULL DEFAULT 'default'` and so can only be empty if a
 // client sent an empty string.
+// expressible reports whether a value can be asked for through the filter the
+// facets exist to fill in (spec 027 #19).
+//
+// The list form is comma-separated and its items are trimmed, so a value with
+// a comma in it, or with space at either end, cannot be spelled in a URL —
+// `docs/api.md` has said so since #1. Offering one as a checkbox would be
+// offering a filter that does not work: ticking `search,web` writes
+// `?name=search,web`, the server reads two names, the listing comes back
+// wrong, and the box stays ticked over it. A trace name is free text, so this
+// is reachable rather than theoretical. The empty string is out for the reason
+// it always was: it is not a value anyone can pick.
+func expressible(value string) bool {
+	return value != "" && value == strings.TrimSpace(value) && !strings.Contains(value, ",")
+}
+
 func scanFacet(rows *sql.Rows, column string, yield func(FacetRow)) error {
 	defer rows.Close()
 	for rows.Next() {
@@ -132,7 +148,7 @@ func scanFacet(rows *sql.Rows, column string, yield func(FacetRow)) error {
 		if err := rows.Scan(&value, &count); err != nil {
 			return fmt.Errorf("scan a %s facet row: %w", column, err)
 		}
-		if value.String == "" {
+		if !expressible(value.String) {
 			continue
 		}
 		yield(FacetRow{Column: column, Value: value.String, Count: count})

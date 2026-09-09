@@ -40,8 +40,8 @@ func (h *harness) facets(t *testing.T, query string) facetsBody {
 	return decodeJSON[facetsBody](t, rec)
 }
 
-// facetRange is a query string covering the seeded hour, so the endpoint's own
-// 30-day default cannot decide what a test sees.
+// facetRange is a query string covering the seeded hour, so that a test says
+// which window it is asking about rather than leaning on the default.
 func facetRange(hour int64) string {
 	from := time.Unix(hour, 0).UTC().Format(time.RFC3339)
 	to := time.Unix(hour+3600, 0).UTC().Format(time.RFC3339)
@@ -202,6 +202,81 @@ func TestANewEnvironmentAppearsWithoutAPass(t *testing.T) {
 	}
 }
 
+// What "no range" means (spec 027 #18): everything the rollup holds, not the
+// last thirty days. The listing these boxes filter says *Any time*, so a list
+// covering a month sat beside a table covering all of it, and an environment
+// last seen forty days ago was in the rows and not in the panel.
+func TestFacetsWithNoRangeReachBackAsFarAsTheRollupHolds(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	// The fixture hour is months before now, which is exactly the case the
+	// thirty-day default used to answer with nothing.
+	h.seedFacetCorpus(t, statsHour)
+
+	body := h.facets(t, "")
+	if got := values(body.Environment); !equal(got, []string{"production:3", "prod:1", "staging:1"}) {
+		t.Errorf("environments = %v over a corpus older than thirty days", got)
+	}
+}
+
+// And what it does not mean: a live scan into history the rollup no longer
+// holds. This endpoint's one exception to spec 013 #13 (#18) — everywhere else
+// that rule answers the hours past the window from the raw rows, and here that
+// scan would be the whole table, unbounded, to lengthen a list of values to
+// tick.
+func TestFacetsDoNotScanBelowTheRollupFloor(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	h.seedFacetCorpus(t, statsHour)
+	h.rollTheCorpus(t, time.Unix(statsHour+2*3600, 0))
+
+	// A raw trace older than every rolled hour: seeded after the pass, so the
+	// rollup's floor stays where it is and this hour is only in `traces`.
+	h.seedFacetHour(t, statsHour-5*3600, 8, "chat", "archived", "2026.8.1")
+
+	body := h.facets(t, "")
+	for _, one := range body.Environment {
+		if one.Value == "archived" {
+			t.Errorf("environments = %v; the answer reached below the rollup floor",
+				values(body.Environment))
+		}
+	}
+	// The rolled hours are still all there — the floor bounds the answer, it
+	// does not shorten it.
+	if got := values(body.Environment); !equal(got, []string{"production:3", "prod:1", "staging:1"}) {
+		t.Errorf("environments = %v", got)
+	}
+
+	// And the answer says which range it covered, not which one was asked
+	// for: a list claiming all of history while it holds what the rollup
+	// holds is the claim the counts exist to make checkable.
+	if want := time.Unix(statsHour, 0).UTC().Format(time.RFC3339); body.From != want {
+		t.Errorf("from = %q, want the rollup's floor %q", body.From, want)
+	}
+}
+
+// A value the filter cannot be given is not offered (spec 027 #19). A trace
+// name is free text, so this is reachable rather than theoretical: ticking
+// `search,web` would write `?name=search,web`, the server would read two
+// names, and the listing would come back wrong under a box that stayed ticked.
+func TestFacetsOmitValuesTheFilterCannotExpress(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	h.seedFacetHour(t, statsHour, 1, "search,web", "production", "2026.8.30")
+	h.seedFacetHour(t, statsHour, 2, " padded ", "production", "2026.8.30")
+	h.seedFacetHour(t, statsHour, 3, "chat", "production", "2026.8.30")
+
+	// Both halves of the seam have to agree: the live tail first, then the
+	// same hour out of the rollup.
+	live := h.facets(t, facetRange(statsHour))
+	if got := values(live.Name); !equal(got, []string{"chat:1"}) {
+		t.Errorf("names from the live tail = %v", got)
+	}
+
+	h.rollTheCorpus(t, time.Unix(statsHour+2*3600, 0))
+	rolled := h.facets(t, facetRange(statsHour))
+	if got := values(rolled.Name); !equal(got, []string{"chat:1"}) {
+		t.Errorf("names from the rollup = %v", got)
+	}
+}
+
 // The cap, and the honesty about it (spec 027 #2): a project that emits a
 // release string per commit gets the busiest hundred and a number for the rest.
 func TestFacetsAreCappedAndSayHowMany(t *testing.T) {
@@ -241,21 +316,28 @@ func TestFacetsParameterValidation(t *testing.T) {
 	expectError(t, h.get(t, "/api/v1/facets?from=yesterday"), 400, "from")
 
 	// An inverted window is a broken question, and three empty lists with a
-	// `200` would be a well-formed answer to it (spec 027 #13). It is
-	// reachable by accident: `?to=` alone, some instant in the past, sits
-	// before the default `from`.
+	// `200` would be a well-formed answer to it (spec 027 #13).
 	expectError(t, h.get(t,
 		"/api/v1/facets?from=2026-09-01T00:00:00Z&to=2026-08-01T00:00:00Z"), 400,
 		"from must be before to")
-	expectError(t, h.get(t, "/api/v1/facets?to=2020-01-01T00:00:00Z"), 400,
-		"from must be before to")
 
-	// With no range at all it answers the last 30 days, which for a fixture
-	// dated in the past is nothing at all — and nothing is an empty list,
-	// never a failure.
+	// `?to=` alone is *not* that question any more (#18): `from` starts at the
+	// beginning of time, floored at the oldest hour the rollup holds, so a
+	// past `to` names a real window — the one ending there — and an empty
+	// answer to it is the truth rather than a shrug.
+	past := h.facets(t, "?to=2020-01-01T00:00:00Z")
+	if len(past.Environment) != 0 {
+		t.Errorf("a window ending in 2020 answered %v", values(past.Environment))
+	}
+
+	// With no range at all it answers everything the rollup holds, and says
+	// which window that was.
 	body := h.facets(t, "")
 	if body.From == "" || body.To == "" {
 		t.Error("the default range is not reported")
+	}
+	if len(body.Environment) == 0 {
+		t.Error("the default range answered nothing over a seeded corpus")
 	}
 }
 
@@ -268,11 +350,29 @@ func TestARepeatedListParameterIsRefused(t *testing.T) {
 
 	expectError(t, h.get(t, "/api/v1/traces?environment=production&environment=staging"),
 		400, "pass one comma-separated list")
+	// And a list longer than the cap is refused by the endpoint too, rather
+	// than reaching the driver and coming back as `too many SQL variables`
+	// (#20).
+	expectError(t, h.get(t, "/api/v1/traces?environment="+listOf(facetCap+1)),
+		400, "at most 100 values in a list")
 
 	// And `tag`, which means something else by the same spelling, is
 	// untouched: two tags are an AND.
 	expectStatus(t, h.get(t, "/api/v1/traces?tag=a&tag=b"), 200)
 }
+
+// listItems and listOf build a list of n distinct values, and the query string
+// spelling it. Long lists are the point: each item is one bound parameter, and
+// past SQLite's limit on those an uncapped list came back a `500` (#20).
+func listItems(n int) []string {
+	items := make([]string, n)
+	for i := range items {
+		items[i] = fmt.Sprintf("e%d", i)
+	}
+	return items
+}
+
+func listOf(n int) string { return strings.Join(listItems(n), ",") }
 
 // The parsing itself, at the one place every endpoint reaches it through.
 func TestFilterListParsing(t *testing.T) {
@@ -291,6 +391,9 @@ func TestFilterListParsing(t *testing.T) {
 		{"a trailing comma", "environment=a,", nil, "empty item in list"},
 		{"whitespace as an item", "environment=a,%20", nil, "empty item in list"},
 		{"repeated", "environment=a&environment=b", nil, "pass one comma-separated list"},
+		{"at the cap", "environment=" + listOf(facetCap), listItems(facetCap), ""},
+		{"over the cap", "environment=" + listOf(facetCap+1), nil,
+			"at most 100 values in a list"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			values, err := url.ParseQuery(tc.query)
