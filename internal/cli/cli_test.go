@@ -498,6 +498,10 @@ func TestExitCodes(t *testing.T) {
 		{"a missing argument", []string{"traces", "show"}, ExitUsage, "needs 1 argument"},
 		{"a limit out of range", []string{"traces", "ls", "--limit", "5000"}, ExitUsage, "--limit must be"},
 		{"an unparseable --since", []string{"traces", "ls", "--since", "yesterday"}, ExitUsage, "--since takes"},
+		// The unit the synopsis used to offer (spec 025 #26). The refusal
+		// says which unit is missing and what the value is in hours, because
+		// "takes a duration (1h, 30m)" leaves both to the reader.
+		{"a day unit", []string{"scores", "trend", "--since", "30d"}, ExitUsage, "--since has no day unit: 30d is 720h"},
 		{"nothing found", []string{"traces", "last"}, ExitFailure, "no trace matches"},
 		{"no such trace", []string{"traces", "show", traceHex(9)}, ExitFailure, "not found"},
 		{"a listing that works", []string{"traces", "ls"}, ExitOK, ""},
@@ -511,6 +515,30 @@ func TestExitCodes(t *testing.T) {
 				t.Errorf("stderr = %q, want it to mention %q", got.stderr, tc.says)
 			}
 		})
+	}
+}
+
+// TestTheSynopsisSpellsWindowsTheParserTakes: the synopsis is where these
+// flags are learned, and `scores trend [--since 30d]` offered a unit Go's
+// duration parser does not have (spec 025 #26) — an example copied straight
+// out of the help text exited 2. So every window the help text spells goes
+// through the parser that will read it.
+func TestTheSynopsisSpellsWindowsTheParserTakes(t *testing.T) {
+	// `T` and `<timestamp>` are the placeholders for an instant; anything
+	// else after these two flags is a literal somebody will type.
+	windows := regexp.MustCompile(`--(?:since|until)[ =]([^\] \n]+)`).FindAllStringSubmatch(Usage, -1)
+	if len(windows) == 0 {
+		t.Fatal("no --since or --until in the synopsis: the pattern has gone stale")
+	}
+	r := &run{opt: Options{Now: time.Now}}
+	for _, found := range windows {
+		value := found[1]
+		if value == "T" {
+			continue
+		}
+		if _, err := r.instant("--since", value); err != nil {
+			t.Errorf("the synopsis spells %q, which the parser refuses: %v", value, err)
+		}
 	}
 }
 

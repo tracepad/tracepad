@@ -174,7 +174,7 @@ const Usage = `Client commands (they talk to a running server over HTTP):
                         [--id ID]
   tracepad scores rm    <score-id>
   tracepad scores trend [--name N] [--group-by hour|day|environment|release|model]
-                        [--since 30d] [--until T] [--env E] [--limit N]
+                        [--since 168h] [--until T] [--env E] [--limit N]
   tracepad prompts ls   [--limit N] [--cursor C]
   tracepad prompts get  <name> [--label L | --version N]
   tracepad prompts push <name> --file prompt.json [--label L] [--message M]
@@ -526,6 +526,16 @@ func (r *run) instant(flag, value string) (string, error) {
 		// milliseconds apart (spec 019 #3), which is where a truncated
 		// bound stops being harmless.
 		return at.UTC().Format(time.RFC3339Nano), nil
+	}
+	// `30d` is what somebody reaching for a month types first, and Go's
+	// duration units stop at the hour (spec 025 #26). The refusal names the
+	// unit that does not exist and does the arithmetic, because listing the
+	// units again leaves the reader to notice which one is missing from the
+	// list and then to multiply.
+	if days, found := strings.CutSuffix(value, "d"); found {
+		if count, err := strconv.ParseFloat(days, 64); err == nil && count > 0 {
+			return "", usageErrorf("%s has no day unit: %s is %gh", flag, value, count*24)
+		}
 	}
 	return "", usageErrorf("%s takes a duration (1h, 30m) or an RFC 3339 timestamp, got %q", flag, value)
 }

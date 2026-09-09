@@ -316,7 +316,7 @@ to type: a score is one row that `add --id` puts straight back.
 
 ```sh
 tracepad scores trend                                    # every name, by day
-tracepad scores trend --name hallucination --since 30d
+tracepad scores trend --name hallucination --since 168h
 tracepad scores trend --name hallucination --group-by release
 tracepad scores trend --group-by model --env production
 ```

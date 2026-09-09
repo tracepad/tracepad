@@ -183,7 +183,7 @@ groupings.
 
 ```sh
 tracepad scores trend                                    # every name, by day
-tracepad scores trend --name hallucination --since 30d   # one name
+tracepad scores trend --name hallucination --since 168h  # one name
 tracepad scores trend --name hallucination --group-by release
 tracepad scores trend --group-by model --env production
 tracepad scores trend --limit 200                        # past the first fifty
