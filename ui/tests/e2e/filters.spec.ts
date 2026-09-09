@@ -92,6 +92,30 @@ async function deliver(spans: Span[], into?: string) {
 	if (!response.ok) throw new Error(`ingest: ${response.status} ${await response.text()}`);
 }
 
+/**
+ * Waits until a delivered trace is readable, because delivery is not the same
+ * event: the export returns as soon as the batch is accepted, and the writer
+ * commits it after. Polling the listing rather than sleeping keeps the wait
+ * honest — and `/facets`' live tail reads the same rows, so a trace the
+ * listing can see is a trace the panel can see.
+ */
+async function readable(key: string, environment: string) {
+	const { baseURL } = state();
+	await expect
+		.poll(
+			async () => {
+				const response = await fetch(
+					`${baseURL}/api/v1/traces?environment=${environment}&limit=1`,
+					{ headers: { Authorization: `Bearer ${key}` } }
+				);
+				if (!response.ok) return -1;
+				return ((await response.json()) as { traces: unknown[] }).traces.length;
+			},
+			{ timeout: 15_000, message: `the ${environment} trace never became readable` }
+		)
+		.toBe(1);
+}
+
 const id = (prefix: string, n: number) => `${prefix}${n}`.padEnd(32, '0');
 const span = (prefix: string, n: number) => `${prefix}${n}`.padEnd(16, '0');
 
@@ -259,6 +283,7 @@ test('an environment first seen after the panel closed is on the list when it re
 		[{ trace: id('f', 1), span: span('f', 1), at: HOUR, name: 'chat', environment: 'production' }],
 		fresh.key
 	);
+	await readable(fresh.key, 'production');
 	await signIn(page, fresh.key);
 
 	await openPanel(page);
@@ -280,6 +305,11 @@ test('an environment first seen after the panel closed is on the list when it re
 		],
 		fresh.key
 	);
+	// The point of the case is what the *reopening* reads, so the trace has to
+	// be readable before the panel opens again: a panel that opened too early
+	// would read a list without `canary` and — correctly — not read it again
+	// until the next opening.
+	await readable(fresh.key, 'canary');
 
 	await openPanel(page);
 	await expect(box(page, 'Environment', 'canary')).toBeVisible();
