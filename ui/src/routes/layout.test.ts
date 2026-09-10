@@ -5,9 +5,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // `/login` with where they were going, and anybody signed in gets the shell.
 
 const bootstrap = vi.fn();
+const needsSetup = vi.fn();
 
 vi.mock('$app/navigation', () => ({ goto: vi.fn(), replaceState: vi.fn() }));
-vi.mock('$lib/session', () => ({ bootstrap: () => bootstrap() }));
+vi.mock('$lib/session', () => ({ bootstrap: () => bootstrap(), needsSetup: () => needsSetup() }));
 vi.mock('$lib/theme.svelte', () => ({ theme: { restore: vi.fn() } }));
 
 /**
@@ -18,6 +19,9 @@ vi.mock('$lib/theme.svelte', () => ({ theme: { restore: vi.fn() } }));
 async function guard(signedIn: boolean, setupRequired: boolean) {
 	vi.resetModules();
 	bootstrap.mockResolvedValue({ setupRequired });
+	// The server goes on saying whatever it said at boot unless a test moves
+	// it, which is what the "an owner appeared" case does.
+	needsSetup.mockResolvedValue(setupRequired);
 	const { auth } = await import('$lib/auth.svelte');
 	if (signedIn) {
 		auth.adopt({
@@ -46,6 +50,7 @@ async function redirectOf(run: Promise<unknown>): Promise<string> {
 
 beforeEach(() => {
 	bootstrap.mockReset();
+	needsSetup.mockReset();
 });
 
 describe('a server with no owner yet', () => {
@@ -96,6 +101,38 @@ describe('a session', () => {
 		const load = await guard(true, true);
 
 		await expect(load('/traces')).resolves.toBeUndefined();
+	});
+});
+
+// The trap this used to be (found in review of PR #54): the boot-time answer
+// was trusted forever, so somebody who set the server up and then signed out
+// was sent to `/setup` — whose only way onwards is `/login`, which sent them
+// straight back. Nothing but a reload escaped it.
+describe('a setup flag that has gone stale', () => {
+	it('is re-asked, and lets a signed-out visitor reach the login form', async () => {
+		const load = await guard(false, true);
+		// Somebody used the setup screen — in this tab or in another one.
+		needsSetup.mockResolvedValue(false);
+
+		await expect(load('/login')).resolves.toBeUndefined();
+		expect(await redirectOf(load('/traces'))).toBe('/login?next=%2Ftraces');
+	});
+
+	it('still sends everybody to setup while the server really has no owner', async () => {
+		const load = await guard(false, true);
+
+		expect(await redirectOf(load('/traces'))).toBe('/setup');
+	});
+
+	// Once the answer is `false` it is settled: a question asked on every
+	// guarded navigation forever would be a request per screen.
+	it('stops asking once an owner exists', async () => {
+		const load = await guard(false, false);
+
+		await load('/login');
+		await load('/login');
+
+		expect(needsSetup).not.toHaveBeenCalled();
 	});
 });
 

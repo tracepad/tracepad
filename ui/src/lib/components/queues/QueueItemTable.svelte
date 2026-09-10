@@ -3,6 +3,7 @@
 	import Button from '$lib/components/Button.svelte';
 	import { timestamp } from '$lib/format';
 	import { modified, selecting } from '$lib/peek';
+	import { project } from '$lib/project.svelte';
 
 	// A queue's items in `seq` order (spec 024 #11): what is done, by whom,
 	// what was skipped and why. The row opens the trace it points at, because
@@ -106,13 +107,18 @@
 									Reopen
 								</Button>
 							{/if}
-							<Button
-								variant="ghost"
-								busy={busyID === row.id}
-								onclick={(event) => (event.stopPropagation(), onremove(row))}
-							>
-								Remove
-							</Button>
+							<!-- Working an item is a viewer's job and taking it off
+							     the list is not: removing one is queue management,
+							     which is an editor's (spec 028 #15). -->
+							{#if project.editor}
+								<Button
+									variant="ghost"
+									busy={busyID === row.id}
+									onclick={(event) => (event.stopPropagation(), onremove(row))}
+								>
+									Remove
+								</Button>
+							{/if}
 						</div>
 					</td>
 				</tr>

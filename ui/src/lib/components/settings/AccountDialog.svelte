@@ -101,7 +101,10 @@
 		if (owner) return;
 		const had = new Map(target.projects.map((one) => [one.id, one.role]));
 		for (const project of projects) {
-			const before = had.get(project.id);
+			// A project this account is not in reads as `''`, the same as "no
+			// access" does, so that the two compare equal: without it every
+			// save sent a `DELETE` for every project on the server.
+			const before = had.get(project.id) ?? '';
 			const after = roles[project.id] || '';
 			if (before === after) continue;
 			if (after === '') await api.deleteMembership(target.id, project.id);

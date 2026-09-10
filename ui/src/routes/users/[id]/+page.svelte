@@ -185,10 +185,15 @@
 		{#if loading}<LoaderCircle class="size-3.5 animate-spin" />{/if}
 	{/snippet}
 	{#snippet actions()}
-		<Button onclick={() => (erasing = !erasing)} aria-expanded={erasing}>
-			<Trash2 class="size-4" />
-			Erase data
-		</Button>
+		<!-- The same card Settings carries, and the same rule: erasing a
+		     user's data is an editor's route, so a viewer reads this page and
+		     is offered nothing on it (spec 028 #15). -->
+		{#if project.editor}
+			<Button onclick={() => (erasing = !erasing)} aria-expanded={erasing}>
+				<Trash2 class="size-4" />
+				Erase data
+			</Button>
+		{/if}
 	{/snippet}
 </PageHeader>
 

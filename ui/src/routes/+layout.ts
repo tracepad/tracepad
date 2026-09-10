@@ -1,6 +1,6 @@
 import { redirect } from '@sveltejs/kit';
 import { auth, LOGIN_ROUTE, OUTSIDE_THE_SHELL, SETUP_ROUTE } from '$lib/auth.svelte';
-import { bootstrap } from '$lib/session';
+import { bootstrap, needsSetup } from '$lib/session';
 import { theme } from '$lib/theme.svelte';
 import type { LayoutLoad } from './$types';
 
@@ -19,9 +19,12 @@ let setupRequired = false;
  * server with no owner sends everybody to `/setup`, nobody signed in goes to
  * `/login` with where they were going, and anything else renders the shell.
  *
- * `setupRequired` stops mattering the moment somebody is signed in, which is
- * how setting up an owner leaves the screen it happened on: setup signs the
- * new owner in, so the next navigation is a session and not a redirect back.
+ * The flag is re-asked rather than trusted while it is `true`. A boot-time
+ * "this server has no owner" stops being true the moment somebody uses the
+ * setup screen, and the tab that read it can be a different tab: trusting it
+ * sent a person who had just signed out to `/setup`, whose only way onwards
+ * is `/login`, which sent them back — a loop nothing but a reload escaped.
+ * Once the answer is `false` it is never asked again.
  */
 export const load: LayoutLoad = async ({ url }) => {
 	if (!started) {
@@ -31,6 +34,7 @@ export const load: LayoutLoad = async ({ url }) => {
 	}
 	if (auth.signedIn) return;
 	const path = url.pathname;
+	if (setupRequired) setupRequired = await needsSetup();
 	if (setupRequired) {
 		if (path !== SETUP_ROUTE) redirect(307, SETUP_ROUTE);
 		return;

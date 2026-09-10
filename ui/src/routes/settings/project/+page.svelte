@@ -51,7 +51,15 @@
 	}
 </script>
 
-{#if failure}
+{#if !id}
+	<!-- An owner whose last project has just been soft-deleted, or a member
+	     whose membership was taken away under an open tab: there is no project
+	     for this tab to be about, and a spinner would say "wait" forever. -->
+	<p class="text-muted max-w-prose text-sm">
+		There is no project on screen. An owner can create one on the Server tab, or give you a role
+		in one that already exists.
+	</p>
+{:else if failure}
 	<p role="alert" class="text-danger text-sm">{failure}</p>
 {:else if current}
 	<ProjectCard {current} mayRename={owner} onchanged={changed} />

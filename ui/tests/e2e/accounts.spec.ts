@@ -254,6 +254,13 @@ test.describe('accounts, from the link the server printed', () => {
 		await page.getByRole('button', { name: 'Save' }).click();
 		await expect(page.getByRole('button', { name: /verdict/ })).toContainText('0.75');
 
+		// A user's page is readable and carries no erasure: the endpoint behind
+		// that button is an editor's, wherever the button is put (#15).
+		await page.goto(`${at.base}/users`);
+		await page.getByRole('link').filter({ hasText: /\w/ }).last().click();
+		await expect(page).toHaveURL(/\/users\/.+/);
+		await expect(page.getByRole('button', { name: 'Erase data' })).toHaveCount(0);
+
 		// And the prompt is readable with nothing on it to press (#15).
 		await page.goto(`${at.base}/prompts/support-answer`);
 		await expect(page.getByRole('heading', { name: 'support-answer' })).toBeVisible();

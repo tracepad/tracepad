@@ -14,18 +14,32 @@ import { project } from '$lib/project.svelte';
 
 /** Asks the server the two questions the guard decides on. */
 export async function bootstrap(): Promise<{ setupRequired: boolean }> {
-	const [setup, me] = await Promise.all([
-		// A server that cannot be reached is not a server that needs setting
-		// up: the login form is where "cannot reach the server" is worth
-		// saying, and it says it on the attempt rather than on the way in.
-		api.getSetup().catch(() => ({ required: false })),
-		api.me().catch(() => null)
-	]);
+	const [required, me] = await Promise.all([needsSetup(), api.me().catch(() => null)]);
 	if (me) {
 		auth.adopt(me);
 		project.restore();
 	}
-	return { setupRequired: setup.required };
+	return { setupRequired: required };
+}
+
+/**
+ * Whether this server still has nobody who can sign in (Decision 9).
+ *
+ * The guard asks again rather than trusting what it learned at boot, because
+ * that answer goes stale the moment somebody uses the setup screen — in this
+ * tab or in another one. Only a server that still has no owner ever pays for
+ * the question; the first `false` ends it for the life of the page.
+ *
+ * A server that cannot be reached is not a server that needs setting up: the
+ * login form is where "cannot reach the server" is worth saying, and it says
+ * it on the attempt rather than on the way in.
+ */
+export async function needsSetup(): Promise<boolean> {
+	try {
+		return (await api.getSetup()).required;
+	} catch {
+		return false;
+	}
 }
 
 /**
