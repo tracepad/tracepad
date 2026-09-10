@@ -253,8 +253,13 @@ count wins whole, and the losers stay in metadata rather than being merged into
 it. An exporter that sends both `gen_ai.usage.input_tokens` and `input_tokens`
 is describing one number twice, and the bare list is closed — ten spellings,
 named above — because a bare word like `input_tokens` is exactly the kind of key
-that collides with an attribute meaning something else. A value that is not a
-number is not a count and stays where it was.
+that collides with an attribute meaning something else. For the same reason the
+ten are read on the **span** only: on the Resource they would describe a whole
+export at once, which no token count does.
+
+A value that is not a number is not a count and stays where it was — and
+neither is `NaN` or an infinity, anywhere the mapping reads a number. They are
+kept as the text they arrived as, in metadata.
 
 Two consequences worth knowing:
 

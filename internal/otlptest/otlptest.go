@@ -709,6 +709,14 @@ func ProbeSpan(keyValues ...string) *tracepb.Span {
 		base, base+ms, attrs...)
 }
 
+// Int and Double are typed attributes for a probe span, which otherwise
+// carries strings alone. A value type is not a detail where the mapping reads
+// numbers: an OTLP double is the only way NaN and the infinities reach the
+// mapper at all (spec 030 #6).
+func Int(key string, value int64) *commonpb.KeyValue { return i64(key, value) }
+
+func Double(key string, value float64) *commonpb.KeyValue { return f64(key, value) }
+
 // Export wraps spans in the resource/scope envelope an exporter would.
 func Export(spans ...*tracepb.Span) []*tracepb.ResourceSpans {
 	return []*tracepb.ResourceSpans{resourceSpans(nil, scope("probe", "0.0.0", spans...))}

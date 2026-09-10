@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -127,6 +128,61 @@ func fixtureBody(t *testing.T, name string) []byte {
 	}
 	t.Fatalf("unknown fixture %q", name)
 	return nil
+}
+
+// A non-finite double on an attribute the mapping reads as a number costs
+// that attribute its column and nothing else (spec 030 #6, found in review of
+// PR #53).
+//
+// The failure this guards is not the one attribute. `usage` and `cost_details`
+// are encoded to JSON inside the ingest transaction, `json.Marshal` refuses
+// NaN, and the refusal fails the write — so one poisoned span used to answer
+// `500` for the whole batch, taking every healthy span in the body with it,
+// and a conforming exporter would retry the same body until it gave up.
+// Asserted at this boundary because that is where the cost was paid.
+func TestIngestSurvivesNonFiniteNumbers(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+
+	const traceID = "00112233445566778899aabbccddeeff" // the probe span's own
+	poisoned := otlptest.ProbeSpan("gen_ai.system", "anthropic")
+	poisoned.Attributes = append(poisoned.Attributes,
+		otlptest.Double("input_tokens", math.NaN()),
+		otlptest.Double("gen_ai.usage.cost", math.Inf(1)),
+		otlptest.Int("output_tokens", 41),
+	)
+	body, err := mapping.EncodeExportRequest(otlptest.Export(poisoned))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rec := h.post(t, "/v1/traces", body)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s; one unusable attribute must not cost the export",
+			rec.Code, rec.Body)
+	}
+
+	observations, err := h.store.Observations(h.project.ID, traceID, store.WithIO)
+	if err != nil || len(observations) != 1 {
+		t.Fatalf("observations = %d, err = %v", len(observations), err)
+	}
+	observation := observations[0]
+	// The count beside it is still a count.
+	if observation.Usage["output_tokens"] != float64(41) {
+		t.Errorf("usage = %v, want the healthy count kept", observation.Usage)
+	}
+	if _, counted := observation.Usage["input_tokens"]; counted {
+		t.Errorf("usage = %v, want NaN refused rather than stored", observation.Usage)
+	}
+	if observation.CostDetails != nil {
+		t.Errorf("cost_details = %v, want an infinite price refused", observation.CostDetails)
+	}
+	// And refused is not dropped: both are in metadata, as the text
+	// `anyValue` kept them as (spec 002 #11).
+	for _, key := range []string{"input_tokens", "gen_ai.usage.cost"} {
+		if observation.Metadata[key] == nil {
+			t.Errorf("metadata = %v, want %q preserved", observation.Metadata, key)
+		}
+	}
 }
 
 // A well-formed export lands as rows, with the trace fields merged out of the

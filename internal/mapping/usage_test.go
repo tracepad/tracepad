@@ -1,6 +1,7 @@
 package mapping_test
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/tracepad/tracepad/internal/mapping"
@@ -140,6 +141,85 @@ func TestBareUsageYieldsToTheTwoConventions(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// NaN and the infinities are not counts (spec 030 #6). `anyValue` keeps a
+// non-finite double as its textual form so that it survives into metadata as
+// text; reading that text back as a number would put a value into `usage` that
+// `json.Marshal` refuses, and the encode happens inside the ingest
+// transaction — so one poisoned attribute would cost the whole export a 500
+// and a retrying exporter would re-send the same body for ever.
+//
+// The hole was never this source's alone: `gen_ai.usage.*` and the cost chain
+// read the same helper, so all three are asserted here.
+func TestUsageRefusesNonFiniteNumbers(t *testing.T) {
+	for _, spelling := range []string{"NaN", "+Inf", "-Inf"} {
+		t.Run(spelling, func(t *testing.T) {
+			observation := mapping.Map(otlptest.SpanWith(
+				"input_tokens", spelling,
+				"gen_ai.usage.output_tokens", spelling,
+				"gen_ai.usage.cost", spelling,
+			)).Observations[0]
+
+			if observation.Usage != nil {
+				t.Errorf("usage = %v, want nothing: %s is not a count", observation.Usage, spelling)
+			}
+			if observation.CostDetails != nil {
+				t.Errorf("cost_details = %v, want nothing: %s is not a price",
+					observation.CostDetails, spelling)
+			}
+			// And it is where an unusable value belongs (spec 002 #11),
+			// not nowhere.
+			for _, key := range []string{"input_tokens", "gen_ai.usage.output_tokens", "gen_ai.usage.cost"} {
+				if observation.Metadata[key] != spelling {
+					t.Errorf("metadata[%q] = %#v, want the refused value preserved",
+						key, observation.Metadata[key])
+				}
+			}
+			// The whole observation has to survive the encoder the
+			// ingest transaction puts it through.
+			if _, err := json.Marshal(observation); err != nil {
+				t.Errorf("the observation does not encode: %v", err)
+			}
+		})
+	}
+}
+
+// A bare token key is read on the span and nowhere else (spec 030 #6). On the
+// Resource it reaches every span of the export, so the merged view would hand
+// each of them the same fabricated usage — and claiming it would take the
+// attribute out of all of their metadata too.
+func TestBareUsageIsASpanFact(t *testing.T) {
+	spans := otlptest.ExportLevels(otlptest.Levels{
+		Resource: []string{"service.name", "counter", "input_tokens", "999"},
+		Spans: [][]string{
+			{"gen_ai.system", "anthropic"},
+			{"gen_ai.system", "anthropic", "input_tokens", "12"},
+		},
+	})
+	observations := mapping.Map(spans).Observations
+	if len(observations) != 2 {
+		t.Fatalf("mapped %d observations, want the two spans", len(observations))
+	}
+
+	// The span that carried none has none, and the resource's attribute is
+	// still visible to it, under the prefix its origin gives it.
+	if observations[0].Usage != nil {
+		t.Errorf("usage = %v on a span that sent no count, want nothing", observations[0].Usage)
+	}
+	if observations[0].Metadata["resource.input_tokens"] != "999" {
+		t.Errorf("metadata = %v, want the resource attribute kept where it arrived",
+			observations[0].Metadata)
+	}
+	// The span that did carry one keeps its own, and the resource's stays
+	// beside it rather than being merged into it.
+	if observations[1].Usage["input_tokens"] != int64(12) {
+		t.Errorf("usage = %v, want the span's own count", observations[1].Usage)
+	}
+	if observations[1].Metadata["resource.input_tokens"] != "999" {
+		t.Errorf("metadata = %v, want the resource attribute kept there too",
+			observations[1].Metadata)
 	}
 }
 
