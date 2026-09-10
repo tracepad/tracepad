@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/svelte';
+import { render, screen, waitFor } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import AccountDialog from './AccountDialog.svelte';
@@ -59,6 +59,10 @@ function open(target: unknown = account()) {
 
 const save = (person: ReturnType<typeof userEvent.setup>) =>
 	person.click(screen.getByRole('button', { name: 'Save' }));
+
+/** Waits until the dialog has finished pulling focus into itself. */
+const settled = () =>
+	waitFor(() => expect(screen.getByRole('dialog').contains(document.activeElement)).toBe(true));
 
 beforeEach(() => {
 	patchAccount.mockClear();
@@ -128,13 +132,24 @@ describe('inviting somebody', () => {
 	it('sends only the projects that were picked', async () => {
 		const { person } = open(null);
 
-		// Pasted rather than typed: in jsdom a keystroke-at-a-time into a bound
-		// field races the dialog's own re-render and arrives half-written. The
-		// Chrome walkthrough types the same field for real.
+		// The dialog moves focus into itself when it opens, and it does it in
+		// an effect — so typing before that has happened types at whatever the
+		// trap is about to take focus from. Waiting for it, and then clicking
+		// the field the way a person reaches one, is what makes the keystrokes
+		// land: without it the address arrived half-written, and under a
+		// parallel run not at all.
+		await settled();
 		await person.click(screen.getByLabelText('Email'));
-		await person.paste('new@example.com');
+		await person.type(screen.getByLabelText('Email'), 'new@example.com');
 		await person.selectOptions(screen.getByLabelText('Role in sandbox'), 'viewer');
-		await person.click(screen.getByRole('button', { name: 'Invite' }));
+
+		// Waited for rather than assumed: the button is disabled until the
+		// email field has something in it, so a click sent the instant after
+		// the typing lands on a dead control and nothing happens — which is
+		// how this test failed once in a parallel run and never alone.
+		const invite = screen.getByRole('button', { name: 'Invite' });
+		await waitFor(() => expect(invite).toBeEnabled());
+		await person.click(invite);
 
 		expect(createAccount).toHaveBeenCalledWith({
 			email: 'new@example.com',
