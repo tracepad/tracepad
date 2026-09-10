@@ -129,14 +129,32 @@ func (s *Store) ListAccounts() ([]*Account, error) {
 	return accounts, rows.Err()
 }
 
-// EnabledOwners counts the owners that can still sign in. A disabled owner
-// counts as no owner (spec 028, edge cases): it is the reason the setup screen
-// comes back on a server whose only owner was switched off, and the reason
-// "the last owner" is about standing rather than about rows.
+// standingOwner is what "an owner" means everywhere it is counted: the flag,
+// switched on, on an account that can actually sign in (spec 028 #22).
+//
+// Both halves of the tail are the same rule. A *disabled* owner is refused at
+// the login, and a *pending* one — invited and never accepted — has no
+// password to be refused against. Counting either would let the invariant this
+// predicate exists for be satisfied by somebody who cannot open the door:
+// promote a second owner, watch them not accept, stand down, and the server
+// has nobody who can run it and prints no setup link because it believes it
+// has an owner.
+const standingOwner = `owner = 1 AND disabled = 0 AND password_hash IS NOT NULL`
+
+// EnabledOwners counts the owners that can sign in today. It is what decides
+// whether the server still needs setting up (Decision 9) and what "the last
+// owner" is measured against (Decision 2).
 func (s *Store) EnabledOwners() (int, error) {
 	var n int
-	err := s.db.QueryRow(`SELECT COUNT(*) FROM accounts WHERE owner = 1 AND disabled = 0`).Scan(&n)
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM accounts WHERE ` + standingOwner).Scan(&n)
 	return n, err
+}
+
+// Standing reports an owner who can sign in — the state the last-owner rule
+// protects. An owner who is disabled or has never accepted an invitation is
+// an owner on paper and nobody at the door.
+func (a *Account) Standing() bool {
+	return a != nil && a.Owner && !a.Disabled && !a.Pending
 }
 
 // Membership is one project an account can reach, with the role it has there.
@@ -441,7 +459,7 @@ func (a *AccountUpdate) apply(tx *sql.Tx) error {
 	// cases).
 	demoted := a.Owner != nil && !*a.Owner
 	switchedOff := a.Disabled != nil && *a.Disabled
-	if account.Owner && !account.Disabled && (demoted || switchedOff) {
+	if account.Standing() && (demoted || switchedOff) {
 		if err := requireAnotherOwner(tx, account.ID); err != nil {
 			return err
 		}
@@ -515,7 +533,7 @@ func (a *AccountDelete) apply(tx *sql.Tx) error {
 		return &Rejection{Kind: RejectInvalid, Message: fmt.Sprintf(
 			"confirm must be the account's email, %q, for this to happen", account.Email)}
 	}
-	if account.Owner && !account.Disabled {
+	if account.Standing() {
 		if err := requireAnotherOwner(tx, account.ID); err != nil {
 			return err
 		}
@@ -832,7 +850,7 @@ var ErrSetupDone = errors.New("this server already has an owner")
 
 func (s *SetupOwner) apply(tx *sql.Tx) error {
 	var owners int
-	if err := tx.QueryRow(`SELECT COUNT(*) FROM accounts WHERE owner = 1 AND disabled = 0`).
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM accounts WHERE ` + standingOwner).
 		Scan(&owners); err != nil {
 		return fmt.Errorf("count owners: %w", err)
 	}
@@ -942,13 +960,14 @@ func txAccount(tx *sql.Tx, query string, args ...any) (*Account, error) {
 func requireAnotherOwner(tx *sql.Tx, exceptID string) error {
 	var others int
 	if err := tx.QueryRow(
-		`SELECT COUNT(*) FROM accounts WHERE owner = 1 AND disabled = 0 AND id <> ?`, exceptID).
+		`SELECT COUNT(*) FROM accounts WHERE `+standingOwner+` AND id <> ?`, exceptID).
 		Scan(&others); err != nil {
 		return fmt.Errorf("count owners: %w", err)
 	}
 	if others == 0 {
-		return &Rejection{Kind: RejectConflict, Message: "this is the last owner; " +
-			"make somebody else an owner first, or this server has nobody who can run it"}
+		return &Rejection{Kind: RejectConflict, Message: "this is the last owner who can sign in; " +
+			"make somebody else an owner — and have them accept the invitation — first, " +
+			"or this server has nobody who can run it"}
 	}
 	return nil
 }

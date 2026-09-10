@@ -27,7 +27,7 @@ CREATE TABLE accounts (
     password_hash BLOB,                             -- NULL until an invite is accepted
     owner         INTEGER NOT NULL DEFAULT 0,
     disabled      INTEGER NOT NULL DEFAULT 0,
-    created_at    INTEGER NOT NULL,                 -- unix ms, like every timestamp here
+    created_at    INTEGER NOT NULL,                 -- unix nanoseconds, like every timestamp here
     last_login_at INTEGER
 ) STRICT;
 

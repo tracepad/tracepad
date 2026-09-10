@@ -213,10 +213,15 @@ Three rules worth knowing before you press something:
   every project. Demoting them leaves none, so they see nothing until they are
   given projects again.
 
-The last enabled owner cannot be demoted, disabled or deleted: `409`. It is the
-one invariant a server needs to never be locked out of itself. A disabled owner
-counts as no owner — a server whose only owner is switched off prints a setup
-link again.
+The last owner **who can sign in** cannot be demoted, disabled or deleted:
+`409`. It is the one invariant a server needs to never be locked out of itself,
+so an owner only counts once they can actually open the door: a disabled owner
+counts as none, and so does one who was invited and has not accepted yet. That
+means you cannot stand down the moment you invite a successor — only once they
+have used their link.
+
+A server with no owner who can sign in prints a setup link again, and that
+setup takes over the existing account if you give it the same email.
 
 ## When every owner's password is lost
 

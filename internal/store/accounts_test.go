@@ -205,6 +205,85 @@ func TestLastOwnerCannotStandDown(t *testing.T) {
 	}
 }
 
+// TestAPendingOwnerIsNoOwner is the other half of Decision 22, and the one
+// that is reachable by ordinary use: an owner invites a second owner, the
+// invitation is never opened, and the first one stands down. Counting the
+// invited account would leave a server nobody can sign in to — and, because
+// it believes it has an owner, one that prints no setup link either.
+func TestAPendingOwnerIsNoOwner(t *testing.T) {
+	f := newAccountFixture(t)
+	founder := f.invite(t, "founder@example.com", true)
+
+	// Invited as an owner and never accepted.
+	now := time.Now().UnixNano()
+	f.submit(t, &AccountCreate{
+		Email: "partner@example.com", Owner: true,
+		TokenID: SessionID("partner"), ExpiresAt: now + int64(7*24*time.Hour), Now: now,
+	})
+	if owners, _ := f.EnabledOwners(); owners != 1 {
+		t.Fatalf("enabled owners = %d, want only the one who can sign in", owners)
+	}
+
+	no, yes := false, true
+	for _, change := range []*AccountUpdate{
+		{AccountID: founder.ID, Owner: &no},
+		{AccountID: founder.ID, Disabled: &yes},
+	} {
+		change.Now = time.Now().UnixNano()
+		err := f.writer.Submit(t.Context(), change)
+		if !rejected(err) || !strings.Contains(err.Error(), "last owner") {
+			t.Fatalf("err = %v, want the pending owner not to count", err)
+		}
+	}
+	if err := f.writer.Submit(t.Context(), &AccountDelete{
+		AccountID: founder.ID, Confirm: founder.Email,
+	}); !rejected(err) || !strings.Contains(err.Error(), "last owner") {
+		t.Fatalf("err = %v, want the pending owner not to count", err)
+	}
+
+	// Once the invitation is accepted the count is two and the founder may
+	// stand down — which is the whole of what "pending" was holding up.
+	f.submit(t, &InviteAccept{
+		SessionSeed: SessionSeed{SessionID: SessionID("partner-session"),
+			ExpiresAt: now + int64(30*24*time.Hour), Now: now},
+		TokenID: SessionID("partner"), NewHash: hashOnce(t),
+	})
+	if owners, _ := f.EnabledOwners(); owners != 2 {
+		t.Fatalf("enabled owners = %d, want both", owners)
+	}
+	f.submit(t, &AccountUpdate{AccountID: founder.ID, Owner: &no, Now: time.Now().UnixNano()})
+}
+
+// TestSetupComesBackForAServerWithNoOwnerWhoCanSignIn: a pending owner must
+// not make the setup screen go away, because the person it was created for
+// cannot open the door either (Decision 22).
+func TestSetupComesBackForAServerWithNoOwnerWhoCanSignIn(t *testing.T) {
+	f := newAccountFixture(t)
+	now := time.Now().UnixNano()
+	f.submit(t, &AccountCreate{
+		Email: "invited@example.com", Owner: true,
+		TokenID: SessionID("invited"), ExpiresAt: now + int64(7*24*time.Hour), Now: now,
+	})
+
+	if owners, _ := f.EnabledOwners(); owners != 0 {
+		t.Fatalf("enabled owners = %d, want the setup link to keep being printed", owners)
+	}
+	// And setup still works: it promotes the row that is already there
+	// rather than colliding with the unique email (Decision 20).
+	setup := &SetupOwner{
+		SessionSeed: SessionSeed{SessionID: SessionID("setup"),
+			ExpiresAt: now + int64(30*24*time.Hour), Now: now},
+		Email: "invited@example.com", Name: "The Founder", Hash: hashOnce(t),
+	}
+	f.submit(t, setup)
+	if setup.Account == nil || !setup.Account.Owner || setup.Account.Pending {
+		t.Fatalf("account = %+v, want an owner who can sign in", setup.Account)
+	}
+	if owners, _ := f.EnabledOwners(); owners != 1 {
+		t.Errorf("enabled owners = %d after the setup", owners)
+	}
+}
+
 // TestOwnerPromotionDropsMemberships: an owner has every project, so the rows
 // that said which ones go (Decision 12) — and demotion leaves none, so the
 // account sees nothing until it is given projects.
