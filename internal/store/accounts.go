@@ -726,6 +726,14 @@ func (p *PasswordChange) apply(tx *sql.Tx) error {
 	if account == nil {
 		return &Rejection{Kind: RejectNotFound, Message: "no such account"}
 	}
+	// Checked before `Verify`, which would otherwise spend its decoy
+	// comparison here — a quarter of a second holding the one writer, on a
+	// path only a signed-in session reaches and a pending account therefore
+	// cannot. The timing this endpoint could leak is nothing: the caller
+	// already knows whose account it is.
+	if account.Pending {
+		return ErrWrongPassword
+	}
 	if !account.Verify(p.Current) {
 		return ErrWrongPassword
 	}

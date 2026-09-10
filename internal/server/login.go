@@ -192,7 +192,15 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to read the account")
 		return
 	}
-	if account == nil || account.Disabled || !account.Verify(request.Password) {
+	// Evaluated before the branch rather than inside it, because `||` is
+	// short-circuiting and skipping the comparison is itself an answer: a
+	// login that returns in a millisecond for an unknown address and in a
+	// quarter of a second for a real one has told you which it was
+	// (Decision 8). `Verify` is nil-safe and spends the comparison against
+	// a decoy when there is no stored hash, so every one of these four
+	// failures costs the same.
+	verified := account.Verify(request.Password)
+	if account == nil || account.Disabled || !verified {
 		s.limiter.failed(email, now)
 		writeError(w, http.StatusUnauthorized, wrongCredentials)
 		return

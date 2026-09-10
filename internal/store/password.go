@@ -1,7 +1,9 @@
 package store
 
 import (
+	"crypto/rand"
 	"fmt"
+	"sync"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -40,13 +42,42 @@ func HashPassword(password string) ([]byte, error) {
 	return bcrypt.GenerateFromPassword([]byte(password), PasswordCost)
 }
 
+// decoy is a hash of a password nobody has, compared against when there is no
+// stored hash to compare against.
+//
+// One 401 with one sentence (Decision 8) is only one answer if it also takes
+// one length of time. `bcrypt` at cost 12 is about a quarter of a second, so a
+// login that skipped it for an unknown email would answer "no account here" in
+// its timing to anyone with a stopwatch — and the throttle does not help,
+// because it counts attempts per email and one attempt is all this needs.
+//
+// Computed once per process, on the first login that needs it, rather than
+// written out as a constant: a literal hash in the source is a thing somebody
+// eventually wonders whether they can log in with.
+var decoy = sync.OnceValue(func() []byte {
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		// Only reachable if the system's randomness is broken, in which
+		// case nothing else here works either. The comparison still costs
+		// what it should, which is all this value is for.
+		raw = []byte("tracepad has no randomness to spare")
+	}
+	hash, err := bcrypt.GenerateFromPassword(raw, PasswordCost)
+	if err != nil {
+		return nil
+	}
+	return hash
+})
+
 // Verify reports whether the password is this account's.
 //
 // An account with no password — invited and not yet accepted — verifies
 // nothing, which is what makes `pending` answer the login with the same 401 as
-// a wrong password (Decision 8).
+// a wrong password (Decision 8). It spends the comparison anyway, against the
+// decoy, so that it answers in the same time as well.
 func (a *Account) Verify(password string) bool {
 	if a == nil || len(a.hash) == 0 {
+		bcrypt.CompareHashAndPassword(decoy(), []byte(password))
 		return false
 	}
 	// Any error is a refusal, mismatch or unreadable hash alike: there is

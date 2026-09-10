@@ -211,6 +211,41 @@ func TestLoginAnswersOneSentenceToEveryFailure(t *testing.T) {
 	}
 }
 
+// TestLoginSpendsTheComparisonWhateverTheAnswer: one sentence for every
+// failure is only one answer if it takes one length of time. `bcrypt` at cost
+// 12 is a quarter of a second, so an unknown address that skipped it would be
+// distinguishable from a real one by a stopwatch — and the throttle counts
+// per email, so one attempt is all that needs (Decision 8).
+//
+// A wall-clock assertion, deliberately loose: what it catches is the
+// difference between running the hash and not running it, which is two orders
+// of magnitude, not the tens of milliseconds a loaded machine adds.
+func TestLoginSpendsTheComparisonWhateverTheAnswer(t *testing.T) {
+	h := newAccountHarness(t)
+	h.owner(t)
+	h.invited(t, "pending@example.com", false)
+
+	// The real comparison, to measure the others against. The decoy is
+	// built on first use, so this also pays for that.
+	known := timeLogin(t, h, "owner@example.com")
+
+	for _, email := range []string{"nobody@example.com", "pending@example.com"} {
+		took := timeLogin(t, h, email)
+		if took < known/4 {
+			t.Errorf("%s answered in %s against %s for an account that exists; "+
+				"the difference is the answer", email, took, known)
+		}
+	}
+}
+
+// timeLogin measures one failed sign-in.
+func timeLogin(t *testing.T, h *harness, email string) time.Duration {
+	t.Helper()
+	start := time.Now()
+	expectError(t, h.login(t, email, "not the password"), http.StatusUnauthorized, wrongCredentials)
+	return time.Since(start)
+}
+
 // TestSessionCookieAttributes: `HttpOnly` is the reason to use a cookie at all
 // — the key in localStorage was readable by any script on the page — and
 // `Secure` follows the request's actual scheme rather than a flag, because the
