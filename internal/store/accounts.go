@@ -390,6 +390,18 @@ func (a *AccountCreate) apply(tx *sql.Tx) error {
 	// and this is the second half of that one rule.
 	if !a.Owner {
 		for _, m := range a.Memberships {
+			// The project is looked up here as well as in the handler,
+			// because between the two a project can be purged: without
+			// this the foreign key fails and a request that deserves a
+			// 404 gets a 500.
+			project, err := projectByID(tx, m.ProjectID)
+			if err != nil {
+				return err
+			}
+			if project == nil {
+				return &Rejection{Kind: RejectNotFound,
+					Message: "no such project: " + m.ProjectID}
+			}
 			if err := putMembership(tx, id, m.ProjectID, m.Role, a.Now); err != nil {
 				return err
 			}
