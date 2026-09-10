@@ -192,6 +192,12 @@ func (s *Server) resolve(w http.ResponseWriter, r *http.Request, rt route) (*cal
 	if !s.scope(w, r, rt, c) {
 		return nil, false
 	}
+	// Last, so that only a request that is actually served extends the
+	// session it was made with. A refused one — wrong origin, wrong role —
+	// has no business writing anything.
+	if c.isSession() {
+		s.slide(w, r, c.session)
+	}
 	return c, true
 }
 
@@ -245,7 +251,6 @@ func (s *Server) identify(w http.ResponseWriter, r *http.Request) (*caller, bool
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return nil, false
 	}
-	s.slide(w, r, found)
 	return &caller{account: account, session: found}, true
 }
 

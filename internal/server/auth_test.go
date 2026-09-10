@@ -317,6 +317,24 @@ func TestSessionSlides(t *testing.T) {
 	if again.ExpiresAt != after.ExpiresAt {
 		t.Error("a session slid twice in one day")
 	}
+
+	// And a request that is refused does not slide: a page on another
+	// origin has no business extending somebody's session.
+	if err := h.writer.Submit(t.Context(), &store.SessionSlide{
+		SessionID: id,
+		ExpiresAt: again.ExpiresAt,
+		Now:       time.Now().Add(-2 * sessionSlideAfter).UnixNano(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rec = h.call(t, "POST", "/api/v1/auth/logout", nil, asSession(who), func(r *http.Request) {
+		r.Header.Set("Origin", "https://evil.example")
+	})
+	expectStatus(t, rec, http.StatusForbidden)
+	refused, _, _ := h.store.SessionByCookie(who.cookie, time.Now().UnixNano())
+	if refused.ExpiresAt != again.ExpiresAt {
+		t.Error("a cross-origin request slid the session it was refused for")
+	}
 }
 
 // TestExpiredCookieIsRefusedAndCleared: the cookie is dead, so it is cleared
@@ -436,6 +454,36 @@ func TestSessionCannotReachASoftDeletedProject(t *testing.T) {
 
 	rec := h.call(t, "GET", "/api/v1/traces", nil, asSession(owner), inProject(h.project.ID))
 	expectError(t, rec, http.StatusNotFound, "no such project")
+
+	// It is off the listing, and an owner asking for it gets it with the
+	// purge date — which is the Server tab's table.
+	rec = h.call(t, "GET", "/api/v1/projects", nil, asSession(owner))
+	expectStatus(t, rec, 200)
+	if listed := decodeJSON[struct {
+		Projects []struct {
+			ID string `json:"id"`
+		} `json:"projects"`
+	}](t, rec).Projects; len(listed) != 0 {
+		t.Errorf("projects = %+v, want a deleted one off the listing", listed)
+	}
+	rec = h.call(t, "GET", "/api/v1/projects?include=deleted", nil, asSession(owner))
+	expectStatus(t, rec, 200)
+	deleted := decodeJSON[struct {
+		Projects []struct {
+			ID      string  `json:"id"`
+			Role    string  `json:"role"`
+			PurgeAt *string `json:"purge_at"`
+		} `json:"projects"`
+	}](t, rec).Projects
+	if len(deleted) != 1 || deleted[0].PurgeAt == nil || deleted[0].Role != store.RoleOwner {
+		t.Errorf("projects = %+v, want the deleted one with its purge date", deleted)
+	}
+
+	// A member cannot ask for that at all: for anyone but an owner the
+	// question can only be about somebody else's project.
+	viewer := h.account(t, "helper@example.com", false)
+	expectError(t, h.call(t, "GET", "/api/v1/projects?include=deleted", nil, asSession(viewer)),
+		http.StatusForbidden, "owner account")
 
 	// The two routes that undo it still answer, because an owner about to
 	// restore has to be able to see what it is restoring (spec 005 #10).

@@ -180,7 +180,24 @@ func (s *Server) handleListProjects(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	case c.isSession():
-		reachable, err := s.store.AccountProjects(c.account)
+		// An owner has every project, so it is the same listing the admin
+		// token gets — and `?include=deleted` is the Server tab's table.
+		// A member's is `me.projects`, which never holds a soft-deleted
+		// one (spec 028, edge cases).
+		if c.account.Owner {
+			projects, err = s.store.ListProjects(includeDeleted)
+			if err != nil {
+				slog.Error("list projects failed", "err", err)
+				writeError(w, http.StatusInternalServerError, "failed to read the projects")
+				return
+			}
+			roles = make(map[string]string, len(projects))
+			for _, project := range projects {
+				roles[project.ID] = store.RoleOwner
+			}
+			break
+		}
+		reachable, err := s.store.Memberships(c.account.ID)
 		if err != nil {
 			slog.Error("list projects failed", "err", err)
 			writeError(w, http.StatusInternalServerError, "failed to read the projects")
@@ -191,7 +208,8 @@ func (s *Server) handleListProjects(w http.ResponseWriter, r *http.Request) {
 			// Read one at a time rather than joined: the retention
 			// fields belong to `projectResponse`, and a second shape
 			// for the same row is how two answers to "what is this
-			// project set to" start to disagree.
+			// project set to" start to disagree. A member's list is a
+			// handful of rows.
 			project, err := s.store.ProjectByID(one.ProjectID)
 			if err != nil {
 				slog.Error("project lookup failed", "err", err)
@@ -203,24 +221,6 @@ func (s *Server) handleListProjects(w http.ResponseWriter, r *http.Request) {
 			}
 			roles[project.ID] = one.Role
 			projects = append(projects, project)
-		}
-		// A member's listing is `me.projects`, and a soft-deleted
-		// project is not on it (spec 028, edge cases); an owner asking
-		// for the deleted ones gets them, because that is the Server
-		// tab's table.
-		if includeDeleted {
-			deleted, err := s.store.ListProjects(true)
-			if err != nil {
-				slog.Error("list projects failed", "err", err)
-				writeError(w, http.StatusInternalServerError, "failed to read the projects")
-				return
-			}
-			for _, project := range deleted {
-				if project.Deleted() {
-					roles[project.ID] = store.RoleOwner
-					projects = append(projects, project)
-				}
-			}
 		}
 	case !c.project.Deleted():
 		projects = []*store.Project{c.project}
