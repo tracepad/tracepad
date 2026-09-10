@@ -305,6 +305,22 @@ API. This file routes; it does not duplicate what specs and docs say.
   `get_facets` (#5), and in the panel the three fields become checkbox lists
   with counts, loaded when it opens (#6–#8). The ceiling rose to 18,500 for a
   component whose lines *are* a checkbox list (#9).
+- ✅ Spec 030 (bare usage keys) shipped: `mapUsage` gains a third source —
+  ten **bare** token spellings (`input_tokens`, `cache_read_tokens`, …) read
+  when neither `langfuse.observation.usage_details` nor any `gen_ai.usage.*`
+  count is on the span (#1), each stored under the key as sent. The three
+  sources are a chain and never a merge: an exporter sending both spellings is
+  describing one number twice, and the standard one wins whole. The list is a
+  closed constant in `rules.go` and a row in `docs/ingest.md`'s table (#2),
+  because a bare word is exactly the key that collides with somebody's
+  unrelated attribute. What it unlocks is Claude Code, whose four counts sat in
+  metadata until now: `docs/ingest.md` gains the section that turns "it happens
+  to work" into a supported path — the six variables as a shell block and as
+  `~/.claude/settings.json`'s `env`, the protocol line that is not optional
+  because gRPC is not served, and what does and does not arrive (no prompt
+  text; Claude Code redacts it before exporting) (#3). Fixture
+  `012-claude-code-interaction` is synthetic to the shape a live session
+  emits — a live one carries the account's email and organization id (#4).
 - ✅ Spec 005 (retention & admin) shipped: schema 0005, the hourly sweeper
   writing every chunk through the group-commit writer, the admin API under
   `/api/v1/projects` with a dry-run/confirm contract on every destructive
