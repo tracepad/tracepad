@@ -279,6 +279,13 @@ func TestAccountsInviteMintsAFreshLink(t *testing.T) {
 	if !strings.Contains(out.stdout, "/invite#token=") {
 		t.Errorf("accounts invite printed:\n%s\nwant a link", out.stdout)
 	}
+	// Whose link it is, which the response itself does not say. The whole
+	// output is a secret about to be carried to a person by hand, and by id
+	// there would be nothing to check the id against (found in review of
+	// PR #52).
+	if !strings.Contains(out.stdout, helperEmail) {
+		t.Errorf("accounts invite printed:\n%s\nwant the account it is for", out.stdout)
+	}
 	if strings.Contains(out.stdout, first) {
 		t.Errorf("accounts invite printed the earlier link again:\n%s", out.stdout)
 	}
@@ -307,15 +314,19 @@ func TestAccountsRemoveWantsTheEmailBack(t *testing.T) {
 		}
 	}
 
-	// The wrong email is refused by the server, inside the transaction that
-	// would have done it — not by a comparison this client made up.
+	// A different account's email is refused, and the refusal names both:
+	// the one that was typed and the one this account actually signs in
+	// with. The comparison is against the email the *server* named in its
+	// preview, which is also what goes on the wire.
 	out = h.run(t.Context(), true, "accounts", "rm", helperEmail, "--confirm", partnerEmail)
 	if out.code != ExitFailure {
 		t.Fatalf("accounts rm --confirm <wrong> exited %d, want %d: %s",
 			out.code, ExitFailure, out.stderr)
 	}
-	if !strings.Contains(out.stderr, helperEmail) {
-		t.Errorf("stderr = %q, want the email it wanted back", out.stderr)
+	for _, want := range []string{helperEmail, partnerEmail, "nothing was done"} {
+		if !strings.Contains(out.stderr, want) {
+			t.Errorf("stderr = %q, want it to carry %q", out.stderr, want)
+		}
 	}
 
 	// `--confirm` that arrived without a value is the shape an unset shell
@@ -343,6 +354,64 @@ func TestAccountsRemoveWantsTheEmailBack(t *testing.T) {
 	out = h.run(t.Context(), true, "accounts", "show", helperEmail)
 	if out.code != ExitFailure {
 		t.Fatalf("accounts show after rm exited %d, want %d", out.code, ExitFailure)
+	}
+}
+
+// TestAccountsRemoveTakesTheEmailInAnyCase: an email is a case-insensitively
+// unique identifier — that is how the column is unique and how the login form
+// matches it — so an account registered as `Helper@Example.com` is named by
+// typing it in any case.
+//
+// The server compares the echo exactly, which is right for the server: what
+// reaches it is the spelling it named itself. What the caller has to get right
+// is *which account*, and case is not that — and this is the path with nobody
+// there to read a refusal (found in review of PR #52).
+func TestAccountsRemoveTakesTheEmailInAnyCase(t *testing.T) {
+	h := newAccountsCLI(t)
+	const mixed = "Helper@Example.com"
+	h.invite(t, mixed)
+
+	out := h.run(t.Context(), true, "accounts", "rm", strings.ToLower(mixed),
+		"--confirm", strings.ToLower(mixed))
+	if out.code != ExitOK {
+		t.Fatalf("accounts rm exited %d: %s", out.code, out.stderr)
+	}
+	// And what it says it deleted is the spelling the account was stored
+	// under, not the one that was typed.
+	if !strings.Contains(out.stdout, mixed) {
+		t.Errorf("accounts rm printed:\n%s\nwant the account's own spelling", out.stdout)
+	}
+}
+
+// TestAccountsRevokeSaysWhatTheAccountReaches: removing a membership is
+// idempotent — the endpoint answers 204 whether or not there was a row — so
+// the command reads the account back rather than asserting that access is
+// gone. For an owner it is not gone at all: an owner has no membership rows
+// and every project there is (found in review of PR #52).
+func TestAccountsRevokeSaysWhatTheAccountReaches(t *testing.T) {
+	h := newAccountsCLI(t)
+	project := h.projectID(t)
+	h.invite(t, partnerEmail, "--owner")
+
+	out := h.run(t.Context(), true, "accounts", "revoke", partnerEmail, project)
+	if out.code != ExitOK {
+		t.Fatalf("accounts revoke exited %d: %s", out.code, out.stderr)
+	}
+	if !strings.Contains(out.stdout, "every project") {
+		t.Errorf("accounts revoke printed:\n%s\n"+
+			"want the truth about an owner, which is that it still reaches everything",
+			out.stdout)
+	}
+
+	// A project the account never had is the same shape: nothing changed,
+	// and the command says what is rather than what it did.
+	h.invite(t, helperEmail, "--project", project+":viewer")
+	out = h.run(t.Context(), true, "accounts", "revoke", helperEmail, "no-such-project")
+	if out.code != ExitOK {
+		t.Fatalf("accounts revoke <unknown project> exited %d: %s", out.code, out.stderr)
+	}
+	if !strings.Contains(out.stdout, "viewer") {
+		t.Errorf("accounts revoke printed:\n%s\nwant the membership it still has", out.stdout)
 	}
 }
 

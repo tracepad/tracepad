@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -211,6 +210,12 @@ func (r *run) accountsCreate(ctx context.Context, args []string) error {
 
 // accountsInvite mints a fresh link for an account that already exists, which
 // is also the password reset (Decision 10).
+//
+// It reads the account first so that it can say **whose** link this is. The
+// whole output of this command is a secret about to be carried to a person by
+// hand, and `accounts invite 4b1e…` would otherwise hand back a link with
+// nothing to check the id against — which is the one mistake worth catching
+// before the link is pasted into a chat.
 func (r *run) accountsInvite(ctx context.Context, args []string) error {
 	fs := r.flags("accounts invite")
 	rest, err := r.parse(fs, args, 1)
@@ -218,6 +223,10 @@ func (r *run) accountsInvite(ctx context.Context, args []string) error {
 		return err
 	}
 	id, err := r.accountID(ctx, rest[0])
+	if err != nil {
+		return err
+	}
+	who, err := r.readAccount(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -234,6 +243,7 @@ func (r *run) accountsInvite(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	fmt.Fprintf(r.opt.Stdout, "a fresh link for %s\n\n", named(who))
 	fmt.Fprintf(r.opt.Stdout, "  %s\n\n", minted.InviteURL)
 	fmt.Fprintf(r.opt.Stdout, "the link is shown only here and is good until %s\n",
 		shortTime(minted.InviteExpiresAt))
@@ -358,6 +368,16 @@ func (r *run) accountsGrant(ctx context.Context, args []string) error {
 	return nil
 }
 
+// accountsRevoke takes one project away from one account, and then says what
+// the account can reach — rather than asserting what the request was for.
+//
+// Removing a membership is idempotent: the endpoint answers `204` whether or
+// not there was a row, so "no longer reaches it" would be a sentence this
+// command cannot know to be true. It is outright false for an **owner**, who
+// has no membership rows and every project there is — the same account the
+// mirror `accounts grant` refuses with "an owner has every project" — and for
+// a project id that was merely mistyped. Reading the account back is one
+// request, and it turns a claim into the answer.
 func (r *run) accountsRevoke(ctx context.Context, args []string) error {
 	fs := r.flags("accounts revoke")
 	rest, err := r.parse(fs, args, 2)
@@ -376,7 +396,11 @@ func (r *run) accountsRevoke(ctx context.Context, args []string) error {
 	if r.wantJSON() {
 		return r.emit(body)
 	}
-	fmt.Fprintf(r.opt.Stdout, "%s no longer reaches %s\n", rest[0], rest[1])
+	who, err := r.readAccount(ctx, id)
+	if err != nil {
+		return err
+	}
+	renderAccount(r, who)
 	return nil
 }
 
@@ -389,6 +413,14 @@ func (r *run) accountsRevoke(ctx context.Context, args []string) error {
 // (Decision 16), which is what a script has instead of a terminal; it is not a
 // `--yes`, because naming the account is the whole point and a script that
 // deletes whichever account the id resolved to is the accident this prevents.
+//
+// The preview is always asked for first, and what was typed is checked against
+// the email the server named rather than sent on to be compared there. The
+// server compares the echo exactly, and an email is a case-insensitively
+// unique identifier: an account registered as `Helper@Example.com` would
+// otherwise refuse `--confirm helper@example.com`, on the one path that has
+// nobody to read the refusal. What the caller has to get right is *which
+// account*, and case is not that.
 func (r *run) accountsRemove(ctx context.Context, args []string) error {
 	var confirm string
 	fs := r.flags("accounts rm")
@@ -406,37 +438,47 @@ func (r *run) accountsRemove(ctx context.Context, args []string) error {
 	}
 	path := "/api/v1/accounts/" + url.PathEscape(id)
 
-	query := url.Values{}
-	addSome(query, "confirm", confirm)
-	answer, err := r.api.Send(ctx, http.MethodDelete, path, query, nil)
+	answer, err := r.api.Send(ctx, http.MethodDelete, path, nil, nil)
 	if err != nil {
 		return err
 	}
-	if stillADryRun(answer) {
-		dry, err := decode[preview](answer)
-		if err != nil {
-			return err
-		}
-		r.renderPreview(dry, "delete the account "+dry.Confirm)
-		if !r.opt.TTY {
+	dry, err := decode[preview](answer)
+	if err != nil {
+		return err
+	}
+	r.renderPreview(dry, "delete the account "+dry.Confirm)
+	switch {
+	case confirm != "":
+		if !strings.EqualFold(confirm, dry.Confirm) {
 			return fmt.Errorf(
-				"this would delete the account %s; it was not done. Re-run with --confirm %s",
-				dry.Confirm, dry.Confirm)
+				"--confirm is %q and this account's email is %q; nothing was done",
+				confirm, dry.Confirm)
 		}
+	case r.opt.TTY:
 		if err := r.askToConfirm(dry.Confirm); err != nil {
 			return err
 		}
-		query.Set("confirm", dry.Confirm)
-		if answer, err = r.api.Send(ctx, http.MethodDelete, path, query, nil); err != nil {
-			return err
-		}
+	default:
+		return fmt.Errorf(
+			"this would delete the account %s; it was not done. Re-run with --confirm %s",
+			dry.Confirm, dry.Confirm)
+	}
+
+	// The server's own spelling, never one this command made up: what
+	// `--confirm` bought is that the caller had to name the account, and the
+	// value on the wire is still the one the server just said it wanted.
+	confirmed := url.Values{}
+	confirmed.Set("confirm", dry.Confirm)
+	answer, err = r.api.Send(ctx, http.MethodDelete, path, confirmed, nil)
+	if err != nil {
+		return err
 	}
 	if r.wantJSON() {
 		return r.emit(answer)
 	}
 	fmt.Fprintf(r.opt.Stdout,
 		"account %s deleted; its memberships, sessions and invitations went with it\n",
-		query.Get("confirm"))
+		dry.Confirm)
 	return nil
 }
 
@@ -501,15 +543,28 @@ func readMemberships(values []string) ([]map[string]any, error) {
 	return memberships, nil
 }
 
-// stillADryRun reports whether the server answered with what it *would* do
-// rather than doing it. A confirmed deletion answers `204` and no body at all,
-// so nothing is the shape of "done".
-func stillADryRun(body json.RawMessage) bool {
-	if strings.TrimSpace(string(body)) == "" {
-		return false
+// readAccount is one account by id, for the two commands whose own answer does
+// not carry it: a revoke and an invitation both come back saying nothing about
+// whose they were.
+func (r *run) readAccount(ctx context.Context, id string) (accountView, error) {
+	body, err := r.api.Get(ctx, "/api/v1/accounts/"+url.PathEscape(id), nil)
+	if err != nil {
+		return accountView{}, err
 	}
-	dry, err := decode[preview](body)
-	return err == nil && dry.DryRun
+	answer, err := decode[struct {
+		Account accountView `json:"account"`
+	}](body)
+	return answer.Account, err
+}
+
+// named is how an account is addressed in a sentence: the email, which is what
+// it signs in with, and the display name when there is one to tell two
+// addresses at the same company apart.
+func named(view accountView) string {
+	if view.Name == "" {
+		return view.Email
+	}
+	return view.Email + " (" + view.Name + ")"
 }
 
 func renderAccount(r *run, view accountView) {

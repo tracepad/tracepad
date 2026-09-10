@@ -734,6 +734,12 @@ partner@example.com  Partner     owner, invited   never                every pro
 `owner` rather than instead of it: an owner counts only once they can actually
 sign in, which is why you cannot stand down the moment you invite a successor.
 
+`accounts grant` and `accounts revoke` move one project in and out of one
+account, and `revoke` prints the account afterwards rather than claiming that
+access is gone — because for an **owner** it is not. An owner has no membership
+rows and every project there is, so revoking one takes nothing away; the
+account it prints says so in as many words.
+
 `accounts rm` is for people who are gone. It takes their memberships, sessions
 and invitations and nothing else, and it wears the same ceremony as the rest of
 the destructive commands — except that the echo is the **email**:
@@ -750,7 +756,8 @@ type "helper@example.com" to confirm:
 `--confirm helper@example.com` is that echo typed in advance, which is what a
 script has instead of a terminal. It is deliberately not a `--yes`: naming the
 account is the point, so a script cannot delete whichever account an id
-happened to resolve to.
+happened to resolve to. Any case will do — an email is a case-insensitively
+unique identifier, and what you have to get right is which account.
 
 **When every owner's password is lost**, this is the way back in — which is why
 the admin token is worth keeping somewhere:
