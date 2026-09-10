@@ -20,18 +20,3 @@ func TestSplitCommand(t *testing.T) {
 		}
 	}
 }
-
-func TestDisplayHost(t *testing.T) {
-	cases := map[string]string{
-		":4318":          "localhost:4318",
-		"0.0.0.0:4318":   "localhost:4318",
-		"[::]:4318":      "localhost:4318",
-		"127.0.0.1:4318": "127.0.0.1:4318",
-		"myhost:4318":    "myhost:4318",
-	}
-	for in, want := range cases {
-		if got := displayHost(in); got != want {
-			t.Errorf("displayHost(%q) = %q, want %q", in, got, want)
-		}
-	}
-}

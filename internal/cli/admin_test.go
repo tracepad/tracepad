@@ -340,9 +340,18 @@ func TestProjectDeleteNeedsTheAdminToken(t *testing.T) {
 		t.Errorf("projects ls --deleted printed:\n%s\nwant the purge date", out.stdout)
 	}
 
-	// And the project's own key can still undo it, which is the whole
-	// point of the exception (#10).
+	// Undoing it is an owner's, not a key's (spec 028 #3). Spec 005 #10
+	// gave the project's own key the exception because a token-less
+	// deployment had no other credential; with accounts there is always an
+	// owner, and a key in an application's config is exactly what must not
+	// be able to move a project in or out of existence.
 	h.env["TRACEPAD_API_KEY"] = testKey
+	out = h.run(t.Context(), false, "projects", "restore", id)
+	if out.code != ExitFailure {
+		t.Fatalf("restoring with a project key exited %d, want a refusal", out.code)
+	}
+
+	h.asAdmin()
 	out = h.run(t.Context(), true, "projects", "restore", id)
 	if out.code != ExitOK {
 		t.Fatalf("projects restore exited %d: %s", out.code, out.stderr)

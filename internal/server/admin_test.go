@@ -389,9 +389,15 @@ func TestSoftDeleteAndRestore(t *testing.T) {
 		t.Errorf("traces = %d during the grace window, want the data still there", got)
 	}
 
-	// Restore with the project's own key: the default install has no admin
-	// token, and the safety net must not need one (#10).
+	// Restoring is an owner's, not a key's (spec 028 #3). Spec 005 #10 let
+	// the project's own key do it because a token-less deployment had no
+	// other credential; a deployment with accounts always has an owner, and
+	// this key is exactly the leaked-application-credential case that must
+	// not be able to move a project in or out of existence.
 	rec = h.call(t, "POST", "/api/v1/projects/"+h.project.ID+"/restore", nil)
+	expectError(t, rec, http.StatusForbidden, "owner account")
+
+	rec = h.call(t, "POST", "/api/v1/projects/"+h.project.ID+"/restore", nil, asAdmin)
 	expectStatus(t, rec, 200)
 	restored := decodeJSON[struct {
 		DeletedAt *string `json:"deleted_at"`
@@ -408,7 +414,7 @@ func TestSoftDeleteAndRestore(t *testing.T) {
 	}
 
 	// Restoring what is not deleted is a mistake worth naming.
-	rec = h.call(t, "POST", "/api/v1/projects/"+h.project.ID+"/restore", nil)
+	rec = h.call(t, "POST", "/api/v1/projects/"+h.project.ID+"/restore", nil, asAdmin)
 	expectError(t, rec, http.StatusBadRequest, "not deleted")
 }
 

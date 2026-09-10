@@ -48,20 +48,22 @@ var hexID = regexp.MustCompile(`^[0-9a-f]{32}$`)
 
 const maxNameLength = 200
 
-// apiProject authenticates a request the way ingest does — one credential
-// story for the whole binary (#2) — and answers 401 itself when the
-// credentials do not resolve to a project.
+// apiProject is which project a data-plane request is about.
+//
+// It asks nothing and refuses nothing: the guard resolved the credential, the
+// policy and the project before the handler ran (spec 028 Decision 7), so by
+// here there is one — a key's own, or the one a session named with
+// `X-Tracepad-Project`. The remaining branch is a handler reached without the
+// guard, which is a programming error rather than a request, and a 500 says so
+// without taking the process down.
 func (s *Server) apiProject(w http.ResponseWriter, r *http.Request) (*store.Project, bool) {
-	if s.store == nil {
-		writeError(w, http.StatusServiceUnavailable, "the API is not available")
+	c := callerFrom(r.Context())
+	if c == nil || c.project == nil {
+		slog.Error("a data-plane handler ran without a project", "path", r.URL.Path)
+		writeError(w, http.StatusInternalServerError, "the request was not authorized")
 		return nil, false
 	}
-	project, ok := s.authenticate(r)
-	if !ok {
-		writeError(w, http.StatusUnauthorized, "unauthorized")
-		return nil, false
-	}
-	return project, true
+	return c.project, true
 }
 
 // submit hands a job to the group-commit writer and renders every outcome but
@@ -75,7 +77,15 @@ func (s *Server) submit(w http.ResponseWriter, r *http.Request, job store.WriteJ
 	if err == nil {
 		return true
 	}
+	s.submitFailure(w, err)
+	return false
+}
 
+// submitFailure renders an outcome the writer already answered with. It is the
+// tail of submit, split out for the handlers that recognise one error of their
+// own before falling back to the shared shapes (spec 028: a wrong current
+// password, a spent invitation).
+func (s *Server) submitFailure(w http.ResponseWriter, err error) {
 	var rejection *store.Rejection
 	switch {
 	case errors.As(err, &rejection):
@@ -91,7 +101,7 @@ func (s *Server) submit(w http.ResponseWriter, r *http.Request, job store.WriteJ
 		}
 		if len(rejection.Details) == 0 {
 			writeError(w, status, rejection.Message)
-			return false
+			return
 		}
 		// A refusal the caller has to act on carries what it needs to
 		// (spec 021 #14). Keys in order, so one refusal is one body.
@@ -112,7 +122,6 @@ func (s *Server) submit(w http.ResponseWriter, r *http.Request, job store.WriteJ
 		slog.Error("write failed", "err", err)
 		writeError(w, http.StatusInternalServerError, "failed to store the write")
 	}
-	return false
 }
 
 // readJSON reads the request body under the configured cap and decodes it

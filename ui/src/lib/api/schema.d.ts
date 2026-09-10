@@ -98,6 +98,135 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/setup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Whether this server still needs its first owner
+         * @description The one thing the interface can learn without a credential. While it answers `{"required": true}` the server prints a setup link at every start and every other screen redirects to `/setup`.
+         */
+        get: operations["getSetup"];
+        put?: never;
+        /**
+         * Create the first owner from the token the server printed
+         * @description The token is 32 random bytes minted at each start while no enabled owner exists, kept in memory only and printed in the setup link — so a token from a log file yesterday opens nothing today, and a restart is the recovery if the link was lost. Answers 403 to a wrong token and to a second attempt once an owner exists.
+         */
+        post: operations["setup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sign in with an email and a password
+         * @description A wrong email, a wrong password, a disabled account and one that has never accepted its invitation all answer the same 401 with the same sentence: any difference between them is a way to find out who has an account here. Five failures for one email inside fifteen minutes and the next is a 429 with `Retry-After`.
+         */
+        post: operations["login"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/accept-invite": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set a password from an invitation link and sign in
+         * @description The token is single-use and good for seven days. Accepting replaces whatever password the account had — which is what makes one path serve both an invitation and a reset — ends its other sessions, and stamps the login.
+         */
+        post: operations["acceptInvite"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * End this session
+         * @description Deletes the row and clears the cookie. A project key or the admin token gets 400: this is a question only a session can ask.
+         */
+        post: operations["logout"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The signed-in account and the projects it can reach
+         * @description The one call the interface makes on load. The project list rides in it because the shell needs both at once: for an owner it is every live project with the role `owner`, for everyone else their memberships, sorted by name.
+         */
+        get: operations["me"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Change this account's display name or password
+         * @description A password change needs the current one and signs every other session of the account out, because changing it is what a person does when they think somebody else has it.
+         */
+        patch: operations["patchMe"];
+        trace?: never;
+    };
+    "/api/v1/auth/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * This account's sessions, the current one marked
+         * @description The reason sessions are rows: "sign out everywhere" is a decision a person makes by looking at the list and recognising which one is the laptop they still have. The id is the row's — sha256 of the cookie — and cannot be turned back into a credential.
+         */
+        get: operations["listAccountSessions"];
+        put?: never;
+        post?: never;
+        /** End every session of this account but the current one */
+        delete: operations["endOtherSessions"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/system": {
         parameters: {
             query?: never;
@@ -996,6 +1125,99 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/accounts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Every account with its standing and its projects
+         * @description The page an owner opens to answer "who can see what", so the projects and roles are on the row rather than behind a click. Sorted by email.
+         */
+        get: operations["listAccounts"];
+        put?: never;
+        /**
+         * Invite an account; the link is shown once
+         * @description Creates an account with no password and the single-use link that sets one, good for seven days. The link is in this response and in no other, ever — only its hash is stored — and carrying it to the person is the owner's job: there is no mail here. A token that sets a password means the password never passes through the owner's hands.
+         */
+        post: operations["createAccount"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/accounts/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One account with its projects */
+        get: operations["getAccount"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete an account; a dry run until `?confirm=` echoes its email
+         * @description For people who are gone. It takes their memberships, sessions and invitations and nothing else: a score does not name its author, and nothing else in the database references an account. Disabling is the reversible way to take access away today.
+         */
+        delete: operations["deleteAccount"];
+        options?: never;
+        head?: never;
+        /**
+         * Change an account's name, owner standing or disabled flag
+         * @description The last enabled owner cannot be demoted or disabled: 409. Making somebody an owner drops their memberships, because an owner has every project. Disabling ends the account's sessions at once.
+         */
+        patch: operations["patchAccount"];
+        trace?: never;
+    };
+    "/api/v1/accounts/{id}/invite": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mint a fresh invitation link; this is also the password reset
+         * @description Ends the account's sessions and voids any earlier link. The old password goes on working until the new link is used, so an owner cannot lock somebody out by pressing this: the failure mode of a reset is somebody locked out on a Friday.
+         */
+        post: operations["inviteAccount"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/accounts/{id}/projects/{project_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Give an account a role in a project
+         * @description An owner already has every project, so a membership for one is a 409.
+         */
+        put: operations["putMembership"];
+        post?: never;
+        /**
+         * Take a project away from an account
+         * @description Removing a membership that is not there is not an error: the state the caller asked for is the state that holds.
+         */
+        delete: operations["deleteMembership"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects": {
         parameters: {
             query?: never;
@@ -1132,6 +1354,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{id}/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Who has a role in this project; owners are not listed
+         * @description The project side of the question an owner asks from the account side at `/api/v1/accounts`. Owners are absent because they are not membership rows — the screen says "and every owner" rather than pretending they are.
+         */
+        get: operations["projectMembers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1139,6 +1381,89 @@ export interface components {
         /** @description The one error shape the whole surface uses */
         Error: {
             error: string;
+        };
+        /** @description A person who signs in, as they see themselves. The email is the sign-in name and nothing else: it is never verified and never written to. */
+        Account: {
+            id: string;
+            email: string;
+            /** @description A display name, which may be empty */
+            name: string;
+            /** @description An owner has every project and every management action, including the accounts themselves */
+            owner: boolean;
+        };
+        AccountDetail: components["schemas"]["Account"] & {
+            /** @description Access taken away reversibly; the sessions ended when it was set */
+            disabled: boolean;
+            /** @description Invited and not yet accepted, so there is no password and no way in yet */
+            pending: boolean;
+            /** Format: date-time */
+            created_at: string;
+            /**
+             * Format: date-time
+             * @description null means this account has never signed in
+             */
+            last_login_at: string | null;
+            /** @description The membership rows, which are empty for an owner: the flag is the membership */
+            projects: components["schemas"]["Membership"][];
+        };
+        /** @description One project an account can reach, with the role it has there */
+        Membership: {
+            id: string;
+            name: string;
+            /**
+             * @description `owner` is not a stored membership: it is what every project reports for an account with the owner flag
+             * @enum {string}
+             */
+            role: "viewer" | "editor" | "owner";
+        };
+        /** @description A membership as the endpoint that writes one answers */
+        MembershipRow: {
+            account_id: string;
+            project_id: string;
+            name: string;
+            /** @enum {string} */
+            role: "viewer" | "editor";
+        };
+        /** @description Who is signed in and what they can reach, which is everything the interface's shell needs on load */
+        Me: {
+            account: components["schemas"]["Account"];
+            /** @description Sorted by name. For an owner, every live project with the role `owner`; for everyone else, their memberships. Soft-deleted projects are not on it. */
+            projects: components["schemas"]["Membership"][];
+        };
+        /** @description One browser's sign-in. The id is sha256 of the cookie's value and cannot be turned back into one. */
+        AccountSession: {
+            id: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            last_seen_at: string;
+            /** Format: date-time */
+            expires_at: string;
+            user_agent: string;
+            ip: string;
+            /** @description The session this request was made with */
+            current: boolean;
+        };
+        /** @description A new account and the link that sets its password. The link is here and in no other response, ever. */
+        Invitation: {
+            account: components["schemas"]["AccountDetail"];
+            invite_url: string;
+            /** Format: date-time */
+            invite_expires_at: string;
+            note?: string;
+        };
+        /** @description What deleting an account would take, and the email that makes it happen */
+        AccountDeletion: {
+            /** @constant */
+            dry_run: true;
+            account: components["schemas"]["AccountDetail"];
+            would_delete: {
+                memberships: number;
+                sessions: number;
+            };
+            /** @description The exact string `?confirm=` must carry: the account's email */
+            confirm: string;
+            note?: string;
         };
         /** @description A trace as it appears in a listing: aggregates only, never a payload. A field the trace never carried is absent rather than empty. */
         TraceRow: {
@@ -1847,7 +2172,7 @@ export interface components {
                 "application/json": components["schemas"]["Error"];
             };
         };
-        /** @description The credentials are good but do not reach this far: cross-project administration needs the admin token */
+        /** @description The credentials are good but do not reach this far: an owner account or the admin token is needed, the role in this project is too low, or a cookie request came from another origin */
         Forbidden: {
             headers: {
                 [name: string]: unknown;
@@ -1856,9 +2181,29 @@ export interface components {
                 "application/json": components["schemas"]["Error"];
             };
         };
-        /** @description The stored state already answers differently: a name that is taken, a project that is already deleted */
+        /** @description The stored state already answers differently: a name that is taken, a project that is already deleted, the last owner being demoted */
         Conflict: {
             headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description The request is well formed and the values are not: an email that is not one, a password outside 10-128 characters */
+        Unprocessable: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description Throttled; `Retry-After` says for how long */
+        TooManyRequests: {
+            headers: {
+                /** @description Seconds to wait */
+                "Retry-After"?: string;
                 [name: string]: unknown;
             };
             content: {
@@ -1902,6 +2247,10 @@ export interface components {
         PromptName: string;
         PromptLabel: string;
         ProjectID: string;
+        AccountID: string;
+        MembershipProjectID: string;
+        /** @description The email of the account being deleted — the one thing about an account a person means. Without it the endpoint changes nothing and answers with a preview; a value that does not match is a 400 that also changes nothing. */
+        ConfirmEmail: string;
         /** @description The name of the project — or the id of the user — being destroyed. Without it the endpoint changes nothing and answers with a preview; a value that does not match is a 400 that also changes nothing. */
         Confirm: string;
         /** @description The name of the dataset being destroyed. Without it the endpoint changes nothing and answers with the counts; a value that does not match is a 400 that also changes nothing. */
@@ -2081,6 +2430,253 @@ export interface operations {
                     "application/json": Record<string, never>;
                 };
             };
+        };
+    };
+    getSetup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Whether an owner exists */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        required: boolean;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+        };
+    };
+    setup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    token: string;
+                    email: string;
+                    password: string;
+                    name?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The owner, signed in; the session cookie is set */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        account: components["schemas"]["Account"];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["Unprocessable"];
+        };
+    };
+    login: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    email: string;
+                    password: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The account, signed in; the session cookie is set */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        account: components["schemas"]["Account"];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            429: components["responses"]["TooManyRequests"];
+        };
+    };
+    acceptInvite: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    token: string;
+                    password: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The account, signed in; the session cookie is set */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        account: components["schemas"]["Account"];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["Unprocessable"];
+        };
+    };
+    logout: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Signed out */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    me: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Who is signed in and what they can reach */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Me"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    patchMe: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name?: string;
+                    password?: {
+                        current: string;
+                        new: string;
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description The account as it now stands */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        account: components["schemas"]["Account"];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["Unprocessable"];
+        };
+    };
+    listAccountSessions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The live sessions, newest first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        sessions: components["schemas"]["AccountSession"][];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    endOtherSessions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description How many sessions were ended */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        ended: number;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
         };
     };
     system: {
@@ -4360,6 +4956,267 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
+    listAccounts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every account */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        accounts: components["schemas"]["AccountDetail"][];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    createAccount: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    email: string;
+                    name?: string;
+                    /** @description An owner has every project, so `memberships` must then be empty */
+                    owner?: boolean;
+                    memberships?: {
+                        project_id: string;
+                        /** @enum {string} */
+                        role: "viewer" | "editor";
+                    }[];
+                };
+            };
+        };
+        responses: {
+            /** @description The account and its invitation link */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Invitation"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
+        };
+    };
+    getAccount: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["AccountID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The account */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        account: components["schemas"]["AccountDetail"];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteAccount: {
+        parameters: {
+            query?: {
+                /** @description The email of the account being deleted — the one thing about an account a person means. Without it the endpoint changes nothing and answers with a preview; a value that does not match is a 400 that also changes nothing. */
+                confirm?: components["parameters"]["ConfirmEmail"];
+            };
+            header?: never;
+            path: {
+                id: components["parameters"]["AccountID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The dry run: what would go, and the email that makes it happen */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountDeletion"];
+                };
+            };
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    patchAccount: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["AccountID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name?: string;
+                    owner?: boolean;
+                    disabled?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The account as it now stands */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        account: components["schemas"]["AccountDetail"];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    inviteAccount: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["AccountID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The link, shown this once */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        invite_url: string;
+                        /** Format: date-time */
+                        invite_expires_at: string;
+                        note?: string;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    putMembership: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["AccountID"];
+                project_id: components["parameters"]["MembershipProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    role: "viewer" | "editor";
+                };
+            };
+        };
+        responses: {
+            /** @description The membership */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        membership: components["schemas"]["MembershipRow"];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
+        };
+    };
+    deleteMembership: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["AccountID"];
+                project_id: components["parameters"]["MembershipProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The account no longer has this project */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     listProjects: {
         parameters: {
             query?: {
@@ -4662,6 +5519,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Deletion"] | components["schemas"]["DryRun"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    projectMembers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["ProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The members, by email */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        members: {
+                            account_id: string;
+                            email: string;
+                            name: string;
+                            /** @enum {string} */
+                            role: "viewer" | "editor";
+                        }[];
+                    };
                 };
             };
             400: components["responses"]["BadRequest"];

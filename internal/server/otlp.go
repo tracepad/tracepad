@@ -52,9 +52,11 @@ func (s *Server) handleTraces(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	project, ok := s.authenticate(r)
+	// The guard resolved the key and refused everything that is not one:
+	// `ingest` is the one policy where a person's session and the admin
+	// token are not credentials at all (spec 028 Decision 3).
+	project, ok := s.apiProject(w, r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
@@ -186,29 +188,6 @@ func (s *Server) handleTraces(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeExportResponse(w, result, jsonEncoding)
-}
-
-// authenticate resolves the request's credentials to a project. Both schemes
-// are accepted on both routes and both resolve through one sha256 lookup
-// (spec 002 #2).
-func (s *Server) authenticate(r *http.Request) (*store.Project, bool) {
-	secret, ok := credential(r.Header.Get("Authorization"))
-	if !ok {
-		return nil, false
-	}
-	project, err := s.store.ProjectBySecret(secret)
-	if err != nil {
-		slog.Error("key lookup failed", "err", err)
-		return nil, false
-	}
-	// A soft-deleted project's keys stop working the moment it is deleted
-	// (spec 005 #9). The two endpoints that can undo the deletion resolve
-	// their caller through the admin path instead, which is the whole of
-	// the exception (#10).
-	if project == nil || project.Deleted() {
-		return nil, false
-	}
-	return project, true
 }
 
 // credential extracts the secret from either scheme. Basic carries

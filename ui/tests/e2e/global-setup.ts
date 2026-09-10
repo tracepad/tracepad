@@ -40,9 +40,7 @@ export default async function boot() {
 	};
 
 	try {
-		const preAuthed = await firstRunURL(server);
-		const key = new URLSearchParams(preAuthed.split('#')[1]).get('key');
-		if (!key) throw new Error(`no key in the pre-authed URL: ${preAuthed}`);
+		const { key, setup } = await firstRunOutput(server);
 
 		const baseURL = `http://127.0.0.1:${PORT}`;
 		await waitForHealth(baseURL, server);
@@ -51,8 +49,10 @@ export default async function boot() {
 		const carried: State = {
 			baseURL,
 			// The server names itself `localhost`; the tests drive `127.0.0.1`,
-			// and a cross-origin hop would drop the localStorage the key lives in.
-			preAuthed: preAuthed.replace(/^http:\/\/[^/]+/, baseURL),
+			// and a cross-origin hop would drop the localStorage the key lives
+			// in and the cookie a session lives in.
+			setup: setup.replace(/^http:\/\/[^/]+/, baseURL),
+			preAuthed: `${baseURL}/#key=${key}`,
 			key
 		};
 		writeFileSync(STATE, JSON.stringify(carried, null, 2));
@@ -68,24 +68,26 @@ export default async function boot() {
 }
 
 /**
- * Reads the server's first-run output for the pre-authed link. Waiting for
- * exactly this line is deliberate: the link is part of the contract (spec 006
- * #8), and a boot that stopped printing it should fail the suite rather than
- * be worked around with a key read out of the database.
+ * Reads the server's first-run output for the two things it prints: the
+ * project's secret key, and the setup link that creates the first owner
+ * (spec 028 #9). Waiting for exactly these is deliberate — both are part of
+ * the contract, and a boot that stopped printing one should fail the suite
+ * rather than be worked around with a value read out of the database.
  */
-function firstRunURL(server: ChildProcess): Promise<string> {
+function firstRunOutput(server: ChildProcess): Promise<{ key: string; setup: string }> {
 	return new Promise((accept, reject) => {
 		let output = '';
 		const timer = setTimeout(
-			() => reject(new Error(`the server printed no pre-authed URL:\n${output}`)),
+			() => reject(new Error(`the server printed no first-run output:\n${output}`)),
 			20_000
 		);
 		const read = (chunk: Buffer) => {
 			output += chunk.toString();
-			const match = /http:\/\/\S+\/#key=tp-sk-[0-9a-f]+/.exec(output);
-			if (!match) return;
+			const key = /authorization=Bearer (tp-sk-[0-9a-f]+)/.exec(output);
+			const setup = /http:\/\/\S+\/setup#token=\S+/.exec(output);
+			if (!key || !setup) return;
 			clearTimeout(timer);
-			accept(match[0]);
+			accept({ key: key[1], setup: setup[0] });
 		};
 		server.stdout?.on('data', read);
 		server.stderr?.on('data', read);

@@ -93,27 +93,38 @@ async function deliver(spans: Span[], into?: string) {
 }
 
 /**
- * Waits until a delivered trace is readable, because delivery is not the same
- * event: the export returns as soon as the batch is accepted, and the writer
- * commits it after. Polling the listing rather than sleeping keeps the wait
- * honest — and `/facets`' live tail reads the same rows, so a trace the
- * listing can see is a trace the panel can see.
+ * Waits until a value is on the facet list, because delivery is not the same
+ * event: the export returns as soon as the batch is accepted, the writer
+ * commits it after, and the rollup takes it after that. Polling rather than
+ * sleeping keeps the wait honest.
+ *
+ * `/facets` rides spec 013's seam: past the rollup's watermark it scans the
+ * live rows, and behind it, it answers from `names_hourly` and `stats_hourly`.
+ * A trace delivered into an hour the aggregator has already rolled is
+ * therefore in the listing at once and on the facet list only after the next
+ * pass re-rolls that hour as dirty — measured at about a second with
+ * `TRACEPAD_ROLLUP_INTERVAL=1s`, and longer on a loaded runner rolling every
+ * project the suite's other workers are creating.
+ *
+ * The panel's assertion has a five-second timeout of its own, so waiting for
+ * the listing instead left the case racing the aggregator rather than testing
+ * what it is about.
  */
-async function readable(key: string, environment: string) {
+async function onTheFacetList(key: string, environment: string) {
 	const { baseURL } = state();
 	await expect
 		.poll(
 			async () => {
-				const response = await fetch(
-					`${baseURL}/api/v1/traces?environment=${environment}&limit=1`,
-					{ headers: { Authorization: `Bearer ${key}` } }
-				);
-				if (!response.ok) return -1;
-				return ((await response.json()) as { traces: unknown[] }).traces.length;
+				const response = await fetch(`${baseURL}/api/v1/facets`, {
+					headers: { Authorization: `Bearer ${key}` }
+				});
+				if (!response.ok) return [];
+				const body = (await response.json()) as { environment?: { value: string }[] };
+				return (body.environment ?? []).map((one) => one.value);
 			},
-			{ timeout: 15_000, message: `the ${environment} trace never became readable` }
+			{ timeout: 15_000, message: `${environment} never reached the facet list` }
 		)
-		.toBe(1);
+		.toContain(environment);
 }
 
 const id = (prefix: string, n: number) => `${prefix}${n}`.padEnd(32, '0');
@@ -379,7 +390,7 @@ test('an environment first seen after the panel closed is on the list when it re
 		[{ trace: id('f', 1), span: span('f', 1), at: HOUR, name: 'chat', environment: 'production' }],
 		fresh.key
 	);
-	await readable(fresh.key, 'production');
+	await onTheFacetList(fresh.key, 'production');
 	await signIn(page, fresh.key);
 
 	await openPanel(page);
@@ -401,11 +412,11 @@ test('an environment first seen after the panel closed is on the list when it re
 		],
 		fresh.key
 	);
-	// The point of the case is what the *reopening* reads, so the trace has to
-	// be readable before the panel opens again: a panel that opened too early
-	// would read a list without `canary` and — correctly — not read it again
-	// until the next opening.
-	await readable(fresh.key, 'canary');
+	// The point of the case is what the *reopening* reads, so `canary` has to
+	// be on the facet list before the panel opens again: a panel that opened
+	// too early would read a list without it and — correctly — not read it
+	// again until the next opening.
+	await onTheFacetList(fresh.key, 'canary');
 
 	await openPanel(page);
 	await expect(box(page, 'Environment', 'canary')).toBeVisible();

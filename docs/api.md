@@ -12,6 +12,12 @@ Authentication is the same as for ingest — `Authorization: Bearer <secret
 key>` or `Basic base64(<public key>:<secret key>)`. See
 [ingest.md](ingest.md#authentication). No `Content-Type` is required.
 
+A browser sends a session cookie instead, and names the project it is asking
+about with `X-Tracepad-Project`; every route says which of the two — and which
+role — it takes, in one word. See [accounts.md](accounts.md#who-may-do-what).
+An `Authorization` header always wins over a cookie, so nothing below changes
+for a script.
+
 ## Finding your way around
 
 ```sh
@@ -860,10 +866,13 @@ did, so both are diffed. Empty when the two versions are identical.
 
 ## Self-description
 
-`GET /api/v1` returns the endpoint map. `GET /api/v1/openapi.json` returns a
-hand-authored OpenAPI 3.1 document — the contract itself, not a rendering of
-the code, kept honest by a test that fails when the document and the router
-disagree in either direction. Neither needs a key.
+`GET /api/v1` returns the endpoint map: every route, a one-line description,
+and the one word that says what calling it takes — `public`, `ingest`,
+`member`, `editor`, `owner` or `session`
+([accounts.md](accounts.md#who-may-do-what)). `GET /api/v1/openapi.json`
+returns a hand-authored OpenAPI 3.1 document — the contract itself, not a
+rendering of the code, kept honest by a test that fails when the document and
+the router disagree in either direction. Neither needs a key.
 
 ## System
 

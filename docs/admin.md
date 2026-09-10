@@ -9,30 +9,33 @@ happens until it is confirmed by name**.
 
 ## Who may ask
 
-| | Project key (`tp-sk-…`) | `TRACEPAD_ADMIN_TOKEN` |
-|---|---|---|
-| Read and change its own retention | ✅ | ✅ |
-| Create, list and revoke its own keys | ✅ | ✅ |
-| Erase a user's data in its own project | ✅ | ✅ |
-| Restore its own deleted project | ✅ | ✅ |
-| Anything in another project | ❌ | ✅ |
-| List every project | ❌ | ✅ |
-| Create a project | ❌ | ✅ |
-| Rename a project | ❌ | ✅ |
-| **Delete a project** | ❌ | ✅ |
+Three kinds of caller reach this surface: a project key, a person signed in
+with an [account](accounts.md), and `TRACEPAD_ADMIN_TOKEN`.
 
-A project's secret key is the administrator of its own project. That is what
-keeps "retention changes without a restart" true in the default install, which
-has no admin token at all.
+| | Project key (`tp-sk-…`) | `viewer` | `editor` | Owner | `TRACEPAD_ADMIN_TOKEN` |
+|---|---|---|---|---|---|
+| Read a project and its windows | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Change its retention | ✅ | ❌ | ✅ | ✅ | ✅ |
+| Create, list and revoke its keys | ✅ | ❌ | ✅ | ✅ | ✅ |
+| Erase a user's data in it | ✅ | ❌ | ✅ | ✅ | ✅ |
+| Anything in another project | ❌ | ❌ | ❌ | ✅ | ✅ |
+| List every project | ❌ | ❌ | ❌ | ✅ | ✅ |
+| Create a project | ❌ | ❌ | ❌ | ✅ | ✅ |
+| Rename a project | ❌ | ❌ | ❌ | ✅ | ✅ |
+| **Delete or restore a project** | ❌ | ❌ | ❌ | ✅ | ✅ |
 
-Deleting a project is the exception, and needs the token even for one's own
-project. An `sk` lives in application config and in CI; a leaked application
-credential must not be able to destroy the data it was writing. In a token-less
-deployment, deleting a project means setting the token first — a deliberate
-speed bump on the one act with a blast radius.
+A project's secret key is still the administrator of its own project. That is
+what keeps "retention changes without a restart" true in the default install,
+which has no admin token at all.
 
-A server with no `TRACEPAD_ADMIN_TOKEN` answers those rows `403` with a message
-that names the variable, rather than `401`-ing a perfectly good key.
+Creating, deleting, restoring and renaming a project need an owner or the
+token, for one reason: an `sk` lives in application config and in CI, and a
+leaked application credential must not be able to move a project in or out of
+existence. A project's name is also the echo every destructive confirmation is
+typed against, which is why renaming sits with them.
+
+A server with no owner and no `TRACEPAD_ADMIN_TOKEN` answers those rows `403`
+with a message that names both, rather than `401`-ing a perfectly good key.
 
 The token is sent in the same header as a key, so the CLI takes it as `--key`
 or `TRACEPAD_API_KEY`:
@@ -40,6 +43,10 @@ or `TRACEPAD_API_KEY`:
 ```sh
 TRACEPAD_API_KEY=$TRACEPAD_ADMIN_TOKEN tracepad projects ls
 ```
+
+A person's session is a cookie rather than a header, and names the project it
+is asking about with `X-Tracepad-Project` on the routes that do not carry one
+in the path. See [accounts.md](accounts.md#what-a-session-may-ask).
 
 ## Dry run by default
 
@@ -82,16 +89,20 @@ on stderr and exit code 1.
 
 | Method | Path | |
 |---|---|---|
-| `GET` | `/api/v1/projects` | All with the token, its own with a key. `?include=deleted` (token only). |
+| `GET` | `/api/v1/projects` | What the caller can reach: all with the token or an owner, its own with a key, its memberships with a member's session. `?include=deleted` (owner or token). |
 | `POST` | `/api/v1/projects` | Create; the secret is in the response and nowhere else. |
 | `GET` | `/api/v1/projects/{id}` | One project with its windows. |
-| `PATCH` | `/api/v1/projects/{id}` | `name` (token only), `retention_days`, `raw_retention_days`, `stats_retention_days`. |
+| `PATCH` | `/api/v1/projects/{id}` | `name` (owner or token), `retention_days`, `raw_retention_days`, `stats_retention_days`. |
 | `DELETE` | `/api/v1/projects/{id}` | Soft delete; `202` with the purge date. |
 | `POST` | `/api/v1/projects/{id}/restore` | Undo it inside the grace window. |
 | `GET` | `/api/v1/projects/{id}/keys` | Public keys and their creation dates. |
 | `POST` | `/api/v1/projects/{id}/keys` | Mint a pair. |
 | `DELETE` | `/api/v1/projects/{id}/keys/{public_key}` | Revoke one. |
 | `DELETE` | `/api/v1/projects/{id}/users/{user_id}/data` | Erase one user's parsed data. |
+| `GET` | `/api/v1/projects/{id}/members` | Who has a role in this project. See [accounts.md](accounts.md#managing-accounts). |
+
+The people who sign in, their roles and their invitations are
+[accounts.md](accounts.md).
 
 ## Projects
 
@@ -104,6 +115,9 @@ tracepad projects rename $ID orders-service
 tracepad projects rm $ID
 tracepad projects restore $ID
 ```
+
+The four that move a project in or out of existence — `create`, `rename`, `rm`
+and `restore` — take the admin token; the rest take a project key.
 
 `projects create` answers with the project and a fresh key pair. The secret is
 printed once, because only its hash is ever stored:

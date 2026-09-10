@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/tracepad/tracepad/internal/client"
@@ -55,6 +56,26 @@ type Server struct {
 	// endpoints that need one say so rather than 401ing.
 	adminToken string
 
+	// Accounts (spec 028). sessionLife is how long a browser session lasts
+	// and how far each slide moves it (Decision 4); publicURL is the
+	// operator's `TRACEPAD_URL`, which wins over a guessed host in a
+	// printed setup or invite link (Decision 11).
+	sessionLife time.Duration
+	publicURL   string
+	// setupToken is minted at each start while this server has no owner who
+	// can sign in, and lives in memory only: a token from yesterday's log
+	// opens nothing today, and a restart is the recovery if the link was
+	// lost (Decision 9). Empty once an owner exists.
+	//
+	// Behind a mutex because two browsers can hold the same link — a double
+	// click is enough — and the handler both reads it and clears it. What
+	// actually stops a second owner being created is the transaction
+	// (`ErrSetupDone`); this is so that the read and the clearing are not a
+	// data race.
+	setupMu    sync.RWMutex
+	setupToken string
+	limiter    *loginLimiter
+
 	// The web interface (spec 006): the built bundle, nil in a build
 	// without the `ui` tag; the path segments the API owns, so a mistyped
 	// endpoint never resolves to a web page; and the matcher that
@@ -83,6 +104,10 @@ func New(cfg *config.Config, version string, st *store.Store, writer JobWriter, 
 	if budget <= 0 {
 		budget = config.DefaultResponseBudgetBytes
 	}
+	sessionLife := cfg.SessionLife
+	if sessionLife <= 0 {
+		sessionLife = config.DefaultSessionLife
+	}
 	s := &Server{
 		store:          st,
 		writer:         writer,
@@ -93,10 +118,18 @@ func New(cfg *config.Config, version string, st *store.Store, writer JobWriter, 
 		responseBudget: budget,
 		mcp:            cfg.MCP,
 		adminToken:     cfg.AdminToken,
+		sessionLife:    sessionLife,
+		publicURL:      cfg.URL,
+		limiter:        newLoginLimiter(),
 		assets:         ui.Assets(),
 		startedAt:      time.Now(),
 		counters:       newCounters(),
 	}
+	// The setup token is minted here rather than on demand, once per start:
+	// "while no owner exists" is a property of the server's lifetime, and a
+	// token minted per request would be a token the printed link never
+	// matched (Decision 9).
+	s.mintSetupToken()
 	s.reserved = reservedSegments(s.routes())
 	s.paths = newPathMatcher(s.routes())
 
@@ -104,7 +137,9 @@ func New(cfg *config.Config, version string, st *store.Store, writer JobWriter, 
 	// from it rather than beside it.
 	mux := http.NewServeMux()
 	for _, route := range s.routes() {
-		mux.HandleFunc(route.Method+" "+route.Path, route.handler)
+		// The policy column is applied here, once, rather than by each
+		// handler asking for its own credentials (spec 028 Decision 7).
+		mux.HandleFunc(route.Method+" "+route.Path, s.guard(route))
 	}
 	if s.mcp {
 		// Registered outside the table: /mcp is a JSON-RPC transport

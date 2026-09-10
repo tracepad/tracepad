@@ -41,6 +41,22 @@ deliberately no file under `/data` holding it: that would put a secret on a
 volume outliving the container, and give anyone who can read the volume a way
 to learn a key that a host install does not have.
 
+The same log carries the **setup link** — the way into the browser interface,
+until this deployment has an owner:
+
+```
+  http://localhost:4318/setup#token=…
+```
+
+Its token is minted per start and held in memory, never on the volume, so a
+`docker restart` prints a new one and a log kept from last week opens nothing.
+The address in it is the container's own guess; behind a proxy, set
+`TRACEPAD_URL` and the link is printed at the address your people use. See
+[accounts.md](accounts.md).
+
+There is deliberately no environment variable for the first owner's password:
+one in `docker-compose.yml` is the thing accounts exist to stop pasting.
+
 Any command can be run against the server from inside its own container —
 `/tracepad` is the same binary, and `--url http://localhost:4318` points it at
 the server it is sharing with:
@@ -138,7 +154,12 @@ docker run -d --name tracepad \
   ghcr.io/tracepad/tracepad
 ```
 
-Two of them deserve a warning.
+Three of them deserve a warning.
+
+`TRACEPAD_URL` is not only the CLI's "which server" any more: it is the host of
+the setup and invitation links this server prints and hands out. Behind a
+reverse proxy the container can only guess, and the guess is its own address,
+so set it to the address your people type.
 
 `TRACEPAD_ADMIN_TOKEN` is a credential, and anything passed with `-e` is
 readable ever after in `docker inspect` and in the daemon's logs. Use

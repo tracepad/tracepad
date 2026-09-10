@@ -223,6 +223,21 @@ func (sw *Sweeper) Pass(ctx context.Context) error {
 		freed = true
 	}
 
+	// Expired browser sessions and spent-by-time invitations (spec 028 #4,
+	// #10). Once per pass rather than once per project: an account belongs
+	// to the deployment, not to a project. A lookup already ignores an
+	// expired row, so this is about the disk and not about access.
+	accounts, err := sw.sweepAccounts(ctx, start.UnixNano())
+	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, ErrWriterClosed) {
+			return err
+		}
+		failures = append(failures, fmt.Errorf("expired sessions and invitations: %w", err))
+	}
+	if accounts > 0 {
+		freed = true
+	}
+
 	if freed {
 		if err := sw.writer.Submit(ctx, &incrementalVacuum{Pages: vacuumPages}); err != nil {
 			failures = append(failures, fmt.Errorf("incremental vacuum: %w", err))
@@ -369,6 +384,29 @@ func (sw *Sweeper) sweepOrphanSearchEntries(ctx context.Context) (int64, error) 
 		logger().Info("collected orphaned search entries", "entries", job.Deleted)
 	}
 	return job.Deleted, nil
+}
+
+// sweepAccounts removes the browser sessions and invitations that have run
+// out (spec 028 #4). Chunked like everything else here, so a deployment that
+// has been away for a month does not hold the writer for one enormous DELETE;
+// what a pass does not reach, the next one does.
+func (sw *Sweeper) sweepAccounts(ctx context.Context, now int64) (int64, error) {
+	var total int64
+	for range sw.maxChunks {
+		chunk := &AccountSweep{Now: now, Limit: sw.chunk}
+		if err := sw.writer.Submit(ctx, chunk); err != nil {
+			return total, err
+		}
+		removed := chunk.Sessions + chunk.Tokens
+		total += removed
+		if chunk.Sessions < int64(sw.chunk) && chunk.Tokens < int64(sw.chunk) {
+			break
+		}
+	}
+	if total > 0 {
+		logger().Info("removed expired sessions and invitations", "rows", total)
+	}
+	return total, nil
 }
 
 func (sw *Sweeper) count(projectID string, traces, raw int64) {

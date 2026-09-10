@@ -231,6 +231,10 @@ Each sweep pass also:
   paths that delete observations take the index with them inside their own
   transactions, and this is the belt to those braces;
 - **purges** projects whose seven-day deletion grace has run out (below);
+- removes **expired browser sessions and invitation links**
+  ([accounts.md](accounts.md)). This is housekeeping and not access control: a
+  session that has run out stops working the moment it does, and an invitation
+  past its seven days is refused, whether or not a pass has been by;
 - runs an incremental vacuum, so the file on disk actually shrinks. Deleting
   rows without one returns nothing to the filesystem.
 
@@ -356,9 +360,13 @@ tracepad projects rm <project-id>     # admin token required
   listings.
 - The data is destroyed by the sweeper **seven days later**, and the response
   says when.
-- `tracepad projects restore <project-id>` undoes it until then — reachable
-  with the project's own key, so a deployment with no admin token can still
-  recover from deleting its only project.
+- `tracepad projects restore <project-id>` undoes it until then, with the same
+  credential that deleted it: an owner account or the admin token. A project's
+  own key reaches neither — it lives in application config and in CI, and a
+  leaked application credential must not move a project in either direction.
+  The one thing such a key still reads while its project is deleted is the
+  project itself, so whoever is about to restore can see what they are
+  restoring and until when.
 - The name stays reserved throughout, so restore always has its name to come
   back to. Creating a project with that name meanwhile is a `409` naming the
   restorable one.
