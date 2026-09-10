@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { createProject, state } from './harness';
+import { createProject, signIn as enter, state } from './harness';
 
 // The Users screens (spec 023, Testing — e2e), against the real binary.
 //
@@ -32,11 +32,7 @@ let own: ReturnType<typeof createProject> | null = null;
 const project = () => (own ??= createProject('users'));
 
 async function signIn(page: Page) {
-	const { key } = await project();
-	await page.goto('/login');
-	await page.getByLabel('Project key').fill(key);
-	await page.getByRole('button', { name: 'Sign in' }).click();
-	await expect(page).toHaveURL(/\/traces$/);
+	await enter(page, (await project()).account);
 }
 
 // --- a minimal OTLP/protobuf export ------------------------------------------

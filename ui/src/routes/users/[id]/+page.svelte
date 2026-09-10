@@ -158,9 +158,9 @@
 	 * success there is no user left to be on, so the page leaves.
 	 */
 	async function erase(confirm?: string): Promise<DryRun | string> {
-		const current = project.current;
-		if (!current) throw new ApiError(0, 'the project has not loaded yet');
-		const answer = await api.eraseUserData(current.id, id, confirm);
+		const current = project.id;
+		if (!current) throw new ApiError(0, 'there is no project on screen to erase from');
+		const answer = await api.eraseUserData(current, id, confirm);
 		if ('dry_run' in answer && answer.dry_run) return answer as DryRun;
 		const deleted = (answer as { deleted: Record<string, number> }).deleted;
 		return `Erased ${deleted.traces ?? 0} traces belonging to ${id}.`;
@@ -185,10 +185,15 @@
 		{#if loading}<LoaderCircle class="size-3.5 animate-spin" />{/if}
 	{/snippet}
 	{#snippet actions()}
-		<Button onclick={() => (erasing = !erasing)} aria-expanded={erasing}>
-			<Trash2 class="size-4" />
-			Erase data
-		</Button>
+		<!-- The same card Settings carries, and the same rule: erasing a
+		     user's data is an editor's route, so a viewer reads this page and
+		     is offered nothing on it (spec 028 #15). -->
+		{#if project.editor}
+			<Button onclick={() => (erasing = !erasing)} aria-expanded={erasing}>
+				<Trash2 class="size-4" />
+				Erase data
+			</Button>
+		{/if}
 	{/snippet}
 </PageHeader>
 

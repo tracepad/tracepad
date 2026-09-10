@@ -6,6 +6,7 @@ import {
 	PLAIN_TEXT_OBSERVATION,
 	PLAIN_TEXT_TRACE,
 	plainTextPayloads,
+	signIn as enter,
 	state
 } from './harness';
 
@@ -19,8 +20,7 @@ import {
 // what puts a truncation marker on the screen to click.
 
 async function signIn(page: Page) {
-	await page.goto(state().preAuthed);
-	await expect(page).toHaveURL(/\/traces$/);
+	await enter(page, state().member);
 }
 
 /** The observation whose metadata carries a nested `events` array to fold. */

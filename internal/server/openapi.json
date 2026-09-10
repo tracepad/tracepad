@@ -2778,7 +2778,9 @@
           "stats_retention_days": {"type": ["integer", "null"], "maximum": 36500, "description": "The window for the statistics rollup, which outlives the traces it summarizes; null means it is kept forever, which is the default"},
           "created_at": {"type": "string", "format": "date-time"},
           "deleted_at": {"type": "string", "format": "date-time"},
-          "purge_at": {"type": "string", "format": "date-time", "description": "When the sweeper destroys the data; seven days after the delete, and not configurable"}
+          "purge_at": {"type": "string", "format": "date-time", "description": "When the sweeper destroys the data; seven days after the delete, and not configurable"},
+          "role": {"type": "string", "enum": ["viewer", "editor", "owner"],
+            "description": "Present only when a session asked: what this account may do in this project. A project key and the admin token get no role, because a role is what an account has (spec 028 #12)"}
         },
         "required": ["id", "name", "retention_days", "raw_retention_days", "stats_retention_days", "created_at"]
       },

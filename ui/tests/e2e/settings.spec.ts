@@ -1,33 +1,26 @@
 import { expect, test, type Page } from '@playwright/test';
-import { ADMIN_TOKEN, createProject, state } from './harness';
+import { createProject, signIn, signInAsOwner, state, type Account } from './harness';
 
 // Settings, end to end (Testing): the dry-run/confirm contract rendered, a key
-// minted and revoked, and the Administration section's lifecycle.
+// minted and revoked, and the Server tab's project lifecycle — which used to
+// be the Administration section behind the admin token and is an owner's tab
+// since spec 028 #14.
 //
 // Every test here changes something, so every test gets a project of its own.
 // Two Playwright projects run these files against one server, and a suite
 // whose tests edit each other's retention is a suite that fails at random.
 
-/** Signs in with a key entered by hand, which is how a second project is opened. */
-async function signInAs(page: Page, key: string) {
-	await page.goto('/login');
-	await page.getByLabel('Project key').fill(key);
-	await page.getByRole('button', { name: 'Sign in' }).click();
-	await expect(page).toHaveURL(/\/traces$/);
-	await page.goto('/settings');
-}
-
-async function unlockAdministration(page: Page) {
-	await page.getByLabel('Admin token').fill(ADMIN_TOKEN);
-	await page.getByRole('button', { name: 'Unlock' }).click();
-	await expect(page.getByText('Unlocked on this browser.')).toBeVisible();
+/** Signs in as the project's own editor and opens its tab. */
+async function openProjectTab(page: Page, account: Account) {
+	await signIn(page, account);
+	await page.goto('/settings/project');
 }
 
 test('shortening retention previews what it would delete, then asks for the name', async ({
 	page
 }) => {
 	const own = await createProject('retention');
-	await signInAs(page, own.key);
+	await openProjectTab(page, own.account);
 
 	await page.getByLabel('Traces, observations and scores').selectOption('Keep for');
 	await page.getByLabel('Days of retention').fill('3');
@@ -59,7 +52,7 @@ test('shortening retention previews what it would delete, then asks for the name
 // spares, so it is confirmed like its siblings.
 test('the statistics window is set from Settings and survives the round trip', async ({ page }) => {
 	const own = await createProject('statswindow');
-	await signInAs(page, own.key);
+	await openProjectTab(page, own.account);
 
 	await page.getByLabel('Statistics history').selectOption('Keep for');
 	await page.getByLabel('Days of statistics retention').fill('180');
@@ -85,7 +78,7 @@ test('the statistics window is set from Settings and survives the round trip', a
 
 test('editing the window after a preview takes the preview away', async ({ page }) => {
 	const own = await createProject('repreview');
-	await signInAs(page, own.key);
+	await openProjectTab(page, own.account);
 
 	await page.getByLabel('Traces, observations and scores').selectOption('Keep for');
 	await page.getByLabel('Days of retention').fill('30');
@@ -104,7 +97,7 @@ test('editing the window after a preview takes the preview away', async ({ page 
 
 test('a minted key is shown once, and can then be revoked', async ({ page }) => {
 	const own = await createProject('keys');
-	await signInAs(page, own.key);
+	await openProjectTab(page, own.account);
 
 	await page.getByRole('button', { name: 'Mint a key pair' }).click();
 
@@ -129,7 +122,7 @@ test('a minted key is shown once, and can then be revoked', async ({ page }) => 
 
 test("erasing a user's data previews it and echoes the user id", async ({ page }) => {
 	const own = await createProject('erasure');
-	await signInAs(page, own.key);
+	await openProjectTab(page, own.account);
 
 	await page.getByLabel('User id').fill('nobody-here');
 	await page.getByRole('button', { name: 'Show what would go' }).click();
@@ -145,25 +138,31 @@ test("erasing a user's data previews it and echoes the user id", async ({ page }
 	await expect(page.getByText(/Erased 0 traces/)).toBeVisible();
 });
 
-test('renaming says it needs the admin token, and works once it has one', async ({ page }) => {
+// Renaming moved from the admin token to `owner` for the reason it needed the
+// token in the first place (spec 028 #3): a project's name is the echo every
+// destructive confirmation is typed against.
+test('renaming is an editor’s to read and an owner’s to do', async ({ page }) => {
 	const own = await createProject('rename');
-	await signInAs(page, own.key);
+	await openProjectTab(page, own.account);
 
-	// Shown, disabled, with the reason and the CLI equivalent (spec 007 #12).
-	await expect(page.getByLabel('Name')).toBeDisabled();
-	await expect(page.getByText('Renaming needs the admin token')).toBeVisible();
+	await expect(page.getByLabel('Name', { exact: true })).toBeDisabled();
+	await expect(page.getByText("Renaming a project is an owner's")).toBeVisible();
+	await expect(page.getByRole('button', { name: 'Rename', exact: true })).toHaveCount(0);
 
-	await unlockAdministration(page);
-	await page.getByLabel('Name').fill(`${own.name}-renamed`);
+	await signInAsOwner(page, own.id);
+	await page.goto('/settings/project');
+	await page.getByLabel('Name', { exact: true }).fill(`${own.name}-renamed`);
 	await page.getByRole('button', { name: 'Rename' }).click();
 
 	await expect(page.getByText('Renamed.')).toBeVisible();
+	// The name rides in `me.projects`, so the sidebar reads the new one too.
+	await expect(page.getByText(`${own.name}-renamed`).first()).toBeVisible();
 });
 
-test('administration creates, deletes with the echo, and restores', async ({ page }) => {
+test('the Server tab creates, deletes with the echo, and restores', async ({ page }) => {
 	const own = await createProject('lifecycle');
-	await signInAs(page, own.key);
-	await unlockAdministration(page);
+	await signInAsOwner(page, own.id);
+	await page.goto('/settings/server');
 
 	const name = `disposable-${Math.random().toString(36).slice(2, 8)}`;
 	await page.getByLabel('New project').fill(name);
@@ -194,15 +193,51 @@ test('administration creates, deletes with the echo, and restores', async ({ pag
 	await expect(row).toContainText('Live');
 });
 
-test('a wrong admin token is refused without touching the session', async ({ page }) => {
-	const own = await createProject('badtoken');
-	await signInAs(page, own.key);
+// The tab is absent for a member and the route redirects, which is the two
+// halves of the same rule (spec 028 #14).
+test('the Server tab belongs to owners', async ({ page }) => {
+	const own = await createProject('servertab');
+	await openProjectTab(page, own.account);
 
-	await page.getByLabel('Admin token').fill('not-the-token');
-	await page.getByRole('button', { name: 'Unlock' }).click();
+	await expect(page.getByRole('tab', { name: 'Project' })).toBeVisible();
+	await expect(page.getByRole('tab', { name: 'Account' })).toBeVisible();
+	await expect(page.getByRole('tab', { name: 'Server' })).toHaveCount(0);
 
-	await expect(page.getByRole('alert')).toContainText('not this server');
-	// Still signed in: a bad management credential is not a bad project key.
-	await page.goto('/traces');
-	await expect(page.getByRole('heading', { level: 1, name: 'Traces' })).toBeVisible();
+	await page.goto('/settings/server');
+	await expect(page).toHaveURL(/\/settings\/project$/);
+});
+
+test('a member changes their own name and password', async ({ page }) => {
+	const own = await createProject('ownaccount');
+	await signIn(page, own.account);
+	await page.goto('/settings/account');
+
+	await page.getByLabel('Display name').fill('Renamed Person');
+	await page.getByRole('button', { name: 'Save' }).click();
+	await expect(page.getByText('Saved.')).toBeVisible();
+	// The account menu reads the display name from the same `me`.
+	await expect(page.getByRole('button', { name: 'Signed in as Renamed Person' })).toBeVisible();
+
+	// This browser is the only session, and it says which one it is.
+	await expect(page.getByText('this browser')).toBeVisible();
+
+	await page.getByLabel('Current password').fill(own.account.password);
+	await page.getByLabel('New password', { exact: true }).fill('a-second-password');
+	await page.getByLabel('New password again').fill('a-second-password');
+	await page.getByRole('button', { name: 'Change the password' }).click();
+
+	await expect(page.getByText('Every other browser was signed out.')).toBeVisible();
+});
+
+test('a wrong current password is refused in the server’s words', async ({ page }) => {
+	const own = await createProject('badpassword');
+	await signIn(page, own.account);
+	await page.goto('/settings/account');
+
+	await page.getByLabel('Current password').fill('not-the-password');
+	await page.getByLabel('New password', { exact: true }).fill('a-long-enough-one');
+	await page.getByLabel('New password again').fill('a-long-enough-one');
+	await page.getByRole('button', { name: 'Change the password' }).click();
+
+	await expect(page.getByRole('alert')).toContainText('wrong current password');
 });

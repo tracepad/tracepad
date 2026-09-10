@@ -17,6 +17,7 @@
 	import VersionView from '$lib/components/prompts/VersionView.svelte';
 	import { timestamp } from '$lib/format';
 	import { asPage, Listing, UrlSpot } from '$lib/listing.svelte';
+	import { project } from '$lib/project.svelte';
 	import {
 		defaultDiff,
 		diffCeiling,
@@ -161,15 +162,18 @@
 		</div>
 	{/snippet}
 	{#snippet actions()}
-		<Button
-			variant="primary"
-			aria-label="New version"
-			onclick={() =>
-				goto(`${here}/versions/new${shown === null ? '' : `?from=${shown}`}`)}
-		>
-			<Plus class="size-4" />
-			<span class="hidden sm:inline">New version</span>
-		</Button>
+		<!-- Reading a prompt and diffing its versions is every role's; appending
+		     one and deleting the name are an editor's (spec 028 #15). -->
+		{#if project.editor}
+			<Button
+				variant="primary"
+				aria-label="New version"
+				onclick={() => goto(`${here}/versions/new${shown === null ? '' : `?from=${shown}`}`)}
+			>
+				<Plus class="size-4" />
+				<span class="hidden sm:inline">New version</span>
+			</Button>
+		{/if}
 		{#if diff}
 			<!-- Just the diff: whichever version was being read before it opened
 			     is still the one to come back to. -->
@@ -186,10 +190,12 @@
 				<span class="hidden sm:inline">Diff</span>
 			</Button>
 		{/if}
-		<Button aria-label="Delete prompt" onclick={() => (deleting = true)}>
-			<Trash2 class="size-4" />
-			<span class="hidden sm:inline">Delete</span>
-		</Button>
+		{#if project.editor}
+			<Button aria-label="Delete prompt" onclick={() => (deleting = true)}>
+				<Trash2 class="size-4" />
+				<span class="hidden sm:inline">Delete</span>
+			</Button>
+		{/if}
 	{/snippet}
 </PageHeader>
 

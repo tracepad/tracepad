@@ -1,13 +1,18 @@
 import { expect, test, type Page } from '@playwright/test';
-import { WIRE_GENERATION, WIRE_GUARDRAIL, WIRE_TRACE, state } from './harness';
+import {
+	signIn as enter,
+	state,
+	WIRE_GENERATION,
+	WIRE_GUARDRAIL,
+	WIRE_TRACE
+} from './harness';
 
 // What the wire already carries, end to end against the real binary
 // (spec 012, Testing): the type filter, the TTFT column, the icons in the
 // tree, and the prompt badge that leads to the traces that ran it.
 
 async function signIn(page: Page) {
-	await page.goto(state().preAuthed);
-	await expect(page).toHaveURL(/\/traces$/);
+	await enter(page, state().member);
 }
 
 test('the type filter narrows the listing and survives a reload', async ({ page }) => {

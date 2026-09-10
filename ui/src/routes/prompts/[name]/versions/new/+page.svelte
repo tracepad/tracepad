@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { api } from '$lib/api/client.svelte';
+	import EditorOnly from '$lib/components/EditorOnly.svelte';
 	import PromptEditor from '$lib/components/prompts/PromptEditor.svelte';
 
 	// A new version of an existing name (spec 021 #4), prefilled from `?from=V`
@@ -31,4 +32,6 @@
 	});
 </script>
 
-<PromptEditor {name} {from} {known} />
+<EditorOnly what="appending a version to a prompt is not yours to do">
+	<PromptEditor {name} {from} {known} />
+</EditorOnly>

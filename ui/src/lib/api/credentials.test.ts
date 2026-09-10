@@ -5,41 +5,51 @@ const replaceState = vi.fn();
 vi.mock('$app/navigation', () => ({ goto, replaceState }));
 
 /**
- * The invariant spec 007 #3 is built on, held by a fetch spy: the admin token
- * goes to the management endpoints that demand it and nowhere else, and it is
- * never the credential on anything that reads trace data.
+ * What every request carries now that a person signs in (spec 028 #4, #6): the
+ * session cookie and nothing else, plus the id of the project the screen is
+ * about — on the routes that need it, and on no others.
  *
- * This is the test the Decision asks for by name. Two credentials in one app
- * is exactly the shape where "it only goes there" quietly stops being true —
- * one call site with the wrong default and the management-plane token is on
- * every listing request in the tab.
+ * This is the fetch-spy that spec 007 #3 had for the admin token, pointed at
+ * the invariant that replaced it. A session is not a project the way a key was,
+ * so "which project is this about" is a claim one function makes for the whole
+ * client, and one call site sending it to the wrong place is exactly the shape
+ * of bug that would leak a listing across projects.
  */
+
+const PROJECT = 'a'.repeat(32);
+const OTHER = 'b'.repeat(32);
+
+const ME = {
+	account: { id: 'acc1', email: 'her@example.com', name: 'Her', owner: true },
+	projects: [
+		{ id: PROJECT, name: 'checkout', role: 'owner' as const },
+		{ id: OTHER, name: 'staging', role: 'owner' as const }
+	]
+};
 
 async function fresh() {
 	vi.resetModules();
 	const { api, ApiError } = await import('./client.svelte');
 	const { auth } = await import('$lib/auth.svelte');
-	const { admin } = await import('$lib/admin.svelte');
-	auth.adopt(PROJECT_KEY);
-	admin.adopt(ADMIN_TOKEN);
-	return { api, ApiError, auth, admin };
+	const { project } = await import('$lib/project.svelte');
+	auth.adopt(ME);
+	project.restore();
+	return { api, ApiError, auth, project };
 }
 
-const PROJECT_KEY = 'tp-sk-project';
-const ADMIN_TOKEN = 'admin-token-secret';
-const PROJECT_ID = 'a'.repeat(32);
-
-type Call = { url: string; method: string; key: string | null };
+type Call = { url: string; method: string; project: string | null; authorization: string | null };
 
 /** A fetch that answers everything with `body`, recording who asked and how. */
 function spyFetch(body: unknown = {}, status = 200): Call[] {
 	const calls: Call[] = [];
 	vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
 		const headers = new Headers(init?.headers);
+		expect(init?.credentials).toBe('same-origin');
 		calls.push({
 			url,
 			method: init?.method ?? 'GET',
-			key: headers.get('Authorization')
+			project: headers.get('X-Tracepad-Project'),
+			authorization: headers.get('Authorization')
 		});
 		return Promise.resolve(
 			new Response(JSON.stringify(body), {
@@ -53,12 +63,13 @@ function spyFetch(body: unknown = {}, status = 200): Call[] {
 
 beforeEach(() => {
 	window.localStorage.clear();
+	window.history.replaceState(null, '', '/traces');
 	goto.mockClear();
 	vi.unstubAllGlobals();
 });
 
 describe('the data plane', () => {
-	it('never carries the admin token', async () => {
+	it('names the project on every request and holds no credential of its own', async () => {
 		const { api } = await fresh();
 		const calls = spyFetch({ traces: [], sessions: [], buckets: [], next_cursor: null });
 
@@ -66,131 +77,87 @@ describe('the data plane', () => {
 		await api.listSessions({});
 		await api.getSession('s1');
 		await api.getStats({ group_by: 'day' });
-		await api.getTrace('b'.repeat(32));
+		await api.getTrace('c'.repeat(32));
+		await api.listPrompts();
+		await api.listQueues();
+
+		expect(calls).toHaveLength(7);
+		for (const call of calls) {
+			expect(call.project).toBe(PROJECT);
+			expect(call.authorization).toBeNull();
+		}
+	});
+
+	it('follows the project the reader picked', async () => {
+		const { api, project } = await fresh();
+		project.choose(OTHER);
+		const calls = spyFetch({ traces: [], next_cursor: null });
+
+		await api.listTraces({});
+
+		expect(calls[0].project).toBe(OTHER);
+	});
+});
+
+describe('the routes that carry their own project', () => {
+	it('are sent no header at all', async () => {
+		const { api } = await fresh();
+		const calls = spyFetch({ projects: [], keys: [], accounts: [], sessions: [], dry_run: false });
+
 		await api.listProjects();
+		await api.getProject(PROJECT);
+		await api.listKeys(PROJECT);
+		await api.me();
+		await api.listSignIns();
+		await api.listAccounts();
+		await api.getSetup();
 
-		expect(calls).toHaveLength(6);
-		for (const call of calls) {
-			expect(call.key).toBe(`Bearer ${PROJECT_KEY}`);
-			expect(call.key).not.toContain(ADMIN_TOKEN);
-		}
+		// A session sends no `X-Tracepad-Project` on any of these (Decision 19):
+		// the project is in the path, or the question is not about one.
+		for (const call of calls) expect(call.project).toBeNull();
+		expect(calls).toHaveLength(7);
 	});
 });
 
-describe("the project's own management", () => {
-	it('runs on the project key, which is what administers its own project', async () => {
+describe('what the interface can no longer do', () => {
+	it('has no admin token to send', async () => {
 		const { api } = await fresh();
-		const calls = spyFetch({ keys: [], dry_run: false, deleted: {} });
 
-		await api.listKeys(PROJECT_ID);
-		await api.createKey(PROJECT_ID);
-		await api.revokeKey(PROJECT_ID, 'tp-pk-old');
-		await api.eraseUserData(PROJECT_ID, 'u1');
-		await api.patchProject(PROJECT_ID, { retention_days: 30 });
-
-		for (const call of calls) {
-			expect(call.key).toBe(`Bearer ${PROJECT_KEY}`);
-		}
-		// And the destructive ones are the endpoint's own dry run until the
-		// echo is passed back (spec 005 #8, spec 007 #5).
-		expect(calls[2].url).toBe(`/api/v1/projects/${PROJECT_ID}/keys/tp-pk-old`);
-		expect(calls[2].method).toBe('DELETE');
-		expect(calls[3].url).toBe(`/api/v1/projects/${PROJECT_ID}/users/u1/data`);
-		expect(calls[4].method).toBe('PATCH');
+		// The five lifecycle calls used to be the only ones carrying a second
+		// credential (spec 007 #3). They are an owner's session now, so the
+		// grep that used to find `scope: 'admin'` finds nothing.
+		expect('probeAdmin' in api).toBe(false);
+		expect('probe' in api).toBe(false);
 	});
 
-	it('sends the echo the server asked for when there is one', async () => {
+	it('runs the project lifecycle on the session', async () => {
 		const { api } = await fresh();
-		const calls = spyFetch({ dry_run: false, deleted: {} });
-
-		await api.eraseUserData(PROJECT_ID, 'u1', 'u1');
-		await api.patchProject(PROJECT_ID, { retention_days: 1 }, 'my-project');
-
-		expect(calls[0].url).toContain('confirm=u1');
-		expect(calls[1].url).toContain('confirm=my-project');
-	});
-});
-
-describe('the management plane', () => {
-	it('is the only place the admin token is sent', async () => {
-		const { api } = await fresh();
-		const calls = spyFetch({ projects: [], id: PROJECT_ID, name: 'x' });
+		const calls = spyFetch({ projects: [], id: PROJECT, name: 'x' });
 
 		await api.listAllProjects();
 		await api.createProject('staging');
-		await api.renameProject(PROJECT_ID, 'renamed');
-		await api.deleteProject(PROJECT_ID);
-		await api.restoreProject(PROJECT_ID);
+		await api.renameProject(PROJECT, 'renamed');
+		await api.deleteProject(PROJECT);
+		await api.restoreProject(PROJECT);
 
 		expect(calls).toHaveLength(5);
 		for (const call of calls) {
-			expect(call.key).toBe(`Bearer ${ADMIN_TOKEN}`);
-			// Every one of them is under /projects: the token reaches the
-			// lifecycle and nothing else (spec 007 #4).
+			expect(call.authorization).toBeNull();
 			expect(call.url.startsWith('/api/v1/projects')).toBe(true);
 		}
-		// Listing soft-deleted projects is the one request only this token can
-		// make, which is what makes it a usable probe.
 		expect(calls[0].url).toContain('include=deleted');
 	});
+});
 
-	it('refuses to send a request it has no token for', async () => {
-		const { api, ApiError, admin } = await fresh();
-		admin.clear();
-		const calls = spyFetch({ projects: [] });
-
-		await expect(api.listAllProjects()).rejects.toBeInstanceOf(ApiError);
-
-		// Not attempted at all, rather than attempted with the project key —
-		// which would send the session's credential somewhere it was never
-		// meant to go and read a 403 as if it meant something.
-		expect(calls).toHaveLength(0);
-	});
-
-	it('locks itself on a 401 without signing the reader out', async () => {
-		const { api, auth, admin } = await fresh();
-		spyFetch({ error: 'unauthorized' }, 401);
-
-		await expect(api.listAllProjects()).rejects.toThrow('admin token');
-
-		expect(admin.unlocked).toBe(false);
-		// A bad admin token is not a bad project key: the screens keep working.
-		expect(auth.key).toBe(PROJECT_KEY);
-		expect(goto).not.toHaveBeenCalled();
-	});
-
-	it('leaves with the project key when that key is rejected', async () => {
-		const { api, auth, admin } = await fresh();
-		spyFetch({ error: 'unauthorized' }, 401);
-
-		await expect(api.listTraces({})).rejects.toThrow('sign in again');
-
-		// The session ended, so both credentials did. Leaving the token behind
-		// would hand the management plane to whoever signs in next on this
-		// browser — `admin.restore()` reads it back on the following load.
-		expect(auth.key).toBe(null);
-		expect(admin.unlocked).toBe(false);
-		expect(window.localStorage.getItem('tracepad.admin')).toBe(null);
-	});
-
-	it('probes a candidate token without storing it', async () => {
-		const { api, admin } = await fresh();
-		admin.clear();
-		const calls = spyFetch({ projects: [] });
-
-		expect(await api.probeAdmin('candidate')).toBe(true);
-
-		expect(calls[0].key).toBe('Bearer candidate');
-		expect(calls[0].url).toBe('/api/v1/projects?include=deleted');
-		// Probing decides; adopting is the caller's move.
-		expect(admin.unlocked).toBe(false);
-	});
-
-	it('reads a refusal as "not the admin token"', async () => {
+describe('the destructive endpoints', () => {
+	it('send the echo the server asked for when there is one', async () => {
 		const { api } = await fresh();
-		// What a perfectly valid project key gets from `?include=deleted`.
-		spyFetch({ error: 'this needs the cross-project admin token' }, 403);
+		const calls = spyFetch({ dry_run: false, deleted: {} });
 
-		expect(await api.probeAdmin(PROJECT_KEY)).toBe(false);
+		await api.eraseUserData(PROJECT, 'u1', 'u1');
+		await api.deleteAccount('acc9', 'helper@example.com');
+
+		expect(calls[0].url).toContain('confirm=u1');
+		expect(calls[1].url).toContain('confirm=helper%40example.com');
 	});
 });

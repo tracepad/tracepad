@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { createProject, state } from './harness';
+import { createProject, signIn as enter, state, type Account } from './harness';
 
 // The filter panel's facet lists, against the real binary (spec 027, Testing —
 // e2e): open the panel, tick two environments, apply, and read the URL, the
@@ -24,12 +24,8 @@ const HOUR = (() => {
 let own: ReturnType<typeof createProject> | null = null;
 const project = () => (own ??= createProject('filters'));
 
-async function signIn(page: Page, into?: string) {
-	const key = into ?? (await project()).key;
-	await page.goto('/login');
-	await page.getByLabel('Project key').fill(key);
-	await page.getByRole('button', { name: 'Sign in' }).click();
-	await expect(page).toHaveURL(/\/traces$/);
+async function signIn(page: Page, into?: Account) {
+	await enter(page, into ?? (await project()).account);
 }
 
 // --- a minimal OTLP/protobuf export ------------------------------------------
@@ -391,7 +387,7 @@ test('an environment first seen after the panel closed is on the list when it re
 		fresh.key
 	);
 	await onTheFacetList(fresh.key, 'production');
-	await signIn(page, fresh.key);
+	await signIn(page, fresh.account);
 
 	await openPanel(page);
 	await expect(box(page, 'Environment', 'production')).toBeVisible();

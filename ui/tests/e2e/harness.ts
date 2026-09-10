@@ -1,3 +1,4 @@
+import { expect, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
@@ -10,36 +11,45 @@ export const CI = !!process.env.CI;
 /** Where the boot writes what the tests need to know about it. */
 export const STATE = join(process.cwd(), 'tests', 'e2e', '.state.json');
 
+/** An account the suite can sign in as. */
+export type Account = { email: string; password: string };
+
 export type State = {
 	baseURL: string;
-	/**
-	 * The setup link the server printed on first run, which is how the first
-	 * owner is created (spec 028 #9).
-	 */
-	setup: string;
-	/**
-	 * The `#key=` entry the interface still takes while the login screen asks
-	 * for a key (spec 006 #8). The server no longer prints it — the setup link
-	 * took its place — so the boot builds it from the key it read out of the
-	 * connection block.
-	 */
-	preAuthed: string;
+	/** The key of the project first run created, which the corpus is in. */
 	key: string;
+	/** That project's id, which is what the seeded accounts can reach. */
+	project: string;
+	/** The first owner, created from the setup link the server printed. */
+	owner: Account & { id: string };
+	/** An editor of the seeded project, for the suites that only read it. */
+	member: Account;
 };
 
 /**
  * The admin token the suite boots the server with. It is a fixture, not a
  * secret: this server lives for the length of one test run on a temporary
- * database.
+ * database. No screen takes it any more (spec 028 #14) — it is how this file
+ * mints projects and accounts out of band, the way `tracepad accounts` does.
  */
 export const ADMIN_TOKEN = 'e2e-admin-token';
+
+/** One password for every fixture account; ten characters is the rule (#1). */
+export const PASSWORD = 'e2e-password';
 
 /**
  * Mints a project of its own, so a test that changes retention, revokes a key
  * or deletes something is not doing it to the project another test is reading.
  * The two Playwright projects run the same files against one server.
+ *
+ * It comes with an editor account of its own for the same reason, and for one
+ * more: the project on screen is the first of `me.projects` by name (spec 028
+ * #13), so an account that can reach exactly one project is an account whose
+ * screens are about the project this suite made.
  */
-export async function createProject(name: string): Promise<{ id: string; name: string; key: string }> {
+export async function createProject(
+	name: string
+): Promise<{ id: string; name: string; key: string; account: Account }> {
 	const { baseURL } = state();
 	const unique = `${name}-${Math.random().toString(36).slice(2, 8)}`;
 	const response = await fetch(`${baseURL}/api/v1/projects`, {
@@ -49,7 +59,73 @@ export async function createProject(name: string): Promise<{ id: string; name: s
 	});
 	if (!response.ok) throw new Error(`create project: ${response.status}`);
 	const created = (await response.json()) as { id: string; name: string; secret_key: string };
-	return { id: created.id, name: created.name, key: created.secret_key };
+	const account = await inviteEditor(baseURL, created.id, unique);
+	return { id: created.id, name: created.name, key: created.secret_key, account };
+}
+
+/**
+ * Invites an editor of one project and accepts the invitation, which is the
+ * only way an account gets a password (spec 028 #10). Two requests, both of
+ * them the ones an owner and an invited person make.
+ */
+export async function inviteEditor(
+	baseURL: string,
+	project: string,
+	label: string
+): Promise<Account> {
+	const email = `${label}@e2e.test`;
+	const response = await fetch(`${baseURL}/api/v1/accounts`, {
+		method: 'POST',
+		headers: { Authorization: `Bearer ${ADMIN_TOKEN}`, 'Content-Type': 'application/json' },
+		body: JSON.stringify({ email, memberships: [{ project_id: project, role: 'editor' }] })
+	});
+	if (!response.ok) throw new Error(`invite ${email}: ${response.status} ${await response.text()}`);
+	const { invite_url } = (await response.json()) as { invite_url: string };
+	await acceptInvite(baseURL, invite_url);
+	return { email, password: PASSWORD };
+}
+
+/** Sets a password from an invitation link, the way the `/invite` screen does. */
+export async function acceptInvite(baseURL: string, link: string) {
+	const token = new URLSearchParams(new URL(link).hash.slice(1)).get('token');
+	if (!token) throw new Error(`no #token= in the invitation link: ${link}`);
+	const response = await fetch(`${baseURL}/api/v1/auth/accept-invite`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ token, password: PASSWORD })
+	});
+	if (!response.ok) throw new Error(`accept the invitation: ${response.status}`);
+}
+
+/**
+ * Signs in through the form, which is the one way in (spec 028 #13). The
+ * cookie the server sets is the session for the rest of the test.
+ */
+export async function signIn(page: Page, account: Account) {
+	await page.goto('/login');
+	await page.getByLabel('Email').fill(account.email);
+	// Exact: the eye beside the field is labelled "Show the password".
+	await page.getByLabel('Password', { exact: true }).fill(account.password);
+	await page.getByRole('button', { name: 'Sign in' }).click();
+	await expect(page).toHaveURL(/\/traces$/);
+}
+
+/**
+ * Signs in as the owner with one project pinned. An owner reaches every
+ * project, so "the first by name" is whichever project some other worker
+ * happened to create — until spec 029's switcher, the choice lives in
+ * `localStorage` under the account's id, and this is how a test states it.
+ */
+export async function signInAsOwner(page: Page, project?: string) {
+	const { owner } = state();
+	if (project) {
+		await page.addInitScript(
+			([id, chosen]: [string, string]) =>
+				window.localStorage.setItem(`tracepad.project.${id}`, chosen),
+			[owner.id, project] as [string, string]
+		);
+	}
+	await signIn(page, owner);
 }
 
 export function state(): State {

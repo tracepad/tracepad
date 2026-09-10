@@ -12,6 +12,7 @@
 	} from '$lib/api/client.svelte';
 	import { ABSENT, duration, elapsed, timestampPrecise, wait } from '$lib/format';
 	import CopyButton from './CopyButton.svelte';
+	import { project } from '$lib/project.svelte';
 	import AddToQueue from './queues/AddToQueue.svelte';
 	import Payload from './Payload.svelte';
 	import ScoresBlock from './scores/ScoresBlock.svelte';
@@ -138,11 +139,13 @@
 			<!-- The other half of spec 024 #13: in an agent trace the thing to
 			     judge is often one generation, so the queue takes this step
 			     rather than the whole run. -->
-			<AddToQueue
-				target={{ trace_id: traceID, observation_id: observation.id }}
-				label="Queue this observation"
-				compact
-			/>
+			{#if project.editor}
+				<AddToQueue
+					target={{ trace_id: traceID, observation_id: observation.id }}
+					label="Queue this observation"
+					compact
+				/>
+			{/if}
 			<a
 				href="/datasets/items/new?trace={encodeURIComponent(traceID)}&obs={encodeURIComponent(observation.id)}"
 				title="Cut this observation into a dataset as a test case"

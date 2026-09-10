@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { state } from './harness';
+import { signIn as enter, state } from './harness';
 
 // Turning pages against the real binary (spec 009). The corpus is smaller
 // than a page, so the pages here are asked for through the URL — the API takes
@@ -7,8 +7,7 @@ import { state } from './harness';
 // bar offers the common steps.
 
 async function signIn(page: Page) {
-	await page.goto(state().preAuthed);
-	await expect(page).toHaveURL(/\/traces$/);
+	await enter(page, state().member);
 }
 
 const rows = (page: Page) => page.locator('tbody tr');

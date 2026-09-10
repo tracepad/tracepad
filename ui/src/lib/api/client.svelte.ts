@@ -1,5 +1,5 @@
-import { admin } from '$lib/admin.svelte';
 import { auth } from '$lib/auth.svelte';
+import { project } from '$lib/project.svelte';
 import type { components, paths } from './schema';
 import type { QueueItemFilters } from './queues';
 import type { RunFilters } from './runs';
@@ -126,13 +126,32 @@ export type Stats = JSONResponse<paths['/api/v1/stats']['get']>;
 export type KeyList = JSONResponse<paths['/api/v1/projects/{id}/keys']['get']>;
 type ProjectList = JSONResponse<paths['/api/v1/projects']['get']>;
 
-/**
- * Which credential a request travels on (spec 007 #3). Two values rather than
- * a boolean, and passed at every call site rather than inferred from the path,
- * because "the admin token never touches the data plane" is a claim that has
- * to be readable in one grep and testable in one spy.
- */
-type Scope = 'project' | 'admin';
+// The people who sign in (spec 028). An `Account` is how somebody sees
+// themselves; an `AccountDetail` is how an owner sees them, which is the same
+// row plus what an owner manages — standing, invitation, last login, projects.
+export type Account = components['schemas']['Account'];
+export type AccountDetail = components['schemas']['AccountDetail'];
+/** One project an account can reach, with the role it has there. */
+export type Membership = components['schemas']['Membership'];
+/** Who is signed in and what they can reach: the one call the shell makes. */
+export type Me = components['schemas']['Me'];
+/** One browser's sign-in, as the session list shows it. */
+export type AccountSession = components['schemas']['AccountSession'];
+/** A new account and the link that sets its password, shown this once. */
+export type Invitation = components['schemas']['Invitation'];
+/** What deleting an account would take, and the email that makes it happen. */
+export type AccountDeletion = components['schemas']['AccountDeletion'];
+/** What an account is created or edited with; an owner has no memberships. */
+export type AccountInput = {
+	email?: string;
+	name?: string;
+	owner?: boolean;
+	memberships?: { project_id: string; role: MemberRole }[];
+};
+/** The two roles a membership can carry; `owner` is a flag, not a role here. */
+export type MemberRole = 'viewer' | 'editor';
+/** The project side of the question: who has a role in this one. */
+export type MemberList = JSONResponse<paths['/api/v1/projects/{id}/members']['get']>;
 
 /** The retention windows a PATCH can move. `null` is "keep forever". */
 export type RetentionUpdate = {
@@ -140,14 +159,6 @@ export type RetentionUpdate = {
 	raw_retention_days?: number | null;
 	stats_retention_days?: number | null;
 };
-
-/**
- * What a credential turns out to be (spec 006 #13). The interface reads
- * traces, so a project key is the only credential it can use; the admin token
- * is named separately because "wrong key" would be a misleading thing to tell
- * someone holding a perfectly valid one.
- */
-export type Credential = 'project-key' | 'admin-token' | 'rejected';
 
 /** A request the server answered with something other than success. */
 export class ApiError extends Error {
@@ -659,120 +670,190 @@ class Api {
 		);
 	}
 
-	// --- administration (spec 007 #3, #4) ----------------------------------
+	// --- signing in (spec 028 #8, #9, #10) ---------------------------------
 	//
-	// The five calls below are the only ones in this file that carry the admin
-	// token, and they are the project lifecycle plus the rename spec 005 #11
-	// made a cross-project act. Nothing that reads trace data appears here.
+	// The four calls that work without a session, and the three that are about
+	// the session itself. Nothing here is stored by this file: the cookie is
+	// the credential and the browser holds it, which is the whole point of
+	// Decision 4.
+
+	/** Whether this server still needs its first owner; askable by anybody. */
+	getSetup(signal?: AbortSignal) {
+		return this.#json<{ required: boolean }>('/api/v1/setup', { anonymous: true, signal });
+	}
+
+	/** Creates the first owner from the token the server printed. */
+	setup(body: { token: string; email: string; password: string; name?: string }) {
+		return this.#json<{ account: Account }>('/api/v1/setup', {
+			method: 'POST',
+			body,
+			anonymous: true
+		});
+	}
+
+	login(email: string, password: string) {
+		return this.#json<{ account: Account }>('/api/v1/auth/login', {
+			method: 'POST',
+			body: { email, password },
+			anonymous: true
+		});
+	}
+
+	/** Sets a password from an invitation link and signs in; single-use. */
+	acceptInvite(token: string, password: string) {
+		return this.#json<{ account: Account }>('/api/v1/auth/accept-invite', {
+			method: 'POST',
+			body: { token, password },
+			anonymous: true
+		});
+	}
+
+	logout() {
+		return this.#json<void>('/api/v1/auth/logout', { method: 'POST', anonymous: true });
+	}
+
+	/**
+	 * Who is signed in and what they can reach. `anonymous` because a 401 here
+	 * is the guard's answer rather than an accident: it is how the shell learns
+	 * there is nobody to render for, and bouncing from inside the client would
+	 * race the redirect the guard is about to make.
+	 */
+	me(signal?: AbortSignal) {
+		return this.#json<Me>('/api/v1/auth/me', { anonymous: true, signal });
+	}
+
+	/** A display name, a password, or both; a password change needs the old one. */
+	patchMe(body: { name?: string; password?: { current: string; new: string } }) {
+		return this.#json<{ account: Account }>('/api/v1/auth/me', { method: 'PATCH', body });
+	}
+
+	listSignIns(signal?: AbortSignal) {
+		return this.#json<{ sessions: AccountSession[] }>('/api/v1/auth/sessions', { signal });
+	}
+
+	/** Sign out everywhere: every session of this account but this one. */
+	endOtherSignIns() {
+		return this.#json<{ ended: number }>('/api/v1/auth/sessions', { method: 'DELETE' });
+	}
+
+	// --- accounts (spec 028 #12) -------------------------------------------
+	//
+	// The Server tab's second table, for owners and for the admin token. An
+	// account is created without a password and reached by a link, so the one
+	// response that carries a link is the one place it ever appears.
+
+	listAccounts(signal?: AbortSignal) {
+		return this.#json<{ accounts: AccountDetail[] }>('/api/v1/accounts', { signal });
+	}
+
+	createAccount(body: AccountInput) {
+		return this.#json<Invitation>('/api/v1/accounts', { method: 'POST', body });
+	}
+
+	patchAccount(id: string, body: { name?: string; owner?: boolean; disabled?: boolean }) {
+		return this.#json<{ account: AccountDetail }>(`/api/v1/accounts/${id}`, {
+			method: 'PATCH',
+			body
+		});
+	}
+
+	/** A dry run until `confirm` echoes the email (spec 005 #8, Decision 12). */
+	deleteAccount(id: string, confirm?: string) {
+		return this.#json<AccountDeletion | void>(`/api/v1/accounts/${id}`, {
+			method: 'DELETE',
+			query: { confirm }
+		});
+	}
+
+	/** A fresh link, which voids the previous one; this is also the reset. */
+	inviteAccount(id: string) {
+		return this.#json<{ invite_url: string; invite_expires_at: string; note?: string }>(
+			`/api/v1/accounts/${id}/invite`,
+			{ method: 'POST' }
+		);
+	}
+
+	putMembership(id: string, projectID: string, role: MemberRole) {
+		return this.#json<{ membership: { project_id: string; role: MemberRole } }>(
+			`/api/v1/accounts/${id}/projects/${projectID}`,
+			{ method: 'PUT', body: { role } }
+		);
+	}
+
+	deleteMembership(id: string, projectID: string) {
+		return this.#json<void>(`/api/v1/accounts/${id}/projects/${projectID}`, { method: 'DELETE' });
+	}
+
+	/** Who has a role in one project; owners are not rows (Decision 12). */
+	listMembers(id: string, signal?: AbortSignal) {
+		return this.#json<MemberList>(`/api/v1/projects/${id}/members`, { signal });
+	}
+
+	// --- project lifecycle (spec 007 #3, #4; now an owner's) ---------------
+	//
+	// What used to need the admin token in a browser. The token is gone from
+	// the interface (Decision 14): an owner session reaches all of it, and a
+	// credential the screens do not use is a credential the screens should not
+	// hold.
 
 	/** Every project, soft-deleted ones included with their purge dates. */
 	listAllProjects(signal?: AbortSignal) {
-		return this.#json<ProjectList>('/api/v1/projects', {
-			query: { include: 'deleted' },
-			scope: 'admin',
-			signal
-		});
+		return this.#json<ProjectList>('/api/v1/projects', { query: { include: 'deleted' }, signal });
+	}
+
+	getProject(id: string, signal?: AbortSignal) {
+		return this.#json<Project>(`/api/v1/projects/${id}`, { signal });
 	}
 
 	createProject(name: string) {
-		return this.#json<Project & NewKey>('/api/v1/projects', {
-			method: 'POST',
-			body: { name },
-			scope: 'admin'
-		});
+		return this.#json<Project & NewKey>('/api/v1/projects', { method: 'POST', body: { name } });
 	}
 
 	renameProject(id: string, name: string) {
-		return this.#json<Project>(`/api/v1/projects/${id}`, {
-			method: 'PATCH',
-			body: { name },
-			scope: 'admin'
-		});
+		return this.#json<Project>(`/api/v1/projects/${id}`, { method: 'PATCH', body: { name } });
 	}
 
 	deleteProject(id: string, confirm?: string) {
 		return this.#json<DryRun | Project>(`/api/v1/projects/${id}`, {
 			method: 'DELETE',
-			query: { confirm },
-			scope: 'admin'
+			query: { confirm }
 		});
 	}
 
 	restoreProject(id: string) {
-		return this.#json<Project>(`/api/v1/projects/${id}/restore`, {
-			method: 'POST',
-			scope: 'admin'
-		});
-	}
-
-	/**
-	 * Decides whether a token really is the admin token before storing it.
-	 * `?include=deleted` is the probe because it is the cheapest request only
-	 * the admin token may make: a project key reaches `GET /api/v1/projects`
-	 * perfectly well and would otherwise pass for one.
-	 */
-	async probeAdmin(token: string): Promise<boolean> {
-		const response = await this.#fetch('/api/v1/projects', { include: 'deleted' }, token);
-		if (response.ok) return true;
-		if (response.status === 401 || response.status === 403) return false;
-		throw await refusal(response);
-	}
-
-	/**
-	 * Decides what a credential is, before it is stored (spec 006 #13). The
-	 * first request is the one the app actually needs, so a credential that
-	 * cannot read the screens cannot get past the login form; the second runs
-	 * only to tell the admin token apart from a wrong key, which is the
-	 * difference between a useful message and a shrug.
-	 */
-	async probe(key: string): Promise<Credential> {
-		const traces = await this.#fetch('/api/v1/traces', { limit: '1' }, key);
-		if (traces.ok) return 'project-key';
-		if (traces.status !== 401) throw await refusal(traces);
-		const projects = await this.#fetch('/api/v1/projects', {}, key);
-		return projects.ok ? 'admin-token' : 'rejected';
+		return this.#json<Project>(`/api/v1/projects/${id}/restore`, { method: 'POST' });
 	}
 
 	async #json<T>(path: string, options: Request = {}): Promise<T> {
-		const scope = options.scope ?? 'project';
-		const key = scope === 'admin' ? admin.token : auth.key;
-		if (scope === 'admin' && !key) {
-			throw new ApiError(0, 'the Administration section is locked');
+		const response = await this.#fetch(path, options.query ?? {}, options);
+		if (response.ok) {
+			// A `204` is an answer with nothing in it — signing out, dropping a
+			// membership, deleting a confirmed account — and `json()` on an
+			// empty body throws.
+			if (response.status === 204) return undefined as T;
+			return (await response.json()) as T;
 		}
-		const response = await this.#fetch(path, options.query ?? {}, key, options);
-		if (response.ok) return (await response.json()) as T;
-		if (response.status === 401) {
-			// Whichever credential this request travelled on is wrong,
-			// revoked, or belongs to something that no longer exists. Keeping
-			// it would replay the same failure on every screen — but a bad
-			// admin token must only lock its own section, never sign the
-			// reader out of the app (spec 006 #8, spec 007 #3).
-			if (scope === 'admin') {
-				admin.clear();
-				throw new ApiError(401, 'the server did not accept that admin token');
-			}
-			// The session is over, so both credentials go — the same reason
-			// `signOut` clears both. A key that stops working drops whoever
-			// was here back to the login form, and the next person to sign in
-			// on this browser must not find the management plane already
-			// unlocked behind it.
+		if (response.status === 401 && !options.anonymous) {
+			// The cookie is gone, expired, or belongs to an account that was
+			// disabled or deleted under this tab. Every screen reads project
+			// data, so there is nothing to stay on: the person goes back to the
+			// login form with where they were (Decision 13).
 			auth.reject();
-			admin.clear();
-			throw new ApiError(401, 'the key was rejected — sign in again');
+			throw new ApiError(401, 'the session has ended — sign in again');
 		}
 		throw await refusal(response);
 	}
 
-	async #fetch(
-		path: string,
-		query: Query,
-		key: string | null,
-		options: Request = {}
-	): Promise<Response> {
+	async #fetch(path: string, query: Query, options: Request = {}): Promise<Response> {
 		let response: Response;
 		try {
 			response = await fetch(path + search(query), {
 				method: options.method ?? 'GET',
+				// The credential is the session cookie and nothing else
+				// (Decision 4). `same-origin` rather than `include`: the
+				// interface is served by the server it talks to, and a
+				// cross-origin request from this app is a bug, not a feature.
+				credentials: 'same-origin',
 				// Never from the browser's cache (spec 021 #13). The prompt
 				// reads carry `Cache-Control: max-age=60` for the SDKs that
 				// poll them by label (spec 003 #14), and a screen that has
@@ -782,7 +863,7 @@ class Api {
 				// for them and states what the data plane is: live.
 				cache: 'no-store',
 				headers: {
-					...(key ? { Authorization: `Bearer ${key}` } : {}),
+					...projectHeader(path),
 					...(options.body === undefined ? {} : { 'Content-Type': 'application/json' })
 				},
 				body: options.body === undefined ? undefined : JSON.stringify(options.body),
@@ -798,12 +879,37 @@ class Api {
 	}
 }
 
+/**
+ * The routes that carry their project in the path, or have none at all: a
+ * session sends no `X-Tracepad-Project` on any of them (Decision 19), and the
+ * server ignores it where it is meaningless.
+ */
+const CARRY_THEIR_OWN = ['/api/v1/projects', '/api/v1/auth', '/api/v1/accounts', '/api/v1/setup'];
+
+/**
+ * Which project this request is about (Decision 6). A key was its own project
+ * and a session is not, so the interface says so in one place — here — rather
+ * than in every call site, and spec 029 will take the id from the page URL
+ * without any of them noticing.
+ */
+function projectHeader(path: string): Record<string, string> {
+	if (CARRY_THEIR_OWN.some((prefix) => path.startsWith(prefix))) return {};
+	const id = project.id;
+	return id ? { 'X-Tracepad-Project': id } : {};
+}
+
 /** Everything one request can vary. */
 type Request = {
 	method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 	query?: Query;
 	body?: unknown;
-	scope?: Scope;
+	/**
+	 * Whether a `401` is this request's own answer rather than the end of the
+	 * session. The login form's refusal and the guard's "nobody is signed in"
+	 * are both 401s that belong to the caller; everything else is a session
+	 * that has ended, and only that sends the person to the login form.
+	 */
+	anonymous?: boolean;
 	signal?: AbortSignal;
 };
 

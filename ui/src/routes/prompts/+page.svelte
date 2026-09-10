@@ -11,6 +11,7 @@
 	import { timestamp } from '$lib/format';
 	import { asPage, Listing, UrlSpot } from '$lib/listing.svelte';
 	import { orderLabelEntries } from '$lib/prompts';
+	import { project } from '$lib/project.svelte';
 
 	// The project's prompts over `GET /api/v1/prompts` (spec 021, Application
 	// contract): the shared listing with no count, because the endpoint offers
@@ -42,7 +43,11 @@
 		<ListingCount {listing} />
 	{/snippet}
 	{#snippet actions()}
-		<Button variant="primary" onclick={() => goto('/prompts/new')}>New prompt</Button>
+		<!-- The listing is every role's; writing a prompt is an editor's
+		     (spec 028 #15). -->
+		{#if project.editor}
+			<Button variant="primary" onclick={() => goto('/prompts/new')}>New prompt</Button>
+		{/if}
 	{/snippet}
 </PageHeader>
 

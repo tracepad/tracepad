@@ -56,28 +56,15 @@
 </script>
 
 <script lang="ts">
-	import LogOut from '@lucide/svelte/icons/log-out';
 	import { page } from '$app/state';
-	import { goto } from '$app/navigation';
-	import { admin } from '$lib/admin.svelte';
 	import { api } from '$lib/api/client.svelte';
-	import { auth, LOGIN_ROUTE } from '$lib/auth.svelte';
 	import { project } from '$lib/project.svelte';
+	import AccountMenu from './AccountMenu.svelte';
 	import ThemeToggle from './ThemeToggle.svelte';
 
 	// One markup, two shapes (spec 006 #15): a column down the left on a
 	// desktop, a single bar across the top on a phone. Utilities rather than a
 	// second component — the parts and their order are the same either way.
-
-	function signOut() {
-		auth.clear();
-		// The admin token is a second credential and leaves with the first:
-		// signing out on a shared machine must not leave the management plane
-		// unlocked behind the login form (spec 007 #3).
-		admin.clear();
-		project.forget();
-		goto(LOGIN_ROUTE, { replaceState: true });
-	}
 
 	/** The active screen: the one whose path this URL is under. */
 	const active = (href: string) => page.url.pathname.startsWith(href);
@@ -152,26 +139,20 @@
 			</ul>
 		</nav>
 
+		<!-- Who is signed in sits at the bottom of the column and at the end of
+		     the phone's bar (spec 028 #14): the last thing on the way out, and
+		     the one control that is about the reader rather than the data. -->
 		<div
 			class="border-border flex shrink-0 items-center gap-0.5
-				md:mt-auto md:justify-between md:border-t md:px-2 md:py-2"
+				md:mt-auto md:flex-col md:items-stretch md:gap-1 md:border-t md:px-2 md:py-2"
 		>
-			<span class="text-subtle hidden px-1 font-mono text-xs md:inline" title="Server version">
-				{api.version ?? ''}
-			</span>
-			<div class="flex items-center gap-0.5">
+			<div class="flex items-center gap-0.5 md:justify-between">
+				<span class="text-subtle hidden px-1 font-mono text-xs md:inline" title="Server version">
+					{api.version ?? ''}
+				</span>
 				<ThemeToggle />
-				<button
-					type="button"
-					onclick={signOut}
-					title="Sign out"
-					aria-label="Sign out"
-					class="text-muted hover:bg-raised hover:text-fg pointer-coarse:size-11 inline-flex size-7
-						cursor-pointer items-center justify-center rounded-md transition-colors duration-100"
-				>
-					<LogOut class="size-4" />
-				</button>
 			</div>
+			<AccountMenu />
 		</div>
 	</div>
 </aside>

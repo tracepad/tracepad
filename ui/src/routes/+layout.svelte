@@ -1,26 +1,16 @@
 <script lang="ts">
 	import '../app.css';
 	import { page } from '$app/state';
-	import { auth, LOGIN_ROUTE } from '$lib/auth.svelte';
-	import { project } from '$lib/project.svelte';
+	import { OUTSIDE_THE_SHELL } from '$lib/auth.svelte';
 	import Sidebar from '$lib/components/Sidebar.svelte';
 
 	let { children } = $props();
 
-	// The login form is the one screen outside the shell: there is nothing to
-	// navigate to yet, and a sidebar that names a project nobody is signed
-	// into would be an odd thing to look at.
-	const inShell = $derived(page.url.pathname !== LOGIN_ROUTE);
-
-	$effect(() => {
-		// The router exists by now, so the pre-authed key can leave the
-		// address bar (spec 006 #8).
-		auth.stripFragment();
-	});
-
-	$effect(() => {
-		if (auth.authenticated) project.load();
-	});
+	// Three screens sit outside the shell (spec 028 #13): signing in, setting
+	// up the first owner, and accepting an invitation. A sidebar that named a
+	// project nobody is signed into would be an odd thing to look at, and on
+	// two of the three there is not even a session to name one from.
+	const inShell = $derived(!OUTSIDE_THE_SHELL.includes(page.url.pathname));
 </script>
 
 {#if inShell}

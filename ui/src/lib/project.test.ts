@@ -9,88 +9,100 @@ async function fresh() {
 	return { project, auth };
 }
 
-function answers(...names: string[]) {
-	const calls: string[] = [];
-	vi.stubGlobal('fetch', (_url: string, init?: RequestInit) => {
-		calls.push(new Headers(init?.headers).get('Authorization') ?? '');
-		const name = names[calls.length - 1];
-		return Promise.resolve(
-			new Response(JSON.stringify({ projects: name ? [{ id: 'x', name }] : [] }), {
-				status: 200,
-				headers: { 'Content-Type': 'application/json' }
-			})
-		);
-	});
-	return calls;
-}
+const me = (id: string, ...projects: { id: string; name: string; role: 'viewer' | 'editor' }[]) => ({
+	account: { id, email: `${id}@example.com`, name: '', owner: false },
+	projects
+});
+
+const CHECKOUT = { id: 'p1', name: 'checkout', role: 'editor' as const };
+const STAGING = { id: 'p2', name: 'staging', role: 'viewer' as const };
 
 beforeEach(() => {
 	window.localStorage.clear();
-	vi.unstubAllGlobals();
 });
 
-describe('the project name in the sidebar', () => {
-	it('is read once per credential, not once per session', async () => {
+describe('which project is on screen', () => {
+	// The server sorts `me.projects` by name, so "the first" is a stable
+	// answer rather than whatever order the rows came back in.
+	it('is the first of them until somebody picks another', async () => {
 		const { project, auth } = await fresh();
-		const calls = answers('first', 'second');
+		auth.adopt(me('acc1', CHECKOUT, STAGING));
 
-		auth.adopt('tp-sk-one');
-		await project.load();
-		expect(project.name).toBe('first');
+		project.restore();
 
-		// Asking again with the same key must not spend a request.
-		await project.load();
-		expect(calls).toHaveLength(1);
-
-		// A 401 signs the reader out without going through the sidebar, so a
-		// new key can be a different project's — and the old name must go.
-		auth.reject();
-		auth.adopt('tp-sk-two');
-		await project.load();
-
-		expect(project.name).toBe('second');
-		expect(calls).toEqual(['Bearer tp-sk-one', 'Bearer tp-sk-two']);
+		expect(project.id).toBe('p1');
+		expect(project.name).toBe('checkout');
+		expect(project.role).toBe('editor');
 	});
 
-	it('asks again after a failure rather than staying blank forever', async () => {
+	it('is nothing at all for an account with no projects', async () => {
 		const { project, auth } = await fresh();
-		auth.adopt('tp-sk-one');
-		vi.stubGlobal('fetch', () => Promise.reject(new TypeError('offline')));
+		auth.adopt(me('acc1'));
 
-		await project.load();
-		expect(project.name).toBeNull();
+		project.restore();
 
-		answers('recovered');
-		await project.load();
-		expect(project.name).toBe('recovered');
+		expect(project.id).toBeNull();
+		expect(project.role).toBeNull();
 	});
 
-	it('says nothing at all without a credential', async () => {
-		const { project } = await fresh();
-		const calls = answers('never');
+	it('is remembered per account, not per browser', async () => {
+		const { project, auth } = await fresh();
+		auth.adopt(me('acc1', CHECKOUT, STAGING));
+		project.restore();
 
-		await project.load();
+		project.choose('p2');
+		expect(project.id).toBe('p2');
 
-		expect(project.name).toBeNull();
-		expect(calls).toHaveLength(0);
+		// Somebody else signs in on the same laptop: their own last choice, or
+		// their own first project — never the previous person's.
+		auth.adopt(me('acc2', CHECKOUT, STAGING));
+		project.restore();
+
+		expect(project.id).toBe('p1');
+		expect(window.localStorage.getItem('tracepad.project.acc1')).toBe('p2');
+	});
+
+	it('comes back to the same one on the next load', async () => {
+		const { project, auth } = await fresh();
+		auth.adopt(me('acc1', CHECKOUT, STAGING));
+		project.restore();
+		project.choose('p2');
+
+		const second = await fresh();
+		second.auth.adopt(me('acc1', CHECKOUT, STAGING));
+		second.project.restore();
+
+		expect(second.project.id).toBe('p2');
+	});
+
+	// A role taken away under an open tab drops the row out of `me.projects`.
+	// Pointing the header at it would be a 403 on every request.
+	it('falls back when the remembered project is gone', async () => {
+		const { project, auth } = await fresh();
+		auth.adopt(me('acc1', CHECKOUT, STAGING));
+		project.restore();
+		project.choose('p2');
+
+		auth.adopt(me('acc1', CHECKOUT));
+
+		expect(project.id).toBe('p1');
 	});
 });
 
-describe('re-reading the project after a change', () => {
-	it('never blanks the row on the way', async () => {
+describe('what the role allows', () => {
+	it('opens the editing controls for an editor and an owner', async () => {
 		const { project, auth } = await fresh();
-		answers('before', 'after');
-		auth.adopt('tp-sk-one');
-		await project.load();
+		auth.adopt(me('acc1', CHECKOUT));
+		project.restore();
 
-		const inFlight = project.refresh();
-		// Settings renders its cards only when there is a project, so a row
-		// that disappeared for one tick would tear every card down and build
-		// it again — taking with it the confirmation the reader was reading.
-		expect(project.current?.name).toBe('before');
+		expect(project.editor).toBe(true);
+	});
 
-		await inFlight;
-		expect(project.current?.name).toBe('after');
+	it('closes them for a viewer', async () => {
+		const { project, auth } = await fresh();
+		auth.adopt(me('acc1', STAGING));
+		project.restore();
+
+		expect(project.editor).toBe(false);
 	});
 });
-

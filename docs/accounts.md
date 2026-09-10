@@ -233,6 +233,23 @@ have used their link.
 A server with no owner who can sign in prints a setup link again, and that
 setup takes over the existing account if you give it the same email.
 
+## In the web interface
+
+All of the above is a screen as well as a `curl`. The setup and invitation
+links open the two screens that read `#token=`; `/login` takes the email and
+the password; the sidebar's account menu leads to *Account*, where anybody
+changes their own name and password and ends their other sessions.
+
+Owners get a **Server** tab in Settings — absent for everybody else, and the
+address redirects — with the projects table and an **Accounts** table: email,
+name, standing, last login, and the projects each account reaches with its
+role, plus *Invite*, *Edit* and *Delete*. The invitation link is shown once,
+there, with a copy button. See [ui.md](ui.md#settings-and-administration).
+
+The interface hides what a role cannot do and the server refuses it anyway;
+what a `viewer` keeps is every listing, every detail screen and the whole
+annotation flow, because scoring is what the role is for.
+
 ## When every owner's password is lost
 
 Keep `TRACEPAD_ADMIN_TOKEN` somewhere, or keep a second owner.

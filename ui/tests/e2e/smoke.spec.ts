@@ -1,47 +1,68 @@
 import { expect, test, type Page } from '@playwright/test';
-import { FAILING_TRACE, LARGE_PAYLOAD_OBSERVATION, LARGE_PAYLOAD_TRACE, state } from './harness';
+import {
+	FAILING_TRACE,
+	LARGE_PAYLOAD_OBSERVATION,
+	LARGE_PAYLOAD_TRACE,
+	signIn as enter,
+	state
+} from './harness';
 
 // The scenario spec 006 asks for, end to end against the real binary: land on
-// login, sign in through the URL the server printed, see the ingested traces,
-// open one, walk its tree, load a payload the budget refused, and come back to
-// the same observation from a deep link.
+// login, sign in, see the ingested traces, open one, walk its tree, load a
+// payload the budget refused, and come back to the same observation from a
+// deep link.
 
 // Read inside the tests, never at module scope: Playwright collects the test
 // files before it runs the global setup that writes this.
-/** Signing in the way the first-run link does. */
 async function signIn(page: Page) {
-	await page.goto(state().preAuthed);
-	await expect(page).toHaveURL(/\/traces$/);
+	await enter(page, state().member);
 }
 
 test('an unauthenticated visit lands on the login form', async ({ page }) => {
 	await page.goto('/traces');
 
 	await expect(page).toHaveURL(/\/login\?next=/);
-	await expect(page.getByLabel('Project key')).toBeVisible();
+	await expect(page.getByLabel('Email')).toBeVisible();
 });
 
-test('the pre-authed URL signs in and leaves the address bar', async ({ page }) => {
+test('a session outlives the navigation', async ({ page }) => {
 	await signIn(page);
 
-	// The fragment carried a secret; it must not survive in the URL or in
-	// history (spec 006 #8).
-	expect(page.url()).not.toContain('#key=');
-	await page.goBack();
-	expect(page.url()).not.toContain('#key=');
-
-	// And the key outlived the navigation, so a reload stays signed in.
+	// The credential is a cookie the browser holds, so a reload is still
+	// signed in and nothing about it was ever in the address bar (spec 028 #4).
 	await page.goto('/traces');
 	await expect(page.getByRole('heading', { name: 'Traces' })).toBeVisible();
 });
 
-test('a bad key is refused with a reason', async ({ page }) => {
+test('a wrong password is refused with one sentence', async ({ page }) => {
 	await page.goto('/login');
-	await page.getByLabel('Project key').fill('tp-sk-not-a-real-key');
+	await page.getByLabel('Email').fill(state().member.email);
+	await page.getByLabel('Password', { exact: true }).fill('not-the-password');
 	await page.getByRole('button', { name: 'Sign in' }).click();
 
-	await expect(page.getByRole('alert')).toContainText('did not accept');
+	// One text for every way of failing, so the form enumerates nobody (#8).
+	await expect(page.getByRole('alert')).toContainText('wrong email or password');
 	await expect(page).toHaveURL(/\/login/);
+});
+
+test('an unknown email is refused with the same sentence', async ({ page }) => {
+	await page.goto('/login');
+	await page.getByLabel('Email').fill('nobody@e2e.test');
+	await page.getByLabel('Password', { exact: true }).fill('not-the-password');
+	await page.getByRole('button', { name: 'Sign in' }).click();
+
+	await expect(page.getByRole('alert')).toContainText('wrong email or password');
+});
+
+test('signing out ends the session and the next screen asks again', async ({ page }) => {
+	await signIn(page);
+
+	await page.getByRole('button', { name: /^Signed in as/ }).click();
+	await page.getByRole('menuitem', { name: 'Sign out' }).click();
+
+	await expect(page).toHaveURL(/\/login/);
+	await page.goto('/traces');
+	await expect(page).toHaveURL(/\/login\?next=/);
 });
 
 test('the ingested traces are on the list and link to themselves', async ({ page }) => {

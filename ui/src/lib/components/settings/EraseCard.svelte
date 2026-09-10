@@ -2,6 +2,7 @@
 	import { api, type DryRun, type Project } from '$lib/api/client.svelte';
 	import ConfirmCard from '../ConfirmCard.svelte';
 	import Card from './Card.svelte';
+	import ViewerNote from './ViewerNote.svelte';
 
 	// Erasing one end user's data (spec 005 #7): the traces filed under that
 	// user id, their observations, payloads and scores. Raw OTLP bodies are
@@ -11,7 +12,7 @@
 	//
 	// The echo here is the user id, because the user is what is being erased.
 
-	let { current }: { current: Project } = $props();
+	let { current, readOnly = false }: { current: Project; readOnly?: boolean } = $props();
 
 	let userID = $state('');
 	const target = $derived(userID.trim());
@@ -29,28 +30,32 @@
 	description="Irreversible operations on this project's data. Each one shows what it would remove
 		before it removes anything."
 >
-	<ConfirmCard
-		title="Erase everything about one user"
-		description="Answers a deletion request: every trace filed under this user id, with its
-			observations, payloads and scores."
-		echoLabel="user id"
-		previewLabel="Show what would go"
-		executeLabel="Erase this user's data"
-		subject={target}
-		ready={target !== ''}
-		preview={() => erase()}
-		execute={(confirm) => erase(confirm) as Promise<string>}
-	>
-		<label for="erase-user" class="text-muted mb-1 block text-xs font-medium">User id</label>
-		<input
-			id="erase-user"
-			type="text"
-			bind:value={userID}
-			placeholder="user-4821"
-			autocomplete="off"
-			spellcheck="false"
-			class="border-border bg-canvas placeholder:text-subtle w-full max-w-sm rounded-md border
-				px-2 py-1 font-mono text-sm"
-		/>
-	</ConfirmCard>
+	{#if readOnly}
+		<ViewerNote what="there is nothing here you can run" />
+	{:else}
+		<ConfirmCard
+			title="Erase everything about one user"
+			description="Answers a deletion request: every trace filed under this user id, with its
+				observations, payloads and scores."
+			echoLabel="user id"
+			previewLabel="Show what would go"
+			executeLabel="Erase this user's data"
+			subject={target}
+			ready={target !== ''}
+			preview={() => erase()}
+			execute={(confirm) => erase(confirm) as Promise<string>}
+		>
+			<label for="erase-user" class="text-muted mb-1 block text-xs font-medium">User id</label>
+			<input
+				id="erase-user"
+				type="text"
+				bind:value={userID}
+				placeholder="user-4821"
+				autocomplete="off"
+				spellcheck="false"
+				class="border-border bg-canvas placeholder:text-subtle w-full max-w-sm rounded-md border
+					px-2 py-1 font-mono text-sm"
+			/>
+		</ConfirmCard>
+	{/if}
 </Card>

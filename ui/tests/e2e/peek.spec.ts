@@ -1,13 +1,12 @@
 import { expect, test, type Page } from '@playwright/test';
-import { state } from './harness';
+import { signIn as enter, state } from './harness';
 
 // The peek panel (spec 008), end to end against the real binary: a row opens
 // beside the listing it came from, the listing survives underneath, and what
 // the panel shows is still a link somebody can send.
 
 async function signIn(page: Page) {
-	await page.goto(state().preAuthed);
-	await expect(page).toHaveURL(/\/traces$/);
+	await enter(page, state().member);
 }
 
 /**

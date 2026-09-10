@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { createProject, state } from './harness';
+import { createProject, signIn as enter, state } from './harness';
 
 // The Evals screens (spec 016, Testing — e2e), against the real binary. The
 // corpus is not enough here: the suite creates a dataset, its items and a run
@@ -34,16 +34,12 @@ const B_TRACES = [
 ] as const;
 
 /** The suite's own project, minted once per worker. */
-let own: Promise<{ key: string }> | null = null;
+let own: ReturnType<typeof createProject> | null = null;
 const project = () => (own ??= createProject('evals'));
 
 /** Signs in with the project's key by hand, the way a second project is opened. */
 async function signIn(page: Page) {
-	const { key } = await project();
-	await page.goto('/login');
-	await page.getByLabel('Project key').fill(key);
-	await page.getByRole('button', { name: 'Sign in' }).click();
-	await expect(page).toHaveURL(/\/traces$/);
+	await enter(page, (await project()).account);
 }
 
 async function call(method: string, path: string, body?: unknown, type = 'application/json') {

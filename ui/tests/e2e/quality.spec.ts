@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { createProject, state } from './harness';
+import { createProject, signIn as enter, state } from './harness';
 
 // The Quality screens (spec 025, Testing — e2e), against the real binary.
 //
@@ -42,11 +42,7 @@ const panel = (page: Page, title: string) =>
 	page.locator('section').filter({ has: page.getByRole('heading', { name: title }) });
 
 async function signIn(page: Page) {
-	const { key } = await project();
-	await page.goto('/login');
-	await page.getByLabel('Project key').fill(key);
-	await page.getByRole('button', { name: 'Sign in' }).click();
-	await expect(page).toHaveURL(/\/traces$/);
+	await enter(page, (await project()).account);
 }
 
 // --- a minimal OTLP/protobuf export ------------------------------------------

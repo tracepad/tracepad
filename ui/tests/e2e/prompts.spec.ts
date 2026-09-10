@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { createProject, state } from './harness';
+import { createProject, signIn as enter, state } from './harness';
 
 // The Prompts screens (spec 021, Testing — e2e) against the real binary. The
 // corpus is seeded through the API in a project of its own (spec 016 #18),
@@ -17,15 +17,11 @@ const CHAT = 'support-answer';
 const TEXT = 'one-liner';
 
 /** The suite's own project, minted once per worker. */
-let own: Promise<{ key: string }> | null = null;
+let own: ReturnType<typeof createProject> | null = null;
 const project = () => (own ??= createProject('prompts'));
 
 async function signIn(page: Page) {
-	const { key } = await project();
-	await page.goto('/login');
-	await page.getByLabel('Project key').fill(key);
-	await page.getByRole('button', { name: 'Sign in' }).click();
-	await expect(page).toHaveURL(/\/traces$/);
+	await enter(page, (await project()).account);
 }
 
 async function call(method: string, path: string, body?: unknown) {

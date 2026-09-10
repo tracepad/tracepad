@@ -13,20 +13,53 @@ It always authenticates. There is no localhost bypass: behind any local
 reverse proxy every request looks like loopback, which would silently turn
 authentication off for the internet.
 
-- **First run.** The server prints a pre-authed link next to the connection
-  strings (`http://localhost:4318/#key=tp-sk-…`). Open it and the interface
-  is signed in. The key travels in the URL fragment, which browsers never
-  send to a server; the app stores it and removes it from the address bar.
-- **Later runs.** The server prints the plain URL, and the login screen asks
-  for a project key.
-- The key is kept in `localStorage` and sent as `Authorization: Bearer`. A
-  `401` clears it and returns to the login screen. "Sign out" in the sidebar
-  forgets it.
+A person signs in with an **email and a password** — an
+[account](accounts.md), not a project key. A key is what a program holds;
+the interface stops being a place to paste one.
 
-The interface reads traces, which needs a **project key**. The admin token is
-a control-plane credential (see [admin.md](admin.md)) and the login screen
-refuses it with an explanation. It is entered further in, on the Settings
-screen, where the endpoints it can actually call live.
+- **First run.** The server has no owner yet, so it prints a **setup link**
+  next to the connection strings (`http://localhost:4318/setup#token=…`) and
+  every screen redirects to `/setup` until somebody uses it. The token
+  travels in the URL fragment, which browsers never send to a server; the
+  screen reads it and takes it back out of the address bar. It is minted
+  afresh at every start while nobody can sign in, so a link from yesterday's
+  log opens nothing — and a restart is the recovery if it was lost.
+- **An invitation.** An owner creates an account and is handed a link
+  (`/invite#token=…`) once, to carry to the person themselves; the link sets
+  their password and signs them in. The same link, minted again, is how a
+  lost password is replaced.
+- **Later.** `/login` asks for the email and the password. Every way of
+  failing — wrong email, wrong password, disabled, invited and never
+  accepted — is one refusal with one sentence, because any difference
+  between them is a way to find out who has an account here.
+
+The session is an `HttpOnly` cookie the browser holds and no script can read.
+It lasts about a month and renews itself as you use it; a `401` on any
+request returns to the login screen with where you were. Nothing about the
+credential is kept in `localStorage`. Signing out ends the session on the
+server, and *Account → Where you are signed in* ends the others.
+
+The admin token is not a credential this interface takes at all: an owner
+reaches everything it used to unlock (see [admin.md](admin.md)).
+
+## What a role sees
+
+The sidebar carries an **account menu** at the bottom: the display name or
+the email, the role in the project on screen as a caption, and the two things
+the menu is for — the Account tab and signing out.
+
+Every screen is reachable for every role, and the listings, the trace detail,
+sessions, stats, quality, users and the whole annotation flow are identical.
+Scoring is a `viewer`'s job — that is what the role is for. What a viewer is
+not offered is the writing: the prompt editor and its labels, the dataset
+item editor and the archive, deleting a prompt, a dataset, a queue or a run,
+the score configs' create and edit, and *Add to queue* — filling a review
+programme is queue management, and queue management is an `editor`'s.
+
+Hiding is for the person; refusing is for the security. The server answers
+every one of those `403` regardless (see [accounts.md](accounts.md)), and a
+`403` that reaches the interface anyway — a role changed under an open tab —
+is rendered in the server's own words in the card or dialog it came from.
 
 ## Screens
 
@@ -616,14 +649,15 @@ which payload is worth that is the reader's call. Raising
 
 ## Settings and administration
 
-Settings runs on **two credentials with disjoint powers**.
+Settings is **three tabs, because it is three audiences**. The active one is
+in the address (`/settings/project`, `/settings/account`, `/settings/server`),
+so a tab is a link.
 
-The session's project key manages its own project, which is what a project
-key is for (see [admin.md](admin.md)):
+**Project** — the project on screen, for everybody who can reach it:
 
-- **Project** — its name and id. Renaming needs the admin token, because a
-  project's name is the echo every destructive confirmation is typed against;
-  the field says so and names `tracepad projects rename`.
+- **Project** — its name and id. Renaming is an owner's, because a project's
+  name is the echo every destructive confirmation is typed against; the field
+  says so to everybody else rather than simply not being there.
 - **Retention** — all three windows, with `null` spelled out: "keep forever"
   for the queryable data, "follow the window above" for the raw bodies, and
   "keep forever" again for the statistics history, which outlives the traces
@@ -635,12 +669,29 @@ key is for (see [admin.md](admin.md)):
   so rather than implying it can be found again.
 - **Danger zone** — erasing everything stored about one end user.
 
-Below them, **Administration** unlocks with this server's
-`TRACEPAD_ADMIN_TOKEN` and covers project lifecycle only: list (soft-deleted
-projects included, with their purge dates), create, delete, restore. The
-token is stored separately from the project key and is sent only to those
-endpoints — it never reads a trace. "Lock" forgets it, and so does signing
-out.
+A `viewer` sees the cards and one line saying why the buttons are gone —
+what the project is set to is worth knowing even when changing it is not
+yours to do. Retention and the keys are an `editor`'s.
+
+**Account** — everybody's own: the display name, the password (changing it
+signs out every other browser), and the list of browsers you are signed in
+on, with *Sign out everywhere else*.
+
+**Server** — an owner's, and absent for everybody else; the address
+redirects too. Two tables:
+
+- **Projects** — every project on this server: create with the keys-once
+  dialog, rename, delete behind the echo, restore, and the soft-deleted ones
+  with their purge dates.
+- **Accounts** — email, name, standing (`pending` / `active` / `disabled`),
+  last login, and the projects each account reaches with the role it has.
+  *Invite* opens a dialog and hands back the link once, with a copy button
+  and its expiry. *Edit* changes the same fields, disables an account, or
+  mints a fresh link. *Delete* is the dry run with the email typed back.
+
+`TRACEPAD_ADMIN_TOKEN` is not entered anywhere in the interface any more: an
+owner reaches all of this, and a credential the screens do not use is a
+credential the screens should not hold.
 
 Every destructive action is the server's dry-run/confirm contract rendered
 (see [admin.md](admin.md#dry-run-by-default)): the card asks the API

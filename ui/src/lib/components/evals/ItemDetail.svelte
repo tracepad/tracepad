@@ -3,6 +3,7 @@
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import { ApiError, api, type DatasetItem, type ItemVersions } from '$lib/api/client.svelte';
 	import { ABSENT, timestamp } from '$lib/format';
+	import { project } from '$lib/project.svelte';
 	import Button from '../Button.svelte';
 	import ConfirmDialog from '../ConfirmDialog.svelte';
 	import JsonView from '../json/JsonView.svelte';
@@ -77,7 +78,10 @@
 	// The two writes an item has (spec 016 #6): the editor page, and the
 	// archive — which destroys nothing, so it asks once in a dialog rather
 	// than through the echo ceremony a dataset's deletion wears.
-	const editable = $derived(writable && archivedAt === null);
+	// A viewer reads an item at every version and writes none of them
+	// (spec 028 #15), so the role joins the two conditions that were already
+	// here rather than adding a branch of its own.
+	const editable = $derived(writable && archivedAt === null && project.editor);
 	let archiving = $state(false);
 </script>
 

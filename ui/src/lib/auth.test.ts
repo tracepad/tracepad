@@ -14,117 +14,119 @@ function at(url: string) {
 	window.history.replaceState(null, '', url);
 }
 
-describe('the pre-authed URL', () => {
-	beforeEach(() => {
-		window.localStorage.clear();
-		goto.mockClear();
-		replaceState.mockClear();
-		at('/');
-	});
+const me = (account: Partial<{ name: string; owner: boolean }> = {}) => ({
+	account: {
+		id: 'acc1',
+		email: 'her@example.com',
+		name: account.name ?? '',
+		owner: account.owner ?? false
+	},
+	projects: [{ id: 'p1', name: 'checkout', role: 'viewer' as const }]
+});
 
-	it('signs in from the fragment and remembers the key', async () => {
-		at('/#key=tp-sk-abc123');
+beforeEach(() => {
+	window.localStorage.clear();
+	goto.mockClear();
+	replaceState.mockClear();
+	at('/');
+});
+
+describe('who is signed in', () => {
+	it('is nobody until `me` has answered', async () => {
 		const auth = await freshAuth();
 
-		auth.restore();
-
-		expect(auth.key).toBe('tp-sk-abc123');
-		expect(auth.authenticated).toBe(true);
-		expect(window.localStorage.getItem('tracepad.key')).toBe('tp-sk-abc123');
+		expect(auth.signedIn).toBe(false);
+		expect(auth.account).toBeNull();
+		expect(auth.projects).toEqual([]);
 	});
 
-	it('takes the key back out of the URL once the router is up', async () => {
-		at('/traces?status=error#key=tp-sk-abc123');
+	it('is the display name when there is one, and the email otherwise', async () => {
 		const auth = await freshAuth();
-		auth.restore();
 
-		auth.stripFragment();
+		auth.adopt(me());
+		expect(auth.displayName).toBe('her@example.com');
 
-		// Replaced, never pushed: the link must not stay reachable through
-		// the back button.
-		expect(replaceState).toHaveBeenCalledWith('/traces?status=error', {});
+		auth.adopt(me({ name: 'Ada' }));
+		expect(auth.displayName).toBe('Ada');
 	});
 
-	it('leaves the URL alone when there is no fragment', async () => {
-		at('/traces');
+	it('says whether this account runs the server', async () => {
 		const auth = await freshAuth();
-		auth.restore();
 
-		auth.stripFragment();
+		auth.adopt(me({ owner: true }));
 
-		expect(replaceState).not.toHaveBeenCalled();
+		expect(auth.owner).toBe(true);
 	});
 
-	it('beats a key left over from a previous visit', async () => {
-		window.localStorage.setItem('tracepad.key', 'tp-sk-old');
-		at('/#key=tp-sk-new');
+	// Nothing about the credential is kept: the session is an HttpOnly cookie
+	// the browser holds, which is the whole point of Decision 4.
+	it('keeps nothing in localStorage', async () => {
 		const auth = await freshAuth();
 
-		auth.restore();
+		auth.adopt(me());
 
-		expect(auth.key).toBe('tp-sk-new');
+		expect(window.localStorage.length).toBe(0);
 	});
 });
 
-describe('the stored key', () => {
-	beforeEach(() => {
-		window.localStorage.clear();
-		goto.mockClear();
-		replaceState.mockClear();
-		at('/');
-	});
-
-	it('is restored when no fragment is present', async () => {
-		window.localStorage.setItem('tracepad.key', 'tp-sk-stored');
+describe('a session that has ended', () => {
+	it('sends the reader to the login form with where they were', async () => {
+		at('/traces?status=error');
 		const auth = await freshAuth();
-
-		auth.restore();
-
-		expect(auth.key).toBe('tp-sk-stored');
-	});
-
-	it('is absent on a first visit', async () => {
-		const auth = await freshAuth();
-
-		auth.restore();
-
-		expect(auth.authenticated).toBe(false);
-	});
-
-	it('is dropped and sent back to login when the server rejects it', async () => {
-		window.localStorage.setItem('tracepad.key', 'tp-sk-revoked');
-		const auth = await freshAuth();
-		auth.restore();
+		auth.adopt(me());
 
 		auth.reject();
 
-		expect(auth.key).toBeNull();
-		expect(window.localStorage.getItem('tracepad.key')).toBeNull();
-		expect(goto).toHaveBeenCalledWith('/login', { replaceState: true });
+		expect(auth.signedIn).toBe(false);
+		expect(goto).toHaveBeenCalledWith('/login?next=%2Ftraces%3Fstatus%3Derror', {
+			replaceState: true
+		});
 	});
 
-	it('does not bounce a visitor who never had a key', async () => {
+	it('does not bounce somebody who is already on the login form', async () => {
+		at('/login');
 		const auth = await freshAuth();
-		auth.restore();
 
 		auth.reject();
 
 		expect(goto).not.toHaveBeenCalled();
 	});
+});
 
-	it('refuses blank input from the login form', async () => {
+describe('a link that carries a token', () => {
+	it('reads the token out of the fragment', async () => {
+		at('/setup#token=abc123');
 		const auth = await freshAuth();
 
-		expect(auth.adopt('   ')).toBe(false);
-		expect(auth.authenticated).toBe(false);
+		expect(auth.tokenFromFragment()).toBe('abc123');
 	});
 
-	it('trims what was pasted', async () => {
+	it('has none when the fragment carries something else', async () => {
+		at('/invite#key=tp-sk-old');
 		const auth = await freshAuth();
 
-		auth.adopt('  tp-sk-padded\n');
+		expect(auth.tokenFromFragment()).toBeNull();
+	});
 
-		expect(auth.key).toBe('tp-sk-padded');
+	it('takes it back out of the URL', async () => {
+		at('/invite?from=chat#token=abc123');
+		const auth = await freshAuth();
+
+		auth.stripFragment();
+
+		// Replaced, never pushed: the link must not stay reachable through the
+		// back button (spec 006 #8). The path and the query are untouched.
+		expect(window.location.pathname + window.location.search).toBe('/invite?from=chat');
+		expect(window.location.hash).toBe('');
+	});
+
+	it('leaves the URL alone when there is no fragment', async () => {
+		at('/invite?from=chat');
+		const auth = await freshAuth();
+
+		auth.stripFragment();
+
+		expect(window.location.pathname + window.location.search).toBe('/invite?from=chat');
 	});
 });
 
@@ -145,8 +147,20 @@ describe('where the login form sends somebody afterwards', () => {
 	});
 
 	it('refuses anywhere but this origin', () => {
-		for (const hostile of ['//elsewhere.example', 'https://elsewhere.example/x', '/\\elsewhere.example']) {
+		for (const hostile of [
+			'//elsewhere.example',
+			'https://elsewhere.example/x',
+			'/\\elsewhere.example'
+		]) {
 			expect(returnTo(at(`?next=${encodeURIComponent(hostile)}`))).toBe('/traces');
+		}
+	});
+
+	// Coming back to the login form is a loop, and coming back to an
+	// invitation is a token that has just been spent.
+	it('refuses the screens outside the shell', () => {
+		for (const outside of ['/login', '/setup', '/invite']) {
+			expect(returnTo(at(`?next=${encodeURIComponent(outside)}`))).toBe('/traces');
 		}
 	});
 

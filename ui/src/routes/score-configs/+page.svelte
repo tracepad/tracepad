@@ -10,6 +10,7 @@
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import { trim } from '$lib/evals';
 	import { count } from '$lib/format';
+	import { project } from '$lib/project.svelte';
 
 	// The score configs of the project, whole (spec 014 #25): what each score
 	// name means — its type, which way is better, what it admits. A form writes
@@ -82,7 +83,11 @@
 		{/if}
 	{/snippet}
 	{#snippet actions()}
-		<Button variant="primary" onclick={() => open(null)}>New score config</Button>
+		<!-- A viewer scores traces against these configs and does not write them
+		     (spec 028 #15). -->
+		{#if project.editor}
+			<Button variant="primary" onclick={() => open(null)}>New score config</Button>
+		{/if}
 	{/snippet}
 </PageHeader>
 
@@ -134,8 +139,10 @@
 						<td class="text-muted {cell}">{config.description ?? '—'}</td>
 						<td class="px-3 py-1.5">
 							<div class="flex justify-end gap-1.5">
-								<Button onclick={() => open(config)}>Edit</Button>
-								<Button variant="ghost" onclick={() => (deleting = config)}>Remove</Button>
+								{#if project.editor}
+									<Button onclick={() => open(config)}>Edit</Button>
+									<Button variant="ghost" onclick={() => (deleting = config)}>Remove</Button>
+								{/if}
 							</div>
 						</td>
 					</tr>

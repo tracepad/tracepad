@@ -19,6 +19,16 @@ vi.mock('$lib/api/client.svelte', () => ({
 	}
 }));
 
+/** The role in the project on screen, which is what gates every write (#15). */
+const here = { editor: true };
+vi.mock('$lib/project.svelte', () => ({
+	project: {
+		get editor() {
+			return here.editor;
+		}
+	}
+}));
+
 const onchanged = vi.fn();
 
 function control(
@@ -46,6 +56,7 @@ async function type(label: string) {
 const dialog = () => screen.queryByRole('alertdialog');
 
 beforeEach(() => {
+	here.editor = true;
 	putPromptLabel.mockClear();
 	deletePromptLabel.mockClear();
 	onchanged.mockClear();
@@ -153,5 +164,26 @@ describe('removing a label', () => {
 		);
 		expect(deletePromptLabel).toHaveBeenCalledWith('support', 'production');
 		expect(onchanged).toHaveBeenCalled();
+	});
+});
+
+// Spec 028 #15: the interface hides what the role cannot do, and the server
+// refuses it anyway. A viewer reads where a label points — that is what a
+// label is for — and moves none of them.
+describe('a viewer', () => {
+	it('reads the labels and is offered no way to change them', () => {
+		here.editor = false;
+		control({ labels: ['production'], named: { production: 7 } });
+
+		expect(screen.getByText('production')).toBeInTheDocument();
+		expect(screen.queryByRole('button', { name: 'Remove production' })).toBeNull();
+		expect(screen.queryByRole('button', { name: 'Add label…' })).toBeNull();
+	});
+
+	it('gets every control back as an editor', () => {
+		control({ labels: ['production'], named: { production: 7 } });
+
+		expect(screen.getByRole('button', { name: 'Remove production' })).toBeInTheDocument();
+		expect(screen.getByRole('button', { name: 'Add label…' })).toBeInTheDocument();
 	});
 });

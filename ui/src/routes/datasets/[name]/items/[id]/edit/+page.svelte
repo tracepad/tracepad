@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/state';
+	import EditorOnly from '$lib/components/EditorOnly.svelte';
 	import ItemEditor from '$lib/components/evals/ItemEditor.svelte';
 
 	// One case, edited (spec 016 #5). The dataset and the item are both in the
@@ -14,4 +15,6 @@
 	const id = $derived(page.params.id ?? '');
 </script>
 
-<ItemEditor {dataset} {id} />
+<EditorOnly what="editing a dataset case is not yours to do">
+	<ItemEditor {dataset} {id} />
+</EditorOnly>
