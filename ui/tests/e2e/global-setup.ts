@@ -2,12 +2,18 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { ADMIN_TOKEN, PORT, STATE, type State } from './harness';
+import { ADMIN_TOKEN, inviteEditor, PASSWORD, PORT, STATE, type State } from './harness';
 
 // Boots the real binary on a temp database and fills it from the synthetic
 // OTLP corpus in `testdata/` (spec 006, Testing). Nothing here is mocked: the
 // point of this suite is exactly the seam the unit layer cannot see — the
 // bundle inside the binary, the SPA fallback, and the URL the server prints.
+//
+// Since spec 028 a person signs in, so the boot also walks the server's own
+// first-contact path: the setup link it printed creates the first owner, and
+// that owner invites an editor of the seeded project for the suites that read
+// it. Every screen these tests drive needs a session, and the accounts are
+// where one comes from.
 
 const ROOT = resolve(process.cwd(), '..');
 const BINARY = join(ROOT, 'bin', 'tracepad');
@@ -19,8 +25,8 @@ export default async function boot() {
 		env: {
 			...process.env,
 			TRACEPAD_DATA_DIR: dataDir,
-			// The management-plane credential (spec 005 #11), which the
-			// Settings screen's Administration section is entered with.
+			// The out-of-band credential (spec 005 #11, spec 028 #16), which the
+			// harness mints projects and accounts with. No screen uses it.
 			TRACEPAD_ADMIN_TOKEN: ADMIN_TOKEN,
 			// Small enough that the corpus's largest payload meets it, which is
 			// what puts a truncation marker on the screen to click.
@@ -46,15 +52,13 @@ export default async function boot() {
 		await waitForHealth(baseURL, server);
 		await ingest(baseURL, key);
 
-		const carried: State = {
-			baseURL,
-			// The server names itself `localhost`; the tests drive `127.0.0.1`,
-			// and a cross-origin hop would drop the localStorage the key lives
-			// in and the cookie a session lives in.
-			setup: setup.replace(/^http:\/\/[^/]+/, baseURL),
-			preAuthed: `${baseURL}/#key=${key}`,
-			key
-		};
+		// The server names itself `localhost`; the tests drive `127.0.0.1`, and
+		// a cross-origin hop would drop the cookie a session lives in.
+		const owner = await createOwner(baseURL, setup.replace(/^http:\/\/[^/]+/, baseURL));
+		const project = await seededProject(baseURL, key);
+		const member = await inviteEditor(baseURL, project, 'member');
+
+		const carried: State = { baseURL, key, project, owner, member };
 		writeFileSync(STATE, JSON.stringify(carried, null, 2));
 	} catch (cause) {
 		stop();
@@ -96,6 +100,32 @@ function firstRunOutput(server: ChildProcess): Promise<{ key: string; setup: str
 			reject(new Error(`the server exited with ${code}:\n${output}`));
 		});
 	});
+}
+
+/** The first owner, from the link the server printed (spec 028 #9). */
+async function createOwner(baseURL: string, link: string): Promise<State['owner']> {
+	const token = new URLSearchParams(new URL(link).hash.slice(1)).get('token');
+	if (!token) throw new Error(`no #token= in the setup link: ${link}`);
+	const email = 'owner@e2e.test';
+	const response = await fetch(`${baseURL}/api/v1/setup`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ token, email, password: PASSWORD, name: 'The Owner' })
+	});
+	if (!response.ok) throw new Error(`setup: ${response.status} ${await response.text()}`);
+	const { account } = (await response.json()) as { account: { id: string } };
+	return { id: account.id, email, password: PASSWORD };
+}
+
+/** The project first run created, which is the one the corpus was ingested into. */
+async function seededProject(baseURL: string, key: string): Promise<string> {
+	const response = await fetch(`${baseURL}/api/v1/projects`, {
+		headers: { Authorization: `Bearer ${key}` }
+	});
+	if (!response.ok) throw new Error(`read the seeded project: ${response.status}`);
+	const { projects } = (await response.json()) as { projects: { id: string }[] };
+	if (!projects[0]) throw new Error('first run created no project');
+	return projects[0].id;
 }
 
 async function waitForHealth(baseURL: string, server: ChildProcess) {

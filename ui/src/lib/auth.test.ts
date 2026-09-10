@@ -108,24 +108,25 @@ describe('a link that carries a token', () => {
 		expect(auth.tokenFromFragment()).toBeNull();
 	});
 
-	it('takes it back out of the URL once the router is up', async () => {
+	it('takes it back out of the URL', async () => {
 		at('/invite?from=chat#token=abc123');
 		const auth = await freshAuth();
 
 		auth.stripFragment();
 
 		// Replaced, never pushed: the link must not stay reachable through the
-		// back button (spec 006 #8).
-		expect(replaceState).toHaveBeenCalledWith('/invite?from=chat', {});
+		// back button (spec 006 #8). The path and the query are untouched.
+		expect(window.location.pathname + window.location.search).toBe('/invite?from=chat');
+		expect(window.location.hash).toBe('');
 	});
 
 	it('leaves the URL alone when there is no fragment', async () => {
-		at('/invite');
+		at('/invite?from=chat');
 		const auth = await freshAuth();
 
 		auth.stripFragment();
 
-		expect(replaceState).not.toHaveBeenCalled();
+		expect(window.location.pathname + window.location.search).toBe('/invite?from=chat');
 	});
 });
 

@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { createProject, state } from './harness';
+import { createProject, signIn as enter, state, type Account } from './harness';
 
 // The page header at both ends of the rule (spec 026 #5, #14), against the real
 // binary.
@@ -35,16 +35,7 @@ const LONG_SCORE =
 const ROW = 48;
 
 async function signIn(page: Page) {
-	await page.goto(state().preAuthed);
-	await expect(page).toHaveURL(/\/traces$/);
-}
-
-/** Into a project of this file's own making rather than the pre-authed one. */
-async function signInTo(page: Page, key: string) {
-	await page.goto('/login');
-	await page.getByLabel('Project key').fill(key);
-	await page.getByRole('button', { name: 'Sign in' }).click();
-	await expect(page).toHaveURL(/\/traces$/);
+	await enter(page, state().member);
 }
 
 async function header(page: Page) {
@@ -83,15 +74,15 @@ const SESSION = 'checkout-eu-west-1-2026-09-09-7c1d4e88-4d51-11ef-9c2d-0242ac120
 
 const attribute = (key: string, value: string) => ({ key, value: { stringValue: value } });
 
-let sown: Promise<string> | null = null;
+let sown: Promise<Account> | null = null;
 
 /**
  * One span in the OTLP/JSON encoding, which is what an SDK on
  * `OTEL_EXPORTER_OTLP_PROTOCOL=http/json` writes (spec 019 #7) — and a body
  * this file can spell out, where the protobuf the other suites build takes a
- * varint encoder to say the same thing. Returns the project's key.
+ * varint encoder to say the same thing. Returns the project's own account.
  */
-function sow(): Promise<string> {
+function sow(): Promise<Account> {
 	sown ??= (async () => {
 		const own = await createProject('header');
 		const { baseURL } = state();
@@ -139,7 +130,7 @@ function sow(): Promise<string> {
 				{ timeout: 15_000, message: 'the sown trace never became readable' }
 			)
 			.toBe(200);
-		return own.key;
+		return own.account;
 	})();
 	return sown;
 }
@@ -154,7 +145,7 @@ test.describe('a trace at 900 px', () => {
 	test.use({ viewport: { width: 900, height: 800 } });
 
 	test('the timestamp stays on one line and the bar stays one row tall', async ({ page }) => {
-		await signInTo(page, await sow());
+		await enter(page, await sow());
 		await page.goto(`/traces/${TRACE}`);
 		await expect(page.locator('header h1')).toHaveText('answer-question');
 

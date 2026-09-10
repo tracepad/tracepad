@@ -1,4 +1,4 @@
-import { goto, replaceState } from '$app/navigation';
+import { goto } from '$app/navigation';
 import type { Me, Membership } from '$lib/api/client.svelte';
 
 // Who is signed in (spec 028 #13). There is no credential in this file any
@@ -88,13 +88,20 @@ class Auth {
 	}
 
 	/**
-	 * Takes the token back out of the URL. `replaceState` rather than a push:
-	 * the link must not survive in history, where a back button or a shared
-	 * screen would hand the secret to whoever is looking (spec 006 #8).
+	 * Takes the token back out of the URL. Replaced rather than pushed: the
+	 * link must not survive in history, where a back button or a shared screen
+	 * would hand the secret to whoever is looking (spec 006 #8).
+	 *
+	 * The browser's own `replaceState` rather than SvelteKit's, because this
+	 * runs in the first effect of a screen whose router has not finished
+	 * starting — where `$app/navigation`'s throws — and because dropping a
+	 * fragment is not a navigation the router has anything to record: the
+	 * route, the query and the history entry are all exactly what they were.
 	 */
 	stripFragment() {
 		if (!window.location.hash) return;
-		replaceState(window.location.pathname + window.location.search, {});
+		const here = window.location.pathname + window.location.search;
+		window.history.replaceState(window.history.state, '', here);
 	}
 }
 

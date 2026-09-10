@@ -43,6 +43,9 @@ describe('the trigger', () => {
 		const trigger = screen.getByRole('button');
 		expect(trigger).toHaveTextContent('Ada Lovelace');
 		expect(trigger).toHaveTextContent('viewer');
+		// The accessible name is stated rather than assembled from those two:
+		// "editor" inside it would match every `name: 'Edit'` in the window.
+		expect(trigger).toHaveAccessibleName('Signed in as Ada Lovelace');
 	});
 
 	// An account with no project has no role to caption, and an empty line

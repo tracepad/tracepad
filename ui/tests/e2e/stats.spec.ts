@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { ADMIN_TOKEN, state } from './harness';
+import { signIn as enter, state } from './harness';
 
 // Stats over the fixed corpus (Testing). The window is named explicitly rather
 // than left to the default: the fixtures carry fixed timestamps, and a suite
@@ -9,8 +9,7 @@ import { ADMIN_TOKEN, state } from './harness';
 const WINDOW = 'from=2026-08-01T00:00:00Z&to=2026-09-30T00:00:00Z';
 
 async function signIn(page: Page) {
-	await page.goto(state().preAuthed);
-	await expect(page).toHaveURL(/\/traces$/);
+	await enter(page, state().member);
 }
 
 test('all four charts render over the corpus', async ({ page }) => {
@@ -118,16 +117,21 @@ test('both themes render the charts, and neither scrolls the page sideways', asy
 	expect(await overflow()).toBeLessThanOrEqual(0);
 });
 
-test('the admin token is not what reads a chart', async ({ page }) => {
-	// The invariant spec 007 #3 rests on, checked where it actually matters:
-	// on the wire, with both credentials in the browser.
+// What spec 007 #3's invariant became (spec 028 #4, #6): there is no bearer
+// token in the browser at all — the session is a cookie no script can read —
+// and what every data-plane request carries instead is the id of the project
+// on screen. Checked on the wire, where it matters.
+test('a chart is read on the cookie, and names the project it is about', async ({ page }) => {
 	await signIn(page);
-	await page.evaluate((token) => localStorage.setItem('tracepad.admin', token), ADMIN_TOKEN);
 
-	const credentials: (string | undefined)[] = [];
+	const sent: { authorization?: string; project?: string }[] = [];
 	page.on('request', (request) => {
 		if (request.url().includes('/api/v1/stats') || request.url().includes('/api/v1/sessions')) {
-			credentials.push(request.headers()['authorization']);
+			const headers = request.headers();
+			sent.push({
+				authorization: headers['authorization'],
+				project: headers['x-tracepad-project']
+			});
 		}
 	});
 
@@ -135,8 +139,9 @@ test('the admin token is not what reads a chart', async ({ page }) => {
 	await page.goto('/sessions');
 	await expect(page.getByText('session-77')).toBeVisible();
 
-	expect(credentials.length).toBeGreaterThan(0);
-	for (const credential of credentials) {
-		expect(credential).toBe(`Bearer ${state().key}`);
+	expect(sent.length).toBeGreaterThan(0);
+	for (const request of sent) {
+		expect(request.authorization).toBeUndefined();
+		expect(request.project).toBe(state().project);
 	}
 });

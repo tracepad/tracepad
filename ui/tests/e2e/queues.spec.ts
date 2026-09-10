@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
-import { createProject, state, WIRE_TRACE } from './harness';
+import { createProject, signIn as enter, state, WIRE_TRACE } from './harness';
 
 // The annotation loop end to end (spec 024, Testing — e2e), against the real
 // binary: declare a queue, fill it by hand and by filter, work it at the desk,
@@ -28,15 +28,11 @@ const TRACES = 3;
 
 const QUEUE = 'weekly-review';
 
-let own: Promise<{ key: string }> | null = null;
+let own: ReturnType<typeof createProject> | null = null;
 const project = () => (own ??= createProject('queues'));
 
 async function signIn(page: Page) {
-	const { key } = await project();
-	await page.goto('/login');
-	await page.getByLabel('Project key').fill(key);
-	await page.getByRole('button', { name: 'Sign in' }).click();
-	await expect(page).toHaveURL(/\/traces$/);
+	await enter(page, (await project()).account);
 }
 
 async function call(method: string, path: string, body?: unknown, type = 'application/json') {

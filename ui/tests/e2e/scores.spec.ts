@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
-import { createProject, state, WIRE_TRACE } from './harness';
+import { createProject, signIn as enter, state, WIRE_TRACE } from './harness';
 
 // Scores where their target is (spec 022, Testing — e2e), against the real
 // binary. The corpus is seeded through the API in a project of its own
@@ -30,15 +30,11 @@ const ON_SESSION = 'aa000000000000000000000000000003';
 const ON_NOWHERE = 'aa000000000000000000000000000004';
 
 /** The suite's own project, minted once per worker. */
-let own: Promise<{ key: string }> | null = null;
+let own: ReturnType<typeof createProject> | null = null;
 const project = () => (own ??= createProject('scores'));
 
 async function signIn(page: Page) {
-	const { key } = await project();
-	await page.goto('/login');
-	await page.getByLabel('Project key').fill(key);
-	await page.getByRole('button', { name: 'Sign in' }).click();
-	await expect(page).toHaveURL(/\/traces$/);
+	await enter(page, (await project()).account);
 }
 
 async function call(method: string, path: string, body?: unknown, type = 'application/json') {

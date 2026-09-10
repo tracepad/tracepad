@@ -27,19 +27,27 @@
 <DropdownMenu.Root>
 	<DropdownMenu.Trigger>
 		{#snippet child({ props })}
+			<!-- An explicit name rather than the words inside it: the caption is
+			     the role, and "editor" inside a control's accessible name is a
+			     word every "Edit" in the window would also match. -->
 			<button
 				{...props}
+				aria-label="Signed in as {auth.displayName}"
 				class="text-fg hover:bg-raised pointer-coarse:min-h-11 flex max-w-40 min-w-0 items-center
 					gap-1.5 rounded-md px-2 py-1 transition-colors duration-100 md:w-full md:max-w-none"
 			>
 				<UserRound class="text-subtle size-4 shrink-0" />
-				<span class="min-w-0 flex-1 text-left">
+				<!-- On a phone the sidebar is one bar across the top and every
+				     row of it is height the listing under it does not get
+				     (spec 006 #15), so this is the icon alone there and the
+				     name and role on a desktop, where the column has room. -->
+				<span class="hidden min-w-0 flex-1 text-left md:block">
 					<span class="block truncate text-sm">{auth.displayName}</span>
 					{#if role}
 						<span class="text-subtle block truncate text-xs capitalize">{role}</span>
 					{/if}
 				</span>
-				<ChevronsUpDown class="text-subtle size-3.5 shrink-0" />
+				<ChevronsUpDown class="text-subtle hidden size-3.5 shrink-0 md:block" />
 			</button>
 		{/snippet}
 	</DropdownMenu.Trigger>
