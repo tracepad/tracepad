@@ -255,7 +255,7 @@ func (s *Server) identify(w http.ResponseWriter, r *http.Request) (*caller, bool
 // for no gain a person could notice.
 func (s *Server) slide(w http.ResponseWriter, r *http.Request, current *store.AccountSession) {
 	now := time.Now()
-	if now.UnixNano()-current.LastSeenAt < int64(sessionSlideAfter) {
+	if s.writer == nil || now.UnixNano()-current.LastSeenAt < int64(sessionSlideAfter) {
 		return
 	}
 	expires := now.Add(s.sessionLife)
