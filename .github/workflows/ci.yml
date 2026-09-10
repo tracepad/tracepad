@@ -24,9 +24,9 @@ jobs:
           node-version-file: ui/package.json
           cache: npm
           cache-dependency-path: ui/package-lock.json
-      - run: make precommit
+      - run: make gate
       # The anchor checker against its own fixture (spec 026 #6, #13).
-      # `precommit` above runs it over the tree; this run is what says the
+      # `gate` above runs it over the tree; this run is what says the
       # checker still finds a broken anchor at all: two of the fixture's
       # links must be reported and the four traps beside them must not.
       - run: make doc-anchors-self-test

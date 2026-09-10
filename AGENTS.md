@@ -367,7 +367,7 @@ API. This file routes; it does not duplicate what specs and docs say.
 | The eval harness in Python | `sdk/python/src/tracepad/_harness.py` (the processor, `Run`, `Attempt`, the score configs, `compare`, the paging loop) and `_datasets.py` (`Dataset`, `Item`), `docs/datasets.md#the-same-loop-from-python`, `docs/sdk-python.md#evals`, spec 018 — the stamping is a `ContextVar` read at `on_start` and never a span the harness opened (#3), `init` registers the processor before the exporting one and under `export=False` too, and the read side is the server's JSON as `dict`s because a model layer is a place to start disagreeing with it (#8) |
 | Packaging: the image and the release | `Dockerfile` + `.dockerignore` (the whole recipe — the image builds both halves from the checkout and copies no prebuilt binary), `scripts/image-check.sh` (the contract, asserted from outside because the image has no shell), `.github/workflows/release-server.yml` (GoReleaser for the archives, `buildx` for one multi-arch manifest on GHCR), the `docker` job in `ci.yml`, `docs/docker.md`, spec 020 — `tracepad health` (`internal/cli/commands.go`) is the container's `HEALTHCHECK` and the one command that needs no key |
 | Configuration | `internal/config/`, spec 001 + spec 002 Configuration tables |
-| The docs' cross-references | `scripts/doc-anchors.sh` and `scripts/doc-anchors-fixture/`, spec 026 #6 — every `[…](file.md#anchor)` in `docs/*.md`, `README.md` and `AGENTS.md` is checked against the target's headings under GitHub's slug rule, fenced code blocks and inline code spans read as neither headings nor links. It runs in `make precommit`; the fixture run is its own CI step, and it also builds a file long enough that a pipe would break the check (#13, #14) |
+| The docs' cross-references | `scripts/doc-anchors.sh` and `scripts/doc-anchors-fixture/`, spec 026 #6 — every `[…](file.md#anchor)` in `docs/*.md`, `README.md` and `AGENTS.md` is checked against the target's headings under GitHub's slug rule, fenced code blocks and inline code spans read as neither headings nor links. It runs in `make gate`; the fixture run is its own CI step, and it also builds a file long enough that a pipe would break the check (#13, #14) |
 
 Attribute semantics for the `langfuse.*` dialect are derived from Langfuse
 (MIT) — see `NOTICE`. Keep new rules in the table in `rules.go`, with the
@@ -375,10 +375,16 @@ reason in a comment; adding a dialect should be a table edit.
 
 ## Commands
 
-- `make precommit` — full gate (format-check + vet + Go tests + the doc-anchor
-  sweep + `svelte-check`, vitest and the API-type drift check). Budget: under
-  30 seconds. The gate self-installs as the git pre-commit hook on first run
-  (and on Claude Code session start); `make install-hooks` force-reinstalls it.
+- `make gate` — the full gate (format-check + vet + `go test ./...` + the
+  doc-anchor sweep + `svelte-check`, vitest and the API-type drift check). It
+  is what CI runs and what the git **pre-push** hook runs; about two minutes
+  today, most of it `internal/server`.
+- `make precommit` — the fast gate the git **pre-commit** hook runs:
+  format-check, vet, the tests of the Go packages you staged, and the
+  interface checks only when `ui/` or `openapi.json` is staged. Seconds, not
+  minutes. Both hooks self-install on first run (and on Claude Code session
+  start); `make install-hooks` force-reinstalls them. Worktrees share the
+  hooks directory, so installing once covers every checkout.
 - `make doc-anchors` — check every anchor in `docs/`, `README.md` and
   `AGENTS.md` against the heading it names (part of the gate);
   `make doc-anchors-self-test` runs the checker over its fixture.
@@ -417,6 +423,21 @@ reason in a comment; adding a dialect should be a table edit.
 - **Docs ship in the same PR** as the behavior they describe.
 - **Trunk-based PR flow**: short-lived branch → PR → squash-merge. PR titles
   follow Conventional Commits (they become the commit history).
+- **Run what you touched, not everything, until the push.** While iterating:
+  `go test ./internal/<package>/` for the package you changed, `npx vitest run
+  <file>` for the component, `npx playwright test <spec>` for the flow. The
+  full Go suite, the full interface suite and the full Playwright run are
+  each once per push — the pre-push hook runs the first two, and CI runs
+  all three. A day of work was measured at 88 full Playwright runs, 71
+  minutes of a 380-minute session; the pre-commit hook's full gate cost
+  another 17 minutes over 25 commits.
+- **Long output goes to a file, once.** `npx playwright test > /tmp/e2e.log
+  2>&1; tail -20 /tmp/e2e.log` — then `grep` the file for the next question.
+  Re-running a seven-minute suite to read a different part of its output is
+  the single most expensive habit in the transcripts.
+- **Push, then report.** After `git push`, tell whoever asked for the work
+  that the PR is up; do not sit in `gh pr checks --watch` — the person or
+  agent coordinating watches CI, and the session is free for the next thing.
 - Stage git changes with explicit paths (never `git add -A`); review
   `git diff --cached --name-only` before committing.
 
