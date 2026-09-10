@@ -14,6 +14,7 @@
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import { count } from '$lib/format';
 	import { freshSearch } from '$lib/page';
+	import { project } from '$lib/project.svelte';
 
 	// One dataset (spec 016 #4): its envelope in the header, a version
 	// selector that rewrites the items tab to `?version=`, and two tabs in the
@@ -127,7 +128,9 @@
 			     would promise to write where the banner says nothing writes. -->
 			<!-- Icons alone at a phone's width, where the header is already
 			     carrying a title, a back link and the version control. -->
-			{#if !older}
+			<!-- Reading a dataset and its runs is every role's; writing an item
+			     and deleting the set are an editor's (spec 028 #15). -->
+			{#if !older && project.editor}
 				<Button
 					variant="primary"
 					aria-label="New item"
@@ -137,10 +140,12 @@
 					<span class="hidden sm:inline">New item</span>
 				</Button>
 			{/if}
-			<Button aria-label="Delete dataset" onclick={() => (deleting = true)}>
-				<Trash2 class="size-4" />
-				<span class="hidden sm:inline">Delete</span>
-			</Button>
+			{#if project.editor}
+				<Button aria-label="Delete dataset" onclick={() => (deleting = true)}>
+					<Trash2 class="size-4" />
+					<span class="hidden sm:inline">Delete</span>
+				</Button>
+			{/if}
 		{/if}
 	{/snippet}
 </PageHeader>

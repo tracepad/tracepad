@@ -20,6 +20,7 @@
 	import { asPage, Listing, UrlSpot, Walk } from '$lib/listing.svelte';
 	import { freshSearch } from '$lib/page';
 	import { peekSearch, readPeek } from '$lib/peek';
+	import { project } from '$lib/project.svelte';
 	import { queueable } from '$lib/queues';
 
 	const POLL_MS = 5000;
@@ -131,12 +132,14 @@
 	<FilterBar {filters} onchange={(next) => navigate(next)} />
 	<!-- The manager's gesture, at the surface where the choice is made: this
 	     filtered list is what deserves a human verdict (spec 024 #13). -->
-	<AddToQueue
-		{filters}
-		matched={takeable.label}
-		blocked={takeable.blocked}
-		label="Add to queue…"
-	/>
+	{#if project.editor}
+		<AddToQueue
+			{filters}
+			matched={takeable.label}
+			blocked={takeable.blocked}
+			label="Add to queue…"
+		/>
+	{/if}
 </div>
 
 <ListingShell {listing} noun="trace">

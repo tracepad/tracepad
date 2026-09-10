@@ -28,6 +28,7 @@
 	import { count, timestamp } from '$lib/format';
 	import { asPage, Listing, UrlSpot, Walk } from '$lib/listing.svelte';
 	import { freshSearch } from '$lib/page';
+	import { project } from '$lib/project.svelte';
 	import { peekSearch, readPeek } from '$lib/peek';
 
 	// One run (spec 016, Application contract): the header, the summary the
@@ -261,10 +262,14 @@
 					{/each}
 				</select>
 			</label>
-			<Button aria-label="Delete run" onclick={() => (deleting = true)}>
-				<Trash2 class="size-4" />
-				<span class="hidden sm:inline">Delete</span>
-			</Button>
+			<!-- Reading and comparing runs is every role's; deleting one is an
+			     editor's (spec 028 #15). -->
+			{#if project.editor}
+				<Button aria-label="Delete run" onclick={() => (deleting = true)}>
+					<Trash2 class="size-4" />
+					<span class="hidden sm:inline">Delete</span>
+				</Button>
+			{/if}
 		{/if}
 	{/snippet}
 </PageHeader>

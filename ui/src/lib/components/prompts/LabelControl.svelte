@@ -2,6 +2,7 @@
 	import Plus from '@lucide/svelte/icons/plus';
 	import { ApiError, api } from '$lib/api/client.svelte';
 	import { orderLabels } from '$lib/prompts';
+	import { project } from '$lib/project.svelte';
 	import Button from '../Button.svelte';
 	import ConfirmDialog from '../ConfirmDialog.svelte';
 	import LabelChip from './LabelChip.svelte';
@@ -107,10 +108,19 @@
 
 <div class="flex flex-wrap items-center gap-1.5">
 	{#each orderLabels(labels) as label (label)}
-		<LabelChip {label} onremove={() => remove(label)} disabled={shut} reason={why} />
+		<!-- A viewer reads where a label points and does not move it (spec 028
+		     #15): the chip stays, the cross on it does not. -->
+		{#if project.editor}
+			<LabelChip {label} onremove={() => remove(label)} disabled={shut} reason={why} />
+		{:else}
+			<LabelChip {label} />
+		{/if}
 	{/each}
 
-	{#if adding && !shut}
+	{#if !project.editor}
+		<!-- Everything below this line writes, so a viewer sees the chips and
+		     stops there. -->
+	{:else if adding && !shut}
 		<form onsubmit={add} class="flex items-center gap-1">
 			<!-- svelte-ignore a11y_autofocus -->
 			<input

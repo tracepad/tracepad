@@ -9,6 +9,7 @@
 	import NewQueueDialog from '$lib/components/queues/NewQueueDialog.svelte';
 	import ProgressBar from '$lib/components/queues/ProgressBar.svelte';
 	import { count } from '$lib/format';
+	import { project } from '$lib/project.svelte';
 
 	// The review programmes of the project (spec 024 #10), whole and in name
 	// order over `GET /api/v1/queues`: a project has as many queues as it has
@@ -62,7 +63,10 @@
 		{/if}
 	{/snippet}
 	{#snippet actions()}
-		<Button variant="primary" onclick={() => (creating = true)}>New queue</Button>
+		<!-- Working a queue is a viewer's job; making one is not (Decision 3). -->
+		{#if project.editor}
+			<Button variant="primary" onclick={() => (creating = true)}>New queue</Button>
+		{/if}
 	{/snippet}
 </PageHeader>
 

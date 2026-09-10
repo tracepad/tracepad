@@ -10,6 +10,7 @@
 	import { Scores } from '$lib/scores.svelte';
 	import JsonView from './json/JsonView.svelte';
 	import AddToQueue from './queues/AddToQueue.svelte';
+	import { project } from '$lib/project.svelte';
 	import ObservationDetail from './ObservationDetail.svelte';
 	import ScoresBlock from './scores/ScoresBlock.svelte';
 	import TraceTree from './TraceTree.svelte';
@@ -159,8 +160,13 @@
 	>
 		{#snippet actions()}
 			<!-- The reader's own gesture (spec 024 #13): this trace deserves a
-			     human verdict, and this is which programme it belongs to. -->
-			<AddToQueue target={{ trace_id: traceID }} />
+			     human verdict, and this is which programme it belongs to.
+			     Scoring is a viewer's job and filling a queue is not, so this
+			     one control is an editor's while the block around it stays
+			     (spec 028 #15). -->
+			{#if project.editor}
+				<AddToQueue target={{ trace_id: traceID }} />
+			{/if}
 		{/snippet}
 	</ScoresBlock>
 

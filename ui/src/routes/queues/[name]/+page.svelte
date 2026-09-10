@@ -27,6 +27,7 @@
 	import TracePeekMeta from '$lib/components/TracePeekMeta.svelte';
 	import { asPage, Listing, UrlSpot, Walk } from '$lib/listing.svelte';
 	import { freshSearch } from '$lib/page';
+	import { project } from '$lib/project.svelte';
 	import { peekSearch, readPeek } from '$lib/peek';
 
 	// One queue (spec 024 #11): what is done, by whom, what was skipped and
@@ -185,10 +186,14 @@
 				<Play class="size-4" />
 				<span class="hidden sm:inline">Start annotating</span>
 			</Button>
-			<Button aria-label="Delete queue" onclick={() => (deleting = true)}>
-				<Trash2 class="size-4" />
-				<span class="hidden sm:inline">Delete</span>
-			</Button>
+			<!-- Working the queue is a viewer's job (Decision 3); deleting the
+			     programme is not. -->
+			{#if project.editor}
+				<Button aria-label="Delete queue" onclick={() => (deleting = true)}>
+					<Trash2 class="size-4" />
+					<span class="hidden sm:inline">Delete</span>
+				</Button>
+			{/if}
 		{/if}
 	{/snippet}
 </PageHeader>

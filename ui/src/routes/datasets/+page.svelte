@@ -9,6 +9,7 @@
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import { count, timestamp } from '$lib/format';
 	import { asPage, Listing, UrlSpot } from '$lib/listing.svelte';
+	import { project } from '$lib/project.svelte';
 
 	// The datasets of the project over `GET /api/v1/datasets` (spec 016,
 	// Application contract): the shared listing (#3) with no count, because
@@ -49,7 +50,9 @@
 		<ListingCount {listing} />
 	{/snippet}
 	{#snippet actions()}
-		<Button variant="primary" onclick={() => (creating = true)}>New dataset</Button>
+		{#if project.editor}
+			<Button variant="primary" onclick={() => (creating = true)}>New dataset</Button>
+		{/if}
 	{/snippet}
 </PageHeader>
 

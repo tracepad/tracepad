@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
+	import EditorOnly from '$lib/components/EditorOnly.svelte';
 	import ItemEditor from '$lib/components/evals/ItemEditor.svelte';
 
 	// A new case (spec 016 #5, #21). The dataset is in the query rather than in
@@ -27,4 +28,6 @@
 	}
 </script>
 
-<ItemEditor {dataset} {trace} {obs} onpick={pick} />
+<EditorOnly what="writing a dataset case is not yours to do">
+	<ItemEditor {dataset} {trace} {obs} onpick={pick} />
+</EditorOnly>
