@@ -644,7 +644,13 @@ func mapModelParameters(a *attrs) map[string]any {
 
 // mapUsage: an explicit usage_details object wins; otherwise every
 // `gen_ai.usage.<key>` is collected verbatim, minus the cost (which is a
-// price, not a token count, and feeds the cost chain instead).
+// price, not a token count, and feeds the cost chain instead); otherwise the
+// bare token keys of spec 030 #1.
+//
+// The three sources are a chain, not a merge. An exporter that sends both
+// `gen_ai.usage.input_tokens` and `input_tokens` is describing one number
+// twice, and the standard spelling wins whole — the bare keys then stay
+// unclaimed in metadata, where both readings are still visible.
 func mapUsage(a *attrs) map[string]any {
 	if raw, ok := a.lookup(lfObsUsageDetails); ok {
 		if obj, valid := parseJSONObject(raw); valid {
@@ -665,6 +671,28 @@ func mapUsage(a *attrs) map[string]any {
 		}
 		a.claim(k)
 		out[k[len(genAIUsagePrefix):]] = jsonNumber(n)
+	}
+	if len(out) > 0 {
+		return out
+	}
+	// Third source: the bare spellings, walked in the order rules.go lists
+	// them so the result never depends on map iteration. The key is kept as
+	// sent — `cache_read_tokens` stays `cache_read_tokens` — the way a
+	// `gen_ai.usage.*` key keeps its suffix; renaming it to something
+	// canonical would be a fourth vocabulary (spec 030 #1).
+	for _, key := range bareUsageKeys {
+		raw, ok := a.lookup(key)
+		if !ok {
+			continue
+		}
+		n, valid := asNumber(raw)
+		if !valid {
+			// Not a count, and a bare word is the likeliest key to
+			// mean something else entirely: leave it in metadata.
+			continue
+		}
+		a.claim(key)
+		out[key] = jsonNumber(n)
 	}
 	if len(out) == 0 {
 		return nil

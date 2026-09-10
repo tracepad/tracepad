@@ -103,6 +103,78 @@ export TRACEPAD_API_KEY=tp-sk-…
 Working examples of all three live in [`scripts/smoke`](../scripts/smoke),
 which is also the test that keeps them working.
 
+A fourth is not an SDK at all: [Claude Code](#claude-code) exports its own
+sessions, and needs only environment too.
+
+## Claude Code
+
+Claude Code emits OpenTelemetry spans for what it does — one
+`claude_code.interaction` per prompt, one `claude_code.llm_request` per API
+call, one `claude_code.tool` per tool call — and Tracepad is an OTLP endpoint,
+so connecting the two is environment and nothing else:
+
+```sh
+export CLAUDE_CODE_ENABLE_TELEMETRY=1
+export CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1
+export OTEL_TRACES_EXPORTER=otlp
+export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer tp-sk-…"
+```
+
+The same six as the `env` object of `~/.claude/settings.json`, which is how they
+outlive the shell that set them:
+
+```json
+{
+  "env": {
+    "CLAUDE_CODE_ENABLE_TELEMETRY": "1",
+    "CLAUDE_CODE_ENHANCED_TELEMETRY_BETA": "1",
+    "OTEL_TRACES_EXPORTER": "otlp",
+    "OTEL_EXPORTER_OTLP_PROTOCOL": "http/protobuf",
+    "OTEL_EXPORTER_OTLP_ENDPOINT": "http://localhost:4318",
+    "OTEL_EXPORTER_OTLP_HEADERS": "Authorization=Bearer tp-sk-…"
+  }
+}
+```
+
+Two of those lines are the ones people lose an afternoon to:
+
+- `OTEL_EXPORTER_OTLP_PROTOCOL` is **not optional**. Tracepad speaks OTLP over
+  HTTP and [not over gRPC](#endpoints), and an exporter left to its own default
+  does not reach it — the CLI reports nothing, and the traces list simply stays
+  empty.
+- `OTEL_EXPORTER_OTLP_ENDPOINT` is the **base** URL, not the trace path: the
+  exporter appends `/v1/traces` itself. It is the one place in this page where
+  the path is not written out.
+
+A day of prompts is a lot of traces to have arrive beside your application's,
+so give them an environment of their own — the filter, the stats and the
+retention policy are all per environment:
+
+```sh
+export OTEL_RESOURCE_ATTRIBUTES=deployment.environment=claude-code
+```
+
+**What arrives.** One trace per prompt, named `claude_code.interaction`, with
+the API calls and the tool calls under it: a `claude_code.tool` span carries a
+`claude_code.tool.blocked_on_user` child while it waits for your answer to the
+permission prompt and a `claude_code.tool.execution` child for the work itself.
+Each `claude_code.llm_request` is a generation on the model it called, and its
+four token counts — `input_tokens`, `output_tokens`, `cache_read_tokens` and
+`cache_creation_tokens`, the last two usually the largest numbers on the
+span — arrive as usage, under those names. Everything else Claude Code stamps
+(`tool_name`, `stop_reason`, `duration_ms`, `span.type`) is in the
+observation's metadata. The session id is the CLI session, so a day's prompts
+group on the Sessions screen; the release is the CLI's own version.
+
+What does *not* arrive is the conversation. Claude Code redacts the prompt
+before it exports anything — `user_prompt` is the literal string `<REDACTED>`,
+beside a `user_prompt_length` — and no completion text is on the spans at all,
+so the input and output panels of these observations are empty. The user id is
+a hash, not an address. Cost is absent for the same reason it is absent
+everywhere: none was sent, and Tracepad does not estimate one.
+
 ## Responses
 
 | Status | Meaning |
@@ -170,11 +242,19 @@ attributes participate at lower priority than the span's own.
 | model parameters | `langfuse.observation.model.parameters` (JSON object) · every `gen_ai.request.*` except the model |
 | input | `langfuse.observation.input` · `gen_ai.input.messages` · `gen_ai.prompt` (including the flattened `gen_ai.prompt.0.content` form) |
 | output | `langfuse.observation.output` · `gen_ai.output.messages` · `gen_ai.completion` (same flattened form) |
-| usage | `langfuse.observation.usage_details` (JSON object) · every `gen_ai.usage.*` count, key kept as sent |
+| usage | `langfuse.observation.usage_details` (JSON object) · every `gen_ai.usage.*` count, key kept as sent · the bare token keys `input_tokens`, `output_tokens`, `total_tokens`, `cache_read_tokens`, `cache_creation_tokens`, `cache_read_input_tokens`, `cache_creation_input_tokens`, `prompt_tokens`, `completion_tokens`, `reasoning_tokens`, key kept as sent |
 | cost | `langfuse.observation.cost_details` (JSON object) · `gen_ai.usage.cost` |
 | level | `langfuse.observation.level` · `tracepad.observation.level` · span status `ERROR` ⇒ `ERROR` · otherwise `DEFAULT` |
 | status message | `langfuse.observation.status_message` · `tracepad.observation.status_message` · the span's status message |
 | observation metadata | `langfuse.observation.metadata` and `langfuse.observation.metadata.*` · the same two under `tracepad.`, **plus every attribute no rule above consumed**, plus the span's events under `events`, plus the instrumentation scope's own name and version under `scope.name` and `scope.version` |
+
+The usage row is a chain like every other one: the first source that yields a
+count wins whole, and the losers stay in metadata rather than being merged into
+it. An exporter that sends both `gen_ai.usage.input_tokens` and `input_tokens`
+is describing one number twice, and the bare list is closed — ten spellings,
+named above — because a bare word like `input_tokens` is exactly the kind of key
+that collides with an attribute meaning something else. A value that is not a
+number is not a count and stays where it was.
 
 Two consequences worth knowing:
 
