@@ -360,9 +360,13 @@ tracepad projects rm <project-id>     # admin token required
   listings.
 - The data is destroyed by the sweeper **seven days later**, and the response
   says when.
-- `tracepad projects restore <project-id>` undoes it until then — reachable
-  with the project's own key, so a deployment with no admin token can still
-  recover from deleting its only project.
+- `tracepad projects restore <project-id>` undoes it until then, with the same
+  credential that deleted it: an owner account or the admin token. A project's
+  own key reaches neither — it lives in application config and in CI, and a
+  leaked application credential must not move a project in either direction.
+  The one thing such a key still reads while its project is deleted is the
+  project itself, so whoever is about to restore can see what they are
+  restoring and until when.
 - The name stays reserved throughout, so restore always has its name to come
   back to. Creating a project with that name meanwhile is a `409` naming the
   restorable one.
