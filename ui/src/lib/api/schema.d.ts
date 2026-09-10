@@ -1740,6 +1740,11 @@ export interface components {
              * @description When the sweeper destroys the data; seven days after the delete, and not configurable
              */
             purge_at?: string;
+            /**
+             * @description Present only when a session asked: what this account may do in this project. A project key and the admin token get no role, because a role is what an account has (spec 028 #12)
+             * @enum {string}
+             */
+            role?: "viewer" | "editor" | "owner";
         };
         /** @description A freshly minted key pair. The secret appears here and nowhere else, ever. */
         NewKey: {

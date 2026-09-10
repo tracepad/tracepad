@@ -213,13 +213,16 @@ the id already filled in; on success the page leaves for the listing. It is
 the Settings card with one field fewer — one contract, rendered twice.
 
 The Settings screen renders this whole contract (see [ui.md](ui.md#settings-and-administration)):
-a project's own management on its project key, and an **Administration**
-section that unlocks with `TRACEPAD_ADMIN_TOKEN` for project lifecycle. Every
-destructive card there is the dry run above, shown, with the same echo typed
-into a field — the browser is not a softer path to destruction than `curl`.
+a **Project** tab with the project's own management, and a **Server** tab —
+owners only — with the project lifecycle and the accounts. Every destructive
+card is the dry run above, shown, with the same echo typed into a field: the
+browser is not a softer path to destruction than `curl`.
 
-The token is stored apart from the project key and sent only to the endpoints
-that require it. It reads no trace data, here or anywhere else.
+`TRACEPAD_ADMIN_TOKEN` is not entered in the interface at all. It was there
+because one credential unlocked the management plane in a browser; an owner
+[account](accounts.md) is that credential now, and the token stays what it is
+for — the CLI, and the recovery when every owner's password is lost
+([cli.md](cli.md#accounts)).
 
 ## Not on the MCP surface
 
