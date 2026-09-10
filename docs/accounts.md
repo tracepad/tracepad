@@ -207,6 +207,10 @@ locked out on a Friday.
 | `DELETE /api/v1/accounts/{id}/projects/{project_id}` | Take a project away. |
 | `GET /api/v1/projects/{id}/members` | The project side: who has a role here. Owners are not listed, because they are not rows — they have every project. |
 
+All of it is also `tracepad accounts …` from a terminal, on the admin token —
+`ls`, `show`, `create`, `invite`, `set`, `grant`, `revoke`, `rm`. The
+[CLI page](cli.md) has the forms.
+
 Three rules worth knowing before you press something:
 
 - **Disabling** ends the account's sessions at once and keeps its roles, so
@@ -237,11 +241,16 @@ The token reaches the account routes, so it is the way back in:
 
 ```sh
 TRACEPAD_ADMIN_TOKEN=… # set on the server, then:
+TRACEPAD_API_KEY=$TRACEPAD_ADMIN_TOKEN tracepad accounts invite you@example.com
+```
+
+Open the link it prints and set a new password. The same thing with `curl`, if
+the binary is not to hand:
+
+```sh
 curl -X POST "http://localhost:4318/api/v1/accounts/$ID/invite" \
   -H "Authorization: Bearer $TRACEPAD_ADMIN_TOKEN"
 ```
-
-Open the link it answers with and set a new password.
 
 A server with **no** owner at all prints a setup link at every start, so that
 case recovers by restarting. A server with an owner who cannot sign in and no

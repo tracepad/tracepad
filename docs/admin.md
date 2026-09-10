@@ -102,7 +102,8 @@ on stderr and exit code 1.
 | `GET` | `/api/v1/projects/{id}/members` | Who has a role in this project. See [accounts.md](accounts.md#managing-accounts). |
 
 The people who sign in, their roles and their invitations are
-[accounts.md](accounts.md).
+[accounts.md](accounts.md), and `tracepad accounts …` manages them from a
+terminal on this same token ([cli.md](cli.md#accounts)).
 
 ## Projects
 

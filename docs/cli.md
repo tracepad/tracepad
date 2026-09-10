@@ -630,10 +630,10 @@ It has a page of its own: [export.md](export.md).
 
 ## Administration
 
-`projects`, `keys`, `retention` and `users rm-data` manage the server itself.
-They are clients of the same API as everything else, and they are covered in
-[admin.md](admin.md) and [retention.md](retention.md); what matters here is how
-they behave at a terminal.
+`projects`, `keys`, `retention`, `users rm-data` and `accounts` manage the
+server itself. They are clients of the same API as everything else, and they
+are covered in [admin.md](admin.md), [retention.md](retention.md) and
+[accounts.md](accounts.md); what matters here is how they behave at a terminal.
 
 ```sh
 tracepad projects ls
@@ -670,6 +670,96 @@ passing both is a usage error rather than one of them quietly winning, and that
 holds when the two agree as well. The commands marked as needing
 the admin token in [admin.md](admin.md) take it as `--key` or
 `TRACEPAD_API_KEY`, since it rides in the same header as a project key.
+
+### `accounts`
+
+```sh
+tracepad accounts ls
+tracepad accounts show   <id|email>
+tracepad accounts create <email> [--name N] [--owner]
+                         [--project <project-id>:viewer|editor]...
+tracepad accounts invite <id|email>
+tracepad accounts set    <id|email> [--name N] [--owner | --no-owner]
+                         [--disable | --enable]
+tracepad accounts grant  <id|email> <project-id> viewer|editor
+tracepad accounts revoke <id|email> <project-id>
+tracepad accounts rm     <id|email> [--confirm <email>]
+```
+
+People sign in and programs use keys; [accounts.md](accounts.md) is the whole
+of it, and this is that from a terminal. Every command here needs the **admin
+token** — the routes take an owner's session or the token, and a terminal has
+no cookie:
+
+```sh
+export TRACEPAD_API_KEY=$TRACEPAD_ADMIN_TOKEN
+```
+
+Each takes the account as an **id or an email**, whichever you have. An email
+is what you know about somebody, so it is what you type; the `@` is what tells
+the two apart.
+
+Inviting somebody prints the link once, and only its hash is stored — carry it
+to them, and the link is what sets their password, so the password never passes
+through your hands:
+
+```
+$ tracepad accounts create helper@example.com --name "The Helper" \
+    --project 9f2c…:viewer
+account helper@example.com created (4b1e…)
+
+  http://localhost:4318/invite#token=…
+
+the invitation link is shown only here; only its hash is stored.
+It is good until 2026-09-17 10:00:00, and it is what sets their password —
+which is why the password never passes through your hands.
+```
+
+`accounts invite` mints a fresh link for an account that already exists, which
+is also the **password reset**: it ends that account's sessions, and the old
+password goes on working until the new link is used, so a link that never
+arrives leaves nobody locked out.
+
+`accounts ls` answers "who can see what" in one table — the projects and roles
+are on the row, and an owner reads as *every project* because an owner has no
+membership rows:
+
+```
+EMAIL                NAME        STANDING         LAST LOGIN           PROJECTS
+helper@example.com   The Helper  member           2026-09-09 11:04:12  checkout (viewer)
+partner@example.com  Partner     owner, invited   never                every project
+```
+
+*invited* is an account that has not used its link yet, and it is said next to
+`owner` rather than instead of it: an owner counts only once they can actually
+sign in, which is why you cannot stand down the moment you invite a successor.
+
+`accounts rm` is for people who are gone. It takes their memberships, sessions
+and invitations and nothing else, and it wears the same ceremony as the rest of
+the destructive commands — except that the echo is the **email**:
+
+```
+$ tracepad accounts rm helper@example.com
+this would delete the account helper@example.com:
+  memberships    1
+  sessions       2
+disabling the account instead takes access away without losing its roles
+type "helper@example.com" to confirm:
+```
+
+`--confirm helper@example.com` is that echo typed in advance, which is what a
+script has instead of a terminal. It is deliberately not a `--yes`: naming the
+account is the point, so a script cannot delete whichever account an id
+happened to resolve to.
+
+**When every owner's password is lost**, this is the way back in — which is why
+the admin token is worth keeping somewhere:
+
+```sh
+TRACEPAD_API_KEY=$TRACEPAD_ADMIN_TOKEN tracepad accounts invite you@example.com
+```
+
+Open the link it prints and set a new password.
 
 ### `health`
 

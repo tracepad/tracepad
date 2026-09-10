@@ -131,6 +131,7 @@ func (r *run) handlers() map[string]func(context.Context, []string) error {
 		"keys":          r.keys,
 		"retention":     r.retention,
 		"users":         r.users,
+		"accounts":      r.accounts,
 	}
 }
 
@@ -277,6 +278,29 @@ and asks you to type the name back; --yes answers that for a script:
                           [--stats-days N | --stats-forever]
                           [--project ID] [--yes]
   tracepad users rm-data  <user-id> [--project ID] [--yes]
+
+Accounts (spec 028). People sign in; programs use keys. These need the admin
+token, and keeping it somewhere is how you get back in when every owner's
+password is lost — set it, run accounts invite, open the link:
+  tracepad accounts ls
+  tracepad accounts show   <id|email>
+  tracepad accounts create <email> [--name N] [--owner]
+                           [--project <project-id>:viewer|editor]...
+  tracepad accounts invite <id|email>
+  tracepad accounts set    <id|email> [--name N] [--owner | --no-owner]
+                           [--disable | --enable]
+  tracepad accounts grant  <id|email> <project-id> viewer|editor
+  tracepad accounts revoke <id|email> <project-id>
+  tracepad accounts rm     <id|email> [--confirm <email>]
+
+An owner has every project; everyone else has a role in the ones they are
+given. accounts create prints the invitation link once — carry it to the
+person, and the link is what sets their password. accounts invite mints a
+fresh one, which is also the password reset: it ends that account's sessions,
+and the old password works until the new link is used. accounts rm shows what
+it would delete and asks for the email back; --confirm answers that for a
+script, and it is the email rather than a --yes because naming the account is
+the point.
 
 Liveness (spec 020). The one command that needs no key, because the route it
 calls needs none. It prints the server's version and exits 0, or says what went
@@ -429,6 +453,13 @@ func (r *run) wantJSON() bool { return r.forceJSON || !r.opt.TTY }
 // asked through the CLI, through an MCP tool and with curl answers with the
 // same bytes (#1).
 func (r *run) emit(body json.RawMessage) error {
+	// A `204` answered with nothing, and verbatim means nothing: a blank
+	// line is not JSON, and the whole reason a piped run is JSON is that
+	// something is going to parse it (#12). The account routes are the first
+	// that answer that way (spec 028 #12).
+	if strings.TrimSpace(string(body)) == "" {
+		return nil
+	}
 	_, err := fmt.Fprintf(r.opt.Stdout, "%s\n", strings.TrimRight(string(body), "\n"))
 	return err
 }
