@@ -92,7 +92,7 @@
 						<th scope="col" class="px-3 py-1.5 font-medium">Status</th>
 						<th scope="col" class="px-3 py-1.5 font-medium">Last login</th>
 						<th scope="col" class="px-3 py-1.5 font-medium">Projects</th>
-						<th scope="col" class="w-36 px-3 py-1.5 font-medium">Actions</th>
+						<th scope="col" class="w-44 px-3 py-1.5 font-medium">Actions</th>
 					</tr>
 				</thead>
 				<tbody>
