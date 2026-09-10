@@ -110,8 +110,8 @@ test('the bar counts what the filters match, not what is on the page', async ({ 
 	await signIn(page);
 	await page.goto('/traces?limit=2');
 
-	// Sixteen in the corpus, two on screen.
-	await expect(page.getByText('2 of 16 traces')).toBeVisible();
+	// Seventeen in the corpus, two on screen.
+	await expect(page.getByText('2 of 17 traces')).toBeVisible();
 
 	await page.goto('/traces?limit=2&environment=staging');
 	await expect(page.getByText(/of 1 trace\b/)).toBeVisible();
@@ -128,7 +128,7 @@ test('changing the page size starts again at the newest page', async ({ page }) 
 	// A cursor is a position in one paging of one listing; at another size it
 	// points into a page that no longer exists.
 	await expect(page).not.toHaveURL(/cursor=/);
-	await expect(rows(page)).toHaveCount(16);
+	await expect(rows(page)).toHaveCount(17);
 });
 
 test('j on the last row of a page turns it and keeps reading', async ({ page }) => {
@@ -209,7 +209,7 @@ test('a listing that fits on one page has all four controls dead', async ({ page
 	// The whole corpus at the default size: this page is both ends at once. A
 	// live » here would navigate to `?direction=prev`, show the same rows and
 	// quietly pause live mode (PR #11, third review).
-	await expect(page.locator('tbody tr')).toHaveCount(16);
+	await expect(page.locator('tbody tr')).toHaveCount(17);
 	for (const name of ['Newest page', 'Previous page', 'Next page', 'Oldest page']) {
 		await expect(page.getByRole('button', { name })).toBeDisabled();
 	}
@@ -217,17 +217,17 @@ test('a listing that fits on one page has all four controls dead', async ({ page
 
 test('walking back to a short page still leaves a way home', async ({ page }) => {
 	await signIn(page);
-	// Sixteen traces in pages of three: from the far end, walking back lands
+	// Seventeen traces in pages of four: from the far end, walking back lands
 	// on a one-row page with nothing above it — rows, but no `prev_cursor`. «
 	// is an anchor and must stay live there, or the reader is stuck on one row
 	// with live mode paused (PR #11, fourth review).
 	//
 	// The size is what the corpus decides, not a taste: the short page exists
 	// only where the corpus leaves a remainder, so a size the count divides by
-	// tests the ordinary page twice over instead. Sixteen and three leave one;
+	// tests the ordinary page twice over instead. Seventeen and four leave one;
 	// a fixture added to the corpus is what to re-derive this pair from.
-	await page.goto('/traces?limit=3&direction=prev');
-	for (let step = 0; step < 5; step++) {
+	await page.goto('/traces?limit=4&direction=prev');
+	for (let step = 0; step < 4; step++) {
 		// One turn at a time. The cursors in the bar belong to the page on
 		// screen, so a click before the next one lands would re-address the
 		// page just asked for and quietly lose a turn — the bar goes dead
@@ -242,8 +242,8 @@ test('walking back to a short page still leaves a way home', async ({ page }) =>
 	const home = page.getByRole('button', { name: 'Newest page' });
 	await expect(home).toBeEnabled();
 	await home.click();
-	await expect(page).toHaveURL(/\/traces\?limit=3$/);
-	await expect(page.locator('tbody tr')).toHaveCount(3);
+	await expect(page).toHaveURL(/\/traces\?limit=4$/);
+	await expect(page.locator('tbody tr')).toHaveCount(4);
 });
 
 test('an empty page off the newest one is not a dead end', async ({ page }) => {
@@ -268,12 +268,12 @@ test('an empty page off the newest one is not a dead end', async ({ page }) => {
 
 test('the sessions listing pages the same way', async ({ page }) => {
 	await signIn(page);
-	// Four sessions in pages of two: one turn is the whole listing, so the
+	// Five sessions in pages of three: one turn is the whole listing, so the
 	// far end is one click away and both cursors are exercised.
-	await page.goto('/sessions?limit=2');
+	await page.goto('/sessions?limit=3');
 
-	await expect(rows(page)).toHaveCount(2);
-	await expect(page.getByText('2 of 4 sessions')).toBeVisible();
+	await expect(rows(page)).toHaveCount(3);
+	await expect(page.getByText('3 of 5 sessions')).toBeVisible();
 	await page.getByRole('button', { name: 'Next page' }).click();
 	await expect(page).toHaveURL(/cursor=/);
 	// ‹ live is the turn having landed; ✕ dead before that is only `busy`.

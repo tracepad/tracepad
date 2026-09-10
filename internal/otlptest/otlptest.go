@@ -45,6 +45,7 @@ func Fixtures() []Fixture {
 		wireColumns(),
 		evalRun(),
 		plainTextPrompt(),
+		claudeCodeInteraction(),
 	}
 }
 
@@ -545,6 +546,143 @@ Look at the cold room first — it logged eight degrees twice overnight.`
 	}
 }
 
+// 012 — Claude Code (spec 030 #4): one `claude_code.interaction` per prompt,
+// an `llm_request` per API call and a `tool` span with the two children a tool
+// call produces, exported by the CLI's own tracer.
+//
+// It is the corpus's example of usage arriving under the **bare** token keys:
+// `input_tokens`, `output_tokens`, `cache_read_tokens` and
+// `cache_creation_tokens` sit straight on the span, under no prefix, and are
+// read only because neither of the two conventions is there (spec 030 #1).
+// Both `model` and `gen_ai.request.model` are sent, as the CLI sends them, so
+// the golden also records which of the two the chain takes.
+//
+// Synthetic, and deliberately so. A live Claude Code span carries the
+// account's email, its `user.account_id`, its `user.account_uuid` and the
+// organization id; none of them is here and none of them belongs in a public
+// tree (workspace rule 4, Decision 4). What is reproduced is the shape — the
+// span names, the `span.type` of each, the value types the CLI puts on the
+// wire — with ids and counts invented on the spot. The user id is a hash on
+// the wire too, so the invented one is hash-shaped.
+func claudeCodeInteraction() Fixture {
+	const traceID = "c0de1a2b3c4d5e6f7a8b9c0d1e2f3a4b"
+	const (
+		rootID    = "c1a2b3c4d5e6f7a8"
+		firstCall = "c2a3b4c5d6e7f8a9"
+		toolID    = "c3a4b5c6d7e8f9aa"
+		blockedID = "c4a5b6c7d8e9fabb"
+		execID    = "c5a6b7c8d9eafbcc"
+		lastCall  = "c6a7b8c9daebfcdd"
+	)
+	// On every span of the export, which is how the CLI stamps them.
+	who := []*commonpb.KeyValue{
+		str("user.id", "3f2a1c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f809"),
+		str("session.id", "9c1f0e6a-2b3d-4c5e-8f70-1a2b3c4d5e6f"),
+		str("terminal.type", "iterm"),
+	}
+	with := func(attrs ...*commonpb.KeyValue) []*commonpb.KeyValue {
+		return append(append([]*commonpb.KeyValue{}, who...), attrs...)
+	}
+	const toolCall = "toolu_01Aa2Bb3Cc4Dd5Ee6Ff7Gg8H"
+
+	interaction := span(traceID, rootID, "", "claude_code.interaction",
+		base, base+2900*ms,
+		with(
+			str("span.type", "interaction"),
+			// Redacted by Claude Code itself, before the span is
+			// exported: no prompt text reaches an OTLP endpoint.
+			str("user_prompt", "<REDACTED>"),
+			i64("user_prompt_length", 46),
+			i64("interaction.sequence", 1),
+			i64("interaction.duration_ms", 2900),
+		)...,
+	)
+	planned := span(traceID, firstCall, rootID, "claude_code.llm_request",
+		base+60*ms, base+900*ms,
+		with(
+			str("span.type", "llm_request"),
+			str("gen_ai.system", "anthropic"),
+			str("model", "claude-haiku-4-5-20251001"),
+			str("gen_ai.request.model", "claude-haiku-4-5-20251001"),
+			i64("input_tokens", 10),
+			i64("output_tokens", 118),
+			i64("cache_read_tokens", 17580),
+			i64("cache_creation_tokens", 10434),
+			str("stop_reason", "tool_use"),
+			str("gen_ai.response.id", "req_011AbCdEfGhIjKlMnOpQrStU"),
+			strs("gen_ai.response.finish_reasons", "tool_use"),
+			i64("duration_ms", 840),
+			boolean("success", true),
+		)...,
+	)
+	tool := span(traceID, toolID, rootID, "claude_code.tool",
+		base+950*ms, base+1600*ms,
+		with(
+			str("span.type", "tool"),
+			str("tool_name", "Bash"),
+			str("tool_use_id", toolCall),
+			str("gen_ai.tool.call.id", toolCall),
+			i64("duration_ms", 650),
+		)...,
+	)
+	blocked := span(traceID, blockedID, toolID, "claude_code.tool.blocked_on_user",
+		base+960*ms, base+985*ms,
+		with(
+			str("span.type", "tool.blocked_on_user"),
+			str("decision", "allow"),
+			str("source", "config"),
+			i64("duration_ms", 25),
+		)...,
+	)
+	executed := span(traceID, execID, toolID, "claude_code.tool.execution",
+		base+990*ms, base+1595*ms,
+		with(
+			str("span.type", "tool.execution"),
+			str("tool_use_id", toolCall),
+			str("gen_ai.tool.call.id", toolCall),
+			i64("duration_ms", 605),
+			boolean("success", true),
+		)...,
+	)
+	answered := span(traceID, lastCall, rootID, "claude_code.llm_request",
+		base+1650*ms, base+2880*ms,
+		with(
+			str("span.type", "llm_request"),
+			str("gen_ai.system", "anthropic"),
+			str("model", "claude-haiku-4-5-20251001"),
+			str("gen_ai.request.model", "claude-haiku-4-5-20251001"),
+			i64("input_tokens", 8),
+			i64("output_tokens", 48),
+			i64("cache_read_tokens", 28014),
+			i64("cache_creation_tokens", 170),
+			str("stop_reason", "end_turn"),
+			str("gen_ai.response.id", "req_011VwXyZaBcDeFgHiJkLmNoP"),
+			strs("gen_ai.response.finish_reasons", "end_turn"),
+			i64("duration_ms", 1230),
+			boolean("success", true),
+		)...,
+	)
+
+	return Fixture{
+		Name: "012-claude-code-interaction",
+		ResourceSpans: []*tracepb.ResourceSpans{
+			resourceSpans(
+				[]*commonpb.KeyValue{
+					str("service.name", "claude-code"),
+					// The CLI's own version, which is what the
+					// release column ends up holding.
+					str("service.version", "2.1.0"),
+					str("os.type", "darwin"),
+					str("os.version", "25.5.0"),
+					str("host.arch", "arm64"),
+				},
+				scope("com.anthropic.claude_code.tracing", "1.0.0",
+					interaction, planned, tool, blocked, executed, answered),
+			),
+		},
+	}
+}
+
 // JSONBody renders an export in the OTLP/JSON encoding, ids hex-encoded as the
 // specification prescribes (spec 019 #7). It is how the corpus is replayed
 // through the JSON door: the same fixtures, the same expected rows, one
@@ -687,6 +825,29 @@ func i64(key string, value int64) *commonpb.KeyValue {
 func f64(key string, value float64) *commonpb.KeyValue {
 	return &commonpb.KeyValue{Key: key, Value: &commonpb.AnyValue{
 		Value: &commonpb.AnyValue_DoubleValue{DoubleValue: value},
+	}}
+}
+
+func boolean(key string, value bool) *commonpb.KeyValue {
+	return &commonpb.KeyValue{Key: key, Value: &commonpb.AnyValue{
+		Value: &commonpb.AnyValue_BoolValue{BoolValue: value},
+	}}
+}
+
+// strs is a string-array attribute — `gen_ai.response.finish_reasons` is one
+// on the wire, and a fixture that flattened it to a string would be testing a
+// shape no exporter sends.
+func strs(key string, values ...string) *commonpb.KeyValue {
+	items := make([]*commonpb.AnyValue, 0, len(values))
+	for _, value := range values {
+		items = append(items, &commonpb.AnyValue{
+			Value: &commonpb.AnyValue_StringValue{StringValue: value},
+		})
+	}
+	return &commonpb.KeyValue{Key: key, Value: &commonpb.AnyValue{
+		Value: &commonpb.AnyValue_ArrayValue{
+			ArrayValue: &commonpb.ArrayValue{Values: items},
+		},
 	}}
 }
 
