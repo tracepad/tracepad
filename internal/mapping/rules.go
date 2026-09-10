@@ -163,6 +163,31 @@ const (
 // feeds the cost chain instead (spec 002 Decision 20, 2026-08-26).
 const genAIUsageCost = "gen_ai.usage.cost"
 
+// bareUsageKeys is the third usage source (spec 030 #1): the spellings an
+// exporter puts straight on the span when nobody normalised its usage —
+// Claude Code's four, the Anthropic SDK's own `usage` object, an OpenAI-style
+// client's prompt/completion pair. Read only when neither
+// `langfuse.observation.usage_details` nor any `gen_ai.usage.*` count is
+// there, and each winner is stored under the key as sent.
+//
+// The set is closed and listed here rather than found by a prefix scan
+// (#2): `input_tokens` is exactly the kind of bare word that collides with
+// somebody's unrelated attribute, and every attribute the mapping reads is
+// named in the table in docs/ingest.md. It grows by a Decision on spec 030,
+// not by a hunch.
+var bareUsageKeys = []string{
+	"input_tokens",
+	"output_tokens",
+	"total_tokens",
+	"cache_read_tokens",
+	"cache_creation_tokens",
+	"cache_read_input_tokens",
+	"cache_creation_input_tokens",
+	"prompt_tokens",
+	"completion_tokens",
+	"reasoning_tokens",
+}
+
 // Span events. OTel records a failure as an event named `exception` rather
 // than as attributes, so this is where a plain-OTel app's stack traces live
 // (spec 002 Decision 26, 2026-08-27).

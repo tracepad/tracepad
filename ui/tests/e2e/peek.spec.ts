@@ -155,6 +155,10 @@ test('a value in a row can still be selected and copied', async ({ page }, testI
 	test.skip(testInfo.project.name !== 'desktop', 'dragging a selection needs a mouse');
 	await signIn(page);
 	const cell = rows(page).filter({ hasText: 'summarise-release-notes' }).locator('td').nth(1);
+	// The drag is done in page coordinates, so the cell has to be on screen
+	// first: a corpus long enough to scroll would otherwise put it below the
+	// fold and the gesture would land on nothing.
+	await cell.scrollIntoViewIfNeeded();
 	const box = await cell.boundingBox();
 	if (!box) throw new Error('the name cell is not on screen');
 

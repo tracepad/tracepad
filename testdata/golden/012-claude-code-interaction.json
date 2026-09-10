@@ -1,0 +1,180 @@
+{
+  "dialect": "genai",
+  "traces": [
+    {
+      "id": "c0de1a2b3c4d5e6f7a8b9c0d1e2f3a4b",
+      "name": "claude_code.interaction",
+      "user_id": "3f2a1c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f809",
+      "session_id": "9c1f0e6a-2b3d-4c5e-8f70-1a2b3c4d5e6f",
+      "release": "2.1.0"
+    }
+  ],
+  "observations": [
+    {
+      "trace_id": "c0de1a2b3c4d5e6f7a8b9c0d1e2f3a4b",
+      "id": "c1a2b3c4d5e6f7a8",
+      "type": "span",
+      "name": "claude_code.interaction",
+      "start_time": 1787738400000000000,
+      "end_time": 1787738402900000000,
+      "level": "DEFAULT",
+      "metadata": {
+        "interaction.duration_ms": 2900,
+        "interaction.sequence": 1,
+        "resource.host.arch": "arm64",
+        "resource.os.type": "darwin",
+        "resource.os.version": "25.5.0",
+        "resource.service.name": "claude-code",
+        "scope.name": "com.anthropic.claude_code.tracing",
+        "scope.version": "1.0.0",
+        "span.type": "interaction",
+        "terminal.type": "iterm",
+        "user_prompt": "\u003cREDACTED\u003e",
+        "user_prompt_length": 46
+      }
+    },
+    {
+      "trace_id": "c0de1a2b3c4d5e6f7a8b9c0d1e2f3a4b",
+      "id": "c2a3b4c5d6e7f8a9",
+      "parent_observation_id": "c1a2b3c4d5e6f7a8",
+      "type": "generation",
+      "name": "claude_code.llm_request",
+      "start_time": 1787738400060000000,
+      "end_time": 1787738400900000000,
+      "model": "claude-haiku-4-5-20251001",
+      "level": "DEFAULT",
+      "usage": {
+        "cache_creation_tokens": 10434,
+        "cache_read_tokens": 17580,
+        "input_tokens": 10,
+        "output_tokens": 118
+      },
+      "metadata": {
+        "duration_ms": 840,
+        "gen_ai.response.finish_reasons": [
+          "tool_use"
+        ],
+        "gen_ai.response.id": "req_011AbCdEfGhIjKlMnOpQrStU",
+        "gen_ai.system": "anthropic",
+        "model": "claude-haiku-4-5-20251001",
+        "resource.host.arch": "arm64",
+        "resource.os.type": "darwin",
+        "resource.os.version": "25.5.0",
+        "resource.service.name": "claude-code",
+        "scope.name": "com.anthropic.claude_code.tracing",
+        "scope.version": "1.0.0",
+        "span.type": "llm_request",
+        "stop_reason": "tool_use",
+        "success": true,
+        "terminal.type": "iterm"
+      }
+    },
+    {
+      "trace_id": "c0de1a2b3c4d5e6f7a8b9c0d1e2f3a4b",
+      "id": "c3a4b5c6d7e8f9aa",
+      "parent_observation_id": "c1a2b3c4d5e6f7a8",
+      "type": "span",
+      "name": "claude_code.tool",
+      "start_time": 1787738400950000000,
+      "end_time": 1787738401600000000,
+      "level": "DEFAULT",
+      "metadata": {
+        "duration_ms": 650,
+        "gen_ai.tool.call.id": "toolu_01Aa2Bb3Cc4Dd5Ee6Ff7Gg8H",
+        "resource.host.arch": "arm64",
+        "resource.os.type": "darwin",
+        "resource.os.version": "25.5.0",
+        "resource.service.name": "claude-code",
+        "scope.name": "com.anthropic.claude_code.tracing",
+        "scope.version": "1.0.0",
+        "span.type": "tool",
+        "terminal.type": "iterm",
+        "tool_name": "Bash",
+        "tool_use_id": "toolu_01Aa2Bb3Cc4Dd5Ee6Ff7Gg8H"
+      }
+    },
+    {
+      "trace_id": "c0de1a2b3c4d5e6f7a8b9c0d1e2f3a4b",
+      "id": "c4a5b6c7d8e9fabb",
+      "parent_observation_id": "c3a4b5c6d7e8f9aa",
+      "type": "span",
+      "name": "claude_code.tool.blocked_on_user",
+      "start_time": 1787738400960000000,
+      "end_time": 1787738400985000000,
+      "level": "DEFAULT",
+      "metadata": {
+        "decision": "allow",
+        "duration_ms": 25,
+        "resource.host.arch": "arm64",
+        "resource.os.type": "darwin",
+        "resource.os.version": "25.5.0",
+        "resource.service.name": "claude-code",
+        "scope.name": "com.anthropic.claude_code.tracing",
+        "scope.version": "1.0.0",
+        "source": "config",
+        "span.type": "tool.blocked_on_user",
+        "terminal.type": "iterm"
+      }
+    },
+    {
+      "trace_id": "c0de1a2b3c4d5e6f7a8b9c0d1e2f3a4b",
+      "id": "c5a6b7c8d9eafbcc",
+      "parent_observation_id": "c3a4b5c6d7e8f9aa",
+      "type": "span",
+      "name": "claude_code.tool.execution",
+      "start_time": 1787738400990000000,
+      "end_time": 1787738401595000000,
+      "level": "DEFAULT",
+      "metadata": {
+        "duration_ms": 605,
+        "gen_ai.tool.call.id": "toolu_01Aa2Bb3Cc4Dd5Ee6Ff7Gg8H",
+        "resource.host.arch": "arm64",
+        "resource.os.type": "darwin",
+        "resource.os.version": "25.5.0",
+        "resource.service.name": "claude-code",
+        "scope.name": "com.anthropic.claude_code.tracing",
+        "scope.version": "1.0.0",
+        "span.type": "tool.execution",
+        "success": true,
+        "terminal.type": "iterm",
+        "tool_use_id": "toolu_01Aa2Bb3Cc4Dd5Ee6Ff7Gg8H"
+      }
+    },
+    {
+      "trace_id": "c0de1a2b3c4d5e6f7a8b9c0d1e2f3a4b",
+      "id": "c6a7b8c9daebfcdd",
+      "parent_observation_id": "c1a2b3c4d5e6f7a8",
+      "type": "generation",
+      "name": "claude_code.llm_request",
+      "start_time": 1787738401650000000,
+      "end_time": 1787738402880000000,
+      "model": "claude-haiku-4-5-20251001",
+      "level": "DEFAULT",
+      "usage": {
+        "cache_creation_tokens": 170,
+        "cache_read_tokens": 28014,
+        "input_tokens": 8,
+        "output_tokens": 48
+      },
+      "metadata": {
+        "duration_ms": 1230,
+        "gen_ai.response.finish_reasons": [
+          "end_turn"
+        ],
+        "gen_ai.response.id": "req_011VwXyZaBcDeFgHiJkLmNoP",
+        "gen_ai.system": "anthropic",
+        "model": "claude-haiku-4-5-20251001",
+        "resource.host.arch": "arm64",
+        "resource.os.type": "darwin",
+        "resource.os.version": "25.5.0",
+        "resource.service.name": "claude-code",
+        "scope.name": "com.anthropic.claude_code.tracing",
+        "scope.version": "1.0.0",
+        "span.type": "llm_request",
+        "stop_reason": "end_turn",
+        "success": true,
+        "terminal.type": "iterm"
+      }
+    }
+  ]
+}

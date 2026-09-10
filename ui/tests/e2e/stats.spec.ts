@@ -25,7 +25,7 @@ test('all four charts render over the corpus', async ({ page }) => {
 	// Latency is two series in one chart (spec 007 #6).
 	await expect(page.locator('.u-legend', { hasText: 'p95' })).toBeVisible();
 	// The header's totals are the endpoint's own numbers.
-	await expect(page.getByText('16 traces · 1 with errors')).toBeVisible();
+	await expect(page.getByText('17 traces · 1 with errors')).toBeVisible();
 });
 
 test('the breakdown tables match what the endpoint reports', async ({ page }) => {
@@ -47,9 +47,14 @@ test('the breakdown tables match what the endpoint reports', async ({ page }) =>
 	expect(unit).toBe('observation');
 	const table = page.getByRole('table').filter({ has: page.getByText('Model') });
 	for (const bucket of buckets) {
-		await expect(table.getByRole('row').filter({ hasText: bucket.key })).toContainText(
-			String(bucket.count)
-		);
+		// The row whose *key* is this model, not every row whose text
+		// contains it: `claude-haiku-4-5` is a prefix of
+		// `claude-haiku-4-5-20251001`, and the corpus carries both. The key
+		// column is the row's header, which is what makes it addressable.
+		const row = table
+			.getByRole('row')
+			.filter({ has: page.getByRole('rowheader', { name: bucket.key, exact: true }) });
+		await expect(row).toContainText(String(bucket.count));
 	}
 });
 

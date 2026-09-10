@@ -101,7 +101,21 @@ func (a *attrs) merge(level origin, kvs []*commonpb.KeyValue) {
 // span talked to, and reading it there is wrong twice over, because claiming
 // it would take the Resource's own value out of metadata as well (found in
 // review of PR #19).
-var keyLevel = map[string]origin{"service.version": originResource}
+// The bare token keys are the mirror case (spec 030 #6, found in review of
+// PR #53). A token count is a fact about one call, so on the Resource — where
+// an attribute describes the service and reaches every span of the export — it
+// is not a count at all: read from the merged view, one stray `input_tokens`
+// beside `service.name` would give every observation in the batch the same
+// fabricated usage and take the attribute out of all of their metadata. These
+// are the ten spellings the spec itself calls collision-prone (Decision 2), so
+// they are read at the span level and nowhere else.
+var keyLevel = func() map[string]origin {
+	levels := map[string]origin{"service.version": originResource}
+	for _, key := range bareUsageKeys {
+		levels[key] = originSpan
+	}
+	return levels
+}()
 
 // lookup returns the value at key without claiming it. A key present with an
 // empty value counts as absent: priority chains are "first non-empty wins",
@@ -293,18 +307,30 @@ func asString(v any) string {
 // asNumber coerces an attribute value to a float. SDKs disagree on whether
 // token counts travel as ints, doubles or decimal strings, so all three are
 // accepted.
+//
+// NaN and the infinities are refused, because a number that cannot be
+// serialized is not a number a column can hold. `anyValue` keeps a non-finite
+// double as its textual form precisely so that it survives into metadata as
+// text; parsing that text back would undo the rescue, and a `usage` or
+// `cost_details` holding NaN fails `json.Marshal` inside the ingest
+// transaction — which loses the whole batch with a 500, not just the one
+// attribute, and a retrying exporter re-sends the same body for ever. Refused
+// here, the value takes the caller's "not a number" branch and stays in
+// metadata where spec 002 #11 promises it (found in review of PR #53).
 func asNumber(v any) (float64, bool) {
 	switch value := v.(type) {
 	case int64:
 		return float64(value), true
 	case float64:
-		return value, true
+		return value, isFinite(value)
 	case string:
 		n, err := strconv.ParseFloat(value, 64)
-		return n, err == nil
+		return n, err == nil && isFinite(n)
 	}
 	return 0, false
 }
+
+func isFinite(f float64) bool { return !math.IsNaN(f) && !math.IsInf(f, 0) }
 
 // asInteger coerces an attribute value to a whole number for an INTEGER
 // column. It accepts the three shapes asNumber does and refuses anything with

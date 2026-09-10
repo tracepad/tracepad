@@ -118,6 +118,111 @@ func TestReadAPIEndToEnd(t *testing.T) {
 	expectStatus(t, h.get(t, "/api/v1/system"), 200)
 }
 
+// A Claude Code session, whole, through the door it actually arrives at
+// (spec 030, Testing). The counts it carries are on the span under no prefix
+// at all, and until spec 030 they landed in metadata: what this asserts is
+// that a `claude -p` needs nothing but three environment variables to produce
+// a readable trace with its tokens on it.
+func TestClaudeCodeInteractionEndToEnd(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	rec := h.post(t, "/v1/traces", fixtureBody(t, "012-claude-code-interaction"))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("ingest: status = %d, body = %s", rec.Code, rec.Body)
+	}
+
+	// `?expand=io` because half of what this asserts is where an attribute
+	// did *not* go: metadata rides only when it is asked for.
+	const traceID = "c0de1a2b3c4d5e6f7a8b9c0d1e2f3a4b"
+	got := h.get(t, "/api/v1/traces/"+traceID+"?expand=io")
+	expectStatus(t, got, 200)
+	trace := decodeJSON[struct {
+		Name      string   `json:"name"`
+		SessionID string   `json:"session_id"`
+		Release   string   `json:"release"`
+		TotalCost *float64 `json:"total_cost"`
+		// The interaction is the root; everything else hangs off it.
+		Observations []struct {
+			Name     string `json:"name"`
+			Children []struct {
+				Name     string         `json:"name"`
+				Type     string         `json:"type"`
+				Model    string         `json:"model"`
+				Usage    map[string]any `json:"usage"`
+				Metadata map[string]any `json:"metadata"`
+				Children []struct {
+					Name string `json:"name"`
+				} `json:"children"`
+			} `json:"children"`
+		} `json:"observations"`
+	}](t, got)
+
+	if trace.Name != "claude_code.interaction" {
+		t.Errorf("trace name = %q, want the root span's", trace.Name)
+	}
+	// The session is the CLI's own session id and the release is the CLI's
+	// version off the resource — both are what make one prompt findable
+	// among a day of them.
+	if trace.SessionID != "9c1f0e6a-2b3d-4c5e-8f70-1a2b3c4d5e6f" {
+		t.Errorf("session_id = %q, want the one the spans carried", trace.SessionID)
+	}
+	if trace.Release != "2.1.0" {
+		t.Errorf("release = %q, want the CLI version off the resource", trace.Release)
+	}
+	// Claude Code sends no cost, and nothing estimates one (spec 002 #14).
+	if trace.TotalCost != nil {
+		t.Errorf("total_cost = %v, want nothing: no cost was sent", *trace.TotalCost)
+	}
+
+	if len(trace.Observations) != 1 {
+		t.Fatalf("roots = %d, want the one interaction", len(trace.Observations))
+	}
+	children := trace.Observations[0].Children
+	if len(children) != 3 {
+		t.Fatalf("the interaction has %d children, want two llm_requests and a tool", len(children))
+	}
+
+	generations := 0
+	for _, child := range children {
+		switch child.Name {
+		case "claude_code.llm_request":
+			generations++
+			if child.Type != "generation" || child.Model != "claude-haiku-4-5-20251001" {
+				t.Errorf("llm_request = %s/%q, want a generation on the model it named",
+					child.Type, child.Model)
+			}
+			// The four counts, under the keys Claude Code sent them
+			// under — the whole point of the third source.
+			for _, key := range []string{
+				"input_tokens", "output_tokens",
+				"cache_read_tokens", "cache_creation_tokens",
+			} {
+				count, ok := child.Usage[key].(float64)
+				if !ok || count <= 0 {
+					t.Errorf("usage[%q] = %#v, want the count the span carried",
+						key, child.Usage[key])
+				}
+				if _, stranded := child.Metadata[key]; stranded {
+					t.Errorf("metadata still holds %q: it belongs in usage now", key)
+				}
+			}
+		case "claude_code.tool":
+			if len(child.Children) != 2 {
+				t.Errorf("the tool span has %d children, want blocked_on_user and execution",
+					len(child.Children))
+			}
+			if child.Metadata["tool_name"] != "Bash" {
+				t.Errorf("tool_name = %#v, want it kept in metadata (spec 030, Overview)",
+					child.Metadata["tool_name"])
+			}
+		default:
+			t.Errorf("unexpected child %q under the interaction", child.Name)
+		}
+	}
+	if generations != 2 {
+		t.Errorf("generations = %d, want the two API calls the session made", generations)
+	}
+}
+
 // treeNodeJS is the shape the e2e walk needs: an id and its children.
 type treeNodeJS struct {
 	ID       string       `json:"id"`
