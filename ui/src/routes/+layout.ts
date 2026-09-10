@@ -1,6 +1,6 @@
 import { redirect } from '@sveltejs/kit';
-import { admin } from '$lib/admin.svelte';
-import { auth, LOGIN_ROUTE } from '$lib/auth.svelte';
+import { auth, LOGIN_ROUTE, OUTSIDE_THE_SHELL, SETUP_ROUTE } from '$lib/auth.svelte';
+import { bootstrap } from '$lib/session';
 import { theme } from '$lib/theme.svelte';
 import type { LayoutLoad } from './$types';
 
@@ -11,26 +11,31 @@ export const ssr = false;
 export const prerender = false;
 
 let started = false;
+/** Whether this server is still waiting for its first owner (Decision 9). */
+let setupRequired = false;
 
 /**
- * The one route guard. Every screen reads project data, so an unauthenticated
- * visit is sent to the login form with where it was going, and comes back
- * there (spec 006 #8).
+ * The one route guard, with the three outcomes of the Application contract: a
+ * server with no owner sends everybody to `/setup`, nobody signed in goes to
+ * `/login` with where they were going, and anything else renders the shell.
+ *
+ * `setupRequired` stops mattering the moment somebody is signed in, which is
+ * how setting up an owner leaves the screen it happened on: setup signs the
+ * new owner in, so the next navigation is a session and not a redirect back.
  */
-export const load: LayoutLoad = ({ url }) => {
+export const load: LayoutLoad = async ({ url }) => {
 	if (!started) {
 		started = true;
-		// Before the first navigation decision: a pre-authed URL has to
-		// count as being signed in, or the link the server printed would
-		// bounce off this guard.
-		auth.restore();
-		// The second credential, restored beside the first — the Settings
-		// screen should not ask for it again on every reload (spec 007 #3).
-		admin.restore();
 		theme.restore();
+		setupRequired = (await bootstrap()).setupRequired;
 	}
-	if (!auth.authenticated && url.pathname !== LOGIN_ROUTE) {
-		const next = url.pathname + url.search;
-		redirect(307, `${LOGIN_ROUTE}?next=${encodeURIComponent(next)}`);
+	if (auth.signedIn) return;
+	const path = url.pathname;
+	if (setupRequired) {
+		if (path !== SETUP_ROUTE) redirect(307, SETUP_ROUTE);
+		return;
+	}
+	if (!OUTSIDE_THE_SHELL.includes(path)) {
+		redirect(307, `${LOGIN_ROUTE}?next=${encodeURIComponent(path + url.search)}`);
 	}
 };

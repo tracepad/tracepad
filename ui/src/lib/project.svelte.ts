@@ -1,78 +1,83 @@
-import { api, type Project } from '$lib/api/client.svelte';
+import type { Membership } from '$lib/api/client.svelte';
 import { auth } from '$lib/auth.svelte';
 
-// The project the credential belongs to, which is all the shell needs to say
-// whose data is on screen. `GET /api/v1/projects` answers with exactly one
-// entry for a project key, and a project key is the only credential that gets
-// past login (spec 006 #13) — so there is nothing to pick between here.
+// Which project is on screen. A session is not a project the way a key was
+// (spec 028 #6), so something has to say which one every request is about — and
+// until spec 029 puts it in the URL with a switcher, it is the first of
+// `me.projects` by name (Decision 13).
+//
+// Remembered per account rather than per browser: two people who share a
+// laptop must not swap each other's project, and the id of a project one of
+// them cannot reach would be answered `403` for the other.
+
+const STORAGE_PREFIX = 'tracepad.project.';
 
 class CurrentProject {
-	#project = $state.raw<Project | null>(null);
+	#chosen = $state.raw<string | null>(null);
+
 	/**
-	 * The credential the name belongs to, not merely "have we asked yet". A
-	 * 401 signs the reader out without going through the sidebar's sign-out,
-	 * so the next key may be a different project's — and a boolean would leave
-	 * the old project's name in the sidebar for the rest of the session.
+	 * The project in force: the remembered one while it is still reachable,
+	 * otherwise the first by name. A role taken away under an open tab drops
+	 * the row out of `me.projects`, and the answer falls back rather than
+	 * pointing the header at a project the server would refuse.
 	 */
-	#loadedFor: string | null = null;
+	get current(): Membership | null {
+		const projects = auth.projects;
+		return projects.find((one) => one.id === this.#chosen) ?? projects[0] ?? null;
+	}
+
+	get id() {
+		return this.current?.id ?? null;
+	}
 
 	get name() {
-		return this.#project?.name ?? null;
+		return this.current?.name ?? null;
 	}
 
-	/**
-	 * The whole project row, which the Settings screen needs: the id every
-	 * management endpoint is addressed by, and the retention windows it edits.
-	 */
-	get current() {
-		return this.#project;
+	/** What this account may do here. `owner` is every project (Decision 2). */
+	get role() {
+		return this.current?.role ?? null;
 	}
 
-	/**
-	 * Loads the name once per credential. A failure is swallowed: the name is
-	 * a label, and a screen that refused to render because it could not
-	 * decorate its sidebar would be a worse answer than an unlabelled one.
-	 */
-	async load() {
-		const key = auth.key;
-		if (!key || this.#loadedFor === key) return;
-		// A different credential means a possibly different project, so the
-		// old row goes now rather than lingering under the new key.
-		this.#project = null;
-		await this.#read(key);
+	/** Whether the editing controls are rendered at all (Decision 15). */
+	get editor() {
+		return this.role === 'editor' || this.role === 'owner';
 	}
 
-	/**
-	 * Reads the project again after something changed it. The sidebar and the
-	 * Settings screen show the same row, so a rename has to reach both.
-	 *
-	 * Unlike `load`, this does not blank the row first. The Settings screen
-	 * renders its cards only when there is a project, so a momentary null
-	 * would tear all of them down and build them again — losing, among other
-	 * things, the "done" the card had just put on the screen.
-	 */
-	async refresh() {
-		const key = auth.key;
-		if (!key) return;
-		await this.#read(key);
+	/** Reads back the project this account was last looking at. */
+	restore() {
+		const id = auth.account?.id;
+		this.#chosen = id ? read(STORAGE_PREFIX + id) : null;
 	}
 
-	async #read(key: string) {
-		this.#loadedFor = key;
-		try {
-			const { projects } = await api.listProjects();
-			// A key that changed again while this was in flight owns the
-			// sidebar now; this answer is about somebody else's project.
-			if (this.#loadedFor !== key) return;
-			this.#project = projects[0] ?? null;
-		} catch {
-			if (this.#loadedFor === key) this.#loadedFor = null;
-		}
+	choose(id: string) {
+		this.#chosen = id;
+		const account = auth.account?.id;
+		if (account) write(STORAGE_PREFIX + account, id);
 	}
 
 	forget() {
-		this.#project = null;
-		this.#loadedFor = null;
+		this.#chosen = null;
+	}
+}
+
+// Storage is a browser feature a person can switch off, and a private window
+// throws on access rather than returning nothing. Neither is a reason for the
+// app to fail to load: without it the choice simply lasts one session.
+function read(name: string): string | null {
+	try {
+		return window.localStorage.getItem(name);
+	} catch {
+		return null;
+	}
+}
+
+function write(name: string, value: string) {
+	try {
+		window.localStorage.setItem(name, value);
+	} catch {
+		// Nothing to do and nothing worth saying: the app works, the choice
+		// just will not outlive the tab.
 	}
 }
 

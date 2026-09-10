@@ -18,9 +18,12 @@ vi.mock('$app/state', () => ({
 	}
 }));
 vi.mock('$lib/api/client.svelte', () => ({ api: { version: '0.0.0-test' } }));
-vi.mock('$lib/auth.svelte', () => ({ auth: { clear: vi.fn() }, LOGIN_ROUTE: '/login' }));
-vi.mock('$lib/admin.svelte', () => ({ admin: { clear: vi.fn() } }));
-vi.mock('$lib/project.svelte', () => ({ project: { name: 'demo', forget: vi.fn() } }));
+vi.mock('$lib/auth.svelte', () => ({
+	auth: { displayName: 'ada@example.com', account: { email: 'ada@example.com' } },
+	LOGIN_ROUTE: '/login'
+}));
+vi.mock('$lib/project.svelte', () => ({ project: { name: 'demo', role: 'editor' } }));
+vi.mock('$lib/session', () => ({ end: vi.fn() }));
 
 describe('the Evals section', () => {
 	it('renders the group with its five children as links and the label as text', () => {

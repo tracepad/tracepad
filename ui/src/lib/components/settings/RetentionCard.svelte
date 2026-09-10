@@ -1,9 +1,9 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { api, type DryRun, type Project, type RetentionUpdate } from '$lib/api/client.svelte';
-	import { project } from '$lib/project.svelte';
 	import ConfirmCard from '../ConfirmCard.svelte';
 	import Card from './Card.svelte';
+	import ViewerNote from './ViewerNote.svelte';
 
 	// The retention windows (spec 005, spec 013 #6). Three numbers, each of
 	// which may be absent, and absent means three different things: no window
@@ -17,7 +17,12 @@
 	// answers with its dry run first and this card renders it. A window that
 	// grows is applied on the same click — there is nothing to stop for.
 
-	let { current }: { current: Project } = $props();
+	let {
+		current,
+		/** A viewer reads the windows and changes none of them (Decision 15). */
+		readOnly = false,
+		onchanged
+	}: { current: Project; readOnly?: boolean; onchanged: () => Promise<void> } = $props();
 
 	type Mode = 'forever' | 'days';
 
@@ -42,7 +47,7 @@
 	async function send(confirm?: string): Promise<DryRun | string> {
 		const answer = await api.patchProject(current.id, body, confirm);
 		if ('dry_run' in answer && answer.dry_run) return answer as DryRun;
-		await project.refresh();
+		await onchanged();
 		return 'Retention updated.';
 	}
 
@@ -62,7 +67,7 @@
 				Traces, observations and scores
 			</label>
 			<div class="flex gap-1.5">
-				<select id="retention-mode" bind:value={mode} class={field}>
+				<select id="retention-mode" bind:value={mode} disabled={readOnly} class={field}>
 					<option value="forever">Keep forever</option>
 					<option value="days">Keep for</option>
 				</select>
@@ -74,7 +79,7 @@
 						min="1"
 						max="36500"
 						bind:value={days}
-						disabled={mode === 'forever'}
+						disabled={readOnly || mode === 'forever'}
 						class="{field} w-24"
 					/>
 					<span class="text-muted text-sm">days</span>
@@ -87,7 +92,7 @@
 				Raw OTLP bodies
 			</label>
 			<div class="flex gap-1.5">
-				<select id="raw-mode" bind:value={rawMode} class={field}>
+				<select id="raw-mode" bind:value={rawMode} disabled={readOnly} class={field}>
 					<option value="follow">Follow the window above</option>
 					<option value="days">Keep for</option>
 				</select>
@@ -99,7 +104,7 @@
 						min="1"
 						max="36500"
 						bind:value={rawDays}
-						disabled={rawMode === 'follow'}
+						disabled={readOnly || rawMode === 'follow'}
 						class="{field} w-24"
 					/>
 					<span class="text-muted text-sm">days</span>
@@ -112,7 +117,7 @@
 				Statistics history
 			</label>
 			<div class="flex gap-1.5">
-				<select id="stats-mode" bind:value={statsMode} class={field}>
+				<select id="stats-mode" bind:value={statsMode} disabled={readOnly} class={field}>
 					<option value="forever">Keep forever</option>
 					<option value="days">Keep for</option>
 				</select>
@@ -124,7 +129,7 @@
 						min="1"
 						max="36500"
 						bind:value={statsDays}
-						disabled={statsMode === 'forever'}
+						disabled={readOnly || statsMode === 'forever'}
 						class="{field} w-24"
 					/>
 					<span class="text-muted text-sm">days</span>
@@ -133,17 +138,21 @@
 		</div>
 	</div>
 
-	<div class="mt-4">
-		<ConfirmCard
-			title="Apply the windows"
-			description="A window that grows is applied straight away. One that shrinks shows what the
-				next sweep would delete, and asks for the project's name before it takes effect."
-			echoLabel="project name"
-			previewLabel="Save"
-			executeLabel="Shorten and delete"
-			subject={body}
-			preview={() => send()}
-			execute={(confirm) => send(confirm) as Promise<string>}
-		/>
-	</div>
+	{#if readOnly}
+		<ViewerNote what="the windows are read-only here" />
+	{:else}
+		<div class="mt-4">
+			<ConfirmCard
+				title="Apply the windows"
+				description="A window that grows is applied straight away. One that shrinks shows what the
+					next sweep would delete, and asks for the project's name before it takes effect."
+				echoLabel="project name"
+				previewLabel="Save"
+				executeLabel="Shorten and delete"
+				subject={body}
+				preview={() => send()}
+				execute={(confirm) => send(confirm) as Promise<string>}
+			/>
+		</div>
+	{/if}
 </Card>

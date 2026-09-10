@@ -1,111 +1,100 @@
 import { goto, replaceState } from '$app/navigation';
+import type { Me, Membership } from '$lib/api/client.svelte';
 
-// The app always authenticates (spec 006 #8). There is no localhost bypass:
-// "is this localhost?" is answered from the connection's remote address, and
-// behind any local reverse proxy every request looks like loopback — which
-// would turn the check off for the internet on the standard TLS setup.
+// Who is signed in (spec 028 #13). There is no credential in this file any
+// more: the session is an `HttpOnly` cookie the browser holds and no script can
+// read, so "are we signed in" is not a value we keep but a question the server
+// answers — `GET /api/v1/auth/me`, once on load, and again whenever a rename or
+// a role change makes the answer stale.
 //
-// The credential is a project secret key or the admin token, kept in
-// localStorage and sent as `Authorization: Bearer`. The zero-friction first
-// contact is the pre-authed URL the server prints on first run: the key rides
-// in the fragment, which is never sent in a request, and the app stores it and
-// strips it out of the address bar before anything else happens.
+// What is kept here is that answer: the account, and the projects it can reach
+// with the role it has in each. Every screen reads its role from this list
+// rather than asking per screen (Decision 15), and the shell reads the name.
 //
 // Module-level state rather than context: the app is a client-only SPA
-// (ssr = false), so there is no server request to leak it between, and the key
-// is genuinely global — the API client needs it from outside any component
-// tree.
-
-const STORAGE_KEY = 'tracepad.key';
+// (ssr = false), so there is no server request to leak it between, and the API
+// client needs it from outside any component tree.
 
 /** Where an unauthenticated visit is sent, and what it comes back to. */
 export const LOGIN_ROUTE = '/login';
+/** Where a server with no owner yet sends everybody (Decision 9). */
+export const SETUP_ROUTE = '/setup';
+/** Where an invitation link lands. */
+export const INVITE_ROUTE = '/invite';
+
+/** The three screens that work without a session, and the only ones. */
+export const OUTSIDE_THE_SHELL = [LOGIN_ROUTE, SETUP_ROUTE, INVITE_ROUTE];
 
 class Auth {
-	#key = $state.raw<string | null>(null);
+	#me = $state.raw<Me | null>(null);
 
-	/** The stored credential, or null when there is none. */
-	get key() {
-		return this.#key;
+	/** The signed-in account, or null when nobody is. */
+	get account() {
+		return this.#me?.account ?? null;
 	}
 
-	get authenticated() {
-		return this.#key !== null;
+	get signedIn() {
+		return this.#me !== null;
+	}
+
+	/** An owner runs the server: every project, and the accounts themselves. */
+	get owner() {
+		return this.#me?.account.owner ?? false;
+	}
+
+	/** What this account can reach, sorted by name, with the role in each. */
+	get projects(): readonly Membership[] {
+		return this.#me?.projects ?? [];
+	}
+
+	/** What to call somebody: the name they chose, else the name they sign in with. */
+	get displayName() {
+		const account = this.#me?.account;
+		if (!account) return '';
+		return account.name.trim() || account.email;
+	}
+
+	adopt(me: Me) {
+		this.#me = me;
+	}
+
+	/** Forgets who was here; the sign-out path and the 401 path both end here. */
+	clear() {
+		this.#me = null;
 	}
 
 	/**
-	 * Reads the credential the app starts with: whatever a pre-authed URL
-	 * carries, otherwise whatever the last visit stored.
-	 *
-	 * This runs before the router exists, so it only reads the fragment;
-	 * taking it back out of the address bar is `stripFragment`, which the
-	 * shell calls once it is mounted.
+	 * What a 401 means now: the cookie is gone, expired, or belongs to an
+	 * account that was disabled or deleted under an open tab. Every screen
+	 * reads project data, so there is nothing to stay on — the person is sent
+	 * to the login form with where they were, and comes back there.
 	 */
-	restore() {
-		const hash = window.location.hash;
-		const fromLink = hash.startsWith('#')
-			? new URLSearchParams(hash.slice(1)).get('key')
-			: null;
-		if (fromLink && this.adopt(fromLink)) return;
-		this.#key = read(STORAGE_KEY);
+	reject() {
+		this.clear();
+		const here = window.location.pathname + window.location.search;
+		if (window.location.pathname === LOGIN_ROUTE) return;
+		goto(`${LOGIN_ROUTE}?next=${encodeURIComponent(here)}`, { replaceState: true });
 	}
 
 	/**
-	 * Takes the key back out of the URL. `replaceState` rather than a push:
-	 * the pre-authed link must not survive in history, where a back button or
-	 * a shared screen would hand the secret to whoever is looking.
+	 * The token a setup or invitation link carries. It rides in the fragment,
+	 * which a browser never puts on the wire, so the link can be pasted into a
+	 * chat without the secret reaching a server log on the way.
+	 */
+	tokenFromFragment(): string | null {
+		const hash = window.location.hash;
+		if (!hash.startsWith('#')) return null;
+		return new URLSearchParams(hash.slice(1)).get('token');
+	}
+
+	/**
+	 * Takes the token back out of the URL. `replaceState` rather than a push:
+	 * the link must not survive in history, where a back button or a shared
+	 * screen would hand the secret to whoever is looking (spec 006 #8).
 	 */
 	stripFragment() {
 		if (!window.location.hash) return;
 		replaceState(window.location.pathname + window.location.search, {});
-	}
-
-	/** Stores a credential entered by hand at the login screen. */
-	adopt(key: string): boolean {
-		const trimmed = key.trim();
-		if (!trimmed) return false;
-		this.#key = trimmed;
-		write(STORAGE_KEY, trimmed);
-		return true;
-	}
-
-	/** Forgets the credential without navigating; the sign-out path. */
-	clear() {
-		this.#key = null;
-		write(STORAGE_KEY, null);
-	}
-
-	/**
-	 * What a 401 means: the stored key is wrong, revoked, or belongs to a
-	 * deleted project. Keeping it would retry the same failure on every
-	 * screen, so it is dropped and the person is asked for another one.
-	 */
-	reject() {
-		if (!this.#key) return;
-		this.clear();
-		goto(LOGIN_ROUTE, { replaceState: true });
-	}
-
-}
-
-// Storage is a browser feature a person can switch off, and a private window
-// throws on access rather than returning nothing. Neither is a reason for the
-// app to fail to load: without it the key simply lasts one session.
-function read(name: string): string | null {
-	try {
-		return window.localStorage.getItem(name);
-	} catch {
-		return null;
-	}
-}
-
-function write(name: string, value: string | null) {
-	try {
-		if (value === null) window.localStorage.removeItem(name);
-		else window.localStorage.setItem(name, value);
-	} catch {
-		// Nothing to do and nothing worth saying: the app works, the key
-		// just will not outlive the tab.
 	}
 }
 
@@ -126,7 +115,13 @@ export function returnTo(url: URL, fallback = '/traces'): string {
 	if (!asked) return fallback;
 	try {
 		const target = new URL(asked, url.origin);
-		return target.origin === url.origin ? target.pathname + target.search : fallback;
+		if (target.origin !== url.origin) return fallback;
+		// The three screens outside the shell are not somewhere to come back
+		// to: `?next=/login` after a sign-in is a loop, and `?next=/invite`
+		// lands on a token that has just been spent.
+		const path = target.pathname;
+		if (OUTSIDE_THE_SHELL.includes(path)) return fallback;
+		return path + target.search;
 	} catch {
 		return fallback;
 	}

@@ -1,24 +1,27 @@
 <script lang="ts">
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import { untrack } from 'svelte';
-	import { admin } from '$lib/admin.svelte';
-	import { ApiError, api, type Project } from '$lib/api/client.svelte';
-	import { project } from '$lib/project.svelte';
+	import { said } from '$lib/accounts';
+	import { api, type Project } from '$lib/api/client.svelte';
 	import { timestamp } from '$lib/format';
 	import Button from '../Button.svelte';
 	import CopyButton from '../CopyButton.svelte';
 	import Card from './Card.svelte';
 
-	// The project this key belongs to: what it is called, and what it is called
-	// in a request.
+	// The project on screen: what it is called, and what it is called in a
+	// request.
 	//
-	// Renaming is the one thing on this card that the session key cannot do.
-	// Spec 005 #11 made a rename cross-project administration — it is how a
-	// project is identified in every confirmation echo — so it runs on the
-	// admin token, and the field says so until the Administration section
-	// below is unlocked (spec 007 #12).
+	// Renaming is an owner's (spec 028 #3). It was the admin token's for the
+	// same reason spec 005 #11 gave — a project's name is the echo every
+	// destructive confirmation is typed against — and the field says so to
+	// everybody who is not one, rather than simply not being there.
 
-	let { current }: { current: Project } = $props();
+	let {
+		current,
+		/** Only an owner may rename; a member reads the name (Decision 3). */
+		mayRename,
+		onchanged
+	}: { current: Project; mayRename: boolean; onchanged: () => Promise<void> } = $props();
 
 	// Seeded from the stored row and then owned by whoever is typing: a
 	// refresh after a successful rename must not reach into the field and
@@ -36,19 +39,19 @@
 		done = false;
 		try {
 			await api.renameProject(current.id, name.trim());
-			await project.refresh();
+			// The name rides in `me.projects`, so the sidebar and the account
+			// menu read the new one from the same call the role comes from.
+			await onchanged();
 			done = true;
 		} catch (cause) {
-			// A 403 here is the server explaining its own credential split;
-			// it says it better than a paraphrase would (spec 007 #4).
-			failure = cause instanceof ApiError ? cause.message : 'The rename failed.';
+			failure = said(cause, 'The rename failed.');
 		} finally {
 			busy = false;
 		}
 	}
 </script>
 
-<Card title="Project" description="The project this key reads and writes.">
+<Card title="Project" description="The project these screens are showing.">
 	<div class="flex flex-wrap items-end gap-2">
 		<div class="min-w-0 flex-1">
 			<label for="project-name" class="text-muted mb-1 block text-xs font-medium">Name</label>
@@ -56,25 +59,25 @@
 				id="project-name"
 				type="text"
 				bind:value={name}
-				disabled={!admin.unlocked}
+				disabled={!mayRename}
 				autocomplete="off"
 				spellcheck="false"
 				class="border-border bg-canvas w-full rounded-md border px-2 py-1 text-sm
 					disabled:opacity-60"
 			/>
 		</div>
-		<Button variant="primary" onclick={rename} disabled={!changed || !admin.unlocked} busy={busy}>
-			{#if busy}<LoaderCircle class="size-4 animate-spin" />{/if}
-			Rename
-		</Button>
+		{#if mayRename}
+			<Button variant="primary" onclick={rename} disabled={!changed} {busy}>
+				{#if busy}<LoaderCircle class="size-4 animate-spin" />{/if}
+				Rename
+			</Button>
+		{/if}
 	</div>
 
-	{#if !admin.unlocked}
+	{#if !mayRename}
 		<p class="text-subtle mt-1.5 text-xs">
-			Renaming needs the admin token — a project's name is what every destructive confirmation
-			echoes. Unlock Administration below, or use <code class="font-mono"
-				>tracepad projects rename</code
-			>.
+			Renaming a project is an owner's: its name is what every destructive confirmation is typed
+			back against.
 		</p>
 	{/if}
 	{#if failure}
