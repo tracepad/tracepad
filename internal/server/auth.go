@@ -445,7 +445,17 @@ func pathScoped(path string) bool {
 
 // sameOrigin is the cross-site check of Decision 5: a cookie-authenticated
 // request with an unsafe method must carry an `Origin` — or, failing that, a
-// `Referer` — whose host is the host it was sent to.
+// `Referer` — whose host is one this server answers to.
+//
+// Which hosts those are is Decision 23. `Host` alone is right for a direct
+// connection and wrong behind a proxy that rewrites it: the browser sends the
+// address the person typed, the server compares it to the internal name it was
+// reached by, and every cookie write answers 403 while a project key goes on
+// working — which reads as a broken interface rather than a misconfiguration.
+// So two more are accepted, and both are the operator's own statement of what
+// the address is: what the proxy says it was asked for, and what
+// `TRACEPAD_URL` says people type — the value this spec already trusts for the
+// links it prints (Decision 11).
 func (s *Server) sameOrigin(r *http.Request) bool {
 	switch r.Method {
 	case http.MethodGet, http.MethodHead, http.MethodOptions:
@@ -462,7 +472,29 @@ func (s *Server) sameOrigin(r *http.Request) bool {
 	if err != nil || parsed.Host == "" {
 		return false
 	}
-	return strings.EqualFold(parsed.Host, r.Host)
+	for _, host := range s.ownHosts(r) {
+		if host != "" && strings.EqualFold(parsed.Host, host) {
+			return true
+		}
+	}
+	return false
+}
+
+// ownHosts is every host this request could legitimately have been addressed
+// to (Decision 23).
+func (s *Server) ownHosts(r *http.Request) [3]string {
+	// Only the first value of `X-Forwarded-For`'s sibling: the header is a
+	// list when requests cross more than one proxy, and the first entry is
+	// the one the browser was talking to.
+	forwarded, _, _ := strings.Cut(r.Header.Get("X-Forwarded-Host"), ",")
+
+	configured := ""
+	if origin := s.configuredOrigin(); origin != "" {
+		if parsed, err := url.Parse(origin); err == nil {
+			configured = parsed.Host
+		}
+	}
+	return [3]string{r.Host, strings.TrimSpace(forwarded), configured}
 }
 
 // --- The cookie -------------------------------------------------------------

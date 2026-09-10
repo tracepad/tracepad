@@ -2310,7 +2310,7 @@
       "adminToken": {"type": "http", "scheme": "bearer",
         "description": "`TRACEPAD_ADMIN_TOKEN`, sent in the same header as a project key. Required for everything cross-project, for creating and deleting a project, and for the account routes — which is what makes it the recovery when every owner's password is lost. A server with none configured answers 403 and says so."},
       "sessionCookie": {"type": "apiKey", "in": "cookie", "name": "tracepad_session",
-        "description": "A browser session: `HttpOnly`, `SameSite=Lax`, `Secure` over TLS, set by the three ways in and lasting `TRACEPAD_SESSION_DAYS` (default 30), sliding. On a route whose policy is `member` or `editor` a session must also name the project it is asking about with `X-Tracepad-Project`, and an unsafe method must carry an `Origin` (or `Referer`) matching the request's host."}
+        "description": "A browser session: `HttpOnly`, `SameSite=Lax`, `Secure` over TLS, set by the three ways in and lasting `TRACEPAD_SESSION_DAYS` (default 30), sliding. On a route whose policy is `member` or `editor` a session must also name the project it is asking about with `X-Tracepad-Project`, and an unsafe method must carry an `Origin` (or `Referer`) whose host is the request's `Host`, the first value of `X-Forwarded-Host`, or the host of `TRACEPAD_URL`."}
     },
     "parameters": {
       "From": {"name": "from", "in": "query", "schema": {"type": "string", "format": "date-time"},

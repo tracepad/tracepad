@@ -427,8 +427,41 @@ func TestCrossOriginWriteIsRefused(t *testing.T) {
 	})
 	expectStatus(t, rec, http.StatusNoContent)
 
+	// Behind a proxy the browser sends the address the person typed and
+	// `Host` is the internal name, so two more hosts are accepted — both
+	// the operator's own statement of what the address is (Decision 23).
+	// Each case signs out, so each needs a session of its own.
+	who = h.resume(t, who, "forwarded")
+	behindProxy := func(origin, forwarded string) *httptest.ResponseRecorder {
+		return h.call(t, "POST", "/api/v1/auth/logout", nil, func(r *http.Request) {
+			r.Header.Del("Authorization")
+			r.AddCookie(&http.Cookie{Name: sessionCookie, Value: who.cookie})
+			r.Header.Set("Origin", origin)
+			if forwarded != "" {
+				r.Header.Set("X-Forwarded-Host", forwarded)
+			}
+		})
+	}
+
+	// What the proxy says it was asked for. A list when a request crossed
+	// more than one, and the first entry is the one the browser used.
+	expectStatus(t, behindProxy("https://traces.example.com",
+		"traces.example.com, inner.internal"), http.StatusNoContent)
+
+	// What the operator says people type.
+	who = h.resume(t, who, "configured")
+	h.server.publicURL = "https://tracepad.example.com"
+	expectStatus(t, behindProxy("https://tracepad.example.com", ""), http.StatusNoContent)
+
+	// And neither of those is a way in for anybody else.
+	who = h.resume(t, who, "stranger")
+	expectError(t, behindProxy("https://evil.example", "traces.example.com"),
+		http.StatusForbidden, "cross-origin")
+	h.server.publicURL = ""
+
 	// A Bearer credential is exempt, and the header wins when both are
 	// present: an explicit credential beats an ambient one.
+	who = h.resume(t, who, "bearer")
 	rec = h.call(t, "POST", "/api/v1/scores",
 		mustJSON(t, map[string]any{"name": "q", "value": 1, "trace_id": traceHex(1)}),
 		func(r *http.Request) {
@@ -607,11 +640,25 @@ func TestPasswordChangeEndsTheOtherSessions(t *testing.T) {
 		t.Errorf("%d sessions are marked current, want exactly the caller's", current)
 	}
 
-	// The current password is what proves it is them.
+	// The current password is what proves it is them — and a body carrying
+	// both leaves neither changed when it is wrong, because they are one
+	// transaction. Two jobs would have committed the rename and then
+	// answered 403.
 	rec = h.call(t, "PATCH", "/api/v1/auth/me", mustJSON(t, map[string]any{
+		"name":     "Somebody Else",
 		"password": map[string]any{"current": "not it", "new": "a brand new password"},
 	}), asSession(who))
 	expectError(t, rec, http.StatusForbidden, "wrong current password")
+
+	rec = h.call(t, "GET", "/api/v1/auth/me", nil, asSession(who))
+	expectStatus(t, rec, 200)
+	if name := decodeJSON[struct {
+		Account struct {
+			Name string `json:"name"`
+		} `json:"account"`
+	}](t, rec).Account.Name; name != "" {
+		t.Errorf("name = %q after a refused password change, want it untouched", name)
+	}
 
 	rec = h.call(t, "PATCH", "/api/v1/auth/me", mustJSON(t, map[string]any{
 		"name":     "The Founder",
@@ -732,6 +779,48 @@ func TestSetup(t *testing.T) {
 	}), http.StatusForbidden)
 	if h.server.SetupURL() != "" {
 		t.Error("the setup link must be gone once it has been used")
+	}
+}
+
+// TestConcurrentSetupMakesOneOwner: two browsers can hold the same link — a
+// double click is enough. Exactly one wins, the other is told the server
+// already has an owner, and the token is read and cleared under a lock so
+// `-race` has nothing to find.
+func TestConcurrentSetupMakesOneOwner(t *testing.T) {
+	h := newAccountHarness(t)
+	token := strings.TrimPrefix(h.server.SetupURL(), h.server.originForPrint()+"/setup#token=")
+
+	const tries = 4
+	var wait sync.WaitGroup
+	codes := make([]int, tries)
+	for i := range tries {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			rec := h.call(t, "POST", "/api/v1/setup", mustJSON(t, map[string]any{
+				"token": token, "email": "founder@example.com", "password": testAccountPassword,
+			}), anonymous, func(r *http.Request) { r.Header.Set("Origin", "http://"+r.Host) })
+			codes[i] = rec.Code
+		}()
+	}
+	wait.Wait()
+
+	created := 0
+	for i, code := range codes {
+		switch code {
+		case http.StatusCreated:
+			created++
+		case http.StatusForbidden:
+		default:
+			t.Errorf("attempt %d = %d, want 201 or 403", i, code)
+		}
+	}
+	if created != 1 {
+		t.Errorf("%d of %d attempts created an owner, want exactly one", created, tries)
+	}
+	owners, err := h.store.EnabledOwners()
+	if err != nil || owners != 1 {
+		t.Errorf("owners = %d, err = %v", owners, err)
 	}
 }
 

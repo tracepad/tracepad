@@ -41,7 +41,7 @@ const setupTokenBytes = 32
 // In memory and per start, so a token from a log file yesterday opens nothing
 // today, and a restart is the recovery if the link was lost.
 func (s *Server) mintSetupToken() {
-	s.setupToken = ""
+	s.setSetupToken("")
 	if s.store == nil {
 		return
 	}
@@ -58,7 +58,20 @@ func (s *Server) mintSetupToken() {
 		slog.Error("could not mint a setup token", "err", err)
 		return
 	}
-	s.setupToken = base64.RawURLEncoding.EncodeToString(raw)
+	s.setSetupToken(base64.RawURLEncoding.EncodeToString(raw))
+}
+
+// currentSetupToken reads the token this start minted, or "" once it is spent.
+func (s *Server) currentSetupToken() string {
+	s.setupMu.RLock()
+	defer s.setupMu.RUnlock()
+	return s.setupToken
+}
+
+func (s *Server) setSetupToken(value string) {
+	s.setupMu.Lock()
+	defer s.setupMu.Unlock()
+	s.setupToken = value
 }
 
 // SetupURL is the link the operator clicks on a server that has no owner yet,
@@ -69,10 +82,11 @@ func (s *Server) mintSetupToken() {
 // never leave the browser, and the interface strips it from the URL as soon as
 // it has read it (spec 006 #8).
 func (s *Server) SetupURL() string {
-	if s.setupToken == "" {
+	token := s.currentSetupToken()
+	if token == "" {
 		return ""
 	}
-	return s.originForPrint() + "/setup#token=" + s.setupToken
+	return s.originForPrint() + "/setup#token=" + token
 }
 
 // SetupRequired reports whether this server still needs its first owner. It is
@@ -127,8 +141,9 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	if !s.readJSON(w, r, &request) {
 		return
 	}
-	if s.setupToken == "" ||
-		subtle.ConstantTimeCompare([]byte(request.Token), []byte(s.setupToken)) != 1 {
+	token := s.currentSetupToken()
+	if token == "" ||
+		subtle.ConstantTimeCompare([]byte(request.Token), []byte(token)) != 1 {
 		writeError(w, http.StatusForbidden,
 			"this setup link is not valid; restart the server to have it print a new one")
 		return
@@ -150,7 +165,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	}
 	// The token is spent the moment it works: `GET /api/v1/setup` flips to
 	// `{required: false}` and there is nothing left to replay.
-	s.setupToken = ""
+	s.setSetupToken("")
 	writeJSON(w, http.StatusCreated, object{}.put("account", accountResponse(create.Account)))
 }
 
@@ -319,36 +334,39 @@ func (s *Server) handlePatchMe(w http.ResponseWriter, r *http.Request) {
 	}
 
 	account := c.account
-	if request.Name != nil {
+	if request.Password == nil {
 		update := &store.AccountUpdate{AccountID: account.ID, Name: request.Name, Now: time.Now().UnixNano()}
 		if !s.submit(w, r, update) {
 			return
 		}
-		account = update.Account
+		writeJSON(w, http.StatusOK, object{}.put("account", accountResponse(update.Account)))
+		return
 	}
-	if request.Password != nil {
-		hash, ok := readPassword(w, request.Password.New)
-		if !ok {
+
+	hash, ok := readPassword(w, request.Password.New)
+	if !ok {
+		return
+	}
+	// One job, so that a wrong current password leaves the display name
+	// alone too: two would commit the rename and then answer 403, and the
+	// person would be reading an error beside their new name.
+	//
+	// A password change signs every other session out (Decision 4):
+	// changing it is what a person does when they think somebody else has
+	// it.
+	change := &store.PasswordChange{
+		AccountID: account.ID, Current: request.Password.Current,
+		NewHash: hash, Keep: c.session.ID, Name: request.Name,
+	}
+	if err := s.writer.Submit(r.Context(), change); err != nil {
+		if errors.Is(err, store.ErrWrongPassword) {
+			writeError(w, http.StatusForbidden, store.ErrWrongPassword.Error())
 			return
 		}
-		// A password change signs every other session out (Decision 4):
-		// changing it is what a person does when they think somebody
-		// else has it.
-		change := &store.PasswordChange{
-			AccountID: account.ID, Current: request.Password.Current,
-			NewHash: hash, Keep: c.session.ID,
-		}
-		if err := s.writer.Submit(r.Context(), change); err != nil {
-			if errors.Is(err, store.ErrWrongPassword) {
-				writeError(w, http.StatusForbidden, store.ErrWrongPassword.Error())
-				return
-			}
-			s.submitFailure(w, err)
-			return
-		}
-		account = change.Account
+		s.submitFailure(w, err)
+		return
 	}
-	writeJSON(w, http.StatusOK, object{}.put("account", accountResponse(account)))
+	writeJSON(w, http.StatusOK, object{}.put("account", accountResponse(change.Account)))
 }
 
 // handleListSessionsOfAccount lists where this account is signed in. It is the

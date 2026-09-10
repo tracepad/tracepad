@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/tracepad/tracepad/internal/client"
@@ -61,10 +62,17 @@ type Server struct {
 	// printed setup or invite link (Decision 11).
 	sessionLife time.Duration
 	publicURL   string
-	// setupToken is minted at each start while this server has no enabled
-	// owner, and lives in memory only: a token from yesterday's log opens
-	// nothing today, and a restart is the recovery if the link was lost
-	// (Decision 9). Empty once an owner exists.
+	// setupToken is minted at each start while this server has no owner who
+	// can sign in, and lives in memory only: a token from yesterday's log
+	// opens nothing today, and a restart is the recovery if the link was
+	// lost (Decision 9). Empty once an owner exists.
+	//
+	// Behind a mutex because two browsers can hold the same link — a double
+	// click is enough — and the handler both reads it and clears it. What
+	// actually stops a second owner being created is the transaction
+	// (`ErrSetupDone`); this is so that the read and the clearing are not a
+	// data race.
+	setupMu    sync.RWMutex
 	setupToken string
 	limiter    *loginLimiter
 

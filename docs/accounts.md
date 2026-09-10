@@ -111,9 +111,15 @@ ignores the header entirely — it is its own project.
 
 A request authenticated by cookie with a method other than `GET`, `HEAD` or
 `OPTIONS` must carry an `Origin` (or, failing that, a `Referer`) whose host is
-the host it was sent to; otherwise `403 cross-origin request refused`. Requests
-carrying an `Authorization` header are exempt, and that header wins when both
-are present: an explicit credential beats an ambient one.
+one this server answers to; otherwise `403 cross-origin request refused`.
+Requests carrying an `Authorization` header are exempt, and that header wins
+when both are present: an explicit credential beats an ambient one.
+
+Three hosts count as this server's: the request's own `Host`, the first value
+of `X-Forwarded-Host`, and the host of `TRACEPAD_URL`. The last two matter
+behind a reverse proxy that rewrites `Host` — the browser sends the address
+your people typed, and without them every write from the interface would be
+refused while a project key went on working.
 
 ### The account's own routes
 
@@ -247,7 +253,7 @@ one in this section.
 | Variable | Default | Meaning |
 |---|---|---|
 | `TRACEPAD_SESSION_DAYS` | `30` | How long a browser session lasts. It slides, so this is "how long since you last opened it", not "how long since you signed in". Minimum 1. |
-| `TRACEPAD_URL` | — | The address your people actually use. The server prints setup and invitation links at its own guess otherwise — the listen address, or the request's `Host` — which is wrong behind a proxy. |
+| `TRACEPAD_URL` | — | The address your people actually use. The server prints setup and invitation links at its own guess otherwise — the listen address, or the request's `Host` — which is wrong behind a proxy, and its host is one of the three the cross-site check accepts. |
 | `TRACEPAD_ADMIN_TOKEN` | — | Unchanged from [administration](admin.md), and now also the account routes. |
 
 Expired sessions and invitations are removed by the

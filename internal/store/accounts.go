@@ -714,6 +714,11 @@ type PasswordChange struct {
 	// Keep is the caller's own session, which a password change does not
 	// end.
 	Keep string
+	// Name rides along when one `PATCH` carries both, so that a wrong
+	// current password leaves neither changed. Two jobs would commit the
+	// rename and then answer 403, and the person would be looking at an
+	// error message beside their new display name.
+	Name *string
 
 	Account *Account
 }
@@ -739,6 +744,11 @@ func (p *PasswordChange) apply(tx *sql.Tx) error {
 	}
 	if err := setPassword(tx, account.ID, p.NewHash); err != nil {
 		return err
+	}
+	if p.Name != nil {
+		if _, err := tx.Exec(`UPDATE accounts SET name = ? WHERE id = ?`, *p.Name, account.ID); err != nil {
+			return fmt.Errorf("rename account: %w", err)
+		}
 	}
 	if _, err := tx.Exec(`DELETE FROM account_sessions WHERE account_id = ? AND id <> ?`,
 		account.ID, p.Keep); err != nil {
