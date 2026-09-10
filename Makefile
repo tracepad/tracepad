@@ -140,24 +140,49 @@ doc-anchors: ## Check every anchor in docs/, README.md and AGENTS.md against its
 doc-anchors-self-test: ## Assert the anchor checker against its fixture
 	scripts/doc-anchors.sh --self-test
 
-precommit: ensure-hooks format-check vet test doc-anchors ui-check ## Full gate (also installed as git pre-commit hook)
+gate: ensure-hooks format-check vet test doc-anchors ui-check ## Full gate: what CI runs, and the git pre-push hook
 
-# git rev-parse --git-path resolves the hooks dir in worktrees too; empty
-# outside a git checkout (e.g. a source tarball), where hooks don't apply.
+# The pre-commit hook runs this: the checks that are cheap and the tests of
+# what is actually staged. The full gate runs once per push instead of once
+# per commit — a branch of twenty commits was paying two minutes each for
+# `go test ./...` and the whole interface suite, and CI runs both anyway.
+precommit: ensure-hooks format-check vet test-staged ui-check-staged ## Fast gate for the pre-commit hook: staged Go packages, the interface only when it changed
+
+# Only the packages with a staged .go file. A change that breaks a dependent
+# package is caught by the pre-push gate, not here.
+test-staged: ## Go tests of the packages with staged changes
+	@pkgs=$$(git diff --cached --name-only --diff-filter=ACMR -- '*.go' | xargs -n1 dirname 2>/dev/null | sort -u | sed 's|^|./|'); \
+	if [ -n "$$pkgs" ]; then go test $$pkgs; else echo "test-staged: no Go changes staged"; fi
+
+ui-check-staged: ## The interface's type-check and unit tests, only when ui/ or openapi.json is staged
+	@if git diff --cached --name-only --diff-filter=ACMR | grep -qE '^(ui/|internal/server/openapi\.json$$)'; then \
+		$(MAKE) ui-check; \
+	else echo "ui-check-staged: no interface changes staged"; fi
+
+# git rev-parse --git-path resolves the hooks dir in worktrees too (worktrees
+# share it); empty outside a git checkout (e.g. a source tarball), where hooks
+# don't apply. The hooks run with the working tree as the current directory.
 HOOKS_DIR = $(shell git rev-parse --git-path hooks 2>/dev/null)
 
-ensure-hooks: ## Install the pre-commit gate hook if missing (no-op otherwise)
+ensure-hooks: ## Install the pre-commit and pre-push hooks if missing (no-op otherwise)
 	@if [ -n "$(HOOKS_DIR)" ] && [ ! -e "$(HOOKS_DIR)/pre-commit" ]; then \
 		printf '#!/bin/sh\nexec make precommit\n' > "$(HOOKS_DIR)/pre-commit"; \
 		chmod +x "$(HOOKS_DIR)/pre-commit"; \
-		echo "installed pre-commit gate hook"; \
+		echo "installed pre-commit hook"; \
+	fi
+	@if [ -n "$(HOOKS_DIR)" ] && [ ! -e "$(HOOKS_DIR)/pre-push" ]; then \
+		printf '#!/bin/sh\nexec make gate\n' > "$(HOOKS_DIR)/pre-push"; \
+		chmod +x "$(HOOKS_DIR)/pre-push"; \
+		echo "installed pre-push gate hook"; \
 	fi
 
-install-hooks: ## (Re)install the pre-commit gate hook
+install-hooks: ## (Re)install both hooks
 	printf '#!/bin/sh\nexec make precommit\n' > "$(HOOKS_DIR)/pre-commit"
 	chmod +x "$(HOOKS_DIR)/pre-commit"
+	printf '#!/bin/sh\nexec make gate\n' > "$(HOOKS_DIR)/pre-push"
+	chmod +x "$(HOOKS_DIR)/pre-push"
 
 .PHONY: help build build-server dev test vet smoke fixtures format format-check \
 	ui ui-deps ui-types ui-types-check ui-check ui-lines image image-check \
-	e2e sdk-test sdk-lines doc-anchors doc-anchors-self-test precommit \
-	ensure-hooks install-hooks
+	e2e sdk-test sdk-lines doc-anchors doc-anchors-self-test gate precommit \
+	test-staged ui-check-staged ensure-hooks install-hooks
