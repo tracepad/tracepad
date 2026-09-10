@@ -1,7 +1,6 @@
 package server
 
 import (
-	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -31,62 +30,45 @@ import (
 // the length of a single transaction.
 const eraseChunk = 500
 
-// caller is who is asking. Exactly one of the two is set: the admin token
-// belongs to the deployment and has no project, and a project key has no
-// cross-project reach.
-type caller struct {
-	admin   bool
-	project *store.Project
-}
-
-// authorize resolves the credentials of an administrative request. A
-// soft-deleted project's key resolves here and is refused by the handlers that
-// are not part of undoing the deletion (#10): killing the keys outright would
-// leave a token-less deployment that deleted its only project with no
-// credential able to restore it.
+// authorize is who is asking, as the guard already worked it out (spec 028
+// Decision 7). It reads the request's context and refuses nothing: a handler
+// that runs is a handler whose caller the policy admitted.
+//
+// A soft-deleted project's key reaches these routes and is refused by the
+// handlers that are not part of undoing the deletion (#10): killing the keys
+// outright would leave a token-less deployment that deleted its only project
+// with no credential able to restore it. `target` is where that is decided,
+// because the reach of each route is known there and only there.
 func (s *Server) authorize(w http.ResponseWriter, r *http.Request) (*caller, bool) {
-	if s.store == nil {
-		writeError(w, http.StatusServiceUnavailable, "the API is not available")
+	c := callerFrom(r.Context())
+	if c == nil {
+		slog.Error("an administrative handler ran without a caller", "path", r.URL.Path)
+		writeError(w, http.StatusInternalServerError, "the request was not authorized")
 		return nil, false
 	}
-	secret, ok := credential(r.Header.Get("Authorization"))
-	if !ok {
-		writeError(w, http.StatusUnauthorized, "unauthorized")
-		return nil, false
-	}
-	// Constant time, because this one compares a whole shared secret
-	// rather than looking a hash up in an index.
-	if s.adminToken != "" &&
-		subtle.ConstantTimeCompare([]byte(secret), []byte(s.adminToken)) == 1 {
-		return &caller{admin: true}, true
-	}
-	project, err := s.store.ProjectBySecret(secret)
-	if err != nil {
-		slog.Error("key lookup failed", "err", err)
-		writeError(w, http.StatusUnauthorized, "unauthorized")
-		return nil, false
-	}
-	if project == nil {
-		writeError(w, http.StatusUnauthorized, "unauthorized")
-		return nil, false
-	}
-	return &caller{project: project}, true
+	return c, true
 }
 
-// requireAdmin gates what only the deployment's own token may do. A server
-// with no token configured says so instead of answering "unauthorized" to a
-// caller holding a perfectly good key (#11).
+// requireAdmin gates what only the deployment's own token or an owner may do.
+// A server with no token configured says so instead of answering
+// "unauthorized" to a caller holding a perfectly good key (#11).
 func (s *Server) requireAdmin(w http.ResponseWriter, c *caller) bool {
-	if c.admin {
+	if c.admin || (c.isSession() && c.account.Owner) {
 		return true
+	}
+	if c.isSession() {
+		writeError(w, http.StatusForbidden, "this needs an owner account")
+		return false
 	}
 	if s.adminToken == "" {
 		writeError(w, http.StatusForbidden,
-			"this needs the cross-project admin token, and TRACEPAD_ADMIN_TOKEN is not configured on this server")
+			"this needs an owner account or the cross-project admin token, "+
+				"and TRACEPAD_ADMIN_TOKEN is not configured on this server")
 		return false
 	}
 	writeError(w, http.StatusForbidden,
-		"this needs the cross-project admin token; a project key administers its own project only")
+		"this needs an owner account or the cross-project admin token; "+
+			"a project key administers its own project only")
 	return false
 }
 
@@ -100,48 +82,68 @@ const (
 )
 
 // target resolves the `{id}` of an administrative request against the caller's
-// reach: a project key reaches its own project and nothing else, the admin
-// token reaches any.
+// reach: a project key reaches its own project and nothing else, a session
+// reaches the projects its account is a member of (the guard has already said
+// so), and the admin token reaches any.
+//
+// What is left here that the guard cannot do is the soft-deleted project, and
+// the reason is `allow`: whether a deleted project is still reachable depends
+// on which route this is, and the route is what the handler knows (#10).
 func (s *Server) target(w http.ResponseWriter, r *http.Request, c *caller, allow reach) (*store.Project, bool) {
 	id := r.PathValue("id")
 
-	if !c.admin {
-		if c.project.ID != id {
-			writeError(w, http.StatusForbidden,
-				"a project key administers its own project only; another project needs the admin token")
+	project := c.project
+	if c.admin {
+		found, err := s.store.ProjectByID(id)
+		if err != nil {
+			slog.Error("project lookup failed", "err", err)
+			writeError(w, http.StatusInternalServerError, "failed to read the project")
 			return nil, false
 		}
-		if c.project.Deleted() && allow == liveOnly {
-			// The key is dead for everything but restoring, and
-			// saying "unauthorized" is exactly what it now is.
-			writeError(w, http.StatusUnauthorized, "unauthorized")
+		if found == nil {
+			writeError(w, http.StatusNotFound, "no such project")
 			return nil, false
 		}
-		return c.project, true
-	}
-
-	project, err := s.store.ProjectByID(id)
-	if err != nil {
-		slog.Error("project lookup failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to read the project")
+		project = found
+	} else if c.isKey() && project.ID != id {
+		writeError(w, http.StatusForbidden,
+			"a project key administers its own project only; another project needs an owner account or the admin token")
 		return nil, false
 	}
 	if project == nil {
+		// Only reachable by a handler called outside the mux.
 		writeError(w, http.StatusNotFound, "no such project")
 		return nil, false
 	}
-	if project.Deleted() && allow == liveOnly {
+	if !project.Deleted() || allow == insideGrace {
+		return project, true
+	}
+
+	switch {
+	case c.admin:
 		writeError(w, http.StatusConflict,
 			"project "+project.Name+" is deleted; restore it before changing it")
-		return nil, false
+	case c.isSession():
+		// A deleted project is not there as far as a person is
+		// concerned; the Server tab lists it with `?include=deleted`
+		// and restores it from there (spec 028, edge cases).
+		writeError(w, http.StatusNotFound, "no such project")
+	default:
+		// The key is dead for everything but restoring, and saying
+		// "unauthorized" is exactly what it now is.
+		writeError(w, http.StatusUnauthorized, "unauthorized")
 	}
-	return project, true
+	return nil, false
 }
 
-// handleListProjects answers with every project for the admin token and with
-// the caller's own for a project key. `?include=deleted` shows soft-deleted
-// projects with their purge dates, which only an administrator can ask for:
-// for anyone else the question can only be about somebody else's project.
+// handleListProjects answers each kind of caller with the projects it can
+// reach: every one for the admin token, its own for a project key, and for a
+// session the same rows as `me.projects` — with the retention fields and the
+// role, which is what the Settings screen reads (spec 028, API contract).
+//
+// `?include=deleted` shows soft-deleted projects with their purge dates, which
+// only an owner or the token can ask for: for anyone else the question can
+// only be about somebody else's project.
 func (s *Server) handleListProjects(w http.ResponseWriter, r *http.Request) {
 	c, ok := s.authorize(w, r)
 	if !ok {
@@ -165,21 +167,72 @@ func (s *Server) handleListProjects(w http.ResponseWriter, r *http.Request) {
 		includeDeleted = true
 	}
 
-	var projects []*store.Project
-	if c.admin {
+	var (
+		projects []*store.Project
+		roles    map[string]string
+	)
+	switch {
+	case c.admin:
 		projects, err = s.store.ListProjects(includeDeleted)
 		if err != nil {
 			slog.Error("list projects failed", "err", err)
 			writeError(w, http.StatusInternalServerError, "failed to read the projects")
 			return
 		}
-	} else if !c.project.Deleted() {
+	case c.isSession():
+		reachable, err := s.store.AccountProjects(c.account)
+		if err != nil {
+			slog.Error("list projects failed", "err", err)
+			writeError(w, http.StatusInternalServerError, "failed to read the projects")
+			return
+		}
+		roles = make(map[string]string, len(reachable))
+		for _, one := range reachable {
+			// Read one at a time rather than joined: the retention
+			// fields belong to `projectResponse`, and a second shape
+			// for the same row is how two answers to "what is this
+			// project set to" start to disagree.
+			project, err := s.store.ProjectByID(one.ProjectID)
+			if err != nil {
+				slog.Error("project lookup failed", "err", err)
+				writeError(w, http.StatusInternalServerError, "failed to read the projects")
+				return
+			}
+			if project == nil {
+				continue
+			}
+			roles[project.ID] = one.Role
+			projects = append(projects, project)
+		}
+		// A member's listing is `me.projects`, and a soft-deleted
+		// project is not on it (spec 028, edge cases); an owner asking
+		// for the deleted ones gets them, because that is the Server
+		// tab's table.
+		if includeDeleted {
+			deleted, err := s.store.ListProjects(true)
+			if err != nil {
+				slog.Error("list projects failed", "err", err)
+				writeError(w, http.StatusInternalServerError, "failed to read the projects")
+				return
+			}
+			for _, project := range deleted {
+				if project.Deleted() {
+					roles[project.ID] = store.RoleOwner
+					projects = append(projects, project)
+				}
+			}
+		}
+	case !c.project.Deleted():
 		projects = []*store.Project{c.project}
 	}
 
 	rendered := make([]object, 0, len(projects))
 	for _, project := range projects {
-		rendered = append(rendered, projectResponse(project))
+		body := projectResponse(project)
+		if role, ok := roles[project.ID]; ok {
+			body = body.put("role", role)
+		}
+		rendered = append(rendered, body)
 	}
 	writeJSON(w, http.StatusOK, object{}.put("projects", rendered))
 }

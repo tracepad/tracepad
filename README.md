@@ -160,12 +160,19 @@ reachable as a tool.
 ## Browsing traces
 
 The same binary serves a web interface on the same port. The first run prints
-a link that is already signed in:
+the link that creates the account you will sign in with:
 
 ```
-  # Web interface, signed in with that key
-  http://localhost:4318/#key=tp-sk-…
+This server has no owner yet. Create the first one — it takes an email and a
+password, and nothing is written down anywhere but this database:
+
+  http://localhost:4318/setup#token=…
 ```
+
+People sign in with an email and a password; keys stay what they are, for
+programs. An owner runs the server and invites everyone else into specific
+projects as a `viewer` or an `editor` — see
+[docs/accounts.md](docs/accounts.md).
 
 A filterable, searchable trace list — a hit shows the text it matched under
 the row and opens the panel on the observation it came from; a trace as its

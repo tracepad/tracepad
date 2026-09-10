@@ -128,3 +128,63 @@ func TestSweepIntervalAndAdminToken(t *testing.T) {
 		t.Error("a sub-second sweep interval is a busy loop, not a configuration")
 	}
 }
+
+// The browser session's lifetime (spec 028 #4, Config additions).
+func TestSessionDays(t *testing.T) {
+	t.Setenv("TRACEPAD_SESSION_DAYS", "")
+
+	cfg, err := Load(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.SessionLife != DefaultSessionLife {
+		t.Errorf("SessionLife = %s, want the documented default %s", cfg.SessionLife, DefaultSessionLife)
+	}
+
+	t.Setenv("TRACEPAD_SESSION_DAYS", "7")
+	cfg, err = Load(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.SessionLife != 7*24*time.Hour {
+		t.Errorf("SessionLife = %s, want 168h", cfg.SessionLife)
+	}
+
+	t.Setenv("TRACEPAD_SESSION_DAYS", "0")
+	if _, err := Load(nil); err == nil {
+		t.Error("a session shorter than the slide's own interval is a broken session, not a short one")
+	}
+	t.Setenv("TRACEPAD_SESSION_DAYS", "a month")
+	if _, err := Load(nil); err == nil {
+		t.Error("a session length that is not a number must be refused, not defaulted")
+	}
+}
+
+// TRACEPAD_URL is the CLI's "which server" and, since spec 028 #11, the host
+// of the links the server prints.
+func TestPublicURL(t *testing.T) {
+	t.Setenv("TRACEPAD_URL", "  https://traces.example.com  ")
+
+	cfg, err := Load(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.URL != "https://traces.example.com" {
+		t.Errorf("URL = %q, want the value without the whitespace a shell leaves behind", cfg.URL)
+	}
+}
+
+func TestDisplayHost(t *testing.T) {
+	cases := map[string]string{
+		":4318":          "localhost:4318",
+		"0.0.0.0:4318":   "localhost:4318",
+		"[::]:4318":      "localhost:4318",
+		"127.0.0.1:4318": "127.0.0.1:4318",
+		"myhost:4318":    "myhost:4318",
+	}
+	for in, want := range cases {
+		if got := DisplayHost(in); got != want {
+			t.Errorf("DisplayHost(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

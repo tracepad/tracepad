@@ -15,22 +15,24 @@ import (
 // what was not asked for and keeps what was in the order the row declares it,
 // so two responses of the same endpoint always read the same way.
 
-// member is one key/value pair of a rendered object.
-type member struct {
+// field is one key/value pair of a rendered object. Named `field` rather than
+// `member` since spec 028, where a member is a person with a role in a
+// project and the word had to mean one thing.
+type field struct {
 	key   string
 	value any
 }
 
-// object marshals its members in order.
-type object []member
+// object marshals its fields in order.
+type object []field
 
-// put appends a member. Absent values are dropped by the callers that know
+// put appends a field. Absent values are dropped by the callers that know
 // what absent means for their field; put itself stores whatever it is given.
 func (o object) put(key string, value any) object {
-	return append(o, member{key: key, value: value})
+	return append(o, field{key: key, value: value})
 }
 
-// putSome appends a member only when there is something to say. An empty
+// putSome appends a field only when there is something to say. An empty
 // string, an empty collection and a nil pointer all mean "this trace never
 // carried the field", which is not the same as carrying an empty one, and a
 // key that is always present but usually empty costs every consumer its
@@ -60,7 +62,7 @@ func (o object) putSome(key string, value any) object {
 	case nil:
 		return o
 	}
-	return append(o, member{key: key, value: value})
+	return append(o, field{key: key, value: value})
 }
 
 func (o object) MarshalJSON() ([]byte, error) {
@@ -86,7 +88,7 @@ func (o object) MarshalJSON() ([]byte, error) {
 	return buffer.Bytes(), nil
 }
 
-// keys returns the member names, which is what an unknown-field error needs to
+// keys returns the field names, which is what an unknown-field error needs to
 // tell the caller what it could have asked for.
 func (o object) keys() []string {
 	out := make([]string, 0, len(o))

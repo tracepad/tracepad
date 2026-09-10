@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net"
 	"os"
 	"os/signal"
 	"strings"
@@ -156,7 +155,6 @@ func serve(args []string) error {
 	if err != nil {
 		return err
 	}
-	printStartup(boot, cfg.Listen)
 
 	// The writer outlives the HTTP server on purpose: it is closed after
 	// Shutdown has drained the handlers that are still waiting on a commit.
@@ -181,6 +179,10 @@ func serve(args []string) error {
 	defer aggregator.Close()
 
 	srv := server.New(cfg, version, st, writer, sweeper)
+	// After the server, because the server is what knows whether this
+	// deployment still needs its first owner and what the link to create
+	// one is (spec 028 #9).
+	printStartup(boot, cfg.Listen, srv.SetupURL())
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -255,15 +257,16 @@ func provisionSpecs(cfg *config.Config) ([]store.ProvisionSpec, error) {
 // project created in this run — both plain OTel and Langfuse-SDK style
 // (spec 001 #9) — and says where the browser interface is.
 //
-// A freshly created project's line carries its key in the URL fragment
-// (spec 006 #8): the interface always authenticates, and this is the one
-// moment the secret is knowable, so the zero-friction first contact is
-// clicking the link the server just printed. Fragments never reach the
-// server; the app stores the key and strips it from the URL. Later startups
-// print the bare URL, because by then the key is the operator's to remember
-// and the login screen's to ask for.
-func printStartup(boot *store.BootstrapResult, listen string) {
-	host := displayHost(listen)
+// The interface's line is the setup link while this server has no owner, and
+// the bare URL once it has one (spec 028 #9). The pre-authed `#key=` link of
+// spec 006 #8 is gone with the key login it authenticated: a key is what a
+// program holds, and the interface is where a person signs in. The idea is
+// unchanged — the one moment the operator is provably at the console is the
+// moment the server prints a line, so the line is the credential — and so is
+// the fragment, which never reaches the server and which the app strips from
+// the URL as soon as it has read it.
+func printStartup(boot *store.BootstrapResult, listen, setupURL string) {
+	host := config.DisplayHost(listen)
 	for _, c := range boot.Created {
 		fmt.Printf(`
 Project %q created. Connect your app with either:
@@ -276,31 +279,23 @@ Project %q created. Connect your app with either:
   LANGFUSE_HOST=http://%s
   LANGFUSE_PUBLIC_KEY=%s
   LANGFUSE_SECRET_KEY=%s
-`, c.Project.Name, host, c.Keys.Secret, host, c.Keys.PublicKey, c.Keys.Secret)
-		if ui.Enabled {
-			fmt.Printf(`
-  # Web interface, signed in with that key
-  http://%s/#key=%s
-`, host, c.Keys.Secret)
-		}
-		fmt.Println()
-	}
-	if ui.Enabled && len(boot.Created) == 0 {
-		fmt.Printf("\nWeb interface: http://%s/\n\n", host)
-	}
-}
 
-// displayHost turns a listen address into a connectable host:port. Wildcard
-// bind hosts (empty, 0.0.0.0, ::) are not valid connect targets, so they are
-// shown as localhost.
-func displayHost(listen string) string {
-	host, port, err := net.SplitHostPort(listen)
-	if err != nil {
-		return listen
+`, c.Project.Name, host, c.Keys.Secret, host, c.Keys.PublicKey, c.Keys.Secret)
 	}
-	switch host {
-	case "", "0.0.0.0", "::":
-		return "localhost:" + port
+	if !ui.Enabled {
+		return
 	}
-	return listen
+	if setupURL != "" {
+		fmt.Printf(`
+This server has no owner yet. Create the first one — it takes an email and a
+password, and nothing is written down anywhere but this database:
+
+  %s
+
+The link is good until this process stops. Restart to have a new one printed.
+
+`, setupURL)
+		return
+	}
+	fmt.Printf("\nWeb interface: http://%s/\n\n", host)
 }

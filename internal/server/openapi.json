@@ -19,7 +19,9 @@
     {"name": "prompts", "description": "Versioned prompts with movable labels"},
     {"name": "datasets", "description": "Datasets of versioned test cases, the runs over them, and the score configs that pin what a score name means"},
     {"name": "queues", "description": "Annotation queues: what to review, the desk that walks it, and who completed what"},
-    {"name": "admin", "description": "Projects, keys, retention windows and user-data erasure"}
+    {"name": "admin", "description": "Projects, keys, retention windows and user-data erasure"},
+    {"name": "auth", "description": "Signing in: the first owner, a password, an invitation, and the sessions that follow"},
+    {"name": "accounts", "description": "The people who sign in and the projects they are members of"}
   ],
   "paths": {
     "/health": {
@@ -120,6 +122,194 @@
         "security": [],
         "responses": {
           "200": {"description": "This document", "content": {"application/json": {"schema": {"type": "object"}}}}
+        }
+      }
+    },
+    "/api/v1/setup": {
+      "get": {
+        "tags": ["auth"],
+        "summary": "Whether this server still needs its first owner",
+        "description": "The one thing the interface can learn without a credential. While it answers `{\"required\": true}` the server prints a setup link at every start and every other screen redirects to `/setup`.",
+        "operationId": "getSetup",
+        "security": [],
+        "responses": {
+          "200": {"description": "Whether an owner exists", "content": {"application/json": {"schema": {
+            "type": "object",
+            "properties": {"required": {"type": "boolean"}},
+            "required": ["required"]
+          }}}},
+          "400": {"$ref": "#/components/responses/BadRequest"}
+        }
+      },
+      "post": {
+        "tags": ["auth"],
+        "summary": "Create the first owner from the token the server printed",
+        "description": "The token is 32 random bytes minted at each start while no enabled owner exists, kept in memory only and printed in the setup link — so a token from a log file yesterday opens nothing today, and a restart is the recovery if the link was lost. Answers 403 to a wrong token and to a second attempt once an owner exists.",
+        "operationId": "setup",
+        "security": [],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {
+          "type": "object",
+          "properties": {
+            "token": {"type": "string"},
+            "email": {"type": "string", "maxLength": 254},
+            "password": {"type": "string", "minLength": 10, "maxLength": 128},
+            "name": {"type": "string"}
+          },
+          "required": ["token", "email", "password"]
+        }}}},
+        "responses": {
+          "201": {"description": "The owner, signed in; the session cookie is set", "content": {"application/json": {"schema": {
+            "type": "object",
+            "properties": {"account": {"$ref": "#/components/schemas/Account"}},
+            "required": ["account"]
+          }}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "422": {"$ref": "#/components/responses/Unprocessable"}
+        }
+      }
+    },
+    "/api/v1/auth/login": {
+      "post": {
+        "tags": ["auth"],
+        "summary": "Sign in with an email and a password",
+        "description": "A wrong email, a wrong password, a disabled account and one that has never accepted its invitation all answer the same 401 with the same sentence: any difference between them is a way to find out who has an account here. Five failures for one email inside fifteen minutes and the next is a 429 with `Retry-After`.",
+        "operationId": "login",
+        "security": [],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {
+          "type": "object",
+          "properties": {"email": {"type": "string"}, "password": {"type": "string"}},
+          "required": ["email", "password"]
+        }}}},
+        "responses": {
+          "200": {"description": "The account, signed in; the session cookie is set", "content": {"application/json": {"schema": {
+            "type": "object",
+            "properties": {"account": {"$ref": "#/components/schemas/Account"}},
+            "required": ["account"]
+          }}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "429": {"$ref": "#/components/responses/TooManyRequests"}
+        }
+      }
+    },
+    "/api/v1/auth/accept-invite": {
+      "post": {
+        "tags": ["auth"],
+        "summary": "Set a password from an invitation link and sign in",
+        "description": "The token is single-use and good for seven days. Accepting replaces whatever password the account had — which is what makes one path serve both an invitation and a reset — ends its other sessions, and stamps the login.",
+        "operationId": "acceptInvite",
+        "security": [],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {
+          "type": "object",
+          "properties": {
+            "token": {"type": "string"},
+            "password": {"type": "string", "minLength": 10, "maxLength": 128}
+          },
+          "required": ["token", "password"]
+        }}}},
+        "responses": {
+          "200": {"description": "The account, signed in; the session cookie is set", "content": {"application/json": {"schema": {
+            "type": "object",
+            "properties": {"account": {"$ref": "#/components/schemas/Account"}},
+            "required": ["account"]
+          }}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "422": {"$ref": "#/components/responses/Unprocessable"}
+        }
+      }
+    },
+    "/api/v1/auth/logout": {
+      "post": {
+        "tags": ["auth"],
+        "summary": "End this session",
+        "description": "Deletes the row and clears the cookie. A project key or the admin token gets 400: this is a question only a session can ask.",
+        "operationId": "logout",
+        "security": [{"sessionCookie": []}],
+        "responses": {
+          "204": {"description": "Signed out"},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"}
+        }
+      }
+    },
+    "/api/v1/auth/me": {
+      "get": {
+        "tags": ["auth"],
+        "summary": "The signed-in account and the projects it can reach",
+        "description": "The one call the interface makes on load. The project list rides in it because the shell needs both at once: for an owner it is every live project with the role `owner`, for everyone else their memberships, sorted by name.",
+        "operationId": "me",
+        "security": [{"sessionCookie": []}],
+        "responses": {
+          "200": {"description": "Who is signed in and what they can reach", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Me"}}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"}
+        }
+      },
+      "patch": {
+        "tags": ["auth"],
+        "summary": "Change this account's display name or password",
+        "description": "A password change needs the current one and signs every other session of the account out, because changing it is what a person does when they think somebody else has it.",
+        "operationId": "patchMe",
+        "security": [{"sessionCookie": []}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {
+          "type": "object",
+          "properties": {
+            "name": {"type": "string"},
+            "password": {
+              "type": "object",
+              "properties": {
+                "current": {"type": "string"},
+                "new": {"type": "string", "minLength": 10, "maxLength": 128}
+              },
+              "required": ["current", "new"]
+            }
+          }
+        }}}},
+        "responses": {
+          "200": {"description": "The account as it now stands", "content": {"application/json": {"schema": {
+            "type": "object",
+            "properties": {"account": {"$ref": "#/components/schemas/Account"}},
+            "required": ["account"]
+          }}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "422": {"$ref": "#/components/responses/Unprocessable"}
+        }
+      }
+    },
+    "/api/v1/auth/sessions": {
+      "get": {
+        "tags": ["auth"],
+        "summary": "This account's sessions, the current one marked",
+        "description": "The reason sessions are rows: \"sign out everywhere\" is a decision a person makes by looking at the list and recognising which one is the laptop they still have. The id is the row's — sha256 of the cookie — and cannot be turned back into a credential.",
+        "operationId": "listAccountSessions",
+        "security": [{"sessionCookie": []}],
+        "responses": {
+          "200": {"description": "The live sessions, newest first", "content": {"application/json": {"schema": {
+            "type": "object",
+            "properties": {"sessions": {"type": "array", "items": {"$ref": "#/components/schemas/AccountSession"}}},
+            "required": ["sessions"]
+          }}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"}
+        }
+      },
+      "delete": {
+        "tags": ["auth"],
+        "summary": "End every session of this account but the current one",
+        "operationId": "endOtherSessions",
+        "security": [{"sessionCookie": []}],
+        "responses": {
+          "200": {"description": "How many sessions were ended", "content": {"application/json": {"schema": {
+            "type": "object",
+            "properties": {"ended": {"type": "integer"}},
+            "required": ["ended"]
+          }}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"}
         }
       }
     },
@@ -1680,6 +1870,200 @@
         }
       }
     },
+    "/api/v1/accounts": {
+      "get": {
+        "tags": ["accounts"],
+        "summary": "Every account with its standing and its projects",
+        "description": "The page an owner opens to answer \"who can see what\", so the projects and roles are on the row rather than behind a click. Sorted by email.",
+        "operationId": "listAccounts",
+        "security": [{"sessionCookie": []}, {"adminToken": []}],
+        "responses": {
+          "200": {"description": "Every account", "content": {"application/json": {"schema": {
+            "type": "object",
+            "properties": {"accounts": {"type": "array", "items": {"$ref": "#/components/schemas/AccountDetail"}}},
+            "required": ["accounts"]
+          }}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"}
+        }
+      },
+      "post": {
+        "tags": ["accounts"],
+        "summary": "Invite an account; the link is shown once",
+        "description": "Creates an account with no password and the single-use link that sets one, good for seven days. The link is in this response and in no other, ever — only its hash is stored — and carrying it to the person is the owner's job: there is no mail here. A token that sets a password means the password never passes through the owner's hands.",
+        "operationId": "createAccount",
+        "security": [{"sessionCookie": []}, {"adminToken": []}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {
+          "type": "object",
+          "properties": {
+            "email": {"type": "string", "maxLength": 254},
+            "name": {"type": "string"},
+            "owner": {"type": "boolean", "description": "An owner has every project, so `memberships` must then be empty"},
+            "memberships": {"type": "array", "items": {
+              "type": "object",
+              "properties": {
+                "project_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+                "role": {"type": "string", "enum": ["viewer", "editor"]}
+              },
+              "required": ["project_id", "role"]
+            }}
+          },
+          "required": ["email"]
+        }}}},
+        "responses": {
+          "201": {"description": "The account and its invitation link", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Invitation"}}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "409": {"$ref": "#/components/responses/Conflict"},
+          "422": {"$ref": "#/components/responses/Unprocessable"}
+        }
+      }
+    },
+    "/api/v1/accounts/{id}": {
+      "get": {
+        "tags": ["accounts"],
+        "summary": "One account with its projects",
+        "operationId": "getAccount",
+        "security": [{"sessionCookie": []}, {"adminToken": []}],
+        "parameters": [{"$ref": "#/components/parameters/AccountID"}],
+        "responses": {
+          "200": {"description": "The account", "content": {"application/json": {"schema": {
+            "type": "object",
+            "properties": {"account": {"$ref": "#/components/schemas/AccountDetail"}},
+            "required": ["account"]
+          }}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      },
+      "patch": {
+        "tags": ["accounts"],
+        "summary": "Change an account's name, owner standing or disabled flag",
+        "description": "The last enabled owner cannot be demoted or disabled: 409. Making somebody an owner drops their memberships, because an owner has every project. Disabling ends the account's sessions at once.",
+        "operationId": "patchAccount",
+        "security": [{"sessionCookie": []}, {"adminToken": []}],
+        "parameters": [{"$ref": "#/components/parameters/AccountID"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {
+          "type": "object",
+          "properties": {
+            "name": {"type": "string"},
+            "owner": {"type": "boolean"},
+            "disabled": {"type": "boolean"}
+          }
+        }}}},
+        "responses": {
+          "200": {"description": "The account as it now stands", "content": {"application/json": {"schema": {
+            "type": "object",
+            "properties": {"account": {"$ref": "#/components/schemas/AccountDetail"}},
+            "required": ["account"]
+          }}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "409": {"$ref": "#/components/responses/Conflict"}
+        }
+      },
+      "delete": {
+        "tags": ["accounts"],
+        "summary": "Delete an account; a dry run until `?confirm=` echoes its email",
+        "description": "For people who are gone. It takes their memberships, sessions and invitations and nothing else: a score does not name its author, and nothing else in the database references an account. Disabling is the reversible way to take access away today.",
+        "operationId": "deleteAccount",
+        "security": [{"sessionCookie": []}, {"adminToken": []}],
+        "parameters": [
+          {"$ref": "#/components/parameters/AccountID"},
+          {"$ref": "#/components/parameters/ConfirmEmail"}
+        ],
+        "responses": {
+          "200": {"description": "The dry run: what would go, and the email that makes it happen", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AccountDeletion"}}}},
+          "204": {"description": "Deleted"},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "409": {"$ref": "#/components/responses/Conflict"}
+        }
+      }
+    },
+    "/api/v1/accounts/{id}/invite": {
+      "post": {
+        "tags": ["accounts"],
+        "summary": "Mint a fresh invitation link; this is also the password reset",
+        "description": "Ends the account's sessions and voids any earlier link. The old password goes on working until the new link is used, so an owner cannot lock somebody out by pressing this: the failure mode of a reset is somebody locked out on a Friday.",
+        "operationId": "inviteAccount",
+        "security": [{"sessionCookie": []}, {"adminToken": []}],
+        "parameters": [{"$ref": "#/components/parameters/AccountID"}],
+        "responses": {
+          "201": {"description": "The link, shown this once", "content": {"application/json": {"schema": {
+            "type": "object",
+            "properties": {
+              "invite_url": {"type": "string"},
+              "invite_expires_at": {"type": "string", "format": "date-time"},
+              "note": {"type": "string"}
+            },
+            "required": ["invite_url", "invite_expires_at"]
+          }}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
+    "/api/v1/accounts/{id}/projects/{project_id}": {
+      "put": {
+        "tags": ["accounts"],
+        "summary": "Give an account a role in a project",
+        "description": "An owner already has every project, so a membership for one is a 409.",
+        "operationId": "putMembership",
+        "security": [{"sessionCookie": []}, {"adminToken": []}],
+        "parameters": [
+          {"$ref": "#/components/parameters/AccountID"},
+          {"$ref": "#/components/parameters/MembershipProjectID"}
+        ],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {
+          "type": "object",
+          "properties": {"role": {"type": "string", "enum": ["viewer", "editor"]}},
+          "required": ["role"]
+        }}}},
+        "responses": {
+          "200": {"description": "The membership", "content": {"application/json": {"schema": {
+            "type": "object",
+            "properties": {"membership": {"$ref": "#/components/schemas/MembershipRow"}},
+            "required": ["membership"]
+          }}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "409": {"$ref": "#/components/responses/Conflict"},
+          "422": {"$ref": "#/components/responses/Unprocessable"}
+        }
+      },
+      "delete": {
+        "tags": ["accounts"],
+        "summary": "Take a project away from an account",
+        "description": "Removing a membership that is not there is not an error: the state the caller asked for is the state that holds.",
+        "operationId": "deleteMembership",
+        "security": [{"sessionCookie": []}, {"adminToken": []}],
+        "parameters": [
+          {"$ref": "#/components/parameters/AccountID"},
+          {"$ref": "#/components/parameters/MembershipProjectID"}
+        ],
+        "responses": {
+          "204": {"description": "The account no longer has this project"},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
     "/api/v1/projects": {
       "get": {
         "tags": ["admin"],
@@ -1885,6 +2269,36 @@
           "404": {"$ref": "#/components/responses/NotFound"}
         }
       }
+    },
+    "/api/v1/projects/{id}/members": {
+      "get": {
+        "tags": ["accounts"],
+        "summary": "Who has a role in this project; owners are not listed",
+        "description": "The project side of the question an owner asks from the account side at `/api/v1/accounts`. Owners are absent because they are not membership rows — the screen says \"and every owner\" rather than pretending they are.",
+        "operationId": "projectMembers",
+        "security": [{"sessionCookie": []}, {"adminToken": []}],
+        "parameters": [{"$ref": "#/components/parameters/ProjectID"}],
+        "responses": {
+          "200": {"description": "The members, by email", "content": {"application/json": {"schema": {
+            "type": "object",
+            "properties": {"members": {"type": "array", "items": {
+              "type": "object",
+              "properties": {
+                "account_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+                "email": {"type": "string"},
+                "name": {"type": "string"},
+                "role": {"type": "string", "enum": ["viewer", "editor"]}
+              },
+              "required": ["account_id", "email", "name", "role"]
+            }}},
+            "required": ["members"]
+          }}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
     }
   },
   "components": {
@@ -1894,7 +2308,9 @@
       "basicKeys": {"type": "http", "scheme": "basic",
         "description": "`base64(public key:secret key)`, the shape a Langfuse SDK sends"},
       "adminToken": {"type": "http", "scheme": "bearer",
-        "description": "`TRACEPAD_ADMIN_TOKEN`, sent in the same header as a project key. Required for everything cross-project and for deleting a project. A server with none configured answers 403 and says so."}
+        "description": "`TRACEPAD_ADMIN_TOKEN`, sent in the same header as a project key. Required for everything cross-project, for creating and deleting a project, and for the account routes — which is what makes it the recovery when every owner's password is lost. A server with none configured answers 403 and says so."},
+      "sessionCookie": {"type": "apiKey", "in": "cookie", "name": "tracepad_session",
+        "description": "A browser session: `HttpOnly`, `SameSite=Lax`, `Secure` over TLS, set by the three ways in and lasting `TRACEPAD_SESSION_DAYS` (default 30), sliding. On a route whose policy is `member` or `editor` a session must also name the project it is asking about with `X-Tracepad-Project`, and an unsafe method must carry an `Origin` (or `Referer`) matching the request's host."}
     },
     "parameters": {
       "From": {"name": "from", "in": "query", "schema": {"type": "string", "format": "date-time"},
@@ -1936,6 +2352,12 @@
         "schema": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$", "maxLength": 200}},
       "ProjectID": {"name": "id", "in": "path", "required": true,
         "schema": {"type": "string", "pattern": "^[0-9a-f]{32}$"}},
+      "AccountID": {"name": "id", "in": "path", "required": true,
+        "schema": {"type": "string", "pattern": "^[0-9a-f]{32}$"}},
+      "MembershipProjectID": {"name": "project_id", "in": "path", "required": true,
+        "schema": {"type": "string", "pattern": "^[0-9a-f]{32}$"}},
+      "ConfirmEmail": {"name": "confirm", "in": "query", "schema": {"type": "string"},
+        "description": "The email of the account being deleted — the one thing about an account a person means. Without it the endpoint changes nothing and answers with a preview; a value that does not match is a 400 that also changes nothing."},
       "Confirm": {"name": "confirm", "in": "query", "schema": {"type": "string"},
         "description": "The name of the project — or the id of the user — being destroyed. Without it the endpoint changes nothing and answers with a preview; a value that does not match is a 400 that also changes nothing."},
       "ConfirmName": {"name": "confirm", "in": "query", "schema": {"type": "string"},
@@ -1967,9 +2389,14 @@
         "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "NotFound": {"description": "No such thing in this project",
         "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
-      "Forbidden": {"description": "The credentials are good but do not reach this far: cross-project administration needs the admin token",
+      "Forbidden": {"description": "The credentials are good but do not reach this far: an owner account or the admin token is needed, the role in this project is too low, or a cookie request came from another origin",
         "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
-      "Conflict": {"description": "The stored state already answers differently: a name that is taken, a project that is already deleted",
+      "Conflict": {"description": "The stored state already answers differently: a name that is taken, a project that is already deleted, the last owner being demoted",
+        "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+      "Unprocessable": {"description": "The request is well formed and the values are not: an email that is not one, a password outside 10-128 characters",
+        "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+      "TooManyRequests": {"description": "Throttled; `Retry-After` says for how long",
+        "headers": {"Retry-After": {"schema": {"type": "string"}, "description": "Seconds to wait"}},
         "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}}
     },
     "schemas": {
@@ -1978,6 +2405,112 @@
         "description": "The one error shape the whole surface uses",
         "properties": {"error": {"type": "string"}},
         "required": ["error"]
+      },
+      "Account": {
+        "type": "object",
+        "description": "A person who signs in, as they see themselves. The email is the sign-in name and nothing else: it is never verified and never written to.",
+        "properties": {
+          "id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+          "email": {"type": "string"},
+          "name": {"type": "string", "description": "A display name, which may be empty"},
+          "owner": {"type": "boolean", "description": "An owner has every project and every management action, including the accounts themselves"}
+        },
+        "required": ["id", "email", "name", "owner"]
+      },
+      "AccountDetail": {
+        "allOf": [
+          {"$ref": "#/components/schemas/Account"},
+          {
+            "type": "object",
+            "description": "An owner's view of somebody: the standing fields and the memberships.",
+            "properties": {
+              "disabled": {"type": "boolean", "description": "Access taken away reversibly; the sessions ended when it was set"},
+              "pending": {"type": "boolean", "description": "Invited and not yet accepted, so there is no password and no way in yet"},
+              "created_at": {"type": "string", "format": "date-time"},
+              "last_login_at": {"type": ["string", "null"], "format": "date-time",
+                "description": "null means this account has never signed in"},
+              "projects": {"type": "array", "items": {"$ref": "#/components/schemas/Membership"},
+                "description": "The membership rows, which are empty for an owner: the flag is the membership"}
+            },
+            "required": ["disabled", "pending", "created_at", "last_login_at", "projects"]
+          }
+        ]
+      },
+      "Membership": {
+        "type": "object",
+        "description": "One project an account can reach, with the role it has there",
+        "properties": {
+          "id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+          "name": {"type": "string"},
+          "role": {"type": "string", "enum": ["viewer", "editor", "owner"],
+            "description": "`owner` is not a stored membership: it is what every project reports for an account with the owner flag"}
+        },
+        "required": ["id", "name", "role"]
+      },
+      "MembershipRow": {
+        "type": "object",
+        "description": "A membership as the endpoint that writes one answers",
+        "properties": {
+          "account_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+          "project_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+          "name": {"type": "string"},
+          "role": {"type": "string", "enum": ["viewer", "editor"]}
+        },
+        "required": ["account_id", "project_id", "name", "role"]
+      },
+      "Me": {
+        "type": "object",
+        "description": "Who is signed in and what they can reach, which is everything the interface's shell needs on load",
+        "properties": {
+          "account": {"$ref": "#/components/schemas/Account"},
+          "projects": {"type": "array", "items": {"$ref": "#/components/schemas/Membership"},
+            "description": "Sorted by name. For an owner, every live project with the role `owner`; for everyone else, their memberships. Soft-deleted projects are not on it."}
+        },
+        "required": ["account", "projects"]
+      },
+      "AccountSession": {
+        "type": "object",
+        "description": "One browser's sign-in. The id is sha256 of the cookie's value and cannot be turned back into one.",
+        "properties": {
+          "id": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "created_at": {"type": "string", "format": "date-time"},
+          "last_seen_at": {"type": "string", "format": "date-time"},
+          "expires_at": {"type": "string", "format": "date-time"},
+          "user_agent": {"type": "string"},
+          "ip": {"type": "string"},
+          "current": {"type": "boolean", "description": "The session this request was made with"}
+        },
+        "required": ["id", "created_at", "last_seen_at", "expires_at", "user_agent", "ip", "current"]
+      },
+      "Invitation": {
+        "type": "object",
+        "description": "A new account and the link that sets its password. The link is here and in no other response, ever.",
+        "properties": {
+          "account": {"$ref": "#/components/schemas/AccountDetail"},
+          "invite_url": {"type": "string"},
+          "invite_expires_at": {"type": "string", "format": "date-time"},
+          "note": {"type": "string"}
+        },
+        "required": ["account", "invite_url", "invite_expires_at"]
+      },
+      "AccountDeletion": {
+        "type": "object",
+        "description": "What deleting an account would take, and the email that makes it happen",
+        "properties": {
+          "dry_run": {"type": "boolean", "const": true},
+          "account": {"$ref": "#/components/schemas/AccountDetail"},
+          "would_delete": {
+            "type": "object",
+            "properties": {
+              "memberships": {"type": "integer"},
+              "sessions": {"type": "integer"}
+            },
+            "required": ["memberships", "sessions"]
+          },
+          "confirm": {"type": "string", "description": "The exact string `?confirm=` must carry: the account's email"},
+          "note": {"type": "string"}
+        },
+        "required": ["dry_run", "account", "would_delete", "confirm"]
       },
       "TraceRow": {
         "type": "object",

@@ -12,7 +12,17 @@ export const STATE = join(process.cwd(), 'tests', 'e2e', '.state.json');
 
 export type State = {
 	baseURL: string;
-	/** The `#key=` link the server printed on first run (spec 006 #8). */
+	/**
+	 * The setup link the server printed on first run, which is how the first
+	 * owner is created (spec 028 #9).
+	 */
+	setup: string;
+	/**
+	 * The `#key=` entry the interface still takes while the login screen asks
+	 * for a key (spec 006 #8). The server no longer prints it — the setup link
+	 * took its place — so the boot builds it from the key it read out of the
+	 * connection block.
+	 */
 	preAuthed: string;
 	key: string;
 };

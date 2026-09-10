@@ -7,6 +7,7 @@ require (
 	github.com/klauspost/compress v1.19.2
 	github.com/modelcontextprotocol/go-sdk v1.7.0
 	go.opentelemetry.io/proto/otlp v1.11.0
+	golang.org/x/crypto v0.57.0
 	google.golang.org/protobuf v1.36.12
 	modernc.org/sqlite v1.57.0
 )
@@ -22,7 +23,7 @@ require (
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	golang.org/x/oauth2 v0.35.0 // indirect
 	golang.org/x/sync v0.21.0 // indirect
-	golang.org/x/sys v0.47.0 // indirect
+	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
 	modernc.org/libc v1.74.4 // indirect
 	modernc.org/mathutil v1.7.1 // indirect

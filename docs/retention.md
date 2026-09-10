@@ -231,6 +231,10 @@ Each sweep pass also:
   paths that delete observations take the index with them inside their own
   transactions, and this is the belt to those braces;
 - **purges** projects whose seven-day deletion grace has run out (below);
+- removes **expired browser sessions and invitation links**
+  ([accounts.md](accounts.md)). This is housekeeping and not access control: a
+  session that has run out stops working the moment it does, and an invitation
+  past its seven days is refused, whether or not a pass has been by;
 - runs an incremental vacuum, so the file on disk actually shrinks. Deleting
   rows without one returns nothing to the filesystem.
 

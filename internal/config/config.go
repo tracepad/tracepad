@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -53,10 +54,23 @@ type Config struct {
 	RollupInterval time.Duration
 	// AdminToken authenticates everything cross-project: creating,
 	// listing, deleting and restoring any project, and reading or changing
-	// another project's settings (spec 005 #11). Unset by default, which
-	// makes those endpoints answer 403 and leaves each project's own key
-	// as the administrator of itself.
+	// another project's settings (spec 005 #11). Since spec 028 it also
+	// reaches the account routes, which is what makes it the documented
+	// recovery when every owner's password is lost (#16). Unset by
+	// default, which makes those endpoints answer 403 and leaves each
+	// project's own key as the administrator of itself.
 	AdminToken string
+	// SessionLife is how long a browser session lasts (spec 028 #4). It
+	// slides: a request seen more than a day after the last one moves the
+	// expiry forward, so "about once a month" is what a person who opens
+	// this daily is asked for.
+	SessionLife time.Duration
+	// URL is the address the operator's people actually use, when the
+	// server cannot guess it (spec 028 #11). Set it behind a proxy: it is
+	// the host of the setup and invitation links the server prints and
+	// hands out. Read by the CLI as the server to talk to, which is why
+	// one variable serves both.
+	URL string
 }
 
 // DefaultMaxBodyBytes is the request body cap when unset (20 MiB).
@@ -77,6 +91,17 @@ const (
 const (
 	DefaultRollupInterval = 5 * time.Minute
 	MinRollupInterval     = time.Second
+)
+
+// Browser session lifetime (spec 028 #4). Thirty days, sliding, is "sign in
+// about once", which is what a tool you open every day should ask. The floor
+// is a day: below that the slide — which runs at most once a day — could not
+// keep a session alive at all, so a smaller number would not be a shorter
+// session but a broken one.
+const (
+	DefaultSessionDays = 30
+	MinSessionDays     = 1
+	DefaultSessionLife = DefaultSessionDays * 24 * time.Hour
 )
 
 // Response budget bounds (spec 004 #2). The floor is what a skeleton response
@@ -101,8 +126,10 @@ var knownEnv = map[string]bool{
 	"TRACEPAD_SWEEP_INTERVAL":        true,
 	"TRACEPAD_ROLLUP_INTERVAL":       true,
 	"TRACEPAD_ADMIN_TOKEN":           true,
-	// Read by the client commands rather than by the server, but a typo
-	// in either is still a typo worth naming.
+	"TRACEPAD_SESSION_DAYS":          true,
+	// The server reads TRACEPAD_URL too since spec 028 #11 — as the host
+	// of the links it prints — but it is still the CLI's "which server",
+	// which is the whole reason there is one variable and not two.
 	"TRACEPAD_URL":     true,
 	"TRACEPAD_API_KEY": true,
 }
@@ -144,6 +171,14 @@ func Load(args []string) (*Config, error) {
 		return nil, fmt.Errorf("TRACEPAD_ROLLUP_INTERVAL: want at least %s, got %s",
 			MinRollupInterval, rollup)
 	}
+	sessionDays, err := parseCount("TRACEPAD_SESSION_DAYS", DefaultSessionDays)
+	if err != nil {
+		return nil, err
+	}
+	if sessionDays < MinSessionDays {
+		return nil, fmt.Errorf("TRACEPAD_SESSION_DAYS: want at least %d, got %d",
+			MinSessionDays, sessionDays)
+	}
 	cfg := &Config{
 		Listen:              envOr("TRACEPAD_LISTEN", ":4318"),
 		DataDir:             envOr("TRACEPAD_DATA_DIR", defaultDataDir()),
@@ -155,6 +190,8 @@ func Load(args []string) (*Config, error) {
 		SweepInterval:       sweep,
 		RollupInterval:      rollup,
 		AdminToken:          strings.TrimSpace(os.Getenv("TRACEPAD_ADMIN_TOKEN")),
+		SessionLife:         time.Duration(sessionDays) * 24 * time.Hour,
+		URL:                 strings.TrimSpace(os.Getenv("TRACEPAD_URL")),
 	}
 
 	fs := flag.NewFlagSet("tracepad", flag.ContinueOnError)
@@ -177,6 +214,26 @@ func Load(args []string) (*Config, error) {
 // DBPath returns the path of the SQLite database file.
 func (c *Config) DBPath() string {
 	return filepath.Join(c.DataDir, "tracepad.db")
+}
+
+// DisplayHost turns a listen address into a connectable host:port. Wildcard
+// bind hosts (empty, 0.0.0.0, ::) are not valid connect targets, so they are
+// shown as localhost.
+//
+// It lives here because two things print addresses and must print the same
+// one: the startup banner's connection lines, and the setup link the server
+// hands the operator when there is no request to take a host from (spec 028
+// #11).
+func DisplayHost(listen string) string {
+	host, port, err := net.SplitHostPort(listen)
+	if err != nil {
+		return listen
+	}
+	switch host {
+	case "", "0.0.0.0", "::":
+		return "localhost:" + port
+	}
+	return listen
 }
 
 func envOr(key, def string) string {
@@ -213,6 +270,20 @@ func parseBytes(key string, def int64) (int64, error) {
 	n, err := strconv.ParseInt(v, 10, 64)
 	if err != nil || n <= 0 {
 		return 0, fmt.Errorf("%s: want a positive byte count, got %q", key, v)
+	}
+	return n, nil
+}
+
+// parseCount reads a plain whole number, for a setting whose unit is in its
+// name (days, here) rather than in its value.
+func parseCount(key string, def int) (int, error) {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return def, nil
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return 0, fmt.Errorf("%s: want a whole number, got %q", key, v)
 	}
 	return n, nil
 }

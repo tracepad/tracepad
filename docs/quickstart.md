@@ -35,14 +35,28 @@ Project "default" created. Connect your app with either:
   LANGFUSE_HOST=http://localhost:4318
   LANGFUSE_PUBLIC_KEY=tp-pk-…
   LANGFUSE_SECRET_KEY=tp-sk-…
-
-  # Web interface, signed in with that key
-  http://localhost:4318/#key=tp-sk-…
 ```
 
 **Copy the secret key somewhere.** It is stored hashed, so this is the only
 time it is printable; a lost key is replaced with `tracepad keys create`, not
 recovered.
+
+Underneath it is a second link, which is how you get into the browser
+interface:
+
+```
+This server has no owner yet. Create the first one — it takes an email and a
+password, and nothing is written down anywhere but this database:
+
+  http://localhost:4318/setup#token=…
+
+The link is good until this process stops. Restart to have a new one printed.
+```
+
+The key is for your application; the account is for you. Open the link, pick a
+password, and that is the last credential you type into a browser here — see
+[accounts.md](accounts.md). The token in it is minted per start and held in
+memory, so if you lose the link, restart and a new one is printed.
 
 Data lives in `~/.local/share/tracepad` by default (`/data` in the Docker
 image, which is where the volume goes); `TRACEPAD_DATA_DIR` moves it.
@@ -99,9 +113,9 @@ trace is queryable the moment its exporter's batch returns.
 
 Three ways, all reading the same API.
 
-**The browser.** Open the pre-authed link the first run printed and the
-interface is already signed in. Later runs print the plain URL and the login
-screen asks for the key. See [ui.md](ui.md).
+**The browser.** Open the setup link the first run printed and create your
+account; after that it is `http://localhost:4318/` and an email and a password.
+See [ui.md](ui.md) and [accounts.md](accounts.md).
 
 **The terminal.** The CLI is the same binary:
 
@@ -132,3 +146,4 @@ curl -H "Authorization: Bearer tp-sk-…" \
 - [api.md](api.md) — the read API, its filters, and the response budget.
 - [retention.md](retention.md) — how long data is kept and how to change it.
 - [admin.md](admin.md) — more projects, more keys, erasing one user's data.
+- [accounts.md](accounts.md) — inviting somebody, and what a `viewer` may do.
