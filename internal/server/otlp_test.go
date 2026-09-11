@@ -10,9 +10,9 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tracepad/tracepad/internal/config"
 	"github.com/tracepad/tracepad/internal/mapping"
@@ -26,6 +26,10 @@ import (
 const (
 	testSecret = "tp-sk-test-secret"
 	testPublic = "tp-pk-test"
+
+	// testCommitWindow is the writer's window in every harness that does
+	// not name one.
+	testCommitWindow = time.Millisecond
 )
 
 type harness struct {
@@ -40,7 +44,7 @@ func newHarness(t *testing.T, cfg *config.Config, writerOpts store.WriterOptions
 	t.Helper()
 	captureLogs(t)
 
-	st, err := store.Open(filepath.Join(t.TempDir(), "tracepad.db"))
+	st, err := store.Open(freshDB(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,6 +53,14 @@ func newHarness(t *testing.T, cfg *config.Config, writerOpts store.WriterOptions
 	project, err := st.CreateProject("test", store.KeyPair{PublicKey: testPublic, Secret: testSecret})
 	if err != nil {
 		t.Fatal(err)
+	}
+	// A lone submission waits the whole commit window before it is flushed,
+	// and these tests write one row at a time: the default fifty
+	// milliseconds, times every write in the package, was most of the
+	// suite's runtime. Nothing here is about group commit — the store's own
+	// tests are — so the window is shortened unless a test asks for one.
+	if writerOpts.CommitWindow == 0 {
+		writerOpts.CommitWindow = testCommitWindow
 	}
 	writer, err := st.NewWriter(writerOpts)
 	if err != nil {

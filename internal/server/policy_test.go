@@ -314,7 +314,7 @@ func TestKeyLoginKeepsWorking(t *testing.T) {
 	// interface has today, and every route it reaches must go on answering.
 	h := newHarness(t, &config.Config{
 		Listen: ":0", StoreRaw: true, MaxBodyBytes: config.DefaultMaxBodyBytes,
-	}, accountWrites)
+	}, store.WriterOptions{})
 	h.seed(t, &model.Trace{ID: traceHex(1), Name: "chat"})
 
 	for _, path := range []string{
