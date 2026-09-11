@@ -22,22 +22,17 @@ import (
 
 const testAccountPassword = "correct horse battery"
 
-// accountHash is one bcrypt hash for the whole test binary. Cost 12 is a
-// quarter of a second by design (Decision 1); hashing per account would be
-// minutes of the suite spent proving the same thing.
+// accountHash is one bcrypt hash for the whole test binary, at the cost
+// TestMain lowered the binary to — and made there, so that no test is the
+// first to ask. The one test that needs a hash at the production cost makes
+// its own.
 var accountHash = sync.OnceValues(func() ([]byte, error) {
 	return store.HashPassword(testAccountPassword)
 })
 
-// accountWrites is the writer these tests want: dozens of tiny writes — an
-// account, an invitation, a session — one after another, where the default
-// fifty-millisecond commit window is the whole of the runtime. Nothing here
-// is about group commit, so the window is shortened rather than waited out.
-var accountWrites = store.WriterOptions{CommitWindow: time.Millisecond}
-
-// newAccountHarness is the ordinary harness with that writer, and with the
-// cross-project token configured — which the six-caller matrix needs and the
-// rest is unaffected by.
+// newAccountHarness is the ordinary harness with the cross-project token
+// configured — which the six-caller matrix needs and the rest is unaffected
+// by.
 func newAccountHarness(t *testing.T) *harness {
 	t.Helper()
 	return newHarness(t, &config.Config{
@@ -45,7 +40,7 @@ func newAccountHarness(t *testing.T) *harness {
 		StoreRaw:     true,
 		MaxBodyBytes: config.DefaultMaxBodyBytes,
 		AdminToken:   adminToken,
-	}, accountWrites)
+	}, store.WriterOptions{})
 }
 
 // signedIn is an account and the cookie value its session carries.
@@ -78,6 +73,13 @@ func (h *harness) account(t *testing.T, email string, owner bool, memberships ..
 	if err != nil {
 		t.Fatal(err)
 	}
+	return h.accountWithHash(t, email, owner, hash, memberships...)
+}
+
+// accountWithHash is account with the password hash given rather than the
+// shared one.
+func (h *harness) accountWithHash(t *testing.T, email string, owner bool, hash []byte, memberships ...store.Membership) *signedIn {
+	t.Helper()
 	h.invited(t, email, owner, memberships...)
 	now := time.Now().UnixNano()
 	value := "cookie-for-" + email
@@ -219,10 +221,21 @@ func TestLoginAnswersOneSentenceToEveryFailure(t *testing.T) {
 //
 // A wall-clock assertion, deliberately loose: what it catches is the
 // difference between running the hash and not running it, which is two orders
-// of magnitude, not the tens of milliseconds a loaded machine adds.
+// of magnitude, not the tens of milliseconds a loaded machine adds. That gap
+// only exists at the production cost — at the one TestMain lowered the binary
+// to, a comparison is a millisecond and so is the noise — so this test, alone
+// in the package, runs at cost 12 and pays for it: about a second, most of the
+// suite's remaining runtime.
 func TestLoginSpendsTheComparisonWhateverTheAnswer(t *testing.T) {
+	lowered := store.SetPasswordCost(store.PasswordCost)
+	t.Cleanup(func() { store.SetPasswordCost(lowered) })
+
 	h := newAccountHarness(t)
-	h.owner(t)
+	hash, err := store.HashPassword(testAccountPassword)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.accountWithHash(t, "owner@example.com", true, hash)
 	h.invited(t, "pending@example.com", false)
 
 	// The real comparison, to measure the others against. The decoy is

@@ -377,8 +377,13 @@ reason in a comment; adding a dialect should be a table edit.
 
 - `make gate` — the full gate (format-check + vet + `go test ./...` + the
   doc-anchor sweep + `svelte-check`, vitest and the API-type drift check). It
-  is what CI runs and what the git **pre-push** hook runs; about two minutes
-  today, most of it `internal/server`.
+  is what CI runs and what the git **pre-push** hook runs. The Go half is
+  bounded by its slowest package — `internal/store` today, at under a minute.
+  Most of a test's time in these suites is waiting rather than the code under
+  test: the writer's fifty-millisecond commit window on every lone write, the
+  migrations on every empty database, bcrypt at cost 12 on every login.
+  `internal/server` pays each once (`main_test.go`, `newHarness`) and runs in
+  seconds; a package that does not can be brought down the same way.
 - `make precommit` — the fast gate the git **pre-commit** hook runs:
   format-check, vet, the tests of the Go packages you staged, and the
   interface checks only when `ui/` or `openapi.json` is staged. Seconds, not
