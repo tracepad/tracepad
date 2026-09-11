@@ -11,6 +11,11 @@ export default defineConfig({
 	testDir: 'tests/e2e',
 	globalSetup: './tests/e2e/global-setup.ts',
 	fullyParallel: true,
+	// The CI runner has two cores and Playwright's default there is one
+	// worker, which serialised a suite that two projects (desktop and mobile)
+	// had already doubled. Two workers halve the wall clock on that runner;
+	// a laptop keeps the default, which is a quarter of its cores.
+	workers: CI ? 2 : undefined,
 	forbidOnly: CI,
 	retries: CI ? 1 : 0,
 	reporter: CI ? 'github' : 'list',

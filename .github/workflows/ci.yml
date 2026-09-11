@@ -1,15 +1,32 @@
 name: CI
 
+# Pull requests carry the gate. A push to `main` is a squash-merge of a pull
+# request that already went green on the same tree, so running everything
+# again there paid a second time for the same answer — roughly half of every
+# month's minutes. The push trigger stays for one job only: the multi-arch
+# image build, which needs a run per merge, not per review (see `multiarch`).
 on:
   push:
     branches: [main]
   pull_request:
+
+# A push to a pull-request branch makes the run already going for its previous
+# head obsolete — the review will look at the new one — so the newer run
+# cancels the older instead of both finishing. `head_ref` is empty on a push
+# to `main`, and `ref` stands in for it, so two merges in quick succession
+# share a group too and the older build is cancelled as well: the newer tree
+# contains the older one, and the multi-arch build of the newer is the answer
+# that matters.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
   gate:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -41,6 +58,7 @@ jobs:
   # cannot see. Its own job, because browser automation does not fit the
   # gate's 30-second budget.
   e2e:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -72,6 +90,7 @@ jobs:
   # built inside the image, which is the point of the Dockerfile being the
   # whole recipe (#1).
   docker:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -81,15 +100,26 @@ jobs:
       # licence files. Single-arch, because a runner can only run its own.
       - run: make image-check VERSION=ci
 
-      # Build-only, and once: what can break the release's multi-arch manifest
-      # is a stage that does not cross-compile, and building both architectures
-      # is what catches that. Booting them is not on offer here and is not what
-      # this step is for.
-      #
-      # `setup-buildx-action` brings up a fresh builder with an empty cache that
-      # shares nothing with the `make image` above, so without the GitHub Actions
-      # cache this step redoes `npm ci`, Vite and both Go builds from nothing on
-      # every push. `push: false` builds and keeps nothing but that cache.
+  # Build-only, and once per merge: what can break the release's multi-arch
+  # manifest is a stage that does not cross-compile, and building both
+  # architectures is what catches that. Booting them is not on offer here and
+  # is not what this job is for. It runs on `main` rather than on the pull
+  # request because the emulated arm64 half is the slowest thing in this file
+  # and the answer it gives changes with the Dockerfile and the toolchains,
+  # not with the code under review — `docker` above already proves the
+  # Dockerfile builds and the image boots, on the runner's own architecture,
+  # for every pull request. A merge that breaks the cross-compile is caught
+  # here before a tag would find it in `release-server.yml`.
+  #
+  # `setup-buildx-action` brings up a fresh builder with an empty cache, so
+  # without the GitHub Actions cache this job redoes `npm ci`, Vite and both Go
+  # builds from nothing on every merge. `push: false` builds and keeps nothing
+  # but that cache.
+  multiarch:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
       - name: The Dockerfile builds for both release architectures
         uses: docker/build-push-action@v6
@@ -105,6 +135,7 @@ jobs:
   # attribute conventions (spec 002, Testing #3). Separate from the gate so
   # that a network hiccup installing SDKs never blocks a code review.
   smoke:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -122,6 +153,7 @@ jobs:
   # moves first — and its end-to-end suite against a real binary. Its own job,
   # because the gate needs neither Python nor a network.
   sdk:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
