@@ -46,12 +46,14 @@ reaches everything it used to unlock (see [admin.md](admin.md)).
 
 Every screen is about one project, and the address says which: everything
 inside the shell lives under **`/p/{project id}`** — `/p/{id}/traces`,
-`/p/{id}/sessions`, `/p/{id}/settings/account`, and so on. A link therefore
+`/p/{id}/sessions`, `/p/{id}/settings/server`, and so on. A link therefore
 names its project, which is what a link shared between two people has needed
 since there were two people; it carries the id rather than the name, because a
 name can be renamed and a link that breaks on a rename is worse than a hex
 segment. `/login`, `/setup` and `/invite` are the three screens outside the
-shell and keep their paths.
+shell and keep their paths. One screen inside the shell is about the person
+rather than a project and lives bare: the Account tab, at `/settings/account`
+— it is yours whether or not you reach a project.
 
 A **bare path** — `/`, or `/traces?status=error` from a bookmark, a chat, or
 the pre-authed link the server prints — redirects to the same path and query
@@ -683,10 +685,12 @@ which payload is worth that is the reader's call. Raising
 ## Settings and administration
 
 Settings is **three tabs, because it is three audiences**. The active one is
-in the address (`/p/{project}/settings/project`, `…/settings/account`,
-`…/settings/server`), so a tab is a link. The Server tab is about the whole
-server and lives under the project prefix anyway: one rule for what is inside
-the shell, and switching projects from it keeps the tab.
+in the address, so a tab is a link. Two of the tabs are about a project and
+live under its prefix (`/p/{project}/settings/project`, `…/settings/server`);
+the Server tab is about the whole server and sits there anyway, and switching
+projects from either keeps the tab. The Account tab is about you and lives
+bare, at `/settings/account`: from there Project and Server point at the
+project you last looked at, and are absent when you reach none.
 
 **Project** — the project on screen, for everybody who can reach it:
 

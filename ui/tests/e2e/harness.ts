@@ -74,11 +74,26 @@ export async function inviteEditor(
 	project: string,
 	label: string
 ): Promise<Account> {
-	const email = `${label}@e2e.test`;
+	return invite(baseURL, `${label}@e2e.test`, [{ project_id: project, role: 'editor' }]);
+}
+
+/**
+ * Invites an account that is a member of nothing — the one whose every bare
+ * path is `/p` (spec 029 #4) and whose Account tab is still its own (#14).
+ */
+export async function inviteNobody(baseURL: string, label: string): Promise<Account> {
+	return invite(baseURL, `${label}-${Math.random().toString(36).slice(2, 8)}@e2e.test`, []);
+}
+
+async function invite(
+	baseURL: string,
+	email: string,
+	memberships: { project_id: string; role: 'editor' }[]
+): Promise<Account> {
 	const response = await fetch(`${baseURL}/api/v1/accounts`, {
 		method: 'POST',
 		headers: { Authorization: `Bearer ${ADMIN_TOKEN}`, 'Content-Type': 'application/json' },
-		body: JSON.stringify({ email, memberships: [{ project_id: project, role: 'editor' }] })
+		body: JSON.stringify({ email, memberships })
 	});
 	if (!response.ok) throw new Error(`invite ${email}: ${response.status} ${await response.text()}`);
 	const { invite_url } = (await response.json()) as { invite_url: string };

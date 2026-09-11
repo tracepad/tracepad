@@ -30,10 +30,21 @@ async function signedIn(...projects: { id: string; name: string }[]) {
 	const root = (await import('./+page')).load as unknown as Load;
 	const rest = (await import('./[...path]/+page')).load as unknown as Load;
 	const landing = (await import('./p/+page')).load as unknown as Load;
+	const account = (await import('./p/[project]/settings/account/+page')).load as unknown as Load;
 	const parent = () => Promise.resolve();
+	// Through a promise either way: a load that redirects before its first
+	// `await` throws synchronously, and this is what SvelteKit does with it.
 	const at = (load: Load, path: string, params: Record<string, string> = {}) =>
-		load({ parent, url: new URL(`http://tracepad.test${path}`), params });
-	return { project, root: at.bind(null, root), rest: at.bind(null, rest), landing: at.bind(null, landing) };
+		Promise.resolve().then(() =>
+			load({ parent, url: new URL(`http://tracepad.test${path}`), params })
+		);
+	return {
+		project,
+		root: at.bind(null, root),
+		rest: at.bind(null, rest),
+		landing: at.bind(null, landing),
+		account: at.bind(null, account)
+	};
 }
 
 /** What a SvelteKit `redirect` looks like when it is thrown at us. */
@@ -74,6 +85,23 @@ describe('a bare path', () => {
 
 		await expect(rest(`/p/${P1}/nonsense`)).rejects.toMatchObject({ status: 404 });
 		await expect(rest(`/p/${P1}/traces/a/b`)).rejects.toMatchObject({ status: 404 });
+	});
+});
+
+// The Account tab is about the person and lives bare (spec 029 #14): a link
+// written under a prefix lands on it with its query; a bare one is its own
+// route and never reaches the rest route — so an account that reaches no
+// project, which every bare path sends to `/p`, still opens it.
+describe('the Account tab', () => {
+	it('is reached bare from under any prefix', async () => {
+		const { account } = await signedIn({ id: P1, name: 'checkout' });
+
+		expect(await redirectOf(account(`/p/${P1}/settings/account?x=1`, { project: P1 }))).toBe(
+			'/settings/account?x=1'
+		);
+		expect(await redirectOf(account('/p/not-mine/settings/account', { project: 'not-mine' }))).toBe(
+			'/settings/account'
+		);
 	});
 });
 

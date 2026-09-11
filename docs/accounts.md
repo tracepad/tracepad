@@ -237,11 +237,12 @@ setup takes over the existing account if you give it the same email.
 
 All of the above is a screen as well as a `curl`. The setup and invitation
 links open the two screens that read `#token=`; `/login` takes the email and
-the password; the sidebar's account menu leads to *Account*, where anybody
-changes their own name and password and ends their other sessions.
+the password; the sidebar's account menu leads to *Account* (`/settings/account`),
+where anybody changes their own name and password and ends their other
+sessions — an account that is a member of nothing included.
 
-Which project a screen is about is in its address — every screen lives under
-`/p/{project id}` — and the switcher at the top of the sidebar lists the
+Which project a screen is about is in its address — every screen about a
+project lives under `/p/{project id}` — and the switcher at the top of the sidebar lists the
 projects the account reaches, with the traffic of the last day beside each.
 A link without the prefix lands on the project the account last looked at;
 an address under a project the account is not a member of is one screen

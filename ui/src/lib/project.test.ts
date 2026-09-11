@@ -233,6 +233,14 @@ describe('switchTarget', () => {
 		expect(switchTarget(at(`/p/${P1}${from}`), P2)).toBe(`/p/${P2}${to}`);
 	});
 
+	// The bare Account tab and `/p` are under no project: nothing to keep.
+	it('lands on the traces from a screen that is under no project', async () => {
+		const { switchTarget } = await fresh();
+
+		expect(switchTarget(at('/settings/account'), P2)).toBe(`/p/${P2}/traces`);
+		expect(switchTarget(at('/p'), P2)).toBe(`/p/${P2}/traces`);
+	});
+
 	it('keeps the filters, the range, the size, the search and live mode', async () => {
 		const { switchTarget } = await fresh();
 		const query = '?status=error&environment=prod&from=2026-09-01T00:00:00Z&limit=25&q=refund&live=1';

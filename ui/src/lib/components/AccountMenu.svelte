@@ -5,7 +5,7 @@
 	import { DropdownMenu } from 'bits-ui';
 	import { goto } from '$app/navigation';
 	import { auth, LOGIN_ROUTE } from '$lib/auth.svelte';
-	import { href, project } from '$lib/project.svelte';
+	import { project } from '$lib/project.svelte';
 	import { end } from '$lib/session';
 
 	// Who is signed in, at the bottom of the sidebar (spec 028 #14). The
@@ -59,9 +59,12 @@
 			class="border-border bg-canvas shadow-overlay z-50 min-w-44 rounded-md border p-1"
 		>
 			<p class="text-subtle truncate px-2 py-1 text-xs">{auth.account?.email ?? ''}</p>
+			<!-- Bare, not under the project on screen: the tab is about the
+			     person, and an account that reaches no project has one too
+			     (spec 029 #14). -->
 			<DropdownMenu.Item>
 				{#snippet child({ props })}
-					<a href={href('/settings/account')} {...props} class={item}>
+					<a href="/settings/account" {...props} class={item}>
 						<UserRound class="size-4 shrink-0" />
 						Account
 					</a>

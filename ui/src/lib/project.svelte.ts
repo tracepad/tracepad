@@ -137,9 +137,12 @@ const SECTIONS = new Set([
  * peek panel. A filter is a question, and the same question of the other
  * project; a cursor is an answer. A first segment that is no section — the
  * 404 a stale link lands on — is not carried over: the switcher is a way out
- * of that page, not a way to see it again under another id.
+ * of that page, not a way to see it again under another id. Nor is a screen
+ * that is under no project at all — `/p`, the bare Account tab (#14): there
+ * is no section to keep, and the switch lands on the project's traces.
  */
 export function switchTarget(url: URL, id: string): string {
+	if (within(url.pathname) === url.pathname) return under('/traces', id);
 	const segments = within(url.pathname).split('/').filter(Boolean);
 	const section = segments[0] && SECTIONS.has(segments[0]) ? segments[0] : 'traces';
 	const kept = section === 'settings' && segments[1] ? `/${section}/${segments[1]}` : `/${section}`;

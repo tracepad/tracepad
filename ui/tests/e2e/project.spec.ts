@@ -57,10 +57,16 @@ test('the switcher names the projects with a count, and keeps the section and th
 	await expect(page).toHaveURL(new RegExp(`/p/${own.id}/traces\\?environment=prod$`));
 	await expect(page.getByRole('button', { name: 'Switch project' })).toHaveText(own.name);
 
-	await page.goto(`/p/${own.id}/settings/account`);
+	// Settings keeps its tab across a switch (#6) — the two tabs that are
+	// about a project; the Account tab is under none (#14).
+	await page.goto(`/p/${own.id}/settings/server`);
 	const seededName = await seededProjectName();
 	await switchTo(page, seededName);
-	await expect(page).toHaveURL(new RegExp(`/p/${seeded}/settings/account$`));
+	await expect(page).toHaveURL(new RegExp(`/p/${seeded}/settings/server$`));
+
+	await page.goto('/settings/account');
+	await switchTo(page, own.name);
+	await expect(page).toHaveURL(new RegExp(`/p/${own.id}/traces$`));
 });
 
 test('an editor of one project sees one row, no New project, and a not-there screen elsewhere', async ({
