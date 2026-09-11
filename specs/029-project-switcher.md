@@ -64,6 +64,7 @@ project archive.
 | 10 | **2026-09-11** — A switch that keeps the route **remounts the screen**: the children of `routes/p/[project]/+layout.svelte` are keyed on the project id. `/p/a/traces` → `/p/b/traces` is the same route with one parameter changed, and SvelteKit reuses the page component; every read that component holds — the listing's rows, its count, a stats chart, a settings card — was about the other project and keyed on the URL's query, not its path, so nothing re-asked. Found in the browser: the new project's listing showed the old project's thousand rows | One place, the layout that already knows the id, rather than a project-id dependency added to every loader on eleven screens. A remount is what "another project" means: nothing carries over, which is also what Decision 6 promises about the answers. The cost is one render of a screen that was going to re-read everything anyway |
 | 11 | **2026-09-11** — Where *New project* lands depends on where it was opened. From the switcher it is Decision 7 as written: `me` again, then `/p/{new id}/traces`, with the keys dialog over it — the switcher lives in the sidebar, which survives the navigation. From the no-projects screen (`/p`) the navigation waits until the keys are dismissed, because that screen is what the dialog is mounted in and leaving it would take the keys with it. From the Server tab's table the owner stays on the tab and the table re-reads, as before this spec: creating three projects in a row from the admin table is the admin table's job, and a round trip through another project's listing for each would be the friction Decision 7 removes | One component either way (`NewProjectDialog`, with an `oncreated` callback the caller decides about), so the keys-once rule still has one implementation |
 | 12 | **2026-09-11** — The API client reads the project id **untracked** (`untrack(() => project.id)` in `projectHeader`). The id now comes off `page.params`, which SvelteKit replaces with a new object on every navigation, and most reads start inside an `$effect` before its first `await` — so a tracked read made every such effect depend on the URL as a whole. Found by the suite: a trace re-read itself on every arrow key (`?obs=`), the item editor re-seeded its panes when `?dataset=` changed under it | A request's project is a fact at the moment the request goes out, not a subscription for the effect that sent it. One line in the one place the header is written, rather than an `untrack` around every call site's read |
+| 13 | **2026-09-11** — Errors: `me` is **not re-read on navigation**; the not-there screen is decided at navigation from the `me` already held, and `me` is re-read on sign-in and after the actions that change it (spec 028 #15). The Application contract's Errors paragraph said "`me` is read again on the next navigation", which the code never did; the paragraph now says what it does | A navigation is a question about a project the shell already knows the answer to; a request per navigation would pay for a fact that changes only when somebody changes it. Deciding at the navigation — rather than live, on every `me` — is what keeps the Server tab, with its Restore, under an owner who has just deleted the project on screen (Edge cases) |
 
 ## API contract
 
@@ -109,8 +110,10 @@ account menu's role caption reads `project.role` as now.
 `NewProjectDialog` (Decision 7).
 
 **Errors.** A `403` that reaches a screen regardless (a membership
-revoked under an open tab) renders as spec 028 #15 says; `me` is read
-again on the next navigation and the not-there screen takes over.
+revoked under an open tab) renders as spec 028 #15 says. `me` is not
+re-read on navigation (Decision 13): it is read on sign-in and after the
+actions that change it, and the not-there screen is decided at the next
+navigation from the `me` the shell already holds.
 
 ## Testing
 
