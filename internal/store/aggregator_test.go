@@ -15,7 +15,7 @@ import (
 // passAt runs one pass with the clock stopped at the given instant.
 func passAt(t *testing.T, s *Store, at time.Time) *Aggregator {
 	t.Helper()
-	writer, err := s.NewWriter(WriterOptions{})
+	writer, err := s.NewWriter(quickWrites)
 	if err != nil {
 		t.Fatal(err)
 	}

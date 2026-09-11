@@ -54,7 +54,7 @@ func rollupFixture(t *testing.T, s *Store, projectID string) {
 // durable write goes through.
 func roll(t *testing.T, s *Store, projectID string, hour int64) *statsRoll {
 	t.Helper()
-	writer, err := s.NewWriter(WriterOptions{})
+	writer, err := s.NewWriter(quickWrites)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -289,7 +289,7 @@ func TestAnHourWithNoCostReportsNone(t *testing.T) {
 // that rolled less than the one before leaves it where it was (spec 013 #4).
 func TestTheWatermarkNeverRegresses(t *testing.T) {
 	s, project := readStore(t)
-	writer, err := s.NewWriter(WriterOptions{})
+	writer, err := s.NewWriter(quickWrites)
 	if err != nil {
 		t.Fatal(err)
 	}

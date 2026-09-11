@@ -19,6 +19,7 @@ import (
 	"github.com/tracepad/tracepad/internal/model"
 	"github.com/tracepad/tracepad/internal/server"
 	"github.com/tracepad/tracepad/internal/store"
+	"github.com/tracepad/tracepad/internal/storetest"
 )
 
 // The CLI's tests (spec 004, Testing #3) run the real commands against a real
@@ -72,15 +73,11 @@ func newHarnessWithToken(t *testing.T, token string) *harness {
 // newHarnessConfigured is the two knobs the harness has, in one place.
 func newHarnessConfigured(t *testing.T, token string, storeRaw bool) *harness {
 	t.Helper()
-	st, err := store.Open(filepath.Join(t.TempDir(), "tracepad.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { st.Close() })
+	st := storetest.Open(t)
 	if _, err := st.CreateProject("test", store.KeyPair{PublicKey: "tp-pk-test", Secret: testKey}); err != nil {
 		t.Fatal(err)
 	}
-	writer, err := st.NewWriter(store.WriterOptions{})
+	writer, err := st.NewWriter(storetest.Writes)
 	if err != nil {
 		t.Fatal(err)
 	}

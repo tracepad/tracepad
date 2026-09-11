@@ -8,7 +8,7 @@ import (
 // seedRawBatch writes one archived body through the same path ingest uses.
 func seedRawBatch(t *testing.T, s *Store, projectID string, raw *RawBatch) {
 	t.Helper()
-	writer, err := s.NewWriter(WriterOptions{})
+	writer, err := s.NewWriter(quickWrites)
 	if err != nil {
 		t.Fatal(err)
 	}

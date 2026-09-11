@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -13,11 +12,7 @@ import (
 
 func openIngestStore(t *testing.T) (*Store, *Project) {
 	t.Helper()
-	s, err := Open(filepath.Join(t.TempDir(), "tracepad.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { s.Close() })
+	s := openFresh(t)
 	p, err := s.CreateProject("test", KeyPair{PublicKey: "tp-pk-test", Secret: "tp-sk-test"})
 	if err != nil {
 		t.Fatal(err)

@@ -368,6 +368,7 @@ API. This file routes; it does not duplicate what specs and docs say.
 | Packaging: the image and the release | `Dockerfile` + `.dockerignore` (the whole recipe — the image builds both halves from the checkout and copies no prebuilt binary), `scripts/image-check.sh` (the contract, asserted from outside because the image has no shell), `.github/workflows/release-server.yml` (GoReleaser for the archives, `buildx` for one multi-arch manifest on GHCR), the `docker` job in `ci.yml`, `docs/docker.md`, spec 020 — `tracepad health` (`internal/cli/commands.go`) is the container's `HEALTHCHECK` and the one command that needs no key |
 | Configuration | `internal/config/`, spec 001 + spec 002 Configuration tables |
 | The docs' cross-references | `scripts/doc-anchors.sh` and `scripts/doc-anchors-fixture/`, spec 026 #6 — every `[…](file.md#anchor)` in `docs/*.md`, `README.md` and `AGENTS.md` is checked against the target's headings under GitHub's slug rule, fenced code blocks and inline code spans read as neither headings nor links. It runs in `make gate`; the fixture run is its own CI step, and it also builds a file long enough that a pipe would break the check (#13, #14) |
+| A test that needs a store | `internal/storetest` for the store's clients (`Open`, `Path`, `Writes`), `harness_test.go` inside `internal/store` for its own suite — one migrated template copied per test and a one-millisecond commit window, because a suite that opens an empty database per test and waits out the default window per lone write spends most of its time on neither the code under test nor its own assertions. The migration tests and the writer's own tests are the exceptions, on purpose |
 
 Attribute semantics for the `langfuse.*` dialect are derived from Langfuse
 (MIT) — see `NOTICE`. Keep new rules in the table in `rules.go`, with the
@@ -378,12 +379,13 @@ reason in a comment; adding a dialect should be a table edit.
 - `make gate` — the full gate (format-check + vet + `go test ./...` + the
   doc-anchor sweep + `svelte-check`, vitest and the API-type drift check). It
   is what CI runs and what the git **pre-push** hook runs. The Go half is
-  bounded by its slowest package — `internal/store` today, at under a minute.
-  Most of a test's time in these suites is waiting rather than the code under
-  test: the writer's fifty-millisecond commit window on every lone write, the
-  migrations on every empty database, bcrypt at cost 12 on every login.
-  `internal/server` pays each once (`main_test.go`, `newHarness`) and runs in
-  seconds; a package that does not can be brought down the same way.
+  bounded by its slowest package, and every package is under ten seconds: the
+  suites used to spend most of their time waiting rather than on the code
+  under test — the writer's fifty-millisecond commit window on every lone
+  write, the migrations on every empty database, bcrypt at cost 12 on every
+  login — and each is now paid once per binary (`internal/storetest`,
+  `internal/store/harness_test.go`, `internal/server/main_test.go`). A new
+  suite that opens a store should start there rather than from `store.Open`.
 - `make precommit` — the fast gate the git **pre-commit** hook runs:
   format-check, vet, the tests of the Go packages you staged, and the
   interface checks only when `ui/` or `openapi.json` is staged. Seconds, not

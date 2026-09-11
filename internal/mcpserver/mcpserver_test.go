@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -23,6 +22,7 @@ import (
 	"github.com/tracepad/tracepad/internal/model"
 	"github.com/tracepad/tracepad/internal/server"
 	"github.com/tracepad/tracepad/internal/store"
+	"github.com/tracepad/tracepad/internal/storetest"
 )
 
 // The MCP surface (spec 004, Testing #4). The tests drive the real go-sdk
@@ -48,16 +48,12 @@ type harness struct {
 
 func newHarness(t *testing.T) *harness {
 	t.Helper()
-	st, err := store.Open(filepath.Join(t.TempDir(), "tracepad.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { st.Close() })
+	st := storetest.Open(t)
 	project, err := st.CreateProject("test", store.KeyPair{PublicKey: "tp-pk-test", Secret: testKey})
 	if err != nil {
 		t.Fatal(err)
 	}
-	writer, err := st.NewWriter(store.WriterOptions{})
+	writer, err := st.NewWriter(storetest.Writes)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -719,15 +715,11 @@ func TestStdioTransportServesTheSameTools(t *testing.T) {
 
 // TestMCPCanBeTurnedOff is the `TRACEPAD_MCP=off` half of the MCP contract.
 func TestMCPCanBeTurnedOff(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "tracepad.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer st.Close()
+	st := storetest.Open(t)
 	if _, err := st.CreateProject("test", store.KeyPair{PublicKey: "tp-pk-test", Secret: testKey}); err != nil {
 		t.Fatal(err)
 	}
-	writer, err := st.NewWriter(store.WriterOptions{})
+	writer, err := st.NewWriter(storetest.Writes)
 	if err != nil {
 		t.Fatal(err)
 	}
