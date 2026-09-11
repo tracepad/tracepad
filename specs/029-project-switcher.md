@@ -1,6 +1,6 @@
 # Spec 029 — The project in the URL, and a switcher in the sidebar
 
-**Status:** 🚧 IN PROGRESS
+**Status:** ✅ SHIPPED
 **Sprint:** September 2026
 
 > Spec 028 gave the server accounts, and an account reaches projects
