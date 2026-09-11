@@ -66,6 +66,15 @@ describe('a bare path', () => {
 
 		expect(await redirectOf(rest('/sessions'))).toBe(`/p/${P1}/sessions`);
 	});
+
+	// The rest route also catches what is under the prefix and names no
+	// screen. Prefixing that again would be a redirect chasing its own tail.
+	it('is a 404, not a second prefix, once it already has one', async () => {
+		const { rest } = await signedIn({ id: P1, name: 'checkout' });
+
+		await expect(rest(`/p/${P1}/nonsense`)).rejects.toMatchObject({ status: 404 });
+		await expect(rest(`/p/${P1}/traces/a/b`)).rejects.toMatchObject({ status: 404 });
+	});
 });
 
 describe('the root', () => {

@@ -147,3 +147,21 @@ async function seededProjectName(): Promise<string> {
 	if (!response.ok) throw new Error(`read the seeded project: ${response.status}`);
 	return ((await response.json()) as { name: string }).name;
 }
+
+// A path that names no screen is a 404 under the prefix as it was without
+// one; the bare redirect adds a prefix to a path that has none, not another
+// one to a path that already does.
+test('a path that is no screen is a 404, prefixed or bare', async ({ page }) => {
+	const own = await createProject('nowhere');
+	await signIn(page, own.account);
+
+	await page.goto(`/p/${own.id}/nonsense`);
+	await expect(page).toHaveURL(new RegExp(`/p/${own.id}/nonsense$`));
+	await expect(page.getByRole('heading', { name: 'No such page' })).toBeVisible();
+
+	await page.goto('/nonsense');
+	await expect(page).toHaveURL(new RegExp(`/p/${own.id}/nonsense$`));
+	await expect(page.getByRole('heading', { name: 'No such page' })).toBeVisible();
+	await page.getByRole('link', { name: 'Back to traces' }).click();
+	await expect(page).toHaveURL(new RegExp(`/p/${own.id}/traces$`));
+});

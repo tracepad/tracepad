@@ -25,6 +25,8 @@
 	let busy = $state(false);
 	let failure = $state<string | null>(null);
 	let minted = $state.raw<NewKey | null>(null);
+	/** A project made, whose `me` could not be read yet: the caller has not heard of it. */
+	let unannounced = $state.raw<Project | null>(null);
 
 	// Opened again is a fresh form; nothing carries over from the last one.
 	$effect(() => {
@@ -39,20 +41,43 @@
 		if (!name.trim() || busy) return;
 		busy = true;
 		failure = null;
+		let created: Project & NewKey;
 		try {
-			const created = await api.createProject(name.trim());
-			await refresh();
-			minted = created;
-			oncreated?.(created);
+			created = await api.createProject(name.trim());
 		} catch (cause) {
 			failure = said(cause, 'Failed to create the project.');
-		} finally {
 			busy = false;
+			return;
 		}
+		// The keys go on screen before anything else can fail: the server says
+		// the secret in this answer and never again, so a `me` that cannot be
+		// read a moment later is no reason to lose them.
+		minted = created;
+		await announce(created);
+		busy = false;
 	}
 
-	function done() {
+	/**
+	 * `me` again, then the caller: what it does with the project — lists it,
+	 * goes to it — needs the shell to reach it first. A read that fails is
+	 * tried once more when the keys are put away, and given up after that: the
+	 * project exists, and the next reload of the shell reads it.
+	 */
+	async function announce(created: Project) {
+		try {
+			await refresh();
+		} catch {
+			unannounced = created;
+			return;
+		}
+		unannounced = null;
+		oncreated?.(created);
+	}
+
+	async function done() {
 		minted = null;
+		if (unannounced) await announce(unannounced);
+		unannounced = null;
 		onclose();
 	}
 </script>

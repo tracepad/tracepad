@@ -1,16 +1,28 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { page } from '$app/state';
-	import { project, switcher } from '$lib/project.svelte';
+	import { auth } from '$lib/auth.svelte';
+	import { switcher } from '$lib/project.svelte';
 
 	// The screen behind an id the account cannot reach (spec 029 #4): unknown,
 	// malformed, or a membership taken away under an open tab. One sentence,
 	// the switcher open beside it, and the screen the URL names never mounts,
 	// so nothing asks the server with an id it would refuse. The interface
 	// does not say which of the two it is because the server does not either.
+	//
+	// Decided at the navigation, not at every `me` (#4, edge cases): a project
+	// deleted under an open tab is the not-there screen on the *next*
+	// navigation. Deciding it live would pull the Server tab out from under
+	// the owner who just deleted the project from it — with the Restore
+	// button, and for their only project the one place Restore is. `page.params`
+	// is replaced on every navigation (#12), so that is what this follows.
 
 	let { children } = $props();
 
-	const reachable = $derived(project.current !== null);
+	const reachable = $derived.by(() => {
+		const id = page.params.project;
+		return untrack(() => auth.projects.some((one) => one.id === id));
+	});
 
 	$effect(() => {
 		if (!reachable) switcher.open = true;

@@ -198,6 +198,32 @@ test('the Server tab creates, deletes with the echo, and restores', async ({ pag
 	await expect(row).toContainText('Live');
 });
 
+// The project on screen is the one being deleted: `me` drops it at once, but
+// the tab — and the Restore on it — stays until the next navigation
+// (spec 029 #4, edge cases). Pulling the screen away mid-action would leave
+// an owner's only project with nowhere to restore it from.
+test('deleting the project on screen leaves the tab, and Restore, in place', async ({ page }) => {
+	const own = await createProject('onscreen');
+	await signInAsOwner(page, own.id);
+	await page.goto('/settings/server');
+	await expect(page).toHaveURL(new RegExp(`/p/${own.id}/settings/server$`));
+
+	// By id: the accounts table on the same tab has a row for the project's
+	// editor, whose email carries the name.
+	const row = page.getByRole('row').filter({ hasText: own.id });
+	await row.getByRole('button', { name: 'Delete', exact: true }).click();
+	await page.getByRole('button', { name: 'Show what it holds' }).click();
+	await page.getByRole('textbox', { name: /Type the project name/ }).fill(own.name);
+	await page.getByRole('button', { name: 'Delete the project' }).click();
+
+	await expect(page.getByText(`${own.name} is deleted`)).toBeVisible();
+	await expect(page).toHaveURL(new RegExp(`/p/${own.id}/settings/server$`));
+	await expect(page.getByText('This project is not yours to see')).toHaveCount(0);
+	await row.getByRole('button', { name: 'Restore' }).click();
+	await expect(page.getByText(`${own.name} is restored.`)).toBeVisible();
+	await expect(row).toContainText('Live');
+});
+
 // The tab is absent for a member and the route redirects, which is the two
 // halves of the same rule (spec 028 #14).
 test('the Server tab belongs to owners', async ({ page }) => {
