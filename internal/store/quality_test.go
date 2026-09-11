@@ -50,7 +50,7 @@ func scoreFixture(t *testing.T, s *Store, projectID string) {
 
 func writeScores(t *testing.T, s *Store, projectID string, at int64, scores ...*Score) {
 	t.Helper()
-	writer, err := s.NewWriter(WriterOptions{})
+	writer, err := s.NewWriter(quickWrites)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -445,7 +445,7 @@ func TestDeletingAScoreCorrectsOnlyTheScoreRollup(t *testing.T) {
 		}
 	}
 
-	writer, err := s.NewWriter(WriterOptions{})
+	writer, err := s.NewWriter(quickWrites)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -492,7 +492,7 @@ func TestDeletingAScoreTheRollupNeverHeld(t *testing.T) {
 	passAt(t, s, afterTheHour())
 	before := rolledScoreRows(t, s, project.ID, rollupHour)
 
-	writer, err := s.NewWriter(WriterOptions{})
+	writer, err := s.NewWriter(quickWrites)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -528,7 +528,7 @@ func TestAScoreTakesItsReceiveTimeFromTheTransaction(t *testing.T) {
 	s, project := readStore(t)
 	rollupFixture(t, s, project.ID)
 
-	writer, err := s.NewWriter(WriterOptions{})
+	writer, err := s.NewWriter(quickWrites)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -708,7 +708,7 @@ func TestTheTraceSweepLeavesTheScoreRollup(t *testing.T) {
 		`UPDATE projects SET retention_days = 1 WHERE id = ?`, project.ID); err != nil {
 		t.Fatal(err)
 	}
-	writer, err := s.NewWriter(WriterOptions{})
+	writer, err := s.NewWriter(quickWrites)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -791,7 +791,7 @@ func TestErasingAUserCorrectsTheScoreRollup(t *testing.T) {
 		t.Fatalf("rows = %v, want the one score", keysSorted(rows))
 	}
 
-	writer, err := s.NewWriter(WriterOptions{})
+	writer, err := s.NewWriter(quickWrites)
 	if err != nil {
 		t.Fatal(err)
 	}

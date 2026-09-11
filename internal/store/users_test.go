@@ -655,7 +655,7 @@ func TestASweptHourGetsNoUserRows(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	writer, err := s.NewWriter(WriterOptions{})
+	writer, err := s.NewWriter(quickWrites)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -698,7 +698,7 @@ func TestAFrozenHourKeepsItsUserRows(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	writer, err := s.NewWriter(WriterOptions{})
+	writer, err := s.NewWriter(quickWrites)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -735,7 +735,7 @@ func TestTheSweepOfTheLastRowForgetsTheUser(t *testing.T) {
 	roll(t, s, project.ID, rollupHour)
 	roll(t, s, project.ID, rollupHour+SecondsPerHour)
 
-	writer, err := s.NewWriter(WriterOptions{})
+	writer, err := s.NewWriter(quickWrites)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1066,7 +1066,7 @@ func TestErasureTakesThePerUserRows(t *testing.T) {
 	usersFixture(t, s, project.ID)
 	roll(t, s, project.ID, rollupHour)
 
-	writer, err := s.NewWriter(WriterOptions{})
+	writer, err := s.NewWriter(quickWrites)
 	if err != nil {
 		t.Fatal(err)
 	}

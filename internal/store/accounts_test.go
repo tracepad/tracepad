@@ -1,7 +1,6 @@
 package store
 
 import (
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -39,12 +38,8 @@ type accountFixture struct {
 
 func newAccountFixture(t *testing.T) *accountFixture {
 	t.Helper()
-	st, err := Open(filepath.Join(t.TempDir(), "tracepad.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { st.Close() })
-	writer, err := st.NewWriter(WriterOptions{})
+	st := openFresh(t)
+	writer, err := st.NewWriter(quickWrites)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -2,7 +2,6 @@ package store
 
 import (
 	"fmt"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -17,11 +16,7 @@ const day = int64(24 * 60 * 60 * 1_000_000_000)
 
 func readStore(t *testing.T) (*Store, *Project) {
 	t.Helper()
-	s, err := Open(filepath.Join(t.TempDir(), "tracepad.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { s.Close() })
+	s := openFresh(t)
 	project, err := s.CreateProject("test", KeyPair{PublicKey: "tp-pk-test", Secret: "tp-sk-test"})
 	if err != nil {
 		t.Fatal(err)
@@ -33,7 +28,7 @@ func readStore(t *testing.T) (*Store, *Project) {
 // uses, so the aggregates under test are the ones ingest maintains.
 func seedTrace(t *testing.T, s *Store, projectID string, trace *model.Trace, observations ...*model.Observation) {
 	t.Helper()
-	writer, err := s.NewWriter(WriterOptions{})
+	writer, err := s.NewWriter(quickWrites)
 	if err != nil {
 		t.Fatal(err)
 	}

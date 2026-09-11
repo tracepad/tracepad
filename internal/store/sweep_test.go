@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -31,20 +30,13 @@ type sweepFixture struct {
 
 func newSweepFixture(t *testing.T) *sweepFixture {
 	t.Helper()
-	s, err := Open(filepath.Join(t.TempDir(), "tracepad.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { s.Close() })
+	s := openFresh(t)
 
 	project, err := s.CreateProject("test", KeyPair{PublicKey: "tp-pk-test", Secret: "tp-sk-test"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	// A short commit window: these tests submit hundreds of writes in
-	// sequence, and the default 50 ms one would spend the whole gate budget
-	// waiting for group commits that have nobody to group with.
-	writer, err := s.NewWriter(WriterOptions{CommitWindow: time.Millisecond})
+	writer, err := s.NewWriter(quickWrites)
 	if err != nil {
 		t.Fatal(err)
 	}
