@@ -5,6 +5,7 @@
 	import { api, type SessionRow } from '$lib/api/client.svelte';
 	import { asPage, Listing, UrlSpot, Walk } from '$lib/listing.svelte';
 	import { peekSearch, readPeek } from '$lib/peek';
+	import { href } from '$lib/project.svelte';
 	import CopyButton from '../CopyButton.svelte';
 	import PaginationBar from '../PaginationBar.svelte';
 	import PeekPanel from '../PeekPanel.svelte';
@@ -69,7 +70,7 @@
 		onnext={() => walk.step(1)}
 		hasPrev={walk.hasPrev}
 		hasNext={walk.hasNext}
-		fullHref="/sessions/{encodeURIComponent(peekID)}"
+		fullHref={href(`/sessions/${encodeURIComponent(peekID)}`)}
 		fullLabel="Open this session as a page"
 	>
 		{#snippet title()}
@@ -81,7 +82,7 @@
 		{/snippet}
 		<SessionDetail
 			sessionID={peekID}
-			onopen={(traceID) => goto(`/traces/${encodeURIComponent(traceID)}`)}
+			onopen={(traceID) => goto(href(`/traces/${encodeURIComponent(traceID)}`))}
 		/>
 	</PeekPanel>
 {/if}

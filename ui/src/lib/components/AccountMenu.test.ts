@@ -82,6 +82,7 @@ describe('the menu', () => {
 	it('offers the account tab and signing out', async () => {
 		const { items, item } = await open('Account');
 
+		// Bare: the tab is about the person, not the project on screen (spec 029 #14).
 		expect(item).toHaveAttribute('href', '/settings/account');
 		expect(items.map((one) => one.textContent?.trim())).toEqual(['Account', 'Sign out']);
 		// The email is here rather than on the trigger: it is what you check,

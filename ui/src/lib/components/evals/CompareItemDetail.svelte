@@ -10,6 +10,7 @@
 	} from '$lib/api/client.svelte';
 	import { deltaText, scoreText } from '$lib/evals';
 	import { ABSENT } from '$lib/format';
+	import { href } from '$lib/project.svelte';
 	import Payload, { isTruncated } from '../Payload.svelte';
 	import VerdictChip from './VerdictChip.svelte';
 
@@ -172,14 +173,14 @@
 						{#if current.trace}
 							<a
 								class="text-accent font-mono underline underline-offset-2"
-								href="/traces/{current.trace.id}"
+								href={href(`/traces/${current.trace.id}`)}
 							>
 								{current.trace.id}
 							</a>
 							{#if current.attempts > 1}
 								<a
 									class="underline underline-offset-2"
-									href="/traces?run_id={run.id}&item_id={item.id}"
+									href={href(`/traces?run_id=${run.id}&item_id=${item.id}`)}
 								>
 									newest of {current.attempts} attempts
 								</a>

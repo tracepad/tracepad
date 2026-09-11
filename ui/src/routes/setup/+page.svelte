@@ -6,6 +6,7 @@
 	import AuthScreen from '$lib/components/auth/AuthScreen.svelte';
 	import Explanation from '$lib/components/auth/Explanation.svelte';
 	import Field from '$lib/components/auth/Field.svelte';
+	import { bareTarget } from '$lib/project.svelte';
 	import { begin } from '$lib/session';
 
 	// The first owner (spec 028 #9). The server prints this link at every start
@@ -48,7 +49,7 @@
 		try {
 			await api.setup({ token, email: email.trim(), password, name: name.trim() });
 			await begin();
-			await goto('/traces', { replaceState: true });
+			await goto(bareTarget('/traces'), { replaceState: true });
 		} catch (cause) {
 			error = said(cause, 'Something went wrong setting this server up.');
 		} finally {

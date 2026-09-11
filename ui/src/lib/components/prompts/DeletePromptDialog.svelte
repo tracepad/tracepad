@@ -3,6 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { api, type DryRun } from '$lib/api/client.svelte';
 	import { count } from '$lib/format';
+	import { href } from '$lib/project.svelte';
 	import ConfirmCard from '../ConfirmCard.svelte';
 
 	// Deleting a prompt takes a name's whole history (spec 021 #7), so it wears
@@ -52,7 +53,7 @@
 				subject={name}
 				preview={() => ask()}
 				execute={(confirm) => ask(confirm) as Promise<string>}
-				ondone={() => void goto('/prompts')}
+				ondone={() => void goto(href('/prompts'))}
 			/>
 		</Dialog.Content>
 	</Dialog.Portal>

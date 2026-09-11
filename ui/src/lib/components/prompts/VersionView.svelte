@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { type Prompt } from '$lib/api/client.svelte';
 	import { timestamp } from '$lib/format';
+	import { href } from '$lib/project.svelte';
 	import { messagesOf } from '$lib/prompts';
 	import JsonView from '../json/JsonView.svelte';
 	import LabelControl from './LabelControl.svelte';
@@ -36,7 +37,7 @@
 	 * `@` — so the pair has to arrive as one value, not as two joined in a URL.
 	 */
 	const filtered = (at?: number) =>
-		`/traces?prompt=${encodeURIComponent(at === undefined ? prompt.name : `${prompt.name}@${at}`)}`;
+		href(`/traces?prompt=${encodeURIComponent(at === undefined ? prompt.name : `${prompt.name}@${at}`)}`);
 
 	const block = 'border-border bg-surface rounded-md border';
 </script>

@@ -5,24 +5,33 @@ import Sidebar from './Sidebar.svelte';
 // The sidebar's first section (spec 016 #1): a labelled group whose label is
 // not a link, whose children are, and whose active state belongs to the child
 // the URL is under — `aria-current="page"` keeps meaning what it means. Its
-// fourth child is Queues (spec 024 #10).
+// fourth child is Queues (spec 024 #10). Every link is under the project on
+// screen, and the active one is read after that prefix (spec 029 #2).
 
-const url = { current: new URL('http://tracepad.test/runs/abc') };
+const PROJECT = vi.hoisted(() => 'a'.repeat(32));
+const url = { current: new URL(`http://tracepad.test/p/${PROJECT}/runs/abc`) };
 
 vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
 vi.mock('$app/state', () => ({
 	page: {
 		get url() {
 			return url.current;
+		},
+		get params() {
+			return { project: PROJECT };
 		}
 	}
 }));
-vi.mock('$lib/api/client.svelte', () => ({ api: { version: '0.0.0-test' } }));
+vi.mock('$lib/api/client.svelte', () => ({ api: { version: '0.0.0-test', listProjects: vi.fn() } }));
 vi.mock('$lib/auth.svelte', () => ({
-	auth: { displayName: 'ada@example.com', account: { email: 'ada@example.com' } },
+	auth: {
+		displayName: 'ada@example.com',
+		account: { email: 'ada@example.com' },
+		owner: false,
+		projects: [{ id: PROJECT, name: 'demo', role: 'editor' }]
+	},
 	LOGIN_ROUTE: '/login'
 }));
-vi.mock('$lib/project.svelte', () => ({ project: { name: 'demo', role: 'editor' } }));
 vi.mock('$lib/session', () => ({ end: vi.fn() }));
 
 describe('the Evals section', () => {
@@ -39,7 +48,7 @@ describe('the Evals section', () => {
 			['Queues', '/queues'],
 			['Quality', '/quality']
 		]) {
-			expect(screen.getByRole('link', { name })).toHaveAttribute('href', href);
+			expect(screen.getByRole('link', { name })).toHaveAttribute('href', `/p/${PROJECT}${href}`);
 		}
 		// Eleven destinations in all: the four that were there, the five the
 		// section holds, Prompts beside them (spec 021 #1) and Users
@@ -58,7 +67,7 @@ describe('the Evals section', () => {
 	// Four destinations share an initial: a prefix looser than the whole
 	// path would light Sessions, Stats and Settings beside Score configs.
 	it('tells the destinations apart by their whole path', () => {
-		url.current = new URL('http://tracepad.test/score-configs');
+		url.current = new URL(`http://tracepad.test/p/${PROJECT}/score-configs`);
 		render(Sidebar);
 
 		const current = screen
@@ -78,7 +87,10 @@ describe('the Prompts item', () => {
 		render(Sidebar);
 		const nav = screen.getByRole('navigation', { name: 'Sections' });
 
-		expect(screen.getByRole('link', { name: 'Prompts' })).toHaveAttribute('href', '/prompts');
+		expect(screen.getByRole('link', { name: 'Prompts' })).toHaveAttribute(
+			'href',
+			`/p/${PROJECT}/prompts`
+		);
 		const order = [...nav.querySelectorAll('a')].map((link) => link.textContent?.trim());
 		// Users sits between Sessions and Stats, which is the two screens it
 		// joins (spec 023 #8).
@@ -91,7 +103,7 @@ describe('the Prompts item', () => {
 	});
 
 	it('is the active one on a prompt page', () => {
-		url.current = new URL('http://tracepad.test/prompts/support-answer?version=2');
+		url.current = new URL(`http://tracepad.test/p/${PROJECT}/prompts/support-answer?version=2`);
 		render(Sidebar);
 
 		const current = screen
@@ -99,5 +111,15 @@ describe('the Prompts item', () => {
 			.filter((link) => link.getAttribute('aria-current') === 'page')
 			.map((link) => link.textContent?.trim());
 		expect(current).toEqual(['Prompts']);
+	});
+});
+
+// The switcher stands where the name did (spec 029 #5); its own behaviour
+// has its own test.
+describe('the project', () => {
+	it('is named by the switcher', () => {
+		render(Sidebar);
+
+		expect(screen.getByRole('button', { name: 'Switch project' })).toHaveTextContent('demo');
 	});
 });

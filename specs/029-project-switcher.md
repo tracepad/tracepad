@@ -1,6 +1,6 @@
 # Spec 029 — The project in the URL, and a switcher in the sidebar
 
-**Status:** 🚧 IN PROGRESS
+**Status:** ✅ SHIPPED
 **Sprint:** September 2026
 
 > Spec 028 gave the server accounts, and an account reaches projects
@@ -61,6 +61,11 @@ project archive.
 | 7 | **2026-09-11** — **New project** in the switcher, owners only, opens the same dialog the Server tab's projects table uses — a name, then the keys-once dialog (spec 007 #3) — and on success calls `me` again and navigates to `/p/{new id}/traces`. The Server tab keeps its own button; the two are one component | The switcher is where a person is when they notice the project they want does not exist, and a round trip through Settings for a name is the kind of friction this spec removes. One component so that the keys-once rule has one implementation. Owners only because creating a project is an owner's action (spec 028 #3), and the menu hides what the role cannot do (spec 028 #15). |
 | 8 | **2026-09-11** — `GET /api/v1/projects` takes **`activity=24h`** (the one accepted value; anything else `400`): each row then carries **`traces_24h`**, the number of traces whose `timestamp` falls in the last 24 hours, counted the way `GET /api/v1/stats` counts traces — from the hourly roll-up behind the watermark and from the raw rows for the tail (spec 013) — so it costs what one stats call costs and trails live traffic by the same lag. Without the parameter the listing is exactly what it was. The switcher asks on every open, never on load | On the listing rather than on `me`, because `me` is answered on every load and the count is wanted only when the menu opens; on the listing rather than a new route, because the listing already answers each caller with what it can reach (spec 028 #19) and the count is a column of that answer. One value for the parameter today, and a parameter rather than a bare flag, so that `activity=7d` can exist without a second field name. From the roll-up because a raw `COUNT(*)` over a day of a busy project is the query the roll-up exists to avoid, and the switcher is opened often. |
 | 9 | **2026-09-11** — The application-line ceiling rises from 20,000 to **20,500**. `main` after spec 028 is 19,481; the switcher with its filter box, the two not-there screens, the redirect route, the `href` and `switchTarget` helpers and the shared create-project dialog are estimated at 300–400 lines net of what the move of the routes leaves unchanged, and one review cycle needs room | The raise rule of spec 015 #9: `main` plus the measured estimate plus a cycle. The route move is a move, not an addition — the counter reads the same files at new paths — so the estimate is the new components alone. The PR reports `make ui-lines` before and after, by file. |
+| 10 | **2026-09-11** — A switch that keeps the route **remounts the screen**: the children of `routes/p/[project]/+layout.svelte` are keyed on the project id. `/p/a/traces` → `/p/b/traces` is the same route with one parameter changed, and SvelteKit reuses the page component; every read that component holds — the listing's rows, its count, a stats chart, a settings card — was about the other project and keyed on the URL's query, not its path, so nothing re-asked. Found in the browser: the new project's listing showed the old project's thousand rows | One place, the layout that already knows the id, rather than a project-id dependency added to every loader on eleven screens. A remount is what "another project" means: nothing carries over, which is also what Decision 6 promises about the answers. The cost is one render of a screen that was going to re-read everything anyway |
+| 11 | **2026-09-11** — Where *New project* lands depends on where it was opened. From the switcher it is Decision 7 as written: `me` again, then `/p/{new id}/traces`, with the keys dialog over it — the switcher lives in the sidebar, which survives the navigation. From the no-projects screen (`/p`) the navigation waits until the keys are dismissed, because that screen is what the dialog is mounted in and leaving it would take the keys with it. From the Server tab's table the owner stays on the tab and the table re-reads, as before this spec: creating three projects in a row from the admin table is the admin table's job, and a round trip through another project's listing for each would be the friction Decision 7 removes | One component either way (`NewProjectDialog`, with an `oncreated` callback the caller decides about), so the keys-once rule still has one implementation |
+| 12 | **2026-09-11** — The API client reads the project id **untracked** (`untrack(() => project.id)` in `projectHeader`). The id now comes off `page.params`, which SvelteKit replaces with a new object on every navigation, and most reads start inside an `$effect` before its first `await` — so a tracked read made every such effect depend on the URL as a whole. Found by the suite: a trace re-read itself on every arrow key (`?obs=`), the item editor re-seeded its panes when `?dataset=` changed under it | A request's project is a fact at the moment the request goes out, not a subscription for the effect that sent it. One line in the one place the header is written, rather than an `untrack` around every call site's read |
+| 13 | **2026-09-11** — Errors: `me` is **not re-read on navigation**; the not-there screen is decided at navigation from the `me` already held, and `me` is re-read on sign-in and after the actions that change it (spec 028 #15). The Application contract's Errors paragraph said "`me` is read again on the next navigation", which the code never did; the paragraph now says what it does | A navigation is a question about a project the shell already knows the answer to; a request per navigation would pay for a fact that changes only when somebody changes it. Deciding at the navigation — rather than live, on every `me` — is what keeps the Server tab, with its Restore, under an owner who has just deleted the project on screen (Edge cases) |
+| 14 | **2026-09-11** — The **Account tab lives bare**, at `/settings/account`, for everybody: it is the one screen inside the shell that is about the person, not a project. `/p/{id}/settings/account` redirects to it, query kept; the rest route never sees it, because it is a route of its own — the one exception to Decision 1, inside the shell, with the sidebar. Under `/p/{id}/settings` the strip keeps Project and Server, and its Account tab is a link to the bare route; the account menu's *Account* leads there too. On the bare screen the strip shows Account active, with Project and Server as links under the remembered project when there is one and absent when there is none — as the sidebar's sections are on `/p`. The sidebar there is as on `/p`; the switcher works and lands on `/p/{id}/traces` (`switchTarget` treats a path under no project as having no section to keep) | Review of #60 found the *Account* item on `/p` linking to `/p`: under Decision 1 the tab needed a project id, and an account that reaches no project has none — so a member whose last membership was removed could not change their own password. A name and a password belong to the account, not to whichever project it happens to be looking at, and the address should say so |
 
 ## API contract
 
@@ -101,13 +106,17 @@ reads `project.id` as it does now.
 link through `href`; `active` compares the path after the prefix. The
 account menu's role caption reads `project.role` as now.
 
-**Settings.** `/p/{id}/settings/{tab}`; `/p/{id}/settings` redirects to
-`project`. The Server tab's *New project* and the switcher's share one
-`NewProjectDialog` (Decision 7).
+**Settings.** `/p/{id}/settings/{project|server}`; `/p/{id}/settings`
+redirects to `project`. The Account tab is bare, `/settings/account`, and
+`/p/{id}/settings/account` redirects to it (Decision 14); the tab strip
+is one component under both. The Server tab's *New project* and the
+switcher's share one `NewProjectDialog` (Decision 7).
 
 **Errors.** A `403` that reaches a screen regardless (a membership
-revoked under an open tab) renders as spec 028 #15 says; `me` is read
-again on the next navigation and the not-there screen takes over.
+revoked under an open tab) renders as spec 028 #15 says. `me` is not
+re-read on navigation (Decision 13): it is read on sign-in and after the
+actions that change it, and the not-there screen is decided at the next
+navigation from the `me` the shell already holds.
 
 ## Testing
 
@@ -140,8 +149,12 @@ e2e (Playwright), against the seeded corpus with an owner and an editor:
   `/traces?environment=prod` lands on the same project with the filter kept.
 - The switcher names both of the owner's projects with a count on each;
   choosing the other from `/p/a/traces/{trace}?environment=prod` lands on
-  `/p/b/traces?environment=prod`, and from `/p/a/settings/account` on
-  `/p/b/settings/account`.
+  `/p/b/traces?environment=prod`, from `/p/a/settings/server` on
+  `/p/b/settings/server`, and from the bare `/settings/account` on
+  `/p/b/traces` (Decision 14).
+- An account with no projects opens *Account* from the menu and changes its
+  password there; `/p/{id}/settings/account` lands on the bare tab, and the
+  Project tab leads back under the same id (Decision 14).
 - The editor, who reaches one project, sees one row and no *New project*;
   `/p/{the owner's other id}/traces` renders the not-there screen and
   sends no request with that id in the header.

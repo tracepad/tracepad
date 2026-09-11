@@ -108,9 +108,10 @@ test('the prompt page opens on the latest version with its list beside it', asyn
 	await expect(page.getByText('You are terse.', { exact: true })).toBeVisible();
 	await expect(page.getByLabel('Config', { exact: true })).toContainText('claude-sonnet-5');
 	// The two links that answer "where did this run" (#2).
+	// Under the project on screen (spec 029 #2), like every link.
 	await expect(page.getByRole('link', { name: 'Traces with v1' })).toHaveAttribute(
 		'href',
-		`/traces?prompt=${CHAT}%401`
+		new RegExp(`^/p/[0-9a-f]{32}/traces\\?prompt=${CHAT}%401$`)
 	);
 });
 

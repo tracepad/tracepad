@@ -1,5 +1,12 @@
 import { expect, test, type Page } from '@playwright/test';
-import { createProject, signIn, signInAsOwner, state, type Account } from './harness';
+import {
+	createProject,
+	inviteNobody,
+	signIn,
+	signInAsOwner,
+	state,
+	type Account
+} from './harness';
 
 // Settings, end to end (Testing): the dry-run/confirm contract rendered, a key
 // minted and revoked, and the Server tab's project lifecycle — which used to
@@ -164,15 +171,20 @@ test('the Server tab creates, deletes with the echo, and restores', async ({ pag
 	await signInAsOwner(page, own.id);
 	await page.goto('/settings/server');
 
+	// The dialog the switcher shares (spec 029 #7): a name, then the keys.
 	const name = `disposable-${Math.random().toString(36).slice(2, 8)}`;
-	await page.getByLabel('New project').fill(name);
-	await page.getByRole('button', { name: 'Create' }).click();
+	await page.getByRole('button', { name: 'New project' }).click();
+	const form = page.getByRole('dialog', { name: 'New project' });
+	await form.getByLabel('Name').fill(name);
+	await form.getByRole('button', { name: 'Create' }).click();
 
 	// Its first pair, shown once, exactly as minting one is.
-	const dialog = page.getByRole('dialog');
+	const dialog = page.getByRole('dialog', { name: 'Your new key pair' });
 	await expect(dialog).toContainText('LANGFUSE_SECRET_KEY=tp-sk-');
 	await dialog.getByRole('button', { name: 'I have copied it' }).click();
 
+	// Made from the Server tab, the owner is still on it (spec 029 #11).
+	await expect(page).toHaveURL(/\/settings\/server$/);
 	const row = page.getByRole('row').filter({ hasText: name });
 	await expect(row).toContainText('Live');
 
@@ -190,6 +202,32 @@ test('the Server tab creates, deletes with the echo, and restores', async ({ pag
 	await expect(row).toContainText('Deleted, purged');
 	await row.getByRole('button', { name: 'Restore' }).click();
 	await expect(page.getByText(`${name} is restored.`)).toBeVisible();
+	await expect(row).toContainText('Live');
+});
+
+// The project on screen is the one being deleted: `me` drops it at once, but
+// the tab — and the Restore on it — stays until the next navigation
+// (spec 029 #4, edge cases). Pulling the screen away mid-action would leave
+// an owner's only project with nowhere to restore it from.
+test('deleting the project on screen leaves the tab, and Restore, in place', async ({ page }) => {
+	const own = await createProject('onscreen');
+	await signInAsOwner(page, own.id);
+	await page.goto('/settings/server');
+	await expect(page).toHaveURL(new RegExp(`/p/${own.id}/settings/server$`));
+
+	// By id: the accounts table on the same tab has a row for the project's
+	// editor, whose email carries the name.
+	const row = page.getByRole('row').filter({ hasText: own.id });
+	await row.getByRole('button', { name: 'Delete', exact: true }).click();
+	await page.getByRole('button', { name: 'Show what it holds' }).click();
+	await page.getByRole('textbox', { name: /Type the project name/ }).fill(own.name);
+	await page.getByRole('button', { name: 'Delete the project' }).click();
+
+	await expect(page.getByText(`${own.name} is deleted`)).toBeVisible();
+	await expect(page).toHaveURL(new RegExp(`/p/${own.id}/settings/server$`));
+	await expect(page.getByText('This project is not yours to see')).toHaveCount(0);
+	await row.getByRole('button', { name: 'Restore' }).click();
+	await expect(page.getByText(`${own.name} is restored.`)).toBeVisible();
 	await expect(row).toContainText('Live');
 });
 
@@ -227,6 +265,57 @@ test('a member changes their own name and password', async ({ page }) => {
 	await page.getByRole('button', { name: 'Change the password' }).click();
 
 	await expect(page.getByText('Every other browser was signed out.')).toBeVisible();
+});
+
+// The Account tab is about the person and lives bare (spec 029 #14): a member
+// of nothing, whose every bare path is `/p`, still opens it from the menu and
+// still owns the password there.
+test('an account with no projects opens the Account tab from the menu and changes its password', async ({
+	page
+}) => {
+	const nobody = await inviteNobody(state().baseURL, 'nobody');
+	await page.goto('/login');
+	await page.getByLabel('Email').fill(nobody.email);
+	await page.getByLabel('Password', { exact: true }).fill(nobody.password);
+	await page.getByRole('button', { name: 'Sign in' }).click();
+	await expect(page).toHaveURL(/\/p$/);
+	await expect(page.getByText('No projects yet')).toBeVisible();
+
+	await page.getByRole('button', { name: /^Signed in as/ }).click();
+	await page.getByRole('menuitem', { name: 'Account' }).click();
+	await expect(page).toHaveURL(/\/settings\/account$/);
+	// The one tab there is: nothing to point Project or Server at.
+	await expect(page.getByRole('tab')).toHaveText(['Account']);
+
+	await page.getByLabel('Current password').fill(nobody.password);
+	await page.getByLabel('New password', { exact: true }).fill('a-password-of-my-own');
+	await page.getByLabel('New password again').fill('a-password-of-my-own');
+	await page.getByRole('button', { name: 'Change the password' }).click();
+	await expect(page.getByText('Every other browser was signed out.')).toBeVisible();
+});
+
+// Under a prefix the tab redirects to its bare address, and from there the
+// Project tab is a way back under the same id.
+test('the Account tab lands bare from under a project, and Project leads back under it', async ({
+	page
+}) => {
+	const own = await createProject('accounttab');
+	await signIn(page, own.account);
+
+	await page.goto(`/p/${own.id}/settings/account?x=1`);
+	await expect(page).toHaveURL(/\/settings\/account\?x=1$/);
+	await expect(page.getByLabel('Display name')).toBeVisible();
+	await expect(page.getByRole('tab')).toHaveText(['Project', 'Account']);
+	// The sidebar is the shell's; the screen is under no project, and the
+	// switcher says so the way it does on `/p`.
+	await expect(page.getByRole('button', { name: 'Switch project' })).toHaveText(
+		'Choose a project'
+	);
+
+	await page.getByRole('tab', { name: 'Project' }).click();
+	await expect(page).toHaveURL(new RegExp(`/p/${own.id}/settings/project$`));
+	await page.getByRole('tab', { name: 'Account' }).click();
+	await expect(page).toHaveURL(/\/settings\/account$/);
 });
 
 test('a wrong current password is refused in the server’s words', async ({ page }) => {

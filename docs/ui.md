@@ -42,6 +42,41 @@ server, and *Account → Where you are signed in* ends the others.
 The admin token is not a credential this interface takes at all: an owner
 reaches everything it used to unlock (see [admin.md](admin.md)).
 
+### The project in the address
+
+Every screen is about one project, and the address says which: everything
+inside the shell lives under **`/p/{project id}`** — `/p/{id}/traces`,
+`/p/{id}/sessions`, `/p/{id}/settings/server`, and so on. A link therefore
+names its project, which is what a link shared between two people has needed
+since there were two people; it carries the id rather than the name, because a
+name can be renamed and a link that breaks on a rename is worse than a hex
+segment. `/login`, `/setup` and `/invite` are the three screens outside the
+shell and keep their paths. One screen inside the shell is about the person
+rather than a project and lives bare: the Account tab, at `/settings/account`
+— it is yours whether or not you reach a project.
+
+A **bare path** — `/`, or `/traces?status=error` from a bookmark, a chat, or
+the pre-authed link the server prints — redirects to the same path and query
+under the **remembered project**: the one this account last looked at in this
+browser, or the first by name until it has looked at one. Every link written
+before the prefix keeps working. An account that reaches no project is sent to
+`/p`, which says so — and, for an owner, offers to create one.
+
+The **switcher** at the top of the sidebar, where the project name is, lists
+the projects the account can reach with each one's traces of the last 24 hours
+beside it — is it alive — and, over eight projects, a box that narrows the
+list. Choosing another project keeps the section you are in (and the Settings
+tab) and keeps the filters, the time window, the search and the page size;
+what it drops is what belonged to the old project: the open trace, prompt or
+queue, the page cursor and the peek panel. An owner has *New project* at the
+bottom of the menu, which opens the same dialog the Server tab uses and lands
+on the new project's empty listing.
+
+An address under a project the account cannot reach — mistyped, deleted, or
+one you are not a member of — renders one screen saying so, with the switcher
+open beside it, and sends no request for it; the interface does not say which
+of the three it is, because the server does not either.
+
 ## What a role sees
 
 The sidebar carries an **account menu** at the bottom: the display name or
@@ -650,8 +685,12 @@ which payload is worth that is the reader's call. Raising
 ## Settings and administration
 
 Settings is **three tabs, because it is three audiences**. The active one is
-in the address (`/settings/project`, `/settings/account`, `/settings/server`),
-so a tab is a link.
+in the address, so a tab is a link. Two of the tabs are about a project and
+live under its prefix (`/p/{project}/settings/project`, `…/settings/server`);
+the Server tab is about the whole server and sits there anyway, and switching
+projects from either keeps the tab. The Account tab is about you and lives
+bare, at `/settings/account`: from there Project and Server point at the
+project you last looked at, and are absent when you reach none.
 
 **Project** — the project on screen, for everybody who can reach it:
 
@@ -681,8 +720,8 @@ on, with *Sign out everywhere else*.
 redirects too. Two tables:
 
 - **Projects** — every project on this server: create with the keys-once
-  dialog, rename, delete behind the echo, restore, and the soft-deleted ones
-  with their purge dates.
+  dialog (the same one the sidebar's switcher opens), rename, delete behind
+  the echo, restore, and the soft-deleted ones with their purge dates.
 - **Accounts** — email, name, standing (`pending` / `active` / `disabled`),
   last login, and the projects each account reaches with the role it has.
   *Invite* opens a dialog and hands back the link once, with a copy button
@@ -703,13 +742,18 @@ in the server's own words.
 ## State in the URL
 
 Filters, the search, live mode, the time window, the stats bucket and the
-selected observation all live in the query string, so any view is a link:
-`/traces?q=refund+failed`, `/traces?status=error&environment=prod`,
-`/traces/{id}?obs={observation_id}`,
-`/sessions?environment=prod`, `/traces?environment=production,staging`,
-`/users?sort=cost&prefix=acme:`,
-`/users/{id}?tab=traces&from=…`, `/stats?from=…&to=…&group_by=hour`.
-Reloading, sharing and the back button all behave.
+selected observation all live in the query string, and the project in the
+path (see [Opening it](#the-project-in-the-address)), so any view is a link:
+`/p/{project}/traces?q=refund+failed`,
+`/p/{project}/traces?status=error&environment=prod`,
+`/p/{project}/traces/{id}?obs={observation_id}`,
+`/p/{project}/sessions?environment=prod`,
+`/p/{project}/traces?environment=production,staging`,
+`/p/{project}/users?sort=cost&prefix=acme:`,
+`/p/{project}/users/{id}?tab=traces&from=…`,
+`/p/{project}/stats?from=…&to=…&group_by=hour`.
+Reloading, sharing and the back button all behave, and so does the same link
+with the prefix left off — it lands on the remembered project.
 
 The time window is one control on every screen that has one — presets for the
 last hour, day, week and month, plus a calendar — and it travels as the

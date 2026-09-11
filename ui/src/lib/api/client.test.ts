@@ -8,8 +8,7 @@ async function fresh() {
 	vi.resetModules();
 	const { api, ApiError, search } = await import('./client.svelte');
 	const { auth } = await import('$lib/auth.svelte');
-	const { project } = await import('$lib/project.svelte');
-	return { api, ApiError, search, auth, project };
+	return { api, ApiError, search, auth };
 }
 
 /** A signed-in session with one project, which is what most screens run on. */
@@ -64,9 +63,8 @@ describe('query building', () => {
 
 describe('requests', () => {
 	it('travels on the cookie and records the server version', async () => {
-		const { api, auth, project } = await fresh();
+		const { api, auth } = await fresh();
 		auth.adopt(ME);
-		project.restore();
 		const calls = stubFetch(json({ traces: [], next_cursor: null }));
 
 		await api.listTraces({ status: 'error' }, { limit: 25 });

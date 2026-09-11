@@ -49,6 +49,18 @@
 # neutral, so the duplication it removed paid for the header fix and the
 # checker rather than for this.
 #
+# 20,000 is spec 028 #17 (2026-09-10): the accounts — the login rewrite, the
+# setup and invite screens, the account menu, the Account tab, the Accounts
+# table with its dialogs — estimated at 1,300-1,500 lines, on `main`'s 18,141.
+#
+# 20,500 is spec 029 #9 (2026-09-11): the project in the URL and the switcher.
+# The route move is a move and counts the same; the switcher with its filter
+# box, the two not-there screens, the redirect routes, the `href` and
+# `switchTarget` helpers and the shared create-project dialog were estimated at
+# 300-400 lines on `main`'s 19,481 and came to 531 (`main` 19,481 -> 20,012):
+# the switcher is 166 on its own, and the seventy links that go through `href`
+# each cost a line or two of wrapping.
+#
 # What it counts, though, has: the budget covers the application, and the tests
 # are reported beside it under no ceiling at all (design §8, amended; spec 010
 # #7). Spec 010 measured what a budget over both actually buys — extracting the

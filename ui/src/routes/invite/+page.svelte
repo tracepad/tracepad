@@ -6,6 +6,7 @@
 	import AuthScreen from '$lib/components/auth/AuthScreen.svelte';
 	import Explanation from '$lib/components/auth/Explanation.svelte';
 	import Field from '$lib/components/auth/Field.svelte';
+	import { bareTarget } from '$lib/project.svelte';
 	import { begin } from '$lib/session';
 
 	// Accepting an invitation (spec 028 #10), which is also how a lost password
@@ -42,7 +43,7 @@
 			// accept endpoint takes a password and nothing else.
 			if (name.trim()) await api.patchMe({ name: name.trim() });
 			await begin();
-			await goto('/traces', { replaceState: true });
+			await goto(bareTarget('/traces'), { replaceState: true });
 		} catch (cause) {
 			error = said(cause, 'Something went wrong accepting this invitation.');
 		} finally {

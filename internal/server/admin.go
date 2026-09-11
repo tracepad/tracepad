@@ -149,10 +149,21 @@ func (s *Server) handleListProjects(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	values, err := queryParams(r, "include")
+	values, err := queryParams(r, "include", "activity")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	// `activity=24h` puts each project's traces of the last day on its row
+	// (spec 029 #8). One value today, and a parameter rather than a flag,
+	// so that a second window can exist without a second field name.
+	withActivity := false
+	if activity := values.Get("activity"); activity != "" {
+		if activity != "24h" {
+			writeError(w, http.StatusBadRequest, "activity: only 24h")
+			return
+		}
+		withActivity = true
 	}
 	includeDeleted := false
 	if include := values.Get("include"); include != "" {
@@ -232,9 +243,37 @@ func (s *Server) handleListProjects(w http.ResponseWriter, r *http.Request) {
 		if role, ok := roles[project.ID]; ok {
 			body = body.put("role", role)
 		}
+		if withActivity {
+			count, err := s.tracesLastDay(project)
+			if err != nil {
+				slog.Error("count the day's traces failed", "err", err)
+				writeError(w, http.StatusInternalServerError, "failed to read the projects")
+				return
+			}
+			body = body.put("traces_24h", count)
+		}
 		rendered = append(rendered, body)
 	}
 	writeJSON(w, http.StatusOK, object{}.put("projects", rendered))
+}
+
+// tracesLastDay counts a project's traces of the last 24 hours the way
+// `GET /api/v1/stats` counts them (spec 029 #8): the rolled hours behind the
+// watermark and the raw rows for the tail, so the number costs what one stats
+// call costs and trails live traffic by the same lag. A soft-deleted project
+// is not there as far as a person is concerned, and its count says so.
+func (s *Server) tracesLastDay(project *store.Project) (int64, error) {
+	if project.Deleted() {
+		return 0, nil
+	}
+	now := time.Now()
+	from, to := now.Add(-24*time.Hour).UnixNano(), now.UnixNano()
+	// One bucket for every key: only the count is read, and a day split
+	// over two calendar dates is still one day of traces.
+	var tally bucket
+	err := s.readStats(project, store.StatsFilter{From: &from, To: &to, GroupBy: defaultGroupBy},
+		func(string) *bucket { return &tally })
+	return tally.count, err
 }
 
 // handleCreateProject mints a project and its first key pair. The secret is in

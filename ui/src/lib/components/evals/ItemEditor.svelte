@@ -5,6 +5,7 @@
 	import { untrack } from 'svelte';
 	import { ApiError, api, type Dataset } from '$lib/api/client.svelte';
 	import { itemBody, savedMessage, short } from '$lib/evals';
+	import { href } from '$lib/project.svelte';
 	import Button from '../Button.svelte';
 	import JsonEditor from '../json/JsonEditor.svelte';
 	import PageHeader from '../PageHeader.svelte';
@@ -208,7 +209,9 @@
 		}
 	}
 
-	const back = $derived(dataset === '' ? '/datasets' : `/datasets/${encodeURIComponent(dataset)}`);
+	const back = $derived(
+		href(dataset === '' ? '/datasets' : `/datasets/${encodeURIComponent(dataset)}`)
+	);
 	const fieldClass = 'border-border bg-canvas text-fg rounded-md border px-2 py-1 text-sm';
 </script>
 
@@ -255,12 +258,12 @@
 				{#if unknown}
 					<span class="text-warn text-xs">
 						This project has no dataset called <code class="font-mono">{dataset}</code>. Choose one
-						above, or <a class="text-accent underline underline-offset-2" href="/datasets">make it</a>
+						above, or <a class="text-accent underline underline-offset-2" href={href('/datasets')}>make it</a>
 						first — saving here would not.
 					</span>
 				{:else if datasets.length === 0 && dataset === ''}
 					<span class="text-subtle text-xs">
-						This project has no dataset yet — <a class="text-accent underline underline-offset-2" href="/datasets">
+						This project has no dataset yet — <a class="text-accent underline underline-offset-2" href={href('/datasets')}>
 							make one
 						</a> and come back; nothing here is lost by opening it in another tab.
 					</span>
@@ -269,7 +272,7 @@
 					     left to conclude their dataset is gone (found in review). -->
 					<span class="text-subtle text-xs">
 						The first {CHOICES} datasets by name. If this case belongs to another, open it from
-						<a class="text-accent underline underline-offset-2" href="/datasets">Datasets</a>
+						<a class="text-accent underline underline-offset-2" href={href('/datasets')}>Datasets</a>
 						and use <em>New item</em>.
 					</span>
 				{/if}
@@ -281,9 +284,11 @@
 				Cut from
 				<a
 					class="text-accent underline underline-offset-2"
-					href="/traces/{encodeURIComponent(source.trace)}{source.obs
-						? `?obs=${encodeURIComponent(source.obs)}`
-						: ''}"
+					href={href(
+						`/traces/${encodeURIComponent(source.trace)}${
+							source.obs ? `?obs=${encodeURIComponent(source.obs)}` : ''
+						}`
+					)}
 				>
 					{source.trace}{source.obs ? ` · ${source.obs}` : ''}
 				</a>
@@ -305,7 +310,9 @@
 				{#if dataset && saved.id}
 					<a
 						class="text-accent ml-1 underline underline-offset-2"
-						href="/datasets/{encodeURIComponent(dataset)}?version={saved.version}&peek={saved.id}"
+						href={href(
+							`/datasets/${encodeURIComponent(dataset)}?version=${saved.version}&peek=${saved.id}`
+						)}
 					>
 						Open it in the dataset
 					</a>

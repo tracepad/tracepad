@@ -2,6 +2,7 @@
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import type { UserRow } from '$lib/api/client.svelte';
 	import { ABSENT, cost, count, middleEllipsis, timestamp } from '$lib/format';
+	import { href } from '$lib/project.svelte';
 	import CopyButton from './CopyButton.svelte';
 
 	// The user listing, one row per user, mapping 1:1 onto what
@@ -43,7 +44,7 @@
 							     of it is the title and the button beside it (spec 023,
 							     edge cases). -->
 							<a
-								href="/users/{encodeURIComponent(row.user_id)}"
+								href={href(`/users/${encodeURIComponent(row.user_id)}`)}
 								title={row.user_id}
 								class="truncate hover:underline"
 							>

@@ -5,6 +5,7 @@
 	import { api, type Trace, type TraceRow } from '$lib/api/client.svelte';
 	import { asPage, Listing, UrlSpot, Walk } from '$lib/listing.svelte';
 	import { peekSearch, readPeek } from '$lib/peek';
+	import { href } from '$lib/project.svelte';
 	import PaginationBar from '../PaginationBar.svelte';
 	import PeekPanel from '../PeekPanel.svelte';
 	import TraceDetail from '../TraceDetail.svelte';
@@ -69,9 +70,9 @@
 		onnext={() => walk.step(1)}
 		hasPrev={walk.hasPrev}
 		hasNext={walk.hasNext}
-		fullHref="/traces/{encodeURIComponent(peekID)}{selectedObs
-			? `?obs=${encodeURIComponent(selectedObs)}`
-			: ''}"
+		fullHref={href(
+			`/traces/${encodeURIComponent(peekID)}${selectedObs ? `?obs=${encodeURIComponent(selectedObs)}` : ''}`
+		)}
 		fullLabel="Open this trace as a page"
 	>
 		{#snippet title()}

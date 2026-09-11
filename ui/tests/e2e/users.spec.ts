@@ -266,7 +266,7 @@ test('an unknown id says so and points at the traces filter', async ({ page }) =
 	await expect(page.getByText('Nothing is filed under')).toBeVisible();
 	await expect(page.getByRole('link', { name: 'traces filtered by it' })).toHaveAttribute(
 		'href',
-		'/traces?user_id=nobody-at-all'
+		/^\/p\/[0-9a-f]{32}\/traces\?user_id=nobody-at-all$/
 	);
 });
 
@@ -297,7 +297,7 @@ test('a user id carrying a per-cent sign is read as it stands', async ({ page })
 	// And the id survived the round trip into the tab's filter.
 	await expect(page.getByRole('link', { name: /Open the full sessions listing/ })).toHaveAttribute(
 		'href',
-		`/sessions?user_id=${encodeURIComponent(odd)}`
+		new RegExp(`^/p/[0-9a-f]{32}/sessions\\?user_id=${encodeURIComponent(odd)}$`)
 	);
 });
 

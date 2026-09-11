@@ -59,6 +59,9 @@
 			class="border-border bg-canvas shadow-overlay z-50 min-w-44 rounded-md border p-1"
 		>
 			<p class="text-subtle truncate px-2 py-1 text-xs">{auth.account?.email ?? ''}</p>
+			<!-- Bare, not under the project on screen: the tab is about the
+			     person, and an account that reaches no project has one too
+			     (spec 029 #14). -->
 			<DropdownMenu.Item>
 				{#snippet child({ props })}
 					<a href="/settings/account" {...props} class={item}>

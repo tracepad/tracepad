@@ -3,7 +3,7 @@
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import { ApiError, api, type DatasetItem, type ItemVersions } from '$lib/api/client.svelte';
 	import { ABSENT, timestamp } from '$lib/format';
-	import { project } from '$lib/project.svelte';
+	import { href, project } from '$lib/project.svelte';
 	import Button from '../Button.svelte';
 	import ConfirmDialog from '../ConfirmDialog.svelte';
 	import JsonView from '../json/JsonView.svelte';
@@ -120,9 +120,13 @@
 						     and the link is offered rather than promised. -->
 						<a
 							class="text-accent underline underline-offset-2"
-							href="/traces/{encodeURIComponent(item.source_trace_id)}{item.source_observation_id
-								? `?obs=${encodeURIComponent(item.source_observation_id)}`
-								: ''}"
+							href={href(
+								`/traces/${encodeURIComponent(item.source_trace_id)}${
+									item.source_observation_id
+										? `?obs=${encodeURIComponent(item.source_observation_id)}`
+										: ''
+								}`
+							)}
 						>
 							{item.source_trace_id}{item.source_observation_id
 								? ` · ${item.source_observation_id}`
@@ -142,7 +146,7 @@
 		{#if editable}
 			<div class="border-border flex gap-1.5 border-b px-4 py-2">
 				<a
-					href="/datasets/{encodeURIComponent(dataset)}/items/{encodeURIComponent(id)}/edit"
+					href={href(`/datasets/${encodeURIComponent(dataset)}/items/${encodeURIComponent(id)}/edit`)}
 					class="border-border bg-surface text-fg hover:bg-raised pointer-coarse:h-11
 						pointer-coarse:px-4 inline-flex h-7 items-center gap-1.5 rounded-md border px-2.5
 						text-sm font-medium whitespace-nowrap transition-colors duration-100"
@@ -187,7 +191,9 @@
 						<li class="flex items-center gap-2 py-0.5">
 							<a
 								class="text-accent tabular-nums underline underline-offset-2"
-								href="/datasets/{encodeURIComponent(dataset)}?tab=items&version={row.version}&peek={id}"
+								href={href(
+									`/datasets/${encodeURIComponent(dataset)}?tab=items&version=${row.version}&peek=${id}`
+								)}
 							>
 								v{row.version}
 							</a>

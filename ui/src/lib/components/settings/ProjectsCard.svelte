@@ -3,27 +3,26 @@
 	import Plus from '@lucide/svelte/icons/plus';
 	import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
 	import { said } from '$lib/accounts';
-	import { api, type DryRun, type NewKey, type Project } from '$lib/api/client.svelte';
+	import { api, type DryRun, type Project } from '$lib/api/client.svelte';
 	import { timestamp } from '$lib/format';
 	import { refresh } from '$lib/session';
 	import Button from '../Button.svelte';
 	import ConfirmCard from '../ConfirmCard.svelte';
-	import SecretDialog from '../SecretDialog.svelte';
 	import Card from './Card.svelte';
+	import NewProjectDialog from './NewProjectDialog.svelte';
 
 	// Project lifecycle (spec 007 #4), which used to be the Administration
 	// section behind the admin token and is now an owner's tab (spec 028 #14).
 	// The table and its ceremony are exactly what they were: create with the
-	// keys-once dialog, delete behind the echo, restore inside the grace
-	// window, soft-deleted rows with their purge dates.
+	// keys-once dialog — the one the switcher opens too (spec 029 #7) —
+	// delete behind the echo, restore inside the grace window, soft-deleted
+	// rows with their purge dates.
 
 	let projects = $state.raw<Project[]>([]);
 	let loading = $state(true);
 	let failure = $state<string | null>(null);
 
-	let newName = $state('');
 	let creating = $state(false);
-	let minted = $state.raw<NewKey | null>(null);
 	/** The project a deletion is being walked through, if any. */
 	let deleting = $state<Project | null>(null);
 	/** What just happened, said outside the card that closes on saying it. */
@@ -43,25 +42,6 @@
 			failure = said(cause, 'Failed to read the projects.');
 		} finally {
 			loading = false;
-		}
-	}
-
-	async function create(event: SubmitEvent) {
-		event.preventDefault();
-		if (!newName.trim() || creating) return;
-		creating = true;
-		failure = null;
-		try {
-			minted = await api.createProject(newName.trim());
-			newName = '';
-			await list();
-			// A new project is one an owner can reach, so the shell's list of
-			// them has just changed (Decision 15).
-			await refresh();
-		} catch (cause) {
-			failure = said(cause, 'Failed to create the project.');
-		} finally {
-			creating = false;
 		}
 	}
 
@@ -175,30 +155,13 @@
 		</div>
 	{/if}
 
-	<form class="mt-4 flex flex-wrap items-end gap-2" onsubmit={create}>
-		<div class="min-w-0 flex-1">
-			<label for="new-project" class="text-muted mb-1 block text-xs font-medium">New project</label>
-			<input
-				id="new-project"
-				type="text"
-				bind:value={newName}
-				placeholder="staging"
-				autocomplete="off"
-				spellcheck="false"
-				class="border-border bg-canvas placeholder:text-subtle w-full rounded-md border px-2
-					py-1 text-sm"
-			/>
-		</div>
-		<Button type="submit" disabled={!newName.trim()} busy={creating}>
-			{#if creating}
-				<LoaderCircle class="size-4 animate-spin" />
-			{:else}
-				<Plus class="size-4" />
-			{/if}
-			Create
+	<div class="mt-4 flex flex-wrap items-center gap-3">
+		<Button onclick={() => (creating = true)}>
+			<Plus class="size-4" />
+			New project
 		</Button>
-	</form>
-	<p class="text-subtle mt-1 text-xs">Its first key pair is shown once, when it is created.</p>
+		<p class="text-subtle text-xs">Its first key pair is shown once, when it is created.</p>
+	</div>
 </Card>
 
-<SecretDialog pair={minted} onclose={() => (minted = null)} />
+<NewProjectDialog open={creating} onclose={() => (creating = false)} oncreated={() => void list()} />

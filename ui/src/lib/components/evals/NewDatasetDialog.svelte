@@ -4,6 +4,7 @@
 	import { Dialog } from 'bits-ui';
 	import { goto } from '$app/navigation';
 	import { ApiError, api } from '$lib/api/client.svelte';
+	import { href } from '$lib/project.svelte';
 	import Button from '../Button.svelte';
 
 	// A dataset is a name and a sentence (spec 014's envelope): the `PUT` that
@@ -51,7 +52,7 @@
 				...(description.trim() === '' ? {} : { description: description.trim() })
 			});
 			onclose();
-			await goto(`/datasets/${encodeURIComponent(dataset.name)}`);
+			await goto(href(`/datasets/${encodeURIComponent(dataset.name)}`));
 		} catch (cause) {
 			// The name grammar is the server's (a URL path segment), and so is
 			// the sentence that explains it.

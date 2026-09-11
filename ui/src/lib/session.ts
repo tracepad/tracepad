@@ -1,6 +1,5 @@
 import { api } from '$lib/api/client.svelte';
 import { auth } from '$lib/auth.svelte';
-import { project } from '$lib/project.svelte';
 
 // What the shell learns before it renders anything (spec 028, Application
 // contract): whether this server has an owner yet, and who is signed in. Two
@@ -15,10 +14,7 @@ import { project } from '$lib/project.svelte';
 /** Asks the server the two questions the guard decides on. */
 export async function bootstrap(): Promise<{ setupRequired: boolean }> {
 	const [required, me] = await Promise.all([needsSetup(), api.me().catch(() => null)]);
-	if (me) {
-		auth.adopt(me);
-		project.restore();
-	}
+	if (me) auth.adopt(me);
 	return { setupRequired: required };
 }
 
@@ -54,10 +50,13 @@ export async function refresh() {
 /** Signs in: the cookie is already set, so all that is left is to read `me`. */
 export async function begin() {
 	await refresh();
-	project.restore();
 }
 
-/** Ends the session here and forgets what it was showing. */
+/**
+ * Ends the session here. What the account was looking at stays remembered
+ * under its own id (spec 029 #3): the next person to sign in on this browser
+ * is sent to their project, and this one comes back to theirs.
+ */
 export async function end() {
 	try {
 		await api.logout();
@@ -66,5 +65,4 @@ export async function end() {
 		// the alternative is a person stuck on a screen they asked to leave.
 	}
 	auth.clear();
-	project.forget();
 }

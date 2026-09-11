@@ -1,3 +1,4 @@
+import { untrack } from 'svelte';
 import { auth } from '$lib/auth.svelte';
 import { project } from '$lib/project.svelte';
 import type { components, paths } from './schema';
@@ -197,8 +198,13 @@ class Api {
 	 */
 	version = $state.raw<string | null>(null);
 
-	listProjects(signal?: AbortSignal) {
-		return this.#json<ProjectList>('/api/v1/projects', { signal });
+	/**
+	 * The projects this session reaches. `activity: '24h'` puts each row's
+	 * traces of the last day on it (spec 029 #8), which is what the switcher
+	 * asks for on every open and nothing asks for on load.
+	 */
+	listProjects(query: { activity?: '24h' } = {}, signal?: AbortSignal) {
+		return this.#json<ProjectList>('/api/v1/projects', { query, signal });
 	}
 
 	listTraces(
@@ -889,12 +895,18 @@ const CARRY_THEIR_OWN = ['/api/v1/projects', '/api/v1/auth', '/api/v1/accounts',
 /**
  * Which project this request is about (Decision 6). A key was its own project
  * and a session is not, so the interface says so in one place — here — rather
- * than in every call site, and spec 029 will take the id from the page URL
- * without any of them noticing.
+ * than in every call site; since spec 029 the id is the page URL's, and no
+ * call site noticed.
+ *
+ * Read untracked: a request's project is a fact at the moment it goes out,
+ * not a subscription. Most reads are started inside an `$effect`, before its
+ * first `await`, and the id comes off `page.params` — which is a new object
+ * on every navigation. Tracked, every such effect re-ran on every `?obs=`
+ * and `?peek=`, and a trace re-read itself on each arrow key.
  */
 function projectHeader(path: string): Record<string, string> {
 	if (CARRY_THEIR_OWN.some((prefix) => path.startsWith(prefix))) return {};
-	const id = project.id;
+	const id = untrack(() => project.id);
 	return id ? { 'X-Tracepad-Project': id } : {};
 }
 

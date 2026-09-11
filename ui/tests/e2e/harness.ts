@@ -43,9 +43,10 @@ export const PASSWORD = 'e2e-password';
  * The two Playwright projects run the same files against one server.
  *
  * It comes with an editor account of its own for the same reason, and for one
- * more: the project on screen is the first of `me.projects` by name (spec 028
- * #13), so an account that can reach exactly one project is an account whose
- * screens are about the project this suite made.
+ * more: a bare path redirects to the remembered project, which for an account
+ * that has opened nothing yet is the first of `me.projects` by name (spec 029
+ * #3) — so an account that can reach exactly one project is an account whose
+ * bare `page.goto('/traces')` lands on the project this suite made.
  */
 export async function createProject(
 	name: string
@@ -73,11 +74,26 @@ export async function inviteEditor(
 	project: string,
 	label: string
 ): Promise<Account> {
-	const email = `${label}@e2e.test`;
+	return invite(baseURL, `${label}@e2e.test`, [{ project_id: project, role: 'editor' }]);
+}
+
+/**
+ * Invites an account that is a member of nothing — the one whose every bare
+ * path is `/p` (spec 029 #4) and whose Account tab is still its own (#14).
+ */
+export async function inviteNobody(baseURL: string, label: string): Promise<Account> {
+	return invite(baseURL, `${label}-${Math.random().toString(36).slice(2, 8)}@e2e.test`, []);
+}
+
+async function invite(
+	baseURL: string,
+	email: string,
+	memberships: { project_id: string; role: 'editor' }[]
+): Promise<Account> {
 	const response = await fetch(`${baseURL}/api/v1/accounts`, {
 		method: 'POST',
 		headers: { Authorization: `Bearer ${ADMIN_TOKEN}`, 'Content-Type': 'application/json' },
-		body: JSON.stringify({ email, memberships: [{ project_id: project, role: 'editor' }] })
+		body: JSON.stringify({ email, memberships })
 	});
 	if (!response.ok) throw new Error(`invite ${email}: ${response.status} ${await response.text()}`);
 	const { invite_url } = (await response.json()) as { invite_url: string };
@@ -99,7 +115,12 @@ export async function acceptInvite(baseURL: string, link: string) {
 
 /**
  * Signs in through the form, which is the one way in (spec 028 #13). The
- * cookie the server sets is the session for the rest of the test.
+ * cookie the server sets is the session for the rest of the test, and the
+ * form lands on the remembered project's traces (spec 029 #3).
+ *
+ * The suites navigate by bare path — `page.goto('/traces?…')` — and go
+ * through that same redirect, the way every link written before the prefix
+ * does; the one suite about the prefix itself asserts the `/p/{id}` shapes.
  */
 export async function signIn(page: Page, account: Account) {
 	await page.goto('/login');
@@ -107,14 +128,14 @@ export async function signIn(page: Page, account: Account) {
 	// Exact: the eye beside the field is labelled "Show the password".
 	await page.getByLabel('Password', { exact: true }).fill(account.password);
 	await page.getByRole('button', { name: 'Sign in' }).click();
-	await expect(page).toHaveURL(/\/traces$/);
+	await expect(page).toHaveURL(/\/p\/[0-9a-f]{32}\/traces$/);
 }
 
 /**
  * Signs in as the owner with one project pinned. An owner reaches every
  * project, so "the first by name" is whichever project some other worker
- * happened to create — until spec 029's switcher, the choice lives in
- * `localStorage` under the account's id, and this is how a test states it.
+ * happened to create; the remembered project lives in `localStorage` under
+ * the account's id (spec 029 #3), and this is how a test states it.
  */
 export async function signInAsOwner(page: Page, project?: string) {
 	const { owner } = state();

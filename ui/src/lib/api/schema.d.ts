@@ -1745,6 +1745,8 @@ export interface components {
              * @enum {string}
              */
             role?: "viewer" | "editor" | "owner";
+            /** @description Present on every row of a listing asked with `activity=24h`, and absent otherwise: the traces whose timestamp falls in the last 24 hours, from the hourly roll-up behind the watermark and the raw rows past it. A soft-deleted project carries 0 (spec 029 #8) */
+            traces_24h?: number;
         };
         /** @description A freshly minted key pair. The secret appears here and nowhere else, ever. */
         NewKey: {
@@ -5227,6 +5229,8 @@ export interface operations {
             query?: {
                 /** @description `deleted` adds soft-deleted projects with their purge dates. Admin token only. */
                 include?: "deleted";
+                /** @description `24h` puts `traces_24h` on every row: the traces of the last 24 hours, counted the way `GET /api/v1/stats` counts them (spec 029 #8). Any other value is a 400. */
+                activity?: "24h";
             };
             header?: never;
             path?: never;

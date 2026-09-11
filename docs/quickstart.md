@@ -115,7 +115,10 @@ Three ways, all reading the same API.
 
 **The browser.** Open the setup link the first run printed and create your
 account; after that it is `http://localhost:4318/` and an email and a password.
-See [ui.md](ui.md) and [accounts.md](accounts.md).
+The root lands on your project's traces at `/p/{project id}/traces` — every
+screen carries its project in the address, and the switcher at the top of the
+sidebar moves between projects. See [ui.md](ui.md) and
+[accounts.md](accounts.md).
 
 **The terminal.** The CLI is the same binary:
 
