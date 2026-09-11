@@ -29,6 +29,13 @@ import (
 // is a store with the schema and no rows, which a copy is.
 func TestMain(m *testing.M) {
 	store.SetPasswordCost(bcrypt.MinCost)
+	// The shared hash is made here, while the cost is what it was just set
+	// to, rather than by whichever test asks first: made inside the one
+	// test's cost-12 window it would be a quarter-second hash for every
+	// login in the binary, and nothing would say so.
+	if _, err := accountHash(); err != nil {
+		log.Fatal(err)
+	}
 
 	dir, err := os.MkdirTemp("", "tracepad-server-test-")
 	if err != nil {

@@ -23,8 +23,9 @@ import (
 const testAccountPassword = "correct horse battery"
 
 // accountHash is one bcrypt hash for the whole test binary, at the cost
-// TestMain lowered the binary to. The one test that needs a hash at the
-// production cost makes its own.
+// TestMain lowered the binary to — and made there, so that no test is the
+// first to ask. The one test that needs a hash at the production cost makes
+// its own.
 var accountHash = sync.OnceValues(func() ([]byte, error) {
 	return store.HashPassword(testAccountPassword)
 })
