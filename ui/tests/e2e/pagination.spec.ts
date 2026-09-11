@@ -33,7 +33,7 @@ const top = (page: Page) => rows(page).first().getByRole('link').first();
  */
 async function identity(page: Page): Promise<string> {
 	const href = await top(page).getAttribute('href');
-	expect(href).toMatch(/^\/traces\/\w/);
+	expect(href).toMatch(/^\/p\/[0-9a-f]{32}\/traces\/\w/);
 	return href ?? '';
 }
 

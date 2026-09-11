@@ -164,15 +164,20 @@ test('the Server tab creates, deletes with the echo, and restores', async ({ pag
 	await signInAsOwner(page, own.id);
 	await page.goto('/settings/server');
 
+	// The dialog the switcher shares (spec 029 #7): a name, then the keys.
 	const name = `disposable-${Math.random().toString(36).slice(2, 8)}`;
-	await page.getByLabel('New project').fill(name);
-	await page.getByRole('button', { name: 'Create' }).click();
+	await page.getByRole('button', { name: 'New project' }).click();
+	const form = page.getByRole('dialog', { name: 'New project' });
+	await form.getByLabel('Name').fill(name);
+	await form.getByRole('button', { name: 'Create' }).click();
 
 	// Its first pair, shown once, exactly as minting one is.
-	const dialog = page.getByRole('dialog');
+	const dialog = page.getByRole('dialog', { name: 'Your new key pair' });
 	await expect(dialog).toContainText('LANGFUSE_SECRET_KEY=tp-sk-');
 	await dialog.getByRole('button', { name: 'I have copied it' }).click();
 
+	// Made from the Server tab, the owner is still on it (spec 029 #11).
+	await expect(page).toHaveURL(/\/settings\/server$/);
 	const row = page.getByRole('row').filter({ hasText: name });
 	await expect(row).toContainText('Live');
 
