@@ -12,12 +12,12 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/tracepad/tracepad/internal/config"
 	"github.com/tracepad/tracepad/internal/mapping"
 	"github.com/tracepad/tracepad/internal/otlptest"
 	"github.com/tracepad/tracepad/internal/store"
+	"github.com/tracepad/tracepad/internal/storetest"
 )
 
 // Ingest end-to-end (spec 002, Testing #2): real protobuf bodies through the
@@ -26,10 +26,6 @@ import (
 const (
 	testSecret = "tp-sk-test-secret"
 	testPublic = "tp-pk-test"
-
-	// testCommitWindow is the writer's window in every harness that does
-	// not name one.
-	testCommitWindow = time.Millisecond
 )
 
 type harness struct {
@@ -44,12 +40,7 @@ func newHarness(t *testing.T, cfg *config.Config, writerOpts store.WriterOptions
 	t.Helper()
 	captureLogs(t)
 
-	st, err := store.Open(freshDB(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { st.Close() })
-
+	st := storetest.Open(t)
 	project, err := st.CreateProject("test", store.KeyPair{PublicKey: testPublic, Secret: testSecret})
 	if err != nil {
 		t.Fatal(err)
@@ -60,7 +51,7 @@ func newHarness(t *testing.T, cfg *config.Config, writerOpts store.WriterOptions
 	// suite's runtime. Nothing here is about group commit — the store's own
 	// tests are — so the window is shortened unless a test asks for one.
 	if writerOpts.CommitWindow == 0 {
-		writerOpts.CommitWindow = testCommitWindow
+		writerOpts.CommitWindow = storetest.Writes.CommitWindow
 	}
 	writer, err := st.NewWriter(writerOpts)
 	if err != nil {

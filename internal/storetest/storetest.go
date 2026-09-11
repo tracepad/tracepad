@@ -1,5 +1,5 @@
 // Package storetest opens the store the way a test of one of its clients — the
-// CLI, the MCP server — wants it: empty, migrated, and quick.
+// server, the CLI, the MCP server — wants it: empty, migrated, and quick.
 //
 // Two costs are paid once here that a harness written from scratch pays on
 // every test. Migrating an empty database from nothing is about fifteen
