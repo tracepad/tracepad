@@ -89,7 +89,7 @@ on stderr and exit code 1.
 
 | Method | Path | |
 |---|---|---|
-| `GET` | `/api/v1/projects` | What the caller can reach: all with the token or an owner, its own with a key, its memberships with a member's session. `?include=deleted` (owner or token). |
+| `GET` | `/api/v1/projects` | What the caller can reach: all with the token or an owner, its own with a key, its memberships with a member's session. `?include=deleted` (owner or token). `?activity=24h` adds `traces_24h` to every row — the traces of the last 24 hours, counted the way `/api/v1/stats` counts them; a soft-deleted project carries `0`. Any other value is a `400`. |
 | `POST` | `/api/v1/projects` | Create; the secret is in the response and nowhere else. |
 | `GET` | `/api/v1/projects/{id}` | One project with its windows. |
 | `PATCH` | `/api/v1/projects/{id}` | `name` (owner or token), `retention_days`, `raw_retention_days`, `stats_retention_days`. |

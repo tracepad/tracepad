@@ -240,6 +240,14 @@ links open the two screens that read `#token=`; `/login` takes the email and
 the password; the sidebar's account menu leads to *Account*, where anybody
 changes their own name and password and ends their other sessions.
 
+Which project a screen is about is in its address — every screen lives under
+`/p/{project id}` — and the switcher at the top of the sidebar lists the
+projects the account reaches, with the traffic of the last day beside each.
+A link without the prefix lands on the project the account last looked at;
+an address under a project the account is not a member of is one screen
+saying so, not a wall of `403`s. See
+[ui.md](ui.md#the-project-in-the-address).
+
 Owners get a **Server** tab in Settings — absent for everybody else, and the
 address redirects — with the projects table and an **Accounts** table: email,
 name, standing, last login, and the projects each account reaches with its
