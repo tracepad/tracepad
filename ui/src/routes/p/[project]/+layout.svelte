@@ -24,7 +24,10 @@
 		return untrack(() => auth.projects.some((one) => one.id === id));
 	});
 
+	// Per navigation, not per transition: closing the menu and then following
+	// a sidebar link is another not-there screen, and the menu opens again.
 	$effect(() => {
+		void page.params.project;
 		if (!reachable) switcher.open = true;
 	});
 </script>

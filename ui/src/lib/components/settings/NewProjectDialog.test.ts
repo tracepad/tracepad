@@ -69,14 +69,24 @@ describe('creating a project', () => {
 
 	it('still shows the keys when `me` cannot be read, and tells the caller once it can', async () => {
 		createProject.mockResolvedValue(MADE);
-		refresh.mockRejectedValueOnce(new Error('network')).mockResolvedValue(undefined);
+		let again!: () => void;
+		refresh
+			.mockRejectedValueOnce(new Error('network'))
+			.mockReturnValueOnce(new Promise<void>((resolve) => (again = resolve)));
 		const { user, oncreated, onclose } = await submit();
 
 		await waitFor(() => expect(screen.getByText(/LANGFUSE_SECRET_KEY=tp-sk-new/)).toBeVisible());
 		expect(oncreated).not.toHaveBeenCalled();
 		expect(screen.queryByRole('alert')).toBeNull();
 
+		// While `me` is read again the form stays shut: a Create with the
+		// same name in it would mint the project twice.
 		await user.click(screen.getByRole('button', { name: 'I have copied it' }));
+		await waitFor(() => expect(refresh).toHaveBeenCalledTimes(2));
+		expect(screen.queryByRole('button', { name: 'Create' })).toBeNull();
+		expect(oncreated).not.toHaveBeenCalled();
+
+		again();
 		await waitFor(() => expect(oncreated).toHaveBeenCalledWith(MADE));
 		expect(refresh).toHaveBeenCalledTimes(2);
 		expect(onclose).toHaveBeenCalledOnce();

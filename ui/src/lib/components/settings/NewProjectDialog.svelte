@@ -83,8 +83,13 @@
 </script>
 
 <!-- The form closes the moment the keys open: two dialogs stacked would be
-     two things to dismiss, and the keys are the one that matters. -->
-<Dialog.Root open={open && minted === null} onOpenChange={(next) => !next && !busy && onclose()}>
+     two things to dismiss, and the keys are the one that matters. It stays
+     shut while a project made is still being announced: a form with the
+     same name in it and Create enabled would mint that project twice. -->
+<Dialog.Root
+	open={open && minted === null && unannounced === null}
+	onOpenChange={(next) => !next && !busy && onclose()}
+>
 	<Dialog.Portal>
 		<Dialog.Overlay class="fixed inset-0 z-50 bg-black/50" />
 		<Dialog.Content

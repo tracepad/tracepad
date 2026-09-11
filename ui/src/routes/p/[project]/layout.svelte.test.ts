@@ -73,4 +73,17 @@ describe('the project layout', () => {
 		expect(screen.getByText('This project is not yours to see')).toBeInTheDocument();
 		expect(switcher.open).toBe(true);
 	});
+
+	// Closing the menu and following a sidebar link — same bad id, another
+	// section — is another not-there screen, and the menu is open on it too.
+	it('opens the switcher again on the next not-there navigation', () => {
+		reaching(P2);
+		render(Layout, { props: { children } });
+		expect(switcher.open).toBe(true);
+
+		switcher.open = false;
+		route.params = { project: P1 };
+		flushSync();
+		expect(switcher.open).toBe(true);
+	});
 });

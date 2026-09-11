@@ -223,7 +223,10 @@ describe('switchTarget', () => {
 		['/settings', '/settings'],
 		['/settings/account', '/settings/account'],
 		['/settings/server', '/settings/server'],
-		['', '/traces']
+		['', '/traces'],
+		// A stale link's 404 is not a section to keep: the switch is the exit.
+		['/nonsense', '/traces'],
+		['/nonsense/deeper', '/traces']
 	])('%s lands on %s of the other project', async (from, to) => {
 		const { switchTarget } = await fresh();
 

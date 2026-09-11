@@ -114,17 +114,34 @@ export function within(pathname: string): string {
 	return match[1] ?? '/';
 }
 
+/** The sections a switch keeps (#6): the first path segment under the prefix. */
+const SECTIONS = new Set([
+	'traces',
+	'sessions',
+	'users',
+	'stats',
+	'prompts',
+	'datasets',
+	'runs',
+	'score-configs',
+	'queues',
+	'quality',
+	'settings'
+]);
+
 /**
  * Where switching to another project lands (#6): the same section, and for
  * Settings the same tab, with everything deeper dropped — a trace, a prompt, a
  * queue belong to the project they came from. The query is kept except the
  * keys that name something in the old project: the page's position and the
  * peek panel. A filter is a question, and the same question of the other
- * project; a cursor is an answer.
+ * project; a cursor is an answer. A first segment that is no section — the
+ * 404 a stale link lands on — is not carried over: the switcher is a way out
+ * of that page, not a way to see it again under another id.
  */
 export function switchTarget(url: URL, id: string): string {
 	const segments = within(url.pathname).split('/').filter(Boolean);
-	const section = segments[0] ?? 'traces';
+	const section = segments[0] && SECTIONS.has(segments[0]) ? segments[0] : 'traces';
 	const kept = section === 'settings' && segments[1] ? `/${section}/${segments[1]}` : `/${section}`;
 	const query = new URLSearchParams(url.search);
 	for (const key of [CURSOR, DIRECTION, PEEK, TRACE, OBS]) query.delete(key);
