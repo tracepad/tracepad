@@ -3,6 +3,7 @@
 	import type { TraceRow } from '$lib/api/client.svelte';
 	import { ABSENT, cost, duration, timestamp, wait } from '$lib/format';
 	import { modified, selecting } from '$lib/peek';
+	import { href } from '$lib/project.svelte';
 	import { highlight, searchTerms } from '$lib/search';
 
 	// The listing, one row per trace, mapping 1:1 onto what
@@ -119,9 +120,13 @@
 						     and "everything in this session" are destinations, and a
 						     destination reachable only with a mouse is not one. -->
 						<a
-							href="/traces/{row.id}{row.match?.observation_id
-								? `?obs=${encodeURIComponent(row.match.observation_id)}`
-								: ''}"
+							href={href(
+								`/traces/${row.id}${
+									row.match?.observation_id
+										? `?obs=${encodeURIComponent(row.match.observation_id)}`
+										: ''
+								}`
+							)}
 							aria-current={lit ? 'true' : undefined}
 							title={row.id}
 						>
@@ -138,7 +143,7 @@
 						     opens the panel, which is why the link stops the event. -->
 						{#if row.user_id}
 							<a
-								href="/users/{encodeURIComponent(row.user_id)}"
+								href={href(`/users/${encodeURIComponent(row.user_id)}`)}
 								onclick={(event) => event.stopPropagation()}
 								title="Everything about {row.user_id}"
 								class="hover:text-fg hover:underline"
@@ -160,7 +165,7 @@
 							{ABSENT}
 						{:else if linkSession}
 							<a
-								href="/sessions/{encodeURIComponent(row.session_id)}"
+								href={href(`/sessions/${encodeURIComponent(row.session_id)}`)}
 								onclick={(event) => event.stopPropagation()}
 								title="Everything in {row.session_id}"
 								class="hover:text-fg hover:underline"

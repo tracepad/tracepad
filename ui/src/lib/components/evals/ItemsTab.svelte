@@ -6,6 +6,7 @@
 	import { short } from '$lib/evals';
 	import { asPage, Listing, UrlSpot, Walk } from '$lib/listing.svelte';
 	import { peekSearch, readPeek } from '$lib/peek';
+	import { href } from '$lib/project.svelte';
 	import CopyButton from '../CopyButton.svelte';
 	import ListingShell from '../ListingShell.svelte';
 	import PeekPanel from '../PeekPanel.svelte';
@@ -115,9 +116,11 @@
 		onnext={() => walk.step(1)}
 		hasPrev={walk.hasPrev}
 		hasNext={walk.hasNext}
-		fullHref={head
-			? `/datasets/${encodeURIComponent(dataset.name)}/items/${encodeURIComponent(peekID)}/edit`
-			: `/datasets/${encodeURIComponent(dataset.name)}?version=${version}&peek=${peekID}`}
+		fullHref={href(
+			head
+				? `/datasets/${encodeURIComponent(dataset.name)}/items/${encodeURIComponent(peekID)}/edit`
+				: `/datasets/${encodeURIComponent(dataset.name)}?version=${version}&peek=${peekID}`
+		)}
 		fullLabel={head ? 'Open this item in the editor' : 'Link to this item'}
 	>
 		{#snippet title()}

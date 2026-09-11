@@ -197,8 +197,13 @@ class Api {
 	 */
 	version = $state.raw<string | null>(null);
 
-	listProjects(signal?: AbortSignal) {
-		return this.#json<ProjectList>('/api/v1/projects', { signal });
+	/**
+	 * The projects this session reaches. `activity: '24h'` puts each row's
+	 * traces of the last day on it (spec 029 #8), which is what the switcher
+	 * asks for on every open and nothing asks for on load.
+	 */
+	listProjects(query: { activity?: '24h' } = {}, signal?: AbortSignal) {
+		return this.#json<ProjectList>('/api/v1/projects', { query, signal });
 	}
 
 	listTraces(

@@ -12,7 +12,7 @@
 	} from '$lib/api/client.svelte';
 	import { ABSENT, duration, elapsed, timestampPrecise, wait } from '$lib/format';
 	import CopyButton from './CopyButton.svelte';
-	import { project } from '$lib/project.svelte';
+	import { href, project } from '$lib/project.svelte';
 	import AddToQueue from './queues/AddToQueue.svelte';
 	import Payload from './Payload.svelte';
 	import ScoresBlock from './scores/ScoresBlock.svelte';
@@ -114,7 +114,7 @@
 		const prompt = observation.prompt;
 		if (!prompt) return null;
 		const label = prompt.version == null ? prompt.name : `${prompt.name}@${prompt.version}`;
-		return `/traces?prompt=${encodeURIComponent(label)}`;
+		return href(`/traces?prompt=${encodeURIComponent(label)}`);
 	});
 </script>
 
@@ -147,7 +147,9 @@
 				/>
 			{/if}
 			<a
-				href="/datasets/items/new?trace={encodeURIComponent(traceID)}&obs={encodeURIComponent(observation.id)}"
+				href={href(
+					`/datasets/items/new?trace=${encodeURIComponent(traceID)}&obs=${encodeURIComponent(observation.id)}`
+				)}
 				title="Cut this observation into a dataset as a test case"
 				class="border-border bg-surface text-fg hover:bg-raised pointer-coarse:h-11
 					pointer-coarse:px-4 inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border

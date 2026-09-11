@@ -5,7 +5,7 @@
 	import { DropdownMenu } from 'bits-ui';
 	import { goto } from '$app/navigation';
 	import { auth, LOGIN_ROUTE } from '$lib/auth.svelte';
-	import { project } from '$lib/project.svelte';
+	import { href, project } from '$lib/project.svelte';
 	import { end } from '$lib/session';
 
 	// Who is signed in, at the bottom of the sidebar (spec 028 #14). The
@@ -61,7 +61,7 @@
 			<p class="text-subtle truncate px-2 py-1 text-xs">{auth.account?.email ?? ''}</p>
 			<DropdownMenu.Item>
 				{#snippet child({ props })}
-					<a href="/settings/account" {...props} class={item}>
+					<a href={href('/settings/account')} {...props} class={item}>
 						<UserRound class="size-4 shrink-0" />
 						Account
 					</a>

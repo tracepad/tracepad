@@ -4,6 +4,7 @@
 	import { Popover } from 'bits-ui';
 	import { ApiError, api, type AnnotationQueue, type QueueTarget } from '$lib/api/client.svelte';
 	import { count } from '$lib/format';
+	import { href } from '$lib/project.svelte';
 	import { FROM_TRACES_CAP } from '$lib/queues';
 	import type { TraceFilters } from '$lib/api/traces';
 	import Button from '../Button.svelte';
@@ -119,7 +120,7 @@
 			{:else if queues && queues.length === 0}
 				<p class="text-muted text-sm">
 					This project has no review queues yet.
-					<a class="text-accent underline underline-offset-2" href="/queues">Make one</a>.
+					<a class="text-accent underline underline-offset-2" href={href('/queues')}>Make one</a>.
 				</p>
 			{:else if queues}
 				<label for="add-to-queue" class="mb-1 block text-xs font-medium">Queue</label>

@@ -24,7 +24,9 @@ vi.mock('$lib/project.svelte', () => ({
 		get role() {
 			return current.role;
 		}
-	}
+	},
+	// The link is written under the project on screen (spec 029 #2).
+	href: (path: string) => `/p/${'a'.repeat(32)}${path}`
 }));
 vi.mock('$lib/session', () => ({ end: () => end() }));
 
@@ -82,7 +84,7 @@ describe('the menu', () => {
 	it('offers the account tab and signing out', async () => {
 		const { items, item } = await open('Account');
 
-		expect(item).toHaveAttribute('href', '/settings/account');
+		expect(item).toHaveAttribute('href', `/p/${'a'.repeat(32)}/settings/account`);
 		expect(items.map((one) => one.textContent?.trim())).toEqual(['Account', 'Sign out']);
 		// The email is here rather than on the trigger: it is what you check,
 		// not what you read at a glance.

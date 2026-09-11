@@ -3,6 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { api, type DryRun } from '$lib/api/client.svelte';
 	import { count } from '$lib/format';
+	import { href } from '$lib/project.svelte';
 	import ConfirmCard from '../ConfirmCard.svelte';
 
 	// Deleting a queue is the act here with a blast radius (spec 024 #8): the
@@ -52,7 +53,7 @@
 				subject={name}
 				preview={() => ask()}
 				execute={(confirm) => ask(confirm) as Promise<string>}
-				ondone={() => void goto('/queues')}
+				ondone={() => void goto(href('/queues'))}
 			/>
 		</Dialog.Content>
 	</Dialog.Portal>

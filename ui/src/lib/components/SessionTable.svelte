@@ -3,6 +3,7 @@
 	import type { SessionRow } from '$lib/api/client.svelte';
 	import { ABSENT, cost, count, timestamp } from '$lib/format';
 	import { modified, selecting } from '$lib/peek';
+	import { href } from '$lib/project.svelte';
 
 	// The session listing, one row per session, mapping 1:1 onto what
 	// `GET /api/v1/sessions` returns. Every number counts traces, which is what
@@ -69,7 +70,7 @@
 						     points at. Enter opens the panel, as a plain click does
 						     (spec 008 #16). -->
 						<a
-							href="/sessions/{encodeURIComponent(row.id)}"
+							href={href(`/sessions/${encodeURIComponent(row.id)}`)}
 							aria-current={row.id === selectedID ? 'true' : undefined}
 							title={row.id}
 						>

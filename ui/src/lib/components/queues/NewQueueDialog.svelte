@@ -4,6 +4,7 @@
 	import { Dialog } from 'bits-ui';
 	import { goto } from '$app/navigation';
 	import { ApiError, api, type ScoreConfig } from '$lib/api/client.svelte';
+	import { href } from '$lib/project.svelte';
 	import { queueProblem } from '$lib/queues';
 	import Button from '../Button.svelte';
 
@@ -67,7 +68,7 @@
 				score_configs: picked
 			});
 			onclose();
-			await goto(`/queues/${encodeURIComponent(queue.name)}`);
+			await goto(href(`/queues/${encodeURIComponent(queue.name)}`));
 		} catch (cause) {
 			failure = cause instanceof ApiError ? cause.message : 'Failed to create the queue.';
 		} finally {
@@ -122,7 +123,7 @@
 				{#if configs.length === 0}
 					<p class="text-warn mt-1 text-sm">
 						This project has declared no score configs. A queue is the scores it asks for, so
-						declare one first on <a class="underline" href="/score-configs">Score configs</a>.
+						declare one first on <a class="underline" href={href('/score-configs')}>Score configs</a>.
 					</p>
 				{:else}
 					<div class="mt-1.5 flex flex-wrap gap-x-4 gap-y-1">

@@ -3,6 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { api, type DryRun } from '$lib/api/client.svelte';
 	import { count } from '$lib/format';
+	import { href } from '$lib/project.svelte';
 	import ConfirmCard from '../ConfirmCard.svelte';
 
 	// Deleting a dataset is the one act here with a blast radius (spec 016 #6):
@@ -55,7 +56,7 @@
 				subject={name}
 				preview={() => ask()}
 				execute={(confirm) => ask(confirm) as Promise<string>}
-				ondone={() => void goto('/datasets')}
+				ondone={() => void goto(href('/datasets'))}
 			/>
 		</Dialog.Content>
 	</Dialog.Portal>

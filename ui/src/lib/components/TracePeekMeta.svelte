@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { Trace } from '$lib/api/client.svelte';
 	import { cost, duration, timestamp } from '$lib/format';
+	import { href } from '$lib/project.svelte';
 	import CopyButton from './CopyButton.svelte';
 
 	// What a panel says about the trace it has open (spec 026 #4): when it
@@ -54,7 +55,7 @@
 	     where the reader is already in that session. -->
 	{#if shown('session') && trace.session_id}
 		<a
-			href="/sessions/{encodeURIComponent(trace.session_id)}"
+			href={href(`/sessions/${encodeURIComponent(trace.session_id)}`)}
 			title="Everything in {trace.session_id}"
 			class="hover:text-fg hidden truncate font-mono hover:underline md:inline"
 		>

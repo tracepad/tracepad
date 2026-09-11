@@ -20,6 +20,7 @@
 		type Draft,
 		type PromptType
 	} from '$lib/prompts';
+	import { href } from '$lib/project.svelte';
 	import Button from '../Button.svelte';
 	import JsonEditor from '../json/JsonEditor.svelte';
 	import LabelChip from './LabelChip.svelte';
@@ -159,7 +160,7 @@
 				...versionBody(draft),
 				expect_version: expect
 			});
-			await goto(`/prompts/${encodeURIComponent(to)}?version=${created.version}`);
+			await goto(href(`/prompts/${encodeURIComponent(to)}?version=${created.version}`));
 		} catch (cause) {
 			// Including the `404` of a prompt deleted while this page was open
 			// (edge cases): the server is the oracle, and it says so here.
@@ -177,7 +178,7 @@
 		}
 	}
 
-	const back = $derived(naming ? '/prompts' : `/prompts/${encodeURIComponent(name)}`);
+	const back = $derived(href(naming ? '/prompts' : `/prompts/${encodeURIComponent(name)}`));
 	const field = 'border-border bg-canvas text-fg rounded-md border px-2 py-1 text-sm';
 	const area = `${field} min-h-24 w-full resize-y font-mono`;
 </script>
@@ -227,7 +228,7 @@
 					at v{conflict.at}. Nothing here was saved.
 					<a
 						class="text-accent underline underline-offset-2"
-						href="/prompts/{encodeURIComponent(conflict.name)}?version={conflict.at}"
+						href={href(`/prompts/${encodeURIComponent(conflict.name)}?version=${conflict.at}`)}
 					>
 						Open it
 					</a>

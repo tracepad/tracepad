@@ -3,6 +3,7 @@
 	import type { Run } from '$lib/api/client.svelte';
 	import { compareChoice, compareHref, short } from '$lib/evals';
 	import { ABSENT, timestamp } from '$lib/format';
+	import { href } from '$lib/project.svelte';
 	import Button from '../Button.svelte';
 	import StatusChip from './StatusChip.svelte';
 
@@ -54,7 +55,7 @@
 	     than becoming the server's 400 page (#11). -->
 	{#if choice.enabled}
 		<a
-			href={compareHref(chosen[0].id, chosen[1].id)}
+			href={href(compareHref(chosen[0].id, chosen[1].id))}
 			title={choice.reason}
 			class="border-accent bg-accent text-on-accent pointer-coarse:h-11 pointer-coarse:px-4 inline-flex
 				h-7 items-center gap-1.5 rounded-md border px-2.5 text-sm font-medium whitespace-nowrap
@@ -111,19 +112,19 @@
 						<!-- Exactly one thing in the row is tabbable, and it is a real
 						     link to the run's page: a run has no peek, its page is
 						     where its summary lives (spec 016, Application contract). -->
-						<a href="/runs/{row.id}" title={row.id} class="hover:text-fg">
+						<a href={href(`/runs/${row.id}`)} title={row.id} class="hover:text-fg">
 							{timestamp(row.created_at)}
 						</a>
 					</td>
 					{#if withDataset}
 						<td class="text-muted {cell}">
-							<a href="/datasets/{encodeURIComponent(row.dataset)}" class="hover:text-fg">
+							<a href={href(`/datasets/${encodeURIComponent(row.dataset)}`)} class="hover:text-fg">
 								{row.dataset}
 							</a>
 						</td>
 					{/if}
 					<td class={cell}>
-						<a href="/runs/{row.id}" class="hover:text-accent">{row.name ?? short(row.id)}</a>
+						<a href={href(`/runs/${row.id}`)} class="hover:text-accent">{row.name ?? short(row.id)}</a>
 					</td>
 					<td class="text-muted px-3 py-1.5 text-right tabular-nums">v{row.dataset_version}</td>
 					<td class="px-3 py-1.5">

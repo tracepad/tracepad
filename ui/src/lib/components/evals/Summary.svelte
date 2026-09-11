@@ -2,6 +2,7 @@
 	import type { RunWithSummary } from '$lib/api/client.svelte';
 	import { trim } from '$lib/evals';
 	import { ABSENT, cost, count, duration } from '$lib/format';
+	import { href } from '$lib/project.svelte';
 
 	// A run's summary as the server computed it (spec 014 API contract →
 	// Runs): coverage, traffic, the scores table, what actually ran, and what
@@ -74,7 +75,9 @@
 						{#each summary.prompts as prompt, i (`${prompt.name}@${prompt.version}`)}
 							{i > 0 ? ', ' : ''}<a
 								class="hover:text-accent underline underline-offset-2"
-								href="/traces?prompt={encodeURIComponent(prompt.version == null ? prompt.name : `${prompt.name}@${prompt.version}`)}"
+								href={href(
+									`/traces?prompt=${encodeURIComponent(prompt.version == null ? prompt.name : `${prompt.name}@${prompt.version}`)}`
+								)}
 							>
 								{prompt.name}{prompt.version == null ? '' : `@${prompt.version}`}
 							</a>

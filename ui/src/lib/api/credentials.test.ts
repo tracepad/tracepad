@@ -19,6 +19,20 @@ vi.mock('$app/navigation', () => ({ goto, replaceState }));
 const PROJECT = 'a'.repeat(32);
 const OTHER = 'b'.repeat(32);
 
+// The project on screen is the one in the URL (spec 029 #2), which the client
+// reads off the route parameter.
+const params = { current: { project: PROJECT } as { project?: string } };
+vi.mock('$app/state', () => ({
+	page: {
+		get params() {
+			return params.current;
+		},
+		get url() {
+			return new URL(`http://tracepad.test/p/${params.current.project ?? ''}/traces`);
+		}
+	}
+}));
+
 const ME = {
 	account: { id: 'acc1', email: 'her@example.com', name: 'Her', owner: true },
 	projects: [
@@ -33,7 +47,7 @@ async function fresh() {
 	const { auth } = await import('$lib/auth.svelte');
 	const { project } = await import('$lib/project.svelte');
 	auth.adopt(ME);
-	project.restore();
+	params.current = { project: PROJECT };
 	return { api, ApiError, auth, project };
 }
 
@@ -88,14 +102,26 @@ describe('the data plane', () => {
 		}
 	});
 
-	it('follows the project the reader picked', async () => {
-		const { api, project } = await fresh();
-		project.choose(OTHER);
+	it('follows the project in the URL', async () => {
+		const { api } = await fresh();
+		params.current = { project: OTHER };
 		const calls = spyFetch({ traces: [], next_cursor: null });
 
 		await api.listTraces({});
 
 		expect(calls[0].project).toBe(OTHER);
+	});
+
+	// An id the account cannot reach is no project at all (spec 029 #4): no
+	// header, rather than one the server would answer 403 to.
+	it('names nothing for a project the account cannot reach', async () => {
+		const { api } = await fresh();
+		params.current = { project: 'c'.repeat(32) };
+		const calls = spyFetch({ traces: [], next_cursor: null });
+
+		await api.listTraces({});
+
+		expect(calls[0].project).toBeNull();
 	});
 });
 

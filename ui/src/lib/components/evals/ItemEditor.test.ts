@@ -13,7 +13,12 @@ import ItemEditor from './ItemEditor.svelte';
 const putItem = vi.fn(async () => ({ ids: ['a'.repeat(32)], version: 2, changed: 1 }));
 
 vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
-vi.mock('$app/state', () => ({ page: { url: new URL('http://tracepad.test/datasets/items/new') } }));
+vi.mock('$app/state', () => ({
+	page: {
+		url: new URL(`http://tracepad.test/p/${'a'.repeat(32)}/datasets/items/new`),
+		params: { project: 'a'.repeat(32) }
+	}
+}));
 vi.mock('$lib/api/client.svelte', () => ({
 	ApiError: class extends Error {},
 	api: {

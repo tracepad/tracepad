@@ -58,16 +58,21 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { api } from '$lib/api/client.svelte';
-	import { project } from '$lib/project.svelte';
+	import { href, switcher, within } from '$lib/project.svelte';
 	import AccountMenu from './AccountMenu.svelte';
+	import ProjectSwitcher from './ProjectSwitcher.svelte';
 	import ThemeToggle from './ThemeToggle.svelte';
 
 	// One markup, two shapes (spec 006 #15): a column down the left on a
 	// desktop, a single bar across the top on a phone. Utilities rather than a
 	// second component — the parts and their order are the same either way.
 
-	/** The active screen: the one whose path this URL is under. */
-	const active = (href: string) => page.url.pathname.startsWith(href);
+	/**
+	 * The active screen: the one whose path this URL is under, compared
+	 * after the project prefix (spec 029 #2) — every section lives under
+	 * `/p/{id}`, and the id is not part of which screen this is.
+	 */
+	const active = (path: string) => within(page.url.pathname).startsWith(path);
 
 	const link =
 		'flex items-center gap-2 rounded-md px-2 py-1.5 transition-colors duration-100 pointer-coarse:min-h-11';
@@ -79,7 +84,7 @@
 	{@const Glyph = entry.icon}
 	<li>
 		<a
-			href={entry.href}
+			href={href(entry.href)}
 			aria-current={active(entry.href) ? 'page' : undefined}
 			class={[link, indented && 'md:ml-3', active(entry.href) ? lit : dim]}
 		>
@@ -103,11 +108,10 @@
 		<span class="text-lg font-semibold tracking-tight">Tracepad</span>
 	</div>
 
-	<div
-		class="text-subtle min-w-0 flex-1 truncate text-xs md:flex-none md:px-3 md:pb-2"
-		title={project.name ?? undefined}
-	>
-		{project.name ?? '—'}
+	<!-- The switcher (spec 029 #5), in the space the project name had: the
+	     same control on the phone bar and in the column. -->
+	<div class="flex min-w-0 flex-1 items-center md:flex-none md:px-2 md:pb-2">
+		<ProjectSwitcher bind:open={switcher.open} />
 	</div>
 
 	<div class="flex w-full min-w-0 items-center gap-2 md:contents">
