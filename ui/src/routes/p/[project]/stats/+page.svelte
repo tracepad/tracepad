@@ -15,13 +15,13 @@
 	import { cost, count, duration } from '$lib/format';
 	import { href } from '$lib/project.svelte';
 
-	// Stats over `GET /api/v1/stats`: four time series and two categorical
+	// Stats over `GET /api/v1/stats`: five time series and three categorical
 	// breakdowns, all of them the endpoint's own numbers. Nothing is computed
 	// here that the API did not send, except the x axis — time passes whether
 	// or not anything was traced, and a bucket with no row stays a gap.
 	//
-	// Three requests, because `group_by` is one dimension at a time: the
-	// timeline, then the model and environment breakdowns.
+	// Four requests, because `group_by` is one dimension at a time: the
+	// timeline, then the model, environment and release breakdowns.
 
 	const range = $derived(readRange(page.url.searchParams));
 	const environment = $derived(page.url.searchParams.get('environment')?.trim() ?? '');
@@ -94,7 +94,14 @@
 	const totals = $derived({
 		traces: sum(series.count),
 		errors: sum(series.errors),
-		cost: series.cost.some((value) => value !== null) ? sum(series.cost) : null
+		cost: series.cost.some((value) => value !== null) ? sum(series.cost) : null,
+		// Input plus output, cache read excluded: a bill is made of the
+		// first two, and the third would count the same tokens twice for
+		// the providers that report cached tokens inside the input (spec
+		// 031 #6). Absent when no bucket carried either, like cost.
+		tokens: [...series.input, ...series.output].some((value) => value !== null)
+			? sum(series.input) + sum(series.output)
+			: null
 	});
 
 	function sum(values: (number | null)[]): number {
@@ -138,7 +145,8 @@
 			<LoaderCircle class="size-3.5 animate-spin" />
 		{:else}
 			<span class="tabular-nums">
-				{count(totals.traces)} traces · {count(totals.errors)} with errors · {cost(totals.cost)}
+				{count(totals.traces)} traces · {count(totals.errors)} with errors · {cost(totals.cost)} ·
+				{count(totals.tokens)} tokens
 			</span>
 		{/if}
 	{/snippet}
@@ -205,6 +213,17 @@
 			summary="{cost(totals.cost)} in total; a bucket where nothing reported a cost is a gap, not a zero."
 		/>
 		<Chart
+			title="Tokens"
+			x={series.x}
+			lines={[
+				{ label: 'Input', values: series.input, token: 'accent' },
+				{ label: 'Output', values: series.output, token: 'ok' },
+				{ label: 'Cache read', values: series.cacheRead, token: 'muted' }
+			]}
+			format={(value) => count(value)}
+			summary="{count(totals.tokens)} input and output tokens in total; a bucket where nothing reported usage is a gap, not a zero."
+		/>
+		<Chart
 			title="Latency"
 			x={series.x}
 			lines={[
@@ -225,18 +244,21 @@
 
 	<div class="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-2">
 		<BreakdownTable
+			tokens
 			title="By model"
 			label="Model"
 			unit={models?.unit ?? 'observation'}
 			rows={breakdown((models?.buckets ?? []) as StatsBucket[])}
 		/>
 		<BreakdownTable
+			tokens
 			title="By environment"
 			label="Environment"
 			unit={environments?.unit ?? 'trace'}
 			rows={breakdown((environments?.buckets ?? []) as StatsBucket[])}
 		/>
 		<BreakdownTable
+			tokens
 			title="By release"
 			label="Release"
 			unit={releases?.unit ?? 'trace'}

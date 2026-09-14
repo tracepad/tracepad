@@ -1068,7 +1068,13 @@ func (r *run) stats(ctx context.Context, args []string) error {
 			TotalCost  *float64 `json:"total_cost"`
 			// Sessions rides only a `--user` timeline (spec 023 #6), so
 			// the column appears only when the answer carries it.
-			Sessions  *int `json:"sessions"`
+			Sessions *int `json:"sessions"`
+			// Tokens is absent when nothing in the bucket reported usage,
+			// and each key when nothing reported that class (spec 031 #4).
+			Tokens *struct {
+				Input  *int64 `json:"input"`
+				Output *int64 `json:"output"`
+			} `json:"tokens"`
 			LatencyMs struct {
 				P50 *int64 `json:"p50"`
 				P95 *int64 `json:"p95"`
@@ -1089,13 +1095,28 @@ func (r *run) stats(ctx context.Context, args []string) error {
 	if sessions {
 		headers = append(headers, "SESSIONS")
 	}
-	t := newTable(r.opt.Stdout, append(headers, "ERRORS", "COST", "P50", "P95")...)
+	// TOKENS is input plus output — what a bill is made of — and a dash
+	// when the bucket reported neither, the way COST is a dash when nothing
+	// in it was priced (spec 031 #13). Cache read is not in it: a provider
+	// that reports cached tokens inside the input would be counted twice.
+	t := newTable(r.opt.Stdout, append(headers, "ERRORS", "COST", "TOKENS", "P50", "P95")...)
 	for _, bucket := range result.Buckets {
 		cells := []string{bucket.Key, strconv.Itoa(bucket.Count)}
 		if sessions {
 			cells = append(cells, strconv.Itoa(deref(bucket.Sessions)))
 		}
-		t.row(append(cells, strconv.Itoa(bucket.ErrorCount), cost(bucket.TotalCost),
+		tokens := "-"
+		if bucket.Tokens != nil && (bucket.Tokens.Input != nil || bucket.Tokens.Output != nil) {
+			var billed int64
+			if bucket.Tokens.Input != nil {
+				billed += *bucket.Tokens.Input
+			}
+			if bucket.Tokens.Output != nil {
+				billed += *bucket.Tokens.Output
+			}
+			tokens = strconv.FormatInt(billed, 10)
+		}
+		t.row(append(cells, strconv.Itoa(bucket.ErrorCount), cost(bucket.TotalCost), tokens,
 			duration(bucket.LatencyMs.P50), duration(bucket.LatencyMs.P95))...)
 	}
 	t.flush()

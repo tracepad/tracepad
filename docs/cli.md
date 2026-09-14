@@ -424,6 +424,13 @@ environment or release counts **traces**, grouping by model counts
 **observations**, because a trace has no model. Grouped by release, the traces
 that named none share one bucket with an empty key.
 
+TOKENS is input plus output — what a bill is made of — summed over the
+generations in the bucket, and a dash when none of them reported usage, the
+way COST is a dash when nothing was priced. Cache-read tokens are not in it
+(a provider that reports cached tokens inside the input would be counted
+twice); `--json` carries all three under `tokens`
+([api.md](api.md#statistics)).
+
 `--env` takes the list every other command takes it as
 ([Lists](#lists)): `--env production,staging` counts both.
 
