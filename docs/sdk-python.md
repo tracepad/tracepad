@@ -156,15 +156,51 @@ call.end(
 `usage` keys are written verbatim under `gen_ai.usage.*` and the store keeps
 them under the names you sent.
 
-For a stream, `call.first_token()` stamps the completion start the moment the
-first chunk arrives — that is where the TTFT column comes from. Only the first
-call counts. Leaving the block without `end` ends the span with what it has.
+`call.first_token()` stamps the completion start the moment the first chunk
+arrives — that is where the TTFT column comes from. Only the first call counts.
+Leaving the block without `end` ends the span with what it has.
+
+### Streams
+
+A streamed answer goes through `call.stream(…)`, which yields every chunk
+unchanged and does the bookkeeping on the way:
+
+```python
+with tracepad.generation("chat", model="gpt-4o-mini", input=messages) as call:
+    stream = client.chat.completions.create(
+        model="gpt-4o-mini", messages=messages, stream=True,
+        stream_options={"include_usage": True},
+    )
+    for chunk in call.stream(stream):
+        if chunk.choices:  # the last chunk carries the usage and no choices
+            print(chunk.choices[0].delta.content or "", end="")
+```
+
+The first chunk with content stamps the first token, so `first_token()` is not
+needed; the `choices[0].delta.content` pieces are joined into the `output`; the
+`model` is taken from the chunks that name it and the `usage` — the cost
+included — from the chunk that carries it, which is the last one. When the
+stream is exhausted the generation ends with all of that, through the same
+table as `end(response=…)`. A stream you leave early, with `break` or an
+exception, is ended by the block around it, with what had been read by then
+and the exception recorded; an `end(…)` you call yourself before the stream is
+over wins, and nothing ends twice. An `async` client reads the same way:
+`async for chunk in call.astream(stream)`.
+
+**Whether the stream carries usage is the provider's choice**, and the package
+cannot make it, because the request is yours. Ask for it: an OpenAI-compatible
+client takes `stream_options={"include_usage": True}`, which adds a final chunk
+with `usage` and no `choices`; OpenRouter takes
+`extra_body={"usage": {"include": True}}`, and the cost rides in that same
+final chunk as `usage.cost`. Without either, the stream records the model and
+the output and no usage — no token counts, no cost — the same as a whole
+response with no `usage` in it.
 
 `@tracepad.observe(type="generation")` is the same reader over a function's
 return value, for a helper that already returns the provider's response. A
 generator is the exception: what it returns is the list of its chunks rather
 than an answer, so that list is recorded as the `output` and nothing is read
-from it.
+from it. For a stream, `call.stream` is the helper, not the decorator.
 
 ## The trace around a step
 

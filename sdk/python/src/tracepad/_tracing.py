@@ -17,7 +17,7 @@ import functools
 import inspect
 import os
 import sys
-from collections.abc import AsyncIterator, Callable, Iterator, Sequence
+from collections.abc import AsyncIterable, AsyncIterator, Callable, Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from time import time_ns
@@ -28,7 +28,7 @@ from opentelemetry import trace as otel
 
 from . import _attributes as attrs
 from ._config import VERSION, Config, adopt, resolve
-from ._generation import read_response
+from ._generation import Stream, read_response
 from ._log import logger
 from ._scores import flush_scores
 
@@ -169,6 +169,12 @@ class Observation:
     def span_id(self) -> str:
         return format(self.span.get_span_context().span_id, "016x")
 
+    def _finish(self, end_time: int | None = None) -> None:
+        """End the span once, with what it has: how a block leaves."""
+        if not self._ended:
+            self._ended = True
+            self.span.end(end_time)
+
     def update(
         self,
         *,
@@ -210,6 +216,9 @@ class Generation(Observation):
         super().__init__(span)
         self._first_token = False
         self._capture_output = capture_output
+        # What `stream` has read so far, folded into `end` when the stream is
+        # over — or when the block is left with the stream unfinished.
+        self._stream: Stream | None = None
 
     def first_token(self) -> None:
         """Stamp the moment the first token came back. Only the first call counts."""
@@ -217,6 +226,38 @@ class Generation(Observation):
             return
         self._first_token = True
         self.span.set_attribute(attrs.COMPLETION_START_TIME, attrs.rfc3339(time_ns()))
+
+    def stream(self, chunks: Iterable[Any]) -> Iterator[Any]:
+        """Pass a streamed OpenAI-compatible answer through (spec 031 #7).
+
+        Yields every chunk unchanged. The first chunk with content stamps the
+        first token; the content deltas are joined into the output; the model
+        and the `usage` — cost included — are taken from the chunks that carry
+        them, which for `usage` is the last one, when the provider was asked
+        to send it (`docs/sdk-python.md`). When the stream is exhausted the
+        generation ends with all of that, as if `end(response=…)` had been
+        given the whole answer. A stream that is closed early, or that raises,
+        leaves the ending to the block around it, which records the exception
+        and ends the span with what the stream gathered; an `end` you call
+        yourself before the stream is over wins, and nothing ends twice.
+        """
+        stream = self._stream = Stream()
+        for chunk in chunks:
+            if stream.take(chunk):
+                self.first_token()
+            yield chunk
+        if not self._ended:
+            self.end()
+
+    async def astream(self, chunks: AsyncIterable[Any]) -> AsyncIterator[Any]:
+        """`stream`, over an async stream: `async for chunk in call.astream(…)`."""
+        stream = self._stream = Stream()
+        async for chunk in chunks:
+            if stream.take(chunk):
+                self.first_token()
+            yield chunk
+        if not self._ended:
+            self.end()
 
     def end(
         self,
@@ -230,9 +271,12 @@ class Generation(Observation):
         """Record the result and end the span.
 
         `response` is read as an OpenAI-compatible answer (spec 017 #5); every
-        explicit argument wins over what was read. Leaving the block without
-        calling this ends the span with what it has.
+        explicit argument wins over what was read. With no `response`, what
+        `stream` gathered stands in for it. Leaving the block without calling
+        this ends the span with what it has.
         """
+        if response is None and self._stream is not None:
+            response = self._stream.response()
         fields = read_response(response) if response is not None else {}
         if model is not None:
             fields["model"] = model
@@ -254,9 +298,14 @@ class Generation(Observation):
         _set(span, attrs.USAGE_COST, fields.get("cost"))
         if "output" in fields:
             _set(span, attrs.OUTPUT, attrs.dumps(fields["output"]))
-        if not self._ended:
-            self._ended = True
-            span.end()
+        Observation._finish(self)
+
+    def _finish(self, end_time: int | None = None) -> None:
+        # A block left while a stream is under way still records what the
+        # stream read: the output so far, and the usage if it got that far.
+        if self._stream is not None and not self._ended:
+            self.end()
+        super()._finish(end_time)
 
 
 def update(
@@ -378,7 +427,7 @@ def _open(
             yield handle
     finally:
         _current.reset(token)
-        _end(handle, end_time)
+        handle._finish(end_time)
 
 
 @contextmanager
@@ -405,12 +454,6 @@ def _failed(handle: Observation, error: BaseException) -> None:
     """Record an exception the way `use_span` does for the other shapes."""
     handle.span.record_exception(error)
     handle.span.set_status(otel.Status(otel.StatusCode.ERROR, str(error)))
-
-
-def _end(handle: Observation, end_time: int | None = None) -> None:
-    if not handle._ended:
-        handle._ended = True
-        handle.span.end(end_time)
 
 
 def span(name: str, *, input: Any = None, metadata: dict[str, Any] | None = None) -> Any:
@@ -518,7 +561,7 @@ def observe(
                     raise
                 finally:
                     leave(observation, yielded, as_response=False)
-                    _end(observation)
+                    observation._finish()
 
             return async_generator
 
@@ -545,7 +588,7 @@ def observe(
                     raise
                 finally:
                     leave(observation, yielded, as_response=False)
-                    _end(observation)
+                    observation._finish()
 
             return generator
 

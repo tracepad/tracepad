@@ -271,7 +271,8 @@ Two consequences worth knowing:
   convention degrades to visible metadata, never to lost data.
 - **Cost is never estimated.** There is no price table. `total_cost` is
   present only when the client sent one; otherwise the UI shows "no data",
-  not `$0`.
+  not `$0`. How to send one, for each way in, is
+  [below](#where-the-price-comes-from).
 - **Exceptions count as errors.** OTel records a failure as a span *event*,
   not an attribute. Every event is kept under `metadata.events` with its
   attributes intact — stack traces included — and a span carrying an
@@ -392,6 +393,59 @@ a negative TTFT rather than a silently corrected one.
 The trace's is null when no observation carried a completion start, and also
 when none of them said when it started: a wait needs a moment to be measured
 from, and a trace like that has no latency either.
+
+### Where the price comes from
+
+A price on an observation is one the provider reported and your side put on
+the span; the mapping reads it from `langfuse.observation.cost_details` or
+`gen_ai.usage.cost` (the table above) and never computes one. Which of the
+two you write, and where, depends on how your spans get here.
+
+**The `tracepad` package** reads it from the answer. `call.end(response=…)`
+takes an OpenAI-compatible response and writes `usage.cost` when it is there —
+OpenRouter puts the charge in that field on every non-streamed answer, and on
+a streamed one when asked (`extra_body={"usage": {"include": True}}`, read by
+`call.stream`). A provider that reports its charge some other way is carried
+by the explicit argument, `call.end(cost=…)`. Both are in
+[sdk-python.md](sdk-python.md#generations).
+
+**A Langfuse SDK** puts it in the generation's `cost_details` — an object with
+`input`, `output` and `total`, or any subset; a missing `total` is the sum of
+the parts — which arrives as `langfuse.observation.cost_details`. Nothing
+about that changes when the SDK points at Tracepad: what the SDK's own docs
+say about recording a cost is what applies.
+
+**Your own OpenTelemetry spans** carry it as `gen_ai.usage.cost`, a number,
+set on the span before it ends:
+
+```python
+with tracer.start_as_current_span("chat") as span:
+    span.set_attribute("gen_ai.request.model", "gpt-4o-mini")
+    response = client.chat.completions.create(model="gpt-4o-mini", messages=messages)
+    span.set_attribute("gen_ai.usage.input_tokens", response.usage.prompt_tokens)
+    span.set_attribute("gen_ai.usage.cost", response.usage.cost)  # OpenRouter reports it
+```
+
+**A third-party auto-instrumentation** — OpenLLMetry, the OpenTelemetry GenAI
+instrumentations — opens and closes the span around the provider call itself,
+so by the time the answer is in your hands the span has ended, and an
+attribute set on an ended span is dropped by the OTel SDK. The price can land
+on that span only if the instrumentation reads it from the answer, and the
+GenAI conventions it writes have no attribute for one: the token counts
+arrive, the price does not, unless its own attribute list says otherwise. The
+way to a price for that call is to make it a `tracepad.generation` block of
+your own — the package reads the answer after the call returns, which is when
+the price exists.
+
+When no price arrived, the store records none: `total_cost` is absent on the
+trace, the interface shows *no data* where a cost would be, and the
+statistics chart the token counts — which every provider reports — beside the
+cost that some do. Tracepad does not go and ask the provider afterwards.
+OpenRouter's generation endpoint could answer for a span that carries the
+generation's id and nothing else, but at the price of an OpenRouter key kept
+in the server, a background fetch with retries and limits of its own, and a
+write that revises an observation already landed; the recipes above put the
+price on the span at the source, where it is exact and needs no credential.
 
 ## Configuration
 
