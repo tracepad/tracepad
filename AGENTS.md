@@ -372,6 +372,18 @@ API. This file routes; it does not duplicate what specs and docs say.
   shares (#7), and `GET /api/v1/projects?activity=24h` counts through the
   stats seam (#8). The ceiling rose to 20,500 (#9). The Account tab is the
   one screen inside the shell that lives bare, `/settings/account` (#14).
+- ✅ Spec 032 (the Node package), PR A shipped: `tracepad` on npm, source in
+  `sdk/js/`, the Python package's surface with promises where Python has
+  context managers and the same vocabulary on the wire — `init` adapts to
+  the provider it finds and, where the 2.x SDK has no hook to add to, hands
+  over `spanProcessor()` for the constructor (#2); `observe` is a wrapper,
+  never a decorator, with the arguments as a positional array (#4); `span`,
+  `event` and `generation` are callback-scoped, with `stream()` as an async
+  iterable that ends the generation on exhaustion and leaves an early exit to
+  the callback (#5); scores ride an `unref`'d timer and a `beforeExit` flush
+  (#6); `prompt` is a promise (#7). Fixture `013-tracepad-sdk-js.pb` is the
+  package's own export (#12, #13), and `@opentelemetry/resources` is the
+  fourth runtime dependency (#14). The eval harness is PR B.
 - ✅ Spec 005 (retention & admin) shipped: schema 0005, the hourly sweeper
   writing every chunk through the group-commit writer, the admin API under
   `/api/v1/projects` with a dry-run/confirm contract on every destructive
@@ -416,6 +428,7 @@ API. This file routes; it does not duplicate what specs and docs say.
 | Writing an eval (the item editor, the forms, the deletions) | `ui/src/lib/components/evals/ItemEditor.svelte` over the routes `datasets/items/new` and `datasets/[name]/items/[id]/edit` (spec 016 #21), `ScoreConfigDialog.svelte` with `ui/src/lib/api/score-configs.ts` (the vocabularies and the rules, held to `openapi.json`), `NewDatasetDialog`/`DeleteDatasetDialog`, `ui/src/lib/components/ConfirmDialog.svelte`, `itemBody`/`savedMessage` in `$lib/evals`, `docs/datasets.md#the-same-loop-from-the-web-interface` — a write is one of spec 014's endpoints and never a verb of the screen's own; the echo ceremony (`ConfirmCard`) is only where the server has a dry run, and the dialog is where it does not (#6) |
 | The Prompts screens (the listing, the versions, the diff, the editor) | `ui/src/routes/prompts/`, `ui/src/lib/components/prompts/` (the chip, the label control, the version view, the painted diff, the editor, the delete card), `ui/src/lib/prompts.ts` (the pure part: the Save gate per field, the chip order, the diff painter's classification, the two conversions between a stored body and the form), `docs/ui.md#prompts`, spec 021 — the diff is the server's and is only painted here (#3), the gate mirrors the `400`s spec 003 already gives and never replaces them (#5), a move or a removal of a label goes through `ConfirmDialog` naming it and a new label does not (#6), and the editor is only ever "new version from this one" because the store is append-only |
 | The Python package | `sdk/python/` (`src/tracepad/` is the package, `tests/` its suite and `tests/e2e/` the run against a real binary), `docs/sdk-python.md`, spec 017 — two dependencies and no third, no provider-client wrapper ever (design §6.5); `_tracing.py` holds the provider adaptation and defers the SDK's own imports into `init`, `_attributes.py` is the vocabulary that `internal/mapping/rules.go` reads back, and the application-line budget is 1,500 shared with spec 018 (`scripts/sdk-lines.sh`). `scripts/fixtures/tracepad_sdk.py` rewrites `testdata/otlp/010-tracepad-sdk.pb` from the package's own exporter |
+| The Node package | `sdk/js/` (`src/` is the package, `test/` its suite and `test/e2e/` the run against a real binary), `docs/sdk-js.md`, spec 032 — `tracing.ts` holds the provider adaptation and the shapes, `attributes.ts` is the vocabulary of `internal/mapping/rules.go` key for key with the Python one, `test/docs.test.ts` type-checks every example in the doc, and the application-line budget is 1,800 shared with the harness (`scripts/sdk-js-lines.sh`). `scripts/fixtures/tracepad_sdk_js.mjs` rewrites `testdata/otlp/013-tracepad-sdk-js.pb` from the package's own exporter, and `internal/server/sdkfixture_test.go` reads the Python and Node packages' fixtures back through the OTLP path |
 | The Go package | `sdk/go/` — a nested module (`github.com/tracepad/tracepad/sdk/go`; the root `go test ./...` does not see it, `make sdk-go-unit` and the gate do), `docs/sdk-go.md`, spec 033 — the same vocabulary as the Python package in the shape of the OTel API (a context in, a context out, `defer step.End()`), three dependencies and no `replace`, one package-level default configured by `Init` (`tracepad.go` holds the provider adaptation), an explicit `Result` and no response reader (#5). Function and type share one namespace in Go, so `Generation` hands out a `*Call` and `Prompt` a `*PromptVersion` (#14). `sdk/go/internal/fixture` rewrites `testdata/otlp/014-tracepad-sdk-go.pb` from the package's own exporter, deterministically (#13); the budget is 1,600 (`scripts/sdk-go-lines.sh`) |
 | The eval harness in Go | `sdk/go/harness.go` (the processor, `Run`, `Attempt`, `ScoreConfigs`, `Compare`, `ItemID`, the paging iterator) and `datasets.go` (`Dataset`, `Item`), `docs/datasets.md#the-same-loop-from-go`, `docs/sdk-go.md#evals`, spec 033 #10 — the item block is a context (`run.Item(ctx, item)` returns one), read by a `SpanProcessor` at `OnStart` and never a span the harness opened; `Init` registers it before the exporter and under `WithExport(false)` too; `Items` is an `iter.Seq2` over every page; there is no block that closes a run, so `Fail` on the error path is the caller's (#16) |
 | The eval harness in Python | `sdk/python/src/tracepad/_harness.py` (the processor, `Run`, `Attempt`, the score configs, `compare`, the paging loop) and `_datasets.py` (`Dataset`, `Item`), `docs/datasets.md#the-same-loop-from-python`, `docs/sdk-python.md#evals`, spec 018 — the stamping is a `ContextVar` read at `on_start` and never a span the harness opened (#3), `init` registers the processor before the exporting one and under `export=False` too, and the read side is the server's JSON as `dict`s because a model layer is a place to start disagreeing with it (#8) |
@@ -467,15 +480,19 @@ reason in a comment; adding a dialect should be a table edit.
   against a binary it builds. `uv` if present, `venv` otherwise;
   `SDK_SKIP_E2E=1` runs the unit half alone. `make sdk-lines` reports its
   budget.
+- `make sdk-js-test` — the Node package's type check and unit suite, then
+  its end-to-end suite against a binary it builds. `SDK_SKIP_E2E=1` runs the
+  unit half alone. `make sdk-js-lines` reports its budget.
 - `make sdk-go-test` — the Go package's vet and unit suite inside its module,
   then its end-to-end package against a binary it builds; `make sdk-go-unit`
   is the unit half alone, which the gate runs. `make sdk-go-lines` reports
   its budget.
 - `make fixtures` — regenerate `testdata/otlp/*.pb` and their goldens after a
   deliberate mapping change. Review the golden diff; it *is* the change. The
-  two bodies that are not synthetic are rewritten from the packages first:
-  `010-tracepad-sdk.pb` needs `uv`, and without it stands as committed;
-  `014-tracepad-sdk-go.pb` needs only Go.
+  three bodies that are not synthetic are rewritten from the packages first:
+  `010-tracepad-sdk.pb` needs `uv` and `013-tracepad-sdk-js.pb` needs `npm`,
+  and without them each stands as committed; `014-tracepad-sdk-go.pb` needs
+  only Go.
 
 ## Process
 
@@ -526,9 +543,11 @@ Before tagging:
 - **Tag a green commit.** The workflow does not check CI and cannot: a tag is
   yours to place, and it runs on whatever commit it names. What a release
   publishes should be what passed, so look at the commit's checks first —
-  `gate`, `e2e`, `smoke`, `sdk`, `sdk-go` and `docker`.
+  `gate`, `e2e`, `smoke`, `sdk`, `sdk-js`, `sdk-go` and `docker`.
 - The Python package has its own tag and its own workflow
-  (`sdk-py/v*`, `release-sdk-py.yml`); the server's tag does not move it.
+  (`sdk-py/v*`, `release-sdk-py.yml`), and so does the Node package
+  (`sdk-js/v*`, `release-sdk-js.yml`, npm trusted publishing); the server's
+  tag moves neither.
 - The Go package's tag is `sdk/go/vX.Y.Z` — the toolchain's rule for a module
   in a subdirectory — and the tag is the whole release: no workflow, the
   module proxy fetches it from the repository (spec 033 #1).

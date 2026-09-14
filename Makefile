@@ -33,19 +33,25 @@ vet: ## Static checks
 smoke: ## Export from real SDKs into a real binary and assert the rows
 	scripts/smoke/run.sh
 
-# Two bodies in the corpus are not synthetic: `010-tracepad-sdk.pb` is what the
-# Python package puts on the wire (spec 017, Testing) and `014-tracepad-sdk-go.pb`
-# what the Go package does (spec 033 #12). They are rewritten first, by each
+# Three bodies in the corpus are not synthetic: `010-tracepad-sdk.pb` is what
+# the Python package puts on the wire (spec 017, Testing), `013-tracepad-sdk-js.pb`
+# what the Node package does (spec 032 #12) and `014-tracepad-sdk-go.pb` what
+# the Go package does (spec 033 #12). They are rewritten first, by each
 # package's own exporter — the Python one under the pinned SDKs of the smoke
 # test — and the Go pass then regenerates every golden, including theirs, from
-# the bytes on disk. Without `uv` the committed Python body stands and only the
-# goldens move, which is what a Go-only checkout wants anyway.
+# the bytes on disk. Without `uv` or `npm` the committed body stands and only
+# the goldens move, which is what a Go-only checkout wants anyway.
 fixtures: ## Regenerate testdata/otlp bodies and their golden files
 	@if command -v uv >/dev/null 2>&1; then \
 		uv run --quiet --isolated --with-requirements scripts/smoke/requirements.txt \
 			--with-editable sdk/python python scripts/fixtures/tracepad_sdk.py; \
 	else \
 		echo "uv is missing: keeping testdata/otlp/010-tracepad-sdk.pb as committed"; \
+	fi
+	@if command -v npm >/dev/null 2>&1; then \
+		$(MAKE) sdk-js-build && node scripts/fixtures/tracepad_sdk_js.mjs; \
+	else \
+		echo "npm is missing: keeping testdata/otlp/013-tracepad-sdk-js.pb as committed"; \
 	fi
 	cd sdk/go && go run ./internal/fixture ../../testdata/otlp/014-tracepad-sdk-go.pb
 	go test ./internal/mapping -run TestGoldenFixtures -update
@@ -152,6 +158,31 @@ SDK_GO_BUDGET := 1900
 sdk-go-lines: ## Report the Go package's application lines against its budget
 	scripts/sdk-go-lines.sh $(SDK_GO_BUDGET)
 
+# --- The Node package (spec 032) ----------------------------------------------
+#
+# Node and npm are dev prerequisites of this half the way they are of the
+# interface: every Go target runs without them.
+
+SDK_JS := sdk/js
+
+sdk-js-deps: ## Install the Node package's toolchain if node_modules is missing
+	@if [ ! -d $(SDK_JS)/node_modules ]; then \
+		command -v npm >/dev/null || { echo "npm is required for the Node package (see sdk/js/package.json engines)"; exit 1; }; \
+		cd $(SDK_JS) && npm ci; \
+	fi
+
+sdk-js-build: sdk-js-deps ## Build the Node package into sdk/js/dist
+	cd $(SDK_JS) && npm run build
+
+sdk-js-test: ## Type-check and unit-test the Node package, and end-to-end against a real binary
+	scripts/sdk-js-test.sh
+
+# The budget spec 032 #11 set, shared with the harness of the same spec.
+SDK_JS_BUDGET := 1800
+
+sdk-js-lines: ## Report the Node package's application lines against its budget
+	scripts/sdk-js-lines.sh $(SDK_JS_BUDGET)
+
 # The documentation's own cross-references (spec 026 #6): a hundred anchors
 # nothing read until now. Cheap enough for the gate — it is awk over seventeen
 # files — and the failure it catches is invisible in review.
@@ -209,5 +240,6 @@ install-hooks: ## (Re)install both hooks
 .PHONY: help build build-server dev test vet smoke fixtures format format-check \
 	ui ui-deps ui-types ui-types-check ui-check ui-lines image image-check \
 	e2e sdk-test sdk-lines sdk-go-test sdk-go-unit sdk-go-lines \
+	sdk-js-deps sdk-js-build sdk-js-test sdk-js-lines \
 	doc-anchors doc-anchors-self-test gate precommit \
 	test-staged ui-check-staged ensure-hooks install-hooks

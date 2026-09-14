@@ -106,6 +106,35 @@ It adds an exporter to a `TracerProvider` your application already has rather
 than replacing it, so it sits beside FastAPI instrumentation and the Langfuse
 SDK instead of competing with them. See [sdk-python.md](sdk-python.md).
 
+**In Node, the same package.** `tracepad` on npm is the same surface with
+promises where Python has context managers — the same names on the wire, the
+same rules about what throws — for Node 20 and newer:
+
+```sh
+npm install tracepad @opentelemetry/api
+export TRACEPAD_HOST=http://localhost:4318
+export TRACEPAD_API_KEY=tp-sk-…
+```
+
+```ts
+import * as tracepad from 'tracepad';
+
+tracepad.init();
+
+const answer = tracepad.observe(async (question: string) => {
+  tracepad.updateTrace({ userId: 'u-42', tags: ['support'] });
+  const reply = await tracepad.generation('chat', { model: 'gpt-4o-mini', input: question }, async (call) => {
+    const response = await client.chat.completions.create({ model: 'gpt-4o-mini', messages: […] });
+    call.end(response);                    // model, usage, and the cost as charged
+    return response.choices[0].message.content;
+  });
+  tracepad.score('helpful', 1);            // against the trace in flight
+  return reply;
+});
+```
+
+See [sdk-js.md](sdk-js.md).
+
 **In Go, the same shape as the OTel API.** The `tracepad` module is the same
 thin layer over the OpenTelemetry Go SDK — a context in, a context out:
 
@@ -185,6 +214,7 @@ curl -H "Authorization: Bearer tp-sk-…" \
 - [ingest.md](ingest.md) — endpoints, authentication, attribute conventions.
 - [sdk-python.md](sdk-python.md) — the `tracepad` package: `init`, `@observe`,
   generations, prompts and scores.
+- [sdk-js.md](sdk-js.md) — the same package for Node.
 - [sdk-go.md](sdk-go.md) — the same package for Go: `Init`, `Span`,
   `Generation`, prompts and scores, in the shape of the OTel API.
 - [api.md](api.md) — the read API, its filters, and the response budget.
