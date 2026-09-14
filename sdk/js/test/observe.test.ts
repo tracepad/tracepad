@@ -12,10 +12,12 @@ fresh();
 describe('the four shapes', () => {
   test('a sync function: input as the positional array, output the return value', () => {
     const seen = spans();
-    const add = tracepad.observe(function add(a: number, b: number) {
+    // The wrapper under another name: a bundler that finds the inner
+    // `add` shadowed by an outer one renames it, and the span with it.
+    const sum = tracepad.observe(function add(a: number, b: number) {
       return a + b;
     });
-    expect(add(2, 3)).toBe(5);
+    expect(sum(2, 3)).toBe(5);
     const attributes = seen.attributes('add');
     expect(attributes[attrs.OBSERVATION_TYPE]).toBe('span');
     expect(attributes[attrs.INPUT]).toBe('[2,3]');
@@ -36,11 +38,11 @@ describe('the four shapes', () => {
 
   test('a generator records the list of what it yielded', () => {
     const seen = spans();
-    const count = tracepad.observe(function* count(n: number) {
+    const counted = tracepad.observe(function* count(n: number) {
       for (let i = 0; i < n; i++) yield i;
       return 'done';
     });
-    const out = count(3);
+    const out = counted(3);
     expect(seen.all()).toEqual([]); // nothing ends before the generator does
     expect([...out]).toEqual([0, 1, 2]);
     expect(seen.attributes('count')[attrs.OUTPUT]).toBe('[0,1,2]');
@@ -48,13 +50,13 @@ describe('the four shapes', () => {
 
   test('an async generator too, and each step runs inside the span', async () => {
     const seen = spans();
-    const stream = tracepad.observe(async function* stream() {
+    const streamed = tracepad.observe(async function* stream() {
       yield 'a';
       tracepad.update({ metadata: { step: 1 } });
       yield 'b';
     });
     const out: string[] = [];
-    for await (const piece of stream()) out.push(piece);
+    for await (const piece of streamed()) out.push(piece);
     expect(out).toEqual(['a', 'b']);
     const attributes = seen.attributes('stream');
     expect(attributes[attrs.OUTPUT]).toBe('["a","b"]');
@@ -63,12 +65,12 @@ describe('the four shapes', () => {
 
   test('a generator left early ends with what came before', () => {
     const seen = spans();
-    const count = tracepad.observe(function* count() {
+    const counted = tracepad.observe(function* count() {
       yield 1;
       yield 2;
       yield 3;
     });
-    for (const n of count()) if (n === 2) break;
+    for (const n of counted()) if (n === 2) break;
     expect(seen.attributes('count')[attrs.OUTPUT]).toBe('[1,2]');
   });
 });
@@ -154,29 +156,29 @@ describe('the error path', () => {
   test('a throw ends the span ERROR with the event, and propagates unchanged', () => {
     const seen = spans();
     const boom = new Error('upstream timeout');
-    const fails = tracepad.observe(function fails() {
+    const failing = tracepad.observe(function fails() {
       throw boom;
     });
-    expect(() => fails()).toThrow(boom);
+    expect(() => failing()).toThrow(boom);
     failed(seen, 'fails');
   });
 
   test('a rejection the same', async () => {
     const seen = spans();
-    const fails = tracepad.observe(async function fails() {
+    const failing = tracepad.observe(async function fails() {
       throw new Error('upstream timeout');
     });
-    await expect(fails()).rejects.toThrow('upstream timeout');
+    await expect(failing()).rejects.toThrow('upstream timeout');
     failed(seen, 'fails');
   });
 
   test('a generator that throws mid-way keeps what it yielded', () => {
     const seen = spans();
-    const fails = tracepad.observe(function* fails() {
+    const failing = tracepad.observe(function* fails() {
       yield 1;
       throw new Error('upstream timeout');
     });
-    expect(() => [...fails()]).toThrow('upstream timeout');
+    expect(() => [...failing()]).toThrow('upstream timeout');
     failed(seen, 'fails');
     expect(seen.attributes('fails')[attrs.OUTPUT]).toBe('[1]');
   });
@@ -184,14 +186,14 @@ describe('the error path', () => {
 
 test('nested steps are parented, and the trace context reaches an await', async () => {
   const seen = spans();
-  const inner = tracepad.observe(async function inner() {
+  const innermost = tracepad.observe(async function inner() {
     await Promise.resolve();
     return tracepad.span('deepest', (o) => o.traceId);
   });
-  const outer = tracepad.observe(async function outer() {
-    return inner();
+  const outermost = tracepad.observe(async function outer() {
+    return innermost();
   });
-  const traceId = await outer();
+  const traceId = await outermost();
   const [deepest, innerSpan, outerSpan] = seen.all();
   expect([deepest!.name, innerSpan!.name, outerSpan!.name]).toEqual(['deepest', 'inner', 'outer']);
   expect(deepest!.parentSpanContext?.spanId).toBe(innerSpan!.spanContext().spanId);

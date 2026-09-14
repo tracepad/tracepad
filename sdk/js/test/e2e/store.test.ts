@@ -150,11 +150,11 @@ describe.skipIf(!BINARY)('against a real binary', () => {
 
   test('a failing step is stored as an error', async () => {
     tracepad.init({ host: store.host, key: KEY });
-    const fails = tracepad.observe(function fails() {
+    const failing = tracepad.observe(function fails() {
       throw new Error('upstream timeout');
     });
     const traceId = tracepad.span('attempt', (attempt) => {
-      expect(() => fails()).toThrow('upstream timeout');
+      expect(() => failing()).toThrow('upstream timeout');
       return attempt.traceId;
     });
     await tracepad.flush({ timeout: 20_000 });
