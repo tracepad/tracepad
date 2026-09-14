@@ -188,6 +188,18 @@ export class ApiError extends Error {
 /** The header the server stamps on every response (spec 004 #28). */
 const VERSION_HEADER = 'X-Tracepad-Version';
 
+/**
+ * How long any one request may go unanswered (spec 010 #10). A request that
+ * neither resolves nor rejects is the one failure nothing above this layer can
+ * see: `loading` stays up forever, and a live tick that never settles holds
+ * the listing's one-read-at-a-time gate with `liveFailure` still `null` — the
+ * screen freezes silently and the toggle does not free it. The read API
+ * answers in milliseconds and caps every scan, so thirty seconds is not a
+ * budget a slow query spends; it is the line past which "still waiting" is
+ * "no answer".
+ */
+const REQUEST_TIMEOUT_MS = 30_000;
+
 type Query = Record<string, string | string[] | undefined | null>;
 
 class Api {
@@ -873,16 +885,39 @@ class Api {
 					...(options.body === undefined ? {} : { 'Content-Type': 'application/json' })
 				},
 				body: options.body === undefined ? undefined : JSON.stringify(options.body),
-				signal: options.signal
+				// The caller's signal and the clock, either of which ends the
+				// request; `fetch` rejects with whichever one fired, and the
+				// reason's name says which.
+				signal: AbortSignal.any([
+					AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+					...(options.signal ? [options.signal] : [])
+				])
 			});
 		} catch (cause) {
-			if (cause instanceof DOMException && cause.name === 'AbortError') throw cause;
+			// The clock ran out: the same failure as a server nobody can reach,
+			// and the caller's to show — a load's `failure`, a tick's
+			// `liveFailure` — not an abort, which lands nowhere (spec 010 #8).
+			if (named(cause) === 'TimeoutError') {
+				throw new ApiError(0, 'the server did not answer in time');
+			}
+			// The caller's own abort: the question went stale, and no answer to
+			// it is wanted, failure included.
+			if (named(cause) === 'AbortError') throw cause;
 			throw new ApiError(0, 'cannot reach the server');
 		}
 		const version = response.headers.get(VERSION_HEADER);
 		if (version) this.version = version;
 		return response;
 	}
+}
+
+/**
+ * What a rejection calls itself. By name rather than by class: `instanceof
+ * DOMException` is bound to a realm, and a signal's reason need not come from
+ * this one — under jsdom it does not.
+ */
+function named(cause: unknown): string {
+	return typeof cause === 'object' && cause !== null && 'name' in cause ? String(cause.name) : '';
 }
 
 /**
