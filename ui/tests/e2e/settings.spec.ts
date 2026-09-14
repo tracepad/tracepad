@@ -235,6 +235,41 @@ test('deleting the project on screen leaves the tab, and Restore, in place', asy
 	await expect(row).toContainText('Live');
 });
 
+// The table is the way into a project's settings (spec 028 #25): a row leads
+// to that project's Project tab — a switch of project, so the sidebar names
+// it — and the Project tab leads an owner back. A member has no table to go
+// back to, and no line saying so.
+test('the projects table leads into a project, and the Project tab leads back', async ({
+	page
+}) => {
+	const own = await createProject('drillfrom');
+	const other = await createProject('drillto');
+	await signInAsOwner(page, own.id);
+	await page.goto('/settings/server');
+	await expect(page).toHaveURL(new RegExp(`/p/${own.id}/settings/server$`));
+
+	const row = page.getByRole('row').filter({ hasText: other.id });
+	await row.getByRole('button', { name: 'Settings' }).click();
+	await expect(page).toHaveURL(new RegExp(`/p/${other.id}/settings/project$`));
+	await expect(page.getByRole('button', { name: 'Switch project' })).toHaveText(other.name);
+	await expect(page.getByLabel('Name')).toHaveValue(other.name);
+
+	await page.getByRole('link', { name: 'All projects' }).click();
+	await expect(page).toHaveURL(new RegExp(`/p/${other.id}/settings/server$`));
+
+	// The name is a link to the same place, for the middle click and the copy.
+	await page.getByRole('row').filter({ hasText: own.id }).getByRole('link', { name: own.name }).click();
+	await expect(page).toHaveURL(new RegExp(`/p/${own.id}/settings/project$`));
+});
+
+test('a member has no way back to a table they cannot see', async ({ page }) => {
+	const own = await createProject('noback');
+	await openProjectTab(page, own.account);
+
+	await expect(page.getByLabel('Name')).toHaveValue(own.name);
+	await expect(page.getByRole('link', { name: 'All projects' })).toHaveCount(0);
+});
+
 // The tab is absent for a member and the route redirects, which is the two
 // halves of the same rule (spec 028 #14).
 test('the Server tab belongs to owners', async ({ page }) => {
