@@ -146,13 +146,16 @@ func TestDeletingATwiceDeletedProject(t *testing.T) {
 // to miss. The chunk here straddles an hour, and the user is not written
 // back into the per-user tables by the roll of that hour (review of PR
 // #65): between a hang-up and the repeat they are gone from the listing,
-// as `docs/admin.md` promises.
+// as `docs/admin.md` promises. The last hour sits at the watermark, and
+// the erasure leaves it to the live scan.
 func TestErasureCorrectsTheHoursOfEachChunkAsItCommits(t *testing.T) {
 	s, project := readStore(t)
 
 	// Three hours; in each, two traces of the user being erased and one of
 	// a bystander. Seeded in hour order, which is the order the chunks
-	// take them in.
+	// take them in. The watermark stands after the second hour: the third
+	// is rolled here as a pass that crashed before advancing would leave
+	// it, and stays as it is — the seam answers it live.
 	hours := []int64{rollupHour, rollupHour + SecondsPerHour, rollupHour + 2*SecondsPerHour}
 	n := 0
 	for _, hour := range hours {
@@ -164,6 +167,7 @@ func TestErasureCorrectsTheHoursOfEachChunkAsItCommits(t *testing.T) {
 		}
 		roll(t, s, project.ID, hour)
 	}
+	advance(t, s, project.ID, hours[1])
 	rolled := func(hour int64) int64 {
 		t.Helper()
 		var count int64
@@ -225,13 +229,17 @@ func TestErasureCorrectsTheHoursOfEachChunkAsItCommits(t *testing.T) {
 	gone("after the first chunk")
 
 	// The repeat: chunks while there is more, the way the handler loops.
-	// Every hour ends at the bystander's one.
+	// Every rolled hour ends at the bystander's one; the live hour keeps
+	// the rows it had, because nothing reads them.
 	for erase().More {
 	}
-	for _, hour := range hours {
+	for _, hour := range hours[:2] {
 		if got := rolled(hour); got != 1 {
 			t.Errorf("hour %d rolled %d traces after the erasure, want 1", hour, got)
 		}
+	}
+	if got := rolled(hours[2]); got != 3 {
+		t.Errorf("the live hour %d was rolled to %d by the erasure, want it left at 3 for the pass", hours[2], got)
 	}
 	gone("after the erasure")
 }
@@ -317,6 +325,7 @@ func TestErasureLeavesAFrozenHourStanding(t *testing.T) {
 			s, project := readStore(t)
 			usersFixture(t, s, project.ID)
 			roll(t, s, project.ID, rollupHour)
+			advance(t, s, project.ID, rollupHour)
 			if _, err := s.db.Exec(
 				`UPDATE projects SET retention_days = 1 WHERE id = ?`, project.ID); err != nil {
 				t.Fatal(err)

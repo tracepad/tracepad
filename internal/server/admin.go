@@ -30,11 +30,12 @@ import (
 // request loops over chunks so that a user with a year of traffic does not
 // hold the writer for the length of a single transaction — and since each
 // chunk re-rolls the hours it empties in that same transaction (spec 023
-// #19), a chunk is bounded in hours too, or a user with one trace an hour
-// would turn one chunk into five hundred whole-hour recomputes.
+// #19), a chunk is one hour's traces: a whole-hour recompute of a dense hour
+// is seconds, which is what the aggregator's own jobs already cost the
+// writer, and a transaction of several would stall ingest for their sum.
 const (
 	eraseChunk      = 500
-	eraseChunkHours = 24
+	eraseChunkHours = 1
 )
 
 // authorize is who is asking, as the guard already worked it out (spec 028

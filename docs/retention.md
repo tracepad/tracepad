@@ -94,9 +94,9 @@ discovered:
    stored numbers stand as the archive of what was there.
 2. **Erasing a user's data corrects the hours it can reach.** The rolled hours
    the erased traces occupied are recomputed in the same transaction that
-   deletes them — the erasure runs in chunks of up to five hundred traces from
-   at most a day of hours, and each chunk commits with its hours already
-   corrected — so the counts drop before
+   deletes them — the erasure runs in chunks of up to five hundred traces of
+   one hour, and each chunk commits with its hour already corrected — so the
+   counts drop before
    the request answers, and a request cut off between chunks leaves no hour
    counting traces that are gone. Hours already frozen are not recomputed: the aggregates
    carry no user id, no name and no text — they are counts, sums and latency

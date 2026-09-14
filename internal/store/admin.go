@@ -641,10 +641,11 @@ func (r *ProjectRestore) apply(tx *sql.Tx) error {
 // find those hours again, because the traces that named them were gone.
 //
 // The rolls are what bound a chunk now, not the traces alone: a chunk is
-// `Limit` traces or `HourLimit` distinct hours, whichever comes first. A
-// user with one trace an hour in a busy project would otherwise turn one
-// chunk into five hundred whole-hour recomputes in a single transaction,
-// holding the one writer while ingest queues behind it.
+// `Limit` traces or `HourLimit` distinct hours, whichever comes first, and
+// the handler sets the hours to one. A whole-hour recompute of a dense hour
+// is seconds (spec 023 #19's numbers), and a transaction of several would
+// hold the one writer while ingest queued behind it; one is what the
+// aggregator's own jobs already cost.
 type UserDataErase struct {
 	ProjectID string
 	UserID    string
@@ -661,7 +662,8 @@ type UserDataErase struct {
 	Now int64
 
 	Counts DeleteCounts
-	// Hours are the rolled hours this chunk emptied and re-rolled.
+	// Hours are the hours this chunk emptied; the ones below the watermark
+	// were re-rolled.
 	Hours []int64
 	// More reports that traces of the user remain after this chunk: the
 	// caller submits another. A chunk cut short by HourLimit is not a
@@ -788,15 +790,25 @@ func (e *UserDataErase) apply(tx *sql.Tx) error {
 	// 013 #11) — the aggregates carry no user id, and `docs/retention.md`
 	// states that position rather than hiding it.
 	//
-	// The summaries are deferred and recomputed once per chunk, the way
-	// the aggregator does once per pass: a user active in every hour of
-	// the chunk is summed once, not once per hour.
+	// Two gates, both read from this transaction, the ones the score
+	// correction of spec 025 #22 applies. An hour at or past the watermark
+	// is the live half of the read seam: its raw rows are already right,
+	// and rows written for it would be ignored until the pass rewrote
+	// them. The summaries are deferred and recomputed once per chunk, the
+	// way the aggregator does once per pass.
 	now := e.Now
 	if now == 0 {
 		now = time.Now().UnixNano()
 	}
+	state, err := rollupState(tx, e.ProjectID)
+	if err != nil {
+		return err
+	}
 	touched := map[string]bool{}
 	for _, hour := range e.Hours {
+		if hour >= state.RolledUntil {
+			continue
+		}
 		roll := &statsRoll{ProjectID: e.ProjectID, Hour: hour, Now: now, DeferSummary: true}
 		if err := roll.apply(tx); err != nil {
 			return fmt.Errorf("re-roll hour %d after erasing from it: %w", hour, err)

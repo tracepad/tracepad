@@ -787,6 +787,7 @@ func TestErasingAUserCorrectsTheScoreRollup(t *testing.T) {
 	writeScores(t, s, project.ID, rollupHour*1e9,
 		numericScore(60, hexTrace(50), "", nameHallucination, 0.7))
 	roll(t, s, project.ID, rollupHour)
+	advance(t, s, project.ID, rollupHour)
 
 	if rows := rolledScoreRows(t, s, project.ID, rollupHour); len(rows) != 1 {
 		t.Fatalf("rows = %v, want the one score", keysSorted(rows))

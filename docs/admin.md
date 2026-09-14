@@ -206,16 +206,17 @@ recompute them from. So the account leaves `/api/v1/users` immediately, and
 corrected where they can be, which is the rule
 [retention.md](retention.md#what-outlives-what) states.
 
-The erasure is synchronous and runs in **chunks** — up to five hundred traces,
-from at most twenty-four distinct hours — each one a transaction that leaves
-the store consistent on its own: the chunk's traces go and the hours they
-occupied are recomputed in the same commit, and the writer is held for one
-chunk at a time so ingest keeps flowing between them. A
-request that is cut off between chunks — a closed tab, the interface's
-thirty-second clock — therefore destroys nothing half-way: what the committed
-chunks erased is erased and counted as erased, and repeating the call finishes
-the rest. The counts in the answer are the request's own; a repeat reports
-what it erased, not what the interrupted one did.
+The erasure is synchronous and runs in **chunks** — up to five hundred traces
+of one hour — each one a transaction that leaves the store consistent on its
+own: the chunk's traces go and the hour they occupied is recomputed in the
+same commit, and the writer is held for one chunk at a time so ingest keeps
+flowing between them. A user active in many hours takes many chunks, and a
+long history can take longer than the interface waits; that is safe, because
+a request cut off between chunks — a closed tab, the interface's
+thirty-second clock — destroys nothing half-way: what the committed chunks
+erased is erased and counted as erased, and repeating the call finishes the
+rest. The counts in the answer are the request's own; a repeat reports what
+it erased, not what the interrupted one did.
 
 ## In the web interface
 
