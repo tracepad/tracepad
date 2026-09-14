@@ -262,6 +262,27 @@ test('the projects table leads into a project, and the Project tab leads back', 
 	await expect(page).toHaveURL(new RegExp(`/p/${own.id}/settings/project$`));
 });
 
+// The table is the server's list and the way in is gated by `me`, which the
+// shell read at sign-in: a project made meanwhile — the CLI, another owner —
+// is on the table and not in the shell, so the tab reads `me` again rather
+// than leading to the not-there screen.
+test('a project made elsewhere is a way in too', async ({ page }) => {
+	const own = await createProject('meanwhile');
+	await signInAsOwner(page, own.id);
+	// Made after the sign-in, and reached without a reload: the sidebar, the
+	// tab — every step a navigation inside the shell.
+	const other = await createProject('outofband');
+	await page.getByRole('link', { name: 'Settings' }).click();
+	await page.getByRole('tab', { name: 'Server' }).click();
+	await expect(page).toHaveURL(new RegExp(`/p/${own.id}/settings/server$`));
+
+	const row = page.getByRole('row').filter({ hasText: other.id });
+	await row.getByRole('button', { name: 'Settings' }).click();
+	await expect(page).toHaveURL(new RegExp(`/p/${other.id}/settings/project$`));
+	await expect(page.getByText('This project is not yours to see')).toHaveCount(0);
+	await expect(page.getByLabel('Name')).toHaveValue(other.name);
+});
+
 test('a member has no way back to a table they cannot see', async ({ page }) => {
 	const own = await createProject('noback');
 	await openProjectTab(page, own.account);

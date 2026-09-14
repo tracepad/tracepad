@@ -6,6 +6,7 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { said } from '$lib/accounts';
+	import { auth } from '$lib/auth.svelte';
 	import { api, type DryRun, type Project } from '$lib/api/client.svelte';
 	import { timestamp } from '$lib/format';
 	import { switchTarget, under } from '$lib/project.svelte';
@@ -63,13 +64,30 @@
 		loading = true;
 		failure = null;
 		try {
-			projects = (await api.listAllProjects()).projects;
+			const listed = (await api.listAllProjects()).projects;
+			// The table is the server's list and the shell's is `me`, read at
+			// sign-in and after this tab's own actions (spec 029 #13). A
+			// project made elsewhere — the CLI, another owner's session — is
+			// in the first and not the second, and a row that led to it would
+			// land on the not-there screen, which is decided at the navigation
+			// from the `me` in hand: so `me` is read again, before the rows
+			// and their buttons appear, when the table knows a live project
+			// the shell does not. A read that fails is not the listing
+			// failing; the row still says what exists.
+			if (listed.some((row) => !row.deleted_at && !known(row.id))) {
+				await refresh().catch(() => {});
+			}
+			projects = listed;
 		} catch (cause) {
 			projects = [];
 			failure = said(cause, 'Failed to read the projects.');
 		} finally {
 			loading = false;
 		}
+	}
+
+	function known(id: string) {
+		return auth.projects.some((one) => one.id === id);
 	}
 
 	async function restore(target: Project) {
