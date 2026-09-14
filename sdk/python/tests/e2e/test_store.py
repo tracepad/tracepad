@@ -86,6 +86,30 @@ def test_a_traced_call_arrives_whole(store: Store) -> None:
     ]
 
 
+def test_a_streamed_call_lands_with_its_usage(store: Store) -> None:
+    """A stream through `call.stream` (spec 031 #7): the usage rides the last chunk."""
+    tracepad.init(store.host, KEY)
+    chunks = [
+        {"model": ANSWER["model"], "choices": [{"delta": {"role": "assistant", "content": ""}}]},
+        {"model": ANSWER["model"], "choices": [{"delta": {"content": "Open Settings "}}]},
+        {"model": ANSWER["model"], "choices": [{"delta": {"content": "and choose Reset."}}]},
+        {"model": ANSWER["model"], "choices": [], "usage": ANSWER["usage"]},
+    ]
+
+    with tracepad.generation("chat-completion", model="claude-sonnet-5") as call:
+        trace_id = call.trace_id
+        assert list(call.stream(chunks)) == chunks
+    tracepad.flush(20.0)
+
+    stored = trace_of(store, trace_id)
+    (generation,) = walk(stored["observations"])
+    assert generation["type"] == "generation"
+    assert generation["usage"] == {"input_tokens": 128, "output_tokens": 41}
+    assert generation["output"] == "Open Settings and choose Reset."
+    assert generation["ttft_ms"] is not None
+    assert abs(stored["total_cost"] - 0.0011) < 1e-12
+
+
 def test_the_application_s_own_spans_share_the_trace(store: Store) -> None:
     """`init` under a provider somebody else set: one pipeline, one trace."""
     otel_api.set_tracer_provider(TracerProvider())
