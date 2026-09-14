@@ -62,7 +62,7 @@ streaming wrapper, any wrapper of a provider client (design §6.5), a
 
 ```
 sdk/go/
-  go.mod                  # module github.com/tracepad/tracepad/sdk/go; go 1.22 (1.23 from PR B)
+  go.mod                  # module github.com/tracepad/tracepad/sdk/go; go 1.25 (Decision 15)
   tracepad.go             # Init, Shutdown, Option; the default and its adaptation
   span.go                 # Span, Event, Observation, Update, UpdateTrace
   generation.go           # Generation, Result, Usage, FirstToken
@@ -73,15 +73,17 @@ sdk/go/
   harness.go              # PR B: the processor, Run, Attempt, ScoreConfigs, Compare, ItemID
   datasets.go             # PR B: Dataset, Item
   e2e/                    # against a real binary (TRACEPAD_BINARY)
+  internal/fixture/       # writes testdata/otlp/014-tracepad-sdk-go.pb (Decision 13)
+  internal/smoke/         # the exporter `make smoke` runs (Decision 11)
   README.md               # what pkg.go.dev shows: install, Init, three lines, a link to docs/sdk-go.md
 ```
 
 **Public surface** (everything else is unexported): `Init`, `Flush`,
 `Span`, `Event`, `Generation`, `Update`, `UpdateTrace`, `Score`, `Prompt`,
-the option constructors named above, `Observation`, `Generation` (type),
-`Result`, `Usage`, `Prompt` (type), `Message`, `HTTPError`, `ErrConfig`,
-`ErrNoTrace`; PR B: `Dataset`, `Item`, `Run`, `Attempt`, `ScoreConfig`,
-`ScoreConfigs`, `Compare`, `ItemID`.
+the option constructors named above, `Observation`, `Call` (the generation's
+handle), `Result`, `Usage`, `PromptVersion`, `Compiled`, `Message`,
+`HTTPError`, `ErrConfig`, `ErrNoTrace` (Decision 14); PR B: `Dataset`,
+`Item`, `Run`, `Attempt`, `ScoreConfig`, `ScoreConfigs`, `Compare`, `ItemID`.
 
 ## Ingest contract
 
