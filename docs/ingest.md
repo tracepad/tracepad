@@ -2,8 +2,9 @@
 
 Tracepad speaks OTLP. Any OpenTelemetry-instrumented application can send to
 it by changing an endpoint and an auth header — nothing has to be installed.
-There *is* a Python package ([sdk-python.md](sdk-python.md)), and it is a
-convenience over exactly this endpoint, not a way around it.
+There *are* packages for Python ([sdk-python.md](sdk-python.md)) and Go
+([sdk-go.md](sdk-go.md)), and they are a convenience over exactly this
+endpoint, not a way around it.
 
 ## Endpoints
 
@@ -285,9 +286,9 @@ Two consequences worth knowing:
 
 The GenAI semantic conventions have no name for a trace name, for tags, for
 free metadata, for the kind of a step or for the prompt one ran. Where they do
-have a name, the [Python package](sdk-python.md) uses it — `gen_ai.*`,
+have a name, the [Python](sdk-python.md) and [Go](sdk-go.md) packages use it — `gen_ai.*`,
 `user.id`, `session.id`, `deployment.environment.name`, the resource's
-`service.version` — and where they do not, it writes these:
+`service.version` — and where they do not, they write these:
 
 | Attribute | What it sets |
 |---|---|

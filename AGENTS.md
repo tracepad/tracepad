@@ -403,6 +403,7 @@ API. This file routes; it does not duplicate what specs and docs say.
 | Writing an eval (the item editor, the forms, the deletions) | `ui/src/lib/components/evals/ItemEditor.svelte` over the routes `datasets/items/new` and `datasets/[name]/items/[id]/edit` (spec 016 #21), `ScoreConfigDialog.svelte` with `ui/src/lib/api/score-configs.ts` (the vocabularies and the rules, held to `openapi.json`), `NewDatasetDialog`/`DeleteDatasetDialog`, `ui/src/lib/components/ConfirmDialog.svelte`, `itemBody`/`savedMessage` in `$lib/evals`, `docs/datasets.md#the-same-loop-from-the-web-interface` — a write is one of spec 014's endpoints and never a verb of the screen's own; the echo ceremony (`ConfirmCard`) is only where the server has a dry run, and the dialog is where it does not (#6) |
 | The Prompts screens (the listing, the versions, the diff, the editor) | `ui/src/routes/prompts/`, `ui/src/lib/components/prompts/` (the chip, the label control, the version view, the painted diff, the editor, the delete card), `ui/src/lib/prompts.ts` (the pure part: the Save gate per field, the chip order, the diff painter's classification, the two conversions between a stored body and the form), `docs/ui.md#prompts`, spec 021 — the diff is the server's and is only painted here (#3), the gate mirrors the `400`s spec 003 already gives and never replaces them (#5), a move or a removal of a label goes through `ConfirmDialog` naming it and a new label does not (#6), and the editor is only ever "new version from this one" because the store is append-only |
 | The Python package | `sdk/python/` (`src/tracepad/` is the package, `tests/` its suite and `tests/e2e/` the run against a real binary), `docs/sdk-python.md`, spec 017 — two dependencies and no third, no provider-client wrapper ever (design §6.5); `_tracing.py` holds the provider adaptation and defers the SDK's own imports into `init`, `_attributes.py` is the vocabulary that `internal/mapping/rules.go` reads back, and the application-line budget is 1,500 shared with spec 018 (`scripts/sdk-lines.sh`). `scripts/fixtures/tracepad_sdk.py` rewrites `testdata/otlp/010-tracepad-sdk.pb` from the package's own exporter |
+| The Go package | `sdk/go/` — a nested module (`github.com/tracepad/tracepad/sdk/go`; the root `go test ./...` does not see it, `make sdk-go-unit` and the gate do), `docs/sdk-go.md`, spec 033 — the same vocabulary as the Python package in the shape of the OTel API (a context in, a context out, `defer step.End()`), three dependencies and no `replace`, one package-level default configured by `Init` (`tracepad.go` holds the provider adaptation), an explicit `Result` and no response reader (#5). Function and type share one namespace in Go, so `Generation` hands out a `*Call` and `Prompt` a `*PromptVersion` (#14). `sdk/go/internal/fixture` rewrites `testdata/otlp/014-tracepad-sdk-go.pb` from the package's own exporter, deterministically (#13); the budget is 1,600 (`scripts/sdk-go-lines.sh`) |
 | The eval harness in Python | `sdk/python/src/tracepad/_harness.py` (the processor, `Run`, `Attempt`, the score configs, `compare`, the paging loop) and `_datasets.py` (`Dataset`, `Item`), `docs/datasets.md#the-same-loop-from-python`, `docs/sdk-python.md#evals`, spec 018 — the stamping is a `ContextVar` read at `on_start` and never a span the harness opened (#3), `init` registers the processor before the exporting one and under `export=False` too, and the read side is the server's JSON as `dict`s because a model layer is a place to start disagreeing with it (#8) |
 | Packaging: the image and the release | `Dockerfile` + `.dockerignore` (the whole recipe — the image builds both halves from the checkout and copies no prebuilt binary), `scripts/image-check.sh` (the contract, asserted from outside because the image has no shell), `.github/workflows/release-server.yml` (GoReleaser for the archives, `buildx` for one multi-arch manifest on GHCR), the `docker` job in `ci.yml`, `docs/docker.md`, spec 020 — `tracepad health` (`internal/cli/commands.go`) is the container's `HEALTHCHECK` and the one command that needs no key |
 | Configuration | `internal/config/`, spec 001 + spec 002 Configuration tables |
@@ -452,10 +453,15 @@ reason in a comment; adding a dialect should be a table edit.
   against a binary it builds. `uv` if present, `venv` otherwise;
   `SDK_SKIP_E2E=1` runs the unit half alone. `make sdk-lines` reports its
   budget.
+- `make sdk-go-test` — the Go package's vet and unit suite inside its module,
+  then its end-to-end package against a binary it builds; `make sdk-go-unit`
+  is the unit half alone, which the gate runs. `make sdk-go-lines` reports
+  its budget.
 - `make fixtures` — regenerate `testdata/otlp/*.pb` and their goldens after a
   deliberate mapping change. Review the golden diff; it *is* the change. The
-  one body that is not synthetic (`010-tracepad-sdk.pb`) is rewritten from the
-  package first, which needs `uv`; without it that body stands as committed.
+  two bodies that are not synthetic are rewritten from the packages first:
+  `010-tracepad-sdk.pb` needs `uv`, and without it stands as committed;
+  `014-tracepad-sdk-go.pb` needs only Go.
 
 ## Process
 
@@ -506,9 +512,12 @@ Before tagging:
 - **Tag a green commit.** The workflow does not check CI and cannot: a tag is
   yours to place, and it runs on whatever commit it names. What a release
   publishes should be what passed, so look at the commit's checks first —
-  `gate`, `e2e`, `smoke`, `sdk` and `docker`.
+  `gate`, `e2e`, `smoke`, `sdk`, `sdk-go` and `docker`.
 - The Python package has its own tag and its own workflow
   (`sdk-py/v*`, `release-sdk-py.yml`); the server's tag does not move it.
+- The Go package's tag is `sdk/go/vX.Y.Z` — the toolchain's rule for a module
+  in a subdirectory — and the tag is the whole release: no workflow, the
+  module proxy fetches it from the repository (spec 033 #1).
 
 One-time, and the owner's to do by hand:
 
