@@ -1,4 +1,4 @@
-"""Assert what the two real SDKs left in the database.
+"""Assert what the real SDKs and our own packages left in the database.
 
 Direct SQL, on purpose, even now that the read API exists (spec 004): this is
 the drift detector for SDK conventions, and what it is checking is what a
@@ -14,6 +14,7 @@ import sqlite3
 import sys
 
 db_path, otel_trace_id_file, langfuse_trace_id_file, tracepad_trace_id_file = sys.argv[1:5]
+tracepad_go_trace_id_file = sys.argv[5]
 
 failures = []
 
@@ -162,9 +163,47 @@ if generations:
     check(payload(generation["input_id"]) is not None, "tracepad generation has no input")
     check(payload(generation["output_id"]) is not None, "tracepad generation has no output")
 
+# --- the tracepad Go package, the same dialect (spec 033) ------------------
+go_id = read_id(tracepad_go_trace_id_file)
+row = trace(go_id)
+check(row["name"] == "tracepad-go-smoke", f"tracepad-go trace name = {row['name']!r}")
+check(row["user_id"] == "smoke-user", f"tracepad-go user_id = {row['user_id']!r}")
+check(row["session_id"] == "smoke-session", f"tracepad-go session_id = {row['session_id']!r}")
+check(row["environment"] == "smoke", f"tracepad-go environment = {row['environment']!r}")
+check(row["release"] == "smoke-1", f"tracepad-go release = {row['release']!r}")
+check(sorted(json.loads(row["tags"] or "[]")) == ["smoke", "spec-033"],
+      f"tracepad-go tags = {row['tags']!r}")
+check(row["observation_count"] == 2, f"tracepad-go observation_count = {row['observation_count']}")
+check(
+    row["total_cost"] is not None and abs(row["total_cost"] - 0.0003) < 1e-9,
+    f"tracepad-go total_cost = {row['total_cost']}",
+)
+check((payload(row["metadata_id"]) or {}).get("suite") == "smoke",
+      "tracepad-go trace metadata lost its entry")
+
+spans = observations(go_id)
+generations = [s for s in spans if s["type"] == "generation"]
+check(len(generations) == 1, f"tracepad-go generations = {len(generations)}")
+if generations:
+    generation = generations[0]
+    check(
+        generation["model"] == "claude-sonnet-5",
+        f"tracepad-go generation model = {generation['model']!r}",
+    )
+    usage = json.loads(generation["usage"] or "{}")
+    check(usage.get("input_tokens") == 11, f"tracepad-go usage = {usage}")
+    check(usage.get("output_tokens") == 5, f"tracepad-go usage = {usage}")
+    params = json.loads(generation["model_parameters"] or "{}")
+    check(params.get("max_tokens") == 64, f"tracepad-go model_parameters = {params}")
+    check(generation["provided_cost"] == 1, "tracepad-go generation must carry provided_cost")
+    check(generation["completion_start_time"] is not None,
+          "tracepad-go generation has no completion start")
+    check(payload(generation["input_id"]) is not None, "tracepad-go generation has no input")
+    check(payload(generation["output_id"]) is not None, "tracepad-go generation has no output")
+
 # --- raw bodies (spec 002 #9) ---------------------------------------------
 raw = db.execute("SELECT dialect, content_encoding, body FROM raw_batches").fetchall()
-check(len(raw) >= 3, f"raw_batches = {len(raw)}, want one per accepted export")
+check(len(raw) >= 4, f"raw_batches = {len(raw)}, want one per accepted export")
 dialects = {r["dialect"] for r in raw}
 check("langfuse" in dialects, f"raw dialects = {dialects}")
 check("genai" in dialects, f"raw dialects = {dialects}")
@@ -180,4 +219,4 @@ if failures:
         print(f"  - {failure}")
     raise SystemExit(1)
 
-print(f"smoke OK: 3 exports, {len(raw)} raw batches stored")
+print(f"smoke OK: 4 exports, {len(raw)} raw batches stored")

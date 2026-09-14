@@ -33,12 +33,13 @@ vet: ## Static checks
 smoke: ## Export from real SDKs into a real binary and assert the rows
 	scripts/smoke/run.sh
 
-# One body in the corpus is not synthetic: `010-tracepad-sdk.pb` is what the
-# Python package puts on the wire (spec 017, Testing). It is rewritten first,
-# by the package's own exporter under the pinned SDKs of the smoke test, and
-# the Go pass then regenerates every golden — including that one's, from the
-# bytes on disk. Without `uv` the committed body stands and only the goldens
-# move, which is what a Go-only checkout wants anyway.
+# Two bodies in the corpus are not synthetic: `010-tracepad-sdk.pb` is what the
+# Python package puts on the wire (spec 017, Testing) and `014-tracepad-sdk-go.pb`
+# what the Go package does (spec 033 #12). They are rewritten first, by each
+# package's own exporter — the Python one under the pinned SDKs of the smoke
+# test — and the Go pass then regenerates every golden, including theirs, from
+# the bytes on disk. Without `uv` the committed Python body stands and only the
+# goldens move, which is what a Go-only checkout wants anyway.
 fixtures: ## Regenerate testdata/otlp bodies and their golden files
 	@if command -v uv >/dev/null 2>&1; then \
 		uv run --quiet --isolated --with-requirements scripts/smoke/requirements.txt \
@@ -46,6 +47,7 @@ fixtures: ## Regenerate testdata/otlp bodies and their golden files
 	else \
 		echo "uv is missing: keeping testdata/otlp/010-tracepad-sdk.pb as committed"; \
 	fi
+	cd sdk/go && go run ./internal/fixture ../../testdata/otlp/014-tracepad-sdk-go.pb
 	go test ./internal/mapping -run TestGoldenFixtures -update
 
 format: ## Format all Go sources
@@ -132,6 +134,23 @@ SDK_BUDGET := 1600
 sdk-lines: ## Report the Python package's application lines against its budget
 	scripts/sdk-lines.sh $(SDK_BUDGET)
 
+# --- The Go package (spec 033) ------------------------------------------------
+#
+# A nested module (`sdk/go/go.mod`), so that a user's `go get` does not carry
+# the server's dependency graph — which is also why the root `go test ./...`
+# does not see it: it is named here, and in the gate, explicitly.
+
+sdk-go-test: ## Vet and unit-test the Go package, and end-to-end against a real binary
+	scripts/sdk-go-test.sh
+
+sdk-go-unit: ## The Go package's vet and unit tests alone (part of the gate)
+	SDK_SKIP_E2E=1 scripts/sdk-go-test.sh
+
+SDK_GO_BUDGET := 1600
+
+sdk-go-lines: ## Report the Go package's application lines against its budget
+	scripts/sdk-go-lines.sh $(SDK_GO_BUDGET)
+
 # The documentation's own cross-references (spec 026 #6): a hundred anchors
 # nothing read until now. Cheap enough for the gate — it is awk over seventeen
 # files — and the failure it catches is invisible in review.
@@ -141,7 +160,7 @@ doc-anchors: ## Check every anchor in docs/, README.md and AGENTS.md against its
 doc-anchors-self-test: ## Assert the anchor checker against its fixture
 	scripts/doc-anchors.sh --self-test
 
-gate: ensure-hooks format-check vet test doc-anchors ui-check ## Full gate: what CI runs, and the git pre-push hook
+gate: ensure-hooks format-check vet test sdk-go-unit doc-anchors ui-check ## Full gate: what CI runs, and the git pre-push hook
 
 # The pre-commit hook runs this: the checks that are cheap and the tests of
 # what is actually staged. The full gate runs once per push instead of once
@@ -150,10 +169,13 @@ gate: ensure-hooks format-check vet test doc-anchors ui-check ## Full gate: what
 precommit: ensure-hooks format-check vet test-staged ui-check-staged ## Fast gate for the pre-commit hook: staged Go packages, the interface only when it changed
 
 # Only the packages with a staged .go file. A change that breaks a dependent
-# package is caught by the pre-push gate, not here.
+# package is caught by the pre-push gate, not here. The Go package is its own
+# module: a staged file under sdk/go runs that module's unit suite instead.
 test-staged: ## Go tests of the packages with staged changes
-	@pkgs=$$(git diff --cached --name-only --diff-filter=ACMR -- '*.go' | xargs -n1 dirname 2>/dev/null | sort -u | sed 's|^|./|'); \
-	if [ -n "$$pkgs" ]; then go test $$pkgs; else echo "test-staged: no Go changes staged"; fi
+	@staged=$$(git diff --cached --name-only --diff-filter=ACMR -- '*.go'); \
+	pkgs=$$(printf '%s\n' "$$staged" | grep -v '^sdk/go/' | xargs -n1 dirname 2>/dev/null | sort -u | sed 's|^|./|'); \
+	if [ -n "$$pkgs" ]; then go test $$pkgs; else echo "test-staged: no Go changes staged"; fi; \
+	if printf '%s\n' "$$staged" | grep -q '^sdk/go/'; then $(MAKE) sdk-go-unit; fi
 
 ui-check-staged: ## The interface's type-check and unit tests, only when ui/ or openapi.json is staged
 	@if git diff --cached --name-only --diff-filter=ACMR | grep -qE '^(ui/|internal/server/openapi\.json$$)'; then \
@@ -185,5 +207,6 @@ install-hooks: ## (Re)install both hooks
 
 .PHONY: help build build-server dev test vet smoke fixtures format format-check \
 	ui ui-deps ui-types ui-types-check ui-check ui-lines image image-check \
-	e2e sdk-test sdk-lines doc-anchors doc-anchors-self-test gate precommit \
+	e2e sdk-test sdk-lines sdk-go-test sdk-go-unit sdk-go-lines \
+	doc-anchors doc-anchors-self-test gate precommit \
 	test-staged ui-check-staged ensure-hooks install-hooks
