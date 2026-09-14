@@ -235,6 +235,62 @@ test('deleting the project on screen leaves the tab, and Restore, in place', asy
 	await expect(row).toContainText('Live');
 });
 
+// The table is the way into a project's settings (spec 028 #25): a row leads
+// to that project's Project tab — a switch of project, so the sidebar names
+// it — and the Project tab leads an owner back. A member has no table to go
+// back to, and no line saying so.
+test('the projects table leads into a project, and the Project tab leads back', async ({
+	page
+}) => {
+	const own = await createProject('drillfrom');
+	const other = await createProject('drillto');
+	await signInAsOwner(page, own.id);
+	await page.goto('/settings/server');
+	await expect(page).toHaveURL(new RegExp(`/p/${own.id}/settings/server$`));
+
+	const row = page.getByRole('row').filter({ hasText: other.id });
+	await row.getByRole('button', { name: 'Settings' }).click();
+	await expect(page).toHaveURL(new RegExp(`/p/${other.id}/settings/project$`));
+	await expect(page.getByRole('button', { name: 'Switch project' })).toHaveText(other.name);
+	await expect(page.getByLabel('Name')).toHaveValue(other.name);
+
+	await page.getByRole('link', { name: 'All projects' }).click();
+	await expect(page).toHaveURL(new RegExp(`/p/${other.id}/settings/server$`));
+
+	// The name is a link to the same place, for the middle click and the copy.
+	await page.getByRole('row').filter({ hasText: own.id }).getByRole('link', { name: own.name }).click();
+	await expect(page).toHaveURL(new RegExp(`/p/${own.id}/settings/project$`));
+});
+
+// The table is the server's list and the way in is gated by `me`, which the
+// shell read at sign-in: a project made meanwhile — the CLI, another owner —
+// is on the table and not in the shell, so the tab reads `me` again rather
+// than leading to the not-there screen.
+test('a project made elsewhere is a way in too', async ({ page }) => {
+	const own = await createProject('meanwhile');
+	await signInAsOwner(page, own.id);
+	// Made after the sign-in, and reached without a reload: the sidebar, the
+	// tab — every step a navigation inside the shell.
+	const other = await createProject('outofband');
+	await page.getByRole('link', { name: 'Settings' }).click();
+	await page.getByRole('tab', { name: 'Server' }).click();
+	await expect(page).toHaveURL(new RegExp(`/p/${own.id}/settings/server$`));
+
+	const row = page.getByRole('row').filter({ hasText: other.id });
+	await row.getByRole('button', { name: 'Settings' }).click();
+	await expect(page).toHaveURL(new RegExp(`/p/${other.id}/settings/project$`));
+	await expect(page.getByText('This project is not yours to see')).toHaveCount(0);
+	await expect(page.getByLabel('Name')).toHaveValue(other.name);
+});
+
+test('a member has no way back to a table they cannot see', async ({ page }) => {
+	const own = await createProject('noback');
+	await openProjectTab(page, own.account);
+
+	await expect(page.getByLabel('Name')).toHaveValue(own.name);
+	await expect(page.getByRole('link', { name: 'All projects' })).toHaveCount(0);
+});
+
 // The tab is absent for a member and the route redirects, which is the two
 // halves of the same rule (spec 028 #14).
 test('the Server tab belongs to owners', async ({ page }) => {

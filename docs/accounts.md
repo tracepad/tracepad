@@ -250,7 +250,8 @@ saying so, not a wall of `403`s. See
 [ui.md](ui.md#the-project-in-the-address).
 
 Owners get a **Server** tab in Settings — absent for everybody else, and the
-address redirects — with the projects table and an **Accounts** table: email,
+address redirects — with the projects table, each row leading into that
+project's own settings, and an **Accounts** table: email,
 name, standing, last login, and the projects each account reaches with its
 role, plus *Invite*, *Edit* and *Delete*. The invitation link is shown once,
 there, with a copy button. See [ui.md](ui.md#settings-and-administration).

@@ -726,11 +726,16 @@ on, with *Sign out everywhere else*.
 **Server** — an owner's, and absent for everybody else; the address
 redirects too. Two tables:
 
-- **Projects** — every project on this server: create with the keys-once
-  dialog (the same one the sidebar's switcher opens), rename, delete behind
-  the echo, restore, and the soft-deleted ones with their purge dates. A
-  project created here is opened once its keys are put away — on this same
-  tab, under the new project, where the table is the same one.
+- **Projects** — every project on this server with its retention and its
+  status, and the way into each one: a row's name and its *Settings* lead to
+  that project's Project tab, which is where the name, the retention and the
+  keys are changed — nothing is edited from the table itself. *Delete* sits
+  beside *Settings* behind the echo; a soft-deleted row shows its purge date
+  and *Restore* instead. *New project* opens the keys-once dialog (the same
+  one the sidebar's switcher opens), and a project created here is opened
+  once its keys are put away — on this same tab, under the new project,
+  where the table is the same one. On the Project tab an owner has
+  *All projects* above the cards, the way back to this table.
 - **Accounts** — email, name, standing (`pending` / `active` / `disabled`),
   last login, and the projects each account reaches with the role it has.
   *Invite* opens a dialog and hands back the link once, with a copy button

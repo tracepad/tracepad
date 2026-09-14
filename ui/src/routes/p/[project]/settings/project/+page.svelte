@@ -1,8 +1,9 @@
 <script lang="ts">
+	import ChevronLeft from '@lucide/svelte/icons/chevron-left';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import { said } from '$lib/accounts';
 	import { api, type Project } from '$lib/api/client.svelte';
-	import { project } from '$lib/project.svelte';
+	import { href, project } from '$lib/project.svelte';
 	import EraseCard from '$lib/components/settings/EraseCard.svelte';
 	import KeysCard from '$lib/components/settings/KeysCard.svelte';
 	import ProjectCard from '$lib/components/settings/ProjectCard.svelte';
@@ -12,7 +13,9 @@
 	// The project on screen, as its members may change it (spec 028 #14). Every
 	// card is here for every role: a viewer sees what the project is set to and
 	// one line saying why the buttons are gone, which is spec 007 #12's rule
-	// applied to roles rather than to a credential.
+	// applied to roles rather than to a credential. An owner came here from
+	// the Server tab's table, or could have (spec 028 #25): the way back is
+	// above the cards, and only for them — a member has no table to go to.
 
 	const id = $derived(project.id);
 	const viewer = $derived(project.role === 'viewer');
@@ -62,6 +65,15 @@
 {:else if failure}
 	<p role="alert" class="text-danger text-sm">{failure}</p>
 {:else if current}
+	{#if owner}
+		<a
+			href={href('/settings/server')}
+			class="text-muted hover:text-fg pointer-coarse:min-h-11 flex w-fit items-center gap-0.5 text-sm"
+		>
+			<ChevronLeft class="size-3.5" />
+			All projects
+		</a>
+	{/if}
 	<ProjectCard {current} mayRename={owner} onchanged={changed} />
 	<RetentionCard {current} readOnly={viewer} onchanged={changed} />
 	<KeysCard {current} readOnly={viewer} />

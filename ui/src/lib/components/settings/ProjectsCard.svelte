@@ -2,12 +2,14 @@
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import Plus from '@lucide/svelte/icons/plus';
 	import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
+	import SlidersHorizontal from '@lucide/svelte/icons/sliders-horizontal';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { said } from '$lib/accounts';
+	import { auth } from '$lib/auth.svelte';
 	import { api, type DryRun, type Project } from '$lib/api/client.svelte';
 	import { timestamp } from '$lib/format';
-	import { switchTarget } from '$lib/project.svelte';
+	import { switchTarget, under } from '$lib/project.svelte';
 	import { refresh } from '$lib/session';
 	import Button from '../Button.svelte';
 	import ConfirmCard from '../ConfirmCard.svelte';
@@ -21,6 +23,12 @@
 	// delete behind the echo, restore inside the grace window, soft-deleted
 	// rows with their purge dates. A project made is a project opened
 	// (spec 029 #15): this tab, under the new id.
+	//
+	// The table is the way into a project's settings (spec 028 #25): a row
+	// shows retention and status, and where they are changed is the Project
+	// tab of that project — so the name and the row's first action lead
+	// there, a switch of project like the sidebar's (spec 029 #6). Nothing
+	// here edits a project; Delete is the exception on the row and looks it.
 
 	let projects = $state.raw<Project[]>([]);
 	let loading = $state(true);
@@ -47,17 +55,39 @@
 		if (made) void goto(switchTarget(page.url, made.id));
 	}
 
+	/** Where a row leads (spec 028 #25): the Project tab of that project. */
+	function settings(row: Project): string {
+		return under('/settings/project', row.id);
+	}
+
 	async function list() {
 		loading = true;
 		failure = null;
 		try {
-			projects = (await api.listAllProjects()).projects;
+			const listed = (await api.listAllProjects()).projects;
+			// The table is the server's list and the shell's is `me`, read at
+			// sign-in and after this tab's own actions (spec 029 #13). A
+			// project made elsewhere — the CLI, another owner's session — is
+			// in the first and not the second, and a row that led to it would
+			// land on the not-there screen, which is decided at the navigation
+			// from the `me` in hand: so `me` is read again, before the rows
+			// and their buttons appear, when the table knows a live project
+			// the shell does not. A read that fails is not the listing
+			// failing; the row still says what exists.
+			if (listed.some((row) => !row.deleted_at && !known(row.id))) {
+				await refresh().catch(() => {});
+			}
+			projects = listed;
 		} catch (cause) {
 			projects = [];
 			failure = said(cause, 'Failed to read the projects.');
 		} finally {
 			loading = false;
 		}
+	}
+
+	function known(id: string) {
+		return auth.projects.some((one) => one.id === id);
 	}
 
 	async function restore(target: Project) {
@@ -107,13 +137,19 @@
 						<th scope="col" class="px-3 py-1.5 font-medium">Id</th>
 						<th scope="col" class="px-3 py-1.5 font-medium">Retention</th>
 						<th scope="col" class="px-3 py-1.5 font-medium">Status</th>
-						<th scope="col" class="w-40 px-3 py-1.5 font-medium">Actions</th>
+						<th scope="col" class="w-48 px-3 py-1.5 font-medium">Actions</th>
 					</tr>
 				</thead>
 				<tbody>
 					{#each projects as row (row.id)}
 						<tr class="border-border border-b last:border-b-0">
-							<th scope="row" class="px-3 py-1.5 text-left font-normal">{row.name}</th>
+							<th scope="row" class="px-3 py-1.5 text-left font-normal">
+								{#if row.deleted_at}
+									{row.name}
+								{:else}
+									<a href={settings(row)} class="hover:text-accent">{row.name}</a>
+								{/if}
+							</th>
 							<td class="text-muted px-3 py-1.5 font-mono text-xs">{row.id}</td>
 							<td class="text-muted px-3 py-1.5 text-sm">
 								{row.retention_days === null
@@ -135,14 +171,21 @@
 										Restore
 									</Button>
 								{:else}
-									<Button
-										onclick={() => (
-											(notice = null), (deleting = deleting?.id === row.id ? null : row)
-										)}
-										aria-expanded={deleting?.id === row.id}
-									>
-										Delete
-									</Button>
+									<div class="flex items-center gap-1">
+										<Button onclick={() => goto(settings(row))}>
+											<SlidersHorizontal class="size-4" />
+											Settings
+										</Button>
+										<Button
+											variant="ghost"
+											onclick={() => (
+												(notice = null), (deleting = deleting?.id === row.id ? null : row)
+											)}
+											aria-expanded={deleting?.id === row.id}
+										>
+											Delete
+										</Button>
+									</div>
 								{/if}
 							</td>
 						</tr>
@@ -175,7 +218,10 @@
 			<Plus class="size-4" />
 			New project
 		</Button>
-		<p class="text-subtle text-xs">Its first key pair is shown once, when it is created.</p>
+		<p class="text-subtle text-xs">
+			A project's name, retention and keys are changed in its settings: the name on a row, or
+			<em>Settings</em> beside it.
+		</p>
 	</div>
 </Card>
 

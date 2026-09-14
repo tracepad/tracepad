@@ -184,6 +184,20 @@ describe('href', () => {
 	});
 });
 
+// The drill-down of spec 028 #25: a row of the Server tab's table leads to
+// that project's Project tab, and the Project tab leads back to the table
+// of whichever project is on screen.
+describe('the projects table', () => {
+	it('leads into another project and back', async () => {
+		const { href, under } = await fresh();
+		params.current = { project: P1 };
+
+		expect(under('/settings/project', P2)).toBe(`/p/${P2}/settings/project`);
+		params.current = { project: P2 };
+		expect(href('/settings/server')).toBe(`/p/${P2}/settings/server`);
+	});
+});
+
 describe('within', () => {
 	it('takes the prefix off and leaves a bare path alone', async () => {
 		const { within } = await fresh();
