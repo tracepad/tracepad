@@ -233,6 +233,14 @@ describe('switchTarget', () => {
 		expect(switchTarget(at(`/p/${P1}${from}`), P2)).toBe(`/p/${P2}${to}`);
 	});
 
+	// A project made from the Server tab is opened on the same tab (#15): the
+	// rule of #6 applied to the project just made rather than one chosen.
+	it('is where a project made from the Server tab lands', async () => {
+		const { switchTarget } = await fresh();
+
+		expect(switchTarget(at(`/p/${P1}/settings/server`), P2)).toBe(`/p/${P2}/settings/server`);
+	});
+
 	// The bare Account tab and `/p` are under no project: nothing to keep.
 	it('lands on the traces from a screen that is under no project', async () => {
 		const { switchTarget } = await fresh();

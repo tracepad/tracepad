@@ -728,7 +728,9 @@ redirects too. Two tables:
 
 - **Projects** — every project on this server: create with the keys-once
   dialog (the same one the sidebar's switcher opens), rename, delete behind
-  the echo, restore, and the soft-deleted ones with their purge dates.
+  the echo, restore, and the soft-deleted ones with their purge dates. A
+  project created here is opened once its keys are put away — on this same
+  tab, under the new project, where the table is the same one.
 - **Accounts** — email, name, standing (`pending` / `active` / `disabled`),
   last login, and the projects each account reaches with the role it has.
   *Invite* opens a dialog and hands back the link once, with a copy button

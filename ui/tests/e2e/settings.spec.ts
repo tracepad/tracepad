@@ -183,8 +183,12 @@ test('the Server tab creates, deletes with the echo, and restores', async ({ pag
 	await expect(dialog).toContainText('LANGFUSE_SECRET_KEY=tp-sk-');
 	await dialog.getByRole('button', { name: 'I have copied it' }).click();
 
-	// Made from the Server tab, the owner is still on it (spec 029 #11).
-	await expect(page).toHaveURL(/\/settings\/server$/);
+	// Made from the Server tab, the owner is on the same tab of the new
+	// project (spec 029 #15): the switcher names it, and the server's table —
+	// the same one — lists it.
+	await expect(page).toHaveURL(/\/p\/[0-9a-f]{32}\/settings\/server$/);
+	await expect(page).not.toHaveURL(new RegExp(`/p/${own.id}/`));
+	await expect(page.getByRole('button', { name: 'Switch project' })).toHaveText(name);
 	const row = page.getByRole('row').filter({ hasText: name });
 	await expect(row).toContainText('Live');
 
