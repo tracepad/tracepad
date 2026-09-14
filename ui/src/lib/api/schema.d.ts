@@ -3166,7 +3166,7 @@ export interface operations {
                 content: {
                     "application/json": {
                         /** @enum {string} */
-                        group_by: "hour" | "day" | "model" | "environment";
+                        group_by: "hour" | "day" | "model" | "environment" | "release";
                         /** @enum {string} */
                         unit: "trace" | "observation";
                         buckets: {
@@ -3175,6 +3175,12 @@ export interface operations {
                             error_count: number;
                             /** @description Absent when nothing in the bucket carried a cost */
                             total_cost?: number;
+                            /** @description Token sums over the observations in the bucket, on every grouping and both units. Each key is present only when something in the bucket carried that count, and the object is absent when none of the three is — absent, never zero, like `total_cost` — and always absent with `user_id`, whose rollup holds no token sums. Cache-read tokens are the input tokens a provider reported as served from its cache; reasoning and cache-creation counts are not summed */
+                            tokens?: {
+                                input?: number;
+                                output?: number;
+                                cache_read?: number;
+                            };
                             /** @description Present only with `user_id` and an `hour` or `day` grouping: how many of that user's sessions began in this bucket. A session is counted where it starts, so a sum over any range is exact */
                             sessions?: number;
                             latency_ms: {

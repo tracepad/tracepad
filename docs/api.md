@@ -644,6 +644,7 @@ curl … "http://localhost:4318/api/v1/stats?group_by=day&from=2026-09-01T00:00:
       "count": 412,
       "error_count": 7,
       "total_cost": 1.82,
+      "tokens": {"input": 1284930, "output": 96410, "cache_read": 402118},
       "latency_ms": {"p50": 640, "p95": 2310}
     }
   ]
@@ -676,6 +677,26 @@ stable across the expiry of the rows they came from. `total_cost` is summed
 only over rows whose client provided a cost and is absent when none did. A
 range with nothing in it comes back with no buckets rather than with
 fabricated zeroes.
+
+`tokens` is the same idea for the one number every provider reports: the
+sums of **input**, **output** and **cache-read** tokens over the generations
+in the bucket, on every grouping and both units. Each count is read off an
+observation's `usage` under the first spelling present of a short list —
+`input_tokens`, `prompt_tokens` or `input`; `output_tokens`,
+`completion_tokens` or `output`; `cache_read_input_tokens`,
+`cache_read_tokens` or `input_cached_tokens` — so the OpenAI, Anthropic and
+Langfuse spellings land in the same three numbers. A key is present only when
+something in the bucket carried that count, and the object is absent when
+none of the three is: a bucket whose calls reported no usage says nothing
+rather than zero. With `user_id` the object is always absent — the per-user
+rollup holds no token sums. Cache-read tokens are the input tokens a provider reported
+as served from its cache; a bill is made of input and output, and cache read
+is what explains one that is smaller than the tokens suggest. Reasoning and
+cache-creation counts are not summed — they stay on the observation, where
+the interface shows them. Hours that were rolled up before this store learned
+about tokens are re-rolled on the next pass, except an hour past the
+project's `retention_days`, whose observations are gone: it keeps no tokens
+for ever.
 
 ### Where the numbers come from
 

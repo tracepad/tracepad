@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"sort"
+	"strings"
 )
 
 // The hourly rollup (spec 013): a few thousand rows that answer what a scan of
@@ -33,6 +34,110 @@ type StatsRow struct {
 	// not the same claim as zero (spec 002 #14).
 	TotalCost *float64
 	Latency   Histogram
+	// Tokens are the three sums of spec 031, on both units: an observation
+	// row carries its own, a trace-unit row the sum over the observations
+	// of its traces (spec 031 #2).
+	Tokens Tokens
+}
+
+// Tokens are the three token sums a statistics cell carries (spec 031 #1):
+// input, output and cache read. Each is nil when nothing in the cell carried
+// that count, which is not the claim that it carried zero — `total_cost`'s
+// rule (spec 002 #14), one column further.
+type Tokens struct {
+	Input     *int64
+	Output    *int64
+	CacheRead *int64
+}
+
+// tokenClasses is the closed list of spec 031 #1: for each of the three sums,
+// the keys of an observation's `usage` it is read under, first present wins.
+// The store keeps usage keys as sent (spec 002 #19, spec 030 #1), so the same
+// fact arrives under a Langfuse spelling, a `gen_ai.usage.*` suffix or a bare
+// key, and the statistics have to pick a spelling per class — here, once, for
+// the rollup and the live scan alike. It grows by a Decision on spec 031, not
+// by a hunch: a collision with somebody's unrelated `input` is visible in this
+// list where a prefix scan would make it an accident.
+//
+// Reasoning and cache-creation counts are deliberately not here: reasoning is
+// inside `output` for most providers and beside it for some, so a sum would
+// double-count or under-count depending on who sent it, and cache creation
+// is a fact about one provider's billing that the observation panel shows.
+var tokenClasses = [...][]string{
+	{"input_tokens", "prompt_tokens", "input"},
+	{"output_tokens", "completion_tokens", "output"},
+	{"cache_read_input_tokens", "cache_read_tokens", "input_cached_tokens"},
+}
+
+// tokenExprs is the three counts read off one observation's `usage`, as SQL
+// expressions in the order of `tokenClasses`, given the column expression
+// `usage` holds it under. A key that is present but does not hold a number —
+// a string, an object — is not a count and is skipped rather than coerced:
+// `CAST` would read "lots" as zero, which is a claim nobody made. The keys
+// are this package's own constants, never anything a request carries.
+func tokenExprs(usage string) [len(tokenClasses)]string {
+	var out [len(tokenClasses)]string
+	for i, keys := range tokenClasses {
+		var firsts []string
+		for _, key := range keys {
+			path := "'$." + key + "'"
+			firsts = append(firsts, `CASE WHEN json_type(`+usage+`, `+path+`) IN ('integer', 'real')
+			     THEN CAST(json_extract(`+usage+`, `+path+`) AS INTEGER) END`)
+		}
+		out[i] = "COALESCE(" + strings.Join(firsts, ", ") + ")"
+	}
+	return out
+}
+
+// tokenColumns is `tokenExprs` as a SELECT list: one observation's three
+// counts, in the order `scanTokens` reads them.
+func tokenColumns(usage string) string {
+	exprs := tokenExprs(usage)
+	return strings.Join(exprs[:], ", ")
+}
+
+// tokenSums is the same three as aggregates: `SUM` over rows that carried no
+// count is NULL, which is what a cell with none should say.
+func tokenSums(usage string) string {
+	exprs := tokenExprs(usage)
+	for i, expr := range exprs {
+		exprs[i] = "SUM(" + expr + ")"
+	}
+	return strings.Join(exprs[:], ", ")
+}
+
+// scanTokens turns the three scanned columns into a Tokens.
+func scanTokens(input, output, cacheRead sql.NullInt64) Tokens {
+	var t Tokens
+	if input.Valid {
+		t.Input = &input.Int64
+	}
+	if output.Valid {
+		t.Output = &output.Int64
+	}
+	if cacheRead.Valid {
+		t.CacheRead = &cacheRead.Int64
+	}
+	return t
+}
+
+// Add folds another cell's sums in: a nil contributes nothing and does not
+// make the sum zero, which is how the bucket adds cost (spec 031 #5).
+func (t *Tokens) Add(other Tokens) {
+	addCount(&t.Input, other.Input)
+	addCount(&t.Output, other.Output)
+	addCount(&t.CacheRead, other.CacheRead)
+}
+
+func addCount(sum **int64, n *int64) {
+	if n == nil {
+		return
+	}
+	total := *n
+	if *sum != nil {
+		total += **sum
+	}
+	*sum = &total
 }
 
 // HourOf is the top of the hour a client timestamp falls in. The rollup
@@ -94,7 +199,8 @@ func rollupState(q querier, projectID string) (RollupState, error) {
 // `environment` filters when set, for the same reason the live scan filters
 // before it groups: a filter is not a grouping.
 func (s *Store) StatsRollupRows(projectID string, fromHour, toHour int64, environment []string, yield func(StatsRow)) error {
-	query := `SELECT hour, environment, release, model, count, error_count, total_cost, latency
+	query := `SELECT hour, environment, release, model, count, error_count, total_cost, latency,
+	                 input_tokens, output_tokens, cache_read_tokens
 	          FROM stats_hourly
 	          WHERE project_id = ? AND hour >= ? AND hour < ?`
 	args := []any{projectID, fromHour, toHour}
@@ -112,17 +218,20 @@ func (s *Store) StatsRollupRows(projectID string, fromHour, toHour int64, enviro
 
 	for rows.Next() {
 		var (
-			row     StatsRow
-			cost    sql.NullFloat64
-			latency string
+			row                      StatsRow
+			cost                     sql.NullFloat64
+			latency                  string
+			input, output, cacheRead sql.NullInt64
 		)
 		if err := rows.Scan(&row.Hour, &row.Environment, &row.Release, &row.Model,
-			&row.Count, &row.ErrorCount, &cost, &latency); err != nil {
+			&row.Count, &row.ErrorCount, &cost, &latency,
+			&input, &output, &cacheRead); err != nil {
 			return fmt.Errorf("scan a rollup row: %w", err)
 		}
 		if cost.Valid {
 			row.TotalCost = &cost.Float64
 		}
+		row.Tokens = scanTokens(input, output, cacheRead)
 		if row.Latency, err = decodeHistogram(latency); err != nil {
 			return err
 		}
@@ -341,10 +450,12 @@ func (r *statsRoll) rollStats(tx *sql.Tx) error {
 		if _, err := tx.Exec(
 			`INSERT INTO stats_hourly
 			   (project_id, hour, environment, release, model,
-			    count, error_count, total_cost, latency)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			    count, error_count, total_cost, latency,
+			    input_tokens, output_tokens, cache_read_tokens)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			r.ProjectID, r.Hour, row.Environment, row.Release, row.Model,
-			row.Count, row.ErrorCount, row.TotalCost, latency); err != nil {
+			row.Count, row.ErrorCount, row.TotalCost, latency,
+			row.Tokens.Input, row.Tokens.Output, row.Tokens.CacheRead); err != nil {
 			return fmt.Errorf("write a rollup row for hour %d: %w", r.Hour, err)
 		}
 	}
@@ -456,14 +567,17 @@ func rollHour(tx *sql.Tx, projectID string, hour int64) ([]StatsRow, error) {
 
 	// The observation-unit rows: what the model grouping counts. The join
 	// is the live scan's — the filters are trace-level, the numbers are the
-	// observation's.
+	// observation's. The same rows carry the tokens, which go to both
+	// cells the observation's trace falls in (spec 031 #2, #5): its model's
+	// and the trace-unit one of its environment and release.
 	observations, err := tx.Query(
 		`SELECT t.environment, COALESCE(t.release, ''), o.model,
 		        o.level = 'ERROR',
 		        CASE WHEN o.provided_cost = 1
 		             THEN json_extract(o.cost_details, '$.total') END,
 		        CASE WHEN o.start_time > 0 AND o.end_time >= o.start_time
-		             THEN (o.end_time - o.start_time) / 1000000 END
+		             THEN (o.end_time - o.start_time) / 1000000 END,
+		        `+tokenColumns("o.usage")+`
 		 FROM observations o
 		 JOIN traces t ON t.project_id = o.project_id AND t.id = o.trace_id
 		 WHERE o.project_id = ? AND t.timestamp >= ? AND t.timestamp < ?
@@ -479,12 +593,16 @@ func rollHour(tx *sql.Tx, projectID string, hour int64) ([]StatsRow, error) {
 			errored                     int
 			cost                        sql.NullFloat64
 			latency                     sql.NullInt64
+			input, output, cacheRead    sql.NullInt64
 		)
 		if err := observations.Scan(&environment, &release, &model,
-			&errored, &cost, &latency); err != nil {
+			&errored, &cost, &latency, &input, &output, &cacheRead); err != nil {
 			return nil, fmt.Errorf("scan an observation of the hour: %w", err)
 		}
 		add(cell(environment, release, model), errored != 0, cost, latency)
+		tokens := scanTokens(input, output, cacheRead)
+		cell(environment, release, model).Tokens.Add(tokens)
+		cell(environment, release, "").Tokens.Add(tokens)
 	}
 	if err := observations.Err(); err != nil {
 		return nil, err
