@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { breakdown, buildSeries, key, type StatsBucket } from './stats';
+import { billedTokens, breakdown, buildSeries, key, type StatsBucket } from './stats';
 
 /**
  * What the Stats screen draws (spec 007 #6). Two things are worth pinning
@@ -44,6 +44,25 @@ describe('the time series', () => {
 
 		expect(series.count).toEqual([1, 1]);
 		expect(series.cost).toEqual([0.5, null]);
+	});
+
+	it('keeps the three token classes apart, and absent ones absent', () => {
+		const series = buildSeries(
+			[
+				bucket('2026-09-01T02:00:00Z', { tokens: { input: 300, output: 30, cache_read: 12 } }),
+				// Traffic whose calls reported no usage: a gap on every class,
+				// not three zeroes (spec 031 #6).
+				bucket('2026-09-01T03:00:00Z'),
+				// Only the OpenAI pair: cache read stays a gap on its own.
+				bucket('2026-09-01T04:00:00Z', { tokens: { input: 200, output: 20 } })
+			],
+			{ from: '2026-09-01T02:00:00Z', to: '2026-09-01T05:00:00Z', bucket: 'hour', now: NOW }
+		);
+
+		expect(series.x).toHaveLength(3);
+		expect(series.input).toEqual([300, null, 200]);
+		expect(series.output).toEqual([30, null, 20]);
+		expect(series.cacheRead).toEqual([12, null, null]);
 	});
 
 	it('carries the latency percentiles as two series', () => {
@@ -117,6 +136,20 @@ describe('the breakdown', () => {
 
 		expect(haiku.cost).toBeNull();
 		expect(haiku.costShare).toBe(0);
+	});
+
+	it('counts a row by its input plus output, and never its cache read', () => {
+		const rows = breakdown([
+			bucket('claude-sonnet-5', { count: 3, tokens: { input: 300, output: 30, cache_read: 999 } }),
+			bucket('gpt-mini', { count: 2, tokens: { output: 20 } }),
+			// A model whose calls reported nothing: `—` in the column, no bar.
+			bucket('local-llama', { count: 1 })
+		]);
+
+		expect(rows.map((row) => row.tokens)).toEqual([330, 20, null]);
+		expect(rows.map((row) => row.tokensShare)).toEqual([1, 20 / 330, 0]);
+		// Cache read alone is not a billed token either.
+		expect(billedTokens({ cache_read: 5 })).toBeNull();
 	});
 
 	it('survives a column that is all zero', () => {

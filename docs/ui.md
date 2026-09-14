@@ -554,17 +554,24 @@ phone the panel covers the screen, which is the whole reason it is there —
 closing it costs nothing, where a page navigation would read the listing
 again.
 
-**Stats** — four charts over `GET /api/v1/stats` — traces, cost, latency
-(p50 and p95) and errors — sharing one x cursor, plus breakdown tables by
-model, by environment and by release with proportion bars. The bucket switcher
-is hourly/daily and defaults to hours for windows up to 48 hours, days above.
-In the release table, the traces that named none are one row called
-*(no release)* rather than a row that is missing.
+**Stats** — five charts over `GET /api/v1/stats` — traces, cost, tokens
+(input, output and cache read as three lines), latency (p50 and p95) and
+errors — sharing one x cursor, plus breakdown tables by model, by
+environment and by release with proportion bars and a **Tokens** column. The
+header's `N tokens` and the column are input plus output — what a bill is
+made of; cache read is on the chart, where it explains a bill that is
+smaller than the tokens suggest, and out of the headline number, where it
+would count the same tokens twice for the providers that report cached
+tokens inside the input. The bucket switcher is hourly/daily and defaults to
+hours for windows up to 48 hours, days above. In the release table, the
+traces that named none are one row called *(no release)* rather than a row
+that is missing.
 
 A bucket the server did not return is drawn as a **gap**, never as a zero,
-and a bucket that reported no cost has no cost point: the API refuses to
-fabricate rows and so does the screen. An empty window says so rather than
-drawing an empty frame.
+and a bucket that reported no cost has no cost point — nor a token point when
+none of its calls reported usage, and a table row without one shows `—`: the
+API refuses to fabricate rows and so does the screen. An empty window says so
+rather than drawing an empty frame.
 
 The numbers behind the charts come from an hourly rollup for closed hours and
 from the live rows for the hour in progress, which is why a month reads as

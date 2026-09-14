@@ -17,6 +17,12 @@ export type StatsBucket = {
 	 * without the filter the key is absent rather than zero.
 	 */
 	sessions?: number;
+	/**
+	 * Token sums over the bucket's generations (spec 031 #4). Each key is
+	 * present only when something carried that count, and the object is
+	 * absent when none did — absent, never zero, like `total_cost`.
+	 */
+	tokens?: { input?: number; output?: number; cache_read?: number };
 	latency_ms: { p50?: number | null; p95?: number | null };
 };
 
@@ -29,6 +35,10 @@ export type Series = {
 	errors: (number | null)[];
 	/** Null everywhere the answer carried no `sessions` at all (spec 023 #6). */
 	sessions: (number | null)[];
+	/** The three token classes, each null wherever the bucket carried none. */
+	input: (number | null)[];
+	output: (number | null)[];
+	cacheRead: (number | null)[];
 	p50: (number | null)[];
 	p95: (number | null)[];
 };
@@ -81,6 +91,9 @@ export function buildSeries(
 		cost: [],
 		errors: [],
 		sessions: [],
+		input: [],
+		output: [],
+		cacheRead: [],
 		p50: [],
 		p95: []
 	};
@@ -95,6 +108,11 @@ export function buildSeries(
 		// window drew and the server did not return is a gap here as it is
 		// everywhere else.
 		series.sessions.push(bucket?.sessions ?? null);
+		// The same discipline as cost, per class: traffic whose calls
+		// reported no usage is a gap on the Tokens chart, not a zero.
+		series.input.push(bucket?.tokens?.input ?? null);
+		series.output.push(bucket?.tokens?.output ?? null);
+		series.cacheRead.push(bucket?.tokens?.cache_read ?? null);
 		series.p50.push(bucket?.latency_ms?.p50 ?? null);
 		series.p95.push(bucket?.latency_ms?.p95 ?? null);
 	}
@@ -128,11 +146,25 @@ export type BreakdownRow = {
 	errorCount: number;
 	/** Null when nothing in this group reported a cost. */
 	cost: number | null;
+	/**
+	 * Input plus output tokens — what a bill is made of — and null when the
+	 * group carried neither. Cache read is on the chart, not here: adding
+	 * it would count the same tokens twice for the providers that report
+	 * cached tokens inside the input (spec 031 #6).
+	 */
+	tokens: number | null;
 	/** Bar widths as fractions of the largest row in each column. */
 	countShare: number;
 	errorShare: number;
 	costShare: number;
+	tokensShare: number;
 };
+
+/** The headline number of a bucket's tokens: input plus output, or null. */
+export function billedTokens(tokens: StatsBucket['tokens']): number | null {
+	if (!tokens || (tokens.input === undefined && tokens.output === undefined)) return null;
+	return (tokens.input ?? 0) + (tokens.output ?? 0);
+}
 
 /**
  * Turns categorical buckets into table rows with proportion bars, biggest
@@ -154,21 +186,25 @@ export function breakdown(buckets: StatsBucket[], unnamed = ''): BreakdownRow[] 
 		count: bucket.count,
 		errorCount: bucket.error_count,
 		cost: bucket.total_cost ?? null,
+		tokens: billedTokens(bucket.tokens),
 		countShare: 0,
 		errorShare: 0,
-		costShare: 0
+		costShare: 0,
+		tokensShare: 0
 	}));
 	const peak = {
 		count: Math.max(0, ...rows.map((row) => row.count)),
 		errors: Math.max(0, ...rows.map((row) => row.errorCount)),
-		cost: Math.max(0, ...rows.map((row) => row.cost ?? 0))
+		cost: Math.max(0, ...rows.map((row) => row.cost ?? 0)),
+		tokens: Math.max(0, ...rows.map((row) => row.tokens ?? 0))
 	};
 	for (const row of rows) {
 		row.countShare = share(row.count, peak.count);
 		row.errorShare = share(row.errorCount, peak.errors);
 		// A group that reported no cost gets no bar rather than an empty
-		// one: absent is not zero (spec 002 #14).
+		// one: absent is not zero (spec 002 #14). Tokens likewise.
 		row.costShare = row.cost === null ? 0 : share(row.cost, peak.cost);
+		row.tokensShare = row.tokens === null ? 0 : share(row.tokens, peak.tokens);
 	}
 	return rows.sort((a, b) => b.count - a.count || a.key.localeCompare(b.key));
 }

@@ -42,6 +42,10 @@
 						</th>
 						<th scope="col" class="w-36 px-3 py-1.5 font-medium">Errors</th>
 						<th scope="col" class="w-36 px-3 py-1.5 font-medium">Cost</th>
+						<!-- Input plus output: what a bill is made of. One number
+						     rather than a column per class, which would widen the
+						     table past a phone (spec 031 #6). -->
+						<th scope="col" class="w-36 px-3 py-1.5 font-medium">Tokens</th>
 					</tr>
 				</thead>
 				<tbody>
@@ -54,7 +58,7 @@
 							>
 								{row.key}
 							</th>
-							{#each [{ share: row.countShare, text: count(row.count), tint: 'bg-accent' }, { share: row.errorShare, text: count(row.errorCount), tint: 'bg-danger' }, { share: row.costShare, text: cost(row.cost), tint: 'bg-accent' }] as cell, index (index)}
+							{#each [{ share: row.countShare, text: count(row.count), tint: 'bg-accent' }, { share: row.errorShare, text: count(row.errorCount), tint: 'bg-danger' }, { share: row.costShare, text: cost(row.cost), tint: 'bg-accent' }, { share: row.tokensShare, text: count(row.tokens), tint: 'bg-accent' }] as cell, index (index)}
 								<td class="px-3 py-1.5">
 									<!-- The bar sits behind the number rather than beside
 									     it, so a long column does not push the figures out

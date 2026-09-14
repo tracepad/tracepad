@@ -12,19 +12,69 @@ async function signIn(page: Page) {
 	await enter(page, state().member);
 }
 
-test('all four charts render over the corpus', async ({ page }) => {
+test('all five charts render over the corpus', async ({ page }) => {
 	await signIn(page);
 	await page.goto(`/stats?${WINDOW}&group_by=day`);
 
-	for (const title of ['Traces', 'Cost', 'Latency', 'Errors']) {
+	for (const title of ['Traces', 'Cost', 'Tokens', 'Latency', 'Errors']) {
 		await expect(page.locator('.u-title', { hasText: title })).toBeVisible();
 	}
 	// One canvas per chart: they are drawn, not merely titled.
-	await expect(page.locator('.uplot canvas')).toHaveCount(4);
+	await expect(page.locator('.uplot canvas')).toHaveCount(5);
 	// Latency is two series in one chart (spec 007 #6).
 	await expect(page.locator('.u-legend', { hasText: 'p95' })).toBeVisible();
 	// The header's totals are the endpoint's own numbers.
 	await expect(page.getByText('17 traces · 1 with errors')).toBeVisible();
+});
+
+test('the Tokens chart has three lines and the model table a column, from the corpus', async ({
+	page
+}) => {
+	await signIn(page);
+	await page.goto(`/stats?${WINDOW}&group_by=day`);
+
+	// Three classes in one chart (spec 031 #6); the corpus carries all three
+	// spellings and a cache-read count, so every line has a point.
+	const legend = page.locator('.uplot', { has: page.locator('.u-title', { hasText: 'Tokens' }) })
+		.locator('.u-legend');
+	for (const label of ['Input', 'Output', 'Cache read']) {
+		await expect(legend).toContainText(label);
+	}
+
+	// The summary line carries the headline number, and it is the
+	// endpoint's: input plus output over the day buckets, cache read excluded.
+	const answer = await fetch(
+		`${state().baseURL}/api/v1/stats?${WINDOW}&group_by=day`,
+		{ headers: { Authorization: `Bearer ${state().key}` } }
+	);
+	const { buckets } = (await answer.json()) as {
+		buckets: { tokens?: { input?: number; output?: number } }[];
+	};
+	const billed = buckets.reduce(
+		(sum, bucket) => sum + (bucket.tokens?.input ?? 0) + (bucket.tokens?.output ?? 0),
+		0
+	);
+	expect(billed).toBeGreaterThan(0);
+	await expect(page.getByText(`${billed.toLocaleString('en-US')} tokens`)).toBeVisible();
+
+	// And the model table's column: the row of the model with the most
+	// observations shows its own input plus output.
+	const byModel = await fetch(
+		`${state().baseURL}/api/v1/stats?${WINDOW}&group_by=model`,
+		{ headers: { Authorization: `Bearer ${state().key}` } }
+	);
+	const models = (await byModel.json()) as {
+		buckets: { key: string; count: number; tokens?: { input?: number; output?: number } }[];
+	};
+	const model = models.buckets.find((bucket) => bucket.tokens?.input !== undefined)!;
+	const table = page.getByRole('table').filter({ has: page.getByText('Model') });
+	const row = table
+		.getByRole('row')
+		.filter({ has: page.getByRole('rowheader', { name: model.key, exact: true }) });
+	await expect(table.getByRole('columnheader', { name: 'Tokens' })).toBeVisible();
+	await expect(row).toContainText(
+		((model.tokens!.input ?? 0) + (model.tokens!.output ?? 0)).toLocaleString('en-US')
+	);
 });
 
 test('the breakdown tables match what the endpoint reports', async ({ page }) => {
