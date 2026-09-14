@@ -2,9 +2,12 @@
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import Plus from '@lucide/svelte/icons/plus';
 	import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
+	import { goto } from '$app/navigation';
+	import { page } from '$app/state';
 	import { said } from '$lib/accounts';
 	import { api, type DryRun, type Project } from '$lib/api/client.svelte';
 	import { timestamp } from '$lib/format';
+	import { switchTarget } from '$lib/project.svelte';
 	import { refresh } from '$lib/session';
 	import Button from '../Button.svelte';
 	import ConfirmCard from '../ConfirmCard.svelte';
@@ -16,13 +19,16 @@
 	// The table and its ceremony are exactly what they were: create with the
 	// keys-once dialog — the one the switcher opens too (spec 029 #7) —
 	// delete behind the echo, restore inside the grace window, soft-deleted
-	// rows with their purge dates.
+	// rows with their purge dates. A project made is a project opened
+	// (spec 029 #15): this tab, under the new id.
 
 	let projects = $state.raw<Project[]>([]);
 	let loading = $state(true);
 	let failure = $state<string | null>(null);
 
 	let creating = $state(false);
+	/** The project just made, whose Server tab this one leaves for once the keys are put away. */
+	let made = $state.raw<Project | null>(null);
 	/** The project a deletion is being walked through, if any. */
 	let deleting = $state<Project | null>(null);
 	/** What just happened, said outside the card that closes on saying it. */
@@ -31,6 +37,15 @@
 	$effect(() => {
 		void list();
 	});
+
+	// The keys are shown once, and this tab is what the dialog is mounted in:
+	// leaving before they are dismissed would take them with it. The same tab
+	// of the new project is what a switch to it would land on (spec 029 #6),
+	// and the remount that the new id brings (#10) re-reads the table.
+	function closed() {
+		creating = false;
+		if (made) void goto(switchTarget(page.url, made.id));
+	}
 
 	async function list() {
 		loading = true;
@@ -164,4 +179,4 @@
 	</div>
 </Card>
 
-<NewProjectDialog open={creating} onclose={() => (creating = false)} oncreated={() => void list()} />
+<NewProjectDialog open={creating} onclose={closed} oncreated={(created) => (made = created)} />
