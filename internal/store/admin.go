@@ -685,6 +685,13 @@ func (e *UserDataErase) apply(tx *sql.Tx) error {
 		return &Rejection{Kind: RejectNotFound, Message: "no such project"}
 	}
 
+	// A chunk of nothing would say `More` for ever: `LIMIT 0` selects no
+	// rows and a scan of zero rows is a full one. A programmer's mistake,
+	// so it fails the job rather than being read as a size.
+	if e.Limit <= 0 {
+		return fmt.Errorf("erase a user's data: chunk limit %d is not positive", e.Limit)
+	}
+
 	e.Hours, e.More = nil, false
 	rows, err := tx.Query(
 		`SELECT id, timestamp FROM traces WHERE project_id = ? AND user_id = ? LIMIT ?`,
@@ -708,10 +715,14 @@ func (e *UserDataErase) apply(tx *sql.Tx) error {
 		hour := HourOf(timestamp)
 		if !seen[hour] {
 			if e.HourLimit > 0 && len(e.Hours) == e.HourLimit {
-				// The hour cap: this trace and the rest of the
-				// selection are the next chunk's.
+				// The hour cap: a trace of a further hour is a later
+				// chunk's. Skipped rather than stopped at, so that a
+				// user whose traces arrived interleaved across hours
+				// still fills the chunk for the hours it has, and
+				// those hours are rolled by this chunk alone rather
+				// than by every chunk that reaches into them.
 				e.More = true
-				break
+				continue
 			}
 			seen[hour] = true
 			e.Hours = append(e.Hours, hour)

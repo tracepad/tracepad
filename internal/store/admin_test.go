@@ -238,14 +238,18 @@ func TestErasureCorrectsTheHoursOfEachChunkAsItCommits(t *testing.T) {
 
 // TestAnEraseChunkIsBoundedInHours (spec 023 #19): the rolls are what a
 // chunk now costs, so a chunk is capped in distinct hours as well as in
-// traces, and a chunk cut short by the cap says there is more.
+// traces, and a chunk cut short by the cap says there is more. The traces
+// arrive interleaved across hours, and the cap skips the hours beyond it
+// rather than stopping at the first of them (second review of PR #65): a
+// chunk holds everything the window has for its hours, so each hour is
+// rolled by one chunk and not by every chunk that reaches into it.
 func TestAnEraseChunkIsBoundedInHours(t *testing.T) {
 	s, project := readStore(t)
-	// One trace an hour, five hours: a sparse user.
-	for i := range 5 {
+	// Three hours, arriving round-robin: hour 0, 1, 2, 0, 1, 2, 0.
+	for i := range 7 {
 		seedUserTrace(t, s, project.ID, userSeed{n: i + 1, user: "sparse", session: "s",
 			environment: "production", model: "claude-sonnet-5", latencyMs: 50,
-			hour: rollupHour + int64(i)*SecondsPerHour, offsetSeconds: 1})
+			hour: rollupHour + int64(i%3)*SecondsPerHour, offsetSeconds: int64(i)})
 	}
 
 	writer, err := s.NewWriter(quickWrites)
@@ -269,12 +273,25 @@ func TestAnEraseChunkIsBoundedInHours(t *testing.T) {
 	for _, chunk := range chunks {
 		got = append(got, chunk.Counts.Traces)
 	}
-	if want := []int64{2, 2, 1}; !slices.Equal(got, want) {
-		t.Errorf("chunks took %v traces, want %v: two hours at a time, and the last one short", got, want)
+	// The first chunk: every trace of hours 0 and 1 (five of them), the
+	// third hour's two skipped; the second: those two, and nothing more.
+	if want := []int64{5, 2}; !slices.Equal(got, want) {
+		t.Fatalf("chunks took %v traces, want %v: two hours at a time, whole", got, want)
 	}
-	if chunks[0].More != true || chunks[1].More != true || chunks[2].More != false {
-		t.Errorf("more = %v %v %v, want the two capped chunks to say so and the last not to",
-			chunks[0].More, chunks[1].More, chunks[2].More)
+	if !chunks[0].More || chunks[1].More {
+		t.Errorf("more = %v %v, want the capped chunk to say so and the last not to",
+			chunks[0].More, chunks[1].More)
+	}
+	if len(chunks[0].Hours) != 2 || len(chunks[1].Hours) != 1 {
+		t.Errorf("hours = %v and %v, want two then one", chunks[0].Hours, chunks[1].Hours)
+	}
+
+	// And a chunk of no size is a mistake, not a size: it would say
+	// `More` for ever.
+	err = writer.Submit(t.Context(), &UserDataErase{ProjectID: project.ID, UserID: "sparse",
+		Confirm: "sparse", Limit: 0})
+	if err == nil || rejected(err) {
+		t.Errorf("a zero limit came back %v, want a storage error", err)
 	}
 }
 
