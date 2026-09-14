@@ -849,7 +849,13 @@ class Api {
 			// membership, deleting a confirmed account — and `json()` on an
 			// empty body throws.
 			if (response.status === 204) return undefined as T;
-			return (await response.json()) as T;
+			try {
+				return (await response.json()) as T;
+			} catch (cause) {
+				// The clock covers the body too: headers that arrived and a
+				// body that never finishes is the same silence as no headers.
+				throw interrupted(cause) ?? cause;
+			}
 		}
 		if (response.status === 401 && !options.anonymous) {
 			// The cookie is gone, expired, or belongs to an account that was
@@ -863,6 +869,15 @@ class Api {
 	}
 
 	async #fetch(path: string, query: Query, options: Request = {}): Promise<Response> {
+		// The caller's signal and the clock, either of which ends the request;
+		// `fetch` rejects with whichever one fired, and the reason's name says
+		// which. Composed outside the `try` on purpose: a browser without
+		// `AbortSignal.any` (spec 010 #10 states the floor) should fail here,
+		// loudly, and not be reported as a server nobody can reach.
+		const signal = AbortSignal.any([
+			AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+			...(options.signal ? [options.signal] : [])
+		]);
 		let response: Response;
 		try {
 			response = await fetch(path + search(query), {
@@ -885,25 +900,10 @@ class Api {
 					...(options.body === undefined ? {} : { 'Content-Type': 'application/json' })
 				},
 				body: options.body === undefined ? undefined : JSON.stringify(options.body),
-				// The caller's signal and the clock, either of which ends the
-				// request; `fetch` rejects with whichever one fired, and the
-				// reason's name says which.
-				signal: AbortSignal.any([
-					AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-					...(options.signal ? [options.signal] : [])
-				])
+				signal
 			});
 		} catch (cause) {
-			// The clock ran out: the same failure as a server nobody can reach,
-			// and the caller's to show — a load's `failure`, a tick's
-			// `liveFailure` — not an abort, which lands nowhere (spec 010 #8).
-			if (named(cause) === 'TimeoutError') {
-				throw new ApiError(0, 'the server did not answer in time');
-			}
-			// The caller's own abort: the question went stale, and no answer to
-			// it is wanted, failure included.
-			if (named(cause) === 'AbortError') throw cause;
-			throw new ApiError(0, 'cannot reach the server');
+			throw interrupted(cause) ?? new ApiError(0, 'cannot reach the server');
 		}
 		const version = response.headers.get(VERSION_HEADER);
 		if (version) this.version = version;
@@ -912,12 +912,22 @@ class Api {
 }
 
 /**
- * What a rejection calls itself. By name rather than by class: `instanceof
- * DOMException` is bound to a realm, and a signal's reason need not come from
- * this one — under jsdom it does not.
+ * What a request cut short by its signal means to the caller, or `null` when
+ * it was not the signal that ended it. The clock running out is the same
+ * failure as a server nobody can reach, and the caller's to show — a load's
+ * `failure`, a tick's `liveFailure` — not an abort, which lands nowhere (spec
+ * 010 #8): the caller's own abort means the question went stale and no answer
+ * to it is wanted, failure included, so it passes through as it is.
+ *
+ * Told apart by name rather than by class: `instanceof DOMException` is bound
+ * to a realm, and a signal's reason need not come from this one — under jsdom
+ * it does not.
  */
-function named(cause: unknown): string {
-	return typeof cause === 'object' && cause !== null && 'name' in cause ? String(cause.name) : '';
+function interrupted(cause: unknown): unknown {
+	const name = typeof cause === 'object' && cause !== null && 'name' in cause ? cause.name : '';
+	if (name === 'TimeoutError') return new ApiError(0, 'the server did not answer in time');
+	if (name === 'AbortError') return cause;
+	return null;
 }
 
 /**

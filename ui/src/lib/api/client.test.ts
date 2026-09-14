@@ -191,6 +191,30 @@ describe('requests', () => {
 		expect((cause as Error).message).toBe('the server did not answer in time');
 	});
 
+	it('gives up the same way on a body that never finishes', async () => {
+		const { api, ApiError, auth } = await fresh();
+		auth.adopt(ME);
+		vi.useFakeTimers();
+		fakeTimeout();
+		// The headers arrive; the body is the part that stalls. The clock covers
+		// both, and a real body read rejects with the signal's reason too.
+		vi.stubGlobal('fetch', (_url: string, init?: RequestInit) => {
+			const signal = init!.signal!;
+			const response = new Response(null, { status: 200 });
+			response.json = () =>
+				new Promise((_, reject) => signal.addEventListener('abort', () => reject(signal.reason)));
+			return Promise.resolve(response);
+		});
+
+		const failure = api.listTraces({}).catch((cause) => cause);
+		await vi.advanceTimersByTimeAsync(30_000);
+		const cause = await failure;
+
+		expect(cause).toBeInstanceOf(ApiError);
+		expect((cause as InstanceType<typeof ApiError>).offline).toBe(true);
+		expect((cause as Error).message).toBe('the server did not answer in time');
+	});
+
 	it("passes the caller's own abort through untouched", async () => {
 		const { api, ApiError, auth } = await fresh();
 		auth.adopt(ME);
