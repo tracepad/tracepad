@@ -12,6 +12,7 @@ import {
   type Context,
   type Span,
   type TracerProvider,
+  ProxyTracerProvider,
   SpanStatusCode,
   context,
   createContextKey,
@@ -74,16 +75,7 @@ export function init(options: InitOptions = {}): void {
     });
     provider.register();
   } else {
-    if (config.environment !== undefined || config.release !== undefined) {
-      // A resource is fixed when its provider is built, and `service.version`
-      // is read from the resource only (`docs/ingest.md`), so neither can be
-      // added to somebody else's provider afterwards.
-      warn(
-        'init(): environment and release are resource attributes and this process already ' +
-          'has a TracerProvider; set deployment.environment.name and service.version on its ' +
-          'resource (OTEL_RESOURCE_ATTRIBUTES) instead',
-      );
-    }
+    if (config.environment !== undefined || config.release !== undefined) refuseResource('init');
     if (typeof (found as Adoptable).addSpanProcessor === 'function') {
       (found as Adoptable).addSpanProcessor!(processor(config, options.export));
     } else if (!handedOut) {
@@ -107,7 +99,16 @@ interface Adoptable extends TracerProvider {
 function delegateOf(): Adoptable | undefined {
   const found = trace.getTracerProvider() as Adoptable & { getDelegate?: () => TracerProvider };
   const delegate = typeof found.getDelegate === 'function' ? found.getDelegate() : found;
-  return delegate.constructor?.name === 'NoopTracerProvider' ? undefined : (delegate as Adoptable);
+  return isNoop(delegate) ? undefined : (delegate as Adoptable);
+}
+
+/**
+ * The API's no-op is one module-level instance, and a fresh proxy with no
+ * delegate hands it out — an identity a minifier cannot rename. The name is
+ * the fallback for a second copy of the API, whose singleton is its own.
+ */
+function isNoop(provider: TracerProvider): boolean {
+  return provider === new ProxyTracerProvider().getDelegate() || provider.constructor?.name === 'NoopTracerProvider';
 }
 
 function resourceFor(config: Config) {
@@ -134,9 +135,21 @@ function resourceFor(config: Config) {
  */
 export function spanProcessor(options: InitOptions = {}): SpanProcessor {
   const config = resolve(options);
+  if (config.environment !== undefined || config.release !== undefined) refuseResource('spanProcessor');
   adopt(config);
   handedOut = true;
   return processor(config, options.export);
+}
+
+/** A resource is fixed when its provider is built, and `service.version` is
+ * read from the resource only (`docs/ingest.md`), so neither can be added to
+ * somebody else's provider afterwards. */
+function refuseResource(call: string): void {
+  warn(
+    `${call}(): environment and release are resource attributes and this process already ` +
+      'has a TracerProvider; set deployment.environment.name and service.version on its ' +
+      'resource (OTEL_RESOURCE_ATTRIBUTES) instead',
+  );
 }
 
 function processor(config: Config, exporting = true): SpanProcessor {
@@ -607,18 +620,29 @@ export function observe<F extends AnyFunction>(fn: F, options: ObserveOptions = 
           enter(handle, args);
           return (fn.apply(this, args) as AsyncIterable<unknown>)[Symbol.asyncIterator]();
         });
-        for (;;) {
-          // Each step inside the span's context, and no longer: a generator
-          // runs in the context of whoever advances it.
-          const step = await context.with(ctx, () => steps!.next());
-          if (step.done) break;
+        // Each step inside the span's context, and no longer: a generator
+        // runs in the context of whoever advances it. What the consumer
+        // sends and throws goes through, and so does the return value.
+        let step = await context.with(ctx, () => steps!.next());
+        while (!step.done) {
           yielded.push(step.value);
-          yield step.value;
+          let sent: unknown;
+          try {
+            sent = yield step.value;
+          } catch (thrown) {
+            step = await context.with(ctx, () => rethrow(steps!, thrown));
+            continue;
+          }
+          step = await context.with(ctx, () => steps!.next(sent));
         }
+        return step.value;
       } catch (error) {
         failed(handle, error);
         throw error;
       } finally {
+        // A consumer that stopped early closes the inner generator too, so
+        // that its own cleanup runs; a finished one is closed already.
+        if (steps?.return !== undefined) await context.with(ctx, () => steps!.return!());
         leave(handle, yielded, false);
         handle.finish();
       }
@@ -627,21 +651,30 @@ export function observe<F extends AnyFunction>(fn: F, options: ObserveOptions = 
     wrapper = function* (this: unknown, ...args: unknown[]) {
       const [handle, ctx] = begin(name, attributes(), make);
       const yielded: unknown[] = [];
+      let steps: Iterator<unknown> | undefined;
       try {
-        const steps = context.with(ctx, () => {
+        steps = context.with(ctx, () => {
           enter(handle, args);
           return (fn.apply(this, args) as Iterable<unknown>)[Symbol.iterator]();
         });
-        for (;;) {
-          const step = context.with(ctx, () => steps.next());
-          if (step.done) break;
+        let step = context.with(ctx, () => steps!.next());
+        while (!step.done) {
           yielded.push(step.value);
-          yield step.value;
+          let sent: unknown;
+          try {
+            sent = yield step.value;
+          } catch (thrown) {
+            step = context.with(ctx, () => rethrow(steps!, thrown));
+            continue;
+          }
+          step = context.with(ctx, () => steps!.next(sent));
         }
+        return step.value;
       } catch (error) {
         failed(handle, error);
         throw error;
       } finally {
+        if (steps?.return !== undefined) context.with(ctx, () => steps!.return!());
         leave(handle, yielded, false);
         handle.finish();
       }
@@ -664,6 +697,12 @@ export function observe<F extends AnyFunction>(fn: F, options: ObserveOptions = 
   }
   Object.defineProperty(wrapper, 'name', { value: fn.name, configurable: true });
   return wrapper as F;
+}
+
+/** Hand a consumer's `throw()` to the inner generator, or throw it where the generator would. */
+function rethrow<S extends Iterator<unknown> | AsyncIterator<unknown>>(steps: S, thrown: unknown): ReturnType<NonNullable<S['throw']>> {
+  if (steps.throw === undefined) throw thrown;
+  return steps.throw(thrown) as ReturnType<NonNullable<S['throw']>>;
 }
 
 /** Forget that `init` ran. For tests. */

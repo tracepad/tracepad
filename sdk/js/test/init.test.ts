@@ -46,6 +46,11 @@ describe('a provider that takes processors in its constructor only (the 2.x line
     expect(warnings).toEqual([expect.stringContaining('pass tracepad.spanProcessor() to it')]);
   });
 
+  test('spanProcessor() refuses environment and release the way init does', () => {
+    tracepad.spanProcessor({ host: HOST, key: KEY, release: '1.0', export: false });
+    expect(warnings).toEqual([expect.stringMatching(/^tracepad: spanProcessor\(\): environment and release are resource attributes/)]);
+  });
+
   test('is silent when spanProcessor() was handed to it', () => {
     new NodeTracerProvider({ spanProcessors: [tracepad.spanProcessor({ host: HOST, key: KEY })] }).register();
     tracepad.init({ host: HOST, key: KEY });
@@ -88,6 +93,19 @@ describe('no provider', () => {
     for (const expected of ['answer-question', 'service.name', 'support-bot', 'deployment.environment.name', 'production', 'service.version', '2026.9.4']) {
       expect(body).toContain(expected);
     }
+    expect(warnings).toEqual([]);
+  });
+
+  test('is told apart by identity, not by a class name a minifier renames', () => {
+    const noop = registered();
+    const named = Object.getOwnPropertyDescriptor(noop.constructor, 'name')!;
+    Object.defineProperty(noop.constructor, 'name', { value: 'ln', configurable: true });
+    try {
+      tracepad.init({ host: HOST, key: KEY, export: false });
+    } finally {
+      Object.defineProperty(noop.constructor, 'name', named);
+    }
+    expect(registered()).toBeInstanceOf(NodeTracerProvider);
     expect(warnings).toEqual([]);
   });
 

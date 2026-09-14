@@ -323,8 +323,8 @@ prompt baked into the code is a prompt the trace cannot name.
 
 | Path | On failure |
 |---|---|
-| `init` after configuration, `observe`, the callbacks, `update`, `end`, the exporter, the score queue | Warned through the logger; never thrown into your code |
-| `prompt`, `flush` | Rejects with `TracepadError`, or `TracepadHTTPError` with `status` and `body` for a non-2xx |
+| `init` after configuration, `observe`, the callbacks, `update`, `end`, the exporter, the score queue, `flush` | Warned through the logger; never thrown into your code — a `flush` that ran out of time says so and resolves |
+| `prompt` | Rejects with `TracepadError`, or `TracepadHTTPError` with `status` and `body` for a non-2xx |
 | `init` with no host or key | `TracepadConfigError` |
 | `score` with no target at all | `Error` — a programming error, visible at the call site |
 

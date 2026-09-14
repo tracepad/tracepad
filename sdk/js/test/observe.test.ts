@@ -63,6 +63,67 @@ describe('the four shapes', () => {
     expect(attributes[attrs.OBSERVATION_METADATA]).toBe('{"step":1}');
   });
 
+  test('a generator is the same shape: return value, sent values, throw', () => {
+    const seen = spans();
+    const closed: string[] = [];
+    const inner = tracepad.observe(function* echo(): Generator<number, string, string> {
+      try {
+        const first = yield 1;
+        const second = yield first.length;
+        return `${first}/${second}`;
+      } catch (error) {
+        closed.push(`caught ${(error as Error).message}`);
+        return 'recovered';
+      } finally {
+        closed.push('cleanup');
+      }
+    });
+    const it = inner();
+    expect(it.next()).toEqual({ value: 1, done: false });
+    expect(it.next('four')).toEqual({ value: 4, done: false });
+    expect(it.next('two')).toEqual({ value: 'four/two', done: true });
+    expect(closed).toEqual(['cleanup']);
+    // The return value reaches a `yield*` delegator, as it would from the bare generator.
+    function* outer() {
+      return yield* inner();
+    }
+    const delegated = outer();
+    delegated.next();
+    delegated.next('a');
+    expect(delegated.next('b')).toEqual({ value: 'a/b', done: true });
+
+    // A consumer's throw is the generator's to catch.
+    const thrown = inner();
+    thrown.next();
+    expect(thrown.throw(new Error('stop'))).toEqual({ value: 'recovered', done: true });
+    expect(closed.slice(-2)).toEqual(['caught stop', 'cleanup']);
+    expect(seen.all().filter((s) => s.name === 'echo')).toHaveLength(3);
+  });
+
+  test('a consumer that stops early closes the inner generator, so its cleanup runs', async () => {
+    spans();
+    const cleaned: string[] = [];
+    const sync = tracepad.observe(function* () {
+      try {
+        yield 1;
+        yield 2;
+      } finally {
+        cleaned.push('sync');
+      }
+    });
+    for (const n of sync()) if (n === 1) break;
+    const async = tracepad.observe(async function* () {
+      try {
+        yield 1;
+        yield 2;
+      } finally {
+        cleaned.push('async');
+      }
+    });
+    for await (const n of async()) if (n === 1) break;
+    expect(cleaned).toEqual(['sync', 'async']);
+  });
+
   test('a generator left early ends with what came before', () => {
     const seen = spans();
     const counted = tracepad.observe(function* count() {
