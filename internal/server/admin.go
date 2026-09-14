@@ -703,14 +703,23 @@ func (s *Server) handleEraseUserData(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Every chunk is a transaction that leaves the store consistent on its
+	// own: the traces go, and the hours they occupied are re-rolled in the
+	// same commit (spec 013 #7, spec 023 #19). So a client that hangs up
+	// between chunks — a closed tab, the interface's thirty-second clock
+	// (spec 010 #10) — loses nothing but the answer, and repeating the
+	// request finishes the rest. `Now` is read once: the freeze is a
+	// question about the retention window, and a request is not long
+	// enough to move it.
 	var erased store.DeleteCounts
-	touched := map[int64]bool{}
+	now := time.Now().UnixNano()
 	for {
 		chunk := &store.UserDataErase{
 			ProjectID: project.ID,
 			UserID:    userID,
 			Confirm:   values.Get("confirm"),
 			Limit:     eraseChunk,
+			Now:       now,
 		}
 		if !s.submit(w, r, chunk) {
 			return
@@ -720,24 +729,8 @@ func (s *Server) handleEraseUserData(w http.ResponseWriter, r *http.Request) {
 		erased.Scores += chunk.Counts.Scores
 		erased.Payloads += chunk.Counts.Payloads
 		erased.AnnotationItems += chunk.Counts.AnnotationItems
-		for _, hour := range chunk.Hours {
-			touched[hour] = true
-		}
 		if chunk.Counts.Traces < int64(eraseChunk) {
 			break
-		}
-	}
-
-	// The statistics are data derived from what was just erased, so the
-	// hours it emptied are recomputed before the 200 that promises the
-	// user's data is gone (spec 013 #7). An hour whose raw rows retention
-	// already took is frozen and the job leaves it alone (#11) — the
-	// aggregates carry no user id, and `docs/retention.md` states that
-	// position rather than hiding it.
-	now := time.Now().UnixNano()
-	for hour := range touched {
-		if !s.submit(w, r, store.RollHour(project.ID, hour, now)) {
-			return
 		}
 	}
 

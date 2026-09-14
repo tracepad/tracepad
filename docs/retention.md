@@ -93,8 +93,11 @@ discovered:
    otherwise replace five thousand summarized traces with itself. The hour's
    stored numbers stand as the archive of what was there.
 2. **Erasing a user's data corrects the hours it can reach.** The rolled hours
-   the erased traces occupied are recomputed before the request answers, so
-   the counts drop. Hours already frozen are not recomputed: the aggregates
+   the erased traces occupied are recomputed in the same transaction that
+   deletes them — the erasure runs in chunks of five hundred traces, and each
+   chunk commits with its hours already corrected — so the counts drop before
+   the request answers, and a request cut off between chunks leaves no hour
+   counting traces that are gone. Hours already frozen are not recomputed: the aggregates
    carry no user id, no name and no text — they are counts, sums and latency
    buckets — which is the same archive posture the raw bodies have below, and
    the same reasoning regulators accept for a backup.
@@ -325,8 +328,10 @@ finds their text: the index is deleted in the same transaction as the rows.
 This lands well inside the one-month response window Article 12(3) allows.
 
 **The statistics are corrected where they can be.** The rolled hours the
-erased traces occupied are recomputed before the call returns; hours whose raw
-rows retention already took are frozen and keep their totals. Those rows hold
+erased traces occupied are recomputed in the same transaction that deletes
+them, chunk by chunk, so they are right before the call returns and stay right
+if the call is cut off; hours whose raw rows retention already took are frozen
+and keep their totals. Those rows hold
 no user id, no name and no text — see [What outlives what](#what-outlives-what).
 The **per-user** rows, which do hold the id, are deleted outright in the same
 request, frozen hours included.

@@ -771,7 +771,8 @@ func TestStatsRetentionSweepsTheScoreRollup(t *testing.T) {
 
 // A user-data erasure corrects the score rollup through the re-roll it already
 // performs (spec 025 #4): the scores went with the traces, so the hour has to
-// stop counting them.
+// stop counting them. Since spec 023 #19 that re-roll is inside the chunk's
+// own transaction, so the erase job alone is the whole correction.
 func TestErasingAUserCorrectsTheScoreRollup(t *testing.T) {
 	s, project := readStore(t)
 
@@ -800,11 +801,6 @@ func TestErasingAUserCorrectsTheScoreRollup(t *testing.T) {
 		Confirm: "erase-me", Limit: 100}
 	if err := writer.Submit(t.Context(), erase); err != nil {
 		t.Fatal(err)
-	}
-	for _, hour := range erase.Hours {
-		if err := writer.Submit(t.Context(), RollHour(project.ID, hour, 0)); err != nil {
-			t.Fatal(err)
-		}
 	}
 
 	if rows := rolledScoreRows(t, s, project.ID, rollupHour); len(rows) != 0 {

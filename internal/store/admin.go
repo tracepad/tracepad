@@ -628,16 +628,29 @@ func (r *ProjectRestore) apply(tx *sql.Tx) error {
 // One chunk per job, like the sweeper: the caller repeats until a chunk comes
 // back short, so a user with a year of traffic does not hold the writer for
 // the length of one transaction.
+//
+// Each chunk re-rolls the hours it emptied **inside its own transaction**
+// (spec 023 #19): a per-hour count is data derived from what was just erased
+// (spec 013 #7), and a correction that commits with the deletion or not at
+// all is the only one a client that hangs up between chunks cannot lose. The
+// handler used to submit the rolls after the last chunk, so a browser that
+// gave up at thirty seconds (spec 010 #10) left every hour the earlier chunks
+// emptied still counting the traces — and a repeat of the request could not
+// find those hours again, because the traces that named them were gone.
 type UserDataErase struct {
 	ProjectID string
 	UserID    string
 	Confirm   string
 	Limit     int
+	// Now is the clock the freeze is measured against (spec 013 #11): an
+	// hour past the project's retention window is left as it stands. Zero
+	// is the wall clock, not the epoch — measured against 1970 nothing
+	// would be past the window, and a frozen hour would be recomputed
+	// from what the sweep left of it.
+	Now int64
 
 	Counts DeleteCounts
-	// Hours are the rolled hours this chunk emptied, for the caller to
-	// re-roll before it answers: a per-hour count is data derived from
-	// what was just erased (spec 013 #7).
+	// Hours are the rolled hours this chunk emptied and re-rolled.
 	Hours []int64
 }
 
@@ -732,7 +745,29 @@ func (e *UserDataErase) apply(tx *sql.Tx) error {
 		return fmt.Errorf("erase payloads: %w", err)
 	}
 	// Text erased under spec 005 #7 must not remain findable (spec 011 #7).
-	return deleteTraceSearchEntries(tx, e.ProjectID, ids)
+	if err := deleteTraceSearchEntries(tx, e.ProjectID, ids); err != nil {
+		return err
+	}
+
+	// The statistics are corrected here, in the transaction that made them
+	// wrong, one whole `RollHour` per hour this chunk touched. The chunks
+	// follow `idx_traces_user`, which is arrival order, so an hour straddles
+	// a chunk boundary rarely and is rolled about once: measured on a
+	// 21k-trace user over 699 hours, 738 rolls. An hour whose raw rows
+	// retention already took is frozen and the roll leaves it alone (spec
+	// 013 #11) — the aggregates carry no user id, and `docs/retention.md`
+	// states that position rather than hiding it.
+	now := e.Now
+	if now == 0 {
+		now = time.Now().UnixNano()
+	}
+	for _, hour := range e.Hours {
+		roll := &statsRoll{ProjectID: e.ProjectID, Hour: hour, Now: now}
+		if err := roll.apply(tx); err != nil {
+			return fmt.Errorf("re-roll hour %d after erasing from it: %w", hour, err)
+		}
+	}
+	return nil
 }
 
 // confirmProjectName is Decision 8 in one function: a destructive job executes

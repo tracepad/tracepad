@@ -334,10 +334,13 @@ type statsRoll struct {
 	Frozen bool
 }
 
-// RollHour is the job that recomputes one `(project, hour)`, for the callers
-// outside this package that have to correct an hour before they answer — the
-// user-data erasure of spec 005 #7, which spec 013 #7 makes re-roll the hours
-// it emptied.
+// RollHour is the job that recomputes one `(project, hour)`, for a caller
+// outside this package that has to roll an hour on its own: the suites of the
+// CLI and the MCP server, which seed a rollup without running a pass. The
+// user-data erasure of spec 005 #7 used to be its caller too, submitting it
+// after the last chunk; since spec 023 #19 the erasure applies the same roll
+// inside each chunk's transaction, where a client that hangs up cannot lose
+// it.
 func RollHour(projectID string, hour, now int64) WriteJob {
 	return &statsRoll{ProjectID: projectID, Hour: hour, Now: now}
 }

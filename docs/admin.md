@@ -206,6 +206,15 @@ recompute them from. So the account leaves `/api/v1/users` immediately, and
 corrected where they can be, which is the rule
 [retention.md](retention.md#what-outlives-what) states.
 
+The erasure is synchronous and runs in **chunks of five hundred traces**, each
+one a transaction that leaves the store consistent on its own: the chunk's
+traces go and the hours they occupied are recomputed in the same commit. A
+request that is cut off between chunks — a closed tab, the interface's
+thirty-second clock — therefore destroys nothing half-way: what the committed
+chunks erased is erased and counted as erased, and repeating the call finishes
+the rest. The counts in the answer are the request's own; a repeat reports
+what it erased, not what the interrupted one did.
+
 ## In the web interface
 
 The same card sits on the user's own page (`/users/{id}` → *Erase data*), with

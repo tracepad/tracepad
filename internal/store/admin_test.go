@@ -137,3 +137,145 @@ func TestDeletingATwiceDeletedProject(t *testing.T) {
 		t.Errorf("deleted_at = %d, want the first deletion's %d", *project.DeletedAt, sweepNow.UnixNano())
 	}
 }
+
+// TestErasureCorrectsTheHoursOfEachChunkAsItCommits (spec 023 #19): the
+// re-roll of spec 013 #7 rides inside the chunk's own transaction, so a
+// request cut off between chunks leaves no hour counting traces that are
+// gone — and a repeat, which only sees the traces that remain, has nothing
+// to miss.
+func TestErasureCorrectsTheHoursOfEachChunkAsItCommits(t *testing.T) {
+	s, project := readStore(t)
+
+	// Three hours; in each, two traces of the user being erased and one of
+	// a bystander. Seeded in hour order, which is the order the chunks
+	// take them in.
+	hours := []int64{rollupHour, rollupHour + SecondsPerHour, rollupHour + 2*SecondsPerHour}
+	n := 0
+	for _, hour := range hours {
+		for _, user := range []string{"forget-me", "forget-me", "keep"} {
+			n++
+			seedUserTrace(t, s, project.ID, userSeed{n: n, user: user, session: "s",
+				environment: "production", model: "claude-sonnet-5", latencyMs: 50,
+				hour: hour, offsetSeconds: int64(n)})
+		}
+		roll(t, s, project.ID, hour)
+	}
+	rolled := func(hour int64) int64 {
+		t.Helper()
+		var count int64
+		for _, row := range rolledRows(t, s, project.ID, hour) {
+			if row.Model == "" {
+				count += row.Count
+			}
+		}
+		return count
+	}
+	for _, hour := range hours {
+		if got := rolled(hour); got != 3 {
+			t.Fatalf("hour %d rolled %d traces, want 3", hour, got)
+		}
+	}
+
+	writer, err := s.NewWriter(quickWrites)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writer.Close()
+	erase := func() *UserDataErase {
+		t.Helper()
+		chunk := &UserDataErase{ProjectID: project.ID, UserID: "forget-me",
+			Confirm: "forget-me", Limit: 2, Now: (rollupHour + 3*SecondsPerHour) * 1e9}
+		if err := writer.Submit(t.Context(), chunk); err != nil {
+			t.Fatal(err)
+		}
+		return chunk
+	}
+
+	// One chunk, as a request that hung up after it would leave things.
+	first := erase()
+	if first.Counts.Traces != 2 || len(first.Hours) != 1 || first.Hours[0] != hours[0] {
+		t.Fatalf("first chunk = %d traces over hours %v, want 2 in hour %d",
+			first.Counts.Traces, first.Hours, hours[0])
+	}
+	if got := rolled(hours[0]); got != 1 {
+		t.Errorf("hour %d rolled %d traces after its chunk committed, want the bystander's 1", hours[0], got)
+	}
+	for _, hour := range hours[1:] {
+		if got := rolled(hour); got != 3 {
+			t.Errorf("hour %d rolled %d traces before any of its own were erased, want 3", hour, got)
+		}
+	}
+
+	// The repeat: chunks until one comes back short, the way the handler
+	// loops. Every hour ends at the bystander's one.
+	for {
+		if chunk := erase(); chunk.Counts.Traces < 2 {
+			break
+		}
+	}
+	for _, hour := range hours {
+		if got := rolled(hour); got != 1 {
+			t.Errorf("hour %d rolled %d traces after the erasure, want 1", hour, got)
+		}
+	}
+	if rows := userRows(t, s, project.ID, "forget-me", rollupHour); len(rows) != 0 {
+		t.Errorf("the erased user still has %d rolled rows", len(rows))
+	}
+}
+
+// TestErasureLeavesAFrozenHourStanding (spec 013 #11): the roll inside the
+// chunk obeys the freeze, and it is the erasure's clock that measures it —
+// an hour past the retention window keeps its totals, the same hour inside
+// it is corrected, and the per-user rows go outright either way (spec 023
+// #10).
+func TestErasureLeavesAFrozenHourStanding(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		now    int64
+		rolled int64
+	}{
+		// Two days past the hour: outside a one-day window, so the hour is
+		// frozen — its traces are still here only because the sweep has
+		// not run.
+		{"frozen", (rollupHour + 2*24*3600) * int64(1e9), 5},
+		// An hour later: inside the window, and the correction happens.
+		{"inside the window", (rollupHour + 3600) * int64(1e9), 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, project := readStore(t)
+			usersFixture(t, s, project.ID)
+			roll(t, s, project.ID, rollupHour)
+			if _, err := s.db.Exec(
+				`UPDATE projects SET retention_days = 1 WHERE id = ?`, project.ID); err != nil {
+				t.Fatal(err)
+			}
+
+			writer, err := s.NewWriter(quickWrites)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer writer.Close()
+			erase := &UserDataErase{ProjectID: project.ID, UserID: "alice", Confirm: "alice",
+				Limit: 100, Now: tc.now}
+			if err := writer.Submit(t.Context(), erase); err != nil {
+				t.Fatal(err)
+			}
+			if erase.Counts.Traces != 3 {
+				t.Fatalf("erased %d traces, want alice's 3", erase.Counts.Traces)
+			}
+
+			var count int64
+			for _, row := range rolledRows(t, s, project.ID, rollupHour) {
+				if row.Model == "" {
+					count += row.Count
+				}
+			}
+			if count != tc.rolled {
+				t.Errorf("the hour rolled %d traces after the erasure, want %d", count, tc.rolled)
+			}
+			if alice, err := s.UserSummaryRow(project.ID, "alice"); err != nil || alice != nil {
+				t.Errorf("alice's summary after erasure = %v, %v; want it gone, frozen hour or not", alice, err)
+			}
+		})
+	}
+}
