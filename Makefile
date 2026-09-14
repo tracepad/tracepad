@@ -177,8 +177,9 @@ sdk-js-build: sdk-js-deps ## Build the Node package into sdk/js/dist
 sdk-js-test: ## Type-check and unit-test the Node package, and end-to-end against a real binary
 	scripts/sdk-js-test.sh
 
-# The budget spec 032 #11 set, shared with the harness of the same spec.
-SDK_JS_BUDGET := 1800
+# The budget spec 032 #11 set, shared with the harness of the same spec;
+# raised for the harness (spec 032 #16).
+SDK_JS_BUDGET := 1900
 
 sdk-js-lines: ## Report the Node package's application lines against its budget
 	scripts/sdk-js-lines.sh $(SDK_JS_BUDGET)

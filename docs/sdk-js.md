@@ -326,14 +326,113 @@ answer is served stale with a warning, because a restart of your observability
 must not take your chat down. With nothing cached the call rejects: a fallback
 prompt baked into the code is a prompt the trace cannot name.
 
+## Evals
+
+The package is also the harness of [datasets.md](datasets.md): a dataset
+object, a run that opens and closes itself, and a block inside which every
+span carries the run and the case it answered. It runs nothing — the cases
+are your program.
+
+```ts
+const golden = tracepad.dataset('support-golden');
+await golden.putItems(cases); // same cases → same version, nothing written
+
+const run = await golden.run('prompt v7', { metadata: { prompt: 'support-answer@7' } });
+await run.wrap(async () => {
+  for await (const item of golden.items(run.datasetVersion)) {
+    await run.item(item, async (attempt) => {
+      const answer = await app.answer(item.input.question);
+      attempt.score('accuracy', judge(answer, item.expected_output));
+    });
+  }
+});
+
+console.log((await run.get()).summary);
+```
+
+| Name | What it is |
+|---|---|
+| `dataset(name)` | A `Dataset`. No request is made here — it is a name. |
+| `Dataset.create({ description, metadata })` | Create it, or replace those two. |
+| `Dataset.putItems(items)` | One batch, one version tick → `[version, changed]`. Only an item's own fields go on the wire, so a row `items()` yielded can be pushed back as it is. |
+| `Dataset.items(version)` | An async iterable of items over every page, whole. |
+| `Dataset.run(name, { metadata, id, datasetVersion })` | Opens a `Run`. |
+| `Dataset.runs()`, `Run.get()`, `Run.items({ unknown, limit })`, `compare(a, b)` | The server's JSON as plain objects — no number is computed here. A run's items inline their payloads and are budget-checked, so that listing pages at the server's own size unless you name one. |
+| `Dataset.delete(name)` | The name must be echoed, as the API asks. |
+| `scoreConfigs([...])` | `PUT` each, in order, one after the other. |
+| `itemId(key)` | `sha256(key)` cut to 32 characters, for a natural key of your own. |
+
+Every call above is async and rejects with `TracepadError`.
+
+**The run pins a version, and `run.datasetVersion` is it.** Fetching by that
+number rather than by "the current one" is what makes the version the harness
+*fetched* and the version it *ran* one number.
+
+**`run.wrap(async () => …)` closes it**: `finished` on a clean return,
+`failed` with the error's name and message on a throw, which is then
+rethrown — and rethrown even when the store refuses the close, which is only
+warned about: the harness's own error is the one to see. A run finished by
+hand is not finished twice. `finish({ timeout })`
+flushes the scores and then the spans *before* it posts, so `run.get()` on
+the next line is over everything the run produced; a late span still links,
+so a flush that timed out is a number read early rather than a trace lost.
+A `Run` is also `await using`-compatible — disposal is `finish` — for a
+setup with TypeScript 5.2 and Node 20 or newer; disposal cannot see an
+error, so `wrap` is the shape that can `fail`:
+
+```ts
+await using run = await tracepad.dataset('support-golden').run('prompt v7');
+```
+
+**`run.item(item, fn)` opens no span of its own.** It runs the callback
+inside an OpenTelemetry context carrying the run and the item, which the
+package's span processor reads at every span's start — so the root span may
+be the framework's, another SDK's or `observe`'s, and it is still stamped.
+That also says exactly how far the block reaches:
+
+| Where the work runs | Stamped |
+|---|---|
+| the callback, and anything it calls | yes |
+| an `await`, a promise chain, a `setTimeout` inside the callback | yes — `AsyncLocalStorage` carries the context |
+| a worker thread, a child process | **no** — it has no context to inherit |
+| another process, over HTTP | **no** — see below |
+| the loop itself already inside a span of yours | stamped, but see below |
+
+**Do not trace the harness.** If the loop runs inside a span of your own — an
+`observe`d driver, an instrumented test runner — then the case's spans are
+children of it, and one trace covers the whole run. Everything is still
+stamped and `attempt.score(...)` still has a trace to score (the block's first
+span starts the case, not the trace's root), but the run then has one trace
+for every case, and a trace links to one item: its coverage collapses to the
+last case stamped. A case wants a trace of its own.
+
+The two attributes do not travel with the trace context, by design. For a
+service the block cannot reach, `attempt.attributes()` is the object to
+forward by your own means:
+
+```ts
+await fetch(url, { method: 'POST', headers: { 'x-eval': JSON.stringify(attempt.attributes()) } });
+```
+
+`attempt.traces` is every root span that started inside the block, in order —
+a case run three times is three traces of one item, and the run's summary
+counts them all — and `attempt.traceId` is the last of them, which is what
+`attempt.score(...)` scores unless `traceId` names another of them. Scoring
+before anything has run throws; after the callback, the `Attempt` is a record
+and stamps nothing.
+
+`init({ export: false })` still stamps: an application exporting through
+another SDK wants its spans stamped all the same, and so does a provider that
+took `spanProcessor({ export: false })`.
+
 ## What throws and what does not
 
 | Path | On failure |
 |---|---|
 | `init` after configuration, `observe`, the callbacks, `update`, `end`, the exporter, the score queue, `flush` | Warned through the logger; never thrown into your code — a `flush` that ran out of time says so and resolves |
-| `prompt` | Rejects with `TracepadError`, or `TracepadHTTPError` with `status` and `body` for a non-2xx |
+| `prompt`, and every call of the harness above | Rejects with `TracepadError`, or `TracepadHTTPError` with `status` and `body` for a non-2xx |
 | `init` with no host or key | `TracepadConfigError` |
-| `score` with no target at all | `Error` — a programming error, visible at the call site |
+| `score` with no target at all, `attempt.score` before a trace, `run.item` with no id | `Error` — a programming error, visible at the call site |
 
 Instrumentation that can break the function it observes is worse than none.
 Everything the package warns about goes through `console.warn` with a

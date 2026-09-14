@@ -126,10 +126,16 @@ function application() {
     );
   });
 
-  // A second trace, on the wrapper's own path.
-  tracepad.span('prepare-question', () => {
-    tracepad.updateTrace({ name: 'help-rewrite', userId: 'user-9001', sessionId: 'session-91' });
-    rewrite('how does stream end');
+  // A second trace, on the wrapper's own path, inside an item block of an
+  // eval run: the processor stamps the run and the item on every span of it
+  // (spec 032 #10). The run is built by hand — no store is asked — so the
+  // trace is an orphan of a run the corpus does not hold, like 009's.
+  const run = new tracepad.Run(tracepad.dataset('docs-golden'), { id: tracepad.itemId('runs/docs-js-1'), dataset_version: 1 });
+  run.item(tracepad.itemId('cases/stream-end.json'), () => {
+    tracepad.span('prepare-question', () => {
+      tracepad.updateTrace({ name: 'help-rewrite', userId: 'user-9001', sessionId: 'session-91' });
+      rewrite('how does stream end');
+    });
   });
 }
 
