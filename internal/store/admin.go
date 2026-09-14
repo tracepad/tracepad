@@ -4,6 +4,8 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"fmt"
+	"maps"
+	"slices"
 	"time"
 )
 
@@ -625,9 +627,9 @@ func (r *ProjectRestore) apply(tx *sql.Tx) error {
 // deliberately untouched, and `docs/retention.md` says so together with what
 // that means for an erasure request.
 //
-// One chunk per job, like the sweeper: the caller repeats until a chunk comes
-// back short, so a user with a year of traffic does not hold the writer for
-// the length of one transaction.
+// One chunk per job, like the sweeper: the caller repeats while `More` says
+// so, so a user with a year of traffic does not hold the writer for the
+// length of one transaction.
 //
 // Each chunk re-rolls the hours it emptied **inside its own transaction**
 // (spec 023 #19): a per-hour count is data derived from what was just erased
@@ -637,11 +639,20 @@ func (r *ProjectRestore) apply(tx *sql.Tx) error {
 // gave up at thirty seconds (spec 010 #10) left every hour the earlier chunks
 // emptied still counting the traces — and a repeat of the request could not
 // find those hours again, because the traces that named them were gone.
+//
+// The rolls are what bound a chunk now, not the traces alone: a chunk is
+// `Limit` traces or `HourLimit` distinct hours, whichever comes first. A
+// user with one trace an hour in a busy project would otherwise turn one
+// chunk into five hundred whole-hour recomputes in a single transaction,
+// holding the one writer while ingest queues behind it.
 type UserDataErase struct {
 	ProjectID string
 	UserID    string
 	Confirm   string
 	Limit     int
+	// HourLimit caps the distinct hours one chunk takes traces from, and
+	// so the rolls one transaction performs. Zero is no cap.
+	HourLimit int
 	// Now is the clock the freeze is measured against (spec 013 #11): an
 	// hour past the project's retention window is left as it stands. Zero
 	// is the wall clock, not the epoch — measured against 1970 nothing
@@ -652,6 +663,10 @@ type UserDataErase struct {
 	Counts DeleteCounts
 	// Hours are the rolled hours this chunk emptied and re-rolled.
 	Hours []int64
+	// More reports that traces of the user remain after this chunk: the
+	// caller submits another. A chunk cut short by HourLimit is not a
+	// chunk that came back short.
+	More bool
 }
 
 func (e *UserDataErase) apply(tx *sql.Tx) error {
@@ -670,17 +685,7 @@ func (e *UserDataErase) apply(tx *sql.Tx) error {
 		return &Rejection{Kind: RejectNotFound, Message: "no such project"}
 	}
 
-	// The per-user rollup goes outright, in this same request (spec 023
-	// #10): those rows are *about* the user, and a re-roll would recompute
-	// them to nothing from raw rows that are gone — or, for a frozen hour
-	// (spec 013 #11), could not recompute them at all. Done on every chunk
-	// because deleting them is idempotent and the last chunk is not known
-	// in advance.
-	if err := deleteUserRollup(tx, e.ProjectID, e.UserID); err != nil {
-		return err
-	}
-
-	e.Hours = nil
+	e.Hours, e.More = nil, false
 	rows, err := tx.Query(
 		`SELECT id, timestamp FROM traces WHERE project_id = ? AND user_id = ? LIMIT ?`,
 		e.ProjectID, e.UserID, e.Limit)
@@ -689,6 +694,7 @@ func (e *UserDataErase) apply(tx *sql.Tx) error {
 	}
 	var ids []any
 	seen := map[int64]bool{}
+	scanned := 0
 	for rows.Next() {
 		var (
 			id        string
@@ -698,18 +704,31 @@ func (e *UserDataErase) apply(tx *sql.Tx) error {
 			rows.Close()
 			return err
 		}
-		ids = append(ids, id)
-		if hour := HourOf(timestamp); !seen[hour] {
+		scanned++
+		hour := HourOf(timestamp)
+		if !seen[hour] {
+			if e.HourLimit > 0 && len(e.Hours) == e.HourLimit {
+				// The hour cap: this trace and the rest of the
+				// selection are the next chunk's.
+				e.More = true
+				break
+			}
 			seen[hour] = true
 			e.Hours = append(e.Hours, hour)
 		}
+		ids = append(ids, id)
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
 		return err
 	}
+	if scanned == e.Limit {
+		e.More = true
+	}
 	if len(ids) == 0 {
-		return nil
+		// Nothing to delete or to roll; the per-user rows still go
+		// (below), for a user whose every hour is frozen.
+		return deleteUserRollup(tx, e.ProjectID, e.UserID)
 	}
 
 	payloads, err := referencedPayloads(tx, e.ProjectID, ids)
@@ -757,17 +776,43 @@ func (e *UserDataErase) apply(tx *sql.Tx) error {
 	// retention already took is frozen and the roll leaves it alone (spec
 	// 013 #11) — the aggregates carry no user id, and `docs/retention.md`
 	// states that position rather than hiding it.
+	//
+	// The summaries are deferred and recomputed once per chunk, the way
+	// the aggregator does once per pass: a user active in every hour of
+	// the chunk is summed once, not once per hour.
 	now := e.Now
 	if now == 0 {
 		now = time.Now().UnixNano()
 	}
+	touched := map[string]bool{}
 	for _, hour := range e.Hours {
-		roll := &statsRoll{ProjectID: e.ProjectID, Hour: hour, Now: now}
+		roll := &statsRoll{ProjectID: e.ProjectID, Hour: hour, Now: now, DeferSummary: true}
 		if err := roll.apply(tx); err != nil {
 			return fmt.Errorf("re-roll hour %d after erasing from it: %w", hour, err)
 		}
+		for _, id := range roll.Touched {
+			// The erased user's summary is not recomputed: it goes
+			// outright, below.
+			if id != e.UserID {
+				touched[id] = true
+			}
+		}
 	}
-	return nil
+	if err := recomputeUsers(tx, e.ProjectID, slices.Sorted(maps.Keys(touched))); err != nil {
+		return err
+	}
+
+	// The per-user rollup goes outright, in this same request (spec 023
+	// #10): those rows are *about* the user, and a re-roll would recompute
+	// them to nothing from raw rows that are gone — or, for a frozen hour
+	// (spec 013 #11), could not recompute them at all. After the rolls,
+	// not before: an hour that straddles the chunk boundary still holds
+	// traces of the user, and its roll would write them back as a row and
+	// a summary built from that one hour — a user listed again, with a
+	// wrong number, between a hang-up and the repeat (review of PR #65).
+	// On every chunk, because deleting is idempotent and the last chunk is
+	// not known in advance.
+	return deleteUserRollup(tx, e.ProjectID, e.UserID)
 }
 
 // confirmProjectName is Decision 8 in one function: a destructive job executes

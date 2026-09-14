@@ -24,11 +24,18 @@ import (
 // the project's name, or the user id. An id is a string you paste; a name is a
 // thing you mean, so a typoed or hallucinated target cannot match.
 
-// eraseChunk is how many of a user's traces one erasure transaction removes.
-// Erasure is synchronous (#7) but not unbounded: the request loops over
-// chunks so that a user with a year of traffic does not hold the writer for
-// the length of a single transaction.
-const eraseChunk = 500
+// eraseChunk is how many of a user's traces one erasure transaction removes,
+// and eraseChunkHours how many distinct hours it takes them from, whichever
+// bound comes first. Erasure is synchronous (#7) but not unbounded: the
+// request loops over chunks so that a user with a year of traffic does not
+// hold the writer for the length of a single transaction — and since each
+// chunk re-rolls the hours it empties in that same transaction (spec 023
+// #19), a chunk is bounded in hours too, or a user with one trace an hour
+// would turn one chunk into five hundred whole-hour recomputes.
+const (
+	eraseChunk      = 500
+	eraseChunkHours = 24
+)
 
 // authorize is who is asking, as the guard already worked it out (spec 028
 // Decision 7). It reads the request's context and refuses nothing: a handler
@@ -719,6 +726,7 @@ func (s *Server) handleEraseUserData(w http.ResponseWriter, r *http.Request) {
 			UserID:    userID,
 			Confirm:   values.Get("confirm"),
 			Limit:     eraseChunk,
+			HourLimit: eraseChunkHours,
 			Now:       now,
 		}
 		if !s.submit(w, r, chunk) {
@@ -729,7 +737,7 @@ func (s *Server) handleEraseUserData(w http.ResponseWriter, r *http.Request) {
 		erased.Scores += chunk.Counts.Scores
 		erased.Payloads += chunk.Counts.Payloads
 		erased.AnnotationItems += chunk.Counts.AnnotationItems
-		if chunk.Counts.Traces < int64(eraseChunk) {
+		if !chunk.More {
 			break
 		}
 	}
