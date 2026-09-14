@@ -88,11 +88,17 @@ func (d *Dataset) PutItems(ctx context.Context, items []Item) (version, changed 
 	return int(v), int(n), nil
 }
 
-// Items is the cases at a version — the run's, not "the current one"; 0 is
-// the current one. Every page is walked; an error ends the sequence with it.
+// CurrentVersion asks Items for the dataset as it is now rather than at a
+// version. It is not 0: version 0 is the dataset before its first item, a
+// real version a run opened before PutItems is pinned to.
+const CurrentVersion = -1
+
+// Items is the cases at a version — the run's, not "the current one", unless
+// CurrentVersion says so. Every page is walked; an error ends the sequence
+// with it.
 func (d *Dataset) Items(ctx context.Context, version int) iter.Seq2[Item, error] {
 	params := url.Values{"limit": {strconv.Itoa(page)}}
-	if version != 0 {
+	if version != CurrentVersion {
 		params.Set("version", strconv.Itoa(version))
 	}
 	return func(yield func(Item, error) bool) {
@@ -150,13 +156,18 @@ func (d *Dataset) Runs(ctx context.Context) iter.Seq2[map[string]any, error] {
 }
 
 // Delete deletes the dataset with its items and runs. The name must be
-// echoed, as the API asks.
+// echoed, as the API asks; with an empty confirm the call is the API's dry
+// run, and the answer says what would go.
 func (d *Dataset) Delete(ctx context.Context, confirm string) (map[string]any, error) {
 	c, err := current()
 	if err != nil {
 		return nil, err
 	}
-	answer, err := request(ctx, c, "DELETE", d.path, nil, url.Values{"confirm": {confirm}})
+	params := url.Values{}
+	if confirm != "" {
+		params.Set("confirm", confirm)
+	}
+	answer, err := request(ctx, c, "DELETE", d.path, nil, params)
 	if err != nil {
 		return nil, err
 	}

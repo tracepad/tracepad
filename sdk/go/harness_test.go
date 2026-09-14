@@ -1,12 +1,14 @@
 package tracepad
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -153,6 +155,30 @@ func TestItemsFollowTheCursorToTheEnd(t *testing.T) {
 	}
 }
 
+func TestVersionZeroIsAVersionAndCurrentIsNone(t *testing.T) {
+	_, fs := harness(t)
+	for _, err := range NewDataset("golden").Items(context.Background(), 0) {
+		t.Fatal(err)
+	}
+	for _, err := range NewDataset("golden").Items(context.Background(), CurrentVersion) {
+		t.Fatal(err)
+	}
+	paths := fs.paths()
+	if !strings.Contains(paths[0], "version=0") || strings.Contains(paths[1], "version") {
+		t.Errorf("paths = %v, want version=0 sent and the current one unversioned", paths)
+	}
+}
+
+func TestDeleteWithoutConfirmIsTheDryRun(t *testing.T) {
+	_, fs := harness(t)
+	if _, err := NewDataset("golden").Delete(context.Background(), ""); err != nil {
+		t.Fatal(err)
+	}
+	if last := fs.last(); last.method != "DELETE" || last.query != "" {
+		t.Errorf("last = %+v, want no confirm parameter at all", last)
+	}
+}
+
 func TestAPagingErrorEndsTheSequenceWithIt(t *testing.T) {
 	_, fs := harness(t)
 	fs.answer("/api/v1/datasets/golden/items", 503)
@@ -208,6 +234,34 @@ func TestFailPostsTheError(t *testing.T) {
 	body := fs.last().body.(map[string]any)
 	if body["status"] != "failed" || body["error"] != "judge timed out" {
 		t.Errorf("body = %v", body)
+	}
+}
+
+func TestFailWithoutAnErrorStillCloses(t *testing.T) {
+	_, fs := harness(t)
+	run := opened(t, fs)
+	if _, err := run.Fail(context.Background(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if body := fs.last().body.(map[string]any); body["status"] != "failed" || body["error"] == "" {
+		t.Errorf("body = %v", body)
+	}
+}
+
+func TestARunWithoutInitSaysItStampsNothing(t *testing.T) {
+	fresh(t)
+	fs := serveStore(t)
+	t.Setenv("TRACEPAD_HOST", fs.URL)
+	t.Setenv("TRACEPAD_API_KEY", testKey)
+	logs := &bytes.Buffer{}
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	run := opened(t, fs)
+	run.Item(context.Background(), Item{ID: caseID})
+	run.Item(context.Background(), Item{ID: otherID})
+	if got := strings.Count(logs.String(), "Init has not run"); got != 1 {
+		t.Errorf("warned %d times, want once per run:\n%s", got, logs.String())
 	}
 }
 

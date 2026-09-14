@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strconv"
 	"sync"
+	"sync/atomic"
 
 	"go.opentelemetry.io/otel/attribute"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -139,6 +140,7 @@ type Run struct {
 	// by construction (spec 014 #7).
 	DatasetVersion int
 	dataset        *Dataset
+	unstamped      atomic.Bool
 }
 
 // Item begins one case: everything started under the returned context
@@ -153,7 +155,20 @@ func (r *Run) Item(ctx context.Context, item Item) (context.Context, *Attempt) {
 		def.log().Warn("tracepad: run.Item needs an item id; nothing will be stamped", "run", r.ID)
 		return ctx, attempt
 	}
+	// The REST half works without Init — the environment is read on the
+	// first call — but the processor that stamps is registered by Init and
+	// by nothing else, so a run without it closes over nothing. Said once.
+	if r.unstamped.CompareAndSwap(false, true) && !initialized() {
+		def.log().Warn("tracepad: Init has not run; spans inside the item context will not carry the run "+
+			"and the item, and the run will cover no case", "run", r.ID)
+	}
 	return context.WithValue(ctx, attemptKey{}, attempt), attempt
+}
+
+func initialized() bool {
+	def.mu.Lock()
+	defer def.mu.Unlock()
+	return def.initialized
 }
 
 // Finish delivers everything the run produced, then closes it as finished.
@@ -167,7 +182,11 @@ func (r *Run) Finish(ctx context.Context) (map[string]any, error) {
 // Fail closes the run as failed, with the error's message. A run left
 // running is reported as such forever (spec 014 #8).
 func (r *Run) Fail(ctx context.Context, cause error) (map[string]any, error) {
-	return r.close(ctx, map[string]any{"status": "failed", "error": cause.Error()})
+	message := "failed, no error given"
+	if cause != nil {
+		message = cause.Error()
+	}
+	return r.close(ctx, map[string]any{"status": "failed", "error": message})
 }
 
 func (r *Run) close(ctx context.Context, body map[string]any) (map[string]any, error) {

@@ -297,10 +297,10 @@ summary, err := run.Finish(ctx)
 | `NewDataset(name)` | A `*Dataset`. No request is made here — it is a name. |
 | `Dataset.Create(ctx, description, metadata)` | Create it, or replace those two. |
 | `Dataset.PutItems(ctx, items)` | One batch, one version tick → `(version, changed, err)`. |
-| `Dataset.Items(ctx, version)` | An `iter.Seq2[Item, error]` over every page, whole; `0` is the current version. |
+| `Dataset.Items(ctx, version)` | An `iter.Seq2[Item, error]` over every page, whole; `tracepad.CurrentVersion` for the dataset as it is now — `0` is a version, the one before the first item. |
 | `Dataset.Run(ctx, name, opts…)` | Opens a `*Run`; `WithRunMetadata`, `WithRunID`, `WithDatasetVersion`. |
 | `Dataset.Runs(ctx)`, `Run.Get(ctx)`, `Run.Items(ctx, opts…)`, `Compare(ctx, a, b)` | The server's JSON as `map[string]any` — no number is computed here. A run's items inline their payloads and are budget-checked, so that listing pages at the server's own size unless `WithLimit` names one; `WithUnknown` adds the traces that link to no case. |
-| `Dataset.Delete(ctx, confirm)` | The name must be echoed, as the API asks. |
+| `Dataset.Delete(ctx, confirm)` | The name must be echoed, as the API asks; an empty `confirm` is the API's dry run. |
 | `ScoreConfigs(ctx, configs)`, `ScoreConfig` | `PUT` each, in order, synchronously. |
 | `ItemID(key)` | `sha256(key)[:32]`, for a natural key of your own. |
 
@@ -351,7 +351,9 @@ started from a context taken before `Item` is not stamped.
 
 `Init` with `WithExport(false)` still registers the processor: an
 application exporting through another SDK wants its spans stamped all the
-same.
+same. Without `Init` at all, the REST calls above work — the environment is
+read on the first one — but nothing registers the processor, so nothing is
+stamped and the run covers no case; the first `run.Item` says so in the log.
 
 ## What fails and what does not
 
