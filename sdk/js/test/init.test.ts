@@ -5,7 +5,7 @@ import type { AddressInfo } from 'node:net';
 
 import { trace } from '@opentelemetry/api';
 import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
-import { BasicTracerProvider as BasicTracerProviderV1, InMemorySpanExporter, SimpleSpanProcessor } from 'sdk-trace-base-v1';
+import { BasicTracerProvider as BasicTracerProviderV1, InMemorySpanExporter, SimpleSpanProcessor, type SpanProcessor as SpanProcessorV1 } from 'sdk-trace-base-v1';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 
 import * as tracepad from '../src/index.js';
@@ -51,6 +51,23 @@ describe('a provider that takes processors after the fact (the 1.x line)', () =>
     // The scope, and the parent link: the two facts a 1.x span names differently.
     expect(body).toContain('tracepad');
     expect(received[0]!.body.includes(Buffer.from(parent, 'hex'))).toBe(true);
+    expect(warnings).toEqual([]);
+  });
+
+  test('init after spanProcessor() attaches nothing more: the 1.x hook is not a second exporter', async () => {
+    const { host, received } = await collector();
+    // The 2.x type on a 1.x provider: the processor's `onEnd` reads either line's span.
+    const ours = tracepad.spanProcessor({ host, key: KEY }) as unknown as SpanProcessorV1;
+    const provider = new BasicTracerProviderV1({ spanProcessors: [ours] });
+    const added = vi.spyOn(provider, 'addSpanProcessor');
+    trace.setGlobalTracerProvider(provider);
+    tracepad.init();
+
+    tracepad.span('once', () => undefined);
+    await tracepad.flush();
+
+    expect(added).not.toHaveBeenCalled();
+    expect(received).toHaveLength(1);
     expect(warnings).toEqual([]);
   });
 

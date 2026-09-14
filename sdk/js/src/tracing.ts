@@ -76,9 +76,14 @@ export function init(options: InitOptions = {}): void {
     provider.register();
   } else {
     if (config.environment !== undefined || config.release !== undefined) refuseResource('init');
-    if (typeof (found as Adoptable).addSpanProcessor === 'function') {
+    // After `spanProcessor()` the processor is in the provider already, on
+    // either line: a 1.x provider has the hook too, and attaching a second
+    // exporter through it would send every span twice.
+    if (handedOut) {
+      // nothing to attach
+    } else if (typeof (found as Adoptable).addSpanProcessor === 'function') {
       (found as Adoptable).addSpanProcessor!(processor(config, options.export));
-    } else if (!handedOut) {
+    } else {
       warn(
         'init(): this process already has a TracerProvider and it takes span processors in ' +
           'its constructor only; nothing was attached — pass tracepad.spanProcessor() to it',
@@ -231,14 +236,18 @@ function readable(span: ReadableSpan): ReadableSpan {
   }) as ReadableSpan;
 }
 
-let exited = false;
+let exiting: Promise<void> | undefined;
 
-/** `beforeExit` fires when the event loop drains: the flush below gives it
- * more to do, so it fires again, and the second time is not a second flush. */
+/** `beforeExit` fires when the event loop drains, and again after every
+ * flush that gave it more to do. A flush with nothing pending is microtasks
+ * only, so the loop ends on its own — and a span another library's own
+ * `beforeExit` handler opened after ours still gets its flush, rather than
+ * being left in the exporter's buffer for the exit to drop. */
 function atExit(): void {
-  if (exited) return;
-  exited = true;
-  void flush();
+  if (exiting !== undefined) return;
+  exiting = flush().finally(() => {
+    exiting = undefined;
+  });
 }
 
 export interface FlushOptions {
@@ -657,7 +666,7 @@ export function observe<F extends AnyFunction>(fn: F, options: ObserveOptions = 
   // of Decision 5 is only asked about a value returned whole.
   const leave = (handle: Observation, result: unknown, asResponse = true) => {
     if (isGeneration && asResponse) (handle as Generation).end(result);
-    else if (captureOutput && !handle.explicit.has('output')) {
+    else if (captureOutput && result !== undefined && !handle.explicit.has('output')) {
       handle.span.setAttribute(attrs.OUTPUT, attrs.dumps(result));
     }
   };
@@ -791,7 +800,7 @@ function rethrow<S extends Iterator<unknown> | AsyncIterator<unknown>>(steps: S,
 export function reset(): void {
   initialized = false;
   handedOut = false;
-  exited = false;
+  exiting = undefined;
   process.off('beforeExit', atExit);
 }
 

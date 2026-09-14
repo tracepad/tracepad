@@ -184,14 +184,17 @@ describe('flush', () => {
     ]);
   });
 
-  test('runs once at beforeExit, on its own', async () => {
+  test('runs at beforeExit on its own, once per firing, and again for what a later handler left', async () => {
     const queue = new ScoreQueue(async () => undefined);
     reset(queue);
     const flushed = vi.spyOn(queue, 'flush');
     tracepad.init({ host: HOST, key: KEY, export: false });
     process.emit('beforeExit', 0);
-    process.emit('beforeExit', 0);
+    process.emit('beforeExit', 0); // while the first flush is still in flight
     await new Promise((tick) => setTimeout(tick, 0));
     expect(flushed).toHaveBeenCalledTimes(1);
+    process.emit('beforeExit', 0); // the loop drained again: another library's handler may have queued more
+    await new Promise((tick) => setTimeout(tick, 0));
+    expect(flushed).toHaveBeenCalledTimes(2);
   });
 });

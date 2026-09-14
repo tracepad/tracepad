@@ -67,8 +67,12 @@ export class Prompt {
   }
 }
 
+/** `str.format`'s reading, because the Python package compiles the same
+ * stored text: `{name}` is a placeholder, and `{{` and `}}` are the braces
+ * themselves — a prompt that shows a JSON example has to be able to say so. */
 function fill(template: string, variables: Record<string, unknown>): string {
-  return template.replace(/\{([^{}]+)\}/g, (_match, name: string) => {
+  return template.replace(/\{\{|\}\}|\{([^{}]*)\}/g, (match: string, name: string | undefined) => {
+    if (name === undefined) return match[0]!;
     if (!Object.hasOwn(variables, name)) {
       throw new TracepadError(`tracepad: prompt placeholder {${name}} has no variable`);
     }

@@ -24,6 +24,14 @@ describe('the four shapes', () => {
     expect(attributes[attrs.OUTPUT]).toBe('5');
   });
 
+  test('a function that returned nothing has no output; null is written as null', () => {
+    const seen = spans();
+    tracepad.observe(() => undefined, { name: 'nothing' })();
+    tracepad.observe(() => null, { name: 'null' })();
+    expect(seen.attributes('nothing')).not.toHaveProperty(attrs.OUTPUT);
+    expect(seen.attributes('null')[attrs.OUTPUT]).toBe('null');
+  });
+
   test('an async function ends the span on settlement', async () => {
     const seen = spans();
     const fetchAnswer = tracepad.observe(async (question: string) => {

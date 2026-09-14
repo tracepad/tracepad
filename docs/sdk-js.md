@@ -63,8 +63,9 @@ environment and release on its resource, and register it with the
 The 2.x line of the SDK takes its processors in the constructor and exposes
 no hook afterwards, so a `NodeTracerProvider` of yours is left alone with a
 warning. Hand it the processor instead, and `init` after that adopts the
-processor's configuration — a bare `init()` needs no arguments and no
-environment, and one that names a different host or key is warned about:
+processor's configuration and attaches nothing more, on either line — a bare
+`init()` needs no arguments and no environment, and one that names a
+different host or key is warned about:
 
 ```ts
 import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
@@ -101,8 +102,9 @@ const answer = tracepad.observe(async (question: string) => {
 
 `observe` wraps a function and returns one of the same shape. Each call is a
 span: the arguments become the observation's `input`, as the positional array
-they are, and the return value the `output`; `{ captureInput: false }` and
-`captureOutput: false` opt out. Positional rather than by name because
+they are, and the return value the `output` — none when the function
+returned nothing; `{ captureInput: false }` and `captureOutput: false` opt
+out. Positional rather than by name because
 parameter names do not survive a bundler, and an object built from them would
 be fiction. Payloads are serialized as JSON under a replacer that never
 throws — a `bigint` becomes a number, an `Error` its name and message, and a
@@ -288,7 +290,7 @@ must not fail the request that produced the trace. Pass `id` for the
 [idempotency](scores.md#idempotency-and-corrections) the API offers.
 
 `await tracepad.flush({ timeout: 10_000 })` drains the queue and then the span
-processors. `init` registers a `beforeExit` listener that calls it once, so a
+processors. `init` registers a `beforeExit` listener that calls it, so a
 script that returns without calling it still delivers — but `beforeExit`
 does not fire on `process.exit()`, so a script that exits that way calls
 `flush` first.
@@ -308,8 +310,10 @@ await tracepad.generation('chat', { prompt: support, model: String(support.confi
 bug at the call site. `Prompt` carries `name`, `version`, `type`, `text` or
 `messages`, `labels` and `config`. `compile(variables)` substitutes
 `{placeholder}`s — in the text, or in every message's content — and throws
-on a placeholder with no variable. Nothing else: a template language is a
-product, and what the store stores is plain text.
+on a placeholder with no variable; `{{` and `}}` are the braces themselves,
+the way Python's `str.format` reads them, so a prompt can show a JSON
+example. Nothing else: a template language is a product, and what the store
+stores is plain text.
 
 Passing the prompt to `generation` records which prompt ran, so the trace can
 be [filtered by it](api.md#listing-traces).

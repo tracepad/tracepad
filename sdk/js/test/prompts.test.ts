@@ -145,6 +145,12 @@ describe('compile', () => {
     ]);
   });
 
+  test('doubled braces are the braces themselves, as str.format reads them', async () => {
+    serving(() => ({ body: { ...STORED, prompt: 'Reply as {{"answer": "{answer}"}} for {product}.' } }));
+    const prompt = await tracepad.prompt('support-answer');
+    expect(prompt.compile({ answer: 'yes', product: 'Tracepad' })).toBe('Reply as {"answer": "yes"} for Tracepad.');
+  });
+
   test('a placeholder with no variable throws', async () => {
     serving(() => ({ body: STORED }));
     const prompt = await tracepad.prompt('support-answer');
