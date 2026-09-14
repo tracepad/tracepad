@@ -162,6 +162,28 @@ describe('flush', () => {
     ]);
   });
 
+  test('never rejects: a provider whose flush fails is warned about', async () => {
+    tracepad.init({ host: HOST, key: KEY, export: false });
+    (registered() as NodeTracerProvider).forceFlush = async () => {
+      throw new Error('collector down');
+    };
+    const unhandled: unknown[] = [];
+    const listener = (reason: unknown) => unhandled.push(reason);
+    process.on('unhandledRejection', listener);
+    try {
+      await expect(tracepad.flush()).resolves.toBeUndefined();
+      process.emit('beforeExit', 0);
+      await new Promise((tick) => setTimeout(tick, 10));
+    } finally {
+      process.off('unhandledRejection', listener);
+    }
+    expect(unhandled).toEqual([]);
+    expect(warnings).toEqual([
+      'tracepad: flush(): the span processors failed to flush: Error: collector down',
+      'tracepad: flush(): the span processors failed to flush: Error: collector down',
+    ]);
+  });
+
   test('runs once at beforeExit, on its own', async () => {
     const queue = new ScoreQueue(async () => undefined);
     reset(queue);

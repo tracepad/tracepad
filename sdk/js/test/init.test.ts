@@ -32,6 +32,28 @@ describe('a provider that takes processors after the fact (the 1.x line)', () =>
     expect(warnings).toEqual([]);
   });
 
+  test('exports through it: a 1.x span is read the way the 2.x exporter reads one', async () => {
+    const { host, received } = await collector();
+    const provider = new BasicTracerProviderV1();
+    trace.setGlobalTracerProvider(provider);
+    tracepad.init({ host, key: KEY });
+
+    const parent = tracepad.span('parent-step', (step) => {
+      tracepad.span('child-step', () => undefined);
+      return step.spanId;
+    });
+    await tracepad.flush();
+
+    expect(received).toHaveLength(1);
+    const body = received[0]!.body.toString('latin1');
+    expect(body).toContain('parent-step');
+    expect(body).toContain('child-step');
+    // The scope, and the parent link: the two facts a 1.x span names differently.
+    expect(body).toContain('tracepad');
+    expect(received[0]!.body.includes(Buffer.from(parent, 'hex'))).toBe(true);
+    expect(warnings).toEqual([]);
+  });
+
   test('refuses environment and release with a warning: the resource is fixed', () => {
     trace.setGlobalTracerProvider(new BasicTracerProviderV1());
     tracepad.init({ host: HOST, key: KEY, environment: 'prod', export: false });
@@ -51,31 +73,48 @@ describe('a provider that takes processors in its constructor only (the 2.x line
     expect(warnings).toEqual([expect.stringMatching(/^tracepad: spanProcessor\(\): environment and release are resource attributes/)]);
   });
 
-  test('is silent when spanProcessor() was handed to it', () => {
+  test('is silent when spanProcessor() was handed to it, and a bare init adopts its configuration', () => {
     new NodeTracerProvider({ spanProcessors: [tracepad.spanProcessor({ host: HOST, key: KEY })] }).register();
-    tracepad.init({ host: HOST, key: KEY });
+    tracepad.init(); // no arguments, and no TRACEPAD_* in the environment
     expect(warnings).toEqual([]);
+    expect(() => tracepad.score('x', 1, { traceId: 'a'.repeat(32) })).not.toThrow();
+  });
+
+  test('an init that disagrees with spanProcessor() about the host says so', () => {
+    new NodeTracerProvider({ spanProcessors: [tracepad.spanProcessor({ host: HOST, key: KEY })] }).register();
+    tracepad.init({ host: 'http://elsewhere:4318' });
+    expect(warnings).toEqual([expect.stringContaining('differs from the one spanProcessor() was built with')]);
   });
 });
 
-describe('no provider', () => {
-  let server: Server | undefined;
-  afterEach(async () => {
-    await new Promise((done) => (server === undefined ? done(undefined) : server.close(done)));
-  });
-
-  test('builds one, registers it, and exports to {host}/v1/traces with the bearer', async () => {
-    const received: { path: string; authorization: string | undefined; body: Buffer }[] = [];
-    server = createServer((request, response) => {
-      const chunks: Buffer[] = [];
-      request.on('data', (chunk: Buffer) => chunks.push(chunk));
-      request.on('end', () => {
-        received.push({ path: request.url!, authorization: request.headers.authorization, body: Buffer.concat(chunks) });
-        response.writeHead(200).end();
-      });
+/** An OTLP collector that keeps what it was sent. */
+interface Received {
+  path: string;
+  authorization: string | undefined;
+  body: Buffer;
+}
+let server: Server | undefined;
+afterEach(async () => {
+  await new Promise((done) => (server === undefined ? done(undefined) : server.close(done)));
+  server = undefined;
+});
+async function collector(): Promise<{ host: string; received: Received[] }> {
+  const received: Received[] = [];
+  server = createServer((request, response) => {
+    const chunks: Buffer[] = [];
+    request.on('data', (chunk: Buffer) => chunks.push(chunk));
+    request.on('end', () => {
+      received.push({ path: request.url!, authorization: request.headers.authorization, body: Buffer.concat(chunks) });
+      response.writeHead(200).end();
     });
-    await new Promise<void>((listening) => server!.listen(0, '127.0.0.1', listening));
-    const host = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  });
+  await new Promise<void>((listening) => server!.listen(0, '127.0.0.1', listening));
+  return { host: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, received };
+}
+
+describe('no provider', () => {
+  test('builds one, registers it, and exports to {host}/v1/traces with the bearer', async () => {
+    const { host, received } = await collector();
     process.title = 'support-bot';
 
     tracepad.init({ host, key: KEY, environment: 'production', release: '2026.9.4' });

@@ -124,6 +124,42 @@ describe('the four shapes', () => {
     expect(cleaned).toEqual(['sync', 'async']);
   });
 
+  test('a bound generator, and an iterator a plain function returns, are driven the same', async () => {
+    const seen = spans();
+    function* numbered(this: { start: number }) {
+      yield this.start;
+      yield this.start + 1;
+    }
+    const bound = tracepad.observe(numbered.bind({ start: 5 }), { name: 'bound' });
+    expect([...bound()]).toEqual([5, 6]);
+    expect(seen.attributes('bound')[attrs.OUTPUT]).toBe('[5,6]');
+
+    // What a compiler makes of an async generator for an older target: a
+    // plain function returning an object with `next` and the symbol.
+    const downleveled = tracepad.observe(function letters() {
+      const items = ['a', 'b'];
+      return {
+        [Symbol.asyncIterator]() {
+          return this;
+        },
+        async next() {
+          const value = items.shift();
+          return value === undefined ? { done: true as const, value: undefined } : { done: false as const, value };
+        },
+      };
+    });
+    const out: string[] = [];
+    for await (const letter of downleveled()) out.push(letter);
+    expect(out).toEqual(['a', 'b']);
+    expect(seen.attributes('letters')[attrs.OUTPUT]).toBe('["a","b"]');
+
+    // An array is iterable but not an iterator: it is a return value.
+    tracepad.observe(function list() {
+      return [1, 2];
+    })();
+    expect(seen.attributes('list')[attrs.OUTPUT]).toBe('[1,2]');
+  });
+
   test('a generator left early ends with what came before', () => {
     const seen = spans();
     const counted = tracepad.observe(function* count() {

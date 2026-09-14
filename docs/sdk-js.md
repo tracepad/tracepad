@@ -63,7 +63,8 @@ environment and release on its resource, and register it with the
 The 2.x line of the SDK takes its processors in the constructor and exposes
 no hook afterwards, so a `NodeTracerProvider` of yours is left alone with a
 warning. Hand it the processor instead, and `init` after that adopts the
-configuration without a word:
+processor's configuration — a bare `init()` needs no arguments and no
+environment, and one that names a different host or key is warned about:
 
 ```ts
 import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
@@ -120,8 +121,10 @@ the payload as [every payload is marked](api.md#the-response-budget).
 | `type: "generation"` | The return value is read as a model response (below) |
 
 A function returning a promise ends the span when it settles; a generator or
-an async generator ends it when it is done, and its `output` is the list of
-what it yielded — a `break` out of a `for` keeps what came before it. A
+an async generator — or any iterator the function returns, which is what a
+bound generator and a compiler's downleveled async generator are — ends it
+when it is done, and its `output` is the list of what it yielded; a `break`
+out of a `for` keeps what came before it and closes the generator. A
 thrown error or a rejection ends the span at level `ERROR` with the exception
 recorded as an OTel event, and propagates unchanged.
 

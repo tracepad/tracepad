@@ -29,9 +29,9 @@ import {
 } from '@opentelemetry/sdk-trace-node';
 
 import * as attrs from './attributes.js';
-import { type Config, type ConfigOptions, adopt, resolve } from './config.js';
+import { type Config, type ConfigOptions, adopt, current, resolve } from './config.js';
 import { type Fields, type Usage, Stream, readResponse } from './generation.js';
-import { VERSION } from './http.js';
+import { VERSION, describe } from './http.js';
 import { type Logger, setLogger, warn } from './log.js';
 import { flushScores } from './scores.js';
 
@@ -66,7 +66,7 @@ export function init(options: InitOptions = {}): void {
     return;
   }
   if (options.logger !== undefined) setLogger(options.logger);
-  const config = resolve(options);
+  const config = configFor(options);
   const found = delegateOf();
   if (found === undefined) {
     const provider = new NodeTracerProvider({
@@ -88,6 +88,29 @@ export function init(options: InitOptions = {}): void {
   adopt(config);
   initialized = true;
   process.on('beforeExit', atExit);
+}
+
+/**
+ * `init`'s configuration: its own arguments over the environment — or, after
+ * `spanProcessor()`, over what the processor was built with, so that a bare
+ * `init()` adopts it and an argument that disagrees is said out loud rather
+ * than sending the spans to one store and the scores to another.
+ */
+function configFor(options: ConfigOptions): Config {
+  if (!handedOut) return resolve(options);
+  const built = current();
+  const config = resolve({ ...built, ...defined(options) });
+  if (config.host !== built.host || config.key !== built.key) {
+    warn(
+      'init(): the host or the key differs from the one spanProcessor() was built with; ' +
+        'the spans go to the processor\'s and the scores and prompts to this one',
+    );
+  }
+  return config;
+}
+
+function defined<T extends object>(options: T): Partial<T> {
+  return Object.fromEntries(Object.entries(options).filter(([, value]) => value !== undefined)) as Partial<T>;
 }
 
 interface Adoptable extends TracerProvider {
@@ -173,7 +196,7 @@ class TracepadProcessor implements SpanProcessor {
   }
 
   onEnd(span: ReadableSpan): void {
-    this.exporting?.onEnd(span);
+    this.exporting?.onEnd(readable(span));
   }
 
   forceFlush(): Promise<void> {
@@ -183,6 +206,29 @@ class TracepadProcessor implements SpanProcessor {
   shutdown(): Promise<void> {
     return this.exporting?.shutdown() ?? Promise.resolve();
   }
+}
+
+/**
+ * A span of the 1.x SDK, as the 2.x exporter reads one.
+ *
+ * The exporter is the 2.x line's whatever provider it was attached to, and
+ * it reads `instrumentationScope` and `parentSpanContext`; a 1.x span names
+ * the same two facts `instrumentationLibrary` and `parentSpanId`, and an
+ * export that reads them under the new names dies on every batch. A view
+ * over the span, with the two under the names the exporter reads, is what
+ * makes Decision 2's adoption of a 1.x provider deliver anything.
+ */
+function readable(span: ReadableSpan): ReadableSpan {
+  const legacy = span as ReadableSpan & { instrumentationLibrary?: ReadableSpan['instrumentationScope']; parentSpanId?: string };
+  if (span.instrumentationScope !== undefined || legacy.instrumentationLibrary === undefined) return span;
+  const { traceId, traceFlags } = span.spanContext();
+  return Object.create(span, {
+    instrumentationScope: { value: legacy.instrumentationLibrary, enumerable: true },
+    parentSpanContext: {
+      value: legacy.parentSpanId ? { traceId, spanId: legacy.parentSpanId, traceFlags } : undefined,
+      enumerable: true,
+    },
+  }) as ReadableSpan;
 }
 
 let exited = false;
@@ -217,8 +263,16 @@ export async function flush({ timeout = 10_000 }: FlushOptions = {}): Promise<vo
     );
     return;
   }
+  // Never rejected: the tracing path warns, and at `beforeExit` a rejection
+  // would be an unhandled one — an exit code of 1 because the store was away.
   const flushed = await Promise.race([
-    provider.forceFlush().then(() => true),
+    provider.forceFlush().then(
+      () => true,
+      (error: unknown) => {
+        warn(`flush(): the span processors failed to flush: ${describe(error)}`);
+        return true;
+      },
+    ),
     new Promise<boolean>((resolve) => setTimeout(() => resolve(false), left).unref()),
   ]);
   if (!flushed) warn(`flush(): the span processors did not flush within ${timeout}ms`);
@@ -608,95 +662,123 @@ export function observe<F extends AnyFunction>(fn: F, options: ObserveOptions = 
     }
   };
 
-  const kind = Object.prototype.toString.call(fn);
-  let wrapper: AnyFunction;
-  if (kind === '[object AsyncGeneratorFunction]') {
-    wrapper = async function* (this: unknown, ...args: unknown[]) {
-      const [handle, ctx] = begin(name, attributes(), make);
-      const yielded: unknown[] = [];
-      let steps: AsyncIterator<unknown> | undefined;
-      try {
-        steps = context.with(ctx, () => {
-          enter(handle, args);
-          return (fn.apply(this, args) as AsyncIterable<unknown>)[Symbol.asyncIterator]();
-        });
-        // Each step inside the span's context, and no longer: a generator
-        // runs in the context of whoever advances it. What the consumer
-        // sends and throws goes through, and so does the return value.
-        let step = await context.with(ctx, () => steps!.next());
-        while (!step.done) {
-          yielded.push(step.value);
-          let sent: unknown;
-          try {
-            sent = yield step.value;
-          } catch (thrown) {
-            step = await context.with(ctx, () => rethrow(steps!, thrown));
-            continue;
-          }
-          step = await context.with(ctx, () => steps!.next(sent));
-        }
-        return step.value;
-      } catch (error) {
-        failed(handle, error);
-        throw error;
-      } finally {
-        // A consumer that stopped early closes the inner generator too, so
-        // that its own cleanup runs; a finished one is closed already.
-        if (steps?.return !== undefined) await context.with(ctx, () => steps!.return!());
-        leave(handle, yielded, false);
-        handle.finish();
-      }
-    };
-  } else if (kind === '[object GeneratorFunction]') {
-    wrapper = function* (this: unknown, ...args: unknown[]) {
-      const [handle, ctx] = begin(name, attributes(), make);
-      const yielded: unknown[] = [];
-      let steps: Iterator<unknown> | undefined;
-      try {
-        steps = context.with(ctx, () => {
-          enter(handle, args);
-          return (fn.apply(this, args) as Iterable<unknown>)[Symbol.iterator]();
-        });
-        let step = context.with(ctx, () => steps!.next());
-        while (!step.done) {
-          yielded.push(step.value);
-          let sent: unknown;
-          try {
-            sent = yield step.value;
-          } catch (thrown) {
-            step = context.with(ctx, () => rethrow(steps!, thrown));
-            continue;
-          }
-          step = context.with(ctx, () => steps!.next(sent));
-        }
-        return step.value;
-      } catch (error) {
-        failed(handle, error);
-        throw error;
-      } finally {
-        if (steps?.return !== undefined) context.with(ctx, () => steps!.return!());
-        leave(handle, yielded, false);
-        handle.finish();
-      }
-    };
-  } else {
-    wrapper = function (this: unknown, ...args: unknown[]) {
-      return open(name, attributes(), make, (handle) => {
+  // Which shape a call is decided by what it returns, not by how the
+  // function was declared: a bound generator function, or an async
+  // generator downleveled by a compiler, is a plain function that returns
+  // an iterator, and it is the iterator that is traced to its end.
+  const wrapper = function (this: unknown, ...args: unknown[]) {
+    const [handle, ctx] = begin(name, attributes(), make);
+    let result: unknown;
+    try {
+      result = context.with(ctx, () => {
         enter(handle, args);
-        const result: unknown = fn.apply(this, args);
-        if (isThenable(result)) {
-          return Promise.resolve(result).then((value) => {
-            leave(handle, value);
-            return value;
-          });
-        }
-        leave(handle, result);
-        return result;
+        return fn.apply(this, args);
       });
-    };
-  }
+    } catch (error) {
+      failed(handle, error);
+      handle.finish();
+      throw error;
+    }
+    if (isThenable(result)) {
+      return Promise.resolve(result).then(
+        (value) => {
+          leave(handle, value);
+          handle.finish();
+          return value;
+        },
+        (error: unknown) => {
+          failed(handle, error);
+          handle.finish();
+          throw error;
+        },
+      );
+    }
+    if (isAsyncIterator(result)) return driveAsync(handle, ctx, result, leave);
+    if (isIterator(result)) return drive(handle, ctx, result, leave);
+    leave(handle, result);
+    handle.finish();
+    return result;
+  };
   Object.defineProperty(wrapper, 'name', { value: fn.name, configurable: true });
   return wrapper as F;
+}
+
+type Leave = (handle: Observation, result: unknown, asResponse?: boolean) => void;
+
+function isIterator(value: unknown): value is Iterator<unknown> {
+  return steps(value, Symbol.iterator);
+}
+
+function isAsyncIterator(value: unknown): value is AsyncIterator<unknown> {
+  return steps(value, Symbol.asyncIterator);
+}
+
+/** An iterator: it is its own iterable and has a `next`. An array is not one. */
+function steps(value: unknown, iterable: symbol): boolean {
+  if (value === null || typeof value !== 'object') return false;
+  const object = value as Record<symbol | string, unknown>;
+  return typeof object[iterable] === 'function' && typeof object.next === 'function';
+}
+
+/**
+ * Drive an iterator the function returned, inside the span, to its end.
+ *
+ * Each step runs inside the span's context, and no longer: a generator runs
+ * in the context of whoever advances it. What the consumer sends and throws
+ * goes through, so does the return value, and a consumer that stops early
+ * closes the inner iterator too, so that its own cleanup runs. The output
+ * is the list of what was yielded (spec 032 #4).
+ */
+function* drive(handle: Observation, ctx: Context, steps: Iterator<unknown>, leave: Leave): Generator<unknown, unknown, unknown> {
+  const yielded: unknown[] = [];
+  try {
+    let step = context.with(ctx, () => steps.next());
+    while (!step.done) {
+      yielded.push(step.value);
+      let sent: unknown;
+      try {
+        sent = yield step.value;
+      } catch (thrown) {
+        step = context.with(ctx, () => rethrow(steps, thrown));
+        continue;
+      }
+      step = context.with(ctx, () => steps.next(sent));
+    }
+    return step.value;
+  } catch (error) {
+    failed(handle, error);
+    throw error;
+  } finally {
+    if (steps.return !== undefined) context.with(ctx, () => steps.return!());
+    leave(handle, yielded, false);
+    handle.finish();
+  }
+}
+
+async function* driveAsync(handle: Observation, ctx: Context, steps: AsyncIterator<unknown>, leave: Leave): AsyncGenerator<unknown, unknown, unknown> {
+  const yielded: unknown[] = [];
+  try {
+    let step = await context.with(ctx, () => steps.next());
+    while (!step.done) {
+      yielded.push(step.value);
+      let sent: unknown;
+      try {
+        sent = yield step.value;
+      } catch (thrown) {
+        step = await context.with(ctx, () => rethrow(steps, thrown));
+        continue;
+      }
+      step = await context.with(ctx, () => steps.next(sent));
+    }
+    return step.value;
+  } catch (error) {
+    failed(handle, error);
+    throw error;
+  } finally {
+    if (steps.return !== undefined) await context.with(ctx, () => steps.return!());
+    leave(handle, yielded, false);
+    handle.finish();
+  }
 }
 
 /** Hand a consumer's `throw()` to the inner generator, or throw it where the generator would. */
