@@ -1,6 +1,6 @@
 # Spec 031 — Tokens in the statistics, streams in the SDK, and where a price comes from
 
-**Status:** 📝 DRAFT
+**Status:** ✅ SHIPPED
 **Sprint:** September 2026
 
 > The store records the price a provider charged and never estimates one
