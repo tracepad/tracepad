@@ -110,7 +110,7 @@ The rollup is **four tables**, and one window governs all of them:
 
 | Table | Holds | Swept by |
 |---|---|---|
-| `stats_hourly` | traffic, errors, cost and latency per hour | `stats_retention_days` |
+| `stats_hourly` | traffic, errors, cost, tokens and latency per hour | `stats_retention_days` |
 | `users_hourly`, `users` | the same per end user, plus their summary | `stats_retention_days` |
 | `scores_hourly` | score means, rates and category counts per hour ([quality.md](quality.md)) | `stats_retention_days` |
 | `names_hourly` | how many traces of each name per hour, and how many failed — what [`GET /api/v1/facets`](api.md#filter-values) lists | `stats_retention_days` |

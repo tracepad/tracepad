@@ -47,6 +47,9 @@ type bucket struct {
 	// truth is "nobody said" (spec 002 #14).
 	costed  bool
 	latency store.Histogram
+	// tokens are the three sums of spec 031, added the way cost is: a half
+	// that carried none contributes nothing and does not make the sum zero.
+	tokens store.Tokens
 	// sessions is how many of the user's sessions began in this bucket. It
 	// rides only a `user_id` timeline (spec 023 #6): `stats_hourly` has no
 	// such number, so without the filter the key is absent rather than zero.
@@ -141,6 +144,9 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 			put("error_count", b.errorCount)
 		if b.costed {
 			row = row.put("total_cost", b.totalCost)
+		}
+		if tokens := tokensObject(b.tokens); tokens != nil {
+			row = row.put("tokens", tokens)
 		}
 		if sessions {
 			row = row.put("sessions", b.sessions)
@@ -245,6 +251,7 @@ func (s *Server) rolledStats(projectID string, filter store.StatsFilter, fromHou
 			b.costed = true
 		}
 		b.latency.Merge(row.Latency)
+		b.tokens.Add(row.Tokens)
 		return b
 	}
 	if filter.UserID != "" {
@@ -271,6 +278,7 @@ func (s *Server) liveStats(projectID string, filter store.StatsFilter, from, to 
 	if to == math.MaxInt64 {
 		window.To = nil
 	}
+	tokens := carriesTokens(filter)
 	if err := s.store.StatsSamples(projectID, window, func(sample store.StatsSample) {
 		b := at(sample.Key)
 		b.count++
@@ -284,10 +292,59 @@ func (s *Server) liveStats(projectID string, filter store.StatsFilter, from, to 
 		if sample.LatencyMs != nil {
 			b.latency.Add(*sample.LatencyMs)
 		}
+		if tokens {
+			b.tokens.Add(sample.Tokens)
+		}
 	}); err != nil {
 		return err
 	}
+	// The trace unit's tokens are one aggregate over the same window,
+	// merged by key (spec 031 #5). It yields nothing for the model
+	// grouping, whose samples carried their own above — and nothing for a
+	// key whose traces had no observation with a count, so a bucket is
+	// never created here that the scan did not.
+	if tokens {
+		if err := s.store.StatsTokens(projectID, window, func(sum store.StatsTokenSum) {
+			at(sum.Key).tokens.Add(sum.Tokens)
+		}); err != nil {
+			return err
+		}
+	}
 	return s.liveSessions(projectID, filter, from, to, at)
+}
+
+// carriesTokens reports whether an answer to this filter carries `tokens`.
+// A `user_id` answer does not: its rolled half is `users_hourly`, which holds
+// no token sums (spec 031 leaves the per-user rollup alone), and a live tail
+// that reported them would be a chart whose tokens appear at the watermark —
+// the seam made visible, which spec 013 #5 forbids.
+func carriesTokens(filter store.StatsFilter) bool {
+	return filter.UserID == ""
+}
+
+// tokensObject is a bucket's `tokens`: each key present only when something
+// in the bucket carried that count, and no object at all when none did
+// (spec 031 #4). Absent rather than zero is the rule for cost and the rows
+// behind it.
+func tokensObject(t store.Tokens) object {
+	var out object
+	for _, count := range []struct {
+		key   string
+		value *int64
+	}{
+		{"input", t.Input},
+		{"output", t.Output},
+		{"cache_read", t.CacheRead},
+	} {
+		if count.value == nil {
+			continue
+		}
+		if out == nil {
+			out = object{}
+		}
+		out = out.put(count.key, *count.value)
+	}
+	return out
 }
 
 // liveSessions is the live half of `sessions` per bucket. It counts a session

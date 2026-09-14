@@ -579,6 +579,17 @@ type StatsSample struct {
 	Errored   bool
 	Cost      *float64
 	LatencyMs *int64
+	// Tokens ride only the model grouping's samples, which are observation
+	// rows and carry their own (spec 031 #5). A trace-unit sample has none:
+	// its bucket's tokens come from StatsTokens, one aggregate over the
+	// same rows the model grouping reads.
+	Tokens Tokens
+}
+
+// StatsTokenSum is one bucket's token sums out of the live aggregate.
+type StatsTokenSum struct {
+	Key    string
+	Tokens Tokens
 }
 
 // StatsUnit reports what a bucket of this grouping counts.
@@ -602,12 +613,13 @@ func (s *Store) StatsSamples(projectID string, filter StatsFilter, yield func(St
 
 	for rows.Next() {
 		var (
-			key     sql.NullString
-			errored int
-			cost    sql.NullFloat64
-			latency sql.NullInt64
+			key                      sql.NullString
+			errored                  int
+			cost                     sql.NullFloat64
+			latency                  sql.NullInt64
+			input, output, cacheRead sql.NullInt64
 		)
-		if err := rows.Scan(&key, &errored, &cost, &latency); err != nil {
+		if err := rows.Scan(&key, &errored, &cost, &latency, &input, &output, &cacheRead); err != nil {
 			return fmt.Errorf("scan stats row: %w", err)
 		}
 		sample := StatsSample{Key: key.String, Errored: errored != 0}
@@ -617,7 +629,40 @@ func (s *Store) StatsSamples(projectID string, filter StatsFilter, yield func(St
 		if latency.Valid {
 			sample.LatencyMs = &latency.Int64
 		}
+		sample.Tokens = scanTokens(input, output, cacheRead)
 		yield(sample)
+	}
+	return rows.Err()
+}
+
+// StatsTokens is the live half of the trace unit's tokens (spec 031 #5): one
+// aggregate over the observations of the traces the scan reads, grouped by
+// the same bucket key, so the caller merges it into the buckets by key. It
+// yields nothing for the model grouping, whose samples carry their own.
+//
+// It reads the same observations the rollup's model cells are made of — the
+// ones that name a model — so a bucket's tokens are the same sum on both
+// sides of the seam.
+func (s *Store) StatsTokens(projectID string, filter StatsFilter, yield func(StatsTokenSum)) error {
+	if filter.GroupBy == GroupByModel {
+		return nil
+	}
+	query, args := statsTokensQuery(projectID, filter)
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return fmt.Errorf("read stats tokens: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var (
+			key                      sql.NullString
+			input, output, cacheRead sql.NullInt64
+		)
+		if err := rows.Scan(&key, &input, &output, &cacheRead); err != nil {
+			return fmt.Errorf("scan stats tokens row: %w", err)
+		}
+		yield(StatsTokenSum{Key: key.String, Tokens: scanTokens(input, output, cacheRead)})
 	}
 	return rows.Err()
 }
@@ -625,6 +670,47 @@ func (s *Store) StatsSamples(projectID string, filter StatsFilter, yield func(St
 // statsQuery builds the scan. `timestamp` is Unix nanoseconds, so the bucket
 // expressions divide before handing it to strftime, which speaks seconds.
 func statsQuery(projectID string, filter StatsFilter) (string, []any) {
+	where, args := statsWhere(projectID, filter, filter.GroupBy == GroupByModel)
+
+	if filter.GroupBy == GroupByModel {
+		// The join exists for the filters, which are all trace-level;
+		// the numbers come from the observation.
+		return `SELECT o.model, o.level = 'ERROR',
+		               CASE WHEN o.provided_cost = 1
+		                    THEN json_extract(o.cost_details, '$.total') END,
+		               CASE WHEN o.start_time > 0 AND o.end_time >= o.start_time
+		                    THEN (o.end_time - o.start_time) / 1000000 END,
+		               ` + tokenColumns("o.usage") + `
+		        FROM observations o
+		        JOIN traces t ON t.project_id = o.project_id AND t.id = o.trace_id
+		        WHERE ` + strings.Join(where, " AND "), args
+	}
+
+	// A trace-unit row carries no tokens of its own: three NULLs keep the
+	// scan's shape, and StatsTokens sums them per bucket.
+	return `SELECT ` + statsKey(filter.GroupBy) + `, t.error_count > 0, t.total_cost, t.latency_ms,
+	               NULL, NULL, NULL
+	        FROM traces t WHERE ` + strings.Join(where, " AND "), args
+}
+
+// statsTokensQuery is the trace unit's aggregate: the model grouping's join
+// and rows, summed per trace-unit bucket key. `SUM` over rows that carried no
+// count is NULL, which is what a bucket with none should say.
+func statsTokensQuery(projectID string, filter StatsFilter) (string, []any) {
+	where, args := statsWhere(projectID, filter, true)
+	key := statsKey(filter.GroupBy)
+	return `SELECT ` + key + `, ` + tokenSums("o.usage") + `
+	        FROM observations o
+	        JOIN traces t ON t.project_id = o.project_id AND t.id = o.trace_id
+	        WHERE ` + strings.Join(where, " AND ") + `
+	        GROUP BY ` + key, args
+}
+
+// statsWhere is the trace-level filter every statistics scan applies, on the
+// trace's alias `t`. A scan over observations adds the one condition that
+// names the unit: an observation counts when it names a model, which is the
+// rule the rollup's observation cells follow too.
+func statsWhere(projectID string, filter StatsFilter, observations bool) ([]string, []any) {
 	where := []string{"t.project_id = ?"}
 	args := []any{projectID}
 	add := func(clause string, values ...any) {
@@ -643,37 +729,27 @@ func statsQuery(projectID string, filter StatsFilter) (string, []any) {
 	if filter.UserID != "" {
 		add("t.user_id = ?", filter.UserID)
 	}
-
-	if filter.GroupBy == GroupByModel {
-		// The join exists for the filters, which are all trace-level;
-		// the numbers come from the observation.
+	if observations {
 		add("o.model IS NOT NULL")
 		add("o.model != ''")
-		return `SELECT o.model, o.level = 'ERROR',
-		               CASE WHEN o.provided_cost = 1
-		                    THEN json_extract(o.cost_details, '$.total') END,
-		               CASE WHEN o.start_time > 0 AND o.end_time >= o.start_time
-		                    THEN (o.end_time - o.start_time) / 1000000 END
-		        FROM observations o
-		        JOIN traces t ON t.project_id = o.project_id AND t.id = o.trace_id
-		        WHERE ` + strings.Join(where, " AND "), args
 	}
+	return where, args
+}
 
-	var key string
-	switch filter.GroupBy {
+// statsKey is the trace-unit bucket expression of a grouping.
+func statsKey(groupBy string) string {
+	switch groupBy {
 	case GroupByHour:
-		key = `strftime('%Y-%m-%dT%H:00:00Z', t.timestamp / 1000000000, 'unixepoch')`
+		return `strftime('%Y-%m-%dT%H:00:00Z', t.timestamp / 1000000000, 'unixepoch')`
 	case GroupByDay:
-		key = `strftime('%Y-%m-%d', t.timestamp / 1000000000, 'unixepoch')`
+		return `strftime('%Y-%m-%d', t.timestamp / 1000000000, 'unixepoch')`
 	case GroupByRelease:
 		// NULL survives the scan as the empty key: a trace that named no
 		// release is a bucket, not an omission (spec 012, API contract).
-		key = `t.release`
+		return `t.release`
 	default:
-		key = `t.environment`
+		return `t.environment`
 	}
-	return `SELECT ` + key + `, t.error_count > 0, t.total_cost, t.latency_ms
-	        FROM traces t WHERE ` + strings.Join(where, " AND "), args
 }
 
 // countedTables are the tables `GET /api/v1/system` reports row counts for, in
