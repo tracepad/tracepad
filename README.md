@@ -75,12 +75,12 @@ export OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://localhost:4318/v1/traces
 export OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer tp-sk-…"
 ```
 
-In Python there is also a package — a thin layer over the same OpenTelemetry
-SDK, which adds an exporter to the provider your application already has
-rather than replacing it:
+In Python and in Node there is also a package — a thin layer over the same
+OpenTelemetry SDK, which adds an exporter to the provider your application
+already has rather than replacing it:
 
 ```sh
-pip install tracepad
+pip install tracepad        # or: npm install tracepad @opentelemetry/api
 ```
 
 ```python
@@ -96,7 +96,8 @@ context out (`go get github.com/tracepad/tracepad/sdk/go`).
 
 See [docs/ingest.md](docs/ingest.md) for the endpoints, the auth schemes, the
 attribute conventions Tracepad understands, and the ingest configuration,
-[docs/sdk-python.md](docs/sdk-python.md) for the Python package and
+[docs/sdk-python.md](docs/sdk-python.md) for the Python package,
+[docs/sdk-js.md](docs/sdk-js.md) for the Node one and
 [docs/sdk-go.md](docs/sdk-go.md) for the Go one.
 
 ## Scores and prompts

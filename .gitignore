@@ -58,3 +58,8 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 *.egg-info/
+
+# The Node package (spec 032). `dist` is built by tsup on `npm pack` and by
+# `make sdk-js-build`; never committed.
+sdk/js/node_modules/
+sdk/js/dist/

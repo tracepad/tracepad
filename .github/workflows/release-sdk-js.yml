@@ -1,0 +1,51 @@
+# Publishing the Node package (spec 032 #11).
+#
+# The tag is the trigger and the version is the package's own: `sdk-js/v0.2.0`
+# releases what `sdk/js/package.json` calls 0.2.0, and a tag that says
+# anything else fails before a build happens — a version on npm cannot be
+# taken back.
+#
+# Credentials: none. npm trusted publishing exchanges this workflow's OIDC
+# token for a publish token, so there is no token in the repository to leak
+# or to rotate, and `--provenance` attaches the build's attestation to the
+# version. The trusted publisher (owner `tracepad`, repository `tracepad`,
+# workflow `release-sdk-js.yml`, environment `npm`) is configured once on
+# npmjs.com by the package's owner.
+name: Release the Node package
+
+on:
+  push:
+    tags: ["sdk-js/v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      # Trusted publishing needs npm 11.5 or newer, which the runner's Node
+      # may or may not bundle.
+      - run: npm install -g npm@latest
+
+      - name: The tag and the package must agree about the version
+        run: scripts/sdk-js-release-check.sh "$GITHUB_REF_NAME"
+
+      # The suite runs here too. CI ran it on the commit, but a tag can be
+      # moved, and what is published must be what passed.
+      - run: npm ci
+        working-directory: sdk/js
+      - run: SDK_SKIP_E2E=1 scripts/sdk-js-test.sh
+
+      # `prepack` builds `dist`; `files` in package.json ships it and nothing else.
+      - run: npm publish --provenance --access public
+        working-directory: sdk/js

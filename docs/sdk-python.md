@@ -385,8 +385,8 @@ written.
 - **No async client.** The REST calls are `urllib`, synchronously; their callers
   are scripts and start-up code. The one thing written from inside a request
   handler — a score — is queued instead.
-- **No price table**, no prompt templating beyond `{placeholders}`, and no
-  JavaScript twin yet.
+- **No price table**, no prompt templating beyond `{placeholders}`. The
+  JavaScript twin is [sdk-js.md](sdk-js.md).
 - **The harness runs nothing.** No judge, no retries, no concurrency helpers,
   no `pytest` plugin and no `tracepad eval …` command: the loop is your
   program, and this is the part of it that talks to the store.

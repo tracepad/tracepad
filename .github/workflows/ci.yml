@@ -145,6 +145,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+      # The fifth exporter is the Node package, built from this checkout
+      # (spec 032 #11).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: sdk/js/package-lock.json
       - run: pip install -r scripts/smoke/requirements.txt -e ./sdk/python
       - run: SMOKE_PYTHON="$(which python)" scripts/smoke/run.sh
 
@@ -200,3 +207,34 @@ jobs:
       - run: TRACEPAD_BINARY=/tmp/tracepad scripts/sdk-go-test.sh
       # A signal, not a rule (design §8), the same instrument the others have.
       - run: make sdk-go-lines
+
+  # The Node package (spec 032 #11): its type check and unit suite on both
+  # ends of the supported range — 20 is the floor and 22 is where the OTel
+  # SDK moves first — and its end-to-end suite against a real binary. Its own
+  # job, like the Python one, because the gate needs neither.
+  sdk-js:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [20, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+          cache-dependency-path: sdk/js/package-lock.json
+      - run: npm ci
+        working-directory: sdk/js
+      - run: scripts/sdk-js-test.sh
+      # The package must build — the dual output and the declarations are
+      # what `npm publish` ships, and nothing else in the suite runs tsup.
+      - run: npm run build
+        working-directory: sdk/js
+      # A signal, not a rule (design §8), the same instrument the others have.
+      - run: make sdk-js-lines

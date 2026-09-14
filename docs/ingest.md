@@ -2,8 +2,9 @@
 
 Tracepad speaks OTLP. Any OpenTelemetry-instrumented application can send to
 it by changing an endpoint and an auth header — nothing has to be installed.
-There *are* packages for Python ([sdk-python.md](sdk-python.md)) and Go
-([sdk-go.md](sdk-go.md)), and they are a convenience over exactly this
+There *are* packages for Python ([sdk-python.md](sdk-python.md)), Node
+([sdk-js.md](sdk-js.md)) and Go ([sdk-go.md](sdk-go.md)), and each is a
+convenience over exactly this
 endpoint, not a way around it.
 
 ## Endpoints
@@ -92,19 +93,19 @@ export LANGFUSE_PUBLIC_KEY=tp-pk-…
 export LANGFUSE_SECRET_KEY=tp-sk-…
 ```
 
-**The `tracepad` package** — the same exporter with the ergonomics on top
-([sdk-python.md](sdk-python.md)):
+**The `tracepad` package** — the same exporter with the ergonomics on top, in
+Python ([sdk-python.md](sdk-python.md)) and in Node ([sdk-js.md](sdk-js.md)):
 
 ```sh
-pip install tracepad
+pip install tracepad        # or: npm install tracepad @opentelemetry/api
 export TRACEPAD_HOST=http://localhost:4318
 export TRACEPAD_API_KEY=tp-sk-…
 ```
 
-Working examples of all three live in [`scripts/smoke`](../scripts/smoke),
+Working examples of all of them live in [`scripts/smoke`](../scripts/smoke),
 which is also the test that keeps them working.
 
-A fourth is not an SDK at all: [Claude Code](#claude-code) exports its own
+One more is not an SDK at all: [Claude Code](#claude-code) exports its own
 sessions, and needs only environment too.
 
 ## Claude Code
@@ -286,9 +287,10 @@ Two consequences worth knowing:
 
 The GenAI semantic conventions have no name for a trace name, for tags, for
 free metadata, for the kind of a step or for the prompt one ran. Where they do
-have a name, the [Python](sdk-python.md) and [Go](sdk-go.md) packages use it — `gen_ai.*`,
-`user.id`, `session.id`, `deployment.environment.name`, the resource's
-`service.version` — and where they do not, they write these:
+have a name, the [Python](sdk-python.md), [Node](sdk-js.md) and [Go](sdk-go.md)
+packages use it — `gen_ai.*`, `user.id`, `session.id`,
+`deployment.environment.name`, the resource's `service.version` — and where
+they do not, they write these:
 
 | Attribute | What it sets |
 |---|---|

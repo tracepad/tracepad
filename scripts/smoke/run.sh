@@ -2,8 +2,8 @@
 # Real-SDK smoke test (spec 002, Testing #3).
 #
 # Builds the binary, runs it, points a pinned opentelemetry-sdk script, a
-# pinned Langfuse SDK script and our own packages — Python and Go — at it, and
-# asserts the rows they produced. This is the drift detector for SDK conventions: when an SDK
+# pinned Langfuse SDK script and our own packages — Python, Go and Node — at
+# it, and asserts the rows they produced. This is the drift detector for SDK conventions: when an SDK
 # changes what it emits, this fails before a user notices. Our own package is
 # installed from this checkout rather than pinned, because the drift it detects
 # is between the package and the mapper of the same commit (spec 017 #12).
@@ -85,10 +85,14 @@ echo "==> exporting with the tracepad package"
 echo "==> exporting with the tracepad Go package"
 (cd "$repo_root/sdk/go" && go run ./internal/smoke "$work/tracepad-go-trace-id")
 
+echo "==> exporting with the tracepad Node package"
+(cd "$repo_root/sdk/js" && { [ -d node_modules ] || npm ci; } && npm run --silent build)
+node "$smoke_dir/export_tracepad.mjs" "$work/tracepad-js-trace-id"
+
 echo "==> checking the database"
 python3 "$smoke_dir/check.py" "$TRACEPAD_DATA_DIR/tracepad.db" \
     "$work/otel-trace-id" "$work/langfuse-trace-id" "$work/tracepad-trace-id" \
-    "$work/tracepad-go-trace-id"
+    "$work/tracepad-go-trace-id" "$work/tracepad-js-trace-id"
 
 echo "==> server log"
 cat "$work/server.log"

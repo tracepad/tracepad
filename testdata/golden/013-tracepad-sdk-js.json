@@ -1,0 +1,177 @@
+{
+  "dialect": "tracepad",
+  "traces": [
+    {
+      "id": "a0b1c2d3e4f5a6b7c8d9eb0000000001",
+      "name": "help-chat",
+      "user_id": "user-9001",
+      "session_id": "session-91",
+      "environment": "production",
+      "release": "2026.9.14",
+      "tags": [
+        "docs",
+        "node"
+      ],
+      "metadata": {
+        "channel": "cli"
+      }
+    },
+    {
+      "id": "a0b1c2d3e4f5a6b7c8d9eb0000000002",
+      "name": "help-rewrite",
+      "user_id": "user-9001",
+      "session_id": "session-91",
+      "environment": "production",
+      "release": "2026.9.14"
+    }
+  ],
+  "observations": [
+    {
+      "trace_id": "a0b1c2d3e4f5a6b7c8d9eb0000000001",
+      "id": "2b3c4d5e6f700001",
+      "type": "span",
+      "name": "answer-question",
+      "start_time": 1787738400000000000,
+      "end_time": 1787738400130000000,
+      "level": "DEFAULT",
+      "input": {
+        "question": "how does a stream end?"
+      },
+      "metadata": {
+        "resource.service.name": "docs-bot",
+        "resource.telemetry.sdk.language": "nodejs",
+        "resource.telemetry.sdk.name": "opentelemetry",
+        "scope.name": "tracepad",
+        "scope.version": "0.1.0"
+      }
+    },
+    {
+      "trace_id": "a0b1c2d3e4f5a6b7c8d9eb0000000001",
+      "id": "2b3c4d5e6f700002",
+      "parent_observation_id": "2b3c4d5e6f700001",
+      "type": "retriever",
+      "name": "docs-search",
+      "start_time": 1787738400020000000,
+      "end_time": 1787738400040000000,
+      "level": "WARNING",
+      "status_message": "one result",
+      "input": [
+        "stream"
+      ],
+      "output": [
+        "the streams page"
+      ],
+      "metadata": {
+        "attempt": 2,
+        "resource.service.name": "docs-bot",
+        "resource.telemetry.sdk.language": "nodejs",
+        "resource.telemetry.sdk.name": "opentelemetry",
+        "scope.name": "tracepad",
+        "scope.version": "0.1.0"
+      }
+    },
+    {
+      "trace_id": "a0b1c2d3e4f5a6b7c8d9eb0000000001",
+      "id": "2b3c4d5e6f700003",
+      "parent_observation_id": "2b3c4d5e6f700001",
+      "type": "event",
+      "name": "cache.miss",
+      "start_time": 1787738400050000000,
+      "end_time": 1787738400050000000,
+      "level": "DEFAULT",
+      "metadata": {
+        "key": "docs-answer",
+        "resource.service.name": "docs-bot",
+        "resource.telemetry.sdk.language": "nodejs",
+        "resource.telemetry.sdk.name": "opentelemetry",
+        "scope.name": "tracepad",
+        "scope.version": "0.1.0"
+      }
+    },
+    {
+      "trace_id": "a0b1c2d3e4f5a6b7c8d9eb0000000001",
+      "id": "2b3c4d5e6f700004",
+      "parent_observation_id": "2b3c4d5e6f700001",
+      "type": "generation",
+      "name": "chat-completion",
+      "start_time": 1787738400090000000,
+      "end_time": 1787738400120000000,
+      "completion_start_time": 1787738400110000000,
+      "model": "gpt-5-mini",
+      "model_parameters": {
+        "max_tokens": 512,
+        "temperature": 0.2
+      },
+      "level": "DEFAULT",
+      "usage": {
+        "cache_read_input_tokens": 64,
+        "input_tokens": 96,
+        "output_tokens": 33,
+        "reasoning_tokens": 8
+      },
+      "cost_details": {
+        "total": 0.0007
+      },
+      "provided_cost": true,
+      "prompt_name": "docs-answer",
+      "prompt_version": 4,
+      "input": [
+        {
+          "content": "how does a stream end?",
+          "role": "user"
+        }
+      ],
+      "output": "When the last chunk does.",
+      "metadata": {
+        "gen_ai.response.model": "gpt-5-mini-2026-08-07",
+        "resource.service.name": "docs-bot",
+        "resource.telemetry.sdk.language": "nodejs",
+        "resource.telemetry.sdk.name": "opentelemetry",
+        "scope.name": "tracepad",
+        "scope.version": "0.1.0"
+      }
+    },
+    {
+      "trace_id": "a0b1c2d3e4f5a6b7c8d9eb0000000002",
+      "id": "2b3c4d5e6f700005",
+      "type": "span",
+      "name": "prepare-question",
+      "start_time": 1787738400140000000,
+      "end_time": 1787738400190000000,
+      "level": "DEFAULT",
+      "metadata": {
+        "resource.service.name": "docs-bot",
+        "resource.telemetry.sdk.language": "nodejs",
+        "resource.telemetry.sdk.name": "opentelemetry",
+        "scope.name": "tracepad",
+        "scope.version": "0.1.0"
+      }
+    },
+    {
+      "trace_id": "a0b1c2d3e4f5a6b7c8d9eb0000000002",
+      "id": "2b3c4d5e6f700006",
+      "parent_observation_id": "2b3c4d5e6f700005",
+      "type": "generation",
+      "name": "rewrite-question",
+      "start_time": 1787738400160000000,
+      "end_time": 1787738400180000000,
+      "model": "gpt-5-nano",
+      "level": "DEFAULT",
+      "usage": {
+        "input_tokens": 15,
+        "output_tokens": 7
+      },
+      "input": [
+        "how does stream end"
+      ],
+      "output": "How does a stream end?",
+      "metadata": {
+        "resource.service.name": "docs-bot",
+        "resource.telemetry.sdk.language": "nodejs",
+        "resource.telemetry.sdk.name": "opentelemetry",
+        "scope.name": "tracepad",
+        "scope.version": "0.1.0"
+      }
+    }
+  ]
+}

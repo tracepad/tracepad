@@ -13,8 +13,14 @@ import json
 import sqlite3
 import sys
 
-db_path, otel_trace_id_file, langfuse_trace_id_file, tracepad_trace_id_file = sys.argv[1:5]
-tracepad_go_trace_id_file = sys.argv[5]
+(
+    db_path,
+    otel_trace_id_file,
+    langfuse_trace_id_file,
+    tracepad_trace_id_file,
+    tracepad_go_trace_id_file,
+    tracepad_js_trace_id_file,
+) = sys.argv[1:7]
 
 failures = []
 
@@ -201,9 +207,48 @@ if generations:
     check(payload(generation["input_id"]) is not None, "tracepad-go generation has no input")
     check(payload(generation["output_id"]) is not None, "tracepad-go generation has no output")
 
+# --- the tracepad Node package, the same dialect (spec 032) ----------------
+tracepad_js_id = read_id(tracepad_js_trace_id_file)
+row = trace(tracepad_js_id)
+check(row["name"] == "tracepad-js-smoke", f"tracepad-js trace name = {row['name']!r}")
+check(row["user_id"] == "smoke-user", f"tracepad-js user_id = {row['user_id']!r}")
+check(row["session_id"] == "smoke-session", f"tracepad-js session_id = {row['session_id']!r}")
+check(row["environment"] == "smoke", f"tracepad-js environment = {row['environment']!r}")
+check(row["release"] == "smoke-2", f"tracepad-js release = {row['release']!r}")
+check(sorted(json.loads(row["tags"] or "[]")) == ["smoke", "spec-032"],
+      f"tracepad-js tags = {row['tags']!r}")
+check(row["observation_count"] == 2,
+      f"tracepad-js observation_count = {row['observation_count']}")
+check(
+    row["total_cost"] is not None and abs(row["total_cost"] - 0.0004) < 1e-9,
+    f"tracepad-js total_cost = {row['total_cost']}",
+)
+check((payload(row["metadata_id"]) or {}).get("suite") == "smoke",
+      "tracepad-js trace metadata lost its entry")
+
+spans = observations(tracepad_js_id)
+generations = [s for s in spans if s["type"] == "generation"]
+check(len(generations) == 1, f"tracepad-js generations = {len(generations)}")
+if generations:
+    generation = generations[0]
+    check(
+        generation["model"] == "claude-sonnet-5",
+        f"tracepad-js generation model = {generation['model']!r}",
+    )
+    usage = json.loads(generation["usage"] or "{}")
+    check(usage.get("input_tokens") == 12, f"tracepad-js usage = {usage}")
+    check(usage.get("output_tokens") == 6, f"tracepad-js usage = {usage}")
+    params = json.loads(generation["model_parameters"] or "{}")
+    check(params.get("max_tokens") == 96, f"tracepad-js model_parameters = {params}")
+    check(generation["provided_cost"] == 1, "tracepad-js generation must carry provided_cost")
+    check(generation["completion_start_time"] is not None,
+          "tracepad-js generation has no completion start")
+    check(payload(generation["input_id"]) is not None, "tracepad-js generation has no input")
+    check(payload(generation["output_id"]) is not None, "tracepad-js generation has no output")
+
 # --- raw bodies (spec 002 #9) ---------------------------------------------
 raw = db.execute("SELECT dialect, content_encoding, body FROM raw_batches").fetchall()
-check(len(raw) >= 4, f"raw_batches = {len(raw)}, want one per accepted export")
+check(len(raw) >= 5, f"raw_batches = {len(raw)}, want one per accepted export")
 dialects = {r["dialect"] for r in raw}
 check("langfuse" in dialects, f"raw dialects = {dialects}")
 check("genai" in dialects, f"raw dialects = {dialects}")
@@ -219,4 +264,4 @@ if failures:
         print(f"  - {failure}")
     raise SystemExit(1)
 
-print(f"smoke OK: 4 exports, {len(raw)} raw batches stored")
+print(f"smoke OK: 5 exports, {len(raw)} raw batches stored")
