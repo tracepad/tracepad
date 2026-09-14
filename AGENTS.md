@@ -310,6 +310,19 @@ API. This file routes; it does not duplicate what specs and docs say.
   `get_facets` (#5), and in the panel the three fields become checkbox lists
   with counts, loaded when it opens (#6–#8). The ceiling rose to 18,500 for a
   component whose lines *are* a checkbox list (#9).
+- ✅ Spec 033 (the Go package) shipped: a nested module `sdk/go`
+  (`github.com/tracepad/tracepad/sdk/go`), thin over the OTel Go SDK with
+  the Python package's vocabulary in the shape of the OTel API — `Init` that
+  adapts to the provider it finds and hands back its `shutdown`, `Span`,
+  `Event`, `Generation` with an explicit `Result` and no response reader
+  (#5), `Update`, `UpdateTrace`, `Score` over a batching goroutine, `Prompt`
+  with the `max-age` cache, and the eval harness as a context (#10). Go has
+  one namespace for a function and a type, so the handles are `*Call` and
+  `*PromptVersion` (#14); the floor is Go 1.25, where the OTel SDK puts it
+  (#15). Fixture `014-tracepad-sdk-go.pb` is the package's own export,
+  deterministic byte for byte (#13); the `sdk-go` CI job runs the module on
+  the two newest Go lines, and `make gate` includes its unit suite because
+  the root `go test ./...` cannot see a nested module (#11).
 - ✅ Spec 031 (tokens in the statistics, streams in the SDK, where a price
   comes from) shipped: `stats_hourly` carries three token sums per cell —
   input, output, cache read — each read off an observation's `usage` under
@@ -404,6 +417,7 @@ API. This file routes; it does not duplicate what specs and docs say.
 | The Prompts screens (the listing, the versions, the diff, the editor) | `ui/src/routes/prompts/`, `ui/src/lib/components/prompts/` (the chip, the label control, the version view, the painted diff, the editor, the delete card), `ui/src/lib/prompts.ts` (the pure part: the Save gate per field, the chip order, the diff painter's classification, the two conversions between a stored body and the form), `docs/ui.md#prompts`, spec 021 — the diff is the server's and is only painted here (#3), the gate mirrors the `400`s spec 003 already gives and never replaces them (#5), a move or a removal of a label goes through `ConfirmDialog` naming it and a new label does not (#6), and the editor is only ever "new version from this one" because the store is append-only |
 | The Python package | `sdk/python/` (`src/tracepad/` is the package, `tests/` its suite and `tests/e2e/` the run against a real binary), `docs/sdk-python.md`, spec 017 — two dependencies and no third, no provider-client wrapper ever (design §6.5); `_tracing.py` holds the provider adaptation and defers the SDK's own imports into `init`, `_attributes.py` is the vocabulary that `internal/mapping/rules.go` reads back, and the application-line budget is 1,500 shared with spec 018 (`scripts/sdk-lines.sh`). `scripts/fixtures/tracepad_sdk.py` rewrites `testdata/otlp/010-tracepad-sdk.pb` from the package's own exporter |
 | The Go package | `sdk/go/` — a nested module (`github.com/tracepad/tracepad/sdk/go`; the root `go test ./...` does not see it, `make sdk-go-unit` and the gate do), `docs/sdk-go.md`, spec 033 — the same vocabulary as the Python package in the shape of the OTel API (a context in, a context out, `defer step.End()`), three dependencies and no `replace`, one package-level default configured by `Init` (`tracepad.go` holds the provider adaptation), an explicit `Result` and no response reader (#5). Function and type share one namespace in Go, so `Generation` hands out a `*Call` and `Prompt` a `*PromptVersion` (#14). `sdk/go/internal/fixture` rewrites `testdata/otlp/014-tracepad-sdk-go.pb` from the package's own exporter, deterministically (#13); the budget is 1,600 (`scripts/sdk-go-lines.sh`) |
+| The eval harness in Go | `sdk/go/harness.go` (the processor, `Run`, `Attempt`, `ScoreConfigs`, `Compare`, `ItemID`, the paging iterator) and `datasets.go` (`Dataset`, `Item`), `docs/datasets.md#the-same-loop-from-go`, `docs/sdk-go.md#evals`, spec 033 #10 — the item block is a context (`run.Item(ctx, item)` returns one), read by a `SpanProcessor` at `OnStart` and never a span the harness opened; `Init` registers it before the exporter and under `WithExport(false)` too; `Items` is an `iter.Seq2` over every page; there is no block that closes a run, so `Fail` on the error path is the caller's (#16) |
 | The eval harness in Python | `sdk/python/src/tracepad/_harness.py` (the processor, `Run`, `Attempt`, the score configs, `compare`, the paging loop) and `_datasets.py` (`Dataset`, `Item`), `docs/datasets.md#the-same-loop-from-python`, `docs/sdk-python.md#evals`, spec 018 — the stamping is a `ContextVar` read at `on_start` and never a span the harness opened (#3), `init` registers the processor before the exporting one and under `export=False` too, and the read side is the server's JSON as `dict`s because a model layer is a place to start disagreeing with it (#8) |
 | Packaging: the image and the release | `Dockerfile` + `.dockerignore` (the whole recipe — the image builds both halves from the checkout and copies no prebuilt binary), `scripts/image-check.sh` (the contract, asserted from outside because the image has no shell), `.github/workflows/release-server.yml` (GoReleaser for the archives, `buildx` for one multi-arch manifest on GHCR), the `docker` job in `ci.yml`, `docs/docker.md`, spec 020 — `tracepad health` (`internal/cli/commands.go`) is the container's `HEALTHCHECK` and the one command that needs no key |
 | Configuration | `internal/config/`, spec 001 + spec 002 Configuration tables |

@@ -7,9 +7,6 @@ import (
 	"reflect"
 	"testing"
 
-	"go.opentelemetry.io/otel"
-	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-
 	tracepad "github.com/tracepad/tracepad/sdk/go"
 )
 
@@ -18,16 +15,6 @@ func TestATracedCallArrivesWhole(t *testing.T) {
 	ctx := context.Background()
 	s.call("POST", "/api/v1/prompts/support-answer/versions",
 		map[string]any{"type": "text", "prompt": "Answer {topic}.", "labels": []string{"production"}})
-
-	// The application's own provider, adopted by Init: one pipeline, and the
-	// framework's span is the root of the trace.
-	application := sdktrace.NewTracerProvider()
-	otel.SetTracerProvider(application)
-	shutdown, err := tracepad.Init(ctx, tracepad.WithHost(s.host), tracepad.WithKey(key))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer shutdown(ctx)
 
 	support, err := tracepad.Prompt(ctx, "support-answer", tracepad.WithLabel("production"))
 	if err != nil {

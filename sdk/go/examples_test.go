@@ -150,4 +150,39 @@ func ExamplePrompt() {
 	call.End(tracepad.Result{})
 }
 
-var _ = answer
+func judge(answer string, expected any) float64 { return 1 }
+
+// ExampleRun_Item is the loop of docs/sdk-go.md#evals and docs/datasets.md.
+func ExampleRun_Item() {
+	ctx := context.Background()
+	var cases []tracepad.Item
+	zero, one := 0.0, 1.0
+	_ = tracepad.ScoreConfigs(ctx, []tracepad.ScoreConfig{
+		{Name: "accuracy", DataType: "numeric", Direction: "higher", Min: &zero, Max: &one},
+		{Name: "verdict", DataType: "categorical", Categories: []string{"pass", "fail"}},
+	})
+
+	golden := tracepad.NewDataset("support-golden")
+	_, _, _ = golden.PutItems(ctx, cases) // same cases → same version, nothing written
+
+	run, err := golden.Run(ctx, "prompt v7", tracepad.WithRunMetadata(map[string]any{"prompt": "support-answer@7"}))
+	if err != nil {
+		log.Fatal(err)
+	}
+	for item, err := range golden.Items(ctx, run.DatasetVersion) {
+		if err != nil {
+			_, _ = run.Fail(ctx, err)
+			log.Fatal(err)
+		}
+		itemCtx, attempt := run.Item(ctx, item)
+		answer, _ := answer(itemCtx, item.Input.(map[string]any)["question"].(string))
+		_ = attempt.Score(ctx, "accuracy", tracepad.WithValue(judge(answer, item.ExpectedOutput)))
+		_ = attempt.Score(ctx, "verdict", tracepad.WithStringValue("pass"), tracepad.WithDataType("categorical"))
+	}
+	summary, err := run.Finish(ctx)
+	if err != nil {
+		log.Fatal(err)
+	}
+	_ = summary["summary"]
+	_, _ = tracepad.Compare(ctx, run.ID, tracepad.ItemID("a natural key"))
+}
