@@ -244,18 +244,21 @@
 
 	<div class="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-2">
 		<BreakdownTable
+			tokens
 			title="By model"
 			label="Model"
 			unit={models?.unit ?? 'observation'}
 			rows={breakdown((models?.buckets ?? []) as StatsBucket[])}
 		/>
 		<BreakdownTable
+			tokens
 			title="By environment"
 			label="Environment"
 			unit={environments?.unit ?? 'trace'}
 			rows={breakdown((environments?.buckets ?? []) as StatsBucket[])}
 		/>
 		<BreakdownTable
+			tokens
 			title="By release"
 			label="Release"
 			unit={releases?.unit ?? 'trace'}
