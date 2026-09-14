@@ -241,7 +241,7 @@ func seedCorpus(t *testing.T, h *harness) {
 			// The wait before the first token, so the ttft column of the
 			// listing has something to show (spec 012, CLI contract).
 			CompletionStartTime: seedBase - 3600*1000*ms + 300*ms,
-			Usage:               map[string]any{"total": 169},
+			Usage:               map[string]any{"input": 128, "output": 41, "total": 169},
 			CostDetails:         map[string]any{"total": 0.001},
 			Input:               []any{map[string]any{"role": "user", "content": "how do I reset my password?"}}})
 	h.seed(t, &model.Trace{ID: traceHex(2), Name: "nightly-eval", Environment: "staging"},
@@ -642,6 +642,22 @@ func TestStatsAndSystem(t *testing.T) {
 	}
 	if !strings.Contains(stats.stdout, "claude-sonnet-5") {
 		t.Errorf("stats = %s, want the model that was used", stats.stdout)
+	}
+	// TOKENS is input plus output (spec 031 #13): 128 + 41 for the one
+	// generation that reported usage, never its `total`.
+	if !strings.Contains(stats.stdout, "TOKENS") || !strings.Contains(stats.stdout, " 169 ") {
+		t.Errorf("stats = %s, want a TOKENS column with 169", stats.stdout)
+	}
+	// And a dash — not a zero — for a bucket that reported none.
+	byEnvironment := h.run(ctx, true, "stats", "--group-by", "environment")
+	staging := ""
+	for _, line := range strings.Split(byEnvironment.stdout, "\n") {
+		if strings.HasPrefix(line, "staging") {
+			staging = line
+		}
+	}
+	if fields := strings.Fields(staging); len(fields) < 5 || fields[4] != "-" {
+		t.Errorf("staging row = %q, want a dash in TOKENS for a bucket with no usage", staging)
 	}
 
 	system := h.run(ctx, true, "system")
