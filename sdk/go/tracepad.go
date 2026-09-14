@@ -178,9 +178,14 @@ func Init(ctx context.Context, opts ...Option) (shutdown func(context.Context) e
 	return d.shutdown, nil
 }
 
-// attach registers what the package adds to an SDK provider: the exporter,
-// under a batching processor, unless the application exports another way.
+// attach registers what the package adds to an SDK provider: the stamping
+// processor of the eval harness first — so that every span the exporter
+// batches already carries the run and the item (spec 018 #3), and under
+// WithExport(false) too, since an application exporting through another
+// SDK still wants its spans stamped — then the exporter, under a batching
+// processor, unless the application exports another way.
 func attach(ctx context.Context, sdk *sdktrace.TracerProvider, c config, export bool) error {
+	sdk.RegisterSpanProcessor(runContextProcessor{})
 	if !export {
 		return nil
 	}

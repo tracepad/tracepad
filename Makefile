@@ -146,7 +146,8 @@ sdk-go-test: ## Vet and unit-test the Go package, and end-to-end against a real 
 sdk-go-unit: ## The Go package's vet and unit tests alone (part of the gate)
 	SDK_SKIP_E2E=1 scripts/sdk-go-test.sh
 
-SDK_GO_BUDGET := 1600
+# The budget spec 033 #11 set, raised for the harness (spec 033 #17).
+SDK_GO_BUDGET := 1900
 
 sdk-go-lines: ## Report the Go package's application lines against its budget
 	scripts/sdk-go-lines.sh $(SDK_GO_BUDGET)

@@ -23,6 +23,9 @@ import (
 	"testing"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+
 	tracepad "github.com/tracepad/tracepad/sdk/go"
 )
 
@@ -34,51 +37,93 @@ type store struct {
 	t    *testing.T
 }
 
-func serve(t *testing.T) *store {
-	t.Helper()
+// The one store and the one Init of the package: Init is process-wide by
+// design, so every test here shares them. The application's own provider
+// is set global before Init, which adopts it (spec 017 #2): its spans and
+// the package's are one pipeline, and a framework's span is a root.
+var (
+	shared      *store
+	application *sdktrace.TracerProvider
+)
+
+func TestMain(m *testing.M) {
 	binary := os.Getenv("TRACEPAD_BINARY")
 	if binary == "" {
+		os.Exit(m.Run())
+	}
+	dir, err := os.MkdirTemp("", "tracepad-e2e")
+	if err != nil {
+		panic(err)
+	}
+	stop, s, err := boot(binary, dir)
+	if err != nil {
+		panic(err)
+	}
+	shared = s
+	application = sdktrace.NewTracerProvider()
+	otel.SetTracerProvider(application)
+	shutdown, err := tracepad.Init(context.Background(), tracepad.WithHost(s.host), tracepad.WithKey(key))
+	if err != nil {
+		panic(err)
+	}
+	code := m.Run()
+	_ = shutdown(context.Background())
+	stop()
+	_ = os.RemoveAll(dir)
+	os.Exit(code)
+}
+
+// serve is the shared store, or a skip without a binary.
+func serve(t *testing.T) *store {
+	t.Helper()
+	if shared == nil {
 		t.Skip("TRACEPAD_BINARY is not set")
 	}
+	return &store{host: shared.host, t: t}
+}
+
+// boot starts the binary on a free port and waits for it to answer; stop
+// kills it and reaps it.
+func boot(binary, dir string) (stop func(), s *store, err error) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		t.Fatal(err)
+		return nil, nil, err
 	}
 	port := listener.Addr().(*net.TCPAddr).Port
 	listener.Close()
 
 	cmd := exec.Command(binary, "serve")
 	cmd.Env = append(os.Environ(),
-		"TRACEPAD_DATA_DIR="+t.TempDir(),
+		"TRACEPAD_DATA_DIR="+dir,
 		fmt.Sprintf("TRACEPAD_LISTEN=127.0.0.1:%d", port),
 		"TRACEPAD_PROJECTS=e2e:tp-pk-e2e:"+key)
 	var output bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &output, &output
 	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
+		return nil, nil, err
 	}
 	// Wait in the background: a server that exits at once is reported at
 	// once, not after the health poll has run out.
 	exited := make(chan error, 1)
 	go func() { exited <- cmd.Wait() }()
-	t.Cleanup(func() {
+	stop = func() {
 		_ = cmd.Process.Kill()
 		<-exited
-	})
-	s := &store{host: fmt.Sprintf("http://127.0.0.1:%d", port), t: t}
+	}
+	s = &store{host: fmt.Sprintf("http://127.0.0.1:%d", port)}
 	for i := 0; i < 100; i++ {
 		select {
 		case <-exited:
-			t.Fatalf("the server exited: %s", output.String())
+			return nil, nil, fmt.Errorf("the server exited: %s", output.String())
 		default:
 		}
 		if _, err := s.try("GET", "/health", nil); err == nil {
-			return s
+			return stop, s, nil
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	t.Fatalf("the server never became healthy: %s", output.String())
-	return nil
+	stop()
+	return nil, nil, fmt.Errorf("the server never became healthy: %s", output.String())
 }
 
 func (s *store) try(method, path string, body any) (map[string]any, error) {

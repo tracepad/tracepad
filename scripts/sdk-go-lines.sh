@@ -3,9 +3,9 @@
 #
 # A warning, never a failure — the same instrument, and the same argument, as
 # `sdk-lines.sh` and `ui-lines.sh`: the number is a signal to revise, not a
-# rule to satisfy. 1,600 lines cover the package and the eval harness
-# together, because they are one module and a budget per spec would be a
-# budget per PR.
+# rule to satisfy. 1,600 lines covered the package (spec 033 #11) and 1,900
+# cover it with the eval harness (spec 033 #17), because they are one module
+# and a budget per spec would be a budget per PR.
 #
 # What it counts is the application; the tests, the e2e package and the
 # programs under internal/ (the fixture writer, the smoke exporter) are
@@ -16,7 +16,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BUDGET="${1:-1600}"
+BUDGET="${1:-1900}"
 
 cd "$ROOT"
 
