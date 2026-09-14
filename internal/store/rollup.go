@@ -71,20 +71,25 @@ var tokenClasses = [...][]string{
 
 // tokenExprs is the three counts read off one observation's `usage`, as SQL
 // expressions in the order of `tokenClasses`, given the column expression
-// `usage` holds it under. A key that is present but does not hold a number —
-// a string, an object — is not a count and is skipped rather than coerced:
-// `CAST` would read "lots" as zero, which is a claim nobody made. The keys
-// are this package's own constants, never anything a request carries.
+// `usage` holds it under. The first key *present* decides (spec 031 #1): a
+// key that is there but does not hold a number — a string, an object — is
+// not a count, and the class is NULL rather than read from the next spelling
+// or coerced. `CAST` would read "lots" as zero, which is a claim nobody made,
+// and falling through to a second spelling would make a collision on the
+// first one silently disappear. The keys are this package's own constants,
+// never anything a request carries.
 func tokenExprs(usage string) [len(tokenClasses)]string {
 	var out [len(tokenClasses)]string
 	for i, keys := range tokenClasses {
-		var firsts []string
+		var arms []string
 		for _, key := range keys {
 			path := "'$." + key + "'"
-			firsts = append(firsts, `CASE WHEN json_type(`+usage+`, `+path+`) IN ('integer', 'real')
-			     THEN CAST(json_extract(`+usage+`, `+path+`) AS INTEGER) END`)
+			kind := `json_type(` + usage + `, ` + path + `)`
+			arms = append(arms, `WHEN `+kind+` IS NOT NULL THEN
+			     CASE WHEN `+kind+` IN ('integer', 'real')
+			          THEN CAST(json_extract(`+usage+`, `+path+`) AS INTEGER) END`)
 		}
-		out[i] = "COALESCE(" + strings.Join(firsts, ", ") + ")"
+		out[i] = "CASE " + strings.Join(arms, " ") + " END"
 	}
 	return out
 }

@@ -51,10 +51,12 @@ func tokensFixture(t *testing.T, s *Store, projectID string) {
 	// No usage at all: contributes nothing, and nothing is not zero.
 	seed(4, "staging", "",
 		observation(4, hexTrace(4), "claude-sonnet-5", nil))
-	// A count that is not a number is not a count.
+	// A count that is not a number is not a count — and the first key
+	// present decides, so the class is NULL rather than read from the next
+	// spelling along (spec 031 #1).
 	seed(5, "staging", "",
 		observation(5, hexTrace(5), "gpt-4o-mini", map[string]any{
-			"input_tokens": "lots", "output_tokens": 40}))
+			"input_tokens": "lots", "prompt_tokens": 5, "output_tokens": 40}))
 	// Usage on an observation that names no model: not in the model unit,
 	// and the rollup's observation cells are the rows the trace-unit sum
 	// is made of (spec 031 #5), so it is in neither.
