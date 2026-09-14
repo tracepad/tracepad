@@ -154,7 +154,11 @@ func Init(ctx context.Context, opts ...Option) (shutdown func(context.Context) e
 	d.config = &c
 	d.provider = o.provider
 	d.sdk, d.built = sdk, built
-	d.scores = newScoreQueue(postScores)
+	// A score written before Init already made the queue; it is kept, so
+	// that what it holds is sent and its goroutine is the one Flush drains.
+	if d.scores == nil {
+		d.scores = newScoreQueue(postScores)
+	}
 	d.scores.start()
 	d.initialized = true
 	d.shutdown = func(ctx context.Context) error {

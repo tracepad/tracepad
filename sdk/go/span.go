@@ -204,9 +204,8 @@ func open(ctx context.Context, name string, f *fields, start ...trace.SpanStartO
 // Update writes observation attributes on the context's current span,
 // whoever started it (spec 017 #11). With no span it logs and does nothing.
 func Update(ctx context.Context, opts ...UpdateOption) {
-	span := trace.SpanFromContext(ctx)
-	if !span.IsRecording() {
-		def.log().Warn("tracepad.Update outside a span: nothing was written")
+	span, ok := spanOf(ctx, "tracepad.Update")
+	if !ok {
 		return
 	}
 	var f fields
@@ -214,6 +213,19 @@ func Update(ctx context.Context, opts ...UpdateOption) {
 		opt.applyUpdate(&f)
 	}
 	update(span, &f)
+}
+
+// spanOf is the context's span when there is one to write on. No span at
+// all is the caller's mistake and is logged; a span a sampler dropped is
+// not recording and is skipped without a word, or every dropped request
+// would log a line per call.
+func spanOf(ctx context.Context, caller string) (trace.Span, bool) {
+	span := trace.SpanFromContext(ctx)
+	if !span.SpanContext().IsValid() {
+		def.log().Warn(caller + " outside a span: nothing was written")
+		return nil, false
+	}
+	return span, span.IsRecording()
 }
 
 // TraceOption configures UpdateTrace.
@@ -251,9 +263,8 @@ func WithTraceMetadata(metadata any) TraceOption {
 // where the handler stands, and the mapper resolves them for the trace. With
 // no span it logs and does nothing.
 func UpdateTrace(ctx context.Context, opts ...TraceOption) {
-	span := trace.SpanFromContext(ctx)
-	if !span.IsRecording() {
-		def.log().Warn("tracepad.UpdateTrace outside a span: nothing was written")
+	span, ok := spanOf(ctx, "tracepad.UpdateTrace")
+	if !ok {
 		return
 	}
 	var f traceFields

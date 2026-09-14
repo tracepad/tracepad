@@ -3,6 +3,8 @@ package tracepad
 import (
 	"context"
 	"maps"
+	"math"
+	"reflect"
 	"slices"
 	"sync/atomic"
 	"time"
@@ -115,19 +117,25 @@ func (g *Call) End(result Result) {
 	g.Observation.End()
 }
 
-// scalar renders a model parameter, keeping the types OTLP has of its own.
+// scalar renders a model parameter, keeping the types OTLP has of its own:
+// every integer width is an int, every float width a double (go-openai's
+// temperature is a float32), a bool a bool, a string a string. Anything else
+// is JSON.
 func scalar(key string, value any) attribute.KeyValue {
-	switch v := value.(type) {
-	case bool:
-		return attribute.Bool(key, v)
-	case int:
-		return attribute.Int(key, v)
-	case int64:
-		return attribute.Int64(key, v)
-	case float64:
-		return attribute.Float64(key, v)
-	case string:
-		return attribute.String(key, v)
+	v := reflect.ValueOf(value)
+	switch v.Kind() {
+	case reflect.Bool:
+		return attribute.Bool(key, v.Bool())
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return attribute.Int64(key, v.Int())
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		if v.Uint() <= math.MaxInt64 {
+			return attribute.Int64(key, int64(v.Uint()))
+		}
+	case reflect.Float32, reflect.Float64:
+		return attribute.Float64(key, v.Float())
+	case reflect.String:
+		return attribute.String(key, v.String())
 	}
 	return attribute.String(key, dumps(value))
 }

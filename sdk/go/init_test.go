@@ -175,3 +175,33 @@ func TestInitBuildsAProviderWhenThereIsNone(t *testing.T) {
 		t.Error("the provider Init built must be shut down by its shutdown")
 	}
 }
+
+// A score written before Init is queued; Init keeps that queue rather than
+// replacing it, so the shutdown it returns sends the score (review of PR
+// #69).
+func TestAScoreBeforeInitIsSentAtShutdown(t *testing.T) {
+	fresh(t)
+	var posted atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/scores" {
+			posted.Add(1)
+		}
+		w.WriteHeader(200)
+	}))
+	t.Cleanup(server.Close)
+	t.Setenv("TRACEPAD_HOST", server.URL)
+	t.Setenv("TRACEPAD_API_KEY", testKey)
+	if err := Score(context.Background(), "early", WithValue(1), WithTraceID(strings.Repeat("a", 32))); err != nil {
+		t.Fatal(err)
+	}
+	shutdown, err := Init(context.Background(), WithExport(false), WithTracerProvider(sdktrace.NewTracerProvider()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := shutdown(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if posted.Load() != 1 {
+		t.Errorf("score batches posted at shutdown = %d, want 1", posted.Load())
+	}
+}

@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"go.opentelemetry.io/otel/attribute"
 )
 
 func TestGenerationWritesTheRequestAndTheResult(t *testing.T) {
@@ -83,5 +85,31 @@ func TestEndAfterFailWritesNothingMore(t *testing.T) {
 	call.End(Result{Model: "late"})
 	if _, set := r.attrs(t, "chat")[attrResponseModel]; set {
 		t.Error("a result after the span ended must not be written")
+	}
+}
+
+// Every numeric width is a number on the wire, not a JSON string of one:
+// go-openai's temperature is a float32 (review of PR #69).
+func TestModelParametersKeepEveryNumericWidth(t *testing.T) {
+	r := setup(t)
+	_, call := Generation(context.Background(), "chat", WithModelParameters(map[string]any{
+		"temperature": float32(0.5), "max_tokens": int32(64), "n": uint8(2), "seed": int64(7),
+		"stream": true, "stop": "\n", "tools": []string{"search"},
+	}))
+	call.End(Result{})
+	attrs := r.attrs(t, "chat")
+	want := map[string]struct {
+		kind attribute.Type
+		text string
+	}{
+		"temperature": {attribute.FLOAT64, "0.5"}, "max_tokens": {attribute.INT64, "64"}, "n": {attribute.INT64, "2"},
+		"seed": {attribute.INT64, "7"}, "stream": {attribute.BOOL, "true"}, "stop": {attribute.STRING, "\n"},
+		"tools": {attribute.STRING, `["search"]`},
+	}
+	for key, w := range want {
+		got := attrs[attrRequestPrefix+key]
+		if got.Type() != w.kind || got.Emit() != w.text {
+			t.Errorf("%s = %s %q, want %s %q", key, got.Type(), got.Emit(), w.kind, w.text)
+		}
 	}
 }

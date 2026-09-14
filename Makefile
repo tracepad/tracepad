@@ -174,7 +174,7 @@ precommit: ensure-hooks format-check vet test-staged ui-check-staged ## Fast gat
 test-staged: ## Go tests of the packages with staged changes
 	@staged=$$(git diff --cached --name-only --diff-filter=ACMR -- '*.go'); \
 	pkgs=$$(printf '%s\n' "$$staged" | grep -v '^sdk/go/' | xargs -n1 dirname 2>/dev/null | sort -u | sed 's|^|./|'); \
-	if [ -n "$$pkgs" ]; then go test $$pkgs; else echo "test-staged: no Go changes staged"; fi; \
+	if [ -n "$$pkgs" ]; then go test $$pkgs || exit 1; else echo "test-staged: no Go changes staged"; fi; \
 	if printf '%s\n' "$$staged" | grep -q '^sdk/go/'; then $(MAKE) sdk-go-unit; fi
 
 ui-check-staged: ## The interface's type-check and unit tests, only when ui/ or openapi.json is staged

@@ -8,6 +8,7 @@ import (
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/codes"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -148,5 +149,20 @@ func TestSpansGoToTheProviderInitWasHanded(t *testing.T) {
 	// The global provider was neither set nor replaced.
 	if otel.GetTracerProvider() == trace.TracerProvider(r.provider) {
 		t.Fatal("WithTracerProvider must not set the provider global")
+	}
+}
+
+// A span a sampler dropped is not "outside a span": nothing is written, and
+// nothing is logged either, or every dropped request would log a line per
+// call (review of PR #69).
+func TestUpdateOnASampledOutSpanIsSilent(t *testing.T) {
+	r := setup(t)
+	dropping := sdktrace.NewTracerProvider(sdktrace.WithSampler(sdktrace.NeverSample()))
+	ctx, span := dropping.Tracer("x").Start(context.Background(), "dropped")
+	Update(ctx, WithLevel("ERROR"))
+	UpdateTrace(ctx, WithUserID("u"))
+	span.End()
+	if r.logs.Len() != 0 {
+		t.Errorf("logs = %q, want none", r.logs.String())
 	}
 }
