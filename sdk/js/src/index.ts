@@ -20,7 +20,18 @@
  */
 
 export type { Level, ObservationType } from './attributes.js';
+export { Dataset, dataset, type Item, type RunOptions } from './datasets.js';
 export type { Usage } from './generation.js';
+export {
+  Attempt,
+  Run,
+  compare,
+  itemId,
+  scoreConfigs,
+  type CloseOptions,
+  type RunItemsOptions,
+  type ScoreConfig,
+} from './harness.js';
 export { TracepadConfigError, TracepadError, TracepadHTTPError, VERSION } from './http.js';
 export type { Logger } from './log.js';
 export { Prompt, prompt, type Message, type PromptOptions } from './prompts.js';

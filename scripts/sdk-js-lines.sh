@@ -3,10 +3,11 @@
 #
 # A warning, never a failure — the same instrument, and the same argument, as
 # `sdk-lines.sh` and `ui-lines.sh`: the number is a signal to revise, not a
-# rule to satisfy. 1,800 lines cover spec 032's package and its eval harness
-# together, because they are one package and a budget per PR would be a
-# budget per spec; higher than Python's 1,600 because TypeScript spends lines
-# on types that Python spends on nothing.
+# rule to satisfy. 1,800 lines were to cover spec 032's package and its eval
+# harness together, because they are one package and a budget per PR would
+# be a budget per spec — higher than Python's 1,600 because TypeScript spends
+# lines on types that Python spends on nothing — and spec 032 #16 raised it
+# to 1,900 for the harness.
 #
 # What it counts is the application; the tests are reported beside it under
 # no ceiling at all (design §8, amended; spec 010 #7).
@@ -15,7 +16,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BUDGET="${1:-1800}"
+BUDGET="${1:-1900}"
 
 cd "$ROOT"
 

@@ -31,6 +31,7 @@ import {
 import * as attrs from './attributes.js';
 import { type Config, type ConfigOptions, adopt, current, resolve } from './config.js';
 import { type Fields, type Usage, Stream, readResponse } from './generation.js';
+import { stamp } from './harness.js';
 import { VERSION, describe } from './http.js';
 import { type Logger, setLogger, warn } from './log.js';
 import { flushScores } from './scores.js';
@@ -154,7 +155,8 @@ function resourceFor(config: Config) {
 }
 
 /**
- * The package's span processor: exporting to the store, unless told not to.
+ * The package's span processor: the run link stamped on every span started
+ * inside an item block, and the export to the store unless told not to.
  *
  * `init` attaches it to the provider it finds or builds; a provider that
  * takes processors in its constructor only (the 2.x `NodeTracerProvider`)
@@ -197,6 +199,11 @@ class TracepadProcessor implements SpanProcessor {
   constructor(private readonly exporting: SpanProcessor | undefined) {}
 
   onStart(span: SdkSpan, parentContext: Context): void {
+    // Before the exporting half, so that every span the exporter batches
+    // already carries the run and the item an eval stamped (spec 018 #3).
+    // It is here under `export: false` too: an application exporting
+    // through another SDK still wants its spans stamped.
+    stamp(span, parentContext);
     this.exporting?.onStart(span, parentContext);
   }
 

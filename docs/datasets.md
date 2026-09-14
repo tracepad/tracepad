@@ -507,6 +507,44 @@ the summary on the next line is over everything the run produced.
 recommends for an id of your own, and `tracepad.compare(a, b)` returns the
 comparison below exactly as the server computed it.
 
+## The same loop from Node
+
+The [Node package](sdk-js.md#evals) is the same harness with promises: an
+async iterable over the items, a callback for the block, `wrap` or
+`await using` for the close.
+
+```ts
+import * as tracepad from 'tracepad';
+
+tracepad.init(); // TRACEPAD_HOST / TRACEPAD_API_KEY from the environment
+
+await tracepad.scoreConfigs([
+  { name: 'accuracy', data_type: 'numeric', direction: 'higher', min: 0, max: 1 },
+  { name: 'verdict', data_type: 'categorical', categories: ['pass', 'fail'] },
+]);
+
+const golden = tracepad.dataset('support-golden');
+await golden.putItems(cases); // same cases → same version, nothing written
+
+const run = await golden.run('prompt v7 / claude-sonnet-5', { metadata: { prompt: 'support-answer@7' } });
+await run.wrap(async () => {
+  for await (const item of golden.items(run.datasetVersion)) {
+    await run.item(item, async (attempt) => {
+      const answer = await app.answer(item.input.question); // its spans carry the run and the item
+      attempt.score('accuracy', judge(answer, item.expected_output));
+      attempt.score('verdict', { stringValue: ok ? 'pass' : 'fail', dataType: 'categorical' });
+    });
+  }
+});
+
+console.log((await run.get()).summary);
+```
+
+`golden.items(version)` walks every page on its own, and `run.wrap` closes
+the run on the way out: `finished` on a clean return, `failed` with the
+error on a throw, which is then rethrown. `tracepad.itemId(key)` and
+`tracepad.compare(a, b)` are the same two helpers as in Python.
+
 ## The same loop from Go
 
 The [Go package](sdk-go.md#evals) is the same loop with the context in place

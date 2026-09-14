@@ -22,7 +22,9 @@
       "user_id": "user-9001",
       "session_id": "session-91",
       "environment": "production",
-      "release": "2026.9.14"
+      "release": "2026.9.14",
+      "run_id": "5b430d3bbca07c6f0ca2deba145b70c6",
+      "item_id": "c82b7c06ccae3e2da144e4272a74ff9b"
     }
   ],
   "observations": [

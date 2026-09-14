@@ -31,6 +31,10 @@ func TestOurPackagesExportsLandWhole(t *testing.T) {
 		observations int
 		warned       string // the observation stamped WARNING with a status message
 		generation   generation
+		// The run link the harness stamped on the fixture's second trace, when
+		// the package's fixture has one (spec 032 #10).
+		linked        string
+		runID, itemID string
 	}{
 		{
 			fixture: "010-tracepad-sdk", trace: "a0b1c2d3e4f5a6b7c8d9ea0000000001",
@@ -49,6 +53,8 @@ func TestOurPackagesExportsLandWhole(t *testing.T) {
 				name: "chat-completion", model: "gpt-5-mini", promptName: "docs-answer",
 				promptVersion: 4, inputTokens: 96, cacheRead: 64, cost: 0.0007,
 			},
+			linked: "a0b1c2d3e4f5a6b7c8d9eb0000000002",
+			runID:  "5b430d3bbca07c6f0ca2deba145b70c6", itemID: "c82b7c06ccae3e2da144e4272a74ff9b",
 		},
 	}
 	for _, tc := range cases {
@@ -116,6 +122,16 @@ func TestOurPackagesExportsLandWhole(t *testing.T) {
 			}
 			if got.Output != "When the last chunk does." && got.Output != "In the trace you are reading." {
 				t.Errorf("output = %#v, want the answer's text as a string", got.Output)
+			}
+			if tc.linked == "" {
+				return
+			}
+			linked, err := h.store.Trace(h.project.ID, tc.linked)
+			if err != nil || linked == nil {
+				t.Fatalf("linked trace = %v, err = %v", linked, err)
+			}
+			if linked.RunID != tc.runID || linked.ItemID != tc.itemID {
+				t.Errorf("run link = %q/%q, want %q/%q from the harness's processor", linked.RunID, linked.ItemID, tc.runID, tc.itemID)
 			}
 		})
 	}

@@ -1,5 +1,6 @@
 /**
- * The examples in `docs/sdk-js.md` compile (spec 032, Testing).
+ * The examples in `docs/sdk-js.md` and the Node section of `docs/datasets.md`
+ * compile (spec 032, Testing).
  *
  * Every ```ts fence is a module of its own, given `tracepad` (this package's
  * source) and a handful of ambient names an example is allowed to assume —
@@ -9,14 +10,14 @@
  */
 
 import { readFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import ts from 'typescript';
 import { expect, test } from 'vitest';
 
 const PACKAGE = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const DOC = join(PACKAGE, '..', '..', 'docs', 'sdk-js.md');
+const DOCS = ['sdk-js.md', 'datasets.md'].map((name) => join(PACKAGE, '..', '..', 'docs', name));
 
 /** What an example may take for granted without declaring it. */
 const AMBIENT = `
@@ -37,10 +38,16 @@ declare const text: string;
 declare const log: { warn(message: string): void };
 declare const yourProcessor: import('@opentelemetry/sdk-trace-node').SpanProcessor;
 declare const call: import('tracepad').Generation;
+declare const attempt: import('tracepad').Attempt;
+declare const app: { answer(question: string): Promise<string> };
+declare const cases: import('tracepad').Item[];
+declare function judge(answer: string, expected: unknown): number;
+declare const ok: boolean;
+declare const url: string;
 `;
 
-function examples(): { line: number; code: string }[] {
-  const lines = readFileSync(DOC, 'utf8').split('\n');
+function examples(doc: string): { line: number; code: string }[] {
+  const lines = readFileSync(doc, 'utf8').split('\n');
   const found: { line: number; code: string }[] = [];
   let open: number | undefined;
   let code: string[] = [];
@@ -60,15 +67,17 @@ function examples(): { line: number; code: string }[] {
   return found;
 }
 
-test('every ```ts example in docs/sdk-js.md type-checks against the package', () => {
-  const blocks = examples();
-  expect(blocks.length).toBeGreaterThan(5);
-
+test('every ```ts example in the docs type-checks against the package', () => {
   const files = new Map<string, string>();
-  for (const { line, code } of blocks) {
-    const imports = code.includes("from 'tracepad'") ? '' : "import * as tracepad from 'tracepad';\n";
-    files.set(join(PACKAGE, `docs-example-${line}.ts`), `${AMBIENT}${imports}${code}\n`);
+  for (const doc of DOCS) {
+    const blocks = examples(doc);
+    expect(blocks.length).toBeGreaterThan(0);
+    for (const { line, code } of blocks) {
+      const imports = code.includes("from 'tracepad'") ? '' : "import * as tracepad from 'tracepad';\n";
+      files.set(join(PACKAGE, `${basename(doc, '.md')}-example-${line}.ts`), `${AMBIENT}${imports}${code}\n`);
+    }
   }
+  expect(files.size).toBeGreaterThan(8);
 
   const options: ts.CompilerOptions = {
     strict: true,
