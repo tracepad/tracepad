@@ -1,5 +1,6 @@
 import { flushSync } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ApiError } from './api/client.svelte';
 import { Listing, StateSpot, Walk, type Answer } from './listing.svelte';
 import type { PageState } from './page';
 
@@ -20,6 +21,13 @@ const answer = (ids: string[], extra: Partial<Answer<Row>> = {}): Answer<Row> =>
 	prev_cursor: null,
 	...extra
 });
+
+/**
+ * What the client throws when a request goes unanswered for thirty seconds
+ * (spec 010 #10): a failure with the server's silence as its message, and not
+ * an abort — an abort lands nowhere, and this has to land somewhere.
+ */
+const unanswered = () => new ApiError(0, 'the server did not answer in time');
 
 type Call = {
 	at: PageState;
@@ -153,6 +161,26 @@ describe('the load', () => {
 		expect(listing.prevCursor).toBeNull();
 		expect(listing.failure).toBe('the listing failed');
 	});
+
+	it('lowers the spinner on a load the clock gave up on, and a tick goes out after it', async () => {
+		const { source, listing } = mount();
+		expect(listing.loading).toBe(true);
+
+		// Unanswered for thirty seconds, the request is failed by the client
+		// rather than aborted (spec 010 #10), so it lands as a failure would.
+		source.loads[0].no(unanswered());
+		await idle();
+		expect(listing.loading).toBe(false);
+		expect(listing.failure).toBe('the server did not answer in time');
+		expect(listing.rows).toEqual([]);
+
+		// With `loading` down, the gate opens and live carries on (#9).
+		void listing.tick();
+		expect(source.counts).toHaveLength(1);
+		source.counts[0].ok(answer(['1'], { total: 1 }));
+		await idle();
+		expect(listing.rows.map((row) => row.id)).toEqual(['1']);
+	});
 });
 
 describe('the count', () => {
@@ -277,6 +305,33 @@ describe('a live tick', () => {
 		await idle();
 		void listing.tick();
 		expect(source.counts).toHaveLength(2);
+	});
+
+	it('is freed by the clock when the server never answers, and says so in its own slot', async () => {
+		const { source, listing } = mount();
+		source.loads[0].ok(answer(['1'], { next_cursor: 'c2' }));
+		await idle();
+
+		// A tick that never settled held the gate for ever with `liveFailure`
+		// still `null` — a silent freeze the toggle could not undo. The client
+		// now fails it after thirty seconds (spec 010 #10), which reaches this
+		// `catch` as any failure does and frees the gate in the `finally`.
+		void listing.tick();
+		source.counts[0].no(unanswered());
+		await idle();
+		expect(listing.liveFailure).toBe('the server did not answer in time');
+		// The rows already on screen are kept, and no loading state was raised.
+		expect(listing.rows.map((row) => row.id)).toEqual(['1']);
+		expect(listing.failure).toBeNull();
+		expect(listing.loading).toBe(false);
+
+		// The next tick goes out, and its answer clears the slot.
+		void listing.tick();
+		expect(source.counts).toHaveLength(2);
+		source.counts[1].ok(answer(['2', '1'], { next_cursor: 'c3', total: 2 }));
+		await idle();
+		expect(listing.liveFailure).toBeNull();
+		expect(listing.rows.map((row) => row.id)).toEqual(['2', '1']);
 	});
 
 	it('does nothing off the newest page', async () => {

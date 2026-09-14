@@ -30,6 +30,39 @@ function stubFetch(...responses: Response[]) {
 	return calls;
 }
 
+/**
+ * A fetch that never answers on its own — only the signal ends it, the way a
+ * real one rejects with the signal's reason once aborted.
+ */
+function hangingFetch() {
+	const calls: { signal: AbortSignal }[] = [];
+	vi.stubGlobal(
+		'fetch',
+		(_url: string, init?: RequestInit) =>
+			new Promise((_, reject) => {
+				const signal = init!.signal!;
+				calls.push({ signal });
+				signal.addEventListener('abort', () => reject(signal.reason));
+			})
+	);
+	return calls;
+}
+
+/**
+ * `AbortSignal.timeout` over the global `setTimeout`, so that fake timers can
+ * fire it. Vitest hands jsdom Node's `AbortSignal`, and Node's schedules its
+ * timer on the `timers` module directly, out of `vi.useFakeTimers`'s reach.
+ * The product keeps the real one; this is the clock the test can turn.
+ */
+function fakeTimeout() {
+	vi.spyOn(AbortSignal, 'timeout').mockImplementation((ms) => {
+		const controller = new AbortController();
+		const reason = new DOMException('The operation timed out.', 'TimeoutError');
+		setTimeout(() => controller.abort(reason), ms);
+		return controller.signal;
+	});
+}
+
 const json = (body: unknown, status = 200) =>
 	new Response(JSON.stringify(body), {
 		status,
@@ -41,6 +74,8 @@ beforeEach(() => {
 	goto.mockClear();
 	window.history.replaceState(null, '', '/traces');
 	vi.unstubAllGlobals();
+	vi.restoreAllMocks();
+	vi.useRealTimers();
 });
 
 describe('query building', () => {
@@ -131,5 +166,67 @@ describe('requests', () => {
 
 		expect(failure).toBeInstanceOf(ApiError);
 		expect((failure as InstanceType<typeof ApiError>).offline).toBe(true);
+	});
+
+	it('gives up on a request that never answers, as it would on an unreachable server', async () => {
+		const { api, ApiError, auth } = await fresh();
+		auth.adopt(ME);
+		vi.useFakeTimers();
+		fakeTimeout();
+		const calls = hangingFetch();
+
+		const failure = api.listTraces({}).catch((cause) => cause);
+
+		// Thirty seconds, in one place, on every request (spec 010 #10).
+		vi.advanceTimersByTime(29_999);
+		expect(calls[0].signal.aborted).toBe(false);
+		vi.advanceTimersByTime(1);
+		const cause = await failure;
+
+		// Not an abort: an abort is the caller saying the question went stale
+		// and lands nowhere (spec 010 #8). This is the server not answering,
+		// which a load shows as its failure and a tick in its own slot.
+		expect(cause).toBeInstanceOf(ApiError);
+		expect((cause as InstanceType<typeof ApiError>).offline).toBe(true);
+		expect((cause as Error).message).toBe('the server did not answer in time');
+	});
+
+	it('gives up the same way on a body that never finishes', async () => {
+		const { api, ApiError, auth } = await fresh();
+		auth.adopt(ME);
+		vi.useFakeTimers();
+		fakeTimeout();
+		// The headers arrive; the body is the part that stalls. The clock covers
+		// both, and a real body read rejects with the signal's reason too.
+		vi.stubGlobal('fetch', (_url: string, init?: RequestInit) => {
+			const signal = init!.signal!;
+			const response = new Response(null, { status: 200 });
+			response.json = () =>
+				new Promise((_, reject) => signal.addEventListener('abort', () => reject(signal.reason)));
+			return Promise.resolve(response);
+		});
+
+		const failure = api.listTraces({}).catch((cause) => cause);
+		await vi.advanceTimersByTimeAsync(30_000);
+		const cause = await failure;
+
+		expect(cause).toBeInstanceOf(ApiError);
+		expect((cause as InstanceType<typeof ApiError>).offline).toBe(true);
+		expect((cause as Error).message).toBe('the server did not answer in time');
+	});
+
+	it("passes the caller's own abort through untouched", async () => {
+		const { api, ApiError, auth } = await fresh();
+		auth.adopt(ME);
+		const calls = hangingFetch();
+		const controller = new AbortController();
+
+		const failure = api.listTraces({}, {}, controller.signal).catch((cause) => cause);
+		controller.abort();
+		const cause = await failure;
+
+		expect(calls[0].signal.aborted).toBe(true);
+		expect(cause).not.toBeInstanceOf(ApiError);
+		expect((cause as Error).name).toBe('AbortError');
 	});
 });

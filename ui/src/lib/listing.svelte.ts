@@ -274,7 +274,9 @@ export class Listing<Row> {
 		// on the load — so a tick fired at t=5 could answer before the load
 		// issued at t=0 and be overwritten by it. `loading` is always cleared by
 		// a load that settles unaborted, and an aborted one is replaced by the
-		// load that aborted it, so this cannot wedge.
+		// load that aborted it, so this cannot wedge — and a request that never
+		// settles at all is failed by the client after thirty seconds (spec 010
+		// #10), so neither half of the gate outlives the server's silence.
 		if (this.#ticking || this.loading) return;
 		this.#ticking = true;
 		const { signal } = controller;
