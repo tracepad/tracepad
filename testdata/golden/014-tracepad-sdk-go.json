@@ -1,0 +1,175 @@
+{
+  "dialect": "tracepad",
+  "traces": [
+    {
+      "id": "b1c2d3e4f5a6b7c8d9eafb0000000001",
+      "name": "faq-answer",
+      "user_id": "user-7310",
+      "session_id": "session-58",
+      "environment": "canary",
+      "release": "2026.9.14",
+      "tags": [
+        "faq",
+        "go"
+      ],
+      "metadata": {
+        "channel": "cli"
+      }
+    },
+    {
+      "id": "b1c2d3e4f5a6b7c8d9eafb0000000002",
+      "name": "faq-rewrite",
+      "user_id": "user-7310",
+      "session_id": "session-58",
+      "environment": "canary",
+      "release": "2026.9.14"
+    }
+  ],
+  "observations": [
+    {
+      "trace_id": "b1c2d3e4f5a6b7c8d9eafb0000000001",
+      "id": "2b3c4d5e6f700001",
+      "type": "span",
+      "name": "answer-question",
+      "start_time": 1787738400000000000,
+      "end_time": 1787738400060000000,
+      "level": "DEFAULT",
+      "input": {
+        "question": "how does a score reach a trace?"
+      },
+      "metadata": {
+        "resource.service.name": "faq-bot",
+        "resource.telemetry.sdk.language": "go",
+        "resource.telemetry.sdk.name": "opentelemetry",
+        "scope.name": "tracepad",
+        "scope.version": "0.1.0"
+      }
+    },
+    {
+      "trace_id": "b1c2d3e4f5a6b7c8d9eafb0000000001",
+      "id": "2b3c4d5e6f700002",
+      "parent_observation_id": "2b3c4d5e6f700001",
+      "type": "retriever",
+      "name": "docs-search",
+      "start_time": 1787738400010000000,
+      "end_time": 1787738400020000000,
+      "level": "WARNING",
+      "status_message": "one result",
+      "input": {
+        "query": "score"
+      },
+      "output": [
+        "the scores page"
+      ],
+      "metadata": {
+        "attempt": 2,
+        "resource.service.name": "faq-bot",
+        "resource.telemetry.sdk.language": "go",
+        "resource.telemetry.sdk.name": "opentelemetry",
+        "scope.name": "tracepad",
+        "scope.version": "0.1.0"
+      }
+    },
+    {
+      "trace_id": "b1c2d3e4f5a6b7c8d9eafb0000000001",
+      "id": "2b3c4d5e6f700003",
+      "parent_observation_id": "2b3c4d5e6f700001",
+      "type": "event",
+      "name": "cache.miss",
+      "start_time": 1787738400030000000,
+      "end_time": 1787738400030000000,
+      "level": "DEFAULT",
+      "metadata": {
+        "key": "tracepad-faq",
+        "resource.service.name": "faq-bot",
+        "resource.telemetry.sdk.language": "go",
+        "resource.telemetry.sdk.name": "opentelemetry",
+        "scope.name": "tracepad",
+        "scope.version": "0.1.0"
+      }
+    },
+    {
+      "trace_id": "b1c2d3e4f5a6b7c8d9eafb0000000001",
+      "id": "2b3c4d5e6f700004",
+      "parent_observation_id": "2b3c4d5e6f700001",
+      "type": "generation",
+      "name": "chat-completion",
+      "start_time": 1787738400040000000,
+      "end_time": 1787738400050000000,
+      "completion_start_time": 1787738400045000000,
+      "model": "claude-opus-5",
+      "model_parameters": {
+        "max_tokens": 512,
+        "temperature": 0.2
+      },
+      "level": "DEFAULT",
+      "usage": {
+        "cache_read_input_tokens": 96,
+        "input_tokens": 131,
+        "output_tokens": 44,
+        "reasoning_tokens": 12
+      },
+      "cost_details": {
+        "total": 0.0017
+      },
+      "provided_cost": true,
+      "prompt_name": "tracepad-faq",
+      "prompt_version": 2,
+      "input": [
+        {
+          "content": "how does a score reach a trace?",
+          "role": "user"
+        }
+      ],
+      "output": "By its trace id, in a batch the queue posts.",
+      "metadata": {
+        "gen_ai.response.model": "claude-opus-5-2026-08-01",
+        "resource.service.name": "faq-bot",
+        "resource.telemetry.sdk.language": "go",
+        "resource.telemetry.sdk.name": "opentelemetry",
+        "scope.name": "tracepad",
+        "scope.version": "0.1.0"
+      }
+    },
+    {
+      "trace_id": "b1c2d3e4f5a6b7c8d9eafb0000000002",
+      "id": "2b3c4d5e6f700005",
+      "type": "span",
+      "name": "prepare-question",
+      "start_time": 1787738400070000000,
+      "end_time": 1787738400100000000,
+      "level": "DEFAULT",
+      "metadata": {
+        "resource.service.name": "faq-bot",
+        "resource.telemetry.sdk.language": "go",
+        "resource.telemetry.sdk.name": "opentelemetry",
+        "scope.name": "tracepad",
+        "scope.version": "0.1.0"
+      }
+    },
+    {
+      "trace_id": "b1c2d3e4f5a6b7c8d9eafb0000000002",
+      "id": "2b3c4d5e6f700006",
+      "parent_observation_id": "2b3c4d5e6f700005",
+      "type": "generation",
+      "name": "rewrite-question",
+      "start_time": 1787738400080000000,
+      "end_time": 1787738400090000000,
+      "model": "gpt-5-mini",
+      "level": "DEFAULT",
+      "usage": {
+        "input_tokens": 19,
+        "output_tokens": 9
+      },
+      "input": "how does score reach trace",
+      "output": "How does a score reach a trace?",
+      "metadata": {
+        "resource.service.name": "faq-bot",
+        "resource.telemetry.sdk.language": "go",
+        "resource.telemetry.sdk.name": "opentelemetry",
+        "scope.name": "tracepad",
+        "scope.version": "0.1.0"
+      }
+    }
+  ]
+}

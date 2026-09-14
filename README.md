@@ -91,9 +91,13 @@ tracepad.init()
 def answer(question: str) -> str: ...
 ```
 
+In Go, the same package with the shape of the OTel API — a context in, a
+context out (`go get github.com/tracepad/tracepad/sdk/go`).
+
 See [docs/ingest.md](docs/ingest.md) for the endpoints, the auth schemes, the
-attribute conventions Tracepad understands, and the ingest configuration, and
-[docs/sdk-python.md](docs/sdk-python.md) for the package.
+attribute conventions Tracepad understands, and the ingest configuration,
+[docs/sdk-python.md](docs/sdk-python.md) for the Python package and
+[docs/sdk-go.md](docs/sdk-go.md) for the Go one.
 
 ## Scores and prompts
 

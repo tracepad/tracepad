@@ -174,3 +174,29 @@ jobs:
       - run: SDK_PYTHON="$(which python)" scripts/sdk-test.sh
       # A signal, not a rule (design §8), the same instrument the interface has.
       - run: make sdk-lines
+
+  # The Go package (spec 033 #11): vet and unit tests inside the nested
+  # module on the two newest Go lines — two Gos like two Pythons — then its
+  # end-to-end package against a real binary. The binary is built with the
+  # server's own Go first, because the root module asks for a newer one than
+  # the package's floor; the package is then tested with the matrix's.
+  sdk-go:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        go-version: ["1.26.x", "1.27.x"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go build -o /tmp/tracepad ./cmd/tracepad
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go-version }}
+          cache-dependency-path: sdk/go/go.sum
+      - run: TRACEPAD_BINARY=/tmp/tracepad scripts/sdk-go-test.sh
+      # A signal, not a rule (design §8), the same instrument the others have.
+      - run: make sdk-go-lines

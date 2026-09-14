@@ -23,7 +23,7 @@ the status):
 
 - **PR A — the package**: a **nested Go module** `sdk/go`
   (`github.com/tracepad/tracepad/sdk/go`, package `tracepad`), thin over
-  `go.opentelemetry.io/otel` (Decision 1): `Init`/`Shutdown`, `Span`,
+  `go.opentelemetry.io/otel` (Decision 1): `Init` and its `shutdown`, `Span`,
   `Event`, `Generation` with `End`, `FirstToken` and an explicit
   `Result`, `Update`, `UpdateTrace`, `Score`, `Prompt`, `Flush`
   (Decisions 2–9); `docs/sdk-go.md`; the quickstart's Go paragraph; a
@@ -54,12 +54,15 @@ streaming wrapper, any wrapper of a provider client (design §6.5), a
 | 10 | **2026-09-14** — **The harness** (PR B): `Dataset(name) *Dataset` (no request made), `PutItems(ctx, items) (version, changed int, err)`, `Items(ctx, version) iter.Seq2[Item, error]` over the 500-item pages, `Create`, `Delete(ctx, confirm)`, `Run(ctx, name, opts…) (*Run, error)`, `Runs(ctx)`. **`run.Item(ctx, case) (context.Context, *Attempt)`** returns a context carrying `(runID, itemID)`; a `SpanProcessor` registered by `Init` stamps `tracepad.run_id` and `tracepad.item_id` in `OnStart` on every span whose context carries them, whoever started it; the `Attempt` records every root span it saw (`Traces()`, `TraceID()`) and `Score(ctx, name, opts…)` posts against the last. **`run.Finish(ctx)`** flushes scores, then the provider, then posts; `run.Fail(ctx, err)` likewise. `ScoreConfigs(ctx, configs)`, `Compare(ctx, a, b)`, `ItemID(key) string` as in spec 018 #6–#7. The read side is the server's JSON decoded into `map[string]any` (spec 018 #8) | Spec 018 in Go: the item block is a context, because in Go a context *is* the block, and the processor reads it at `OnStart` the way the Python one reads the `ContextVar`. `iter.Seq2` because Go 1.23 has range-over-func and a paging generator is what it is for; the floor stays 1.22 for the package, and `Items` is built with the `iter` package from 1.23 — so the floor is **1.23** for PR B, stated in `go.mod` then. |
 | 11 | **2026-09-14** — **CI.** The `sdk-go` job runs `go vet` and `go test ./...` inside `sdk/go` on the two newest Go lines, then the e2e against a real binary through `scripts/sdk-go-test.sh` (build the server, start it on a free port, run the package's `e2e` test package with `TRACEPAD_BINARY`), and `make sdk-go-lines` against a **1,600**-line application budget (`scripts/sdk-go-lines.sh`). `make gate` includes the module's tests. `make smoke` gains the package as a pinned exporter | Spec 017 #12's shape. Two Go lines like two Pythons. No release workflow (Decision 1). |
 | 12 | **2026-09-14** — **The golden fixture** is `testdata/otlp/012-tracepad-sdk-go.pb`, written by `scripts/fixtures/tracepad_sdk_go/main.go` (a small program in the SDK module's test tree, with an in-memory OTLP collector) and read back by the server's OTLP suite like 010 and 011 | Decision 3's proof. |
+| 13 | **2026-09-14** — The fixture is **`testdata/otlp/014-tracepad-sdk-go.pb`**, not 012: the corpus already had `011-plain-text-prompt` (spec 015) and `012-claude-code-interaction` (spec 030) when this spec was written, and spec 032's fixture takes 013. The program that writes it lives **inside the SDK module**, at `sdk/go/internal/fixture/main.go`, and `make fixtures` runs it as `cd sdk/go && go run ./internal/fixture …` before the Go golden pass; the smoke exporter sits beside it (`sdk/go/internal/smoke`). It is deterministic without post-processing: a fixed id generator on the provider and an exporter wrapper that lays the batch's instants on the grid as the OTLP exporter reads them — so a second run is byte-for-byte the first, and `Usage` and model-parameter keys are written in sorted order, which is what made it so | Decision 12's path, `scripts/fixtures/tracepad_sdk_go/main.go`, is in the *root* module's tree: a Go program there could import the package only through a `replace` in the server's `go.mod`, which would hand the server the OTel SDK's dependency graph for the sake of a script — the reverse of what Decision 1 refuses. `internal/` keeps the two programs out of the module's public API and off pkg.go.dev. A fixture the mapper reads back is also seeded into the interface's end-to-end corpus, whose counts moved by two traces and one session (PR A says which expectations). |
+| 14 | **2026-09-14** — **Go has one namespace for a function and a type**, so the handles are named apart from the calls: `Generation(ctx, …)` returns a **`*Call`**, `Prompt(ctx, …)` returns a **`*PromptVersion`**, and `Compile` returns a **`Compiled`** with `Text` or `Messages` filled. The calls keep the spec's names — `Span`, `Event`, `Generation`, `Score`, `Prompt` — because they are what every call site reads; the types appear in signatures and struct fields. `UpdateTrace`'s options are a `TraceOption`; `WithInput`, `WithMetadata` and `WithType` are `SpanOption`s, which every `Generation` and `Update` also takes, so one constructor serves the three calls | The contract's `Generation` (function) beside `Generation` (type) and `Prompt` beside `Prompt` do not compile. The call is the shape the docs family shares (spec 017, 032); a handle named after what it is — a call to a model, one version of a stored prompt — costs a Go reader nothing, and the OTel Go API itself pairs `tracer.Start` with `trace.Span`. |
+| 15 | **2026-09-14** — **The floor is Go 1.25**, not 1.22, and the module pins **OTel v1.46.0** (current). Decision 10's "1.23 for PR B" is moot: `iter` is in. CI's two lines are 1.26 and 1.27; the module also builds and tests on 1.25 (verified with `GOTOOLCHAIN=go1.25.0`) | A `go.mod` cannot declare a floor below its dependencies', and every OTel release since v1.42 says `go 1.25.0`; the last one on 1.22 is v1.35, a year old. Pinning that for the sake of the number would hand every user a stale SDK that MVS upgrades the moment anything else in their graph asks for a newer one, so the floor would be a fiction either way. |
 
 ## Package contract
 
 ```
 sdk/go/
-  go.mod                  # module github.com/tracepad/tracepad/sdk/go; go 1.22 (1.23 from PR B)
+  go.mod                  # module github.com/tracepad/tracepad/sdk/go; go 1.25 (Decision 15)
   tracepad.go             # Init, Shutdown, Option; the default and its adaptation
   span.go                 # Span, Event, Observation, Update, UpdateTrace
   generation.go           # Generation, Result, Usage, FirstToken
@@ -70,15 +73,17 @@ sdk/go/
   harness.go              # PR B: the processor, Run, Attempt, ScoreConfigs, Compare, ItemID
   datasets.go             # PR B: Dataset, Item
   e2e/                    # against a real binary (TRACEPAD_BINARY)
+  internal/fixture/       # writes testdata/otlp/014-tracepad-sdk-go.pb (Decision 13)
+  internal/smoke/         # the exporter `make smoke` runs (Decision 11)
   README.md               # what pkg.go.dev shows: install, Init, three lines, a link to docs/sdk-go.md
 ```
 
 **Public surface** (everything else is unexported): `Init`, `Flush`,
 `Span`, `Event`, `Generation`, `Update`, `UpdateTrace`, `Score`, `Prompt`,
-the option constructors named above, `Observation`, `Generation` (type),
-`Result`, `Usage`, `Prompt` (type), `Message`, `HTTPError`, `ErrConfig`,
-`ErrNoTrace`; PR B: `Dataset`, `Item`, `Run`, `Attempt`, `ScoreConfig`,
-`ScoreConfigs`, `Compare`, `ItemID`.
+the option constructors named above, `Observation`, `Call` (the generation's
+handle), `Result`, `Usage`, `PromptVersion`, `Compiled`, `Message`,
+`HTTPError`, `ErrConfig`, `ErrNoTrace` (Decision 14); PR B: `Dataset`,
+`Item`, `Run`, `Attempt`, `ScoreConfig`, `ScoreConfigs`, `Compare`, `ItemID`.
 
 ## Ingest contract
 

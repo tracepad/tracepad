@@ -106,6 +106,45 @@ It adds an exporter to a `TracerProvider` your application already has rather
 than replacing it, so it sits beside FastAPI instrumentation and the Langfuse
 SDK instead of competing with them. See [sdk-python.md](sdk-python.md).
 
+**In Go, the same shape as the OTel API.** The `tracepad` module is the same
+thin layer over the OpenTelemetry Go SDK — a context in, a context out:
+
+```sh
+go get github.com/tracepad/tracepad/sdk/go
+```
+
+```go
+import tracepad "github.com/tracepad/tracepad/sdk/go"
+
+func main() {
+	shutdown, err := tracepad.Init(ctx)      // TRACEPAD_HOST, TRACEPAD_API_KEY
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer shutdown(ctx)
+	...
+}
+
+func answer(ctx context.Context, question string) (string, error) {
+	ctx, step := tracepad.Span(ctx, "answer", tracepad.WithInput(question))
+	defer step.End()
+	tracepad.UpdateTrace(ctx, tracepad.WithUserID("u-42"), tracepad.WithTags("support"))
+
+	ctx, call := tracepad.Generation(ctx, "chat", tracepad.WithModel("gpt-4o-mini"))
+	response, err := client.Chat.Completions.New(ctx, params)
+	if err != nil {
+		call.Fail(err)
+		return "", err
+	}
+	call.End(tracepad.Result{Model: response.Model, Usage: usage(response), Output: text(response)})
+	tracepad.Score(ctx, "helpful", tracepad.WithValue(1))   // against the trace in flight
+	return text(response), nil
+}
+```
+
+It registers an exporter on the `TracerProvider` your application already has
+— `otelhttp`, `otelgrpc` — rather than replacing it. See [sdk-go.md](sdk-go.md).
+
 A `200` from the export means the spans are committed and fsynced, so a
 trace is queryable the moment its exporter's batch returns.
 
@@ -146,6 +185,8 @@ curl -H "Authorization: Bearer tp-sk-…" \
 - [ingest.md](ingest.md) — endpoints, authentication, attribute conventions.
 - [sdk-python.md](sdk-python.md) — the `tracepad` package: `init`, `@observe`,
   generations, prompts and scores.
+- [sdk-go.md](sdk-go.md) — the same package for Go: `Init`, `Span`,
+  `Generation`, prompts and scores, in the shape of the OTel API.
 - [api.md](api.md) — the read API, its filters, and the response budget.
 - [retention.md](retention.md) — how long data is kept and how to change it.
 - [admin.md](admin.md) — more projects, more keys, erasing one user's data.
