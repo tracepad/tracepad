@@ -66,6 +66,22 @@ func roll(t *testing.T, s *Store, projectID string, hour int64) *statsRoll {
 	return job
 }
 
+// advance moves the watermark past `hour`, as a pass that rolled it would:
+// the hour is answered from the rollup from here on, and the corrections
+// that gate on the watermark — the erasure's, the score's — apply to it.
+func advance(t *testing.T, s *Store, projectID string, hour int64) {
+	t.Helper()
+	writer, err := s.NewWriter(quickWrites)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writer.Close()
+	job := &statsRollupAdvance{ProjectID: projectID, RolledUntil: hour + SecondsPerHour, LastPass: 1}
+	if err := writer.Submit(context.Background(), job); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func rolledRows(t *testing.T, s *Store, projectID string, hour int64) map[string]StatsRow {
 	t.Helper()
 	rows := map[string]StatsRow{}

@@ -2,9 +2,11 @@ package server
 
 import (
 	"context"
+	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/tracepad/tracepad/internal/config"
 	"github.com/tracepad/tracepad/internal/model"
 	"github.com/tracepad/tracepad/internal/store"
 )
@@ -241,6 +243,116 @@ func TestErasingAUserCorrectsTheRolledHours(t *testing.T) {
 	after := h.statsBuckets(t, "/api/v1/stats?group_by=hour")
 	if len(after) != 1 || after[0].Count != 2 {
 		t.Errorf("buckets = %+v, want the two traces that remain", after)
+	}
+}
+
+// hangUpOnTheFirstChunk is the client of spec 010 #10 as the writer sees it:
+// the first erase chunk commits — the writer never abandons a job whose
+// caller has — but the request's context is cancelled before it is answered,
+// and the handler learns of the chunk only that its client is gone.
+type hangUpOnTheFirstChunk struct {
+	inner  JobWriter
+	cancel context.CancelFunc
+	chunks int
+}
+
+func (w *hangUpOnTheFirstChunk) Submit(ctx context.Context, job store.WriteJob) error {
+	if _, ok := job.(*store.UserDataErase); !ok {
+		return w.inner.Submit(ctx, job)
+	}
+	w.chunks++
+	if err := w.inner.Submit(context.Background(), job); err != nil {
+		return err
+	}
+	w.cancel()
+	return context.Canceled
+}
+
+// A client that hangs up between chunks — a closed tab, the interface's
+// thirty-second clock — leaves every hour the committed chunks emptied
+// already corrected, and a repeat of the request finishes the rest with no
+// hour left counting traces that are gone (spec 023 #19; found in review of
+// PR #61).
+func TestAnErasureCutOffBetweenChunksLeavesNoHourDirty(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+
+	// More traces than one chunk takes, over two hours, a bystander in
+	// each. Seeded in one batch, in hour order: the chunks follow the
+	// user index, which is arrival order, so the first chunk is exactly
+	// the first hour's five hundred.
+	first, second := statsHour, statsHour+3600
+	batch := &store.IngestBatch{ProjectID: h.project.ID}
+	add := func(n int, hour int64, user string) {
+		start := hour*int64(time.Second) + int64(n)*int64(time.Millisecond)
+		batch.Traces = append(batch.Traces,
+			&model.Trace{ID: traceHex(n), Environment: "production", UserID: user})
+		batch.Observations = append(batch.Observations, &model.Observation{
+			TraceID: traceHex(n), ID: spanHex(n), Type: model.TypeSpan,
+			Level: model.LevelDefault, StartTime: start, EndTime: start + 50*ms})
+	}
+	n := 0
+	for range eraseChunk {
+		n++
+		add(n, first, "forget-me")
+	}
+	n++
+	add(n, first, "keep")
+	for range 50 {
+		n++
+		add(n, second, "forget-me")
+	}
+	n++
+	add(n, second, "keep")
+	if err := h.writer.Submit(t.Context(), batch); err != nil {
+		t.Fatal(err)
+	}
+	h.rollTheCorpus(t, time.Unix(second+3*3600, 0))
+
+	before := h.statsBuckets(t, "/api/v1/stats?group_by=hour")
+	if len(before) != 2 || before[0].Count != eraseChunk+1 || before[1].Count != 51 {
+		t.Fatalf("buckets = %+v, want %d and 51", before, eraseChunk+1)
+	}
+
+	// The same server over the same store, with the client that hangs up.
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	writer := &hangUpOnTheFirstChunk{inner: h.writer, cancel: cancel}
+	cfg := &config.Config{Listen: ":0", StoreRaw: true, MaxBodyBytes: config.DefaultMaxBodyBytes}
+	server := New(cfg, "test", h.store, writer, h.sweeper)
+	path := "/api/v1/projects/" + h.project.ID + "/users/forget-me/data?confirm=forget-me"
+	req := httptest.NewRequest("DELETE", path, nil).WithContext(ctx)
+	req.Header.Set("Authorization", "Bearer "+testSecret)
+	server.Handler().ServeHTTP(httptest.NewRecorder(), req)
+	if writer.chunks != 1 {
+		t.Fatalf("the handler submitted %d chunks after its client hung up, want 1", writer.chunks)
+	}
+
+	// The first hour's traces are gone, and so is their count: the chunk
+	// that took them corrected the hour in the same commit. The second
+	// hour, untouched, still says what it said.
+	preview := decodeJSON[struct {
+		WouldDelete map[string]int `json:"would_delete"`
+	}](t, h.call(t, "DELETE", "/api/v1/projects/"+h.project.ID+"/users/forget-me/data", nil))
+	if preview.WouldDelete["traces"] != 50 {
+		t.Fatalf("%d traces left after one chunk, want the second hour's 50", preview.WouldDelete["traces"])
+	}
+	cut := h.statsBuckets(t, "/api/v1/stats?group_by=hour")
+	if len(cut) != 2 || cut[0].Count != 1 || cut[1].Count != 51 {
+		t.Errorf("buckets = %+v after the hang-up, want 1 and 51", cut)
+	}
+
+	// The repeat sees only the traces that remain, and that is enough.
+	rec := h.call(t, "DELETE", path, nil)
+	expectStatus(t, rec, 200)
+	erased := decodeJSON[struct {
+		Deleted map[string]int `json:"deleted"`
+	}](t, rec)
+	if erased.Deleted["traces"] != 50 {
+		t.Errorf("the repeat erased %d traces, want the 50 that were left", erased.Deleted["traces"])
+	}
+	after := h.statsBuckets(t, "/api/v1/stats?group_by=hour")
+	if len(after) != 2 || after[0].Count != 1 || after[1].Count != 1 {
+		t.Errorf("buckets = %+v after the repeat, want the bystanders' 1 and 1", after)
 	}
 }
 
