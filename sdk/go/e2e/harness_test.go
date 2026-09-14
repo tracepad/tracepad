@@ -57,14 +57,20 @@ func serve(t *testing.T) *store {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
+	// Wait in the background: a server that exits at once is reported at
+	// once, not after the health poll has run out.
+	exited := make(chan error, 1)
+	go func() { exited <- cmd.Wait() }()
 	t.Cleanup(func() {
 		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
+		<-exited
 	})
 	s := &store{host: fmt.Sprintf("http://127.0.0.1:%d", port), t: t}
 	for i := 0; i < 100; i++ {
-		if cmd.ProcessState != nil {
+		select {
+		case <-exited:
 			t.Fatalf("the server exited: %s", output.String())
+		default:
 		}
 		if _, err := s.try("GET", "/health", nil); err == nil {
 			return s

@@ -64,7 +64,12 @@ func (q *scoreQueue) start() {
 }
 
 func (q *scoreQueue) submit(score map[string]any) {
-	q.start()
+	// The goroutine starts once there is a store to post to: a score written
+	// before Init — with the host and the key coming as options — waits in
+	// the queue rather than being posted nowhere and dropped. Init starts it.
+	if _, err := current(); err == nil {
+		q.start()
+	}
 	q.mu.RLock()
 	defer q.mu.RUnlock()
 	if q.closed {
@@ -106,19 +111,32 @@ func (q *scoreQueue) flush(ctx context.Context) error {
 	}
 }
 
-// close stops the goroutine once it has sent what was queued.
-func (q *scoreQueue) close() {
+// close stops the goroutine once it has sent what was queued, or gives up
+// waiting when the context does — the goroutine then finishes on its own.
+// A queue that never started is holding scores nobody configured a store
+// for, which is said out loud.
+func (q *scoreQueue) close(ctx context.Context) error {
 	q.mu.Lock()
 	if q.closed {
 		q.mu.Unlock()
-		return
+		return nil
 	}
 	q.closed = true
-	started := q.started
+	started, left := q.started, len(q.items)
 	close(q.items)
 	q.mu.Unlock()
-	if started {
-		<-q.done
+	if !started {
+		if left > 0 {
+			def.log().Warn("tracepad: scores dropped, no store was configured", "count", left)
+		}
+		return nil
+	}
+	select {
+	case <-q.done:
+		return nil
+	case <-ctx.Done():
+		def.log().Warn("tracepad: the score queue did not stop in time; scores may be dropped", "error", ctx.Err())
+		return ctx.Err()
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -69,10 +70,13 @@ type defaults struct {
 	mu          sync.Mutex
 	initialized bool
 	config      *config
-	logger      *slog.Logger
-	// provider is the one Init was handed explicitly; nil means the global
+	// logger and provider are read on every span and every log line, from
+	// any goroutine, while Init may be writing them: atomics, not the lock,
+	// which Init holds while it logs.
+	logger atomic.Pointer[slog.Logger]
+	// provider is the one Init was handed explicitly; unset means the global
 	// one, read at every call so that it is whatever the application set.
-	provider trace.TracerProvider
+	provider atomic.Pointer[trace.TracerProvider]
 	// sdk is the SDK provider the processors were registered on — adopted
 	// or built — and what Flush asks to flush; built says which.
 	sdk      *sdktrace.TracerProvider
@@ -84,8 +88,8 @@ type defaults struct {
 var def = &defaults{}
 
 func (d *defaults) log() *slog.Logger {
-	if d.logger != nil {
-		return d.logger
+	if logger := d.logger.Load(); logger != nil {
+		return logger
 	}
 	return slog.Default()
 }
@@ -121,7 +125,7 @@ func Init(ctx context.Context, opts ...Option) (shutdown func(context.Context) e
 		return nil, err
 	}
 	if o.logger != nil {
-		d.logger = o.logger
+		d.logger.Store(o.logger)
 	}
 	provider := o.provider
 	if provider == nil {
@@ -140,7 +144,12 @@ func Init(ctx context.Context, opts ...Option) (shutdown func(context.Context) e
 	case sdk == nil && o.provider == nil && isDefault(provider):
 		sdk = sdktrace.NewTracerProvider(sdktrace.WithResource(newResource(c)))
 		otel.SetTracerProvider(sdk)
-		otel.SetTextMapPropagator(propagation.TraceContext{})
+		// The propagator too is set only where nothing was: an application
+		// that composed its own (TraceContext and Baggage, say) before Init
+		// keeps it, or baggage would silently stop crossing services.
+		if len(otel.GetTextMapPropagator().Fields()) == 0 {
+			otel.SetTextMapPropagator(propagation.TraceContext{})
+		}
 		provider, built = sdk, true
 	case sdk == nil:
 		d.log().Warn("tracepad.Init: the TracerProvider is not the OpenTelemetry SDK's; " +
@@ -152,7 +161,9 @@ func Init(ctx context.Context, opts ...Option) (shutdown func(context.Context) e
 		}
 	}
 	d.config = &c
-	d.provider = o.provider
+	if o.provider != nil {
+		d.provider.Store(&o.provider)
+	}
 	d.sdk, d.built = sdk, built
 	// A score written before Init already made the queue; it is kept, so
 	// that what it holds is sent and its goroutine is the one Flush drains.
@@ -231,9 +242,9 @@ func processName() string {
 // tracer is where the package's spans come from: the explicit provider, or
 // the global one as it is at the moment of the call.
 func tracer() trace.Tracer {
-	provider := def.provider
-	if provider == nil {
-		provider = otel.GetTracerProvider()
+	provider := otel.GetTracerProvider()
+	if explicit := def.provider.Load(); explicit != nil {
+		provider = *explicit
 	}
 	return provider.Tracer("tracepad", trace.WithInstrumentationVersion(Version))
 }
@@ -261,14 +272,16 @@ func Flush(ctx context.Context) error {
 
 // close is the shutdown Init returns: it flushes, stops the score goroutine,
 // and shuts the provider down only when the package built it — an adopted
-// provider is the application's to close.
+// provider is the application's to close. Every step keeps to the context's
+// deadline: a store that is away at shutdown must not hold the process
+// until something kills it.
 func (d *defaults) close(ctx context.Context) error {
 	err := Flush(ctx)
 	d.mu.Lock()
 	scores, sdk, built := d.scores, d.sdk, d.built
 	d.mu.Unlock()
 	if scores != nil {
-		scores.close()
+		err = errors.Join(err, scores.close(ctx))
 	}
 	if built && sdk != nil {
 		err = errors.Join(err, sdk.Shutdown(ctx))
@@ -284,10 +297,12 @@ func reset() {
 	d.mu.Lock()
 	scores := d.scores
 	d.initialized, d.built = false, false
-	d.config, d.logger, d.provider, d.sdk, d.scores, d.shutdown = nil, nil, nil, nil, nil, nil
+	d.config, d.sdk, d.scores, d.shutdown = nil, nil, nil, nil
+	d.logger.Store(nil)
+	d.provider.Store(nil)
 	d.mu.Unlock()
 	if scores != nil {
-		scores.close()
+		_ = scores.close(context.Background())
 	}
 	forgetPrompts()
 }

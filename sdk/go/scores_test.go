@@ -47,7 +47,7 @@ func queue(t *testing.T, s *sender, after func(time.Duration) <-chan time.Time) 
 	q.after = after
 	def.mu.Lock()
 	if def.scores != nil {
-		def.scores.close()
+		_ = def.scores.close(context.Background())
 	}
 	def.scores = q
 	def.mu.Unlock()
@@ -181,7 +181,7 @@ func TestAScoreAfterTheQueueClosedIsLoggedAsDropped(t *testing.T) {
 	r := setup(t)
 	s := &sender{}
 	q := queue(t, s, nil)
-	q.close()
+	_ = q.close(context.Background())
 	_ = Score(context.Background(), "late", WithValue(1), WithTraceID(strings.Repeat("a", 32)))
 	if !strings.Contains(r.logs.String(), "the queue is closed") || len(s.batches) != 0 {
 		t.Errorf("logs = %q, batches = %v", r.logs.String(), s.batches)
@@ -222,5 +222,5 @@ func TestFlushGivesUpWhenTheContextDoes(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 	close(blocked)
-	q.close()
+	_ = q.close(context.Background())
 }
