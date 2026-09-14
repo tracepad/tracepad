@@ -68,8 +68,10 @@ var observationTypes = map[string]bool{
 // A string is sent as it is — a plain-text prompt is a plain-text payload,
 // not a JSON string of one (spec 015 #12) — and everything else is JSON with
 // HTML escaping off. A value the encoder refuses (a channel, a function, a
-// cycle) is still a string in the trace, as `fmt.Sprint` of it: the tracing
-// path never fails the step it observes (spec 017 #9).
+// cycle) is still a string in the trace, naming its type and the reason: the
+// tracing path never fails the step it observes (spec 017 #9). Not
+// `fmt.Sprint` of it — that walks a cycle until the stack is gone (found in
+// review of PR #69).
 func dumps(value any) string {
 	if text, ok := value.(string); ok {
 		return text
@@ -78,7 +80,7 @@ func dumps(value any) string {
 	enc := json.NewEncoder(&out)
 	enc.SetEscapeHTML(false)
 	if err := enc.Encode(value); err != nil {
-		return fmt.Sprint(value)
+		return fmt.Sprintf("<%T: %v>", value, err)
 	}
 	return string(bytes.TrimRight(out.Bytes(), "\n"))
 }

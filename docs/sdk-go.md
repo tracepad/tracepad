@@ -110,7 +110,8 @@ There is no function wrapper like Python's `@observe`: Go has no decorators
 and no way to capture a function's arguments by name, so the input is what
 you hand `WithInput`. Payloads are serialized with `encoding/json` (HTML
 escaping off); a value the encoder cannot express — a channel, a cycle — is a
-string in the trace rather than an error in your function.
+string in the trace naming its type and the reason, rather than an error in
+your function.
 
 There is no client-side size cap. `OTEL_SPAN_ATTRIBUTE_VALUE_LENGTH_LIMIT` is
 the OTel SDK's knob, and the server's own `TRACEPAD_MAX_BODY_BYTES` cut marks

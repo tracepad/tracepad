@@ -60,10 +60,17 @@ func TestAStringInputIsSentAsItIs(t *testing.T) {
 
 func TestAValueJSONCannotExpressIsStillAString(t *testing.T) {
 	r := setup(t)
+	cycle := map[string]any{}
+	cycle["self"] = cycle
 	_, step := Span(context.Background(), "s", WithInput(map[string]any{"ch": make(chan int)}))
+	step.Update(WithOutput(cycle)) // must not walk the cycle until the stack is gone
 	step.End()
-	if got := str(t, r.attrs(t, "s"), attrInput); !strings.Contains(got, "ch") {
-		t.Errorf("input = %q, want fmt.Sprint of the value", got)
+	attrs := r.attrs(t, "s")
+	if got := str(t, attrs, attrInput); !strings.Contains(got, "chan int") {
+		t.Errorf("input = %q, want the type and the encoder's reason", got)
+	}
+	if got := str(t, attrs, attrOutput); !strings.Contains(got, "cycle") {
+		t.Errorf("output = %q, want the encoder's reason", got)
 	}
 }
 

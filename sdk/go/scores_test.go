@@ -45,12 +45,15 @@ func queue(t *testing.T, s *sender, after func(time.Duration) <-chan time.Time) 
 		after = func(time.Duration) <-chan time.Time { return nil }
 	}
 	q.after = after
+	// The old queue is closed outside the lock, as reset does: its goroutine
+	// reads the configuration under it.
 	def.mu.Lock()
-	if def.scores != nil {
-		_ = def.scores.close(context.Background())
-	}
+	previous := def.scores
 	def.scores = q
 	def.mu.Unlock()
+	if previous != nil {
+		_ = previous.close(context.Background())
+	}
 	return q
 }
 
