@@ -172,7 +172,8 @@ with tracepad.generation("chat", model="gpt-4o-mini", input=messages) as call:
         stream_options={"include_usage": True},
     )
     for chunk in call.stream(stream):
-        print(chunk.choices[0].delta.content or "", end="")
+        if chunk.choices:  # the last chunk carries the usage and no choices
+            print(chunk.choices[0].delta.content or "", end="")
 ```
 
 The first chunk with content stamps the first token, so `first_token()` is not
