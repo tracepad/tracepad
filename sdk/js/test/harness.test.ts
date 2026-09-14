@@ -99,12 +99,14 @@ describe('the item block', () => {
       expect(attempt.traces).toEqual([first, second]);
       attempt.score('accuracy', 0.5, { comment: 'second try' });
       attempt.score('verdict', { stringValue: 'pass', dataType: 'categorical' });
+      attempt.score('accuracy', 0, { traceId: first }); // the first try, named
       return attempt;
     });
     await tracepad.flush();
     expect(sent).toEqual([[
       { name: 'accuracy', trace_id: attempt.traceId, value: 0.5, comment: 'second try' },
       { name: 'verdict', trace_id: attempt.traceId, string_value: 'pass', data_type: 'categorical' },
+      { name: 'accuracy', trace_id: attempt.traces[0], value: 0 },
     ]]);
   });
 
@@ -172,6 +174,16 @@ describe('the run', () => {
     expect(calls.length - before).toBe(2); // the open, one close
   });
 
+  test('wrap rethrows the harness\'s own error when the close is refused, and says so', async () => {
+    serving((call) => (call.url.endsWith('/finish') ? { status: 503, body: 'away' } : { body: {} }));
+    tracepad.init({ host: HOST, key: KEY, export: false });
+    const run = await tracepad.dataset('golden').run('a');
+    await expect(run.wrap(async () => {
+      throw new TypeError('judge timed out');
+    })).rejects.toThrow('judge timed out');
+    expect(warnings).toEqual([expect.stringMatching(/^tracepad: run\.wrap\(\): the run could not be failed and stays running: TracepadHTTPError: /)]);
+  });
+
   test('is await using-compatible: disposal is finish, once', async () => {
     const calls = serving();
     tracepad.init({ host: HOST, key: KEY, export: false });
@@ -233,11 +245,14 @@ describe('the dataset', () => {
     ]);
   });
 
-  test('putItems sends the cases whole, without the version, and reports the tick', async () => {
+  test('putItems sends the cases\' fields and nothing the store added, and reports the tick', async () => {
     const calls = fakeFetch(() => ({ body: { version: 4, changed: 1 } }));
     tracepad.init({ host: HOST, key: KEY, export: false });
+    // The first is a row as `items()` yields it: what the store adds to a
+    // case is not what `POST` takes back.
+    const readBack = { id: 'a', input: { q: 1 }, expected_output: 'x', version: 3, seq: 7, created_at: '2026-09-14T00:00:00Z', archived: false };
     const result = await tracepad.dataset('golden').putItems([
-      { id: 'a', input: { q: 1 }, expected_output: 'x', version: 3 },
+      readBack as tracepad.Item,
       { input: 'bare', metadata: undefined },
     ]);
     expect(result).toEqual([4, 1]);
@@ -246,6 +261,7 @@ describe('the dataset', () => {
       url: `${HOST}/api/v1/datasets/golden/items`,
       body: [{ id: 'a', input: { q: 1 }, expected_output: 'x' }, { input: 'bare' }],
     });
+    expect(Object.keys((calls[0]!.body as unknown[])[0] as object)).toEqual(['id', 'input', 'expected_output']);
   });
 
   test('create, runs and delete are the endpoints, and the name is echoed', async () => {

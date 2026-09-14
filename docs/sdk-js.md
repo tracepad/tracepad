@@ -354,7 +354,7 @@ console.log((await run.get()).summary);
 |---|---|
 | `dataset(name)` | A `Dataset`. No request is made here — it is a name. |
 | `Dataset.create({ description, metadata })` | Create it, or replace those two. |
-| `Dataset.putItems(items)` | One batch, one version tick → `[version, changed]`. |
+| `Dataset.putItems(items)` | One batch, one version tick → `[version, changed]`. Only an item's own fields go on the wire, so a row `items()` yielded can be pushed back as it is. |
 | `Dataset.items(version)` | An async iterable of items over every page, whole. |
 | `Dataset.run(name, { metadata, id, datasetVersion })` | Opens a `Run`. |
 | `Dataset.runs()`, `Run.get()`, `Run.items({ unknown, limit })`, `compare(a, b)` | The server's JSON as plain objects — no number is computed here. A run's items inline their payloads and are budget-checked, so that listing pages at the server's own size unless you name one. |
@@ -370,7 +370,9 @@ number rather than by "the current one" is what makes the version the harness
 
 **`run.wrap(async () => …)` closes it**: `finished` on a clean return,
 `failed` with the error's name and message on a throw, which is then
-rethrown. A run finished by hand is not finished twice. `finish({ timeout })`
+rethrown — and rethrown even when the store refuses the close, which is only
+warned about: the harness's own error is the one to see. A run finished by
+hand is not finished twice. `finish({ timeout })`
 flushes the scores and then the spans *before* it posts, so `run.get()` on
 the next line is over everything the run produced; a late span still links,
 so a flush that timed out is a number read early rather than a trace lost.
@@ -415,8 +417,9 @@ await fetch(url, { method: 'POST', headers: { 'x-eval': JSON.stringify(attempt.a
 `attempt.traces` is every root span that started inside the block, in order —
 a case run three times is three traces of one item, and the run's summary
 counts them all — and `attempt.traceId` is the last of them, which is what
-`attempt.score(...)` scores. Scoring before anything has run throws; after the
-callback, the `Attempt` is a record and stamps nothing.
+`attempt.score(...)` scores unless `traceId` names another of them. Scoring
+before anything has run throws; after the callback, the `Attempt` is a record
+and stamps nothing.
 
 `init({ export: false })` still stamps: an application exporting through
 another SDK wants its spans stamped all the same, and so does a provider that

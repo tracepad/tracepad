@@ -21,6 +21,7 @@ import { ITEM_ID, RUN_ID } from './attributes.js';
 import { current } from './config.js';
 import type { Dataset, Item } from './datasets.js';
 import { TracepadError, TracepadHTTPError, request } from './http.js';
+import { warn } from './log.js';
 import { type ScoreFields, score } from './scores.js';
 import { flush } from './tracing.js';
 
@@ -84,7 +85,8 @@ export class Attempt {
     return { [RUN_ID]: this.runId, [ITEM_ID]: this.itemId };
   }
 
-  /** Score the trace this attempt produced (spec 018 #4). */
+  /** Score the trace this attempt produced (spec 018 #4) — the last one, unless
+   * `fields.traceId` names another of `traces`, the first of several tries say. */
   score(name: string, value?: number | ScoreFields, fields: ScoreFields = {}): void {
     if (this.traceId === undefined) {
       throw new Error(
@@ -96,7 +98,7 @@ export class Attempt {
       fields = value;
       value = undefined;
     }
-    score(name, value, { ...fields, traceId: this.traceId });
+    score(name, value, { traceId: this.traceId, ...fields });
   }
 }
 
@@ -197,7 +199,15 @@ export class Run {
       if (!this.closed) await this.finish();
       return result;
     } catch (error) {
-      if (!this.closed) await this.fail(error);
+      // The harness's own error is the one to see; a close the store refused
+      // must not replace it on the way out.
+      if (!this.closed) {
+        try {
+          await this.fail(error);
+        } catch (closing) {
+          warn(`run.wrap(): the run could not be failed and stays running: ${describe(closing)}`);
+        }
+      }
       throw error;
     }
   }

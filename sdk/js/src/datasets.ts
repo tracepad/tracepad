@@ -91,10 +91,19 @@ export class Dataset {
   }
 }
 
-/** What goes on the wire: unset fields are omitted, and the version is never sent. */
+/** The fields `POST …/items` takes; the server refuses any other. */
+const SENT = ['id', 'input', 'expected_output', 'metadata', 'source_trace_id', 'source_observation_id'] as const;
+
+/** What goes on the wire: the item's fields and no others — a row read back
+ * from `items()` carries the version it was written at, its `seq` and its
+ * timestamps too, and pushing it whole would be refused as unknown fields. */
 function sendable(item: Item): Json {
-  const { version: _read, ...fields } = item;
-  return Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined));
+  const body: Json = {};
+  for (const name of SENT) {
+    const value = (item as Json)[name];
+    if (value !== undefined) body[name] = value;
+  }
+  return body;
 }
 
 /** A dataset by name. No request is made here. */
