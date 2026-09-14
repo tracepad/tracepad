@@ -265,12 +265,100 @@ a fallback prompt baked into the code is a prompt the trace cannot name. A
 script that only fetches a prompt need not call `Init`: the environment is
 read on the first call.
 
+## Evals
+
+The package is also the harness of [datasets.md](datasets.md): a dataset
+value, a run that pins a version, and a context inside which every span
+carries the run and the case it answered. It runs nothing — the cases are
+your program.
+
+```go
+golden := tracepad.NewDataset("support-golden")
+golden.PutItems(ctx, cases)          // same cases → same version, nothing written
+
+run, err := golden.Run(ctx, "prompt v7", tracepad.WithRunMetadata(map[string]any{"prompt": "support-answer@7"}))
+if err != nil {
+	return err
+}
+for item, err := range golden.Items(ctx, run.DatasetVersion) {
+	if err != nil {
+		run.Fail(ctx, err)
+		return err
+	}
+	itemCtx, attempt := run.Item(ctx, item)
+	answer := app.Answer(itemCtx, item.Input.(map[string]any)["question"].(string))
+	attempt.Score(ctx, "accuracy", tracepad.WithValue(judge(answer, item.ExpectedOutput)))
+}
+summary, err := run.Finish(ctx)
+```
+
+| Name | What it is |
+|---|---|
+| `NewDataset(name)` | A `*Dataset`. No request is made here — it is a name. |
+| `Dataset.Create(ctx, description, metadata)` | Create it, or replace those two. |
+| `Dataset.PutItems(ctx, items)` | One batch, one version tick → `(version, changed, err)`. |
+| `Dataset.Items(ctx, version)` | An `iter.Seq2[Item, error]` over every page, whole; `0` is the current version. |
+| `Dataset.Run(ctx, name, opts…)` | Opens a `*Run`; `WithRunMetadata`, `WithRunID`, `WithDatasetVersion`. |
+| `Dataset.Runs(ctx)`, `Run.Get(ctx)`, `Run.Items(ctx, opts…)`, `Compare(ctx, a, b)` | The server's JSON as `map[string]any` — no number is computed here. A run's items inline their payloads and are budget-checked, so that listing pages at the server's own size unless `WithLimit` names one; `WithUnknown` adds the traces that link to no case. |
+| `Dataset.Delete(ctx, confirm)` | The name must be echoed, as the API asks. |
+| `ScoreConfigs(ctx, configs)`, `ScoreConfig` | `PUT` each, in order, synchronously. |
+| `ItemID(key)` | `sha256(key)[:32]`, for a natural key of your own. |
+
+**The run pins a version, and `run.DatasetVersion` is it.** Fetching by that
+number rather than by "the current one" is what makes the version the harness
+*fetched* and the version it *ran* one number.
+
+**A run is closed by `Finish` or `Fail`**, and there is no block to close it
+for you: a run left running is reported as such forever, so the `Fail` on
+the error path is yours to write. Both flush the scores and then the spans
+*before* they post, so `Get` on the next line is over everything the run
+produced; a late span still links, so a flush that ran out of time is a
+number read early rather than a trace lost, and the close still posts.
+
+**`run.Item(ctx, item)` opens no span of its own.** It returns a context
+carrying the run and the item, which a span processor reads at every span's
+start — so the root span may be the framework's, another SDK's or `Span`'s,
+and it is still stamped. That also says exactly how far the context reaches,
+because in Go a context *is* the block:
+
+| Where the work runs | Stamped |
+|---|---|
+| a call handed the context, and anything it calls with it | yes |
+| a goroutine handed the context | yes |
+| a goroutine started with `context.Background()` | **no** — it has no context to inherit |
+| a span started with a context from before `Item` | **no** |
+| another process, over HTTP | **no** — see below |
+| the loop itself already inside a span of yours | stamped, but see below |
+
+**Do not trace the harness.** If the loop runs inside a span of your own —
+an instrumented test runner, a `Span` around the loop — then the case's spans
+are children of it, and one trace covers the whole run. Everything is still
+stamped and `attempt.Score` still has a trace to score (the context's first
+span starts the case, not the trace's root), but the run then has one trace
+for every case, and a trace links to one item: its coverage collapses to the
+last case stamped. A case wants a trace of its own.
+
+The two attributes do not travel with the trace context, by design. For a
+service the context cannot reach, `attempt.Attributes()` is the map to
+forward by your own means — a header, a field in the request.
+
+`attempt.Traces()` is every root span that started inside the context, in
+order — a case run three times is three traces of one item, and the run's
+summary counts them all — and `attempt.TraceID()` is the last of them, which
+is what `attempt.Score` scores. Scoring before anything has run is
+`ErrNoTrace`; after the loop moves on, the `Attempt` is a record, and a span
+started from a context taken before `Item` is not stamped.
+
+`Init` with `WithExport(false)` still registers the processor: an
+application exporting through another SDK wants its spans stamped all the
+same.
+
 ## What fails and what does not
 
 | Path | On failure |
 |---|---|
 | `Init` after configuration, `Span`, `Generation`, `Update`, `End`, the exporter, the score queue | Logged through `slog` (`WithLogger`, or the default logger); never a panic, never an error into your code |
-| `Prompt`, `Flush`, `shutdown` | An error: `*HTTPError{Status, Body}` for a non-2xx answer, the transport's own otherwise |
+| `Prompt`, `Flush`, `shutdown`, and every call of the harness above | An error: `*HTTPError{Status, Body}` for a non-2xx answer, the transport's own otherwise |
 | `Init` with no host or key | `ErrConfig`, wrapped with what is missing |
 | `Score` with no target at all | `ErrNoTrace` — a programming error, visible at the call site |
 
@@ -299,3 +387,6 @@ exporter — pins it.
 - **No price table**, and no prompt templating beyond `{placeholders}`.
 - **No client type.** One default the package keeps, configured by `Init`;
   `WithTracerProvider` is the one per-instance knob, for tests.
+- **The harness runs nothing.** No judge, no retries, no worker pool and no
+  `tracepad eval …` command: the loop is your program, and this is the part
+  of it that talks to the store.

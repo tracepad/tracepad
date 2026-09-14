@@ -507,6 +507,48 @@ the summary on the next line is over everything the run produced.
 recommends for an id of your own, and `tracepad.compare(a, b)` returns the
 comparison below exactly as the server computed it.
 
+## The same loop from Go
+
+The [Go package](sdk-go.md#evals) is the same loop with the context in place
+of the block: `run.Item(ctx, item)` returns a context carrying the run and
+the item, and a span processor writes them on every span started under it —
+the application's own, a framework's, another SDK's.
+
+```go
+shutdown, err := tracepad.Init(ctx) // TRACEPAD_HOST / TRACEPAD_API_KEY from the environment
+defer shutdown(ctx)
+
+tracepad.ScoreConfigs(ctx, []tracepad.ScoreConfig{
+	{Name: "accuracy", DataType: "numeric", Direction: "higher", Min: &zero, Max: &one},
+	{Name: "verdict", DataType: "categorical", Categories: []string{"pass", "fail"}},
+})
+
+golden := tracepad.NewDataset("support-golden")
+golden.PutItems(ctx, cases)          // same cases → same version, nothing written
+
+run, err := golden.Run(ctx, "prompt v7 / claude-sonnet-5",
+	tracepad.WithRunMetadata(map[string]any{"prompt": "support-answer@7"}))
+for item, err := range golden.Items(ctx, run.DatasetVersion) {
+	if err != nil {
+		run.Fail(ctx, err)
+		return err
+	}
+	itemCtx, attempt := run.Item(ctx, item)
+	answer := app.Answer(itemCtx, question(item))   // its spans carry the run and the item
+	attempt.Score(ctx, "accuracy", tracepad.WithValue(judge(answer, item.ExpectedOutput)))
+	attempt.Score(ctx, "verdict", tracepad.WithStringValue(verdict), tracepad.WithDataType("categorical"))
+}
+summary, err := run.Finish(ctx)
+```
+
+`golden.Items(ctx, version)` walks every page on its own, and `Finish` — or
+`Fail`, on the error path, which is yours to write since Go has no block to
+close the run for you — flushes the scores and the spans before it posts, so
+the summary it returns is over everything the run produced.
+
+`tracepad.ItemID("cases/refund.json")` and `tracepad.Compare(ctx, a, b)` are
+the Python package's `item_id` and `compare`.
+
 ## The same loop from a shell
 
 Every step above is a command, and the CLI is nothing but a client of the API
