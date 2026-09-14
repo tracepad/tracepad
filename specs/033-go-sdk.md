@@ -1,0 +1,122 @@
+# Spec 033 — The Go package: `tracepad.Init`, spans and generations in context, scores, prompts and the eval harness
+
+**Status:** 📝 DRAFT
+**Sprint:** September 2026
+
+> Go is where the agents and the services that call models from the
+> backend are written when they are not written in Python, and it is the
+> language the store itself is in. An application in Go already has the
+> OpenTelemetry SDK one import away; what it does not have is the ten
+> lines that make a span a *step*, a span a *generation* with its usage
+> and the price the provider charged, a score against the trace in flight
+> and a prompt by label. This spec adds the `tracepad` Go package: the
+> same surface as specs 017 and 032, in the shape Go gives it — a
+> `context.Context` in, a `context.Context` out, and nothing global that
+> the language would not forgive.
+
+---
+
+## Overview
+
+Deliverables, two PRs in this order (the last commit of the second flips
+the status):
+
+- **PR A — the package**: a **nested Go module** `sdk/go`
+  (`github.com/tracepad/tracepad/sdk/go`, package `tracepad`), thin over
+  `go.opentelemetry.io/otel` (Decision 1): `Init`/`Shutdown`, `Span`,
+  `Event`, `Generation` with `End`, `FirstToken` and an explicit
+  `Result`, `Update`, `UpdateTrace`, `Score`, `Prompt`, `Flush`
+  (Decisions 2–9); `docs/sdk-go.md`; the quickstart's Go paragraph; a
+  golden fixture written by the package (Decision 12); the `sdk-go` CI
+  job (Decision 11).
+- **PR B — the eval harness**: `Dataset`, `Run`, `run.Item(ctx, case)`,
+  `ScoreConfigs`, `Compare`, `ItemID` (Decision 10); the *same loop from
+  Go* section in `docs/datasets.md`; `docs/sdk-go.md#evals`.
+
+Not here: an OpenAI-compatible response reader (Decision 5 says why), a
+streaming wrapper, any wrapper of a provider client (design §6.5), a
+`Client` type with per-instance configuration beyond what tests need
+(Decision 2).
+
+## Decisions log
+
+| # | Decision | Rationale |
+|---|----------|-----------|
+| 1 | **2026-09-14** — **A nested module**, `sdk/go/go.mod` with module path `github.com/tracepad/tracepad/sdk/go`, package name `tracepad`, **Go 1.22 or newer**, dependencies `go.opentelemetry.io/otel`, `go.opentelemetry.io/otel/sdk`, `go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp` and nothing else — no dependency on the server's module, no `replace`. Released by the tag **`sdk/go/vX.Y.Z`** (the Go toolchain's rule for a module in a subdirectory); `REPOS.md`'s `sdk-go/` prefix is corrected to this. No release workflow: the tag is the release, and the `sdk-go` CI job is what runs on it | A package inside the root module would hand every user the server's dependency graph (SQLite, the UI embed, the MCP server) in their `go.sum`; a nested module is the standard answer and `go get github.com/tracepad/tracepad/sdk/go` is what a reader expects to type. Thin over OTel for spec 017 #1's reasons. The tag form is not a preference: `go get …/sdk/go@v0.1.0` resolves the tag `sdk/go/v0.1.0` and nothing else. |
+| 2 | **2026-09-14** — **`Init(ctx, opts ...Option) (shutdown func(context.Context) error, err error)`** with `WithHost`, `WithKey`, `WithEnvironment`, `WithRelease`, `WithExport(bool)`, `WithLogger(*slog.Logger)`, `WithTracerProvider(trace.TracerProvider)`; the environment (`TRACEPAD_HOST`, `TRACEPAD_API_KEY`, `TRACEPAD_ENVIRONMENT`, `TRACEPAD_RELEASE`) fills what the options did not (spec 017 #10). It **adapts to the provider it finds**: when `otel.GetTracerProvider()` is an SDK `*sdktrace.TracerProvider`, the call registers a `BatchSpanProcessor` with an OTLP/HTTP exporter aimed at `{host}/v1/traces` on it; when it is the API's no-op default, the call builds one — resource from `resource.Default()` merged with `service.name` (`OTEL_SERVICE_NAME` or the executable's name), `deployment.environment.name`, `service.version` — and sets it global with a `TraceContext` propagator. `WithEnvironment`/`WithRelease` are refused with a warning when `Init` adopts a provider it did not build (spec 017 #13). A second `Init` is a no-op with a warning. The package keeps **one default** the functions below use; there is no exported client type | Spec 017 #2 in Go: an application on `otelhttp` or `otelgrpc` has a provider, and replacing it would detach them. Options rather than a struct because that is how the OTel Go SDK itself is configured, so the reader learns nothing new. One package-level default because a span helper that needed a receiver on every call would not be a helper; the explicit provider option is what tests and the rare two-destination application use. |
+| 3 | **2026-09-14** — The attributes are **exactly spec 017 #3's**, one constant per key in `attributes.go`, one serializer (`encoding/json` with `SetEscapeHTML(false)`; a `string` is sent as is, spec 015 #12; a value that does not marshal is sent as `fmt.Sprint` of it) | The store reads one dialect; the fixture of Decision 12 proves the package speaks it. |
+| 4 | **2026-09-14** — **`Span(ctx, name, opts ...SpanOption) (context.Context, *Observation)`** and **`Event(ctx, name, …)`** open a span under the context's current span and return the context carrying it; the caller ends it with `obs.End()` (the Go idiom: `defer obs.End()`), and `obs.Fail(err)` records the error as an OTel event, sets status `ERROR` and ends. Options: `WithInput(any)`, `WithMetadata(any)`, `WithType(string)`. There is **no function wrapper like `observe`**: Go has no decorators and no way to capture a function's arguments by name; the input is what the caller hands `WithInput` | The OTel Go API is `ctx, span := tracer.Start(ctx, …)` / `defer span.End()`, and a helper that changed that shape would fight every other instrumentation in the process. `Fail` exists because `defer` cannot see the error the function is about to return, and the three lines that record it are the ones every caller would write. |
+| 5 | **2026-09-14** — **`Generation(ctx, name, opts ...GenerationOption) (context.Context, *Generation)`** with `WithModel`, `WithPrompt(*Prompt)`, `WithModelParameters(map[string]any)`, `WithInput`; **`gen.End(Result{Model, Usage, Cost, Output})`** writes the model, every `Usage` entry under `gen_ai.usage.<key>`, the cost and the output, then ends; **`gen.FirstToken()`** stamps the completion start once; `gen.Fail(err)` as on a span. `Usage` is `map[string]int64` and `Cost` is `*float64` — absent is absent, never zero. **No OpenAI-compatible reader, no stream wrapper**: `docs/sdk-go.md` shows the five lines that fill a `Result` from `openai-go`'s `ChatCompletion` and the three that stamp `FirstToken` in a stream loop | Go has no dominant client with one response shape the way Python and Node have the OpenAI envelope: `openai-go`, `anthropic-sdk-go`, `go-openai` and the raw `net/http` caller each hand back a different struct, and a reader over `any` would be reflection guessing at field names. An explicit `Result` is five lines at the call site and cannot silently read the wrong field. A pointer for the cost is the language's own "not set", and spec 002 #14's "never $0" needs exactly that. |
+| 6 | **2026-09-14** — **`Score(ctx, name string, opts ...ScoreOption) error`** — `WithValue(float64)`, `WithStringValue`, `WithDataType`, `WithComment`, `WithID`, `WithTraceID`, `WithObservationID`, `OnObservation()` — targets the context's span when none is given and returns **`ErrNoTrace`** with no span and no id (spec 017 #7). It **does not call the server**: it enqueues, and a goroutine started by `Init` posts `POST /api/v1/scores` in batches of up to 100 every 2 s or when the batch fills; a rejected batch is retried once, then logged and dropped (spec 017 #6). **`Flush(ctx) error`** drains the queue, then the provider's `ForceFlush`; **`shutdown`** (returned by `Init`) flushes and shuts the provider down when the package built it, and only flushes when it adopted one | Spec 017 #6–#7. An error return instead of a panic is Go's `ValueError`, and a sentinel so the caller can `errors.Is`. The goroutine is the daemon thread; `shutdown` is `atexit`, and it is returned rather than registered because Go has no exit hook and every server already has a place where it closes things. |
+| 7 | **2026-09-14** — **`Prompt(ctx, name string, opts ...PromptOption) (*Prompt, error)`** with `WithLabel`, `WithVersion`; `Prompt` has `Name`, `Version`, `Text`, `Messages`, `Labels`, `Config` and `Compile(vars map[string]any) (string \| []Message)` — `{name}` substitution as spec 017 #8; cached in memory per `(name, label \| version)` for the `Cache-Control: max-age` the server sent, served stale on transport or 5xx error with a warning, and an error when nothing is cached (`*HTTPError` or the transport's). `Generation(…, WithPrompt(p))` writes `tracepad.prompt.name` / `tracepad.prompt.version` | The rules are the Python ones. Two return shapes for `Compile` are one method with two fields (`Text`, `Messages`) on the result, not an interface: a chat prompt and a text prompt are different data and the caller knows which they asked for. |
+| 8 | **2026-09-14** — **Failure semantics are spec 017 #9's**: the tracing path (`Init` after configuration, `Span`, `Generation`, `Update`, `End`, the exporter, the score queue) never panics and logs through `slog` (the default logger, or `WithLogger`); the REST path returns errors — `*HTTPError{Status, Body}` for a non-2xx answer, the transport's error otherwise; `Init` with no host or key returns **`ErrConfig`** (wrapped with what is missing). REST goes over `net/http` with the default client and a 10 s timeout | Same rules; Go spells "never raises" as "never panics, returns errors", and `slog` is the standard library's logger since 1.21, so no dependency. |
+| 9 | **2026-09-14** — **`Update(ctx, opts ...UpdateOption)`** (`WithName`, `WithInput`, `WithOutput`, `WithMetadata`, `WithLevel`, `WithStatusMessage`, `WithType`) and **`UpdateTrace(ctx, …)`** (`WithTraceName`, `WithUserID`, `WithSessionID`, `WithTags`, `WithTraceMetadata`) act on the context's span (spec 017 #11), log and do nothing without one. `Observation` carries `TraceID()`, `SpanID()`, `Span()` (the OTel span) | Same contract, Go names. |
+| 10 | **2026-09-14** — **The harness** (PR B): `Dataset(name) *Dataset` (no request made), `PutItems(ctx, items) (version, changed int, err)`, `Items(ctx, version) iter.Seq2[Item, error]` over the 500-item pages, `Create`, `Delete(ctx, confirm)`, `Run(ctx, name, opts…) (*Run, error)`, `Runs(ctx)`. **`run.Item(ctx, case) (context.Context, *Attempt)`** returns a context carrying `(runID, itemID)`; a `SpanProcessor` registered by `Init` stamps `tracepad.run_id` and `tracepad.item_id` in `OnStart` on every span whose context carries them, whoever started it; the `Attempt` records every root span it saw (`Traces()`, `TraceID()`) and `Score(ctx, name, opts…)` posts against the last. **`run.Finish(ctx)`** flushes scores, then the provider, then posts; `run.Fail(ctx, err)` likewise. `ScoreConfigs(ctx, configs)`, `Compare(ctx, a, b)`, `ItemID(key) string` as in spec 018 #6–#7. The read side is the server's JSON decoded into `map[string]any` (spec 018 #8) | Spec 018 in Go: the item block is a context, because in Go a context *is* the block, and the processor reads it at `OnStart` the way the Python one reads the `ContextVar`. `iter.Seq2` because Go 1.23 has range-over-func and a paging generator is what it is for; the floor stays 1.22 for the package, and `Items` is built with the `iter` package from 1.23 — so the floor is **1.23** for PR B, stated in `go.mod` then. |
+| 11 | **2026-09-14** — **CI.** The `sdk-go` job runs `go vet` and `go test ./...` inside `sdk/go` on the two newest Go lines, then the e2e against a real binary through `scripts/sdk-go-test.sh` (build the server, start it on a free port, run the package's `e2e` test package with `TRACEPAD_BINARY`), and `make sdk-go-lines` against a **1,600**-line application budget (`scripts/sdk-go-lines.sh`). `make gate` includes the module's tests. `make smoke` gains the package as a pinned exporter | Spec 017 #12's shape. Two Go lines like two Pythons. No release workflow (Decision 1). |
+| 12 | **2026-09-14** — **The golden fixture** is `testdata/otlp/012-tracepad-sdk-go.pb`, written by `scripts/fixtures/tracepad_sdk_go/main.go` (a small program in the SDK module's test tree, with an in-memory OTLP collector) and read back by the server's OTLP suite like 010 and 011 | Decision 3's proof. |
+
+## Package contract
+
+```
+sdk/go/
+  go.mod                  # module github.com/tracepad/tracepad/sdk/go; go 1.22 (1.23 from PR B)
+  tracepad.go             # Init, Shutdown, Option; the default and its adaptation
+  span.go                 # Span, Event, Observation, Update, UpdateTrace
+  generation.go           # Generation, Result, Usage, FirstToken
+  attributes.go           # the vocabulary of spec 017 #3: one constant per key, one serializer
+  scores.go               # Score, the queue, the goroutine, Flush
+  prompts.go              # Prompt, the cache, Compile
+  http.go                 # net/http, auth, HTTPError, ErrConfig, ErrNoTrace
+  harness.go              # PR B: the processor, Run, Attempt, ScoreConfigs, Compare, ItemID
+  datasets.go             # PR B: Dataset, Item
+  e2e/                    # against a real binary (TRACEPAD_BINARY)
+  README.md               # what pkg.go.dev shows: install, Init, three lines, a link to docs/sdk-go.md
+```
+
+**Public surface** (everything else is unexported): `Init`, `Flush`,
+`Span`, `Event`, `Generation`, `Update`, `UpdateTrace`, `Score`, `Prompt`,
+the option constructors named above, `Observation`, `Generation` (type),
+`Result`, `Usage`, `Prompt` (type), `Message`, `HTTPError`, `ErrConfig`,
+`ErrNoTrace`; PR B: `Dataset`, `Item`, `Run`, `Attempt`, `ScoreConfig`,
+`ScoreConfigs`, `Compare`, `ItemID`.
+
+## Ingest contract
+
+Unchanged: the package writes the `tracepad.*` dialect of spec 017 and the
+GenAI conventions. The fixture of Decision 12 pins it.
+
+## Testing
+
+- Unit (in-memory span exporter from `sdk/trace/tracetest`): `Init`
+  adopts an SDK provider by registering a processor, builds one when the
+  global is the no-op, warns on a second call, refuses environment and
+  release on an adopted provider, returns `ErrConfig` without host or key;
+  `Span`/`Event`/`Generation` write the attributes of spec 017 #3, `End`
+  and `Fail` set status and the event, `Result` with a nil cost writes no
+  cost, `Usage` keys land under `gen_ai.usage.`; `FirstToken` once;
+  `Score` enqueues, batches at 100 and at 2 s, retries once, drops with a
+  log line, returns `ErrNoTrace`; `Flush` drains; `Prompt` caches for
+  `max-age`, serves stale on 503, errors on an empty cache, `Compile` on
+  text and on messages; `Update` without a span logs; `shutdown` flushes
+  and shuts down only what it built.
+- E2E against a real binary: one `Span` with a `Generation` and a `Score`
+  inside — `GET /api/v1/traces/{id}` shows the tree, the model, the usage,
+  the cost and the score; a generation with `FirstToken` lands time to
+  first token.
+- PR B: the harness against the real binary — items put and read at a
+  version, a run over three items with two roots each, `Traces` per
+  attempt, scores on the right trace, `Finish` then `Get` with the
+  summary, `Fail`, `Compare`; a unit test for the processor stamping a
+  span started by `otelhttp`'s handler inside an item context.
+- The fixture: `012-tracepad-sdk-go.pb` regenerated and read back by the
+  server's OTLP suite.
+- Docs: the anchor checker; the `docs/sdk-go.md` examples compile
+  (`go vet` over an `examples_test.go` in the module).
+- CI: `sdk-go` job green on the two newest Go lines; `make gate` green
+  with the module included.
+
+## Out of scope
+
+- A response reader or a stream wrapper — Decision 5.
+- A `Client` type beyond `WithTracerProvider` for tests — Decision 2.
+- Any provider-client wrapper — design §6.5.
