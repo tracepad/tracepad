@@ -125,8 +125,9 @@ ui-lines: ## Report the interface's application lines against its budget, and it
 sdk-test: ## Unit-test the Python package, and end-to-end against a real binary
 	scripts/sdk-test.sh
 
-# The budget spec 017 #1 set, shared with the harness of spec 018.
-SDK_BUDGET := 1500
+# The budget spec 017 #1 set, shared with the harness of spec 018; raised for
+# the streaming pass-through (spec 031 #22).
+SDK_BUDGET := 1600
 
 sdk-lines: ## Report the Python package's application lines against its budget
 	scripts/sdk-lines.sh $(SDK_BUDGET)

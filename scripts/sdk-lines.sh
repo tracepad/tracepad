@@ -3,9 +3,10 @@
 #
 # A warning, never a failure — the same instrument, and the same argument, as
 # `ui-lines.sh`: the number is a signal to revise, not a rule to satisfy. 1,500
-# lines cover spec 017 (init, the decorators, generations, prompts, scores) and
+# lines covered spec 017 (init, the decorators, generations, prompts, scores) and
 # spec 018 (the eval harness) together, because they are one package and a
-# budget per spec would be a budget per PR.
+# budget per spec would be a budget per PR; spec 031 #22 raised it to 1,600 for
+# the streaming pass-through.
 #
 # What it counts is the application; the tests are reported beside it under no
 # ceiling at all (design §8, amended; spec 010 #7). A number that charges for
@@ -15,7 +16,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BUDGET="${1:-1500}"
+BUDGET="${1:-1600}"
 
 cd "$ROOT"
 
