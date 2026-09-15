@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { billedTokens, breakdown, buildSeries, key, type StatsBucket } from './stats';
+import { billedTokens, breakdown, buildSeries, key, NEW, summarize, type StatsBucket } from './stats';
 
 /**
  * What the Stats screen draws (spec 007 #6). Two things are worth pinning
@@ -157,5 +157,85 @@ describe('the breakdown', () => {
 
 		expect(quiet[0].countShare).toBe(0);
 		expect(quiet[0].errorShare).toBe(0);
+	});
+});
+
+// The summary row (spec 034 #2): four figures and their movement against the
+// previous window. The arithmetic is the one thing this screen computes, and
+// the failures are silent — a division by a zero previous, a change coloured
+// the wrong way — so each rule is pinned here.
+describe('summarize', () => {
+	const now = bucket('', {
+		count: 120,
+		error_count: 6,
+		total_cost: 2.4,
+		latency_ms: { p50: 500, p95: 1800 }
+	});
+	const before = bucket('', {
+		count: 100,
+		error_count: 2,
+		total_cost: 3,
+		latency_ms: { p50: 400, p95: 1500 }
+	});
+
+	it('renders the four figures with their changes', () => {
+		const [traces, cost, errors, latency] = summarize(now, before);
+
+		expect(traces).toMatchObject({ value: '120', change: '+20%', direction: 'up', tone: null });
+		expect(cost).toMatchObject({ value: '$2.40', change: '−20%', direction: 'down', tone: 'better' });
+		expect(errors).toMatchObject({ value: '5%', change: '+3 pt', direction: 'up', tone: 'worse' });
+		expect(latency).toMatchObject({ value: '1.8 s', change: '+300 ms', direction: 'up', tone: 'worse' });
+		expect(traces.previous).toBe('100');
+		expect(latency.previous).toBe('1.5 s');
+	});
+
+	it('keeps a small change to one decimal and a flat one uncoloured', () => {
+		const [traces, , errors] = summarize(
+			bucket('', { count: 103, error_count: 5 }),
+			bucket('', { count: 100, error_count: 5 })
+		);
+
+		expect(traces.change).toBe('+3%');
+		// 4.85% against 5%: the tenth is what tells them apart.
+		expect(errors.change).toBe('−0.1 pt');
+		expect(summarize(now, now)[1]).toMatchObject({ change: '±0%', direction: 'flat', tone: null });
+		expect(summarize(now, now)[3].change).toBe('±0 ms');
+	});
+
+	it('reads new against a zero or absent previous', () => {
+		const [traces, cost, errors, latency] = summarize(now, null);
+		for (const figure of [traces, cost, errors, latency]) {
+			expect(figure.change).toBe(NEW);
+			expect(figure.direction).toBeNull();
+			expect(figure.previous).toBeNull();
+		}
+		// A previous window with traces but no cost, and no errors: the cost
+		// and the rate are new against it, the count is not.
+		const quiet = summarize(now, bucket('', { count: 50, error_count: 0, latency_ms: {} }));
+		expect(quiet[0].change).toBe('+140%');
+		expect(quiet[1].change).toBe(NEW);
+		expect(quiet[2]).toMatchObject({ change: NEW, previous: '0%' });
+		expect(quiet[3].change).toBe(NEW);
+	});
+
+	it('dashes an absent figure and gives it no change', () => {
+		const [traces, cost, errors, latency] = summarize(
+			bucket('', { count: 0, error_count: 0, latency_ms: {} }),
+			before
+		);
+		expect(traces).toMatchObject({ value: '0', change: '−100%', direction: 'down' });
+		expect(cost).toMatchObject({ value: '—', change: null, direction: null, tone: null });
+		expect(errors).toMatchObject({ value: '—', change: null });
+		expect(latency).toMatchObject({ value: '—', change: null });
+
+		for (const figure of summarize(null, before)) expect(figure.value).toBe('—');
+	});
+
+	it('renders the p95 change as a duration of the right size', () => {
+		const [, , , latency] = summarize(
+			bucket('', { count: 1, error_count: 0, latency_ms: { p50: 1, p95: 900 } }),
+			bucket('', { count: 1, error_count: 0, latency_ms: { p50: 1, p95: 3400 } })
+		);
+		expect(latency).toMatchObject({ change: '−2.5 s', direction: 'down', tone: 'better' });
 	});
 });

@@ -1,3 +1,4 @@
+import { ABSENT, cost, count, duration } from '$lib/format';
 import type { Bucket } from './range';
 
 // Turning `GET /api/v1/stats` into what the Stats screen draws. Pure, because
@@ -211,4 +212,103 @@ export function breakdown(buckets: StatsBucket[], unnamed = ''): BreakdownRow[] 
 
 function share(value: number, peak: number): number {
 	return peak > 0 ? value / peak : 0;
+}
+
+/** One tile of the dashboard's summary row (spec 034 #2), rendered. */
+export type SummaryFigure = {
+	id: 'traces' | 'cost' | 'errors' | 'latency';
+	label: string;
+	/** The figure, or a dash when the window carried none. */
+	value: string;
+	/** The previous window's figure, for the tooltip; null when there is none. */
+	previous: string | null;
+	/**
+	 * The change against the previous window: a signed percentage, signed
+	 * points, or a signed duration; `new` when the previous figure is zero or
+	 * absent; null when this window's figure is absent.
+	 */
+	change: string | null;
+	direction: 'up' | 'down' | 'flat' | null;
+	/**
+	 * Whether the movement is good or bad news. Cost, errors and latency
+	 * colour an increase as worse; traces colour neither, because more
+	 * traffic is the denominator, not a verdict.
+	 */
+	tone: 'better' | 'worse' | null;
+};
+
+/** The one word a change against nothing reads as. */
+export const NEW = 'new';
+
+/**
+ * The four figures of the summary row with their movement against the
+ * previous window (spec 034 #2). The comparison is arithmetic here and not
+ * on the server: the API gives the two windows and never a `compare`.
+ */
+export function summarize(bucket: StatsBucket | null, previous: StatsBucket | null): SummaryFigure[] {
+	const rate = (b: StatsBucket | null) =>
+		b && b.count > 0 ? (b.error_count / b.count) * 100 : null;
+	const p95 = (b: StatsBucket | null) => b?.latency_ms?.p95 ?? null;
+	return [
+		figure('traces', 'Traces', bucket?.count ?? null, previous?.count ?? null, count, percent, null),
+		figure('cost', 'Cost', bucket?.total_cost ?? null, previous?.total_cost ?? null, cost, percent, 'worse'),
+		figure('errors', 'Errors', rate(bucket), rate(previous), percentage, points, 'worse'),
+		figure('latency', 'Latency', p95(bucket), p95(previous), duration, delta, 'worse')
+	];
+}
+
+function figure(
+	id: SummaryFigure['id'],
+	label: string,
+	value: number | null,
+	previous: number | null,
+	render: (value: number) => string,
+	change: (value: number, previous: number) => string,
+	increase: 'worse' | null
+): SummaryFigure {
+	if (value === null) {
+		return { id, label, value: ABSENT, previous: null, change: null, direction: null, tone: null };
+	}
+	const rendered = render(value);
+	const before = previous === null ? null : render(previous);
+	// A previous of zero is not a base a percentage can be taken against,
+	// and an absent one is a window before the project: both read as new.
+	if (previous === null || previous === 0) {
+		return { id, label, value: rendered, previous: before, change: NEW, direction: null, tone: null };
+	}
+	const direction = value > previous ? 'up' : value < previous ? 'down' : 'flat';
+	const tone =
+		increase === null || direction === 'flat' ? null : direction === 'up' ? 'worse' : 'better';
+	return { id, label, value: rendered, previous: before, change: change(value, previous), direction, tone };
+}
+
+/** An error rate as the tile shows it. */
+function percentage(value: number): string {
+	return `${round(value)}%`;
+}
+
+function percent(value: number, previous: number): string {
+	return signed(((value - previous) / previous) * 100, '%');
+}
+
+function points(value: number, previous: number): string {
+	return signed(value - previous, ' pt');
+}
+
+/** A latency change, kept in the units `duration` would give the size. */
+function delta(value: number, previous: number): string {
+	if (value === previous) return '±0 ms';
+	const size = duration(Math.abs(value - previous));
+	return value > previous ? `+${size}` : `−${size}`;
+}
+
+/** Signed, with `±0` for no movement rather than a plus on nothing. */
+function signed(value: number, unit: string): string {
+	if (value === 0) return `±0${unit}`;
+	return `${value < 0 ? '−' : '+'}${round(Math.abs(value))}${unit}`;
+}
+
+/** Whole numbers past ten, one decimal under it — enough to tell 1.2% from 1.9%. */
+function round(value: number): string {
+	return (Math.abs(value) >= 10 ? Math.round(value) : Math.round(value * 10) / 10).toString();
 }

@@ -25,10 +25,12 @@ test('the owner lands on the remembered project, and a bare path keeps its filte
 }) => {
 	const own = await createProject('bare');
 	await signInAsOwner(page, own.id);
-	await expect(page).toHaveURL(new RegExp(`/p/${own.id}/traces$`));
+	// The project's front page is the dashboard (spec 034 #1), which writes
+	// its window into the address.
+	await expect(page).toHaveURL(new RegExp(`/p/${own.id}/dashboard(\\?|$)`));
 
 	await page.goto('/');
-	await expect(page).toHaveURL(new RegExp(`/p/${own.id}/traces$`));
+	await expect(page).toHaveURL(new RegExp(`/p/${own.id}/dashboard(\\?|$)`));
 
 	await page.goto('/traces?environment=prod');
 	await expect(page).toHaveURL(new RegExp(`/p/${own.id}/traces\\?environment=prod$`));
@@ -66,7 +68,7 @@ test('the switcher names the projects with a count, and keeps the section and th
 
 	await page.goto('/settings/account');
 	await switchTo(page, own.name);
-	await expect(page).toHaveURL(new RegExp(`/p/${own.id}/traces$`));
+	await expect(page).toHaveURL(new RegExp(`/p/${own.id}/dashboard(\\?|$)`));
 });
 
 test('an editor of one project sees one row, no New project, and a not-there screen elsewhere', async ({
@@ -75,7 +77,7 @@ test('an editor of one project sees one row, no New project, and a not-there scr
 	const { project: seeded } = state();
 	const own = await createProject('editor');
 	await signIn(page, own.account);
-	await expect(page).toHaveURL(new RegExp(`/p/${own.id}/traces$`));
+	await expect(page).toHaveURL(new RegExp(`/p/${own.id}/dashboard(\\?|$)`));
 
 	await page.getByRole('button', { name: 'Switch project' }).click();
 	const menu = page.getByRole('menu');
@@ -96,7 +98,7 @@ test('an editor of one project sees one row, no New project, and a not-there scr
 	expect(named).toEqual([]);
 });
 
-test('New project from the switcher shows the keys once and lands on the new listing', async ({
+test('New project from the switcher shows the keys once and lands on the new dashboard', async ({
 	page
 }) => {
 	const own = await createProject('maker');
@@ -115,10 +117,12 @@ test('New project from the switcher shows the keys once and lands on the new lis
 	await keys.getByRole('button', { name: 'I have copied it' }).click();
 	await expect(keys).toBeHidden();
 
-	await expect(page).toHaveURL(new RegExp(`/p/${ID}/traces$`));
+	// On its dashboard, where a fresh project's instructions are (spec 034 #6).
+	await expect(page).toHaveURL(new RegExp(`/p/${ID}/dashboard`));
 	await expect(page).not.toHaveURL(new RegExp(`/p/${own.id}/`));
 	await expect(page.getByRole('button', { name: 'Switch project' })).toHaveText(name);
-	await expect(page.getByText('No traces yet')).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'No traces yet' })).toBeVisible();
+	await expect(page.getByText('OTEL_EXPORTER_OTLP_TRACES_ENDPOINT')).toBeVisible();
 });
 
 test('a reload stays put, and the login round trip returns to the prefixed path', async ({
@@ -168,6 +172,6 @@ test('a path that is no screen is a 404, prefixed or bare', async ({ page }) => 
 	await page.goto('/nonsense');
 	await expect(page).toHaveURL(new RegExp(`/p/${own.id}/nonsense$`));
 	await expect(page.getByRole('heading', { name: 'No such page' })).toBeVisible();
-	await page.getByRole('link', { name: 'Back to traces' }).click();
-	await expect(page).toHaveURL(new RegExp(`/p/${own.id}/traces$`));
+	await page.getByRole('link', { name: 'Back to the dashboard' }).click();
+	await expect(page).toHaveURL(new RegExp(`/p/${own.id}/dashboard(\\?|$)`));
 });

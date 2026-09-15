@@ -7,6 +7,7 @@ import {
 	defaultBucket,
 	matchPreset,
 	presetRange,
+	previousRange,
 	readBucket,
 	readRange,
 	spanMs
@@ -102,4 +103,24 @@ describe('the bucket', () => {
 
 it('opens Stats on a preset the endpoint can serve', () => {
 	expect(PRESETS.some((preset) => preset.key === DEFAULT_PRESET)).toBe(true);
+});
+
+// The previous window (spec 034 #2): the same length, ending where this one
+// begins, with an open end read as now.
+describe('previousRange', () => {
+	it('mirrors the window before its start', () => {
+		expect(previousRange({ from: '2026-09-01T12:00:00.000Z' }, NOW)).toEqual({
+			from: '2026-08-25T12:00:00.000Z',
+			to: '2026-09-01T12:00:00.000Z'
+		});
+		expect(
+			previousRange({ from: '2026-09-01T00:00:00.000Z', to: '2026-09-03T00:00:00.000Z' }, NOW)
+		).toEqual({ from: '2026-08-30T00:00:00.000Z', to: '2026-09-01T00:00:00.000Z' });
+	});
+
+	it('is nothing for a window with no start or no length', () => {
+		expect(previousRange({}, NOW)).toBeNull();
+		expect(previousRange({ to: '2026-09-03T00:00:00.000Z' }, NOW)).toBeNull();
+		expect(previousRange({ from: '2026-09-03T00:00:00.000Z', to: '2026-09-01T00:00:00.000Z' }, NOW)).toBeNull();
+	});
 });

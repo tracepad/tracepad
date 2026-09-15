@@ -18,6 +18,7 @@
 	import CopyButton from '$lib/components/CopyButton.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import RangePicker from '$lib/components/RangePicker.svelte';
+	import { rememberedRange, rememberRange } from '$lib/range.svelte';
 	import UserSessionsTab from '$lib/components/users/UserSessionsTab.svelte';
 	import UserTracesTab from '$lib/components/users/UserTracesTab.svelte';
 	import { cost, count, duration, middleEllipsis, timestamp } from '$lib/format';
@@ -44,9 +45,13 @@
 	 * narrower.
 	 */
 	const openedAt = new Date();
-	/** Thirty days is the window this page opens on (spec 023 #9). */
 	const range = $derived(readRange(page.url.searchParams));
-	const viewed = $derived(range.from || range.to ? range : presetRange('30d', openedAt));
+	/**
+	 * The window this page opens on: the one this browser remembers (spec 034
+	 * #7), else thirty days (spec 023 #9).
+	 */
+	const fallback = rememberedRange(openedAt) ?? presetRange('30d', openedAt);
+	const viewed = $derived(range.from || range.to ? range : fallback);
 	const bucket = $derived(readBucket(page.url.searchParams, viewed, openedAt));
 	const tab = $derived(readTab(page.url.searchParams));
 
@@ -149,6 +154,7 @@
 	}
 
 	function setRange(picked: Range) {
+		rememberRange(picked, new Date());
 		navigate({ from: picked.from ?? '', to: picked.to ?? '' });
 	}
 

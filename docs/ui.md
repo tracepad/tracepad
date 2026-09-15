@@ -45,8 +45,8 @@ reaches everything it used to unlock (see [admin.md](admin.md)).
 ### The project in the address
 
 Every screen is about one project, and the address says which: everything
-inside the shell lives under **`/p/{project id}`** — `/p/{id}/traces`,
-`/p/{id}/sessions`, `/p/{id}/settings/server`, and so on. A link therefore
+inside the shell lives under **`/p/{project id}`** — `/p/{id}/dashboard`,
+`/p/{id}/traces`, `/p/{id}/settings/server`, and so on. A link therefore
 names its project, which is what a link shared between two people has needed
 since there were two people; it carries the id rather than the name, because a
 name can be renamed and a link that breaks on a rename is worse than a hex
@@ -59,8 +59,11 @@ A **bare path** — `/`, or `/traces?status=error` from a bookmark, a chat, or
 the pre-authed link the server prints — redirects to the same path and query
 under the **remembered project**: the one this account last looked at in this
 browser, or the first by name until it has looked at one. Every link written
-before the prefix keeps working. An account that reaches no project is sent to
-`/p`, which says so — and, for an owner, offers to create one.
+before the prefix keeps working. `/` and `/p/{id}` open the project's
+[dashboard](#dashboard); so does the login form with nowhere else to return
+to, and so do the setup and invitation links once the password is set. An
+account that reaches no project is sent to `/p`, which says so — and, for an
+owner, offers to create one.
 
 The **switcher** at the top of the sidebar, where the project name is, lists
 the projects the account can reach with each one's traces of the last 24 hours
@@ -68,9 +71,10 @@ beside it — is it alive — and, over eight projects, a box that narrows the
 list. Choosing another project keeps the section you are in (and the Settings
 tab) and keeps the filters, the time window, the search and the page size;
 what it drops is what belonged to the old project: the open trace, prompt or
-queue, the page cursor and the peek panel. An owner has *New project* at the
-bottom of the menu, which opens the same dialog the Server tab uses and lands
-on the new project's empty listing.
+queue, the page cursor and the peek panel; from a screen that is under no
+project it lands on the dashboard. An owner has *New project* at the bottom of
+the menu, which opens the same dialog the Server tab uses and lands on the
+new project's dashboard, where the setup instructions are.
 
 An address under a project the account cannot reach — mistyped, deleted, or
 one you are not a member of — renders one screen saying so, with the switcher
@@ -83,8 +87,10 @@ The sidebar carries an **account menu** at the bottom: the display name or
 the email, the role in the project on screen as a caption, and the two things
 the menu is for — the Account tab and signing out.
 
-Every screen is reachable for every role, and the listings, the trace detail,
-sessions, stats, quality, users and the whole annotation flow are identical.
+Every screen is reachable for every role, and the dashboard — its Customize
+mode included, since the arrangement is the account's — the listings, the
+trace detail, sessions, quality, users and the whole annotation flow are
+identical.
 Scoring is a `viewer`'s job — that is what the role is for. What a viewer is
 not offered is the writing: the prompt editor and its labels, the dataset
 item editor and the archive, deleting a prompt, a dataset, a queue or a run,
@@ -97,6 +103,10 @@ every one of those `403` regardless (see [accounts.md](accounts.md)), and a
 is rendered in the server's own words in the card or dialog it came from.
 
 ## Screens
+
+**Dashboard** — the project's front page, first in the sidebar and what
+`/p/{id}` opens: how much the project ran, what it cost, whether it broke and
+whether the scores moved, at a glance. See [Dashboard](#dashboard).
 
 **Traces** — the listing. One row per trace, mapping onto
 `GET /api/v1/traces`: time, name, environment, user, session, cost, latency,
@@ -148,6 +158,10 @@ by default, pauses while the tab is hidden, and only runs on the newest page
 are ordered by their own timestamps, so a span that arrives late appears
 where it belongs rather than at the top — which on a full page means it can
 push the oldest row of that page off it.
+
+When a project has no traces at all the listing says so in one line and
+points at the dashboard, where the exporter settings are; with a filter or a
+search set it says what matched nothing instead.
 
 **Sessions** — one row per session over `GET /api/v1/sessions`: last seen,
 id, how many traces, how many of them failed, cost, first seen. The filters
@@ -215,7 +229,7 @@ row that writing the same id again puts straight back.
 
 ## Prompts
 
-*Prompts* is a top-level section, between *Stats* and *Evals*: a prompt is a
+*Prompts* is a top-level section, between *Users* and *Evals*: a prompt is a
 production artefact — what the application ships — rather than an eval noun.
 It is [prompts.md](prompts.md) on screen, and it writes through exactly the
 endpoints described there.
@@ -459,11 +473,13 @@ somebody has to work through.
 
 The fifth child of *Evals* is what the evals and the reviewers have been
 saying, over time: [quality.md](quality.md) in a screen. It sits with the eval
-nouns rather than with the traffic on *Stats*, because quality is what evals
-produce.
+nouns rather than with the traffic on the dashboard, because quality is what
+evals produce; the dashboard's Quality block draws the six busiest of these
+cards and leads here.
 
-The filter bar is Stats': the time window (`?from=&to=`, the last 30 days by
-default), the environment box, and the hourly/daily choice (`?group_by=`).
+The filter bar is the dashboard's: the time window (`?from=&to=`, the one this
+browser [remembers](#the-remembered-window) or the last 30 days), the
+environment box, and the hourly/daily choice (`?group_by=`).
 
 **Quality** (`/quality`) is a card per score name in the window, over one
 request. A card is the name, its data type, how many scores it holds, and a
@@ -481,7 +497,7 @@ how many are not shown — a shorter grid that looked complete would be the one
 thing worse than a truncated one
 ([quality.md](quality.md#two-ceilings-on-an-answer)).
 
-**One score** (`/quality?name=X`) is the Stats screen's composition for one
+**One score** (`/quality?name=X`) is the dashboard's composition for one
 name: the trend full width — with the minimum and the maximum as two fainter
 lines behind a numeric mean — a count chart beside it, and three breakdown
 tables under them: by model, by environment, by release. Each row is the key,
@@ -554,24 +570,54 @@ phone the panel covers the screen, which is the whole reason it is there —
 closing it costs nothing, where a page navigation would read the listing
 again.
 
-**Stats** — five charts over `GET /api/v1/stats` — traces, cost, tokens
-(input, output and cache read as three lines), latency (p50 and p95) and
-errors — sharing one x cursor, plus breakdown tables by model, by
-environment and by release with proportion bars and a **Tokens** column. The
-header's `N tokens` and the column are input plus output — what a bill is
-made of; cache read is on the chart, where it explains a bill that is
-smaller than the tokens suggest, and out of the headline number, where it
-would count the same tokens twice for the providers that report cached
-tokens inside the input. The bucket switcher is hourly/daily and defaults to
-hours for windows up to 48 hours, days above. In the release table, the
-traces that named none are one row called *(no release)* rather than a row
-that is missing.
+## Dashboard
+
+The project's front page (`/p/{id}/dashboard`; the old `/stats` address
+redirects here, query and all). It is the screen that was *Stats* with the
+row a front page needs above it: figures with their movement, the charts and
+breakdowns, the quality cards, when the last trace arrived, and — for a
+project with no traces yet — the instructions for the first one.
+
+The **summary row**: four tiles for the window on screen — *Traces*, *Cost*,
+*Errors* (failed traces as a share of all) and *Latency* (the p95) — each with
+its change against the **previous window**, the same length ending where this
+one begins. Traces and cost move as a signed percentage, the error rate in
+points, the p95 as a signed duration, with an arrow; cost, errors and latency
+colour an increase as worse, traces neither, because more traffic is the
+denominator and not a verdict. The previous figure is in the tile's tooltip.
+A tile whose figure is absent — nothing priced, nothing timed, no traces —
+shows a dash and no change; a change whose previous figure is zero or absent
+reads *new*, which is also what a window whose previous window predates the
+project, or predates what the rollup still keeps, reads. The figures are two
+requests for `GET /api/v1/stats?group_by=total`, this window's and the
+previous one's ([api.md](api.md#statistics)); the subtraction is the only
+arithmetic the screen does.
+
+**Last trace** in the header — *Last trace 4 min ago*, the instant in the
+tooltip — is the newest row of the trace listing with the environment filter
+and no window, because the one thing a window of statistics cannot say is
+whether anything is arriving now. *No traces yet* when the listing is empty.
+It is read with the rest of the page and by *Refresh*, never polled: the
+Traces live toggle is the one poller in the app.
+
+The **charts** — traces, cost, tokens (input, output and cache read as three
+lines), latency (p50 and p95) and errors — share one x cursor, and the
+**breakdown tables** by model, by environment and by release carry proportion
+bars and a **Tokens** column of input plus output, what a bill is made of;
+cache read is on the chart, where it explains a bill that is smaller than the
+tokens suggest, and out of the column, where it would count the same tokens
+twice for the providers that report cached tokens inside the input. The
+bucket switcher is hourly/daily and defaults to hours for windows up to 48
+hours, days above. In the release table, the traces that named none are one
+row called *(no release)* rather than a row that is missing.
 
 A bucket the server did not return is drawn as a **gap**, never as a zero,
 and a bucket that reported no cost has no cost point — nor a token point when
 none of its calls reported usage, and a table row without one shows `—`: the
 API refuses to fabricate rows and so does the screen. An empty window says so
-rather than drawing an empty frame.
+rather than drawing an empty frame. A project with traces but none in the
+window shows dashes, empty axes and the true last-trace time: not the
+instructions.
 
 The numbers behind the charts come from an hourly rollup for closed hours and
 from the live rows for the hour in progress, which is why a month reads as
@@ -579,11 +625,41 @@ fast as a day and why the charts keep answering about data retention has
 since deleted. The latency percentiles are histogram-based, accurate to a few
 percent — see [api.md](api.md#where-the-numbers-come-from).
 
-Neither screen has a live mode. Both re-read on a filter change and on the
-**Refresh** control; the Traces live toggle is the only poller in the app.
+**Quality** — up to six score names of the window, the ones with the most
+scores first, each drawn as the [Quality](#quality) overview draws its card
+and leading to that score's detail, with *See all* when more names exist.
+The block is not drawn when the window holds no score. One request, and none
+while the block is hidden.
 
-**Users** — sits between Sessions and Stats, which is what it joins: a user is
-a set of sessions, and their page is Stats for one of them.
+**A fresh project** — no traces at all, which is *Last trace* saying so —
+shows, in place of the blocks, the exporter settings with a copy button and
+the quickstart link. The filter bar stays.
+
+**Customize** in the header enters a mode in which every block wears a handle
+and a *Hide* control. Blocks are reordered by dragging the handle — or by
+keyboard: focus the handle, space to lift, arrows to move, space to drop, with
+the moves announced — and the order is one list across the summary, the charts,
+the breakdowns and the quality cards, so a chart may sit above the summary if
+that is what you want. Hidden blocks are listed in a strip at the bottom with
+*Show*; *Reset* restores the default; *Done* leaves the mode. A hidden block
+makes no request of its own: the timeline request serves the five charts and
+is made while any of them shows, and the breakdowns and the quality cards are
+each their own request. A person who asked for less motion gets no animation
+while dragging; the keyboard path is unchanged.
+
+The arrangement is kept on the **account**, per project, under
+`preferences.dashboard` ([accounts.md](accounts.md#preferences)), so it
+follows you between browsers and is yours whatever your role in the project.
+Every change in Customize mode is written at once; a write the server refuses
+is shown in the strip, and the arrangement on screen stays what you made.
+Two tabs writing at once is last write wins.
+
+Neither the dashboard nor the Quality screen has a live mode. Both re-read on
+a filter change and on the **Refresh** control.
+
+**Users** — sits between Sessions and Prompts, joining the screens about
+who: a user is a set of sessions, and their page is the dashboard's charts
+for one of them.
 
 The listing is `GET /api/v1/users`: id, traces, sessions, errors, cost, first
 and last seen. A sort select offers the four questions the endpoint answers —
@@ -755,17 +831,17 @@ in the server's own words.
 
 ## State in the URL
 
-Filters, the search, live mode, the time window, the stats bucket and the
-selected observation all live in the query string, and the project in the
+Filters, the search, live mode, the time window, the dashboard's bucket and
+the selected observation all live in the query string, and the project in the
 path (see [Opening it](#the-project-in-the-address)), so any view is a link:
+`/p/{project}/dashboard?from=…&to=…&group_by=hour`,
 `/p/{project}/traces?q=refund+failed`,
 `/p/{project}/traces?status=error&environment=prod`,
 `/p/{project}/traces/{id}?obs={observation_id}`,
 `/p/{project}/sessions?environment=prod`,
 `/p/{project}/traces?environment=production,staging`,
 `/p/{project}/users?sort=cost&prefix=acme:`,
-`/p/{project}/users/{id}?tab=traces&from=…`,
-`/p/{project}/stats?from=…&to=…&group_by=hour`.
+`/p/{project}/users/{id}?tab=traces&from=…`.
 Reloading, sharing and the back button all behave, and so does the same link
 with the prefix left off — it lands on the remembered project.
 
@@ -773,6 +849,20 @@ The time window is one control on every screen that has one — presets for the
 last hour, day, week and month, plus a calendar — and it travels as the
 `from`/`to` the API itself takes. A preset sets `from` and leaves the end
 open, so "the last 24 hours" keeps ending now.
+
+### The remembered window
+
+The window you last set is **remembered in this browser**, per account: a
+preset as the preset, so "the last 24 hours" still ends now a week later; a
+calendar range as its days. The screens that open on a default window — the
+dashboard, Quality and a user's page — open on the remembered one instead
+when their address carries none; every screen with the control writes it,
+the Traces and Sessions listings included. The listings never *read* it: they
+keep opening on *Any time*, because a listing that silently narrowed itself
+to last week would hide the trace you came for. A window in the address
+always wins, so a link somebody sends shows their window, not yours. Nothing
+about it goes to the server — the arrangement of the dashboard does, the
+window does not — and *Any time* forgets it.
 
 ## Appearance
 

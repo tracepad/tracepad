@@ -114,8 +114,12 @@ export function within(pathname: string): string {
 	return match[1] ?? '/';
 }
 
-/** The sections a switch keeps (#6): the first path segment under the prefix. */
+/**
+ * The sections a switch keeps (#6): the first path segment under the prefix.
+ * `stats` stays for its redirect to the dashboard (spec 034 #1).
+ */
 const SECTIONS = new Set([
+	'dashboard',
 	'traces',
 	'sessions',
 	'users',
@@ -139,12 +143,13 @@ const SECTIONS = new Set([
  * 404 a stale link lands on — is not carried over: the switcher is a way out
  * of that page, not a way to see it again under another id. Nor is a screen
  * that is under no project at all — `/p`, the bare Account tab (#14): there
- * is no section to keep, and the switch lands on the project's traces.
+ * is no section to keep, and the switch lands on the project's dashboard
+ * (spec 034 #1).
  */
 export function switchTarget(url: URL, id: string): string {
-	if (within(url.pathname) === url.pathname) return under('/traces', id);
+	if (within(url.pathname) === url.pathname) return under('/dashboard', id);
 	const segments = within(url.pathname).split('/').filter(Boolean);
-	const section = segments[0] && SECTIONS.has(segments[0]) ? segments[0] : 'traces';
+	const section = segments[0] && SECTIONS.has(segments[0]) ? segments[0] : 'dashboard';
 	const kept = section === 'settings' && segments[1] ? `/${section}/${segments[1]}` : `/${section}`;
 	const query = new URLSearchParams(url.search);
 	for (const key of [CURSOR, DIRECTION, PEEK, TRACE, OBS]) query.delete(key);

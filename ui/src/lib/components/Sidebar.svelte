@@ -1,9 +1,9 @@
 <script lang="ts" module>
-	import ChartLine from '@lucide/svelte/icons/chart-line';
 	import ChartSpline from '@lucide/svelte/icons/chart-spline';
 	import ClipboardCheck from '@lucide/svelte/icons/clipboard-check';
 	import Database from '@lucide/svelte/icons/database';
 	import FlaskConical from '@lucide/svelte/icons/flask-conical';
+	import LayoutDashboard from '@lucide/svelte/icons/layout-dashboard';
 	import ListTree from '@lucide/svelte/icons/list-tree';
 	import MessagesSquare from '@lucide/svelte/icons/messages-square';
 	import Ruler from '@lucide/svelte/icons/ruler';
@@ -23,12 +23,14 @@
 	 * in common (#1). A group is a row too; the list nests once.
 	 */
 	export const SECTIONS: (Item | Group)[] = [
+		// First, because it is the door (spec 034 #1): the screen that was
+		// Stats, seventh, is the project's front page.
+		{ href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
 		{ href: '/traces', label: 'Traces', icon: ListTree },
 		{ href: '/sessions', label: 'Sessions', icon: MessagesSquare },
 		// Between the two screens it joins (spec 023 #8): a user is a set of
-		// sessions, and the user page is Stats for one of them.
+		// sessions, and the user page is the dashboard for one of them.
 		{ href: '/users', label: 'Users', icon: Users },
-		{ href: '/stats', label: 'Stats', icon: ChartLine },
 		// Top level, not under *Evals* (spec 021 #1): a prompt is what the
 		// application ships, and filing it under the test loop would say it
 		// belongs to the eval nouns.

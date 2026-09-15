@@ -18,6 +18,7 @@
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import PeekPanel from '$lib/components/PeekPanel.svelte';
 	import RangePicker from '$lib/components/RangePicker.svelte';
+	import { rememberRange } from '$lib/range.svelte';
 	import SessionDetail from '$lib/components/SessionDetail.svelte';
 	import SessionTable from '$lib/components/SessionTable.svelte';
 	import TraceDetail from '$lib/components/TraceDetail.svelte';
@@ -177,7 +178,10 @@
 		     this row also has a control that cannot shrink beside one that can. -->
 		<RangePicker
 			range={{ from: filters.from, to: filters.to }}
-			onchange={(range) => navigate({ environment: filters.environment, user_id: filters.user_id, ...range })}
+			onchange={(range) => {
+				rememberRange(range, new Date());
+				navigate({ environment: filters.environment, user_id: filters.user_id, ...range });
+			}}
 			class="min-w-24"
 		/>
 		<Popover.Root bind:open={environmentOpen}>

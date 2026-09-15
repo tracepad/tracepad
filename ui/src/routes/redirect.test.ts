@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // and not one of the three screens outside the shell, goes to the same path
 // and query under the remembered project. An account that reaches no
 // project is sent to `/p` (#4), and `/p` itself goes on to the project's
-// traces for everybody else.
+// dashboard for everybody else (spec 034 #1).
 
 vi.mock('$app/navigation', () => ({ goto: vi.fn(), replaceState: vi.fn() }));
 vi.mock('$app/state', () => ({ page: { params: {} } }));
@@ -31,6 +31,7 @@ async function signedIn(...projects: { id: string; name: string }[]) {
 	const rest = (await import('./[...path]/+page')).load as unknown as Load;
 	const landing = (await import('./p/+page')).load as unknown as Load;
 	const account = (await import('./p/[project]/settings/account/+page')).load as unknown as Load;
+	const stats = (await import('./p/[project]/stats/+page')).load as unknown as Load;
 	const parent = () => Promise.resolve();
 	// Through a promise either way: a load that redirects before its first
 	// `await` throws synchronously, and this is what SvelteKit does with it.
@@ -43,7 +44,8 @@ async function signedIn(...projects: { id: string; name: string }[]) {
 		root: at.bind(null, root),
 		rest: at.bind(null, rest),
 		landing: at.bind(null, landing),
-		account: at.bind(null, account)
+		account: at.bind(null, account),
+		stats: at.bind(null, stats)
 	};
 }
 
@@ -106,11 +108,11 @@ describe('the Account tab', () => {
 });
 
 describe('the root', () => {
-	it('is the remembered project’s traces', async () => {
+	it('is the remembered project’s dashboard', async () => {
 		const { project, root } = await signedIn({ id: P1, name: 'checkout' }, { id: P2, name: 'staging' });
 		project.remember(P2);
 
-		expect(await redirectOf(root('/'))).toBe(`/p/${P2}/traces`);
+		expect(await redirectOf(root('/'))).toBe(`/p/${P2}/dashboard`);
 	});
 });
 
@@ -127,6 +129,20 @@ describe('an account with no projects', () => {
 		await expect(nobody.landing('/p')).resolves.toBeUndefined();
 
 		const somebody = await signedIn({ id: P1, name: 'checkout' });
-		expect(await redirectOf(somebody.landing('/p'))).toBe(`/p/${P1}/traces`);
+		expect(await redirectOf(somebody.landing('/p'))).toBe(`/p/${P1}/dashboard`);
+	});
+});
+
+// `/stats` is the dashboard's old address (spec 034 #1): a link that names it
+// lands on `/dashboard` under the same project, query and all — so a window
+// somebody shared is still the window they shared.
+describe('the Stats screen', () => {
+	it('redirects to the dashboard and keeps its query', async () => {
+		const { stats } = await signedIn({ id: P1, name: 'checkout' });
+
+		expect(
+			await redirectOf(stats(`/p/${P1}/stats?from=2026-09-01T00:00:00Z&group_by=hour`, { project: P1 }))
+		).toBe(`/p/${P1}/dashboard?from=2026-09-01T00:00:00Z&group_by=hour`);
+		expect(await redirectOf(stats(`/p/${P1}/stats`, { project: P1 }))).toBe(`/p/${P1}/dashboard`);
 	});
 });

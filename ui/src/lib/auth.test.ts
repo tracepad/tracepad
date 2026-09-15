@@ -143,8 +143,9 @@ describe('where the login form sends somebody afterwards', () => {
 		expect(returnTo(at('?next=%2Ftraces%3Fstatus%3Derror'))).toBe('/traces?status=error');
 	});
 
-	it('falls back when nothing was asked for', () => {
-		expect(returnTo(at(''))).toBe('/traces');
+	// The project's front page (spec 034 #12), through the bare-path redirect.
+	it('falls back to the dashboard when nothing was asked for', () => {
+		expect(returnTo(at(''))).toBe('/dashboard');
 	});
 
 	it('refuses anywhere but this origin', () => {
@@ -153,7 +154,7 @@ describe('where the login form sends somebody afterwards', () => {
 			'https://elsewhere.example/x',
 			'/\\elsewhere.example'
 		]) {
-			expect(returnTo(at(`?next=${encodeURIComponent(hostile)}`))).toBe('/traces');
+			expect(returnTo(at(`?next=${encodeURIComponent(hostile)}`))).toBe('/dashboard');
 		}
 	});
 
@@ -161,7 +162,7 @@ describe('where the login form sends somebody afterwards', () => {
 	// invitation is a token that has just been spent.
 	it('refuses the screens outside the shell', () => {
 		for (const outside of ['/login', '/setup', '/invite']) {
-			expect(returnTo(at(`?next=${encodeURIComponent(outside)}`))).toBe('/traces');
+			expect(returnTo(at(`?next=${encodeURIComponent(outside)}`))).toBe('/dashboard');
 		}
 	});
 

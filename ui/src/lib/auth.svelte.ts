@@ -1,5 +1,5 @@
 import { goto } from '$app/navigation';
-import type { Me, Membership } from '$lib/api/client.svelte';
+import type { Account, Me, Membership } from '$lib/api/client.svelte';
 
 // Who is signed in (spec 028 #13). There is no credential in this file any
 // more: the session is an `HttpOnly` cookie the browser holds and no script can
@@ -58,6 +58,16 @@ class Auth {
 		this.#me = me;
 	}
 
+	/**
+	 * Takes the account a write answered with, keeping the projects: the
+	 * response to `PATCH /auth/me` is the account and nothing else, and a
+	 * second `me` to learn what the first call already said would be a
+	 * round trip for nothing (spec 034 #9).
+	 */
+	revise(account: Account) {
+		if (this.#me) this.#me = { ...this.#me, account };
+	}
+
 	/** Forgets who was here; the sign-out path and the 401 path both end here. */
 	clear() {
 		this.#me = null;
@@ -107,7 +117,8 @@ class Auth {
 
 /**
  * Where the login form sends somebody after they sign in: back to the screen
- * the guard interrupted, and never anywhere else.
+ * the guard interrupted, and never anywhere else. With nothing to go back to,
+ * the project's front page (spec 034 #12).
  *
  * The check is an origin comparison rather than a prefix test, because the URL
  * parser is the only thing that agrees with the URL parser: for a special
@@ -117,7 +128,7 @@ class Auth {
  * cross-origin `goto` — but that refusal would land as a failed sign-in on a
  * reader who is in fact signed in.
  */
-export function returnTo(url: URL, fallback = '/traces'): string {
+export function returnTo(url: URL, fallback = '/dashboard'): string {
 	const asked = url.searchParams.get('next');
 	if (!asked) return fallback;
 	try {

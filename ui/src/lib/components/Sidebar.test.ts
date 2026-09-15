@@ -50,9 +50,9 @@ describe('the Evals section', () => {
 		]) {
 			expect(screen.getByRole('link', { name })).toHaveAttribute('href', `/p/${PROJECT}${href}`);
 		}
-		// Eleven destinations in all: the four that were there, the five the
-		// section holds, Prompts beside them (spec 021 #1) and Users
-		// (spec 023 #8).
+		// Eleven destinations in all: the four that were there — Stats now
+		// the Dashboard (spec 034 #1) — the five the section holds, Prompts
+		// beside them (spec 021 #1) and Users (spec 023 #8).
 		expect(nav.querySelectorAll('a')).toHaveLength(11);
 	});
 
@@ -79,11 +79,11 @@ describe('the Evals section', () => {
 });
 
 // Spec 021 #1: a prompt is a production artefact — what the application ships
-// — not an eval noun, so it is a top-level item between Stats and the section
+// — not an eval noun, so it is a top-level item between Users and the section
 // rather than a fourth child of it, which is the mistake the decision rules
 // out.
 describe('the Prompts item', () => {
-	it('sits at the top level, between Stats and Evals', () => {
+	it('sits at the top level, between Users and Evals', () => {
 		render(Sidebar);
 		const nav = screen.getByRole('navigation', { name: 'Sections' });
 
@@ -92,9 +92,15 @@ describe('the Prompts item', () => {
 			`/p/${PROJECT}/prompts`
 		);
 		const order = [...nav.querySelectorAll('a')].map((link) => link.textContent?.trim());
-		// Users sits between Sessions and Stats, which is the two screens it
-		// joins (spec 023 #8).
-		expect(order.slice(0, 5)).toEqual(['Traces', 'Sessions', 'Users', 'Stats', 'Prompts']);
+		// The dashboard is the door and comes first (spec 034 #1); Stats is
+		// gone from the sections, since it is the dashboard. Users sits
+		// between Sessions and Prompts, the screens it joins (spec 023 #8).
+		expect(order.slice(0, 5)).toEqual(['Dashboard', 'Traces', 'Sessions', 'Users', 'Prompts']);
+		expect(order).not.toContain('Stats');
+		expect(screen.getByRole('link', { name: 'Dashboard' })).toHaveAttribute(
+			'href',
+			`/p/${PROJECT}/dashboard`
+		);
 		// And the group holds the eval screens and no more.
 		const group = nav.querySelector('li > ul');
 		expect([...(group?.querySelectorAll('a') ?? [])].map((link) => link.textContent?.trim())).toEqual(

@@ -67,6 +67,7 @@ test('signing out ends the session and the next screen asks again', async ({ pag
 
 test('the ingested traces are on the list and link to themselves', async ({ page }) => {
 	await signIn(page);
+	await page.goto('/traces');
 
 	await expect(page.getByRole('link', { name: /\d/ }).first()).toBeVisible();
 	await expect(page.getByText('summarise-release-notes')).toBeVisible();

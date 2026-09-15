@@ -81,6 +81,7 @@
 	import Button from './Button.svelte';
 	import FacetField_ from './FacetField.svelte';
 	import RangePicker from './RangePicker.svelte';
+	import { rememberRange } from '$lib/range.svelte';
 	import SearchBox from './SearchBox.svelte';
 
 	// The filter bar is a mirror of `GET /api/v1/traces` (Application
@@ -149,8 +150,13 @@
 		onchange(next);
 	}
 
-	/** The window, changed by the shared control, leaving the rest alone. */
+	/**
+	 * The window, changed by the shared control, leaving the rest alone — and
+	 * remembered for the screens that open on one (spec 034 #7), though this
+	 * listing never reads it back.
+	 */
 	function setRange(range: { from?: string; to?: string }) {
+		rememberRange(range, new Date());
 		const { from: _from, to: _to, ...rest } = filters;
 		onchange({ ...rest, ...range });
 	}
