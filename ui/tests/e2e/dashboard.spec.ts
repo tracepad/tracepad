@@ -300,3 +300,35 @@ test('the window is remembered for the screens that open on one', async ({ page 
 	await page.goto('/traces');
 	await expect(page.getByRole('button', { name: /^Time range: Any time/ })).toBeVisible();
 });
+
+// The other way a row of presets goes missing: on a screen short enough that
+// the cap holds less than the calendar, the picker used to open on the day it
+// focuses — a plain `focus()` scrolls the panel to that day, and the presets
+// stood past the panel's own top edge instead of the viewport's. Landscape on
+// a phone is such a screen, and so is a laptop with the window docked low.
+test('the picker opens on its presets on a short screen', async ({ page }) => {
+	await signIn(page);
+	await page.setViewportSize({ width: 375, height: 480 });
+	// The day it focuses is the window's first, and this one sits in the
+	// month's last row — the furthest a plain `focus()` would scroll.
+	await page.goto('/dashboard?from=2026-07-26T00:00:00Z&to=2026-08-31T00:00:00Z');
+	await page.getByRole('button', { name: /^Time range: / }).click();
+
+	const picker = page.locator('[data-popover-content]');
+	await expect(picker).toBeVisible();
+	// The cap is doing its work: the panel is shorter than what it holds.
+	await expect
+		.poll(() => picker.evaluate((el) => el.scrollHeight > el.clientHeight))
+		.toBe(true);
+	const box = (await picker.boundingBox())!;
+	expect(box.y).toBeGreaterThanOrEqual(0);
+	expect(box.y + box.height).toBeLessThanOrEqual(480);
+	// Not scrolled by the opening focus; the first preset is at the top.
+	expect(await picker.evaluate((el) => el.scrollTop)).toBe(0);
+	const first = (await page.getByRole('button', { name: 'Last hour' }).boundingBox())!;
+	expect(first.y).toBeGreaterThanOrEqual(box.y);
+	expect(first.y + first.height).toBeLessThanOrEqual(box.y + box.height);
+
+	await page.getByRole('button', { name: 'Last 24 hours' }).click();
+	await expect(page).toHaveURL(/from=/);
+});

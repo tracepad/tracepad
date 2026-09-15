@@ -87,6 +87,23 @@
 	}
 
 	let open = $state(false);
+	let content = $state<HTMLElement | null>(null);
+
+	/**
+	 * The library's opening focus, without the scroll: it focuses the day the
+	 * window starts on, and a plain `focus()` scrolls every scrollable
+	 * ancestor to show it — which, now that the panel is one, opened a short
+	 * screen on the calendar with the presets scrolled past the panel's own
+	 * top edge. The same day keeps the focus (the arrow keys walk from it),
+	 * and the panel opens where it was drawn. Preventing the default is what
+	 * stops the library's own handler, which runs after this one.
+	 */
+	function focusWithoutScroll(event: Event) {
+		const day = content?.querySelector<HTMLElement>('[data-bits-day][data-focused]');
+		if (!day) return;
+		event.preventDefault();
+		day.focus({ preventScroll: true });
+	}
 
 	const cell =
 		'size-8 rounded-md text-sm data-selected:bg-accent-soft data-selected:text-accent ' +
@@ -142,6 +159,8 @@
 	     (spec 027 #6). -->
 	<Portal>
 		<DateRangePicker.Content
+			bind:ref={content}
+			onOpenAutoFocus={focusWithoutScroll}
 			sideOffset={6}
 			align="start"
 			class="border-border bg-canvas shadow-overlay z-50 w-[min(20rem,calc(100vw-1.5rem))]
