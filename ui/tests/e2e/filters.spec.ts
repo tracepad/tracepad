@@ -263,6 +263,16 @@ test('the panel is usable at a phone width and the page never scrolls sideways',
 	await page.goto('/traces');
 	await openPanel(page);
 
+	// The panel is whole, frame included: capped one level down it stood its
+	// own border past the top edge, the way the range picker stood a row of
+	// presets there.
+	const panel = (await page.locator('[data-popover-content]').boundingBox())!;
+	const viewport = page.viewportSize()!;
+	expect(panel.y).toBeGreaterThanOrEqual(0);
+	expect(panel.x).toBeGreaterThanOrEqual(0);
+	expect(panel.y + panel.height).toBeLessThanOrEqual(viewport.height);
+	expect(panel.x + panel.width).toBeLessThanOrEqual(viewport.width);
+
 	await box(page, 'Environment', 'staging').check();
 	await page.getByRole('button', { name: 'Apply' }).click();
 	await expect(page).toHaveURL(/environment=staging/);

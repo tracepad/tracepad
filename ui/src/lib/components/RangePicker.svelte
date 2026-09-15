@@ -130,12 +130,23 @@
 
 	<!-- Portalled for the same reason the filter popover is: the bar it sits in
 	     scrolls sideways on a narrow screen, and a calendar clipped by its own
-	     toolbar is unusable. -->
+	     toolbar is unusable.
+
+	     Never taller than the room it was given, and scrolling inside when the
+	     room is short. The floating layer flips to whichever side has more of
+	     it and shifts only sideways, so on a phone — where the header stacks
+	     and the trigger sits mid-screen — a panel taller than either side used
+	     to open upward with its first row of presets past the top edge, where
+	     no scroll could reach it. The variable is the height the layer
+	     measured for the side it chose, and the cap is the filter popover's
+	     (spec 027 #6). -->
 	<Portal>
 		<DateRangePicker.Content
 			sideOffset={6}
 			align="start"
-			class="border-border bg-canvas shadow-overlay z-50 w-[min(20rem,calc(100vw-1.5rem))] rounded-lg border p-3"
+			class="border-border bg-canvas shadow-overlay z-50 w-[min(20rem,calc(100vw-1.5rem))]
+				max-h-[calc(var(--bits-popover-content-available-height,100vh)-1.5rem)] overflow-y-auto
+				rounded-lg border p-3"
 		>
 			<div class="flex flex-wrap gap-1.5">
 				{#each PRESETS as shortcut (shortcut.key)}
