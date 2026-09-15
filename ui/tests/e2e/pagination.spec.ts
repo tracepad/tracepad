@@ -6,8 +6,10 @@ import { signIn as enter, state } from './harness';
 // any size from 1 to 500 and the interface reads it, while the control in the
 // bar offers the common steps.
 
+/** Signs in and opens the listing: the front page is the dashboard (spec 034 #1). */
 async function signIn(page: Page) {
 	await enter(page, state().member);
+	await page.goto('/traces');
 }
 
 const rows = (page: Page) => page.locator('tbody tr');

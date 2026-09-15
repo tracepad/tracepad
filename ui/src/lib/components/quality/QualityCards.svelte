@@ -1,6 +1,7 @@
 <script lang="ts">
+	import { page } from '$app/state';
 	import type { ScoreConfig, ScoreSeries } from '$lib/api/client.svelte';
-	import { axisRange, buildScoreSeries, figure } from '$lib/api/quality';
+	import { axisRange, buildScoreSeries, figure, qualitySearch } from '$lib/api/quality';
 	import type { Bucket } from '$lib/api/range';
 	import Chart from '$lib/components/Chart.svelte';
 	import { count } from '$lib/format';
@@ -26,6 +27,13 @@
 
 	const configOf = (one: ScoreSeries) => configs.find((config) => config.name === one.name);
 
+	/**
+	 * A card leads to its score's detail with the window carried: the
+	 * dashboard and the Quality screen keep it under the same names, so one
+	 * reading of the address serves both.
+	 */
+	const at = (name: string) => href(qualitySearch(page.url.searchParams, { name }));
+
 	/** How a value reads in a legend, by the series' type. */
 	function formatter(one: ScoreSeries) {
 		if (one.data_type === 'numeric')
@@ -39,7 +47,7 @@
 	{#each series as one (one.name + one.data_type)}
 		{@const shape = buildScoreSeries(one, window)}
 		<a
-			href={href('/quality', new URLSearchParams({ name: one.name }))}
+			href={at(one.name)}
 			title={configOf(one)?.description || undefined}
 			class="focus-visible:outline-accent block rounded-lg transition-opacity duration-100 hover:opacity-80"
 		>
@@ -58,7 +66,7 @@
 </div>
 {#if more > 0}
 	<p class="mt-2 text-sm">
-		<a href={href('/quality')} class="text-accent hover:underline">
+		<a href={at('')} class="text-accent hover:underline">
 			See all {count(series.length + more)} score names
 		</a>
 	</p>

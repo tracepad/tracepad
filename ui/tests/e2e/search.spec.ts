@@ -10,8 +10,10 @@ import { signIn as enter, state } from './harness';
 const CHAT_TRACE = '4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f';
 const CHAT_GENERATION = '2b3c4d5e6f7a8b9c';
 
+/** Signs in and opens the listing: the front page is the dashboard (spec 034 #1). */
 async function signIn(page: Page) {
 	await enter(page, state().member);
+	await page.goto('/traces');
 }
 
 test('a search narrows the listing and says where it matched', async ({ page }) => {
