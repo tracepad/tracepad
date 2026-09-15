@@ -135,7 +135,7 @@ func TestTheRolledAnswerEqualsTheLiveOne(t *testing.T) {
 	h.seedHour(t, statsHour, 1, 6, "production")
 	h.seedHour(t, statsHour, 30, 2, "staging")
 
-	for _, grouping := range []string{"hour", "day", "environment", "model"} {
+	for _, grouping := range []string{"hour", "day", "environment", "model", "total"} {
 		t.Run(grouping, func(t *testing.T) {
 			path := "/api/v1/stats?group_by=" + grouping
 			before := h.statsBuckets(t, path)

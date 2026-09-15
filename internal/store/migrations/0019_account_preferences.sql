@@ -1,0 +1,13 @@
+-- How the interface is arranged for one person (spec 034 #9).
+--
+-- A JSON object the interface owns the shape of and the server only holds:
+-- the dashboard's block order and hidden set, per project, and whatever a
+-- later screen keeps per account. Opaque on purpose — the server has no
+-- opinion on how a dashboard is arranged and must not need a migration when
+-- a block is added — and capped at 16 KiB on write, which is what keeps an
+-- opaque object from becoming a store. Written whole, never merged: a merge
+-- of nested objects is a contract nobody can read back from a table.
+--
+-- `'{}'` rather than NULL: an account that has never written one has an
+-- empty arrangement, not an unknown one, and every reader gets an object.
+ALTER TABLE accounts ADD COLUMN preferences TEXT NOT NULL DEFAULT '{}';

@@ -19,7 +19,8 @@ const me = (account: Partial<{ name: string; owner: boolean }> = {}) => ({
 		id: 'acc1',
 		email: 'her@example.com',
 		name: account.name ?? '',
-		owner: account.owner ?? false
+		owner: account.owner ?? false,
+		preferences: {}
 	},
 	projects: [{ id: 'p1', name: 'checkout', role: 'viewer' as const }]
 });

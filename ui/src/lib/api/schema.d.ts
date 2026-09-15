@@ -200,8 +200,8 @@ export interface paths {
         options?: never;
         head?: never;
         /**
-         * Change this account's display name or password
-         * @description A password change needs the current one and signs every other session of the account out, because changing it is what a person does when they think somebody else has it.
+         * Change this account's display name, password or preferences
+         * @description A password change needs the current one and signs every other session of the account out, because changing it is what a person does when they think somebody else has it. `preferences` replaces the stored object whole — validated only as a JSON object of at most 16 KiB; the interface owns its shape.
          */
         patch: operations["patchMe"];
         trace?: never;
@@ -416,7 +416,7 @@ export interface paths {
         };
         /**
          * Counts, errors, cost and latency percentiles per bucket
-         * @description `unit` says what a bucket counts: grouping by hour, day, environment or release counts traces, and grouping by model counts observations, because a trace has no model. Grouped by release, a trace that named none falls in the bucket with the empty key. An empty range answers with no buckets rather than with fabricated zero rows. Latency percentiles are histogram-based: accurate to a few percent, and stable across the expiry of the raw rows.
+         * @description `unit` says what a bucket counts: grouping by hour, day, environment, release or total counts traces, and grouping by model counts observations, because a trace has no model. Grouped by release, a trace that named none falls in the bucket with the empty key. Grouped by `total`, the whole window is one bucket under the empty key — the same shape as a day bucket, with percentiles merged over every hour in the window — and it takes every filter the other groupings take. An empty range answers with no buckets rather than with fabricated zero rows. Latency percentiles are histogram-based: accurate to a few percent, and stable across the expiry of the raw rows.
          */
         get: operations["stats"];
         put?: never;
@@ -1390,6 +1390,10 @@ export interface components {
             name: string;
             /** @description An owner has every project and every management action, including the accounts themselves */
             owner: boolean;
+            /** @description How the interface is arranged for this person: an opaque JSON object the interface owns the shape of, `{}` until written, at most 16 KiB, replaced whole by `PATCH /auth/me`. The dashboard keeps its block order under `dashboard`, keyed by project id */
+            preferences: {
+                [key: string]: unknown;
+            };
         };
         AccountDetail: components["schemas"]["Account"] & {
             /** @description Access taken away reversibly; the sessions ended when it was set */
@@ -2617,6 +2621,10 @@ export interface operations {
                         current: string;
                         new: string;
                     };
+                    /** @description Replaces the stored object; `422` for anything but an object, or one over 16 KiB */
+                    preferences?: {
+                        [key: string]: unknown;
+                    };
                 };
             };
         };
@@ -3148,9 +3156,9 @@ export interface operations {
                 to?: components["parameters"]["To"];
                 /** @description The environment a trace ran in. A comma-separated list matches **any** of them: `?environment=production,staging`. Items are trimmed and duplicates collapse; an empty item (`a,,b`, `a,`) is a 400, as an empty value is, and so is repeating the parameter — one list, one parameter. At most 100 items; beyond that, a 400. An environment whose name contains a comma is not expressible here. `GET /api/v1/facets` lists the values in a range with their counts */
                 environment?: components["parameters"]["Environment"];
-                /** @description Restricts every bucket to one end user. The shape, the groupings and `unit` are unchanged; a `hour` or `day` timeline additionally carries `sessions` per bucket. Statistics for one user trail the raw data by the same rollup lag as the rest */
+                /** @description Restricts every bucket to one end user. The shape, the groupings and `unit` are unchanged; a `hour` or `day` timeline, and the `total` bucket, additionally carry `sessions` per bucket. Statistics for one user trail the raw data by the same rollup lag as the rest */
                 user_id?: string;
-                group_by?: "hour" | "day" | "model" | "environment" | "release";
+                group_by?: "hour" | "day" | "model" | "environment" | "release" | "total";
             };
             header?: never;
             path?: never;
@@ -3166,7 +3174,7 @@ export interface operations {
                 content: {
                     "application/json": {
                         /** @enum {string} */
-                        group_by: "hour" | "day" | "model" | "environment" | "release";
+                        group_by: "hour" | "day" | "model" | "environment" | "release" | "total";
                         /** @enum {string} */
                         unit: "trace" | "observation";
                         buckets: {
@@ -3181,7 +3189,7 @@ export interface operations {
                                 output?: number;
                                 cache_read?: number;
                             };
-                            /** @description Present only with `user_id` and an `hour` or `day` grouping: how many of that user's sessions began in this bucket. A session is counted where it starts, so a sum over any range is exact */
+                            /** @description Present only with `user_id` and an `hour`, `day` or `total` grouping: how many of that user's sessions began in this bucket. A session is counted where it starts, so a sum over any range is exact */
                             sessions?: number;
                             latency_ms: {
                                 p50?: number | null;

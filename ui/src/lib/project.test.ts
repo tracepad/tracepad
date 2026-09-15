@@ -23,7 +23,7 @@ async function fresh() {
 }
 
 const me = (id: string, ...projects: { id: string; name: string; role: 'viewer' | 'editor' }[]) => ({
-	account: { id, email: `${id}@example.com`, name: '', owner: false },
+	account: { id, email: `${id}@example.com`, name: '', owner: false, preferences: {} },
 	projects
 });
 

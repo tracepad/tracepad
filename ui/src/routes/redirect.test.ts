@@ -23,7 +23,7 @@ async function signedIn(...projects: { id: string; name: string }[]) {
 	vi.resetModules();
 	const { auth } = await import('$lib/auth.svelte');
 	auth.adopt({
-		account: { id: 'acc1', email: 'her@example.com', name: '', owner: false },
+		account: { id: 'acc1', email: 'her@example.com', name: '', owner: false, preferences: {} },
 		projects: projects.map((one) => ({ ...one, role: 'editor' as const }))
 	});
 	const { project } = await import('$lib/project.svelte');

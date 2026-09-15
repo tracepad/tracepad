@@ -457,6 +457,7 @@ func TestEveryToolMatchesItsEndpoint(t *testing.T) {
 		{"list_scores", map[string]any{"trace_id": traceHex(1)},
 			"/api/v1/scores?trace_id=" + traceHex(1)},
 		{"get_stats", map[string]any{"group_by": "model"}, "/api/v1/stats?group_by=model"},
+		{"get_stats", map[string]any{"group_by": "total"}, "/api/v1/stats?group_by=total"},
 		{"list_datasets", map[string]any{}, "/api/v1/datasets"},
 		{"get_dataset_items", map[string]any{"name": "golden"}, "/api/v1/datasets/golden/items"},
 		{"get_dataset_items", map[string]any{"name": "golden", "version": 1},
