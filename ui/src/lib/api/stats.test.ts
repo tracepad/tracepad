@@ -209,13 +209,21 @@ describe('summarize', () => {
 			expect(figure.direction).toBeNull();
 			expect(figure.previous).toBeNull();
 		}
-		// A previous window with traces but no cost, and no errors: the cost
-		// and the rate are new against it, the count is not.
+		// A previous window with traces but no cost, no errors and nothing
+		// timed: the cost is new against it (a percentage of nothing), the
+		// count is not, the error rate is a difference and says so
+		// (Decision 13), and the untimed p95 is absent, so new.
 		const quiet = summarize(now, bucket('', { count: 50, error_count: 0, latency_ms: {} }));
 		expect(quiet[0].change).toBe('+140%');
 		expect(quiet[1].change).toBe(NEW);
-		expect(quiet[2]).toMatchObject({ change: NEW, previous: '0%' });
+		expect(quiet[2]).toMatchObject({ change: '+5 pt', previous: '0%', direction: 'up', tone: 'worse' });
 		expect(quiet[3].change).toBe(NEW);
+		// No errors in either window is no movement, not news.
+		const calm = summarize(
+			bucket('', { count: 10, error_count: 0 }),
+			bucket('', { count: 10, error_count: 0 })
+		);
+		expect(calm[2]).toMatchObject({ change: '±0 pt', direction: 'flat', tone: null });
 	});
 
 	it('dashes an absent figure and gives it no change', () => {

@@ -195,8 +195,14 @@
 	);
 	const figures = $derived(summarize(summary?.now ?? null, summary?.before ?? null));
 	const cards = $derived(busiest(scores, QUALITY_CARDS));
-	/** A fresh project: the listing is empty and nothing failed (Decision 6). */
-	const fresh = $derived(lastTrace === null && !failure);
+	/**
+	 * A fresh project: the listing is empty and nothing failed (Decision 6).
+	 * The listing carries the environment filter (Decision 4), so an empty
+	 * answer under one says "none in this environment", not "none at all" —
+	 * that is the header's *No traces yet* and empty charts, never the
+	 * instructions.
+	 */
+	const fresh = $derived(lastTrace === null && !failure && !environment);
 
 	function sum(values: (number | null)[]): number {
 		return values.reduce((carry: number, value) => carry + (value ?? 0), 0);

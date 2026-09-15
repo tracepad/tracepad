@@ -166,6 +166,16 @@ describe('the last-trace line', () => {
 		expect(listTraces.mock.calls[0][1]).toEqual({ limit: 1 });
 	});
 
+	it('keeps the blocks when only the environment filter finds nothing', async () => {
+		url.current = new URL(`${AT}&environment=nowhere`);
+		listTraces.mockResolvedValue({ traces: [], next_cursor: null, prev_cursor: null });
+		render(Page);
+
+		await waitFor(() => expect(screen.getByText('No traces yet')).toBeInTheDocument());
+		expect(screen.queryByText(/OTEL_EXPORTER_OTLP_TRACES_ENDPOINT/)).toBeNull();
+		expect(document.querySelector('[aria-label="Dashboard blocks"]')).not.toBeNull();
+	});
+
 	it('says no traces yet, and shows the onboarding card in place of the blocks', async () => {
 		listTraces.mockResolvedValue({ traces: [], next_cursor: null, prev_cursor: null });
 		render(Page);

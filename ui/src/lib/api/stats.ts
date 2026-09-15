@@ -224,8 +224,9 @@ export type SummaryFigure = {
 	previous: string | null;
 	/**
 	 * The change against the previous window: a signed percentage, signed
-	 * points, or a signed duration; `new` when the previous figure is zero or
-	 * absent; null when this window's figure is absent.
+	 * points, or a signed duration; `new` when the previous figure is absent,
+	 * or is zero where the change would divide by it (traces and cost —
+	 * Decision 13); null when this window's figure is absent.
 	 */
 	change: string | null;
 	direction: 'up' | 'down' | 'flat' | null;
@@ -257,6 +258,9 @@ export function summarize(bucket: StatsBucket | null, previous: StatsBucket | nu
 	];
 }
 
+/** The changes that divide by the previous figure, and so have no answer against zero. */
+const RATIOS = new Set<(value: number, previous: number) => string>();
+
 function figure(
 	id: SummaryFigure['id'],
 	label: string,
@@ -271,9 +275,11 @@ function figure(
 	}
 	const rendered = render(value);
 	const before = previous === null ? null : render(previous);
-	// A previous of zero is not a base a percentage can be taken against,
-	// and an absent one is a window before the project: both read as new.
-	if (previous === null || previous === 0) {
+	// An absent previous is a window before the project, and a zero is not a
+	// base a percentage can be taken against: both read as new. A difference
+	// — points, a duration — has an answer against zero, and gives it
+	// (Decision 13): no errors last week and 3% this week is `+3 pt`, worse.
+	if (previous === null || (previous === 0 && RATIOS.has(change))) {
 		return { id, label, value: rendered, previous: before, change: NEW, direction: null, tone: null };
 	}
 	const direction = value > previous ? 'up' : value < previous ? 'down' : 'flat';
@@ -290,6 +296,7 @@ function percentage(value: number): string {
 function percent(value: number, previous: number): string {
 	return signed(((value - previous) / previous) * 100, '%');
 }
+RATIOS.add(percent);
 
 function points(value: number, previous: number): string {
 	return signed(value - previous, ' pt');
