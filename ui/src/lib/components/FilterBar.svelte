@@ -250,20 +250,22 @@
 			{/snippet}
 		</Popover.Trigger>
 		<Popover.Portal>
+			<!-- The cap is on the panel itself, border and padding included, so
+			     the box the layer measured is the box it draws: capped one
+			     level down, the panel stood its own frame past the edge. The
+			     range picker keeps the same cap. -->
 			<Popover.Content
 				sideOffset={6}
 				align="start"
-				class="border-border bg-canvas shadow-overlay z-50 w-[min(22rem,calc(100vw-1.5rem))]
+				class="border-border bg-canvas shadow-overlay z-50 flex w-[min(22rem,calc(100vw-1.5rem))]
+					max-h-[calc(var(--bits-popover-content-available-height,100vh)-1.5rem)] flex-col
 					rounded-lg border p-3"
 			>
 				<!-- The fields scroll and the two buttons do not: with three
 				     checkbox lists in it the panel is taller than a laptop's
 				     viewport, and Apply below the fold is a panel that cannot be
 				     used (spec 027 #6). -->
-				<form
-					onsubmit={apply}
-					class="flex max-h-[calc(var(--bits-popover-content-available-height,100vh)-1.5rem)] flex-col"
-				>
+				<form onsubmit={apply} class="flex min-h-0 flex-col">
 					<div class="grid grid-cols-2 gap-x-2 gap-y-2.5 overflow-y-auto px-0.5 py-0.5">
 						{#each FIELD_NAMES as name (name)}
 							{@const field = FIELDS[name]}
