@@ -95,3 +95,17 @@ export function spanMs(range: Range, now: Date): number {
 	if (Number.isNaN(from) || Number.isNaN(to)) return Number.POSITIVE_INFINITY;
 	return to - from;
 }
+
+/**
+ * The window of the same length ending where this one begins (spec 034 #2):
+ * `from − (to − from)` to `from`, with `to` read as now for an open window.
+ * Null when the window has no start, because then there is nothing before
+ * it to compare against.
+ */
+export function previousRange(range: Range, now: Date): Range | null {
+	if (!range.from) return null;
+	const from = new Date(range.from).getTime();
+	const to = range.to ? new Date(range.to).getTime() : now.getTime();
+	if (Number.isNaN(from) || Number.isNaN(to) || to <= from) return null;
+	return { from: new Date(from - (to - from)).toISOString(), to: new Date(from).toISOString() };
+}

@@ -29,7 +29,7 @@ const children = createRawSnippet(() => ({ render: () => '<div>inside</div>' }))
 
 function reaching(...ids: string[]) {
 	auth.adopt({
-		account: { id: 'acc1', email: 'her@example.com', name: '', owner: true },
+		account: { id: 'acc1', email: 'her@example.com', name: '', owner: true, preferences: {} },
 		projects: ids.map((id) => ({ id, name: id.slice(0, 4), role: 'owner' as const }))
 	});
 }

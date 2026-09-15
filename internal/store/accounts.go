@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -56,25 +57,33 @@ type Account struct {
 	Pending     bool
 	CreatedAt   int64
 	LastLoginAt *int64
+	// Preferences is how the interface is arranged for this person (spec
+	// 034 #9): a JSON object the interface owns the shape of and the server
+	// only holds, `{}` until written. Opaque here on purpose — the server
+	// has no opinion on how a dashboard is arranged.
+	Preferences json.RawMessage
 
 	hash []byte
 }
 
 // accountColumns is the one SELECT list every account read shares.
-const accountColumns = `id, email, name, password_hash, owner, disabled, created_at, last_login_at`
+const accountColumns = `id, email, name, password_hash, owner, disabled, created_at, last_login_at, preferences`
 
 func scanAccount(row interface{ Scan(...any) error }) (*Account, error) {
 	var (
-		a         Account
-		hash      []byte
-		owner     int64
-		disabled  int64
-		lastLogin sql.NullInt64
+		a           Account
+		hash        []byte
+		owner       int64
+		disabled    int64
+		lastLogin   sql.NullInt64
+		preferences string
 	)
-	if err := row.Scan(&a.ID, &a.Email, &a.Name, &hash, &owner, &disabled, &a.CreatedAt, &lastLogin); err != nil {
+	if err := row.Scan(&a.ID, &a.Email, &a.Name, &hash, &owner, &disabled, &a.CreatedAt, &lastLogin,
+		&preferences); err != nil {
 		return nil, err
 	}
 	a.hash = hash
+	a.Preferences = json.RawMessage(preferences)
 	a.Owner = owner != 0
 	a.Disabled = disabled != 0
 	a.Pending = len(hash) == 0
@@ -432,13 +441,18 @@ func (a *AccountCreate) apply(tx *sql.Tx) error {
 	return err
 }
 
-// AccountUpdate changes a name, the owner flag or the disabled flag.
+// AccountUpdate changes a name, the owner flag, the disabled flag, or the
+// preferences.
 type AccountUpdate struct {
 	AccountID string
 	Name      *string
 	Owner     *bool
 	Disabled  *bool
-	Now       int64
+	// Preferences replaces the stored object whole (spec 034 #9). Only the
+	// account's own route sets it: an owner's edit of somebody else is
+	// about their standing, not about how their screens are arranged.
+	Preferences json.RawMessage
+	Now         int64
 
 	Account *Account
 }
@@ -469,6 +483,9 @@ func (a *AccountUpdate) apply(tx *sql.Tx) error {
 		if _, err := tx.Exec(`UPDATE accounts SET name = ? WHERE id = ?`, *a.Name, account.ID); err != nil {
 			return fmt.Errorf("rename account: %w", err)
 		}
+	}
+	if err := setPreferences(tx, account.ID, a.Preferences); err != nil {
+		return err
 	}
 	if a.Owner != nil {
 		owner := 0
@@ -717,8 +734,10 @@ type PasswordChange struct {
 	// Name rides along when one `PATCH` carries both, so that a wrong
 	// current password leaves neither changed. Two jobs would commit the
 	// rename and then answer 403, and the person would be looking at an
-	// error message beside their new display name.
-	Name *string
+	// error message beside their new display name. Preferences ride for
+	// the same reason (spec 034 #9).
+	Name        *string
+	Preferences json.RawMessage
 
 	Account *Account
 }
@@ -749,6 +768,9 @@ func (p *PasswordChange) apply(tx *sql.Tx) error {
 		if _, err := tx.Exec(`UPDATE accounts SET name = ? WHERE id = ?`, *p.Name, account.ID); err != nil {
 			return fmt.Errorf("rename account: %w", err)
 		}
+	}
+	if err := setPreferences(tx, account.ID, p.Preferences); err != nil {
+		return err
 	}
 	if _, err := tx.Exec(`DELETE FROM account_sessions WHERE account_id = ? AND id <> ?`,
 		account.ID, p.Keep); err != nil {
@@ -1007,6 +1029,21 @@ func insertToken(tx *sql.Tx, id, accountID string, now, expiresAt int64) error {
 		id, accountID, now, expiresAt)
 	if err != nil {
 		return fmt.Errorf("create invitation: %w", err)
+	}
+	return nil
+}
+
+// setPreferences writes the object whole, and nothing when there is none to
+// write: a nil message is "not in this request", never "empty". What arrives
+// here is already known to be an object under the cap — the handler is the
+// one validator (spec 034 #9).
+func setPreferences(tx *sql.Tx, accountID string, preferences json.RawMessage) error {
+	if preferences == nil {
+		return nil
+	}
+	if _, err := tx.Exec(`UPDATE accounts SET preferences = ? WHERE id = ?`,
+		string(preferences), accountID); err != nil {
+		return fmt.Errorf("write the preferences: %w", err)
 	}
 	return nil
 }

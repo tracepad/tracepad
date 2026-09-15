@@ -145,6 +145,9 @@ func TestLiveTokensEqualTheRolledOnes(t *testing.T) {
 		{GroupByEnvironment, func(r StatsRow) (string, bool) { return r.Environment, r.Model == "" }},
 		{GroupByRelease, func(r StatsRow) (string, bool) { return r.Release, r.Model == "" }},
 		{GroupByModel, func(r StatsRow) (string, bool) { return r.Model, r.Model != "" }},
+		// The whole window under the empty key (spec 034 #3): `GROUP BY ''`
+		// is one group, and the aggregate says so.
+		{GroupByTotal, func(r StatsRow) (string, bool) { return "", r.Model == "" }},
 	} {
 		t.Run(tc.groupBy, func(t *testing.T) {
 			filter := StatsFilter{From: &from, To: &to, GroupBy: tc.groupBy}

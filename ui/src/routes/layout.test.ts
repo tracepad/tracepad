@@ -25,7 +25,7 @@ async function guard(signedIn: boolean, setupRequired: boolean) {
 	const { auth } = await import('$lib/auth.svelte');
 	if (signedIn) {
 		auth.adopt({
-			account: { id: 'acc1', email: 'her@example.com', name: '', owner: false },
+			account: { id: 'acc1', email: 'her@example.com', name: '', owner: false, preferences: {} },
 			projects: []
 		});
 	}

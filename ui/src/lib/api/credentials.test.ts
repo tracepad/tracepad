@@ -34,7 +34,7 @@ vi.mock('$app/state', () => ({
 }));
 
 const ME = {
-	account: { id: 'acc1', email: 'her@example.com', name: 'Her', owner: true },
+	account: { id: 'acc1', email: 'her@example.com', name: 'Her', owner: true, preferences: {} },
 	projects: [
 		{ id: PROJECT, name: 'checkout', role: 'owner' as const },
 		{ id: OTHER, name: 'staging', role: 'owner' as const }

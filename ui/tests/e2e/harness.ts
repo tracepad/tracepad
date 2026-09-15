@@ -116,7 +116,8 @@ export async function acceptInvite(baseURL: string, link: string) {
 /**
  * Signs in through the form, which is the one way in (spec 028 #13). The
  * cookie the server sets is the session for the rest of the test, and the
- * form lands on the remembered project's traces (spec 029 #3).
+ * form lands on the remembered project's dashboard (spec 029 #3, spec 034
+ * #1), which writes its window into the address.
  *
  * The suites navigate by bare path — `page.goto('/traces?…')` — and go
  * through that same redirect, the way every link written before the prefix
@@ -128,7 +129,7 @@ export async function signIn(page: Page, account: Account) {
 	// Exact: the eye beside the field is labelled "Show the password".
 	await page.getByLabel('Password', { exact: true }).fill(account.password);
 	await page.getByRole('button', { name: 'Sign in' }).click();
-	await expect(page).toHaveURL(/\/p\/[0-9a-f]{32}\/traces$/);
+	await expect(page).toHaveURL(/\/p\/[0-9a-f]{32}\/dashboard(\?|$)/);
 }
 
 /**

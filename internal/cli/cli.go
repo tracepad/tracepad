@@ -183,8 +183,8 @@ const Usage = `Client commands (they talk to a running server over HTTP):
   tracepad prompts diff <name> --from N --to M
   tracepad prompts label <name> <label> (--version N | --rm)
   tracepad prompts rm   <name> [--yes]
-  tracepad stats        [--group-by hour|day|model|environment|release] [--since 1h]
-                        [--until T] [--env E] [--user U]
+  tracepad stats        [--group-by hour|day|model|environment|release|total]
+                        [--since 1h] [--until T] [--env E] [--user U]
   tracepad facets       [--since 1h] [--until T]
   tracepad system
 

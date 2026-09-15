@@ -15,7 +15,7 @@ trend and three breakdowns, and the same numbers in the API, the CLI and MCP.
 A score is counted in **the hour of the trace it names** — not in the hour it
 was graded — and it takes that trace's environment, release and model. That is
 what makes a quality curve line up with the traffic and cost curves on the
-[Stats](ui.md#screens) screen: a judge that grades yesterday's traffic today
+[dashboard](ui.md#dashboard): a judge that grades yesterday's traffic today
 moves the point where the traffic was, not where the judge was.
 
 Two kinds of score are therefore absent:

@@ -46,6 +46,7 @@
     "@lezer/highlight": "1.2.3",
     "@lucide/svelte": "^1.35.0",
     "bits-ui": "^2.19.0",
+    "svelte-dnd-action": "^0.9.79",
     "uplot": "^1.6.32"
   }
 }

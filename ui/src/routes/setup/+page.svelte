@@ -49,7 +49,7 @@
 		try {
 			await api.setup({ token, email: email.trim(), password, name: name.trim() });
 			await begin();
-			await goto(bareTarget('/traces'), { replaceState: true });
+			await goto(bareTarget('/dashboard'), { replaceState: true });
 		} catch (cause) {
 			error = said(cause, 'Something went wrong setting this server up.');
 		} finally {

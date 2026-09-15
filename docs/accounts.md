@@ -126,10 +126,24 @@ refused while a project key went on working.
 | | |
 |---|---|
 | `GET /api/v1/auth/me` | The account and every project it can reach, with the role in each. The one call the interface makes on load. |
-| `PATCH /api/v1/auth/me` | Change the display name, or the password with `{"password": {"current", "new"}}`. A password change signs every **other** session out. |
+| `PATCH /api/v1/auth/me` | Change the display name, the password with `{"password": {"current", "new"}}`, or the preferences with `{"preferences": {…}}` — any of them, together or alone. A password change signs every **other** session out. |
 | `GET /api/v1/auth/sessions` | Where this account is signed in, the current one marked, with the user agent and address of each. |
 | `DELETE /api/v1/auth/sessions` | Sign out everywhere but here. What you press after a laptop goes missing. |
 | `POST /api/v1/auth/logout` | End this session. |
+
+### Preferences
+
+`account.preferences` on `GET /api/v1/auth/me` is how the interface is
+arranged for this person: a JSON object the interface owns the shape of and
+the server only holds — `{}` until written, at most 16 KiB, and validated as
+nothing more than *an object under the size* (`422` otherwise). `PATCH
+/api/v1/auth/me {"preferences": {…}}` replaces it **whole**: send back the
+object you read, with your change in it, never a fragment to be merged. The
+dashboard keeps its block order and hidden set under `dashboard`, keyed by
+project id ([ui.md](ui.md#dashboard)); the arrangement follows the person
+between browsers because it is on the account. It is the account's own: an
+owner's `PATCH /api/v1/accounts/{id}` does not touch it, a project key has
+none, and neither the CLI nor MCP reads or writes it.
 
 ## Who may do what
 
@@ -239,7 +253,9 @@ All of the above is a screen as well as a `curl`. The setup and invitation
 links open the two screens that read `#token=`; `/login` takes the email and
 the password; the sidebar's account menu leads to *Account* (`/settings/account`),
 where anybody changes their own name and password and ends their other
-sessions — an account that is a member of nothing included.
+sessions — an account that is a member of nothing included. A project opens
+on its [dashboard](ui.md#dashboard), whose arrangement is kept on the account
+(above) and so follows the person from one browser to the next.
 
 Which project a screen is about is in its address — every screen about a
 project lives under `/p/{project id}` — and the switcher at the top of the sidebar lists the

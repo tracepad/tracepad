@@ -30,10 +30,27 @@ const defaultGroupBy = store.GroupByDay
 
 // statsGroupings is every value `group_by` accepts, in the order the error
 // message and `openapi.json` list them. One list, so a grouping the store
-// knows and the API rejects cannot happen (spec 012 #4 added `release`).
+// knows and the API rejects cannot happen (spec 012 #4 added `release`,
+// spec 034 #3 `total`).
 var statsGroupings = []string{
 	store.GroupByHour, store.GroupByDay, store.GroupByModel,
-	store.GroupByEnvironment, store.GroupByRelease,
+	store.GroupByEnvironment, store.GroupByRelease, store.GroupByTotal,
+}
+
+// carriesSessions reports whether an answer to this filter carries
+// `sessions` per bucket: a count of sessions has no meaning in `stats_hourly`
+// and no bucket to live in outside a timeline, so it rides exactly the one
+// question it answers — this user's activity over time (spec 023 #6) — and
+// the whole window as one bucket, which is that timeline summed (spec 034 #3).
+func carriesSessions(filter store.StatsFilter) bool {
+	if filter.UserID == "" {
+		return false
+	}
+	switch filter.GroupBy {
+	case store.GroupByHour, store.GroupByDay, store.GroupByTotal:
+		return true
+	}
+	return false
 }
 
 // bucket accumulates one group, from either side of the seam.
@@ -115,11 +132,7 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		}
 		return b
 	}
-	// A count of sessions has no meaning in `stats_hourly` and no bucket to
-	// live in outside a timeline, so it rides exactly the one question it
-	// answers: this user's activity over time (spec 023 #6).
-	sessions := filter.UserID != "" &&
-		(filter.GroupBy == store.GroupByHour || filter.GroupBy == store.GroupByDay)
+	sessions := carriesSessions(filter)
 	if err := s.readStats(project, filter, at); err != nil {
 		slog.Error("read stats failed", "err", err)
 		writeError(w, http.StatusInternalServerError, "failed to compute the statistics")
@@ -359,8 +372,7 @@ func tokensObject(t store.Tokens) object {
 // is put in it, would invent a `count: 0, sessions: 1` bucket for a session
 // whose traces the filter removed (found in review of PR #42).
 func (s *Server) liveSessions(projectID string, filter store.StatsFilter, from, to int64, at func(string) *bucket) error {
-	if filter.UserID == "" ||
-		(filter.GroupBy != store.GroupByHour && filter.GroupBy != store.GroupByDay) {
+	if !carriesSessions(filter) {
 		return nil
 	}
 	return s.store.UserSessionStarts(projectID, filter.UserID, filter.Environment, from, to,
@@ -383,6 +395,8 @@ func rollupKey(groupBy string, row store.StatsRow) string {
 		return row.Model
 	case store.GroupByRelease:
 		return row.Release
+	case store.GroupByTotal:
+		return ""
 	default:
 		return row.Environment
 	}

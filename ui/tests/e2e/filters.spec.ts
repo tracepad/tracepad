@@ -346,14 +346,14 @@ test('the sessions bar keeps its controls inside it at a phone width', async ({
 
 /**
  * The other side of Decision 22: the window control is shared by five bars,
- * and only the two that pass it a minimum may make it narrow. On Stats and
+ * and only the two that pass it a minimum may make it narrow. On the dashboard and
  * Quality the field and the bucket buttons beside it cannot shrink at all, so
  * a picker allowed to shrink there absorbs the whole deficit — for one commit
  * on this branch it was 34 px wide with **no label at all**, on the default
  * window, which is not even a narrow one. Those two bars scroll instead, which
  * is what they have always done.
  */
-for (const screen of ['/stats', '/quality'] as const) {
+for (const screen of ['/dashboard', '/quality'] as const) {
 	test(`the window keeps its label on ${screen} at a phone width`, async ({ page }, testInfo) => {
 		test.skip(testInfo.project.name !== 'mobile', 'the narrow width is the test');
 		await signIn(page);
@@ -388,6 +388,7 @@ test('an environment first seen after the panel closed is on the list when it re
 	);
 	await onTheFacetList(fresh.key, 'production');
 	await signIn(page, fresh.account);
+	await page.goto('/traces');
 
 	await openPanel(page);
 	await expect(box(page, 'Environment', 'production')).toBeVisible();

@@ -208,6 +208,27 @@ export function orderSeries(series: ScoreSeries[], configs: ScoreConfig[]): Scor
 	});
 }
 
+/** How many scores a series holds over the window, across its buckets. */
+export function scoresIn(series: ScoreSeries): number {
+	return series.buckets.reduce((sum, bucket) => sum + bucket.count, 0);
+}
+
+/**
+ * The dashboard's card order (spec 034 #5): the series with the most scores
+ * first, the name and type breaking ties so two reads agree — because the
+ * most-graded name is the one most likely to be the project's own verdict.
+ */
+export function busiest(series: ScoreSeries[], limit: number): ScoreSeries[] {
+	return [...series]
+		.sort(
+			(a, b) =>
+				scoresIn(b) - scoresIn(a) ||
+				a.name.localeCompare(b.name) ||
+				a.data_type.localeCompare(b.data_type)
+		)
+		.slice(0, limit);
+}
+
 /** One row of a breakdown table: the key, the count, and the type's summary. */
 export type ScoreBreakdownRow = {
 	key: string;

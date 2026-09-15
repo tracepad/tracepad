@@ -101,13 +101,17 @@ func TestStatsGroupsByRelease(t *testing.T) {
 		"input":  in.Properties["group_by"].Enum,
 		"output": out.Properties["group_by"].Enum,
 	} {
-		if !slices.Contains(enum, "release") {
-			t.Errorf("the %s group_by enum has no release: %v", label, enum)
+		for _, value := range []string{"release", "total"} {
+			if !slices.Contains(enum, value) {
+				t.Errorf("the %s group_by enum has no %s: %v", label, value, enum)
+			}
 		}
 	}
-	// The description says when to reach for it, which is the only thing a
-	// model has to go on when choosing between five groupings.
-	if !strings.Contains(stats.Description, "release") {
-		t.Errorf("the tool's description does not mention the release grouping: %q", stats.Description)
+	// The description says when to reach for each, which is the only thing
+	// a model has to go on when choosing between six groupings.
+	for _, value := range []string{"release", "total"} {
+		if !strings.Contains(stats.Description, value) {
+			t.Errorf("the tool's description does not mention the %s grouping: %q", value, stats.Description)
+		}
 	}
 }

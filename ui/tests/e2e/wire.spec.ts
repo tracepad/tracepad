@@ -17,6 +17,7 @@ async function signIn(page: Page) {
 
 test('the type filter narrows the listing and survives a reload', async ({ page }) => {
 	await signIn(page);
+	await page.goto('/traces');
 
 	await page.getByRole('button', { name: /Filters/ }).click();
 	await page.getByLabel('Type').selectOption('tool');
@@ -125,10 +126,10 @@ test('the statistics group by release, with the unnamed traces in their own row'
 	page
 }) => {
 	await signIn(page);
-	// The window is named, as stats.spec.ts names it: the fixtures carry
+	// The window is named, as dashboard.spec.ts names it: the fixtures carry
 	// fixed timestamps, and the default preset is the last seven days, which
 	// they fell out of a week after this test was written.
-	await page.goto('/stats?from=2026-08-01T00:00:00Z&to=2026-09-30T00:00:00Z');
+	await page.goto('/dashboard?from=2026-08-01T00:00:00Z&to=2026-09-30T00:00:00Z');
 
 	const releases = page.locator('section', { hasText: 'By release' });
 	await expect(releases).toBeVisible();

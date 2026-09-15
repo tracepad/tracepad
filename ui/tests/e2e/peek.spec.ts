@@ -5,8 +5,10 @@ import { signIn as enter, state } from './harness';
 // beside the listing it came from, the listing survives underneath, and what
 // the panel shows is still a link somebody can send.
 
+/** Signs in and opens the listing: the front page is the dashboard (spec 034 #1). */
 async function signIn(page: Page) {
 	await enter(page, state().member);
+	await page.goto('/traces');
 }
 
 /**

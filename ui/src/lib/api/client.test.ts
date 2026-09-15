@@ -13,7 +13,7 @@ async function fresh() {
 
 /** A signed-in session with one project, which is what most screens run on. */
 const ME = {
-	account: { id: 'acc1', email: 'her@example.com', name: '', owner: false },
+	account: { id: 'acc1', email: 'her@example.com', name: '', owner: false, preferences: {} },
 	projects: [{ id: 'p1', name: 'checkout', role: 'editor' as const }]
 };
 

@@ -183,9 +183,12 @@ Three ways, all reading the same API.
 
 **The browser.** Open the setup link the first run printed and create your
 account; after that it is `http://localhost:4318/` and an email and a password.
-The root lands on your project's traces at `/p/{project id}/traces` — every
-screen carries its project in the address, and the switcher at the top of the
-sidebar moves between projects. See [ui.md](ui.md) and
+The root lands on your project's dashboard at `/p/{project id}/dashboard` —
+the exporter settings above, until the first trace arrives, then the
+traffic, the cost, the errors and the latency of the window with their
+movement against the window before; *Traces* in the sidebar is the listing.
+Every screen carries its project in the address, and the switcher at the top
+of the sidebar moves between projects. See [ui.md](ui.md) and
 [accounts.md](accounts.md).
 
 **The terminal.** The CLI is the same binary:

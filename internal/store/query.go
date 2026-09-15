@@ -553,6 +553,12 @@ const (
 	// release groups under the empty key, which the clients render as
 	// *(no release)*.
 	GroupByRelease = "release"
+	// GroupByTotal answers "how much, over the whole window" as one bucket
+	// under the empty key (spec 034 #3): the number a dashboard's summary
+	// tile shows, merged from the same histograms the timed groupings merge
+	// within a bucket — because a p95 over a week is not a function of
+	// seven daily p95s.
+	GroupByTotal = "total"
 )
 
 // StatsFilter bounds the statistics scan. From/To always bound the *trace*
@@ -747,6 +753,10 @@ func statsKey(groupBy string) string {
 		// NULL survives the scan as the empty key: a trace that named no
 		// release is a bucket, not an omission (spec 012, API contract).
 		return `t.release`
+	case GroupByTotal:
+		// One constant key, so the whole window folds into one bucket and
+		// `GROUP BY` it is one group (spec 034 #3).
+		return `''`
 	default:
 		return `t.environment`
 	}

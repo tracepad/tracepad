@@ -740,8 +740,16 @@ class Api {
 		return this.#json<Me>('/api/v1/auth/me', { anonymous: true, signal });
 	}
 
-	/** A display name, a password, or both; a password change needs the old one. */
-	patchMe(body: { name?: string; password?: { current: string; new: string } }) {
+	/**
+	 * A display name, a password, the preferences, or any of them together;
+	 * a password change needs the old one, and the preferences replace the
+	 * stored object whole (spec 034 #9).
+	 */
+	patchMe(body: {
+		name?: string;
+		password?: { current: string; new: string };
+		preferences?: Account['preferences'];
+	}) {
 		return this.#json<{ account: Account }>('/api/v1/auth/me', { method: 'PATCH', body });
 	}
 

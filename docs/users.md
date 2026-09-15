@@ -8,7 +8,7 @@ to avoid.
 
 So users get a rollup of their own: the same hourly grain, one dimension over.
 A listing of who is there, a page for each of them, and the same charts and
-breakdowns the [Stats](ui.md#screens) screen draws, restricted to one account.
+breakdowns the [dashboard](ui.md#dashboard) draws, restricted to one account.
 
 ## What a user is
 
@@ -163,6 +163,6 @@ See [mcp.md](mcp.md).
 
 ## In the web interface
 
-*Users* sits between *Sessions* and *Stats*, which is what it joins: a user is
-a set of sessions, and their page is Stats for one of them. See
-[ui.md](ui.md#screens).
+*Users* sits between *Sessions* and *Prompts*, joining the screens about who:
+a user is a set of sessions, and their page is the dashboard's charts for one
+of them. See [ui.md](ui.md#screens).

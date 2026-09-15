@@ -412,6 +412,7 @@ tracepad stats --group-by day --since 168h
 tracepad stats --group-by model
 tracepad stats --group-by release
 tracepad stats --group-by day --user user-4821
+tracepad stats --group-by total --since 168h
 ```
 
 `--since` takes Go durations (`1h`, `30m`, `168h`) or an RFC 3339 instant.
@@ -420,9 +421,15 @@ other end, in the same two spellings, so a duration there is also counted back
 from now: `--since 48h --until 24h` is the day before yesterday.
 
 The table's second column names what is being counted: grouping by hour, day,
-environment or release counts **traces**, grouping by model counts
+environment, release or total counts **traces**, grouping by model counts
 **observations**, because a trace has no model. Grouped by release, the traces
 that named none share one bucket with an empty key.
+
+`--group-by total` is the whole window as one row, with an empty key: the
+counts summed and the percentiles merged over every hour in it, which is not
+the same as the p95 of the daily p95s. Last week beside this week is the
+command run twice with two windows — there is no `--compare`; the difference
+is arithmetic the caller does.
 
 TOKENS is input plus output — what a bill is made of — summed over the
 generations in the bucket, and a dash when none of them reported usage, the
@@ -435,9 +442,9 @@ twice); `--json` carries all three under `tokens`
 ([Lists](#lists)): `--env production,staging` counts both.
 
 `--user` restricts every bucket to one end user, with the groupings and the
-counts unchanged. On an `hour` or `day` timeline it also adds a SESSIONS
-column: how many of that user's sessions began in the bucket, counted where
-they start so a sum is exact ([users.md](users.md)).
+counts unchanged. On an `hour` or `day` timeline, and on the `total` row, it
+also adds a SESSIONS column: how many of that user's sessions began in the
+bucket, counted where they start so a sum is exact ([users.md](users.md)).
 
 ### `facets`
 

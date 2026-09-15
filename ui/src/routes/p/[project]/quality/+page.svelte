@@ -27,9 +27,11 @@
 	import Chart from '$lib/components/Chart.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import RangePicker from '$lib/components/RangePicker.svelte';
+	import QualityCards from '$lib/components/quality/QualityCards.svelte';
 	import ScoreBreakdown from '$lib/components/quality/ScoreBreakdown.svelte';
 	import { count } from '$lib/format';
 	import { href } from '$lib/project.svelte';
+	import { rememberedRange, rememberRange } from '$lib/range.svelte';
 
 	// Quality (spec 025 #9–#12): what the evals and the reviewers have been
 	// saying, over the same window the Stats screen answers for.
@@ -51,8 +53,12 @@
 	 */
 	const openedAt = new Date();
 	const range = $derived(readRange(page.url.searchParams));
-	/** Thirty days is the window this screen opens on (spec 025 #9). */
-	const viewed = $derived(range.from || range.to ? range : presetRange('30d', openedAt));
+	/**
+	 * The window this screen opens on: the one this browser remembers (spec
+	 * 034 #7), else thirty days (spec 025 #9).
+	 */
+	const fallback = rememberedRange(openedAt) ?? presetRange('30d', openedAt);
+	const viewed = $derived(range.from || range.to ? range : fallback);
 	const environment = $derived(page.url.searchParams.get('environment')?.trim() ?? '');
 	const bucket = $derived(readBucket(page.url.searchParams, viewed, openedAt));
 	/** The detail view is the overview with a name in the URL (Decision 11). */
@@ -159,6 +165,7 @@
 	}
 
 	function setRange(picked: Range) {
+		rememberRange(picked, new Date());
 		navigate({ from: picked.from ?? '', to: picked.to ?? '' });
 	}
 
@@ -316,27 +323,11 @@
 			</div>
 		{/each}
 	{:else}
-		<div class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-			{#each series as one (one.name + one.data_type)}
-				{@const shape = shapeOf(one)}
-				<a
-					href={at({ name: one.name })}
-					title={configOf(one)?.description || undefined}
-					class="focus-visible:outline-accent block rounded-lg transition-opacity duration-100 hover:opacity-80"
-				>
-					<Chart
-						title="{one.name} · {one.data_type} · {count(shape.total)} scores"
-						x={shape.x}
-						lines={shape.primary}
-						format={formatter(one)}
-						range={axisRange(configOf(one))}
-						summary="{one.name} per {bucket} over {count(shape.total)} scores. Open for the breakdowns."
-						sync="quality-card-{one.name}-{one.data_type}"
-						height={120}
-					/>
-				</a>
-			{/each}
-		</div>
+		<QualityCards
+			{series}
+			{configs}
+			window={{ from: viewed.from, to: viewed.to, bucket, now: openedAt }}
+		/>
 		{#if omitted > 0}
 			<p class="text-muted mt-3 text-sm">
 				{count(omitted)} rarer score {omitted === 1 ? 'name' : 'names'} not shown. A narrower window,

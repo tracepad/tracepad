@@ -660,6 +660,23 @@ func TestStatsAndSystem(t *testing.T) {
 		t.Errorf("staging row = %q, want a dash in TOKENS for a bucket with no usage", staging)
 	}
 
+	// The whole window as one row (spec 034 #3): the value goes through
+	// the same enum, and the table is the same table under an empty key.
+	total := h.run(ctx, true, "stats", "--group-by", "total")
+	if total.code != ExitOK {
+		t.Fatalf("exit = %d, stderr = %s", total.code, total.stderr)
+	}
+	lines := strings.Split(strings.TrimSpace(total.stdout), "\n")
+	if len(lines) != 2 || !strings.Contains(lines[0], "TOTAL") || !strings.Contains(lines[0], "TRACES") {
+		t.Errorf("stats --group-by total = %q, want a header naming TOTAL and TRACES over one row", total.stdout)
+	}
+	if !strings.Contains(h.run(ctx, true, "stats", "--group-by", "total").stdout, "169") {
+		t.Errorf("stats --group-by total = %q, want the corpus's tokens summed on its one row", total.stdout)
+	}
+	if usage := h.run(ctx, false, "stats", "--help"); !strings.Contains(usage.stdout+usage.stderr, "|total]") {
+		t.Errorf("the usage does not offer total: %s", usage.stdout+usage.stderr)
+	}
+
 	system := h.run(ctx, true, "system")
 	if system.code != ExitOK {
 		t.Fatalf("exit = %d, stderr = %s", system.code, system.stderr)

@@ -64,8 +64,9 @@
 		void goto(switchTarget(page.url, id));
 	}
 
+	/** A project just made opens on its dashboard, where the setup is (spec 034 #12). */
 	function created(made: Project) {
-		void goto(under('/traces', made.id));
+		void goto(under('/dashboard', made.id));
 	}
 
 	function caption(id: string): { text: string; empty: boolean } | null {

@@ -23,7 +23,7 @@ async function fresh() {
 }
 
 const me = (id: string, ...projects: { id: string; name: string; role: 'viewer' | 'editor' }[]) => ({
-	account: { id, email: `${id}@example.com`, name: '', owner: false },
+	account: { id, email: `${id}@example.com`, name: '', owner: false, preferences: {} },
 	projects
 });
 
@@ -214,12 +214,14 @@ describe('switchTarget', () => {
 
 	// One case per section: the section stays, everything deeper goes.
 	it.each([
+		['/dashboard', '/dashboard'],
 		['/traces', '/traces'],
 		[`/traces/${'c'.repeat(32)}`, '/traces'],
 		['/sessions', '/sessions'],
 		['/sessions/s-1', '/sessions'],
 		['/users', '/users'],
 		['/users/u-1', '/users'],
+		// Kept as a section for its redirect to the dashboard (spec 034 #1).
 		['/stats', '/stats'],
 		['/prompts', '/prompts'],
 		['/prompts/support-answer/versions/new', '/prompts'],
@@ -237,10 +239,11 @@ describe('switchTarget', () => {
 		['/settings', '/settings'],
 		['/settings/account', '/settings/account'],
 		['/settings/server', '/settings/server'],
-		['', '/traces'],
+		// No section, or none to keep, is the front page (spec 034 #1).
+		['', '/dashboard'],
 		// A stale link's 404 is not a section to keep: the switch is the exit.
-		['/nonsense', '/traces'],
-		['/nonsense/deeper', '/traces']
+		['/nonsense', '/dashboard'],
+		['/nonsense/deeper', '/dashboard']
 	])('%s lands on %s of the other project', async (from, to) => {
 		const { switchTarget } = await fresh();
 
@@ -256,11 +259,11 @@ describe('switchTarget', () => {
 	});
 
 	// The bare Account tab and `/p` are under no project: nothing to keep.
-	it('lands on the traces from a screen that is under no project', async () => {
+	it('lands on the dashboard from a screen that is under no project', async () => {
 		const { switchTarget } = await fresh();
 
-		expect(switchTarget(at('/settings/account'), P2)).toBe(`/p/${P2}/traces`);
-		expect(switchTarget(at('/p'), P2)).toBe(`/p/${P2}/traces`);
+		expect(switchTarget(at('/settings/account'), P2)).toBe(`/p/${P2}/dashboard`);
+		expect(switchTarget(at('/p'), P2)).toBe(`/p/${P2}/dashboard`);
 	});
 
 	it('keeps the filters, the range, the size, the search and live mode', async () => {

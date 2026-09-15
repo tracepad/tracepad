@@ -651,22 +651,36 @@ curl … "http://localhost:4318/api/v1/stats?group_by=day&from=2026-09-01T00:00:
 }
 ```
 
-`group_by` is `hour`, `day`, `model`, `environment` or `release` (default
-`day`), and `unit` says what a bucket counts. Grouping by hour, day,
-environment or release counts **traces**; grouping by model counts
-**observations**, because a trace has no model. The two counts are not
-comparable, which is why the response says which one you are looking at.
+`group_by` is `hour`, `day`, `model`, `environment`, `release` or `total`
+(default `day`), and `unit` says what a bucket counts. Grouping by hour,
+day, environment, release or total counts **traces**; grouping by model
+counts **observations**, because a trace has no model. The two counts are
+not comparable, which is why the response says which one you are looking at.
 
 Grouped by release, the traces that named none fall in the bucket whose `key`
 is the empty string — that is a group, not a gap, and dropping it would make
 the numbers stop adding up.
 
+Grouped by `total`, the whole window is **one bucket** under the empty key,
+in the same shape as a day bucket: the count, the errors, the cost and the
+tokens summed, and `p50`/`p95` merged over every hour's histogram in the
+window — which is not the same number as a percentile of the daily
+percentiles. It takes every filter the other groupings take. A window with
+nothing in it has no bucket, as everywhere. This is the figure the
+dashboard's summary row shows; the change against the previous window is two
+requests and a subtraction the caller does — there is no `compare`.
+
+```sh
+curl … "http://localhost:4318/api/v1/stats?group_by=total&from=2026-09-08T00:00:00Z"
+```
+
 `user_id` restricts every bucket to one end user. The shape, the groupings and
-`unit` do not change; with `group_by=hour` or `group_by=day` each bucket
-additionally carries `sessions` — how many of that user's sessions *began* in
-it, so a sum over any range is exact. Without the filter the key is absent
-rather than zero, because the statistics rollup holds no such number. The
-per-user answer trails the raw data by the same lag as the rest.
+`unit` do not change; with `group_by=hour`, `group_by=day` or
+`group_by=total` each bucket additionally carries `sessions` — how many of
+that user's sessions *began* in it, so a sum over any range is exact. Without
+the filter the key is absent rather than zero, because the statistics rollup
+holds no such number. The per-user answer trails the raw data by the same lag
+as the rest.
 
 ```sh
 curl … "http://localhost:4318/api/v1/stats?group_by=day&user_id=user-4821"

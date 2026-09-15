@@ -7,7 +7,6 @@
 	import { api, type Trace, type TraceRow } from '$lib/api/client.svelte';
 	import { filterCount, filterSearch, readFilters, type TraceFilters } from '$lib/api/traces';
 	import Button from '$lib/components/Button.svelte';
-	import CopyButton from '$lib/components/CopyButton.svelte';
 	import FilterBar from '$lib/components/FilterBar.svelte';
 	import ListingCount from '$lib/components/ListingCount.svelte';
 	import ListingShell from '$lib/components/ListingShell.svelte';
@@ -95,11 +94,6 @@
 	// a filter matching more than the endpoint's cap is refused with the
 	// reason rather than silently truncated to the newest thousand.
 	const takeable = $derived(queueable(listing.total));
-
-	const snippet = $derived(
-		`OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=${page.url.origin}/v1/traces\n` +
-			'OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer <your project key>"'
-	);
 </script>
 
 <svelte:head><title>Traces · Tracepad</title></svelte:head>
@@ -171,29 +165,17 @@
 					</p>
 					<Button class="mt-3" onclick={() => navigate({})}>Clear filters</Button>
 				{:else}
+					<!-- One line and a pointer (spec 034 #6): the exporter settings
+					     are on the dashboard, which is where a fresh project opens. -->
 					<h2 class="flex items-center gap-2 font-medium">
 						<Inbox class="text-subtle size-4" />
 						No traces yet
 					</h2>
 					<p class="text-muted mt-1">
-						Point an OpenTelemetry-instrumented app at this server and reload.
+						The <a href={href('/dashboard')} class="text-accent underline underline-offset-2"
+							>dashboard</a
+						> has the exporter settings to point an OpenTelemetry-instrumented app at this server.
 					</p>
-					<div class="border-border bg-surface mt-3 flex items-start gap-2 rounded-md border p-3">
-						<pre class="min-w-0 flex-1 overflow-x-auto font-mono text-xs">{snippet}</pre>
-						<CopyButton text={() => snippet} label="Copy the exporter settings" />
-					</div>
-					<p class="text-subtle mt-2 text-xs">
-						The key is the one printed when this project was created; nobody else, including this
-						page, can read it back.
-					</p>
-					<a
-						class="text-accent mt-3 inline-block underline underline-offset-2"
-						href="https://github.com/tracepad/tracepad/blob/main/docs/quickstart.md"
-						target="_blank"
-						rel="noreferrer"
-					>
-						Quickstart
-					</a>
 				{/if}
 			</div>
 		</div>

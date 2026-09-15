@@ -43,7 +43,7 @@
 			// accept endpoint takes a password and nothing else.
 			if (name.trim()) await api.patchMe({ name: name.trim() });
 			await begin();
-			await goto(bareTarget('/traces'), { replaceState: true });
+			await goto(bareTarget('/dashboard'), { replaceState: true });
 		} catch (cause) {
 			error = said(cause, 'Something went wrong accepting this invitation.');
 		} finally {

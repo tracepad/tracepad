@@ -12,8 +12,8 @@
 		<p class="text-muted mt-2">
 			{page.status === 404 ? page.url.pathname : (page.error?.message ?? 'Unknown error')}
 		</p>
-		<a href={href('/traces')} class="text-accent mt-4 inline-block underline underline-offset-2">
-			Back to traces
+		<a href={href('/dashboard')} class="text-accent mt-4 inline-block underline underline-offset-2">
+			Back to the dashboard
 		</a>
 	</div>
 </div>

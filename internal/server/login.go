@@ -1,9 +1,11 @@
 package server
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -308,7 +310,12 @@ func (s *Server) writeMe(w http.ResponseWriter, account *store.Account) {
 		put("projects", membershipsResponse(projects)))
 }
 
-// handlePatchMe changes the display name, the password, or both.
+// maxPreferencesBytes caps the preferences object (spec 034 #9): the size is
+// what keeps an opaque object from becoming a store.
+const maxPreferencesBytes = 16 * 1024
+
+// handlePatchMe changes the display name, the password, the preferences, or
+// any of them together.
 func (s *Server) handlePatchMe(w http.ResponseWriter, r *http.Request) {
 	c, ok := s.authorize(w, r)
 	if !ok {
@@ -324,18 +331,24 @@ func (s *Server) handlePatchMe(w http.ResponseWriter, r *http.Request) {
 			Current string `json:"current"`
 			New     string `json:"new"`
 		} `json:"password"`
+		Preferences json.RawMessage `json:"preferences"`
 	}
 	if !s.readJSON(w, r, &request) {
 		return
 	}
-	if request.Name == nil && request.Password == nil {
-		writeError(w, http.StatusBadRequest, `nothing to change: send "name" or "password"`)
+	if request.Name == nil && request.Password == nil && request.Preferences == nil {
+		writeError(w, http.StatusBadRequest, `nothing to change: send "name", "password" or "preferences"`)
+		return
+	}
+	preferences, ok := readPreferences(w, request.Preferences)
+	if !ok {
 		return
 	}
 
 	account := c.account
 	if request.Password == nil {
-		update := &store.AccountUpdate{AccountID: account.ID, Name: request.Name, Now: time.Now().UnixNano()}
+		update := &store.AccountUpdate{AccountID: account.ID, Name: request.Name,
+			Preferences: preferences, Now: time.Now().UnixNano()}
 		if !s.submit(w, r, update) {
 			return
 		}
@@ -356,7 +369,7 @@ func (s *Server) handlePatchMe(w http.ResponseWriter, r *http.Request) {
 	// it.
 	change := &store.PasswordChange{
 		AccountID: account.ID, Current: request.Password.Current,
-		NewHash: hash, Keep: c.session.ID, Name: request.Name,
+		NewHash: hash, Keep: c.session.ID, Name: request.Name, Preferences: preferences,
 	}
 	if err := s.writer.Submit(r.Context(), change); err != nil {
 		if errors.Is(err, store.ErrWrongPassword) {
@@ -486,15 +499,46 @@ func trimUserAgent(raw string) string {
 }
 
 // accountResponse is the shape every endpoint that answers with one account
-// uses: who it is and whether it runs the server. The standing fields belong
-// to the owner's view of somebody else (see fullAccountResponse), and the hash
-// is not reachable from here at all.
+// uses: who it is, whether it runs the server, and how its screens are
+// arranged. The standing fields belong to the owner's view of somebody else
+// (see fullAccountResponse), and the hash is not reachable from here at all.
 func accountResponse(a *store.Account) object {
+	preferences := a.Preferences
+	if len(preferences) == 0 {
+		preferences = json.RawMessage("{}")
+	}
 	return object{}.
 		put("id", a.ID).
 		put("email", a.Email).
 		put("name", a.Name).
-		put("owner", a.Owner)
+		put("owner", a.Owner).
+		put("preferences", preferences)
+}
+
+// readPreferences validates what `PATCH /auth/me` may store under
+// `preferences` (spec 034 #9): a JSON object under the cap, and nothing more
+// is asked of it — the interface owns the shape, the server owns the bytes.
+// Stored compacted, so the cap measures the object and not its whitespace.
+// A nil message is the field's absence, which changes nothing.
+func readPreferences(w http.ResponseWriter, raw json.RawMessage) (json.RawMessage, bool) {
+	if raw == nil {
+		return nil, true
+	}
+	var shape map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &shape); err != nil || shape == nil {
+		writeError(w, http.StatusUnprocessableEntity, "preferences: must be an object")
+		return nil, false
+	}
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, raw); err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "preferences: must be an object")
+		return nil, false
+	}
+	if compact.Len() > maxPreferencesBytes {
+		writeError(w, http.StatusUnprocessableEntity, "preferences: larger than 16 KiB")
+		return nil, false
+	}
+	return json.RawMessage(compact.Bytes()), true
 }
 
 // membershipsResponse renders the projects an account can reach, with its role
