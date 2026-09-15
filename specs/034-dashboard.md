@@ -1,6 +1,6 @@
 # Spec 034 — Dashboard: the project's front page
 
-**Status:** 🟡 DRAFT
+**Status:** ✅ SHIPPED
 **Sprint:** September 2026
 
 > A project opens on its trace listing. That is the right screen for the
