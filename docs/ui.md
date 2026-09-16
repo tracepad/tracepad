@@ -93,9 +93,9 @@ trace detail, sessions, quality, users and the whole annotation flow are
 identical.
 Scoring is a `viewer`'s job — that is what the role is for. What a viewer is
 not offered is the writing: the prompt editor and its labels, the dataset
-item editor and the archive, deleting a prompt, a dataset, a queue or a run,
-the score configs' create and edit, and *Add to queue* — filling a review
-programme is queue management, and queue management is an `editor`'s.
+item editor and the archive, deleting a prompt, a dataset, a queue, a run or
+a trace, the score configs' create and edit, and *Add to queue* — filling a
+review programme is queue management, and queue management is an `editor`'s.
 
 Hiding is for the person; refusing is for the security. The server answers
 every one of those `403` regardless (see [accounts.md](accounts.md)), and a
@@ -469,6 +469,36 @@ match before the call, queues the newest of them up to the endpoint's cap of
 1,000, and above that cap it is disabled with the reason — a queue is a list
 somebody has to work through.
 
+## Deleting traces
+
+The one way a trace leaves the store by hand ([admin.md](admin.md#deleting-traces)),
+offered at the two surfaces where the choice is made and to editors only,
+like *Add to queue* beside which each of them sits.
+
+**On the trace header** — *Delete…* on a trace, in the peek panel or on the
+full page. The dialog opens on the server's dry run — the observations,
+scores and queue items that go with the trace, the eval runs that would lose
+it, and the note that the raw OTLP body stays — with the trace id already
+filled in as the echo: it is on screen, and typing thirty-two hex characters
+back is a ritual, not a check. *Delete this trace* is the act. From the peek
+panel the panel closes and the listing under it re-reads; from the trace's
+own page the page leaves for the listing; from a session, the session is
+re-read one trace shorter; from the desk, the item went with the trace and
+the desk moves on.
+
+**On the traces listing** — *Delete…* beside *Add to queue…*. The dialog
+names what it is about before it asks for anything: the listing's own count,
+the active filters as the same chips the bar shows, the search text, and the
+moment the set is closed at — the filter's own `to`, or, when it has none,
+**the moment the dialog opened**, said in so many words, because an empty
+filter is *every trace before now* and the wording has to make that plain.
+The dry run counts the match exactly where the listing's count stops at a
+thousand. The echo is the project's name; then the deletion runs in rounds
+of a thousand, a line saying *2,000 of 12,000 deleted*, and *Stop* beside it
+finishes the round in flight and leaves the rest — every round is a complete,
+consistent act, and a person who sees the number and changes their mind must
+not need to close the tab. The listing re-reads when it is over.
+
 ## Quality
 
 The fifth child of *Evals* is what the evals and the reviewers have been
@@ -829,8 +859,9 @@ Every destructive action is the server's dry-run/confirm contract rendered
 (see [admin.md](admin.md#dry-run-by-default)): the card asks the API
 what the change would delete, shows that answer, and enables its button only
 once you have typed back the identity the server named — the project's name,
-or the user id. Nothing is counted in the browser, and a refusal is reported
-in the server's own words.
+or the user id; [deleting one trace](#deleting-traces) is the one card that
+fills its echo in, because the id is already on screen. Nothing is counted in
+the browser, and a refusal is reported in the server's own words.
 
 ## State in the URL
 

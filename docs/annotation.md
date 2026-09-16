@@ -308,12 +308,16 @@ header or an observation panel, and *Add to queue…* beside the filter bar on
 ## What happens to items
 
 - **Items follow their trace.** The retention sweep that deletes a trace
-  deletes its items in the same job, and erasing a user's data
-  ([retention.md](retention.md)) takes the items of their traces. An item is a
-  pointer, and a pointer to a deleted trace is a desk showing an empty page.
-  Both destructive endpoints count what they take under `annotation_items` in
-  the dry run and in the answer, and deleting a **project** names the queues
-  themselves too ([admin.md](admin.md#dry-run-by-default)).
+  deletes its items in the same job, erasing a user's data
+  ([retention.md](retention.md)) takes the items of their traces, and so does
+  deleting a trace by hand — one by id, or a filter's worth
+  ([admin.md](admin.md#deleting-traces)). An item is a pointer, and a pointer
+  to a deleted trace is a desk showing an empty page. Every one of these
+  destructive endpoints counts what it takes under `annotation_items` in the
+  dry run and in the answer, and deleting a **project** names the queues
+  themselves too ([admin.md](admin.md#dry-run-by-default)). A trace deleted
+  from the desk itself takes its item with it, and the desk moves on to the
+  next.
 - **Deleting a queue takes its items and nothing else.** The scores written
   while annotating stay on their traces and expire on their own timestamps,
   like every other score.

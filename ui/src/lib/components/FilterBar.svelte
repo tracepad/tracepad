@@ -1,5 +1,6 @@
 <script lang="ts" module>
-	import type { FilterName } from '$lib/api/traces';
+	import { facetChip, readList } from '$lib/api/facets';
+	import { TRACE_FILTERS, type FilterName, type TraceFilters } from '$lib/api/traces';
 	import { OBSERVATION_TYPES } from '$lib/observations';
 
 	type Field = {
@@ -69,14 +70,43 @@
 			hint: 'The attempts at one case'
 		}
 	};
+
+	/** The filters this popover owns: everything the bar itself does not. */
+	const FIELD_NAMES = TRACE_FILTERS.filter((name) => !ON_THE_BAR.includes(name)) as FieldName[];
+
+	/**
+	 * What a chip says and what its tooltip says. They differ only for a
+	 * many-valued filter above two values, where the number is the information
+	 * and the names stay one hover away (Decision 7).
+	 */
+	function chip(filters: TraceFilters, name: FieldName): { text: string; title: string } {
+		const label = FIELDS[name].label;
+		const value = filters[name];
+		if (FIELDS[name].kind === 'facet' && typeof value === 'string') {
+			return facetChip(label, readList(value));
+		}
+		const text = `${label}: ${Array.isArray(value) ? value.join(', ') : value}`;
+		return { text, title: text };
+	}
+
+	/**
+	 * The active filters as the bar renders them — its chips, in its order —
+	 * for a surface that names what the listing is filtered by without
+	 * inventing a second rendering of the same filter (spec 035 #12).
+	 */
+	export function chips(filters: TraceFilters): { name: FieldName; text: string; title: string }[] {
+		return FIELD_NAMES.filter((name) => filters[name] !== undefined).map((name) => ({
+			name,
+			...chip(filters, name)
+		}));
+	}
 </script>
 
 <script lang="ts">
 	import ListFilter from '@lucide/svelte/icons/list-filter';
 	import X from '@lucide/svelte/icons/x';
 	import { Popover } from 'bits-ui';
-	import { facetChip, readList, writeList, type FacetField } from '$lib/api/facets';
-	import { TRACE_FILTERS, type TraceFilters } from '$lib/api/traces';
+	import { writeList, type FacetField } from '$lib/api/facets';
 	import { FacetValues } from '$lib/facets.svelte';
 	import Button from './Button.svelte';
 	import FacetField_ from './FacetField.svelte';
@@ -92,9 +122,6 @@
 
 	let { filters, onchange }: { filters: TraceFilters; onchange: (next: TraceFilters) => void } =
 		$props();
-
-	/** The filters this popover owns: everything the bar itself does not. */
-	const FIELD_NAMES = TRACE_FILTERS.filter((name) => !ON_THE_BAR.includes(name)) as FieldName[];
 
 	let open = $state(false);
 	// The popover edits a copy: a listing that re-queried on every keystroke
@@ -196,21 +223,6 @@
 			}
 		}
 		return next;
-	}
-
-	/**
-	 * What a chip says and what its tooltip says. They differ only for a
-	 * many-valued filter above two values, where the number is the information
-	 * and the names stay one hover away (Decision 7).
-	 */
-	function chip(name: FieldName): { text: string; title: string } {
-		const label = FIELDS[name].label;
-		const value = filters[name];
-		if (FIELDS[name].kind === 'facet' && typeof value === 'string') {
-			return facetChip(label, readList(value));
-		}
-		const text = `${label}: ${Array.isArray(value) ? value.join(', ') : value}`;
-		return { text, title: text };
 	}
 
 	const fieldClass =
@@ -357,13 +369,11 @@
 	</Popover.Root>
 
 	<ul class="flex min-w-0 items-center gap-1 overflow-x-auto">
-		{#each FIELD_NAMES as name (name)}
-			{#if filters[name] !== undefined}
-				{@const label = chip(name)}
+		{#each chips(filters) as label (label.name)}
 				<li>
 					<button
 						type="button"
-						onclick={() => drop(name)}
+						onclick={() => drop(label.name)}
 						aria-label="Remove filter {label.title}"
 						title={label.title}
 						class="border-border bg-surface text-muted hover:bg-raised hover:text-fg
@@ -374,7 +384,6 @@
 						<X class="size-3.5 shrink-0" />
 					</button>
 				</li>
-			{/if}
 		{/each}
 	</ul>
 </div>

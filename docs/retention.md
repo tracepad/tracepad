@@ -92,13 +92,13 @@ discovered:
    recomputing it — a single late fragment arriving for that hour would
    otherwise replace five thousand summarized traces with itself. The hour's
    stored numbers stand as the archive of what was there.
-2. **Erasing a user's data corrects the hours it can reach.** The rolled hours
-   the erased traces occupied are recomputed in the same transaction that
-   deletes them — the erasure runs in chunks of up to five hundred traces of
-   one hour, and each chunk commits with its hour already corrected — so the
-   counts drop before
-   the request answers, and a request cut off between chunks leaves no hour
-   counting traces that are gone. Hours already frozen are not recomputed: the aggregates
+2. **Erasing a user's data, and deleting traces, corrects the hours it can
+   reach.** The rolled hours the erased or deleted traces occupied are
+   recomputed in the same transaction that deletes them — both run in chunks
+   of up to five hundred traces of one hour, and each chunk commits with its
+   hour already corrected — so the counts drop before the request answers,
+   and a request cut off between chunks leaves no hour counting traces that
+   are gone. Hours already frozen are not recomputed: the aggregates
    carry no user id, no name and no text — they are counts, sums and latency
    buckets — which is the same archive posture the raw bodies have below, and
    the same reasoning regulators accept for a backup.
@@ -324,6 +324,31 @@ observations, payloads, scores and the annotation-queue items pointing at them
 Like every destructive endpoint it is a dry run until confirmed; the echo here
 is the user id itself. Traces an eval run is keeping go with the rest, and the
 dry run lists those runs under `runs` so the hole is visible before it opens.
+
+## Deleting traces
+
+```sh
+tracepad traces rm 4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f
+tracepad traces rm --to 2026-09-17T14:02:17Z --env loadtest
+```
+
+`DELETE /api/v1/traces/{id}` and `DELETE /api/v1/traces?<filters>&to=` are
+the operator's own door between the sweep and the project's deletion: one
+trace by id, or every trace a listing filter matches before a moment
+([admin.md](admin.md#deleting-traces)). They take exactly what an erasure
+takes and by the same path — the traces, their observations, payloads,
+scores, search entries and queue items, the hours re-rolled in the same
+transaction, a run's pin overridden — so every promise on this page about
+what outlives what holds for a deletion as it holds for an erasure. In
+particular the raw OTLP bodies are **not** touched, for the structural
+reason below: a raw batch holds many traces, and a trace cannot be cut out
+of one. The preview says so.
+
+A deletion removes what the store holds at that moment, and nothing is
+remembered about the ids: a span that arrives afterwards for a deleted trace
+creates the trace again from what arrived, as it would for a trace never
+seen. The bulk form's required `to` makes that rare; for one trace whose
+export is still in flight, wait for it to finish.
 
 ### What this means for a data-subject request
 

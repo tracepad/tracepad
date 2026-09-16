@@ -8,9 +8,12 @@
 	import { ABSENT } from '$lib/format';
 	import { observationIDs, splitScores } from '$lib/scores';
 	import { Scores } from '$lib/scores.svelte';
+	import Trash2 from '@lucide/svelte/icons/trash-2';
+	import Button from './Button.svelte';
 	import JsonView from './json/JsonView.svelte';
 	import AddToQueue from './queues/AddToQueue.svelte';
-	import { project } from '$lib/project.svelte';
+	import DeleteTraceDialog from './traces/DeleteTraceDialog.svelte';
+	import { href, project } from '$lib/project.svelte';
 	import ObservationDetail from './ObservationDetail.svelte';
 	import ScoresBlock from './scores/ScoresBlock.svelte';
 	import TraceTree from './TraceTree.svelte';
@@ -26,8 +29,16 @@
 
 	let {
 		traceID,
-		trace = $bindable(null)
-	}: { traceID: string; trace?: Trace | null } = $props();
+		trace = $bindable(null),
+		/**
+		 * What the host does once this trace is gone (spec 035 #8): the peek
+		 * panel closes and its listing re-reads, the full page leaves for the
+		 * listing. Without one, the listing is where there is left to go.
+		 */
+		ondeleted = () => void goto(href('/traces'))
+	}: { traceID: string; trace?: Trace | null; ondeleted?: () => void } = $props();
+
+	let deleting = $state(false);
 
 	const selectedID = $derived(page.url.searchParams.get('obs'));
 
@@ -166,9 +177,23 @@
 			     (spec 028 #15). -->
 			{#if project.editor}
 				<AddToQueue target={{ trace_id: traceID }} />
+				<!-- And the reader's other gesture (spec 035 #8): this trace
+				     should not be here. The dialog carries the ceremony. -->
+				<Button onclick={() => (deleting = true)} aria-label="Delete…" title="Delete this trace">
+					<Trash2 class="size-4" />
+					<span class="hidden sm:inline">Delete…</span>
+				</Button>
 			{/if}
 		{/snippet}
 	</ScoresBlock>
+	{#if deleting}
+		<DeleteTraceDialog
+			open
+			{traceID}
+			onclose={() => (deleting = false)}
+			ondeleted={() => ((deleting = false), ondeleted())}
+		/>
+	{/if}
 
 	<!-- Two panes side by side; on a phone one at a time, switched here. -->
 	<div class="border-border flex shrink-0 gap-1 border-b px-3 py-1.5 md:hidden" role="tablist">
