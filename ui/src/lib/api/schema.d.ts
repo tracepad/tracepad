@@ -263,7 +263,7 @@ export interface paths {
         post?: never;
         /**
          * Delete every trace a listing filter matches before `to`, in bounded rounds
-         * @description The filters are the trace listing's own, with the same names and the same validation, so "delete what I am looking at" is one call with no second grammar — and `to` is required, dry run and confirmed alike: it closes the set, so that what was previewed is what is deleted however much ingest flows in between. Without `confirm` it answers with the dry run, counting the match exactly rather than at the listing's cap, naming the eval runs that would lose traces, and stating that raw OTLP bodies are not touched. With `confirm` echoing the project's name it deletes at most `limit` of the newest matches, in chunks of one hour, each chunk its own transaction re-rolling the hours it emptied, and answers whether there is `more`; repeat the same call while there is. A filter matching nothing is a successful dry run of zero and a successful deletion of nothing. Editor role.
+         * @description The filters are the trace listing's own, with the same names and the same validation, so "delete what I am looking at" is one call with no second grammar — and `to` is required, dry run and confirmed alike: it closes the set, so that what was previewed is what is deleted however much ingest flows in between. Without `confirm` it answers with the dry run, counting the match exactly rather than at the listing's cap, naming the eval runs that would lose traces, and stating that raw OTLP bodies are not touched. With `confirm` echoing the project's name it deletes at most `limit` of the newest matches, in chunks of one hour — and at most fifty chunks, whichever bound comes first — each chunk its own transaction re-rolling the hours it emptied, and answers whether there is `more`; repeat the same call while there is. A filter matching nothing is a successful dry run of zero and a successful deletion of nothing. Editor role.
          */
         delete: operations["deleteTraces"];
         options?: never;
@@ -2913,7 +2913,7 @@ export interface operations {
                 item_id?: components["parameters"]["ItemFilter"];
                 /** @description The name of the project whose slice is being destroyed. Without it the endpoint changes nothing and answers with the dry run; a value that does not match is a 400 that also changes nothing. */
                 confirm?: string;
-                /** @description How many traces one confirmed call may delete — one round. Out of range is a 400, not a silent clamp */
+                /** @description How many traces one confirmed call may delete — one round; the round also ends at fifty one-hour chunks, whichever comes first. Out of range is a 400, not a silent clamp */
                 limit?: number;
             };
             header?: never;

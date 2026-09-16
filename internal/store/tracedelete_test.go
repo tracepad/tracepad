@@ -321,3 +321,31 @@ func TestTraceDeletionStaysInItsProject(t *testing.T) {
 		t.Errorf("traces = %d, want both untouched", got)
 	}
 }
+
+// TestPayloadDeleteSeeksTheReferenceIndexes (spec 035 #13): deleting a payload
+// row is a foreign-key check in every column that references it, and without
+// an index each check was a scan of `observations` — six milliseconds per
+// payload on a real database, and the reason a deletion of a few hundred
+// traces outran the interface's clock. Migration 0020's partial indexes turn
+// the four checks into seeks, and this is the plan test that keeps them so.
+func TestPayloadDeleteSeeksTheReferenceIndexes(t *testing.T) {
+	f := newSweepFixture(t)
+	plan, err := f.store.explainQueryPlan(`DELETE FROM payloads WHERE id IN (?, ?)`, int64(1), int64(2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(plan, "\n")
+	for _, index := range []string{
+		"idx_observations_input_payload",
+		"idx_observations_output_payload",
+		"idx_observations_metadata_payload",
+		"idx_traces_metadata_payload",
+	} {
+		if !strings.Contains(joined, index) {
+			t.Errorf("the foreign-key check does not seek %s:\n%s", index, joined)
+		}
+	}
+	if strings.Contains(joined, "SCAN") {
+		t.Errorf("a foreign-key check scans rather than seeks:\n%s", joined)
+	}
+}

@@ -27,6 +27,14 @@ const (
 	// deleteRound is the most traces one confirmed bulk request removes,
 	// and the default.
 	deleteRound = 1000
+	// deleteRoundChunks is the most chunks — hours, since a chunk is one
+	// hour's traces — one round runs, whichever bound comes first (#14). A
+	// chunk is a transaction and a commit of its own, and a set spread
+	// thinly over many hours is many small chunks: measured on a copy of a
+	// real database, 300 traces over 118 hours took 9.2 s, and a round of
+	// 1,000 such traces would run past the interface's thirty-second clock
+	// every time. Fifty chunks is a few seconds; the answer says `more`.
+	deleteRoundChunks = 50
 	// deleteNote is the position on raw bodies, stated in every preview
 	// rather than left to the docs: a raw batch holds many traces of many
 	// kinds, and a trace cannot be cut out of one (#3).
@@ -162,12 +170,15 @@ func (s *Server) handleDeleteTraces(w http.ResponseWriter, r *http.Request) {
 	// Chunks of one hour, at most `TraceDeleteChunk` traces each (#3), each
 	// its own transaction: the rows arrive newest first, so an hour's
 	// traces are contiguous and a chunk ends where the hour does. A client
-	// that hangs up between chunks loses nothing but the answer.
+	// that hangs up between chunks loses nothing but the answer. The round
+	// ends early at `deleteRoundChunks` (#14) and says so with `more`: the
+	// traces past it are still there, and the next request takes them.
 	var deleted store.DeleteCounts
 	now := time.Now().UnixNano()
 	confirm := values.Get("confirm")
 	var chunk []string
 	var hour int64
+	chunks := 0
 	flush := func() bool {
 		if len(chunk) == 0 {
 			return true
@@ -184,6 +195,7 @@ func (s *Server) handleDeleteTraces(w http.ResponseWriter, r *http.Request) {
 		deleted.Payloads += job.Counts.Payloads
 		deleted.AnnotationItems += job.Counts.AnnotationItems
 		chunk = nil
+		chunks++
 		return true
 	}
 	for _, row := range rows {
@@ -191,6 +203,10 @@ func (s *Server) handleDeleteTraces(w http.ResponseWriter, r *http.Request) {
 		if len(chunk) > 0 && (at != hour || len(chunk) == store.TraceDeleteChunk) {
 			if !flush() {
 				return
+			}
+			if chunks == deleteRoundChunks {
+				more = true
+				break
 			}
 		}
 		hour = at

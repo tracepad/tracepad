@@ -261,3 +261,40 @@ func TestDeleteTracesIsAnEditorsRoute(t *testing.T) {
 		t.Errorf("traces = %d, want the editor's deletion done", got)
 	}
 }
+
+// TestARoundIsBoundedInChunksToo (#14): a set spread thinly over many hours is
+// many one-hour chunks, and a round ends at `deleteRoundChunks` of them with
+// `more` rather than running past the interface's clock.
+func TestARoundIsBoundedInChunksToo(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	const hours = deleteRoundChunks + 10
+	batch := &store.IngestBatch{ProjectID: h.project.ID}
+	for n := 1; n <= hours; n++ {
+		start := seedBase + int64(n)*3600*1000*ms
+		batch.Traces = append(batch.Traces, &model.Trace{ID: traceHex(n), Name: "sparse"})
+		batch.Observations = append(batch.Observations, &model.Observation{
+			TraceID: traceHex(n), ID: spanHex(n), Type: model.TypeSpan, Level: model.LevelDefault,
+			StartTime: start, EndTime: start + ms})
+	}
+	if err := h.writer.Submit(t.Context(), batch); err != nil {
+		t.Fatal(err)
+	}
+	path := "/api/v1/traces?to=" + url.QueryEscape(formatTime(seedBase+(hours+1)*3600*1000*ms)) +
+		"&confirm=" + url.QueryEscape(h.project.Name)
+
+	rec := h.call(t, "DELETE", path, nil)
+	expectStatus(t, rec, 200)
+	first := decodeJSON[deleteAnswer](t, rec)
+	if first.Deleted["traces"] != deleteRoundChunks || first.More == nil || !*first.More {
+		t.Fatalf("first round = %+v, want %d traces (one per hour) and more", first, deleteRoundChunks)
+	}
+	rec = h.call(t, "DELETE", path, nil)
+	expectStatus(t, rec, 200)
+	second := decodeJSON[deleteAnswer](t, rec)
+	if second.Deleted["traces"] != 10 || *second.More {
+		t.Errorf("second round = %+v, want the remaining 10 and no more", second)
+	}
+	if got := h.countTraces(t); got != 0 {
+		t.Errorf("traces = %d, want none left", got)
+	}
+}

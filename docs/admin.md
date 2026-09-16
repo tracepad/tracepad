@@ -274,7 +274,9 @@ already uses for the same act by another door.
 
 A confirmed request deletes **one round**: the newest `limit` matches
 (1–1000, default 1000), in chunks of at most five hundred traces of one hour,
-each chunk its own transaction, and answers
+each chunk its own transaction — and at most fifty such chunks, whichever
+bound comes first, so a set spread thinly over many hours does not run past
+the interface's clock — and answers
 `{"dry_run": false, "deleted": {…}, "more": true}` — repeat the same call
 while `more` is true. A request that ran for minutes is one the interface's
 thirty-second clock would cut off every time, leaving the operator with an
