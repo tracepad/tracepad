@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
+	"net/http"
 	"net/url"
 	"strconv"
 	"time"
@@ -28,8 +30,161 @@ func (r *run) traces(ctx context.Context, args []string) error {
 		return r.tracesShow(ctx, rest)
 	case "last":
 		return r.tracesLast(ctx, rest)
+	case "rm":
+		return r.tracesRemove(ctx, rest)
 	}
-	return usageErrorf("traces takes ls, show or last, got %q", sub)
+	return usageErrorf("traces takes ls, show, last or rm, got %q", sub)
+}
+
+// tracesRemove is `traces rm <id>` and `traces rm --to T [filters]` (spec 035
+// #7): one trace by id, or every trace the listing's filters match before a
+// moment. Both go through the one `destructive` ceremony every deletion in
+// this binary wears — the server's dry run shown, then the server's own echo
+// sent back — and `--yes` replaces the typing, not the check.
+//
+// The bulk form takes the listing's own flags, but not `--until`: `--to` is
+// the required upper bound the spec names, and one bound under two names
+// would be a second way to say the same thing. The CLI does not fill it in
+// (#7): a script that deletes by filter should say what it means. Rounds are
+// the server's unit of work (#4); this loops until it says there is no more,
+// with `--limit` bounding one round rather than the whole.
+func (r *run) tracesRemove(ctx context.Context, args []string) error {
+	var (
+		filters traceFilterFlags
+		search  string
+		to      string
+		limit   int
+		yes     bool
+	)
+	fs := r.flags("traces rm")
+	filters.registerFollowing(fs)
+	fs.StringVar(&search, "search", "", "")
+	fs.StringVar(&to, "to", "", "")
+	fs.IntVar(&limit, "limit", 0, "")
+	fs.BoolVar(&yes, "yes", false, "")
+	positional, err := r.parse(fs, args, -1)
+	if err != nil {
+		return err
+	}
+	switch len(positional) {
+	case 1:
+		if to != "" {
+			return usageErrorf("traces rm takes a trace id or --to, not both")
+		}
+		return r.removeOneTrace(ctx, positional[0], yes)
+	case 0:
+		if to == "" {
+			return usageErrorf("traces rm needs a trace id, or --to <time> to delete by filter")
+		}
+	default:
+		return usageErrorf("traces rm takes one trace id, got %d", len(positional))
+	}
+
+	query, err := filters.query(r)
+	if err != nil {
+		return err
+	}
+	addSome(query, "q", search)
+	bound, err := r.instant("--to", to)
+	if err != nil {
+		return err
+	}
+	query.Set("to", bound)
+	if limit != 0 {
+		// One round's bound, the server's 1–1000 (#4); the whole is
+		// however many rounds it takes.
+		if limit < 1 || limit > 1000 {
+			return usageErrorf("--limit must be between 1 and 1000, got %d", limit)
+		}
+		query.Set("limit", strconv.Itoa(limit))
+	}
+
+	const path = "/api/v1/traces"
+	answer, confirmed, err := r.confirmDestructive(ctx, http.MethodDelete, path, query, nil, yes,
+		"delete every trace matching these filters that started before "+shortTime(bound))
+	if err != nil {
+		return err
+	}
+	if confirmed == nil {
+		// Not a dry run: the server did it in one, which it does not today
+		// — handed on as it came rather than second-guessed.
+		return r.emit(answer)
+	}
+
+	// The rounds (#4): every answer is a complete, consistent act, and the
+	// running total is what the operator watches.
+	total := map[string]int64{}
+	rounds := 0
+	for {
+		body, err := r.api.Send(ctx, http.MethodDelete, path, confirmed, nil)
+		if err != nil {
+			return err
+		}
+		round, err := decode[struct {
+			Deleted map[string]int64 `json:"deleted"`
+			More    bool             `json:"more"`
+		}](body)
+		if err != nil {
+			return err
+		}
+		rounds++
+		for kind, count := range round.Deleted {
+			total[kind] += count
+		}
+		if !round.More {
+			break
+		}
+		fmt.Fprintf(r.opt.Stderr, "%d traces deleted so far, more to go\n", total["traces"])
+	}
+
+	if r.wantJSON() {
+		// The rounds summed into one body: a script asked to delete a
+		// slice wants one answer about the slice, not one per round.
+		summed, err := json.Marshal(map[string]any{"dry_run": false, "deleted": total, "rounds": rounds})
+		if err != nil {
+			return err
+		}
+		return r.emit(summed)
+	}
+	fmt.Fprintf(r.opt.Stdout, "deleted %d traces in %d round(s)\n", total["traces"], rounds)
+	renderDeleted(r.opt.Stdout, total)
+	return nil
+}
+
+// removeOneTrace is the single form: the echo is the trace id, the trace's
+// only identity (#1).
+func (r *run) removeOneTrace(ctx context.Context, id string, yes bool) error {
+	body, err := r.destructive(ctx, http.MethodDelete, "/api/v1/traces/"+url.PathEscape(id),
+		nil, nil, yes, "delete trace "+id)
+	if err != nil {
+		return err
+	}
+	if r.wantJSON() {
+		return r.emit(body)
+	}
+	result, err := decode[struct {
+		Deleted map[string]int64 `json:"deleted"`
+		ID      string           `json:"id"`
+	}](body)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(r.opt.Stdout, "deleted trace %s\n", result.ID)
+	renderDeleted(r.opt.Stdout, result.Deleted)
+	return nil
+}
+
+// renderDeleted prints what a deletion of traces took, and the position on
+// raw bodies the server's own preview states.
+func renderDeleted(out io.Writer, deleted map[string]int64) {
+	t := newTable(out)
+	for _, kind := range []string{"traces", "observations", "scores", "payloads", "annotation_items"} {
+		if count, reported := deleted[kind]; reported {
+			t.row("  "+kind, strconv.FormatInt(count, 10))
+		}
+	}
+	t.flush()
+	fmt.Fprintln(out, "\nraw OTLP bodies are not deleted; they expire on the raw retention window")
 }
 
 // traceFilterFlags are the filters `traces ls`, `traces last` and `tail`

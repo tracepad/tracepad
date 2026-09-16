@@ -261,7 +261,11 @@ export interface paths {
         get: operations["listTraces"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Delete every trace a listing filter matches before `to`, in bounded rounds
+         * @description The filters are the trace listing's own, with the same names and the same validation, so "delete what I am looking at" is one call with no second grammar — and `to` is required, dry run and confirmed alike: it closes the set, so that what was previewed is what is deleted however much ingest flows in between. Without `confirm` it answers with the dry run, counting the match exactly rather than at the listing's cap, naming the eval runs that would lose traces, and stating that raw OTLP bodies are not touched. With `confirm` echoing the project's name it deletes at most `limit` of the newest matches, in chunks of one hour, each chunk its own transaction re-rolling the hours it emptied, and answers whether there is `more`; repeat the same call while there is. A filter matching nothing is a successful dry run of zero and a successful deletion of nothing. Editor role.
+         */
+        delete: operations["deleteTraces"];
         options?: never;
         head?: never;
         patch?: never;
@@ -301,7 +305,11 @@ export interface paths {
         get: operations["getTrace"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Delete one trace and everything attached to it
+         * @description The trace, its observations, scores, payloads, search entries and annotation-queue items, with the hour it started in re-rolled in the same transaction. Raw OTLP bodies are not touched: a raw batch holds many traces, and a trace cannot be cut out of one. Without `confirm` it answers with the dry run, naming the eval runs that would lose the trace; with `confirm` echoing the trace id it deletes. An unknown id is a 404 either way. Editor role.
+         */
+        delete: operations["deleteTrace"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1827,12 +1835,14 @@ export interface components {
             would_delete: {
                 [key: string]: number;
             };
+            /** @description Trace deletion by filter only: how many traces the filter matches, counted exactly */
+            matched?: number;
             /**
              * Format: date-time
              * @description Arrival of the oldest affected row; absent when nothing is affected
              */
             oldest?: string;
-            /** @description User-data erasure only: the dataset runs that would lose traces to it, because erasure overrides the pin a run puts on them */
+            /** @description User-data erasure and trace deletion only: the dataset runs that would lose traces to it, because both override the pin a run puts on them */
             affected_runs?: {
                 id: string;
                 dataset: string;
@@ -1850,6 +1860,27 @@ export interface components {
             deleted: {
                 [key: string]: number;
             };
+        };
+        /** @description What deleting one trace removed */
+        TraceDeletion: {
+            /** @constant */
+            dry_run: false;
+            /** @description `traces`, `observations`, `scores`, `payloads` and `annotation_items` */
+            deleted: {
+                [key: string]: number;
+            };
+            id: string;
+        };
+        /** @description What one round of a deletion by filter removed */
+        TracesDeletion: {
+            /** @constant */
+            dry_run: false;
+            /** @description `traces`, `observations`, `scores`, `payloads` and `annotation_items`, summed over the round's chunks */
+            deleted: {
+                [key: string]: number;
+            };
+            /** @description Traces matching the filter remain; repeat the same call */
+            more: boolean;
         };
         /** @description A named, versioned set of test cases. `version` advances by one on every write that changes the item set; `item_count` is the live items at that version. */
         Dataset: {
@@ -2845,6 +2876,66 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
         };
     };
+    deleteTraces: {
+        parameters: {
+            query?: {
+                /** @description RFC 3339, inclusive. The range is half-open, so walking a timeline never reports a row twice. */
+                from?: components["parameters"]["From"];
+                /** @description RFC 3339, exclusive */
+                to?: components["parameters"]["To"];
+                /** @description The environment a trace ran in. A comma-separated list matches **any** of them: `?environment=production,staging`. Items are trimmed and duplicates collapse; an empty item (`a,,b`, `a,`) is a 400, as an empty value is, and so is repeating the parameter — one list, one parameter. At most 100 items; beyond that, a 400. An environment whose name contains a comma is not expressible here. `GET /api/v1/facets` lists the values in a range with their counts */
+                environment?: components["parameters"]["Environment"];
+                /** @description Exact match on the trace's user id */
+                user_id?: string;
+                /** @description Exact match on the trace's session id */
+                session_id?: string;
+                /** @description The trace name. A comma-separated list matches **any** of them; items are trimmed, duplicates collapse, an empty item is a 400, repeating the parameter is a 400, at most 100 items, and a name containing a comma is not expressible here. A trace with no name never matches. `GET /api/v1/facets` lists the values in a range with their counts */
+                name?: string;
+                /** @description Repeatable; a trace must carry every tag given */
+                tag?: string[];
+                /** @description `error` keeps traces with at least one failed observation, `ok` keeps the rest */
+                status?: "error" | "ok";
+                /** @description Keeps traces whose total cost is at least this much */
+                min_cost?: number;
+                /** @description Full-text search over one field of one observation — input, output, metadata, name or status message — or over the trace name. Words (all must occur), `"quoted phrases"`, `prefix*`. Words, not substrings: `error` does not find `errors`, `err*` finds both. Case and diacritics are folded, identifiers split on punctuation, and only the first 64 KiB of each payload is indexed. A `q` with no word in it is a 400 */
+                q?: components["parameters"]["Search"];
+                /** @description The deployment the trace ran in, from `langfuse.release` or the resource's `service.version`. A comma-separated list matches **any** of them; items are trimmed, duplicates collapse, an empty item is a 400, repeating the parameter is a 400, at most 100 items, and a release whose name contains a comma is not expressible here. `GET /api/v1/facets` lists the values in a range with their counts */
+                release?: components["parameters"]["Release"];
+                /** @description Exact match on the version of the trace's own logic, from `langfuse.version` */
+                version?: components["parameters"]["Version"];
+                /** @description Keeps traces with at least one observation of this kind. Exact: `generation` does not match `embedding`. A value outside the list is a 400 */
+                type?: components["parameters"]["ObservationType"];
+                /** @description `name` or `name@version`: keeps traces with at least one observation that ran this prompt, at any version or at that one. A version is a run of digits after the last `@` with a name in front of it; every other string is a name, `@` included — `@acme/support`, `team@acme/answer`, `name@latest` and `svc@-1` all filter as names. A label is not a version */
+                prompt?: components["parameters"]["Prompt"];
+                /** @description Keeps the traces of one dataset run. A value of another shape is a 400: the ingest mapper claims nothing else into the column, so it could only match nothing */
+                run_id?: components["parameters"]["RunFilter"];
+                /** @description Keeps the attempts at one dataset item, across runs unless `run_id` narrows it */
+                item_id?: components["parameters"]["ItemFilter"];
+                /** @description The name of the project whose slice is being destroyed. Without it the endpoint changes nothing and answers with the dry run; a value that does not match is a 400 that also changes nothing. */
+                confirm?: string;
+                /** @description How many traces one confirmed call may delete — one round. Out of range is a 400, not a silent clamp */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description What one round deleted and whether there is more, or the dry run of what the filter matches */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TracesDeletion"] | components["schemas"]["DryRun"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
     lastTrace: {
         parameters: {
             query?: {
@@ -2935,6 +3026,35 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteTrace: {
+        parameters: {
+            query?: {
+                /** @description The id of the trace being destroyed — its only identity. Without it the endpoint changes nothing and answers with the dry run; a value that does not match is a 400 that also changes nothing. */
+                confirm?: string;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description What was deleted, or the dry run of what would be */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TraceDeletion"] | components["schemas"]["DryRun"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };

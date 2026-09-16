@@ -678,36 +678,12 @@ func (s *Server) handleEraseUserData(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// Erasure overrides the pin a run puts on its traces (spec 014
-		// #14): the runs that will lose traces are named here, so the
-		// operator sees the hole before it opens.
-		affected := make([]object, 0, len(runs))
-		for _, run := range runs {
-			affected = append(affected, object{}.
-				put("id", run.ID).
-				put("dataset", run.Dataset).
-				put("traces", run.Traces))
-		}
-		// The echo here is the user id, because the user is what is
-		// being erased (#8).
-		writeJSON(w, http.StatusOK, object{}.
-			put("dry_run", true).
-			put("would_delete", object{}.
-				put("traces", counts.Traces).
-				put("observations", counts.Observations).
-				put("scores", counts.Scores).
-				// The queue items pointing at those traces (spec 024 #3):
-				// they go with the traces, so the preview says so rather
-				// than leaving the docs to promise it alone.
-				put("annotation_items", counts.AnnotationItems)).
-			putSome("oldest", oldestTime(counts)).
-			// `affected_runs`, not `runs`: the dataset deletion's dry
-			// run already answers with a `runs` count, and one key
-			// that is a number on one destructive preview and a list
-			// of objects on another is a trap for the shared client
-			// type that reads both.
-			put("affected_runs", affected).
-			put("confirm", userID).
-			put("note", "raw OTLP bodies are not erased; they expire on the raw retention window"))
+		// #14): the runs that will lose traces are named, so the operator
+		// sees the hole before it opens. The echo here is the user id,
+		// because the user is what is being erased (#8). The shape is the
+		// one every deletion of traces answers with (spec 035 #1).
+		writeJSON(w, http.StatusOK, deletionPreview(counts, runs, userID,
+			"raw OTLP bodies are not erased; they expire on the raw retention window"))
 		return
 	}
 
@@ -745,12 +721,7 @@ func (s *Server) handleEraseUserData(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, object{}.
 		put("dry_run", false).
-		put("deleted", object{}.
-			put("traces", erased.Traces).
-			put("observations", erased.Observations).
-			put("scores", erased.Scores).
-			put("payloads", erased.Payloads).
-			put("annotation_items", erased.AnnotationItems)).
+		put("deleted", deletedCounts(erased)).
 		put("user_id", userID))
 }
 

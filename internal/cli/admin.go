@@ -42,6 +42,10 @@ type preview struct {
 	// deletion answers with a `runs` count, and this struct is what reads
 	// every preview.
 	Runs []affectedRun `json:"affected_runs"`
+	// Matched is the bulk trace deletion's exact count of what its filter
+	// matches (spec 035 #2): the same number as `would_delete.traces`,
+	// named because it is the one the operator counted on screen.
+	Matched *int64 `json:"matched"`
 	// The dataset deletion's own counts (spec 014 #20). Pointers, because
 	// this one struct reads every preview and zero is a real answer: a
 	// dataset with no runs would otherwise look like an erasure preview
@@ -615,13 +619,28 @@ func (r *run) usersRemoveData(ctx context.Context, rest []string) error {
 func (r *run) destructive(ctx context.Context, method, path string, query url.Values,
 	body any, yes bool, what string) (json.RawMessage, error) {
 
+	answer, confirmed, err := r.confirmDestructive(ctx, method, path, query, body, yes, what)
+	if err != nil || confirmed == nil {
+		return answer, err
+	}
+	return r.api.Send(ctx, method, path, confirmed, body)
+}
+
+// confirmDestructive is the ceremony without the act: the dry run asked for,
+// shown, and the echo agreed to. It hands back the query that confirms it,
+// for a caller that sends it more than once — the bulk trace deletion repeats
+// the confirmed call while the server says there is more (spec 035 #4, #7).
+// An answer that was not a dry run comes back as it is, with no query.
+func (r *run) confirmDestructive(ctx context.Context, method, path string, query url.Values,
+	body any, yes bool, what string) (json.RawMessage, url.Values, error) {
+
 	answer, err := r.api.Send(ctx, method, path, query, body)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	dry, err := decode[preview](answer)
 	if err != nil || !dry.DryRun {
-		return answer, err
+		return answer, nil, err
 	}
 
 	r.renderPreview(dry, what)
@@ -631,10 +650,10 @@ func (r *run) destructive(ctx context.Context, method, path string, query url.Va
 		// made up: --yes replaces the typing, not the check.
 	case r.opt.TTY:
 		if err := r.askToConfirm(dry.Confirm); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	default:
-		return nil, fmt.Errorf(
+		return nil, nil, fmt.Errorf(
 			"this would %s; it was not done. Re-run with --yes to go ahead", what)
 	}
 
@@ -643,7 +662,7 @@ func (r *run) destructive(ctx context.Context, method, path string, query url.Va
 		confirmed[key] = values
 	}
 	confirmed.Set("confirm", dry.Confirm)
-	return r.api.Send(ctx, method, path, confirmed, body)
+	return nil, confirmed, nil
 }
 
 // renderPreview prints what the server said the request would cost. It goes to
@@ -652,6 +671,9 @@ func (r *run) destructive(ctx context.Context, method, path string, query url.Va
 func (r *run) renderPreview(dry preview, what string) {
 	out := r.opt.Stderr
 	fmt.Fprintf(out, "this would %s:\n", what)
+	if dry.Matched != nil {
+		fmt.Fprintf(out, "  %-14s %d\n", "matched", *dry.Matched)
+	}
 	kinds := make([]string, 0, len(dry.WouldDelete))
 	for kind := range dry.WouldDelete {
 		kinds = append(kinds, kind)
