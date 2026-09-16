@@ -141,7 +141,12 @@
 	{/snippet}
 </PageHeader>
 
-<div class="border-border flex items-center gap-2 overflow-x-auto border-b px-4 py-2">
+<!-- Wrapping at a phone's width, and only there (spec 035 #16): the bar's
+     three controls take 307 px at their floors, and 343 px is what the row
+     has — one action beside them already overlapped the Filters button by a
+     sliver, and a second covers it. On a phone the actions take a second
+     row; at `sm` and up the row is one, as it was. -->
+<div class="border-border flex flex-wrap items-center gap-2 overflow-x-auto border-b px-4 py-2 sm:flex-nowrap">
 	<FilterBar {filters} onchange={(next) => navigate(next)} />
 	<!-- The manager's gesture, at the surface where the choice is made: this
 	     filtered list is what deserves a human verdict (spec 024 #13). -->
