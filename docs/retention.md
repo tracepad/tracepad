@@ -347,6 +347,14 @@ particular the raw OTLP bodies are **not** touched, for the structural
 reason below: a raw batch holds many traces, and a trace cannot be cut out
 of one. The preview says so.
 
+**The first start after the upgrade builds four indexes** over the columns
+that reference stored payloads (migration 0020): deleting a payload is a
+foreign-key check in each of them, and without the indexes every check was a
+scan — the reason erasure and the sweep were slower than they needed to be.
+The migration runs before the server listens, once; on a store of a few
+hundred thousand observations it is seconds, and the log names the migration
+as it runs, after the backup every migration takes beside the database.
+
 A deletion removes what the store holds at that moment, and nothing is
 remembered about the ids: a span that arrives afterwards for a deleted trace
 creates the trace again from what arrived, as it would for a trace never
