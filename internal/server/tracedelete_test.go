@@ -180,6 +180,14 @@ func TestDeleteTracesByFilter(t *testing.T) {
 	}
 
 	expectError(t, h.call(t, "DELETE", "/api/v1/traces?to="+to+"&confirm=nope", nil), 400, h.project.Name)
+	// And a wrong echo over a filter that matches nothing is a 400 too: no
+	// chunk ran, so one empty job checks it (review of PR #74).
+	expectError(t, h.call(t, "DELETE", "/api/v1/traces?to="+to+"&environment=nowhere&confirm=nope", nil), 400, h.project.Name)
+	rec = h.call(t, "DELETE", "/api/v1/traces?to="+to+"&environment=nowhere&confirm="+url.QueryEscape(h.project.Name), nil)
+	expectStatus(t, rec, 200)
+	if none := decodeJSON[deleteAnswer](t, rec); none.Deleted["traces"] != 0 || *none.More {
+		t.Errorf("a confirmed deletion of nothing = %+v, want zeros and no more", none)
+	}
 
 	// Rounds over the staging slice: `limit` bounds one, `more` says there
 	// is another, the running counts add up.

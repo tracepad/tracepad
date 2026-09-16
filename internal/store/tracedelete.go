@@ -155,7 +155,10 @@ type TraceDelete struct {
 
 func (d *TraceDelete) apply(tx *sql.Tx) error {
 	d.Counts, d.Hours = DeleteCounts{}, nil
-	if len(d.IDs) == 0 {
+	// The bulk form may hand over nothing: a filter that matches nothing is
+	// still a confirmed request, and its echo is checked here like every
+	// other's (review of PR #74). The single form always names one id.
+	if len(d.IDs) == 0 && !d.ByFilter {
 		return fmt.Errorf("delete traces: no ids were given")
 	}
 	// The bound is the caller's to keep (#3); crossing it is a programmer's

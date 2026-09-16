@@ -215,6 +215,15 @@ func (s *Server) handleDeleteTraces(w http.ResponseWriter, r *http.Request) {
 	if !flush() {
 		return
 	}
+	// A filter that matched nothing ran no chunk, and so checked no echo:
+	// one empty job checks it inside the transaction like every other
+	// confirmed request's, so a wrong project name is a 400 whether or not
+	// the range holds anything (review of PR #74).
+	if chunks == 0 && !s.submit(w, r, &store.TraceDelete{
+		ProjectID: project.ID, Confirm: confirm, ByFilter: true, Now: now,
+	}) {
+		return
+	}
 
 	writeJSON(w, http.StatusOK, object{}.
 		put("dry_run", false).
