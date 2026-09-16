@@ -38,6 +38,13 @@
 	const previous = $derived(neighbour(ordered, position, -1));
 	const following = $derived(neighbour(ordered, position, 1));
 
+	/** A trace deleted from the panel (spec 035 #8): closed, and the session re-read. */
+	let reread = $state(0);
+	function deleted() {
+		peek(null);
+		reread++;
+	}
+
 	/** Opening pushes one entry; moving between rows replaces it (#6). */
 	function peek(traceID: string | null) {
 		const search = peekSearch(page.url.searchParams, { peek: traceID });
@@ -62,13 +69,15 @@
 	{/snippet}
 </PageHeader>
 
-<SessionDetail
-	sessionID={id}
-	bind:session
-	bind:traces
-	onopen={peek}
-	selectedTraceID={peekID}
-/>
+{#key reread}
+	<SessionDetail
+		sessionID={id}
+		bind:session
+		bind:traces
+		onopen={peek}
+		selectedTraceID={peekID}
+	/>
+{/key}
 
 {#if peekID}
 	<PeekPanel
@@ -92,6 +101,6 @@
 			     session (spec 023 #17). -->
 			<TracePeekMeta trace={peeked} hide={['session', 'id']} />
 		{/snippet}
-		<TraceDetail traceID={peekID} bind:trace={peeked} />
+		<TraceDetail traceID={peekID} bind:trace={peeked} ondeleted={deleted} />
 	</PeekPanel>
 {/if}

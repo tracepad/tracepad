@@ -2,9 +2,11 @@
 	import Inbox from '@lucide/svelte/icons/inbox';
 	import Pause from '@lucide/svelte/icons/pause';
 	import Play from '@lucide/svelte/icons/play';
+	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { api, type Trace, type TraceRow } from '$lib/api/client.svelte';
+	import { count } from '$lib/format';
 	import { filterCount, filterSearch, readFilters, type TraceFilters } from '$lib/api/traces';
 	import Button from '$lib/components/Button.svelte';
 	import FilterBar from '$lib/components/FilterBar.svelte';
@@ -13,6 +15,7 @@
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import PeekPanel from '$lib/components/PeekPanel.svelte';
 	import AddToQueue from '$lib/components/queues/AddToQueue.svelte';
+	import DeleteTracesDialog from '$lib/components/traces/DeleteTracesDialog.svelte';
 	import TraceDetail from '$lib/components/TraceDetail.svelte';
 	import TracePeekMeta from '$lib/components/TracePeekMeta.svelte';
 	import TraceTable from '$lib/components/TraceTable.svelte';
@@ -94,6 +97,22 @@
 	// a filter matching more than the endpoint's cap is refused with the
 	// reason rather than silently truncated to the newest thousand.
 	const takeable = $derived(queueable(listing.total));
+
+	// *Delete…* beside it (spec 035 #9): the same surface, the other verdict.
+	// The count it names is the listing's own, capped as the listing caps it;
+	// the dialog's dry run is what counts exactly.
+	let deleting = $state(false);
+	const matchedLabel = $derived(
+		listing.total === null
+			? 'the traces on screen'
+			: `${count(listing.total.value)}${listing.total.capped ? '+' : ''} traces`
+	);
+
+	/** Once a peeked trace is gone: the panel closes and the page re-reads. */
+	function deleted() {
+		peek(null);
+		listing.reload();
+	}
 </script>
 
 <svelte:head><title>Traces · Tracepad</title></svelte:head>
@@ -122,7 +141,12 @@
 	{/snippet}
 </PageHeader>
 
-<div class="border-border flex items-center gap-2 overflow-x-auto border-b px-4 py-2">
+<!-- Wrapping at a phone's width, and only there (spec 035 #16): the bar's
+     three controls take 307 px at their floors, and 343 px is what the row
+     has — one action beside them already overlapped the Filters button by a
+     sliver, and a second covers it. On a phone the actions take a second
+     row; at `sm` and up the row is one, as it was. -->
+<div class="border-border flex flex-wrap items-center gap-2 overflow-x-auto border-b px-4 py-2 sm:flex-nowrap">
 	<FilterBar {filters} onchange={(next) => navigate(next)} />
 	<!-- The manager's gesture, at the surface where the choice is made: this
 	     filtered list is what deserves a human verdict (spec 024 #13). -->
@@ -133,8 +157,22 @@
 			blocked={takeable.blocked}
 			label="Add to queue…"
 		/>
+		<Button onclick={() => (deleting = true)} aria-label="Delete…" title="Delete the traces these filters match">
+			<Trash2 class="size-4" />
+			<span class="hidden sm:inline">Delete…</span>
+		</Button>
 	{/if}
 </div>
+
+{#if deleting}
+	<DeleteTracesDialog
+		open
+		{filters}
+		matched={matchedLabel}
+		onclose={() => (deleting = false)}
+		ondeleted={() => listing.reload()}
+	/>
+{/if}
 
 <ListingShell {listing} noun="trace">
 	{#snippet table()}
@@ -203,6 +241,6 @@
 		{#snippet meta()}
 			<TracePeekMeta trace={peeked} />
 		{/snippet}
-		<TraceDetail traceID={peekID} bind:trace={peeked} />
+		<TraceDetail traceID={peekID} bind:trace={peeked} ondeleted={deleted} />
 	</PeekPanel>
 {/if}

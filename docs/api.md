@@ -33,6 +33,8 @@ document served without authentication.
 | `GET` | `/api/v1/traces` | List traces, filtered and paginated |
 | `GET` | `/api/v1/traces/{id}` | One trace, observations as a tree |
 | `GET` | `/api/v1/traces/last` | The newest trace matching the filters, whole |
+| `DELETE` | `/api/v1/traces/{id}` | Delete one trace; a dry run until confirmed with its id |
+| `DELETE` | `/api/v1/traces?…&to=` | Delete every trace the filters match before `to`, in rounds; a dry run until confirmed with the project name |
 | `GET` | `/api/v1/observations/{id}/io` | One observation's payloads, whole |
 | `GET` | `/api/v1/sessions` | List sessions by most recent activity |
 | `GET` | `/api/v1/sessions/{id}` | One session: totals and traces |
@@ -60,8 +62,8 @@ has decided deserves a human verdict, and who has given one — under
 `/api/v1/queues`: [annotation.md](annotation.md).
 
 Everything under `/api/v1/projects` that destroys something is a dry run until
-`?confirm=` echoes the name of what it destroys, and so is deleting a dataset
-or an annotation queue.
+`?confirm=` echoes the name of what it destroys, and so is deleting a dataset,
+an annotation queue, or [traces](#deleting-traces).
 That contract is described once, in [admin.md](admin.md#dry-run-by-default).
 The ceremony is for what cannot be undone: deleting one score takes no
 `?confirm=`, because writing its id again recreates it.
@@ -400,6 +402,53 @@ what you decide with before asking for the rest.
 Adds each observation's `input`, `output` and `metadata`. Without it, a trace
 of hundreds of observations still fits the response budget; with it, you get
 the shape of every payload in one round trip.
+
+## Deleting traces
+
+```sh
+curl -X DELETE … "http://localhost:4318/api/v1/traces/4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f"
+curl -X DELETE … "http://localhost:4318/api/v1/traces/4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f?confirm=4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f"
+```
+
+```json
+{
+  "dry_run": true,
+  "would_delete": {"traces": 1, "observations": 7, "scores": 2, "annotation_items": 1},
+  "oldest": "2026-09-01T10:00:00Z",
+  "affected_runs": [],
+  "confirm": "4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f",
+  "note": "raw OTLP bodies are not deleted; they expire on the raw retention window"
+}
+```
+
+`DELETE /api/v1/traces/{id}` removes one trace and everything attached to it
+— observations, scores, payloads, search entries, annotation-queue items —
+with the hour it started in re-rolled in the same transaction. An editor's
+route. Without `confirm` it answers the dry run above; the echo is the trace
+id, its only identity. With it: `{"dry_run": false, "deleted": {"traces": 1,
+"observations": 7, "scores": 2, "payloads": 9, "annotation_items": 1}, "id":
+"4f8c…"}`. An unknown id is `404` either way, a wrong echo `400`. When an
+eval run holds the trace it is deleted all the same, and `affected_runs`
+names the run in the dry run ([datasets.md](datasets.md#what-a-run-keeps)).
+
+```sh
+curl -X DELETE … "http://localhost:4318/api/v1/traces?environment=loadtest&to=2026-09-17T14:02:17Z"
+curl -X DELETE … "http://localhost:4318/api/v1/traces?environment=loadtest&to=2026-09-17T14:02:17Z&confirm=checkout-service&limit=1000"
+```
+
+`DELETE /api/v1/traces` takes every [filter of the listing](#filters), with
+the same validation, and **requires `to`** — dry run and confirmed alike, a
+`400` without it — so the set is closed: what the preview counted is what is
+deleted, however much ingest flows in between. The dry run adds `matched`,
+the exact count (the listing's own stops at a thousand), and its echo is the
+**project name**. A confirmed request deletes **one round** — the newest
+`limit` matches, 1–1000 and 1000 by default, in chunks of one hour, and at
+most fifty chunks — and answers `{"dry_run": false, "deleted": {…}, "more":
+true}`; repeat the same call while `more` is true. Nothing is recounted on the way, a filter that
+matches nothing is a successful dry run of zero and a successful deletion of
+nothing, and a repeat after `more: false` is harmless. The whole of it — what
+goes, what stays, the ingest race — is in
+[admin.md](admin.md#deleting-traces).
 
 ## The response budget
 

@@ -288,7 +288,9 @@
 				md:h-auto md:min-h-0 md:w-3/5 md:shrink md:border-r"
 		>
 			{#key item.id}
-				<TraceDetail traceID={item.trace_id} bind:trace={peeked} />
+				<!-- A trace deleted from the desk takes its item with it
+				     (spec 024 #3); the next item is what is left to do. -->
+				<TraceDetail traceID={item.trace_id} bind:trace={peeked} ondeleted={() => void take()} />
 			{/key}
 		</div>
 		<div

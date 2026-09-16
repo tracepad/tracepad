@@ -4,8 +4,6 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"fmt"
-	"maps"
-	"slices"
 	"time"
 )
 
@@ -192,58 +190,11 @@ type AffectedRun struct {
 }
 
 // UserDataPreview counts one user's parsed data: what an erasure request would
-// remove (spec 005 #7). Raw bodies are not counted because they are not
-// touched — `docs/retention.md` states that position rather than hiding it.
-// The runs holding any of the traces come back beside the counts: erasure
-// overrides the pin (spec 014 #14), and the preview is where that is said.
+// remove (spec 005 #7). It is the one preview every deletion of traces shares
+// (`tracesPreview`, spec 035 #3), asked about the traces filed under the id.
 func (s *Store) UserDataPreview(projectID, userID string) (DeleteCounts, []AffectedRun, error) {
-	var (
-		counts DeleteCounts
-		oldest sql.NullInt64
-	)
-	const owned = `SELECT id FROM traces WHERE project_id = ? AND user_id = ?`
-	err := s.db.QueryRow(
-		`SELECT COUNT(*), MIN(ingested_at) FROM traces WHERE project_id = ? AND user_id = ?`,
-		projectID, userID).Scan(&counts.Traces, &oldest)
-	if err != nil {
-		return counts, nil, fmt.Errorf("count a user's traces: %w", err)
-	}
-	if oldest.Valid {
-		counts.Oldest = oldest.Int64
-	}
-	if err := s.db.QueryRow(
-		`SELECT COUNT(*) FROM observations WHERE project_id = ? AND trace_id IN (`+owned+`)`,
-		projectID, projectID, userID).Scan(&counts.Observations); err != nil {
-		return counts, nil, fmt.Errorf("count a user's observations: %w", err)
-	}
-	if err := s.db.QueryRow(
-		`SELECT COUNT(*) FROM scores WHERE project_id = ? AND trace_id IN (`+owned+`)`,
-		projectID, projectID, userID).Scan(&counts.Scores); err != nil {
-		return counts, nil, fmt.Errorf("count a user's scores: %w", err)
-	}
-	if err := s.db.QueryRow(
-		`SELECT COUNT(*) FROM annotation_items WHERE project_id = ? AND trace_id IN (`+owned+`)`,
-		projectID, projectID, userID).Scan(&counts.AnnotationItems); err != nil {
-		return counts, nil, fmt.Errorf("count a user's annotation items: %w", err)
-	}
-	rows, err := s.db.Query(
-		`SELECT r.id, r.dataset, COUNT(*) FROM traces t
-		   JOIN dataset_runs r ON r.project_id = t.project_id AND r.id = t.run_id
-		  WHERE t.project_id = ? AND t.user_id = ?
-		  GROUP BY r.id, r.dataset ORDER BY r.dataset, r.id`, projectID, userID)
-	if err != nil {
-		return counts, nil, fmt.Errorf("find a user's runs: %w", err)
-	}
-	defer rows.Close()
-	var runs []AffectedRun
-	for rows.Next() {
-		var run AffectedRun
-		if err := rows.Scan(&run.ID, &run.Dataset, &run.Traces); err != nil {
-			return counts, nil, err
-		}
-		runs = append(runs, run)
-	}
-	return counts, runs, rows.Err()
+	return s.tracesPreview(projectID,
+		`SELECT id FROM traces WHERE project_id = ? AND user_id = ?`, projectID, userID)
 }
 
 // ProjectPreview counts everything a project holds: what deleting it will
@@ -744,84 +695,17 @@ func (e *UserDataErase) apply(tx *sql.Tx) error {
 		return deleteUserRollup(tx, e.ProjectID, e.UserID)
 	}
 
-	payloads, err := referencedPayloads(tx, e.ProjectID, ids)
-	if err != nil {
-		return err
-	}
-	if e.Counts.Observations, err = deleteIn(tx,
-		`DELETE FROM observations WHERE project_id = ? AND trace_id IN`,
-		[]any{e.ProjectID}, ids); err != nil {
-		return fmt.Errorf("erase observations: %w", err)
-	}
-	if e.Counts.Scores, err = deleteIn(tx,
-		`DELETE FROM scores WHERE project_id = ? AND trace_id IN`,
-		[]any{e.ProjectID}, ids); err != nil {
-		return fmt.Errorf("erase scores: %w", err)
-	}
-	// The queues keep their shape; what pointed at the erased traces goes
-	// with them (spec 024 #3), for the same reason the scores do. Counted,
-	// because the response is what an operator shows for "everything about
-	// this person is gone".
-	if e.Counts.AnnotationItems, err = deleteIn(tx,
-		`DELETE FROM annotation_items WHERE project_id = ? AND trace_id IN`,
-		[]any{e.ProjectID}, ids); err != nil {
-		return fmt.Errorf("erase annotation items: %w", err)
-	}
-	if e.Counts.Traces, err = deleteIn(tx,
-		`DELETE FROM traces WHERE project_id = ? AND id IN`,
-		[]any{e.ProjectID}, ids); err != nil {
-		return fmt.Errorf("erase traces: %w", err)
-	}
-	if e.Counts.Payloads, err = deleteIn(tx,
-		`DELETE FROM payloads WHERE id IN`, nil, payloads); err != nil {
-		return fmt.Errorf("erase payloads: %w", err)
-	}
-	// Text erased under spec 005 #7 must not remain findable (spec 011 #7).
-	if err := deleteTraceSearchEntries(tx, e.ProjectID, ids); err != nil {
-		return err
-	}
-
-	// The statistics are corrected here, in the transaction that made them
-	// wrong, one whole `RollHour` per hour this chunk touched. The chunks
-	// follow `idx_traces_user`, which is arrival order, so an hour straddles
-	// a chunk boundary rarely and is rolled about once: measured on a
-	// 21k-trace user over 699 hours, 738 rolls. An hour whose raw rows
-	// retention already took is frozen and the roll leaves it alone (spec
-	// 013 #11) — the aggregates carry no user id, and `docs/retention.md`
-	// states that position rather than hiding it.
-	//
-	// Two gates, both read from this transaction, the ones the score
-	// correction of spec 025 #22 applies. An hour at or past the watermark
-	// is the live half of the read seam: its raw rows are already right,
-	// and rows written for it would be ignored until the pass rewrote
-	// them. The summaries are deferred and recomputed once per chunk, the
-	// way the aggregator does once per pass.
-	now := e.Now
-	if now == 0 {
-		now = time.Now().UnixNano()
-	}
-	state, err := rollupState(tx, e.ProjectID)
-	if err != nil {
-		return err
-	}
-	touched := map[string]bool{}
-	for _, hour := range e.Hours {
-		if hour >= state.RolledUntil {
-			continue
-		}
-		roll := &statsRoll{ProjectID: e.ProjectID, Hour: hour, Now: now, DeferSummary: true}
-		if err := roll.apply(tx); err != nil {
-			return fmt.Errorf("re-roll hour %d after erasing from it: %w", hour, err)
-		}
-		for _, id := range roll.Touched {
-			// The erased user's summary is not recomputed: it goes
-			// outright, below.
-			if id != e.UserID {
-				touched[id] = true
-			}
-		}
-	}
-	if err := recomputeUsers(tx, e.ProjectID, slices.Sorted(maps.Keys(touched))); err != nil {
+	// The body is the one trace deletion shares (spec 035 #3): the rows
+	// hanging off the traces, the traces, the orphaned payloads, the search
+	// entries, then one whole `RollHour` per hour this chunk touched, in
+	// this same transaction. The chunks follow `idx_traces_user`, which is
+	// arrival order, so an hour straddles a chunk boundary rarely and is
+	// rolled about once: measured on a 21k-trace user over 699 hours, 738
+	// rolls. The erased user's own summary is not recomputed: it goes
+	// outright, below.
+	removal := &traceRemoval{projectID: e.ProjectID, ids: ids, hours: e.Hours,
+		now: e.Now, skipUser: e.UserID}
+	if e.Counts, err = removal.apply(tx); err != nil {
 		return err
 	}
 

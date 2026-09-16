@@ -94,8 +94,8 @@ func TestMethodMismatchStillAnswers405(t *testing.T) {
 
 	for _, probe := range []struct{ method, path, allow string }{
 		{"GET", "/v1/traces", "POST"},
-		{"DELETE", "/api/v1/traces", "GET"},
-		{"POST", "/api/v1/traces/0123456789abcdef0123456789abcdef", "GET"},
+		{"PUT", "/api/v1/traces", "DELETE, GET"},
+		{"POST", "/api/v1/traces/0123456789abcdef0123456789abcdef", "DELETE, GET"},
 		{"PUT", "/api/v1/scores", "GET, POST"},
 	} {
 		rec := h.call(t, probe.method, probe.path, nil)

@@ -176,6 +176,48 @@ tracepad traces last --error --full
 "Why did the last run fail" — every filter of `traces ls`, `--search`
 included, the newest match, the whole tree. One request.
 
+### `traces rm`
+
+```sh
+tracepad traces rm 4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f
+tracepad traces rm --to 2026-09-17T14:02:17Z --env loadtest --since 24h
+tracepad traces rm --to 1h --search "api key" --yes
+```
+
+Deletes one trace by id, or every trace the listing's filters match before
+`--to` — the trace with its observations, scores, payloads and queue items,
+the statistics of its hour corrected in the same transaction, the raw OTLP
+body it arrived in left alone ([admin.md](admin.md#deleting-traces)). Both
+forms are destructive commands like the ones under
+[Administration](#administration): the server's preview is printed, the echo
+is typed back — the trace id for one trace, the project's name for a filter
+— and `--yes` answers that for a script without skipping the check.
+
+```
+$ tracepad traces rm --to 1h --env loadtest
+this would delete every trace matching these filters that started before 2026-09-17 13:02:17:
+  matched        12000
+  annotation_items 0
+  observations   36000
+  scores         0
+  traces         12000
+  oldest         2026-09-16 09:12:40
+raw OTLP bodies are not deleted; they expire on the raw retention window
+type "checkout-service" to confirm:
+```
+
+The bulk form takes the filters of `traces ls` — `--search` included — but
+`--to` in place of `--until`, and **requires** it: it closes the set, so that
+what the preview counted is what goes however much ingest flows in
+meanwhile, and the command does not fill it in because a script that deletes
+by filter should say what it means. No other filter is needed: `--to` alone
+is *every trace before then*. The server deletes in rounds of `--limit`
+traces (1–1000, the default 1000) and the command repeats them until there is
+no more, printing the running total on stderr between rounds and the total
+once at the end; `--json` sums the rounds into one answer with a `rounds`
+count. A run cut off between rounds has lost nothing but the tally: what
+committed is gone, and re-running the same command continues.
+
 ### `tail`
 
 ```sh
@@ -645,7 +687,8 @@ It has a page of its own: [export.md](export.md).
 ## Administration
 
 `projects`, `keys`, `retention`, `users rm-data` and `accounts` manage the
-server itself. They are clients of the same API as everything else, and they
+server itself; [`traces rm`](#traces-rm) is the same ceremony on the data
+plane. They are clients of the same API as everything else, and they
 are covered in [admin.md](admin.md), [retention.md](retention.md) and
 [accounts.md](accounts.md); what matters here is how they behave at a terminal.
 

@@ -61,6 +61,10 @@ func (s *Server) routes() []route {
 		{"GET", "/api/v1/traces", member, "List traces newest first, filtered and cursor-paginated", s.handleListTraces},
 		{"GET", "/api/v1/traces/last", member, "The newest trace matching the filters, whole", s.handleLastTrace},
 		{"GET", "/api/v1/traces/{id}", member, "One trace with its observations as a nested tree", s.handleGetTrace},
+		// Deleting traces (spec 035): a dry run until `confirm` echoes the
+		// trace id, or the project's name for the bulk form.
+		{"DELETE", "/api/v1/traces/{id}", editor, "Delete one trace and everything attached to it", s.handleDeleteTrace},
+		{"DELETE", "/api/v1/traces", editor, "Delete every trace a listing filter matches before `to`, in bounded rounds", s.handleDeleteTraces},
 		{"GET", "/api/v1/observations/{id}/io", member, "The whole input, output and metadata of one observation", s.handleObservationIO},
 
 		// The raw archive (spec 019): what arrived, in the order it

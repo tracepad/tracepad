@@ -77,6 +77,15 @@ export async function inviteEditor(
 	return invite(baseURL, `${label}@e2e.test`, [{ project_id: project, role: 'editor' }]);
 }
 
+/** A viewer of one project, for the suites about what a viewer is not offered. */
+export async function inviteViewer(
+	baseURL: string,
+	project: string,
+	label: string
+): Promise<Account> {
+	return invite(baseURL, `${label}-viewer@e2e.test`, [{ project_id: project, role: 'viewer' }]);
+}
+
 /**
  * Invites an account that is a member of nothing — the one whose every bare
  * path is `/p` (spec 029 #4) and whose Account tab is still its own (#14).
@@ -88,7 +97,7 @@ export async function inviteNobody(baseURL: string, label: string): Promise<Acco
 async function invite(
 	baseURL: string,
 	email: string,
-	memberships: { project_id: string; role: 'editor' }[]
+	memberships: { project_id: string; role: 'editor' | 'viewer' }[]
 ): Promise<Account> {
 	const response = await fetch(`${baseURL}/api/v1/accounts`, {
 		method: 'POST',

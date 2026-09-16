@@ -51,8 +51,9 @@ in the path. See [accounts.md](accounts.md#what-a-session-may-ask).
 ## Dry run by default
 
 Every destructive endpoint changes nothing until `?confirm=` echoes the
-identity of what it destroys — the project's **name**, or the **user id**.
-Without it, the endpoint answers `200` with a preview:
+identity of what it destroys — the project's **name**, the **user id**, or the
+**trace id** when one trace is deleted. Without it, the endpoint answers `200`
+with a preview:
 
 ```json
 {
@@ -99,6 +100,8 @@ on stderr and exit code 1.
 | `POST` | `/api/v1/projects/{id}/keys` | Mint a pair. |
 | `DELETE` | `/api/v1/projects/{id}/keys/{public_key}` | Revoke one. |
 | `DELETE` | `/api/v1/projects/{id}/users/{user_id}/data` | Erase one user's parsed data. |
+| `DELETE` | `/api/v1/traces/{id}` | Delete one trace — an editor's route, on the data plane. See [below](#deleting-traces). |
+| `DELETE` | `/api/v1/traces?…&to=` | Delete every trace a listing filter matches before `to`, in rounds. |
 | `GET` | `/api/v1/projects/{id}/members` | Who has a role in this project. See [accounts.md](accounts.md#managing-accounts). |
 
 The people who sign in, their roles and their invitations are
@@ -218,7 +221,94 @@ erased is erased and counted as erased, and repeating the call finishes the
 rest. The counts in the answer are the request's own; a repeat reports what
 it erased, not what the interrupted one did.
 
+## Deleting traces
+
+```sh
+tracepad traces rm 4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f
+tracepad traces rm --to 2026-09-17T14:02:17Z --env loadtest --since 24h
+```
+
+A trace leaves the store in exactly two ways otherwise: the retention sweep
+takes it when its window runs out, or the project goes whole. In between is
+where the mistakes live — an eval harness that exported under the
+application's key, a load test run against production, one trace holding
+something a person should not have typed — and this is the door for those.
+One trace by id, or every trace a [listing filter](api.md#filters) matches:
+`DELETE /api/v1/traces/{id}`, and `DELETE /api/v1/traces?<filters>&to=`. An
+editor's route rather than an administrator's — it is the reader's and the
+manager's gesture at the surfaces where they read and choose — and it wears
+the same ceremony as everything above: a dry run until `confirm` echoes the
+identity of what goes.
+
+**What goes** is what erasure takes, by the same path: the trace, its
+observations, scores, payloads and search entries, the
+[annotation-queue items](annotation.md) pointing at it, and the hour it
+started in re-rolled in the same transaction, so the
+[statistics](retention.md#what-outlives-what) stop counting it as the `200`
+arrives. Raw OTLP bodies are **not** touched — a raw batch holds many traces
+of many kinds, and a trace cannot be cut out of one — and the preview says so
+in its `note`. A trace an eval run holds is deleted like any other; the run
+then shows the item as missing, and the preview names the run under
+`affected_runs` so the hole is seen before it opens
+([datasets.md](datasets.md#what-a-run-keeps)).
+
+**One trace.** The echo is the trace id, because the id is the trace's only
+identity. Without `confirm` the endpoint answers the preview — `would_delete`
+with `traces`, `observations`, `scores` and `annotation_items`, `oldest`,
+`affected_runs`, `confirm`, `note` — and an unknown id is `404`, dry run and
+confirmed alike. With `?confirm=<id>` it deletes and answers
+`{"dry_run": false, "deleted": {…}, "id"}`; `deleted` counts the payloads too.
+
+**By filter.** The filters are the trace listing's own — the same names, the
+same validation, `400` on an unknown one — so "delete what I am looking at"
+is one call with no second grammar; an empty filter is *every trace before
+`to`*. `to` is **required**, dry run and confirmed alike: the listing is
+half-open on it, so a trace that starts after it can never qualify, and the
+operator who previewed a thousand does not delete a thousand and forty
+because ingest kept flowing in between. The CLI does not fill it in — a
+script that deletes by filter should say what it means — and the interface
+pins it to the moment its dialog opened, and says so. The preview counts the
+match **exactly** under `matched` (the listing's own count stops at a
+thousand), and the echo is the **project name**, the one retention shrinking
+already uses for the same act by another door.
+
+A confirmed request deletes **one round**: the newest `limit` matches
+(1–1000, default 1000), in chunks of at most five hundred traces of one hour,
+each chunk its own transaction — and at most fifty such chunks, whichever
+bound comes first, so a set spread thinly over many hours does not run past
+the interface's clock — and answers
+`{"dry_run": false, "deleted": {…}, "more": true}` — repeat the same call
+while `more` is true. A request that ran for minutes is one the interface's
+thirty-second clock would cut off every time, leaving the operator with an
+error over a store that is in fact fine; a round is a complete, consistent
+act, and the client — the CLI, the dialog — is the one that loops and can say
+*2,000 of 12,000*. A round cut off between chunks destroys nothing half-way:
+what committed is gone and counted, and the next request continues. Nothing
+is recounted on the way: a confirmed round takes what the filter matches at
+that moment, so a set that shrank since the preview — retention, another
+operator, an earlier round — is not a reason to refuse, and a repeat after
+`more: false` deletes nothing and is not an error.
+
+**The ingest race is documented, not fought.** A deletion removes what the
+store holds at that moment. A span that arrives afterwards for a deleted
+trace creates the trace again from what arrived, exactly as it would for a
+trace never seen; nothing is remembered about deleted ids. `to=` makes this
+rare for the bulk form, and an operator deleting a trace whose spans are
+still arriving has a stopwatch problem, not a store problem: wait for the
+export to finish, then delete.
+
+Not here: moving traces between projects (replay the
+[raw bodies](export.md) into the other project with its key), a trash or an
+undo (a project has a grace window because a project is a thing with a name
+and a history; a trace is a row, and a re-export recreates it), deleting one
+observation. A session's traces are `?session_id=…&to=`.
+
 ## In the web interface
+
+*Delete…* sits on the trace header beside *Add to queue*, and on the traces
+listing beside *Add to queue…* — editors only, like both — each a dialog
+around the same card with the server's dry run on screen
+([ui.md](ui.md#deleting-traces)).
 
 The same card sits on the user's own page (`/users/{id}` → *Erase data*), with
 the id already filled in; on success the page leaves for the listing. It is

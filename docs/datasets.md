@@ -419,10 +419,16 @@ retention window — the traces themselves are not deleted:
 A harness that creates a run per CI job prunes old ones with it, from a
 script, with no preview round-trip.
 
-Two things do outrank the pin. Erasing a user's data
+Three things do outrank the pin. Erasing a user's data
 (`tracepad users rm-data`) deletes the user's traces whether or not a run
-holds them; the dry run names the runs affected. And deleting the dataset
-takes its runs with it.
+holds them; deleting traces by hand (`tracepad traces rm`,
+[admin.md](admin.md#deleting-traces)) does the same, for the same reason —
+the pin is a pin against *retention*, "do not age this out", not "nobody may
+remove this" — and both dry runs name the runs affected under
+`affected_runs`, so the hole is seen before it opens; the run then shows
+those items as missing. And deleting the dataset takes its runs with it.
+Deleting a run's traces on purpose is `DELETE /api/v1/traces?run_id=…&to=`,
+which is what `DELETE /api/v1/runs/{id}` deliberately does *not* do.
 
 ## Orphans
 

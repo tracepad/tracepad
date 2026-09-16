@@ -44,6 +44,19 @@
 		subject,
 		/** Whether there is enough here to ask the server about yet. */
 		ready = true,
+		/**
+		 * Ask the server as soon as the card is on screen, rather than on a
+		 * click: for a dialog that opened *because* somebody chose to delete
+		 * this one thing, the preview is what the dialog is (spec 035 #8).
+		 */
+		immediate = false,
+		/**
+		 * Fill the echo in from the plan rather than have it typed. Only where
+		 * the identity is already on screen and is an id: typing thirty-two
+		 * hex characters back is a ritual, not a check, and the server checks
+		 * the string either way (spec 035 #8).
+		 */
+		prefill = false,
 		/** Extra controls the card needs before it can preview anything. */
 		children,
 		ondone
@@ -57,6 +70,8 @@
 		execute: (confirm: string) => Promise<string>;
 		subject?: unknown;
 		ready?: boolean;
+		immediate?: boolean;
+		prefill?: boolean;
 		children?: Snippet;
 		ondone?: () => void;
 	} = $props();
@@ -86,6 +101,18 @@
 	 * reassurance it is.
 	 */
 	const nothing = $derived(rows.every(([, howMany]) => howMany === 0));
+	/**
+	 * The eval runs that would lose traces (spec 014 #14, spec 035 #6): the
+	 * deletion overrides the pin a run puts on them, and the preview is where
+	 * the operator sees the hole before it opens.
+	 */
+	const runs = $derived(showing?.affected_runs ?? []);
+
+	$effect(() => {
+		if (immediate && ready && showing === null && !busy && !done && !failure) {
+			void run('preview');
+		}
+	});
 
 	async function run(step: 'preview' | 'execute') {
 		busy = true;
@@ -107,7 +134,7 @@
 					plan = answer;
 					planned = asked;
 				}
-				echo = '';
+				echo = prefill && plan ? plan.confirm : '';
 			} else {
 				done = await execute(echo);
 				plan = null;
@@ -169,6 +196,16 @@
 			{#if showing.oldest}
 				<p class="text-muted mt-1.5 text-sm">
 					Reaching back to {timestamp(showing.oldest)}.
+				</p>
+			{/if}
+			{#if runs.length > 0}
+				<p class="text-warn mt-1.5 text-sm">
+					{runs.length === 1 ? 'An eval run holds some of these' : 'Eval runs hold some of these'}
+					and will show them as missing:
+					{#each runs as run, index (run.id)}{index > 0 ? ', ' : ' '}<span
+							class="whitespace-nowrap">{run.dataset} <code class="font-mono">{run.id.slice(0, 8)}</code
+							> ({count(run.traces)})</span
+						>{/each}.
 				</p>
 			{/if}
 			{#if showing.note}

@@ -425,6 +425,46 @@
           "400": {"$ref": "#/components/responses/BadRequest"},
           "401": {"$ref": "#/components/responses/Unauthorized"}
         }
+      },
+      "delete": {
+        "tags": ["traces"],
+        "summary": "Delete every trace a listing filter matches before `to`, in bounded rounds",
+        "description": "The filters are the trace listing's own, with the same names and the same validation, so \"delete what I am looking at\" is one call with no second grammar — and `to` is required, dry run and confirmed alike: it closes the set, so that what was previewed is what is deleted however much ingest flows in between. Without `confirm` it answers with the dry run, counting the match exactly rather than at the listing's cap, naming the eval runs that would lose traces, and stating that raw OTLP bodies are not touched. With `confirm` echoing the project's name it deletes at most `limit` of the newest matches, in chunks of one hour — and at most fifty chunks, whichever bound comes first — each chunk its own transaction re-rolling the hours it emptied, and answers whether there is `more`; repeat the same call while there is. A filter matching nothing is a successful dry run of zero and a successful deletion of nothing. Editor role.",
+        "operationId": "deleteTraces",
+        "parameters": [
+          {"$ref": "#/components/parameters/From"},
+          {"$ref": "#/components/parameters/To"},
+          {"$ref": "#/components/parameters/Environment"},
+          {"name": "user_id", "in": "query", "schema": {"type": "string"}, "description": "Exact match on the trace's user id"},
+          {"name": "session_id", "in": "query", "schema": {"type": "string"}, "description": "Exact match on the trace's session id"},
+          {"name": "name", "in": "query", "schema": {"type": "string"}, "description": "The trace name. A comma-separated list matches **any** of them; items are trimmed, duplicates collapse, an empty item is a 400, repeating the parameter is a 400, at most 100 items, and a name containing a comma is not expressible here. A trace with no name never matches. `GET /api/v1/facets` lists the values in a range with their counts"},
+          {"name": "tag", "in": "query", "schema": {"type": "array", "items": {"type": "string"}}, "style": "form", "explode": true,
+            "description": "Repeatable; a trace must carry every tag given"},
+          {"name": "status", "in": "query", "schema": {"type": "string", "enum": ["error", "ok"]},
+            "description": "`error` keeps traces with at least one failed observation, `ok` keeps the rest"},
+          {"name": "min_cost", "in": "query", "schema": {"type": "number", "minimum": 0},
+            "description": "Keeps traces whose total cost is at least this much"},
+          {"$ref": "#/components/parameters/Search"},
+          {"$ref": "#/components/parameters/Release"},
+          {"$ref": "#/components/parameters/Version"},
+          {"$ref": "#/components/parameters/ObservationType"},
+          {"$ref": "#/components/parameters/Prompt"},
+          {"$ref": "#/components/parameters/RunFilter"},
+          {"$ref": "#/components/parameters/ItemFilter"},
+          {"name": "confirm", "in": "query", "schema": {"type": "string"},
+            "description": "The name of the project whose slice is being destroyed. Without it the endpoint changes nothing and answers with the dry run; a value that does not match is a 400 that also changes nothing."},
+          {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 1000},
+            "description": "How many traces one confirmed call may delete — one round; the round also ends at fifty one-hour chunks, whichever comes first. Out of range is a 400, not a silent clamp"}
+        ],
+        "responses": {
+          "200": {"description": "What one round deleted and whether there is more, or the dry run of what the filter matches",
+            "content": {"application/json": {"schema": {"oneOf": [
+              {"$ref": "#/components/schemas/TracesDeletion"},
+              {"$ref": "#/components/schemas/DryRun"}]}}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"}
+        }
       }
     },
     "/api/v1/traces/last": {
@@ -479,6 +519,28 @@
           "200": {"description": "The trace", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Trace"}}}},
           "400": {"$ref": "#/components/responses/BadRequest"},
           "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      },
+      "delete": {
+        "tags": ["traces"],
+        "summary": "Delete one trace and everything attached to it",
+        "description": "The trace, its observations, scores, payloads, search entries and annotation-queue items, with the hour it started in re-rolled in the same transaction. Raw OTLP bodies are not touched: a raw batch holds many traces, and a trace cannot be cut out of one. Without `confirm` it answers with the dry run, naming the eval runs that would lose the trace; with `confirm` echoing the trace id it deletes. An unknown id is a 404 either way. Editor role.",
+        "operationId": "deleteTrace",
+        "parameters": [
+          {"name": "id", "in": "path", "required": true,
+            "schema": {"type": "string", "pattern": "^[0-9a-f]{32}$"}},
+          {"name": "confirm", "in": "query", "schema": {"type": "string"},
+            "description": "The id of the trace being destroyed — its only identity. Without it the endpoint changes nothing and answers with the dry run; a value that does not match is a 400 that also changes nothing."}
+        ],
+        "responses": {
+          "200": {"description": "What was deleted, or the dry run of what would be",
+            "content": {"application/json": {"schema": {"oneOf": [
+              {"$ref": "#/components/schemas/TraceDeletion"},
+              {"$ref": "#/components/schemas/DryRun"}]}}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
           "404": {"$ref": "#/components/responses/NotFound"}
         }
       }
@@ -2881,9 +2943,10 @@
         "properties": {
           "dry_run": {"const": true},
           "would_delete": {"type": "object", "additionalProperties": {"type": "integer"}},
+          "matched": {"type": "integer", "description": "Trace deletion by filter only: how many traces the filter matches, counted exactly"},
           "oldest": {"type": "string", "format": "date-time", "description": "Arrival of the oldest affected row; absent when nothing is affected"},
           "affected_runs": {"type": "array",
-            "description": "User-data erasure only: the dataset runs that would lose traces to it, because erasure overrides the pin a run puts on them",
+            "description": "User-data erasure and trace deletion only: the dataset runs that would lose traces to it, because both override the pin a run puts on them",
             "items": {"type": "object",
               "properties": {
                 "id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
@@ -2904,6 +2967,28 @@
           "deleted": {"type": "object", "additionalProperties": {"type": "integer"}}
         },
         "required": ["dry_run", "deleted"]
+      },
+      "TraceDeletion": {
+        "type": "object",
+        "description": "What deleting one trace removed",
+        "properties": {
+          "dry_run": {"const": false},
+          "deleted": {"type": "object", "additionalProperties": {"type": "integer"},
+            "description": "`traces`, `observations`, `scores`, `payloads` and `annotation_items`"},
+          "id": {"type": "string", "pattern": "^[0-9a-f]{32}$"}
+        },
+        "required": ["dry_run", "deleted", "id"]
+      },
+      "TracesDeletion": {
+        "type": "object",
+        "description": "What one round of a deletion by filter removed",
+        "properties": {
+          "dry_run": {"const": false},
+          "deleted": {"type": "object", "additionalProperties": {"type": "integer"},
+            "description": "`traces`, `observations`, `scores`, `payloads` and `annotation_items`, summed over the round's chunks"},
+          "more": {"type": "boolean", "description": "Traces matching the filter remain; repeat the same call"}
+        },
+        "required": ["dry_run", "deleted", "more"]
       },
       "Dataset": {
         "type": "object",

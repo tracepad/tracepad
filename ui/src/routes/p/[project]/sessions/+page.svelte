@@ -110,6 +110,19 @@
 	const drill = (traceID: string | null) =>
 		move({ peek: peekID, trace: traceID }, traceID !== null);
 
+	/**
+	 * A trace deleted from the drilled layer (spec 035 #8): back up to the
+	 * session, which is re-read whole — its rows and its totals both changed —
+	 * and the listing with it, because a session with one trace fewer is a
+	 * different row.
+	 */
+	let reread = $state(0);
+	function deleted() {
+		drill(null);
+		reread++;
+		listing.reload();
+	}
+
 	/** Commits a text filter on blur or Enter, never on every keystroke. */
 	function commit(name: 'environment' | 'user_id', value: string) {
 		const next = { ...filters };
@@ -329,15 +342,17 @@
 		     review). The classes are exclusive rather than a `hidden` added to
 		     a `flex`, so that neither has to win on stylesheet order. -->
 		<div class={drilled ? 'hidden' : 'flex min-h-0 flex-1 flex-col'}>
-			<SessionDetail
-				sessionID={peekID}
-				bind:session={peekedSession}
-				onopen={drill}
-				selectedTraceID={lastDrilled}
-			/>
+			{#key reread}
+				<SessionDetail
+					sessionID={peekID}
+					bind:session={peekedSession}
+					onopen={drill}
+					selectedTraceID={lastDrilled}
+				/>
+			{/key}
 		</div>
 		{#if drilled}
-			<TraceDetail traceID={drilled} bind:trace={peekedTrace} />
+			<TraceDetail traceID={drilled} bind:trace={peekedTrace} ondeleted={deleted} />
 		{/if}
 	</PeekPanel>
 {/if}

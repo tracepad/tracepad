@@ -42,6 +42,10 @@ export type SessionRow = components['schemas']['SessionRow'];
 export type UserRow = components['schemas']['UserRow'];
 /** What a destructive request answers before it is confirmed (spec 005 #8). */
 export type DryRun = components['schemas']['DryRun'];
+/** What deleting one trace removed (spec 035 #1). */
+export type TraceDeletion = components['schemas']['TraceDeletion'];
+/** What one round of a deletion by filter removed, and whether there is more (spec 035 #4). */
+export type TracesDeletion = components['schemas']['TracesDeletion'];
 /** A freshly minted pair; the secret is in this response and nowhere else. */
 export type NewKey = components['schemas']['NewKey'];
 
@@ -227,6 +231,30 @@ class Api {
 		return this.#json<TracePage>('/api/v1/traces', {
 			query: { ...filters, ...paging(page) },
 			signal
+		});
+	}
+
+	/**
+	 * Deleting one trace (spec 035 #1): a dry run until `confirm` echoes the
+	 * trace id, which is its only identity.
+	 */
+	deleteTrace(id: string, confirm?: string) {
+		return this.#json<DryRun | TraceDeletion>(`/api/v1/traces/${encodeURIComponent(id)}`, {
+			method: 'DELETE',
+			query: { confirm }
+		});
+	}
+
+	/**
+	 * Deleting every trace a filter matches before `to` (spec 035 #2, #4):
+	 * a dry run until `confirm` echoes the project's name, then one round of
+	 * at most `limit` traces per call, repeated while the answer says `more`.
+	 * The filters must carry `to`; the server refuses them without it.
+	 */
+	deleteTraces(filters: TraceFilters, confirm?: string, limit?: number) {
+		return this.#json<DryRun | TracesDeletion>('/api/v1/traces', {
+			method: 'DELETE',
+			query: { ...filters, confirm, limit: limit === undefined ? undefined : String(limit) }
 		});
 	}
 
