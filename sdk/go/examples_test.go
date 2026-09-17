@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"strings"
+	"time"
 
 	tracepad "github.com/tracepad/tracepad/sdk/go"
 )
@@ -148,6 +149,31 @@ func ExamplePrompt() {
 	ctx, call := tracepad.Generation(ctx, "chat", tracepad.WithPrompt(support),
 		tracepad.WithModel(support.Config["model"].(string)), tracepad.WithInput(messages))
 	call.End(tracepad.Result{})
+}
+
+// ExampleDeleteTraces is docs/sdk-go.md#deleting-traces: the dry run, then
+// the project's name as the echo, then one trace by its id.
+func ExampleDeleteTraces() {
+	ctx := context.Background()
+	_, step := tracepad.Span(ctx, "answer")
+	step.End()
+
+	filter := tracepad.TraceFilter{To: time.Now(), Environment: "loadtest"}
+	preview, err := tracepad.DeleteTraces(ctx, filter, "")
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Println(preview["matched"], preview["would_delete"])
+	total, err := tracepad.DeleteTraces(ctx, filter, "checkout-service")
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Println(total["deleted"], total["rounds"])
+
+	_, err = tracepad.DeleteTrace(ctx, step.TraceID(), true)
+	if err != nil {
+		log.Fatal(err)
+	}
 }
 
 func judge(answer string, expected any) float64 { return 1 }

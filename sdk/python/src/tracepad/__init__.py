@@ -25,6 +25,7 @@ from ._errors import TracepadConfigError, TracepadError, TracepadHTTPError
 from ._harness import Attempt, Run, ScoreConfig, compare, item_id, score_configs
 from ._prompts import Prompt, prompt
 from ._scores import score
+from ._traces import delete_trace, delete_traces
 from ._tracing import (
     Generation,
     Observation,
@@ -53,6 +54,8 @@ __all__ = [
     "__version__",
     "compare",
     "dataset",
+    "delete_trace",
+    "delete_traces",
     "event",
     "flush",
     "generation",

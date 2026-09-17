@@ -265,6 +265,54 @@ a fallback prompt baked into the code is a prompt the trace cannot name. A
 script that only fetches a prompt need not call `Init`: the environment is
 read on the first call.
 
+## Deleting traces
+
+```go
+filter := tracepad.TraceFilter{To: time.Now(), Environment: "loadtest"}
+preview, err := tracepad.DeleteTraces(ctx, filter, "")
+if err != nil {
+	return err
+}
+log.Println(preview["matched"], preview["would_delete"])
+total, err := tracepad.DeleteTraces(ctx, filter, "checkout-service")
+if err != nil {
+	return err
+}
+log.Println(total["deleted"], total["rounds"])
+
+_, err = tracepad.DeleteTrace(ctx, step.TraceID(), true)
+```
+
+A script's door to what [`traces rm`](cli.md#traces-rm) does: an eval harness that
+exported under the wrong key, a test suite that wants its traces gone before
+the next run. Both calls are a dry run until confirmed, the way every
+destructive act in the store is, and both return `*HTTPError` for what the
+API refuses — a `404` for an unknown id, a `400` for a wrong echo or a filter
+name it does not know.
+
+`DeleteTrace(ctx, id, confirm bool)` takes one trace with everything attached
+to it. With `false` the answer is the preview — `would_delete`,
+`affected_runs`, `confirm`, `note`; with `true` the package sends the id as
+the echo, because it has the id in hand, and the answer says what went.
+
+`DeleteTraces(ctx, filter, confirm string, ...DeleteOption)` takes every
+trace the `TraceFilter` matches — one field per
+[listing filter](api.md#filters), `Tag` a slice, `From` and `To` a
+`time.Time` sent as UTC — before `To`, which is required so that the set is
+closed: a zero `To` is an error before any request. With an empty `confirm`
+it is one dry run and the answer is the API's preview, `matched` counted
+exactly. With the project's name — a name you type, since the package does
+not know it — it deletes in rounds of at most `WithRoundLimit` traces (1000
+by default), repeats while the API says there is more, and answers one
+total, `deleted` with `traces`, `observations`, `scores`, `payloads` and
+`annotation_items`, and `rounds` — `float64`s, as in every answer the package
+decodes. A filter that matches nothing is one round of zero, not an error.
+
+Raw OTLP bodies are **not** touched — a raw batch holds many traces of many
+kinds, and a trace cannot be cut out of one — and the preview says so in its
+`note`. What goes, what stays and the ingest race are in
+[admin.md](admin.md#deleting-traces).
+
 ## Evals
 
 The package is also the harness of [datasets.md](datasets.md): a dataset
@@ -360,7 +408,7 @@ stamped and the run covers no case; the first `run.Item` says so in the log.
 | Path | On failure |
 |---|---|
 | `Init` after configuration, `Span`, `Generation`, `Update`, `End`, the exporter, the score queue | Logged through `slog` (`WithLogger`, or the default logger); never a panic, never an error into your code |
-| `Prompt`, `Flush`, `shutdown`, and every call of the harness above | An error: `*HTTPError{Status, Body}` for a non-2xx answer, the transport's own otherwise |
+| `Prompt`, `Flush`, `shutdown`, `DeleteTrace`, `DeleteTraces`, and every call of the harness above | An error: `*HTTPError{Status, Body}` for a non-2xx answer, the transport's own otherwise |
 | `Init` with no host or key | `ErrConfig`, wrapped with what is missing |
 | `Score` with no target at all | `ErrNoTrace` — a programming error, visible at the call site |
 

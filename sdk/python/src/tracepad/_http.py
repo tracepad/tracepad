@@ -50,7 +50,8 @@ def request(
 
     url = config.host + path
     if params:
-        url += "?" + urllib.parse.urlencode(params)
+        # A list is a repeated name (`tag=a&tag=b`), the listing's own grammar.
+        url += "?" + urllib.parse.urlencode(params, doseq=True)
     payload = None if body is None else json.dumps(body).encode()
     call = urllib.request.Request(
         url,

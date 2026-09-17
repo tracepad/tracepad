@@ -5,7 +5,8 @@
 # `sdk-lines.sh` and `ui-lines.sh`: the number is a signal to revise, not a
 # rule to satisfy. 1,600 lines covered the package (spec 033 #11) and 1,900
 # cover it with the eval harness (spec 033 #17), because they are one module
-# and a budget per spec would be a budget per PR.
+# and a budget per spec would be a budget per PR; spec 036 #8 raised it to
+# 2,100 for trace deletion.
 #
 # What it counts is the application; the tests, the e2e package and the
 # programs under internal/ (the fixture writer, the smoke exporter) are
@@ -16,7 +17,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BUDGET="${1:-1900}"
+BUDGET="${1:-2100}"
 
 cd "$ROOT"
 

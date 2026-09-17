@@ -36,6 +36,7 @@ export { TracepadConfigError, TracepadError, TracepadHTTPError, VERSION } from '
 export type { Logger } from './log.js';
 export { Prompt, prompt, type Message, type PromptOptions } from './prompts.js';
 export { score, type ScoreFields } from './scores.js';
+export { deleteTrace, deleteTraces, type DeleteTracesOptions, type TraceFilter } from './traces.js';
 export {
   Generation,
   Observation,

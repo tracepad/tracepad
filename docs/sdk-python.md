@@ -266,6 +266,49 @@ answer is served stale with a warning, because a restart of your observability
 must not take your chat down. With nothing cached the call raises: a fallback
 prompt baked into the code is a prompt the trace cannot name.
 
+## Deleting traces
+
+```python
+from datetime import datetime, timezone
+
+to = datetime.now(timezone.utc)
+preview = tracepad.delete_traces(to=to, environment="loadtest")
+print(preview["matched"], preview["would_delete"])
+total = tracepad.delete_traces(to=to, environment="loadtest", confirm="checkout-service")
+print(total["deleted"]["traces"], "traces in", total["rounds"], "rounds")
+
+tracepad.delete_trace(trace_id, confirm=True)
+```
+
+A script's door to what [`traces rm`](cli.md#traces-rm) does: an eval harness that
+exported under the wrong key, a test suite that wants its traces gone before
+the next run. Both calls are a dry run until confirmed, the way every
+destructive act in the store is, and both raise `TracepadHTTPError` for what
+the API refuses — a `404` for an unknown id, a `400` for a wrong echo or a
+filter name it does not know.
+
+`delete_trace(id, confirm=False)` takes one trace with everything attached to
+it. Without `confirm` the answer is the preview — `would_delete`,
+`affected_runs`, `confirm`, `note`; with `confirm=True` the package sends the
+id as the echo, because it has the id in hand, and the answer says what went.
+
+`delete_traces(*, to, confirm="", limit=1000, **filters)` takes every trace
+the [listing's filters](api.md#filters) match, by their API names — `from_`
+for `from`, `tag` a list — before `to`, which is required so that the set is
+closed; a time is a `datetime` or an RFC 3339 string, and a naive `datetime`
+is UTC. Without `confirm` it is one dry run and the answer is the API's
+preview, `matched` counted exactly. With the project's name as `confirm` — a
+name you type, since the package does not know it — it deletes in rounds of
+at most `limit` traces, repeats while the API says there is more, and returns
+one total: `{"deleted": {"traces", "observations", "scores", "payloads",
+"annotation_items"}, "rounds": N}`. A filter that matches nothing is one round
+of zero, not an error.
+
+Raw OTLP bodies are **not** touched — a raw batch holds many traces of many
+kinds, and a trace cannot be cut out of one — and the preview says so in its
+`note`. What goes, what stays and the ingest race are in
+[admin.md](admin.md#deleting-traces).
+
 ## Evals
 
 The package is also the harness of [datasets.md](datasets.md): a dataset
@@ -353,7 +396,7 @@ through another SDK wants its spans stamped all the same.
 | Path | On failure |
 |---|---|
 | `init` after configuration, the decorators, `update`, `end`, the exporter, the score queue | Logged through the `tracepad` logger; never raised into your code |
-| `prompt`, `flush`, and every call of the harness above | `TracepadError`, or `TracepadHTTPError(status, body)` for a non-2xx |
+| `prompt`, `flush`, `delete_trace`, `delete_traces`, and every call of the harness above | `TracepadError`, or `TracepadHTTPError(status, body)` for a non-2xx |
 | `init` with no host or key | `TracepadConfigError` |
 | `score` with no target at all | `ValueError` — a programming error, visible at the call site |
 
