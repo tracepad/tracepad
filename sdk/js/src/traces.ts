@@ -14,6 +14,9 @@ type Json = Record<string, unknown>;
 
 /** The most traces one confirmed round may take: the API's own bound. */
 const ROUND = 1000;
+/** How long one confirmed round may take: the server sizes a round for the
+ * interface's thirty-second clock, and this leaves room over it. */
+const ROUND_TIMEOUT = 60_000;
 
 /**
  * The trace listing's filters, by their API names (`docs/api.md`); `to` is
@@ -55,6 +58,8 @@ export function deleteTrace(id: string, { confirm = false }: { confirm?: boolean
  * With the project's name it deletes in rounds of at most `limit` traces,
  * repeating while the API says `more`, and resolves with the total:
  * `{ deleted: { traces, observations, scores, payloads, annotation_items }, rounds }`.
+ * A round that fails rejects as it is — the rounds before it are done and
+ * consistent, and a repeat continues.
  */
 export async function deleteTraces(
   filter: TraceFilter,
@@ -67,7 +72,7 @@ export async function deleteTraces(
   const deleted: Record<string, number> = {};
   let rounds = 0;
   for (;;) {
-    const answer = await call('/api/v1/traces', params);
+    const answer = await call('/api/v1/traces', params, ROUND_TIMEOUT);
     rounds += 1;
     for (const [kind, count] of Object.entries((answer.deleted as Record<string, number> | undefined) ?? {})) {
       deleted[kind] = (deleted[kind] ?? 0) + count;
@@ -76,6 +81,6 @@ export async function deleteTraces(
   }
 }
 
-async function call(path: string, params: Params): Promise<Json> {
-  return ((await request(current(), 'DELETE', path, { params })).body as Json) ?? {};
+async function call(path: string, params: Params, timeout = 10_000): Promise<Json> {
+  return ((await request(current(), 'DELETE', path, { params, timeout })).body as Json) ?? {};
 }

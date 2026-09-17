@@ -303,8 +303,8 @@ closed: a zero `To` is an error before any request. With an empty `confirm`
 it is one dry run and the answer is the API's preview, `matched` counted
 exactly. With the project's name — a name you type, since the package does
 not know it — it deletes in rounds of at most `WithRoundLimit` traces (1000
-by default), repeats while the API says there is more, and answers one
-total, `deleted` with `traces`, `observations`, `scores`, `payloads` and
+by default), each given sixty seconds, repeats while the API says there is
+more, and answers one total, `deleted` with `traces`, `observations`, `scores`, `payloads` and
 `annotation_items`, and `rounds` — `float64`s, as in every answer the package
 decodes. A filter that matches nothing is one round of zero, not an error.
 

@@ -358,8 +358,8 @@ is closed; a time is a `Date` or an RFC 3339 string. Without `confirm` it is
 one dry run and the answer is the API's preview, `matched` counted exactly.
 With the project's name as `confirm` — a name you type, since the package
 does not know it — it deletes in rounds of at most `limit` traces (1000 by
-default), repeats while the API says there is more, and resolves with one
-total: `{ deleted: { traces, observations, scores, payloads,
+default), each given sixty seconds, repeats while the API says there is
+more, and resolves with one total: `{ deleted: { traces, observations, scores, payloads,
 annotation_items }, rounds }`. A filter that matches nothing is one round of
 zero, not an error.
 

@@ -119,6 +119,12 @@ type response struct {
 // request makes one JSON call. It returns *HTTPError for a non-2xx answer and
 // the transport's own error for everything that never got one.
 func request(ctx context.Context, c config, method, path string, body any, params url.Values) (response, error) {
+	return requestWith(ctx, httpClient, c, method, path, body, params)
+}
+
+// requestWith is request over a client of the caller's: the one place a
+// call waits longer than the default (a deletion's round, traces.go).
+func requestWith(ctx context.Context, client *http.Client, c config, method, path string, body any, params url.Values) (response, error) {
 	target := c.host + path
 	if len(params) > 0 {
 		target += "?" + params.Encode()
@@ -138,7 +144,7 @@ func request(ctx context.Context, c config, method, path string, body any, param
 	req.Header.Set("Authorization", "Bearer "+c.key)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "tracepad-go/"+Version)
-	answer, err := httpClient.Do(req)
+	answer, err := client.Do(req)
 	if err != nil {
 		return response{}, fmt.Errorf("tracepad: %s %s: %w", method, path, err)
 	}

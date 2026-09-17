@@ -3,6 +3,7 @@ package tracepad
 import (
 	"context"
 	"errors"
+	"net/http"
 	"net/url"
 	"strconv"
 	"time"
@@ -50,6 +51,10 @@ func (f TraceFilter) values() (url.Values, error) {
 	return params, nil
 }
 
+// roundClient waits for one confirmed round: the server sizes a round for
+// the interface's thirty-second clock, and this leaves room over it.
+var roundClient = &http.Client{Timeout: 60 * time.Second}
+
 // DeleteOption configures DeleteTraces.
 type DeleteOption func(url.Values)
 
@@ -70,7 +75,7 @@ func DeleteTrace(ctx context.Context, id string, confirm bool) (map[string]any, 
 	if confirm {
 		params.Set("confirm", id)
 	}
-	return del(ctx, "/api/v1/traces/"+url.PathEscape(id), params)
+	return del(ctx, "/api/v1/traces/"+url.PathEscape(id), params, httpClient)
 }
 
 // DeleteTraces deletes every trace the filter matches that started before
@@ -81,14 +86,15 @@ func DeleteTrace(ctx context.Context, id string, confirm bool) (map[string]any, 
 // {"deleted": {"traces", "observations", "scores", "payloads",
 // "annotation_items"}, "rounds"} — with float64 numbers, as in every answer
 // the package decodes. A wrong echo is the 400 of the first round, before
-// anything went.
+// anything went; a round that fails later is returned as it is — the rounds
+// before it are done and consistent, and a repeat continues.
 func DeleteTraces(ctx context.Context, filter TraceFilter, confirm string, opts ...DeleteOption) (map[string]any, error) {
 	params, err := filter.values()
 	if err != nil {
 		return nil, err
 	}
 	if confirm == "" {
-		return del(ctx, "/api/v1/traces", params)
+		return del(ctx, "/api/v1/traces", params, httpClient)
 	}
 	params.Set("confirm", confirm)
 	params.Set("limit", "1000")
@@ -98,7 +104,7 @@ func DeleteTraces(ctx context.Context, filter TraceFilter, confirm string, opts 
 	deleted := map[string]any{}
 	rounds := 0
 	for {
-		answer, err := del(ctx, "/api/v1/traces", params)
+		answer, err := del(ctx, "/api/v1/traces", params, roundClient)
 		if err != nil {
 			return nil, err
 		}
@@ -115,12 +121,12 @@ func DeleteTraces(ctx context.Context, filter TraceFilter, confirm string, opts 
 	}
 }
 
-func del(ctx context.Context, path string, params url.Values) (map[string]any, error) {
+func del(ctx context.Context, path string, params url.Values, client *http.Client) (map[string]any, error) {
 	c, err := current()
 	if err != nil {
 		return nil, err
 	}
-	answer, err := request(ctx, c, "DELETE", path, nil, params)
+	answer, err := requestWith(ctx, client, c, "DELETE", path, nil, params)
 	if err != nil {
 		return nil, err
 	}

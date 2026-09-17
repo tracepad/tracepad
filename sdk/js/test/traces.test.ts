@@ -1,6 +1,6 @@
 /** Deleting traces: the dry run, the echo, the rounds (spec 036). */
 
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 
 import * as tracepad from '../src/index.js';
 import { HOST, KEY, fakeFetch, fresh, type Call } from './helpers.js';
@@ -56,12 +56,20 @@ describe('by filter', () => {
       { deleted: { traces: 12, observations: 30, payloads: 1 }, more: false },
     ];
     const calls = fakeFetch(() => ({ body: answers.shift() }));
+    const timeouts: number[] = [];
+    vi.spyOn(AbortSignal, 'timeout').mockImplementation((ms) => {
+      timeouts.push(ms);
+      return new AbortController().signal;
+    });
     tracepad.init({ host: HOST, key: KEY, export: false });
     const total = await tracepad.deleteTraces({ to: '2026-09-17T14:02:17Z', environment: 'staging' }, { confirm: 'my-project' });
     expect(total).toEqual({ deleted: { traces: 2012, observations: 7030, payloads: 10 }, rounds: 3 });
     expect(requests(calls)).toEqual(
       Array(3).fill(['DELETE', '/api/v1/traces?to=2026-09-17T14%3A02%3A17Z&environment=staging&confirm=my-project&limit=1000']),
     );
+    // A round waits longer than the helper's default: the server sizes one
+    // for the interface's thirty-second clock.
+    expect(timeouts).toEqual([60_000, 60_000, 60_000]);
   });
 
   test('a round that finds nothing is one round of zero', async () => {

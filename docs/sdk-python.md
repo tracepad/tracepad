@@ -296,11 +296,12 @@ id as the echo, because it has the id in hand, and the answer says what went.
 the [listing's filters](api.md#filters) match, by their API names — `from_`
 for `from`, `tag` a list — before `to`, which is required so that the set is
 closed; a time is a `datetime` or an RFC 3339 string, and a naive `datetime`
-is UTC. Without `confirm` it is one dry run and the answer is the API's
-preview, `matched` counted exactly. With the project's name as `confirm` — a
-name you type, since the package does not know it — it deletes in rounds of
-at most `limit` traces, repeats while the API says there is more, and returns
-one total: `{"deleted": {"traces", "observations", "scores", "payloads",
+is local time, as Python's own `astimezone()` reads it. Without `confirm` it
+is one dry run and the answer is the API's preview, `matched` counted
+exactly. With the project's name as `confirm` — a name you type, since the
+package does not know it — it deletes in rounds of at most `limit` traces,
+each given sixty seconds, repeats while the API says there is more, and
+returns one total: `{"deleted": {"traces", "observations", "scores", "payloads",
 "annotation_items"}, "rounds": N}`. A filter that matches nothing is one round
 of zero, not an error.
 
