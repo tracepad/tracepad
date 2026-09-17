@@ -6,7 +6,7 @@
 # lines covered spec 017 (init, the decorators, generations, prompts, scores) and
 # spec 018 (the eval harness) together, because they are one package and a
 # budget per spec would be a budget per PR; spec 031 #22 raised it to 1,600 for
-# the streaming pass-through.
+# the streaming pass-through, and spec 036 #8 to 1,700 for trace deletion.
 #
 # What it counts is the application; the tests are reported beside it under no
 # ceiling at all (design §8, amended; spec 010 #7). A number that charges for
@@ -16,7 +16,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BUDGET="${1:-1600}"
+BUDGET="${1:-1700}"
 
 cd "$ROOT"
 

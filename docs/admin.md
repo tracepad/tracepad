@@ -238,7 +238,9 @@ One trace by id, or every trace a [listing filter](api.md#filters) matches:
 editor's route rather than an administrator's — it is the reader's and the
 manager's gesture at the surfaces where they read and choose — and it wears
 the same ceremony as everything above: a dry run until `confirm` echoes the
-identity of what goes.
+identity of what goes. The SDKs call both from a script, the rounds walked for
+you — [Python](sdk-python.md#deleting-traces), [Node](sdk-js.md#deleting-traces),
+[Go](sdk-go.md#deleting-traces).
 
 **What goes** is what erasure takes, by the same path: the trace, its
 observations, scores, payloads and search entries, the

@@ -49,9 +49,12 @@ export interface Response {
   headers: Headers;
 }
 
+/** Query parameters; a list is sent as a repeated name (`tag=a&tag=b`). */
+export type Params = Record<string, string | number | string[] | undefined>;
+
 export interface RequestOptions {
   body?: unknown;
-  params?: Record<string, string | number | undefined>;
+  params?: Params;
   timeout?: number;
 }
 
@@ -68,7 +71,9 @@ export async function request(
   let url = config.host + path;
   const query = new URLSearchParams();
   for (const [name, value] of Object.entries(params ?? {})) {
-    if (value !== undefined) query.set(name, String(value));
+    for (const one of Array.isArray(value) ? value : [value]) {
+      if (one !== undefined) query.append(name, String(one));
+    }
   }
   if (query.size > 0) url += `?${query}`;
 
