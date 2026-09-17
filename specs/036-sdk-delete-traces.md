@@ -1,6 +1,6 @@
 # Spec 036 — Deleting traces from the SDKs
 
-**Status:** 🟡 DRAFT
+**Status:** ✅ SHIPPED
 **Sprint:** September 2026
 
 > Spec 035 gave the store a way to remove traces, and the case that asked
