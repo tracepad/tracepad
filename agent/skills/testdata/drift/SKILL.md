@@ -16,6 +16,12 @@ tracepad skills install --dir /tmp/skills --force
 tracepad scores add --trace <trace-id> --name helpful \
   --value 1
 tracepad stats --group-by total   # a comment is not a --flag
+tracepad skills show debugging.md
+tracepad traces ls --limit 5 \
+```
+
+```sh
+echo "a block's trailing backslash does not reach this one" --bogus
 ```
 
 `get_trace`, `search`, `ttft_ms`, `total_cost`, `GET /api/v1`,
@@ -32,6 +38,7 @@ tracepad traces lst
 tracepad traces ls --sinse 1h
 tracepad skills install --global
 tracepad serve --listen :9999
+tracepad skills show debuging.md
 ```
 
 `get_trcae` is not a tool, `/api/v1/tracez` is not a route, and

@@ -16,7 +16,10 @@ import (
 // Name is the skill's name and the directory it is installed as.
 const Name = "tracepad"
 
-//go:embed all:tracepad
+// Without `all:`, so a `.DS_Store` or an editor's dotfile in the directory is
+// never compiled in, installed, listed or counted against the budget.
+//
+//go:embed tracepad
 var embedded embed.FS
 
 // Files is the skill as the binary carries it, rooted at the skill's own

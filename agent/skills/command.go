@@ -10,16 +10,20 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
+
+	"github.com/tracepad/tracepad/internal/cli"
 )
 
-// Exit codes, the CLI's own (spec 037, command contract): a script has to tell
-// "that directory is somebody else's" from "you typed the flag wrong".
+// Exit codes are the CLI's own (spec 037, command contract): a script has to
+// tell "that directory is somebody else's" from "you typed the flag wrong", and
+// both halves of the binary have to mean the same thing by each number.
 const (
-	exitOK      = 0
-	exitFailure = 1
-	exitUsage   = 2
+	exitOK      = cli.ExitOK
+	exitFailure = cli.ExitFailure
+	exitUsage   = cli.ExitUsage
 )
 
 // marker is the file that says a directory is an installed copy of this skill
@@ -51,11 +55,14 @@ type Options struct {
 	Stdout  io.Writer
 	Stderr  io.Writer
 	// Env resolves environment variables; os.Getenv in production. HOME is
-	// the only one read.
+	// the one read, and USERPROFILE on Windows.
 	Env func(string) string
 	// Getwd is the directory --project resolves against; os.Getwd in
 	// production.
 	Getwd func() (string, error)
+	// GOOS decides where the home directory is read from; runtime.GOOS
+	// when empty.
+	GOOS string
 }
 
 // usageError is a mistake in how the command was typed: exit 2, with the usage
@@ -78,6 +85,9 @@ func Run(opt Options) int {
 	}
 	if opt.Getwd == nil {
 		opt.Getwd = os.Getwd
+	}
+	if opt.GOOS == "" {
+		opt.GOOS = runtime.GOOS
 	}
 	err := run(opt)
 	var usage *usageError
@@ -175,20 +185,26 @@ func runInstall(opt Options, args []string) error {
 	if err != nil {
 		return err
 	}
-	previous, replaced, err := install(Files(), target, opt.Version, *force)
+	done, err := install(Files(), target, opt.Version, *force)
 	if err != nil {
 		return err
 	}
 	switch {
-	case replaced && previous == "":
+	case done.replaced && !done.marked:
 		fmt.Fprintf(opt.Stdout, "installed %s to %s, replacing a directory that was not an installed skill\n",
-			opt.Version, target)
-	case replaced && previous == opt.Version:
-		fmt.Fprintf(opt.Stdout, "reinstalled %s in %s\n", opt.Version, target)
-	case replaced:
-		fmt.Fprintf(opt.Stdout, "updated %s → %s in %s\n", previous, opt.Version, target)
+			opt.Version, done.target)
+	case done.replaced && done.previous == opt.Version:
+		fmt.Fprintf(opt.Stdout, "reinstalled %s in %s\n", opt.Version, done.target)
+	case done.replaced && done.previous == "":
+		fmt.Fprintf(opt.Stdout, "updated an unversioned install → %s in %s\n", opt.Version, done.target)
+	case done.replaced:
+		fmt.Fprintf(opt.Stdout, "updated %s → %s in %s\n", done.previous, opt.Version, done.target)
 	default:
-		fmt.Fprintf(opt.Stdout, "installed %s to %s\n", opt.Version, target)
+		fmt.Fprintf(opt.Stdout, "installed %s to %s\n", opt.Version, done.target)
+	}
+	if done.leftover != "" {
+		fmt.Fprintf(opt.Stderr, "tracepad skills: the previous copy could not be removed; delete %s\n",
+			done.leftover)
 	}
 	return nil
 }
@@ -207,7 +223,12 @@ func installBase(opt Options, project bool, dir string) (string, error) {
 		}
 		return filepath.Join(wd, ".claude", "skills"), nil
 	}
+	// os.UserHomeDir's rule, over the injected environment: Windows keeps
+	// the home directory in USERPROFILE and usually has no HOME at all.
 	home := opt.Env("HOME")
+	if home == "" && opt.GOOS == "windows" {
+		home = opt.Env("USERPROFILE")
+	}
 	if home == "" {
 		// A container runs without one, and the fallback would be a write
 		// to /.claude that nobody meant (edge cases).
@@ -217,62 +238,106 @@ func installBase(opt Options, project bool, dir string) (string, error) {
 	return filepath.Join(home, ".claude", "skills"), nil
 }
 
-// install writes files to target, whole. previous is the version the marker
-// named, and replaced says whether there was a directory to replace at all.
+// outcome is what an install found and did, for the line it prints.
+type outcome struct {
+	// target is where the skill went: the directory a symlink at the
+	// requested path points to, when it is one.
+	target string
+	// replaced says there was a directory to replace; marked, that it
+	// carried the marker, whose version is previous ("" when it was empty).
+	replaced, marked bool
+	previous         string
+	// leftover is the previous copy when it could not be removed after the
+	// new one was in place: the install succeeded, and the caller says where
+	// the debris is.
+	leftover string
+}
+
+// stagingPrefix names the directories an install writes before swapping them
+// in. The prefix is this command's own, so one left by an install that was
+// killed half-way is removed by the next.
+const stagingPrefix = ".tracepad-install-"
+
+// install writes files to target, whole.
 //
 // The new copy is written beside the target first and swapped in by rename,
 // so a failure half-way leaves the old skill where it was rather than a mix
-// of two versions (#6).
-func install(files fs.FS, target, version string, force bool) (previous string, replaced bool, err error) {
-	if _, err := os.Lstat(target); err == nil {
-		replaced = true
-		stamp, err := os.ReadFile(filepath.Join(target, marker))
+// of two versions (#6). A target that is a symlink — a copy kept in a
+// dotfiles repository — is followed, so the copy the user maintains is the
+// one updated, not replaced by a directory of its own.
+func install(files fs.FS, target, version string, force bool) (outcome, error) {
+	done := outcome{target: target}
+	info, err := os.Lstat(target)
+	switch {
+	case err == nil && info.Mode()&fs.ModeSymlink != 0:
+		resolved, err := filepath.EvalSymlinks(target)
+		if err != nil {
+			return done, fmt.Errorf("%s is a symlink to nothing that can be installed into: %w", target, err)
+		}
+		done.target = resolved
+		done.replaced = true
+	case err == nil:
+		done.replaced = true
+	case !errors.Is(err, fs.ErrNotExist):
+		return done, err
+	}
+	if done.replaced {
+		stamp, err := os.ReadFile(filepath.Join(done.target, marker))
 		switch {
 		case err == nil:
-			previous = strings.TrimSpace(string(stamp))
+			done.marked = true
+			done.previous = strings.TrimSpace(string(stamp))
+		case !errors.Is(err, fs.ErrNotExist):
+			// A marker that cannot be read is not the same as no marker,
+			// and calling it "somebody else's directory" would hide why.
+			return done, fmt.Errorf("cannot read %s: %w", filepath.Join(done.target, marker), err)
 		case !force:
-			return "", false, fmt.Errorf("%s exists and is not a skill this command installed "+
-				"(it has no %s); pass --force to replace it", target, marker)
+			return done, fmt.Errorf("%s exists and is not a skill this command installed "+
+				"(it has no %s); pass --force to replace it", done.target, marker)
 		}
-	} else if !errors.Is(err, fs.ErrNotExist) {
-		return "", false, err
 	}
 
-	parent := filepath.Dir(target)
+	parent := filepath.Dir(done.target)
 	if err := os.MkdirAll(parent, 0o755); err != nil {
-		return "", false, err
+		return done, err
 	}
-	staging, err := os.MkdirTemp(parent, ".tracepad-install-")
+	if stale, _ := filepath.Glob(filepath.Join(parent, stagingPrefix+"*")); len(stale) > 0 {
+		for _, dir := range stale {
+			os.RemoveAll(dir)
+		}
+	}
+	staging, err := os.MkdirTemp(parent, stagingPrefix)
 	if err != nil {
-		return "", false, err
+		return done, err
 	}
 	defer os.RemoveAll(staging)
 	if err := os.Chmod(staging, 0o755); err != nil {
-		return "", false, err
+		return done, err
 	}
 	if err := write(files, staging, version); err != nil {
-		return "", false, err
+		return done, err
 	}
 
-	if replaced {
-		old := staging + ".old"
-		if err := os.Rename(target, old); err != nil {
-			return "", false, err
-		}
-		if err := os.Rename(staging, target); err != nil {
-			// Put the old one back rather than leave nothing.
-			os.Rename(old, target)
-			return "", false, err
-		}
-		if err := os.RemoveAll(old); err != nil {
-			return "", false, err
-		}
-		return previous, true, nil
+	if !done.replaced {
+		return done, os.Rename(staging, done.target)
 	}
-	if err := os.Rename(staging, target); err != nil {
-		return "", false, err
+	old := staging + ".old"
+	if err := os.Rename(done.target, old); err != nil {
+		return done, err
 	}
-	return "", false, nil
+	if err := os.Rename(staging, done.target); err != nil {
+		// Put the old one back rather than leave nothing, and say so when
+		// even that fails: the previous skill is then under a hidden name.
+		if back := os.Rename(old, done.target); back != nil {
+			return done, fmt.Errorf("%w; putting the previous skill back failed too (%v), and it is at %s",
+				err, back, old)
+		}
+		return done, err
+	}
+	if err := os.RemoveAll(old); err != nil {
+		done.leftover = old
+	}
+	return done, nil
 }
 
 // write copies every file of the skill into dir, stamping SKILL.md with the

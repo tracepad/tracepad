@@ -50,6 +50,16 @@ func TestTheSkillNamesOnlyWhatTheBinaryHas(t *testing.T) {
 	}
 }
 
+// TestHeadingSlugsFollowTheDocAnchorsRule: the absolute links the drift test
+// checks land on GitHub, so their anchors have to be GitHub's.
+func TestHeadingSlugsFollowTheDocAnchorsRule(t *testing.T) {
+	content := "# Foo — bar\n## `traces ls`\n## Setup ##\n```sh\n# not a heading\n```\n## Setup\n## Setup\n"
+	want := []string{"foo--bar", "traces-ls", "setup", "setup-1", "setup-2"}
+	if got := headingSlugs(content); !slices.Equal(got, want) {
+		t.Errorf("slugs = %q, want %q", got, want)
+	}
+}
+
 // TestTheDriftCheckCatchesDrift is the self-test: a fixture skill with one of
 // each defect, and the check has to report every one of them and nothing it
 // was not meant to. A check that passes the real skill because it can no
@@ -60,19 +70,20 @@ func TestTheDriftCheckCatchesDrift(t *testing.T) {
 
 	got := check(fixture, surface, shipped)
 	want := []string{
-		"`tracepad tracez`",           // an unknown command
-		"`tracepad traces lst`",       // an unknown subcommand
-		"--sinse",                     // an unknown flag
-		"--global",                    // an unknown flag of the binary's own command
-		"`tracepad serve`",            // a word this test cannot check
-		"`get_trcae`",                 // an unknown MCP tool
-		"/api/v1/tracez",              // an unknown route
-		"DELETE /api/v1/system",       // a route under the wrong method
-		"../../../docs/cli.md",        // a link into docs/
-		"references/nowhere.md",       // a relative link that does not resolve
-		"docs/nowhere.md",             // a repository link to no file
-		"docs/cli.md#no-such-heading", // a repository link to no heading
-		"--fulll",                     // an inline command, checked like a fenced one
+		"`tracepad tracez`",                  // an unknown command
+		"`tracepad traces lst`",              // an unknown subcommand
+		"--sinse",                            // an unknown flag
+		"--global",                           // an unknown flag of the binary's own command
+		"`tracepad serve`",                   // a word this test cannot check
+		"`get_trcae`",                        // an unknown MCP tool
+		"/api/v1/tracez",                     // an unknown route
+		"DELETE /api/v1/system",              // a route under the wrong method
+		"../../../docs/cli.md",               // a link into docs/
+		"references/nowhere.md",              // a relative link that does not resolve
+		"docs/nowhere.md",                    // a repository link to no file
+		"docs/cli.md#no-such-heading",        // a repository link to no heading
+		"--fulll",                            // an inline command, wrapped, checked like a fenced one
+		"`tracepad skills show debuging.md`", // a file the skill does not have
 	}
 	for _, needle := range want {
 		found := 0
@@ -255,6 +266,18 @@ func (s *surface) command(words []string) []string {
 				problems = append(problems, fmt.Sprintf("`tracepad skills %s` has no --%s", rest[0], flag))
 			}
 		}
+		// `show` takes a file of the skill the binary carries; a
+		// placeholder (`<file>`, `[FILE]`) stands for one.
+		if rest[0] == "show" {
+			for _, word := range rest[1:] {
+				if strings.HasPrefix(word, "-") || strings.ContainsAny(word, "<>[]") {
+					continue
+				}
+				if _, found := lookup(Files(), word); !found {
+					problems = append(problems, fmt.Sprintf("`tracepad skills show %s` names no file of the skill", word))
+				}
+			}
+		}
 		return problems
 	case "serve", "mcp":
 		// Their flags are parsed in package main, out of this test's reach.
@@ -349,51 +372,80 @@ func check(files fs.FS, s *surface, limits budgets) []string {
 
 func checkFile(files fs.FS, name, content string, s *surface) []string {
 	var problems []string
+	report := func(line int, problem string) {
+		problems = append(problems, fmt.Sprintf("line %d: %s", line, problem))
+	}
+	lines := strings.Split(content, "\n")
+
+	// The fenced lines, one shell line at a time. The prose is kept aside,
+	// with a blank where a fence was, so it can be read a paragraph at a
+	// time below.
+	prose := make([]string, len(lines))
 	inFence := false
 	pending := ""
-	for number, line := range strings.Split(content, "\n") {
-		at := func(problem string) { problems = append(problems, fmt.Sprintf("line %d: %s", number+1, problem)) }
+	for i, line := range lines {
 		for _, problem := range s.paths(line) {
-			at(problem)
+			report(i+1, problem)
 		}
 		if fence.MatchString(line) {
-			inFence = !inFence
+			// A block that ends on a trailing backslash has nothing to
+			// continue into; carrying it over would glue it to the next
+			// block's first command.
+			inFence, pending = !inFence, ""
 			continue
 		}
-		if inFence {
-			// A trailing backslash continues the command on the next line.
-			if joined, more := strings.CutSuffix(line, `\`); more {
-				pending += joined + " "
-				continue
-			}
-			for _, words := range invocations(pending + line) {
-				for _, problem := range s.command(words) {
-					at(problem)
-				}
-			}
-			pending = ""
+		if !inFence {
+			prose[i] = line
 			continue
 		}
-		for _, match := range inlineCode.FindAllStringSubmatch(line, -1) {
-			span := match[1]
+		// A trailing backslash continues the command on the next line.
+		if joined, more := strings.CutSuffix(line, `\`); more {
+			pending += joined + " "
+			continue
+		}
+		for _, words := range invocations(pending + line) {
+			for _, problem := range s.command(words) {
+				report(i+1, problem)
+			}
+		}
+		pending = ""
+	}
+
+	// Markdown lets a code span and a link wrap onto the next line, so the
+	// prose is matched a paragraph at a time; a span is reported on the line
+	// it starts on.
+	for first := 0; first < len(prose); {
+		if strings.TrimSpace(prose[first]) == "" {
+			first++
+			continue
+		}
+		last := first
+		for last < len(prose) && strings.TrimSpace(prose[last]) != "" {
+			last++
+		}
+		paragraph := strings.Join(prose[first:last], "\n")
+		lineOf := func(offset int) int { return first + 1 + strings.Count(paragraph[:offset], "\n") }
+		for _, match := range inlineCode.FindAllStringSubmatchIndex(paragraph, -1) {
+			span := strings.Join(strings.Fields(paragraph[match[2]:match[3]]), " ")
 			if strings.Contains(span, "tracepad ") {
 				for _, words := range invocations(span) {
 					for _, problem := range s.command(words) {
-						at(problem)
+						report(lineOf(match[0]), problem)
 					}
 				}
 				continue
 			}
 			verb, _, _ := strings.Cut(span, "_")
 			if toolName.MatchString(span) && s.verbs[verb] && !s.tools[span] {
-				at(fmt.Sprintf("`%s` is not an MCP tool", span))
+				report(lineOf(match[0]), fmt.Sprintf("`%s` is not an MCP tool", span))
 			}
 		}
-		for _, match := range link.FindAllStringSubmatch(line, -1) {
-			if problem := s.link(files, name, match[1]); problem != "" {
-				at(problem)
+		for _, match := range link.FindAllStringSubmatchIndex(paragraph, -1) {
+			if problem := s.link(files, name, paragraph[match[2]:match[3]]); problem != "" {
+				report(lineOf(match[0]), problem)
 			}
 		}
+		first = last
 	}
 	return problems
 }
@@ -533,33 +585,41 @@ func (s *surface) link(files fs.FS, from, target string) string {
 }
 
 // hasHeading reports whether a Markdown file has a heading with this anchor,
-// under GitHub's slug rule: lower case, spaces to hyphens, punctuation gone.
+// under the rule `scripts/doc-anchors.sh` states for GitHub: lower case;
+// everything but ASCII letters, digits, `_`, `-` and spaces removed; spaces to
+// hyphens; closing `#`s dropped; a repeated slug numbered `-1`, `-2`, … in the
+// order the headings appear.
 func hasHeading(content, anchor string) bool {
+	return slices.Contains(headingSlugs(content), anchor)
+}
+
+var (
+	headingLine    = regexp.MustCompile(`^#{1,6}[ \t]`)
+	closingHashes  = regexp.MustCompile(`[ \t]+#+[ \t]*$`)
+	openingHashes  = regexp.MustCompile(`^#+[ \t]+`)
+	notSlugPattern = regexp.MustCompile(`[^-_ a-z0-9]`)
+)
+
+func headingSlugs(content string) []string {
+	var out []string
+	seen := map[string]int{}
 	inFence := false
 	for _, line := range strings.Split(content, "\n") {
 		if fence.MatchString(line) {
 			inFence = !inFence
 			continue
 		}
-		if inFence || !strings.HasPrefix(line, "#") {
+		if inFence || !headingLine.MatchString(line) {
 			continue
 		}
-		if slug(strings.TrimLeft(line, "# ")) == anchor {
-			return true
+		text := closingHashes.ReplaceAllString(openingHashes.ReplaceAllString(line, ""), "")
+		slug := strings.ReplaceAll(notSlugPattern.ReplaceAllString(strings.ToLower(text), ""), " ", "-")
+		if seen[slug] > 0 {
+			out = append(out, fmt.Sprintf("%s-%d", slug, seen[slug]))
+		} else {
+			out = append(out, slug)
 		}
+		seen[slug]++
 	}
-	return false
-}
-
-func slug(heading string) string {
-	var out strings.Builder
-	for _, r := range strings.ToLower(strings.TrimSpace(heading)) {
-		switch {
-		case r == ' ':
-			out.WriteRune('-')
-		case r == '-' || r == '_' || r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r > 127:
-			out.WriteRune(r)
-		}
-	}
-	return out.String()
+	return out
 }

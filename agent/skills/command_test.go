@@ -294,3 +294,95 @@ func head(content []byte) string {
 	}
 	return string(content)
 }
+
+// TestWindowsReadsUserProfile: Windows keeps the home directory in USERPROFILE
+// and usually has no HOME, which is os.UserHomeDir's rule too.
+func TestWindowsReadsUserProfile(t *testing.T) {
+	profile := t.TempDir()
+	var stdout, stderr bytes.Buffer
+	code := Run(Options{
+		Args: []string{"install"}, Version: "dev", Stdout: &stdout, Stderr: &stderr,
+		Env: func(key string) string {
+			if key == "USERPROFILE" {
+				return profile
+			}
+			return ""
+		},
+		GOOS: "windows",
+	})
+	if code != exitOK {
+		t.Fatalf("exit %d, %s", code, stderr.String())
+	}
+	if _, err := os.Stat(filepath.Join(profile, ".claude", "skills", Name, "SKILL.md")); err != nil {
+		t.Errorf("nothing under USERPROFILE: %v", err)
+	}
+}
+
+// TestASymlinkedTargetIsFollowed: a skill kept in a dotfiles repository and
+// linked into place is the copy that gets updated; the link stays a link.
+func TestASymlinkedTargetIsFollowed(t *testing.T) {
+	kept, dir := t.TempDir(), t.TempDir()
+	if got := runSkills(t, "", "", "0.3.1", "install", "--dir", kept); got.code != exitOK {
+		t.Fatalf("first install: %s", got.stderr)
+	}
+	link := filepath.Join(dir, Name)
+	if err := os.Symlink(filepath.Join(kept, Name), link); err != nil {
+		t.Fatal(err)
+	}
+	got := runSkills(t, "", "", "0.4.0", "install", "--dir", dir)
+	if got.code != exitOK || !strings.Contains(got.stdout, "updated 0.3.1 → 0.4.0") {
+		t.Fatalf("exit %d, stdout %q, stderr %q", got.code, got.stdout, got.stderr)
+	}
+	if info, err := os.Lstat(link); err != nil || info.Mode()&fs.ModeSymlink == 0 {
+		t.Errorf("the link was replaced: %v", err)
+	}
+	if marked, _ := os.ReadFile(filepath.Join(kept, Name, marker)); string(marked) != "0.4.0\n" {
+		t.Errorf("the linked copy was not updated: marker %q", marked)
+	}
+}
+
+// TestTheMarkerIsReadHonestly: an empty marker is still a marker, and one that
+// cannot be read is an error saying so, not "somebody else's directory".
+func TestTheMarkerIsReadHonestly(t *testing.T) {
+	dir := t.TempDir()
+	if got := runSkills(t, "", "", "0.3.1", "install", "--dir", dir); got.code != exitOK {
+		t.Fatal(got.stderr)
+	}
+	stamp := filepath.Join(dir, Name, marker)
+	if err := os.WriteFile(stamp, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := runSkills(t, "", "", "0.4.0", "install", "--dir", dir)
+	if got.code != exitOK || !strings.Contains(got.stdout, "updated an unversioned install → 0.4.0") {
+		t.Errorf("empty marker: exit %d, stdout %q", got.code, got.stdout)
+	}
+
+	if os.Getuid() == 0 {
+		t.Skip("root reads a file whatever its mode")
+	}
+	if err := os.Chmod(stamp, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(stamp, 0o644) })
+	unreadable := runSkills(t, "", "", "0.5.0", "install", "--dir", dir)
+	if unreadable.code != exitFailure || !strings.Contains(unreadable.stderr, "cannot read") ||
+		strings.Contains(unreadable.stderr, "not a skill") {
+		t.Errorf("unreadable marker: exit %d, stderr %q", unreadable.code, unreadable.stderr)
+	}
+}
+
+// TestAStagingDirectoryLeftByAKilledInstallIsRemoved: the prefix is this
+// command's own, so the next install clears what a killed one left behind.
+func TestAStagingDirectoryLeftByAKilledInstallIsRemoved(t *testing.T) {
+	dir := t.TempDir()
+	stale := filepath.Join(dir, stagingPrefix+"123.old")
+	if err := os.MkdirAll(filepath.Join(stale, "references"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := runSkills(t, "", "", "dev", "install", "--dir", dir); got.code != exitOK {
+		t.Fatal(got.stderr)
+	}
+	if _, err := os.Stat(stale); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the stale staging directory survived: %v", err)
+	}
+}
