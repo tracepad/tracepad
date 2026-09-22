@@ -1,6 +1,6 @@
 # Spec 038 — SDK parity: the step's kind, a generation's metadata, the trace's version
 
-**Status:** 🟡 DRAFT
+**Status:** ✅ SHIPPED
 **Sprint:** September 2026
 
 > The first application to trace through the Python package side by side
