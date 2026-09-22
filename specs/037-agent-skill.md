@@ -1,6 +1,6 @@
 # Spec 037 — The agent skill: how a coding agent works with Tracepad
 
-**Status:** 🟡 DRAFT
+**Status:** ✅ SHIPPED
 **Sprint:** September 2026
 
 > A coding agent that is asked "why did this call cost four dollars" or "wire
