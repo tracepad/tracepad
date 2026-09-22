@@ -176,52 +176,59 @@ def test_an_unknown_kind_warns_and_is_still_written(
     spans: Any, caplog: pytest.LogCaptureFixture
 ) -> None:
     # Written all the same: the mapper keeps it in the observation's metadata.
+    # Once per spelling, whichever door: a step in a loop says it once.
     with caplog.at_level(logging.WARNING, logger="tracepad"):
-        with tracepad.span("lookup", type="retreiver"):
-            pass
+        for _ in range(3):
+            with tracepad.span("lookup", type="retreiver"):
+                tracepad.update(type="retreiver")
 
-        @tracepad.observe(type="retreiver")
+        @tracepad.observe(type="retriver")
         def lookup() -> None:
             pass
 
-        # The decorator checks on the first call, once: at decoration the
-        # application may not have configured its logging yet.
-        assert caplog.text.count("'retreiver' is not one of the observation types") == 1
+        # Not at decoration: the application may not have configured its
+        # logging yet. On the call.
+        assert caplog.text.count("is not one of the observation types") == 1
         lookup()
         lookup()
 
-    assert caplog.text.count("'retreiver' is not one of the observation types") == 2
-    assert all(s.attributes[attrs.OBSERVATION_TYPE] == "retreiver" for s in spans.all())
+    assert caplog.text.count("'retreiver' is not one of the observation types") == 1
+    assert caplog.text.count("'retriver' is not one of the observation types") == 1
+    kinds = [s.attributes[attrs.OBSERVATION_TYPE] for s in spans.all()]
+    assert kinds == ["retreiver"] * 3 + ["retriver"] * 2
 
 
 def test_an_empty_kind_is_the_default(spans: Any, caplog: pytest.LogCaptureFixture) -> None:
-    # As Go's `WithType("")`: forwarding an optional kind opens a plain step.
+    # As Go's `WithType("")`, at every door: forwarding an optional kind opens
+    # a plain step, and `update` leaves the kind where it was.
     with caplog.at_level(logging.WARNING, logger="tracepad"):
         with tracepad.span("forwarded", type=None):
             pass
         with tracepad.span("blank", type=""):
+            tracepad.update(type="")
+
+        @tracepad.observe(type="")
+        def decorated() -> None:
             pass
 
+        decorated()
+
     assert caplog.text == ""
-    assert spans.attributes("forwarded")[attrs.OBSERVATION_TYPE] == "span"
-    assert spans.attributes("blank")[attrs.OBSERVATION_TYPE] == "span"
+    for name in ("forwarded", "blank", "decorated"):
+        assert spans.attributes(name)[attrs.OBSERVATION_TYPE] == "span"
 
 
-def test_the_kinds_with_a_shape_of_their_own_open_that_shape(spans: Any) -> None:
-    # Spec 038 #8: what `@observe(type="generation")` does.
+def test_span_as_a_generation_hands_out_a_generation(spans: Any) -> None:
+    # Spec 038 #8: the one kind with a handle of its own, as
+    # `@observe(type="generation")` does.
     with tracepad.span("chat", type="generation", metadata={"attempt": 1}) as call:
         call.first_token()
         call.end(model="gpt-4o-mini", usage={"input_tokens": 3})
-    with tracepad.span("cache.miss", type="event"):
-        pass
 
     chat = spans.one("chat")
     assert chat.attributes[attrs.OBSERVATION_TYPE] == "generation"
     assert chat.attributes[attrs.RESPONSE_MODEL] == "gpt-4o-mini"
     assert json.loads(chat.attributes[attrs.OBSERVATION_METADATA]) == {"attempt": 1}
-    marker = spans.one("cache.miss")
-    assert marker.attributes[attrs.OBSERVATION_TYPE] == "event"
-    assert marker.start_time == marker.end_time
 
 
 def test_update_trace_writes_the_trace_level_names(spans: Any) -> None:

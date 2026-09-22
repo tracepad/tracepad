@@ -138,6 +138,14 @@ func TestTracepadTraceVersionRanksBesideLangfuse(t *testing.T) {
 			if got := result.Traces[0].Version; got != tc.want {
 				t.Errorf("version = %q, want %q", got, tc.want)
 			}
+			// The loser of one span's chain is still visible, as the trace
+			// name's is (TestLangfuseWinsOverTracepad): nothing is dropped
+			// (spec 002 #11).
+			if tc.name == "both on one span" {
+				if got := result.Observations[0].Metadata["tracepad.trace.version"]; got != "written-by-tracepad" {
+					t.Errorf("metadata = %v, want the loser preserved", result.Observations[0].Metadata)
+				}
+			}
 		})
 	}
 }

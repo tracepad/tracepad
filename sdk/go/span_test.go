@@ -123,6 +123,23 @@ func TestUpdateActsOnTheCurrentSpanWhoeverStartedIt(t *testing.T) {
 	}
 }
 
+// In Go the function names the shape and WithType only the kind written
+// (spec 038 #8): the return types are fixed, so a kind cannot choose them.
+func TestWithTypeSetsTheKindNotTheShape(t *testing.T) {
+	r := setup(t)
+	ctx := context.Background()
+	_, step := Span(ctx, "plain", WithType("generation"))
+	step.End()
+	_, call := Generation(ctx, "embed", WithModel("text-embedding-3-small"), WithType("embedding"))
+	call.End(Result{})
+	if got := str(t, r.attrs(t, "plain"), attrObservationType); got != "generation" {
+		t.Errorf("Span with WithType(generation) = %q", got)
+	}
+	if got := str(t, r.attrs(t, "embed"), attrObservationType); got != "embedding" {
+		t.Errorf("Generation with WithType(embedding) = %q", got)
+	}
+}
+
 func TestUpdateOutsideASpanLogsAndWritesNothing(t *testing.T) {
 	r := setup(t)
 	Update(context.Background(), WithLevel("ERROR"))

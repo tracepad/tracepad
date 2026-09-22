@@ -200,8 +200,7 @@ class Observation:
                 _set(span, key, attrs.dumps(value))
         _set(span, attrs.OBSERVATION_LEVEL, level)
         _set(span, attrs.OBSERVATION_STATUS_MESSAGE, status_message)
-        if type is not None:
-            _set(span, attrs.OBSERVATION_TYPE, _kind(type))
+        _set(span, attrs.OBSERVATION_TYPE, _kind(type))
 
 
 class Generation(Observation):
@@ -374,13 +373,23 @@ def _set(span: otel.Span, key: str, value: Any) -> None:
         span.set_attribute(key, value)
 
 
-def _kind(type: str) -> str:
+#: The spellings already warned about: a step opened in a loop says it once.
+_warned_kinds: set[str] = set()
+
+
+def _kind(type: str | None) -> str | None:
     """Pass a step's kind through, warning when the store will not classify by it.
 
-    A spelling outside the ten is not refused: the mapper keeps it in the
-    observation's metadata and classifies the span by its heuristics.
+    An empty kind is no kind — `None`, and the caller's default stands, as Go's
+    `WithType("")` (spec 038 #8). A spelling outside the ten is not refused:
+    the mapper keeps it in the observation's metadata and classifies the span
+    by its heuristics. The warning is given once per spelling, and only when a
+    step is written, after the application has configured its logging.
     """
-    if type not in attrs.OBSERVATION_TYPES:
+    if not type:
+        return None
+    if type not in attrs.OBSERVATION_TYPES and type not in _warned_kinds:
+        _warned_kinds.add(type)
         logger.warning(
             "tracepad: %r is not one of the observation types the store "
             "classifies by; it will be kept in the observation's metadata", type
@@ -483,14 +492,13 @@ def span(
     `type` is the step's kind — `"retriever"`, `"tool"`, `"agent"`… — as
     `@observe(type=…)` takes it (spec 038 #1): the kind is known when the step
     opens, so it is written then rather than corrected by `update` after. An
-    empty kind is the default, and `"generation"` and `"event"` open what
-    `generation()` and `event()` open, as the decorator does (spec 038 #8).
+    empty kind is the default, and `"generation"` opens what `generation()`
+    opens, the one kind with a handle of its own — as the decorator does
+    (spec 038 #8).
     """
-    kind = _kind(type or "span")
+    kind = _kind(type) or "span"
     if kind == "generation":
         return generation(name, input=input, metadata=metadata)
-    if kind == "event":
-        return event(name, input=input, metadata=metadata)
     return _open(name, _observation_attributes(kind, input, metadata))
 
 
@@ -519,7 +527,7 @@ def observe(
     fn: Callable[..., Any] | None = None,
     *,
     name: str | None = None,
-    type: str = "span",
+    type: str | None = "span",
     capture_input: bool = True,
     capture_output: bool = True,
 ) -> Any:
@@ -540,18 +548,16 @@ def observe(
     def decorate(fn: Callable[..., Any]) -> Callable[..., Any]:
         signature = inspect.signature(fn) if capture_input else None
         label = name or fn.__name__
-        is_generation = type == "generation"
-        # The kind is checked on the first call rather than here, at import
-        # time, before the application has configured its logging.
-        unchecked = [True]
+        kind = type or "span"
+        is_generation = kind == "generation"
 
         def attributes() -> dict[str, Any]:
-            if unchecked:
-                unchecked.clear()
-                _kind(type)
+            # Checked per call rather than here, at import time, before the
+            # application has configured its logging; `_kind` says it once.
+            _kind(kind)
             if is_generation:
                 return _generation_attributes(None, None, None, None)
-            return _observation_attributes(type)
+            return _observation_attributes(kind)
 
         def make(span: otel.Span) -> Observation:
             return Generation(span, capture_output) if is_generation else Observation(span)

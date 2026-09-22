@@ -357,7 +357,7 @@ export class Observation {
     }
     set(span, attrs.OBSERVATION_LEVEL, fields.level);
     set(span, attrs.OBSERVATION_STATUS_MESSAGE, fields.statusMessage);
-    if (fields.type !== undefined) span.setAttribute(attrs.OBSERVATION_TYPE, kind(fields.type));
+    set(span, attrs.OBSERVATION_TYPE, kind(fields.type));
   }
 }
 
@@ -508,13 +508,21 @@ function set(span: Span, key: string, value: string | number | boolean | undefin
   if (value !== undefined) span.setAttribute(key, value);
 }
 
+/** The spellings already warned about: a step opened in a loop says it once. */
+const warnedKinds = new Set<string>();
+
 /**
  * Pass a step's kind through, warning when the store will not classify by
- * it. A spelling outside the ten is not refused: the mapper keeps it in the
- * observation's metadata and classifies the span by its heuristics.
+ * it. An empty kind is no kind — `undefined`, and the caller's default
+ * stands, as Go's `WithType("")` (spec 038 #8). A spelling outside the ten
+ * is not refused: the mapper keeps it in the observation's metadata and
+ * classifies the span by its heuristics. The warning is given once per
+ * spelling, and only when a step is written, after `init({ logger })`.
  */
-function kind(type: string): string {
-  if (!(attrs.OBSERVATION_TYPES as readonly string[]).includes(type)) {
+function kind(type: string | undefined): string | undefined {
+  if (!type) return undefined;
+  if (!(attrs.OBSERVATION_TYPES as readonly string[]).includes(type) && !warnedKinds.has(type)) {
+    warnedKinds.add(type);
     warn(
       `${JSON.stringify(type)} is not one of the observation types the store ` +
         "classifies by; it will be kept in the observation's metadata",
@@ -533,10 +541,10 @@ export interface SpanOptions extends ObservationOptions {
   /**
    * The step's kind — `'retriever'`, `'tool'`, `'agent'`… — as `observe`
    * takes it; `'span'` by default (spec 038 #1). `event` and `generation`
-   * name their kind by being called, so neither takes one, and neither is
-   * one here: their shapes are those two functions (spec 038 #8).
+   * name their kind by being called, so neither takes one. `'generation'` is
+   * not one here: its handle is `generation()`'s (spec 038 #8).
    */
-  type?: Exclude<attrs.ObservationType, 'generation' | 'event'>;
+  type?: Exclude<attrs.ObservationType, 'generation'>;
 }
 
 export interface GenerationOptions extends ObservationOptions {
@@ -642,14 +650,13 @@ export function span<T>(name: string, options: SpanOptions, fn: Callback<Observa
 /** A step of the trace, as a callback over an `Observation`. */
 export function span<T>(name: string, options: SpanOptions | Callback<Observation, T>, fn?: Callback<Observation, T>): T {
   const [given, callback] = split(options, fn);
-  // An empty kind is the default, and the two kinds with a shape of their
-  // own open that shape — what `observe` does with them (spec 038 #8).
-  const type = kind((given?.type as string | undefined) || 'span');
-  if (type === 'generation' || type === 'event') {
-    const rest: ObservationOptions = {};
-    if (given?.input !== undefined) rest.input = given.input;
-    if (given?.metadata !== undefined) rest.metadata = given.metadata;
-    return type === 'event' ? event(name, rest, callback) : generation(name, rest, callback);
+  // An empty kind is the default, and the one kind with a handle of its own
+  // opens that handle, whatever else the options carry — what `observe`
+  // does with it (spec 038 #8).
+  const type = kind(given?.type) ?? 'span';
+  if (type === 'generation') {
+    const { type: _generation, ...rest } = given as GenerationOptions & { type: string };
+    return generation(name, rest, callback);
   }
   return open(name, observationAttributes(type, given), (s) => new Observation(s), callback);
 }
@@ -657,7 +664,7 @@ export function span<T>(name: string, options: SpanOptions | Callback<Observatio
 /** Warn about a kind given to a shape that names its own: it is not written. */
 function ownKind(options: ObservationOptions | undefined, shape: string): void {
   const type = (options as { type?: unknown } | undefined)?.type;
-  if (type !== undefined) {
+  if (type !== undefined && type !== shape) {
     warn(`${shape}() takes no type; its kind is ${JSON.stringify(shape)} and ${JSON.stringify(type)} is ignored`);
   }
 }
@@ -704,16 +711,13 @@ type AnyFunction = (...args: any[]) => any;
  * status `ERROR`, the exception recorded, and propagates unchanged.
  */
 export function observe<F extends AnyFunction>(fn: F, options: ObserveOptions = {}): F {
-  const { name = fn.name || 'anonymous', type = 'span', captureInput = true, captureOutput = true } = options;
+  const { name = fn.name || 'anonymous', captureInput = true, captureOutput = true } = options;
+  const type = options.type || 'span';
   const isGeneration = type === 'generation';
-  // The kind is checked on the first call rather than here, usually at
-  // module load, before `init({ logger })` has said where warnings go.
-  let unchecked = true;
+  // Checked per call rather than here, usually at module load, before
+  // `init({ logger })` has said where warnings go; `kind` says it once.
   const attributes = () => {
-    if (unchecked) {
-      unchecked = false;
-      kind(type);
-    }
+    kind(type);
     return isGeneration ? generationAttributes({}) : observationAttributes(type);
   };
   const make = (s: Span) => (isGeneration ? new Generation(s, captureOutput) : new Observation(s));
@@ -859,6 +863,7 @@ function rethrow<S extends Iterator<unknown> | AsyncIterator<unknown>>(steps: S,
 /** Forget that `init` ran. For tests. */
 export function reset(): void {
   initialized = false;
+  warnedKinds.clear();
   handedOut = false;
   exiting = undefined;
   process.off('beforeExit', atExit);

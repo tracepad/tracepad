@@ -114,11 +114,13 @@ with tracepad.event("cache.miss"):
 
 `type=` is the kind the step *is* — a retriever, a tool call, an agent — and it
 is known when the step opens, so it is written then. An empty one (`None`,
-`""`) is the default. `"generation"` and `"event"` open what `generation()` and
-`event()` open, as the decorator does. A spelling outside the ten logs a
-warning and is sent all the same; the store keeps it in the observation's
-metadata, exactly as for `@observe(type=…)` — which checks on the function's
-first call — and `update(type=…)`.
+`""`) is no kind at all, here as in `@observe` and `update`: the default
+stands. `"generation"` hands out what `generation()` does — the one kind with a
+handle of its own, `end` and `first_token` — as the decorator does; `"event"`
+is written as the kind, and the zero duration is `event()`'s. A spelling
+outside the ten is sent all the same, and the store keeps it in the
+observation's metadata; the `tracepad` logger warns once per spelling, when the
+first step is written.
 
 `span`, `event` and `generation` hand out an `Observation` carrying
 `trace_id`, `span_id`, `update(...)` and the OTel span itself as `.span`.

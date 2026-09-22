@@ -44,6 +44,7 @@ def fresh(monkeypatch: pytest.MonkeyPatch) -> Any:
     _config.forget()
     _prompts.forget()
     _scores.reset()
+    _tracing._warned_kinds.clear()
     yield
     reset_otel()
     _tracing._initialized = False

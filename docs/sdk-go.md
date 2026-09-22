@@ -104,7 +104,7 @@ second `End` does nothing, so the two lines above coexist.
 |---|---|
 | `WithInput(any)` | The step's input. A `string` is sent as it is; anything else as JSON |
 | `WithMetadata(any)` | Free metadata, a JSON object |
-| `WithType(string)` | One of the [ten kinds](ingest.md#the-kind-of-each-step); `"span"` by default |
+| `WithType(string)` | One of the [ten kinds](ingest.md#the-kind-of-each-step); `"span"` by default. It sets the kind written, not the shape: the function names that, so a generation is opened with `Generation` (a `*Call`, with `End(Result)`) and an event with `Event` — `Span` with `WithType("generation")` is a plain step stored as a generation without a model. On `Generation` it types a model call of another kind, `WithType("embedding")` |
 
 There is no function wrapper like Python's `@observe`: Go has no decorators
 and no way to capture a function's arguments by name, so the input is what
