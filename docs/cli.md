@@ -867,6 +867,24 @@ The `--listen` **flag** is not consulted, because a flag on the server's command
 line is not visible to a second process. Where both a server and its probe read
 the configuration, put the port in the environment.
 
+### `skills`
+
+```sh
+tracepad skills install
+tracepad skills install --project
+tracepad skills install --dir ~/.agents/skills
+tracepad skills show
+tracepad skills show debugging.md
+```
+
+The agent skill this binary carries: `install` writes it where a coding agent
+finds it — `~/.claude/skills/tracepad` by default, `./.claude/skills/tracepad`
+with `--project`, `DIR/tracepad` with `--dir` — and `show` prints `SKILL.md` or
+one of its references. Both are local: no server, no key. An update replaces
+the directory whole, and a `tracepad` directory the command did not install is
+refused unless `--force`. Exit `1` for that refusal, `2` for a usage error.
+The whole of it is [agents.md](agents.md).
+
 ## Version skew
 
 Every API response carries the server's build. When it differs from the CLI's,

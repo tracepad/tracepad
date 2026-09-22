@@ -221,6 +221,8 @@ curl -H "Authorization: Bearer tp-sk-…" \
 - [sdk-go.md](sdk-go.md) — the same package for Go: `Init`, `Span`,
   `Generation`, prompts and scores, in the shape of the OTel API.
 - [api.md](api.md) — the read API, its filters, and the response budget.
+- [agents.md](agents.md) — the skill that teaches a coding agent to work with
+  all of this: `tracepad skills install`.
 - [retention.md](retention.md) — how long data is kept and how to change it.
 - [admin.md](admin.md) — more projects, more keys, erasing one user's data.
 - [accounts.md](accounts.md) — inviting somebody, and what a `viewer` may do.
