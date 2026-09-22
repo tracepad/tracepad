@@ -162,6 +162,16 @@ their own, so all three return the same bytes. See [docs/api.md](docs/api.md),
 The MCP surface reads and nothing else — administration is deliberately not
 reachable as a tool.
 
+A coding agent gets the order of work — start from the trace, read the payload
+before guessing at the prompt, dry-run anything destructive and ask — as a
+skill that ships inside the binary, so its version is always the server's:
+
+```sh
+tracepad skills install      # into ~/.claude/skills; --project or --dir for elsewhere
+```
+
+See [docs/agents.md](docs/agents.md).
+
 ## Browsing traces
 
 The same binary serves a web interface on the same port. The first run prints

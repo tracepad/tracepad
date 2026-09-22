@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/tracepad/tracepad/agent/skills"
 	"github.com/tracepad/tracepad/internal/cli"
 	"github.com/tracepad/tracepad/internal/client"
 	"github.com/tracepad/tracepad/internal/config"
@@ -59,7 +60,7 @@ var clientCommands = func() map[string]bool {
 // one of them: `clientCommands` is consulted first, so a collision would take
 // `serve` away from the server and hand it to a client command of the same
 // name. Nothing enforces this at compile time, so the test does.
-var serverCommands = []string{"serve", "mcp", "version", "help"}
+var serverCommands = []string{"serve", "mcp", "skills", "version", "help"}
 
 func main() {
 	cmd, args := splitCommand(os.Args[1:])
@@ -75,6 +76,17 @@ func main() {
 			slog.Error("fatal", "err", err)
 			os.Exit(1)
 		}
+	case cmd == "skills":
+		// Local: it writes the skill this binary carries and talks to no
+		// server (spec 037 #6), so it sits with the binary's own words.
+		os.Exit(skills.Run(skills.Options{
+			Args:    args,
+			Version: version,
+			Stdout:  os.Stdout,
+			Stderr:  os.Stderr,
+			Env:     os.Getenv,
+			Getwd:   os.Getwd,
+		}))
 	case clientCommands[cmd]:
 		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
@@ -114,6 +126,10 @@ Usage:
   tracepad [serve] [flags]   run the server (default command)
   tracepad mcp [flags]       serve MCP over stdio, against a running server
   tracepad version           print the version
+  tracepad skills install [--project | --dir DIR] [--force]
+                             install the agent skill this binary carries
+  tracepad skills show [FILE]
+                             print the skill, or one of its references
 
 Flags of serve:
   --listen addr      HTTP listen address        (env TRACEPAD_LISTEN, default :4318)

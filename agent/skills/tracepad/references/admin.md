@@ -1,0 +1,128 @@
+# Administering a Tracepad server
+
+Everything here changes what a project keeps or who can reach it. Read first,
+change only what the human asked for, and put every destructive act through
+the dry-run rule of SKILL.md: run it without `--yes`, show the preview, stop,
+and add `--yes` only on the human's word about that preview.
+
+## Who may do what
+
+- A **project key** (`tp-sk-…`) reaches one project. Most commands here work
+  with it: keys, retention, erasing a user, deleting traces.
+- The **admin token** (`TRACEPAD_ADMIN_TOKEN` on the server) reaches every
+  project, and is the only credential for creating, renaming or deleting a
+  project and for managing accounts. It rides where a key does:
+  `TRACEPAD_API_KEY="$TRACEPAD_ADMIN_TOKEN" tracepad projects ls`. Do not ask
+  for it unless the task needs it.
+- `tracepad help` marks the commands that need the admin token.
+
+## Reading the state
+
+```sh
+tracepad projects show
+tracepad keys ls
+tracepad retention show
+tracepad system
+```
+
+`projects show` with a project key is that key's project: its id, name and
+retention windows. `retention show` is the three windows — traces, raw
+bodies, statistics — in days, or forever.
+
+## Keys
+
+```sh
+tracepad keys create
+tracepad keys rm <public-key>
+```
+
+`keys create` prints the new secret **once**. Hand it to the human in the
+answer, or write it where they told you to (a secret store, an untracked
+environment file) — never into a tracked file, a log or a commit message.
+`keys rm` revokes **at once** — it previews only when the key is the
+project's last. Whatever still uses the key stops being able to send or read
+the moment it runs, so ask before running it, naming the key and what uses it.
+
+## Retention
+
+```sh
+tracepad retention set --days 30
+```
+
+Shortening a window deletes what falls outside it on the next sweep, so the
+command is a dry run first: the preview counts the traces, observations,
+scores and raw bodies that would go. Lengthening deletes nothing. `--raw-days`
+and `--stats-days` move the other two windows; `tracepad help` has the rest.
+
+## Erasing one user's data
+
+```sh
+tracepad users show <user-id>
+tracepad users rm-data <user-id>
+```
+
+Everything stored about one end user — their traces with everything attached,
+and their rows in the statistics. It is a request someone is entitled to make;
+it is also irreversible. Look at the user first, then the dry run, then stop.
+
+## Deleting traces
+
+One trace by id, or every trace a listing filter matches before a bound. What
+goes: the traces, their observations, payloads, scores, search entries and
+queue items, with the statistics corrected. What stays: the raw OTLP bodies
+they arrived in, which expire on the raw retention window. A trace an eval run
+holds is deleted like any other, and the preview names the run.
+
+The sequence, for "delete the traces of environment `test` from today":
+
+1. **Pin the window.** "Today" is a date the human means; the data is in
+   UTC. Work out the start as an RFC 3339 instant, and take the end as a fixed
+   instant too — now, written out:
+
+```sh
+date -u +%Y-%m-%dT%H:%M:%SZ
+```
+
+2. **Look at the set** with the listing's own filters — `--until` here is the
+   same bound `--to` will be:
+
+```sh
+tracepad traces ls --env test --since <start> --until <end> --total --limit 5
+```
+
+3. **The dry run.** The same filters, `--to` for the bound, no `--yes`:
+
+```sh
+tracepad traces rm --env test --since <start> --to <end>
+```
+
+   It prints what would go — `matched`, then the counts per kind — and exits
+   `1` saying *it was not done*. That is the end of this step.
+
+4. **Stop and report**: the filters, the bound, how many traces match, what
+   else goes with them, that raw bodies stay. Give the confirming command —
+   the same line with `--yes` — for the human to approve. Do not run it.
+
+5. **Only on the human's go-ahead**, run exactly that line with `--yes`. The
+   CLI deletes in rounds and loops until nothing matches; an interrupted run
+   has lost nothing but its tally, and the same command continues it.
+
+One trace is the same with its id: `tracepad traces rm <trace-id>` previews,
+and the confirming line adds `--yes`. Spans that are still arriving for a
+deleted trace create it again, so delete after the application has finished
+exporting.
+
+## Projects and accounts
+
+Creating, renaming, deleting and restoring a project, and every `accounts`
+command, need the admin token and are rarely an agent's job. A deleted
+project is restorable for seven days (`tracepad projects restore`); nothing
+else in this file is. When the human asks for one of these, read the command's
+help, show them the preview it prints, and let them confirm.
+
+## From application code
+
+The Python, Node and Go packages can delete traces too, with the same
+preview-then-confirm shape; the same rule holds for code you write: the code
+previews and a person confirms. Do not write a job that confirms its own
+deletions unless the human asked for exactly that.

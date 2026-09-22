@@ -406,6 +406,18 @@ API. This file routes; it does not duplicate what specs and docs say.
   echo (#8) and on the listing with the filter's chips, `to` pinned to the
   moment the dialog opened, a progress line and *Stop* (#9). The ingest
   race is documented, not fought (#10).
+- ✅ Spec 037 (the agent skill) shipped: one skill, `tracepad`, in
+  `agent/skills/tracepad/` — `SKILL.md` under 200 lines and four references
+  under 900 in all (#1) — that teaches the order of work and restates no
+  flag, route or field, pointing at `tracepad help`, `GET /api/v1` and the
+  MCP tool list instead (#2); its one rule of policy is that a destructive
+  command stops at the dry run until the human confirms (#3). Embedded by
+  `agent/skills/embed.go` and installed by `tracepad skills install
+  [--project | --dir DIR] [--force]`, which replaces the directory whole,
+  stamps the binary's version into the frontmatter and a `.version` marker,
+  and refuses a directory without the marker (#5–#7); `skills show` prints
+  it. A drift test asks the binary for its commands, flags, tools and routes
+  and fails on any name in the skill the binary does not have (#8).
 - ✅ Spec 032 (the Node package) shipped: `tracepad` on npm, source in
   `sdk/js/`, the Python package's surface with promises where Python has
   context managers and the same vocabulary on the wire — `init` adapts to
@@ -476,6 +488,7 @@ API. This file routes; it does not duplicate what specs and docs say.
 | Packaging: the image and the release | `Dockerfile` + `.dockerignore` (the whole recipe — the image builds both halves from the checkout and copies no prebuilt binary), `scripts/image-check.sh` (the contract, asserted from outside because the image has no shell), `.github/workflows/release-server.yml` (GoReleaser for the archives, `buildx` for one multi-arch manifest on GHCR), the `docker` job in `ci.yml`, `docs/docker.md`, spec 020 — `tracepad health` (`internal/cli/commands.go`) is the container's `HEALTHCHECK` and the one command that needs no key |
 | Configuration | `internal/config/`, spec 001 + spec 002 Configuration tables |
 | The docs' cross-references | `scripts/doc-anchors.sh` and `scripts/doc-anchors-fixture/`, spec 026 #6 — every `[…](file.md#anchor)` in `docs/*.md`, `README.md` and `AGENTS.md` is checked against the target's headings under GitHub's slug rule, fenced code blocks and inline code spans read as neither headings nor links. It runs in `make gate`; the fixture run is its own CI step, and it also builds a file long enough that a pipe would break the check (#13, #14) |
+| The agent skill | `agent/skills/tracepad/` (the skill itself: `SKILL.md` and `references/`), `agent/skills/command.go` (`skills install`/`show`, the stamp), `agent/skills/drift_test.go` with its fixture in `testdata/drift/`, `docs/agents.md`, spec 037 — the skill teaches order and never restates what the binary says about itself (#2). **A PR that changes a command, a flag, an MCP tool or a route the skill names updates the skill in the same PR**: the drift test enforces the names, the reviewer the meaning (#9). Budgets: `SKILL.md` ≤ 200 lines, the whole skill ≤ 900 (#1) |
 | A test that needs a store | `internal/storetest` for the store's clients (`Open`, `Path`, `Writes`), `harness_test.go` inside `internal/store` for its own suite — one migrated template copied per test and a one-millisecond commit window, because a suite that opens an empty database per test and waits out the default window per lone write spends most of its time on neither the code under test nor its own assertions. The migration tests and the writer's own tests are the exceptions, on purpose |
 
 Attribute semantics for the `langfuse.*` dialect are derived from Langfuse
