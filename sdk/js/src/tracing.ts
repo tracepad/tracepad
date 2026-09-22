@@ -357,15 +357,7 @@ export class Observation {
     }
     set(span, attrs.OBSERVATION_LEVEL, fields.level);
     set(span, attrs.OBSERVATION_STATUS_MESSAGE, fields.statusMessage);
-    if (fields.type !== undefined) {
-      if (!(attrs.OBSERVATION_TYPES as readonly string[]).includes(fields.type)) {
-        warn(
-          `${JSON.stringify(fields.type)} is not one of the observation types the store ` +
-            "classifies by; it will be kept in the observation's metadata",
-        );
-      }
-      span.setAttribute(attrs.OBSERVATION_TYPE, fields.type);
-    }
+    if (fields.type !== undefined) span.setAttribute(attrs.OBSERVATION_TYPE, kind(fields.type));
   }
 }
 
@@ -470,6 +462,12 @@ export interface TraceFields {
   sessionId?: string;
   tags?: string[];
   metadata?: Record<string, unknown>;
+  /**
+   * The version of this trace's own logic — a pipeline revision, a prompt
+   * bundle, an experiment arm — beside `release`, the deployment's, set once
+   * at `init` (spec 038 #3).
+   */
+  version?: string;
 }
 
 /**
@@ -490,6 +488,7 @@ export function updateTrace(fields: TraceFields): void {
   set(span, attrs.SESSION_ID, fields.sessionId);
   if (fields.tags !== undefined) span.setAttribute(attrs.TRACE_TAGS, attrs.dumps([...fields.tags]));
   if (fields.metadata !== undefined) span.setAttribute(attrs.TRACE_METADATA, attrs.dumps(fields.metadata));
+  set(span, attrs.TRACE_VERSION, fields.version);
 }
 
 /**
@@ -509,19 +508,44 @@ function set(span: Span, key: string, value: string | number | boolean | undefin
   if (value !== undefined) span.setAttribute(key, value);
 }
 
-export interface SpanOptions {
+/**
+ * Pass a step's kind through, warning when the store will not classify by
+ * it. A spelling outside the ten is not refused: the mapper keeps it in the
+ * observation's metadata and classifies the span by its heuristics.
+ */
+function kind(type: string): string {
+  if (!(attrs.OBSERVATION_TYPES as readonly string[]).includes(type)) {
+    warn(
+      `${JSON.stringify(type)} is not one of the observation types the store ` +
+        "classifies by; it will be kept in the observation's metadata",
+    );
+  }
+  return type;
+}
+
+/** What every step may be opened with. `event` takes these alone. */
+export interface ObservationOptions {
   input?: unknown;
   metadata?: Record<string, unknown>;
 }
 
-export interface GenerationOptions extends SpanOptions {
+export interface SpanOptions extends ObservationOptions {
+  /**
+   * The step's kind — `'retriever'`, `'tool'`, `'agent'`… — as `observe`
+   * takes it; `'span'` by default (spec 038 #1). `event` and `generation`
+   * name their kind by being called, so neither takes one.
+   */
+  type?: attrs.ObservationType;
+}
+
+export interface GenerationOptions extends ObservationOptions {
   model?: string;
   /** A `Prompt`, or anything with a `name` and a `version`, or a name. */
   prompt?: { name: string; version?: number } | string;
   modelParameters?: Record<string, unknown>;
 }
 
-function observationAttributes(type: string, options: SpanOptions = {}): Attributes {
+function observationAttributes(type: string, options: ObservationOptions = {}): Attributes {
   const attributes: Attributes = { [attrs.OBSERVATION_TYPE]: type };
   if (options.input !== undefined) attributes[attrs.INPUT] = attrs.dumps(options.input);
   if (options.metadata !== undefined) attributes[attrs.OBSERVATION_METADATA] = attrs.dumps(options.metadata);
@@ -617,13 +641,13 @@ export function span<T>(name: string, options: SpanOptions, fn: Callback<Observa
 /** A step of the trace, as a callback over an `Observation`. */
 export function span<T>(name: string, options: SpanOptions | Callback<Observation, T>, fn?: Callback<Observation, T>): T {
   const [given, callback] = split(options, fn);
-  return open(name, observationAttributes('span', given), (s) => new Observation(s), callback);
+  return open(name, observationAttributes(kind(given?.type ?? 'span'), given), (s) => new Observation(s), callback);
 }
 
 export function event<T>(name: string, fn: Callback<Observation, T>): T;
-export function event<T>(name: string, options: SpanOptions, fn: Callback<Observation, T>): T;
+export function event<T>(name: string, options: ObservationOptions, fn: Callback<Observation, T>): T;
 /** A zero-duration observation: something that happened, not something that took time. */
-export function event<T>(name: string, options: SpanOptions | Callback<Observation, T>, fn?: Callback<Observation, T>): T {
+export function event<T>(name: string, options: ObservationOptions | Callback<Observation, T>, fn?: Callback<Observation, T>): T {
   const [given, callback] = split(options, fn);
   return open(name, observationAttributes('event', given), (s) => new Observation(s), callback, now());
 }
@@ -661,6 +685,7 @@ type AnyFunction = (...args: any[]) => any;
  */
 export function observe<F extends AnyFunction>(fn: F, options: ObserveOptions = {}): F {
   const { name = fn.name || 'anonymous', type = 'span', captureInput = true, captureOutput = true } = options;
+  kind(type);
   const isGeneration = type === 'generation';
   const attributes = () => (isGeneration ? generationAttributes({}) : observationAttributes(type));
   const make = (s: Span) => (isGeneration ? new Generation(s, captureOutput) : new Observation(s));

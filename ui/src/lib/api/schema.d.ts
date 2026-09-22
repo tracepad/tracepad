@@ -1486,7 +1486,7 @@ export interface components {
             environment: string;
             /** @description The deployment the trace ran in, from `langfuse.release` or the resource's `service.version` */
             release?: string;
-            /** @description The version of the trace's own logic, from `langfuse.version` */
+            /** @description The version of the trace's own logic, from `langfuse.version` or `tracepad.trace.version` */
             version?: string;
             /** @description The dataset run this trace belongs to, from `tracepad.run_id`; absent on ordinary traffic. No foreign key stands behind it: a trace may name a run the project does not have */
             run_id?: string;
@@ -2272,7 +2272,7 @@ export interface components {
         Search: string;
         /** @description The deployment the trace ran in, from `langfuse.release` or the resource's `service.version`. A comma-separated list matches **any** of them; items are trimmed, duplicates collapse, an empty item is a 400, repeating the parameter is a 400, at most 100 items, and a release whose name contains a comma is not expressible here. `GET /api/v1/facets` lists the values in a range with their counts */
         Release: string;
-        /** @description Exact match on the version of the trace's own logic, from `langfuse.version` */
+        /** @description Exact match on the version of the trace's own logic, from `langfuse.version` or `tracepad.trace.version` */
         Version: string;
         /** @description Keeps traces with at least one observation of this kind. Exact: `generation` does not match `embedding`. A value outside the list is a 400 */
         ObservationType: "span" | "generation" | "event" | "agent" | "tool" | "chain" | "retriever" | "guardrail" | "evaluator" | "embedding";
@@ -2826,7 +2826,7 @@ export interface operations {
                 q?: components["parameters"]["Search"];
                 /** @description The deployment the trace ran in, from `langfuse.release` or the resource's `service.version`. A comma-separated list matches **any** of them; items are trimmed, duplicates collapse, an empty item is a 400, repeating the parameter is a 400, at most 100 items, and a release whose name contains a comma is not expressible here. `GET /api/v1/facets` lists the values in a range with their counts */
                 release?: components["parameters"]["Release"];
-                /** @description Exact match on the version of the trace's own logic, from `langfuse.version` */
+                /** @description Exact match on the version of the trace's own logic, from `langfuse.version` or `tracepad.trace.version` */
                 version?: components["parameters"]["Version"];
                 /** @description Keeps traces with at least one observation of this kind. Exact: `generation` does not match `embedding`. A value outside the list is a 400 */
                 type?: components["parameters"]["ObservationType"];
@@ -2901,7 +2901,7 @@ export interface operations {
                 q?: components["parameters"]["Search"];
                 /** @description The deployment the trace ran in, from `langfuse.release` or the resource's `service.version`. A comma-separated list matches **any** of them; items are trimmed, duplicates collapse, an empty item is a 400, repeating the parameter is a 400, at most 100 items, and a release whose name contains a comma is not expressible here. `GET /api/v1/facets` lists the values in a range with their counts */
                 release?: components["parameters"]["Release"];
-                /** @description Exact match on the version of the trace's own logic, from `langfuse.version` */
+                /** @description Exact match on the version of the trace's own logic, from `langfuse.version` or `tracepad.trace.version` */
                 version?: components["parameters"]["Version"];
                 /** @description Keeps traces with at least one observation of this kind. Exact: `generation` does not match `embedding`. A value outside the list is a 400 */
                 type?: components["parameters"]["ObservationType"];
@@ -2956,7 +2956,7 @@ export interface operations {
                 q?: components["parameters"]["Search"];
                 /** @description The deployment the trace ran in, from `langfuse.release` or the resource's `service.version`. A comma-separated list matches **any** of them; items are trimmed, duplicates collapse, an empty item is a 400, repeating the parameter is a 400, at most 100 items, and a release whose name contains a comma is not expressible here. `GET /api/v1/facets` lists the values in a range with their counts */
                 release?: components["parameters"]["Release"];
-                /** @description Exact match on the version of the trace's own logic, from `langfuse.version` */
+                /** @description Exact match on the version of the trace's own logic, from `langfuse.version` or `tracepad.trace.version` */
                 version?: components["parameters"]["Version"];
                 /** @description Keeps traces with at least one observation of this kind. Exact: `generation` does not match `embedding`. A value outside the list is a 400 */
                 type?: components["parameters"]["ObservationType"];
@@ -4849,7 +4849,7 @@ export interface operations {
                 q?: components["parameters"]["Search"];
                 /** @description The deployment the trace ran in, from `langfuse.release` or the resource's `service.version`. A comma-separated list matches **any** of them; items are trimmed, duplicates collapse, an empty item is a 400, repeating the parameter is a 400, at most 100 items, and a release whose name contains a comma is not expressible here. `GET /api/v1/facets` lists the values in a range with their counts */
                 release?: components["parameters"]["Release"];
-                /** @description Exact match on the version of the trace's own logic, from `langfuse.version` */
+                /** @description Exact match on the version of the trace's own logic, from `langfuse.version` or `tracepad.trace.version` */
                 version?: components["parameters"]["Version"];
                 /** @description Keeps traces with at least one observation of this kind. Exact: `generation` does not match `embedding`. A value outside the list is a 400 */
                 type?: components["parameters"]["ObservationType"];

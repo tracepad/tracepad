@@ -27,7 +27,8 @@ func TestATracedCallArrivesWhole(t *testing.T) {
 	ctx, request := application.Tracer("the.framework").Start(ctx, "GET /answer")
 	ctx, step := tracepad.Span(ctx, "answer-question", tracepad.WithInput(map[string]any{"question": "how do I reset my password?"}))
 	tracepad.UpdateTrace(ctx, tracepad.WithTraceName("support-chat"), tracepad.WithUserID("user-4821"),
-		tracepad.WithSessionID("session-77"), tracepad.WithTags("support", "beta"))
+		tracepad.WithSessionID("session-77"), tracepad.WithTags("support", "beta"),
+		tracepad.WithTraceVersion("retrieval-v2"))
 	genCtx, call := tracepad.Generation(ctx, "chat-completion", tracepad.WithModel("claude-sonnet-5"),
 		tracepad.WithPrompt(support), tracepad.WithModelParameters(map[string]any{"temperature": 0.2}),
 		tracepad.WithInput([]tracepad.Message{{Role: "user", Content: "how do I reset my password?"}}))
@@ -49,7 +50,9 @@ func TestATracedCallArrivesWhole(t *testing.T) {
 	flush(t)
 
 	stored := s.trace(step.TraceID())
-	for field, want := range map[string]any{"name": "support-chat", "user_id": "user-4821", "session_id": "session-77", "error_count": 1.0} {
+	for field, want := range map[string]any{
+		"name": "support-chat", "user_id": "user-4821", "session_id": "session-77", "version": "retrieval-v2", "error_count": 1.0,
+	} {
 		if stored[field] != want {
 			t.Errorf("%s = %v, want %v", field, stored[field], want)
 		}

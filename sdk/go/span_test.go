@@ -106,13 +106,15 @@ func TestUpdateActsOnTheCurrentSpanWhoeverStartedIt(t *testing.T) {
 	ctx, span := r.provider.Tracer("the.framework").Start(context.Background(), "GET /answer")
 	Update(ctx, WithLevel("ERROR"), WithType("agent"))
 	UpdateTrace(ctx, WithTraceName("support-chat"), WithUserID("u-42"), WithSessionID("s-7"),
-		WithTags("support", "beta"), WithTraceMetadata(map[string]any{"channel": "web"}))
+		WithTags("support", "beta"), WithTraceMetadata(map[string]any{"channel": "web"}),
+		WithTraceVersion("retrieval-v2"))
 	span.End()
 	attrs := r.attrs(t, "GET /answer")
 	want := map[string]string{
 		attrObservationLevel: "ERROR", attrObservationType: "agent",
 		attrTraceName: "support-chat", attrUserID: "u-42", attrSessionID: "s-7",
 		attrTraceTags: `["support","beta"]`, attrTraceMetadata: `{"channel":"web"}`,
+		attrTraceVersion: "retrieval-v2",
 	}
 	for key, value := range want {
 		if got := str(t, attrs, key); got != value {

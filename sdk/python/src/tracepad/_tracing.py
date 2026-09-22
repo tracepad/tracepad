@@ -201,12 +201,7 @@ class Observation:
         _set(span, attrs.OBSERVATION_LEVEL, level)
         _set(span, attrs.OBSERVATION_STATUS_MESSAGE, status_message)
         if type is not None:
-            if type not in attrs.OBSERVATION_TYPES:
-                logger.warning(
-                    "tracepad: %r is not one of the observation types the store "
-                    "classifies by; it will be kept in the observation's metadata", type
-                )
-            _set(span, attrs.OBSERVATION_TYPE, type)
+            _set(span, attrs.OBSERVATION_TYPE, _kind(type))
 
 
 class Generation(Observation):
@@ -336,12 +331,16 @@ def update_trace(
     session_id: str | None = None,
     tags: Sequence[str] | None = None,
     metadata: dict[str, Any] | None = None,
+    version: str | None = None,
 ) -> None:
     """Write trace-level attributes on the current span (spec 017 #11).
 
     A request handler rarely holds the root span — the framework does — and
     the one thing it knows is who the user is. These land where the handler
-    stands, and the mapper resolves them for the trace.
+    stands, and the mapper resolves them for the trace. `version` is the
+    version of this trace's own logic — a pipeline revision, a prompt bundle,
+    an experiment arm — beside `release`, the deployment's, set once at
+    `init` (spec 038 #3).
     """
     span = otel.get_current_span()
     if not span.is_recording():
@@ -354,6 +353,7 @@ def update_trace(
         _set(span, attrs.TRACE_TAGS, attrs.dumps(list(tags)))
     if metadata is not None:
         _set(span, attrs.TRACE_METADATA, attrs.dumps(metadata))
+    _set(span, attrs.TRACE_VERSION, version)
 
 
 def _observation_of(span: otel.Span) -> Observation:
@@ -374,6 +374,20 @@ def _set(span: otel.Span, key: str, value: Any) -> None:
         span.set_attribute(key, value)
 
 
+def _kind(type: str) -> str:
+    """Pass a step's kind through, warning when the store will not classify by it.
+
+    A spelling outside the ten is not refused: the mapper keeps it in the
+    observation's metadata and classifies the span by its heuristics.
+    """
+    if type not in attrs.OBSERVATION_TYPES:
+        logger.warning(
+            "tracepad: %r is not one of the observation types the store "
+            "classifies by; it will be kept in the observation's metadata", type
+        )
+    return type
+
+
 def _observation_attributes(
     type: str,
     input: Any = None,
@@ -392,8 +406,9 @@ def _generation_attributes(
     prompt: Any,
     model_parameters: dict[str, Any] | None,
     input: Any,
+    metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    attributes = _observation_attributes("generation", input=input)
+    attributes = _observation_attributes("generation", input, metadata)
     if model is not None:
         attributes[attrs.REQUEST_MODEL] = model
     for name, value in (model_parameters or {}).items():
@@ -456,9 +471,20 @@ def _failed(handle: Observation, error: BaseException) -> None:
     handle.span.set_status(otel.Status(otel.StatusCode.ERROR, str(error)))
 
 
-def span(name: str, *, input: Any = None, metadata: dict[str, Any] | None = None) -> Any:
-    """A step of the trace, as a context manager over an `Observation`."""
-    return _open(name, _observation_attributes("span", input, metadata))
+def span(
+    name: str,
+    *,
+    input: Any = None,
+    metadata: dict[str, Any] | None = None,
+    type: str = "span",
+) -> Any:
+    """A step of the trace, as a context manager over an `Observation`.
+
+    `type` is the step's kind — `"retriever"`, `"tool"`, `"agent"`… — as
+    `@observe(type=…)` takes it (spec 038 #1): the kind is known when the step
+    opens, so it is written then rather than corrected by `update` after.
+    """
+    return _open(name, _observation_attributes(_kind(type), input, metadata))
 
 
 def event(name: str, *, input: Any = None, metadata: dict[str, Any] | None = None) -> Any:
@@ -475,9 +501,10 @@ def generation(
     prompt: Any = None,
     model_parameters: dict[str, Any] | None = None,
     input: Any = None,
+    metadata: dict[str, Any] | None = None,
 ) -> Any:
     """A call to a model, as a context manager over a `Generation`."""
-    attributes = _generation_attributes(model, prompt, model_parameters, input)
+    attributes = _generation_attributes(model, prompt, model_parameters, input, metadata)
     return _open(name, attributes, Generation)
 
 
@@ -502,6 +529,8 @@ def observe(
     generators of both kinds: the span ends when the generator is exhausted or
     closed, and its `output` is the list of what it yielded.
     """
+
+    _kind(type)
 
     def decorate(fn: Callable[..., Any]) -> Callable[..., Any]:
         signature = inspect.signature(fn) if capture_input else None

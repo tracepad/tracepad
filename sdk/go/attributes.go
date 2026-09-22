@@ -38,6 +38,7 @@ const (
 	attrTraceName               = "tracepad.trace.name"
 	attrTraceTags               = "tracepad.trace.tags"
 	attrTraceMetadata           = "tracepad.trace.metadata"
+	attrTraceVersion            = "tracepad.trace.version"
 	attrObservationType         = "tracepad.observation.type"
 	attrObservationLevel        = "tracepad.observation.level"
 	attrObservationStatusMsg    = "tracepad.observation.status_message"

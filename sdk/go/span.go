@@ -233,6 +233,7 @@ type TraceOption func(*traceFields)
 
 type traceFields struct {
 	name, userID, sessionID string
+	version                 string
 	tags                    []string
 	metadata                any
 	hasTags, hasMetadata    bool
@@ -246,6 +247,13 @@ func WithUserID(id string) TraceOption { return func(f *traceFields) { f.userID 
 
 // WithSessionID groups traces into a session.
 func WithSessionID(id string) TraceOption { return func(f *traceFields) { f.sessionID = id } }
+
+// WithTraceVersion is the version of this trace's own logic — a pipeline
+// revision, a prompt bundle, an experiment arm — beside WithRelease, the
+// deployment's version set once at Init (spec 038 #3).
+func WithTraceVersion(version string) TraceOption {
+	return func(f *traceFields) { f.version = version }
+}
 
 // WithTags are the trace's tags.
 func WithTags(tags ...string) TraceOption {
@@ -280,6 +288,7 @@ func UpdateTrace(ctx context.Context, opts ...TraceOption) {
 	set(attrTraceName, f.name)
 	set(attrUserID, f.userID)
 	set(attrSessionID, f.sessionID)
+	set(attrTraceVersion, f.version)
 	if f.hasTags {
 		if f.tags == nil {
 			f.tags = []string{}

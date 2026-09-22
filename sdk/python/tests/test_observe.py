@@ -164,6 +164,30 @@ def test_span_and_event(spans: Any) -> None:
     assert marker.parent.span_id == outer.context.span_id
 
 
+def test_a_span_takes_its_kind_when_it_opens(spans: Any) -> None:
+    # Spec 038 #1: one call, not a span retyped by `update` afterwards.
+    with tracepad.span("docs-search", type="retriever"):
+        pass
+
+    assert spans.attributes("docs-search")[attrs.OBSERVATION_TYPE] == "retriever"
+
+
+def test_an_unknown_kind_warns_and_is_still_written(
+    spans: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    # Written all the same: the mapper keeps it in the observation's metadata.
+    with caplog.at_level(logging.WARNING, logger="tracepad"):
+        with tracepad.span("lookup", type="retreiver"):
+            pass
+
+        @tracepad.observe(type="retreiver")
+        def lookup() -> None:
+            pass
+
+    assert caplog.text.count("'retreiver' is not one of the observation types") == 2
+    assert spans.attributes("lookup")[attrs.OBSERVATION_TYPE] == "retreiver"
+
+
 def test_update_trace_writes_the_trace_level_names(spans: Any) -> None:
     with tracepad.span("handler"):
         tracepad.update_trace(
@@ -172,6 +196,7 @@ def test_update_trace_writes_the_trace_level_names(spans: Any) -> None:
             session_id="s-7",
             tags=["support", "beta"],
             metadata={"channel": "web"},
+            version="retrieval-v2",
         )
 
     attributes = spans.attributes("handler")
@@ -180,6 +205,7 @@ def test_update_trace_writes_the_trace_level_names(spans: Any) -> None:
     assert attributes[attrs.SESSION_ID] == "s-7"
     assert json.loads(attributes[attrs.TRACE_TAGS]) == ["support", "beta"]
     assert json.loads(attributes[attrs.TRACE_METADATA]) == {"channel": "web"}
+    assert attributes[attrs.TRACE_VERSION] == "retrieval-v2"
 
 
 def test_update_outside_a_span_warns_and_writes_nothing(

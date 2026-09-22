@@ -14,6 +14,7 @@ func TestTracepadDialect(t *testing.T) {
 		"tracepad.trace.name", "support-chat",
 		"tracepad.trace.tags", `["support","beta"]`,
 		"tracepad.trace.metadata", `{"channel":"web"}`,
+		"tracepad.trace.version", "retrieval-v2",
 		"tracepad.observation.type", "tool",
 		"tracepad.observation.level", "warning",
 		"tracepad.observation.status_message", "no results, retrying",
@@ -37,6 +38,9 @@ func TestTracepadDialect(t *testing.T) {
 	}
 	if trace.UserID != "user-4821" || trace.SessionID != "session-77" {
 		t.Errorf("user = %q, session = %q", trace.UserID, trace.SessionID)
+	}
+	if trace.Version != "retrieval-v2" {
+		t.Errorf("version = %q", trace.Version)
 	}
 
 	observation := result.Observations[0]
@@ -100,6 +104,41 @@ func TestLangfuseWinsOverTracepad(t *testing.T) {
 	// The loser is still visible: nothing is dropped (spec 002 #11).
 	if observation.Metadata["tracepad.trace.name"] != "written-by-tracepad" {
 		t.Errorf("metadata = %v, want the loser preserved", observation.Metadata)
+	}
+}
+
+// The trace's version is the one trace field the dialect missed (spec 038 #4):
+// `tracepad.trace.version` sits beside `langfuse.version`, and the
+// `langfuse.*` key wins on one span and across the spans of an export alike —
+// the chain's rank, not the order of delivery (spec 012 #11).
+func TestTracepadTraceVersionRanksBesideLangfuse(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		spans [][]string
+		want  string
+	}{
+		{"alone", [][]string{{"tracepad.trace.version", "arm-b"}}, "arm-b"},
+		{"both on one span", [][]string{{
+			"langfuse.version", "written-by-langfuse",
+			"tracepad.trace.version", "written-by-tracepad",
+		}}, "written-by-langfuse"},
+		{"the langfuse key on the root, ours on a later span", [][]string{
+			{"langfuse.version", "written-by-langfuse"},
+			{"tracepad.trace.version", "written-by-tracepad"},
+		}, "written-by-langfuse"},
+		{"ours on the root, the langfuse key on a later span", [][]string{
+			{"tracepad.trace.version", "written-by-tracepad"},
+			{"langfuse.version", "written-by-langfuse"},
+		}, "written-by-langfuse"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := mapping.Map(otlptest.ExportLevels(otlptest.Levels{
+				ScopeName: "tracepad", ScopeVersion: "0.1.0", Spans: tc.spans,
+			}))
+			if got := result.Traces[0].Version; got != tc.want {
+				t.Errorf("version = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 

@@ -37,7 +37,7 @@ defer shutdown(ctx)
 | `WithHost` | `TRACEPAD_HOST` | Where the store is, e.g. `http://localhost:4318` |
 | `WithKey` | `TRACEPAD_API_KEY` | A secret key (`tp-sk-…`), sent as `Bearer` |
 | `WithEnvironment` | `TRACEPAD_ENVIRONMENT` | The deployment this process is |
-| `WithRelease` | `TRACEPAD_RELEASE` | The version of its own logic |
+| `WithRelease` | `TRACEPAD_RELEASE` | The version of this deployment — per trace, [`WithTraceVersion`](#the-trace-around-a-step) |
 | `WithExport(false)` | — | Attaches everything except the exporter |
 | `WithLogger` | — | Where the tracing path says what it could not do; `slog.Default()` otherwise |
 | `WithTracerProvider` | — | Attach to this provider instead of the global one — for tests |
@@ -199,7 +199,8 @@ thing it knows is who the user is:
 
 ```go
 tracepad.UpdateTrace(ctx, tracepad.WithTraceName("support-chat"), tracepad.WithUserID("u-42"),
-	tracepad.WithSessionID("s-7"), tracepad.WithTags("support"), tracepad.WithTraceMetadata(map[string]any{"channel": "web"}))
+	tracepad.WithSessionID("s-7"), tracepad.WithTags("support"), tracepad.WithTraceMetadata(map[string]any{"channel": "web"}),
+	tracepad.WithTraceVersion("retrieval-v2"))
 tracepad.Update(ctx, tracepad.WithLevel("WARNING"), tracepad.WithStatusMessage("retried once"))
 ```
 
@@ -207,6 +208,20 @@ Both act on the context's current span, whoever started it, and the store
 resolves the trace-level ones for the trace. `Update` takes `WithName`,
 `WithInput`, `WithOutput`, `WithMetadata`, `WithLevel`, `WithStatusMessage` and
 `WithType`. Outside a span both log a warning and do nothing.
+
+| `UpdateTrace` option | Meaning |
+|---|---|
+| `WithTraceName(string)` | The trace's name |
+| `WithUserID(string)` | Who the trace is for |
+| `WithSessionID(string)` | The session it belongs to |
+| `WithTags(...string)` | Its tags |
+| `WithTraceMetadata(any)` | Free metadata on the trace, a JSON object |
+| `WithTraceVersion(string)` | The version of this trace's own logic |
+
+`WithTraceVersion` is the version of *this trace's* logic — a pipeline
+revision, a prompt bundle, an experiment arm — and the trace listing filters on
+it (`version=`). It sits beside `WithRelease`, the deployment's version set
+once at `Init`: two arms running in one release are told apart by the version.
 
 ## Scores
 
@@ -418,8 +433,8 @@ Instrumentation that can break the function it observes is worse than none.
 ## What it writes
 
 The OTel GenAI semantic conventions where a name exists, and `tracepad.*` where
-none does — a trace name, tags, free metadata, an observation kind, a prompt
-reference. The whole table is in
+none does — a trace name, tags, free metadata, a trace version, an observation
+kind, a prompt reference. The whole table is in
 [ingest.md](ingest.md#what-tracepad-reads-from-your-spans); the `tracepad.*`
 half is [its own section](ingest.md#the-tracepad-dialect). It is the same
 vocabulary the [Python package](sdk-python.md#what-it-writes) writes, and the

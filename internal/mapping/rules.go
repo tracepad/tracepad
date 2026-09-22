@@ -50,6 +50,7 @@ const (
 	tpTraceName              = "tracepad.trace.name"
 	tpTraceTags              = "tracepad.trace.tags"
 	tpTraceMetadata          = "tracepad.trace.metadata"
+	tpTraceVersion           = "tracepad.trace.version"
 	tpObsType                = "tracepad.observation.type"
 	tpObsLevel               = "tracepad.observation.level"
 	tpObsStatusMessage       = "tracepad.observation.status_message"
@@ -119,8 +120,9 @@ var (
 	traceReleaseKeys = []string{lfRelease, "service.version"}
 
 	// Not `langfuse.observation.version`: that is the observation's own
-	// version and stays in metadata (spec 012 #4).
-	traceVersionKeys = []string{lfVersion}
+	// version and stays in metadata (spec 012 #4). The `tracepad` key is the
+	// one trace field spec 017 #3 missed (spec 038 #4).
+	traceVersionKeys = []string{lfVersion, tpTraceVersion}
 
 	// The run link (spec 014 #2). One key each: there is no dialect to
 	// fall back to, and the shape is checked before the key is claimed.

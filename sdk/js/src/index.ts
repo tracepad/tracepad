@@ -53,6 +53,7 @@ export {
   type FlushOptions,
   type GenerationOptions,
   type InitOptions,
+  type ObservationOptions,
   type ObserveOptions,
   type SpanOptions,
   type TraceFields,

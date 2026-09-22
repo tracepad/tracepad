@@ -232,7 +232,7 @@ attributes participate at lower priority than the span's own.
 | session | `langfuse.session.id` · `session.id` · `gen_ai.conversation.id` |
 | environment | `langfuse.environment` · `deployment.environment.name` · `deployment.environment` · `default` |
 | release | `langfuse.release` · the resource's `service.version` |
-| version | `langfuse.version` |
+| version | `langfuse.version` · `tracepad.trace.version` |
 | run | `tracepad.run_id` (a 32-hex run id; see [The run link](#the-run-link)) |
 | item | `tracepad.item_id` (a 32-hex item id, claimed only beside a run id) |
 | tags | `langfuse.trace.tags` · `tracepad.trace.tags` (JSON array, comma-separated list, or single value) |
@@ -286,7 +286,8 @@ Two consequences worth knowing:
 ### The `tracepad` dialect
 
 The GenAI semantic conventions have no name for a trace name, for tags, for
-free metadata, for the kind of a step or for the prompt one ran. Where they do
+free metadata, for the version of a trace's own logic, for the kind of a step
+or for the prompt one ran. Where they do
 have a name, the [Python](sdk-python.md), [Node](sdk-js.md) and [Go](sdk-go.md)
 packages use it — `gen_ai.*`, `user.id`, `session.id`,
 `deployment.environment.name`, the resource's `service.version` — and where
@@ -297,6 +298,7 @@ they do not, they write these:
 | `tracepad.trace.name` | the trace's name |
 | `tracepad.trace.tags` | its tags, as a JSON array |
 | `tracepad.trace.metadata` | its metadata, as a JSON object |
+| `tracepad.trace.version` | the version of its own logic — a pipeline revision, a prompt bundle, an experiment arm — beside the deployment's `release` |
 | `tracepad.observation.type` | the [kind](#the-kind-of-each-step) of this step |
 | `tracepad.observation.level` | its level |
 | `tracepad.observation.status_message` | why |

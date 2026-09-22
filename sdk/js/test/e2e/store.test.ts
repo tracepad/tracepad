@@ -48,7 +48,10 @@ describe.skipIf(!BINARY)('against a real binary', () => {
 
     let traceId = '';
     const answer = tracepad.observe(async (question: string) => {
-      tracepad.updateTrace({ name: 'support-chat', userId: 'user-4821', sessionId: 'session-77', tags: ['support', 'beta'] });
+      tracepad.updateTrace({
+        name: 'support-chat', userId: 'user-4821', sessionId: 'session-77', tags: ['support', 'beta'],
+        version: 'retrieval-v2',
+      });
       await tracepad.generation(
         'chat-completion',
         { model: 'claude-sonnet-5', prompt: support, modelParameters: { temperature: 0.2 }, input: [{ role: 'user', content: question }] },
@@ -72,6 +75,7 @@ describe.skipIf(!BINARY)('against a real binary', () => {
     expect([...stored.tags!].sort()).toEqual(['beta', 'support']);
     expect(stored.environment).toBe('e2e');
     expect(stored.release).toBe('2026.9.4');
+    expect(stored.version).toBe('retrieval-v2');
 
     const observations = walk(stored.observations);
     expect(observations.map((o) => o.name)).toEqual(['answer-question', 'chat-completion']);

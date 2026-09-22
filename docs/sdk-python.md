@@ -30,7 +30,7 @@ tracepad.init()
 | `host` | `TRACEPAD_HOST` | Where the store is, e.g. `http://localhost:4318` |
 | `key` | `TRACEPAD_API_KEY` | A secret key (`tp-sk-…`), sent as `Bearer` |
 | `environment` | `TRACEPAD_ENVIRONMENT` | The deployment this process is |
-| `release` | `TRACEPAD_RELEASE` | The version of its own logic |
+| `release` | `TRACEPAD_RELEASE` | The version of this deployment — per trace, [`update_trace(version=…)`](#the-trace-around-a-step) |
 | `export` | — | `False` attaches everything except the exporter |
 
 The arguments win over the environment, and with neither a host nor a key the
@@ -99,12 +99,24 @@ OTel event, and propagates unchanged.
 The same thing without a decorator, plus the zero-duration kind:
 
 ```python
-with tracepad.span("retrieve", input={"query": q}) as step:
+with tracepad.span("retrieve", type="retriever", input={"query": q}) as step:
     step.update(output=documents, metadata={"hits": len(documents)})
 
 with tracepad.event("cache.miss"):
     pass
 ```
+
+| Argument | `span` | `event` | `generation` |
+|---|---|---|---|
+| `input=` | yes | yes | yes |
+| `metadata=` | yes | yes | yes |
+| `type=` | one of the [ten kinds](ingest.md#the-kind-of-each-step); `"span"` by default | — (`event`) | — (`generation`) |
+
+`type=` is the kind the step *is* — a retriever, a tool call, an agent — and it
+is known when the step opens, so it is written then. A spelling outside the ten
+logs a warning and is sent all the same; the store keeps it in the
+observation's metadata, exactly as for `@observe(type=…)` and
+`update(type=…)`.
 
 `span`, `event` and `generation` hand out an `Observation` carrying
 `trace_id`, `span_id`, `update(...)` and the OTel span itself as `.span`.
@@ -117,10 +129,14 @@ with tracepad.generation(
     model="gpt-4o-mini",
     model_parameters={"temperature": 0.2},
     input=messages,
+    metadata={"attempt": 2},
 ) as call:
     response = client.chat.completions.create(model="gpt-4o-mini", messages=messages)
     call.end(response=response)
 ```
+
+`metadata=` is the generation's own, written as `span(metadata=…)` writes it —
+what is known when the call starts, such as which attempt this is.
 
 `end(response=…)` reads an OpenAI-compatible answer — a `dict` or any object
 with the attributes, which the OpenAI client's models are:
@@ -209,13 +225,19 @@ thing it knows is who the user is:
 
 ```python
 tracepad.update_trace(name="support-chat", user_id="u-42", session_id="s-7",
-                      tags=["support"], metadata={"channel": "web"})
+                      tags=["support"], metadata={"channel": "web"},
+                      version="retrieval-v2")
 tracepad.update(level="WARNING", status_message="retried once")
 ```
 
 Both act on the *current* span, whoever started it, and the store resolves the
 trace-level ones for the trace. Outside a span both log a warning and do
 nothing.
+
+`version` is the version of *this trace's* logic — a pipeline revision, a
+prompt bundle, an experiment arm — and the trace listing filters on it
+(`version=`). It sits beside `release`, the deployment's version set once at
+`init`: two arms running in one release are told apart by `version`.
 
 ## Scores
 
@@ -413,8 +435,8 @@ logging.getLogger("tracepad").setLevel(logging.DEBUG)
 ## What it writes
 
 The OTel GenAI semantic conventions where a name exists, and `tracepad.*` where
-none does — a trace name, tags, free metadata, an observation kind, a prompt
-reference. The whole table is in
+none does — a trace name, tags, free metadata, a trace version, an observation
+kind, a prompt reference. The whole table is in
 [ingest.md](ingest.md#what-tracepad-reads-from-your-spans); the `tracepad.*`
 half is [its own section](ingest.md#the-tracepad-dialect). A span this package
 produced means the same thing to any OTel backend, and `langfuse.*` is never

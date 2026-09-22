@@ -28,6 +28,7 @@ export const SERVICE_VERSION = 'service.version';
 export const TRACE_NAME = 'tracepad.trace.name';
 export const TRACE_TAGS = 'tracepad.trace.tags';
 export const TRACE_METADATA = 'tracepad.trace.metadata';
+export const TRACE_VERSION = 'tracepad.trace.version';
 export const OBSERVATION_TYPE = 'tracepad.observation.type';
 export const OBSERVATION_LEVEL = 'tracepad.observation.level';
 export const OBSERVATION_STATUS_MESSAGE = 'tracepad.observation.status_message';

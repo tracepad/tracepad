@@ -89,6 +89,16 @@ def test_a_response_without_usage_claims_no_cost(spans: Any) -> None:
     assert not [key for key in attributes if key.startswith(attrs.USAGE_PREFIX)]
 
 
+def test_a_generation_takes_metadata_when_it_opens(spans: Any) -> None:
+    # Spec 038 #2: written as `span(metadata=)` writes it.
+    with tracepad.generation("chat", model="gpt-4o-mini", metadata={"attempt": 2}):
+        pass
+
+    attributes = spans.attributes("chat")
+    assert json.loads(attributes[attrs.OBSERVATION_METADATA]) == {"attempt": 2}
+    assert attributes[attrs.OBSERVATION_TYPE] == "generation"
+
+
 def test_first_token_stamps_once(spans: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     # A clock that moves a whole second per reading: two stamps a millisecond
     # apart would be one value however often they were written, and what is
