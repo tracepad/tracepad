@@ -476,15 +476,22 @@ def span(
     *,
     input: Any = None,
     metadata: dict[str, Any] | None = None,
-    type: str = "span",
+    type: str | None = "span",
 ) -> Any:
     """A step of the trace, as a context manager over an `Observation`.
 
     `type` is the step's kind — `"retriever"`, `"tool"`, `"agent"`… — as
     `@observe(type=…)` takes it (spec 038 #1): the kind is known when the step
-    opens, so it is written then rather than corrected by `update` after.
+    opens, so it is written then rather than corrected by `update` after. An
+    empty kind is the default, and `"generation"` and `"event"` open what
+    `generation()` and `event()` open, as the decorator does (spec 038 #8).
     """
-    return _open(name, _observation_attributes(_kind(type), input, metadata))
+    kind = _kind(type or "span")
+    if kind == "generation":
+        return generation(name, input=input, metadata=metadata)
+    if kind == "event":
+        return event(name, input=input, metadata=metadata)
+    return _open(name, _observation_attributes(kind, input, metadata))
 
 
 def event(name: str, *, input: Any = None, metadata: dict[str, Any] | None = None) -> Any:
@@ -530,14 +537,18 @@ def observe(
     closed, and its `output` is the list of what it yielded.
     """
 
-    _kind(type)
-
     def decorate(fn: Callable[..., Any]) -> Callable[..., Any]:
         signature = inspect.signature(fn) if capture_input else None
         label = name or fn.__name__
         is_generation = type == "generation"
+        # The kind is checked on the first call rather than here, at import
+        # time, before the application has configured its logging.
+        unchecked = [True]
 
         def attributes() -> dict[str, Any]:
+            if unchecked:
+                unchecked.clear()
+                _kind(type)
             if is_generation:
                 return _generation_attributes(None, None, None, None)
             return _observation_attributes(type)

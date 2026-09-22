@@ -533,9 +533,10 @@ export interface SpanOptions extends ObservationOptions {
   /**
    * The step's kind — `'retriever'`, `'tool'`, `'agent'`… — as `observe`
    * takes it; `'span'` by default (spec 038 #1). `event` and `generation`
-   * name their kind by being called, so neither takes one.
+   * name their kind by being called, so neither takes one, and neither is
+   * one here: their shapes are those two functions (spec 038 #8).
    */
-  type?: attrs.ObservationType;
+  type?: Exclude<attrs.ObservationType, 'generation' | 'event'>;
 }
 
 export interface GenerationOptions extends ObservationOptions {
@@ -641,7 +642,24 @@ export function span<T>(name: string, options: SpanOptions, fn: Callback<Observa
 /** A step of the trace, as a callback over an `Observation`. */
 export function span<T>(name: string, options: SpanOptions | Callback<Observation, T>, fn?: Callback<Observation, T>): T {
   const [given, callback] = split(options, fn);
-  return open(name, observationAttributes(kind(given?.type ?? 'span'), given), (s) => new Observation(s), callback);
+  // An empty kind is the default, and the two kinds with a shape of their
+  // own open that shape — what `observe` does with them (spec 038 #8).
+  const type = kind((given?.type as string | undefined) || 'span');
+  if (type === 'generation' || type === 'event') {
+    const rest: ObservationOptions = {};
+    if (given?.input !== undefined) rest.input = given.input;
+    if (given?.metadata !== undefined) rest.metadata = given.metadata;
+    return type === 'event' ? event(name, rest, callback) : generation(name, rest, callback);
+  }
+  return open(name, observationAttributes(type, given), (s) => new Observation(s), callback);
+}
+
+/** Warn about a kind given to a shape that names its own: it is not written. */
+function ownKind(options: ObservationOptions | undefined, shape: string): void {
+  const type = (options as { type?: unknown } | undefined)?.type;
+  if (type !== undefined) {
+    warn(`${shape}() takes no type; its kind is ${JSON.stringify(shape)} and ${JSON.stringify(type)} is ignored`);
+  }
 }
 
 export function event<T>(name: string, fn: Callback<Observation, T>): T;
@@ -649,6 +667,7 @@ export function event<T>(name: string, options: ObservationOptions, fn: Callback
 /** A zero-duration observation: something that happened, not something that took time. */
 export function event<T>(name: string, options: ObservationOptions | Callback<Observation, T>, fn?: Callback<Observation, T>): T {
   const [given, callback] = split(options, fn);
+  ownKind(given, 'event');
   return open(name, observationAttributes('event', given), (s) => new Observation(s), callback, now());
 }
 
@@ -657,6 +676,7 @@ export function generation<T>(name: string, options: GenerationOptions, fn: Call
 /** A call to a model, as a callback over a `Generation`. */
 export function generation<T>(name: string, options: GenerationOptions | Callback<Generation, T>, fn?: Callback<Generation, T>): T {
   const [given, callback] = split(options, fn);
+  ownKind(given, 'generation');
   return open(name, generationAttributes(given ?? {}), (s) => new Generation(s), callback);
 }
 
@@ -685,9 +705,17 @@ type AnyFunction = (...args: any[]) => any;
  */
 export function observe<F extends AnyFunction>(fn: F, options: ObserveOptions = {}): F {
   const { name = fn.name || 'anonymous', type = 'span', captureInput = true, captureOutput = true } = options;
-  kind(type);
   const isGeneration = type === 'generation';
-  const attributes = () => (isGeneration ? generationAttributes({}) : observationAttributes(type));
+  // The kind is checked on the first call rather than here, usually at
+  // module load, before `init({ logger })` has said where warnings go.
+  let unchecked = true;
+  const attributes = () => {
+    if (unchecked) {
+      unchecked = false;
+      kind(type);
+    }
+    return isGeneration ? generationAttributes({}) : observationAttributes(type);
+  };
   const make = (s: Span) => (isGeneration ? new Generation(s, captureOutput) : new Observation(s));
   const enter = (handle: Observation, args: unknown[]) => {
     if (captureInput) handle.span.setAttribute(attrs.INPUT, attrs.dumps(args));

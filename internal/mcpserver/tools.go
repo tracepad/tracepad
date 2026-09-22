@@ -86,8 +86,8 @@ func traceFilterProperties() map[string]*jsonschema.Schema {
 		"release": text("Use when the user names a deployment or asks whether a release changed something — " +
 			"\"did 2026.8.30 make it slower\". The release the trace ran in, or a comma-separated list of them, " +
 			"which keeps traces from any one. get_facets lists what a range holds."),
-		"version": text("Use when the user names a version of the application's own logic rather than a " +
-			"deployment. Exact match."),
+		"version": text("Use when the user names a version of the traced logic — an experiment arm, a " +
+			"pipeline revision — rather than a deployment. Exact match."),
 		"type": oneOf("Use when the user asks about a kind of step — a tool call, a guardrail, a retrieval — "+
 			"and wants the traces that contain one. Exact: \"generation\" does not match \"embedding\".",
 			"span", "generation", "event", "agent", "tool", "chain",
@@ -614,7 +614,7 @@ func traceRowSchema() *jsonschema.Schema {
 		"session_id":        text("The session it belongs to, for get_session."),
 		"environment":       text("Where it ran."),
 		"release":           text("The deployment it ran in, which list_traces takes as its release filter."),
-		"version":           text("The version of the application's own logic."),
+		"version":           text("The version of this trace's own logic — a pipeline revision, an experiment arm — beside the release."),
 		"tags":              list(text("A tag."), "Tags the application set."),
 		"timestamp":         timestamp("When its earliest observation started."),
 		"total_cost":        number("Summed over observations whose client reported a cost; absent when none did."),
@@ -723,7 +723,7 @@ func traceDetailSchema() *jsonschema.Schema {
 		"session_id":        text("The session it belongs to."),
 		"environment":       text("Where it ran."),
 		"release":           text("The deployment it ran in, which list_traces takes as its release filter."),
-		"version":           text("The version of the application's own logic."),
+		"version":           text("The version of this trace's own logic — a pipeline revision, an experiment arm — beside the release."),
 		"tags":              list(text("A tag."), "Tags the application set."),
 		"timestamp":         timestamp("When its earliest observation started."),
 		"total_cost":        number("Summed over observations whose client reported a cost."),

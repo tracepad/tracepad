@@ -184,8 +184,44 @@ def test_an_unknown_kind_warns_and_is_still_written(
         def lookup() -> None:
             pass
 
+        # The decorator checks on the first call, once: at decoration the
+        # application may not have configured its logging yet.
+        assert caplog.text.count("'retreiver' is not one of the observation types") == 1
+        lookup()
+        lookup()
+
     assert caplog.text.count("'retreiver' is not one of the observation types") == 2
-    assert spans.attributes("lookup")[attrs.OBSERVATION_TYPE] == "retreiver"
+    assert all(s.attributes[attrs.OBSERVATION_TYPE] == "retreiver" for s in spans.all())
+
+
+def test_an_empty_kind_is_the_default(spans: Any, caplog: pytest.LogCaptureFixture) -> None:
+    # As Go's `WithType("")`: forwarding an optional kind opens a plain step.
+    with caplog.at_level(logging.WARNING, logger="tracepad"):
+        with tracepad.span("forwarded", type=None):
+            pass
+        with tracepad.span("blank", type=""):
+            pass
+
+    assert caplog.text == ""
+    assert spans.attributes("forwarded")[attrs.OBSERVATION_TYPE] == "span"
+    assert spans.attributes("blank")[attrs.OBSERVATION_TYPE] == "span"
+
+
+def test_the_kinds_with_a_shape_of_their_own_open_that_shape(spans: Any) -> None:
+    # Spec 038 #8: what `@observe(type="generation")` does.
+    with tracepad.span("chat", type="generation", metadata={"attempt": 1}) as call:
+        call.first_token()
+        call.end(model="gpt-4o-mini", usage={"input_tokens": 3})
+    with tracepad.span("cache.miss", type="event"):
+        pass
+
+    chat = spans.one("chat")
+    assert chat.attributes[attrs.OBSERVATION_TYPE] == "generation"
+    assert chat.attributes[attrs.RESPONSE_MODEL] == "gpt-4o-mini"
+    assert json.loads(chat.attributes[attrs.OBSERVATION_METADATA]) == {"attempt": 1}
+    marker = spans.one("cache.miss")
+    assert marker.attributes[attrs.OBSERVATION_TYPE] == "event"
+    assert marker.start_time == marker.end_time
 
 
 def test_update_trace_writes_the_trace_level_names(spans: Any) -> None:

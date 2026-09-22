@@ -45,8 +45,9 @@ func WithEnvironment(environment string) Option {
 	return func(o *options) { o.environment = environment }
 }
 
-// WithRelease is the version of the application's own logic; it lands on
-// the resource as service.version. TRACEPAD_RELEASE otherwise.
+// WithRelease is the version of this deployment; it lands on the resource as
+// service.version. TRACEPAD_RELEASE otherwise. The version of one trace's own
+// logic — an experiment arm inside a release — is WithTraceVersion.
 func WithRelease(release string) Option { return func(o *options) { o.release = release } }
 
 // WithExport(false) attaches everything except the exporter, for an

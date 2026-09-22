@@ -159,12 +159,16 @@ tracepad.event('cache.miss', () => {});
 |---|---|---|---|
 | `input` | yes | yes | yes |
 | `metadata` | yes | yes | yes |
-| `type` | one of the [ten kinds](ingest.md#the-kind-of-each-step); `'span'` by default | — (`event`) | — (`generation`) |
+| `type` | one of the [ten kinds](ingest.md#the-kind-of-each-step) but `'generation'` and `'event'`; `'span'` by default | — (`event`) | — (`generation`) |
 
 `type` is the kind the step *is* — a retriever, a tool call, an agent — and it
-is known when the step opens, so it is written then. A spelling outside the ten
-warns and is sent all the same; the store keeps it in the observation's
-metadata, exactly as for `observe`'s `type` and `update({ type })`.
+is known when the step opens, so it is written then. `'generation'` and
+`'event'` are not in the type because `generation()` and `event()` are the way
+to them; given anyway, without types, they open what those two open. A
+spelling outside the ten warns and is sent all the same; the store keeps it in
+the observation's metadata, exactly as for `observe`'s `type` — checked on the
+function's first call, after `init({ logger })` — and `update({ type })`. A
+`type` handed to `event` or `generation` is ignored, with a warning.
 
 The span ends when the callback returns, or when the promise it returned
 settles. `span`, `event` and `generation` hand out an `Observation` carrying

@@ -43,7 +43,9 @@ Two settings people lose an afternoon to:
 
 - The packages read **`TRACEPAD_HOST`** and `TRACEPAD_API_KEY` — `HOST`, not
   the CLI's `TRACEPAD_URL`. `TRACEPAD_ENVIRONMENT` and `TRACEPAD_RELEASE` name
-  the deployment and the version of the code. Without a host or a key `init`
+  the deployment and its version; a variant inside one release — an
+  experiment arm, a prompt bundle — is the trace's own version, set where the
+  trace is updated. Without a host or a key `init`
   fails loudly, which is the point: do not catch it into silence.
 - `init` joins a `TracerProvider` the application already has instead of
   building a second one.
@@ -90,6 +92,8 @@ What makes a trace answer questions later, roughly in order of value:
 - The **environment** and **release** on every process: filters, statistics
   and retention are per environment, and a release ties a change in cost or
   quality to a deploy.
+- A **trace version** when two variants of the logic run in one release, so
+  the listing can set one against the other.
 - A **user id** and a **session id** where the application has them.
 - The **prompt name and version** on the generation that ran it, so "which
   prompt produced this" has an answer.
