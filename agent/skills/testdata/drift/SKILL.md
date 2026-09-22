@@ -17,6 +17,9 @@ tracepad scores add --trace <trace-id> --name helpful \
   --value 1
 tracepad stats --group-by total   # a comment is not a --flag
 tracepad skills show debugging.md
+pip install tracepad && npm install tracepad @opentelemetry/api
+docker run --rm --user "$(id -u):$(id -g)" -v "$HOME/.claude/skills:/skills" \
+  ghcr.io/tracepad/tracepad skills install --dir /skills
 tracepad traces ls --limit 5 \
 ```
 
@@ -39,6 +42,9 @@ tracepad traces ls --sinse 1h
 tracepad skills install --global
 tracepad serve --listen :9999
 tracepad skills show debuging.md
+$ tracepad traces lsx
+sudo ./bin/tracepad trace ls
+docker run --rm ghcr.io/tracepad/tracepad:0.4.0 skills instal --dir /skills
 ```
 
 `get_trcae` is not a tool, `/api/v1/tracez` is not a route, and

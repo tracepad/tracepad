@@ -53,8 +53,9 @@ func TestTheSkillNamesOnlyWhatTheBinaryHas(t *testing.T) {
 // TestHeadingSlugsFollowTheDocAnchorsRule: the absolute links the drift test
 // checks land on GitHub, so their anchors have to be GitHub's.
 func TestHeadingSlugsFollowTheDocAnchorsRule(t *testing.T) {
-	content := "# Foo — bar\n## `traces ls`\n## Setup ##\n```sh\n# not a heading\n```\n## Setup\n## Setup\n"
-	want := []string{"foo--bar", "traces-ls", "setup", "setup-1", "setup-2"}
+	content := "# Foo — bar\n## `traces ls`\n## Setup ##\n```sh\n# not a heading\n```\n## Setup\n   ## Setup  \n" +
+		"## a\n## a\n## a-1\n"
+	want := []string{"foo--bar", "traces-ls", "setup", "setup-1", "setup-2", "a", "a-1", "a-1-1"}
 	if got := headingSlugs(content); !slices.Equal(got, want) {
 		t.Errorf("slugs = %q, want %q", got, want)
 	}
@@ -84,6 +85,9 @@ func TestTheDriftCheckCatchesDrift(t *testing.T) {
 		"docs/cli.md#no-such-heading",        // a repository link to no heading
 		"--fulll",                            // an inline command, wrapped, checked like a fenced one
 		"`tracepad skills show debuging.md`", // a file the skill does not have
+		"`tracepad traces lsx`",              // behind a prompt
+		"`tracepad trace`",                   // behind sudo, a path to the binary
+		"`tracepad skills instal`",           // behind `docker run` and the image
 	}
 	for _, needle := range want {
 		found := 0
@@ -497,14 +501,41 @@ func invocations(line string) [][]string {
 func commands(segments [][]string) [][]string {
 	var out [][]string
 	for _, words := range segments {
-		for len(words) > 0 && strings.Contains(words[0], "=") && !strings.HasPrefix(words[0], "-") {
+		// What stands in front of the binary without being it: a prompt,
+		// `sudo`, `VAR=value`.
+		for len(words) > 0 && (words[0] == "$" || words[0] == "sudo" ||
+			strings.Contains(words[0], "=") && !strings.HasPrefix(words[0], "-")) {
 			words = words[1:]
 		}
-		if len(words) > 0 && words[0] == "tracepad" {
+		if len(words) == 0 {
+			continue
+		}
+		switch {
+		case isBinary(words[0]):
 			out = append(out, words[1:])
+		case words[0] == "docker" && len(words) > 1 && words[1] == "run":
+			// The command is what follows the image.
+			for i, word := range words {
+				if isImage(word) {
+					out = append(out, words[i+1:])
+					break
+				}
+			}
 		}
 	}
 	return out
+}
+
+// isBinary is `tracepad` or a path to it (`./bin/tracepad`); `tracepad.init()`
+// and `pip install tracepad` are not a command line starting with it.
+func isBinary(word string) bool {
+	return word == "tracepad" || strings.HasSuffix(word, "/tracepad") && !strings.Contains(word, ":")
+}
+
+// isImage is the published image, with or without a tag.
+func isImage(word string) bool {
+	image, _, _ := strings.Cut(word, ":")
+	return strings.HasSuffix(image, "tracepad/tracepad")
 }
 
 // paths checks every `/api/v1…` path on a line against the route map, and
@@ -585,24 +616,26 @@ func (s *surface) link(files fs.FS, from, target string) string {
 }
 
 // hasHeading reports whether a Markdown file has a heading with this anchor,
-// under the rule `scripts/doc-anchors.sh` states for GitHub: lower case;
-// everything but ASCII letters, digits, `_`, `-` and spaces removed; spaces to
-// hyphens; closing `#`s dropped; a repeated slug numbered `-1`, `-2`, … in the
-// order the headings appear.
+// under GitHub's rule (github-slugger), which `scripts/doc-anchors.sh` states
+// too: lower case; everything but ASCII letters, digits, `_`, `-` and spaces
+// removed; spaces to hyphens; closing `#`s and trailing blanks dropped; a slug
+// already taken gets `-1`, `-2`, … until it is free, so `a`, `a`, `a-1` become
+// `a`, `a-1`, `a-1-1`. Setext headings are not read, as the script does not
+// read them: the documents the skill links to have none.
 func hasHeading(content, anchor string) bool {
 	return slices.Contains(headingSlugs(content), anchor)
 }
 
 var (
-	headingLine    = regexp.MustCompile(`^#{1,6}[ \t]`)
+	headingLine    = regexp.MustCompile(`^ {0,3}#{1,6}([ \t]|$)`)
 	closingHashes  = regexp.MustCompile(`[ \t]+#+[ \t]*$`)
-	openingHashes  = regexp.MustCompile(`^#+[ \t]+`)
+	openingHashes  = regexp.MustCompile(`^ {0,3}#+[ \t]*`)
 	notSlugPattern = regexp.MustCompile(`[^-_ a-z0-9]`)
 )
 
 func headingSlugs(content string) []string {
 	var out []string
-	seen := map[string]int{}
+	taken := map[string]int{}
 	inFence := false
 	for _, line := range strings.Split(content, "\n") {
 		if fence.MatchString(line) {
@@ -612,14 +645,18 @@ func headingSlugs(content string) []string {
 		if inFence || !headingLine.MatchString(line) {
 			continue
 		}
-		text := closingHashes.ReplaceAllString(openingHashes.ReplaceAllString(line, ""), "")
-		slug := strings.ReplaceAll(notSlugPattern.ReplaceAllString(strings.ToLower(text), ""), " ", "-")
-		if seen[slug] > 0 {
-			out = append(out, fmt.Sprintf("%s-%d", slug, seen[slug]))
-		} else {
-			out = append(out, slug)
+		text := strings.TrimSpace(closingHashes.ReplaceAllString(openingHashes.ReplaceAllString(line, ""), ""))
+		base := strings.ReplaceAll(notSlugPattern.ReplaceAllString(strings.ToLower(text), ""), " ", "-")
+		slug := base
+		for {
+			if _, used := taken[slug]; !used {
+				break
+			}
+			taken[base]++
+			slug = fmt.Sprintf("%s-%d", base, taken[base])
 		}
-		seen[slug]++
+		taken[slug] = 0
+		out = append(out, slug)
 	}
 	return out
 }

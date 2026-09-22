@@ -12,7 +12,9 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/tracepad/tracepad/internal/cli"
 )
@@ -181,10 +183,7 @@ func runInstall(opt Options, args []string) error {
 	if err != nil {
 		return err
 	}
-	target, err := filepath.Abs(filepath.Join(base, Name))
-	if err != nil {
-		return err
-	}
+	target := filepath.Join(base, Name)
 	done, err := install(Files(), target, opt.Version, *force)
 	if err != nil {
 		return err
@@ -202,6 +201,10 @@ func runInstall(opt Options, args []string) error {
 	default:
 		fmt.Fprintf(opt.Stdout, "installed %s to %s\n", opt.Version, done.target)
 	}
+	for _, path := range done.kept {
+		fmt.Fprintf(opt.Stderr, "tracepad skills: an interrupted install left %s, which may hold "+
+			"what it replaced; delete it once it is not needed\n", path)
+	}
 	if done.leftover != "" {
 		fmt.Fprintf(opt.Stderr, "tracepad skills: the previous copy could not be removed; delete %s\n",
 			done.leftover)
@@ -213,56 +216,75 @@ func runInstall(opt Options, args []string) error {
 // user's Claude Code skills by default, the project's with --project, or
 // anywhere with --dir (#6).
 func installBase(opt Options, project bool, dir string) (string, error) {
-	switch {
-	case dir != "":
-		return dir, nil
-	case project:
+	if dir != "" && filepath.IsAbs(dir) {
+		return filepath.Clean(dir), nil
+	}
+	if dir != "" || project {
+		// Both resolve against the one working directory the command was
+		// given, so a relative --dir and --project cannot disagree.
 		wd, err := opt.Getwd()
 		if err != nil {
-			return "", fmt.Errorf("cannot tell the current directory for --project: %w", err)
+			return "", fmt.Errorf("cannot tell the current directory: %w", err)
+		}
+		if dir != "" {
+			return filepath.Join(wd, dir), nil
 		}
 		return filepath.Join(wd, ".claude", "skills"), nil
 	}
-	// os.UserHomeDir's rule, over the injected environment: Windows keeps
-	// the home directory in USERPROFILE and usually has no HOME at all.
-	home := opt.Env("HOME")
-	if home == "" && opt.GOOS == "windows" {
-		home = opt.Env("USERPROFILE")
+	// os.UserHomeDir's rule, over the injected environment: USERPROFILE on
+	// Windows — where Claude Code looks, and where a HOME set by Git Bash or
+	// a roaming profile is not — and HOME everywhere else.
+	variable := "HOME"
+	if opt.GOOS == "windows" {
+		variable = "USERPROFILE"
 	}
+	home := opt.Env(variable)
 	if home == "" {
 		// A container runs without one, and the fallback would be a write
 		// to /.claude that nobody meant (edge cases).
-		return "", errors.New("HOME is not set, so there is no default place to install to; " +
-			"pass --dir DIR (or --project for ./.claude/skills)")
+		return "", fmt.Errorf("%s is not set, so there is no default place to install to; "+
+			"pass --dir DIR (or --project for ./.claude/skills)", variable)
 	}
 	return filepath.Join(home, ".claude", "skills"), nil
 }
 
-// outcome is what an install found and did, for the line it prints.
+// outcome is what an install found and did, for the lines it prints.
 type outcome struct {
 	// target is where the skill went: the directory a symlink at the
 	// requested path points to, when it is one.
 	target string
-	// replaced says there was a directory to replace; marked, that it
-	// carried the marker, whose version is previous ("" when it was empty).
+	// replaced says there was something to replace; marked, that it was a
+	// directory carrying the marker, whose version is previous ("" when the
+	// marker was empty).
 	replaced, marked bool
 	previous         string
 	// leftover is the previous copy when it could not be removed after the
 	// new one was in place: the install succeeded, and the caller says where
 	// the debris is.
 	leftover string
+	// kept are previous copies an interrupted install set aside and never
+	// got to remove. One may be the only copy of what it replaced — a
+	// directory `--force` took over — so they are named, never deleted.
+	kept []string
 }
 
-// stagingPrefix names the directories an install writes before swapping them
-// in. The prefix is this command's own, so one left by an install that was
-// killed half-way is removed by the next.
-const stagingPrefix = ".tracepad-install-"
+// holding is the directory, beside the skill, where an install writes its new
+// copy and sets the old one aside before swapping them. Nested one level down
+// on purpose: a skills directory is read one level deep, so nothing in here —
+// a copy a killed install left, a previous version that could not be removed
+// — is ever taken for a second `tracepad` skill.
+const holding = ".tracepad-install"
+
+// abandonedAfter is how old a staging copy has to be before an install takes
+// it for one a killed install left, rather than one another install is
+// writing right now.
+const abandonedAfter = time.Hour
 
 // install writes files to target, whole.
 //
-// The new copy is written beside the target first and swapped in by rename,
-// so a failure half-way leaves the old skill where it was rather than a mix
-// of two versions (#6). A target that is a symlink — a copy kept in a
+// The new copy is written in the holding directory first and swapped in by
+// rename, so a failure half-way leaves the old skill where it was rather than
+// a mix of two versions (#6). A target that is a symlink — a copy kept in a
 // dotfiles repository — is followed, so the copy the user maintains is the
 // one updated, not replaced by a directory of its own.
 func install(files fs.FS, target, version string, force bool) (outcome, error) {
@@ -274,14 +296,16 @@ func install(files fs.FS, target, version string, force bool) (outcome, error) {
 		if err != nil {
 			return done, fmt.Errorf("%s is a symlink to nothing that can be installed into: %w", target, err)
 		}
-		done.target = resolved
-		done.replaced = true
+		if info, err = os.Stat(resolved); err != nil {
+			return done, err
+		}
+		done.target, done.replaced = resolved, true
 	case err == nil:
 		done.replaced = true
 	case !errors.Is(err, fs.ErrNotExist):
 		return done, err
 	}
-	if done.replaced {
+	if done.replaced && info.IsDir() {
 		stamp, err := os.ReadFile(filepath.Join(done.target, marker))
 		switch {
 		case err == nil:
@@ -291,29 +315,27 @@ func install(files fs.FS, target, version string, force bool) (outcome, error) {
 			// A marker that cannot be read is not the same as no marker,
 			// and calling it "somebody else's directory" would hide why.
 			return done, fmt.Errorf("cannot read %s: %w", filepath.Join(done.target, marker), err)
-		case !force:
-			return done, fmt.Errorf("%s exists and is not a skill this command installed "+
-				"(it has no %s); pass --force to replace it", done.target, marker)
 		}
+	}
+	if done.replaced && !done.marked && !force {
+		return done, fmt.Errorf("%s exists and is not a skill this command installed "+
+			"(it has no %s); pass --force to replace it", done.target, marker)
 	}
 
-	parent := filepath.Dir(done.target)
-	if err := os.MkdirAll(parent, 0o755); err != nil {
+	work := filepath.Join(filepath.Dir(done.target), holding)
+	if err := os.MkdirAll(work, 0o755); err != nil {
 		return done, err
 	}
-	if stale, _ := filepath.Glob(filepath.Join(parent, stagingPrefix+"*")); len(stale) > 0 {
-		for _, dir := range stale {
-			os.RemoveAll(dir)
-		}
-	}
-	staging, err := os.MkdirTemp(parent, stagingPrefix)
+	// Deferred first so it runs last: the holding directory goes when an
+	// install leaves nothing in it, which is every install but an
+	// interrupted one.
+	defer os.Remove(work)
+	done.kept = sweep(work)
+	staging, err := stagingDir(work)
 	if err != nil {
 		return done, err
 	}
 	defer os.RemoveAll(staging)
-	if err := os.Chmod(staging, 0o755); err != nil {
-		return done, err
-	}
 	if err := write(files, staging, version); err != nil {
 		return done, err
 	}
@@ -327,7 +349,8 @@ func install(files fs.FS, target, version string, force bool) (outcome, error) {
 	}
 	if err := os.Rename(staging, done.target); err != nil {
 		// Put the old one back rather than leave nothing, and say so when
-		// even that fails: the previous skill is then under a hidden name.
+		// even that fails: the previous skill is then in the holding
+		// directory, which no later install deletes.
 		if back := os.Rename(old, done.target); back != nil {
 			return done, fmt.Errorf("%w; putting the previous skill back failed too (%v), and it is at %s",
 				err, back, old)
@@ -338,6 +361,41 @@ func install(files fs.FS, target, version string, force bool) (outcome, error) {
 		done.leftover = old
 	}
 	return done, nil
+}
+
+// sweep removes the staging copies an install killed half-way left behind —
+// copies of a binary's own skill, which any install writes again — and returns
+// the previous copies set aside by one, which it does not touch.
+func sweep(work string) (kept []string) {
+	entries, err := os.ReadDir(work)
+	if err != nil {
+		return nil
+	}
+	for _, entry := range entries {
+		path := filepath.Join(work, entry.Name())
+		if strings.HasSuffix(entry.Name(), ".old") {
+			kept = append(kept, path)
+			continue
+		}
+		if info, err := entry.Info(); err == nil && time.Since(info.ModTime()) > abandonedAfter {
+			os.RemoveAll(path)
+		}
+	}
+	return kept
+}
+
+// stagingDir makes a fresh directory in the holding directory. os.Mkdir
+// rather than os.MkdirTemp, whose 0700 would have to be widened by a chmod
+// that ignores the umask the files inside it are written under.
+func stagingDir(work string) (string, error) {
+	for range 10 {
+		name := filepath.Join(work, strconv.FormatInt(time.Now().UnixNano(), 36))
+		err := os.Mkdir(name, 0o755)
+		if !errors.Is(err, fs.ErrExist) {
+			return name, err
+		}
+	}
+	return "", fmt.Errorf("cannot make a staging directory in %s", work)
 }
 
 // write copies every file of the skill into dir, stamping SKILL.md with the
@@ -391,6 +449,8 @@ func Stamp(skill []byte, version string) ([]byte, error) {
 		case inMetadata && !stamped && strings.HasPrefix(line, "  version:"):
 			lines[i] = []byte(fmt.Sprintf("  version: %q\n", version))
 			stamped = true
+		case strings.TrimSpace(line) == "", strings.HasPrefix(line, "#"):
+			// A blank line or a comment does not end a YAML mapping.
 		case !strings.HasPrefix(line, " "):
 			inMetadata = false
 		}

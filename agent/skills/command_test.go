@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // result is one run's whole observable behaviour.
@@ -76,8 +77,8 @@ func TestInstallWritesEveryFileAndStampsTheVersion(t *testing.T) {
 	if err != nil || string(marked) != "0.4.0\n" {
 		t.Errorf("marker = %q, %v; want the version", marked, err)
 	}
-	if leftovers, _ := filepath.Glob(filepath.Join(dir, ".tracepad-install-*")); len(leftovers) > 0 {
-		t.Errorf("the staging directory was left behind: %v", leftovers)
+	if _, err := os.Stat(filepath.Join(dir, holding)); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the holding directory was left behind: %v", err)
 	}
 }
 
@@ -264,6 +265,10 @@ func TestStamp(t *testing.T) {
 	if string(got) != want {
 		t.Errorf("stamped:\n%s\nwant:\n%s", got, want)
 	}
+	commented := "---\nmetadata:\n\n# the build stamps this\n  version: dev\n---\n"
+	if got, err := Stamp([]byte(commented), "1.2.0"); err != nil || !strings.Contains(string(got), `version: "1.2.0"`) {
+		t.Errorf("a blank line or a comment inside metadata: %q, %v", got, err)
+	}
 	for _, broken := range []string{
 		"# no frontmatter\n",
 		"---\nname: x\n---\n",
@@ -299,14 +304,13 @@ func head(content []byte) string {
 // and usually has no HOME, which is os.UserHomeDir's rule too.
 func TestWindowsReadsUserProfile(t *testing.T) {
 	profile := t.TempDir()
+	// A HOME set by Git Bash or a roaming profile is not where Claude Code
+	// looks on Windows; USERPROFILE is.
 	var stdout, stderr bytes.Buffer
 	code := Run(Options{
 		Args: []string{"install"}, Version: "dev", Stdout: &stdout, Stderr: &stderr,
 		Env: func(key string) string {
-			if key == "USERPROFILE" {
-				return profile
-			}
-			return ""
+			return map[string]string{"USERPROFILE": profile, "HOME": t.TempDir()}[key]
 		},
 		GOOS: "windows",
 	})
@@ -371,18 +375,88 @@ func TestTheMarkerIsReadHonestly(t *testing.T) {
 	}
 }
 
-// TestAStagingDirectoryLeftByAKilledInstallIsRemoved: the prefix is this
-// command's own, so the next install clears what a killed one left behind.
-func TestAStagingDirectoryLeftByAKilledInstallIsRemoved(t *testing.T) {
+// TestWhatAKilledInstallLeftIsSweptOrNamed: a staging copy older than an hour
+// is a copy of some binary's skill and goes; a fresh one may be another
+// install's and stays; a previous copy set aside may be the only copy of what
+// it replaced, so it is named and never deleted.
+func TestWhatAKilledInstallLeftIsSweptOrNamed(t *testing.T) {
 	dir := t.TempDir()
-	stale := filepath.Join(dir, stagingPrefix+"123.old")
-	if err := os.MkdirAll(filepath.Join(stale, "references"), 0o755); err != nil {
+	work := filepath.Join(dir, holding)
+	abandoned, fresh, old := filepath.Join(work, "abandoned"), filepath.Join(work, "fresh"),
+		filepath.Join(work, "set-aside.old")
+	for _, path := range []string{abandoned, fresh, old} {
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	long := time.Now().Add(-2 * abandonedAfter)
+	if err := os.Chtimes(abandoned, long, long); err != nil {
 		t.Fatal(err)
 	}
-	if got := runSkills(t, "", "", "dev", "install", "--dir", dir); got.code != exitOK {
+	if err := os.Chtimes(old, long, long); err != nil {
+		t.Fatal(err)
+	}
+
+	got := runSkills(t, "", "", "dev", "install", "--dir", dir)
+	if got.code != exitOK {
 		t.Fatal(got.stderr)
 	}
-	if _, err := os.Stat(stale); !errors.Is(err, fs.ErrNotExist) {
-		t.Errorf("the stale staging directory survived: %v", err)
+	if _, err := os.Stat(abandoned); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("an abandoned staging copy survived: %v", err)
+	}
+	for _, path := range []string{fresh, old} {
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("%s was removed: %v", path, err)
+		}
+	}
+	if !strings.Contains(got.stderr, old) {
+		t.Errorf("the set-aside copy is not named: %q", got.stderr)
+	}
+}
+
+// TestAnInstallLeavesNothingBesideTheSkill: the holding directory is gone
+// after an install that finished, so a skills directory holds `tracepad` and
+// nothing an agent could take for a second copy.
+func TestAnInstallLeavesNothingBesideTheSkill(t *testing.T) {
+	dir := t.TempDir()
+	for _, version := range []string{"0.3.1", "0.4.0"} {
+		if got := runSkills(t, "", "", version, "install", "--dir", dir); got.code != exitOK {
+			t.Fatal(got.stderr)
+		}
+		entries, _ := os.ReadDir(dir)
+		if len(entries) != 1 || entries[0].Name() != Name {
+			t.Errorf("after %s the directory holds %v", version, entries)
+		}
+	}
+}
+
+// TestAFileInThePlaceIsReplacedWithForce: a regular file where the directory
+// goes has no marker to read; it is refused, and --force replaces it.
+func TestAFileInThePlaceIsReplacedWithForce(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, Name), []byte("a file\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := runSkills(t, "", "", "dev", "install", "--dir", dir); got.code != exitFailure ||
+		!strings.Contains(got.stderr, "--force") {
+		t.Errorf("without --force: exit %d, %q", got.code, got.stderr)
+	}
+	if got := runSkills(t, "", "", "dev", "install", "--dir", dir, "--force"); got.code != exitOK {
+		t.Fatalf("--force: exit %d, %q", got.code, got.stderr)
+	}
+	if _, err := os.Stat(filepath.Join(dir, Name, "SKILL.md")); err != nil {
+		t.Errorf("--force did not install over the file: %v", err)
+	}
+}
+
+// TestARelativeDirResolvesLikeProject: one working directory for both.
+func TestARelativeDirResolvesLikeProject(t *testing.T) {
+	wd := t.TempDir()
+	got := runSkills(t, "", wd, "dev", "install", "--dir", "agents")
+	if got.code != exitOK {
+		t.Fatal(got.stderr)
+	}
+	if _, err := os.Stat(filepath.Join(wd, "agents", Name, "SKILL.md")); err != nil {
+		t.Errorf("a relative --dir did not resolve against the working directory: %v", err)
 	}
 }
