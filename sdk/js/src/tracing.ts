@@ -92,7 +92,8 @@ export function init(options: InitOptions = {}): void {
     // either line: a 1.x provider has the hook too, and attaching a second
     // exporter through it would send every span twice.
     if (handedOut) {
-      // nothing to attach
+      // nothing to attach: the exporter, and its timeout, are spanProcessor()'s
+      if (options.exportTimeoutMillis !== undefined) warn('init(): exportTimeoutMillis is ignored; pass it to spanProcessor(), which built the exporter');
     } else if (typeof (found as Adoptable).addSpanProcessor === 'function') {
       (found as Adoptable).addSpanProcessor!(processor(config, options));
     } else {
@@ -595,7 +596,7 @@ function costly(span: Span, fields: Costly): void {
   if (!span.isRecording()) return;
   if (fields.input !== undefined) span.setAttribute(attrs.INPUT, attrs.dumps(fields.input));
   if (fields.output !== undefined) span.setAttribute(attrs.OUTPUT, attrs.dumps(fields.output));
-  if (fields.metadata !== undefined) span.setAttributes(attrs.metadata(fields.metadata));
+  if (fields.metadata != null) span.setAttributes(attrs.metadata(fields.metadata));
   for (const [name, value] of Object.entries(fields.parameters ?? {})) {
     span.setAttribute(attrs.REQUEST_PREFIX + name, attrs.scalar(value));
   }
@@ -903,7 +904,7 @@ function* drive(handle: Observation, ctx: Context, steps: Iterator<unknown>, lea
   try {
     let step = context.with(ctx, () => steps.next());
     while (!step.done) {
-      yielded.push(step.value);
+      if (handle.span.isRecording()) yielded.push(step.value); // kept only to be written
       let sent: unknown;
       try {
         sent = yield step.value;
@@ -929,7 +930,7 @@ async function* driveAsync(handle: Observation, ctx: Context, steps: AsyncIterat
   try {
     let step = await context.with(ctx, () => steps.next());
     while (!step.done) {
-      yielded.push(step.value);
+      if (handle.span.isRecording()) yielded.push(step.value); // kept only to be written
       let sent: unknown;
       try {
         sent = yield step.value;

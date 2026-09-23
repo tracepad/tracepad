@@ -195,8 +195,9 @@ def flush(timeout: float = 10.0) -> None:
         with _flushing_lock:
             ours = _flushing is None or _flushing[0] != force or not _flushing[1].is_alive()
             if ours:
-                _flushing = (force, threading.Thread(target=force, daemon=True,
-                                                     args=(int(left * 1000),)))
+                millis = int(max(0.0, deadline - monotonic()) * 1000)
+                _flushing = (force, threading.Thread(target=_force, args=(force, millis),
+                                                     daemon=True))
                 _flushing[1].start()
             exporting = _flushing[1]
         exporting.join(max(0.0, deadline - monotonic()))
@@ -208,6 +209,15 @@ def flush(timeout: float = 10.0) -> None:
             return
         if ours:
             return
+
+
+def _force(force: Callable[[int], Any], millis: int) -> None:
+    """The provider's flush, on the helper thread: a failure is the package's
+    to say, through its logger, not a traceback on stderr."""
+    try:
+        force(millis)
+    except Exception as error:  # the tracing path never raises
+        logger.warning("tracepad.flush(): the span processors failed to flush: %r", error)
 
 
 def _tracer() -> otel.Tracer:
@@ -687,7 +697,8 @@ def observe(
                                 value = await steps.__anext__()
                             except StopAsyncIteration:
                                 break
-                        yielded.append(value)
+                        if observation.span.is_recording():  # kept only to be written
+                            yielded.append(value)
                         yield value
                 except Exception as error:
                     _failed(observation, error)
@@ -714,7 +725,8 @@ def observe(
                                 value = next(steps)
                             except StopIteration:
                                 break
-                        yielded.append(value)
+                        if observation.span.is_recording():  # kept only to be written
+                            yielded.append(value)
                         yield value
                 except Exception as error:
                     _failed(observation, error)

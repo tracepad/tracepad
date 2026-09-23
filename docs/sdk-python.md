@@ -155,7 +155,10 @@ unset once written. Metadata that is no mapping is written whole under
 `tracepad.observation.metadata`. More than 32 keys in one write, or an empty key, are written whole under
 `tracepad.observation.metadata` as well: a span holds 128 attributes by
 default, and a full one drops the step's own. The store merges the whole
-object with the per-key entries, and a per-key entry wins. A string whose text is a JSON object or array
+object with the per-key entries, and a per-key entry wins — so a large write
+does not replace a key written on its own before it, and a second large write
+replaces the first whole: give a step its large metadata once, when it opens,
+and update a few keys at a time after. A string whose text is a JSON object or array
 is stored as that structure, as every per-key metadata is read.
 
 `span`, `event` and `generation` hand out an `Observation` carrying

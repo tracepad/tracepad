@@ -6,6 +6,7 @@ import logging
 import threading
 import time
 import uuid
+import weakref
 from collections import ChainMap
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
@@ -371,3 +372,39 @@ def test_a_stream_gathers_nothing_for_a_span_that_does_not_record() -> None:
             assert list(call.stream(chunks)) == chunks
             assert call._stream is None
     assert captured.spans == []
+
+
+# --- found in the third review of PR #83 -----------------------------------------
+
+
+def test_an_observed_generator_keeps_nothing_for_a_span_that_does_not_record() -> None:
+    class Chunk:
+        pass
+
+    @tracepad.observe
+    def chunks() -> Iterator[Chunk]:
+        while True:
+            yield Chunk()
+
+    with testing.capture(), sampled_out():
+        stream = chunks()
+        first = next(stream)
+        gone = weakref.ref(first)
+        del first
+        next(stream)
+        assert gone() is None  # the consumer let it go, and so did the wrapper
+        stream.close()
+
+
+def test_a_flush_that_fails_on_its_thread_says_so_through_the_logger(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    tracepad.init(HOST, KEY, export=False)
+
+    def failing(timeout_millis: int) -> bool:
+        raise RuntimeError("collector down")
+
+    monkeypatch.setattr(_tracing._built, "force_flush", failing)
+    with caplog.at_level(logging.WARNING, logger="tracepad"):
+        tracepad.flush(1.0)
+    assert "failed to flush: RuntimeError('collector down')" in caplog.text

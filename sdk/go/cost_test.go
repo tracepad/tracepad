@@ -3,9 +3,11 @@ package tracepad_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -395,5 +397,50 @@ func TestOpenTelemetrysBatchExportTimeoutIsKept(t *testing.T) {
 	t.Setenv("OTEL_BSP_EXPORT_TIMEOUT", "100") // milliseconds
 	if took := exportTakes(t, tracepad.WithExportTimeout(5*time.Second)); took > 2*time.Second {
 		t.Errorf("the export took %v, want the batch processor's 100ms", took)
+	}
+}
+
+// Found in the third review of PR #83.
+
+// masked is a map type with an encoding of its own, which the metadata keeps.
+type masked map[string]string
+
+func (m masked) MarshalJSON() ([]byte, error) {
+	out := map[string]string{}
+	for key, value := range m {
+		if key == "authorization" {
+			value = "<masked>"
+		}
+		out[key] = value
+	}
+	return json.Marshal(out)
+}
+
+func TestMetadataIsTakenAsItEncodes(t *testing.T) {
+	rec := tracepadtest.Capture(t)
+	_, step := tracepad.Span(context.Background(), "step", tracepad.WithMetadata(masked{"authorization": "secret"}))
+	step.End()
+	_, big := tracepad.Span(context.Background(), "big", tracepad.WithMetadata(struct {
+		ID uint64 `json:"id"`
+	}{math.MaxUint64}))
+	big.End()
+
+	if got := rec.Attributes(t, "step")["tracepad.observation.metadata.authorization"].AsString(); got != "<masked>" {
+		t.Errorf("authorization = %q, want the map type's own encoding", got)
+	}
+	if got := rec.Attributes(t, "big")["tracepad.observation.metadata.id"]; got != attribute.StringValue("18446744073709551615") {
+		t.Errorf("id = %v, want its exact digits", got.Emit())
+	}
+}
+
+func TestATimeoutUnderANanosecondIsIgnoredWithAWarning(t *testing.T) {
+	tracepadtest.Reset(t)
+	t.Setenv("TRACEPAD_EXPORT_TIMEOUT", "1e-10")
+	out := logs(t)
+	if _, err := tracepad.Init(context.Background(), tracepad.WithHost("http://tracepad.test:4318"), tracepad.WithKey("tp-sk-test")); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "TRACEPAD_EXPORT_TIMEOUT is not a number of seconds") {
+		t.Errorf("logged:\n%s", out)
 	}
 }

@@ -138,7 +138,8 @@ func scalar(key string, value any) attribute.KeyValue {
 			if n, err := number.Int64(); err == nil {
 				return attribute.Int64(key, n)
 			}
-			if f, err := number.Float64(); err == nil {
+			// An integer past int64 stays its exact digits, as a uint64 does.
+			if f, err := number.Float64(); err == nil && strings.ContainsAny(number.String(), ".eE") {
 				return attribute.Float64(key, f)
 			}
 		}

@@ -2,6 +2,7 @@ package tracepad
 
 import (
 	"context"
+	"encoding"
 	"encoding/json"
 	"maps"
 	"reflect"
@@ -261,21 +262,33 @@ const maxMetadataKeys = 32
 // per-key form cannot name — an empty one — is written whole under the one key.
 func metadataAttributes(metadata any) []attribute.KeyValue {
 	entries := map[string]any{}
-	if v := reflect.ValueOf(metadata); v.Kind() == reflect.Map && v.Type().Key().Kind() == reflect.String {
+	encoded := ""
+	whole := func() []attribute.KeyValue {
+		if encoded == "" {
+			encoded = dumps(metadata)
+		}
+		return []attribute.KeyValue{attribute.String(attrObservationMetadata, encoded)}
+	}
+	v := reflect.ValueOf(metadata)
+	_, marshals := metadata.(json.Marshaler)
+	_, texts := metadata.(encoding.TextMarshaler)
+	if v.Kind() == reflect.Map && v.Type().Key().Kind() == reflect.String && !marshals && !texts {
 		for _, key := range v.MapKeys() {
 			entries[key.String()] = v.MapIndex(key).Interface()
 		}
 	} else {
-		// Numbers as they were spelled, so that an int64 id past 2^53 is not
+		// As it encodes — a map type's own MarshalJSON included — with the
+		// numbers as they were spelled, so that an int64 id past 2^53 is not
 		// rounded through a float64 (found in review of PR #83).
-		decoder := json.NewDecoder(strings.NewReader(dumps(metadata)))
+		encoded = dumps(metadata)
+		decoder := json.NewDecoder(strings.NewReader(encoded))
 		decoder.UseNumber()
 		if err := decoder.Decode(&entries); err != nil {
-			return []attribute.KeyValue{attribute.String(attrObservationMetadata, dumps(metadata))}
+			return whole()
 		}
 	}
 	if _, empty := entries[""]; empty || len(entries) > maxMetadataKeys {
-		return []attribute.KeyValue{attribute.String(attrObservationMetadata, dumps(metadata))}
+		return whole()
 	}
 	var attrs []attribute.KeyValue
 	for _, key := range slices.Sorted(maps.Keys(entries)) {

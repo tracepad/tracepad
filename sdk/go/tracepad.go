@@ -257,8 +257,11 @@ func exportTimeout(given time.Duration) time.Duration {
 		def.log().Warn("tracepad.Init: WithExportTimeout is not a positive duration; it is ignored", "value", given)
 	}
 	if raw := strings.TrimSpace(os.Getenv("TRACEPAD_EXPORT_TIMEOUT")); raw != "" {
-		if seconds, err := strconv.ParseFloat(raw, 64); err == nil && seconds > 0 && seconds < math.MaxInt64/float64(time.Second) {
-			return time.Duration(seconds * float64(time.Second))
+		seconds, err := strconv.ParseFloat(raw, 64)
+		// Past the int64 of a Duration, or under a nanosecond — which would be
+		// zero, and zero leaves the exporter to OpenTelemetry — is no timeout.
+		if timeout := time.Duration(seconds * float64(time.Second)); err == nil && timeout > 0 && seconds < math.MaxInt64/float64(time.Second) {
+			return timeout
 		}
 		def.log().Warn("tracepad.Init: TRACEPAD_EXPORT_TIMEOUT is not a number of seconds; it is ignored", "value", raw)
 	}

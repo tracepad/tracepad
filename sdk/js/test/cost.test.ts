@@ -3,6 +3,7 @@
 import { DiagLogLevel, ROOT_CONTEXT, context, diag, trace } from '@opentelemetry/api';
 import {
   BatchSpanProcessor,
+  NodeTracerProvider,
   type ReadableSpan,
   type SpanExporter,
   type SpanProcessor,
@@ -281,5 +282,19 @@ describe('found in the second review of PR #83', () => {
       }),
     );
     expect(captured.spans).toEqual([]);
+  });
+});
+
+describe('found in the third review of PR #83', () => {
+  test('metadata: null writes nothing', () => {
+    const captured = spans();
+    tracepad.span('step', { metadata: null as unknown as Record<string, unknown> }, () => undefined);
+    expect(Object.keys(captured.attributes('step')).filter((key) => key.startsWith(attrs.OBSERVATION_METADATA))).toEqual([]);
+  });
+
+  test("an init after spanProcessor() says its exportTimeoutMillis is the processor's to take", () => {
+    new NodeTracerProvider({ spanProcessors: [tracepad.spanProcessor({ host: HOST, key: KEY, export: false })] }).register();
+    tracepad.init({ exportTimeoutMillis: 1000 });
+    expect(warnings).toEqual([expect.stringContaining('exportTimeoutMillis is ignored; pass it to spanProcessor()')]);
   });
 });
