@@ -3,20 +3,26 @@ package store
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"io"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // sameJSON reports whether two stored bodies say the same thing as JSON
 // values (spec 014 #6, #32): object keys in any order, a string spelled with
 // `\uXXXX` escapes or as raw UTF-8, a number written `1`, `1.0` or `1e0`.
-// Duplicate keys resolve the way a decoder resolves them, last one wins.
 //
-// Byte-equal bodies — the harness re-declaring its cases with the same
-// client — are settled without decoding; only a body whose bytes differ pays
-// for parsing both sides. A nil body is "none was sent" and equals only
-// another nil. A body that does not parse is compared by its bytes alone,
-// which the fast path already did.
+// Byte-equal bodies are settled without decoding; only a body whose bytes
+// differ from its stored row pays for parsing both sides. A nil body is "none
+// was sent" and equals only another nil. Where the decoded value cannot be
+// trusted to stand for the text, the bytes decide, which the fast path
+// already did: a body that does not parse, carries anything after its value,
+// repeats a key (last-wins would hide an edit to the shadowed one), or holds
+// U+FFFD in a string — the decoder writes that for a lone surrogate escape
+// and for an invalid UTF-8 byte alike, so two different strings would read
+// as one.
 func sameJSON(a, b []byte) bool {
 	if bytes.Equal(a, b) {
 		return true
@@ -35,16 +41,68 @@ func sameJSON(a, b []byte) bool {
 	return equalJSONValue(left, right)
 }
 
-// decodeJSONValue parses one value with its numbers kept as written, so no
-// precision is lost on the way to the comparison.
+// errUntrusted is a body whose decoded value may not say what its text says.
+var errUntrusted = errors.New("decoded value does not stand for the text")
+
+// decodeJSONValue parses exactly one value with its numbers kept as written,
+// so no precision is lost on the way to the comparison.
 func decodeJSONValue(raw []byte) (any, error) {
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.UseNumber()
-	var value any
-	if err := decoder.Decode(&value); err != nil {
+	value, err := decodeToken(decoder)
+	if err != nil {
 		return nil, err
 	}
+	if _, err := decoder.Token(); err != io.EOF {
+		return nil, errUntrusted
+	}
 	return value, nil
+}
+
+func decodeToken(decoder *json.Decoder) (any, error) {
+	token, err := decoder.Token()
+	if err != nil {
+		return nil, err
+	}
+	switch token := token.(type) {
+	case json.Delim:
+		if token == '[' {
+			array := []any{}
+			for decoder.More() {
+				element, err := decodeToken(decoder)
+				if err != nil {
+					return nil, err
+				}
+				array = append(array, element)
+			}
+			_, err := decoder.Token()
+			return array, err
+		}
+		object := map[string]any{}
+		for decoder.More() {
+			key, err := decoder.Token()
+			if err != nil {
+				return nil, err
+			}
+			name, _ := key.(string)
+			if _, repeated := object[name]; repeated || strings.ContainsRune(name, utf8.RuneError) {
+				return nil, errUntrusted
+			}
+			if object[name], err = decodeToken(decoder); err != nil {
+				return nil, err
+			}
+		}
+		_, err := decoder.Token()
+		return object, err
+	case string:
+		if strings.ContainsRune(token, utf8.RuneError) {
+			return nil, errUntrusted
+		}
+		return token, nil
+	default:
+		// json.Number, bool, nil.
+		return token, nil
+	}
 }
 
 func equalJSONValue(a, b any) bool {
@@ -87,8 +145,8 @@ func equalJSONValue(a, b any) bool {
 // spellings of one decimal value come out the same. It works on the text:
 // no float rounding, and no big-number arithmetic an exponent of a million
 // digits could turn into a cost. Zero is "0" whatever its sign. A number whose
-// exponent does not fit an int is returned as written — equal only to
-// itself, which is the old byte comparison.
+// exponent has more than 15 significant digits is returned as written —
+// equal only to itself, which is the old byte comparison.
 func canonicalNumber(number string) string {
 	text := number
 	negative := strings.HasPrefix(text, "-")
@@ -96,15 +154,22 @@ func canonicalNumber(number string) string {
 
 	exponent := 0
 	if at := strings.IndexAny(text, "eE"); at >= 0 {
-		written := strings.TrimPrefix(text[at+1:], "+")
+		written := text[at+1:]
+		negativeExponent := strings.HasPrefix(written, "-")
+		written = strings.TrimLeft(strings.TrimLeft(written, "+-"), "0")
 		if len(written) > 15 {
 			return number
 		}
-		parsed, err := strconv.Atoi(written)
-		if err != nil {
-			return number
+		if written != "" {
+			parsed, err := strconv.Atoi(written)
+			if err != nil {
+				return number
+			}
+			exponent = parsed
 		}
-		exponent = parsed
+		if negativeExponent {
+			exponent = -exponent
+		}
 		text = text[:at]
 	}
 	integer, fraction, _ := strings.Cut(text, ".")

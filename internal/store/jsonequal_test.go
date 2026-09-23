@@ -24,6 +24,17 @@ func TestSameJSON(t *testing.T) {
 		{`{"a":[{"x":1.0}]}`, `{"a":[{"x":1}]}`, true},
 		{`"a"`, `"A"`, false},
 		{`not json`, `"not json"`, false},
+		// U+FFFD is what the decoder writes for a lone surrogate and an
+		// invalid byte alike, so a string holding it is compared as bytes.
+		{`"\ud800"`, `"\udc00"`, false},
+		{`"\ud800"`, `"\ufffd"`, false},
+		{"\"\xff\"", "\"\xfe\"", false},
+		{`{"\ud800":1}`, `{"\udc00":1}`, false},
+		// A repeated key could hide an edit to the one a decoder drops.
+		{`{"a":1,"a":2}`, `{"a":2}`, false},
+		// Anything after the value is not ignored.
+		{`[1] x`, `[1]`, false},
+		{`[1][2]`, `[1]`, false},
 	}
 	for _, c := range cases {
 		if got := sameJSON([]byte(c.a), []byte(c.b)); got != c.want {
@@ -39,6 +50,10 @@ func TestSameJSON(t *testing.T) {
 	if sameJSON(nil, []byte(`null`)) || sameJSON([]byte(`{}`), nil) {
 		t.Error("an absent body equals a present one")
 	}
+	// Byte-equal still settles it, whatever the body holds.
+	if !sameJSON([]byte(`{"a":1,"a":2}`), []byte(`{"a":1,"a":2}`)) || !sameJSON([]byte(`"\ud800"`), []byte(`"\ud800"`)) {
+		t.Error("byte-equal bodies differ")
+	}
 }
 
 func TestCanonicalNumber(t *testing.T) {
@@ -48,7 +63,8 @@ func TestCanonicalNumber(t *testing.T) {
 		{"-12.5", "-125e-1", "-1.25E1", "-0.125e2"},
 		{"1200", "1.2e3", "12e2", "1200.00"},
 		{"12345678901234567890123", "1.2345678901234567890123e22"},
-		{"0.001", "1e-3", "10E-4"},
+		{"0.001", "1e-3", "10E-4", "1e-000000000000003"},
+		{"10", "1e+01", "1e0000000000000001", "1E+0000000000000000000001"},
 	}
 	for _, group := range equal {
 		want := canonicalNumber(group[0])
@@ -70,8 +86,8 @@ func TestCanonicalNumber(t *testing.T) {
 			t.Errorf("canonicalNumber says %s == %s", pair[0], pair[1])
 		}
 	}
-	// An exponent too long for an int is compared as written, not parsed
-	// into an arithmetic of its own.
+	// An exponent with too many significant digits for an int is compared
+	// as written, not parsed into an arithmetic of its own.
 	huge := "1e1234567890123456789"
 	if got := canonicalNumber(huge); got != huge {
 		t.Errorf("canonicalNumber(%s) = %s, want it as written", huge, got)

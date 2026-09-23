@@ -164,8 +164,9 @@ and never otherwise.
   whitespace, key order, `\u` escapes and the spelling of a number (`1`,
   `1.0`, `1e0`) are not changes, so the same cases posted from another client
   are the same cases. An array's order and a value's type (`"1"` against `1`)
-  are. The stored body stays the text first sent. A retry after a lost
-  response is therefore idempotent.
+  are. The stored body stays the text first sent: re-spelling a number and
+  nothing else writes nothing. A retry after a lost response is therefore
+  idempotent.
 - An **edit** is a `POST` with the same `id` and a different body: a new row,
   one tick. The old row is still readable at every earlier version.
 - A **delete** is an archive: `DELETE …/items/{id}` writes a row marked
