@@ -51,7 +51,7 @@ describe('span, event and generation', () => {
     const attributes = seen.attributes('retrieve');
     expect(attributes[attrs.OBSERVATION_TYPE]).toBe('span');
     expect(attributes[attrs.INPUT]).toBe('{"query":"q"}');
-    expect(attributes[attrs.OBSERVATION_METADATA]).toBe('{"hits":2}');
+    expect(attributes[`${attrs.OBSERVATION_METADATA}.hits`]).toBe(2);
     expect(attributes[attrs.OUTPUT]).toBe('["doc"]');
   });
 
@@ -151,7 +151,7 @@ describe('span, event and generation', () => {
       [attrs.REQUEST_MODEL]: 'gpt-4o-mini',
       [attrs.PROMPT_NAME]: 'answer',
       [attrs.PROMPT_VERSION]: 3,
-      [attrs.OBSERVATION_METADATA]: '{"attempt":1}',
+      [`${attrs.OBSERVATION_METADATA}.attempt`]: 1,
       [attrs.RESPONSE_MODEL]: 'gpt-4o-mini-2026-04-01',
     });
     expect(warnings).toEqual([]);
@@ -186,7 +186,7 @@ describe('span, event and generation', () => {
   test('a generation takes metadata when it opens', () => {
     const seen = spans();
     tracepad.generation('chat', { model: 'gpt-4o-mini', metadata: { attempt: 2 } }, () => undefined);
-    expect(seen.attributes('chat')[attrs.OBSERVATION_METADATA]).toBe('{"attempt":2}');
+    expect(seen.attributes('chat')[`${attrs.OBSERVATION_METADATA}.attempt`]).toBe(2);
   });
 
   test('an event takes no time', () => {

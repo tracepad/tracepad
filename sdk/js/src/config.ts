@@ -9,6 +9,7 @@
  */
 
 import { TracepadConfigError } from './http.js';
+import { warn } from './log.js';
 
 export interface Config {
   readonly host: string;
@@ -45,6 +46,25 @@ export function resolve(options: ConfigOptions = {}): Config {
   if (environment) config.environment = environment;
   if (release) config.release = release;
   return config;
+}
+
+/** The exporter's per-export timeout when nothing names one (spec 042 #3):
+ * OpenTelemetry's ten seconds, its retries inside them, is long for a
+ * request that flushes before it answers. */
+export const EXPORT_TIMEOUT_MILLIS = 5000;
+
+/** The option, then TRACEPAD_EXPORT_TIMEOUT (seconds), then five seconds — or
+ * `undefined`, which leaves the exporter to OpenTelemetry's own variable when one is set. */
+export function exportTimeout(millis: number | undefined): number | undefined {
+  if (millis !== undefined) return millis;
+  const raw = (process.env.TRACEPAD_EXPORT_TIMEOUT ?? '').trim();
+  if (raw) {
+    const seconds = Number(raw);
+    if (Number.isFinite(seconds) && seconds > 0) return seconds * 1000;
+    warn(`TRACEPAD_EXPORT_TIMEOUT=${JSON.stringify(raw)} is not a number of seconds; it is ignored`);
+  }
+  if (process.env.OTEL_EXPORTER_OTLP_TRACES_TIMEOUT || process.env.OTEL_EXPORTER_OTLP_TIMEOUT) return undefined;
+  return EXPORT_TIMEOUT_MILLIS;
 }
 
 function pick(argument: string | undefined, variable: string): string {

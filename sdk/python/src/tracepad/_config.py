@@ -72,7 +72,7 @@ def resolve_timeout(argument: float | None) -> float | None:
             seconds = float(raw)
         except ValueError:
             seconds = 0.0
-        if seconds > 0:
+        if 0 < seconds < float("inf"):
             return seconds
         logger.warning("tracepad: TRACEPAD_EXPORT_TIMEOUT=%r is not a number of seconds; "
                        "it is ignored", raw)
