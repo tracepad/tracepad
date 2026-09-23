@@ -96,6 +96,35 @@ def test_outside_a_span_without_a_trace_id_raises(spans: Any) -> None:
         tracepad.score("helpful", 1)
 
 
+def test_with_tracing_off_a_score_without_a_target_is_dropped(
+    sender: Sender, caplog: pytest.LogCaptureFixture
+) -> None:
+    # Spec 039 #1: no `init`, so every span is a no-op — inside a block as
+    # outside one — and the call site is not wrong.
+    made = queue(sender)
+    with caplog.at_level(logging.DEBUG, logger="tracepad"):
+        with tracepad.span("handler") as observation:
+            tracepad.score("helpful", 1)
+        tracepad.score("helpful", 1, observation=True)
+    made.flush(2.0)
+
+    assert sender.batches == []
+    assert caplog.text.count("tracing is off") == 2
+    assert all(r.levelno == logging.DEBUG for r in caplog.records)
+    # Spec 039 #3: no trace behind the span, no id.
+    assert (observation.trace_id, observation.span_id) == (None, None)
+
+
+def test_with_tracing_off_a_score_by_id_is_sent(sender: Sender) -> None:
+    # Spec 039 #2: scoring by id is REST, not tracing.
+    made = queue(sender)
+    with tracepad.span("handler"):
+        tracepad.score("helpful", 1, trace_id="a" * 32)
+    made.flush(2.0)
+
+    assert sender.batches == [[{"name": "helpful", "trace_id": "a" * 32, "value": 1}]]
+
+
 def test_the_batch_closes_at_a_hundred(sender: Sender) -> None:
     clock = Clock()
     made = queue(sender, clock=clock)

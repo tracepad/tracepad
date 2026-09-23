@@ -40,7 +40,7 @@ describe('a provider that takes processors after the fact (the 1.x line)', () =>
 
     const parent = tracepad.span('parent-step', (step) => {
       tracepad.span('child-step', () => undefined);
-      return step.spanId;
+      return step.spanId!;
     });
     await tracepad.flush();
 

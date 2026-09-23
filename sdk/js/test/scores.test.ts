@@ -5,6 +5,7 @@ import type { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
 import { describe, expect, test, vi } from 'vitest';
 
 import * as tracepad from '../src/index.js';
+import { setLogger } from '../src/log.js';
 import { ScoreQueue, reset } from '../src/scores.js';
 import { HOST, KEY, fakeFetch, fresh, registered, spans, warnings } from './helpers.js';
 
@@ -34,7 +35,7 @@ describe('the target', () => {
     const { sent, queue } = recording();
     let ids: [string, string] | undefined;
     tracepad.span('step', (step) => {
-      ids = [step.traceId, step.spanId];
+      ids = [step.traceId!, step.spanId!];
       tracepad.score('helpful', 0.9, { comment: 'cited the source' });
       tracepad.score('grounded', 1, { dataType: 'boolean', observation: true });
       tracepad.score('verdict', { stringValue: 'pass', dataType: 'categorical', id: 'v-1' });
@@ -56,6 +57,41 @@ describe('the target', () => {
     await queue.flush(1000);
     expect(sent).toEqual([[{ name: 'helpful', trace_id: 'a'.repeat(32), observation_id: 'b'.repeat(16), value: 1 }]]);
     expect(trace.getActiveSpan()).toBeUndefined();
+  });
+});
+
+describe('tracing off: no init in this process (spec 039)', () => {
+  test('a score without a target is dropped with a debug line, inside a span and outside one', async () => {
+    const debug: string[] = [];
+    setLogger({ warn: (message) => warnings.push(message), debug: (message) => debug.push(message) });
+    const { sent, queue } = recording();
+    const ids = tracepad.span('handler', (step) => {
+      tracepad.score('helpful', 1);
+      return [step.traceId, step.spanId];
+    });
+    tracepad.score('helpful', 1, { observation: true });
+    await queue.flush(1000);
+    expect(sent).toEqual([]);
+    expect(debug).toEqual([
+      'tracepad: score(): tracing is off (no init); "helpful" was dropped',
+      'tracepad: score(): tracing is off (no init); "helpful" was dropped',
+    ]);
+    expect(warnings).toEqual([]);
+    // No trace behind the span, no id (#3).
+    expect(ids).toEqual([undefined, undefined]);
+  });
+
+  test('a score by id is sent as ever: that is REST, not tracing (#2)', async () => {
+    const { sent, queue } = recording();
+    tracepad.span('handler', () => tracepad.score('helpful', 1, { traceId: 'a'.repeat(32) }));
+    await queue.flush(1000);
+    expect(sent).toEqual([[{ name: 'helpful', trace_id: 'a'.repeat(32), value: 1 }]]);
+  });
+
+  test('a logger without debug hears nothing', () => {
+    recording();
+    expect(() => tracepad.score('helpful', 1)).not.toThrow();
+    expect(warnings).toEqual([]);
   });
 });
 

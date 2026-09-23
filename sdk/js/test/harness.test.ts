@@ -94,8 +94,8 @@ describe('the item block', () => {
     const run = await tracepad.dataset('golden').run('prompt v7');
     const attempt = run.item('case-1', (attempt) => {
       expect(() => attempt.score('accuracy', 1)).toThrow('no trace has started inside this item block yet');
-      const first = tracepad.span('try-1', (o) => o.traceId);
-      const second = tracepad.span('try-2', (o) => o.traceId);
+      const first = tracepad.span('try-1', (o) => o.traceId!);
+      const second = tracepad.span('try-2', (o) => o.traceId!);
       expect(attempt.traces).toEqual([first, second]);
       attempt.score('accuracy', 0.5, { comment: 'second try' });
       attempt.score('verdict', { stringValue: 'pass', dataType: 'categorical' });

@@ -1,12 +1,17 @@
 package tracepad
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/trace/noop"
 )
 
 // sender records every batch it was handed and refuses the first `failures`.
@@ -122,6 +127,62 @@ func TestOutsideASpanWithoutATraceIDIsErrNoTrace(t *testing.T) {
 	setup(t)
 	if err := Score(context.Background(), "helpful", WithValue(1)); !errors.Is(err, ErrNoTrace) {
 		t.Errorf("err = %v", err)
+	}
+}
+
+// tracingOff is a process that never called Init (spec 039): the global
+// provider is OTel's no-op one, and the default logger — where the package
+// logs before Init — is recorded at debug level.
+func tracingOff(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	fresh(t)
+	previous, logger := otel.GetTracerProvider(), slog.Default()
+	otel.SetTracerProvider(noop.NewTracerProvider())
+	logs := &bytes.Buffer{}
+	slog.SetDefault(slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { otel.SetTracerProvider(previous); slog.SetDefault(logger) })
+	return logs
+}
+
+func TestWithTracingOffAScoreWithoutATargetIsDropped(t *testing.T) {
+	logs := tracingOff(t)
+	s := &sender{}
+	q := queue(t, s, nil)
+	ctx, step := Span(context.Background(), "handler")
+	if err := Score(ctx, "helpful", WithValue(1)); err != nil {
+		t.Errorf("inside a span: err = %v, want nil", err)
+	}
+	step.End()
+	if err := Score(context.Background(), "helpful", WithValue(1), OnObservation()); err != nil {
+		t.Errorf("outside every span: err = %v, want nil", err)
+	}
+	flushed(t, q)
+	if len(s.batches) != 0 {
+		t.Errorf("batches = %v, want nothing enqueued", s.batches)
+	}
+	if n := strings.Count(logs.String(), "level=DEBUG msg=\"tracepad.Score: tracing is off"); n != 2 {
+		t.Errorf("logs = %q, want two debug lines", logs.String())
+	}
+	// No trace behind the span, no id (spec 039 #3).
+	if step.TraceID() != "" || step.SpanID() != "" {
+		t.Errorf("ids = %q, %q, want empty", step.TraceID(), step.SpanID())
+	}
+}
+
+func TestWithTracingOffAScoreByIDIsSent(t *testing.T) {
+	tracingOff(t)
+	// By id it is REST, not tracing (spec 039 #2): posted with the store the
+	// environment names, as a judge script that traces nothing does.
+	t.Setenv("TRACEPAD_HOST", testHost)
+	t.Setenv("TRACEPAD_API_KEY", testKey)
+	s := &sender{}
+	q := queue(t, s, nil)
+	if err := Score(context.Background(), "helpful", WithValue(1), WithTraceID(strings.Repeat("a", 32))); err != nil {
+		t.Fatal(err)
+	}
+	flushed(t, q)
+	if len(s.batches) != 1 || s.batches[0][0]["trace_id"] != strings.Repeat("a", 32) {
+		t.Errorf("batches = %v", s.batches)
 	}
 }
 

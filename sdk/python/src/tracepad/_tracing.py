@@ -93,6 +93,11 @@ def init(
     _initialized = True
 
 
+def initialized() -> bool:
+    """Whether `init` ran in this process: not calling it turns tracing off."""
+    return _initialized
+
+
 def _resource(config: Config) -> Any:
     from opentelemetry.sdk.resources import Resource
 
@@ -162,12 +167,17 @@ class Observation:
         self._explicit: set[str] = set()
 
     @property
-    def trace_id(self) -> str:
-        return format(self.span.get_span_context().trace_id, "032x")
+    def trace_id(self) -> str | None:
+        """The trace's 32-hex id, or `None` with no trace behind the span —
+        tracing off, as an `Attempt` has none before it runs (spec 039 #3)."""
+        context = self.span.get_span_context()
+        return format(context.trace_id, "032x") if context.is_valid else None
 
     @property
-    def span_id(self) -> str:
-        return format(self.span.get_span_context().span_id, "016x")
+    def span_id(self) -> str | None:
+        """The span's 16-hex id, or `None` as `trace_id`."""
+        context = self.span.get_span_context()
+        return format(context.span_id, "016x") if context.is_valid else None
 
     def _finish(self, end_time: int | None = None) -> None:
         """End the span once, with what it has: how a block leaves."""

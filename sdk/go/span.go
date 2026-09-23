@@ -101,11 +101,24 @@ type Observation struct {
 // Span is the OTel span underneath, for anything this handle does not do.
 func (o *Observation) Span() trace.Span { return o.span }
 
-// TraceID is the trace's id as the API spells it, 32 lower-case hex digits.
-func (o *Observation) TraceID() string { return o.span.SpanContext().TraceID().String() }
+// TraceID is the trace's id as the API spells it, 32 lower-case hex digits —
+// or "" with no trace behind the span, which is tracing off, as an Attempt
+// has none before it runs (spec 039 #3).
+func (o *Observation) TraceID() string {
+	if ids := o.span.SpanContext(); ids.IsValid() {
+		return ids.TraceID().String()
+	}
+	return ""
+}
 
-// SpanID is the span's id as the API spells it, 16 lower-case hex digits.
-func (o *Observation) SpanID() string { return o.span.SpanContext().SpanID().String() }
+// SpanID is the span's id as the API spells it, 16 lower-case hex digits —
+// or "", as TraceID.
+func (o *Observation) SpanID() string {
+	if ids := o.span.SpanContext(); ids.IsValid() {
+		return ids.SpanID().String()
+	}
+	return ""
+}
 
 // End ends the span with what it has. The second call, and every one after
 // it, does nothing: `defer step.End()` beside an explicit Fail is fine.
@@ -163,9 +176,7 @@ func warnKind(typ string) {
 	if observationTypes[typ] {
 		return
 	}
-	def.mu.Lock()
-	ready := def.initialized
-	def.mu.Unlock()
+	ready := initialized()
 	warnedKinds.Lock()
 	seen := warnedKinds.seen[typ]
 	if !seen && ready && len(warnedKinds.seen) < maxWarnedKinds {

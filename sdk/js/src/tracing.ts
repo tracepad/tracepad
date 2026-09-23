@@ -16,6 +16,7 @@ import {
   SpanStatusCode,
   context,
   createContextKey,
+  isSpanContextValid,
   trace,
 } from '@opentelemetry/api';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-proto';
@@ -38,6 +39,9 @@ import { flushScores } from './scores.js';
 
 let initialized = false;
 let handedOut = false;
+
+/** Whether `init` or `spanProcessor` ran: not calling either turns tracing off (spec 039 #1). */
+export const tracingOn = (): boolean => initialized || handedOut;
 
 /** The observation the current callback opened, so that `update` can tell
  * what the application said explicitly from what the wrapper captured. */
@@ -326,12 +330,15 @@ export class Observation {
     this.span = span;
   }
 
-  get traceId(): string {
-    return this.span.spanContext().traceId;
+  /** The trace's id, or `undefined` with no trace behind the span — tracing off (spec 039 #3). */
+  get traceId(): string | undefined {
+    const ids = this.span.spanContext();
+    return isSpanContextValid(ids) ? ids.traceId : undefined;
   }
 
-  get spanId(): string {
-    return this.span.spanContext().spanId;
+  get spanId(): string | undefined {
+    const ids = this.span.spanContext();
+    return isSpanContextValid(ids) ? ids.spanId : undefined;
   }
 
   /** @internal End the span once, with what it has: how a callback leaves. */
@@ -518,17 +525,14 @@ const warnedKinds = new Set<string>();
 
 function firstTime(key: string): boolean {
   if (warnedKinds.has(key)) return false;
-  if ((initialized || handedOut) && warnedKinds.size < 256) warnedKinds.add(key);
+  if (tracingOn() && warnedKinds.size < 256) warnedKinds.add(key);
   return true;
 }
 
 /**
- * Pass a step's kind through, warning when the store will not classify by
- * it. An empty kind is no kind — `undefined`, and the caller's default
- * stands, as Go's `WithType("")` (spec 038 #8). A spelling outside the ten
- * is not refused: the mapper keeps it in the observation's metadata and
- * classifies the span by its heuristics. The warning is given once per
- * spelling, and only when a step is written, after `init({ logger })`.
+ * Pass a step's kind through: an empty one is no kind, and the caller's
+ * default stands (spec 038 #8); one outside the ten is kept in metadata by
+ * the mapper, and warned about as `warnedKinds` says.
  */
 function kind(type: string | undefined): string | undefined {
   if (!type) return undefined;

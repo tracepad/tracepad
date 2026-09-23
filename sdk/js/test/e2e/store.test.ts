@@ -58,7 +58,7 @@ describe.skipIf(!BINARY)('against a real binary', () => {
         async (call) => {
           call.firstToken();
           call.end(ANSWER);
-          traceId = call.traceId;
+          traceId = call.traceId!;
         },
       );
       tracepad.score('helpful', 0.9, { comment: 'cited the source' });
@@ -116,7 +116,7 @@ describe.skipIf(!BINARY)('against a real binary', () => {
 
     let traceId = '';
     await tracepad.generation('chat-completion', { model: 'claude-sonnet-5' }, async (call) => {
-      traceId = call.traceId;
+      traceId = call.traceId!;
       const seen = [];
       for await (const chunk of call.stream(streamed())) seen.push(chunk);
       expect(seen).toEqual(chunks);
@@ -159,7 +159,7 @@ describe.skipIf(!BINARY)('against a real binary', () => {
     });
     const traceId = tracepad.span('attempt', (attempt) => {
       expect(() => failing()).toThrow('upstream timeout');
-      return attempt.traceId;
+      return attempt.traceId!;
     });
     await tracepad.flush({ timeout: 20_000 });
 

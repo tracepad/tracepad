@@ -165,6 +165,8 @@ func (r *Run) Item(ctx context.Context, item Item) (context.Context, *Attempt) {
 	return context.WithValue(ctx, attemptKey{}, attempt), attempt
 }
 
+// initialized reports whether Init ran: not calling it is how tracing is
+// turned off (spec 039 #1).
 func initialized() bool {
 	def.mu.Lock()
 	defer def.mu.Unlock()

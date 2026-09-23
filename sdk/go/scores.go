@@ -266,7 +266,9 @@ func OnObservation() ScoreOption {
 //
 // With no target given, the target is the trace of the context's span, and
 // its span too with OnObservation. With no span and no WithTraceID the
-// error is ErrNoTrace. Score does not call the server: it enqueues, and a
+// error is ErrNoTrace — unless Init never ran: tracing is off, every span is
+// a no-op, and the call is dropped with a debug line (spec 039 #1). Score
+// does not call the server: it enqueues, and a
 // goroutine posts POST /api/v1/scores in batches of up to 100 every two
 // seconds; a rejected batch is retried once, then logged with the server's
 // own message and dropped.
@@ -279,6 +281,10 @@ func Score(ctx context.Context, name string, opts ...ScoreOption) error {
 	if _, given := body["trace_id"]; !given {
 		span := trace.SpanContextFromContext(ctx)
 		if !span.IsValid() {
+			if !initialized() {
+				def.log().Debug("tracepad.Score: tracing is off (no Init); the score was dropped", "name", name)
+				return nil
+			}
 			return ErrNoTrace
 		}
 		body["trace_id"] = span.TraceID().String()

@@ -40,11 +40,15 @@ tracepad.init();
 | `environment` | `TRACEPAD_ENVIRONMENT` | The deployment this process is |
 | `release` | `TRACEPAD_RELEASE` | The version of this deployment — per trace, [`updateTrace({ version })`](#the-trace-around-a-step) |
 | `export` | — | `false` attaches everything except the exporter |
-| `logger` | — | Where the warnings go; `console` by default |
+| `logger` | — | Where the warnings go — and, if it has `debug`, the lines nothing needs to act on; `console` by default |
 
 The options win over the environment, and with neither a host nor a key the
 call throws `TracepadConfigError` — misconfiguration discovered as a `401` in
 a log file an hour later is the bug report that rule prevents.
+
+**Not calling `init` is how tracing is turned off** — in tests, on a machine
+with no key: spans are no-ops, ids are absent, scores without a target are
+dropped.
 
 Standard OpenTelemetry variables (`OTEL_SERVICE_NAME`,
 `OTEL_RESOURCE_ATTRIBUTES`, the batch processor's own limits) are honoured by
@@ -174,7 +178,10 @@ own is ignored, with a warning.
 
 The span ends when the callback returns, or when the promise it returned
 settles. `span`, `event` and `generation` hand out an `Observation` carrying
-`traceId`, `spanId`, `update({...})` and the OTel span itself as `.span`.
+`traceId`, `spanId`, `update({...})` and the OTel span itself as `.span`. With
+no trace behind the span — tracing off — the two ids are `undefined`, not a
+string of zeros: `string | undefined`, so the compiler asks what to do without
+one.
 
 ## Generations
 
@@ -302,7 +309,10 @@ tracepad.score('grounded', 1, { dataType: 'boolean', observation: true });
 With no target given, the target is the trace of the active span — and its
 observation too when `observation: true`. Outside a span, with no `traceId`,
 the call throws: a score that silently went nowhere is the failure this API
-is worst at surfacing.
+is worst at surfacing. In a process that never called `init` (or
+`spanProcessor`) the same call is dropped with a line to the logger's `debug`,
+when it has one — every span is a no-op there, and the call site is not wrong.
+A `traceId` given is scored either way.
 
 `score` does not call the server and returns nothing to await. It enqueues,
 and a timer posts [`POST /api/v1/scores`](scores.md) in batches of up to 100
@@ -358,7 +368,7 @@ console.log(preview.matched, preview.would_delete);
 const total = await tracepad.deleteTraces({ to, environment: 'loadtest' }, { confirm: 'checkout-service' });
 console.log(total.deleted, total.rounds);
 
-await tracepad.deleteTrace(call.traceId, { confirm: true });
+if (call.traceId) await tracepad.deleteTrace(call.traceId, { confirm: true });
 ```
 
 A script's door to what [`traces rm`](cli.md#traces-rm) does: an eval harness that
@@ -497,7 +507,8 @@ took `spanProcessor({ export: false })`.
 | `init` after configuration, `observe`, the callbacks, `update`, `end`, the exporter, the score queue, `flush` | Warned through the logger; never thrown into your code — a `flush` that ran out of time says so and resolves |
 | `prompt`, `deleteTrace`, `deleteTraces`, and every call of the harness above | Rejects with `TracepadError`, or `TracepadHTTPError` with `status` and `body` for a non-2xx |
 | `init` with no host or key | `TracepadConfigError` |
-| `score` with no target at all, `attempt.score` before a trace, `run.item` with no id | `Error` — a programming error, visible at the call site |
+| `score` with no target (initialised, outside every span), `attempt.score` before a trace, `run.item` with no id | `Error` — a programming error, visible at the call site |
+| `score` with no target, never initialised | Nothing; a line to the logger's `debug` — tracing is off |
 
 Instrumentation that can break the function it observes is worse than none.
 Everything the package warns about goes through `console.warn` with a

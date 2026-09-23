@@ -22,7 +22,7 @@ describe.skipIf(!BINARY)('against a real binary', () => {
     const ids = ['first', 'second'].map((name) =>
       tracepad.span(name, (step) => {
         tracepad.updateTrace({ name: 'doomed', tags: ['doomed'] });
-        return step.traceId;
+        return step.traceId!;
       }),
     );
     await tracepad.flush({ timeout: 20_000 });
