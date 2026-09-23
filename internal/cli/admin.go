@@ -560,7 +560,17 @@ func (r *run) retentionSet(ctx context.Context, args []string) error {
 	fmt.Fprintf(r.opt.Stdout, "  statistics  %s\n",
 		window(view.StatsRetentionDays, "kept forever"))
 	fmt.Fprintf(r.opt.Stdout, "  media       %s\n", mediaSetting(view.Media))
-	fmt.Fprintln(r.opt.Stdout, "\nthe new window takes effect on the next sweep")
+	// A window waits for the sweep; the media setting applies to what
+	// arrives next, and sweeps nothing (spec 041 #6).
+	windows := media == "" || len(request) > 1
+	switch {
+	case windows && media != "":
+		fmt.Fprintln(r.opt.Stdout, "\nthe new window takes effect on the next sweep, the media setting from the next export")
+	case windows:
+		fmt.Fprintln(r.opt.Stdout, "\nthe new window takes effect on the next sweep")
+	default:
+		fmt.Fprintln(r.opt.Stdout, "\nthe media setting applies from the next export")
+	}
 	return nil
 }
 

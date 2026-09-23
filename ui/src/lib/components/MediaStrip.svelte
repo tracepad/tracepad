@@ -23,13 +23,16 @@
 
 	$effect(() => {
 		const controller = new AbortController();
-		const made: string[] = [];
+		const made: [sha: string, url: string][] = [];
 		for (const ref of refs.filter(isPicture)) {
 			const sha = ref.tracepad_media;
 			api.media(sha, controller.signal).then(
 				(blob) => {
+					// A body that lands after the teardown would make a URL
+					// nothing revokes.
+					if (controller.signal.aborted) return;
 					const url = URL.createObjectURL(blob);
-					made.push(url);
+					made.push([sha, url]);
 					urls[sha] = url;
 				},
 				(cause) => {
@@ -39,7 +42,12 @@
 		}
 		return () => {
 			controller.abort();
-			made.forEach((url) => URL.revokeObjectURL(url));
+			// Dropped from the state as well as revoked, so that no `<img>`
+			// is left pointing at a dead URL while the next run fetches.
+			for (const [sha, url] of made) {
+				URL.revokeObjectURL(url);
+				if (urls[sha] === url) delete urls[sha];
+			}
 		};
 	});
 

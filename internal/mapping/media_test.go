@@ -115,21 +115,40 @@ func TestExtractMediaShapes(t *testing.T) {
 	}
 }
 
-// The reference replaces the matched *object* for the three object shapes
-// (#4): an Anthropic image keeps its `type: image` wrapper, and its `source`
-// is the reference.
-func TestExtractMediaReplacesTheWholeObject(t *testing.T) {
+// In the three object shapes the reference takes the slot the bytes were in,
+// and every other field of the object stays the client's (Decision 19): an
+// Anthropic source keeps its type, a blob part its modality, a Gemini part
+// what rides beside its inline data.
+func TestExtractMediaKeepsTheObject(t *testing.T) {
 	body := picture(8000, 3)
-	messages := []any{map[string]any{"role": "user", "content": []any{
-		map[string]any{"type": "image", "source": map[string]any{"type": "base64", "media_type": "image/jpeg", "data": b64(body)}},
-	}}}
-	export := otlptest.SpanWith("gen_ai.input.messages", mustJSON(t, messages))
-	mapping.ExtractMedia(export, mapping.MediaOptions{})
-	got := mustJSON(t, inputOf(t, export))
-	want := `[{"content":[{"source":{"mime_type":"image/jpeg","size":8000,"tracepad_media":"` +
-		shaOf(body) + `"},"type":"image"}],"role":"user"}]`
-	if got != want {
-		t.Errorf("input =\n%s\nwant\n%s", got, want)
+	ref := `{"mime_type":"image/jpeg","size":8000,"tracepad_media":"` + shaOf(body) + `"}`
+	cases := []struct {
+		name string
+		part any
+		want string
+	}{
+		{"Anthropic source",
+			map[string]any{"type": "image", "cache_control": map[string]any{"type": "ephemeral"},
+				"source": map[string]any{"type": "base64", "media_type": "image/jpeg", "data": b64(body)}},
+			`{"cache_control":{"type":"ephemeral"},"source":{"data":` + ref + `,"media_type":"image/jpeg","type":"base64"},"type":"image"}`},
+		{"GenAI blob",
+			map[string]any{"type": "blob", "modality": "image", "mime_type": "image/jpeg", "content": b64(body)},
+			`{"content":` + ref + `,"mime_type":"image/jpeg","modality":"image","type":"blob"}`},
+		{"Gemini part",
+			map[string]any{"thought_signature": "c2ln", "inline_data": map[string]any{"mime_type": "image/jpeg", "data": b64(body), "display_name": "cat"}},
+			`{"inline_data":{"data":` + ref + `,"display_name":"cat","mime_type":"image/jpeg"},"thought_signature":"c2ln"}`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			export := otlptest.SpanWith("gen_ai.input.messages", mustJSON(t, []any{
+				map[string]any{"role": "user", "content": []any{c.part}}}))
+			mapping.ExtractMedia(export, mapping.MediaOptions{})
+			got := mustJSON(t, inputOf(t, export))
+			want := `[{"content":[` + c.want + `],"role":"user"}]`
+			if got != want {
+				t.Errorf("input =\n%s\nwant\n%s", got, want)
+			}
+		})
 	}
 }
 
@@ -222,16 +241,24 @@ func TestExtractMediaLangfuseReference(t *testing.T) {
 		map[string]any{"type": "image_url", "image_url": map[string]any{"url": missing}},
 	}}}
 	export := otlptest.SpanWith("langfuse.observation.input", mustJSON(t, messages))
+	asked := map[string]int{}
 	found := mapping.ExtractMedia(export, mapping.MediaOptions{
-		Resolve: func(id string) (string, int64, bool) { return sha, 1234, id == "HELD" },
+		Resolve: func(id string) (string, int64, bool) {
+			asked[id]++
+			return sha, 1234, id == "HELD"
+		},
 	})
 	if len(found.Bodies) != 0 || len(found.Refs) != 1 {
 		t.Fatalf("bodies %d refs %+v, want no body and one ref", len(found.Bodies), found.Refs)
 	}
+	// One lookup per id however often a batch names it.
+	if asked["HELD"] != 1 || asked["GONE"] != 1 {
+		t.Errorf("the store was asked %v, want once per id", asked)
+	}
 	got := mustJSON(t, inputOf(t, export))
 	for _, want := range []string{
 		`"image_url":{"url":{"mime_type":"image/png","size":1234,"tracepad_media":"` + sha + `"}}`,
-		`"source":{"mime_type":"image/jpeg","size":1234,"tracepad_media":"` + sha + `"}`,
+		`"source":{"data":{"mime_type":"image/jpeg","size":1234,"tracepad_media":"` + sha + `"},"media_type":"image/jpeg","type":"base64"}`,
 		`"url":"` + missing + `"`,
 	} {
 		if !strings.Contains(got, want) {
@@ -240,20 +267,33 @@ func TestExtractMediaLangfuseReference(t *testing.T) {
 	}
 }
 
-// InlineMedia is the way back (#8): the references become data URLs, and an
-// export of the inlined body maps to the rows the first delivery produced.
+// InlineMedia is the way back (#8): each reference becomes what it replaced
+// (Decision 19) — the base64 of an object shape's slot, the data URL of a
+// whole string — so an export of the inlined body is the client's payload
+// again and maps to the rows the first delivery produced.
 func TestInlineMediaRoundTrip(t *testing.T) {
 	body := picture(12000, 8)
+	url := "data:image/png;base64," + b64(body)
 	messages := mustJSON(t, []any{map[string]any{"role": "user", "content": []any{
 		map[string]any{"type": "image", "source": map[string]any{"type": "base64", "media_type": "image/png", "data": b64(body)}},
+		map[string]any{"type": "blob", "modality": "image", "mime_type": "image/png", "content": b64(body)},
+		map[string]any{"type": "image_url", "image_url": map[string]any{"url": url}},
 	}}})
-	export := otlptest.Export(
-		otlptest.ProbeSpan("gen_ai.input.messages", messages),
-	)
-	export[0].ScopeSpans[0].Spans[0].Attributes = append(export[0].ScopeSpans[0].Spans[0].Attributes,
+	// A string attribute holding, whole, one Gemini part: the document's
+	// root is an object shape.
+	part := mustJSON(t, map[string]any{"inline_data": map[string]any{"mime_type": "image/png", "data": b64(body)}})
+	span := otlptest.ProbeSpan("gen_ai.input.messages", messages)
+	span.Attributes = append(span.Attributes,
 		&commonpb.KeyValue{Key: "langfuse.observation.output",
-			Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: "data:image/png;base64," + b64(body)}}})
+			Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: url}}},
+		&commonpb.KeyValue{Key: "langfuse.observation.metadata.part",
+			Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: part}}})
+	export := otlptest.Export(span)
+	sent := cloneExport(export)
 	found := mapping.ExtractMedia(export, mapping.MediaOptions{})
+	if len(found.Bodies) != 1 {
+		t.Fatalf("extracted %d bodies, want 1", len(found.Bodies))
+	}
 	first := mapping.Map(cloneExport(export))
 
 	changed := mapping.InlineMedia(export, func(sha string) (string, []byte, bool) {
@@ -265,9 +305,15 @@ func TestInlineMediaRoundTrip(t *testing.T) {
 	if !changed[0] {
 		t.Fatal("nothing was inlined")
 	}
-	encoded, _ := proto.Marshal(export[0])
-	if !bytes.Contains(encoded, []byte(b64(body))) {
-		t.Fatal("the inlined export does not carry the bytes")
+	for i, kv := range export[0].ScopeSpans[0].Spans[0].Attributes {
+		want := sent[0].ScopeSpans[0].Spans[0].Attributes[i]
+		got, _ := kv.Value.GetValue().(*commonpb.AnyValue_StringValue)
+		if got == nil {
+			t.Fatalf("%s came back as %T, want a string", kv.Key, kv.Value.GetValue())
+		}
+		if !sameJSON(got.StringValue, want.Value.GetStringValue()) {
+			t.Errorf("%s came back as\n%.300s\nwant\n%.300s", kv.Key, got.StringValue, want.Value.GetStringValue())
+		}
 	}
 	again := mapping.ExtractMedia(export, mapping.MediaOptions{})
 	if len(again.Bodies) != 1 || again.Bodies[0].SHA256 != found.Bodies[0].SHA256 {
@@ -280,6 +326,21 @@ func TestInlineMediaRoundTrip(t *testing.T) {
 	if a, b := mustJSON(t, first.Observations[0].Output), mustJSON(t, second.Observations[0].Output); a != b {
 		t.Errorf("output after the round trip = %s, want %s", b, a)
 	}
+}
+
+// sameJSON compares two strings as JSON documents when both are one, and as
+// text otherwise: a rewritten document is re-encoded with its keys in order.
+func sameJSON(a, b string) bool {
+	var x, y any
+	if json.Unmarshal([]byte(a), &x) != nil || json.Unmarshal([]byte(b), &y) != nil {
+		return a == b
+	}
+	return mustMarshalAny(x) == mustMarshalAny(y)
+}
+
+func mustMarshalAny(v any) string {
+	out, _ := json.Marshal(v)
+	return string(out)
 }
 
 func cloneExport(export []*tracepb.ResourceSpans) []*tracepb.ResourceSpans {
@@ -338,10 +399,25 @@ func TestExportBodySplice(t *testing.T) {
 	})
 
 	t.Run("json", func(t *testing.T) {
-		source, err := otlptest.JSONBody([]*tracepb.ResourceSpans{plain, media})
+		encoded, err := otlptest.JSONBody([]*tracepb.ResourceSpans{plain, media})
 		if err != nil {
 			t.Fatal(err)
 		}
+		var elements []json.RawMessage
+		var envelope map[string]json.RawMessage
+		if err := json.Unmarshal(encoded, &envelope); err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(envelope["resourceSpans"], &elements); err != nil {
+			t.Fatal(err)
+		}
+		// The client's own spelling: indentation, a key before the array,
+		// and a prompt with markup, none of which a re-marshal would keep.
+		untouched := strings.Replace(string(elements[0]), `hello`, `<b>hello</b> & bye`, 1)
+		untouched = strings.Replace(untouched, `{`, "{\n    ", 1)
+		head := "{\n  \"zz\": 1,\n  \"resourceSpans\": [\n    " + untouched + ",\n    "
+		tail := "\n  ]\n}\n"
+		source := []byte(head + string(elements[1]) + tail)
 		decoded, err := mapping.DecodeExportBody(source, true)
 		if err != nil {
 			t.Fatal(err)
@@ -353,6 +429,9 @@ func TestExportBodySplice(t *testing.T) {
 		}
 		if bytes.Contains(out, []byte(b64(body))) {
 			t.Error("the factored JSON body still carries the picture")
+		}
+		if !bytes.HasPrefix(out, []byte(head)) || !bytes.HasSuffix(out, []byte(tail)) {
+			t.Errorf("the envelope and the untouched element did not keep their bytes:\n%.400s", out)
 		}
 		spans, unreadable, err := mapping.DecodeExportRequestJSON(out)
 		if err != nil || unreadable != 0 || len(spans) != 2 {

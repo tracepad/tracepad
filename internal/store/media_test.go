@@ -3,6 +3,7 @@ package store
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"strings"
 	"testing"
 
 	"github.com/tracepad/tracepad/internal/model"
@@ -250,30 +251,63 @@ func TestMediaScopedByRef(t *testing.T) {
 }
 
 // A ref the Langfuse channel wrote for a trace that never arrived is taken
-// after the grace, with its body; one inside the grace stays (Decision 13).
+// after the grace, with its body; one inside the grace stays; one whose trace
+// did arrive is settled and kept (Decision 13). The hourly look reads only
+// pending refs, through their own index, and counts only what it deleted.
 func TestMediaOrphanRefs(t *testing.T) {
 	f := newSweepFixture(t)
 	late := mediaBody(7, 4200)
 	fresh := mediaBody(8, 4300)
+	settled := mediaBody(11, 4400)
+	resolved := mediaBody(12, 4500)
 	for _, upload := range []*MediaUpload{
 		{ProjectID: f.project.ID, TraceID: hexTrace(1), Body: late, Now: daysAgo(3)},
 		{ProjectID: f.project.ID, TraceID: hexTrace(2), Body: fresh, Now: sweepNow.UnixNano()},
+		{ProjectID: f.project.ID, TraceID: hexTrace(3), Body: settled, Now: daysAgo(3)},
+		{ProjectID: f.project.ID, TraceID: hexTrace(4), Body: resolved, Now: daysAgo(3)},
 	} {
 		if err := f.writer.Submit(t.Context(), upload); err != nil {
 			t.Fatal(err)
 		}
 	}
+	// Trace 3 arrives carrying something else (its span overtook the
+	// upload); trace 4 arrives with the upload resolved, which settles the
+	// ref at ingest.
+	f.arriveWithMedia(t, f.project.ID, hexTrace(3), daysAgo(2), mediaBody(13, 4096), false)
+	f.arriveWithMedia(t, f.project.ID, hexTrace(4), daysAgo(2), resolved, false)
+	if got := f.count(t, `SELECT COUNT(*) FROM media_refs WHERE pending = 1`); got != 3 {
+		t.Fatalf("%d pending refs before the sweep, want 3", got)
+	}
+
+	var plan string
+	var id, parent, notused int
+	if err := f.store.db.QueryRow(`EXPLAIN QUERY PLAN SELECT sha256, project_id, trace_id FROM media_refs
+		  WHERE pending = 1 AND created_at < ? LIMIT ?`, 0, 1).Scan(&id, &parent, &notused, &plan); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(plan, "idx_media_refs_pending") {
+		t.Errorf("the orphan look is %q, want a seek on idx_media_refs_pending", plan)
+	}
+
 	if err := f.sweeper.Pass(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if file, _ := f.store.MediaFor(f.project.ID, late.SHA256); file != nil {
 		t.Error("the ref whose trace never came outlived the grace")
 	}
-	if file, _ := f.store.MediaFor(f.project.ID, fresh.SHA256); file == nil {
-		t.Error("a ref inside the grace was taken")
+	for name, body := range map[string]MediaBody{"inside the grace": fresh, "settled": settled, "resolved": resolved} {
+		if file, _ := f.store.MediaFor(f.project.ID, body.SHA256); file == nil {
+			t.Errorf("the ref %s was taken", name)
+		}
 	}
-	if got := f.mediaRows(t); got != 1 {
-		t.Errorf("%d media rows, want only the fresh one", got)
+	if got := f.count(t, `SELECT COUNT(*) FROM media_refs WHERE pending = 1`); got != 1 {
+		t.Errorf("%d pending refs after the sweep, want only the fresh one", got)
+	}
+	if got := f.mediaRows(t); got != 4 {
+		t.Errorf("%d media rows, want all but the late one", got)
+	}
+	if freed, err := f.sweeper.sweepOrphanMedia(t.Context(), sweepNow.UnixNano()); err != nil || freed != 0 {
+		t.Errorf("a second look freed %d (%v), want nothing", freed, err)
 	}
 }
 

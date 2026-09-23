@@ -66,8 +66,25 @@ func shaPrefixOf(mediaID string) (string, bool) {
 // already stored is left as it is — the first stored type wins (spec 041, edge
 // cases) — and a ref is written only while its body exists: a resolved
 // Langfuse id names a body read outside this transaction, which a deletion may
-// have collected since.
+// have collected since. Ingest writes a ref with its trace, so the ref is
+// settled, and one the Langfuse channel left pending is settled by it.
 func writeMedia(tx *sql.Tx, projectID string, bodies []MediaBody, refs []MediaRef, now int64) error {
+	if err := writeMediaBodies(tx, bodies, now); err != nil {
+		return err
+	}
+	for _, ref := range refs {
+		if _, err := tx.Exec(
+			`INSERT INTO media_refs (sha256, project_id, trace_id, created_at, pending)
+			 SELECT ?, ?, ?, ?, 0 WHERE EXISTS (SELECT 1 FROM media WHERE sha256 = ?)
+			 ON CONFLICT (sha256, project_id, trace_id) DO UPDATE SET pending = 0`,
+			ref.SHA256, projectID, ref.TraceID, now, ref.SHA256); err != nil {
+			return fmt.Errorf("store media ref %s: %w", ref.SHA256, err)
+		}
+	}
+	return nil
+}
+
+func writeMediaBodies(tx *sql.Tx, bodies []MediaBody, now int64) error {
 	for _, body := range bodies {
 		if _, err := tx.Exec(
 			`INSERT INTO media (sha256, mime_type, size, body, created_at) VALUES (?, ?, ?, ?, ?)
@@ -76,16 +93,29 @@ func writeMedia(tx *sql.Tx, projectID string, bodies []MediaBody, refs []MediaRe
 			return fmt.Errorf("store media %s: %w", body.SHA256, err)
 		}
 	}
-	for _, ref := range refs {
-		if _, err := tx.Exec(
-			`INSERT INTO media_refs (sha256, project_id, trace_id, created_at)
-			 SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM media WHERE sha256 = ?)
-			 ON CONFLICT DO NOTHING`,
-			ref.SHA256, projectID, ref.TraceID, now, ref.SHA256); err != nil {
-			return fmt.Errorf("store media ref %s: %w", ref.SHA256, err)
-		}
-	}
 	return nil
+}
+
+// writeChannelRef is the Langfuse channel's ref (#9), written when the SDK
+// uploads — usually before the trace's spans arrive, so it is pending until
+// they do (Decision 13). It reports whether a ref now exists: false when the
+// body is gone.
+func writeChannelRef(tx *sql.Tx, projectID, sha, traceID string, now int64) (bool, error) {
+	if _, err := tx.Exec(
+		`INSERT INTO media_refs (sha256, project_id, trace_id, created_at, pending)
+		 SELECT ?, ?, ?, ?, NOT EXISTS (SELECT 1 FROM traces WHERE project_id = ? AND id = ?)
+		  WHERE EXISTS (SELECT 1 FROM media WHERE sha256 = ?)
+		 ON CONFLICT DO NOTHING`,
+		sha, projectID, traceID, now, projectID, traceID, sha); err != nil {
+		return false, fmt.Errorf("add media ref: %w", err)
+	}
+	var one int
+	err := tx.QueryRow(`SELECT 1 FROM media_refs WHERE sha256 = ? AND project_id = ? AND trace_id = ?`,
+		sha, projectID, traceID).Scan(&one)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 // writeRawMediaRefs records the bodies a raw batch points at (Decision 12).
@@ -345,25 +375,8 @@ type MediaRefAdd struct {
 }
 
 func (a *MediaRefAdd) apply(tx *sql.Tx) error {
-	result, err := tx.Exec(
-		`INSERT INTO media_refs (sha256, project_id, trace_id, created_at)
-		 SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM media WHERE sha256 = ?)
-		 ON CONFLICT DO NOTHING`,
-		a.SHA256, a.ProjectID, a.TraceID, nowOr(a.Now), a.SHA256)
-	if err != nil {
-		return fmt.Errorf("add media ref: %w", err)
-	}
-	if n, err := result.RowsAffected(); err == nil && n > 0 {
-		a.Added = true
-		return nil
-	}
-	var one int
-	err = tx.QueryRow(`SELECT 1 FROM media_refs WHERE sha256 = ? AND project_id = ? AND trace_id = ?`,
-		a.SHA256, a.ProjectID, a.TraceID).Scan(&one)
-	a.Added = err == nil
-	if err == sql.ErrNoRows {
-		return nil
-	}
+	added, err := writeChannelRef(tx, a.ProjectID, a.SHA256, a.TraceID, nowOr(a.Now))
+	a.Added = added
 	return err
 }
 
@@ -377,8 +390,12 @@ type MediaUpload struct {
 }
 
 func (u *MediaUpload) apply(tx *sql.Tx) error {
-	return writeMedia(tx, u.ProjectID, []MediaBody{u.Body},
-		[]MediaRef{{SHA256: u.Body.SHA256, TraceID: u.TraceID}}, nowOr(u.Now))
+	now := nowOr(u.Now)
+	if err := writeMediaBodies(tx, []MediaBody{u.Body}, now); err != nil {
+		return err
+	}
+	_, err := writeChannelRef(tx, u.ProjectID, u.Body.SHA256, u.TraceID, now)
+	return err
 }
 
 func nowOr(now int64) int64 {
@@ -388,14 +405,14 @@ func nowOr(now int64) int64 {
 	return now
 }
 
-// orphanMediaRefs finds refs naming a trace the project does not have, older
-// than the grace (Decision 13). Read outside the writer like the orphaned
-// payloads are; the deletion re-checks inside its transaction.
+// orphanMediaRefs finds the Langfuse channel's refs still pending past the
+// grace (Decision 13) — a seek on the partial index, which holds only those.
+// Read outside the writer like the orphaned payloads are; the job decides each
+// one inside its transaction.
 func (s *Store) orphanMediaRefs(before int64, limit int) ([]MediaOrphan, error) {
 	rows, err := s.db.Query(
-		`SELECT sha256, project_id, trace_id FROM media_refs r
-		  WHERE r.created_at < ?
-		    AND NOT EXISTS (SELECT 1 FROM traces t WHERE t.project_id = r.project_id AND t.id = r.trace_id)
+		`SELECT sha256, project_id, trace_id FROM media_refs
+		  WHERE pending = 1 AND created_at < ?
 		  LIMIT ?`, before, limit)
 	if err != nil {
 		return nil, fmt.Errorf("find orphaned media refs: %w", err)
@@ -436,34 +453,47 @@ func (s *Store) orphanMedia(limit int) ([]string, error) {
 	return out, rows.Err()
 }
 
-// MediaOrphan is one ref whose trace never came.
+// MediaOrphan is one pending ref past the grace.
 type MediaOrphan struct {
 	SHA256    string
 	ProjectID string
 	TraceID   string
 }
 
-// mediaSweep deletes the orphaned refs the read pass found — each one only if
-// its trace is still absent — and collects the bodies they leave, together
+// mediaSweep settles the pending refs the read pass found: one whose trace
+// has arrived since is kept and no longer pending, one whose trace never came
+// is deleted. It then collects the bodies the deleted refs leave, together
 // with any body the pass found with no ref at all.
 type mediaSweep struct {
 	Refs   []MediaOrphan
 	Bodies []string
 
+	// Dropped counts the refs deleted, and Deleted the bodies collected.
+	Dropped int64
 	Deleted int64
 }
 
 func (m *mediaSweep) apply(tx *sql.Tx) error {
-	m.Deleted = 0
+	m.Dropped, m.Deleted = 0, 0
 	var shas []any
 	for _, ref := range m.Refs {
-		if _, err := tx.Exec(
-			`DELETE FROM media_refs WHERE sha256 = ? AND project_id = ? AND trace_id = ?
+		result, err := tx.Exec(
+			`DELETE FROM media_refs WHERE sha256 = ? AND project_id = ? AND trace_id = ? AND pending = 1
 			   AND NOT EXISTS (SELECT 1 FROM traces WHERE project_id = ? AND id = ?)`,
-			ref.SHA256, ref.ProjectID, ref.TraceID, ref.ProjectID, ref.TraceID); err != nil {
+			ref.SHA256, ref.ProjectID, ref.TraceID, ref.ProjectID, ref.TraceID)
+		if err != nil {
 			return fmt.Errorf("delete orphaned media ref: %w", err)
 		}
-		shas = append(shas, ref.SHA256)
+		if n, err := result.RowsAffected(); err == nil && n > 0 {
+			m.Dropped += n
+			shas = append(shas, ref.SHA256)
+			continue
+		}
+		if _, err := tx.Exec(
+			`UPDATE media_refs SET pending = 0 WHERE sha256 = ? AND project_id = ? AND trace_id = ?`,
+			ref.SHA256, ref.ProjectID, ref.TraceID); err != nil {
+			return fmt.Errorf("settle media ref: %w", err)
+		}
 	}
 	for _, sha := range m.Bodies {
 		shas = append(shas, sha)

@@ -79,6 +79,9 @@ func mediaRows(found *mapping.MediaResult, traces []*model.Trace, rawMedia bool)
 // bytes (#7).
 const mediaCacheControl = "private, max-age=31536000, immutable"
 
+// mediaVary keys a cached body by the credential and the project that read it.
+const mediaVary = "Authorization, Cookie, " + projectHeader
+
 // mediaSandbox is the policy every body is served under. The bytes are the
 // client's, and a body declared `text/html` or `image/svg+xml` opened as a page
 // on this origin would otherwise run whatever script it carries next to the
@@ -124,6 +127,10 @@ func writeMediaBody(w http.ResponseWriter, sha string, file *store.MediaFile) {
 	header.Set("Content-Type", file.MimeType)
 	header.Set("Content-Length", strconv.Itoa(len(file.Body)))
 	header.Set("Cache-Control", mediaCacheControl)
+	// The answer depends on who asks: a browser that cached a body under one
+	// project must not serve it from the cache under another, which holds no
+	// ref to it (#7).
+	header.Set("Vary", mediaVary)
 	header.Set("X-Content-Type-Options", "nosniff")
 	header.Set("Content-Security-Policy", mediaSandbox)
 	if !inlineMedia(file.MimeType) {

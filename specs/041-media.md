@@ -26,7 +26,7 @@ Deliverables, one PR (the last commit flips the status):
 - Schema 0021: `media` (content-addressed bodies) and `media_refs` (who
   points at them) (Decisions 2–3).
 - Extraction at ingest from every payload the mapper writes, and from the
-  raw body before it is stored (Decisions 1, 4, 5).
+  raw body before it is stored (Decisions 1, 4, 5, 19).
 - A project setting, `media: store | placeholder` (Decision 6).
 - `GET /api/v1/media/{sha256}`; the reference object in every read path;
   the OTLP export re-inlines (Decisions 7–8).
@@ -58,65 +58,10 @@ string and stays one.
 | 10 | **2026-09-23** — **The interface**: in the observation's input and output panel a reference renders as a **thumbnail** for `image/*` (bounded box, click opens the full image in a new tab via the media URL, the MIME type and size under it) and as a **chip** for anything else (type, size, download) (owner decision); a reference with `stored: false` renders as a muted chip saying *not stored (project setting)*. The JSON view shows the reference object as data | The picture is the point of a multimodal trace; a hash is not. Other media — audio, PDF — have no useful inline preview in a trace reader and are one click away. |
 | 11 | **2026-09-23** — **Accounting**: the system page's storage figures (spec 029) gain `media` bytes and count, and a project's dry-run counts for deletion paths name the media bodies that would be freed | An operator deciding on the placeholder setting needs to see what media costs; a deletion preview that hides a hundred megabytes of pictures is a preview that lies by omission. |
 | 12 | **2026-09-23** — **A raw batch's refs are rows of their own**, `media_raw_refs(sha256, raw_batch_id)`, not `media_refs` rows under the trace ids the batch carried (implementation; amends #5) | A ref keyed by trace id goes when its trace goes, and a raw batch outlives its traces by design: erasure and trace deletion leave it (spec 005 #7, spec 035 #3), and its window is its own (spec 005 #6). Under #5's wording the picture an erased trace pointed at would be collected while the batch that replays it still names it, which is the loss #5 says replay does not suffer. Keyed by the batch, the ref goes with the batch — in the raw sweep's own transaction, and by cascade — and the read scope of #7 counts a raw ref as the project's own. |
-| 13 | **2026-09-23** — **`media_refs` gains `created_at`**, and the hourly sweep drops a ref whose trace the project does not have once it is a day old, collecting the body it leaves; a project's purge drops every ref it still has (implementation; amends the data contract) | The Langfuse channel (#9) records the ref when the SDK asks to upload, before the trace's spans arrive, and a trace can fail to arrive at all — an exporter that gave up, a sampled-out span. Without an age there is no telling "not yet" from "never", and the body would stay until the project is purged. A day is far past any exporter's retry window and costs one indexed scan an hour. |
+| 13 | **2026-09-23** — **`media_refs` gains `created_at` and `pending`**, with a partial index on `created_at WHERE pending = 1`. The Langfuse channel writes its ref pending when the project does not have the trace yet; ingest writes its refs settled, and settles a pending one it writes again. The hourly sweep reads the pending refs older than a day: one whose trace has arrived since is settled, one whose trace never came is dropped and the body it leaves collected. A project's purge drops every ref it still has (implementation; amends the data contract) | The Langfuse channel (#9) records the ref when the SDK asks to upload, before the trace's spans arrive, and a trace can fail to arrive at all — an exporter that gave up, a sampled-out span. Without an age there is no telling "not yet" from "never", and the body would stay until the project is purged. A day is far past any exporter's retry window. Ingest's refs are written in the transaction that writes their trace and can never be orphans, so the flag keeps the hourly look to the few refs that can: a seek on the partial index, where an age alone would read every ref a project has on every pass. |
 | 14 | **2026-09-23** — **The upload URL is presigned**: `PUT /api/public/media/{mediaId}/upload` is a public route whose `?token=` is an HMAC-signed grant — project, trace, hash, type, length, an hour — under a key minted at each start; `uploadUrl` is `null` only when **this project** already holds the body, and a Langfuse id resolves at ingest only to a body this project holds (implementation; amends #9's "Basic or Bearer auth") | The SDK PUTs the upload URL with its bare HTTP client (`media_manager.py`, `_httpx_client.put`), with no credential — against Langfuse the URL is an object store's and the signature is in its query — so an authenticated PUT would refuse every upload. A key per start is the setup token's bargain: an upload URL from before a restart fails, the SDK logs it, and the picture is lost as it would be against an unreachable Langfuse. "Already stored" is asked of the project rather than of the table because a hash any project could name would otherwise adopt another project's picture — the bytes are the proof of possession, and #7's scope would be moot. `GET /api/public/media/{id}` answers a `url` that needs a key, like every read. |
-| 15 | **2026-09-23** — **Serving and drawing bytes safely**: `GET /api/v1/media/{sha256}` adds `X-Content-Type-Options: nosniff` and a sandboxing `Content-Security-Policy`, and sends anything but `image/*`, `audio/*` and `video/*` as an attachment; the interface fetches the bytes with its own credentials and draws a blob in an `<img>`, and opens the full image in a new tab as an `<img>` in a blank page (implementation; amends #10's "via the media URL") | The type is whatever a client declared, and a body declared `text/html` or `image/svg+xml` opened as a page of this origin would run its script beside the session cookie. A session names its project in a header (spec 028 #6) that an `<img src>` cannot send, so the media URL cannot be linked directly; a blob drawn by an `<img>` or saved by a download is never a document. |
+| 15 | **2026-09-23** — **Serving and drawing bytes safely**: `GET /api/v1/media/{sha256}` adds `X-Content-Type-Options: nosniff` and a sandboxing `Content-Security-Policy`, and sends anything but `image/*`, `audio/*` and `video/*` as an attachment, and answers `Vary: Authorization, Cookie, X-Tracepad-Project`; the interface fetches the bytes with its own credentials and draws a blob in an `<img>`, and opens the full image in a new tab as an `<img>` in a blank page (implementation; amends #10's "via the media URL") | The type is whatever a client declared, and a body declared `text/html` or `image/svg+xml` opened as a page of this origin would run its script beside the session cookie. A session names its project in a header (spec 028 #6) that an `<img src>` cannot send, so the media URL cannot be linked directly; a blob drawn by an `<img>` or saved by a download is never a document. #7's cache headers would otherwise let a browser answer a project with a body it cached under another, which #7's scope says is a `404`; `Vary` keys the cache by who asked. |
 | 16 | **2026-09-23** — **The walk runs over the decoded export before the mapper**, rewriting attributes in place — span, event, scope and resource attributes, a JSON string attribute re-encoded only when something in it was replaced — and the raw body is that export re-encoded, with only the ResourceSpans the walk changed re-written and everything else kept byte for byte (implementation; how #1 and #5 are met) | One pass feeds both halves: the mapper maps a body whose payloads already carry references, and the archive is the same body, so a replay maps to exactly the rows the first delivery produced and there is no second walker to disagree with the first about what was media. A whole-string data URL attribute becomes an object attribute, which the mapper reads as the reference object. |
-| 17 | **2026-09-23** — **The re-inlining of #8 happens in `GET /api/v1/raw/{id}`**, which the export and any other reader of the archive call; every reference comes back as a data URL whatever shape it replaced, and the listing's `size_bytes` stays the stored length (implementation) | The CLI is a client with no logic of its own (spec 004), and the archive's reader is where "as sent" is owed. The reference does not remember the shape it replaced, and a data URL is enough for the round trip: a second Tracepad extracts it to the same reference. Computing the inlined length for the listing would mean decoding every batch to list it. |
+| 17 | **2026-09-23** — **The re-inlining of #8 happens in `GET /api/v1/raw/{id}`**, which the export and any other reader of the archive call; each reference comes back as what it replaced (#19), and the listing's `size_bytes` stays the stored length (implementation) | The CLI is a client with no logic of its own (spec 004), and the archive's reader is where "as sent" is owed. Computing the inlined length for the listing would mean decoding every batch to list it. |
 | 18 | **2026-09-23** — **`tracepad retention set --media store\|placeholder`**, and `retention show` prints the setting (implementation; the CLI half of #6) | The setting is set where the retention windows are, as #6 says, and the CLI is where the windows are set from a terminal. |
-
-## Data contract (schema 0021)
-
-```sql
-CREATE TABLE media (
-    sha256     TEXT PRIMARY KEY,       -- hex of the decoded bytes
-    mime_type  TEXT NOT NULL,
-    size       INTEGER NOT NULL,       -- decoded bytes
-    body       BLOB NOT NULL,
-    created_at INTEGER NOT NULL
-) STRICT;
-
-CREATE TABLE media_refs (
-    sha256     TEXT NOT NULL REFERENCES media(sha256),
-    project_id TEXT NOT NULL,
-    trace_id   TEXT NOT NULL,
-    PRIMARY KEY (sha256, project_id, trace_id)
-) STRICT, WITHOUT ROWID;
-CREATE INDEX idx_media_refs_trace ON media_refs(project_id, trace_id);
-
-ALTER TABLE projects ADD COLUMN media TEXT NOT NULL DEFAULT 'store'
-    CHECK (media IN ('store', 'placeholder'));
-```
-
-Existing traces are not rewritten: the migration adds tables and a column,
-and media already inline stays inline until retention takes it. `docs/media.md`
-says so.
-
-## Testing
-
-- Mapper: each of the four shapes extracted at 4 KiB and kept inline below;
-  a data URL inside a longer string is not a match (the whole string must be
-  the URL); the reference object's fields; two generations sending the same
-  image write one `media` row and two refs.
-- Raw: a stored raw body carries references; replay re-maps it to the same
-  observations.
-- Deletion: retention, erasure, trace deletion and purge remove refs and GC
-  bodies with no ref left; a body shared by two projects survives one
-  project's purge.
-- Setting: `placeholder` writes no body and a `stored: false` reference.
-- API: `GET /api/v1/media/{sha}` bytes and headers, `404` without a ref in
-  the caller's project; the export re-inlines.
-- Bridge: the Langfuse SDK itself (the e2e harness already runs it) sends an
-  image; the upload round trip succeeds, the trace's reference is rewritten,
-  the picture is fetchable; a second identical image gets `uploadUrl: null`.
-- UI: thumbnail, chip, not-stored chip (vitest); Playwright on a trace with
-  an image; live check in a browser, both themes, 375 px.
-
-## Edge cases
-
-- A malformed base64 body under a recognised shape: left inline, a warning
-  in the log with the trace id, never a rejected batch.
-- An image over the body cap (`TRACEPAD_MAX_BODY_BYTES`) never arrives;
-  nothing new here.
-- The same content under two MIME types: the first stored type wins; the
-  reference carries the type the client declared.
+| 19 | **2026-09-23** — **In the three object shapes the reference replaces the base64, not the object** (amends #4): the Anthropic source's `data`, the GenAI blob's `content`, the Gemini part's `inline_data.data`; every other field stays as the client sent it. An Anthropic image is `{"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": {"tracepad_media": …}}}`. A data URL string is still replaced whole. The way out (#8, #17) puts back what each reference replaced: the base64 in an object's slot, the data URL of a whole string. The archive's JSON splice keeps the untouched elements and the envelope as their source bytes (code review) | Replacing the whole object dropped what rode beside the bytes — the blob part's `modality`, which the conventions require, a Gemini part's `thought_signature` or `display_name` — from the payload and, because the raw archive is the same rewrite, from replay and export, beyond recovery; #5 promises the archive loses the media and nothing else. Writing into the slot keeps the rule "wherever media was, a reference is" (the reference is still the one object readers and the interface look for) and makes the round trip exact: an export is the client's payload, where a data URL in place of an Anthropic source was a request the provider would refuse. |

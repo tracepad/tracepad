@@ -99,7 +99,6 @@ func decodeExportJSON(body []byte) (*ExportBody, error) {
 	if err := decodeJSONNumbers(raw, &elements); err != nil {
 		return out, fmt.Errorf("%w: resourceSpans is not an array", ErrMalformedBody)
 	}
-	out.envelope, out.elements = envelope, elements
 
 	for i, element := range elements {
 		converted, err := hexIDsToBase64(element, fmt.Sprintf("resourceSpans[%d]", i))

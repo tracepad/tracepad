@@ -56,6 +56,27 @@ describe('the media strip', () => {
 		expect(media).not.toHaveBeenCalled();
 	});
 
+	it('drops its URLs with the refs they were made for, and makes none after', async () => {
+		const view = render(MediaStrip, { refs: [png] });
+		const open = screen.getByRole('button', { name: /Open the full image/ });
+		await waitFor(() => expect(open).toBeEnabled());
+
+		// New refs, same picture: the old URL is revoked and no longer drawn
+		// while the next fetch is in flight.
+		let land: (blob: Blob) => void = () => {};
+		media.mockImplementation(() => new Promise<Blob>((resolve) => (land = resolve)));
+		await view.rerender({ refs: [{ ...png }] });
+		expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:tracepad/1');
+		await waitFor(() => expect(open.querySelector('img')).toBeNull());
+
+		// A body that lands after the strip is gone makes no URL.
+		view.unmount();
+		vi.mocked(URL.createObjectURL).mockClear();
+		land(new Blob(['late']));
+		await Promise.resolve();
+		expect(URL.createObjectURL).not.toHaveBeenCalled();
+	});
+
 	it('says so when a picture cannot be loaded', async () => {
 		media.mockRejectedValue(new Error('404'));
 		render(MediaStrip, { refs: [png] });

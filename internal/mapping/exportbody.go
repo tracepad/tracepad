@@ -1,6 +1,7 @@
 package mapping
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 
@@ -26,12 +27,9 @@ type ExportBody struct {
 	// spans is, for the protobuf encoding, where each decoded
 	// ResourceSpans field sits in source: from its tag to its end.
 	spans [][2]int
-	// The JSON encoding keeps the envelope, which of the two spellings
-	// held the array, the array's elements, and which element each decoded
-	// ResourceSpans came from.
-	envelope  map[string]json.RawMessage
+	// The JSON encoding keeps which of the two spellings held the array,
+	// and which of its elements each decoded ResourceSpans came from.
 	key       string
-	elements  []json.RawMessage
 	positions []int
 }
 
@@ -70,11 +68,23 @@ func (b *ExportBody) Encode(changed []bool) ([]byte, error) {
 	return append(out, b.source[previous:]...), nil
 }
 
+// encodeJSON splices the re-encoded elements into the source where the old
+// ones stood. The envelope, the whitespace and every other element stay the
+// client's bytes: a re-marshalled document would compact them, reorder the
+// envelope's keys and escape every `<` of a prompt.
 func (b *ExportBody) encodeJSON(changed []bool) ([]byte, error) {
-	elements := append([]json.RawMessage(nil), b.elements...)
+	spans, err := jsonElementSpans(b.source, b.key)
+	if err != nil {
+		return nil, fmt.Errorf("re-encode resource spans: %w", err)
+	}
+	var out []byte
+	previous := 0
 	for i, position := range b.positions {
 		if i >= len(changed) || !changed[i] {
 			continue
+		}
+		if position >= len(spans) {
+			return nil, fmt.Errorf("re-encode resource spans: element %d is not in the body", position)
 		}
 		encoded, err := protojson.Marshal(b.ResourceSpans[i])
 		if err != nil {
@@ -84,18 +94,52 @@ func (b *ExportBody) encodeJSON(changed []bool) ([]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("re-encode resource spans: %w", err)
 		}
-		elements[position] = converted
+		span := spans[position]
+		out = append(out, b.source[previous:span[0]]...)
+		out = append(out, converted...)
+		previous = span[1]
 	}
-	array, err := json.Marshal(elements)
-	if err != nil {
-		return nil, err
+	return append(out, b.source[previous:]...), nil
+}
+
+// jsonElementSpans finds, in a JSON export, where each element of the
+// resource spans array under key sits: from its first byte to its end. A key
+// written twice is read the way decoding reads it, the last one winning.
+func jsonElementSpans(body []byte, key string) ([][2]int, error) {
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	if token, err := decoder.Token(); err != nil || token != json.Delim('{') {
+		return nil, fmt.Errorf("the body is not a JSON object")
 	}
-	envelope := make(map[string]json.RawMessage, len(b.envelope))
-	for key, value := range b.envelope {
-		envelope[key] = value
+	var spans [][2]int
+	for decoder.More() {
+		token, err := decoder.Token()
+		if err != nil {
+			return nil, err
+		}
+		if name, _ := token.(string); name != key {
+			var skip json.RawMessage
+			if err := decoder.Decode(&skip); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		if token, err := decoder.Token(); err != nil || token != json.Delim('[') {
+			return nil, fmt.Errorf("%s is not an array", key)
+		}
+		spans = spans[:0]
+		for decoder.More() {
+			var element json.RawMessage
+			if err := decoder.Decode(&element); err != nil {
+				return nil, err
+			}
+			end := int(decoder.InputOffset())
+			spans = append(spans, [2]int{end - len(element), end})
+		}
+		if _, err := decoder.Token(); err != nil {
+			return nil, err
+		}
 	}
-	envelope[b.key] = array
-	return json.Marshal(envelope)
+	return spans, nil
 }
 
 func anyTrue(values []bool) bool {

@@ -17,17 +17,22 @@ CREATE TABLE media (
 -- `media_raw_refs` names it, and every path that deletes traces deletes their
 -- rows in the same transaction and collects the bodies left with none.
 --
--- `created_at` (Unix nanoseconds) is not in the spec's schema (Decision 13):
--- the Langfuse channel records a ref for a trace whose spans have not arrived
--- yet, and the sweep needs an age to tell "not yet" from "never".
+-- `created_at` (Unix nanoseconds) and `pending` are not in the spec's schema
+-- (Decision 13): the Langfuse channel records a ref for a trace whose spans
+-- have not arrived yet, and the sweep needs to know which refs those are and
+-- an age to tell "not yet" from "never". Ingest's own refs are written with
+-- their trace and are never pending; the partial index keeps the hourly look
+-- to the few that are.
 CREATE TABLE media_refs (
     sha256     TEXT NOT NULL REFERENCES media(sha256),
     project_id TEXT NOT NULL,
     trace_id   TEXT NOT NULL,
     created_at INTEGER NOT NULL,
+    pending    INTEGER NOT NULL DEFAULT 0 CHECK (pending IN (0, 1)),
     PRIMARY KEY (sha256, project_id, trace_id)
 ) STRICT, WITHOUT ROWID;
 CREATE INDEX idx_media_refs_trace ON media_refs(project_id, trace_id);
+CREATE INDEX idx_media_refs_pending ON media_refs(created_at) WHERE pending = 1;
 
 -- The raw archive's own refs (Decision 12). A raw batch outlives the traces
 -- it fed — erasure and trace deletion leave it, and its window is its own

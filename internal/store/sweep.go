@@ -374,8 +374,8 @@ func (sw *Sweeper) sweepOrphanPayloads(ctx context.Context) (int64, error) {
 	return job.Deleted, nil
 }
 
-// sweepOrphanMedia collects the refs whose trace never arrived within the
-// grace (spec 041, Decision 13) and any body no ref names at all, then the
+// sweepOrphanMedia collects the pending refs whose trace never arrived within
+// the grace (spec 041, Decision 13) and any body no ref names at all, then the
 // bodies those refs leave. Found by a read outside the writer, like the
 // orphaned payloads; the job re-checks each predicate inside its transaction.
 func (sw *Sweeper) sweepOrphanMedia(ctx context.Context, now int64) (int64, error) {
@@ -394,10 +394,10 @@ func (sw *Sweeper) sweepOrphanMedia(ctx context.Context, now int64) (int64, erro
 	if err := sw.writer.Submit(ctx, job); err != nil {
 		return 0, err
 	}
-	if job.Deleted > 0 || len(refs) > 0 {
-		logger().Info("collected orphaned media", "refs", len(refs), "bodies", job.Deleted)
+	if job.Deleted > 0 || job.Dropped > 0 {
+		logger().Info("collected orphaned media", "refs", job.Dropped, "bodies", job.Deleted)
 	}
-	return job.Deleted + int64(len(refs)), nil
+	return job.Deleted + job.Dropped, nil
 }
 
 // sweepOrphanSearchEntries collects index entries whose observation — or whose

@@ -43,10 +43,17 @@ Where the media was, the payload now holds:
 ```
 
 `tracepad_media` is the lower-case hex SHA-256 of the decoded bytes, and
-`size` is their length. For a data URL the reference replaces the string; for
-the three object shapes it replaces the whole object — an Anthropic image
-becomes `{"type": "image", "source": {"tracepad_media": …}}`. Wherever media
-was, a reference is.
+`size` is their length. For a data URL the reference replaces the string. For
+the three object shapes it replaces the base64 inside the object and nothing
+else, so every other field the client sent stays — a blob part's `modality`, a
+Gemini part's `thought_signature`. An Anthropic image becomes:
+
+```json
+{"type": "image", "source": {"type": "base64", "media_type": "image/jpeg",
+  "data": {"tracepad_media": "3f2a…c91e", "mime_type": "image/jpeg", "size": 48213}}}
+```
+
+Wherever media was, a reference is.
 
 Every reader returns the reference as it is: the read API, `tracepad traces
 show`, and the MCP tools. None of them fetches the bytes — an agent reading a
@@ -86,7 +93,8 @@ GET /api/v1/media/{sha256}
 ```
 
 answers the bytes with their `Content-Type`, cached for a year and
-`immutable` (the address is the content). It answers only a project that
+`immutable` (the address is the content), and keyed in the browser's cache by
+the credential and the project that asked. It answers only a project that
 points at the body — from one of its traces or one of its raw batches — and
 `404` for any other hash, so a hash that appeared in a log is not a way into
 another project's pictures. See [api.md](api.md#media).
@@ -170,7 +178,9 @@ the client wrote it, as the evidence of what the client meant.
 A body only another project holds is still asked for: skipping the upload on a
 hash alone would let any project adopt another's picture by naming it. If the
 SDK uploads for a trace whose spans never arrive, the ref is dropped by the
-hourly sweep a day later, and the body with it.
+hourly sweep a day later, and the body with it. The sweep looks only at the
+refs the channel wrote that are still waiting for their trace, so its cost does
+not grow with the pictures a project keeps.
 
 ## In the interface
 
@@ -184,6 +194,6 @@ data. See [ui.md](ui.md#payloads).
 ## The way out
 
 `tracepad export --otlp`, and `GET /api/v1/raw/{id}` beneath it, put the bytes
-back: an exported span carries a data URL where the reference is, so a trace
-moved to another backend is whole. Posted into another Tracepad, the data URL
-is extracted again to the same reference. See [export.md](export.md).
+back, each in the shape it came in: the base64 in an object's slot, a data URL
+where a whole string was. A trace moved to another backend is whole, and
+posted into another Tracepad it is extracted again to the same reference. See [export.md](export.md).

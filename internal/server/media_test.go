@@ -102,6 +102,7 @@ func TestMediaIngestAndRead(t *testing.T) {
 		"Content-Type":           "image/png",
 		"Cache-Control":          "private, max-age=31536000, immutable",
 		"X-Content-Type-Options": "nosniff",
+		"Vary":                   "Authorization, Cookie, X-Tracepad-Project",
 	} {
 		if got := rec.Header().Get(header); got != value {
 			t.Errorf("%s = %q, want %q", header, got, value)

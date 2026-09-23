@@ -211,6 +211,19 @@ func TestRetentionSetIsADryRunUntilConfirmed(t *testing.T) {
 	if strings.Contains(out.stderr, "would") {
 		t.Errorf("a window that grows was previewed: %q", out.stderr)
 	}
+
+	// The media setting alone (spec 041 #6) needs no confirmation and
+	// changes no window: the footer says when it applies instead.
+	out = h.run(t.Context(), true, "retention", "set", "--media", "placeholder")
+	if out.code != ExitOK {
+		t.Fatalf("retention set --media exited %d: %s", out.code, out.stderr)
+	}
+	if project, _ := h.store.ProjectByName("test"); project.Media != "placeholder" {
+		t.Errorf("media = %q, want placeholder", project.Media)
+	}
+	if strings.Contains(out.stdout, "sweep") || !strings.Contains(out.stdout, "from the next export") {
+		t.Errorf("stdout = %q, want the media footer and no window's", out.stdout)
+	}
 }
 
 // TestInteractiveConfirmationTypesTheName: on a terminal the ceremony is

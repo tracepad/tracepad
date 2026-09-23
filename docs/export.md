@@ -248,10 +248,10 @@ See [api.md#the-raw-archive](api.md#the-raw-archive).
 
 **Media comes back inline.** Ingest keeps each image or file once and leaves a
 reference in the archived body ([media.md](media.md)); the body endpoint puts
-the bytes back as a data URL where each reference is, so a batch leaving for
-another backend is whole. The reference does not remember whether it replaced
-an Anthropic source or a string, so every shape comes back as a data URL —
-which a second Tracepad extracts to the same reference again. A reference whose
+the bytes back where each reference is, so a batch leaving for another backend
+is whole: the base64 in the slot of an Anthropic source, a Gemini part or a
+GenAI blob, and a data URL where a whole string was — each shape as the client
+sent it, which a second Tracepad extracts to the same reference again. A reference whose
 body was not stored (the `placeholder` setting) stays a reference. `size_bytes`
 in the listing is the stored body's length, before the media is put back.
 

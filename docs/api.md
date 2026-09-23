@@ -583,8 +583,9 @@ already taken it. Both answer the same way, because a batch that is not yours
 does not exist to you.
 
 The archive stores each body with its media factored out, and this endpoint
-puts it back: every reference becomes a data URL again, so what leaves is the
-batch the client sent ([media.md](media.md#the-way-out)). `size_bytes` above is
+puts it back: each reference becomes what it replaced again — the base64 in an
+Anthropic, Gemini or GenAI object, the data URL of a string — so what leaves is
+the batch the client sent ([media.md](media.md#the-way-out)). `size_bytes` above is
 the stored length, before that.
 
 ## Media
@@ -603,8 +604,10 @@ object in their place ([media.md](media.md)):
 Every read — a trace, an observation's payloads, search, the CLI, MCP —
 returns that object as it is; this endpoint is where the bytes are. It answers
 them in the MIME type the first client to send them declared, with
-`Cache-Control: private, max-age=31536000, immutable`, `X-Content-Type-Options:
-nosniff` and a sandboxing `Content-Security-Policy`; anything that is not an
+`Cache-Control: private, max-age=31536000, immutable` (with `Vary:
+Authorization, Cookie, X-Tracepad-Project`, so a browser's cache never answers
+one project with another's body), `X-Content-Type-Options: nosniff` and a
+sandboxing `Content-Security-Policy`; anything that is not an
 image, audio or video comes as an attachment. It answers only a project that
 points at the body, from a trace or a raw batch: any other hash is `404`, the
 same as one nobody holds. A reference with `"stored": false` has no bytes to

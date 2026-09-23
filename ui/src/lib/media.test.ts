@@ -16,7 +16,15 @@ describe('media references (spec 041 #4)', () => {
 
 	it('finds every reference in a payload once, in order', () => {
 		const value = [
-			{ role: 'user', content: [{ type: 'image', source: png }, { type: 'text', text: 'hi' }] },
+			// In an object shape the reference sits in the base64's slot
+			// (Decision 19).
+			{
+				role: 'user',
+				content: [
+					{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: png } },
+					{ type: 'text', text: 'hi' }
+				]
+			},
 			{ role: 'user', content: [{ type: 'image_url', image_url: { url: png } }, pdf, kept] }
 		];
 		expect(mediaRefs(value)).toEqual([png, pdf, kept]);

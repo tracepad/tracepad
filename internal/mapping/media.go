@@ -116,48 +116,78 @@ func (r *MediaResult) SHAs() []string {
 // event — and replaces each recognised media value with a reference, in place.
 func ExtractMedia(resourceSpans []*tracepb.ResourceSpans, opts MediaOptions) *MediaResult {
 	w := &mediaWalk{
-		opts:   opts,
-		res:    &MediaResult{Changed: make([]bool, len(resourceSpans))},
-		bodies: map[string]bool{},
-		refs:   map[MediaRef]bool{},
+		opts:     opts,
+		res:      &MediaResult{},
+		bodies:   map[string]bool{},
+		refs:     map[MediaRef]bool{},
+		resolved: map[string]resolvedMedia{},
 	}
+	w.res.Changed = rewriteMedia(resourceSpans, w)
+	return w.res
+}
+
+// mediaRewrite is one direction of the walk over an export: ExtractMedia
+// turns media into references, InlineMedia turns them back. Both run on one
+// traversal, rewriteMedia, so the two cannot disagree about where a value may
+// sit.
+type mediaRewrite interface {
+	// enter is told which traces the attributes walked next belong to.
+	enter(traces []string)
+	// whole answers the reference that replaces a string which is, in its
+	// entirety, media.
+	whole(s string) (map[string]any, bool)
+	// object is tried on every object before its fields are walked. It may
+	// rewrite the object in place through its fields (changed), answer a
+	// string that replaces the object whole, and stop the walk entering it.
+	object(f fields) (replacement string, changed, stop bool)
+	// decodes is the cheap look at a string before it is decoded as a JSON
+	// document to walk.
+	decodes(s string) bool
+}
+
+// rewriteMedia runs a rewrite over every attribute of an export — resource,
+// scope, span and event — and reports, per ResourceSpans, whether it changed
+// anything.
+func rewriteMedia(resourceSpans []*tracepb.ResourceSpans, r mediaRewrite) []bool {
+	changed := make([]bool, len(resourceSpans))
 	for i, rs := range resourceSpans {
 		if rs == nil {
 			continue
 		}
-		changed := false
-		all := tracesOf(rs.GetScopeSpans()...)
+		visit := func(traces []string, kvs []*commonpb.KeyValue) {
+			r.enter(traces)
+			if rewriteAttributes(r, kvs) {
+				changed[i] = true
+			}
+		}
 		if resource := rs.GetResource(); resource != nil {
-			w.traces = all
-			changed = w.attributes(resource.Attributes) || changed
+			visit(tracesOf(rs.GetScopeSpans()...), resource.Attributes)
 		}
 		for _, ss := range rs.GetScopeSpans() {
 			if ss == nil {
 				continue
 			}
 			if scope := ss.GetScope(); scope != nil {
-				w.traces = tracesOf(ss)
-				changed = w.attributes(scope.Attributes) || changed
+				visit(tracesOf(ss), scope.Attributes)
 			}
 			for _, span := range ss.GetSpans() {
 				if span == nil {
 					continue
 				}
-				w.traces = nil
+				var traces []string
 				if id := traceID(span.GetTraceId()); id != "" {
-					w.traces = []string{id}
+					traces = []string{id}
 				}
-				changed = w.attributes(span.Attributes) || changed
+				visit(traces, span.Attributes)
 				for _, event := range span.GetEvents() {
 					if event != nil {
-						changed = w.attributes(event.Attributes) || changed
+						visit(traces, event.Attributes)
 					}
 				}
 			}
 		}
-		w.res.Changed[i] = changed
 	}
-	return w.res
+	return changed
 }
 
 // tracesOf lists the distinct trace ids of the spans under some scopes: the
@@ -176,95 +206,294 @@ func tracesOf(scopes ...*tracepb.ScopeSpans) []string {
 	return out
 }
 
-type mediaWalk struct {
-	opts   MediaOptions
-	res    *MediaResult
-	bodies map[string]bool
-	refs   map[MediaRef]bool
-	// traces are the trace ids the value being walked belongs to.
-	traces []string
-}
-
-func (w *mediaWalk) attributes(kvs []*commonpb.KeyValue) bool {
+func rewriteAttributes(r mediaRewrite, kvs []*commonpb.KeyValue) bool {
 	changed := false
 	for _, kv := range kvs {
-		if kv != nil && w.anyValue(kv.Value) {
+		if kv != nil && rewriteAnyValue(r, kv.Value) {
 			changed = true
 		}
 	}
 	return changed
 }
 
-// anyValue rewrites one OTLP value in place and reports whether it did.
-func (w *mediaWalk) anyValue(v *commonpb.AnyValue) bool {
+// rewriteAnyValue rewrites one OTLP value in place and reports whether it did.
+func rewriteAnyValue(r mediaRewrite, v *commonpb.AnyValue) bool {
 	if v == nil {
 		return false
 	}
 	switch value := v.Value.(type) {
 	case *commonpb.AnyValue_StringValue:
-		replacement, changed := w.text(value.StringValue)
-		if !changed {
+		if ref, ok := r.whole(value.StringValue); ok {
+			v.Value = otlpValue(ref).Value
+			return true
+		}
+		if !r.decodes(value.StringValue) {
 			return false
 		}
-		switch r := replacement.(type) {
-		case string:
-			value.StringValue = r
-		case map[string]any:
-			v.Value = &commonpb.AnyValue_KvlistValue{KvlistValue: refKvlist(r)}
+		rewritten, ok := rewriteDocument(r, value.StringValue)
+		if ok {
+			value.StringValue = rewritten
 		}
-		return true
+		return ok
 	case *commonpb.AnyValue_ArrayValue:
 		changed := false
 		for _, item := range value.ArrayValue.GetValues() {
-			if w.anyValue(item) {
+			if rewriteAnyValue(r, item) {
 				changed = true
 			}
 		}
 		return changed
 	case *commonpb.AnyValue_KvlistValue:
 		kvs := value.KvlistValue.GetValues()
-		if ref, matched := w.shape(kvlistGetter(kvs)); matched {
-			if ref == nil {
-				return false
-			}
-			v.Value = &commonpb.AnyValue_KvlistValue{KvlistValue: refKvlist(ref)}
+		replacement, changed, stop := r.object(kvlistFields(kvs))
+		if replacement != "" {
+			v.Value = &commonpb.AnyValue_StringValue{StringValue: replacement}
 			return true
 		}
-		return w.attributes(kvs)
+		if stop {
+			return changed
+		}
+		return rewriteAttributes(r, kvs) || changed
 	}
 	return false
 }
 
-// text is one string: the whole of it a data URL or a Langfuse reference, or
-// a JSON document that may carry either inside. The answer is a reference
-// object, the re-encoded document, or no change.
-func (w *mediaWalk) text(s string) (any, bool) {
-	if ref := w.wholeString(s); ref != nil {
-		return ref, true
-	}
-	if len(s) < minEncodedMedia && !strings.Contains(s, langfuseMarker) {
-		return nil, false
-	}
-	if !mayHoldMedia(s) {
-		return nil, false
-	}
+// rewriteDocument is a string attribute that holds a JSON document: decoded,
+// walked, and re-encoded only when something in it was replaced. A document
+// that was, whole, one reference goes back to the string it replaced rather
+// than to that string's JSON encoding.
+func rewriteDocument(r mediaRewrite, s string) (string, bool) {
 	trimmed := strings.TrimSpace(s)
 	if trimmed == "" || (trimmed[0] != '{' && trimmed[0] != '[') {
-		return nil, false
+		return "", false
 	}
 	document, ok := decodeDocument(trimmed)
 	if !ok {
-		return nil, false
+		return "", false
 	}
-	rewritten, changed := w.jsonValue(document)
+	rewritten, changed := rewriteJSON(r, document)
 	if !changed {
-		return nil, false
+		return "", false
 	}
-	encoded, ok := encodeDocument(rewritten)
+	if text, isText := rewritten.(string); isText {
+		return text, true
+	}
+	return encodeDocument(rewritten)
+}
+
+// rewriteJSON walks a decoded document, answering its replacement.
+func rewriteJSON(r mediaRewrite, v any) (any, bool) {
+	switch value := v.(type) {
+	case string:
+		if ref, ok := r.whole(value); ok {
+			return ref, true
+		}
+	case []any:
+		changed := false
+		for i, item := range value {
+			if replacement, ok := rewriteJSON(r, item); ok {
+				value[i] = replacement
+				changed = true
+			}
+		}
+		return value, changed
+	case map[string]any:
+		replacement, changed, stop := r.object(mapFields(value))
+		if replacement != "" {
+			return replacement, true
+		}
+		if stop {
+			return value, changed
+		}
+		for key, item := range value {
+			if replacement, ok := rewriteJSON(r, item); ok {
+				value[key] = replacement
+				changed = true
+			}
+		}
+		return value, changed
+	}
+	return v, false
+}
+
+// fields reads and writes the fields of an object over either spelling of
+// one: a decoded JSON map or an OTLP kvlist. A value set is a string or a
+// reference object.
+type fields struct {
+	has    func(key string) bool
+	text   func(key string) (string, bool)
+	flag   func(key string) (bool, bool)
+	nested func(key string) (fields, bool)
+	set    func(key string, value any)
+}
+
+func mapFields(m map[string]any) fields {
+	return fields{
+		has: func(key string) bool {
+			_, ok := m[key]
+			return ok
+		},
+		text: func(key string) (string, bool) {
+			s, ok := m[key].(string)
+			return s, ok
+		},
+		flag: func(key string) (bool, bool) {
+			b, ok := m[key].(bool)
+			return b, ok
+		},
+		nested: func(key string) (fields, bool) {
+			inner, ok := m[key].(map[string]any)
+			if !ok {
+				return fields{}, false
+			}
+			return mapFields(inner), true
+		},
+		set: func(key string, value any) { m[key] = value },
+	}
+}
+
+func kvlistFields(kvs []*commonpb.KeyValue) fields {
+	find := func(key string) *commonpb.KeyValue {
+		for _, kv := range kvs {
+			if kv != nil && kv.Key == key {
+				return kv
+			}
+		}
+		return nil
+	}
+	return fields{
+		has: func(key string) bool { return find(key) != nil },
+		text: func(key string) (string, bool) {
+			v, ok := find(key).GetValue().GetValue().(*commonpb.AnyValue_StringValue)
+			if !ok {
+				return "", false
+			}
+			return v.StringValue, true
+		},
+		flag: func(key string) (bool, bool) {
+			v, ok := find(key).GetValue().GetValue().(*commonpb.AnyValue_BoolValue)
+			if !ok {
+				return false, false
+			}
+			return v.BoolValue, true
+		},
+		nested: func(key string) (fields, bool) {
+			v, ok := find(key).GetValue().GetValue().(*commonpb.AnyValue_KvlistValue)
+			if !ok {
+				return fields{}, false
+			}
+			return kvlistFields(v.KvlistValue.GetValues()), true
+		},
+		set: func(key string, value any) {
+			if kv := find(key); kv != nil {
+				kv.Value = otlpValue(value)
+			}
+		},
+	}
+}
+
+// mediaSlot finds where one of the three object shapes of #1 keeps its
+// bytes: the object holding them, their key, and the declared type.
+// Anthropic's base64 source and the GenAI blob part hold them themselves;
+// Gemini's part holds them in its inline data, under either spelling.
+//
+// The reference is written into that slot and every other field of the
+// object is left alone (Decision 19): a blob part's `modality` or a Gemini
+// part's `thought_signature` is the client's, not the media.
+func mediaSlot(f fields) (holder fields, key, mime string, ok bool) {
+	kind, _ := f.text("type")
+	switch kind {
+	case "base64":
+		if mime, okMime := f.text("media_type"); okMime && f.has("data") {
+			return f, "data", mime, true
+		}
+	case "blob":
+		if mime, okMime := f.text("mime_type"); okMime && f.has("content") {
+			return f, "content", mime, true
+		}
+	}
+	for _, name := range []string{"inline_data", "inlineData"} {
+		inner, found := f.nested(name)
+		if !found {
+			continue
+		}
+		mime, okMime := inner.text("mime_type")
+		if !okMime {
+			mime, okMime = inner.text("mimeType")
+		}
+		if okMime && inner.has("data") {
+			return inner, "data", mime, true
+		}
+	}
+	return fields{}, "", "", false
+}
+
+// refOf reads a reference object.
+func refOf(f fields) (sha, mime string, stored, ok bool) {
+	sha, ok = f.text(MediaRefKey)
 	if !ok {
-		return nil, false
+		return "", "", false, false
 	}
-	return encoded, true
+	mime, _ = f.text(mediaMimeKey)
+	flag, isFlag := f.flag(mediaStoredKey)
+	return sha, mime, !isFlag || flag, true
+}
+
+type mediaWalk struct {
+	opts   MediaOptions
+	res    *MediaResult
+	bodies map[string]bool
+	refs   map[MediaRef]bool
+	// resolved memoises the Langfuse ids already asked of the store: a
+	// conversation that sends one picture in every turn is one lookup.
+	resolved map[string]resolvedMedia
+	// traces are the trace ids the value being walked belongs to.
+	traces []string
+}
+
+type resolvedMedia struct {
+	sha  string
+	size int64
+	ok   bool
+}
+
+func (w *mediaWalk) enter(traces []string) { w.traces = traces }
+
+func (w *mediaWalk) whole(s string) (map[string]any, bool) {
+	ref := w.wholeString(s)
+	return ref, ref != nil
+}
+
+func (w *mediaWalk) decodes(s string) bool {
+	if len(s) < minEncodedMedia && !strings.Contains(s, langfuseMarker) {
+		return false
+	}
+	return mayHoldMedia(s)
+}
+
+// object writes a reference into the slot of an object shape. An object of
+// a media shape whose bytes stay — too small, malformed, or an unresolved
+// Langfuse id — needs no further walk either.
+func (w *mediaWalk) object(f fields) (string, bool, bool) {
+	holder, key, mime, ok := mediaSlot(f)
+	if !ok {
+		return "", false, false
+	}
+	data, isText := holder.text(key)
+	if !isText {
+		return "", false, false
+	}
+	var ref map[string]any
+	if _, id, isRef := parseLangfuseRef(data); isRef {
+		ref = w.langfuse(mime, id)
+	} else {
+		ref = w.reference(mime, data)
+	}
+	if ref == nil {
+		return "", false, true
+	}
+	holder.set(key, ref)
+	return "", true, true
 }
 
 // wholeString matches a string that is, in its entirety, a data URL or a
@@ -277,142 +506,6 @@ func (w *mediaWalk) wholeString(s string) map[string]any {
 		return w.langfuse(mime, id)
 	}
 	return nil
-}
-
-// jsonValue walks a decoded document, answering its replacement.
-func (w *mediaWalk) jsonValue(v any) (any, bool) {
-	switch value := v.(type) {
-	case string:
-		if ref := w.wholeString(value); ref != nil {
-			return ref, true
-		}
-	case []any:
-		changed := false
-		for i, item := range value {
-			if replacement, ok := w.jsonValue(item); ok {
-				value[i] = replacement
-				changed = true
-			}
-		}
-		return value, changed
-	case map[string]any:
-		if ref, matched := w.shape(mapGetter(value)); matched {
-			if ref == nil {
-				return value, false
-			}
-			return ref, true
-		}
-		changed := false
-		for key, item := range value {
-			if replacement, ok := w.jsonValue(item); ok {
-				value[key] = replacement
-				changed = true
-			}
-		}
-		return value, changed
-	}
-	return v, false
-}
-
-// getter reads a string field of an object, and nested an object field, over
-// either spelling of an object: a decoded JSON map or an OTLP kvlist.
-type getter struct {
-	text   func(key string) (string, bool)
-	nested func(key string) (getter, bool)
-}
-
-func mapGetter(m map[string]any) getter {
-	return getter{
-		text: func(key string) (string, bool) {
-			s, ok := m[key].(string)
-			return s, ok
-		},
-		nested: func(key string) (getter, bool) {
-			inner, ok := m[key].(map[string]any)
-			if !ok {
-				return getter{}, false
-			}
-			return mapGetter(inner), true
-		},
-	}
-}
-
-func kvlistGetter(kvs []*commonpb.KeyValue) getter {
-	find := func(key string) *commonpb.AnyValue {
-		for _, kv := range kvs {
-			if kv != nil && kv.Key == key {
-				return kv.Value
-			}
-		}
-		return nil
-	}
-	return getter{
-		text: func(key string) (string, bool) {
-			v, ok := find(key).GetValue().(*commonpb.AnyValue_StringValue)
-			if !ok {
-				return "", false
-			}
-			return v.StringValue, true
-		},
-		nested: func(key string) (getter, bool) {
-			v, ok := find(key).GetValue().(*commonpb.AnyValue_KvlistValue)
-			if !ok {
-				return getter{}, false
-			}
-			return kvlistGetter(v.KvlistValue.GetValues()), true
-		},
-	}
-}
-
-// shape recognises the three object shapes of #1 and answers the reference
-// that replaces the whole object. `matched` without a reference is an object
-// of a media shape that stays as it is — too small, malformed, or an
-// unresolved Langfuse id — and whose insides need no further walk.
-func (w *mediaWalk) shape(g getter) (ref map[string]any, matched bool) {
-	mime, data, ok := objectMedia(g)
-	if !ok {
-		return nil, false
-	}
-	if _, id, isRef := parseLangfuseRef(data); isRef {
-		return w.langfuse(mime, id), true
-	}
-	return w.reference(mime, data), true
-}
-
-// objectMedia is the three object shapes: Anthropic's base64 source, the
-// GenAI conventions' blob part, and Gemini's inline data under either
-// spelling.
-func objectMedia(g getter) (mime, data string, ok bool) {
-	kind, _ := g.text("type")
-	switch kind {
-	case "base64":
-		mime, okMime := g.text("media_type")
-		data, okData := g.text("data")
-		if okMime && okData {
-			return mime, data, true
-		}
-	case "blob":
-		mime, okMime := g.text("mime_type")
-		data, okData := g.text("content")
-		if okMime && okData {
-			return mime, data, true
-		}
-	}
-	for _, key := range []string{"inline_data", "inlineData"} {
-		inner, found := g.nested(key)
-		if !found {
-			continue
-		}
-		mime, okMime := inner.text("mime_type")
-		if !okMime {
-			mime, okMime = inner.text("mimeType")
-		}
-		data, okData := inner.text("data")
-		if okMime && okData {
-			return mime, data, true
-		}
-	}
-	return "", "", false
 }
 
 // reference decodes one match and answers its reference, or nil to leave it
@@ -450,12 +543,16 @@ func (w *mediaWalk) langfuse(mime, id string) map[string]any {
 	if w.opts.Resolve == nil {
 		return nil
 	}
-	sha, size, ok := w.opts.Resolve(id)
-	if !ok {
+	found, asked := w.resolved[id]
+	if !asked {
+		found.sha, found.size, found.ok = w.opts.Resolve(id)
+		w.resolved[id] = found
+	}
+	if !found.ok {
 		return nil
 	}
-	w.addRefs(sha)
-	return map[string]any{MediaRefKey: sha, mediaMimeKey: mime, mediaSizeKey: size}
+	w.addRefs(found.sha)
+	return map[string]any{MediaRefKey: found.sha, mediaMimeKey: mime, mediaSizeKey: found.size}
 }
 
 func (w *mediaWalk) addRefs(sha string) {
@@ -564,26 +661,27 @@ func encodeDocument(v any) (string, bool) {
 	return strings.TrimSuffix(buf.String(), "\n"), true
 }
 
-// refKvlist renders a reference object as the OTLP value that replaces a
-// string attribute which was, whole, a data URL. The mapper reads a kvlist as
-// an object, so the payload holds the same reference either way.
-func refKvlist(ref map[string]any) *commonpb.KeyValueList {
+// otlpValue renders what a rewrite sets — a string, or a reference object —
+// as an OTLP value. A reference is a kvlist, which the mapper reads as an
+// object, so the payload holds the same reference whichever spelling the
+// value arrived in.
+func otlpValue(v any) *commonpb.AnyValue {
+	ref, isRef := v.(map[string]any)
+	if !isRef {
+		s, _ := v.(string)
+		return &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: s}}
+	}
 	list := &commonpb.KeyValueList{}
 	add := func(key string, value *commonpb.AnyValue) {
 		list.Values = append(list.Values, &commonpb.KeyValue{Key: key, Value: value})
 	}
-	add(MediaRefKey, stringValue(ref[MediaRefKey]))
-	add(mediaMimeKey, stringValue(ref[mediaMimeKey]))
+	add(MediaRefKey, otlpValue(ref[MediaRefKey]))
+	add(mediaMimeKey, otlpValue(ref[mediaMimeKey]))
 	if size, ok := ref[mediaSizeKey].(int64); ok {
 		add(mediaSizeKey, &commonpb.AnyValue{Value: &commonpb.AnyValue_IntValue{IntValue: size}})
 	}
 	if stored, ok := ref[mediaStoredKey].(bool); ok {
 		add(mediaStoredKey, &commonpb.AnyValue{Value: &commonpb.AnyValue_BoolValue{BoolValue: stored}})
 	}
-	return list
-}
-
-func stringValue(v any) *commonpb.AnyValue {
-	s, _ := v.(string)
-	return &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: s}}
+	return &commonpb.AnyValue{Value: &commonpb.AnyValue_KvlistValue{KvlistValue: list}}
 }
