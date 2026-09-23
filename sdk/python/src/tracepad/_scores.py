@@ -202,13 +202,16 @@ def score(
     call site is not wrong (spec 039 #1). A `trace_id` given scores either way.
     """
     if trace_id is None:
-        context = otel.get_current_span().get_span_context()
-        if not context.is_valid:
-            from ._tracing import initialized
+        from ._tracing import initialized
 
-            if not initialized():
-                logger.debug("tracepad.score(): tracing is off (no init); %r was dropped", name)
-                return
+        current = otel.get_current_span()
+        # A span that does not record, in a process with tracing off, is the
+        # no-op tracer's — its context invalid, or a propagated caller's.
+        if not initialized() and not current.is_recording():
+            logger.debug("tracepad.score(): tracing is off (no init); %r was dropped", name)
+            return
+        context = current.get_span_context()
+        if not context.is_valid:
             raise ValueError(
                 "tracepad.score(): no active span and no trace_id; pass trace_id=…"
             )

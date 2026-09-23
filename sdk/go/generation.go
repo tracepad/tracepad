@@ -80,7 +80,7 @@ func Generation(ctx context.Context, name string, opts ...GenerationOption) (con
 	}
 	ctx, o := open(ctx, name, &f, trace.WithAttributes(attrs...))
 	g := &Call{}
-	g.span = o.span
+	g.span, g.traced = o.span, o.traced
 	return ctx, g
 }
 

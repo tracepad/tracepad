@@ -161,6 +161,10 @@ class Observation:
 
     def __init__(self, span: otel.Span) -> None:
         self.span = span
+        # Whether a trace is behind it: with tracing off, OTel's no-op tracer
+        # hands out an invalid context, or echoes a propagated parent's — a
+        # caller's ids, not this step's (spec 039 #3).
+        self._traced = span.get_span_context().is_valid and (span.is_recording() or _initialized)
         self._ended = False
         # What the application named itself, which the capture of Decision 4
         # must not overwrite afterwards.
@@ -170,14 +174,12 @@ class Observation:
     def trace_id(self) -> str | None:
         """The trace's 32-hex id, or `None` with no trace behind the span —
         tracing off, as an `Attempt` has none before it runs (spec 039 #3)."""
-        context = self.span.get_span_context()
-        return format(context.trace_id, "032x") if context.is_valid else None
+        return format(self.span.get_span_context().trace_id, "032x") if self._traced else None
 
     @property
     def span_id(self) -> str | None:
         """The span's 16-hex id, or `None` as `trace_id`."""
-        context = self.span.get_span_context()
-        return format(context.span_id, "016x") if context.is_valid else None
+        return format(self.span.get_span_context().span_id, "016x") if self._traced else None
 
     def _finish(self, end_time: int | None = None) -> None:
         """End the span once, with what it has: how a block leaves."""

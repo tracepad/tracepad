@@ -300,7 +300,9 @@ if err != nil {
 }
 log.Println(total["deleted"], total["rounds"])
 
-_, err = tracepad.DeleteTrace(ctx, step.TraceID(), true)
+if id := step.TraceID(); id != "" { // "" with tracing off
+	_, err = tracepad.DeleteTrace(ctx, id, true)
+}
 ```
 
 A script's door to what [`traces rm`](cli.md#traces-rm) does: an eval harness that

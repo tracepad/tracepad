@@ -150,11 +150,9 @@ export function score(name: string, value?: number | ScoreFields, fields: ScoreF
   }
   let { traceId, observationId } = fields;
   if (traceId === undefined) {
+    if (!tracingOn() && !trace.getActiveSpan()?.isRecording()) return debug(`score(): tracing is off (no init); ${JSON.stringify(name)} was dropped`);
     const active = trace.getActiveSpan()?.spanContext();
-    if (active === undefined || !isSpanContextValid(active)) {
-      if (!tracingOn()) return debug(`score(): tracing is off (no init); ${JSON.stringify(name)} was dropped`);
-      throw new Error('tracepad: score(): no active span and no traceId; pass traceId');
-    }
+    if (active === undefined || !isSpanContextValid(active)) throw new Error('tracepad: score(): no active span and no traceId; pass traceId');
     traceId = active.traceId;
     if (fields.observation && observationId === undefined) observationId = active.spanId;
   }

@@ -279,12 +279,14 @@ func Score(ctx context.Context, name string, opts ...ScoreOption) error {
 		opt(body, &target)
 	}
 	if _, given := body["trace_id"]; !given {
+		// A span that does not record, with tracing off, is the no-op
+		// tracer's — its context invalid, or a propagated caller's.
+		if !initialized() && !trace.SpanFromContext(ctx).IsRecording() {
+			def.log().Debug("tracepad.Score: tracing is off (no Init); the score was dropped", "name", name)
+			return nil
+		}
 		span := trace.SpanContextFromContext(ctx)
 		if !span.IsValid() {
-			if !initialized() {
-				def.log().Debug("tracepad.Score: tracing is off (no Init); the score was dropped", "name", name)
-				return nil
-			}
 			return ErrNoTrace
 		}
 		body["trace_id"] = span.TraceID().String()

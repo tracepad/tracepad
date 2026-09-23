@@ -1,7 +1,7 @@
 /** Scores: the queue, the timer and the batch (spec 032 #6). */
 
-import { trace } from '@opentelemetry/api';
-import type { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
+import { ROOT_CONTEXT, context, trace } from '@opentelemetry/api';
+import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
 import { describe, expect, test, vi } from 'vitest';
 
 import * as tracepad from '../src/index.js';
@@ -86,6 +86,53 @@ describe('tracing off: no init in this process (spec 039)', () => {
     tracepad.span('handler', () => tracepad.score('helpful', 1, { traceId: 'a'.repeat(32) }));
     await queue.flush(1000);
     expect(sent).toEqual([[{ name: 'helpful', trace_id: 'a'.repeat(32), value: 1 }]]);
+  });
+
+  test('a propagated parent is not a trace: the no-op tracer echoes the caller\'s ids', async () => {
+    // A request came in with a `traceparent`, and a context manager carries it:
+    // registering installs one, and disabling the tracer leaves no provider.
+    new NodeTracerProvider().register();
+    trace.disable();
+    const debug: string[] = [];
+    setLogger({ warn: (message) => warnings.push(message), debug: (message) => debug.push(message) });
+    const { sent, queue } = recording();
+    const caller = { traceId: 'a'.repeat(32), spanId: 'b'.repeat(16), traceFlags: 1, isRemote: true };
+    const ids = context.with(trace.setSpanContext(ROOT_CONTEXT, caller), () =>
+      tracepad.span('handler', (step) => {
+        expect(step.span.spanContext().spanId).toBe('b'.repeat(16)); // the echo itself
+        tracepad.score('helpful', 1);
+        return [step.traceId, step.spanId];
+      }),
+    );
+    await queue.flush(1000);
+    expect(ids).toEqual([undefined, undefined]);
+    expect(sent).toEqual([]);
+    expect(debug).toHaveLength(1);
+  });
+
+  test("without init, the application's own provider still scores (the spec's first edge case)", async () => {
+    new NodeTracerProvider().register();
+    const { sent, queue } = recording();
+    const traceId = tracepad.span('handler', (step) => {
+      tracepad.score('helpful', 1);
+      return step.traceId;
+    });
+    await queue.flush(1000);
+    expect(traceId).toMatch(/^[0-9a-f]{32}$/);
+    expect(sent).toEqual([[{ name: 'helpful', trace_id: traceId, value: 1 }]]);
+  });
+
+  test('the default logger keeps debug lines off stdout', async () => {
+    vi.resetModules();
+    const pristine = await import('../src/log.js');
+    const out = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const debug = vi.spyOn(console, 'debug').mockImplementation(() => undefined);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    pristine.debug('nothing to act on');
+    pristine.warn('something to act on');
+    expect(out).not.toHaveBeenCalled();
+    expect(debug).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith('tracepad: something to act on');
   });
 
   test('a logger without debug hears nothing', () => {

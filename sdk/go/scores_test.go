@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"go.opentelemetry.io/otel"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/trace"
 	"go.opentelemetry.io/otel/trace/noop"
 )
 
@@ -166,6 +168,56 @@ func TestWithTracingOffAScoreWithoutATargetIsDropped(t *testing.T) {
 	// No trace behind the span, no id (spec 039 #3).
 	if step.TraceID() != "" || step.SpanID() != "" {
 		t.Errorf("ids = %q, %q, want empty", step.TraceID(), step.SpanID())
+	}
+}
+
+// A request came in with a traceparent: the no-op tracer hands the caller's
+// context to every child. Those are the caller's ids, not the step's, and
+// nothing of this process is stored under them (spec 039 #3).
+func TestWithTracingOffAPropagatedParentIsNotATrace(t *testing.T) {
+	logs := tracingOff(t)
+	s := &sender{}
+	q := queue(t, s, nil)
+	caller := trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID: trace.TraceID{0xa0, 0xb1}, SpanID: trace.SpanID{0xc2, 0xd3},
+		TraceFlags: trace.FlagsSampled, Remote: true,
+	})
+	ctx, step := Span(trace.ContextWithRemoteSpanContext(context.Background(), caller), "handler")
+	if step.Span().SpanContext().SpanID() != caller.SpanID() {
+		t.Fatal("the no-op tracer did not echo the caller: the test proves nothing")
+	}
+	if err := Score(ctx, "helpful", WithValue(1)); err != nil {
+		t.Errorf("err = %v", err)
+	}
+	step.End()
+	flushed(t, q)
+	if step.TraceID() != "" || step.SpanID() != "" {
+		t.Errorf("ids = %q, %q, want empty", step.TraceID(), step.SpanID())
+	}
+	if len(s.batches) != 0 || !strings.Contains(logs.String(), "tracing is off") {
+		t.Errorf("batches = %v, logs = %q", s.batches, logs.String())
+	}
+}
+
+// The spec's first edge case: tracing is on, just not through us — the spans
+// record, the ids are real, and a score inside one is enqueued.
+func TestWithoutInitTheApplicationsOwnProviderStillScores(t *testing.T) {
+	tracingOff(t)
+	provider := sdktrace.NewTracerProvider()
+	t.Cleanup(func() { _ = provider.Shutdown(context.Background()) })
+	otel.SetTracerProvider(provider)
+	t.Setenv("TRACEPAD_HOST", testHost)
+	t.Setenv("TRACEPAD_API_KEY", testKey)
+	s := &sender{}
+	q := queue(t, s, nil)
+	ctx, step := Span(context.Background(), "handler")
+	if err := Score(ctx, "helpful", WithValue(1)); err != nil {
+		t.Fatal(err)
+	}
+	step.End()
+	flushed(t, q)
+	if len(step.TraceID()) != 32 || len(s.batches) != 1 || s.batches[0][0]["trace_id"] != step.TraceID() {
+		t.Errorf("trace id = %q, batches = %v", step.TraceID(), s.batches)
 	}
 }
 

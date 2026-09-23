@@ -171,9 +171,10 @@ func ExampleDeleteTraces() {
 	}
 	log.Println(total["deleted"], total["rounds"])
 
-	_, err = tracepad.DeleteTrace(ctx, step.TraceID(), true)
-	if err != nil {
-		log.Fatal(err)
+	if id := step.TraceID(); id != "" { // "" with tracing off
+		if _, err := tracepad.DeleteTrace(ctx, id, true); err != nil {
+			log.Fatal(err)
+		}
 	}
 }
 

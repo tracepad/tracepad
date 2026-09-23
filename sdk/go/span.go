@@ -96,6 +96,10 @@ type Observation struct {
 	ended atomic.Bool
 	// at is the instant an Event is of: it ends where it started.
 	at time.Time
+	// traced is whether a trace is behind it: with tracing off, OTel's no-op
+	// tracer hands out an invalid context, or echoes a propagated caller's —
+	// the caller's ids, not this step's (spec 039 #3).
+	traced bool
 }
 
 // Span is the OTel span underneath, for anything this handle does not do.
@@ -105,8 +109,8 @@ func (o *Observation) Span() trace.Span { return o.span }
 // or "" with no trace behind the span, which is tracing off, as an Attempt
 // has none before it runs (spec 039 #3).
 func (o *Observation) TraceID() string {
-	if ids := o.span.SpanContext(); ids.IsValid() {
-		return ids.TraceID().String()
+	if o.traced {
+		return o.span.SpanContext().TraceID().String()
 	}
 	return ""
 }
@@ -114,8 +118,8 @@ func (o *Observation) TraceID() string {
 // SpanID is the span's id as the API spells it, 16 lower-case hex digits —
 // or "", as TraceID.
 func (o *Observation) SpanID() string {
-	if ids := o.span.SpanContext(); ids.IsValid() {
-		return ids.SpanID().String()
+	if o.traced {
+		return o.span.SpanContext().SpanID().String()
 	}
 	return ""
 }
@@ -244,7 +248,7 @@ func Event(ctx context.Context, name string, opts ...SpanOption) (context.Contex
 func open(ctx context.Context, name string, f *fields, start ...trace.SpanStartOption) (context.Context, *Observation) {
 	start = append(start, trace.WithAttributes(observationAttributes(f)...))
 	ctx, span := tracer().Start(ctx, name, start...)
-	return ctx, &Observation{span: span}
+	return ctx, &Observation{span: span, traced: span.SpanContext().IsValid() && (span.IsRecording() || initialized())}
 }
 
 // Update writes observation attributes on the context's current span,

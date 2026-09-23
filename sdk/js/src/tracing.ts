@@ -325,20 +325,21 @@ export class Observation {
   /** @internal What the application named itself, which the capture of
    * Decision 4 must not overwrite afterwards. */
   readonly explicit = new Set<string>();
+  /** A trace behind it, not the no-op tracer's invalid or echoed caller's context (spec 039 #3). */
+  private readonly traced: boolean;
 
   constructor(span: Span) {
     this.span = span;
+    this.traced = isSpanContextValid(span.spanContext()) && (span.isRecording() || tracingOn());
   }
 
   /** The trace's id, or `undefined` with no trace behind the span — tracing off (spec 039 #3). */
   get traceId(): string | undefined {
-    const ids = this.span.spanContext();
-    return isSpanContextValid(ids) ? ids.traceId : undefined;
+    return this.traced ? this.span.spanContext().traceId : undefined;
   }
 
   get spanId(): string | undefined {
-    const ids = this.span.spanContext();
-    return isSpanContextValid(ids) ? ids.spanId : undefined;
+    return this.traced ? this.span.spanContext().spanId : undefined;
   }
 
   /** @internal End the span once, with what it has: how a callback leaves. */
