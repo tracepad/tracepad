@@ -1,6 +1,6 @@
 # Spec 040 — Testing an application's instrumentation
 
-**Status:** 🟡 DRAFT
+**Status:** ✅ SHIPPED
 **Sprint:** September 2026
 
 > An application that traces wants to test that it does: that the analysis

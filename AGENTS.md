@@ -418,6 +418,15 @@ API. This file routes; it does not duplicate what specs and docs say.
   and refuses a directory without the marker (#5–#7); `skills show` prints
   it. A drift test asks the binary for its commands, flags, tools and routes
   and fails on any name in the skill the binary does not have (#8).
+- ✅ Spec 040 (testing an application's instrumentation) shipped:
+  `tracepad.testing` (Python, with an opt-in pytest plugin), the
+  `tracepad/testing` entry (Node) and `tracepadtest` (Go) — `capture()`
+  gives a fresh, initialised process that records spans and keeps scores
+  instead of exporting, `reset()` one that never initialised (#1, #2). The
+  private reset lives in the package once, OTel's global provider included
+  (#3), and leaves a follower as the global provider, so a tracer taken at
+  import records into every capture (#14); Go's helpers fail a parallel test
+  (#10). Budgets 1,900 / 2,200 / 2,350 (#13).
 - ✅ Spec 039 (tracing off) shipped: a process that never called `init` has
   tracing off, and the packages now know it — `score` with no target there
   is dropped with a debug line instead of raising (an initialised process
