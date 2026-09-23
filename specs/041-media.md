@@ -1,6 +1,6 @@
 # Spec 041 — Media: images and files in traces, stored once
 
-**Status:** 🟡 DRAFT
+**Status:** ✅ SHIPPED
 **Sprint:** September 2026
 
 > A multimodal call sends the model a picture, and the trace of that call
