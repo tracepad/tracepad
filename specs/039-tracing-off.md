@@ -1,0 +1,68 @@
+# Spec 039 — The packages with tracing off
+
+**Status:** 🟡 DRAFT
+**Sprint:** September 2026
+
+> An application traces in production and not in its tests, or not on a
+> developer's machine that has no key: it simply does not call `init`. The
+> packages promise that instrumentation never breaks the function it
+> observes, and in that process they break it twice. A `score()` inside a
+> `with tracepad.span(...)` block raises, because OpenTelemetry's no-op
+> tracer hands out the invalid span context and the package cannot tell
+> "tracing is off" from "you scored outside every span". And an
+> observation's `trace_id` is thirty-two zeros — OpenTelemetry's word for
+> *no trace* leaking out as if it were an id, which an application then
+> stores on its own rows. The first downstream application to move to the
+> packages found both on the day it tried. This spec makes tracing-off a
+> state the packages know and answer honestly in, in all three.
+
+---
+
+## Overview
+
+Deliverables, one PR (the last commit flips the status):
+
+- `score` with no explicit target in a process that never initialised the
+  package: a no-op with a debug log, in Python, Node and Go (Decisions
+  1–2).
+- An observation's trace and span id with no real trace behind them: `None`
+  (Python), `undefined` (Node), `""` (Go) (Decision 3).
+- The three SDK pages: *What raises and what does not* (and its Node and Go
+  counterparts) and the observation reference (Decision 4).
+
+Not here: a switch to turn tracing off in an initialised process, sampling,
+anything on the server.
+
+## Decisions log
+
+| # | Decision | Rationale |
+|---|----------|-----------|
+| 1 | **2026-09-23** — **`score` with no target — no `trace_id` given — and no valid span context** is a **no-op with one debug-level log line** when the package has **never been initialised** in this process (`init` not called: Python `_initialized`, Node's and Go's equivalent). In an **initialised** process the same call keeps raising (`ValueError` in Python, a thrown `Error` in Node, `ErrNoTrace` returned in Go): there, no span means the caller scored outside every span, which is the programming error spec 017 #7 made the one exception to "the tracing path never raises" | The exception was written for a mistake the author can fix at the call site, and it fires as well for a configuration the author chose on purpose — tests, a keyless development machine — where the call site is correct and nothing can be fixed there. The package can tell the two apart by the one fact it owns, whether `init` ran; the span context cannot, because the no-op tracer's spans are invalid inside a block exactly as outside one. Initialised-and-outside keeps the raise so the mistake it was for is still loud. |
+| 2 | **2026-09-23** — A `score` **with an explicit `trace_id`** is unchanged in either state: it is enqueued and posted with the configuration the environment gives, as a script that scores stored traces without tracing anything does today | Scoring by id is REST, not tracing (spec 017 #7, the judge script of `docs/scores.md`): it needs a host and a key, not a provider, and turning it off with tracing would break the offline judge to fix the application. |
+| 3 | **2026-09-23** — **An observation's trace and span id** read as **`None` / `undefined` / `""`** when its span context is invalid — which is every span of a process with no provider, and only those. Python's `Observation.trace_id` and `span_id` become `str \| None`, Node's `traceId` / `spanId` `string \| undefined`; Go's `TraceID()` / `SpanID()` keep `string` and return `""`. This is the contract the harness's `Attempt.trace_id` already has in all three (`None` / `undefined` / `""` before any trace), now applied to the observation | Thirty-two zeros is a value that looks like an id and is not one: stored on an application's row it points at nothing, joins to nothing, and passes every "is it set" check. The absent value is the honest answer, the one each language uses for "no value", and the one the same packages already give for the same question on an attempt. The type change in Python and Node is the point — a checker now asks the caller what to do with no trace. Go returns `""` because a string cannot be nil, as `Attempt.TraceID` does. |
+| 4 | **2026-09-23** — **Docs**: each SDK page's table of what raises gains the row *`score` with no target, never initialised* → *nothing; a debug line*, and the row for no target narrows to *initialised, outside every span*; the observation reference states the absent id; the Python and Node pages add one sentence under *init* — "not calling `init` is how tracing is turned off: spans are no-ops, ids are absent, scores without a target are dropped" | The pattern is common enough to be a sentence in the docs rather than a discovery; the tables are where a reader looks for what can raise. |
+
+## Testing
+
+Per package, in a process (or a test with the package reset) that never
+initialised it:
+
+- `score("x", 1)` inside `span(...)` and outside any span: no exception
+  (Go: `nil`), nothing enqueued, one debug log line.
+- `score("x", 1, trace_id=…)` (Go: `WithTraceID`): enqueued as today.
+- `span(...).trace_id` / `.span_id`: `None` / `undefined` / `""`.
+
+In an initialised process: `score` outside every span still raises (Go:
+`ErrNoTrace`), inside a span it scores the span's trace; `trace_id` is the
+32-hex id. The existing suites pass unchanged except where they asserted the
+zero id or the old raise.
+
+## Edge cases
+
+- An application that set its own global `TracerProvider` and never called
+  `init`: its spans are valid, so ids are real and a `score` inside a span
+  enqueues against the trace — the package posts it if the environment
+  configures a host and key, and logs the failure (never raises) if not,
+  as the score queue already does.
+- `init` called, then the provider shut down: the process is initialised;
+  Decision 1's raise applies outside a valid span.
