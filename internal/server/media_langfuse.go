@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tracepad/tracepad/internal/mapping"
 	"github.com/tracepad/tracepad/internal/store"
 )
 
@@ -121,6 +122,12 @@ func (s *Server) handleLangfuseMediaUpload(w http.ResponseWriter, r *http.Reques
 		// A dataset item's media (the SDK's other caller) is out of
 		// scope (spec 041, Overview).
 		writeError(w, http.StatusBadRequest, "traceId is required: media is stored for traces only")
+		return
+	}
+	if !mapping.IsHexID(request.TraceID) {
+		// The id a trace is stored under; any other spelling is a ref
+		// that no span could ever settle or resolve.
+		writeError(w, http.StatusBadRequest, "traceId must be 32 lower-case hex digits")
 		return
 	}
 	if !strings.Contains(request.ContentType, "/") {

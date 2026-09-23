@@ -397,7 +397,8 @@ func (sw *Sweeper) sweepOrphanMedia(ctx context.Context, now int64) (int64, erro
 	if job.Deleted > 0 || job.Dropped > 0 {
 		logger().Info("collected orphaned media", "refs", job.Dropped, "bodies", job.Deleted)
 	}
-	return job.Deleted + job.Dropped, nil
+	// Bodies only: a dropped or settled ref frees no page worth a vacuum.
+	return job.Deleted, nil
 }
 
 // sweepOrphanSearchEntries collects index entries whose observation — or whose
@@ -601,24 +602,11 @@ func (r *rawSweep) apply(tx *sql.Tx) error {
 	// The ids first: the batches' media refs go with them, and the bodies
 	// only they pointed at are collected in the same transaction (spec 041,
 	// Decision 12).
-	rows, err := tx.Query(
+	ids, err := queryColumn[int64](tx,
 		`SELECT id FROM raw_batches WHERE project_id = ? AND received_at < ?
 		  ORDER BY received_at LIMIT ?`, r.ProjectID, cutoff, r.Limit)
 	if err != nil {
 		return fmt.Errorf("sweep raw batches: %w", err)
-	}
-	var ids []any
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			rows.Close()
-			return err
-		}
-		ids = append(ids, id)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return err
 	}
 	if len(ids) == 0 {
 		return nil
@@ -886,6 +874,31 @@ func deleteIn(tx *sql.Tx, prefix string, lead []any, ids []any) (int64, error) {
 		return nil
 	})
 	return total, err
+}
+
+// rowsQuerier is what a column read needs of a transaction or of the
+// database.
+type rowsQuerier interface {
+	Query(query string, args ...any) (*sql.Rows, error)
+}
+
+// queryColumn runs a query whose rows are one column of type T and answers
+// the values, as the []any an IN list takes.
+func queryColumn[T any](q rowsQuerier, query string, args ...any) ([]any, error) {
+	rows, err := q.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []any
+	for rows.Next() {
+		var v T
+		if err := rows.Scan(&v); err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
 }
 
 // eachIn walks an id list in statement-sized batches. An empty list runs

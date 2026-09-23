@@ -20,6 +20,9 @@
 
 	let urls = $state<Record<string, string>>({});
 	let failed = $state<Record<string, boolean>>({});
+	// The bytes behind each thumbnail, kept so that the full picture's tab
+	// gets a URL of its own, alive as long as that tab rather than the strip.
+	const blobs: Record<string, Blob> = {};
 
 	$effect(() => {
 		const controller = new AbortController();
@@ -33,6 +36,7 @@
 					if (controller.signal.aborted) return;
 					const url = URL.createObjectURL(blob);
 					made.push([sha, url]);
+					blobs[sha] = blob;
 					urls[sha] = url;
 				},
 				(cause) => {
@@ -46,16 +50,25 @@
 			// is left pointing at a dead URL while the next run fetches.
 			for (const [sha, url] of made) {
 				URL.revokeObjectURL(url);
-				if (urls[sha] === url) delete urls[sha];
+				if (urls[sha] === url) {
+					delete urls[sha];
+					delete blobs[sha];
+				}
 			}
 		};
 	});
 
-	/** The full picture in a tab of its own, drawn by an `<img>` and nothing else. */
+	/**
+	 * The full picture in a tab of its own, drawn by an `<img>` and nothing
+	 * else, from a URL the tab keeps until it is closed: the strip's own go
+	 * when another observation is selected.
+	 */
 	function open(ref: MediaRef) {
-		const url = urls[ref.tracepad_media];
-		const view = url ? window.open('', '_blank') : null;
+		const blob = blobs[ref.tracepad_media];
+		const view = blob ? window.open('', '_blank') : null;
 		if (!view) return;
+		const url = URL.createObjectURL(blob);
+		view.addEventListener('pagehide', () => URL.revokeObjectURL(url));
 		view.document.title = `${ref.mime_type} · ${bytes(ref.size)}`;
 		view.document.body.style.cssText =
 			'margin:0;min-height:100vh;display:grid;place-items:center;background:#111';

@@ -24,6 +24,10 @@ type IngestBatch struct {
 	Media     []MediaBody
 	MediaRefs []MediaRef
 	RawMedia  []string
+	// Resolved are the bodies a Langfuse reference string was rewritten
+	// to, read before this write: if one is gone the batch is refused with
+	// ErrMediaGone rather than stored pointing at nothing (spec 041 #9).
+	Resolved []string
 	// IngestedAt is the server clock at arrival, which is the clock
 	// retention counts from (spec 005 #1). Zero means "now", resolved in
 	// apply so that every path into the writer has an arrival time even
@@ -74,6 +78,9 @@ func (b *IngestBatch) apply(tx *sql.Tx) error {
 	arrived := b.IngestedAt
 	if arrived == 0 {
 		arrived = time.Now().UnixNano()
+	}
+	if err := mediaStillThere(tx, b.Resolved); err != nil {
+		return err
 	}
 	// The bodies first: every ref below, the raw batch's included, names
 	// a row that has to exist (spec 041 #2).

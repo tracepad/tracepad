@@ -302,7 +302,7 @@ func TestInlineMediaRoundTrip(t *testing.T) {
 		}
 		return "image/png", body, true
 	})
-	if !changed[0] {
+	if !changed.Any() {
 		t.Fatal("nothing was inlined")
 	}
 	for i, kv := range export[0].ScopeSpans[0].Spans[0].Attributes {
@@ -379,10 +379,10 @@ func TestExportBodySplice(t *testing.T) {
 			t.Fatalf("decoded %d spans, %d unreadable", len(decoded.ResourceSpans), decoded.Unreadable)
 		}
 		found := mapping.ExtractMedia(decoded.ResourceSpans, mapping.MediaOptions{})
-		if found.Changed[0] || !found.Changed[1] {
-			t.Fatalf("changed = %v, want only the second", found.Changed)
+		if found.Rewrites.Changed()[0] || !found.Rewrites.Changed()[1] {
+			t.Fatalf("changed = %v, want only the second", found.Rewrites.Changed())
 		}
-		out, err := decoded.Encode(found.Changed)
+		out, err := decoded.Encode(found.Rewrites)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -423,7 +423,7 @@ func TestExportBodySplice(t *testing.T) {
 			t.Fatal(err)
 		}
 		found := mapping.ExtractMedia(decoded.ResourceSpans, mapping.MediaOptions{})
-		out, err := decoded.Encode(found.Changed)
+		out, err := decoded.Encode(found.Rewrites)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -460,4 +460,105 @@ func plainLenField(n int) int {
 		prefix++
 	}
 	return 1 + prefix + n
+}
+
+// The archive and the way out differ from what the client sent by the media
+// and nothing else (#5, Decision 19): in a JSON body the rewritten element
+// keeps the fields the decoder does not know, its markup and its key order,
+// and the JSON document inside an attribute keeps its own; extracted and put
+// back, the body is the client's, byte for byte.
+func TestExportBodyJSONKeepsTheClientsBytes(t *testing.T) {
+	body := picture(6000, 11)
+	url := "data:image/png;base64," + b64(body)
+	document := `{"role": "user",  "content": [{"type": "text", "text": "<b>look</b> & tell"}, ` +
+		`{"type": "image_url", "image_url": {"url": "` + url + `", "detail": "high"}}], "a_last": 1}`
+	// The client's own escaping: a JSON string with no HTML escapes.
+	var buf bytes.Buffer
+	encoder := json.NewEncoder(&buf)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(document); err != nil {
+		t.Fatal(err)
+	}
+	quoted := bytes.TrimSpace(buf.Bytes())
+	source := []byte(`{"resourceSpans": [{"resource": {"attributes": [], "entityRefs": [{"type": "service"}]},
+  "scopeSpans": [{"scope": {"name": "s"}, "spans": [{"traceId": "00112233445566778899aabbccddeeff",
+    "spanId": "0011223344556677", "name": "gen <1>", "startTimeUnixNano": "1", "endTimeUnixNano": "2",
+    "futureField": {"x": true},
+    "attributes": [{"key": "gen_ai.input.messages", "value": {"stringValue": ` + string(quoted) + `}},
+                   {"key": "whole", "value": {"stringValue": "` + url + `"}}]}]}]},
+  {"resource": {"attributes": [{"key": "service.name", "value": {"stringValue": "a & b"}}]}}]}`)
+
+	decoded, err := mapping.DecodeExportBody(source, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := mapping.ExtractMedia(decoded.ResourceSpans, mapping.MediaOptions{})
+	factored, err := decoded.Encode(found.Rewrites)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(factored, []byte(b64(body))) {
+		t.Fatal("the archive still carries the picture")
+	}
+	for _, kept := range []string{`"entityRefs": [{"type": "service"}]`, `"futureField": {"x": true}`,
+		`"name": "gen <1>"`, `{"stringValue": "a & b"}`} {
+		if !bytes.Contains(factored, []byte(kept)) {
+			t.Errorf("the archive lost %s", kept)
+		}
+	}
+	// The document inside the attribute keeps its order and spacing: only
+	// the URL became the reference.
+	again, err := mapping.DecodeExportBody(factored, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored := again.ResourceSpans[0].ScopeSpans[0].Spans[0].Attributes[0].Value.GetStringValue()
+	ref := `{"mime_type":"image/png","size":6000,"tracepad_media":"` + shaOf(body) + `"}`
+	if want := strings.Replace(document, `"`+url+`"`, ref, 1); stored != want {
+		t.Errorf("the attribute's document =\n%.300s\nwant\n%.300s", stored, want)
+	}
+
+	inlined := mapping.InlineMedia(again.ResourceSpans, func(string) (string, []byte, bool) {
+		return "image/png", body, true
+	})
+	whole, err := again.Encode(inlined)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := mustReformat(t, whole); got != mustReformat(t, source) {
+		t.Errorf("extracted and put back, the body differs from the client's:\n%.600s", whole)
+	}
+	if !bytes.Contains(whole, []byte(`"futureField": {"x": true}`)) || !bytes.Contains(whole, quoted) {
+		t.Error("the way out is not the client's bytes where nothing was media")
+	}
+}
+
+// mustReformat compacts a JSON document without re-escaping it: the splice
+// writes the values it replaced compactly, and that is the only difference
+// it is allowed.
+func mustReformat(t *testing.T, doc []byte) string {
+	t.Helper()
+	var out bytes.Buffer
+	if err := json.Compact(&out, doc); err != nil {
+		t.Fatal(err)
+	}
+	return out.String()
+}
+
+// Under the placeholder setting a Langfuse string is not resolved, even to a
+// body the project already holds: nothing new is kept alive (#6).
+func TestExtractMediaPlaceholderLeavesLangfuseStrings(t *testing.T) {
+	reference := "@@@langfuseMedia:type=image/png|id=HELD|source=base64_data_uri@@@"
+	export := otlptest.SpanWith("langfuse.observation.input", mustJSON(t, []any{
+		map[string]any{"type": "image_url", "image_url": map[string]any{"url": reference}}}))
+	found := mapping.ExtractMedia(export, mapping.MediaOptions{
+		Placeholder: true,
+		Resolve:     func(string) (string, int64, bool) { return strings.Repeat("ab", 32), 10, true },
+	})
+	if found.Any() || len(found.Refs) != 0 || len(found.Resolved) != 0 {
+		t.Fatalf("placeholder resolved a Langfuse string: refs %v, resolved %v", found.Refs, found.Resolved)
+	}
+	if got := mustJSON(t, inputOf(t, export)); !strings.Contains(got, reference) {
+		t.Errorf("input = %s, want the SDK's string as sent", got)
+	}
 }

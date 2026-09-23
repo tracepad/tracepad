@@ -536,7 +536,7 @@ func (s *Store) Observation(projectID, traceID, id string) (*ObservationRow, err
 	if !rows.Next() {
 		return nil, rows.Err()
 	}
-	return s.scanObservation(rows, WithIO)
+	return s.scanObservation(rows, WithIO, nil)
 }
 
 // Statistics grouping (spec 004 #8). The first two group traces by when they

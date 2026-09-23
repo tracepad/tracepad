@@ -10,6 +10,7 @@ import (
 
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
 	tracepb "go.opentelemetry.io/proto/otlp/trace/v1"
+	"google.golang.org/protobuf/encoding/protojson"
 )
 
 // Media (spec 041): images and files taken out of the JSON at ingest, stored
@@ -86,13 +87,16 @@ type MediaResult struct {
 	// Refs are the distinct (body, trace) pairs: every extracted body and
 	// every resolved Langfuse upload, for the traces whose spans carried it.
 	Refs []MediaRef
-	// Changed reports, per ResourceSpans, whether the walk rewrote it —
-	// what decides whether the raw body has to be re-encoded at all.
-	Changed []bool
+	// Resolved are the bodies a Langfuse reference string was rewritten
+	// to: read outside the write, so the write checks they are still there.
+	Resolved []string
+	// Rewrites are, per ResourceSpans, the values the walk replaced — what
+	// decides whether the raw body is rewritten at all, and where.
+	Rewrites Rewrites
 }
 
 // Any reports whether the walk rewrote anything.
-func (r *MediaResult) Any() bool { return anyTrue(r.Changed) }
+func (r *MediaResult) Any() bool { return r.Rewrites.Any() }
 
 // SHAs lists every body the export now points at, once each: what the raw
 // batch's own refs are (Decision 12).
@@ -114,6 +118,23 @@ func (r *MediaResult) SHAs() []string {
 	return out
 }
 
+// Rewrites is what a walk replaced in each ResourceSpans of an export: the
+// values, and where each sits in the element's JSON, so that a JSON body is
+// spliced rather than re-encoded (spec 041 #5).
+type Rewrites [][]jsonEdit
+
+// Changed reports, per ResourceSpans, whether the walk rewrote it.
+func (r Rewrites) Changed() []bool {
+	out := make([]bool, len(r))
+	for i, edits := range r {
+		out[i] = len(edits) > 0
+	}
+	return out
+}
+
+// Any reports whether the walk rewrote anything.
+func (r Rewrites) Any() bool { return anyTrue(r.Changed()) }
+
 // ExtractMedia walks every attribute of an export — resource, scope, span and
 // event — and replaces each recognised media value with a reference, in place.
 func ExtractMedia(resourceSpans []*tracepb.ResourceSpans, opts MediaOptions) *MediaResult {
@@ -124,7 +145,7 @@ func ExtractMedia(resourceSpans []*tracepb.ResourceSpans, opts MediaOptions) *Me
 		refs:     map[MediaRef]bool{},
 		resolved: map[string]resolvedMedia{},
 	}
-	w.res.Changed = rewriteMedia(resourceSpans, w)
+	w.res.Rewrites = rewriteMedia(resourceSpans, w)
 	return w.res
 }
 
@@ -139,40 +160,49 @@ type mediaRewrite interface {
 	// entirety, media.
 	whole(s string) (map[string]any, bool)
 	// object is tried on every object before its fields are walked. It may
-	// rewrite the object in place through its fields (changed), answer a
-	// string that replaces the object whole, and stop the walk entering it.
-	object(f fields) (replacement string, changed, stop bool)
+	// rewrite the object in place through its fields, answer a string that
+	// replaces the object whole, and stop the walk entering it.
+	object(f fields) (replacement string, stop bool)
 	// decodes is the cheap look at a string before it is decoded as a JSON
 	// document to walk.
 	decodes(s string) bool
 }
 
+// The OTLP/JSON names of the containers a walk goes through, with the proto
+// spelling the decoder also accepts.
+var (
+	stepScopeSpans = memberOr("scopeSpans", "scope_spans")
+	stepAttributes = member("attributes")
+	stepValue      = member("value")
+	stepValues     = member("values")
+	stepArray      = memberOr("arrayValue", "array_value")
+	stepKvlist     = memberOr("kvlistValue", "kvlist_value")
+)
+
 // rewriteMedia runs a rewrite over every attribute of an export — resource,
-// scope, span and event — and reports, per ResourceSpans, whether it changed
-// anything.
-func rewriteMedia(resourceSpans []*tracepb.ResourceSpans, r mediaRewrite) []bool {
-	changed := make([]bool, len(resourceSpans))
+// scope, span and event — and answers, per ResourceSpans, what it replaced.
+func rewriteMedia(resourceSpans []*tracepb.ResourceSpans, r mediaRewrite) Rewrites {
+	rewrites := make(Rewrites, len(resourceSpans))
 	for i, rs := range resourceSpans {
 		if rs == nil {
 			continue
 		}
-		visit := func(traces []string, kvs []*commonpb.KeyValue) {
+		sink := &editSink{}
+		visit := func(traces []string, kvs []*commonpb.KeyValue, path ...jsonStep) {
 			r.enter(traces)
-			if rewriteAttributes(r, kvs) {
-				changed[i] = true
-			}
+			rewriteAttributes(r, kvs, within(path, stepAttributes), sink)
 		}
 		if resource := rs.GetResource(); resource != nil {
-			visit(tracesOf(rs.GetScopeSpans()...), resource.Attributes)
+			visit(tracesOf(rs.GetScopeSpans()...), resource.Attributes, member("resource"))
 		}
-		for _, ss := range rs.GetScopeSpans() {
+		for s, ss := range rs.GetScopeSpans() {
 			if ss == nil {
 				continue
 			}
 			if scope := ss.GetScope(); scope != nil {
-				visit(tracesOf(ss), scope.Attributes)
+				visit(tracesOf(ss), scope.Attributes, stepScopeSpans, element(s), member("scope"))
 			}
-			for _, span := range ss.GetSpans() {
+			for k, span := range ss.GetSpans() {
 				if span == nil {
 					continue
 				}
@@ -180,16 +210,18 @@ func rewriteMedia(resourceSpans []*tracepb.ResourceSpans, r mediaRewrite) []bool
 				if id := traceID(span.GetTraceId()); id != "" {
 					traces = []string{id}
 				}
-				visit(traces, span.Attributes)
-				for _, event := range span.GetEvents() {
+				at := []jsonStep{stepScopeSpans, element(s), member("spans"), element(k)}
+				visit(traces, span.Attributes, at...)
+				for e, event := range span.GetEvents() {
 					if event != nil {
-						visit(traces, event.Attributes)
+						visit(traces, event.Attributes, within(at, member("events"), element(e))...)
 					}
 				}
 			}
 		}
+		rewrites[i] = sink.edits
 	}
-	return changed
+	return rewrites
 }
 
 // tracesOf lists the distinct trace ids of the spans under some scopes: the
@@ -208,62 +240,74 @@ func tracesOf(scopes ...*tracepb.ScopeSpans) []string {
 	return out
 }
 
-func rewriteAttributes(r mediaRewrite, kvs []*commonpb.KeyValue) bool {
-	changed := false
-	for _, kv := range kvs {
-		if kv != nil && rewriteAnyValue(r, kv.Value) {
-			changed = true
+// rewriteAttributes walks a list of key-values whose JSON array sits at path.
+func rewriteAttributes(r mediaRewrite, kvs []*commonpb.KeyValue, path []jsonStep, sink *editSink) {
+	for i, kv := range kvs {
+		if kv != nil {
+			rewriteAnyValue(r, kv.Value, within(path, element(i), stepValue), sink)
 		}
 	}
-	return changed
 }
 
-// rewriteAnyValue rewrites one OTLP value in place and reports whether it did.
-func rewriteAnyValue(r mediaRewrite, v *commonpb.AnyValue) bool {
+// anyValueJSON is an edit's value for an OTLP value: its protojson, compacted
+// so that the spliced bytes are stable.
+func anyValueJSON(v *commonpb.AnyValue) func() ([]byte, error) {
+	return func() ([]byte, error) {
+		encoded, err := protojson.Marshal(v)
+		if err != nil {
+			return nil, err
+		}
+		var out bytes.Buffer
+		if err := json.Compact(&out, encoded); err != nil {
+			return nil, err
+		}
+		return out.Bytes(), nil
+	}
+}
+
+// rewriteAnyValue rewrites one OTLP value, whose JSON sits at path, in place.
+func rewriteAnyValue(r mediaRewrite, v *commonpb.AnyValue, path []jsonStep, sink *editSink) {
 	if v == nil {
-		return false
+		return
 	}
 	switch value := v.Value.(type) {
 	case *commonpb.AnyValue_StringValue:
 		if ref, ok := r.whole(value.StringValue); ok {
 			v.Value = otlpValue(ref).Value
-			return true
+			sink.add(path, anyValueJSON(v))
+			return
 		}
 		if !r.decodes(value.StringValue) {
-			return false
+			return
 		}
-		rewritten, ok := rewriteDocument(r, value.StringValue)
-		if ok {
+		if rewritten, ok := rewriteDocument(r, value.StringValue); ok {
 			value.StringValue = rewritten
+			sink.add(path, anyValueJSON(v))
 		}
-		return ok
 	case *commonpb.AnyValue_ArrayValue:
-		changed := false
-		for _, item := range value.ArrayValue.GetValues() {
-			if rewriteAnyValue(r, item) {
-				changed = true
-			}
+		for i, item := range value.ArrayValue.GetValues() {
+			rewriteAnyValue(r, item, within(path, stepArray, stepValues, element(i)), sink)
 		}
-		return changed
 	case *commonpb.AnyValue_KvlistValue:
 		kvs := value.KvlistValue.GetValues()
-		replacement, changed, stop := r.object(kvlistFields(kvs))
+		list := within(path, stepKvlist)
+		replacement, stop := r.object(kvlistFields(kvs, list, sink))
 		if replacement != "" {
 			v.Value = &commonpb.AnyValue_StringValue{StringValue: replacement}
-			return true
+			sink.add(path, anyValueJSON(v))
+			return
 		}
-		if stop {
-			return changed
+		if !stop {
+			rewriteAttributes(r, kvs, within(list, stepValues), sink)
 		}
-		return rewriteAttributes(r, kvs) || changed
 	}
-	return false
 }
 
 // rewriteDocument is a string attribute that holds a JSON document: decoded,
-// walked, and re-encoded only when something in it was replaced. A document
-// that was, whole, one reference goes back to the string it replaced rather
-// than to that string's JSON encoding.
+// walked, and — only when something in it was replaced — spliced, so that
+// everything but the replaced values stays as the client wrote it. A
+// document that was, whole, one reference goes back to the string it
+// replaced rather than to that string's JSON encoding.
 func rewriteDocument(r mediaRewrite, s string) (string, bool) {
 	trimmed := strings.TrimSpace(s)
 	if trimmed == "" || (trimmed[0] != '{' && trimmed[0] != '[') {
@@ -273,54 +317,63 @@ func rewriteDocument(r mediaRewrite, s string) (string, bool) {
 	if !ok {
 		return "", false
 	}
-	rewritten, changed := rewriteJSON(r, document)
-	if !changed {
-		return "", false
-	}
-	if text, isText := rewritten.(string); isText {
+	sink := &editSink{}
+	replacement, replaced := rewriteJSON(r, document, nil, sink)
+	if text, isText := replacement.(string); replaced && isText {
 		return text, true
 	}
-	return encodeDocument(rewritten)
+	if len(sink.edits) == 0 {
+		return "", false
+	}
+	lead := strings.Index(s, trimmed)
+	spliced, err := spliceJSON([]byte(trimmed), sink.edits)
+	if err != nil {
+		// Unreachable for a document the decoder read; the rewritten tree
+		// is still a true document, only not the client's spelling of it.
+		return encodeDocument(replacement)
+	}
+	return s[:lead] + string(spliced) + s[lead+len(trimmed):], true
 }
 
-// rewriteJSON walks a decoded document, answering its replacement.
-func rewriteJSON(r mediaRewrite, v any) (any, bool) {
+// rewriteJSON walks a decoded document whose value sits at path. It answers
+// the value that replaces this one whole, when there is one; a value
+// rewritten inside is changed in place, and the sink told where.
+func rewriteJSON(r mediaRewrite, v any, path []jsonStep, sink *editSink) (any, bool) {
 	switch value := v.(type) {
 	case string:
 		if ref, ok := r.whole(value); ok {
 			return ref, true
 		}
 	case []any:
-		changed := false
 		for i, item := range value {
-			if replacement, ok := rewriteJSON(r, item); ok {
+			at := within(path, element(i))
+			if replacement, ok := rewriteJSON(r, item, at, sink); ok {
 				value[i] = replacement
-				changed = true
+				sink.add(at, encodedJSON(replacement))
 			}
 		}
-		return value, changed
 	case map[string]any:
-		replacement, changed, stop := r.object(mapFields(value))
+		replacement, stop := r.object(mapFields(value, path, sink))
 		if replacement != "" {
 			return replacement, true
 		}
 		if stop {
-			return value, changed
+			return v, false
 		}
 		for key, item := range value {
-			if replacement, ok := rewriteJSON(r, item); ok {
+			at := within(path, member(key))
+			if replacement, ok := rewriteJSON(r, item, at, sink); ok {
 				value[key] = replacement
-				changed = true
+				sink.add(at, encodedJSON(replacement))
 			}
 		}
-		return value, changed
 	}
 	return v, false
 }
 
 // fields reads and writes the fields of an object over either spelling of
 // one: a decoded JSON map or an OTLP kvlist. A value set is a string or a
-// reference object.
+// reference object, and the sink is told where it went.
 type fields struct {
 	has    func(key string) bool
 	text   func(key string) (string, bool)
@@ -329,7 +382,8 @@ type fields struct {
 	set    func(key string, value any)
 }
 
-func mapFields(m map[string]any) fields {
+// mapFields is a decoded object whose value sits at path in its document.
+func mapFields(m map[string]any, path []jsonStep, sink *editSink) fields {
 	return fields{
 		has: func(key string) bool {
 			_, ok := m[key]
@@ -348,47 +402,61 @@ func mapFields(m map[string]any) fields {
 			if !ok {
 				return fields{}, false
 			}
-			return mapFields(inner), true
+			return mapFields(inner, within(path, member(key)), sink), true
 		},
-		set: func(key string, value any) { m[key] = value },
+		set: func(key string, value any) {
+			m[key] = value
+			sink.add(within(path, member(key)), encodedJSON(value))
+		},
 	}
 }
 
-func kvlistFields(kvs []*commonpb.KeyValue) fields {
-	find := func(key string) *commonpb.KeyValue {
-		for _, kv := range kvs {
+// kvlistFields is a kvlist whose KeyValueList sits at path in the export.
+func kvlistFields(kvs []*commonpb.KeyValue, path []jsonStep, sink *editSink) fields {
+	find := func(key string) (int, *commonpb.KeyValue) {
+		for i, kv := range kvs {
 			if kv != nil && kv.Key == key {
-				return kv
+				return i, kv
 			}
 		}
-		return nil
+		return -1, nil
+	}
+	valueOf := func(key string) *commonpb.AnyValue {
+		_, kv := find(key)
+		return kv.GetValue()
 	}
 	return fields{
-		has: func(key string) bool { return find(key) != nil },
+		has: func(key string) bool {
+			_, kv := find(key)
+			return kv != nil
+		},
 		text: func(key string) (string, bool) {
-			v, ok := find(key).GetValue().GetValue().(*commonpb.AnyValue_StringValue)
+			v, ok := valueOf(key).GetValue().(*commonpb.AnyValue_StringValue)
 			if !ok {
 				return "", false
 			}
 			return v.StringValue, true
 		},
 		flag: func(key string) (bool, bool) {
-			v, ok := find(key).GetValue().GetValue().(*commonpb.AnyValue_BoolValue)
+			v, ok := valueOf(key).GetValue().(*commonpb.AnyValue_BoolValue)
 			if !ok {
 				return false, false
 			}
 			return v.BoolValue, true
 		},
 		nested: func(key string) (fields, bool) {
-			v, ok := find(key).GetValue().GetValue().(*commonpb.AnyValue_KvlistValue)
+			i, kv := find(key)
+			v, ok := kv.GetValue().GetValue().(*commonpb.AnyValue_KvlistValue)
 			if !ok {
 				return fields{}, false
 			}
-			return kvlistFields(v.KvlistValue.GetValues()), true
+			return kvlistFields(v.KvlistValue.GetValues(),
+				within(path, stepValues, element(i), stepValue, stepKvlist), sink), true
 		},
 		set: func(key string, value any) {
-			if kv := find(key); kv != nil {
+			if i, kv := find(key); kv != nil {
 				kv.Value = otlpValue(value)
+				sink.add(within(path, stepValues, element(i), stepValue), anyValueJSON(kv.Value))
 			}
 		},
 	}
@@ -476,14 +544,14 @@ func (w *mediaWalk) decodes(s string) bool {
 // object writes a reference into the slot of an object shape. An object of
 // a media shape whose bytes stay — too small, malformed, or an unresolved
 // Langfuse id — needs no further walk either.
-func (w *mediaWalk) object(f fields) (string, bool, bool) {
+func (w *mediaWalk) object(f fields) (string, bool) {
 	holder, key, mime, ok := mediaSlot(f)
 	if !ok {
-		return "", false, false
+		return "", false
 	}
 	data, isText := holder.text(key)
 	if !isText {
-		return "", false, false
+		return "", false
 	}
 	var ref map[string]any
 	if _, id, isRef := parseLangfuseRef(data); isRef {
@@ -491,11 +559,10 @@ func (w *mediaWalk) object(f fields) (string, bool, bool) {
 	} else {
 		ref = w.reference(mime, data)
 	}
-	if ref == nil {
-		return "", false, true
+	if ref != nil {
+		holder.set(key, ref)
 	}
-	holder.set(key, ref)
-	return "", true, true
+	return "", true
 }
 
 // wholeString matches a string that is, in its entirety, a data URL or a
@@ -542,13 +609,18 @@ func (w *mediaWalk) reference(mime, data string) map[string]any {
 // langfuse resolves a Langfuse upload to the body this project holds, or nil
 // to leave the reference string as the client wrote it (#9).
 func (w *mediaWalk) langfuse(mime, id string) map[string]any {
-	if w.opts.Resolve == nil {
+	// Under the placeholder setting nothing is kept (#6): resolving would
+	// give an upload stored before the switch a new trace to live for.
+	if w.opts.Resolve == nil || w.opts.Placeholder {
 		return nil
 	}
 	found, asked := w.resolved[id]
 	if !asked {
 		found.sha, found.size, found.ok = w.opts.Resolve(id)
 		w.resolved[id] = found
+		if found.ok {
+			w.res.Resolved = append(w.res.Resolved, found.sha)
+		}
 	}
 	if !found.ok {
 		return nil
@@ -586,7 +658,9 @@ func (w *mediaWalk) warn(reason string) {
 // ingest would have written. Nothing else is touched — a data URL a payload
 // still holds names no body the store has.
 func ResolveLangfuseMedia(v any, resolve func(mediaID string) (sha string, size int64, ok bool)) (any, bool) {
-	return rewriteJSON(langfuseRead(resolve), v)
+	sink := &editSink{}
+	replacement, replaced := rewriteJSON(langfuseRead(resolve), v, nil, sink)
+	return replacement, replaced || len(sink.edits) > 0
 }
 
 type langfuseRead func(mediaID string) (sha string, size int64, ok bool)
@@ -603,22 +677,20 @@ func (r langfuseRead) whole(s string) (map[string]any, bool) {
 	return r.reference(mime, id)
 }
 
-func (r langfuseRead) object(f fields) (string, bool, bool) {
+func (r langfuseRead) object(f fields) (string, bool) {
 	holder, key, mime, ok := mediaSlot(f)
 	if !ok {
-		return "", false, false
+		return "", false
 	}
 	data, _ := holder.text(key)
 	_, id, isRef := parseLangfuseRef(data)
 	if !isRef {
-		return "", false, false
+		return "", false
 	}
-	ref, ok := r.reference(mime, id)
-	if !ok {
-		return "", false, true
+	if ref, ok := r.reference(mime, id); ok {
+		holder.set(key, ref)
 	}
-	holder.set(key, ref)
-	return "", true, true
+	return "", true
 }
 
 func (r langfuseRead) reference(mime, id string) (map[string]any, bool) {

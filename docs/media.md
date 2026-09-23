@@ -72,7 +72,9 @@ pipeline sends to five generations, or a retry sends twice, is one body.
 The raw archive is stored the same way: the body kept for replay is the export
 as sent, **with the media factored out** — each extracted value replaced by
 the same reference — so a picture is not kept a second time for the raw
-window. See [ingest.md](ingest.md#what-is-kept-and-for-how-long).
+window. Only those values change: a JSON body keeps its fields, its key order
+and its spacing, including inside a JSON document an attribute holds, and
+fields a newer client sends that this server does not know yet. See [ingest.md](ingest.md#what-is-kept-and-for-how-long).
 
 Measured on one trace with a 1 MiB photograph sent to five generations:
 
@@ -163,7 +165,7 @@ picture sent through the bridge is kept like any other:
 
 | Call | What it does |
 |---|---|
-| `POST /api/public/media` | The SDK asks where to upload. `mediaId` is the SDK's own derivation of the hash, which it checks. `uploadUrl` is `null` when this project already holds the body — the second identical picture sends nothing. |
+| `POST /api/public/media` | The SDK asks where to upload, for a `traceId` of 32 lower-case hex digits. `mediaId` is the SDK's own derivation of the hash, which it checks. `uploadUrl` is `null` when this project already holds the body — the second identical picture sends nothing. |
 | `PUT` the `uploadUrl` | The bytes. The URL is presigned: the SDK sends no credential with this request, so the URL carries a signed token instead, good for an hour — across a restart, because the key it is signed with is kept in the database. The body must match the declared length and SHA-256, or nothing is stored. |
 | `PATCH /api/public/media/{mediaId}` | The SDK's report on the upload; a failure is logged. |
 | `GET /api/public/media/{mediaId}` | The Langfuse record of a body, with a `url` to `GET /api/v1/media/{sha256}` — which, like every read, needs a key of the project. |
@@ -180,8 +182,10 @@ the API, the interface, the CLI, MCP — answers the reference in its place, for
 the trace the upload was made for. The stored payload is not rewritten, and the
 raw archive and the export keep the string as the client sent it.
 
-Under the `placeholder` setting nothing is uploaded, and the string is left as
-the client wrote it, as the evidence of what the client meant.
+Under the `placeholder` setting nothing is uploaded and no string is resolved
+— not even to a picture the project stored before it switched, which would
+otherwise gain a new trace to live for — and the string is left as the client
+wrote it, as the evidence of what the client meant.
 
 A body only another project holds is still asked for: skipping the upload on a
 hash alone would let any project adopt another's picture by naming it. If the

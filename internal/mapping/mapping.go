@@ -383,7 +383,7 @@ func firstHexID(a *attrs, claim bool, keys ...string) rankedValue {
 			continue
 		}
 		id, valid := raw.(string)
-		if !valid || !isHexID(id) {
+		if !valid || !IsHexID(id) {
 			continue
 		}
 		if claim {
@@ -394,8 +394,8 @@ func firstHexID(a *attrs, claim bool, keys ...string) rankedValue {
 	return rankedValue{}
 }
 
-// isHexID reports the shape of a store-issued id: 32 lower-case hex digits.
-func isHexID(s string) bool {
+// IsHexID reports the shape of a store-issued id: 32 lower-case hex digits.
+func IsHexID(s string) bool {
 	if len(s) != 32 {
 		return false
 	}

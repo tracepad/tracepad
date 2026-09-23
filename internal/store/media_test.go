@@ -3,6 +3,7 @@ package store
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"strings"
 	"testing"
 
@@ -347,5 +348,25 @@ func TestMediaFirstTypeWins(t *testing.T) {
 	file, err := f.store.MediaFor(f.project.ID, body.SHA256)
 	if err != nil || file == nil || file.MimeType != "image/png" {
 		t.Fatalf("stored type = %+v, %v; want the first", file, err)
+	}
+}
+
+// A batch whose Langfuse strings were resolved to a body that a deletion
+// collected before the write is refused whole, so the caller can take it
+// again with the strings kept (spec 041 #9).
+func TestMediaResolvedBodyGone(t *testing.T) {
+	f := newSweepFixture(t)
+	gone := mediaBody(14, 4096)
+	batch := &IngestBatch{
+		ProjectID: f.project.ID,
+		Traces:    []*model.Trace{{ID: hexTrace(1)}},
+		MediaRefs: []MediaRef{{SHA256: gone.SHA256, TraceID: hexTrace(1)}},
+		Resolved:  []string{gone.SHA256},
+	}
+	if err := f.writer.Submit(t.Context(), batch); !errors.Is(err, ErrMediaGone) {
+		t.Fatalf("submit = %v, want ErrMediaGone", err)
+	}
+	if got := f.count(t, `SELECT COUNT(*) FROM traces WHERE project_id = ?`, f.project.ID); got != 0 {
+		t.Errorf("%d traces written by a refused batch", got)
 	}
 }

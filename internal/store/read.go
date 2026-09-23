@@ -105,7 +105,7 @@ func (s *Store) Trace(projectID, id string) (*TraceRow, error) {
 	if err != nil {
 		return nil, err
 	}
-	metadata, err := s.readPayload(metadataID, projectID, id)
+	metadata, err := s.readPayload(metadataID, projectID, id, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -194,8 +194,9 @@ func (s *Store) Observations(projectID, traceID string, io IOMode) ([]*Observati
 	defer rows.Close()
 
 	var out []*ObservationRow
+	reads := &mediaReads{}
 	for rows.Next() {
-		row, err := s.scanObservation(rows, io)
+		row, err := s.scanObservation(rows, io, reads)
 		if err != nil {
 			return nil, err
 		}
@@ -204,7 +205,9 @@ func (s *Store) Observations(projectID, traceID string, io IOMode) ([]*Observati
 	return out, rows.Err()
 }
 
-func (s *Store) scanObservation(rows *sql.Rows, io IOMode) (*ObservationRow, error) {
+// scanObservation reads one row; reads memoises the Langfuse resolution of
+// Decision 21 across the rows of one read, and may be nil.
+func (s *Store) scanObservation(rows *sql.Rows, io IOMode, reads *mediaReads) (*ObservationRow, error) {
 	var (
 		row             ObservationRow
 		parent          sql.NullString
@@ -257,13 +260,13 @@ func (s *Store) scanObservation(rows *sql.Rows, io IOMode) (*ObservationRow, err
 	if !io {
 		return &row, nil
 	}
-	if row.Input, err = s.readPayload(inputID, row.ProjectID, row.TraceID); err != nil {
+	if row.Input, err = s.readPayload(inputID, row.ProjectID, row.TraceID, reads); err != nil {
 		return nil, err
 	}
-	if row.Output, err = s.readPayload(outputID, row.ProjectID, row.TraceID); err != nil {
+	if row.Output, err = s.readPayload(outputID, row.ProjectID, row.TraceID, reads); err != nil {
 		return nil, err
 	}
-	metadata, err := s.readPayload(metadataID, row.ProjectID, row.TraceID)
+	metadata, err := s.readPayload(metadataID, row.ProjectID, row.TraceID, reads)
 	if err != nil {
 		return nil, err
 	}
@@ -289,7 +292,7 @@ func (s *Store) FileSize() int64 {
 // readPayload resolves a payload reference into the value it holds, for one
 // trace of a project: a Langfuse reference string the trace's upload has
 // since caught up with reads as the reference (spec 041, Decision 21).
-func (s *Store) readPayload(id sql.NullInt64, projectID, traceID string) (any, error) {
+func (s *Store) readPayload(id sql.NullInt64, projectID, traceID string, reads *mediaReads) (any, error) {
 	if !id.Valid {
 		return nil, nil
 	}
@@ -310,7 +313,10 @@ func (s *Store) readPayload(id sql.NullInt64, projectID, traceID string) (any, e
 		return nil, fmt.Errorf("decode payload %d: %w", id.Int64, err)
 	}
 	if bytes.Contains(raw, langfuseMarker) {
-		return s.resolveLangfuseMedia(out, projectID, traceID)
+		if reads == nil {
+			reads = &mediaReads{}
+		}
+		return reads.resolve(s, out, projectID, traceID)
 	}
 	return out, nil
 }

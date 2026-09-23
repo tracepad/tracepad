@@ -543,9 +543,8 @@ func (u *ProjectUpdate) apply(tx *sql.Tx) error {
 		}
 	}
 	if u.Media != nil {
-		if *u.Media != MediaStore && *u.Media != MediaPlaceholder {
-			return &Rejection{Kind: RejectInvalid, Message: fmt.Sprintf(
-				"media must be %q or %q, got %q", MediaStore, MediaPlaceholder, *u.Media)}
+		if err := CheckMediaSetting(*u.Media); err != nil {
+			return &Rejection{Kind: RejectInvalid, Message: err.Error()}
 		}
 		if _, err := tx.Exec(`UPDATE projects SET media = ? WHERE id = ?`, *u.Media, u.ProjectID); err != nil {
 			return fmt.Errorf("set media setting: %w", err)

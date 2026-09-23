@@ -120,41 +120,48 @@ func (s *Server) handleTraces(w http.ResponseWriter, r *http.Request) {
 	// walk rewrites the attributes in place, so the payloads the mapper
 	// writes carry references, and the raw body below is this same export
 	// with the media factored out (#5).
-	media := mapping.ExtractMedia(resourceSpans, s.mediaOptions(project))
-	result := mapping.Map(resourceSpans)
-	result.NoteUnreadable(unreadable)
-	batch := &store.IngestBatch{
-		ProjectID:    project.ID,
-		Traces:       result.Traces,
-		Observations: result.Observations,
-	}
-	rawMedia := false
-	if s.storeRaw && media.Any() {
-		factored, err := decoded.Encode(media.Changed)
-		if err != nil {
-			// The body as it arrived is still a true archive, only a
-			// heavier one; losing the batch over it would not be.
-			slog.Error("could not factor media out of the raw body; keeping it as received",
-				"project", project.Name, "err", err)
-		} else {
-			body, rawMedia = factored, true
+	received := body
+	prepare := func(decoded *mapping.ExportBody, opts mapping.MediaOptions) (*store.IngestBatch, *mapping.Result) {
+		resourceSpans := decoded.ResourceSpans
+		media := mapping.ExtractMedia(resourceSpans, opts)
+		result := mapping.Map(resourceSpans)
+		result.NoteUnreadable(unreadable)
+		batch := &store.IngestBatch{
+			ProjectID:    project.ID,
+			Traces:       result.Traces,
+			Observations: result.Observations,
+			Resolved:     media.Resolved,
 		}
-	}
-	batch.Media, batch.MediaRefs, batch.RawMedia = mediaRows(media, result.Traces, rawMedia)
-	if s.storeRaw {
-		batch.Raw = &store.RawBatch{
-			ReceivedAt: time.Now().UnixNano(),
-			Dialect:    result.Dialect,
-			// As received, never converted (spec 019 #8): a JSON batch
-			// is kept as JSON, and the column is what tells a replay
-			// which it is holding. The parsed media type rather than
-			// the header verbatim, so a charset parameter does not
-			// end up on the wire of a replay.
-			ContentType:     mediaType,
-			ContentEncoding: encoding,
-			Body:            body,
+		archived, rawMedia := received, false
+		if s.storeRaw && media.Any() {
+			factored, err := decoded.Encode(media.Rewrites)
+			if err != nil {
+				// The body as it arrived is still a true archive, only a
+				// heavier one; losing the batch over it would not be.
+				slog.Error("could not factor media out of the raw body; keeping it as received",
+					"project", project.Name, "err", err)
+			} else {
+				archived, rawMedia = factored, true
+			}
 		}
+		batch.Media, batch.MediaRefs, batch.RawMedia = mediaRows(media, result.Traces, rawMedia)
+		if s.storeRaw {
+			batch.Raw = &store.RawBatch{
+				ReceivedAt: time.Now().UnixNano(),
+				Dialect:    result.Dialect,
+				// As received, never converted (spec 019 #8): a JSON batch
+				// is kept as JSON, and the column is what tells a replay
+				// which it is holding. The parsed media type rather than
+				// the header verbatim, so a charset parameter does not
+				// end up on the wire of a replay.
+				ContentType:     mediaType,
+				ContentEncoding: encoding,
+				Body:            archived,
+			}
+		}
+		return batch, result
 	}
+	batch, result := prepare(decoded, s.mediaOptions(project))
 	if batch.Empty() {
 		// Every span was skipped and raw storage is off: there is
 		// nothing to commit, and the export is still a success. The
@@ -165,7 +172,21 @@ func (s *Server) handleTraces(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.writer.Submit(r.Context(), batch); err != nil {
+	err = s.writer.Submit(r.Context(), batch)
+	if errors.Is(err, store.ErrMediaGone) {
+		// A Langfuse upload the walk rewrote a string to was collected
+		// before the write (spec 041 #9). Taken again without resolving,
+		// the batch keeps the SDK's strings as sent — the evidence of the
+		// picture — instead of a reference to nothing.
+		again, decodeErr := mapping.DecodeExportBody(received, jsonEncoding)
+		if decodeErr == nil {
+			opts := s.mediaOptions(project)
+			opts.Resolve = nil
+			batch, result = prepare(again, opts)
+			err = s.writer.Submit(r.Context(), batch)
+		}
+	}
+	if err != nil {
 		switch {
 		case errors.Is(err, store.ErrWriterBusy):
 			// Backpressure the exporter can act on: OTLP clients

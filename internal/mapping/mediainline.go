@@ -13,14 +13,14 @@ type MediaFetch func(sha string) (mime string, body []byte, ok bool)
 
 // InlineMedia is ExtractMedia run backwards, for the way out (spec 041 #8): a
 // reference becomes media again, so a batch leaving for another backend is
-// whole. It reports, per ResourceSpans, whether it rewrote anything.
+// whole. It answers what it rewrote, per ResourceSpans, for the body's splice.
 //
 // Each shape comes back as it was sent (Decision 19): a reference in the slot
 // of an object shape becomes the base64 that slot held, and any other
 // reference — which replaced a whole string — becomes a data URL. Posted back
 // to a Tracepad, either is extracted to the same reference. A reference with
 // `"stored": false`, or whose body is gone, stays a reference.
-func InlineMedia(resourceSpans []*tracepb.ResourceSpans, fetch MediaFetch) []bool {
+func InlineMedia(resourceSpans []*tracepb.ResourceSpans, fetch MediaFetch) Rewrites {
 	return rewriteMedia(resourceSpans, &mediaInline{fetch: fetch, bodies: map[string]inlineBody{}})
 }
 
@@ -43,33 +43,31 @@ func (in *mediaInline) whole(string) (map[string]any, bool) { return nil, false 
 
 func (in *mediaInline) decodes(s string) bool { return strings.Contains(s, MediaRefKey) }
 
-func (in *mediaInline) object(f fields) (string, bool, bool) {
+func (in *mediaInline) object(f fields) (string, bool) {
 	if holder, key, _, ok := mediaSlot(f); ok {
 		if slot, isObject := holder.nested(key); isObject {
 			if sha, _, stored, isRef := refOf(slot); isRef {
-				body, ok := in.body(sha, stored)
-				if !ok {
-					return "", false, true
+				if body, ok := in.body(sha, stored); ok {
+					holder.set(key, body.encoded)
 				}
-				holder.set(key, body.encoded)
-				return "", true, true
+				return "", true
 			}
 		}
 	}
 	sha, mime, stored, isRef := refOf(f)
 	if !isRef {
-		return "", false, false
+		return "", false
 	}
 	body, ok := in.body(sha, stored)
 	if !ok {
-		return "", false, true
+		return "", true
 	}
 	// The type the reference carries wins over the stored one: it is what
 	// this client declared (spec 041, edge cases).
 	if mime == "" {
 		mime = body.mime
 	}
-	return "data:" + mime + ";base64," + body.encoded, true, true
+	return "data:" + mime + ";base64," + body.encoded, true
 }
 
 func (in *mediaInline) body(sha string, stored bool) (inlineBody, bool) {

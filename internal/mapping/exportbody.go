@@ -1,12 +1,9 @@
 package mapping
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
 
 	tracepb "go.opentelemetry.io/proto/otlp/trace/v1"
-	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 )
@@ -41,15 +38,18 @@ func DecodeExportBody(body []byte, asJSON bool) (*ExportBody, error) {
 	return decodeExportProto(body)
 }
 
-// Encode writes the body back with the changed ResourceSpans re-encoded in
-// place. Nothing changed is the source itself.
-func (b *ExportBody) Encode(changed []bool) ([]byte, error) {
+// Encode writes the body back with the rewritten ResourceSpans in place.
+// Nothing rewritten is the source itself.
+func (b *ExportBody) Encode(rewrites Rewrites) ([]byte, error) {
+	changed := rewrites.Changed()
 	if !anyTrue(changed) {
 		return b.source, nil
 	}
 	if b.asJSON {
-		return b.encodeJSON(changed)
+		return b.encodeJSON(rewrites)
 	}
+	// Protobuf keeps what it does not know: a decoded ResourceSpans carries
+	// its unknown fields, and marshals them back.
 	var out []byte
 	previous := 0
 	for i, span := range b.spans {
@@ -68,78 +68,27 @@ func (b *ExportBody) Encode(changed []bool) ([]byte, error) {
 	return append(out, b.source[previous:]...), nil
 }
 
-// encodeJSON splices the re-encoded elements into the source where the old
-// ones stood. The envelope, the whitespace and every other element stay the
-// client's bytes: a re-marshalled document would compact them, reorder the
-// envelope's keys and escape every `<` of a prompt.
-func (b *ExportBody) encodeJSON(changed []bool) ([]byte, error) {
-	spans, err := jsonElementSpans(b.source, b.key)
-	if err != nil {
-		return nil, fmt.Errorf("re-encode resource spans: %w", err)
-	}
-	var out []byte
-	previous := 0
+// encodeJSON splices the rewritten values into the source where the old ones
+// stood, and nothing else. JSON decoding drops the fields it does not know,
+// so a re-encoded element would lose them; spliced, the envelope, the
+// whitespace, the unknown fields and every value the walk did not touch stay
+// the client's bytes.
+func (b *ExportBody) encodeJSON(rewrites Rewrites) ([]byte, error) {
+	var edits []jsonEdit
 	for i, position := range b.positions {
-		if i >= len(changed) || !changed[i] {
-			continue
+		if i >= len(rewrites) {
+			break
 		}
-		if position >= len(spans) {
-			return nil, fmt.Errorf("re-encode resource spans: element %d is not in the body", position)
-		}
-		encoded, err := protojson.Marshal(b.ResourceSpans[i])
-		if err != nil {
-			return nil, fmt.Errorf("re-encode resource spans: %w", err)
-		}
-		converted, err := base64IDsToHex(encoded)
-		if err != nil {
-			return nil, fmt.Errorf("re-encode resource spans: %w", err)
-		}
-		span := spans[position]
-		out = append(out, b.source[previous:span[0]]...)
-		out = append(out, converted...)
-		previous = span[1]
-	}
-	return append(out, b.source[previous:]...), nil
-}
-
-// jsonElementSpans finds, in a JSON export, where each element of the
-// resource spans array under key sits: from its first byte to its end. A key
-// written twice is read the way decoding reads it, the last one winning.
-func jsonElementSpans(body []byte, key string) ([][2]int, error) {
-	decoder := json.NewDecoder(bytes.NewReader(body))
-	if token, err := decoder.Token(); err != nil || token != json.Delim('{') {
-		return nil, fmt.Errorf("the body is not a JSON object")
-	}
-	var spans [][2]int
-	for decoder.More() {
-		token, err := decoder.Token()
-		if err != nil {
-			return nil, err
-		}
-		if name, _ := token.(string); name != key {
-			var skip json.RawMessage
-			if err := decoder.Decode(&skip); err != nil {
-				return nil, err
-			}
-			continue
-		}
-		if token, err := decoder.Token(); err != nil || token != json.Delim('[') {
-			return nil, fmt.Errorf("%s is not an array", key)
-		}
-		spans = spans[:0]
-		for decoder.More() {
-			var element json.RawMessage
-			if err := decoder.Decode(&element); err != nil {
-				return nil, err
-			}
-			end := int(decoder.InputOffset())
-			spans = append(spans, [2]int{end - len(element), end})
-		}
-		if _, err := decoder.Token(); err != nil {
-			return nil, err
+		prefix := []jsonStep{member(b.key), element(position)}
+		for _, edit := range rewrites[i] {
+			edits = append(edits, jsonEdit{path: within(prefix, edit.path...), value: edit.value})
 		}
 	}
-	return spans, nil
+	out, err := spliceJSON(b.source, edits)
+	if err != nil {
+		return nil, fmt.Errorf("splice resource spans: %w", err)
+	}
+	return out, nil
 }
 
 func anyTrue(values []bool) bool {

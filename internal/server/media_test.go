@@ -465,4 +465,40 @@ func TestLangfuseMediaPlaceholder(t *testing.T) {
 	expectStatus(t, h.send(t, "POST", "/api/public/media", map[string]any{
 		"contentType": "image/png", "contentLength": 8,
 		"sha256Hash": base64.StdEncoding.EncodeToString(sum[:])}), 400)
+	// A trace id in any other spelling than the one traces are stored
+	// under could never be settled or resolved.
+	for _, bad := range []string{strings.ToUpper(probeTrace), "not-a-trace", probeTrace + "00"} {
+		expectStatus(t, h.send(t, "POST", "/api/public/media", map[string]any{
+			"traceId": bad, "contentType": "image/png", "contentLength": 8,
+			"sha256Hash": base64.StdEncoding.EncodeToString(sum[:]), "field": "input"}), 400)
+	}
+}
+
+// A picture the project stored before switching to placeholder is not given
+// a new trace to live for: under the setting, ingest resolves no Langfuse
+// string, and the string is kept as sent (#6, #9).
+func TestLangfuseMediaPlaceholderResolvesNothing(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	picture := testPicture(20000, 9)
+	sum := sha256.Sum256(picture)
+	mediaID, upload := h.langfuseAsk(t, picture, probeTrace, testSecret)
+	if upload == nil || h.langfusePut(t, *upload, picture, base64.StdEncoding.EncodeToString(sum[:])) != 200 {
+		t.Fatal("the upload under store did not land")
+	}
+	expectStatus(t, h.send(t, "PATCH", "/api/v1/projects/"+h.project.ID, map[string]any{"media": "placeholder"}), 200)
+
+	other := strings.Repeat("cd", 16)
+	reference := "@@@langfuseMedia:type=image/png|id=" + mediaID + "|source=base64_data_uri@@@"
+	input, _ := json.Marshal([]any{map[string]any{"type": "image_url", "image_url": map[string]any{"url": reference}}})
+	export := otlptest.SpanWith("langfuse.observation.input", string(input))
+	export[0].ScopeSpans[0].Spans[0].TraceId, _ = hex.DecodeString(other)
+	expectStatus(t, h.post(t, "/api/public/otel/v1/traces", encodeExport(t, export)), 200)
+
+	rec := h.get(t, "/api/v1/observations/"+probeSpan+"/io?trace_id="+other)
+	expectStatus(t, rec, 200)
+	// Read as sent, too: a ref for the new trace would have been resolved
+	// on read (Decision 21), so the string also says none was written.
+	if !strings.Contains(rec.Body.String(), reference) {
+		t.Errorf("input = %.300s, want the SDK's string as sent", rec.Body.String())
+	}
 }

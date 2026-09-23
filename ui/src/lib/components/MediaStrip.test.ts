@@ -33,11 +33,21 @@ describe('the media strip', () => {
 		expect(open.querySelector('img')?.getAttribute('src')).toBe('blob:tracepad/1');
 		expect(screen.getByText('image/png · 20 KB')).toBeInTheDocument();
 
+		// The tab draws a URL of its own, which outlives the strip's and goes
+		// when the tab does.
+		vi.mocked(URL.createObjectURL).mockReturnValueOnce('blob:tracepad/tab');
 		const view = document.implementation.createHTMLDocument('');
-		const opened = vi.spyOn(window, 'open').mockReturnValue({ document: view } as unknown as Window);
+		const listeners: Record<string, () => void> = {};
+		const opened = vi.spyOn(window, 'open').mockReturnValue({
+			document: view,
+			addEventListener: (type: string, listener: () => void) => (listeners[type] = listener)
+		} as unknown as Window);
 		await userEvent.click(open);
 		expect(opened).toHaveBeenCalledWith('', '_blank');
-		expect(view.querySelector('img')?.getAttribute('src')).toBe('blob:tracepad/1');
+		expect(view.querySelector('img')?.getAttribute('src')).toBe('blob:tracepad/tab');
+		expect(URL.revokeObjectURL).not.toHaveBeenCalledWith('blob:tracepad/tab');
+		listeners.pagehide?.();
+		expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:tracepad/tab');
 	});
 
 	it('offers anything else as a download, fetched only when asked', async () => {

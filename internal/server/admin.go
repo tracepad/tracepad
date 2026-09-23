@@ -399,9 +399,10 @@ func (s *Server) handlePatchProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if request.Media != nil {
-		if *request.Media != store.MediaStore && *request.Media != store.MediaPlaceholder {
-			writeError(w, http.StatusBadRequest, fmt.Sprintf(
-				`media must be %q or %q`, store.MediaStore, store.MediaPlaceholder))
+		// Asked here as well as in the write, so that a bad value is a 400
+		// before a shrinking window's dry run rather than after it.
+		if err := store.CheckMediaSetting(*request.Media); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		update.Media = request.Media

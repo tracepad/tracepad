@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -121,6 +122,28 @@ func writeChannelRef(tx *sql.Tx, projectID, sha, traceID string, now int64) (boo
 	return err == nil, err
 }
 
+// ErrMediaGone refuses an ingest whose payloads were rewritten to a body a
+// deletion collected after the rewrite read it. The caller takes the batch
+// again without resolving, so the client's reference string is kept rather
+// than a reference to nothing.
+var ErrMediaGone = errors.New("a resolved media body was collected before the write")
+
+// mediaStillThere checks, inside the ingest's transaction, that every body a
+// Langfuse string was resolved to still exists.
+func mediaStillThere(tx *sql.Tx, shas []string) error {
+	for _, sha := range shas {
+		var one int
+		err := tx.QueryRow(`SELECT 1 FROM media WHERE sha256 = ?`, sha).Scan(&one)
+		if err == sql.ErrNoRows {
+			return ErrMediaGone
+		}
+		if err != nil {
+			return fmt.Errorf("check media %s: %w", sha, err)
+		}
+	}
+	return nil
+}
+
 // writeRawMediaRefs records the bodies a raw batch points at (Decision 12).
 func writeRawMediaRefs(tx *sql.Tx, batchID int64, shas []string) error {
 	for _, sha := range shas {
@@ -140,20 +163,10 @@ func writeRawMediaRefs(tx *sql.Tx, batchID int64, shas []string) error {
 func dropTraceMedia(tx *sql.Tx, projectID string, traceIDs []any) (int64, int64, error) {
 	var shas []any
 	err := eachIn(traceIDs, func(batch []any) error {
-		rows, err := tx.Query(`SELECT DISTINCT sha256 FROM media_refs WHERE project_id = ? AND trace_id IN (`+
+		found, err := queryColumn[string](tx, `SELECT DISTINCT sha256 FROM media_refs WHERE project_id = ? AND trace_id IN (`+
 			placeholders(len(batch))+`)`, append([]any{projectID}, batch...)...)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var sha string
-			if err := rows.Scan(&sha); err != nil {
-				return err
-			}
-			shas = append(shas, sha)
-		}
-		return rows.Err()
+		shas = append(shas, found...)
+		return err
 	})
 	if err != nil {
 		return 0, 0, fmt.Errorf("find the traces' media: %w", err)
@@ -172,20 +185,10 @@ func dropTraceMedia(tx *sql.Tx, projectID string, traceIDs []any) (int64, int64,
 func dropRawMedia(tx *sql.Tx, batchIDs []any) (int64, int64, error) {
 	var shas []any
 	err := eachIn(batchIDs, func(batch []any) error {
-		rows, err := tx.Query(`SELECT DISTINCT sha256 FROM media_raw_refs WHERE raw_batch_id IN (`+
+		found, err := queryColumn[string](tx, `SELECT DISTINCT sha256 FROM media_raw_refs WHERE raw_batch_id IN (`+
 			placeholders(len(batch))+`)`, batch...)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var sha string
-			if err := rows.Scan(&sha); err != nil {
-				return err
-			}
-			shas = append(shas, sha)
-		}
-		return rows.Err()
+		shas = append(shas, found...)
+		return err
 	})
 	if err != nil {
 		return 0, 0, fmt.Errorf("find the raw batches' media: %w", err)
@@ -317,11 +320,43 @@ func (s *Store) MediaByLangfuseID(projectID, mediaID string) (*MediaInfo, error)
 // payload's bytes before anything is decoded for it.
 var langfuseMarker = []byte(mapping.LangfuseMarker)
 
-// resolveLangfuseMedia answers a payload with each Langfuse reference string
-// the trace now has a body for read as the reference (Decision 21): the
-// bodies the trace's refs name, keyed by the SDK's id for them. The stored
-// payload is not rewritten, and the raw archive keeps the string as sent.
-func (s *Store) resolveLangfuseMedia(v any, projectID, traceID string) (any, error) {
+// mediaReads resolves, for one read, the Langfuse reference strings a
+// trace's upload has since caught up with (Decision 21). The bodies a trace's
+// refs hold are asked for once per trace, however many of its payloads carry
+// a string.
+type mediaReads struct {
+	held map[[2]string]map[string]MediaInfo
+}
+
+// resolve answers a payload with each Langfuse reference string the trace
+// now has a body for read as the reference: the bodies the trace's refs name,
+// keyed by the SDK's id for them. The stored payload is not rewritten, and
+// the raw archive keeps the string as sent.
+func (m *mediaReads) resolve(s *Store, v any, projectID, traceID string) (any, error) {
+	key := [2]string{projectID, traceID}
+	held, asked := m.held[key]
+	if !asked {
+		var err error
+		if held, err = s.traceMediaIDs(projectID, traceID); err != nil {
+			return nil, err
+		}
+		if m.held == nil {
+			m.held = map[[2]string]map[string]MediaInfo{}
+		}
+		m.held[key] = held
+	}
+	if len(held) == 0 {
+		return v, nil
+	}
+	out, _ := mapping.ResolveLangfuseMedia(v, func(id string) (string, int64, bool) {
+		info, ok := held[id]
+		return info.SHA256, info.Size, ok
+	})
+	return out, nil
+}
+
+// traceMediaIDs lists the bodies a trace's refs name, by their Langfuse id.
+func (s *Store) traceMediaIDs(projectID, traceID string) (map[string]MediaInfo, error) {
 	rows, err := s.db.Query(
 		`SELECT m.sha256, m.size FROM media_refs r JOIN media m ON m.sha256 = r.sha256
 		  WHERE r.project_id = ? AND r.trace_id = ?`, projectID, traceID)
@@ -337,17 +372,7 @@ func (s *Store) resolveLangfuseMedia(v any, projectID, traceID string) (any, err
 		}
 		held[MediaIDFor(info.SHA256)] = info
 	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	if len(held) == 0 {
-		return v, nil
-	}
-	out, _ := mapping.ResolveLangfuseMedia(v, func(id string) (string, int64, bool) {
-		info, ok := held[id]
-		return info.SHA256, info.Size, ok
-	})
-	return out, nil
+	return held, rows.Err()
 }
 
 // MediaSummary is the system endpoint's media figure (#11): the bodies a
@@ -472,8 +497,8 @@ func (s *Store) orphanMediaRefs(before int64, limit int) ([]MediaOrphan, error) 
 // orphanMedia finds bodies no ref names at all — what a hand-edited database,
 // or a crash between two statements that should never have been two, would
 // leave. The scan reads the primary-key index, never a body.
-func (s *Store) orphanMedia(limit int) ([]string, error) {
-	rows, err := s.db.Query(
+func (s *Store) orphanMedia(limit int) ([]any, error) {
+	shas, err := queryColumn[string](s.db,
 		`SELECT sha256 FROM media m
 		  WHERE NOT EXISTS (SELECT 1 FROM media_refs r WHERE r.sha256 = m.sha256)
 		    AND NOT EXISTS (SELECT 1 FROM media_raw_refs rr WHERE rr.sha256 = m.sha256)
@@ -481,16 +506,7 @@ func (s *Store) orphanMedia(limit int) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("find orphaned media: %w", err)
 	}
-	defer rows.Close()
-	var out []string
-	for rows.Next() {
-		var sha string
-		if err := rows.Scan(&sha); err != nil {
-			return nil, err
-		}
-		out = append(out, sha)
-	}
-	return out, rows.Err()
+	return shas, nil
 }
 
 // MediaOrphan is one pending ref past the grace.
@@ -506,7 +522,7 @@ type MediaOrphan struct {
 // with any body the pass found with no ref at all.
 type mediaSweep struct {
 	Refs   []MediaOrphan
-	Bodies []string
+	Bodies []any
 
 	// Dropped counts the refs deleted, and Deleted the bodies collected.
 	Dropped int64
@@ -535,9 +551,7 @@ func (m *mediaSweep) apply(tx *sql.Tx) error {
 			return fmt.Errorf("settle media ref: %w", err)
 		}
 	}
-	for _, sha := range m.Bodies {
-		shas = append(shas, sha)
-	}
+	shas = append(shas, m.Bodies...)
 	count, _, err := collectMedia(tx, shas)
 	m.Deleted = count
 	return err
@@ -567,6 +581,15 @@ func (s *Store) serverKey(name string) ([]byte, error) {
 	return key, nil
 }
 
+// CheckMediaSetting is the one rule for a project's media setting (#6),
+// asked by the handler before a dry run and by the update inside its write.
+func CheckMediaSetting(setting string) error {
+	if setting != MediaStore && setting != MediaPlaceholder {
+		return fmt.Errorf("media must be %q or %q, got %q", MediaStore, MediaPlaceholder, setting)
+	}
+	return nil
+}
+
 // ValidMediaSHA reports a lower-case hex SHA-256, the only spelling a media
 // path accepts.
 func ValidMediaSHA(s string) bool {
@@ -577,22 +600,9 @@ func ValidMediaSHA(s string) bool {
 // the bodies only it pointed at (spec 041 #3). A body another project also
 // points at survives: the refs carry the project for exactly this.
 func dropProjectMedia(tx *sql.Tx, projectID string) error {
-	rows, err := tx.Query(`SELECT DISTINCT sha256 FROM media_refs WHERE project_id = ?`, projectID)
+	shas, err := queryColumn[string](tx, `SELECT DISTINCT sha256 FROM media_refs WHERE project_id = ?`, projectID)
 	if err != nil {
 		return fmt.Errorf("find a project's media: %w", err)
-	}
-	var shas []any
-	for rows.Next() {
-		var sha string
-		if err := rows.Scan(&sha); err != nil {
-			rows.Close()
-			return err
-		}
-		shas = append(shas, sha)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return err
 	}
 	if _, err := tx.Exec(`DELETE FROM media_refs WHERE project_id = ?`, projectID); err != nil {
 		return fmt.Errorf("delete a project's media refs: %w", err)
