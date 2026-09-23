@@ -52,7 +52,9 @@ def request(
     if params:
         # A list is a repeated name (`tag=a&tag=b`), the listing's own grammar.
         url += "?" + urllib.parse.urlencode(params, doseq=True)
-    payload = None if body is None else _encode(body)
+    # Raw UTF-8 like the other clients; a lone surrogate goes as its `\u` escape (spec 014 #32).
+    payload = None if body is None else json.dumps(body, ensure_ascii=False).encode(
+        "utf-8", "backslashreplace")
     call = urllib.request.Request(
         url,
         data=payload,
@@ -105,13 +107,3 @@ def max_age(headers: dict[str, str]) -> int:
                 return 0
     return 0
 
-
-def _encode(body: Any) -> bytes:
-    """The body as raw UTF-8 JSON, the way every other client sends it: a
-    non-ASCII string costs its bytes, not six per character of escape.
-
-    A lone surrogate has no UTF-8 form; `backslashreplace` writes it as the
-    `\\udcff` escape it would have had, which is valid JSON inside the string
-    that holds it, and leaves the rest of the body raw.
-    """
-    return json.dumps(body, ensure_ascii=False).encode("utf-8", "backslashreplace")
