@@ -424,7 +424,8 @@ API. This file routes; it does not duplicate what specs and docs say.
   still raises `ValueError` / throws / returns `ErrNoTrace` outside every
   span), a `score` by id is sent as ever (#1, #2), and an observation's ids
   with no trace behind them are `None` / `undefined` / `""` rather than
-  zeros (#3). Node's `Logger` gained an optional `debug` (#5).
+  zeros (#3). "Tracing off" is read from three facts — no `init`, a no-op
+  global provider, no recording span — and Node's line goes to OTel's `diag` (#7, #8).
 - ✅ Spec 038 (SDK parity) shipped: Python's `span(type=…)` and Node's
   `span(name, { type })` take the step's kind when it opens, as Go's
   `WithType` did (#1) — `type` on `span` only, so Node's `event` takes the

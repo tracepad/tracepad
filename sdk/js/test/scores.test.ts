@@ -1,8 +1,8 @@
 /** Scores: the queue, the timer and the batch (spec 032 #6). */
 
-import { ROOT_CONTEXT, context, trace } from '@opentelemetry/api';
+import { DiagLogLevel, ROOT_CONTEXT, context, diag, trace } from '@opentelemetry/api';
 import { AlwaysOffSampler, NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
-import { describe, expect, test, vi } from 'vitest';
+import { describe, expect, onTestFinished, test, vi } from 'vitest';
 
 import * as tracepad from '../src/index.js';
 import { setLogger } from '../src/log.js';
@@ -61,9 +61,17 @@ describe('the target', () => {
 });
 
 describe('tracing off: no init in this process (spec 039)', () => {
+  /** OTel's diagnostic logger at debug, where the line goes: ours exists only after init. */
+  function diagnostics(): () => string[] {
+    const lines: string[] = [];
+    const drop = () => undefined;
+    diag.setLogger({ debug: (message) => lines.push(message), verbose: drop, info: drop, warn: drop, error: drop }, DiagLogLevel.DEBUG);
+    onTestFinished(() => diag.disable());
+    return () => lines.filter((line) => line.startsWith('tracepad:'));
+  }
+
   test('a score without a target is dropped with a debug line, inside a span and outside one', async () => {
-    const debug: string[] = [];
-    setLogger({ warn: (message) => warnings.push(message), debug: (message) => debug.push(message) });
+    const debug = diagnostics();
     const { sent, queue } = recording();
     const ids = tracepad.span('handler', (step) => {
       tracepad.score('helpful', 1);
@@ -72,9 +80,9 @@ describe('tracing off: no init in this process (spec 039)', () => {
     tracepad.score('helpful', 1, { observation: true });
     await queue.flush(1000);
     expect(sent).toEqual([]);
-    expect(debug).toEqual([
-      'tracepad: score(): tracing is off (no init); "helpful" was dropped',
-      'tracepad: score(): tracing is off (no init); "helpful" was dropped',
+    expect(debug()).toEqual([
+      'tracepad: score(): tracing is off; "helpful" was dropped',
+      'tracepad: score(): tracing is off; "helpful" was dropped',
     ]);
     expect(warnings).toEqual([]);
     // No trace behind the span, no id (#3).
@@ -93,8 +101,7 @@ describe('tracing off: no init in this process (spec 039)', () => {
     // registering installs one, and disabling the tracer leaves no provider.
     new NodeTracerProvider().register();
     trace.disable();
-    const debug: string[] = [];
-    setLogger({ warn: (message) => warnings.push(message), debug: (message) => debug.push(message) });
+    const debug = diagnostics();
     const { sent, queue } = recording();
     const caller = { traceId: 'a'.repeat(32), spanId: 'b'.repeat(16), traceFlags: 1, isRemote: true };
     const ids = context.with(trace.setSpanContext(ROOT_CONTEXT, caller), () =>
@@ -107,7 +114,7 @@ describe('tracing off: no init in this process (spec 039)', () => {
     await queue.flush(1000);
     expect(ids).toEqual([undefined, undefined]);
     expect(sent).toEqual([]);
-    expect(debug).toHaveLength(1);
+    expect(debug()).toHaveLength(1);
   });
 
   test("without init, the application's own provider still scores (the spec's first edge case)", async () => {
@@ -131,6 +138,19 @@ describe('tracing off: no init in this process (spec 039)', () => {
     expect(() => tracepad.score('helpful', 1)).toThrow('no active span and no traceId');
   });
 
+  test("without init, an unregistered provider's recording span still scores (#8)", async () => {
+    // A provider wired into the framework and not registered globally; the
+    // context manager comes from a registration whose tracer is then disabled.
+    new NodeTracerProvider().register();
+    trace.disable();
+    const request = new NodeTracerProvider().getTracer('the.framework').startSpan('GET /answer');
+    const { sent, queue } = recording();
+    context.with(trace.setSpan(context.active(), request), () => tracepad.score('helpful', 1));
+    request.end();
+    await queue.flush(1000);
+    expect(sent).toEqual([[{ name: 'helpful', trace_id: request.spanContext().traceId, value: 1 }]]);
+  });
+
   test('without init, a sampled-out span keeps its ids: they are propagated whether or not kept', () => {
     new NodeTracerProvider({ sampler: new AlwaysOffSampler() }).register();
     const ids = tracepad.span('handler', (step) => {
@@ -141,22 +161,13 @@ describe('tracing off: no init in this process (spec 039)', () => {
     expect(ids[1]).toMatch(/^[0-9a-f]{16}$/);
   });
 
-  test('the default logger keeps debug lines off stdout', async () => {
-    vi.resetModules();
-    const pristine = await import('../src/log.js');
+  test('with no diagnostic logger the drop is silent: nothing on stdout, nothing in our logger', () => {
+    recording();
     const out = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     const debug = vi.spyOn(console, 'debug').mockImplementation(() => undefined);
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    pristine.debug('nothing to act on');
-    pristine.warn('something to act on');
+    expect(() => tracepad.score('helpful', 1)).not.toThrow();
     expect(out).not.toHaveBeenCalled();
     expect(debug).not.toHaveBeenCalled();
-    expect(warn).toHaveBeenCalledWith('tracepad: something to act on');
-  });
-
-  test('a logger without debug hears nothing', () => {
-    recording();
-    expect(() => tracepad.score('helpful', 1)).not.toThrow();
     expect(warnings).toEqual([]);
   });
 });

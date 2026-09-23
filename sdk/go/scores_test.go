@@ -133,16 +133,21 @@ func TestOutsideASpanWithoutATraceIDIsErrNoTrace(t *testing.T) {
 }
 
 // withoutInit is a process that never called Init (spec 039): the global
-// provider is OTel's no-op one, and the default logger — where the package
-// logs before Init — is recorded at debug level.
+// provider is a no-op, and the default logger — where the package logs before
+// Init — is recorded at debug level. A global still at the API's default is
+// left alone: the first SetTracerProvider in a binary delegates that default
+// for good, and a test should not be what spends it.
 func withoutInit(t *testing.T) *bytes.Buffer {
 	t.Helper()
 	fresh(t)
-	previous, logger := otel.GetTracerProvider(), slog.Default()
-	otel.SetTracerProvider(noop.NewTracerProvider())
-	logs := &bytes.Buffer{}
+	if !tracingOff() {
+		previous := otel.GetTracerProvider()
+		otel.SetTracerProvider(noop.NewTracerProvider())
+		t.Cleanup(func() { otel.SetTracerProvider(previous) })
+	}
+	logger, logs := slog.Default(), &bytes.Buffer{}
 	slog.SetDefault(slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
-	t.Cleanup(func() { otel.SetTracerProvider(previous); slog.SetDefault(logger) })
+	t.Cleanup(func() { slog.SetDefault(logger) })
 	return logs
 }
 
@@ -261,6 +266,52 @@ func TestWithTracingOffAnEmptyTraceIDIsNoTarget(t *testing.T) {
 	flushed(t, q)
 	if len(s.batches) != 0 {
 		t.Errorf("batches = %v, want nothing", s.batches)
+	}
+}
+
+// A provider the application wired into its framework without registering it
+// globally: the handler's span records, so a score in its context goes to
+// that trace — tracing is on here, whatever the global says (spec 039 #8).
+func TestWithoutInitAnUnregisteredProvidersSpanStillScores(t *testing.T) {
+	withoutInit(t)
+	t.Setenv("TRACEPAD_HOST", testHost)
+	t.Setenv("TRACEPAD_API_KEY", testKey)
+	provider := sdktrace.NewTracerProvider()
+	t.Cleanup(func() { _ = provider.Shutdown(context.Background()) })
+	s := &sender{}
+	q := queue(t, s, nil)
+	ctx, request := provider.Tracer("the.framework").Start(context.Background(), "GET /answer")
+	if err := Score(ctx, "helpful", WithValue(1)); err != nil {
+		t.Fatal(err)
+	}
+	request.End()
+	flushed(t, q)
+	if len(s.batches) != 1 || s.batches[0][0]["trace_id"] != request.SpanContext().TraceID().String() {
+		t.Errorf("batches = %v", s.batches)
+	}
+}
+
+// The trace package's deprecated no-op is as off as the noop package's.
+func TestTheDeprecatedNoopProviderIsTracingOff(t *testing.T) {
+	withoutInit(t)
+	previous := otel.GetTracerProvider()
+	otel.SetTracerProvider(trace.NewNoopTracerProvider()) //nolint:staticcheck
+	t.Cleanup(func() { otel.SetTracerProvider(previous) })
+	ctx, step := Span(context.Background(), "handler")
+	if err := Score(ctx, "helpful", WithValue(1)); err != nil || step.TraceID() != "" {
+		t.Errorf("err = %v, trace id = %q", err, step.TraceID())
+	}
+}
+
+// With tracing on, an empty WithTraceID is a target that names nothing — an
+// id stored while tracing was off, a missing column — and not a licence to
+// score the context's trace instead.
+func TestWithTracingOnAnEmptyTraceIDIsErrNoTrace(t *testing.T) {
+	setup(t)
+	ctx, step := Span(context.Background(), "handler")
+	defer step.End()
+	if err := Score(ctx, "judge", WithValue(1), WithTraceID("")); !errors.Is(err, ErrNoTrace) {
+		t.Errorf("err = %v, want ErrNoTrace", err)
 	}
 }
 

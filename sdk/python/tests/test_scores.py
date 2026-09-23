@@ -170,6 +170,37 @@ def test_without_init_the_application_s_own_provider_still_scores(sender: Sender
         tracepad.score("helpful", 1)
 
 
+def test_without_init_an_unregistered_provider_s_span_still_scores(sender: Sender) -> None:
+    # A provider wired into the framework and not set globally: the handler's
+    # span records, so a score inside it goes to that trace (spec 039 #8).
+    from opentelemetry.sdk.trace import TracerProvider
+
+    framework = TracerProvider().get_tracer("the.framework")
+    made = queue(sender)
+    with framework.start_as_current_span("GET /answer") as request:
+        tracepad.score("helpful", 1)
+    made.flush(2.0)
+
+    assert sender.batches[0][0]["trace_id"] == format(request.get_span_context().trace_id, "032x")
+
+
+def test_otel_sdk_disabled_is_tracing_off(
+    sender: Sender, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The SDK's own provider hands out no-op tracers under OTEL_SDK_DISABLED.
+    from opentelemetry.sdk.trace import TracerProvider
+
+    monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
+    otel_api.set_tracer_provider(TracerProvider())
+    made = queue(sender)
+    with tracepad.span("handler") as observation:
+        tracepad.score("helpful", 1)
+    made.flush(2.0)
+
+    assert observation.trace_id is None
+    assert sender.batches == []
+
+
 def test_without_init_a_sampled_out_span_keeps_its_ids() -> None:
     # A sampler that drops a trace leaves its ids real: they are propagated
     # and correlated whether or not the spans are kept (spec 039 #7).

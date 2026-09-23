@@ -227,7 +227,8 @@ func Span(ctx context.Context, name string, opts ...SpanOption) (context.Context
 	for _, opt := range opts {
 		opt.applyUpdate(&f)
 	}
-	return open(ctx, name, &f)
+	o := &Observation{}
+	return open(ctx, name, &f, o), o
 }
 
 // Event is a zero-duration observation: something that happened, not
@@ -239,16 +240,17 @@ func Event(ctx context.Context, name string, opts ...SpanOption) (context.Contex
 		opt.applyUpdate(&f)
 	}
 	at := time.Now()
-	ctx, o := open(ctx, name, &f, trace.WithTimestamp(at))
-	o.at = at
-	return ctx, o
+	o := &Observation{at: at}
+	return open(ctx, name, &f, o, trace.WithTimestamp(at)), o
 }
 
-// open starts the span with the attributes the fields write.
-func open(ctx context.Context, name string, f *fields, start ...trace.SpanStartOption) (context.Context, *Observation) {
+// open starts the span with the attributes the fields write, into o — the
+// one place an Observation, or the one a Call embeds, is made.
+func open(ctx context.Context, name string, f *fields, o *Observation, start ...trace.SpanStartOption) context.Context {
 	start = append(start, trace.WithAttributes(observationAttributes(f)...))
-	ctx, span := tracer().Start(ctx, name, start...)
-	return ctx, &Observation{span: span, traced: span.SpanContext().IsValid() && !tracingOff()}
+	ctx, o.span = tracer().Start(ctx, name, start...)
+	o.traced = o.span.SpanContext().IsValid() && !tracingOff()
+	return ctx
 }
 
 // Update writes observation attributes on the context's current span,

@@ -94,10 +94,12 @@ def init(
 
 
 def tracing_off() -> bool:
-    """No `init` and no provider of the application's own: every span is the API's
-    no-op — an invalid context, or a propagated caller's echoed (spec 039 #7)."""
+    """No `init` and no working provider of the application's own: every span is the
+    API's no-op — an invalid context, or a propagated caller's echoed (spec 039 #7).
+    `OTEL_SDK_DISABLED` makes the SDK's own provider hand out no-op tracers."""
     no_op = (otel.ProxyTracerProvider, otel.NoOpTracerProvider)
-    return not _initialized and isinstance(otel.get_tracer_provider(), no_op)
+    disabled = os.environ.get("OTEL_SDK_DISABLED", "").strip().lower() == "true"
+    return not _initialized and (disabled or isinstance(otel.get_tracer_provider(), no_op))
 
 
 def _resource(config: Config) -> Any:

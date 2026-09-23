@@ -40,7 +40,7 @@ tracepad.init();
 | `environment` | `TRACEPAD_ENVIRONMENT` | The deployment this process is |
 | `release` | `TRACEPAD_RELEASE` | The version of this deployment — per trace, [`updateTrace({ version })`](#the-trace-around-a-step) |
 | `export` | — | `false` attaches everything except the exporter |
-| `logger` | — | Where the warnings go — and, if it has `debug`, the lines nothing needs to act on; `console.warn` by default, and no debug lines by default, since `console.debug` is stdout |
+| `logger` | — | Where the warnings go; `console` by default |
 
 The options win over the environment, and with neither a host nor a key the
 call throws `TracepadConfigError` — misconfiguration discovered as a `401` in
@@ -311,11 +311,12 @@ tracepad.score('grounded', 1, { dataType: 'boolean', observation: true });
 With no target given, the target is the trace of the active span — and its
 observation too when `observation: true`. Outside a span, with no `traceId`,
 the call throws: a score that silently went nowhere is the failure this API
-is worst at surfacing. In a process that never called `init` (or
-`spanProcessor`) and has no provider of its own the same call is dropped with a line to the logger's `debug`,
-when it has one (the default has none) — every span is a no-op there, and the
-call site is not wrong.
-A `traceId` given is scored either way.
+is worst at surfacing. Where nothing traces — no `init` (or `spanProcessor`),
+no provider of the application's own, no recording span in the context — the
+same call is dropped instead: every span is a no-op there, and the call site is
+not wrong. The line saying so goes to OpenTelemetry's own diagnostic logger at
+debug (`diag.setLogger(…, DiagLogLevel.DEBUG)`), since the package's logger is
+set by `init`. A `traceId` given is scored either way.
 
 `score` does not call the server and returns nothing to await. It enqueues,
 and a timer posts [`POST /api/v1/scores`](scores.md) in batches of up to 100
@@ -510,8 +511,8 @@ took `spanProcessor({ export: false })`.
 | `init` after configuration, `observe`, the callbacks, `update`, `end`, the exporter, the score queue, `flush` | Warned through the logger; never thrown into your code — a `flush` that ran out of time says so and resolves |
 | `prompt`, `deleteTrace`, `deleteTraces`, and every call of the harness above | Rejects with `TracepadError`, or `TracepadHTTPError` with `status` and `body` for a non-2xx |
 | `init` with no host or key | `TracepadConfigError` |
-| `score` with no target (initialised, outside every span), `attempt.score` before a trace, `run.item` with no id | `Error` — a programming error, visible at the call site |
-| `score` with no target, never initialised, no provider of its own | Nothing; a line to the logger's `debug` — tracing is off |
+| `score` with no target outside every span while tracing — initialised, or through a provider of the application's own —, `attempt.score` before a trace, `run.item` with no id | `Error` — a programming error, visible at the call site |
+| `score` with no target where nothing traces (no `init`, no provider of its own, no recording span) | Nothing; a `diag.debug` line — tracing is off |
 
 Instrumentation that can break the function it observes is worse than none.
 Everything the package warns about goes through `console.warn` with a

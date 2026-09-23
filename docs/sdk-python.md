@@ -262,9 +262,10 @@ tracepad.score("grounded", 1, data_type="boolean", observation=True)
 With no target given, the target is the trace of the active span — and its
 observation too when `observation=True`. Outside a span, with no `trace_id`,
 the call raises `ValueError`: a score that silently went nowhere is the failure
-this API is worst at surfacing. In a process that never called `init` and has
-no provider of its own the same call is dropped with a debug line instead —
-every span is a no-op there, and the call site is not wrong. A `trace_id` given is scored either way.
+this API is worst at surfacing. Where nothing traces — no `init`, no provider
+of the application's own (or `OTEL_SDK_DISABLED=true`), no recording span — the
+same call is dropped with a debug line instead: every span is a no-op there, and
+the call site is not wrong. A `trace_id` given is scored either way.
 
 `score` does not call the server. It enqueues, and a daemon thread posts
 [`POST /api/v1/scores`](scores.md) in batches of up to 100 every two seconds.
@@ -435,8 +436,8 @@ through another SDK wants its spans stamped all the same.
 | `init` after configuration, the decorators, `update`, `end`, the exporter, the score queue | Logged through the `tracepad` logger; never raised into your code |
 | `prompt`, `flush`, `delete_trace`, `delete_traces`, and every call of the harness above | `TracepadError`, or `TracepadHTTPError(status, body)` for a non-2xx |
 | `init` with no host or key | `TracepadConfigError` |
-| `score` with no target, initialised, outside every span | `ValueError` — a programming error, visible at the call site |
-| `score` with no target, never initialised, no provider of its own | Nothing; a debug line — tracing is off |
+| `score` with no target outside every span while tracing — initialised, or through a provider of the application's own | `ValueError` — a programming error, visible at the call site |
+| `score` with no target where nothing traces (no `init`, no provider of its own, no recording span) | Nothing; a debug line — tracing is off |
 
 Instrumentation that can break the function it observes is worse than none.
 Everything the package logs goes to the `tracepad` logger, which has no handler

@@ -236,10 +236,11 @@ tracepad.Score(ctx, "grounded", tracepad.WithValue(1), tracepad.WithDataType("bo
 With no target given, the target is the trace of the context's span — and its
 observation too with `OnObservation()`. Outside a span, with no
 `WithTraceID`, the call returns `ErrNoTrace`: a score that silently went
-nowhere is the failure this API is worst at surfacing. In a process that never
-called `Init` and has no provider of its own the same call returns `nil` and logs a debug line instead —
-tracing is off, every span is a no-op there, and the call site is not wrong. A
-`WithTraceID` is scored either way.
+nowhere is the failure this API is worst at surfacing, and so is an empty
+`WithTraceID` — an id stored while tracing was off, say. Where nothing traces —
+no `Init`, a no-op global provider, no recording span in the context — the same
+call returns `nil` and logs a debug line instead: every span is a no-op there,
+and the call site is not wrong. A `WithTraceID` is scored either way.
 
 `Score` does not call the server. It enqueues, and a goroutine posts
 [`POST /api/v1/scores`](scores.md) in batches of up to 100 every two seconds.
@@ -432,8 +433,8 @@ stamped and the run covers no case; the first `run.Item` says so in the log.
 | `Init` after configuration, `Span`, `Generation`, `Update`, `End`, the exporter, the score queue | Logged through `slog` (`WithLogger`, or the default logger); never a panic, never an error into your code |
 | `Prompt`, `Flush`, `shutdown`, `DeleteTrace`, `DeleteTraces`, and every call of the harness above | An error: `*HTTPError{Status, Body}` for a non-2xx answer, the transport's own otherwise |
 | `Init` with no host or key | `ErrConfig`, wrapped with what is missing |
-| `Score` with no target, initialised, outside every span | `ErrNoTrace` — a programming error, visible at the call site |
-| `Score` with no target, never initialised, no provider of its own | `nil`; a debug line — tracing is off |
+| `Score` with no target — or an empty `WithTraceID` — outside every span while tracing: initialised, or through a provider of the application's own | `ErrNoTrace` — a programming error, visible at the call site |
+| `Score` with no target where nothing traces (no `Init`, no-op global provider, no recording span) | `nil`; a debug line — tracing is off |
 
 Both sentinels are for `errors.Is`, and `*HTTPError` for `errors.As`.
 Instrumentation that can break the function it observes is worse than none.

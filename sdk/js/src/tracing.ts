@@ -140,8 +140,10 @@ function delegateOf(): Adoptable | undefined {
  * delegate hands it out — an identity a minifier cannot rename. The name is
  * the fallback for a second copy of the API, whose singleton is its own.
  */
+const NOOP = new ProxyTracerProvider().getDelegate();
+
 function isNoop(provider: TracerProvider): boolean {
-  return provider === new ProxyTracerProvider().getDelegate() || provider.constructor?.name === 'NoopTracerProvider';
+  return provider === NOOP || provider.constructor?.name === 'NoopTracerProvider';
 }
 
 function resourceFor(config: Config) {

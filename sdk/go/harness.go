@@ -179,7 +179,8 @@ func tracingOff() bool {
 	}
 	provider := otel.GetTracerProvider()
 	_, disabled := provider.(noop.TracerProvider)
-	return disabled || isDefault(provider)
+	// The deprecated no-op of the trace package is one comparable value.
+	return disabled || isDefault(provider) || provider == trace.NewNoopTracerProvider() //nolint:staticcheck
 }
 
 // Finish delivers everything the run produced, then closes it as finished.

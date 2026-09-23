@@ -10,11 +10,9 @@
 
 export interface Logger {
   warn(message: string): void;
-  /** Where the lines nothing needs to act on go, if it has one; the default does not (stdout). */
-  debug?(message: string): void;
 }
 
-let sink: Logger = { warn: (message) => console.warn(message) };
+let sink: Logger = console;
 
 export function setLogger(logger: Logger): void {
   sink = logger;
@@ -22,8 +20,4 @@ export function setLogger(logger: Logger): void {
 
 export function warn(message: string): void {
   sink.warn(`tracepad: ${message}`);
-}
-
-export function debug(message: string): void {
-  sink.debug?.(`tracepad: ${message}`);
 }
