@@ -66,6 +66,7 @@ ignore = ["A002", "A001"]
 
 # Named rather than discovered, so that the answer does not depend on which
 # directory `ruff` was run from: the package is first-party to the scripts
-# beside it in the repository, and `conftest` to the suite.
+# beside it in the repository, and `conftest` and `test_harness` (whose fake
+# store another test file reuses) to the suite.
 [tool.ruff.lint.isort]
-known-first-party = ["tracepad", "conftest"]
+known-first-party = ["tracepad", "conftest", "test_harness"]
