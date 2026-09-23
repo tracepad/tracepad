@@ -546,6 +546,33 @@ func TestIngestReportsWriteFailure(t *testing.T) {
 	}
 }
 
+// A version written in our own dialect is a version like any other: it
+// reaches the trace's column through the real ingest path, and the listing's
+// `version=` filter finds the trace by it (spec 038 #4).
+func TestIngestTracepadTraceVersionIsFilterable(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+
+	const traceID = "00112233445566778899aabbccddeeff" // the probe span's own
+	body, err := mapping.EncodeExportRequest(otlptest.SpanWith("tracepad.trace.version", "arm-b"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectStatus(t, h.post(t, "/v1/traces", body), http.StatusOK)
+
+	if got := listedIDs(t, h.get(t, "/api/v1/traces?version=arm-b")); len(got) != 1 || got[0] != traceID {
+		t.Errorf("?version=arm-b = %v, want the trace", got)
+	}
+	if got := listedIDs(t, h.get(t, "/api/v1/traces?version=arm-a")); len(got) != 0 {
+		t.Errorf("?version=arm-a = %v, want nothing", got)
+	}
+	trace := decodeJSON[struct {
+		Version string `json:"version"`
+	}](t, h.get(t, "/api/v1/traces/"+traceID))
+	if trace.Version != "arm-b" {
+		t.Errorf("version = %q, want the one the span wrote", trace.Version)
+	}
+}
+
 func rs2slice[T any](v T) []T { return []T{v} }
 
 // setRetention moves a project's trace window directly, for tests that need

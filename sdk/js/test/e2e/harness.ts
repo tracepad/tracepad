@@ -132,6 +132,7 @@ export interface Trace {
   tags?: string[];
   environment?: string;
   release?: string;
+  version?: string;
   total_cost?: number;
   error_count?: number;
   run_id?: string;

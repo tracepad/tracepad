@@ -1,7 +1,7 @@
 /** The callback-scoped shapes and the OpenAI-compatible reader (spec 032 #5). */
 
 import { SpanStatusCode } from '@opentelemetry/api';
-import { describe, expect, test, vi } from 'vitest';
+import { describe, expect, expectTypeOf, test, vi } from 'vitest';
 
 import * as attrs from '../src/attributes.js';
 import * as tracepad from '../src/index.js';
@@ -87,6 +87,108 @@ describe('span, event and generation', () => {
     expect(span.events[0]?.attributes?.['exception.type']).toBe('TypeError');
   });
 
+  test('a span takes its kind when it opens, and an unknown one warns once per spelling', () => {
+    // Spec 038 #1: one call, not a span retyped by update afterwards.
+    const seen = spans();
+    tracepad.span('docs-search', { type: 'retriever' }, () => undefined);
+    expect(seen.attributes('docs-search')[attrs.OBSERVATION_TYPE]).toBe('retriever');
+    expect(warnings).toEqual([]);
+
+    // Written all the same: the mapper keeps it in the observation's metadata.
+    // Once per spelling, whichever door: a step in a loop says it once.
+    for (let i = 0; i < 3; i++) {
+      tracepad.span('lookup', { type: 'retreiver' as never }, () => tracepad.update({ type: 'retreiver' as never }));
+    }
+    // Not at wrap time, usually module load, before `init({ logger })`: on the call.
+    const lookup = tracepad.observe(function lookupAgain() {}, { type: 'retriver' as never });
+    expect(warnings).toHaveLength(1);
+    lookup();
+    lookup();
+    expect(seen.all().map((s) => s.attributes[attrs.OBSERVATION_TYPE])).toEqual([
+      'retriever', 'retreiver', 'retreiver', 'retreiver', 'retriver', 'retriver',
+    ]);
+    expect(warnings).toEqual([
+      expect.stringContaining('"retreiver" is not one of the observation types'),
+      expect.stringContaining('"retriver" is not one of the observation types'),
+    ]);
+  });
+
+  test('a kind is remembered only once a logger could have been named', () => {
+    // Before `init`, the warning goes to the default sink and is said again
+    // after it, where the application's logger hears it (spec 038 #5).
+    const early = tracepad.observe(function early() {}, { type: 'retreiver' as never });
+    early();
+    early();
+    expect(warnings).toHaveLength(2);
+    spans();
+    early();
+    early();
+    expect(warnings).toHaveLength(3);
+  });
+
+  test('an empty kind is the default, at every door', () => {
+    // As Go's `WithType("")`: forwarding an optional kind opens a plain step,
+    // and `update` leaves the kind where it was.
+    const seen = spans();
+    tracepad.span('blank', { type: '' as never }, () => tracepad.update({ type: '' as never }));
+    tracepad.observe(function decorated() {}, { type: '' as never })();
+    expect(seen.attributes('blank')[attrs.OBSERVATION_TYPE]).toBe('span');
+    expect(seen.attributes('decorated')[attrs.OBSERVATION_TYPE]).toBe('span');
+    expect(warnings).toEqual([]);
+  });
+
+  test('span as a generation hands out a generation, with every option it was given', () => {
+    // Spec 038 #8: the one kind with a handle of its own, as `observe` does.
+    // Not in the type — `generation()` is the way in — but a caller without
+    // types gets the handle and loses none of the generation's options.
+    const seen = spans();
+    const options = { type: 'generation', model: 'gpt-4o-mini', prompt: { name: 'answer', version: 3 }, metadata: { attempt: 1 } };
+    tracepad.span('chat', options as never, (call) => {
+      (call as tracepad.Generation).end({ model: 'gpt-4o-mini-2026-04-01' });
+    });
+    expect(seen.attributes('chat')).toMatchObject({
+      [attrs.OBSERVATION_TYPE]: 'generation',
+      [attrs.REQUEST_MODEL]: 'gpt-4o-mini',
+      [attrs.PROMPT_NAME]: 'answer',
+      [attrs.PROMPT_VERSION]: 3,
+      [attrs.OBSERVATION_METADATA]: '{"attempt":1}',
+      [attrs.RESPONSE_MODEL]: 'gpt-4o-mini-2026-04-01',
+    });
+    expect(warnings).toEqual([]);
+  });
+
+  test('only span takes a kind: event and generation name theirs by being called', () => {
+    expectTypeOf<tracepad.GenerationOptions>().not.toHaveProperty('type');
+    expectTypeOf<tracepad.ObservationOptions>().not.toHaveProperty('type');
+    expectTypeOf<tracepad.SpanOptions>().toHaveProperty('type');
+    // @ts-expect-error — `generation()` is the way to a generation
+    tracepad.span('chat', { type: 'generation' }, () => undefined);
+    const seen = spans();
+    // @ts-expect-error — a generation's kind is `generation`
+    tracepad.generation('chat', { type: 'tool' }, () => undefined);
+    // A `SpanOptions` value still compiles for `event` (its base is a
+    // supertype), so the kind it carries is said out loud, not dropped — and
+    // the shape's own kind is nothing to say.
+    const options: tracepad.SpanOptions = { type: 'tool' };
+    tracepad.event('cache.miss', options, () => undefined);
+    tracepad.event('cache.miss', options, () => undefined); // once, as any kind warning
+    tracepad.event('cache.hit', { type: 'event' } as tracepad.SpanOptions, () => undefined);
+    tracepad.event('cache.hit', { type: '' } as never, () => undefined);
+    expect(seen.attributes('chat')[attrs.OBSERVATION_TYPE]).toBe('generation');
+    expect(seen.all().filter((s) => s.name !== 'chat').map((s) => s.attributes[attrs.OBSERVATION_TYPE])).toEqual([
+      'event', 'event', 'event', 'event',
+    ]);
+    expect(warnings).toEqual([
+      'tracepad: generation() takes no type; its kind is "generation" and "tool" is ignored',
+      'tracepad: event() takes no type; its kind is "event" and "tool" is ignored',
+    ]);
+  });
+  test('a generation takes metadata when it opens', () => {
+    const seen = spans();
+    tracepad.generation('chat', { model: 'gpt-4o-mini', metadata: { attempt: 2 } }, () => undefined);
+    expect(seen.attributes('chat')[attrs.OBSERVATION_METADATA]).toBe('{"attempt":2}');
+  });
+
   test('an event takes no time', () => {
     const seen = spans();
     tracepad.event('cache.miss', { metadata: { key: 'k' } }, () => undefined);
@@ -98,7 +200,10 @@ describe('span, event and generation', () => {
   test('update and updateTrace act on the current span, whoever opened it', () => {
     const seen = spans();
     tracepad.span('handler', () => {
-      tracepad.updateTrace({ name: 'support-chat', userId: 'u-42', sessionId: 's-7', tags: ['support'], metadata: { channel: 'web' } });
+      tracepad.updateTrace({
+        name: 'support-chat', userId: 'u-42', sessionId: 's-7', tags: ['support'], metadata: { channel: 'web' },
+        version: 'retrieval-v2',
+      });
       tracepad.update({ level: 'WARNING', statusMessage: 'retried once' });
     });
     expect(seen.attributes('handler')).toMatchObject({
@@ -107,9 +212,16 @@ describe('span, event and generation', () => {
       [attrs.SESSION_ID]: 's-7',
       [attrs.TRACE_TAGS]: '["support"]',
       [attrs.TRACE_METADATA]: '{"channel":"web"}',
+      [attrs.TRACE_VERSION]: 'retrieval-v2',
       [attrs.OBSERVATION_LEVEL]: 'WARNING',
       [attrs.OBSERVATION_STATUS_MESSAGE]: 'retried once',
     });
+  });
+
+  test('an empty version is no version, as in Go', () => {
+    const seen = spans();
+    tracepad.span('handler', () => tracepad.updateTrace({ version: '' }));
+    expect(seen.attributes('handler')[attrs.TRACE_VERSION]).toBeUndefined();
   });
 
   test('outside a span both warn and write nothing', () => {

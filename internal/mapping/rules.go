@@ -50,6 +50,7 @@ const (
 	tpTraceName              = "tracepad.trace.name"
 	tpTraceTags              = "tracepad.trace.tags"
 	tpTraceMetadata          = "tracepad.trace.metadata"
+	tpTraceVersion           = "tracepad.trace.version"
 	tpObsType                = "tracepad.observation.type"
 	tpObsLevel               = "tracepad.observation.level"
 	tpObsStatusMessage       = "tracepad.observation.status_message"
@@ -85,8 +86,11 @@ const (
 	lfObsPromptVersion = "langfuse.observation.prompt.version"
 )
 
-// Priority chains. First non-empty wins; every key in a chain is consumed,
-// hit or miss, because they all carry the same meaning.
+// Priority chains. First non-empty wins and is claimed; a runner-up stays in
+// the observation's metadata, because nothing is dropped (spec 002 #11). It
+// may be a second SDK's word for the same fact — `tracepad.*` beside the
+// `langfuse.*` key it mirrors — or a different fact from the same SDK, such as
+// the model that answered beside the one requested.
 var (
 	// trace.name falls back to the root span's name, which is not an
 	// attribute and is handled by the mapper.
@@ -119,8 +123,9 @@ var (
 	traceReleaseKeys = []string{lfRelease, "service.version"}
 
 	// Not `langfuse.observation.version`: that is the observation's own
-	// version and stays in metadata (spec 012 #4).
-	traceVersionKeys = []string{lfVersion}
+	// version and stays in metadata (spec 012 #4). The `tracepad` key is the
+	// one trace field spec 017 #3 missed (spec 038 #4).
+	traceVersionKeys = []string{lfVersion, tpTraceVersion}
 
 	// The run link (spec 014 #2). One key each: there is no dialect to
 	// fall back to, and the shape is checked before the key is claimed.

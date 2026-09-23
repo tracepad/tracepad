@@ -2,6 +2,7 @@ package tracepad
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -61,8 +62,15 @@ func WithMetadata(metadata any) SpanOption {
 // WithType is the kind of the step: one of the ten the store classifies by
 // (docs/ingest.md) — "span" by default, "event" for Event, "generation" for
 // Generation. Another spelling is kept in the observation's metadata, with a
-// warning.
-func WithType(typ string) SpanOption { return spanOption(func(f *fields) { f.typ = typ }) }
+// warning once per spelling. An empty kind is no kind: the default stands
+// (spec 038 #8).
+func WithType(typ string) SpanOption {
+	return spanOption(func(f *fields) {
+		if typ != "" {
+			f.typ = typ
+		}
+	})
+}
 
 // WithName renames the span.
 func WithName(name string) UpdateOption { return updateOption(func(f *fields) { f.name = name }) }
@@ -140,6 +148,36 @@ func update(span trace.Span, f *fields) {
 	span.SetAttributes(observationAttributes(f)...)
 }
 
+// warnedKinds are the spellings already warned about, so that a step in a
+// loop says it once (spec 038 #5). A spelling is remembered only once Init
+// has said where warnings go, and at most maxWarnedKinds of them: past that a
+// new one warns every time, which is what a kind computed at run time is.
+var warnedKinds = struct {
+	sync.Mutex
+	seen map[string]bool
+}{seen: map[string]bool{}}
+
+const maxWarnedKinds = 256
+
+func warnKind(typ string) {
+	if observationTypes[typ] {
+		return
+	}
+	def.mu.Lock()
+	ready := def.initialized
+	def.mu.Unlock()
+	warnedKinds.Lock()
+	seen := warnedKinds.seen[typ]
+	if !seen && ready && len(warnedKinds.seen) < maxWarnedKinds {
+		warnedKinds.seen[typ] = true
+	}
+	warnedKinds.Unlock()
+	if !seen {
+		def.log().Warn("tracepad: not one of the observation types the store classifies by; "+
+			"it will be kept in the observation's metadata", "type", typ)
+	}
+}
+
 // observationAttributes are the attributes a set of fields writes, whatever
 // the call that collected them.
 func observationAttributes(f *fields) []attribute.KeyValue {
@@ -150,10 +188,7 @@ func observationAttributes(f *fields) []attribute.KeyValue {
 		}
 	}
 	if f.typ != "" {
-		if !observationTypes[f.typ] {
-			def.log().Warn("tracepad: not one of the observation types the store classifies by; "+
-				"it will be kept in the observation's metadata", "type", f.typ)
-		}
+		warnKind(f.typ)
 		set(attrObservationType, f.typ)
 	}
 	if f.hasInput {
@@ -233,6 +268,7 @@ type TraceOption func(*traceFields)
 
 type traceFields struct {
 	name, userID, sessionID string
+	version                 string
 	tags                    []string
 	metadata                any
 	hasTags, hasMetadata    bool
@@ -246,6 +282,13 @@ func WithUserID(id string) TraceOption { return func(f *traceFields) { f.userID 
 
 // WithSessionID groups traces into a session.
 func WithSessionID(id string) TraceOption { return func(f *traceFields) { f.sessionID = id } }
+
+// WithTraceVersion is the version of this trace's own logic — a pipeline
+// revision, a prompt bundle, an experiment arm — beside WithRelease, the
+// deployment's version set once at Init (spec 038 #3).
+func WithTraceVersion(version string) TraceOption {
+	return func(f *traceFields) { f.version = version }
+}
 
 // WithTags are the trace's tags.
 func WithTags(tags ...string) TraceOption {
@@ -280,6 +323,7 @@ func UpdateTrace(ctx context.Context, opts ...TraceOption) {
 	set(attrTraceName, f.name)
 	set(attrUserID, f.userID)
 	set(attrSessionID, f.sessionID)
+	set(attrTraceVersion, f.version)
 	if f.hasTags {
 		if f.tags == nil {
 			f.tags = []string{}

@@ -164,6 +164,91 @@ def test_span_and_event(spans: Any) -> None:
     assert marker.parent.span_id == outer.context.span_id
 
 
+def test_a_span_takes_its_kind_when_it_opens(spans: Any) -> None:
+    # Spec 038 #1: one call, not a span retyped by `update` afterwards.
+    with tracepad.span("docs-search", type="retriever"):
+        pass
+
+    assert spans.attributes("docs-search")[attrs.OBSERVATION_TYPE] == "retriever"
+
+
+def test_an_unknown_kind_warns_and_is_still_written(
+    spans: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    # Written all the same: the mapper keeps it in the observation's metadata.
+    # Once per spelling, whichever door: a step in a loop says it once.
+    with caplog.at_level(logging.WARNING, logger="tracepad"):
+        for _ in range(3):
+            with tracepad.span("lookup", type="retreiver"):
+                tracepad.update(type="retreiver")
+
+        @tracepad.observe(type="retriver")
+        def lookup() -> None:
+            pass
+
+        # Not at decoration: the application may not have configured its
+        # logging yet. On the call.
+        assert caplog.text.count("is not one of the observation types") == 1
+        lookup()
+        lookup()
+
+    assert caplog.text.count("'retreiver' is not one of the observation types") == 1
+    assert caplog.text.count("'retriver' is not one of the observation types") == 1
+    kinds = [s.attributes[attrs.OBSERVATION_TYPE] for s in spans.all()]
+    assert kinds == ["retreiver"] * 3 + ["retriver"] * 2
+
+
+def test_a_kind_is_remembered_only_after_init(caplog: pytest.LogCaptureFixture) -> None:
+    # Before `init` the warning is said again after it (spec 038 #5).
+    with caplog.at_level(logging.WARNING, logger="tracepad"):
+        with tracepad.span("early", type="retreiver"):
+            pass
+        with tracepad.span("early", type="retreiver"):
+            pass
+    assert caplog.text.count("is not one of the observation types") == 2
+
+
+def test_an_empty_version_is_no_version(spans: Any) -> None:
+    # As Go's `UpdateTrace` skips an empty string.
+    with tracepad.span("handler"):
+        tracepad.update_trace(version="")
+
+    assert attrs.TRACE_VERSION not in spans.attributes("handler")
+
+
+def test_an_empty_kind_is_the_default(spans: Any, caplog: pytest.LogCaptureFixture) -> None:
+    # As Go's `WithType("")`, at every door: forwarding an optional kind opens
+    # a plain step, and `update` leaves the kind where it was.
+    with caplog.at_level(logging.WARNING, logger="tracepad"):
+        with tracepad.span("forwarded", type=None):
+            pass
+        with tracepad.span("blank", type=""):
+            tracepad.update(type="")
+
+        @tracepad.observe(type="")
+        def decorated() -> None:
+            pass
+
+        decorated()
+
+    assert caplog.text == ""
+    for name in ("forwarded", "blank", "decorated"):
+        assert spans.attributes(name)[attrs.OBSERVATION_TYPE] == "span"
+
+
+def test_span_as_a_generation_hands_out_a_generation(spans: Any) -> None:
+    # Spec 038 #8: the one kind with a handle of its own, as
+    # `@observe(type="generation")` does.
+    with tracepad.span("chat", type="generation", metadata={"attempt": 1}) as call:
+        call.first_token()
+        call.end(model="gpt-4o-mini", usage={"input_tokens": 3})
+
+    chat = spans.one("chat")
+    assert chat.attributes[attrs.OBSERVATION_TYPE] == "generation"
+    assert chat.attributes[attrs.RESPONSE_MODEL] == "gpt-4o-mini"
+    assert json.loads(chat.attributes[attrs.OBSERVATION_METADATA]) == {"attempt": 1}
+
+
 def test_update_trace_writes_the_trace_level_names(spans: Any) -> None:
     with tracepad.span("handler"):
         tracepad.update_trace(
@@ -172,6 +257,7 @@ def test_update_trace_writes_the_trace_level_names(spans: Any) -> None:
             session_id="s-7",
             tags=["support", "beta"],
             metadata={"channel": "web"},
+            version="retrieval-v2",
         )
 
     attributes = spans.attributes("handler")
@@ -180,6 +266,7 @@ def test_update_trace_writes_the_trace_level_names(spans: Any) -> None:
     assert attributes[attrs.SESSION_ID] == "s-7"
     assert json.loads(attributes[attrs.TRACE_TAGS]) == ["support", "beta"]
     assert json.loads(attributes[attrs.TRACE_METADATA]) == {"channel": "web"}
+    assert attributes[attrs.TRACE_VERSION] == "retrieval-v2"
 
 
 def test_update_outside_a_span_warns_and_writes_nothing(

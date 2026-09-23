@@ -106,18 +106,37 @@ func TestUpdateActsOnTheCurrentSpanWhoeverStartedIt(t *testing.T) {
 	ctx, span := r.provider.Tracer("the.framework").Start(context.Background(), "GET /answer")
 	Update(ctx, WithLevel("ERROR"), WithType("agent"))
 	UpdateTrace(ctx, WithTraceName("support-chat"), WithUserID("u-42"), WithSessionID("s-7"),
-		WithTags("support", "beta"), WithTraceMetadata(map[string]any{"channel": "web"}))
+		WithTags("support", "beta"), WithTraceMetadata(map[string]any{"channel": "web"}),
+		WithTraceVersion("retrieval-v2"))
 	span.End()
 	attrs := r.attrs(t, "GET /answer")
 	want := map[string]string{
 		attrObservationLevel: "ERROR", attrObservationType: "agent",
 		attrTraceName: "support-chat", attrUserID: "u-42", attrSessionID: "s-7",
 		attrTraceTags: `["support","beta"]`, attrTraceMetadata: `{"channel":"web"}`,
+		attrTraceVersion: "retrieval-v2",
 	}
 	for key, value := range want {
 		if got := str(t, attrs, key); got != value {
 			t.Errorf("%s = %q, want %q", key, got, value)
 		}
+	}
+}
+
+// In Go the function names the shape and WithType only the kind written
+// (spec 038 #8): the return types are fixed, so a kind cannot choose them.
+func TestWithTypeSetsTheKindNotTheShape(t *testing.T) {
+	r := setup(t)
+	ctx := context.Background()
+	_, step := Span(ctx, "plain", WithType("generation"))
+	step.End()
+	_, call := Generation(ctx, "embed", WithModel("text-embedding-3-small"), WithType("embedding"))
+	call.End(Result{})
+	if got := str(t, r.attrs(t, "plain"), attrObservationType); got != "generation" {
+		t.Errorf("Span with WithType(generation) = %q", got)
+	}
+	if got := str(t, r.attrs(t, "embed"), attrObservationType); got != "embedding" {
+		t.Errorf("Generation with WithType(embedding) = %q", got)
 	}
 }
 
@@ -136,12 +155,40 @@ func TestUpdateOutsideASpanLogsAndWritesNothing(t *testing.T) {
 
 func TestAnUnknownTypeIsWrittenWithAWarning(t *testing.T) {
 	r := setup(t)
-	_, step := Span(context.Background(), "s", WithType("thought"))
-	step.End()
-	if got := str(t, r.attrs(t, "s"), attrObservationType); got != "thought" {
-		t.Errorf("type = %q", got)
+	// Once per spelling, whichever door: a step in a loop says it once
+	// (spec 038 #5).
+	for range 3 {
+		ctx, step := Span(context.Background(), "s", WithType("thought"))
+		Update(ctx, WithType("thought"))
+		step.End()
 	}
-	if !strings.Contains(r.logs.String(), "not one of the observation types") {
+	for _, s := range r.spans() {
+		if got := str(t, attrsOf(s), attrObservationType); got != "thought" {
+			t.Errorf("type = %q", got)
+		}
+	}
+	if n := strings.Count(r.logs.String(), "not one of the observation types"); n != 1 {
+		t.Errorf("warnings = %d, want 1: %q", n, r.logs.String())
+	}
+}
+
+// An empty kind is no kind: forwarding an optional one keeps the shape's own
+// (spec 038 #8), as the other two packages do.
+func TestAnEmptyTypeKeepsTheDefault(t *testing.T) {
+	r := setup(t)
+	ctx := context.Background()
+	_, step := Span(ctx, "plain", WithType(""))
+	step.End()
+	_, miss := Event(ctx, "cache.miss", WithType(""))
+	miss.End()
+	_, call := Generation(ctx, "chat", WithType(""))
+	call.End(Result{})
+	for name, want := range map[string]string{"plain": "span", "cache.miss": "event", "chat": "generation"} {
+		if got := str(t, r.attrs(t, name), attrObservationType); got != want {
+			t.Errorf("%s: type = %q, want %q", name, got, want)
+		}
+	}
+	if r.logs.Len() != 0 {
 		t.Errorf("logs = %q", r.logs.String())
 	}
 }

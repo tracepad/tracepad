@@ -357,15 +357,7 @@ export class Observation {
     }
     set(span, attrs.OBSERVATION_LEVEL, fields.level);
     set(span, attrs.OBSERVATION_STATUS_MESSAGE, fields.statusMessage);
-    if (fields.type !== undefined) {
-      if (!(attrs.OBSERVATION_TYPES as readonly string[]).includes(fields.type)) {
-        warn(
-          `${JSON.stringify(fields.type)} is not one of the observation types the store ` +
-            "classifies by; it will be kept in the observation's metadata",
-        );
-      }
-      span.setAttribute(attrs.OBSERVATION_TYPE, fields.type);
-    }
+    set(span, attrs.OBSERVATION_TYPE, kind(fields.type));
   }
 }
 
@@ -470,6 +462,12 @@ export interface TraceFields {
   sessionId?: string;
   tags?: string[];
   metadata?: Record<string, unknown>;
+  /**
+   * The version of this trace's own logic — a pipeline revision, a prompt
+   * bundle, an experiment arm — beside `release`, the deployment's, set once
+   * at `init` (spec 038 #3).
+   */
+  version?: string;
 }
 
 /**
@@ -490,6 +488,7 @@ export function updateTrace(fields: TraceFields): void {
   set(span, attrs.SESSION_ID, fields.sessionId);
   if (fields.tags !== undefined) span.setAttribute(attrs.TRACE_TAGS, attrs.dumps([...fields.tags]));
   if (fields.metadata !== undefined) span.setAttribute(attrs.TRACE_METADATA, attrs.dumps(fields.metadata));
+  set(span, attrs.TRACE_VERSION, fields.version || undefined);
 }
 
 /**
@@ -509,19 +508,63 @@ function set(span: Span, key: string, value: string | number | boolean | undefin
   if (value !== undefined) span.setAttribute(key, value);
 }
 
-export interface SpanOptions {
+/**
+ * The kinds already warned about, so that a step in a loop says it once
+ * (spec 038 #5). A kind is remembered only once `init` or `spanProcessor`
+ * has said where warnings go, and at most 256 of them: past that a new one
+ * warns every time, which is what a kind computed at run time is.
+ */
+const warnedKinds = new Set<string>();
+
+function firstTime(key: string): boolean {
+  if (warnedKinds.has(key)) return false;
+  if ((initialized || handedOut) && warnedKinds.size < 256) warnedKinds.add(key);
+  return true;
+}
+
+/**
+ * Pass a step's kind through, warning when the store will not classify by
+ * it. An empty kind is no kind — `undefined`, and the caller's default
+ * stands, as Go's `WithType("")` (spec 038 #8). A spelling outside the ten
+ * is not refused: the mapper keeps it in the observation's metadata and
+ * classifies the span by its heuristics. The warning is given once per
+ * spelling, and only when a step is written, after `init({ logger })`.
+ */
+function kind(type: string | undefined): string | undefined {
+  if (!type) return undefined;
+  if (!(attrs.OBSERVATION_TYPES as readonly string[]).includes(type) && firstTime(type)) {
+    warn(
+      `${JSON.stringify(type)} is not one of the observation types the store ` +
+        "classifies by; it will be kept in the observation's metadata",
+    );
+  }
+  return type;
+}
+
+/** What every step may be opened with. `event` takes these alone. */
+export interface ObservationOptions {
   input?: unknown;
   metadata?: Record<string, unknown>;
 }
 
-export interface GenerationOptions extends SpanOptions {
+export interface SpanOptions extends ObservationOptions {
+  /**
+   * The step's kind — `'retriever'`, `'tool'`, `'agent'`… — as `observe`
+   * takes it; `'span'` by default (spec 038 #1). `event` and `generation`
+   * name their kind by being called, so neither takes one. `'generation'` is
+   * not one here: its handle is `generation()`'s (spec 038 #8).
+   */
+  type?: Exclude<attrs.ObservationType, 'generation'>;
+}
+
+export interface GenerationOptions extends ObservationOptions {
   model?: string;
   /** A `Prompt`, or anything with a `name` and a `version`, or a name. */
   prompt?: { name: string; version?: number } | string;
   modelParameters?: Record<string, unknown>;
 }
 
-function observationAttributes(type: string, options: SpanOptions = {}): Attributes {
+function observationAttributes(type: string, options: ObservationOptions = {}): Attributes {
   const attributes: Attributes = { [attrs.OBSERVATION_TYPE]: type };
   if (options.input !== undefined) attributes[attrs.INPUT] = attrs.dumps(options.input);
   if (options.metadata !== undefined) attributes[attrs.OBSERVATION_METADATA] = attrs.dumps(options.metadata);
@@ -617,14 +660,31 @@ export function span<T>(name: string, options: SpanOptions, fn: Callback<Observa
 /** A step of the trace, as a callback over an `Observation`. */
 export function span<T>(name: string, options: SpanOptions | Callback<Observation, T>, fn?: Callback<Observation, T>): T {
   const [given, callback] = split(options, fn);
-  return open(name, observationAttributes('span', given), (s) => new Observation(s), callback);
+  // An empty kind is the default, and the one kind with a handle of its own
+  // opens that handle, whatever else the options carry — what `observe`
+  // does with it (spec 038 #8).
+  const type = kind(given?.type) ?? 'span';
+  if (type === 'generation') {
+    const { type: _generation, ...rest } = given as GenerationOptions & { type: string };
+    return generation(name, rest, callback);
+  }
+  return open(name, observationAttributes(type, given), (s) => new Observation(s), callback);
+}
+
+/** Warn about a kind given to a shape that names its own: it is not written. */
+function ownKind(options: ObservationOptions | undefined, shape: string): void {
+  const type = (options as { type?: unknown } | undefined)?.type;
+  if (type !== undefined && type !== '' && type !== shape && firstTime(`${shape}:${String(type)}`)) {
+    warn(`${shape}() takes no type; its kind is ${JSON.stringify(shape)} and ${JSON.stringify(type)} is ignored`);
+  }
 }
 
 export function event<T>(name: string, fn: Callback<Observation, T>): T;
-export function event<T>(name: string, options: SpanOptions, fn: Callback<Observation, T>): T;
+export function event<T>(name: string, options: ObservationOptions, fn: Callback<Observation, T>): T;
 /** A zero-duration observation: something that happened, not something that took time. */
-export function event<T>(name: string, options: SpanOptions | Callback<Observation, T>, fn?: Callback<Observation, T>): T {
+export function event<T>(name: string, options: ObservationOptions | Callback<Observation, T>, fn?: Callback<Observation, T>): T {
   const [given, callback] = split(options, fn);
+  ownKind(given, 'event');
   return open(name, observationAttributes('event', given), (s) => new Observation(s), callback, now());
 }
 
@@ -633,6 +693,7 @@ export function generation<T>(name: string, options: GenerationOptions, fn: Call
 /** A call to a model, as a callback over a `Generation`. */
 export function generation<T>(name: string, options: GenerationOptions | Callback<Generation, T>, fn?: Callback<Generation, T>): T {
   const [given, callback] = split(options, fn);
+  ownKind(given, 'generation');
   return open(name, generationAttributes(given ?? {}), (s) => new Generation(s), callback);
 }
 
@@ -660,9 +721,15 @@ type AnyFunction = (...args: any[]) => any;
  * status `ERROR`, the exception recorded, and propagates unchanged.
  */
 export function observe<F extends AnyFunction>(fn: F, options: ObserveOptions = {}): F {
-  const { name = fn.name || 'anonymous', type = 'span', captureInput = true, captureOutput = true } = options;
+  const { name = fn.name || 'anonymous', captureInput = true, captureOutput = true } = options;
+  const type = options.type || 'span';
   const isGeneration = type === 'generation';
-  const attributes = () => (isGeneration ? generationAttributes({}) : observationAttributes(type));
+  // Checked per call rather than here, usually at module load, before
+  // `init({ logger })` has said where warnings go; `kind` says it once.
+  const attributes = () => {
+    kind(type);
+    return isGeneration ? generationAttributes({}) : observationAttributes(type);
+  };
   const make = (s: Span) => (isGeneration ? new Generation(s, captureOutput) : new Observation(s));
   const enter = (handle: Observation, args: unknown[]) => {
     if (captureInput) handle.span.setAttribute(attrs.INPUT, attrs.dumps(args));
@@ -806,6 +873,7 @@ function rethrow<S extends Iterator<unknown> | AsyncIterator<unknown>>(steps: S,
 /** Forget that `init` ran. For tests. */
 export function reset(): void {
   initialized = false;
+  warnedKinds.clear();
   handedOut = false;
   exiting = undefined;
   process.off('beforeExit', atExit);

@@ -38,7 +38,7 @@ tracepad.init();
 | `host` | `TRACEPAD_HOST` | Where the store is, e.g. `http://localhost:4318` |
 | `key` | `TRACEPAD_API_KEY` | A secret key (`tp-sk-…`), sent as `Bearer` |
 | `environment` | `TRACEPAD_ENVIRONMENT` | The deployment this process is |
-| `release` | `TRACEPAD_RELEASE` | The version of its own logic |
+| `release` | `TRACEPAD_RELEASE` | The version of this deployment — per trace, [`updateTrace({ version })`](#the-trace-around-a-step) |
 | `export` | — | `false` attaches everything except the exporter |
 | `logger` | — | Where the warnings go; `console` by default |
 
@@ -147,13 +147,30 @@ class Bot {
 The same thing as a callback, plus the zero-duration kind:
 
 ```ts
-await tracepad.span('retrieve', { input: { query } }, async (step) => {
+await tracepad.span('retrieve', { type: 'retriever', input: { query } }, async (step) => {
   const documents = await search(query);
   step.update({ output: documents, metadata: { hits: documents.length } });
 });
 
 tracepad.event('cache.miss', () => {});
 ```
+
+| Option | `span` (`SpanOptions`) | `event` (`ObservationOptions`) | `generation` (`GenerationOptions`) |
+|---|---|---|---|
+| `input` | yes | yes | yes |
+| `metadata` | yes | yes | yes |
+| `type` | one of the [ten kinds](ingest.md#the-kind-of-each-step) but `'generation'`; `'span'` by default | — (`event`) | — (`generation`) |
+
+`type` is the kind the step *is* — a retriever, a tool call, an agent — and it
+is known when the step opens, so it is written then. `'generation'` is not in
+the type because its handle is `generation()`'s; given anyway, without types,
+it hands out that handle with every option passed. `'event'` is written as the
+kind, and the zero duration is `event()`'s. An empty kind is no kind, here as
+in `observe` and `update`: the default stands. A spelling outside the ten is
+sent all the same, and the store keeps it in the observation's metadata; the
+package warns once per spelling, when the first step is written — after
+`init({ logger })`. A `type` handed to `event` or `generation` other than their
+own is ignored, with a warning.
 
 The span ends when the callback returns, or when the promise it returned
 settles. `span`, `event` and `generation` hand out an `Observation` carrying
@@ -261,12 +278,18 @@ thing it knows is who the user is:
 
 ```ts
 tracepad.updateTrace({ name: 'support-chat', userId: 'u-42', sessionId: 's-7',
-                       tags: ['support'], metadata: { channel: 'web' } });
+                       tags: ['support'], metadata: { channel: 'web' },
+                       version: 'retrieval-v2' });
 tracepad.update({ level: 'WARNING', statusMessage: 'retried once' });
 ```
 
 Both act on the *current* span, whoever started it, and the store resolves the
 trace-level ones for the trace. Outside a span both warn and do nothing.
+
+`version` is the version of *this trace's* logic — a pipeline revision, a
+prompt bundle, an experiment arm — and the trace listing filters on it
+(`version=`). It sits beside `release`, the deployment's version set once at
+`init`: two arms running in one release are told apart by `version`.
 
 ## Scores
 
@@ -488,8 +511,8 @@ tracepad.init({ logger: { warn: (message) => log.warn(message) } });
 ## What it writes
 
 The OTel GenAI semantic conventions where a name exists, and `tracepad.*` where
-none does — a trace name, tags, free metadata, an observation kind, a prompt
-reference. The whole table is in
+none does — a trace name, tags, free metadata, a trace version, an observation
+kind, a prompt reference. The whole table is in
 [ingest.md](ingest.md#what-tracepad-reads-from-your-spans); the `tracepad.*`
 half is [its own section](ingest.md#the-tracepad-dialect). It is the table
 the Python package writes, key for key: a golden fixture written by this

@@ -200,13 +200,7 @@ class Observation:
                 _set(span, key, attrs.dumps(value))
         _set(span, attrs.OBSERVATION_LEVEL, level)
         _set(span, attrs.OBSERVATION_STATUS_MESSAGE, status_message)
-        if type is not None:
-            if type not in attrs.OBSERVATION_TYPES:
-                logger.warning(
-                    "tracepad: %r is not one of the observation types the store "
-                    "classifies by; it will be kept in the observation's metadata", type
-                )
-            _set(span, attrs.OBSERVATION_TYPE, type)
+        _set(span, attrs.OBSERVATION_TYPE, _kind(type))
 
 
 class Generation(Observation):
@@ -336,12 +330,16 @@ def update_trace(
     session_id: str | None = None,
     tags: Sequence[str] | None = None,
     metadata: dict[str, Any] | None = None,
+    version: str | None = None,
 ) -> None:
     """Write trace-level attributes on the current span (spec 017 #11).
 
     A request handler rarely holds the root span — the framework does — and
     the one thing it knows is who the user is. These land where the handler
-    stands, and the mapper resolves them for the trace.
+    stands, and the mapper resolves them for the trace. `version` is the
+    version of this trace's own logic — a pipeline revision, a prompt bundle,
+    an experiment arm — beside `release`, the deployment's, set once at
+    `init` (spec 038 #3).
     """
     span = otel.get_current_span()
     if not span.is_recording():
@@ -354,6 +352,7 @@ def update_trace(
         _set(span, attrs.TRACE_TAGS, attrs.dumps(list(tags)))
     if metadata is not None:
         _set(span, attrs.TRACE_METADATA, attrs.dumps(metadata))
+    _set(span, attrs.TRACE_VERSION, version or None)
 
 
 def _observation_of(span: otel.Span) -> Observation:
@@ -374,6 +373,34 @@ def _set(span: otel.Span, key: str, value: Any) -> None:
         span.set_attribute(key, value)
 
 
+#: The spellings already warned about, so that a step in a loop says it once
+#: (spec 038 #5). A spelling is remembered only after `init`, and at most 256
+#: of them: past that a new one warns every time, which is what a kind
+#: computed at run time is.
+_warned_kinds: set[str] = set()
+
+
+def _kind(type: str | None) -> str | None:
+    """Pass a step's kind through, warning when the store will not classify by it.
+
+    An empty kind is no kind — `None`, and the caller's default stands, as Go's
+    `WithType("")` (spec 038 #8). A spelling outside the ten is not refused:
+    the mapper keeps it in the observation's metadata and classifies the span
+    by its heuristics. The warning is given once per spelling, and only when a
+    step is written, after the application has configured its logging.
+    """
+    if not type:
+        return None
+    if type not in attrs.OBSERVATION_TYPES and type not in _warned_kinds:
+        if _initialized and len(_warned_kinds) < 256:
+            _warned_kinds.add(type)
+        logger.warning(
+            "tracepad: %r is not one of the observation types the store "
+            "classifies by; it will be kept in the observation's metadata", type
+        )
+    return type
+
+
 def _observation_attributes(
     type: str,
     input: Any = None,
@@ -392,8 +419,9 @@ def _generation_attributes(
     prompt: Any,
     model_parameters: dict[str, Any] | None,
     input: Any,
+    metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    attributes = _observation_attributes("generation", input=input)
+    attributes = _observation_attributes("generation", input, metadata)
     if model is not None:
         attributes[attrs.REQUEST_MODEL] = model
     for name, value in (model_parameters or {}).items():
@@ -456,9 +484,26 @@ def _failed(handle: Observation, error: BaseException) -> None:
     handle.span.set_status(otel.Status(otel.StatusCode.ERROR, str(error)))
 
 
-def span(name: str, *, input: Any = None, metadata: dict[str, Any] | None = None) -> Any:
-    """A step of the trace, as a context manager over an `Observation`."""
-    return _open(name, _observation_attributes("span", input, metadata))
+def span(
+    name: str,
+    *,
+    input: Any = None,
+    metadata: dict[str, Any] | None = None,
+    type: str | None = "span",
+) -> Any:
+    """A step of the trace, as a context manager over an `Observation`.
+
+    `type` is the step's kind — `"retriever"`, `"tool"`, `"agent"`… — as
+    `@observe(type=…)` takes it (spec 038 #1): the kind is known when the step
+    opens, so it is written then rather than corrected by `update` after. An
+    empty kind is the default, and `"generation"` opens what `generation()`
+    opens, the one kind with a handle of its own — as the decorator does
+    (spec 038 #8).
+    """
+    kind = _kind(type) or "span"
+    if kind == "generation":
+        return generation(name, input=input, metadata=metadata)
+    return _open(name, _observation_attributes(kind, input, metadata))
 
 
 def event(name: str, *, input: Any = None, metadata: dict[str, Any] | None = None) -> Any:
@@ -475,9 +520,10 @@ def generation(
     prompt: Any = None,
     model_parameters: dict[str, Any] | None = None,
     input: Any = None,
+    metadata: dict[str, Any] | None = None,
 ) -> Any:
     """A call to a model, as a context manager over a `Generation`."""
-    attributes = _generation_attributes(model, prompt, model_parameters, input)
+    attributes = _generation_attributes(model, prompt, model_parameters, input, metadata)
     return _open(name, attributes, Generation)
 
 
@@ -485,7 +531,7 @@ def observe(
     fn: Callable[..., Any] | None = None,
     *,
     name: str | None = None,
-    type: str = "span",
+    type: str | None = "span",
     capture_input: bool = True,
     capture_output: bool = True,
 ) -> Any:
@@ -506,12 +552,16 @@ def observe(
     def decorate(fn: Callable[..., Any]) -> Callable[..., Any]:
         signature = inspect.signature(fn) if capture_input else None
         label = name or fn.__name__
-        is_generation = type == "generation"
+        kind = type or "span"
+        is_generation = kind == "generation"
 
         def attributes() -> dict[str, Any]:
+            # Checked per call rather than here, at import time, before the
+            # application has configured its logging; `_kind` says it once.
+            _kind(kind)
             if is_generation:
                 return _generation_attributes(None, None, None, None)
-            return _observation_attributes(type)
+            return _observation_attributes(kind)
 
         def make(span: otel.Span) -> Observation:
             return Generation(span, capture_output) if is_generation else Observation(span)

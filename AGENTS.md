@@ -418,6 +418,14 @@ API. This file routes; it does not duplicate what specs and docs say.
   and refuses a directory without the marker (#5–#7); `skills show` prints
   it. A drift test asks the binary for its commands, flags, tools and routes
   and fails on any name in the skill the binary does not have (#8).
+- ✅ Spec 038 (SDK parity) shipped: Python's `span(type=…)` and Node's
+  `span(name, { type })` take the step's kind when it opens, as Go's
+  `WithType` did (#1) — `type` on `span` only, so Node's `event` takes the
+  new `ObservationOptions` (#6); Python's `generation(metadata=…)` (#2); and a
+  trace's own version from all three — `update_trace(version=)`,
+  `updateTrace({ version })`, `WithTraceVersion` — as `tracepad.trace.version`,
+  which the mapper ranks beside `langfuse.version` (#3, #4). An unknown kind
+  warns through one helper per package, `observe` included (#5).
 - ✅ Spec 032 (the Node package) shipped: `tracepad` on npm, source in
   `sdk/js/`, the Python package's surface with promises where Python has
   context managers and the same vocabulary on the wire — `init` adapts to

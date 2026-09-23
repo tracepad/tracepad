@@ -124,7 +124,8 @@ func ExampleCall_FirstToken() {
 func ExampleUpdateTrace() {
 	ctx := context.Background()
 	tracepad.UpdateTrace(ctx, tracepad.WithTraceName("support-chat"), tracepad.WithUserID("u-42"),
-		tracepad.WithSessionID("s-7"), tracepad.WithTags("support"), tracepad.WithTraceMetadata(map[string]any{"channel": "web"}))
+		tracepad.WithSessionID("s-7"), tracepad.WithTags("support"), tracepad.WithTraceMetadata(map[string]any{"channel": "web"}),
+		tracepad.WithTraceVersion("retrieval-v2"))
 	tracepad.Update(ctx, tracepad.WithLevel("WARNING"), tracepad.WithStatusMessage("retried once"))
 }
 

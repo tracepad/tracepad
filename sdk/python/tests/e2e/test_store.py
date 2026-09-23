@@ -42,10 +42,12 @@ def test_a_traced_call_arrives_whole(store: Store) -> None:
     @tracepad.observe(name="answer-question")
     def answer(question: str) -> str:
         tracepad.update_trace(name="support-chat", user_id="user-4821",
-                              session_id="session-77", tags=["support", "beta"])
+                              session_id="session-77", tags=["support", "beta"],
+                              version="retrieval-v2")
         with tracepad.generation("chat-completion", model="claude-sonnet-5", prompt=support,
                                  model_parameters={"temperature": 0.2},
-                                 input=[{"role": "user", "content": question}]) as call:
+                                 input=[{"role": "user", "content": question}],
+                                 metadata={"attempt": 1}) as call:
             call.first_token()
             call.end(response=ANSWER)
             trace_id.append(call.trace_id)
@@ -63,6 +65,7 @@ def test_a_traced_call_arrives_whole(store: Store) -> None:
     assert sorted(stored["tags"]) == ["beta", "support"]
     assert stored["environment"] == "e2e"
     assert stored["release"] == "2026.9.4"
+    assert stored["version"] == "retrieval-v2"
 
     observations = walk(stored["observations"])
     assert [o["name"] for o in observations] == ["answer-question", "chat-completion"]
@@ -76,6 +79,7 @@ def test_a_traced_call_arrives_whole(store: Store) -> None:
     assert generation["prompt"] == {"name": "support-answer", "version": 1}
     assert generation["ttft_ms"] is not None
     assert generation["output"] == "Open Settings and choose Reset."
+    assert generation["metadata"]["attempt"] == 1
 
     # The cost is the one the provider charged, never a computed one.
     assert abs(stored["total_cost"] - 0.0011) < 1e-12
