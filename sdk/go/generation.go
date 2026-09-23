@@ -48,7 +48,7 @@ func WithModel(model string) GenerationOption {
 }
 
 // WithModelParameters are the request's parameters — temperature,
-// max_tokens — each written as gen_ai.request.<key>.
+// max_tokens — each written as gen_ai.request.<key> when the span records.
 func WithModelParameters(parameters map[string]any) GenerationOption {
 	return generationOption(func(f *fields) { f.parameters = parameters })
 }
@@ -70,9 +70,6 @@ func Generation(ctx context.Context, name string, opts ...GenerationOption) (con
 	var attrs []attribute.KeyValue
 	if f.model != "" {
 		attrs = append(attrs, attribute.String(attrRequestModel, f.model))
-	}
-	for _, key := range slices.Sorted(maps.Keys(f.parameters)) {
-		attrs = append(attrs, scalar(attrRequestPrefix+key, f.parameters[key]))
 	}
 	if f.prompt != nil {
 		attrs = append(attrs, attribute.String(attrPromptName, f.prompt.Name),
@@ -108,7 +105,7 @@ func (g *Call) End(result Result) {
 	if result.Cost != nil {
 		attrs = append(attrs, attribute.Float64(attrUsageCost, *result.Cost))
 	}
-	if result.Output != nil {
+	if result.Output != nil && g.span.IsRecording() { // nothing serialised for nothing (spec 042 #1)
 		attrs = append(attrs, attribute.String(attrOutput, dumps(result.Output)))
 	}
 	g.span.SetAttributes(attrs...)

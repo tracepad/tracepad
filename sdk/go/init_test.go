@@ -298,3 +298,28 @@ func TestSpansDuringInitDoNotRace(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// The export timeout's resolution (spec 042 #3): the option, then
+// TRACEPAD_EXPORT_TIMEOUT in seconds, then five seconds — and nothing of the
+// package's own when OpenTelemetry's variable is set, which then keeps its
+// own meaning: in Go, the bound of one attempt. cost_test.go proves the
+// value reaches the exporter against a store that never answers.
+func TestTheExportTimeoutResolves(t *testing.T) {
+	for _, variable := range []string{"TRACEPAD_EXPORT_TIMEOUT", "OTEL_EXPORTER_OTLP_TRACES_TIMEOUT", "OTEL_EXPORTER_OTLP_TIMEOUT"} {
+		t.Setenv(variable, "")
+	}
+	if got := exportTimeout(0); got != 5*time.Second {
+		t.Errorf("default = %v, want 5s", got)
+	}
+	t.Setenv("OTEL_EXPORTER_OTLP_TRACES_TIMEOUT", "7000")
+	if got := exportTimeout(0); got != 0 {
+		t.Errorf("under OpenTelemetry's variable = %v, want none of ours", got)
+	}
+	t.Setenv("TRACEPAD_EXPORT_TIMEOUT", "2.5")
+	if got := exportTimeout(0); got != 2500*time.Millisecond {
+		t.Errorf("from the environment = %v, want 2.5s", got)
+	}
+	if got := exportTimeout(1500 * time.Millisecond); got != 1500*time.Millisecond {
+		t.Errorf("the option = %v, want it to win", got)
+	}
+}
