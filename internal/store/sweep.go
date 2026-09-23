@@ -86,6 +86,10 @@ type Sweeper struct {
 	lastRun time.Time
 	nextRun time.Time
 	deleted map[string]*sweepCounters
+
+	// mediaCursor is where the next pass's look for bodies no ref names
+	// starts (spec 041): one page per pass, not the whole table.
+	mediaCursor string
 }
 
 type sweepCounters struct {
@@ -383,10 +387,11 @@ func (sw *Sweeper) sweepOrphanMedia(ctx context.Context, now int64) (int64, erro
 	if err != nil {
 		return 0, err
 	}
-	bodies, err := sw.store.orphanMedia(orphanScanLimit)
+	bodies, next, err := sw.store.orphanMedia(sw.mediaCursor, orphanScanLimit)
 	if err != nil {
 		return 0, err
 	}
+	sw.mediaCursor = next
 	if len(refs) == 0 && len(bodies) == 0 {
 		return 0, nil
 	}

@@ -51,8 +51,6 @@ const (
 // took a picture out (#9): `@@@langfuseMedia:type=…|id=…|source=…@@@`.
 const LangfuseMarker = "@@@langfuseMedia:"
 
-const langfuseMarker = LangfuseMarker
-
 // MediaOptions is what one project's ingest needs to know.
 type MediaOptions struct {
 	// Placeholder is the project setting of #6: the reference is left with
@@ -133,7 +131,14 @@ func (r Rewrites) Changed() []bool {
 }
 
 // Any reports whether the walk rewrote anything.
-func (r Rewrites) Any() bool { return anyTrue(r.Changed()) }
+func (r Rewrites) Any() bool {
+	for _, edits := range r {
+		if len(edits) > 0 {
+			return true
+		}
+	}
+	return false
+}
 
 // ExtractMedia walks every attribute of an export — resource, scope, span and
 // event — and replaces each recognised media value with a reference, in place.
@@ -144,6 +149,7 @@ func ExtractMedia(resourceSpans []*tracepb.ResourceSpans, opts MediaOptions) *Me
 		bodies:   map[string]bool{},
 		refs:     map[MediaRef]bool{},
 		resolved: map[string]resolvedMedia{},
+		decoded:  map[string]decodedMedia{},
 	}
 	w.res.Rewrites = rewriteMedia(resourceSpans, w)
 	return w.res
@@ -517,8 +523,18 @@ type mediaWalk struct {
 	// resolved memoises the Langfuse ids already asked of the store: a
 	// conversation that sends one picture in every turn is one lookup.
 	resolved map[string]resolvedMedia
+	// decoded memoises the base64 values already decoded, by their text.
+	decoded map[string]decodedMedia
 	// traces are the trace ids the value being walked belongs to.
 	traces []string
+}
+
+// decodedMedia is one base64 value a walk has decoded: its hash, its size
+// and its bytes, or nothing for a value that stays inline.
+type decodedMedia struct {
+	sha  string
+	size int64
+	body []byte
 }
 
 type resolvedMedia struct {
@@ -535,7 +551,7 @@ func (w *mediaWalk) whole(s string) (map[string]any, bool) {
 }
 
 func (w *mediaWalk) decodes(s string) bool {
-	if len(s) < minEncodedMedia && !strings.Contains(s, langfuseMarker) {
+	if len(s) < minEncodedMedia && !strings.Contains(s, LangfuseMarker) {
 		return false
 	}
 	return mayHoldMedia(s)
@@ -578,31 +594,39 @@ func (w *mediaWalk) wholeString(s string) map[string]any {
 }
 
 // reference decodes one match and answers its reference, or nil to leave it
-// inline: below the size floor, or not base64 at all.
+// inline: below the size floor, or not base64 at all. Each distinct base64 is
+// decoded and hashed once per walk: a conversation re-sends its history every
+// turn, and a picture in it would otherwise be decoded once per generation.
 func (w *mediaWalk) reference(mime, data string) map[string]any {
 	if mime == "" || len(data) < minEncodedMedia {
 		return nil
 	}
-	body, ok := decodeBase64(data)
-	if !ok {
-		w.warn("a " + mime + " body under a recognised media shape is not base64; it was left inline")
+	// A MIME type is case-insensitive (RFC 2045); the lower-case one is
+	// what the interface and the serving headers test.
+	mime = strings.ToLower(mime)
+	found, seen := w.decoded[data]
+	if !seen {
+		if body, ok := decodeBase64(data); !ok {
+			w.warn("a " + mime + " body under a recognised media shape is not base64; it was left inline")
+		} else if len(body) >= MediaMinSize {
+			sum := sha256.Sum256(body)
+			found = decodedMedia{sha: hex.EncodeToString(sum[:]), size: int64(len(body)), body: body}
+		}
+		w.decoded[data] = found
+	}
+	if found.sha == "" {
 		return nil
 	}
-	if len(body) < MediaMinSize {
-		return nil
-	}
-	sum := sha256.Sum256(body)
-	sha := hex.EncodeToString(sum[:])
-	ref := map[string]any{MediaRefKey: sha, mediaMimeKey: mime, mediaSizeKey: int64(len(body))}
+	ref := map[string]any{MediaRefKey: found.sha, mediaMimeKey: mime, mediaSizeKey: found.size}
 	if w.opts.Placeholder {
 		ref[mediaStoredKey] = false
 		return ref
 	}
-	if !w.bodies[sha] {
-		w.bodies[sha] = true
-		w.res.Bodies = append(w.res.Bodies, &MediaBody{SHA256: sha, MimeType: mime, Body: body})
+	if !w.bodies[found.sha] {
+		w.bodies[found.sha] = true
+		w.res.Bodies = append(w.res.Bodies, &MediaBody{SHA256: found.sha, MimeType: mime, Body: found.body})
 	}
-	w.addRefs(sha)
+	w.addRefs(found.sha)
 	return ref
 }
 
@@ -626,7 +650,7 @@ func (w *mediaWalk) langfuse(mime, id string) map[string]any {
 		return nil
 	}
 	w.addRefs(found.sha)
-	return map[string]any{MediaRefKey: found.sha, mediaMimeKey: mime, mediaSizeKey: found.size}
+	return map[string]any{MediaRefKey: found.sha, mediaMimeKey: strings.ToLower(mime), mediaSizeKey: found.size}
 }
 
 func (w *mediaWalk) addRefs(sha string) {
@@ -698,17 +722,19 @@ func (r langfuseRead) reference(mime, id string) (map[string]any, bool) {
 	if !ok {
 		return nil, false
 	}
-	return map[string]any{MediaRefKey: sha, mediaMimeKey: mime, mediaSizeKey: size}, true
+	return map[string]any{MediaRefKey: sha, mediaMimeKey: strings.ToLower(mime), mediaSizeKey: size}, true
 }
 
 // parseDataURL splits `data:<mime>[;params];base64,<data>`. The MIME type is
-// required: without one there is nothing to say what the bytes are.
+// required: without one there is nothing to say what the bytes are. The
+// scheme and `;base64` are matched in any case, as URLs and media types are.
 func parseDataURL(s string) (mime, data string, ok bool) {
-	if !strings.HasPrefix(s, "data:") {
+	if len(s) < len("data:") || !strings.EqualFold(s[:len("data:")], "data:") {
 		return "", "", false
 	}
 	header, data, found := strings.Cut(s[len("data:"):], ",")
-	if !found || !strings.HasSuffix(header, ";base64") {
+	if !found || len(header) < len(";base64") ||
+		!strings.EqualFold(header[len(header)-len(";base64"):], ";base64") {
 		return "", "", false
 	}
 	mime, _, _ = strings.Cut(header, ";")
@@ -721,11 +747,11 @@ func parseDataURL(s string) (mime, data string, ok bool) {
 // parseLangfuseRef reads the reference string the Langfuse SDK writes
 // (`langfuse/media.py`, `_reference_string`), whole.
 func parseLangfuseRef(s string) (mime, id string, ok bool) {
-	if !strings.HasPrefix(s, langfuseMarker) || !strings.HasSuffix(s, "@@@") ||
-		len(s) < len(langfuseMarker)+3 {
+	if !strings.HasPrefix(s, LangfuseMarker) || !strings.HasSuffix(s, "@@@") ||
+		len(s) < len(LangfuseMarker)+3 {
 		return "", "", false
 	}
-	for _, part := range strings.Split(s[len(langfuseMarker):len(s)-3], "|") {
+	for _, part := range strings.Split(s[len(LangfuseMarker):len(s)-3], "|") {
 		key, value, _ := strings.Cut(part, "=")
 		switch key {
 		case "type":
@@ -754,10 +780,26 @@ func decodeBase64(data string) ([]byte, bool) {
 // none of these in it has nothing the walk could match, and decoding a large
 // payload twice for nothing is what the check exists to avoid.
 func mayHoldMedia(s string) bool {
-	for _, needle := range []string{";base64,", `"base64"`, `"blob"`, "inline_data", "inlineData", langfuseMarker} {
+	for _, needle := range []string{`"base64"`, `"blob"`, "inline_data", "inlineData", LangfuseMarker} {
 		if strings.Contains(s, needle) {
 			return true
 		}
+	}
+	return containsFold(s, ";base64,")
+}
+
+// containsFold is strings.Contains ignoring ASCII case, without lowering a
+// copy of what may be megabytes of payload.
+func containsFold(s, needle string) bool {
+	for i := strings.IndexByte(s, needle[0]); i >= 0 && i+len(needle) <= len(s); {
+		if strings.EqualFold(s[i:i+len(needle)], needle) {
+			return true
+		}
+		next := strings.IndexByte(s[i+1:], needle[0])
+		if next < 0 {
+			return false
+		}
+		i += 1 + next
 	}
 	return false
 }

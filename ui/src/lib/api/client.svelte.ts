@@ -364,7 +364,11 @@ class Api {
 	 * browser may cache it: the address is the content.
 	 */
 	async media(sha: string, signal?: AbortSignal): Promise<Blob> {
-		const response = await this.#fetch(`/api/v1/media/${sha}`, {}, { signal, cache: 'default' });
+		const response = await this.#fetch(
+			`/api/v1/media/${sha}`,
+			{},
+			{ signal, cache: 'default', clockUntilHeaders: true }
+		);
 		if (response.ok) return await response.blob();
 		throw await refusal(response);
 	}
@@ -923,8 +927,15 @@ class Api {
 		// which. Composed outside the `try` on purpose: a browser without
 		// `AbortSignal.any` (spec 010 #10 states the floor) should fail here,
 		// loudly, and not be reported as a server nobody can reach.
+		const clock = options.clockUntilHeaders ? new AbortController() : null;
+		const timer = clock
+			? setTimeout(
+					() => clock.abort(new DOMException('The operation timed out.', 'TimeoutError')),
+					REQUEST_TIMEOUT_MS
+				)
+			: undefined;
 		const signal = AbortSignal.any([
-			AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+			clock?.signal ?? AbortSignal.timeout(REQUEST_TIMEOUT_MS),
 			...(options.signal ? [options.signal] : [])
 		]);
 		let response: Response;
@@ -953,6 +964,8 @@ class Api {
 			});
 		} catch (cause) {
 			throw interrupted(cause) ?? new ApiError(0, 'cannot reach the server');
+		} finally {
+			clearTimeout(timer);
 		}
 		const version = response.headers.get(VERSION_HEADER);
 		if (version) this.version = version;
@@ -1019,6 +1032,12 @@ type Request = {
 	signal?: AbortSignal;
 	/** Only a content-addressed read overrides `no-store` (spec 041 #7). */
 	cache?: RequestCache;
+	/**
+	 * Whether the clock stops once the answer's headers are in. A media body
+	 * may be tens of megabytes on a slow link: the clock is there for a server
+	 * that does not answer, not for a body that takes its time.
+	 */
+	clockUntilHeaders?: boolean;
 };
 
 /** The two page parameters, as query values. */

@@ -6,12 +6,15 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strconv"
 	"strings"
 	"testing"
+	"testing/iotest"
 
 	tracepb "go.opentelemetry.io/proto/otlp/trace/v1"
 
@@ -274,6 +277,15 @@ func TestLangfuseMediaChannel(t *testing.T) {
 	}
 	if code := put(t, *upload, testPicture(30000, 6)); code != 400 {
 		t.Errorf("a PUT of other bytes = %d, want 400", code)
+	}
+	// A body that breaks off is a read failure, not a size problem.
+	broken, _ := url.Parse(*upload)
+	req, _ := http.NewRequest("PUT", broken.RequestURI(), io.MultiReader(
+		bytes.NewReader(picture[:100]), iotest.ErrReader(errors.New("connection reset"))))
+	brokenRec := httptest.NewRecorder()
+	h.server.Handler().ServeHTTP(brokenRec, req)
+	if brokenRec.Code != 400 {
+		t.Errorf("a PUT whose body breaks off = %d, want 400", brokenRec.Code)
 	}
 	if h.mediaHeld(t, sha) {
 		t.Fatal("a body was stored before a good upload")

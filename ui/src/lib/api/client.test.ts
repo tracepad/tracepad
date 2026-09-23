@@ -191,6 +191,37 @@ describe('requests', () => {
 		expect((cause as Error).message).toBe('the server did not answer in time');
 	});
 
+	it('lets a media body take its time once the headers are in, but not the headers', async () => {
+		const { api, ApiError, auth } = await fresh();
+		auth.adopt(ME);
+		vi.useFakeTimers();
+		fakeTimeout();
+		// Twenty megabytes on a slow link: the headers are prompt, the body
+		// takes a minute (spec 041).
+		vi.stubGlobal('fetch', (_url: string, init?: RequestInit) => {
+			const signal = init!.signal!;
+			const response = new Response(null, { status: 200 });
+			// A real body read rejects with the signal's reason, as this does.
+			response.blob = () =>
+				new Promise((resolve, reject) => {
+					signal.addEventListener('abort', () => reject(signal.reason));
+					setTimeout(() => resolve(new Blob(['x'])), 60_000);
+				});
+			return Promise.resolve(response);
+		});
+		const body = api.media('a'.repeat(64));
+		await vi.advanceTimersByTimeAsync(60_000);
+		expect(await body).toBeInstanceOf(Blob);
+
+		// A server that sends no headers is still given up on.
+		hangingFetch();
+		const failure = api.media('b'.repeat(64)).catch((cause) => cause);
+		await vi.advanceTimersByTimeAsync(30_000);
+		const cause = await failure;
+		expect(cause).toBeInstanceOf(ApiError);
+		expect((cause as Error).message).toBe('the server did not answer in time');
+	});
+
 	it('gives up the same way on a body that never finishes', async () => {
 		const { api, ApiError, auth } = await fresh();
 		auth.adopt(ME);

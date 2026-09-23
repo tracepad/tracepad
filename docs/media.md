@@ -19,7 +19,9 @@ trace's metadata, and nothing else:
 | Gemini's **inline data** | Gemini, Vertex | `{"inline_data": {"mime_type": "image/png", "data": "…"}}` (or `inlineData` / `mimeType`) |
 | The GenAI conventions' **blob part** | OpenTelemetry GenAI instrumentations | `{"type": "blob", "mime_type": "image/png", "content": "…"}` |
 
-A match is extracted when its decoded size is **at least 4 KiB**. Smaller ones
+The scheme, `;base64` and the MIME type are matched in any case, and the type
+is stored lower-case. A match is extracted when its decoded size is **at least
+4 KiB**. Smaller ones
 — icons, tiny thumbnails — stay where they are, because a reference would cost
 more than it saves.
 

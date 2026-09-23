@@ -370,3 +370,42 @@ func TestMediaResolvedBodyGone(t *testing.T) {
 		t.Errorf("%d traces written by a refused batch", got)
 	}
 }
+
+// The look for bodies no ref names reads one page per pass and goes on from
+// where it stopped, wrapping at the end: its cost is a page, not the table.
+func TestMediaOrphanBodiesPaged(t *testing.T) {
+	f := newSweepFixture(t)
+	held := mediaBody(15, 4096)
+	f.arriveWithMedia(t, f.project.ID, hexTrace(1), daysAgo(1), held, false)
+	var loose []string
+	for seed := byte(16); seed < 19; seed++ {
+		body := mediaBody(seed, 4096)
+		if _, err := f.store.db.Exec(`INSERT INTO media (sha256, mime_type, size, body, created_at) VALUES (?, ?, ?, ?, 0)`,
+			body.SHA256, body.MimeType, len(body.Body), body.Body); err != nil {
+			t.Fatal(err)
+		}
+		loose = append(loose, body.SHA256)
+	}
+	found := map[string]bool{}
+	cursor, passes := "", 0
+	for {
+		orphans, next, err := f.store.orphanMedia(cursor, 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, sha := range orphans {
+			found[sha.(string)] = true
+		}
+		passes++
+		if cursor = next; cursor == "" {
+			break
+		}
+	}
+	// Two full pages, then an empty one that wraps the cursor.
+	if passes != 3 {
+		t.Errorf("four bodies in pages of two took %d passes, want 3", passes)
+	}
+	if len(found) != len(loose) || found[held.SHA256] {
+		t.Errorf("orphans = %v, want the three loose bodies and not the held one", found)
+	}
+}

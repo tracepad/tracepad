@@ -21,18 +21,12 @@ import (
 // transaction and collects the bodies left with none, the way it collects
 // payloads.
 
-// MediaBody is one body to store.
-type MediaBody struct {
-	SHA256   string
-	MimeType string
-	Body     []byte
-}
-
-// MediaRef is one trace pointing at one body.
-type MediaRef struct {
-	SHA256  string
-	TraceID string
-}
+// MediaBody is one body to store, and MediaRef one trace pointing at one
+// body: the walk's own types, written as it found them.
+type (
+	MediaBody = mapping.MediaBody
+	MediaRef  = mapping.MediaRef
+)
 
 // MediaOrphanGrace is how long a ref may name a trace that is not there before
 // the sweep takes it (Decision 13). The Langfuse channel records the ref when
@@ -494,19 +488,44 @@ func (s *Store) orphanMediaRefs(before int64, limit int) ([]MediaOrphan, error) 
 	return out, rows.Err()
 }
 
-// orphanMedia finds bodies no ref names at all — what a hand-edited database,
-// or a crash between two statements that should never have been two, would
-// leave. The scan reads the primary-key index, never a body.
-func (s *Store) orphanMedia(limit int) ([]any, error) {
-	shas, err := queryColumn[string](s.db,
-		`SELECT sha256 FROM media m
-		  WHERE NOT EXISTS (SELECT 1 FROM media_refs r WHERE r.sha256 = m.sha256)
+// orphanMedia finds bodies no ref names at all — what only a hand-edited
+// database would leave, since every write and deletion of refs is one
+// transaction. A belt that cheap to wear has to stay cheap: each pass reads
+// one page of the primary key after the cursor and checks those, and the
+// next pass goes on from where this one stopped, wrapping at the end. It
+// answers the orphans and the cursor to start from next time.
+func (s *Store) orphanMedia(after string, page int) ([]any, string, error) {
+	rows, err := s.db.Query(
+		`SELECT sha256,
+		        NOT EXISTS (SELECT 1 FROM media_refs r WHERE r.sha256 = m.sha256)
 		    AND NOT EXISTS (SELECT 1 FROM media_raw_refs rr WHERE rr.sha256 = m.sha256)
-		  LIMIT ?`, limit)
+		   FROM media m WHERE sha256 > ? ORDER BY sha256 LIMIT ?`, after, page)
 	if err != nil {
-		return nil, fmt.Errorf("find orphaned media: %w", err)
+		return nil, after, fmt.Errorf("find orphaned media: %w", err)
 	}
-	return shas, nil
+	defer rows.Close()
+	var (
+		orphans []any
+		last    string
+		read    int
+	)
+	for rows.Next() {
+		var orphan bool
+		if err := rows.Scan(&last, &orphan); err != nil {
+			return nil, after, err
+		}
+		read++
+		if orphan {
+			orphans = append(orphans, last)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, after, err
+	}
+	if read < page {
+		last = ""
+	}
+	return orphans, last, nil
 }
 
 // MediaOrphan is one pending ref past the grace.

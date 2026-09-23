@@ -54,7 +54,7 @@ func mediaRows(found *mapping.MediaResult, traces []*model.Trace, rawMedia bool)
 	kept := map[string]bool{}
 	for _, ref := range found.Refs {
 		if stored[ref.TraceID] {
-			refs = append(refs, store.MediaRef{SHA256: ref.SHA256, TraceID: ref.TraceID})
+			refs = append(refs, ref)
 			kept[ref.SHA256] = true
 		}
 	}
@@ -68,7 +68,7 @@ func mediaRows(found *mapping.MediaResult, traces []*model.Trace, rawMedia bool)
 	var bodies []store.MediaBody
 	for _, body := range found.Bodies {
 		if kept[body.SHA256] {
-			bodies = append(bodies, store.MediaBody{SHA256: body.SHA256, MimeType: body.MimeType, Body: body.Body})
+			bodies = append(bodies, *body)
 		}
 	}
 	return bodies, refs, raw
@@ -159,6 +159,10 @@ func (s *Server) inlineRawMedia(projectID string, batch *store.RawBody) []byte {
 	}
 	decoded, err := mapping.DecodeExportBody(batch.Body, batch.ContentType == contentTypeJSON)
 	if err != nil {
+		// Unreachable for a body ingest decoded and factored; were it to
+		// happen, the reader gets the references, and the log says so.
+		slog.Warn("could not decode a raw body to inline its media; serving it as stored",
+			"raw_batch", batch.ID, "err", err)
 		return batch.Body
 	}
 	changed := mapping.InlineMedia(decoded.ResourceSpans, func(sha string) (string, []byte, bool) {

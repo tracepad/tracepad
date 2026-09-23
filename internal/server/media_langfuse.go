@@ -130,6 +130,8 @@ func (s *Server) handleLangfuseMediaUpload(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, "traceId must be 32 lower-case hex digits")
 		return
 	}
+	// Case-insensitive (RFC 2045), stored as ingest stores it.
+	request.ContentType = strings.ToLower(request.ContentType)
 	if !strings.Contains(request.ContentType, "/") {
 		writeError(w, http.StatusBadRequest, "contentType must be a MIME type")
 		return
@@ -222,7 +224,14 @@ func (s *Server) handleLangfuseMediaPut(w http.ResponseWriter, r *http.Request) 
 
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, grant.Length+1))
 	if err != nil {
-		writeError(w, http.StatusRequestEntityTooLarge, "the body is larger than the upload declared")
+		// Only the cap is a size problem; a client that hung up or a
+		// broken chunked body is not, and the SDK logs what it is told.
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			writeError(w, http.StatusRequestEntityTooLarge, "the body is larger than the upload declared")
+			return
+		}
+		writeError(w, http.StatusBadRequest, "cannot read the upload body")
 		return
 	}
 	sum := sha256.Sum256(body)

@@ -69,3 +69,83 @@ string and stays one.
 | 21 | **2026-09-23** — **A Langfuse reference string whose upload landed after its span reads as the reference** (owner decision; amends #9's "left as it is otherwise"): when a stored payload holds `@@@langfuseMedia:…\|id=X\|…@@@` and the project holds a ref from *that trace* to the body whose Langfuse id is X, every read (`/io`, a trace's metadata, a run's output, and so the interface, CLI and MCP) answers the reference object in its place — the same one ingest writes. The stored payload is not rewritten; the raw archive and the export keep the string | The SDK uploads on a thread of its own, and a script that sets an input and flushes at once exports the span first; the ingest-time rewrite then finds no body and the picture is a string forever, although the bytes arrive a moment later. Resolving on read closes the race without a second write path: the refs table already says which trace the upload was for, the check runs only on a payload whose bytes contain the marker, and a read that does not rewrite needs no transaction, no recount of payload sizes and no second rule for the archive, which is owed the batch as sent. |
 | 22 | **2026-09-23** — **The upload key is kept in the database** (owner decision; amends #14's "minted at each start"): `server_keys(name, key, created_at)` in schema 0021, `media_upload` minted with 32 bytes of `crypto/rand` at the first open that finds it missing, read at every open after | A key per start lost every picture whose upload URL was issued before a restart — an upgrade, a crash, a `docker restart` in the middle of a run. The URL is already bounded by its hour and its exact grant (project, trace, hash, type, length), so outliving a restart widens nothing; the database is what a restart keeps, and a backup that carries the key restores a server whose URLs still work. The setup token stays per start: it opens an account, and a log line from last week must not. |
 | 23 | **2026-09-23** — **Second review round** (implementation; how #5, #6 and #9 are met): (a) a JSON body is spliced by value, at both levels — the walk records the JSON path of every value it replaces, in the export and inside a JSON document an attribute holds, and one pass over the source replaces those bytes and no others; (b) under `placeholder` ingest resolves no Langfuse string, even to a body the project already holds; (c) a batch whose Langfuse strings were resolved to a body collected before its write is refused inside the write and taken again with the strings kept; (d) the channel's `traceId` must be 32 lower-case hex digits | (a) JSON decoding drops the fields it does not know, and a re-encoded element or document sorts its keys and re-escapes its strings; #5 promises the archive loses the media and nothing else, and the archive exists for a replay by a later version that may know those fields. (b) Resolving adds a ref for the new trace, which keeps a picture alive under a setting that says not to keep one. (c) The resolution is read outside the write; without the check the payload and the archive would point at a body that is gone and the SDK's string — the only evidence of the picture — would be lost with it. (d) A ref under any other spelling of the id names a trace no span can arrive for. |
+| 24 | **2026-09-23** — **Third review round** (implementation): (a) a MIME type is case-insensitive, and so are a data URL's `data:` and `;base64` — a match is extracted in any case and its type stored and referenced lower-case, from ingest and from the Langfuse channel alike; (b) the upload PUT answers `413` only for a body over the declared length, and `400` for one that cannot be read; (c) the hourly look for bodies no ref names reads one page of the primary key per pass behind a cursor; (d) the interface's clock covers a media body's headers, not its bytes; (e) a batch's distinct base64 values are decoded and hashed once each | (a) `image/PNG` and `data:…;BASE64,` are legal (RFC 2045, RFC 2397) and were missed or drawn as a chip; the interface and the serving headers test the lower-case prefix. (b) The SDK logs what it is told, and a client that hung up has no size problem. (c) Every write and deletion of refs is one transaction, so only a hand-edited database leaves such a body; the belt must not cost a scan of every body every hour. (d) A 20 MiB body on a slow link outlasts the thirty seconds meant for a server that does not answer. (e) A conversation re-sends its history each turn, and one picture in it was decoded once per generation. |
+
+## Data contract (schema 0021)
+
+```sql
+CREATE TABLE media (
+    sha256     TEXT PRIMARY KEY,       -- hex of the decoded bytes
+    mime_type  TEXT NOT NULL,
+    size       INTEGER NOT NULL,       -- decoded bytes
+    body       BLOB NOT NULL,
+    created_at INTEGER NOT NULL
+) STRICT;
+
+CREATE TABLE media_refs (
+    sha256     TEXT NOT NULL REFERENCES media(sha256),
+    project_id TEXT NOT NULL,
+    trace_id   TEXT NOT NULL,
+    PRIMARY KEY (sha256, project_id, trace_id)
+) STRICT, WITHOUT ROWID;
+CREATE INDEX idx_media_refs_trace ON media_refs(project_id, trace_id);
+
+ALTER TABLE projects ADD COLUMN media TEXT NOT NULL DEFAULT 'store'
+    CHECK (media IN ('store', 'placeholder'));
+```
+
+Existing traces are not rewritten: the migration adds tables and a column,
+and media already inline stays inline until retention takes it. `docs/media.md`
+says so.
+
+As shipped the schema is amended by three decisions, and
+`internal/store/migrations/0021_media.sql` is its text: `media_refs` gains
+`created_at` and `pending`, with a partial index on `created_at WHERE pending
+= 1` (#13); a raw batch's refs are `media_raw_refs(sha256, raw_batch_id)`,
+dropped with the batch (#12); and `server_keys(name, key, created_at)` keeps
+the upload key (#22).
+
+## Testing
+
+- Mapper: each of the four shapes extracted at 4 KiB and kept inline below;
+  a data URL inside a longer string is not a match (the whole string must be
+  the URL); the reference object's fields; two generations sending the same
+  image write one `media` row and two refs.
+- Raw: a stored raw body carries references; replay re-maps it to the same
+  observations.
+- Deletion: retention, erasure, trace deletion and purge remove refs and GC
+  bodies with no ref left; a body shared by two projects survives one
+  project's purge.
+- Setting: `placeholder` writes no body and a `stored: false` reference.
+- API: `GET /api/v1/media/{sha}` bytes and headers, `404` without a ref in
+  the caller's project; the export re-inlines.
+- Bridge: the Langfuse SDK itself (the e2e harness already runs it) sends an
+  image; the upload round trip succeeds, the trace's reference is rewritten,
+  the picture is fetchable; a second identical image gets `uploadUrl: null`.
+- UI: thumbnail, chip, not-stored chip (vitest); Playwright on a trace with
+  an image; live check in a browser, both themes, 375 px.
+
+Added by the decisions: a raw batch's refs outliving its traces (#12); a
+pending ref settled or dropped after the grace, through its index (#13); the
+presigned upload refusing a forged token and other bytes (#14); the serving
+headers (#15); an object shape keeping its other fields, and extract → inline
+giving back the client's payload (#19); a span that overtook its upload read
+as the reference (#21); an upload URL accepted after a restart (#22); a JSON
+body and the document inside an attribute kept byte for byte, `placeholder`
+resolving nothing, a resolved body gone before the write (#23).
+
+## Edge cases
+
+- A malformed base64 body under a recognised shape: left inline, a warning
+  in the log with the trace id, never a rejected batch.
+- An image over the body cap (`TRACEPAD_MAX_BODY_BYTES`) never arrives;
+  nothing new here.
+- The same content under two MIME types: the first stored type wins; the
+  reference carries the type the client declared.
+- A span that overtakes its own Langfuse upload: stored with the SDK's
+  string, read as the reference once the upload lands (#21).
+- A Langfuse upload collected between its resolution and the ingest's write:
+  the batch is taken again with the string kept (#23).
+- A MIME type is case-insensitive (RFC 2045), and so is a data URL's
+  `data:` and `;base64` (#24): `data:Image/PNG;BASE64,…` is extracted, and
+  stored and referenced as `image/png`.

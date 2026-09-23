@@ -562,3 +562,27 @@ func TestExtractMediaPlaceholderLeavesLangfuseStrings(t *testing.T) {
 		t.Errorf("input = %s, want the SDK's string as sent", got)
 	}
 }
+
+// A data URL's scheme and `;base64`, and a MIME type, are case-insensitive:
+// the match is extracted, and the reference carries the lower-case type the
+// interface and the serving headers test.
+func TestExtractMediaCaseInsensitive(t *testing.T) {
+	body := picture(5000, 12)
+	export := otlptest.SpanWith("gen_ai.input.messages", mustJSON(t, []any{
+		map[string]any{"content": "DATA:Image/PNG;BASE64," + b64(body)},
+		map[string]any{"type": "base64", "media_type": "IMAGE/JPEG", "data": b64(picture(5000, 13))},
+	}))
+	found := mapping.ExtractMedia(export, mapping.MediaOptions{})
+	if len(found.Bodies) != 2 {
+		t.Fatalf("extracted %d bodies, want both", len(found.Bodies))
+	}
+	for _, body := range found.Bodies {
+		if body.MimeType != strings.ToLower(body.MimeType) {
+			t.Errorf("stored type %q, want it lower-case", body.MimeType)
+		}
+	}
+	got := mustJSON(t, inputOf(t, export))
+	if !strings.Contains(got, `"mime_type":"image/png"`) || !strings.Contains(got, `"mime_type":"image/jpeg"`) {
+		t.Errorf("input = %.400s, want lower-case types in the references", got)
+	}
+}

@@ -2,6 +2,7 @@ package mapping
 
 import (
 	"fmt"
+	"slices"
 
 	tracepb "go.opentelemetry.io/proto/otlp/trace/v1"
 	"google.golang.org/protobuf/encoding/protowire"
@@ -42,7 +43,7 @@ func DecodeExportBody(body []byte, asJSON bool) (*ExportBody, error) {
 // Nothing rewritten is the source itself.
 func (b *ExportBody) Encode(rewrites Rewrites) ([]byte, error) {
 	changed := rewrites.Changed()
-	if !anyTrue(changed) {
+	if !slices.Contains(changed, true) {
 		return b.source, nil
 	}
 	if b.asJSON {
@@ -89,13 +90,4 @@ func (b *ExportBody) encodeJSON(rewrites Rewrites) ([]byte, error) {
 		return nil, fmt.Errorf("splice resource spans: %w", err)
 	}
 	return out, nil
-}
-
-func anyTrue(values []bool) bool {
-	for _, v := range values {
-		if v {
-			return true
-		}
-	}
-	return false
 }
