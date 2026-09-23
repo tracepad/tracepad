@@ -17,6 +17,7 @@ import functools
 import inspect
 import os
 import sys
+import threading
 from collections.abc import AsyncIterable, AsyncIterator, Callable, Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -27,7 +28,7 @@ from opentelemetry import context as otel_context
 from opentelemetry import trace as otel
 
 from . import _attributes as attrs
-from ._config import VERSION, Config, adopt, resolve
+from ._config import VERSION, Config, adopt, resolve, resolve_timeout
 from ._generation import Stream, read_response
 from ._log import logger
 from ._scores import flush_scores
@@ -49,6 +50,7 @@ def init(
     environment: str | None = None,
     release: str | None = None,
     export: bool = True,
+    export_timeout: float | None = None,
 ) -> None:
     """Point this process at a Tracepad store (spec 017 #2, #10).
 
@@ -61,12 +63,18 @@ def init(
 
     `export=False` attaches everything except the exporter, for an application
     whose traces already reach the store another way.
+
+    `export_timeout` bounds one export, in seconds, retries included — then
+    TRACEPAD_EXPORT_TIMEOUT, then five (spec 042 #3).
     """
     global _built
     if _initialized:
         logger.warning("tracepad.init() has already run; this call is a no-op")
         return
     config = resolve(host, key, environment, release)
+    if not export and export_timeout is not None:
+        logger.warning("tracepad.init(): export_timeout is ignored with export=False, "
+                       "which adds no exporter to bound")
 
     from opentelemetry.sdk.trace import TracerProvider
 
@@ -87,10 +95,10 @@ def init(
             "process already has a TracerProvider; set deployment.environment.name and "
             "service.version on its resource (OTEL_RESOURCE_ATTRIBUTES) instead"
         )
-    _attach(provider, config, export)
+    _attach(provider, config, export, export_timeout)
 
 
-def _attach(provider: Any, config: Config, export: bool) -> None:
+def _attach(provider: Any, config: Config, export: bool, timeout: float | None = None) -> None:
     """What `init` adds to the provider it found or built; `tracepad.testing`
     calls it with a provider and a configuration of its own (spec 040 #1)."""
     global _initialized
@@ -102,7 +110,7 @@ def _attach(provider: Any, config: Config, export: bool) -> None:
 
     provider.add_span_processor(RunContextProcessor())
     if export:
-        provider.add_span_processor(_exporter(config))
+        provider.add_span_processor(_exporter(config, resolve_timeout(timeout)))
     adopt(config)
     _initialized = True
 
@@ -137,7 +145,7 @@ def _process_name() -> str:
     return os.path.basename(sys.argv[0]).removesuffix(".py") or "python"
 
 
-def _exporter(config: Config) -> Any:
+def _exporter(config: Config, timeout: float | None) -> Any:
     from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
     from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
@@ -145,6 +153,7 @@ def _exporter(config: Config) -> Any:
         OTLPSpanExporter(
             endpoint=config.traces_endpoint,
             headers={"Authorization": f"Bearer {config.key}"},
+            timeout=timeout,
         )
     )
 
@@ -156,6 +165,11 @@ def flush(timeout: float = 10.0) -> None:
     matters more — so a score queue that spent all of it is said out loud
     rather than leaving `force_flush` a deadline of zero, which returns
     at once and exports nothing (found in review of PR #35).
+
+    OpenTelemetry's batch processor exports synchronously on `force_flush` and
+    never reads the deadline it is given, so the flush runs on a thread of its
+    own that is waited for what is left of the budget; past that, the export
+    finishes in the background (spec 042 #4).
     """
     left = flush_scores(timeout)
     force = getattr(otel.get_tracer_provider(), "force_flush", None)
@@ -167,7 +181,14 @@ def flush(timeout: float = 10.0) -> None:
             "not flushed and are left to their exporter's own schedule", timeout
         )
         return
-    force(int(left * 1000))
+    exporting = threading.Thread(target=force, args=(int(left * 1000),), daemon=True)
+    exporting.start()
+    exporting.join(left)
+    if exporting.is_alive():
+        logger.warning(
+            "tracepad.flush(): the spans were not exported within the %ss budget; the "
+            "export goes on in the background", timeout
+        )
 
 
 def _tracer() -> otel.Tracer:
@@ -214,18 +235,14 @@ class Observation:
         status_message: str | None = None,
         type: str | None = None,
     ) -> None:
-        """Write observation attributes on this span."""
+        """Write observation attributes on this span; `metadata` adds its keys to
+        the ones the span carries (spec 042 #5)."""
         span = self.span
         if name is not None:
             span.update_name(name)
-        for field, key, value in (
-            ("input", attrs.INPUT, input),
-            ("output", attrs.OUTPUT, output),
-            ("metadata", attrs.OBSERVATION_METADATA, metadata),
-        ):
-            if value is not None:
-                self._explicit.add(field)
-                _set(span, key, attrs.dumps(value))
+        if output is not None:
+            self._explicit.add("output")
+        _costly(span, input=input, output=output, metadata=metadata)
         _set(span, attrs.OBSERVATION_LEVEL, level)
         _set(span, attrs.OBSERVATION_STATUS_MESSAGE, status_message)
         _set(span, attrs.OBSERVATION_TYPE, _kind(type))
@@ -297,6 +314,9 @@ class Generation(Observation):
         `stream` gathered stands in for it. Leaving the block without calling
         this ends the span with what it has.
         """
+        if not self.span.is_recording():  # nothing to read for (spec 042 #1)
+            Observation._finish(self)
+            return
         if response is None and self._stream is not None:
             response = self._stream.response()
         fields = read_response(response) if response is not None else {}
@@ -343,7 +363,7 @@ def update(
     """Write observation attributes on the current span (spec 017 #11)."""
     span = otel.get_current_span()
     if not span.is_recording():
-        logger.warning("tracepad.update() outside a span: nothing was written")
+        _unwritten("update")
         return
     _observation_of(span).update(
         name=name, input=input, output=output, metadata=metadata,
@@ -371,7 +391,7 @@ def update_trace(
     """
     span = otel.get_current_span()
     if not span.is_recording():
-        logger.warning("tracepad.update_trace() outside a span: nothing was written")
+        _unwritten("update_trace")
         return
     _set(span, attrs.TRACE_NAME, name)
     _set(span, attrs.USER_ID, user_id)
@@ -381,6 +401,17 @@ def update_trace(
     if metadata is not None:
         _set(span, attrs.TRACE_METADATA, attrs.dumps(metadata))
     _set(span, attrs.TRACE_VERSION, version or None)
+
+
+def _unwritten(call: str) -> None:
+    """Warn only for the mistake: a process that traces, and no span anywhere in
+    context. A span that does not record is tracing off or a sampler's choice,
+    a configuration rather than an error, and says so at debug (spec 042 #2)."""
+    span = otel.get_current_span()
+    if tracing_off() or _current.get() is not None or span.get_span_context().is_valid:
+        logger.debug("tracepad.%s(): the span does not record; nothing was written", call)
+    else:
+        logger.warning("tracepad.%s() outside a span: nothing was written", call)
 
 
 def _observation_of(span: otel.Span) -> Observation:
@@ -399,6 +430,31 @@ def _observation_of(span: otel.Span) -> Observation:
 def _set(span: otel.Span, key: str, value: Any) -> None:
     if value is not None:
         span.set_attribute(key, value)
+
+
+def _costly(
+    span: otel.Span,
+    input: Any = None,
+    output: Any = None,
+    metadata: dict[str, Any] | None = None,
+    parameters: dict[str, Any] | None = None,
+) -> None:
+    """The attributes that cost a serialisation, written only on a span that
+    records: with tracing off, or the span sampled out, nothing is serialised
+    (spec 042 #1). Metadata is one attribute per key, so that a later write
+    adds keys rather than replacing the lot (spec 042 #5)."""
+    if not span.is_recording():
+        return
+    _set(span, attrs.INPUT, None if input is None else attrs.dumps(input))
+    _set(span, attrs.OUTPUT, None if output is None else attrs.dumps(output))
+    if isinstance(metadata, dict):
+        for key, value in metadata.items():
+            _set(span, f"{attrs.OBSERVATION_METADATA}.{key}",
+                 None if value is None else attrs.scalar(value))
+    elif metadata is not None:  # not a mapping after all: one attribute, as it came
+        _set(span, attrs.OBSERVATION_METADATA, attrs.dumps(metadata))
+    for name, value in (parameters or {}).items():
+        _set(span, attrs.REQUEST_PREFIX + name, attrs.scalar(value))
 
 
 #: The spellings already warned about, so that a step in a loop says it once
@@ -429,31 +485,11 @@ def _kind(type: str | None) -> str | None:
     return type
 
 
-def _observation_attributes(
-    type: str,
-    input: Any = None,
-    metadata: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    attributes: dict[str, Any] = {attrs.OBSERVATION_TYPE: type}
-    if input is not None:
-        attributes[attrs.INPUT] = attrs.dumps(input)
-    if metadata is not None:
-        attributes[attrs.OBSERVATION_METADATA] = attrs.dumps(metadata)
-    return attributes
-
-
-def _generation_attributes(
-    model: str | None,
-    prompt: Any,
-    model_parameters: dict[str, Any] | None,
-    input: Any,
-    metadata: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    attributes = _observation_attributes("generation", input, metadata)
+def _generation_attributes(model: str | None, prompt: Any) -> dict[str, Any]:
+    """What a generation starts with: the cheap ones, which a sampler may read."""
+    attributes: dict[str, Any] = {attrs.OBSERVATION_TYPE: "generation"}
     if model is not None:
         attributes[attrs.REQUEST_MODEL] = model
-    for name, value in (model_parameters or {}).items():
-        attributes[attrs.REQUEST_PREFIX + name] = attrs.scalar(value)
     if prompt is not None:
         attributes[attrs.PROMPT_NAME] = getattr(prompt, "name", prompt)
         version = getattr(prompt, "version", None)
@@ -470,9 +506,12 @@ def _open(
     *,
     start_time: int | None = None,
     end_time: int | None = None,
+    **costly: Any,
 ) -> Iterator[Any]:
-    """Start a span, hand out its observation, and end it once."""
+    """Start a span with the cheap attributes, add the costly ones if it
+    records (spec 042 #1), hand out its observation, and end it once."""
     span = _tracer().start_span(name, attributes=attributes, start_time=start_time)
+    _costly(span, **costly)
     handle = factory(span)
     token = _current.set(handle)
     try:
@@ -531,14 +570,14 @@ def span(
     kind = _kind(type) or "span"
     if kind == "generation":
         return generation(name, input=input, metadata=metadata)
-    return _open(name, _observation_attributes(kind, input, metadata))
+    return _open(name, {attrs.OBSERVATION_TYPE: kind}, input=input, metadata=metadata)
 
 
 def event(name: str, *, input: Any = None, metadata: dict[str, Any] | None = None) -> Any:
     """A zero-duration observation: something that happened, not something that took time."""
     at = time_ns()
-    return _open(name, _observation_attributes("event", input, metadata),
-                 start_time=at, end_time=at)
+    return _open(name, {attrs.OBSERVATION_TYPE: "event"}, start_time=at, end_time=at,
+                 input=input, metadata=metadata)
 
 
 def generation(
@@ -551,8 +590,8 @@ def generation(
     metadata: dict[str, Any] | None = None,
 ) -> Any:
     """A call to a model, as a context manager over a `Generation`."""
-    attributes = _generation_attributes(model, prompt, model_parameters, input, metadata)
-    return _open(name, attributes, Generation)
+    return _open(name, _generation_attributes(model, prompt), Generation,
+                 input=input, metadata=metadata, parameters=model_parameters)
 
 
 def observe(
@@ -588,8 +627,8 @@ def observe(
             # application has configured its logging; `_kind` says it once.
             _kind(kind)
             if is_generation:
-                return _generation_attributes(None, None, None, None)
-            return _observation_attributes(kind)
+                return _generation_attributes(None, None)
+            return {attrs.OBSERVATION_TYPE: kind}
 
         def make(span: otel.Span) -> Observation:
             return Generation(span, capture_output) if is_generation else Observation(span)
@@ -601,7 +640,7 @@ def observe(
             return make(_tracer().start_span(label, attributes=attributes()))
 
         def enter(observation: Observation, args: tuple[Any, ...], kwargs: dict[str, Any]) -> None:
-            if signature is not None:
+            if signature is not None and observation.span.is_recording():
                 _set(observation.span, attrs.INPUT,
                      attrs.dumps(_arguments(signature, args, kwargs)))
 
@@ -613,7 +652,8 @@ def observe(
             # Decision 5 is only asked about a value returned whole.
             if is_generation and as_response:
                 observation.end(response=result)
-            elif capture_output and "output" not in observation._explicit:
+            elif (capture_output and "output" not in observation._explicit
+                  and observation.span.is_recording()):
                 _set(observation.span, attrs.OUTPUT, attrs.dumps(result))
 
         if inspect.isasyncgenfunction(fn):

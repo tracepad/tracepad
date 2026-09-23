@@ -157,6 +157,23 @@ def test_a_failing_step_is_stored_as_an_error(store: Store) -> None:
     assert stored["error_count"] == 1
 
 
+def test_observation_metadata_merges_by_key(store: Store) -> None:
+    """Spec 042 #5: `update(metadata=)` adds its keys and keeps the ones there."""
+    tracepad.init(store.host, KEY)
+    with tracepad.span("tagged", metadata={"a": 1, "request_id": "r-7"}) as step:
+        trace_id = step.trace_id
+        tracepad.update(metadata={"b": {"flag": True}})
+        tracepad.update(metadata={"a": 3})
+    tracepad.flush(20.0)
+
+    (tagged,) = walk(trace_of(store, trace_id)["observations"])
+    assert {key: tagged["metadata"][key] for key in ("a", "b", "request_id")} == {
+        "a": 3,
+        "b": {"flag": True},
+        "request_id": "r-7",
+    }
+
+
 def test_the_package_is_installed_from_this_checkout() -> None:
     """A guard against testing a `tracepad` from PyPI by accident."""
     assert Path(tracepad.__file__).resolve().is_relative_to(Path(__file__).resolve().parents[3])

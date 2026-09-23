@@ -71,7 +71,7 @@ def test_update_inside_replaces(spans: Any) -> None:
     assert attributes[attrs.OUTPUT] == "also redacted"
     assert attributes[attrs.OBSERVATION_LEVEL] == "WARNING"
     assert attributes[attrs.OBSERVATION_STATUS_MESSAGE] == "degraded"
-    assert json.loads(attributes[attrs.OBSERVATION_METADATA]) == {"attempt": 2}
+    assert attributes[f"{attrs.OBSERVATION_METADATA}.attempt"] == 2
 
 
 def test_an_exception_ends_the_span_as_an_error_and_propagates(spans: Any) -> None:
@@ -246,7 +246,7 @@ def test_span_as_a_generation_hands_out_a_generation(spans: Any) -> None:
     chat = spans.one("chat")
     assert chat.attributes[attrs.OBSERVATION_TYPE] == "generation"
     assert chat.attributes[attrs.RESPONSE_MODEL] == "gpt-4o-mini"
-    assert json.loads(chat.attributes[attrs.OBSERVATION_METADATA]) == {"attempt": 1}
+    assert chat.attributes[f"{attrs.OBSERVATION_METADATA}.attempt"] == 1
 
 
 def test_update_trace_writes_the_trace_level_names(spans: Any) -> None:

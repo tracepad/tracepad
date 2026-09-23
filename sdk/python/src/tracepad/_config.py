@@ -13,8 +13,14 @@ import os
 from dataclasses import dataclass
 
 from ._errors import TracepadConfigError
+from ._log import logger
 
 VERSION = "0.1.0"
+
+#: The exporter's per-export timeout in seconds when nothing names one (spec
+#: 042 #3): OpenTelemetry's ten, its retries inside them, is long for a thread
+#: that flushes at the end of a request.
+EXPORT_TIMEOUT = 5.0
 
 
 @dataclass(frozen=True)
@@ -53,6 +59,26 @@ def resolve(
         environment=_pick(environment, "TRACEPAD_ENVIRONMENT") or None,
         release=_pick(release, "TRACEPAD_RELEASE") or None,
     )
+
+
+def resolve_timeout(argument: float | None) -> float | None:
+    """The argument, then TRACEPAD_EXPORT_TIMEOUT, then five seconds — or `None`,
+    which leaves the exporter to OpenTelemetry's own variable when one is set."""
+    if argument is not None:
+        return argument
+    raw = os.environ.get("TRACEPAD_EXPORT_TIMEOUT", "").strip()
+    if raw:
+        try:
+            seconds = float(raw)
+        except ValueError:
+            seconds = 0.0
+        if seconds > 0:
+            return seconds
+        logger.warning("tracepad: TRACEPAD_EXPORT_TIMEOUT=%r is not a number of seconds; "
+                       "it is ignored", raw)
+    if any(os.environ.get(f"OTEL_EXPORTER_OTLP{kind}_TIMEOUT") for kind in ("_TRACES", "")):
+        return None
+    return EXPORT_TIMEOUT
 
 
 def _pick(argument: str | None, variable: str) -> str:
