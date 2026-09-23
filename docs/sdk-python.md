@@ -32,6 +32,7 @@ tracepad.init()
 | `environment` | `TRACEPAD_ENVIRONMENT` | The deployment this process is |
 | `release` | `TRACEPAD_RELEASE` | The version of this deployment — per trace, [`update_trace(version=…)`](#the-trace-around-a-step) |
 | `export` | — | `False` attaches everything except the exporter |
+| `export_timeout` | `TRACEPAD_EXPORT_TIMEOUT` | Seconds one export may take, its retries included; `5.0` by default |
 
 The arguments win over the environment, and with neither a host nor a key the
 call raises `TracepadConfigError` — misconfiguration discovered as a `401` in a
@@ -46,6 +47,15 @@ and its scores are sent.
 Standard OpenTelemetry variables (`OTEL_SERVICE_NAME`,
 `OTEL_RESOURCE_ATTRIBUTES`, the batch processor's own limits) are honoured by
 the OTel SDK as they are; the package neither reads them nor sets them.
+
+**`export_timeout`** is handed to the OTLP exporter as its per-export timeout.
+OpenTelemetry's default is ten seconds, retries inside them — long for a
+request thread that flushes before it answers — so the package's is five.
+With neither the argument nor `TRACEPAD_EXPORT_TIMEOUT`,
+`OTEL_EXPORTER_OTLP_TRACES_TIMEOUT` keeps working underneath when it is set.
+A `TRACEPAD_EXPORT_TIMEOUT` that is not a number of seconds is ignored with a
+warning, and so is the argument under `export=False`, which adds no exporter
+to bound.
 
 **`init` adapts to the provider it finds.** If the application has already set
 a global `TracerProvider` — FastAPI instrumentation, `opentelemetry-instrument`,
@@ -127,6 +137,21 @@ is written as the kind, and the zero duration is `event()`'s. A spelling
 outside the ten is sent all the same, and the store keeps it in the
 observation's metadata; the `tracepad` logger warns once per spelling, when the
 first step is written.
+
+**What a step costs when nothing records.** A span starts with the cheap
+attributes only — its kind, the model, the prompt reference — which is what a
+sampler or a span processor sees. Input, output, metadata and model parameters,
+everything serialised to JSON, are set after the span exists and only if it
+records: with tracing off, or under a sampler that dropped the span, none of
+them is serialised at all, in the opening call, in `update`, in `end` and in
+`@observe` alike.
+
+**Metadata merges by key.** It is written one attribute per top-level key,
+`tracepad.observation.metadata.<key>` — a string, a number or a boolean as it
+is, anything else as JSON — so `update(metadata={"flag": 1})` adds `flag` and
+replaces only it, and the keys the step opened with stay. A key given as
+`None` writes nothing; it does not delete the key, since an attribute cannot be
+unset once written.
 
 `span`, `event` and `generation` hand out an `Observation` carrying
 `trace_id`, `span_id`, `update(...)` and the OTel span itself as `.span`. With
@@ -243,8 +268,11 @@ tracepad.update(level="WARNING", status_message="retried once")
 ```
 
 Both act on the *current* span, whoever started it, and the store resolves the
-trace-level ones for the trace. Outside a span both log a warning and do
-nothing.
+trace-level ones for the trace. Outside every span, in a process that traces,
+both log a warning and do nothing — that call is a mistake. On a span that does
+not record — tracing off, or a sampler's choice — they do nothing with a debug
+line: that is configuration, and a warning on every call would teach an
+operator to ignore the package's warnings.
 
 `version` is the version of *this trace's* logic — a pipeline revision, a
 prompt bundle, an experiment arm — and the trace listing filters on it
@@ -275,7 +303,13 @@ the request that produced the trace. Pass `id=` for the
 [idempotency](scores.md#idempotency-and-corrections) the API offers.
 
 `tracepad.flush(timeout=10.0)` drains the queue and then the span processors,
-and runs at interpreter exit on its own.
+and runs at interpreter exit on its own. The timeout is one budget over both,
+and `flush` returns within it: OpenTelemetry's batch processor exports
+synchronously and does not keep a deadline, so the spans are flushed on a
+helper thread that is waited for what is left of the budget. When it runs out,
+`flush` logs a warning and returns, and the export finishes in the background —
+a request that flushes in a `finally` is not held for as long as a store that
+is away takes to time out.
 
 ## Prompts
 
@@ -490,6 +524,8 @@ processes, so they do not share one.
 | Path | On failure |
 |---|---|
 | `init` after configuration, the decorators, `update`, `end`, the exporter, the score queue | Logged through the `tracepad` logger; never raised into your code |
+| `update`, `update_trace` on a span that does not record (tracing off, or sampled out) | Nothing; a debug line |
+| `flush` that runs out of time | A warning; the export finishes in the background |
 | `prompt`, `flush`, `delete_trace`, `delete_traces`, and every call of the harness above | `TracepadError`, or `TracepadHTTPError(status, body)` for a non-2xx |
 | `init` with no host or key | `TracepadConfigError` |
 | `score` with no target outside every span while tracing — initialised, or through a provider of the application's own | `ValueError` — a programming error, visible at the call site |

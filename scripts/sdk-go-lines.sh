@@ -6,7 +6,8 @@
 # rule to satisfy. 1,600 lines covered the package (spec 033 #11) and 1,900
 # cover it with the eval harness (spec 033 #17), because they are one module
 # and a budget per spec would be a budget per PR; spec 036 #8 raised it to
-# 2,100 for trace deletion, spec 040 #13 to 2,350 for `tracepadtest`.
+# 2,100 for trace deletion, spec 040 #13 to 2,350 for `tracepadtest`, spec
+# 042 #6 to 2,450 for the cost and bounds.
 #
 # What it counts is the application — `tracepadtest` and the hook it opens
 # under internal/ included; the tests, the e2e package and the programs
@@ -18,7 +19,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BUDGET="${1:-2350}"
+BUDGET="${1:-2450}"
 
 cd "$ROOT"
 

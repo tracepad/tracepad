@@ -318,7 +318,7 @@ they do not, they write these:
 | `tracepad.observation.type` | the [kind](#the-kind-of-each-step) of this step |
 | `tracepad.observation.level` | its level |
 | `tracepad.observation.status_message` | why |
-| `tracepad.observation.metadata` | its metadata, as a JSON object |
+| `tracepad.observation.metadata` | its metadata, as a JSON object — or `tracepad.observation.metadata.<key>`, one attribute per entry, which is what the packages write, so that a second write adds keys |
 | `tracepad.observation.completion_start_time` | when the first token came back |
 | `tracepad.prompt.name`, `tracepad.prompt.version` | the prompt it ran |
 

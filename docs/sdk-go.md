@@ -39,6 +39,7 @@ defer shutdown(ctx)
 | `WithEnvironment` | `TRACEPAD_ENVIRONMENT` | The deployment this process is |
 | `WithRelease` | `TRACEPAD_RELEASE` | The version of this deployment — per trace, [`WithTraceVersion`](#the-trace-around-a-step) |
 | `WithExport(false)` | — | Attaches everything except the exporter |
+| `WithExportTimeout(time.Duration)` | `TRACEPAD_EXPORT_TIMEOUT` (seconds) | How long one export may take, its retries included; five seconds by default |
 | `WithLogger` | — | Where the tracing path says what it could not do; `slog.Default()` otherwise |
 | `WithTracerProvider` | — | Attach to this provider instead of the global one — for tests |
 
@@ -49,6 +50,17 @@ file an hour later is the bug report that rule prevents.
 Standard OpenTelemetry variables (`OTEL_SERVICE_NAME`,
 `OTEL_RESOURCE_ATTRIBUTES`, the batch processor's own limits) are honoured by
 the OTel SDK as they are; the package neither reads them nor sets them.
+
+**`WithExportTimeout`** bounds one export, its retries included.
+OpenTelemetry's default is ten seconds for one attempt, retried for up to a
+minute — long for a request that flushes before it answers — so the package's
+is five, set both as the exporter's timeout and as the batch processor's
+export timeout, which is what bounds the retries. With neither the option nor
+`TRACEPAD_EXPORT_TIMEOUT`, `OTEL_EXPORTER_OTLP_TRACES_TIMEOUT` keeps working
+underneath when it is set, with the OTel SDK's meaning: the bound of one
+attempt. A `TRACEPAD_EXPORT_TIMEOUT` that is not a number of seconds is
+ignored with a warning, and so is the option under `WithExport(false)`, which
+adds no exporter to bound.
 
 **`Init` adapts to the provider it finds.** If the application has already set
 a global `TracerProvider` — `otelhttp`, `otelgrpc`, another SDK — the call
@@ -103,8 +115,24 @@ second `End` does nothing, so the two lines above coexist.
 | Option | Meaning |
 |---|---|
 | `WithInput(any)` | The step's input. A `string` is sent as it is; anything else as JSON |
-| `WithMetadata(any)` | Free metadata, a JSON object |
+| `WithMetadata(any)` | Free metadata: a map, or anything that encodes as a JSON object. Written one attribute per top-level key, so an `Update` adds its keys and replaces only its own |
 | `WithType(string)` | One of the [ten kinds](ingest.md#the-kind-of-each-step); `"span"` by default, and an empty one keeps the default. Another spelling is sent all the same and warned about once. It sets the kind written, not the shape: the function names that, so a generation is opened with `Generation` (a `*Call`, with `End(Result)`) and an event with `Event` — `Span` with `WithType("generation")` is a plain step stored as a generation without a model. On `Generation` it types a model call of another kind, `WithType("embedding")` |
+
+**What a step costs when nothing records.** A span starts with the cheap
+attributes only — its kind, the model, the prompt reference — which is what a
+sampler or a span processor sees. Input, output, metadata and model
+parameters, everything serialised to JSON, are set after the span exists and
+only if it records: with tracing off, or under a sampler that dropped the
+span, none of them is serialised at all, in the opening call, in `Update` and
+in `End` alike.
+
+**Metadata merges by key.** It is written one attribute per top-level key,
+`tracepad.observation.metadata.<key>` — a string, a number or a boolean as it
+is, anything else as JSON — so `Update(ctx, WithMetadata(map[string]any{"flag": 1}))`
+adds `flag` and replaces only it, and the keys the step opened with stay. A
+key with a `nil` value writes nothing; it does not delete the key, since an
+attribute cannot be unset once written. Metadata that encodes as no JSON
+object at all is written whole under `tracepad.observation.metadata`.
 
 There is no function wrapper like Python's `@observe`: Go has no decorators
 and no way to capture a function's arguments by name, so the input is what
@@ -209,7 +237,11 @@ tracepad.Update(ctx, tracepad.WithLevel("WARNING"), tracepad.WithStatusMessage("
 Both act on the context's current span, whoever started it, and the store
 resolves the trace-level ones for the trace. `Update` takes `WithName`,
 `WithInput`, `WithOutput`, `WithMetadata`, `WithLevel`, `WithStatusMessage` and
-`WithType`. Outside a span both log a warning and do nothing.
+`WithType`. Outside every span, in a process that traces, both log a warning
+and do nothing — that call is a mistake. On a span that does not record —
+tracing off, or a sampler's choice — they do nothing with a debug line: that
+is configuration, and a warning on every call would teach an operator to
+ignore the package's warnings.
 
 | `UpdateTrace` option | Meaning |
 |---|---|
@@ -250,7 +282,10 @@ the request that produced the trace. Pass `WithID` for the
 [idempotency](scores.md#idempotency-and-corrections) the API offers.
 
 `tracepad.Flush(ctx)` drains the queue and then the span processors; the
-`shutdown` returned by `Init` does the same before it closes anything.
+`shutdown` returned by `Init` does the same before it closes anything. Both
+keep to the context's deadline: against a store that never answers, `Flush`
+returns `context.DeadlineExceeded` when the context ends, and the export goes
+on under its own timeout.
 
 ## Prompts
 
@@ -487,6 +522,7 @@ the helper panics in the testing package.
 | `Init` with no host or key | `ErrConfig`, wrapped with what is missing |
 | `Score` with no target — or an empty `WithTraceID` — outside every span while tracing: initialised, or through a provider of the application's own | `ErrNoTrace` — a programming error, visible at the call site |
 | `Score` with no target where nothing traces (no `Init`, no-op global provider, no recording span) | `nil`; a debug line — tracing is off |
+| `Update`, `UpdateTrace` on a span that does not record (tracing off, or sampled out) | Nothing; a debug line |
 
 Both sentinels are for `errors.Is`, and `*HTTPError` for `errors.As`.
 Instrumentation that can break the function it observes is worse than none.

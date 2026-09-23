@@ -40,11 +40,21 @@ tracepad.init();
 | `environment` | `TRACEPAD_ENVIRONMENT` | The deployment this process is |
 | `release` | `TRACEPAD_RELEASE` | The version of this deployment — per trace, [`updateTrace({ version })`](#the-trace-around-a-step) |
 | `export` | — | `false` attaches everything except the exporter |
+| `exportTimeoutMillis` | `TRACEPAD_EXPORT_TIMEOUT` (seconds) | How long one export may take, its retries included; `5000` by default |
 | `logger` | — | Where the warnings go; `console` by default |
 
 The options win over the environment, and with neither a host nor a key the
 call throws `TracepadConfigError` — misconfiguration discovered as a `401` in
 a log file an hour later is the bug report that rule prevents.
+
+**`exportTimeoutMillis`** is handed to the OTLP exporter as its timeout, and
+`spanProcessor()` takes it too. OpenTelemetry's default is ten seconds,
+retries inside them — long for a request that flushes before it answers — so
+the package's is five. With neither the option nor `TRACEPAD_EXPORT_TIMEOUT`,
+`OTEL_EXPORTER_OTLP_TRACES_TIMEOUT` keeps working underneath when it is set. A
+`TRACEPAD_EXPORT_TIMEOUT` that is not a number of seconds is ignored with a
+warning, and so is the option under `export: false`, which adds no exporter to
+bound.
 
 **Not calling `init` is how tracing is turned off** — in tests, on a machine
 with no key — as long as the process has no OpenTelemetry provider of its own:
@@ -178,6 +188,21 @@ package warns once per spelling, when the first step is written — after
 `init({ logger })`. A `type` handed to `event` or `generation` other than their
 own is ignored, with a warning.
 
+**What a step costs when nothing records.** A span starts with the cheap
+attributes only — its kind, the model, the prompt reference — which is what a
+sampler or a span processor sees. Input, output, metadata and model
+parameters, everything serialised to JSON, are set after the span exists and
+only if it records: with tracing off, or under a sampler that dropped the
+span, none of them is serialised at all, in the opening call, in `update`, in
+`end` and in `observe` alike.
+
+**Metadata merges by key.** It is written one attribute per top-level key,
+`tracepad.observation.metadata.<key>` — a string, a number or a boolean as it
+is, anything else as JSON — so `update({ metadata: { flag: 1 } })` adds `flag`
+and replaces only it, and the keys the step opened with stay. A key given as
+`undefined` or `null` writes nothing; it does not delete the key, since an
+attribute cannot be unset once written.
+
 The span ends when the callback returns, or when the promise it returned
 settles. `span`, `event` and `generation` hand out an `Observation` carrying
 `traceId`, `spanId`, `update({...})` and the OTel span itself as `.span`. With
@@ -293,7 +318,11 @@ tracepad.update({ level: 'WARNING', statusMessage: 'retried once' });
 ```
 
 Both act on the *current* span, whoever started it, and the store resolves the
-trace-level ones for the trace. Outside a span both warn and do nothing.
+trace-level ones for the trace. Outside every span, in a process that traces,
+both warn and do nothing — that call is a mistake. On a span that does not
+record — tracing off, or a sampler's choice — they do nothing with a
+`diag.debug` line: that is configuration, and a warning on every call would
+teach an operator to ignore the package's warnings.
 
 `version` is the version of *this trace's* logic — a pipeline revision, a
 prompt bundle, an experiment arm — and the trace listing filters on it
@@ -327,7 +356,8 @@ must not fail the request that produced the trace. Pass `id` for the
 [idempotency](scores.md#idempotency-and-corrections) the API offers.
 
 `await tracepad.flush({ timeout: 10_000 })` drains the queue and then the span
-processors. `init` registers a `beforeExit` listener that calls it, so a
+processors, within the one budget: it resolves when the budget runs out, with
+a warning, and the export finishes in the background. `init` registers a `beforeExit` listener that calls it, so a
 script that returns without calling it still delivers — but `beforeExit`
 does not fire on `process.exit()`, so a script that exits that way calls
 `flush` first.
@@ -568,6 +598,7 @@ told otherwise.
 | `init` with no host or key | `TracepadConfigError` |
 | `score` with no target outside every span while tracing — initialised, or through a provider of the application's own —, `attempt.score` before a trace, `run.item` with no id | `Error` — a programming error, visible at the call site |
 | `score` with no target where nothing traces (no `init`, no provider of its own, no recording span) | Nothing; a `diag.debug` line — tracing is off |
+| `update`, `updateTrace` on a span that does not record (tracing off, or sampled out) | Nothing; a `diag.debug` line |
 
 Instrumentation that can break the function it observes is worse than none.
 Everything the package warns about goes through `console.warn` with a
