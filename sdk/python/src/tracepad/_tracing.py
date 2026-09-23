@@ -33,6 +33,9 @@ from ._log import logger
 from ._scores import flush_scores
 
 _initialized = False
+# The provider `init` built, if it built one: `tracepad.testing.reset()` shuts
+# it down, so that its batching exporter does not outlive the test.
+_built: Any = None
 
 #: The observation the current block opened, so that `update` can tell what
 #: the application said explicitly from what the decorator captured.
@@ -59,7 +62,7 @@ def init(
     `export=False` attaches everything except the exporter, for an application
     whose traces already reach the store another way.
     """
-    global _initialized
+    global _built
     if _initialized:
         logger.warning("tracepad.init() has already run; this call is a no-op")
         return
@@ -69,8 +72,12 @@ def init(
 
     provider = otel.get_tracer_provider()
     if not isinstance(provider, TracerProvider):
-        provider = TracerProvider(resource=_resource(config))
-        otel.set_tracer_provider(provider)
+        # After a test's reset the global is `tracepad.testing`'s follower, and
+        # a tracer taken at import is bound to it: it follows the new provider
+        # rather than giving way to it (spec 040 #14).
+        install = getattr(provider, "follow", otel.set_tracer_provider)
+        provider = _built = TracerProvider(resource=_resource(config))
+        install(provider)
     elif config.environment or config.release:
         # A resource is fixed when its provider is built, and `service.version`
         # is read from the resource only (`docs/ingest.md`), so neither can be
@@ -80,6 +87,13 @@ def init(
             "process already has a TracerProvider; set deployment.environment.name and "
             "service.version on its resource (OTEL_RESOURCE_ATTRIBUTES) instead"
         )
+    _attach(provider, config, export)
+
+
+def _attach(provider: Any, config: Config, export: bool) -> None:
+    """What `init` adds to the provider it found or built; `tracepad.testing`
+    calls it with a provider and a configuration of its own (spec 040 #1)."""
+    global _initialized
     # Before the exporting one, so that every span the exporter batches
     # already carries the run and the item an eval stamped (spec 018 #3). It
     # is registered under `export=False` too: an application exporting

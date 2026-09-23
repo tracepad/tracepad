@@ -26,7 +26,10 @@ def processors(provider: Any) -> list[str]:
 ATTACHED = ["RunContextProcessor", "BatchSpanProcessor"]
 
 
-def test_creates_a_provider_when_there_is_none() -> None:
+def test_creates_a_provider_when_there_is_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A process no test reset ran in: nothing has set the global provider.
+    monkeypatch.setattr(otel_api, "_TRACER_PROVIDER", None)
+    monkeypatch.setattr(otel_api, "_TRACER_PROVIDER_SET_ONCE", otel_api.Once())
     tracepad.init(HOST, KEY)
     provider = otel_api.get_tracer_provider()
     assert isinstance(provider, TracerProvider)

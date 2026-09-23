@@ -37,7 +37,7 @@ describe('the item block', () => {
     });
     tracepad.span('after', () => undefined);
 
-    const [answer, request, after] = seen.all();
+    const [answer, request, after] = seen.spans;
     for (const span of [answer!, request!]) {
       expect(span.attributes[RUN_ID]).toBe('run-1');
       expect(span.attributes[ITEM_ID]).toBe('case-1');
@@ -62,7 +62,7 @@ describe('the item block', () => {
       });
       tracepad.span('three', () => undefined);
     });
-    expect(seen.all().map((s) => [s.name, s.attributes[ITEM_ID]])).toEqual([
+    expect(seen.spans.map((s) => [s.name, s.attributes[ITEM_ID]])).toEqual([
       ['one', 'outer'],
       ['two', 'inner'],
       ['three', 'outer'],

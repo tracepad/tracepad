@@ -100,7 +100,7 @@ describe('a stream through the generation', () => {
     expect(attributes[attrs.OUTPUT]).toBe('cut');
     expect(attributes[attrs.USAGE_COST]).toBe(1);
     expect(attributes).not.toHaveProperty('gen_ai.usage.input_tokens');
-    expect(seen.all()).toHaveLength(1);
+    expect(seen.spans).toHaveLength(1);
   });
 
   test('a break leaves the ending to the callback, with what was read', async () => {
@@ -110,7 +110,7 @@ describe('a stream through the generation', () => {
       for await (const piece of call.stream(later(CHUNKS))) {
         if (piece.choices[0]?.delta.content === 'po') break;
       }
-      ended = seen.all().length > 0;
+      ended = seen.spans.length > 0;
     });
     expect(ended).toBe(false);
     const attributes = seen.attributes('chat');

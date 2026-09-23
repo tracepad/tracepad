@@ -4,29 +4,26 @@
  * `init`, the global `TracerProvider` and the score queue are all
  * process-wide by design — the OTel API refuses to set a provider twice on
  * purpose — so the suite resets them between tests rather than pretending
- * they are not.
+ * they are not. The reset and the capture are the public `tracepad/testing`
+ * (spec 040 #7): the suite exercises the helpers an application tests with,
+ * and the environment scrub, the logger and the scripted `fetch` stay here.
  */
 
-import { context, trace, type ProxyTracerProvider, type TracerProvider } from '@opentelemetry/api';
-import {
-  InMemorySpanExporter,
-  NodeTracerProvider,
-  SimpleSpanProcessor,
-  type ReadableSpan,
-} from '@opentelemetry/sdk-trace-node';
+import { type ProxyTracerProvider, type TracerProvider, trace } from '@opentelemetry/api';
 import { afterEach, beforeEach, vi } from 'vitest';
 
-import * as config from '../src/config.js';
+import { adopt } from '../src/config.js';
 import { setLogger } from '../src/log.js';
-import * as prompts from '../src/prompts.js';
-import * as scores from '../src/scores.js';
-import * as tracing from '../src/tracing.js';
+import { type Capture, capture, reset } from '../src/testing.js';
+import { FOLLOWER } from '../src/tracing.js';
 
 export const HOST = 'http://tracepad.test:4318';
 export const KEY = 'tp-sk-test';
 
 /** Every line the package warned with, in order. */
 export const warnings: string[] = [];
+
+const intoWarnings = { warn: (message: string) => warnings.push(message) };
 
 export function fresh(): void {
   beforeEach(() => {
@@ -41,8 +38,8 @@ export function fresh(): void {
       delete process.env[variable];
     }
     warnings.length = 0;
-    setLogger({ warn: (message) => warnings.push(message) });
     reset();
+    setLogger(intoWarnings);
   });
   afterEach(() => {
     reset();
@@ -52,52 +49,20 @@ export function fresh(): void {
   });
 }
 
-function reset(): void {
-  trace.disable();
-  context.disable();
-  tracing.reset();
-  config.forget();
-  prompts.forget();
-  scores.reset();
-}
-
-/** The provider registered with the API, behind its proxy. */
+/** The provider registered with the API, behind its proxy — and behind the
+ * follower a reset leaves there, the one it records into. */
 export function registered(): TracerProvider {
-  return (trace.getTracerProvider() as ProxyTracerProvider).getDelegate();
+  const delegate = (trace.getTracerProvider() as ProxyTracerProvider).getDelegate();
+  return delegate === FOLLOWER ? (FOLLOWER.target ?? delegate) : delegate;
 }
 
-/** A provider of our own, carrying the package's processor, exporting into memory. */
-export function spans(): Spans {
-  const exporter = new InMemorySpanExporter();
-  const provider = new NodeTracerProvider({
-    spanProcessors: [
-      new SimpleSpanProcessor(exporter),
-      tracing.spanProcessor({ host: HOST, key: KEY, export: false }),
-    ],
-  });
-  provider.register();
-  tracing.init({ host: HOST, key: KEY });
-  return new Spans(exporter);
-}
-
-export class Spans {
-  constructor(private readonly exporter: InMemorySpanExporter) {}
-
-  all(): ReadableSpan[] {
-    return this.exporter.getFinishedSpans();
-  }
-
-  one(name?: string): ReadableSpan {
-    const found = this.all().filter((s) => name === undefined || s.name === name);
-    if (found.length !== 1) {
-      throw new Error(`want one span named ${name}, got ${this.all().map((s) => s.name)}`);
-    }
-    return found[0]!;
-  }
-
-  attributes(name?: string): Record<string, unknown> {
-    return { ...this.one(name).attributes };
-  }
+/** A provider of our own, carrying the package's processor, recording into
+ * memory; the configuration is the suite's, whatever placeholder the capture uses. */
+export function spans(): Capture {
+  const captured = capture();
+  adopt({ host: HOST, key: KEY });
+  setLogger(intoWarnings);
+  return captured;
 }
 
 /** A `fetch` that answers from a script, recording every call. */

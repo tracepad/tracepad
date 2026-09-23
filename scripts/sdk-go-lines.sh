@@ -6,10 +6,11 @@
 # rule to satisfy. 1,600 lines covered the package (spec 033 #11) and 1,900
 # cover it with the eval harness (spec 033 #17), because they are one module
 # and a budget per spec would be a budget per PR; spec 036 #8 raised it to
-# 2,100 for trace deletion.
+# 2,100 for trace deletion, spec 040 #13 to 2,350 for `tracepadtest`.
 #
-# What it counts is the application; the tests, the e2e package and the
-# programs under internal/ (the fixture writer, the smoke exporter) are
+# What it counts is the application — `tracepadtest` and the hook it opens
+# under internal/ included; the tests, the e2e package and the programs
+# under internal/ (the fixture writer, the smoke exporter) are
 # reported beside it under no ceiling at all (design §8, amended; spec 010
 # #7). A number that charges for coverage argues for deleting tests.
 #
@@ -17,7 +18,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BUDGET="${1:-2100}"
+BUDGET="${1:-2350}"
 
 cd "$ROOT"
 
@@ -25,8 +26,8 @@ sources() {
 	git ls-files 'sdk/go' | grep -E '\.go$' || true
 }
 
-app() { sources | grep -v -E '_test\.go$|^sdk/go/e2e/|^sdk/go/internal/' || true; }
-tests() { sources | grep -E '_test\.go$|^sdk/go/e2e/|^sdk/go/internal/' || true; }
+app() { sources | grep -v -E '_test\.go$|^sdk/go/e2e/|^sdk/go/internal/(fixture|smoke)/' || true; }
+tests() { sources | grep -E '_test\.go$|^sdk/go/e2e/|^sdk/go/internal/(fixture|smoke)/' || true; }
 
 files() {
 	if [ -z "$1" ]; then echo 0; else printf '%s\n' "$1" | wc -l | tr -d ' '; fi

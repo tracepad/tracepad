@@ -194,7 +194,7 @@ def test_an_unknown_kind_warns_and_is_still_written(
 
     assert caplog.text.count("'retreiver' is not one of the observation types") == 1
     assert caplog.text.count("'retriver' is not one of the observation types") == 1
-    kinds = [s.attributes[attrs.OBSERVATION_TYPE] for s in spans.all()]
+    kinds = [s.attributes[attrs.OBSERVATION_TYPE] for s in spans.spans]
     assert kinds == ["retreiver"] * 3 + ["retriver"] * 2
 
 
@@ -276,7 +276,7 @@ def test_update_outside_a_span_warns_and_writes_nothing(
         tracepad.update(name="nowhere")
         tracepad.update_trace(user_id="u-1")
     assert caplog.text.count("outside a span") == 2
-    assert spans.all() == []
+    assert spans.spans == []
 
 
 def test_dumps_of_a_string_is_the_string() -> None:
@@ -323,7 +323,7 @@ def test_a_partly_read_generator_does_not_leave_its_span_current(spans: Any) -> 
 
     after = spans.one("after")
     assert after.parent is None
-    assert len({span.context.trace_id for span in spans.all()}) == 3
+    assert len({span.context.trace_id for span in spans.spans}) == 3
 
 
 def test_a_span_started_inside_a_generator_step_is_its_child(spans: Any) -> None:

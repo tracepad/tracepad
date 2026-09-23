@@ -3,6 +3,7 @@ package tracepad
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.opentelemetry.io/otel/trace"
@@ -45,6 +46,10 @@ type scoreQueue struct {
 	started bool
 	closed  bool
 	done    chan struct{}
+	// keep, when set, is tracepadtest's capture: each score is handed to it
+	// on the caller's goroutine, and nothing is posted or started.
+	keep    func(map[string]any)
+	dropped atomic.Bool
 }
 
 func newScoreQueue(send func(context.Context, []map[string]any) error) *scoreQueue {
@@ -57,13 +62,17 @@ func newScoreQueue(send func(context.Context, []map[string]any) error) *scoreQue
 func (q *scoreQueue) start() {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	if !q.started && !q.closed {
+	if !q.started && !q.closed && q.keep == nil {
 		q.started = true
 		go q.run()
 	}
 }
 
 func (q *scoreQueue) submit(score map[string]any) {
+	if q.keep != nil {
+		q.keep(score)
+		return
+	}
 	// The goroutine starts once there is a store to post to: a score written
 	// before Init — with the host and the key coming as options — waits in
 	// the queue rather than being posted nowhere and dropped. Init starts it.
@@ -140,11 +149,24 @@ func (q *scoreQueue) close(ctx context.Context) error {
 	}
 }
 
+// drop stops the goroutine without sending what is queued, and without
+// waiting for it: a batch already on the wire is past recalling, and is not
+// retried (spec 040 #14).
+func (q *scoreQueue) drop() {
+	q.dropped.Store(true)
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if !q.closed {
+		q.closed = true
+		close(q.items)
+	}
+}
+
 func (q *scoreQueue) run() {
 	defer close(q.done)
 	for {
 		batch, flushes, stopping := q.collect()
-		if len(batch) > 0 {
+		if len(batch) > 0 && !q.dropped.Load() {
 			q.deliver(batch)
 		}
 		for _, marker := range flushes {
@@ -183,6 +205,9 @@ func (q *scoreQueue) collect() (batch []map[string]any, flushes []chan struct{},
 func (q *scoreQueue) deliver(batch []map[string]any) {
 	var err error
 	for attempt := 0; attempt < 2; attempt++ {
+		if q.dropped.Load() {
+			return
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		err = q.send(ctx, batch)
 		cancel()

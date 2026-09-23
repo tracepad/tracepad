@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -19,6 +20,10 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/embedded"
+	"go.opentelemetry.io/otel/trace/noop"
+
+	"github.com/tracepad/tracepad/sdk/go/internal/hook"
 )
 
 // Option configures Init.
@@ -82,10 +87,12 @@ type defaults struct {
 	provider atomic.Pointer[trace.TracerProvider]
 	// sdk is the SDK provider the processors were registered on — adopted
 	// or built — and what Flush asks to flush; built says which.
-	sdk      *sdktrace.TracerProvider
-	built    bool
-	scores   *scoreQueue
-	shutdown func(context.Context) error
+	sdk   *sdktrace.TracerProvider
+	built bool
+	// propagated says Init set the propagator, which reset takes back.
+	propagated bool
+	scores     *scoreQueue
+	shutdown   func(context.Context) error
 }
 
 var def = &defaults{}
@@ -127,6 +134,12 @@ func Init(ctx context.Context, opts ...Option) (shutdown func(context.Context) e
 	if err != nil {
 		return nil, err
 	}
+	return d.start(ctx, c, o)
+}
+
+// start is Init past its configuration, under the lock; tracepadtest's
+// capture calls it with a configuration of its own (spec 040 #1).
+func (d *defaults) start(ctx context.Context, c config, o options) (func(context.Context) error, error) {
 	if o.logger != nil {
 		d.logger.Store(o.logger)
 	}
@@ -152,6 +165,7 @@ func Init(ctx context.Context, opts ...Option) (shutdown func(context.Context) e
 		// keeps it, or baggage would silently stop crossing services.
 		if len(otel.GetTextMapPropagator().Fields()) == 0 {
 			otel.SetTextMapPropagator(propagation.TraceContext{})
+			d.propagated = true
 		}
 		provider, built = sdk, true
 	case sdk == nil:
@@ -203,11 +217,14 @@ func attach(ctx context.Context, sdk *sdktrace.TracerProvider, c config, export 
 }
 
 // isDefault tells the API's own delegating provider — the one every process
-// has until something sets one — from a provider an application set that is
-// not the SDK's. There is no public way to ask, and replacing an
+// has until something sets one, or what reset leaves — from a provider an
+// application set that is not the SDK's. There is no public way to ask, and replacing an
 // application's provider because its type was unfamiliar is exactly what
 // Decision 2 refuses, so the package's own internal path is the test.
 func isDefault(provider trace.TracerProvider) bool {
+	if isFollow(provider) {
+		return true
+	}
 	t := reflect.TypeOf(provider)
 	for t != nil && t.Kind() == reflect.Pointer {
 		t = t.Elem()
@@ -297,21 +314,95 @@ func (d *defaults) close(ctx context.Context) error {
 	return err
 }
 
-// reset forgets the default, for tests: Init is process-wide by design. The
-// queue is closed outside the lock: its goroutine reads the configuration
-// under it.
+func init() {
+	hook.Reset = reset
+	hook.Capture = func(host, key string, provider trace.TracerProvider, keep func(map[string]any)) error {
+		reset()
+		followed.Store(&provider)
+		q := newScoreQueue(nil)
+		q.keep = keep
+		d := def
+		d.mu.Lock()
+		defer d.mu.Unlock()
+		d.scores = q
+		// The propagator an Init that built its provider would set.
+		if len(otel.GetTextMapPropagator().Fields()) == 0 {
+			otel.SetTextMapPropagator(propagation.TraceContext{})
+			d.propagated = true
+		}
+		_, err := d.start(context.Background(), config{host: host, key: key}, options{provider: provider})
+		return err
+	}
+}
+
+// follow is the global provider reset leaves (spec 040 #9, #14). The API's
+// own default cannot come back once anything was set, and the first
+// SetTracerProvider binds every tracer taken before it — a package-level
+// otel.Tracer — to that provider for good. Bound to this one, such a tracer
+// asks at every span where spans go now: to the capture's provider, to one
+// set since, or nowhere — the no-op that is tracing off, and nothing set to
+// an Init that runs next.
+type follow struct{ embedded.TracerProvider }
+
+// followed is the provider of the capture in progress.
+var followed atomic.Pointer[trace.TracerProvider]
+
+func (follow) Tracer(name string, opts ...trace.TracerOption) trace.Tracer {
+	return followTracer{name: name, opts: opts}
+}
+
+type followTracer struct {
+	embedded.Tracer
+	name string
+	opts []trace.TracerOption
+}
+
+var nowhere trace.TracerProvider = noop.NewTracerProvider()
+
+func (t followTracer) Start(ctx context.Context, name string, opts ...trace.SpanStartOption) (context.Context, trace.Span) {
+	provider := nowhere
+	if p := followed.Load(); p != nil {
+		provider = *p
+	} else if global := otel.GetTracerProvider(); !isFollow(global) {
+		provider = global
+	}
+	return provider.Tracer(t.name, t.opts...).Start(ctx, name, opts...)
+}
+
+func isFollow(provider trace.TracerProvider) bool {
+	_, ok := provider.(follow)
+	return ok
+}
+
+// reset returns the process to never initialised — for this package's tests
+// and, through the hook, for tracepadtest's (spec 040 #3). Init is
+// process-wide by design. What Init built is shut down and what it set is
+// taken back; the queue drops what it holds, outside the lock: its goroutine
+// reads the configuration under it.
 func reset() {
+	followed.Store(nil)
+	otel.SetTracerProvider(follow{})
 	d := def
 	d.mu.Lock()
-	scores := d.scores
-	d.built = false
+	scores, sdk, built, propagated := d.scores, d.sdk, d.built, d.propagated
+	d.built, d.propagated = false, false
 	d.ready.Store(false)
 	d.config, d.sdk, d.scores, d.shutdown = nil, nil, nil, nil
 	d.logger.Store(nil)
 	d.provider.Store(nil)
 	d.mu.Unlock()
 	if scores != nil {
-		_ = scores.close(context.Background())
+		scores.drop()
+	}
+	if built {
+		// Its spans go to the store the test configured, as at exit; a store
+		// that is away does not hold the cleanup for the exporter's retries.
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = sdk.Shutdown(ctx)
+		cancel()
+	}
+	if propagated {
+		otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator())
 	}
 	forgetPrompts()
 	warnedKinds.Lock()

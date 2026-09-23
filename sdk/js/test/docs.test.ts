@@ -89,7 +89,7 @@ test('every ```ts example in the docs type-checks against the package', () => {
     skipLibCheck: true,
     noEmit: true,
     baseUrl: PACKAGE,
-    paths: { tracepad: ['src/index.ts'] },
+    paths: { tracepad: ['src/index.ts'], 'tracepad/testing': ['src/testing.ts'] },
   };
   const host = ts.createCompilerHost(options);
   const readFile = host.readFile.bind(host);

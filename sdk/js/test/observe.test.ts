@@ -5,7 +5,8 @@ import { describe, expect, test } from 'vitest';
 
 import * as attrs from '../src/attributes.js';
 import * as tracepad from '../src/index.js';
-import { fresh, spans, warnings, type Spans } from './helpers.js';
+import type { Capture } from '../src/testing.js';
+import { fresh, spans, warnings } from './helpers.js';
 
 fresh();
 
@@ -39,7 +40,7 @@ describe('the four shapes', () => {
       return `${question}!`;
     }, { name: 'fetch-answer' });
     const pending = fetchAnswer('why');
-    expect(seen.all()).toEqual([]);
+    expect(seen.spans).toEqual([]);
     expect(await pending).toBe('why!');
     expect(seen.attributes('fetch-answer')[attrs.OUTPUT]).toBe('why!'); // a string as it is
   });
@@ -51,7 +52,7 @@ describe('the four shapes', () => {
       return 'done';
     });
     const out = counted(3);
-    expect(seen.all()).toEqual([]); // nothing ends before the generator does
+    expect(seen.spans).toEqual([]); // nothing ends before the generator does
     expect([...out]).toEqual([0, 1, 2]);
     expect(seen.attributes('count')[attrs.OUTPUT]).toBe('[0,1,2]');
   });
@@ -105,7 +106,7 @@ describe('the four shapes', () => {
     thrown.next();
     expect(thrown.throw(new Error('stop'))).toEqual({ value: 'recovered', done: true });
     expect(closed.slice(-2)).toEqual(['caught stop', 'cleanup']);
-    expect(seen.all().filter((s) => s.name === 'echo')).toHaveLength(3);
+    expect(seen.spans.filter((s) => s.name === 'echo')).toHaveLength(3);
   });
 
   test('a consumer that stops early closes the inner generator, so its cleanup runs', async () => {
@@ -186,7 +187,7 @@ describe('what the span carries', () => {
     tracepad.observe(() => 1)();
     tracepad.observe(function named() {})();
     tracepad.observe(() => 2, { name: 'given' })();
-    expect(seen.all().map((s) => s.name)).toEqual(['anonymous', 'named', 'given']);
+    expect(seen.spans.map((s) => s.name)).toEqual(['anonymous', 'named', 'given']);
   });
 
   test('the wrapper keeps the name and forwards this', () => {
@@ -205,7 +206,7 @@ describe('what the span carries', () => {
   test('the type is written, and an unknown one warns', () => {
     const seen = spans();
     tracepad.observe(() => 1, { type: 'retriever' })();
-    expect(seen.attributes()[attrs.OBSERVATION_TYPE]).toBe('retriever');
+    expect(seen.attributes('anonymous')[attrs.OBSERVATION_TYPE]).toBe('retriever');
     tracepad.update({ type: 'widget' as never });
     expect(warnings).toEqual([expect.stringContaining('outside a span')]);
   });
@@ -213,7 +214,7 @@ describe('what the span carries', () => {
   test('the opt-outs leave the attributes unset', () => {
     const seen = spans();
     tracepad.observe((secret: string) => secret.length, { captureInput: false, captureOutput: false })('hunter2');
-    const attributes = seen.attributes();
+    const attributes = seen.attributes('anonymous');
     expect(attributes).not.toHaveProperty(attrs.INPUT);
     expect(attributes).not.toHaveProperty(attrs.OUTPUT);
   });
@@ -247,12 +248,12 @@ describe('what the span carries', () => {
     const loop: Record<string, unknown> = {};
     loop.self = loop;
     expect(tracepad.observe((x: unknown) => x === loop)(loop)).toBe(true);
-    expect(seen.attributes()[attrs.INPUT]).toBe('[object Object]');
+    expect(seen.attributes('anonymous')[attrs.INPUT]).toBe('[object Object]');
   });
 });
 
 describe('the error path', () => {
-  function failed(seen: Spans, name: string) {
+  function failed(seen: Capture, name: string) {
     const span = seen.one(name);
     expect(span.status).toEqual({ code: SpanStatusCode.ERROR, message: 'upstream timeout' });
     expect(span.events.map((e) => [e.name, e.attributes?.['exception.message']])).toEqual([['exception', 'upstream timeout']]);
@@ -299,7 +300,7 @@ test('nested steps are parented, and the trace context reaches an await', async 
     return innermost();
   });
   const traceId = await outermost();
-  const [deepest, innerSpan, outerSpan] = seen.all();
+  const [deepest, innerSpan, outerSpan] = seen.spans;
   expect([deepest!.name, innerSpan!.name, outerSpan!.name]).toEqual(['deepest', 'inner', 'outer']);
   expect(deepest!.parentSpanContext?.spanId).toBe(innerSpan!.spanContext().spanId);
   expect(innerSpan!.parentSpanContext?.spanId).toBe(outerSpan!.spanContext().spanId);

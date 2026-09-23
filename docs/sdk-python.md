@@ -429,6 +429,62 @@ counts them all — and `attempt.trace_id` is the last of them, which is what
 `init(export=False)` still registers the processor: an application exporting
 through another SDK wants its spans stamped all the same.
 
+## Testing your instrumentation
+
+`tracepad.testing` is what a test suite uses to check that the code traces:
+that a step is a span with the right name, a model call a generation with its
+usage, a thumbs-up a score.
+
+```python
+import tracepad
+from tracepad.testing import capture
+
+def test_the_answer_is_traced():
+    with capture() as captured:
+        answer("why is the sky blue")
+
+    assert captured.one("answer").attributes["tracepad.observation.type"] == "span"
+    assert captured.attributes("chat")["gen_ai.usage.input_tokens"] == 12
+    assert captured.scores[0]["name"] == "helpful"
+```
+
+`capture()` resets everything the package keeps process-wide and initialises
+the package against a provider that records into memory, with export off and
+nothing read from the environment; the score queue keeps each body instead of
+posting it. The global provider follows the capture's, so a tracer your
+application took at import — `trace.get_tracer(__name__)` — records into
+every capture, not only the first, as long as `tracepad.testing` is imported
+before anything sets a provider (the plugin line in `conftest.py` is). Leaving the block resets the process
+again, and what was captured stays readable:
+
+| On a `Capture` | What it is |
+|---|---|
+| `spans` | Every finished span, in the order it ended — OpenTelemetry's own `ReadableSpan` |
+| `one(name)` | The single span of that name; an `AssertionError` naming the spans there were otherwise |
+| `attributes(name)` | That span's attributes, as a `dict` |
+| `scores` | The bodies `score()` would have posted: `name`, `trace_id`, `value` and the rest |
+
+`reset()` alone returns the process to one that never called `init` — tracing
+off, as [above](#init) — for a test of the code with tracing off: `score`
+does nothing, and the ids are `None`.
+
+On pytest, a suite opts into both as fixtures in its `conftest.py`:
+
+```python
+pytest_plugins = ["tracepad.testing"]
+```
+
+`tracepad_capture` is a `Capture`, reset around the test; `tracepad_off` is a
+reset process. Nothing loads the plugin into a suite that does not name it.
+
+Nothing is sent: the placeholder host is `tracepad.test`, which does not
+resolve, so a REST call a test forgot to stub — `prompt`, a dataset,
+`delete_trace` — fails rather than reaching a store. A reset shuts down a
+provider `init` built and drops the scores still queued. A provider your
+application installs at import time is replaced for the capture and not
+restored after it. The capture is process-wide; pytest-xdist's workers are
+processes, so they do not share one.
+
 ## What raises and what does not
 
 | Path | On failure |

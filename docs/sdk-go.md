@@ -426,6 +426,58 @@ same. Without `Init` at all, the REST calls above work — the environment is
 read on the first one — but nothing registers the processor, so nothing is
 stamped and the run covers no case; the first `run.Item` says so in the log.
 
+## Testing your instrumentation
+
+Package `tracepadtest` is what a test suite uses to check that the code
+traces: that a step is a span with the right name, a model call a generation
+with its usage, a thumbs-up a score. It is `httptest`'s idiom — the helpers
+take the test and register their own cleanup.
+
+```go
+import "github.com/tracepad/tracepad/sdk/go/tracepadtest"
+
+func TestTheAnswerIsTraced(t *testing.T) {
+	rec := tracepadtest.Capture(t)
+	answer(context.Background(), "why is the sky blue")
+
+	if got := rec.Attributes(t, "answer")["tracepad.observation.type"].AsString(); got != "span" {
+		t.Errorf("type = %q, want span", got)
+	}
+	if got := rec.Scores(); len(got) != 1 || got[0]["name"] != "helpful" {
+		t.Errorf("scores = %v", got)
+	}
+}
+```
+
+`Capture` resets everything the package keeps process-wide and initialises
+the package against a provider that records into memory, with export off and
+nothing read from the environment; the score queue keeps each body instead of
+posting it. The global provider follows the capture's, so a package-level
+`otel.Tracer("app")` records into every capture, not only the first. The
+test's cleanup — on `t.Fatal` too — resets the process again, and what was
+captured stays readable, from a parent test after its subtest too.
+
+| On a `*Recorder` | What it is |
+|---|---|
+| `Spans()` | Every finished span, in the order it ended — the SDK's own `tracetest.SpanStubs` |
+| `One(t, name)` | The single span of that name; the test fails naming the spans there were otherwise |
+| `Attributes(t, name)` | That span's attributes, by key |
+| `Scores()` | The bodies `Score` would have posted: `name`, `trace_id`, `value` and the rest |
+
+`tracepadtest.Reset(t)` returns the process to one that never called `Init` —
+tracing off, as [above](#steps) — for a test of the code with tracing off:
+`Score` returns `nil`, and the ids are empty. A reset shuts down a provider
+`Init` built, takes back the propagator it set and drops the scores still
+queued; an `Init` after it builds a provider as it would in a fresh process.
+
+Nothing is sent: the placeholder host is `tracepad.test`, which does not
+resolve, so a REST call a test forgot to stub — `Prompt`, a dataset,
+`DeleteTrace` — fails rather than reaching a store. A provider your
+application sets at start-up is replaced for the capture and not restored
+after it. The capture is process-wide, so it refuses a parallel test: called after
+`t.Parallel`, the helper fails the test saying why, and a `t.Parallel` after
+the helper panics in the testing package.
+
 ## What fails and what does not
 
 | Path | On failure |

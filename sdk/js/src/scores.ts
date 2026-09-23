@@ -74,6 +74,13 @@ export class ScoreQueue {
     this.closed = true;
   }
 
+  /** Stop without sending what is queued. */
+  drop(): void {
+    this.closed = true;
+    this.queued = [];
+    clearTimeout(this.timer);
+  }
+
   private drain(): void {
     if (this.timer !== undefined) {
       clearTimeout(this.timer);
@@ -111,8 +118,11 @@ export function queueOf(): ScoreQueue {
   return queue;
 }
 
-/** Replace the process-wide queue. For tests. */
+/** Replace the process-wide queue, for `tracepad/testing`. The one replaced
+ * stops and drops what it holds: sent later, it would go to whatever store
+ * the next test configured (spec 040 #14). */
 export function reset(replacement?: ScoreQueue): void {
+  queue?.drop();
   queue = replacement;
 }
 
