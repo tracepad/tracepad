@@ -5,9 +5,9 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from harness import BINARY, KEY, Store, trace_of
 
 import tracepad
+from harness import BINARY, KEY, Store, trace_of
 
 pytestmark = pytest.mark.skipif(not BINARY, reason="TRACEPAD_BINARY is not set")
 

@@ -55,7 +55,6 @@ testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 100
-src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "A", "RUF"]
@@ -65,7 +64,10 @@ select = ["E", "F", "I", "UP", "B", "A", "RUF"]
 ignore = ["A002", "A001"]
 
 # Named rather than discovered, so that the answer does not depend on which
-# directory `ruff` was run from: the package is first-party to the scripts
-# beside it in the repository, and `conftest` to the suite.
+# directory `ruff` was run from (CI runs it from the repository root with
+# `--config`, where a `src` list here would resolve to nothing): the package is
+# first-party to the scripts beside it, and the suite's shared modules —
+# `test_harness`, whose fake store another test file reuses, and the e2e
+# `harness` — to the suite.
 [tool.ruff.lint.isort]
-known-first-party = ["tracepad", "conftest"]
+known-first-party = ["tracepad", "test_harness", "harness"]

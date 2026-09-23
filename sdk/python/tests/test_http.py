@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import urllib.request
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 
@@ -14,7 +14,7 @@ from tracepad._http import request
 
 class Answer:
     status = 200
-    headers: dict[str, str] = {}
+    headers: ClassVar[dict[str, str]] = {}
 
     def __enter__(self) -> Answer:
         return self
@@ -52,7 +52,9 @@ def test_non_ascii_goes_as_raw_utf8(monkeypatch: pytest.MonkeyPatch) -> None:
     assert json.loads(data) == body
 
 
-def test_a_lone_surrogate_is_escaped_and_the_rest_stays_raw(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_lone_surrogate_is_escaped_and_the_rest_stays_raw(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     body = {"input": "bad \udcff byte", "note": "Καλημέρα"}
 
     data = sent(monkeypatch, body)
