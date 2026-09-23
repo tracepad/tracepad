@@ -528,10 +528,13 @@ test('the answer is traced', async () => {
 });
 ```
 
-`capture()` resets everything the package keeps process-wide, registers a
-global provider that records into memory, and initialises the package against
-it with export off; the score queue keeps each body instead of posting it.
-`restore()` resets the process again, and what was captured stays readable.
+`capture()` resets everything the package keeps process-wide and initialises
+the package against a provider that records into memory, with export off and
+nothing read from the environment; the score queue keeps each body instead of
+posting it. The global provider follows the capture's, so a tracer your
+application took at import — `trace.getTracer('app')` — records into every
+capture, not only the first. `restore()` resets the process again, and what
+was captured stays readable.
 The handle is also `Disposable`: `using captured = capture();` restores at the
 end of the block where the runtime has `using`.
 
@@ -549,7 +552,8 @@ does nothing, and the ids are `undefined`. It also puts the logger back to
 
 Nothing is sent: the placeholder host is `tracepad.test`, which does not
 resolve, so a REST call a test forgot to stub — `prompt`, a dataset,
-`deleteTrace` — fails rather than reaching a store. A provider your
+`deleteTrace` — fails rather than reaching a store. A reset shuts down a
+provider `init` built and drops the scores still queued. A provider your
 application registers at import time is replaced for the capture and not
 restored after it. The capture is process-wide: Vitest and Jest run each file
 in a worker of its own, and the tests inside one file one at a time unless

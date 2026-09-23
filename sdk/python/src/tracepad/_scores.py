@@ -54,7 +54,7 @@ class ScoreQueue:
         self._queue: queue.SimpleQueue[Any] = queue.SimpleQueue()
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
-        self._closed = False
+        self._closed = self._dropped = False
 
     def submit(self, score: dict[str, Any]) -> None:
         with self._lock:
@@ -90,12 +90,20 @@ class ScoreQueue:
         self._queue.put(_STOP)
         thread.join(timeout)
 
+    def drop(self) -> None:
+        """Stop without sending what is queued."""
+        with self._lock:
+            self._closed = self._dropped = True
+            thread = self._thread
+        if thread is not None:
+            self._queue.put(_STOP)
+
     def _run(self) -> None:
         while True:
             batch: list[dict[str, Any]] = []
             flushes: list[_Flush] = []
             stopping = self._collect(batch, flushes)
-            if batch:
+            if batch and not self._dropped:
                 self._deliver(batch)
             for marker in flushes:
                 marker.done.set()
@@ -164,10 +172,14 @@ def _at_exit() -> None:
 
 
 def reset(replacement: ScoreQueue | None = None) -> None:
-    """Replace the process-wide queue. For tests."""
+    """Replace the process-wide queue, for `tracepad.testing`. The one replaced
+    stops and drops what it holds: posted later, it would go to whatever store
+    the next test configured (spec 040 #14)."""
     global _scores
     with _queue_lock:
-        _scores = replacement
+        replaced, _scores = _scores, replacement
+    if replaced is not None:
+        replaced.drop()
 
 
 def flush_scores(timeout: float) -> float:

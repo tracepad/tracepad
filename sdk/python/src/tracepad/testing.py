@@ -38,14 +38,63 @@ _KEY = "tp-sk-test"
 
 __all__ = ["Capture", "capture", "reset"]
 
+# The capture's provider, which the global follows while it lasts.
+_target: TracerProvider | None = None
+
+
+class _Following(otel.Tracer):
+    """A tracer that asks at every span where spans go now: the capture's
+    provider, or one the application set after the reset, or nowhere."""
+
+    def __init__(self, args: tuple[Any, ...], kwargs: dict[str, Any]) -> None:
+        self._args, self._kwargs = args, kwargs
+        self._for: Any = None
+        self._tracer: otel.Tracer = otel.NoOpTracer()
+
+    def _now(self) -> otel.Tracer:
+        provider = _target or otel.get_tracer_provider()
+        if provider is _FOLLOW:
+            return otel.NoOpTracer()
+        if provider is not self._for:
+            self._for, self._tracer = provider, provider.get_tracer(*self._args, **self._kwargs)
+        return self._tracer
+
+    def start_span(self, *args: Any, **kwargs: Any) -> otel.Span:
+        return self._now().start_span(*args, **kwargs)
+
+    def start_as_current_span(self, *args: Any, **kwargs: Any) -> Any:
+        return self._now().start_as_current_span(*args, **kwargs)
+
+
+class _Follow(otel.NoOpTracerProvider):
+    """The global provider a reset leaves (spec 040 #14). The API binds a
+    tracer taken before any provider — `trace.get_tracer(__name__)` at import
+    — to the first provider set, for good; binding it to this one instead
+    keeps it recording in every capture after. With no capture it is the
+    no-op the package reads as tracing off."""
+
+    def get_tracer(self, *args: Any, **kwargs: Any) -> otel.Tracer:
+        return _Following(args, kwargs)
+
+    def force_flush(self, timeout_millis: int = 30000) -> bool:
+        return _target.force_flush(timeout_millis) if _target else True
+
+
+_FOLLOW = _Follow()
+
 
 def reset() -> None:
-    """Return the process to never initialised: no `init`, no global provider,
-    no cached configuration or prompts, no score queue (spec 040 #2)."""
+    """Return the process to never initialised: no `init`, no provider of the
+    package's, no cached configuration or prompts, no score queue (spec 040 #2)."""
+    global _target
     # The API's own "set once" guard, private to `opentelemetry.trace`; the
     # package's test of this function fails if a release moves it.
-    otel._TRACER_PROVIDER = None
+    otel._TRACER_PROVIDER = _FOLLOW
     otel._TRACER_PROVIDER_SET_ONCE = otel.Once()
+    for provider in (_target, _tracing._built):
+        if provider is not None:
+            provider.shutdown()
+    _target = _tracing._built = None
     _tracing._initialized = False
     _tracing._warned_kinds.clear()
     _config.forget()
@@ -67,12 +116,16 @@ class Capture:
     """What the code under test traced and scored, since `capture()`."""
 
     def __init__(self) -> None:
+        global _target
         reset()
         self._exporter = InMemorySpanExporter()
-        provider = TracerProvider()
-        provider.add_span_processor(SimpleSpanProcessor(self._exporter))
-        otel.set_tracer_provider(provider)
-        _tracing.init(_HOST, _KEY, export=False)
+        # Shut down by the next reset, not at exit: an exit hook would keep
+        # every capture's spans alive until the interpreter ends.
+        _target = TracerProvider(shutdown_on_exit=False)
+        _target.add_span_processor(SimpleSpanProcessor(self._exporter))
+        # A configuration of its own, not the environment's: nothing is sent,
+        # and TRACEPAD_ENVIRONMENT would only draw `init`'s resource warning.
+        _tracing._attach(_target, _config.Config(host=_HOST, key=_KEY), export=False)
         # The bodies `score()` would have posted, in order.
         self.scores: list[dict[str, Any]] = []
         _scores.reset(_Kept(self.scores))

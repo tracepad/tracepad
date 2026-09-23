@@ -449,9 +449,11 @@ func TestTheAnswerIsTraced(t *testing.T) {
 }
 ```
 
-`Capture` resets everything the package keeps process-wide, sets a global
-provider that records into memory, and initialises the package against it
-with export off; the score queue keeps each body instead of posting it. The
+`Capture` resets everything the package keeps process-wide and initialises
+the package against a provider that records into memory, with export off and
+nothing read from the environment; the score queue keeps each body instead of
+posting it. The global provider follows the capture's, so a package-level
+`otel.Tracer("app")` records into every capture, not only the first. The
 test's cleanup — on `t.Fatal` too — resets the process again.
 
 | On a `*Recorder` | What it is |
@@ -463,8 +465,9 @@ test's cleanup — on `t.Fatal` too — resets the process again.
 
 `tracepadtest.Reset(t)` returns the process to one that never called `Init` —
 tracing off, as [above](#steps) — for a test of the code with tracing off:
-`Score` returns `nil`, and the ids are empty. An `Init` after it builds a
-provider as it would in a fresh process.
+`Score` returns `nil`, and the ids are empty. A reset shuts down a provider
+`Init` built, takes back the propagator it set and drops the scores still
+queued; an `Init` after it builds a provider as it would in a fresh process.
 
 Nothing is sent: the placeholder host is `tracepad.test`, which does not
 resolve, so a REST call a test forgot to stub — `Prompt`, a dataset,

@@ -448,11 +448,13 @@ def test_the_answer_is_traced():
     assert captured.scores[0]["name"] == "helpful"
 ```
 
-`capture()` resets everything the package keeps process-wide, installs a
-global provider that records into memory, and initialises the package against
-it with export off; the score queue keeps each body instead of posting it.
-Leaving the block resets the process again, and what was captured stays
-readable:
+`capture()` resets everything the package keeps process-wide and initialises
+the package against a provider that records into memory, with export off and
+nothing read from the environment; the score queue keeps each body instead of
+posting it. The global provider follows the capture's, so a tracer your
+application took at import — `trace.get_tracer(__name__)` — records into
+every capture, not only the first. Leaving the block resets the process
+again, and what was captured stays readable:
 
 | On a `Capture` | What it is |
 |---|---|
@@ -476,7 +478,8 @@ reset process. Nothing loads the plugin into a suite that does not name it.
 
 Nothing is sent: the placeholder host is `tracepad.test`, which does not
 resolve, so a REST call a test forgot to stub — `prompt`, a dataset,
-`delete_trace` — fails rather than reaching a store. A provider your
+`delete_trace` — fails rather than reaching a store. A reset shuts down a
+provider `init` built and drops the scores still queued. A provider your
 application installs at import time is replaced for the capture and not
 restored after it. The capture is process-wide; pytest-xdist's workers are
 processes, so they do not share one.

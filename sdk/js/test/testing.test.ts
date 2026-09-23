@@ -1,14 +1,19 @@
 /** `tracepad/testing`: the capture, the reset, the entry point (spec 040). */
 
 import { execFileSync } from 'node:child_process';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { beforeAll, describe, expect, test, vi } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
+
+import { trace } from '@opentelemetry/api';
+import { InMemorySpanExporter, NodeTracerProvider, SimpleSpanProcessor } from '@opentelemetry/sdk-trace-node';
+import { afterAll, beforeAll, describe, expect, test, vi } from 'vitest';
 
 import * as tracepad from '../src/index.js';
+import { ScoreQueue, reset as resetScores } from '../src/scores.js';
 import { capture, reset } from '../src/testing.js';
-import { fresh, registered } from './helpers.js';
+import { fresh } from './helpers.js';
 
 fresh();
 
@@ -82,11 +87,54 @@ describe('a capture', () => {
   });
 });
 
-test('the reset undoes the registration the API allows once (spec 040 #3)', () => {
+describe('the reset', () => {
+  test('keeps a tracer taken at import recording in every capture (spec 040 #14)', () => {
+    const tracer = trace.getTracer('app'); // before any provider, as a module does
+    for (const name of ['first', 'second']) {
+      const captured = capture();
+      tracer.startActiveSpan(name, (root) => {
+        tracepad.span('step', () => {});
+        root.end();
+      });
+      captured.restore();
+      expect(captured.spans.map((s) => s.name)).toEqual(['step', name]);
+      expect(captured.one('step').parentSpanContext?.spanId).toBe(captured.one(name).spanContext().spanId);
+    }
+  });
+
+  test('undoes the registration the API allows once (spec 040 #3)', () => {
+    const tracer = trace.getTracer('app');
+    capture().restore();
+    const own = new NodeTracerProvider({ spanProcessors: [new SimpleSpanProcessor(new InMemorySpanExporter())] });
+    expect(trace.setGlobalTracerProvider(own)).toBe(true);
+    expect(tracer.startSpan('app').isRecording()).toBe(true);
+    reset();
+    expect(tracer.startSpan('off').isRecording()).toBe(false);
+  });
+
+  test('shuts down the provider init built', () => {
+    const shutdown = vi.spyOn(NodeTracerProvider.prototype, 'shutdown');
+    tracepad.init({ host: 'http://tracepad.test:4318', key: 'tp-sk-test' });
+    reset();
+    expect(shutdown).toHaveBeenCalledOnce();
+  });
+
+  test('stops the queue it replaced, and drops what it held', async () => {
+    const sent: unknown[] = [];
+    resetScores(new ScoreQueue(async (batch) => void sent.push(batch), { interval: 10 }));
+    tracepad.score('pending', 1, { traceId: 'a'.repeat(32) });
+    reset();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(sent).toEqual([]);
+  });
+});
+
+test('a capture reads nothing from the environment', () => {
+  process.env.TRACEPAD_ENVIRONMENT = 'ci';
+  process.env.TRACEPAD_RELEASE = '1.2.3';
+  const warned = vi.spyOn(console, 'warn');
   capture();
-  expect(registered().constructor.name).toBe('NodeTracerProvider');
-  reset();
-  expect(registered().constructor.name).toBe('NoopTracerProvider');
+  expect(warned).not.toHaveBeenCalled();
 });
 
 test('reset() alone is tracing off', () => {
@@ -101,15 +149,21 @@ test('reset() alone is tracing off', () => {
 
 describe('the entry point, built', () => {
   const root = dirname(dirname(fileURLToPath(import.meta.url)));
+  // A package of its own under node_modules, so the build leaves `dist/`
+  // alone and the OTel packages still resolve from where it sits.
+  let built = '';
   // Both entries must reach one copy of the package's state: a `reset` that
   // cleared a second copy would leave the root's `init` standing.
   const probe = `const c = capture(); tp.span('s', () => tp.score('x', 1)); c.restore();
     console.log(JSON.stringify([c.spans.map((s) => s.name), c.scores.length]));`;
-  const run = (args: string[]) => execFileSync(process.execPath, args, { cwd: root, encoding: 'utf8' }).trim();
+  const run = (args: string[]) => execFileSync(process.execPath, args, { cwd: built, encoding: 'utf8' }).trim();
 
   beforeAll(() => {
-    execFileSync('npx', ['tsup', '--silent'], { cwd: root, stdio: 'ignore' });
+    built = mkdtempSync(join(root, 'node_modules', '.tracepad-build-'));
+    writeFileSync(join(built, 'package.json'), readFileSync(join(root, 'package.json')));
+    execFileSync('npx', ['tsup', '--out-dir', join(built, 'dist')], { cwd: root, stdio: 'pipe' });
   });
+  afterAll(() => rmSync(built, { recursive: true, force: true }));
 
   test('imports as ESM', () => {
     const esm = `import { capture } from 'tracepad/testing'; import * as tp from 'tracepad'; ${probe}`;

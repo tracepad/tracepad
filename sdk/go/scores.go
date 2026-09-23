@@ -3,6 +3,7 @@ package tracepad
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.opentelemetry.io/otel/trace"
@@ -47,7 +48,8 @@ type scoreQueue struct {
 	done    chan struct{}
 	// keep, when set, is tracepadtest's capture: each score is handed to it
 	// on the caller's goroutine, and nothing is posted or started.
-	keep func(map[string]any)
+	keep    func(map[string]any)
+	dropped atomic.Bool
 }
 
 func newScoreQueue(send func(context.Context, []map[string]any) error) *scoreQueue {
@@ -147,11 +149,17 @@ func (q *scoreQueue) close(ctx context.Context) error {
 	}
 }
 
+// drop stops the goroutine without sending what is queued (spec 040 #14).
+func (q *scoreQueue) drop() {
+	q.dropped.Store(true)
+	_ = q.close(context.Background())
+}
+
 func (q *scoreQueue) run() {
 	defer close(q.done)
 	for {
 		batch, flushes, stopping := q.collect()
-		if len(batch) > 0 {
+		if len(batch) > 0 && !q.dropped.Load() {
 			q.deliver(batch)
 		}
 		for _, marker := range flushes {

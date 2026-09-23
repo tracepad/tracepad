@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+import logging
+import time
 import urllib.request
 from typing import Any
 
 import pytest
 import requests
 from opentelemetry import trace as otel_api
+from opentelemetry.sdk.trace import TracerProvider
 
 import tracepad
-from tracepad import testing
+from tracepad import _scores, testing
 
 
 def test_a_capture_records_the_spans_in_order_and_the_scores() -> None:
@@ -73,12 +76,61 @@ def test_two_captures_in_a_row_see_only_their_own() -> None:
     assert [score["name"] for score in second.scores] == ["two"]
 
 
-def test_reset_undoes_the_global_provider_the_api_sets_once() -> None:
+def test_a_tracer_taken_at_import_records_in_every_capture() -> None:
+    tracer = otel_api.get_tracer("app")  # before any provider, as a module does
+
+    for name in ("first", "second"):
+        with testing.capture() as captured, tracer.start_as_current_span(name):
+            with tracepad.span("step"):
+                pass
+        assert [span.name for span in captured.spans] == ["step", name]
+        step, root = captured.spans
+        assert step.parent is not None and step.parent.span_id == root.context.span_id
+
+
+def test_after_a_reset_init_sets_a_provider_of_its_own() -> None:
     # The reset reaches into `opentelemetry.trace`'s private globals (spec 040
-    # #3): a release that renames them fails here, not in an application's suite.
+    # #3): a release that renames them fails here, not in an application's
+    # suite — `init` could not set its provider, and the tracer taken before
+    # would not follow it.
+    tracer = otel_api.get_tracer("app")
     with testing.capture():
-        assert not isinstance(otel_api.get_tracer_provider(), otel_api.ProxyTracerProvider)
-    assert isinstance(otel_api.get_tracer_provider(), otel_api.ProxyTracerProvider)
+        pass
+    tracepad.init("http://tracepad.test:4318", "tp-sk-test", export=False)
+    built = otel_api.get_tracer_provider()
+    assert isinstance(built, TracerProvider)
+    with tracer.start_as_current_span("app") as span:
+        assert span.is_recording()
+    testing.reset()
+    assert not otel_api.get_tracer_provider().get_tracer("app").start_span("off").is_recording()
+
+
+def test_the_reset_shuts_down_the_provider_init_built(monkeypatch: pytest.MonkeyPatch) -> None:
+    tracepad.init("http://tracepad.test:4318", "tp-sk-test")  # exporting, batched
+    built = otel_api.get_tracer_provider()
+    shut: list[bool] = []
+    monkeypatch.setattr(built, "shutdown", lambda: shut.append(True))
+    testing.reset()
+    assert shut == [True]
+
+
+def test_a_capture_reads_nothing_from_the_environment(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setenv("TRACEPAD_ENVIRONMENT", "ci")
+    monkeypatch.setenv("TRACEPAD_RELEASE", "1.2.3")
+    with caplog.at_level(logging.WARNING, logger="tracepad"), testing.capture():
+        pass
+    assert caplog.records == []
+
+
+def test_a_queue_the_reset_replaced_sends_nothing_after_it() -> None:
+    sent: list[list[dict[str, Any]]] = []
+    _scores.reset(_scores.ScoreQueue(sent.append, interval=0.05))
+    tracepad.score("pending", 1, trace_id="a" * 32)
+    testing.reset()
+    time.sleep(0.2)
+    assert sent == []
 
 
 def test_reset_alone_is_tracing_off() -> None:

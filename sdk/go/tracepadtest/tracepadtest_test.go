@@ -1,20 +1,23 @@
 package tracepadtest_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"reflect"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"go.opentelemetry.io/otel"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	"go.opentelemetry.io/otel/trace"
 
 	tracepad "github.com/tracepad/tracepad/sdk/go"
 	"github.com/tracepad/tracepad/sdk/go/tracepadtest"
@@ -144,23 +147,80 @@ func TestCapturesInSequentialTestsSeeOnlyTheirOwn(t *testing.T) {
 	}
 }
 
-// The reset replaces the global provider (spec 040 #3, #9): the capture's is
-// gone after it, and an Init that runs next builds one, as in a fresh process.
-func TestAfterTheResetInitBuildsAProvider(t *testing.T) {
-	var captured trace.TracerProvider
-	t.Run("capture", func(t *testing.T) {
-		tracepadtest.Capture(t)
-		captured = otel.GetTracerProvider()
-	})
+// appTracer is taken when the binary starts, before any provider is set, as
+// an application's package-level tracer is.
+var appTracer = otel.Tracer("app")
+
+func TestATracerTakenAtStartRecordsInEveryCapture(t *testing.T) {
+	for _, name := range []string{"first", "second"} {
+		t.Run(name, func(t *testing.T) {
+			rec := tracepadtest.Capture(t)
+			ctx, root := appTracer.Start(context.Background(), name)
+			_, step := tracepad.Span(ctx, "step")
+			step.End()
+			root.End()
+			if got := rec.One(t, "step").Parent.SpanID(); got != rec.One(t, name).SpanContext.SpanID() {
+				t.Errorf("step's parent = %s, want the application's span", got)
+			}
+		})
+	}
+}
+
+// The reset replaces the global provider and takes back what Init set (spec
+// 040 #3, #9, #14): an Init after it builds a provider, as in a fresh
+// process, and the next reset shuts that one down.
+func TestAfterTheResetInitBuildsAProviderAndTheNextResetShutsItDown(t *testing.T) {
+	t.Run("capture", func(t *testing.T) { tracepadtest.Capture(t) })
 	tracepadtest.Reset(t)
-	shutdown, err := tracepad.Init(context.Background(), tracepad.WithHost("http://tracepad.test:4318"),
-		tracepad.WithKey("tp-sk-test"), tracepad.WithExport(false))
-	if err != nil {
+	if _, err := tracepad.Init(context.Background(), tracepad.WithHost("http://tracepad.test:4318"),
+		tracepad.WithKey("tp-sk-test"), tracepad.WithExport(false)); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = shutdown(context.Background()) })
-	if built, ok := otel.GetTracerProvider().(*sdktrace.TracerProvider); !ok || built == captured {
-		t.Errorf("global provider = %T, want the one Init built", otel.GetTracerProvider())
+	built, ok := otel.GetTracerProvider().(*sdktrace.TracerProvider)
+	if !ok {
+		t.Fatalf("global provider = %T, want the one Init built", otel.GetTracerProvider())
+	}
+	if _, span := appTracer.Start(context.Background(), "app"); !span.IsRecording() {
+		t.Error("the tracer taken at start does not follow the provider Init built")
+	}
+	tracepadtest.Reset(t)
+	if _, span := built.Tracer("app").Start(context.Background(), "after"); span.IsRecording() {
+		t.Error("the provider Init built is still running after the reset")
+	}
+	if fields := otel.GetTextMapPropagator().Fields(); len(fields) != 0 {
+		t.Errorf("propagator fields = %v, want Init's taken back", fields)
+	}
+}
+
+func TestACaptureReadsNothingFromTheEnvironment(t *testing.T) {
+	t.Setenv("TRACEPAD_ENVIRONMENT", "ci")
+	t.Setenv("TRACEPAD_RELEASE", "1.2.3")
+	logs := &bytes.Buffer{}
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	tracepadtest.Capture(t)
+	if logs.Len() != 0 {
+		t.Errorf("the capture logged:\n%s", logs)
+	}
+}
+
+func TestTheResetDropsWhatTheQueueHeld(t *testing.T) {
+	var posts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { posts.Add(1) }))
+	t.Cleanup(server.Close)
+	t.Setenv("TRACEPAD_HOST", server.URL)
+	t.Setenv("TRACEPAD_API_KEY", "tp-sk-test")
+	tracepadtest.Reset(t)
+	if err := tracepad.Score(context.Background(), "pending", tracepad.WithTraceID(strings.Repeat("a", 32))); err != nil {
+		t.Fatal(err)
+	}
+	tracepadtest.Reset(t)
+	if err := tracepad.Flush(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if posts.Load() != 0 {
+		t.Errorf("posts = %d, want the pending score dropped", posts.Load())
 	}
 }
 

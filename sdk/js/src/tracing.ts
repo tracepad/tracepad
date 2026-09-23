@@ -11,6 +11,9 @@ import {
   type Attributes,
   type Context,
   type Span,
+  type SpanOptions as OtelSpanOptions,
+  type Tracer,
+  type TracerOptions,
   type TracerProvider,
   ProxyTracerProvider,
   SpanStatusCode,
@@ -39,6 +42,8 @@ import { flushScores } from './scores.js';
 
 let initialized = false;
 let handedOut = false;
+/** The provider `init` built, if it built one: a test's reset shuts it down (spec 040 #14). */
+let built: NodeTracerProvider | undefined;
 
 /** No `init` or `spanProcessor`, and no provider of the application's own: every span is the API's no-op (spec 039 #7). */
 export const tracingOff = (): boolean => !initialized && !handedOut && delegateOf() === undefined;
@@ -74,10 +79,10 @@ export function init(options: InitOptions = {}): void {
   const config = configFor(options);
   const found = delegateOf();
   if (found === undefined) {
-    const provider = new NodeTracerProvider({
+    const provider = (built = new NodeTracerProvider({
       resource: resourceFor(config),
       spanProcessors: [processor(config, options.export)],
-    });
+    }));
     provider.register();
   } else {
     if (config.environment !== undefined || config.release !== undefined) refuseResource('init');
@@ -130,10 +135,41 @@ interface Adoptable extends TracerProvider {
 
 /** The provider the application registered, or nothing when the global is the API's no-op. */
 function delegateOf(): Adoptable | undefined {
-  const found = trace.getTracerProvider() as Adoptable & { getDelegate?: () => TracerProvider };
-  const delegate = typeof found.getDelegate === 'function' ? found.getDelegate() : found;
+  const delegate = registered();
+  if (delegate === FOLLOWER) return FOLLOWER.target;
   return isNoop(delegate) ? undefined : (delegate as Adoptable);
 }
+
+function registered(): TracerProvider {
+  const found = trace.getTracerProvider() as TracerProvider & { getDelegate?: () => TracerProvider };
+  return typeof found.getDelegate === 'function' ? found.getDelegate() : found;
+}
+
+/**
+ * The global provider a test's reset leaves (spec 040 #14). The API binds a
+ * tracer taken before any registration — `trace.getTracer()` at import — to
+ * the first provider registered, for good; bound to this one, it asks at
+ * every span where spans go now, and keeps recording in every capture after.
+ * Its target is the capture's provider; without one it follows a provider
+ * registered since, or is the no-op the package reads as tracing off.
+ */
+class Follower implements TracerProvider {
+  target: Adoptable | undefined;
+
+  getTracer(name: string, version?: string, options?: TracerOptions): Tracer {
+    const to = (): TracerProvider => this.target ?? (registered() === this ? NOOP : registered());
+    const now = (): Tracer => to().getTracer(name, version, options);
+    return {
+      startSpan: (span: string, given?: OtelSpanOptions, ctx?: Context) => now().startSpan(span, given, ctx),
+      startActiveSpan: ((...args: unknown[]) => {
+        const tracer = now();
+        return (tracer.startActiveSpan as (...args: unknown[]) => unknown).apply(tracer, args);
+      }) as Tracer['startActiveSpan'],
+    };
+  }
+}
+
+export const FOLLOWER = new Follower();
 
 /**
  * The API's no-op is one module-level instance, and a fresh proxy with no
@@ -877,12 +913,22 @@ function rethrow<S extends Iterator<unknown> | AsyncIterator<unknown>>(steps: S,
   return steps.throw(thrown) as ReturnType<NonNullable<S['throw']>>;
 }
 
-/** Forget that `init` ran. For tests. */
+/** Forget that `init` ran, for `tracepad/testing`: shut down what it built,
+ * and leave nothing registered and the follower behind the API's proxy. */
 export function reset(): void {
   initialized = false;
   warnedKinds.clear();
   handedOut = false;
   exiting = undefined;
   process.off('beforeExit', atExit);
+  void built?.shutdown();
+  built = FOLLOWER.target = undefined;
+  // The registration is undone the way the API's own `unregisterGlobal` does
+  // it: `trace.disable()` would also replace the API's proxy, and the tracers
+  // taken from the old one would follow nothing. The package's test of the
+  // reset fails if the API moves its globals.
+  const globals = (globalThis as Record<symbol, Record<string, unknown> | undefined>)[Symbol.for('opentelemetry.js.api.1')];
+  if (globals !== undefined) delete globals.trace;
+  (trace.getTracerProvider() as ProxyTracerProvider).setDelegate(FOLLOWER);
 }
 

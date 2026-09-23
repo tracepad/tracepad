@@ -21,12 +21,11 @@ import (
 	"sync"
 	"testing"
 
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
-	tracepad "github.com/tracepad/tracepad/sdk/go"
+	_ "github.com/tracepad/tracepad/sdk/go" // its init sets the hook
 	"github.com/tracepad/tracepad/sdk/go/internal/hook"
 )
 
@@ -44,10 +43,11 @@ type Recorder struct {
 	scores   []map[string]any
 }
 
-// Capture resets the process, installs a global tracer provider that records
-// into memory, and initialises the package against it with export off and a
-// score queue that keeps what it is given (spec 040 #1). The test's cleanup
-// resets the process again.
+// Capture resets the process, has the global tracer provider follow one that
+// records into memory — a tracer the application took at start-up included —
+// and initialises the package against it with export off, nothing read from
+// the environment, and a score queue that keeps what it is given (spec 040
+// #1, #14). The test's cleanup resets the process again.
 func Capture(t testing.TB) *Recorder {
 	t.Helper()
 	serial(t, "Capture")
@@ -57,11 +57,7 @@ func Capture(t testing.TB) *Recorder {
 		hook.Reset()
 		_ = provider.Shutdown(context.Background())
 	})
-	hook.Reset()
-	otel.SetTracerProvider(provider)
-	hook.Keep(r.keep)
-	if _, err := tracepad.Init(context.Background(),
-		tracepad.WithHost(host), tracepad.WithKey(key), tracepad.WithExport(false)); err != nil {
+	if err := hook.Capture(host, key, provider, r.keep); err != nil {
 		t.Fatalf("tracepadtest.Capture: %v", err)
 	}
 	return r

@@ -18,7 +18,8 @@
  * (spec 040 #3). A subpath of its own, so no application bundle carries it.
  */
 
-import { type Attributes, context, propagation, trace } from '@opentelemetry/api';
+import { type Attributes, context, propagation } from '@opentelemetry/api';
+import { AsyncLocalStorageContextManager } from '@opentelemetry/context-async-hooks';
 import {
   InMemorySpanExporter,
   NodeTracerProvider,
@@ -40,10 +41,9 @@ const KEY = 'tp-sk-test';
 /** Return the process to never initialised: no `init`, no global provider, no
  * cached configuration or prompts, no score queue, the default logger (spec 040 #2). */
 export function reset(): void {
-  trace.disable();
+  tracing.reset();
   context.disable();
   propagation.disable();
-  tracing.reset();
   config.forget();
   prompts.forget();
   scores.reset();
@@ -59,13 +59,16 @@ export class Capture implements Disposable {
   /** @internal `capture()` is the way in. */
   constructor() {
     reset();
-    new NodeTracerProvider({
-      spanProcessors: [
-        new SimpleSpanProcessor(this.exporter),
-        tracing.spanProcessor({ host: HOST, key: KEY, export: false }),
-      ],
-    }).register();
-    tracing.init({ host: HOST, key: KEY });
+    // A configuration of its own, not the environment's: nothing is sent, and
+    // TRACEPAD_ENVIRONMENT would only draw the resource warning.
+    const own = { host: HOST, key: KEY, environment: '', release: '' };
+    // Followed, not registered: the global stays the follower, so a tracer
+    // the application took at import records here too (spec 040 #14).
+    tracing.FOLLOWER.target = new NodeTracerProvider({
+      spanProcessors: [new SimpleSpanProcessor(this.exporter), tracing.spanProcessor({ ...own, export: false })],
+    });
+    context.setGlobalContextManager(new AsyncLocalStorageContextManager().enable());
+    tracing.init(own);
     // A batch of one is sent the moment it is queued, and this send is synchronous.
     scores.reset(new scores.ScoreQueue(async (batch) => void this.scores.push(...batch), { batchSize: 1 }));
   }

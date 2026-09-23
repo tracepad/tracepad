@@ -136,7 +136,7 @@ sdk-test: ## Unit-test the Python package, and end-to-end against a real binary
 # The budget spec 017 #1 set, shared with the harness of spec 018; raised for
 # the streaming pass-through (spec 031 #22), for trace deletion (spec 036 #8)
 # and for `tracepad.testing` (spec 040 #13).
-SDK_BUDGET := 1850
+SDK_BUDGET := 1900
 
 sdk-lines: ## Report the Python package's application lines against its budget
 	scripts/sdk-lines.sh $(SDK_BUDGET)
@@ -155,7 +155,7 @@ sdk-go-unit: ## The Go package's vet and unit tests alone (part of the gate)
 
 # The budget spec 033 #11 set, raised for the harness (spec 033 #17), for
 # trace deletion (spec 036 #8) and for `tracepadtest` (spec 040 #13).
-SDK_GO_BUDGET := 2300
+SDK_GO_BUDGET := 2350
 
 sdk-go-lines: ## Report the Go package's application lines against its budget
 	scripts/sdk-go-lines.sh $(SDK_GO_BUDGET)
@@ -182,7 +182,7 @@ sdk-js-test: ## Type-check and unit-test the Node package, and end-to-end agains
 # The budget spec 032 #11 set, shared with the harness of the same spec;
 # raised for the harness (spec 032 #16), for trace deletion (spec 036 #8) and
 # for `tracepad/testing` (spec 040 #13).
-SDK_JS_BUDGET := 2150
+SDK_JS_BUDGET := 2200
 
 sdk-js-lines: ## Report the Node package's application lines against its budget
 	scripts/sdk-js-lines.sh $(SDK_JS_BUDGET)
