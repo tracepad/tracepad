@@ -1,6 +1,6 @@
 # Spec 042 — What the packages cost when nothing is recorded, and how long they may wait
 
-**Status:** 🟡 DRAFT
+**Status:** ✅ SHIPPED
 **Sprint:** September 2026
 
 > A web application that moved to the Python package found three places

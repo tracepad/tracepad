@@ -418,6 +418,15 @@ API. This file routes; it does not duplicate what specs and docs say.
   and refuses a directory without the marker (#5–#7); `skills show` prints
   it. A drift test asks the binary for its commands, flags, tools and routes
   and fails on any name in the skill the binary does not have (#8).
+- ✅ Spec 042 (what the packages cost when nothing records, and how long
+  they wait) shipped: a span starts with the cheap attributes, and input,
+  output, metadata and model parameters are serialised only for a span that
+  records (#1); `update` / `update_trace` warn only outside every span in a
+  process that traces, a debug line otherwise (#2); `export_timeout` — five
+  seconds, `TRACEPAD_EXPORT_TIMEOUT` — bounds one export with its retries, in
+  Go on the batch processor too (#3, #7); Python's `flush` keeps its timeout
+  on a helper thread (#4); observation metadata is one attribute per key, so
+  `update` merges (#5). Budgets 2,000 / 2,275 / 2,500 (#6, #11, #12).
 - ✅ Spec 040 (testing an application's instrumentation) shipped:
   `tracepad.testing` (Python, with an opt-in pytest plugin), the
   `tracepad/testing` entry (Node) and `tracepadtest` (Go) — `capture()`
