@@ -9,9 +9,13 @@ Uses only the standard library so it runs with any Python, including the one
 that never saw the SDKs.
 """
 
+import base64
+import hashlib
 import json
+import os
 import sqlite3
 import sys
+import urllib.request
 
 (
     db_path,
@@ -20,7 +24,8 @@ import sys
     tracepad_trace_id_file,
     tracepad_go_trace_id_file,
     tracepad_js_trace_id_file,
-) = sys.argv[1:7]
+    langfuse_media_file,
+) = sys.argv[1:8]
 
 failures = []
 
@@ -246,6 +251,45 @@ if generations:
     check(payload(generation["input_id"]) is not None, "tracepad-js generation has no input")
     check(payload(generation["output_id"]) is not None, "tracepad-js generation has no output")
 
+# --- the Langfuse media channel (spec 041 #9) ------------------------------
+# Payloads carrying a reference are past the compression threshold, so they are
+# read back through the API rather than decoded here; the rest is the tables.
+def api(path):
+    request = urllib.request.Request(
+        os.environ["SMOKE_HOST"] + path,
+        headers={"Authorization": "Bearer " + os.environ["SMOKE_SECRET_KEY"]})
+    with urllib.request.urlopen(request) as response:
+        return response.read()
+
+
+with open(langfuse_media_file) as f:
+    media = json.load(f)
+picture = base64.b64decode(media["picture"])
+sha = hashlib.sha256(picture).hexdigest()
+posts = [a for a in media["answers"] if a["method"] == "POST"]
+puts = [a for a in media["answers"] if a["method"] == "PUT"]
+patches = [a for a in media["answers"] if a["method"] == "PATCH"]
+check(len(posts) == 2, f"media POSTs = {posts}")
+if len(posts) == 2:
+    check(posts[0]["body"]["uploadUrl"], f"first media POST = {posts[0]}")
+    check(posts[1]["body"]["uploadUrl"] is None, f"second media POST = {posts[1]}, want uploadUrl null")
+    check(posts[0]["body"]["mediaId"] == posts[1]["body"]["mediaId"], f"media ids differ: {posts}")
+check([p["status"] for p in puts] == [200], f"media PUTs = {puts}")
+check([p["status"] for p in patches] == [204], f"media PATCHes = {patches}")
+row = db.execute("SELECT mime_type, size FROM media WHERE sha256 = ?", (sha,)).fetchone()
+check(row is not None and row["size"] == media["size"] and row["mime_type"] == "image/png",
+      f"media row = {dict(row) if row else None}")
+for trace_id in media["traces"]:
+    refs = db.execute("SELECT COUNT(*) FROM media_refs WHERE sha256 = ? AND trace_id = ?",
+                      (sha, trace_id)).fetchone()[0]
+    check(refs == 1, f"media refs of trace {trace_id} = {refs}")
+    for obs in observations(trace_id):
+        io = json.loads(api(f"/api/v1/observations/{obs['id']}/io?trace_id={trace_id}"))
+        text = json.dumps(io.get("input"))
+        check(sha in text and "@@@langfuseMedia" not in text,
+              f"trace {trace_id} input was not rewritten to the reference: {text[:300]}")
+check(api(f"/api/v1/media/{sha}") == picture, "the media endpoint does not answer the picture")
+
 # --- raw bodies (spec 002 #9) ---------------------------------------------
 raw = db.execute("SELECT dialect, content_encoding, body FROM raw_batches").fetchall()
 check(len(raw) >= 5, f"raw_batches = {len(raw)}, want one per accepted export")
@@ -264,4 +308,4 @@ if failures:
         print(f"  - {failure}")
     raise SystemExit(1)
 
-print(f"smoke OK: 5 exports, {len(raw)} raw batches stored")
+print(f"smoke OK: 6 exports, {len(raw)} raw batches stored, one picture through the media channel")

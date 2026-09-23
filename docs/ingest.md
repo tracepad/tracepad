@@ -218,6 +218,22 @@ raw retention window (`TRACEPAD_STORE_RAW`, `raw_retention_days` — see
 `traces_before_window` is the honest edge of the promise: those traces still
 have rows, but no body to replay. `tracepad system` prints the same block.
 
+The raw body is kept **as sent, with the media factored out**: an image or a
+file ingest takes out of a payload (see [media.md](media.md)) is replaced by the
+same reference in the archived body, so a picture is stored once rather than a
+second time for the raw window. Nothing else in the body changes — a part of the
+export that held no media keeps its bytes — and the way out puts the bytes back
+(`GET /api/v1/raw/{id}`, [export.md](export.md)).
+
+## Images and files
+
+Images and files in a payload — data URLs, Anthropic and Gemini inline bodies,
+GenAI blob parts, at least 4 KiB decoded — are taken out at ingest, stored once
+each, and left as a reference `{"tracepad_media": "<sha256>", "mime_type",
+"size"}`. The Langfuse SDK's own upload channel is served under
+`/api/public/media`, so a picture sent through the bridge is kept too. Both are
+[media.md](media.md).
+
 ## What Tracepad reads from your spans
 
 Attributes are resolved by a priority chain per field: an explicit

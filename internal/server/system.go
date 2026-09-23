@@ -261,6 +261,15 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// What media costs this project, beside the setting that decides it
+	// (spec 041 #11).
+	media, err := s.mediaBlock(project)
+	if err != nil {
+		slog.Error("summarise media failed", "err", err)
+		writeError(w, http.StatusInternalServerError, "failed to summarise the media")
+		return
+	}
+
 	body := object{}.
 		put("version", s.version).
 		put("go_version", runtime.Version()).
@@ -288,6 +297,7 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 			put("pinned_traces", pinned).
 			put("orphan_traces", s.counters.orphanTraces(project.ID))).
 		put("raw", raw).
+		put("media", media).
 		// The counters are since this process started and say so: an
 		// honest process-lifetime number now beats a metrics subsystem
 		// later (#10). They are this project's, for the same reason the

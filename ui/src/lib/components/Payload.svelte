@@ -20,7 +20,9 @@
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import Button from './Button.svelte';
 	import JsonView from './json/JsonView.svelte';
+	import MediaStrip from './MediaStrip.svelte';
 	import { ABSENT, bytes } from '$lib/format';
+	import { mediaRefs } from '$lib/media';
 
 	let {
 		label,
@@ -55,6 +57,8 @@
 	// `loaded`, an observation that genuinely has no metadata keeps offering
 	// to load it, forever, and the click changes nothing.
 	const pending = $derived(Boolean(refused) && !present && !loaded);
+	/** The images and files the payload points at (spec 041 #10). */
+	const media = $derived(present && !marker ? mediaRefs(value) : []);
 
 	/**
 	 * How much of the payload the preview actually is. The marker reports the
@@ -140,6 +144,9 @@
 			Load {label.toLowerCase()}
 		</Button>
 	{:else if present}
+		{#if media.length > 0}
+			<MediaStrip refs={media} />
+		{/if}
 		<JsonView {value} {label} />
 	{:else}
 		<p class="text-subtle">{ABSENT}</p>

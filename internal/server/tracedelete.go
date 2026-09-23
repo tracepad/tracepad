@@ -194,6 +194,8 @@ func (s *Server) handleDeleteTraces(w http.ResponseWriter, r *http.Request) {
 		deleted.Scores += job.Counts.Scores
 		deleted.Payloads += job.Counts.Payloads
 		deleted.AnnotationItems += job.Counts.AnnotationItems
+		deleted.Media += job.Counts.Media
+		deleted.MediaBytes += job.Counts.MediaBytes
 		chunk = nil
 		chunks++
 		return true
@@ -255,7 +257,10 @@ func wouldDelete(counts store.DeleteCounts) object {
 		// The queue items pointing at those traces (spec 024 #3): they go
 		// with the traces, so the preview says so rather than leaving the
 		// docs to promise it alone.
-		put("annotation_items", counts.AnnotationItems)
+		put("annotation_items", counts.AnnotationItems).
+		// The media bodies only these traces point at (spec 041 #11).
+		put("media", counts.Media).
+		put("media_bytes", counts.MediaBytes)
 }
 
 // deletedCounts is the confirmed answer's counts: the preview's, and the
@@ -266,7 +271,9 @@ func deletedCounts(counts store.DeleteCounts) object {
 		put("observations", counts.Observations).
 		put("scores", counts.Scores).
 		put("payloads", counts.Payloads).
-		put("annotation_items", counts.AnnotationItems)
+		put("annotation_items", counts.AnnotationItems).
+		put("media", counts.Media).
+		put("media_bytes", counts.MediaBytes)
 }
 
 // affectedRuns renders the runs a deletion would take traces from (spec 014

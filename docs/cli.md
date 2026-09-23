@@ -696,8 +696,14 @@ are covered in [admin.md](admin.md), [retention.md](retention.md) and
 tracepad projects ls
 tracepad keys create
 tracepad retention set --days 90
+tracepad retention set --media placeholder
 tracepad users rm-data user-4711
 ```
+
+`retention show` prints the project's media setting beside the three windows,
+and `retention set --media store|placeholder` changes it
+([media.md](media.md#not-keeping-them-the-placeholder-setting)); it deletes
+nothing, so it asks for no confirmation.
 
 Every destructive command asks the server what it would do, prints that, and
 asks you to type the name of what is being destroyed:

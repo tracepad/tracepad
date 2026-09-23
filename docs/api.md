@@ -582,6 +582,40 @@ A `404` means the id is not this project's, or the retention sweeper has
 already taken it. Both answer the same way, because a batch that is not yours
 does not exist to you.
 
+The archive stores each body with its media factored out, and this endpoint
+puts it back: each reference becomes what it replaced again — the base64 in an
+Anthropic, Gemini or GenAI object, the data URL of a string — so what leaves is
+the batch the client sent ([media.md](media.md#the-way-out)). `size_bytes` above is
+the stored length, before that.
+
+## Media
+
+```sh
+curl … -o picture.png "http://localhost:4318/api/v1/media/3f2a…c91e"
+```
+
+Ingest takes images and files out of the payloads and leaves a reference
+object in their place ([media.md](media.md)):
+
+```json
+{"tracepad_media": "3f2a…c91e", "mime_type": "image/png", "size": 48213}
+```
+
+Every read — a trace, an observation's payloads, search, the CLI, MCP —
+returns that object as it is; this endpoint is where the bytes are. It answers
+them in the MIME type the first client to send them declared, with
+`Cache-Control: private, max-age=31536000, immutable` (with `Vary:
+Authorization, Cookie, X-Tracepad-Project`, so a browser's cache never answers
+one project with another's body), `X-Content-Type-Options: nosniff` and a
+sandboxing `Content-Security-Policy`; anything that is not an
+image, audio or video comes as an attachment. It answers only a project that
+points at the body, from a trace or a raw batch: any other hash is `404`, the
+same as one nobody holds. A reference with `"stored": false` has no bytes to
+fetch.
+
+The Langfuse SDK's media channel (`/api/public/media`) is described in
+[media.md](media.md#the-langfuse-sdks-media-channel).
+
 ## Sessions
 
 A session is not a stored entity: it is the set of traces that named it, and
@@ -974,6 +1008,11 @@ per attribute dialect, how many were skipped, and every distinct
 `pinned_traces` is how many traces a live run is keeping out of the retention
 sweep — the size of retention's one exception — and `orphan_traces` how many
 trace deliveries since start named a run this project does not have.
+
+`media` is what the images and files ingest took out of this project's
+payloads cost, beside the setting that decides whether they are kept:
+`{"setting": "store", "count": 212, "bytes": 318455112}` — distinct bodies the
+project's traces and raw batches point at, and their decoded size.
 
 `raw` is the archive of export bodies — what an export can carry out, and what
 it cannot:

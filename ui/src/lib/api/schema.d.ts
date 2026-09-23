@@ -61,6 +61,70 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/public/media": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Langfuse SDK: an upload URL for one media body, or null when it is already stored
+         * @description The first call of the Langfuse SDK's media channel. `mediaId` is the SDK's own derivation — the first 22 characters of the URL-safe base64 SHA-256 — which the SDK checks. `uploadUrl` is null when this project already holds the body, in which case the named trace's ref is recorded and nothing is sent; a body only another project holds is still asked for, because the bytes are the proof of possession. Under the `placeholder` setting `uploadUrl` is always null and nothing is kept. The body is read leniently: fields a newer SDK adds are ignored.
+         */
+        post: operations["langfuseMediaUploadURL"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/public/media/{mediaId}/upload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Langfuse SDK: the presigned upload of one media body
+         * @description Where `uploadUrl` points. Presigned like an object-store URL: the SDK sends no credential here, and the signed `token` names the project, the trace, the hash, the type and the length the upload was granted for. A body that does not match the declared length and SHA-256 — or the `x-amz-checksum-sha256` header when it is sent — is refused and nothing is stored.
+         */
+        put: operations["langfuseMediaPut"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/public/media/{mediaId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Langfuse SDK: one media body's type, size and address
+         * @description The Langfuse shape for a body this project holds. `url` is `GET /api/v1/media/{sha256}`, which needs a credential of the project like every read; it never changes, so `urlExpiry` is a year away.
+         */
+        get: operations["langfuseMediaGet"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Langfuse SDK: the report on one media upload
+         * @description The SDK's account of how its PUT went. There is no upload state to keep — the PUT stored the body or it did not — so a failure is logged and every report is answered 204.
+         */
+        patch: operations["langfuseMediaPatch"];
+        trace?: never;
+    };
     "/api/v1": {
         parameters: {
             query?: never;
@@ -327,6 +391,26 @@ export interface paths {
          * @description The one endpoint no byte budget applies to: it exists to be the `full` target of every truncation marker, and a budget here would recurse. A span id is unique only inside its trace, so pass `?trace_id=` when the same id appears in more than one — every truncation marker already carries the pair.
          */
         get: operations["observationIO"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/media/{sha256}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One image or file a payload references, by the SHA-256 of its bytes
+         * @description Ingest takes images and files out of the payloads and leaves a reference object in their place, `{"tracepad_media": "<sha256>", "mime_type", "size"}` — this is where its bytes are. Served only to a project that points at the body, from a trace or from a raw batch; any other hash is 404, so a hash seen in a log is not a capability across projects. Content-addressed, so cached for a year and immutable. Every body is served under a sandboxing Content-Security-Policy and `nosniff`; anything but an image, audio or video is sent as an attachment.
+         */
+        get: operations["media"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1743,6 +1827,11 @@ export interface components {
             raw_retention_days: number | null;
             /** @description The window for the statistics rollup, which outlives the traces it summarizes; null means it is kept forever, which is the default */
             stats_retention_days: number | null;
+            /**
+             * @description What ingest does with an image or file it takes out of a payload (spec 041 #6)
+             * @enum {string}
+             */
+            media: "store" | "placeholder";
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -1865,7 +1954,7 @@ export interface components {
         TraceDeletion: {
             /** @constant */
             dry_run: false;
-            /** @description `traces`, `observations`, `scores`, `payloads` and `annotation_items` */
+            /** @description `traces`, `observations`, `scores`, `payloads`, `annotation_items`, and the `media` bodies collected with their `media_bytes` */
             deleted: {
                 [key: string]: number;
             };
@@ -2425,6 +2514,154 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
         };
     };
+    langfuseMediaUploadURL: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    traceId: string;
+                    observationId?: string | null;
+                    contentType: string;
+                    contentLength: number;
+                    /** @description The standard base64 SHA-256 of the body */
+                    sha256Hash: string;
+                    field?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The id and where to PUT the bytes */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        mediaId: string;
+                        /** @description A presigned URL, good for an hour and for this server's lifetime; null when nothing needs sending */
+                        uploadUrl: string | null;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    langfuseMediaPut: {
+        parameters: {
+            query: {
+                token: string;
+            };
+            header?: never;
+            path: {
+                mediaId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "*/*": string;
+            };
+        };
+        responses: {
+            /** @description Stored */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            /** @description The token is missing, forged, expired, or for another id */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The body is larger than the upload declared */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    langfuseMediaGet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                mediaId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The body's record */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        mediaId: string;
+                        contentType: string;
+                        contentLength: number;
+                        /** Format: date-time */
+                        uploadedAt: string;
+                        url: string;
+                        /** Format: date-time */
+                        urlExpiry: string;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    langfuseMediaPatch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                mediaId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: date-time */
+                    uploadedAt?: string;
+                    uploadHttpStatus?: number;
+                    uploadHttpError?: string | null;
+                    uploadTimeMs?: number | null;
+                };
+            };
+        };
+        responses: {
+            /** @description Recorded */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
     apiIndex: {
         parameters: {
             query?: never;
@@ -2780,6 +3017,15 @@ export interface operations {
                             /** @description Traces whose earliest span started before the oldest batch arrived, and which an export therefore cannot cover. A lower bound: a late export of an old trace lands after the batch line. */
                             traces_before_window: number;
                         };
+                        /** @description The images and files ingest took out of this project's payloads: the setting that decides whether they are kept, and what the kept ones cost. A body two projects share is in both projects' figures. */
+                        media?: {
+                            /** @enum {string} */
+                            setting: "store" | "placeholder";
+                            /** @description Distinct bodies this project's traces and raw batches point at */
+                            count: number;
+                            /** @description Their decoded size */
+                            bytes: number;
+                        };
                         /** @description This project's ingest traffic since the process started */
                         counters: {
                             /** Format: date-time */
@@ -3101,6 +3347,33 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+        };
+    };
+    media: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sha256: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The bytes, in the MIME type the first client to send them declared */
+            200: {
+                headers: {
+                    /** @description `private, max-age=31536000, immutable` */
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": string;
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
         };
     };
     listRawBatches: {
@@ -5506,6 +5779,11 @@ export interface operations {
                     raw_retention_days?: number | null;
                     /** @description The window for the hourly statistics rollup, measured by the hour a row summarizes; null keeps it forever, which is the default. The rollup outlives the traces it summarizes, so shortening this window destroys history the trace sweep spares — it asks for the same confirmation the other two do. */
                     stats_retention_days?: number | null;
+                    /**
+                     * @description What ingest does with an image or file it takes out of a payload: `store` keeps the body, `placeholder` keeps only a reference saying it was not stored. Not destructive either way — bodies already kept stay until their traces go.
+                     * @enum {string}
+                     */
+                    media?: "store" | "placeholder";
                 };
             };
         };

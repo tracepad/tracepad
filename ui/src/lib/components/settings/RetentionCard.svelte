@@ -36,12 +36,14 @@
 	let rawDays = $state(stored.raw_retention_days ?? 7);
 	let statsMode = $state<Mode>(stored.stats_retention_days === null ? 'forever' : 'days');
 	let statsDays = $state(stored.stats_retention_days ?? 365);
+	let media = $state<'store' | 'placeholder'>(stored.media);
 
 	/** The PATCH body: all three windows, as the endpoint spells them. */
 	const body = $derived<RetentionUpdate>({
 		retention_days: mode === 'forever' ? null : Math.trunc(days),
 		raw_retention_days: rawMode === 'follow' ? null : Math.trunc(rawDays),
-		stats_retention_days: statsMode === 'forever' ? null : Math.trunc(statsDays)
+		stats_retention_days: statsMode === 'forever' ? null : Math.trunc(statsDays),
+		media
 	});
 
 	async function send(confirm?: string): Promise<DryRun | string> {
@@ -59,7 +61,9 @@
 	title="Retention"
 	description="How long this project keeps its data. The sweeper runs hourly and deletes what has
 		fallen outside the window; shortening one destroys data, so it is previewed first. The
-		statistics outlive the traces they summarize, which is why they have a window of their own."
+		statistics outlive the traces they summarize, which is why they have a window of their own.
+		Images and files are stored once each and go with the last trace or raw body that points at
+		them; a placeholder keeps only their type and size."
 >
 	<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
 		<div>
@@ -135,6 +139,18 @@
 					<span class="text-muted text-sm">days</span>
 				</div>
 			</div>
+		</div>
+
+		<!-- Not a window, but the same question — what this project keeps
+		     (spec 041 #6) — and never destructive: nothing kept is deleted. -->
+		<div>
+			<label for="media-mode" class="text-muted mb-1 block text-xs font-medium">
+				Images and files in payloads
+			</label>
+			<select id="media-mode" bind:value={media} disabled={readOnly} class={field}>
+				<option value="store">Store them, once each</option>
+				<option value="placeholder">Keep a placeholder only</option>
+			</select>
 		</div>
 	</div>
 

@@ -86,6 +86,10 @@ type Sweeper struct {
 	lastRun time.Time
 	nextRun time.Time
 	deleted map[string]*sweepCounters
+
+	// mediaCursor is where the next pass's look for bodies no ref names
+	// starts (spec 041): one page per pass, not the whole table.
+	mediaCursor string
 }
 
 type sweepCounters struct {
@@ -209,6 +213,17 @@ func (sw *Sweeper) Pass(ctx context.Context) error {
 		failures = append(failures, fmt.Errorf("orphaned payloads: %w", err))
 	}
 	if orphans > 0 {
+		freed = true
+	}
+
+	media, err := sw.sweepOrphanMedia(ctx, start.UnixNano())
+	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, ErrWriterClosed) {
+			return err
+		}
+		failures = append(failures, fmt.Errorf("orphaned media: %w", err))
+	}
+	if media > 0 {
 		freed = true
 	}
 
@@ -363,6 +378,34 @@ func (sw *Sweeper) sweepOrphanPayloads(ctx context.Context) (int64, error) {
 	return job.Deleted, nil
 }
 
+// sweepOrphanMedia collects the pending refs whose trace never arrived within
+// the grace (spec 041, Decision 13) and any body no ref names at all, then the
+// bodies those refs leave. Found by a read outside the writer, like the
+// orphaned payloads; the job re-checks each predicate inside its transaction.
+func (sw *Sweeper) sweepOrphanMedia(ctx context.Context, now int64) (int64, error) {
+	refs, err := sw.store.orphanMediaRefs(now-int64(MediaOrphanGrace), orphanScanLimit)
+	if err != nil {
+		return 0, err
+	}
+	bodies, next, err := sw.store.orphanMedia(sw.mediaCursor, orphanScanLimit)
+	if err != nil {
+		return 0, err
+	}
+	sw.mediaCursor = next
+	if len(refs) == 0 && len(bodies) == 0 {
+		return 0, nil
+	}
+	job := &mediaSweep{Refs: refs, Bodies: bodies}
+	if err := sw.writer.Submit(ctx, job); err != nil {
+		return 0, err
+	}
+	if job.Deleted > 0 || job.Dropped > 0 {
+		logger().Info("collected orphaned media", "refs", job.Dropped, "bodies", job.Deleted)
+	}
+	// Bodies only: a dropped or settled ref frees no page worth a vacuum.
+	return job.Deleted, nil
+}
+
 // sweepOrphanSearchEntries collects index entries whose observation — or whose
 // trace — is gone (spec 011, data contract). The three deletion paths keep the
 // index in step inside their own transactions; this is the belt to those
@@ -478,10 +521,12 @@ type traceSweep struct {
 	// (spec 024 #3): an item is a pointer, and a pointer to a deleted trace
 	// is a desk showing an empty page.
 	Items int64
+	// Media are the bodies the chunk collected (spec 041 #3).
+	Media int64
 }
 
 func (t *traceSweep) apply(tx *sql.Tx) error {
-	t.Traces, t.Observations, t.Scores, t.Payloads, t.Items = 0, 0, 0, 0, 0
+	t.Traces, t.Observations, t.Scores, t.Payloads, t.Items, t.Media = 0, 0, 0, 0, 0, 0
 
 	cutoff, sweeping, err := sweepCutoff(tx, t.ProjectID, t.Now, t.Purge)
 	if err != nil || !sweeping {
@@ -528,6 +573,10 @@ func (t *traceSweep) apply(tx *sql.Tx) error {
 		`DELETE FROM payloads WHERE id IN`, nil, payloads); err != nil {
 		return fmt.Errorf("sweep payloads: %w", err)
 	}
+	// Media follows its traces (spec 041 #3): no window of its own.
+	if t.Media, _, err = dropTraceMedia(tx, t.ProjectID, ids); err != nil {
+		return err
+	}
 	// In the same transaction as the rows themselves: an index that outlives
 	// a deletion is a retention promise broken (spec 011 #7).
 	return deleteTraceSearchEntries(tx, t.ProjectID, ids)
@@ -544,26 +593,37 @@ type rawSweep struct {
 	Limit     int
 
 	Deleted int64
+	// Media are the bodies the chunk collected.
+	Media int64
 }
 
 func (r *rawSweep) apply(tx *sql.Tx) error {
-	r.Deleted = 0
+	r.Deleted, r.Media = 0, 0
 
 	cutoff, sweeping, err := rawSweepCutoff(tx, r.ProjectID, r.Now, r.Purge)
 	if err != nil || !sweeping {
 		return err
 	}
-	result, err := tx.Exec(
-		`DELETE FROM raw_batches WHERE id IN (
-		    SELECT id FROM raw_batches
-		     WHERE project_id = ? AND received_at < ?
-		     ORDER BY received_at LIMIT ?)`,
-		r.ProjectID, cutoff, r.Limit)
+	// The ids first: the batches' media refs go with them, and the bodies
+	// only they pointed at are collected in the same transaction (spec 041,
+	// Decision 12).
+	ids, err := queryColumn[int64](tx,
+		`SELECT id FROM raw_batches WHERE project_id = ? AND received_at < ?
+		  ORDER BY received_at LIMIT ?`, r.ProjectID, cutoff, r.Limit)
 	if err != nil {
 		return fmt.Errorf("sweep raw batches: %w", err)
 	}
-	r.Deleted, err = result.RowsAffected()
-	return err
+	if len(ids) == 0 {
+		return nil
+	}
+	if r.Media, _, err = dropRawMedia(tx, ids); err != nil {
+		return err
+	}
+	r.Deleted, err = deleteIn(tx, `DELETE FROM raw_batches WHERE id IN`, nil, ids)
+	if err != nil {
+		return fmt.Errorf("sweep raw batches: %w", err)
+	}
+	return nil
 }
 
 // payloadSweep removes the orphans the read pass found.
@@ -611,6 +671,12 @@ func (p *projectPurge) apply(tx *sql.Tx) error {
 	p.Purged = rows > 0
 	if !p.Purged {
 		return nil
+	}
+	// Nor has `media_refs` (schema 0021): what is left of it — a ref the
+	// Langfuse channel wrote for a trace that never arrived — goes here,
+	// with the bodies only this project pointed at (spec 041 #3).
+	if err := dropProjectMedia(tx, p.ProjectID); err != nil {
+		return err
 	}
 	// `search_entries` has no foreign key to cascade from (schema 0006), so
 	// the remainder the drained chunks left behind goes here (spec 011 #7).
@@ -813,6 +879,31 @@ func deleteIn(tx *sql.Tx, prefix string, lead []any, ids []any) (int64, error) {
 		return nil
 	})
 	return total, err
+}
+
+// rowsQuerier is what a column read needs of a transaction or of the
+// database.
+type rowsQuerier interface {
+	Query(query string, args ...any) (*sql.Rows, error)
+}
+
+// queryColumn runs a query whose rows are one column of type T and answers
+// the values, as the []any an IN list takes.
+func queryColumn[T any](q rowsQuerier, query string, args ...any) ([]any, error) {
+	rows, err := q.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []any
+	for rows.Next() {
+		var v T
+		if err := rows.Scan(&v); err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
 }
 
 // eachIn walks an id list in statement-sized batches. An empty list runs

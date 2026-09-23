@@ -63,46 +63,57 @@ var unmarshalJSON = protojson.UnmarshalOptions{DiscardUnknown: true}
 // OTLP/JSON, and silently reading base64 as well would make a body mean two
 // things (spec 019 #7).
 func DecodeExportRequestJSON(body []byte) ([]*tracepb.ResourceSpans, int, error) {
+	decoded, err := decodeExportJSON(body)
+	if err != nil {
+		return nil, decoded.Unreadable, err
+	}
+	return decoded.ResourceSpans, decoded.Unreadable, nil
+}
+
+// decodeExportJSON is DecodeExportRequestJSON keeping the envelope and the
+// position of each decoded element, for the splice of spec 041 #5.
+func decodeExportJSON(body []byte) (*ExportBody, error) {
+	out := &ExportBody{source: body, asJSON: true}
 	if len(bytes.TrimSpace(body)) == 0 {
 		// An empty body is a valid, empty export, exactly as it is on
 		// the protobuf path.
-		return nil, 0, nil
+		return out, nil
 	}
 	var envelope map[string]json.RawMessage
 	if err := decodeJSONNumbers(body, &envelope); err != nil {
-		return nil, 0, fmt.Errorf("%w: the body is not a JSON object", ErrMalformedBody)
+		return out, fmt.Errorf("%w: the body is not a JSON object", ErrMalformedBody)
 	}
 
 	var raw json.RawMessage
 	for _, key := range resourceSpansKeys {
 		if value, found := envelope[key]; found {
 			raw = value
+			out.key = key
 			break
 		}
 	}
 	if len(raw) == 0 || string(raw) == "null" {
-		return nil, 0, nil
+		return out, nil
 	}
 	var elements []json.RawMessage
 	if err := decodeJSONNumbers(raw, &elements); err != nil {
-		return nil, 0, fmt.Errorf("%w: resourceSpans is not an array", ErrMalformedBody)
+		return out, fmt.Errorf("%w: resourceSpans is not an array", ErrMalformedBody)
 	}
 
-	var out []*tracepb.ResourceSpans
-	var malformed int
 	for i, element := range elements {
 		converted, err := hexIDsToBase64(element, fmt.Sprintf("resourceSpans[%d]", i))
 		if err != nil {
-			return nil, malformed, err
+			return out, err
 		}
 		rs := &tracepb.ResourceSpans{}
 		if err := unmarshalJSON.Unmarshal(converted, rs); err != nil {
-			malformed++
+			out.Unreadable++
 			continue
 		}
-		out = append(out, rs)
+		out.ResourceSpans = append(out.ResourceSpans, rs)
+		out.positions = append(out.positions, i)
 	}
-	return out, malformed, nil
+	return out, nil
 }
 
 // EncodeExportResponseJSON renders an ExportTraceServiceResponse in the

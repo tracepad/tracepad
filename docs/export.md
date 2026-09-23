@@ -246,6 +246,15 @@ project's own keys, with no admin token involved:
 
 See [api.md#the-raw-archive](api.md#the-raw-archive).
 
+**Media comes back inline.** Ingest keeps each image or file once and leaves a
+reference in the archived body ([media.md](media.md)); the body endpoint puts
+the bytes back where each reference is, so a batch leaving for another backend
+is whole: the base64 in the slot of an Anthropic source, a Gemini part or a
+GenAI blob, and a data URL where a whole string was — each shape as the client
+sent it, which a second Tracepad extracts to the same reference again. A reference whose
+body was not stored (the `placeholder` setting) stays a reference. `size_bytes`
+in the listing is the stored body's length, before the media is put back.
+
 ## A receiver that only takes protobuf
 
 If some of your batches arrived as OTLP/JSON (see [ingest.md](ingest.md)) and

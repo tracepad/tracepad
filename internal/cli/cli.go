@@ -281,7 +281,7 @@ and asks you to type the name back; --yes answers that for a script:
   tracepad retention show [--project ID]
   tracepad retention set  [--days N | --forever] [--raw-days N | --raw-follow]
                           [--stats-days N | --stats-forever]
-                          [--project ID] [--yes]
+                          [--media store|placeholder] [--project ID] [--yes]
   tracepad users rm-data  <user-id> [--project ID] [--yes]
 
 Accounts (spec 028). People sign in; programs use keys. These need the admin

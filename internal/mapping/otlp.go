@@ -43,37 +43,50 @@ var ErrMalformedBody = errors.New("malformed OTLP request body")
 // one unusable part must not destroy the usable rest, which is still on disk
 // in the raw body. Only an envelope we cannot walk at all is an error.
 func DecodeExportRequest(body []byte) ([]*tracepb.ResourceSpans, int, error) {
-	var out []*tracepb.ResourceSpans
-	var malformed int
-	for len(body) > 0 {
-		num, typ, n := protowire.ConsumeTag(body)
+	decoded, err := decodeExportProto(body)
+	if err != nil {
+		return nil, decoded.Unreadable, err
+	}
+	return decoded.ResourceSpans, decoded.Unreadable, nil
+}
+
+// decodeExportProto is DecodeExportRequest keeping, for each ResourceSpans it
+// decoded, where its field sits in the body — which is what lets a rewrite of
+// one be spliced back without re-encoding the rest (spec 041 #5).
+func decodeExportProto(body []byte) (*ExportBody, error) {
+	out := &ExportBody{source: body}
+	offset := 0
+	for offset < len(body) {
+		start := offset
+		num, typ, n := protowire.ConsumeTag(body[offset:])
 		if n < 0 {
-			return nil, malformed, fmt.Errorf("%w: %v", ErrMalformedBody, protowire.ParseError(n))
+			return out, fmt.Errorf("%w: %v", ErrMalformedBody, protowire.ParseError(n))
 		}
-		body = body[n:]
+		offset += n
 
 		if num == fieldResourceSpans && typ == protowire.BytesType {
-			raw, n := protowire.ConsumeBytes(body)
+			raw, n := protowire.ConsumeBytes(body[offset:])
 			if n < 0 {
-				return nil, malformed, fmt.Errorf("%w: %v", ErrMalformedBody, protowire.ParseError(n))
+				return out, fmt.Errorf("%w: %v", ErrMalformedBody, protowire.ParseError(n))
 			}
-			body = body[n:]
+			offset += n
 			rs := &tracepb.ResourceSpans{}
 			if err := proto.Unmarshal(raw, rs); err != nil {
-				malformed++
+				out.Unreadable++
 				continue
 			}
-			out = append(out, rs)
+			out.ResourceSpans = append(out.ResourceSpans, rs)
+			out.spans = append(out.spans, [2]int{start, offset})
 			continue
 		}
 
-		n = protowire.ConsumeFieldValue(num, typ, body)
+		n = protowire.ConsumeFieldValue(num, typ, body[offset:])
 		if n < 0 {
-			return nil, malformed, fmt.Errorf("%w: %v", ErrMalformedBody, protowire.ParseError(n))
+			return out, fmt.Errorf("%w: %v", ErrMalformedBody, protowire.ParseError(n))
 		}
-		body = body[n:]
+		offset += n
 	}
-	return out, malformed, nil
+	return out, nil
 }
 
 // EncodeExportResponse renders an ExportTraceServiceResponse. A fully

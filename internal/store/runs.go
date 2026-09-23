@@ -704,13 +704,14 @@ func (s *Store) attachOutputs(projectID string, traceIDs []any, byTrace map[stri
 	// The payload reads happen after the cursor is drained: readPayload
 	// runs its own query, and SQLite will not have two open on one
 	// connection mid-scan.
+	reads := &mediaReads{}
 	for _, found := range roots {
 		attempt, ok := byTrace[found.traceID]
 		if !ok {
 			continue
 		}
 		attempt.ObservationID = found.observationID
-		output, err := s.readPayload(found.outputID)
+		output, err := s.readPayload(found.outputID, projectID, found.traceID, reads)
 		if err != nil {
 			return err
 		}

@@ -179,7 +179,9 @@ func (s *Server) handleGetRawBatch(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set(headerDialect, batch.Dialect)
 	}
 	w.WriteHeader(http.StatusOK)
-	w.Write(batch.Body)
+	// As received, with the media put back where ingest factored it out
+	// (spec 041 #8): what leaves through here is the batch the client sent.
+	w.Write(s.inlineRawMedia(project.ID, batch))
 }
 
 // rawFilter reads the window the listing pages over. Half-open like every
