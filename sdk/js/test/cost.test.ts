@@ -239,3 +239,47 @@ describe('found in review of PR #83', () => {
     expect(Object.fromEntries(metadata)).toEqual({ [attrs.OBSERVATION_METADATA]: attrs.dumps(given) });
   });
 });
+
+describe('found in the second review of PR #83', () => {
+  const metadataOf = (captured: ReturnType<typeof spans>, name: string) =>
+    Object.fromEntries(Object.entries(captured.attributes(name)).filter(([key]) => key.startsWith(attrs.OBSERVATION_METADATA)));
+
+  test('metadata past the key cap, or with an empty key, is written whole, and the step keeps its own attributes', () => {
+    const captured = spans();
+    const many = Object.fromEntries(Array.from({ length: attrs.MAX_METADATA_KEYS + 1 }, (_, i) => [`k${i}`, i]));
+    tracepad.generation('chat', { model: 'm', metadata: many }, () => undefined);
+    tracepad.span('empty', { metadata: { '': 1, a: 2 } }, () => undefined);
+    expect(metadataOf(captured, 'chat')).toEqual({ [attrs.OBSERVATION_METADATA]: attrs.dumps(many) });
+    expect(captured.attributes('chat')[attrs.OBSERVATION_TYPE]).toBe('generation');
+    expect(metadataOf(captured, 'empty')).toEqual({ [attrs.OBSERVATION_METADATA]: '{"":1,"a":2}' });
+  });
+
+  test('an object that is no plain record is taken as it encodes; a bigint is a number', () => {
+    const captured = spans();
+    class Tagged {
+      toJSON() {
+        return { tag: 'x' };
+      }
+    }
+    tracepad.span('tagged', { metadata: new Tagged() as unknown as Record<string, unknown> }, () => undefined);
+    tracepad.span('dated', { metadata: new Date(Date.UTC(2026, 8, 23)) as unknown as Record<string, unknown> }, () => undefined);
+    tracepad.span('big', { metadata: { id: 10n } }, () => undefined);
+    expect(metadataOf(captured, 'tagged')).toEqual({ [`${attrs.OBSERVATION_METADATA}.tag`]: 'x' });
+    expect(metadataOf(captured, 'dated')).toEqual({ [attrs.OBSERVATION_METADATA]: '"2026-09-23T00:00:00.000Z"' });
+    expect(metadataOf(captured, 'big')).toEqual({ [`${attrs.OBSERVATION_METADATA}.id`]: 10 });
+  });
+
+  test('a stream gathers nothing for a span that does not record', async () => {
+    const captured = capture();
+    const chunks = [{ model: 'm', choices: [{ delta: { content: 'hi' } }] }];
+    await sampledOut(() =>
+      tracepad.generation('chat', async (call) => {
+        const seen = [];
+        for await (const chunk of call.stream(chunks)) seen.push(chunk);
+        expect(seen).toEqual(chunks);
+        expect((call as unknown as { streamed: unknown }).streamed).toBeUndefined();
+      }),
+    );
+    expect(captured.spans).toEqual([]);
+  });
+});

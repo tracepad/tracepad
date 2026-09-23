@@ -21,7 +21,7 @@ import threading
 from collections.abc import AsyncIterable, AsyncIterator, Callable, Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
-from time import time_ns
+from time import monotonic, time_ns
 from typing import Any
 
 from opentelemetry import context as otel_context
@@ -188,18 +188,26 @@ def flush(timeout: float = 10.0) -> None:
         )
         return
     global _flushing
-    with _flushing_lock:
-        if _flushing is None or _flushing[0] != force or not _flushing[1].is_alive():
-            _flushing = (force, threading.Thread(target=force, args=(int(left * 1000),),
-                                                 daemon=True))
-            _flushing[1].start()
-        exporting = _flushing[1]
-    exporting.join(left)
-    if exporting.is_alive():
-        logger.warning(
-            "tracepad.flush(): the spans were not exported within the %ss budget; the "
-            "export goes on in the background", timeout
-        )
+    deadline = monotonic() + left
+    while True:
+        # A flush still running from before is waited for first; then this
+        # flush's own, for the spans ended since (found in review of PR #83).
+        with _flushing_lock:
+            ours = _flushing is None or _flushing[0] != force or not _flushing[1].is_alive()
+            if ours:
+                _flushing = (force, threading.Thread(target=force, daemon=True,
+                                                     args=(int(left * 1000),)))
+                _flushing[1].start()
+            exporting = _flushing[1]
+        exporting.join(max(0.0, deadline - monotonic()))
+        if exporting.is_alive():
+            logger.warning(
+                "tracepad.flush(): the spans were not exported within the %ss budget; the "
+                "export goes on in the background", timeout
+            )
+            return
+        if ours:
+            return
 
 
 def _tracer() -> otel.Tracer:
@@ -291,9 +299,10 @@ class Generation(Observation):
         and ends the span with what the stream gathered; an `end` you call
         yourself before the stream is over wins, and nothing ends twice.
         """
-        stream = self._stream = Stream()
+        # Nothing is gathered for a span that does not record (spec 042 #1).
+        stream = self._stream = Stream() if self.span.is_recording() else None
         for chunk in chunks:
-            if stream.take(chunk):
+            if stream is not None and stream.take(chunk):
                 self.first_token()
             yield chunk
         if not self._ended:
@@ -301,9 +310,9 @@ class Generation(Observation):
 
     async def astream(self, chunks: AsyncIterable[Any]) -> AsyncIterator[Any]:
         """`stream`, over an async stream: `async for chunk in call.astream(…)`."""
-        stream = self._stream = Stream()
+        stream = self._stream = Stream() if self.span.is_recording() else None
         async for chunk in chunks:
-            if stream.take(chunk):
+            if stream is not None and stream.take(chunk):
                 self.first_token()
             yield chunk
         if not self._ended:
@@ -452,18 +461,13 @@ def _costly(
 ) -> None:
     """The attributes that cost a serialisation, written only on a span that
     records: with tracing off, or the span sampled out, nothing is serialised
-    (spec 042 #1). Metadata is one attribute per key, so that a later write
-    adds keys rather than replacing the lot (spec 042 #5)."""
+    (spec 042 #1)."""
     if not span.is_recording():
         return
     _set(span, attrs.INPUT, None if input is None else attrs.dumps(input))
     _set(span, attrs.OUTPUT, None if output is None else attrs.dumps(output))
-    if isinstance(metadata, dict):
-        for key, value in metadata.items():
-            _set(span, f"{attrs.OBSERVATION_METADATA}.{key}",
-                 None if value is None else attrs.scalar(value))
-    elif metadata is not None:  # not a mapping after all: one attribute, as it came
-        _set(span, attrs.OBSERVATION_METADATA, attrs.dumps(metadata))
+    if metadata is not None:
+        span.set_attributes(attrs.metadata(metadata))
     for name, value in (parameters or {}).items():
         _set(span, attrs.REQUEST_PREFIX + name, attrs.scalar(value))
 

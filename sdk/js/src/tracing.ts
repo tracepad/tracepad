@@ -466,9 +466,10 @@ export class Generation extends Observation {
    * yourself before the stream is over wins, and nothing ends twice.
    */
   async *stream<C>(chunks: Iterable<C> | AsyncIterable<C>): AsyncGenerator<C, void, undefined> {
-    const stream = (this.streamed = new Stream());
+    // Nothing is gathered for a span that does not record (spec 042 #1).
+    const stream = (this.streamed = this.span.isRecording() ? new Stream() : undefined);
     for await (const chunk of chunks) {
-      if (stream.take(chunk)) this.firstToken();
+      if (stream?.take(chunk)) this.firstToken();
       yield chunk;
     }
     if (!this.ended) this.end();
@@ -588,23 +589,13 @@ interface Costly {
 
 /**
  * Written after the span exists and only when it records: with tracing off,
- * or the span sampled out, nothing is serialised (spec 042 #1). Metadata is
- * one attribute per key, so that a later write adds keys rather than
- * replacing the lot; a key without a value writes nothing (spec 042 #5).
+ * or the span sampled out, nothing is serialised (spec 042 #1).
  */
 function costly(span: Span, fields: Costly): void {
   if (!span.isRecording()) return;
   if (fields.input !== undefined) span.setAttribute(attrs.INPUT, attrs.dumps(fields.input));
   if (fields.output !== undefined) span.setAttribute(attrs.OUTPUT, attrs.dumps(fields.output));
-  const { metadata } = fields;
-  if (typeof metadata !== 'object' || metadata === null || Array.isArray(metadata)) {
-    // Not an object after all — a string, a list: one attribute, as it came.
-    if (metadata !== undefined) span.setAttribute(attrs.OBSERVATION_METADATA, attrs.dumps(metadata));
-  } else {
-    for (const [key, value] of Object.entries(metadata)) {
-      if (value != null) span.setAttribute(`${attrs.OBSERVATION_METADATA}.${key}`, attrs.scalar(value));
-    }
-  }
+  if (fields.metadata !== undefined) span.setAttributes(attrs.metadata(fields.metadata));
   for (const [name, value] of Object.entries(fields.parameters ?? {})) {
     span.setAttribute(attrs.REQUEST_PREFIX + name, attrs.scalar(value));
   }

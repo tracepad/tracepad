@@ -14,6 +14,7 @@ The `tracepad.*` half of this file is the mapper's table in
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any
 
@@ -114,6 +115,26 @@ def scalar(value: Any) -> Any:
         except ValueError:
             pass
     return encoded
+
+
+#: More keys than this in one write are written whole, as one attribute: a span
+#: holds 128 attributes by default (OTEL_SPAN_ATTRIBUTE_COUNT_LIMIT), and when
+#: it is full the ones dropped are the step's own (found in review of PR #83).
+MAX_METADATA_KEYS = 32
+
+
+def metadata(value: Any) -> dict[str, Any]:
+    """Observation metadata as attributes: one per top-level key, so that a
+    later write adds keys rather than replacing the lot (spec 042 #5), a key
+    without a value writing nothing. Written whole under the one key instead
+    when it is no mapping, has more than `MAX_METADATA_KEYS` keys, or a key
+    the per-key form cannot name — an empty one."""
+    if isinstance(value, Mapping) and len(value) <= MAX_METADATA_KEYS and all(
+        str(key) for key in value
+    ):
+        return {f"{OBSERVATION_METADATA}.{key}": scalar(entry)
+                for key, entry in value.items() if entry is not None}
+    return {OBSERVATION_METADATA: dumps(value)}
 
 
 def rfc3339(nanoseconds: int) -> str:

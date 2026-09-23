@@ -58,7 +58,8 @@ is five, set both as the exporter's timeout and as the batch processor's
 export timeout, which is what bounds the retries. With neither the option nor
 `TRACEPAD_EXPORT_TIMEOUT`, `OTEL_EXPORTER_OTLP_TRACES_TIMEOUT` keeps working
 underneath when it is set, with the OTel SDK's meaning: the bound of one
-attempt. A `TRACEPAD_EXPORT_TIMEOUT` that is not a number of seconds, or a
+attempt; an `OTEL_BSP_EXPORT_TIMEOUT` set by the operator keeps bounding the
+batch processor's export. A `TRACEPAD_EXPORT_TIMEOUT` that is not a number of seconds, or a
 negative `WithExportTimeout`, is ignored with a warning, and so is the option
 under `WithExport(false)`, which adds no exporter to bound.
 
@@ -134,7 +135,11 @@ key with a `nil` value — a nil pointer, map or slice as well — writes
 nothing; it does not delete the key, since an attribute cannot be unset once
 written. A struct's numbers keep the integers they are. Metadata that encodes
 as no JSON object at all is written whole under
-`tracepad.observation.metadata`. A string whose text is a JSON object or array
+`tracepad.observation.metadata`. More than 32 keys in one write, or an empty key, are written whole under
+`tracepad.observation.metadata` as well: a span holds 128 attributes by
+default, and a full one drops the step's own. The store merges the whole
+object with the per-key entries, and a per-key entry wins. An unsigned integer past
+`math.MaxInt64` is its exact decimal string. A string whose text is a JSON object or array
 is stored as that structure, as every per-key metadata is read.
 
 There is no function wrapper like Python's `@observe`: Go has no decorators

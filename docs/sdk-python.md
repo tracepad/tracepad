@@ -152,7 +152,10 @@ is, anything else as JSON — so `update(metadata={"flag": 1})` adds `flag` and
 replaces only it, and the keys the step opened with stay. A key given as
 `None` writes nothing; it does not delete the key, since an attribute cannot be
 unset once written. Metadata that is no mapping is written whole under
-`tracepad.observation.metadata`. A string whose text is a JSON object or array
+`tracepad.observation.metadata`. More than 32 keys in one write, or an empty key, are written whole under
+`tracepad.observation.metadata` as well: a span holds 128 attributes by
+default, and a full one drops the step's own. The store merges the whole
+object with the per-key entries, and a per-key entry wins. A string whose text is a JSON object or array
 is stored as that structure, as every per-key metadata is read.
 
 `span`, `event` and `generation` hand out an `Observation` carrying

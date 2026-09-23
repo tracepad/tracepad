@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -358,5 +359,41 @@ func TestANegativeExportTimeoutIsIgnoredWithAWarning(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "WithExportTimeout is not a positive duration") {
 		t.Errorf("logged:\n%s", out)
+	}
+}
+
+// Found in the second review of PR #83.
+func TestMetadataPastTheKeyCapOrWithAnEmptyKeyIsWrittenWhole(t *testing.T) {
+	rec := tracepadtest.Capture(t)
+	many := map[string]any{}
+	for i := range 33 {
+		many[fmt.Sprintf("k%02d", i)] = i
+	}
+	_, call := tracepad.Generation(context.Background(), "chat", tracepad.WithModel("m"), tracepad.WithMetadata(many))
+	call.End(tracepad.Result{Output: "done"})
+	_, empty := tracepad.Span(context.Background(), "empty", tracepad.WithMetadata(map[string]any{"": 1, "a": 2}))
+	empty.End()
+
+	chat := rec.Attributes(t, "chat")
+	if _, ok := chat["tracepad.observation.metadata.k00"]; ok {
+		t.Error("33 keys were split, want them written whole")
+	}
+	if got := chat["tracepad.observation.metadata"].AsString(); !strings.HasPrefix(got, `{"k00":0,`) {
+		t.Errorf("metadata = %q", got)
+	}
+	if chat["gen_ai.output.messages"].AsString() != "done" {
+		t.Error("End's output was dropped")
+	}
+	if got := rec.Attributes(t, "empty")["tracepad.observation.metadata"].AsString(); got != `{"":1,"a":2}` {
+		t.Errorf("metadata = %q", got)
+	}
+}
+
+// The batch processor's own variable is the operator's, and stays in force.
+func TestOpenTelemetrysBatchExportTimeoutIsKept(t *testing.T) {
+	tracepadtest.Reset(t)
+	t.Setenv("OTEL_BSP_EXPORT_TIMEOUT", "100") // milliseconds
+	if took := exportTakes(t, tracepad.WithExportTimeout(5*time.Second)); took > 2*time.Second {
+		t.Errorf("the export took %v, want the batch processor's 100ms", took)
 	}
 }

@@ -249,9 +249,16 @@ func costly(span trace.Span, f *fields) {
 	span.SetAttributes(attrs...)
 }
 
+// maxMetadataKeys is how many keys one write splits: past it the metadata is
+// written whole, as one attribute. A span holds 128 attributes by default
+// (OTEL_SPAN_ATTRIBUTE_COUNT_LIMIT), and when it is full the ones dropped are
+// the step's own, End's result among them (found in review of PR #83).
+const maxMetadataKeys = 32
+
 // metadataAttributes are metadata one attribute per top-level key, in key
 // order, a value kept as the scalar it is or as JSON (spec 042 #5). Metadata
-// that is no JSON object is written whole under the one key, as it came.
+// that is no JSON object, has more than maxMetadataKeys keys, or a key the
+// per-key form cannot name — an empty one — is written whole under the one key.
 func metadataAttributes(metadata any) []attribute.KeyValue {
 	entries := map[string]any{}
 	if v := reflect.ValueOf(metadata); v.Kind() == reflect.Map && v.Type().Key().Kind() == reflect.String {
@@ -267,6 +274,9 @@ func metadataAttributes(metadata any) []attribute.KeyValue {
 			return []attribute.KeyValue{attribute.String(attrObservationMetadata, dumps(metadata))}
 		}
 	}
+	if _, empty := entries[""]; empty || len(entries) > maxMetadataKeys {
+		return []attribute.KeyValue{attribute.String(attrObservationMetadata, dumps(metadata))}
+	}
 	var attrs []attribute.KeyValue
 	for _, key := range slices.Sorted(maps.Keys(entries)) {
 		if value := entries[key]; !isNil(value) {
@@ -280,9 +290,13 @@ func metadataAttributes(metadata any) []attribute.KeyValue {
 // slice or interface inside one — a *string left unset writes nothing, as
 // nil does, rather than the text "null".
 func isNil(value any) bool {
-	v := reflect.ValueOf(value)
-	nillable := slices.Contains([]reflect.Kind{reflect.Pointer, reflect.Map, reflect.Slice, reflect.Interface}, v.Kind())
-	return !v.IsValid() || nillable && v.IsNil()
+	switch v := reflect.ValueOf(value); v.Kind() {
+	case reflect.Invalid:
+		return true
+	case reflect.Pointer, reflect.Map, reflect.Slice:
+		return v.IsNil()
+	}
+	return false
 }
 
 // Span opens a step of the trace under the context's current span and

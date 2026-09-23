@@ -229,7 +229,9 @@ func attach(ctx context.Context, sdk *sdktrace.TracerProvider, c config, o optio
 	var batching []sdktrace.BatchSpanProcessorOption
 	if timeout := exportTimeout(o.exportTimeout); timeout > 0 {
 		exporting = append(exporting, otlptracehttp.WithTimeout(timeout))
-		batching = append(batching, sdktrace.WithExportTimeout(timeout))
+		if os.Getenv("OTEL_BSP_EXPORT_TIMEOUT") == "" { // the operator's, where set
+			batching = append(batching, sdktrace.WithExportTimeout(timeout))
+		}
 	}
 	exporter, err := otlptracehttp.New(ctx, exporting...)
 	if err != nil {

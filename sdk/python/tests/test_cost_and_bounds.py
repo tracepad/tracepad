@@ -6,9 +6,11 @@ import logging
 import threading
 import time
 import uuid
+from collections import ChainMap
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from types import MappingProxyType
 from typing import Any
 
 import pytest
@@ -312,3 +314,60 @@ def test_metadata_that_is_no_mapping_is_written_whole(given: Any, spans: testing
     metadata = {k: v for k, v in spans.attributes("step").items()
                 if k.startswith(attrs.OBSERVATION_METADATA)}
     assert metadata == {attrs.OBSERVATION_METADATA: attrs.dumps(given)}
+
+
+# --- found in the second review of PR #83 ----------------------------------------
+
+
+def test_a_flush_waits_for_the_one_before_it_and_then_flushes_its_own(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tracepad.init(HOST, KEY, export=False)
+    released = threading.Event()
+    calls: list[int] = []
+
+    def slow(timeout_millis: int) -> bool:
+        calls.append(timeout_millis)
+        released.wait(5)
+        return True
+
+    monkeypatch.setattr(_tracing._built, "force_flush", slow)
+    try:
+        tracepad.flush(0.05)  # runs out of time; its export goes on
+        threading.Timer(0.05, released.set).start()
+        tracepad.flush(2.0)  # waits for it, then flushes the spans ended since
+        assert len(calls) == 2
+    finally:
+        released.set()
+
+
+def test_metadata_past_the_key_cap_or_with_an_empty_key_is_written_whole(
+    spans: testing.Capture,
+) -> None:
+    many = {f"k{i}": i for i in range(attrs.MAX_METADATA_KEYS + 1)}
+    with tracepad.generation("chat", model="m", metadata=many):
+        pass
+    with tracepad.span("empty", metadata={"": 1, "a": 2}):
+        pass
+
+    chat = spans.attributes("chat")
+    assert chat[attrs.OBSERVATION_METADATA] == attrs.dumps(many)
+    assert chat[attrs.OBSERVATION_TYPE] == "generation"  # the step's own attributes stay
+    assert spans.attributes("empty")[attrs.OBSERVATION_METADATA] == '{"":1,"a":2}'
+
+
+def test_any_mapping_merges_by_key(spans: testing.Capture) -> None:
+    with tracepad.span("step", metadata=MappingProxyType({"a": 1})):
+        tracepad.update(metadata=ChainMap({"b": 2}))
+    attributes = spans.attributes("step")
+    assert (attributes[f"{attrs.OBSERVATION_METADATA}.a"],
+            attributes[f"{attrs.OBSERVATION_METADATA}.b"]) == (1, 2)
+
+
+def test_a_stream_gathers_nothing_for_a_span_that_does_not_record() -> None:
+    chunks = [{"model": "m", "choices": [{"delta": {"content": "hi"}}]}]
+    with testing.capture() as captured, sampled_out():
+        with tracepad.generation("chat") as call:
+            assert list(call.stream(chunks)) == chunks
+            assert call._stream is None
+    assert captured.spans == []
