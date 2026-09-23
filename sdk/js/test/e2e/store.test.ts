@@ -169,4 +169,18 @@ describe.skipIf(!BINARY)('against a real binary', () => {
     expect(failed.status_message).toContain('upstream timeout');
     expect(stored.error_count).toBe(1);
   });
+
+  test('observation metadata merges by key (spec 042 #5)', async () => {
+    tracepad.init({ host: store.host, key: KEY });
+    const traceId = tracepad.span('tagged', { metadata: { a: 1, request_id: 'r-7' } }, (step) => {
+      tracepad.update({ metadata: { b: { flag: true } } });
+      tracepad.update({ metadata: { a: 3 } });
+      return step.traceId!;
+    });
+    await tracepad.flush({ timeout: 20_000 });
+
+    const [tagged] = walk((await traceOf(store, traceId)).observations);
+    const { a, b, request_id } = tagged!.metadata!;
+    expect({ a, b, request_id }).toEqual({ a: 3, b: { flag: true }, request_id: 'r-7' });
+  });
 });

@@ -104,3 +104,22 @@ func TestATracedCallArrivesWhole(t *testing.T) {
 		t.Errorf("score = %v", score)
 	}
 }
+
+// Spec 042 #5: an Update's metadata adds its keys and keeps the ones there.
+func TestObservationMetadataMergesByKey(t *testing.T) {
+	s := serve(t)
+	ctx, step := tracepad.Span(context.Background(), "tagged",
+		tracepad.WithMetadata(map[string]any{"a": 1, "request_id": "r-7"}))
+	tracepad.Update(ctx, tracepad.WithMetadata(map[string]any{"b": map[string]bool{"flag": true}}))
+	tracepad.Update(ctx, tracepad.WithMetadata(map[string]any{"a": 3}))
+	step.End()
+	flush(t)
+
+	tagged := walk(s.trace(step.TraceID())["observations"])[0]
+	metadata, _ := tagged["metadata"].(map[string]any)
+	got := map[string]any{"a": metadata["a"], "b": metadata["b"], "request_id": metadata["request_id"]}
+	want := map[string]any{"a": 3.0, "b": map[string]any{"flag": true}, "request_id": "r-7"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("metadata = %v, want %v", got, want)
+	}
+}

@@ -25,12 +25,12 @@ func TestSpanWritesTheVocabulary(t *testing.T) {
 
 	attrs := r.attrs(t, "docs-search")
 	want := map[string]string{
-		attrObservationType:      "retriever",
-		attrInput:                `{"query":"reset"}`,
-		attrOutput:               `["the ingest page"]`,
-		attrObservationMetadata:  `{"hits":2}`,
-		attrObservationLevel:     "WARNING",
-		attrObservationStatusMsg: "one result",
+		attrObservationType:               "retriever",
+		attrInput:                         `{"query":"reset"}`,
+		attrOutput:                        `["the ingest page"]`,
+		attrObservationMetadata + ".hits": "2",
+		attrObservationLevel:              "WARNING",
+		attrObservationStatusMsg:          "one result",
 	}
 	for key, value := range want {
 		if got := str(t, attrs, key); got != value {

@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -32,6 +34,7 @@ type Option func(*options)
 type options struct {
 	host, key, environment, release string
 	export                          bool
+	exportTimeout                   time.Duration
 	logger                          *slog.Logger
 	provider                        trace.TracerProvider
 }
@@ -58,6 +61,12 @@ func WithRelease(release string) Option { return func(o *options) { o.release = 
 // WithExport(false) attaches everything except the exporter, for an
 // application whose traces already reach the store another way.
 func WithExport(export bool) Option { return func(o *options) { o.export = export } }
+
+// WithExportTimeout bounds one export, its retries included (spec 042 #3).
+// TRACEPAD_EXPORT_TIMEOUT, in seconds, otherwise; then five seconds.
+func WithExportTimeout(timeout time.Duration) Option {
+	return func(o *options) { o.exportTimeout = timeout }
+}
 
 // WithLogger is where the tracing path says what it could not do (spec 017
 // #9). slog.Default() otherwise.
@@ -172,8 +181,12 @@ func (d *defaults) start(ctx context.Context, c config, o options) (func(context
 		d.log().Warn("tracepad.Init: the TracerProvider is not the OpenTelemetry SDK's; " +
 			"spans are started on it, but no exporter can be attached to it")
 	}
+	if !o.export && o.exportTimeout != 0 {
+		d.log().Warn("tracepad.Init: WithExportTimeout is ignored with WithExport(false), " +
+			"which adds no exporter to bound")
+	}
 	if sdk != nil {
-		if err := attach(ctx, sdk, c, o.export); err != nil {
+		if err := attach(ctx, sdk, c, o); err != nil {
 			return nil, err
 		}
 	}
@@ -201,19 +214,61 @@ func (d *defaults) start(ctx context.Context, c config, o options) (func(context
 // WithExport(false) too, since an application exporting through another
 // SDK still wants its spans stamped — then the exporter, under a batching
 // processor, unless the application exports another way.
-func attach(ctx context.Context, sdk *sdktrace.TracerProvider, c config, export bool) error {
+func attach(ctx context.Context, sdk *sdktrace.TracerProvider, c config, o options) error {
 	sdk.RegisterSpanProcessor(runContextProcessor{})
-	if !export {
+	if !o.export {
 		return nil
 	}
-	exporter, err := otlptracehttp.New(ctx,
-		otlptracehttp.WithEndpointURL(c.host+"/v1/traces"),
-		otlptracehttp.WithHeaders(map[string]string{"Authorization": "Bearer " + c.key}))
+	exporting := []otlptracehttp.Option{
+		otlptracehttp.WithEndpointURL(c.host + "/v1/traces"),
+		otlptracehttp.WithHeaders(map[string]string{"Authorization": "Bearer " + c.key}),
+	}
+	// The exporter's timeout bounds one attempt, and a timed-out attempt is
+	// retried for up to a minute; the batch processor's bounds the export,
+	// its retries included, which is what the option promises.
+	var batching []sdktrace.BatchSpanProcessorOption
+	if timeout := exportTimeout(o.exportTimeout); timeout > 0 {
+		exporting = append(exporting, otlptracehttp.WithTimeout(timeout))
+		if os.Getenv("OTEL_BSP_EXPORT_TIMEOUT") == "" { // the operator's, where set
+			batching = append(batching, sdktrace.WithExportTimeout(timeout))
+		}
+	}
+	exporter, err := otlptracehttp.New(ctx, exporting...)
 	if err != nil {
 		return fmt.Errorf("tracepad: building the exporter: %w", err)
 	}
-	sdk.RegisterSpanProcessor(sdktrace.NewBatchSpanProcessor(exporter))
+	sdk.RegisterSpanProcessor(sdktrace.NewBatchSpanProcessor(exporter, batching...))
 	return nil
+}
+
+// defaultExportTimeout is one export's bound when nothing names one (spec
+// 042 #3): OpenTelemetry's ten seconds, its retries inside them, is long for
+// a request that flushes before it answers.
+const defaultExportTimeout = 5 * time.Second
+
+// exportTimeout is the option, then TRACEPAD_EXPORT_TIMEOUT in seconds, then
+// five seconds — or zero, which leaves the exporter to OpenTelemetry's own
+// variable when one is set.
+func exportTimeout(given time.Duration) time.Duration {
+	if given > 0 {
+		return given
+	}
+	if given < 0 {
+		def.log().Warn("tracepad.Init: WithExportTimeout is not a positive duration; it is ignored", "value", given)
+	}
+	if raw := strings.TrimSpace(os.Getenv("TRACEPAD_EXPORT_TIMEOUT")); raw != "" {
+		seconds, err := strconv.ParseFloat(raw, 64)
+		// Past the int64 of a Duration, or under a nanosecond — which would be
+		// zero, and zero leaves the exporter to OpenTelemetry — is no timeout.
+		if timeout := time.Duration(seconds * float64(time.Second)); err == nil && timeout > 0 && seconds < math.MaxInt64/float64(time.Second) {
+			return timeout
+		}
+		def.log().Warn("tracepad.Init: TRACEPAD_EXPORT_TIMEOUT is not a number of seconds; it is ignored", "value", raw)
+	}
+	if os.Getenv("OTEL_EXPORTER_OTLP_TRACES_TIMEOUT") != "" || os.Getenv("OTEL_EXPORTER_OTLP_TIMEOUT") != "" {
+		return 0
+	}
+	return defaultExportTimeout
 }
 
 // isDefault tells the API's own delegating provider — the one every process

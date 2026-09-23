@@ -2,6 +2,12 @@ package tracepad
 
 import (
 	"context"
+	"encoding"
+	"encoding/json"
+	"maps"
+	"reflect"
+	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -54,7 +60,10 @@ func WithInput(input any) SpanOption {
 	return spanOption(func(f *fields) { f.input, f.hasInput = input, true })
 }
 
-// WithMetadata is free metadata on the observation, a JSON object.
+// WithMetadata is free metadata on the observation: a map, or anything that
+// encodes as a JSON object. It is written one attribute per top-level key, so
+// that an Update adds its keys to the ones the span carries and replaces only
+// its own; a nil value writes nothing, and deletes nothing (spec 042 #5).
 func WithMetadata(metadata any) SpanOption {
 	return spanOption(func(f *fields) { f.metadata, f.hasMetadata = metadata, true })
 }
@@ -163,6 +172,7 @@ func update(span trace.Span, f *fields) {
 		span.SetName(f.name)
 	}
 	span.SetAttributes(observationAttributes(f)...)
+	costly(span, f)
 }
 
 // warnedKinds are the spellings already warned about, so that a step in a
@@ -193,8 +203,9 @@ func warnKind(typ string) {
 	}
 }
 
-// observationAttributes are the attributes a set of fields writes, whatever
-// the call that collected them.
+// observationAttributes are the cheap attributes a set of fields writes,
+// whatever the call that collected them: what a span starts with, where a
+// sampler or a span processor may read them.
 func observationAttributes(f *fields) []attribute.KeyValue {
 	var attrs []attribute.KeyValue
 	set := func(key, value string) {
@@ -206,6 +217,24 @@ func observationAttributes(f *fields) []attribute.KeyValue {
 		warnKind(f.typ)
 		set(attrObservationType, f.typ)
 	}
+	set(attrObservationLevel, f.level)
+	set(attrObservationStatusMsg, f.statusMessage)
+	return attrs
+}
+
+// costly writes the attributes that cost a serialisation, after the span
+// exists and only when it records: with tracing off, or the span sampled
+// out, nothing is serialised (spec 042 #1).
+func costly(span trace.Span, f *fields) {
+	if !span.IsRecording() {
+		return
+	}
+	var attrs []attribute.KeyValue
+	set := func(key, text string) {
+		if text != "" {
+			attrs = append(attrs, attribute.String(key, text))
+		}
+	}
 	if f.hasInput {
 		set(attrInput, dumps(f.input))
 	}
@@ -213,11 +242,74 @@ func observationAttributes(f *fields) []attribute.KeyValue {
 		set(attrOutput, dumps(f.output))
 	}
 	if f.hasMetadata {
-		set(attrObservationMetadata, dumps(f.metadata))
+		attrs = append(attrs, metadataAttributes(f.metadata)...)
 	}
-	set(attrObservationLevel, f.level)
-	set(attrObservationStatusMsg, f.statusMessage)
+	for _, key := range slices.Sorted(maps.Keys(f.parameters)) {
+		attrs = append(attrs, scalar(attrRequestPrefix+key, f.parameters[key]))
+	}
+	span.SetAttributes(attrs...)
+}
+
+// maxMetadataKeys is how many keys one write splits: past it the metadata is
+// written whole, as one attribute. A span holds 128 attributes by default
+// (OTEL_SPAN_ATTRIBUTE_COUNT_LIMIT), and when it is full the ones dropped are
+// the step's own, End's result among them (found in review of PR #83).
+const maxMetadataKeys = 32
+
+// metadataAttributes are metadata one attribute per top-level key, in key
+// order, a value kept as the scalar it is or as JSON (spec 042 #5). Metadata
+// that is no JSON object, has more than maxMetadataKeys keys, or a key the
+// per-key form cannot name — an empty one — is written whole under the one key.
+func metadataAttributes(metadata any) []attribute.KeyValue {
+	entries := map[string]any{}
+	encoded := ""
+	whole := func() []attribute.KeyValue {
+		if encoded == "" {
+			encoded = dumps(metadata)
+		}
+		return []attribute.KeyValue{attribute.String(attrObservationMetadata, encoded)}
+	}
+	v := reflect.ValueOf(metadata)
+	_, marshals := metadata.(json.Marshaler)
+	_, texts := metadata.(encoding.TextMarshaler)
+	if v.Kind() == reflect.Map && v.Type().Key().Kind() == reflect.String && !marshals && !texts {
+		for _, key := range v.MapKeys() {
+			entries[key.String()] = v.MapIndex(key).Interface()
+		}
+	} else {
+		// As it encodes — a map type's own MarshalJSON included — with the
+		// numbers as they were spelled, so that an int64 id past 2^53 is not
+		// rounded through a float64 (found in review of PR #83).
+		encoded = dumps(metadata)
+		decoder := json.NewDecoder(strings.NewReader(encoded))
+		decoder.UseNumber()
+		if err := decoder.Decode(&entries); err != nil {
+			return whole()
+		}
+	}
+	if _, empty := entries[""]; empty || len(entries) > maxMetadataKeys {
+		return whole()
+	}
+	var attrs []attribute.KeyValue
+	for _, key := range slices.Sorted(maps.Keys(entries)) {
+		if value := entries[key]; !isNil(value) {
+			attrs = append(attrs, scalar(attrObservationMetadata+"."+key, value))
+		}
+	}
 	return attrs
+}
+
+// isNil is a value that is nothing: nil itself, or a nil pointer, map,
+// slice or interface inside one — a *string left unset writes nothing, as
+// nil does, rather than the text "null".
+func isNil(value any) bool {
+	switch v := reflect.ValueOf(value); v.Kind() {
+	case reflect.Invalid:
+		return true
+	case reflect.Pointer, reflect.Map, reflect.Slice:
+		return v.IsNil()
+	}
+	return false
 }
 
 // Span opens a step of the trace under the context's current span and
@@ -249,12 +341,14 @@ func Event(ctx context.Context, name string, opts ...SpanOption) (context.Contex
 func open(ctx context.Context, name string, f *fields, o *Observation, start ...trace.SpanStartOption) context.Context {
 	start = append(start, trace.WithAttributes(observationAttributes(f)...))
 	ctx, o.span = tracer().Start(ctx, name, start...)
+	costly(o.span, f)
 	o.traced = o.span.SpanContext().IsValid() && !tracingOff()
 	return ctx
 }
 
 // Update writes observation attributes on the context's current span,
-// whoever started it (spec 017 #11). With no span it logs and does nothing.
+// whoever started it (spec 017 #11). With no span in a process that traces
+// it warns and does nothing; on a span that does not record it does nothing.
 func Update(ctx context.Context, opts ...UpdateOption) {
 	span, ok := spanOf(ctx, "tracepad.Update")
 	if !ok {
@@ -268,16 +362,21 @@ func Update(ctx context.Context, opts ...UpdateOption) {
 }
 
 // spanOf is the context's span when there is one to write on. No span at
-// all is the caller's mistake and is logged; a span a sampler dropped is
-// not recording and is skipped without a word, or every dropped request
-// would log a line per call.
+// all, in a process that traces, is the caller's mistake and is warned
+// about; a span that does not record — tracing off, or a sampler's choice —
+// is a configuration, and says so at debug, or every dropped request would
+// warn a line per call (spec 042 #2).
 func spanOf(ctx context.Context, caller string) (trace.Span, bool) {
 	span := trace.SpanFromContext(ctx)
-	if !span.SpanContext().IsValid() {
+	switch {
+	case span.IsRecording():
+		return span, true
+	case !span.SpanContext().IsValid() && !tracingOff():
 		def.log().Warn(caller + " outside a span: nothing was written")
-		return nil, false
+	default:
+		def.log().Debug(caller + ": the span does not record; nothing was written")
 	}
-	return span, span.IsRecording()
+	return nil, false
 }
 
 // TraceOption configures UpdateTrace.

@@ -19,6 +19,7 @@ import {
   SpanStatusCode,
   context,
   createContextKey,
+  diag,
   isSpanContextValid,
   trace,
 } from '@opentelemetry/api';
@@ -33,7 +34,7 @@ import {
 } from '@opentelemetry/sdk-trace-node';
 
 import * as attrs from './attributes.js';
-import { type Config, type ConfigOptions, adopt, current, resolve } from './config.js';
+import { type Config, type ConfigOptions, adopt, current, exportTimeout, resolve } from './config.js';
 import { type Fields, type Usage, Stream, readResponse } from './generation.js';
 import { stamp } from './harness.js';
 import { VERSION, describe } from './http.js';
@@ -55,6 +56,8 @@ const HANDLE = createContextKey('tracepad-observation');
 export interface InitOptions extends ConfigOptions {
   /** `false` attaches everything except the exporter. */
   export?: boolean;
+  /** One export's bound, retries included; then TRACEPAD_EXPORT_TIMEOUT (seconds), then 5000 (spec 042 #3). */
+  exportTimeoutMillis?: number;
   logger?: Logger;
 }
 
@@ -81,7 +84,7 @@ export function init(options: InitOptions = {}): void {
   if (found === undefined) {
     install((built = new NodeTracerProvider({
       resource: resourceFor(config),
-      spanProcessors: [processor(config, options.export)],
+      spanProcessors: [processor(config, options)],
     })));
   } else {
     if (config.environment !== undefined || config.release !== undefined) refuseResource('init');
@@ -89,9 +92,10 @@ export function init(options: InitOptions = {}): void {
     // either line: a 1.x provider has the hook too, and attaching a second
     // exporter through it would send every span twice.
     if (handedOut) {
-      // nothing to attach
+      // nothing to attach: the exporter, and its timeout, are spanProcessor()'s
+      if (options.exportTimeoutMillis !== undefined) warn('init(): exportTimeoutMillis is ignored; pass it to spanProcessor(), which built the exporter');
     } else if (typeof (found as Adoptable).addSpanProcessor === 'function') {
-      (found as Adoptable).addSpanProcessor!(processor(config, options.export));
+      (found as Adoptable).addSpanProcessor!(processor(config, options));
     } else {
       warn(
         'init(): this process already has a TracerProvider and it takes span processors in ' +
@@ -230,7 +234,7 @@ export function spanProcessor(options: InitOptions = {}): SpanProcessor {
   if (config.environment !== undefined || config.release !== undefined) refuseResource('spanProcessor');
   adopt(config);
   handedOut = true;
-  return processor(config, options.export);
+  return processor(config, options);
 }
 
 /** A resource is fixed when its provider is built, and `service.version` is
@@ -244,15 +248,19 @@ function refuseResource(call: string): void {
   );
 }
 
-function processor(config: Config, exporting = true): SpanProcessor {
-  return new TracepadProcessor(exporting ? exporter(config) : undefined);
+function processor(config: Config, options: InitOptions): SpanProcessor {
+  if (options.export !== false) return new TracepadProcessor(exporter(config, options.exportTimeoutMillis));
+  if (options.exportTimeoutMillis !== undefined) warn('exportTimeoutMillis is ignored with export: false, which adds no exporter to bound');
+  return new TracepadProcessor(undefined);
 }
 
-function exporter(config: Config): SpanProcessor {
+function exporter(config: Config, millis: number | undefined): SpanProcessor {
+  const timeoutMillis = exportTimeout(millis);
   return new BatchSpanProcessor(
     new OTLPTraceExporter({
       url: `${config.host}/v1/traces`,
       headers: { Authorization: `Bearer ${config.key}` },
+      ...(timeoutMillis === undefined ? {} : { timeoutMillis }),
     }),
   );
 }
@@ -407,20 +415,12 @@ export class Observation {
     this.span.end(endTime);
   }
 
-  /** Write observation attributes on this span. */
+  /** Write observation attributes on this span; `metadata` adds its keys to the ones the span carries (spec 042 #5). */
   update(fields: UpdateFields): void {
     const { span } = this;
     if (fields.name !== undefined) span.updateName(fields.name);
-    for (const [field, key, value] of [
-      ['input', attrs.INPUT, fields.input],
-      ['output', attrs.OUTPUT, fields.output],
-      ['metadata', attrs.OBSERVATION_METADATA, fields.metadata],
-    ] as const) {
-      if (value !== undefined) {
-        this.explicit.add(field);
-        span.setAttribute(key, attrs.dumps(value));
-      }
-    }
+    if (fields.output !== undefined) this.explicit.add('output');
+    costly(span, fields);
     set(span, attrs.OBSERVATION_LEVEL, fields.level);
     set(span, attrs.OBSERVATION_STATUS_MESSAGE, fields.statusMessage);
     set(span, attrs.OBSERVATION_TYPE, kind(fields.type));
@@ -467,9 +467,10 @@ export class Generation extends Observation {
    * yourself before the stream is over wins, and nothing ends twice.
    */
   async *stream<C>(chunks: Iterable<C> | AsyncIterable<C>): AsyncGenerator<C, void, undefined> {
-    const stream = (this.streamed = new Stream());
+    // Nothing is gathered for a span that does not record (spec 042 #1).
+    const stream = (this.streamed = this.span.isRecording() ? new Stream() : undefined);
     for await (const chunk of chunks) {
-      if (stream.take(chunk)) this.firstToken();
+      if (stream?.take(chunk)) this.firstToken();
       yield chunk;
     }
     if (!this.ended) this.end();
@@ -484,6 +485,7 @@ export class Generation extends Observation {
    * calling this ends the span with what it has.
    */
   end(response?: unknown, fields: EndFields = {}): void {
+    if (!this.span.isRecording()) return Observation.prototype.finish.call(this); // nothing to read for (spec 042 #1)
     if (response === undefined && this.streamed !== undefined) response = this.streamed.response();
     const read: Fields = response === undefined ? {} : readResponse(response);
     if (fields.model !== undefined) read.model = fields.model;
@@ -515,10 +517,7 @@ export class Generation extends Observation {
 /** Write observation attributes on the current span (spec 032 #9). */
 export function update(fields: UpdateFields): void {
   const span = trace.getActiveSpan();
-  if (span === undefined || !span.isRecording()) {
-    warn('update() outside a span: nothing was written');
-    return;
-  }
+  if (span === undefined || !span.isRecording()) return unwritten('update', span);
   observationOf(span).update(fields);
 }
 
@@ -545,16 +544,23 @@ export interface TraceFields {
  */
 export function updateTrace(fields: TraceFields): void {
   const span = trace.getActiveSpan();
-  if (span === undefined || !span.isRecording()) {
-    warn('updateTrace() outside a span: nothing was written');
-    return;
-  }
+  if (span === undefined || !span.isRecording()) return unwritten('updateTrace', span);
   set(span, attrs.TRACE_NAME, fields.name);
   set(span, attrs.USER_ID, fields.userId);
   set(span, attrs.SESSION_ID, fields.sessionId);
   if (fields.tags !== undefined) span.setAttribute(attrs.TRACE_TAGS, attrs.dumps([...fields.tags]));
   if (fields.metadata !== undefined) span.setAttribute(attrs.TRACE_METADATA, attrs.dumps(fields.metadata));
   set(span, attrs.TRACE_VERSION, fields.version || undefined);
+}
+
+/**
+ * A warning only for the mistake: a process that traces, and no span in
+ * context at all. A span that does not record is tracing off or a sampler's
+ * choice — a configuration, not an error — and says so at debug (spec 042 #2).
+ */
+function unwritten(call: string, span: Span | undefined): void {
+  if (span === undefined && !tracingOff()) warn(`${call}() outside a span: nothing was written`);
+  else diag.debug(`tracepad: ${call}(): the span does not record; nothing was written`);
 }
 
 /**
@@ -572,6 +578,28 @@ function observationOf(span: Span): Observation {
 
 function set(span: Span, key: string, value: string | number | boolean | undefined): void {
   if (value !== undefined) span.setAttribute(key, value);
+}
+
+/** The attributes that cost a serialisation. */
+interface Costly {
+  input?: unknown;
+  output?: unknown;
+  metadata?: Record<string, unknown>;
+  parameters?: Record<string, unknown> | undefined;
+}
+
+/**
+ * Written after the span exists and only when it records: with tracing off,
+ * or the span sampled out, nothing is serialised (spec 042 #1).
+ */
+function costly(span: Span, fields: Costly): void {
+  if (!span.isRecording()) return;
+  if (fields.input !== undefined) span.setAttribute(attrs.INPUT, attrs.dumps(fields.input));
+  if (fields.output !== undefined) span.setAttribute(attrs.OUTPUT, attrs.dumps(fields.output));
+  if (fields.metadata != null) span.setAttributes(attrs.metadata(fields.metadata));
+  for (const [name, value] of Object.entries(fields.parameters ?? {})) {
+    span.setAttribute(attrs.REQUEST_PREFIX + name, attrs.scalar(value));
+  }
 }
 
 /**
@@ -627,19 +655,10 @@ export interface GenerationOptions extends ObservationOptions {
   modelParameters?: Record<string, unknown>;
 }
 
-function observationAttributes(type: string, options: ObservationOptions = {}): Attributes {
-  const attributes: Attributes = { [attrs.OBSERVATION_TYPE]: type };
-  if (options.input !== undefined) attributes[attrs.INPUT] = attrs.dumps(options.input);
-  if (options.metadata !== undefined) attributes[attrs.OBSERVATION_METADATA] = attrs.dumps(options.metadata);
-  return attributes;
-}
-
+/** What a generation starts with: the cheap attributes, which a sampler may read. */
 function generationAttributes(options: GenerationOptions): Attributes {
-  const attributes = observationAttributes('generation', options);
+  const attributes: Attributes = { [attrs.OBSERVATION_TYPE]: 'generation' };
   if (options.model !== undefined) attributes[attrs.REQUEST_MODEL] = options.model;
-  for (const [name, value] of Object.entries(options.modelParameters ?? {})) {
-    attributes[attrs.REQUEST_PREFIX + name] = attrs.scalar(value);
-  }
   if (options.prompt !== undefined) {
     const { prompt } = options;
     attributes[attrs.PROMPT_NAME] = typeof prompt === 'string' ? prompt : prompt.name;
@@ -663,15 +682,18 @@ function failed(handle: Observation, error: unknown): void {
   handle.span.setStatus({ code: SpanStatusCode.ERROR, message });
 }
 
-/** Start a span in the active context, and the context the callback runs in. */
+/** Start a span in the active context with the cheap attributes, add the
+ * costly ones if it records, and the context the callback runs in. */
 function begin<H extends Observation>(
   name: string,
   attributes: Attributes,
   make: (span: Span) => H,
   startTime?: number,
+  fields: Costly = {},
 ): [H, Context] {
   const options = startTime === undefined ? { attributes } : { attributes, startTime };
   const span = tracer().startSpan(name, options, context.active());
+  costly(span, fields);
   const handle = make(span);
   return [handle, trace.setSpan(context.active(), span).setValue(HANDLE, handle)];
 }
@@ -686,8 +708,9 @@ function open<H extends Observation, T>(
   make: (span: Span) => H,
   fn: Callback<H, T>,
   at?: number,
+  fields?: Costly,
 ): T {
-  const [handle, ctx] = begin(name, attributes, make, at);
+  const [handle, ctx] = begin(name, attributes, make, at, fields);
   let result: T;
   try {
     result = context.with(ctx, fn, undefined, handle);
@@ -731,7 +754,7 @@ export function span<T>(name: string, options: SpanOptions | Callback<Observatio
     const { type: _generation, ...rest } = given as GenerationOptions & { type: string };
     return generation(name, rest, callback);
   }
-  return open(name, observationAttributes(type, given), (s) => new Observation(s), callback);
+  return open(name, { [attrs.OBSERVATION_TYPE]: type }, (s) => new Observation(s), callback, undefined, given);
 }
 
 /** Warn about a kind given to a shape that names its own: it is not written. */
@@ -748,7 +771,7 @@ export function event<T>(name: string, options: ObservationOptions, fn: Callback
 export function event<T>(name: string, options: ObservationOptions | Callback<Observation, T>, fn?: Callback<Observation, T>): T {
   const [given, callback] = split(options, fn);
   ownKind(given, 'event');
-  return open(name, observationAttributes('event', given), (s) => new Observation(s), callback, now());
+  return open(name, { [attrs.OBSERVATION_TYPE]: 'event' }, (s) => new Observation(s), callback, now(), given);
 }
 
 export function generation<T>(name: string, fn: Callback<Generation, T>): T;
@@ -757,7 +780,8 @@ export function generation<T>(name: string, options: GenerationOptions, fn: Call
 export function generation<T>(name: string, options: GenerationOptions | Callback<Generation, T>, fn?: Callback<Generation, T>): T {
   const [given, callback] = split(options, fn);
   ownKind(given, 'generation');
-  return open(name, generationAttributes(given ?? {}), (s) => new Generation(s), callback);
+  const opened = given ?? {};
+  return open(name, generationAttributes(opened), (s) => new Generation(s), callback, undefined, { ...opened, parameters: opened.modelParameters });
 }
 
 export interface ObserveOptions {
@@ -791,11 +815,11 @@ export function observe<F extends AnyFunction>(fn: F, options: ObserveOptions = 
   // `init({ logger })` has said where warnings go; `kind` says it once.
   const attributes = () => {
     kind(type);
-    return isGeneration ? generationAttributes({}) : observationAttributes(type);
+    return isGeneration ? generationAttributes({}) : { [attrs.OBSERVATION_TYPE]: type };
   };
   const make = (s: Span) => (isGeneration ? new Generation(s, captureOutput) : new Observation(s));
   const enter = (handle: Observation, args: unknown[]) => {
-    if (captureInput) handle.span.setAttribute(attrs.INPUT, attrs.dumps(args));
+    if (captureInput && handle.span.isRecording()) handle.span.setAttribute(attrs.INPUT, attrs.dumps(args));
   };
   // What the function said about itself wins over what was captured from it
   // (spec 017 #4). A generator's result is the list of what it yielded,
@@ -803,7 +827,7 @@ export function observe<F extends AnyFunction>(fn: F, options: ObserveOptions = 
   // of Decision 5 is only asked about a value returned whole.
   const leave = (handle: Observation, result: unknown, asResponse = true) => {
     if (isGeneration && asResponse) (handle as Generation).end(result);
-    else if (captureOutput && result !== undefined && !handle.explicit.has('output')) {
+    else if (captureOutput && result !== undefined && !handle.explicit.has('output') && handle.span.isRecording()) {
       handle.span.setAttribute(attrs.OUTPUT, attrs.dumps(result));
     }
   };
@@ -880,7 +904,7 @@ function* drive(handle: Observation, ctx: Context, steps: Iterator<unknown>, lea
   try {
     let step = context.with(ctx, () => steps.next());
     while (!step.done) {
-      yielded.push(step.value);
+      if (handle.span.isRecording()) yielded.push(step.value); // kept only to be written
       let sent: unknown;
       try {
         sent = yield step.value;
@@ -906,7 +930,7 @@ async function* driveAsync(handle: Observation, ctx: Context, steps: AsyncIterat
   try {
     let step = await context.with(ctx, () => steps.next());
     while (!step.done) {
-      yielded.push(step.value);
+      if (handle.span.isRecording()) yielded.push(step.value); // kept only to be written
       let sent: unknown;
       try {
         sent = yield step.value;

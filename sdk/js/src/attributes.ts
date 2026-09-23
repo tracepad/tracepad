@@ -88,12 +88,59 @@ function replacer(this: unknown, _key: string, value: unknown): unknown {
   return value;
 }
 
-/** Render a model parameter, keeping the types OTLP has of its own. */
+/** Render a model parameter or a metadata entry, keeping the types OTLP has
+ * of its own. A value that encodes as a JSON string — a `Date` — is that
+ * string, not the string with its quotes (found in review of PR #83). */
 export function scalar(value: unknown): string | number | boolean {
   if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
     return value;
   }
-  return dumps(value);
+  if (typeof value === 'bigint') return Number(value); // as `dumps` writes one
+  const encoded = dumps(value);
+  try {
+    return encoded.startsWith('"') ? (JSON.parse(encoded) as string) : encoded;
+  } catch {
+    return encoded; // `String()` of a value the encoder refused, and not JSON
+  }
+}
+
+/** More keys than this in one write are written whole, as one attribute: a
+ * span holds 128 attributes by default (OTEL_SPAN_ATTRIBUTE_COUNT_LIMIT), and
+ * when it is full the ones dropped are the step's own (found in review of PR #83). */
+export const MAX_METADATA_KEYS = 32;
+
+/**
+ * Observation metadata as attributes: one per top-level key, so that a later
+ * write adds keys rather than replacing the lot (spec 042 #5), a key without
+ * a value writing nothing. An object that is not a plain record — a class
+ * with `toJSON`, a `Map` — is taken as it encodes. Written whole under the
+ * one key instead when it encodes as no object, has more than
+ * `MAX_METADATA_KEYS` keys, or a key the per-key form cannot name — an empty one.
+ */
+export function metadata(value: unknown): Record<string, string | number | boolean> {
+  const plain = isRecord(value) && [Object.prototype, null].includes(Object.getPrototypeOf(value));
+  const entries = plain ? value : decoded(value);
+  const keys = isRecord(entries) ? Object.keys(entries) : [];
+  if (!isRecord(entries) || keys.length > MAX_METADATA_KEYS || keys.includes('')) {
+    return { [OBSERVATION_METADATA]: dumps(value) };
+  }
+  const out: Record<string, string | number | boolean> = {};
+  for (const [key, entry] of Object.entries(entries)) {
+    if (entry != null) out[`${OBSERVATION_METADATA}.${key}`] = scalar(entry);
+  }
+  return out;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function decoded(value: unknown): unknown {
+  try {
+    return JSON.parse(dumps(value)) as unknown;
+  } catch {
+    return undefined;
+  }
 }
 
 /** An instant as the mapper reads it (`docs/ingest.md`, time to first token). */

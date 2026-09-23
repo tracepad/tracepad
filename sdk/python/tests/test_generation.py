@@ -95,7 +95,7 @@ def test_a_generation_takes_metadata_when_it_opens(spans: Any) -> None:
         pass
 
     attributes = spans.attributes("chat")
-    assert json.loads(attributes[attrs.OBSERVATION_METADATA]) == {"attempt": 2}
+    assert attributes[f"{attrs.OBSERVATION_METADATA}.attempt"] == 2
     assert attributes[attrs.OBSERVATION_TYPE] == "generation"
 
 

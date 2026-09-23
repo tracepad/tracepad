@@ -121,6 +121,7 @@ export interface Observation {
   ttft_ms?: number | null;
   input?: unknown;
   output?: unknown;
+  metadata?: Record<string, unknown>;
   children?: Observation[];
 }
 

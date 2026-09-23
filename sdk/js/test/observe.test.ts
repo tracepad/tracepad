@@ -69,7 +69,7 @@ describe('the four shapes', () => {
     expect(out).toEqual(['a', 'b']);
     const attributes = seen.attributes('stream');
     expect(attributes[attrs.OUTPUT]).toBe('["a","b"]');
-    expect(attributes[attrs.OBSERVATION_METADATA]).toBe('{"step":1}');
+    expect(attributes[`${attrs.OBSERVATION_METADATA}.step`]).toBe(1);
   });
 
   test('a generator is the same shape: return value, sent values, throw', () => {
