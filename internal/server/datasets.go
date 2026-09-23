@@ -385,8 +385,9 @@ func indexedError(kind string, total, index int, err error) string {
 }
 
 // validate turns an item request into what the store writes: the bodies
-// compacted, so the comparison of #6 is on one normalization, and the id
-// checked or minted.
+// compacted, so what comes back out is not padded by how it was sent, and the
+// id checked or minted. Whether a body changed is the store's call, made on
+// the JSON value (spec 014 #32).
 func (in *itemRequest) validate() (*store.DatasetItemInput, error) {
 	if !jsonValue(in.Input) {
 		return nil, fmt.Errorf(`"input" is required`)
