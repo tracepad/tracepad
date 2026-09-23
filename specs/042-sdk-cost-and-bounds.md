@@ -30,6 +30,7 @@ Deliverables, one PR (the last commit flips the status):
 - `init(export_timeout=)` and its Node and Go counterparts, with a default
   of five seconds (Decision 3).
 - `flush(timeout)` that returns within its timeout (Decision 4).
+- Observation metadata that merges by key on `update` (Decision 5).
 - The three SDK pages: *init*, *flush*, *What raises and what does not*.
 
 Builds on spec 039 as merged (its Decision 7: tracing is off when `init`
@@ -43,6 +44,7 @@ never ran and the global provider is OpenTelemetry's no-op one).
 | 2 | **2026-09-23** — **`update` and `update_trace` warn only when they are a mistake**: in an initialised process with **no span in context at all** (the call is outside every block). When a span is in context but does not record — tracing off, or sampled out — the call is a **no-op with a debug line**, like spec 039's `score` | Spec 039 settled that tracing-off is a configuration, not an error, and a sampled-out span is the sampler doing its job. A warning on every call in either state teaches an operator to ignore the package's warnings, which is worse than no warning. The real mistake — updating from outside every block in a process that traces — keeps its warning. |
 | 3 | **2026-09-23** — **`export_timeout`**: `init(export_timeout=5.0)` in Python (seconds), `init({ exportTimeoutMillis: 5000 })` in Node, `WithExportTimeout(5 * time.Second)` in Go, and `TRACEPAD_EXPORT_TIMEOUT` (seconds) in all three when the argument is absent; the value is handed to the OTLP exporter as its per-export timeout. Ignored, with a warning, when `init` adopts an application's own provider and adds no exporter of its own (`export=False`) | OpenTelemetry's default is ten seconds per export and the OTLP exporters retry within it, which is a reasonable default for a batch job and a long one for a request thread. Five seconds is still generous for one POST to a server on the same network; the knob is there for the ones that are not. The environment variable is the one a deployment can set without a code change, named in the package's own vocabulary; the OTel variable (`OTEL_EXPORTER_OTLP_TRACES_TIMEOUT`) keeps working underneath when neither is given. |
 | 4 | **2026-09-23** — **`flush(timeout)` returns within `timeout`**. Python runs the provider's `force_flush` on a helper thread and waits for it at most the budget left after the scores; when the budget runs out it logs one warning and returns, and the export finishes in the background. Node races `forceFlush()` against a timer the same way. Go's `ForceFlush` already honours its context, and the Go `Flush` derives one from the timeout it is given — verified by a test with a server that never answers. In all three, a test proves the bound against an exporter that hangs | The docstring's promise is the right promise — a caller that gives a flush five seconds has a reason — and the OpenTelemetry Python batch processor in 1.44 does not keep it (`force_flush` calls `_export(EXPORT_ALL)` synchronously and never reads `timeout_millis`). A helper thread is the one way to bound a call the package does not own; the export it leaves running is the same export the batch processor would have run on its own schedule. |
+| 5 | **2026-09-23** — **Observation metadata merges by key.** The packages write metadata as **one attribute per top-level key**, `tracepad.observation.metadata.<key>` (the value JSON-encoded when it is not a string, number or boolean), instead of one serialised object under `tracepad.observation.metadata`. So `update(metadata={"flag": 1})` adds or replaces `flag` and leaves the keys the span already carried; passing a key with `None` / `undefined` / a nil value writes nothing for it (it does not delete). `span(metadata=)`, `generation(metadata=)`, `update(metadata=)` alike, in all three packages; trace metadata keeps the merge `update_trace` already has. The mapper needs nothing: it already reads `tracepad.observation.metadata.*` per key and merges it (`docs/ingest.md`) | Found by the first application ported from the Langfuse SDK, whose OpenTelemetry exporter writes `langfuse.observation.metadata.<key>` one attribute per key, so adding a flag to a span that already carries identifiers keeps them. Ours wrote one attribute, which OpenTelemetry replaces whole on a second write — a silent loss of exactly the identifiers a reader filters by, in code that looked correct to its author. Per-key attributes are the merge OpenTelemetry already has, with no read-modify-write in the package; they also fit Decision 1, since each key is serialised on its own and only for a recording span. Deletion by `None` is left out on purpose: an attribute cannot be unset once written, and pretending otherwise would be a promise the wire cannot keep. |
 
 ## Testing
 
@@ -61,6 +63,9 @@ Per package:
   it.
 - `flush(0.2)` against an exporter that blocks for five seconds returns
   within the budget plus a small margin and logs the warning.
+- `span(metadata={"a": 1})` then `update(metadata={"b": 2})`: the stored
+  observation carries both keys (server e2e); `update(metadata={"a": 3})`
+  replaces `a` only.
 
 ## Out of scope
 
