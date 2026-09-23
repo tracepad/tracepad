@@ -55,8 +55,8 @@ type DatasetItem struct {
 	// version it was read at, which may be later.
 	Version  int
 	Archived bool
-	// The three bodies are opaque, compacted JSON (#4, #6); nil when the
-	// row carries none.
+	// The three bodies are opaque, compacted JSON as first sent (#4, #6,
+	// #32); nil when the row carries none.
 	Input               []byte
 	ExpectedOutput      []byte
 	Metadata            []byte
@@ -133,15 +133,17 @@ type DatasetItemInput struct {
 }
 
 // same reports whether a stored row already says everything this input says.
-// The comparison is on the compacted JSON text, which is the normalization
-// the store applies before writing, so key order does not count as a change
-// (#6). The source pair takes part too: a case that learned where it came from
-// has changed, even if its bodies did not.
+// The bodies compare as JSON values, not as text (#6, #32): key order, how a
+// string was escaped and how a number was spelled do not count as a change,
+// so the same cases re-declared through another client land on the same
+// version. What is stored stays the compacted text as first sent. The source
+// pair takes part too (#23): a case that learned where it came from has
+// changed, even if its bodies did not.
 func (in *DatasetItemInput) same(row *DatasetItem) bool {
 	return row != nil && !row.Archived &&
-		string(row.Input) == string(in.Input) &&
-		string(row.ExpectedOutput) == string(in.ExpectedOutput) &&
-		string(row.Metadata) == string(in.Metadata) &&
+		sameJSON(row.Input, in.Input) &&
+		sameJSON(row.ExpectedOutput, in.ExpectedOutput) &&
+		sameJSON(row.Metadata, in.Metadata) &&
 		row.SourceTraceID == in.SourceTraceID &&
 		row.SourceObservationID == in.SourceObservationID
 }

@@ -75,14 +75,14 @@ func TestDatasetVersionClock(t *testing.T) {
 	if again.Version != 1 || again.Changed != 0 {
 		t.Errorf("re-post: version %d changed %d, want the same version and nothing changed", again.Version, again.Changed)
 	}
-	// Key order is not a change: the comparison is on compacted JSON.
+	// Key order is not a change: the comparison is on the JSON value (#32).
 	reordered := f.postItems(t, name,
 		&DatasetItemInput{ID: itemID(1), Input: []byte(`{"q":"one"}`), Metadata: []byte(`{"b":1,"a":2}`)})
 	if reordered.Version != 2 || reordered.Changed != 1 {
 		t.Fatalf("adding metadata: version %d changed %d, want 2 and 1", reordered.Version, reordered.Changed)
 	}
 	sameOtherOrder := f.postItems(t, name,
-		&DatasetItemInput{ID: itemID(1), Input: []byte(`{"q":"one"}`), Metadata: []byte(`{"b":1,"a":2}`)})
+		&DatasetItemInput{ID: itemID(1), Input: []byte(`{"q":"one"}`), Metadata: []byte(`{"a":2,"b":1}`)})
 	if sameOtherOrder.Changed != 0 {
 		t.Errorf("the same metadata again counted as a change")
 	}
@@ -144,6 +144,66 @@ func TestDatasetVersionClock(t *testing.T) {
 	}
 	if dataset.ItemCount != 2 {
 		t.Errorf("item_count = %d, want the two live items", dataset.ItemCount)
+	}
+}
+
+// TestEquivalentBodiesDoNotTick is Decision 32: the same cases re-declared
+// through another client — escapes where the first sent raw UTF-8, keys in
+// another order, numbers spelled differently — are the same cases, and the
+// version stays where it was. A real change still ticks, and what is stored
+// stays the text as first sent.
+func TestEquivalentBodiesDoNotTick(t *testing.T) {
+	f := newSweepFixture(t)
+	const name = "multilingual"
+	sent := []*DatasetItemInput{
+		{ID: itemID(1), Input: []byte(`{"q":"Καλημέρα κόσμε","lang":"el"}`), ExpectedOutput: []byte(`"Hello, world"`)},
+		{ID: itemID(2), Input: []byte(`{"q":"<b>&</b>"}`), Metadata: []byte(`{"weight":1.0,"tags":["a","b"],"limits":{"max":100,"min":0}}`)},
+		{ID: itemID(3), Input: []byte(`{"n":12345678901234567890123}`)},
+	}
+	if first := f.postItems(t, name, sent...); first.Version != 1 || first.Changed != 3 {
+		t.Fatalf("first batch: version %d changed %d, want 1 and 3", first.Version, first.Changed)
+	}
+
+	equivalent := []*DatasetItemInput{
+		// Escaped non-ASCII, as Python's json.dumps sends it by default,
+		// and the keys the other way round.
+		{ID: itemID(1), Input: []byte(`{"lang":"el","q":"\u039a\u03b1\u03bb\u03b7\u03bc\u03ad\u03c1\u03b1 \u03ba\u03cc\u03c3\u03bc\u03b5"}`), ExpectedOutput: []byte(`"Hello, world"`)},
+		// HTML-escaped, as Go's json.Marshal sends it; 1.0 as 1 (JSON.stringify),
+		// 100 as 1e2, 0 as -0.0, nested keys reordered.
+		{ID: itemID(2), Input: []byte(`{"q":"\u003cb\u003e\u0026\u003c/b\u003e"}`), Metadata: []byte(`{"limits":{"min":-0.0,"max":1e2},"tags":["a","b"],"weight":1}`)},
+		// A number past float64's precision, spelled another way.
+		{ID: itemID(3), Input: []byte(`{"n":1.2345678901234567890123E+22}`)},
+	}
+	again := f.postItems(t, name, equivalent...)
+	if again.Version != 1 || again.Changed != 0 {
+		t.Errorf("equivalent re-post: version %d changed %d, want version 1 and nothing changed", again.Version, again.Changed)
+	}
+	stored, err := f.store.DatasetItem(f.project.ID, name, itemID(1), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored == nil || string(stored.Input) != `{"q":"Καλημέρα κόσμε","lang":"el"}` {
+		t.Errorf("item 1 = %+v, want the body as first sent", stored)
+	}
+
+	// Each of these differs from the stored value in one place, and each is
+	// a change: a letter, a nested number, an array's order, a key, a type.
+	changes := []*DatasetItemInput{
+		{ID: itemID(1), Input: []byte(`{"lang":"el","q":"\u039a\u03b1\u03bb\u03b7\u03bc\u03ad\u03c1\u03b1 \u03ba\u03cc\u03c3\u03bc\u03b5!"}`), ExpectedOutput: []byte(`"Hello, world"`)},
+		{ID: itemID(2), Input: []byte(`{"q":"<b>&</b>"}`), Metadata: []byte(`{"weight":1.5,"tags":["a","b"],"limits":{"max":100,"min":0}}`)},
+		{ID: itemID(2), Input: []byte(`{"q":"<b>&</b>"}`), Metadata: []byte(`{"weight":1.0,"tags":["b","a"],"limits":{"max":100,"min":0}}`)},
+		{ID: itemID(2), Input: []byte(`{"q":"<b>&</b>"}`), Metadata: []byte(`{"weight":1.0,"tags":["a","b"],"limits":{"max":100}}`)},
+		{ID: itemID(3), Input: []byte(`{"n":"12345678901234567890123"}`)},
+		{ID: itemID(3), Input: []byte(`{"n":12345678901234567890124}`)},
+	}
+	version := 1
+	for i, change := range changes {
+		write := f.postItems(t, name, change)
+		version++
+		if write.Version != version || write.Changed != 1 {
+			t.Errorf("change %d: version %d changed %d, want %d and 1", i, write.Version, write.Changed, version)
+			version = write.Version
+		}
 	}
 }
 

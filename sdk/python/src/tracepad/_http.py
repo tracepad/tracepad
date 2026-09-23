@@ -52,7 +52,7 @@ def request(
     if params:
         # A list is a repeated name (`tag=a&tag=b`), the listing's own grammar.
         url += "?" + urllib.parse.urlencode(params, doseq=True)
-    payload = None if body is None else json.dumps(body).encode()
+    payload = None if body is None else _encode(body)
     call = urllib.request.Request(
         url,
         data=payload,
@@ -104,3 +104,17 @@ def max_age(headers: dict[str, str]) -> int:
             except ValueError:
                 return 0
     return 0
+
+
+def _encode(body: Any) -> bytes:
+    """The body as raw UTF-8 JSON, the way every other client sends it: a
+    non-ASCII string costs its bytes, not six per character of escape.
+
+    A string with a lone surrogate has no UTF-8 form; for that body alone the
+    ASCII escape is the only honest spelling, and it is what the store has
+    always accepted.
+    """
+    try:
+        return json.dumps(body, ensure_ascii=False).encode()
+    except UnicodeEncodeError:
+        return json.dumps(body).encode()

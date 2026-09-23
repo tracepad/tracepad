@@ -158,10 +158,13 @@ and never otherwise.
 - A batch is **one tick**, however many items it carries. `version` in the
   response is the dataset's version after the write, `changed` is how many
   items produced a row.
-- A `POST` whose items are all byte-equal to what is stored writes nothing
-  and leaves the version where it was: `"changed": 0`. Equality is on the
-  compacted JSON of `input`, `expected_output` and `metadata` plus the source
-  pair, so key order and whitespace are not changes. A retry after a lost
+- A `POST` whose items all say what is stored already writes nothing and
+  leaves the version where it was: `"changed": 0`. Equality is on the JSON
+  value of `input`, `expected_output` and `metadata` plus the source pair:
+  whitespace, key order, `\u` escapes and the spelling of a number (`1`,
+  `1.0`, `1e0`) are not changes, so the same cases posted from another client
+  are the same cases. An array's order and a value's type (`"1"` against `1`)
+  are. The stored body stays the text first sent. A retry after a lost
   response is therefore idempotent.
 - An **edit** is a `POST` with the same `id` and a different body: a new row,
   one tick. The old row is still readable at every earlier version.
