@@ -36,12 +36,14 @@
 	let rawDays = $state(stored.raw_retention_days ?? 7);
 	let statsMode = $state<Mode>(stored.stats_retention_days === null ? 'forever' : 'days');
 	let statsDays = $state(stored.stats_retention_days ?? 365);
+	let media = $state<'store' | 'placeholder'>(stored.media);
 
 	/** The PATCH body: all three windows, as the endpoint spells them. */
 	const body = $derived<RetentionUpdate>({
 		retention_days: mode === 'forever' ? null : Math.trunc(days),
 		raw_retention_days: rawMode === 'follow' ? null : Math.trunc(rawDays),
-		stats_retention_days: statsMode === 'forever' ? null : Math.trunc(statsDays)
+		stats_retention_days: statsMode === 'forever' ? null : Math.trunc(statsDays),
+		media
 	});
 
 	async function send(confirm?: string): Promise<DryRun | string> {
@@ -135,6 +137,18 @@
 					<span class="text-muted text-sm">days</span>
 				</div>
 			</div>
+		</div>
+
+		<!-- Not a window, but the same question — what this project keeps
+		     (spec 041 #6) — and never destructive: nothing kept is deleted. -->
+		<div>
+			<label for="media-mode" class="text-muted mb-1 block text-xs font-medium">
+				Images and files in payloads
+			</label>
+			<select id="media-mode" bind:value={media} disabled={readOnly} class={field}>
+				<option value="store">Store them, once each</option>
+				<option value="placeholder">Keep a placeholder only</option>
+			</select>
 		</div>
 	</div>
 

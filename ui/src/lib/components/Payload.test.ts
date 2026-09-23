@@ -4,6 +4,10 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Truncation } from '$lib/api/client.svelte';
 import Payload, { isTruncated } from './Payload.svelte';
 
+vi.mock('$lib/api/client.svelte', () => ({
+	api: { media: async () => new Blob(['bytes'], { type: 'image/png' }) }
+}));
+
 // The viewer consumes the truncation contract of spec 004; it never
 // re-implements the budget that produced it.
 
@@ -125,5 +129,18 @@ describe('a trace whose expansion was refused', () => {
 
 		expect(screen.queryByRole('button', { name: /load/i })).not.toBeInTheDocument();
 		expect(screen.getByText('—')).toBeInTheDocument();
+	});
+});
+
+describe('a payload that references media (spec 041 #10)', () => {
+	it('draws the media above the JSON, which still shows the reference as data', () => {
+		URL.createObjectURL = vi.fn(() => 'blob:tracepad/1');
+		URL.revokeObjectURL = vi.fn();
+		const ref = { tracepad_media: 'd'.repeat(64), mime_type: 'image/png', size: 20_000 };
+		const value = [{ role: 'user', content: [{ type: 'image_url', image_url: { url: ref } }] }];
+		render(Payload, { label: 'Input', value, loading: false, onload: vi.fn() });
+		expect(screen.getByRole('list', { name: 'Media' })).toBeInTheDocument();
+		expect(screen.getByRole('button', { name: /Open the full image, image\/png/ })).toBeInTheDocument();
+		expect(screen.getByLabelText('Input').textContent).toContain('tracepad_media');
 	});
 });

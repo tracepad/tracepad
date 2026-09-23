@@ -163,6 +163,8 @@ export type RetentionUpdate = {
 	retention_days?: number | null;
 	raw_retention_days?: number | null;
 	stats_retention_days?: number | null;
+	/** What ingest does with media it takes out of a payload (spec 041 #6). */
+	media?: 'store' | 'placeholder';
 };
 
 /** A request the server answered with something other than success. */
@@ -354,6 +356,17 @@ class Api {
 			`/api/v1/observations/${encodeURIComponent(observationId)}/io`,
 			{ query: { trace_id: traceId }, signal }
 		);
+	}
+
+	/**
+	 * One media body by its hash (spec 041 #7), as a blob the page can show
+	 * without the bytes ever being rendered as a document of this origin. The
+	 * browser may cache it: the address is the content.
+	 */
+	async media(sha: string, signal?: AbortSignal): Promise<Blob> {
+		const response = await this.#fetch(`/api/v1/media/${sha}`, {}, { signal, cache: 'default' });
+		if (response.ok) return await response.blob();
+		throw await refusal(response);
 	}
 
 	// --- datasets, runs and score configs (spec 014, read by spec 016) ------
@@ -930,7 +943,7 @@ class Api {
 				// answer and show the move as not having happened. Every other
 				// endpoint sends no caching headers, so this changes nothing
 				// for them and states what the data plane is: live.
-				cache: 'no-store',
+				cache: options.cache ?? 'no-store',
 				headers: {
 					...projectHeader(path),
 					...(options.body === undefined ? {} : { 'Content-Type': 'application/json' })
@@ -1004,6 +1017,8 @@ type Request = {
 	 */
 	anonymous?: boolean;
 	signal?: AbortSignal;
+	/** Only a content-addressed read overrides `no-store` (spec 041 #7). */
+	cache?: RequestCache;
 };
 
 /** The two page parameters, as query values. */

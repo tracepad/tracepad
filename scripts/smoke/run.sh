@@ -79,6 +79,9 @@ echo "==> exporting with opentelemetry-sdk"
 echo "==> exporting with the langfuse SDK"
 "$python_bin" "$smoke_dir/export_langfuse.py" "$work/langfuse-trace-id"
 
+echo "==> sending a picture through the langfuse SDK's media channel"
+"$python_bin" "$smoke_dir/export_langfuse_media.py" "$work/langfuse-media.json"
+
 echo "==> exporting with the tracepad package"
 "$python_bin" "$smoke_dir/export_tracepad.py" "$work/tracepad-trace-id"
 
@@ -92,7 +95,7 @@ node "$smoke_dir/export_tracepad.mjs" "$work/tracepad-js-trace-id"
 echo "==> checking the database"
 python3 "$smoke_dir/check.py" "$TRACEPAD_DATA_DIR/tracepad.db" \
     "$work/otel-trace-id" "$work/langfuse-trace-id" "$work/tracepad-trace-id" \
-    "$work/tracepad-go-trace-id" "$work/tracepad-js-trace-id"
+    "$work/tracepad-go-trace-id" "$work/tracepad-js-trace-id" "$work/langfuse-media.json"
 
 echo "==> server log"
 cat "$work/server.log"
