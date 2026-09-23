@@ -488,7 +488,7 @@ export function updateTrace(fields: TraceFields): void {
   set(span, attrs.SESSION_ID, fields.sessionId);
   if (fields.tags !== undefined) span.setAttribute(attrs.TRACE_TAGS, attrs.dumps([...fields.tags]));
   if (fields.metadata !== undefined) span.setAttribute(attrs.TRACE_METADATA, attrs.dumps(fields.metadata));
-  set(span, attrs.TRACE_VERSION, fields.version);
+  set(span, attrs.TRACE_VERSION, fields.version || undefined);
 }
 
 /**
@@ -508,8 +508,19 @@ function set(span: Span, key: string, value: string | number | boolean | undefin
   if (value !== undefined) span.setAttribute(key, value);
 }
 
-/** The spellings already warned about: a step opened in a loop says it once. */
+/**
+ * The kinds already warned about, so that a step in a loop says it once
+ * (spec 038 #5). A kind is remembered only once `init` or `spanProcessor`
+ * has said where warnings go, and at most 256 of them: past that a new one
+ * warns every time, which is what a kind computed at run time is.
+ */
 const warnedKinds = new Set<string>();
+
+function firstTime(key: string): boolean {
+  if (warnedKinds.has(key)) return false;
+  if ((initialized || handedOut) && warnedKinds.size < 256) warnedKinds.add(key);
+  return true;
+}
 
 /**
  * Pass a step's kind through, warning when the store will not classify by
@@ -521,8 +532,7 @@ const warnedKinds = new Set<string>();
  */
 function kind(type: string | undefined): string | undefined {
   if (!type) return undefined;
-  if (!(attrs.OBSERVATION_TYPES as readonly string[]).includes(type) && !warnedKinds.has(type)) {
-    warnedKinds.add(type);
+  if (!(attrs.OBSERVATION_TYPES as readonly string[]).includes(type) && firstTime(type)) {
     warn(
       `${JSON.stringify(type)} is not one of the observation types the store ` +
         "classifies by; it will be kept in the observation's metadata",
@@ -664,7 +674,7 @@ export function span<T>(name: string, options: SpanOptions | Callback<Observatio
 /** Warn about a kind given to a shape that names its own: it is not written. */
 function ownKind(options: ObservationOptions | undefined, shape: string): void {
   const type = (options as { type?: unknown } | undefined)?.type;
-  if (type !== undefined && type !== shape) {
+  if (type !== undefined && type !== '' && type !== shape && firstTime(`${shape}:${String(type)}`)) {
     warn(`${shape}() takes no type; its kind is ${JSON.stringify(shape)} and ${JSON.stringify(type)} is ignored`);
   }
 }

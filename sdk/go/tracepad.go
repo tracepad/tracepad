@@ -311,4 +311,7 @@ func reset() {
 		_ = scores.close(context.Background())
 	}
 	forgetPrompts()
+	warnedKinds.Lock()
+	clear(warnedKinds.seen)
+	warnedKinds.Unlock()
 }

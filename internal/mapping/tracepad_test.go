@@ -116,20 +116,24 @@ func TestTracepadTraceVersionRanksBesideLangfuse(t *testing.T) {
 		name  string
 		spans [][]string
 		want  string
+		// The loser of the root span's own chain, which stays visible in its
+		// metadata, as the trace name's does (TestLangfuseWinsOverTracepad):
+		// nothing is dropped (spec 002 #11).
+		loser string
 	}{
-		{"alone", [][]string{{"tracepad.trace.version", "arm-b"}}, "arm-b"},
+		{"alone", [][]string{{"tracepad.trace.version", "arm-b"}}, "arm-b", ""},
 		{"both on one span", [][]string{{
 			"langfuse.version", "written-by-langfuse",
 			"tracepad.trace.version", "written-by-tracepad",
-		}}, "written-by-langfuse"},
+		}}, "written-by-langfuse", "written-by-tracepad"},
 		{"the langfuse key on the root, ours on a later span", [][]string{
 			{"langfuse.version", "written-by-langfuse"},
 			{"tracepad.trace.version", "written-by-tracepad"},
-		}, "written-by-langfuse"},
+		}, "written-by-langfuse", ""},
 		{"ours on the root, the langfuse key on a later span", [][]string{
 			{"tracepad.trace.version", "written-by-tracepad"},
 			{"langfuse.version", "written-by-langfuse"},
-		}, "written-by-langfuse"},
+		}, "written-by-langfuse", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			result := mapping.Map(otlptest.ExportLevels(otlptest.Levels{
@@ -138,11 +142,8 @@ func TestTracepadTraceVersionRanksBesideLangfuse(t *testing.T) {
 			if got := result.Traces[0].Version; got != tc.want {
 				t.Errorf("version = %q, want %q", got, tc.want)
 			}
-			// The loser of one span's chain is still visible, as the trace
-			// name's is (TestLangfuseWinsOverTracepad): nothing is dropped
-			// (spec 002 #11).
-			if tc.name == "both on one span" {
-				if got := result.Observations[0].Metadata["tracepad.trace.version"]; got != "written-by-tracepad" {
+			if tc.loser != "" {
+				if got := result.Observations[0].Metadata["tracepad.trace.version"]; got != tc.loser {
 					t.Errorf("metadata = %v, want the loser preserved", result.Observations[0].Metadata)
 				}
 			}

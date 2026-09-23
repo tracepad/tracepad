@@ -87,9 +87,10 @@ const (
 )
 
 // Priority chains. First non-empty wins and is claimed; a runner-up stays in
-// the observation's metadata, because nothing is dropped (spec 002 #11) — a
-// span carrying two keys of one chain was written by two SDKs, and the one
-// that lost is still what the second of them said.
+// the observation's metadata, because nothing is dropped (spec 002 #11). It
+// may be a second SDK's word for the same fact — `tracepad.*` beside the
+// `langfuse.*` key it mirrors — or a different fact from the same SDK, such as
+// the model that answered beside the one requested.
 var (
 	// trace.name falls back to the root span's name, which is not an
 	// attribute and is handled by the mapper.

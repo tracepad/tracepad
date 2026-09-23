@@ -155,12 +155,40 @@ func TestUpdateOutsideASpanLogsAndWritesNothing(t *testing.T) {
 
 func TestAnUnknownTypeIsWrittenWithAWarning(t *testing.T) {
 	r := setup(t)
-	_, step := Span(context.Background(), "s", WithType("thought"))
-	step.End()
-	if got := str(t, r.attrs(t, "s"), attrObservationType); got != "thought" {
-		t.Errorf("type = %q", got)
+	// Once per spelling, whichever door: a step in a loop says it once
+	// (spec 038 #5).
+	for range 3 {
+		ctx, step := Span(context.Background(), "s", WithType("thought"))
+		Update(ctx, WithType("thought"))
+		step.End()
 	}
-	if !strings.Contains(r.logs.String(), "not one of the observation types") {
+	for _, s := range r.spans() {
+		if got := str(t, attrsOf(s), attrObservationType); got != "thought" {
+			t.Errorf("type = %q", got)
+		}
+	}
+	if n := strings.Count(r.logs.String(), "not one of the observation types"); n != 1 {
+		t.Errorf("warnings = %d, want 1: %q", n, r.logs.String())
+	}
+}
+
+// An empty kind is no kind: forwarding an optional one keeps the shape's own
+// (spec 038 #8), as the other two packages do.
+func TestAnEmptyTypeKeepsTheDefault(t *testing.T) {
+	r := setup(t)
+	ctx := context.Background()
+	_, step := Span(ctx, "plain", WithType(""))
+	step.End()
+	_, miss := Event(ctx, "cache.miss", WithType(""))
+	miss.End()
+	_, call := Generation(ctx, "chat", WithType(""))
+	call.End(Result{})
+	for name, want := range map[string]string{"plain": "span", "cache.miss": "event", "chat": "generation"} {
+		if got := str(t, r.attrs(t, name), attrObservationType); got != want {
+			t.Errorf("%s: type = %q, want %q", name, got, want)
+		}
+	}
+	if r.logs.Len() != 0 {
 		t.Errorf("logs = %q", r.logs.String())
 	}
 }

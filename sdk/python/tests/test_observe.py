@@ -198,6 +198,24 @@ def test_an_unknown_kind_warns_and_is_still_written(
     assert kinds == ["retreiver"] * 3 + ["retriver"] * 2
 
 
+def test_a_kind_is_remembered_only_after_init(caplog: pytest.LogCaptureFixture) -> None:
+    # Before `init` the warning is said again after it (spec 038 #5).
+    with caplog.at_level(logging.WARNING, logger="tracepad"):
+        with tracepad.span("early", type="retreiver"):
+            pass
+        with tracepad.span("early", type="retreiver"):
+            pass
+    assert caplog.text.count("is not one of the observation types") == 2
+
+
+def test_an_empty_version_is_no_version(spans: Any) -> None:
+    # As Go's `UpdateTrace` skips an empty string.
+    with tracepad.span("handler"):
+        tracepad.update_trace(version="")
+
+    assert attrs.TRACE_VERSION not in spans.attributes("handler")
+
+
 def test_an_empty_kind_is_the_default(spans: Any, caplog: pytest.LogCaptureFixture) -> None:
     # As Go's `WithType("")`, at every door: forwarding an optional kind opens
     # a plain step, and `update` leaves the kind where it was.

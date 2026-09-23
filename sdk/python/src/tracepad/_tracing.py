@@ -352,7 +352,7 @@ def update_trace(
         _set(span, attrs.TRACE_TAGS, attrs.dumps(list(tags)))
     if metadata is not None:
         _set(span, attrs.TRACE_METADATA, attrs.dumps(metadata))
-    _set(span, attrs.TRACE_VERSION, version)
+    _set(span, attrs.TRACE_VERSION, version or None)
 
 
 def _observation_of(span: otel.Span) -> Observation:
@@ -373,7 +373,10 @@ def _set(span: otel.Span, key: str, value: Any) -> None:
         span.set_attribute(key, value)
 
 
-#: The spellings already warned about: a step opened in a loop says it once.
+#: The spellings already warned about, so that a step in a loop says it once
+#: (spec 038 #5). A spelling is remembered only after `init`, and at most 256
+#: of them: past that a new one warns every time, which is what a kind
+#: computed at run time is.
 _warned_kinds: set[str] = set()
 
 
@@ -389,7 +392,8 @@ def _kind(type: str | None) -> str | None:
     if not type:
         return None
     if type not in attrs.OBSERVATION_TYPES and type not in _warned_kinds:
-        _warned_kinds.add(type)
+        if _initialized and len(_warned_kinds) < 256:
+            _warned_kinds.add(type)
         logger.warning(
             "tracepad: %r is not one of the observation types the store "
             "classifies by; it will be kept in the observation's metadata", type

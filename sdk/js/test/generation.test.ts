@@ -113,6 +113,19 @@ describe('span, event and generation', () => {
     ]);
   });
 
+  test('a kind is remembered only once a logger could have been named', () => {
+    // Before `init`, the warning goes to the default sink and is said again
+    // after it, where the application's logger hears it (spec 038 #5).
+    const early = tracepad.observe(function early() {}, { type: 'retreiver' as never });
+    early();
+    early();
+    expect(warnings).toHaveLength(2);
+    spans();
+    early();
+    early();
+    expect(warnings).toHaveLength(3);
+  });
+
   test('an empty kind is the default, at every door', () => {
     // As Go's `WithType("")`: forwarding an optional kind opens a plain step,
     // and `update` leaves the kind where it was.
@@ -158,9 +171,13 @@ describe('span, event and generation', () => {
     // the shape's own kind is nothing to say.
     const options: tracepad.SpanOptions = { type: 'tool' };
     tracepad.event('cache.miss', options, () => undefined);
+    tracepad.event('cache.miss', options, () => undefined); // once, as any kind warning
     tracepad.event('cache.hit', { type: 'event' } as tracepad.SpanOptions, () => undefined);
+    tracepad.event('cache.hit', { type: '' } as never, () => undefined);
     expect(seen.attributes('chat')[attrs.OBSERVATION_TYPE]).toBe('generation');
-    expect(seen.attributes('cache.miss')[attrs.OBSERVATION_TYPE]).toBe('event');
+    expect(seen.all().filter((s) => s.name !== 'chat').map((s) => s.attributes[attrs.OBSERVATION_TYPE])).toEqual([
+      'event', 'event', 'event', 'event',
+    ]);
     expect(warnings).toEqual([
       'tracepad: generation() takes no type; its kind is "generation" and "tool" is ignored',
       'tracepad: event() takes no type; its kind is "event" and "tool" is ignored',
@@ -199,6 +216,12 @@ describe('span, event and generation', () => {
       [attrs.OBSERVATION_LEVEL]: 'WARNING',
       [attrs.OBSERVATION_STATUS_MESSAGE]: 'retried once',
     });
+  });
+
+  test('an empty version is no version, as in Go', () => {
+    const seen = spans();
+    tracepad.span('handler', () => tracepad.updateTrace({ version: '' }));
+    expect(seen.attributes('handler')[attrs.TRACE_VERSION]).toBeUndefined();
   });
 
   test('outside a span both warn and write nothing', () => {
