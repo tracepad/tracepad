@@ -1,6 +1,6 @@
 # Spec 039 — The packages with tracing off
 
-**Status:** 🟡 DRAFT
+**Status:** ✅ SHIPPED
 **Sprint:** September 2026
 
 > An application traces in production and not in its tests, or not on a
