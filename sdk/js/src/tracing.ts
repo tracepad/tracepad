@@ -596,8 +596,14 @@ function costly(span: Span, fields: Costly): void {
   if (!span.isRecording()) return;
   if (fields.input !== undefined) span.setAttribute(attrs.INPUT, attrs.dumps(fields.input));
   if (fields.output !== undefined) span.setAttribute(attrs.OUTPUT, attrs.dumps(fields.output));
-  for (const [key, value] of Object.entries(fields.metadata ?? {})) {
-    if (value != null) span.setAttribute(`${attrs.OBSERVATION_METADATA}.${key}`, attrs.scalar(value));
+  const { metadata } = fields;
+  if (typeof metadata !== 'object' || metadata === null || Array.isArray(metadata)) {
+    // Not an object after all — a string, a list: one attribute, as it came.
+    if (metadata !== undefined) span.setAttribute(attrs.OBSERVATION_METADATA, attrs.dumps(metadata));
+  } else {
+    for (const [key, value] of Object.entries(metadata)) {
+      if (value != null) span.setAttribute(`${attrs.OBSERVATION_METADATA}.${key}`, attrs.scalar(value));
+    }
   }
   for (const [name, value] of Object.entries(fields.parameters ?? {})) {
     span.setAttribute(attrs.REQUEST_PREFIX + name, attrs.scalar(value));

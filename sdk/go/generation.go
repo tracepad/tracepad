@@ -2,10 +2,12 @@ package tracepad
 
 import (
 	"context"
+	"encoding/json"
 	"maps"
 	"math"
 	"reflect"
 	"slices"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -112,10 +114,12 @@ func (g *Call) End(result Result) {
 	g.Observation.End()
 }
 
-// scalar renders a model parameter, keeping the types OTLP has of its own:
-// every integer width is an int, every float width a double (go-openai's
-// temperature is a float32), a bool a bool, a string a string. Anything else
-// is JSON.
+// scalar renders a model parameter or a metadata entry, keeping the types
+// OTLP has of its own: every integer width is an int, every float width a
+// double (go-openai's temperature is a float32), a bool a bool, a string a
+// string, a json.Number the int or the double it spells. Anything else is
+// JSON — and a value that encodes as a JSON string, a time.Time, is that
+// string without its quotes (found in review of PR #83).
 func scalar(key string, value any) attribute.KeyValue {
 	v := reflect.ValueOf(value)
 	switch v.Kind() {
@@ -130,7 +134,20 @@ func scalar(key string, value any) attribute.KeyValue {
 	case reflect.Float32, reflect.Float64:
 		return attribute.Float64(key, v.Float())
 	case reflect.String:
+		if number, ok := value.(json.Number); ok {
+			if n, err := number.Int64(); err == nil {
+				return attribute.Int64(key, n)
+			}
+			if f, err := number.Float64(); err == nil {
+				return attribute.Float64(key, f)
+			}
+		}
 		return attribute.String(key, v.String())
 	}
-	return attribute.String(key, dumps(value))
+	encoded := dumps(value)
+	var text string
+	if strings.HasPrefix(encoded, `"`) && json.Unmarshal([]byte(encoded), &text) == nil {
+		return attribute.String(key, text)
+	}
+	return attribute.String(key, encoded)
 }

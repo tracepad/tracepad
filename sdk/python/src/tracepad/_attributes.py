@@ -96,10 +96,24 @@ def dumps(value: Any) -> str:
 
 
 def scalar(value: Any) -> Any:
-    """Render a model parameter, keeping the types OTLP has of its own."""
-    if isinstance(value, (bool, int, float, str)):
+    """Render a model parameter or a metadata entry, keeping the types OTLP has
+    of its own.
+
+    An `int` outside OTLP's 64 bits is JSON, since protobuf refuses it at
+    export and the whole batch with it; and a value that encodes as a JSON
+    string — a `datetime`, a `UUID` through `repr` — is that string, not the
+    string with its quotes (found in review of PR #83).
+    """
+    fits = isinstance(value, int) and -(2**63) <= value < 2**63
+    if fits or isinstance(value, (float, str)):
         return value
-    return dumps(value)
+    encoded = dumps(value)
+    if encoded.startswith('"'):
+        try:
+            return str(json.loads(encoded))
+        except ValueError:
+            pass
+    return encoded
 
 
 def rfc3339(nanoseconds: int) -> str:

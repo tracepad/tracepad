@@ -156,7 +156,7 @@ sdk-go-unit: ## The Go package's vet and unit tests alone (part of the gate)
 # The budget spec 033 #11 set, raised for the harness (spec 033 #17), for
 # trace deletion (spec 036 #8), for `tracepadtest` (spec 040 #13) and for the
 # cost and bounds of spec 042.
-SDK_GO_BUDGET := 2450
+SDK_GO_BUDGET := 2475
 
 sdk-go-lines: ## Report the Go package's application lines against its budget
 	scripts/sdk-go-lines.sh $(SDK_GO_BUDGET)

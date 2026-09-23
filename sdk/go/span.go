@@ -6,6 +6,7 @@ import (
 	"maps"
 	"reflect"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -257,16 +258,31 @@ func metadataAttributes(metadata any) []attribute.KeyValue {
 		for _, key := range v.MapKeys() {
 			entries[key.String()] = v.MapIndex(key).Interface()
 		}
-	} else if err := json.Unmarshal([]byte(dumps(metadata)), &entries); err != nil {
-		return []attribute.KeyValue{attribute.String(attrObservationMetadata, dumps(metadata))}
+	} else {
+		// Numbers as they were spelled, so that an int64 id past 2^53 is not
+		// rounded through a float64 (found in review of PR #83).
+		decoder := json.NewDecoder(strings.NewReader(dumps(metadata)))
+		decoder.UseNumber()
+		if err := decoder.Decode(&entries); err != nil {
+			return []attribute.KeyValue{attribute.String(attrObservationMetadata, dumps(metadata))}
+		}
 	}
 	var attrs []attribute.KeyValue
 	for _, key := range slices.Sorted(maps.Keys(entries)) {
-		if value := entries[key]; value != nil {
+		if value := entries[key]; !isNil(value) {
 			attrs = append(attrs, scalar(attrObservationMetadata+"."+key, value))
 		}
 	}
 	return attrs
+}
+
+// isNil is a value that is nothing: nil itself, or a nil pointer, map,
+// slice or interface inside one — a *string left unset writes nothing, as
+// nil does, rather than the text "null".
+func isNil(value any) bool {
+	v := reflect.ValueOf(value)
+	nillable := slices.Contains([]reflect.Kind{reflect.Pointer, reflect.Map, reflect.Slice, reflect.Interface}, v.Kind())
+	return !v.IsValid() || nillable && v.IsNil()
 }
 
 // Span opens a step of the trace under the context's current span and

@@ -316,9 +316,47 @@ func TestMetadataMergesByKey(t *testing.T) {
 		t.Errorf("step metadata = %v, want %v", got, want)
 	}
 	if got, want := metadata("typed"), map[string]attribute.Value{
-		"tracepad.observation.metadata.attempt": attribute.Float64Value(2),
+		"tracepad.observation.metadata.attempt": attribute.Int64Value(2),
 		"tracepad.observation.metadata.region":  attribute.StringValue("eu"),
 	}; !reflect.DeepEqual(got, want) {
 		t.Errorf("typed metadata = %v, want %v", got, want)
+	}
+}
+
+// Found in review of PR #83.
+func TestMetadataValuesKeepTheirTypeAndNothingIsNothing(t *testing.T) {
+	rec := tracepadtest.Capture(t)
+	var unset *string
+	_, step := tracepad.Span(context.Background(), "step", tracepad.WithMetadata(map[string]any{
+		"reason": unset, // a typed nil: nothing, not "null"
+		"at":     time.Date(2026, 9, 23, 10, 0, 0, 0, time.UTC),
+	}))
+	step.End()
+	_, typed := tracepad.Span(context.Background(), "typed", tracepad.WithMetadata(struct {
+		TenantID int64 `json:"tenant_id"`
+	}{9007199254740993}))
+	typed.End()
+
+	got := rec.Attributes(t, "step")
+	if _, ok := got["tracepad.observation.metadata.reason"]; ok {
+		t.Errorf("a nil *string was written: %v", got["tracepad.observation.metadata.reason"])
+	}
+	if at := got["tracepad.observation.metadata.at"].AsString(); at != "2026-09-23T10:00:00Z" {
+		t.Errorf("at = %q, want the time without its quotes", at)
+	}
+	if id := rec.Attributes(t, "typed")["tracepad.observation.metadata.tenant_id"]; id != attribute.Int64Value(9007199254740993) {
+		t.Errorf("tenant_id = %v, want the exact integer", id.Emit())
+	}
+}
+
+func TestANegativeExportTimeoutIsIgnoredWithAWarning(t *testing.T) {
+	tracepadtest.Reset(t)
+	out := logs(t)
+	if _, err := tracepad.Init(context.Background(), tracepad.WithHost("http://tracepad.test:4318"), tracepad.WithKey("tp-sk-test"),
+		tracepad.WithExportTimeout(-time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "WithExportTimeout is not a positive duration") {
+		t.Errorf("logged:\n%s", out)
 	}
 }

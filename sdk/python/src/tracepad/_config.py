@@ -64,18 +64,18 @@ def resolve(
 def resolve_timeout(argument: float | None) -> float | None:
     """The argument, then TRACEPAD_EXPORT_TIMEOUT, then five seconds — or `None`,
     which leaves the exporter to OpenTelemetry's own variable when one is set."""
-    if argument is not None:
-        return argument
-    raw = os.environ.get("TRACEPAD_EXPORT_TIMEOUT", "").strip()
-    if raw:
+    for name, given in (("export_timeout", argument),
+                        ("TRACEPAD_EXPORT_TIMEOUT", os.environ.get("TRACEPAD_EXPORT_TIMEOUT"))):
+        if given is None or (isinstance(given, str) and not given.strip()):
+            continue
         try:
-            seconds = float(raw)
-        except ValueError:
+            seconds = float(given)
+        except (TypeError, ValueError):
             seconds = 0.0
         if 0 < seconds < float("inf"):
             return seconds
-        logger.warning("tracepad: TRACEPAD_EXPORT_TIMEOUT=%r is not a number of seconds; "
-                       "it is ignored", raw)
+        logger.warning("tracepad: %s=%r is not a positive number of seconds; it is ignored",
+                       name, given)
     if any(os.environ.get(f"OTEL_EXPORTER_OTLP{kind}_TIMEOUT") for kind in ("_TRACES", "")):
         return None
     return EXPORT_TIMEOUT

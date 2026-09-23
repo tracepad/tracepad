@@ -88,12 +88,19 @@ function replacer(this: unknown, _key: string, value: unknown): unknown {
   return value;
 }
 
-/** Render a model parameter, keeping the types OTLP has of its own. */
+/** Render a model parameter or a metadata entry, keeping the types OTLP has
+ * of its own. A value that encodes as a JSON string — a `Date` — is that
+ * string, not the string with its quotes (found in review of PR #83). */
 export function scalar(value: unknown): string | number | boolean {
   if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
     return value;
   }
-  return dumps(value);
+  const encoded = dumps(value);
+  try {
+    return encoded.startsWith('"') ? (JSON.parse(encoded) as string) : encoded;
+  } catch {
+    return encoded; // `String()` of a value the encoder refused, and not JSON
+  }
 }
 
 /** An instant as the mapper reads it (`docs/ingest.md`, time to first token). */

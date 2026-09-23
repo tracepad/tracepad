@@ -53,9 +53,9 @@ OpenTelemetry's default is ten seconds, retries inside them — long for a
 request thread that flushes before it answers — so the package's is five.
 With neither the argument nor `TRACEPAD_EXPORT_TIMEOUT`,
 `OTEL_EXPORTER_OTLP_TRACES_TIMEOUT` keeps working underneath when it is set.
-A `TRACEPAD_EXPORT_TIMEOUT` that is not a number of seconds is ignored with a
-warning, and so is the argument under `export=False`, which adds no exporter
-to bound.
+An argument or a `TRACEPAD_EXPORT_TIMEOUT` that is not a positive number of
+seconds is ignored with a warning, and so is the argument under
+`export=False`, which adds no exporter to bound.
 
 **`init` adapts to the provider it finds.** If the application has already set
 a global `TracerProvider` — FastAPI instrumentation, `opentelemetry-instrument`,
@@ -151,7 +151,9 @@ them is serialised at all, in the opening call, in `update`, in `end` and in
 is, anything else as JSON — so `update(metadata={"flag": 1})` adds `flag` and
 replaces only it, and the keys the step opened with stay. A key given as
 `None` writes nothing; it does not delete the key, since an attribute cannot be
-unset once written.
+unset once written. Metadata that is no mapping is written whole under
+`tracepad.observation.metadata`. A string whose text is a JSON object or array
+is stored as that structure, as every per-key metadata is read.
 
 `span`, `event` and `generation` hand out an `Observation` carrying
 `trace_id`, `span_id`, `update(...)` and the OTel span itself as `.span`. With

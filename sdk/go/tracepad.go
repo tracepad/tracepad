@@ -251,6 +251,9 @@ func exportTimeout(given time.Duration) time.Duration {
 	if given > 0 {
 		return given
 	}
+	if given < 0 {
+		def.log().Warn("tracepad.Init: WithExportTimeout is not a positive duration; it is ignored", "value", given)
+	}
 	if raw := strings.TrimSpace(os.Getenv("TRACEPAD_EXPORT_TIMEOUT")); raw != "" {
 		if seconds, err := strconv.ParseFloat(raw, 64); err == nil && seconds > 0 && seconds < math.MaxInt64/float64(time.Second) {
 			return time.Duration(seconds * float64(time.Second))

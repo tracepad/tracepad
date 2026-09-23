@@ -205,3 +205,37 @@ test('metadata merges by key: update adds keys and replaces only its own (Decisi
     [`${prefix}.b`]: '{"nested":true}',
   });
 });
+
+describe('found in review of PR #83', () => {
+  const timeout = () => {
+    const [ours] = (registered() as unknown as { _activeSpanProcessor: { _spanProcessors: { exporting: { _exporter: { _delegate: { _timeout: number } } } }[] } })._activeSpanProcessor._spanProcessors;
+    return ours!.exporting._exporter._delegate._timeout;
+  };
+
+  test.each([0, -1, Number.NaN, 3e9])('exportTimeoutMillis %s is ignored with a warning, and init does not throw', (given) => {
+    tracepad.init({ host: HOST, key: KEY, exportTimeoutMillis: given });
+    expect(timeout()).toBe(5000);
+    expect(warnings).toEqual([`tracepad: exportTimeoutMillis=${String(given)} is not a positive number of milliseconds; it is ignored`]);
+  });
+
+  test('a TRACEPAD_EXPORT_TIMEOUT past what a timer holds is ignored with a warning', () => {
+    process.env.TRACEPAD_EXPORT_TIMEOUT = '3000000';
+    onTestFinished(() => void delete process.env.TRACEPAD_EXPORT_TIMEOUT);
+    tracepad.init({ host: HOST, key: KEY });
+    expect(timeout()).toBe(5000);
+    expect(warnings).toEqual([expect.stringContaining('TRACEPAD_EXPORT_TIMEOUT="3000000" is not a number of seconds')]);
+  });
+
+  test('a metadata value that encodes as a JSON string is that string, without its quotes', () => {
+    const captured = spans();
+    tracepad.span('step', { metadata: { at: new Date(Date.UTC(2026, 8, 23, 10)) } }, () => undefined);
+    expect(captured.attributes('step')[`${attrs.OBSERVATION_METADATA}.at`]).toBe('2026-09-23T10:00:00.000Z');
+  });
+
+  test.each([['a', 'b'], 'nightly'])('metadata that is no object is written whole: %j', (given) => {
+    const captured = spans();
+    tracepad.span('step', { metadata: given as unknown as Record<string, unknown> }, () => undefined);
+    const metadata = Object.entries(captured.attributes('step')).filter(([key]) => key.startsWith(attrs.OBSERVATION_METADATA));
+    expect(Object.fromEntries(metadata)).toEqual({ [attrs.OBSERVATION_METADATA]: attrs.dumps(given) });
+  });
+});

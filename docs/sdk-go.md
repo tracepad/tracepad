@@ -58,9 +58,9 @@ is five, set both as the exporter's timeout and as the batch processor's
 export timeout, which is what bounds the retries. With neither the option nor
 `TRACEPAD_EXPORT_TIMEOUT`, `OTEL_EXPORTER_OTLP_TRACES_TIMEOUT` keeps working
 underneath when it is set, with the OTel SDK's meaning: the bound of one
-attempt. A `TRACEPAD_EXPORT_TIMEOUT` that is not a number of seconds is
-ignored with a warning, and so is the option under `WithExport(false)`, which
-adds no exporter to bound.
+attempt. A `TRACEPAD_EXPORT_TIMEOUT` that is not a number of seconds, or a
+negative `WithExportTimeout`, is ignored with a warning, and so is the option
+under `WithExport(false)`, which adds no exporter to bound.
 
 **`Init` adapts to the provider it finds.** If the application has already set
 a global `TracerProvider` — `otelhttp`, `otelgrpc`, another SDK — the call
@@ -130,9 +130,12 @@ in `End` alike.
 `tracepad.observation.metadata.<key>` — a string, a number or a boolean as it
 is, anything else as JSON — so `Update(ctx, WithMetadata(map[string]any{"flag": 1}))`
 adds `flag` and replaces only it, and the keys the step opened with stay. A
-key with a `nil` value writes nothing; it does not delete the key, since an
-attribute cannot be unset once written. Metadata that encodes as no JSON
-object at all is written whole under `tracepad.observation.metadata`.
+key with a `nil` value — a nil pointer, map or slice as well — writes
+nothing; it does not delete the key, since an attribute cannot be unset once
+written. A struct's numbers keep the integers they are. Metadata that encodes
+as no JSON object at all is written whole under
+`tracepad.observation.metadata`. A string whose text is a JSON object or array
+is stored as that structure, as every per-key metadata is read.
 
 There is no function wrapper like Python's `@observe`: Go has no decorators
 and no way to capture a function's arguments by name, so the input is what

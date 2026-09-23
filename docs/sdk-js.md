@@ -52,9 +52,10 @@ a log file an hour later is the bug report that rule prevents.
 retries inside them — long for a request that flushes before it answers — so
 the package's is five. With neither the option nor `TRACEPAD_EXPORT_TIMEOUT`,
 `OTEL_EXPORTER_OTLP_TRACES_TIMEOUT` keeps working underneath when it is set. A
-`TRACEPAD_EXPORT_TIMEOUT` that is not a number of seconds is ignored with a
-warning, and so is the option under `export: false`, which adds no exporter to
-bound.
+`TRACEPAD_EXPORT_TIMEOUT` that is not a number of seconds, or an option that is
+not a positive number of milliseconds — both at most what a Node timer holds,
+2^31 − 1 — is ignored with a warning rather than thrown from `init`, and so is
+the option under `export: false`, which adds no exporter to bound.
 
 **Not calling `init` is how tracing is turned off** — in tests, on a machine
 with no key — as long as the process has no OpenTelemetry provider of its own:
@@ -201,7 +202,10 @@ span, none of them is serialised at all, in the opening call, in `update`, in
 is, anything else as JSON — so `update({ metadata: { flag: 1 } })` adds `flag`
 and replaces only it, and the keys the step opened with stay. A key given as
 `undefined` or `null` writes nothing; it does not delete the key, since an
-attribute cannot be unset once written.
+attribute cannot be unset once written. Metadata that is no object — a
+string, an array — is written whole under `tracepad.observation.metadata`. A
+string whose text is a JSON object or array is stored as that structure, as
+every per-key metadata is read.
 
 The span ends when the callback returns, or when the promise it returned
 settles. `span`, `event` and `generation` hand out an `Observation` carrying

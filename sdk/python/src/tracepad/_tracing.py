@@ -34,6 +34,12 @@ from ._log import logger
 from ._scores import flush_scores
 
 _initialized = False
+# The export a `flush` that ran out of time left running: the next one waits
+# for it rather than starting another behind the processor's export lock,
+# so a store that is away costs one thread, not one per request. Kept with
+# the flush it runs: a provider reset since is not waited for.
+_flushing: tuple[Any, threading.Thread] | None = None
+_flushing_lock = threading.Lock()
 # The provider `init` built, if it built one: `tracepad.testing.reset()` shuts
 # it down, so that its batching exporter does not outlive the test.
 _built: Any = None
@@ -181,8 +187,13 @@ def flush(timeout: float = 10.0) -> None:
             "not flushed and are left to their exporter's own schedule", timeout
         )
         return
-    exporting = threading.Thread(target=force, args=(int(left * 1000),), daemon=True)
-    exporting.start()
+    global _flushing
+    with _flushing_lock:
+        if _flushing is None or _flushing[0] != force or not _flushing[1].is_alive():
+            _flushing = (force, threading.Thread(target=force, args=(int(left * 1000),),
+                                                 daemon=True))
+            _flushing[1].start()
+        exporting = _flushing[1]
     exporting.join(left)
     if exporting.is_alive():
         logger.warning(

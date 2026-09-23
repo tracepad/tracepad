@@ -5,8 +5,10 @@ from __future__ import annotations
 import logging
 import threading
 import time
+import uuid
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from typing import Any
 
 import pytest
@@ -252,3 +254,61 @@ def test_update_adds_metadata_keys_and_replaces_only_its_own(spans: testing.Capt
         f"{prefix}.keep": "x",  # None writes nothing, and deletes nothing
         f"{prefix}.b": '{"nested":true}',
     }
+
+
+# --- found in review of PR #83 ---------------------------------------------------
+
+
+def test_flushes_that_run_out_of_time_share_one_export(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A request that flushes in its `finally`, against a store that is away:
+    # one export left running, not one thread per request.
+    tracepad.init(HOST, KEY, export=False)
+    released = threading.Event()
+    calls: list[int] = []
+
+    def hanging(timeout_millis: int) -> bool:
+        calls.append(timeout_millis)
+        released.wait(5)
+        return True
+
+    monkeypatch.setattr(_tracing._built, "force_flush", hanging)
+    try:
+        for _ in range(3):
+            tracepad.flush(0.05)
+        assert len(calls) == 1
+    finally:
+        released.set()
+
+
+@pytest.mark.parametrize("given", [0, -1, float("nan")])
+def test_an_argument_that_is_not_seconds_is_ignored_with_a_warning(
+    given: float, caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level(logging.WARNING, logger="tracepad"):
+        tracepad.init(HOST, KEY, export_timeout=given)
+    assert exporter_timeout() == 5.0
+    assert "export_timeout=" in caplog.text
+
+
+def test_metadata_values_keep_their_type_or_become_plain_strings(spans: testing.Capture) -> None:
+    moment = datetime(2026, 9, 23, 10, 0, tzinfo=timezone.utc)
+    ident = uuid.UUID(int=1)
+    with tracepad.span("step", metadata={"big": 2**64, "at": moment, "id": ident, "n": -(2**63)}):
+        pass
+
+    attributes = spans.attributes("step")
+    prefix = attrs.OBSERVATION_METADATA
+    assert attributes[f"{prefix}.big"] == str(2**64)  # past OTLP's 64 bits: JSON, not a lost batch
+    assert attributes[f"{prefix}.at"] == repr(moment)  # the string, without its quotes
+    assert attributes[f"{prefix}.id"] == repr(ident)
+    assert attributes[f"{prefix}.n"] == -(2**63)
+
+
+@pytest.mark.parametrize("given", [["a", "b"], "nightly"])
+def test_metadata_that_is_no_mapping_is_written_whole(given: Any, spans: testing.Capture) -> None:
+    with tracepad.span("step", metadata=given):
+        pass
+
+    metadata = {k: v for k, v in spans.attributes("step").items()
+                if k.startswith(attrs.OBSERVATION_METADATA)}
+    assert metadata == {attrs.OBSERVATION_METADATA: attrs.dumps(given)}

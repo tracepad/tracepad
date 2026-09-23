@@ -56,11 +56,17 @@ export const EXPORT_TIMEOUT_MILLIS = 5000;
 /** The option, then TRACEPAD_EXPORT_TIMEOUT (seconds), then five seconds — or
  * `undefined`, which leaves the exporter to OpenTelemetry's own variable when one is set. */
 export function exportTimeout(millis: number | undefined): number | undefined {
-  if (millis !== undefined) return millis;
+  // Checked here rather than left to the exporter, which throws out of `init`
+  // on a timeout it refuses — and past 2^31 - 1 a timer fires at once, so
+  // every export would time out (found in review of PR #83).
+  const valid = (ms: number) => Number.isFinite(ms) && ms > 0 && ms <= 2 ** 31 - 1;
+  if (millis !== undefined) {
+    if (valid(millis)) return millis;
+    warn(`exportTimeoutMillis=${String(millis)} is not a positive number of milliseconds; it is ignored`);
+  }
   const raw = (process.env.TRACEPAD_EXPORT_TIMEOUT ?? '').trim();
   if (raw) {
-    const seconds = Number(raw);
-    if (Number.isFinite(seconds) && seconds > 0) return seconds * 1000;
+    if (valid(Number(raw) * 1000)) return Number(raw) * 1000;
     warn(`TRACEPAD_EXPORT_TIMEOUT=${JSON.stringify(raw)} is not a number of seconds; it is ignored`);
   }
   if (process.env.OTEL_EXPORTER_OTLP_TRACES_TIMEOUT || process.env.OTEL_EXPORTER_OTLP_TIMEOUT) return undefined;
