@@ -93,6 +93,15 @@ def init(
     _initialized = True
 
 
+def tracing_off() -> bool:
+    """No `init` and no working provider of the application's own: every span is the
+    API's no-op — an invalid context, or a propagated caller's echoed (spec 039 #7).
+    `OTEL_SDK_DISABLED` makes the SDK's own provider hand out no-op tracers."""
+    no_op = (otel.ProxyTracerProvider, otel.NoOpTracerProvider)
+    disabled = os.environ.get("OTEL_SDK_DISABLED", "").strip().lower() == "true"
+    return not _initialized and (disabled or isinstance(otel.get_tracer_provider(), no_op))
+
+
 def _resource(config: Config) -> Any:
     from opentelemetry.sdk.resources import Resource
 
@@ -156,18 +165,23 @@ class Observation:
 
     def __init__(self, span: otel.Span) -> None:
         self.span = span
+        # Whether a trace is behind it, decided at open (spec 039 #3, #7).
+        self._traced = span.get_span_context().is_valid and not tracing_off()
         self._ended = False
         # What the application named itself, which the capture of Decision 4
         # must not overwrite afterwards.
         self._explicit: set[str] = set()
 
     @property
-    def trace_id(self) -> str:
-        return format(self.span.get_span_context().trace_id, "032x")
+    def trace_id(self) -> str | None:
+        """The trace's 32-hex id, or `None` with no trace behind the span —
+        tracing off, as an `Attempt` has none before it runs (spec 039 #3)."""
+        return format(self.span.get_span_context().trace_id, "032x") if self._traced else None
 
     @property
-    def span_id(self) -> str:
-        return format(self.span.get_span_context().span_id, "016x")
+    def span_id(self) -> str | None:
+        """The span's 16-hex id, or `None` as `trace_id`."""
+        return format(self.span.get_span_context().span_id, "016x") if self._traced else None
 
     def _finish(self, end_time: int | None = None) -> None:
         """End the span once, with what it has: how a block leaves."""

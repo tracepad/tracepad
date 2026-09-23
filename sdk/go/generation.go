@@ -78,10 +78,8 @@ func Generation(ctx context.Context, name string, opts ...GenerationOption) (con
 		attrs = append(attrs, attribute.String(attrPromptName, f.prompt.Name),
 			attribute.Int(attrPromptVersion, f.prompt.Version))
 	}
-	ctx, o := open(ctx, name, &f, trace.WithAttributes(attrs...))
 	g := &Call{}
-	g.span = o.span
-	return ctx, g
+	return open(ctx, name, &f, &g.Observation, trace.WithAttributes(attrs...)), g
 }
 
 // FirstToken stamps the moment the first token came back — where the TTFT

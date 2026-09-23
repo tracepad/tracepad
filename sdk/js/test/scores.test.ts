@@ -1,10 +1,11 @@
 /** Scores: the queue, the timer and the batch (spec 032 #6). */
 
-import { trace } from '@opentelemetry/api';
-import type { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
-import { describe, expect, test, vi } from 'vitest';
+import { DiagLogLevel, ROOT_CONTEXT, context, diag, trace } from '@opentelemetry/api';
+import { AlwaysOffSampler, NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
+import { describe, expect, onTestFinished, test, vi } from 'vitest';
 
 import * as tracepad from '../src/index.js';
+import { setLogger } from '../src/log.js';
 import { ScoreQueue, reset } from '../src/scores.js';
 import { HOST, KEY, fakeFetch, fresh, registered, spans, warnings } from './helpers.js';
 
@@ -34,7 +35,7 @@ describe('the target', () => {
     const { sent, queue } = recording();
     let ids: [string, string] | undefined;
     tracepad.span('step', (step) => {
-      ids = [step.traceId, step.spanId];
+      ids = [step.traceId!, step.spanId!];
       tracepad.score('helpful', 0.9, { comment: 'cited the source' });
       tracepad.score('grounded', 1, { dataType: 'boolean', observation: true });
       tracepad.score('verdict', { stringValue: 'pass', dataType: 'categorical', id: 'v-1' });
@@ -56,6 +57,118 @@ describe('the target', () => {
     await queue.flush(1000);
     expect(sent).toEqual([[{ name: 'helpful', trace_id: 'a'.repeat(32), observation_id: 'b'.repeat(16), value: 1 }]]);
     expect(trace.getActiveSpan()).toBeUndefined();
+  });
+});
+
+describe('tracing off: no init in this process (spec 039)', () => {
+  /** OTel's diagnostic logger at debug, where the line goes: ours exists only after init. */
+  function diagnostics(): () => string[] {
+    const lines: string[] = [];
+    const drop = () => undefined;
+    diag.setLogger({ debug: (message) => lines.push(message), verbose: drop, info: drop, warn: drop, error: drop }, DiagLogLevel.DEBUG);
+    onTestFinished(() => diag.disable());
+    return () => lines.filter((line) => line.startsWith('tracepad:'));
+  }
+
+  test('a score without a target is dropped with a debug line, inside a span and outside one', async () => {
+    const debug = diagnostics();
+    const { sent, queue } = recording();
+    const ids = tracepad.span('handler', (step) => {
+      tracepad.score('helpful', 1);
+      return [step.traceId, step.spanId];
+    });
+    tracepad.score('helpful', 1, { observation: true });
+    await queue.flush(1000);
+    expect(sent).toEqual([]);
+    expect(debug()).toEqual([
+      'tracepad: score(): tracing is off; "helpful" was dropped',
+      'tracepad: score(): tracing is off; "helpful" was dropped',
+    ]);
+    expect(warnings).toEqual([]);
+    // No trace behind the span, no id (#3).
+    expect(ids).toEqual([undefined, undefined]);
+  });
+
+  test('a score by id is sent as ever: that is REST, not tracing (#2)', async () => {
+    const { sent, queue } = recording();
+    tracepad.span('handler', () => tracepad.score('helpful', 1, { traceId: 'a'.repeat(32) }));
+    await queue.flush(1000);
+    expect(sent).toEqual([[{ name: 'helpful', trace_id: 'a'.repeat(32), value: 1 }]]);
+  });
+
+  test('a propagated parent is not a trace: the no-op tracer echoes the caller\'s ids', async () => {
+    // A request came in with a `traceparent`, and a context manager carries it:
+    // registering installs one, and disabling the tracer leaves no provider.
+    new NodeTracerProvider().register();
+    trace.disable();
+    const debug = diagnostics();
+    const { sent, queue } = recording();
+    const caller = { traceId: 'a'.repeat(32), spanId: 'b'.repeat(16), traceFlags: 1, isRemote: true };
+    const ids = context.with(trace.setSpanContext(ROOT_CONTEXT, caller), () =>
+      tracepad.span('handler', (step) => {
+        expect(step.span.spanContext().spanId).toBe('b'.repeat(16)); // the echo itself
+        tracepad.score('helpful', 1);
+        return [step.traceId, step.spanId];
+      }),
+    );
+    await queue.flush(1000);
+    expect(ids).toEqual([undefined, undefined]);
+    expect(sent).toEqual([]);
+    expect(debug()).toHaveLength(1);
+  });
+
+  test("without init, the application's own provider still scores (the spec's first edge case)", async () => {
+    new NodeTracerProvider().register();
+    const { sent, queue } = recording();
+    let later: Promise<void> = Promise.resolve();
+    const traceId = tracepad.span('handler', (step) => {
+      tracepad.score('helpful', 1);
+      // A continuation that scores after the span ended: its trace is as real (spec 039 #7).
+      later = new Promise((done) => setTimeout(() => done(tracepad.score('late', 1)), 1));
+      return step.traceId;
+    });
+    await later;
+    await queue.flush(1000);
+    expect(traceId).toMatch(/^[0-9a-f]{32}$/);
+    expect(sent.flat()).toEqual([
+      { name: 'helpful', trace_id: traceId, value: 1 },
+      { name: 'late', trace_id: traceId, value: 1 },
+    ]);
+    // Tracing is on here, so outside every span is the programming error it always was.
+    expect(() => tracepad.score('helpful', 1)).toThrow('no active span and no traceId');
+  });
+
+  test("without init, an unregistered provider's recording span still scores (#8)", async () => {
+    // A provider wired into the framework and not registered globally; the
+    // context manager comes from a registration whose tracer is then disabled.
+    new NodeTracerProvider().register();
+    trace.disable();
+    const request = new NodeTracerProvider().getTracer('the.framework').startSpan('GET /answer');
+    const { sent, queue } = recording();
+    context.with(trace.setSpan(context.active(), request), () => tracepad.score('helpful', 1));
+    request.end();
+    await queue.flush(1000);
+    expect(sent).toEqual([[{ name: 'helpful', trace_id: request.spanContext().traceId, value: 1 }]]);
+  });
+
+  test('without init, a sampled-out span keeps its ids: they are propagated whether or not kept', () => {
+    new NodeTracerProvider({ sampler: new AlwaysOffSampler() }).register();
+    const ids = tracepad.span('handler', (step) => {
+      expect(step.span.isRecording()).toBe(false);
+      return [step.traceId, step.spanId];
+    });
+    expect(ids[0]).toMatch(/^[0-9a-f]{32}$/);
+    expect(ids[1]).toMatch(/^[0-9a-f]{16}$/);
+  });
+
+  test('with no diagnostic logger the drop is silent: nothing on stdout, nothing in our logger', () => {
+    recording();
+    const out = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const debug = vi.spyOn(console, 'debug').mockImplementation(() => undefined);
+    expect(() => tracepad.score('helpful', 1)).not.toThrow();
+    expect(out).not.toHaveBeenCalled();
+    expect(debug).not.toHaveBeenCalled();
+    expect(warnings).toEqual([]);
   });
 });
 

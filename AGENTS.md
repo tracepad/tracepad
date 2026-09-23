@@ -418,6 +418,14 @@ API. This file routes; it does not duplicate what specs and docs say.
   and refuses a directory without the marker (#5–#7); `skills show` prints
   it. A drift test asks the binary for its commands, flags, tools and routes
   and fails on any name in the skill the binary does not have (#8).
+- ✅ Spec 039 (tracing off) shipped: a process that never called `init` has
+  tracing off, and the packages now know it — `score` with no target there
+  is dropped with a debug line instead of raising (an initialised process
+  still raises `ValueError` / throws / returns `ErrNoTrace` outside every
+  span), a `score` by id is sent as ever (#1, #2), and an observation's ids
+  with no trace behind them are `None` / `undefined` / `""` rather than
+  zeros (#3). "Tracing off" is read from three facts — no `init`, a no-op
+  global provider, no recording span — and Node's line goes to OTel's `diag` (#7, #8).
 - ✅ Spec 038 (SDK parity) shipped: Python's `span(type=…)` and Node's
   `span(name, { type })` take the step's kind when it opens, as Go's
   `WithType` did (#1) — `type` on `span` only, so Node's `event` takes the

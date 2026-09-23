@@ -6,6 +6,7 @@ import logging
 from typing import Any
 
 import pytest
+from opentelemetry import trace as otel_api
 
 import tracepad
 from tracepad import _scores, _tracing
@@ -94,6 +95,124 @@ def test_an_explicit_target_needs_no_span(sender: Sender) -> None:
 def test_outside_a_span_without_a_trace_id_raises(spans: Any) -> None:
     with pytest.raises(ValueError, match="no active span"):
         tracepad.score("helpful", 1)
+
+
+def test_with_tracing_off_a_score_without_a_target_is_dropped(
+    sender: Sender, caplog: pytest.LogCaptureFixture
+) -> None:
+    # Spec 039 #1: no `init`, so every span is a no-op — inside a block as
+    # outside one — and the call site is not wrong.
+    made = queue(sender)
+    with caplog.at_level(logging.DEBUG, logger="tracepad"):
+        with tracepad.span("handler") as observation:
+            tracepad.score("helpful", 1)
+        tracepad.score("helpful", 1, observation=True)
+    made.flush(2.0)
+
+    assert sender.batches == []
+    assert caplog.text.count("tracing is off") == 2
+    assert all(r.levelno == logging.DEBUG for r in caplog.records)
+    # Spec 039 #3: no trace behind the span, no id.
+    assert (observation.trace_id, observation.span_id) == (None, None)
+
+
+def test_with_tracing_off_a_score_by_id_is_sent(sender: Sender) -> None:
+    # Spec 039 #2: scoring by id is REST, not tracing.
+    made = queue(sender)
+    with tracepad.span("handler"):
+        tracepad.score("helpful", 1, trace_id="a" * 32)
+    made.flush(2.0)
+
+    assert sender.batches == [[{"name": "helpful", "trace_id": "a" * 32, "value": 1}]]
+
+
+def test_with_tracing_off_a_propagated_parent_is_not_a_trace(
+    sender: Sender, caplog: pytest.LogCaptureFixture
+) -> None:
+    # A request came in with a `traceparent`: the no-op tracer hands the
+    # caller's context to every child. Those are the caller's ids, not the
+    # step's, and nothing of this process will be stored under them.
+    from opentelemetry import context as otel_context
+    from opentelemetry.trace import NonRecordingSpan, SpanContext, TraceFlags
+
+    caller = SpanContext(0xA0B1, 0xC2D3, is_remote=True, trace_flags=TraceFlags(1))
+    token = otel_context.attach(otel_api.set_span_in_context(NonRecordingSpan(caller)))
+    made = queue(sender)
+    try:
+        with caplog.at_level(logging.DEBUG, logger="tracepad"):
+            with tracepad.span("handler") as observation:
+                tracepad.score("helpful", 1)
+    finally:
+        otel_context.detach(token)
+    made.flush(2.0)
+
+    assert (observation.trace_id, observation.span_id) == (None, None)
+    assert sender.batches == []
+    assert caplog.text.count("tracing is off") == 1
+
+
+def test_without_init_the_application_s_own_provider_still_scores(sender: Sender) -> None:
+    # The spec's first edge case: tracing is on, just not through us — the
+    # spans record, the ids are real, and a score inside one is enqueued.
+    from opentelemetry.sdk.trace import TracerProvider
+
+    otel_api.set_tracer_provider(TracerProvider())
+    made = queue(sender)
+    with tracepad.span("handler") as observation:
+        tracepad.score("helpful", 1)
+    made.flush(2.0)
+
+    assert observation.trace_id is not None and len(observation.trace_id) == 32
+    assert sender.batches == [[{"name": "helpful", "trace_id": observation.trace_id, "value": 1}]]
+    # Tracing is on here, so outside every span is the programming error it
+    # always was (spec 039 #7).
+    with pytest.raises(ValueError, match="no active span"):
+        tracepad.score("helpful", 1)
+
+
+def test_without_init_an_unregistered_provider_s_span_still_scores(sender: Sender) -> None:
+    # A provider wired into the framework and not set globally: the handler's
+    # span records, so a score inside it goes to that trace (spec 039 #8).
+    from opentelemetry.sdk.trace import TracerProvider
+
+    framework = TracerProvider().get_tracer("the.framework")
+    made = queue(sender)
+    with framework.start_as_current_span("GET /answer") as request:
+        tracepad.score("helpful", 1)
+    made.flush(2.0)
+
+    assert sender.batches[0][0]["trace_id"] == format(request.get_span_context().trace_id, "032x")
+
+
+def test_otel_sdk_disabled_is_tracing_off(
+    sender: Sender, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The SDK's own provider hands out no-op tracers under OTEL_SDK_DISABLED.
+    from opentelemetry.sdk.trace import TracerProvider
+
+    monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
+    otel_api.set_tracer_provider(TracerProvider())
+    made = queue(sender)
+    with tracepad.span("handler") as observation:
+        tracepad.score("helpful", 1)
+    made.flush(2.0)
+
+    assert observation.trace_id is None
+    assert sender.batches == []
+
+
+def test_without_init_a_sampled_out_span_keeps_its_ids() -> None:
+    # A sampler that drops a trace leaves its ids real: they are propagated
+    # and correlated whether or not the spans are kept (spec 039 #7).
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.sampling import ALWAYS_OFF
+
+    otel_api.set_tracer_provider(TracerProvider(sampler=ALWAYS_OFF))
+    with tracepad.span("handler") as observation:
+        assert not observation.span.is_recording()
+
+    assert observation.trace_id is not None and len(observation.trace_id) == 32
+    assert observation.span_id is not None and len(observation.span_id) == 16
 
 
 def test_the_batch_closes_at_a_hundred(sender: Sender) -> None:

@@ -10,11 +10,12 @@
  * program that is done is not held open by it.
  */
 
-import { isSpanContextValid, trace } from '@opentelemetry/api';
+import { diag, isSpanContextValid, trace } from '@opentelemetry/api';
 
 import { current } from './config.js';
 import { describe, request } from './http.js';
 import { warn } from './log.js';
+import { tracingOff } from './tracing.js';
 
 export const BATCH_SIZE = 100;
 export const INTERVAL = 2000;
@@ -149,7 +150,11 @@ export function score(name: string, value?: number | ScoreFields, fields: ScoreF
   }
   let { traceId, observationId } = fields;
   if (traceId === undefined) {
-    const active = trace.getActiveSpan()?.spanContext();
+    // A no-op global echoes a propagated parent, which never records; a live span of the app's own
+    // provider does. OTel's `diag` gets the line: no logger of ours exists before `init` (spec 039 #8).
+    const span = trace.getActiveSpan();
+    if (tracingOff() && !span?.isRecording()) return diag.debug(`tracepad: score(): tracing is off; ${JSON.stringify(name)} was dropped`);
+    const active = span?.spanContext();
     if (active === undefined || !isSpanContextValid(active)) {
       throw new Error('tracepad: score(): no active span and no traceId; pass traceId');
     }

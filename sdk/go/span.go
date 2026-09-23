@@ -96,16 +96,33 @@ type Observation struct {
 	ended atomic.Bool
 	// at is the instant an Event is of: it ends where it started.
 	at time.Time
+	// traced is whether a trace is behind it: with tracing off, OTel's no-op
+	// tracer hands out an invalid context, or echoes a propagated caller's —
+	// the caller's ids, not this step's (spec 039 #3).
+	traced bool
 }
 
 // Span is the OTel span underneath, for anything this handle does not do.
 func (o *Observation) Span() trace.Span { return o.span }
 
-// TraceID is the trace's id as the API spells it, 32 lower-case hex digits.
-func (o *Observation) TraceID() string { return o.span.SpanContext().TraceID().String() }
+// TraceID is the trace's id as the API spells it, 32 lower-case hex digits —
+// or "" with no trace behind the span, which is tracing off, as an Attempt
+// has none before it runs (spec 039 #3).
+func (o *Observation) TraceID() string {
+	if o.traced {
+		return o.span.SpanContext().TraceID().String()
+	}
+	return ""
+}
 
-// SpanID is the span's id as the API spells it, 16 lower-case hex digits.
-func (o *Observation) SpanID() string { return o.span.SpanContext().SpanID().String() }
+// SpanID is the span's id as the API spells it, 16 lower-case hex digits —
+// or "", as TraceID.
+func (o *Observation) SpanID() string {
+	if o.traced {
+		return o.span.SpanContext().SpanID().String()
+	}
+	return ""
+}
 
 // End ends the span with what it has. The second call, and every one after
 // it, does nothing: `defer step.End()` beside an explicit Fail is fine.
@@ -163,9 +180,7 @@ func warnKind(typ string) {
 	if observationTypes[typ] {
 		return
 	}
-	def.mu.Lock()
-	ready := def.initialized
-	def.mu.Unlock()
+	ready := initialized()
 	warnedKinds.Lock()
 	seen := warnedKinds.seen[typ]
 	if !seen && ready && len(warnedKinds.seen) < maxWarnedKinds {
@@ -212,7 +227,8 @@ func Span(ctx context.Context, name string, opts ...SpanOption) (context.Context
 	for _, opt := range opts {
 		opt.applyUpdate(&f)
 	}
-	return open(ctx, name, &f)
+	o := &Observation{}
+	return open(ctx, name, &f, o), o
 }
 
 // Event is a zero-duration observation: something that happened, not
@@ -224,16 +240,17 @@ func Event(ctx context.Context, name string, opts ...SpanOption) (context.Contex
 		opt.applyUpdate(&f)
 	}
 	at := time.Now()
-	ctx, o := open(ctx, name, &f, trace.WithTimestamp(at))
-	o.at = at
-	return ctx, o
+	o := &Observation{at: at}
+	return open(ctx, name, &f, o, trace.WithTimestamp(at)), o
 }
 
-// open starts the span with the attributes the fields write.
-func open(ctx context.Context, name string, f *fields, start ...trace.SpanStartOption) (context.Context, *Observation) {
+// open starts the span with the attributes the fields write, into o — the
+// one place an Observation, or the one a Call embeds, is made.
+func open(ctx context.Context, name string, f *fields, o *Observation, start ...trace.SpanStartOption) context.Context {
 	start = append(start, trace.WithAttributes(observationAttributes(f)...))
-	ctx, span := tracer().Start(ctx, name, start...)
-	return ctx, &Observation{span: span}
+	ctx, o.span = tracer().Start(ctx, name, start...)
+	o.traced = o.span.SpanContext().IsValid() && !tracingOff()
+	return ctx
 }
 
 // Update writes observation attributes on the context's current span,

@@ -16,6 +16,7 @@ import {
   SpanStatusCode,
   context,
   createContextKey,
+  isSpanContextValid,
   trace,
 } from '@opentelemetry/api';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-proto';
@@ -38,6 +39,9 @@ import { flushScores } from './scores.js';
 
 let initialized = false;
 let handedOut = false;
+
+/** No `init` or `spanProcessor`, and no provider of the application's own: every span is the API's no-op (spec 039 #7). */
+export const tracingOff = (): boolean => !initialized && !handedOut && delegateOf() === undefined;
 
 /** The observation the current callback opened, so that `update` can tell
  * what the application said explicitly from what the wrapper captured. */
@@ -136,8 +140,10 @@ function delegateOf(): Adoptable | undefined {
  * delegate hands it out — an identity a minifier cannot rename. The name is
  * the fallback for a second copy of the API, whose singleton is its own.
  */
+const NOOP = new ProxyTracerProvider().getDelegate();
+
 function isNoop(provider: TracerProvider): boolean {
-  return provider === new ProxyTracerProvider().getDelegate() || provider.constructor?.name === 'NoopTracerProvider';
+  return provider === NOOP || provider.constructor?.name === 'NoopTracerProvider';
 }
 
 function resourceFor(config: Config) {
@@ -321,17 +327,21 @@ export class Observation {
   /** @internal What the application named itself, which the capture of
    * Decision 4 must not overwrite afterwards. */
   readonly explicit = new Set<string>();
+  /** A trace behind it, decided at open (spec 039 #3, #7). */
+  private readonly traced: boolean;
 
   constructor(span: Span) {
     this.span = span;
+    this.traced = isSpanContextValid(span.spanContext()) && !tracingOff();
   }
 
-  get traceId(): string {
-    return this.span.spanContext().traceId;
+  /** The trace's id, or `undefined` with no trace behind the span — tracing off (spec 039 #3). */
+  get traceId(): string | undefined {
+    return this.traced ? this.span.spanContext().traceId : undefined;
   }
 
-  get spanId(): string {
-    return this.span.spanContext().spanId;
+  get spanId(): string | undefined {
+    return this.traced ? this.span.spanContext().spanId : undefined;
   }
 
   /** @internal End the span once, with what it has: how a callback leaves. */
@@ -523,12 +533,9 @@ function firstTime(key: string): boolean {
 }
 
 /**
- * Pass a step's kind through, warning when the store will not classify by
- * it. An empty kind is no kind — `undefined`, and the caller's default
- * stands, as Go's `WithType("")` (spec 038 #8). A spelling outside the ten
- * is not refused: the mapper keeps it in the observation's metadata and
- * classifies the span by its heuristics. The warning is given once per
- * spelling, and only when a step is written, after `init({ logger })`.
+ * Pass a step's kind through: an empty one is no kind, and the caller's
+ * default stands (spec 038 #8); one outside the ten is kept in metadata by
+ * the mapper, and warned about as `warnedKinds` says.
  */
 function kind(type: string | undefined): string | undefined {
   if (!type) return undefined;

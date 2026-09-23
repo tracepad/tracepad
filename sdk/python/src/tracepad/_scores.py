@@ -196,9 +196,20 @@ def score(
     id too when `observation=True`. Outside a span, with no `trace_id`, this
     raises: a score that silently went nowhere is the failure this API is
     worst at surfacing, and a programming error visible at the call site is
-    the one exception to "the tracing path never raises".
+    the one exception to "the tracing path never raises". Where nothing traces —
+    no `init`, no provider of the application's own, no recording span — the
+    same call is a no-op with a debug line: every span is a no-op there, inside
+    a block as outside one, and the call site is not wrong (spec 039 #1, #8). A
+    `trace_id` given scores either way.
     """
     if trace_id is None:
+        from ._tracing import tracing_off  # here: `_tracing` imports this module
+
+        # A no-op global echoes a propagated parent, which never records; a live
+        # span from a provider the application wired itself does.
+        if tracing_off() and not otel.get_current_span().is_recording():
+            logger.debug("tracepad.score(): tracing is off (no init); %r was dropped", name)
+            return
         context = otel.get_current_span().get_span_context()
         if not context.is_valid:
             raise ValueError(

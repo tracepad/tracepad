@@ -218,7 +218,7 @@ func queueOf() *scoreQueue {
 // ScoreOption configures Score.
 type ScoreOption func(map[string]any, *scoreTarget)
 
-type scoreTarget struct{ onObservation bool }
+type scoreTarget struct{ onObservation, emptyTraceID bool }
 
 // WithValue is the number, for a numeric or a boolean (0 or 1) score.
 func WithValue(value float64) ScoreOption {
@@ -249,12 +249,22 @@ func WithID(id string) ScoreOption {
 
 // WithTraceID names the trace to score instead of the context's.
 func WithTraceID(traceID string) ScoreOption {
-	return func(body map[string]any, _ *scoreTarget) { body["trace_id"] = traceID }
+	return func(body map[string]any, t *scoreTarget) {
+		if traceID == "" { // an Observation's TraceID with tracing off
+			t.emptyTraceID = true
+			return
+		}
+		body["trace_id"] = traceID
+	}
 }
 
 // WithObservationID names the observation to score, inside its trace.
 func WithObservationID(observationID string) ScoreOption {
-	return func(body map[string]any, _ *scoreTarget) { body["observation_id"] = observationID }
+	return func(body map[string]any, _ *scoreTarget) {
+		if observationID != "" {
+			body["observation_id"] = observationID
+		}
+	}
 }
 
 // OnObservation scores the context's span rather than its trace alone.
@@ -266,7 +276,10 @@ func OnObservation() ScoreOption {
 //
 // With no target given, the target is the trace of the context's span, and
 // its span too with OnObservation. With no span and no WithTraceID the
-// error is ErrNoTrace. Score does not call the server: it enqueues, and a
+// error is ErrNoTrace, and so is an empty WithTraceID — unless nothing traces
+// here: no Init, a no-op global provider and no recording span in ctx. Then
+// the call is dropped with a debug line (spec 039 #1, #8). Score does not
+// call the server: it enqueues, and a
 // goroutine posts POST /api/v1/scores in batches of up to 100 every two
 // seconds; a rejected batch is retried once, then logged with the server's
 // own message and dropped.
@@ -277,8 +290,14 @@ func Score(ctx context.Context, name string, opts ...ScoreOption) error {
 		opt(body, &target)
 	}
 	if _, given := body["trace_id"]; !given {
+		// A no-op global echoes a propagated parent, which never records; a
+		// live span from a provider the application wired itself does.
+		if tracingOff() && !trace.SpanFromContext(ctx).IsRecording() {
+			def.log().Debug("tracepad.Score: tracing is off (no Init); the score was dropped", "name", name)
+			return nil
+		}
 		span := trace.SpanContextFromContext(ctx)
-		if !span.IsValid() {
+		if !span.IsValid() || target.emptyTraceID {
 			return ErrNoTrace
 		}
 		body["trace_id"] = span.TraceID().String()

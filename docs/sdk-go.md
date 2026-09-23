@@ -126,7 +126,9 @@ miss.End()
 
 `Span`, `Event` and `Generation` hand out a handle carrying `TraceID()`,
 `SpanID()`, `Update(...)`, `End()`, `Fail(err)` and the OTel span itself as
-`Span()`.
+`Span()`. With no trace behind the span — tracing off: `Init` never called and
+no provider of the application's own — the two ids are `""`, not a string of zeros, as `Attempt.TraceID()` is before
+anything has run.
 
 ## Generations
 
@@ -234,7 +236,11 @@ tracepad.Score(ctx, "grounded", tracepad.WithValue(1), tracepad.WithDataType("bo
 With no target given, the target is the trace of the context's span — and its
 observation too with `OnObservation()`. Outside a span, with no
 `WithTraceID`, the call returns `ErrNoTrace`: a score that silently went
-nowhere is the failure this API is worst at surfacing.
+nowhere is the failure this API is worst at surfacing, and so is an empty
+`WithTraceID` — an id stored while tracing was off, say. Where nothing traces —
+no `Init`, a no-op global provider, no recording span in the context — the same
+call returns `nil` and logs a debug line instead: every span is a no-op there,
+and the call site is not wrong. A `WithTraceID` is scored either way.
 
 `Score` does not call the server. It enqueues, and a goroutine posts
 [`POST /api/v1/scores`](scores.md) in batches of up to 100 every two seconds.
@@ -295,7 +301,9 @@ if err != nil {
 }
 log.Println(total["deleted"], total["rounds"])
 
-_, err = tracepad.DeleteTrace(ctx, step.TraceID(), true)
+if id := step.TraceID(); id != "" { // "" with tracing off
+	_, err = tracepad.DeleteTrace(ctx, id, true)
+}
 ```
 
 A script's door to what [`traces rm`](cli.md#traces-rm) does: an eval harness that
@@ -425,7 +433,8 @@ stamped and the run covers no case; the first `run.Item` says so in the log.
 | `Init` after configuration, `Span`, `Generation`, `Update`, `End`, the exporter, the score queue | Logged through `slog` (`WithLogger`, or the default logger); never a panic, never an error into your code |
 | `Prompt`, `Flush`, `shutdown`, `DeleteTrace`, `DeleteTraces`, and every call of the harness above | An error: `*HTTPError{Status, Body}` for a non-2xx answer, the transport's own otherwise |
 | `Init` with no host or key | `ErrConfig`, wrapped with what is missing |
-| `Score` with no target at all | `ErrNoTrace` — a programming error, visible at the call site |
+| `Score` with no target — or an empty `WithTraceID` — outside every span while tracing: initialised, or through a provider of the application's own | `ErrNoTrace` — a programming error, visible at the call site |
+| `Score` with no target where nothing traces (no `Init`, no-op global provider, no recording span) | `nil`; a debug line — tracing is off |
 
 Both sentinels are for `errors.Is`, and `*HTTPError` for `errors.As`.
 Instrumentation that can break the function it observes is worse than none.

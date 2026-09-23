@@ -68,9 +68,11 @@ func WithTracerProvider(provider trace.TracerProvider) Option {
 // defaults is the one default the package keeps (spec 033 #2): a span helper
 // that needed a receiver on every call would not be a helper.
 type defaults struct {
-	mu          sync.Mutex
-	initialized bool
-	config      *config
+	mu sync.Mutex
+	// ready is whether Init ran: an atomic, since every span and score reads
+	// it while Init holds the lock to build the exporter.
+	ready  atomic.Bool
+	config *config
 	// logger and provider are read on every span and every log line, from
 	// any goroutine, while Init may be writing them: atomics, not the lock,
 	// which Init holds while it logs.
@@ -117,7 +119,7 @@ func Init(ctx context.Context, opts ...Option) (shutdown func(context.Context) e
 	d := def
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if d.initialized {
+	if d.ready.Load() {
 		d.log().Warn("tracepad.Init has already run; this call is a no-op")
 		return d.shutdown, nil
 	}
@@ -172,7 +174,7 @@ func Init(ctx context.Context, opts ...Option) (shutdown func(context.Context) e
 		d.scores = newScoreQueue(postScores)
 	}
 	d.scores.start()
-	d.initialized = true
+	d.ready.Store(true)
 	d.shutdown = func(ctx context.Context) error {
 		return d.close(ctx)
 	}
@@ -302,7 +304,8 @@ func reset() {
 	d := def
 	d.mu.Lock()
 	scores := d.scores
-	d.initialized, d.built = false, false
+	d.built = false
+	d.ready.Store(false)
 	d.config, d.sdk, d.scores, d.shutdown = nil, nil, nil, nil
 	d.logger.Store(nil)
 	d.provider.Store(nil)

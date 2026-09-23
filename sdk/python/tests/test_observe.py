@@ -150,8 +150,8 @@ def test_an_argument_that_is_not_json_is_repr_d(spans: Any) -> None:
 
 def test_span_and_event(spans: Any) -> None:
     with tracepad.span("outer", input={"q": 1}, metadata={"k": "v"}) as observation:
-        assert len(observation.trace_id) == 32
-        assert len(observation.span_id) == 16
+        assert observation.trace_id is not None and len(observation.trace_id) == 32
+        assert observation.span_id is not None and len(observation.span_id) == 16
         with tracepad.event("cache.miss"):
             pass
 
