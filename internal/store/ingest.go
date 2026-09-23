@@ -17,6 +17,13 @@ type IngestBatch struct {
 	// Raw is the body to keep for a later remap; nil when raw storage is
 	// off (spec 002 #9).
 	Raw *RawBatch
+	// Media are the bodies ingest took out of the payloads (spec 041 #2),
+	// MediaRefs the traces pointing at them (#3), and RawMedia the bodies
+	// the raw body points at, which become the raw batch's own refs
+	// (Decision 12).
+	Media     []MediaBody
+	MediaRefs []MediaRef
+	RawMedia  []string
 	// IngestedAt is the server clock at arrival, which is the clock
 	// retention counts from (spec 005 #1). Zero means "now", resolved in
 	// apply so that every path into the writer has an arrival time even
@@ -68,19 +75,28 @@ func (b *IngestBatch) apply(tx *sql.Tx) error {
 	if arrived == 0 {
 		arrived = time.Now().UnixNano()
 	}
+	// The bodies first: every ref below, the raw batch's included, names
+	// a row that has to exist (spec 041 #2).
+	if err := writeMedia(tx, b.ProjectID, b.Media, b.MediaRefs, arrived); err != nil {
+		return err
+	}
 	if b.Raw != nil {
 		// Always zstd, unlike payloads: the table has no compression
 		// column, so one encoding keeps replay unambiguous, and an OTLP
 		// body small enough for the threshold to matter is not a body
 		// worth a special case.
-		if _, err := tx.Exec(
+		var rawID int64
+		if err := tx.QueryRow(
 			`INSERT INTO raw_batches (project_id, received_at, dialect, content_type, content_encoding, body)
-			 VALUES (?, ?, ?, ?, ?, ?)`,
+			 VALUES (?, ?, ?, ?, ?, ?) RETURNING id`,
 			b.ProjectID, b.Raw.ReceivedAt, b.Raw.Dialect,
 			nullString(b.Raw.ContentType), nullString(b.Raw.ContentEncoding),
 			zstdEncoder.EncodeAll(b.Raw.Body, nil),
-		); err != nil {
+		).Scan(&rawID); err != nil {
 			return fmt.Errorf("store raw batch: %w", err)
+		}
+		if err := writeRawMediaRefs(tx, rawID, b.RawMedia); err != nil {
+			return err
 		}
 	}
 

@@ -70,10 +70,13 @@ type projectView struct {
 	RawRetentionDays *int   `json:"raw_retention_days"`
 	// StatsRetentionDays is the rollup's own window. It outlives the traces
 	// it summarizes, so it is a window of its own (spec 013 #6).
-	StatsRetentionDays *int   `json:"stats_retention_days"`
-	CreatedAt          string `json:"created_at"`
-	DeletedAt          string `json:"deleted_at"`
-	PurgeAt            string `json:"purge_at"`
+	StatsRetentionDays *int `json:"stats_retention_days"`
+	// Media is what ingest does with an image it takes out of a payload
+	// (spec 041 #6): `store` or `placeholder`.
+	Media     string `json:"media"`
+	CreatedAt string `json:"created_at"`
+	DeletedAt string `json:"deleted_at"`
+	PurgeAt   string `json:"purge_at"`
 }
 
 func (r *run) projects(ctx context.Context, args []string) error {
@@ -453,6 +456,7 @@ func (r *run) retentionShow(ctx context.Context, args []string) error {
 		window(view.RawRetentionDays, "follow the trace window"))
 	fmt.Fprintf(r.opt.Stdout, "  statistics  %s\n",
 		window(view.StatsRetentionDays, "kept forever"))
+	fmt.Fprintf(r.opt.Stdout, "  media       %s\n", mediaSetting(view.Media))
 	return nil
 }
 
@@ -467,6 +471,7 @@ func (r *run) retentionSet(ctx context.Context, args []string) error {
 		forever   bool
 		rawFollow bool
 		statsKeep bool
+		media     string
 		yes       bool
 	)
 	fs := r.flags("retention set")
@@ -477,6 +482,7 @@ func (r *run) retentionSet(ctx context.Context, args []string) error {
 	fs.BoolVar(&forever, "forever", false, "")
 	fs.BoolVar(&rawFollow, "raw-follow", false, "")
 	fs.BoolVar(&statsKeep, "stats-forever", false, "")
+	fs.StringVar(&media, "media", "", "")
 	fs.BoolVar(&yes, "yes", false, "")
 	if _, err := r.parse(fs, args, 0); err != nil {
 		return err
@@ -519,9 +525,16 @@ func (r *run) retentionSet(ctx context.Context, args []string) error {
 		}
 		request["stats_retention_days"] = statsDays
 	}
+	switch media {
+	case "":
+	case "store", "placeholder":
+		request["media"] = media
+	default:
+		return usageErrorf("--media is store or placeholder, got %q", media)
+	}
 	if len(request) == 0 {
 		return usageErrorf("retention set needs --days, --forever, --raw-days, --raw-follow, " +
-			"--stats-days or --stats-forever")
+			"--stats-days, --stats-forever or --media")
 	}
 
 	id, err := r.projectID(ctx, fs, *project)
@@ -546,8 +559,17 @@ func (r *run) retentionSet(ctx context.Context, args []string) error {
 		window(view.RawRetentionDays, "follow the trace window"))
 	fmt.Fprintf(r.opt.Stdout, "  statistics  %s\n",
 		window(view.StatsRetentionDays, "kept forever"))
+	fmt.Fprintf(r.opt.Stdout, "  media       %s\n", mediaSetting(view.Media))
 	fmt.Fprintln(r.opt.Stdout, "\nthe new window takes effect on the next sweep")
 	return nil
+}
+
+// mediaSetting renders spec 041 #6's setting as the sentence it means.
+func mediaSetting(setting string) string {
+	if setting == "placeholder" {
+		return "placeholder: images and files are not kept, a reference says so"
+	}
+	return "stored once each, kept as long as a trace or raw body points at them"
 }
 
 // users is the one command that spans both halves of the CLI: two reads over
@@ -783,6 +805,7 @@ func renderProject(r *run, view projectView) {
 		window(view.RawRetentionDays, "follow the trace window"))
 	fmt.Fprintf(r.opt.Stdout, "  statistics  %s\n",
 		window(view.StatsRetentionDays, "kept forever"))
+	fmt.Fprintf(r.opt.Stdout, "  media       %s\n", mediaSetting(view.Media))
 	if view.DeletedAt != "" {
 		fmt.Fprintf(r.opt.Stdout, "  deleted     %s\n", shortTime(view.DeletedAt))
 		fmt.Fprintf(r.opt.Stdout, "  purged at   %s\n", shortTime(view.PurgeAt))

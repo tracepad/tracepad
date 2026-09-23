@@ -35,6 +35,14 @@ func (s *Server) routes() []route {
 		// person's browser never writes spans (spec 028 Decision 3).
 		{"POST", "/v1/traces", ingest, "OTLP/HTTP protobuf trace ingest", s.handleTraces},
 		{"POST", "/api/public/otel/v1/traces", ingest, "OTLP ingest under the Langfuse SDK's path", s.handleTraces},
+		// The Langfuse media channel (spec 041 #9): the SDK asks for an
+		// upload URL, PUTs the bytes there, and reports back. The PUT is
+		// public because the URL is presigned — the SDK sends it no
+		// credential — and the token in it is the check (Decision 14).
+		{"POST", "/api/public/media", ingest, "Langfuse SDK: an upload URL for one media body, or null when it is already stored", s.handleLangfuseMediaUpload},
+		{"PUT", "/api/public/media/{mediaId}/upload", public, "Langfuse SDK: the presigned upload of one media body", s.handleLangfuseMediaPut},
+		{"PATCH", "/api/public/media/{mediaId}", ingest, "Langfuse SDK: the report on one media upload", s.handleLangfuseMediaPatch},
+		{"GET", "/api/public/media/{mediaId}", ingest, "Langfuse SDK: one media body's type, size and address", s.handleLangfuseMediaGet},
 
 		// Self-description: where an agent that has never seen this API
 		// starts (design §3.2).
@@ -66,6 +74,9 @@ func (s *Server) routes() []route {
 		{"DELETE", "/api/v1/traces/{id}", editor, "Delete one trace and everything attached to it", s.handleDeleteTrace},
 		{"DELETE", "/api/v1/traces", editor, "Delete every trace a listing filter matches before `to`, in bounded rounds", s.handleDeleteTraces},
 		{"GET", "/api/v1/observations/{id}/io", member, "The whole input, output and metadata of one observation", s.handleObservationIO},
+		// Media (spec 041 #7): one body by its hash, for a project that
+		// points at it; `404` for any other.
+		{"GET", "/api/v1/media/{sha256}", member, "One image or file a payload references, by the SHA-256 of its bytes", s.handleGetMedia},
 
 		// The raw archive (spec 019): what arrived, in the order it
 		// arrived, and one body exactly as the client sent it. This is

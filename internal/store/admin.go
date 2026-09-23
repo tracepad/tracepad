@@ -39,6 +39,12 @@ type DeleteCounts struct {
 	// pointing at the erased traces, and deleting a project takes both.
 	AnnotationQueues int64
 	AnnotationItems  int64
+	// Media and MediaBytes are the bodies the operation would collect —
+	// those nothing staying behind points at — and their decoded bytes
+	// (spec 041 #11): a preview that hid a hundred megabytes of pictures
+	// would be a preview that lies by omission.
+	Media      int64
+	MediaBytes int64
 	// Oldest is the arrival time of the oldest affected row (Unix
 	// nanoseconds), or zero when nothing is affected.
 	Oldest int64
@@ -48,7 +54,7 @@ type DeleteCounts struct {
 func (c DeleteCounts) Any() bool {
 	return c.Traces+c.Observations+c.Scores+c.Payloads+c.RawBatches+
 		c.Prompts+c.PromptLabels+c.APIKeys+
-		c.AnnotationQueues+c.AnnotationItems > 0
+		c.AnnotationQueues+c.AnnotationItems+c.Media > 0
 }
 
 // OptionalDays is a retention window as a PATCH carries it. Absent, cleared
@@ -108,6 +114,25 @@ func (s *Store) RetentionPreview(projectID string, retention, raw, stats *int, n
 		}
 		counts.RawBatches = batches
 		counts.Oldest = earliest(counts.Oldest, oldest)
+	}
+	// The bodies both windows together would collect (spec 041 #11): a
+	// body a trace keeps is not freed by its raw batch going, nor the
+	// other way round, so the two are asked about as one deletion.
+	var traces, raws string
+	var traceArgs, rawArgs []any
+	if cutoff, windowed := cutoffFor(retention, now); windowed {
+		traces = `SELECT id FROM traces t WHERE t.project_id = ? AND t.ingested_at < ? AND ` + notPinned
+		traceArgs = []any{projectID, cutoff}
+	}
+	if cutoff, windowed := cutoffFor(rawWindow, now); windowed {
+		raws = `SELECT id FROM raw_batches WHERE project_id = ? AND received_at < ?`
+		rawArgs = []any{projectID, cutoff}
+	}
+	if traces != "" || raws != "" {
+		var err error
+		if counts.Media, counts.MediaBytes, err = s.mediaFreed(projectID, traces, traceArgs, raws, rawArgs); err != nil {
+			return counts, err
+		}
 	}
 	// The rollup's own window, which is measured against the hour a row
 	// summarizes rather than against arrival: the rows carry no arrival
@@ -234,7 +259,13 @@ func (s *Store) ProjectPreview(projectID string) (DeleteCounts, error) {
 			return counts, fmt.Errorf("count a project's %s: %w", table.name, err)
 		}
 	}
-	return counts, nil
+	// Every trace the project's refs name, not only the ones still here: a
+	// ref the Langfuse channel wrote for a trace that never came goes with
+	// the project too (spec 041 #11).
+	counts.Media, counts.MediaBytes, err = s.mediaFreed(projectID,
+		`SELECT trace_id FROM media_refs WHERE project_id = ?`, []any{projectID},
+		`SELECT id FROM raw_batches WHERE project_id = ?`, []any{projectID})
+	return counts, err
 }
 
 func earliest(a, b int64) int64 {
@@ -395,6 +426,10 @@ type ProjectUpdate struct {
 	// like the other two, and shrinking it destroys history that the trace
 	// sweep deliberately spares, so it is confirmed like the other two.
 	StatsWindow OptionalDays
+	// Media is the project's media setting (spec 041 #6), nil to leave it.
+	// Not destructive either way: `placeholder` stops keeping new bodies
+	// and deletes none, and `store` keeps them again from the next export.
+	Media *string
 	// Confirm is the echo, required when either window shrinks. Whether it
 	// is required is decided here rather than by the caller: the caller
 	// decided it against a project row it read a moment earlier, and the
@@ -505,6 +540,15 @@ func (u *ProjectUpdate) apply(tx *sql.Tx) error {
 		if _, err := tx.Exec(`UPDATE projects SET stats_retention_days = ? WHERE id = ?`,
 			nullDays(u.StatsWindow.Value), u.ProjectID); err != nil {
 			return fmt.Errorf("set stats retention window: %w", err)
+		}
+	}
+	if u.Media != nil {
+		if *u.Media != MediaStore && *u.Media != MediaPlaceholder {
+			return &Rejection{Kind: RejectInvalid, Message: fmt.Sprintf(
+				"media must be %q or %q, got %q", MediaStore, MediaPlaceholder, *u.Media)}
+		}
+		if _, err := tx.Exec(`UPDATE projects SET media = ? WHERE id = ?`, *u.Media, u.ProjectID); err != nil {
+			return fmt.Errorf("set media setting: %w", err)
 		}
 	}
 	u.Project, err = projectByID(tx, u.ProjectID)

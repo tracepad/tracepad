@@ -84,6 +84,12 @@ func (r *traceRemoval) apply(tx *sql.Tx) (DeleteCounts, error) {
 		`DELETE FROM payloads WHERE id IN`, nil, payloads); err != nil {
 		return counts, fmt.Errorf("delete payloads: %w", err)
 	}
+	// The traces' media refs, and the bodies nothing points at any more
+	// (spec 041 #3). A body a raw batch still names stays: the batch
+	// outlives the trace here, as it always has (#3 above).
+	if counts.Media, counts.MediaBytes, err = dropTraceMedia(tx, r.projectID, r.ids); err != nil {
+		return counts, err
+	}
 	// Text that is gone must not remain findable (spec 011 #7).
 	if err := deleteTraceSearchEntries(tx, r.projectID, r.ids); err != nil {
 		return counts, err
@@ -290,6 +296,11 @@ func (s *Store) tracesPreview(projectID, owned string, args ...any) (DeleteCount
 			append([]any{projectID}, args...)...).Scan(table.count); err != nil {
 			return counts, nil, fmt.Errorf("count the %s: %w", table.name, err)
 		}
+	}
+	// The bodies only these traces point at (spec 041 #11). Raw batches
+	// are not touched here, so a body one still names is not counted.
+	if counts.Media, counts.MediaBytes, err = s.mediaFreed(projectID, owned, args, "", nil); err != nil {
+		return counts, nil, err
 	}
 	rows, err := s.db.Query(
 		`SELECT r.id, r.dataset, COUNT(*) FROM traces t

@@ -368,6 +368,8 @@ func (s *Server) handlePatchProject(w http.ResponseWriter, r *http.Request) {
 		RetentionDays      json.RawMessage `json:"retention_days"`
 		RawRetentionDays   json.RawMessage `json:"raw_retention_days"`
 		StatsRetentionDays json.RawMessage `json:"stats_retention_days"`
+		// Media is the setting of spec 041 #6: `store` or `placeholder`.
+		Media *string `json:"media"`
 	}
 	if !s.readJSON(w, r, &request) {
 		return
@@ -396,10 +398,19 @@ func (s *Server) handlePatchProject(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if update.Name == nil && !update.Retention.Set && !update.RawWindow.Set && !update.StatsWindow.Set {
+	if request.Media != nil {
+		if *request.Media != store.MediaStore && *request.Media != store.MediaPlaceholder {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf(
+				`media must be %q or %q`, store.MediaStore, store.MediaPlaceholder))
+			return
+		}
+		update.Media = request.Media
+	}
+	if update.Name == nil && !update.Retention.Set && !update.RawWindow.Set && !update.StatsWindow.Set &&
+		update.Media == nil {
 		writeError(w, http.StatusBadRequest,
-			`nothing to change: send "name", "retention_days", "raw_retention_days" `+
-				`or "stats_retention_days"`)
+			`nothing to change: send "name", "retention_days", "raw_retention_days", `+
+				`"stats_retention_days" or "media"`)
 		return
 	}
 
@@ -439,7 +450,11 @@ func (s *Server) handlePatchProject(w http.ResponseWriter, r *http.Request) {
 				// The rolled hours are named separately because they
 				// are the one thing here the trace sweep spares by
 				// design (spec 013 #6).
-				put("stats_hours", counts.StatsHours)).
+				put("stats_hours", counts.StatsHours).
+				// The media bodies the two windows together would
+				// collect (spec 041 #11).
+				put("media", counts.Media).
+				put("media_bytes", counts.MediaBytes)).
 			put("note", "the shorter window takes effect on the next sweep"))
 		return
 	}
@@ -489,7 +504,9 @@ func (s *Server) handleDeleteProject(w http.ResponseWriter, r *http.Request) {
 				// preview names both: a review backlog somebody else
 				// is working through is a reason not to press this.
 				put("annotation_queues", counts.AnnotationQueues).
-				put("annotation_items", counts.AnnotationItems)).
+				put("annotation_items", counts.AnnotationItems).
+				put("media", counts.Media).
+				put("media_bytes", counts.MediaBytes)).
 			put("note", "the keys stop working immediately; the data is restorable for seven days"))
 		return
 	}
@@ -714,6 +731,8 @@ func (s *Server) handleEraseUserData(w http.ResponseWriter, r *http.Request) {
 		erased.Scores += chunk.Counts.Scores
 		erased.Payloads += chunk.Counts.Payloads
 		erased.AnnotationItems += chunk.Counts.AnnotationItems
+		erased.Media += chunk.Counts.Media
+		erased.MediaBytes += chunk.Counts.MediaBytes
 		if !chunk.More {
 			break
 		}
@@ -756,6 +775,9 @@ func projectResponse(p *store.Project) object {
 		// The rollup's own window: null is forever here too, and it is
 		// what keeps the charts when the traces go (spec 013 #6).
 		put("stats_retention_days", p.StatsRetentionDays).
+		// What ingest does with an image it takes out of a payload
+		// (spec 041 #6).
+		put("media", p.Media).
 		put("created_at", p.CreatedAt)
 	if p.Deleted() {
 		body = body.

@@ -115,7 +115,17 @@ type Project struct {
 	// nil while it is live (#9).
 	DeletedAt *int64
 	CreatedAt string
+	// Media is what ingest does with an image or a file it takes out of a
+	// payload (spec 041 #6): MediaStore keeps the body, MediaPlaceholder
+	// keeps only a reference that says it was not stored.
+	Media string
 }
+
+// The two values of a project's media setting (spec 041 #6).
+const (
+	MediaStore       = "store"
+	MediaPlaceholder = "placeholder"
+)
 
 // Deleted reports a project inside its grace window.
 func (p *Project) Deleted() bool { return p != nil && p.DeletedAt != nil }
@@ -154,7 +164,7 @@ type KeyInfo struct {
 
 // projectColumns is the one SELECT list every project read shares, so a column
 // added to the table is added to every reader at once.
-const projectColumns = `id, name, retention_days, raw_retention_days, stats_retention_days, deleted_at, created_at`
+const projectColumns = `id, name, retention_days, raw_retention_days, stats_retention_days, deleted_at, created_at, media`
 
 func scanProject(row interface{ Scan(...any) error }) (*Project, error) {
 	var (
@@ -164,7 +174,7 @@ func scanProject(row interface{ Scan(...any) error }) (*Project, error) {
 		stats     sql.NullInt64
 		deleted   sql.NullInt64
 	)
-	if err := row.Scan(&p.ID, &p.Name, &retention, &raw, &stats, &deleted, &p.CreatedAt); err != nil {
+	if err := row.Scan(&p.ID, &p.Name, &retention, &raw, &stats, &deleted, &p.CreatedAt, &p.Media); err != nil {
 		return nil, err
 	}
 	if stats.Valid {

@@ -12,8 +12,6 @@ import (
 	"strings"
 	"time"
 
-	tracepb "go.opentelemetry.io/proto/otlp/trace/v1"
-
 	"github.com/tracepad/tracepad/internal/mapping"
 	"github.com/tracepad/tracepad/internal/store"
 )
@@ -92,15 +90,7 @@ func (s *Server) handleTraces(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var (
-		resourceSpans []*tracepb.ResourceSpans
-		unreadable    int
-	)
-	if jsonEncoding {
-		resourceSpans, unreadable, err = mapping.DecodeExportRequestJSON(body)
-	} else {
-		resourceSpans, unreadable, err = mapping.DecodeExportRequest(body)
-	}
+	decoded, err := mapping.DecodeExportBody(body, jsonEncoding)
 	if err != nil {
 		s.counters.observeRejectedBatch(project.ID)
 		slog.Warn("undecodable OTLP body", "project", project.Name, "err", err)
@@ -111,6 +101,7 @@ func (s *Server) handleTraces(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, decodeFailure(jsonEncoding, err))
 		return
 	}
+	resourceSpans, unreadable := decoded.ResourceSpans, decoded.Unreadable
 	if len(resourceSpans) == 0 && unreadable == 0 {
 		// Per the OTLP spec an empty batch is a successful no-op; there
 		// is nothing to store and nothing to replay later.
@@ -125,6 +116,11 @@ func (s *Server) handleTraces(w http.ResponseWriter, r *http.Request) {
 			"project", project.Name, "count", unreadable)
 	}
 
+	// Media comes out before the mapper sees the export (spec 041 #1): the
+	// walk rewrites the attributes in place, so the payloads the mapper
+	// writes carry references, and the raw body below is this same export
+	// with the media factored out (#5).
+	media := mapping.ExtractMedia(resourceSpans, s.mediaOptions(project))
 	result := mapping.Map(resourceSpans)
 	result.NoteUnreadable(unreadable)
 	batch := &store.IngestBatch{
@@ -132,6 +128,19 @@ func (s *Server) handleTraces(w http.ResponseWriter, r *http.Request) {
 		Traces:       result.Traces,
 		Observations: result.Observations,
 	}
+	rawMedia := false
+	if s.storeRaw && media.Any() {
+		factored, err := decoded.Encode(media.Changed)
+		if err != nil {
+			// The body as it arrived is still a true archive, only a
+			// heavier one; losing the batch over it would not be.
+			slog.Error("could not factor media out of the raw body; keeping it as received",
+				"project", project.Name, "err", err)
+		} else {
+			body, rawMedia = factored, true
+		}
+	}
+	batch.Media, batch.MediaRefs, batch.RawMedia = mediaRows(media, result.Traces, rawMedia)
 	if s.storeRaw {
 		batch.Raw = &store.RawBatch{
 			ReceivedAt: time.Now().UnixNano(),

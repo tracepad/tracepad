@@ -14,6 +14,7 @@
     {"name": "ingest", "description": "OTLP trace ingest"},
     {"name": "traces", "description": "Traces, observations and sessions"},
     {"name": "raw", "description": "The archive of export bodies as they arrived, which is what an export replays"},
+    {"name": "media", "description": "Images and files taken out of payloads at ingest, stored once, and the Langfuse SDK's media channel"},
     {"name": "stats", "description": "Aggregates computed on the fly"},
     {"name": "scores", "description": "Quality judgements about traces"},
     {"name": "prompts", "description": "Versioned prompts with movable labels"},
@@ -86,6 +87,106 @@
             "application/x-protobuf": {"schema": {"type": "string", "format": "binary"}},
             "application/json": {"schema": {"type": "object"}}
           }},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"}
+        }
+      }
+    },
+    "/api/public/media": {
+      "post": {
+        "tags": ["media"],
+        "summary": "Langfuse SDK: an upload URL for one media body, or null when it is already stored",
+        "description": "The first call of the Langfuse SDK's media channel. `mediaId` is the SDK's own derivation — the first 22 characters of the URL-safe base64 SHA-256 — which the SDK checks. `uploadUrl` is null when this project already holds the body, in which case the named trace's ref is recorded and nothing is sent; a body only another project holds is still asked for, because the bytes are the proof of possession. Under the `placeholder` setting `uploadUrl` is always null and nothing is kept. The body is read leniently: fields a newer SDK adds are ignored.",
+        "operationId": "langfuseMediaUploadURL",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {
+          "type": "object",
+          "properties": {
+            "traceId": {"type": "string"},
+            "observationId": {"type": ["string", "null"]},
+            "contentType": {"type": "string"},
+            "contentLength": {"type": "integer", "minimum": 1},
+            "sha256Hash": {"type": "string", "description": "The standard base64 SHA-256 of the body"},
+            "field": {"type": "string"}
+          },
+          "required": ["traceId", "contentType", "contentLength", "sha256Hash"]
+        }}}},
+        "responses": {
+          "200": {"description": "The id and where to PUT the bytes", "content": {"application/json": {"schema": {
+            "type": "object",
+            "properties": {
+              "mediaId": {"type": "string"},
+              "uploadUrl": {"type": ["string", "null"], "description": "A presigned URL, good for an hour and for this server's lifetime; null when nothing needs sending"}
+            },
+            "required": ["mediaId", "uploadUrl"]
+          }}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"}
+        }
+      }
+    },
+    "/api/public/media/{mediaId}/upload": {
+      "put": {
+        "tags": ["media"],
+        "summary": "Langfuse SDK: the presigned upload of one media body",
+        "description": "Where `uploadUrl` points. Presigned like an object-store URL: the SDK sends no credential here, and the signed `token` names the project, the trace, the hash, the type and the length the upload was granted for. A body that does not match the declared length and SHA-256 — or the `x-amz-checksum-sha256` header when it is sent — is refused and nothing is stored.",
+        "operationId": "langfuseMediaPut",
+        "security": [],
+        "parameters": [
+          {"name": "mediaId", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "token", "in": "query", "required": true, "schema": {"type": "string"}}
+        ],
+        "requestBody": {"required": true, "content": {"*/*": {"schema": {"type": "string", "format": "binary"}}}},
+        "responses": {
+          "200": {"description": "Stored"},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "403": {"description": "The token is missing, forged, expired, or for another id",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+          "413": {"description": "The body is larger than the upload declared",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}}
+        }
+      }
+    },
+    "/api/public/media/{mediaId}": {
+      "get": {
+        "tags": ["media"],
+        "summary": "Langfuse SDK: one media body's type, size and address",
+        "description": "The Langfuse shape for a body this project holds. `url` is `GET /api/v1/media/{sha256}`, which needs a credential of the project like every read; it never changes, so `urlExpiry` is a year away.",
+        "operationId": "langfuseMediaGet",
+        "parameters": [{"name": "mediaId", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "responses": {
+          "200": {"description": "The body's record", "content": {"application/json": {"schema": {
+            "type": "object",
+            "properties": {
+              "mediaId": {"type": "string"},
+              "contentType": {"type": "string"},
+              "contentLength": {"type": "integer"},
+              "uploadedAt": {"type": "string", "format": "date-time"},
+              "url": {"type": "string"},
+              "urlExpiry": {"type": "string", "format": "date-time"}
+            },
+            "required": ["mediaId", "contentType", "contentLength", "uploadedAt", "url", "urlExpiry"]
+          }}}},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      },
+      "patch": {
+        "tags": ["media"],
+        "summary": "Langfuse SDK: the report on one media upload",
+        "description": "The SDK's account of how its PUT went. There is no upload state to keep — the PUT stored the body or it did not — so a failure is logged and every report is answered 204.",
+        "operationId": "langfuseMediaPatch",
+        "parameters": [{"name": "mediaId", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {
+          "type": "object",
+          "properties": {
+            "uploadedAt": {"type": "string", "format": "date-time"},
+            "uploadHttpStatus": {"type": "integer"},
+            "uploadHttpError": {"type": ["string", "null"]},
+            "uploadTimeMs": {"type": ["integer", "null"]}
+          }
+        }}}},
+        "responses": {
+          "204": {"description": "Recorded"},
           "400": {"$ref": "#/components/responses/BadRequest"},
           "401": {"$ref": "#/components/responses/Unauthorized"}
         }
@@ -357,6 +458,14 @@
                     "description": "Traces whose earliest span started before the oldest batch arrived, and which an export therefore cannot cover. A lower bound: a late export of an old trace lands after the batch line."}
                 },
                 "required": ["enabled", "batches", "bytes", "oldest_received_at", "newest_received_at", "traces_before_window"]},
+              "media": {"type": "object",
+                "description": "The images and files ingest took out of this project's payloads: the setting that decides whether they are kept, and what the kept ones cost. A body two projects share is in both projects' figures.",
+                "properties": {
+                  "setting": {"type": "string", "enum": ["store", "placeholder"]},
+                  "count": {"type": "integer", "description": "Distinct bodies this project's traces and raw batches point at"},
+                  "bytes": {"type": "integer", "description": "Their decoded size"}
+                },
+                "required": ["setting", "count", "bytes"]},
               "counters": {"type": "object",
                 "description": "This project's ingest traffic since the process started",
                 "properties": {
@@ -575,6 +684,28 @@
           "404": {"$ref": "#/components/responses/NotFound"},
           "409": {"description": "The span id appears in more than one trace; the message lists the candidates",
             "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}}
+        }
+      }
+    },
+    "/api/v1/media/{sha256}": {
+      "get": {
+        "tags": ["media"],
+        "summary": "One image or file a payload references, by the SHA-256 of its bytes",
+        "description": "Ingest takes images and files out of the payloads and leaves a reference object in their place, `{\"tracepad_media\": \"<sha256>\", \"mime_type\", \"size\"}` — this is where its bytes are. Served only to a project that points at the body, from a trace or from a raw batch; any other hash is 404, so a hash seen in a log is not a capability across projects. Content-addressed, so cached for a year and immutable. Every body is served under a sandboxing Content-Security-Policy and `nosniff`; anything but an image, audio or video is sent as an attachment.",
+        "operationId": "media",
+        "parameters": [
+          {"name": "sha256", "in": "path", "required": true,
+            "schema": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}
+        ],
+        "responses": {
+          "200": {"description": "The bytes, in the MIME type the first client to send them declared",
+            "headers": {
+              "Cache-Control": {"schema": {"type": "string"}, "description": "`private, max-age=31536000, immutable`"}
+            },
+            "content": {"*/*": {"schema": {"type": "string", "format": "binary"}}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
         }
       }
     },
@@ -2210,7 +2341,9 @@
             "raw_retention_days": {"type": ["integer", "null"], "minimum": 1, "maximum": 36500,
               "description": "The window for stored OTLP bodies; null follows retention_days"},
             "stats_retention_days": {"type": ["integer", "null"], "minimum": 1, "maximum": 36500,
-              "description": "The window for the hourly statistics rollup, measured by the hour a row summarizes; null keeps it forever, which is the default. The rollup outlives the traces it summarizes, so shortening this window destroys history the trace sweep spares — it asks for the same confirmation the other two do."}
+              "description": "The window for the hourly statistics rollup, measured by the hour a row summarizes; null keeps it forever, which is the default. The rollup outlives the traces it summarizes, so shortening this window destroys history the trace sweep spares — it asks for the same confirmation the other two do."},
+            "media": {"type": "string", "enum": ["store", "placeholder"],
+              "description": "What ingest does with an image or file it takes out of a payload: `store` keeps the body, `placeholder` keeps only a reference saying it was not stored. Not destructive either way — bodies already kept stay until their traces go."}
           }}}}},
         "responses": {
           "200": {"description": "The project as it is now, or the dry run of a window that shrinks",
@@ -2851,6 +2984,7 @@
           "retention_days": {"type": ["integer", "null"], "maximum": 36500, "description": "null means the data is kept forever, which is the default"},
           "raw_retention_days": {"type": ["integer", "null"], "maximum": 36500, "description": "null means raw follows retention_days"},
           "stats_retention_days": {"type": ["integer", "null"], "maximum": 36500, "description": "The window for the statistics rollup, which outlives the traces it summarizes; null means it is kept forever, which is the default"},
+          "media": {"type": "string", "enum": ["store", "placeholder"], "description": "What ingest does with an image or file it takes out of a payload (spec 041 #6)"},
           "created_at": {"type": "string", "format": "date-time"},
           "deleted_at": {"type": "string", "format": "date-time"},
           "purge_at": {"type": "string", "format": "date-time", "description": "When the sweeper destroys the data; seven days after the delete, and not configurable"},
@@ -2859,7 +2993,7 @@
           "traces_24h": {"type": "integer", "minimum": 0,
             "description": "Present on every row of a listing asked with `activity=24h`, and absent otherwise: the traces whose timestamp falls in the last 24 hours, from the hourly roll-up behind the watermark and the raw rows past it. A soft-deleted project carries 0 (spec 029 #8)"}
         },
-        "required": ["id", "name", "retention_days", "raw_retention_days", "stats_retention_days", "created_at"]
+        "required": ["id", "name", "retention_days", "raw_retention_days", "stats_retention_days", "media", "created_at"]
       },
       "NewKey": {
         "type": "object",
@@ -2974,7 +3108,7 @@
         "properties": {
           "dry_run": {"const": false},
           "deleted": {"type": "object", "additionalProperties": {"type": "integer"},
-            "description": "`traces`, `observations`, `scores`, `payloads` and `annotation_items`"},
+            "description": "`traces`, `observations`, `scores`, `payloads`, `annotation_items`, and the `media` bodies collected with their `media_bytes`"},
           "id": {"type": "string", "pattern": "^[0-9a-f]{32}$"}
         },
         "required": ["dry_run", "deleted", "id"]
