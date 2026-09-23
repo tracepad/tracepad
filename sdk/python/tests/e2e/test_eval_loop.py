@@ -11,11 +11,11 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from harness import BINARY, KEY, Store, trace_of
 from opentelemetry import trace as otel_api
 from opentelemetry.sdk.trace import TracerProvider
 
 import tracepad
+from harness import BINARY, KEY, Store, trace_of
 
 pytestmark = pytest.mark.skipif(not BINARY, reason="TRACEPAD_BINARY is not set")
 
