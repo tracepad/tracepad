@@ -19,10 +19,8 @@ import (
 // was sent" and equals only another nil. Where the decoded value cannot be
 // trusted to stand for the text, the bytes decide, which the fast path
 // already did: a body that does not parse, carries anything after its value,
-// repeats a key (last-wins would hide an edit to the shadowed one), or holds
-// U+FFFD in a string — the decoder writes that for a lone surrogate escape
-// and for an invalid UTF-8 byte alike, so two different strings would read
-// as one.
+// repeats a key (last-wins would hide an edit to the shadowed one), or is not
+// lossless (see lossless).
 func sameJSON(a, b []byte) bool {
 	if bytes.Equal(a, b) {
 		return true
@@ -47,6 +45,9 @@ var errUntrusted = errors.New("decoded value does not stand for the text")
 // decodeJSONValue parses exactly one value with its numbers kept as written,
 // so no precision is lost on the way to the comparison.
 func decodeJSONValue(raw []byte) (any, error) {
+	if !lossless(raw) {
+		return nil, errUntrusted
+	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.UseNumber()
 	value, err := decodeToken(decoder)
@@ -85,7 +86,7 @@ func decodeToken(decoder *json.Decoder) (any, error) {
 				return nil, err
 			}
 			name, _ := key.(string)
-			if _, repeated := object[name]; repeated || strings.ContainsRune(name, utf8.RuneError) {
+			if _, repeated := object[name]; repeated {
 				return nil, errUntrusted
 			}
 			if object[name], err = decodeToken(decoder); err != nil {
@@ -94,15 +95,60 @@ func decodeToken(decoder *json.Decoder) (any, error) {
 		}
 		_, err := decoder.Token()
 		return object, err
-	case string:
-		if strings.ContainsRune(token, utf8.RuneError) {
-			return nil, errUntrusted
-		}
-		return token, nil
 	default:
-		// json.Number, bool, nil.
+		// string, json.Number, bool, nil.
 		return token, nil
 	}
+}
+
+// lossless reports whether decoding raw keeps every string distinct from
+// every other: its bytes are valid UTF-8 and every `\uD800`–`\uDFFF` escape
+// is half of a pair. The decoder writes U+FFFD for an invalid byte and for a
+// lone surrogate alike, so two different strings would otherwise read as one;
+// a U+FFFD that was sent as such is an ordinary character. Every backslash in
+// a valid body opens an escape inside a string, so the scan needs no string
+// state of its own.
+func lossless(raw []byte) bool {
+	if !utf8.Valid(raw) {
+		return false
+	}
+	for i := 0; i < len(raw); i++ {
+		if raw[i] != '\\' {
+			continue
+		}
+		i++
+		if i >= len(raw) || raw[i] != 'u' {
+			continue
+		}
+		code, ok := escapedUnit(raw, i+1)
+		if !ok {
+			return false
+		}
+		i += 4
+		switch {
+		case code >= 0xDC00 && code <= 0xDFFF:
+			return false
+		case code >= 0xD800 && code <= 0xDBFF:
+			if i+2 >= len(raw) || raw[i+1] != '\\' || raw[i+2] != 'u' {
+				return false
+			}
+			low, ok := escapedUnit(raw, i+3)
+			if !ok || low < 0xDC00 || low > 0xDFFF {
+				return false
+			}
+			i += 6
+		}
+	}
+	return true
+}
+
+// escapedUnit reads the four hex digits of a `\u` escape starting at at.
+func escapedUnit(raw []byte, at int) (uint64, bool) {
+	if at+4 > len(raw) {
+		return 0, false
+	}
+	code, err := strconv.ParseUint(string(raw[at:at+4]), 16, 16)
+	return code, err == nil
 }
 
 func equalJSONValue(a, b any) bool {
@@ -144,42 +190,42 @@ func equalJSONValue(a, b any) bool {
 // power of ten, `[-]digits e exp` with no leading or trailing zeros, so two
 // spellings of one decimal value come out the same. It works on the text:
 // no float rounding, and no big-number arithmetic an exponent of a million
-// digits could turn into a cost. Zero is "0" whatever its sign. A number whose
-// exponent has more than 15 significant digits is returned as written —
-// equal only to itself, which is the old byte comparison.
+// digits could turn into a cost. Zero is "0" whatever its sign or exponent.
+// A number whose exponent has more than 15 significant digits is returned as
+// written, lower-cased — equal only to its own spelling, which is the old
+// byte comparison.
 func canonicalNumber(number string) string {
 	text := number
 	negative := strings.HasPrefix(text, "-")
 	text = strings.TrimPrefix(text, "-")
 
+	mantissa, written, scientific := strings.Cut(strings.ToLower(text), "e")
+	if strings.Trim(mantissa, "0.") == "" {
+		return "0"
+	}
 	exponent := 0
-	if at := strings.IndexAny(text, "eE"); at >= 0 {
-		written := text[at+1:]
+	if scientific {
 		negativeExponent := strings.HasPrefix(written, "-")
 		written = strings.TrimLeft(strings.TrimLeft(written, "+-"), "0")
 		if len(written) > 15 {
-			return number
+			return strings.ToLower(number)
 		}
 		if written != "" {
 			parsed, err := strconv.Atoi(written)
 			if err != nil {
-				return number
+				return strings.ToLower(number)
 			}
 			exponent = parsed
 		}
 		if negativeExponent {
 			exponent = -exponent
 		}
-		text = text[:at]
 	}
-	integer, fraction, _ := strings.Cut(text, ".")
+	integer, fraction, _ := strings.Cut(mantissa, ".")
 	digits := integer + fraction
 	exponent -= len(fraction)
 
 	digits = strings.TrimLeft(digits, "0")
-	if digits == "" {
-		return "0"
-	}
 	trimmed := strings.TrimRight(digits, "0")
 	exponent += len(digits) - len(trimmed)
 

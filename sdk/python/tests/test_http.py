@@ -52,10 +52,11 @@ def test_non_ascii_goes_as_raw_utf8(monkeypatch: pytest.MonkeyPatch) -> None:
     assert json.loads(data) == body
 
 
-def test_a_lone_surrogate_falls_back_to_the_escape(monkeypatch: pytest.MonkeyPatch) -> None:
-    body = {"input": "bad \udcff byte"}
+def test_a_lone_surrogate_is_escaped_and_the_rest_stays_raw(monkeypatch: pytest.MonkeyPatch) -> None:
+    body = {"input": "bad \udcff byte", "note": "Καλημέρα"}
 
     data = sent(monkeypatch, body)
 
     assert b"\\udcff" in data
+    assert "Καλημέρα".encode() in data
     assert json.loads(data) == body

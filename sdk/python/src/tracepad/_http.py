@@ -110,11 +110,8 @@ def _encode(body: Any) -> bytes:
     """The body as raw UTF-8 JSON, the way every other client sends it: a
     non-ASCII string costs its bytes, not six per character of escape.
 
-    A string with a lone surrogate has no UTF-8 form; for that body alone the
-    ASCII escape is the only honest spelling, and it is what the store has
-    always accepted.
+    A lone surrogate has no UTF-8 form; `backslashreplace` writes it as the
+    `\\udcff` escape it would have had, which is valid JSON inside the string
+    that holds it, and leaves the rest of the body raw.
     """
-    try:
-        return json.dumps(body, ensure_ascii=False).encode()
-    except UnicodeEncodeError:
-        return json.dumps(body).encode()
+    return json.dumps(body, ensure_ascii=False).encode("utf-8", "backslashreplace")

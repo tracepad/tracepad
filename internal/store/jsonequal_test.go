@@ -30,6 +30,12 @@ func TestSameJSON(t *testing.T) {
 		{`"\ud800"`, `"\ufffd"`, false},
 		{"\"\xff\"", "\"\xfe\"", false},
 		{`{"\ud800":1}`, `{"\udc00":1}`, false},
+		{`"\ud800\u0041"`, `"\udbff\u0041"`, false},
+		// A U+FFFD that was sent as such, a surrogate pair, and an escaped
+		// backslash before a `u` are ordinary text.
+		{`{"a":"\ufffd","b":1}`, `{"b":1,"a":"�"}`, true},
+		{`"\ud83d\ude00"`, `"😀"`, true},
+		{`{"a":"\\ud800","b":1}`, `{"b":1,"a":"\\ud800"}`, true},
 		// A repeated key could hide an edit to the one a decoder drops.
 		{`{"a":1,"a":2}`, `{"a":2}`, false},
 		// Anything after the value is not ignored.
@@ -59,7 +65,7 @@ func TestSameJSON(t *testing.T) {
 func TestCanonicalNumber(t *testing.T) {
 	equal := [][]string{
 		{"1", "1.0", "1.000", "1e0", "1E+0", "10e-1", "0.1e1", "100e-2"},
-		{"0", "-0", "0.0", "-0.0", "0e10", "0E-5"},
+		{"0", "-0", "0.0", "-0.0", "0e10", "0E-5", "0e1234567890123456789", "-0.00E-99999999999999999999"},
 		{"-12.5", "-125e-1", "-1.25E1", "-0.125e2"},
 		{"1200", "1.2e3", "12e2", "1200.00"},
 		{"12345678901234567890123", "1.2345678901234567890123e22"},
@@ -91,5 +97,8 @@ func TestCanonicalNumber(t *testing.T) {
 	huge := "1e1234567890123456789"
 	if got := canonicalNumber(huge); got != huge {
 		t.Errorf("canonicalNumber(%s) = %s, want it as written", huge, got)
+	}
+	if got := canonicalNumber("1E1234567890123456789"); got != huge {
+		t.Errorf("canonicalNumber(1E…) = %s, want the case of the e not to count", got)
 	}
 }
