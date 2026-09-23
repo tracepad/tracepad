@@ -13,7 +13,7 @@ import pytest
 from opentelemetry import trace as otel_api
 
 import tracepad
-from tracepad import _config, _datasets, _harness, _scores, _tracing
+from tracepad import _config, _datasets, _harness, _tracing
 from tracepad._attributes import ITEM_ID, RUN_ID
 from tracepad._errors import TracepadHTTPError
 from tracepad._http import Response
@@ -212,7 +212,7 @@ def test_a_span_inside_the_block_carries_the_run_and_the_item(
 def test_the_block_opens_no_span_of_its_own(spans: Any, store: Store) -> None:
     with opened(store).item(CASE):
         pass
-    assert spans.all() == []
+    assert spans.spans == []
 
 
 def test_every_root_is_recorded_and_the_last_is_the_trace(spans: Any, store: Store) -> None:
@@ -221,7 +221,7 @@ def test_every_root_is_recorded_and_the_last_is_the_trace(spans: Any, store: Sto
             with tracepad.span("attempt"):
                 pass
 
-    roots = [format(span.context.trace_id, "032x") for span in spans.all()]
+    roots = [format(span.context.trace_id, "032x") for span in spans.spans]
     assert attempt.traces == roots
     assert attempt.trace_id == roots[-1]
     assert attempt.attributes() == {RUN_ID: RUN, ITEM_ID: CASE}
@@ -325,18 +325,14 @@ def test_a_score_before_any_trace_raises(spans: Any, store: Store) -> None:
 
 
 def test_a_score_goes_against_the_trace_the_block_saw(spans: Any, store: Store) -> None:
-    sent: list[list[dict[str, Any]]] = []
-    _scores.reset(_scores.ScoreQueue(sent.append))
-
     with opened(store).item(CASE) as attempt:
         with tracepad.span("answer"):
             pass
         attempt.score("accuracy", 1)
         attempt.score("verdict", string_value="pass", data_type="categorical")
-    _scores.flush_scores(2.0)
 
-    assert [item["trace_id"] for batch in sent for item in batch] == [attempt.trace_id] * 2
-    assert sent[-1][-1]["string_value"] == "pass"
+    assert [score["trace_id"] for score in spans.scores] == [attempt.trace_id] * 2
+    assert spans.scores[-1]["string_value"] == "pass"
 
 
 # --- the rest -------------------------------------------------------------
@@ -357,7 +353,7 @@ def test_a_case_may_be_a_dict_an_item_or_a_bare_id(spans: Any, store: Store) -> 
     for case in ({"id": CASE, "input": 1}, tracepad.Item(id=CASE), CASE):
         with run.item(case), tracepad.span("case"):  # type: ignore[arg-type]
             pass
-    assert [span.attributes[ITEM_ID] for span in spans.all()] == [CASE] * 3
+    assert [span.attributes[ITEM_ID] for span in spans.spans] == [CASE] * 3
 
 
 def test_a_run_the_store_refused_to_close_is_still_open(store: Store) -> None:

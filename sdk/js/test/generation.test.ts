@@ -43,7 +43,7 @@ describe('span, event and generation', () => {
     const result = tracepad.span('retrieve', { input: { query: 'q' }, metadata: { hits: 2 } }, (step) => {
       expect(step.traceId).toMatch(/^[0-9a-f]{32}$/);
       expect(step.spanId).toMatch(/^[0-9a-f]{16}$/);
-      expect(seen.all()).toEqual([]);
+      expect(seen.spans).toEqual([]);
       step.update({ output: ['doc'] });
       return 'ok';
     });
@@ -67,7 +67,7 @@ describe('span, event and generation', () => {
       await new Promise((tick) => setTimeout(tick, 5));
       return 'done';
     });
-    expect(seen.all()).toEqual([]);
+    expect(seen.spans).toEqual([]);
     expect(await pending).toBe('done');
     expect(seen.one('later').ended).toBe(true);
 
@@ -104,7 +104,7 @@ describe('span, event and generation', () => {
     expect(warnings).toHaveLength(1);
     lookup();
     lookup();
-    expect(seen.all().map((s) => s.attributes[attrs.OBSERVATION_TYPE])).toEqual([
+    expect(seen.spans.map((s) => s.attributes[attrs.OBSERVATION_TYPE])).toEqual([
       'retriever', 'retreiver', 'retreiver', 'retreiver', 'retriver', 'retriver',
     ]);
     expect(warnings).toEqual([
@@ -175,7 +175,7 @@ describe('span, event and generation', () => {
     tracepad.event('cache.hit', { type: 'event' } as tracepad.SpanOptions, () => undefined);
     tracepad.event('cache.hit', { type: '' } as never, () => undefined);
     expect(seen.attributes('chat')[attrs.OBSERVATION_TYPE]).toBe('generation');
-    expect(seen.all().filter((s) => s.name !== 'chat').map((s) => s.attributes[attrs.OBSERVATION_TYPE])).toEqual([
+    expect(seen.spans.filter((s) => s.name !== 'chat').map((s) => s.attributes[attrs.OBSERVATION_TYPE])).toEqual([
       'event', 'event', 'event', 'event',
     ]);
     expect(warnings).toEqual([

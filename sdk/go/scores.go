@@ -45,6 +45,9 @@ type scoreQueue struct {
 	started bool
 	closed  bool
 	done    chan struct{}
+	// keep, when set, is tracepadtest's capture: each score is handed to it
+	// on the caller's goroutine, and nothing is posted or started.
+	keep func(map[string]any)
 }
 
 func newScoreQueue(send func(context.Context, []map[string]any) error) *scoreQueue {
@@ -57,13 +60,17 @@ func newScoreQueue(send func(context.Context, []map[string]any) error) *scoreQue
 func (q *scoreQueue) start() {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	if !q.started && !q.closed {
+	if !q.started && !q.closed && q.keep == nil {
 		q.started = true
 		go q.run()
 	}
 }
 
 func (q *scoreQueue) submit(score map[string]any) {
+	if q.keep != nil {
+		q.keep(score)
+		return
+	}
 	// The goroutine starts once there is a store to post to: a score written
 	// before Init — with the host and the key coming as options — waits in
 	// the queue rather than being posted nowhere and dropped. Init starts it.

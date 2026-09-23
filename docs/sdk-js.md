@@ -504,6 +504,57 @@ and stamps nothing.
 another SDK wants its spans stamped all the same, and so does a provider that
 took `spanProcessor({ export: false })`.
 
+## Testing your instrumentation
+
+`tracepad/testing` is what a test suite uses to check that the code traces:
+that a step is a span with the right name, a model call a generation with its
+usage, a thumbs-up a score. It is an entry point of its own, so an
+application's bundle does not carry it.
+
+```ts
+import { afterEach, expect, test } from 'vitest';
+import { type Capture, capture } from 'tracepad/testing';
+
+let captured: Capture;
+afterEach(() => captured.restore());
+
+test('the answer is traced', async () => {
+  captured = capture();
+  await app.answer('why is the sky blue');
+
+  expect(captured.one('answer').attributes['tracepad.observation.type']).toBe('span');
+  expect(captured.attributes('chat')['gen_ai.usage.input_tokens']).toBe(12);
+  expect(captured.scores[0]?.name).toBe('helpful');
+});
+```
+
+`capture()` resets everything the package keeps process-wide, registers a
+global provider that records into memory, and initialises the package against
+it with export off; the score queue keeps each body instead of posting it.
+`restore()` resets the process again, and what was captured stays readable.
+The handle is also `Disposable`: `using captured = capture();` restores at the
+end of the block where the runtime has `using`.
+
+| On a `Capture` | What it is |
+|---|---|
+| `spans` | Every finished span, in the order it ended — the SDK's own `ReadableSpan` |
+| `one(name)` | The single span of that name; throws naming the spans there were otherwise |
+| `attributes(name)` | That span's attributes |
+| `scores` | The bodies `score()` would have posted: `name`, `trace_id`, `value` and the rest |
+
+`reset()` alone returns the process to one that never called `init` — tracing
+off, as [above](#init) — for a test of the code with tracing off: `score`
+does nothing, and the ids are `undefined`. It also puts the logger back to
+`console`.
+
+Nothing is sent: the placeholder host is `tracepad.test`, which does not
+resolve, so a REST call a test forgot to stub — `prompt`, a dataset,
+`deleteTrace` — fails rather than reaching a store. A provider your
+application registers at import time is replaced for the capture and not
+restored after it. The capture is process-wide: Vitest and Jest run each file
+in a worker of its own, and the tests inside one file one at a time unless
+told otherwise.
+
 ## What throws and what does not
 
 | Path | On failure |

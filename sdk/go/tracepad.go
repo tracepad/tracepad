@@ -19,6 +19,9 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
+
+	"github.com/tracepad/tracepad/sdk/go/internal/hook"
 )
 
 // Option configures Init.
@@ -203,11 +206,14 @@ func attach(ctx context.Context, sdk *sdktrace.TracerProvider, c config, export 
 }
 
 // isDefault tells the API's own delegating provider — the one every process
-// has until something sets one — from a provider an application set that is
-// not the SDK's. There is no public way to ask, and replacing an
+// has until something sets one, or what reset leaves — from a provider an
+// application set that is not the SDK's. There is no public way to ask, and replacing an
 // application's provider because its type was unfamiliar is exactly what
 // Decision 2 refuses, so the package's own internal path is the test.
 func isDefault(provider trace.TracerProvider) bool {
+	if _, ok := provider.(unset); ok {
+		return true
+	}
 	t := reflect.TypeOf(provider)
 	for t != nil && t.Kind() == reflect.Pointer {
 		t = t.Elem()
@@ -297,10 +303,29 @@ func (d *defaults) close(ctx context.Context) error {
 	return err
 }
 
-// reset forgets the default, for tests: Init is process-wide by design. The
-// queue is closed outside the lock: its goroutine reads the configuration
-// under it.
+func init() {
+	hook.Reset = reset
+	hook.Keep = func(keep func(map[string]any)) {
+		q := newScoreQueue(nil)
+		q.keep = keep
+		def.mu.Lock()
+		def.scores = q
+		def.mu.Unlock()
+	}
+}
+
+// unset is the global provider after reset. The API's own default cannot
+// come back once anything was set — the first SetTracerProvider delegates it
+// for good — so this no-op stands in for it: tracing off, and nothing set to
+// an Init that runs next (spec 040 #9).
+type unset struct{ noop.TracerProvider }
+
+// reset returns the process to never initialised — for this package's tests
+// and, through the hook, for tracepadtest's (spec 040 #3). Init is
+// process-wide by design. The queue is closed outside the lock: its
+// goroutine reads the configuration under it.
 func reset() {
+	otel.SetTracerProvider(unset{})
 	d := def
 	d.mu.Lock()
 	scores := d.scores
