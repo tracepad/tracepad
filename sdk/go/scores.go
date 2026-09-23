@@ -249,12 +249,20 @@ func WithID(id string) ScoreOption {
 
 // WithTraceID names the trace to score instead of the context's.
 func WithTraceID(traceID string) ScoreOption {
-	return func(body map[string]any, _ *scoreTarget) { body["trace_id"] = traceID }
+	return func(body map[string]any, _ *scoreTarget) {
+		if traceID != "" { // an Observation's TraceID with tracing off: no target given
+			body["trace_id"] = traceID
+		}
+	}
 }
 
 // WithObservationID names the observation to score, inside its trace.
 func WithObservationID(observationID string) ScoreOption {
-	return func(body map[string]any, _ *scoreTarget) { body["observation_id"] = observationID }
+	return func(body map[string]any, _ *scoreTarget) {
+		if observationID != "" {
+			body["observation_id"] = observationID
+		}
+	}
 }
 
 // OnObservation scores the context's span rather than its trace alone.
@@ -279,9 +287,7 @@ func Score(ctx context.Context, name string, opts ...ScoreOption) error {
 		opt(body, &target)
 	}
 	if _, given := body["trace_id"]; !given {
-		// A span that does not record, with tracing off, is the no-op
-		// tracer's — its context invalid, or a propagated caller's.
-		if !initialized() && !trace.SpanFromContext(ctx).IsRecording() {
+		if tracingOff() {
 			def.log().Debug("tracepad.Score: tracing is off (no Init); the score was dropped", "name", name)
 			return nil
 		}

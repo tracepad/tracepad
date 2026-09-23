@@ -164,6 +164,24 @@ def test_without_init_the_application_s_own_provider_still_scores(sender: Sender
 
     assert observation.trace_id is not None and len(observation.trace_id) == 32
     assert sender.batches == [[{"name": "helpful", "trace_id": observation.trace_id, "value": 1}]]
+    # Tracing is on here, so outside every span is the programming error it
+    # always was (spec 039 #7).
+    with pytest.raises(ValueError, match="no active span"):
+        tracepad.score("helpful", 1)
+
+
+def test_without_init_a_sampled_out_span_keeps_its_ids() -> None:
+    # A sampler that drops a trace leaves its ids real: they are propagated
+    # and correlated whether or not the spans are kept (spec 039 #7).
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.sampling import ALWAYS_OFF
+
+    otel_api.set_tracer_provider(TracerProvider(sampler=ALWAYS_OFF))
+    with tracepad.span("handler") as observation:
+        assert not observation.span.is_recording()
+
+    assert observation.trace_id is not None and len(observation.trace_id) == 32
+    assert observation.span_id is not None and len(observation.span_id) == 16
 
 
 def test_the_batch_closes_at_a_hundred(sender: Sender) -> None:

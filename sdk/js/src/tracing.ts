@@ -40,8 +40,8 @@ import { flushScores } from './scores.js';
 let initialized = false;
 let handedOut = false;
 
-/** Whether `init` or `spanProcessor` ran: not calling either turns tracing off (spec 039 #1). */
-export const tracingOn = (): boolean => initialized || handedOut;
+/** No `init` or `spanProcessor`, and no provider of the application's own: every span is the API's no-op (spec 039 #7). */
+export const tracingOff = (): boolean => !initialized && !handedOut && delegateOf() === undefined;
 
 /** The observation the current callback opened, so that `update` can tell
  * what the application said explicitly from what the wrapper captured. */
@@ -325,12 +325,12 @@ export class Observation {
   /** @internal What the application named itself, which the capture of
    * Decision 4 must not overwrite afterwards. */
   readonly explicit = new Set<string>();
-  /** A trace behind it, not the no-op tracer's invalid or echoed caller's context (spec 039 #3). */
+  /** A trace behind it, decided at open (spec 039 #3, #7). */
   private readonly traced: boolean;
 
   constructor(span: Span) {
     this.span = span;
-    this.traced = isSpanContextValid(span.spanContext()) && (span.isRecording() || tracingOn());
+    this.traced = isSpanContextValid(span.spanContext()) && !tracingOff();
   }
 
   /** The trace's id, or `undefined` with no trace behind the span — tracing off (spec 039 #3). */
@@ -526,7 +526,7 @@ const warnedKinds = new Set<string>();
 
 function firstTime(key: string): boolean {
   if (warnedKinds.has(key)) return false;
-  if (tracingOn() && warnedKinds.size < 256) warnedKinds.add(key);
+  if ((initialized || handedOut) && warnedKinds.size < 256) warnedKinds.add(key);
   return true;
 }
 

@@ -248,7 +248,7 @@ func Event(ctx context.Context, name string, opts ...SpanOption) (context.Contex
 func open(ctx context.Context, name string, f *fields, start ...trace.SpanStartOption) (context.Context, *Observation) {
 	start = append(start, trace.WithAttributes(observationAttributes(f)...))
 	ctx, span := tracer().Start(ctx, name, start...)
-	return ctx, &Observation{span: span, traced: span.SpanContext().IsValid() && (span.IsRecording() || initialized())}
+	return ctx, &Observation{span: span, traced: span.SpanContext().IsValid() && !tracingOff()}
 }
 
 // Update writes observation attributes on the context's current span,

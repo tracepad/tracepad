@@ -15,7 +15,7 @@ import { isSpanContextValid, trace } from '@opentelemetry/api';
 import { current } from './config.js';
 import { describe, request } from './http.js';
 import { debug, warn } from './log.js';
-import { tracingOn } from './tracing.js';
+import { tracingOff } from './tracing.js';
 
 export const BATCH_SIZE = 100;
 export const INTERVAL = 2000;
@@ -150,9 +150,11 @@ export function score(name: string, value?: number | ScoreFields, fields: ScoreF
   }
   let { traceId, observationId } = fields;
   if (traceId === undefined) {
-    if (!tracingOn() && !trace.getActiveSpan()?.isRecording()) return debug(`score(): tracing is off (no init); ${JSON.stringify(name)} was dropped`);
+    if (tracingOff()) return debug(`score(): tracing is off (no init); ${JSON.stringify(name)} was dropped`);
     const active = trace.getActiveSpan()?.spanContext();
-    if (active === undefined || !isSpanContextValid(active)) throw new Error('tracepad: score(): no active span and no traceId; pass traceId');
+    if (active === undefined || !isSpanContextValid(active)) {
+      throw new Error('tracepad: score(): no active span and no traceId; pass traceId');
+    }
     traceId = active.traceId;
     if (fields.observation && observationId === undefined) observationId = active.spanId;
   }

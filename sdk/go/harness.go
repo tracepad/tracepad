@@ -11,9 +11,11 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
 )
 
 // The eval harness: a run, the context that stamps it, and the scores (spec
@@ -165,12 +167,19 @@ func (r *Run) Item(ctx context.Context, item Item) (context.Context, *Attempt) {
 	return context.WithValue(ctx, attemptKey{}, attempt), attempt
 }
 
-// initialized reports whether Init ran: not calling it is how tracing is
-// turned off (spec 039 #1).
-func initialized() bool {
-	def.mu.Lock()
-	defer def.mu.Unlock()
-	return def.initialized
+// initialized reports whether Init ran.
+func initialized() bool { return def.ready.Load() }
+
+// tracingOff reports a process that never called Init and has no provider of
+// its own: every span there is the API's no-op — an invalid context, or a
+// propagated caller's echoed (spec 039 #1, #7).
+func tracingOff() bool {
+	if initialized() {
+		return false
+	}
+	provider := otel.GetTracerProvider()
+	_, disabled := provider.(noop.TracerProvider)
+	return disabled || isDefault(provider)
 }
 
 // Finish delivers everything the run produced, then closes it as finished.

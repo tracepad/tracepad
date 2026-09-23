@@ -1,7 +1,7 @@
 /** Scores: the queue, the timer and the batch (spec 032 #6). */
 
 import { ROOT_CONTEXT, context, trace } from '@opentelemetry/api';
-import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
+import { AlwaysOffSampler, NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
 import { describe, expect, test, vi } from 'vitest';
 
 import * as tracepad from '../src/index.js';
@@ -113,13 +113,32 @@ describe('tracing off: no init in this process (spec 039)', () => {
   test("without init, the application's own provider still scores (the spec's first edge case)", async () => {
     new NodeTracerProvider().register();
     const { sent, queue } = recording();
+    let later: Promise<void> = Promise.resolve();
     const traceId = tracepad.span('handler', (step) => {
       tracepad.score('helpful', 1);
+      // A continuation that scores after the span ended: its trace is as real (spec 039 #7).
+      later = new Promise((done) => setTimeout(() => done(tracepad.score('late', 1)), 1));
       return step.traceId;
     });
+    await later;
     await queue.flush(1000);
     expect(traceId).toMatch(/^[0-9a-f]{32}$/);
-    expect(sent).toEqual([[{ name: 'helpful', trace_id: traceId, value: 1 }]]);
+    expect(sent.flat()).toEqual([
+      { name: 'helpful', trace_id: traceId, value: 1 },
+      { name: 'late', trace_id: traceId, value: 1 },
+    ]);
+    // Tracing is on here, so outside every span is the programming error it always was.
+    expect(() => tracepad.score('helpful', 1)).toThrow('no active span and no traceId');
+  });
+
+  test('without init, a sampled-out span keeps its ids: they are propagated whether or not kept', () => {
+    new NodeTracerProvider({ sampler: new AlwaysOffSampler() }).register();
+    const ids = tracepad.span('handler', (step) => {
+      expect(step.span.isRecording()).toBe(false);
+      return [step.traceId, step.spanId];
+    });
+    expect(ids[0]).toMatch(/^[0-9a-f]{32}$/);
+    expect(ids[1]).toMatch(/^[0-9a-f]{16}$/);
   });
 
   test('the default logger keeps debug lines off stdout', async () => {

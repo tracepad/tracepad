@@ -126,8 +126,8 @@ miss.End()
 
 `Span`, `Event` and `Generation` hand out a handle carrying `TraceID()`,
 `SpanID()`, `Update(...)`, `End()`, `Fail(err)` and the OTel span itself as
-`Span()`. With no trace behind the span — tracing off, `Init` never called —
-the two ids are `""`, not a string of zeros, as `Attempt.TraceID()` is before
+`Span()`. With no trace behind the span — tracing off: `Init` never called and
+no provider of the application's own — the two ids are `""`, not a string of zeros, as `Attempt.TraceID()` is before
 anything has run.
 
 ## Generations
@@ -237,7 +237,7 @@ With no target given, the target is the trace of the context's span — and its
 observation too with `OnObservation()`. Outside a span, with no
 `WithTraceID`, the call returns `ErrNoTrace`: a score that silently went
 nowhere is the failure this API is worst at surfacing. In a process that never
-called `Init` the same call returns `nil` and logs a debug line instead —
+called `Init` and has no provider of its own the same call returns `nil` and logs a debug line instead —
 tracing is off, every span is a no-op there, and the call site is not wrong. A
 `WithTraceID` is scored either way.
 
@@ -433,7 +433,7 @@ stamped and the run covers no case; the first `run.Item` says so in the log.
 | `Prompt`, `Flush`, `shutdown`, `DeleteTrace`, `DeleteTraces`, and every call of the harness above | An error: `*HTTPError{Status, Body}` for a non-2xx answer, the transport's own otherwise |
 | `Init` with no host or key | `ErrConfig`, wrapped with what is missing |
 | `Score` with no target, initialised, outside every span | `ErrNoTrace` — a programming error, visible at the call site |
-| `Score` with no target, never initialised | `nil`; a debug line — tracing is off |
+| `Score` with no target, never initialised, no provider of its own | `nil`; a debug line — tracing is off |
 
 Both sentinels are for `errors.Is`, and `*HTTPError` for `errors.As`.
 Instrumentation that can break the function it observes is worse than none.

@@ -93,9 +93,11 @@ def init(
     _initialized = True
 
 
-def initialized() -> bool:
-    """Whether `init` ran in this process: not calling it turns tracing off."""
-    return _initialized
+def tracing_off() -> bool:
+    """No `init` and no provider of the application's own: every span is the API's
+    no-op — an invalid context, or a propagated caller's echoed (spec 039 #7)."""
+    no_op = (otel.ProxyTracerProvider, otel.NoOpTracerProvider)
+    return not _initialized and isinstance(otel.get_tracer_provider(), no_op)
 
 
 def _resource(config: Config) -> Any:
@@ -161,10 +163,8 @@ class Observation:
 
     def __init__(self, span: otel.Span) -> None:
         self.span = span
-        # Whether a trace is behind it: with tracing off, OTel's no-op tracer
-        # hands out an invalid context, or echoes a propagated parent's — a
-        # caller's ids, not this step's (spec 039 #3).
-        self._traced = span.get_span_context().is_valid and (span.is_recording() or _initialized)
+        # Whether a trace is behind it, decided at open (spec 039 #3, #7).
+        self._traced = span.get_span_context().is_valid and not tracing_off()
         self._ended = False
         # What the application named itself, which the capture of Decision 4
         # must not overwrite afterwards.
