@@ -13,7 +13,7 @@ from opentelemetry import trace as otel_api
 from opentelemetry.sdk.trace import TracerProvider
 
 import tracepad
-from tracepad import _scores, testing
+from tracepad import _scores, _tracing, testing
 
 
 def test_a_capture_records_the_spans_in_order_and_the_scores() -> None:
@@ -88,26 +88,37 @@ def test_a_tracer_taken_at_import_records_in_every_capture() -> None:
         assert step.parent is not None and step.parent.span_id == root.context.span_id
 
 
-def test_after_a_reset_init_sets_a_provider_of_its_own() -> None:
-    # The reset reaches into `opentelemetry.trace`'s private globals (spec 040
-    # #3): a release that renames them fails here, not in an application's
-    # suite — `init` could not set its provider, and the tracer taken before
-    # would not follow it.
-    tracer = otel_api.get_tracer("app")
-    with testing.capture():
-        pass
+def test_a_tracer_first_used_under_init_still_records_in_later_captures() -> None:
+    # What `trace.get_tracer()` hands out at import, before any provider: a
+    # proxy that binds to the global provider at its first span, for good.
+    tracer = otel_api._PROXY_TRACER_PROVIDER.get_tracer("app")
     tracepad.init("http://tracepad.test:4318", "tp-sk-test", export=False)
-    built = otel_api.get_tracer_provider()
-    assert isinstance(built, TracerProvider)
-    with tracer.start_as_current_span("app") as span:
+    with tracer.start_as_current_span("under init") as span:
         assert span.is_recording()
     testing.reset()
-    assert not otel_api.get_tracer_provider().get_tracer("app").start_span("off").is_recording()
+    assert not tracer.start_span("off").is_recording()
+    with testing.capture() as captured, tracer.start_as_current_span("captured"):
+        pass
+    assert [span.name for span in captured.spans] == ["captured"]
+
+
+def test_a_capture_holds_the_global_provider_as_a_process_does() -> None:
+    # The reset reaches into `opentelemetry.trace`'s private globals (spec 040
+    # #3): a release that renames them fails here, not in an application's suite.
+    with testing.capture() as captured:
+        otel_api.set_tracer_provider(TracerProvider())  # an app factory's, refused
+        with tracepad.span("answer"):
+            pass
+    assert [span.name for span in captured.spans] == ["answer"]
+    testing.reset()
+    own = TracerProvider()
+    otel_api.set_tracer_provider(own)  # a reset process takes one again
+    assert otel_api.get_tracer_provider() is own
 
 
 def test_the_reset_shuts_down_the_provider_init_built(monkeypatch: pytest.MonkeyPatch) -> None:
     tracepad.init("http://tracepad.test:4318", "tp-sk-test")  # exporting, batched
-    built = otel_api.get_tracer_provider()
+    built = _tracing._built
     shut: list[bool] = []
     monkeypatch.setattr(built, "shutdown", lambda: shut.append(True))
     testing.reset()

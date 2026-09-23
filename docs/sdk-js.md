@@ -513,13 +513,12 @@ application's bundle does not carry it.
 
 ```ts
 import { afterEach, expect, test } from 'vitest';
-import { type Capture, capture } from 'tracepad/testing';
+import { capture, reset } from 'tracepad/testing';
 
-let captured: Capture;
-afterEach(() => captured.restore());
+afterEach(() => reset());
 
 test('the answer is traced', async () => {
-  captured = capture();
+  const captured = capture();
   await app.answer('why is the sky blue');
 
   expect(captured.one('answer').attributes['tracepad.observation.type']).toBe('span');
@@ -533,7 +532,7 @@ the package against a provider that records into memory, with export off and
 nothing read from the environment; the score queue keeps each body instead of
 posting it. The global provider follows the capture's, so a tracer your
 application took at import — `trace.getTracer('app')` — records into every
-capture, not only the first. `restore()` resets the process again, and what
+capture, not only the first. `restore()` — or `reset()` — resets the process again, and what
 was captured stays readable.
 The handle is also `Disposable`: `using captured = capture();` restores at the
 end of the block where the runtime has `using`.

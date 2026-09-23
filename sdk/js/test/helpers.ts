@@ -12,8 +12,10 @@
 import { type ProxyTracerProvider, type TracerProvider, trace } from '@opentelemetry/api';
 import { afterEach, beforeEach, vi } from 'vitest';
 
+import { adopt } from '../src/config.js';
 import { setLogger } from '../src/log.js';
 import { type Capture, capture, reset } from '../src/testing.js';
+import { FOLLOWER } from '../src/tracing.js';
 
 export const HOST = 'http://tracepad.test:4318';
 export const KEY = 'tp-sk-test';
@@ -47,14 +49,18 @@ export function fresh(): void {
   });
 }
 
-/** The provider registered with the API, behind its proxy. */
+/** The provider registered with the API, behind its proxy — and behind the
+ * follower a reset leaves there, the one it records into. */
 export function registered(): TracerProvider {
-  return (trace.getTracerProvider() as ProxyTracerProvider).getDelegate();
+  const delegate = (trace.getTracerProvider() as ProxyTracerProvider).getDelegate();
+  return delegate === FOLLOWER ? (FOLLOWER.target ?? delegate) : delegate;
 }
 
-/** A provider of our own, carrying the package's processor, recording into memory. */
+/** A provider of our own, carrying the package's processor, recording into
+ * memory; the configuration is the suite's, whatever placeholder the capture uses. */
 export function spans(): Capture {
   const captured = capture();
+  adopt({ host: HOST, key: KEY });
   setLogger(intoWarnings);
   return captured;
 }

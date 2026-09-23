@@ -19,7 +19,6 @@
  */
 
 import { type Attributes, context, propagation } from '@opentelemetry/api';
-import { AsyncLocalStorageContextManager } from '@opentelemetry/context-async-hooks';
 import {
   InMemorySpanExporter,
   NodeTracerProvider,
@@ -62,12 +61,12 @@ export class Capture implements Disposable {
     // A configuration of its own, not the environment's: nothing is sent, and
     // TRACEPAD_ENVIRONMENT would only draw the resource warning.
     const own = { host: HOST, key: KEY, environment: '', release: '' };
-    // Followed, not registered: the global stays the follower, so a tracer
-    // the application took at import records here too (spec 040 #14).
-    tracing.FOLLOWER.target = new NodeTracerProvider({
+    // Behind the follower, so a tracer the application took at import records
+    // here too; registered, so an app's own registration is refused as in any
+    // process that has one (spec 040 #14).
+    tracing.install(new NodeTracerProvider({
       spanProcessors: [new SimpleSpanProcessor(this.exporter), tracing.spanProcessor({ ...own, export: false })],
-    });
-    context.setGlobalContextManager(new AsyncLocalStorageContextManager().enable());
+    }));
     tracing.init(own);
     // A batch of one is sent the moment it is queued, and this send is synchronous.
     scores.reset(new scores.ScoreQueue(async (batch) => void this.scores.push(...batch), { batchSize: 1 }));

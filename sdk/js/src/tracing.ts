@@ -79,11 +79,10 @@ export function init(options: InitOptions = {}): void {
   const config = configFor(options);
   const found = delegateOf();
   if (found === undefined) {
-    const provider = (built = new NodeTracerProvider({
+    install((built = new NodeTracerProvider({
       resource: resourceFor(config),
       spanProcessors: [processor(config, options.export)],
-    }));
-    provider.register();
+    })));
   } else {
     if (config.environment !== undefined || config.release !== undefined) refuseResource('init');
     // After `spanProcessor()` the processor is in the provider already, on
@@ -170,6 +169,20 @@ class Follower implements TracerProvider {
 }
 
 export const FOLLOWER = new Follower();
+
+/**
+ * Register a provider — with the context manager and the propagator that
+ * come with it — or, after a test's reset, register the follower recording
+ * into it: a tracer taken at import is bound to the follower, and binds to
+ * the first provider behind the API's proxy for good.
+ */
+export function install(provider: NodeTracerProvider): void {
+  const following = registered() === FOLLOWER;
+  provider.register();
+  if (!following) return;
+  FOLLOWER.target = provider;
+  (trace.getTracerProvider() as ProxyTracerProvider).setDelegate(FOLLOWER);
+}
 
 /**
  * The API's no-op is one module-level instance, and a fresh proxy with no

@@ -38,7 +38,8 @@ _KEY = "tp-sk-test"
 
 __all__ = ["Capture", "capture", "reset"]
 
-# The capture's provider, which the global follows while it lasts.
+# The provider the follower records into: a capture's, or the one `init` built
+# after a reset.
 _target: TracerProvider | None = None
 
 
@@ -76,8 +77,19 @@ class _Follow(otel.NoOpTracerProvider):
     def get_tracer(self, *args: Any, **kwargs: Any) -> otel.Tracer:
         return _Following(args, kwargs)
 
-    def force_flush(self, timeout_millis: int = 30000) -> bool:
-        return _target.force_flush(timeout_millis) if _target else True
+    def __getattr__(self, name: str) -> Any:
+        # `resource`, `force_flush`, `add_span_processor`: the provider it
+        # records into answers, as it would as the global.
+        if _target is None:
+            raise AttributeError(name)
+        return getattr(_target, name)
+
+    def follow(self, provider: TracerProvider) -> None:
+        """Record into `provider`, and refuse another global provider as a
+        process that set one does; a capture and `init` call it."""
+        global _target
+        _target = provider
+        otel._TRACER_PROVIDER_SET_ONCE.do_once(lambda: None)
 
 
 _FOLLOW = _Follow()
@@ -91,9 +103,8 @@ def reset() -> None:
     # package's test of this function fails if a release moves it.
     otel._TRACER_PROVIDER = _FOLLOW
     otel._TRACER_PROVIDER_SET_ONCE = otel.Once()
-    for provider in (_target, _tracing._built):
-        if provider is not None:
-            provider.shutdown()
+    for provider in {_target, _tracing._built} - {None}:
+        provider.shutdown()
     _target = _tracing._built = None
     _tracing._initialized = False
     _tracing._warned_kinds.clear()
@@ -116,16 +127,16 @@ class Capture:
     """What the code under test traced and scored, since `capture()`."""
 
     def __init__(self) -> None:
-        global _target
         reset()
         self._exporter = InMemorySpanExporter()
         # Shut down by the next reset, not at exit: an exit hook would keep
         # every capture's spans alive until the interpreter ends.
-        _target = TracerProvider(shutdown_on_exit=False)
-        _target.add_span_processor(SimpleSpanProcessor(self._exporter))
+        provider = TracerProvider(shutdown_on_exit=False)
+        provider.add_span_processor(SimpleSpanProcessor(self._exporter))
+        _FOLLOW.follow(provider)
         # A configuration of its own, not the environment's: nothing is sent,
         # and TRACEPAD_ENVIRONMENT would only draw `init`'s resource warning.
-        _tracing._attach(_target, _config.Config(host=_HOST, key=_KEY), export=False)
+        _tracing._attach(provider, _config.Config(host=_HOST, key=_KEY), export=False)
         # The bodies `score()` would have posted, in order.
         self.scores: list[dict[str, Any]] = []
         _scores.reset(_Kept(self.scores))

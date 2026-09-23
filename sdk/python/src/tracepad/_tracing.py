@@ -72,8 +72,12 @@ def init(
 
     provider = otel.get_tracer_provider()
     if not isinstance(provider, TracerProvider):
+        # After a test's reset the global is `tracepad.testing`'s follower, and
+        # a tracer taken at import is bound to it: it follows the new provider
+        # rather than giving way to it (spec 040 #14).
+        install = getattr(provider, "follow", otel.set_tracer_provider)
         provider = _built = TracerProvider(resource=_resource(config))
-        otel.set_tracer_provider(provider)
+        install(provider)
     elif config.environment or config.release:
         # A resource is fixed when its provider is built, and `service.version`
         # is read from the resource only (`docs/ingest.md`), so neither can be

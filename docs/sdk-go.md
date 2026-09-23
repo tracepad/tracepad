@@ -454,7 +454,8 @@ the package against a provider that records into memory, with export off and
 nothing read from the environment; the score queue keeps each body instead of
 posting it. The global provider follows the capture's, so a package-level
 `otel.Tracer("app")` records into every capture, not only the first. The
-test's cleanup — on `t.Fatal` too — resets the process again.
+test's cleanup — on `t.Fatal` too — resets the process again, and what was
+captured stays readable, from a parent test after its subtest too.
 
 | On a `*Recorder` | What it is |
 |---|---|

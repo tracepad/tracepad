@@ -153,6 +153,7 @@ describe('no provider', () => {
   });
 
   test('is told apart by identity, not by a class name a minifier renames', () => {
+    trace.disable(); // a process no test reset ran in: the API's own no-op
     const noop = registered();
     const named = Object.getOwnPropertyDescriptor(noop.constructor, 'name')!;
     Object.defineProperty(noop.constructor, 'name', { value: 'ln', configurable: true });

@@ -17,7 +17,6 @@
 package tracepadtest
 
 import (
-	"context"
 	"sync"
 	"testing"
 
@@ -52,11 +51,10 @@ func Capture(t testing.TB) *Recorder {
 	t.Helper()
 	serial(t, "Capture")
 	r := &Recorder{exporter: tracetest.NewInMemoryExporter()}
+	// Not shut down at the cleanup — the reset detaches it — since shutting
+	// down the exporter would empty it, and what was captured stays readable.
 	provider := sdktrace.NewTracerProvider(sdktrace.WithSyncer(r.exporter))
-	t.Cleanup(func() {
-		hook.Reset()
-		_ = provider.Shutdown(context.Background())
-	})
+	t.Cleanup(hook.Reset)
 	if err := hook.Capture(host, key, provider, r.keep); err != nil {
 		t.Fatalf("tracepadtest.Capture: %v", err)
 	}

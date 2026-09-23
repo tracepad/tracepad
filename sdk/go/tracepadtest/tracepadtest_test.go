@@ -17,6 +17,7 @@ import (
 	"testing"
 
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 
 	tracepad "github.com/tracepad/tracepad/sdk/go"
@@ -189,6 +190,27 @@ func TestAfterTheResetInitBuildsAProviderAndTheNextResetShutsItDown(t *testing.T
 	}
 	if fields := otel.GetTextMapPropagator().Fields(); len(fields) != 0 {
 		t.Errorf("propagator fields = %v, want Init's taken back", fields)
+	}
+}
+
+func TestWhatWasCapturedStaysReadableAfterTheTest(t *testing.T) {
+	var rec *tracepadtest.Recorder
+	t.Run("capture", func(t *testing.T) {
+		rec = tracepadtest.Capture(t)
+		_, s := tracepad.Span(context.Background(), "kept")
+		s.End()
+	})
+	rec.One(t, "kept")
+}
+
+func TestACapturePropagatesTheTraceContext(t *testing.T) {
+	tracepadtest.Capture(t)
+	ctx, s := tracepad.Span(context.Background(), "call")
+	defer s.End()
+	headers := propagation.MapCarrier{}
+	otel.GetTextMapPropagator().Inject(ctx, headers)
+	if headers["traceparent"] == "" {
+		t.Errorf("headers = %v, want a traceparent", headers)
 	}
 }
 

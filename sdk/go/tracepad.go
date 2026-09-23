@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -324,6 +325,11 @@ func init() {
 		d.mu.Lock()
 		defer d.mu.Unlock()
 		d.scores = q
+		// The propagator an Init that built its provider would set.
+		if len(otel.GetTextMapPropagator().Fields()) == 0 {
+			otel.SetTextMapPropagator(propagation.TraceContext{})
+			d.propagated = true
+		}
 		_, err := d.start(context.Background(), config{host: host, key: key}, options{provider: provider})
 		return err
 	}
@@ -351,8 +357,10 @@ type followTracer struct {
 	opts []trace.TracerOption
 }
 
+var nowhere trace.TracerProvider = noop.NewTracerProvider()
+
 func (t followTracer) Start(ctx context.Context, name string, opts ...trace.SpanStartOption) (context.Context, trace.Span) {
-	var provider trace.TracerProvider = noop.NewTracerProvider()
+	provider := nowhere
 	if p := followed.Load(); p != nil {
 		provider = *p
 	} else if global := otel.GetTracerProvider(); !isFollow(global) {
@@ -387,7 +395,11 @@ func reset() {
 		scores.drop()
 	}
 	if built {
-		_ = sdk.Shutdown(context.Background())
+		// Its spans go to the store the test configured, as at exit; a store
+		// that is away does not hold the cleanup for the exporter's retries.
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = sdk.Shutdown(ctx)
+		cancel()
 	}
 	if propagated {
 		otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator())

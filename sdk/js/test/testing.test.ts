@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 
-import { trace } from '@opentelemetry/api';
+import { context, propagation, trace } from '@opentelemetry/api';
 import { InMemorySpanExporter, NodeTracerProvider, SimpleSpanProcessor } from '@opentelemetry/sdk-trace-node';
 import { afterAll, beforeAll, describe, expect, test, vi } from 'vitest';
 
@@ -77,6 +77,13 @@ describe('a capture', () => {
     expect(second.scores.map((s) => s.name)).toEqual(['two']);
   });
 
+  test('propagates the trace context, as an initialised process does', () => {
+    capture();
+    const headers: Record<string, string> = {};
+    tracepad.span('call', () => propagation.inject(context.active(), headers));
+    expect(headers.traceparent).toMatch(/^00-[0-9a-f]{32}-[0-9a-f]{16}-01$/);
+  });
+
   test('is disposed by `using`', () => {
     {
       using captured = capture();
@@ -102,14 +109,27 @@ describe('the reset', () => {
     }
   });
 
-  test('undoes the registration the API allows once (spec 040 #3)', () => {
+  test('keeps a tracer first used under init recording in later captures', () => {
     const tracer = trace.getTracer('app');
-    capture().restore();
-    const own = new NodeTracerProvider({ spanProcessors: [new SimpleSpanProcessor(new InMemorySpanExporter())] });
-    expect(trace.setGlobalTracerProvider(own)).toBe(true);
-    expect(tracer.startSpan('app').isRecording()).toBe(true);
+    tracepad.init({ host: 'http://tracepad.test:4318', key: 'tp-sk-test', export: false });
+    expect(tracer.startSpan('under init').isRecording()).toBe(true);
     reset();
     expect(tracer.startSpan('off').isRecording()).toBe(false);
+    const captured = capture();
+    tracer.startSpan('captured').end();
+    expect(captured.spans.map((s) => s.name)).toEqual(['captured']);
+  });
+
+  test('undoes the registration the API allows once, which a capture holds (spec 040 #3)', () => {
+    const own = () => new NodeTracerProvider({ spanProcessors: [new SimpleSpanProcessor(new InMemorySpanExporter())] });
+    const captured = capture();
+    expect(trace.setGlobalTracerProvider(own())).toBe(false); // an app factory's, refused
+    tracepad.span('answer', () => {});
+    expect(captured.spans.map((s) => s.name)).toEqual(['answer']);
+    captured.restore();
+    const tracer = trace.getTracer('app');
+    expect(trace.setGlobalTracerProvider(own())).toBe(true);
+    expect(tracer.startSpan('app').isRecording()).toBe(true);
   });
 
   test('shuts down the provider init built', () => {
