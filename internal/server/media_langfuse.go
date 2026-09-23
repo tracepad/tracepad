@@ -2,7 +2,6 @@ package server
 
 import (
 	"crypto/hmac"
-	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
@@ -31,23 +30,11 @@ import (
 // points at an object store and the signature is in the query — so the route
 // is public and the URL carries a signed token instead: the project, the trace,
 // the hash, the type and the length the POST declared, and an hour to use it
-// in. The token is HMAC-signed with a key minted at each start, the setup
-// token's bargain: a URL from before a restart uploads nothing, and the SDK
-// logs the failure and moves on.
+// in. The token is HMAC-signed with a key the database keeps (Decision 22),
+// so a URL issued before a restart still uploads within its hour.
 
 // mediaUploadWindow is how long an upload URL is good for.
 const mediaUploadWindow = time.Hour
-
-// newMediaKey mints the key upload tokens are signed with.
-func newMediaKey() []byte {
-	key := make([]byte, 32)
-	if _, err := rand.Read(key); err != nil {
-		// crypto/rand does not fail on the platforms Go supports; a
-		// server that cannot sign uploads is still a server.
-		slog.Error("could not mint the media upload key", "err", err)
-	}
-	return key
-}
 
 // uploadGrant is what an upload token says the PUT may store.
 type uploadGrant struct {

@@ -710,7 +710,7 @@ func (s *Store) attachOutputs(projectID string, traceIDs []any, byTrace map[stri
 			continue
 		}
 		attempt.ObservationID = found.observationID
-		output, err := s.readPayload(found.outputID)
+		output, err := s.readPayload(found.outputID, projectID, found.traceID)
 		if err != nil {
 			return err
 		}

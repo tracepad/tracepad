@@ -15,9 +15,11 @@ import (
 
 	tracepb "go.opentelemetry.io/proto/otlp/trace/v1"
 
+	"github.com/tracepad/tracepad/internal/config"
 	"github.com/tracepad/tracepad/internal/mapping"
 	"github.com/tracepad/tracepad/internal/otlptest"
 	"github.com/tracepad/tracepad/internal/store"
+	"github.com/tracepad/tracepad/internal/storetest"
 )
 
 // Media over HTTP (spec 041, Testing — API, raw, setting, bridge).
@@ -249,33 +251,10 @@ func TestLangfuseMediaChannel(t *testing.T) {
 	mediaID := strings.NewReplacer("+", "-", "/", "_").Replace(hash)[:22]
 
 	ask := func(t *testing.T, trace string, secret string) (string, *string) {
-		t.Helper()
-		rec := h.call(t, "POST", "/api/public/media", mustJSON(t, map[string]any{
-			"traceId": trace, "observationId": probeSpan, "contentType": "image/png",
-			"contentLength": len(picture), "sha256Hash": hash, "field": "input",
-		}), asKey(secret))
-		expectStatus(t, rec, 200)
-		var answer struct {
-			MediaID   string  `json:"mediaId"`
-			UploadURL *string `json:"uploadUrl"`
-		}
-		if err := json.Unmarshal(rec.Body.Bytes(), &answer); err != nil {
-			t.Fatal(err)
-		}
-		return answer.MediaID, answer.UploadURL
+		return h.langfuseAsk(t, picture, trace, secret)
 	}
 	put := func(t *testing.T, upload string, body []byte) int {
-		t.Helper()
-		parsed, err := url.Parse(upload)
-		if err != nil {
-			t.Fatal(err)
-		}
-		req, _ := http.NewRequest("PUT", parsed.RequestURI(), bytes.NewReader(body))
-		req.Header.Set("Content-Type", "image/png")
-		req.Header.Set("x-amz-checksum-sha256", hash)
-		rec := httptest.NewRecorder()
-		h.server.Handler().ServeHTTP(rec, req)
-		return rec.Code
+		return h.langfusePut(t, upload, body, hash)
 	}
 
 	id, upload := ask(t, probeTrace, testSecret)
@@ -335,6 +314,139 @@ func TestLangfuseMediaChannel(t *testing.T) {
 		t.Errorf("media record = %v", record)
 	}
 	expectStatus(t, h.get(t, "/api/public/media/AAAAAAAAAAAAAAAAAAAAAA"), 404)
+}
+
+// langfuseAsk is the SDK's POST /api/public/media for a picture: the media id
+// and the upload URL the server answers.
+func (h *harness) langfuseAsk(t *testing.T, picture []byte, trace, secret string) (string, *string) {
+	t.Helper()
+	sum := sha256.Sum256(picture)
+	rec := h.call(t, "POST", "/api/public/media", mustJSON(t, map[string]any{
+		"traceId": trace, "observationId": probeSpan, "contentType": "image/png",
+		"contentLength": len(picture), "sha256Hash": base64.StdEncoding.EncodeToString(sum[:]),
+		"field": "input",
+	}), asKey(secret))
+	expectStatus(t, rec, 200)
+	var answer struct {
+		MediaID   string  `json:"mediaId"`
+		UploadURL *string `json:"uploadUrl"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &answer); err != nil {
+		t.Fatal(err)
+	}
+	return answer.MediaID, answer.UploadURL
+}
+
+// langfusePut is the SDK's bare PUT of the upload URL, with no credential.
+func (h *harness) langfusePut(t *testing.T, upload string, body []byte, hash string) int {
+	t.Helper()
+	parsed, err := url.Parse(upload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, _ := http.NewRequest("PUT", parsed.RequestURI(), bytes.NewReader(body))
+	req.Header.Set("Content-Type", "image/png")
+	req.Header.Set("x-amz-checksum-sha256", hash)
+	rec := httptest.NewRecorder()
+	h.server.Handler().ServeHTTP(rec, req)
+	return rec.Code
+}
+
+// A span that overtakes its own upload is stored with the SDK's string; once
+// the PUT lands, every read answers the reference in its place, while the
+// stored payload and the raw archive keep the string as sent (Decision 21).
+func TestLangfuseMediaSpanBeforeUpload(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	picture := testPicture(30000, 7)
+	sum := sha256.Sum256(picture)
+	sha := hex.EncodeToString(sum[:])
+	hash := base64.StdEncoding.EncodeToString(sum[:])
+
+	mediaID, upload := h.langfuseAsk(t, picture, probeTrace, testSecret)
+	if upload == nil {
+		t.Fatal("the first upload was not asked for")
+	}
+	reference := "@@@langfuseMedia:type=image/png|id=" + mediaID + "|source=base64_data_uri@@@"
+	input, _ := json.Marshal([]any{map[string]any{"role": "user", "content": []any{
+		map[string]any{"type": "image_url", "image_url": map[string]any{"url": reference}},
+		map[string]any{"type": "image", "source": map[string]any{
+			"type": "base64", "media_type": "image/png", "data": reference}},
+	}}})
+	export := otlptest.SpanWith("langfuse.observation.input", string(input))
+	expectStatus(t, h.post(t, "/api/public/otel/v1/traces", encodeExport(t, export)), 200)
+	if got := h.observationInput(t); !strings.Contains(got, reference) || strings.Contains(got, sha) {
+		t.Fatalf("before the upload the input = %s, want the SDK's string", got)
+	}
+
+	if code := h.langfusePut(t, *upload, picture, hash); code != 200 {
+		t.Fatalf("the upload = %d, want 200", code)
+	}
+	got := h.observationInput(t)
+	ref := `{"mime_type":"image/png","size":30000,"tracepad_media":"` + sha + `"}`
+	for _, want := range []string{`"url":` + ref, `"data":` + ref} {
+		if !strings.Contains(got, want) {
+			t.Errorf("after the upload the input lacks %s:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, reference) {
+		t.Errorf("the SDK's string is still read after the upload: %s", got)
+	}
+
+	batches := archived(t, h)
+	rec := h.get(t, "/api/v1/raw/"+itoa(batches[0].ID))
+	expectStatus(t, rec, 200)
+	if !bytes.Contains(rec.Body.Bytes(), []byte(reference)) {
+		t.Error("the raw archive lost the SDK's string; it is kept as sent")
+	}
+}
+
+// An upload URL issued before a restart still uploads after it: the key it is
+// signed with is the database's, not the process's (Decision 22).
+func TestLangfuseMediaUploadSurvivesRestart(t *testing.T) {
+	captureLogs(t)
+	path := storetest.Path(t)
+	start := func() (*harness, func()) {
+		st, err := store.Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		project, err := st.ProjectByName("test")
+		if err == nil && project == nil {
+			project, err = st.CreateProject("test", store.KeyPair{PublicKey: testPublic, Secret: testSecret})
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		writer, err := st.NewWriter(storetest.Writes)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfg := &config.Config{Listen: ":0", StoreRaw: true, MaxBodyBytes: config.DefaultMaxBodyBytes}
+		h := &harness{server: New(cfg, "test", st, writer, st.NewSweeper(writer, store.SweepOptions{})),
+			store: st, writer: writer, project: project}
+		return h, func() {
+			writer.Close()
+			st.Close()
+		}
+	}
+
+	picture := testPicture(20000, 8)
+	sum := sha256.Sum256(picture)
+	before, stop := start()
+	_, upload := before.langfuseAsk(t, picture, probeTrace, testSecret)
+	if upload == nil {
+		t.Fatal("the upload was not asked for")
+	}
+	stop()
+
+	after, stop := start()
+	defer stop()
+	if code := after.langfusePut(t, *upload, picture, base64.StdEncoding.EncodeToString(sum[:])); code != 200 {
+		t.Fatalf("the upload after a restart = %d, want 200", code)
+	}
+	if !after.mediaHeld(t, hex.EncodeToString(sum[:])) {
+		t.Error("the body uploaded after the restart was not stored")
+	}
 }
 
 // Under the placeholder setting the channel asks for nothing, and the SDK's

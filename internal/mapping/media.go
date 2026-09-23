@@ -46,9 +46,11 @@ const (
 	mediaStoredKey = "stored"
 )
 
-// langfuseMarker opens the reference string the Langfuse SDK leaves where it
+// LangfuseMarker opens the reference string the Langfuse SDK leaves where it
 // took a picture out (#9): `@@@langfuseMedia:type=…|id=…|source=…@@@`.
-const langfuseMarker = "@@@langfuseMedia:"
+const LangfuseMarker = "@@@langfuseMedia:"
+
+const langfuseMarker = LangfuseMarker
 
 // MediaOptions is what one project's ingest needs to know.
 type MediaOptions struct {
@@ -574,6 +576,57 @@ func (w *mediaWalk) warn(reason string) {
 		trace = w.traces[0]
 	}
 	w.opts.Warn(trace, reason)
+}
+
+// ResolveLangfuseMedia rewrites, in a payload read back from the store, each
+// Langfuse reference string whose upload the trace now points at (spec 041,
+// Decision 21). A span can overtake its own upload: it is stored with the
+// SDK's string, and the ref arrives with the PUT after it. The stored payload
+// keeps the string; a read answers the reference in its place, the same one
+// ingest would have written. Nothing else is touched — a data URL a payload
+// still holds names no body the store has.
+func ResolveLangfuseMedia(v any, resolve func(mediaID string) (sha string, size int64, ok bool)) (any, bool) {
+	return rewriteJSON(langfuseRead(resolve), v)
+}
+
+type langfuseRead func(mediaID string) (sha string, size int64, ok bool)
+
+func (r langfuseRead) enter([]string) {}
+
+func (r langfuseRead) decodes(string) bool { return false }
+
+func (r langfuseRead) whole(s string) (map[string]any, bool) {
+	mime, id, ok := parseLangfuseRef(s)
+	if !ok {
+		return nil, false
+	}
+	return r.reference(mime, id)
+}
+
+func (r langfuseRead) object(f fields) (string, bool, bool) {
+	holder, key, mime, ok := mediaSlot(f)
+	if !ok {
+		return "", false, false
+	}
+	data, _ := holder.text(key)
+	_, id, isRef := parseLangfuseRef(data)
+	if !isRef {
+		return "", false, false
+	}
+	ref, ok := r.reference(mime, id)
+	if !ok {
+		return "", false, true
+	}
+	holder.set(key, ref)
+	return "", true, true
+}
+
+func (r langfuseRead) reference(mime, id string) (map[string]any, bool) {
+	sha, size, ok := r(id)
+	if !ok {
+		return nil, false
+	}
+	return map[string]any{MediaRefKey: sha, mediaMimeKey: mime, mediaSizeKey: size}, true
 }
 
 // parseDataURL splits `data:<mime>[;params];base64,<data>`. The MIME type is

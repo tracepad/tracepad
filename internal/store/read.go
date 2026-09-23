@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -104,7 +105,7 @@ func (s *Store) Trace(projectID, id string) (*TraceRow, error) {
 	if err != nil {
 		return nil, err
 	}
-	metadata, err := s.readPayload(metadataID)
+	metadata, err := s.readPayload(metadataID, projectID, id)
 	if err != nil {
 		return nil, err
 	}
@@ -256,13 +257,13 @@ func (s *Store) scanObservation(rows *sql.Rows, io IOMode) (*ObservationRow, err
 	if !io {
 		return &row, nil
 	}
-	if row.Input, err = s.readPayload(inputID); err != nil {
+	if row.Input, err = s.readPayload(inputID, row.ProjectID, row.TraceID); err != nil {
 		return nil, err
 	}
-	if row.Output, err = s.readPayload(outputID); err != nil {
+	if row.Output, err = s.readPayload(outputID, row.ProjectID, row.TraceID); err != nil {
 		return nil, err
 	}
-	metadata, err := s.readPayload(metadataID)
+	metadata, err := s.readPayload(metadataID, row.ProjectID, row.TraceID)
 	if err != nil {
 		return nil, err
 	}
@@ -285,8 +286,10 @@ func (s *Store) FileSize() int64 {
 	return total
 }
 
-// readPayload resolves a payload reference into the value it holds.
-func (s *Store) readPayload(id sql.NullInt64) (any, error) {
+// readPayload resolves a payload reference into the value it holds, for one
+// trace of a project: a Langfuse reference string the trace's upload has
+// since caught up with reads as the reference (spec 041, Decision 21).
+func (s *Store) readPayload(id sql.NullInt64, projectID, traceID string) (any, error) {
 	if !id.Valid {
 		return nil, nil
 	}
@@ -305,6 +308,9 @@ func (s *Store) readPayload(id sql.NullInt64) (any, error) {
 	var out any
 	if err := json.Unmarshal(raw, &out); err != nil {
 		return nil, fmt.Errorf("decode payload %d: %w", id.Int64, err)
+	}
+	if bytes.Contains(raw, langfuseMarker) {
+		return s.resolveLangfuseMedia(out, projectID, traceID)
 	}
 	return out, nil
 }

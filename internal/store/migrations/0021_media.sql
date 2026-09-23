@@ -46,6 +46,17 @@ CREATE TABLE media_raw_refs (
 ) STRICT, WITHOUT ROWID;
 CREATE INDEX idx_media_raw_refs_batch ON media_raw_refs(raw_batch_id);
 
+-- Keys the server signs with and must keep across restarts (Decision 22).
+-- The Langfuse channel's upload URLs are signed with `media_upload`, minted
+-- once at the first start that finds it missing: a URL issued before a
+-- restart still uploads. It lives in the database because the database is
+-- the one thing a restart keeps — and the backup — and it never leaves it.
+CREATE TABLE server_keys (
+    name       TEXT PRIMARY KEY,
+    key        BLOB NOT NULL,
+    created_at INTEGER NOT NULL
+) STRICT;
+
 -- The project setting of #6: `placeholder` writes no body and leaves a
 -- reference that says so.
 ALTER TABLE projects ADD COLUMN media TEXT NOT NULL DEFAULT 'store'

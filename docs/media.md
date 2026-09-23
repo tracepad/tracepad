@@ -164,15 +164,23 @@ picture sent through the bridge is kept like any other:
 | Call | What it does |
 |---|---|
 | `POST /api/public/media` | The SDK asks where to upload. `mediaId` is the SDK's own derivation of the hash, which it checks. `uploadUrl` is `null` when this project already holds the body — the second identical picture sends nothing. |
-| `PUT` the `uploadUrl` | The bytes. The URL is presigned: the SDK sends no credential with this request, so the URL carries a signed token instead, good for an hour and for the server's current run. The body must match the declared length and SHA-256, or nothing is stored. |
+| `PUT` the `uploadUrl` | The bytes. The URL is presigned: the SDK sends no credential with this request, so the URL carries a signed token instead, good for an hour — across a restart, because the key it is signed with is kept in the database. The body must match the declared length and SHA-256, or nothing is stored. |
 | `PATCH /api/public/media/{mediaId}` | The SDK's report on the upload; a failure is logged. |
 | `GET /api/public/media/{mediaId}` | The Langfuse record of a body, with a `url` to `GET /api/v1/media/{sha256}` — which, like every read, needs a key of the project. |
 
 The span arrives carrying the SDK's reference string —
 `@@@langfuseMedia:type=image/png|id=…|source=base64_data_uri@@@` — and ingest
 rewrites it to Tracepad's reference when the body is stored, so a bridged trace
-looks like any other in the interface. When it is not — the project's setting
-is `placeholder`, or the span overtook its own upload — the string is left as
+looks like any other in the interface.
+
+A span can overtake its own upload — a script that sets an input and flushes
+at once exports the span before the SDK's upload thread has PUT the bytes. The
+span is then stored with the string, and once the upload lands every read —
+the API, the interface, the CLI, MCP — answers the reference in its place, for
+the trace the upload was made for. The stored payload is not rewritten, and the
+raw archive and the export keep the string as the client sent it.
+
+Under the `placeholder` setting nothing is uploaded, and the string is left as
 the client wrote it, as the evidence of what the client meant.
 
 A body only another project holds is still asked for: skipping the upload on a

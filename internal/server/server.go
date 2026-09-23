@@ -87,7 +87,7 @@ type Server struct {
 	startedAt time.Time
 	counters  *counters
 	// mediaKey signs the Langfuse channel's upload URLs (spec 041,
-	// Decision 14), minted at each start like the setup token.
+	// Decisions 14 and 22), kept in the database across restarts.
 	mediaKey []byte
 }
 
@@ -127,7 +127,9 @@ func New(cfg *config.Config, version string, st *store.Store, writer JobWriter, 
 		assets:         ui.Assets(),
 		startedAt:      time.Now(),
 		counters:       newCounters(),
-		mediaKey:       newMediaKey(),
+	}
+	if st != nil {
+		s.mediaKey = st.MediaUploadKey()
 	}
 	// The setup token is minted here rather than on demand, once per start:
 	// "while no owner exists" is a property of the server's lifetime, and a

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
@@ -8,6 +9,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/tracepad/tracepad/internal/mapping"
 )
 
 // Media (spec 041): the bodies ingest took out of the JSON, one row per
@@ -310,6 +313,43 @@ func (s *Store) MediaByLangfuseID(projectID, mediaID string) (*MediaInfo, error)
 	return nil, rows.Err()
 }
 
+// langfuseMarker is the Langfuse reference string's opening, looked for in a
+// payload's bytes before anything is decoded for it.
+var langfuseMarker = []byte(mapping.LangfuseMarker)
+
+// resolveLangfuseMedia answers a payload with each Langfuse reference string
+// the trace now has a body for read as the reference (Decision 21): the
+// bodies the trace's refs name, keyed by the SDK's id for them. The stored
+// payload is not rewritten, and the raw archive keeps the string as sent.
+func (s *Store) resolveLangfuseMedia(v any, projectID, traceID string) (any, error) {
+	rows, err := s.db.Query(
+		`SELECT m.sha256, m.size FROM media_refs r JOIN media m ON m.sha256 = r.sha256
+		  WHERE r.project_id = ? AND r.trace_id = ?`, projectID, traceID)
+	if err != nil {
+		return nil, fmt.Errorf("read the trace's media: %w", err)
+	}
+	defer rows.Close()
+	held := map[string]MediaInfo{}
+	for rows.Next() {
+		var info MediaInfo
+		if err := rows.Scan(&info.SHA256, &info.Size); err != nil {
+			return nil, err
+		}
+		held[MediaIDFor(info.SHA256)] = info
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(held) == 0 {
+		return v, nil
+	}
+	out, _ := mapping.ResolveLangfuseMedia(v, func(id string) (string, int64, bool) {
+		info, ok := held[id]
+		return info.SHA256, info.Size, ok
+	})
+	return out, nil
+}
+
 // MediaSummary is the system endpoint's media figure (#11): the bodies a
 // project points at and their decoded bytes. A body two projects share is in
 // both figures, because each would keep it alive alone.
@@ -501,6 +541,30 @@ func (m *mediaSweep) apply(tx *sql.Tx) error {
 	count, _, err := collectMedia(tx, shas)
 	m.Deleted = count
 	return err
+}
+
+// MediaUploadKey is the key the Langfuse channel signs its upload URLs with
+// (Decision 22): the same on every start of the server over this database.
+func (s *Store) MediaUploadKey() []byte { return s.mediaUploadKey }
+
+// serverKey reads a named key, minting it first when there is none. Written
+// at open, before the writer runs, like the migrations; a second process
+// racing the first start keeps whichever key was written first.
+func (s *Store) serverKey(name string) ([]byte, error) {
+	fresh := make([]byte, 32)
+	if _, err := rand.Read(fresh); err != nil {
+		return nil, fmt.Errorf("mint the %s key: %w", name, err)
+	}
+	if _, err := s.db.Exec(
+		`INSERT INTO server_keys (name, key, created_at) VALUES (?, ?, ?) ON CONFLICT(name) DO NOTHING`,
+		name, fresh, time.Now().UnixNano()); err != nil {
+		return nil, fmt.Errorf("store the %s key: %w", name, err)
+	}
+	var key []byte
+	if err := s.db.QueryRow(`SELECT key FROM server_keys WHERE name = ?`, name).Scan(&key); err != nil {
+		return nil, fmt.Errorf("read the %s key: %w", name, err)
+	}
+	return key, nil
 }
 
 // ValidMediaSHA reports a lower-case hex SHA-256, the only spelling a media

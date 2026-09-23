@@ -26,6 +26,9 @@ type Store struct {
 	// the first statement touches the file, because creating
 	// schema_migrations already materializes it.
 	fresh bool
+	// mediaUploadKey signs the Langfuse channel's upload URLs (spec 041,
+	// Decision 22), read — or minted — once at open.
+	mediaUploadKey []byte
 }
 
 // Open opens (creating if needed) the database at path and applies pending
@@ -77,6 +80,10 @@ func Open(path string) (*Store, error) {
 	// is no way for a reader to tell (spec 011 #8). It runs once, before the
 	// server listens, and finds nothing to do on every start after that.
 	if err := s.backfillSearchIndex(); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("open %s: %w", path, err)
+	}
+	if s.mediaUploadKey, err = s.serverKey("media_upload"); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("open %s: %w", path, err)
 	}
