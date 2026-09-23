@@ -220,10 +220,20 @@ a dry run until you echo the name of what it destroys, and deleting a project
 is undoable for a week. See [docs/retention.md](docs/retention.md) and
 [docs/admin.md](docs/admin.md).
 
+## Images and files
+
+A picture a model was sent is stored once, not as base64 in every payload that
+carried it. Ingest takes data URLs, Anthropic and Gemini inline bodies and
+GenAI blob parts out of the JSON — for every client, the Langfuse SDK's own
+upload channel included — keeps each distinct file one time, and leaves a
+small reference in its place; the trace view shows the image. A project that
+must not keep pictures keeps only a placeholder. See
+[docs/media.md](docs/media.md).
+
 ## Taking the data out
 
-Every export body Tracepad accepts is kept byte for byte, and one command
-replays it into any OTLP receiver — another Tracepad, a Collector, a vendor's
+Every export body Tracepad accepts is kept as it arrived — with media stored
+once beside it and put back on the way out — and one command replays it into any OTLP receiver — another Tracepad, a Collector, a vendor's
 endpoint — or onto disk:
 
 ```sh

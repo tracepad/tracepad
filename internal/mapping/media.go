@@ -16,7 +16,7 @@ import (
 // once, and left behind as a reference.
 //
 // The walk runs over the decoded export *before* the mapper sees it, and
-// rewrites the attributes in place (Decision 12 of the spec). That one pass is
+// rewrites the attributes in place (spec 041, Decision 16). That one pass is
 // what both halves of #5 need: the mapper then maps a body whose payloads
 // already carry references, and the raw batch kept for replay is that same
 // body re-encoded — so a replay of the archive maps to exactly the rows the

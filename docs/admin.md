@@ -180,6 +180,18 @@ next sweep, so it is previewed and confirmed like any other destruction, even
 when nothing is old enough to be affected yet: what is being changed is the
 policy.
 
+The same `PATCH /api/v1/projects/{id}` carries the project's media setting,
+`"media": "store"` (the default) or `"placeholder"` — whether ingest keeps the
+images and files it takes out of payloads, or only a reference saying it did
+not ([media.md](media.md#not-keeping-them-the-placeholder-setting)). It is not
+destructive either way and needs no confirmation: `tracepad retention set
+--media placeholder`.
+
+Every dry run of a deletion — a window that shrinks, an erasure, a trace
+deletion, a project's — names the media bodies it would free as `media` and
+their decoded bytes as `media_bytes`: only the bodies nothing staying behind
+points at.
+
 ## Erasing a user's data
 
 ```sh

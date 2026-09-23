@@ -778,6 +778,15 @@ screens write item bodies in. It is a text document, not a tree:
 Light and dark share one set of colours with the rest of the interface: keys,
 strings, numbers and punctuation, all of them from `app.css`.
 
+**Images and files** a payload references ([media.md](media.md)) are drawn
+above its JSON: an image as a thumbnail with its type and size under it, which
+opens the full picture in a new tab; any other file as a chip that downloads
+it; and a reference the project's setting kept no bytes for as a muted chip
+reading *not stored (project setting)*. The JSON still shows every reference
+as data. The bytes are fetched with the page's own credentials and drawn from
+memory — never opened as a page of this server — so a file that declared
+itself HTML is still only a download.
+
 ### The response budget
 
 A trace is fetched with `?expand=io`, so the server spends its byte budget on
@@ -817,7 +826,9 @@ project you last looked at, and are absent when you reach none.
   for the queryable data, "follow the window above" for the raw bodies, and
   "keep forever" again for the statistics history, which outlives the traces
   it summarizes and so has a window of its own (see
-  [retention.md](retention.md#what-outlives-what)).
+  [retention.md](retention.md#what-outlives-what)) — and beside them the
+  project's media setting: store images and files once each, or keep a
+  placeholder only ([media.md](media.md#not-keeping-them-the-placeholder-setting)).
 - **API keys** — the public keys with their dates, minting, and revocation.
   A minted pair is shown **once**, in both connection formats, exactly as
   first run prints them; the secret is stored as a hash and the dialog says

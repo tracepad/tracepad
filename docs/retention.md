@@ -74,6 +74,14 @@ one export body feeds many traces with different fates.
 
 ## What outlives what
 
+**Media follows its traces**, with no window of its own: an image or a file
+ingest stored ([media.md](media.md)) lives while a trace or a raw batch points
+at it, and every path below — the sweep, erasure, trace deletion, a project's
+purge — deletes the refs of what it deletes and collects the bodies nothing
+points at any more, in the same transaction. A body another project also sent
+survives. The project setting `media: placeholder` is the answer for "do not
+keep pictures at all".
+
 The statistics are **not** deleted with the traces they summarize. That is
 deliberate: a month of history is a few thousand rows where the traces behind
 it are millions, and deleting the cheap thing along with the expensive one is
@@ -345,7 +353,10 @@ each chunk a transaction of its own, so a round cut off leaves nothing
 half-deleted and the next request continues. In
 particular the raw OTLP bodies are **not** touched, for the structural
 reason below: a raw batch holds many traces, and a trace cannot be cut out
-of one. The preview says so.
+of one. The preview says so. A picture a deleted trace pointed at goes with
+it unless a raw batch still points at it, and then when that batch expires
+([media.md](media.md#how-long-they-are-kept)); the preview counts the bodies
+it would free as `media` and `media_bytes`.
 
 **The first start after the upgrade builds four indexes** over the columns
 that reference stored payloads (migration 0020): deleting a payload is a

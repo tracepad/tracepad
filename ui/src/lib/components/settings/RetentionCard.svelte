@@ -61,7 +61,9 @@
 	title="Retention"
 	description="How long this project keeps its data. The sweeper runs hourly and deletes what has
 		fallen outside the window; shortening one destroys data, so it is previewed first. The
-		statistics outlive the traces they summarize, which is why they have a window of their own."
+		statistics outlive the traces they summarize, which is why they have a window of their own.
+		Images and files are stored once each and go with the last trace or raw body that points at
+		them; a placeholder keeps only their type and size."
 >
 	<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
 		<div>
