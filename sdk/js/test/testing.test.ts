@@ -139,6 +139,15 @@ describe('the reset', () => {
     expect(shutdown).toHaveBeenCalledOnce();
   });
 
+  test('warns when that shutdown fails, rather than leaving a rejection unhandled', async () => {
+    vi.spyOn(NodeTracerProvider.prototype, 'shutdown').mockRejectedValue(new Error('the store is away'));
+    const warned = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    tracepad.init({ host: 'http://tracepad.test:4318', key: 'tp-sk-test' });
+    reset();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(warned).toHaveBeenCalledWith(expect.stringContaining('the store is away'));
+  });
+
   test('stops the queue it replaced, and drops what it held', async () => {
     const sent: unknown[] = [];
     resetScores(new ScoreQueue(async (batch) => void sent.push(batch), { interval: 10 }));
@@ -188,6 +197,15 @@ describe('the entry point, built', () => {
   test('imports as ESM', () => {
     const esm = `import { capture } from 'tracepad/testing'; import * as tp from 'tracepad'; ${probe}`;
     expect(run(['--input-type=module', '-e', esm])).toBe('[["s"],1]');
+  });
+
+  test('imported before any provider, keeps an init before the first capture from binding the tracers', () => {
+    const first = `import { trace } from '@opentelemetry/api'; import { capture } from 'tracepad/testing';
+      import * as tp from 'tracepad'; const tracer = trace.getTracer('app');
+      tp.init({ host: 'http://tracepad.test:4318', key: 'tp-sk-test', export: false });
+      tracer.startSpan('under init').end(); const c = capture(); tracer.startSpan('captured').end();
+      console.log(JSON.stringify(c.spans.map((s) => s.name)));`;
+    expect(run(['--input-type=module', '-e', first])).toBe('["captured"]');
   });
 
   test('requires as CommonJS', () => {

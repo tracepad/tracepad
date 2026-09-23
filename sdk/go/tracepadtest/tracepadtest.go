@@ -42,6 +42,13 @@ type Recorder struct {
 	scores   []map[string]any
 }
 
+// A test binary that links this package starts with the follower as the
+// global provider, before a TestMain or an init of the application's sets
+// one: every OpenTelemetry tracer taken at start-up binds to the first
+// provider set, for good, and bound to the follower it reaches every
+// capture (spec 040 #14).
+func init() { hook.Reset() }
+
 // Capture resets the process, has the global tracer provider follow one that
 // records into memory — a tracer the application took at start-up included —
 // and initialises the package against it with export off, nothing read from

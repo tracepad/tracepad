@@ -32,6 +32,8 @@ import * as prompts from './prompts.js';
 import * as scores from './scores.js';
 import * as tracing from './tracing.js';
 
+tracing.follow();
+
 // A reserved name (RFC 2606), so nothing resolves it: export is off and the
 // queue does not post, and a REST call a test forgot to stub fails loudly.
 const HOST = 'http://tracepad.test:4318';

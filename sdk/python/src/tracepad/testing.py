@@ -21,6 +21,7 @@ path never imports this module.
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Iterator
 from typing import Any
 
@@ -38,6 +39,9 @@ _KEY = "tp-sk-test"
 
 __all__ = ["Capture", "capture", "reset"]
 
+# How long a reset waits for the provider `init` built to shut down, in seconds.
+_SHUTDOWN_WAIT = 5.0
+
 # The provider the follower records into: a capture's, or the one `init` built
 # after a reset.
 _target: TracerProvider | None = None
@@ -49,16 +53,18 @@ class _Following(otel.Tracer):
 
     def __init__(self, args: tuple[Any, ...], kwargs: dict[str, Any]) -> None:
         self._args, self._kwargs = args, kwargs
-        self._for: Any = None
-        self._tracer: otel.Tracer = otel.NoOpTracer()
+        # One tuple, swapped whole: a thread never sees a provider with the
+        # tracer of the one before it.
+        self._bound: tuple[Any, otel.Tracer] = (None, otel.NoOpTracer())
 
     def _now(self) -> otel.Tracer:
         provider = _target or otel.get_tracer_provider()
         if provider is _FOLLOW:
             return otel.NoOpTracer()
-        if provider is not self._for:
-            self._for, self._tracer = provider, provider.get_tracer(*self._args, **self._kwargs)
-        return self._tracer
+        bound = self._bound
+        if bound[0] is not provider:
+            bound = self._bound = (provider, provider.get_tracer(*self._args, **self._kwargs))
+        return bound[1]
 
     def start_span(self, *args: Any, **kwargs: Any) -> otel.Span:
         return self._now().start_span(*args, **kwargs)
@@ -93,6 +99,11 @@ class _Follow(otel.NoOpTracerProvider):
 
 
 _FOLLOW = _Follow()
+# Imported before anything set a provider — a conftest that names the plugin,
+# before a session fixture calls `init` — the follower goes in at once: a
+# tracer taken at import binds to the first provider set, for good.
+if otel._TRACER_PROVIDER is None:
+    otel._TRACER_PROVIDER = _FOLLOW
 
 
 def reset() -> None:
@@ -103,8 +114,14 @@ def reset() -> None:
     # package's test of this function fails if a release moves it.
     otel._TRACER_PROVIDER = _FOLLOW
     otel._TRACER_PROVIDER_SET_ONCE = otel.Once()
-    for provider in {_target, _tracing._built} - {None}:
-        provider.shutdown()
+    if _target is not None and _target is not _tracing._built:
+        _target.shutdown()
+    if _tracing._built is not None:
+        # Its spans go to the store the test configured, as at exit; a store
+        # that is away does not hold the teardown for the exporter's retries.
+        shutdown = threading.Thread(target=_tracing._built.shutdown, daemon=True)
+        shutdown.start()
+        shutdown.join(_SHUTDOWN_WAIT)
     _target = _tracing._built = None
     _tracing._initialized = False
     _tracing._warned_kinds.clear()

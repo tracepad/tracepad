@@ -453,7 +453,8 @@ the package against a provider that records into memory, with export off and
 nothing read from the environment; the score queue keeps each body instead of
 posting it. The global provider follows the capture's, so a tracer your
 application took at import — `trace.get_tracer(__name__)` — records into
-every capture, not only the first. Leaving the block resets the process
+every capture, not only the first, as long as `tracepad.testing` is imported
+before anything sets a provider (the plugin line in `conftest.py` is). Leaving the block resets the process
 again, and what was captured stays readable:
 
 | On a `Capture` | What it is |

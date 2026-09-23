@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import subprocess
+import sys
 import time
 import urllib.request
 from typing import Any
@@ -123,6 +125,33 @@ def test_the_reset_shuts_down_the_provider_init_built(monkeypatch: pytest.Monkey
     monkeypatch.setattr(built, "shutdown", lambda: shut.append(True))
     testing.reset()
     assert shut == [True]
+
+
+def test_the_reset_waits_for_that_shutdown_only_so_long(monkeypatch: pytest.MonkeyPatch) -> None:
+    tracepad.init("http://tracepad.test:4318", "tp-sk-test")
+    monkeypatch.setattr(_tracing._built, "shutdown", lambda: time.sleep(2))  # a store away
+    monkeypatch.setattr(testing, "_SHUTDOWN_WAIT", 0.05)
+    started = time.monotonic()
+    testing.reset()
+    assert time.monotonic() - started < 1
+
+
+def test_an_init_before_the_first_reset_does_not_keep_the_tracers() -> None:
+    # A session fixture that calls `init` before any capture, in a process of
+    # its own: the plugin's import put the follower in first.
+    script = """
+from opentelemetry import trace
+from tracepad import testing
+import tracepad
+tracer = trace.get_tracer("app")
+tracepad.init("http://tracepad.test:4318", "tp-sk-test", export=False)
+tracer.start_span("under init").end()
+with testing.capture() as captured:
+    tracer.start_span("captured").end()
+print([span.name for span in captured.spans])
+"""
+    out = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, check=True)
+    assert out.stdout.strip() == "['captured']"
 
 
 def test_a_capture_reads_nothing_from_the_environment(

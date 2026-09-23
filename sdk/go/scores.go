@@ -149,10 +149,17 @@ func (q *scoreQueue) close(ctx context.Context) error {
 	}
 }
 
-// drop stops the goroutine without sending what is queued (spec 040 #14).
+// drop stops the goroutine without sending what is queued, and without
+// waiting for it: a batch already on the wire is past recalling, and is not
+// retried (spec 040 #14).
 func (q *scoreQueue) drop() {
 	q.dropped.Store(true)
-	_ = q.close(context.Background())
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if !q.closed {
+		q.closed = true
+		close(q.items)
+	}
 }
 
 func (q *scoreQueue) run() {
@@ -198,6 +205,9 @@ func (q *scoreQueue) collect() (batch []map[string]any, flushes []chan struct{},
 func (q *scoreQueue) deliver(batch []map[string]any) {
 	var err error
 	for attempt := 0; attempt < 2; attempt++ {
+		if q.dropped.Load() {
+			return
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		err = q.send(ctx, batch)
 		cancel()

@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
@@ -244,6 +245,60 @@ func TestTheResetDropsWhatTheQueueHeld(t *testing.T) {
 	if posts.Load() != 0 {
 		t.Errorf("posts = %d, want the pending score dropped", posts.Load())
 	}
+}
+
+func TestTheResetNeitherWaitsForASendInFlightNorWarns(t *testing.T) {
+	arrived, release := make(chan struct{}, 2), make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		arrived <- struct{}{}
+		<-release
+	}))
+	t.Cleanup(server.Close)
+	t.Cleanup(func() { close(release) })
+	t.Setenv("TRACEPAD_HOST", server.URL)
+	t.Setenv("TRACEPAD_API_KEY", "tp-sk-test")
+	logs := &bytes.Buffer{}
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	tracepadtest.Reset(t)
+	_ = tracepad.Score(context.Background(), "in flight", tracepad.WithTraceID(strings.Repeat("a", 32)))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = tracepad.Flush(ctx) }()
+	<-arrived
+	started := time.Now()
+	tracepadtest.Reset(t)
+	if waited := time.Since(started); waited > time.Second {
+		t.Errorf("the reset waited %s for a send in flight", waited)
+	}
+	if logs.Len() != 0 {
+		t.Errorf("the reset logged:\n%s", logs)
+	}
+}
+
+// A TestMain that initialises before the first capture binds a tracer taken
+// at start-up to the provider it builds, unless the follower came first.
+func TestAnInitBeforeTheFirstCaptureDoesNotKeepTheTracers(t *testing.T) {
+	cmd := exec.Command(os.Args[0], "-test.run=^TestChildInitFirst$", "-test.v")
+	cmd.Env = append(os.Environ(), "TRACEPADTEST_CHILD=TestChildInitFirst")
+	if out, err := cmd.CombinedOutput(); err != nil || !strings.Contains(string(out), "--- PASS: TestChildInitFirst") {
+		t.Fatalf("child: %v\n%s", err, out)
+	}
+}
+
+func TestChildInitFirst(t *testing.T) {
+	only(t)
+	if _, err := tracepad.Init(context.Background(), tracepad.WithHost("http://tracepad.test:4318"),
+		tracepad.WithKey("tp-sk-test"), tracepad.WithExport(false)); err != nil {
+		t.Fatal(err)
+	}
+	_, s := appTracer.Start(context.Background(), "under init")
+	s.End()
+	rec := tracepadtest.Capture(t)
+	_, s = appTracer.Start(context.Background(), "captured")
+	s.End()
+	rec.One(t, "captured")
 }
 
 func TestResetAloneIsTracingOff(t *testing.T) {

@@ -532,7 +532,8 @@ the package against a provider that records into memory, with export off and
 nothing read from the environment; the score queue keeps each body instead of
 posting it. The global provider follows the capture's, so a tracer your
 application took at import — `trace.getTracer('app')` — records into every
-capture, not only the first. `restore()` — or `reset()` — resets the process again, and what
+capture, not only the first, as long as `tracepad/testing` is imported before
+anything registers a provider. `restore()` — or `reset()` — resets the process again, and what
 was captured stays readable.
 The handle is also `Disposable`: `using captured = capture();` restores at the
 end of the block where the runtime has `using`.

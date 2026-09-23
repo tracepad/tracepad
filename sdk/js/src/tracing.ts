@@ -170,6 +170,13 @@ class Follower implements TracerProvider {
 
 export const FOLLOWER = new Follower();
 
+/** Put the follower behind the API's proxy when nothing is registered yet:
+ * `tracepad/testing` imported before a provider is, as a tracer taken at
+ * import binds to the first provider behind the proxy, for good. */
+export function follow(): void {
+  if (isNoop(registered())) (trace.getTracerProvider() as ProxyTracerProvider).setDelegate(FOLLOWER);
+}
+
 /**
  * Register a provider — with the context manager and the propagator that
  * come with it — or, after a test's reset, register the follower recording
@@ -934,7 +941,9 @@ export function reset(): void {
   handedOut = false;
   exiting = undefined;
   process.off('beforeExit', atExit);
-  void built?.shutdown();
+  // Its spans go to the store the test configured, as at exit; a failed
+  // export is warned about, never an unhandled rejection.
+  built?.shutdown().catch((error: unknown) => warn(`reset: the provider init built failed to shut down: ${describe(error)}`));
   built = FOLLOWER.target = undefined;
   // The registration is undone the way the API's own `unregisterGlobal` does
   // it: `trace.disable()` would also replace the API's proxy, and the tracers
