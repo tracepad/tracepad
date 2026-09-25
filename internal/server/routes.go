@@ -37,10 +37,11 @@ func (s *Server) routes() []route {
 		{"POST", "/api/public/otel/v1/traces", ingest, "OTLP ingest under the Langfuse SDK's path", s.handleTraces},
 		// The Langfuse media channel (spec 041 #9): the SDK asks for an
 		// upload URL, PUTs the bytes there, and reports back. The PUT is
-		// public because the URL is presigned — the SDK sends it no
-		// credential — and the token in it is the check (Decision 14).
+		// presigned because the SDK sends it no credential — the token in
+		// the URL is the check (Decision 14) — and the body is the picture,
+		// capped at the length the token grants.
 		{"POST", "/api/public/media", ingest, "Langfuse SDK: an upload URL for one media body, or null when it is already stored", s.handleLangfuseMediaUpload},
-		{"PUT", "/api/public/media/{mediaId}/upload", public, "Langfuse SDK: the presigned upload of one media body", s.handleLangfuseMediaPut},
+		{"PUT", "/api/public/media/{mediaId}/upload", presigned, "Langfuse SDK: the presigned upload of one media body", s.handleLangfuseMediaPut},
 		{"PATCH", "/api/public/media/{mediaId}", ingest, "Langfuse SDK: the report on one media upload", s.handleLangfuseMediaPatch},
 		{"GET", "/api/public/media/{mediaId}", ingest, "Langfuse SDK: one media body's type, size and address", s.handleLangfuseMediaGet},
 

@@ -131,43 +131,35 @@ func (s *Server) readJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 	if !ok {
 		return false
 	}
-	return decodeInto(w, body, v)
+	if err := decodeStrict(body, v); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return false
+	}
+	return true
 }
 
 // readAPIBody reads and size-caps a request body (spec 003, API contract).
 func (s *Server) readAPIBody(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
 	body, err := readBody(w, r, s.maxBodyBytes)
-	return body, bodyRead(w, err)
+	return body, s.bodyRead(w, r, err)
 }
 
-// maxPublicBodyBytes caps the body of a route anyone can call (spec 028
-// Decision 26). The largest such body is a setup — a token, an email, a
-// password and a name, under 4 KiB even with every character escaped — so
-// twice that is room for any client and nothing for an attacker.
-const maxPublicBodyBytes = 8 << 10
-
-// readPublicJSON is readJSON for the routes that run before any credential:
-// setup, sign-in and accepting an invitation. Their bodies are a few hundred
-// bytes of JSON, so the configured cap — sized for trace batches — is the
-// wrong one, and a compressed body is refused outright: decompressing is work
-// done for a caller nobody has identified (spec 028 Decision 26).
-func readPublicJSON(w http.ResponseWriter, r *http.Request, v any) bool {
-	if encoding := strings.TrimSpace(r.Header.Get("Content-Encoding")); encoding != "" &&
-		!strings.EqualFold(encoding, "identity") {
-		writeError(w, http.StatusUnsupportedMediaType, "this route takes an uncompressed body")
-		return false
-	}
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxPublicBodyBytes))
-	if !bodyRead(w, err) {
-		return false
-	}
-	return decodeInto(w, body, v)
-}
-
-// bodyRead answers the client itself when reading the body failed.
-func bodyRead(w http.ResponseWriter, err error) bool {
+// bodyRead answers the client itself when reading the body failed: 413 for
+// the cap, 400 for anything else. A gzip body that fit on the wire and
+// expanded past the cap is also logged, because to an OTLP exporter a 413 is
+// final — the batch is dropped, and this line is where the operator finds out
+// why (spec 002 #27).
+func (s *Server) bodyRead(w http.ResponseWriter, r *http.Request, err error) bool {
 	if err == nil {
 		return true
+	}
+	var inflated *inflatedTooLarge
+	if errors.As(err, &inflated) {
+		if skipped, ok := s.inflatedLog.allow(time.Now()); ok {
+			slog.Warn("a gzip body expanded past TRACEPAD_MAX_BODY_BYTES after decompression and was refused with 413",
+				"path", r.URL.Path, "wire_bytes_read", inflated.wire, "limit", inflated.limit,
+				"not_logged_since_last", skipped)
+		}
 	}
 	var tooLarge *http.MaxBytesError
 	if errors.As(err, &tooLarge) {
@@ -178,11 +170,42 @@ func bodyRead(w http.ResponseWriter, err error) bool {
 	return false
 }
 
-// decodeInto decodes a read body into v, answering 400 itself when it does not.
-func decodeInto(w http.ResponseWriter, body []byte, v any) bool {
-	if err := decodeStrict(body, v); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return false
+// maxPublicBodyBytes caps the body of a route anyone can call (spec 028
+// Decision 26). The largest such body is a setup — a token, an email, a
+// password and a name, under 4 KiB even with every character escaped — so
+// twice that is room for any client and nothing for an attacker.
+const maxPublicBodyBytes = 8 << 10
+
+// smallPlainBody is what the guard puts in front of every public route that
+// can carry a body (spec 028 Decision 26). Those routes run before anything
+// knows who is calling, so they take a few KiB and no Content-Encoding:
+// decompressing is work done for a caller nobody has identified, and the
+// configured cap is sized for trace batches, not for an email and a
+// password. Both refusals come before the handler, and so before a byte of
+// the body is read.
+func smallPlainBody(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !plainEncoding(r) {
+			writeError(w, http.StatusUnsupportedMediaType, "this route takes an uncompressed body")
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, maxPublicBodyBytes)
+		next(w, r)
+	}
+}
+
+// plainEncoding reports whether a request declares no content coding but
+// `identity` — in every Content-Encoding header it carries, and in every
+// comma-separated token of each, since a coding hidden behind the first one
+// is still a coding.
+func plainEncoding(r *http.Request) bool {
+	for _, value := range r.Header.Values("Content-Encoding") {
+		for _, coding := range strings.Split(value, ",") {
+			coding = strings.TrimSpace(coding)
+			if coding != "" && !strings.EqualFold(coding, "identity") {
+				return false
+			}
+		}
 	}
 	return true
 }

@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/tracepad/tracepad/internal/config"
 	"github.com/tracepad/tracepad/internal/store"
@@ -140,7 +141,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		Password string `json:"password"`
 		Name     string `json:"name"`
 	}
-	if !readPublicJSON(w, r, &request) {
+	if !s.readJSON(w, r, &request) {
 		return
 	}
 	token := s.currentSetupToken()
@@ -192,7 +193,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		Email    string `json:"email"`
 		Password string `json:"password"`
 	}
-	if !readPublicJSON(w, r, &request) {
+	if !s.readJSON(w, r, &request) {
 		return
 	}
 	email := strings.TrimSpace(request.Email)
@@ -258,7 +259,7 @@ func (s *Server) handleAcceptInvite(w http.ResponseWriter, r *http.Request) {
 		Token    string `json:"token"`
 		Password string `json:"password"`
 	}
-	if !readPublicJSON(w, r, &request) {
+	if !s.readJSON(w, r, &request) {
 		return
 	}
 	if strings.TrimSpace(request.Token) == "" {
@@ -350,8 +351,12 @@ func (s *Server) handlePatchMe(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, `nothing to change: send "name", "password" or "preferences"`)
 		return
 	}
-	if request.Name != nil && !validAccountName(w, *request.Name) {
-		return
+	if request.Name != nil {
+		name := strings.TrimSpace(*request.Name)
+		if !validAccountName(w, name) {
+			return
+		}
+		request.Name = &name
 	}
 	preferences, ok := readPreferences(w, request.Preferences)
 	if !ok {
@@ -598,13 +603,16 @@ func validEmail(email string) error {
 	return nil
 }
 
-// maxAccountNameLength bounds an account's display name (Decision 26).
+// maxAccountNameLength bounds an account's display name, in characters
+// (Decision 26): a name is read by people, and a limit in bytes would give a
+// Cyrillic name half the room of a Latin one.
 const maxAccountNameLength = 200
 
-// validAccountName checks a display name's length, answering 422 itself when
-// it is too long. Empty is allowed: the name is optional everywhere.
+// validAccountName checks a trimmed display name's length, answering 422
+// itself when it is too long. Empty is allowed: the name is optional
+// everywhere.
 func validAccountName(w http.ResponseWriter, name string) bool {
-	if len(name) > maxAccountNameLength {
+	if utf8.RuneCountInString(name) > maxAccountNameLength {
 		writeError(w, http.StatusUnprocessableEntity,
 			fmt.Sprintf("a name must be at most %d characters", maxAccountNameLength))
 		return false

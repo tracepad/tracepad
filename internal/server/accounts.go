@@ -197,8 +197,12 @@ func (s *Server) handlePatchAccount(w http.ResponseWriter, r *http.Request) {
 			`nothing to change: send "name", "owner" or "disabled"`)
 		return
 	}
-	if request.Name != nil && !validAccountName(w, *request.Name) {
-		return
+	if request.Name != nil {
+		name := strings.TrimSpace(*request.Name)
+		if !validAccountName(w, name) {
+			return
+		}
+		request.Name = &name
 	}
 	update := &store.AccountUpdate{
 		AccountID: account.ID, Name: request.Name, Owner: request.Owner,
