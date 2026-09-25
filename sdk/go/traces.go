@@ -53,7 +53,7 @@ func (f TraceFilter) values() (url.Values, error) {
 
 // roundClient waits for one confirmed round: the server sizes a round for
 // the interface's thirty-second clock, and this leaves room over it.
-var roundClient = &http.Client{Timeout: 60 * time.Second}
+var roundClient = &http.Client{Timeout: 60 * time.Second, CheckRedirect: sameOrigin}
 
 // DeleteOption configures DeleteTraces.
 type DeleteOption func(url.Values)

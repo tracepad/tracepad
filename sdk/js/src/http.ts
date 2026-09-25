@@ -68,6 +68,13 @@ export async function request(
   path: string,
   { body, params, timeout = 10_000 }: RequestOptions = {},
 ): Promise<Response> {
+  // Every name in a path is encoded by its caller, and that leaves the two
+  // segments encoding cannot hide: the URL parser resolves `..` before the
+  // request leaves, so it would name another object. No name the store
+  // accepts is empty or dots (spec 032 #17).
+  if (path.split('/').slice(1).some((part) => part === '' || part === '.' || part === '..')) {
+    throw new TracepadError(`tracepad: ${method} ${path}: an empty or dot segment names nothing`);
+  }
   let url = config.host + path;
   const query = new URLSearchParams();
   for (const [name, value] of Object.entries(params ?? {})) {
@@ -87,12 +94,20 @@ export async function request(
         'User-Agent': USER_AGENT,
       },
       body: body === undefined ? null : JSON.stringify(body),
+      // A write is never re-sent where a redirect points: `fetch` turns a
+      // POST into a GET on 301–303, and a listing's `200` would read as the
+      // batch delivered (spec 032 #17).
+      redirect: method === 'GET' || method === 'HEAD' ? 'follow' : 'manual',
       signal: AbortSignal.timeout(timeout),
     });
   } catch (error) {
     throw new TracepadError(`tracepad: ${method} ${config.host}${path}: ${describe(error)}`);
   }
   const raw = await answer.text();
+  if (answer.status >= 300 && answer.status < 400) {
+    const location = answer.headers.get('location') ?? 'nowhere';
+    throw new TracepadHTTPError(answer.status, `a redirect to ${location} is not followed for ${method}; point the host at the store itself`);
+  }
   if (!answer.ok) {
     // The body is where the store names the offending field or item, and
     // it is the whole value of rejecting rather than logging a status.

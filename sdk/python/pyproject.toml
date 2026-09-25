@@ -7,6 +7,9 @@ name = "tracepad"
 description = "The Python package for Tracepad: a thin layer of ergonomics over the OpenTelemetry SDK"
 readme = "README.md"
 license = "Apache-2.0"
+# Copies of the repository's own, which `make gate` keeps identical: Apache-2.0
+# §4 has both travel with the package, and PEP 639 forbids a path above this one.
+license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.10"
 authors = [{ name = "Tracepad" }]
 keywords = ["opentelemetry", "otlp", "llm", "observability", "tracing", "evals"]

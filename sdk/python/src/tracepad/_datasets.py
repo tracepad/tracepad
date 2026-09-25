@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from dataclasses import dataclass, fields
 from typing import Any
+from urllib.parse import quote
 
 from . import _config
 from ._harness import PAGE, Run, pages
@@ -52,7 +53,7 @@ class Dataset:
 
     def __init__(self, name: str) -> None:
         self.name = name
-        self._path = f"/api/v1/datasets/{name}"
+        self._path = f"/api/v1/datasets/{quote(str(name), safe='')}"
 
     def create(self, description: str | None = None,
                metadata: Any = None) -> dict[str, Any]:

@@ -48,6 +48,13 @@ def request(
     import urllib.parse
     import urllib.request
 
+    # Every name in a path is percent-encoded by its caller, and that leaves
+    # the two segments encoding cannot hide: urllib sends `..` as it is and the
+    # server answers with a redirect to the path it names, which is never the
+    # object the caller meant. No name the store accepts is empty or dots
+    # (spec 017 #19).
+    if any(part in ("", ".", "..") for part in path.split("/")[1:]):
+        raise TracepadError(f"tracepad: {method} {path}: an empty or dot segment names nothing")
     url = config.host + path
     if params:
         # A list is a repeated name (`tag=a&tag=b`), the listing's own grammar.
@@ -60,11 +67,16 @@ def request(
         data=payload,
         method=method,
         headers={
-            "Authorization": f"Bearer {config.key}",
             "Content-Type": "application/json",
             "User-Agent": USER_AGENT,
         },
     )
+    # Unredirected: urllib copies every other header to wherever a `302`
+    # points, whatever the host, so an SSO proxy or a canonical-host rule in
+    # front of the store would have been handed the project's secret. The
+    # store never redirects; a request that meets one arrives without the key
+    # and is answered `401` (spec 017 #19).
+    call.add_unredirected_header("Authorization", f"Bearer {config.key}")
     try:
         with urllib.request.urlopen(call, timeout=timeout) as answer:
             headers = {name.lower(): value for name, value in answer.headers.items()}

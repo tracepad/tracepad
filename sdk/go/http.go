@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -53,6 +54,18 @@ func (e *HTTPError) Error() string {
 type config struct {
 	host, key, environment, release string
 }
+
+// String and GoString keep the key out of %v, %+v and %#v (spec 033 #18): a
+// configuration printed while debugging is a secret in a log.
+func (c config) String() string {
+	c.key = redacted
+	type bare config
+	return fmt.Sprintf("%+v", bare(c))
+}
+
+func (c config) GoString() string { return c.String() }
+
+const redacted = "[redacted]"
 
 // resolve builds a config, failing with ErrConfig when the two required
 // values are nowhere.
@@ -106,7 +119,35 @@ func current() (config, error) {
 // auth, no async twin (spec 017 #6, spec 033 #8). Its callers are scripts and
 // start-up code — a prompt at boot, the harness — where a blocking call is
 // the honest shape. Scores are the exception and get a queue of their own.
-var httpClient = &http.Client{Timeout: 10 * time.Second}
+var httpClient = &http.Client{Timeout: 10 * time.Second, CheckRedirect: sameOrigin}
+
+// sameOrigin is the redirect rule of both clients (spec 033 #18): a hop to
+// another scheme, host or port goes without the key, as `fetch` has it.
+// net/http's own rule compares host names alone, so it would carry the key to
+// another port, to a subdomain, and from https down to plain http on the same
+// host. A write is never re-sent: net/http turns a POST into a GET on
+// 301–303, and a listing's 200 would read as the batch delivered.
+func sameOrigin(req *http.Request, via []*http.Request) error {
+	if method := via[0].Method; method != http.MethodGet && method != http.MethodHead {
+		return fmt.Errorf("a redirect to %s is not followed for %s; point the host at the store itself", req.URL, method)
+	}
+	if len(via) >= 10 {
+		return errors.New("stopped after 10 redirects")
+	}
+	first := origin(via[0].URL)
+	if origin(req.URL) != first || slices.ContainsFunc(via[1:], func(hop *http.Request) bool { return origin(hop.URL) != first }) {
+		req.Header.Del("Authorization")
+	}
+	return nil
+}
+
+func origin(u *url.URL) string {
+	port := u.Port()
+	if port == "" {
+		port = map[string]string{"http": "80", "https": "443"}[u.Scheme]
+	}
+	return u.Scheme + "://" + strings.ToLower(u.Hostname()) + ":" + port
+}
 
 // response is one JSON answer: the status, the decoded body (nil when empty,
 // the text when it was not JSON) and the headers.
@@ -125,6 +166,15 @@ func request(ctx context.Context, c config, method, path string, body any, param
 // requestWith is request over a client of the caller's: the one place a
 // call waits longer than the default (a deletion's round, traces.go).
 func requestWith(ctx context.Context, client *http.Client, c config, method, path string, body any, params url.Values) (response, error) {
+	// Every name in a path is escaped by its caller, and that leaves the two
+	// segments escaping cannot hide: the server answers `..` with a redirect
+	// to the path it names, which is never the object meant. No name the
+	// store accepts is empty or dots (spec 033 #18).
+	if slices.ContainsFunc(strings.Split(path, "/")[1:], func(part string) bool {
+		return part == "" || part == "." || part == ".."
+	}) {
+		return response{}, fmt.Errorf("tracepad: %s %s: an empty or dot segment names nothing", method, path)
+	}
 	target := c.host + path
 	if len(params) > 0 {
 		target += "?" + params.Encode()

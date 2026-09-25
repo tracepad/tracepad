@@ -16,6 +16,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import quote
 
 from . import _config
 from ._errors import TracepadError, TracepadPlaceholderError
@@ -103,7 +104,8 @@ def prompt(name: str, *, label: str | None = None, version: int | None = None) -
     if version is not None:
         params["version"] = version
     try:
-        answer = request(_config.current(), "GET", f"/api/v1/prompts/{name}", params=params)
+        answer = request(_config.current(), "GET", f"/api/v1/prompts/{quote(str(name), safe='')}",
+                         params=params)
     except TracepadError as error:
         if cached is None or _is_client_error(error):
             raise

@@ -205,12 +205,12 @@ func (r *Run) close(ctx context.Context, body map[string]any) (map[string]any, e
 	if err := Flush(ctx); err != nil {
 		def.log().Warn("tracepad: the run's flush did not finish; closing it anyway", "run", r.ID, "error", err)
 	}
-	return post(ctx, "/api/v1/runs/"+r.ID+"/finish", body)
+	return post(ctx, r.path()+"/finish", body)
 }
 
 // Get is the run with its summary, as the server computes it (spec 018 #8).
 func (r *Run) Get(ctx context.Context) (map[string]any, error) {
-	return get(ctx, "/api/v1/runs/"+r.ID, nil)
+	return get(ctx, r.path(), nil)
 }
 
 // Items is the run's cases with the attempts made at each. Unlike a
@@ -222,8 +222,13 @@ func (r *Run) Items(ctx context.Context, opts ...RunItemsOption) iter.Seq2[map[s
 	for _, opt := range opts {
 		opt(params)
 	}
-	return pages(ctx, "/api/v1/runs/"+r.ID+"/items", params, "items")
+	return pages(ctx, r.path()+"/items", params, "items")
 }
+
+// path is the run's own. The server's hex needs no escaping and is escaped
+// all the same: a path is built one way whoever supplied the segment (spec
+// 033 #18).
+func (r *Run) path() string { return "/api/v1/runs/" + url.PathEscape(r.ID) }
 
 // RunItemsOption configures Run.Items.
 type RunItemsOption func(url.Values)
@@ -277,7 +282,7 @@ func ItemID(key string) string {
 // Compare is two runs side by side, exactly as the server computes it (spec
 // 014 #18).
 func Compare(ctx context.Context, a, b string) (map[string]any, error) {
-	return get(ctx, "/api/v1/runs/"+a+"/compare/"+b, nil)
+	return get(ctx, "/api/v1/runs/"+url.PathEscape(a)+"/compare/"+url.PathEscape(b), nil)
 }
 
 func get(ctx context.Context, path string, params url.Values) (map[string]any, error) {

@@ -117,7 +117,8 @@ export function init(options: InitOptions = {}): void {
 function configFor(options: ConfigOptions): Config {
   if (!handedOut) return resolve(options);
   const built = current();
-  const config = resolve({ ...built, ...defined(options) });
+  // The key by name: it is not enumerable, so a spread would drop it.
+  const config = resolve({ ...built, key: built.key, ...defined(options) });
   if (config.host !== built.host || config.key !== built.key) {
     warn(
       'init(): the host or the key differs from the one spanProcessor() was built with; ' +
@@ -259,7 +260,9 @@ function exporter(config: Config, millis: number | undefined): SpanProcessor {
   return new BatchSpanProcessor(
     new OTLPTraceExporter({
       url: `${config.host}/v1/traces`,
-      headers: { Authorization: `Bearer ${config.key}` },
+      // A function rather than a record, so the key is not a value on the
+      // exporter for `util.inspect` to print (spec 032 #17).
+      headers: async () => ({ Authorization: `Bearer ${config.key}` }),
       ...(timeoutMillis === undefined ? {} : { timeoutMillis }),
     }),
   );

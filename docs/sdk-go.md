@@ -534,8 +534,16 @@ the helper panics in the testing package.
 | `Score` with no target — or an empty `WithTraceID` — outside every span while tracing: initialised, or through a provider of the application's own | `ErrNoTrace` — a programming error, visible at the call site |
 | `Score` with no target where nothing traces (no `Init`, no-op global provider, no recording span) | `nil`; a debug line — tracing is off |
 | `Update`, `UpdateTrace` on a span that does not record (tracing off, or sampled out) | Nothing; a debug line |
+| A name that is empty, `.` or `..` | An error, before any request — no name the store accepts is one |
 
 Both sentinels are for `errors.Is`, and `*HTTPError` for `errors.As`.
+
+A REST call follows a redirect of a `GET` with the key only within the store's
+origin — the same scheme, host and port; anywhere else it goes without
+`Authorization`, as `fetch` has it. A write is never re-sent: its redirect is an
+error that names where it pointed. The store itself never redirects, so
+`WithHost` or `TRACEPAD_HOST` should be the address it answers on.
+
 Instrumentation that can break the function it observes is worse than none.
 
 ## What it writes

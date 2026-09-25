@@ -136,8 +136,9 @@ sdk-test: ## Unit-test the Python package, and end-to-end against a real binary
 # The budget spec 017 #1 set, shared with the harness of spec 018; raised for
 # the streaming pass-through (spec 031 #22), for trace deletion (spec 036 #8),
 # for `tracepad.testing` (spec 040 #13), for the cost and bounds of spec 042
-# and for `compile`'s own substitution (spec 017 #18).
-SDK_BUDGET := 2040
+# for `compile`'s own substitution (spec 017 #18), and for the key and the path
+# (spec 017 #19).
+SDK_BUDGET := 2100
 
 sdk-lines: ## Report the Python package's application lines against its budget
 	scripts/sdk-lines.sh $(SDK_BUDGET)
@@ -155,9 +156,9 @@ sdk-go-unit: ## The Go package's vet and unit tests alone (part of the gate)
 	SDK_SKIP_E2E=1 scripts/sdk-go-test.sh
 
 # The budget spec 033 #11 set, raised for the harness (spec 033 #17), for
-# trace deletion (spec 036 #8), for `tracepadtest` (spec 040 #13) and for the
-# cost and bounds of spec 042.
-SDK_GO_BUDGET := 2500
+# trace deletion (spec 036 #8), for `tracepadtest` (spec 040 #13), for the
+# cost and bounds of spec 042, and for the key and the path (spec 033 #18).
+SDK_GO_BUDGET := 2575
 
 sdk-go-lines: ## Report the Go package's application lines against its budget
 	scripts/sdk-go-lines.sh $(SDK_GO_BUDGET)
@@ -183,8 +184,9 @@ sdk-js-test: ## Type-check and unit-test the Node package, and end-to-end agains
 
 # The budget spec 032 #11 set, shared with the harness of the same spec;
 # raised for the harness (spec 032 #16), for trace deletion (spec 036 #8), for
-# `tracepad/testing` (spec 040 #13) and for the cost and bounds of spec 042.
-SDK_JS_BUDGET := 2275
+# `tracepad/testing` (spec 040 #13), for the cost and bounds of spec 042, and
+# for the key and the path (spec 032 #17).
+SDK_JS_BUDGET := 2300
 
 sdk-js-lines: ## Report the Node package's application lines against its budget
 	scripts/sdk-js-lines.sh $(SDK_JS_BUDGET)
@@ -198,7 +200,12 @@ doc-anchors: ## Check every anchor in docs/, README.md and AGENTS.md against its
 doc-anchors-self-test: ## Assert the anchor checker against its fixture
 	scripts/doc-anchors.sh --self-test
 
-gate: ensure-hooks format-check vet test sdk-go-unit doc-anchors ui-check ## Full gate: what CI runs, and the git pre-push hook
+sdk-notices: ## Fail if a package's copy of LICENSE or NOTICE is not the root's
+	@for copy in sdk/js/LICENSE sdk/js/NOTICE sdk/python/LICENSE sdk/python/NOTICE sdk/go/NOTICE; do \
+		cmp -s "$$(basename $$copy)" "$$copy" || { echo "sdk-notices: $$copy differs from ./$$(basename $$copy); copy it again"; exit 1; }; \
+	done
+
+gate: ensure-hooks format-check vet test sdk-go-unit doc-anchors sdk-notices ui-check ## Full gate: what CI runs, and the git pre-push hook
 
 # The pre-commit hook runs this: the checks that are cheap and the tests of
 # what is actually staged. The full gate runs once per push instead of once
@@ -246,6 +253,6 @@ install-hooks: ## (Re)install both hooks
 .PHONY: help build build-server dev test vet smoke fixtures format format-check \
 	ui ui-deps ui-types ui-types-check ui-check ui-lines image image-check \
 	e2e sdk-test sdk-lines sdk-go-test sdk-go-unit sdk-go-lines \
-	sdk-js-deps sdk-js-build sdk-js-test sdk-js-lines \
+	sdk-js-deps sdk-js-build sdk-js-test sdk-js-lines sdk-notices \
 	doc-anchors doc-anchors-self-test gate precommit \
 	test-staged ui-check-staged ensure-hooks install-hooks
