@@ -331,11 +331,13 @@ with tracepad.generation("chat", prompt=support, model=support.config["model"]):
 
 `Prompt` carries `name`, `version`, `type`, `text` or `messages`, `labels` and
 `config`. `compile(**variables)` substitutes `{placeholder}`s — in the text,
-or in every message's content — with `str()` of each value, and raises
-`TracepadPlaceholderError` on a placeholder with no variable (a
-`TracepadError`, and a `KeyError` as well). `{{` and `}}` are the braces
-themselves, so a prompt can show a JSON example; a brace that pairs with
-nothing is left as it is. It is not `str.format`: `{q:>12}`, `{user.email}`,
+or in every message's content — with each value rendered the way
+`f"{value}"` renders it, and raises `TracepadPlaceholderError` on a
+placeholder with no variable (a `TracepadError`, and a `KeyError` as well).
+`{{` and `}}` are the braces themselves, so a prompt can show a JSON example;
+a brace that pairs with nothing is left as it is. A message whose content is
+not a string — a list of content parts — is passed on as it is, with no
+substitution inside it. It is not `str.format`: `{q:>12}`, `{user.email}`,
 `{items[0]}` and `{q!r}` are not evaluated — they are placeholders no
 variable names, so they raise. The stored text is written by whoever holds
 the project key, and it must not run in your process. The Node package reads

@@ -1,6 +1,6 @@
 /** Prompts: fetched by label, cached for as long as the server says (spec 032 #7). */
 
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -165,7 +165,9 @@ describe('compile', () => {
   // sdk/go/prompts_test.go): one stored text, compiled with string variables,
   // must be one prompt, whichever package reads it.
   const table = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'testdata', 'prompts', 'compile.json');
-  const { cases } = JSON.parse(readFileSync(table, 'utf8')) as {
+  // Read from the repository: outside a checkout there is no testdata/.
+  const present = existsSync(table);
+  const { cases } = (present ? JSON.parse(readFileSync(table, 'utf8')) : { cases: [] }) as {
     cases: {
       name: string;
       text?: string;
@@ -176,14 +178,16 @@ describe('compile', () => {
     }[];
   };
 
-  test.each(cases)('reads what the Python package reads: $name', (c) => {
-    const prompt = new tracepad.Prompt(c.messages !== undefined
-      ? { name: 'p', version: 1, type: 'chat', messages: c.messages }
-      : { name: 'p', version: 1, type: 'text', text: c.text ?? '' });
-    if (c.error !== undefined) {
-      expect(() => prompt.compile(c.variables)).toThrow(c.error);
-    } else {
-      expect(prompt.compile(c.variables)).toEqual(c.compiled);
-    }
+  describe.skipIf(!present)('the shared table', () => {
+    test.each(cases)('reads what the Python package reads: $name', (c) => {
+      const prompt = new tracepad.Prompt(c.messages !== undefined
+        ? { name: 'p', version: 1, type: 'chat', messages: c.messages }
+        : { name: 'p', version: 1, type: 'text', text: c.text ?? '' });
+      if (c.error !== undefined) {
+        expect(() => prompt.compile(c.variables)).toThrow(c.error);
+      } else {
+        expect(prompt.compile(c.variables)).toEqual(c.compiled);
+      }
+    });
   });
 });

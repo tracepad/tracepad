@@ -144,9 +144,9 @@ func TestCompileSubstitutesInTextAndInMessages(t *testing.T) {
 
 // The Python and Node packages run the same table: one stored text, compiled
 // with string variables, is one prompt in all three — except where a case
-// says what Go gives instead, because Go never fails a compile and leaves a
-// placeholder no variable names as it is (spec 017 #18). Messages carry a
-// role and a content here, so a case's other fields are not compared.
+// says what Go gives instead, because Go never fails a compile, leaves a
+// placeholder no variable names as it is, and keeps a message's role and
+// content only (spec 017 #18).
 func TestCompileReadsTheSharedTable(t *testing.T) {
 	body, err := os.ReadFile(filepath.Join("..", "..", "testdata", "prompts", "compile.json"))
 	if errors.Is(err, os.ErrNotExist) {
@@ -174,6 +174,10 @@ func TestCompileReadsTheSharedTable(t *testing.T) {
 		want := c.expected
 		if c.Go != nil {
 			want = *c.Go
+		}
+		if want.Compiled == nil {
+			t.Errorf("%s: raises in Python and Node, and has no `go` field saying what Go gives", c.Name)
+			continue
 		}
 		got := (&PromptVersion{Text: c.Text, Messages: c.Messages}).Compile(c.Variables)
 		if c.Messages != nil {

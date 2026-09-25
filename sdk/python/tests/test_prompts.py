@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from enum import Enum, IntEnum
 from pathlib import Path
 from typing import Any
 
@@ -141,24 +142,19 @@ def test_compile_substitutes_in_text(monkeypatch: pytest.MonkeyPatch) -> None:
 # must be one prompt, whichever package reads it. Read from the repository,
 # so a test run from an unpacked sdist, which has no testdata/, skips it.
 TABLE = Path(__file__).parents[3] / "testdata" / "prompts" / "compile.json"
+CASES = json.loads(TABLE.read_text())["cases"] if TABLE.is_file() else []
 
 
-@pytest.fixture
-def cases() -> list[dict[str, Any]]:
-    if not TABLE.is_file():
-        pytest.skip(f"{TABLE} is not here: not a checkout of the repository")
-    return json.loads(TABLE.read_text())["cases"]
-
-
-def test_compile_reads_what_the_node_package_reads(cases: list[dict[str, Any]]) -> None:
-    for case in cases:
-        prompt = Prompt(name="p", version=1, type="chat" if "messages" in case else "text",
-                        text=case.get("text"), messages=case.get("messages"))
-        if "error" in case:
-            with pytest.raises(TracepadError, match=re.escape(case["error"])):
-                prompt.compile(**case["variables"])
-        else:
-            assert prompt.compile(**case["variables"]) == case["compiled"], case["name"]
+@pytest.mark.skipif(not TABLE.is_file(), reason="no testdata/: not a checkout of the repository")
+@pytest.mark.parametrize("case", CASES, ids=[case["name"] for case in CASES])
+def test_compile_reads_what_the_node_package_reads(case: dict[str, Any]) -> None:
+    prompt = Prompt(name="p", version=1, type="chat" if "messages" in case else "text",
+                    text=case.get("text"), messages=case.get("messages"))
+    if "error" in case:
+        with pytest.raises(TracepadError, match=re.escape(case["error"])):
+            prompt.compile(**case["variables"])
+    else:
+        assert prompt.compile(**case["variables"]) == case["compiled"]
 
 
 def test_a_placeholder_with_no_variable_is_a_key_error_too() -> None:
@@ -194,3 +190,30 @@ def test_compile_hands_a_variable_to_str_and_nothing_more() -> None:
     compiled = Prompt(name="p", version=1, type="text", text="Hello {user}").compile(user=User())
     assert compiled.startswith("Hello <")
     assert "sk-not-for-the-prompt" not in compiled
+
+
+class Tone(str, Enum):
+    FRIENDLY = "friendly"
+
+
+class Size(IntEnum):
+    LARGE = 3
+
+
+@pytest.mark.parametrize("value", [Tone.FRIENDLY, Size.LARGE, 2.5, None, True])
+def test_a_value_renders_as_str_format_rendered_it(value: Any) -> None:
+    # Before 3.12 a mixin Enum formats as its value and prints as its name.
+    compiled = Prompt(name="p", version=1, type="text", text="[{v}]").compile(v=value)
+    assert compiled == f"[{value}]"
+
+
+def test_a_message_whose_content_is_not_a_string_is_passed_on_as_it_is() -> None:
+    parts = [{"type": "text", "text": "Hi {q}"}, {"type": "image_url", "image_url": {"url": "x"}}]
+    prompt = Prompt(name="p", version=1, type="chat", messages=[
+        {"role": "system", "content": "About {q}."},
+        {"role": "user", "content": parts},
+    ])
+    assert prompt.compile(q="refunds") == [
+        {"role": "system", "content": "About refunds."},
+        {"role": "user", "content": parts},
+    ]

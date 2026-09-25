@@ -1,5 +1,5 @@
 {
-  "about": "Prompt.compile cases the Python, Node and Go packages all run (spec 017 #18). A case compiles `text` or `messages` with `variables`, all of them strings, and either equals `compiled` or raises an error containing `error`. `go` is what the Go package gives instead where it differs: it never raises, and leaves a placeholder no variable names as it is.",
+  "about": "Prompt.compile cases the Python, Node and Go packages all run (spec 017 #18). A case compiles `text` or `messages` with `variables`, all of them strings, and either equals `compiled` or raises an error containing `error`. `go` is what the Go package gives instead where it differs: it never raises, leaves a placeholder no variable names as it is, and keeps a message's role and content only.",
   "cases": [
     { "name": "a placeholder", "text": "Answer {q}.", "variables": {"q": "hi"}, "compiled": "Answer hi." },
     { "name": "a variable named self", "text": "{self} and {q}", "variables": {"self": "me", "q": "hi"}, "compiled": "me and hi" },
@@ -57,7 +57,15 @@
           "role": "assistant",
           "content": ""
         }
-      ]
+      ],
+      "go": {
+        "note": "Go's Message carries role and content only: the other fields, `name` here, are dropped.",
+        "compiled": [
+          { "role": "system", "content": "You help with Tracepad. Reply as {\"ok\": true}." },
+          { "role": "user", "content": "why?" },
+          { "role": "assistant", "content": "" }
+        ]
+      }
     },
     {
       "name": "a format spec in a later message",

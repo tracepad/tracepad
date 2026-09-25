@@ -39,13 +39,15 @@ class Prompt:
         """Substitute `{name}` placeholders, in the text or in every message.
 
         A placeholder with no variable raises `TracepadPlaceholderError`: a
-        prompt sent with a hole in it is a worse failure than one not sent.
-        Nothing else: a template language is a product, and what the store
-        stores is plain text (spec 017 #8, #18).
+        prompt sent with a hole in it is a worse failure than one not sent. A
+        message whose content is not a string (a list of parts) is passed on
+        as it is. Nothing else: a template language is a product, and what
+        the store stores is plain text (spec 017 #8, #18).
         """
         if self.messages is not None:
             return [
-                {**message, "content": _fill(str(message.get("content", "")), variables)}
+                {**message, "content": _fill(content, variables)}
+                if isinstance(content := message.get("content", ""), str) else dict(message)
                 for message in self.messages
             ]
         return _fill(self.text or "", variables)
@@ -69,7 +71,9 @@ def _fill(template: str, variables: dict[str, Any]) -> str:
             raise TracepadPlaceholderError(
                 f"tracepad: prompt placeholder {{{name}}} has no variable"
             )
-        return str(variables[name])
+        # An empty spec, never one from the text: what `str.format` gave for
+        # `{name}`, which for a str- or int-mixin Enum before 3.12 is its value.
+        return format(variables[name], "")
 
     return _PLACEHOLDER.sub(one, template)
 
