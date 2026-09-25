@@ -3,9 +3,13 @@ package mcpserver
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"reflect"
+	"regexp"
+	"runtime/debug"
 
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -53,25 +57,92 @@ func New(version string, api API) *mcp.Server {
 			"get_last_trace to find a run, then get_trace to see what happened inside it. " +
 			"Every tool reads; none of them change anything.",
 	})
-	server.AddReceivingMiddleware(cacheableToolList, logTraceContext)
+	// recoverPanics comes first so that it wraps everything after it: the
+	// other middleware, the SDK's own dispatch and every tool handler.
+	server.AddReceivingMiddleware(recoverPanics, cacheableToolList, logTraceContext)
 	register(server, api)
 	return server
+}
+
+// recoverPanics turns a panic anywhere in the handler chain into a JSON-RPC
+// internal error for that one request. The SDK runs each request in a
+// goroutine of its own, which net/http's per-connection recovery does not
+// cover, so without this a single bad request takes down the whole process:
+// ingest, the UI and every other client with it. The request itself is not
+// logged — it is arbitrary input from a caller nobody has authenticated yet —
+// only the method, the panic and where it happened.
+func recoverPanics(next mcp.MethodHandler) mcp.MethodHandler {
+	return func(ctx context.Context, method string, req mcp.Request) (result mcp.Result, err error) {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				slog.Error("mcp handler panicked", "method", method,
+					"panic", clip(fmt.Sprint(recovered)), "stack", string(debug.Stack()))
+				result, err = nil, &jsonrpc.Error{Code: jsonrpc.CodeInternalError, Message: "internal error"}
+			}
+		}()
+		return next(ctx, method, req)
+	}
+}
+
+// clipLimit bounds a caller-influenced string on its way into the log.
+const clipLimit = 200
+
+func clip(s string) string {
+	if len(s) <= clipLimit {
+		return s
+	}
+	return s[:clipLimit] + "…"
+}
+
+// requestMeta is the request's `_meta`, or nil when it has none. A request
+// that omits the optional `params` member arrives with a typed nil pointer
+// inside a non-nil Params interface, so comparing the interface with nil is
+// not enough, and calling GetMeta on it dereferences nil. Reflection is the
+// check because it covers every params type the SDK has or will add; the
+// SDK's own isNil is unexported, and a type switch over today's types would
+// silently miss tomorrow's.
+func requestMeta(req mcp.Request) map[string]any {
+	if req == nil {
+		return nil
+	}
+	params := req.GetParams()
+	if params == nil {
+		return nil
+	}
+	if v := reflect.ValueOf(params); v.Kind() == reflect.Pointer && v.IsNil() {
+		return nil
+	}
+	return params.GetMeta()
 }
 
 // traceparentKey is where the 2026-07-28 spec documents incoming W3C trace
 // context: on the request's `_meta`.
 const traceparentKey = "traceparent"
 
+// traceparentFormat is a W3C trace context header of version 00: exactly 55
+// characters of lowercase hex and dashes.
+var traceparentFormat = regexp.MustCompile(`^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$`)
+
+// validTraceparent says whether a value is well-formed trace context. The
+// all-zero trace and parent ids are invalid by the W3C spec.
+func validTraceparent(value string) bool {
+	return traceparentFormat.MatchString(value) &&
+		value[3:35] != "00000000000000000000000000000000" &&
+		value[36:52] != "0000000000000000"
+}
+
 // logTraceContext records incoming trace context, and nothing more (#22). A
 // tracing product should at least not drop trace context on the floor; full
 // self-instrumentation is deliberately out of scope, so the request log is
 // where it lands and where it stops.
+//
+// This runs before any credential is checked, so only well-formed trace
+// context is logged: anything else is dropped rather than written, and an
+// unauthenticated caller cannot put arbitrary bytes into the log through it.
 func logTraceContext(next mcp.MethodHandler) mcp.MethodHandler {
 	return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
-		if params := req.GetParams(); params != nil {
-			if traceparent, ok := params.GetMeta()[traceparentKey].(string); ok && traceparent != "" {
-				slog.Info("mcp request", "method", method, traceparentKey, traceparent)
-			}
+		if traceparent, ok := requestMeta(req)[traceparentKey].(string); ok && validTraceparent(traceparent) {
+			slog.Info("mcp request", "method", method, traceparentKey, traceparent)
 		}
 		return next(ctx, method, req)
 	}

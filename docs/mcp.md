@@ -71,8 +71,9 @@ elicitation, and MCP resources or prompts. Authentication is the pre-shared
 project key, not OAuth: the OAuth framework in the MCP spec targets
 multi-tenant public servers, and this one is self-hosted.
 
-A `traceparent` on a request's `_meta` is recorded in the server log. Nothing
-more happens with it — this is a tracing product, so it should at least not be
+A `traceparent` on a request's `_meta` is recorded in the server log, once
+per request, when it is well-formed W3C trace context (version `00`, 55
+characters); anything else is dropped unlogged. Nothing more happens with it — this is a tracing product, so it should at least not be
 the tool that drops trace context on the floor, but instrumenting tracepad with
 tracepad is a later question.
 
