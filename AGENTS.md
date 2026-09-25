@@ -583,7 +583,8 @@ reason in a comment; adding a dialect should be a table edit.
 - `make smoke` — export from pinned real SDKs and from our own package into a
   real binary and assert the rows. Needs network on first run (installs them).
 - `make sdk-test` — the Python package's unit suite, then its end-to-end suite
-  against a binary it builds. `uv` if present, `venv` otherwise;
+  against a binary it builds, on the OpenTelemetry floor `pyproject.toml`
+  names and on the newest release. `uv` if present, `venv` otherwise;
   `SDK_SKIP_E2E=1` runs the unit half alone. `make sdk-lines` reports its
   budget.
 - `make sdk-js-test` — the Node package's type check and unit suite, then

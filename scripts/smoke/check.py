@@ -272,7 +272,8 @@ patches = [a for a in media["answers"] if a["method"] == "PATCH"]
 check(len(posts) == 2, f"media POSTs = {posts}")
 if len(posts) == 2:
     check(posts[0]["body"]["uploadUrl"], f"first media POST = {posts[0]}")
-    check(posts[1]["body"]["uploadUrl"] is None, f"second media POST = {posts[1]}, want uploadUrl null")
+    check(posts[1]["body"]["uploadUrl"] is None,
+          f"second media POST = {posts[1]}, want uploadUrl null")
     check(posts[0]["body"]["mediaId"] == posts[1]["body"]["mediaId"], f"media ids differ: {posts}")
 check([p["status"] for p in puts] == [200], f"media PUTs = {puts}")
 check([p["status"] for p in patches] == [204], f"media PATCHes = {patches}")

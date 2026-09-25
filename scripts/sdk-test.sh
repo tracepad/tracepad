@@ -1,30 +1,69 @@
 #!/usr/bin/env bash
 # The Python package's suite: unit tests, then end-to-end against a real binary
-# (spec 017, Testing).
+# (spec 017, Testing) — on both ends of the OpenTelemetry range the package
+# admits, the floor `pyproject.toml` names and the newest release (spec 042 #14).
 #
 #   scripts/sdk-test.sh [pytest arguments…]
+#   scripts/sdk-test.sh --floor-pins     print the floor as pip requirements
 #
 # Set SDK_PYTHON to an interpreter that already has the package and pytest
-# installed to skip the environment setup. Set SDK_SKIP_E2E=1 to run the unit
-# half alone (no Go toolchain needed).
+# installed to skip the environment setup; the suite then runs once, on
+# whatever OpenTelemetry that interpreter has (CI's floor leg installs it with
+# `--floor-pins`). Both ends run even when the first fails, and the script
+# exits non-zero after them. Set SDK_SKIP_E2E=1 to run the unit half alone
+# (no Go toolchain needed).
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 package="$repo_root/sdk/python"
+
+# `"opentelemetry-sdk>=1.44,<2",` → `opentelemetry-sdk==1.44`, which pip reads as 1.44.0.
+# One pin per OpenTelemetry dependency, or none: a line the pattern missed would
+# leave its package at the newest release in a run that says it is the floor.
+floor_pins() {
+    local pyproject="$package/pyproject.toml" pins wanted
+    pins="$(sed -n 's/^ *"\(opentelemetry-[a-z-]*\)>=\([0-9.]*\),.*/\1==\2/p' "$pyproject")"
+    wanted="$(grep -c '^ *"opentelemetry-' "$pyproject")"
+    if [ -z "$pins" ] || [ "$(printf '%s\n' "$pins" | wc -l)" -ne "$wanted" ]; then
+        echo "pyproject.toml: not every OpenTelemetry dependency reads \"name>=X.Y,<N\"" >&2
+        return 1
+    fi
+    printf '%s\n' "$pins"
+}
+if [ "${1:-}" = "--floor-pins" ]; then
+    floor_pins
+    exit
+fi
+
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
-python_bin="${SDK_PYTHON:-}"
-if [ -z "$python_bin" ]; then
-    echo "==> preparing python environment"
-    if command -v uv >/dev/null 2>&1; then
-        uv venv "$work/venv" >/dev/null
-        uv pip install --quiet --python "$work/venv/bin/python" -e "$package" pytest
-    else
-        python3 -m venv "$work/venv"
-        "$work/venv/bin/pip" install --quiet -e "$package" pytest
+# One environment per end of the range: `latest` resolves as a fresh
+# `pip install tracepad` would, `floor` pins OpenTelemetry to what we promise.
+prepare() {
+    local venv="$work/venv-$1" found pins=()
+    if [ "$1" = floor ]; then
+        found="$(floor_pins)"
+        # shellcheck disable=SC2206 # requirement strings: no spaces, no globs
+        pins=($found)
     fi
-    python_bin="$work/venv/bin/python"
+    echo "==> preparing python environment (OpenTelemetry $1)"
+    if command -v uv >/dev/null 2>&1; then
+        uv venv "$venv" >/dev/null
+        uv pip install --quiet --python "$venv/bin/python" -e "$package" pytest ${pins[@]+"${pins[@]}"}
+    else
+        python3 -m venv "$venv"
+        "$venv/bin/pip" install --quiet -e "$package" pytest ${pins[@]+"${pins[@]}"}
+    fi
+    pythons+=("$venv/bin/python")
+}
+
+pythons=()
+if [ -n "${SDK_PYTHON:-}" ]; then
+    pythons=("$SDK_PYTHON")
+else
+    prepare floor
+    prepare latest
 fi
 
 if [ -z "${SDK_SKIP_E2E:-}" ]; then
@@ -33,6 +72,16 @@ if [ -z "${SDK_SKIP_E2E:-}" ]; then
     export TRACEPAD_BINARY="$work/tracepad"
 fi
 
-echo "==> pytest"
+# Every end runs even when one fails: which of them broke is the report.
 cd "$package"
-"$python_bin" -m pytest "$@"
+failed=()
+for python_bin in "${pythons[@]}"; do
+    otel="$("$python_bin" -c \
+        'from importlib.metadata import version; print(version("opentelemetry-sdk"))')"
+    echo "==> pytest (opentelemetry-sdk $otel)"
+    "$python_bin" -m pytest "$@" || failed+=("$otel")
+done
+if [ ${#failed[@]} -gt 0 ]; then
+    echo "==> failed on opentelemetry-sdk ${failed[*]}" >&2
+    exit 1
+fi
