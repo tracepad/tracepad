@@ -155,8 +155,8 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	name := strings.TrimSpace(request.Name)
-	if !validAccountName(w, name) {
+	name, ok := readAccountName(w, request.Name)
+	if !ok {
 		return
 	}
 	hash, ok := readPassword(w, request.Password)
@@ -200,8 +200,12 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	// No account can have an email or a password this long, so the answer is
 	// already known — and the limiter below keeps the email as a key for
 	// fifteen minutes, so its size must never be the caller's to choose
-	// (Decision 26). The same 401 as every other failure (Decision 8).
-	if len(email) > maxEmailLength || len(request.Password) > store.MaxPasswordLength {
+	// (Decision 26). Both spellings are measured: the one an account can
+	// have, and the lower-cased one the limiter keys by, which is longer for
+	// the few letters whose lower case takes more bytes. The same 401 as
+	// every other failure (Decision 8).
+	if len(email) > maxEmailLength || len(strings.ToLower(email)) > maxEmailLength ||
+		len(request.Password) > store.MaxPasswordLength {
 		writeError(w, http.StatusUnauthorized, wrongCredentials)
 		return
 	}
@@ -352,8 +356,8 @@ func (s *Server) handlePatchMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if request.Name != nil {
-		name := strings.TrimSpace(*request.Name)
-		if !validAccountName(w, name) {
+		name, ok := readAccountName(w, *request.Name)
+		if !ok {
 			return
 		}
 		request.Name = &name
@@ -608,16 +612,17 @@ func validEmail(email string) error {
 // Cyrillic name half the room of a Latin one.
 const maxAccountNameLength = 200
 
-// validAccountName checks a trimmed display name's length, answering 422
+// readAccountName trims a display name and checks its length, answering 422
 // itself when it is too long. Empty is allowed: the name is optional
 // everywhere.
-func validAccountName(w http.ResponseWriter, name string) bool {
+func readAccountName(w http.ResponseWriter, raw string) (string, bool) {
+	name := strings.TrimSpace(raw)
 	if utf8.RuneCountInString(name) > maxAccountNameLength {
 		writeError(w, http.StatusUnprocessableEntity,
 			fmt.Sprintf("a name must be at most %d characters", maxAccountNameLength))
-		return false
+		return "", false
 	}
-	return true
+	return name, true
 }
 
 // readPassword checks the length and hashes, answering 422 itself when the

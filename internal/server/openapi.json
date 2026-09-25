@@ -2180,7 +2180,8 @@
           "401": {"$ref": "#/components/responses/Unauthorized"},
           "403": {"$ref": "#/components/responses/Forbidden"},
           "404": {"$ref": "#/components/responses/NotFound"},
-          "409": {"$ref": "#/components/responses/Conflict"}
+          "409": {"$ref": "#/components/responses/Conflict"},
+          "422": {"$ref": "#/components/responses/Unprocessable"}
         }
       },
       "delete": {
@@ -2611,7 +2612,7 @@
         "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "Conflict": {"description": "The stored state already answers differently: a name that is taken, a project that is already deleted, the last owner being demoted",
         "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
-      "Unprocessable": {"description": "The request is well formed and the values are not: an email that is not one, a password outside 10-128 characters",
+      "Unprocessable": {"description": "The request is well formed and the values are not: an email that is not one, a password outside 10-128 characters, a name over 200 characters",
         "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "TooManyRequests": {"description": "Throttled; `Retry-After` says for how long",
         "headers": {"Retry-After": {"schema": {"type": "string"}, "description": "Seconds to wait"}},

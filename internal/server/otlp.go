@@ -70,8 +70,8 @@ func (s *Server) handleTraces(w http.ResponseWriter, r *http.Request) {
 	}
 
 	encoding := r.Header.Get("Content-Encoding")
-	body, err := readBody(w, r, s.maxBodyBytes)
-	if !s.bodyRead(w, r, err) {
+	body, ok := s.readAPIBody(w, r)
+	if !ok {
 		return
 	}
 

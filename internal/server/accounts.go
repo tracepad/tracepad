@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"log/slog"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/tracepad/tracepad/internal/store"
@@ -91,8 +90,8 @@ func (s *Server) handleCreateAccount(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	name := strings.TrimSpace(request.Name)
-	if !validAccountName(w, name) {
+	name, ok := readAccountName(w, request.Name)
+	if !ok {
 		return
 	}
 	if request.Owner && len(request.Memberships) > 0 {
@@ -198,8 +197,8 @@ func (s *Server) handlePatchAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if request.Name != nil {
-		name := strings.TrimSpace(*request.Name)
-		if !validAccountName(w, name) {
+		name, ok := readAccountName(w, *request.Name)
+		if !ok {
 			return
 		}
 		request.Name = &name

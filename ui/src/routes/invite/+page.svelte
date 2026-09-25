@@ -67,7 +67,13 @@
 		disabled={!password || !again}
 		onsubmit={submit}
 	>
-		<Field label="Display name" bind:value={name} placeholder="optional" autocomplete="name" />
+		<Field
+			label="Display name"
+			bind:value={name}
+			placeholder="optional"
+			autocomplete="name"
+			maxlength={200}
+		/>
 		<Field
 			label="Password"
 			type="password"

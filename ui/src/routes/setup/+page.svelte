@@ -77,7 +77,13 @@
 		disabled={!email.trim() || !password || !again}
 		onsubmit={submit}
 	>
-		<Field label="Display name" bind:value={name} placeholder="optional" autocomplete="name" />
+		<Field
+			label="Display name"
+			bind:value={name}
+			placeholder="optional"
+			autocomplete="name"
+			maxlength={200}
+		/>
 		<Field label="Email" type="email" bind:value={email} autocomplete="username" />
 		<Field
 			label="Password"

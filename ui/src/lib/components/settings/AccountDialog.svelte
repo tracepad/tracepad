@@ -199,6 +199,7 @@
 							bind:value={name}
 							placeholder="optional"
 							autocomplete="off"
+							maxlength={200}
 							class={field}
 						/>
 					</div>

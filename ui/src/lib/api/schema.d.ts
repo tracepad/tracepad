@@ -2321,7 +2321,7 @@ export interface components {
                 "application/json": components["schemas"]["Error"];
             };
         };
-        /** @description The request is well formed and the values are not: an email that is not one, a password outside 10-128 characters */
+        /** @description The request is well formed and the values are not: an email that is not one, a password outside 10-128 characters, a name over 200 characters */
         Unprocessable: {
             headers: {
                 [name: string]: unknown;
@@ -5593,6 +5593,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
         };
     };
     inviteAccount: {

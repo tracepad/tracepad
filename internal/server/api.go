@@ -172,8 +172,9 @@ func (s *Server) bodyRead(w http.ResponseWriter, r *http.Request, err error) boo
 
 // maxPublicBodyBytes caps the body of a route anyone can call (spec 028
 // Decision 26). The largest such body is a setup — a token, an email, a
-// password and a name, under 4 KiB even with every character escaped — so
-// twice that is room for any client and nothing for an attacker.
+// password and a name — at most about 4.7 KiB with every character escaped
+// (a name of astral characters as surrogate pairs is 12 bytes a character),
+// so 8 KiB is room for any client and nothing for an attacker.
 const maxPublicBodyBytes = 8 << 10
 
 // smallPlainBody is what the guard puts in front of every public route that

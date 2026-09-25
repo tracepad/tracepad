@@ -12,7 +12,8 @@
 		value = $bindable(''),
 		autocomplete,
 		placeholder,
-		hint
+		hint,
+		maxlength
 	}: {
 		label: string;
 		type?: 'text' | 'email' | 'password';
@@ -20,6 +21,7 @@
 		autocomplete?: string;
 		placeholder?: string;
 		hint?: string;
+		maxlength?: number;
 	} = $props();
 
 	const id = $props.id();
@@ -38,6 +40,7 @@
 		oninput={(event) => (value = event.currentTarget.value)}
 		autocomplete={autocomplete as never}
 		{placeholder}
+		{maxlength}
 		spellcheck="false"
 		autocapitalize="off"
 		aria-describedby={hint ? `${id}-hint` : undefined}

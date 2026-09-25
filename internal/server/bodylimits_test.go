@@ -207,6 +207,14 @@ func TestLoginKeepsNoOverlongKey(t *testing.T) {
 	}
 	expectError(t, h.login(t, "owner@example.com", strings.Repeat("p", store.MaxPasswordLength+1)),
 		http.StatusUnauthorized, wrongCredentials)
+	// U+023A is two bytes and lower-cases to U+2C65, three: an email that
+	// fits as sent and not as the limiter would key it is refused too.
+	growing := strings.Repeat("\u023a", 120) + "@x.io"
+	if len(growing) > maxEmailLength || len(strings.ToLower(growing)) <= maxEmailLength {
+		t.Fatalf("the probe is %d bytes, %d lower-cased; it must straddle %d",
+			len(growing), len(strings.ToLower(growing)), maxEmailLength)
+	}
+	expectError(t, h.login(t, growing, testAccountPassword), http.StatusUnauthorized, wrongCredentials)
 	h.server.limiter.mu.Lock()
 	defer h.server.limiter.mu.Unlock()
 	for key := range h.server.limiter.failures {
