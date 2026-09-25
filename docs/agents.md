@@ -61,7 +61,9 @@ directory named; `--force` replaces it. A `tracepad` that is a symlink — a cop
 kept in a dotfiles repository — is updated where it points, but only if what it
 points at is a skill this command installed: a link to any other directory is
 refused even with `--force`, because replacing it would delete a directory
-you never named. Remove the link and install again.
+you never named. Remove the link and install again. The one exception is a link
+to an empty directory — how a dotfiles copy is set up the first time —
+which `--force` installs into.
 
 ### From the Docker image
 

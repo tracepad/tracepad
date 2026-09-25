@@ -532,3 +532,29 @@ func TestARelativeDirResolvesLikeProject(t *testing.T) {
 		t.Errorf("a relative --dir did not resolve against the working directory: %v", err)
 	}
 }
+
+// TestForceInstallsThroughALinkToAnEmptyDirectory: the one link --force
+// follows into an unmarked directory is one to an empty directory — how a copy
+// kept in a dotfiles repository is set up in the first place, with nothing to
+// lose (#16). Without --force it is refused like any other.
+func TestForceInstallsThroughALinkToAnEmptyDirectory(t *testing.T) {
+	kept, dir := t.TempDir(), t.TempDir()
+	link := filepath.Join(dir, Name)
+	if err := os.Symlink(kept, link); err != nil {
+		t.Fatal(err)
+	}
+	if got := runSkills(t, "", "", "0.4.0", "install", "--dir", dir); got.code != exitFailure ||
+		!strings.Contains(got.stderr, "is a symlink to") {
+		t.Fatalf("without --force: exit %d, stderr %q, want a refusal", got.code, got.stderr)
+	}
+	got := runSkills(t, "", "", "0.4.0", "install", "--dir", dir, "--force")
+	if got.code != exitOK {
+		t.Fatalf("--force: exit %d, stderr %q", got.code, got.stderr)
+	}
+	if marked, _ := os.ReadFile(filepath.Join(kept, marker)); string(marked) != "0.4.0\n" {
+		t.Errorf("the linked directory was not installed into: marker %q", marked)
+	}
+	if info, err := os.Lstat(link); err != nil || info.Mode()&fs.ModeSymlink == 0 {
+		t.Errorf("the link was replaced: %v", err)
+	}
+}

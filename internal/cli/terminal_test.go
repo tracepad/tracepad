@@ -1,9 +1,12 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -148,7 +151,8 @@ func TestHumanOutputIsInertOnATerminal(t *testing.T) {
 			fragments: []string{`input: input \x1b]52;c;ZWNobyBwd25lZA==\x07\x1b[2J\x1b[H\u009b31m\u202eevil`}},
 		{args: []string{"traces", "show", traceHex(9), "--full"},
 			want: []string{"name", "env", "release", "version", "user", "session", "tag",
-				"obs", "model", "status", "prompt"}},
+				"obs", "model", "prompt"},
+			text: []string{"status"}},
 		{args: []string{"traces", "last"}, want: []string{"name", "env", "release"}},
 		{args: []string{"sessions", "ls"}, want: []string{"session"}},
 		{args: []string{"sessions", "show", hostile("session")}, want: []string{"session", "name"}},
@@ -163,7 +167,7 @@ func TestHumanOutputIsInertOnATerminal(t *testing.T) {
 		{args: []string{"datasets", "ls"}, want: []string{"description"}},
 		{args: []string{"datasets", "show", "golden"}, text: []string{"description"}},
 		{args: []string{"runs", "ls"}, want: []string{"run"}},
-		{args: []string{"runs", "show", cliRunID(1)}, want: []string{"run", "failed"}},
+		{args: []string{"runs", "show", cliRunID(1)}, want: []string{"run"}, text: []string{"failed"}},
 		{args: []string{"score-configs", "ls"}, want: []string{"config"}},
 		{args: []string{"score-configs", "show", "quality"}, text: []string{"config"}},
 		{args: []string{"queues", "ls"}, want: []string{"queue"}},
@@ -252,16 +256,112 @@ func TestJSONModeKeepsTheAPIsBytes(t *testing.T) {
 			"/api/v1/traces/" + traceHex(9) + fmt.Sprintf("?expand=io&budget=%d", fullBudget)},
 		{[]string{"traces", "ls"}, "/api/v1/traces"},
 	} {
-		got := h.run(t.Context(), false, check.args...)
-		if got.code != ExitOK {
-			t.Fatalf("%v: exit = %d, stderr = %s", check.args, got.code, got.stderr)
-		}
 		direct := httpGet(t, h.url+check.path)
-		if strings.TrimRight(got.stdout, "\n") != strings.TrimRight(direct, "\n") {
-			t.Errorf("%v: the CLI and the endpoint disagree:\ncli:  %q\ncurl: %q", check.args, got.stdout, direct)
+		// A pipe, and `--json` on a terminal: the terminal's escaping
+		// writer is not the one the JSON goes through.
+		for _, tty := range []bool{false, true} {
+			got := h.run(t.Context(), tty, append(check.args, "--json")...)
+			if got.code != ExitOK {
+				t.Fatalf("%v: exit = %d, stderr = %s", check.args, got.code, got.stderr)
+			}
+			if strings.TrimRight(got.stdout, "\n") != strings.TrimRight(direct, "\n") {
+				t.Errorf("%v, tty %v: the CLI and the endpoint disagree:\ncli:  %q\ncurl: %q",
+					check.args, tty, got.stdout, direct)
+			}
+			if !strings.Contains(got.stdout, "\u009b") {
+				t.Errorf("%v, tty %v: the C1 character did not arrive as sent:\n%q", check.args, tty, got.stdout)
+			}
 		}
-		if !strings.Contains(got.stdout, "\u009b") {
-			t.Errorf("%v: the C1 character did not arrive as sent:\n%q", check.args, got.stdout)
+	}
+}
+
+// The backstop: a renderer that forgets termsafe and prints a server value
+// with a bare Fprintf still cannot put a control sequence on the terminal,
+// because a terminal run's stdout and stderr escape what goes through them.
+// The faint-style pair dim writes is the one sequence let through, and the
+// JSON mode's writer is left alone (#35).
+func TestATerminalRunsWritersEscapeWhatARendererForgot(t *testing.T) {
+	var out, errOut bytes.Buffer
+	r := newRun(Options{Stdout: &out, Stderr: &errOut, TTY: true,
+		Env: func(string) string { return "" }})
+
+	fmt.Fprintf(r.opt.Stdout, "name %s\n", hostile("raw"))
+	fmt.Fprintln(r.opt.Stdout, dim("snippet", true))
+	fmt.Fprintf(r.opt.Stderr, "tracepad: %s\n", hostile("err"))
+	for what, got := range map[string]string{"stdout": out.String(), "stderr": errOut.String()} {
+		assertInert(t, what, got)
+		if strings.Contains(got, "\x1b") && !strings.Contains(got, "\x1b[2msnippet\x1b[0m") {
+			t.Errorf("%s: an escape other than the faint pair: %q", what, got)
 		}
+	}
+	if !strings.Contains(out.String(), shownText("raw")) || !strings.Contains(out.String(), "\x1b[2msnippet\x1b[0m") {
+		t.Errorf("stdout = %q", out.String())
+	}
+	if !strings.Contains(errOut.String(), shownText("err")) {
+		t.Errorf("stderr = %q", errOut.String())
+	}
+
+	out.Reset()
+	fmt.Fprintf(r.stdout, "%s\n", `{"name":"\u001b"}`+"\u009b")
+	if out.String() != `{"name":"\u001b"}`+"\u009b\n" {
+		t.Errorf("the JSON writer changed the bytes: %q", out.String())
+	}
+}
+
+// A table's headers can come from the server too: `stats` and `scores trend`
+// name their first column after the answer's own `group_by`. The real server
+// only ever answers with one of its enums, so this is a server that does not.
+func TestTableHeadersFromTheServerAreEscaped(t *testing.T) {
+	bad := jsonString(t, hostile("group"))
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/stats":
+			fmt.Fprintf(w, `{"group_by":%s,"unit":%s,"buckets":[{"key":"k","count":1,"error_count":0}]}`, bad, bad)
+		case "/api/v1/stats/scores":
+			fmt.Fprintf(w, `{"group_by":%s,"targets":"traces","series":[{"name":"s","data_type":"NUMERIC",`+
+				`"buckets":[{"key":"k","count":1,"mean":1}]}]}`, bad)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer fake.Close()
+	h := &harness{url: fake.URL, env: map[string]string{"TRACEPAD_URL": fake.URL, "TRACEPAD_API_KEY": testKey}}
+
+	for _, args := range [][]string{{"stats"}, {"scores", "trend"}} {
+		got := h.run(t.Context(), true, args...)
+		if got.code != ExitOK {
+			t.Fatalf("%v: exit = %d, stderr = %s", args, got.code, got.stderr)
+		}
+		assertInert(t, fmt.Sprintf("%q", args), got.stdout)
+		// Upper-cased by the renderer, then escaped as a one-line field:
+		// the escaping writer alone would keep the newline, and the
+		// header would break the table in two.
+		if !strings.Contains(got.stdout, `GROUP\x1b]52;C;`) || !strings.Contains(got.stdout, `EVIL\x0d\x0aEND`) {
+			t.Errorf("%v: the header is missing or not escaped:\n%s", args, got.stdout)
+		}
+	}
+}
+
+// An error message is text by nature — often a traceback — and keeps its
+// lines, each indented under the label, with what is inside them escaped.
+func TestAnErrorMessageKeepsItsLines(t *testing.T) {
+	h := newHarness(t)
+	start := seedBase - 600*1000*ms
+	h.seed(t, &model.Trace{ID: traceHex(8), Name: "failing"},
+		&model.Observation{TraceID: traceHex(8), ID: spanHex(8), Type: model.TypeSpan,
+			Name: "call", Level: model.LevelError, StartTime: start, EndTime: start + ms,
+			StatusMessage: "Traceback (most recent call last):\n\tFile \"app.py\", line 3\nValueError: \x1b[2Jboom"})
+
+	got := h.run(t.Context(), true, "traces", "show", traceHex(8))
+	if got.code != ExitOK {
+		t.Fatalf("exit = %d, stderr = %s", got.code, got.stderr)
+	}
+	assertInert(t, "traces show", got.stdout)
+	want := "    status: Traceback (most recent call last):\n" +
+		"            \tFile \"app.py\", line 3\n" +
+		`            ValueError: \x1b[2Jboom` + "\n"
+	if !strings.Contains(got.stdout, want) {
+		t.Errorf("output is missing\n%s\nin\n%s", want, got.stdout)
 	}
 }

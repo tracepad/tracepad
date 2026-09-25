@@ -12,7 +12,7 @@ import (
 // and some show it on a terminal: a value from a trace goes into it escaped,
 // the way it does on the CLI (spec 004 #35).
 func TestSummariesEscapeWhatATraceCarries(t *testing.T) {
-	const attack = "x\x1b]52;c;ZWNobyBwd25lZA==\x07\u009b2J‮\nforged line"
+	const attack = "x\x1b]52;c;ZWNobyBwd25lZA==\x07\u009b2J\u202e\nforged line"
 	value, err := json.Marshal(attack)
 	if err != nil {
 		t.Fatal(err)
@@ -45,7 +45,7 @@ func TestSummariesEscapeWhatATraceCarries(t *testing.T) {
 		if !strings.Contains(got, `\x1b]52;c;`) {
 			t.Errorf("%s: the value is missing or not escaped: %q", tc.name, got)
 		}
-		for _, raw := range []string{"\x1b", "\x07", "\u009b", "‮", "\n"} {
+		for _, raw := range []string{"\x1b", "\x07", "\u009b", "\u202e", "\n"} {
 			if strings.Contains(got, raw) {
 				t.Errorf("%s: raw %q in %q", tc.name, raw, got)
 			}

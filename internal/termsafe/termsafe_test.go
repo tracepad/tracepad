@@ -1,6 +1,9 @@
 package termsafe
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestString(t *testing.T) {
 	for _, tc := range []struct{ in, want string }{
@@ -45,5 +48,27 @@ func TestCleanValuesAreReturnedAsTheyAre(t *testing.T) {
 	value := "an ordinary trace name"
 	if allocs := testing.AllocsPerRun(100, func() { _ = String(value) }); allocs != 0 {
 		t.Errorf("String allocated %v times on a clean value", allocs)
+	}
+}
+
+func TestWriter(t *testing.T) {
+	var out strings.Builder
+	w := NewWriter(&out, "\x1b[2m", "\x1b[0m")
+	for _, chunk := range []string{
+		"plain line\n",
+		"\x1b[2mfaint\x1b[0m\tcell\n",
+		"name\x1b]52;c;x\x07\x1b[2J\u009b\u202e\r\n",
+		"\x1b[2m\x1b[31mred\x1b[0m\n",
+	} {
+		if n, err := w.Write([]byte(chunk)); err != nil || n != len(chunk) {
+			t.Fatalf("Write(%q) = %d, %v", chunk, n, err)
+		}
+	}
+	want := "plain line\n" +
+		"\x1b[2mfaint\x1b[0m\tcell\n" +
+		`name\x1b]52;c;x\x07\x1b[2J\u009b\u202e\x0d` + "\n" +
+		"\x1b[2m" + `\x1b[31mred` + "\x1b[0m\n"
+	if out.String() != want {
+		t.Errorf("wrote %q\nwant  %q", out.String(), want)
 	}
 }

@@ -25,16 +25,20 @@ type table struct {
 func newTable(out io.Writer, headers ...string) *table {
 	t := &table{writer: tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)}
 	if len(headers) > 0 {
-		fmt.Fprintln(t.writer, strings.Join(headers, "\t"))
+		fmt.Fprintln(t.writer, strings.Join(termsafe.All(headers), "\t"))
 	}
 	return t
 }
 
 // row writes one row of cells, each made terminal-safe here rather than at
 // every call site: a cell is where most of what the server sends is printed,
-// and one tab in one of them would shift every column after it (#35).
+// and one tab in one of them would shift every column after it (#35). In
+// place, so a row of clean cells allocates nothing for it.
 func (t *table) row(cells ...string) {
-	fmt.Fprintln(t.writer, strings.Join(termsafe.All(cells), "\t"))
+	for i, cell := range cells {
+		cells[i] = termsafe.String(cell)
+	}
+	fmt.Fprintln(t.writer, strings.Join(cells, "\t"))
 }
 
 // line writes a line that is not a row: one trailing cell, which tabwriter
@@ -181,8 +185,15 @@ func dim(text string, colour bool) string {
 	if !colour {
 		return text
 	}
-	return "\x1b[2m" + text + "\x1b[0m"
+	return faintOn + text + faintOff
 }
+
+// faintOn and faintOff are the pair dim writes, which the escaping writer
+// under a terminal run lets through (#35).
+const (
+	faintOn  = "\x1b[2m"
+	faintOff = "\x1b[0m"
+)
 
 func renderTraceDetail(out io.Writer, trace traceDetail) {
 	fmt.Fprintf(out, "trace %s\n", termsafe.String(trace.ID))
@@ -257,7 +268,7 @@ func renderObservation(out io.Writer, node observationNode, indent string) {
 	}
 	fmt.Fprintf(out, "%s%s %s  [%s]\n", indent, marker, termsafe.String(strings.Join(parts, "  ")), termsafe.String(node.ID))
 	if node.StatusMessage != "" {
-		fmt.Fprintf(out, "%s    status: %s\n", indent, termsafe.String(node.StatusMessage))
+		fmt.Fprintf(out, "%s    status: %s\n", indent, block(node.StatusMessage, indent+"            "))
 	}
 	for _, payload := range []struct {
 		label string
@@ -277,6 +288,14 @@ func renderObservation(out io.Writer, node observationNode, indent string) {
 	for _, child := range node.Children {
 		renderObservation(out, child, indent+"  ")
 	}
+}
+
+// block renders a message that is text by nature — an error, often a
+// traceback — keeping its lines and indenting each one after the first under
+// the label it follows, so the tree or the view around it still reads as one
+// (#35).
+func block(text, indent string) string {
+	return strings.ReplaceAll(termsafe.Text(text), "\n", "\n"+indent)
 }
 
 // truncationMarker is what the server puts in place of a payload too big for
@@ -328,7 +347,7 @@ func shortTime(value string) string {
 	}
 	parsed, err := time.Parse(time.RFC3339Nano, value)
 	if err != nil {
-		return termsafe.String(value)
+		return value
 	}
 	return parsed.UTC().Format("2006-01-02 15:04:05")
 }

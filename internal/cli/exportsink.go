@@ -127,7 +127,7 @@ func (s *receiver) send(ctx context.Context, row rawBatchRow, body []byte) (stri
 		}
 		fmt.Fprintf(s.run.opt.Stderr,
 			"tracepad: batch %d: %s; retrying in %s (attempt %d of %d)\n",
-			row.ID, termsafe.String(err.Error()), wait, attempt+1, s.attempts)
+			row.ID, termsafe.Text(err.Error()), wait, attempt+1, s.attempts)
 		select {
 		case <-ctx.Done():
 			return "", ctx.Err()

@@ -287,9 +287,10 @@ const abandonedAfter = time.Hour
 // a mix of two versions (#6). A target that is a symlink — a copy kept in a
 // dotfiles repository — is followed, so the copy the user maintains is the
 // one updated, not replaced by a directory of its own. It is followed only
-// into a skill this command installed, though, and `--force` does not change
-// that (#16): a link is a path to anywhere, and replacing whatever it names
-// would delete a directory the user never pointed the command at.
+// into a skill this command installed, though, and `--force` changes that only
+// for an empty directory (#16): a link is a path to anywhere, and replacing
+// whatever it names would delete a directory the user never pointed the
+// command at.
 func install(files fs.FS, target, version string, force bool) (outcome, error) {
 	done := outcome{target: target}
 	linked := false
@@ -321,10 +322,13 @@ func install(files fs.FS, target, version string, force bool) (outcome, error) {
 			return done, fmt.Errorf("cannot read %s: %w", filepath.Join(done.target, marker), err)
 		}
 	}
-	if done.replaced && !done.marked && linked {
+	// An empty directory behind a link is the one exception, with --force:
+	// it is how a copy kept in a dotfiles repository is set up in the first
+	// place, and replacing it loses nothing.
+	if done.replaced && !done.marked && linked && !(force && emptyDir(done.target)) {
 		return done, fmt.Errorf("%s is a symlink to %s, which is not a skill this command installed "+
-			"(it has no %s); an install follows a link only into its own skill, even with --force: "+
-			"remove the link and install again", target, done.target, marker)
+			"(it has no %s); an install follows a link only into its own skill, or with --force "+
+			"into an empty directory: remove the link and install again", target, done.target, marker)
 	}
 	if done.replaced && !done.marked && !force {
 		return done, fmt.Errorf("%s exists and is not a skill this command installed "+
@@ -370,6 +374,12 @@ func install(files fs.FS, target, version string, force bool) (outcome, error) {
 		done.leftover = old
 	}
 	return done, nil
+}
+
+// emptyDir reports whether path is a directory with nothing in it.
+func emptyDir(path string) bool {
+	entries, err := os.ReadDir(path)
+	return err == nil && len(entries) == 0
 }
 
 // holdingDir makes the holding directory, or checks that the one already

@@ -374,7 +374,7 @@ func (r *run) reportExport(summary exportSummary, dryRun bool) {
 		if err != nil {
 			return
 		}
-		fmt.Fprintf(r.opt.Stdout, "%s\n", encoded)
+		fmt.Fprintf(r.stdout, "%s\n", encoded)
 		return
 	}
 

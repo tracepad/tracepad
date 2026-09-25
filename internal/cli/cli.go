@@ -65,7 +65,11 @@ type Options struct {
 
 // run carries the resolved connection and output mode through one command.
 type run struct {
+	// opt's Stdout and Stderr are escaping writers wherever a person may be
+	// reading them (spec 004 #35); stdout is the unwrapped one, which the
+	// JSON mode writes the API's bytes to.
 	opt        Options
+	stdout     io.Writer
 	url        string
 	key        string
 	forceJSON  bool
@@ -81,11 +85,7 @@ func Run(ctx context.Context, opt Options) int {
 	if opt.Now == nil {
 		opt.Now = time.Now
 	}
-	r := &run{
-		opt: opt,
-		url: firstNonEmpty(opt.Env("TRACEPAD_URL"), client.DefaultURL),
-		key: opt.Env("TRACEPAD_API_KEY"),
-	}
+	r := newRun(opt)
 
 	command, rest := split(opt.Args)
 	handler, known := r.handlers()[command]
@@ -100,6 +100,26 @@ func Run(ctx context.Context, opt Options) int {
 		return r.fail(err)
 	}
 	return ExitOK
+}
+
+// newRun is one command's state, with the writers a person reads made safe.
+func newRun(opt Options) *run {
+	r := &run{
+		opt:    opt,
+		stdout: opt.Stdout,
+		url:    firstNonEmpty(opt.Env("TRACEPAD_URL"), client.DefaultURL),
+		key:    opt.Env("TRACEPAD_API_KEY"),
+	}
+	// The backstop under every renderer: whatever reaches a terminal
+	// through these goes out escaped, a value a renderer printed raw
+	// included. Stdout only on a terminal, where it is the human mode or
+	// `--json`, which writes to r.stdout; stderr always, since it is a
+	// terminal even when stdout is a pipe.
+	if opt.TTY {
+		r.opt.Stdout = termsafe.NewWriter(opt.Stdout, faintOn, faintOff)
+	}
+	r.opt.Stderr = termsafe.NewWriter(opt.Stderr)
+	return r
 }
 
 // handlers is every subcommand this package dispatches, in one table.
@@ -467,7 +487,7 @@ func (r *run) emit(body json.RawMessage) error {
 	if strings.TrimSpace(string(body)) == "" {
 		return nil
 	}
-	_, err := fmt.Fprintf(r.opt.Stdout, "%s\n", strings.TrimRight(string(body), "\n"))
+	_, err := fmt.Fprintf(r.stdout, "%s\n", strings.TrimRight(string(body), "\n"))
 	return err
 }
 

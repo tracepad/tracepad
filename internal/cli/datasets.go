@@ -708,7 +708,7 @@ func (r *run) renderRun(body json.RawMessage) error {
 	fmt.Fprintf(out, "%s %s\n", termsafe.String(shown.ID), termsafe.String(orDash(shown.Name)))
 	fmt.Fprintf(out, "%s at version %d, %s\n", termsafe.String(shown.Dataset), shown.DatasetVersion, termsafe.String(shown.Status))
 	if shown.Error != "" {
-		fmt.Fprintf(out, "error: %s\n", termsafe.String(shown.Error))
+		fmt.Fprintf(out, "error: %s\n", block(shown.Error, "       "))
 	}
 	summary := shown.Summary
 	fmt.Fprintf(out, "\nitems:  %d of %d covered, %d missing, %d unknown traces\n",
@@ -791,7 +791,7 @@ func (r *run) runsFinish(ctx context.Context, args []string) error {
 	}
 	fmt.Fprintf(r.opt.Stdout, "%s is %s\n", termsafe.String(closed.ID), termsafe.String(closed.Status))
 	if closed.Error != "" {
-		fmt.Fprintf(r.opt.Stdout, "error: %s\n", termsafe.String(closed.Error))
+		fmt.Fprintf(r.opt.Stdout, "error: %s\n", block(closed.Error, "       "))
 	}
 	return nil
 }

@@ -7,7 +7,7 @@
 // above, a C1 CSI does the same in one character, a bidi override makes text
 // read backwards. So every control character — C0, DEL, C1 — and the bidi
 // embeddings, overrides and isolates become visible escapes: `\x1b`, `\u009b`,
-// `‮`. A byte that is not UTF-8 is shown as `\xNN` rather than passed on
+// `\u202e`. A byte that is not UTF-8 is shown as `\xNN` rather than passed on
 // for a terminal to guess at. Everything else, backslashes included, is left
 // as it was: a name that needs nothing prints exactly as before.
 //
@@ -17,6 +17,7 @@ package termsafe
 
 import (
 	"fmt"
+	"io"
 	"strings"
 	"unicode/utf8"
 )
@@ -40,6 +41,54 @@ func All(values []string) []string {
 		out[i] = String(value)
 	}
 	return out
+}
+
+// Writer is Text applied to everything written through it: the backstop
+// under a human-readable run, so that a value a renderer forgot to pass
+// through String still cannot reach the terminal as a control sequence. It
+// keeps newline and tab, which a writer cannot tell from the layout around
+// them, and the exact sequences in keep — the one styling its owner writes
+// itself.
+//
+// Each Write is escaped as a whole. A sequence split across two writes is
+// escaped rather than joined, which is the safe way to be wrong; fmt and
+// tabwriter write a line or a cell at a time, so it does not happen.
+type Writer struct {
+	w    io.Writer
+	keep []string
+}
+
+// NewWriter returns a Writer over w that lets the sequences in keep through.
+func NewWriter(w io.Writer, keep ...string) *Writer { return &Writer{w: w, keep: keep} }
+
+// Write reports len(p) on success: the caller's bytes were all consumed, even
+// though more than that went out.
+func (s *Writer) Write(p []byte) (int, error) {
+	text := string(p)
+	if clean(text, true) {
+		return s.w.Write(p)
+	}
+	var out strings.Builder
+	start := 0
+	for i := 0; i < len(text); i++ {
+		if text[i] != 0x1b {
+			continue
+		}
+		for _, kept := range s.keep {
+			if strings.HasPrefix(text[i:], kept) {
+				out.WriteString(Text(text[start:i]))
+				out.WriteString(kept)
+				i += len(kept) - 1
+				start = i + 1
+				break
+			}
+		}
+	}
+	out.WriteString(Text(text[start:]))
+	if _, err := io.WriteString(s.w, out.String()); err != nil {
+		return 0, err
+	}
+	return len(p), nil
 }
 
 func escape(s string, multiline bool) string {
