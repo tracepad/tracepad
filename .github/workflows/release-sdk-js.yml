@@ -46,6 +46,7 @@ jobs:
         working-directory: sdk/js
       - run: SDK_SKIP_E2E=1 scripts/sdk-js-test.sh
 
-      # `prepack` builds `dist`; `files` in package.json ships it and nothing else.
+      # `prepack` builds `dist`; `files` in package.json ships it and NOTICE, and
+      # npm adds LICENSE and the README on its own.
       - run: npm publish --provenance --access public
         working-directory: sdk/js

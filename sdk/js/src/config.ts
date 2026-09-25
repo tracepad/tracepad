@@ -45,6 +45,10 @@ export function resolve(options: ConfigOptions = {}): Config {
   const release = pick(options.release, 'TRACEPAD_RELEASE');
   if (environment) config.environment = environment;
   if (release) config.release = release;
+  // Read, never listed: out of `console.log`, `util.inspect` and
+  // `JSON.stringify`, which are what an error tracker renders a value with
+  // (spec 032 #17).
+  Object.defineProperty(config, 'key', { enumerable: false });
   return config;
 }
 

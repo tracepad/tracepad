@@ -117,7 +117,8 @@ export function init(options: InitOptions = {}): void {
 function configFor(options: ConfigOptions): Config {
   if (!handedOut) return resolve(options);
   const built = current();
-  const config = resolve({ ...built, ...defined(options) });
+  // The key by name: it is not enumerable, so a spread would drop it.
+  const config = resolve({ ...built, key: built.key, ...defined(options) });
   if (config.host !== built.host || config.key !== built.key) {
     warn(
       'init(): the host or the key differs from the one spanProcessor() was built with; ' +

@@ -547,9 +547,15 @@ processes, so they do not share one.
 | `flush` that runs out of time | A warning; the export finishes in the background |
 | `prompt`, `flush`, `delete_trace`, `delete_traces`, and every call of the harness above | `TracepadError`, or `TracepadHTTPError(status, body)` for a non-2xx |
 | `Prompt.compile` with a placeholder no variable names | `TracepadPlaceholderError` — a `TracepadError` and a `KeyError` |
+| A name that is empty, `.` or `..` | `TracepadError`, before any request — no name the store accepts is one |
 | `init` with no host or key | `TracepadConfigError` |
 | `score` with no target outside every span while tracing — initialised, or through a provider of the application's own | `ValueError` — a programming error, visible at the call site |
 | `score` with no target where nothing traces (no `init`, no provider of its own, no recording span) | Nothing; a debug line — tracing is off |
+
+A REST call follows a redirect with the key only within the store's origin —
+the same scheme, host and port; anywhere else it goes without `Authorization`,
+as `fetch` has it. The store itself never redirects, so `TRACEPAD_HOST` should
+be the address it answers on.
 
 Instrumentation that can break the function it observes is worse than none.
 Everything the package logs goes to the `tracepad` logger, which has no handler

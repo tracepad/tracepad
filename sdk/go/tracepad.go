@@ -39,6 +39,15 @@ type options struct {
 	provider                        trace.TracerProvider
 }
 
+// String and GoString keep the key out of %v, %+v and %#v, as config's do.
+func (o options) String() string {
+	o.key = redacted
+	type bare options
+	return fmt.Sprintf("%+v", bare(o))
+}
+
+func (o options) GoString() string { return o.String() }
+
 // WithHost names the store, e.g. "http://localhost:4318". TRACEPAD_HOST
 // otherwise.
 func WithHost(host string) Option { return func(o *options) { o.host = host } }

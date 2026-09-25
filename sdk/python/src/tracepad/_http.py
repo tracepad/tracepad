@@ -48,6 +48,13 @@ def request(
     import urllib.parse
     import urllib.request
 
+    # Every name in a path is percent-encoded by its caller, and that leaves
+    # the two segments encoding cannot hide: urllib sends `..` as it is and the
+    # server answers with a redirect to the path it names, which is never the
+    # object the caller meant. No name the store accepts is empty or dots
+    # (spec 017 #19).
+    if any(part in ("", ".", "..") for part in path.split("/")[1:]):
+        raise TracepadError(f"tracepad: {method} {path}: an empty or dot segment names nothing")
     url = config.host + path
     if params:
         # A list is a repeated name (`tag=a&tag=b`), the listing's own grammar.
@@ -66,7 +73,7 @@ def request(
         },
     )
     try:
-        with urllib.request.urlopen(call, timeout=timeout) as answer:
+        with _open(call, timeout) as answer:
             headers = {name.lower(): value for name, value in answer.headers.items()}
             return Response(answer.status, _decode(answer.read()), headers)
     except urllib.error.HTTPError as error:
@@ -75,6 +82,39 @@ def request(
         raise TracepadHTTPError(error.code, _text(error.read())) from None
     except (urllib.error.URLError, TimeoutError, OSError) as error:
         raise TracepadError(f"tracepad: {method} {config.host}{path}: {error}") from None
+
+
+_opener: Any = None
+
+
+def _open(call: Any, timeout: float) -> Any:
+    """`urlopen` less one thing: a redirect to another scheme, host or port is
+    followed without the key (spec 017 #19). urllib copies every header to
+    wherever a `302` points, so an SSO proxy or a canonical-host rule in front
+    of the store would have been handed the project's secret. The rule is
+    `fetch`'s, and the Node and Go packages keep it too.
+    """
+    global _opener
+    if _opener is None:
+        import urllib.request
+
+        class SameOrigin(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self, req: Any, *args: Any) -> Any:
+                follow = super().redirect_request(req, *args)
+                if follow is not None and _origin(follow.full_url) != _origin(req.full_url):
+                    follow.remove_header("Authorization")
+                return follow
+
+        _opener = urllib.request.build_opener(SameOrigin)
+    return _opener.open(call, timeout=timeout)
+
+
+def _origin(url: str) -> tuple[str, str, int | None]:
+    import urllib.parse
+
+    parts = urllib.parse.urlsplit(url)
+    scheme = parts.scheme.lower()
+    return scheme, (parts.hostname or ""), parts.port or {"http": 80, "https": 443}.get(scheme)
 
 
 def _decode(raw: bytes) -> Any:

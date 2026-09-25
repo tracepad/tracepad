@@ -68,6 +68,13 @@ export async function request(
   path: string,
   { body, params, timeout = 10_000 }: RequestOptions = {},
 ): Promise<Response> {
+  // Every name in a path is encoded by its caller, and that leaves the two
+  // segments encoding cannot hide: the URL parser resolves `..` before the
+  // request leaves, so it would name another object. No name the store
+  // accepts is empty or dots (spec 032 #17).
+  if (path.split('/').slice(1).some((part) => part === '' || part === '.' || part === '..')) {
+    throw new TracepadError(`tracepad: ${method} ${path}: an empty or dot segment names nothing`);
+  }
   let url = config.host + path;
   const query = new URLSearchParams();
   for (const [name, value] of Object.entries(params ?? {})) {

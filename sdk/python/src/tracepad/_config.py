@@ -10,7 +10,7 @@ implementation would be a second set of answers.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from ._errors import TracepadConfigError
 from ._log import logger
@@ -28,7 +28,9 @@ class Config:
     """Where the store is, who we are to it, and what to call this deploy."""
 
     host: str
-    key: str
+    # Out of the repr: an error tracker renders a frame's locals with it, and
+    # every REST call raises from a frame holding this (spec 017 #19).
+    key: str = field(repr=False)
     environment: str | None = None
     release: str | None = None
 

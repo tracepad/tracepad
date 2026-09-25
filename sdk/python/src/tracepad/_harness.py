@@ -18,6 +18,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
+from urllib.parse import quote
 
 from opentelemetry import context as otel_context
 from opentelemetry.sdk.trace import SpanProcessor
@@ -130,6 +131,9 @@ class Run:
         #: (spec 014 #7).
         self.dataset_version: int = body["dataset_version"]
         self._closed = False
+        # The server's hex, which needs no escaping, escaped all the same: a
+        # path is built one way whoever supplied the segment (spec 017 #19).
+        self._path = f"/api/v1/runs/{quote(self.id, safe='')}"
 
     @contextmanager
     def item(self, case: Item | str) -> Iterator[Attempt]:
@@ -159,7 +163,7 @@ class Run:
         # every trace and score the run produced (spec 018 #5). A late span
         # still links, so a flush that timed out is a number read early.
         flush(timeout)
-        closed = request(_config.current(), "POST", f"/api/v1/runs/{self.id}/finish",
+        closed = request(_config.current(), "POST", f"{self._path}/finish",
                          body=body).body or {}
         # Only now: a `finish` the store refused has not closed anything, and
         # marking it closed would make `__exit__` step over the `fail` that
@@ -169,7 +173,7 @@ class Run:
 
     def get(self) -> dict[str, Any]:
         """The run with its summary, as the server computes it (spec 018 #8)."""
-        return dict(request(_config.current(), "GET", f"/api/v1/runs/{self.id}").body or {})
+        return dict(request(_config.current(), "GET", self._path).body or {})
 
     def items(self, unknown: bool = False, limit: int | None = None) -> Iterator[dict[str, Any]]:
         """The run's cases with the attempts made at each.
@@ -185,7 +189,7 @@ class Run:
             params["limit"] = limit
         if unknown:
             params["unknown"] = "true"
-        return pages(f"/api/v1/runs/{self.id}/items", params, "items")
+        return pages(f"{self._path}/items", params, "items")
 
     def __enter__(self) -> Run:
         return self
@@ -231,7 +235,8 @@ def score_configs(configs: Any) -> None:
         body = {k: v for k, v in config.items() if k != "name"} if isinstance(config, dict) \
             else config.body()
         try:
-            request(_config.current(), "PUT", f"/api/v1/score-configs/{name}", body=body)
+            request(_config.current(), "PUT", f"/api/v1/score-configs/{quote(name, safe='')}",
+                    body=body)
         except TracepadHTTPError as refused:
             # The name in the message, and the status and the body kept: a
             # caller that catches this is entitled to what the store said.
@@ -266,7 +271,8 @@ def item_id(key: str) -> str:
 
 def compare(a: str, b: str) -> dict[str, Any]:
     """Two runs side by side, exactly as the server computes it (spec 014 #18)."""
-    return dict(request(_config.current(), "GET", f"/api/v1/runs/{a}/compare/{b}").body or {})
+    path = f"/api/v1/runs/{quote(a, safe='')}/compare/{quote(b, safe='')}"
+    return dict(request(_config.current(), "GET", path).body or {})
 
 
 def pages(path: str, params: dict[str, Any], key: str) -> Iterator[dict[str, Any]]:

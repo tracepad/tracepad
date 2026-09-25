@@ -126,10 +126,14 @@ export class Run {
   /** The version the harness must fetch by — one number by construction (spec 014 #7). */
   readonly datasetVersion: number;
   private closed = false;
+  private readonly path: string;
 
   constructor(dataset: Dataset, body: Json) {
     this.dataset = dataset;
     this.id = String(body.id);
+    // The server's hex, which needs no escaping, escaped all the same: a path
+    // is built one way whoever supplied the segment (spec 032 #17).
+    this.path = `/api/v1/runs/${encodeURIComponent(this.id)}`;
     this.name = typeof body.name === 'string' ? body.name : '';
     this.datasetVersion = Number(body.dataset_version);
   }
@@ -161,7 +165,7 @@ export class Run {
     // every trace and score the run produced (spec 018 #5). A late span
     // still links, so a flush that timed out is a number read early.
     await flush({ timeout });
-    const closed = await request(current(), 'POST', `/api/v1/runs/${this.id}/finish`, { body });
+    const closed = await request(current(), 'POST', `${this.path}/finish`, { body });
     // Only now: a `finish` the store refused has not closed anything.
     this.closed = true;
     return (closed.body as Json) ?? {};
@@ -169,7 +173,7 @@ export class Run {
 
   /** The run with its summary, as the server computes it (spec 018 #8). */
   async get(): Promise<Json> {
-    return ((await request(current(), 'GET', `/api/v1/runs/${this.id}`)).body as Json) ?? {};
+    return ((await request(current(), 'GET', this.path)).body as Json) ?? {};
   }
 
   /**
@@ -185,7 +189,7 @@ export class Run {
     const params: Record<string, string | number | undefined> = {};
     if (options.limit !== undefined) params.limit = options.limit;
     if (options.unknown) params.unknown = 'true';
-    return pages(`/api/v1/runs/${this.id}/items`, params, 'items');
+    return pages(`${this.path}/items`, params, 'items');
   }
 
   /**
@@ -282,7 +286,8 @@ export function itemId(key: string): string {
 
 /** Two runs side by side, exactly as the server computes it (spec 014 #18). */
 export async function compare(a: string, b: string): Promise<Json> {
-  return ((await request(current(), 'GET', `/api/v1/runs/${a}/compare/${b}`)).body as Json) ?? {};
+  const path = `/api/v1/runs/${encodeURIComponent(a)}/compare/${encodeURIComponent(b)}`;
+  return ((await request(current(), 'GET', path)).body as Json) ?? {};
 }
 
 /**
