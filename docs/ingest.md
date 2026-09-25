@@ -21,7 +21,9 @@ Both routes are the same endpoint and accept the same credentials.
   accepted too), or `application/json` for the OTLP/JSON encoding — see
   [The JSON encoding](#the-json-encoding). Anything else is `415`.
 - **Content-Encoding**: `gzip` is supported and transparently decoded, in
-  either encoding.
+  either encoding. `TRACEPAD_MAX_BODY_BYTES` applies to the decompressed
+  body too: a batch that expands past it is `413`, exactly as if it had been
+  sent uncompressed.
 - OTLP over gRPC is not implemented.
 
 ## The JSON encoding
@@ -184,7 +186,7 @@ everywhere: none was sent, and Tracepad does not estimate one.
 | `200` | Committed to disk. An empty body means everything was accepted; a body carries `partial_success` with the number of skipped spans. |
 | `400` | The body is not a decodable OTLP export. |
 | `401` | Unknown credentials. |
-| `413` | The body is over `TRACEPAD_MAX_BODY_BYTES`. |
+| `413` | The body is over `TRACEPAD_MAX_BODY_BYTES` — on the wire, or once decompressed. |
 | `415` | `Content-Type` is neither `application/x-protobuf` nor `application/json`. |
 | `429` | The write queue is saturated; retry after the `Retry-After` delay. Standard OTLP exporters do this on their own. |
 
@@ -473,7 +475,7 @@ price on the span at the source, where it is exact and needs no credential.
 | Environment variable | Default | Meaning |
 |---|---|---|
 | `TRACEPAD_STORE_RAW` | `on` | Keep every accepted body (zstd) so mapping can be replayed later |
-| `TRACEPAD_MAX_BODY_BYTES` | `20971520` | Request body cap; over it the answer is `413` |
+| `TRACEPAD_MAX_BODY_BYTES` | `20971520` | Request body cap, gzip counted decompressed; over it the answer is `413` |
 
 Raw bodies are the reason a mapping bug is fixable after the fact rather than
 being data loss. Turning them off makes ingest work exactly the same and

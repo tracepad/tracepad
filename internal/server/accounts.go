@@ -91,6 +91,10 @@ func (s *Server) handleCreateAccount(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	name := strings.TrimSpace(request.Name)
+	if !validAccountName(w, name) {
+		return
+	}
 	if request.Owner && len(request.Memberships) > 0 {
 		writeError(w, http.StatusUnprocessableEntity, "an owner has every project")
 		return
@@ -124,7 +128,7 @@ func (s *Server) handleCreateAccount(w http.ResponseWriter, r *http.Request) {
 	now := time.Now()
 	expires := now.Add(inviteWindow)
 	create := &store.AccountCreate{
-		Email: email, Name: strings.TrimSpace(request.Name), Owner: request.Owner,
+		Email: email, Name: name, Owner: request.Owner,
 		Memberships: memberships,
 		TokenID:     store.SessionID(token), ExpiresAt: expires.UnixNano(), Now: now.UnixNano(),
 	}
@@ -191,6 +195,9 @@ func (s *Server) handlePatchAccount(w http.ResponseWriter, r *http.Request) {
 	if request.Name == nil && request.Owner == nil && request.Disabled == nil {
 		writeError(w, http.StatusBadRequest,
 			`nothing to change: send "name", "owner" or "disabled"`)
+		return
+	}
+	if request.Name != nil && !validAccountName(w, *request.Name) {
 		return
 	}
 	update := &store.AccountUpdate{

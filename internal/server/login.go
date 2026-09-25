@@ -140,7 +140,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		Password string `json:"password"`
 		Name     string `json:"name"`
 	}
-	if !s.readJSON(w, r, &request) {
+	if !readPublicJSON(w, r, &request) {
 		return
 	}
 	token := s.currentSetupToken()
@@ -154,14 +154,16 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	name := strings.TrimSpace(request.Name)
+	if !validAccountName(w, name) {
+		return
+	}
 	hash, ok := readPassword(w, request.Password)
 	if !ok {
 		return
 	}
 
-	create := &store.SetupOwner{
-		Email: email, Name: strings.TrimSpace(request.Name), Hash: hash,
-	}
+	create := &store.SetupOwner{Email: email, Name: name, Hash: hash}
 	if !s.signIn(w, r, create) {
 		return
 	}
@@ -190,10 +192,18 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		Email    string `json:"email"`
 		Password string `json:"password"`
 	}
-	if !s.readJSON(w, r, &request) {
+	if !readPublicJSON(w, r, &request) {
 		return
 	}
 	email := strings.TrimSpace(request.Email)
+	// No account can have an email or a password this long, so the answer is
+	// already known — and the limiter below keeps the email as a key for
+	// fifteen minutes, so its size must never be the caller's to choose
+	// (Decision 26). The same 401 as every other failure (Decision 8).
+	if len(email) > maxEmailLength || len(request.Password) > store.MaxPasswordLength {
+		writeError(w, http.StatusUnauthorized, wrongCredentials)
+		return
+	}
 
 	now := time.Now()
 	if wait := s.limiter.retryAfter(email, now); wait > 0 {
@@ -248,7 +258,7 @@ func (s *Server) handleAcceptInvite(w http.ResponseWriter, r *http.Request) {
 		Token    string `json:"token"`
 		Password string `json:"password"`
 	}
-	if !s.readJSON(w, r, &request) {
+	if !readPublicJSON(w, r, &request) {
 		return
 	}
 	if strings.TrimSpace(request.Token) == "" {
@@ -338,6 +348,9 @@ func (s *Server) handlePatchMe(w http.ResponseWriter, r *http.Request) {
 	}
 	if request.Name == nil && request.Password == nil && request.Preferences == nil {
 		writeError(w, http.StatusBadRequest, `nothing to change: send "name", "password" or "preferences"`)
+		return
+	}
+	if request.Name != nil && !validAccountName(w, *request.Name) {
 		return
 	}
 	preferences, ok := readPreferences(w, request.Preferences)
@@ -583,6 +596,20 @@ func validEmail(email string) error {
 		return errors.New("that does not look like an email address")
 	}
 	return nil
+}
+
+// maxAccountNameLength bounds an account's display name (Decision 26).
+const maxAccountNameLength = 200
+
+// validAccountName checks a display name's length, answering 422 itself when
+// it is too long. Empty is allowed: the name is optional everywhere.
+func validAccountName(w http.ResponseWriter, name string) bool {
+	if len(name) > maxAccountNameLength {
+		writeError(w, http.StatusUnprocessableEntity,
+			fmt.Sprintf("a name must be at most %d characters", maxAccountNameLength))
+		return false
+	}
+	return true
 }
 
 // readPassword checks the length and hashes, answering 422 itself when the

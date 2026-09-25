@@ -131,26 +131,60 @@ func (s *Server) readJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 	if !ok {
 		return false
 	}
-	if err := decodeStrict(body, v); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return false
-	}
-	return true
+	return decodeInto(w, body, v)
 }
 
 // readAPIBody reads and size-caps a request body (spec 003, API contract).
 func (s *Server) readAPIBody(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
 	body, err := readBody(w, r, s.maxBodyBytes)
-	if err != nil {
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
-			writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
-			return nil, false
-		}
-		writeError(w, http.StatusBadRequest, "cannot read request body")
-		return nil, false
+	return body, bodyRead(w, err)
+}
+
+// maxPublicBodyBytes caps the body of a route anyone can call (spec 028
+// Decision 26). The largest such body is a setup — a token, an email, a
+// password and a name, under 4 KiB even with every character escaped — so
+// twice that is room for any client and nothing for an attacker.
+const maxPublicBodyBytes = 8 << 10
+
+// readPublicJSON is readJSON for the routes that run before any credential:
+// setup, sign-in and accepting an invitation. Their bodies are a few hundred
+// bytes of JSON, so the configured cap — sized for trace batches — is the
+// wrong one, and a compressed body is refused outright: decompressing is work
+// done for a caller nobody has identified (spec 028 Decision 26).
+func readPublicJSON(w http.ResponseWriter, r *http.Request, v any) bool {
+	if encoding := strings.TrimSpace(r.Header.Get("Content-Encoding")); encoding != "" &&
+		!strings.EqualFold(encoding, "identity") {
+		writeError(w, http.StatusUnsupportedMediaType, "this route takes an uncompressed body")
+		return false
 	}
-	return body, true
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxPublicBodyBytes))
+	if !bodyRead(w, err) {
+		return false
+	}
+	return decodeInto(w, body, v)
+}
+
+// bodyRead answers the client itself when reading the body failed.
+func bodyRead(w http.ResponseWriter, err error) bool {
+	if err == nil {
+		return true
+	}
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
+		return false
+	}
+	writeError(w, http.StatusBadRequest, "cannot read request body")
+	return false
+}
+
+// decodeInto decodes a read body into v, answering 400 itself when it does not.
+func decodeInto(w http.ResponseWriter, body []byte, v any) bool {
+	if err := decodeStrict(body, v); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return false
+	}
+	return true
 }
 
 // decodeStrict decodes one JSON value, refusing fields the target does not

@@ -30,17 +30,6 @@ const (
 	contentTypeJSON        = mapping.ContentTypeJSON
 )
 
-// maxDecompressionRatio bounds how far one gzipped body may expand. The
-// configured cap applies to what arrives on the wire, so without this a 20
-// MiB body of zeros would decompress into gigabytes.
-//
-// It is a per-request bound, not a memory budget: handler concurrency is
-// unbounded, so N simultaneous exports can hold N decompressed bodies. What
-// keeps that finite in practice is the writer queue (spec 002 #15), which
-// stops admitting work long before the machine runs out — an aggregate cap
-// belongs with the rate limiting deferred to a later spec.
-const maxDecompressionRatio = 20
-
 // handleTraces serves both the canonical OTLP route and the Langfuse-SDK
 // alias. They are the same endpoint: one key pair serves both wire formats,
 // so a client that guessed the wrong path still works (spec 002 #2).
@@ -276,6 +265,14 @@ func decodeFailure(asJSON bool, err error) string {
 
 // readBody reads the request body under the configured cap, transparently
 // decompressing gzip (spec 002 API contract).
+//
+// The cap bounds the body the parser gets, not only the bytes on the wire: a
+// gzipped body is cut off once it has decompressed to maxBytes, so a few
+// hundred kilobytes of compressed zeros cannot become hundreds of megabytes
+// (spec 002 #27). It is a per-request bound, not a memory budget — handler
+// concurrency is unbounded, so N simultaneous requests can hold N bodies, and
+// the writer queue (spec 002 #15) only sees a body after it has been read. An
+// aggregate budget belongs with the rate limiting deferred to a later spec.
 func readBody(w http.ResponseWriter, r *http.Request, maxBytes int64) ([]byte, error) {
 	limited := http.MaxBytesReader(w, r.Body, maxBytes)
 	if !strings.EqualFold(r.Header.Get("Content-Encoding"), "gzip") {
@@ -288,13 +285,12 @@ func readBody(w http.ResponseWriter, r *http.Request, maxBytes int64) ([]byte, e
 	}
 	defer gz.Close()
 
-	max := maxBytes * maxDecompressionRatio
-	body, err := io.ReadAll(io.LimitReader(gz, max+1))
+	body, err := io.ReadAll(io.LimitReader(gz, maxBytes+1))
 	if err != nil {
 		return nil, err
 	}
-	if int64(len(body)) > max {
-		return nil, &http.MaxBytesError{Limit: max}
+	if int64(len(body)) > maxBytes {
+		return nil, &http.MaxBytesError{Limit: maxBytes}
 	}
 	return body, nil
 }
