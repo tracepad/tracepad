@@ -47,6 +47,9 @@ func (h *harness) seedHour(t *testing.T, hour int64, first, n int, environment s
 // watermark answers with the raw tables emptied.
 func TestARangeBehindTheWatermarkOutlivesTheRawRows(t *testing.T) {
 	h := newHarness(t, nil, store.WriterOptions{})
+	// The traces arrive in the hour they ran, so the retention pass below
+	// takes them whatever the date the suite runs on.
+	h.arrival = statsHour * int64(time.Second)
 	h.seedHour(t, statsHour, 1, 4, "production")
 	h.rollTheCorpus(t, time.Unix(statsHour+3*3600, 0))
 

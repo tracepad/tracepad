@@ -121,6 +121,9 @@ func derefFloat(value *float64) any {
 // watermark answers with the raw rows gone.
 func TestScoreTrendsBehindTheWatermarkOutliveTheRawRows(t *testing.T) {
 	h := newHarness(t, nil, store.WriterOptions{})
+	// The traces arrive in the hour they ran, so the retention pass below
+	// takes them whatever the date the suite runs on.
+	h.arrival = statsHour * int64(time.Second)
 	h.seedScoredHour(t, statsHour, 1, "production", "2.5.0", "claude-sonnet-5", 0.2, "pass")
 	h.seedScoredHour(t, statsHour, 2, "production", "2.5.0", "claude-sonnet-5", 0.6, "fail")
 	h.rollTheCorpus(t, time.Unix(statsHour+3*3600, 0))

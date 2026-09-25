@@ -34,6 +34,12 @@ type harness struct {
 	writer  *store.Writer
 	sweeper *store.Sweeper
 	project *store.Project
+	// arrival is the IngestedAt h.seed stamps, in Unix nanoseconds. Zero
+	// leaves it to the store, which is the wall clock: fine for a test that
+	// never runs retention, and a test that does must set it, or the rows
+	// it seeds are always "just arrived" and a fixed sweeper clock passes
+	// them only until the calendar catches up with it.
+	arrival int64
 }
 
 func newHarness(t *testing.T, cfg *config.Config, writerOpts store.WriterOptions) *harness {
