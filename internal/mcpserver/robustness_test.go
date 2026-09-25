@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -62,13 +63,38 @@ func postMCP(t *testing.T, base string, body []byte, header http.Header) mcpAnsw
 // captureLog routes the default logger into a buffer for the length of the
 // test. The logger is process-global, so no test that calls this may run in
 // parallel.
-func captureLog(t *testing.T) *bytes.Buffer {
+func captureLog(t *testing.T) *lockedLog {
 	t.Helper()
-	var recorded bytes.Buffer
+	recorded := &lockedLog{}
 	previous := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&recorded, nil)))
+	slog.SetDefault(slog.New(slog.NewTextHandler(recorded, nil)))
 	t.Cleanup(func() { slog.SetDefault(previous) })
-	return &recorded
+	return recorded
+}
+
+// lockedLog is a log buffer the server's goroutines can write while the test
+// reads it: a notification, for one, is handled after its 202 has gone out.
+type lockedLog struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (l *lockedLog) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.buf.Write(p)
+}
+
+func (l *lockedLog) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.buf.String()
+}
+
+func (l *lockedLog) Reset() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.buf.Reset()
 }
 
 // assertServed checks that a request got past the transport and was answered
@@ -90,9 +116,10 @@ func assertServed(t *testing.T, answer mcpAnswer, notification bool) {
 }
 
 // assertJSONRPC checks that the body is a JSON-RPC response to request 1 and
-// returns its error code, zero for a result. 2026-07-28 maps some error
-// codes to HTTP statuses, so the status alone does not say who answered.
-func assertJSONRPC(t *testing.T, answer mcpAnswer) int {
+// says whether it is an error, and with which code. 2026-07-28 maps some
+// error codes to HTTP statuses, so the status alone does not say who
+// answered.
+func assertJSONRPC(t *testing.T, answer mcpAnswer) (failed bool, code int) {
 	t.Helper()
 	var envelope struct {
 		JSONRPC string          `json:"jsonrpc"`
@@ -109,9 +136,9 @@ func assertJSONRPC(t *testing.T, answer mcpAnswer) int {
 		t.Fatalf("status %d, not a response to request 1: %s", answer.status, answer.body)
 	}
 	if envelope.Error == nil {
-		return 0
+		return false, 0
 	}
-	return envelope.Error.Code
+	return true, envelope.Error.Code
 }
 
 // assertRefused checks that the transport turned a request away before
@@ -146,7 +173,13 @@ var (
 		"notifications/initialized": true, "notifications/cancelled": true,
 		"notifications/roots/list_changed": true,
 	}
+	// resultWithEmptyParams are the methods whose `params` are required but
+	// have no required field, so `{}` is a complete request to them.
+	resultWithEmptyParams = map[string]bool{"initialize": true, "logging/setLevel": true}
 )
+
+// laterMethod is a 2026-07-28 method, unknown to the older protocols.
+const laterMethod = "server/discover"
 
 const unknownMethod = "no/such/method"
 
@@ -170,8 +203,11 @@ func TestRequestsWithoutParamsAreAnswered(t *testing.T) {
 
 	// The older protocols carry nothing in `params` the transport insists
 	// on. A missing `params` passes it only where the protocol makes them
-	// optional; `null` and `{}` pass it everywhere, and the SDK then
-	// answers, or the handler chain does.
+	// optional; `null` and `{}` pass it everywhere. Then, as spec 004's edge
+	// case has it, a method with optional `params` answers as if they were
+	// `{}`, and one with required `params` refuses `null` with an error —
+	// and answers `{}` like any request, which is a result where no field of
+	// its `params` is required.
 	shapes := map[string]string{"missing": "", "null": `,"params":null`, "empty": `,"params":{}`}
 	for shape, params := range shapes {
 		for _, method := range append(append([]string{}, everyRequest...), everyNotification...) {
@@ -183,8 +219,15 @@ func TestRequestsWithoutParamsAreAnswered(t *testing.T) {
 					assertRefused(t, answer, "unsupported")
 				case shape == "missing" && !paramsOptional[method]:
 					assertRefused(t, answer, `missing required "params"`)
+				case notification:
+					assertServed(t, answer, true)
 				default:
-					assertServed(t, answer, notification)
+					assertServed(t, answer, false)
+					wantResult := method != laterMethod && (paramsOptional[method] ||
+						shape == "empty" && resultWithEmptyParams[method])
+					if failed, code := assertJSONRPC(t, answer); failed == wantResult {
+						t.Fatalf("error %v (code %d), want a result %v: %s", failed, code, wantResult, answer.body)
+					}
 				}
 			})
 		}
@@ -193,18 +236,25 @@ func TestRequestsWithoutParamsAreAnswered(t *testing.T) {
 	// 2026-07-28 requires the protocol version on `_meta`, and the transport
 	// refuses a request without it before any of our code runs. So the
 	// closest a caller gets to "no params" is `_meta` and nothing else.
-	// Whether the request reached the handler chain is read off the log: the
+	// Whether a request reached the handler chain is read off the log: its
 	// `_meta` carries trace context, which the chain's middleware logs.
 	recorded := captureLog(t)
 	const traceparent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
-	meta, err := json.Marshal(map[string]any{"_meta": map[string]any{
-		mcp.MetaKeyProtocolVersion:    mcpserver.ProtocolVersion,
-		mcp.MetaKeyClientCapabilities: map[string]any{},
-		"traceparent":                 traceparent,
-	}})
-	if err != nil {
-		t.Fatal(err)
+	metaWith := func(extra map[string]any) []byte {
+		fields := map[string]any{
+			mcp.MetaKeyProtocolVersion:    mcpserver.ProtocolVersion,
+			mcp.MetaKeyClientCapabilities: map[string]any{},
+		}
+		for key, value := range extra {
+			fields[key] = value
+		}
+		meta, err := json.Marshal(map[string]any{"_meta": fields})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return meta
 	}
+	meta := metaWith(map[string]any{"traceparent": traceparent})
 	onlyMeta := `,"params":` + string(meta)
 	// What 2026-07-28 does before dispatch: the lifecycle, logging and
 	// subscription methods are gone from it (method not found), and a
@@ -220,7 +270,7 @@ func TestRequestsWithoutParamsAreAnswered(t *testing.T) {
 	for _, method := range everyRequest {
 		t.Run("2026-07-28/meta-only/"+method, func(t *testing.T) {
 			recorded.Reset()
-			code := assertJSONRPC(t, postMCP(t, h.url, message(method, onlyMeta, false), newProtocol(method)))
+			_, code := assertJSONRPC(t, postMCP(t, h.url, message(method, onlyMeta, false), newProtocol(method)))
 			reached := strings.Contains(recorded.String(), traceparent)
 			if want, isRefused := refused[method]; isRefused {
 				if code != want || reached {
@@ -235,10 +285,13 @@ func TestRequestsWithoutParamsAreAnswered(t *testing.T) {
 	}
 	// Notifications are handled after the 202 goes out, so whether they
 	// reached the chain cannot be read off the log here; that the server
-	// is still serving afterwards is checked below.
+	// is still serving afterwards is checked below. Their `_meta` carries no
+	// trace context: a line one of them logs late would otherwise pass for
+	// the next subtest's.
+	notificationMeta := `,"params":` + string(metaWith(nil))
 	for _, method := range everyNotification {
 		t.Run("2026-07-28/meta-only/"+method, func(t *testing.T) {
-			assertServed(t, postMCP(t, h.url, message(method, onlyMeta, true), newProtocol(method)), true)
+			assertServed(t, postMCP(t, h.url, message(method, notificationMeta, true), newProtocol(method)), true)
 		})
 	}
 	// A tool call that names its tool and nothing else does reach it.
@@ -278,30 +331,27 @@ func newProtocol(method string) http.Header {
 	}
 }
 
-// panickingAPI stands in for a tool handler with a bug in it, one whose
-// panic message is built from the caller's input.
-type panickingAPI struct{}
+// panickingAPI stands in for a tool handler with a bug in it.
+type panickingAPI struct{ bug func(query url.Values) }
 
-func (panickingAPI) Get(_ context.Context, _ string, query url.Values, _ string) (json.RawMessage, error) {
-	panic(fmt.Sprintf("a bug in a tool handler, on %v", query))
+func (p panickingAPI) Get(_ context.Context, _ string, query url.Values, _ string) (json.RawMessage, error) {
+	p.bug(query)
+	return nil, nil
 }
 
-// TestPanicIsAnErrorNotACrash: a panic in the MCP handler chain is a JSON-RPC
-// internal error for that request, the next request is served, and the log
-// gets the panic's type and stack but not its value, which here carries the
-// request.
-func TestPanicIsAnErrorNotACrash(t *testing.T) {
-	recorded := captureLog(t)
-
-	httpServer := httptest.NewServer(mcpserver.HTTPHandler(testVersion, panickingAPI{}))
+// panickingServer serves MCP over tools whose every call panics.
+func panickingServer(t *testing.T, bug func(url.Values)) *harness {
+	t.Helper()
+	httpServer := httptest.NewServer(mcpserver.HTTPHandler(testVersion, panickingAPI{bug: bug}))
 	t.Cleanup(httpServer.Close)
-	h := &harness{url: httpServer.URL}
+	return &harness{url: httpServer.URL}
+}
 
-	const marker = "request-body-marker-7f3a"
-	answer := h.rpc(t, "tools/call", map[string]any{
-		"name":      "list_traces",
-		"arguments": map[string]any{"name": marker},
-	})
+// panickingCall calls a tool that panics and checks the caller gets a
+// JSON-RPC internal error that says nothing about the panic.
+func panickingCall(t *testing.T, h *harness, arguments map[string]any) {
+	t.Helper()
+	answer := h.rpc(t, "tools/call", map[string]any{"name": "list_traces", "arguments": arguments})
 	var envelope struct {
 		Error struct {
 			Code    int    `json:"code"`
@@ -311,13 +361,24 @@ func TestPanicIsAnErrorNotACrash(t *testing.T) {
 	if err := json.Unmarshal(answer, &envelope); err != nil {
 		t.Fatalf("%v (%s)", err, answer)
 	}
-	if envelope.Error.Code != -32603 {
-		t.Fatalf("want a JSON-RPC internal error (-32603), got %s", answer)
+	if envelope.Error.Code != -32603 || envelope.Error.Message != "internal error" {
+		t.Fatalf("want a bare JSON-RPC internal error (-32603), got %s", answer)
 	}
-	if strings.Contains(string(answer), "a bug in a tool handler") {
-		t.Fatalf("the panic leaked to the caller: %s", answer)
-	}
+}
 
+// TestPanicIsAnErrorNotACrash: a panic in the MCP handler chain is a JSON-RPC
+// internal error for that request, and the next request is served. The log
+// gets the panic's type and stack but not its value, which here is built
+// from the request; and the stack once, not once per request — a caller who
+// can trigger a panic can do it in a loop.
+func TestPanicIsAnErrorNotACrash(t *testing.T) {
+	recorded := captureLog(t)
+	h := panickingServer(t, func(query url.Values) {
+		panic(fmt.Sprintf("a bug in a tool handler, on %v", query))
+	})
+
+	const marker = "request-body-marker-7f3a"
+	panickingCall(t, h, map[string]any{"name": marker})
 	if tools := h.rpc(t, "tools/list", nil); !bytes.Contains(tools, []byte("get_last_trace")) {
 		t.Fatalf("the next request was not served: %s", tools)
 	}
@@ -328,10 +389,51 @@ func TestPanicIsAnErrorNotACrash(t *testing.T) {
 			t.Fatalf("the log carries the panic's value (%q):\n%s", leak, log)
 		}
 	}
-	for _, want := range []string{"mcp handler panicked", "method=tools/call", "panic_type=string", "robustness_test.go"} {
+	for _, want := range []string{"mcp handler panicked", "method=tools/call", "panic_type=string", "stack=", "robustness_test.go"} {
 		if !strings.Contains(log, want) {
 			t.Fatalf("the log misses %q:\n%s", want, log)
 		}
+	}
+
+	// Seven more of the same: summarised at the 2nd, 4th and 8th, with no
+	// second stack.
+	for range 7 {
+		panickingCall(t, h, map[string]any{"name": marker})
+	}
+	log = recorded.String()
+	if n := strings.Count(log, "stack="); n != 1 {
+		t.Fatalf("the stack was logged %d times, want once:\n%s", n, log)
+	}
+	if n := strings.Count(log, "mcp handler panicked again"); n != 3 {
+		t.Fatalf("%d repeat lines for 7 repeats, want 3 (at 2, 4, 8):\n%s", n, log)
+	}
+	for _, want := range []string{"occurrences=2", "occurrences=4", "occurrences=8"} {
+		if !strings.Contains(log, want) {
+			t.Fatalf("the log misses %q:\n%s", want, log)
+		}
+	}
+	if strings.Contains(log, marker) {
+		t.Fatalf("a repeat line carries the request:\n%s", log)
+	}
+}
+
+// TestRuntimeErrorPanicKeepsItsMessage: a panic the Go runtime raised is
+// logged with the runtime's own message, which names what went wrong and
+// carries nothing of the request.
+func TestRuntimeErrorPanicKeepsItsMessage(t *testing.T) {
+	recorded := captureLog(t)
+	h := panickingServer(t, func(query url.Values) {
+		var none []string
+		_ = none[len(query)]
+	})
+
+	panickingCall(t, h, map[string]any{"name": "request-body-marker-7f3a"})
+	log := recorded.String()
+	if !strings.Contains(log, "index out of range") || !strings.Contains(log, "panic_type=runtime.boundsError") {
+		t.Fatalf("the runtime's message did not reach the log:\n%s", log)
+	}
+	if strings.Contains(log, "request-body-marker-7f3a") {
+		t.Fatalf("the log carries the request:\n%s", log)
 	}
 }
 
@@ -367,15 +469,35 @@ func TestOnlyWellFormedTraceContextIsLogged(t *testing.T) {
 		t.Fatalf("older protocol: logged %d times, want once:\n%s", n, recorded.String())
 	}
 
+	// A later version is read the way W3C Trace Context §3.2.4 tells a
+	// parser to: its first 55 characters as version 00, when a dash or
+	// nothing follows them. Only those 55 reach the log.
+	later := "01" + valid[2:]
+	for name, traceparent := range map[string]string{
+		"later version":           later,
+		"later version, extended": later + "-" + strings.Repeat("b", 64<<10),
+	} {
+		t.Run(name, func(t *testing.T) {
+			recorded.Reset()
+			unauthenticated(t, traceparent)
+			log := recorded.String()
+			if n := strings.Count(log, later); n != 1 || strings.Contains(log, later+"-") {
+				t.Fatalf("want exactly the first 55 characters, once:\n%.500s", log)
+			}
+		})
+	}
+
 	invalid := map[string]string{
-		"oversized":      "00-" + strings.Repeat("a", 64<<10),
-		"forged line":    valid + "\nlevel=ERROR msg=forged",
-		"trailing bytes": valid + "-extra",
-		"uppercase":      strings.ToUpper(valid),
-		"other version":  "01" + valid[2:],
-		"zero trace id":  "00-00000000000000000000000000000000-00f067aa0ba902b7-01",
-		"zero parent id": "00-4bf92f3577b34da6a3ce929d0e0e4736-0000000000000000-01",
-		"not hex":        "00-4bf92f3577b34da6a3ce929d0e0e473z-00f067aa0ba902b7-01",
+		"oversized":              "00-" + strings.Repeat("a", 64<<10),
+		"forged line":            valid + "\nlevel=ERROR msg=forged",
+		"version 00, extended":   valid + "-extra",
+		"short":                  valid[:54],
+		"uppercase":              strings.ToUpper(valid),
+		"version ff":             "ff" + valid[2:],
+		"later version, no dash": later + "x",
+		"zero trace id":          "00-00000000000000000000000000000000-00f067aa0ba902b7-01",
+		"zero parent id":         "00-4bf92f3577b34da6a3ce929d0e0e4736-0000000000000000-01",
+		"not hex":                "00-4bf92f3577b34da6a3ce929d0e0e473z-00f067aa0ba902b7-01",
 	}
 	for name, traceparent := range invalid {
 		t.Run(name, func(t *testing.T) {

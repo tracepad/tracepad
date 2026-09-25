@@ -9,7 +9,9 @@ import (
 	"net/http"
 	"reflect"
 	"regexp"
+	"runtime"
 	"runtime/debug"
+	"sync"
 
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -59,7 +61,7 @@ func New(version string, api API) *mcp.Server {
 	})
 	// recoverPanics comes first so that it wraps everything after it: the
 	// other middleware, the SDK's method dispatch and every tool handler.
-	server.AddReceivingMiddleware(recoverPanics, cacheableToolList, logTraceContext)
+	server.AddReceivingMiddleware(recoverPanics(&panicLog{}), cacheableToolList, logTraceContext)
 	register(server, api)
 	return server
 }
@@ -75,20 +77,82 @@ func New(version string, api API) *mcp.Server {
 // params) and after it (shaping and encoding the result) runs in that same
 // goroutine and is not covered: the SDK calls our code here and nowhere else.
 //
-// What is logged is the method, the panic's type and the stack. Not the
-// panic's value: a message built from an argument would carry the request,
-// which is arbitrary input from a caller nobody has authenticated yet, into
-// the log. The stack says where it happened, and that is what a fix needs.
-func recoverPanics(next mcp.MethodHandler) mcp.MethodHandler {
-	return func(ctx context.Context, method string, req mcp.Request) (result mcp.Result, err error) {
-		defer func() {
-			if recovered := recover(); recovered != nil {
-				slog.Error("mcp handler panicked", "method", method,
-					"panic_type", fmt.Sprintf("%T", recovered), "stack", string(debug.Stack()))
-				result, err = nil, &jsonrpc.Error{Code: jsonrpc.CodeInternalError, Message: "internal error"}
-			}
-		}()
-		return next(ctx, method, req)
+// What reaches the log is decided by panicLog.
+func recoverPanics(log *panicLog) mcp.Middleware {
+	return func(next mcp.MethodHandler) mcp.MethodHandler {
+		return func(ctx context.Context, method string, req mcp.Request) (result mcp.Result, err error) {
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					log.record(method, recovered)
+					result, err = nil, &jsonrpc.Error{Code: jsonrpc.CodeInternalError, Message: "internal error"}
+				}
+			}()
+			return next(ctx, method, req)
+		}
+	}
+}
+
+// panicKindsLimit bounds how many distinct panics panicLog remembers. Past
+// it, every new kind is counted together under one overflow entry.
+const panicKindsLimit = 64
+
+// panicLog writes recovered panics to the log without letting a caller who
+// can trigger one grow the log without bound. A panic reachable without a
+// credential can be sent in a loop, and the full stack is kilobytes, so:
+//
+//   - The first panic of a kind — a method and a panic type — is logged in
+//     full, with its stack. That is what a fix needs, and it needs it once.
+//   - Repeats of it are counted, and a one-line summary with the count is
+//     logged at the 2nd, 4th, 8th… occurrence: the log grows with the
+//     logarithm of a loop, not with the loop.
+//   - The kinds remembered are capped at panicKindsLimit; past that, new
+//     kinds share one overflow entry and are summarised like repeats.
+//
+// The panic's value is logged only when it is a runtime.Error, whose message
+// the Go runtime writes (an index out of range, a nil map). Any other value
+// may be a message built from an argument, which would carry the request —
+// arbitrary input from a caller nobody has authenticated yet — into the log;
+// for those the type stands in.
+//
+// One panicLog belongs to one server, and a process serves one, so "the
+// first of a kind" is the first in the process.
+type panicLog struct {
+	mu    sync.Mutex
+	kinds map[panicKind]int64
+}
+
+type panicKind struct{ method, panicType string }
+
+// overflowKind is where kinds beyond panicKindsLimit are counted.
+var overflowKind = panicKind{method: "(other)", panicType: "(other)"}
+
+func (l *panicLog) record(method string, recovered any) {
+	kind := panicKind{method: method, panicType: fmt.Sprintf("%T", recovered)}
+	attrs := []any{"method", kind.method, "panic_type", kind.panicType}
+	if runtimeErr, ok := recovered.(runtime.Error); ok {
+		attrs = append(attrs, "panic", runtimeErr.Error())
+	}
+
+	l.mu.Lock()
+	if l.kinds == nil {
+		l.kinds = map[panicKind]int64{}
+	}
+	key := kind
+	if _, known := l.kinds[key]; !known && len(l.kinds) >= panicKindsLimit {
+		key = overflowKind
+	}
+	l.kinds[key]++
+	count := l.kinds[key]
+	l.mu.Unlock()
+
+	switch {
+	case count == 1 && key == kind:
+		slog.Error("mcp handler panicked", append(attrs, "stack", string(debug.Stack()))...)
+	case count&(count-1) == 0: // a power of two
+		if key == overflowKind {
+			attrs = append(attrs, "note", "too many kinds of panic to track; counted together")
+		}
+		slog.Error("mcp handler panicked again", append(attrs, "occurrences", count)...)
 	}
 }
 
@@ -117,16 +181,39 @@ func requestMeta(req mcp.Request) map[string]any {
 // context: on the request's `_meta`.
 const traceparentKey = "traceparent"
 
-// traceparentFormat is a W3C trace context header of version 00: exactly 55
-// characters of lowercase hex and dashes.
-var traceparentFormat = regexp.MustCompile(`^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$`)
+// traceparentLen is the length of a version 00 traceparent, and of the part
+// of a later version that version 00 defines.
+const traceparentLen = 55
 
-// validTraceparent says whether a value is well-formed trace context. The
-// all-zero trace and parent ids are invalid by the W3C spec.
-func validTraceparent(value string) bool {
-	return traceparentFormat.MatchString(value) &&
-		value[3:35] != "00000000000000000000000000000000" &&
-		value[36:52] != "0000000000000000"
+// traceparentFields is the version 00 layout: version, trace id, parent id
+// and flags, lowercase hex separated by dashes.
+var traceparentFields = regexp.MustCompile(`^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$`)
+
+// traceparentOf returns the loggable part of a traceparent, and whether it is
+// well-formed W3C trace context at all (Trace Context §3.2.4). Version `ff`
+// is invalid. Version 00 is exactly 55 characters. A later version may be
+// longer, and a parser reads its first 55 characters as version 00 when what
+// follows them is a dash or nothing; only those 55 are returned. All-zero
+// trace and parent ids are invalid in every version.
+func traceparentOf(value string) (string, bool) {
+	if len(value) < traceparentLen {
+		return "", false
+	}
+	head := value[:traceparentLen]
+	switch version := head[:2]; {
+	case version == "ff":
+		return "", false
+	case version == "00" && len(value) != traceparentLen:
+		return "", false
+	case len(value) > traceparentLen && value[traceparentLen] != '-':
+		return "", false
+	}
+	if !traceparentFields.MatchString(head) ||
+		head[3:35] == "00000000000000000000000000000000" ||
+		head[36:52] == "0000000000000000" {
+		return "", false
+	}
+	return head, true
 }
 
 // logTraceContext records incoming trace context, and nothing more (#22). A
@@ -139,8 +226,10 @@ func validTraceparent(value string) bool {
 // unauthenticated caller cannot put arbitrary bytes into the log through it.
 func logTraceContext(next mcp.MethodHandler) mcp.MethodHandler {
 	return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
-		if traceparent, ok := requestMeta(req)[traceparentKey].(string); ok && validTraceparent(traceparent) {
-			slog.Info("mcp request", "method", method, traceparentKey, traceparent)
+		if value, ok := requestMeta(req)[traceparentKey].(string); ok {
+			if traceparent, valid := traceparentOf(value); valid {
+				slog.Info("mcp request", "method", method, traceparentKey, traceparent)
+			}
 		}
 		return next(ctx, method, req)
 	}

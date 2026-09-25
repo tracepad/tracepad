@@ -72,12 +72,14 @@ project key, not OAuth: the OAuth framework in the MCP spec targets
 multi-tenant public servers, and this one is self-hosted.
 
 A `traceparent` on a request's `_meta` is recorded in the server log, once per
-request, when it is well-formed W3C trace context: version `00`, exactly 55
-characters, lowercase hex, and neither the trace id nor the parent id all
-zeros. Anything else is dropped without being logged. Nothing more happens with
-it — this is a tracing product, so it should at least not be the tool that
-drops trace context on the floor, but instrumenting tracepad with tracepad is a
-later question.
+request, when it is well-formed W3C trace context: lowercase hex, neither the
+trace id nor the parent id all zeros, and a version other than `ff`. Version
+`00` must be exactly 55 characters; a later version may be longer, as the W3C
+spec allows, when a dash follows its first 55 characters, and only those 55
+are logged. Anything else is dropped without being logged. Nothing more
+happens with it — this is a tracing product, so it should at least not be the
+tool that drops trace context on the floor, but instrumenting tracepad with
+tracepad is a later question.
 
 ## The tools
 
