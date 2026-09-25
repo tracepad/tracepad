@@ -1,0 +1,49 @@
+{
+  "about": "Prompt.compile cases the Python and Node packages both run (spec 017 #18). A case compiles `text` or `messages` with `variables`, and either equals `compiled` or raises an error containing `error`.",
+  "cases": [
+    { "name": "a placeholder", "text": "Answer {q}.", "variables": { "q": "hi" }, "compiled": "Answer hi." },
+    { "name": "a number", "text": "{n} items", "variables": { "n": 5 }, "compiled": "5 items" },
+    { "name": "the same placeholder twice", "text": "{q}, {q}", "variables": { "q": "hi" }, "compiled": "hi, hi" },
+    { "name": "a variable the text does not use", "text": "plain", "variables": { "q": "hi" }, "compiled": "plain" },
+    { "name": "an empty text", "text": "", "variables": {}, "compiled": "" },
+    { "name": "doubled braces", "text": "{{lit}}", "variables": {}, "compiled": "{lit}" },
+    { "name": "a JSON example", "text": "Reply as {{\"answer\": \"{q}\"}}.", "variables": { "q": "yes" }, "compiled": "Reply as {\"answer\": \"yes\"}." },
+    { "name": "a placeholder inside doubled braces", "text": "{{{q}}}", "variables": { "q": "hi" }, "compiled": "{hi}" },
+    { "name": "a value with braces is not read again", "text": "{q}", "variables": { "q": "{r}" }, "compiled": "{r}" },
+    { "name": "a format spec", "text": "[{q:>12}]", "variables": { "q": "hi" }, "error": "prompt placeholder {q:>12} has no variable" },
+    { "name": "a width that would allocate", "text": "{q:>50000000}", "variables": { "q": "hi" }, "error": "prompt placeholder {q:>50000000} has no variable" },
+    { "name": "an attribute", "text": "{n.real}", "variables": { "n": 5 }, "error": "prompt placeholder {n.real} has no variable" },
+    { "name": "an index", "text": "{a[0]}", "variables": { "a": ["x"] }, "error": "prompt placeholder {a[0]} has no variable" },
+    { "name": "a conversion", "text": "{x!r}", "variables": { "x": "hi" }, "error": "prompt placeholder {x!r} has no variable" },
+    { "name": "a name with spaces", "text": "{ q }", "variables": { "q": "hi" }, "error": "prompt placeholder { q } has no variable" },
+    { "name": "an unknown name", "text": "Answer {missing}.", "variables": { "q": "hi" }, "error": "prompt placeholder {missing} has no variable" },
+    { "name": "empty braces", "text": "{}", "variables": { "q": "hi" }, "error": "prompt placeholder {} has no variable" },
+    { "name": "an opening brace never closed", "text": "{q", "variables": { "q": "hi" }, "compiled": "{q" },
+    { "name": "a closing brace never opened", "text": "q}", "variables": { "q": "hi" }, "compiled": "q}" },
+    { "name": "braces the wrong way round", "text": "}{q}{", "variables": { "q": "hi" }, "compiled": "}hi{" },
+    { "name": "a brace inside a placeholder", "text": "{a{q}", "variables": { "q": "hi" }, "compiled": "{ahi" },
+    {
+      "name": "every message, keeping the other fields",
+      "messages": [
+        { "role": "system", "content": "You help with {product}. Reply as {{\"ok\": true}}.", "name": "rules" },
+        { "role": "user", "content": "{question}" },
+        { "role": "assistant", "content": "" }
+      ],
+      "variables": { "product": "Tracepad", "question": "why?" },
+      "compiled": [
+        { "role": "system", "content": "You help with Tracepad. Reply as {\"ok\": true}.", "name": "rules" },
+        { "role": "user", "content": "why?" },
+        { "role": "assistant", "content": "" }
+      ]
+    },
+    {
+      "name": "a format spec in a later message",
+      "messages": [
+        { "role": "system", "content": "You help with {product}." },
+        { "role": "user", "content": "{question:>12}" }
+      ],
+      "variables": { "product": "Tracepad", "question": "why?" },
+      "error": "prompt placeholder {question:>12} has no variable"
+    }
+  ]
+}

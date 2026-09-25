@@ -11,6 +11,7 @@ name.
 
 from __future__ import annotations
 
+import re
 import threading
 import time
 from dataclasses import dataclass, field
@@ -37,15 +38,38 @@ class Prompt:
     def compile(self, **variables: Any) -> str | list[dict[str, Any]]:
         """Substitute `{name}` placeholders, in the text or in every message.
 
-        `str.format` and nothing else: a template language is a product, and
-        what the store stores is plain text (spec 017 #8).
+        A placeholder with no variable raises: a prompt sent with a hole in it
+        is a worse failure than one not sent. Nothing else: a template
+        language is a product, and what the store stores is plain text
+        (spec 017 #8, #18).
         """
         if self.messages is not None:
             return [
-                {**message, "content": str(message.get("content", "")).format(**variables)}
+                {**message, "content": _fill(str(message.get("content", "")), variables)}
                 for message in self.messages
             ]
-        return (self.text or "").format(**variables)
+        return _fill(self.text or "", variables)
+
+
+_PLACEHOLDER = re.compile(r"\{\{|\}\}|\{([^{}]*)\}")
+
+
+def _fill(template: str, variables: dict[str, Any]) -> str:
+    """The reading the JS package's `fill` has: `{{` and `}}` are the braces
+    themselves, and what stands between two braces is a name, looked up as
+    written. Never `str.format`: the text is the store's, written by whoever
+    holds the project key, and a format spec or an attribute chain in it would
+    run in this process (spec 017 #18)."""
+
+    def one(match: re.Match[str]) -> str:
+        name = match.group(1)
+        if name is None:
+            return match.group(0)[0]
+        if name not in variables:
+            raise TracepadError(f"tracepad: prompt placeholder {{{name}}} has no variable")
+        return str(variables[name])
+
+    return _PLACEHOLDER.sub(one, template)
 
 
 @dataclass

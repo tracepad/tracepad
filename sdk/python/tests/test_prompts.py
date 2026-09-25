@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import logging
+import re
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -11,6 +14,7 @@ import tracepad
 from tracepad import _config, _prompts
 from tracepad._errors import TracepadError, TracepadHTTPError
 from tracepad._http import Response
+from tracepad._prompts import Prompt
 
 CHAT = {
     "name": "support-answer",
@@ -130,3 +134,49 @@ def test_compile_substitutes_in_text(monkeypatch: pytest.MonkeyPatch) -> None:
     prompt = tracepad.prompt("summarize")
     assert prompt.messages is None
     assert prompt.compile(document="the changelog") == "Summarise the changelog in one sentence."
+
+
+# The Node package runs the same table (sdk/js/test/prompts.test.ts): one
+# stored text must compile to one prompt, whichever package reads it.
+CASES = json.loads(
+    (Path(__file__).parents[3] / "testdata" / "prompts" / "compile.json").read_text()
+)["cases"]
+
+
+@pytest.mark.parametrize("case", CASES, ids=[case["name"] for case in CASES])
+def test_compile_reads_what_the_node_package_reads(case: dict[str, Any]) -> None:
+    prompt = Prompt(name="p", version=1, type="chat" if "messages" in case else "text",
+                    text=case.get("text"), messages=case.get("messages"))
+    if "error" in case:
+        with pytest.raises(TracepadError, match=re.escape(case["error"])):
+            prompt.compile(**case["variables"])
+    else:
+        assert prompt.compile(**case["variables"]) == case["compiled"]
+
+
+class User:
+    """An object an application might well pass, with something behind it."""
+
+    email = "someone@example.com"
+
+    def __init__(self) -> None:
+        self.api_key = "sk-not-for-the-prompt"
+
+
+@pytest.mark.parametrize("text", [
+    "{user.api_key}",
+    "{user.__class__.__init__.__globals__[os].environ}",
+    "{user.email:>40}",
+    "{user!r}",
+])
+def test_compile_evaluates_nothing_in_the_stored_text(text: str) -> None:
+    with pytest.raises(TracepadError) as raised:
+        Prompt(name="p", version=1, type="text", text=text).compile(user=User())
+    assert "sk-not-for-the-prompt" not in str(raised.value)
+    assert "someone@example.com" not in str(raised.value)
+
+
+def test_compile_hands_a_variable_to_str_and_nothing_more() -> None:
+    compiled = Prompt(name="p", version=1, type="text", text="Hello {user}").compile(user=User())
+    assert compiled.startswith("Hello <")
+    assert "sk-not-for-the-prompt" not in compiled

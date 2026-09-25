@@ -232,9 +232,17 @@ whose definition is gone, which is the honest answer: they did run it.
 ## Using a prompt from an application
 
 Fetch by label at start-up (or per request, behind the 60-second cache), read
-`config` for your model parameters, and interpolate the body yourself:
+`config` for your model parameters, and interpolate the body yourself —
+replacing `{name}` and nothing else:
 
 ```python
+def fill(template, variables):
+    def one(match):
+        if match.group(1) is None:
+            return match.group(0)[0]  # {{ and }} are the braces themselves
+        return str(variables[match.group(1)])  # a name, never a format spec
+    return re.sub(r"\{\{|\}\}|\{([^{}]*)\}", one, template)
+
 prompt = httpx.get(
     "http://localhost:4318/api/v1/prompts/summarize",
     params={"label": "production"},
@@ -242,11 +250,16 @@ prompt = httpx.get(
 ).json()
 
 messages = [
-    {"role": m["role"], "content": m["content"].format(**variables)}
+    {"role": m["role"], "content": fill(m["content"], variables)}
     for m in prompt["prompt"]
 ]
 response = client.messages.create(model=prompt["config"]["model"], messages=messages)
 ```
+
+Not `m["content"].format(**variables)`: `str.format` reads more than names —
+`{q:>50000000}` pads to a width, `{user.email}` walks an attribute — and the
+body is written by whoever holds the project key, not by the application. The
+SDKs substitute names the same way.
 
 Deploying a new prompt is then a label move, not a release.
 

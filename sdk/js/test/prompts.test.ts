@@ -1,5 +1,9 @@
 /** Prompts: fetched by label, cached for as long as the server says (spec 032 #7). */
 
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { describe, expect, test, vi } from 'vitest';
 
 import * as tracepad from '../src/index.js';
@@ -155,5 +159,30 @@ describe('compile', () => {
     serving(() => ({ body: STORED }));
     const prompt = await tracepad.prompt('support-answer');
     expect(() => prompt.compile({ topic: 'refunds' })).toThrow('placeholder {product} has no variable');
+  });
+
+  // The Python package runs the same table (sdk/python/tests/test_prompts.py):
+  // one stored text must compile to one prompt, whichever package reads it.
+  const table = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'testdata', 'prompts', 'compile.json');
+  const { cases } = JSON.parse(readFileSync(table, 'utf8')) as {
+    cases: {
+      name: string;
+      text?: string;
+      messages?: tracepad.Message[];
+      variables: Record<string, unknown>;
+      compiled?: unknown;
+      error?: string;
+    }[];
+  };
+
+  test.each(cases)('reads what the Python package reads: $name', (c) => {
+    const prompt = new tracepad.Prompt(c.messages !== undefined
+      ? { name: 'p', version: 1, type: 'chat', messages: c.messages }
+      : { name: 'p', version: 1, type: 'text', text: c.text ?? '' });
+    if (c.error !== undefined) {
+      expect(() => prompt.compile(c.variables)).toThrow(c.error);
+    } else {
+      expect(prompt.compile(c.variables)).toEqual(c.compiled);
+    }
   });
 });

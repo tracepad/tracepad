@@ -330,9 +330,15 @@ with tracepad.generation("chat", prompt=support, model=support.config["model"]):
 ```
 
 `Prompt` carries `name`, `version`, `type`, `text` or `messages`, `labels` and
-`config`. `compile(**variables)` is `str.format`-style substitution of
-`{placeholder}`s — in the text, or in every message's content. Nothing else: a
-template language is a product, and what the store stores is plain text.
+`config`. `compile(**variables)` substitutes `{placeholder}`s — in the text,
+or in every message's content — and raises `TracepadError` on a placeholder
+with no variable; `{{` and `}}` are the braces themselves, so a prompt can show
+a JSON example. It reads the braces the way `str.format` does and nothing
+more: `{q:>12}`, `{user.email}`, `{items[0]}` and `{q!r}` are not evaluated,
+they are placeholders no variable names, so they raise. The stored text is
+written by whoever holds the project key, and it must not run in your
+process. Nothing else: a template language is a product, and what the store
+stores is plain text.
 
 Passing the prompt to `generation` records which prompt ran, so the trace can
 be [filtered by it](api.md#listing-traces).
