@@ -157,7 +157,9 @@ jobs:
 
   # The Python package (spec 017 #12): its unit suite on both ends of the
   # supported range — 3.10 is the floor and the newest is where the OTel SDK
-  # moves first — and its end-to-end suite against a real binary. Its own job,
+  # moves first — and its end-to-end suite against a real binary. The oldest
+  # Python runs the oldest OpenTelemetry `pyproject.toml` admits and the newest
+  # runs whatever a fresh install resolves today (spec 042 #14). Its own job,
   # because the gate needs neither Python nor a network.
   sdk:
     if: github.event_name == 'pull_request'
@@ -165,7 +167,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.13"]
+        include:
+          - python-version: "3.10"
+            otel: floor
+          - python-version: "3.13"
+            otel: latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -175,6 +181,8 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: pip install -e ./sdk/python pytest "ruff==0.16.6"
+      - if: matrix.otel == 'floor'
+        run: scripts/sdk-test.sh --floor-pins | xargs pip install
       # One rule set for every Python file in the repository, named rather
       # than discovered: the scripts sit outside the package that configures it.
       - run: ruff check --config sdk/python/pyproject.toml sdk/python scripts

@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import logging
+import socket
 import subprocess
 import sys
 import time
-import urllib.request
 from typing import Any
 
 import pytest
-import requests
 from opentelemetry import trace as otel_api
 from opentelemetry.sdk.trace import TracerProvider
 
@@ -42,20 +41,52 @@ def test_one_fails_naming_the_spans_there_were() -> None:
         captured.one("c")
 
 
-def test_nothing_reaches_the_network(monkeypatch: pytest.MonkeyPatch) -> None:
-    def refuse(*_: Any, **__: Any) -> Any:
-        pytest.fail("a capture made a network call")
+@pytest.fixture
+def connections(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
+    """Every attempt to reach a host, refused and written down.
 
-    monkeypatch.setattr(urllib.request, "urlopen", refuse)
-    monkeypatch.setattr(requests.Session, "request", refuse)
+    The socket is where `urllib`, `requests` and `urllib3` all end up, and the
+    OTLP exporter changed from the second to the third in OpenTelemetry 1.45;
+    and the list is read on the test's own thread, because an export runs on
+    the batch processor's or the flush's, where a raise fails nothing."""
+    attempts: list[Any] = []
+
+    def refuse(*args: Any, **_: Any) -> Any:
+        attempts.append(args[1] if isinstance(args[0], socket.socket) else args[:2])
+        raise ConnectionRefusedError("no network in this test")
+
+    for owner, name in ((socket.socket, "connect"), (socket.socket, "connect_ex"),
+                        (socket, "getaddrinfo")):
+        monkeypatch.setattr(owner, name, refuse)
+    return attempts
+
+
+def test_nothing_reaches_the_network(connections: list[Any]) -> None:
     with testing.capture() as captured:
         with tracepad.generation("chat", model="gpt-4o-mini") as call:
             call.end(output="hi", usage={"input": 3, "output": 1})
             tracepad.score("helpful", 1, observation=True)
         tracepad.flush(1.0)
 
+    assert connections == []
     assert captured.one("chat").attributes is not None
     assert len(captured.scores) == 1
+
+
+@pytest.mark.parametrize("export", [True, False], ids=["spans", "scores"])
+def test_the_network_guard_sees_what_init_sends(
+    export: bool, connections: list[Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The test above is only as good as what `connections` sees: a transport
+    # that went round the socket would leave it green whatever a capture did.
+    monkeypatch.setenv("TRACEPAD_EXPORT_TIMEOUT", "0.2")  # given up before the test ends
+    tracepad.init("http://tracepad.test:4318", "tp-sk-test", export=export)
+    with tracepad.span("sent"):
+        if not export:
+            tracepad.score("helpful", 1)  # the only thing sent, so it is the one seen
+    tracepad.flush(2.0)
+
+    assert ("tracepad.test", 4318) in connections
 
 
 def test_leaving_a_capture_leaves_a_process_that_never_initialised() -> None:

@@ -31,10 +31,12 @@ out_file = sys.argv[1]
 
 def noise_png(side):
     rng = random.Random(41)
-    rows = b"".join(b"\x00" + bytes(rng.randrange(256) for _ in range(side * 3)) for _ in range(side))
+    rows = b"".join(b"\x00" + bytes(rng.randrange(256) for _ in range(side * 3))
+                    for _ in range(side))
 
     def chunk(kind, data):
-        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+        crc = struct.pack(">I", zlib.crc32(kind + data))
+        return struct.pack(">I", len(data)) + kind + data + crc
 
     header = struct.pack(">IIBBBBB", side, side, 8, 2, 0, 0, 0)
     return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", zlib.compress(rows))

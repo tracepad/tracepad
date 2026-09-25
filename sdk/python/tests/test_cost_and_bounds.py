@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import socket
 import threading
 import time
 import uuid
@@ -23,6 +24,7 @@ from opentelemetry.sdk.trace.export import BatchSpanProcessor, SpanExporter, Spa
 import tracepad
 from tracepad import _attributes as attrs
 from tracepad import _tracing, testing
+from tracepad._config import resolve_timeout
 
 HOST, KEY = "http://tracepad.test:4318", "tp-sk-test"
 
@@ -150,35 +152,62 @@ def test_an_initialised_process_still_warns_outside_every_block(
 # --- export_timeout (Decision 3) -------------------------------------------------
 
 
-def exporter_timeout() -> float:
-    processors = _tracing._built._active_span_processor._span_processors
-    batch = next(p for p in processors if isinstance(p, BatchSpanProcessor))
-    return float(batch.span_exporter._timeout)
+@pytest.fixture
+def silent() -> Iterator[str]:
+    """A store that takes the connection and never answers: the kernel completes
+    the handshake for a listening socket, and nothing ever reads the request."""
+    with socket.socket() as server:
+        server.bind(("127.0.0.1", 0))
+        server.listen(8)
+        yield f"http://127.0.0.1:{server.getsockname()[1]}"
+
+
+def export_seconds(host: str, **options: Any) -> float:
+    """How long one export to `host` ran, timed by a flush with room to spare.
+
+    The bound is observed on the wire rather than read back from the exporter:
+    where OpenTelemetry keeps the timeout is private, and moved in 1.45."""
+    tracepad.init(host, KEY, **options)
+    with tracepad.span("slow"):
+        pass
+    started = time.monotonic()
+    tracepad.flush(10.0)
+    return time.monotonic() - started
+
+
+def cut_at(seconds: float, bound: float) -> bool:
+    """The export waited on the store (it did not fail fast) and gave up at the bound."""
+    return bound * 0.9 <= seconds < bound + 1.0
 
 
 def test_the_export_timeout_is_five_seconds_by_default() -> None:
-    tracepad.init(HOST, KEY)
-    assert exporter_timeout() == 5.0
+    assert resolve_timeout(None) == 5.0
 
 
-def test_the_environment_names_it(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("TRACEPAD_EXPORT_TIMEOUT", "2.5")
-    tracepad.init(HOST, KEY)
-    assert exporter_timeout() == 2.5
+def test_the_argument_bounds_an_export_to_a_store_that_never_answers(silent: str) -> None:
+    assert cut_at(export_seconds(silent, export_timeout=0.3), 0.3)
 
 
-def test_the_argument_wins_over_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("TRACEPAD_EXPORT_TIMEOUT", "2.5")
-    tracepad.init(HOST, KEY, export_timeout=1.5)
-    assert exporter_timeout() == 1.5
+def test_the_environment_names_it(silent: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TRACEPAD_EXPORT_TIMEOUT", "0.3")
+    assert cut_at(export_seconds(silent), 0.3)
 
 
-def test_opentelemetry_s_own_variable_works_when_neither_is_given(
-    monkeypatch: pytest.MonkeyPatch,
+def test_the_argument_wins_over_the_environment(
+    silent: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("OTEL_EXPORTER_OTLP_TRACES_TIMEOUT", "7")
-    tracepad.init(HOST, KEY)
-    assert exporter_timeout() == 7.0
+    monkeypatch.setenv("TRACEPAD_EXPORT_TIMEOUT", "30")
+    assert cut_at(export_seconds(silent, export_timeout=0.3), 0.3)
+
+
+@pytest.mark.parametrize("variable", ["OTEL_EXPORTER_OTLP_TRACES_TIMEOUT",
+                                      "OTEL_EXPORTER_OTLP_TIMEOUT"])
+def test_opentelemetry_s_own_variable_works_when_neither_is_given(
+    variable: str, silent: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(variable, "0.3")  # seconds in OpenTelemetry Python, not milliseconds
+    assert resolve_timeout(None) is None
+    assert cut_at(export_seconds(silent), 0.3)
 
 
 def test_a_variable_that_is_not_seconds_is_ignored_with_a_warning(
@@ -187,8 +216,8 @@ def test_a_variable_that_is_not_seconds_is_ignored_with_a_warning(
     monkeypatch.setenv("TRACEPAD_EXPORT_TIMEOUT", "5s")
     with caplog.at_level(logging.WARNING, logger="tracepad"):
         tracepad.init(HOST, KEY)
-    assert exporter_timeout() == 5.0
     assert "TRACEPAD_EXPORT_TIMEOUT='5s'" in caplog.text
+    assert resolve_timeout(None) == 5.0
 
 
 def test_it_is_ignored_with_a_warning_when_nothing_is_exported(
@@ -289,8 +318,8 @@ def test_an_argument_that_is_not_seconds_is_ignored_with_a_warning(
 ) -> None:
     with caplog.at_level(logging.WARNING, logger="tracepad"):
         tracepad.init(HOST, KEY, export_timeout=given)
-    assert exporter_timeout() == 5.0
     assert "export_timeout=" in caplog.text
+    assert resolve_timeout(given) == 5.0
 
 
 def test_metadata_values_keep_their_type_or_become_plain_strings(spans: testing.Capture) -> None:
