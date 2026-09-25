@@ -51,10 +51,10 @@ export class Prompt {
   /**
    * Substitute `{name}` placeholders, in the text or in every message.
    *
-   * A placeholder with no variable throws, the way Python's `str.format`
-   * does: a prompt sent with a hole in it is a worse failure than one not
-   * sent. Nothing else: a template language is a product, and what the
-   * store stores is plain text.
+   * A placeholder with no variable throws, as the Python package's
+   * `compile` raises: a prompt sent with a hole in it is a worse failure
+   * than one not sent. Nothing else: a template language is a product, and
+   * what the store stores is plain text.
    */
   compile(variables: Record<string, unknown> = {}): string | Message[] {
     if (this.messages !== undefined) {
@@ -67,9 +67,11 @@ export class Prompt {
   }
 }
 
-/** `str.format`'s reading, because the Python package compiles the same
- * stored text: `{name}` is a placeholder, and `{{` and `}}` are the braces
- * themselves — a prompt that shows a JSON example has to be able to say so. */
+/** The reading the Python package's `compile` has too, because both compile
+ * the same stored text (spec 017 #18): `{{` and `}}` are the braces
+ * themselves — a prompt that shows a JSON example has to be able to say so —
+ * and what stands between two braces is a name, looked up as written. A
+ * format spec or an attribute chain is a name no variable carries. */
 function fill(template: string, variables: Record<string, unknown>): string {
   return template.replace(/\{\{|\}\}|\{([^{}]*)\}/g, (match: string, name: string | undefined) => {
     if (name === undefined) return match[0]!;

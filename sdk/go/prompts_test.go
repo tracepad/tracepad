@@ -2,9 +2,12 @@ package tracepad
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -136,6 +139,70 @@ func TestCompileSubstitutesInTextAndInMessages(t *testing.T) {
 		compiled.Messages[0] != (Message{"system", "You are terse."}) ||
 		compiled.Messages[1] != (Message{"user", "{literal} why?"}) {
 		t.Errorf("compiled = %+v", compiled)
+	}
+}
+
+// The Python and Node packages run the same table: one stored text, compiled
+// with string variables, is one prompt in all three — except where a case
+// says what Go gives instead, because Go never fails a compile, leaves a
+// placeholder no variable names as it is, and keeps a message's role and
+// content only (spec 017 #18).
+func TestCompileReadsTheSharedTable(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("..", "..", "testdata", "prompts", "compile.json"))
+	if errors.Is(err, os.ErrNotExist) {
+		t.Skip("testdata/prompts/compile.json is not here: not a checkout of the repository")
+	} else if err != nil {
+		t.Fatal(err)
+	}
+	type expected struct {
+		Compiled json.RawMessage `json:"compiled"`
+	}
+	var table struct {
+		Cases []struct {
+			Name      string         `json:"name"`
+			Text      string         `json:"text"`
+			Messages  []Message      `json:"messages"`
+			Variables map[string]any `json:"variables"`
+			expected
+			Go *expected `json:"go"`
+		} `json:"cases"`
+	}
+	if err := json.Unmarshal(body, &table); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range table.Cases {
+		want := c.expected
+		if c.Go != nil {
+			want = *c.Go
+		}
+		if want.Compiled == nil {
+			t.Errorf("%s: raises in Python and Node, and has no `go` field saying what Go gives", c.Name)
+			continue
+		}
+		got := (&PromptVersion{Text: c.Text, Messages: c.Messages}).Compile(c.Variables)
+		if c.Messages != nil {
+			var messages []Message
+			if err := json.Unmarshal(want.Compiled, &messages); err != nil {
+				t.Fatalf("%s: %v", c.Name, err)
+			}
+			if len(got.Messages) != len(messages) {
+				t.Errorf("%s: compiled = %+v, want %+v", c.Name, got.Messages, messages)
+				continue
+			}
+			for i := range messages {
+				if got.Messages[i] != messages[i] {
+					t.Errorf("%s: message %d = %+v, want %+v", c.Name, i, got.Messages[i], messages[i])
+				}
+			}
+			continue
+		}
+		var text string
+		if err := json.Unmarshal(want.Compiled, &text); err != nil {
+			t.Fatalf("%s: %v", c.Name, err)
+		}
+		if got.Text != text {
+			t.Errorf("%s: compiled = %q, want %q", c.Name, got.Text, text)
+		}
 	}
 }
 

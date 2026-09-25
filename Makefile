@@ -135,8 +135,9 @@ sdk-test: ## Unit-test the Python package, and end-to-end against a real binary
 
 # The budget spec 017 #1 set, shared with the harness of spec 018; raised for
 # the streaming pass-through (spec 031 #22), for trace deletion (spec 036 #8),
-# for `tracepad.testing` (spec 040 #13) and for the cost and bounds of spec 042.
-SDK_BUDGET := 2000
+# for `tracepad.testing` (spec 040 #13), for the cost and bounds of spec 042
+# and for `compile`'s own substitution (spec 017 #18).
+SDK_BUDGET := 2040
 
 sdk-lines: ## Report the Python package's application lines against its budget
 	scripts/sdk-lines.sh $(SDK_BUDGET)

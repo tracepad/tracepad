@@ -1,5 +1,9 @@
 /** Prompts: fetched by label, cached for as long as the server says (spec 032 #7). */
 
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { describe, expect, test, vi } from 'vitest';
 
 import * as tracepad from '../src/index.js';
@@ -145,7 +149,7 @@ describe('compile', () => {
     ]);
   });
 
-  test('doubled braces are the braces themselves, as str.format reads them', async () => {
+  test('doubled braces are the braces themselves', async () => {
     serving(() => ({ body: { ...STORED, prompt: 'Reply as {{"answer": "{answer}"}} for {product}.' } }));
     const prompt = await tracepad.prompt('support-answer');
     expect(prompt.compile({ answer: 'yes', product: 'Tracepad' })).toBe('Reply as {"answer": "yes"} for Tracepad.');
@@ -155,5 +159,35 @@ describe('compile', () => {
     serving(() => ({ body: STORED }));
     const prompt = await tracepad.prompt('support-answer');
     expect(() => prompt.compile({ topic: 'refunds' })).toThrow('placeholder {product} has no variable');
+  });
+
+  // The Python and Go packages run the same table (sdk/python/tests/test_prompts.py,
+  // sdk/go/prompts_test.go): one stored text, compiled with string variables,
+  // must be one prompt, whichever package reads it.
+  const table = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'testdata', 'prompts', 'compile.json');
+  // Read from the repository: outside a checkout there is no testdata/.
+  const present = existsSync(table);
+  const { cases } = (present ? JSON.parse(readFileSync(table, 'utf8')) : { cases: [] }) as {
+    cases: {
+      name: string;
+      text?: string;
+      messages?: tracepad.Message[];
+      variables: Record<string, string>;
+      compiled?: unknown;
+      error?: string;
+    }[];
+  };
+
+  describe.skipIf(!present)('the shared table', () => {
+    test.each(cases)('reads what the Python package reads: $name', (c) => {
+      const prompt = new tracepad.Prompt(c.messages !== undefined
+        ? { name: 'p', version: 1, type: 'chat', messages: c.messages }
+        : { name: 'p', version: 1, type: 'text', text: c.text ?? '' });
+      if (c.error !== undefined) {
+        expect(() => prompt.compile(c.variables)).toThrow(c.error);
+      } else {
+        expect(prompt.compile(c.variables)).toEqual(c.compiled);
+      }
+    });
   });
 });

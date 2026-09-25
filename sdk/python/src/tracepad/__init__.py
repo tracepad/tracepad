@@ -21,7 +21,12 @@ from __future__ import annotations
 
 from ._config import VERSION as __version__
 from ._datasets import Dataset, Item, dataset
-from ._errors import TracepadConfigError, TracepadError, TracepadHTTPError
+from ._errors import (
+    TracepadConfigError,
+    TracepadError,
+    TracepadHTTPError,
+    TracepadPlaceholderError,
+)
 from ._harness import Attempt, Run, ScoreConfig, compare, item_id, score_configs
 from ._prompts import Prompt, prompt
 from ._scores import score
@@ -51,6 +56,7 @@ __all__ = [
     "TracepadConfigError",
     "TracepadError",
     "TracepadHTTPError",
+    "TracepadPlaceholderError",
     "__version__",
     "compare",
     "dataset",

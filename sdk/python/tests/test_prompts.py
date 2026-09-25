@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
+import json
 import logging
+import re
+from enum import Enum, IntEnum
+from pathlib import Path
 from typing import Any
 
 import pytest
 
 import tracepad
 from tracepad import _config, _prompts
-from tracepad._errors import TracepadError, TracepadHTTPError
+from tracepad._errors import TracepadError, TracepadHTTPError, TracepadPlaceholderError
 from tracepad._http import Response
+from tracepad._prompts import Prompt
 
 CHAT = {
     "name": "support-answer",
@@ -130,3 +135,85 @@ def test_compile_substitutes_in_text(monkeypatch: pytest.MonkeyPatch) -> None:
     prompt = tracepad.prompt("summarize")
     assert prompt.messages is None
     assert prompt.compile(document="the changelog") == "Summarise the changelog in one sentence."
+
+
+# The Node and Go packages run the same table (sdk/js/test/prompts.test.ts,
+# sdk/go/prompts_test.go): one stored text, compiled with string variables,
+# must be one prompt, whichever package reads it. Read from the repository,
+# so a test run from an unpacked sdist, which has no testdata/, skips it.
+TABLE = Path(__file__).parents[3] / "testdata" / "prompts" / "compile.json"
+CASES = json.loads(TABLE.read_text())["cases"] if TABLE.is_file() else []
+
+
+@pytest.mark.skipif(not TABLE.is_file(), reason="no testdata/: not a checkout of the repository")
+@pytest.mark.parametrize("case", CASES, ids=[case["name"] for case in CASES])
+def test_compile_reads_what_the_node_package_reads(case: dict[str, Any]) -> None:
+    prompt = Prompt(name="p", version=1, type="chat" if "messages" in case else "text",
+                    text=case.get("text"), messages=case.get("messages"))
+    if "error" in case:
+        with pytest.raises(TracepadError, match=re.escape(case["error"])):
+            prompt.compile(**case["variables"])
+    else:
+        assert prompt.compile(**case["variables"]) == case["compiled"]
+
+
+def test_a_placeholder_with_no_variable_is_a_key_error_too() -> None:
+    with pytest.raises(KeyError) as raised:
+        Prompt(name="p", version=1, type="text", text="{missing}").compile()
+    assert isinstance(raised.value, TracepadPlaceholderError)
+    assert str(raised.value) == "tracepad: prompt placeholder {missing} has no variable"
+
+
+class User:
+    """An object an application might well pass, with something behind it."""
+
+    email = "someone@example.com"
+
+    def __init__(self) -> None:
+        self.api_key = "sk-not-for-the-prompt"
+
+
+@pytest.mark.parametrize("text", [
+    "{user.api_key}",
+    "{user.__class__.__init__.__globals__[os].environ}",
+    "{user.email:>40}",
+    "{user!r}",
+])
+def test_compile_evaluates_nothing_in_the_stored_text(text: str) -> None:
+    with pytest.raises(TracepadError) as raised:
+        Prompt(name="p", version=1, type="text", text=text).compile(user=User())
+    assert "sk-not-for-the-prompt" not in str(raised.value)
+    assert "someone@example.com" not in str(raised.value)
+
+
+def test_compile_hands_a_variable_to_str_and_nothing_more() -> None:
+    compiled = Prompt(name="p", version=1, type="text", text="Hello {user}").compile(user=User())
+    assert compiled.startswith("Hello <")
+    assert "sk-not-for-the-prompt" not in compiled
+
+
+class Tone(str, Enum):
+    FRIENDLY = "friendly"
+
+
+class Size(IntEnum):
+    LARGE = 3
+
+
+@pytest.mark.parametrize("value", [Tone.FRIENDLY, Size.LARGE, 2.5, None, True])
+def test_a_value_renders_as_str_format_rendered_it(value: Any) -> None:
+    # Before 3.12 a mixin Enum formats as its value and prints as its name.
+    compiled = Prompt(name="p", version=1, type="text", text="[{v}]").compile(v=value)
+    assert compiled == f"[{value}]"
+
+
+def test_a_message_whose_content_is_not_a_string_is_passed_on_as_it_is() -> None:
+    parts = [{"type": "text", "text": "Hi {q}"}, {"type": "image_url", "image_url": {"url": "x"}}]
+    prompt = Prompt(name="p", version=1, type="chat", messages=[
+        {"role": "system", "content": "About {q}."},
+        {"role": "user", "content": parts},
+    ])
+    assert prompt.compile(q="refunds") == [
+        {"role": "system", "content": "About refunds."},
+        {"role": "user", "content": parts},
+    ]
