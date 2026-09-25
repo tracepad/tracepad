@@ -29,8 +29,19 @@ def fresh(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
         "TRACEPAD_RELEASE",
         "OTEL_SERVICE_NAME",
         "OTEL_RESOURCE_ATTRIBUTES",
+        # A developer's own bound would move every test that times an export.
+        "TRACEPAD_EXPORT_TIMEOUT",
+        "OTEL_EXPORTER_OTLP_TRACES_TIMEOUT",
+        "OTEL_EXPORTER_OTLP_TIMEOUT",
     ):
         monkeypatch.delenv(variable, raising=False)
+    # A proxy would stand between the suite and the hosts it watches or
+    # times; `NO_PROXY` also keeps urllib off the macOS system proxy.
+    for variable in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"):
+        monkeypatch.delenv(variable, raising=False)
+        monkeypatch.delenv(variable.lower(), raising=False)
+    monkeypatch.setenv("NO_PROXY", "*")
+    monkeypatch.setenv("no_proxy", "*")
     testing.reset()
     yield
     testing.reset()

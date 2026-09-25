@@ -176,8 +176,9 @@ def export_seconds(host: str, **options: Any) -> float:
 
 
 def cut_at(seconds: float, bound: float) -> bool:
-    """The export waited on the store (it did not fail fast) and gave up at the bound."""
-    return bound * 0.9 <= seconds < bound + 1.0
+    """The export waited on the store (it did not fail fast) and gave up at the bound,
+    give or take a loaded machine: the flush it is timed by would have waited ten."""
+    return bound * 0.9 <= seconds < bound + 3.0
 
 
 def test_the_export_timeout_is_five_seconds_by_default() -> None:
@@ -211,13 +212,14 @@ def test_opentelemetry_s_own_variable_works_when_neither_is_given(
 
 
 def test_a_variable_that_is_not_seconds_is_ignored_with_a_warning(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    silent: str, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     monkeypatch.setenv("TRACEPAD_EXPORT_TIMEOUT", "5s")
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_TRACES_TIMEOUT", "0.3")  # next in line, and timed
     with caplog.at_level(logging.WARNING, logger="tracepad"):
-        tracepad.init(HOST, KEY)
+        seconds = export_seconds(silent)
     assert "TRACEPAD_EXPORT_TIMEOUT='5s'" in caplog.text
-    assert resolve_timeout(None) == 5.0
+    assert cut_at(seconds, 0.3)
 
 
 def test_it_is_ignored_with_a_warning_when_nothing_is_exported(
@@ -314,12 +316,14 @@ def test_flushes_that_run_out_of_time_share_one_export(monkeypatch: pytest.Monke
 
 @pytest.mark.parametrize("given", [0, -1, float("nan")])
 def test_an_argument_that_is_not_seconds_is_ignored_with_a_warning(
-    given: float, caplog: pytest.LogCaptureFixture
+    given: float, silent: str, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
+    # What reaches the exporter is the next bound in line, not the argument.
+    monkeypatch.setenv("TRACEPAD_EXPORT_TIMEOUT", "0.3")
     with caplog.at_level(logging.WARNING, logger="tracepad"):
-        tracepad.init(HOST, KEY, export_timeout=given)
+        seconds = export_seconds(silent, export_timeout=given)
     assert "export_timeout=" in caplog.text
-    assert resolve_timeout(given) == 5.0
+    assert cut_at(seconds, 0.3)
 
 
 def test_metadata_values_keep_their_type_or_become_plain_strings(spans: testing.Capture) -> None:

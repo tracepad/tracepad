@@ -8,6 +8,7 @@ import subprocess
 import sys
 import time
 from typing import Any
+from urllib.parse import urlsplit
 
 import pytest
 from opentelemetry import trace as otel_api
@@ -15,6 +16,8 @@ from opentelemetry.sdk.trace import TracerProvider
 
 import tracepad
 from tracepad import _scores, _tracing, testing
+
+HOST, KEY = "http://tracepad.test:4318", "tp-sk-test"
 
 
 def test_a_capture_records_the_spans_in_order_and_the_scores() -> None:
@@ -80,13 +83,13 @@ def test_the_network_guard_sees_what_init_sends(
     # The test above is only as good as what `connections` sees: a transport
     # that went round the socket would leave it green whatever a capture did.
     monkeypatch.setenv("TRACEPAD_EXPORT_TIMEOUT", "0.2")  # given up before the test ends
-    tracepad.init("http://tracepad.test:4318", "tp-sk-test", export=export)
+    tracepad.init(HOST, KEY, export=export)
     with tracepad.span("sent"):
         if not export:
             tracepad.score("helpful", 1)  # the only thing sent, so it is the one seen
     tracepad.flush(2.0)
 
-    assert ("tracepad.test", 4318) in connections
+    assert (urlsplit(HOST).hostname, urlsplit(HOST).port) in connections
 
 
 def test_leaving_a_capture_leaves_a_process_that_never_initialised() -> None:
@@ -125,7 +128,7 @@ def test_a_tracer_first_used_under_init_still_records_in_later_captures() -> Non
     # What `trace.get_tracer()` hands out at import, before any provider: a
     # proxy that binds to the global provider at its first span, for good.
     tracer = otel_api._PROXY_TRACER_PROVIDER.get_tracer("app")
-    tracepad.init("http://tracepad.test:4318", "tp-sk-test", export=False)
+    tracepad.init(HOST, KEY, export=False)
     with tracer.start_as_current_span("under init") as span:
         assert span.is_recording()
     testing.reset()
@@ -150,7 +153,7 @@ def test_a_capture_holds_the_global_provider_as_a_process_does() -> None:
 
 
 def test_the_reset_shuts_down_the_provider_init_built(monkeypatch: pytest.MonkeyPatch) -> None:
-    tracepad.init("http://tracepad.test:4318", "tp-sk-test")  # exporting, batched
+    tracepad.init(HOST, KEY)  # exporting, batched
     built = _tracing._built
     shut: list[bool] = []
     monkeypatch.setattr(built, "shutdown", lambda: shut.append(True))
@@ -159,7 +162,7 @@ def test_the_reset_shuts_down_the_provider_init_built(monkeypatch: pytest.Monkey
 
 
 def test_the_reset_waits_for_that_shutdown_only_so_long(monkeypatch: pytest.MonkeyPatch) -> None:
-    tracepad.init("http://tracepad.test:4318", "tp-sk-test")
+    tracepad.init(HOST, KEY)
     monkeypatch.setattr(_tracing._built, "shutdown", lambda: time.sleep(2))  # a store away
     monkeypatch.setattr(testing, "_SHUTDOWN_WAIT", 0.05)
     started = time.monotonic()
@@ -205,7 +208,7 @@ def test_a_queue_the_reset_replaced_sends_nothing_after_it() -> None:
 
 
 def test_reset_alone_is_tracing_off() -> None:
-    tracepad.init("http://tracepad.test:4318", "tp-sk-test", export=False)
+    tracepad.init(HOST, KEY, export=False)
     testing.reset()
 
     with tracepad.span("off") as step:

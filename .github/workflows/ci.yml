@@ -157,10 +157,10 @@ jobs:
 
   # The Python package (spec 017 #12): its unit suite on both ends of the
   # supported range — 3.10 is the floor and the newest is where the OTel SDK
-  # moves first — and its end-to-end suite against a real binary. The oldest
-  # Python runs the oldest OpenTelemetry `pyproject.toml` admits and the newest
-  # runs whatever a fresh install resolves today (spec 042 #14). Its own job,
-  # because the gate needs neither Python nor a network.
+  # moves first — and its end-to-end suite against a real binary. OpenTelemetry
+  # on both ends too (spec 042 #14): the floor `pyproject.toml` admits, on the
+  # oldest Python, and whatever a fresh install resolves today, on both. Its own
+  # job, because the gate needs neither Python nor a network.
   sdk:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
@@ -170,6 +170,8 @@ jobs:
         include:
           - python-version: "3.10"
             otel: floor
+          - python-version: "3.10"
+            otel: latest
           - python-version: "3.13"
             otel: latest
     steps:
@@ -180,9 +182,18 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - run: pip install -e ./sdk/python pytest "ruff==0.16.6"
-      - if: matrix.otel == 'floor'
-        run: scripts/sdk-test.sh --floor-pins | xargs pip install
+      # One resolution, the floor's pins in it: installing the newest first and
+      # downgrading after would leave what only the newest needs behind.
+      - env:
+          OTEL_END: ${{ matrix.otel }}
+        run: |
+          install=(-e ./sdk/python pytest "ruff==0.16.6")
+          if [ "$OTEL_END" = floor ]; then
+            pins="$(scripts/sdk-test.sh --floor-pins)"
+            mapfile -t floor <<< "$pins"
+            install+=("${floor[@]}")
+          fi
+          pip install "${install[@]}"
       # One rule set for every Python file in the repository, named rather
       # than discovered: the scripts sit outside the package that configures it.
       - run: ruff check --config sdk/python/pyproject.toml sdk/python scripts
