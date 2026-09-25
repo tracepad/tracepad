@@ -28,6 +28,7 @@ func (h *harness) seed(t *testing.T, trace *model.Trace, observations ...*model.
 		ProjectID:    h.project.ID,
 		Traces:       []*model.Trace{trace},
 		Observations: observations,
+		IngestedAt:   h.arrival,
 	})
 	if err != nil {
 		t.Fatal(err)

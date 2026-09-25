@@ -127,6 +127,9 @@ func TestFacetsFromTheLiveTail(t *testing.T) {
 // asserts it, by emptying the raw tables first.
 func TestFacetsBehindTheWatermarkOutliveTheRawRows(t *testing.T) {
 	h := newHarness(t, nil, store.WriterOptions{})
+	// The traces arrive in the hour they ran, so the retention pass below
+	// takes them whatever the date the suite runs on.
+	h.arrival = statsHour * int64(time.Second)
 	h.seedFacetCorpus(t, statsHour)
 	h.rollTheCorpus(t, time.Unix(statsHour+3*3600, 0))
 
