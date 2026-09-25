@@ -104,7 +104,7 @@ def prompt(name: str, *, label: str | None = None, version: int | None = None) -
     if version is not None:
         params["version"] = version
     try:
-        answer = request(_config.current(), "GET", f"/api/v1/prompts/{quote(name, safe='')}",
+        answer = request(_config.current(), "GET", f"/api/v1/prompts/{quote(str(name), safe='')}",
                          params=params)
     except TracepadError as error:
         if cached is None or _is_client_error(error):

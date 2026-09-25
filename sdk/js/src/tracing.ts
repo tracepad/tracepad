@@ -260,7 +260,9 @@ function exporter(config: Config, millis: number | undefined): SpanProcessor {
   return new BatchSpanProcessor(
     new OTLPTraceExporter({
       url: `${config.host}/v1/traces`,
-      headers: { Authorization: `Bearer ${config.key}` },
+      // A function rather than a record, so the key is not a value on the
+      // exporter for `util.inspect` to print (spec 032 #17).
+      headers: async () => ({ Authorization: `Bearer ${config.key}` }),
       ...(timeoutMillis === undefined ? {} : { timeoutMillis }),
     }),
   );

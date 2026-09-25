@@ -235,7 +235,7 @@ def score_configs(configs: Any) -> None:
         body = {k: v for k, v in config.items() if k != "name"} if isinstance(config, dict) \
             else config.body()
         try:
-            request(_config.current(), "PUT", f"/api/v1/score-configs/{quote(name, safe='')}",
+            request(_config.current(), "PUT", f"/api/v1/score-configs/{quote(str(name), safe='')}",
                     body=body)
         except TracepadHTTPError as refused:
             # The name in the message, and the status and the body kept: a
@@ -271,7 +271,7 @@ def item_id(key: str) -> str:
 
 def compare(a: str, b: str) -> dict[str, Any]:
     """Two runs side by side, exactly as the server computes it (spec 014 #18)."""
-    path = f"/api/v1/runs/{quote(a, safe='')}/compare/{quote(b, safe='')}"
+    path = f"/api/v1/runs/{quote(str(a), safe='')}/compare/{quote(str(b), safe='')}"
     return dict(request(_config.current(), "GET", path).body or {})
 
 

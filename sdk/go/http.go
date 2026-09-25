@@ -122,18 +122,21 @@ func current() (config, error) {
 var httpClient = &http.Client{Timeout: 10 * time.Second, CheckRedirect: sameOrigin}
 
 // sameOrigin is the redirect rule of both clients (spec 033 #18): a hop to
-// another scheme, host or port goes without the key, as `fetch` has it and
-// the Python package does. net/http's own rule compares host names alone, so
-// it would carry the key to another port, to a subdomain, and from https down
-// to plain http on the same host.
+// another scheme, host or port goes without the key, as `fetch` has it.
+// net/http's own rule compares host names alone, so it would carry the key to
+// another port, to a subdomain, and from https down to plain http on the same
+// host. A write is never re-sent: net/http turns a POST into a GET on
+// 301–303, and a listing's 200 would read as the batch delivered.
 func sameOrigin(req *http.Request, via []*http.Request) error {
+	if method := via[0].Method; method != http.MethodGet && method != http.MethodHead {
+		return fmt.Errorf("a redirect to %s is not followed for %s; point the host at the store itself", req.URL, method)
+	}
 	if len(via) >= 10 {
 		return errors.New("stopped after 10 redirects")
 	}
-	for _, hop := range append(via[1:], req) {
-		if origin(hop.URL) != origin(via[0].URL) {
-			req.Header.Del("Authorization")
-		}
+	first := origin(via[0].URL)
+	if origin(req.URL) != first || slices.ContainsFunc(via[1:], func(hop *http.Request) bool { return origin(hop.URL) != first }) {
+		req.Header.Del("Authorization")
 	}
 	return nil
 }

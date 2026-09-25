@@ -538,10 +538,11 @@ the helper panics in the testing package.
 
 Both sentinels are for `errors.Is`, and `*HTTPError` for `errors.As`.
 
-A REST call follows a redirect with the key only within the store's origin —
-the same scheme, host and port; anywhere else it goes without `Authorization`,
-as `fetch` has it. The store itself never redirects, so `WithHost` or `TRACEPAD_HOST`
-should be the address it answers on.
+A REST call follows a redirect of a `GET` with the key only within the store's
+origin — the same scheme, host and port; anywhere else it goes without
+`Authorization`, as `fetch` has it. A write is never re-sent: its redirect is an
+error that names where it pointed. The store itself never redirects, so
+`WithHost` or `TRACEPAD_HOST` should be the address it answers on.
 
 Instrumentation that can break the function it observes is worse than none.
 

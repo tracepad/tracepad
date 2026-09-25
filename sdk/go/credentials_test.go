@@ -1,6 +1,7 @@
 package tracepad
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"net/http"
@@ -23,6 +24,7 @@ type witness struct {
 	mu    sync.Mutex
 	seen  []seen
 	hopTo string
+	code  int // of the redirect; 302 when unset
 }
 
 func serveWitness(t *testing.T) *witness {
@@ -31,10 +33,10 @@ func serveWitness(t *testing.T) *witness {
 	w.Server = httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 		w.mu.Lock()
 		w.seen = append(w.seen, seen{r.Method, r.RequestURI, r.Header.Get("Authorization")})
-		hopTo := w.hopTo
+		hopTo, code := w.hopTo, cmp.Or(w.code, http.StatusFound)
 		w.mu.Unlock()
 		if rest, ok := strings.CutPrefix(r.URL.Path, "/hop"); ok {
-			http.Redirect(rw, r, hopTo+rest, http.StatusFound)
+			http.Redirect(rw, r, hopTo+rest, code)
 			return
 		}
 		_, _ = rw.Write([]byte(`{"name":"n","version":1,"type":"text","prompt":"hi","labels":[]}`))
@@ -71,8 +73,8 @@ func TestARedirectToAnotherOriginGoesWithoutTheKey(t *testing.T) {
 	store.hopTo = elsewhere.URL
 	c := config{host: store.URL, key: secretKey}
 
-	for _, method := range []string{"GET", "POST"} {
-		if _, err := request(context.Background(), c, method, "/hop/api/v1/prompts/n", nil, nil); err != nil {
+	for range 2 {
+		if _, err := request(context.Background(), c, "GET", "/hop/api/v1/prompts/n", nil, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -89,6 +91,41 @@ func TestARedirectToAnotherOriginGoesWithoutTheKey(t *testing.T) {
 	for _, r := range got {
 		if r.authorization != "" || r.target != "/api/v1/prompts/n" {
 			t.Errorf("elsewhere saw %+v", r)
+		}
+	}
+}
+
+func TestTheKeyDoesNotComeBackWhenTheChainDoes(t *testing.T) {
+	store, elsewhere := serveWitness(t), serveWitness(t)
+	store.hopTo, elsewhere.hopTo = elsewhere.URL, store.URL
+
+	if _, err := request(context.Background(), config{host: store.URL, key: secretKey}, "GET", "/hop/hop/api/v1/prompts/n", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	want := []seen{{"GET", "/hop/hop/api/v1/prompts/n", "Bearer " + secretKey}, {"GET", "/api/v1/prompts/n", ""}}
+	if got := store.requests(); !slices.Equal(got, want) {
+		t.Errorf("the store saw %v", got)
+	}
+	if got := elsewhere.requests(); !slices.Equal(got, []seen{{"GET", "/hop/api/v1/prompts/n", ""}}) {
+		t.Errorf("elsewhere saw %v", got)
+	}
+}
+
+// net/http turns a POST into a GET on a 302 and re-sends it on a 307; a
+// write is re-sent on neither.
+func TestAWriteIsNotReSentWhereARedirectPoints(t *testing.T) {
+	for _, code := range []int{http.StatusFound, http.StatusTemporaryRedirect} {
+		store, target := serveWitness(t), serveWitness(t)
+		store.hopTo, store.code = target.URL, code
+
+		_, err := request(context.Background(), config{host: store.URL, key: secretKey}, "POST", "/hop/api/v1/scores", []any{}, nil)
+
+		if err == nil || !strings.Contains(err.Error(), "a redirect to "+target.URL+"/api/v1/scores is not followed for POST") {
+			t.Errorf("%d: %v", code, err)
+		}
+		if got := target.requests(); len(got) != 0 {
+			t.Errorf("%d: the target saw %v", code, got)
 		}
 	}
 }

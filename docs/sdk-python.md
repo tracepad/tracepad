@@ -552,10 +552,9 @@ processes, so they do not share one.
 | `score` with no target outside every span while tracing — initialised, or through a provider of the application's own | `ValueError` — a programming error, visible at the call site |
 | `score` with no target where nothing traces (no `init`, no provider of its own, no recording span) | Nothing; a debug line — tracing is off |
 
-A REST call follows a redirect with the key only within the store's origin —
-the same scheme, host and port; anywhere else it goes without `Authorization`,
-as `fetch` has it. The store itself never redirects, so `TRACEPAD_HOST` should
-be the address it answers on.
+A REST call that meets a redirect sends the next hop without the key, wherever
+it points, so a write redirected to a `GET` is answered `401`. The store itself
+never redirects, so `TRACEPAD_HOST` should be the address it answers on.
 
 Instrumentation that can break the function it observes is worse than none.
 Everything the package logs goes to the `tracepad` logger, which has no handler

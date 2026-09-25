@@ -53,7 +53,7 @@ class Dataset:
 
     def __init__(self, name: str) -> None:
         self.name = name
-        self._path = f"/api/v1/datasets/{quote(name, safe='')}"
+        self._path = f"/api/v1/datasets/{quote(str(name), safe='')}"
 
     def create(self, description: str | None = None,
                metadata: Any = None) -> dict[str, Any]:

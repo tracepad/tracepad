@@ -38,16 +38,18 @@ describe('the key', () => {
   afterEach(async () => {
     await Promise.all(servers.splice(0).map((s) => new Promise((done) => s.close(done))));
   });
-  async function store(hopTo = ''): Promise<{ url: string; seen: Seen[] }> {
+  async function store(hopTo = '', code = 302): Promise<{ url: string; seen: Seen[]; hopTo: string }> {
     const seen: Seen[] = [];
+    const answer = { url: '', seen, hopTo };
     const server = createServer((req, res) => {
       seen.push({ path: req.url!, authorization: req.headers.authorization });
-      if (req.url!.startsWith('/hop/')) res.writeHead(302, { Location: hopTo + req.url!.slice(4) }).end();
+      if (req.url!.startsWith('/hop/')) res.writeHead(code, { Location: answer.hopTo + req.url!.slice(4) }).end();
       else res.writeHead(200, { 'Content-Type': 'application/json' }).end('{}');
     });
     servers.push(server);
     await new Promise<void>((listening) => server.listen(0, '127.0.0.1', listening));
-    return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, seen };
+    answer.url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    return answer;
   }
 
   test('arrives nowhere a redirect to another origin points: fetch drops it, and this pins that', async () => {
@@ -58,6 +60,32 @@ describe('the key', () => {
 
     expect(origin.seen).toEqual([{ path: '/hop/api/v1/prompts/n', authorization: `Bearer ${KEY}` }]);
     expect(elsewhere.seen).toEqual([{ path: '/api/v1/prompts/n', authorization: undefined }]);
+  });
+
+  test('does not come back when the chain does', async () => {
+    const elsewhere = await store();
+    const origin = await store(elsewhere.url);
+    elsewhere.hopTo = origin.url;
+
+    await request({ host: origin.url, key: KEY }, 'GET', '/hop/hop/api/v1/prompts/n');
+
+    expect(elsewhere.seen).toEqual([{ path: '/hop/api/v1/prompts/n', authorization: undefined }]);
+    expect(origin.seen).toEqual([
+      { path: '/hop/hop/api/v1/prompts/n', authorization: `Bearer ${KEY}` },
+      { path: '/api/v1/prompts/n', authorization: undefined },
+    ]);
+  });
+
+  test.each([302, 307])('a write is not re-sent where a %i points', async (code) => {
+    const target = await store();
+    const origin = await store(target.url, code);
+
+    await expect(request({ host: origin.url, key: KEY }, 'POST', '/hop/api/v1/scores', { body: [] })).rejects.toMatchObject({
+      name: 'TracepadHTTPError',
+      status: code,
+      message: expect.stringContaining(`a redirect to ${target.url}/api/v1/scores is not followed for POST`),
+    });
+    expect(target.seen).toEqual([]);
   });
 });
 

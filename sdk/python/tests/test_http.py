@@ -12,7 +12,7 @@ from typing import Any, ClassVar
 import pytest
 
 import tracepad
-from tracepad import _config, _http
+from tracepad import _config
 from tracepad._errors import TracepadError, TracepadHTTPError
 from tracepad._http import request
 
@@ -41,7 +41,7 @@ def sent(monkeypatch: pytest.MonkeyPatch, body: Any) -> bytes:
         calls.append(call)
         return Answer()
 
-    monkeypatch.setattr(_http, "_open", urlopen)
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
     request(_config.Config(host="http://x", key="tp-sk-x"), "POST", "/api/v1/x", body=body)
     assert len(calls) == 1
     data = calls[0].data
@@ -131,13 +131,32 @@ def test_a_redirect_to_another_origin_goes_without_the_key(
     assert elsewhere.seen == [("GET", "/api/v1/prompts/n", None), ("GET", "/api/v1/scores", None)]
 
 
-def test_a_redirect_within_the_origin_keeps_the_key(servers: tuple[Store, Store]) -> None:
+def test_a_redirect_within_the_origin_goes_without_the_key_too(
+    servers: tuple[Store, Store],
+) -> None:
     store, _ = servers
     store.hop_to = store.url
+    config = _config.Config(host=store.url, key=KEY)
 
-    request(_config.Config(host=store.url, key=KEY), "GET", "/hop/api/v1/prompts/n")
+    request(config, "GET", "/hop/api/v1/prompts/n")
+    # The POST a 302 turned into a GET reaches no listing as the key: the
+    # store answers it `401`, not the page a queue would read as delivered.
+    request(config, "POST", "/hop/api/v1/scores", body=[])
 
-    assert store.seen[-1] == ("GET", "/api/v1/prompts/n", f"Bearer {KEY}")
+    assert store.seen[1::2] == [("GET", "/api/v1/prompts/n", None), ("GET", "/api/v1/scores", None)]
+
+
+def test_the_key_does_not_come_back_when_the_chain_does(
+    servers: tuple[Store, Store],
+) -> None:
+    store, elsewhere = servers
+    store.hop_to, elsewhere.hop_to = elsewhere.url, store.url
+
+    request(_config.Config(host=store.url, key=KEY), "GET", "/hop/hop/api/v1/prompts/n")
+
+    assert elsewhere.seen == [("GET", "/hop/api/v1/prompts/n", None)]
+    assert store.seen == [("GET", "/hop/hop/api/v1/prompts/n", f"Bearer {KEY}"),
+                          ("GET", "/api/v1/prompts/n", None)]
 
 
 def test_the_key_is_not_in_the_configs_repr() -> None:
@@ -173,6 +192,18 @@ def test_a_name_is_one_segment_whatever_it_holds(
         ("PUT", f"/api/v1/score-configs/{segment}"),
         ("GET", f"/api/v1/runs/{segment}/compare/{segment}"),
     ]
+
+
+def test_a_name_that_is_not_a_string_is_sent_as_its_text(servers: tuple[Store, Store]) -> None:
+    store, _ = servers
+    _config.adopt(_config.Config(host=store.url, key=KEY))
+
+    tracepad.dataset(2024).delete("")  # type: ignore[arg-type]
+    tracepad.score_configs([{"name": 5, "data_type": "boolean"}])
+    tracepad.compare(1, 2)  # type: ignore[arg-type]
+
+    assert [path for _, path, _ in store.seen] == [
+        "/api/v1/datasets/2024?confirm=", "/api/v1/score-configs/5", "/api/v1/runs/1/compare/2"]
 
 
 @pytest.mark.parametrize("name", ["", ".", ".."])
