@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/tracepad/tracepad/internal/mapping"
+	"github.com/tracepad/tracepad/internal/termsafe"
 )
 
 // Where an export goes (spec 019 #5): an OTLP receiver, which is the promise's
@@ -126,7 +127,7 @@ func (s *receiver) send(ctx context.Context, row rawBatchRow, body []byte) (stri
 		}
 		fmt.Fprintf(s.run.opt.Stderr,
 			"tracepad: batch %d: %s; retrying in %s (attempt %d of %d)\n",
-			row.ID, err, wait, attempt+1, s.attempts)
+			row.ID, termsafe.String(err.Error()), wait, attempt+1, s.attempts)
 		select {
 		case <-ctx.Done():
 			return "", ctx.Err()

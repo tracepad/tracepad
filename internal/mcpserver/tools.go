@@ -10,6 +10,8 @@ import (
 
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/tracepad/tracepad/internal/termsafe"
 )
 
 // The tools (#17). Each maps 1:1 onto one endpoint.
@@ -995,7 +997,7 @@ func summarizeTraceList(body json.RawMessage) string {
 		}
 	}
 	summary := fmt.Sprintf("%d traces, newest %s (%s); %d with errors",
-		len(parsed.Traces), parsed.Traces[0].ID, parsed.Traces[0].Timestamp, failed)
+		len(parsed.Traces), termsafe.String(parsed.Traces[0].ID), termsafe.String(parsed.Traces[0].Timestamp), failed)
 	if parsed.NextCursor != nil {
 		summary += "; more pages available"
 	}
@@ -1024,7 +1026,7 @@ func summarizeSearch(body json.RawMessage) string {
 	summary := fmt.Sprintf("%d traces match", len(parsed.Traces))
 	if match := parsed.Traces[0].Match; match != nil {
 		summary += fmt.Sprintf("; the newest is %s, matched in its %s: %q",
-			parsed.Traces[0].ID, match.Field, match.Snippet)
+			termsafe.String(parsed.Traces[0].ID), termsafe.String(match.Field), match.Snippet)
 	}
 	if parsed.NextCursor != nil {
 		summary += "; more pages available"
@@ -1044,7 +1046,7 @@ func summarizeTrace(body json.RawMessage) string {
 		return "one trace"
 	}
 	return fmt.Sprintf("Trace %s (%s) in %s: %d observations, %d failed.",
-		parsed.ID, orUnnamed(parsed.Name), orUnnamed(parsed.Environment),
+		termsafe.String(parsed.ID), termsafe.String(orUnnamed(parsed.Name)), termsafe.String(orUnnamed(parsed.Environment)),
 		parsed.ObservationCount, parsed.ErrorCount)
 }
 
@@ -1058,7 +1060,7 @@ func summarizeIO(body json.RawMessage) string {
 		return "one observation's payloads"
 	}
 	return fmt.Sprintf("Observation %s: %d bytes of input, %d bytes of output, whole.",
-		parsed.ObservationID, len(parsed.Input), len(parsed.Output))
+		termsafe.String(parsed.ObservationID), len(parsed.Input), len(parsed.Output))
 }
 
 func summarizeSessionList(body json.RawMessage) string {
@@ -1085,7 +1087,7 @@ func summarizeSessionList(body json.RawMessage) string {
 		}
 	}
 	summary := fmt.Sprintf("%d sessions over %d traces, most recent %s (%s); %d with errors",
-		len(parsed.Sessions), traces, parsed.Sessions[0].ID, parsed.Sessions[0].LastSeen, failing)
+		len(parsed.Sessions), traces, termsafe.String(parsed.Sessions[0].ID), termsafe.String(parsed.Sessions[0].LastSeen), failing)
 	if parsed.NextCursor != nil {
 		summary += "; more pages available"
 	}
@@ -1102,7 +1104,7 @@ func summarizeSession(body json.RawMessage) string {
 		return "one session"
 	}
 	return fmt.Sprintf("Session %s: %d traces, %d with errors.",
-		parsed.ID, parsed.TraceCount, parsed.ErrorCount)
+		termsafe.String(parsed.ID), parsed.TraceCount, parsed.ErrorCount)
 }
 
 func summarizeUserList(body json.RawMessage) string {
@@ -1124,7 +1126,7 @@ func summarizeUserList(body json.RawMessage) string {
 		traces += user.Traces
 	}
 	summary := fmt.Sprintf("%d users over %d traces, first %s (%d traces)",
-		len(parsed.Users), traces, parsed.Users[0].UserID, parsed.Users[0].Traces)
+		len(parsed.Users), traces, termsafe.String(parsed.Users[0].UserID), parsed.Users[0].Traces)
 	if parsed.NextCursor != nil {
 		summary += "; more pages available"
 	}
@@ -1143,7 +1145,7 @@ func summarizeUser(body json.RawMessage) string {
 		return "one user"
 	}
 	return fmt.Sprintf("User %s: %d traces over %d sessions, %d with errors, last seen %s.",
-		parsed.UserID, parsed.Traces, parsed.Sessions, parsed.ErrorCount, orUnnamed(parsed.LastSeen))
+		termsafe.String(parsed.UserID), parsed.Traces, parsed.Sessions, parsed.ErrorCount, termsafe.String(orUnnamed(parsed.LastSeen)))
 }
 
 func summarizePrompt(body json.RawMessage) string {
@@ -1156,9 +1158,9 @@ func summarizePrompt(body json.RawMessage) string {
 	if err := json.Unmarshal(body, &parsed); err != nil {
 		return "one prompt version"
 	}
-	summary := fmt.Sprintf("Prompt %s version %d (%s)", parsed.Name, parsed.Version, parsed.Type)
+	summary := fmt.Sprintf("Prompt %s version %d (%s)", termsafe.String(parsed.Name), parsed.Version, termsafe.String(parsed.Type))
 	if len(parsed.Labels) > 0 {
-		summary += ", labelled " + strings.Join(parsed.Labels, ", ")
+		summary += ", labelled " + strings.Join(termsafe.All(parsed.Labels), ", ")
 	}
 	return summary + "."
 }
@@ -1194,7 +1196,7 @@ func summarizeStats(body json.RawMessage) string {
 		total += bucket.Count
 	}
 	return fmt.Sprintf("%d buckets by %s, %d %ss in total.",
-		len(parsed.Buckets), parsed.GroupBy, total, parsed.Unit)
+		len(parsed.Buckets), termsafe.String(parsed.GroupBy), total, termsafe.String(parsed.Unit))
 }
 
 func summarizeScoreTrends(body json.RawMessage) string {
@@ -1218,13 +1220,13 @@ func summarizeScoreTrends(body json.RawMessage) string {
 	total := 0
 	names := make([]string, 0, len(parsed.Series))
 	for _, series := range parsed.Series {
-		names = append(names, series.Name)
+		names = append(names, termsafe.String(series.Name))
 		for _, bucket := range series.Buckets {
 			total += bucket.Count
 		}
 	}
 	summary := fmt.Sprintf("%d series by %s (%s), %d scores in total: %s",
-		len(parsed.Series), parsed.GroupBy, parsed.Targets, total, strings.Join(names, ", "))
+		len(parsed.Series), termsafe.String(parsed.GroupBy), termsafe.String(parsed.Targets), total, strings.Join(names, ", "))
 	// A model reading this has to know the list is not the whole list.
 	if parsed.Omitted > 0 {
 		summary += fmt.Sprintf("; %d rarer names not shown", parsed.Omitted)

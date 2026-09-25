@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/tracepad/tracepad/internal/client"
+	"github.com/tracepad/tracepad/internal/termsafe"
 )
 
 // Exit codes (#12). A script has to be able to tell "no such trace" from "you
@@ -349,7 +350,8 @@ func usageErrorf(format string, args ...any) error {
 
 // fail renders an error and returns the exit code it maps to.
 func (r *run) fail(err error) int {
-	fmt.Fprintf(r.opt.Stderr, "tracepad: %s\n", err)
+	// An error can quote the server, and the server can quote a trace.
+	fmt.Fprintf(r.opt.Stderr, "tracepad: %s\n", termsafe.Text(err.Error()))
 	var usage *usageError
 	if errors.As(err, &usage) {
 		fmt.Fprint(r.opt.Stderr, "\n", Usage)
@@ -447,7 +449,7 @@ func (r *run) noteServerVersion(version string) {
 	r.warnedSkew = true
 	fmt.Fprintf(r.opt.Stderr,
 		"tracepad: warning: this is tracepad %s talking to a server running %s\n",
-		r.opt.Version, version)
+		r.opt.Version, termsafe.String(version))
 }
 
 // wantJSON reports whether this invocation prints the API's bytes rather than

@@ -57,7 +57,11 @@ build stamps `dev`, which matches anything.
 
 A `tracepad` directory the command did not install — one without the
 `.version` file it writes — is refused rather than overwritten, with the
-directory named; `--force` replaces it.
+directory named; `--force` replaces it. A `tracepad` that is a symlink — a copy
+kept in a dotfiles repository — is updated where it points, but only if what it
+points at is a skill this command installed: a link to any other directory is
+refused even with `--force`, because replacing it would delete a directory
+you never named. Remove the link and install again.
 
 ### From the Docker image
 

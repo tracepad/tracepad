@@ -286,9 +286,13 @@ const abandonedAfter = time.Hour
 // rename, so a failure half-way leaves the old skill where it was rather than
 // a mix of two versions (#6). A target that is a symlink — a copy kept in a
 // dotfiles repository — is followed, so the copy the user maintains is the
-// one updated, not replaced by a directory of its own.
+// one updated, not replaced by a directory of its own. It is followed only
+// into a skill this command installed, though, and `--force` does not change
+// that (#16): a link is a path to anywhere, and replacing whatever it names
+// would delete a directory the user never pointed the command at.
 func install(files fs.FS, target, version string, force bool) (outcome, error) {
 	done := outcome{target: target}
+	linked := false
 	info, err := os.Lstat(target)
 	switch {
 	case err == nil && info.Mode()&fs.ModeSymlink != 0:
@@ -299,7 +303,7 @@ func install(files fs.FS, target, version string, force bool) (outcome, error) {
 		if info, err = os.Stat(resolved); err != nil {
 			return done, err
 		}
-		done.target, done.replaced = resolved, true
+		done.target, done.replaced, linked = resolved, true, true
 	case err == nil:
 		done.replaced = true
 	case !errors.Is(err, fs.ErrNotExist):
@@ -317,13 +321,18 @@ func install(files fs.FS, target, version string, force bool) (outcome, error) {
 			return done, fmt.Errorf("cannot read %s: %w", filepath.Join(done.target, marker), err)
 		}
 	}
+	if done.replaced && !done.marked && linked {
+		return done, fmt.Errorf("%s is a symlink to %s, which is not a skill this command installed "+
+			"(it has no %s); an install follows a link only into its own skill, even with --force: "+
+			"remove the link and install again", target, done.target, marker)
+	}
 	if done.replaced && !done.marked && !force {
 		return done, fmt.Errorf("%s exists and is not a skill this command installed "+
 			"(it has no %s); pass --force to replace it", done.target, marker)
 	}
 
 	work := filepath.Join(filepath.Dir(done.target), holding)
-	if err := os.MkdirAll(work, 0o755); err != nil {
+	if err := holdingDir(work); err != nil {
 		return done, err
 	}
 	// Deferred first so it runs last: the holding directory goes when an
@@ -361,6 +370,30 @@ func install(files fs.FS, target, version string, force bool) (outcome, error) {
 		done.leftover = old
 	}
 	return done, nil
+}
+
+// holdingDir makes the holding directory, or checks that the one already
+// there is a directory rather than a link to one: an install deletes what it
+// finds in it, and through a link that would be the contents of wherever the
+// link points (#16).
+func holdingDir(work string) error {
+	if err := os.MkdirAll(filepath.Dir(work), 0o755); err != nil {
+		return err
+	}
+	err := os.Mkdir(work, 0o755)
+	if err == nil || !errors.Is(err, fs.ErrExist) {
+		return err
+	}
+	info, err := os.Lstat(work)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		// Lstat does not follow: a link to a directory lands here too.
+		return fmt.Errorf("%s is where an install stages its copy, and it is not a directory "+
+			"(a symlink, or a file); remove it and install again", work)
+	}
+	return nil
 }
 
 // sweep removes the staging copies an install killed half-way left behind —

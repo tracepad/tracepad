@@ -345,6 +345,78 @@ func TestASymlinkedTargetIsFollowed(t *testing.T) {
 	}
 }
 
+// TestALinkIsNotFollowedIntoSomebodyElsesDirectory: a link at the target that
+// points at a directory this command did not install is refused with --force
+// as well as without it, and the directory it points at keeps every file
+// (#16). The link could come from a cloned repository's `.claude/skills/`.
+func TestALinkIsNotFollowedIntoSomebodyElsesDirectory(t *testing.T) {
+	victim, dir := t.TempDir(), t.TempDir()
+	precious := filepath.Join(victim, "precious.txt")
+	if err := os.WriteFile(precious, []byte("keep me"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, Name)
+	if err := os.Symlink(victim, link); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"install", "--dir", dir},
+		{"install", "--dir", dir, "--force"},
+	} {
+		got := runSkills(t, "", "", "0.4.0", args...)
+		if got.code != exitFailure {
+			t.Fatalf("%v: exit %d, stdout %q, want a refusal", args, got.code, got.stdout)
+		}
+		// Both paths named, and no advice to force it: forcing is what
+		// does not work here.
+		if !strings.Contains(got.stderr, link) || !strings.Contains(got.stderr, "is a symlink to") ||
+			strings.Contains(got.stderr, "pass --force") {
+			t.Errorf("%v: stderr %q", args, got.stderr)
+		}
+	}
+	if kept, err := os.ReadFile(precious); err != nil || string(kept) != "keep me" {
+		t.Errorf("the linked directory lost its file: %q, %v", kept, err)
+	}
+	if _, err := os.Stat(filepath.Join(victim, "SKILL.md")); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the skill was written into the linked directory: %v", err)
+	}
+	if info, err := os.Lstat(link); err != nil || info.Mode()&fs.ModeSymlink == 0 {
+		t.Errorf("the link was replaced: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(filepath.Dir(victim), holding)); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("a holding directory was made beside the linked directory: %v", err)
+	}
+}
+
+// TestAHoldingDirectoryThatIsALinkIsRefused: an install sweeps its holding
+// directory, and a link planted in its place would point that sweep at
+// somebody else's files (#16).
+func TestAHoldingDirectoryThatIsALinkIsRefused(t *testing.T) {
+	victim, dir := t.TempDir(), t.TempDir()
+	// Old enough that a sweep would take it for a killed install's copy.
+	stale := filepath.Join(victim, "stale")
+	if err := os.Mkdir(stale, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-2 * abandonedAfter)
+	if err := os.Chtimes(stale, old, old); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(victim, filepath.Join(dir, holding)); err != nil {
+		t.Fatal(err)
+	}
+	got := runSkills(t, "", "", "0.4.0", "install", "--dir", dir, "--force")
+	if got.code != exitFailure || !strings.Contains(got.stderr, "not a directory") {
+		t.Fatalf("exit %d, stderr %q, want a refusal", got.code, got.stderr)
+	}
+	if _, err := os.Stat(stale); err != nil {
+		t.Errorf("the sweep went through the link: %v", err)
+	}
+	if entries, _ := os.ReadDir(victim); len(entries) != 1 {
+		t.Errorf("the install wrote through the link: %v", entries)
+	}
+}
+
 // TestTheMarkerIsReadHonestly: an empty marker is still a marker, and one that
 // cannot be read is an error saying so, not "somebody else's directory".
 func TestTheMarkerIsReadHonestly(t *testing.T) {
