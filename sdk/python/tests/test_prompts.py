@@ -12,7 +12,7 @@ import pytest
 
 import tracepad
 from tracepad import _config, _prompts
-from tracepad._errors import TracepadError, TracepadHTTPError
+from tracepad._errors import TracepadError, TracepadHTTPError, TracepadPlaceholderError
 from tracepad._http import Response
 from tracepad._prompts import Prompt
 
@@ -136,22 +136,36 @@ def test_compile_substitutes_in_text(monkeypatch: pytest.MonkeyPatch) -> None:
     assert prompt.compile(document="the changelog") == "Summarise the changelog in one sentence."
 
 
-# The Node package runs the same table (sdk/js/test/prompts.test.ts): one
-# stored text must compile to one prompt, whichever package reads it.
-CASES = json.loads(
-    (Path(__file__).parents[3] / "testdata" / "prompts" / "compile.json").read_text()
-)["cases"]
+# The Node and Go packages run the same table (sdk/js/test/prompts.test.ts,
+# sdk/go/prompts_test.go): one stored text, compiled with string variables,
+# must be one prompt, whichever package reads it. Read from the repository,
+# so a test run from an unpacked sdist, which has no testdata/, skips it.
+TABLE = Path(__file__).parents[3] / "testdata" / "prompts" / "compile.json"
 
 
-@pytest.mark.parametrize("case", CASES, ids=[case["name"] for case in CASES])
-def test_compile_reads_what_the_node_package_reads(case: dict[str, Any]) -> None:
-    prompt = Prompt(name="p", version=1, type="chat" if "messages" in case else "text",
-                    text=case.get("text"), messages=case.get("messages"))
-    if "error" in case:
-        with pytest.raises(TracepadError, match=re.escape(case["error"])):
-            prompt.compile(**case["variables"])
-    else:
-        assert prompt.compile(**case["variables"]) == case["compiled"]
+@pytest.fixture
+def cases() -> list[dict[str, Any]]:
+    if not TABLE.is_file():
+        pytest.skip(f"{TABLE} is not here: not a checkout of the repository")
+    return json.loads(TABLE.read_text())["cases"]
+
+
+def test_compile_reads_what_the_node_package_reads(cases: list[dict[str, Any]]) -> None:
+    for case in cases:
+        prompt = Prompt(name="p", version=1, type="chat" if "messages" in case else "text",
+                        text=case.get("text"), messages=case.get("messages"))
+        if "error" in case:
+            with pytest.raises(TracepadError, match=re.escape(case["error"])):
+                prompt.compile(**case["variables"])
+        else:
+            assert prompt.compile(**case["variables"]) == case["compiled"], case["name"]
+
+
+def test_a_placeholder_with_no_variable_is_a_key_error_too() -> None:
+    with pytest.raises(KeyError) as raised:
+        Prompt(name="p", version=1, type="text", text="{missing}").compile()
+    assert isinstance(raised.value, TracepadPlaceholderError)
+    assert str(raised.value) == "tracepad: prompt placeholder {missing} has no variable"
 
 
 class User:

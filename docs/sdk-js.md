@@ -390,8 +390,9 @@ bug at the call site. `Prompt` carries `name`, `version`, `type`, `text` or
 `messages`, `labels` and `config`. `compile(variables)` substitutes
 `{placeholder}`s — in the text, or in every message's content — and throws
 on a placeholder with no variable; `{{` and `}}` are the braces themselves,
-the way Python's `str.format` reads them, so a prompt can show a JSON
-example. Nothing else: a template language is a product, and what the store
+so a prompt can show a JSON example. The Python package reads the same text
+the same way, so a prompt compiled with string variables is one prompt in
+both. Nothing else: a template language is a product, and what the store
 stores is plain text.
 
 Passing the prompt to `generation` records which prompt ran, so the trace can

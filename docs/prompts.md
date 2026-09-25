@@ -236,6 +236,10 @@ Fetch by label at start-up (or per request, behind the 60-second cache), read
 replacing `{name}` and nothing else:
 
 ```python
+import re
+
+import httpx
+
 def fill(template, variables):
     def one(match):
         if match.group(1) is None:

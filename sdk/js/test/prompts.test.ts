@@ -149,7 +149,7 @@ describe('compile', () => {
     ]);
   });
 
-  test('doubled braces are the braces themselves, as str.format reads them', async () => {
+  test('doubled braces are the braces themselves', async () => {
     serving(() => ({ body: { ...STORED, prompt: 'Reply as {{"answer": "{answer}"}} for {product}.' } }));
     const prompt = await tracepad.prompt('support-answer');
     expect(prompt.compile({ answer: 'yes', product: 'Tracepad' })).toBe('Reply as {"answer": "yes"} for Tracepad.');
@@ -161,15 +161,16 @@ describe('compile', () => {
     expect(() => prompt.compile({ topic: 'refunds' })).toThrow('placeholder {product} has no variable');
   });
 
-  // The Python package runs the same table (sdk/python/tests/test_prompts.py):
-  // one stored text must compile to one prompt, whichever package reads it.
+  // The Python and Go packages run the same table (sdk/python/tests/test_prompts.py,
+  // sdk/go/prompts_test.go): one stored text, compiled with string variables,
+  // must be one prompt, whichever package reads it.
   const table = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'testdata', 'prompts', 'compile.json');
   const { cases } = JSON.parse(readFileSync(table, 'utf8')) as {
     cases: {
       name: string;
       text?: string;
       messages?: tracepad.Message[];
-      variables: Record<string, unknown>;
+      variables: Record<string, string>;
       compiled?: unknown;
       error?: string;
     }[];

@@ -331,14 +331,17 @@ with tracepad.generation("chat", prompt=support, model=support.config["model"]):
 
 `Prompt` carries `name`, `version`, `type`, `text` or `messages`, `labels` and
 `config`. `compile(**variables)` substitutes `{placeholder}`s — in the text,
-or in every message's content — and raises `TracepadError` on a placeholder
-with no variable; `{{` and `}}` are the braces themselves, so a prompt can show
-a JSON example. It reads the braces the way `str.format` does and nothing
-more: `{q:>12}`, `{user.email}`, `{items[0]}` and `{q!r}` are not evaluated,
-they are placeholders no variable names, so they raise. The stored text is
-written by whoever holds the project key, and it must not run in your
-process. Nothing else: a template language is a product, and what the store
-stores is plain text.
+or in every message's content — with `str()` of each value, and raises
+`TracepadPlaceholderError` on a placeholder with no variable (a
+`TracepadError`, and a `KeyError` as well). `{{` and `}}` are the braces
+themselves, so a prompt can show a JSON example; a brace that pairs with
+nothing is left as it is. It is not `str.format`: `{q:>12}`, `{user.email}`,
+`{items[0]}` and `{q!r}` are not evaluated — they are placeholders no
+variable names, so they raise. The stored text is written by whoever holds
+the project key, and it must not run in your process. The Node package reads
+the same text the same way, so a prompt compiled with string variables is one
+prompt in both. Nothing else: a template language is a product, and what the
+store stores is plain text.
 
 Passing the prompt to `generation` records which prompt ran, so the trace can
 be [filtered by it](api.md#listing-traces).
@@ -541,6 +544,7 @@ processes, so they do not share one.
 | `update`, `update_trace` on a span that does not record (tracing off, or sampled out) | Nothing; a debug line |
 | `flush` that runs out of time | A warning; the export finishes in the background |
 | `prompt`, `flush`, `delete_trace`, `delete_traces`, and every call of the harness above | `TracepadError`, or `TracepadHTTPError(status, body)` for a non-2xx |
+| `Prompt.compile` with a placeholder no variable names | `TracepadPlaceholderError` — a `TracepadError` and a `KeyError` |
 | `init` with no host or key | `TracepadConfigError` |
 | `score` with no target outside every span while tracing — initialised, or through a provider of the application's own | `ValueError` — a programming error, visible at the call site |
 | `score` with no target where nothing traces (no `init`, no provider of its own, no recording span) | Nothing; a debug line — tracing is off |

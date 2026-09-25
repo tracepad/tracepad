@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from . import _config
-from ._errors import TracepadError
+from ._errors import TracepadError, TracepadPlaceholderError
 from ._http import max_age, request
 from ._log import logger
 
@@ -35,13 +35,13 @@ class Prompt:
     labels: list[str] = field(default_factory=list)
     config: dict[str, Any] = field(default_factory=dict)
 
-    def compile(self, **variables: Any) -> str | list[dict[str, Any]]:
+    def compile(self, /, **variables: Any) -> str | list[dict[str, Any]]:
         """Substitute `{name}` placeholders, in the text or in every message.
 
-        A placeholder with no variable raises: a prompt sent with a hole in it
-        is a worse failure than one not sent. Nothing else: a template
-        language is a product, and what the store stores is plain text
-        (spec 017 #8, #18).
+        A placeholder with no variable raises `TracepadPlaceholderError`: a
+        prompt sent with a hole in it is a worse failure than one not sent.
+        Nothing else: a template language is a product, and what the store
+        stores is plain text (spec 017 #8, #18).
         """
         if self.messages is not None:
             return [
@@ -66,7 +66,9 @@ def _fill(template: str, variables: dict[str, Any]) -> str:
         if name is None:
             return match.group(0)[0]
         if name not in variables:
-            raise TracepadError(f"tracepad: prompt placeholder {{{name}}} has no variable")
+            raise TracepadPlaceholderError(
+                f"tracepad: prompt placeholder {{{name}}} has no variable"
+            )
         return str(variables[name])
 
     return _PLACEHOLDER.sub(one, template)

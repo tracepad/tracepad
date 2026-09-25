@@ -1,4 +1,4 @@
-"""The three exceptions, in the one module every other one may import.
+"""The exceptions, in the one module every other one may import.
 
 Failure semantics are split by path (spec 017 #9). The tracing path never
 raises into application code and logs instead; the REST path — `prompt`,
@@ -26,3 +26,10 @@ class TracepadHTTPError(TracepadError):
 
 class TracepadConfigError(TracepadError):
     """`init` was given no host or no key, and the environment has none."""
+
+
+class TracepadPlaceholderError(TracepadError, KeyError):
+    """A prompt placeholder no variable names. A `KeyError` too, which is what
+    `str.format` raised before `compile` stopped calling it (spec 017 #18)."""
+
+    __str__ = TracepadError.__str__  # the message, not KeyError's quoted repr of it
