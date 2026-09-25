@@ -11,7 +11,9 @@ import (
 	"regexp"
 	"runtime"
 	"runtime/debug"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -61,7 +63,7 @@ func New(version string, api API) *mcp.Server {
 	})
 	// recoverPanics comes first so that it wraps everything after it: the
 	// other middleware, the SDK's method dispatch and every tool handler.
-	server.AddReceivingMiddleware(recoverPanics(&panicLog{}), cacheableToolList, logTraceContext)
+	server.AddReceivingMiddleware(recoverPanics(&panicLog{now: time.Now}), cacheableToolList, logTraceContext)
 	register(server, api)
 	return server
 }
@@ -83,7 +85,7 @@ func recoverPanics(log *panicLog) mcp.Middleware {
 		return func(ctx context.Context, method string, req mcp.Request) (result mcp.Result, err error) {
 			defer func() {
 				if recovered := recover(); recovered != nil {
-					log.record(method, recovered)
+					log.record(method, toolName(req), recovered, panicSite())
 					result, err = nil, &jsonrpc.Error{Code: jsonrpc.CodeInternalError, Message: "internal error"}
 				}
 			}()
@@ -92,68 +94,151 @@ func recoverPanics(log *panicLog) mcp.Middleware {
 	}
 }
 
-// panicKindsLimit bounds how many distinct panics panicLog remembers. Past
-// it, every new kind is counted together under one overflow entry.
-const panicKindsLimit = 64
+// panicSite is the function and line a panic was raised at: the first frame
+// below runtime.gopanic that is not the runtime's own, which for a nil
+// dereference or a bad index is the code that made it. It must be called
+// from the deferred function that recovered, while the panicking frames are
+// still on the stack. The function name, not the file, so the build path
+// stays out of the log.
+func panicSite() string {
+	pcs := make([]uintptr, 64)
+	frames := runtime.CallersFrames(pcs[:runtime.Callers(1, pcs)])
+	for panicking := false; ; {
+		frame, more := frames.Next()
+		if frame.Function == "runtime.gopanic" {
+			panicking = true
+		} else if panicking && !strings.HasPrefix(frame.Function, "runtime.") {
+			return fmt.Sprintf("%s:%d", frame.Function, frame.Line)
+		}
+		if !more {
+			return "unknown"
+		}
+	}
+}
+
+// toolNameFormat is the shape of every tool name this server registers.
+var toolNameFormat = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
+
+// toolName is the tool a `tools/call` names, when the name has the shape of
+// one of ours, so it can tell apart two tools' bugs that panic at the same
+// shared site. A panic in a tool handler means the SDK found the tool, so
+// the name is a registered one; the shape check bounds what could reach the
+// log from a panic before that lookup.
+func toolName(req mcp.Request) string {
+	if req == nil {
+		return ""
+	}
+	params, ok := req.GetParams().(*mcp.CallToolParamsRaw)
+	if !ok || params == nil || !toolNameFormat.MatchString(params.Name) {
+		return ""
+	}
+	return params.Name
+}
+
+// runtimeMessage is the message of a panic the Go runtime raised, or "" for
+// any other value. It calls Error() on a value the panicking code chose, so
+// that call gets a recover of its own: a panic here would be past the one
+// that recovered the first.
+func runtimeMessage(recovered any) (message string) {
+	runtimeErr, ok := recovered.(runtime.Error)
+	if !ok {
+		return ""
+	}
+	defer func() {
+		if recover() != nil {
+			message = ""
+		}
+	}()
+	return runtimeErr.Error()
+}
+
+const (
+	// panicSummaryInterval is how often, at most, one kind of panic gets a
+	// line after its first.
+	panicSummaryInterval = time.Minute
+	// panicKindsLimit bounds how many kinds of panic are tracked apart.
+	panicKindsLimit = 64
+)
 
 // panicLog writes recovered panics to the log without letting a caller who
 // can trigger one grow the log without bound. A panic reachable without a
 // credential can be sent in a loop, and the full stack is kilobytes, so:
 //
-//   - The first panic of a kind — a method and a panic type — is logged in
-//     full, with its stack. That is what a fix needs, and it needs it once.
-//   - Repeats of it are counted, and a one-line summary with the count is
-//     logged at the 2nd, 4th, 8th… occurrence: the log grows with the
-//     logarithm of a loop, not with the loop.
-//   - The kinds remembered are capped at panicKindsLimit; past that, new
-//     kinds share one overflow entry and are summarised like repeats.
+//   - A kind of panic is its type, the site it was raised at and the tool
+//     it was raised in, if any. The first of a kind is logged in full, with
+//     its stack: that is what a fix needs, and it needs it once.
+//   - Repeats are counted, and at most once a minute a kind gets a one-line
+//     summary with the count since its last line. A count still pending
+//     when the panics stop is reported with the next one.
+//   - At most panicKindsLimit kinds are tracked. Past that, new kinds are
+//     counted together, summarised the same way under a line that names no
+//     method or type, because the panics it counts have different ones.
 //
-// The panic's value is logged only when it is a runtime.Error, whose message
-// the Go runtime writes (an index out of range, a nil map). Any other value
-// may be a message built from an argument, which would carry the request —
-// arbitrary input from a caller nobody has authenticated yet — into the log;
+// The panic's value is logged only when it is a runtime.Error: the Go runtime
+// writes that message, and the most of the request it can carry is a number
+// derived from it — an index, a length — never its bytes. Any other value
+// may be a message built from an argument, which would carry the request,
+// arbitrary input from a caller nobody has authenticated yet, into the log;
 // for those the type stands in.
 //
-// One panicLog belongs to one server, and a process serves one, so "the
-// first of a kind" is the first in the process.
+// One panicLog belongs to one server, and a process serves one.
 type panicLog struct {
-	mu    sync.Mutex
-	kinds map[panicKind]int64
+	now func() time.Time
+
+	mu       sync.Mutex
+	kinds    map[panicKind]*panicTally
+	overflow panicTally
 }
 
-type panicKind struct{ method, panicType string }
+type panicKind struct{ panicType, site, tool string }
 
-// overflowKind is where kinds beyond panicKindsLimit are counted.
-var overflowKind = panicKind{method: "(other)", panicType: "(other)"}
+type panicTally struct {
+	pending int64     // occurrences since the last line
+	logged  time.Time // when the last line was written; zero for never
+}
 
-func (l *panicLog) record(method string, recovered any) {
-	kind := panicKind{method: method, panicType: fmt.Sprintf("%T", recovered)}
-	attrs := []any{"method", kind.method, "panic_type", kind.panicType}
-	if runtimeErr, ok := recovered.(runtime.Error); ok {
-		attrs = append(attrs, "panic", runtimeErr.Error())
+func (l *panicLog) record(method, tool string, recovered any, site string) {
+	kind := panicKind{panicType: fmt.Sprintf("%T", recovered), site: site, tool: tool}
+	attrs := []any{"method", method}
+	if tool != "" {
+		attrs = append(attrs, "tool", tool)
 	}
+	attrs = append(attrs, "panic_type", kind.panicType, "site", site)
+	if message := runtimeMessage(recovered); message != "" {
+		attrs = append(attrs, "panic", message)
+	}
+	now := l.now()
 
 	l.mu.Lock()
 	if l.kinds == nil {
-		l.kinds = map[panicKind]int64{}
+		l.kinds = map[panicKind]*panicTally{}
 	}
-	key := kind
-	if _, known := l.kinds[key]; !known && len(l.kinds) >= panicKindsLimit {
-		key = overflowKind
+	tally, known := l.kinds[kind]
+	if !known && len(l.kinds) < panicKindsLimit {
+		l.kinds[kind] = &panicTally{logged: now}
+		l.mu.Unlock()
+		slog.Error("mcp handler panicked", append(attrs, "stack", string(debug.Stack()))...)
+		return
 	}
-	l.kinds[key]++
-	count := l.kinds[key]
+	if !known {
+		tally = &l.overflow
+	}
+	tally.pending++
+	if !tally.logged.IsZero() && now.Sub(tally.logged) < panicSummaryInterval {
+		l.mu.Unlock()
+		return
+	}
+	count, since := tally.pending, tally.logged
+	tally.pending, tally.logged = 0, now
 	l.mu.Unlock()
 
-	switch {
-	case count == 1 && key == kind:
-		slog.Error("mcp handler panicked", append(attrs, "stack", string(debug.Stack()))...)
-	case count&(count-1) == 0: // a power of two
-		if key == overflowKind {
-			attrs = append(attrs, "note", "too many kinds of panic to track; counted together")
-		}
-		slog.Error("mcp handler panicked again", append(attrs, "occurrences", count)...)
+	if tally == &l.overflow {
+		slog.Error("mcp handler panics of untracked kinds", "occurrences", count,
+			"note", "more kinds of panic than are tracked apart; these are counted together")
+		return
 	}
+	slog.Error("mcp handler panic repeated",
+		append(attrs, "occurrences", count, "since", since.UTC().Format(time.RFC3339))...)
 }
 
 // requestMeta is the request's `_meta`, or nil when it has none. A request

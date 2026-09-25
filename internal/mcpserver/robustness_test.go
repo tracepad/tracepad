@@ -349,9 +349,9 @@ func panickingServer(t *testing.T, bug func(url.Values)) *harness {
 
 // panickingCall calls a tool that panics and checks the caller gets a
 // JSON-RPC internal error that says nothing about the panic.
-func panickingCall(t *testing.T, h *harness, arguments map[string]any) {
+func panickingCall(t *testing.T, h *harness, tool string, arguments map[string]any) {
 	t.Helper()
-	answer := h.rpc(t, "tools/call", map[string]any{"name": "list_traces", "arguments": arguments})
+	answer := h.rpc(t, "tools/call", map[string]any{"name": tool, "arguments": arguments})
 	var envelope struct {
 		Error struct {
 			Code    int    `json:"code"`
@@ -368,9 +368,11 @@ func panickingCall(t *testing.T, h *harness, arguments map[string]any) {
 
 // TestPanicIsAnErrorNotACrash: a panic in the MCP handler chain is a JSON-RPC
 // internal error for that request, and the next request is served. The log
-// gets the panic's type and stack but not its value, which here is built
-// from the request; and the stack once, not once per request — a caller who
-// can trigger a panic can do it in a loop.
+// gets the panic's type, where it was raised and in which tool, and the
+// stack — but not the panic's value, which here is built from the request.
+// The stack comes once per kind, not once per request: a caller who can
+// trigger a panic can do it in a loop (the timing of the summaries is
+// TestPanicSummariesAreTimed's).
 func TestPanicIsAnErrorNotACrash(t *testing.T) {
 	recorded := captureLog(t)
 	h := panickingServer(t, func(query url.Values) {
@@ -378,7 +380,7 @@ func TestPanicIsAnErrorNotACrash(t *testing.T) {
 	})
 
 	const marker = "request-body-marker-7f3a"
-	panickingCall(t, h, map[string]any{"name": marker})
+	panickingCall(t, h, "list_traces", map[string]any{"name": marker})
 	if tools := h.rpc(t, "tools/list", nil); !bytes.Contains(tools, []byte("get_last_trace")) {
 		t.Fatalf("the next request was not served: %s", tools)
 	}
@@ -389,37 +391,33 @@ func TestPanicIsAnErrorNotACrash(t *testing.T) {
 			t.Fatalf("the log carries the panic's value (%q):\n%s", leak, log)
 		}
 	}
-	for _, want := range []string{"mcp handler panicked", "method=tools/call", "panic_type=string", "stack=", "robustness_test.go"} {
+	for _, want := range []string{"mcp handler panicked", "method=tools/call", "tool=list_traces",
+		"panic_type=string", "site=github.com/tracepad/tracepad/internal/mcpserver_test.TestPanicIsAnErrorNotACrash",
+		"stack=", "robustness_test.go"} {
 		if !strings.Contains(log, want) {
 			t.Fatalf("the log misses %q:\n%s", want, log)
 		}
 	}
 
-	// Seven more of the same: summarised at the 2nd, 4th and 8th, with no
-	// second stack.
+	// Seven more of the same inside the minute add nothing; the same bug
+	// reached through another tool is a kind of its own.
 	for range 7 {
-		panickingCall(t, h, map[string]any{"name": marker})
+		panickingCall(t, h, "list_traces", map[string]any{"name": marker})
 	}
-	log = recorded.String()
-	if n := strings.Count(log, "stack="); n != 1 {
-		t.Fatalf("the stack was logged %d times, want once:\n%s", n, log)
+	if log := recorded.String(); strings.Count(log, "stack=") != 1 || strings.Contains(log, "repeated") {
+		t.Fatalf("repeats inside the minute were logged:\n%s", log)
 	}
-	if n := strings.Count(log, "mcp handler panicked again"); n != 3 {
-		t.Fatalf("%d repeat lines for 7 repeats, want 3 (at 2, 4, 8):\n%s", n, log)
-	}
-	for _, want := range []string{"occurrences=2", "occurrences=4", "occurrences=8"} {
-		if !strings.Contains(log, want) {
-			t.Fatalf("the log misses %q:\n%s", want, log)
-		}
-	}
-	if strings.Contains(log, marker) {
-		t.Fatalf("a repeat line carries the request:\n%s", log)
+	panickingCall(t, h, "get_last_trace", map[string]any{})
+	if log := recorded.String(); strings.Count(log, "stack=") != 2 || !strings.Contains(log, "tool=get_last_trace") {
+		t.Fatalf("a second tool's panic was folded into the first:\n%s", log)
 	}
 }
 
 // TestRuntimeErrorPanicKeepsItsMessage: a panic the Go runtime raised is
-// logged with the runtime's own message, which names what went wrong and
-// carries nothing of the request.
+// logged with the runtime's own message, which names what went wrong; the
+// most of the request it can carry is a number derived from it (here an
+// index), never the request's bytes. Its site is the code that made it, not
+// the runtime's frames above it.
 func TestRuntimeErrorPanicKeepsItsMessage(t *testing.T) {
 	recorded := captureLog(t)
 	h := panickingServer(t, func(query url.Values) {
@@ -427,9 +425,10 @@ func TestRuntimeErrorPanicKeepsItsMessage(t *testing.T) {
 		_ = none[len(query)]
 	})
 
-	panickingCall(t, h, map[string]any{"name": "request-body-marker-7f3a"})
+	panickingCall(t, h, "list_traces", map[string]any{"name": "request-body-marker-7f3a"})
 	log := recorded.String()
-	if !strings.Contains(log, "index out of range") || !strings.Contains(log, "panic_type=runtime.boundsError") {
+	if !strings.Contains(log, "index out of range") || !strings.Contains(log, "panic_type=runtime.boundsError") ||
+		!strings.Contains(log, "site=github.com/tracepad/tracepad/internal/mcpserver_test.TestRuntimeErrorPanicKeepsItsMessage") {
 		t.Fatalf("the runtime's message did not reach the log:\n%s", log)
 	}
 	if strings.Contains(log, "request-body-marker-7f3a") {
