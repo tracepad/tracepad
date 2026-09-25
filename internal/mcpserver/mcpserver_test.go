@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -237,40 +236,24 @@ func (h *harness) rpc(t *testing.T, method string, params map[string]any) []byte
 	if err != nil {
 		t.Fatal(err)
 	}
-	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost,
-		h.url+mcpserver.Path, bytes.NewReader(body))
-	if err != nil {
-		t.Fatal(err)
-	}
-	request.Header.Set("Authorization", "Bearer "+testKey)
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Accept", "application/json, text/event-stream")
 	// 2026-07-28 puts the method (and, for a tool call, its name) in
 	// headers so a proxy can route and authorize without parsing the body.
-	request.Header.Set("Mcp-Protocol-Version", mcpserver.ProtocolVersion)
-	request.Header.Set("Mcp-Method", method)
+	header := http.Header{
+		"Authorization":        {"Bearer " + testKey},
+		"Mcp-Protocol-Version": {mcpserver.ProtocolVersion},
+		"Mcp-Method":           {method},
+	}
 	if name, ok := params["name"].(string); ok {
-		request.Header.Set("Mcp-Name", name)
+		header.Set("Mcp-Name", name)
 	}
-
-	// A fresh connection every time: a stateless server may not depend on
-	// one being reused.
-	response, err := (&http.Client{Transport: &http.Transport{DisableKeepAlives: true}}).Do(request)
-	if err != nil {
-		t.Fatal(err)
+	answer := postMCP(t, h.url, body, header)
+	if answer.status != http.StatusOK {
+		t.Fatalf("%s: status %d: %s", method, answer.status, answer.body)
 	}
-	defer response.Body.Close()
-	answer, err := io.ReadAll(response.Body)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if response.StatusCode != http.StatusOK {
-		t.Fatalf("%s: status %d: %s", method, response.StatusCode, answer)
-	}
-	if id := response.Header.Get("Mcp-Session-Id"); id != "" {
+	if id := answer.header.Get("Mcp-Session-Id"); id != "" {
 		t.Fatalf("%s: the server issued session %q; 2026-07-28 is sessionless", method, id)
 	}
-	return frameBody(answer)
+	return answer.body
 }
 
 // frameBody unwraps a server-sent-events frame, which is what streamable HTTP
@@ -795,27 +778,11 @@ func TestOlderProtocolStillWorks(t *testing.T) {
 
 	legacy := func(t *testing.T, body string) []byte {
 		t.Helper()
-		request, err := http.NewRequestWithContext(t.Context(), http.MethodPost,
-			h.url+mcpserver.Path, strings.NewReader(body))
-		if err != nil {
-			t.Fatal(err)
+		answer := postMCP(t, h.url, []byte(body), http.Header{"Authorization": {"Bearer " + testKey}})
+		if answer.status != http.StatusOK {
+			t.Fatalf("status %d: %s", answer.status, answer.body)
 		}
-		request.Header.Set("Authorization", "Bearer "+testKey)
-		request.Header.Set("Content-Type", "application/json")
-		request.Header.Set("Accept", "application/json, text/event-stream")
-		response, err := http.DefaultClient.Do(request)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer response.Body.Close()
-		answer, err := io.ReadAll(response.Body)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if response.StatusCode != http.StatusOK {
-			t.Fatalf("status %d: %s", response.StatusCode, answer)
-		}
-		return frameBody(answer)
+		return answer.body
 	}
 
 	initialized := legacy(t, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":`+
@@ -835,10 +802,7 @@ func TestOlderProtocolStillWorks(t *testing.T) {
 func TestIncomingTraceContextIsLogged(t *testing.T) {
 	h := newHarness(t)
 
-	var recorded bytes.Buffer
-	previous := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&recorded, nil)))
-	t.Cleanup(func() { slog.SetDefault(previous) })
+	recorded := captureLog(t)
 
 	const traceparent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
 	answer := h.rpc(t, "tools/call", map[string]any{
