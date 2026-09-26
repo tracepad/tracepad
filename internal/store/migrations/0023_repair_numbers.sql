@@ -57,9 +57,18 @@ UPDATE traces
 -- Sums no row can produce. The pass rewrites every hour it can recompute; an
 -- hour frozen past the retention window (spec 013 #11) has lost the rows it
 -- would be recomputed from, so its honest value is NULL, "no data".
+--
+-- A token sum is impossible when it is negative — a sum that wrapped — or
+-- larger than 10^9 per row the cell counts, which is where `1e300` cast to
+-- the largest int64 landed. On a trace-unit cell the count is traces and the
+-- tokens are their observations', so the bound assumes 10^9 tokens per trace:
+-- three orders past the largest context any model offers.
 UPDATE stats_hourly SET total_cost = NULL WHERE abs(total_cost) > 1.7976931348623157e308;
-UPDATE stats_hourly SET input_tokens = NULL WHERE input_tokens < 0;
-UPDATE stats_hourly SET output_tokens = NULL WHERE output_tokens < 0;
-UPDATE stats_hourly SET cache_read_tokens = NULL WHERE cache_read_tokens < 0;
+UPDATE stats_hourly SET input_tokens = NULL
+ WHERE input_tokens < 0 OR input_tokens > 1000000000 * count;
+UPDATE stats_hourly SET output_tokens = NULL
+ WHERE output_tokens < 0 OR output_tokens > 1000000000 * count;
+UPDATE stats_hourly SET cache_read_tokens = NULL
+ WHERE cache_read_tokens < 0 OR cache_read_tokens > 1000000000 * count;
 UPDATE users_hourly SET total_cost = NULL WHERE abs(total_cost) > 1.7976931348623157e308;
 UPDATE users        SET total_cost = NULL WHERE abs(total_cost) > 1.7976931348623157e308;

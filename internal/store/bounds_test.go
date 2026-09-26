@@ -625,7 +625,7 @@ func TestMigration0023RepairsPoisonedNumbers(t *testing.T) {
 		`UPDATE users SET total_cost = 9e999`,
 		fmt.Sprintf(`INSERT INTO stats_hourly (project_id, hour, environment, release, model, count, error_count,
 		                                       total_cost, latency, input_tokens, output_tokens, cache_read_tokens)
-		             VALUES ('%s', %d, 'production', '', '', 3, 0, 9e999, '[]', -3, 5, NULL)`, poisoned.ID, frozenHour),
+		             VALUES ('%s', %d, 'production', '', '', 3, 0, 9e999, '[]', -3, 5, 9223372036854775807)`, poisoned.ID, frozenHour),
 		`DELETE FROM schema_migrations WHERE filename = '0023_repair_numbers.sql'`,
 	} {
 		if _, err := s.db.Exec(statement); err != nil {
@@ -659,8 +659,11 @@ func TestMigration0023RepairsPoisonedNumbers(t *testing.T) {
 		}
 	}
 	frozen := dumpRows(t, s.db, fmt.Sprintf(
-		`SELECT quote(total_cost), quote(input_tokens), quote(output_tokens) FROM stats_hourly WHERE hour = %d`, frozenHour))
-	if !slices.Equal(frozen, []string{"NULL|NULL|5"}) {
+		`SELECT quote(total_cost), quote(input_tokens), quote(output_tokens), quote(cache_read_tokens)
+		   FROM stats_hourly WHERE hour = %d`, frozenHour))
+	// The cache-read sum is what `1e300` cast to an int64 left: positive, and
+	// more than three traces can count.
+	if !slices.Equal(frozen, []string{"NULL|NULL|5|NULL"}) {
 		t.Errorf("the frozen cell = %v, want its impossible sums NULL and its sound one kept", frozen)
 	}
 }
