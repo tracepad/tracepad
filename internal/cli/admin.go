@@ -62,10 +62,12 @@ type preview struct {
 
 // mintedKey is one key an account minted, as its deletion preview lists it.
 type mintedKey struct {
-	ProjectName string  `json:"project_name"`
-	PublicKey   string  `json:"public_key"`
-	Name        string  `json:"name"`
-	LastUsedAt  *string `json:"last_used_at"`
+	ProjectName string `json:"project_name"`
+	PublicKey   string `json:"public_key"`
+	Name        string `json:"name"`
+	// LastUsedAt is null until the key is used, which decodes to the
+	// empty string.
+	LastUsedAt string `json:"last_used_at"`
 }
 
 // affectedRun is one run that loses traces to an erasure.
@@ -359,7 +361,7 @@ func (r *run) keysList(ctx context.Context, args []string) error {
 				Email    string `json:"email"`
 				Standing string `json:"standing"`
 			} `json:"created_by"`
-			LastUsedAt *string `json:"last_used_at"`
+			LastUsedAt string `json:"last_used_at"`
 		} `json:"keys"`
 	}](body)
 	if err != nil {
@@ -377,7 +379,7 @@ func (r *run) keysList(ctx context.Context, args []string) error {
 		t.row(termsafe.String(key.PublicKey), orDash(termsafe.String(key.Name)),
 			termsafe.String(strings.Join(key.Scopes, ",")), shortTime(key.CreatedAt),
 			minter(by.Kind, termsafe.String(by.Email), termsafe.String(by.Standing)),
-			lastUsed(key.LastUsedAt))
+			timeOrNever(key.LastUsedAt))
 	}
 	t.flush()
 	return nil
@@ -397,14 +399,6 @@ func minter(kind, email, standing string) string {
 	// Keys from before the server recorded it: the ones to rotate first
 	// if a key was ever lost (spec 045, edge cases).
 	return "unknown"
-}
-
-// lastUsed renders a key's last use, which is null until it has one.
-func lastUsed(at *string) string {
-	if at == nil {
-		return "never"
-	}
-	return shortTime(*at)
 }
 
 // keyName renders an optional name inside a sentence.
@@ -811,7 +805,7 @@ func (r *run) renderPreview(dry preview, what string) {
 	for _, key := range dry.Keys {
 		fmt.Fprintf(out, "  %-14s %s in %s%s, last used %s\n", "keeps key",
 			termsafe.String(key.PublicKey), termsafe.String(key.ProjectName),
-			keyName(key.Name), lastUsed(key.LastUsedAt))
+			keyName(key.Name), timeOrNever(key.LastUsedAt))
 	}
 	if dry.Note != "" {
 		fmt.Fprintf(out, "%s\n", termsafe.Text(dry.Note))

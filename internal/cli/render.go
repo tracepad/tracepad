@@ -405,6 +405,16 @@ func totalTokens(usage map[string]any) string {
 	return fmt.Sprintf("%d tokens", int64(total))
 }
 
+// timeOrNever renders an instant that is null until something first happens —
+// a sign-in, a key's first use — as "never" rather than a blank cell, which
+// would read as a missing value.
+func timeOrNever(value string) string {
+	if value == "" {
+		return "never"
+	}
+	return shortTime(value)
+}
+
 func orDash(value string) string {
 	if value == "" {
 		return "-"

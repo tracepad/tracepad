@@ -5977,7 +5977,7 @@ export interface operations {
         requestBody?: {
             content: {
                 "application/json": {
-                    /** @description Which program holds the key. Trimmed; at most 64 characters; not unique */
+                    /** @description Which program holds the key. Trimmed; at most 64 characters; no control or bidirectional control characters (422); not unique */
                     name?: string;
                 };
             };
@@ -5996,6 +5996,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
         };
     };
     revokeKey: {

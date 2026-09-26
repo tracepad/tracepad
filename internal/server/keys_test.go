@@ -200,8 +200,9 @@ func TestStandingFollowsTheMinter(t *testing.T) {
 	}
 }
 
-// TestMintingValidatesTheName: the body is optional, a name is trimmed and at
-// most 64 characters, and nothing else is taken yet (Testing #8).
+// TestMintingValidatesTheName: the body is optional, a name is trimmed, at most
+// 64 characters and free of control characters, and nothing else is taken yet
+// (Testing #8, Decision 20).
 func TestMintingValidatesTheName(t *testing.T) {
 	h := newAccountHarness(t)
 	keys := "/api/v1/projects/" + h.project.ID + "/keys"
@@ -220,7 +221,20 @@ func TestMintingValidatesTheName(t *testing.T) {
 	}
 
 	rec = h.call(t, "POST", keys, mustJSON(t, map[string]any{"name": sixtyFour + "x"}), asAdmin)
-	expectError(t, rec, http.StatusBadRequest, "at most 64 characters")
+	expectError(t, rec, http.StatusUnprocessableEntity, "at most 64 characters")
+
+	// Characters, not bytes and not UTF-16 units: 64 emoji fit.
+	emoji := strings.Repeat("🔑", 64)
+	rec = h.call(t, "POST", keys, mustJSON(t, map[string]any{"name": emoji}), asAdmin)
+	expectStatus(t, rec, http.StatusCreated)
+	rec = h.call(t, "POST", keys, mustJSON(t, map[string]any{"name": emoji + "🔑"}), asAdmin)
+	expectError(t, rec, http.StatusUnprocessableEntity, "at most 64 characters")
+
+	// A newline or a bidirectional override is refused, not rendered.
+	for _, name := range []string{"checkout\napi", "tab\there", "evil\u202Eipa", "iso\u2066late"} {
+		rec = h.call(t, "POST", keys, mustJSON(t, map[string]any{"name": name}), asAdmin)
+		expectError(t, rec, http.StatusUnprocessableEntity, "control character")
+	}
 
 	rec = h.call(t, "POST", keys, mustJSON(t, map[string]any{"scopes": []string{"read"}}), asAdmin)
 	expectStatus(t, rec, http.StatusBadRequest)
@@ -396,5 +410,68 @@ func TestAccountDeletionListsTheKeysItMinted(t *testing.T) {
 		nil, asAdmin), 204)
 	for _, secret := range secrets {
 		expectStatus(t, h.call(t, "GET", "/api/v1/traces", nil, asKey(secret)), 200)
+	}
+}
+
+// stuckWriter holds every key-use job until its caller gives up, the way a
+// writer busy with a long erasure chunk would.
+type stuckWriter struct {
+	JobWriter
+	mu      sync.Mutex
+	waiting int
+}
+
+func (w *stuckWriter) Submit(ctx context.Context, job store.WriteJob) error {
+	if _, ok := job.(*store.KeyUse); !ok {
+		return w.JobWriter.Submit(ctx, job)
+	}
+	w.mu.Lock()
+	w.waiting++
+	w.mu.Unlock()
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+// TestShutdownKeepsToItsDeadline: a tick stuck on a busy writer is cancelled
+// rather than waited out, so `Shutdown` returns within its own deadline plus
+// the final flush's moment of grace — never after the writer frees up.
+func TestShutdownKeepsToItsDeadline(t *testing.T) {
+	h := newAccountHarness(t)
+	stuck := &stuckWriter{JobWriter: h.writer}
+	h.server.writer = stuck
+	h.server.keyUseEvery = 5 * time.Millisecond
+	h.server.startKeyUseFlusher()
+
+	expectStatus(t, h.get(t, "/api/v1/traces"), 200)
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		stuck.mu.Lock()
+		waiting := stuck.waiting
+		stuck.mu.Unlock()
+		if waiting > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("no tick reached the writer")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	if err := h.server.Shutdown(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// The drain's 100ms and the final flush's second of grace, with room.
+	if took := time.Since(start); took > 1500*time.Millisecond {
+		t.Errorf("Shutdown took %s with a 100ms deadline", took)
+	}
+	// The use went back into the map when the tick was cancelled, and the
+	// final flush tried it again rather than losing it.
+	stuck.mu.Lock()
+	defer stuck.mu.Unlock()
+	if stuck.waiting < 2 {
+		t.Errorf("the writer saw %d key-use jobs, want the cancelled tick and the final flush", stuck.waiting)
 	}
 }

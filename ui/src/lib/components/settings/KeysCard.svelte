@@ -4,7 +4,7 @@
 	import { said } from '$lib/accounts';
 	import { api, type DryRun, type Key, type NewKey, type Project } from '$lib/api/client.svelte';
 	import { timestamp } from '$lib/format';
-	import { minter, outlived } from '$lib/keys';
+	import { lastUse, MAX_KEY_NAME, minter, outlived, tooLong } from '$lib/keys';
 	import Button from '../Button.svelte';
 	import ConfirmCard from '../ConfirmCard.svelte';
 	import SecretDialog from '../SecretDialog.svelte';
@@ -125,6 +125,7 @@
 					<thead class="text-subtle text-xs whitespace-nowrap">
 						<tr class="border-border border-b">
 							<th scope="col" class="px-3 py-1.5 font-medium">Name</th>
+							<th scope="col" class="px-3 py-1.5 font-medium">Scopes</th>
 							<th scope="col" class="px-3 py-1.5 font-medium">Created</th>
 							<th scope="col" class="px-3 py-1.5 font-medium">Last used</th>
 							<th scope="col" class="w-24 px-3 py-1.5"><span class="sr-only">Actions</span></th>
@@ -137,6 +138,7 @@
 									{key.name || '—'}
 									<span class="text-subtle block font-mono text-xs break-all">{key.public_key}</span>
 								</th>
+								<td class="text-muted px-3 py-1.5">{key.scopes.join(', ')}</td>
 								<td class="text-muted px-3 py-1.5">
 									<span class="tabular-nums">{timestamp(key.created_at)}</span>
 									<span class="block text-xs">by {minter(key.created_by)}</span>
@@ -147,7 +149,7 @@
 									{/if}
 								</td>
 								<td class="text-muted px-3 py-1.5 tabular-nums whitespace-nowrap">
-									{key.last_used_at ? timestamp(key.last_used_at) : 'never'}
+									{lastUse(key.last_used_at)}
 								</td>
 								<td class="px-3 py-1.5">
 									<Button
@@ -175,13 +177,13 @@
 			<input
 				id="key-name"
 				bind:value={name}
-				maxlength="64"
 				autocomplete="off"
+				aria-invalid={tooLong(name) || undefined}
 				placeholder="Which program will hold it, e.g. checkout api"
 				class="border-border bg-canvas placeholder:text-subtle min-w-0 flex-1 rounded-md border
 					px-2 py-1 text-sm"
 			/>
-			<Button type="submit" busy={minting}>
+			<Button type="submit" busy={minting} disabled={tooLong(name)}>
 				{#if minting}
 					<LoaderCircle class="size-4 animate-spin" />
 				{:else}
@@ -190,6 +192,11 @@
 				Mint a key pair
 			</Button>
 		</form>
+		{#if tooLong(name)}
+			<p role="alert" class="text-danger mt-1 text-sm">
+				A key's name is at most {MAX_KEY_NAME} characters.
+			</p>
+		{/if}
 
 		{#if revoking}
 			{@const publicKey = revoking}

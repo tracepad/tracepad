@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/tracepad/tracepad/internal/store"
@@ -578,8 +579,31 @@ func (s *Server) handleListKeys(w http.ResponseWriter, r *http.Request) {
 }
 
 // maxKeyName bounds a key's name (spec 045 #6): enough to say which program
-// holds it, short enough to fit a row.
+// holds it, short enough to fit a row. In characters, as an account's name is
+// (spec 028 #26).
 const maxKeyName = 64
+
+// readKeyName trims a key's name and checks it, answering 422 itself as an
+// account's name does (spec 045 #20). A name is printed in the listing, the
+// Keys card and an account's deletion preview, so a control character — a
+// newline that opens a line of its own — or a bidirectional override that
+// makes one key's name read as another's is refused rather than rendered.
+func readKeyName(w http.ResponseWriter, raw string) (string, bool) {
+	name := strings.TrimSpace(raw)
+	if utf8.RuneCountInString(name) > maxKeyName {
+		writeError(w, http.StatusUnprocessableEntity,
+			fmt.Sprintf("a key's name must be at most %d characters", maxKeyName))
+		return "", false
+	}
+	for _, r := range name {
+		if unicode.IsControl(r) || unicode.Is(unicode.Bidi_Control, r) {
+			writeError(w, http.StatusUnprocessableEntity,
+				fmt.Sprintf("a key's name cannot contain the control character %U", r))
+			return "", false
+		}
+	}
+	return name, true
+}
 
 // handleCreateKey mints another key pair for a project. Several active pairs
 // are what makes rotation zero-downtime: create, move the SDKs, revoke (#12).
@@ -610,10 +634,8 @@ func (s *Server) handleCreateKey(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	name := strings.TrimSpace(request.Name)
-	if utf8.RuneCountInString(name) > maxKeyName {
-		writeError(w, http.StatusBadRequest,
-			fmt.Sprintf("a key's name must be at most %d characters", maxKeyName))
+	name, ok := readKeyName(w, request.Name)
+	if !ok {
 		return
 	}
 	keys, err := store.GenerateKeyPair()

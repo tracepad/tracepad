@@ -36,6 +36,26 @@ func TestEveryRouteHasAPolicy(t *testing.T) {
 	}
 }
 
+// TestKeysAreIssuedByPeople: every route that manages a project's keys declares
+// `issuer`, and nothing else does (spec 045 #4) — so a key route added later
+// with `editor` fails here instead of admitting a project key.
+func TestKeysAreIssuedByPeople(t *testing.T) {
+	h := newAccountHarness(t)
+	issuers := 0
+	for _, rt := range h.server.routes() {
+		keys := strings.HasPrefix(rt.Path, "/api/v1/projects/{id}/keys")
+		if keys != (rt.Policy == issuer) {
+			t.Errorf("%s %s has policy %s", rt.Method, rt.Path, rt.Policy)
+		}
+		if keys {
+			issuers++
+		}
+	}
+	if issuers != 3 {
+		t.Errorf("%d routes manage keys, want the three of spec 045 #4", issuers)
+	}
+}
+
 // TestEndpointMapPublishesThePolicy: `GET /api/v1` is where an agent that has
 // never seen this API finds out what it would need to call each route (spec
 // 028, API contract).
@@ -90,14 +110,6 @@ type verdict struct {
 
 var admitted = verdict{}
 
-// managesKeys is the three routes no project key reaches (spec 045 #4), keyed
-// by pattern, written out here rather than asked of the guard so that the
-// oracle and the thing it checks are two statements and not one.
-var managesKeys = map[string]bool{
-	"/api/v1/projects/{id}/keys":              true,
-	"/api/v1/projects/{id}/keys/{public_key}": true,
-}
-
 // decision is Decision 3, as code. `path` is the route's pattern, because two
 // of the rules turn on whether the route is one of the project's own.
 func decision(p policy, w who, path string) verdict {
@@ -128,9 +140,6 @@ func decision(p policy, w who, path string) verdict {
 		return verdict{http.StatusForbidden, "owner account"}
 
 	case member:
-		if w == projectKey && managesKeys[path] {
-			return verdict{http.StatusForbidden, "cannot list, mint or revoke keys"}
-		}
 		if w == deploymentToken && !projectRoute(path) {
 			// The admin token keeps exactly the powers spec 005 #11
 			// gave it and still reaches no data-plane route.
@@ -138,8 +147,8 @@ func decision(p policy, w who, path string) verdict {
 		}
 		return admitted
 
-	case editor:
-		if w == projectKey && managesKeys[path] {
+	case editor, issuer:
+		if p == issuer && w == projectKey {
 			// No key manages keys, whatever it may do elsewhere
 			// (spec 045 #4).
 			return verdict{http.StatusForbidden, "cannot list, mint or revoke keys"}

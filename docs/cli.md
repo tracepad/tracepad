@@ -708,7 +708,7 @@ are covered in [admin.md](admin.md), [retention.md](retention.md) and
 
 ```sh
 tracepad projects ls
-tracepad keys create --name "checkout api"   # admin token
+tracepad keys create --project $ID --name "checkout api"   # admin token
 tracepad retention set --days 90
 tracepad retention set --media placeholder
 tracepad users rm-data user-4711

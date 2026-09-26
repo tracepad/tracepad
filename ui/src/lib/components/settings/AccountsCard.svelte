@@ -11,6 +11,7 @@
 		type Project
 	} from '$lib/api/client.svelte';
 	import { timestamp } from '$lib/format';
+	import { lastUse } from '$lib/keys';
 	import Button from '../Button.svelte';
 	import ConfirmCard from '../ConfirmCard.svelte';
 	import AccountDialog from './AccountDialog.svelte';
@@ -175,7 +176,7 @@
 							<li>
 								<code class="font-mono">{key.public_key}</code>
 								{key.name ? `(${key.name})` : ''} in {key.project_name}, last used
-								{key.last_used_at ? timestamp(key.last_used_at) : 'never'}
+								{lastUse(key.last_used_at)}
 							</li>
 						{/each}
 					</ul>

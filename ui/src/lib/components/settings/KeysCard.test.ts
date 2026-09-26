@@ -63,6 +63,7 @@ describe('the keys card', () => {
 		const editor = (await screen.findByText('checkout api')).closest('tr')!;
 		expect(within(editor).getByText('by ed@example.com (editor)')).toBeTruthy();
 		expect(within(editor).getByText('never')).toBeTruthy();
+		expect(within(editor).getByText('ingest, read, write')).toBeTruthy();
 		expect(within(editor).queryByText(/can no longer manage keys/)).toBeNull();
 
 		const server = screen.getByText('tp-pk-startup').closest('tr')!;
@@ -86,6 +87,23 @@ describe('the keys card', () => {
 		await person.click(screen.getByRole('button', { name: 'Mint a key pair' }));
 
 		expect(createKey).toHaveBeenCalledWith('p1', 'billing worker');
+	});
+
+	it('counts a name the way the server does, in characters', async () => {
+		render(KeysCard, { current: PROJECT } as never);
+		const person = userEvent.setup({ pointerEventsCheck: 0 });
+		const field = await screen.findByLabelText('Which program will hold the new key');
+		const mint = screen.getByRole('button', { name: 'Mint a key pair' });
+
+		// Sixty-four emoji are 128 UTF-16 units and 64 characters: they fit.
+		await person.click(field);
+		await person.paste('🔑'.repeat(64));
+		expect(mint.hasAttribute('disabled')).toBe(false);
+		expect(screen.queryByRole('alert')).toBeNull();
+
+		await person.paste('🔑');
+		expect(mint.hasAttribute('disabled')).toBe(true);
+		expect(screen.getByRole('alert').textContent).toContain('at most 64 characters');
 	});
 
 	it('shows a viewer neither the keys nor the form', () => {

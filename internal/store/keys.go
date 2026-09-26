@@ -116,6 +116,11 @@ type withTail struct {
 
 func (w withTail) Scan(dest ...any) error { return w.row.Scan(append(dest, w.tail...)...) }
 
+// keyBySecretQuery is built once: it runs on every key-authenticated request.
+var keyBySecretQuery = `SELECT ` + prefixed("p", projectColumns) + `, ` + keyColumns + `
+	  FROM api_keys k JOIN projects p ON p.id = k.project_id
+	 WHERE k.secret_hash = ?`
+
 // KeyBySecret resolves an API secret to its key and the key's project, or two
 // nils if the secret is unknown. Lookup is by sha256(secret) against a unique
 // index (spec 001 #8), and the project comes back in the same query.
@@ -128,9 +133,7 @@ func (s *Store) KeyBySecret(secret string) (*Project, *KeyInfo, error) {
 	hash := sha256.Sum256([]byte(secret))
 	var row keyRow
 	project, err := scanProject(withTail{
-		row: s.db.QueryRow(`SELECT `+prefixed("p", projectColumns)+`, `+keyColumns+`
-		  FROM api_keys k JOIN projects p ON p.id = k.project_id
-		 WHERE k.secret_hash = ?`, hash[:]),
+		row:  s.db.QueryRow(keyBySecretQuery, hash[:]),
 		tail: row.dest(),
 	})
 	if err == sql.ErrNoRows {

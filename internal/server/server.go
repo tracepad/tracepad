@@ -97,9 +97,9 @@ type Server struct {
 	// the next flush writes it (spec 045 #9); the rest is the flusher's
 	// lifetime, which is serving's (keyuse.go).
 	keyUses     *keyUses
+	keyUseEvery time.Duration
 	flusherOnce sync.Once
-	stopOnce    sync.Once
-	flusherStop chan struct{}
+	flusherStop context.CancelFunc
 	flusherDone chan struct{}
 }
 
@@ -141,6 +141,7 @@ func New(cfg *config.Config, version string, st *store.Store, writer JobWriter, 
 		startedAt:      time.Now(),
 		counters:       newCounters(),
 		keyUses:        newKeyUses(),
+		keyUseEvery:    keyUseFlushEvery,
 	}
 	if st != nil {
 		s.mediaKey = st.MediaUploadKey()
@@ -210,11 +211,16 @@ func (s *Server) ListenAndServe() error {
 // owner, and so must the last flush.
 func (s *Server) Shutdown(ctx context.Context) error {
 	err := s.http.Shutdown(ctx)
-	s.stopKeyUseFlusher()
-	// Its own deadline: a drain that ran out of time is exactly when the
-	// uses it made still deserve their one write.
-	flushCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-	defer cancel()
+	s.stopKeyUseFlusher(ctx)
+	// The caller's deadline, with a moment's grace when the drain spent all
+	// of it: the uses the drained requests made still deserve their one
+	// write, and a second is what a single small job needs.
+	flushCtx := ctx
+	if ctx.Err() != nil {
+		var cancel context.CancelFunc
+		flushCtx, cancel = context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+		defer cancel()
+	}
 	s.flushKeyUses(flushCtx)
 	return err
 }

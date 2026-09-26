@@ -38,9 +38,10 @@ status:
     (Decision 5), and no credential at all is `401`; a key's use is
     recorded here, admitted or refused (spec 045 #9);
  2. cross-origin, for a cookie on an unsafe method (Decision 5);
- 3. the policy against the kind of caller;
- 4. the project the request is about, for a session (Decision 6);
- 5. what a key may do: no key lists, mints or revokes keys (spec 045 #4).
+ 3. the policy against the kind of caller — which is where a key is told
+    it cannot manage keys (spec 045 #4), before a soft-deleted project's
+    key could be told anything else;
+ 4. the project the request is about, for a session (Decision 6).
 */
 
 // policy is what a route requires of its caller. It is the whole of the
@@ -84,6 +85,17 @@ const (
 	// told "not a session" rather than "unauthorized", because it is a
 	// perfectly good credential asking a question it cannot have.
 	session
+	// issuer is `editor` without the project key: the three routes that
+	// list, mint and revoke a project's keys (spec 045 #4). An owner or
+	// `editor` session, or the admin token; a key is refused whatever it
+	// may do elsewhere, because a key that mints keys turns one lost key into
+	// as many credentials as its finder wants, each outliving the first
+	// one's revocation. It is its own policy so that the table says which
+	// routes these are, rather than a path comparison in the guard; the
+	// endpoint map calls it `editor`, which is what it is to everyone but a
+	// key. Spec 045's second half moves the key's half of this into the
+	// scope column as `none`.
+	issuer
 )
 
 // String names a policy for the endpoint map and for test failures.
@@ -95,7 +107,7 @@ func (p policy) String() string {
 		return "ingest"
 	case member:
 		return "member"
-	case editor:
+	case editor, issuer:
 		return "editor"
 	case owner:
 		return "owner"
@@ -188,7 +200,7 @@ func (s *Server) guard(rt route) http.HandlerFunc {
 	}
 }
 
-// resolve is steps one to five above. It answers the client itself on every
+// resolve is steps one to four above. It answers the client itself on every
 // refusal, so a handler that runs is a handler whose caller is allowed.
 func (s *Server) resolve(w http.ResponseWriter, r *http.Request, rt route) (*caller, bool) {
 	if s.store == nil {
@@ -210,13 +222,6 @@ func (s *Server) resolve(w http.ResponseWriter, r *http.Request, rt route) (*cal
 		return nil, false
 	}
 	if !s.scope(w, r, rt, c) {
-		return nil, false
-	}
-	if c.isKey() && keyRoute(rt.Path) {
-		// Step five, after the project step, so that a soft-deleted
-		// project's key gets the same answer here as a live one and its
-		// own answers everywhere else (spec 045 #13).
-		writeError(w, http.StatusForbidden, keyRouteRefusal)
 		return nil, false
 	}
 	// Last, so that only a request that is actually served extends the
@@ -344,11 +349,17 @@ func (s *Server) admits(w http.ResponseWriter, rt route, c *caller) bool {
 		}
 		return s.requireAdmin(w, c)
 
-	case member, editor:
+	case member, editor, issuer:
 		if c.isKey() {
+			if rt.Policy == issuer {
+				// Answered the same for a live project's key and a
+				// soft-deleted one's, because it is refused before the
+				// project is looked at (spec 045 #13).
+				writeError(w, http.StatusForbidden, keyRouteRefusal)
+				return false
+			}
 			// A project key is the administrator of its own project
-			// (spec 005 #11), which is both of these — but for the keys
-			// themselves, which step five keeps from it.
+			// (spec 005 #11), which is both of these.
 			return true
 		}
 		if c.admin {
@@ -400,7 +411,7 @@ func (s *Server) scope(w http.ResponseWriter, r *http.Request, rt route, c *call
 		// `/api/v1/projects` that are about no single project, so there
 		// is nothing to scope and no header to ask for.
 		return true
-	case rt.Policy == member || rt.Policy == editor:
+	case rt.Policy == member || rt.Policy == editor || rt.Policy == issuer:
 		id = r.Header.Get(projectHeader)
 		if id == "" {
 			writeError(w, http.StatusBadRequest,
@@ -443,7 +454,7 @@ func (s *Server) scope(w http.ResponseWriter, r *http.Request, rt route, c *call
 		writeError(w, http.StatusNotFound, "no such project")
 		return false
 	}
-	if rt.Policy == editor && role == store.RoleViewer {
+	if (rt.Policy == editor || rt.Policy == issuer) && role == store.RoleViewer {
 		writeError(w, http.StatusForbidden, "your role in this project is viewer")
 		return false
 	}
@@ -468,19 +479,7 @@ func projectRoute(path string) bool {
 	return path == projectRoutePrefix || strings.HasPrefix(path, projectRoutePrefix+"/")
 }
 
-// keyRoutePrefix is the three routes that list, mint and revoke a project's
-// keys.
-const keyRoutePrefix = projectRoutePrefix + "/{id}/keys"
-
-// keyRoute reports one of them. No project key reaches these, whatever it may
-// do elsewhere (spec 045 #4): a key that mints keys turns one lost key into as
-// many credentials as its finder wants, each outliving the first one's
-// revocation. Issuing a credential is a person's act, or the operator's.
-func keyRoute(path string) bool {
-	return path == keyRoutePrefix || strings.HasPrefix(path, keyRoutePrefix+"/")
-}
-
-// keyRouteRefusal is what a key on those routes is told.
+// keyRouteRefusal is what a key on an `issuer` route is told.
 const keyRouteRefusal = "a project key cannot list, mint or revoke keys; " +
 	"that needs an owner or editor signed in, or the admin token"
 

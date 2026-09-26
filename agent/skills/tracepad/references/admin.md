@@ -40,8 +40,8 @@ listing also says who minted each key and when it was last used. If they
 choose to run it themselves from a terminal:
 
 ```sh
-TRACEPAD_API_KEY="$TRACEPAD_ADMIN_TOKEN" tracepad keys create --name "checkout api"
-TRACEPAD_API_KEY="$TRACEPAD_ADMIN_TOKEN" tracepad keys rm <public-key>
+TRACEPAD_API_KEY="$TRACEPAD_ADMIN_TOKEN" tracepad keys create --project <project-id> --name "checkout api"
+TRACEPAD_API_KEY="$TRACEPAD_ADMIN_TOKEN" tracepad keys rm <public-key> --project <project-id>
 ```
 
 Rotation is mint, move the applications, then revoke — revoking first stops

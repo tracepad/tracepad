@@ -158,16 +158,21 @@ project key manages keys:
 
 ```sh
 export TRACEPAD_API_KEY=$TRACEPAD_ADMIN_TOKEN
-tracepad keys create --name "checkout api"   # mint the new pair
+tracepad projects ls                                      # the project's id
+tracepad keys create --project $ID --name "checkout api"  # mint the new pair
 # move your SDKs onto it
-tracepad keys ls                             # wait until the old one goes quiet
-tracepad keys rm tp-pk-old…                  # revoke it
+tracepad keys ls --project $ID                            # wait until the old one goes quiet
+tracepad keys rm tp-pk-old… --project $ID                 # revoke it
 ```
+
+The token reaches every project, so it needs `--project` as soon as there is
+more than one; with a single project the command finds it by itself.
 
 There is never a window where ingest `401`s. The secret half of a pair is
 returned exactly once, at creation; the store keeps only its SHA-256 hash, so
 there is nothing to show later even to an administrator. The name is optional,
-at most 64 characters and not unique: it is there to say which program holds
+at most 64 characters, free of control characters and not unique: it is there
+to say which program holds
 the key.
 
 The listing says, for each key, who minted it and when it was last used:

@@ -105,17 +105,18 @@ func (s *Server) flushKeyUses(ctx context.Context) {
 // — every test in this package — has no goroutine writing behind its back.
 func (s *Server) startKeyUseFlusher() {
 	s.flusherOnce.Do(func() {
-		s.flusherStop = make(chan struct{})
+		ctx, cancel := context.WithCancel(context.Background())
+		s.flusherStop = cancel
 		s.flusherDone = make(chan struct{})
 		go func() {
 			defer close(s.flusherDone)
-			ticker := time.NewTicker(keyUseFlushEvery)
+			ticker := time.NewTicker(s.keyUseEvery)
 			defer ticker.Stop()
 			for {
 				select {
 				case <-ticker.C:
-					s.flushKeyUses(context.Background())
-				case <-s.flusherStop:
+					s.flushKeyUses(ctx)
+				case <-ctx.Done():
 					return
 				}
 			}
@@ -123,13 +124,18 @@ func (s *Server) startKeyUseFlusher() {
 	})
 }
 
-// stopKeyUseFlusher stops the ticker, if it runs, and waits for a tick in
-// progress to finish, so that the final flush is the last one.
-func (s *Server) stopKeyUseFlusher() {
+// stopKeyUseFlusher stops the ticker, if it runs. A tick waiting on a busy
+// writer is cancelled rather than waited out, so `Shutdown` keeps to its
+// deadline: the cancelled flush puts its values back, and the final flush
+// writes them — `max` makes writing one twice harmless.
+func (s *Server) stopKeyUseFlusher(ctx context.Context) {
 	s.flusherOnce.Do(func() {}) // a flusher that never started never will
 	if s.flusherStop == nil {
 		return
 	}
-	s.stopOnce.Do(func() { close(s.flusherStop) })
-	<-s.flusherDone
+	s.flusherStop()
+	select {
+	case <-s.flusherDone:
+	case <-ctx.Done():
+	}
 }
