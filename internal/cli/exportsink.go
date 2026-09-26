@@ -374,9 +374,15 @@ func firstLine(body []byte) string {
 	if len(text) > 200 {
 		// At a character boundary: half a character is a byte the
 		// terminal would be shown as `\xNN`.
+		// A character is at most utf8.UTFMax bytes, so a start is never
+		// further back than that — and a body that is not text at all is
+		// cut where it is rather than walked back to nothing.
 		cut := 200
-		for cut > 0 && !utf8.RuneStart(text[cut]) {
+		for back := 0; back < utf8.UTFMax && cut > 0 && !utf8.RuneStart(text[cut]); back++ {
 			cut--
+		}
+		if !utf8.RuneStart(text[cut]) {
+			cut = 200
 		}
 		text = text[:cut] + "…"
 	}

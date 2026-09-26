@@ -412,7 +412,15 @@ func ours(dir string) (bool, string, error) {
 		return false, "", fmt.Errorf("cannot read %s: %w", filepath.Join(dir, marker), err)
 	}
 	skill, err := os.ReadFile(filepath.Join(dir, "SKILL.md"))
-	if err != nil || !namesThisSkill(skill) {
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return false, "", nil
+	case err != nil:
+		// The same rule as the marker's: unreadable is not absent, and a
+		// real install that cannot be read must not be replaced as
+		// somebody else's directory.
+		return false, "", fmt.Errorf("cannot read %s: %w", filepath.Join(dir, "SKILL.md"), err)
+	case !namesThisSkill(skill):
 		return false, "", nil
 	}
 	return true, strings.TrimSpace(string(stamp)), nil

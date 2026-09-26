@@ -347,7 +347,9 @@ func shortTime(value string) string {
 	}
 	parsed, err := time.Parse(time.RFC3339Nano, value)
 	if err != nil {
-		return value
+		// The server's text, printed inside a line (#35). Only here: an
+		// instant that parsed is this function's own formatting.
+		return termsafe.String(value)
 	}
 	return parsed.UTC().Format("2006-01-02 15:04:05")
 }

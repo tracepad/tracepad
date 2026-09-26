@@ -681,3 +681,25 @@ func TestAMarkerAloneIsNotASkill(t *testing.T) {
 		t.Errorf("the dotfiles link: exit %d, stdout %q, stderr %q", got.code, got.stdout, got.stderr)
 	}
 }
+
+// TestAnUnreadableSkillIsAnError: SKILL.md that cannot be read is not the
+// same as none, and a real install behind it is not replaced as somebody
+// else's directory, even with --force (#16).
+func TestAnUnreadableSkillIsAnError(t *testing.T) {
+	dir := t.TempDir()
+	if got := runSkills(t, "", "", "0.3.1", "install", "--dir", dir); got.code != exitOK {
+		t.Fatal(got.stderr)
+	}
+	skill := filepath.Join(dir, Name, "SKILL.md")
+	if err := os.Chmod(skill, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(skill, 0o644) })
+	if _, err := os.ReadFile(skill); err == nil {
+		t.Skip("running as a user every file is readable to")
+	}
+	got := runSkills(t, "", "", "0.4.0", "install", "--dir", dir, "--force")
+	if got.code != exitFailure || !strings.Contains(got.stderr, "cannot read") {
+		t.Errorf("exit %d, stdout %q, stderr %q, want the read error", got.code, got.stdout, got.stderr)
+	}
+}

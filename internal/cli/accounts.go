@@ -447,7 +447,10 @@ func (r *run) accountsRemove(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	r.renderPreview(dry, "delete the account "+dry.Confirm)
+	// The email is the server's, and one line: a newline in it would open
+	// a line of its own on the preview (#35).
+	shown := termsafe.String(dry.Confirm)
+	r.renderPreview(dry, "delete the account "+shown)
 	switch {
 	case confirm != "":
 		if !strings.EqualFold(confirm, dry.Confirm) {
@@ -462,7 +465,7 @@ func (r *run) accountsRemove(ctx context.Context, args []string) error {
 	default:
 		return fmt.Errorf(
 			"this would delete the account %s; it was not done. Re-run with --confirm %s",
-			dry.Confirm, dry.Confirm)
+			shown, shown)
 	}
 
 	// The server's own spelling, never one this command made up: what

@@ -416,3 +416,42 @@ func TestFirstLineCutsAtACharacter(t *testing.T) {
 		t.Errorf("firstLine = %q", got)
 	}
 }
+
+// The email `accounts rm` echoes is the server's, and a line of the preview:
+// a newline in it does not open a line of its own (#35).
+func TestTheConfirmEchoIsOneLine(t *testing.T) {
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"dry_run":true,"confirm":"a@b.example\ntracepad: forged"}`)
+	}))
+	defer fake.Close()
+	h := &harness{url: fake.URL, env: map[string]string{"TRACEPAD_URL": fake.URL, "TRACEPAD_API_KEY": testKey}}
+
+	got := h.run(t.Context(), false, "accounts", "rm", "4b1e")
+	if got.code != ExitFailure {
+		t.Fatalf("exit = %d, stderr = %q", got.code, got.stderr)
+	}
+	for i, line := range strings.Split(got.stderr, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "tracepad: forged") {
+			t.Errorf("line %d is the server's: %q", i, got.stderr)
+		}
+	}
+	if !strings.Contains(got.stderr, `delete the account a@b.example\x0atracepad: forged`) {
+		t.Errorf("stderr = %q", got.stderr)
+	}
+}
+
+// A timestamp that does not parse is the server's text, printed inside a line.
+func TestAnUnparsedInstantIsOneLine(t *testing.T) {
+	if got := shortTime("x\ny\x1b"); got != `x\x0ay\x1b` {
+		t.Errorf("shortTime = %q", got)
+	}
+}
+
+// A body that is not text is cut where it is, not walked back to nothing.
+func TestFirstLineKeepsABinaryBody(t *testing.T) {
+	got := firstLine(bytes.Repeat([]byte{0x80}, 250))
+	if len(got) < 200 {
+		t.Errorf("firstLine kept %d bytes: %q", len(got), got)
+	}
+}
