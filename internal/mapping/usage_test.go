@@ -240,3 +240,22 @@ func TestBareUsageIsReachedPastAGenAICost(t *testing.T) {
 		t.Errorf("cost_details = %v, want the cost where it belongs", observation.CostDetails)
 	}
 }
+
+// A total is derived from the components only when their sum is finite (spec
+// 043 #5), and the sum is taken in key order: near the largest double, whether
+// it overflows depends on the order, and a map's order is random — the same
+// span stored a total on one delivery and none on the next.
+func TestADerivedTotalDoesNotDependOnOrder(t *testing.T) {
+	for range 100 {
+		observation := mapping.Map(otlptest.SpanWith(
+			"langfuse.observation.cost_details", `{"a": 1e308, "b": 1e308, "c": -1e308}`,
+		)).Observations[0]
+		cost := observation.CostDetails
+		if cost["a"] != 1e308 || cost["b"] != 1e308 || cost["c"] != -1e308 {
+			t.Fatalf("cost_details = %v, want the components as sent", cost)
+		}
+		if total, ok := cost["total"]; ok {
+			t.Fatalf("total = %v, want none: a + b overflows before c is added", total)
+		}
+	}
+}

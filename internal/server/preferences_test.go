@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -139,7 +140,7 @@ func TestPreferencesAreTheAccountsOwn(t *testing.T) {
 	rec = h.call(t, "DELETE",
 		"/api/v1/accounts/"+helper.account.ID+"?confirm=helper@example.com", nil, asSession(owner))
 	expectStatus(t, rec, http.StatusNoContent)
-	gone, err := h.store.AccountByID(helper.account.ID)
+	gone, err := h.store.AccountByID(context.Background(), helper.account.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

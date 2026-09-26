@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -208,7 +209,7 @@ func TestMediaSharedAcrossAPurge(t *testing.T) {
 	if err := f.sweeper.Pass(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if p, _ := f.store.ProjectByID(f.project.ID); p != nil {
+	if p, _ := f.store.ProjectByID(context.Background(), f.project.ID); p != nil {
 		t.Fatal("the project was not purged")
 	}
 	if got := f.mediaRows(t); got != 1 {

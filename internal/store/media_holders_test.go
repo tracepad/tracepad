@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -177,7 +178,7 @@ func TestMediaHoldersFollowRefs(t *testing.T) {
 	if err := f.sweeper.Pass(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if p, _ := f.store.ProjectByID(f.project.ID); p != nil {
+	if p, _ := f.store.ProjectByID(context.Background(), f.project.ID); p != nil {
 		t.Fatal("the project was not purged")
 	}
 	f.checkHolders(t, "a purge")

@@ -358,7 +358,7 @@ func TestPurgeStopsWhenTheProjectIsRestored(t *testing.T) {
 	}
 
 	// The pass has read the project as purgable; the restore lands first.
-	project, err := f.store.ProjectByID(f.project.ID)
+	project, err := f.store.ProjectByID(context.Background(), f.project.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -111,7 +111,7 @@ func TestAccountsMigrationAndPurgeCascade(t *testing.T) {
 	if err != nil || len(memberships) != 0 {
 		t.Errorf("memberships = %+v, err = %v; the purge must take them", memberships, err)
 	}
-	if survivor, err := f.AccountByID(account.ID); err != nil || survivor == nil {
+	if survivor, err := f.AccountByID(context.Background(), account.ID); err != nil || survivor == nil {
 		t.Errorf("the account did not survive its project's purge: %v, %v", survivor, err)
 	}
 }
@@ -294,14 +294,14 @@ func TestOwnerPromotionDropsMemberships(t *testing.T) {
 	if rows, _ := f.Memberships(helper.ID); len(rows) != 0 {
 		t.Errorf("memberships = %+v after promotion, want none", rows)
 	}
-	promoted, _ := f.AccountByID(helper.ID)
+	promoted, _ := f.AccountByID(context.Background(), helper.ID)
 	projects, err := f.AccountProjects(promoted)
 	if err != nil || len(projects) != 1 || projects[0].Role != RoleOwner {
 		t.Fatalf("an owner's projects = %+v, err = %v", projects, err)
 	}
 
 	f.submit(t, &AccountUpdate{AccountID: helper.ID, Owner: &no, Now: time.Now().UnixNano()})
-	demoted, _ := f.AccountByID(helper.ID)
+	demoted, _ := f.AccountByID(context.Background(), helper.ID)
 	projects, err = f.AccountProjects(demoted)
 	if err != nil || len(projects) != 0 {
 		t.Errorf("a demoted owner's projects = %+v, want none until it is given some", projects)
@@ -345,7 +345,7 @@ func TestInvitationIsSingleUseAndExpires(t *testing.T) {
 	}
 
 	// Accepting stamped the login.
-	accepted, _ := f.AccountByID(account.ID)
+	accepted, _ := f.AccountByID(context.Background(), account.ID)
 	if accepted.LastLoginAt == nil {
 		t.Error("accepting an invitation must stamp last_login_at")
 	}
@@ -361,7 +361,7 @@ func TestInvitationIsSingleUseAndExpires(t *testing.T) {
 	if session, _, _ := f.SessionByCookie(context.Background(), "session-for-helper@example.com", now); session != nil {
 		t.Error("a reset must end the account's sessions")
 	}
-	stillThere, _ := f.AccountByID(account.ID)
+	stillThere, _ := f.AccountByID(context.Background(), account.ID)
 	if !stillThere.Verify(testAccountPassword) {
 		t.Error("a reset must leave the old password working until the link is used")
 	}

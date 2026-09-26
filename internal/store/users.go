@@ -363,11 +363,7 @@ func (s *Store) UserRollup(projectID, userID string, beforeHour int64) (*UserSum
 		summary.ErrorCount += errored
 		summary.Sessions += sessions
 		if cost.Valid {
-			total := cost.Float64
-			if summary.TotalCost != nil {
-				total = AddCost(*summary.TotalCost, total)
-			}
-			summary.TotalCost = &total
+			summary.TotalCost = AddCost(summary.TotalCost, cost.Float64)
 		}
 		hist, err := decodeHistogram(latency)
 		if err != nil {
@@ -431,11 +427,7 @@ func (s *Store) UserTail(projectID, userID string, fromNanos int64) (*UserSummar
 			summary.ErrorCount++
 		}
 		if cost.Valid {
-			total := cost.Float64
-			if summary.TotalCost != nil {
-				total = AddCost(*summary.TotalCost, total)
-			}
-			summary.TotalCost = &total
+			summary.TotalCost = AddCost(summary.TotalCost, cost.Float64)
 		}
 		if latency.Valid {
 			summary.Latency.Add(latency.Int64)

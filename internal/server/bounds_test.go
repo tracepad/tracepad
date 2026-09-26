@@ -94,10 +94,23 @@ func TestADatabaseConditionIsRetryable(t *testing.T) {
 func TestAResponseThatDoesNotEncodeIs500(t *testing.T) {
 	captureLogs(t)
 	rec := httptest.NewRecorder()
+	// What a prompt read sets before it renders: a failure must not be
+	// kept for the minute its answer would have been.
+	rec.Header().Set("Cache-Control", promptCacheControl)
+	rec.Header().Set("ETag", `"v1"`)
+	rec.Header().Set("Last-Modified", "Sat, 26 Sep 2026 10:00:00 GMT")
 	writeJSON(rec, http.StatusOK, map[string]any{"nested": map[string]any{"cost": math.Inf(1)}})
 	expectError(t, rec, http.StatusInternalServerError, "failed to render the response")
 	if !json.Valid(rec.Body.Bytes()) {
 		t.Errorf("body = %q, want JSON", rec.Body)
+	}
+	if got := rec.Header().Get("Cache-Control"); got != "no-store" {
+		t.Errorf("Cache-Control = %q on a failed render, want no-store", got)
+	}
+	for _, name := range []string{"ETag", "Last-Modified"} {
+		if got := rec.Header().Get(name); got != "" {
+			t.Errorf("%s = %q on a failed render, want none", name, got)
+		}
 	}
 
 	// And a body that encodes is the bytes it always was.

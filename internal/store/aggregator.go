@@ -29,6 +29,11 @@ const (
 	// picked up by the next pass, which is what makes the backfill
 	// incremental rather than a stall (spec 013 #5).
 	maxHoursPerPass = 500
+	// maxHourAttempts is how many passes in a row a failing dirty hour holds
+	// `last_pass` back for (spec 043 #24). Holding it is what brings the
+	// hour back; holding it for good would make every later pass re-roll
+	// everything touched since, for ever, for one hour that cannot be rolled.
+	maxHourAttempts = 3
 )
 
 // RollupOptions tunes the aggregator. Zero fields take defaults.
@@ -52,6 +57,10 @@ type Aggregator struct {
 
 	mu      sync.Mutex
 	lastRun time.Time
+	// attempts counts, per project and dirty hour, the passes in a row that
+	// failed to roll it. In memory: a restart gives a failing hour its
+	// attempts again, which costs a few passes, not a correction.
+	attempts map[string]map[int64]int
 }
 
 // NewAggregator builds the aggregator without starting it, on the same terms
@@ -201,9 +210,12 @@ func (a *Aggregator) rollProject(ctx context.Context, project *Project, at time.
 					return rolled, err
 				}
 				failures = append(failures, a.hourFailed(project, hour, err))
-				dirtyFailed = true
+				if a.retry(project, hour) {
+					dirtyFailed = true
+				}
 				continue
 			}
+			a.rolledAgain(project.ID, hour)
 			if !job.Frozen {
 				rolled++
 			}
@@ -324,11 +336,50 @@ func (a *Aggregator) rollProject(ctx context.Context, project *Project, at time.
 	return rolled, errors.Join(failures...)
 }
 
-// stopsThePass reports a failure that is not an hour's own: the pass was
-// cancelled or the writer is shutting down, and every hour after this one
-// would fail the same way.
+// stopsThePass reports a failure that is not an hour's own, which every hour
+// after this one would meet the same way: the pass was cancelled or ran out of
+// time, the writer is shutting down or its queue is full, or the database
+// itself is in trouble (spec 043 #24). The project's pass ends there, before
+// the watermark and `last_pass` move, and the next pass starts over; going on
+// would log a failure for every remaining hour and roll none of them.
 func stopsThePass(err error) bool {
-	return errors.Is(err, context.Canceled) || errors.Is(err, ErrWriterClosed)
+	if _, condition := Condition(err); condition {
+		return true
+	}
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, ErrWriterClosed) || errors.Is(err, ErrWriterBusy)
+}
+
+// retry counts one more failed pass for a dirty hour and reports whether the
+// pass should hold `last_pass` for it. Past maxHourAttempts it gives up: the
+// hour keeps the numbers it had until a span lands in it again, which makes it
+// dirty — and gives it its attempts — once more.
+func (a *Aggregator) retry(project *Project, hour int64) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.attempts == nil {
+		a.attempts = map[string]map[int64]int{}
+	}
+	hours := a.attempts[project.ID]
+	if hours == nil {
+		hours = map[int64]int{}
+		a.attempts[project.ID] = hours
+	}
+	hours[hour]++
+	if hours[hour] < maxHourAttempts {
+		return true
+	}
+	delete(hours, hour)
+	logger().Error("gave up on an hour of statistics; it keeps its previous numbers until a span lands in it",
+		"project", project.Name, "hour", time.Unix(hour, 0).UTC(), "passes", maxHourAttempts)
+	return false
+}
+
+// rolledAgain forgets the failures of an hour that has rolled.
+func (a *Aggregator) rolledAgain(projectID string, hour int64) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	delete(a.attempts[projectID], hour)
 }
 
 // hourFailed logs one hour that could not be rolled and hands back the error

@@ -96,8 +96,8 @@ func scanAccount(row interface{ Scan(...any) error }) (*Account, error) {
 }
 
 // AccountByID reads one account, or nil when there is none.
-func (s *Store) AccountByID(id string) (*Account, error) {
-	return s.oneAccount(context.Background(), `SELECT `+accountColumns+` FROM accounts WHERE id = ?`, id)
+func (s *Store) AccountByID(ctx context.Context, id string) (*Account, error) {
+	return s.oneAccount(ctx, `SELECT `+accountColumns+` FROM accounts WHERE id = ?`, id)
 }
 
 // AccountByEmail reads one account by its sign-in name. The lookup is
@@ -334,7 +334,7 @@ func (s *Store) SessionByCookie(ctx context.Context, value string, now int64) (*
 	if err != nil {
 		return nil, nil, fmt.Errorf("read session: %w", err)
 	}
-	account, err := s.oneAccount(ctx, `SELECT `+accountColumns+` FROM accounts WHERE id = ?`, session.AccountID)
+	account, err := s.AccountByID(ctx, session.AccountID)
 	if err != nil {
 		return nil, nil, err
 	}

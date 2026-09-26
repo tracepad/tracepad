@@ -534,6 +534,12 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 	var buffer bytes.Buffer
 	if err := json.NewEncoder(&buffer).Encode(body); err != nil {
 		slog.Error("failed to render the response", "type", fmt.Sprintf("%T", body), "err", err)
+		// The handler may have set how long its answer keeps — a prompt
+		// sets a minute — and a failure must not be kept at all.
+		header := w.Header()
+		header.Del("ETag")
+		header.Del("Last-Modified")
+		header.Set("Cache-Control", "no-store")
 		writeError(w, http.StatusInternalServerError, "failed to render the response")
 		return
 	}

@@ -737,8 +737,16 @@ func mapCost(a *attrs) map[string]any {
 		// once here beats teaching every reader the component names.
 		var total float64
 		var hasComponent bool
-		for _, v := range out {
-			if n, ok := asNumber(v); ok {
+		// In key order: with components near the largest double, whether
+		// the sum overflows depends on the order it is taken in, and the
+		// same span must store the same thing on every delivery.
+		keys := make([]string, 0, len(out))
+		for key := range out {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			if n, ok := asNumber(out[key]); ok {
 				total += n
 				hasComponent = true
 			}

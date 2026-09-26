@@ -415,7 +415,7 @@ func (s *Server) scope(w http.ResponseWriter, r *http.Request, rt route, c *call
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), credentialDeadline)
-	project, err := s.store.ProjectByIDContext(ctx, id)
+	project, err := s.store.ProjectByID(ctx, id)
 	cancel()
 	if err != nil {
 		slog.Error("project lookup failed", "err", err)

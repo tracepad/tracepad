@@ -195,21 +195,22 @@ func saturatingAdd(a, b int64) int64 {
 	return a + b
 }
 
-// AddCost is the cost addition every rollup and every merge of rollup rows
-// uses: it holds at the largest finite double instead of reaching an
-// infinity, which no encoder can write (spec 043 #6).
-func AddCost(a, b float64) float64 {
-	return clampCost(clampCost(a) + clampCost(b))
-}
-
-func clampCost(x float64) float64 {
-	switch {
-	case x > math.MaxFloat64:
-		return math.MaxFloat64
-	case x < -math.MaxFloat64:
-		return -math.MaxFloat64
+// AddCost folds one cost into a sum, nil while nothing has carried one — the
+// addition every rollup and every merge of rollup rows uses (spec 043 #6). The
+// sum holds at the largest finite double instead of reaching an infinity,
+// which no encoder can write. A cost that is not a finite number is not a
+// cost: a NaN, or an infinity stored before the counting rule, adds nothing,
+// so a sum of nothing else stays nil — "no data" — rather than becoming a NaN,
+// or a zero where two opposite infinities met.
+func AddCost(sum *float64, n float64) *float64 {
+	if math.IsNaN(n) || math.IsInf(n, 0) {
+		return sum
 	}
-	return x
+	total := n
+	if sum != nil && !math.IsNaN(*sum) && !math.IsInf(*sum, 0) {
+		total = min(max(*sum+n, -math.MaxFloat64), math.MaxFloat64)
+	}
+	return &total
 }
 
 // HourOf is the top of the hour a client timestamp falls in. The rollup
@@ -726,11 +727,7 @@ func add(row *StatsRow, errored bool, cost sql.NullFloat64, latency sql.NullInt6
 		row.ErrorCount++
 	}
 	if cost.Valid {
-		total := cost.Float64
-		if row.TotalCost != nil {
-			total = AddCost(*row.TotalCost, total)
-		}
-		row.TotalCost = &total
+		row.TotalCost = AddCost(row.TotalCost, cost.Float64)
 	}
 	if latency.Valid {
 		row.Latency.Add(latency.Int64)

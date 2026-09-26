@@ -275,14 +275,9 @@ func (s *Store) ProjectByName(name string) (*Project, error) {
 	return s.oneProject(context.Background(), `SELECT `+projectColumns+` FROM projects WHERE name = ?`, name)
 }
 
-// ProjectByID returns the project or nil if absent, deleted ones included.
-func (s *Store) ProjectByID(id string) (*Project, error) {
-	return s.ProjectByIDContext(context.Background(), id)
-}
-
-// ProjectByIDContext is ProjectByID under a context, for the guard, whose
-// lookups each run under a deadline of their own (spec 043 #1).
-func (s *Store) ProjectByIDContext(ctx context.Context, id string) (*Project, error) {
+// ProjectByID returns the project or nil if absent, deleted ones included. The
+// guard reads it under a deadline of its own (spec 043 #1).
+func (s *Store) ProjectByID(ctx context.Context, id string) (*Project, error) {
 	return s.oneProject(ctx, `SELECT `+projectColumns+` FROM projects WHERE id = ?`, id)
 }
 

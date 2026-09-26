@@ -105,7 +105,7 @@ func (s *Server) handleCreateAccount(w http.ResponseWriter, r *http.Request) {
 				"a role is "+store.RoleViewer+" or "+store.RoleEditor+", not "+m.Role)
 			return
 		}
-		project, err := s.store.ProjectByID(m.ProjectID)
+		project, err := s.store.ProjectByID(r.Context(), m.ProjectID)
 		if err != nil {
 			slog.Error("project lookup failed", "err", err)
 			writeError(w, http.StatusInternalServerError, "failed to read the project")
@@ -336,7 +336,7 @@ func (s *Server) handlePutMembership(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	projectID := r.PathValue("project_id")
-	project, err := s.store.ProjectByID(projectID)
+	project, err := s.store.ProjectByID(r.Context(), projectID)
 	if err != nil {
 		slog.Error("project lookup failed", "err", err)
 		writeError(w, http.StatusInternalServerError, "failed to read the project")
@@ -418,7 +418,7 @@ func (s *Server) handleProjectMembers(w http.ResponseWriter, r *http.Request) {
 
 // account resolves the `{id}` of an account route, answering 404 itself.
 func (s *Server) account(w http.ResponseWriter, r *http.Request) (*store.Account, bool) {
-	account, err := s.store.AccountByID(r.PathValue("id"))
+	account, err := s.store.AccountByID(r.Context(), r.PathValue("id"))
 	if err != nil {
 		slog.Error("account lookup failed", "err", err)
 		writeError(w, http.StatusInternalServerError, "failed to read the account")
