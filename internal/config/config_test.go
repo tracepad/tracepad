@@ -30,6 +30,11 @@ func TestParseProjects(t *testing.T) {
 	if strings.Contains(err.Error(), "tp-sk") || !strings.Contains(err.Error(), "entry 2") {
 		t.Fatalf("error = %q, want the entry's position and none of its secret", err)
 	}
+	// Three fields with one empty says which one, still without the value.
+	_, err = ParseProjects("app::tp-sk-a")
+	if err == nil || !strings.Contains(err.Error(), "field 2 is empty") || strings.Contains(err.Error(), "tp-sk") {
+		t.Fatalf("error = %v, want field 2 named as empty and no secret", err)
+	}
 	if _, err := ParseProjects("app:p:s,app:p2:s2"); err == nil {
 		t.Fatal("expected error for duplicate name")
 	}
@@ -188,6 +193,7 @@ func TestPublicURL(t *testing.T) {
 // The image sets TRACEPAD_IN_CONTAINER=1 (spec 020 #20); anywhere else it is
 // unset, and a known variable, so it is never reported as a typo.
 func TestInContainer(t *testing.T) {
+	t.Setenv("TRACEPAD_IN_CONTAINER", "")
 	cfg, err := Load(nil)
 	if err != nil {
 		t.Fatal(err)

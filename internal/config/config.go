@@ -376,12 +376,18 @@ func ParseProjects(raw string) ([]ProjectSpec, error) {
 	var specs []ProjectSpec
 	for i, part := range strings.Split(raw, ",") {
 		fields := strings.Split(strings.TrimSpace(part), ":")
-		if len(fields) != 3 || fields[0] == "" || fields[1] == "" || fields[2] == "" {
-			// The entry is named by its position, never quoted: a
-			// malformed one is usually a secret with a stray colon in
-			// it, and this error ends up in the log (spec 001 #12).
+		// The entry is named by its position, never quoted: a malformed
+		// one is usually a secret with a stray colon in it, and this error
+		// ends up in the log (spec 001 #12).
+		if len(fields) != 3 {
 			return nil, fmt.Errorf("TRACEPAD_PROJECTS entry %d: want name:public_key:secret_key, got %d fields",
 				i+1, len(fields))
+		}
+		for f, value := range fields {
+			if value == "" {
+				return nil, fmt.Errorf("TRACEPAD_PROJECTS entry %d: want name:public_key:secret_key, field %d is empty",
+					i+1, f+1)
+			}
 		}
 		if seen[fields[0]] {
 			return nil, fmt.Errorf("TRACEPAD_PROJECTS: duplicate project name %q", fields[0])

@@ -434,9 +434,10 @@ This lands well inside the one-month response window Article 12(3) allows.
 **What to do about it today.**
 
 - **Before erasing**, note what the erasure will not find by itself:
-  `tracepad sessions ls --user <id>` lists the user's sessions, and
-  `tracepad scores ls --session <session>` then `tracepad scores rm <score id>`
-  retracts the session scores. A dataset item cut from one of their traces is
+  `tracepad sessions ls --user <id>` lists the user's sessions, and for each
+  one `tracepad scores ls --session <session> --limit 500 --json` lists its
+  scores — those without a `trace_id` are the session-only ones — and
+  `tracepad scores rm <id>` retracts each by its `id`. A dataset item cut from one of their traces is
   removed for good only with its dataset — recreate the set without it.
 - **Bound the raw window** if you answer erasure requests:
   `tracepad retention set --raw-days 14 --yes` makes every batch leave 14 days

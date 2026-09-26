@@ -25,7 +25,10 @@ else, put a TLS proxy in front — [Serving over TLS](#serving-over-tls). Inside
 the container the server cannot see where its port was published, so it says
 this once at every start, as an `INFO` line, until `TRACEPAD_URL` is an
 `https://` address. (The same binary on a host, reachable beyond loopback over
-plain HTTP, makes it a `WARN`.)
+plain HTTP, makes it a `WARN`.) The note reads the same whatever the publish
+is, so it does not tell you when the port *is* exposed: with
+`--network host`, in a Kubernetes pod, or with `-p 4318:4318`, other machines
+reach the server over plain HTTP and nothing louder is printed.
 
 ## The keys are printed once, to the log
 
@@ -190,18 +193,20 @@ any account that can get into the directory. The directory is the guard, and
 the image creates `/data` as `0755`, so a named volume starts open, as does a
 host directory made with `mkdir`.
 
-Close it once. For a named volume, from a throwaway container:
+Close it once — before the first run or after it; the file step does nothing
+when there are no files yet. For a named volume, from a throwaway container:
 
 ```sh
-docker run --rm -v tracepad:/data busybox \
-  sh -c 'chmod 0700 /data && chmod 0600 /data/tracepad.db*'
+docker run --rm -v tracepad:/data busybox sh -c \
+  "chmod 0700 /data && find /data -maxdepth 1 -name 'tracepad.db*' -exec chmod 0600 {} \;"
 ```
 
-For a host directory:
+For a host directory — through `sudo`, because once it is `0700` and owned by
+uid 65532 your own shell can no longer list it:
 
 ```sh
 sudo chmod 0700 ./tracepad-data
-sudo chmod 0600 ./tracepad-data/tracepad.db*
+sudo find ./tracepad-data -maxdepth 1 -name 'tracepad.db*' -exec chmod 0600 {} \;
 ```
 
 Files the server writes later — a new backup at the next upgrade — are created
@@ -300,7 +305,9 @@ location / {
   large batch is then lost at the proxy with a `413` the server never sees.
 
 Then tell the server where people reach it, and it prints its setup and
-invitation links there — and stops noting plain HTTP at start:
+invitation links there — and stops noting plain HTTP at start. An `https://`
+`TRACEPAD_URL` is taken as your word that a TLS proxy fronts this process; the
+direct listener stays reachable, which is why the port stays on loopback:
 
 ```sh
 docker run -d --name tracepad -v tracepad:/data -p 127.0.0.1:4318:4318 \
@@ -376,11 +383,14 @@ migration it writes `tracepad.db.pre-<migration>.bak` beside the database — a
 full copy as it stood before the upgrade, for rolling that upgrade back by
 swapping the file in. It never deletes one, so a volume that has seen several
 upgrades holds several complete old databases, each with everything since
-erased or swept still inside it, and so does any tar of the volume. Once an
-upgrade has proved itself, delete its backups:
+erased or swept still inside it, and so does any tar of the volume. Once the
+latest upgrade has proved itself, remove them. This removes **all** of them —
+the latest upgrade's rollback copy included — names each one it removes, and
+does nothing on a volume that has none:
 
 ```sh
-docker run --rm -v tracepad:/data busybox sh -c 'ls -l /data/*.bak && rm /data/*.bak'
+docker run --rm -v tracepad:/data busybox \
+  find /data -maxdepth 1 -name 'tracepad.db.pre-*.bak' -print -exec rm {} \;
 ```
 
 A data-subject erasure does not reach these files; see
