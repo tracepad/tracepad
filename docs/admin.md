@@ -191,8 +191,8 @@ tp-pk-81c0…          checkout api  ingest,read,write  2026-09-26 17:30:05  ed@
   record. If a key was ever lost, the `unknown` keys created after it are the
   ones to rotate first.
 - **Last used** is the last request the key authenticated, admitted or
-  refused. It is written once a minute, so it may be a minute behind, and a
-  crash loses at most that minute. `never` means not since the server started
+  refused. It is written to the database once a minute; the listing includes
+  uses not yet written, and a crash loses at most that minute. `never` means not since the server started
   recording it.
 
 Taking somebody's access away — removing a membership, demoting an editor,

@@ -230,10 +230,13 @@ func TestMintingValidatesTheName(t *testing.T) {
 	rec = h.call(t, "POST", keys, mustJSON(t, map[string]any{"name": emoji + "🔑"}), asAdmin)
 	expectError(t, rec, http.StatusUnprocessableEntity, "at most 64 characters")
 
-	// A newline or a bidirectional override is refused, not rendered.
-	for _, name := range []string{"checkout\napi", "tab\there", "evil\u202Eipa", "iso\u2066late"} {
+	// A character that is not what it looks like is refused, not rendered:
+	// a newline, a tab, a line separator, bidirectional controls, and the
+	// zero-width space, joiner and byte-order mark.
+	for _, name := range []string{"checkout\napi", "tab\there", "line\u2028break",
+		"evil\u202Eipa", "iso\u2066late", "checkout\u200Bapi", "zw\u200Dj", "bom\uFEFF"} {
 		rec = h.call(t, "POST", keys, mustJSON(t, map[string]any{"name": name}), asAdmin)
-		expectError(t, rec, http.StatusUnprocessableEntity, "control character")
+		expectError(t, rec, http.StatusUnprocessableEntity, "invisible or control character")
 	}
 
 	rec = h.call(t, "POST", keys, mustJSON(t, map[string]any{"scopes": []string{"read"}}), asAdmin)
@@ -473,5 +476,113 @@ func TestShutdownKeepsToItsDeadline(t *testing.T) {
 	defer stuck.mu.Unlock()
 	if stuck.waiting < 2 {
 		t.Errorf("the writer saw %d key-use jobs, want the cancelled tick and the final flush", stuck.waiting)
+	}
+}
+
+// onceStuckWriter holds the first key-use job until its caller gives up and
+// passes every later one through: a tick caught by a busy writer, and a final
+// flush that finds it free again.
+type onceStuckWriter struct {
+	JobWriter
+	mu      sync.Mutex
+	stuck   bool
+	waiting chan struct{}
+}
+
+func (w *onceStuckWriter) Submit(ctx context.Context, job store.WriteJob) error {
+	if _, ok := job.(*store.KeyUse); ok {
+		w.mu.Lock()
+		first := !w.stuck
+		w.stuck = true
+		w.mu.Unlock()
+		if first {
+			close(w.waiting)
+			<-ctx.Done()
+			return ctx.Err()
+		}
+	}
+	return w.JobWriter.Submit(ctx, job)
+}
+
+// TestShutdownLosesNoUse: `Shutdown` handed a deadline the drain has already
+// spent, while a tick is stuck on the writer, still writes the uses — the
+// cancelled tick puts them back before the final flush takes them.
+func TestShutdownLosesNoUse(t *testing.T) {
+	h := newAccountHarness(t)
+	stuck := &onceStuckWriter{JobWriter: h.writer, waiting: make(chan struct{})}
+	h.server.writer = stuck
+	h.server.keyUseEvery = 5 * time.Millisecond
+	h.server.startKeyUseFlusher()
+
+	start := time.Now().UnixNano()
+	expectStatus(t, h.get(t, "/api/v1/traces"), 200)
+	select {
+	case <-stuck.waiting:
+	case <-time.After(2 * time.Second):
+		t.Fatal("no tick reached the writer")
+	}
+
+	spent, cancel := context.WithCancel(t.Context())
+	cancel()
+	_ = h.server.Shutdown(spent)
+
+	keys, err := h.store.ProjectKeys(h.project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range keys {
+		if key.PublicKey == testPublic && (key.LastUsedAt == nil || *key.LastUsedAt < start) {
+			t.Errorf("after Shutdown the key was last used at %v, want the request's time", key.LastUsedAt)
+		}
+	}
+}
+
+// heldWriter holds a key-use job until released, after committing it or not.
+type heldWriter struct {
+	JobWriter
+	commitFirst bool
+	arrived     chan struct{}
+	release     chan struct{}
+}
+
+func (w *heldWriter) Submit(ctx context.Context, job store.WriteJob) error {
+	if _, ok := job.(*store.KeyUse); !ok {
+		return w.JobWriter.Submit(ctx, job)
+	}
+	var err error
+	if w.commitFirst {
+		err = w.JobWriter.Submit(ctx, job)
+	}
+	close(w.arrived)
+	<-w.release
+	if !w.commitFirst {
+		err = w.JobWriter.Submit(ctx, job)
+	}
+	return err
+}
+
+// TestListingSeesAUseInFlight: while a flush is out — before its row is
+// written, and after — the listing answers the new use, never the older one
+// the row still holds (spec 045 #9).
+func TestListingSeesAUseInFlight(t *testing.T) {
+	for _, commitFirst := range []bool{false, true} {
+		h := newAccountHarness(t)
+		held := &heldWriter{JobWriter: h.writer, commitFirst: commitFirst,
+			arrived: make(chan struct{}), release: make(chan struct{})}
+		h.server.writer = held
+
+		expectStatus(t, h.get(t, "/api/v1/traces"), 200)
+		done := make(chan struct{})
+		go func() { h.server.flushKeyUses(context.Background()); close(done) }()
+		<-held.arrived
+
+		if listed := h.keysOf(t, h.project.ID)[testPublic]; listed.LastUsedAt == nil {
+			t.Errorf("commitFirst=%v: the listing lost a use that is being written", commitFirst)
+		}
+		close(held.release)
+		<-done
+		if listed := h.keysOf(t, h.project.ID)[testPublic]; listed.LastUsedAt == nil {
+			t.Errorf("commitFirst=%v: the listing lost the use once it was written", commitFirst)
+		}
 	}
 }

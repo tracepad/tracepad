@@ -45,15 +45,23 @@ func (u *keyUses) touch(publicKey string, at int64) {
 	}
 }
 
-// pending is the latest use not yet written, if any.
-func (u *keyUses) pending(publicKey string) (int64, bool) {
+// unwritten is every use not yet known to be written: seen since the last
+// flush, or in the flush that is out. A reader takes it *before* it reads the
+// stored times, so that a flush landing in between moves a value from here
+// into the row and never out of both (spec 045 #9).
+func (u *keyUses) unwritten() map[string]int64 {
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	at, ok := u.seen[publicKey]
-	if flushed, inFlight := u.flushing[publicKey]; inFlight && flushed > at {
-		return flushed, true
+	all := make(map[string]int64, len(u.seen)+len(u.flushing))
+	for publicKey, at := range u.flushing {
+		all[publicKey] = at
 	}
-	return at, ok
+	for publicKey, at := range u.seen {
+		if at > all[publicKey] {
+			all[publicKey] = at
+		}
+	}
+	return all
 }
 
 // take hands the uses seen so far to one flush. Nil when there is nothing to
@@ -125,17 +133,16 @@ func (s *Server) startKeyUseFlusher() {
 }
 
 // stopKeyUseFlusher stops the ticker, if it runs. A tick waiting on a busy
-// writer is cancelled rather than waited out, so `Shutdown` keeps to its
-// deadline: the cancelled flush puts its values back, and the final flush
-// writes them — `max` makes writing one twice harmless.
-func (s *Server) stopKeyUseFlusher(ctx context.Context) {
+// writer is cancelled rather than waited out, which returns at once — the
+// writer's `Submit` gives up on its context — so waiting for the goroutine
+// costs no time, and it is what guarantees the cancelled flush has put its
+// values back before the final flush takes them. `max` makes writing one
+// twice harmless.
+func (s *Server) stopKeyUseFlusher() {
 	s.flusherOnce.Do(func() {}) // a flusher that never started never will
 	if s.flusherStop == nil {
 		return
 	}
 	s.flusherStop()
-	select {
-	case <-s.flusherDone:
-	case <-ctx.Done():
-	}
+	<-s.flusherDone
 }

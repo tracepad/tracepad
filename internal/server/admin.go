@@ -565,6 +565,8 @@ func (s *Server) handleListKeys(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// Before the stored times, never after: see `unwritten`.
+	unwritten := s.keyUses.unwritten()
 	keys, err := s.store.ProjectKeys(project.ID)
 	if err != nil {
 		slog.Error("list keys failed", "err", err)
@@ -573,7 +575,7 @@ func (s *Server) handleListKeys(w http.ResponseWriter, r *http.Request) {
 	}
 	rendered := make([]object, 0, len(keys))
 	for _, key := range keys {
-		rendered = append(rendered, s.keyResponse(key))
+		rendered = append(rendered, keyResponse(key, unwritten))
 	}
 	writeJSON(w, http.StatusOK, object{}.put("keys", rendered))
 }
@@ -585,9 +587,11 @@ const maxKeyName = 64
 
 // readKeyName trims a key's name and checks it, answering 422 itself as an
 // account's name does (spec 045 #20). A name is printed in the listing, the
-// Keys card and an account's deletion preview, so a control character — a
-// newline that opens a line of its own — or a bidirectional override that
-// makes one key's name read as another's is refused rather than rendered.
+// Keys card and an account's deletion preview, so a character that is not
+// what it looks like is refused rather than rendered: a control character or a
+// line or paragraph separator, which opens a line of its own, and a format
+// character — a bidirectional override, a zero-width space, a joiner — which
+// makes one key's name read as another's.
 func readKeyName(w http.ResponseWriter, raw string) (string, bool) {
 	name := strings.TrimSpace(raw)
 	if utf8.RuneCountInString(name) > maxKeyName {
@@ -596,9 +600,9 @@ func readKeyName(w http.ResponseWriter, raw string) (string, bool) {
 		return "", false
 	}
 	for _, r := range name {
-		if unicode.IsControl(r) || unicode.Is(unicode.Bidi_Control, r) {
+		if unicode.IsControl(r) || unicode.In(r, unicode.Cf, unicode.Zl, unicode.Zp) {
 			writeError(w, http.StatusUnprocessableEntity,
-				fmt.Sprintf("a key's name cannot contain the control character %U", r))
+				fmt.Sprintf("a key's name cannot contain the invisible or control character %U", r))
 			return "", false
 		}
 	}
@@ -654,7 +658,7 @@ func (s *Server) handleCreateKey(w http.ResponseWriter, r *http.Request) {
 		put("name", name).
 		put("scopes", strings.Fields(store.AllScopes)).
 		put("created_at", create.CreatedAt).
-		put("created_by", mintedBy(create.Origin, standingOf(c))).
+		put("created_by", mintedBy(create.Origin, c.role)).
 		put("note", "the secret key is shown only here; only its hash is stored"))
 }
 
@@ -665,15 +669,6 @@ func keyOrigin(c *caller) store.KeyOrigin {
 		return store.OriginAccount(c.account)
 	}
 	return store.KeyOrigin{Via: store.MintedByAdminToken}
-}
-
-// standingOf is the standing a key minted by this caller has in the project
-// the caller is about: its role, which the guard resolved.
-func standingOf(c *caller) string {
-	if c.isSession() {
-		return c.role
-	}
-	return ""
 }
 
 // mintedBy renders a key's `created_by` (spec 045, API contract): the kind
@@ -693,24 +688,25 @@ func mintedBy(origin store.KeyOrigin, standing string) object {
 // keyResponse is one key as the listing answers it. Its last use is the later
 // of what is stored and what is waiting for the next flush, so a key used a
 // second ago does not read as idle (spec 045 #9).
-func (s *Server) keyResponse(key store.KeyInfo) object {
+func keyResponse(key store.KeyInfo, unwritten map[string]int64) object {
 	return object{}.
 		put("public_key", key.PublicKey).
 		put("name", key.Name).
 		put("scopes", key.Scopes).
 		put("created_at", key.CreatedAt).
 		put("created_by", mintedBy(key.CreatedBy, key.Standing)).
-		put("last_used_at", s.lastUsed(key))
+		put("last_used_at", lastUsed(key, unwritten))
 }
 
 // lastUsed is a key's last use for a response: RFC 3339, or nil — which the
-// API renders as null, its way of saying "never".
-func (s *Server) lastUsed(key store.KeyInfo) any {
+// API renders as null, its way of saying "never". `unwritten` is the uses the
+// store may not have yet, taken before the key was read.
+func lastUsed(key store.KeyInfo, unwritten map[string]int64) any {
 	at := int64(0)
 	if key.LastUsedAt != nil {
 		at = *key.LastUsedAt
 	}
-	if pending, ok := s.keyUses.pending(key.PublicKey); ok && pending > at {
+	if pending := unwritten[key.PublicKey]; pending > at {
 		at = pending
 	}
 	if at == 0 {
@@ -737,7 +733,7 @@ func (s *Server) handleRevokeKey(w http.ResponseWriter, r *http.Request) {
 	}
 	publicKey := r.PathValue("public_key")
 
-	keys, err := s.store.ProjectKeys(project.ID)
+	keys, err := s.store.ProjectKeyIDs(project.ID)
 	if err != nil {
 		slog.Error("list keys failed", "err", err)
 		writeError(w, http.StatusInternalServerError, "failed to read the keys")
@@ -745,7 +741,7 @@ func (s *Server) handleRevokeKey(w http.ResponseWriter, r *http.Request) {
 	}
 	known := false
 	for _, key := range keys {
-		known = known || key.PublicKey == publicKey
+		known = known || key == publicKey
 	}
 	if !known {
 		writeError(w, http.StatusNotFound, "this project has no key "+publicKey)

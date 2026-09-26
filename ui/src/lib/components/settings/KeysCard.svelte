@@ -3,8 +3,8 @@
 	import Plus from '@lucide/svelte/icons/plus';
 	import { said } from '$lib/accounts';
 	import { api, type DryRun, type Key, type NewKey, type Project } from '$lib/api/client.svelte';
-	import { timestamp } from '$lib/format';
-	import { lastUse, MAX_KEY_NAME, minter, outlived, tooLong } from '$lib/keys';
+	import { timeOrNever, timestamp } from '$lib/format';
+	import { MAX_KEY_NAME, minter, outlived, tooLong } from '$lib/keys';
 	import Button from '../Button.svelte';
 	import ConfirmCard from '../ConfirmCard.svelte';
 	import SecretDialog from '../SecretDialog.svelte';
@@ -149,7 +149,7 @@
 									{/if}
 								</td>
 								<td class="text-muted px-3 py-1.5 tabular-nums whitespace-nowrap">
-									{lastUse(key.last_used_at)}
+									{timeOrNever(key.last_used_at)}
 								</td>
 								<td class="px-3 py-1.5">
 									<Button

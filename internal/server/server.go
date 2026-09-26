@@ -211,7 +211,7 @@ func (s *Server) ListenAndServe() error {
 // owner, and so must the last flush.
 func (s *Server) Shutdown(ctx context.Context) error {
 	err := s.http.Shutdown(ctx)
-	s.stopKeyUseFlusher(ctx)
+	s.stopKeyUseFlusher()
 	// The caller's deadline, with a moment's grace when the drain spent all
 	// of it: the uses the drained requests made still deserve their one
 	// write, and a second is what a single small job needs.

@@ -254,6 +254,7 @@ func (s *Server) handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
 		// #10), so they are not in `would_delete`: they are listed
 		// because this is the moment an owner decides whether to rotate
 		// them.
+		unwritten := s.keyUses.unwritten()
 		minted, err := s.store.KeysMintedBy(account.ID)
 		if err != nil {
 			slog.Error("could not read the keys an account minted", "err", err)
@@ -268,7 +269,7 @@ func (s *Server) handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
 				put("public_key", one.Key.PublicKey).
 				put("name", one.Key.Name).
 				put("scopes", one.Key.Scopes).
-				put("last_used_at", s.lastUsed(one.Key)))
+				put("last_used_at", lastUsed(one.Key, unwritten)))
 		}
 		body, ok := s.fullAccount(w, account)
 		if !ok {

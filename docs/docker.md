@@ -67,6 +67,8 @@ mints or revokes keys — so from a terminal it takes the admin token:
 
 ```sh
 read -rs TRACEPAD_API_KEY && export TRACEPAD_API_KEY   # paste TRACEPAD_ADMIN_TOKEN
+docker exec -e TRACEPAD_API_KEY tracepad /tracepad projects ls --url http://localhost:4318
+ID=…   # the project's id from that listing: the token reaches every project
 docker exec -e TRACEPAD_API_KEY tracepad /tracepad keys create --project $ID --url http://localhost:4318
 # move your applications onto the new pair, then revoke the printed one
 docker exec -e TRACEPAD_API_KEY tracepad /tracepad keys rm tp-pk-… --project $ID --url http://localhost:4318
@@ -120,11 +122,10 @@ docker run -d --name tracepad -v tracepad:/data -p 127.0.0.1:4318:4318 \
   ghcr.io/tracepad/tracepad
 
 export TRACEPAD_API_KEY="$(sed -n 's/^TRACEPAD_ADMIN_TOKEN=//p' tracepad.env)"
+docker exec -e TRACEPAD_API_KEY tracepad /tracepad projects ls --url http://localhost:4318
+ID=…   # the project's id from that listing
 docker exec -e TRACEPAD_API_KEY tracepad /tracepad keys create --project $ID --url http://localhost:4318
 ```
-
-`$ID` is the project's id from `projects ls`: the token reaches every project,
-so it names the one it mints for.
 
 Without one, an owner or editor signed in to the web interface mints a pair
 in the project's settings. `TRACEPAD_PROJECTS` is not a way back in: it creates

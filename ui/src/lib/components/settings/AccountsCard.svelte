@@ -10,8 +10,7 @@
 		type Invitation,
 		type Project
 	} from '$lib/api/client.svelte';
-	import { timestamp } from '$lib/format';
-	import { lastUse } from '$lib/keys';
+	import { timeOrNever } from '$lib/format';
 	import Button from '../Button.svelte';
 	import ConfirmCard from '../ConfirmCard.svelte';
 	import AccountDialog from './AccountDialog.svelte';
@@ -125,7 +124,7 @@
 								</span>
 							</td>
 							<td class="text-muted {cell} tabular-nums whitespace-nowrap">
-								{row.last_login_at ? timestamp(row.last_login_at) : 'never'}
+								{timeOrNever(row.last_login_at)}
 							</td>
 							<td class="text-muted {cell}">{reaches(row)}</td>
 							<td class="px-3 py-1.5">
@@ -176,7 +175,7 @@
 							<li>
 								<code class="font-mono">{key.public_key}</code>
 								{key.name ? `(${key.name})` : ''} in {key.project_name}, last used
-								{lastUse(key.last_used_at)}
+								{timeOrNever(key.last_used_at)}
 							</li>
 						{/each}
 					</ul>

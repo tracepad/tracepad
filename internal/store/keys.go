@@ -189,6 +189,26 @@ func (s *Store) ProjectKeys(projectID string) ([]KeyInfo, error) {
 	return keys, rows.Err()
 }
 
+// ProjectKeyIDs lists the public halves of a project's keys, which is all a
+// revocation needs to know: whether the key is this project's, and whether it
+// is the last one.
+func (s *Store) ProjectKeyIDs(projectID string) ([]string, error) {
+	rows, err := s.db.Query(`SELECT public_key FROM api_keys WHERE project_id = ?`, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 // standing is the minter's relation to a project, most final first: an
 // account that is gone or cannot sign in is that before it is anything else,
 // and an owner has no membership row to read a role from (spec 028 #2).

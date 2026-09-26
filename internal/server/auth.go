@@ -124,8 +124,10 @@ type caller struct {
 	// project is the key's project, or — for a session — the project this
 	// request is about, resolved from the path or the header (Decision 6).
 	project *store.Project
-	// key is the project key itself, for a key: which one is asking, which
-	// is what a grant made on its behalf names (spec 045 #8).
+	// key is the project key's own row, for a key: which key is asking and
+	// what it may do. A handler that names the key — the media upload grant
+	// of spec 041 #28 — reads its public key here, and the scope check of
+	// spec 045 #13 reads its scopes.
 	key *store.KeyInfo
 	// account and session are set together, for a browser cookie.
 	account *store.Account
