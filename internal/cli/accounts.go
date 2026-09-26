@@ -630,12 +630,6 @@ func accountProjects(view accountView) string {
 	return strings.Join(named, ", ")
 }
 
-// lastLogin says "never" rather than leaving the cell blank: an account that
-// has never signed in is the state an invitation leaves it in, and a blank
-// would read as a missing value.
-func lastLogin(view accountView) string {
-	if view.LastLoginAt == "" {
-		return "never"
-	}
-	return shortTime(view.LastLoginAt)
-}
+// lastLogin is "never" for an account that has not signed in, which is the
+// state an invitation leaves it in.
+func lastLogin(view accountView) string { return timeOrNever(view.LastLoginAt) }

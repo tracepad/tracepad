@@ -35,9 +35,12 @@ The order is fixed, because it is what the six-caller test asserts status by
 status:
 
  1. the credential — an `Authorization` header beats a cookie, always
-    (Decision 5), and no credential at all is `401`;
+    (Decision 5), and no credential at all is `401`; a key's use is
+    recorded here, admitted or refused (spec 045 #9);
  2. cross-origin, for a cookie on an unsafe method (Decision 5);
- 3. the policy against the kind of caller;
+ 3. the policy against the kind of caller — which is where a key is told
+    it cannot manage keys (spec 045 #4), before a soft-deleted project's
+    key could be told anything else;
  4. the project the request is about, for a session (Decision 6).
 */
 
@@ -82,6 +85,17 @@ const (
 	// told "not a session" rather than "unauthorized", because it is a
 	// perfectly good credential asking a question it cannot have.
 	session
+	// issuer is `editor` without the project key: the three routes that
+	// list, mint and revoke a project's keys (spec 045 #4). An owner or
+	// `editor` session, or the admin token; a key is refused whatever it
+	// may do elsewhere, because a key that mints keys turns one lost key into
+	// as many credentials as its finder wants, each outliving the first
+	// one's revocation. It is its own policy so that the table says which
+	// routes these are, rather than a path comparison in the guard; the
+	// endpoint map calls it `editor`, which is what it is to everyone but a
+	// key. Spec 045's second half moves the key's half of this into the
+	// scope column as `none`.
+	issuer
 )
 
 // String names a policy for the endpoint map and for test failures.
@@ -93,7 +107,7 @@ func (p policy) String() string {
 		return "ingest"
 	case member:
 		return "member"
-	case editor:
+	case editor, issuer:
 		return "editor"
 	case owner:
 		return "owner"
@@ -110,6 +124,11 @@ type caller struct {
 	// project is the key's project, or — for a session — the project this
 	// request is about, resolved from the path or the header (Decision 6).
 	project *store.Project
+	// key is the project key's own row, for a key: which key is asking and
+	// what it may do. A handler that names the key — the media upload grant
+	// of spec 041 #28 — reads its public key here, and the scope check of
+	// spec 045 #13 reads its scopes.
+	key *store.KeyInfo
 	// account and session are set together, for a browser cookie.
 	account *store.Account
 	session *store.AccountSession
@@ -123,7 +142,7 @@ type caller struct {
 func (c *caller) isSession() bool { return c != nil && c.account != nil }
 
 // isKey reports a project key.
-func (c *caller) isKey() bool { return c != nil && !c.admin && c.account == nil && c.project != nil }
+func (c *caller) isKey() bool { return c != nil && c.key != nil }
 
 // callerKey is the context key the guard stores the caller under.
 type callerKey struct{}
@@ -233,7 +252,7 @@ func (s *Server) identify(w http.ResponseWriter, r *http.Request) (*caller, bool
 			subtle.ConstantTimeCompare([]byte(secret), []byte(s.adminToken)) == 1 {
 			return &caller{admin: true}, true
 		}
-		project, err := s.store.ProjectBySecret(secret)
+		project, key, err := s.store.KeyBySecret(secret)
 		if err != nil {
 			slog.Error("key lookup failed", "err", err)
 			writeError(w, http.StatusUnauthorized, "unauthorized")
@@ -243,7 +262,12 @@ func (s *Server) identify(w http.ResponseWriter, r *http.Request) (*caller, bool
 			writeError(w, http.StatusUnauthorized, "unauthorized")
 			return nil, false
 		}
-		return &caller{project: project}, true
+		// Here rather than once the request is admitted: the question
+		// last use answers is whether anybody still holds the key, and a
+		// lost key probing what it cannot reach is exactly that
+		// (spec 045 #9).
+		s.keyUses.touch(key.PublicKey, time.Now().UnixNano())
+		return &caller{project: project, key: key}, true
 	}
 
 	cookie, err := r.Cookie(sessionCookie)
@@ -327,8 +351,15 @@ func (s *Server) admits(w http.ResponseWriter, rt route, c *caller) bool {
 		}
 		return s.requireAdmin(w, c)
 
-	case member, editor:
+	case member, editor, issuer:
 		if c.isKey() {
+			if rt.Policy == issuer {
+				// Answered the same for a live project's key and a
+				// soft-deleted one's, because it is refused before the
+				// project is looked at (spec 045 #13).
+				writeError(w, http.StatusForbidden, keyRouteRefusal)
+				return false
+			}
 			// A project key is the administrator of its own project
 			// (spec 005 #11), which is both of these.
 			return true
@@ -382,7 +413,7 @@ func (s *Server) scope(w http.ResponseWriter, r *http.Request, rt route, c *call
 		// `/api/v1/projects` that are about no single project, so there
 		// is nothing to scope and no header to ask for.
 		return true
-	case rt.Policy == member || rt.Policy == editor:
+	case rt.Policy == member || rt.Policy == editor || rt.Policy == issuer:
 		id = r.Header.Get(projectHeader)
 		if id == "" {
 			writeError(w, http.StatusBadRequest,
@@ -425,7 +456,7 @@ func (s *Server) scope(w http.ResponseWriter, r *http.Request, rt route, c *call
 		writeError(w, http.StatusNotFound, "no such project")
 		return false
 	}
-	if rt.Policy == editor && role == store.RoleViewer {
+	if (rt.Policy == editor || rt.Policy == issuer) && role == store.RoleViewer {
 		writeError(w, http.StatusForbidden, "your role in this project is viewer")
 		return false
 	}
@@ -449,6 +480,10 @@ const projectRoutePrefix = "/api/v1/projects"
 func projectRoute(path string) bool {
 	return path == projectRoutePrefix || strings.HasPrefix(path, projectRoutePrefix+"/")
 }
+
+// keyRouteRefusal is what a key on an `issuer` route is told.
+const keyRouteRefusal = "a project key cannot list, mint or revoke keys; " +
+	"that needs an owner or editor signed in, or the admin token"
 
 // pathScoped reports a route that names its project in the path, which is
 // every route under `/api/v1/projects` but the listing and the create — and

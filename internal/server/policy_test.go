@@ -36,6 +36,26 @@ func TestEveryRouteHasAPolicy(t *testing.T) {
 	}
 }
 
+// TestKeysAreIssuedByPeople: every route that manages a project's keys declares
+// `issuer`, and nothing else does (spec 045 #4) — so a key route added later
+// with `editor` fails here instead of admitting a project key.
+func TestKeysAreIssuedByPeople(t *testing.T) {
+	h := newAccountHarness(t)
+	issuers := 0
+	for _, rt := range h.server.routes() {
+		keys := strings.HasPrefix(rt.Path, "/api/v1/projects/{id}/keys")
+		if keys != (rt.Policy == issuer) {
+			t.Errorf("%s %s has policy %s", rt.Method, rt.Path, rt.Policy)
+		}
+		if keys {
+			issuers++
+		}
+	}
+	if issuers != 3 {
+		t.Errorf("%d routes manage keys, want the three of spec 045 #4", issuers)
+	}
+}
+
 // TestEndpointMapPublishesThePolicy: `GET /api/v1` is where an agent that has
 // never seen this API finds out what it would need to call each route (spec
 // 028, API contract).
@@ -127,7 +147,12 @@ func decision(p policy, w who, path string) verdict {
 		}
 		return admitted
 
-	case editor:
+	case editor, issuer:
+		if p == issuer && w == projectKey {
+			// No key manages keys, whatever it may do elsewhere
+			// (spec 045 #4).
+			return verdict{http.StatusForbidden, "cannot list, mint or revoke keys"}
+		}
 		if w == deploymentToken && !projectRoute(path) {
 			return verdict{http.StatusUnauthorized, "unauthorized"}
 		}
@@ -308,7 +333,8 @@ func TestSessionsAreIsolatedByProject(t *testing.T) {
 }
 
 // TestKeyLoginKeepsWorking is what makes this a change the interface can
-// follow one PR later: every route a key reached before it still reaches.
+// follow one PR later: every route a key reached before it still reaches —
+// but for the three that manage keys, which no key reaches since spec 045 #4.
 func TestKeyLoginKeepsWorking(t *testing.T) {
 	// Deliberately without an admin token: this is the deployment the
 	// interface has today, and every route it reaches must go on answering.
@@ -321,12 +347,13 @@ func TestKeyLoginKeepsWorking(t *testing.T) {
 		"/api/v1/traces", "/api/v1/sessions", "/api/v1/stats", "/api/v1/system",
 		"/api/v1/prompts", "/api/v1/datasets", "/api/v1/queues", "/api/v1/score-configs",
 		"/api/v1/projects", "/api/v1/projects/" + h.project.ID,
-		"/api/v1/projects/" + h.project.ID + "/keys",
 	} {
 		if rec := h.get(t, path); rec.Code != 200 {
 			t.Errorf("GET %s with a project key = %d (%s)", path, rec.Code, rec.Body)
 		}
 	}
+	keys := "/api/v1/projects/" + h.project.ID + "/keys"
+	expectError(t, h.get(t, keys), http.StatusForbidden, "cannot list, mint or revoke keys")
 
 	// And the project listing still answers a key with its own project and
 	// no role, which is the shape the interface reads today.

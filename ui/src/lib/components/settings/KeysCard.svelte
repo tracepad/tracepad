@@ -1,10 +1,10 @@
 <script lang="ts">
-	import KeyRound from '@lucide/svelte/icons/key-round';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import Plus from '@lucide/svelte/icons/plus';
 	import { said } from '$lib/accounts';
-	import { api, type DryRun, type NewKey, type Project } from '$lib/api/client.svelte';
-	import { timestamp } from '$lib/format';
+	import { api, type DryRun, type Key, type NewKey, type Project } from '$lib/api/client.svelte';
+	import { timeOrNever, timestamp } from '$lib/format';
+	import { MAX_KEY_NAME, minter, outlived, tooLong } from '$lib/keys';
 	import Button from '../Button.svelte';
 	import ConfirmCard from '../ConfirmCard.svelte';
 	import SecretDialog from '../SecretDialog.svelte';
@@ -18,6 +18,11 @@
 	// only — because that is all the server has. Revoking asks twice: once here
 	// and, when it is the project's last key, again with the echo the server
 	// demands (spec 005 #12).
+	//
+	// Each row says which program holds the key, who minted it and whether it
+	// is still in use (spec 045 #14): the three things to know before revoking
+	// it. A key whose minter can no longer manage keys here says so on the
+	// row, because nothing revoked it when they lost access (#10).
 
 	let {
 		current,
@@ -29,11 +34,11 @@
 		readOnly = false
 	}: { current: Project; readOnly?: boolean } = $props();
 
-	type Key = { public_key: string; created_at: string };
-
 	let keys = $state.raw<Key[]>([]);
 	let loading = $state(true);
 	let minting = $state(false);
+	/** What the next key will be called: which program is going to hold it. */
+	let name = $state('');
 	let failure = $state<string | null>(null);
 	let minted = $state.raw<NewKey | null>(null);
 	/** The key a revocation is being walked through, if any. */
@@ -69,7 +74,8 @@
 		minting = true;
 		failure = null;
 		try {
-			minted = await api.createKey(current.id);
+			minted = await api.createKey(current.id, name.trim());
+			name = '';
 			await list();
 		} catch (cause) {
 			failure = said(cause, 'Failed to mint a key.');
@@ -96,7 +102,8 @@
 <Card
 	title="API keys"
 	description="Each pair authenticates ingest and every read. Rotate by minting a new one, moving
-		your exporters over, then revoking the old."
+		your exporters over, then revoking the old: the old one's last use says when nothing holds it
+		any more."
 >
 	{#if readOnly}
 		<ViewerNote what="the keys are not shown and cannot be rotated from here" />
@@ -113,33 +120,83 @@
 				Reading the keys
 			</p>
 		{:else}
-			<ul class="border-border divide-border divide-y rounded-md border">
-				{#each keys as key (key.public_key)}
-					<li class="flex flex-wrap items-center gap-2 px-3 py-2">
-						<KeyRound class="text-subtle size-4 shrink-0" />
-						<span class="min-w-0 flex-1 truncate font-mono text-sm">{key.public_key}</span>
-						<span class="text-subtle text-xs tabular-nums">{timestamp(key.created_at)}</span>
-						<Button
-							onclick={() => (
-								(notice = null), (revoking = revoking === key.public_key ? null : key.public_key)
-							)}
-							aria-expanded={revoking === key.public_key}
-						>
-							Revoke
-						</Button>
-					</li>
-				{/each}
-			</ul>
+			<div class="border-border overflow-x-auto rounded-md border">
+				<table class="w-full border-collapse text-left text-sm">
+					<thead class="text-subtle text-xs whitespace-nowrap">
+						<tr class="border-border border-b">
+							<th scope="col" class="px-3 py-1.5 font-medium">Name</th>
+							<th scope="col" class="px-3 py-1.5 font-medium">Scopes</th>
+							<th scope="col" class="px-3 py-1.5 font-medium">Created</th>
+							<th scope="col" class="px-3 py-1.5 font-medium">Last used</th>
+							<th scope="col" class="w-24 px-3 py-1.5"><span class="sr-only">Actions</span></th>
+						</tr>
+					</thead>
+					<tbody>
+						{#each keys as key (key.public_key)}
+							<tr class="border-border border-b align-top last:border-b-0">
+								<th scope="row" class="px-3 py-1.5 text-left font-normal">
+									{key.name || '—'}
+									<span class="text-subtle block font-mono text-xs break-all">{key.public_key}</span>
+								</th>
+								<td class="text-muted px-3 py-1.5">{key.scopes.join(', ')}</td>
+								<td class="text-muted px-3 py-1.5">
+									<span class="tabular-nums">{timestamp(key.created_at)}</span>
+									<span class="block text-xs">by {minter(key.created_by)}</span>
+									{#if outlived(key.created_by)}
+										<span class="text-warn block text-xs">
+											The person who minted it can no longer manage keys here.
+										</span>
+									{/if}
+								</td>
+								<td class="text-muted px-3 py-1.5 tabular-nums whitespace-nowrap">
+									{timeOrNever(key.last_used_at)}
+								</td>
+								<td class="px-3 py-1.5">
+									<Button
+										onclick={() => (
+											(notice = null),
+											(revoking = revoking === key.public_key ? null : key.public_key)
+										)}
+										aria-expanded={revoking === key.public_key}
+									>
+										Revoke
+									</Button>
+								</td>
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			</div>
 		{/if}
 
-		<Button class="mt-3" onclick={mint} busy={minting}>
-			{#if minting}
-				<LoaderCircle class="size-4 animate-spin" />
-			{:else}
-				<Plus class="size-4" />
-			{/if}
-			Mint a key pair
-		</Button>
+		<form
+			class="mt-3 flex flex-wrap gap-1.5"
+			onsubmit={(event) => (event.preventDefault(), mint())}
+		>
+			<label for="key-name" class="sr-only">Which program will hold the new key</label>
+			<input
+				id="key-name"
+				bind:value={name}
+				autocomplete="off"
+				aria-invalid={tooLong(name) || undefined}
+				placeholder="Which program will hold it, e.g. checkout api"
+				class="border-border bg-canvas placeholder:text-subtle min-w-0 flex-1 rounded-md border
+					px-2 py-1 text-sm"
+			/>
+			<Button type="submit" busy={minting} disabled={tooLong(name)}>
+				{#if minting}
+					<LoaderCircle class="size-4 animate-spin" />
+				{:else}
+					<Plus class="size-4" />
+				{/if}
+				Mint a key pair
+			</Button>
+		</form>
+		{#if tooLong(name)}
+			<p role="alert" class="text-danger mt-1 text-sm">
+				A key's name is at most {MAX_KEY_NAME} characters.
+			</p>
+		{/if}
 
 		{#if revoking}
 			{@const publicKey = revoking}

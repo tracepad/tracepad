@@ -57,7 +57,12 @@ cases an eval ran and the container that groups the traces one pass produced,
 under `/api/v1/datasets` and `/api/v1/runs`: [datasets.md](datasets.md). So
 does administration — projects, keys, retention windows and user-data erasure
 — under `/api/v1/projects`: [admin.md](admin.md) and
-[retention.md](retention.md). And so do the annotation queues — what a team
+[retention.md](retention.md). A project key administers its own project there,
+but for its keys: `GET`, `POST` and `DELETE` under `/api/v1/projects/{id}/keys`
+answer a key `403` — `a project key cannot list, mint or revoke keys; that
+needs an owner or editor signed in, or the admin token` — and the listing says
+who minted each key and when it was last used ([admin.md](admin.md#keys)). And
+so do the annotation queues — what a team
 has decided deserves a human verdict, and who has given one — under
 `/api/v1/queues`: [annotation.md](annotation.md).
 
