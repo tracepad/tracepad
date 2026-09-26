@@ -2,8 +2,10 @@ import { sveltekit } from '@sveltejs/kit/vite';
 import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'vitest/config';
 
+import { notices } from './notices.js';
+
 export default defineConfig({
-	plugins: [tailwindcss(), sveltekit()],
+	plugins: [tailwindcss(), sveltekit(), notices()],
 	build: {
 		// The bundle ships inside a binary that is downloaded once; a source
 		// map would double its size for a debugging session nobody has.

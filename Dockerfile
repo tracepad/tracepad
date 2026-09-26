@@ -50,6 +50,11 @@ COPY . .
 # served the stub page is the one thing spec 006 #9 rules out.
 COPY --from=ui /src/ui/dist ./internal/ui/dist
 
+# The licences of the Go modules compiled in and of the npm packages the bundle
+# above carries, from the module cache `go mod download` filled and the list
+# the bundle's build wrote beside it; no network (spec 020 #17).
+RUN mkdir -p /out && go run ./scripts/notices -ui internal/ui/dist/third-party-notices.txt -o /out/THIRD_PARTY_NOTICES
+
 ARG VERSION
 ARG TARGETOS
 ARG TARGETARCH
@@ -87,6 +92,7 @@ COPY --from=build --chown=65532:65532 /out/data /data
 # the NOTICE and the third-party licences travel in it (.goreleaser.yaml says
 # the same of the release archives).
 COPY LICENSE NOTICE /usr/share/doc/tracepad/
+COPY --from=build /out/THIRD_PARTY_NOTICES /usr/share/doc/tracepad/
 COPY third_party /usr/share/doc/tracepad/third_party
 
 # The two defaults that make `docker run -v tracepad:/data -p 4318:4318 …` the

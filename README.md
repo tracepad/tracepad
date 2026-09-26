@@ -248,4 +248,6 @@ invents one. See [docs/export.md](docs/export.md).
 ## License
 
 Apache-2.0. See [LICENSE](LICENSE); third-party attributions are in
-[NOTICE](NOTICE).
+[NOTICE](NOTICE). Every release archive and the image also carry
+`THIRD_PARTY_NOTICES`, the licences of the Go modules and npm packages the
+binary is built from (`make notices` writes it after `make ui`).

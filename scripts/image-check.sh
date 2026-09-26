@@ -121,11 +121,11 @@ esac
 echo "    tracepad.db is on the volume"
 
 echo "==> Apache-2.0 §4(d): the licences travel in the image"
-for file in LICENSE NOTICE third_party/langfuse/LICENSE; do
+for file in LICENSE NOTICE THIRD_PARTY_NOTICES third_party/langfuse/LICENSE; do
     docker cp "$container:/usr/share/doc/tracepad/$file" - >/dev/null 2>&1 ||
         fail "/usr/share/doc/tracepad/$file is not in the image"
 done
-echo "    LICENSE, NOTICE and third_party are present"
+echo "    LICENSE, NOTICE, THIRD_PARTY_NOTICES and third_party are present"
 
 echo "==> the probe fails honestly"
 # A probe that cannot tell a dead server from a live one is worse than none:
