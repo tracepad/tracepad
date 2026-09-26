@@ -76,11 +76,11 @@ func shaPrefixOf(mediaID string) (string, bool) {
 // hold is recorded with its first ref, under the type this batch declared
 // (Decision 25). It answers the bodies it recorded a hold of, so that the
 // batch's raw refs do not record them again.
-func writeMedia(tx *sql.Tx, projectID string, bodies []MediaBody, refs []MediaRef, now int64) (map[string]bool, error) {
+func writeMedia(tx *sql.Tx, projectID string, bodies []MediaBody, types map[string]string, refs []MediaRef,
+	now int64) (map[string]bool, error) {
 	if err := writeMediaBodies(tx, bodies, now); err != nil {
 		return nil, err
 	}
-	types := declaredTypes(bodies)
 	held := map[string]bool{}
 	for _, ref := range refs {
 		result, err := tx.Exec(
@@ -377,15 +377,9 @@ const mediaScope = `SELECT h.mime_type, h.first_at, (SELECT m.size FROM media m 
 	   FROM media_holders h
 	  WHERE h.sha256 = ? AND h.project_id = ? AND ` + holdsBody
 
-// rowQuerier is a database or a transaction, for a lookup asked both outside
-// the writer and inside a write.
-type rowQuerier interface {
-	QueryRow(query string, args ...any) *sql.Row
-}
-
 // projectHold is the one lookup of a project's hold of a body (Decision 26):
 // nil when the project holds none, or the body was collected meanwhile.
-func projectHold(q rowQuerier, projectID, sha string) (*MediaInfo, error) {
+func projectHold(q querier, projectID, sha string) (*MediaInfo, error) {
 	info := MediaInfo{SHA256: sha}
 	var size sql.NullInt64
 	err := q.QueryRow(mediaScope, sha, projectID).Scan(&info.MimeType, &info.CreatedAt, &size)
@@ -715,21 +709,25 @@ type MediaOrphan struct {
 // mediaSweep settles the pending refs the read pass found: one whose trace
 // has arrived since is kept and no longer pending, one whose trace never came
 // is deleted. It releases the holds the deleted refs leave and any hold the
-// pass found with no ref behind it, and then collects the bodies left with no
-// ref, together with any body the pass found with no ref at all.
+// pass found with no ref behind it, restores the holds the pass found missing
+// behind a ref, and then collects the bodies left with no ref, together with
+// any body the pass found with no ref at all.
 type mediaSweep struct {
 	Refs   []MediaOrphan
 	Bodies []any
-	// Holds are holder rows the pass found with no ref of their project.
-	Holds []MediaHold
+	// Stale are holder rows the pass found with no ref of their project,
+	// and Missing the pairs with a ref and no holder row.
+	Stale, Missing []MediaHold
+	Now            int64
 
-	// Dropped counts the refs deleted, and Deleted the bodies collected.
-	Dropped int64
-	Deleted int64
+	// Dropped counts the refs deleted, Released and Restored the holds
+	// deleted and written, and Deleted the bodies collected — each what
+	// this transaction did, not what the read pass found.
+	Dropped, Released, Restored, Deleted int64
 }
 
 func (m *mediaSweep) apply(tx *sql.Tx) error {
-	m.Dropped, m.Deleted = 0, 0
+	m.Dropped, m.Released, m.Restored, m.Deleted = 0, 0, 0, 0
 	var shas []any
 	released := map[string][]any{}
 	for _, ref := range m.Refs {
@@ -752,16 +750,40 @@ func (m *mediaSweep) apply(tx *sql.Tx) error {
 			return fmt.Errorf("settle media ref: %w", err)
 		}
 	}
-	for _, hold := range m.Holds {
+	for _, hold := range m.Stale {
 		released[hold.ProjectID] = append(released[hold.ProjectID], hold.SHA256)
 		shas = append(shas, hold.SHA256)
 	}
 	// One release per project; each re-checks, in this transaction, that
 	// no ref of the project is left.
 	for projectID, held := range released {
-		if _, _, err := releaseMedia(tx, projectID, held); err != nil {
+		n, _, err := releaseMedia(tx, projectID, held)
+		if err != nil {
 			return err
 		}
+		m.Released += n
+	}
+	// A ref with no hold behind it: the type the project declared is not
+	// kept anywhere else, so the hold is octet-stream — never another
+	// project's type — from now.
+	for _, hold := range m.Missing {
+		result, err := tx.Exec(
+			`INSERT INTO media_holders (sha256, project_id, mime_type, first_at)
+			 SELECT ?, ?, 'application/octet-stream', ?
+			  WHERE EXISTS (SELECT 1 FROM media WHERE sha256 = ?)
+			    AND (EXISTS (SELECT 1 FROM media_refs WHERE sha256 = ? AND project_id = ?)
+			         OR EXISTS (SELECT 1 FROM media_raw_refs WHERE sha256 = ? AND project_id = ?))
+			 ON CONFLICT DO NOTHING`,
+			hold.SHA256, hold.ProjectID, nowOr(m.Now), hold.SHA256,
+			hold.SHA256, hold.ProjectID, hold.SHA256, hold.ProjectID)
+		if err != nil {
+			return fmt.Errorf("restore media hold: %w", err)
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("restore media hold: %w", err)
+		}
+		m.Restored += n
 	}
 	shas = append(shas, m.Bodies...)
 	count, _, err := collectMedia(tx, shas)
@@ -775,22 +797,39 @@ type MediaHold struct {
 	ProjectID string
 }
 
-// staleHolds finds, among the bodies in (after, upto] — the page the look for
+// holdDrift finds, among the bodies in (after, upto] — the page the look for
 // bodies with no ref just read; an empty upto is the end of the table — the
-// holder rows with no ref of their project behind them. Every write and
-// deletion keeps the two in step in one transaction, so only a hand-edited
-// database leaves one, and the reads already refuse it (Decision 26); the
-// sweep takes it so that it does not stay.
-func (s *Store) staleHolds(after, upto string) ([]MediaHold, error) {
-	query := `SELECT h.sha256, h.project_id FROM media_holders h WHERE h.sha256 > ?`
+// holder rows with no ref of their project behind them, and the pairs with a
+// ref and no holder row. Every write and deletion keeps the two in step in
+// one transaction, so only a hand-edited database leaves either: the reads
+// refuse a hold that is not both (Decision 26), and the sweep repairs it so
+// that it does not stay.
+func (s *Store) holdDrift(after, upto string) (stale, missing []MediaHold, err error) {
+	within := `sha256 > ?`
 	args := []any{after}
 	if upto != "" {
-		query += ` AND h.sha256 <= ?`
+		within += ` AND sha256 <= ?`
 		args = append(args, upto)
 	}
-	rows, err := s.db.Query(query+` AND NOT `+holdsBody, args...)
+	if stale, err = s.holdPairs(`SELECT h.sha256, h.project_id FROM media_holders h
+		  WHERE h.`+within+` AND NOT `+holdsBody, args...); err != nil {
+		return nil, nil, fmt.Errorf("find stale media holds: %w", err)
+	}
+	if missing, err = s.holdPairs(`SELECT x.sha256, x.project_id FROM (
+		    SELECT sha256, project_id FROM media_refs WHERE `+within+`
+		    UNION SELECT sha256, project_id FROM media_raw_refs WHERE `+within+`) x
+		  WHERE NOT EXISTS (SELECT 1 FROM media_holders h
+		                     WHERE h.sha256 = x.sha256 AND h.project_id = x.project_id)`,
+		append(append([]any{}, args...), args...)...); err != nil {
+		return nil, nil, fmt.Errorf("find missing media holds: %w", err)
+	}
+	return stale, missing, nil
+}
+
+func (s *Store) holdPairs(query string, args ...any) ([]MediaHold, error) {
+	rows, err := s.db.Query(query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("find stale media holds: %w", err)
+		return nil, err
 	}
 	defer rows.Close()
 	var out []MediaHold

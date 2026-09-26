@@ -301,8 +301,9 @@ func (s *Store) tracesPreview(projectID, owned string, args ...any) (DeleteCount
 			return counts, nil, fmt.Errorf("count the %s: %w", table.name, err)
 		}
 	}
-	// The bodies only these traces point at (spec 041 #11). Raw batches
-	// are not touched here, so a body one still names is not counted.
+	// The bodies the project stops holding with these traces (spec 041
+	// #11, #27). Raw batches are not touched here, so a body one of the
+	// project's still names is not counted.
 	if counts.Media, counts.MediaBytes, err = s.mediaFreed(projectID, owned, args, "", nil); err != nil {
 		return counts, nil, err
 	}

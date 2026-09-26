@@ -391,21 +391,22 @@ func (sw *Sweeper) sweepOrphanMedia(ctx context.Context, now int64) (int64, erro
 	if err != nil {
 		return 0, err
 	}
-	// The holds of the same page with no ref behind them (spec 041 #26).
-	holds, err := sw.store.staleHolds(sw.mediaCursor, next)
+	// The holds of the same page out of step with the refs (spec 041 #26).
+	stale, missing, err := sw.store.holdDrift(sw.mediaCursor, next)
 	if err != nil {
 		return 0, err
 	}
 	sw.mediaCursor = next
-	if len(refs) == 0 && len(bodies) == 0 && len(holds) == 0 {
+	if len(refs) == 0 && len(bodies) == 0 && len(stale) == 0 && len(missing) == 0 {
 		return 0, nil
 	}
-	job := &mediaSweep{Refs: refs, Bodies: bodies, Holds: holds}
+	job := &mediaSweep{Refs: refs, Bodies: bodies, Stale: stale, Missing: missing, Now: now}
 	if err := sw.writer.Submit(ctx, job); err != nil {
 		return 0, err
 	}
-	if job.Deleted > 0 || job.Dropped > 0 || len(holds) > 0 {
-		logger().Info("collected orphaned media", "refs", job.Dropped, "holds", len(holds), "bodies", job.Deleted)
+	if job.Deleted > 0 || job.Dropped > 0 || job.Released > 0 || job.Restored > 0 {
+		logger().Info("collected orphaned media", "refs", job.Dropped, "holds_released", job.Released,
+			"holds_restored", job.Restored, "bodies", job.Deleted)
 	}
 	// Bodies only: a dropped or settled ref frees no page worth a vacuum.
 	return job.Deleted, nil

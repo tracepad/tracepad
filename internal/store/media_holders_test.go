@@ -208,41 +208,73 @@ func TestMediaScopeSeeksOnly(t *testing.T) {
 		}
 		return strings.Join(lines, "\n")
 	}
-	refs := []string{
-		"SEARCH r USING PRIMARY KEY (sha256=? AND project_id=?)",
-		"SEARCH rr USING COVERING INDEX idx_media_raw_refs_holder (sha256=? AND project_id=?)",
+	// Each step is named by its table alias and what it must seek on,
+	// not by SQLite's exact wording, which moves between versions: the
+	// holder and both ref tables by the pair, the body by its hash.
+	type seek struct{ alias, index, key string }
+	pair := []seek{
+		{"r", "", "project_id=?"},
+		{"rr", "idx_media_raw_refs_holder", "project_id=?"},
+		{"m", "", "sha256=?"},
 	}
 	for _, c := range []struct {
 		name  string
 		plan  string
-		seeks []string
+		seeks []seek
 	}{
 		{"the scope", plan(mediaScope, strings.Repeat("a", 64), "p"),
-			append([]string{"SEARCH h USING PRIMARY KEY (sha256=? AND project_id=?)",
-				"SEARCH m USING INDEX sqlite_autoindex_media_1 (sha256=?)"}, refs...)},
+			append([]seek{{"h", "", "project_id=?"}}, pair...)},
 		{"the read", plan(mediaRead, strings.Repeat("a", 64), "p"),
-			append([]string{"SEARCH h USING PRIMARY KEY (sha256=? AND project_id=?)",
-				"SEARCH m USING INDEX sqlite_autoindex_media_1 (sha256=?)"}, refs...)},
+			append([]seek{{"h", "", "project_id=?"}}, pair...)},
 		// Within the project's own rows: a hash only other projects hold
 		// reads none of theirs.
 		{"a Langfuse id", plan(mediaByID, "p", "aa", "aag"),
-			append([]string{"SEARCH h USING INDEX idx_media_holders_project (project_id=? AND sha256>? AND sha256<?)",
-				"SEARCH m USING INDEX sqlite_autoindex_media_1 (sha256=?)"}, refs...)},
+			append([]seek{{"h", "idx_media_holders_project", "project_id=?"}}, pair...)},
 	} {
-		for _, seek := range c.seeks {
-			if !strings.Contains(c.plan, seek) {
-				t.Errorf("%s: plan lacks %q:\n%s", c.name, seek, c.plan)
+		lines := strings.Split(c.plan, "\n")
+		for _, want := range c.seeks {
+			found := false
+			for _, line := range lines {
+				if strings.HasPrefix(line, "SEARCH "+want.alias+" ") &&
+					strings.Contains(line, want.index) && strings.Contains(line, want.key) {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("%s: no seek of %s on %s %s:\n%s", c.name, want.alias, want.index, want.key, c.plan)
 			}
 		}
-		for _, line := range strings.Split(c.plan, "\n") {
-			if !strings.HasPrefix(line, "SEARCH") && !strings.Contains(line, "SUBQUERY") {
-				t.Errorf("%s: plan step %q is not a seek", c.name, line)
-			}
-			if strings.Contains(line, "raw_batches") {
-				t.Errorf("%s: plan reads %q", c.name, line)
+		for _, line := range lines {
+			if strings.HasPrefix(line, "SCAN") || strings.Contains(line, "raw_batches") {
+				t.Errorf("%s: plan step %q is not a seek on the pair", c.name, line)
 			}
 		}
 	}
+}
+
+// A ref with no hold behind it — only a hand-edited database leaves one — is
+// refused by every read, and the hourly look restores the hold as
+// octet-stream, never another project's type (#26).
+func TestMediaMissingHoldIsRestored(t *testing.T) {
+	f := newSweepFixture(t)
+	b := f.secondProject(t, "b")
+	x := mediaBody(56, 4096)
+	f.arriveWithMedia(t, f.project.ID, hexTrace(1), daysAgo(1), x, false)
+	f.arriveWithMedia(t, b.ID, hexTrace(2), daysAgo(1), x, false)
+	if _, err := f.store.db.Exec(`DELETE FROM media_holders WHERE project_id = ?`, b.ID); err != nil {
+		t.Fatal(err)
+	}
+	if file, err := f.store.MediaFor(b.ID, x.SHA256); err != nil || file != nil {
+		t.Errorf("a ref with no hold read the body: %+v, %v", file, err)
+	}
+	if err := f.sweeper.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	file, err := f.store.MediaFor(b.ID, x.SHA256)
+	if err != nil || file == nil || file.MimeType != "application/octet-stream" {
+		t.Errorf("after the sweep B reads %+v, %v; want its body as application/octet-stream", file, err)
+	}
+	f.checkHolders(t, "the sweep")
 }
 
 // A hold written with no type of its own in hand is never another project's

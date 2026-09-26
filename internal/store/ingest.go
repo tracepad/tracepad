@@ -84,7 +84,8 @@ func (b *IngestBatch) apply(tx *sql.Tx) error {
 	}
 	// The bodies first: every ref below, the raw batch's included, names
 	// a row that has to exist (spec 041 #2).
-	held, err := writeMedia(tx, b.ProjectID, b.Media, b.MediaRefs, arrived)
+	types := declaredTypes(b.Media)
+	held, err := writeMedia(tx, b.ProjectID, b.Media, types, b.MediaRefs, arrived)
 	if err != nil {
 		return err
 	}
@@ -103,7 +104,7 @@ func (b *IngestBatch) apply(tx *sql.Tx) error {
 		).Scan(&rawID); err != nil {
 			return fmt.Errorf("store raw batch: %w", err)
 		}
-		if err := writeRawMediaRefs(tx, b.ProjectID, rawID, b.RawMedia, declaredTypes(b.Media), held, arrived); err != nil {
+		if err := writeRawMediaRefs(tx, b.ProjectID, rawID, b.RawMedia, types, held, arrived); err != nil {
 			return err
 		}
 	}
