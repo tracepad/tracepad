@@ -900,8 +900,8 @@ one of its references. Both are local: no server, no key. An update replaces
 the directory whole, and a `tracepad` directory the command did not install is
 refused unless `--force`. A `tracepad` symlink in your own skills directory is
 followed only into a skill the command installed, or with `--force` into an
-empty directory; every other link on the way — and any link at all with
-`--project` — is refused, `--force` or not.
+empty directory; with `--project` no link on the way is followed at all.
+Either refusal holds with `--force` too.
 Exit `1` for that refusal, `2` for a usage error.
 The whole of it is [agents.md](agents.md).
 

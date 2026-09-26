@@ -219,8 +219,8 @@ func runInstall(opt Options, args []string) error {
 // installBase is the directory the skill's own directory goes into: the
 // user's Claude Code skills by default, the project's with --project, or
 // anywhere with --dir (#6). root is where the path the command chose begins —
-// the home, the working tree, --dir itself — below which it follows no link
-// (#16).
+// the home, the working tree, --dir itself; inside a project, the install
+// follows no link below it (#16).
 func installBase(opt Options, project bool, dir string) (root, base string, err error) {
 	if dir != "" && filepath.IsAbs(dir) {
 		return filepath.Clean(dir), filepath.Clean(dir), nil
@@ -295,16 +295,19 @@ const abandonedAfter = time.Hour
 // rename, so a failure half-way leaves the old skill where it was rather than
 // a mix of two versions (#6). A target that is a symlink — a copy kept in a
 // dotfiles repository — is followed, so the copy the user maintains is the
-// one updated, not replaced by a directory of its own (#14). Since #16 that
-// is the only link an install follows: the last step of a path the user chose
-// (never one inside a project, which is somebody's checkout), and only into
-// this command's own skill, or with --force into an empty directory. A link
-// is a path to anywhere, and replacing whatever it names would delete a
-// directory the user never pointed the command at.
+// one updated, not replaced by a directory of its own (#14). Since #16 it is
+// followed only into this command's own skill, or with --force into an empty
+// directory: a link is a path to anywhere, and replacing whatever it names
+// would delete a directory the user never pointed the command at. Inside a
+// project no link is followed at all, on the way or at the end — a checkout's
+// links are its authors', not the user's — while the directories above a
+// user's own install are the user's, a linked ~/.claude included.
 func install(files fs.FS, root, target, version string, force, project bool) (outcome, error) {
 	done := outcome{target: target}
-	if err := noLinkBelow(root, filepath.Dir(target)); err != nil {
-		return done, err
+	if project {
+		if err := noLinkBelow(root, filepath.Dir(target)); err != nil {
+			return done, err
+		}
 	}
 	linked := false
 	info, err := os.Lstat(target)
@@ -434,10 +437,10 @@ func namesThisSkill(skill []byte) bool {
 	return false
 }
 
-// noLinkBelow refuses a path that goes through a link between root and dir:
-// `.claude` or `.claude/skills` as a symlink would carry the install — and
-// the deletion of what it replaces — anywhere (#16). What does not exist yet
-// is made by the install, as a directory.
+// noLinkBelow refuses a project path that goes through a link between the
+// working tree and dir: `.claude` or `.claude/skills` committed as a symlink
+// would carry the install — and the deletion of what it replaces — anywhere
+// (#16). What does not exist yet is made by the install, as a directory.
 func noLinkBelow(root, dir string) error {
 	rel, err := filepath.Rel(root, dir)
 	if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
@@ -454,8 +457,9 @@ func noLinkBelow(root, dir string) error {
 			return err
 		}
 		if info.Mode()&fs.ModeSymlink != 0 {
-			return fmt.Errorf("%s is a symlink, and an install follows none on the way to the skill "+
-				"directory; remove it, or install with --dir into the directory it points at", path)
+			return fmt.Errorf("%s is a symlink, and an install into a project follows none: "+
+				"a checkout's links are its authors', not yours; remove it, or install with --dir "+
+				"into the directory it points at", path)
 		}
 	}
 	return nil

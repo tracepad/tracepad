@@ -611,19 +611,29 @@ func TestALinkAboveTheSkillIsRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := runSkills(t, "", clone, "0.4.0", "install", "--project", "--force")
-	if got.code != exitFailure || !strings.Contains(got.stderr, "follows none on the way") {
+	if got.code != exitFailure || !strings.Contains(got.stderr, "an install into a project follows none") {
 		t.Fatalf("exit %d, stdout %q, stderr %q, want a refusal", got.code, got.stdout, got.stderr)
 	}
 	if kept, err := os.ReadFile(precious); err != nil || string(kept) != "mine" {
 		t.Errorf("the directory the link led to lost its file: %q, %v", kept, err)
 	}
-	// The same holds for the user's own skills directory.
-	home := t.TempDir()
-	if err := os.Symlink(parent, filepath.Join(home, ".claude")); err != nil {
+}
+
+// TestALinkedHomeClaudeIsTheUsers: the directories above a user's own install
+// are the user's, and `~/.claude` kept in a dotfiles repository is a common
+// way to have them — so the default install goes through the link. Only a
+// project's links are refused (#16).
+func TestALinkedHomeClaudeIsTheUsers(t *testing.T) {
+	home, dotfiles := t.TempDir(), t.TempDir()
+	if err := os.Symlink(dotfiles, filepath.Join(home, ".claude")); err != nil {
 		t.Fatal(err)
 	}
-	if got := runSkills(t, home, "", "0.4.0", "install", "--force"); got.code != exitFailure {
-		t.Errorf("under a linked ~/.claude: exit %d, stdout %q", got.code, got.stdout)
+	got := runSkills(t, home, "", "0.4.0", "install")
+	if got.code != exitOK {
+		t.Fatalf("exit %d, stdout %q, stderr %q", got.code, got.stdout, got.stderr)
+	}
+	if marked, _ := os.ReadFile(filepath.Join(dotfiles, "skills", Name, marker)); string(marked) != "0.4.0\n" {
+		t.Errorf("the skill did not land in the linked directory: marker %q", marked)
 	}
 }
 
