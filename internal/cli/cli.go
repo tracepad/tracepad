@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/tracepad/tracepad/internal/client"
+	"github.com/tracepad/tracepad/internal/termsafe"
 )
 
 // Exit codes (#12). A script has to be able to tell "no such trace" from "you
@@ -64,7 +65,11 @@ type Options struct {
 
 // run carries the resolved connection and output mode through one command.
 type run struct {
+	// opt's Stdout and Stderr are escaping writers wherever a person may be
+	// reading them (spec 004 #35). jsonOut is stdout unwrapped, and only emit
+	// writes to it: the JSON mode's bytes are the API's (#1).
 	opt        Options
+	jsonOut    io.Writer
 	url        string
 	key        string
 	forceJSON  bool
@@ -80,11 +85,7 @@ func Run(ctx context.Context, opt Options) int {
 	if opt.Now == nil {
 		opt.Now = time.Now
 	}
-	r := &run{
-		opt: opt,
-		url: firstNonEmpty(opt.Env("TRACEPAD_URL"), client.DefaultURL),
-		key: opt.Env("TRACEPAD_API_KEY"),
-	}
+	r := newRun(opt)
 
 	command, rest := split(opt.Args)
 	handler, known := r.handlers()[command]
@@ -99,6 +100,26 @@ func Run(ctx context.Context, opt Options) int {
 		return r.fail(err)
 	}
 	return ExitOK
+}
+
+// newRun is one command's state, with the writers a person reads made safe.
+func newRun(opt Options) *run {
+	r := &run{
+		opt:     opt,
+		jsonOut: opt.Stdout,
+		url:     firstNonEmpty(opt.Env("TRACEPAD_URL"), client.DefaultURL),
+		key:     opt.Env("TRACEPAD_API_KEY"),
+	}
+	// The backstop under every renderer: whatever reaches a terminal
+	// through these goes out escaped, a value a renderer printed raw
+	// included. Stdout only on a terminal, where it is the human mode or
+	// `--json`, which writes to r.jsonOut; stderr always, since it is a
+	// terminal even when stdout is a pipe.
+	if opt.TTY {
+		r.opt.Stdout = termsafe.NewWriter(opt.Stdout, faintOn, faintOff)
+	}
+	r.opt.Stderr = termsafe.NewWriter(opt.Stderr)
+	return r
 }
 
 // handlers is every subcommand this package dispatches, in one table.
@@ -349,7 +370,10 @@ func usageErrorf(format string, args ...any) error {
 
 // fail renders an error and returns the exit code it maps to.
 func (r *run) fail(err error) int {
-	fmt.Fprintf(r.opt.Stderr, "tracepad: %s\n", err)
+	// An error can quote the server, and the server can quote a trace.
+	// Its lines after the first are indented under the label, so a message
+	// cannot open a line of its own that reads like the CLI's (#35).
+	fmt.Fprintf(r.opt.Stderr, "tracepad: %s\n", block(err.Error(), "          "))
 	var usage *usageError
 	if errors.As(err, &usage) {
 		fmt.Fprint(r.opt.Stderr, "\n", Usage)
@@ -447,7 +471,7 @@ func (r *run) noteServerVersion(version string) {
 	r.warnedSkew = true
 	fmt.Fprintf(r.opt.Stderr,
 		"tracepad: warning: this is tracepad %s talking to a server running %s\n",
-		r.opt.Version, version)
+		r.opt.Version, termsafe.String(version))
 }
 
 // wantJSON reports whether this invocation prints the API's bytes rather than
@@ -465,7 +489,7 @@ func (r *run) emit(body json.RawMessage) error {
 	if strings.TrimSpace(string(body)) == "" {
 		return nil
 	}
-	_, err := fmt.Fprintf(r.opt.Stdout, "%s\n", strings.TrimRight(string(body), "\n"))
+	_, err := fmt.Fprintf(r.jsonOut, "%s\n", strings.TrimRight(string(body), "\n"))
 	return err
 }
 

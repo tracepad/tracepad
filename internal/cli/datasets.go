@@ -9,6 +9,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/tracepad/tracepad/internal/termsafe"
 )
 
 // The eval commands (spec 014, CLI contract): `datasets`, `runs` and
@@ -171,9 +173,9 @@ func (r *run) datasetsShow(ctx context.Context, args []string) error {
 		return err
 	}
 	fmt.Fprintf(r.opt.Stdout, "%s at version %d: %d items, %d runs\n",
-		envelope.Name, page.Version, envelope.ItemCount, envelope.RunCount)
+		termsafe.String(envelope.Name), page.Version, envelope.ItemCount, envelope.RunCount)
 	if envelope.Description != "" {
-		fmt.Fprintf(r.opt.Stdout, "%s\n", envelope.Description)
+		fmt.Fprintf(r.opt.Stdout, "%s\n", termsafe.Text(envelope.Description))
 	}
 	if len(page.Items) == 0 {
 		fmt.Fprintln(r.opt.Stdout, "\nno items")
@@ -351,7 +353,7 @@ func (r *run) datasetsRemoveItem(ctx context.Context, args []string) error {
 	}
 	// "archived", not "deleted": the row is still readable at every earlier
 	// version, which is the whole point of the append-only history (#5).
-	fmt.Fprintf(r.opt.Stdout, "archived %s at version %d\n", archived.ID, archived.Version)
+	fmt.Fprintf(r.opt.Stdout, "archived %s at version %d\n", termsafe.String(archived.ID), archived.Version)
 	return nil
 }
 
@@ -382,7 +384,7 @@ func (r *run) datasetsRemove(ctx context.Context, args []string) error {
 		return err
 	}
 	fmt.Fprintf(r.opt.Stdout, "deleted %s: %s and %s gone, %s released to the retention window\n",
-		deleted.Dataset, plural(int(deleted.Items), "item"), plural(int(deleted.Runs), "run"),
+		termsafe.String(deleted.Dataset), plural(int(deleted.Items), "item"), plural(int(deleted.Runs), "run"),
 		plural(int(deleted.PinnedTraces), "trace"))
 	return nil
 }
@@ -538,9 +540,9 @@ func (r *run) runsCreate(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(r.opt.Stdout, "%s\n", created.ID)
+	fmt.Fprintf(r.opt.Stdout, "%s\n", termsafe.String(created.ID))
 	fmt.Fprintf(r.opt.Stdout, "%s at version %d, %s\n",
-		created.Dataset, created.DatasetVersion, created.Status)
+		termsafe.String(created.Dataset), created.DatasetVersion, termsafe.String(created.Status))
 	return nil
 }
 
@@ -703,10 +705,10 @@ func (r *run) renderRun(body json.RawMessage) error {
 		return err
 	}
 	out := r.opt.Stdout
-	fmt.Fprintf(out, "%s %s\n", shown.ID, orDash(shown.Name))
-	fmt.Fprintf(out, "%s at version %d, %s\n", shown.Dataset, shown.DatasetVersion, shown.Status)
+	fmt.Fprintf(out, "%s %s\n", termsafe.String(shown.ID), termsafe.String(orDash(shown.Name)))
+	fmt.Fprintf(out, "%s at version %d, %s\n", termsafe.String(shown.Dataset), shown.DatasetVersion, termsafe.String(shown.Status))
 	if shown.Error != "" {
-		fmt.Fprintf(out, "error: %s\n", shown.Error)
+		fmt.Fprintf(out, "error: %s\n", block(shown.Error, "       "))
 	}
 	summary := shown.Summary
 	fmt.Fprintf(out, "\nitems:  %d of %d covered, %d missing, %d unknown traces\n",
@@ -717,7 +719,7 @@ func (r *run) renderRun(body json.RawMessage) error {
 		cost(summary.Traces.TotalCost),
 		duration(summary.Traces.LatencyMs.P50), duration(summary.Traces.LatencyMs.P95))
 	if len(summary.Models) > 0 {
-		fmt.Fprintf(out, "models: %s\n", strings.Join(summary.Models, ", "))
+		fmt.Fprintf(out, "models: %s\n", strings.Join(termsafe.All(summary.Models), ", "))
 	}
 	if len(summary.Prompts) > 0 {
 		var prompts []string
@@ -728,7 +730,7 @@ func (r *run) renderRun(body json.RawMessage) error {
 			}
 			prompts = append(prompts, prompt.Name)
 		}
-		fmt.Fprintf(out, "prompts: %s\n", strings.Join(prompts, ", "))
+		fmt.Fprintf(out, "prompts: %s\n", strings.Join(termsafe.All(prompts), ", "))
 	}
 	if len(summary.Scores) == 0 {
 		return nil
@@ -787,9 +789,9 @@ func (r *run) runsFinish(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(r.opt.Stdout, "%s is %s\n", closed.ID, closed.Status)
+	fmt.Fprintf(r.opt.Stdout, "%s is %s\n", termsafe.String(closed.ID), termsafe.String(closed.Status))
 	if closed.Error != "" {
-		fmt.Fprintf(r.opt.Stdout, "error: %s\n", closed.Error)
+		fmt.Fprintf(r.opt.Stdout, "error: %s\n", block(closed.Error, "       "))
 	}
 	return nil
 }
@@ -908,11 +910,11 @@ func (r *run) runsCompare(ctx context.Context, args []string) error {
 
 func (r *run) renderComparison(compared comparison, all bool) error {
 	out := r.opt.Stdout
-	fmt.Fprintf(out, "%s\n", compared.Dataset)
-	fmt.Fprintf(out, "a  %s  %s  version %d  %s\n",
-		compared.A.ID, orDash(compared.A.Name), compared.A.DatasetVersion, compared.A.Status)
-	fmt.Fprintf(out, "b  %s  %s  version %d  %s\n",
-		compared.B.ID, orDash(compared.B.Name), compared.B.DatasetVersion, compared.B.Status)
+	fmt.Fprintf(out, "%s\n", termsafe.String(compared.Dataset))
+	fmt.Fprintf(out, "a  %s  %s  version %d  %s\n", termsafe.String(compared.A.ID),
+		termsafe.String(orDash(compared.A.Name)), compared.A.DatasetVersion, termsafe.String(compared.A.Status))
+	fmt.Fprintf(out, "b  %s  %s  version %d  %s\n", termsafe.String(compared.B.ID),
+		termsafe.String(orDash(compared.B.Name)), compared.B.DatasetVersion, termsafe.String(compared.B.Status))
 	if !compared.SameVersion {
 		fmt.Fprintln(out, "\nthe dataset moved between the two runs; items outside the "+
 			"intersection are marked")
@@ -1028,7 +1030,7 @@ func (r *run) runsRemove(ctx context.Context, args []string) error {
 		return err
 	}
 	fmt.Fprintf(r.opt.Stdout, "deleted %s, released %s to the retention window\n",
-		deleted.ID, plural(int(deleted.ReleasedTraces), "trace"))
+		termsafe.String(deleted.ID), plural(int(deleted.ReleasedTraces), "trace"))
 	return nil
 }
 
@@ -1122,12 +1124,13 @@ func (r *run) scoreConfigsShow(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(r.opt.Stdout, "%s: %s\n", config.Name, typeAndDirection(config.DataType, config.Direction))
+	fmt.Fprintf(r.opt.Stdout, "%s: %s\n", termsafe.String(config.Name),
+		termsafe.String(typeAndDirection(config.DataType, config.Direction)))
 	if span := configRange(config); span != "" {
-		fmt.Fprintf(r.opt.Stdout, "admits: %s\n", span)
+		fmt.Fprintf(r.opt.Stdout, "admits: %s\n", termsafe.String(span))
 	}
 	if config.Description != "" {
-		fmt.Fprintf(r.opt.Stdout, "%s\n", config.Description)
+		fmt.Fprintf(r.opt.Stdout, "%s\n", termsafe.Text(config.Description))
 	}
 	return nil
 }
@@ -1162,7 +1165,8 @@ func (r *run) scoreConfigsPush(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(r.opt.Stdout, "%s: %s\n", config.Name, typeAndDirection(config.DataType, config.Direction))
+	fmt.Fprintf(r.opt.Stdout, "%s: %s\n", termsafe.String(config.Name),
+		termsafe.String(typeAndDirection(config.DataType, config.Direction)))
 	return nil
 }
 

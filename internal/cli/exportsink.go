@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/tracepad/tracepad/internal/mapping"
 )
@@ -124,9 +125,12 @@ func (s *receiver) send(ctx context.Context, row rawBatchRow, body []byte) (stri
 		if attempt == s.attempts {
 			break
 		}
+		// The batch and the attempt first, the reason after them as a block
+		// of its own: a reason that runs to several lines cannot carry the
+		// retry away from the batch it is about (#35).
 		fmt.Fprintf(s.run.opt.Stderr,
-			"tracepad: batch %d: %s; retrying in %s (attempt %d of %d)\n",
-			row.ID, err, wait, attempt+1, s.attempts)
+			"tracepad: batch %d: retrying in %s (attempt %d of %d): %s\n",
+			row.ID, wait, attempt+1, s.attempts, block(err.Error(), "          "))
 		select {
 		case <-ctx.Done():
 			return "", ctx.Err()
@@ -368,7 +372,19 @@ func firstLine(body []byte) string {
 		text = text[:index]
 	}
 	if len(text) > 200 {
-		text = text[:200] + "…"
+		// At a character boundary: half a character is a byte the
+		// terminal would be shown as `\xNN`.
+		// A character is at most utf8.UTFMax bytes, so a start is never
+		// further back than that — and a body that is not text at all is
+		// cut where it is rather than walked back to nothing.
+		cut := 200
+		for back := 0; back < utf8.UTFMax && cut > 0 && !utf8.RuneStart(text[cut]); back++ {
+			cut--
+		}
+		if !utf8.RuneStart(text[cut]) {
+			cut = 200
+		}
+		text = text[:cut] + "…"
 	}
 	return text
 }

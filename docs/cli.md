@@ -32,6 +32,16 @@ tracepad traces ls | jq '.traces' # JSON, because you are not
 That is the whole reason for the TTY check: an agent shelling out to
 `tracepad` should not have to know a flag to get machine output.
 
+A trace's text is written by whoever sends it — and by the users whose words
+your application logs — so the table never hands a terminal a control
+character. Escape sequences, other control characters (a tab or newline inside
+a name included), C1 characters and bidirectional overrides are printed as
+visible escapes: a trace named `a<ESC>[2Jb` shows as `a\x1b[2Jb`, not as a
+cleared screen. Text that is text by nature — a prompt, a diff, an error
+message such as a failed span's status — keeps its newlines and tabs, its
+lines after the first indented under the label. The JSON is untouched: it is the API's bytes, and
+escaping is the job of whatever reads it.
+
 ## Exit codes
 
 | Code | Meaning |
@@ -888,7 +898,11 @@ finds it — `~/.claude/skills/tracepad` by default, `./.claude/skills/tracepad`
 with `--project`, `DIR/tracepad` with `--dir` — and `show` prints `SKILL.md` or
 one of its references. Both are local: no server, no key. An update replaces
 the directory whole, and a `tracepad` directory the command did not install is
-refused unless `--force`. Exit `1` for that refusal, `2` for a usage error.
+refused unless `--force`. A `tracepad` symlink in your own skills directory is
+followed only into a skill the command installed, or with `--force` into an
+empty directory; with `--project` no link on the way is followed at all.
+Either refusal holds with `--force` too.
+Exit `1` for that refusal, `2` for a usage error.
 The whole of it is [agents.md](agents.md).
 
 ## Version skew

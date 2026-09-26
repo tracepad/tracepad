@@ -179,16 +179,20 @@ func runInstall(opt Options, args []string) error {
 		return usageErrorf("--dir needs a directory; it was passed empty")
 	}
 
-	base, err := installBase(opt, *project, *dir)
+	root, base, err := installBase(opt, *project, *dir)
 	if err != nil {
 		return err
 	}
 	target := filepath.Join(base, Name)
-	done, err := install(Files(), target, opt.Version, *force)
+	done, err := install(Files(), root, target, opt.Version, *force, *project)
 	if err != nil {
 		return err
 	}
 	switch {
+	case done.empty:
+		// Nothing was there to replace: the directory a link set up for
+		// the skill, waiting for it (#16).
+		fmt.Fprintf(opt.Stdout, "installed %s to %s\n", opt.Version, done.target)
 	case done.replaced && !done.marked:
 		fmt.Fprintf(opt.Stdout, "installed %s to %s, replacing a directory that was not an installed skill\n",
 			opt.Version, done.target)
@@ -214,22 +218,24 @@ func runInstall(opt Options, args []string) error {
 
 // installBase is the directory the skill's own directory goes into: the
 // user's Claude Code skills by default, the project's with --project, or
-// anywhere with --dir (#6).
-func installBase(opt Options, project bool, dir string) (string, error) {
+// anywhere with --dir (#6). root is where the path the command chose begins —
+// the home, the working tree, --dir itself; inside a project, the install
+// follows no link below it (#16).
+func installBase(opt Options, project bool, dir string) (root, base string, err error) {
 	if dir != "" && filepath.IsAbs(dir) {
-		return filepath.Clean(dir), nil
+		return filepath.Clean(dir), filepath.Clean(dir), nil
 	}
 	if dir != "" || project {
 		// Both resolve against the one working directory the command was
 		// given, so a relative --dir and --project cannot disagree.
 		wd, err := opt.Getwd()
 		if err != nil {
-			return "", fmt.Errorf("cannot tell the current directory: %w", err)
+			return "", "", fmt.Errorf("cannot tell the current directory: %w", err)
 		}
 		if dir != "" {
-			return filepath.Join(wd, dir), nil
+			return filepath.Join(wd, dir), filepath.Join(wd, dir), nil
 		}
-		return filepath.Join(wd, ".claude", "skills"), nil
+		return wd, filepath.Join(wd, ".claude", "skills"), nil
 	}
 	// os.UserHomeDir's rule, over the injected environment: USERPROFILE on
 	// Windows — where Claude Code looks, and where a HOME set by Git Bash or
@@ -242,10 +248,10 @@ func installBase(opt Options, project bool, dir string) (string, error) {
 	if home == "" {
 		// A container runs without one, and the fallback would be a write
 		// to /.claude that nobody meant (edge cases).
-		return "", fmt.Errorf("%s is not set, so there is no default place to install to; "+
+		return "", "", fmt.Errorf("%s is not set, so there is no default place to install to; "+
 			"pass --dir DIR (or --project for ./.claude/skills)", variable)
 	}
-	return filepath.Join(home, ".claude", "skills"), nil
+	return home, filepath.Join(home, ".claude", "skills"), nil
 }
 
 // outcome is what an install found and did, for the lines it prints.
@@ -258,6 +264,9 @@ type outcome struct {
 	// marker was empty).
 	replaced, marked bool
 	previous         string
+	// empty says the target was an empty directory reached through a
+	// link, which --force installs into (#16): nothing was replaced.
+	empty bool
 	// leftover is the previous copy when it could not be removed after the
 	// new one was in place: the install succeeded, and the caller says where
 	// the debris is.
@@ -286,12 +295,28 @@ const abandonedAfter = time.Hour
 // rename, so a failure half-way leaves the old skill where it was rather than
 // a mix of two versions (#6). A target that is a symlink — a copy kept in a
 // dotfiles repository — is followed, so the copy the user maintains is the
-// one updated, not replaced by a directory of its own.
-func install(files fs.FS, target, version string, force bool) (outcome, error) {
+// one updated, not replaced by a directory of its own (#14). Since #16 it is
+// followed only into this command's own skill, or with --force into an empty
+// directory: a link is a path to anywhere, and replacing whatever it names
+// would delete a directory the user never pointed the command at. Inside a
+// project no link is followed at all, on the way or at the end — a checkout's
+// links are its authors', not the user's — while the directories above a
+// user's own install are the user's, a linked ~/.claude included.
+func install(files fs.FS, root, target, version string, force, project bool) (outcome, error) {
 	done := outcome{target: target}
+	if project {
+		if err := noLinkBelow(root, filepath.Dir(target)); err != nil {
+			return done, err
+		}
+	}
+	linked := false
 	info, err := os.Lstat(target)
 	switch {
 	case err == nil && info.Mode()&fs.ModeSymlink != 0:
+		if project {
+			return done, fmt.Errorf("%s is a symlink, and an install into a project follows none: "+
+				"a checkout's links are its authors', not yours; remove it and install again", target)
+		}
 		resolved, err := filepath.EvalSymlinks(target)
 		if err != nil {
 			return done, fmt.Errorf("%s is a symlink to nothing that can be installed into: %w", target, err)
@@ -299,31 +324,35 @@ func install(files fs.FS, target, version string, force bool) (outcome, error) {
 		if info, err = os.Stat(resolved); err != nil {
 			return done, err
 		}
-		done.target, done.replaced = resolved, true
+		done.target, done.replaced, linked = resolved, true, true
 	case err == nil:
 		done.replaced = true
 	case !errors.Is(err, fs.ErrNotExist):
 		return done, err
 	}
 	if done.replaced && info.IsDir() {
-		stamp, err := os.ReadFile(filepath.Join(done.target, marker))
-		switch {
-		case err == nil:
-			done.marked = true
-			done.previous = strings.TrimSpace(string(stamp))
-		case !errors.Is(err, fs.ErrNotExist):
-			// A marker that cannot be read is not the same as no marker,
-			// and calling it "somebody else's directory" would hide why.
-			return done, fmt.Errorf("cannot read %s: %w", filepath.Join(done.target, marker), err)
+		if done.marked, done.previous, err = ours(done.target); err != nil {
+			return done, err
 		}
+	}
+	if done.replaced && !done.marked && linked {
+		// An empty directory behind a link is the one exception, with
+		// --force: it is how a copy kept in a dotfiles repository is set
+		// up in the first place, and replacing it loses nothing.
+		if !force || !emptyDir(done.target) {
+			return done, fmt.Errorf("%s is a symlink to %s, which is not a skill this command installed "+
+				"(%s); an install follows a link only into its own skill, or with --force "+
+				"into an empty directory: remove the link and install again", target, done.target, ownMark)
+		}
+		done.empty = true
 	}
 	if done.replaced && !done.marked && !force {
 		return done, fmt.Errorf("%s exists and is not a skill this command installed "+
-			"(it has no %s); pass --force to replace it", done.target, marker)
+			"(%s); pass --force to replace it", done.target, ownMark)
 	}
 
 	work := filepath.Join(filepath.Dir(done.target), holding)
-	if err := os.MkdirAll(work, 0o755); err != nil {
+	if err := holdingDir(work); err != nil {
 		return done, err
 	}
 	// Deferred first so it runs last: the holding directory goes when an
@@ -361,6 +390,117 @@ func install(files fs.FS, target, version string, force bool) (outcome, error) {
 		done.leftover = old
 	}
 	return done, nil
+}
+
+// ownMark says what makes a directory this command's own skill, for the
+// refusals that name its absence.
+const ownMark = "no SKILL.md named " + Name + " beside a " + marker
+
+// ours reports whether dir is a skill this command installed, and the version
+// its marker names ("" when the marker is empty). It takes both halves (#16):
+// SKILL.md naming this skill, and the marker. The marker alone is one file
+// with a generic name, which any repository can commit — and a link followed
+// on its word alone replaced whatever held one.
+func ours(dir string) (bool, string, error) {
+	stamp, err := os.ReadFile(filepath.Join(dir, marker))
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return false, "", nil
+	case err != nil:
+		// A marker that cannot be read is not the same as no marker,
+		// and calling it "somebody else's directory" would hide why.
+		return false, "", fmt.Errorf("cannot read %s: %w", filepath.Join(dir, marker), err)
+	}
+	skill, err := os.ReadFile(filepath.Join(dir, "SKILL.md"))
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return false, "", nil
+	case err != nil:
+		// The same rule as the marker's: unreadable is not absent, and a
+		// real install that cannot be read must not be replaced as
+		// somebody else's directory.
+		return false, "", fmt.Errorf("cannot read %s: %w", filepath.Join(dir, "SKILL.md"), err)
+	case !namesThisSkill(skill):
+		return false, "", nil
+	}
+	return true, strings.TrimSpace(string(stamp)), nil
+}
+
+// namesThisSkill reports whether a SKILL.md's frontmatter says `name:
+// tracepad`, the line every install writes.
+func namesThisSkill(skill []byte) bool {
+	lines := strings.Split(string(skill), "\n")
+	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
+		return false
+	}
+	for _, line := range lines[1:] {
+		line = strings.TrimRight(line, "\r")
+		if line == "---" {
+			return false
+		}
+		if value, found := strings.CutPrefix(line, "name:"); found {
+			return strings.Trim(strings.TrimSpace(value), `"'`) == Name
+		}
+	}
+	return false
+}
+
+// noLinkBelow refuses a project path that goes through a link between the
+// working tree and dir: `.claude` or `.claude/skills` committed as a symlink
+// would carry the install — and the deletion of what it replaces — anywhere
+// (#16). What does not exist yet is made by the install, as a directory.
+func noLinkBelow(root, dir string) error {
+	rel, err := filepath.Rel(root, dir)
+	if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
+		return nil
+	}
+	path := root
+	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+		path = filepath.Join(path, part)
+		info, err := os.Lstat(path)
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if info.Mode()&fs.ModeSymlink != 0 {
+			return fmt.Errorf("%s is a symlink, and an install into a project follows none: "+
+				"a checkout's links are its authors', not yours; remove it, or install with --dir "+
+				"into the directory it points at", path)
+		}
+	}
+	return nil
+}
+
+// emptyDir reports whether path is a directory with nothing in it.
+func emptyDir(path string) bool {
+	entries, err := os.ReadDir(path)
+	return err == nil && len(entries) == 0
+}
+
+// holdingDir makes the holding directory, or checks that the one already
+// there is a directory rather than a link to one: an install deletes what it
+// finds in it, and through a link that would be the contents of wherever the
+// link points (#16).
+func holdingDir(work string) error {
+	if err := os.MkdirAll(filepath.Dir(work), 0o755); err != nil {
+		return err
+	}
+	err := os.Mkdir(work, 0o755)
+	if err == nil || !errors.Is(err, fs.ErrExist) {
+		return err
+	}
+	info, err := os.Lstat(work)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		// Lstat does not follow: a link to a directory lands here too.
+		return fmt.Errorf("%s is where an install stages its copy, and it is not a directory "+
+			"(a symlink, or a file); remove it and install again", work)
+	}
+	return nil
 }
 
 // sweep removes the staging copies an install killed half-way left behind —

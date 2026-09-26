@@ -8,6 +8,8 @@ import (
 	"strings"
 	"text/tabwriter"
 	"time"
+
+	"github.com/tracepad/tracepad/internal/termsafe"
 )
 
 // Human-readable output (spec 004 #12). The JSON mode prints the API's bytes
@@ -23,12 +25,19 @@ type table struct {
 func newTable(out io.Writer, headers ...string) *table {
 	t := &table{writer: tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)}
 	if len(headers) > 0 {
-		fmt.Fprintln(t.writer, strings.Join(headers, "\t"))
+		fmt.Fprintln(t.writer, strings.Join(termsafe.All(headers), "\t"))
 	}
 	return t
 }
 
+// row writes one row of cells, each made terminal-safe here rather than at
+// every call site: a cell is where most of what the server sends is printed,
+// and one tab in one of them would shift every column after it (#35). In
+// place, so a row of clean cells allocates nothing for it.
 func (t *table) row(cells ...string) {
+	for i, cell := range cells {
+		cells[i] = termsafe.String(cell)
+	}
 	fmt.Fprintln(t.writer, strings.Join(cells, "\t"))
 }
 
@@ -149,7 +158,7 @@ func renderTraceTable(out io.Writer, rows []traceRow, colour bool) {
 			// A line with no tab in it is one trailing cell, which
 			// tabwriter leaves out of every column: the snippet cannot
 			// widen the table it sits under.
-			t.line(dim(matchLine(*row.Match), colour))
+			t.line(dim(termsafe.String(matchLine(*row.Match)), colour))
 		}
 	}
 	t.flush()
@@ -166,6 +175,8 @@ func matchLine(match traceMatch) string {
 }
 
 // dim renders text in the terminal's faint style, and plainly everywhere else.
+// The text has been through termsafe already: these two sequences are the only
+// escapes a human-mode run writes.
 // The one place this binary colours anything: the snippet is annotation under a
 // row, and on a terminal the difference between annotation and data is what
 // keeps the table readable. Piped output is bytes somebody parses (#12), so it
@@ -174,29 +185,36 @@ func dim(text string, colour bool) string {
 	if !colour {
 		return text
 	}
-	return "\x1b[2m" + text + "\x1b[0m"
+	return faintOn + text + faintOff
 }
 
+// faintOn and faintOff are the pair dim writes, which the escaping writer
+// under a terminal run lets through (#35).
+const (
+	faintOn  = "\x1b[2m"
+	faintOff = "\x1b[0m"
+)
+
 func renderTraceDetail(out io.Writer, trace traceDetail) {
-	fmt.Fprintf(out, "trace %s\n", trace.ID)
-	fmt.Fprintf(out, "  name        %s\n", orDash(trace.Name))
-	fmt.Fprintf(out, "  environment %s\n", orDash(trace.Environment))
+	fmt.Fprintf(out, "trace %s\n", termsafe.String(trace.ID))
+	fmt.Fprintf(out, "  name        %s\n", termsafe.String(orDash(trace.Name)))
+	fmt.Fprintf(out, "  environment %s\n", termsafe.String(orDash(trace.Environment)))
 	// Beside the environment, and only when the trace carried them: a
 	// deployment nobody named is not a deployment called "-".
 	if trace.Release != "" {
-		fmt.Fprintf(out, "  release     %s\n", trace.Release)
+		fmt.Fprintf(out, "  release     %s\n", termsafe.String(trace.Release))
 	}
 	if trace.Version != "" {
-		fmt.Fprintf(out, "  version     %s\n", trace.Version)
+		fmt.Fprintf(out, "  version     %s\n", termsafe.String(trace.Version))
 	}
 	if trace.UserID != "" {
-		fmt.Fprintf(out, "  user        %s\n", trace.UserID)
+		fmt.Fprintf(out, "  user        %s\n", termsafe.String(trace.UserID))
 	}
 	if trace.SessionID != "" {
-		fmt.Fprintf(out, "  session     %s\n", trace.SessionID)
+		fmt.Fprintf(out, "  session     %s\n", termsafe.String(trace.SessionID))
 	}
 	if len(trace.Tags) > 0 {
-		fmt.Fprintf(out, "  tags        %s\n", strings.Join(trace.Tags, ", "))
+		fmt.Fprintf(out, "  tags        %s\n", strings.Join(termsafe.All(trace.Tags), ", "))
 	}
 	fmt.Fprintf(out, "  started     %s\n", shortTime(trace.Timestamp))
 	fmt.Fprintf(out, "  latency     %s\n", duration(trace.LatencyMs))
@@ -204,13 +222,13 @@ func renderTraceDetail(out io.Writer, trace traceDetail) {
 	fmt.Fprintf(out, "  cost        %s\n", cost(trace.TotalCost))
 	fmt.Fprintf(out, "  errors      %d of %d observations\n", trace.ErrorCount, trace.ObservationCount)
 	if len(trace.Metadata) > 0 {
-		fmt.Fprintf(out, "  metadata    %s\n", compact(trace.Metadata))
+		fmt.Fprintf(out, "  metadata    %s\n", termsafe.String(compact(trace.Metadata)))
 	}
 	if trace.Expansion != nil {
 		// Saying nothing here would leave a reader of `--full` wondering
 		// where the payloads went.
 		fmt.Fprintf(out, "\n  %d payloads were not expanded: %s\n",
-			trace.Expansion.Payloads, trace.Expansion.Reason)
+			trace.Expansion.Payloads, termsafe.String(trace.Expansion.Reason))
 	}
 	fmt.Fprintln(out)
 	for _, node := range trace.Observations {
@@ -248,9 +266,9 @@ func renderObservation(out io.Writer, node observationNode, indent string) {
 	if node.Prompt != nil {
 		parts = append(parts, "prompt "+node.Prompt.String())
 	}
-	fmt.Fprintf(out, "%s%s %s  [%s]\n", indent, marker, strings.Join(parts, "  "), node.ID)
+	fmt.Fprintf(out, "%s%s %s  [%s]\n", indent, marker, termsafe.String(strings.Join(parts, "  ")), termsafe.String(node.ID))
 	if node.StatusMessage != "" {
-		fmt.Fprintf(out, "%s    status: %s\n", indent, node.StatusMessage)
+		fmt.Fprintf(out, "%s    status: %s\n", indent, block(node.StatusMessage, indent+"            "))
 	}
 	for _, payload := range []struct {
 		label string
@@ -263,11 +281,21 @@ func renderObservation(out io.Writer, node observationNode, indent string) {
 		if len(payload.value) == 0 {
 			continue
 		}
-		fmt.Fprintf(out, "%s    %s: %s\n", indent, payload.label, payloadText(payload.value))
+		// JSON text escapes C0 and DEL but not C1, and a preview is
+		// JSON text cut short.
+		fmt.Fprintf(out, "%s    %s: %s\n", indent, payload.label, termsafe.String(payloadText(payload.value)))
 	}
 	for _, child := range node.Children {
 		renderObservation(out, child, indent+"  ")
 	}
+}
+
+// block renders a message that is text by nature — an error, often a
+// traceback — keeping its lines and indenting each one after the first under
+// the label it follows, so the tree or the view around it still reads as one
+// (#35).
+func block(text, indent string) string {
+	return strings.ReplaceAll(termsafe.Text(text), "\n", "\n"+indent)
 }
 
 // truncationMarker is what the server puts in place of a payload too big for
@@ -319,7 +347,9 @@ func shortTime(value string) string {
 	}
 	parsed, err := time.Parse(time.RFC3339Nano, value)
 	if err != nil {
-		return value
+		// The server's text, printed inside a line (#35). Only here: an
+		// instant that parsed is this function's own formatting.
+		return termsafe.String(value)
 	}
 	return parsed.UTC().Format("2006-01-02 15:04:05")
 }

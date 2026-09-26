@@ -6,6 +6,8 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+
+	"github.com/tracepad/tracepad/internal/termsafe"
 )
 
 // The annotation commands (spec 024 #9): `queues`. Between them they are the
@@ -135,7 +137,8 @@ func (r *run) queuesPut(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(r.opt.Stdout, "%s asks for %s\n", queue.Name, strings.Join(queue.ScoreConfigs, ", "))
+	fmt.Fprintf(r.opt.Stdout, "%s asks for %s\n", termsafe.String(queue.Name),
+		strings.Join(termsafe.All(queue.ScoreConfigs), ", "))
 	return nil
 }
 
@@ -178,7 +181,7 @@ func (r *run) queuesRemove(ctx context.Context, args []string) error {
 		return err
 	}
 	fmt.Fprintf(r.opt.Stdout, "deleted %s: %s gone, the scores stay on their traces\n",
-		deleted.Name, plural(int(deleted.WouldDelete.Items), "item"))
+		termsafe.String(deleted.Name), plural(int(deleted.WouldDelete.Items), "item"))
 	return nil
 }
 
@@ -279,10 +282,10 @@ func (r *run) queuesAddOne(ctx context.Context, name, trace, observation string)
 		return err
 	}
 	if added.Existing > 0 {
-		fmt.Fprintf(r.opt.Stdout, "already in %s as %s\n", name, first(added.IDs))
+		fmt.Fprintf(r.opt.Stdout, "already in %s as %s\n", name, termsafe.String(first(added.IDs)))
 		return nil
 	}
-	fmt.Fprintf(r.opt.Stdout, "added to %s as %s\n", name, first(added.IDs))
+	fmt.Fprintf(r.opt.Stdout, "added to %s as %s\n", name, termsafe.String(first(added.IDs)))
 	return nil
 }
 
@@ -419,7 +422,7 @@ func (r *run) queuesNext(ctx context.Context, args []string) error {
 	}
 	item := *answer.Item
 	fmt.Fprintf(r.opt.Stdout, "%s  %s\nclaimed until %s\n",
-		item.ID, itemTarget(item), shortTime(item.ClaimedUntil))
+		termsafe.String(item.ID), termsafe.String(itemTarget(item)), shortTime(item.ClaimedUntil))
 	return nil
 }
 
@@ -460,6 +463,6 @@ func (r *run) queuesFinish(ctx context.Context, verb string, args []string) erro
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(r.opt.Stdout, "%s is %s\n", item.ID, item.Status)
+	fmt.Fprintf(r.opt.Stdout, "%s is %s\n", termsafe.String(item.ID), termsafe.String(item.Status))
 	return nil
 }

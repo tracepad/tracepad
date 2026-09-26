@@ -8,6 +8,8 @@ import (
 
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/tracepad/tracepad/internal/termsafe"
 )
 
 // The six eval tools (spec 014 #22), all read-only. "Why did the eval regress"
@@ -491,7 +493,8 @@ func summarizeRuns(body json.RawMessage) string {
 	if len(parsed.Runs) == 0 {
 		return "No runs yet."
 	}
-	return fmt.Sprintf("%d runs, newest %s (%s).", len(parsed.Runs), parsed.Runs[0].ID, parsed.Runs[0].Status)
+	return fmt.Sprintf("%d runs, newest %s (%s).", len(parsed.Runs),
+		termsafe.String(parsed.Runs[0].ID), termsafe.String(parsed.Runs[0].Status))
 }
 
 func summarizeRun(body json.RawMessage) string {
@@ -513,7 +516,7 @@ func summarizeRun(body json.RawMessage) string {
 		return "one run"
 	}
 	return fmt.Sprintf("A %s run of %q: %d of %d cases covered by %d traces, %d failed.",
-		parsed.Status, parsed.Dataset, parsed.Summary.Items.Covered, parsed.Summary.Items.Total,
+		termsafe.String(parsed.Status), parsed.Dataset, parsed.Summary.Items.Covered, parsed.Summary.Items.Total,
 		parsed.Summary.Traces.Count, parsed.Summary.Traces.ErrorCount)
 }
 

@@ -345,6 +345,78 @@ func TestASymlinkedTargetIsFollowed(t *testing.T) {
 	}
 }
 
+// TestALinkIsNotFollowedIntoSomebodyElsesDirectory: a link at the target that
+// points at a directory this command did not install is refused with --force
+// as well as without it, and the directory it points at keeps every file
+// (#16). The link could come from a cloned repository's `.claude/skills/`.
+func TestALinkIsNotFollowedIntoSomebodyElsesDirectory(t *testing.T) {
+	victim, dir := t.TempDir(), t.TempDir()
+	precious := filepath.Join(victim, "precious.txt")
+	if err := os.WriteFile(precious, []byte("keep me"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, Name)
+	if err := os.Symlink(victim, link); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"install", "--dir", dir},
+		{"install", "--dir", dir, "--force"},
+	} {
+		got := runSkills(t, "", "", "0.4.0", args...)
+		if got.code != exitFailure {
+			t.Fatalf("%v: exit %d, stdout %q, want a refusal", args, got.code, got.stdout)
+		}
+		// Both paths named, and no advice to force it: forcing is what
+		// does not work here.
+		if !strings.Contains(got.stderr, link) || !strings.Contains(got.stderr, "is a symlink to") ||
+			strings.Contains(got.stderr, "pass --force") {
+			t.Errorf("%v: stderr %q", args, got.stderr)
+		}
+	}
+	if kept, err := os.ReadFile(precious); err != nil || string(kept) != "keep me" {
+		t.Errorf("the linked directory lost its file: %q, %v", kept, err)
+	}
+	if _, err := os.Stat(filepath.Join(victim, "SKILL.md")); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the skill was written into the linked directory: %v", err)
+	}
+	if info, err := os.Lstat(link); err != nil || info.Mode()&fs.ModeSymlink == 0 {
+		t.Errorf("the link was replaced: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(filepath.Dir(victim), holding)); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("a holding directory was made beside the linked directory: %v", err)
+	}
+}
+
+// TestAHoldingDirectoryThatIsALinkIsRefused: an install sweeps its holding
+// directory, and a link planted in its place would point that sweep at
+// somebody else's files (#16).
+func TestAHoldingDirectoryThatIsALinkIsRefused(t *testing.T) {
+	victim, dir := t.TempDir(), t.TempDir()
+	// Old enough that a sweep would take it for a killed install's copy.
+	stale := filepath.Join(victim, "stale")
+	if err := os.Mkdir(stale, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-2 * abandonedAfter)
+	if err := os.Chtimes(stale, old, old); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(victim, filepath.Join(dir, holding)); err != nil {
+		t.Fatal(err)
+	}
+	got := runSkills(t, "", "", "0.4.0", "install", "--dir", dir, "--force")
+	if got.code != exitFailure || !strings.Contains(got.stderr, "not a directory") {
+		t.Fatalf("exit %d, stderr %q, want a refusal", got.code, got.stderr)
+	}
+	if _, err := os.Stat(stale); err != nil {
+		t.Errorf("the sweep went through the link: %v", err)
+	}
+	if entries, _ := os.ReadDir(victim); len(entries) != 1 {
+		t.Errorf("the install wrote through the link: %v", entries)
+	}
+}
+
 // TestTheMarkerIsReadHonestly: an empty marker is still a marker, and one that
 // cannot be read is an error saying so, not "somebody else's directory".
 func TestTheMarkerIsReadHonestly(t *testing.T) {
@@ -458,5 +530,176 @@ func TestARelativeDirResolvesLikeProject(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(wd, "agents", Name, "SKILL.md")); err != nil {
 		t.Errorf("a relative --dir did not resolve against the working directory: %v", err)
+	}
+}
+
+// TestForceInstallsThroughALinkToAnEmptyDirectory: the one link --force
+// follows into an unmarked directory is one to an empty directory — how a copy
+// kept in a dotfiles repository is set up in the first place, with nothing to
+// lose (#16). Without --force it is refused like any other.
+func TestForceInstallsThroughALinkToAnEmptyDirectory(t *testing.T) {
+	kept, dir := t.TempDir(), t.TempDir()
+	link := filepath.Join(dir, Name)
+	if err := os.Symlink(kept, link); err != nil {
+		t.Fatal(err)
+	}
+	if got := runSkills(t, "", "", "0.4.0", "install", "--dir", dir); got.code != exitFailure ||
+		!strings.Contains(got.stderr, "is a symlink to") {
+		t.Fatalf("without --force: exit %d, stderr %q, want a refusal", got.code, got.stderr)
+	}
+	got := runSkills(t, "", "", "0.4.0", "install", "--dir", dir, "--force")
+	if got.code != exitOK || strings.Contains(got.stdout, "replacing") {
+		t.Fatalf("--force: exit %d, stdout %q, stderr %q", got.code, got.stdout, got.stderr)
+	}
+	if marked, _ := os.ReadFile(filepath.Join(kept, marker)); string(marked) != "0.4.0\n" {
+		t.Errorf("the linked directory was not installed into: marker %q", marked)
+	}
+	if info, err := os.Lstat(link); err != nil || info.Mode()&fs.ModeSymlink == 0 {
+		t.Errorf("the link was replaced: %v", err)
+	}
+}
+
+// TestAProjectInstallFollowsNoLink: a checkout's links are its authors'. One
+// that commits `.claude/skills/tracepad -> ../..` and a `.version` at its root
+// would otherwise have its own clone — and the work in it — replaced by the
+// skill, with no --force needed (#16).
+func TestAProjectInstallFollowsNoLink(t *testing.T) {
+	repo := t.TempDir()
+	work := filepath.Join(repo, "work.txt")
+	for path, content := range map[string]string{work: "uncommitted", filepath.Join(repo, marker): "0.1.0\n"} {
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(repo, ".claude", "skills"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("../..", filepath.Join(repo, ".claude", "skills", Name)); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"install", "--project"}, {"install", "--project", "--force"}} {
+		got := runSkills(t, "", repo, "0.4.0", args...)
+		if got.code != exitFailure || !strings.Contains(got.stderr, "an install into a project follows none") {
+			t.Fatalf("%v: exit %d, stdout %q, stderr %q, want a refusal", args, got.code, got.stdout, got.stderr)
+		}
+	}
+	if kept, err := os.ReadFile(work); err != nil || string(kept) != "uncommitted" {
+		t.Errorf("the checkout lost its work: %q, %v", kept, err)
+	}
+	if _, err := os.Stat(filepath.Join(repo, "SKILL.md")); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the skill was written over the checkout: %v", err)
+	}
+}
+
+// TestALinkAboveTheSkillIsRefused: `.claude/skills` as a link carries the
+// install out of the tree, onto a real `tracepad` directory somewhere else —
+// a sibling checkout of the same name — which --force would replace (#16).
+func TestALinkAboveTheSkillIsRefused(t *testing.T) {
+	parent := t.TempDir()
+	precious := filepath.Join(parent, Name, "precious.txt")
+	if err := os.MkdirAll(filepath.Dir(precious), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(precious, []byte("mine"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	clone := filepath.Join(parent, "clone")
+	if err := os.MkdirAll(filepath.Join(clone, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("../..", filepath.Join(clone, ".claude", "skills")); err != nil {
+		t.Fatal(err)
+	}
+	got := runSkills(t, "", clone, "0.4.0", "install", "--project", "--force")
+	if got.code != exitFailure || !strings.Contains(got.stderr, "an install into a project follows none") {
+		t.Fatalf("exit %d, stdout %q, stderr %q, want a refusal", got.code, got.stdout, got.stderr)
+	}
+	if kept, err := os.ReadFile(precious); err != nil || string(kept) != "mine" {
+		t.Errorf("the directory the link led to lost its file: %q, %v", kept, err)
+	}
+}
+
+// TestALinkedHomeClaudeIsTheUsers: the directories above a user's own install
+// are the user's, and `~/.claude` kept in a dotfiles repository is a common
+// way to have them — so the default install goes through the link. Only a
+// project's links are refused (#16).
+func TestALinkedHomeClaudeIsTheUsers(t *testing.T) {
+	home, dotfiles := t.TempDir(), t.TempDir()
+	if err := os.Symlink(dotfiles, filepath.Join(home, ".claude")); err != nil {
+		t.Fatal(err)
+	}
+	got := runSkills(t, home, "", "0.4.0", "install")
+	if got.code != exitOK {
+		t.Fatalf("exit %d, stdout %q, stderr %q", got.code, got.stdout, got.stderr)
+	}
+	if marked, _ := os.ReadFile(filepath.Join(dotfiles, "skills", Name, marker)); string(marked) != "0.4.0\n" {
+		t.Errorf("the skill did not land in the linked directory: marker %q", marked)
+	}
+}
+
+// TestAMarkerAloneIsNotASkill: `.version` is a generic name any directory can
+// hold; a link is followed only into one whose SKILL.md names this skill
+// (#16). A dotfiles link to a real install still is.
+func TestAMarkerAloneIsNotASkill(t *testing.T) {
+	home, elsewhere := t.TempDir(), t.TempDir()
+	for name, content := range map[string]string{marker: "1.0.0\n", "notes.txt": "keep me"} {
+		if err := os.WriteFile(filepath.Join(elsewhere, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	skills := filepath.Join(home, ".claude", "skills")
+	if err := os.MkdirAll(skills, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(skills, Name)
+	if err := os.Symlink(elsewhere, link); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"install"}, {"install", "--force"}} {
+		if got := runSkills(t, home, "", "0.4.0", args...); got.code != exitFailure ||
+			!strings.Contains(got.stderr, "is a symlink to") {
+			t.Fatalf("%v: exit %d, stdout %q, stderr %q, want a refusal", args, got.code, got.stdout, got.stderr)
+		}
+	}
+	if kept, err := os.ReadFile(filepath.Join(elsewhere, "notes.txt")); err != nil || string(kept) != "keep me" {
+		t.Errorf("the linked directory lost its file: %q, %v", kept, err)
+	}
+
+	// The dotfiles copy, a real install, linked into the same place.
+	dotfiles := t.TempDir()
+	if got := runSkills(t, "", "", "0.3.1", "install", "--dir", dotfiles); got.code != exitOK {
+		t.Fatal(got.stderr)
+	}
+	if err := os.Remove(link); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(dotfiles, Name), link); err != nil {
+		t.Fatal(err)
+	}
+	if got := runSkills(t, home, "", "0.4.0", "install"); got.code != exitOK ||
+		!strings.Contains(got.stdout, "updated 0.3.1 → 0.4.0") {
+		t.Errorf("the dotfiles link: exit %d, stdout %q, stderr %q", got.code, got.stdout, got.stderr)
+	}
+}
+
+// TestAnUnreadableSkillIsAnError: SKILL.md that cannot be read is not the
+// same as none, and a real install behind it is not replaced as somebody
+// else's directory, even with --force (#16).
+func TestAnUnreadableSkillIsAnError(t *testing.T) {
+	dir := t.TempDir()
+	if got := runSkills(t, "", "", "0.3.1", "install", "--dir", dir); got.code != exitOK {
+		t.Fatal(got.stderr)
+	}
+	skill := filepath.Join(dir, Name, "SKILL.md")
+	if err := os.Chmod(skill, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(skill, 0o644) })
+	if _, err := os.ReadFile(skill); err == nil {
+		t.Skip("running as a user every file is readable to")
+	}
+	got := runSkills(t, "", "", "0.4.0", "install", "--dir", dir, "--force")
+	if got.code != exitFailure || !strings.Contains(got.stderr, "cannot read") {
+		t.Errorf("exit %d, stdout %q, stderr %q, want the read error", got.code, got.stdout, got.stderr)
 	}
 }

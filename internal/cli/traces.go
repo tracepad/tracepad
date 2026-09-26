@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/tracepad/tracepad/internal/config"
+	"github.com/tracepad/tracepad/internal/termsafe"
 )
 
 // `traces ls`, `traces show`, `traces last` and `tail` — the commands the
@@ -169,7 +170,7 @@ func (r *run) removeOneTrace(ctx context.Context, id string, yes bool) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(r.opt.Stdout, "deleted trace %s\n", result.ID)
+	fmt.Fprintf(r.opt.Stdout, "deleted trace %s\n", termsafe.String(result.ID))
 	renderDeleted(r.opt.Stdout, result.Deleted)
 	return nil
 }
@@ -363,10 +364,10 @@ func (r *run) tracesList(ctx context.Context, args []string) error {
 // not have.
 func walkOn(r *run, forward string, next, prev *string) {
 	if next != nil {
-		fmt.Fprintf(r.opt.Stdout, "\n%s: --cursor %s\n", forward, *next)
+		fmt.Fprintf(r.opt.Stdout, "\n%s: --cursor %s\n", forward, termsafe.String(*next))
 	}
 	if prev != nil {
-		fmt.Fprintf(r.opt.Stdout, "newer: --newer --cursor %s\n", *prev)
+		fmt.Fprintf(r.opt.Stdout, "newer: --newer --cursor %s\n", termsafe.String(*prev))
 	}
 }
 
@@ -675,7 +676,7 @@ func (r *run) poll(ctx context.Context, query url.Values, window *tailWindow) ([
 
 func (r *run) printTailed(entry tailed) {
 	if r.wantJSON() {
-		fmt.Fprintf(r.opt.Stdout, "%s\n", entry.raw)
+		_ = r.emit(entry.raw)
 		return
 	}
 	row := entry.row
@@ -684,6 +685,6 @@ func (r *run) printTailed(entry tailed) {
 		status = fmt.Sprintf("%d errors", row.ErrorCount)
 	}
 	fmt.Fprintf(r.opt.Stdout, "%s  %s  %s  %s  %s  %s\n",
-		shortTime(row.Timestamp), row.ID, orDash(row.Name),
-		orDash(row.Environment), status, duration(row.LatencyMs))
+		shortTime(row.Timestamp), termsafe.String(row.ID), termsafe.String(orDash(row.Name)),
+		termsafe.String(orDash(row.Environment)), status, duration(row.LatencyMs))
 }

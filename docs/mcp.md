@@ -166,7 +166,9 @@ Tool inputs mirror their endpoint's query parameters — same names, same
 meanings — with the constraints stated in the schema: enums for `status`,
 `type`, `group_by` and `data_type`, hex patterns for ids, `limit` bounded at
 500. Every tool declares an `outputSchema` and returns the endpoint's JSON as
-`structuredContent`, with a one-line summary in `content`.
+`structuredContent`, with a one-line summary in `content`. A value from a trace
+inside that summary — a name, an id — has its control characters shown as
+escapes (`\x1b`), the way the CLI's tables show them; the JSON is the API's.
 
 `list_traces`, `search` and `get_last_trace` take four filters for what the
 wire already carries:

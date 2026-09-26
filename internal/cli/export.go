@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/tracepad/tracepad/internal/client"
+	"github.com/tracepad/tracepad/internal/termsafe"
 )
 
 // `tracepad export --otlp` (spec 019 #1, #5, #6): the way out. It replays the
@@ -301,7 +302,7 @@ func (r *run) replayOne(ctx context.Context, sink destination, row rawBatchRow,
 		// its own mapping, not a failure of this transfer: it has the
 		// bytes. Counted and passed on, never retried (spec 019 #6).
 		summary.PartialSuccess++
-		fmt.Fprintf(r.opt.Stderr, "tracepad: batch %d: the receiver reported %s\n", row.ID, partial)
+		fmt.Fprintf(r.opt.Stderr, "tracepad: batch %d: the receiver reported %s\n", row.ID, termsafe.String(partial))
 	}
 
 	summary.Sent++
@@ -312,7 +313,7 @@ func (r *run) replayOne(ctx context.Context, sink destination, row rawBatchRow,
 	summary.LastReceivedAt = row.ReceivedAt
 	if summary.Sent%progressEvery == 0 {
 		fmt.Fprintf(r.opt.Stderr, "tracepad: %d batches, %s, through %s\n",
-			summary.Sent, byteSize(int(summary.Bytes)), row.ReceivedAt)
+			summary.Sent, byteSize(int(summary.Bytes)), termsafe.String(row.ReceivedAt))
 	}
 	return nil
 }
@@ -373,7 +374,7 @@ func (r *run) reportExport(summary exportSummary, dryRun bool) {
 		if err != nil {
 			return
 		}
-		fmt.Fprintf(r.opt.Stdout, "%s\n", encoded)
+		_ = r.emit(encoded)
 		return
 	}
 
@@ -422,14 +423,14 @@ func (r *run) reportExport(summary exportSummary, dryRun bool) {
 		// transport error, or a directory that could not be written —
 		// and printing "0" for it would read as a status code.
 		if stop.Status == 0 {
-			fmt.Fprintf(r.opt.Stdout, "  stopped at batch %d: %s\n", stop.ID, stop.Message)
+			fmt.Fprintf(r.opt.Stdout, "  stopped at batch %d: %s\n", stop.ID, termsafe.String(stop.Message))
 		} else {
 			fmt.Fprintf(r.opt.Stdout, "  stopped at batch %d: %d %s\n",
-				stop.ID, stop.Status, stop.Message)
+				stop.ID, stop.Status, termsafe.String(stop.Message))
 		}
 	}
 	if summary.LastCursor != "" {
-		fmt.Fprintf(r.opt.Stdout, "--after %s\n", summary.LastCursor)
+		fmt.Fprintf(r.opt.Stdout, "--after %s\n", termsafe.String(summary.LastCursor))
 	}
 }
 

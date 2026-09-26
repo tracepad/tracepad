@@ -55,9 +55,21 @@ frontmatter (`metadata.version`), and the skill tells the agent to compare it
 with `tracepad version` and to reinstall when they differ — a development
 build stamps `dev`, which matches anything.
 
-A `tracepad` directory the command did not install — one without the
-`.version` file it writes — is refused rather than overwritten, with the
-directory named; `--force` replaces it.
+A `tracepad` directory the command did not install — one without both the
+`SKILL.md` naming `tracepad` and the `.version` file it writes — is refused
+rather than overwritten, with the directory named; `--force` replaces it.
+
+A `tracepad` in your own skills directory that is a symlink — a copy kept in a
+dotfiles repository — is updated where it points, but only if what it points
+at is a skill this command installed: a link to any other directory is refused
+even with `--force`, because replacing it would delete a directory you never
+named. Remove the link and install again. The one exception is a link to an
+empty directory — how a dotfiles copy is set up the first time — which
+`--force` installs into. The directories above it are yours, so a `~/.claude`
+kept in a dotfiles repository works as it is. With `--project` no link is
+followed at all — not `.claude`, not `.claude/skills`, not `tracepad` — because
+the links in a checkout belong to whoever wrote it; install with `--dir` into
+the directory such a link points at instead.
 
 ### From the Docker image
 

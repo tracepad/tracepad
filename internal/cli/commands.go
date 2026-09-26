@@ -11,6 +11,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/tracepad/tracepad/internal/termsafe"
 )
 
 // sortStrings keeps the small ordered lists the tables render deterministic.
@@ -166,7 +168,7 @@ func (r *run) sessionsShow(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(r.opt.Stdout, "session %s\n", session.ID)
+	fmt.Fprintf(r.opt.Stdout, "session %s\n", termsafe.String(session.ID))
 	fmt.Fprintf(r.opt.Stdout, "  traces  %d (%d with errors)\n", session.TraceCount, session.ErrorCount)
 	fmt.Fprintf(r.opt.Stdout, "  cost    %s\n", cost(session.TotalCost))
 	fmt.Fprintf(r.opt.Stdout, "  window  %s .. %s\n\n",
@@ -292,7 +294,7 @@ func (r *run) usersShow(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(r.opt.Stdout, "user %s\n", user.UserID)
+	fmt.Fprintf(r.opt.Stdout, "user %s\n", termsafe.String(user.UserID))
 	fmt.Fprintf(r.opt.Stdout, "  traces    %d (%d with errors)\n", user.Traces, user.ErrorCount)
 	fmt.Fprintf(r.opt.Stdout, "  sessions  %d\n", user.Sessions)
 	fmt.Fprintf(r.opt.Stdout, "  cost      %s\n", cost(user.TotalCost))
@@ -402,7 +404,7 @@ func (r *run) scoresTrend(ctx context.Context, args []string) error {
 		// counts only the scores that name an observation (spec 025 #6)
 		// and a reader comparing two runs of this command has to see it.
 		fmt.Fprintf(r.opt.Stdout, "%s (%s, %s scores)\n",
-			series.Name, series.DataType, result.Targets)
+			termsafe.String(series.Name), termsafe.String(series.DataType), termsafe.String(result.Targets))
 		key := strings.ToUpper(result.GroupBy)
 		t := newTable(r.opt.Stdout, key, "SCORES", scoreTrendColumn(series.DataType))
 		for _, bucket := range series.Buckets {
@@ -566,7 +568,7 @@ func (r *run) scoresAdd(ctx context.Context, args []string) error {
 	if len(written.IDs) == 0 {
 		return fmt.Errorf("the server wrote the score and named no id")
 	}
-	fmt.Fprintln(r.opt.Stdout, written.IDs[0])
+	fmt.Fprintln(r.opt.Stdout, termsafe.String(written.IDs[0]))
 	return nil
 }
 
@@ -799,17 +801,19 @@ func (r *run) promptsGet(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(r.opt.Stdout, "%s version %d (%s)\n", prompt.Name, prompt.Version, prompt.Type)
+	fmt.Fprintf(r.opt.Stdout, "%s version %d (%s)\n", termsafe.String(prompt.Name), prompt.Version, termsafe.String(prompt.Type))
 	if len(prompt.Labels) > 0 {
-		fmt.Fprintf(r.opt.Stdout, "labels: %s\n", strings.Join(prompt.Labels, ", "))
+		fmt.Fprintf(r.opt.Stdout, "labels: %s\n", strings.Join(termsafe.All(prompt.Labels), ", "))
 	}
 	if prompt.CommitMessage != "" {
-		fmt.Fprintf(r.opt.Stdout, "message: %s\n", prompt.CommitMessage)
+		fmt.Fprintf(r.opt.Stdout, "message: %s\n", termsafe.String(prompt.CommitMessage))
 	}
 	fmt.Fprintf(r.opt.Stdout, "created: %s\n\n", shortTime(prompt.CreatedAt))
-	fmt.Fprintf(r.opt.Stdout, "%s\n", indented(prompt.Prompt))
+	// Indented JSON is a block of lines, and its strings are JSON-escaped
+	// already — except for C1, which the encoder leaves alone.
+	fmt.Fprintf(r.opt.Stdout, "%s\n", termsafe.Text(indented(prompt.Prompt)))
 	if len(prompt.Config) > 0 {
-		fmt.Fprintf(r.opt.Stdout, "\nconfig:\n%s\n", indented(prompt.Config))
+		fmt.Fprintf(r.opt.Stdout, "\nconfig:\n%s\n", termsafe.Text(indented(prompt.Config)))
 	}
 	return nil
 }
@@ -882,9 +886,9 @@ func (r *run) promptsPush(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(r.opt.Stdout, "%s version %d created", created.Name, created.Version)
+	fmt.Fprintf(r.opt.Stdout, "%s version %d created", termsafe.String(created.Name), created.Version)
 	if len(created.Labels) > 0 {
-		fmt.Fprintf(r.opt.Stdout, " (%s)", strings.Join(created.Labels, ", "))
+		fmt.Fprintf(r.opt.Stdout, " (%s)", strings.Join(termsafe.All(created.Labels), ", "))
 	}
 	fmt.Fprintln(r.opt.Stdout)
 	return nil
@@ -922,10 +926,11 @@ func (r *run) promptsDiff(ctx context.Context, args []string) error {
 		return err
 	}
 	if result.Diff == "" {
-		fmt.Fprintf(r.opt.Stdout, "%s versions %d and %d are identical\n", result.Name, from, to)
+		fmt.Fprintf(r.opt.Stdout, "%s versions %d and %d are identical\n", termsafe.String(result.Name), from, to)
 		return nil
 	}
-	fmt.Fprint(r.opt.Stdout, result.Diff)
+	// A diff of two prompts is the prompts' own text, line by line.
+	fmt.Fprint(r.opt.Stdout, termsafe.Text(result.Diff))
 	return nil
 }
 
@@ -970,10 +975,10 @@ func (r *run) promptsLabel(ctx context.Context, args []string) error {
 	// Both answers name the version: a move names where the label landed, a
 	// removal where it had been — which is the number a rollback needs.
 	if remove {
-		fmt.Fprintf(r.opt.Stdout, "%s: %s removed from version %d\n", name, answer.Label, answer.Version)
+		fmt.Fprintf(r.opt.Stdout, "%s: %s removed from version %d\n", name, termsafe.String(answer.Label), answer.Version)
 		return nil
 	}
-	fmt.Fprintf(r.opt.Stdout, "%s: %s now points at version %d\n", name, answer.Label, answer.Version)
+	fmt.Fprintf(r.opt.Stdout, "%s: %s now points at version %d\n", name, termsafe.String(answer.Label), answer.Version)
 	return nil
 }
 
@@ -1012,7 +1017,7 @@ func (r *run) promptsRemove(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(r.opt.Stdout, "deleted %s: %s and %s gone\n", deleted.Name,
+	fmt.Fprintf(r.opt.Stdout, "deleted %s: %s and %s gone\n", termsafe.String(deleted.Name),
 		plural(deleted.WouldDelete.Versions, "version"), plural(deleted.WouldDelete.Labels, "label"))
 	return nil
 }
@@ -1277,7 +1282,7 @@ func (r *run) health(ctx context.Context, args []string) error {
 		}
 		return r.emit(out)
 	}
-	fmt.Fprintln(r.opt.Stdout, answer.Version)
+	fmt.Fprintln(r.opt.Stdout, termsafe.String(answer.Version))
 	return nil
 }
 
@@ -1357,13 +1362,14 @@ func (r *run) system(ctx context.Context, args []string) error {
 		return err
 	}
 
-	fmt.Fprintf(r.opt.Stdout, "tracepad %s (%s), client %s\n", info.Version, info.GoVersion, r.opt.Version)
+	fmt.Fprintf(r.opt.Stdout, "tracepad %s (%s), client %s\n",
+		termsafe.String(info.Version), termsafe.String(info.GoVersion), r.opt.Version)
 	fmt.Fprintf(r.opt.Stdout, "  up since   %s (%s)\n", shortTime(info.StartedAt), uptime(info.UptimeSeconds))
 	fmt.Fprintf(r.opt.Stdout, "  database   %s\n", byteSize(int(info.Database.SizeBytes)))
 	fmt.Fprintf(r.opt.Stdout, "  writes     %d of %d queued\n",
 		info.WriterQueue.Waiting, info.WriterQueue.Capacity)
 	if info.MCP.Path != "" {
-		fmt.Fprintf(r.opt.Stdout, "  mcp        %s at %s\n", enabled(info.MCP.Enabled), info.MCP.Path)
+		fmt.Fprintf(r.opt.Stdout, "  mcp        %s at %s\n", enabled(info.MCP.Enabled), termsafe.String(info.MCP.Path))
 	}
 
 	// This project's rows, not the deployment's (spec 004 Decision 33);
@@ -1420,7 +1426,7 @@ func (r *run) system(ctx context.Context, args []string) error {
 	}
 	if len(info.Counters.SDKVersions) > 0 {
 		fmt.Fprintf(r.opt.Stdout, "  langfuse SDK versions seen: %s\n",
-			strings.Join(info.Counters.SDKVersions, ", "))
+			strings.Join(termsafe.All(info.Counters.SDKVersions), ", "))
 	}
 	return nil
 }

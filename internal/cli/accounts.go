@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/tracepad/tracepad/internal/store"
+	"github.com/tracepad/tracepad/internal/termsafe"
 )
 
 /*
@@ -198,8 +199,8 @@ func (r *run) accountsCreate(ctx context.Context, args []string) error {
 		return err
 	}
 	fmt.Fprintf(r.opt.Stdout, "account %s created (%s)\n\n",
-		created.Account.Email, created.Account.ID)
-	fmt.Fprintf(r.opt.Stdout, "  %s\n\n", created.InviteURL)
+		termsafe.String(created.Account.Email), termsafe.String(created.Account.ID))
+	fmt.Fprintf(r.opt.Stdout, "  %s\n\n", termsafe.String(created.InviteURL))
 	fmt.Fprintf(r.opt.Stdout,
 		"the invitation link is shown only here; only its hash is stored.\n"+
 			"It is good until %s, and it is what sets their password —\n"+
@@ -243,15 +244,15 @@ func (r *run) accountsInvite(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(r.opt.Stdout, "a fresh link for %s\n\n", named(who))
-	fmt.Fprintf(r.opt.Stdout, "  %s\n\n", minted.InviteURL)
+	fmt.Fprintf(r.opt.Stdout, "a fresh link for %s\n\n", termsafe.String(named(who)))
+	fmt.Fprintf(r.opt.Stdout, "  %s\n\n", termsafe.String(minted.InviteURL))
 	fmt.Fprintf(r.opt.Stdout, "the link is shown only here and is good until %s\n",
 		shortTime(minted.InviteExpiresAt))
 	// The server's own sentence about what this did, rather than a second
 	// copy of it here: the rule that the old password keeps working until
 	// the link is used is the server's, and one wording cannot drift.
 	if minted.Note != "" {
-		fmt.Fprintln(r.opt.Stdout, minted.Note)
+		fmt.Fprintln(r.opt.Stdout, termsafe.Text(minted.Note))
 	}
 	return nil
 }
@@ -364,7 +365,7 @@ func (r *run) accountsGrant(ctx context.Context, args []string) error {
 		return err
 	}
 	fmt.Fprintf(r.opt.Stdout, "%s is a %s of %s\n",
-		rest[0], answer.Membership.Role, answer.Membership.Name)
+		rest[0], termsafe.String(answer.Membership.Role), termsafe.String(answer.Membership.Name))
 	return nil
 }
 
@@ -446,7 +447,10 @@ func (r *run) accountsRemove(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	r.renderPreview(dry, "delete the account "+dry.Confirm)
+	// The email is the server's, and one line: a newline in it would open
+	// a line of its own on the preview (#35).
+	shown := termsafe.String(dry.Confirm)
+	r.renderPreview(dry, "delete the account "+shown)
 	switch {
 	case confirm != "":
 		if !strings.EqualFold(confirm, dry.Confirm) {
@@ -461,7 +465,7 @@ func (r *run) accountsRemove(ctx context.Context, args []string) error {
 	default:
 		return fmt.Errorf(
 			"this would delete the account %s; it was not done. Re-run with --confirm %s",
-			dry.Confirm, dry.Confirm)
+			shown, shown)
 	}
 
 	// The server's own spelling, never one this command made up: what
@@ -478,7 +482,7 @@ func (r *run) accountsRemove(ctx context.Context, args []string) error {
 	}
 	fmt.Fprintf(r.opt.Stdout,
 		"account %s deleted; its memberships, sessions and invitations went with it\n",
-		dry.Confirm)
+		termsafe.String(dry.Confirm))
 	return nil
 }
 
@@ -568,9 +572,9 @@ func named(view accountView) string {
 }
 
 func renderAccount(r *run, view accountView) {
-	fmt.Fprintf(r.opt.Stdout, "account %s\n", view.Email)
-	fmt.Fprintf(r.opt.Stdout, "  id          %s\n", view.ID)
-	fmt.Fprintf(r.opt.Stdout, "  name        %s\n", orDash(view.Name))
+	fmt.Fprintf(r.opt.Stdout, "account %s\n", termsafe.String(view.Email))
+	fmt.Fprintf(r.opt.Stdout, "  id          %s\n", termsafe.String(view.ID))
+	fmt.Fprintf(r.opt.Stdout, "  name        %s\n", termsafe.String(orDash(view.Name)))
 	fmt.Fprintf(r.opt.Stdout, "  standing    %s\n", accountStanding(view))
 	fmt.Fprintf(r.opt.Stdout, "  created     %s\n", shortTime(view.CreatedAt))
 	fmt.Fprintf(r.opt.Stdout, "  last login  %s\n", lastLogin(view))

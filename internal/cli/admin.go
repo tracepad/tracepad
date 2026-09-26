@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/tracepad/tracepad/internal/store"
+	"github.com/tracepad/tracepad/internal/termsafe"
 )
 
 // The administrative commands (spec 005): `projects`, `keys`, `retention` and
@@ -219,10 +220,10 @@ func (r *run) projectsCreate(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(r.opt.Stdout, "project %s created (%s)\n\n", created.Name, created.ID)
-	fmt.Fprintf(r.opt.Stdout, "  TRACEPAD_API_KEY=%s\n", created.SecretKey)
-	fmt.Fprintf(r.opt.Stdout, "  LANGFUSE_PUBLIC_KEY=%s\n", created.PublicKey)
-	fmt.Fprintf(r.opt.Stdout, "  LANGFUSE_SECRET_KEY=%s\n\n", created.SecretKey)
+	fmt.Fprintf(r.opt.Stdout, "project %s created (%s)\n\n", termsafe.String(created.Name), termsafe.String(created.ID))
+	fmt.Fprintf(r.opt.Stdout, "  TRACEPAD_API_KEY=%s\n", termsafe.String(created.SecretKey))
+	fmt.Fprintf(r.opt.Stdout, "  LANGFUSE_PUBLIC_KEY=%s\n", termsafe.String(created.PublicKey))
+	fmt.Fprintf(r.opt.Stdout, "  LANGFUSE_SECRET_KEY=%s\n\n", termsafe.String(created.SecretKey))
 	fmt.Fprintln(r.opt.Stdout, "the secret key is shown only here; only its hash is stored")
 	return nil
 }
@@ -246,7 +247,7 @@ func (r *run) projectsRename(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(r.opt.Stdout, "project %s is now named %s\n", view.ID, view.Name)
+	fmt.Fprintf(r.opt.Stdout, "project %s is now named %s\n", termsafe.String(view.ID), termsafe.String(view.Name))
 	return nil
 }
 
@@ -276,8 +277,8 @@ func (r *run) projectsRemove(ctx context.Context, args []string) error {
 		return err
 	}
 	fmt.Fprintf(r.opt.Stdout, "project %s deleted; its data is purged at %s\n",
-		view.Name, shortTime(view.PurgeAt))
-	fmt.Fprintf(r.opt.Stdout, "restore it until then with: tracepad projects restore %s\n", view.ID)
+		termsafe.String(view.Name), shortTime(view.PurgeAt))
+	fmt.Fprintf(r.opt.Stdout, "restore it until then with: tracepad projects restore %s\n", termsafe.String(view.ID))
 	return nil
 }
 
@@ -300,7 +301,7 @@ func (r *run) projectsRestore(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(r.opt.Stdout, "project %s restored\n", view.Name)
+	fmt.Fprintf(r.opt.Stdout, "project %s restored\n", termsafe.String(view.Name))
 	return nil
 }
 
@@ -382,9 +383,9 @@ func (r *run) keysCreate(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(r.opt.Stdout, "  TRACEPAD_API_KEY=%s\n", created.SecretKey)
-	fmt.Fprintf(r.opt.Stdout, "  LANGFUSE_PUBLIC_KEY=%s\n", created.PublicKey)
-	fmt.Fprintf(r.opt.Stdout, "  LANGFUSE_SECRET_KEY=%s\n\n", created.SecretKey)
+	fmt.Fprintf(r.opt.Stdout, "  TRACEPAD_API_KEY=%s\n", termsafe.String(created.SecretKey))
+	fmt.Fprintf(r.opt.Stdout, "  LANGFUSE_PUBLIC_KEY=%s\n", termsafe.String(created.PublicKey))
+	fmt.Fprintf(r.opt.Stdout, "  LANGFUSE_SECRET_KEY=%s\n\n", termsafe.String(created.SecretKey))
 	fmt.Fprintln(r.opt.Stdout,
 		"the secret key is shown only here; move your SDKs onto it, then revoke the old key")
 	return nil
@@ -450,7 +451,7 @@ func (r *run) retentionShow(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(r.opt.Stdout, "%s\n", view.Name)
+	fmt.Fprintf(r.opt.Stdout, "%s\n", termsafe.String(view.Name))
 	fmt.Fprintf(r.opt.Stdout, "  traces      %s\n", window(view.RetentionDays, "kept forever"))
 	fmt.Fprintf(r.opt.Stdout, "  raw bodies  %s\n",
 		window(view.RawRetentionDays, "follow the trace window"))
@@ -553,7 +554,7 @@ func (r *run) retentionSet(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(r.opt.Stdout, "%s\n", view.Name)
+	fmt.Fprintf(r.opt.Stdout, "%s\n", termsafe.String(view.Name))
 	fmt.Fprintf(r.opt.Stdout, "  traces      %s\n", window(view.RetentionDays, "kept forever"))
 	fmt.Fprintf(r.opt.Stdout, "  raw bodies  %s\n",
 		window(view.RawRetentionDays, "follow the trace window"))
@@ -630,7 +631,7 @@ func (r *run) usersRemoveData(ctx context.Context, rest []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(r.opt.Stdout, "erased the data of %s\n", result.UserID)
+	fmt.Fprintf(r.opt.Stdout, "erased the data of %s\n", termsafe.String(result.UserID))
 	t := newTable(r.opt.Stdout)
 	for _, kind := range []string{"traces", "observations", "scores", "payloads"} {
 		if count, reported := result.Deleted[kind]; reported {
@@ -712,7 +713,7 @@ func (r *run) renderPreview(dry preview, what string) {
 	}
 	sortStrings(kinds)
 	for _, kind := range kinds {
-		fmt.Fprintf(out, "  %-14s %d\n", kind, dry.WouldDelete[kind])
+		fmt.Fprintf(out, "  %-14s %d\n", termsafe.String(kind), dry.WouldDelete[kind])
 	}
 	if dry.Oldest != "" {
 		fmt.Fprintf(out, "  %-14s %s\n", "oldest", shortTime(dry.Oldest))
@@ -738,10 +739,10 @@ func (r *run) renderPreview(dry preview, what string) {
 	// the runs.
 	for _, affected := range dry.Runs {
 		fmt.Fprintf(out, "  %-14s %s of %s loses %d\n",
-			"run", affected.ID, affected.Dataset, affected.Traces)
+			"run", termsafe.String(affected.ID), termsafe.String(affected.Dataset), affected.Traces)
 	}
 	if dry.Note != "" {
-		fmt.Fprintf(out, "%s\n", dry.Note)
+		fmt.Fprintf(out, "%s\n", termsafe.Text(dry.Note))
 	}
 }
 
@@ -807,8 +808,8 @@ func (r *run) projectID(ctx context.Context, fs *flag.FlagSet, given string) (st
 }
 
 func renderProject(r *run, view projectView) {
-	fmt.Fprintf(r.opt.Stdout, "project %s\n", view.Name)
-	fmt.Fprintf(r.opt.Stdout, "  id          %s\n", view.ID)
+	fmt.Fprintf(r.opt.Stdout, "project %s\n", termsafe.String(view.Name))
+	fmt.Fprintf(r.opt.Stdout, "  id          %s\n", termsafe.String(view.ID))
 	fmt.Fprintf(r.opt.Stdout, "  created     %s\n", shortTime(view.CreatedAt))
 	fmt.Fprintf(r.opt.Stdout, "  traces      %s\n", window(view.RetentionDays, "kept forever"))
 	fmt.Fprintf(r.opt.Stdout, "  raw bodies  %s\n",
