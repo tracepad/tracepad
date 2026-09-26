@@ -59,7 +59,7 @@ that key next month. Treat the first key as exposed once it has been copied
 out, and rotate onto one that was never printed:
 
 ```sh
-export TRACEPAD_API_KEY=tp-sk-…    # the printed key, from the log
+read -rs TRACEPAD_API_KEY && export TRACEPAD_API_KEY   # paste the printed key
 docker exec -e TRACEPAD_API_KEY tracepad /tracepad keys create --url http://localhost:4318
 # move your applications onto the new pair, then revoke the printed one
 docker exec -e TRACEPAD_API_KEY tracepad /tracepad keys rm tp-pk-… --url http://localhost:4318
@@ -91,11 +91,12 @@ Any command can be run against the server from inside its own container —
 the server it is sharing with. Hand it the credential through the environment,
 as `-e TRACEPAD_API_KEY` with no value — Docker copies the variable from your
 shell — and not as `--key`: an argument is in your shell's history and in the
-process list of the host and the container while it runs, and an environment
-variable is in neither.
+process list of the host and the container while it runs, where every account
+can read it. `read -s` takes the value without echoing it or leaving it in the
+history either.
 
 ```sh
-export TRACEPAD_API_KEY=tp-sk-…
+read -rs TRACEPAD_API_KEY && export TRACEPAD_API_KEY   # paste the key
 docker exec -e TRACEPAD_API_KEY tracepad /tracepad keys create \
   --url http://localhost:4318   # mint a second pair, to rotate onto
 ```
