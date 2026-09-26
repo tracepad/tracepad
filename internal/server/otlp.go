@@ -183,20 +183,15 @@ func (s *Server) handleTraces(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 			// The client hung up; there is nobody to answer.
 		default:
-			if condition, ok := store.Condition(err); ok {
+			if _, ok := store.Condition(err); ok {
 				// A lock that did not clear, a full disk, an I/O
 				// error: the database's condition, which passes, so
 				// the answer is one an exporter retries (spec 043 #2).
 				// Everything else is the batch's own and would fail
 				// again on every retry — a retry loop over a poison
 				// batch is worse than the loss, so it stays a 500.
-				if skipped, ok := s.storageLog.allow(condition, time.Now()); ok {
-					slog.Error("ingest write failed on a database condition",
-						"condition", condition, "project", project.Name, "err", err,
-						"since_last_line", skipped)
-				}
-				w.Header().Set("Retry-After", "1")
-				writeError(w, http.StatusServiceUnavailable, "storage is temporarily unavailable; retry shortly")
+				// The writer has logged it, once a minute.
+				unavailable(w)
 				return
 			}
 			slog.Error("ingest write failed", "project", project.Name, "err", err)

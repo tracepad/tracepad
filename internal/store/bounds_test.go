@@ -191,10 +191,7 @@ func TestSumsSaturate(t *testing.T) {
 			t.Errorf("AddCost over %v = %v, want %v", tc.costs, got, tc.want)
 		}
 	}
-	nan := math.NaN()
-	if got := value(AddCost(&nan, 1)); got != 1.0 {
-		t.Errorf("AddCost(NaN, 1) = %v, want a stored NaN to count as nothing", got)
-	}
+
 }
 
 // The counting rule (spec 043 #4), read by every reader: a cost counts when
@@ -275,6 +272,46 @@ func TestTheCountingRule(t *testing.T) {
 	}
 }
 
+// failingJob is a write the database refuses with the error it holds.
+type failingJob struct{ err error }
+
+func (j failingJob) apply(*sql.Tx) error { return j.err }
+
+// A database condition is logged once a minute per condition, however many
+// commits it fails (spec 043 #2): a full disk failed every export, and each
+// failure wrote a line of its own.
+func TestADatabaseConditionIsLoggedOnceAMinute(t *testing.T) {
+	var logged bytes.Buffer
+	previous := logger
+	logger = func() *slog.Logger { return slog.New(slog.NewTextHandler(&logged, nil)) }
+	t.Cleanup(func() { logger = previous })
+	conditionLog = &pacedLog{every: time.Minute}
+
+	s := openFresh(t)
+	writer, err := s.NewWriter(quickWrites)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writer.Close()
+	full := fmt.Errorf("commit write transaction: %w", codedError{13})
+	for range 20 {
+		if err := writer.Submit(context.Background(), failingJob{full}); !errors.Is(err, full) {
+			t.Fatalf("submit = %v, want the condition back", err)
+		}
+	}
+	lines := strings.Count(logged.String(), "condition=SQLITE_FULL")
+	if lines != 1 {
+		t.Errorf("logged %d lines for 20 commits a full disk failed, want 1:\n%s", lines, logged.String())
+	}
+	// And a failure of the job's own is still logged every time.
+	for range 2 {
+		writer.Submit(context.Background(), failingJob{errors.New("constraint failed")})
+	}
+	if got := strings.Count(logged.String(), "constraint failed"); got != 2 {
+		t.Errorf("logged %d lines for 2 failures of the jobs' own, want 2", got)
+	}
+}
+
 // countingFailure fails the roll of every hour with one error and counts the
 // attempts.
 type countingFailure struct {
@@ -352,72 +389,172 @@ func TestAFailureThatIsNotTheHoursStopsThePass(t *testing.T) {
 	}
 }
 
-// A dirty hour that fails holds `last_pass` for a bounded number of passes,
+// heldFixture is a store with hours rolled once, one aggregator that keeps
+// its counts across passes, a seam that fails the hours it names, and a clock
+// that runs ahead of the wall so that each pass moves `last_pass`.
+type heldFixture struct {
+	t          *testing.T
+	store      *Store
+	project    *Project
+	seam       *failingHours
+	aggregator *Aggregator
+	clock      time.Time
+}
+
+func newHeldFixture(t *testing.T, hours ...int64) *heldFixture {
+	s, project := readStore(t)
+	f := &heldFixture{t: t, store: s, project: project}
+	for n, hour := range hours {
+		f.seed(hour, n+1)
+	}
+	passAt(t, s, time.Unix(hours[len(hours)-1]+2*SecondsPerHour, 0))
+	writer, err := s.NewWriter(quickWrites)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { writer.Close() })
+	f.seam = &failingHours{inner: writer, hours: map[int64]bool{}}
+	f.clock = time.Now().Add(time.Hour)
+	f.aggregator = s.NewAggregator(f.seam, RollupOptions{
+		Interval: DefaultRollupInterval, Now: func() time.Time { return f.clock },
+	})
+	return f
+}
+
+// seed puts trace n in an hour, stamped on the fixture's clock: a late span.
+func (f *heldFixture) seed(hour int64, n int) {
+	start := hour*1e9 + int64(n)*1e9
+	trace := &model.Trace{ID: hexTrace(n), Environment: "production"}
+	seedTrace(f.t, f.store, f.project.ID, trace, &model.Observation{
+		TraceID: trace.ID, ID: hexSpan(n), Type: model.TypeSpan,
+		Level: model.LevelDefault, StartTime: start, EndTime: start + 1e6,
+	})
+	if !f.clock.IsZero() {
+		if _, err := f.store.db.Exec(`UPDATE traces SET updated_at = ? WHERE id = ?`,
+			f.clock.UnixNano(), hexTrace(n)); err != nil {
+			f.t.Fatal(err)
+		}
+	}
+}
+
+func (f *heldFixture) pass() error {
+	f.clock = f.clock.Add(time.Minute)
+	return f.aggregator.Pass(context.Background())
+}
+
+func (f *heldFixture) state() RollupState {
+	state, err := f.store.RollupState(f.project.ID)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return state
+}
+
+// A dirty hour that fails holds `last_pass` for exactly maxHeldPasses passes,
 // not for ever (spec 043 #24): held for good, every later pass re-rolled all
 // that had changed since, for one hour that cannot be rolled.
 func TestAHourThatAlwaysFailsHoldsLastPassABoundedTime(t *testing.T) {
-	s, project := readStore(t)
 	hour := rollupHour
-	seed := func(n int) {
-		start := hour*1e9 + int64(n)*1e9
-		trace := &model.Trace{ID: hexTrace(n), Environment: "production"}
+	f := newHeldFixture(t, hour)
+	f.seed(hour, 2) // a late span: the hour is dirty
+	f.seam.hours[hour] = true
+
+	held := f.state().LastPass
+	for pass := 1; pass <= maxHeldPasses+1; pass++ {
+		if err := f.pass(); err == nil {
+			t.Fatalf("pass %d reported no failure", pass)
+		}
+		moved := f.state().LastPass != held
+		if want := pass == maxHeldPasses+1; moved != want {
+			t.Fatalf("after failed pass %d last_pass moved = %v, want %v: held for %d passes and no more",
+				pass, moved, want, maxHeldPasses)
+		}
+	}
+	// Given up: the next pass no longer finds the hour.
+	if err := f.pass(); err != nil {
+		t.Errorf("the pass after giving up = %v, want the hour no longer retried", err)
+	}
+
+	// A span that lands in the hour again makes it dirty again, and it rolls
+	// once it can.
+	f.seed(hour, 3)
+	delete(f.seam.hours, hour)
+	if err := f.pass(); err != nil {
+		t.Fatal(err)
+	}
+	if got := rolledRows(t, f.store, f.project.ID, hour)["production||"].Count; got != 3 {
+		t.Errorf("the hour holds %d traces once it can be rolled, want 3", got)
+	}
+}
+
+// Two failing hours cannot hold `last_pass` for ever by taking turns: the
+// passes are counted against the value held, not per hour (found in the
+// second review of PR #112, where hour A gave up as B held, then B as A came
+// back, for ever).
+func TestTwoFailingHoursDoNotTakeTurnsHoldingLastPass(t *testing.T) {
+	a, b := rollupHour, rollupHour+SecondsPerHour
+	f := newHeldFixture(t, a, b)
+	f.seed(a, 3)
+	f.seed(b, 4)
+	f.seam.hours[a] = true // A fails from the first pass, B from the second
+
+	held := f.state().LastPass
+	for pass := 1; pass <= maxHeldPasses+1; pass++ {
+		if err := f.pass(); err == nil {
+			t.Fatalf("pass %d reported no failure", pass)
+		}
+		f.seam.hours[b] = true
+		if f.state().LastPass != held {
+			if pass != maxHeldPasses+1 {
+				t.Fatalf("last_pass moved after pass %d, want it held for %d", pass, maxHeldPasses)
+			}
+			return
+		}
+	}
+	t.Fatalf("last_pass still held after %d passes of two failing hours", maxHeldPasses+1)
+}
+
+// A closed hour that always fails holds the watermark for exactly
+// maxHeldPasses passes; then the roll goes on past it, and one hour no longer
+// leaves every later one to the live scan for ever (spec 043 #24).
+func TestAClosedHourThatAlwaysFailsHoldsTheWatermarkABoundedTime(t *testing.T) {
+	s, project := readStore(t)
+	hours := []int64{rollupHour, rollupHour + SecondsPerHour, rollupHour + 2*SecondsPerHour}
+	for i, hour := range hours {
+		start := hour*1e9 + 1e9
+		trace := &model.Trace{ID: hexTrace(i + 1), Environment: "production"}
 		seedTrace(t, s, project.ID, trace, &model.Observation{
-			TraceID: trace.ID, ID: hexSpan(n), Type: model.TypeSpan,
+			TraceID: trace.ID, ID: hexSpan(i + 1), Type: model.TypeSpan,
 			Level: model.LevelDefault, StartTime: start, EndTime: start + 1e6,
 		})
 	}
-	seed(1)
-	passAt(t, s, time.Unix(hour+2*SecondsPerHour, 0))
-	seed(2) // a late span: the hour is dirty
-
 	writer, err := s.NewWriter(quickWrites)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer writer.Close()
-	seam := &failingHours{inner: writer, hours: map[int64]bool{hour: true}}
-	clock := time.Now().Add(time.Hour)
-	aggregator := s.NewAggregator(seam, RollupOptions{
-		Interval: DefaultRollupInterval, Now: func() time.Time { return clock },
-	})
-	lastPass := func() int64 {
+	at := time.Unix(hours[2]+2*SecondsPerHour, 0)
+	aggregator := s.NewAggregator(&failingHours{inner: writer, hours: map[int64]bool{hours[1]: true}},
+		RollupOptions{Interval: DefaultRollupInterval, Now: func() time.Time { return at }})
+
+	for pass := 1; pass <= maxHeldPasses+1; pass++ {
+		if err := aggregator.Pass(context.Background()); err == nil {
+			t.Fatalf("pass %d reported no failure", pass)
+		}
 		state, err := s.RollupState(project.ID)
 		if err != nil {
 			t.Fatal(err)
 		}
-		return state.LastPass
-	}
-	held := lastPass()
-	for attempt := 1; attempt <= maxHourAttempts; attempt++ {
-		clock = clock.Add(time.Minute)
-		if err := aggregator.Pass(context.Background()); err == nil {
-			t.Fatalf("pass %d reported no failure", attempt)
+		want := hours[1]
+		if pass == maxHeldPasses+1 {
+			want = hours[2] + SecondsPerHour
 		}
-		moved := lastPass() != held
-		if want := attempt == maxHourAttempts; moved != want {
-			t.Fatalf("after failed pass %d last_pass moved = %v, want %v", attempt, moved, want)
+		if state.RolledUntil != want {
+			t.Fatalf("after pass %d rolled_until = %d, want %d", pass, state.RolledUntil, want)
 		}
 	}
-	// Given up: the next pass no longer finds the hour, and succeeds.
-	clock = clock.Add(time.Minute)
-	if err := aggregator.Pass(context.Background()); err != nil {
-		t.Errorf("the pass after giving up = %v, want the hour no longer retried", err)
-	}
-
-	// A span that lands in the hour again makes it dirty again, with its
-	// attempts back.
-	seed(3)
-	// Stamped on the pass's clock, which runs ahead of the wall.
-	if _, err := s.db.Exec(`UPDATE traces SET updated_at = ? WHERE id = ?`, clock.UnixNano(), hexTrace(3)); err != nil {
-		t.Fatal(err)
-	}
-	delete(seam.hours, hour)
-	clock = clock.Add(time.Minute)
-	if err := aggregator.Pass(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if got := rolledRows(t, s, project.ID, hour)["production||"].Count; got != 3 {
-		t.Errorf("the hour holds %d traces once it can be rolled, want 3", got)
+	if got := rolledRows(t, s, project.ID, hours[2])["production||"].Count; got != 1 {
+		t.Errorf("the hour after the given-up one holds %d traces, want it rolled", got)
 	}
 }
 

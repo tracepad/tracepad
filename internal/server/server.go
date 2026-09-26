@@ -78,9 +78,6 @@ type Server struct {
 	// inflatedLog paces the warning for a gzip body refused after
 	// decompression (spec 002 #27).
 	inflatedLog *logLimiter
-	// storageLog paces the error for an export refused on a database
-	// condition, one line a minute per condition (spec 043 #2).
-	storageLog *perKeyLimiter
 
 	// The web interface (spec 006): the built bundle, nil in a build
 	// without the `ui` tag; the path segments the API owns, so a mistyped
@@ -131,7 +128,6 @@ func New(cfg *config.Config, version string, st *store.Store, writer JobWriter, 
 		publicURL:      cfg.URL,
 		limiter:        newLoginLimiter(),
 		inflatedLog:    &logLimiter{every: time.Minute},
-		storageLog:     &perKeyLimiter{every: time.Minute},
 		assets:         ui.Assets(),
 		startedAt:      time.Now(),
 		counters:       newCounters(),

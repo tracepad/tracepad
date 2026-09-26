@@ -29,11 +29,13 @@ const (
 	// picked up by the next pass, which is what makes the backfill
 	// incremental rather than a stall (spec 013 #5).
 	maxHoursPerPass = 500
-	// maxHourAttempts is how many passes in a row a failing dirty hour holds
-	// `last_pass` back for (spec 043 #24). Holding it is what brings the
-	// hour back; holding it for good would make every later pass re-roll
-	// everything touched since, for ever, for one hour that cannot be rolled.
-	maxHourAttempts = 3
+	// maxHeldPasses is how many passes in a row a failing hour may hold the
+	// rollup back (spec 043 #24): `last_pass`, for an hour behind the
+	// watermark, and the watermark itself, for a closed hour ahead of it.
+	// Holding is what brings the hour back; holding for good made every
+	// later pass re-roll everything touched since, or left every later hour
+	// to the live scan, for one hour that cannot be rolled.
+	maxHeldPasses = 3
 )
 
 // RollupOptions tunes the aggregator. Zero fields take defaults.
@@ -57,10 +59,21 @@ type Aggregator struct {
 
 	mu      sync.Mutex
 	lastRun time.Time
-	// attempts counts, per project and dirty hour, the passes in a row that
-	// failed to roll it. In memory: a restart gives a failing hour its
-	// attempts again, which costs a few passes, not a correction.
-	attempts map[string]map[int64]int
+	// held counts, per project, the passes in a row that kept `last_pass`
+	// at one value for a failing dirty hour; stuck, the passes in a row
+	// whose forward roll stopped at one closed hour. Counted against what
+	// is held rather than per hour, so that two failing hours cannot hold
+	// it for ever by taking turns. In memory: a restart grants the passes
+	// again, which costs a few passes, not a correction.
+	held  map[string]holding
+	stuck map[string]holding
+}
+
+// holding is one thing a pass is holding back — a `last_pass` value or a
+// watermark hour — and for how many passes in a row it has.
+type holding struct {
+	at     int64
+	passes int
 }
 
 // NewAggregator builds the aggregator without starting it, on the same terms
@@ -73,7 +86,8 @@ func (s *Store) NewAggregator(writer jobSubmitter, opts RollupOptions) *Aggregat
 	if opts.Now == nil {
 		opts.Now = time.Now
 	}
-	return &Aggregator{store: s, writer: writer, interval: opts.Interval, now: opts.Now}
+	return &Aggregator{store: s, writer: writer, interval: opts.Interval, now: opts.Now,
+		held: map[string]holding{}, stuck: map[string]holding{}}
 }
 
 // Start runs passes on the tick until Close. Like the sweeper, the first pass
@@ -210,12 +224,9 @@ func (a *Aggregator) rollProject(ctx context.Context, project *Project, at time.
 					return rolled, err
 				}
 				failures = append(failures, a.hourFailed(project, hour, err))
-				if a.retry(project, hour) {
-					dirtyFailed = true
-				}
+				dirtyFailed = true
 				continue
 			}
-			a.rolledAgain(project.ID, hour)
 			if !job.Frozen {
 				rolled++
 			}
@@ -223,6 +234,18 @@ func (a *Aggregator) rollProject(ctx context.Context, project *Project, at time.
 				touched[id] = true
 			}
 		}
+	}
+
+	// Hold `last_pass` for the failed hours, a bounded number of passes.
+	keepLastPass := false
+	if dirtyFailed {
+		keepLastPass = a.hold(a.held, project.ID, state.LastPass)
+		if !keepLastPass {
+			logger().Error("gave up on the failed hours of statistics; they keep their previous numbers until a span lands in them",
+				"project", project.Name, "passes", maxHeldPasses)
+		}
+	} else {
+		a.release(a.held, project.ID)
 	}
 
 	// (3): every closed hour that holds traces, from the watermark
@@ -241,7 +264,7 @@ func (a *Aggregator) rollProject(ctx context.Context, project *Project, at time.
 			// traces retention has taken is exactly one whose
 			// history is left to age on its own (found in review of
 			// PR #28, by a test written for the chunking).
-			if err := a.advance(ctx, project.ID, state.RolledUntil, at, dirtyFailed); err != nil {
+			if err := a.advance(ctx, project.ID, state.RolledUntil, at, keepLastPass); err != nil {
 				return rolled, err
 			}
 			if err := a.sweepRollup(ctx, project, at); err != nil {
@@ -270,7 +293,12 @@ func (a *Aggregator) rollProject(ctx context.Context, project *Project, at time.
 	// A failing hour stops the roll there, and the watermark still moves
 	// up to it — past everything this pass rolled, never past the failure,
 	// which the read seam would then answer as zero (spec 013 #12). The
-	// next pass starts the roll at that hour again.
+	// next pass starts the roll at that hour again — for a bounded number
+	// of passes: after that the hour is given up and the roll goes on past
+	// it, so that one hour cannot leave every later one to the live scan
+	// for ever (spec 043 #24). A given-up hour answers from whatever the
+	// rollup holds for it, and a span that lands in it later makes it dirty,
+	// which rolls it again.
 	var (
 		newest   int64
 		examined bool
@@ -284,8 +312,14 @@ func (a *Aggregator) rollProject(ctx context.Context, project *Project, at time.
 				return rolled, err
 			}
 			failures = append(failures, a.hourFailed(project, hour, err))
-			stopped, stopAt = true, hour
-			break
+			if a.hold(a.stuck, project.ID, hour) {
+				stopped, stopAt = true, hour
+				break
+			}
+			logger().Error("gave up on an hour of statistics; the roll goes on past it",
+				"project", project.Name, "hour", time.Unix(hour, 0).UTC(), "passes", maxHeldPasses)
+			newest, examined = hour, true
+			continue
 		}
 		if !job.Frozen {
 			rolled++
@@ -318,6 +352,9 @@ func (a *Aggregator) rollProject(ctx context.Context, project *Project, at time.
 	//
 	// A pass that rolled nothing leaves the watermark alone; `last_pass`
 	// still moves, so the dirty-hour window stays bounded.
+	if !stopped {
+		a.release(a.stuck, project.ID)
+	}
 	until := state.RolledUntil
 	switch {
 	case stopped:
@@ -325,7 +362,7 @@ func (a *Aggregator) rollProject(ctx context.Context, project *Project, at time.
 	case examined:
 		until = min(closed, newest+SecondsPerHour)
 	}
-	if err := a.advance(ctx, project.ID, until, at, dirtyFailed); err != nil {
+	if err := a.advance(ctx, project.ID, until, at, keepLastPass); err != nil {
 		return rolled, err
 	}
 
@@ -350,36 +387,30 @@ func stopsThePass(err error) bool {
 		errors.Is(err, ErrWriterClosed) || errors.Is(err, ErrWriterBusy)
 }
 
-// retry counts one more failed pass for a dirty hour and reports whether the
-// pass should hold `last_pass` for it. Past maxHourAttempts it gives up: the
-// hour keeps the numbers it had until a span lands in it again, which makes it
-// dirty — and gives it its attempts — once more.
-func (a *Aggregator) retry(project *Project, hour int64) bool {
+// hold reports whether a pass may hold `at` back once more for a project,
+// counting the passes in a row it has been held. At the cap it gives up and
+// forgets it; anything held at a new value starts the count again.
+func (a *Aggregator) hold(in map[string]holding, projectID string, at int64) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.attempts == nil {
-		a.attempts = map[string]map[int64]int{}
+	current := in[projectID]
+	if current.at != at || current.passes == 0 {
+		current = holding{at: at}
 	}
-	hours := a.attempts[project.ID]
-	if hours == nil {
-		hours = map[int64]int{}
-		a.attempts[project.ID] = hours
+	if current.passes >= maxHeldPasses {
+		delete(in, projectID)
+		return false
 	}
-	hours[hour]++
-	if hours[hour] < maxHourAttempts {
-		return true
-	}
-	delete(hours, hour)
-	logger().Error("gave up on an hour of statistics; it keeps its previous numbers until a span lands in it",
-		"project", project.Name, "hour", time.Unix(hour, 0).UTC(), "passes", maxHourAttempts)
-	return false
+	current.passes++
+	in[projectID] = current
+	return true
 }
 
-// rolledAgain forgets the failures of an hour that has rolled.
-func (a *Aggregator) rolledAgain(projectID string, hour int64) {
+// release forgets what a project's pass no longer holds.
+func (a *Aggregator) release(in map[string]holding, projectID string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	delete(a.attempts[projectID], hour)
+	delete(in, projectID)
 }
 
 // hourFailed logs one hour that could not be rolled and hands back the error

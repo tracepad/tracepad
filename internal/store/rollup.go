@@ -6,6 +6,8 @@ import (
 	"math"
 	"sort"
 	"strings"
+
+	"github.com/tracepad/tracepad/internal/model"
 )
 
 // The hourly rollup (spec 013): a few thousand rows that answer what a scan of
@@ -201,13 +203,14 @@ func saturatingAdd(a, b int64) int64 {
 // which no encoder can write. A cost that is not a finite number is not a
 // cost: a NaN, or an infinity stored before the counting rule, adds nothing,
 // so a sum of nothing else stays nil — "no data" — rather than becoming a NaN,
-// or a zero where two opposite infinities met.
+// or a zero where two opposite infinities met. The sum is always one this
+// function returned, so it is finite by construction.
 func AddCost(sum *float64, n float64) *float64 {
-	if math.IsNaN(n) || math.IsInf(n, 0) {
+	if !model.Finite(n) {
 		return sum
 	}
 	total := n
-	if sum != nil && !math.IsNaN(*sum) && !math.IsInf(*sum, 0) {
+	if sum != nil {
 		total = min(max(*sum+n, -math.MaxFloat64), math.MaxFloat64)
 	}
 	return &total

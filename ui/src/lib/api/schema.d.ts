@@ -2294,7 +2294,7 @@ export interface components {
                 "application/json": components["schemas"]["Error"];
             };
         };
-        /** @description The credentials could not be checked right now (and, on ingest, the database could not take the write); retry after `Retry-After` */
+        /** @description The credentials could not be checked right now, or a write met a database condition that passes (a full disk, a lock that did not clear); retry after `Retry-After` */
         ServiceUnavailable: {
             headers: {
                 /** @description Seconds to wait */

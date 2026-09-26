@@ -119,9 +119,24 @@ func (s *Server) submitFailure(w http.ResponseWriter, err error) {
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 		// The client hung up; there is nobody left to answer.
 	default:
+		if _, ok := store.Condition(err); ok {
+			// The database's condition, which passes: the status a
+			// client retries, as ingest answers it (spec 043 #2). The
+			// writer has logged it, once a minute.
+			unavailable(w)
+			return
+		}
 		slog.Error("write failed", "err", err)
 		writeError(w, http.StatusInternalServerError, "failed to store the write")
 	}
+}
+
+// unavailable is the answer for a write a database condition failed (spec 043
+// #2): a lock that did not clear, a full disk, an I/O error. It passes, so the
+// status is one a client retries.
+func unavailable(w http.ResponseWriter) {
+	w.Header().Set("Retry-After", "1")
+	writeError(w, http.StatusServiceUnavailable, "storage is temporarily unavailable; retry shortly")
 }
 
 // readJSON reads the request body under the configured cap and decodes it

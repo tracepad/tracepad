@@ -78,7 +78,7 @@ func Open(path string) (*Store, error) {
 	// but two idle connections by default, so every burst of concurrent
 	// requests opened new ones and paid their per-connection pragmas again;
 	// kept, a connection pays them once.
-	db.SetMaxIdleConns(poolSize())
+	db.SetMaxIdleConns(idleConns())
 	db.SetConnMaxIdleTime(5 * time.Minute)
 	s := &Store{db: db, path: path, fresh: fresh}
 	// sql.Open is lazy: real open failures (corrupt file, permissions)
@@ -123,12 +123,14 @@ func createFile(path string) error {
 	return db.Ping()
 }
 
-// poolSize is how many connections the pool keeps: twice the reads the server
-// serves at once by default — twice GOMAXPROCS, at least four — plus eight for
-// the writer, the background jobs, credential lookups and handlers that hold
-// two statements at once (spec 043 #1, #16).
-func poolSize() int {
-	return 2*max(4, 2*runtime.GOMAXPROCS(0)) + 8
+// idleConns is how many connections the pool keeps between bursts: one per
+// processor, at least four (spec 043 #24). A connection kept is one whose
+// pragmas are paid; each also keeps its own page cache, so the number is the
+// work the machine can do at once rather than the most a burst ever opened —
+// until #16 bounds the pool and the reads, a burst past it still opens and
+// then closes connections, as before.
+func idleConns() int {
+	return max(4, runtime.GOMAXPROCS(0))
 }
 
 // Close closes the database.

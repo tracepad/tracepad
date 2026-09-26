@@ -5,10 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"math"
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/tracepad/tracepad/internal/model"
 )
 
 // Rendering for the read API (spec 004). Rows are built as ordered key/value
@@ -113,9 +114,9 @@ var nonFiniteLog = &perKeyLimiter{every: time.Minute}
 func finite(value any) bool {
 	switch v := value.(type) {
 	case float64:
-		return !math.IsNaN(v) && !math.IsInf(v, 0)
+		return model.Finite(v)
 	case *float64:
-		return v == nil || (!math.IsNaN(*v) && !math.IsInf(*v, 0))
+		return v == nil || model.Finite(*v)
 	}
 	return true
 }

@@ -1,6 +1,10 @@
 package store
 
-import "errors"
+import (
+	"errors"
+	"sync"
+	"time"
+)
 
 // The database's conditions (spec 043 #2): failures that pass on their own —
 // a lock that did not clear, a full disk, an I/O error — as against a failure
@@ -36,4 +40,34 @@ func Condition(err error) (string, bool) {
 	}
 	name, ok := conditionNames[coded.Code()&0xff]
 	return name, ok
+}
+
+// conditionLog paces the log lines of commits a database condition failed:
+// one a minute per condition, saying how many it stands for (spec 043 #2). A
+// full disk fails every write until it is freed, and a line per export would
+// bury the one that says so.
+var conditionLog = &pacedLog{every: time.Minute}
+
+type pacedLog struct {
+	mu    sync.Mutex
+	every time.Duration
+	last  map[string]time.Time
+	held  map[string]int64
+}
+
+// allow reports whether to log the key now, and how many lines were held back
+// since the last one that was.
+func (l *pacedLog) allow(key string, now time.Time) (skipped int64, ok bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.last == nil {
+		l.last, l.held = map[string]time.Time{}, map[string]int64{}
+	}
+	if last, seen := l.last[key]; seen && now.Sub(last) < l.every {
+		l.held[key]++
+		return 0, false
+	}
+	skipped = l.held[key]
+	l.last[key], l.held[key] = now, 0
+	return skipped, true
 }

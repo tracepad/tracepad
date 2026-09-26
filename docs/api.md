@@ -1078,7 +1078,7 @@ actually at ([prompts.md](prompts.md#appending-to-the-version-you-meant)):
 | `404` | No such thing in this project. On `traces/last`, the message names the filters that found nothing. |
 | `409` | An observation id that is ambiguous without a `trace_id`; a prompt append whose `expect_version` disagrees with the name's current state. |
 | `500` | The answer could not be rendered — `{"error": "failed to render the response"}`. Never a `200` with an empty body. |
-| `503` | The credentials could not be checked right now — `{"error": "cannot check credentials right now; retry shortly"}`, with `Retry-After: 1`. A browser session is not signed out by it. |
+| `503` | The credentials could not be checked right now — `{"error": "cannot check credentials right now; retry shortly"}` — or a write met a database condition that passes, a full disk or a lock that did not clear — `{"error": "storage is temporarily unavailable; retry shortly"}`. Both carry `Retry-After: 1`. A browser session is not signed out by it. |
 
 A number JSON cannot spell — an infinity a store written by an earlier version
 still holds — is rendered as `null`, this API's word for "no number", rather

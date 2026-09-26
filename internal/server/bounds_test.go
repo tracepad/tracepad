@@ -1,12 +1,15 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -84,6 +87,43 @@ func TestADatabaseConditionIsRetryable(t *testing.T) {
 	expectError(t, rec, http.StatusInternalServerError, "failed to store spans")
 	if got := rec.Header().Get("Retry-After"); got != "" {
 		t.Errorf("Retry-After = %q on the batch's own failure, want none", got)
+	}
+}
+
+// A JSON write — a score from an SDK — that a database condition failed gets
+// the same retryable answer an export does (spec 043 #2).
+func TestADatabaseConditionIsRetryableOnTheJSONAPI(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	h.server.writer = conditionWriter{codedError{5}} // SQLITE_BUSY
+	rec := h.send(t, "POST", "/api/v1/scores", []map[string]any{
+		{"trace_id": traceHex(1), "name": "accuracy", "value": 1}})
+	expectError(t, rec, http.StatusServiceUnavailable, "storage is temporarily unavailable; retry shortly")
+	if got := rec.Header().Get("Retry-After"); got != "1" {
+		t.Errorf("Retry-After = %q, want 1", got)
+	}
+}
+
+// A client that hangs up while its credential is looked up is gone, not a
+// storage failure: nothing is answered and nothing is logged at error (spec
+// 043 #24), as ingest already treats a hang-up.
+func TestAClientThatHangsUpDuringTheLookupIsNotAFailure(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	var logged bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logged, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	req := httptest.NewRequest("GET", "/api/v1/traces", nil).WithContext(ctx)
+	req.Header.Set("Authorization", "Bearer "+testSecret)
+	rec := httptest.NewRecorder()
+	h.server.Handler().ServeHTTP(rec, req)
+	if rec.Code == http.StatusServiceUnavailable {
+		t.Errorf("status = 503 for a client that hung up, want nothing answered")
+	}
+	if strings.Contains(logged.String(), "lookup failed") {
+		t.Errorf("a hang-up was logged as a failed lookup:\n%s", logged.String())
 	}
 }
 

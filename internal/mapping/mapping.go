@@ -711,8 +711,11 @@ func mapUsage(a *attrs) map[string]any {
 	return out
 }
 
-// mapCost returns the client-provided cost, normalized so that a `total` is
-// always present (spec 002 #14: cost is never estimated, only recorded).
+// mapCost returns the client-provided cost, with a `total` derived from the
+// components when none was sent and their sum is finite (spec 002 #14: cost is
+// never estimated, only recorded; spec 043 #5). A sum that is not finite
+// leaves the components as sent and no `total`, which the store counts as no
+// data.
 func mapCost(a *attrs) map[string]any {
 	var out map[string]any
 	if raw, ok := a.lookup(lfObsCostDetails); ok {
@@ -757,7 +760,7 @@ func mapCost(a *attrs) map[string]any {
 		// with it (spec 002 #13). No total is derived then: the
 		// components are kept as sent and the cost counts as no data
 		// (spec 043 #5).
-		if hasComponent && !math.IsInf(total, 0) && !math.IsNaN(total) {
+		if hasComponent && model.Finite(total) {
 			out["total"] = jsonNumber(total)
 		}
 	}

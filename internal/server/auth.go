@@ -230,6 +230,13 @@ func cannotCheck(w http.ResponseWriter) {
 	writeError(w, http.StatusServiceUnavailable, "cannot check credentials right now; retry shortly")
 }
 
+// clientGone reports a request whose client hung up while a lookup ran. The
+// lookup failed for that reason and no other: there is no storage failure to
+// log and nobody to answer, as ingest already treats a hang-up.
+func clientGone(r *http.Request) bool {
+	return r.Context().Err() != nil
+}
+
 // identify resolves the credential. An `Authorization` header wins over a
 // cookie when both are present: an explicit credential beats an ambient one,
 // which is what keeps a command-line tool's behaviour untouched next to a
@@ -251,6 +258,9 @@ func (s *Server) identify(w http.ResponseWriter, r *http.Request) (*caller, bool
 		project, err := s.store.ProjectBySecret(ctx, secret)
 		cancel()
 		if err != nil {
+			if clientGone(r) {
+				return nil, false
+			}
 			slog.Error("key lookup failed", "err", err)
 			cannotCheck(w)
 			return nil, false
@@ -272,6 +282,9 @@ func (s *Server) identify(w http.ResponseWriter, r *http.Request) (*caller, bool
 	found, account, err := s.store.SessionByCookie(ctx, cookie.Value, now)
 	cancel()
 	if err != nil {
+		if clientGone(r) {
+			return nil, false
+		}
 		// Not a sign-out: the cookie was never judged, so it stays.
 		slog.Error("session lookup failed", "err", err)
 		cannotCheck(w)
@@ -418,6 +431,9 @@ func (s *Server) scope(w http.ResponseWriter, r *http.Request, rt route, c *call
 	project, err := s.store.ProjectByID(ctx, id)
 	cancel()
 	if err != nil {
+		if clientGone(r) {
+			return false
+		}
 		slog.Error("project lookup failed", "err", err)
 		cannotCheck(w)
 		return false
@@ -426,6 +442,9 @@ func (s *Server) scope(w http.ResponseWriter, r *http.Request, rt route, c *call
 	role, err := s.store.ProjectRole(ctx, c.account, id)
 	cancel()
 	if err != nil {
+		if clientGone(r) {
+			return false
+		}
 		slog.Error("membership lookup failed", "err", err)
 		cannotCheck(w)
 		return false
