@@ -82,9 +82,13 @@
 		view.document.body.append(img);
 	}
 
+	// A download is saved from a neutral blob: a browser that finds a name
+	// with no extension adds one from the blob's type, which would put back
+	// the `.hta` or `.html` the name left out (#32).
 	async function download(ref: MediaRef) {
 		try {
-			const url = URL.createObjectURL(await api.media(ref.tracepad_media));
+			const body = await api.media(ref.tracepad_media);
+			const url = URL.createObjectURL(new Blob([body], { type: 'application/octet-stream' }));
 			const link = document.createElement('a');
 			link.href = url;
 			link.download = fileName(ref);

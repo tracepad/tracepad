@@ -218,7 +218,8 @@ func TestMediaScopeSeeksOnly(t *testing.T) {
 		seeks []string
 	}{
 		{"the scope", plan(mediaScope, strings.Repeat("a", 64), "p"),
-			append([]string{"SEARCH h USING PRIMARY KEY (sha256=? AND project_id=?)"}, refs...)},
+			append([]string{"SEARCH h USING PRIMARY KEY (sha256=? AND project_id=?)",
+				"SEARCH m USING INDEX sqlite_autoindex_media_1 (sha256=?)"}, refs...)},
 		{"the read", plan(mediaRead, strings.Repeat("a", 64), "p"),
 			append([]string{"SEARCH h USING PRIMARY KEY (sha256=? AND project_id=?)",
 				"SEARCH m USING INDEX sqlite_autoindex_media_1 (sha256=?)"}, refs...)},
@@ -262,6 +263,58 @@ func TestMediaHoldWithoutATypeIsNotAnothers(t *testing.T) {
 	}
 	if mime != "application/octet-stream" {
 		t.Errorf("B's hold without a type = %q, want application/octet-stream, never A's image/png", mime)
+	}
+}
+
+// A holder row with no ref of its project behind it — only a hand-edited
+// database leaves one — is refused by every read and counted by nothing, and
+// the hourly look takes it (#26); the other project's hold stays.
+func TestMediaStaleHoldIsSwept(t *testing.T) {
+	f := newSweepFixture(t)
+	b := f.secondProject(t, "b")
+	x := mediaBody(53, 4096)
+	f.arriveWithMedia(t, f.project.ID, hexTrace(1), daysAgo(1), x, false)
+	if _, err := f.store.db.Exec(`INSERT INTO media_holders (sha256, project_id, mime_type, first_at)
+		VALUES (?, ?, 'image/png', 1)`, x.SHA256, b.ID); err != nil {
+		t.Fatal(err)
+	}
+	if file, err := f.store.MediaFor(b.ID, x.SHA256); err != nil || file != nil {
+		t.Errorf("a hold with no ref read the body: %+v, %v", file, err)
+	}
+	if summary, err := f.store.MediaSummary(b.ID); err != nil || summary.Count != 0 {
+		t.Errorf("a hold with no ref is counted: %+v, %v", summary, err)
+	}
+	if err := f.sweeper.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.count(t, `SELECT COUNT(*) FROM media_holders WHERE project_id = ?`, b.ID); got != 0 {
+		t.Errorf("%d stale holds survive the sweep", got)
+	}
+	if file, err := f.store.MediaFor(f.project.ID, x.SHA256); err != nil || file == nil {
+		t.Fatalf("the sweep took the holding project's body: %v", err)
+	}
+	f.checkHolders(t, "the sweep")
+}
+
+// A raw ref written without its project is refused by the database (#26):
+// the column's default is only there because SQLite adds a NOT NULL column
+// with one.
+func TestMediaRawRefNeedsAProject(t *testing.T) {
+	f := newSweepFixture(t)
+	x := mediaBody(54, 4096)
+	f.arriveWithMedia(t, f.project.ID, hexTrace(1), daysAgo(1), x, true)
+	var batch int64
+	if err := f.store.db.QueryRow(`SELECT id FROM raw_batches LIMIT 1`).Scan(&batch); err != nil {
+		t.Fatal(err)
+	}
+	other := mediaBody(55, 4096)
+	if _, err := f.store.db.Exec(`INSERT INTO media (sha256, mime_type, size, body, created_at) VALUES (?, 'image/png', 1, X'00', 0)`,
+		other.SHA256); err != nil {
+		t.Fatal(err)
+	}
+	_, err := f.store.db.Exec(`INSERT INTO media_raw_refs (sha256, raw_batch_id) VALUES (?, ?)`, other.SHA256, batch)
+	if err == nil || !strings.Contains(err.Error(), "project_id is required") {
+		t.Errorf("a raw ref without a project = %v, want refused", err)
 	}
 }
 

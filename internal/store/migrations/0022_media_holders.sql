@@ -10,6 +10,13 @@ ALTER TABLE media_raw_refs ADD COLUMN project_id TEXT NOT NULL DEFAULT '';
 UPDATE media_raw_refs
    SET project_id = (SELECT project_id FROM raw_batches WHERE id = raw_batch_id);
 CREATE INDEX idx_media_raw_refs_holder ON media_raw_refs(sha256, project_id);
+-- The column's default exists only because SQLite adds a NOT NULL column with
+-- one; a raw ref written without its project would be a hold nobody sees.
+CREATE TRIGGER media_raw_refs_need_a_project BEFORE INSERT ON media_raw_refs
+  WHEN NEW.project_id = ''
+BEGIN
+  SELECT RAISE(ABORT, 'media_raw_refs.project_id is required');
+END;
 
 -- A project's own view of a body it holds (#25): the type this project stored
 -- it under and when its hold began (Unix nanoseconds). One row per content

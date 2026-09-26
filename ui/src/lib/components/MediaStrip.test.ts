@@ -59,6 +59,21 @@ describe('the media strip', () => {
 		expect(media).toHaveBeenCalledWith(pdf.tracepad_media);
 	});
 
+	it('saves a download from a neutral blob, whatever the type (#32)', async () => {
+		const hta: MediaRef = { tracepad_media: 'e'.repeat(64), mime_type: 'application/hta', size: 700 };
+		media.mockImplementation(async () => new Blob(['<hta/>'], { type: 'application/hta' }));
+		render(MediaStrip, { refs: [hta] });
+		const saved: string[] = [];
+		vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+			saved.push(this.download);
+		});
+		await userEvent.click(screen.getByRole('button', { name: /Download application\/hta/ }));
+		await waitFor(() => expect(saved).toEqual(['eeeeeeeeeeee']));
+		const blob = vi.mocked(URL.createObjectURL).mock.calls[0][0] as Blob;
+		expect(blob.type).toBe('application/octet-stream');
+		expect(await blob.text()).toBe('<hta/>');
+	});
+
 	it('says a body was not stored, and fetches nothing for it', () => {
 		render(MediaStrip, { refs: [kept] });
 		expect(screen.getByText('image/jpeg · 9 KB · not stored (project setting)')).toBeInTheDocument();

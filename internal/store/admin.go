@@ -261,12 +261,11 @@ func (s *Store) ProjectPreview(projectID string) (DeleteCounts, error) {
 			return counts, fmt.Errorf("count a project's %s: %w", table.name, err)
 		}
 	}
-	// Every trace the project's refs name, not only the ones still here: a
-	// ref the Langfuse channel wrote for a trace that never came goes with
-	// the project too (spec 041 #11).
-	counts.Media, counts.MediaBytes, err = s.mediaFreed(projectID,
-		`SELECT trace_id FROM media_refs WHERE project_id = ?`, []any{projectID},
-		`SELECT id FROM raw_batches WHERE project_id = ?`, []any{projectID})
+	// Every body the project holds, a ref the Langfuse channel wrote for a
+	// trace that never came included: the project stops holding all of them
+	// (spec 041 #11, #27), which is its media figure.
+	summary, err := s.MediaSummary(projectID)
+	counts.Media, counts.MediaBytes = summary.Count, summary.Bytes
 	return counts, err
 }
 
