@@ -80,6 +80,7 @@ func writeMedia(tx *sql.Tx, projectID string, bodies []MediaBody, refs []MediaRe
 		return err
 	}
 	types := declaredTypes(bodies)
+	held := map[string]bool{}
 	for _, ref := range refs {
 		result, err := tx.Exec(
 			`INSERT INTO media_refs (sha256, project_id, trace_id, created_at, pending)
@@ -89,9 +90,16 @@ func writeMedia(tx *sql.Tx, projectID string, bodies []MediaBody, refs []MediaRe
 		if err != nil {
 			return fmt.Errorf("store media ref %s: %w", ref.SHA256, err)
 		}
-		if n, err := result.RowsAffected(); err != nil || n == 0 {
+		n, err := result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("store media ref %s: %w", ref.SHA256, err)
+		}
+		// One hold per body, however many of the batch's traces point at
+		// it.
+		if n == 0 || held[ref.SHA256] {
 			continue
 		}
+		held[ref.SHA256] = true
 		if err := holdMedia(tx, projectID, ref.SHA256, types[ref.SHA256], now); err != nil {
 			return err
 		}
@@ -114,12 +122,12 @@ func declaredTypes(bodies []MediaBody) map[string]string {
 // and from now (Decision 25). A project that already holds it keeps the type
 // and the time it had: within a project the first type wins. A ref with no
 // type of its own in hand — a Langfuse id resolved to a body the project
-// already holds — finds the row there; the body's stored type is only the
-// belt for a row that is not.
+// already holds — finds the row there. Were it ever not there, the hold is
+// `application/octet-stream`: never the type another project declared.
 func holdMedia(tx *sql.Tx, projectID, sha, mimeType string, now int64) error {
 	if _, err := tx.Exec(
 		`INSERT INTO media_holders (sha256, project_id, mime_type, first_at)
-		 SELECT m.sha256, ?, COALESCE(NULLIF(?, ''), m.mime_type), ? FROM media m WHERE m.sha256 = ?
+		 SELECT m.sha256, ?, COALESCE(NULLIF(?, ''), 'application/octet-stream'), ? FROM media m WHERE m.sha256 = ?
 		 ON CONFLICT DO NOTHING`,
 		projectID, mimeType, now, sha); err != nil {
 		return fmt.Errorf("hold media %s: %w", sha, err)
@@ -201,7 +209,11 @@ func writeRawMediaRefs(tx *sql.Tx, projectID string, batchID int64, shas []strin
 		if err != nil {
 			return fmt.Errorf("store raw media ref %s: %w", sha, err)
 		}
-		if n, err := result.RowsAffected(); err != nil || n == 0 {
+		n, err := result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("store raw media ref %s: %w", sha, err)
+		}
+		if n == 0 {
 			continue
 		}
 		if err := holdMedia(tx, projectID, sha, types[sha], now); err != nil {
@@ -347,29 +359,43 @@ type MediaFile struct {
 	Body     []byte
 }
 
-// mediaScope is the scope of #7 as Decision 26 has it: a project holds a body
-// when it has a holder row for it and a ref to it, from a trace or from a raw
-// batch — each a seek on (sha256, project_id). It answers the project's own
-// type and the start of its hold (Decision 25). The body itself is read only
-// once the answer is yes, so a hash nobody holds and a hash only another
-// project holds are the same few missed probes.
+// holdsBody is the rest of the scope of #7 as Decision 26 has it, asked of a
+// holder row h: a project holds a body when it has a holder row for it and a
+// ref to it, from a trace or from a raw batch — each a seek on (sha256,
+// project_id). The one predicate every "does this project hold this body"
+// asks.
+const holdsBody = `(EXISTS (SELECT 1 FROM media_refs r WHERE r.sha256 = h.sha256 AND r.project_id = h.project_id)
+	    OR EXISTS (SELECT 1 FROM media_raw_refs rr WHERE rr.sha256 = h.sha256 AND rr.project_id = h.project_id))`
+
+// mediaScope answers, for a project holding a body, the project's own type
+// and the start of its hold (Decision 25), and no row otherwise: a hash
+// nobody holds and a hash only another project holds are the same few missed
+// probes.
 const mediaScope = `SELECT h.mime_type, h.first_at FROM media_holders h
-	 WHERE h.sha256 = ? AND h.project_id = ?
-	   AND (EXISTS (SELECT 1 FROM media_refs r WHERE r.sha256 = h.sha256 AND r.project_id = h.project_id)
-	        OR EXISTS (SELECT 1 FROM media_raw_refs rr WHERE rr.sha256 = h.sha256 AND rr.project_id = h.project_id))`
+	 WHERE h.sha256 = ? AND h.project_id = ? AND ` + holdsBody
+
+// mediaByID is the Langfuse id's lookup (#9, Decision 26): a seek on this
+// project's holder rows in the hash range the id's first sixteen bytes spell,
+// through `idx_media_holders_project`, so no other project's row is read.
+const mediaByID = `SELECT h.sha256, h.mime_type, h.first_at,
+	        (SELECT m.size FROM media m WHERE m.sha256 = h.sha256)
+	   FROM media_holders h
+	  WHERE h.project_id = ? AND h.sha256 >= ? AND h.sha256 < ? AND ` + holdsBody
+
+// mediaRead is the scope with the body read in the same statement, so in one
+// snapshot: the body only once the answer is yes, and never after the
+// project's hold went. A NULL body is one collected meanwhile.
+const mediaRead = `SELECT h.mime_type, (SELECT m.body FROM media m WHERE m.sha256 = h.sha256)
+	   FROM media_holders h
+	  WHERE h.sha256 = ? AND h.project_id = ? AND ` + holdsBody
 
 // MediaFor reads one body for a project, under the project's own type, or nil
 // when the project holds no ref to it — which is also what a body that does
 // not exist looks like, so a hash is not a capability across projects (#7).
 func (s *Store) MediaFor(projectID, sha string) (*MediaFile, error) {
-	info, err := s.MediaHeld(projectID, sha)
-	if err != nil || info == nil {
-		return nil, err
-	}
-	file := MediaFile{MimeType: info.MimeType}
-	err = s.db.QueryRow(`SELECT body FROM media WHERE sha256 = ?`, sha).Scan(&file.Body)
-	if err == sql.ErrNoRows {
-		// Collected since the scope was asked.
+	var file MediaFile
+	err := s.db.QueryRow(mediaRead, sha, projectID).Scan(&file.MimeType, &file.Body)
+	if err == sql.ErrNoRows || err == nil && file.Body == nil {
 		return nil, nil
 	}
 	if err != nil {
@@ -394,63 +420,46 @@ type MediaInfo struct {
 // project could name would otherwise be a way to adopt another's picture.
 func (s *Store) MediaHeld(projectID, sha string) (*MediaInfo, error) {
 	info := MediaInfo{SHA256: sha}
-	err := s.db.QueryRow(mediaScope, sha, projectID).Scan(&info.MimeType, &info.CreatedAt)
-	if err == sql.ErrNoRows {
+	var size sql.NullInt64
+	err := s.db.QueryRow(
+		`SELECT h.mime_type, h.first_at, (SELECT m.size FROM media m WHERE m.sha256 = h.sha256)
+		   FROM media_holders h WHERE h.sha256 = ? AND h.project_id = ? AND `+holdsBody,
+		sha, projectID).Scan(&info.MimeType, &info.CreatedAt, &size)
+	if err == sql.ErrNoRows || err == nil && !size.Valid {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("look up media %s: %w", sha, err)
 	}
-	return s.withSize(&info)
-}
-
-// withSize completes a held body's info with its size, a property of the
-// bytes; nil when the body was collected since its hold was read.
-func (s *Store) withSize(info *MediaInfo) (*MediaInfo, error) {
-	err := s.db.QueryRow(`SELECT size FROM media WHERE sha256 = ?`, info.SHA256).Scan(&info.Size)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("look up media %s: %w", info.SHA256, err)
-	}
-	return info, nil
+	info.Size = size.Int64
+	return &info, nil
 }
 
 // MediaByLangfuseID resolves the SDK's id to a body this project holds (#9):
-// a seek on the hash range the id's first sixteen bytes spell, for this
-// project, then the whole id compared (Decision 26).
+// the project's holders in the hash range the id's first sixteen bytes spell,
+// then the whole id compared (Decision 26).
 func (s *Store) MediaByLangfuseID(projectID, mediaID string) (*MediaInfo, error) {
 	prefix, ok := shaPrefixOf(mediaID)
 	if !ok {
 		return nil, nil
 	}
-	rows, err := s.db.Query(
-		`SELECT h.sha256, h.mime_type, h.first_at FROM media_holders h
-		  WHERE h.sha256 >= ? AND h.sha256 < ? AND h.project_id = ?
-		    AND (EXISTS (SELECT 1 FROM media_refs r WHERE r.sha256 = h.sha256 AND r.project_id = h.project_id)
-		         OR EXISTS (SELECT 1 FROM media_raw_refs rr WHERE rr.sha256 = h.sha256 AND rr.project_id = h.project_id))`,
-		prefix, prefix+"g", projectID)
+	rows, err := s.db.Query(mediaByID, projectID, prefix, prefix+"g")
 	if err != nil {
 		return nil, fmt.Errorf("look up media %s: %w", mediaID, err)
 	}
-	var found *MediaInfo
+	defer rows.Close()
 	for rows.Next() {
 		var info MediaInfo
-		if err := rows.Scan(&info.SHA256, &info.MimeType, &info.CreatedAt); err != nil {
-			rows.Close()
+		var size sql.NullInt64
+		if err := rows.Scan(&info.SHA256, &info.MimeType, &info.CreatedAt, &size); err != nil {
 			return nil, err
 		}
-		if MediaIDFor(info.SHA256) == mediaID {
-			found = &info
-			break
+		if size.Valid && MediaIDFor(info.SHA256) == mediaID {
+			info.Size = size.Int64
+			return &info, nil
 		}
 	}
-	rows.Close()
-	if err := rows.Err(); err != nil || found == nil {
-		return nil, err
-	}
-	return s.withSize(found)
+	return nil, rows.Err()
 }
 
 // langfuseMarker is the Langfuse reference string's opening, looked for in a
@@ -520,16 +529,16 @@ type MediaSummary struct {
 	Bytes int64
 }
 
-// MediaSummary counts what a project's refs hold.
+// MediaSummary counts what a project's refs hold: its holder rows, one per
+// body it points at from a trace or a raw batch (Decision 25), read through
+// `idx_media_holders_project`.
 func (s *Store) MediaSummary(projectID string) (MediaSummary, error) {
 	var summary MediaSummary
 	err := s.db.QueryRow(
-		`SELECT COUNT(*), COALESCE(SUM(size), 0) FROM media WHERE sha256 IN (
-		   SELECT sha256 FROM media_refs WHERE project_id = ?
-		   UNION
-		   SELECT rr.sha256 FROM media_raw_refs rr JOIN raw_batches b ON b.id = rr.raw_batch_id
-		    WHERE b.project_id = ?)`,
-		projectID, projectID).Scan(&summary.Count, &summary.Bytes)
+		`SELECT COUNT(*), COALESCE(SUM(m.size), 0)
+		   FROM media_holders h JOIN media m ON m.sha256 = h.sha256
+		  WHERE h.project_id = ?`,
+		projectID).Scan(&summary.Count, &summary.Bytes)
 	if err != nil {
 		return summary, fmt.Errorf("summarise media: %w", err)
 	}

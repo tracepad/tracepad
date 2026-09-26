@@ -22,6 +22,10 @@ CREATE TABLE media_holders (
     first_at   INTEGER NOT NULL,
     PRIMARY KEY (sha256, project_id)
 ) STRICT, WITHOUT ROWID;
+-- A project's own holder rows: a Langfuse id is a hash range, which on the
+-- primary key would read every project's rows in it, and a project's purge
+-- and its media figure ask for its rows alone.
+CREATE INDEX idx_media_holders_project ON media_holders(project_id, sha256);
 
 -- Which type each project declared before this migration is kept only inside
 -- the payloads' references, so every existing holder gets the body's stored

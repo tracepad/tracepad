@@ -453,7 +453,7 @@ func (s *Server) handlePatchProject(w http.ResponseWriter, r *http.Request) {
 				// design (spec 013 #6).
 				put("stats_hours", counts.StatsHours).
 				// The media bodies the two windows together would
-				// collect (spec 041 #11).
+				// make the project stop holding (spec 041 #11, #27).
 				put("media", counts.Media).
 				put("media_bytes", counts.MediaBytes)).
 			put("note", "the shorter window takes effect on the next sweep"))

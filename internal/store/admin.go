@@ -39,10 +39,11 @@ type DeleteCounts struct {
 	// pointing at the erased traces, and deleting a project takes both.
 	AnnotationQueues int64
 	AnnotationItems  int64
-	// Media and MediaBytes are the bodies the operation would collect —
-	// those nothing staying behind points at — and their decoded bytes
-	// (spec 041 #11): a preview that hid a hundred megabytes of pictures
-	// would be a preview that lies by omission.
+	// Media and MediaBytes are the bodies the project would stop holding —
+	// those none of its traces or raw batches staying behind points at —
+	// and their decoded bytes (spec 041 #11, #27): a preview that hid a
+	// hundred megabytes of pictures would be a preview that lies by
+	// omission. Whether another project keeps the bytes does not enter it.
 	Media      int64
 	MediaBytes int64
 	// Oldest is the arrival time of the oldest affected row (Unix
@@ -115,9 +116,10 @@ func (s *Store) RetentionPreview(projectID string, retention, raw, stats *int, n
 		counts.RawBatches = batches
 		counts.Oldest = earliest(counts.Oldest, oldest)
 	}
-	// The bodies both windows together would collect (spec 041 #11): a
-	// body a trace keeps is not freed by its raw batch going, nor the
-	// other way round, so the two are asked about as one deletion.
+	// The bodies both windows together would make the project stop
+	// holding (spec 041 #11, #27): a body a trace keeps is not released by
+	// its raw batch going, nor the other way round, so the two are asked
+	// about as one deletion.
 	var traces, raws string
 	var traceArgs, rawArgs []any
 	if cutoff, windowed := cutoffFor(retention, now); windowed {

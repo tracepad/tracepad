@@ -208,10 +208,6 @@ func TestMediaScopeSeeksOnly(t *testing.T) {
 		}
 		return strings.Join(lines, "\n")
 	}
-	const lookup = `SELECT h.sha256, h.mime_type, h.first_at FROM media_holders h
-		  WHERE h.sha256 >= ? AND h.sha256 < ? AND h.project_id = ?
-		    AND (EXISTS (SELECT 1 FROM media_refs r WHERE r.sha256 = h.sha256 AND r.project_id = h.project_id)
-		         OR EXISTS (SELECT 1 FROM media_raw_refs rr WHERE rr.sha256 = h.sha256 AND rr.project_id = h.project_id))`
 	refs := []string{
 		"SEARCH r USING PRIMARY KEY (sha256=? AND project_id=?)",
 		"SEARCH rr USING COVERING INDEX idx_media_raw_refs_holder (sha256=? AND project_id=?)",
@@ -223,8 +219,14 @@ func TestMediaScopeSeeksOnly(t *testing.T) {
 	}{
 		{"the scope", plan(mediaScope, strings.Repeat("a", 64), "p"),
 			append([]string{"SEARCH h USING PRIMARY KEY (sha256=? AND project_id=?)"}, refs...)},
-		{"a Langfuse id", plan(lookup, "aa", "aag", "p"),
-			append([]string{"SEARCH h USING PRIMARY KEY (sha256>? AND sha256<?)"}, refs...)},
+		{"the read", plan(mediaRead, strings.Repeat("a", 64), "p"),
+			append([]string{"SEARCH h USING PRIMARY KEY (sha256=? AND project_id=?)",
+				"SEARCH m USING INDEX sqlite_autoindex_media_1 (sha256=?)"}, refs...)},
+		// Within the project's own rows: a hash only other projects hold
+		// reads none of theirs.
+		{"a Langfuse id", plan(mediaByID, "p", "aa", "aag"),
+			append([]string{"SEARCH h USING INDEX idx_media_holders_project (project_id=? AND sha256>? AND sha256<?)",
+				"SEARCH m USING INDEX sqlite_autoindex_media_1 (sha256=?)"}, refs...)},
 	} {
 		for _, seek := range c.seeks {
 			if !strings.Contains(c.plan, seek) {
@@ -235,12 +237,38 @@ func TestMediaScopeSeeksOnly(t *testing.T) {
 			if !strings.HasPrefix(line, "SEARCH") && !strings.Contains(line, "SUBQUERY") {
 				t.Errorf("%s: plan step %q is not a seek", c.name, line)
 			}
-			if strings.Contains(line, "raw_batches") || strings.HasPrefix(line, "SEARCH m ") {
+			if strings.Contains(line, "raw_batches") {
 				t.Errorf("%s: plan reads %q", c.name, line)
 			}
 		}
 	}
 }
+
+// A hold written with no type of its own in hand is never another project's
+// type (#25): the body's stored type is A's, and B's hold is octet-stream.
+func TestMediaHoldWithoutATypeIsNotAnothers(t *testing.T) {
+	f := newSweepFixture(t)
+	b := f.secondProject(t, "b")
+	x := mediaBody(49, 4096)
+	f.arriveWithMedia(t, f.project.ID, hexTrace(1), daysAgo(1), x, false)
+	hold := writeJob(func(tx *sql.Tx) error { return holdMedia(tx, b.ID, x.SHA256, "", daysAgo(1)) })
+	if err := f.writer.Submit(t.Context(), hold); err != nil {
+		t.Fatal(err)
+	}
+	var mime string
+	if err := f.store.db.QueryRow(`SELECT mime_type FROM media_holders WHERE sha256 = ? AND project_id = ?`,
+		x.SHA256, b.ID).Scan(&mime); err != nil {
+		t.Fatal(err)
+	}
+	if mime != "application/octet-stream" {
+		t.Errorf("B's hold without a type = %q, want application/octet-stream, never A's image/png", mime)
+	}
+}
+
+// writeJob runs a function as a writer job.
+type writeJob func(tx *sql.Tx) error
+
+func (j writeJob) apply(tx *sql.Tx) error { return j(tx) }
 
 // A body only a raw batch of B holds is B's (#12); to A, which holds nothing,
 // it looks like a hash nobody holds.
