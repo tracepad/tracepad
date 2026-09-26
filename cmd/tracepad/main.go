@@ -198,7 +198,8 @@ func serve(args []string) error {
 	// After the server, because the server is what knows whether this
 	// deployment still needs its first owner and what the link to create
 	// one is (spec 028 #9).
-	printStartup(boot, cfg.Listen, srv.SetupURL())
+	printStartup(os.Stdout, boot, cfg.Listen, srv.SetupURL())
+	warnPlainHTTP(slog.Default(), cfg.Listen, cfg.URL, cfg.InContainer)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -273,6 +274,12 @@ func provisionSpecs(cfg *config.Config) ([]store.ProvisionSpec, error) {
 // project created in this run — both plain OTel and Langfuse-SDK style
 // (spec 001 #9) — and says where the browser interface is.
 //
+// A secret is printed only when this run generated it. One declared in
+// TRACEPAD_PROJECTS is the operator's already, and printing it would copy it
+// into every log this output is kept in — `docker logs` among them, which
+// keeps it for the life of the container (spec 001 #12). The lines are
+// printed with the place for it named instead.
+//
 // The interface's line is the setup link while this server has no owner, and
 // the bare URL once it has one (spec 028 #9). The pre-authed `#key=` link of
 // spec 006 #8 is gone with the key login it authenticated: a key is what a
@@ -281,11 +288,16 @@ func provisionSpecs(cfg *config.Config) ([]store.ProvisionSpec, error) {
 // moment the server prints a line, so the line is the credential — and so is
 // the fragment, which never reaches the server and which the app strips from
 // the URL as soon as it has read it.
-func printStartup(boot *store.BootstrapResult, listen, setupURL string) {
+func printStartup(w io.Writer, boot *store.BootstrapResult, listen, setupURL string) {
 	host := config.DisplayHost(listen)
 	for _, c := range boot.Created {
-		fmt.Printf(`
-Project %q created. Connect your app with either:
+		intro, secret := ". Connect your app with either:", c.Keys.Secret
+		if c.Declared {
+			intro = " from TRACEPAD_PROJECTS. Connect your app with the\nsecret key declared there, in either of:"
+			secret = "<its secret key from TRACEPAD_PROJECTS>"
+		}
+		fmt.Fprintf(w, `
+Project %q created%s
 
   # OpenTelemetry SDK
   OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://%s/v1/traces
@@ -296,13 +308,13 @@ Project %q created. Connect your app with either:
   LANGFUSE_PUBLIC_KEY=%s
   LANGFUSE_SECRET_KEY=%s
 
-`, c.Project.Name, host, c.Keys.Secret, host, c.Keys.PublicKey, c.Keys.Secret)
+`, c.Project.Name, intro, host, secret, host, c.Keys.PublicKey, secret)
 	}
 	if !ui.Enabled {
 		return
 	}
 	if setupURL != "" {
-		fmt.Printf(`
+		fmt.Fprintf(w, `
 This server has no owner yet. Create the first one — it takes an email and a
 password, and nothing is written down anywhere but this database:
 
@@ -313,5 +325,26 @@ The link is good until this process stops. Restart to have a new one printed.
 `, setupURL)
 		return
 	}
-	fmt.Printf("\nWeb interface: http://%s/\n\n", host)
+	fmt.Fprintf(w, "\nWeb interface: http://%s/\n\n", host)
+}
+
+// warnPlainHTTP says so at start when other machines can reach this server
+// over plain HTTP and nothing says a TLS proxy stands in front (spec 001 #12).
+// A warning, not a refusal. In the image it is one INFO line instead: a
+// container binds every interface by design and is fenced by where its port
+// is published, which the server cannot see, and a warning that fires in the
+// recommended setup teaches people to skip warnings.
+func warnPlainHTTP(log *slog.Logger, listen, publicURL string, inContainer bool) {
+	if !config.PlainHTTPBeyondLoopback(listen, publicURL) {
+		return
+	}
+	if inContainer {
+		log.Info("listening on all interfaces inside the container; publish the port on 127.0.0.1 "+
+			"or put TLS in front — docs/docker.md", "listen", listen)
+		return
+	}
+	log.Warn("serving plain HTTP beyond loopback: passwords, session cookies and keys cross the network unencrypted. "+
+		"Put a TLS proxy in front and set TRACEPAD_URL to its https:// address, or listen on 127.0.0.1 "+
+		"(in a container, publish the port with -p 127.0.0.1:4318:4318)",
+		"listen", listen)
 }

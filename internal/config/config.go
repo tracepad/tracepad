@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -71,6 +72,12 @@ type Config struct {
 	// hands out. Read by the CLI as the server to talk to, which is why
 	// one variable serves both.
 	URL string
+	// InContainer says the process runs in the published image, which sets
+	// TRACEPAD_IN_CONTAINER=1 (spec 001 #12, spec 020 #20). There a wildcard
+	// bind is the design and the port's reach is decided by where it is
+	// published, which the process cannot see — so the plain-HTTP notice at
+	// start is information, not a warning.
+	InContainer bool
 }
 
 // DefaultMaxBodyBytes is the request body cap when unset (20 MiB).
@@ -127,6 +134,7 @@ var knownEnv = map[string]bool{
 	"TRACEPAD_ROLLUP_INTERVAL":       true,
 	"TRACEPAD_ADMIN_TOKEN":           true,
 	"TRACEPAD_SESSION_DAYS":          true,
+	"TRACEPAD_IN_CONTAINER":          true,
 	// The server reads TRACEPAD_URL too since spec 028 #11 — as the host
 	// of the links it prints — but it is still the CLI's "which server",
 	// which is the whole reason there is one variable and not two.
@@ -171,6 +179,10 @@ func Load(args []string) (*Config, error) {
 		return nil, fmt.Errorf("TRACEPAD_ROLLUP_INTERVAL: want at least %s, got %s",
 			MinRollupInterval, rollup)
 	}
+	inContainer, err := parseOnOff("TRACEPAD_IN_CONTAINER", false)
+	if err != nil {
+		return nil, err
+	}
 	sessionDays, err := parseCount("TRACEPAD_SESSION_DAYS", DefaultSessionDays)
 	if err != nil {
 		return nil, err
@@ -192,6 +204,7 @@ func Load(args []string) (*Config, error) {
 		AdminToken:          strings.TrimSpace(os.Getenv("TRACEPAD_ADMIN_TOKEN")),
 		SessionLife:         time.Duration(sessionDays) * 24 * time.Hour,
 		URL:                 strings.TrimSpace(os.Getenv("TRACEPAD_URL")),
+		InContainer:         inContainer,
 	}
 
 	fs := flag.NewFlagSet("tracepad", flag.ContinueOnError)
@@ -234,6 +247,33 @@ func DisplayHost(listen string) string {
 		return "localhost:" + port
 	}
 	return listen
+}
+
+// PlainHTTPBeyondLoopback reports whether a server listening on listen, and
+// told by publicURL where its people reach it, takes passwords, session
+// cookies and keys in clear from other machines (spec 001 #12). Tracepad
+// serves no TLS itself, so the listener is plain HTTP whatever it binds; what
+// decides is whether anything but this machine can reach it, and whether an
+// https TRACEPAD_URL says a proxy in front is where people actually connect.
+//
+// A hostname other than localhost counts as reachable: it names some
+// interface, and which one is the resolver's business, not a thing to guess
+// at here.
+func PlainHTTPBeyondLoopback(listen, publicURL string) bool {
+	if u, err := url.Parse(strings.TrimSpace(publicURL)); err == nil && strings.EqualFold(u.Scheme, "https") {
+		return false
+	}
+	host, _, err := net.SplitHostPort(listen)
+	if err != nil {
+		return false
+	}
+	if strings.EqualFold(host, "localhost") {
+		return false
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+		return false
+	}
+	return true
 }
 
 func envOr(key, def string) string {
@@ -334,10 +374,20 @@ func ParseProjects(raw string) ([]ProjectSpec, error) {
 	}
 	seen := map[string]bool{}
 	var specs []ProjectSpec
-	for _, part := range strings.Split(raw, ",") {
+	for i, part := range strings.Split(raw, ",") {
 		fields := strings.Split(strings.TrimSpace(part), ":")
-		if len(fields) != 3 || fields[0] == "" || fields[1] == "" || fields[2] == "" {
-			return nil, fmt.Errorf("TRACEPAD_PROJECTS entry %q: want name:public_key:secret_key", part)
+		// The entry is named by its position, never quoted: a malformed
+		// one is usually a secret with a stray colon in it, and this error
+		// ends up in the log (spec 001 #12).
+		if len(fields) != 3 {
+			return nil, fmt.Errorf("TRACEPAD_PROJECTS entry %d: want name:public_key:secret_key, got %d fields",
+				i+1, len(fields))
+		}
+		for f, value := range fields {
+			if value == "" {
+				return nil, fmt.Errorf("TRACEPAD_PROJECTS entry %d: want name:public_key:secret_key, field %d is empty",
+					i+1, f+1)
+			}
 		}
 		if seen[fields[0]] {
 			return nil, fmt.Errorf("TRACEPAD_PROJECTS: duplicate project name %q", fields[0])

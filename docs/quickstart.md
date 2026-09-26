@@ -12,7 +12,7 @@ tracepad
 Or in Docker, which needs nothing installed but Docker:
 
 ```sh
-docker run -d --name tracepad -v tracepad:/data -p 4318:4318 \
+docker run -d --name tracepad -v tracepad:/data -p 127.0.0.1:4318:4318 \
   ghcr.io/tracepad/tracepad
 docker logs tracepad
 ```
@@ -20,6 +20,13 @@ docker logs tracepad
 Everything below is the same either way; the container prints to its log what
 the binary prints to your terminal. See [docker.md](docker.md) for the volume,
 the permissions and upgrades.
+
+The `127.0.0.1:` keeps the port on this machine, as `tracepad --listen
+127.0.0.1:4318` does for the binary. Tracepad speaks plain HTTP, and the binary
+warns at start while other machines can reach it that way (the container, which
+cannot see where its port is published, says it as a note);
+[docker.md](docker.md#serving-over-tls) says how to put TLS in front before you
+open it up.
 
 The first run creates the database, a project called `default`, and its key
 pair — then prints them, once:

@@ -10,13 +10,19 @@ type ProvisionSpec struct {
 }
 
 // BootstrapResult reports what Bootstrap did. Secrets are present only for
-// projects created in this run (generated ones); the store never returns
-// stored secrets because it does not have them.
+// projects created in this run; the store never returns stored secrets because
+// it does not have them.
 type BootstrapResult struct {
-	Created []struct {
-		Project Project
-		Keys    KeyPair
-	}
+	Created []BootstrapCreated
+}
+
+// BootstrapCreated is one project Bootstrap created. Declared says its keys
+// came from TRACEPAD_PROJECTS rather than being generated here: the operator
+// already holds that secret, so it is not one to print (spec 001 #12).
+type BootstrapCreated struct {
+	Project  Project
+	Keys     KeyPair
+	Declared bool
 }
 
 // Bootstrap provisions projects idempotently. Declared projects that already
@@ -25,7 +31,8 @@ type BootstrapResult struct {
 func (s *Store) Bootstrap(specs []ProvisionSpec) (*BootstrapResult, error) {
 	res := &BootstrapResult{}
 
-	if len(specs) == 0 {
+	declared := len(specs) > 0
+	if !declared {
 		n, err := s.CountProjects()
 		if err != nil {
 			return nil, err
@@ -60,10 +67,11 @@ func (s *Store) Bootstrap(specs []ProvisionSpec) (*BootstrapResult, error) {
 		if err != nil {
 			return nil, fmt.Errorf("bootstrap: %w", err)
 		}
-		res.Created = append(res.Created, struct {
-			Project Project
-			Keys    KeyPair
-		}{*p, KeyPair{PublicKey: spec.PublicKey, Secret: spec.SecretKey}})
+		res.Created = append(res.Created, BootstrapCreated{
+			Project:  *p,
+			Keys:     KeyPair{PublicKey: spec.PublicKey, Secret: spec.SecretKey},
+			Declared: declared,
+		})
 	}
 	return res, nil
 }

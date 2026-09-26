@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"flag"
+	"strings"
 	"testing"
 	"time"
 )
@@ -18,6 +19,21 @@ func TestParseProjects(t *testing.T) {
 
 	if _, err := ParseProjects("app:only-two"); err == nil {
 		t.Fatal("expected error for malformed entry")
+	}
+	// A malformed entry is named by its position and never quoted: the
+	// error is logged, and what is malformed is usually the secret
+	// (spec 001 #12).
+	_, err = ParseProjects("app:tp-pk-a:tp-sk-a,eval:tp-pk-b:tp-sk-with:colon")
+	if err == nil {
+		t.Fatal("expected error for an entry with four fields")
+	}
+	if strings.Contains(err.Error(), "tp-sk") || !strings.Contains(err.Error(), "entry 2") {
+		t.Fatalf("error = %q, want the entry's position and none of its secret", err)
+	}
+	// Three fields with one empty says which one, still without the value.
+	_, err = ParseProjects("app::tp-sk-a")
+	if err == nil || !strings.Contains(err.Error(), "field 2 is empty") || strings.Contains(err.Error(), "tp-sk") {
+		t.Fatalf("error = %v, want field 2 named as empty and no secret", err)
 	}
 	if _, err := ParseProjects("app:p:s,app:p2:s2"); err == nil {
 		t.Fatal("expected error for duplicate name")
@@ -174,6 +190,26 @@ func TestPublicURL(t *testing.T) {
 	}
 }
 
+// The image sets TRACEPAD_IN_CONTAINER=1 (spec 020 #20); anywhere else it is
+// unset, and a known variable, so it is never reported as a typo.
+func TestInContainer(t *testing.T) {
+	t.Setenv("TRACEPAD_IN_CONTAINER", "")
+	cfg, err := Load(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.InContainer {
+		t.Error("InContainer set with TRACEPAD_IN_CONTAINER unset")
+	}
+	t.Setenv("TRACEPAD_IN_CONTAINER", "1")
+	if cfg, err = Load(nil); err != nil || !cfg.InContainer {
+		t.Errorf("TRACEPAD_IN_CONTAINER=1: InContainer = %v, err = %v", cfg != nil && cfg.InContainer, err)
+	}
+	if !knownEnv["TRACEPAD_IN_CONTAINER"] {
+		t.Error("TRACEPAD_IN_CONTAINER would be warned about as unknown")
+	}
+}
+
 func TestDisplayHost(t *testing.T) {
 	cases := map[string]string{
 		":4318":          "localhost:4318",
@@ -185,6 +221,34 @@ func TestDisplayHost(t *testing.T) {
 	for in, want := range cases {
 		if got := DisplayHost(in); got != want {
 			t.Errorf("DisplayHost(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// Tracepad serves no TLS of its own, so a listener other machines can reach is
+// one they send passwords and keys to in clear — unless TRACEPAD_URL says the
+// people come in through https (spec 001 #12).
+func TestPlainHTTPBeyondLoopback(t *testing.T) {
+	cases := []struct {
+		listen, url string
+		want        bool
+	}{
+		{":4318", "", true},
+		{"0.0.0.0:4318", "", true},
+		{"[::]:4318", "", true},
+		{"192.168.1.20:4318", "", true},
+		{"traces.internal:4318", "", true},
+		{":4318", "http://traces.example.com", true},
+		{"127.0.0.1:4318", "", false},
+		{"[::1]:4318", "", false},
+		{"localhost:4318", "", false},
+		{":4318", "https://traces.example.com", false},
+		{":4318", "HTTPS://traces.example.com", false},
+		{"not-an-address", "", false},
+	}
+	for _, c := range cases {
+		if got := PlainHTTPBeyondLoopback(c.listen, c.url); got != c.want {
+			t.Errorf("PlainHTTPBeyondLoopback(%q, %q) = %v, want %v", c.listen, c.url, got, c.want)
 		}
 	}
 }

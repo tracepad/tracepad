@@ -8,13 +8,27 @@ and listens on `4318`.
 ```sh
 docker run -d --name tracepad \
   -v tracepad:/data \
-  -p 4318:4318 \
+  -p 127.0.0.1:4318:4318 \
   ghcr.io/tracepad/tracepad
 ```
 
 That is the whole command: the image already sets `TRACEPAD_DATA_DIR=/data` and
 `TRACEPAD_LISTEN=:4318`, so there is nothing to configure to get a running
 store. The interface is on <http://localhost:4318/>.
+
+**The port is published on loopback, and every example here does the same.**
+`-p 4318:4318` would publish it on every interface of the host, and Tracepad
+speaks plain HTTP: the passwords people sign in with, their session cookies and
+your applications' keys would cross the network readable by anything on the
+path. Keep `127.0.0.1:` for applications on the same machine; to serve anyone
+else, put a TLS proxy in front — [Serving over TLS](#serving-over-tls). Inside
+the container the server cannot see where its port was published, so it says
+this once at every start, as an `INFO` line, until `TRACEPAD_URL` is an
+`https://` address. (The same binary on a host, reachable beyond loopback over
+plain HTTP, makes it a `WARN`.) The note reads the same whatever the publish
+is, so it does not tell you when the port *is* exposed: with
+`--network host`, in a Kubernetes pod, or with `-p 4318:4318`, other machines
+reach the server over plain HTTP and nothing louder is printed.
 
 ## The keys are printed once, to the log
 
@@ -41,6 +55,25 @@ deliberately no file under `/data` holding it: that would put a secret on a
 volume outliving the container, and give anyone who can read the volume a way
 to learn a key that a host install does not have.
 
+**The log still holds it.** Docker keeps a container's output for as long as
+the container exists, and with the default `json-file` driver it never rotates
+it: whoever can run `docker logs tracepad` — or read the log file under the
+daemon's directory, or receive whatever ships your logs elsewhere — can read
+that key next month. Treat the first key as exposed once it has been copied
+out, and rotate onto one that was never printed:
+
+```sh
+read -rs TRACEPAD_API_KEY && export TRACEPAD_API_KEY   # paste the printed key
+docker exec -e TRACEPAD_API_KEY tracepad /tracepad keys create --url http://localhost:4318
+# move your applications onto the new pair, then revoke the printed one
+docker exec -e TRACEPAD_API_KEY tracepad /tracepad keys rm tp-pk-… --url http://localhost:4318
+```
+
+A key minted by `keys create` is printed to your terminal, not to the
+container's log. A deployment that declares its keys in `TRACEPAD_PROJECTS`
+from the start never has one printed: the server names the variable where the
+secret would go instead of repeating it.
+
 The same log carries the **setup link** — the way into the browser interface,
 until this deployment has an owner:
 
@@ -59,11 +92,17 @@ one in `docker-compose.yml` is the thing accounts exist to stop pasting.
 
 Any command can be run against the server from inside its own container —
 `/tracepad` is the same binary, and `--url http://localhost:4318` points it at
-the server it is sharing with:
+the server it is sharing with. Hand it the credential through the environment,
+as `-e TRACEPAD_API_KEY` with no value — Docker copies the variable from your
+shell — and not as `--key`: an argument is in your shell's history and in the
+process list of the host and the container while it runs, where every account
+can read it. `read -s` takes the value without echoing it or leaving it in the
+history either.
 
 ```sh
-docker exec tracepad /tracepad keys create --url http://localhost:4318 \
-  --key tp-sk-…            # mint a second pair, to rotate onto
+read -rs TRACEPAD_API_KEY && export TRACEPAD_API_KEY   # paste the key
+docker exec -e TRACEPAD_API_KEY tracepad /tracepad keys create \
+  --url http://localhost:4318   # mint a second pair, to rotate onto
 ```
 
 **If the key is lost rather than being rotated**, that command has nothing to
@@ -73,17 +112,19 @@ is the admin token, which is why a deployment you cannot afford to lock
 yourself out of should be started with one:
 
 ```sh
-docker run -d --name tracepad -v tracepad:/data -p 4318:4318 \
-  --env-file ./tracepad.env \        # TRACEPAD_ADMIN_TOKEN=…
+# tracepad.env holds one line: TRACEPAD_ADMIN_TOKEN=…
+docker run -d --name tracepad -v tracepad:/data -p 127.0.0.1:4318:4318 \
+  --env-file ./tracepad.env \
   ghcr.io/tracepad/tracepad
 
-docker exec tracepad /tracepad keys create \
-  --url http://localhost:4318 --key "$TRACEPAD_ADMIN_TOKEN"
+export TRACEPAD_API_KEY="$(sed -n 's/^TRACEPAD_ADMIN_TOKEN=//p' tracepad.env)"
+docker exec -e TRACEPAD_API_KEY tracepad /tracepad keys create --url http://localhost:4318
 ```
 
-Without one, the remaining route is the declarative bootstrap: set
-`TRACEPAD_PROJECTS` and restart, which re-adds the keys it names. See
-[admin.md](admin.md) and [cli.md](cli.md).
+Without one, an owner or editor signed in to the web interface mints a pair
+in the project's settings. `TRACEPAD_PROJECTS` is not a way back in: it creates
+the projects it names that do not exist yet and leaves an existing project's
+keys as they are. See [admin.md](admin.md) and [cli.md](cli.md).
 
 ## What the image is
 
@@ -96,7 +137,7 @@ Without one, the remaining route is the declarative bootstrap: set
 | Entrypoint | `/tracepad` — arguments are the server's flags |
 | Port | `4318` |
 | Volume | `/data` |
-| Set in the image | `TRACEPAD_DATA_DIR=/data`, `TRACEPAD_LISTEN=:4318` |
+| Set in the image | `TRACEPAD_DATA_DIR=/data`, `TRACEPAD_LISTEN=:4318`, `TRACEPAD_IN_CONTAINER=1` (turns the plain-HTTP warning into a note) |
 | Health | `HEALTHCHECK` running `tracepad health` |
 | Licences | `/usr/share/doc/tracepad/` — `LICENSE`, `NOTICE`, `THIRD_PARTY_NOTICES` (every Go module and npm package the binary carries) and `third_party/` |
 
@@ -127,19 +168,52 @@ saying so:
 ERROR fatal err="open /data/tracepad.db: … unable to open database file (14)"
 ```
 
-The fix is to give the directory to the user that will write it, once, before
-the first run:
+The fix is to create the directory for the user that will write it, once,
+before the first run — owned by uid 65532 and closed to everyone else:
 
 ```sh
-mkdir -p ./tracepad-data
-sudo chown 65532:65532 ./tracepad-data
+sudo install -d -m 0700 -o 65532 -g 65532 ./tracepad-data
 docker run -d -v "$PWD/tracepad-data:/data" … ghcr.io/tracepad/tracepad
 ```
+
+`mkdir -p` and a `chown` would work too, and leave the directory `0755`:
+readable by every account on the host, which is the next section's problem.
 
 You can also run the container as root with `--user 0:0`, and it will work. Do
 not: this store holds every prompt and completion your application ever sent,
 and a container that writes `/data` as root is one that hands root-owned files
 back to your host and runs a network service as root to do it.
+
+### Who else can read it
+
+The database holds every prompt and completion, the accounts' password hashes
+and the key that signs media uploads. Today the server creates it — and its
+`-wal`, `-shm` and pre-migration backup files — with mode `0644`, readable by
+any account that can get into the directory. The directory is the guard, and
+the image creates `/data` as `0755`, so a named volume starts open, as does a
+host directory made with `mkdir`.
+
+Close it once — before the first run or after it; the file step does nothing
+when there are no files yet. For a named volume, from a throwaway container:
+
+```sh
+docker run --rm -v tracepad:/data busybox sh -c \
+  "chmod 0700 /data && find /data -maxdepth 1 -name 'tracepad.db*' -exec chmod 0600 {} \;"
+```
+
+For a host directory — through `sudo`, because once it is `0700` and owned by
+uid 65532 your own shell can no longer list it:
+
+```sh
+sudo chmod 0700 ./tracepad-data
+sudo find ./tracepad-data -maxdepth 1 -name 'tracepad.db*' -exec chmod 0600 {} \;
+```
+
+Files the server writes later — a new backup at the next upgrade — are created
+`0644` again, and the `0700` directory is what keeps them to their owner. On a
+host install the same holds for the data directory: the server creates it
+`0700` when it creates it, and one you made yourself keeps the mode you gave
+it.
 
 ## Configuration
 
@@ -148,7 +222,7 @@ and `tracepad help`) is passed with `-e`:
 
 ```sh
 docker run -d --name tracepad \
-  -v tracepad:/data -p 4318:4318 \
+  -v tracepad:/data -p 127.0.0.1:4318:4318 \
   -e TRACEPAD_STORE_RAW=off \
   -e TRACEPAD_SWEEP_INTERVAL=30m \
   ghcr.io/tracepad/tracepad
@@ -159,12 +233,19 @@ Three of them deserve a warning.
 `TRACEPAD_URL` is not only the CLI's "which server" any more: it is the host of
 the setup and invitation links this server prints and hands out. Behind a
 reverse proxy the container can only guess, and the guess is its own address,
-so set it to the address your people type.
+so set it to the address your people type — see
+[Serving over TLS](#serving-over-tls).
 
-`TRACEPAD_ADMIN_TOKEN` is a credential, and anything passed with `-e` is
-readable ever after in `docker inspect` and in the daemon's logs. Use
-`--env-file`, or your orchestrator's secret mechanism, as you would for any
-other password.
+`TRACEPAD_ADMIN_TOKEN` is a credential, and **no way of handing it to a
+container keeps it out of `docker inspect`**: `-e`, `--env-file` and Compose's
+`env_file` all end up in the container's configuration, which shows every
+variable in plain text to anyone who can talk to the Docker daemon. What a file
+does buy is keeping the value off the command line — out of your shell's
+history, the host's process list and a `docker-compose.yml` you commit — so use
+one, `chmod 600` it, and keep it out of version control. The rest is who has
+the Docker socket: on that host it is as good as root, and it reads this token
+whatever you do. The same goes for `TRACEPAD_PROJECTS`, whose entries carry
+secret keys.
 
 `TRACEPAD_LISTEN` is already right, and the way to break it is to set it to
 `127.0.0.1:4318`. Inside a container, loopback is the container's own: the
@@ -182,6 +263,62 @@ flag you appended to the command line, so a container started with `--listen
 ```sh
 docker run -d -e TRACEPAD_LISTEN=:8080 -p 8080:8080 … ghcr.io/tracepad/tracepad
 ```
+
+## Serving over TLS
+
+Tracepad does not terminate TLS; a reverse proxy in front of it does, and it is
+the only way to serve anyone who is not on the same machine without their
+passwords, cookies and keys crossing the network in the clear. Keep the
+container's port on loopback, so the proxy is the only way in, and give the
+proxy the name people will use:
+
+```
+# Caddyfile — Caddy obtains and renews the certificate itself
+traces.example.com {
+	reverse_proxy 127.0.0.1:4318
+}
+```
+
+Any proxy will do if it does three things, which Caddy does by default and
+nginx needs told:
+
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:4318;
+    proxy_set_header Host              $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Host  $host;
+    proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+    client_max_body_size 20m;   # an OTLP batch may be up to 20 MiB
+}
+```
+
+- **`X-Forwarded-Proto: https`** is how the server knows the browser is on
+  https, and it then marks the session cookie `Secure`
+  ([accounts.md](accounts.md#signing-in)).
+- **`Host` or `X-Forwarded-Host`** carries the name the browser typed. Writes
+  from the interface are refused unless their `Origin` is one of this server's
+  hosts, and behind a proxy that rewrites `Host` the forwarded one is how it
+  recognises its own.
+- **A body limit at least `TRACEPAD_MAX_BODY_BYTES`** (20 MiB by default).
+  nginx refuses anything over 1 MiB unless told otherwise, and an exporter's
+  large batch is then lost at the proxy with a `413` the server never sees.
+
+Then tell the server where people reach it, and it prints its setup and
+invitation links there — and stops noting plain HTTP at start. An `https://`
+`TRACEPAD_URL` is taken as your word that a TLS proxy fronts this process; the
+direct listener stays reachable, which is why the port stays on loopback:
+
+```sh
+docker run -d --name tracepad -v tracepad:/data -p 127.0.0.1:4318:4318 \
+  -e TRACEPAD_URL=https://traces.example.com \
+  ghcr.io/tracepad/tracepad
+```
+
+Applications then export to `https://traces.example.com/v1/traces`, and the
+CLI takes the same address as `--url`. The server believes
+`X-Forwarded-Proto` from whoever sends it, which is one more reason for the
+loopback publish: only the proxy should be able to.
 
 ## Health
 
@@ -209,13 +346,14 @@ services:
       - "127.0.0.1:4318:4318"
     volumes:
       - tracepad:/data
-    env_file: [.env]        # TRACEPAD_ADMIN_TOKEN and anything else secret
+    env_file: [.env]        # TRACEPAD_ADMIN_TOKEN and anything else secret; chmod 600, not in git
 
 volumes:
   tracepad:
 ```
 
-`docker compose logs tracepad` is where the first run's keys are.
+`docker compose logs tracepad` is where the first run's keys are — and where
+they stay, which is why [the first key is worth rotating](#the-keys-are-printed-once-to-the-log).
 
 ## Upgrading, and backing up first
 
@@ -229,14 +367,34 @@ Back the volume up by tarring it from a throwaway container:
 ```sh
 docker stop tracepad
 docker run --rm -v tracepad:/data -v "$PWD:/backup" busybox \
-  tar czf /backup/tracepad-$(date +%F).tar.gz -C /data .
+  sh -c 'umask 077 && tar czf /backup/tracepad-$(date +%F).tar.gz -C /data .'
 docker pull ghcr.io/tracepad/tracepad:0.3
 docker rm -f tracepad && docker run -d --name tracepad … ghcr.io/tracepad/tracepad:0.3
 ```
 
 Stopping first matters: SQLite's write-ahead log is part of the database, and a
-tar of a live one is a copy of a file mid-write. Restoring is the same command
-with the arguments swapped, into a stopped container's volume.
+tar of a live one is a copy of a file mid-write. `umask 077` makes the archive
+readable by its owner alone; it is the whole database, and without it the file
+lands in your directory as readable as that directory lets it be. Restoring is
+the same command with the arguments swapped, into a stopped container's volume.
+
+**The server keeps a copy of its own, too.** Before every start that applies a
+migration it writes `tracepad.db.pre-<migration>.bak` beside the database — a
+full copy as it stood before the upgrade, for rolling that upgrade back by
+swapping the file in. It never deletes one, so a volume that has seen several
+upgrades holds several complete old databases, each with everything since
+erased or swept still inside it, and so does any tar of the volume. Once the
+latest upgrade has proved itself, remove them. This removes **all** of them —
+the latest upgrade's rollback copy included — names each one it removes, and
+does nothing on a volume that has none:
+
+```sh
+docker run --rm -v tracepad:/data busybox \
+  find /data -maxdepth 1 -name 'tracepad.db.pre-*.bak' -print -exec rm {} \;
+```
+
+A data-subject erasure does not reach these files; see
+[retention.md](retention.md#what-this-means-for-a-data-subject-request).
 
 ## Building it yourself
 

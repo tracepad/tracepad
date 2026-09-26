@@ -45,6 +45,9 @@ func TestBootstrapDefaultOnceAndIdempotent(t *testing.T) {
 	if len(boot.Created) != 1 || boot.Created[0].Project.Name != "default" {
 		t.Fatalf("want created default, got %+v", boot.Created)
 	}
+	if boot.Created[0].Declared {
+		t.Fatal("the generated default reported as declared: its secret would never be printed")
+	}
 	secret := boot.Created[0].Keys.Secret
 
 	// Second run: nothing new.
@@ -72,8 +75,14 @@ func TestBootstrapDeclarativeIdempotent(t *testing.T) {
 		{Name: "app", PublicKey: "tp-pk-a", SecretKey: "tp-sk-a"},
 		{Name: "eval", PublicKey: "tp-pk-b", SecretKey: "tp-sk-b"},
 	}
-	if _, err := s.Bootstrap(specs); err != nil {
+	first, err := s.Bootstrap(specs)
+	if err != nil {
 		t.Fatalf("Bootstrap: %v", err)
+	}
+	// The operator wrote these secrets, so they are marked for the banner
+	// to leave out (spec 001 #12).
+	if len(first.Created) != 2 || !first.Created[0].Declared || !first.Created[1].Declared {
+		t.Fatalf("want two declared projects created, got %+v", first.Created)
 	}
 	// Restart with same env: no new projects, keys untouched.
 	boot, err := s.Bootstrap(specs)

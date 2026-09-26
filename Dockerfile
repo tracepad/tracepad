@@ -99,11 +99,16 @@ COPY LICENSE NOTICE /usr/share/doc/tracepad/
 COPY --from=build /out/THIRD_PARTY_NOTICES /usr/share/doc/tracepad/
 COPY third_party /usr/share/doc/tracepad/third_party
 
-# The two defaults that make `docker run -v tracepad:/data -p 4318:4318 …` the
-# whole command. `:4318` rather than `127.0.0.1:4318` on purpose: a server bound
-# to loopback inside a container is a server nothing outside it can reach.
+# The two defaults that make `docker run -v tracepad:/data -p 127.0.0.1:4318:4318 …`
+# the whole command. TRACEPAD_LISTEN=:4318 rather than 127.0.0.1:4318 on
+# purpose — the publish, not the bind, keeps it on loopback: a server bound to
+# loopback inside a container is a server nothing outside it can reach.
+# TRACEPAD_IN_CONTAINER turns the plain-HTTP warning at start into one INFO
+# line: here the wildcard bind is the design, and where the port is published —
+# which the process cannot see — decides who reaches it (spec 020 #20).
 ENV TRACEPAD_DATA_DIR=/data \
-    TRACEPAD_LISTEN=:4318
+    TRACEPAD_LISTEN=:4318 \
+    TRACEPAD_IN_CONTAINER=1
 
 EXPOSE 4318
 VOLUME /data
