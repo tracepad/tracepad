@@ -4,12 +4,13 @@
 	import { reaches, said, standing } from '$lib/accounts';
 	import {
 		api,
+		type AccountDeletion,
 		type AccountDetail,
 		type DryRun,
 		type Invitation,
 		type Project
 	} from '$lib/api/client.svelte';
-	import { timestamp } from '$lib/format';
+	import { timeOrNever } from '$lib/format';
 	import Button from '../Button.svelte';
 	import ConfirmCard from '../ConfirmCard.svelte';
 	import AccountDialog from './AccountDialog.svelte';
@@ -36,6 +37,12 @@
 	let invitation = $state.raw<Invitation | null>(null);
 	/** The account a deletion is being walked through, if any. */
 	let deleting = $state.raw<AccountDetail | null>(null);
+	/**
+	 * The keys that account minted, from the dry run: the deletion leaves
+	 * them working, and this is when to decide about rotating them (spec 045
+	 * #10).
+	 */
+	let survivors = $state.raw<AccountDeletion['keys']>([]);
 
 	$effect(() => {
 		void list();
@@ -57,7 +64,10 @@
 
 	async function remove(target: AccountDetail, confirm?: string): Promise<DryRun | string> {
 		const answer = await api.deleteAccount(target.id, confirm);
-		if (answer && answer.dry_run) return answer as DryRun;
+		if (answer && answer.dry_run) {
+			survivors = answer.keys;
+			return answer as DryRun;
+		}
 		await list();
 		notice = `${target.email} is deleted.`;
 		return notice;
@@ -114,7 +124,7 @@
 								</span>
 							</td>
 							<td class="text-muted {cell} tabular-nums whitespace-nowrap">
-								{row.last_login_at ? timestamp(row.last_login_at) : 'never'}
+								{timeOrNever(row.last_login_at)}
 							</td>
 							<td class="text-muted {cell}">{reaches(row)}</td>
 							<td class="px-3 py-1.5">
@@ -122,7 +132,9 @@
 									<Button onclick={() => ((notice = null), (editing = row))}>Edit</Button>
 									<Button
 										onclick={() => (
-											(notice = null), (deleting = deleting?.id === row.id ? null : row)
+											(notice = null),
+											(survivors = []),
+											(deleting = deleting?.id === row.id ? null : row)
 										)}
 										aria-expanded={deleting?.id === row.id}
 									>
@@ -152,7 +164,23 @@
 				preview={() => remove(target)}
 				execute={(confirm) => remove(target, confirm) as Promise<string>}
 				ondone={() => (deleting = null)}
-			/>
+			>
+				{#if survivors.length > 0}
+					<p class="text-warn text-sm">
+						{survivors.length === 1 ? 'A key' : `${survivors.length} keys`} they minted will keep working
+						until revoked:
+					</p>
+					<ul class="text-muted mt-1 text-sm">
+						{#each survivors as key (key.public_key)}
+							<li>
+								<code class="font-mono">{key.public_key}</code>
+								{key.name ? `(${key.name})` : ''} in {key.project_name}, last used
+								{timeOrNever(key.last_used_at)}
+							</li>
+						{/each}
+					</ul>
+				{/if}
+			</ConfirmCard>
 		</div>
 	{/if}
 

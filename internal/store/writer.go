@@ -285,19 +285,23 @@ func (w *Writer) flush(pending []*submission) {
 // for something the stored state does not allow is routine traffic, not an
 // incident, and it is already being told so in the response.
 //
-// A database condition is logged once a minute per condition, with the number
-// of failures it stands for (spec 043 #2): it is the same news every time
-// until it passes, and every caller has already been answered with a status
-// that says to retry.
+// A database condition is logged at error once a minute per condition, with
+// the number of failures it stands for (spec 043 #2): it is the same news every
+// time until it passes, and every caller has already been answered with a
+// status that says to retry.
 func logFailure(err error, level slog.Level, message string, args ...any) {
 	if rejected(err) {
 		level = slog.LevelInfo
 	}
 	if condition, ok := Condition(err); ok {
-		skipped, now := conditionLog.allow(condition, time.Now())
+		skipped, now := conditionLog.Allow(condition, time.Now())
 		if !now {
 			return
 		}
+		// At error whatever the caller asked for: the paced line may be
+		// the window's warning rather than a job's error, and it is the
+		// only line this minute — an alert on errors has to see it.
+		level = slog.LevelError
 		args = append(args, "condition", condition, "since_last_line", skipped)
 	}
 	logger().Log(context.Background(), level, message, append([]any{"err", err}, args...)...)

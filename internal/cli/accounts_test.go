@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/tracepad/tracepad/internal/store"
 )
 
 // The accounts commands (spec 028 #16), each one against a real server.
@@ -354,6 +356,39 @@ func TestAccountsRemoveWantsTheEmailBack(t *testing.T) {
 	out = h.run(t.Context(), true, "accounts", "show", helperEmail)
 	if out.code != ExitFailure {
 		t.Fatalf("accounts show after rm exited %d, want %d", out.code, ExitFailure)
+	}
+}
+
+// TestAccountsRemoveListsTheKeysItMinted: the preview names the keys the
+// account minted, which the deletion leaves working (spec 045 #10).
+func TestAccountsRemoveListsTheKeysItMinted(t *testing.T) {
+	h := newAccountsCLI(t)
+	project := h.projectID(t)
+	h.invite(t, helperEmail, "--project", project+":editor")
+	helper, err := h.store.AccountByEmail(helperEmail)
+	if err != nil || helper == nil {
+		t.Fatalf("the invited account: %v", err)
+	}
+	// Minted the way a signed-in editor mints, which a terminal cannot be.
+	keys, err := store.GenerateKeyPair()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.writer.Submit(t.Context(), &store.KeyCreate{
+		ProjectID: project, Keys: keys, Name: "helper's script", Origin: store.OriginAccount(helper),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	out := h.run(t.Context(), false, "accounts", "rm", helperEmail)
+	if out.code != ExitFailure {
+		t.Fatalf("accounts rm exited %d, want %d: %s", out.code, ExitFailure, out.stderr)
+	}
+	for _, want := range []string{"keeps key", keys.PublicKey, "helper's script", "in test", "never",
+		"keep working until they are revoked"} {
+		if !strings.Contains(out.stderr, want) {
+			t.Errorf("stderr = %q, want it to carry %q", out.stderr, want)
+		}
 	}
 }
 

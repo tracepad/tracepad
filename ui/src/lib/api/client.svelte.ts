@@ -48,6 +48,8 @@ export type TraceDeletion = components['schemas']['TraceDeletion'];
 export type TracesDeletion = components['schemas']['TracesDeletion'];
 /** A freshly minted pair; the secret is in this response and nowhere else. */
 export type NewKey = components['schemas']['NewKey'];
+/** One of a project's keys, with who minted it and when it was last used (spec 045). */
+export type Key = components['schemas']['Key'];
 
 // The eval nouns (spec 014), read by the Evals screens (spec 016).
 export type Dataset = components['schemas']['Dataset'];
@@ -692,7 +694,8 @@ class Api {
 
 	// --- the project's own management (spec 005 #11) -----------------------
 	//
-	// All of it on the session's project key: a project administers itself.
+	// All of it on the session, for the project on screen. The keys are an
+	// owner's or an editor's: no project key manages keys (spec 045 #4).
 	// Every destructive one is the server's dry run until `confirm` echoes
 	// what it destroys, and the screen renders that preview rather than
 	// computing one of its own (spec 007 #5).
@@ -714,8 +717,12 @@ class Api {
 		return this.#json<KeyList>(`/api/v1/projects/${id}/keys`, { signal });
 	}
 
-	createKey(id: string) {
-		return this.#json<NewKey>(`/api/v1/projects/${id}/keys`, { method: 'POST' });
+	/** A name says which program will hold the key (spec 045 #6). */
+	createKey(id: string, name = '') {
+		return this.#json<NewKey>(`/api/v1/projects/${id}/keys`, {
+			method: 'POST',
+			body: name ? { name } : undefined
+		});
 	}
 
 	/** Revoking the last key of a project asks for the echo (spec 005 #12). */

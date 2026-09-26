@@ -300,14 +300,20 @@ and asks you to type the name back; --yes answers that for a script:
   tracepad projects rename  <project-id> <new-name>    (admin token)
   tracepad projects rm      <project-id> [--yes]       (admin token)
   tracepad projects restore <project-id>
-  tracepad keys ls      [--project ID]
-  tracepad keys create  [--project ID]
+  tracepad keys ls      [--project ID]                 (admin token)
+  tracepad keys create  [--name NAME] [--project ID]   (admin token)
   tracepad keys rm      <public-key> [--project ID] [--yes]
+                                                       (admin token)
   tracepad retention show [--project ID]
   tracepad retention set  [--days N | --forever] [--raw-days N | --raw-follow]
                           [--stats-days N | --stats-forever]
                           [--media store|placeholder] [--project ID] [--yes]
   tracepad users rm-data  <user-id> [--project ID] [--yes]
+
+No project key lists, mints or revokes keys (spec 045): the keys commands take
+the admin token, and an owner or editor can do the same in the web interface,
+under Settings, Project, API keys. keys ls says who minted each key and when it
+was last used, to within a minute.
 
 Accounts (spec 028). People sign in; programs use keys. These need the admin
 token, and keeping it somewhere is how you get back in when every owner's

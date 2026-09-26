@@ -7,6 +7,37 @@
 -- JSON number between -1e12 and 1e12, NULL otherwise. The clock is Unix
 -- nanoseconds, the unit `traces.updated_at` is stamped in.
 
+-- One pass over the observations that carry a cost or a usage finds every
+-- trace the repair touches: `cost` marks the traces an observation of which
+-- carries a cost the rule no longer counts, and the rest carry a token count
+-- the rule no longer counts — negative, or past 10^9 — under any spelling of
+-- the three classes (re-rolling an hour that did not need it costs nothing).
+-- One scan with one parse of `usage` rather than one per key: about four
+-- seconds for a million observations that all carry both (spec 043 #24).
+CREATE TEMP TABLE repair_numbers (
+    project_id TEXT NOT NULL,
+    trace_id   TEXT NOT NULL,
+    cost       INTEGER NOT NULL
+);
+INSERT INTO repair_numbers (project_id, trace_id, cost)
+SELECT o.project_id, o.trace_id,
+       o.provided_cost = 1
+       AND json_extract(o.cost_details, '$.total') IS NOT NULL
+       AND NOT (json_type(o.cost_details, '$.total') IN ('integer', 'real')
+                AND json_extract(o.cost_details, '$.total') BETWEEN -1e12 AND 1e12)
+  FROM observations o
+ WHERE (o.provided_cost = 1
+        AND json_extract(o.cost_details, '$.total') IS NOT NULL
+        AND NOT (json_type(o.cost_details, '$.total') IN ('integer', 'real')
+                 AND json_extract(o.cost_details, '$.total') BETWEEN -1e12 AND 1e12))
+    OR (o.usage IS NOT NULL
+        AND EXISTS (SELECT 1 FROM json_each(o.usage) u
+                     WHERE u.key IN ('input_tokens', 'prompt_tokens', 'input',
+                                     'output_tokens', 'completion_tokens', 'output',
+                                     'cache_read_input_tokens', 'cache_read_tokens', 'input_cached_tokens')
+                       AND u.type IN ('integer', 'real')
+                       AND u.value NOT BETWEEN 0 AND 1000000000));
+
 -- Traces whose total is infinite, or whose observations carry a cost the rule
 -- no longer counts: recomputed from their own rows, exactly as a late span
 -- would have made them, and stamped so the next pass re-rolls their hours
@@ -21,38 +52,14 @@ UPDATE traces
                         AND o.provided_cost = 1),
        updated_at = CAST(unixepoch('subsec') * 1000000000 AS INTEGER)
  WHERE abs(total_cost) > 1.7976931348623157e308
-    OR (project_id, id) IN (SELECT o.project_id, o.trace_id FROM observations o
-                             WHERE o.provided_cost = 1
-                               AND json_extract(o.cost_details, '$.total') IS NOT NULL
-                               AND NOT (json_type(o.cost_details, '$.total') IN ('integer', 'real')
-                                        AND json_extract(o.cost_details, '$.total') BETWEEN -1e12 AND 1e12));
+    OR (project_id, id) IN (SELECT project_id, trace_id FROM repair_numbers WHERE cost);
 
--- Traces an observation of which carries a token count the rule no longer
--- counts — negative, or past 10^9: nothing on the trace changes, only its
--- hours move. A spelling that is not the first present in its class is
--- stamped too; re-rolling an hour that did not need it costs nothing.
+-- The token counts: nothing on the trace changes, only its hours move.
 UPDATE traces
    SET updated_at = CAST(unixepoch('subsec') * 1000000000 AS INTEGER)
- WHERE (project_id, id) IN (SELECT o.project_id, o.trace_id FROM observations o
-                             WHERE o.usage IS NOT NULL
-                               AND ((json_type(o.usage, '$.input_tokens') IN ('integer', 'real')
-                                 AND json_extract(o.usage, '$.input_tokens') NOT BETWEEN 0 AND 1000000000)
-                             OR (json_type(o.usage, '$.prompt_tokens') IN ('integer', 'real')
-                                 AND json_extract(o.usage, '$.prompt_tokens') NOT BETWEEN 0 AND 1000000000)
-                             OR (json_type(o.usage, '$.input') IN ('integer', 'real')
-                                 AND json_extract(o.usage, '$.input') NOT BETWEEN 0 AND 1000000000)
-                             OR (json_type(o.usage, '$.output_tokens') IN ('integer', 'real')
-                                 AND json_extract(o.usage, '$.output_tokens') NOT BETWEEN 0 AND 1000000000)
-                             OR (json_type(o.usage, '$.completion_tokens') IN ('integer', 'real')
-                                 AND json_extract(o.usage, '$.completion_tokens') NOT BETWEEN 0 AND 1000000000)
-                             OR (json_type(o.usage, '$.output') IN ('integer', 'real')
-                                 AND json_extract(o.usage, '$.output') NOT BETWEEN 0 AND 1000000000)
-                             OR (json_type(o.usage, '$.cache_read_input_tokens') IN ('integer', 'real')
-                                 AND json_extract(o.usage, '$.cache_read_input_tokens') NOT BETWEEN 0 AND 1000000000)
-                             OR (json_type(o.usage, '$.cache_read_tokens') IN ('integer', 'real')
-                                 AND json_extract(o.usage, '$.cache_read_tokens') NOT BETWEEN 0 AND 1000000000)
-                             OR (json_type(o.usage, '$.input_cached_tokens') IN ('integer', 'real')
-                                 AND json_extract(o.usage, '$.input_cached_tokens') NOT BETWEEN 0 AND 1000000000)));
+ WHERE (project_id, id) IN (SELECT project_id, trace_id FROM repair_numbers WHERE NOT cost);
+
+DROP TABLE repair_numbers;
 
 -- Sums no row can produce. The pass rewrites every hour it can recompute; an
 -- hour frozen past the retention window (spec 013 #11) has lost the rows it

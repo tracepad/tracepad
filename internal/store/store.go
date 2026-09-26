@@ -6,7 +6,6 @@ package store
 import (
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"fmt"
@@ -204,14 +203,6 @@ type KeyPair struct {
 	Secret    string
 }
 
-// KeyInfo is one stored key as a listing shows it: the public half and when it
-// was made. The secret half is a hash and is never shown, because it is never
-// held (spec 005 #12).
-type KeyInfo struct {
-	PublicKey string
-	CreatedAt string
-}
-
 // projectColumns is the one SELECT list every project read shares, so a column
 // added to the table is added to every reader at once.
 const projectColumns = `id, name, retention_days, raw_retention_days, stats_retention_days, deleted_at, created_at, media`
@@ -248,8 +239,8 @@ func scanProject(row interface{ Scan(...any) error }) (*Project, error) {
 
 // CreateProject inserts a project with the given key pair, outside the
 // group-commit writer: it runs at startup, from the bootstrap, before the
-// writer exists. The API creates projects as a job like every other write
-// (see ProjectCreate).
+// writer exists, so the key is the server's own (spec 045 #8). The API creates
+// projects as a job like every other write (see ProjectCreate).
 func (s *Store) CreateProject(name string, keys KeyPair) (*Project, error) {
 	id, err := randomHex(16)
 	if err != nil {
@@ -260,7 +251,7 @@ func (s *Store) CreateProject(name string, keys KeyPair) (*Project, error) {
 		return nil, err
 	}
 	defer tx.Rollback()
-	project, err := insertProject(tx, id, name, keys)
+	project, err := insertProject(tx, id, name, keys, KeyOrigin{Via: MintedAtStartup})
 	if err != nil {
 		return nil, err
 	}
@@ -319,23 +310,6 @@ func (s *Store) CountProjects() (int, error) {
 	return n, err
 }
 
-// ProjectBySecret resolves an API secret to its project, or nil if unknown.
-// Lookup is by sha256(secret) against a unique index (spec 001 #8).
-//
-// A soft-deleted project resolves too, and the caller decides what its keys
-// may still do: everything is refused during the grace window except reading
-// the project and restoring it (spec 005 #10), so the deletion is undoable in
-// a deployment that has no admin token to undo it with.
-func (s *Store) ProjectBySecret(ctx context.Context, secret string) (*Project, error) {
-	hash := sha256.Sum256([]byte(secret))
-	// A subquery rather than a join: `secret_hash` is unique, so it can
-	// only name one project, and both tables carry a `created_at` that a
-	// join would leave ambiguous in the shared column list.
-	return s.oneProject(ctx,
-		`SELECT `+projectColumns+` FROM projects
-		  WHERE id = (SELECT project_id FROM api_keys WHERE secret_hash = ?)`, hash[:])
-}
-
 func (s *Store) oneProject(ctx context.Context, query string, args ...any) (*Project, error) {
 	project, err := scanProject(s.db.QueryRowContext(ctx, query, args...))
 	if err == sql.ErrNoRows {
@@ -345,27 +319,6 @@ func (s *Store) oneProject(ctx context.Context, query string, args ...any) (*Pro
 		return nil, err
 	}
 	return project, nil
-}
-
-// ProjectKeys lists a project's active keys, oldest first (spec 005 #12).
-func (s *Store) ProjectKeys(projectID string) ([]KeyInfo, error) {
-	rows, err := s.db.Query(
-		`SELECT public_key, created_at FROM api_keys WHERE project_id = ? ORDER BY created_at, public_key`,
-		projectID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	keys := []KeyInfo{}
-	for rows.Next() {
-		var key KeyInfo
-		if err := rows.Scan(&key.PublicKey, &key.CreatedAt); err != nil {
-			return nil, err
-		}
-		keys = append(keys, key)
-	}
-	return keys, rows.Err()
 }
 
 // GenerateKeyPair mints a fresh random key pair (spec 001 #8).

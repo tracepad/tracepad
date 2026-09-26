@@ -141,6 +141,7 @@ func (a *Aggregator) Pass(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("rollup: list projects: %w", err)
 	}
+	a.forgetGone(projects)
 
 	var failures []error
 	var rolled int
@@ -180,11 +181,11 @@ func (a *Aggregator) rollProject(ctx context.Context, project *Project, at time.
 	closed := HourOf(at.Add(-a.interval).UnixNano())
 
 	var rolled int
-	// The hours that failed, each logged where it failed. One failing hour
+	// How many hours failed, each logged where it failed. One failing hour
 	// costs that hour and nothing else (spec 043 #8): it used to return from
 	// the project's pass before the watermark moved, so one poisoned hour
 	// stopped the project's statistics for good.
-	var failures []error
+	var failures int
 	// A dirty hour that failed keeps `last_pass` where it was, so the next
 	// pass finds it again; moving it would lose that correction for ever.
 	// The hours that did succeed are re-rolled with it, which is idempotent
@@ -223,7 +224,8 @@ func (a *Aggregator) rollProject(ctx context.Context, project *Project, at time.
 				if stopsThePass(err) {
 					return rolled, err
 				}
-				failures = append(failures, a.hourFailed(project, hour, err))
+				a.hourFailed(project, hour, err)
+				failures++
 				dirtyFailed = true
 				continue
 			}
@@ -270,7 +272,7 @@ func (a *Aggregator) rollProject(ctx context.Context, project *Project, at time.
 			if err := a.sweepRollup(ctx, project, at); err != nil {
 				return rolled, err
 			}
-			return rolled, errors.Join(failures...)
+			return rolled, failedHours(failures)
 		}
 		from = oldest
 	}
@@ -311,7 +313,8 @@ func (a *Aggregator) rollProject(ctx context.Context, project *Project, at time.
 			if stopsThePass(err) {
 				return rolled, err
 			}
-			failures = append(failures, a.hourFailed(project, hour, err))
+			a.hourFailed(project, hour, err)
+			failures++
 			if a.hold(a.stuck, project.ID, hour) {
 				stopped, stopAt = true, hour
 				break
@@ -370,7 +373,7 @@ func (a *Aggregator) rollProject(ctx context.Context, project *Project, at time.
 	if err := a.sweepRollup(ctx, project, at); err != nil {
 		return rolled, err
 	}
-	return rolled, errors.Join(failures...)
+	return rolled, failedHours(failures)
 }
 
 // stopsThePass reports a failure that is not an hour's own, which every hour
@@ -406,6 +409,24 @@ func (a *Aggregator) hold(in map[string]holding, projectID string, at int64) boo
 	return true
 }
 
+// forgetGone drops what is held for projects the pass no longer rolls — a
+// deleted one's counts would otherwise live as long as the process.
+func (a *Aggregator) forgetGone(projects []*Project) {
+	live := make(map[string]bool, len(projects))
+	for _, project := range projects {
+		live[project.ID] = true
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, held := range []map[string]holding{a.held, a.stuck} {
+		for id := range held {
+			if !live[id] {
+				delete(held, id)
+			}
+		}
+	}
+}
+
 // release forgets what a project's pass no longer holds.
 func (a *Aggregator) release(in map[string]holding, projectID string) {
 	a.mu.Lock()
@@ -413,12 +434,20 @@ func (a *Aggregator) release(in map[string]holding, projectID string) {
 	delete(in, projectID)
 }
 
-// hourFailed logs one hour that could not be rolled and hands back the error
-// the pass reports.
-func (a *Aggregator) hourFailed(project *Project, hour int64, err error) error {
-	logger().Error("could not roll an hour of statistics; the next pass tries it again",
+// hourFailed logs one hour that could not be rolled. It is the one line the
+// hour gets: the pass reports only how many failed (spec 043 #24).
+func (a *Aggregator) hourFailed(project *Project, hour int64, err error) {
+	logger().Error("could not roll an hour of statistics",
 		"project", project.Name, "hour", time.Unix(hour, 0).UTC(), "err", err)
-	return fmt.Errorf("hour %d: %w", hour, err)
+}
+
+// failedHours is what a project's pass reports for the hours that failed: a
+// count, each hour already logged on its own.
+func failedHours(n int) error {
+	if n == 0 {
+		return nil
+	}
+	return fmt.Errorf("%d hour(s) could not be rolled; each is logged on its own", n)
 }
 
 // rollOne submits one hour and hands back the job, which is the only place

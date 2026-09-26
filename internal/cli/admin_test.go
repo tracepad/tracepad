@@ -258,29 +258,43 @@ func TestInteractiveConfirmationTypesTheName(t *testing.T) {
 	}
 }
 
-// TestKeyRotationThroughTheCLI walks the sequence Decision 12 exists for, and
-// ends on the guard: the last key asks for the name.
+// TestKeyRotationThroughTheCLI: several pairs, so create → move → revoke never
+// leaves a gap, and revoking the last one asks first. The commands take the
+// admin token: no project key manages keys (spec 045 #4).
 func TestKeyRotationThroughTheCLI(t *testing.T) {
 	h := newAdminCLI(t)
+	h.asAdmin()
 
-	out := h.run(t.Context(), false, "keys", "create")
+	out := h.run(t.Context(), false, "keys", "create", "--name", "checkout api")
 	if out.code != ExitOK {
 		t.Fatalf("keys create exited %d: %s", out.code, out.stderr)
 	}
 	minted := struct {
 		PublicKey string `json:"public_key"`
 		SecretKey string `json:"secret_key"`
+		Name      string `json:"name"`
 	}{}
 	if err := json.Unmarshal([]byte(out.stdout), &minted); err != nil {
 		t.Fatalf("keys create did not answer with JSON: %v (%s)", err, out.stdout)
 	}
-	if minted.SecretKey == "" {
-		t.Fatalf("keys create = %s, want a whole pair", out.stdout)
+	if minted.SecretKey == "" || minted.Name != "checkout api" {
+		t.Fatalf("keys create = %s, want a whole, named pair", out.stdout)
 	}
 
+	// Who made each key and whether it is in use, in columns (spec 045 #15).
 	out = h.run(t.Context(), true, "keys", "ls")
-	if !strings.Contains(out.stdout, "tp-pk-test") || !strings.Contains(out.stdout, minted.PublicKey) {
-		t.Errorf("keys ls printed:\n%s\nwant both pairs", out.stdout)
+	for _, want := range []string{
+		"PUBLIC KEY", "NAME", "SCOPES", "CREATED BY", "LAST USED",
+		"tp-pk-test", "server", minted.PublicKey, "checkout api", "admin token", "ingest,read,write",
+	} {
+		if !strings.Contains(out.stdout, want) {
+			t.Errorf("keys ls printed:\n%s\nwant %q", out.stdout, want)
+		}
+	}
+	// Every command so far went with the token, so no key has
+	// authenticated anything yet.
+	if !strings.Contains(out.stdout, "never") {
+		t.Errorf("keys ls printed:\n%s\nwant a key never used", out.stdout)
 	}
 
 	// Revoking one of two is not destructive enough to ask about.
@@ -289,9 +303,7 @@ func TestKeyRotationThroughTheCLI(t *testing.T) {
 		t.Fatalf("keys rm exited %d: %s", out.code, out.stderr)
 	}
 
-	// The last one is. The key used for the connection is the one being
-	// revoked, which is exactly the mistake the guard is there for.
-	h.env["TRACEPAD_API_KEY"] = minted.SecretKey
+	// The last one is.
 	out = h.run(t.Context(), false, "keys", "rm", minted.PublicKey)
 	if out.code != ExitFailure {
 		t.Fatalf("revoking the last key exited %d, want a refusal", out.code)
@@ -310,6 +322,28 @@ func TestKeyRotationThroughTheCLI(t *testing.T) {
 	}
 	if len(keys) != 0 {
 		t.Errorf("keys = %+v, want none left", keys)
+	}
+}
+
+// TestKeysNeedMoreThanAKey: every `keys` command run with a project key prints
+// the server's refusal and exits 1, as every refusal does (spec 045 #4).
+func TestKeysNeedMoreThanAKey(t *testing.T) {
+	h := newAdminCLI(t)
+	for _, args := range [][]string{
+		{"keys", "ls"},
+		{"keys", "create", "--name", "mine"},
+		{"keys", "rm", "tp-pk-test", "--yes"},
+	} {
+		out := h.run(t.Context(), false, args...)
+		if out.code != ExitFailure {
+			t.Errorf("%v with a project key exited %d, want %d", args, out.code, ExitFailure)
+		}
+		if !strings.Contains(out.stderr, "a project key cannot list, mint or revoke keys") {
+			t.Errorf("%v: stderr = %q, want the server's refusal", args, out.stderr)
+		}
+	}
+	if keys, _ := h.store.ProjectKeys(h.projectID(t)); len(keys) != 1 {
+		t.Errorf("keys = %+v, want the one there was", keys)
 	}
 }
 

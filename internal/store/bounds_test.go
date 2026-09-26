@@ -12,9 +12,11 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/tracepad/tracepad/internal/logpace"
 	"github.com/tracepad/tracepad/internal/model"
 )
 
@@ -60,7 +62,7 @@ func TestAKeyLookupDoesNotWaitForTheWriter(t *testing.T) {
 	opened := s.db.Stats().OpenConnections
 
 	start := time.Now()
-	project, err := s.ProjectBySecret(ctx, "tp-sk-test")
+	project, _, err := s.KeyBySecret(ctx, "tp-sk-test")
 	took := time.Since(start)
 	if err != nil || project == nil {
 		t.Fatalf("lookup = %v, %v after %v, want the project while the writer holds its lock",
@@ -285,23 +287,35 @@ func TestADatabaseConditionIsLoggedOnceAMinute(t *testing.T) {
 	previous := logger
 	logger = func() *slog.Logger { return slog.New(slog.NewTextHandler(&logged, nil)) }
 	t.Cleanup(func() { logger = previous })
-	conditionLog = &pacedLog{every: time.Minute}
+	conditionLog = &logpace.Keyed{Every: time.Minute}
 
 	s := openFresh(t)
-	writer, err := s.NewWriter(quickWrites)
+	// A window long enough to gather the concurrent submissions below: a
+	// window of several jobs fails with a warning before it retries each,
+	// and that warning is the one line the minute lets through.
+	writer, err := s.NewWriter(WriterOptions{CommitWindow: 50 * time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer writer.Close()
 	full := fmt.Errorf("commit write transaction: %w", codedError{13})
+	var wg sync.WaitGroup
 	for range 20 {
-		if err := writer.Submit(context.Background(), failingJob{full}); !errors.Is(err, full) {
-			t.Fatalf("submit = %v, want the condition back", err)
-		}
+		wg.Go(func() {
+			if err := writer.Submit(context.Background(), failingJob{full}); !errors.Is(err, full) {
+				t.Errorf("submit = %v, want the condition back", err)
+			}
+		})
 	}
+	wg.Wait()
 	lines := strings.Count(logged.String(), "condition=SQLITE_FULL")
 	if lines != 1 {
 		t.Errorf("logged %d lines for 20 commits a full disk failed, want 1:\n%s", lines, logged.String())
+	}
+	// At error, whichever line it was: an alert on errors has to see a
+	// full disk.
+	if !strings.Contains(logged.String(), "level=ERROR") {
+		t.Errorf("the one line is not at error:\n%s", logged.String())
 	}
 	// And a failure of the job's own is still logged every time.
 	for range 2 {
@@ -514,6 +528,31 @@ func TestTwoFailingHoursDoNotTakeTurnsHoldingLastPass(t *testing.T) {
 	t.Fatalf("last_pass still held after %d passes of two failing hours", maxHeldPasses+1)
 }
 
+// What is held for a project goes with the project: a deleted one's counts
+// would otherwise live as long as the process (found in the third review of
+// PR #112).
+func TestHeldCountsGoWithTheirProject(t *testing.T) {
+	s, project := readStore(t)
+	writer, err := s.NewWriter(quickWrites)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writer.Close()
+	aggregator := s.NewAggregator(writer, RollupOptions{Interval: DefaultRollupInterval})
+	aggregator.hold(aggregator.held, "gone", 1)
+	aggregator.hold(aggregator.stuck, "gone", rollupHour)
+	aggregator.hold(aggregator.held, project.ID, 1)
+	if err := aggregator.Pass(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := aggregator.held["gone"]; ok {
+		t.Error("a project that is not there is still held")
+	}
+	if _, ok := aggregator.stuck["gone"]; ok {
+		t.Error("a project that is not there is still stuck")
+	}
+}
+
 // A closed hour that always fails holds the watermark for exactly
 // maxHeldPasses passes; then the roll goes on past it, and one hour no longer
 // leaves every later one to the live scan for ever (spec 043 #24).
@@ -609,8 +648,21 @@ func TestOneFailingHourDoesNotStopThePass(t *testing.T) {
 		seedHours(t, s, project.ID, 1)
 		at := time.Unix(hours[2]+2*SecondsPerHour, 0)
 
-		if err := pass(t, s, map[int64]bool{hours[1]: true}, at); err == nil {
-			t.Error("the pass reported no failure, want the failed hour in its error")
+		var logged bytes.Buffer
+		previous := logger
+		logger = func() *slog.Logger { return slog.New(slog.NewTextHandler(&logged, nil)) }
+		err := pass(t, s, map[int64]bool{hours[1]: true}, at)
+		logger = previous
+		if err == nil {
+			t.Error("the pass reported no failure")
+		}
+		// The hour is logged once, where it failed; the pass reports how
+		// many, and the tick that logs the pass does not repeat it.
+		if lines := strings.Count(logged.String(), "injected failure"); lines != 1 {
+			t.Errorf("the failed hour was logged %d times, want once:\n%s", lines, logged.String())
+		}
+		if strings.Contains(err.Error(), "injected failure") {
+			t.Errorf("the pass's error = %q, want a count, not the hour's error again", err)
 		}
 		if got := count(t, s, project.ID, hours[0]); got != 1 {
 			t.Errorf("the hour before the failure holds %d traces, want it rolled", got)
@@ -677,12 +729,12 @@ func TestOneFailingHourDoesNotStopThePass(t *testing.T) {
 	})
 }
 
-// Migration 0023 spells out the counting rule the store builds (spec 043 #9):
+// Migration 0024 spells out the counting rule the store builds (spec 043 #9):
 // the same cost expression, and every token key with the same range. Two
 // copies of one rule are held together here, or the repair would count what
 // the store does not.
-func TestMigration0023SpellsTheCountingRule(t *testing.T) {
-	body, err := migrationFS.ReadFile("migrations/0023_repair_numbers.sql")
+func TestMigration0024SpellsTheCountingRule(t *testing.T) {
+	body, err := migrationFS.ReadFile("migrations/0024_repair_numbers.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -695,10 +747,12 @@ func TestMigration0023SpellsTheCountingRule(t *testing.T) {
 	if !strings.Contains(migration, normal(costExpr("o.cost_details"))) {
 		t.Errorf("the migration does not carry costExpr as the store builds it:\n%s", normal(costExpr("o.cost_details")))
 	}
+	if !strings.Contains(migration, normal(`u.value NOT BETWEEN 0 AND `+maxCountedTokens)) {
+		t.Errorf("the migration does not read token counts with the store's range %s", maxCountedTokens)
+	}
 	for _, keys := range tokenClasses {
 		for _, key := range keys {
-			want := normal(`json_extract(o.usage, '$.` + key + `') NOT BETWEEN 0 AND ` + maxCountedTokens)
-			if !strings.Contains(migration, want) {
+			if !strings.Contains(migration, `'`+key+`'`) {
 				t.Errorf("the migration does not stamp traces whose %q is out of range", key)
 			}
 		}
@@ -708,9 +762,9 @@ func TestMigration0023SpellsTheCountingRule(t *testing.T) {
 // The repair (spec 043 #9): a database whose aggregates an earlier version
 // poisoned — an infinite trace total, a string total summed to zero, infinite
 // and negative sums in the rollup, a frozen cell nothing can recompute — comes
-// out of migration 0023 and one pass with the numbers a fresh ingest of the
+// out of migration 0024 and one pass with the numbers a fresh ingest of the
 // same spans produces, and the frozen cell NULL.
-func TestMigration0023RepairsPoisonedNumbers(t *testing.T) {
+func TestMigration0024RepairsPoisonedNumbers(t *testing.T) {
 	at := afterTheHour()
 	frozenHour := rollupHour - 30*24*SecondsPerHour
 	seedAll := func(t *testing.T, s *Store, projectID string) {
@@ -763,7 +817,7 @@ func TestMigration0023RepairsPoisonedNumbers(t *testing.T) {
 		fmt.Sprintf(`INSERT INTO stats_hourly (project_id, hour, environment, release, model, count, error_count,
 		                                       total_cost, latency, input_tokens, output_tokens, cache_read_tokens)
 		             VALUES ('%s', %d, 'production', '', '', 3, 0, 9e999, '[]', -3, 5, 9223372036854775807)`, poisoned.ID, frozenHour),
-		`DELETE FROM schema_migrations WHERE filename = '0023_repair_numbers.sql'`,
+		`DELETE FROM schema_migrations WHERE filename = '0024_repair_numbers.sql'`,
 	} {
 		if _, err := s.db.Exec(statement); err != nil {
 			t.Fatalf("%s: %v", statement, err)
@@ -777,7 +831,7 @@ func TestMigration0023RepairsPoisonedNumbers(t *testing.T) {
 		t.Fatalf("migrate: %v", err)
 	}
 	defer s.Close()
-	t.Logf("migration 0023 over the fixture took %v", time.Since(start).Round(time.Millisecond))
+	t.Logf("migration 0024 over the fixture took %v", time.Since(start).Round(time.Millisecond))
 	passAt(t, s, at)
 
 	for _, query := range []string{

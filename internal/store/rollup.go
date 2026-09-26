@@ -91,7 +91,7 @@ const (
 // summed to an infinity that no encoder can write.
 //
 // Every reader uses it: the trace aggregate, the statistics and users rollups
-// and the live statistics scan, and migration 0023, which spells the same
+// and the live statistics scan, and migration 0024, which spells the same
 // expression out (a test holds the two together). `BETWEEN` rather than
 // `abs()`, which raises `integer overflow` on the smallest int64; the value is
 // read as REAL, so an aggregate over it is a float sum that cannot overflow

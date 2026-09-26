@@ -137,6 +137,14 @@ export function relative(iso: string | null | undefined, now = Date.now()): stri
 }
 
 /** The same instant with milliseconds, for the detail panel's timings. */
+/**
+ * An instant that is null until something first happens — a sign-in, a key's
+ * first use — as "never" rather than a blank, which would read as missing.
+ */
+export function timeOrNever(iso: string | null | undefined): string {
+	return iso ? timestamp(iso) : 'never';
+}
+
 export function timestampPrecise(iso: string | null | undefined): string {
 	const at = instant(iso);
 	if (!at) return ABSENT;

@@ -220,11 +220,12 @@ func TestRetentionPreviewCountsWhatWouldGo(t *testing.T) {
 }
 
 // TestKeyRotation is Decision 12: several active pairs, so the sequence
-// create → move the SDKs → revoke never has a window where ingest 401s.
+// create → move the SDKs → revoke never has a window where ingest 401s. The
+// admin token does it here, since no key manages keys (spec 045 #4).
 func TestKeyRotation(t *testing.T) {
 	h := newAdminHarness(t)
 
-	rec := h.call(t, "POST", "/api/v1/projects/"+h.project.ID+"/keys", nil)
+	rec := h.call(t, "POST", "/api/v1/projects/"+h.project.ID+"/keys", nil, asAdmin)
 	expectStatus(t, rec, 201)
 	minted := decodeJSON[struct {
 		PublicKey string `json:"public_key"`
@@ -240,7 +241,7 @@ func TestKeyRotation(t *testing.T) {
 		expectStatus(t, rec, 200)
 	}
 
-	rec = h.get(t, "/api/v1/projects/"+h.project.ID+"/keys")
+	rec = h.call(t, "GET", "/api/v1/projects/"+h.project.ID+"/keys", nil, asAdmin)
 	expectStatus(t, rec, 200)
 	keys := decodeJSON[struct {
 		Keys []struct {
@@ -258,8 +259,7 @@ func TestKeyRotation(t *testing.T) {
 	}
 
 	// Revoking one of two needs no ceremony; the other still ingests.
-	rec = h.call(t, "DELETE", "/api/v1/projects/"+h.project.ID+"/keys/"+testPublic, nil,
-		asKey(minted.SecretKey))
+	rec = h.call(t, "DELETE", "/api/v1/projects/"+h.project.ID+"/keys/"+testPublic, nil, asAdmin)
 	expectStatus(t, rec, 200)
 	rec = h.call(t, "GET", "/api/v1/traces", nil, asKey(testSecret))
 	expectStatus(t, rec, 401)
@@ -268,7 +268,7 @@ func TestKeyRotation(t *testing.T) {
 
 	// The last one does: a project with no keys cannot ingest (#12).
 	path := "/api/v1/projects/" + h.project.ID + "/keys/" + minted.PublicKey
-	rec = h.call(t, "DELETE", path, nil, asKey(minted.SecretKey))
+	rec = h.call(t, "DELETE", path, nil, asAdmin)
 	expectStatus(t, rec, 200)
 	preview := decodeJSON[struct {
 		DryRun  bool   `json:"dry_run"`
@@ -280,9 +280,9 @@ func TestKeyRotation(t *testing.T) {
 	rec = h.call(t, "GET", "/api/v1/traces", nil, asKey(minted.SecretKey))
 	expectStatus(t, rec, 200)
 
-	rec = h.call(t, "DELETE", path+"?confirm=wrong", nil, asKey(minted.SecretKey))
+	rec = h.call(t, "DELETE", path+"?confirm=wrong", nil, asAdmin)
 	expectError(t, rec, http.StatusBadRequest, `"test"`)
-	rec = h.call(t, "DELETE", path+"?confirm=test", nil, asKey(minted.SecretKey))
+	rec = h.call(t, "DELETE", path+"?confirm=test", nil, asAdmin)
 	expectStatus(t, rec, 200)
 	rec = h.call(t, "GET", "/api/v1/traces", nil, asKey(minted.SecretKey))
 	expectStatus(t, rec, 401)
@@ -295,7 +295,7 @@ func TestRevokingAKeyOfAnotherProject(t *testing.T) {
 	h := newAdminHarness(t)
 	other := h.second(t, "other", "tp-sk-other")
 
-	rec := h.call(t, "DELETE", "/api/v1/projects/"+h.project.ID+"/keys/tp-pk-other", nil)
+	rec := h.call(t, "DELETE", "/api/v1/projects/"+h.project.ID+"/keys/tp-pk-other", nil, asAdmin)
 	expectError(t, rec, http.StatusNotFound, "tp-pk-other")
 
 	keys, err := h.store.ProjectKeys(other.ID)
@@ -363,7 +363,7 @@ func TestSoftDeleteAndRestore(t *testing.T) {
 	for _, request := range []struct{ method, path string }{
 		{"GET", "/api/v1/traces"},
 		{"GET", "/api/v1/system"},
-		{"GET", "/api/v1/projects/" + h.project.ID + "/keys"},
+		{"PATCH", "/api/v1/projects/" + h.project.ID},
 		{"POST", "/api/v1/scores"},
 	} {
 		rec := h.call(t, request.method, request.path, nil)
@@ -372,6 +372,9 @@ func TestSoftDeleteAndRestore(t *testing.T) {
 				request.method, request.path, rec.Code)
 		}
 	}
+	// The key routes answer it what they answer every key (spec 045 #13).
+	rec = h.get(t, "/api/v1/projects/"+h.project.ID+"/keys")
+	expectError(t, rec, http.StatusForbidden, "cannot list, mint or revoke keys")
 
 	// Except the two that can undo it (#10).
 	rec = h.get(t, "/api/v1/projects/"+h.project.ID)

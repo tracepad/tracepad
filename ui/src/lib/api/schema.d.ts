@@ -1254,7 +1254,7 @@ export interface paths {
         post?: never;
         /**
          * Delete an account; a dry run until `?confirm=` echoes its email
-         * @description For people who are gone. It takes their memberships, sessions and invitations and nothing else: a score does not name its author, and nothing else in the database references an account. Disabling is the reversible way to take access away today.
+         * @description For people who are gone. It takes their memberships, sessions and invitations and nothing else: a score does not name its author, and the keys it minted keep working, listed in the dry run. Disabling is the reversible way to take access away today.
          */
         delete: operations["deleteAccount"];
         options?: never;
@@ -1390,14 +1390,14 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List a project's public keys
-         * @description The secrets are not here because they are not anywhere: only their hashes are stored.
+         * List a project's keys, who minted each and when it was last used
+         * @description An owner or editor signed in, or the admin token; a project key is answered 403, because no key lists, mints or revokes keys. The secrets are not here because they are not anywhere: only their hashes are stored.
          */
         get: operations["listKeys"];
         put?: never;
         /**
          * Mint a key pair; the secret is shown once
-         * @description Several active pairs are what makes rotation zero-downtime: create the new one, move the SDKs, revoke the old.
+         * @description An owner or editor signed in, or the admin token; a project key is answered 403. Several active pairs are what makes rotation zero-downtime: create the new one, move the SDKs, revoke the old. The key records who minted it.
          */
         post: operations["createKey"];
         delete?: never;
@@ -1418,7 +1418,7 @@ export interface paths {
         post?: never;
         /**
          * Revoke one key pair
-         * @description Revoking a project's last key stops its ingest, so that one is a dry run until `confirm` echoes the project's name.
+         * @description An owner or editor signed in, or the admin token; a project key is answered 403. Revoking a project's last key stops its ingest, so that one is a dry run until `confirm` echoes the project's name.
          */
         delete: operations["revokeKey"];
         options?: never;
@@ -1557,6 +1557,16 @@ export interface components {
                 memberships: number;
                 sessions: number;
             };
+            /** @description The keys the account minted that still exist, in every project. Not in `would_delete`: deleting the account leaves them working */
+            keys: {
+                project_id: string;
+                project_name: string;
+                public_key: string;
+                name: string;
+                scopes: components["schemas"]["KeyScopes"];
+                /** Format: date-time */
+                last_used_at: string | null;
+            }[];
             /** @description The exact string `?confirm=` must carry: the account's email */
             confirm: string;
             note?: string;
@@ -1853,9 +1863,43 @@ export interface components {
         NewKey: {
             public_key: string;
             secret_key: string;
+            name?: string;
+            scopes?: components["schemas"]["KeyScopes"];
             /** Format: date-time */
             created_at?: string;
+            created_by?: components["schemas"]["KeyMinter"];
             note?: string;
+        };
+        /** @description One of a project's keys: the public half, what it may do, who minted it and when it was last used */
+        Key: {
+            public_key: string;
+            /** @description Which program holds it; empty when the minter gave none */
+            name: string;
+            scopes: components["schemas"]["KeyScopes"];
+            /** Format: date-time */
+            created_at: string;
+            created_by: components["schemas"]["KeyMinter"];
+            /**
+             * Format: date-time
+             * @description The last request the key authenticated, admitted or refused, written once a minute: a use in the last minute may be missing after a crash. null until the key is used
+             */
+            last_used_at: string | null;
+        };
+        /** @description What the key may do. Every key holds all three today */
+        KeyScopes: ("ingest" | "read" | "write")[];
+        /** @description Who minted a key. `account`: an owner or editor signed in; `admin_token`: the admin token; `startup`: the server itself, for the first-start project or one `TRACEPAD_PROJECTS` declares; `unknown`: the key predates the record */
+        KeyMinter: {
+            /** @enum {string} */
+            kind: "account" | "admin_token" | "startup" | "unknown";
+            /** @description `account` only, and only while the account exists */
+            account_id?: string;
+            /** @description `account` only: the email the account had when it minted the key, kept after the account is deleted */
+            email?: string;
+            /**
+             * @description `account` only: the minter's relation to the project now. `removed` has no role here any more
+             * @enum {string}
+             */
+            standing?: "owner" | "editor" | "viewer" | "removed" | "disabled" | "deleted";
         };
         /** @description One review programme: a named list of traces or observations and the score names a reviewer must set on each of them (spec 024). */
         AnnotationQueue: {
@@ -6010,11 +6054,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        keys: {
-                            public_key: string;
-                            /** Format: date-time */
-                            created_at: string;
-                        }[];
+                        keys: components["schemas"]["Key"][];
                     };
                 };
             };
@@ -6034,7 +6074,14 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /** @description Which program holds the key. Trimmed; at most 64 characters; no control or bidirectional control characters (422); not unique */
+                    name?: string;
+                };
+            };
+        };
         responses: {
             /** @description The new pair, secret included this once */
             201: {
@@ -6049,6 +6096,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };

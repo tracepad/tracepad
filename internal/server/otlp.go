@@ -191,7 +191,7 @@ func (s *Server) handleTraces(w http.ResponseWriter, r *http.Request) {
 				// again on every retry — a retry loop over a poison
 				// batch is worse than the loss, so it stays a 500.
 				// The writer has logged it, once a minute.
-				unavailable(w)
+				retryLater(w, storageUnavailable)
 				return
 			}
 			slog.Error("ingest write failed", "project", project.Name, "err", err)
@@ -352,29 +352,6 @@ func (l *logLimiter) allow(now time.Time) (skipped int64, ok bool) {
 	}
 	skipped, l.skipped, l.last = l.skipped, 0, now
 	return skipped, true
-}
-
-// perKeyLimiter is a logLimiter per key: one line per interval for each
-// database condition, so a disk that stays full says so once a minute rather
-// than drowning the lock that clears in the same minute.
-type perKeyLimiter struct {
-	mu    sync.Mutex
-	every time.Duration
-	keys  map[string]*logLimiter
-}
-
-func (l *perKeyLimiter) allow(key string, now time.Time) (skipped int64, ok bool) {
-	l.mu.Lock()
-	limiter := l.keys[key]
-	if limiter == nil {
-		if l.keys == nil {
-			l.keys = map[string]*logLimiter{}
-		}
-		limiter = &logLimiter{every: l.every}
-		l.keys[key] = limiter
-	}
-	l.mu.Unlock()
-	return limiter.allow(now)
 }
 
 // writeExportResponse answers with an ExportTraceServiceResponse, carrying

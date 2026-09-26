@@ -911,7 +911,7 @@ func TestSystemPrintsTheRawArchive(t *testing.T) {
 // compared field by field. What arrives at B is what A holds — ids included.
 func TestExportRoundTrip(t *testing.T) {
 	source := newHarness(t)
-	destination := newHarness(t)
+	destination := newHarnessWithToken(t, testAdminToken)
 
 	for _, fixture := range otlptest.Fixtures() {
 		body, err := mapping.EncodeExportRequest(fixture.ResourceSpans)
@@ -924,7 +924,11 @@ func TestExportRoundTrip(t *testing.T) {
 	// The receiver's own credentials, because that is what it is: a second
 	// Tracepad, reached the way any OTLP receiver is — with a key of its own,
 	// not the source's, which no flag lets out (spec 019 #14).
+	// Minted with the receiver's admin token, which is who mints keys
+	// (spec 045 #4).
+	destination.env["TRACEPAD_API_KEY"] = testAdminToken
 	minted := destination.run(t.Context(), false, "keys", "create", "--json")
+	destination.env["TRACEPAD_API_KEY"] = testKey
 	if minted.code != ExitOK {
 		t.Fatalf("keys create: exit = %d, stderr = %s", minted.code, minted.stderr)
 	}

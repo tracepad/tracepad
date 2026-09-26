@@ -45,8 +45,8 @@ Project "default" created. Connect your app with either:
 ```
 
 **Copy the secret key somewhere.** It is stored hashed, so this is the only
-time it is printable; a lost key is replaced with `tracepad keys create`, not
-recovered.
+time it is printable; a lost key is replaced in Settings → Project → API keys,
+or with `tracepad keys create` and the admin token — not recovered.
 
 Underneath it is a second link, which is how you get into the browser
 interface:

@@ -2265,7 +2265,7 @@
       "delete": {
         "tags": ["accounts"],
         "summary": "Delete an account; a dry run until `?confirm=` echoes its email",
-        "description": "For people who are gone. It takes their memberships, sessions and invitations and nothing else: a score does not name its author, and nothing else in the database references an account. Disabling is the reversible way to take access away today.",
+        "description": "For people who are gone. It takes their memberships, sessions and invitations and nothing else: a score does not name its author, and the keys it minted keep working, listed in the dry run. Disabling is the reversible way to take access away today.",
         "operationId": "deleteAccount",
         "security": [{"sessionCookie": []}, {"adminToken": []}],
         "parameters": [
@@ -2498,16 +2498,15 @@
     "/api/v1/projects/{id}/keys": {
       "get": {
         "tags": ["admin"],
-        "summary": "List a project's public keys",
-        "description": "The secrets are not here because they are not anywhere: only their hashes are stored.",
+        "summary": "List a project's keys, who minted each and when it was last used",
+        "description": "An owner or editor signed in, or the admin token; a project key is answered 403, because no key lists, mints or revokes keys. The secrets are not here because they are not anywhere: only their hashes are stored.",
         "operationId": "listKeys",
+        "security": [{"sessionCookie": []}, {"adminToken": []}],
         "parameters": [{"$ref": "#/components/parameters/ProjectID"}],
         "responses": {
           "200": {"description": "The active keys, oldest first",
             "content": {"application/json": {"schema": {"type": "object",
-              "properties": {"keys": {"type": "array", "items": {"type": "object",
-                "properties": {"public_key": {"type": "string"}, "created_at": {"type": "string", "format": "date-time"}},
-                "required": ["public_key", "created_at"]}}},
+              "properties": {"keys": {"type": "array", "items": {"$ref": "#/components/schemas/Key"}}},
               "required": ["keys"]}}}},
           "400": {"$ref": "#/components/responses/BadRequest"},
           "401": {"$ref": "#/components/responses/Unauthorized"},
@@ -2519,9 +2518,16 @@
       "post": {
         "tags": ["admin"],
         "summary": "Mint a key pair; the secret is shown once",
-        "description": "Several active pairs are what makes rotation zero-downtime: create the new one, move the SDKs, revoke the old.",
+        "description": "An owner or editor signed in, or the admin token; a project key is answered 403. Several active pairs are what makes rotation zero-downtime: create the new one, move the SDKs, revoke the old. The key records who minted it.",
         "operationId": "createKey",
+        "security": [{"sessionCookie": []}, {"adminToken": []}],
         "parameters": [{"$ref": "#/components/parameters/ProjectID"}],
+        "requestBody": {"required": false, "content": {"application/json": {"schema": {
+          "type": "object",
+          "properties": {
+            "name": {"type": "string", "maxLength": 64, "description": "Which program holds the key. Trimmed; at most 64 characters; no control or bidirectional control characters (422); not unique"}
+          },
+          "additionalProperties": false}}}},
         "responses": {
           "201": {"description": "The new pair, secret included this once",
             "content": {"application/json": {"schema": {"$ref": "#/components/schemas/NewKey"}}}},
@@ -2529,7 +2535,8 @@
           "401": {"$ref": "#/components/responses/Unauthorized"},
           "503": {"$ref": "#/components/responses/ServiceUnavailable"},
           "403": {"$ref": "#/components/responses/Forbidden"},
-          "404": {"$ref": "#/components/responses/NotFound"}
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "422": {"$ref": "#/components/responses/Unprocessable"}
         }
       }
     },
@@ -2537,8 +2544,9 @@
       "delete": {
         "tags": ["admin"],
         "summary": "Revoke one key pair",
-        "description": "Revoking a project's last key stops its ingest, so that one is a dry run until `confirm` echoes the project's name.",
+        "description": "An owner or editor signed in, or the admin token; a project key is answered 403. Revoking a project's last key stops its ingest, so that one is a dry run until `confirm` echoes the project's name.",
         "operationId": "revokeKey",
+        "security": [{"sessionCookie": []}, {"adminToken": []}],
         "parameters": [
           {"$ref": "#/components/parameters/ProjectID"},
           {"name": "public_key", "in": "path", "required": true, "schema": {"type": "string"}},
@@ -2620,7 +2628,7 @@
       "basicKeys": {"type": "http", "scheme": "basic",
         "description": "`base64(public key:secret key)`, the shape a Langfuse SDK sends"},
       "adminToken": {"type": "http", "scheme": "bearer",
-        "description": "`TRACEPAD_ADMIN_TOKEN`, sent in the same header as a project key. Required for everything cross-project, for creating and deleting a project, and for the account routes — which is what makes it the recovery when every owner's password is lost. A server with none configured answers 403 and says so."},
+        "description": "`TRACEPAD_ADMIN_TOKEN`, sent in the same header as a project key. Required for everything cross-project, for creating and deleting a project, and for the account routes; beside an owner's or editor's session, it is what lists, mints and revokes a project's keys, which no project key does — which is what makes it the recovery when every owner's password is lost. A server with none configured answers 403 and says so."},
       "sessionCookie": {"type": "apiKey", "in": "cookie", "name": "tracepad_session",
         "description": "A browser session: `HttpOnly`, `SameSite=Lax`, `Secure` over TLS, set by the three ways in and lasting `TRACEPAD_SESSION_DAYS` (default 30), sliding. On a route whose policy is `member` or `editor` a session must also name the project it is asking about with `X-Tracepad-Project`, and an unsafe method must carry an `Origin` (or `Referer`) whose host is the request's `Host`, the first value of `X-Forwarded-Host`, or the host of `TRACEPAD_URL`."}
     },
@@ -2824,10 +2832,26 @@
             },
             "required": ["memberships", "sessions"]
           },
+          "keys": {
+            "type": "array",
+            "description": "The keys the account minted that still exist, in every project. Not in `would_delete`: deleting the account leaves them working",
+            "items": {
+              "type": "object",
+              "properties": {
+                "project_id": {"type": "string"},
+                "project_name": {"type": "string"},
+                "public_key": {"type": "string"},
+                "name": {"type": "string"},
+                "scopes": {"$ref": "#/components/schemas/KeyScopes"},
+                "last_used_at": {"type": ["string", "null"], "format": "date-time"}
+              },
+              "required": ["project_id", "project_name", "public_key", "name", "scopes", "last_used_at"]
+            }
+          },
           "confirm": {"type": "string", "description": "The exact string `?confirm=` must carry: the account's email"},
           "note": {"type": "string"}
         },
-        "required": ["dry_run", "account", "would_delete", "confirm"]
+        "required": ["dry_run", "account", "would_delete", "keys", "confirm"]
       },
       "TraceRow": {
         "type": "object",
@@ -3110,10 +3134,44 @@
         "properties": {
           "public_key": {"type": "string"},
           "secret_key": {"type": "string"},
+          "name": {"type": "string"},
+          "scopes": {"$ref": "#/components/schemas/KeyScopes"},
           "created_at": {"type": "string", "format": "date-time"},
+          "created_by": {"$ref": "#/components/schemas/KeyMinter"},
           "note": {"type": "string"}
         },
         "required": ["public_key", "secret_key"]
+      },
+      "Key": {
+        "type": "object",
+        "description": "One of a project's keys: the public half, what it may do, who minted it and when it was last used",
+        "properties": {
+          "public_key": {"type": "string"},
+          "name": {"type": "string", "description": "Which program holds it; empty when the minter gave none"},
+          "scopes": {"$ref": "#/components/schemas/KeyScopes"},
+          "created_at": {"type": "string", "format": "date-time"},
+          "created_by": {"$ref": "#/components/schemas/KeyMinter"},
+          "last_used_at": {"type": ["string", "null"], "format": "date-time",
+            "description": "The last request the key authenticated, admitted or refused, written once a minute: a use in the last minute may be missing after a crash. null until the key is used"}
+        },
+        "required": ["public_key", "name", "scopes", "created_at", "created_by", "last_used_at"]
+      },
+      "KeyScopes": {
+        "type": "array",
+        "description": "What the key may do. Every key holds all three today",
+        "items": {"type": "string", "enum": ["ingest", "read", "write"]}
+      },
+      "KeyMinter": {
+        "type": "object",
+        "description": "Who minted a key. `account`: an owner or editor signed in; `admin_token`: the admin token; `startup`: the server itself, for the first-start project or one `TRACEPAD_PROJECTS` declares; `unknown`: the key predates the record",
+        "properties": {
+          "kind": {"type": "string", "enum": ["account", "admin_token", "startup", "unknown"]},
+          "account_id": {"type": "string", "description": "`account` only, and only while the account exists"},
+          "email": {"type": "string", "description": "`account` only: the email the account had when it minted the key, kept after the account is deleted"},
+          "standing": {"type": "string", "enum": ["owner", "editor", "viewer", "removed", "disabled", "deleted"],
+            "description": "`account` only: the minter's relation to the project now. `removed` has no role here any more"}
+        },
+        "required": ["kind"]
       },
       "AnnotationQueue": {
         "type": "object",

@@ -123,7 +123,7 @@ func (s *Server) submitFailure(w http.ResponseWriter, err error) {
 			// The database's condition, which passes: the status a
 			// client retries, as ingest answers it (spec 043 #2). The
 			// writer has logged it, once a minute.
-			unavailable(w)
+			retryLater(w, storageUnavailable)
 			return
 		}
 		slog.Error("write failed", "err", err)
@@ -131,12 +131,16 @@ func (s *Server) submitFailure(w http.ResponseWriter, err error) {
 	}
 }
 
-// unavailable is the answer for a write a database condition failed (spec 043
-// #2): a lock that did not clear, a full disk, an I/O error. It passes, so the
-// status is one a client retries.
-func unavailable(w http.ResponseWriter) {
+// storageUnavailable is the answer for a write a database condition failed
+// (spec 043 #2): a lock that did not clear, a full disk, an I/O error.
+const storageUnavailable = "storage is temporarily unavailable; retry shortly"
+
+// retryLater is the one `503` that asks to be retried (spec 043 #1, #2): a
+// credential that could not be checked and a write a database condition
+// failed both pass on their own, so the status is one a client retries.
+func retryLater(w http.ResponseWriter, message string) {
 	w.Header().Set("Retry-After", "1")
-	writeError(w, http.StatusServiceUnavailable, "storage is temporarily unavailable; retry shortly")
+	writeError(w, http.StatusServiceUnavailable, message)
 }
 
 // readJSON reads the request body under the configured cap and decodes it

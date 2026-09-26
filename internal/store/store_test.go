@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -61,12 +62,18 @@ func TestBootstrapDefaultOnceAndIdempotent(t *testing.T) {
 	}
 
 	// Auth lookup by secret works; wrong secret does not.
-	p, err := s.ProjectBySecret(context.Background(), secret)
+	p, key, err := s.KeyBySecret(context.Background(), secret)
 	if err != nil || p == nil || p.Name != "default" {
-		t.Fatalf("ProjectBySecret: p=%+v err=%v", p, err)
+		t.Fatalf("KeyBySecret: p=%+v err=%v", p, err)
 	}
-	if p, _ := s.ProjectBySecret(context.Background(), "tp-sk-wrong"); p != nil {
-		t.Fatalf("wrong secret resolved to %+v", p)
+	// The server made this key by itself, and it may do everything a key
+	// may (spec 045 #5, #8).
+	if key.PublicKey != boot.Created[0].Keys.PublicKey || key.CreatedBy.Via != MintedAtStartup ||
+		strings.Join(key.Scopes, " ") != AllScopes {
+		t.Fatalf("the first-start key = %+v, want the server's own with every scope", key)
+	}
+	if p, key, _ := s.KeyBySecret(context.Background(), "tp-sk-wrong"); p != nil || key != nil {
+		t.Fatalf("wrong secret resolved to %+v, %+v", p, key)
 	}
 }
 
@@ -93,8 +100,9 @@ func TestBootstrapDeclarativeIdempotent(t *testing.T) {
 	if len(boot.Created) != 0 {
 		t.Fatalf("re-bootstrap created %+v", boot.Created)
 	}
-	if p, _ := s.ProjectBySecret(context.Background(), "tp-sk-b"); p == nil || p.Name != "eval" {
-		t.Fatalf("declared key does not resolve, got %+v", p)
+	if p, key, _ := s.KeyBySecret(context.Background(), "tp-sk-b"); p == nil || p.Name != "eval" ||
+		key.CreatedBy.Via != MintedAtStartup {
+		t.Fatalf("declared key does not resolve as the server's own, got %+v, %+v", p, key)
 	}
 	// Declared projects present, no stray "default".
 	if p, _ := s.ProjectByName("default"); p != nil {
