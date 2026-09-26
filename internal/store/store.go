@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -31,9 +30,12 @@ type Store struct {
 }
 
 // Open opens (creating if needed) the database at path and applies pending
-// migrations. The parent directory is created with 0700.
+// migrations. The data directory is 0700 and the database files 0600, made so
+// or tightened to it on every start (spec 044 #13).
 func Open(path string) (*Store, error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	info, statErr := os.Stat(path)
+	fresh := statErr != nil || info.Size() == 0
+	if err := secureFiles(path); err != nil {
 		return nil, fmt.Errorf("create data dir: %w", err)
 	}
 	// modernc.org/sqlite accepts pragmas in the DSN, applied in order per
@@ -52,9 +54,14 @@ func Open(path string) (*Store, error) {
 	// version — takes a read snapshot at its first SELECT and is then
 	// refused with SQLITE_BUSY_SNAPSHOT when it tries to upgrade, a
 	// failure busy_timeout cannot wait out (spec 003 Decision 24).
-	dsn := "file:" + path + "?_txlock=immediate&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)&_pragma=auto_vacuum(INCREMENTAL)&_pragma=synchronous(NORMAL)"
-	info, statErr := os.Stat(path)
-	fresh := statErr != nil || info.Size() == 0
+	//
+	// secure_delete(ON) zeroes what a delete frees — the cells inside live
+	// pages and the pages that go to the freelist, where raw bodies and
+	// large payloads live — instead of leaving the bytes for anyone who can
+	// read the file (spec 044 #10). FAST would leave the freed overflow
+	// pages intact. There is no setting to turn it off: a guarantee that
+	// depends on configuration is not one (spec 005 #9).
+	dsn := "file:" + path + "?_txlock=immediate&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)&_pragma=auto_vacuum(INCREMENTAL)&_pragma=synchronous(NORMAL)&_pragma=secure_delete(ON)"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", path, err)
@@ -66,6 +73,15 @@ func Open(path string) (*Store, error) {
 	if err := s.migrate(); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("open %s: %w (latest backup, if any: %s)", path, err, latestBackup(path))
+	}
+	// The compaction migration records a request for what an upgraded
+	// database's earlier deletions left (spec 044 #11). A new one has
+	// deleted nothing, and "compaction pending" would say it had (#18).
+	if fresh {
+		if _, err := db.Exec(`UPDATE compaction SET requested_at = NULL WHERE id = 1`); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("open %s: clear the new database's compaction request: %w", path, err)
+		}
 	}
 	// Not fatal: without incremental auto-vacuum, retention still deletes
 	// rows and the file merely stops shrinking. Refusing to start over
@@ -305,19 +321,10 @@ func randomHex(nbytes int) (string, error) {
 
 // latestBackup names the newest .bak next to the DB for error messages.
 func latestBackup(dbPath string) string {
-	matches, _ := filepath.Glob(dbPath + ".pre-*.bak")
-	if len(matches) == 0 {
-		return "none"
+	if newest := newestBackup(dbPath); newest != nil {
+		return newest.Path
 	}
-	newest := matches[0]
-	for _, m := range matches[1:] {
-		ni, _ := os.Stat(newest)
-		mi, _ := os.Stat(m)
-		if ni != nil && mi != nil && mi.ModTime().After(ni.ModTime()) {
-			newest = m
-		}
-	}
-	return newest
+	return "none"
 }
 
 var logger = slog.Default

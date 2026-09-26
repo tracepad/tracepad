@@ -809,8 +809,12 @@ func (s *Server) handleEraseUserData(w http.ResponseWriter, r *http.Request) {
 		// sees the hole before it opens. The echo here is the user id,
 		// because the user is what is being erased (#8). The shape is the
 		// one every deletion of traces answers with (spec 035 #1).
-		writeJSON(w, http.StatusOK, deletionPreview(counts, runs, userID,
-			"raw OTLP bodies are not erased; they expire on the raw retention window"))
+		preview := deletionPreview(counts, runs, userID,
+			"raw OTLP bodies are not erased; they expire on the raw retention window")
+		if backup := s.backupAnswer(); backup != nil {
+			preview = preview.put("pre_migration_backup", backup)
+		}
+		writeJSON(w, http.StatusOK, preview)
 		return
 	}
 
@@ -823,6 +827,7 @@ func (s *Server) handleEraseUserData(w http.ResponseWriter, r *http.Request) {
 	// question about the retention window, and a request is not long
 	// enough to move it.
 	var erased store.DeleteCounts
+	var compaction int64
 	now := time.Now().UnixNano()
 	for {
 		chunk := &store.UserDataErase{
@@ -843,15 +848,23 @@ func (s *Server) handleEraseUserData(w http.ResponseWriter, r *http.Request) {
 		erased.AnnotationItems += chunk.Counts.AnnotationItems
 		erased.Media += chunk.Counts.Media
 		erased.MediaBytes += chunk.Counts.MediaBytes
+		compaction = max(compaction, chunk.CompactionRequested)
 		if !chunk.More {
 			break
 		}
 	}
 
-	writeJSON(w, http.StatusOK, object{}.
+	answer := object{}.
 		put("dry_run", false).
 		put("deleted", deletedCounts(erased)).
-		put("user_id", userID))
+		put("user_id", userID).
+		put("compaction", s.compactionAnswer(compaction))
+	// The one copy of the database the erasure does not rewrite, and the
+	// day it goes (spec 044 #12).
+	if backup := s.backupAnswer(); backup != nil {
+		answer = answer.put("pre_migration_backup", backup)
+	}
+	writeJSON(w, http.StatusOK, answer)
 }
 
 // dryRun renders the preview shape every destructive endpoint answers with

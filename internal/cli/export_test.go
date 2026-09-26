@@ -906,6 +906,29 @@ func TestSystemPrintsTheRawArchive(t *testing.T) {
 	}
 }
 
+// A compaction waiting for the next sweep is named with the moment it was
+// asked for (spec 044 #11) — and a new store, which has deleted nothing, has
+// none to name (#18).
+func TestSystemPrintsThePendingCompaction(t *testing.T) {
+	h := newHarness(t)
+	got := h.run(t.Context(), true, "system")
+	if got.code != ExitOK {
+		t.Fatalf("exit = %d, stderr = %s", got.code, got.stderr)
+	}
+	if strings.Contains(got.stdout, "compaction") {
+		t.Errorf("a new store reports a compaction:\n%s", got.stdout)
+	}
+
+	h.seedTraces(t, 1, 1, "")
+	if out := h.run(t.Context(), true, "traces", "rm", traceHex(1), "--yes"); out.code != ExitOK {
+		t.Fatalf("traces rm exited %d: %s", out.code, out.stderr)
+	}
+	got = h.run(t.Context(), true, "system")
+	if !strings.Contains(got.stdout, "compaction pending since") {
+		t.Errorf("the system output does not name the pending compaction:\n%s", got.stdout)
+	}
+}
+
 // TestExportRoundTrip is the whole promise in one test: a corpus ingested into
 // one server, exported into a second one's `/v1/traces`, and the two read APIs
 // compared field by field. What arrives at B is what A holds — ids included.

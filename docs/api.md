@@ -432,7 +432,10 @@ with the hour it started in re-rolled in the same transaction. An editor's
 route. Without `confirm` it answers the dry run above; the echo is the trace
 id, its only identity. With it: `{"dry_run": false, "deleted": {"traces": 1,
 "observations": 7, "scores": 2, "payloads": 9, "annotation_items": 1}, "id":
-"4f8c…"}`. An unknown id is `404` either way, a wrong echo `400`. When an
+"4f8c…", "compaction": {"requested_at": "…", "expected_by": "…"}}` —
+`compaction` is the sweeper pass that overwrites what the deletion unlinked,
+and when it is due ([retention.md](retention.md#what-this-means-for-a-data-subject-request)).
+An unknown id is `404` either way, a wrong echo `400`. When an
 eval run holds the trace it is deleted all the same, and `affected_runs`
 names the run in the dry run ([datasets.md](datasets.md#what-a-run-keeps)).
 
@@ -449,7 +452,7 @@ the exact count (the listing's own stops at a thousand), and its echo is the
 **project name**. A confirmed request deletes **one round** — the newest
 `limit` matches, 1–1000 and 1000 by default, in chunks of one hour, and at
 most fifty chunks — and answers `{"dry_run": false, "deleted": {…}, "more":
-true}`; repeat the same call while `more` is true. Nothing is recounted on the way, a filter that
+true, "compaction": {…}}`; repeat the same call while `more` is true. Nothing is recounted on the way, a filter that
 matches nothing is a successful dry run of zero and a successful deletion of
 nothing, and a repeat after `more: false` is harmless. The whole of it — what
 goes, what stays, the ingest race — is in
@@ -514,7 +517,8 @@ pair, so following a marker never lands there.
 
 Every export body Tracepad accepts is kept as it arrived, and these two
 endpoints are how it leaves. They are the project's own reads under the
-project's own keys — a key that reads traces reads the batches they came from —
+project's own keys — a key that reads traces reads the batches they came from;
+signed in, an editor's or an owner's, and not a viewer's —
 and they are what [`tracepad export --otlp`](export.md) is a client of. Anything
 else can be one too: a backup job, a script, a second Tracepad.
 
@@ -1051,6 +1055,18 @@ names none of them.
 `size_bytes` is the one deployment-wide number: it is the file on disk, which
 is the operator question this endpoint exists to answer, and payloads and
 compression are shared so it cannot be split per project.
+
+`compaction` is deployment-wide too, and names nobody:
+
+```json
+"compaction": {"requested_at": "2026-09-26T10:02:11Z", "completed_at": "2026-09-26T09:00:00Z"}
+```
+
+An erasure, a trace deletion or a project's purge asks the next sweeper pass to
+overwrite what it unlinked — merge the search index, drain the free pages,
+truncate the write-ahead log ([retention.md](retention.md#what-this-means-for-a-data-subject-request)).
+`requested_at` is the latest request still waiting, `null` when none is;
+`completed_at` is when one last finished, `null` before the first.
 
 This is the endpoint to read first when something looks wrong, and the one to
 paste into a bug report.

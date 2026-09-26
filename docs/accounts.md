@@ -161,8 +161,8 @@ contract rather than a description of it.
 |---|---|
 | `public` | Anyone: `GET /api/v1`, `openapi.json`, `/health`, and the three ways in. |
 | `ingest` | A project key, and nothing else. |
-| `member` | A project key, or a session whose account is an owner or has any role in the named project. Every read, plus writing and retracting scores and working a queue. |
-| `editor` | A project key, or an owner or `editor` session. Prompts, datasets, runs, score configs, queues, retention, keys, user-data erasure — but no project key lists, mints or revokes keys: those three routes answer a key `403`, and an owner or editor session or the admin token manages them. |
+| `member` | A project key, or a session whose account is an owner or has any role in the named project. Every read but the raw archive, plus writing and retracting scores and working a queue. |
+| `editor` | A project key, or an owner or `editor` session. Prompts, datasets, runs, score configs, queues, retention, keys, user-data erasure, and reading the raw archive (`/api/v1/raw`) — the bulk way out of a project, which a viewer does not take — but no project key lists, mints or revokes keys: those three routes answer a key `403`, and an owner or editor session or the admin token manages them. |
 | `owner` | `TRACEPAD_ADMIN_TOKEN`, or an owner session. Creating, deleting, restoring and renaming a project; listing every project; everything under `/api/v1/accounts`. |
 | `session` | Only a cookie. A key or the admin token is told `not a session`, which is what it is. |
 

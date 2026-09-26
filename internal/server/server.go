@@ -32,6 +32,9 @@ type JobWriter interface {
 // dry-run semantics the rest of this spec insists on (Decision 14).
 type SweepReporter interface {
 	Status(projectID string) store.SweepStatus
+	// ExpectedBy is when a compaction requested now will have run
+	// (spec 044 #11).
+	ExpectedBy() int64
 }
 
 // Server is the Tracepad HTTP server.

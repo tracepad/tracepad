@@ -667,6 +667,10 @@ the ingest counters and what the retention sweeper has done since the server
 started. The first thing to run when something looks wrong, and the thing to
 paste into a bug report.
 
+A line under the database says whether a compaction is waiting for the next
+sweep — `compaction pending since …` after an erasure or a deletion — or when
+one last finished ([retention.md](retention.md#what-this-means-for-a-data-subject-request)).
+
 The `raw archive` block is what an export can carry out, and how far back:
 
 ```

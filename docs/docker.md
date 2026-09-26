@@ -182,8 +182,8 @@ sudo install -d -m 0700 -o 65532 -g 65532 ./tracepad-data
 docker run -d -v "$PWD/tracepad-data:/data" … ghcr.io/tracepad/tracepad
 ```
 
-`mkdir -p` and a `chown` would work too, and leave the directory `0755`:
-readable by every account on the host, which is the next section's problem.
+`mkdir -p` and a `chown` would work too, and leave the directory `0755` until
+the server's first start closes it ([Who else can read it](#who-else-can-read-it)).
 
 You can also run the container as root with `--user 0:0`, and it will work. Do
 not: this store holds every prompt and completion your application ever sent,
@@ -193,33 +193,29 @@ back to your host and runs a network service as root to do it.
 ### Who else can read it
 
 The database holds every prompt and completion, the accounts' password hashes
-and the key that signs media uploads. Today the server creates it — and its
-`-wal`, `-shm` and pre-migration backup files — with mode `0644`, readable by
-any account that can get into the directory. The directory is the guard, and
-the image creates `/data` as `0755`, so a named volume starts open, as does a
-host directory made with `mkdir`.
+and the key that signs media uploads, so the server keeps it to its owner: the
+data directory `0700`, the database, its `-wal` and `-shm` and the
+pre-migration backups `0600`. It creates them that way, and it tightens them
+**at every start** — an install from before this, whose files were `0644` in a
+`0755` directory, is closed by the first start of the new version. The image
+creates `/data` as `0700`, so a new named volume starts closed.
 
-Close it once — before the first run or after it; the file step does nothing
-when there are no files yet. For a named volume, from a throwaway container:
+The directory is tightened only while it holds nothing but the database's own
+files. One you share with other things — `TRACEPAD_DATA_DIR=.`, a home
+directory — keeps the mode you gave it, and the log says so at every start, a
+`WARN` naming the directory and one of the other files; the database files in
+it are `0600` all the same. Give the database a directory of its own.
 
-```sh
-docker run --rm -v tracepad:/data busybox sh -c \
-  "chmod 0700 /data && find /data -maxdepth 1 -name 'tracepad.db*' -exec chmod 0600 {} \;"
-```
-
-For a host directory — through `sudo`, because once it is `0700` and owned by
-uid 65532 your own shell can no longer list it:
+When a mode cannot be changed — a filesystem without Unix modes, a directory
+the server does not own — the server starts anyway and says so in its log, a
+`WARN` naming the file and its mode. Close that one yourself; for a host
+directory, through `sudo`, since once it is `0700` and owned by uid 65532 your
+own shell can no longer list it:
 
 ```sh
 sudo chmod 0700 ./tracepad-data
 sudo find ./tracepad-data -maxdepth 1 -name 'tracepad.db*' -exec chmod 0600 {} \;
 ```
-
-Files the server writes later — a new backup at the next upgrade — are created
-`0644` again, and the `0700` directory is what keeps them to their owner. On a
-host install the same holds for the data directory: the server creates it
-`0700` when it creates it, and one you made yourself keeps the mode you gave
-it.
 
 ## Configuration
 
@@ -386,20 +382,23 @@ the same command with the arguments swapped, into a stopped container's volume.
 
 **The server keeps a copy of its own, too.** Before every start that applies a
 migration it writes `tracepad.db.pre-<migration>.bak` beside the database — a
-full copy as it stood before the upgrade, for rolling that upgrade back by
-swapping the file in. It never deletes one, so a volume that has seen several
-upgrades holds several complete old databases, each with everything since
-erased or swept still inside it, and so does any tar of the volume. Once the
-latest upgrade has proved itself, remove them. This removes **all** of them —
-the latest upgrade's rollback copy included — names each one it removes, and
-does nothing on a volume that has none:
+full copy as it stood before the upgrade, readable by its owner only, for
+rolling that upgrade back by swapping the file in. Once the upgrade's
+migrations have committed, the server removes the backups of earlier upgrades,
+naming each in its log; the sweeper removes the newest seven days after it was
+written. That week is the window for a rollback — and the copy holds
+everything erased or swept since, as does any tar of the volume taken in it.
+Once the upgrade has proved itself you can remove it sooner. This removes
+every backup there is, names each one, and does nothing on a volume that has
+none:
 
 ```sh
 docker run --rm -v tracepad:/data busybox \
   find /data -maxdepth 1 -name 'tracepad.db.pre-*.bak' -print -exec rm {} \;
 ```
 
-A data-subject erasure does not reach these files; see
+A data-subject erasure does not rewrite this file; while it exists, the
+erasure's answer names it and the day it goes — see
 [retention.md](retention.md#what-this-means-for-a-data-subject-request).
 
 ## Building it yourself

@@ -451,6 +451,11 @@ func TestUsersRemoveData(t *testing.T) {
 	if !strings.Contains(out.stdout, "raw OTLP bodies are not erased") {
 		t.Errorf("stdout = %q, want the raw archive position stated", out.stdout)
 	}
+	// And when the bytes the rows left in the file are overwritten (spec 044
+	// #11).
+	if !strings.Contains(out.stdout, "freed bytes are overwritten by the next sweep, expected by") {
+		t.Errorf("stdout = %q, want the compaction's date", out.stdout)
+	}
 
 	counts, err := h.store.TableCounts(h.projectID(t))
 	if err != nil {
