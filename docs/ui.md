@@ -785,7 +785,10 @@ it; and a reference the project's setting kept no bytes for as a muted chip
 reading *not stored (project setting)*. The JSON still shows every reference
 as data. The bytes are fetched with the page's own credentials and drawn from
 memory — never opened as a page of this server — so a file that declared
-itself HTML is still only a download.
+itself HTML is still only a download. A picture is drawn under the type its
+own reference declared, and a download is saved with an extension only for
+common image, audio, video, PDF and text types; any other type is saved with
+none.
 
 ### The response budget
 

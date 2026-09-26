@@ -356,7 +356,7 @@ reason below: a raw batch holds many traces, and a trace cannot be cut out
 of one. The preview says so. A picture a deleted trace pointed at goes with
 it unless a raw batch still points at it, and then when that batch expires
 ([media.md](media.md#how-long-they-are-kept)); the preview counts the bodies
-it would free as `media` and `media_bytes`.
+the project would stop holding as `media` and `media_bytes`.
 
 **The first start after the upgrade builds four indexes** over the columns
 that reference stored payloads (migration 0020): deleting a payload is a

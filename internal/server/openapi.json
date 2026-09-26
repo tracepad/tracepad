@@ -158,9 +158,9 @@
             "type": "object",
             "properties": {
               "mediaId": {"type": "string"},
-              "contentType": {"type": "string"},
+              "contentType": {"type": "string", "description": "The type this project stored the body under"},
               "contentLength": {"type": "integer"},
-              "uploadedAt": {"type": "string", "format": "date-time"},
+              "uploadedAt": {"type": "string", "format": "date-time", "description": "When this project's hold of the body began"},
               "url": {"type": "string"},
               "urlExpiry": {"type": "string", "format": "date-time"}
             },
@@ -710,7 +710,7 @@
             "schema": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}
         ],
         "responses": {
-          "200": {"description": "The bytes, in the MIME type the first client to send them declared",
+          "200": {"description": "The bytes, in the MIME type this project stored them under",
             "headers": {
               "Cache-Control": {"schema": {"type": "string"}, "description": "`private, max-age=31536000, immutable`"}
             },
@@ -3121,7 +3121,7 @@
         "properties": {
           "dry_run": {"const": false},
           "deleted": {"type": "object", "additionalProperties": {"type": "integer"},
-            "description": "`traces`, `observations`, `scores`, `payloads`, `annotation_items`, and the `media` bodies collected with their `media_bytes`"},
+            "description": "`traces`, `observations`, `scores`, `payloads`, `annotation_items`, and the `media` bodies the project stopped holding with their `media_bytes`"},
           "id": {"type": "string", "pattern": "^[0-9a-f]{32}$"}
         },
         "required": ["dry_run", "deleted", "id"]

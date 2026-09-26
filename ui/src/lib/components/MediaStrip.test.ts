@@ -87,6 +87,17 @@ describe('the media strip', () => {
 		expect(URL.createObjectURL).not.toHaveBeenCalled();
 	});
 
+	it("draws a picture under its reference's type, not the served one (#25)", async () => {
+		const svg: MediaRef = { tracepad_media: 'd'.repeat(64), mime_type: 'image/svg+xml', size: 300 };
+		media.mockImplementation(async () => new Blob(['<svg/>'], { type: 'text/plain' }));
+		render(MediaStrip, { refs: [svg] });
+		const open = screen.getByRole('button', { name: /Open the full image/ });
+		await waitFor(() => expect(open).toBeEnabled());
+		const drawn = vi.mocked(URL.createObjectURL).mock.calls[0][0] as Blob;
+		expect(drawn.type).toBe('image/svg+xml');
+		expect(await drawn.text()).toBe('<svg/>');
+	});
+
 	it('says so when a picture cannot be loaded', async () => {
 		media.mockRejectedValue(new Error('404'));
 		render(MediaStrip, { refs: [png] });

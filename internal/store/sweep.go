@@ -574,9 +574,11 @@ func (t *traceSweep) apply(tx *sql.Tx) error {
 		return fmt.Errorf("sweep payloads: %w", err)
 	}
 	// Media follows its traces (spec 041 #3): no window of its own.
-	if t.Media, _, err = dropTraceMedia(tx, t.ProjectID, ids); err != nil {
+	drop, err := dropTraceMedia(tx, t.ProjectID, ids)
+	if err != nil {
 		return err
 	}
+	t.Media = drop.Collected
 	// In the same transaction as the rows themselves: an index that outlives
 	// a deletion is a retention promise broken (spec 011 #7).
 	return deleteTraceSearchEntries(tx, t.ProjectID, ids)
@@ -616,9 +618,11 @@ func (r *rawSweep) apply(tx *sql.Tx) error {
 	if len(ids) == 0 {
 		return nil
 	}
-	if r.Media, _, err = dropRawMedia(tx, ids); err != nil {
+	drop, err := dropRawMedia(tx, r.ProjectID, ids)
+	if err != nil {
 		return err
 	}
+	r.Media = drop.Collected
 	r.Deleted, err = deleteIn(tx, `DELETE FROM raw_batches WHERE id IN`, nil, ids)
 	if err != nil {
 		return fmt.Errorf("sweep raw batches: %w", err)
@@ -672,9 +676,10 @@ func (p *projectPurge) apply(tx *sql.Tx) error {
 	if !p.Purged {
 		return nil
 	}
-	// Nor has `media_refs` (schema 0021): what is left of it — a ref the
-	// Langfuse channel wrote for a trace that never arrived — goes here,
-	// with the bodies only this project pointed at (spec 041 #3).
+	// Nor have `media_refs` and `media_holders` (schemas 0021, 0022): what
+	// is left of them — a ref the Langfuse channel wrote for a trace that
+	// never arrived — goes here, with the bodies only this project pointed
+	// at (spec 041 #3).
 	if err := dropProjectMedia(tx, p.ProjectID); err != nil {
 		return err
 	}

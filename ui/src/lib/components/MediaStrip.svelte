@@ -14,7 +14,9 @@
 	// The bytes are fetched, not linked: a session names its project in a
 	// header an `<img src>` cannot send, and a blob drawn in an `<img>` — or
 	// saved by a download — is never rendered as a document of this origin,
-	// whatever type the client declared.
+	// whatever type the client declared. A thumbnail is drawn under the type
+	// its own reference declared, not the one the server answers, which is
+	// the type the project first stored the bytes under (#25).
 
 	let { refs }: { refs: MediaRef[] } = $props();
 
@@ -30,10 +32,11 @@
 		for (const ref of refs.filter(isPicture)) {
 			const sha = ref.tracepad_media;
 			api.media(sha, controller.signal).then(
-				(blob) => {
+				(body) => {
 					// A body that lands after the teardown would make a URL
 					// nothing revokes.
 					if (controller.signal.aborted) return;
+					const blob = new Blob([body], { type: ref.mime_type });
 					const url = URL.createObjectURL(blob);
 					made.push([sha, url]);
 					blobs[sha] = blob;

@@ -1954,7 +1954,7 @@ export interface components {
         TraceDeletion: {
             /** @constant */
             dry_run: false;
-            /** @description `traces`, `observations`, `scores`, `payloads`, `annotation_items`, and the `media` bodies collected with their `media_bytes` */
+            /** @description `traces`, `observations`, `scores`, `payloads`, `annotation_items`, and the `media` bodies the project stopped holding with their `media_bytes` */
             deleted: {
                 [key: string]: number;
             };
@@ -2616,9 +2616,13 @@ export interface operations {
                 content: {
                     "application/json": {
                         mediaId: string;
+                        /** @description The type this project stored the body under */
                         contentType: string;
                         contentLength: number;
-                        /** Format: date-time */
+                        /**
+                         * Format: date-time
+                         * @description When this project's hold of the body began
+                         */
                         uploadedAt: string;
                         url: string;
                         /** Format: date-time */
@@ -3416,7 +3420,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The bytes, in the MIME type the first client to send them declared */
+            /** @description The bytes, in the MIME type this project stored them under */
             200: {
                 headers: {
                     /** @description `private, max-age=31536000, immutable` */

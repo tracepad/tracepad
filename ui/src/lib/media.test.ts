@@ -40,7 +40,26 @@ describe('media references (spec 041 #4)', () => {
 
 	it('names a download by the hash and the type', () => {
 		expect(fileName(pdf)).toBe('bbbbbbbbbbbb.pdf');
-		expect(fileName({ ...png, mime_type: 'image/svg+xml' })).toBe('aaaaaaaaaaaa.svg');
 		expect(fileName({ ...png, mime_type: 'weird' })).toBe('aaaaaaaaaaaa');
+	});
+
+	it('takes an extension only from the fixed list (#32)', () => {
+		const named = (mime_type: string) => fileName({ ...png, mime_type });
+		for (const mime of [
+			'application/hta',
+			'image/svg+xml',
+			'text/html',
+			'application/x-msdownload',
+			'text/csv',
+			'application/octet-stream',
+			'constructor/x',
+			'toString'
+		]) {
+			expect(named(mime), mime).toBe('aaaaaaaaaaaa');
+		}
+		expect(named('image/jpeg')).toBe('aaaaaaaaaaaa.jpg');
+		expect(named('image/PNG; charset=binary')).toBe('aaaaaaaaaaaa.png');
+		expect(named('application/pdf')).toBe('aaaaaaaaaaaa.pdf');
+		expect(named('audio/mpeg')).toBe('aaaaaaaaaaaa.mp3');
 	});
 });
