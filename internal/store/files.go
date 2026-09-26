@@ -48,10 +48,7 @@ func secureFiles(path string) error {
 	tightenDir(dir, filepath.Base(path))
 
 	if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
-		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, dataFileMode)
-		if err == nil {
-			f.Close()
-		} else if !errors.Is(err, fs.ErrExist) {
+		if err := createOwnerOnly(path); err != nil && !errors.Is(err, fs.ErrExist) {
 			logger().Warn("could not create the database file owner-only; SQLite will create it", "path", path, "err", err)
 		}
 	}
@@ -93,7 +90,7 @@ func tightenDir(dir, db string) {
 		return
 	}
 	for _, entry := range entries {
-		if !databaseFile(db, entry) {
+		if !databaseFile(db, entry) && !systemEntry(entry.Name()) {
 			logger().Warn("the data directory is open to other users and holds more than the database, so its mode is left as it is; "+
 				"give the database a directory of its own, or chmod 700 this one",
 				"dir", dir, "mode", info.Mode().Perm().String(), "other", entry.Name())
@@ -113,6 +110,14 @@ func databaseFile(db string, entry fs.DirEntry) bool {
 	default:
 		return isBackup(db, entry)
 	}
+}
+
+// systemEntry says whether a name is one the operating system puts in a
+// directory on its own — a filesystem's `lost+found` at the root of a
+// dedicated volume, the Finder's `.DS_Store` and `._` files — so that a
+// directory holding only those and the database is still the database's own.
+func systemEntry(name string) bool {
+	return name == "lost+found" || name == ".DS_Store" || strings.HasPrefix(name, "._")
 }
 
 // isBackup says whether a directory entry is a pre-migration backup of the
@@ -145,11 +150,12 @@ func backupFiles(path string) []string {
 	return backups
 }
 
-// createBackupFile makes the empty file `VACUUM INTO` writes the backup into,
-// at 0600. SQLite accepts an empty existing file as the target and keeps its
-// mode; left to create the file itself it would use the umask's 0644.
-func createBackupFile(dst string) error {
-	f, err := os.OpenFile(dst, os.O_CREATE|os.O_EXCL|os.O_WRONLY, dataFileMode)
+// createOwnerOnly creates an empty file at 0600 for SQLite to write into — the
+// database before its first open, a backup before its `VACUUM INTO`. SQLite
+// accepts an empty existing file and keeps its mode; left to create the file
+// itself it would use the umask's 0644. A file already there is an error.
+func createOwnerOnly(path string) error {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, dataFileMode)
 	if err != nil {
 		return err
 	}

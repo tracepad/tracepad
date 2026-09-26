@@ -215,9 +215,13 @@ func (sw *Sweeper) Pass(ctx context.Context) error {
 	sw.mu.Lock()
 	sw.running, sw.runStart = true, start
 	sw.mu.Unlock()
+	// Whatever way the pass ends — finished, failed, cancelled — the ticker
+	// fires again an interval after it began, and that is the pass a
+	// compaction requested now is expected by (spec 044 #19).
 	defer func() {
 		sw.mu.Lock()
 		sw.running = false
+		sw.nextRun = start.Add(sw.interval)
 		sw.mu.Unlock()
 	}()
 	projects, err := sw.store.ListProjects(true)
@@ -311,7 +315,6 @@ func (sw *Sweeper) Pass(ctx context.Context) error {
 
 	sw.mu.Lock()
 	sw.lastRun = start
-	sw.nextRun = start.Add(sw.interval)
 	sw.mu.Unlock()
 
 	return errors.Join(failures...)

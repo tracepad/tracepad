@@ -183,3 +183,41 @@ func TestADirectoryHoldingOtherFilesKeepsItsMode(t *testing.T) {
 		t.Errorf("want a WARN naming %s and notes.txt, got:\n%s", dir, logged.String())
 	}
 }
+
+// What the operating system puts in a directory on its own — `lost+found` at
+// the root of a dedicated volume, the Finder's files — does not make it a
+// shared one: it is tightened, and nothing is warned about (#19).
+func TestAVolumeRootIsStillTheDatabasesOwn(t *testing.T) {
+	underUmask022(t)
+	dir := filepath.Join(t.TempDir(), "volume")
+	for _, d := range []string{dir, filepath.Join(dir, "lost+found")} {
+		if err := os.Mkdir(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Chmod(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{".DS_Store", "._tracepad.db"} {
+		if err := os.WriteFile(filepath.Join(dir, name), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var logged bytes.Buffer
+	oldLogger := logger
+	logger = func() *slog.Logger { return slog.New(slog.NewTextHandler(&logged, nil)) }
+	t.Cleanup(func() { logger = oldLogger })
+
+	s, err := Open(filepath.Join(dir, "tracepad.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if mode := modeOf(t, dir); mode != 0o700 {
+		t.Errorf("the volume's root is %v, want 0700", mode)
+	}
+	if strings.Contains(logged.String(), "level=WARN") {
+		t.Errorf("want no warning, got:\n%s", logged.String())
+	}
+}

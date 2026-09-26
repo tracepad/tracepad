@@ -68,10 +68,14 @@ func requestCompaction(tx *sql.Tx, now int64) (int64, error) {
 	if now == 0 {
 		now = time.Now().UnixNano()
 	}
+	// An upsert, not an update of the row the migration made: a store whose
+	// row went missing — a hand edit, a restore — must still let a deletion
+	// commit, and gets its row back from the first one.
 	var stamp int64
 	if err := tx.QueryRow(
-		`UPDATE compaction SET requested_at = MAX(COALESCE(requested_at, 0) + 1, ?)
-		  WHERE id = 1 RETURNING requested_at`, now).Scan(&stamp); err != nil {
+		`INSERT INTO compaction (id, requested_at) VALUES (1, ?1)
+		 ON CONFLICT (id) DO UPDATE SET requested_at = MAX(COALESCE(requested_at, 0) + 1, ?1)
+		 RETURNING requested_at`, now).Scan(&stamp); err != nil {
 		return 0, fmt.Errorf("request a compaction: %w", err)
 	}
 	return stamp, nil

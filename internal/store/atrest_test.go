@@ -395,6 +395,43 @@ func TestACompactionIsExpectedByTheNextPassNotThePast(t *testing.T) {
 	}
 }
 
+// A pass that ends early — cancelled here, failed elsewhere — still moves the
+// next run on, so an answer given after it names the pass the ticker will run,
+// not the moment of the answer (#19).
+func TestAPassThatEndsEarlyStillMovesTheNextRun(t *testing.T) {
+	f := newSweepFixture(t)
+	f.arrive(t, f.project.ID, strings.Repeat("ab", 16), daysAgo(400))
+	f.sweeper.mu.Lock()
+	f.sweeper.nextRun = sweepNow.Add(-time.Hour) // the pass before this one's
+	f.sweeper.mu.Unlock()
+	cancelled, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := f.sweeper.Pass(cancelled); err == nil {
+		t.Fatal("control: a pass on a cancelled context finished")
+	}
+	if got, want := f.sweeper.ExpectedBy(), sweepNow.Add(f.sweeper.interval).UnixNano(); got != want {
+		t.Errorf("ExpectedBy = %v, want the next tick at %v", time.Unix(0, got).UTC(), time.Unix(0, want).UTC())
+	}
+}
+
+// A store whose compaction row went missing still lets a deletion commit, and
+// the deletion's request puts the row back (#19).
+func TestADeletionWithoutTheCompactionRowStillCommits(t *testing.T) {
+	f := newSweepFixture(t)
+	id := strings.Repeat("cd", 16)
+	f.arrive(t, f.project.ID, id, daysAgo(1))
+	if _, err := f.store.db.Exec(`DELETE FROM compaction`); err != nil {
+		t.Fatal(err)
+	}
+	job := &TraceDelete{ProjectID: f.project.ID, IDs: []string{id}, Confirm: id}
+	if err := f.writer.Submit(t.Context(), job); err != nil {
+		t.Fatalf("the deletion failed without the row: %v", err)
+	}
+	if state, _ := f.store.Compaction(); job.CompactionRequested == 0 || state.RequestedAt != job.CompactionRequested {
+		t.Errorf("CompactionRequested = %d, state = %+v; want the row back with the request", job.CompactionRequested, state)
+	}
+}
+
 // A backup that failed to write leaves no file: an empty one would be the
 // newest, the one the recovery hint names and an operator swaps in.
 func TestAFailedBackupLeavesNoFile(t *testing.T) {

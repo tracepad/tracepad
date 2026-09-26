@@ -256,7 +256,7 @@ func (s *Store) backupBefore(firstPending string) (string, error) {
 	// Created empty at 0600 first: VACUUM INTO writes into an empty file it
 	// finds and keeps its mode, and the copy holds everything the database
 	// does (spec 044 #12).
-	if err := createBackupFile(dst); err != nil {
+	if err := createOwnerOnly(dst); err != nil {
 		return "", fmt.Errorf("backup before migration: %w", err)
 	}
 	// VACUUM INTO instead of a file copy (spec 001 #11): the snapshot is a

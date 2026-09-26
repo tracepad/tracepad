@@ -432,7 +432,12 @@ This lands well inside the one-month response window Article 12(3) allows.
    Deleting traces and a project's purge ask for one too; the retention sweep
    zeroes what it frees but does not, since rewriting the index every hour
    would cost more than it protects, and the words of swept traces leave the
-   index with its ordinary merges.
+   index with its ordinary merges. The cost is per pass, not per deletion:
+   an explicit deletion, however small — one trace — has the next pass
+   compact the whole store, and on a large one that is a rewrite of the
+   search index. Deletions made within one interval share one compaction, so
+   a store where something is deleted every hour rewrites its index once an
+   hour.
 2. **The pre-migration backup.** Before every start that applies a migration
    the server writes `tracepad.db.pre-<migration>.bak` beside the database — a
    complete copy, readable by its owner only. Once that upgrade's migrations

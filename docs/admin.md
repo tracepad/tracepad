@@ -354,7 +354,9 @@ with `traces`, `observations`, `scores` and `annotation_items`, `oldest`,
 confirmed alike. With `?confirm=<id>` it deletes and answers
 `{"dry_run": false, "deleted": {…}, "id", "compaction"}`; `deleted` counts the
 payloads too, and `compaction` says when the sweeper pass that overwrites what
-the deletion unlinked is due.
+the deletion unlinked is due. That pass compacts the whole store, however
+little was deleted — on a large one, a rewrite of the search index; deletions
+within one interval share it ([retention.md](retention.md#what-this-means-for-a-data-subject-request)).
 
 **By filter.** The filters are the trace listing's own — the same names, the
 same validation, `400` on an unknown one — so "delete what I am looking at"
