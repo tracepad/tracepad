@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -313,19 +312,10 @@ func randomHex(nbytes int) (string, error) {
 
 // latestBackup names the newest .bak next to the DB for error messages.
 func latestBackup(dbPath string) string {
-	matches, _ := filepath.Glob(dbPath + ".pre-*.bak")
-	if len(matches) == 0 {
-		return "none"
+	if newest := newestBackup(dbPath); newest != nil {
+		return newest.Path
 	}
-	newest := matches[0]
-	for _, m := range matches[1:] {
-		ni, _ := os.Stat(newest)
-		mi, _ := os.Stat(m)
-		if ni != nil && mi != nil && mi.ModTime().After(ni.ModTime()) {
-			newest = m
-		}
-	}
-	return newest
+	return "none"
 }
 
 var logger = slog.Default

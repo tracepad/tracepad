@@ -827,6 +827,7 @@ func (s *Server) handleEraseUserData(w http.ResponseWriter, r *http.Request) {
 	// question about the retention window, and a request is not long
 	// enough to move it.
 	var erased store.DeleteCounts
+	var compaction int64
 	now := time.Now().UnixNano()
 	for {
 		chunk := &store.UserDataErase{
@@ -847,6 +848,7 @@ func (s *Server) handleEraseUserData(w http.ResponseWriter, r *http.Request) {
 		erased.AnnotationItems += chunk.Counts.AnnotationItems
 		erased.Media += chunk.Counts.Media
 		erased.MediaBytes += chunk.Counts.MediaBytes
+		compaction = max(compaction, chunk.CompactionRequested)
 		if !chunk.More {
 			break
 		}
@@ -856,7 +858,7 @@ func (s *Server) handleEraseUserData(w http.ResponseWriter, r *http.Request) {
 		put("dry_run", false).
 		put("deleted", deletedCounts(erased)).
 		put("user_id", userID).
-		put("compaction", s.compactionAnswer())
+		put("compaction", s.compactionAnswer(compaction))
 	// The one copy of the database the erasure does not rewrite, and the
 	// day it goes (spec 044 #12).
 	if backup := s.backupAnswer(); backup != nil {

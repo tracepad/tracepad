@@ -50,8 +50,8 @@ func TestAnErasureAnswersWithItsCompactionAndTheBackup(t *testing.T) {
 	path := "/api/v1/projects/" + h.project.ID + "/users/erase-me/data"
 
 	type backupBlock struct {
-		CreatedAt time.Time `json:"created_at"`
-		RemovedAt time.Time `json:"removed_at"`
+		CreatedAt   time.Time `json:"created_at"`
+		RemoveAfter time.Time `json:"remove_after"`
 	}
 	rec := h.call(t, "DELETE", path, nil)
 	expectStatus(t, rec, http.StatusOK)
@@ -59,7 +59,7 @@ func TestAnErasureAnswersWithItsCompactionAndTheBackup(t *testing.T) {
 		Backup *backupBlock `json:"pre_migration_backup"`
 	}](t, rec)
 	if preview.Backup == nil || !preview.Backup.CreatedAt.Equal(written) ||
-		!preview.Backup.RemovedAt.Equal(written.Add(store.BackupLifetime)) {
+		!preview.Backup.RemoveAfter.Equal(written.Add(store.BackupLifetime)) {
 		t.Errorf("the preview's backup = %+v, want written %v and removed a week later", preview.Backup, written)
 	}
 
@@ -76,7 +76,7 @@ func TestAnErasureAnswersWithItsCompactionAndTheBackup(t *testing.T) {
 	if answer.Deleted["traces"] != 1 {
 		t.Fatalf("deleted = %v, want the one trace", answer.Deleted)
 	}
-	next := time.Unix(0, h.sweeper.Status("").NextRun)
+	next := time.Unix(0, h.sweeper.ExpectedBy())
 	if answer.Compaction.RequestedAt == nil || answer.Compaction.ExpectedBy == nil ||
 		!answer.Compaction.ExpectedBy.Equal(next) {
 		t.Errorf("compaction = %+v, want a request expected by the next pass at %v", answer.Compaction, next)
@@ -123,5 +123,20 @@ func TestATraceDeletionAnswersWithItsCompaction(t *testing.T) {
 	expectStatus(t, rec, http.StatusOK)
 	if body := decodeJSON[map[string]any](t, rec); body["pre_migration_backup"] != nil {
 		t.Errorf("pre_migration_backup = %v with no backup on disk, want the field absent", body["pre_migration_backup"])
+	}
+
+	// A confirmed erasure that found nothing asked for nothing, and says so —
+	// although a request is pending (this deletion's above, and the
+	// migration's), it is not this answer's to report.
+	rec = h.call(t, "DELETE", "/api/v1/projects/"+h.project.ID+"/users/nobody/data?confirm=nobody", nil)
+	expectStatus(t, rec, http.StatusOK)
+	empty := decodeJSON[struct {
+		Compaction struct {
+			RequestedAt *time.Time `json:"requested_at"`
+			ExpectedBy  *time.Time `json:"expected_by"`
+		} `json:"compaction"`
+	}](t, rec)
+	if empty.Compaction.RequestedAt != nil || empty.Compaction.ExpectedBy != nil {
+		t.Errorf("an erasure of nothing answered compaction = %+v, want both null", empty.Compaction)
 	}
 }

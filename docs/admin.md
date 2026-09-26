@@ -264,16 +264,20 @@ will not reach:
   "deleted": {"traces": 12, "observations": 240, "scores": 30, "payloads": 480, …},
   "user_id": "user-4711",
   "compaction": {"requested_at": "2026-09-26T10:02:11Z", "expected_by": "2026-09-26T11:00:00Z"},
-  "pre_migration_backup": {"created_at": "2026-09-24T08:00:00Z", "removed_at": "2026-10-01T08:00:00Z"}
+  "pre_migration_backup": {"created_at": "2026-09-24T08:00:00Z", "remove_after": "2026-10-01T08:00:00Z"}
 }
 ```
 
 - `compaction` — the freed space is zeroed as the rows go; the search index
-  and the write-ahead log are rewritten by the next sweeper pass, which
-  `expected_by` names. `GET /api/v1/system` says when it finished.
+  and the write-ahead log are rewritten by a sweeper pass, and `expected_by`
+  is when that pass is due: the next one, or the one after a pass already
+  running. `GET /api/v1/system` says when it finished. Both fields are `null`
+  when the erasure found nothing to delete and so asked for nothing.
 - `pre_migration_backup` — present while the server keeps a copy of the
   database from before its last upgrade: the one copy an erasure does not
-  rewrite, and the day the sweeper removes it. The dry run names it too.
+  rewrite. `remove_after` is seven days after it was written; the first
+  sweeper pass after that removes it — not before, and not while the server
+  is down. The dry run names it too.
 
 **What it does not take.** The raw OTLP bodies are not touched — a batch holds
 many traces — so the user's spans stay readable through `GET /api/v1/raw/{id}`

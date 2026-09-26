@@ -29,43 +29,46 @@ const ftsMergePages = 500
 // before it gives up for this pass. It holds the one writer while it waits.
 const checkpointBusyWait = 250 * time.Millisecond
 
-// maxCompactionSteps bounds each phase of one pass, so that a compaction that
-// somehow never finishes a phase cannot hold the pass for ever; the request
-// stays pending and the next pass continues.
-const maxCompactionSteps = 100_000
+// maxDrainSteps bounds the free-page drain of one pass, a backstop behind the
+// rule that stops it when a step frees nothing.
+const maxDrainSteps = 10_000
 
 // CompactionState is what `GET /api/v1/system` reports: the latest pending
 // request and the last completed compaction, Unix nanoseconds, zero for none.
+// PreparedFor is the request whose merge and drain are done, so that only the
+// checkpoint is left of it.
 type CompactionState struct {
 	RequestedAt int64
 	CompletedAt int64
+	PreparedFor int64
 }
 
 // Compaction reads the deployment's compaction state.
 func (s *Store) Compaction() (CompactionState, error) {
-	var requested, completed sql.NullInt64
-	err := s.db.QueryRow(`SELECT requested_at, completed_at FROM compaction WHERE id = 1`).
-		Scan(&requested, &completed)
+	var requested, completed, prepared sql.NullInt64
+	err := s.db.QueryRow(`SELECT requested_at, completed_at, prepared_for FROM compaction WHERE id = 1`).
+		Scan(&requested, &completed, &prepared)
 	if errors.Is(err, sql.ErrNoRows) {
 		return CompactionState{}, nil
 	}
 	if err != nil {
 		return CompactionState{}, fmt.Errorf("read compaction state: %w", err)
 	}
-	return CompactionState{RequestedAt: requested.Int64, CompletedAt: completed.Int64}, nil
+	return CompactionState{RequestedAt: requested.Int64, CompletedAt: completed.Int64, PreparedFor: prepared.Int64}, nil
 }
 
 // requestCompaction records that a deletion wants the next pass to compact,
-// inside the deletion's own transaction. The stamp only moves forward: a
-// compaction clears the request it started from and no later one, which is
-// how a deletion committed while a compaction runs is not forgotten.
-func requestCompaction(tx *sql.Tx) error {
+// inside the deletion's own transaction, and returns the stamp it wrote. The
+// stored stamp only moves forward: a compaction clears the request it started
+// from and no later one, which is how a deletion committed while a compaction
+// runs is not forgotten.
+func requestCompaction(tx *sql.Tx) (int64, error) {
+	now := time.Now().UnixNano()
 	if _, err := tx.Exec(
-		`UPDATE compaction SET requested_at = MAX(COALESCE(requested_at, 0), ?) WHERE id = 1`,
-		time.Now().UnixNano()); err != nil {
-		return fmt.Errorf("request a compaction: %w", err)
+		`UPDATE compaction SET requested_at = MAX(COALESCE(requested_at, 0), ?) WHERE id = 1`, now); err != nil {
+		return 0, fmt.Errorf("request a compaction: %w", err)
 	}
-	return nil
+	return now, nil
 }
 
 // ftsMerge is one bounded step of merging the search index. FTS5 says whether
@@ -108,13 +111,22 @@ func (c *walCheckpoint) apply(*sql.Tx) error {
 	return errors.New("a checkpoint runs alone, never inside a transaction")
 }
 
-func (c *walCheckpoint) runAlone(ctx context.Context, conn *sql.Conn) error {
+func (c *walCheckpoint) runAlone(ctx context.Context, conn *sql.Conn) (err error) {
 	c.Busy = false
+	// The writer's own wait, whatever the DSN set it to, is put back after:
+	// every commit after this one runs on this connection.
+	var wait int64
+	if err := conn.QueryRowContext(ctx, `PRAGMA busy_timeout`).Scan(&wait); err != nil {
+		return fmt.Errorf("checkpoint: read busy wait: %w", err)
+	}
 	if _, err := conn.ExecContext(ctx, fmt.Sprintf(`PRAGMA busy_timeout = %d`, c.BusyWait.Milliseconds())); err != nil {
 		return fmt.Errorf("checkpoint: set busy wait: %w", err)
 	}
-	// Back to the DSN's wait for every commit after this one.
-	defer conn.ExecContext(ctx, `PRAGMA busy_timeout = 5000`)
+	defer func() {
+		if _, restore := conn.ExecContext(ctx, fmt.Sprintf(`PRAGMA busy_timeout = %d`, wait)); restore != nil {
+			err = errors.Join(err, fmt.Errorf("checkpoint: restore busy wait: %w", restore))
+		}
+	}()
 	var busy, logFrames, checkpointed int64
 	if err := conn.QueryRowContext(ctx, `PRAGMA wal_checkpoint(TRUNCATE)`).
 		Scan(&busy, &logFrames, &checkpointed); err != nil {
@@ -122,6 +134,16 @@ func (c *walCheckpoint) runAlone(ctx context.Context, conn *sql.Conn) error {
 	}
 	c.Busy = busy != 0
 	return nil
+}
+
+// compactionPrepared records that a request's merge and drain are done, so a
+// pass that finds only its checkpoint left — a reader held the log last time —
+// runs that alone rather than rewriting the index again.
+type compactionPrepared struct{ For int64 }
+
+func (p *compactionPrepared) apply(tx *sql.Tx) error {
+	_, err := tx.Exec(`UPDATE compaction SET prepared_for = ? WHERE id = 1 AND requested_at = ?`, p.For, p.For)
+	return err
 }
 
 // compactionDone stamps a finished compaction and clears the request it
@@ -135,52 +157,114 @@ type compactionDone struct {
 func (d *compactionDone) apply(tx *sql.Tx) error {
 	_, err := tx.Exec(`UPDATE compaction
 	    SET completed_at = ?,
-	        requested_at = CASE WHEN requested_at = ? THEN NULL ELSE requested_at END
+	        requested_at = CASE WHEN requested_at = ? THEN NULL ELSE requested_at END,
+	        prepared_for = NULL
 	  WHERE id = 1`, d.At, d.Started)
 	return err
 }
 
-// compact runs a pending compaction: the index merged to what a merge can
-// make of it, the freelist drained, the log checkpointed and truncated. It
-// reports whether it completed; a checkpoint that stays busy leaves the
-// request for the next pass.
-func (sw *Sweeper) compact(ctx context.Context) (bool, error) {
+// compact runs a pending compaction: the index merged, the freelist drained,
+// the log checkpointed and truncated. It reports whether it completed and
+// whether it drained the freelist; a checkpoint that stays busy leaves the
+// request for the next pass, which then runs the checkpoint alone.
+func (sw *Sweeper) compact(ctx context.Context) (done, drained bool, err error) {
 	state, err := sw.store.Compaction()
 	if err != nil || state.RequestedAt == 0 {
-		return false, err
+		return false, false, err
 	}
-	for range maxCompactionSteps {
-		merge := &ftsMerge{Pages: ftsMergePages}
-		if err := sw.writer.Submit(ctx, merge); err != nil {
-			return false, err
+	if state.PreparedFor != state.RequestedAt {
+		if err := sw.mergeIndex(ctx); err != nil {
+			return false, false, err
 		}
-		if !merge.Worked {
-			break
+		if err := sw.drainFreelist(ctx, true); err != nil {
+			return false, false, err
 		}
-	}
-	for range maxCompactionSteps {
-		var free int64
-		if err := sw.store.db.QueryRowContext(ctx, `PRAGMA freelist_count`).Scan(&free); err != nil {
-			return false, fmt.Errorf("read the freelist: %w", err)
-		}
-		if free == 0 {
-			break
-		}
-		if err := sw.writer.Submit(ctx, &incrementalVacuum{Pages: vacuumPages}); err != nil {
-			return false, err
+		drained = true
+		if err := sw.writer.Submit(ctx, &compactionPrepared{For: state.RequestedAt}); err != nil {
+			return false, drained, err
 		}
 	}
 	checkpoint := &walCheckpoint{BusyWait: checkpointBusyWait}
 	if err := sw.writer.Submit(ctx, checkpoint); err != nil {
-		return false, err
+		return false, drained, err
 	}
 	if checkpoint.Busy {
 		logger().Info("compaction waits for the next pass: a reader held the write-ahead log")
-		return false, nil
+		return false, drained, nil
 	}
-	done := &compactionDone{Started: state.RequestedAt, At: sw.now().UnixNano()}
-	if err := sw.writer.Submit(ctx, done); err != nil {
-		return false, err
+	if err := sw.writer.Submit(ctx, &compactionDone{Started: state.RequestedAt, At: sw.now().UnixNano()}); err != nil {
+		return false, drained, err
 	}
-	return true, nil
+	return true, drained, nil
+}
+
+// mergeIndex merges the search index in bounded steps until a merge finds
+// nothing to do — or until it has written twice the index's size as it stood
+// when the phase began. Under live ingest every commit adds a segment, so
+// "nothing to do" may never come; the budget is what makes the phase end
+// once the segments that held the deleted text have been rewritten, rather
+// than rewriting the whole index over and over.
+func (sw *Sweeper) mergeIndex(ctx context.Context) error {
+	var pages int
+	if err := sw.store.db.QueryRowContext(ctx, `SELECT count(*) FROM search_fts_data`).Scan(&pages); err != nil {
+		return fmt.Errorf("measure the search index: %w", err)
+	}
+	budget := 2*pages + ftsMergePages
+	for written := 0; written < budget; written += ftsMergePages {
+		merge := &ftsMerge{Pages: ftsMergePages}
+		if err := sw.writer.Submit(ctx, merge); err != nil {
+			return err
+		}
+		if sw.afterMergeStep != nil {
+			sw.afterMergeStep()
+		}
+		if !merge.Worked {
+			return nil
+		}
+	}
+	return nil
+}
+
+// drainFreelist hands free pages back to the filesystem: until none are left
+// when untilEmpty, one bounded job otherwise — the retention sweep's own
+// reclaim. It stops when a job frees nothing, and does nothing on a file that
+// is not in incremental auto-vacuum mode, where the pragma is a no-op and a
+// loop waiting for the freelist to empty would never end.
+func (sw *Sweeper) drainFreelist(ctx context.Context, untilEmpty bool) error {
+	var mode int
+	if err := sw.store.db.QueryRowContext(ctx, `PRAGMA auto_vacuum`).Scan(&mode); err != nil {
+		return fmt.Errorf("read auto_vacuum mode: %w", err)
+	}
+	if mode != incrementalVacuumMode {
+		return nil
+	}
+	freelist := func() (int64, error) {
+		var free int64
+		err := sw.store.db.QueryRowContext(ctx, `PRAGMA freelist_count`).Scan(&free)
+		return free, err
+	}
+	free, err := freelist()
+	if err != nil {
+		return fmt.Errorf("read the freelist: %w", err)
+	}
+	for range maxDrainSteps {
+		if free == 0 {
+			return nil
+		}
+		if err := sw.writer.Submit(ctx, &incrementalVacuum{Pages: vacuumPages}); err != nil {
+			return err
+		}
+		if !untilEmpty {
+			return nil
+		}
+		left, err := freelist()
+		if err != nil {
+			return fmt.Errorf("read the freelist: %w", err)
+		}
+		if left >= free {
+			return nil
+		}
+		free = left
+	}
+	return nil
 }

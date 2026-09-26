@@ -690,8 +690,8 @@ func (r *run) usersRemoveData(ctx context.Context, rest []string) error {
 			ExpectedBy *string `json:"expected_by"`
 		} `json:"compaction"`
 		Backup *struct {
-			CreatedAt string `json:"created_at"`
-			RemovedAt string `json:"removed_at"`
+			CreatedAt   string `json:"created_at"`
+			RemoveAfter string `json:"remove_after"`
 		} `json:"pre_migration_backup"`
 	}](body)
 	if err != nil {
@@ -715,8 +715,8 @@ func (r *run) usersRemoveData(ctx context.Context, rest []string) error {
 			shortTime(*result.Compaction.ExpectedBy))
 	}
 	if result.Backup != nil {
-		fmt.Fprintf(r.opt.Stdout, "the pre-migration backup of %s is not rewritten; it is removed %s\n",
-			shortTime(result.Backup.CreatedAt), shortTime(result.Backup.RemovedAt))
+		fmt.Fprintf(r.opt.Stdout, "the pre-migration backup of %s is not rewritten; the first sweep after %s removes it\n",
+			shortTime(result.Backup.CreatedAt), shortTime(result.Backup.RemoveAfter))
 	}
 	return nil
 }

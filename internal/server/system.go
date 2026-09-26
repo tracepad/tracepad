@@ -352,29 +352,27 @@ func compactionBlock(state store.CompactionState) object {
 }
 
 // compactionAnswer is what the confirmed answer of an explicit deletion says
-// about the compaction it asked for (spec 044 #11): when the request stands
-// and the pass that will run it. Both null when nothing is pending — a
-// deletion that found nothing asked for nothing.
-func (s *Server) compactionAnswer() object {
+// about the compaction *it* asked for (spec 044 #11): when it asked, and the
+// pass that will have run it. Both null when this request deleted nothing and
+// so asked for nothing — whatever another request left pending is not its
+// answer to give.
+func (s *Server) compactionAnswer(requested int64) object {
 	body := object{}.put("requested_at", nil).put("expected_by", nil)
-	state, err := s.store.Compaction()
-	if err != nil {
-		slog.Error("read compaction state failed", "err", err)
+	if requested == 0 {
 		return body
 	}
-	if state.RequestedAt == 0 {
-		return body
-	}
-	body = body.put("requested_at", formatTime(state.RequestedAt))
+	body = body.put("requested_at", formatTime(requested))
 	if s.sweeper != nil {
-		body = body.put("expected_by", formatTime(s.sweeper.Status("").NextRun))
+		body = body.put("expected_by", formatTime(s.sweeper.ExpectedBy()))
 	}
 	return body
 }
 
 // backupAnswer names the newest pre-migration backup — the one copy of the
-// database an erasure does not reach — with the date the sweeper removes it
-// (spec 044 #12). Nil when there is none, and the field is then absent.
+// database an erasure does not reach — with the moment after which the
+// sweeper's next pass removes it (spec 044 #12). "After", not "at": a pass
+// runs on its interval, and not at all while the server is down. Nil when
+// there is none, and the field is then absent.
 func (s *Server) backupAnswer() any {
 	backup := s.store.PreMigrationBackup()
 	if backup == nil {
@@ -382,7 +380,7 @@ func (s *Server) backupAnswer() any {
 	}
 	return object{}.
 		put("created_at", formatTime(backup.CreatedAt)).
-		put("removed_at", formatTime(backup.RemovedAt))
+		put("remove_after", formatTime(backup.RemoveAfter))
 }
 
 func timeOrNull(ns int64) any {

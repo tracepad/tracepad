@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"embed"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -231,6 +232,12 @@ func (s *Store) ensureIncrementalVacuum() error {
 	return nil
 }
 
+// vacuumInto writes the snapshot; a seam for the test that makes it fail.
+var vacuumInto = func(db *sql.DB, dst string) error {
+	_, err := db.Exec(`VACUUM INTO ?`, dst)
+	return err
+}
+
 // backupBefore snapshots the database before the first pending migration and
 // returns the backup's path. A fresh database (no file before Open) is not
 // backed up, and the path is empty.
@@ -257,7 +264,13 @@ func (s *Store) backupBefore(firstPending string) (string, error) {
 	// WAL are included (a plain copy of the main file silently loses them
 	// after an unclean shutdown), and it streams without loading the
 	// database into memory.
-	if _, err := s.db.Exec(`VACUUM INTO ?`, dst); err != nil {
+	if err := vacuumInto(s.db, dst); err != nil {
+		// The file created above is empty or half-written, and left
+		// behind it would be the newest backup — the one the recovery
+		// hint names, and the one an operator swaps in.
+		if removeErr := os.Remove(dst); removeErr != nil && !os.IsNotExist(removeErr) {
+			err = errors.Join(err, removeErr)
+		}
 		return "", fmt.Errorf("backup before migration: %w", err)
 	}
 	logger().Info("database backed up before migration", "backup", dst)

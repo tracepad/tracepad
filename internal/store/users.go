@@ -867,18 +867,22 @@ func RecomputeUserSummaries(projectID string, userIDs []string) WriteJob {
 // the user, so they are deleted outright rather than re-rolled — a re-roll
 // would recompute them to nothing from raw rows that are gone, and for a
 // frozen hour (spec 013 #11) could not recompute them at all.
-func deleteUserRollup(tx *sql.Tx, projectID, userID string) error {
-	if _, err := tx.Exec(
+func deleteUserRollup(tx *sql.Tx, projectID, userID string) (int64, error) {
+	hours, err := tx.Exec(
 		`DELETE FROM users_hourly WHERE project_id = ? AND user_id = ?`,
-		projectID, userID); err != nil {
-		return fmt.Errorf("erase the user's rolled hours: %w", err)
+		projectID, userID)
+	if err != nil {
+		return 0, fmt.Errorf("erase the user's rolled hours: %w", err)
 	}
-	if _, err := tx.Exec(
+	summary, err := tx.Exec(
 		`DELETE FROM users WHERE project_id = ? AND user_id = ?`,
-		projectID, userID); err != nil {
-		return fmt.Errorf("erase the user's summary: %w", err)
+		projectID, userID)
+	if err != nil {
+		return 0, fmt.Errorf("erase the user's summary: %w", err)
 	}
-	return nil
+	removedHours, _ := hours.RowsAffected()
+	removedSummary, _ := summary.RowsAffected()
+	return removedHours + removedSummary, nil
 }
 
 // usersRollupSweep deletes rolled per-user rows older than the project's stats

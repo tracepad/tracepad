@@ -3174,10 +3174,10 @@
       },
       "Compaction": {
         "type": "object",
-        "description": "The compaction an explicit deletion asked for: the next sweeper pass overwrites what the deletion unlinked. Both null when nothing is pending.",
+        "description": "The compaction this deletion asked for: the sweeper pass that overwrites what it unlinked. Both null when it deleted nothing and so asked for nothing.",
         "properties": {
           "requested_at": {"type": ["string", "null"], "format": "date-time"},
-          "expected_by": {"type": ["string", "null"], "format": "date-time", "description": "The sweeper's next pass"}
+          "expected_by": {"type": ["string", "null"], "format": "date-time", "description": "When the pass that runs it is due: the next one, or the one after a pass already under way; never earlier than the answer"}
         },
         "required": ["requested_at", "expected_by"]
       },
@@ -3186,9 +3186,9 @@
         "description": "The newest copy of the database the server wrote before an upgrade, which an erasure does not rewrite, and when the sweeper removes it",
         "properties": {
           "created_at": {"type": "string", "format": "date-time"},
-          "removed_at": {"type": "string", "format": "date-time"}
+          "remove_after": {"type": "string", "format": "date-time", "description": "Seven days after `created_at`; the first sweeper pass after it removes the file — not before, and not while the server is down"}
         },
-        "required": ["created_at", "removed_at"]
+        "required": ["created_at", "remove_after"]
       },
       "Deletion": {
         "type": "object",

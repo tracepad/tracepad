@@ -6,7 +6,11 @@
 CREATE TABLE compaction (
     id           INTEGER PRIMARY KEY CHECK (id = 1),
     requested_at INTEGER,   -- Unix ns of the latest pending request; NULL when none is
-    completed_at INTEGER    -- Unix ns of the last completed compaction
+    completed_at INTEGER,   -- Unix ns of the last completed compaction
+    -- The request whose index merge and free-page drain are done, when only
+    -- its checkpoint is left (a reader held the log): the next pass runs the
+    -- checkpoint alone rather than rewriting the index again.
+    prepared_for INTEGER
 ) STRICT;
 
 -- The first pass after the upgrade compacts what deletions before it left:

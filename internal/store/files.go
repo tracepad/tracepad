@@ -115,30 +115,37 @@ func removeBackups(path, keep string) {
 }
 
 // Backup is a pre-migration backup as the erasure answer names it (spec 044
-// #12): when it was written and when the sweeper removes it.
+// #12): when it was written, and the moment after which the sweeper's next
+// pass removes it — not a promise of that moment, since a pass runs on its
+// interval and not while the server is down.
 type Backup struct {
-	Path      string
-	CreatedAt int64 // Unix ns: the file's modification time
-	RemovedAt int64 // CreatedAt plus BackupLifetime
+	Path        string
+	CreatedAt   int64 // Unix ns: the file's modification time
+	RemoveAfter int64 // CreatedAt plus BackupLifetime
 }
 
-// PreMigrationBackup is the newest backup beside the database, nil when there
-// is none.
-func (s *Store) PreMigrationBackup() *Backup {
-	files := backupFiles(s.path)
+// newestBackup is the most recently written backup beside the database at
+// path, nil when there is none. The one lookup both the erasure's answer and
+// the recovery hint of a failed start use, so they cannot name different
+// files.
+func newestBackup(path string) *Backup {
 	var newest *Backup
-	for _, file := range files {
+	for _, file := range backupFiles(path) {
 		info, err := os.Stat(file)
 		if err != nil {
 			continue
 		}
 		created := info.ModTime().UnixNano()
 		if newest == nil || created > newest.CreatedAt {
-			newest = &Backup{Path: file, CreatedAt: created, RemovedAt: created + int64(BackupLifetime)}
+			newest = &Backup{Path: file, CreatedAt: created, RemoveAfter: created + int64(BackupLifetime)}
 		}
 	}
 	return newest
 }
+
+// PreMigrationBackup is the newest backup beside the database, nil when there
+// is none.
+func (s *Store) PreMigrationBackup() *Backup { return newestBackup(s.path) }
 
 // expireBackups deletes the backups written more than BackupLifetime before
 // now, each by name in the log. It is the sweeper's; the migration runner

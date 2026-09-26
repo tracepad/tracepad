@@ -437,8 +437,9 @@ This lands well inside the one-month response window Article 12(3) allows.
    the server writes `tracepad.db.pre-<migration>.bak` beside the database — a
    complete copy, readable by its owner only. Once that upgrade's migrations
    have committed it removes the older ones, and the sweeper removes the
-   newest seven days after it was written. While one exists, the erasure's
-   dry run and answer name it and its date (`pre_migration_backup`);
+   newest at its first pass seven days or more after it was written. While
+   one exists, the erasure's dry run and answer name it and that date
+   (`pre_migration_backup.remove_after`);
    [docker.md](docker.md#upgrading-and-backing-up-first) says how to remove
    it sooner.
 3. **Copies outside the database**: your own backups, volume and filesystem

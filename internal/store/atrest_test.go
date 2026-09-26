@@ -2,8 +2,11 @@ package store
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"database/sql"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -195,7 +198,7 @@ func TestABusyCheckpointLeavesTheRequestPending(t *testing.T) {
 	// Something for the log to hold that the reader's snapshot predates.
 	f.arrive(t, f.project.ID, strings.Repeat("ef", 16), daysAgo(1))
 
-	done, err := f.sweeper.compact(t.Context())
+	done, _, err := f.sweeper.compact(t.Context())
 	reader.Close()
 	if err != nil {
 		t.Fatal(err)
@@ -203,11 +206,203 @@ func TestABusyCheckpointLeavesTheRequestPending(t *testing.T) {
 	if done {
 		t.Fatal("the compaction reported done while a reader held the log")
 	}
-	if state, _ := f.store.Compaction(); state.RequestedAt == 0 {
+	state, _ := f.store.Compaction()
+	if state.RequestedAt == 0 {
 		t.Fatal("the request was cleared although the checkpoint did not finish")
 	}
-	if done, err := f.sweeper.compact(t.Context()); err != nil || !done {
-		t.Fatalf("the next attempt: done = %v, err = %v", done, err)
+	if state.PreparedFor != state.RequestedAt {
+		t.Fatalf("state = %+v: the merge and drain that did finish are not recorded", state)
+	}
+
+	// The next pass runs the checkpoint alone: the index is not merged,
+	// nor the freelist drained, a second time for the same request.
+	merges := 0
+	f.sweeper.afterMergeStep = func() { merges++ }
+	done, drained, err := f.sweeper.compact(t.Context())
+	if err != nil || !done || drained || merges != 0 {
+		t.Fatalf("the next attempt: done = %v, drained = %v, merges = %d, err = %v; want only the checkpoint",
+			done, drained, merges, err)
+	}
+}
+
+// Under live ingest every commit adds a segment, so "a merge found nothing to
+// do" may never come. The phase is bounded by the index as it stood when it
+// began: it ends, and the deleted text is gone all the same.
+func TestTheIndexMergeEndsUnderLiveIngest(t *testing.T) {
+	f := newSweepFixture(t)
+	if err := f.sweeper.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	word := marker(t)
+	doomed := strings.Repeat("ab", 16)
+	if err := f.writer.Submit(t.Context(), &IngestBatch{
+		ProjectID: f.project.ID, IngestedAt: daysAgo(1),
+		Traces: []*model.Trace{{ID: doomed, Name: "chat " + word}},
+		Observations: []*model.Observation{{TraceID: doomed, ID: doomed[:16], Type: model.TypeSpan,
+			Level: model.LevelDefault, StartTime: daysAgo(1), EndTime: daysAgo(1) + 1_000_000}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.writer.Submit(t.Context(), &TraceDelete{ProjectID: f.project.ID, IDs: []string{doomed}, Confirm: doomed}); err != nil {
+		t.Fatal(err)
+	}
+
+	steps := 0
+	f.sweeper.afterMergeStep = func() {
+		steps++
+		if steps > 50 {
+			t.Fatalf("the merge is still going after %d steps under ingest", steps)
+		}
+		// A new trace, and with it a new segment, after every step.
+		id := fmt.Sprintf("%032x", 0xfeed0000+steps)
+		f.arrive(t, f.project.ID, id, daysAgo(1), func(tr *model.Trace) { tr.Name = "live " + id })
+	}
+	done, _, err := f.sweeper.compact(t.Context())
+	if err != nil || !done {
+		t.Fatalf("done = %v, err = %v", done, err)
+	}
+	if held := filesHolding(t, f.store.path, word[4:]); len(held) != 0 {
+		t.Errorf("the deleted trace's text is still in %v", held)
+	}
+}
+
+// On a file that is not in incremental auto-vacuum mode the pragma frees
+// nothing; the drain must see that and stop, not submit job after job.
+func TestTheDrainStopsWhenNothingCanBeFreed(t *testing.T) {
+	s := openFresh(t)
+	conn, err := s.db.Conn(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range []string{`PRAGMA auto_vacuum = NONE`, `VACUUM`,
+		`CREATE TABLE probe (body BLOB)`, `INSERT INTO probe VALUES (zeroblob(200000))`, `DELETE FROM probe`} {
+		if _, err := conn.ExecContext(t.Context(), statement); err != nil {
+			t.Fatalf("%s: %v", statement, err)
+		}
+	}
+	conn.Close()
+	var free int64
+	if err := s.db.QueryRow(`PRAGMA freelist_count`).Scan(&free); err != nil || free == 0 {
+		t.Fatalf("control: freelist_count = %d (%v), want free pages to drain", free, err)
+	}
+
+	writer, err := s.NewWriter(quickWrites)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writer.Close()
+	counted := &countingSubmitter{writer: writer}
+	sweeper := s.NewSweeper(counted, SweepOptions{Now: func() time.Time { return sweepNow }})
+	done, _, err := sweeper.compact(t.Context())
+	if err != nil || !done {
+		t.Fatalf("done = %v, err = %v", done, err)
+	}
+	if counted.vacuums != 0 {
+		t.Errorf("%d incremental-vacuum jobs on a file where they free nothing", counted.vacuums)
+	}
+}
+
+// countingSubmitter counts the free-page jobs a sweeper submits.
+type countingSubmitter struct {
+	writer  *Writer
+	vacuums int
+}
+
+func (c *countingSubmitter) Submit(ctx context.Context, job WriteJob) error {
+	if _, ok := job.(*incrementalVacuum); ok {
+		c.vacuums++
+	}
+	return c.writer.Submit(ctx, job)
+}
+
+// An erasure that finds only the user's per-user rows — their traces already
+// swept — deletes rows that name them, and asks for the compaction every
+// erasure that deleted something asks for (spec 044 #1).
+func TestAnErasureOfOnlyTheRollupAsksForACompaction(t *testing.T) {
+	f := newSweepFixture(t)
+	if err := f.sweeper.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.db.Exec(`INSERT INTO users
+		(project_id, user_id, traces, error_count, sessions, first_seen, last_seen)
+		VALUES (?, 'gone', 3, 0, 1, 1, 2)`, f.project.ID); err != nil {
+		t.Fatal(err)
+	}
+	erase := &UserDataErase{ProjectID: f.project.ID, UserID: "gone", Confirm: "gone", Limit: 10}
+	if err := f.writer.Submit(t.Context(), erase); err != nil {
+		t.Fatal(err)
+	}
+	state, _ := f.store.Compaction()
+	if erase.CompactionRequested == 0 || state.RequestedAt != erase.CompactionRequested {
+		t.Errorf("CompactionRequested = %d, state = %+v; want the erasure's own request pending",
+			erase.CompactionRequested, state)
+	}
+
+	// And one that finds nothing at all asks for nothing.
+	nobody := &UserDataErase{ProjectID: f.project.ID, UserID: "nobody", Confirm: "nobody", Limit: 10}
+	if err := f.writer.Submit(t.Context(), nobody); err != nil {
+		t.Fatal(err)
+	}
+	if nobody.CompactionRequested != 0 {
+		t.Errorf("an erasure that deleted nothing requested a compaction at %d", nobody.CompactionRequested)
+	}
+}
+
+// A request made while a pass is under way may be one the pass has already
+// read past, so it is due at the pass after; and never earlier than now.
+func TestACompactionIsExpectedByTheNextPassNotThePast(t *testing.T) {
+	f := newSweepFixture(t)
+	now := sweepNow
+	f.sweeper.now = func() time.Time { return now }
+	f.sweeper.mu.Lock()
+	f.sweeper.nextRun = now.Add(-time.Minute) // a late tick
+	f.sweeper.mu.Unlock()
+	if got := f.sweeper.ExpectedBy(); got != now.UnixNano() {
+		t.Errorf("with the tick late: ExpectedBy = %v, want now", time.Unix(0, got).UTC())
+	}
+
+	f.sweeper.mu.Lock()
+	f.sweeper.running, f.sweeper.runStart = true, now.Add(-time.Second)
+	f.sweeper.mu.Unlock()
+	if got, want := f.sweeper.ExpectedBy(), now.Add(-time.Second).Add(f.sweeper.interval).UnixNano(); got != want {
+		t.Errorf("during a pass: ExpectedBy = %v, want the pass after it at %v",
+			time.Unix(0, got).UTC(), time.Unix(0, want).UTC())
+	}
+}
+
+// A backup that failed to write leaves no file: an empty one would be the
+// newest, the one the recovery hint names and an operator swaps in.
+func TestAFailedBackupLeavesNoFile(t *testing.T) {
+	for _, older := range []bool{true, false} {
+		s, path := openTemp(t)
+		previous := path + ".pre-0001_init.bak"
+		if older {
+			if err := os.WriteFile(previous, []byte("an older upgrade's copy"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			at := time.Now().Add(-time.Hour)
+			os.Chtimes(previous, at, at)
+		}
+		pendingAgain(t, s, false)
+		s.Close()
+
+		failing := vacuumInto
+		vacuumInto = func(*sql.DB, string) error { return errors.New("disk full") }
+		_, err := Open(path)
+		vacuumInto = failing
+		if err == nil {
+			t.Fatal("Open succeeded although the backup failed")
+		}
+		if _, statErr := os.Stat(path + ".pre-0023_compaction.bak"); !os.IsNotExist(statErr) {
+			t.Errorf("the failed backup left its file behind: %v", statErr)
+		}
+		want := "latest backup, if any: none"
+		if older {
+			want = "latest backup, if any: " + previous
+		}
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %q, want the hint %q", err, want)
+		}
 	}
 }
 
@@ -264,7 +459,7 @@ func TestTheSweeperRemovesABackupAfterSevenDays(t *testing.T) {
 	backup := f.store.PreMigrationBackup()
 	written := sweepNow.Add(-6 * 24 * time.Hour).UnixNano()
 	if backup == nil || backup.Path != young || backup.CreatedAt != written ||
-		backup.RemovedAt != written+int64(BackupLifetime) {
+		backup.RemoveAfter != written+int64(BackupLifetime) {
 		t.Errorf("PreMigrationBackup = %+v, want %s written %d", backup, young, written)
 	}
 }

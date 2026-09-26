@@ -1988,13 +1988,13 @@ export interface components {
             /** @description User-data erasure only, and only while a backup exists */
             pre_migration_backup?: components["schemas"]["PreMigrationBackup"];
         };
-        /** @description The compaction an explicit deletion asked for: the next sweeper pass overwrites what the deletion unlinked. Both null when nothing is pending. */
+        /** @description The compaction this deletion asked for: the sweeper pass that overwrites what it unlinked. Both null when it deleted nothing and so asked for nothing. */
         Compaction: {
             /** Format: date-time */
             requested_at: string | null;
             /**
              * Format: date-time
-             * @description The sweeper's next pass
+             * @description When the pass that runs it is due: the next one, or the one after a pass already under way; never earlier than the answer
              */
             expected_by: string | null;
         };
@@ -2002,8 +2002,11 @@ export interface components {
         PreMigrationBackup: {
             /** Format: date-time */
             created_at: string;
-            /** Format: date-time */
-            removed_at: string;
+            /**
+             * Format: date-time
+             * @description Seven days after `created_at`; the first sweeper pass after it removes the file — not before, and not while the server is down
+             */
+            remove_after: string;
         };
         /** @description What a confirmed destructive request actually removed */
         Deletion: {
