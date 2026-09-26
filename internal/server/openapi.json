@@ -478,6 +478,13 @@
                   "bytes": {"type": "integer", "description": "Their decoded size"}
                 },
                 "required": ["setting", "count", "bytes"]},
+              "compaction": {"type": "object",
+                "description": "The deployment's compaction: after an erasure, a trace deletion or a project's purge, the next sweeper pass merges the search index, drains the freelist and truncates the write-ahead log, so what the deletion unlinked is overwritten rather than left in the file",
+                "properties": {
+                  "requested_at": {"type": ["string", "null"], "format": "date-time", "description": "The latest request still pending; null when none is"},
+                  "completed_at": {"type": ["string", "null"], "format": "date-time", "description": "When one last finished; null before the first"}
+                },
+                "required": ["requested_at", "completed_at"]},
               "counters": {"type": "object",
                 "description": "This project's ingest traffic since the process started",
                 "properties": {
@@ -725,7 +732,7 @@
       "get": {
         "tags": ["raw"],
         "summary": "List the raw export bodies oldest first, cursor-paginated",
-        "description": "The archive: every accepted export, kept as it arrived. This is the one listing here whose natural order is forward, because a replay has to preserve arrival order — a receiver that does not upsert by span id must see the spans in the order the world produced them. Follow with `GET /api/v1/raw/{id}` for a body; `tracepad export --otlp` is these two endpoints in a loop.",
+        "description": "The archive: every accepted export, kept as it arrived. This is the one listing here whose natural order is forward, because a replay has to preserve arrival order — a receiver that does not upsert by span id must see the spans in the order the world produced them. Follow with `GET /api/v1/raw/{id}` for a body; `tracepad export --otlp` is these two endpoints in a loop. Both are an editor's read: a project key, an editor or an owner — a viewer session is refused, because the archive is the bulk way out of a project.",
         "operationId": "listRawBatches",
         "parameters": [
           {"name": "since", "in": "query",
@@ -2478,7 +2485,7 @@
       "delete": {
         "tags": ["admin"],
         "summary": "Erase everything stored about one user",
-        "description": "Erases the queryable stores synchronously: the traces filed under the user id, their observations, payloads and scores, and the annotation-queue items pointing at those traces — counted under `annotation_items` in both the preview and the answer. Raw OTLP bodies are not touched — they are an archive expiring on the raw retention window, which docs/retention.md documents together with what that means for an erasure request. Without `confirm` it answers with the preview; the echo here is the user id.",
+        "description": "Erases the queryable stores synchronously: the traces filed under the user id, their observations, payloads and scores, and the annotation-queue items pointing at those traces — counted under `annotation_items` in both the preview and the answer. The answer's `compaction` says when the sweeper pass that overwrites what was unlinked is due, and `pre_migration_backup`, while one exists, names the backup the erasure does not rewrite and the day it goes. Raw OTLP bodies are not touched — they are an archive expiring on the raw retention window, which docs/retention.md documents together with what that means for an erasure request. Without `confirm` it answers with the preview; the echo here is the user id.",
         "operationId": "eraseUserData",
         "parameters": [
           {"$ref": "#/components/parameters/ProjectID"},
@@ -3160,16 +3167,38 @@
               },
               "required": ["id", "dataset", "traces"]}},
           "confirm": {"type": "string", "description": "Send this back as `?confirm=` to make it happen"},
-          "note": {"type": "string"}
+          "note": {"type": "string"},
+          "pre_migration_backup": {"$ref": "#/components/schemas/PreMigrationBackup", "description": "User-data erasure only, and only while a backup exists"}
         },
         "required": ["dry_run", "would_delete", "confirm"]
+      },
+      "Compaction": {
+        "type": "object",
+        "description": "The compaction an explicit deletion asked for: the next sweeper pass overwrites what the deletion unlinked. Both null when nothing is pending.",
+        "properties": {
+          "requested_at": {"type": ["string", "null"], "format": "date-time"},
+          "expected_by": {"type": ["string", "null"], "format": "date-time", "description": "The sweeper's next pass"}
+        },
+        "required": ["requested_at", "expected_by"]
+      },
+      "PreMigrationBackup": {
+        "type": "object",
+        "description": "The newest copy of the database the server wrote before an upgrade, which an erasure does not rewrite, and when the sweeper removes it",
+        "properties": {
+          "created_at": {"type": "string", "format": "date-time"},
+          "removed_at": {"type": "string", "format": "date-time"}
+        },
+        "required": ["created_at", "removed_at"]
       },
       "Deletion": {
         "type": "object",
         "description": "What a confirmed destructive request actually removed",
         "properties": {
           "dry_run": {"const": false},
-          "deleted": {"type": "object", "additionalProperties": {"type": "integer"}}
+          "deleted": {"type": "object", "additionalProperties": {"type": "integer"}},
+          "user_id": {"type": "string", "description": "User-data erasure only"},
+          "compaction": {"$ref": "#/components/schemas/Compaction", "description": "User-data erasure only"},
+          "pre_migration_backup": {"$ref": "#/components/schemas/PreMigrationBackup", "description": "User-data erasure only, and only while a backup exists"}
         },
         "required": ["dry_run", "deleted"]
       },
@@ -3180,9 +3209,10 @@
           "dry_run": {"const": false},
           "deleted": {"type": "object", "additionalProperties": {"type": "integer"},
             "description": "`traces`, `observations`, `scores`, `payloads`, `annotation_items`, and the `media` bodies the project stopped holding with their `media_bytes`"},
-          "id": {"type": "string", "pattern": "^[0-9a-f]{32}$"}
+          "id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+          "compaction": {"$ref": "#/components/schemas/Compaction"}
         },
-        "required": ["dry_run", "deleted", "id"]
+        "required": ["dry_run", "deleted", "id", "compaction"]
       },
       "TracesDeletion": {
         "type": "object",
@@ -3191,9 +3221,10 @@
           "dry_run": {"const": false},
           "deleted": {"type": "object", "additionalProperties": {"type": "integer"},
             "description": "`traces`, `observations`, `scores`, `payloads` and `annotation_items`, summed over the round's chunks"},
-          "more": {"type": "boolean", "description": "Traces matching the filter remain; repeat the same call"}
+          "more": {"type": "boolean", "description": "Traces matching the filter remain; repeat the same call"},
+          "compaction": {"$ref": "#/components/schemas/Compaction"}
         },
-        "required": ["dry_run", "deleted", "more"]
+        "required": ["dry_run", "deleted", "more", "compaction"]
       },
       "Dataset": {
         "type": "object",

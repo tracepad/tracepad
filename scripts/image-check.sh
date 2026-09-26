@@ -120,6 +120,16 @@ case "$listing" in
 esac
 echo "    tracepad.db is on the volume"
 
+echo "==> the volume is its owner's alone"
+# The database holds every prompt, the password hashes and the media signing
+# key; the directory and the file are closed to other accounts (spec 044 #13).
+modes="$(docker run --rm -v "$volume:/data" busybox:latest stat -c '%a %n' /data /data/tracepad.db)"
+case "$modes" in
+    "700 /data"*"600 /data/tracepad.db") ;;
+    *) fail "the modes are [$modes], want /data 700 and tracepad.db 600" ;;
+esac
+echo "    /data 700, tracepad.db 600"
+
 echo "==> Apache-2.0 §4(d): the licences travel in the image"
 for file in LICENSE NOTICE THIRD_PARTY_NOTICES third_party/langfuse/LICENSE; do
     docker cp "$container:/usr/share/doc/tracepad/$file" - >/dev/null 2>&1 ||

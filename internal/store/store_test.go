@@ -129,7 +129,7 @@ func TestBackupIncludesWALData(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.fresh = false
-	if err := s.backupBefore("migrations/0001_init.sql"); err != nil {
+	if _, err := s.backupBefore("migrations/0001_init.sql"); err != nil {
 		t.Fatalf("backupBefore: %v", err)
 	}
 	b, err := Open(path + ".pre-0001_init.bak")
@@ -143,7 +143,7 @@ func TestBackupIncludesWALData(t *testing.T) {
 
 	// Re-running with an existing backup must overwrite, not fail
 	// (VACUUM INTO refuses existing targets on its own).
-	if err := s.backupBefore("migrations/0001_init.sql"); err != nil {
+	if _, err := s.backupBefore("migrations/0001_init.sql"); err != nil {
 		t.Fatalf("backupBefore over existing backup: %v", err)
 	}
 }

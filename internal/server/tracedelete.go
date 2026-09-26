@@ -89,7 +89,8 @@ func (s *Server) handleDeleteTrace(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, object{}.
 		put("dry_run", false).
 		put("deleted", deletedCounts(job.Counts)).
-		put("id", id))
+		put("id", id).
+		put("compaction", s.compactionAnswer()))
 }
 
 // handleDeleteTraces is DELETE /api/v1/traces?<filters>&to= (#2, #4, #5).
@@ -230,7 +231,8 @@ func (s *Server) handleDeleteTraces(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, object{}.
 		put("dry_run", false).
 		put("deleted", deletedCounts(deleted)).
-		put("more", more))
+		put("more", more).
+		put("compaction", s.compactionAnswer()))
 }
 
 // deletionPreview renders the dry run of a deletion of traces — one trace's,

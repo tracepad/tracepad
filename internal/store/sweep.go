@@ -259,6 +259,20 @@ func (sw *Sweeper) Pass(ctx context.Context) error {
 		}
 	}
 
+	// What an explicit deletion asked for, after this pass's own deletions
+	// so that a purge finished above is compacted in the same pass
+	// (spec 044 #11).
+	if _, err := sw.compact(ctx); err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, ErrWriterClosed) {
+			return err
+		}
+		failures = append(failures, fmt.Errorf("compaction: %w", err))
+	}
+
+	// The newest pre-migration backup, seven days after it was written
+	// (spec 044 #12). Files, not rows: nothing here goes through the writer.
+	sw.store.expireBackups(start)
+
 	sw.mu.Lock()
 	sw.lastRun = start
 	sw.nextRun = start.Add(sw.interval)
@@ -681,6 +695,11 @@ func (p *projectPurge) apply(tx *sql.Tx) error {
 	p.Purged = rows > 0
 	if !p.Purged {
 		return nil
+	}
+	// The project's data went in this pass's chunks and goes here; the
+	// same pass compacts after it (spec 044 #11).
+	if err := requestCompaction(tx); err != nil {
+		return err
 	}
 	// Nor have `media_refs` and `media_holders` (schemas 0021, 0022): what
 	// is left of them — a ref the Langfuse channel wrote for a trace that

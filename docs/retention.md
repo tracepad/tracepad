@@ -332,8 +332,9 @@ filed under one user id — the traces, their observations, payloads, scores,
 search entries and the annotation-queue items pointing at them, and the user's
 per-user statistics — synchronously, and answers with the counts. It does not
 reach everything the store holds about that user: the raw OTLP bodies, scores
-given to a session rather than a trace, dataset items cut from the user's
-traces, and the bytes a deletion leaves in the file all outlast it.
+given to a session rather than a trace, and dataset items cut from the user's
+traces outlast it, and what it unlinks is overwritten in the file by the next
+sweep rather than when the call returns.
 [What this means for a data-subject request](#what-this-means-for-a-data-subject-request)
 lists each and what to do about it today.
 Like every destructive endpoint it is a dry run until confirmed; the echo here
@@ -371,7 +372,8 @@ foreign-key check in each of them, and without the indexes every check was a
 scan — the reason erasure and the sweep were slower than they needed to be.
 The migration runs before the server listens, once; on a store of a few
 hundred thousand observations it is seconds, and the log names the migration
-as it runs, after the backup every migration takes beside the database.
+as it runs, after the backup every migration takes beside the database — kept
+seven days ([what that means](#what-this-means-for-a-data-subject-request)).
 
 A deletion removes what the store holds at that moment, and nothing is
 remembered about the ids: a span that arrives afterwards for a deleted trace
@@ -402,8 +404,8 @@ This lands well inside the one-month response window Article 12(3) allows.
    of many users. `GET /api/v1/raw/{id}` and
    [`tracepad export --otlp`](export.md) still return the user's spans — their
    prompts and outputs, byte for byte, with the pictures put back — to the
-   project's keys and to every member of the project, viewers included, until
-   the batch leaves by the raw window. That window follows `retention_days`
+   project's keys and to its editors and owners, until the batch leaves by
+   the raw window. That window follows `retention_days`
    unless set, and both are unset by default, so by default **they never
    leave**. A future `remap` that replays raw bodies into the parsed tables
    would bring the erased data back too.
@@ -416,20 +418,41 @@ This lands well inside the one-month response window Article 12(3) allows.
    `source_trace_id` on erasure. Deleting an item archives it at a new version
    and keeps every earlier row; only deleting the dataset removes them.
 
-**What stays in the files.**
+**What stays in the files, and for how long.**
 
-1. **The bytes of what was deleted.** SQLite unlinks a deleted row and leaves
-   its bytes where they were until something overwrites them, and the search
-   index keeps the words of deleted text in its segments until they are
-   merged. Nothing in the API returns them, but anyone who can read the
-   database file can.
-2. **The pre-migration backups.** Before every start that applies a migration
+1. **The deleted rows, until the next sweep.** Deleting a row unlinks it, and
+   Tracepad zeroes the space it frees as the rows go. Two things still hold
+   the deleted text afterwards: the search index, whose segments keep a
+   deleted document's words until they are merged, and the write-ahead log,
+   which keeps the pages as they were until it is checkpointed. So an erasure
+   asks for a **compaction**, and the next sweeper pass — within
+   `TRACEPAD_SWEEP_INTERVAL`, an hour by default — merges the index, drains
+   the free pages and truncates the log. The erasure's answer names that pass
+   (`compaction.expected_by`), and `GET /api/v1/system` says when it finished.
+   Deleting traces and a project's purge ask for one too; the retention sweep
+   zeroes what it frees but does not, since rewriting the index every hour
+   would cost more than it protects, and the words of swept traces leave the
+   index with its ordinary merges.
+2. **The pre-migration backup.** Before every start that applies a migration
    the server writes `tracepad.db.pre-<migration>.bak` beside the database — a
-   complete copy — and never deletes it
-   ([docker.md](docker.md#upgrading-and-backing-up-first)).
+   complete copy, readable by its owner only. Once that upgrade's migrations
+   have committed it removes the older ones, and the sweeper removes the
+   newest seven days after it was written. While one exists, the erasure's
+   dry run and answer name it and its date (`pre_migration_backup`);
+   [docker.md](docker.md#upgrading-and-backing-up-first) says how to remove
+   it sooner.
 3. **Copies outside the database**: your own backups, volume and filesystem
    snapshots, an export taken before the erasure, the logs of your application
    or proxy. Expire those with your own process.
+4. **What deletions before this version left.** Until this version the freed
+   space was not zeroed. The first sweeper pass after the upgrade compacts
+   once — the index rewritten, the free pages drained — and what older
+   deletions left inside pages still in use stays until those pages are
+   rewritten. A full `VACUUM` of the stopped database rewrites every page
+   (below).
+5. **What the disk keeps below the file.** A program can overwrite its own
+   file, not the blocks a filesystem or an SSD has already released; full-disk
+   or volume encryption is the layer for that.
 
 **What to do about it today.**
 
@@ -447,24 +470,22 @@ This lands well inside the one-month response window Article 12(3) allows.
   the ones already kept still leave by the window. The price is the
   insurance: a mapping bug becomes data loss rather than a replay away from
   being fixed.
-- **Overwrite the freed bytes** with the server stopped, using the `sqlite3`
-  shell (3.43 or newer) on the database file:
+- **For deletions made before this version**, rewrite every page once with
+  the server stopped, using the `sqlite3` shell (3.43 or newer) on the
+  database file:
 
   ```sh
   sqlite3 tracepad.db "INSERT INTO search_fts(search_fts) VALUES('optimize'); VACUUM;"
   ```
 
   The first statement rewrites the search index without the deleted text,
-  the second rewrites every page of the file; each alone leaves some of it.
-  The raw bodies still in the archive are not affected — they are live rows.
-- **Delete the `.bak` files** once the upgrade they guard has proved itself.
-- **Keep the files to their owner**: the database is created readable by any
-  account that can get into its directory, so the directory is the guard
-  ([docker.md](docker.md#who-else-can-read-it)).
+  the second every page of the file. The raw bodies still in the archive are
+  not affected — they are live rows.
+- **Delete the `.bak` file sooner** than its seven days once the upgrade it
+  guards has proved itself.
 
 This section describes the server as it is. The change that extends erasure
-to the raw bodies, the session scores and the dataset items, and overwrites
-what it deletes, is specified in
+to the raw bodies, the session scores and the dataset items is specified in
 [`specs/044-erasure-and-data-at-rest.md`](../specs/044-erasure-and-data-at-rest.md).
 
 ## Deleting a project

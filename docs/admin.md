@@ -255,13 +255,32 @@ eval run holds any of the user's traces, the preview names it under
 `affected_runs` — erasure outranks the pin, and the run shows those items as
 missing afterwards ([datasets.md](datasets.md#what-a-run-keeps)).
 
+The confirmed answer also says when the rest of the job is done, and what it
+will not reach:
+
+```json
+{
+  "dry_run": false,
+  "deleted": {"traces": 12, "observations": 240, "scores": 30, "payloads": 480, …},
+  "user_id": "user-4711",
+  "compaction": {"requested_at": "2026-09-26T10:02:11Z", "expected_by": "2026-09-26T11:00:00Z"},
+  "pre_migration_backup": {"created_at": "2026-09-24T08:00:00Z", "removed_at": "2026-10-01T08:00:00Z"}
+}
+```
+
+- `compaction` — the freed space is zeroed as the rows go; the search index
+  and the write-ahead log are rewritten by the next sweeper pass, which
+  `expected_by` names. `GET /api/v1/system` says when it finished.
+- `pre_migration_backup` — present while the server keeps a copy of the
+  database from before its last upgrade: the one copy an erasure does not
+  rewrite, and the day the sweeper removes it. The dry run names it too.
+
 **What it does not take.** The raw OTLP bodies are not touched — a batch holds
 many traces — so the user's spans stay readable through `GET /api/v1/raw/{id}`
 and `tracepad export --otlp` until the raw window takes their batches, which by
 default is never; the preview says so in its note. Scores given to one of the
 user's sessions rather than a trace, and dataset items cut from their traces,
-stay as well. And a deletion unlinks rows without overwriting them, so their
-bytes remain in the database file and in any pre-migration backup beside it.
+stay as well, and so does the pre-migration backup until its date.
 [retention.md](retention.md#what-this-means-for-a-data-subject-request) lists
 each and what to do about it today.
 
@@ -329,7 +348,9 @@ identity. Without `confirm` the endpoint answers the preview — `would_delete`
 with `traces`, `observations`, `scores` and `annotation_items`, `oldest`,
 `affected_runs`, `confirm`, `note` — and an unknown id is `404`, dry run and
 confirmed alike. With `?confirm=<id>` it deletes and answers
-`{"dry_run": false, "deleted": {…}, "id"}`; `deleted` counts the payloads too.
+`{"dry_run": false, "deleted": {…}, "id", "compaction"}`; `deleted` counts the
+payloads too, and `compaction` says when the sweeper pass that overwrites what
+the deletion unlinked is due.
 
 **By filter.** The filters are the trace listing's own — the same names, the
 same validation, `400` on an unknown one — so "delete what I am looking at"

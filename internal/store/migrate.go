@@ -93,7 +93,8 @@ func (s *Store) migrate() error {
 		return nil
 	}
 
-	if err := s.backupBefore(pending[0]); err != nil {
+	backup, err := s.backupBefore(pending[0])
+	if err != nil {
 		return err
 	}
 
@@ -107,6 +108,14 @@ func (s *Store) migrate() error {
 			return err
 		}
 		logger().Info("applied migration", "migration", name)
+	}
+	// Every migration this run's backup guards has committed, so the older
+	// backups stop being the way back from anything: each is a full copy of
+	// the database as it was, everything erased or swept since included
+	// (spec 044 #12). Not before this point — a migration that fails keeps
+	// every file for the one case they exist for.
+	if backup != "" {
+		removeBackups(s.path, backup)
 	}
 	return nil
 }
@@ -222,19 +231,26 @@ func (s *Store) ensureIncrementalVacuum() error {
 	return nil
 }
 
-// backupBefore snapshots the database before the first pending migration.
-// A fresh database (no file before Open) is not backed up.
-func (s *Store) backupBefore(firstPending string) error {
+// backupBefore snapshots the database before the first pending migration and
+// returns the backup's path. A fresh database (no file before Open) is not
+// backed up, and the path is empty.
+func (s *Store) backupBefore(firstPending string) (string, error) {
 	if s.fresh {
-		return nil // fresh database, nothing worth backing up
+		return "", nil // fresh database, nothing worth backing up
 	}
 	tag := strings.TrimSuffix(strings.TrimPrefix(firstPending, "migrations/"), ".sql")
 	dst := s.path + ".pre-" + tag + ".bak"
-	// VACUUM INTO refuses to overwrite; the state before *this* run is what
-	// matters after a crashed earlier attempt (spec 001, edge cases), so a
-	// stale backup is dropped first.
+	// VACUUM INTO refuses to overwrite a database; the state before *this*
+	// run is what matters after a crashed earlier attempt (spec 001, edge
+	// cases), so a stale backup is dropped first.
 	if err := os.Remove(dst); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("backup before migration: %w", err)
+		return "", fmt.Errorf("backup before migration: %w", err)
+	}
+	// Created empty at 0600 first: VACUUM INTO writes into an empty file it
+	// finds and keeps its mode, and the copy holds everything the database
+	// does (spec 044 #12).
+	if err := createBackupFile(dst); err != nil {
+		return "", fmt.Errorf("backup before migration: %w", err)
 	}
 	// VACUUM INTO instead of a file copy (spec 001 #11): the snapshot is a
 	// complete, checkpointed database — committed rows still sitting in the
@@ -242,8 +258,8 @@ func (s *Store) backupBefore(firstPending string) error {
 	// after an unclean shutdown), and it streams without loading the
 	// database into memory.
 	if _, err := s.db.Exec(`VACUUM INTO ?`, dst); err != nil {
-		return fmt.Errorf("backup before migration: %w", err)
+		return "", fmt.Errorf("backup before migration: %w", err)
 	}
 	logger().Info("database backed up before migration", "backup", dst)
-	return nil
+	return dst, nil
 }

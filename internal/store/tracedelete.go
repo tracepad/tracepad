@@ -98,6 +98,13 @@ func (r *traceRemoval) apply(tx *sql.Tx) (DeleteCounts, error) {
 	if err := deleteTraceSearchEntries(tx, r.projectID, r.ids); err != nil {
 		return counts, err
 	}
+	// And must not remain in the file: an explicit deletion asks the next
+	// pass to merge the index and truncate the log (spec 044 #11).
+	if counts.Traces > 0 {
+		if err := requestCompaction(tx); err != nil {
+			return counts, err
+		}
+	}
 
 	// The statistics are corrected here, in the transaction that made them
 	// wrong, one whole `RollHour` per hour this chunk touched. An hour whose

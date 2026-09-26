@@ -305,9 +305,10 @@ columns, the payloads, the trace and span ids. Two things to know:
 
 The command is a client of two endpoints, and so can anything else be — a
 backup job, a script, a second Tracepad. They are project-scoped reads under the
-project's own keys, with no admin token involved — and, like every other read,
-open to every member of the project signed in to the interface, viewers
-included:
+project's own keys, with no admin token involved, and to an editor or an owner
+signed in to the interface. A **viewer** is refused: the archive is the bulk
+way out of a project, every body whole, and taking a project's data out is an
+editor's act, like its retention windows and its keys:
 
 | Method | Path | |
 |---|---|---|

@@ -31,9 +31,12 @@ type Store struct {
 }
 
 // Open opens (creating if needed) the database at path and applies pending
-// migrations. The parent directory is created with 0700.
+// migrations. The data directory is 0700 and the database files 0600, made so
+// or tightened to it on every start (spec 044 #13).
 func Open(path string) (*Store, error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	info, statErr := os.Stat(path)
+	fresh := statErr != nil || info.Size() == 0
+	if err := secureFiles(path); err != nil {
 		return nil, fmt.Errorf("create data dir: %w", err)
 	}
 	// modernc.org/sqlite accepts pragmas in the DSN, applied in order per
@@ -52,9 +55,14 @@ func Open(path string) (*Store, error) {
 	// version — takes a read snapshot at its first SELECT and is then
 	// refused with SQLITE_BUSY_SNAPSHOT when it tries to upgrade, a
 	// failure busy_timeout cannot wait out (spec 003 Decision 24).
-	dsn := "file:" + path + "?_txlock=immediate&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)&_pragma=auto_vacuum(INCREMENTAL)&_pragma=synchronous(NORMAL)"
-	info, statErr := os.Stat(path)
-	fresh := statErr != nil || info.Size() == 0
+	//
+	// secure_delete(ON) zeroes what a delete frees — the cells inside live
+	// pages and the pages that go to the freelist, where raw bodies and
+	// large payloads live — instead of leaving the bytes for anyone who can
+	// read the file (spec 044 #10). FAST would leave the freed overflow
+	// pages intact. There is no setting to turn it off: a guarantee that
+	// depends on configuration is not one (spec 005 #9).
+	dsn := "file:" + path + "?_txlock=immediate&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)&_pragma=auto_vacuum(INCREMENTAL)&_pragma=synchronous(NORMAL)&_pragma=secure_delete(ON)"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", path, err)

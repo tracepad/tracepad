@@ -70,8 +70,10 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
 # with: a distroless image can only receive directories, and the one the server
 # writes to has to arrive owned by the user that will write to it (#2). A named
 # volume inherits that ownership when Docker seeds it; a host directory bind
-# mounted over it does not, which is what docs/docker.md's `chown` line is for.
-RUN mkdir -p /out/data
+# mounted over it does not, which is what docs/docker.md's `install` line is for.
+# 0700: the directory is the guard of everything the server writes into it,
+# and a named volume inherits this mode when Docker seeds it (spec 044 #13).
+RUN mkdir -p /out/data && chmod 0700 /out/data
 
 # --- The image ----------------------------------------------------------------
 #
@@ -90,7 +92,7 @@ LABEL org.opencontainers.image.title="Tracepad" \
       org.opencontainers.image.licenses="Apache-2.0"
 
 COPY --from=build /out/tracepad /tracepad
-COPY --from=build --chown=65532:65532 /out/data /data
+COPY --from=build --chown=65532:65532 --chmod=0700 /out/data /data
 
 # Apache-2.0 §4(d) applies to a container image as it does to an archive, so
 # the NOTICE and the third-party licences travel in it (.goreleaser.yaml says
