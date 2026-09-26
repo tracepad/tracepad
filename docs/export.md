@@ -79,12 +79,25 @@ tracepad export --otlp \
 ```
 
 Each batch is posted under the `Content-Type` it was received in, which is what
-makes it acceptable to a receiver that took it once. `--header k=v` repeats.
-`OTEL_EXPORTER_OTLP_HEADERS` is honoured — if you have already configured an
-exporter on this machine, its credentials are already there — and a `--header`
-on the command line wins over it. Its values are percent-decoded as the OTLP
-specification prescribes, which leaves a `+` alone: a base64 bearer token comes
-through as written.
+makes it acceptable to a receiver that took it once. `--header k=v` repeats,
+and its value is sent as written. Header names are not case-sensitive: two
+`--header`s naming the same one in different case are one header, and the last
+one on the command line wins.
+
+The receiver's credentials go in `--header` and nowhere else.
+`OTEL_EXPORTER_OTLP_HEADERS` is **not** read: on a machine that sends traces to
+Tracepad it holds your Tracepad key, and that key is not the receiver's
+business. If it is set and you pass no `--header`, the command says it ignored
+it.
+
+Into Langfuse, whose OTLP endpoint takes the project's public and secret key as
+Basic auth:
+
+```sh
+tracepad export --otlp \
+  --to https://cloud.langfuse.com/api/public/otel/v1/traces \
+  --header "authorization=Basic $(printf '%s' "$LANGFUSE_PUBLIC_KEY:$LANGFUSE_SECRET_KEY" | base64)"
+```
 
 `--gzip` compresses on the wire. It is off by default because whether the
 receiver supports it is the one thing this command cannot know, and the bytes
@@ -92,7 +105,24 @@ are on a local link more often than not.
 
 **The receiver is not authenticated by your project key.** The key opens *this*
 server's archive; the receiver's credentials are whatever it wants, and they go
-in `--header`.
+in `--header`. A header carrying a Tracepad key — the one the command is using,
+or anything starting `tp-sk-` — is refused before anything is sent:
+
+```
+$ tracepad export --otlp --to https://otlp.example.com/v1/traces \
+    --header "authorization=Bearer $TRACEPAD_API_KEY"
+tracepad: --header Authorization carries a Tracepad project key; the receiver would get admin access to your project. …
+```
+
+The one receiver whose own credentials are such a key is another Tracepad —
+moving to a new server, say. Give it *that* server's key, and say so:
+
+```sh
+tracepad export --otlp \
+  --to https://new-tracepad.example.com/v1/traces \
+  --header "authorization=Bearer $NEW_SERVER_KEY" \
+  --allow-tracepad-key
+```
 
 ### When a receiver says no
 

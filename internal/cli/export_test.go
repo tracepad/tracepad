@@ -334,45 +334,106 @@ func TestExportGzipsWhenAsked(t *testing.T) {
 	}
 }
 
-// `OTEL_EXPORTER_OTLP_HEADERS` is honoured, and a `--header` on the command
-// line wins over it: a flag is the more specific statement.
-func TestExportReadsTheOTLPHeadersVariable(t *testing.T) {
+// `OTEL_EXPORTER_OTLP_HEADERS` is not read (spec 019 #14). On a machine that
+// sends traces here it holds this server's project key, and copying it into
+// every POST handed a project admin's key to whatever receiver `--to` named.
+func TestExportDoesNotReadTheOTLPHeadersVariable(t *testing.T) {
 	h := newHarness(t)
 	seedArchive(t, h, 1)
 	sink := newStub(t, nil)
-	h.env["OTEL_EXPORTER_OTLP_HEADERS"] = "authorization=Bearer from-env,x-tenant=acme%20corp"
-
-	got := h.run(t.Context(), false, "export", "--otlp", "--to", sink.server.URL,
-		"--header", "authorization=Bearer from-flag")
-	if got.code != ExitOK {
-		t.Fatalf("exit = %d, stderr = %s", got.code, got.stderr)
-	}
-	if header := sink.headers[0]; header.Get("Authorization") != "Bearer from-flag" {
-		t.Errorf("Authorization = %q, want the flag to win", header.Get("Authorization"))
-	}
-	// And the percent-encoding the OTLP specification prescribes is undone.
-	if header := sink.headers[0]; header.Get("X-Tenant") != "acme corp" {
-		t.Errorf("X-Tenant = %q, want the decoded value", header.Get("X-Tenant"))
-	}
-}
-
-// The values in that variable are RFC 3986 percent-encoding, not the form
-// encoding, so `+` is a literal. A base64 bearer token contains `+`, and
-// reading it as a space corrupts the credential into a 401 — which the export
-// treats as fatal, so the whole run dies on a header nobody mistyped.
-func TestExportKeepsAPlusInAnEnvironmentHeader(t *testing.T) {
-	h := newHarness(t)
-	seedArchive(t, h, 1)
-	sink := newStub(t, nil)
-	const token = "Bearer YWJj+ZGVm/Z2hp=="
-	h.env["OTEL_EXPORTER_OTLP_HEADERS"] = "authorization=" + token
+	h.env["OTEL_EXPORTER_OTLP_HEADERS"] = "authorization=Bearer " + testKey + ",x-tenant=acme"
 
 	got := h.run(t.Context(), false, "export", "--otlp", "--to", sink.server.URL)
 	if got.code != ExitOK {
 		t.Fatalf("exit = %d, stderr = %s", got.code, got.stderr)
 	}
+	for name, values := range sink.headers[0] {
+		for _, value := range values {
+			if strings.Contains(value, "tp-sk-") || name == "X-Tenant" {
+				t.Errorf("the variable reached the receiver: %s: %s", name, value)
+			}
+		}
+	}
+	// Said, without the value, so a receiver answering 401 is not a mystery.
+	if !strings.Contains(got.stderr, "OTEL_EXPORTER_OTLP_HEADERS is not read") ||
+		strings.Contains(got.stderr, testKey) {
+		t.Errorf("stderr = %q", got.stderr)
+	}
+}
+
+// A `--header` value goes out as written: a base64 bearer token keeps its `+`.
+func TestExportKeepsAHeaderValueAsWritten(t *testing.T) {
+	h := newHarness(t)
+	seedArchive(t, h, 1)
+	sink := newStub(t, nil)
+	const token = "Bearer YWJj+ZGVm/Z2hp=="
+
+	got := h.run(t.Context(), false, "export", "--otlp", "--to", sink.server.URL, "--header", "authorization="+token)
+	if got.code != ExitOK {
+		t.Fatalf("exit = %d, stderr = %s", got.code, got.stderr)
+	}
 	if header := sink.headers[0].Get("Authorization"); header != token {
 		t.Errorf("Authorization = %q, want %q", header, token)
+	}
+}
+
+// One header, one value, whatever case it is spelled in: the last `--header`
+// naming it wins, every time — not whichever a map happened to yield last.
+func TestExportHeadersAreOneValueWhateverTheCase(t *testing.T) {
+	h := newHarness(t)
+	seedArchive(t, h, 1)
+	sink := newStub(t, nil)
+
+	const runs = 50
+	for range runs {
+		got := h.run(t.Context(), false, "export", "--otlp", "--to", sink.server.URL,
+			"--header", "authorization=Bearer first", "--header", "AUTHORIZATION=Bearer second",
+			"--header", "Authorization=Bearer last")
+		if got.code != ExitOK {
+			t.Fatalf("exit = %d, stderr = %s", got.code, got.stderr)
+		}
+	}
+	if len(sink.headers) != runs {
+		t.Fatalf("the receiver saw %d requests, want %d", len(sink.headers), runs)
+	}
+	for i, header := range sink.headers {
+		if values := header.Values("Authorization"); len(values) != 1 || values[0] != "Bearer last" {
+			t.Fatalf("request %d: Authorization = %q, want the last flag's value alone", i, values)
+		}
+	}
+}
+
+// A header carrying a Tracepad key is refused before the first POST: the
+// receiver would get admin access to the project (spec 019 #14).
+func TestExportRefusesToSendATracepadKey(t *testing.T) {
+	h := newHarness(t)
+	seedArchive(t, h, 1)
+	sink := newStub(t, nil)
+
+	for _, header := range []string{
+		"authorization=Bearer tp-sk-0123456789abcdef",
+		"x-api-key=" + testKey,
+		"Authorization=Bearer TP-SK-shouting",
+	} {
+		got := h.run(t.Context(), false, "export", "--otlp", "--to", sink.server.URL, "--header", header)
+		if got.code != ExitFailure || !strings.Contains(got.stderr, "carries a Tracepad project key") {
+			t.Errorf("%s: exit = %d, stderr = %q, want a refusal", header, got.code, got.stderr)
+		}
+		if strings.Contains(got.stderr, "tp-sk-0123") || strings.Contains(got.stderr, testKey) {
+			t.Errorf("%s: the refusal repeats the key: %q", header, got.stderr)
+		}
+	}
+	if len(sink.received()) != 0 {
+		t.Fatalf("the receiver got %d batches", len(sink.received()))
+	}
+
+	// The key this command itself reads with is caught whatever it looks
+	// like — an admin token has no tp-sk- in it.
+	if !carriesTracepadKey("Bearer admin-token-123", "admin-token-123") {
+		t.Error("the command's own key was not recognized")
+	}
+	if carriesTracepadKey("Bearer receiver-key", "admin-token-123") {
+		t.Error("a receiver's own key was taken for a Tracepad one")
 	}
 }
 
@@ -692,7 +753,10 @@ func TestExportRoundTrip(t *testing.T) {
 		// The receiver's own credentials, because that is what it is: a
 		// second Tracepad, reached the way any OTLP receiver is.
 		"--to", destination.url+"/v1/traces",
-		"--header", "authorization=Bearer "+testKey)
+		"--header", "authorization=Bearer "+testKey,
+		// A Tracepad key, the destination's own — which is what this flag
+		// is for (spec 019 #14).
+		"--allow-tracepad-key")
 	if got.code != ExitOK {
 		t.Fatalf("exit = %d, stderr = %s", got.code, got.stderr)
 	}

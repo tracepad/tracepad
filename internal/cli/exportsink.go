@@ -50,7 +50,7 @@ func (e *stopError) Error() string {
 }
 
 // destination builds the one the flags name.
-func (r *run) destination(to, dir string, headers headerList, compress, resuming bool) (destination, error) {
+func (r *run) destination(to, dir string, headers map[string]string, compress, resuming bool) (destination, error) {
 	if to != "" {
 		return r.receiver(to, headers, compress)
 	}
@@ -68,7 +68,7 @@ type receiver struct {
 	attempts int
 }
 
-func (r *run) receiver(target string, headers headerList, compress bool) (destination, error) {
+func (r *run) receiver(target string, headers map[string]string, compress bool) (destination, error) {
 	// The scheme is checked and not merely required to be present: a
 	// receiver is an OTLP/HTTP endpoint, and `ftp://host/x` parses into a
 	// scheme and a host perfectly well. Left to the transport it would
@@ -79,10 +79,6 @@ func (r *run) receiver(target string, headers headerList, compress bool) (destin
 		(parsed.Scheme != "http" && parsed.Scheme != "https") {
 		return nil, usageErrorf("--to %q is not an http(s) url", target)
 	}
-	resolved, err := exportHeaders(r.opt.Env("OTEL_EXPORTER_OTLP_HEADERS"), headers)
-	if err != nil {
-		return nil, err
-	}
 	backoff := r.opt.retryBackoff
 	if backoff <= 0 {
 		backoff = defaultRetryBackoff
@@ -90,7 +86,7 @@ func (r *run) receiver(target string, headers headerList, compress bool) (destin
 	return &receiver{
 		run:     r,
 		url:     target,
-		headers: resolved,
+		headers: headers,
 		gzip:    compress,
 		// No client-side timeout: a receiver ingesting a large batch is
 		// doing work, and the retry loop below is what bounds a hang
@@ -303,39 +299,61 @@ func batchFileName(row rawBatchRow) (string, error) {
 	return fmt.Sprintf("%013d-%d%s", at.UnixMilli(), row.ID, extension), nil
 }
 
-// exportHeaders resolves what rides on every POST. `OTEL_EXPORTER_OTLP_HEADERS`
-// is honoured because an operator who has already configured an exporter has
-// already put the receiver's credentials there; `--header` wins over it,
-// because a flag on this command line is the more specific statement.
-func exportHeaders(environment string, flags headerList) (map[string]string, error) {
+// exportHeaders resolves what rides on every POST: the `--header` flags and
+// nothing else (spec 019 #14).
+//
+// `OTEL_EXPORTER_OTLP_HEADERS` is not read. On a machine that sends traces to
+// this server it holds this server's project key — the docs say to put it
+// there — and an export that copied it into every POST handed that key, a
+// project admin's, to whichever receiver `--to` named. The variable is for an
+// application's exporter; a receiver's credentials are named on the command
+// line, for that receiver.
+//
+// Names are canonicalized, so `authorization` and `Authorization` are one
+// header, and the last flag naming it wins: which value goes out is decided by
+// the order the command line gives, never by the order of a map.
+//
+// A value carrying a Tracepad secret key — the one this command reads the
+// archive with, or any `tp-sk-` — is refused unless --allow-tracepad-key says
+// the receiver is a Tracepad server of the same owner, whose key it is.
+func (r *run) exportHeaders(flags headerList, allowKey bool) (map[string]string, error) {
 	out := map[string]string{}
-	for _, pair := range strings.Split(environment, ",") {
-		key, value, found := strings.Cut(strings.TrimSpace(pair), "=")
-		if !found || key == "" {
-			continue
-		}
-		// The OTLP specification percent-encodes the values in this
-		// variable; a value with nothing to decode survives unchanged.
-		//
-		// PathUnescape and not QueryUnescape: the latter is the
-		// *form* encoding, where `+` means a space. These values are
-		// RFC 3986 percent-encoding, where `+` is a literal — and a
-		// bearer token is base64, whose alphabet contains `+`. Reading
-		// it as a space corrupts the credential into a 401 the export
-		// then treats as fatal.
-		if decoded, err := url.PathUnescape(value); err == nil {
-			value = decoded
-		}
-		out[strings.TrimSpace(key)] = value
-	}
 	for _, pair := range flags {
 		key, value, found := strings.Cut(pair, "=")
 		if !found || strings.TrimSpace(key) == "" {
 			return nil, usageErrorf("--header takes name=value, got %q", pair)
 		}
-		out[strings.TrimSpace(key)] = value
+		out[http.CanonicalHeaderKey(strings.TrimSpace(key))] = value
+	}
+	if !allowKey {
+		for key, value := range out {
+			if carriesTracepadKey(value, r.key) {
+				// A refusal, not a usage error: the message is the whole
+				// point, and the synopsis printed under it would bury it.
+				return nil, fmt.Errorf("--header %s carries a Tracepad project key; the receiver "+
+					"would get admin access to your project. Give it the receiver's own "+
+					"credentials, or pass --allow-tracepad-key if the receiver is a Tracepad "+
+					"server of yours and the key is its own", key)
+			}
+		}
+	}
+	if len(flags) == 0 && r.opt.Env("OTEL_EXPORTER_OTLP_HEADERS") != "" {
+		// Said once, and without the value: the one reader this change
+		// could surprise is somebody whose receiver credentials used to
+		// come from there, and their first sign would be a 401.
+		fmt.Fprintln(r.opt.Stderr, "tracepad: OTEL_EXPORTER_OTLP_HEADERS is not read by export; "+
+			"pass the receiver's credentials with --header")
 	}
 	return out, nil
+}
+
+// carriesTracepadKey reports whether a header value holds a Tracepad secret:
+// the key this command itself uses, or anything shaped like a project's.
+func carriesTracepadKey(value, own string) bool {
+	if own != "" && strings.Contains(value, own) {
+		return true
+	}
+	return strings.Contains(strings.ToLower(value), "tp-sk-")
 }
 
 // partialSuccess renders what a receiver reported about spans it would not
