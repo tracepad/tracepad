@@ -44,6 +44,14 @@ Source = "https://github.com/tracepad/tracepad"
 [dependency-groups]
 dev = ["pytest>=8", "ruff==0.16.6"]
 
+# What a release builds and tests with is `uv.lock`, not a fresh resolution
+# (spec 017 #20): the suite runs on `uv sync --locked`. The build backend, which
+# a lock file does not cover, is held to one version here for every build, and
+# by hash — with everything it imports — in `build-constraints.txt` for the
+# release's; the two name the same hatchling.
+[tool.uv]
+build-constraint-dependencies = ["hatchling==1.32.4"]
+
 [tool.hatch.version]
 path = "src/tracepad/_config.py"
 

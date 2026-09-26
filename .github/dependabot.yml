@@ -1,0 +1,85 @@
+# Version updates for everything this repository pins (spec 020 #19): the Go
+# modules, the lock files of the interface and the two packages, the Actions
+# (pinned by commit, which Dependabot moves with the version comment beside
+# it) and the base images (pinned by digest). The few pins it cannot see —
+# versions passed to a tool rather than declared to a package manager — are
+# listed in the same Decision and moved by hand.
+#
+# Weekly, and one pull request per ecosystem and directory: minor and patch
+# updates are grouped, a major one arrives alone because it is the one that
+# needs reading. A version is proposed a week after it was published, not the
+# day it was: a compromised release is usually pulled within days. Security
+# updates are not grouped or delayed by any of this.
+version: 2
+
+updates:
+  # The server's modules only. `sdk/go/go.mod` is a published library's: the
+  # versions it names are the floor every application that imports it resolves
+  # to, and they move when the package decides, not weekly.
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      go:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directories: ["/ui", "/sdk/js", "/tools/lockfile-lint"]
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      npm:
+        patterns: ["*"]
+        update-types: [minor, patch]
+    # The Node package's OpenTelemetry 1.x test double (spec 032 #18): moved
+    # to 2.x it would still pass, and test nothing the real dependency does not.
+    ignore:
+      - dependency-name: sdk-trace-base-v1
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: uv
+    directory: /sdk/python
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      python:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      images:
+        patterns: ["*"]
+        update-types: [minor, patch]
+    # The image's toolchains are go.mod's Go line and a Node the interface
+    # supports; they change by hand with those files (spec 020 #19). Here only
+    # the digest under a tag moves.
+    ignore:
+      - dependency-name: golang
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: node
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]

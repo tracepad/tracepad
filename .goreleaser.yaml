@@ -1,5 +1,5 @@
-# Release configuration. Runs on version tags (v*) via release workflow
-# (added in the packaging stage); `goreleaser check` validates this file.
+# Release configuration. Runs on version tags (v*) in release-server.yml, as
+# `release --skip=publish`; `goreleaser check` validates this file.
 version: 2
 
 project_name: tracepad
@@ -42,5 +42,7 @@ archives:
 checksum:
   name_template: checksums.txt
 
+# GoReleaser builds and no longer publishes (spec 020 #19): the release and its
+# notes are `gh release create --generate-notes` in release-server.yml.
 changelog:
-  use: github
+  disable: true

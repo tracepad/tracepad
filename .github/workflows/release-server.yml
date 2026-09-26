@@ -7,9 +7,15 @@
 # that a contributor, a fork or an operator with a patch can build the artifact
 # the docs describe.
 #
-# Credentials: none of ours. GoReleaser publishes with the repository's own
-# token, and the image is pushed to GHCR with the same one under
-# `packages: write`.
+# Credentials: none of ours. The release and the image are published with the
+# repository's own token, and their provenance is signed through the
+# workflow's OIDC identity (#19).
+#
+# Built where nothing can be published, published where nothing is built
+# (#19): `archives` and `image-build` run GoReleaser, `make ui`, `npm ci` and
+# buildx with read access alone and hand their outputs over as artifacts;
+# `release` and `image` hold the write scopes and only attest and upload what
+# they were handed — no checkout, no toolchain, no install.
 #
 # Nothing here runs on `main`. The tag is the one act the owner performs
 # deliberately, and `latest` moves only with it (#6).
@@ -19,8 +25,7 @@ on:
   push:
     tags: ["v*"]
 
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
   # Everything that can refuse the tag, before anything is published. It is its
@@ -29,15 +34,21 @@ jobs:
   # half-published release is worse than a refused one.
   check:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       version: ${{ steps.meta.outputs.version }}
       tags: ${{ steps.meta.outputs.tags }}
+      prerelease: ${{ steps.meta.outputs.prerelease }}
+      latest: ${{ steps.meta.outputs.latest }}
+      previous: ${{ steps.meta.outputs.previous }}
     steps:
       # Tags and all of them: which image tags this release may move is a
       # question about the ones already published (#16).
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: The tag, and the image tags it moves
         id: meta
@@ -52,6 +63,10 @@ jobs:
 
           image="ghcr.io/${GITHUB_REPOSITORY}"
           tags="$image:$version"
+          # The GitHub release follows the image: marked a pre-release when it
+          # is one, and Latest only when `latest` moves with it.
+          prerelease=false
+          latest=false
 
           # A pre-release publishes under its exact tag and nothing else: it is
           # for the person who asked for it, and neither `X.Y` — what an
@@ -60,6 +75,7 @@ jobs:
           case "$version" in
             *-*)
               echo "pre-release: publishing $version alone"
+              prerelease=true
               ;;
             *)
               # A moving tag may only move forward. Releasing a back-patch
@@ -86,74 +102,172 @@ jobs:
 
               if [ "$newest" = "$GITHUB_REF_NAME" ]; then
                 tags="$tags,$image:latest"
+                latest=true
               else
                 echo "not moving latest: $newest is newer"
               fi
               ;;
           esac
 
+          # The release notes run from the server tag before this one in its
+          # own history — not from GitHub's newest release, which for a
+          # back-patch is a later line. A stable release counts from the
+          # stable one before it, so its notes cover the release candidates
+          # too; the first tag has nothing to count from.
+          exclude=()
+          [ "$prerelease" = true ] || exclude=(--exclude 'v*-*')
+          previous="$(git describe --tags --abbrev=0 --match 'v[0-9]*' \
+                        "${exclude[@]}" "$GITHUB_REF_NAME^" 2>/dev/null || true)"
+          echo "notes from: ${previous:-the beginning}"
+
           echo "publishing: $tags"
           {
             echo "version=$version"
             echo "tags=$tags"
+            echo "prerelease=$prerelease"
+            echo "latest=$latest"
+            echo "previous=$previous"
           } >> "$GITHUB_OUTPUT"
 
-  release:
+  # The six archives and their checksums, with no way to publish them: GoReleaser
+  # builds with `--skip=publish`, and `release` below puts them on GitHub.
+  archives:
     needs: check
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
     steps:
-      # The whole history, because GoReleaser's changelog is built from it.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v5
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
+          cache: false
       # `.goreleaser.yaml` runs `make ui` before the matrix: every official
       # artifact carries the web interface (spec 006 #9), and a build without
       # the tag would silently ship the stub page.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version-file: ui/package.json
-          cache: npm
-          cache-dependency-path: ui/package-lock.json
-      - uses: goreleaser/goreleaser-action@v6
+          node-version-file: ui/package.json # zizmor: ignore[cache-poisoning] -- v4 caches only when `cache:` is set, and it is not
+      - uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6.4.0
         with:
           distribution: goreleaser
-          version: "~> v2"
-          args: release --clean
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          version: "v2.18.2"
+          args: release --clean --skip=publish
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: archives
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/checksums.txt
+          if-no-files-found: error
+          retention-days: 1
 
-  image:
-    needs: [check, release]
+  # The multi-arch image as an OCI archive, pushed nowhere. No QEMU: both
+  # builder stages run on the build platform and cross-compile (Dockerfile,
+  # #10), and the runtime stage only copies — so nothing in this build ever
+  # executes an arm64 binary.
+  image-build:
+    needs: check
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
     steps:
-      - uses: actions/checkout@v4
-
-      # No QEMU: both builder stages run on the build platform and
-      # cross-compile (Dockerfile, #10), and the runtime stage only copies —
-      # so nothing in this build ever executes an arm64 binary.
-      - uses: docker/setup-buildx-action@v3
-
-      - uses: docker/login-action@v3
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      # Both decided in `check`, before the release was published.
-      - uses: docker/build-push-action@v6
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      # No BuildKit provenance and no build record: both embed the tag push's
+      # event payload. The image's provenance is `image`'s attestation (#19).
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ needs.check.outputs.tags }}
+          provenance: false
+          outputs: type=oci,dest=${{ runner.temp }}/image.tar
           build-args: |
             VERSION=${{ needs.check.outputs.version }}
             REVISION=${{ github.sha }}
+        env:
+          DOCKER_BUILD_RECORD_UPLOAD: false
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: image
+          path: ${{ runner.temp }}/image.tar
+          if-no-files-found: error
+          retention-days: 1
+
+  # Publishes only once both builds exist: an image that does not build refuses
+  # the tag before the archives are public.
+  release:
+    needs: [check, archives, image-build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # the release and its files
+      id-token: write # signing the archives' provenance
+      attestations: write # storing it
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: archives
+          path: dist
+      - uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
+        with:
+          subject-path: |
+            dist/*.tar.gz
+            dist/*.zip
+      # Left to itself GitHub marks every new release Latest: a release
+      # candidate, or a back-patch published after a newer line, would take
+      # the badge — and the download link — from the newest stable (#16).
+      - name: The release, with the archives and their checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PRERELEASE: ${{ needs.check.outputs.prerelease }}
+          LATEST: ${{ needs.check.outputs.latest }}
+          PREVIOUS: ${{ needs.check.outputs.previous }}
+        run: |
+          since=()
+          [ -z "$PREVIOUS" ] || since=(--notes-start-tag "$PREVIOUS")
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+            --verify-tag --generate-notes "${since[@]}" \
+            --prerelease="$PRERELEASE" --latest="$LATEST" dist/*
+
+  image:
+    needs: [check, image-build, release]
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write # the image and its attestation on GHCR
+      id-token: write # signing the image's provenance
+      attestations: write # storing it
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: image
+          path: ${{ runner.temp }}
+      # Every tag decided in `check`, before the release was published, points
+      # at the one index the archive holds; skopeo is on the runner image. The
+      # login goes into Docker's config file rather than skopeo's own, because
+      # the attestation below is pushed with whatever credentials that file
+      # holds — skopeo reads it just the same.
+      - name: Push the archive under each tag
+        id: push
+        env:
+          TAGS: ${{ needs.check.outputs.tags }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          export REGISTRY_AUTH_FILE="$HOME/.docker/config.json"
+          mkdir -p "$HOME/.docker"
+          skopeo login ghcr.io --username "$GITHUB_ACTOR" --password-stdin <<< "$GH_TOKEN"
+          for tag in ${TAGS//,/ }; do
+            skopeo copy --all --preserve-digests --digestfile "$RUNNER_TEMP/digest" \
+              "oci-archive:$RUNNER_TEMP/image.tar" "docker://$tag"
+          done
+          echo "digest=$(cat "$RUNNER_TEMP/digest")" >> "$GITHUB_OUTPUT"
+      - uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
+        with:
+          subject-name: ghcr.io/${{ github.repository }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true

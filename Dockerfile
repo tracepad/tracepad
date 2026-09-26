@@ -5,6 +5,10 @@
 # build follows, so a binary from either path answers /health with the same
 # version, even though the bytes differ because the build stamps do.
 
+# Every base image is pinned by the digest of its multi-arch index, the tag
+# kept beside it for the reader and for Dependabot, which moves both (spec 020
+# #19): a tag is a name the publisher can point elsewhere, a digest is the bytes.
+
 # The version the binary reports. `dev` for anyone building from a checkout;
 # the release workflow passes the tag without its `v` (#6).
 ARG VERSION=dev
@@ -19,7 +23,7 @@ ARG REVISION=
 # and carries no architecture, so this stage is pinned to the platform doing the
 # building: under `--platform linux/amd64,linux/arm64` it then runs once instead
 # of once per architecture, and never under emulation (#10).
-FROM --platform=$BUILDPLATFORM node:22-alpine AS ui
+FROM --platform=$BUILDPLATFORM node:22-alpine@sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402 AS ui
 
 WORKDIR /src/ui
 # The manifest and the lock file first, on their own layer: editing a component
@@ -35,7 +39,7 @@ RUN npm run build
 # `CGO_ENABLED=0` makes that exact — the SQLite driver is modernc's, pure Go
 # (.goreleaser.yaml:17) — and it is the difference between a Go build that takes
 # a minute and an emulated arm64 one that takes fifteen (#10).
-FROM --platform=$BUILDPLATFORM golang:1.27-alpine AS build
+FROM --platform=$BUILDPLATFORM golang:1.27-alpine@sha256:8a5910f31396cd4d89662f56c68b3ae31d374308270a1c3bd96672ee5ed43414 AS build
 
 WORKDIR /src
 COPY go.mod go.sum ./
@@ -74,7 +78,7 @@ RUN mkdir -p /out/data
 # Distroless static: no shell, no package manager, `nonroot` (65532) as the
 # user, and the two things a static Go program still reads from an OS — zone
 # data and CA roots (#2).
-FROM gcr.io/distroless/static-debian12:nonroot
+FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab
 
 ARG VERSION
 ARG REVISION
