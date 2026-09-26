@@ -98,7 +98,7 @@ Without one, the remaining route is the declarative bootstrap: set
 | Volume | `/data` |
 | Set in the image | `TRACEPAD_DATA_DIR=/data`, `TRACEPAD_LISTEN=:4318` |
 | Health | `HEALTHCHECK` running `tracepad health` |
-| Licences | `/usr/share/doc/tracepad/` |
+| Licences | `/usr/share/doc/tracepad/` — `LICENSE`, `NOTICE`, `THIRD_PARTY_NOTICES` (every Go module and npm package the binary carries) and `third_party/` |
 
 There is no shell in it. The runtime layer is distroless — the binary, CA
 roots, zone data and nothing else — so there is no package manager to run, no

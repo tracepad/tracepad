@@ -10,6 +10,8 @@ project_name: tracepad
 before:
   hooks:
     - make ui
+    # After the bundle: its list of npm packages is half of the file (spec 020 #17).
+    - make notices
 
 builds:
   - main: ./cmd/tracepad
@@ -28,10 +30,12 @@ archives:
         formats: [zip]
     # Listed explicitly rather than left to the defaults: Apache-2.0 §4(d)
     # requires NOTICE to travel with every distribution, and it is not one
-    # of the files GoReleaser picks up on its own.
+    # of the files GoReleaser picks up on its own; THIRD_PARTY_NOTICES is the
+    # licences of what the binary compiles in and bundles.
     files:
       - LICENSE
       - NOTICE
+      - THIRD_PARTY_NOTICES
       - README.md
       - third_party/**/*
 

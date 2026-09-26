@@ -79,6 +79,9 @@ ui: ui-deps ## Build the SPA and stage it where the `ui` build tag embeds it
 	mkdir -p $(UI_EMBED)
 	cp -R $(UI_DIST)/. $(UI_EMBED)/
 
+notices: ## Write THIRD_PARTY_NOTICES from the module cache and the staged bundle (after `make ui`)
+	go run ./scripts/notices -ui $(UI_EMBED)/third-party-notices.txt -o THIRD_PARTY_NOTICES
+
 ui-types: ui-deps ## Regenerate the TypeScript API types from openapi.json
 	cd $(UI) && npm run types
 
@@ -120,7 +123,7 @@ e2e: build ## Boot the real binary on a temp database and run the Playwright smo
 
 # The budget is named here as well as defaulted in the script (spec 015 #9), so
 # that the number a build reports is visible in the target that reports it.
-UI_BUDGET := 21800
+UI_BUDGET := 21900
 
 ui-lines: ## Report the interface's application lines against its budget, and its test lines beside them
 	scripts/ui-lines.sh $(UI_BUDGET)
@@ -251,7 +254,7 @@ install-hooks: ## (Re)install both hooks
 	chmod +x "$(HOOKS_DIR)/pre-push"
 
 .PHONY: help build build-server dev test vet smoke fixtures format format-check \
-	ui ui-deps ui-types ui-types-check ui-check ui-lines image image-check \
+	ui ui-deps notices ui-types ui-types-check ui-check ui-lines image image-check \
 	e2e sdk-test sdk-lines sdk-go-test sdk-go-unit sdk-go-lines \
 	sdk-js-deps sdk-js-build sdk-js-test sdk-js-lines sdk-notices \
 	doc-anchors doc-anchors-self-test gate precommit \

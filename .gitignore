@@ -34,6 +34,8 @@ go.work.sum
 # Tracepad
 bin/
 dist/
+# Written by `make notices` for a release, from the module cache and the bundle (spec 020 #17).
+THIRD_PARTY_NOTICES
 .dev.log
 *.db
 *.db-wal
