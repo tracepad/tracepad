@@ -177,8 +177,8 @@ picture sent through the bridge is kept like any other:
 
 | Call | What it does |
 |---|---|
-| `POST /api/public/media` | The SDK asks where to upload, for a `traceId` of 32 lower-case hex digits. `mediaId` is the SDK's own derivation of the hash, which it checks. `uploadUrl` is `null` when this project already holds the body — the second identical picture sends nothing. |
-| `PUT` the `uploadUrl` | The bytes. The URL is presigned: the SDK sends no credential with this request, so the URL carries a signed token instead, good for an hour — across a restart, because the key it is signed with is kept in the database. The body must match the declared length and SHA-256, or nothing is stored. |
+| `POST /api/public/media` | The SDK asks where to upload, for a `traceId` of 32 lower-case hex digits. `mediaId` is the SDK's own derivation of the hash, which it checks. `uploadUrl` is `null` when this project already holds the body — the second identical picture sends nothing, and its ref is written when its trace's spans arrive. `429` with `Retry-After: 60` when the project has 10,000 uploads waiting for their traces and this one would be another; a trace the project already has is never refused. |
+| `PUT` the `uploadUrl` | The bytes. The URL is presigned: the SDK sends no credential with this request, so the URL carries a signed token instead, good for an hour — across a restart, because the key it is signed with is kept in the database. The body must match the declared length and SHA-256, or nothing is stored. `403`, before a byte of the body is read, when the key that asked for the URL has been revoked since, or the project has deleted or erased traces since (a URL asked for afterwards uploads); `429` at the cap above, for an upload whose trace has not arrived. |
 | `PATCH /api/public/media/{mediaId}` | The SDK's report on the upload; a failure is logged. |
 | `GET /api/public/media/{mediaId}` | The Langfuse record of a body, with a `url` to `GET /api/v1/media/{sha256}` — which, like every read, needs a key of the project. |
 
@@ -202,9 +202,18 @@ wrote it, as the evidence of what the client meant.
 A body only another project holds is still asked for: skipping the upload on a
 hash alone would let any project adopt another's picture by naming it. If the
 SDK uploads for a trace whose spans never arrive, the ref is dropped by the
-hourly sweep a day later, and the body with it. The sweep looks only at the
-refs the channel wrote that are still waiting for their trace, so its cost does
-not grow with the pictures a project keeps.
+hourly sweep a day after the upload, and the body with it — naming the same
+hash again for another trace that has not arrived writes nothing, so it does
+not keep the body longer. The sweep looks only at the refs the channel wrote
+that are still waiting for their trace, so its cost does not grow with the
+pictures a project keeps, and a project may have at most 10,000 of them.
+
+An upload URL names the key that asked for it. Revoking the key voids the URLs
+it obtained, and deleting or erasing traces voids every URL the project issued
+before — a picture that landed after its trace was gone would be stored under
+a ref to nothing. The SDK asks for a URL and PUTs it in one go, so what this
+refuses is the few uploads in transit at that moment; the SDK logs them.
+URLs issued before the upgrade that introduced this are refused once.
 
 ## In the interface
 

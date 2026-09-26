@@ -189,7 +189,7 @@ func TestMediaSharedAcrossAPurge(t *testing.T) {
 	f.arriveWithMedia(t, f.project.ID, hexTrace(1), daysAgo(3), shared, true)
 	f.arriveWithMedia(t, other.ID, hexTrace(2), daysAgo(3), shared, false)
 	if err := f.writer.Submit(t.Context(), &MediaUpload{ProjectID: f.project.ID, TraceID: hexTrace(9),
-		Body: own, Now: sweepNow.UnixNano()}); err != nil {
+		Body: own, Now: sweepNow.UnixNano(), Key: "tp-pk-test", Issued: 1, PendingCap: MaxPendingMediaRefs}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -270,6 +270,7 @@ func TestMediaOrphanRefs(t *testing.T) {
 		{ProjectID: f.project.ID, TraceID: hexTrace(3), Body: settled, Now: daysAgo(3)},
 		{ProjectID: f.project.ID, TraceID: hexTrace(4), Body: resolved, Now: daysAgo(3)},
 	} {
+		upload.Key, upload.Issued, upload.PendingCap = "tp-pk-test", 1, MaxPendingMediaRefs
 		if err := f.writer.Submit(t.Context(), upload); err != nil {
 			t.Fatal(err)
 		}
@@ -315,29 +316,46 @@ func TestMediaOrphanRefs(t *testing.T) {
 	}
 }
 
-// A second identical upload for another trace asks for no bytes: the ref is
-// added when the body is there, and refused when it is not.
+// A second identical upload for another trace asks for no bytes when the body
+// is there, and for the bytes when it is not. The ref is written, settled, for
+// a trace the project has; for a trace not here yet nothing is written, and its
+// spans resolve the SDK's string when they come (#30).
 func TestMediaRefAdd(t *testing.T) {
 	f := newSweepFixture(t)
 	body := mediaBody(9, 4096)
+	refs := func() int64 {
+		return f.count(t, `SELECT COUNT(*) FROM media_refs WHERE sha256 = '`+body.SHA256+`'`)
+	}
 	add := &MediaRefAdd{ProjectID: f.project.ID, SHA256: body.SHA256, TraceID: hexTrace(1)}
 	if err := f.writer.Submit(t.Context(), add); err != nil {
 		t.Fatal(err)
 	}
-	if add.Added {
-		t.Fatal("a ref was added to a body that does not exist")
+	if add.Held {
+		t.Fatal("a body that does not exist is held")
 	}
 	f.arriveWithMedia(t, f.project.ID, hexTrace(2), daysAgo(1), body, false)
+	before := refs()
+
 	add = &MediaRefAdd{ProjectID: f.project.ID, SHA256: body.SHA256, TraceID: hexTrace(1)}
-	if err := f.writer.Submit(t.Context(), add); err != nil {
-		t.Fatal(err)
+	if err := f.writer.Submit(t.Context(), add); err != nil || !add.Held {
+		t.Fatalf("the null answer for a trace not here = %v, %v", add.Held, err)
 	}
-	if !add.Added {
-		t.Fatal("the ref to a stored body was not added")
+	if refs() != before {
+		t.Error("a ref was written for a trace that is not stored")
+	}
+
+	f.arriveWithMedia(t, f.project.ID, hexTrace(3), daysAgo(1), mediaBody(10, 100), false)
+	add = &MediaRefAdd{ProjectID: f.project.ID, SHA256: body.SHA256, TraceID: hexTrace(3)}
+	if err := f.writer.Submit(t.Context(), add); err != nil || !add.Held {
+		t.Fatalf("the null answer for a stored trace = %v, %v", add.Held, err)
+	}
+	if n := f.count(t, `SELECT COUNT(*) FROM media_refs WHERE sha256 = '`+body.SHA256+`'
+	                    AND trace_id = '`+hexTrace(3)+`' AND pending = 0`); n != 1 {
+		t.Errorf("settled refs for the stored trace = %d, want 1", n)
 	}
 	// Idempotent: the SDK retries.
-	if err := f.writer.Submit(t.Context(), add); err != nil || !add.Added {
-		t.Fatalf("a repeated ref = %v, %v", add.Added, err)
+	if err := f.writer.Submit(t.Context(), add); err != nil || !add.Held {
+		t.Fatalf("a repeated ref = %v, %v", add.Held, err)
 	}
 }
 

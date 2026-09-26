@@ -29,6 +29,9 @@ type Store struct {
 	// mediaUploadKey signs the Langfuse channel's upload URLs (spec 041,
 	// Decision 22), read — or minted — once at open.
 	mediaUploadKey []byte
+	// maxPendingMediaRefs is the cap on one project's pending refs (spec
+	// 041 #31): MaxPendingMediaRefs, lowered only by tests.
+	maxPendingMediaRefs int
 }
 
 // Open opens (creating if needed) the database at path and applies pending
@@ -86,7 +89,7 @@ func Open(path string) (*Store, error) {
 	// kept, a connection pays them once.
 	db.SetMaxIdleConns(idleConns())
 	db.SetConnMaxIdleTime(5 * time.Minute)
-	s := &Store{db: db, path: path, fresh: fresh}
+	s := &Store{db: db, path: path, fresh: fresh, maxPendingMediaRefs: MaxPendingMediaRefs}
 	// sql.Open is lazy: real open failures (corrupt file, permissions)
 	// surface from the first statement inside migrate, so the recovery
 	// hint naming the DB path and the newest backup belongs here.
@@ -184,6 +187,9 @@ type Project struct {
 	// payload (spec 041 #6): MediaStore keeps the body, MediaPlaceholder
 	// keeps only a reference that says it was not stored.
 	Media string
+	// MediaGrantsAfter voids the upload URLs issued at or before it (spec
+	// 041 #29), Unix nanoseconds: the last erasure or trace deletion.
+	MediaGrantsAfter int64
 }
 
 // The two values of a project's media setting (spec 041 #6).
@@ -221,7 +227,7 @@ type KeyPair struct {
 
 // projectColumns is the one SELECT list every project read shares, so a column
 // added to the table is added to every reader at once.
-const projectColumns = `id, name, retention_days, raw_retention_days, stats_retention_days, deleted_at, created_at, media`
+const projectColumns = `id, name, retention_days, raw_retention_days, stats_retention_days, deleted_at, created_at, media, media_grants_after`
 
 func scanProject(row interface{ Scan(...any) error }) (*Project, error) {
 	var (
@@ -231,7 +237,8 @@ func scanProject(row interface{ Scan(...any) error }) (*Project, error) {
 		stats     sql.NullInt64
 		deleted   sql.NullInt64
 	)
-	if err := row.Scan(&p.ID, &p.Name, &retention, &raw, &stats, &deleted, &p.CreatedAt, &p.Media); err != nil {
+	if err := row.Scan(&p.ID, &p.Name, &retention, &raw, &stats, &deleted, &p.CreatedAt, &p.Media,
+		&p.MediaGrantsAfter); err != nil {
 		return nil, err
 	}
 	if stats.Valid {

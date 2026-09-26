@@ -1,0 +1,260 @@
+package server
+
+import (
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/tracepad/tracepad/internal/model"
+	"github.com/tracepad/tracepad/internal/otlptest"
+	"github.com/tracepad/tracepad/internal/store"
+)
+
+// The upload channel's lifecycle (spec 041 #28–#31): an upload URL dies with
+// the key that asked for it and with any trace deletion after it, a second
+// identical picture writes no pending ref for a trace that is not here, and a
+// project's pending refs are capped. Every refusal of the PUT comes before a
+// byte of its body.
+
+// putUnread PUTs an endless body at an upload URL and reports the status and
+// how much of the body the server read.
+func (h *harness) putUnread(t *testing.T, upload string) (int, int64) {
+	t.Helper()
+	parsed, err := url.Parse(upload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := &countingReader{}
+	req := httptest.NewRequest("PUT", parsed.RequestURI(), body)
+	rec := httptest.NewRecorder()
+	h.server.Handler().ServeHTTP(rec, req)
+	if rec.Code == http.StatusTooManyRequests && rec.Header().Get("Retry-After") != "60" {
+		t.Errorf("a 429 without Retry-After: 60 (%q)", rec.Header().Get("Retry-After"))
+	}
+	return rec.Code, body.read
+}
+
+// pictureOf is a picture with its hex and base64 SHA-256.
+func pictureOf(seed byte) (picture []byte, sha, hash string) {
+	picture = testPicture(20000, seed)
+	sum := sha256.Sum256(picture)
+	return picture, hex.EncodeToString(sum[:]), base64.StdEncoding.EncodeToString(sum[:])
+}
+
+// trace32 is a trace id of the n-th test trace.
+func trace32(n int) string { return strings.Repeat("0", 30) + hex.EncodeToString([]byte{byte(n)}) }
+
+// TestLangfuseMediaUploadDiesWithItsKey: a URL a second key asked for is
+// refused once that key is revoked, before the body; one the first key asked
+// for still uploads. A token from before grants named their key is refused
+// the same way (#28).
+func TestLangfuseMediaUploadDiesWithItsKey(t *testing.T) {
+	h := newAdminHarness(t)
+	rec := h.call(t, "POST", "/api/v1/projects/"+h.project.ID+"/keys", nil, asAdmin)
+	expectStatus(t, rec, http.StatusCreated)
+	second := decodeJSON[struct {
+		PublicKey string `json:"public_key"`
+		SecretKey string `json:"secret_key"`
+	}](t, rec)
+
+	picture, sha, hash := pictureOf(60)
+	_, theirs := h.langfuseAsk(t, picture, probeTrace, second.SecretKey)
+	_, ours := h.langfuseAsk(t, picture, trace32(2), testSecret)
+	if theirs == nil || ours == nil {
+		t.Fatal("an upload was not asked for")
+	}
+	expectStatus(t, h.call(t, "DELETE", "/api/v1/projects/"+h.project.ID+"/keys/"+second.PublicKey,
+		nil, asAdmin), 200)
+
+	if code, read := h.putUnread(t, *theirs); code != http.StatusForbidden || read != 0 {
+		t.Errorf("the revoked key's URL = %d after reading %d bytes, want 403 and none", code, read)
+	}
+	if h.mediaHeld(t, sha) {
+		t.Fatal("the revoked key's URL stored its body")
+	}
+	if code := h.langfusePut(t, *ours, picture, hash); code != 200 {
+		t.Errorf("the live key's URL = %d, want 200", code)
+	}
+
+	// A token signed the old way — valid signature, no key, no instant.
+	legacy, err := h.server.signUpload(uploadGrant{
+		Project: h.project.ID, Trace: probeTrace, SHA256: sha, MimeType: "image/png",
+		Length: int64(len(picture)), Expires: time.Now().Add(time.Hour).Unix(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := "/api/public/media/" + store.MediaIDFor(sha) + "/upload?token=" + url.QueryEscape(legacy)
+	if code, read := h.putUnread(t, path); code != http.StatusForbidden || read != 0 {
+		t.Errorf("a token without its key = %d after reading %d bytes, want 403 and none", code, read)
+	}
+}
+
+// TestLangfuseMediaUploadAfterDeletion: deleting a trace — or erasing its
+// user — voids every upload URL the project issued before, before the body;
+// a URL asked for afterwards, for the deleted id too, uploads. A retention
+// sweep voids nothing (#29).
+func TestLangfuseMediaUploadAfterDeletion(t *testing.T) {
+	for _, how := range []string{"delete", "erase"} {
+		t.Run(how, func(t *testing.T) {
+			h := newAdminHarness(t)
+			h.seed(t, &model.Trace{ID: probeTrace, UserID: "u1"},
+				&model.Observation{TraceID: probeTrace, ID: probeSpan, Type: model.TypeSpan,
+					Level: model.LevelDefault, StartTime: seedBase, EndTime: seedBase + ms})
+
+			picture, sha, hash := pictureOf(61)
+			other, otherSHA, _ := pictureOf(62)
+			_, forDeleted := h.langfuseAsk(t, picture, probeTrace, testSecret)
+			_, forAnother := h.langfuseAsk(t, other, trace32(3), testSecret)
+			if forDeleted == nil || forAnother == nil {
+				t.Fatal("an upload was not asked for")
+			}
+
+			switch how {
+			case "delete":
+				expectStatus(t, h.call(t, "DELETE", "/api/v1/traces/"+probeTrace+"?confirm="+probeTrace, nil), 200)
+			case "erase":
+				expectStatus(t, h.call(t, "DELETE",
+					"/api/v1/projects/"+h.project.ID+"/users/u1/data?confirm=u1", nil), 200)
+			}
+
+			for name, upload := range map[string]string{"the deleted trace's": *forDeleted, "another trace's": *forAnother} {
+				if code, read := h.putUnread(t, upload); code != http.StatusForbidden || read != 0 {
+					t.Errorf("%s URL from before the %s = %d after reading %d bytes, want 403 and none",
+						name, how, code, read)
+				}
+			}
+			if h.mediaHeld(t, sha) || h.mediaHeld(t, otherSHA) {
+				t.Fatal("a voided URL stored its body")
+			}
+
+			// Asked for afterwards: new data, for any trace.
+			_, after := h.langfuseAsk(t, picture, probeTrace, testSecret)
+			if after == nil {
+				t.Fatal("no upload URL after the deletion")
+			}
+			if code := h.langfusePut(t, *after, picture, hash); code != 200 {
+				t.Errorf("a URL asked for after the %s = %d, want 200", how, code)
+			}
+		})
+	}
+
+	t.Run("retention", func(t *testing.T) {
+		h := newAdminHarness(t)
+		picture, _, hash := pictureOf(63)
+		_, upload := h.langfuseAsk(t, picture, probeTrace, testSecret)
+		if err := h.sweeper.Pass(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		if code := h.langfusePut(t, *upload, picture, hash); code != 200 {
+			t.Errorf("a URL across a retention sweep = %d, want 200", code)
+		}
+	})
+}
+
+// TestLangfuseMediaNullAnswerThenSpans: the project holds X; asked for X for a
+// trace that is not here, it answers null and writes no ref; the trace's
+// spans, carrying the SDK's string, resolve it and settle the ref (#30).
+func TestLangfuseMediaNullAnswerThenSpans(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	picture, sha, hash := pictureOf(64)
+	_, upload := h.langfuseAsk(t, picture, trace32(4), testSecret)
+	if code := h.langfusePut(t, *upload, picture, hash); code != 200 {
+		t.Fatalf("the first upload = %d", code)
+	}
+	refs := func(trace string) (pending, settled int) {
+		t.Helper()
+		pending, settled, err := h.store.MediaRefStates(h.project.ID, trace)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return pending, settled
+	}
+
+	mediaID, again := h.langfuseAsk(t, picture, probeTrace, testSecret)
+	if again != nil {
+		t.Fatalf("a second identical picture was asked for: %s", *again)
+	}
+	if p, s := refs(probeTrace); p+s != 0 {
+		t.Fatalf("the null answer wrote %d pending and %d settled refs for a trace not here", p, s)
+	}
+
+	reference := "@@@langfuseMedia:type=image/png|id=" + mediaID + "|source=base64_data_uri@@@"
+	input, _ := json.Marshal([]any{map[string]any{"role": "user", "content": []any{
+		map[string]any{"type": "image_url", "image_url": map[string]any{"url": reference}}}}})
+	expectStatus(t, h.post(t, "/api/public/otel/v1/traces",
+		encodeExport(t, otlptest.SpanWith("langfuse.observation.input", string(input)))), 200)
+	if got := h.observationInput(t); !strings.Contains(got, `"tracepad_media":"`+sha+`"`) {
+		t.Errorf("the spans' input = %s, want the SDK's string resolved", got)
+	}
+	if p, s := refs(probeTrace); p != 0 || s != 1 {
+		t.Errorf("after the spans the trace has %d pending and %d settled refs, want one settled", p, s)
+	}
+}
+
+// TestLangfuseMediaPendingCap: at the cap, an ask for a trace the project does
+// not have and the PUT of a URL whose ref would be pending answer 429 with
+// Retry-After, the PUT before its body; an ask for a trace the project has
+// is not refused, and once a trace arrives there is room again (#31).
+func TestLangfuseMediaPendingCap(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	h.store.SetMaxPendingMediaRefs(3)
+
+	// The first for the trace the test's span will carry, so that its
+	// arrival settles that ref.
+	traces := []string{probeTrace, trace32(11), trace32(12), trace32(13)}
+	var uploads, mediaIDs []string
+	for i := range 4 {
+		picture, _, _ := pictureOf(byte(70 + i))
+		mediaID, upload := h.langfuseAsk(t, picture, traces[i], testSecret)
+		if upload == nil {
+			t.Fatalf("ask %d got no URL", i)
+		}
+		uploads, mediaIDs = append(uploads, *upload), append(mediaIDs, mediaID)
+	}
+	for i := range 3 {
+		picture, _, hash := pictureOf(byte(70 + i))
+		if code := h.langfusePut(t, uploads[i], picture, hash); code != 200 {
+			t.Fatalf("upload %d = %d", i, code)
+		}
+	}
+
+	picture, _, _ := pictureOf(80)
+	sum := sha256.Sum256(picture)
+	rec := h.call(t, "POST", "/api/public/media", mustJSON(t, map[string]any{
+		"traceId": trace32(20), "contentType": "image/png", "contentLength": len(picture),
+		"sha256Hash": base64.StdEncoding.EncodeToString(sum[:]), "field": "input",
+	}))
+	expectError(t, rec, http.StatusTooManyRequests, "waiting for their traces")
+	if rec.Header().Get("Retry-After") != "60" {
+		t.Errorf("Retry-After = %q, want 60", rec.Header().Get("Retry-After"))
+	}
+	if code, read := h.putUnread(t, uploads[3]); code != http.StatusTooManyRequests || read != 0 {
+		t.Errorf("the fourth PUT at the cap = %d after reading %d bytes, want 429 and none", code, read)
+	}
+
+	// A trace the project has settles its ref, so it is never refused.
+	h.seed(t, &model.Trace{ID: trace32(21)})
+	if _, upload := h.langfuseAsk(t, picture, trace32(21), testSecret); upload == nil {
+		t.Error("an ask for a stored trace at the cap got no URL")
+	}
+
+	// One of the three traces arrives with its picture: its ref settles,
+	// and there is room.
+	reference := "@@@langfuseMedia:type=image/png|id=" + mediaIDs[0] + "|source=base64_data_uri@@@"
+	input, _ := json.Marshal([]any{map[string]any{"role": "user", "content": []any{
+		map[string]any{"type": "image_url", "image_url": map[string]any{"url": reference}}}}})
+	expectStatus(t, h.post(t, "/api/public/otel/v1/traces",
+		encodeExport(t, otlptest.SpanWith("langfuse.observation.input", string(input)))), 200)
+	fourth, _, hash := pictureOf(73)
+	if code := h.langfusePut(t, uploads[3], fourth, hash); code != 200 {
+		t.Errorf("the fourth PUT once there is room = %d, want 200", code)
+	}
+}

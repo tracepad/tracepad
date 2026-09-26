@@ -72,7 +72,7 @@ export interface paths {
         put?: never;
         /**
          * Langfuse SDK: an upload URL for one media body, or null when it is already stored
-         * @description The first call of the Langfuse SDK's media channel. `mediaId` is the SDK's own derivation — the first 22 characters of the URL-safe base64 SHA-256 — which the SDK checks. `uploadUrl` is null when this project already holds the body, in which case the named trace's ref is recorded and nothing is sent; a body only another project holds is still asked for, because the bytes are the proof of possession. Under the `placeholder` setting `uploadUrl` is always null and nothing is kept. The body is read leniently: fields a newer SDK adds are ignored.
+         * @description The first call of the Langfuse SDK's media channel. `mediaId` is the SDK's own derivation — the first 22 characters of the URL-safe base64 SHA-256 — which the SDK checks. `uploadUrl` is null when this project already holds the body, in which case nothing is sent and the named trace's ref is recorded if the project has the trace — otherwise its spans record it when they arrive; a body only another project holds is still asked for, because the bytes are the proof of possession. Under the `placeholder` setting `uploadUrl` is always null and nothing is kept. The body is read leniently: fields a newer SDK adds are ignored.
          */
         post: operations["langfuseMediaUploadURL"];
         delete?: never;
@@ -2637,6 +2637,15 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            /** @description The project has 10,000 uploads waiting for their traces and this one would be another; `Retry-After: 60`. A trace the project has is never refused */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             503: components["responses"]["ServiceUnavailable"];
         };
     };
@@ -2665,7 +2674,7 @@ export interface operations {
                 content?: never;
             };
             400: components["responses"]["BadRequest"];
-            /** @description The token is missing, forged, expired, or for another id */
+            /** @description The token is missing, forged, expired, or for another id; or the key that asked for it has been revoked, or the project has deleted or erased traces since it was issued. Answered before the body is read */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -2676,6 +2685,15 @@ export interface operations {
             };
             /** @description The body is larger than the upload declared */
             413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The project has 10,000 uploads waiting for their traces and this one's trace has not arrived; `Retry-After: 60`. Answered before the body is read */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -96,6 +96,13 @@ const (
 	// differently: a project name that is taken, a deletion of something
 	// already deleted (spec 005).
 	RejectConflict = "conflict"
+	// RejectForbidden is a credential the stored state no longer honours:
+	// an upload URL whose key was revoked, or one an erasure voided
+	// (spec 041 #28, #29).
+	RejectForbidden = "forbidden"
+	// RejectFull is a write refused for a bound the project has reached,
+	// which a retry after a while may find room under (spec 041 #31).
+	RejectFull = "full"
 )
 
 func (r *Rejection) Error() string { return r.Message }

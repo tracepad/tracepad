@@ -120,8 +120,10 @@ func TestMediaHoldersFollowRefs(t *testing.T) {
 	f.checkHolders(t, "a resolved ingest")
 
 	for _, upload := range []*MediaUpload{
-		{ProjectID: f.project.ID, TraceID: hexTrace(4), Body: uploaded, Now: daysAgo(1)},
-		{ProjectID: other.ID, TraceID: hexTrace(5), Body: orphan, Now: daysAgo(3)},
+		{ProjectID: f.project.ID, TraceID: hexTrace(4), Body: uploaded, Now: daysAgo(1),
+			Key: "tp-pk-test", Issued: 1, PendingCap: MaxPendingMediaRefs},
+		{ProjectID: other.ID, TraceID: hexTrace(5), Body: orphan, Now: daysAgo(3),
+			Key: "tp-pk-other", Issued: 1, PendingCap: MaxPendingMediaRefs},
 	} {
 		if err := f.writer.Submit(t.Context(), upload); err != nil {
 			t.Fatal(err)
@@ -129,8 +131,8 @@ func TestMediaHoldersFollowRefs(t *testing.T) {
 	}
 	f.checkHolders(t, "the upload")
 	add := &MediaRefAdd{ProjectID: f.project.ID, SHA256: uploaded.SHA256, TraceID: hexTrace(6)}
-	if err := f.writer.Submit(t.Context(), add); err != nil || !add.Added {
-		t.Fatalf("null answer = %v, %v", add.Added, err)
+	if err := f.writer.Submit(t.Context(), add); err != nil || !add.Held {
+		t.Fatalf("null answer = %v, %v", add.Held, err)
 	}
 	f.checkHolders(t, "the null answer")
 
@@ -414,8 +416,8 @@ func TestMediaResolvedHoldGone(t *testing.T) {
 	// The same race on the null answer: no ref, and the handler asks for
 	// the bytes.
 	add := &MediaRefAdd{ProjectID: b.ID, SHA256: x.SHA256, TraceID: hexTrace(4)}
-	if err := f.writer.Submit(t.Context(), add); err != nil || add.Added {
-		t.Fatalf("null answer after B's hold went = %v, %v; want no ref", add.Added, err)
+	if err := f.writer.Submit(t.Context(), add); err != nil || add.Held {
+		t.Fatalf("null answer after B's hold went = %v, %v; want the bytes asked for", add.Held, err)
 	}
 	f.checkHolders(t, "the refused writes")
 }
