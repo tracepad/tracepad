@@ -315,9 +315,8 @@ func batchFileName(row rawBatchRow) (string, error) {
 // value HTTP cannot carry is a usage error here, not a transport error on the
 // first POST that the retry loop would spend half a minute on.
 //
-// Every credential on the way out — each header value, and the user info and
-// query of `--to` itself — is checked for a Tracepad key before anything is
-// sent (refuseTracepadKey).
+// Everything on the way out — each header value, and `--to` itself — is
+// checked for a Tracepad key before anything is sent (refuseTracepadKey).
 func (r *run) exportHeaders(to string, flags headerList, allowKey bool) (map[string]string, error) {
 	out := map[string]string{}
 	var names []string
@@ -335,32 +334,27 @@ func (r *run) exportHeaders(to string, flags headerList, allowKey bool) (map[str
 				"which no HTTP header value may", key)
 		}
 		name := http.CanonicalHeaderKey(key)
+		if reservedHeaders[name] {
+			return nil, usageErrorf("--header %s is set by the export itself: each batch goes out "+
+				"under the type and encoding it has, and --gzip is how to compress it", name)
+		}
 		if _, seen := out[name]; !seen {
 			names = append(names, name)
 		}
 		out[name] = value
 	}
 	for _, name := range names {
-		if err := r.refuseTracepadKey("--header "+name, credentialsIn(out[name]), allowKey); err != nil {
+		if err := r.refuseTracepadKey("--header "+name, out[name], allowKey); err != nil {
 			return nil, err
 		}
 	}
-	// Go turns user info in the URL into an Authorization header of its own,
-	// and a query string goes out on every request: both are credentials the
-	// receiver gets. User info is not refused as such — a collector behind
-	// Basic auth is reached that way — only a Tracepad key in it is.
-	if parsed, err := url.Parse(to); err == nil {
-		var found []string
-		if parsed.User != nil {
-			password, _ := parsed.User.Password()
-			found = append(found, parsed.User.Username(), password)
-		}
-		for _, values := range parsed.Query() {
-			found = append(found, values...)
-		}
-		if err := r.refuseTracepadKey("--to", found, allowKey); err != nil {
-			return nil, err
-		}
+	// The URL whole and raw — user info, path and query as they will go out:
+	// Go turns user info into an Authorization header of its own, and sends
+	// the path and query verbatim, pairs a query parser would drop included.
+	// User info is not refused as such — a collector behind Basic auth is
+	// reached that way — only a Tracepad key in it is.
+	if err := r.refuseTracepadKey("--to", to, allowKey); err != nil {
+		return nil, err
 	}
 	if r.opt.Env("OTEL_EXPORTER_OTLP_HEADERS") != "" {
 		// Said whenever it is set, and without the value: its reader may
@@ -372,26 +366,40 @@ func (r *run) exportHeaders(to string, flags headerList, allowKey bool) (map[str
 	return out, nil
 }
 
-// refuseTracepadKey refuses a credential bound for the receiver that is a
-// Tracepad key. The key this command reads the archive with — the source's —
-// is refused always: no receiver has a use for it. Any other `tp-sk-` is
-// refused unless --allow-tracepad-key says the receiver is a Tracepad server
-// of the same owner and the key is its own. The error names where the key
-// was, never the key.
-func (r *run) refuseTracepadKey(where string, candidates []string, allowKey bool) error {
-	for _, candidate := range candidates {
-		if candidate == "" {
-			continue
-		}
-		// A whole token, not a substring: an operator's admin token can be
-		// any string at all, and a short one would be found inside
-		// unrelated values.
-		if r.key != "" && candidate == r.key {
-			// A refusal, not a usage error: the message is the whole
-			// point, and the synopsis printed under it would bury it.
-			return fmt.Errorf("%s carries the key this command reads your project with; the "+
-				"receiver would get admin access to your project. --allow-tracepad-key does "+
-				"not change that: give the receiver its own credentials", where)
+// reservedHeaders are the ones the export sets per batch. A --header naming
+// one would relabel every body: protobuf announced as JSON, a plain body as
+// gzip — and the receiver's 400 would stop the export.
+var reservedHeaders = map[string]bool{
+	"Content-Type": true, "Content-Encoding": true, "Content-Length": true, "Host": true,
+}
+
+// refuseTracepadKey refuses text bound for the receiver that holds a Tracepad
+// key (spec 019 #14). It reads no authorization scheme — Bearer, Basic,
+// Token, a query parameter, a path segment are all just text — so it is a
+// superset of whatever the server takes for a credential, and nothing is left
+// to keep in step with it. It looks at the text as given, percent-decoded,
+// and with every run that could be base64 decoded, one level:
+//
+//   - one of the command's own keys — the one it reads the archive with and,
+//     when set, TRACEPAD_ADMIN_TOKEN — is refused always; no receiver has a
+//     use for the source's credentials, and --allow-tracepad-key does not
+//     change that;
+//   - `tp-sk-` in any case is refused unless --allow-tracepad-key says the
+//     receiver is a Tracepad of the same owner and the key is its own.
+//
+// The error names where the key was, never the key.
+func (r *run) refuseTracepadKey(where, text string, allowKey bool) error {
+	own := []string{r.key, r.opt.Env("TRACEPAD_ADMIN_TOKEN")}
+	for _, candidate := range readings(text) {
+		for _, key := range own {
+			if key != "" && holdsKey(candidate, key) {
+				// A refusal, not a usage error: the message is the whole
+				// point, and the synopsis printed under it would bury it.
+				return fmt.Errorf("%s carries a key this command holds for your Tracepad "+
+					"(TRACEPAD_API_KEY, --key or TRACEPAD_ADMIN_TOKEN); the receiver would get "+
+					"admin access to your project. --allow-tracepad-key does not change that: give "+
+					"the receiver its own credentials", where)
+			}
 		}
 		if !allowKey && strings.Contains(strings.ToLower(candidate), "tp-sk-") {
 			return fmt.Errorf("%s carries a Tracepad project key; the receiver would get admin "+
@@ -403,29 +411,77 @@ func (r *run) refuseTracepadKey(where string, candidates []string, allowKey bool
 	return nil
 }
 
-// credentialsIn is everything in a header value a server could take for a
-// key, read the way this server's own `credential` reads an Authorization
-// header: the value whole, the token after `Bearer`, and after `Basic` the
-// decoded pair and both of its halves. Basic is how a Langfuse SDK sends a
-// Tracepad key, and in base64 the `tp-sk-` is not there to see.
-func credentialsIn(value string) []string {
-	value = strings.TrimSpace(value)
-	out := []string{value}
-	scheme, rest, found := strings.Cut(value, " ")
-	if !found {
-		return out
+// readings is text as the receiver might read it: as given, percent-decoded,
+// and every run of it that decodes as base64 — padded or not, standard or
+// URL-safe — decoded. The runs are cut three ways, because `/` and `+` belong
+// to the standard alphabet and `-` and `_` to the URL-safe one, and a path or
+// a query puts `/` and `=` around a token.
+func readings(text string) []string {
+	out := []string{text}
+	if decoded, err := url.PathUnescape(text); err == nil && decoded != text {
+		out = append(out, decoded)
 	}
-	rest = strings.TrimSpace(rest)
-	switch strings.ToLower(scheme) {
-	case "bearer":
-		out = append(out, rest)
-	case "basic":
-		if decoded, err := base64.StdEncoding.DecodeString(rest); err == nil {
-			user, password, _ := strings.Cut(string(decoded), ":")
-			out = append(out, string(decoded), user, password)
+	for _, surface := range append([]string(nil), out...) {
+		for _, alphabet := range []string{"+/-_", "+/", "-_"} {
+			runs := strings.FieldsFunc(surface, func(c rune) bool {
+				return !isAlnum(c) && !strings.ContainsRune(alphabet, c)
+			})
+			for _, run := range runs {
+				if decoded, ok := base64Text(run); ok {
+					out = append(out, decoded)
+				}
+			}
 		}
 	}
 	return out
+}
+
+// base64Text decodes a run that is long enough to hide a key, in the first
+// encoding that takes it.
+func base64Text(run string) (string, bool) {
+	if len(run) < 8 {
+		return "", false
+	}
+	for _, encoding := range []*base64.Encoding{base64.RawStdEncoding, base64.RawURLEncoding} {
+		if decoded, err := encoding.DecodeString(run); err == nil {
+			return string(decoded), true
+		}
+	}
+	return "", false
+}
+
+// holdsKey reports whether text holds key. A key of 16 characters or more is
+// found anywhere: nothing ordinary contains one by chance. A shorter one —
+// an operator's admin token can be any string — is found only as a whole
+// token, bounded by characters no key is made of, so `dev` is not found in
+// `development`.
+func holdsKey(text, key string) bool {
+	if len(key) >= 16 {
+		return strings.Contains(text, key)
+	}
+	for from := 0; ; {
+		at := strings.Index(text[from:], key)
+		if at < 0 {
+			return false
+		}
+		at += from
+		end := at + len(key)
+		if (at == 0 || !isKeyByte(text[at-1])) && (end == len(text) || !isKeyByte(text[end])) {
+			return true
+		}
+		from = at + 1
+	}
+}
+
+func isAlnum(c rune) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9'
+}
+
+// isKeyByte is what a key token is made of: letters, digits, `-`, `_`, `.`
+// and `~`. Anything else — space, `:`, `=`, `/`, `&`, `;` — is where a token
+// ends.
+func isKeyByte(c byte) bool {
+	return isAlnum(rune(c)) || c == '-' || c == '_' || c == '.' || c == '~'
 }
 
 // validHeaderName is RFC 7230's token: the characters a header name may hold.

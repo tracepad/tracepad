@@ -231,9 +231,9 @@ manifest.jsonl, so ls is in replay order. --dry-run prints what would be sent
 and sends nothing. The summary ends with how many traces started before the
 archive begins, which are the ones no export can carry. The receiver's
 credentials go in --header; OTEL_EXPORTER_OTLP_HEADERS is not read. A Tracepad
-key bound for the receiver is refused: the one this command uses always, any
-other tp-sk-… unless --allow-tracepad-key says the receiver is a Tracepad
-server of yours.
+key bound for the receiver, in a header or in --to, is refused: the ones this
+command holds (its key, TRACEPAD_ADMIN_TOKEN) always, any other tp-sk-… unless
+--allow-tracepad-key says the receiver is a Tracepad server of yours.
 
 Evals (spec 014). The loop is: declare the configs, push the cases, open the
 run, stamp each trace with tracepad.run_id and tracepad.item_id, post the

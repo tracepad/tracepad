@@ -399,6 +399,7 @@ func TestExportHeadersTable(t *testing.T) {
 		to    string
 		flags []string
 		allow bool
+		env   map[string]string
 		want  map[string]string
 		// refused is a fragment of the error, empty when none is wanted.
 		refused string
@@ -421,9 +422,9 @@ func TestExportHeadersTable(t *testing.T) {
 		{name: "a tp-sk- the flag allows", flags: []string{"authorization=Bearer tp-sk-0123"}, allow: true,
 			want: map[string]string{"Authorization": "Bearer tp-sk-0123"}},
 		{name: "the command's own key as a bearer", flags: []string{"authorization=Bearer " + own},
-			refused: "the key this command reads"},
+			refused: "a key this command holds"},
 		{name: "the command's own key inside Basic, flag or not", flags: []string{"authorization=" + basic("x:"+own)},
-			allow: true, refused: "the key this command reads"},
+			allow: true, refused: "a key this command holds"},
 		{name: "the own key is a token, not a substring", flags: []string{"x-env=" + own + "-and-more"},
 			want: map[string]string{"X-Env": own + "-and-more"}},
 		{name: "a tp-sk- in the url's user info", to: "https://pk:tp-sk-0123@collector.example/v1/traces",
@@ -432,10 +433,41 @@ func TestExportHeadersTable(t *testing.T) {
 			refused: "--to carries a Tracepad"},
 		{name: "a collector's own Basic in user info", to: "https://user:secret@collector.example/v1/traces",
 			want: map[string]string{}},
+		// Review round 2: whatever the scheme, the separator or the
+		// encoding, the text is read for a key.
+		{name: "a query pair a parser would drop", to: "https://c.example/v1/traces?key=tp-sk-0123;x=y",
+			refused: "--to carries a Tracepad"},
+		{name: "a query name", to: "https://c.example/v1/traces?tp-sk-0123", refused: "--to carries a Tracepad"},
+		{name: "a path segment", to: "https://c.example/v1/traces/tp-sk-0123", refused: "--to carries a Tracepad"},
+		{name: "percent-encoded", to: "https://c.example/v1/traces?key=tp%2Dsk%2D0123",
+			refused: "--to carries a Tracepad"},
+		{name: "the own key under another scheme, flag or not", flags: []string{"x-api-key=Token " + own},
+			allow: true, refused: "a key this command holds"},
+		{name: "the own key after a tab", flags: []string{"authorization=Bearer\t" + own},
+			refused: "a key this command holds"},
+		{name: "the own key in the url", to: "https://c.example/v1/traces?k=" + own, allow: true,
+			refused: "a key this command holds"},
+		{name: "unpadded Basic", flags: []string{"authorization=Basic " +
+			base64.RawStdEncoding.EncodeToString([]byte("tp-pk-1:tp-sk-XYZ"))}, refused: "Tracepad project key"},
+		{name: "URL-safe Basic", flags: []string{"authorization=Basic " +
+			base64.URLEncoding.EncodeToString([]byte("tp-pk-1:tp-sk-\xfb\xff"))}, refused: "Tracepad project key"},
+		{name: "the server's admin token from the environment",
+			env:   map[string]string{"TRACEPAD_ADMIN_TOKEN": "a-long-admin-token-0001"},
+			flags: []string{"authorization=Bearer a-long-admin-token-0001"}, allow: true,
+			refused: "a key this command holds"},
+		{name: "a short admin token inside a word is not it",
+			env:   map[string]string{"TRACEPAD_ADMIN_TOKEN": "dev"},
+			flags: []string{"x-env=development"}, want: map[string]string{"X-Env": "development"}},
+		{name: "a short admin token as a word is",
+			env:   map[string]string{"TRACEPAD_ADMIN_TOKEN": "dev"},
+			flags: []string{"x-token=key:dev"}, refused: "a key this command holds"},
+		{name: "a header the export sets itself", flags: []string{"content-type=application/json"},
+			refused: "set by the export itself"},
+		{name: "the encoding too", flags: []string{"Content-Encoding=gzip"}, refused: "set by the export itself"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var errOut bytes.Buffer
-			r := newRun(Options{Stderr: &errOut, Env: func(string) string { return "" }})
+			r := newRun(Options{Stderr: &errOut, Env: func(key string) string { return tc.env[key] }})
 			r.key = own
 			to := tc.to
 			if to == "" {
@@ -446,7 +478,8 @@ func TestExportHeadersTable(t *testing.T) {
 				if err == nil || !strings.Contains(err.Error(), tc.refused) {
 					t.Fatalf("err = %v, want one saying %q", err, tc.refused)
 				}
-				if strings.Contains(err.Error(), own) || strings.Contains(err.Error(), "tp-sk-0123") {
+				if strings.Contains(err.Error(), own) || strings.Contains(err.Error(), "tp-sk-0123") ||
+					strings.Contains(err.Error(), "admin-token-0001") {
 					t.Errorf("the refusal repeats the key: %v", err)
 				}
 				return

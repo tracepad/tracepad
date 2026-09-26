@@ -87,8 +87,11 @@ one on the command line wins.
 The receiver's credentials go in `--header` and nowhere else.
 `OTEL_EXPORTER_OTLP_HEADERS` is **not** read: on a machine that sends traces to
 Tracepad it holds your Tracepad key, and that key is not the receiver's
-business. If it is set and you pass no `--header`, the command says it ignored
-it.
+business. Whenever it is set, the command says it ignored it.
+
+`Content-Type`, `Content-Encoding`, `Content-Length` and `Host` are not yours to
+set: each batch goes out under the type and encoding it has, and `--gzip` is how
+to compress it.
 
 Into Langfuse, whose OTLP endpoint takes a Langfuse project's public and secret
 key as Basic auth:
@@ -114,15 +117,20 @@ are on a local link more often than not.
 **The receiver is not authenticated by your project key.** The key opens *this*
 server's archive; the receiver's credentials are whatever it wants, and they go
 in `--header`. A Tracepad key on its way to the receiver is refused before
-anything is sent — the one the command is using, or anything starting
-`tp-sk-`, whether it is a header's value, a bearer token, inside a Basic pair,
-or in the `--to` URL itself:
+anything is sent. The command reads every header value and the `--to` URL
+whole — as written, percent-decoded, and with anything base64 decoded — so the
+scheme does not matter: a bearer token, a Basic pair, a query parameter, a
+path segment. The key the command is using, and `TRACEPAD_ADMIN_TOKEN` when it
+is set, are refused outright:
 
 ```
 $ tracepad export --otlp --to https://otlp.example.com/v1/traces \
     --header "authorization=Bearer $TRACEPAD_API_KEY"
-tracepad: --header Authorization carries a Tracepad project key; the receiver would get admin access to your project. …
+tracepad: --header Authorization carries a key this command holds for your Tracepad (TRACEPAD_API_KEY, --key or TRACEPAD_ADMIN_TOKEN); the receiver would get admin access to your project. --allow-tracepad-key does not change that: give the receiver its own credentials
 ```
+
+Any other key starting `tp-sk-` is refused the same way, with a message that
+names the one way through.
 
 The one receiver whose own credentials are such a key is another Tracepad —
 moving to a new server, say. Give it *that* server's key, and say so with
