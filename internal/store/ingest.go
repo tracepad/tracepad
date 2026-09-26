@@ -79,12 +79,14 @@ func (b *IngestBatch) apply(tx *sql.Tx) error {
 	if arrived == 0 {
 		arrived = time.Now().UnixNano()
 	}
-	if err := mediaStillThere(tx, b.Resolved); err != nil {
+	if err := mediaStillThere(tx, b.ProjectID, b.Resolved); err != nil {
 		return err
 	}
 	// The bodies first: every ref below, the raw batch's included, names
 	// a row that has to exist (spec 041 #2).
-	if err := writeMedia(tx, b.ProjectID, b.Media, b.MediaRefs, arrived); err != nil {
+	types := declaredTypes(b.Media)
+	held, err := writeMedia(tx, b.ProjectID, b.Media, types, b.MediaRefs, arrived)
+	if err != nil {
 		return err
 	}
 	if b.Raw != nil {
@@ -102,7 +104,7 @@ func (b *IngestBatch) apply(tx *sql.Tx) error {
 		).Scan(&rawID); err != nil {
 			return fmt.Errorf("store raw batch: %w", err)
 		}
-		if err := writeRawMediaRefs(tx, rawID, b.RawMedia); err != nil {
+		if err := writeRawMediaRefs(tx, b.ProjectID, rawID, b.RawMedia, types, held, arrived); err != nil {
 			return err
 		}
 	}

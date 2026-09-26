@@ -86,10 +86,14 @@ func (r *traceRemoval) apply(tx *sql.Tx) (DeleteCounts, error) {
 	}
 	// The traces' media refs, and the bodies nothing points at any more
 	// (spec 041 #3). A body a raw batch still names stays: the batch
-	// outlives the trace here, as it always has (#3 above).
-	if counts.Media, counts.MediaBytes, err = dropTraceMedia(tx, r.projectID, r.ids); err != nil {
+	// outlives the trace here, as it always has (#3 above). The answer
+	// counts what the project stopped holding (spec 041 #27), whether or
+	// not another project keeps the bytes.
+	drop, err := dropTraceMedia(tx, r.projectID, r.ids)
+	if err != nil {
 		return counts, err
 	}
+	counts.Media, counts.MediaBytes = drop.Released, drop.ReleasedBytes
 	// Text that is gone must not remain findable (spec 011 #7).
 	if err := deleteTraceSearchEntries(tx, r.projectID, r.ids); err != nil {
 		return counts, err
@@ -297,8 +301,9 @@ func (s *Store) tracesPreview(projectID, owned string, args ...any) (DeleteCount
 			return counts, nil, fmt.Errorf("count the %s: %w", table.name, err)
 		}
 	}
-	// The bodies only these traces point at (spec 041 #11). Raw batches
-	// are not touched here, so a body one still names is not counted.
+	// The bodies the project stops holding with these traces (spec 041
+	// #11, #27). Raw batches are not touched here, so a body one of the
+	// project's still names is not counted.
 	if counts.Media, counts.MediaBytes, err = s.mediaFreed(projectID, owned, args, "", nil); err != nil {
 		return counts, nil, err
 	}

@@ -603,7 +603,7 @@ object in their place ([media.md](media.md)):
 
 Every read — a trace, an observation's payloads, search, the CLI, MCP —
 returns that object as it is; this endpoint is where the bytes are. It answers
-them in the MIME type the first client to send them declared, with
+them in the MIME type this project stored them under, with
 `Cache-Control: private, max-age=31536000, immutable` (with `Vary:
 Authorization, Cookie, X-Tracepad-Project`, so a browser's cache never answers
 one project with another's body), `X-Content-Type-Options: nosniff` and a

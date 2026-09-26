@@ -391,16 +391,22 @@ func (sw *Sweeper) sweepOrphanMedia(ctx context.Context, now int64) (int64, erro
 	if err != nil {
 		return 0, err
 	}
+	// The holds of the same page out of step with the refs (spec 041 #26).
+	stale, missing, err := sw.store.holdDrift(sw.mediaCursor, next)
+	if err != nil {
+		return 0, err
+	}
 	sw.mediaCursor = next
-	if len(refs) == 0 && len(bodies) == 0 {
+	if len(refs) == 0 && len(bodies) == 0 && len(stale) == 0 && len(missing) == 0 {
 		return 0, nil
 	}
-	job := &mediaSweep{Refs: refs, Bodies: bodies}
+	job := &mediaSweep{Refs: refs, Bodies: bodies, Stale: stale, Missing: missing, Now: now}
 	if err := sw.writer.Submit(ctx, job); err != nil {
 		return 0, err
 	}
-	if job.Deleted > 0 || job.Dropped > 0 {
-		logger().Info("collected orphaned media", "refs", job.Dropped, "bodies", job.Deleted)
+	if job.Deleted > 0 || job.Dropped > 0 || job.Released > 0 || job.Restored > 0 {
+		logger().Info("collected orphaned media", "refs", job.Dropped, "holds_released", job.Released,
+			"holds_restored", job.Restored, "bodies", job.Deleted)
 	}
 	// Bodies only: a dropped or settled ref frees no page worth a vacuum.
 	return job.Deleted, nil
@@ -574,9 +580,11 @@ func (t *traceSweep) apply(tx *sql.Tx) error {
 		return fmt.Errorf("sweep payloads: %w", err)
 	}
 	// Media follows its traces (spec 041 #3): no window of its own.
-	if t.Media, _, err = dropTraceMedia(tx, t.ProjectID, ids); err != nil {
+	drop, err := dropTraceMedia(tx, t.ProjectID, ids)
+	if err != nil {
 		return err
 	}
+	t.Media = drop.Collected
 	// In the same transaction as the rows themselves: an index that outlives
 	// a deletion is a retention promise broken (spec 011 #7).
 	return deleteTraceSearchEntries(tx, t.ProjectID, ids)
@@ -616,9 +624,11 @@ func (r *rawSweep) apply(tx *sql.Tx) error {
 	if len(ids) == 0 {
 		return nil
 	}
-	if r.Media, _, err = dropRawMedia(tx, ids); err != nil {
+	drop, err := dropRawMedia(tx, r.ProjectID, ids)
+	if err != nil {
 		return err
 	}
+	r.Media = drop.Collected
 	r.Deleted, err = deleteIn(tx, `DELETE FROM raw_batches WHERE id IN`, nil, ids)
 	if err != nil {
 		return fmt.Errorf("sweep raw batches: %w", err)
@@ -672,9 +682,10 @@ func (p *projectPurge) apply(tx *sql.Tx) error {
 	if !p.Purged {
 		return nil
 	}
-	// Nor has `media_refs` (schema 0021): what is left of it — a ref the
-	// Langfuse channel wrote for a trace that never arrived — goes here,
-	// with the bodies only this project pointed at (spec 041 #3).
+	// Nor have `media_refs` and `media_holders` (schemas 0021, 0022): what
+	// is left of them — a ref the Langfuse channel wrote for a trace that
+	// never arrived — goes here, with the bodies only this project pointed
+	// at (spec 041 #3).
 	if err := dropProjectMedia(tx, p.ProjectID); err != nil {
 		return err
 	}

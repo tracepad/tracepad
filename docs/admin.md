@@ -188,9 +188,13 @@ destructive either way and needs no confirmation: `tracepad retention set
 --media placeholder`.
 
 Every dry run of a deletion — a window that shrinks, an erasure, a trace
-deletion, a project's — names the media bodies it would free as `media` and
-their decoded bytes as `media_bytes`: only the bodies nothing staying behind
-points at.
+deletion, a project's — and every confirmed answer names the media bodies the
+project would stop holding as `media` and their decoded bytes as
+`media_bytes`: the bodies none of the project's traces or raw batches staying
+behind points at. The figure is the project's own, like the one
+`GET /api/v1/system` reports: a body another project also holds is counted,
+although its bytes stay on disk for that project, and a project's deletion no
+longer says how much of what it counts leaves the disk.
 
 ## Erasing a user's data
 

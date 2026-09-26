@@ -87,8 +87,12 @@ Measured on one trace with a 1 MiB photograph sent to five generations:
 | Raw body, compressed | 1.38 MB | 536 B |
 | Media | — | one 1 MiB body |
 
-When two clients send the same bytes under two MIME types, the first stored
-type is the body's; each reference carries the type its own client declared.
+The bytes are shared, but what a project sees of them is its own: the type is
+the one **this project** first stored the body under, and the Langfuse record's
+`uploadedAt` is when this project's hold began. Another project sending the
+same bytes first, under another type, changes neither. Within one project the
+first stored type is the one served; each reference still carries the type its
+own client declared, and the interface draws it under that.
 
 ## Reading the bytes
 
@@ -96,12 +100,16 @@ type is the body's; each reference carries the type its own client declared.
 GET /api/v1/media/{sha256}
 ```
 
-answers the bytes with their `Content-Type`, cached for a year and
+answers the bytes with the `Content-Type` this project stored them under,
+cached for a year and
 `immutable` (the address is the content), and keyed in the browser's cache by
 the credential and the project that asked. It answers only a project that
 points at the body — from one of its traces or one of its raw batches — and
 `404` for any other hash, so a hash that appeared in a log is not a way into
-another project's pictures. See [api.md](api.md#media).
+another project's pictures. Whether a project holds a body is looked up by the
+hash and the project together; another project's rows are never read, so a
+hash only another project holds costs the same to refuse as one nobody holds.
+See [api.md](api.md#media).
 
 Every body is served with `X-Content-Type-Options: nosniff` and a sandboxing
 `Content-Security-Policy`, and anything that is not an image, audio or video is
@@ -146,8 +154,10 @@ trace or a raw batch points at it, and goes with the last one:
 
 Each of those collects the bodies nothing points at any more, in the same
 transaction. A body another project still points at survives — refs carry the
-project, bodies are shared. Every dry run names the bodies a deletion would
-free (`media`, `media_bytes`), and `GET /api/v1/system` reports what the
+project, bodies are shared. Every dry run and every confirmed deletion names
+the bodies the project would stop holding (`media`, `media_bytes`) — whether
+or not another project keeps the same bytes on disk, so a count never says
+what any other project holds — and `GET /api/v1/system` reports what the
 project's media costs:
 
 ```json
@@ -200,10 +210,14 @@ not grow with the pictures a project keeps.
 
 In an observation's input and output panel, a reference to an image is a
 **thumbnail** — click it to open the full image in a new tab — with its type
-and size under it. Any other file is a **chip** with its type and size that
-downloads it. A reference with `"stored": false` is a muted chip reading
-*not stored (project setting)*. The JSON below still shows every reference as
-data. See [ui.md](ui.md#payloads).
+and size under it, drawn under the type its own reference declared. Any other
+file is a **chip** with its type and size that downloads it, named by the
+start of its hash with an extension only for common image, audio, video, PDF
+and text types: anything else, `text/html` and `image/svg+xml` included, is
+saved with none, so a file that declared itself something a desktop would run
+is never saved as one. A reference with `"stored": false` is a muted chip
+reading *not stored (project setting)*. The JSON below still shows every
+reference as data. See [ui.md](ui.md#payloads).
 
 ## The way out
 

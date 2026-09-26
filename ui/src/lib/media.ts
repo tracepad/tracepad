@@ -46,9 +46,53 @@ export function isPicture(ref: MediaRef): boolean {
 	return ref.stored !== false && ref.mime_type.startsWith('image/');
 }
 
-/** A file name for a download: the hash's start and the type's extension. */
+/**
+ * The only extensions a download is named with (spec 041 #32): types whose
+ * usual desktop handler is a viewer or a player. The type is the client's
+ * claim, and an extension a desktop runs on a double-click — `.hta`, `.exe`,
+ * or `.html` and `.svg`, which open in a browser from disk — would turn it
+ * into one.
+ */
+const extensions: Record<string, string> = {
+	'image/png': 'png',
+	'image/jpeg': 'jpg',
+	'image/jpg': 'jpg',
+	'image/gif': 'gif',
+	'image/webp': 'webp',
+	'image/avif': 'avif',
+	'image/heic': 'heic',
+	'image/heif': 'heif',
+	'image/bmp': 'bmp',
+	'image/tiff': 'tiff',
+	'audio/mpeg': 'mp3',
+	'audio/mp3': 'mp3',
+	'audio/wav': 'wav',
+	'audio/x-wav': 'wav',
+	'audio/wave': 'wav',
+	'audio/ogg': 'ogg',
+	'audio/oga': 'ogg',
+	'audio/opus': 'opus',
+	'audio/flac': 'flac',
+	'audio/aac': 'aac',
+	'audio/mp4': 'm4a',
+	'audio/webm': 'webm',
+	'video/webm': 'webm',
+	'video/mp4': 'mp4',
+	'video/quicktime': 'mov',
+	'video/mpeg': 'mpeg',
+	'video/ogg': 'ogv',
+	'application/pdf': 'pdf',
+	'text/plain': 'txt',
+	'application/json': 'json'
+};
+
+/**
+ * A file name for a download: the hash's start, and an extension only when
+ * the type is on the list above — none otherwise, which nothing opens without
+ * asking.
+ */
 export function fileName(ref: MediaRef): string {
-	const subtype = ref.mime_type.split('/')[1]?.split(/[+;]/)[0] ?? '';
-	const extension = /^[a-z0-9.-]{1,10}$/i.test(subtype) ? `.${subtype}` : '';
+	const type = ref.mime_type.split(';')[0].trim().toLowerCase();
+	const extension = Object.hasOwn(extensions, type) ? `.${extensions[type]}` : '';
 	return ref.tracepad_media.slice(0, 12) + extension;
 }

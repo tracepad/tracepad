@@ -196,8 +196,10 @@ func TestMediaSharedAcrossAPurge(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if preview.Media != 1 || preview.MediaBytes != 4500 {
-		t.Errorf("project preview = %d bodies, %d bytes; want only its own", preview.Media, preview.MediaBytes)
+	// Both bodies: the preview counts what the project stops holding, the
+	// shared one included, not what leaves the disk (Decision 27).
+	if preview.Media != 2 || preview.MediaBytes != 12500 {
+		t.Errorf("project preview = %d bodies, %d bytes; want both it holds", preview.Media, preview.MediaBytes)
 	}
 
 	if _, err := f.store.db.Exec(`UPDATE projects SET deleted_at = ? WHERE id = ?`, daysAgo(10), f.project.ID); err != nil {

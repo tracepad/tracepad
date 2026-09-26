@@ -20,6 +20,13 @@ import (
 // every path that deletes traces or raw batches deletes their refs in its own
 // transaction and collects the bodies left with none, the way it collects
 // payloads.
+//
+// What a project sees of a body is its own (Decision 25): `media_holders`
+// keeps, per body and project that points at it, the type that project
+// stored it under and when its hold began. The row is written with the
+// project's first ref to the body and deleted with its last, in the same
+// transaction, so "does this project hold this body" is a seek on the pair
+// (Decision 26) and never looks at another project's rows.
 
 // MediaBody is one body to store, and MediaRef one trace pointing at one
 // body: the walk's own types, written as it found them.
@@ -61,23 +68,70 @@ func shaPrefixOf(mediaID string) (string, bool) {
 }
 
 // writeMedia stores an ingest's bodies and refs inside its transaction. A body
-// already stored is left as it is — the first stored type wins (spec 041, edge
-// cases) — and a ref is written only while its body exists: a resolved
-// Langfuse id names a body read outside this transaction, which a deletion may
-// have collected since. Ingest writes a ref with its trace, so the ref is
-// settled, and one the Langfuse channel left pending is settled by it.
-func writeMedia(tx *sql.Tx, projectID string, bodies []MediaBody, refs []MediaRef, now int64) error {
+// already stored is left as it is — its bytes are the same whoever sent them —
+// and a ref is written only while its body exists: a resolved Langfuse id
+// names a body read outside this transaction, which a deletion may have
+// collected since. Ingest writes a ref with its trace, so the ref is settled,
+// and one the Langfuse channel left pending is settled by it. The project's
+// hold is recorded with its first ref, under the type this batch declared
+// (Decision 25). It answers the bodies it recorded a hold of, so that the
+// batch's raw refs do not record them again.
+func writeMedia(tx *sql.Tx, projectID string, bodies []MediaBody, types map[string]string, refs []MediaRef,
+	now int64) (map[string]bool, error) {
 	if err := writeMediaBodies(tx, bodies, now); err != nil {
-		return err
+		return nil, err
 	}
+	held := map[string]bool{}
 	for _, ref := range refs {
-		if _, err := tx.Exec(
+		result, err := tx.Exec(
 			`INSERT INTO media_refs (sha256, project_id, trace_id, created_at, pending)
 			 SELECT ?, ?, ?, ?, 0 WHERE EXISTS (SELECT 1 FROM media WHERE sha256 = ?)
 			 ON CONFLICT (sha256, project_id, trace_id) DO UPDATE SET pending = 0`,
-			ref.SHA256, projectID, ref.TraceID, now, ref.SHA256); err != nil {
-			return fmt.Errorf("store media ref %s: %w", ref.SHA256, err)
+			ref.SHA256, projectID, ref.TraceID, now, ref.SHA256)
+		if err != nil {
+			return nil, fmt.Errorf("store media ref %s: %w", ref.SHA256, err)
 		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return nil, fmt.Errorf("store media ref %s: %w", ref.SHA256, err)
+		}
+		// One hold per body, however many of the batch's traces point at
+		// it.
+		if n == 0 || held[ref.SHA256] {
+			continue
+		}
+		held[ref.SHA256] = true
+		if err := holdMedia(tx, projectID, ref.SHA256, types[ref.SHA256], now); err != nil {
+			return nil, err
+		}
+	}
+	return held, nil
+}
+
+// declaredTypes is the type a batch declared for each of its bodies.
+func declaredTypes(bodies []MediaBody) map[string]string {
+	types := make(map[string]string, len(bodies))
+	for _, body := range bodies {
+		if _, seen := types[body.SHA256]; !seen {
+			types[body.SHA256] = body.MimeType
+		}
+	}
+	return types
+}
+
+// holdMedia records that a project holds a body, under the type it declared
+// and from now (Decision 25). A project that already holds it keeps the type
+// and the time it had: within a project the first type wins. A ref with no
+// type of its own in hand — a Langfuse id resolved to a body the project
+// already holds — finds the row there. Were it ever not there, the hold is
+// `application/octet-stream`: never the type another project declared.
+func holdMedia(tx *sql.Tx, projectID, sha, mimeType string, now int64) error {
+	if _, err := tx.Exec(
+		`INSERT INTO media_holders (sha256, project_id, mime_type, first_at)
+		 SELECT m.sha256, ?, COALESCE(NULLIF(?, ''), 'application/octet-stream'), ? FROM media m WHERE m.sha256 = ?
+		 ON CONFLICT DO NOTHING`,
+		projectID, mimeType, now, sha); err != nil {
+		return fmt.Errorf("hold media %s: %w", sha, err)
 	}
 	return nil
 }
@@ -96,9 +150,9 @@ func writeMediaBodies(tx *sql.Tx, bodies []MediaBody, now int64) error {
 
 // writeChannelRef is the Langfuse channel's ref (#9), written when the SDK
 // uploads — usually before the trace's spans arrive, so it is pending until
-// they do (Decision 13). It reports whether a ref now exists: false when the
-// body is gone.
-func writeChannelRef(tx *sql.Tx, projectID, sha, traceID string, now int64) (bool, error) {
+// they do (Decision 13) — with the project's hold under the type the upload
+// declared. It reports whether a ref now exists: false when the body is gone.
+func writeChannelRef(tx *sql.Tx, projectID, sha, traceID, mimeType string, now int64) (bool, error) {
 	if _, err := tx.Exec(
 		`INSERT INTO media_refs (sha256, project_id, trace_id, created_at, pending)
 		 SELECT ?, ?, ?, ?, NOT EXISTS (SELECT 1 FROM traces WHERE project_id = ? AND id = ?)
@@ -113,7 +167,10 @@ func writeChannelRef(tx *sql.Tx, projectID, sha, traceID string, now int64) (boo
 	if err == sql.ErrNoRows {
 		return false, nil
 	}
-	return err == nil, err
+	if err != nil {
+		return false, err
+	}
+	return true, holdMedia(tx, projectID, sha, mimeType, now)
 }
 
 // ErrMediaGone refuses an ingest whose payloads were rewritten to a body a
@@ -122,39 +179,64 @@ func writeChannelRef(tx *sql.Tx, projectID, sha, traceID string, now int64) (boo
 // than a reference to nothing.
 var ErrMediaGone = errors.New("a resolved media body was collected before the write")
 
-// mediaStillThere checks, inside the ingest's transaction, that every body a
-// Langfuse string was resolved to still exists.
-func mediaStillThere(tx *sql.Tx, shas []string) error {
+// mediaStillThere checks, inside the ingest's transaction, that the project
+// still holds every body a Langfuse string was resolved to (Decision 26): a
+// body another project keeps alive is not one this project may point at once
+// its own last ref has gone.
+func mediaStillThere(tx *sql.Tx, projectID string, shas []string) error {
 	for _, sha := range shas {
-		var one int
-		err := tx.QueryRow(`SELECT 1 FROM media WHERE sha256 = ?`, sha).Scan(&one)
-		if err == sql.ErrNoRows {
+		hold, err := projectHold(tx, projectID, sha)
+		if err != nil {
+			return err
+		}
+		if hold == nil {
 			return ErrMediaGone
 		}
-		if err != nil {
-			return fmt.Errorf("check media %s: %w", sha, err)
-		}
 	}
 	return nil
 }
 
-// writeRawMediaRefs records the bodies a raw batch points at (Decision 12).
-func writeRawMediaRefs(tx *sql.Tx, batchID int64, shas []string) error {
+// writeRawMediaRefs records the bodies a raw batch points at (Decision 12),
+// under the batch's project (Decision 26), and the project's hold of each
+// the batch's trace refs did not already record (`held`).
+func writeRawMediaRefs(tx *sql.Tx, projectID string, batchID int64, shas []string, types map[string]string,
+	held map[string]bool, now int64) error {
 	for _, sha := range shas {
-		if _, err := tx.Exec(
-			`INSERT INTO media_raw_refs (sha256, raw_batch_id)
-			 SELECT ?, ? WHERE EXISTS (SELECT 1 FROM media WHERE sha256 = ?)
+		result, err := tx.Exec(
+			`INSERT INTO media_raw_refs (sha256, raw_batch_id, project_id)
+			 SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM media WHERE sha256 = ?)
 			 ON CONFLICT DO NOTHING`,
-			sha, batchID, sha); err != nil {
+			sha, batchID, projectID, sha)
+		if err != nil {
 			return fmt.Errorf("store raw media ref %s: %w", sha, err)
 		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("store raw media ref %s: %w", sha, err)
+		}
+		if n == 0 || held[sha] {
+			continue
+		}
+		if err := holdMedia(tx, projectID, sha, types[sha], now); err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
-// dropTraceMedia deletes a set of traces' refs and collects the bodies no ref
-// names any more. It answers how many bodies went and their bytes.
-func dropTraceMedia(tx *sql.Tx, projectID string, traceIDs []any) (int64, int64, error) {
+// mediaDrop is what deleting a set of refs did to media: the bodies the
+// project stopped holding with their bytes — what a deletion answers the
+// project (Decision 27) — and the bodies collected, which only the sweep's log
+// reports.
+type mediaDrop struct {
+	Released, ReleasedBytes int64
+	Collected               int64
+}
+
+// dropTraceMedia deletes a set of traces' refs, releases the project's hold
+// of the bodies it no longer points at, and collects the bodies no ref names
+// any more.
+func dropTraceMedia(tx *sql.Tx, projectID string, traceIDs []any) (mediaDrop, error) {
 	var shas []any
 	err := eachIn(traceIDs, func(batch []any) error {
 		found, err := queryColumn[string](tx, `SELECT DISTINCT sha256 FROM media_refs WHERE project_id = ? AND trace_id IN (`+
@@ -163,20 +245,21 @@ func dropTraceMedia(tx *sql.Tx, projectID string, traceIDs []any) (int64, int64,
 		return err
 	})
 	if err != nil {
-		return 0, 0, fmt.Errorf("find the traces' media: %w", err)
+		return mediaDrop{}, fmt.Errorf("find the traces' media: %w", err)
 	}
 	if len(shas) == 0 {
-		return 0, 0, nil
+		return mediaDrop{}, nil
 	}
 	if _, err := deleteIn(tx, `DELETE FROM media_refs WHERE project_id = ? AND trace_id IN`,
 		[]any{projectID}, traceIDs); err != nil {
-		return 0, 0, fmt.Errorf("delete media refs: %w", err)
+		return mediaDrop{}, fmt.Errorf("delete media refs: %w", err)
 	}
-	return collectMedia(tx, shas)
+	return releaseAndCollect(tx, projectID, shas)
 }
 
-// dropRawMedia is dropTraceMedia for raw batches about to be deleted.
-func dropRawMedia(tx *sql.Tx, batchIDs []any) (int64, int64, error) {
+// dropRawMedia is dropTraceMedia for a project's raw batches about to be
+// deleted.
+func dropRawMedia(tx *sql.Tx, projectID string, batchIDs []any) (mediaDrop, error) {
 	var shas []any
 	err := eachIn(batchIDs, func(batch []any) error {
 		found, err := queryColumn[string](tx, `SELECT DISTINCT sha256 FROM media_raw_refs WHERE raw_batch_id IN (`+
@@ -185,20 +268,65 @@ func dropRawMedia(tx *sql.Tx, batchIDs []any) (int64, int64, error) {
 		return err
 	})
 	if err != nil {
-		return 0, 0, fmt.Errorf("find the raw batches' media: %w", err)
+		return mediaDrop{}, fmt.Errorf("find the raw batches' media: %w", err)
 	}
 	if len(shas) == 0 {
-		return 0, 0, nil
+		return mediaDrop{}, nil
 	}
 	if _, err := deleteIn(tx, `DELETE FROM media_raw_refs WHERE raw_batch_id IN`, nil, batchIDs); err != nil {
-		return 0, 0, fmt.Errorf("delete raw media refs: %w", err)
+		return mediaDrop{}, fmt.Errorf("delete raw media refs: %w", err)
 	}
-	return collectMedia(tx, shas)
+	return releaseAndCollect(tx, projectID, shas)
+}
+
+func releaseAndCollect(tx *sql.Tx, projectID string, shas []any) (mediaDrop, error) {
+	var drop mediaDrop
+	var err error
+	if drop.Released, drop.ReleasedBytes, err = releaseMedia(tx, projectID, shas); err != nil {
+		return drop, err
+	}
+	drop.Collected, _, err = collectMedia(tx, shas)
+	return drop, err
+}
+
+// releaseMedia deletes the project's hold of those of the given bodies it no
+// longer points at, from a trace or a raw batch (Decision 25), and answers how
+// many it released and their bytes (Decision 27). Asked before collecting, so
+// the body's size is still there to read.
+func releaseMedia(tx *sql.Tx, projectID string, shas []any) (count, size int64, err error) {
+	err = eachIn(shas, func(batch []any) error {
+		rows, err := tx.Query(
+			`DELETE FROM media_holders WHERE project_id = ? AND sha256 IN (`+placeholders(len(batch))+`)
+			   AND NOT EXISTS (SELECT 1 FROM media_refs r
+			                    WHERE r.sha256 = media_holders.sha256 AND r.project_id = media_holders.project_id)
+			   AND NOT EXISTS (SELECT 1 FROM media_raw_refs rr
+			                    WHERE rr.sha256 = media_holders.sha256 AND rr.project_id = media_holders.project_id)
+			 RETURNING (SELECT size FROM media m WHERE m.sha256 = media_holders.sha256)`,
+			append([]any{projectID}, batch...)...)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var n sql.NullInt64
+			if err := rows.Scan(&n); err != nil {
+				return err
+			}
+			count++
+			size += n.Int64
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return 0, 0, fmt.Errorf("release media: %w", err)
+	}
+	return count, size, nil
 }
 
 // collectMedia deletes those of the given bodies nothing points at any more:
 // no trace of any project, no raw batch. The predicate is the whole check, so
-// a body another project still holds survives this project's deletion.
+// a body another project still holds survives this project's deletion. A
+// holder row left over goes with its body by cascade.
 func collectMedia(tx *sql.Tx, shas []any) (count, size int64, err error) {
 	err = eachIn(shas, func(batch []any) error {
 		rows, err := tx.Query(
@@ -232,21 +360,61 @@ type MediaFile struct {
 	Body     []byte
 }
 
-// holdsMedia is the scope of #7: a body is readable by a project that points
-// at it, from a trace or from a raw batch, and by nobody else.
-const holdsMedia = `(EXISTS (SELECT 1 FROM media_refs r WHERE r.sha256 = m.sha256 AND r.project_id = ?)
-	 OR EXISTS (SELECT 1 FROM media_raw_refs rr JOIN raw_batches b ON b.id = rr.raw_batch_id
-	            WHERE rr.sha256 = m.sha256 AND b.project_id = ?))`
+// holdsBody is the rest of the scope of #7 as Decision 26 has it, asked of a
+// holder row h: a project holds a body when it has a holder row for it and a
+// ref to it, from a trace or from a raw batch — each a seek on (sha256,
+// project_id). The one predicate every "does this project hold this body"
+// asks.
+const holdsBody = `(EXISTS (SELECT 1 FROM media_refs r WHERE r.sha256 = h.sha256 AND r.project_id = h.project_id)
+	    OR EXISTS (SELECT 1 FROM media_raw_refs rr WHERE rr.sha256 = h.sha256 AND rr.project_id = h.project_id))`
 
-// MediaFor reads one body for a project, or nil when the project holds no ref
-// to it — which is also what a body that does not exist looks like, so a hash
-// is not a capability across projects (#7).
+// mediaScope answers, for a project holding a body, the project's own type,
+// the start of its hold (Decision 25) and the body's size, and no row
+// otherwise: a hash nobody holds and a hash only another project holds are
+// the same few missed probes. One statement, so one snapshot; the size is read
+// only for a row the scope admits.
+const mediaScope = `SELECT h.mime_type, h.first_at, (SELECT m.size FROM media m WHERE m.sha256 = h.sha256)
+	   FROM media_holders h
+	  WHERE h.sha256 = ? AND h.project_id = ? AND ` + holdsBody
+
+// projectHold is the one lookup of a project's hold of a body (Decision 26):
+// nil when the project holds none, or the body was collected meanwhile.
+func projectHold(q querier, projectID, sha string) (*MediaInfo, error) {
+	info := MediaInfo{SHA256: sha}
+	var size sql.NullInt64
+	err := q.QueryRow(mediaScope, sha, projectID).Scan(&info.MimeType, &info.CreatedAt, &size)
+	if err == sql.ErrNoRows || err == nil && !size.Valid {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("look up media %s: %w", sha, err)
+	}
+	info.Size = size.Int64
+	return &info, nil
+}
+
+// mediaByID is the Langfuse id's lookup (#9, Decision 26): a seek on this
+// project's holder rows in the hash range the id's first sixteen bytes spell,
+// through `idx_media_holders_project`, so no other project's row is read.
+const mediaByID = `SELECT h.sha256, h.mime_type, h.first_at,
+	        (SELECT m.size FROM media m WHERE m.sha256 = h.sha256)
+	   FROM media_holders h
+	  WHERE h.project_id = ? AND h.sha256 >= ? AND h.sha256 < ? AND ` + holdsBody
+
+// mediaRead is the scope with the body read in the same statement, so in one
+// snapshot: the body only once the answer is yes, and never after the
+// project's hold went. A NULL body is one collected meanwhile.
+const mediaRead = `SELECT h.mime_type, (SELECT m.body FROM media m WHERE m.sha256 = h.sha256)
+	   FROM media_holders h
+	  WHERE h.sha256 = ? AND h.project_id = ? AND ` + holdsBody
+
+// MediaFor reads one body for a project, under the project's own type, or nil
+// when the project holds no ref to it — which is also what a body that does
+// not exist looks like, so a hash is not a capability across projects (#7).
 func (s *Store) MediaFor(projectID, sha string) (*MediaFile, error) {
 	var file MediaFile
-	err := s.db.QueryRow(
-		`SELECT m.mime_type, m.body FROM media m WHERE m.sha256 = ? AND `+holdsMedia,
-		sha, projectID, projectID).Scan(&file.MimeType, &file.Body)
-	if err == sql.ErrNoRows {
+	err := s.db.QueryRow(mediaRead, sha, projectID).Scan(&file.MimeType, &file.Body)
+	if err == sql.ErrNoRows || err == nil && file.Body == nil {
 		return nil, nil
 	}
 	if err != nil {
@@ -256,7 +424,8 @@ func (s *Store) MediaFor(projectID, sha string) (*MediaFile, error) {
 }
 
 // MediaInfo is what a Langfuse lookup answers: the body's identity and size,
-// never its bytes.
+// never its bytes, and the asking project's own type and the start of its
+// hold (Decision 25).
 type MediaInfo struct {
 	SHA256    string
 	MimeType  string
@@ -265,45 +434,34 @@ type MediaInfo struct {
 }
 
 // MediaHeld reports whether a project holds a ref to a body, and what the body
-// is. It decides the Langfuse channel's `uploadUrl: null` (#9): only a
+// is to it. It decides the Langfuse channel's `uploadUrl: null` (#9): only a
 // project that already holds the bytes skips the upload, because a hash any
 // project could name would otherwise be a way to adopt another's picture.
 func (s *Store) MediaHeld(projectID, sha string) (*MediaInfo, error) {
-	var info MediaInfo
-	err := s.db.QueryRow(
-		`SELECT m.sha256, m.mime_type, m.size, m.created_at FROM media m WHERE m.sha256 = ? AND `+holdsMedia,
-		sha, projectID, projectID).Scan(&info.SHA256, &info.MimeType, &info.Size, &info.CreatedAt)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("look up media %s: %w", sha, err)
-	}
-	return &info, nil
+	return projectHold(s.db, projectID, sha)
 }
 
 // MediaByLangfuseID resolves the SDK's id to a body this project holds (#9):
-// a seek on the hash range the id's first sixteen bytes spell, then the whole
-// id compared.
+// the project's holders in the hash range the id's first sixteen bytes spell,
+// then the whole id compared (Decision 26).
 func (s *Store) MediaByLangfuseID(projectID, mediaID string) (*MediaInfo, error) {
 	prefix, ok := shaPrefixOf(mediaID)
 	if !ok {
 		return nil, nil
 	}
-	rows, err := s.db.Query(
-		`SELECT m.sha256, m.mime_type, m.size, m.created_at FROM media m
-		  WHERE m.sha256 >= ? AND m.sha256 < ? AND `+holdsMedia,
-		prefix, prefix+"g", projectID, projectID)
+	rows, err := s.db.Query(mediaByID, projectID, prefix, prefix+"g")
 	if err != nil {
 		return nil, fmt.Errorf("look up media %s: %w", mediaID, err)
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var info MediaInfo
-		if err := rows.Scan(&info.SHA256, &info.MimeType, &info.Size, &info.CreatedAt); err != nil {
+		var size sql.NullInt64
+		if err := rows.Scan(&info.SHA256, &info.MimeType, &info.CreatedAt, &size); err != nil {
 			return nil, err
 		}
-		if MediaIDFor(info.SHA256) == mediaID {
+		if size.Valid && MediaIDFor(info.SHA256) == mediaID {
+			info.Size = size.Int64
 			return &info, nil
 		}
 	}
@@ -377,25 +535,27 @@ type MediaSummary struct {
 	Bytes int64
 }
 
-// MediaSummary counts what a project's refs hold.
+// MediaSummary counts what a project's refs hold: its holds, one per body it
+// points at from a trace or a raw batch (Decisions 25, 26), read through
+// `idx_media_holders_project` and asked the same predicate as every read.
 func (s *Store) MediaSummary(projectID string) (MediaSummary, error) {
 	var summary MediaSummary
 	err := s.db.QueryRow(
-		`SELECT COUNT(*), COALESCE(SUM(size), 0) FROM media WHERE sha256 IN (
-		   SELECT sha256 FROM media_refs WHERE project_id = ?
-		   UNION
-		   SELECT rr.sha256 FROM media_raw_refs rr JOIN raw_batches b ON b.id = rr.raw_batch_id
-		    WHERE b.project_id = ?)`,
-		projectID, projectID).Scan(&summary.Count, &summary.Bytes)
+		`SELECT COUNT(*), COALESCE(SUM(m.size), 0)
+		   FROM media_holders h JOIN media m ON m.sha256 = h.sha256
+		  WHERE h.project_id = ? AND `+holdsBody,
+		projectID).Scan(&summary.Count, &summary.Bytes)
 	if err != nil {
 		return summary, fmt.Errorf("summarise media: %w", err)
 	}
 	return summary, nil
 }
 
-// mediaFreed counts the bodies a deletion would collect (#11): those some of
-// the traces or raw batches going point at, and nothing staying does. `traces`
-// selects trace ids of the project and `raws` raw batch ids; either may be
+// mediaFreed counts the bodies a deletion would make the project stop holding
+// (#11 as Decision 27 has it): those some of the project's traces or raw
+// batches going point at, and none of its refs staying does. Whether another
+// project keeps the bytes on disk does not enter the figure. `traces` selects
+// trace ids of the project and `raws` raw batch ids of it; either may be
 // empty, which is none.
 func (s *Store) mediaFreed(projectID, traces string, traceArgs []any, raws string, rawArgs []any) (count, size int64, err error) {
 	if traces == "" {
@@ -404,26 +564,32 @@ func (s *Store) mediaFreed(projectID, traces string, traceArgs []any, raws strin
 	if raws == "" {
 		raws = `SELECT NULL WHERE 0`
 	}
-	args := append(append(append([]any{}, traceArgs...), rawArgs...), projectID, projectID)
+	args := append(append(append([]any{}, traceArgs...), rawArgs...),
+		projectID, projectID, projectID, projectID)
 	err = s.db.QueryRow(
 		`WITH gone(trace_id) AS (`+traces+`), gone_raw(id) AS (`+raws+`)
 		 SELECT COUNT(*), COALESCE(SUM(m.size), 0) FROM media m
-		  WHERE (m.sha256 IN (SELECT sha256 FROM media_refs WHERE project_id = ? AND trace_id IN gone)
-		         OR m.sha256 IN (SELECT sha256 FROM media_raw_refs WHERE raw_batch_id IN gone_raw))
+		  WHERE m.sha256 IN (SELECT sha256 FROM media_refs WHERE project_id = ? AND trace_id IN gone
+		                     UNION
+		                     SELECT sha256 FROM media_raw_refs WHERE project_id = ? AND raw_batch_id IN gone_raw)
 		    AND NOT EXISTS (SELECT 1 FROM media_refs r WHERE r.sha256 = m.sha256
-		                     AND NOT (r.project_id = ? AND r.trace_id IN gone))
+		                     AND r.project_id = ? AND r.trace_id NOT IN gone)
 		    AND NOT EXISTS (SELECT 1 FROM media_raw_refs rr WHERE rr.sha256 = m.sha256
-		                     AND rr.raw_batch_id NOT IN gone_raw)`,
+		                     AND rr.project_id = ? AND rr.raw_batch_id NOT IN gone_raw)`,
 		args...).Scan(&count, &size)
 	if err != nil {
-		return 0, 0, fmt.Errorf("count the media a deletion frees: %w", err)
+		return 0, 0, fmt.Errorf("count the media a deletion releases: %w", err)
 	}
 	return count, size, nil
 }
 
 // MediaRefAdd records that a trace points at a body the project already holds
 // — the Langfuse channel's answer to a second identical upload, which asks
-// for no bytes (#9). It reports whether the body was still there to point at.
+// for no bytes (#9). It reports whether the project still held the body to
+// point at: asked again inside the write (Decision 26), because a body whose
+// last ref in this project went since the handler asked may be kept alive by
+// another project's, and pointing at it then would be a hold without the
+// bytes.
 type MediaRefAdd struct {
 	ProjectID string
 	SHA256    string
@@ -434,13 +600,18 @@ type MediaRefAdd struct {
 }
 
 func (a *MediaRefAdd) apply(tx *sql.Tx) error {
-	added, err := writeChannelRef(tx, a.ProjectID, a.SHA256, a.TraceID, nowOr(a.Now))
-	a.Added = added
+	a.Added = false
+	hold, err := projectHold(tx, a.ProjectID, a.SHA256)
+	if err != nil || hold == nil {
+		return err
+	}
+	a.Added, err = writeChannelRef(tx, a.ProjectID, a.SHA256, a.TraceID, hold.MimeType, nowOr(a.Now))
 	return err
 }
 
 // MediaUpload stores one body the Langfuse channel received and the ref of
-// the trace it was sent for (#9).
+// the trace it was sent for (#9), and the project's hold under the type the
+// upload declared (Decision 25).
 type MediaUpload struct {
 	ProjectID string
 	TraceID   string
@@ -453,7 +624,7 @@ func (u *MediaUpload) apply(tx *sql.Tx) error {
 	if err := writeMediaBodies(tx, []MediaBody{u.Body}, now); err != nil {
 		return err
 	}
-	_, err := writeChannelRef(tx, u.ProjectID, u.Body.SHA256, u.TraceID, now)
+	_, err := writeChannelRef(tx, u.ProjectID, u.Body.SHA256, u.TraceID, u.Body.MimeType, now)
 	return err
 }
 
@@ -537,20 +708,28 @@ type MediaOrphan struct {
 
 // mediaSweep settles the pending refs the read pass found: one whose trace
 // has arrived since is kept and no longer pending, one whose trace never came
-// is deleted. It then collects the bodies the deleted refs leave, together
-// with any body the pass found with no ref at all.
+// is deleted. It releases the holds the deleted refs leave and any hold the
+// pass found with no ref behind it, restores the holds the pass found missing
+// behind a ref, and then collects the bodies left with no ref, together with
+// any body the pass found with no ref at all.
 type mediaSweep struct {
 	Refs   []MediaOrphan
 	Bodies []any
+	// Stale are holder rows the pass found with no ref of their project,
+	// and Missing the pairs with a ref and no holder row.
+	Stale, Missing []MediaHold
+	Now            int64
 
-	// Dropped counts the refs deleted, and Deleted the bodies collected.
-	Dropped int64
-	Deleted int64
+	// Dropped counts the refs deleted, Released and Restored the holds
+	// deleted and written, and Deleted the bodies collected — each what
+	// this transaction did, not what the read pass found.
+	Dropped, Released, Restored, Deleted int64
 }
 
 func (m *mediaSweep) apply(tx *sql.Tx) error {
-	m.Dropped, m.Deleted = 0, 0
+	m.Dropped, m.Released, m.Restored, m.Deleted = 0, 0, 0, 0
 	var shas []any
+	released := map[string][]any{}
 	for _, ref := range m.Refs {
 		result, err := tx.Exec(
 			`DELETE FROM media_refs WHERE sha256 = ? AND project_id = ? AND trace_id = ? AND pending = 1
@@ -562,6 +741,7 @@ func (m *mediaSweep) apply(tx *sql.Tx) error {
 		if n, err := result.RowsAffected(); err == nil && n > 0 {
 			m.Dropped += n
 			shas = append(shas, ref.SHA256)
+			released[ref.ProjectID] = append(released[ref.ProjectID], ref.SHA256)
 			continue
 		}
 		if _, err := tx.Exec(
@@ -570,10 +750,97 @@ func (m *mediaSweep) apply(tx *sql.Tx) error {
 			return fmt.Errorf("settle media ref: %w", err)
 		}
 	}
+	for _, hold := range m.Stale {
+		released[hold.ProjectID] = append(released[hold.ProjectID], hold.SHA256)
+		shas = append(shas, hold.SHA256)
+	}
+	// One release per project; each re-checks, in this transaction, that
+	// no ref of the project is left.
+	for projectID, held := range released {
+		n, _, err := releaseMedia(tx, projectID, held)
+		if err != nil {
+			return err
+		}
+		m.Released += n
+	}
+	// A ref with no hold behind it: the type the project declared is not
+	// kept anywhere else, so the hold is octet-stream — never another
+	// project's type — from now.
+	for _, hold := range m.Missing {
+		result, err := tx.Exec(
+			`INSERT INTO media_holders (sha256, project_id, mime_type, first_at)
+			 SELECT ?, ?, 'application/octet-stream', ?
+			  WHERE EXISTS (SELECT 1 FROM media WHERE sha256 = ?)
+			    AND (EXISTS (SELECT 1 FROM media_refs WHERE sha256 = ? AND project_id = ?)
+			         OR EXISTS (SELECT 1 FROM media_raw_refs WHERE sha256 = ? AND project_id = ?))
+			 ON CONFLICT DO NOTHING`,
+			hold.SHA256, hold.ProjectID, nowOr(m.Now), hold.SHA256,
+			hold.SHA256, hold.ProjectID, hold.SHA256, hold.ProjectID)
+		if err != nil {
+			return fmt.Errorf("restore media hold: %w", err)
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("restore media hold: %w", err)
+		}
+		m.Restored += n
+	}
 	shas = append(shas, m.Bodies...)
 	count, _, err := collectMedia(tx, shas)
 	m.Deleted = count
 	return err
+}
+
+// MediaHold is one project's holder row of one body.
+type MediaHold struct {
+	SHA256    string
+	ProjectID string
+}
+
+// holdDrift finds, among the bodies in (after, upto] — the page the look for
+// bodies with no ref just read; an empty upto is the end of the table — the
+// holder rows with no ref of their project behind them, and the pairs with a
+// ref and no holder row. Every write and deletion keeps the two in step in
+// one transaction, so only a hand-edited database leaves either: the reads
+// refuse a hold that is not both (Decision 26), and the sweep repairs it so
+// that it does not stay.
+func (s *Store) holdDrift(after, upto string) (stale, missing []MediaHold, err error) {
+	within := `sha256 > ?`
+	args := []any{after}
+	if upto != "" {
+		within += ` AND sha256 <= ?`
+		args = append(args, upto)
+	}
+	if stale, err = s.holdPairs(`SELECT h.sha256, h.project_id FROM media_holders h
+		  WHERE h.`+within+` AND NOT `+holdsBody, args...); err != nil {
+		return nil, nil, fmt.Errorf("find stale media holds: %w", err)
+	}
+	if missing, err = s.holdPairs(`SELECT x.sha256, x.project_id FROM (
+		    SELECT sha256, project_id FROM media_refs WHERE `+within+`
+		    UNION SELECT sha256, project_id FROM media_raw_refs WHERE `+within+`) x
+		  WHERE NOT EXISTS (SELECT 1 FROM media_holders h
+		                     WHERE h.sha256 = x.sha256 AND h.project_id = x.project_id)`,
+		append(append([]any{}, args...), args...)...); err != nil {
+		return nil, nil, fmt.Errorf("find missing media holds: %w", err)
+	}
+	return stale, missing, nil
+}
+
+func (s *Store) holdPairs(query string, args ...any) ([]MediaHold, error) {
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []MediaHold
+	for rows.Next() {
+		var hold MediaHold
+		if err := rows.Scan(&hold.SHA256, &hold.ProjectID); err != nil {
+			return nil, err
+		}
+		out = append(out, hold)
+	}
+	return out, rows.Err()
 }
 
 // MediaUploadKey is the key the Langfuse channel signs its upload URLs with
@@ -615,16 +882,23 @@ func ValidMediaSHA(s string) bool {
 	return len(s) == 64 && strings.Trim(s, "0123456789abcdef") == ""
 }
 
-// dropProjectMedia deletes every ref a purged project still has and collects
-// the bodies only it pointed at (spec 041 #3). A body another project also
-// points at survives: the refs carry the project for exactly this.
+// dropProjectMedia deletes every ref and hold a purged project still has and
+// collects the bodies only it pointed at (spec 041 #3). A body another project
+// also points at survives: the refs carry the project for exactly this. The
+// raw refs went with the project's batches by cascade; its holder rows name
+// those bodies too.
 func dropProjectMedia(tx *sql.Tx, projectID string) error {
-	shas, err := queryColumn[string](tx, `SELECT DISTINCT sha256 FROM media_refs WHERE project_id = ?`, projectID)
+	shas, err := queryColumn[string](tx,
+		`SELECT sha256 FROM media_refs WHERE project_id = ?
+		 UNION SELECT sha256 FROM media_holders WHERE project_id = ?`, projectID, projectID)
 	if err != nil {
 		return fmt.Errorf("find a project's media: %w", err)
 	}
 	if _, err := tx.Exec(`DELETE FROM media_refs WHERE project_id = ?`, projectID); err != nil {
 		return fmt.Errorf("delete a project's media refs: %w", err)
+	}
+	if _, err := tx.Exec(`DELETE FROM media_holders WHERE project_id = ?`, projectID); err != nil {
+		return fmt.Errorf("delete a project's media holds: %w", err)
 	}
 	_, _, err = collectMedia(tx, shas)
 	return err
