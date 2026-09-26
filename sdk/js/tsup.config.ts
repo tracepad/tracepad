@@ -1,3 +1,6 @@
+import { readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+
 import { defineConfig } from 'tsup';
 
 // Both module systems, one declaration file each (spec 032 #1). The OTel
@@ -15,4 +18,17 @@ export default defineConfig({
   clean: true,
   target: 'node20',
   platform: 'node',
+  // Maps for the ESM build only: the CommonJS pass re-bundles tsup's split
+  // output, and its map names that output by absolute path — the machine the
+  // package was built on, published with it (spec 032 #18). The pass needs a
+  // map to read, so the CommonJS ones are removed once the build is done.
+  async onSuccess() {
+    for (const file of await readdir('dist')) {
+      if (file.endsWith('.cjs.map')) await rm(join('dist', file));
+      else if (file.endsWith('.cjs')) {
+        const code = await readFile(join('dist', file), 'utf8');
+        await writeFile(join('dist', file), code.replace(/\n\/\/# sourceMappingURL=\S+\s*$/, '\n'));
+      }
+    }
+  },
 });

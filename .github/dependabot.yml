@@ -1,0 +1,67 @@
+# Version updates for everything this repository pins (spec 020 #19): the Go
+# modules, the lock files of the interface and the two packages, the Actions
+# (pinned by commit, which Dependabot moves with the version comment beside
+# it) and the base images (pinned by digest).
+#
+# Weekly, and one pull request per ecosystem and directory: minor and patch
+# updates are grouped, a major one arrives alone because it is the one that
+# needs reading. A version is proposed a week after it was published, not the
+# day it was: a compromised release is usually pulled within days. Security
+# updates are not grouped or delayed by any of this.
+version: 2
+
+updates:
+  - package-ecosystem: gomod
+    directories: ["/", "/sdk/go"]
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      go:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directories: ["/ui", "/sdk/js"]
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      npm:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  - package-ecosystem: uv
+    directory: /sdk/python
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      python:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      images:
+        patterns: ["*"]
+        update-types: [minor, patch]

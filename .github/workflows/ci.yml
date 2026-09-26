@@ -12,13 +12,14 @@ on:
 
 # A push to a pull-request branch makes the run already going for its previous
 # head obsolete — the review will look at the new one — so the newer run
-# cancels the older instead of both finishing. `head_ref` is empty on a push
-# to `main`, and `ref` stands in for it, so two merges in quick succession
-# share a group too and the older build is cancelled as well: the newer tree
-# contains the older one, and the multi-arch build of the newer is the answer
-# that matters.
+# cancels the older instead of both finishing. The group is the pull request's
+# number rather than its branch name, which two forks can share and so cancel
+# each other's runs (spec 020 #19). A push to `main` has no number, and `ref`
+# stands in for it, so two merges in quick succession share a group too and the
+# older build is cancelled as well: the newer tree contains the older one, and
+# the multi-arch build of the newer is the answer that matters.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -29,19 +30,31 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
       # The gate type-checks and unit-tests the web interface too (spec 006
       # #10). Only the interface needs Node: `go test ./...` on its own does
       # not, and the tagless build the Go half compiles carries no bundle.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version-file: ui/package.json
           cache: npm
           cache-dependency-path: ui/package-lock.json
       - run: make gate
+      # The lock files resolve to the npm registry only, over https, with
+      # integrity hashes, and under the names they claim (spec 020 #19). The
+      # Node package's one alias is its OpenTelemetry 1.x test double.
+      - name: The lock files resolve where they claim to
+        run: |
+          lint=(npx --yes lockfile-lint@5.0.1 --type npm --allowed-hosts npm
+                --validate-https --validate-integrity --validate-package-names)
+          "${lint[@]}" --path ui/package-lock.json
+          "${lint[@]}" --path sdk/js/package-lock.json \
+            --allowed-package-name-aliases sdk-trace-base-v1:@opentelemetry/sdk-trace-base
       # The anchor checker against its own fixture (spec 026 #6, #13).
       # `gate` above runs it over the tree; this run is what says the
       # checker still finds a broken anchor at all: two of the fixture's
@@ -61,11 +74,13 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version-file: ui/package.json
           cache: npm
@@ -75,7 +90,7 @@ jobs:
       - run: npx playwright install --with-deps chromium
         working-directory: ui
       - run: make e2e
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: failure()
         with:
           name: playwright-traces
@@ -93,7 +108,9 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
       - run: make image VERSION=ci
       # Boots it on an ephemeral volume, waits for the container's own
       # HEALTHCHECK, and asserts the version, the uid, the volume and the
@@ -119,17 +136,24 @@ jobs:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
       - name: The Dockerfile builds for both release architectures
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           platforms: linux/amd64,linux/arm64
           push: false
+          # No provenance and no build record: both carry the event's payload,
+          # and this build publishes nothing to attest (spec 020 #19).
+          provenance: false
           build-args: VERSION=ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
+        env:
+          DOCKER_BUILD_RECORD_UPLOAD: false
 
   # Real instrumentation against a real binary: the drift detector for SDK
   # attribute conventions (spec 002, Testing #3). Separate from the gate so
@@ -138,16 +162,18 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.13"
       # The fifth exporter is the Node package, built from this checkout
       # (spec 032 #11).
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: npm
@@ -159,8 +185,9 @@ jobs:
   # supported range — 3.10 is the floor and the newest is where the OTel SDK
   # moves first — and its end-to-end suite against a real binary. OpenTelemetry
   # on both ends too (spec 042 #14): the floor `pyproject.toml` admits, on the
-  # oldest Python, and whatever a fresh install resolves today, on both. Its own
-  # job, because the gate needs neither Python nor a network.
+  # oldest Python, and what `uv.lock` holds — kept current by Dependabot — on
+  # both (spec 017 #20). Its own job, because the gate needs neither Python nor
+  # a network.
   sdk:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
@@ -171,33 +198,32 @@ jobs:
           - python-version: "3.10"
             otel: floor
           - python-version: "3.10"
-            otel: latest
+            otel: locked
           - python-version: "3.13"
-            otel: latest
+            otel: locked
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
-      - uses: actions/setup-python@v5
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
         with:
+          version: "0.11.12"
           python-version: ${{ matrix.python-version }}
-      # One resolution, the floor's pins in it: installing the newest first and
-      # downgrading after would leave what only the newest needs behind.
-      - env:
-          OTEL_END: ${{ matrix.otel }}
+      # The lock, whole; the floor's pins over it on that leg alone.
+      - run: uv sync --locked
+        working-directory: sdk/python
+      - if: matrix.otel == 'floor'
         run: |
-          install=(-e ./sdk/python pytest "ruff==0.16.6")
-          if [ "$OTEL_END" = floor ]; then
-            pins="$(scripts/sdk-test.sh --floor-pins)"
-            mapfile -t floor <<< "$pins"
-            install+=("${floor[@]}")
-          fi
-          pip install "${install[@]}"
+          pins="$(scripts/sdk-test.sh --floor-pins)"
+          mapfile -t floor <<< "$pins"
+          uv pip install --python sdk/python/.venv/bin/python "${floor[@]}"
       # One rule set for every Python file in the repository, named rather
       # than discovered: the scripts sit outside the package that configures it.
-      - run: ruff check --config sdk/python/pyproject.toml sdk/python scripts
-      - run: SDK_PYTHON="$(which python)" scripts/sdk-test.sh
+      - run: sdk/python/.venv/bin/ruff check --config sdk/python/pyproject.toml sdk/python scripts
+      - run: SDK_PYTHON="$PWD/sdk/python/.venv/bin/python" scripts/sdk-test.sh
       # A signal, not a rule (design §8), the same instrument the interface has.
       - run: make sdk-lines
 
@@ -214,12 +240,14 @@ jobs:
       matrix:
         go-version: ["1.26.x", "1.27.x"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
       - run: go build -o /tmp/tracepad ./cmd/tracepad
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: ${{ matrix.go-version }}
           cache-dependency-path: sdk/go/go.sum
@@ -239,11 +267,13 @@ jobs:
       matrix:
         node-version: [20, 22]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ matrix.node-version }}
           cache: npm

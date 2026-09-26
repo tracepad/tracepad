@@ -11,31 +11,31 @@
 # version. The trusted publisher (owner `tracepad`, repository `tracepad`,
 # workflow `release-sdk-js.yml`, environment `npm`) is configured once on
 # npmjs.com by the package's owner.
+#
+# Two jobs, and only the second can mint that token (spec 032 #18): `build`
+# installs from the lock file, tests and packs with read access alone, and
+# `publish` receives the tarball it made and uploads it with lifecycle scripts
+# off — it runs no code of the package's and installs nothing but a pinned npm.
 name: Release the Node package
 
 on:
   push:
     tags: ["sdk-js/v*"]
 
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
-  release:
+  build:
     runs-on: ubuntu-latest
-    environment: npm
     permissions:
       contents: read
-      id-token: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          node-version: 24
-          registry-url: https://registry.npmjs.org
-      # Trusted publishing needs npm 11.5 or newer, which the runner's Node
-      # may or may not bundle.
-      - run: npm install -g npm@latest
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24 # zizmor: ignore[cache-poisoning] -- v4 caches only when `cache:` is set, and it is not
 
       - name: The tag and the package must agree about the version
         run: scripts/sdk-js-release-check.sh "$GITHUB_REF_NAME"
@@ -48,5 +48,31 @@ jobs:
 
       # `prepack` builds `dist`; `files` in package.json ships it and NOTICE, and
       # npm adds LICENSE and the README on its own.
-      - run: npm publish --provenance --access public
+      - run: mkdir -p "$RUNNER_TEMP/package" && npm pack --pack-destination "$RUNNER_TEMP/package"
         working-directory: sdk/js
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: package
+          path: ${{ runner.temp }}/package/
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      id-token: write # trusted publishing and the provenance npm attaches
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: package
+          path: package
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24 # zizmor: ignore[cache-poisoning] -- v4 caches only when `cache:` is set, and it is not
+          registry-url: https://registry.npmjs.org
+      # Trusted publishing needs npm 11.5 or newer, which the runner's Node
+      # may or may not bundle; one exact version rather than `latest`.
+      - run: npm install -g npm@11.20.0 # zizmor: ignore[adhoc-packages] -- npm itself, one exact version
+      - run: npm publish package/*.tgz --provenance --access public --ignore-scripts
