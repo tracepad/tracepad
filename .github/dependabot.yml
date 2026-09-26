@@ -42,6 +42,12 @@ updates:
     ignore:
       - dependency-name: sdk-trace-base-v1
         update-types: ["version-update:semver-major"]
+      # Node's types are the Node the code may use (spec 032 #19, spec 006
+      # #16): 22 in `sdk/js`, the oldest Node the package supports, so that
+      # it cannot call an API 22 does not have; 24 in `ui`, the one Node
+      # that builds it. A newer major would type-check what that Node lacks.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: uv
     directory: /sdk/python

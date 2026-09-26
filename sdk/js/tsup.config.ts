@@ -20,10 +20,15 @@ export default defineConfig({
   outDir,
   format: ['esm', 'cjs'],
   splitting: true,
-  dts: true,
+  // The declarations are written by TypeScript 6's API (`typescript` is the
+  // alias to `@typescript/typescript6`; `tsc` is 7, which has no stable API
+  // yet), and tsup's declaration pass always sets `baseUrl`, an option 6.0
+  // deprecates. Silenced for that pass only: the package's own tsconfig sets
+  // no `baseUrl`, and `tsc` 7 checks it with nothing silenced.
+  dts: { compilerOptions: { ignoreDeprecations: '6.0' } },
   sourcemap: true,
   clean: true,
-  target: 'node20',
+  target: 'node22',
   platform: 'node',
   // Maps for the ESM build only: the CommonJS pass re-bundles tsup's split
   // output, and its map names that output by absolute path — the machine the

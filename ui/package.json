@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": "^22.13 || ^24"
+    "node": "^24"
   },
   "scripts": {
     "dev": "vite dev",
@@ -24,13 +24,14 @@
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/svelte": "^5.4.2",
     "@testing-library/user-event": "^14.6.1",
-    "@types/node": "^22.20.1",
+    "@types/node": "^24.19.0",
+    "@typescript/native": "npm:typescript@^7.0.2",
     "jsdom": "^29.0.0",
     "openapi-typescript": "^7.13.0",
     "svelte": "^5.56.10",
     "svelte-check": "^4.7.6",
     "tailwindcss": "^4.3.3",
-    "typescript": "^5.9.3",
+    "typescript": "npm:@typescript/typescript6@^6.0.2",
     "vite": "^8.2.2",
     "vitest": "^4.1.11"
   },
@@ -48,5 +49,10 @@
     "bits-ui": "^2.19.0",
     "svelte-dnd-action": "^0.9.79",
     "uplot": "^1.6.32"
+  },
+  "overrides": {
+    "openapi-typescript": {
+      "typescript": "$typescript"
+    }
   }
 }

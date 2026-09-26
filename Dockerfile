@@ -19,11 +19,12 @@ ARG REVISION=
 
 # --- The web interface --------------------------------------------------------
 #
-# Node 22 is the floor `ui/package.json` declares. The bundle is static files
-# and carries no architecture, so this stage is pinned to the platform doing the
-# building: under `--platform linux/amd64,linux/arm64` it then runs once instead
-# of once per architecture, and never under emulation (#10).
-FROM --platform=$BUILDPLATFORM node:22-alpine@sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402 AS ui
+# Node 24, the one `ui/package.json` declares (spec 006 #16). The bundle is
+# static files and carries no architecture, so this stage is pinned to the
+# platform doing the building: under `--platform linux/amd64,linux/arm64` it
+# then runs once instead of once per architecture, and never under emulation
+# (#10).
+FROM --platform=$BUILDPLATFORM node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS ui
 
 WORKDIR /src/ui
 # The manifest and the lock file first, on their own layer: editing a component

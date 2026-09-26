@@ -14,6 +14,10 @@ package="$repo_root/sdk/js"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
+# A Node the package does not support fails here, by name, rather than
+# somewhere in the suite.
+node "$repo_root/scripts/node-engines.mjs" "$package/package.json"
+
 if [ ! -d "$package/node_modules" ]; then
     echo "==> npm ci"
     (cd "$package" && npm ci)
