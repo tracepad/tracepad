@@ -213,6 +213,9 @@ func (s *Server) handleLangfuseMediaPut(w http.ResponseWriter, r *http.Request) 
 	}
 	project, err := s.store.ProjectByID(r.Context(), grant.Project)
 	if err != nil {
+		if hungUp(r) {
+			return
+		}
 		slog.Error("project lookup failed", "err", err)
 		writeError(w, http.StatusInternalServerError, "failed to read the project")
 		return

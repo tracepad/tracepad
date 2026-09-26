@@ -264,16 +264,21 @@ func (w *Writer) flush(pending []*submission) {
 		return
 	}
 	if len(pending) == 1 {
-		logFailure(err, slog.LevelError, "write commit failed", "jobs", 1)
+		lost(pending[0], err)
 		answer(pending, err)
 		return
 	}
-	logFailure(err, slog.LevelWarn, "write window failed, retrying jobs individually",
-		"jobs", len(pending))
+	// A database condition is left to the retries below: a write they
+	// commit is not lost, and one they cannot commit is logged as lost
+	// (spec 043 #24). Anything else says why the window came apart.
+	if _, condition := Condition(err); !condition {
+		logFailure(err, slog.LevelWarn, "write window failed, retrying jobs individually",
+			"jobs", len(pending))
+	}
 	for _, sub := range pending {
 		one := []*submission{sub}
 		if err := w.commit(one); err != nil {
-			logFailure(err, slog.LevelError, "write commit failed", "jobs", 1)
+			lost(sub, err)
 			answer(one, err)
 			continue
 		}
@@ -281,28 +286,41 @@ func (w *Writer) flush(pending []*submission) {
 	}
 }
 
+// reportsItsFailure is a job whose caller logs its failure itself, with what
+// the writer does not know — the aggregator's hour names its project and its
+// hour. The writer leaves it to that line, so a failure is one line (spec 043
+// #24).
+type reportsItsFailure interface {
+	failureReported() bool
+}
+
+// lost logs one write that did not commit.
+func lost(sub *submission, err error) {
+	if job, ok := sub.job.(reportsItsFailure); ok && job.failureReported() {
+		return
+	}
+	logFailure(err, slog.LevelError, "write commit failed")
+}
+
 // logFailure reports a failed commit, demoting a rejection: a caller asking
 // for something the stored state does not allow is routine traffic, not an
 // incident, and it is already being told so in the response.
 //
-// A database condition is logged at error once a minute per condition, with
-// the number of failures it stands for (spec 043 #2): it is the same news every
-// time until it passes, and every caller has already been answered with a
-// status that says to retry.
+// A database condition is logged once a minute per condition, with the number
+// of writes it failed since the last line (spec 043 #2): it is the same news
+// every time until it passes, and every caller has already been answered with
+// a status that says to retry. It is only ever called for a write that was
+// lost, so the line is an error and the count counts failures.
 func logFailure(err error, level slog.Level, message string, args ...any) {
 	if rejected(err) {
 		level = slog.LevelInfo
 	}
 	if condition, ok := Condition(err); ok {
-		skipped, now := conditionLog.Allow(condition, time.Now())
+		failed, now := conditionLog.Allow(condition, time.Now())
 		if !now {
 			return
 		}
-		// At error whatever the caller asked for: the paced line may be
-		// the window's warning rather than a job's error, and it is the
-		// only line this minute — an alert on errors has to see it.
-		level = slog.LevelError
-		args = append(args, "condition", condition, "since_last_line", skipped)
+		args = append(args, "condition", condition, "failed_since_last_line", failed)
 	}
 	logger().Log(context.Background(), level, message, append([]any{"err", err}, args...)...)
 }

@@ -445,8 +445,9 @@ about that changes when the SDK points at Tracepad: what the SDK's own docs
 say about recording a cost is what applies.
 
 A price is counted — into a trace's total, the statistics, a user's summary —
-when its `total` is a number between −10¹² and 10¹². Anything else there, a
-string or a number beyond that, is kept on the observation as it was sent and
+when its `total` is a number between −10¹² and 10¹²; a string that is a number,
+`"0.25"`, is stored as that number. Anything else there, a string that is not
+a number or a number beyond that, is kept on the observation as it was sent and
 counted as no cost, the same as an observation that carried none.
 
 **Your own OpenTelemetry spans** carry it as `gen_ai.usage.cost`, a number,

@@ -85,22 +85,29 @@ const (
 
 // costExpr is the cost one observation counts, as an SQL expression over the
 // column expression `details` holds its `cost_details` under: `total` when it
-// is a JSON number within the domain, NULL otherwise — "no data", not zero
-// (spec 002 #14, spec 043 #4). A string `total` used to fail the scan that
-// read it, and with it the hour's roll; two totals near the largest double
-// summed to an infinity that no encoder can write.
+// is a number within the domain, NULL otherwise — "no data", not zero (spec
+// 002 #14, spec 043 #4). A number is a JSON number, or a JSON string whose text
+// is one — `"0.25"`, which SQLite's own `SUM` always read as 0.25 and which the
+// mapper now stores as the number (#24). A string that is not a number — "abc"
+// — used to fail the scan that read it, and with it the hour's roll; two totals
+// near the largest double summed to an infinity that no encoder can write.
 //
 // Every reader uses it: the trace aggregate, the statistics and users rollups
 // and the live statistics scan, and migration 0024, which spells the same
-// expression out (a test holds the two together). `BETWEEN` rather than
-// `abs()`, which raises `integer overflow` on the smallest int64; the value is
-// read as REAL, so an aggregate over it is a float sum that cannot overflow
-// where an integer one could.
+// expression out (a test holds the two together). `json_valid` is strict JSON,
+// so a text reads as a number only when it is one whole — not `1e5e5`, not
+// `Infinity` — and `BETWEEN` rather than `abs()`, which raises `integer
+// overflow` on the smallest int64. The value is read as REAL, so an aggregate
+// over it is a float sum that cannot overflow where an integer one could.
 func costExpr(details string) string {
-	path := `json_extract(` + details + `, '$.total')`
-	return `CASE WHEN json_type(` + details + `, '$.total') IN ('integer', 'real')
-	              AND ` + path + ` BETWEEN -` + maxCountedCost + ` AND ` + maxCountedCost + `
-	             THEN CAST(` + path + ` AS REAL) END`
+	total := `json_extract(` + details + `, '$.total')`
+	kind := `json_type(` + details + `, '$.total')`
+	number := `CASE WHEN ` + kind + ` IN ('integer', 'real') THEN ` + total + `
+	                WHEN ` + kind + ` = 'text' AND json_valid(` + total + `)
+	                     AND json_type(` + total + `) IN ('integer', 'real')
+	                THEN json_extract(` + total + `, '$') END`
+	return `CASE WHEN (` + number + `) BETWEEN -` + maxCountedCost + ` AND ` + maxCountedCost + `
+	             THEN CAST((` + number + `) AS REAL) END`
 }
 
 // tokenExprs is the three counts read off one observation's `usage`, as SQL
@@ -397,6 +404,10 @@ type statsRoll struct {
 	// corrects a single hour and then answers — the user-data erasure — does
 	// not set it, because there is no pass to defer to.
 	DeferSummary bool
+	// Reported says the caller logs this job's failure itself — the
+	// aggregator does, naming the project and the hour — so the writer
+	// does not log it a second time (spec 043 #24).
+	Reported bool
 	// Frozen reports that `stats_hourly` was left alone because retention
 	// has taken the raw rows it would have been recomputed from. It is the
 	// statistics' own answer since spec 026 #7 gave each table its own: it
@@ -415,6 +426,8 @@ type statsRoll struct {
 func RollHour(projectID string, hour, now int64) WriteJob {
 	return &statsRoll{ProjectID: projectID, Hour: hour, Now: now}
 }
+
+func (r *statsRoll) failureReported() bool { return r.Reported }
 
 func (r *statsRoll) apply(tx *sql.Tx) error {
 	// The freeze is read inside the transaction that would act on it,

@@ -107,6 +107,9 @@ func (s *Server) handleCreateAccount(w http.ResponseWriter, r *http.Request) {
 		}
 		project, err := s.store.ProjectByID(r.Context(), m.ProjectID)
 		if err != nil {
+			if hungUp(r) {
+				return
+			}
 			slog.Error("project lookup failed", "err", err)
 			writeError(w, http.StatusInternalServerError, "failed to read the project")
 			return
@@ -364,6 +367,9 @@ func (s *Server) handlePutMembership(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("project_id")
 	project, err := s.store.ProjectByID(r.Context(), projectID)
 	if err != nil {
+		if hungUp(r) {
+			return
+		}
 		slog.Error("project lookup failed", "err", err)
 		writeError(w, http.StatusInternalServerError, "failed to read the project")
 		return
@@ -446,6 +452,9 @@ func (s *Server) handleProjectMembers(w http.ResponseWriter, r *http.Request) {
 func (s *Server) account(w http.ResponseWriter, r *http.Request) (*store.Account, bool) {
 	account, err := s.store.AccountByID(r.Context(), r.PathValue("id"))
 	if err != nil {
+		if hungUp(r) {
+			return nil, false
+		}
 		slog.Error("account lookup failed", "err", err)
 		writeError(w, http.StatusInternalServerError, "failed to read the account")
 		return nil, false

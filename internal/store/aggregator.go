@@ -454,7 +454,7 @@ func failedHours(n int) error {
 // that knows whether the hour was frozen rather than rolled — and which users
 // it touched, for the summary the pass writes once at the end.
 func (a *Aggregator) rollOne(ctx context.Context, projectID string, hour int64, at time.Time) (*statsRoll, error) {
-	job := &statsRoll{ProjectID: projectID, Hour: hour, Now: at.UnixNano(), DeferSummary: true}
+	job := &statsRoll{ProjectID: projectID, Hour: hour, Now: at.UnixNano(), DeferSummary: true, Reported: true}
 	return job, a.writer.Submit(ctx, job)
 }
 

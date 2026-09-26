@@ -448,17 +448,17 @@ func TestProjectRole(t *testing.T) {
 	helper := f.invite(t, "helper@example.com", false,
 		Membership{ProjectID: f.project.ID, Role: RoleViewer})
 
-	if role, _ := f.ProjectRole(context.Background(), founder, f.project.ID); role != RoleOwner {
+	if _, role, _ := f.ProjectWithRole(context.Background(), founder, f.project.ID); role != RoleOwner {
 		t.Errorf("an owner's role = %q, want %q", role, RoleOwner)
 	}
-	if role, _ := f.ProjectRole(context.Background(), founder, "0123456789abcdef0123456789abcdef"); role != RoleOwner {
+	if _, role, _ := f.ProjectWithRole(context.Background(), founder, "0123456789abcdef0123456789abcdef"); role != RoleOwner {
 		t.Error("an owner has every project, including ones that do not exist; " +
 			"the project lookup is what answers 404")
 	}
-	if role, _ := f.ProjectRole(context.Background(), helper, f.project.ID); role != RoleViewer {
+	if _, role, _ := f.ProjectWithRole(context.Background(), helper, f.project.ID); role != RoleViewer {
 		t.Errorf("a member's role = %q, want %q", role, RoleViewer)
 	}
-	if role, _ := f.ProjectRole(context.Background(), helper, "0123456789abcdef0123456789abcdef"); role != "" {
+	if _, role, _ := f.ProjectWithRole(context.Background(), helper, "0123456789abcdef0123456789abcdef"); role != "" {
 		t.Errorf("role in a project one is not a member of = %q, want none", role)
 	}
 

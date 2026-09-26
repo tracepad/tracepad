@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -218,9 +219,13 @@ func TestTheCountingRule(t *testing.T) {
 	seed(2, map[string]any{"total": "abc"}, map[string]any{"input_tokens": -3, "output_tokens": 5})
 	seed(3, map[string]any{"total": 2e12}, map[string]any{"input_tokens": 1e9, "output_tokens": 1e9 + 1})
 	seed(4, map[string]any{"total": 0.25}, map[string]any{"input_tokens": 10})
+	// A string that is a number is one (spec 043 #24): SQLite's `SUM`
+	// always counted it, and a store written before the mapper stored it
+	// as the number still holds it as text.
+	seed(5, map[string]any{"total": "0.5"}, nil)
 
 	totals := map[string]*float64{}
-	for n := 1; n <= 4; n++ {
+	for n := 1; n <= 5; n++ {
 		row, err := s.Trace(project.ID, hexTrace(n))
 		if err != nil {
 			t.Fatal(err)
@@ -235,6 +240,9 @@ func TestTheCountingRule(t *testing.T) {
 	if cost := totals[hexTrace(4)]; cost == nil || *cost != 0.25 {
 		t.Errorf("trace 4 total_cost = %v, want 0.25", cost)
 	}
+	if cost := totals[hexTrace(5)]; cost == nil || *cost != 0.5 {
+		t.Errorf("trace 5 total_cost = %v, want the string \"0.5\" counted as 0.5", cost)
+	}
 	// Kept as sent, not dropped (spec 002 #11).
 	observations, err := s.Observations(project.ID, hexTrace(2), WithIO)
 	if err != nil || len(observations) != 1 || observations[0].CostDetails["total"] != "abc" {
@@ -247,8 +255,8 @@ func TestTheCountingRule(t *testing.T) {
 		cost          float64
 		input, output int64
 	}{
-		"production||":  {0.25, 1e9 + 10, 10},
-		"production||m": {0.25, 1e9 + 10, 10},
+		"production||":  {0.75, 1e9 + 10, 10},
+		"production||m": {0.75, 1e9 + 10, 10},
 	}
 	if len(rows) != len(want) {
 		t.Fatalf("rolled %v, want %v", keysOf(rows), keysOf(want))
@@ -312,8 +320,8 @@ func TestADatabaseConditionIsLoggedOnceAMinute(t *testing.T) {
 	if lines != 1 {
 		t.Errorf("logged %d lines for 20 commits a full disk failed, want 1:\n%s", lines, logged.String())
 	}
-	// At error, whichever line it was: an alert on errors has to see a
-	// full disk.
+	// At error: every one of the twenty was a write lost, and an alert
+	// on errors has to see a full disk.
 	if !strings.Contains(logged.String(), "level=ERROR") {
 		t.Errorf("the one line is not at error:\n%s", logged.String())
 	}
@@ -323,6 +331,88 @@ func TestADatabaseConditionIsLoggedOnceAMinute(t *testing.T) {
 	}
 	if got := strings.Count(logged.String(), "constraint failed"); got != 2 {
 		t.Errorf("logged %d lines for 2 failures of the jobs' own, want 2", got)
+	}
+}
+
+// flakyJob fails its first apply with a database condition and commits after:
+// the window it is in fails, and the retry of each job alone succeeds.
+type flakyJob struct{ applies *atomic.Int32 }
+
+func (j flakyJob) apply(*sql.Tx) error {
+	if j.applies.Add(1) == 1 {
+		return fmt.Errorf("begin write transaction: %w", codedError{5})
+	}
+	return nil
+}
+
+// A window a database condition failed, whose jobs then committed one by one,
+// lost no write, and says nothing at error (spec 043 #24): an alert on errors
+// is for a write that was lost.
+func TestAWindowWhoseRetriesCommitLogsNoError(t *testing.T) {
+	var logged bytes.Buffer
+	previous := logger
+	logger = func() *slog.Logger { return slog.New(slog.NewTextHandler(&logged, nil)) }
+	t.Cleanup(func() { logger = previous })
+	conditionLog = &logpace.Keyed{Every: time.Minute}
+
+	s := openFresh(t)
+	writer, err := s.NewWriter(WriterOptions{CommitWindow: 50 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writer.Close()
+	var applies atomic.Int32
+	var wg sync.WaitGroup
+	for range 5 {
+		wg.Go(func() {
+			if err := writer.Submit(context.Background(), flakyJob{&applies}); err != nil {
+				t.Errorf("submit = %v, want the retry to commit it", err)
+			}
+		})
+	}
+	wg.Wait()
+	if applies.Load() < 6 {
+		t.Fatalf("%d applies: the jobs never shared a window, so the test proves nothing", applies.Load())
+	}
+	if strings.Contains(logged.String(), "level=ERROR") {
+		t.Errorf("a window whose every job committed logged an error:\n%s", logged.String())
+	}
+}
+
+// A failed hour is one line: the aggregator's, which names the project and the
+// hour, and not the writer's as well (spec 043 #24). A real failure rather than
+// a seam, so that the writer sees it.
+func TestAFailedHourIsOneLine(t *testing.T) {
+	s, project := readStore(t)
+	rollupFixture(t, s, project.ID)
+	// A table the roll writes, gone: every roll fails, and not on a
+	// condition of the database.
+	if _, err := s.db.Exec(`DROP TABLE names_hourly`); err != nil {
+		t.Fatal(err)
+	}
+	var logged bytes.Buffer
+	previous := logger
+	logger = func() *slog.Logger { return slog.New(slog.NewTextHandler(&logged, nil)) }
+	t.Cleanup(func() { logger = previous })
+
+	writer, err := s.NewWriter(quickWrites)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writer.Close()
+	at := afterTheHour()
+	aggregator := s.NewAggregator(writer, RollupOptions{
+		Interval: DefaultRollupInterval, Now: func() time.Time { return at },
+	})
+	err = aggregator.Pass(context.Background())
+	if err == nil {
+		t.Fatal("the pass reported no failure")
+	}
+	if lines := strings.Count(logged.String(), "no such table"); lines != 1 {
+		t.Errorf("the failed hour was logged %d times, want once:\n%s", lines, logged.String())
+	}
+	if strings.Contains(err.Error(), "no such table") {
+		t.Errorf("the pass's error = %q, want a count, not the hour's error again", err)
 	}
 }
 
@@ -729,6 +819,49 @@ func TestOneFailingHourDoesNotStopThePass(t *testing.T) {
 	})
 }
 
+// The repair nulls a token sum only where no honest one can be that large
+// (found in the fourth review of PR #112): a cell with no model counts traces,
+// and an agent's trace of three thousand calls at half a million tokens each
+// sums to 1.5e9 in a cell whose count is one. Nulled, the hour kept NULL for
+// ever — none of its observations is out of range, so nothing stamped it.
+func TestMigration0024KeepsHonestAgentSums(t *testing.T) {
+	path := freshDB(t)
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	project, err := s.CreateProject("test", KeyPair{PublicKey: "tp-pk-test", Secret: "tp-sk-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	trace := &model.Trace{ID: hexTrace(1), Environment: "production"}
+	observations := make([]*model.Observation, 3000)
+	for i := range observations {
+		start := rollupHour*1e9 + int64(i)*1e6
+		observations[i] = &model.Observation{
+			TraceID: trace.ID, ID: hexSpan(i + 1), Type: model.TypeGeneration,
+			Level: model.LevelDefault, Model: "m", StartTime: start, EndTime: start + 1e5,
+			Usage: map[string]any{"input_tokens": 500000},
+		}
+	}
+	seedTrace(t, s, project.ID, trace, observations...)
+	passAt(t, s, afterTheHour())
+	if _, err := s.db.Exec(`DELETE FROM schema_migrations WHERE filename = '0024_repair_numbers.sql'`); err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+
+	s, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	sums := dumpRows(t, s.db, `SELECT model, quote(input_tokens) FROM stats_hourly ORDER BY model`)
+	if want := []string{"|1500000000", "m|1500000000"}; !slices.Equal(sums, want) {
+		t.Errorf("input tokens after the repair = %v, want %v: an honest sum is not an impossible one", sums, want)
+	}
+}
+
 // Migration 0024 spells out the counting rule the store builds (spec 043 #9):
 // the same cost expression, and every token key with the same range. Two
 // copies of one rule are held together here, or the repair would count what
@@ -787,6 +920,10 @@ func TestMigration0024RepairsPoisonedNumbers(t *testing.T) {
 			generation(hexTrace(3), 4, nil, map[string]any{"input_tokens": 1e300, "output_tokens": 7}))
 		seedTrace(t, s, projectID, &model.Trace{ID: hexTrace(4), Environment: "production", UserID: "u2"},
 			generation(hexTrace(4), 5, map[string]any{"total": 0.5}, map[string]any{"input_tokens": 10}))
+		// A total a store written before the mapper read it as a number
+		// still holds as text: it is a cost, and the repair keeps it.
+		seedTrace(t, s, projectID, &model.Trace{ID: hexTrace(5), Environment: "staging", UserID: "u3"},
+			generation(hexTrace(5), 6, map[string]any{"total": "0.25"}, nil))
 	}
 
 	// What the same spans make on this version.
@@ -848,6 +985,9 @@ func TestMigration0024RepairsPoisonedNumbers(t *testing.T) {
 		if !slices.Equal(got, want) {
 			t.Errorf("%s\n got: %v\nwant: %v", space(query), got, want)
 		}
+	}
+	if got := dumpRows(t, s.db, `SELECT quote(total_cost) FROM traces WHERE id = '`+hexTrace(5)+`'`); !slices.Equal(got, []string{"0.25"}) {
+		t.Errorf("the trace whose total was the text \"0.25\" = %v after the repair, want its cost kept", got)
 	}
 	frozen := dumpRows(t, s.db, fmt.Sprintf(
 		`SELECT quote(total_cost), quote(input_tokens), quote(output_tokens), quote(cache_read_tokens)

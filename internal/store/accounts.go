@@ -265,24 +265,31 @@ func (s *Store) ProjectMembers(projectID string) ([]Member, error) {
 	return out, rows.Err()
 }
 
-// ProjectRole answers what one account may do in one project: `owner` for an
-// owner, the membership's role for a member, and "" for somebody who is
-// neither (Decision 3).
-func (s *Store) ProjectRole(ctx context.Context, account *Account, projectID string) (string, error) {
-	if account.Owner {
-		return RoleOwner, nil
-	}
+// ProjectWithRole reads one project, or nil if there is none, together with
+// what one account may do in it: `owner` for an owner, the membership's role
+// for a member, and "" for somebody who is neither (Decision 3). One query
+// rather than two, so that the guard's scoping is one lookup under one
+// deadline (spec 043 #24).
+func (s *Store) ProjectWithRole(ctx context.Context, account *Account, projectID string) (*Project, string, error) {
 	var role string
-	err := s.db.QueryRowContext(ctx,
-		`SELECT role FROM memberships WHERE account_id = ? AND project_id = ?`,
-		account.ID, projectID).Scan(&role)
+	project, err := scanProject(withTail{
+		row: s.db.QueryRowContext(ctx,
+			`SELECT `+prefixed("p", projectColumns)+`, COALESCE(m.role, '')
+			   FROM projects p
+			   LEFT JOIN memberships m ON m.project_id = p.id AND m.account_id = ?
+			  WHERE p.id = ?`, account.ID, projectID),
+		tail: []any{&role},
+	})
 	if err == sql.ErrNoRows {
-		return "", nil
+		project, role, err = nil, "", nil
 	}
 	if err != nil {
-		return "", fmt.Errorf("read membership: %w", err)
+		return nil, "", fmt.Errorf("read the project and the membership: %w", err)
 	}
-	return role, nil
+	if account.Owner {
+		role = RoleOwner
+	}
+	return project, role, nil
 }
 
 // AccountSession is one browser's sign-in (Decision 4). The name carries

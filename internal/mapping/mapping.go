@@ -735,6 +735,15 @@ func mapCost(a *attrs) map[string]any {
 	if len(out) == 0 {
 		return nil
 	}
+	// A total written as a string that is a number is the number, as the
+	// scalar `gen_ai.usage.cost` above already reads one: SQLite's `SUM`
+	// always counted `"0.25"`, and the store's counting rule still does
+	// (spec 043 #24). A string that is not one — "abc" — stays as sent.
+	if text, ok := out["total"].(string); ok {
+		if n, valid := asNumber(strings.TrimSpace(text)); valid {
+			out["total"] = jsonNumber(n)
+		}
+	}
 	if _, ok := out["total"]; !ok {
 		// The trace list sums one number per observation; deriving it
 		// once here beats teaching every reader the component names.

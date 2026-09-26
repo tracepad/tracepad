@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tracepad/tracepad/internal/logpace"
 	"github.com/tracepad/tracepad/internal/store"
 )
 
@@ -256,18 +257,47 @@ func guardLookup[T any](w http.ResponseWriter, r *http.Request, what string, loo
 	if err == nil {
 		return value, true
 	}
-	if r.Context().Err() == nil {
-		slog.Error(what+" lookup failed", "err", err)
-		retryLater(w, "cannot check credentials right now; retry shortly")
-	}
 	var zero T
+	if hungUp(r) {
+		return zero, false
+	}
+	// A database condition is the same news on every request until it
+	// passes — a lock held past the busy timeout, a full disk — so it is
+	// logged once a minute per condition, as the writer logs it (spec 043
+	// #24); anything else is logged every time.
+	if condition, ok := store.Condition(err); ok {
+		if failed, now := lookupLog.Allow(condition, time.Now()); now {
+			slog.Error(what+" lookup failed", "err", err, "condition", condition,
+				"failed_since_last_line", failed)
+		}
+	} else {
+		slog.Error(what+" lookup failed", "err", err)
+	}
+	retryLater(w, "cannot check credentials right now; retry shortly")
 	return zero, false
+}
+
+// lookupLog paces the log line of a guard lookup a database condition failed.
+var lookupLog = &logpace.Keyed{Every: time.Minute}
+
+// hungUp reports a request whose client is gone. A lookup that failed for that
+// reason is no storage failure and has nobody to answer: nothing is logged and
+// nothing is written, as ingest already treats a hang-up (spec 043 #24).
+func hungUp(r *http.Request) bool {
+	return r.Context().Err() != nil
 }
 
 // keyLookup is what a key lookup finds: the project and the key itself.
 type keyLookup struct {
 	project *store.Project
 	key     *store.KeyInfo
+}
+
+// membership is what the scoping lookup finds: the project, and the account's
+// role in it.
+type membership struct {
+	project *store.Project
+	role    string
 }
 
 // signIn is what a session lookup finds: the row and the account behind it.
@@ -471,18 +501,14 @@ func (s *Server) scope(w http.ResponseWriter, r *http.Request, rt route, c *call
 		return true
 	}
 
-	project, ok := guardLookup(w, r, "project", func(ctx context.Context) (*store.Project, error) {
-		return s.store.ProjectByID(ctx, id)
+	found, ok := guardLookup(w, r, "membership", func(ctx context.Context) (membership, error) {
+		project, role, err := s.store.ProjectWithRole(ctx, c.account, id)
+		return membership{project, role}, err
 	})
 	if !ok {
 		return false
 	}
-	role, ok := guardLookup(w, r, "membership", func(ctx context.Context) (string, error) {
-		return s.store.ProjectRole(ctx, c.account, id)
-	})
-	if !ok {
-		return false
-	}
+	project, role := found.project, found.role
 	if role == "" {
 		// 403 rather than 404 for a project you are not in: ids are
 		// random, so there is nothing to enumerate, and "not a member" is

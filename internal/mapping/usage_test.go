@@ -259,3 +259,24 @@ func TestADerivedTotalDoesNotDependOnOrder(t *testing.T) {
 		}
 	}
 }
+
+// A total written as a string that is a number is stored as the number (spec
+// 043 #24): the counting rule counts it either way, and a stored number is
+// one every reader reads the same. A string that is not a number stays as
+// sent, and counts as no data.
+func TestANumericStringTotalIsANumber(t *testing.T) {
+	for _, tc := range []struct {
+		sent string
+		want any
+	}{
+		{`{"total": "0.25"}`, 0.25},
+		{`{"total": " 1.5 "}`, 1.5},
+		{`{"total": "abc"}`, "abc"},
+		{`{"total": "Infinity"}`, "Infinity"},
+	} {
+		observation := mapping.Map(otlptest.SpanWith("langfuse.observation.cost_details", tc.sent)).Observations[0]
+		if got := observation.CostDetails["total"]; got != tc.want {
+			t.Errorf("%s: total = %#v, want %#v", tc.sent, got, tc.want)
+		}
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -13,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tracepad/tracepad/internal/logpace"
 	"github.com/tracepad/tracepad/internal/mapping"
 	"github.com/tracepad/tracepad/internal/model"
 	"github.com/tracepad/tracepad/internal/otlptest"
@@ -121,6 +123,64 @@ func TestAClientThatHangsUpDuringTheLookupIsNotAFailure(t *testing.T) {
 	h.server.Handler().ServeHTTP(rec, req)
 	if rec.Code == http.StatusServiceUnavailable {
 		t.Errorf("status = 503 for a client that hung up, want nothing answered")
+	}
+	if strings.Contains(logged.String(), "lookup failed") {
+		t.Errorf("a hang-up was logged as a failed lookup:\n%s", logged.String())
+	}
+}
+
+// A credential lookup a database condition failed is logged once a minute per
+// condition, as the writer logs the same condition (spec 043 #24): while a
+// lock is held past the busy timeout every exporter's retry fails its lookup,
+// and a line each would bury the one that says why. Anything else is logged
+// every time.
+func TestAFailedLookupOnAConditionIsLoggedOnceAMinute(t *testing.T) {
+	var logged bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logged, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	lookupLog = &logpace.Keyed{Every: time.Minute}
+
+	lookup := func(err error) {
+		rec := httptest.NewRecorder()
+		_, ok := guardLookup(rec, httptest.NewRequest("GET", "/api/v1/traces", nil), "key",
+			func(context.Context) (int, error) { return 0, err })
+		if ok || rec.Code != http.StatusServiceUnavailable {
+			t.Fatalf("lookup = %v, status %d, want a 503", ok, rec.Code)
+		}
+	}
+	for range 10 {
+		lookup(codedError{5}) // SQLITE_BUSY
+	}
+	if lines := strings.Count(logged.String(), "condition=SQLITE_BUSY"); lines != 1 {
+		t.Errorf("logged %d lines for 10 lookups a held lock failed, want 1:\n%s", lines, logged.String())
+	}
+	for range 2 {
+		lookup(errors.New("no such table: api_keys"))
+	}
+	if lines := strings.Count(logged.String(), "no such table"); lines != 2 {
+		t.Errorf("logged %d lines for 2 lookups that failed on their own, want 2", lines)
+	}
+}
+
+// A lookup outside the guard whose client hung up is not a storage failure
+// either (spec 043 #24): nothing answered, nothing logged — here the admin
+// token's own read of the project it names.
+func TestAHangUpDuringAHandlersLookupIsNotAFailure(t *testing.T) {
+	h := newAdminHarness(t)
+	var logged bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logged, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	req := httptest.NewRequest("GET", "/api/v1/projects/"+h.project.ID, nil).WithContext(ctx)
+	asAdmin(req)
+	rec := httptest.NewRecorder()
+	h.server.Handler().ServeHTTP(rec, req)
+	if rec.Code == http.StatusInternalServerError {
+		t.Errorf("status = 500 for a client that hung up, want nothing answered")
 	}
 	if strings.Contains(logged.String(), "lookup failed") {
 		t.Errorf("a hang-up was logged as a failed lookup:\n%s", logged.String())
