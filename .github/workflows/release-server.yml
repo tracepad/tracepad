@@ -39,6 +39,8 @@ jobs:
     outputs:
       version: ${{ steps.meta.outputs.version }}
       tags: ${{ steps.meta.outputs.tags }}
+      prerelease: ${{ steps.meta.outputs.prerelease }}
+      latest: ${{ steps.meta.outputs.latest }}
     steps:
       # Tags and all of them: which image tags this release may move is a
       # question about the ones already published (#16).
@@ -60,6 +62,10 @@ jobs:
 
           image="ghcr.io/${GITHUB_REPOSITORY}"
           tags="$image:$version"
+          # The GitHub release follows the image: marked a pre-release when it
+          # is one, and Latest only when `latest` moves with it.
+          prerelease=false
+          latest=false
 
           # A pre-release publishes under its exact tag and nothing else: it is
           # for the person who asked for it, and neither `X.Y` — what an
@@ -68,6 +74,7 @@ jobs:
           case "$version" in
             *-*)
               echo "pre-release: publishing $version alone"
+              prerelease=true
               ;;
             *)
               # A moving tag may only move forward. Releasing a back-patch
@@ -94,6 +101,7 @@ jobs:
 
               if [ "$newest" = "$GITHUB_REF_NAME" ]; then
                 tags="$tags,$image:latest"
+                latest=true
               else
                 echo "not moving latest: $newest is newer"
               fi
@@ -104,6 +112,8 @@ jobs:
           {
             echo "version=$version"
             echo "tags=$tags"
+            echo "prerelease=$prerelease"
+            echo "latest=$latest"
           } >> "$GITHUB_OUTPUT"
 
   # The six archives and their checksums, with no way to publish them: GoReleaser
@@ -196,10 +206,18 @@ jobs:
           subject-path: |
             dist/*.tar.gz
             dist/*.zip
+      # Left to itself GitHub marks every new release Latest: a release
+      # candidate, or a back-patch published after a newer line, would take
+      # the badge — and the download link — from the newest stable (#16).
       - name: The release, with the archives and their checksums
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes dist/*
+          PRERELEASE: ${{ needs.check.outputs.prerelease }}
+          LATEST: ${{ needs.check.outputs.latest }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+            --verify-tag --generate-notes \
+            --prerelease="$PRERELEASE" --latest="$LATEST" dist/*
 
   image:
     needs: [check, image-build, release]
@@ -214,13 +232,18 @@ jobs:
           name: image
           path: ${{ runner.temp }}
       # Every tag decided in `check`, before the release was published, points
-      # at the one index the archive holds; skopeo is on the runner image.
+      # at the one index the archive holds; skopeo is on the runner image. The
+      # login goes into Docker's config file rather than skopeo's own, because
+      # the attestation below is pushed with whatever credentials that file
+      # holds — skopeo reads it just the same.
       - name: Push the archive under each tag
         id: push
         env:
           TAGS: ${{ needs.check.outputs.tags }}
           GH_TOKEN: ${{ github.token }}
         run: |
+          export REGISTRY_AUTH_FILE="$HOME/.docker/config.json"
+          mkdir -p "$HOME/.docker"
           skopeo login ghcr.io --username "$GITHUB_ACTOR" --password-stdin <<< "$GH_TOKEN"
           for tag in ${TAGS//,/ }; do
             skopeo copy --all --preserve-digests --digestfile "$RUNNER_TEMP/digest" \

@@ -25,6 +25,11 @@ concurrency:
 permissions:
   contents: read
 
+# The uv the Python package is tested with, the same one its release builds
+# with. Dependabot does not move it; spec 020 #19 lists the pins moved by hand.
+env:
+  UV_VERSION: "0.11.12"
+
 jobs:
   gate:
     if: github.event_name == 'pull_request'
@@ -47,10 +52,12 @@ jobs:
       - run: make gate
       # The lock files resolve to the npm registry only, over https, with
       # integrity hashes, and under the names they claim (spec 020 #19). The
-      # Node package's one alias is its OpenTelemetry 1.x test double.
+      # Node package's one alias is its OpenTelemetry 1.x test double. The
+      # linter is the interface's dev dependency, installed from its lock by
+      # `make gate` above rather than resolved afresh on every run.
       - name: The lock files resolve where they claim to
         run: |
-          lint=(npx --yes lockfile-lint@5.0.1 --type npm --allowed-hosts npm
+          lint=(ui/node_modules/.bin/lockfile-lint --type npm --allowed-hosts npm
                 --validate-https --validate-integrity --validate-package-names)
           "${lint[@]}" --path ui/package-lock.json
           "${lint[@]}" --path sdk/js/package-lock.json \
@@ -210,16 +217,22 @@ jobs:
           go-version-file: go.mod
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
         with:
-          version: "0.11.12"
+          version: ${{ env.UV_VERSION }}
           python-version: ${{ matrix.python-version }}
-      # The lock, whole; the floor's pins over it on that leg alone.
-      - run: uv sync --locked
+      # Each leg is one resolution (spec 042 #16): the lock, whole, or the
+      # package with the floor's pins in it. Installing the lock first and the
+      # floor over it would leave whatever only the newer OpenTelemetry pulls
+      # in behind, and a broken floor could pass on it.
+      - if: matrix.otel == 'locked'
+        run: uv sync --locked
         working-directory: sdk/python
       - if: matrix.otel == 'floor'
         run: |
           pins="$(scripts/sdk-test.sh --floor-pins)"
           mapfile -t floor <<< "$pins"
-          uv pip install --python sdk/python/.venv/bin/python "${floor[@]}"
+          uv venv sdk/python/.venv
+          uv pip install --python sdk/python/.venv/bin/python -e sdk/python \
+            --group sdk/python/pyproject.toml:dev "${floor[@]}"
       # One rule set for every Python file in the repository, named rather
       # than discovered: the scripts sit outside the package that configures it.
       - run: sdk/python/.venv/bin/ruff check --config sdk/python/pyproject.toml sdk/python scripts

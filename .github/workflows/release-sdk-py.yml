@@ -12,9 +12,10 @@
 # PyPI by the project's owner.
 #
 # Two jobs, and only the second can mint that token (spec 017 #20): `build`
-# installs, tests and builds from `uv.lock` with read access alone, and
-# `publish` receives the two files it made and uploads them — it runs no code
-# of the package's and installs nothing but a pinned uv.
+# installs from `uv.lock`, builds against hashed build constraints and tests
+# what it built, with read access alone, and `publish` receives the two files
+# it made and uploads them — it runs no code of the package's and installs
+# nothing but a pinned uv.
 name: Release the Python package
 
 on:
@@ -22,6 +23,11 @@ on:
     tags: ["sdk-py/v*"]
 
 permissions: {}
+
+# The same uv CI tests the package with. Dependabot does not move it; spec 020
+# #19 lists the pins moved by hand.
+env:
+  UV_VERSION: "0.11.12"
 
 jobs:
   build:
@@ -34,7 +40,7 @@ jobs:
           persist-credentials: false
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
         with:
-          version: "0.11.12"
+          version: ${{ env.UV_VERSION }}
           python-version: "3.13"
           enable-cache: false
 
@@ -47,16 +53,23 @@ jobs:
             exit 1
           fi
 
-      # The suite runs here too. CI ran it on the commit, but a tag can be
-      # moved, and what is published must be what passed — on the lock, not on
-      # whatever the index serves today.
-      - run: uv sync --locked
+      # The test dependencies from the lock, and not the package: building it
+      # editable here would run the build backend outside the constraints
+      # below, the ones that hold it by hash.
+      - run: uv sync --locked --no-install-project
         working-directory: sdk/python
-      - run: SDK_PYTHON="$PWD/sdk/python/.venv/bin/python" SDK_SKIP_E2E=1 scripts/sdk-test.sh
+      # The backend and everything it imports, by version and by hash: a lock
+      # covers what the package installs, not what builds it.
+      - run: >-
+          uv build --out-dir "$RUNNER_TEMP/dist"
+          --build-constraints build-constraints.txt --require-hashes
+        working-directory: sdk/python
 
-      # hatchling is held to one version by `[tool.uv]` in pyproject.toml.
-      - run: uv build --out-dir "$RUNNER_TEMP/dist"
-        working-directory: sdk/python
+      # The suite runs here too, on the wheel about to be published. CI ran it
+      # on the commit, but a tag can be moved, and what is published must be
+      # what passed — on the lock, not on whatever the index serves today.
+      - run: uv pip install --python sdk/python/.venv/bin/python --no-deps "$RUNNER_TEMP"/dist/*.whl
+      - run: SDK_PYTHON="$PWD/sdk/python/.venv/bin/python" SDK_SKIP_E2E=1 scripts/sdk-test.sh
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: dist
@@ -77,6 +90,6 @@ jobs:
           path: dist
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
         with:
-          version: "0.11.12"
+          version: ${{ env.UV_VERSION }}
           enable-cache: false
       - run: uv publish --trusted-publishing always dist/*
