@@ -199,7 +199,7 @@ func serve(args []string) error {
 	// deployment still needs its first owner and what the link to create
 	// one is (spec 028 #9).
 	printStartup(os.Stdout, boot, cfg.Listen, srv.SetupURL())
-	warnPlainHTTP(slog.Default(), cfg.Listen, cfg.URL)
+	warnPlainHTTP(slog.Default(), cfg.Listen, cfg.URL, cfg.InContainer)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -330,10 +330,17 @@ The link is good until this process stops. Restart to have a new one printed.
 
 // warnPlainHTTP says so at start when other machines can reach this server
 // over plain HTTP and nothing says a TLS proxy stands in front (spec 001 #12).
-// A warning, not a refusal: a container binds every interface by design and
-// is fenced by where its port is published, which the server cannot see.
-func warnPlainHTTP(log *slog.Logger, listen, publicURL string) {
+// A warning, not a refusal. In the image it is one INFO line instead: a
+// container binds every interface by design and is fenced by where its port
+// is published, which the server cannot see, and a warning that fires in the
+// recommended setup teaches people to skip warnings.
+func warnPlainHTTP(log *slog.Logger, listen, publicURL string, inContainer bool) {
 	if !config.PlainHTTPBeyondLoopback(listen, publicURL) {
+		return
+	}
+	if inContainer {
+		log.Info("listening on all interfaces inside the container; publish the port on 127.0.0.1 "+
+			"or put TLS in front — docs/docker.md", "listen", listen)
 		return
 	}
 	log.Warn("serving plain HTTP beyond loopback: passwords, session cookies and keys cross the network unencrypted. "+

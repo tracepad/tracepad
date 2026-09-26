@@ -185,6 +185,25 @@ func TestPublicURL(t *testing.T) {
 	}
 }
 
+// The image sets TRACEPAD_IN_CONTAINER=1 (spec 020 #20); anywhere else it is
+// unset, and a known variable, so it is never reported as a typo.
+func TestInContainer(t *testing.T) {
+	cfg, err := Load(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.InContainer {
+		t.Error("InContainer set with TRACEPAD_IN_CONTAINER unset")
+	}
+	t.Setenv("TRACEPAD_IN_CONTAINER", "1")
+	if cfg, err = Load(nil); err != nil || !cfg.InContainer {
+		t.Errorf("TRACEPAD_IN_CONTAINER=1: InContainer = %v, err = %v", cfg != nil && cfg.InContainer, err)
+	}
+	if !knownEnv["TRACEPAD_IN_CONTAINER"] {
+		t.Error("TRACEPAD_IN_CONTAINER would be warned about as unknown")
+	}
+}
+
 func TestDisplayHost(t *testing.T) {
 	cases := map[string]string{
 		":4318":          "localhost:4318",

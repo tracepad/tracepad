@@ -57,25 +57,43 @@ func TestPrintStartupPrintsOnlyGeneratedSecrets(t *testing.T) {
 }
 
 // Other machines reaching a plain-HTTP listener with nothing saying a TLS proxy
-// is in front is a warning at start, naming the address (spec 001 #12).
+// is in front is a warning at start, naming the address — and, in the image,
+// where the wildcard bind is the design and the publish decides the reach, one
+// INFO line instead (spec 001 #12).
 func TestWarnPlainHTTP(t *testing.T) {
 	cases := []struct {
 		listen, url string
-		warn        bool
+		container   bool
+		level       string // "" when nothing is logged
 	}{
-		{":4318", "", true},
-		{":4318", "https://traces.example.com", false},
-		{"127.0.0.1:4318", "", false},
+		{":4318", "", false, "WARN"},
+		{":4318", "https://traces.example.com", false, ""},
+		{"127.0.0.1:4318", "", false, ""},
+		{":4318", "", true, "INFO"},
+		{":4318", "https://traces.example.com", true, ""},
 	}
 	for _, c := range cases {
 		var out bytes.Buffer
-		warnPlainHTTP(slog.New(slog.NewTextHandler(&out, nil)), c.listen, c.url)
+		warnPlainHTTP(slog.New(slog.NewTextHandler(&out, nil)), c.listen, c.url, c.container)
 		logged := out.String()
-		if got := strings.Contains(logged, "level=WARN"); got != c.warn {
-			t.Errorf("listen %q, url %q: warned = %v, want %v\n%s", c.listen, c.url, got, c.warn, logged)
+		if c.level == "" {
+			if logged != "" {
+				t.Errorf("listen %q, url %q, container %v: want nothing logged, got\n%s",
+					c.listen, c.url, c.container, logged)
+			}
+			continue
 		}
-		if c.warn && (!strings.Contains(logged, "listen="+c.listen) || !strings.Contains(logged, "TRACEPAD_URL")) {
-			t.Errorf("the warning should name the address and the fix:\n%s", logged)
+		if strings.Count(logged, "\n") != 1 || !strings.Contains(logged, "level="+c.level) ||
+			!strings.Contains(logged, "listen="+c.listen) {
+			t.Errorf("listen %q, url %q, container %v: want one %s line naming the address, got\n%s",
+				c.listen, c.url, c.container, c.level, logged)
+		}
+		fix := "TRACEPAD_URL"
+		if c.container {
+			fix = "docs/docker.md"
+		}
+		if !strings.Contains(logged, fix) {
+			t.Errorf("the line should point at %s:\n%s", fix, logged)
 		}
 	}
 }

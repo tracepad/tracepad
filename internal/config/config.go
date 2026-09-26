@@ -72,6 +72,12 @@ type Config struct {
 	// hands out. Read by the CLI as the server to talk to, which is why
 	// one variable serves both.
 	URL string
+	// InContainer says the process runs in the published image, which sets
+	// TRACEPAD_IN_CONTAINER=1 (spec 001 #12, spec 020 #20). There a wildcard
+	// bind is the design and the port's reach is decided by where it is
+	// published, which the process cannot see — so the plain-HTTP notice at
+	// start is information, not a warning.
+	InContainer bool
 }
 
 // DefaultMaxBodyBytes is the request body cap when unset (20 MiB).
@@ -128,6 +134,7 @@ var knownEnv = map[string]bool{
 	"TRACEPAD_ROLLUP_INTERVAL":       true,
 	"TRACEPAD_ADMIN_TOKEN":           true,
 	"TRACEPAD_SESSION_DAYS":          true,
+	"TRACEPAD_IN_CONTAINER":          true,
 	// The server reads TRACEPAD_URL too since spec 028 #11 — as the host
 	// of the links it prints — but it is still the CLI's "which server",
 	// which is the whole reason there is one variable and not two.
@@ -172,6 +179,10 @@ func Load(args []string) (*Config, error) {
 		return nil, fmt.Errorf("TRACEPAD_ROLLUP_INTERVAL: want at least %s, got %s",
 			MinRollupInterval, rollup)
 	}
+	inContainer, err := parseOnOff("TRACEPAD_IN_CONTAINER", false)
+	if err != nil {
+		return nil, err
+	}
 	sessionDays, err := parseCount("TRACEPAD_SESSION_DAYS", DefaultSessionDays)
 	if err != nil {
 		return nil, err
@@ -193,6 +204,7 @@ func Load(args []string) (*Config, error) {
 		AdminToken:          strings.TrimSpace(os.Getenv("TRACEPAD_ADMIN_TOKEN")),
 		SessionLife:         time.Duration(sessionDays) * 24 * time.Hour,
 		URL:                 strings.TrimSpace(os.Getenv("TRACEPAD_URL")),
+		InContainer:         inContainer,
 	}
 
 	fs := flag.NewFlagSet("tracepad", flag.ContinueOnError)

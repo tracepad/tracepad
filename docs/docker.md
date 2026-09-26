@@ -21,10 +21,11 @@ store. The interface is on <http://localhost:4318/>.
 speaks plain HTTP: the passwords people sign in with, their session cookies and
 your applications' keys would cross the network readable by anything on the
 path. Keep `127.0.0.1:` for applications on the same machine; to serve anyone
-else, put a TLS proxy in front — [Serving over TLS](#serving-over-tls). The
-server says so in its log at every start until `TRACEPAD_URL` is an `https://`
-address, because inside a container it cannot see where its port was
-published.
+else, put a TLS proxy in front — [Serving over TLS](#serving-over-tls). Inside
+the container the server cannot see where its port was published, so it says
+this once at every start, as an `INFO` line, until `TRACEPAD_URL` is an
+`https://` address. (The same binary on a host, reachable beyond loopback over
+plain HTTP, makes it a `WARN`.)
 
 ## The keys are printed once, to the log
 
@@ -133,7 +134,7 @@ keys as they are. See [admin.md](admin.md) and [cli.md](cli.md).
 | Entrypoint | `/tracepad` — arguments are the server's flags |
 | Port | `4318` |
 | Volume | `/data` |
-| Set in the image | `TRACEPAD_DATA_DIR=/data`, `TRACEPAD_LISTEN=:4318` |
+| Set in the image | `TRACEPAD_DATA_DIR=/data`, `TRACEPAD_LISTEN=:4318`, `TRACEPAD_IN_CONTAINER=1` (turns the plain-HTTP warning into a note) |
 | Health | `HEALTHCHECK` running `tracepad health` |
 | Licences | `/usr/share/doc/tracepad/` — `LICENSE`, `NOTICE`, `THIRD_PARTY_NOTICES` (every Go module and npm package the binary carries) and `third_party/` |
 
@@ -299,7 +300,7 @@ location / {
   large batch is then lost at the proxy with a `413` the server never sees.
 
 Then tell the server where people reach it, and it prints its setup and
-invitation links there — and stops warning at start about plain HTTP:
+invitation links there — and stops noting plain HTTP at start:
 
 ```sh
 docker run -d --name tracepad -v tracepad:/data -p 127.0.0.1:4318:4318 \

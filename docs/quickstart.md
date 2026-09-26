@@ -22,8 +22,9 @@ the binary prints to your terminal. See [docker.md](docker.md) for the volume,
 the permissions and upgrades.
 
 The `127.0.0.1:` keeps the port on this machine, as `tracepad --listen
-127.0.0.1:4318` does for the binary. Tracepad speaks plain HTTP, and the server
-warns at start while other machines can reach it that way;
+127.0.0.1:4318` does for the binary. Tracepad speaks plain HTTP, and the binary
+warns at start while other machines can reach it that way (the container, which
+cannot see where its port is published, says it as a note);
 [docker.md](docker.md#serving-over-tls) says how to put TLS in front before you
 open it up.
 
