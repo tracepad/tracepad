@@ -250,9 +250,33 @@ func (s *Server) handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed to read the sessions")
 			return
 		}
+		// The keys the account minted are not deleted with it (spec 045
+		// #10), so they are not in `would_delete`: they are listed
+		// because this is the moment an owner decides whether to rotate
+		// them.
+		minted, err := s.store.KeysMintedBy(account.ID)
+		if err != nil {
+			slog.Error("could not read the keys an account minted", "err", err)
+			writeError(w, http.StatusInternalServerError, "failed to read the keys")
+			return
+		}
+		keys := make([]object, 0, len(minted))
+		for _, one := range minted {
+			keys = append(keys, object{}.
+				put("project_id", one.ProjectID).
+				put("project_name", one.ProjectName).
+				put("public_key", one.Key.PublicKey).
+				put("name", one.Key.Name).
+				put("scopes", one.Key.Scopes).
+				put("last_used_at", s.lastUsed(one.Key)))
+		}
 		body, ok := s.fullAccount(w, account)
 		if !ok {
 			return
+		}
+		note := "disabling the account instead takes access away without losing its roles"
+		if len(keys) > 0 {
+			note += "; the keys it minted keep working until they are revoked"
 		}
 		writeJSON(w, http.StatusOK, object{}.
 			put("dry_run", true).
@@ -260,8 +284,9 @@ func (s *Server) handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
 			put("would_delete", object{}.
 				put("memberships", len(memberships)).
 				put("sessions", len(sessions))).
+			put("keys", keys).
 			put("confirm", account.Email).
-			put("note", "disabling the account instead takes access away without losing its roles"))
+			put("note", note))
 		return
 	}
 

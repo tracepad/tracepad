@@ -1,7 +1,6 @@
 package store
 
 import (
-	"crypto/sha256"
 	"database/sql"
 	"fmt"
 	"time"
@@ -287,6 +286,9 @@ func earliest(a, b int64) int64 {
 type ProjectCreate struct {
 	Name string
 	Keys KeyPair
+	// Origin is who is creating the project, which is who minted its first
+	// key (spec 045 #8).
+	Origin KeyOrigin
 
 	Project *Project
 }
@@ -309,7 +311,7 @@ func (p *ProjectCreate) apply(tx *sql.Tx) error {
 	if err != nil {
 		return err
 	}
-	project, err := insertProject(tx, id, p.Name, p.Keys)
+	project, err := insertProject(tx, id, p.Name, p.Keys, p.Origin)
 	if err != nil {
 		return err
 	}
@@ -317,10 +319,10 @@ func (p *ProjectCreate) apply(tx *sql.Tx) error {
 	return nil
 }
 
-// insertProject writes a project row and its first key. Shared with the
-// startup bootstrap, which runs before the writer exists and so cannot be a
-// job (spec 001 #9).
-func insertProject(tx *sql.Tx, id, name string, keys KeyPair) (*Project, error) {
+// insertProject writes a project row and its first key, which may do
+// everything a key may (spec 045 #5). Shared with the startup bootstrap, which
+// runs before the writer exists and so cannot be a job (spec 001 #9).
+func insertProject(tx *sql.Tx, id, name string, keys KeyPair, origin KeyOrigin) (*Project, error) {
 	// RETURNING keeps the returned Project in sync with schema defaults
 	// instead of duplicating them as Go literals.
 	project, err := scanProject(tx.QueryRow(
@@ -328,20 +330,10 @@ func insertProject(tx *sql.Tx, id, name string, keys KeyPair) (*Project, error) 
 	if err != nil {
 		return nil, fmt.Errorf("create project %q: %w", name, err)
 	}
-	if err := insertKey(tx, id, keys); err != nil {
+	if err := insertKey(tx, id, keys, "", origin); err != nil {
 		return nil, err
 	}
 	return project, nil
-}
-
-func insertKey(tx *sql.Tx, projectID string, keys KeyPair) error {
-	hash := sha256.Sum256([]byte(keys.Secret))
-	if _, err := tx.Exec(
-		`INSERT INTO api_keys (public_key, secret_hash, project_id) VALUES (?, ?, ?)`,
-		keys.PublicKey, hash[:], projectID); err != nil {
-		return fmt.Errorf("create key for project %s: %w", projectID, err)
-	}
-	return nil
 }
 
 // KeyCreate adds a key pair to a project. Several active pairs are the point:
@@ -350,6 +342,11 @@ func insertKey(tx *sql.Tx, projectID string, keys KeyPair) error {
 type KeyCreate struct {
 	ProjectID string
 	Keys      KeyPair
+	// Name says which program holds the key (spec 045 #6); Origin who
+	// minted it (#8).
+	Name   string
+	Origin KeyOrigin
+
 	CreatedAt string
 }
 
@@ -361,7 +358,7 @@ func (k *KeyCreate) apply(tx *sql.Tx) error {
 	if project == nil {
 		return &Rejection{Kind: RejectNotFound, Message: "no such project"}
 	}
-	if err := insertKey(tx, k.ProjectID, k.Keys); err != nil {
+	if err := insertKey(tx, k.ProjectID, k.Keys, k.Name, k.Origin); err != nil {
 		return err
 	}
 	return tx.QueryRow(`SELECT created_at FROM api_keys WHERE public_key = ?`, k.Keys.PublicKey).

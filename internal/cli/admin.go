@@ -54,6 +54,18 @@ type preview struct {
 	Items        *int64 `json:"items"`
 	DatasetRuns  *int64 `json:"runs"`
 	PinnedTraces *int64 `json:"pinned_traces"`
+	// Keys are the keys an account deletion leaves working because the
+	// account minted them (spec 045 #10). Not in `would_delete`: the
+	// deletion does not take them.
+	Keys []mintedKey `json:"keys"`
+}
+
+// mintedKey is one key an account minted, as its deletion preview lists it.
+type mintedKey struct {
+	ProjectName string  `json:"project_name"`
+	PublicKey   string  `json:"public_key"`
+	Name        string  `json:"name"`
+	LastUsedAt  *string `json:"last_used_at"`
 }
 
 // affectedRun is one run that loses traces to an erasure.
@@ -338,8 +350,16 @@ func (r *run) keysList(ctx context.Context, args []string) error {
 	}
 	listing, err := decode[struct {
 		Keys []struct {
-			PublicKey string `json:"public_key"`
-			CreatedAt string `json:"created_at"`
+			PublicKey string   `json:"public_key"`
+			Name      string   `json:"name"`
+			Scopes    []string `json:"scopes"`
+			CreatedAt string   `json:"created_at"`
+			CreatedBy struct {
+				Kind     string `json:"kind"`
+				Email    string `json:"email"`
+				Standing string `json:"standing"`
+			} `json:"created_by"`
+			LastUsedAt *string `json:"last_used_at"`
 		} `json:"keys"`
 	}](body)
 	if err != nil {
@@ -349,17 +369,56 @@ func (r *run) keysList(ctx context.Context, args []string) error {
 		fmt.Fprintln(r.opt.Stdout, "no keys: this project cannot ingest until one is created")
 		return nil
 	}
-	t := newTable(r.opt.Stdout, "PUBLIC KEY", "CREATED")
+	// Who minted a key and whether it is still in use are the two questions
+	// the listing answers before a revocation (spec 045 #8, #9).
+	t := newTable(r.opt.Stdout, "PUBLIC KEY", "NAME", "SCOPES", "CREATED", "CREATED BY", "LAST USED")
 	for _, key := range listing.Keys {
-		t.row(key.PublicKey, shortTime(key.CreatedAt))
+		by := key.CreatedBy
+		t.row(termsafe.String(key.PublicKey), orDash(termsafe.String(key.Name)),
+			termsafe.String(strings.Join(key.Scopes, ",")), shortTime(key.CreatedAt),
+			minter(by.Kind, termsafe.String(by.Email), termsafe.String(by.Standing)),
+			lastUsed(key.LastUsedAt))
 	}
 	t.flush()
 	return nil
 }
 
+// minter renders a key's `created_by` in one cell: the account and its
+// standing now, or who else made it.
+func minter(kind, email, standing string) string {
+	switch kind {
+	case "account":
+		return email + " (" + standing + ")"
+	case "admin_token":
+		return "admin token"
+	case "startup":
+		return "server"
+	}
+	// Keys from before the server recorded it: the ones to rotate first
+	// if a key was ever lost (spec 045, edge cases).
+	return "unknown"
+}
+
+// lastUsed renders a key's last use, which is null until it has one.
+func lastUsed(at *string) string {
+	if at == nil {
+		return "never"
+	}
+	return shortTime(*at)
+}
+
+// keyName renders an optional name inside a sentence.
+func keyName(name string) string {
+	if name == "" {
+		return ""
+	}
+	return " (" + termsafe.String(name) + ")"
+}
+
 func (r *run) keysCreate(ctx context.Context, args []string) error {
 	fs := r.flags("keys create")
 	project := fs.String("project", "", "")
+	name := fs.String("name", "", "")
 	if _, err := r.parse(fs, args, 0); err != nil {
 		return err
 	}
@@ -368,8 +427,14 @@ func (r *run) keysCreate(ctx context.Context, args []string) error {
 		return err
 	}
 
+	// The name says which program will hold the key (spec 045 #6); the
+	// server trims and bounds it.
+	var request any
+	if *name != "" {
+		request = map[string]string{"name": *name}
+	}
 	body, err := r.api.Send(ctx, http.MethodPost,
-		"/api/v1/projects/"+url.PathEscape(id)+"/keys", nil, nil)
+		"/api/v1/projects/"+url.PathEscape(id)+"/keys", nil, request)
 	if err != nil {
 		return err
 	}
@@ -740,6 +805,13 @@ func (r *run) renderPreview(dry preview, what string) {
 	for _, affected := range dry.Runs {
 		fmt.Fprintf(out, "  %-14s %s of %s loses %d\n",
 			"run", termsafe.String(affected.ID), termsafe.String(affected.Dataset), affected.Traces)
+	}
+	// What an account deletion leaves behind, and whose rotation is now a
+	// decision for whoever is deleting it (spec 045 #10).
+	for _, key := range dry.Keys {
+		fmt.Fprintf(out, "  %-14s %s in %s%s, last used %s\n", "keeps key",
+			termsafe.String(key.PublicKey), termsafe.String(key.ProjectName),
+			keyName(key.Name), lastUsed(key.LastUsedAt))
 	}
 	if dry.Note != "" {
 		fmt.Fprintf(out, "%s\n", termsafe.Text(dry.Note))

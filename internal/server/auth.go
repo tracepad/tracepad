@@ -35,10 +35,12 @@ The order is fixed, because it is what the six-caller test asserts status by
 status:
 
  1. the credential — an `Authorization` header beats a cookie, always
-    (Decision 5), and no credential at all is `401`;
+    (Decision 5), and no credential at all is `401`; a key's use is
+    recorded here, admitted or refused (spec 045 #9);
  2. cross-origin, for a cookie on an unsafe method (Decision 5);
  3. the policy against the kind of caller;
- 4. the project the request is about, for a session (Decision 6).
+ 4. the project the request is about, for a session (Decision 6);
+ 5. what a key may do: no key lists, mints or revokes keys (spec 045 #4).
 */
 
 // policy is what a route requires of its caller. It is the whole of the
@@ -110,6 +112,9 @@ type caller struct {
 	// project is the key's project, or — for a session — the project this
 	// request is about, resolved from the path or the header (Decision 6).
 	project *store.Project
+	// key is the project key itself, for a key: which one is asking, which
+	// is what a grant made on its behalf names (spec 045 #8).
+	key *store.KeyInfo
 	// account and session are set together, for a browser cookie.
 	account *store.Account
 	session *store.AccountSession
@@ -123,7 +128,7 @@ type caller struct {
 func (c *caller) isSession() bool { return c != nil && c.account != nil }
 
 // isKey reports a project key.
-func (c *caller) isKey() bool { return c != nil && !c.admin && c.account == nil && c.project != nil }
+func (c *caller) isKey() bool { return c != nil && c.key != nil }
 
 // callerKey is the context key the guard stores the caller under.
 type callerKey struct{}
@@ -183,7 +188,7 @@ func (s *Server) guard(rt route) http.HandlerFunc {
 	}
 }
 
-// resolve is steps one to four above. It answers the client itself on every
+// resolve is steps one to five above. It answers the client itself on every
 // refusal, so a handler that runs is a handler whose caller is allowed.
 func (s *Server) resolve(w http.ResponseWriter, r *http.Request, rt route) (*caller, bool) {
 	if s.store == nil {
@@ -205,6 +210,13 @@ func (s *Server) resolve(w http.ResponseWriter, r *http.Request, rt route) (*cal
 		return nil, false
 	}
 	if !s.scope(w, r, rt, c) {
+		return nil, false
+	}
+	if c.isKey() && keyRoute(rt.Path) {
+		// Step five, after the project step, so that a soft-deleted
+		// project's key gets the same answer here as a live one and its
+		// own answers everywhere else (spec 045 #13).
+		writeError(w, http.StatusForbidden, keyRouteRefusal)
 		return nil, false
 	}
 	// Last, so that only a request that is actually served extends the
@@ -233,7 +245,7 @@ func (s *Server) identify(w http.ResponseWriter, r *http.Request) (*caller, bool
 			subtle.ConstantTimeCompare([]byte(secret), []byte(s.adminToken)) == 1 {
 			return &caller{admin: true}, true
 		}
-		project, err := s.store.ProjectBySecret(secret)
+		project, key, err := s.store.KeyBySecret(secret)
 		if err != nil {
 			slog.Error("key lookup failed", "err", err)
 			writeError(w, http.StatusUnauthorized, "unauthorized")
@@ -243,7 +255,12 @@ func (s *Server) identify(w http.ResponseWriter, r *http.Request) (*caller, bool
 			writeError(w, http.StatusUnauthorized, "unauthorized")
 			return nil, false
 		}
-		return &caller{project: project}, true
+		// Here rather than once the request is admitted: the question
+		// last use answers is whether anybody still holds the key, and a
+		// lost key probing what it cannot reach is exactly that
+		// (spec 045 #9).
+		s.keyUses.touch(key.PublicKey, time.Now().UnixNano())
+		return &caller{project: project, key: key}, true
 	}
 
 	cookie, err := r.Cookie(sessionCookie)
@@ -330,7 +347,8 @@ func (s *Server) admits(w http.ResponseWriter, rt route, c *caller) bool {
 	case member, editor:
 		if c.isKey() {
 			// A project key is the administrator of its own project
-			// (spec 005 #11), which is both of these.
+			// (spec 005 #11), which is both of these — but for the keys
+			// themselves, which step five keeps from it.
 			return true
 		}
 		if c.admin {
@@ -449,6 +467,22 @@ const projectRoutePrefix = "/api/v1/projects"
 func projectRoute(path string) bool {
 	return path == projectRoutePrefix || strings.HasPrefix(path, projectRoutePrefix+"/")
 }
+
+// keyRoutePrefix is the three routes that list, mint and revoke a project's
+// keys.
+const keyRoutePrefix = projectRoutePrefix + "/{id}/keys"
+
+// keyRoute reports one of them. No project key reaches these, whatever it may
+// do elsewhere (spec 045 #4): a key that mints keys turns one lost key into as
+// many credentials as its finder wants, each outliving the first one's
+// revocation. Issuing a credential is a person's act, or the operator's.
+func keyRoute(path string) bool {
+	return path == keyRoutePrefix || strings.HasPrefix(path, keyRoutePrefix+"/")
+}
+
+// keyRouteRefusal is what a key on those routes is told.
+const keyRouteRefusal = "a project key cannot list, mint or revoke keys; " +
+	"that needs an owner or editor signed in, or the admin token"
 
 // pathScoped reports a route that names its project in the path, which is
 // every route under `/api/v1/projects` but the listing and the create — and

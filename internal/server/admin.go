@@ -1,11 +1,14 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/tracepad/tracepad/internal/store"
 )
@@ -14,8 +17,9 @@ import (
 // user-data erasure. Two rules shape every handler in this file.
 //
 // Authorisation (#11): a project's `sk` key is the administrator of its own
-// project — retention, keys, erasure, restore — while anything cross-project
-// needs `TRACEPAD_ADMIN_TOKEN`. Deleting a project is the exception that needs
+// project — retention, erasure, restore — while anything cross-project needs
+// `TRACEPAD_ADMIN_TOKEN`. Its keys are the exception: no key lists, mints or
+// revokes keys (spec 045 #4), which the guard enforces. Deleting a project is the exception that needs
 // the token even for one's own: an `sk` lives in application config and CI,
 // and a leaked application credential must not be able to destroy the data.
 //
@@ -312,7 +316,7 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	create := &store.ProjectCreate{Name: request.Name, Keys: keys}
+	create := &store.ProjectCreate{Name: request.Name, Keys: keys, Origin: keyOrigin(c)}
 	if !s.submit(w, r, create) {
 		return
 	}
@@ -544,8 +548,9 @@ func (s *Server) handleRestoreProject(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, projectResponse(restore.Project))
 }
 
-// handleListKeys lists a project's public keys. The secrets are not here
-// because they are not anywhere: the store keeps only their hashes.
+// handleListKeys lists a project's public keys, each with who minted it and
+// when it was last used (spec 045 #8, #9). The secrets are not here because
+// they are not anywhere: the store keeps only their hashes.
 func (s *Server) handleListKeys(w http.ResponseWriter, r *http.Request) {
 	c, ok := s.authorize(w, r)
 	if !ok {
@@ -567,15 +572,18 @@ func (s *Server) handleListKeys(w http.ResponseWriter, r *http.Request) {
 	}
 	rendered := make([]object, 0, len(keys))
 	for _, key := range keys {
-		rendered = append(rendered, object{}.
-			put("public_key", key.PublicKey).
-			put("created_at", key.CreatedAt))
+		rendered = append(rendered, s.keyResponse(key))
 	}
 	writeJSON(w, http.StatusOK, object{}.put("keys", rendered))
 }
 
+// maxKeyName bounds a key's name (spec 045 #6): enough to say which program
+// holds it, short enough to fit a row.
+const maxKeyName = 64
+
 // handleCreateKey mints another key pair for a project. Several active pairs
 // are what makes rotation zero-downtime: create, move the SDKs, revoke (#12).
+// The body is optional and carries the key's name (spec 045 #6).
 func (s *Server) handleCreateKey(w http.ResponseWriter, r *http.Request) {
 	c, ok := s.authorize(w, r)
 	if !ok {
@@ -589,21 +597,104 @@ func (s *Server) handleCreateKey(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	body, ok := s.readAPIBody(w, r)
+	if !ok {
+		return
+	}
+	var request struct {
+		Name string `json:"name"`
+	}
+	if len(bytes.TrimSpace(body)) > 0 {
+		if err := decodeStrict(body, &request); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	name := strings.TrimSpace(request.Name)
+	if utf8.RuneCountInString(name) > maxKeyName {
+		writeError(w, http.StatusBadRequest,
+			fmt.Sprintf("a key's name must be at most %d characters", maxKeyName))
+		return
+	}
 	keys, err := store.GenerateKeyPair()
 	if err != nil {
 		slog.Error("key generation failed", "err", err)
 		writeError(w, http.StatusInternalServerError, "failed to generate a key pair")
 		return
 	}
-	create := &store.KeyCreate{ProjectID: project.ID, Keys: keys}
+	create := &store.KeyCreate{ProjectID: project.ID, Keys: keys, Name: name, Origin: keyOrigin(c)}
 	if !s.submit(w, r, create) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, object{}.
 		put("public_key", keys.PublicKey).
 		put("secret_key", keys.Secret).
+		put("name", name).
+		put("scopes", strings.Fields(store.AllScopes)).
 		put("created_at", create.CreatedAt).
+		put("created_by", mintedBy(create.Origin, standingOf(c))).
 		put("note", "the secret key is shown only here; only its hash is stored"))
+}
+
+// keyOrigin is who is minting, as the key records it (spec 045 #8). A key
+// never mints (#4), so the guard has left a session or the admin token.
+func keyOrigin(c *caller) store.KeyOrigin {
+	if c.isSession() {
+		return store.OriginAccount(c.account)
+	}
+	return store.KeyOrigin{Via: store.MintedByAdminToken}
+}
+
+// standingOf is the standing a key minted by this caller has in the project
+// the caller is about: its role, which the guard resolved.
+func standingOf(c *caller) string {
+	if c.isSession() {
+		return c.role
+	}
+	return ""
+}
+
+// mintedBy renders a key's `created_by` (spec 045, API contract): the kind
+// always, and for an account its id while it exists, the email it had when it
+// minted, and its standing in the project now.
+func mintedBy(origin store.KeyOrigin, standing string) object {
+	by := object{}.put("kind", origin.Via)
+	if origin.Via != store.MintedByAccount {
+		return by
+	}
+	if origin.AccountID != "" {
+		by = by.put("account_id", origin.AccountID)
+	}
+	return by.put("email", origin.Email).put("standing", standing)
+}
+
+// keyResponse is one key as the listing answers it. Its last use is the later
+// of what is stored and what is waiting for the next flush, so a key used a
+// second ago does not read as idle (spec 045 #9).
+func (s *Server) keyResponse(key store.KeyInfo) object {
+	return object{}.
+		put("public_key", key.PublicKey).
+		put("name", key.Name).
+		put("scopes", key.Scopes).
+		put("created_at", key.CreatedAt).
+		put("created_by", mintedBy(key.CreatedBy, key.Standing)).
+		put("last_used_at", s.lastUsed(key))
+}
+
+// lastUsed is a key's last use for a response: RFC 3339, or nil — which the
+// API renders as null, its way of saying "never".
+func (s *Server) lastUsed(key store.KeyInfo) any {
+	at := int64(0)
+	if key.LastUsedAt != nil {
+		at = *key.LastUsedAt
+	}
+	if pending, ok := s.keyUses.pending(key.PublicKey); ok && pending > at {
+		at = pending
+	}
+	if at == 0 {
+		return nil
+	}
+	return formatTime(at)
 }
 
 // handleRevokeKey removes one key pair. Revoking the last one leaves a project

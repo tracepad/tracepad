@@ -708,11 +708,19 @@ are covered in [admin.md](admin.md), [retention.md](retention.md) and
 
 ```sh
 tracepad projects ls
-tracepad keys create
+tracepad keys create --name "checkout api"   # admin token
 tracepad retention set --days 90
 tracepad retention set --media placeholder
 tracepad users rm-data user-4711
 ```
+
+The `keys` commands take the admin token, because no project key lists, mints
+or revokes keys; with a project key they print the server's `403` and exit 1.
+An owner or editor does the same in the web interface. `keys ls` shows each
+key's name, scopes, creation date, who minted it — `email (standing)`, `admin
+token`, `server` or `unknown` — and when it was last used, which is written
+once a minute ([admin.md](admin.md#keys)). `keys create --name` says which
+program will hold the key.
 
 `retention show` prints the project's media setting beside the three windows,
 and `retention set --media store|placeholder` changes it
@@ -819,14 +827,17 @@ account it prints says so in as many words.
 
 `accounts rm` is for people who are gone. It takes their memberships, sessions
 and invitations and nothing else, and it wears the same ceremony as the rest of
-the destructive commands — except that the echo is the **email**:
+the destructive commands — except that the echo is the **email**. The keys the
+account minted are not deleted with it; the preview lists them, so you can
+decide whether to rotate them first:
 
 ```
 $ tracepad accounts rm helper@example.com
 this would delete the account helper@example.com:
   memberships    1
   sessions       2
-disabling the account instead takes access away without losing its roles
+  keeps key      tp-pk-81c0… in checkout (nightly eval), last used 2026-09-26 17:41:12
+disabling the account instead takes access away without losing its roles; the keys it minted keep working until they are revoked
 type "helper@example.com" to confirm:
 ```
 

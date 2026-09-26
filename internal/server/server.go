@@ -92,6 +92,15 @@ type Server struct {
 	// mediaKey signs the Langfuse channel's upload URLs (spec 041,
 	// Decisions 14 and 22), kept in the database across restarts.
 	mediaKey []byte
+
+	// keyUses is when each key last authenticated a request, held until
+	// the next flush writes it (spec 045 #9); the rest is the flusher's
+	// lifetime, which is serving's (keyuse.go).
+	keyUses     *keyUses
+	flusherOnce sync.Once
+	stopOnce    sync.Once
+	flusherStop chan struct{}
+	flusherDone chan struct{}
 }
 
 // New builds the server around an opened store, the writer that serializes
@@ -131,6 +140,7 @@ func New(cfg *config.Config, version string, st *store.Store, writer JobWriter, 
 		assets:         ui.Assets(),
 		startedAt:      time.Now(),
 		counters:       newCounters(),
+		keyUses:        newKeyUses(),
 	}
 	if st != nil {
 		s.mediaKey = st.MediaUploadKey()
@@ -186,6 +196,7 @@ func (s *Server) Handler() http.Handler { return s.http.Handler }
 // ListenAndServe blocks until the server stops.
 func (s *Server) ListenAndServe() error {
 	slog.Info("listening", "addr", s.http.Addr)
+	s.startKeyUseFlusher()
 	err := s.http.ListenAndServe()
 	if err == http.ErrServerClosed {
 		return nil
@@ -193,11 +204,19 @@ func (s *Server) ListenAndServe() error {
 	return err
 }
 
-// Shutdown drains in-flight requests. The ingest writer outlives it by
-// design: a handler still waiting on a commit must get its answer before the
-// writer is closed by its owner.
+// Shutdown drains in-flight requests, then writes the key uses they made
+// (spec 045 #9). The ingest writer outlives it by design: a handler still
+// waiting on a commit must get its answer before the writer is closed by its
+// owner, and so must the last flush.
 func (s *Server) Shutdown(ctx context.Context) error {
-	return s.http.Shutdown(ctx)
+	err := s.http.Shutdown(ctx)
+	s.stopKeyUseFlusher()
+	// Its own deadline: a drain that ran out of time is exactly when the
+	// uses it made still deserve their one write.
+	flushCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	s.flushKeyUses(flushCtx)
+	return err
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {

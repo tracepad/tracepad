@@ -3,11 +3,11 @@
 People sign in; programs use keys.
 
 A project key is a credential an application holds: it is in your SDK's config
-and in your CI, it carries exactly one project, and it can do everything to
-that project. That is the right shape for an exporter and the wrong one for a
-person. A freelancer who should see one project would get the credential that
-also rotates its keys and erases its data, and taking it back would mean
-rotating the key under the running application.
+and in your CI, it carries exactly one project, and it can do nearly everything
+to that project. That is the right shape for an exporter and the wrong one for
+a person. A freelancer who should see one project would get the credential that
+also erases its data, and taking it back would mean rotating the key under the
+running application.
 
 So the server has **accounts**: an email, a password, and a role in each
 project. Keys stay what they are — [ingest](ingest.md), the
@@ -162,7 +162,7 @@ contract rather than a description of it.
 | `public` | Anyone: `GET /api/v1`, `openapi.json`, `/health`, and the three ways in. |
 | `ingest` | A project key, and nothing else. |
 | `member` | A project key, or a session whose account is an owner or has any role in the named project. Every read, plus writing and retracting scores and working a queue. |
-| `editor` | A project key, or an owner or `editor` session. Prompts, datasets, runs, score configs, queues, retention, keys, user-data erasure. |
+| `editor` | A project key, or an owner or `editor` session. Prompts, datasets, runs, score configs, queues, retention, keys, user-data erasure — but no project key lists, mints or revokes keys: those three routes answer a key `403`, and an owner or editor session or the admin token manages them. |
 | `owner` | `TRACEPAD_ADMIN_TOKEN`, or an owner session. Creating, deleting, restoring and renaming a project; listing every project; everything under `/api/v1/accounts`. |
 | `session` | Only a cookie. A key or the admin token is told `not a session`, which is what it is. |
 
@@ -236,9 +236,11 @@ Three rules worth knowing before you press something:
 - **Disabling** ends the account's sessions at once and keeps its roles, so
   enabling puts everything back. It is how you take access away today.
 - **Deleting** is for people who are gone. It takes the memberships, sessions
-  and invitations and nothing else — a score does not name its author, and
-  nothing else in the database references an account. The echo is the email,
-  the one thing about an account a person means.
+  and invitations and nothing else — a score does not name its author, and the
+  keys the account minted keep working, with its email still on them. The dry
+  run lists those keys, in every project, so you can decide whether to rotate
+  them ([admin.md](admin.md#keys)). The echo is the email, the one thing about
+  an account a person means.
 - **Making somebody an owner** deletes their memberships, because an owner has
   every project. Demoting them leaves none, so they see nothing until they are
   given projects again.

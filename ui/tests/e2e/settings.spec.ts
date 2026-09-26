@@ -106,6 +106,7 @@ test('a minted key is shown once, and can then be revoked', async ({ page }) => 
 	const own = await createProject('keys');
 	await openProjectTab(page, own.account);
 
+	await page.getByLabel('Which program will hold the new key').fill('e2e worker');
 	await page.getByRole('button', { name: 'Mint a key pair' }).click();
 
 	// The dialog is the same artifact first run prints: both formats, with the
@@ -116,10 +117,25 @@ test('a minted key is shown once, and can then be revoked', async ({ page }) => 
 	await expect(dialog).toContainText('LANGFUSE_SECRET_KEY=tp-sk-');
 	await dialog.getByRole('button', { name: 'I have copied it' }).click();
 
-	// Two pairs now; revoking the newer one is not the last-key case, so the
-	// server does it on the first request and the card says so.
-	const rows = page.getByRole('listitem').filter({ hasText: 'tp-pk-' });
+	// Two pairs now, each saying who minted it and whether it has been used
+	// (spec 045 #14): the project's first by the admin token that created it,
+	// the new one by the editor signed in here, under the name typed.
+	const rows = page.getByRole('row').filter({ hasText: 'tp-pk-' });
 	await expect(rows).toHaveCount(2);
+	await expect(rows.first()).toContainText('by the admin token');
+	await expect(rows.last()).toContainText('e2e worker');
+	await expect(rows.last()).toContainText(`by ${own.account.email} (editor)`);
+	await expect(rows.last()).toContainText('never');
+
+	// The project's own key is not one of the credentials that see this
+	// (spec 045 #4).
+	const byKey = await page.request.get(`/api/v1/projects/${own.id}/keys`, {
+		headers: { Authorization: `Bearer ${own.key}` }
+	});
+	expect(byKey.status()).toBe(403);
+
+	// Revoking the newer one is not the last-key case, so the server does it
+	// on the first request and the card says so.
 	await rows.last().getByRole('button', { name: 'Revoke' }).click();
 	await page.getByRole('button', { name: 'Revoke', exact: true }).last().click();
 

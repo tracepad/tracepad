@@ -90,6 +90,14 @@ type verdict struct {
 
 var admitted = verdict{}
 
+// managesKeys is the three routes no project key reaches (spec 045 #4), keyed
+// by pattern, written out here rather than asked of the guard so that the
+// oracle and the thing it checks are two statements and not one.
+var managesKeys = map[string]bool{
+	"/api/v1/projects/{id}/keys":              true,
+	"/api/v1/projects/{id}/keys/{public_key}": true,
+}
+
 // decision is Decision 3, as code. `path` is the route's pattern, because two
 // of the rules turn on whether the route is one of the project's own.
 func decision(p policy, w who, path string) verdict {
@@ -120,6 +128,9 @@ func decision(p policy, w who, path string) verdict {
 		return verdict{http.StatusForbidden, "owner account"}
 
 	case member:
+		if w == projectKey && managesKeys[path] {
+			return verdict{http.StatusForbidden, "cannot list, mint or revoke keys"}
+		}
 		if w == deploymentToken && !projectRoute(path) {
 			// The admin token keeps exactly the powers spec 005 #11
 			// gave it and still reaches no data-plane route.
@@ -128,6 +139,11 @@ func decision(p policy, w who, path string) verdict {
 		return admitted
 
 	case editor:
+		if w == projectKey && managesKeys[path] {
+			// No key manages keys, whatever it may do elsewhere
+			// (spec 045 #4).
+			return verdict{http.StatusForbidden, "cannot list, mint or revoke keys"}
+		}
 		if w == deploymentToken && !projectRoute(path) {
 			return verdict{http.StatusUnauthorized, "unauthorized"}
 		}
@@ -308,7 +324,8 @@ func TestSessionsAreIsolatedByProject(t *testing.T) {
 }
 
 // TestKeyLoginKeepsWorking is what makes this a change the interface can
-// follow one PR later: every route a key reached before it still reaches.
+// follow one PR later: every route a key reached before it still reaches —
+// but for the three that manage keys, which no key reaches since spec 045 #4.
 func TestKeyLoginKeepsWorking(t *testing.T) {
 	// Deliberately without an admin token: this is the deployment the
 	// interface has today, and every route it reaches must go on answering.
@@ -321,12 +338,13 @@ func TestKeyLoginKeepsWorking(t *testing.T) {
 		"/api/v1/traces", "/api/v1/sessions", "/api/v1/stats", "/api/v1/system",
 		"/api/v1/prompts", "/api/v1/datasets", "/api/v1/queues", "/api/v1/score-configs",
 		"/api/v1/projects", "/api/v1/projects/" + h.project.ID,
-		"/api/v1/projects/" + h.project.ID + "/keys",
 	} {
 		if rec := h.get(t, path); rec.Code != 200 {
 			t.Errorf("GET %s with a project key = %d (%s)", path, rec.Code, rec.Body)
 		}
 	}
+	keys := "/api/v1/projects/" + h.project.ID + "/keys"
+	expectError(t, h.get(t, keys), http.StatusForbidden, "cannot list, mint or revoke keys")
 
 	// And the project listing still answers a key with its own project and
 	// no role, which is the shape the interface reads today.

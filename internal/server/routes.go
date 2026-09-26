@@ -191,9 +191,9 @@ func (s *Server) routes() []route {
 		{"PATCH", "/api/v1/projects/{id}", editor, "Rename a project (owners) or move its retention windows", s.handlePatchProject},
 		{"DELETE", "/api/v1/projects/{id}", owner, "Soft-delete a project, restorable for seven days", s.handleDeleteProject},
 		{"POST", "/api/v1/projects/{id}/restore", owner, "Undo a soft delete inside its grace window", s.handleRestoreProject},
-		{"GET", "/api/v1/projects/{id}/keys", editor, "List a project's public keys", s.handleListKeys},
-		{"POST", "/api/v1/projects/{id}/keys", editor, "Mint a key pair; the secret is shown once", s.handleCreateKey},
-		{"DELETE", "/api/v1/projects/{id}/keys/{public_key}", editor, "Revoke one key pair", s.handleRevokeKey},
+		{"GET", "/api/v1/projects/{id}/keys", editor, "List a project's keys, who minted each and when it was last used; not with a project key", s.handleListKeys},
+		{"POST", "/api/v1/projects/{id}/keys", editor, "Mint a key pair; the secret is shown once. Not with a project key", s.handleCreateKey},
+		{"DELETE", "/api/v1/projects/{id}/keys/{public_key}", editor, "Revoke one key pair; not with a project key", s.handleRevokeKey},
 		{"DELETE", "/api/v1/projects/{id}/users/{user_id}/data", editor, "Erase everything stored about one user", s.handleEraseUserData},
 		{"GET", "/api/v1/projects/{id}/members", owner, "Who has a role in this project; owners are not listed", s.handleProjectMembers},
 

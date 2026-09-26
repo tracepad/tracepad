@@ -60,17 +60,20 @@ the container exists, and with the default `json-file` driver it never rotates
 it: whoever can run `docker logs tracepad` — or read the log file under the
 daemon's directory, or receive whatever ships your logs elsewhere — can read
 that key next month. Treat the first key as exposed once it has been copied
-out, and rotate onto one that was never printed:
+out, and rotate onto one that was never printed: in the web interface, under
+**Settings → Project → API keys**, mint a pair, move your applications onto it,
+and revoke the printed one. A project key cannot do this for you — no key
+mints or revokes keys — so from a terminal it takes the admin token:
 
 ```sh
-read -rs TRACEPAD_API_KEY && export TRACEPAD_API_KEY   # paste the printed key
+read -rs TRACEPAD_API_KEY && export TRACEPAD_API_KEY   # paste TRACEPAD_ADMIN_TOKEN
 docker exec -e TRACEPAD_API_KEY tracepad /tracepad keys create --url http://localhost:4318
 # move your applications onto the new pair, then revoke the printed one
 docker exec -e TRACEPAD_API_KEY tracepad /tracepad keys rm tp-pk-… --url http://localhost:4318
 ```
 
-A key minted by `keys create` is printed to your terminal, not to the
-container's log. A deployment that declares its keys in `TRACEPAD_PROJECTS`
+A key minted this way is shown in your browser or printed to your terminal,
+never to the container's log. A deployment that declares its keys in `TRACEPAD_PROJECTS`
 from the start never has one printed: the server names the variable where the
 secret would go instead of repeating it.
 
@@ -101,15 +104,14 @@ history either.
 
 ```sh
 read -rs TRACEPAD_API_KEY && export TRACEPAD_API_KEY   # paste the key
-docker exec -e TRACEPAD_API_KEY tracepad /tracepad keys create \
-  --url http://localhost:4318   # mint a second pair, to rotate onto
+docker exec -e TRACEPAD_API_KEY tracepad /tracepad traces ls \
+  --url http://localhost:4318
 ```
 
-**If the key is lost rather than being rotated**, that command has nothing to
-authenticate with — every CLI command but `health` needs a credential, and the
-one you would pass is the one you do not have. The credential that still works
-is the admin token, which is why a deployment you cannot afford to lock
-yourself out of should be started with one:
+**If the key is lost**, nothing the key could do is left to do with it — and
+minting a new one was never among them. The credentials that mint keys are an
+owner's or editor's session and the admin token, which is why a deployment you
+cannot afford to lock yourself out of should be started with one:
 
 ```sh
 # tracepad.env holds one line: TRACEPAD_ADMIN_TOKEN=…

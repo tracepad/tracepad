@@ -16,7 +16,7 @@ with an [account](accounts.md), and `TRACEPAD_ADMIN_TOKEN`.
 |---|---|---|---|---|---|
 | Read a project and its windows | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Change its retention | ✅ | ❌ | ✅ | ✅ | ✅ |
-| Create, list and revoke its keys | ✅ | ❌ | ✅ | ✅ | ✅ |
+| Create, list and revoke its keys | ❌ | ❌ | ✅ | ✅ | ✅ |
 | Erase a user's data in it | ✅ | ❌ | ✅ | ✅ | ✅ |
 | Anything in another project | ❌ | ❌ | ❌ | ✅ | ✅ |
 | List every project | ❌ | ❌ | ❌ | ✅ | ✅ |
@@ -27,6 +27,13 @@ with an [account](accounts.md), and `TRACEPAD_ADMIN_TOKEN`.
 A project's secret key is still the administrator of its own project. That is
 what keeps "retention changes without a restart" true in the default install,
 which has no admin token at all.
+
+Its keys are the exception: **no project key lists, mints or revokes keys**,
+and it is answered `403` on those three routes. A key that could mint keys
+would turn one lost key into as many credentials as its finder wanted, each of
+them outliving the revocation of the first. Issuing a credential is a person's
+act — an owner's or an editor's, signed in — or the operator's, with the
+admin token.
 
 Creating, deleting, restoring and renaming a project need an owner or the
 token, for one reason: an `sk` lives in application config and in CI, and a
@@ -96,9 +103,9 @@ on stderr and exit code 1.
 | `PATCH` | `/api/v1/projects/{id}` | `name` (owner or token), `retention_days`, `raw_retention_days`, `stats_retention_days`. |
 | `DELETE` | `/api/v1/projects/{id}` | Soft delete; `202` with the purge date. |
 | `POST` | `/api/v1/projects/{id}/restore` | Undo it inside the grace window. |
-| `GET` | `/api/v1/projects/{id}/keys` | Public keys and their creation dates. |
-| `POST` | `/api/v1/projects/{id}/keys` | Mint a pair. |
-| `DELETE` | `/api/v1/projects/{id}/keys/{public_key}` | Revoke one. |
+| `GET` | `/api/v1/projects/{id}/keys` | Public keys, who minted each and when it was last used. Not with a project key. |
+| `POST` | `/api/v1/projects/{id}/keys` | Mint a pair, optionally `{"name": …}`. Not with a project key. |
+| `DELETE` | `/api/v1/projects/{id}/keys/{public_key}` | Revoke one. Not with a project key. |
 | `DELETE` | `/api/v1/projects/{id}/users/{user_id}/data` | Erase one user's parsed data. |
 | `DELETE` | `/api/v1/traces/{id}` | Delete one trace — an editor's route, on the data plane. See [below](#deleting-traces). |
 | `DELETE` | `/api/v1/traces?…&to=` | Delete every trace a listing filter matches before `to`, in rounds. |
@@ -121,7 +128,8 @@ tracepad projects restore $ID
 ```
 
 The four that move a project in or out of existence — `create`, `rename`, `rm`
-and `restore` — take the admin token; the rest take a project key.
+and `restore` — take the admin token; the rest take a project key. The `keys`
+commands take the admin token too.
 
 `projects create` answers with the project and a fresh key pair. The secret is
 printed once, because only its hash is ever stored:
@@ -144,18 +152,51 @@ whole of it for the single-project install most deployments are.
 ## Keys
 
 Several key pairs can be active at once, which is what makes rotation
-zero-downtime:
+zero-downtime. An owner or editor does it in the interface, under **Settings →
+Project → API keys**; from a terminal it takes the admin token, because no
+project key manages keys:
 
 ```sh
-tracepad keys create              # mint the new pair
+export TRACEPAD_API_KEY=$TRACEPAD_ADMIN_TOKEN
+tracepad keys create --name "checkout api"   # mint the new pair
 # move your SDKs onto it
-tracepad keys ls
-tracepad keys rm tp-pk-old…       # revoke the old one
+tracepad keys ls                             # wait until the old one goes quiet
+tracepad keys rm tp-pk-old…                  # revoke it
 ```
 
 There is never a window where ingest `401`s. The secret half of a pair is
 returned exactly once, at creation; the store keeps only its SHA-256 hash, so
-there is nothing to show later even to an administrator.
+there is nothing to show later even to an administrator. The name is optional,
+at most 64 characters and not unique: it is there to say which program holds
+the key.
+
+The listing says, for each key, who minted it and when it was last used:
+
+```
+PUBLIC KEY           NAME          SCOPES             CREATED              CREATED BY                   LAST USED
+tp-pk-3f9a…          -             ingest,read,write  2026-09-01 08:00:00  server                       2026-09-26 17:41:12
+tp-pk-81c0…          checkout api  ingest,read,write  2026-09-26 17:30:05  ed@example.com (editor)      never
+```
+
+- **Created by** is the account that minted it, with its email as it was then
+  and its standing in the project now — `owner`, `editor`, `viewer`, `removed`
+  (no role here any more), `disabled` or `deleted`; or `admin token`; or
+  `server`, for the key of the first-start project and those
+  `TRACEPAD_PROJECTS` declares; or `unknown`, for a key older than this
+  record. If a key was ever lost, the `unknown` keys created after it are the
+  ones to rotate first.
+- **Last used** is the last request the key authenticated, admitted or
+  refused. It is written once a minute, so it may be a minute behind, and a
+  crash loses at most that minute. `never` means not since the server started
+  recording it.
+
+Taking somebody's access away — removing a membership, demoting an editor,
+disabling or deleting the account — revokes no key: the person who minted a
+key is often the one who wired production with it, and ingest stopping by
+surprise is the worse failure. The Keys card marks a key whose minter can no
+longer manage keys in the project, and deleting an account shows the keys it
+minted before it asks for the email. Rotate those deliberately: mint, move,
+revoke.
 
 Revoking a project's **last** key leaves a project that cannot ingest. That is
 allowed — an owner or editor can mint a new pair in the interface, and so can
