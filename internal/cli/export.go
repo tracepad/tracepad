@@ -106,7 +106,7 @@ func (r *run) export(ctx context.Context, args []string) error {
 	var resolved map[string]string
 	if to != "" {
 		var err error
-		if resolved, err = r.exportHeaders(headers, allowKey); err != nil {
+		if resolved, err = r.exportHeaders(to, headers, allowKey); err != nil {
 			return err
 		}
 	}

@@ -90,14 +90,22 @@ Tracepad it holds your Tracepad key, and that key is not the receiver's
 business. If it is set and you pass no `--header`, the command says it ignored
 it.
 
-Into Langfuse, whose OTLP endpoint takes the project's public and secret key as
-Basic auth:
+Into Langfuse, whose OTLP endpoint takes a Langfuse project's public and secret
+key as Basic auth:
 
 ```sh
+LF_PUBLIC_KEY=pk-lf-…   # from Langfuse's project settings
+LF_SECRET_KEY=sk-lf-…
 tracepad export --otlp \
   --to https://cloud.langfuse.com/api/public/otel/v1/traces \
-  --header "authorization=Basic $(printf '%s' "$LANGFUSE_PUBLIC_KEY:$LANGFUSE_SECRET_KEY" | base64)"
+  --header "authorization=Basic $(printf '%s' "$LF_PUBLIC_KEY:$LF_SECRET_KEY" | base64 | tr -d '\n')"
 ```
+
+These are **Langfuse's** keys, `pk-lf-…` and `sk-lf-…`. On a machine whose
+Langfuse SDK sends traces to Tracepad, `LANGFUSE_PUBLIC_KEY` and
+`LANGFUSE_SECRET_KEY` hold *Tracepad's* keys — do not use them here. `tr -d
+'\n'` is there because GNU `base64` wraps its output, and a line break is not
+something a header can carry.
 
 `--gzip` compresses on the wire. It is off by default because whether the
 receiver supports it is the one thing this command cannot know, and the bytes
@@ -105,8 +113,10 @@ are on a local link more often than not.
 
 **The receiver is not authenticated by your project key.** The key opens *this*
 server's archive; the receiver's credentials are whatever it wants, and they go
-in `--header`. A header carrying a Tracepad key — the one the command is using,
-or anything starting `tp-sk-` — is refused before anything is sent:
+in `--header`. A Tracepad key on its way to the receiver is refused before
+anything is sent — the one the command is using, or anything starting
+`tp-sk-`, whether it is a header's value, a bearer token, inside a Basic pair,
+or in the `--to` URL itself:
 
 ```
 $ tracepad export --otlp --to https://otlp.example.com/v1/traces \
@@ -115,7 +125,10 @@ tracepad: --header Authorization carries a Tracepad project key; the receiver wo
 ```
 
 The one receiver whose own credentials are such a key is another Tracepad —
-moving to a new server, say. Give it *that* server's key, and say so:
+moving to a new server, say. Give it *that* server's key, and say so with
+`--allow-tracepad-key`. The flag lets through a `tp-sk-` that is not the key
+the command reads with; that one, the source's, is refused with or without it,
+since no receiver has a use for it:
 
 ```sh
 tracepad export --otlp \
