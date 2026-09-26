@@ -880,8 +880,16 @@ func deleteUserRollup(tx *sql.Tx, projectID, userID string) (int64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("erase the user's summary: %w", err)
 	}
-	removedHours, _ := hours.RowsAffected()
-	removedSummary, _ := summary.RowsAffected()
+	// The count decides whether the erasure asks for a compaction (spec 044
+	// #17), so a count that cannot be read is an error, not a zero.
+	removedHours, err := hours.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("count the user's erased hours: %w", err)
+	}
+	removedSummary, err := summary.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("count the user's erased summary: %w", err)
+	}
 	return removedHours + removedSummary, nil
 }
 

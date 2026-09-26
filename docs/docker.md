@@ -200,6 +200,12 @@ pre-migration backups `0600`. It creates them that way, and it tightens them
 `0755` directory, is closed by the first start of the new version. The image
 creates `/data` as `0700`, so a new named volume starts closed.
 
+The directory is tightened only while it holds nothing but the database's own
+files. One you share with other things — `TRACEPAD_DATA_DIR=.`, a home
+directory — keeps the mode you gave it, and the log says so at every start, a
+`WARN` naming the directory and one of the other files; the database files in
+it are `0600` all the same. Give the database a directory of its own.
+
 When a mode cannot be changed — a filesystem without Unix modes, a directory
 the server does not own — the server starts anyway and says so in its log, a
 `WARN` naming the file and its mode. Close that one yourself; for a host

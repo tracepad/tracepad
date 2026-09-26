@@ -39,7 +39,7 @@ func TestAnErasureAnswersWithItsCompactionAndTheBackup(t *testing.T) {
 	h.seed(t, &model.Trace{ID: traceHex(1), UserID: "erase-me"},
 		&model.Observation{TraceID: traceHex(1), ID: spanHex(1), Type: model.TypeSpan,
 			Level: model.LevelDefault, StartTime: seedBase, EndTime: seedBase + ms})
-	backup := h.store.Path() + ".pre-0024_compaction.bak"
+	backup := h.dbPath + ".pre-0024_compaction.bak"
 	written := time.Now().Add(-24 * time.Hour).Truncate(time.Second)
 	if err := os.WriteFile(backup, []byte("copy"), 0o600); err != nil {
 		t.Fatal(err)

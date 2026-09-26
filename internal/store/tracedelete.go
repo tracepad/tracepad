@@ -105,7 +105,7 @@ func (r *traceRemoval) apply(tx *sql.Tx) (DeleteCounts, error) {
 	// And must not remain in the file: an explicit deletion asks the next
 	// pass to merge the index and truncate the log (spec 044 #11).
 	if counts.Traces > 0 {
-		if r.compactionAt, err = requestCompaction(tx); err != nil {
+		if r.compactionAt, err = requestCompaction(tx, r.now); err != nil {
 			return counts, err
 		}
 	}

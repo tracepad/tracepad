@@ -19,6 +19,26 @@ import (
 // Data at rest (spec 044 #10–#13): what a deletion leaves in the file, and who
 // can read the file.
 
+// request records a compaction request the way a deletion does, in a
+// transaction of its own, on the clock given (zero is the wall clock), and
+// returns the stamp stored.
+func request(t *testing.T, s *Store, now int64) int64 {
+	t.Helper()
+	tx, err := s.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stamp, err := requestCompaction(tx, now)
+	if err != nil {
+		tx.Rollback()
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	return stamp
+}
+
 // marker is a random lowercase word nothing else in a test database contains.
 func marker(t *testing.T) string {
 	t.Helper()
@@ -186,6 +206,7 @@ func TestTheRetentionSweepDoesNotAskForACompaction(t *testing.T) {
 // the pass gives up after its short wait and leaves the request for the next.
 func TestABusyCheckpointLeavesTheRequestPending(t *testing.T) {
 	f := newSweepFixture(t)
+	request(t, f.store, 0)
 	// An open statement holds a read snapshot. Not a transaction: every
 	// BEGIN here takes the write lock (`_txlock=immediate`).
 	reader, err := f.store.db.Query(`SELECT id FROM projects`)
@@ -293,6 +314,7 @@ func TestTheDrainStopsWhenNothingCanBeFreed(t *testing.T) {
 	defer writer.Close()
 	counted := &countingSubmitter{writer: writer}
 	sweeper := s.NewSweeper(counted, SweepOptions{Now: func() time.Time { return sweepNow }})
+	request(t, s, 0)
 	done, _, err := sweeper.compact(t.Context())
 	if err != nil || !done {
 		t.Fatalf("done = %v, err = %v", done, err)
@@ -328,14 +350,17 @@ func TestAnErasureOfOnlyTheRollupAsksForACompaction(t *testing.T) {
 		VALUES (?, 'gone', 3, 0, 1, 1, 2)`, f.project.ID); err != nil {
 		t.Fatal(err)
 	}
-	erase := &UserDataErase{ProjectID: f.project.ID, UserID: "gone", Confirm: "gone", Limit: 10}
+	erase := &UserDataErase{ProjectID: f.project.ID, UserID: "gone", Confirm: "gone", Limit: 10,
+		Now: sweepNow.UnixNano()}
 	if err := f.writer.Submit(t.Context(), erase); err != nil {
 		t.Fatal(err)
 	}
 	state, _ := f.store.Compaction()
-	if erase.CompactionRequested == 0 || state.RequestedAt != erase.CompactionRequested {
-		t.Errorf("CompactionRequested = %d, state = %+v; want the erasure's own request pending",
-			erase.CompactionRequested, state)
+	// Stamped on the erasure's own clock, the one it measures everything
+	// else by, not the wall clock beside it.
+	if erase.CompactionRequested != erase.Now || state.RequestedAt != erase.CompactionRequested {
+		t.Errorf("CompactionRequested = %d, state = %+v; want the erasure's own request, at its Now %d",
+			erase.CompactionRequested, state, erase.Now)
 	}
 
 	// And one that finds nothing at all asks for nothing.
@@ -393,7 +418,7 @@ func TestAFailedBackupLeavesNoFile(t *testing.T) {
 		if err == nil {
 			t.Fatal("Open succeeded although the backup failed")
 		}
-		if _, statErr := os.Stat(path + ".pre-0023_compaction.bak"); !os.IsNotExist(statErr) {
+		if _, statErr := os.Stat(path + ".pre-0024_compaction.bak"); !os.IsNotExist(statErr) {
 			t.Errorf("the failed backup left its file behind: %v", statErr)
 		}
 		want := "latest backup, if any: none"
@@ -428,6 +453,91 @@ func TestACompactionClearsOnlyTheRequestItStartedFrom(t *testing.T) {
 	}
 	if state, _ := f.store.Compaction(); state.RequestedAt != 0 || state.CompletedAt != 400 {
 		t.Errorf("the request the compaction started from: %+v, want it cleared", state)
+	}
+}
+
+// A deletion whose clock reads earlier than the pending request — a time sync
+// stepped it back, or it is injected — still makes a request of its own: the
+// compaction that started from the earlier one does not clear it.
+func TestARequestSurvivesAClockThatStepsBack(t *testing.T) {
+	f := newSweepFixture(t)
+	started := request(t, f.store, 1_000_000)
+	late := request(t, f.store, 500_000) // committed while the compaction runs
+	if late <= started {
+		t.Fatalf("the later request was stamped %d, not after %d", late, started)
+	}
+	if state, _ := f.store.Compaction(); state.RequestedAt != late {
+		t.Errorf("stored %d, the request answered %d: they must be the same stamp", state.RequestedAt, late)
+	}
+	if err := f.writer.Submit(t.Context(), &compactionDone{Started: started, At: 2_000_000}); err != nil {
+		t.Fatal(err)
+	}
+	if state, _ := f.store.Compaction(); state.RequestedAt != late {
+		t.Errorf("after the compaction: %+v, want the later request still pending", state)
+	}
+}
+
+// The migration's request is for what an upgraded store's earlier deletions
+// left; a new store has deleted nothing and starts with none (#18).
+func TestOnlyAnUpgradedStoreStartsWithACompactionPending(t *testing.T) {
+	s, path := openTemp(t)
+	if state, _ := s.Compaction(); state.RequestedAt != 0 {
+		t.Errorf("a new store: %+v, want nothing pending", state)
+	}
+	pendingAgain(t, s, false)
+	s.Close()
+
+	upgraded, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer upgraded.Close()
+	if state, _ := upgraded.Compaction(); state.RequestedAt == 0 {
+		t.Errorf("an upgraded store: %+v, want the migration's request pending", state)
+	}
+}
+
+// A backup is found by its name in the database's own directory, never by a
+// pattern built from the path: a data directory named with `[` or `*` names
+// its own backups and no other directory's, and a link named like a backup is
+// not one.
+func TestBackupsAreTheDirectorysOwnWhateverItIsCalled(t *testing.T) {
+	for _, name := range []string{"tp[12]*", "tp["} {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			dir, neighbour := filepath.Join(root, name), filepath.Join(root, "tp1")
+			for _, d := range []string{dir, neighbour} {
+				if err := os.Mkdir(d, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			path := filepath.Join(dir, "tracepad.db")
+			mine := path + ".pre-0001_init.bak"
+			theirs := filepath.Join(neighbour, "tracepad.db.pre-0001_init.bak")
+			old := time.Now().Add(-2 * BackupLifetime)
+			for _, file := range []string{mine, theirs} {
+				if err := os.WriteFile(file, []byte("copy"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Chtimes(file, old, old); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.Symlink(theirs, path+".pre-0002_traces.bak"); err != nil {
+				t.Fatal(err)
+			}
+
+			if got := backupFiles(path); len(got) != 1 || got[0] != mine {
+				t.Errorf("backupFiles = %q, want only %q", got, mine)
+			}
+			(&Store{path: path}).expireBackups(time.Now())
+			if _, err := os.Stat(mine); !os.IsNotExist(err) {
+				t.Errorf("the directory's own expired backup survived: %v", err)
+			}
+			if _, err := os.Stat(theirs); err != nil {
+				t.Errorf("the neighbouring directory's backup was touched: %v", err)
+			}
+		})
 	}
 }
 

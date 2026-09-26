@@ -5,7 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
+	"strings"
 	"time"
 )
 
@@ -17,8 +17,11 @@ import (
 // Enforced on every start and not only on create, because every install that
 // predates this was created 0644 under the usual umask, and the files — not the
 // directory someone else may have made — are what the server can vouch for.
-// Never fatal: a filesystem without Unix modes, or a directory the process
-// does not own, must still start, and says so.
+// The directory is tightened only while it holds nothing but the database's
+// own files (spec 044 #18): one the operator shares with other things —
+// `--data-dir .`, a home directory — keeps its mode, with a warning. Never
+// fatal: a filesystem without Unix modes, or a directory the process does not
+// own, must still start, and says so.
 
 const (
 	dataDirMode  os.FileMode = 0o700
@@ -42,7 +45,7 @@ func secureFiles(path string) error {
 	if err := os.MkdirAll(dir, dataDirMode); err != nil {
 		return err
 	}
-	tighten(dir, dataDirMode)
+	tightenDir(dir, filepath.Base(path))
 
 	if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
 		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, dataFileMode)
@@ -75,16 +78,71 @@ func tighten(path string, mode os.FileMode) {
 	}
 }
 
-// backupFiles lists the pre-migration backups beside the database, oldest name
-// first. A migration's name starts with its number, so name order is the order
-// they were written in.
-func backupFiles(path string) []string {
-	matches, err := filepath.Glob(path + ".pre-*.bak")
+// tightenDir takes group and other access away from the data directory when
+// every entry in it is the database's own — the file, its log, its index, its
+// backups. Anything else there means the directory is not the server's alone
+// to set, and a mode the operator chose for other files is left as it is.
+func tightenDir(dir, db string) {
+	info, err := os.Stat(dir)
+	if err != nil || info.Mode().Perm()&0o077 == 0 {
+		return
+	}
+	entries, err := os.ReadDir(dir)
 	if err != nil {
+		logger().Warn("could not list the data directory to decide its mode", "dir", dir, "err", err)
+		return
+	}
+	for _, entry := range entries {
+		if !databaseFile(db, entry) {
+			logger().Warn("the data directory is open to other users and holds more than the database, so its mode is left as it is; "+
+				"give the database a directory of its own, or chmod 700 this one",
+				"dir", dir, "mode", info.Mode().Perm().String(), "other", entry.Name())
+			return
+		}
+	}
+	tighten(dir, dataDirMode)
+}
+
+// databaseFile says whether a directory entry is one of the database's own
+// files: the database, its `-wal`, `-shm` and `-journal`, or a pre-migration
+// backup.
+func databaseFile(db string, entry fs.DirEntry) bool {
+	switch name := entry.Name(); name {
+	case db, db + "-wal", db + "-shm", db + "-journal":
+		return true
+	default:
+		return isBackup(db, entry)
+	}
+}
+
+// isBackup says whether a directory entry is a pre-migration backup of the
+// database named db: a regular file named `<db>.pre-<migration>.bak`. Matched
+// by name rather than by a glob over the path, so that a data directory whose
+// name holds `[` or `*` names only its own backups — and a link, which a chmod
+// or a remove would follow elsewhere or leave behind, is not one.
+func isBackup(db string, entry fs.DirEntry) bool {
+	name, prefix, suffix := entry.Name(), db+".pre-", ".bak"
+	return entry.Type().IsRegular() && len(name) > len(prefix)+len(suffix) &&
+		strings.HasPrefix(name, prefix) && strings.HasSuffix(name, suffix)
+}
+
+// backupFiles lists the pre-migration backups beside the database, oldest name
+// first. A migration's name starts with its number, so name order — the order
+// the directory is read in — is the order they were written in.
+func backupFiles(path string) []string {
+	dir, db := filepath.Dir(path), filepath.Base(path)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		logger().Warn("could not list the data directory for pre-migration backups", "dir", dir, "err", err)
 		return nil
 	}
-	sort.Strings(matches)
-	return matches
+	var backups []string
+	for _, entry := range entries {
+		if isBackup(db, entry) {
+			backups = append(backups, filepath.Join(dir, entry.Name()))
+		}
+	}
+	return backups
 }
 
 // createBackupFile makes the empty file `VACUUM INTO` writes the backup into,
@@ -163,6 +221,3 @@ func (s *Store) expireBackups(now time.Time) {
 		logger().Info("removed a pre-migration backup past its seven days", "backup", file)
 	}
 }
-
-// Path is the database file's path; the backups and the log live beside it.
-func (s *Store) Path() string { return s.path }

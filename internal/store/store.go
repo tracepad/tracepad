@@ -74,6 +74,15 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("open %s: %w (latest backup, if any: %s)", path, err, latestBackup(path))
 	}
+	// The compaction migration records a request for what an upgraded
+	// database's earlier deletions left (spec 044 #11). A new one has
+	// deleted nothing, and "compaction pending" would say it had (#18).
+	if fresh {
+		if _, err := db.Exec(`UPDATE compaction SET requested_at = NULL WHERE id = 1`); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("open %s: clear the new database's compaction request: %w", path, err)
+		}
+	}
 	// Not fatal: without incremental auto-vacuum, retention still deletes
 	// rows and the file merely stops shrinking. Refusing to start over
 	// that — a full VACUUM wants room for a second copy of the database —

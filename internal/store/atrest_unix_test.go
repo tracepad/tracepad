@@ -140,3 +140,46 @@ func TestAModeThatCannotBeChangedIsAWarning(t *testing.T) {
 		t.Errorf("want a WARN naming %s and its mode, got:\n%s", path, logged.String())
 	}
 }
+
+// A directory that holds more than the database is not the server's alone to
+// set (#18): it keeps the mode its owner gave it, with a warning naming it and
+// what else is there. The database's own files are 0600 all the same.
+func TestADirectoryHoldingOtherFilesKeepsItsMode(t *testing.T) {
+	underUmask022(t)
+	dir := filepath.Join(t.TempDir(), "shared")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	notes := filepath.Join(dir, "notes.txt")
+	if err := os.WriteFile(notes, []byte("someone else's"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var logged bytes.Buffer
+	oldLogger := logger
+	logger = func() *slog.Logger { return slog.New(slog.NewTextHandler(&logged, nil)) }
+	t.Cleanup(func() { logger = oldLogger })
+
+	path := filepath.Join(dir, "tracepad.db")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if mode := modeOf(t, dir); mode != 0o755 {
+		t.Errorf("the shared directory is %v, want it left 0755", mode)
+	}
+	if mode := modeOf(t, notes); mode != 0o644 {
+		t.Errorf("the other file is %v, want it untouched", mode)
+	}
+	if mode := modeOf(t, path); mode != 0o600 {
+		t.Errorf("the database is %v, want 0600", mode)
+	}
+	if !strings.Contains(logged.String(), "level=WARN") || !strings.Contains(logged.String(), dir) ||
+		!strings.Contains(logged.String(), "notes.txt") {
+		t.Errorf("want a WARN naming %s and notes.txt, got:\n%s", dir, logged.String())
+	}
+}

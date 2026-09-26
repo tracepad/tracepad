@@ -775,7 +775,7 @@ func (e *UserDataErase) eraseRollup(tx *sql.Tx) error {
 	if err != nil || removed == 0 || e.CompactionRequested != 0 {
 		return err
 	}
-	e.CompactionRequested, err = requestCompaction(tx)
+	e.CompactionRequested, err = requestCompaction(tx, e.Now)
 	return err
 }
 

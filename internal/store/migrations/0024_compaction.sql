@@ -15,6 +15,8 @@ CREATE TABLE compaction (
 
 -- The first pass after the upgrade compacts what deletions before it left:
 -- search-index segments holding deleted text, and freed pages that were never
--- zeroed because secure_delete was not on yet.
+-- zeroed because secure_delete was not on yet. A new database has deleted
+-- nothing, and `Open` clears the request once the migrations commit (spec 044
+-- #18).
 INSERT INTO compaction (id, requested_at)
 VALUES (1, CAST(unixepoch('subsec') * 1000 AS INTEGER) * 1000000);

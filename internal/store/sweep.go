@@ -734,7 +734,7 @@ func (p *projectPurge) apply(tx *sql.Tx) error {
 	}
 	// The project's data went in this pass's chunks and goes here; the
 	// same pass compacts after it (spec 044 #11).
-	if _, err := requestCompaction(tx); err != nil {
+	if _, err := requestCompaction(tx, p.Now); err != nil {
 		return err
 	}
 	// Nor have `media_refs` and `media_holders` (schemas 0021, 0022): what

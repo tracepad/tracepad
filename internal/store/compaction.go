@@ -58,17 +58,23 @@ func (s *Store) Compaction() (CompactionState, error) {
 }
 
 // requestCompaction records that a deletion wants the next pass to compact,
-// inside the deletion's own transaction, and returns the stamp it wrote. The
-// stored stamp only moves forward: a compaction clears the request it started
-// from and no later one, which is how a deletion committed while a compaction
-// runs is not forgotten.
-func requestCompaction(tx *sql.Tx) (int64, error) {
-	now := time.Now().UnixNano()
-	if _, err := tx.Exec(
-		`UPDATE compaction SET requested_at = MAX(COALESCE(requested_at, 0), ?) WHERE id = 1`, now); err != nil {
+// inside the deletion's own transaction, and returns the stamp it stored. now
+// is the deletion's own clock, zero for the wall clock. The stored stamp only
+// moves forward, and every request moves it: a request is later than the one
+// before it even when the clock is not — stepped back by a time sync, or
+// injected — and that is what lets a compaction clear the request it started
+// from and never one committed while it ran.
+func requestCompaction(tx *sql.Tx, now int64) (int64, error) {
+	if now == 0 {
+		now = time.Now().UnixNano()
+	}
+	var stamp int64
+	if err := tx.QueryRow(
+		`UPDATE compaction SET requested_at = MAX(COALESCE(requested_at, 0) + 1, ?)
+		  WHERE id = 1 RETURNING requested_at`, now).Scan(&stamp); err != nil {
 		return 0, fmt.Errorf("request a compaction: %w", err)
 	}
-	return now, nil
+	return stamp, nil
 }
 
 // ftsMerge is one bounded step of merging the search index. FTS5 says whether

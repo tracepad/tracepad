@@ -71,9 +71,7 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
 # writes to has to arrive owned by the user that will write to it (#2). A named
 # volume inherits that ownership when Docker seeds it; a host directory bind
 # mounted over it does not, which is what docs/docker.md's `install` line is for.
-# 0700: the directory is the guard of everything the server writes into it,
-# and a named volume inherits this mode when Docker seeds it (spec 044 #13).
-RUN mkdir -p /out/data && chmod 0700 /out/data
+RUN mkdir -p /out/data
 
 # --- The image ----------------------------------------------------------------
 #
@@ -92,6 +90,9 @@ LABEL org.opencontainers.image.title="Tracepad" \
       org.opencontainers.image.licenses="Apache-2.0"
 
 COPY --from=build /out/tracepad /tracepad
+# 0700: the directory is the guard of everything the server writes into it,
+# and a named volume inherits this mode when Docker seeds it (spec 044 #13).
+# Set here, once, where the directory is copied in.
 COPY --from=build --chown=65532:65532 --chmod=0700 /out/data /data
 
 # Apache-2.0 §4(d) applies to a container image as it does to an archive, so

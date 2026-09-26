@@ -347,8 +347,8 @@ func (s *Server) sweeperStatus(projectID string) object {
 // each stamp RFC 3339, or null for none.
 func compactionBlock(state store.CompactionState) object {
 	return object{}.
-		put("requested_at", timeOrNull(state.RequestedAt)).
-		put("completed_at", timeOrNull(state.CompletedAt))
+		put("requested_at", formatInstant(state.RequestedAt)).
+		put("completed_at", formatInstant(state.CompletedAt))
 }
 
 // compactionAnswer is what the confirmed answer of an explicit deletion says
@@ -381,13 +381,6 @@ func (s *Server) backupAnswer() any {
 	return object{}.
 		put("created_at", formatTime(backup.CreatedAt)).
 		put("remove_after", formatTime(backup.RemoveAfter))
-}
-
-func timeOrNull(ns int64) any {
-	if ns == 0 {
-		return nil
-	}
-	return formatTime(ns)
 }
 
 // queueReporter is the part of *store.Writer the system endpoint needs. The
