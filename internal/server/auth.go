@@ -415,14 +415,16 @@ func (s *Server) scope(w http.ResponseWriter, r *http.Request, rt route, c *call
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), credentialDeadline)
-	defer cancel()
 	project, err := s.store.ProjectByIDContext(ctx, id)
+	cancel()
 	if err != nil {
 		slog.Error("project lookup failed", "err", err)
 		cannotCheck(w)
 		return false
 	}
+	ctx, cancel = context.WithTimeout(r.Context(), credentialDeadline)
 	role, err := s.store.ProjectRole(ctx, c.account, id)
+	cancel()
 	if err != nil {
 		slog.Error("membership lookup failed", "err", err)
 		cannotCheck(w)
