@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -236,6 +237,33 @@ func DisplayHost(listen string) string {
 	return listen
 }
 
+// PlainHTTPBeyondLoopback reports whether a server listening on listen, and
+// told by publicURL where its people reach it, takes passwords, session
+// cookies and keys in clear from other machines (spec 001 #12). Tracepad
+// serves no TLS itself, so the listener is plain HTTP whatever it binds; what
+// decides is whether anything but this machine can reach it, and whether an
+// https TRACEPAD_URL says a proxy in front is where people actually connect.
+//
+// A hostname other than localhost counts as reachable: it names some
+// interface, and which one is the resolver's business, not a thing to guess
+// at here.
+func PlainHTTPBeyondLoopback(listen, publicURL string) bool {
+	if u, err := url.Parse(strings.TrimSpace(publicURL)); err == nil && strings.EqualFold(u.Scheme, "https") {
+		return false
+	}
+	host, _, err := net.SplitHostPort(listen)
+	if err != nil {
+		return false
+	}
+	if strings.EqualFold(host, "localhost") {
+		return false
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+		return false
+	}
+	return true
+}
+
 func envOr(key, def string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
@@ -334,10 +362,14 @@ func ParseProjects(raw string) ([]ProjectSpec, error) {
 	}
 	seen := map[string]bool{}
 	var specs []ProjectSpec
-	for _, part := range strings.Split(raw, ",") {
+	for i, part := range strings.Split(raw, ",") {
 		fields := strings.Split(strings.TrimSpace(part), ":")
 		if len(fields) != 3 || fields[0] == "" || fields[1] == "" || fields[2] == "" {
-			return nil, fmt.Errorf("TRACEPAD_PROJECTS entry %q: want name:public_key:secret_key", part)
+			// The entry is named by its position, never quoted: a
+			// malformed one is usually a secret with a stray colon in
+			// it, and this error ends up in the log (spec 001 #12).
+			return nil, fmt.Errorf("TRACEPAD_PROJECTS entry %d: want name:public_key:secret_key, got %d fields",
+				i+1, len(fields))
 		}
 		if seen[fields[0]] {
 			return nil, fmt.Errorf("TRACEPAD_PROJECTS: duplicate project name %q", fields[0])

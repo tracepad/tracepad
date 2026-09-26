@@ -14,10 +14,14 @@ trace on screen.
 In Docker, which needs nothing else installed:
 
 ```sh
-docker run -d --name tracepad -v tracepad:/data -p 4318:4318 \
+docker run -d --name tracepad -v tracepad:/data -p 127.0.0.1:4318:4318 \
   ghcr.io/tracepad/tracepad
 docker logs tracepad          # the first run prints the keys, once
 ```
+
+The port is published on this machine only: Tracepad speaks plain HTTP, and
+serving it to anyone else is a job for a TLS proxy in front
+([docs/docker.md](docs/docker.md#serving-over-tls)).
 
 Or as a binary: the archives for Linux, macOS and Windows on
 [Releases](https://github.com/tracepad/tracepad/releases) — one file, nothing
@@ -208,7 +212,7 @@ rather than by hand:
 
 ```sh
 tracepad retention set --days 90       # traces, counted from when they arrived
-tracepad users rm-data user-4711       # one user, everywhere it is queryable
+tracepad users rm-data user-4711       # one user's traces, not the raw archive
 ```
 
 An hourly sweeper removes what has expired, in chunks through the same writer
@@ -217,8 +221,11 @@ survive it: the hourly rollup keeps answering about a window whose traces are
 gone, until you give it a window of its own with `--stats-days`. Projects, keys
 and retention windows are managed over the same API; every destructive call is
 a dry run until you echo the name of what it destroys, and deleting a project
-is undoable for a week. See [docs/retention.md](docs/retention.md) and
-[docs/admin.md](docs/admin.md).
+is undoable for a week. An erasure takes the parsed data and leaves the raw
+OTLP archive and the freed bytes in the file behind; the
+[data-subject section](docs/retention.md#what-this-means-for-a-data-subject-request)
+says what that means and what to do about it. See
+[docs/retention.md](docs/retention.md) and [docs/admin.md](docs/admin.md).
 
 ## Images and files
 

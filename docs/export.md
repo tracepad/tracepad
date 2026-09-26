@@ -69,6 +69,15 @@ If the server has never kept bodies — `TRACEPAD_STORE_RAW` off since day one �
 the command exits 1 saying so, and reports every trace as uncovered. There is
 nothing to replay and no flag that changes it.
 
+**The archive is what arrived, and nothing since has changed it.** Deleting
+traces and erasing a user's data remove parsed rows and leave the batches
+alone, so the export still carries the spans of a trace deleted yesterday and
+of a user erased this morning, until the raw window takes the batches that
+held them. An export taken to answer "give me my data" is right to include
+them; one taken after an erasure, to seed another store, carries the erased
+person with it. [retention.md](retention.md#what-this-means-for-a-data-subject-request)
+says how to bound that today.
+
 ## Into a receiver
 
 ```sh
@@ -237,7 +246,9 @@ columns, the payloads, the trace and span ids. Two things to know:
 
 The command is a client of two endpoints, and so can anything else be — a
 backup job, a script, a second Tracepad. They are project-scoped reads under the
-project's own keys, with no admin token involved:
+project's own keys, with no admin token involved — and, like every other read,
+open to every member of the project signed in to the interface, viewers
+included:
 
 | Method | Path | |
 |---|---|---|

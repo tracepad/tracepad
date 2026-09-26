@@ -158,8 +158,10 @@ returned exactly once, at creation; the store keeps only its SHA-256 hash, so
 there is nothing to show later even to an administrator.
 
 Revoking a project's **last** key leaves a project that cannot ingest. That is
-allowed — a declaratively provisioned deployment re-adds its keys from
-`TRACEPAD_PROJECTS` on restart — but it asks for the confirmation first.
+allowed — an owner or editor can mint a new pair in the interface, and so can
+the admin token — but it asks for the confirmation first. `TRACEPAD_PROJECTS`
+does not re-add it: on restart it creates the projects it names that do not
+exist and leaves an existing project's keys as they are.
 
 ## Retention
 
@@ -201,11 +203,17 @@ tracepad users rm-data user-4711
 The echo is the user id. The response reports what went, per store. When an
 eval run holds any of the user's traces, the preview names it under
 `affected_runs` — erasure outranks the pin, and the run shows those items as
-missing afterwards ([datasets.md](datasets.md#what-a-run-keeps)). Raw OTLP
-bodies are deliberately not touched — see
-[retention.md](retention.md#what-this-means-for-a-data-subject-request) for
-what that means for a data-subject request and how to deploy if it is not
-acceptable.
+missing afterwards ([datasets.md](datasets.md#what-a-run-keeps)).
+
+**What it does not take.** The raw OTLP bodies are not touched — a batch holds
+many traces — so the user's spans stay readable through `GET /api/v1/raw/{id}`
+and `tracepad export --otlp` until the raw window takes their batches, which by
+default is never; the preview says so in its note. Scores given to one of the
+user's sessions rather than a trace, and dataset items cut from their traces,
+stay as well. And a deletion unlinks rows without overwriting them, so their
+bytes remain in the database file and in any pre-migration backup beside it.
+[retention.md](retention.md#what-this-means-for-a-data-subject-request) lists
+each and what to do about it today.
 
 The **annotation-queue items** pointing at the erased traces go with them
 ([annotation.md](annotation.md)) — an item is a pointer, and the queues keep

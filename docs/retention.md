@@ -106,10 +106,12 @@ discovered:
    of up to five hundred traces of one hour, and each chunk commits with its
    hour already corrected — so the counts drop before the request answers,
    and a request cut off between chunks leaves no hour counting traces that
-   are gone. Hours already frozen are not recomputed: the aggregates
-   carry no user id, no name and no text — they are counts, sums and latency
-   buckets — which is the same archive posture the raw bodies have below, and
-   the same reasoning regulators accept for a backup.
+   are gone. Hours already frozen are not recomputed: the project-wide
+   aggregates carry no user id and no prompt or completion text — they are
+   counts, sums and latency buckets, plus, in `names_hourly`, the **trace
+   names** they count. Trace names are operation names by convention; a
+   deployment that puts personal data into them should know a frozen hour
+   keeps it.
 
    The **per-user** rollup is the exception to that exception. Those rows are
    about the user by construction, so an erasure deletes them outright rather
@@ -325,10 +327,15 @@ decide: the start after the upgrade does it, and says so in the log.
 tracepad users rm-data user-4711
 ```
 
-`DELETE /api/v1/projects/{id}/users/{user_id}/data` erases everything the
-queryable stores hold about one user — the traces filed under that id, their
-observations, payloads, scores and the annotation-queue items pointing at them
-— synchronously, and answers with the counts.
+`DELETE /api/v1/projects/{id}/users/{user_id}/data` erases the parsed data
+filed under one user id — the traces, their observations, payloads, scores,
+search entries and the annotation-queue items pointing at them, and the user's
+per-user statistics — synchronously, and answers with the counts. It does not
+reach everything the store holds about that user: the raw OTLP bodies, scores
+given to a session rather than a trace, dataset items cut from the user's
+traces, and the bytes a deletion leaves in the file all outlast it.
+[What this means for a data-subject request](#what-this-means-for-a-data-subject-request)
+lists each and what to do about it today.
 Like every destructive endpoint it is a dry run until confirmed; the echo here
 is the user id itself. Traces an eval run is keeping go with the rest, and the
 dry run lists those runs under `runs` so the hole is visible before it opens.
@@ -374,38 +381,90 @@ export is still in flight, wait for it to finish.
 
 ### What this means for a data-subject request
 
-You are the controller; tracepad is the tool. Two things are worth stating
-plainly rather than leaving to be discovered:
+You are the controller; tracepad is the tool. This is what an erasure does
+today, where its reach ends, and what you can do about the rest.
 
-**Erasure covers the queryable stores immediately.** After the call, no read
-endpoint, CLI command or MCP tool can return that user's traces, and no search
-finds their text: the index is deleted in the same transaction as the rows.
+**What goes when the call returns.** The traces filed under the user id, with
+their observations, payloads, scores, search entries and annotation-queue
+items, and the user's rows in the per-user statistics. After the call no
+listing, trace view, search, CLI command or MCP tool built on the parsed data
+returns them. The project-wide statistics are corrected where they can be: the
+hours the erased traces occupied are recomputed in the same transaction that
+deletes them, chunk by chunk, so they are right before the call returns and
+stay right if it is cut off; hours whose rows retention already took are
+frozen and keep their totals — see [What outlives what](#what-outlives-what).
 This lands well inside the one-month response window Article 12(3) allows.
 
-**The statistics are corrected where they can be.** The rolled hours the
-erased traces occupied are recomputed in the same transaction that deletes
-them, chunk by chunk, so they are right before the call returns and stay right
-if the call is cut off; hours whose raw rows retention already took are frozen
-and keep their totals. Those rows hold
-no user id, no name and no text — see [What outlives what](#what-outlives-what).
-The **per-user** rows, which do hold the id, are deleted outright in the same
-request, frozen hours included.
+**What stays readable through the API.**
 
-**Raw OTLP bodies are not erased.** They are an archive: not served by any read
-endpoint, not searchable, expiring on their own schedule — the same posture as
-a database backup, which regulators accept. Two caveats follow from that, and
-both are on you rather than on the tool:
+1. **The raw OTLP bodies.** Every export body is archived as it arrived, and an
+   erasure does not touch them: a batch holds the spans of many traces, often
+   of many users. `GET /api/v1/raw/{id}` and
+   [`tracepad export --otlp`](export.md) still return the user's spans — their
+   prompts and outputs, byte for byte, with the pictures put back — to the
+   project's keys and to every member of the project, viewers included, until
+   the batch leaves by the raw window. That window follows `retention_days`
+   unless set, and both are unset by default, so by default **they never
+   leave**. A future `remap` that replays raw bodies into the parsed tables
+   would bring the erased data back too.
+2. **Scores given to a session**, not a trace ([scores.md](scores.md)) — a
+   verdict on a whole conversation, with its comment. An erasure and the
+   retention sweep both take scores by trace, so a session-only score stays
+   until its project is deleted.
+3. **Dataset items cut from the user's traces** ([datasets.md](datasets.md)),
+   which are verbatim copies of an input and an output. Nothing reads their
+   `source_trace_id` on erasure. Deleting an item archives it at a new version
+   and keeps every earlier row; only deleting the dataset removes them.
 
-1. The completeness of an erasure assumes a **bounded raw window**. With
-   `raw_retention_days` unset and `retention_days` unset too, the raw bodies are
-   kept forever, and so is the copy of the erased data inside them.
-2. A future `remap` replays raw bodies into the parsed tables. Replaying a
-   window that still contains an erased user resurrects their data.
+**What stays in the files.**
 
-If your deployment cannot live with either, run with `TRACEPAD_STORE_RAW=off`.
-Nothing is archived, erasure is complete the moment it returns, and the price
-is the insurance: a mapping bug becomes data loss rather than a replay away
-from being fixed.
+1. **The bytes of what was deleted.** SQLite unlinks a deleted row and leaves
+   its bytes where they were until something overwrites them, and the search
+   index keeps the words of deleted text in its segments until they are
+   merged. Nothing in the API returns them, but anyone who can read the
+   database file can.
+2. **The pre-migration backups.** Before every start that applies a migration
+   the server writes `tracepad.db.pre-<migration>.bak` beside the database — a
+   complete copy — and never deletes it
+   ([docker.md](docker.md#upgrading-and-backing-up-first)).
+3. **Copies outside the database**: your own backups, volume and filesystem
+   snapshots, an export taken before the erasure, the logs of your application
+   or proxy. Expire those with your own process.
+
+**What to do about it today.**
+
+- **Before erasing**, note what the erasure will not find by itself:
+  `tracepad sessions ls --user <id>` lists the user's sessions, and
+  `tracepad scores ls --session <session>` then `tracepad scores rm <score id>`
+  retracts the session scores. A dataset item cut from one of their traces is
+  removed for good only with its dataset — recreate the set without it.
+- **Bound the raw window** if you answer erasure requests:
+  `tracepad retention set --raw-days 14 --yes` makes every batch leave 14 days
+  after it arrived, on the next sweep, and the export's reach shrinks with it.
+  An erasure is complete for the raw bodies once the window has passed the
+  user's last batch. `TRACEPAD_STORE_RAW=off` stops keeping new bodies at all;
+  the ones already kept still leave by the window. The price is the
+  insurance: a mapping bug becomes data loss rather than a replay away from
+  being fixed.
+- **Overwrite the freed bytes** with the server stopped, using the `sqlite3`
+  shell (3.43 or newer) on the database file:
+
+  ```sh
+  sqlite3 tracepad.db "INSERT INTO search_fts(search_fts) VALUES('optimize'); VACUUM;"
+  ```
+
+  The first statement rewrites the search index without the deleted text,
+  the second rewrites every page of the file; each alone leaves some of it.
+  The raw bodies still in the archive are not affected — they are live rows.
+- **Delete the `.bak` files** once the upgrade they guard has proved itself.
+- **Keep the files to their owner**: the database is created readable by any
+  account that can get into its directory, so the directory is the guard
+  ([docker.md](docker.md#who-else-can-read-it)).
+
+This section describes the server as it is. The change that extends erasure
+to the raw bodies, the session scores and the dataset items, and overwrites
+what it deletes, is specified in
+[`specs/044-erasure-and-data-at-rest.md`](../specs/044-erasure-and-data-at-rest.md).
 
 ## Deleting a project
 
@@ -440,7 +499,7 @@ deployment was configured is a safety net nobody can rely on.
 |---|---|---|
 | `TRACEPAD_SWEEP_INTERVAL` | `1h` | How often a pass runs. A Go duration; at least `1s`. |
 | `TRACEPAD_ROLLUP_INTERVAL` | `5m` | How often the statistics aggregator runs, and so how long a closed hour waits before the rollup holds it. A Go duration; at least `1s`. |
-| `TRACEPAD_STORE_RAW` | `on` | Keep raw OTLP bodies at all. `off` removes the archive caveats above. |
+| `TRACEPAD_STORE_RAW` | `on` | Keep raw OTLP bodies at all. `off` stops keeping new ones; those already kept leave by the raw window. |
 
 The windows themselves are per project and live in the database, so changing
 them needs no restart. See [admin.md](admin.md).
