@@ -690,7 +690,11 @@ or onto disk, in arrival order, resumably. `--dry-run` prints what would go and
 sends nothing; a receiver that answers `429` or `5xx` is retried, anything else
 `4xx` stops the export with the cursor to pass as `--after`. The summary ends
 with how many traces started before the archive begins, which are the ones no
-export can carry.
+export can carry. The receiver's credentials go in `--header`;
+`OTEL_EXPORTER_OTLP_HEADERS` is not read, and a Tracepad key bound for the
+receiver is refused — the ones this machine holds for your Tracepad always,
+any other unless `--allow-tracepad-key` says the receiver is a Tracepad of
+yours.
 
 It has a page of its own: [export.md](export.md).
 

@@ -79,12 +79,36 @@ tracepad export --otlp \
 ```
 
 Each batch is posted under the `Content-Type` it was received in, which is what
-makes it acceptable to a receiver that took it once. `--header k=v` repeats.
-`OTEL_EXPORTER_OTLP_HEADERS` is honoured — if you have already configured an
-exporter on this machine, its credentials are already there — and a `--header`
-on the command line wins over it. Its values are percent-decoded as the OTLP
-specification prescribes, which leaves a `+` alone: a base64 bearer token comes
-through as written.
+makes it acceptable to a receiver that took it once. `--header k=v` repeats,
+and its value is sent as written. Header names are not case-sensitive: two
+`--header`s naming the same one in different case are one header, and the last
+one on the command line wins.
+
+The receiver's credentials go in `--header` and nowhere else.
+`OTEL_EXPORTER_OTLP_HEADERS` is **not** read: on a machine that sends traces to
+Tracepad it holds your Tracepad key, and that key is not the receiver's
+business. Whenever it is set, the command says it ignored it.
+
+`Content-Type`, `Content-Encoding`, `Content-Length` and `Host` are not yours to
+set: each batch goes out under the type and encoding it has, and `--gzip` is how
+to compress it.
+
+Into Langfuse, whose OTLP endpoint takes a Langfuse project's public and secret
+key as Basic auth:
+
+```sh
+LF_PUBLIC_KEY=pk-lf-…   # from Langfuse's project settings
+LF_SECRET_KEY=sk-lf-…
+tracepad export --otlp \
+  --to https://cloud.langfuse.com/api/public/otel/v1/traces \
+  --header "authorization=Basic $(printf '%s' "$LF_PUBLIC_KEY:$LF_SECRET_KEY" | base64 | tr -d '\n')"
+```
+
+These are **Langfuse's** keys, `pk-lf-…` and `sk-lf-…`. On a machine whose
+Langfuse SDK sends traces to Tracepad, `LANGFUSE_PUBLIC_KEY` and
+`LANGFUSE_SECRET_KEY` hold *Tracepad's* keys — do not use them here. `tr -d
+'\n'` is there because GNU `base64` wraps its output, and a line break is not
+something a header can carry.
 
 `--gzip` compresses on the wire. It is off by default because whether the
 receiver supports it is the one thing this command cannot know, and the bytes
@@ -92,7 +116,42 @@ are on a local link more often than not.
 
 **The receiver is not authenticated by your project key.** The key opens *this*
 server's archive; the receiver's credentials are whatever it wants, and they go
-in `--header`.
+in `--header`. A Tracepad key on its way to the receiver is refused before
+anything is sent. The command reads every header name and value and the `--to`
+URL whole — as written, percent-decoded, and with anything base64 decoded — so
+the scheme does not matter: a bearer token, a Basic pair, a query parameter, a
+path segment. The keys of your Tracepad this machine holds are refused
+outright: the one the command reads with (`--key` or `TRACEPAD_API_KEY`),
+`TRACEPAD_API_KEY` even when `--key` overrides it, `TRACEPAD_ADMIN_TOKEN`,
+`LANGFUSE_SECRET_KEY`, and any `tp-sk-…` in `OTEL_EXPORTER_OTLP_HEADERS`:
+
+```
+$ tracepad export --otlp --to https://otlp.example.com/v1/traces \
+    --header "authorization=Bearer $TRACEPAD_API_KEY"
+tracepad: --header Authorization carries a key of your Tracepad that this machine holds (--key, TRACEPAD_API_KEY, TRACEPAD_ADMIN_TOKEN, LANGFUSE_SECRET_KEY or OTEL_EXPORTER_OTLP_HEADERS); the receiver would get admin access to your project. --allow-tracepad-key does not change that: give the receiver its own credentials
+```
+
+An admin token shorter than 16 characters is looked for only as a whole word
+in the text as written, and not in the `--to` host: an operator's short token
+would otherwise match a compose service of the same name, or a few bytes of a
+receiver's base64. A `--header` typed wrong — curl's `Name: value`, say — is
+refused without repeating it, so a key in it does not reach a CI log.
+
+Any other key starting `tp-sk-` is refused the same way, with a message that
+names the one way through.
+
+The one receiver whose own credentials are such a key is another Tracepad —
+moving to a new server, say. Give it *that* server's key, and say so with
+`--allow-tracepad-key`. The flag lets through a `tp-sk-` that is none of the
+keys above; those, the source's, are refused with or without it, since no
+receiver has a use for them:
+
+```sh
+tracepad export --otlp \
+  --to https://new-tracepad.example.com/v1/traces \
+  --header "authorization=Bearer $NEW_SERVER_KEY" \
+  --allow-tracepad-key
+```
 
 ### When a receiver says no
 

@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"compress/gzip"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -334,45 +335,277 @@ func TestExportGzipsWhenAsked(t *testing.T) {
 	}
 }
 
-// `OTEL_EXPORTER_OTLP_HEADERS` is honoured, and a `--header` on the command
-// line wins over it: a flag is the more specific statement.
-func TestExportReadsTheOTLPHeadersVariable(t *testing.T) {
+// `OTEL_EXPORTER_OTLP_HEADERS` is not read (spec 019 #14). On a machine that
+// sends traces here it holds this server's project key, and copying it into
+// every POST handed a project admin's key to whatever receiver `--to` named.
+func TestExportDoesNotReadTheOTLPHeadersVariable(t *testing.T) {
 	h := newHarness(t)
 	seedArchive(t, h, 1)
 	sink := newStub(t, nil)
-	h.env["OTEL_EXPORTER_OTLP_HEADERS"] = "authorization=Bearer from-env,x-tenant=acme%20corp"
+	h.env["OTEL_EXPORTER_OTLP_HEADERS"] = "authorization=Bearer " + testKey + ",x-tenant=acme"
 
-	got := h.run(t.Context(), false, "export", "--otlp", "--to", sink.server.URL,
-		"--header", "authorization=Bearer from-flag")
+	// A --header of another name: the note is said all the same, since the
+	// receiver's credentials may have been in the variable.
+	got := h.run(t.Context(), false, "export", "--otlp", "--to", sink.server.URL, "--header", "x-scope-orgid=acme")
 	if got.code != ExitOK {
 		t.Fatalf("exit = %d, stderr = %s", got.code, got.stderr)
 	}
-	if header := sink.headers[0]; header.Get("Authorization") != "Bearer from-flag" {
-		t.Errorf("Authorization = %q, want the flag to win", header.Get("Authorization"))
+	if len(sink.headers) != 1 {
+		t.Fatalf("the receiver saw %d requests, want 1", len(sink.headers))
 	}
-	// And the percent-encoding the OTLP specification prescribes is undone.
-	if header := sink.headers[0]; header.Get("X-Tenant") != "acme corp" {
-		t.Errorf("X-Tenant = %q, want the decoded value", header.Get("X-Tenant"))
+	for name, values := range sink.headers[0] {
+		for _, value := range values {
+			if strings.Contains(value, "tp-sk-") || name == "X-Tenant" {
+				t.Errorf("the variable reached the receiver: %s: %s", name, value)
+			}
+		}
+	}
+	// Said, without the value, so a receiver answering 401 is not a mystery.
+	if !strings.Contains(got.stderr, "OTEL_EXPORTER_OTLP_HEADERS is not read") ||
+		strings.Contains(got.stderr, testKey) {
+		t.Errorf("stderr = %q", got.stderr)
 	}
 }
 
-// The values in that variable are RFC 3986 percent-encoding, not the form
-// encoding, so `+` is a literal. A base64 bearer token contains `+`, and
-// reading it as a space corrupts the credential into a 401 — which the export
-// treats as fatal, so the whole run dies on a header nobody mistyped.
-func TestExportKeepsAPlusInAnEnvironmentHeader(t *testing.T) {
+// A `--header` value goes out as written: a base64 bearer token keeps its `+`.
+func TestExportKeepsAHeaderValueAsWritten(t *testing.T) {
 	h := newHarness(t)
 	seedArchive(t, h, 1)
 	sink := newStub(t, nil)
 	const token = "Bearer YWJj+ZGVm/Z2hp=="
-	h.env["OTEL_EXPORTER_OTLP_HEADERS"] = "authorization=" + token
 
-	got := h.run(t.Context(), false, "export", "--otlp", "--to", sink.server.URL)
+	got := h.run(t.Context(), false, "export", "--otlp", "--to", sink.server.URL, "--header", "authorization="+token)
 	if got.code != ExitOK {
 		t.Fatalf("exit = %d, stderr = %s", got.code, got.stderr)
 	}
+	if len(sink.headers) != 1 {
+		t.Fatalf("the receiver saw %d requests, want 1", len(sink.headers))
+	}
 	if header := sink.headers[0].Get("Authorization"); header != token {
 		t.Errorf("Authorization = %q, want %q", header, token)
+	}
+}
+
+// exportHeaders, as a table (spec 019 #14): one value per header whatever the
+// case, the last flag winning; a name or value HTTP cannot carry refused at
+// once; a Tracepad key refused wherever the receiver would get it — in a
+// header, as Bearer or as Basic, or in `--to` itself — the source's own key
+// even with --allow-tracepad-key.
+func TestExportHeadersTable(t *testing.T) {
+	const own = "admin-token-12345"
+	basic := func(pair string) string { return "Basic " + base64.StdEncoding.EncodeToString([]byte(pair)) }
+	for _, tc := range []struct {
+		name  string
+		to    string
+		flags []string
+		allow bool
+		env   map[string]string
+		want  map[string]string
+		// refused is a fragment of the error, empty when none is wanted.
+		refused string
+	}{
+		{name: "one value whatever the case, the last flag's",
+			flags: []string{"authorization=Bearer first", "AUTHORIZATION=Bearer second", "Authorization=Bearer last"},
+			want:  map[string]string{"Authorization": "Bearer last"}},
+		{name: "a value goes out as written",
+			flags: []string{"x-scope-orgid=acme", "authorization=Bearer YWJj+ZGVm/Z2hp=="},
+			want:  map[string]string{"X-Scope-Orgid": "acme", "Authorization": "Bearer YWJj+ZGVm/Z2hp=="}},
+		{name: "a receiver's own Basic pair", flags: []string{"authorization=" + basic("pk-lf-1:sk-lf-2")},
+			want: map[string]string{"Authorization": basic("pk-lf-1:sk-lf-2")}},
+		{name: "a line break in a value", flags: []string{"authorization=Bearer x\r\nX-Evil: 1"},
+			refused: "line break"},
+		{name: "a space in a name", flags: []string{"x api=1"}, refused: "must be name=value"},
+		{name: "a tp-sk- bearer", flags: []string{"authorization=Bearer tp-sk-0123"}, refused: "Tracepad project key"},
+		{name: "a tp-sk- in any case", flags: []string{"x-key=TP-SK-shouting"}, refused: "Tracepad project key"},
+		{name: "a tp-sk- inside Basic", flags: []string{"authorization=" + basic("tp-pk-1:tp-sk-2")},
+			refused: "Tracepad project key"},
+		{name: "a tp-sk- the flag allows", flags: []string{"authorization=Bearer tp-sk-0123"}, allow: true,
+			want: map[string]string{"Authorization": "Bearer tp-sk-0123"}},
+		{name: "the command's own key as a bearer", flags: []string{"authorization=Bearer " + own},
+			refused: "a key of your Tracepad"},
+		{name: "the command's own key inside Basic, flag or not", flags: []string{"authorization=" + basic("x:"+own)},
+			allow: true, refused: "a key of your Tracepad"},
+		{name: "a long own key is found inside a word", flags: []string{"x-env=" + own + "-and-more"},
+			refused: "a key of your Tracepad"},
+		{name: "a tp-sk- in the url's user info", to: "https://pk:tp-sk-0123@collector.example/v1/traces",
+			refused: "--to carries a Tracepad"},
+		{name: "a tp-sk- in the url's query", to: "https://collector.example/v1/traces?key=tp-sk-0123",
+			refused: "--to carries a Tracepad"},
+		{name: "a collector's own Basic in user info", to: "https://user:secret@collector.example/v1/traces",
+			want: map[string]string{}},
+		// Review round 2: whatever the scheme, the separator or the
+		// encoding, the text is read for a key.
+		{name: "a query pair a parser would drop", to: "https://c.example/v1/traces?key=tp-sk-0123;x=y",
+			refused: "--to carries a Tracepad"},
+		{name: "a query name", to: "https://c.example/v1/traces?tp-sk-0123", refused: "--to carries a Tracepad"},
+		{name: "a path segment", to: "https://c.example/v1/traces/tp-sk-0123", refused: "--to carries a Tracepad"},
+		{name: "percent-encoded", to: "https://c.example/v1/traces?key=tp%2Dsk%2D0123",
+			refused: "--to carries a Tracepad"},
+		{name: "the own key under another scheme, flag or not", flags: []string{"x-api-key=Token " + own},
+			allow: true, refused: "a key of your Tracepad"},
+		{name: "the own key after a tab", flags: []string{"authorization=Bearer\t" + own},
+			refused: "a key of your Tracepad"},
+		{name: "the own key in the url", to: "https://c.example/v1/traces?k=" + own, allow: true,
+			refused: "a key of your Tracepad"},
+		{name: "unpadded Basic", flags: []string{"authorization=Basic " +
+			base64.RawStdEncoding.EncodeToString([]byte("tp-pk-1:tp-sk-XYZ"))}, refused: "Tracepad project key"},
+		{name: "URL-safe Basic", flags: []string{"authorization=Basic " +
+			base64.URLEncoding.EncodeToString([]byte("tp-pk-1:tp-sk-\xfb\xff"))}, refused: "Tracepad project key"},
+		{name: "the server's admin token from the environment",
+			env:   map[string]string{"TRACEPAD_ADMIN_TOKEN": "a-long-admin-token-0001"},
+			flags: []string{"authorization=Bearer a-long-admin-token-0001"}, allow: true,
+			refused: "a key of your Tracepad"},
+		{name: "a short admin token inside a word is not it",
+			env:   map[string]string{"TRACEPAD_ADMIN_TOKEN": "dev"},
+			flags: []string{"x-env=development"}, want: map[string]string{"X-Env": "development"}},
+		{name: "a short admin token as a word is",
+			env:   map[string]string{"TRACEPAD_ADMIN_TOKEN": "dev"},
+			flags: []string{"x-token=key:dev"}, refused: "a key of your Tracepad"},
+		// Review round 3.
+		{name: "an admin token with a newline from an env file",
+			env:   map[string]string{"TRACEPAD_ADMIN_TOKEN": "a-long-admin-token-0001\n"},
+			flags: []string{"authorization=Bearer a-long-admin-token-0001"}, allow: true,
+			refused: "a key of your Tracepad"},
+		{name: "TRACEPAD_API_KEY when --key overrode it",
+			env:   map[string]string{"TRACEPAD_API_KEY": "tp-sk-prod-0000000000"},
+			flags: []string{"authorization=Bearer tp-sk-prod-0000000000"}, allow: true,
+			refused: "a key of your Tracepad"},
+		{name: "LANGFUSE_SECRET_KEY",
+			env:   map[string]string{"LANGFUSE_SECRET_KEY": "tp-sk-lf-0000000000"},
+			flags: []string{"x-key=tp-sk-lf-0000000000"}, allow: true, refused: "a key of your Tracepad"},
+		{name: "a key from OTEL_EXPORTER_OTLP_HEADERS",
+			env:   map[string]string{"OTEL_EXPORTER_OTLP_HEADERS": "x-tenant=acme,authorization=Bearer%20tp-sk-otel-000000"},
+			flags: []string{"authorization=Bearer tp-sk-otel-000000"}, allow: true, refused: "a key of your Tracepad"},
+		{name: "a key inside Basic in OTEL_EXPORTER_OTLP_HEADERS",
+			env: map[string]string{"OTEL_EXPORTER_OTLP_HEADERS": "authorization=" +
+				strings.ReplaceAll(basic("tp-pk-1:tp-sk-basic-0000"), " ", "%20")},
+			flags: []string{"x-key=tp-sk-basic-0000"}, allow: true, refused: "a key of your Tracepad"},
+		{name: "a malformed escape before an encoded key",
+			to: "https://c.example/v1/traces?x=%zz&key=tp%2Dsk%2D0123", refused: "--to carries a Tracepad"},
+		{name: "a key as a header name", flags: []string{"tp-sk-0123=1"}, refused: "--header name carries a Tracepad"},
+		{name: "the own key as a header name", flags: []string{own + "=1"}, allow: true,
+			refused: "--header name carries a key of your Tracepad"},
+		{name: "a short admin token named like the receiver's host",
+			env: map[string]string{"TRACEPAD_ADMIN_TOKEN": "tracepad"}, to: "http://tracepad:4318/v1/traces",
+			want: map[string]string{}},
+		{name: "a short admin token in the url's user info",
+			env: map[string]string{"TRACEPAD_ADMIN_TOKEN": "tracepad"}, to: "http://u:tracepad@tracepad:4318/v1/traces",
+			refused: "--to carries a key of your Tracepad"},
+		{name: "a short admin token is not looked for in decoded base64",
+			env:   map[string]string{"TRACEPAD_ADMIN_TOKEN": "dev"},
+			flags: []string{"authorization=" + basic("user:dev")}, want: map[string]string{"Authorization": basic("user:dev")}},
+		{name: "a header the export sets itself", flags: []string{"content-type=application/json"},
+			refused: "set by the export itself"},
+		{name: "the encoding too", flags: []string{"Content-Encoding=gzip"}, refused: "set by the export itself"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var errOut bytes.Buffer
+			r := newRun(Options{Stderr: &errOut, Env: func(key string) string { return tc.env[key] }})
+			r.key = own
+			to := tc.to
+			if to == "" {
+				to = "https://collector.example/v1/traces"
+			}
+			got, err := r.exportHeaders(to, tc.flags, tc.allow)
+			if tc.refused != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.refused) {
+					t.Fatalf("err = %v, want one saying %q", err, tc.refused)
+				}
+				if strings.Contains(err.Error(), own) || strings.Contains(err.Error(), "tp-sk-0123") ||
+					strings.Contains(err.Error(), "admin-token-0001") {
+					t.Errorf("the refusal repeats the key: %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("err = %v", err)
+			}
+			if len(got) != len(tc.want) {
+				t.Fatalf("headers = %v, want %v", got, tc.want)
+			}
+			for name, value := range tc.want {
+				if got[name] != value {
+					t.Errorf("%s = %q, want %q", name, got[name], value)
+				}
+			}
+		})
+	}
+}
+
+// And end to end, once: each request carries one Authorization, the last
+// flag's.
+func TestExportHeadersAreOneValueWhateverTheCase(t *testing.T) {
+	h := newHarness(t)
+	seedArchive(t, h, 1)
+	sink := newStub(t, nil)
+
+	got := h.run(t.Context(), false, "export", "--otlp", "--to", sink.server.URL,
+		"--header", "authorization=Bearer first", "--header", "AUTHORIZATION=Bearer second",
+		"--header", "Authorization=Bearer last")
+	if got.code != ExitOK {
+		t.Fatalf("exit = %d, stderr = %s", got.code, got.stderr)
+	}
+	if len(sink.headers) != 1 {
+		t.Fatalf("the receiver saw %d requests, want 1", len(sink.headers))
+	}
+	if values := sink.headers[0].Values("Authorization"); len(values) != 1 || values[0] != "Bearer last" {
+		t.Fatalf("Authorization = %q, want the last flag's value alone", values)
+	}
+}
+
+// A Tracepad key is refused before the first POST, wherever it sits: the
+// receiver would get admin access to the project (spec 019 #14).
+func TestExportRefusesToSendATracepadKey(t *testing.T) {
+	h := newHarness(t)
+	seedArchive(t, h, 1)
+	sink := newStub(t, nil)
+	basic := "Basic " + base64.StdEncoding.EncodeToString([]byte("tp-pk-test:"+testKey))
+	withUser := strings.Replace(sink.server.URL, "://", "://tp-pk-test:"+testKey+"@", 1)
+
+	for _, args := range [][]string{
+		{"--to", sink.server.URL, "--header", "authorization=Bearer tp-sk-0123456789abcdef"},
+		{"--to", sink.server.URL, "--header", "x-api-key=" + testKey},
+		{"--to", sink.server.URL, "--header", "authorization=" + basic},
+		// The source's own key, which the flag does not let through.
+		{"--to", sink.server.URL, "--header", "authorization=" + basic, "--allow-tracepad-key"},
+		{"--to", withUser},
+	} {
+		got := h.run(t.Context(), false, append([]string{"export", "--otlp"}, args...)...)
+		if got.code != ExitFailure || !strings.Contains(got.stderr, "admin access to your project") {
+			t.Errorf("%q: exit = %d, stderr = %q, want a refusal", args, got.code, got.stderr)
+		}
+		if strings.Contains(got.stderr, "tp-sk-0123") || strings.Contains(got.stderr, testKey) {
+			t.Errorf("%q: the refusal repeats the key: %q", args, got.stderr)
+		}
+	}
+	if len(sink.received()) != 0 {
+		t.Fatalf("the receiver got %d batches", len(sink.received()))
+	}
+}
+
+// A --header typed wrong is a usage error that repeats neither the value nor
+// a name it could not tell from one: curl's `Name: value` would otherwise put
+// the key in a CI log (spec 019 #14).
+func TestExportHeaderUsageErrorsDoNotRepeatTheKey(t *testing.T) {
+	h := newHarness(t)
+	seedArchive(t, h, 1)
+	sink := newStub(t, nil)
+	padded := base64.StdEncoding.EncodeToString([]byte("tp-pk-test:" + testKey + "x"))
+
+	for _, header := range []string{
+		"Authorization: Bearer " + testKey,
+		"Authorization: Basic " + padded,
+	} {
+		got := h.run(t.Context(), false, "export", "--otlp", "--to", sink.server.URL, "--header", header)
+		if got.code != ExitUsage || !strings.Contains(got.stderr, "must be name=value") {
+			t.Errorf("%q: exit = %d, stderr = %q, want a usage error", header, got.code, got.stderr)
+		}
+		if strings.Contains(got.stderr, testKey) || strings.Contains(got.stderr, padded) {
+			t.Errorf("%q: the usage error repeats the credential: %q", header, got.stderr)
+		}
+	}
+	if len(sink.received()) != 0 {
+		t.Fatalf("the receiver got %d batches", len(sink.received()))
 	}
 }
 
@@ -688,11 +921,25 @@ func TestExportRoundTrip(t *testing.T) {
 		postOTLP(t, source.url, body)
 	}
 
+	// The receiver's own credentials, because that is what it is: a second
+	// Tracepad, reached the way any OTLP receiver is — with a key of its own,
+	// not the source's, which no flag lets out (spec 019 #14).
+	minted := destination.run(t.Context(), false, "keys", "create", "--json")
+	if minted.code != ExitOK {
+		t.Fatalf("keys create: exit = %d, stderr = %s", minted.code, minted.stderr)
+	}
+	var key struct {
+		SecretKey string `json:"secret_key"`
+	}
+	if err := json.Unmarshal([]byte(minted.stdout), &key); err != nil || key.SecretKey == testKey {
+		t.Fatalf("keys create = %q, %v", minted.stdout, err)
+	}
 	got := source.run(t.Context(), false, "export", "--otlp",
-		// The receiver's own credentials, because that is what it is: a
-		// second Tracepad, reached the way any OTLP receiver is.
 		"--to", destination.url+"/v1/traces",
-		"--header", "authorization=Bearer "+testKey)
+		"--header", "authorization=Bearer "+key.SecretKey,
+		// A Tracepad key, the destination's own — which is what this flag
+		// is for.
+		"--allow-tracepad-key")
 	if got.code != ExitOK {
 		t.Fatalf("exit = %d, stderr = %s", got.code, got.stderr)
 	}

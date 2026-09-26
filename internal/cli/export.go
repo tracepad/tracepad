@@ -65,6 +65,7 @@ func (r *run) export(ctx context.Context, args []string) error {
 		until    string
 		after    string
 		dryRun   bool
+		allowKey bool
 	)
 	fs.BoolVar(&otlp, "otlp", false, "")
 	fs.StringVar(&to, "to", "", "")
@@ -75,6 +76,7 @@ func (r *run) export(ctx context.Context, args []string) error {
 	fs.StringVar(&until, "until", "", "")
 	fs.StringVar(&after, "after", "", "")
 	fs.BoolVar(&dryRun, "dry-run", false, "")
+	fs.BoolVar(&allowKey, "allow-tracepad-key", false, "")
 	if _, err := r.parse(fs, args, 0); err != nil {
 		return err
 	}
@@ -95,6 +97,18 @@ func (r *run) export(ctx context.Context, args []string) error {
 		return usageErrorf("--header applies to --to; a directory takes no headers")
 	case dir != "" && compress:
 		return usageErrorf("--gzip applies to --to; a directory holds the bodies as they are")
+	case dir != "" && allowKey:
+		return usageErrorf("--allow-tracepad-key applies to --to; a directory is sent no headers")
+	}
+	// Resolved and checked before anything is asked of either server, so a
+	// header carrying a Tracepad key is refused before a byte is sent
+	// (spec 019 #14).
+	var resolved map[string]string
+	if to != "" {
+		var err error
+		if resolved, err = r.exportHeaders(to, headers, allowKey); err != nil {
+			return err
+		}
 	}
 	if after == "" && wasGiven(fs, "after") {
 		return usageErrorf("--after needs the cursor the previous run printed; it was passed empty")
@@ -137,7 +151,7 @@ func (r *run) export(ctx context.Context, args []string) error {
 		return nil
 	}
 
-	sink, err := r.destination(to, dir, headers, compress, after != "")
+	sink, err := r.destination(to, dir, resolved, compress, after != "")
 	if err != nil {
 		return err
 	}
