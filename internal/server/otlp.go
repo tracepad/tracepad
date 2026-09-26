@@ -5,11 +5,13 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"mime"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/tracepad/tracepad/internal/mapping"
@@ -29,17 +31,6 @@ const (
 	contentTypeProtobufAlt = "application/protobuf"
 	contentTypeJSON        = mapping.ContentTypeJSON
 )
-
-// maxDecompressionRatio bounds how far one gzipped body may expand. The
-// configured cap applies to what arrives on the wire, so without this a 20
-// MiB body of zeros would decompress into gigabytes.
-//
-// It is a per-request bound, not a memory budget: handler concurrency is
-// unbounded, so N simultaneous exports can hold N decompressed bodies. What
-// keeps that finite in practice is the writer queue (spec 002 #15), which
-// stops admitting work long before the machine runs out — an aggregate cap
-// belongs with the rate limiting deferred to a later spec.
-const maxDecompressionRatio = 20
 
 // handleTraces serves both the canonical OTLP route and the Langfuse-SDK
 // alias. They are the same endpoint: one key pair serves both wire formats,
@@ -79,14 +70,8 @@ func (s *Server) handleTraces(w http.ResponseWriter, r *http.Request) {
 	}
 
 	encoding := r.Header.Get("Content-Encoding")
-	body, err := readBody(w, r, s.maxBodyBytes)
-	if err != nil {
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
-			writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
-			return
-		}
-		writeError(w, http.StatusBadRequest, "cannot read request body")
+	body, ok := s.readAPIBody(w, r)
+	if !ok {
 		return
 	}
 
@@ -276,27 +261,86 @@ func decodeFailure(asJSON bool, err error) string {
 
 // readBody reads the request body under the configured cap, transparently
 // decompressing gzip (spec 002 API contract).
+//
+// The cap bounds the body twice: the bytes on the wire, and for gzip the bytes
+// they decompress to — the body the parser gets — so a few hundred kilobytes
+// of compressed zeros cannot become hundreds of megabytes (spec 002 #27). It
+// is a per-request bound, not a memory budget: handler concurrency is
+// unbounded, so N simultaneous requests can hold N bodies, and the writer
+// queue (spec 002 #15) only sees a body after it has been read. An aggregate
+// budget belongs with the rate limiting deferred to a later spec.
 func readBody(w http.ResponseWriter, r *http.Request, maxBytes int64) ([]byte, error) {
 	limited := http.MaxBytesReader(w, r.Body, maxBytes)
 	if !strings.EqualFold(r.Header.Get("Content-Encoding"), "gzip") {
 		return io.ReadAll(limited)
 	}
 
-	gz, err := gzip.NewReader(limited)
+	wire := &countingBody{reader: limited}
+	gz, err := gzip.NewReader(wire)
 	if err != nil {
 		return nil, err
 	}
 	defer gz.Close()
 
-	max := maxBytes * maxDecompressionRatio
-	body, err := io.ReadAll(io.LimitReader(gz, max+1))
+	body, err := io.ReadAll(io.LimitReader(gz, maxBytes+1))
 	if err != nil {
 		return nil, err
 	}
-	if int64(len(body)) > max {
-		return nil, &http.MaxBytesError{Limit: max}
+	if int64(len(body)) > maxBytes {
+		return nil, &inflatedTooLarge{wire: wire.read, limit: maxBytes}
 	}
 	return body, nil
+}
+
+// inflatedTooLarge is a gzip body that fit the cap on the wire and expanded
+// past it. It is a MaxBytesError to everything that answers 413, and its own
+// type to the one place that logs it.
+type inflatedTooLarge struct {
+	// wire is how many compressed bytes had been read when the
+	// decompressed stream passed the cap.
+	wire  int64
+	limit int64
+}
+
+func (e *inflatedTooLarge) Error() string {
+	return fmt.Sprintf("gzip body expands past %d bytes", e.limit)
+}
+
+func (e *inflatedTooLarge) Unwrap() error { return &http.MaxBytesError{Limit: e.limit} }
+
+// countingBody counts what is read through it.
+type countingBody struct {
+	reader io.Reader
+	read   int64
+}
+
+func (c *countingBody) Read(p []byte) (int, error) {
+	n, err := c.reader.Read(p)
+	c.read += int64(n)
+	return n, err
+}
+
+// logLimiter lets one line through per interval and counts the rest, so a
+// burst of refused bombs costs one log line a minute rather than one a
+// request, and the line that does get through says how many it stands for.
+type logLimiter struct {
+	mu      sync.Mutex
+	every   time.Duration
+	last    time.Time
+	skipped int64
+}
+
+// allow reports whether to log now and how many were held back since the
+// last line that was.
+func (l *logLimiter) allow(now time.Time) (skipped int64, ok bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if !l.last.IsZero() && now.Sub(l.last) < l.every {
+		l.skipped++
+		return 0, false
+	}
+	skipped, l.skipped, l.last = l.skipped, 0, now
+	return skipped, true
 }
 
 // writeExportResponse answers with an ExportTraceServiceResponse, carrying

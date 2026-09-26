@@ -95,6 +95,12 @@ Passwords are `bcrypt` at cost 12, between 10 and 128 characters, with no other
 rule: composition rules make passwords worse, and 128 is past where `bcrypt`
 stops reading.
 
+Setup, sign-in and accepting an invitation are the three routes that take a
+body from anybody, so they take a small one: at most 8 KiB of uncompressed
+JSON. A larger body is `413` and a compressed one (`Content-Encoding: gzip`
+or any other) is `415`. A display name is trimmed and then at most 200
+characters, here and wherever else one is set.
+
 ### What a session may ask
 
 A key carries its project. A session does not, so it names one on every request

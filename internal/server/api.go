@@ -141,16 +141,74 @@ func (s *Server) readJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 // readAPIBody reads and size-caps a request body (spec 003, API contract).
 func (s *Server) readAPIBody(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
 	body, err := readBody(w, r, s.maxBodyBytes)
-	if err != nil {
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
-			writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
-			return nil, false
-		}
-		writeError(w, http.StatusBadRequest, "cannot read request body")
-		return nil, false
+	return body, s.bodyRead(w, r, err)
+}
+
+// bodyRead answers the client itself when reading the body failed: 413 for
+// the cap, 400 for anything else. A gzip body that fit on the wire and
+// expanded past the cap is also logged, because to an OTLP exporter a 413 is
+// final — the batch is dropped, and this line is where the operator finds out
+// why (spec 002 #27).
+func (s *Server) bodyRead(w http.ResponseWriter, r *http.Request, err error) bool {
+	if err == nil {
+		return true
 	}
-	return body, true
+	var inflated *inflatedTooLarge
+	if errors.As(err, &inflated) {
+		if skipped, ok := s.inflatedLog.allow(time.Now()); ok {
+			slog.Warn("a gzip body expanded past TRACEPAD_MAX_BODY_BYTES after decompression and was refused with 413",
+				"path", r.URL.Path, "wire_bytes_read", inflated.wire, "limit", inflated.limit,
+				"not_logged_since_last", skipped)
+		}
+	}
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
+		return false
+	}
+	writeError(w, http.StatusBadRequest, "cannot read request body")
+	return false
+}
+
+// maxPublicBodyBytes caps the body of a route anyone can call (spec 028
+// Decision 26). The largest such body is a setup — a token, an email, a
+// password and a name — at most about 4.7 KiB with every character escaped
+// (a name of astral characters as surrogate pairs is 12 bytes a character),
+// so 8 KiB is room for any client and nothing for an attacker.
+const maxPublicBodyBytes = 8 << 10
+
+// smallPlainBody is what the guard puts in front of every public route that
+// can carry a body (spec 028 Decision 26). Those routes run before anything
+// knows who is calling, so they take a few KiB and no Content-Encoding:
+// decompressing is work done for a caller nobody has identified, and the
+// configured cap is sized for trace batches, not for an email and a
+// password. Both refusals come before the handler, and so before a byte of
+// the body is read.
+func smallPlainBody(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !plainEncoding(r) {
+			writeError(w, http.StatusUnsupportedMediaType, "this route takes an uncompressed body")
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, maxPublicBodyBytes)
+		next(w, r)
+	}
+}
+
+// plainEncoding reports whether a request declares no content coding but
+// `identity` — in every Content-Encoding header it carries, and in every
+// comma-separated token of each, since a coding hidden behind the first one
+// is still a coding.
+func plainEncoding(r *http.Request) bool {
+	for _, value := range r.Header.Values("Content-Encoding") {
+		for _, coding := range strings.Split(value, ",") {
+			coding = strings.TrimSpace(coding)
+			if coding != "" && !strings.EqualFold(coding, "identity") {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // decodeStrict decodes one JSON value, refusing fields the target does not

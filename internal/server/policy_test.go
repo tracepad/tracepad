@@ -166,7 +166,7 @@ func TestPermissionMatrix(t *testing.T) {
 
 	viewer, editor, owner := people[0], people[1], people[2]
 	for _, rt := range h.server.routes() {
-		if rt.Policy == public {
+		if rt.Policy == public || rt.Policy == presigned {
 			continue
 		}
 		if rt.Policy == session {

@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/tracepad/tracepad/internal/config"
 	"github.com/tracepad/tracepad/internal/store"
@@ -154,14 +155,16 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	name, ok := readAccountName(w, request.Name)
+	if !ok {
+		return
+	}
 	hash, ok := readPassword(w, request.Password)
 	if !ok {
 		return
 	}
 
-	create := &store.SetupOwner{
-		Email: email, Name: strings.TrimSpace(request.Name), Hash: hash,
-	}
+	create := &store.SetupOwner{Email: email, Name: name, Hash: hash}
 	if !s.signIn(w, r, create) {
 		return
 	}
@@ -194,6 +197,18 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	email := strings.TrimSpace(request.Email)
+	// No account can have an email or a password this long, so the answer is
+	// already known — and the limiter below keeps the email as a key for
+	// fifteen minutes, so its size must never be the caller's to choose
+	// (Decision 26). Both spellings are measured: the one an account can
+	// have, and the lower-cased one the limiter keys by, which is longer for
+	// the few letters whose lower case takes more bytes. The same 401 as
+	// every other failure (Decision 8).
+	if len(email) > maxEmailLength || len(strings.ToLower(email)) > maxEmailLength ||
+		len(request.Password) > store.MaxPasswordLength {
+		writeError(w, http.StatusUnauthorized, wrongCredentials)
+		return
+	}
 
 	now := time.Now()
 	if wait := s.limiter.retryAfter(email, now); wait > 0 {
@@ -339,6 +354,13 @@ func (s *Server) handlePatchMe(w http.ResponseWriter, r *http.Request) {
 	if request.Name == nil && request.Password == nil && request.Preferences == nil {
 		writeError(w, http.StatusBadRequest, `nothing to change: send "name", "password" or "preferences"`)
 		return
+	}
+	if request.Name != nil {
+		name, ok := readAccountName(w, *request.Name)
+		if !ok {
+			return
+		}
+		request.Name = &name
 	}
 	preferences, ok := readPreferences(w, request.Preferences)
 	if !ok {
@@ -583,6 +605,24 @@ func validEmail(email string) error {
 		return errors.New("that does not look like an email address")
 	}
 	return nil
+}
+
+// maxAccountNameLength bounds an account's display name, in characters
+// (Decision 26): a name is read by people, and a limit in bytes would give a
+// Cyrillic name half the room of a Latin one.
+const maxAccountNameLength = 200
+
+// readAccountName trims a display name and checks its length, answering 422
+// itself when it is too long. Empty is allowed: the name is optional
+// everywhere.
+func readAccountName(w http.ResponseWriter, raw string) (string, bool) {
+	name := strings.TrimSpace(raw)
+	if utf8.RuneCountInString(name) > maxAccountNameLength {
+		writeError(w, http.StatusUnprocessableEntity,
+			fmt.Sprintf("a name must be at most %d characters", maxAccountNameLength))
+		return "", false
+	}
+	return name, true
 }
 
 // readPassword checks the length and hashes, answering 422 itself when the

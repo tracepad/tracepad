@@ -57,6 +57,7 @@ Deliverables:
 | 24 | **2026-08-26** — The fixture corpus is synthesized end to end (`internal/otlptest` builds it, `make fixtures` writes it) until live captures exist | Testing #1 wants structure from live captures with synthesized content; there is no capture corpus yet, and blocking ingest on one would invert the order (the proxy capture needs a running ingest endpoint). The structures are built from the spec and from the SDKs' own attribute definitions, and verified end to end by the real-SDK smoke test, which exports through the actual exporters. When captures arrive they replace the builders; the `.pb` files on disk are the contract either way. |
 | 25 | **2026-08-27** (from PR #2 review) — An attribute is consumed only when a rule actually *uses* its value, never when a rule merely inspects it; the losers of a priority chain stay unconsumed | #11 says unmapped attributes are never dropped, and the first implementation broke it in exactly the cases that matter most: an unknown `langfuse.observation.level` spelling, a `cost_details`/`usage_details`/`model_parameters` that did not parse as JSON, and every runner-up in a chain were marked consumed at lookup and then discarded — landing nowhere at all. The reference implementation deletes whole chains, and here we deliberately do not follow it (cf. #19): `gen_ai.response.model` is the model that answered, `gen_ai.request.model` the one that was asked for, and collapsing them loses a fact rather than a duplicate. Regression tests pin each case. |
 | 26 | **2026-08-27** (from PR #2 review) — Span events land whole in `metadata.events`; an `exception` event additionally raises the level to ERROR and fills `status_message`, unless the mapping chain already set the level explicitly | The Mapping table was silent on events, so the first implementation never read them — and OTel records failures *as events*, which meant every stack trace from a plain-OTel app was dropped. The product exists to debug failed LLM pipelines, and "the last failed trace with its stack trace" is a planned task shortcut of the read API (design §3.2, spec 004), so losing `exception.*` is not acceptable. Metadata alone is not enough either: a span whose exporter set no ERROR status would stay out of `error_count` and out of every error filter built on it, so the failure would be stored and still invisible. An explicit `langfuse.observation.level` keeps precedence — a client that said DEBUG meant DEBUG. Span *links* remain unmapped; they are structural references rather than user data, and #9 keeps them recoverable. |
+| 27 | **2026-09-26** — **`TRACEPAD_MAX_BODY_BYTES` caps the decoded body as well as the wire.** The compressed bytes stay under the cap as before, and a gzipped body is also read through an `io.LimitReader` of the cap on the decompressor's output, answering `413` the moment it expands past it; the unwritten ×20 allowance for compressed bodies is gone, and no second setting replaces it. A body refused after decompression is logged as a `WARN` naming the route, the compressed bytes read and `TRACEPAD_MAX_BODY_BYTES`, at most one line a minute with a count of the ones not logged since. The same reader serves the JSON API, so the bound holds there too (amends #16) | #16 says the cap exists to stop pathological bodies from ballooning memory, and ×20 of it was 400 MiB per request from a body of a few hundred kilobytes — the ballooning, allowed. The cap now means the size of the export the parser is handed, which is what costs memory. Exporters do not need more: a default batch is ≤512 spans (#16), and a batch that decompresses past 20 MiB is one that would already be refused sent plain. The cost is real where it lands: an OTLP exporter treats `413` as final and drops the batch, so a deployment whose batches were compressed under the old allowance loses them silently after the upgrade — hence the `WARN`, which is where an operator finds out, and the remedy is the one knob, raised. `tracepad export --to` another Tracepad meets the receiver's cap the same way, and the remedy is the same knob on the receiver. A separate decompressed limit would be a second number to explain for a case no default exporter reaches. Paced, because the line is written for a request the server refused, and a stream of bombs must not become a stream of log lines. |
 
 ## API contract
 
@@ -67,7 +68,8 @@ Deliverables:
 - Auth per Decision 2; unknown credentials → 401 `{"error": "unauthorized"}`.
 - Success: 200, `ExportTraceServiceResponse` protobuf; `partial_success`
   filled when spans were skipped (Decision 13).
-- 400 undecodable body · 413 over cap · 429 writer backpressure
+- 400 undecodable body · 413 over cap, gzip counted decompressed (Decision
+  27) · 429 writer backpressure
   (`Retry-After: 1`) · 415 wrong content type.
 - Empty batch: 200, empty response (per OTLP spec).
 
@@ -152,7 +154,8 @@ priority than the span's own attributes.
    regenerates goldens.
 2. **Ingest e2e** — in-process server, real protobuf bodies, asserts rows,
    aggregates, idempotency (double-send), partial success, auth failures,
-   429 under a saturated writer.
+   429 under a saturated writer, and a gzip body that expands one byte past
+   the cap answering 413 (Decision 27).
 3. **Real-SDK smoke (CI)** — a pinned `langfuse` (Python) and a pinned
    `opentelemetry-sdk` + GenAI-semconv script export to a running binary;
    assertions via direct DB reads (the read API arrives in a later spec).
@@ -175,7 +178,7 @@ priority than the span's own attributes.
 | Env | Default | Meaning |
 |---|---|---|
 | `TRACEPAD_STORE_RAW` | `on` | Keep raw OTLP bodies (Decision 9) |
-| `TRACEPAD_MAX_BODY_BYTES` | `20971520` | Request body cap (Decision 16) |
+| `TRACEPAD_MAX_BODY_BYTES` | `20971520` | Request body cap, gzip counted decompressed (Decisions 16, 27) |
 
 ## Out of scope (later specs)
 

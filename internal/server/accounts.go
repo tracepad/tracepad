@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"log/slog"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/tracepad/tracepad/internal/store"
@@ -91,6 +90,10 @@ func (s *Server) handleCreateAccount(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	name, ok := readAccountName(w, request.Name)
+	if !ok {
+		return
+	}
 	if request.Owner && len(request.Memberships) > 0 {
 		writeError(w, http.StatusUnprocessableEntity, "an owner has every project")
 		return
@@ -124,7 +127,7 @@ func (s *Server) handleCreateAccount(w http.ResponseWriter, r *http.Request) {
 	now := time.Now()
 	expires := now.Add(inviteWindow)
 	create := &store.AccountCreate{
-		Email: email, Name: strings.TrimSpace(request.Name), Owner: request.Owner,
+		Email: email, Name: name, Owner: request.Owner,
 		Memberships: memberships,
 		TokenID:     store.SessionID(token), ExpiresAt: expires.UnixNano(), Now: now.UnixNano(),
 	}
@@ -192,6 +195,13 @@ func (s *Server) handlePatchAccount(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest,
 			`nothing to change: send "name", "owner" or "disabled"`)
 		return
+	}
+	if request.Name != nil {
+		name, ok := readAccountName(w, *request.Name)
+		if !ok {
+			return
+		}
+		request.Name = &name
 	}
 	update := &store.AccountUpdate{
 		AccountID: account.ID, Name: request.Name, Owner: request.Owner,

@@ -68,6 +68,15 @@ const (
 	// owner is the admin token or an owner session: the projects
 	// themselves and the accounts.
 	owner
+	// presigned is public to every caller — nothing in the headers is
+	// asked for — but the credential is a signed token in the URL that the
+	// handler checks before it reads a byte: the Langfuse media upload
+	// (spec 041 #14). It is its own policy so that the table says, rather
+	// than a path comparison somewhere, that this route keeps its own body
+	// rules instead of the small plain body every other public route gets
+	// (spec 028 Decision 26). The endpoint map calls it `public`, because
+	// that is what it is to a caller.
+	presigned
 	// session is a route only a cookie reaches — the six of `/api/v1/auth`
 	// that are about the person signed in. A key or the admin token is
 	// told "not a session" rather than "unauthorized", because it is a
@@ -78,7 +87,7 @@ const (
 // String names a policy for the endpoint map and for test failures.
 func (p policy) String() string {
 	switch p {
-	case public:
+	case public, presigned:
 		return "public"
 	case ingest:
 		return "ingest"
@@ -156,8 +165,14 @@ func (s *Server) guard(rt route) http.HandlerFunc {
 			writeError(w, http.StatusInternalServerError, "this route declares no policy")
 		}
 	}
-	if rt.Policy == public {
+	if rt.Policy == presigned {
 		return rt.handler
+	}
+	if rt.Policy == public {
+		if rt.Method == http.MethodGet || rt.Method == http.MethodHead {
+			return rt.handler
+		}
+		return smallPlainBody(rt.handler)
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		c, ok := s.resolve(w, r, rt)

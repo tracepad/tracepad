@@ -80,7 +80,14 @@
 			<label for="account-name" class="text-muted mb-1 block text-xs font-medium">
 				Display name
 			</label>
-			<input id="account-name" type="text" bind:value={name} autocomplete="name" class={field} />
+			<input
+				id="account-name"
+				type="text"
+				bind:value={name}
+				autocomplete="name"
+				maxlength={200}
+				class={field}
+			/>
 		</div>
 		<Button variant="primary" onclick={saveName} disabled={!renamed} busy={savingName}>
 			{#if savingName}<LoaderCircle class="size-4 animate-spin" />{/if}

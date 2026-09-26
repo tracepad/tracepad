@@ -75,6 +75,9 @@ type Server struct {
 	setupMu    sync.RWMutex
 	setupToken string
 	limiter    *loginLimiter
+	// inflatedLog paces the warning for a gzip body refused after
+	// decompression (spec 002 #27).
+	inflatedLog *logLimiter
 
 	// The web interface (spec 006): the built bundle, nil in a build
 	// without the `ui` tag; the path segments the API owns, so a mistyped
@@ -124,6 +127,7 @@ func New(cfg *config.Config, version string, st *store.Store, writer JobWriter, 
 		sessionLife:    sessionLife,
 		publicURL:      cfg.URL,
 		limiter:        newLoginLimiter(),
+		inflatedLog:    &logLimiter{every: time.Minute},
 		assets:         ui.Assets(),
 		startedAt:      time.Now(),
 		counters:       newCounters(),

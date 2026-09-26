@@ -2321,7 +2321,7 @@ export interface components {
                 "application/json": components["schemas"]["Error"];
             };
         };
-        /** @description The request is well formed and the values are not: an email that is not one, a password outside 10-128 characters */
+        /** @description The request is well formed and the values are not: an email that is not one, a password outside 10-128 characters, a name over 200 characters */
         Unprocessable: {
             headers: {
                 [name: string]: unknown;
@@ -2747,6 +2747,7 @@ export interface operations {
                     token: string;
                     email: string;
                     password: string;
+                    /** @description Trimmed; at most 200 characters */
                     name?: string;
                 };
             };
@@ -2765,6 +2766,24 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             403: components["responses"]["Forbidden"];
+            /** @description The body is over 8 KiB */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The body is compressed: a route that takes no credential takes a plain body */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             422: components["responses"]["Unprocessable"];
         };
     };
@@ -2797,6 +2816,24 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            /** @description The body is over 8 KiB */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The body is compressed: a route that takes no credential takes a plain body */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             429: components["responses"]["TooManyRequests"];
         };
     };
@@ -2829,6 +2866,24 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             403: components["responses"]["Forbidden"];
+            /** @description The body is over 8 KiB */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The body is compressed: a route that takes no credential takes a plain body */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             422: components["responses"]["Unprocessable"];
         };
     };
@@ -2884,6 +2939,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
+                    /** @description Trimmed; at most 200 characters */
                     name?: string;
                     password?: {
                         current: string;
@@ -5406,6 +5462,7 @@ export interface operations {
             content: {
                 "application/json": {
                     email: string;
+                    /** @description Trimmed; at most 200 characters */
                     name?: string;
                     /** @description An owner has every project, so `memberships` must then be empty */
                     owner?: boolean;
@@ -5512,6 +5569,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
+                    /** @description Trimmed; at most 200 characters */
                     name?: string;
                     owner?: boolean;
                     disabled?: boolean;
@@ -5535,6 +5593,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
         };
     };
     inviteAccount: {

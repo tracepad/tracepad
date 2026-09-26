@@ -254,7 +254,7 @@
             "token": {"type": "string"},
             "email": {"type": "string", "maxLength": 254},
             "password": {"type": "string", "minLength": 10, "maxLength": 128},
-            "name": {"type": "string"}
+            "name": {"type": "string", "maxLength": 200, "description": "Trimmed; at most 200 characters"}
           },
           "required": ["token", "email", "password"]
         }}}},
@@ -266,6 +266,10 @@
           }}}},
           "400": {"$ref": "#/components/responses/BadRequest"},
           "403": {"$ref": "#/components/responses/Forbidden"},
+          "413": {"description": "The body is over 8 KiB",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+          "415": {"description": "The body is compressed: a route that takes no credential takes a plain body",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
           "422": {"$ref": "#/components/responses/Unprocessable"}
         }
       }
@@ -290,6 +294,10 @@
           }}}},
           "400": {"$ref": "#/components/responses/BadRequest"},
           "401": {"$ref": "#/components/responses/Unauthorized"},
+          "413": {"description": "The body is over 8 KiB",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+          "415": {"description": "The body is compressed: a route that takes no credential takes a plain body",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
           "429": {"$ref": "#/components/responses/TooManyRequests"}
         }
       }
@@ -317,6 +325,10 @@
           }}}},
           "400": {"$ref": "#/components/responses/BadRequest"},
           "403": {"$ref": "#/components/responses/Forbidden"},
+          "413": {"description": "The body is over 8 KiB",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+          "415": {"description": "The body is compressed: a route that takes no credential takes a plain body",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
           "422": {"$ref": "#/components/responses/Unprocessable"}
         }
       }
@@ -357,7 +369,7 @@
         "requestBody": {"required": true, "content": {"application/json": {"schema": {
           "type": "object",
           "properties": {
-            "name": {"type": "string"},
+            "name": {"type": "string", "maxLength": 200, "description": "Trimmed; at most 200 characters"},
             "password": {
               "type": "object",
               "properties": {
@@ -2100,7 +2112,7 @@
           "type": "object",
           "properties": {
             "email": {"type": "string", "maxLength": 254},
-            "name": {"type": "string"},
+            "name": {"type": "string", "maxLength": 200, "description": "Trimmed; at most 200 characters"},
             "owner": {"type": "boolean", "description": "An owner has every project, so `memberships` must then be empty"},
             "memberships": {"type": "array", "items": {
               "type": "object",
@@ -2153,7 +2165,7 @@
         "requestBody": {"required": true, "content": {"application/json": {"schema": {
           "type": "object",
           "properties": {
-            "name": {"type": "string"},
+            "name": {"type": "string", "maxLength": 200, "description": "Trimmed; at most 200 characters"},
             "owner": {"type": "boolean"},
             "disabled": {"type": "boolean"}
           }
@@ -2168,7 +2180,8 @@
           "401": {"$ref": "#/components/responses/Unauthorized"},
           "403": {"$ref": "#/components/responses/Forbidden"},
           "404": {"$ref": "#/components/responses/NotFound"},
-          "409": {"$ref": "#/components/responses/Conflict"}
+          "409": {"$ref": "#/components/responses/Conflict"},
+          "422": {"$ref": "#/components/responses/Unprocessable"}
         }
       },
       "delete": {
@@ -2599,7 +2612,7 @@
         "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "Conflict": {"description": "The stored state already answers differently: a name that is taken, a project that is already deleted, the last owner being demoted",
         "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
-      "Unprocessable": {"description": "The request is well formed and the values are not: an email that is not one, a password outside 10-128 characters",
+      "Unprocessable": {"description": "The request is well formed and the values are not: an email that is not one, a password outside 10-128 characters, a name over 200 characters",
         "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "TooManyRequests": {"description": "Throttled; `Retry-After` says for how long",
         "headers": {"Retry-After": {"schema": {"type": "string"}, "description": "Seconds to wait"}},
