@@ -676,7 +676,7 @@ func (r *run) poll(ctx context.Context, query url.Values, window *tailWindow) ([
 
 func (r *run) printTailed(entry tailed) {
 	if r.wantJSON() {
-		fmt.Fprintf(r.stdout, "%s\n", entry.raw)
+		_ = r.emit(entry.raw)
 		return
 	}
 	row := entry.row

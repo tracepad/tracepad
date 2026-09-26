@@ -66,10 +66,10 @@ type Options struct {
 // run carries the resolved connection and output mode through one command.
 type run struct {
 	// opt's Stdout and Stderr are escaping writers wherever a person may be
-	// reading them (spec 004 #35); stdout is the unwrapped one, which the
-	// JSON mode writes the API's bytes to.
+	// reading them (spec 004 #35). jsonOut is stdout unwrapped, and only emit
+	// writes to it: the JSON mode's bytes are the API's (#1).
 	opt        Options
-	stdout     io.Writer
+	jsonOut    io.Writer
 	url        string
 	key        string
 	forceJSON  bool
@@ -105,15 +105,15 @@ func Run(ctx context.Context, opt Options) int {
 // newRun is one command's state, with the writers a person reads made safe.
 func newRun(opt Options) *run {
 	r := &run{
-		opt:    opt,
-		stdout: opt.Stdout,
-		url:    firstNonEmpty(opt.Env("TRACEPAD_URL"), client.DefaultURL),
-		key:    opt.Env("TRACEPAD_API_KEY"),
+		opt:     opt,
+		jsonOut: opt.Stdout,
+		url:     firstNonEmpty(opt.Env("TRACEPAD_URL"), client.DefaultURL),
+		key:     opt.Env("TRACEPAD_API_KEY"),
 	}
 	// The backstop under every renderer: whatever reaches a terminal
 	// through these goes out escaped, a value a renderer printed raw
 	// included. Stdout only on a terminal, where it is the human mode or
-	// `--json`, which writes to r.stdout; stderr always, since it is a
+	// `--json`, which writes to r.jsonOut; stderr always, since it is a
 	// terminal even when stdout is a pipe.
 	if opt.TTY {
 		r.opt.Stdout = termsafe.NewWriter(opt.Stdout, faintOn, faintOff)
@@ -371,7 +371,9 @@ func usageErrorf(format string, args ...any) error {
 // fail renders an error and returns the exit code it maps to.
 func (r *run) fail(err error) int {
 	// An error can quote the server, and the server can quote a trace.
-	fmt.Fprintf(r.opt.Stderr, "tracepad: %s\n", termsafe.Text(err.Error()))
+	// Its lines after the first are indented under the label, so a message
+	// cannot open a line of its own that reads like the CLI's (#35).
+	fmt.Fprintf(r.opt.Stderr, "tracepad: %s\n", block(err.Error(), "          "))
 	var usage *usageError
 	if errors.As(err, &usage) {
 		fmt.Fprint(r.opt.Stderr, "\n", Usage)
@@ -487,7 +489,7 @@ func (r *run) emit(body json.RawMessage) error {
 	if strings.TrimSpace(string(body)) == "" {
 		return nil
 	}
-	_, err := fmt.Fprintf(r.stdout, "%s\n", strings.TrimRight(string(body), "\n"))
+	_, err := fmt.Fprintf(r.jsonOut, "%s\n", strings.TrimRight(string(body), "\n"))
 	return err
 }
 

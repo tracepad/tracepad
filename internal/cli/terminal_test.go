@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/tracepad/tracepad/internal/model"
@@ -302,7 +305,7 @@ func TestATerminalRunsWritersEscapeWhatARendererForgot(t *testing.T) {
 	}
 
 	out.Reset()
-	fmt.Fprintf(r.stdout, "%s\n", `{"name":"\u001b"}`+"\u009b")
+	fmt.Fprintf(r.jsonOut, "%s\n", `{"name":"\u001b"}`+"\u009b")
 	if out.String() != `{"name":"\u001b"}`+"\u009b\n" {
 		t.Errorf("the JSON writer changed the bytes: %q", out.String())
 	}
@@ -363,5 +366,53 @@ func TestAnErrorMessageKeepsItsLines(t *testing.T) {
 		`            ValueError: \x1b[2Jboom` + "\n"
 	if !strings.Contains(got.stdout, want) {
 		t.Errorf("output is missing\n%s\nin\n%s", want, got.stdout)
+	}
+}
+
+// An error's lines after the first are indented under the label, so a message
+// cannot open a line that reads like one of the CLI's own (#35).
+func TestAnErrorCannotOpenALineOfItsOwn(t *testing.T) {
+	var out, errOut bytes.Buffer
+	r := newRun(Options{Stdout: &out, Stderr: &errOut, TTY: true, Env: func(string) string { return "" }})
+	r.fail(errors.New("bad\ntracepad: warning: x"))
+	for i, line := range strings.Split(strings.TrimRight(errOut.String(), "\n"), "\n") {
+		if i > 0 && strings.HasPrefix(line, "tracepad:") {
+			t.Errorf("line %d opens like the CLI's own: %q", i, errOut.String())
+		}
+	}
+	if !strings.Contains(errOut.String(), "tracepad: bad\n          tracepad: warning: x\n") {
+		t.Errorf("stderr = %q", errOut.String())
+	}
+}
+
+// A retry names the batch and the attempt before the reason, so a reason of
+// several lines cannot carry the retry away from its batch.
+func TestARetryNamesItsBatchFirst(t *testing.T) {
+	h := newHarness(t)
+	h.retryBackoff = time.Millisecond
+	seedArchive(t, h, 1)
+	sink := newStub(t, func(n int) (int, []byte, string) {
+		if n < 1 {
+			return http.StatusServiceUnavailable, []byte("come back later"), ""
+		}
+		return http.StatusOK, nil, ""
+	})
+	got := h.run(t.Context(), false, "export", "--otlp", "--to", sink.server.URL)
+	if got.code != ExitOK {
+		t.Fatalf("exit = %d, stderr = %s", got.code, got.stderr)
+	}
+	retry := regexp.MustCompile(`(?m)^tracepad: batch \d+: retrying in \S+ \(attempt 2 of \d+\): .*come back later`)
+	if !retry.MatchString(got.stderr) {
+		t.Errorf("stderr = %q", got.stderr)
+	}
+}
+
+// A receiver's message is cut at a character, never inside one: half a
+// character would reach the terminal as `\xNN` (#35).
+func TestFirstLineCutsAtACharacter(t *testing.T) {
+	body := strings.Repeat("a", 199) + strings.Repeat("\u00e9", 10)
+	got := firstLine([]byte(body))
+	if !utf8.ValidString(got) || got != strings.Repeat("a", 199)+"…" {
+		t.Errorf("firstLine = %q", got)
 	}
 }
