@@ -13,8 +13,11 @@
 version: 2
 
 updates:
+  # The server's modules only. `sdk/go/go.mod` is a published library's: the
+  # versions it names are the floor every application that imports it resolves
+  # to, and they move when the package decides, not weekly.
   - package-ecosystem: gomod
-    directories: ["/", "/sdk/go"]
+    directory: /
     schedule:
       interval: weekly
     cooldown:
@@ -25,7 +28,7 @@ updates:
         update-types: [minor, patch]
 
   - package-ecosystem: npm
-    directories: ["/ui", "/sdk/js"]
+    directories: ["/ui", "/sdk/js", "/tools/lockfile-lint"]
     schedule:
       interval: weekly
     cooldown:
@@ -72,3 +75,11 @@ updates:
       images:
         patterns: ["*"]
         update-types: [minor, patch]
+    # The image's toolchains are go.mod's Go line and a Node the interface
+    # supports; they change by hand with those files (spec 020 #19). Here only
+    # the digest under a tag moves.
+    ignore:
+      - dependency-name: golang
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: node
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]

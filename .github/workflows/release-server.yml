@@ -41,6 +41,7 @@ jobs:
       tags: ${{ steps.meta.outputs.tags }}
       prerelease: ${{ steps.meta.outputs.prerelease }}
       latest: ${{ steps.meta.outputs.latest }}
+      previous: ${{ steps.meta.outputs.previous }}
     steps:
       # Tags and all of them: which image tags this release may move is a
       # question about the ones already published (#16).
@@ -108,12 +109,24 @@ jobs:
               ;;
           esac
 
+          # The release notes run from the server tag before this one in its
+          # own history — not from GitHub's newest release, which for a
+          # back-patch is a later line. A stable release counts from the
+          # stable one before it, so its notes cover the release candidates
+          # too; the first tag has nothing to count from.
+          exclude=()
+          [ "$prerelease" = true ] || exclude=(--exclude 'v*-*')
+          previous="$(git describe --tags --abbrev=0 --match 'v[0-9]*' \
+                        "${exclude[@]}" "$GITHUB_REF_NAME^" 2>/dev/null || true)"
+          echo "notes from: ${previous:-the beginning}"
+
           echo "publishing: $tags"
           {
             echo "version=$version"
             echo "tags=$tags"
             echo "prerelease=$prerelease"
             echo "latest=$latest"
+            echo "previous=$previous"
           } >> "$GITHUB_OUTPUT"
 
   # The six archives and their checksums, with no way to publish them: GoReleaser
@@ -214,9 +227,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PRERELEASE: ${{ needs.check.outputs.prerelease }}
           LATEST: ${{ needs.check.outputs.latest }}
+          PREVIOUS: ${{ needs.check.outputs.previous }}
         run: |
+          since=()
+          [ -z "$PREVIOUS" ] || since=(--notes-start-tag "$PREVIOUS")
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
-            --verify-tag --generate-notes \
+            --verify-tag --generate-notes "${since[@]}" \
             --prerelease="$PRERELEASE" --latest="$LATEST" dist/*
 
   image:

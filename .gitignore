@@ -65,3 +65,6 @@ __pycache__/
 # `make sdk-js-build`; never committed.
 sdk/js/node_modules/
 sdk/js/dist/
+
+# The gate's lock-file linter, installed from its own lock (spec 020 #19).
+tools/lockfile-lint/node_modules/

@@ -53,12 +53,16 @@ jobs:
       # The lock files resolve to the npm registry only, over https, with
       # integrity hashes, and under the names they claim (spec 020 #19). The
       # Node package's one alias is its OpenTelemetry 1.x test double. The
-      # linter is the interface's dev dependency, installed from its lock by
-      # `make gate` above rather than resolved afresh on every run.
+      # linter is installed from a lock of its own, here and nowhere else: not
+      # resolved afresh on every run, and not part of the interface, whose
+      # install every release build repeats.
       - name: The lock files resolve where they claim to
         run: |
-          lint=(ui/node_modules/.bin/lockfile-lint --type npm --allowed-hosts npm
-                --validate-https --validate-integrity --validate-package-names)
+          npm ci --prefix tools/lockfile-lint --ignore-scripts --no-audit --no-fund
+          lint=(tools/lockfile-lint/node_modules/.bin/lockfile-lint --type npm
+                --allowed-hosts npm --validate-https --validate-integrity
+                --validate-package-names)
+          "${lint[@]}" --path tools/lockfile-lint/package-lock.json
           "${lint[@]}" --path ui/package-lock.json
           "${lint[@]}" --path sdk/js/package-lock.json \
             --allowed-package-name-aliases sdk-trace-base-v1:@opentelemetry/sdk-trace-base

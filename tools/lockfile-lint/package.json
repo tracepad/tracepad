@@ -1,0 +1,8 @@
+{
+  "name": "tracepad-lockfile-lint",
+  "private": true,
+  "description": "The lock-file linter CI's gate runs, installed from its own lock and nowhere else (spec 020 #19).",
+  "devDependencies": {
+    "lockfile-lint": "^5.0.1"
+  }
+}

@@ -8,10 +8,11 @@
 #
 # Set SDK_PYTHON to an interpreter that already has the package and pytest
 # installed to skip the environment setup; the suite then runs once, on
-# whatever OpenTelemetry that interpreter has. CI does, one leg per end (spec
-# 042 #16): the lock, or the package with `--floor-pins` in one install. Both ends run even when the first fails, and the script
-# exits non-zero after them. Set SDK_SKIP_E2E=1 to run the unit half alone
-# (no Go toolchain needed).
+# whatever OpenTelemetry that interpreter has. CI sets it and prepares one
+# interpreter per leg (spec 042 #16): the lock, or the package with
+# `--floor-pins` in one install. Both ends run even when the first fails,
+# and the script exits non-zero after them. Set SDK_SKIP_E2E=1 to run the
+# unit half alone (no Go toolchain needed).
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
