@@ -11,9 +11,18 @@ import { createProject, signIn as enter, state } from './harness';
 
 const ALICE = 'alice@e2e';
 const BOB = 'bob@e2e';
-/** Two hours in the past, so both are closed from the aggregator's first pass. */
-const HOUR_A = 1787738400000000000n; // 2026-08-26T10:00:00Z
-const HOUR_B = 1787745600000000000n; // 2026-08-26T12:00:00Z
+/**
+ * Two hours in the past, so both are closed from the aggregator's first pass —
+ * and relative to now, on the hour, as `filters.spec.ts` does: the page opens
+ * on the last thirty days, and a fixed instant fell out of that window a month
+ * after it was written, taking the charts with it.
+ */
+const HOUR = 3_600_000_000_000n;
+const HOUR_A = (BigInt(Date.now()) * 1_000_000n / HOUR - 6n) * HOUR;
+const HOUR_B = HOUR_A + 2n * HOUR;
+/** A window around both hours, for a test that names one. */
+const iso = (nanos: bigint) => new Date(Number(nanos / 1_000_000n)).toISOString();
+const WINDOW = `from=${iso(HOUR_A - 24n * HOUR)}&to=${iso(HOUR_B + 24n * HOUR)}`;
 
 /**
  * Now, in nanoseconds — where a test puts a trace it wants to read back
@@ -191,10 +200,8 @@ test('the user page draws the cards, the charts, the breakdowns and both tabs', 
 	page
 }) => {
 	await signIn(page);
-	// A window wide enough to hold the fixtures, which are fixed in the past.
-	await page.goto(
-		`/users/${encodeURIComponent(ALICE)}?from=2026-08-01T00:00:00Z&to=2026-09-30T00:00:00Z`
-	);
+	// A window named in the URL, wide enough to hold the fixtures.
+	await page.goto(`/users/${encodeURIComponent(ALICE)}?${WINDOW}`);
 
 	// The cards are `GET /api/v1/users/{id}`.
 	for (const label of ['Traces', 'Sessions', 'With errors', 'Cost', 'p50', 'Last seen']) {

@@ -574,7 +574,9 @@ reason in a comment; adding a dialect should be a table edit.
 - `make build` — binary with the web interface into `./bin`;
   `make build-server` builds without it and needs no Node.
 - `make e2e` — boot the real binary on a temp database and run the Playwright
-  smoke. Its own CI job, never part of the gate.
+  smoke. Its own CI job, never part of the gate. Fixtures are dated relative to
+  now, or read through a window the test names: a fixed instant read through a
+  default window ("the last 30 days") fails a month after it was written.
 - `make image` — build the Docker image as `tracepad:dev`; `make image-check`
   boots it on an ephemeral volume and asserts the contract (healthy through the
   container's own `HEALTHCHECK`, the version, uid 65532, the database on the
