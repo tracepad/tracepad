@@ -538,6 +538,12 @@ func mapCompletionStartTime(a *attrs) int64 {
 	return 0
 }
 
+// The instants an int64 of nanoseconds can hold.
+var (
+	earliestInstant = time.Unix(0, math.MinInt64)
+	latestInstant   = time.Unix(0, math.MaxInt64)
+)
+
 // parseInstant reads the shapes an SDK sends an instant in: an integer of
 // nanoseconds, an RFC 3339 string, and that same string with a layer of JSON
 // quoting still around it — which is what the Langfuse SDK 4.7 emits on the
@@ -576,7 +582,12 @@ func parseInstant(raw any) (int64, bool) {
 			return nanoseconds, true
 		}
 		instant, err := time.Parse(time.RFC3339Nano, text)
-		if err != nil {
+		if err != nil || instant.Before(earliestInstant) || instant.After(latestInstant) {
+			// Outside the years 1678–2262 `UnixNano` is undefined: a
+			// date in the year 3000 came back as an arbitrary
+			// nanosecond count. Not an instant, so it stays in
+			// metadata with every other shape this cannot read
+			// (spec 043 #5).
 			return 0, false
 		}
 		return instant.UnixNano(), true
@@ -732,7 +743,13 @@ func mapCost(a *attrs) map[string]any {
 				hasComponent = true
 			}
 		}
-		if hasComponent {
+		// Each component is finite already, but two near the largest
+		// double sum to an infinity, which the store cannot encode — so
+		// the whole batch failed, one bad span taking every good one
+		// with it (spec 002 #13). No total is derived then: the
+		// components are kept as sent and the cost counts as no data
+		// (spec 043 #5).
+		if hasComponent && !math.IsInf(total, 0) && !math.IsNaN(total) {
 			out["total"] = jsonNumber(total)
 		}
 	}

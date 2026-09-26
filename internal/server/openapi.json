@@ -68,6 +68,8 @@
           "415": {"description": "Content-Type is neither application/x-protobuf nor application/json",
             "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
           "429": {"description": "The write queue is full; retry after the Retry-After delay",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+          "503": {"description": "The database could not take the batch right now, or could not check the key; retry after the Retry-After delay",
             "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}}
         }
       }
@@ -88,7 +90,9 @@
             "application/json": {"schema": {"type": "object"}}
           }},
           "400": {"$ref": "#/components/responses/BadRequest"},
-          "401": {"$ref": "#/components/responses/Unauthorized"}
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "503": {"description": "The database could not take the batch right now, or could not check the key; retry after the Retry-After delay",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}}
         }
       }
     },

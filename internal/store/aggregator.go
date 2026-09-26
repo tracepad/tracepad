@@ -157,6 +157,16 @@ func (a *Aggregator) rollProject(ctx context.Context, project *Project, at time.
 	closed := HourOf(at.Add(-a.interval).UnixNano())
 
 	var rolled int
+	// The hours that failed, each logged where it failed. One failing hour
+	// costs that hour and nothing else (spec 043 #8): it used to return from
+	// the project's pass before the watermark moved, so one poisoned hour
+	// stopped the project's statistics for good.
+	var failures []error
+	// A dirty hour that failed keeps `last_pass` where it was, so the next
+	// pass finds it again; moving it would lose that correction for ever.
+	// The hours that did succeed are re-rolled with it, which is idempotent
+	// (spec 013 #3).
+	var dirtyFailed bool
 	// Every user any hour of this pass touched, summarized once at the end
 	// (spec 023 #3). Held here rather than recomputed by each hour's job
 	// because a user active in n rolled hours would otherwise have their
@@ -187,7 +197,12 @@ func (a *Aggregator) rollProject(ctx context.Context, project *Project, at time.
 			// same rule.
 			job, err := a.rollOne(ctx, project.ID, hour, at)
 			if err != nil {
-				return rolled, err
+				if stopsThePass(err) {
+					return rolled, err
+				}
+				failures = append(failures, a.hourFailed(project, hour, err))
+				dirtyFailed = true
+				continue
 			}
 			if !job.Frozen {
 				rolled++
@@ -214,10 +229,13 @@ func (a *Aggregator) rollProject(ctx context.Context, project *Project, at time.
 			// traces retention has taken is exactly one whose
 			// history is left to age on its own (found in review of
 			// PR #28, by a test written for the chunking).
-			if err := a.advance(ctx, project.ID, state.RolledUntil, at); err != nil {
+			if err := a.advance(ctx, project.ID, state.RolledUntil, at, dirtyFailed); err != nil {
 				return rolled, err
 			}
-			return rolled, a.sweepRollup(ctx, project, at)
+			if err := a.sweepRollup(ctx, project, at); err != nil {
+				return rolled, err
+			}
+			return rolled, errors.Join(failures...)
 		}
 		from = oldest
 	}
@@ -236,14 +254,26 @@ func (a *Aggregator) rollProject(ctx context.Context, project *Project, at time.
 	// exists because hour zero is a real hour: a trace no span of which
 	// said when it started is stamped there deliberately (spec 004 #26),
 	// and `newest > 0` would have read that as "nothing was rolled".
+	//
+	// A failing hour stops the roll there, and the watermark still moves
+	// up to it — past everything this pass rolled, never past the failure,
+	// which the read seam would then answer as zero (spec 013 #12). The
+	// next pass starts the roll at that hour again.
 	var (
 		newest   int64
 		examined bool
+		stopped  bool
+		stopAt   int64
 	)
 	for _, hour := range hours {
 		job, err := a.rollOne(ctx, project.ID, hour, at)
 		if err != nil {
-			return rolled, err
+			if stopsThePass(err) {
+				return rolled, err
+			}
+			failures = append(failures, a.hourFailed(project, hour, err))
+			stopped, stopAt = true, hour
+			break
 		}
 		if !job.Frozen {
 			rolled++
@@ -277,10 +307,13 @@ func (a *Aggregator) rollProject(ctx context.Context, project *Project, at time.
 	// A pass that rolled nothing leaves the watermark alone; `last_pass`
 	// still moves, so the dirty-hour window stays bounded.
 	until := state.RolledUntil
-	if examined {
+	switch {
+	case stopped:
+		until = max(until, stopAt)
+	case examined:
 		until = min(closed, newest+SecondsPerHour)
 	}
-	if err := a.advance(ctx, project.ID, until, at); err != nil {
+	if err := a.advance(ctx, project.ID, until, at, dirtyFailed); err != nil {
 		return rolled, err
 	}
 
@@ -288,7 +321,22 @@ func (a *Aggregator) rollProject(ctx context.Context, project *Project, at time.
 	if err := a.sweepRollup(ctx, project, at); err != nil {
 		return rolled, err
 	}
-	return rolled, nil
+	return rolled, errors.Join(failures...)
+}
+
+// stopsThePass reports a failure that is not an hour's own: the pass was
+// cancelled or the writer is shutting down, and every hour after this one
+// would fail the same way.
+func stopsThePass(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, ErrWriterClosed)
+}
+
+// hourFailed logs one hour that could not be rolled and hands back the error
+// the pass reports.
+func (a *Aggregator) hourFailed(project *Project, hour int64, err error) error {
+	logger().Error("could not roll an hour of statistics; the next pass tries it again",
+		"project", project.Name, "hour", time.Unix(hour, 0).UTC(), "err", err)
+	return fmt.Errorf("hour %d: %w", hour, err)
 }
 
 // rollOne submits one hour and hands back the job, which is the only place
@@ -351,11 +399,14 @@ func frozenBefore(project *Project, nowNanos int64) int64 {
 // cutoff is deliberately conservative (found in review of PR #28).
 const commitMargin = time.Second
 
-func (a *Aggregator) advance(ctx context.Context, projectID string, until int64, at time.Time) error {
+// advance moves the watermark and records the pass. keepLastPass holds the
+// dirty-hour cutoff where it was, for a pass in which a dirty hour failed.
+func (a *Aggregator) advance(ctx context.Context, projectID string, until int64, at time.Time, keepLastPass bool) error {
 	return a.writer.Submit(ctx, &statsRollupAdvance{
-		ProjectID:   projectID,
-		RolledUntil: until,
-		LastPass:    at.Add(-commitMargin).UnixNano(),
+		ProjectID:    projectID,
+		RolledUntil:  until,
+		LastPass:     at.Add(-commitMargin).UnixNano(),
+		KeepLastPass: keepLastPass,
 	})
 }
 

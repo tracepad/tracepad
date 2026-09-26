@@ -183,6 +183,22 @@ func (s *Server) handleTraces(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 			// The client hung up; there is nobody to answer.
 		default:
+			if condition, ok := store.Condition(err); ok {
+				// A lock that did not clear, a full disk, an I/O
+				// error: the database's condition, which passes, so
+				// the answer is one an exporter retries (spec 043 #2).
+				// Everything else is the batch's own and would fail
+				// again on every retry — a retry loop over a poison
+				// batch is worse than the loss, so it stays a 500.
+				if skipped, ok := s.storageLog.allow(condition, time.Now()); ok {
+					slog.Error("ingest write failed on a database condition",
+						"condition", condition, "project", project.Name, "err", err,
+						"since_last_line", skipped)
+				}
+				w.Header().Set("Retry-After", "1")
+				writeError(w, http.StatusServiceUnavailable, "storage is temporarily unavailable; retry shortly")
+				return
+			}
 			slog.Error("ingest write failed", "project", project.Name, "err", err)
 			writeError(w, http.StatusInternalServerError, "failed to store spans")
 		}
@@ -341,6 +357,29 @@ func (l *logLimiter) allow(now time.Time) (skipped int64, ok bool) {
 	}
 	skipped, l.skipped, l.last = l.skipped, 0, now
 	return skipped, true
+}
+
+// perKeyLimiter is a logLimiter per key: one line per interval for each
+// database condition, so a disk that stays full says so once a minute rather
+// than drowning the lock that clears in the same minute.
+type perKeyLimiter struct {
+	mu    sync.Mutex
+	every time.Duration
+	keys  map[string]*logLimiter
+}
+
+func (l *perKeyLimiter) allow(key string, now time.Time) (skipped int64, ok bool) {
+	l.mu.Lock()
+	limiter := l.keys[key]
+	if limiter == nil {
+		if l.keys == nil {
+			l.keys = map[string]*logLimiter{}
+		}
+		limiter = &logLimiter{every: l.every}
+		l.keys[key] = limiter
+	}
+	l.mu.Unlock()
+	return limiter.allow(now)
 }
 
 // writeExportResponse answers with an ExportTraceServiceResponse, carrying

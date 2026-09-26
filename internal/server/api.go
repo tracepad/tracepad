@@ -524,11 +524,22 @@ func validName(kind, value string) error {
 	return nil
 }
 
-// writeJSON renders a response body.
+// writeJSON renders a response body. The body is encoded before the status is
+// written (spec 043 #3): a value that does not encode — a nesting limit, a
+// number JSON cannot spell — is a `500` that says so, never a `200` with an
+// empty body, which a client cannot tell from an empty answer and a cache may
+// keep. The bytes of a body that encodes are what `json.Encoder` wrote,
+// trailing newline included.
 func writeJSON(w http.ResponseWriter, status int, body any) {
+	var buffer bytes.Buffer
+	if err := json.NewEncoder(&buffer).Encode(body); err != nil {
+		slog.Error("failed to render the response", "type", fmt.Sprintf("%T", body), "err", err)
+		writeError(w, http.StatusInternalServerError, "failed to render the response")
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(body); err != nil {
+	if _, err := w.Write(buffer.Bytes()); err != nil {
 		slog.Error("failed to write response", "err", err)
 	}
 }

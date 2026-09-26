@@ -223,7 +223,7 @@ func (s *Server) readUser(projectID, userID string) (*store.UserSummary, bool, e
 		if tail.TotalCost != nil {
 			total := *tail.TotalCost
 			if merged.TotalCost != nil {
-				total += *merged.TotalCost
+				total = store.AddCost(*merged.TotalCost, total)
 			}
 			merged.TotalCost = &total
 		}

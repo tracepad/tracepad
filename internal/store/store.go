@@ -4,6 +4,7 @@
 package store
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
@@ -12,6 +13,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -41,10 +43,17 @@ func Open(path string) (*Store, error) {
 	// new pool connection — busy_timeout must come first so every later
 	// pragma (journal_mode included) already waits out lock contention
 	// instead of failing with SQLITE_BUSY. WAL for concurrent readers with
-	// the single writer; incremental auto_vacuum so retention deletes
-	// return disk space (spec 005 #5). auto_vacuum only takes on a
-	// database with no tables yet, which is why migration 0005 carries the
-	// fallback for a file that predates the pragma.
+	// the single writer.
+	//
+	// auto_vacuum is not here, though retention needs it (spec 005 #5).
+	// The mode is a property of the file, and setting a full or
+	// incremental mode writes the header even when the mode is unchanged —
+	// so as a DSN pragma it began a write transaction on every new pool
+	// connection, which queued behind a long commit, waited out
+	// busy_timeout and failed the request that needed the connection
+	// (spec 043 #1). A fresh file gets the mode once, as it is created
+	// (`createFile`); an existing one is checked at every open
+	// (`ensureIncrementalVacuum`).
 	//
 	// _txlock=immediate makes every transaction take the write lock at
 	// BEGIN. Every transaction this binary opens is a write (migrations,
@@ -53,13 +62,24 @@ func Open(path string) (*Store, error) {
 	// version — takes a read snapshot at its first SELECT and is then
 	// refused with SQLITE_BUSY_SNAPSHOT when it tries to upgrade, a
 	// failure busy_timeout cannot wait out (spec 003 Decision 24).
-	dsn := "file:" + path + "?_txlock=immediate&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)&_pragma=auto_vacuum(INCREMENTAL)&_pragma=synchronous(NORMAL)"
+	dsn := "file:" + path + "?_txlock=immediate&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)&_pragma=synchronous(NORMAL)"
 	info, statErr := os.Stat(path)
 	fresh := statErr != nil || info.Size() == 0
+	if fresh {
+		if err := createFile(path); err != nil {
+			return nil, fmt.Errorf("create %s: %w", path, err)
+		}
+	}
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", path, err)
 	}
+	// The pool keeps what it opens (spec 043 #1). `database/sql` closes all
+	// but two idle connections by default, so every burst of concurrent
+	// requests opened new ones and paid their per-connection pragmas again;
+	// kept, a connection pays them once.
+	db.SetMaxIdleConns(poolSize())
+	db.SetConnMaxIdleTime(5 * time.Minute)
 	s := &Store{db: db, path: path, fresh: fresh}
 	// sql.Open is lazy: real open failures (corrupt file, permissions)
 	// surface from the first statement inside migrate, so the recovery
@@ -88,6 +108,27 @@ func Open(path string) (*Store, error) {
 		return nil, fmt.Errorf("open %s: %w", path, err)
 	}
 	return s, nil
+}
+
+// createFile makes a fresh database file in incremental auto-vacuum mode and
+// WAL, in that order: once WAL has written the file's header the mode can no
+// longer change without a VACUUM, which is what every fresh file used to go
+// through on its first open, when the DSN named the two the other way round.
+func createFile(path string) error {
+	db, err := sql.Open("sqlite", "file:"+path+"?_pragma=auto_vacuum(INCREMENTAL)&_pragma=journal_mode(WAL)")
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	return db.Ping()
+}
+
+// poolSize is how many connections the pool keeps: twice the reads the server
+// serves at once by default — twice GOMAXPROCS, at least four — plus eight for
+// the writer, the background jobs, credential lookups and handlers that hold
+// two statements at once (spec 043 #1, #16).
+func poolSize() int {
+	return 2*max(4, 2*runtime.GOMAXPROCS(0)) + 8
 }
 
 // Close closes the database.
@@ -231,12 +272,18 @@ func (s *Store) CreateProject(name string, keys KeyPair) (*Project, error) {
 // is returned like any other: its name stays reserved through the grace
 // window, so that restore always has its name to come back to (spec 005 #9).
 func (s *Store) ProjectByName(name string) (*Project, error) {
-	return s.oneProject(`SELECT `+projectColumns+` FROM projects WHERE name = ?`, name)
+	return s.oneProject(context.Background(), `SELECT `+projectColumns+` FROM projects WHERE name = ?`, name)
 }
 
 // ProjectByID returns the project or nil if absent, deleted ones included.
 func (s *Store) ProjectByID(id string) (*Project, error) {
-	return s.oneProject(`SELECT `+projectColumns+` FROM projects WHERE id = ?`, id)
+	return s.ProjectByIDContext(context.Background(), id)
+}
+
+// ProjectByIDContext is ProjectByID under a context, for the guard, whose
+// lookups each run under a deadline of their own (spec 043 #1).
+func (s *Store) ProjectByIDContext(ctx context.Context, id string) (*Project, error) {
+	return s.oneProject(ctx, `SELECT `+projectColumns+` FROM projects WHERE id = ?`, id)
 }
 
 // ListProjects returns every project, oldest first. Deleted ones are left out
@@ -282,18 +329,18 @@ func (s *Store) CountProjects() (int, error) {
 // may still do: everything is refused during the grace window except reading
 // the project and restoring it (spec 005 #10), so the deletion is undoable in
 // a deployment that has no admin token to undo it with.
-func (s *Store) ProjectBySecret(secret string) (*Project, error) {
+func (s *Store) ProjectBySecret(ctx context.Context, secret string) (*Project, error) {
 	hash := sha256.Sum256([]byte(secret))
 	// A subquery rather than a join: `secret_hash` is unique, so it can
 	// only name one project, and both tables carry a `created_at` that a
 	// join would leave ambiguous in the shared column list.
-	return s.oneProject(
+	return s.oneProject(ctx,
 		`SELECT `+projectColumns+` FROM projects
 		  WHERE id = (SELECT project_id FROM api_keys WHERE secret_hash = ?)`, hash[:])
 }
 
-func (s *Store) oneProject(query string, args ...any) (*Project, error) {
-	project, err := scanProject(s.db.QueryRow(query, args...))
+func (s *Store) oneProject(ctx context.Context, query string, args ...any) (*Project, error) {
+	project, err := scanProject(s.db.QueryRowContext(ctx, query, args...))
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}

@@ -216,6 +216,20 @@ func (s *Server) resolve(w http.ResponseWriter, r *http.Request, rt route) (*cal
 	return c, true
 }
 
+// credentialDeadline bounds each lookup the guard makes (spec 043 #1): a
+// lookup that waits for a connection or a lock is a credential the server
+// could not check, and it says so rather than holding the request.
+const credentialDeadline = 5 * time.Second
+
+// cannotCheck is the answer for a credential the server could not check
+// (spec 043 #1). It is never `401`: an exporter treats `401` as final and drops
+// the batch, and its operator starts checking a key that was never wrong.
+// `503` with `Retry-After` is what an exporter retries, and it is the truth.
+func cannotCheck(w http.ResponseWriter) {
+	w.Header().Set("Retry-After", "1")
+	writeError(w, http.StatusServiceUnavailable, "cannot check credentials right now; retry shortly")
+}
+
 // identify resolves the credential. An `Authorization` header wins over a
 // cookie when both are present: an explicit credential beats an ambient one,
 // which is what keeps a command-line tool's behaviour untouched next to a
@@ -233,10 +247,12 @@ func (s *Server) identify(w http.ResponseWriter, r *http.Request) (*caller, bool
 			subtle.ConstantTimeCompare([]byte(secret), []byte(s.adminToken)) == 1 {
 			return &caller{admin: true}, true
 		}
-		project, err := s.store.ProjectBySecret(secret)
+		ctx, cancel := context.WithTimeout(r.Context(), credentialDeadline)
+		project, err := s.store.ProjectBySecret(ctx, secret)
+		cancel()
 		if err != nil {
 			slog.Error("key lookup failed", "err", err)
-			writeError(w, http.StatusUnauthorized, "unauthorized")
+			cannotCheck(w)
 			return nil, false
 		}
 		if project == nil {
@@ -252,10 +268,13 @@ func (s *Server) identify(w http.ResponseWriter, r *http.Request) (*caller, bool
 		return nil, false
 	}
 	now := time.Now().UnixNano()
-	found, account, err := s.store.SessionByCookie(cookie.Value, now)
+	ctx, cancel := context.WithTimeout(r.Context(), credentialDeadline)
+	found, account, err := s.store.SessionByCookie(ctx, cookie.Value, now)
+	cancel()
 	if err != nil {
+		// Not a sign-out: the cookie was never judged, so it stays.
 		slog.Error("session lookup failed", "err", err)
-		writeError(w, http.StatusUnauthorized, "unauthorized")
+		cannotCheck(w)
 		return nil, false
 	}
 	if found == nil {
@@ -395,16 +414,18 @@ func (s *Server) scope(w http.ResponseWriter, r *http.Request, rt route, c *call
 		return true
 	}
 
-	project, err := s.store.ProjectByID(id)
+	ctx, cancel := context.WithTimeout(r.Context(), credentialDeadline)
+	defer cancel()
+	project, err := s.store.ProjectByIDContext(ctx, id)
 	if err != nil {
 		slog.Error("project lookup failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to read the project")
+		cannotCheck(w)
 		return false
 	}
-	role, err := s.store.ProjectRole(c.account, id)
+	role, err := s.store.ProjectRole(ctx, c.account, id)
 	if err != nil {
 		slog.Error("membership lookup failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to read the membership")
+		cannotCheck(w)
 		return false
 	}
 	if role == "" {

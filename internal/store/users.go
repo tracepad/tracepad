@@ -365,7 +365,7 @@ func (s *Store) UserRollup(projectID, userID string, beforeHour int64) (*UserSum
 		if cost.Valid {
 			total := cost.Float64
 			if summary.TotalCost != nil {
-				total += *summary.TotalCost
+				total = AddCost(*summary.TotalCost, total)
 			}
 			summary.TotalCost = &total
 		}
@@ -433,7 +433,7 @@ func (s *Store) UserTail(projectID, userID string, fromNanos int64) (*UserSummar
 		if cost.Valid {
 			total := cost.Float64
 			if summary.TotalCost != nil {
-				total += *summary.TotalCost
+				total = AddCost(*summary.TotalCost, total)
 			}
 			summary.TotalCost = &total
 		}
@@ -629,7 +629,7 @@ func rollUserHour(tx *sql.Tx, projectID string, hour int64) ([]UserStatsRow, err
 		`SELECT t.user_id, t.environment, COALESCE(t.release, ''), o.model,
 		        o.level = 'ERROR',
 		        CASE WHEN o.provided_cost = 1
-		             THEN json_extract(o.cost_details, '$.total') END,
+		             THEN `+costExpr("o.cost_details")+` END,
 		        CASE WHEN o.start_time > 0 AND o.end_time >= o.start_time
 		             THEN (o.end_time - o.start_time) / 1000000 END
 		 FROM observations o

@@ -260,7 +260,7 @@ func (s *Server) rolledStats(projectID string, filter store.StatsFilter, fromHou
 		b.count += row.Count
 		b.errorCount += row.ErrorCount
 		if row.TotalCost != nil {
-			b.totalCost += *row.TotalCost
+			b.totalCost = store.AddCost(b.totalCost, *row.TotalCost)
 			b.costed = true
 		}
 		b.latency.Merge(row.Latency)
@@ -299,7 +299,7 @@ func (s *Server) liveStats(projectID string, filter store.StatsFilter, from, to 
 			b.errorCount++
 		}
 		if sample.Cost != nil {
-			b.totalCost += *sample.Cost
+			b.totalCost = store.AddCost(b.totalCost, *sample.Cost)
 			b.costed = true
 		}
 		if sample.LatencyMs != nil {

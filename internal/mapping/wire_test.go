@@ -4,6 +4,7 @@ import (
 	"math"
 	"strconv"
 	"testing"
+	"time"
 
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
 
@@ -172,6 +173,23 @@ func TestCompletionStartTime(t *testing.T) {
 			name:     "not a number at all",
 			value:    doubleValue(math.NaN()),
 			inMetada: true,
+		},
+		// Outside the years 1678–2262 `UnixNano` is undefined: the year
+		// 3000 came back as an arbitrary nanosecond count (spec 043 #5).
+		{
+			name:     "a date past what nanoseconds hold",
+			value:    stringValue("3000-01-01T00:00:00Z"),
+			inMetada: true,
+		},
+		{
+			name:     "a date before what nanoseconds hold",
+			value:    stringValue("1600-01-01T00:00:00Z"),
+			inMetada: true,
+		},
+		{
+			name:  "the last date nanoseconds hold",
+			value: stringValue("2262-04-11T23:47:16Z"),
+			want:  time.Date(2262, 4, 11, 23, 47, 16, 0, time.UTC).UnixNano(),
 		},
 	}
 

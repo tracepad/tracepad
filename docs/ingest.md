@@ -76,7 +76,10 @@ Authorization: Basic base64(<public key>:<secret key>)
 ```
 
 Keys are printed when a project is created (see the server's startup output).
-Unknown credentials get `401 {"error": "unauthorized"}`.
+Unknown credentials get `401 {"error": "unauthorized"}`. A key the server
+could not check — the database did not answer the lookup within five seconds —
+gets `503` with `Retry-After: 1` instead, which an exporter retries: a `401`
+would make it drop the batch.
 
 ## Connecting an application
 
@@ -189,6 +192,8 @@ everywhere: none was sent, and Tracepad does not estimate one.
 | `413` | The body is over `TRACEPAD_MAX_BODY_BYTES` — on the wire, or once decompressed. |
 | `415` | `Content-Type` is neither `application/x-protobuf` nor `application/json`. |
 | `429` | The write queue is saturated; retry after the `Retry-After` delay. Standard OTLP exporters do this on their own. |
+| `500` | The batch could not be stored for a reason of its own, which a retry would meet again; exporters do not retry it. No known client input leads here — one that does is a bug worth reporting. |
+| `503` | The database could not take the batch right now — a lock that did not clear, a full disk, an I/O error — or could not check the key. Carries `Retry-After: 1`, and exporters retry it. |
 
 A `200` means the spans are committed and fsynced, not merely queued.
 
@@ -434,9 +439,15 @@ by the explicit argument, `call.end(cost=…)`. Both are in
 
 **A Langfuse SDK** puts it in the generation's `cost_details` — an object with
 `input`, `output` and `total`, or any subset; a missing `total` is the sum of
-the parts — which arrives as `langfuse.observation.cost_details`. Nothing
+the parts, when that sum is a finite number — which arrives as
+`langfuse.observation.cost_details`. Nothing
 about that changes when the SDK points at Tracepad: what the SDK's own docs
 say about recording a cost is what applies.
+
+A price is counted — into a trace's total, the statistics, a user's summary —
+when its `total` is a number between −10¹² and 10¹². Anything else there, a
+string or a number beyond that, is kept on the observation as it was sent and
+counted as no cost, the same as an observation that carried none.
 
 **Your own OpenTelemetry spans** carry it as `gen_ai.usage.cost`, a number,
 set on the span before it ends:

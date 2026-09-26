@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -60,11 +61,11 @@ func TestBootstrapDefaultOnceAndIdempotent(t *testing.T) {
 	}
 
 	// Auth lookup by secret works; wrong secret does not.
-	p, err := s.ProjectBySecret(secret)
+	p, err := s.ProjectBySecret(context.Background(), secret)
 	if err != nil || p == nil || p.Name != "default" {
 		t.Fatalf("ProjectBySecret: p=%+v err=%v", p, err)
 	}
-	if p, _ := s.ProjectBySecret("tp-sk-wrong"); p != nil {
+	if p, _ := s.ProjectBySecret(context.Background(), "tp-sk-wrong"); p != nil {
 		t.Fatalf("wrong secret resolved to %+v", p)
 	}
 }
@@ -92,7 +93,7 @@ func TestBootstrapDeclarativeIdempotent(t *testing.T) {
 	if len(boot.Created) != 0 {
 		t.Fatalf("re-bootstrap created %+v", boot.Created)
 	}
-	if p, _ := s.ProjectBySecret("tp-sk-b"); p == nil || p.Name != "eval" {
+	if p, _ := s.ProjectBySecret(context.Background(), "tp-sk-b"); p == nil || p.Name != "eval" {
 		t.Fatalf("declared key does not resolve, got %+v", p)
 	}
 	// Declared projects present, no stray "default".

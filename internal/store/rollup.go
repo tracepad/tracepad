@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 )
@@ -69,15 +70,47 @@ var tokenClasses = [...][]string{
 	{"cache_read_input_tokens", "cache_read_tokens", "input_cached_tokens"},
 }
 
+// The counting rule's domain (spec 043 #4): the largest cost one observation
+// may count and the largest token count. Beyond any price one call costs in
+// any currency, and two orders beyond the largest context any model offers —
+// and far enough inside the numbers' types that no sum of them overflows: a
+// double needs ~10^296 such costs, an int64 ~9×10^9 such counts. A value
+// outside is kept as sent (spec 002 #11) and counted as no data.
+const (
+	maxCountedCost   = "1e12"
+	maxCountedTokens = "1000000000"
+)
+
+// costExpr is the cost one observation counts, as an SQL expression over the
+// column expression `details` holds its `cost_details` under: `total` when it
+// is a JSON number within the domain, NULL otherwise — "no data", not zero
+// (spec 002 #14, spec 043 #4). A string `total` used to fail the scan that
+// read it, and with it the hour's roll; two totals near the largest double
+// summed to an infinity that no encoder can write.
+//
+// Every reader uses it: the trace aggregate, the statistics and users rollups
+// and the live statistics scan, and migration 0023, which spells the same
+// expression out (a test holds the two together). `BETWEEN` rather than
+// `abs()`, which raises `integer overflow` on the smallest int64; the value is
+// read as REAL, so an aggregate over it is a float sum that cannot overflow
+// where an integer one could.
+func costExpr(details string) string {
+	path := `json_extract(` + details + `, '$.total')`
+	return `CASE WHEN json_type(` + details + `, '$.total') IN ('integer', 'real')
+	              AND ` + path + ` BETWEEN -` + maxCountedCost + ` AND ` + maxCountedCost + `
+	             THEN CAST(` + path + ` AS REAL) END`
+}
+
 // tokenExprs is the three counts read off one observation's `usage`, as SQL
 // expressions in the order of `tokenClasses`, given the column expression
 // `usage` holds it under. The first key *present* decides (spec 031 #1): a
-// key that is there but does not hold a number — a string, an object — is
-// not a count, and the class is NULL rather than read from the next spelling
-// or coerced. `CAST` would read "lots" as zero, which is a claim nobody made,
-// and falling through to a second spelling would make a collision on the
-// first one silently disappear. The keys are this package's own constants,
-// never anything a request carries.
+// key that is there but does not hold a count — a string, an object, a number
+// outside 0 to 10^9 (spec 043 #4) — is not a count, and the class is NULL
+// rather than read from the next spelling or coerced. `CAST` would read
+// "lots" as zero, which is a claim nobody made, and `1e300` as the largest
+// int64, whose sum overflowed; falling through to a second spelling would
+// make a collision on the first one silently disappear. The keys are this
+// package's own constants, never anything a request carries.
 func tokenExprs(usage string) [len(tokenClasses)]string {
 	var out [len(tokenClasses)]string
 	for i, keys := range tokenClasses {
@@ -85,9 +118,11 @@ func tokenExprs(usage string) [len(tokenClasses)]string {
 		for _, key := range keys {
 			path := "'$." + key + "'"
 			kind := `json_type(` + usage + `, ` + path + `)`
+			value := `json_extract(` + usage + `, ` + path + `)`
 			arms = append(arms, `WHEN `+kind+` IS NOT NULL THEN
 			     CASE WHEN `+kind+` IN ('integer', 'real')
-			          THEN CAST(json_extract(`+usage+`, `+path+`) AS INTEGER) END`)
+			               AND `+value+` BETWEEN 0 AND `+maxCountedTokens+`
+			          THEN CAST(`+value+` AS INTEGER) END`)
 		}
 		out[i] = "CASE " + strings.Join(arms, " ") + " END"
 	}
@@ -134,15 +169,47 @@ func (t *Tokens) Add(other Tokens) {
 	addCount(&t.CacheRead, other.CacheRead)
 }
 
+// addCount folds one count into a sum that holds at the int64 limits rather
+// than wrapping (spec 043 #6). The counting rule keeps client input far from
+// them; this is for a row written before it and a reader that forgets it — a
+// sum at the limit is visibly absurd, one that wrapped negative breaks the
+// page that shows it.
 func addCount(sum **int64, n *int64) {
 	if n == nil {
 		return
 	}
 	total := *n
 	if *sum != nil {
-		total += **sum
+		total = saturatingAdd(**sum, *n)
 	}
 	*sum = &total
+}
+
+func saturatingAdd(a, b int64) int64 {
+	switch {
+	case b > 0 && a > math.MaxInt64-b:
+		return math.MaxInt64
+	case b < 0 && a < math.MinInt64-b:
+		return math.MinInt64
+	}
+	return a + b
+}
+
+// AddCost is the cost addition every rollup and every merge of rollup rows
+// uses: it holds at the largest finite double instead of reaching an
+// infinity, which no encoder can write (spec 043 #6).
+func AddCost(a, b float64) float64 {
+	return clampCost(clampCost(a) + clampCost(b))
+}
+
+func clampCost(x float64) float64 {
+	switch {
+	case x > math.MaxFloat64:
+		return math.MaxFloat64
+	case x < -math.MaxFloat64:
+		return -math.MaxFloat64
+	}
+	return x
 }
 
 // HourOf is the top of the hour a client timestamp falls in. The rollup
@@ -582,7 +649,7 @@ func rollHour(tx *sql.Tx, projectID string, hour int64) ([]StatsRow, error) {
 		`SELECT t.environment, COALESCE(t.release, ''), o.model,
 		        o.level = 'ERROR',
 		        CASE WHEN o.provided_cost = 1
-		             THEN json_extract(o.cost_details, '$.total') END,
+		             THEN `+costExpr("o.cost_details")+` END,
 		        CASE WHEN o.start_time > 0 AND o.end_time >= o.start_time
 		             THEN (o.end_time - o.start_time) / 1000000 END,
 		        `+tokenColumns("o.usage")+`
@@ -661,7 +728,7 @@ func add(row *StatsRow, errored bool, cost sql.NullFloat64, latency sql.NullInt6
 	if cost.Valid {
 		total := cost.Float64
 		if row.TotalCost != nil {
-			total += *row.TotalCost
+			total = AddCost(*row.TotalCost, total)
 		}
 		row.TotalCost = &total
 	}
@@ -673,10 +740,14 @@ func add(row *StatsRow, errored bool, cost sql.NullFloat64, latency sql.NullInt6
 // statsRollupAdvance moves a project's watermark and records the pass. The
 // watermark never moves backwards: a pass that rolled less than the last one
 // leaves it where it was (spec 013 #4).
+//
+// KeepLastPass leaves `last_pass` where it was, for a pass in which a dirty
+// hour failed: the next pass has to find that hour again (spec 043 #8).
 type statsRollupAdvance struct {
-	ProjectID   string
-	RolledUntil int64
-	LastPass    int64
+	ProjectID    string
+	RolledUntil  int64
+	LastPass     int64
+	KeepLastPass bool
 }
 
 func (a *statsRollupAdvance) apply(tx *sql.Tx) error {
@@ -685,8 +756,8 @@ func (a *statsRollupAdvance) apply(tx *sql.Tx) error {
 		 VALUES (?, ?, ?)
 		 ON CONFLICT(project_id) DO UPDATE SET
 		   rolled_until = MAX(rolled_until, excluded.rolled_until),
-		   last_pass    = excluded.last_pass`,
-		a.ProjectID, a.RolledUntil, a.LastPass)
+		   last_pass    = CASE WHEN ? THEN last_pass ELSE excluded.last_pass END`,
+		a.ProjectID, a.RolledUntil, a.LastPass, a.KeepLastPass)
 	if err != nil {
 		return fmt.Errorf("advance the rollup watermark: %w", err)
 	}
