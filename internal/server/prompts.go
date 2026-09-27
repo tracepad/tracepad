@@ -18,8 +18,17 @@ import (
 // promptCacheControl is sent on every prompt read (#14). Sixty seconds bounds
 // how long a label move takes to reach a client that caches; version-pinned
 // reads are immutable in practice and a client that pins may cache them for
-// longer on its own.
-const promptCacheControl = "max-age=60"
+// longer on its own. `private` because a prompt is one project's, and a shared
+// cache in front of the server — a proxy, a CDN — must not hand it to the next
+// caller who asks for the same URL (#26). The guard has already sent the
+// Vary that says who that caller is (spec 001 #17).
+const promptCacheControl = "private, max-age=60"
+
+// cachePrivately lets a prompt read be kept, by its caller alone, where the
+// guard's default keeps nothing (spec 001 #17).
+func cachePrivately(w http.ResponseWriter) {
+	w.Header().Set("Cache-Control", promptCacheControl)
+}
 
 // promptVersionRequest is the wire shape of a new version. Only `type` needs
 // a pointer: whether the client stated it decides what the write transaction
@@ -300,7 +309,7 @@ func (s *Server) handleGetPrompt(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, missing)
 		return
 	}
-	w.Header().Set("Cache-Control", promptCacheControl)
+	cachePrivately(w)
 	writeJSON(w, http.StatusOK, renderPrompt(prompt))
 }
 
@@ -371,7 +380,7 @@ func (s *Server) handleListPromptVersions(w http.ResponseWriter, r *http.Request
 	if labels == nil {
 		labels = map[string]int{}
 	}
-	w.Header().Set("Cache-Control", promptCacheControl)
+	cachePrivately(w)
 	writeJSON(w, http.StatusOK, promptVersionListResponse{
 		Versions: out, Labels: labels, NextCursor: next, PrevCursor: prev})
 }
@@ -432,7 +441,7 @@ func (s *Server) handleListPrompts(w http.ResponseWriter, r *http.Request) {
 			UpdatedAt:     formatTime(prompt.UpdatedAt),
 		})
 	}
-	w.Header().Set("Cache-Control", promptCacheControl)
+	cachePrivately(w)
 	writeJSON(w, http.StatusOK, promptListResponse{Prompts: out, NextCursor: next, PrevCursor: prev})
 }
 
@@ -609,7 +618,7 @@ func (s *Server) handlePromptDiff(w http.ResponseWriter, r *http.Request) {
 	diff := unifiedDiff("prompt", fromLabel, toLabel, pretty(loaded[0].Prompt), pretty(loaded[1].Prompt)) +
 		unifiedDiff("config", fromLabel, toLabel, pretty(loaded[0].Config), pretty(loaded[1].Config))
 
-	w.Header().Set("Cache-Control", promptCacheControl)
+	cachePrivately(w)
 	writeJSON(w, http.StatusOK, object{}.
 		put("name", name).
 		put("from", versions[0]).

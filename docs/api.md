@@ -1076,6 +1076,35 @@ truncate the write-ahead log ([retention.md](retention.md#what-this-means-for-a-
 This is the endpoint to read first when something looks wrong, and the one to
 paste into a bug report.
 
+## Response headers
+
+Every response, API and interface alike, carries:
+
+| Header | Value | Why |
+|---|---|---|
+| `Content-Security-Policy` | `frame-ancestors 'none'` | No other page can draw this server inside a frame. |
+| `X-Frame-Options` | `DENY` | The same, for browsers that predate the line above. |
+| `X-Content-Type-Options` | `nosniff` | A response is only ever what its `Content-Type` says. |
+| `Referrer-Policy` | `same-origin` | A link out of the interface tells the other site nothing. |
+
+A media body replaces the first with its own sandboxing policy, which refuses
+frames too ([Media](#media)).
+
+A response on a route that needs a credential also carries `Cache-Control:
+private, no-store` and `Vary: Authorization, Cookie, X-Tracepad-Project`: it is
+one caller's, and no cache in front of the server may keep it. Prompt reads may
+be kept for a minute (`private, max-age=60`, [prompts.md](prompts.md)) and media
+bodies for a year ([Media](#media)); those two say so themselves.
+
+A response has five minutes to be written, which is what a 20 MiB body needs
+over a slow link. The five minutes count from the end of the request's headers,
+so they bound the work behind a response as well: a request whose work runs
+longer has its connection closed once that work is done, and the client sees
+the connection drop rather than the answer. Nothing in the API is meant to take
+that long, and a bulk deletion removes at most a bounded round of traces per
+request, so repeating one is safe. `/mcp` is a stream and has no such limit,
+for a request with a project key; without one it is `401`.
+
 ## Errors
 
 One shape everywhere:

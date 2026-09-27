@@ -667,19 +667,47 @@ func (s *Server) originFor(r *http.Request) string {
 	return scheme + "://" + r.Host
 }
 
-// configuredOrigin is `TRACEPAD_URL` reduced to a scheme and a host, or "".
-// A value that will not parse is ignored rather than fatal: it is the CLI's
-// "which server" as well, and a link is not worth refusing to start over.
-func (s *Server) configuredOrigin() string {
-	raw := strings.TrimSpace(s.publicURL)
+// setPublicURL reads `TRACEPAD_URL` once, when the server is built, so that
+// the checks that consult it on every sign-in and cookie write neither parse
+// it again nor, when it is malformed, log about it each time. A value that
+// will not parse is ignored rather than fatal — it is the CLI's "which
+// server" as well, and a link is not worth refusing to start over — and the
+// start says so, once.
+func (s *Server) setPublicURL(raw string) {
+	s.configured = nil
+	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return ""
+		return
 	}
 	parsed, err := url.Parse(raw)
-	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-		slog.Warn("TRACEPAD_URL is not a URL; printed links use the request's host instead",
+	if err != nil || parsed.Host == "" || parsed.Scheme != "http" && parsed.Scheme != "https" {
+		// Any scheme but the two a browser loads this server over would
+		// be printed in every link and taken as the site's own, refusing
+		// each http origin on its host.
+		slog.Warn("TRACEPAD_URL is not an http or https URL; printed links use the request's host instead",
 			"value", raw)
+		return
+	}
+	s.configured = &publicAddress{
+		origin:   parsed.Scheme + "://" + parsed.Host,
+		scheme:   parsed.Scheme,
+		host:     withoutDefaultPort(parsed.Scheme, parsed.Host),
+		hostname: parsed.Hostname(),
+	}
+}
+
+// publicAddress is `TRACEPAD_URL` as the checks that consult it on every
+// request need it, worked out once: the origin a printed link starts with,
+// its scheme, its host as a browser writes it (withoutDefaultPort), and the
+// bare name an https one vouches for on any port (spec 028 #30).
+type publicAddress struct {
+	origin, scheme, host, hostname string
+}
+
+// configuredOrigin is `TRACEPAD_URL` reduced to a scheme and a host, or "".
+func (s *Server) configuredOrigin() string {
+	if s.configured == nil {
 		return ""
 	}
-	return parsed.Scheme + "://" + parsed.Host
+	return s.configured.origin
 }

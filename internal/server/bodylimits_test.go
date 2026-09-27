@@ -119,6 +119,7 @@ func TestPublicRoutesRefuseCompressedBodies(t *testing.T) {
 		var reached bool
 		var read error
 		req := httptest.NewRequest(rt.Method, rt.Path, bytes.NewReader([]byte("{}")))
+		asJSON(req)
 		req.Header.Add("Content-Encoding", "identity")
 		req.Header.Add("Content-Encoding", "Identity, identity")
 		rec := httptest.NewRecorder()
@@ -135,6 +136,7 @@ func TestPublicRoutesRefuseLargeBodiesUnread(t *testing.T) {
 	for _, rt := range publicBodyRoutes(t, h) {
 		body := &countingReader{}
 		req := httptest.NewRequest(rt.Method, rt.Path, body)
+		asJSON(req)
 		rec := httptest.NewRecorder()
 		h.server.Handler().ServeHTTP(rec, req)
 		expectError(t, rec, http.StatusRequestEntityTooLarge, "too large")
@@ -150,9 +152,9 @@ func TestPublicRoutesRefuseLargeBodiesUnread(t *testing.T) {
 		// off at it, even a reader of its own.
 		var reached bool
 		var read error
-		endless := &countingReader{}
-		guardedStub(h, rt, &reached, &read).ServeHTTP(httptest.NewRecorder(),
-			httptest.NewRequest(rt.Method, rt.Path, endless))
+		endless := httptest.NewRequest(rt.Method, rt.Path, &countingReader{})
+		asJSON(endless)
+		guardedStub(h, rt, &reached, &read).ServeHTTP(httptest.NewRecorder(), endless)
 		var tooLarge *http.MaxBytesError
 		if !errors.As(read, &tooLarge) || tooLarge.Limit != maxPublicBodyBytes {
 			t.Errorf("%s %s: a handler behind the guard read with error %v, want the %d-byte cap",
@@ -163,7 +165,7 @@ func TestPublicRoutesRefuseLargeBodiesUnread(t *testing.T) {
 		// padding is JSON whitespace, so the answer is the route's own.
 		padded := append(mustJSON(t, map[string]any{"email": "a@b.c", "password": "x"}),
 			bytes.Repeat([]byte(" "), maxPublicBodyBytes-100)...)
-		rec = h.call(t, rt.Method, rt.Path, padded, anonymous)
+		rec = h.call(t, rt.Method, rt.Path, padded, anonymous, asJSON)
 		if rec.Code == http.StatusRequestEntityTooLarge || rec.Code == http.StatusUnsupportedMediaType {
 			t.Errorf("%s %s refused a body under the cap: %d %s", rt.Method, rt.Path, rec.Code, rec.Body)
 		}
@@ -178,18 +180,18 @@ func TestPublicRoutesStillSignIn(t *testing.T) {
 	rec := h.call(t, "POST", "/api/v1/setup", mustJSON(t, map[string]any{
 		"token": token, "email": "founder@example.com", "password": testAccountPassword,
 		"name": strings.Repeat("n", maxAccountNameLength),
-	}), anonymous, func(r *http.Request) { r.Header.Set("Content-Encoding", "identity") })
+	}), anonymous, func(r *http.Request) { r.Header.Set("Content-Encoding", "identity") }, asJSON)
 	expectStatus(t, rec, http.StatusCreated)
 
 	rec = h.call(t, "POST", "/api/v1/auth/login", mustJSON(t, map[string]any{
 		"email": "founder@example.com", "password": testAccountPassword,
-	}), anonymous, func(r *http.Request) { r.Header.Set("Content-Encoding", "identity") })
+	}), anonymous, func(r *http.Request) { r.Header.Set("Content-Encoding", "identity") }, asJSON)
 	expectStatus(t, rec, http.StatusOK)
 
 	h.invited(t, "invitee@example.com", false)
 	rec = h.call(t, "POST", "/api/v1/auth/accept-invite", mustJSON(t, map[string]any{
 		"token": "token-for-invitee@example.com", "password": testAccountPassword,
-	}), anonymous)
+	}), anonymous, asJSON)
 	expectStatus(t, rec, http.StatusOK)
 	if sessionCookieOf(rec) == nil {
 		t.Error("accepting an invitation must sign the person in")
@@ -234,7 +236,7 @@ func TestAccountNameHasACeiling(t *testing.T) {
 		return h.call(t, "POST", "/api/v1/setup", mustJSON(t, map[string]any{
 			"token": token, "email": "founder@example.com", "password": testAccountPassword,
 			"name": name,
-		}), anonymous)
+		}), anonymous, asJSON)
 	}
 	expectError(t, setup(strings.Repeat("n", maxAccountNameLength+1)),
 		http.StatusUnprocessableEntity, "name must be at most")
@@ -356,7 +358,10 @@ func TestIngestCapsTheDecompressedBody(t *testing.T) {
 	// Two bombs inside the minute: one warning, and the second is
 	// counted for the next one to report.
 	h.server.inflatedLog.mu.Lock()
-	held := h.server.inflatedLog.skipped
+	var held int64
+	if k := h.server.inflatedLog.seen[""]; k != nil {
+		held = k.skipped
+	}
 	h.server.inflatedLog.mu.Unlock()
 	if held != 1 {
 		t.Errorf("warnings held back = %d after two refusals in a minute, want 1", held)

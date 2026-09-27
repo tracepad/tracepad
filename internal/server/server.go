@@ -4,13 +4,14 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io/fs"
 	"log/slog"
+	"net"
 	"net/http"
 	"sync"
 	"time"
 
-	"github.com/tracepad/tracepad/internal/client"
 	"github.com/tracepad/tracepad/internal/config"
 	"github.com/tracepad/tracepad/internal/mcpserver"
 	"github.com/tracepad/tracepad/internal/store"
@@ -60,11 +61,13 @@ type Server struct {
 	adminToken string
 
 	// Accounts (spec 028). sessionLife is how long a browser session lasts
-	// and how far each slide moves it (Decision 4); publicURL is the
-	// operator's `TRACEPAD_URL`, which wins over a guessed host in a
-	// printed setup or invite link (Decision 11).
+	// and how far each slide moves it (Decision 4); configured is the
+	// operator's `TRACEPAD_URL`, read once (setPublicURL), which wins over a
+	// guessed host in a printed setup or invite link (Decision 11) and is
+	// one of the server's own origins (Decision 23). Nil when unset or
+	// unreadable.
 	sessionLife time.Duration
-	publicURL   string
+	configured  *publicAddress
 	// setupToken is minted at each start while this server has no owner who
 	// can sign in, and lives in memory only: a token from yesterday's log
 	// opens nothing today, and a restart is the recovery if the link was
@@ -78,9 +81,24 @@ type Server struct {
 	setupMu    sync.RWMutex
 	setupToken string
 	limiter    *loginLimiter
+	// running counts the handlers in flight, and handlerGrace is how long
+	// a stop waits for them once their connections are closed (spec 001
+	// #16).
+	running      inflight
+	handlerGrace time.Duration
+	// stopping ends when a stop begins, and with it every MCP stream
+	// (mcpStream): a client holding its event stream open would otherwise
+	// keep the drain waiting for its whole window. Nothing else is tied to
+	// it, so an ingest waiting on its commit is left to finish (spec 001 #16).
+	stopping    context.Context
+	stopStreams context.CancelFunc
 	// inflatedLog paces the warning for a gzip body refused after
 	// decompression (spec 002 #27).
 	inflatedLog *logLimiter
+	// originLog paces the warning for a browser request refused for its
+	// origin (spec 028 #30), per origin, so that a page elsewhere posting
+	// once a minute cannot hide the line about the operator's own proxy.
+	originLog *logLimiter
 
 	// The web interface (spec 006): the built bundle, nil in a build
 	// without the `ui` tag; the path segments the API owns, so a mistyped
@@ -137,15 +155,17 @@ func New(cfg *config.Config, version string, st *store.Store, writer JobWriter, 
 		mcp:            cfg.MCP,
 		adminToken:     cfg.AdminToken,
 		sessionLife:    sessionLife,
-		publicURL:      cfg.URL,
 		limiter:        newLoginLimiter(),
+		handlerGrace:   defaultHandlerGrace,
 		inflatedLog:    &logLimiter{every: time.Minute},
+		originLog:      &logLimiter{every: time.Minute, keys: 64},
 		assets:         ui.Assets(),
 		startedAt:      time.Now(),
 		counters:       newCounters(),
 		keyUses:        newKeyUses(),
 		keyUseEvery:    keyUseFlushEvery,
 	}
+	s.setPublicURL(cfg.URL)
 	if st != nil {
 		s.mediaKey = st.MediaUploadKey()
 	}
@@ -172,7 +192,7 @@ func New(cfg *config.Config, version string, st *store.Store, writer JobWriter, 
 		// (Decision 27). Its tools reach the read API through this
 		// same mux — one implementation of budgets, truncation, auth
 		// and JSON shape (spec 004 #16).
-		mux.Handle(mcpserver.Path, mcpserver.HTTPHandler(version, &mcpserver.Loopback{Handler: mux}))
+		mux.Handle(mcpserver.Path, s.mcpStream(mcpserver.HTTPHandler(version, &mcpserver.Loopback{Handler: mux})))
 	}
 	// The web interface, also outside the table (spec 006): a catch-all
 	// that serves the SPA and its assets, and hands anything under an API
@@ -180,28 +200,49 @@ func New(cfg *config.Config, version string, st *store.Store, writer JobWriter, 
 	mux.HandleFunc("/", s.handleUI)
 
 	s.http = &http.Server{
-		Addr:              cfg.Listen,
-		Handler:           s.withVersion(mux),
+		Addr: cfg.Listen,
+		// The headers outermost, so that even the 503 a stop answers
+		// once it has begun waiting carries them (spec 001 #14).
+		Handler:           s.withResponseHeaders(s.running.track(mux)),
 		ReadHeaderTimeout: 10 * time.Second,
 		// ReadTimeout bounds slow-dripping request bodies; IdleTimeout
-		// reaps abandoned keep-alives. WriteTimeout stays unset on
-		// purpose: future endpoints stream (MCP over HTTP, trace
-		// tailing) and a global write deadline would cut them off
-		// mid-response.
-		ReadTimeout: 60 * time.Second,
-		IdleTimeout: 120 * time.Second,
+		// reaps abandoned keep-alives; WriteTimeout bounds a slow reader
+		// (spec 001 #15). The one route that streams lifts its own
+		// deadline, and only for a project key (`mcpStream`), so the
+		// bound is for documents and for anybody without one.
+		ReadTimeout:  60 * time.Second,
+		WriteTimeout: writeTimeout,
+		IdleTimeout:  120 * time.Second,
 	}
+	s.stopping, s.stopStreams = context.WithCancel(context.Background())
+	s.http.RegisterOnShutdown(s.stopStreams)
 	return s
 }
 
 // Handler exposes the routing for tests.
 func (s *Server) Handler() http.Handler { return s.http.Handler }
 
-// ListenAndServe blocks until the server stops.
+// listenAddr is the address to bind for a configured one. An empty address
+// is `:http`, as http.Server.ListenAndServe has it; net.Listen alone would
+// read it as "any free port".
+func listenAddr(configured string) string {
+	if configured == "" {
+		return ":http"
+	}
+	return configured
+}
+
+// ListenAndServe blocks until the server stops. It binds the listener itself
+// so that the log names the address actually bound — the port `:0` chose, the
+// address a host name resolved to — rather than the one configured.
 func (s *Server) ListenAndServe() error {
-	slog.Info("listening", "addr", s.http.Addr)
+	listener, err := net.Listen("tcp", listenAddr(s.http.Addr))
+	if err != nil {
+		return err
+	}
+	slog.Info("listening", "addr", listener.Addr().String())
 	s.startKeyUseFlusher()
-	err := s.http.ListenAndServe()
+	err = s.http.Serve(listener)
 	if err == http.ErrServerClosed {
 		return nil
 	}
@@ -212,20 +253,51 @@ func (s *Server) ListenAndServe() error {
 // (spec 045 #9). The ingest writer outlives it by design: a handler still
 // waiting on a commit must get its answer before the writer is closed by its
 // owner, and so must the last flush.
+//
+// A connection still open when ctx ends — a response a slow client has not
+// finished reading — is closed rather than waited for. Closing a connection
+// does not stop its handler, though, and the caller closes the writer next, so
+// Shutdown then waits up to handlerGrace for every handler to return (spec 001
+// #16), on every path out, whatever else failed. A stop whose handlers all
+// returned is a clean one, however it got there; one that still has a handler
+// running reports errHandlersStuck, so the process exits non-zero and a
+// supervisor sees that it did not stop cleanly. MCP streams end when the stop
+// begins (stopping), rather than holding the drain for its whole window.
 func (s *Server) Shutdown(ctx context.Context) error {
 	err := s.http.Shutdown(ctx)
-	s.stopKeyUseFlusher()
-	// The caller's deadline, with a moment's grace when the drain spent all
-	// of it: the uses the drained requests made still deserve their one
-	// write, and a second is what a single small job needs.
-	flushCtx := ctx
-	if ctx.Err() != nil {
-		var cancel context.CancelFunc
-		flushCtx, cancel = context.WithTimeout(context.WithoutCancel(ctx), time.Second)
-		defer cancel()
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		slog.Warn("connections still open after the drain window were closed")
+		err = s.http.Close()
 	}
+	// Whatever went wrong above, the handlers are waited for: the caller
+	// closes the writer next on every path out of here.
+	grace, cancel := context.WithTimeout(context.Background(), s.handlerGrace)
+	defer cancel()
+	if waitErr := s.running.wait(grace); waitErr != nil {
+		slog.Warn("handlers still running after the stop's grace period; stopping without them",
+			"running", s.running.count())
+		err = errors.Join(err, waitErr)
+	}
+	// After the handlers, which are what touch keys; before the owner
+	// closes the writer the flush is a job on.
+	s.stopKeyUseFlusher()
+	flushCtx, flushCancel := context.WithTimeout(context.Background(), keyUseFlushTime(grace))
+	defer flushCancel()
 	s.flushKeyUses(flushCtx)
 	return err
+}
+
+// keyUseFlushTime is how long a stop gives its last write of key uses: at
+// most a second, which one small job never needs, and only what is left of
+// the handlers' grace, so the stop stays inside its budget (spec 001 #16) —
+// but never under a quarter of a second, since the uses the drained requests
+// made still deserve their one write.
+func keyUseFlushTime(grace context.Context) time.Duration {
+	left := time.Second
+	if deadline, ok := grace.Deadline(); ok {
+		left = min(left, time.Until(deadline))
+	}
+	return max(left, 250*time.Millisecond)
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
@@ -238,16 +310,4 @@ func writeError(w http.ResponseWriter, status int, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(map[string]string{"error": message})
-}
-
-// withVersion stamps this build on every response. A client that has to spend
-// a round trip on `/api/v1/system` to notice version skew will not spend it,
-// so the answer rides along with whatever it was already asking for
-// (Decision 28). The header name lives in the client package because that is
-// who reads it; the server is the only writer.
-func (s *Server) withVersion(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set(client.VersionHeader, s.version)
-		next.ServeHTTP(w, r)
-	})
 }

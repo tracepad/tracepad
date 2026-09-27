@@ -270,10 +270,11 @@
             "required": ["account"]
           }}}},
           "400": {"$ref": "#/components/responses/BadRequest"},
-          "403": {"$ref": "#/components/responses/Forbidden"},
+          "403": {"description": "A wrong or spent token, or an `Origin` that is not this server's",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
           "413": {"description": "The body is over 8 KiB",
             "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
-          "415": {"description": "The body is compressed: a route that takes no credential takes a plain body",
+          "415": {"description": "The body is compressed, or not declared `application/json`: a route that takes no credential takes a plain JSON body",
             "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
           "422": {"$ref": "#/components/responses/Unprocessable"}
         }
@@ -299,12 +300,14 @@
           }}}},
           "400": {"$ref": "#/components/responses/BadRequest"},
           "401": {"$ref": "#/components/responses/Unauthorized"},
-          "503": {"$ref": "#/components/responses/ServiceUnavailable"},
+          "403": {"description": "The request carries an `Origin` that is not this server's",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
           "413": {"description": "The body is over 8 KiB",
             "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
-          "415": {"description": "The body is compressed: a route that takes no credential takes a plain body",
+          "415": {"description": "The body is compressed, or not declared `application/json`: a route that takes no credential takes a plain JSON body",
             "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
-          "429": {"$ref": "#/components/responses/TooManyRequests"}
+          "429": {"$ref": "#/components/responses/TooManyRequests"},
+          "503": {"$ref": "#/components/responses/ServiceUnavailable"}
         }
       }
     },
@@ -330,10 +333,11 @@
             "required": ["account"]
           }}}},
           "400": {"$ref": "#/components/responses/BadRequest"},
-          "403": {"$ref": "#/components/responses/Forbidden"},
+          "403": {"description": "A wrong or spent token, or an `Origin` that is not this server's",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
           "413": {"description": "The body is over 8 KiB",
             "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
-          "415": {"description": "The body is compressed: a route that takes no credential takes a plain body",
+          "415": {"description": "The body is compressed, or not declared `application/json`: a route that takes no credential takes a plain JSON body",
             "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
           "422": {"$ref": "#/components/responses/Unprocessable"}
         }

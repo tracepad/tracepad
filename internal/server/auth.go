@@ -192,15 +192,73 @@ func (s *Server) guard(rt route) http.HandlerFunc {
 		if rt.Method == http.MethodGet || rt.Method == http.MethodHead {
 			return rt.handler
 		}
-		return smallPlainBody(rt.handler)
+		return s.publicBody(rt.handler)
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Before the caller is known, so a refusal carries them too.
+		callerHeaders(w)
 		c, ok := s.resolve(w, r, rt)
 		if !ok {
 			return
 		}
 		rt.handler(w, r.WithContext(withCaller(r.Context(), c)))
 	}
+}
+
+// callerCacheControl is what every response on a route that needs a caller
+// says about caching, unless its handler says otherwise (spec 001 #17): it is
+// one caller's, and nothing keeps it. A shared cache in front of the server —
+// a proxy, a CDN told to cache everything — must not hand one project's
+// traces to the next caller who asks for the same URL, and a cookie, unlike
+// `Authorization`, does not stop such a cache from storing. The two reads
+// that may be kept say so themselves: prompts for a minute (#26), media for
+// a year (spec 041 #7). `Vary` (credentialVary) names the credential, for a
+// cache that keeps private copies all the same.
+const callerCacheControl = "private, no-store"
+
+// callerHeaders sends what every response on a route that needs a caller says
+// about caching: the guard's, and the MCP stream's, the one such route outside
+// the table.
+func callerHeaders(w http.ResponseWriter) {
+	header := w.Header()
+	header.Set("Cache-Control", callerCacheControl)
+	header.Set("Vary", credentialVary)
+}
+
+// headerCaller is who an `Authorization` header names — the admin token or a
+// project key — or nil when it names nobody. It is the one reading of that
+// header: the guard's, and the MCP stream's (spec 001 #15). An error is the
+// store failing to answer, which is not the key being wrong: both callers run
+// it through guardLookup, which answers that `503` with `Retry-After` and no
+// challenge (spec 043 #1), so no client goes looking for another credential
+// over a busy database.
+//
+// A soft-deleted project's key still names its project here; what it may
+// reach is the guard's scope's to decide, and the MCP stream refuses it. A key
+// it finds is marked as used, whichever of the two asked (spec 045 #9).
+func (s *Server) headerCaller(ctx context.Context, header string) (*caller, error) {
+	secret, ok := credential(header)
+	if !ok {
+		return nil, nil
+	}
+	// Constant time, because this one compares a whole shared secret rather
+	// than looking a hash up in an index.
+	if s.adminToken != "" &&
+		subtle.ConstantTimeCompare([]byte(secret), []byte(s.adminToken)) == 1 {
+		return &caller{admin: true}, nil
+	}
+	project, key, err := s.store.KeyBySecret(ctx, secret)
+	if err != nil {
+		return nil, err
+	}
+	if project == nil {
+		return nil, nil
+	}
+	// Here rather than once the request is admitted: the question last use
+	// answers is whether anybody still holds the key, and a lost key
+	// probing what it cannot reach is exactly that (spec 045 #9).
+	s.keyUses.touch(key.PublicKey, time.Now().UnixNano())
+	return &caller{project: project, key: key}, nil
 }
 
 // resolve is steps one to four above. It answers the client itself on every
@@ -218,7 +276,7 @@ func (s *Server) resolve(w http.ResponseWriter, r *http.Request, rt route) (*cal
 		// SameSite=Lax already stops the classic cross-site POST, but a
 		// cookie that authorises `DELETE /api/v1/projects/{id}` deserves
 		// a check the server makes itself (Decision 5).
-		writeError(w, http.StatusForbidden, "cross-origin request refused")
+		s.refuseOrigin(w, r)
 		return nil, false
 	}
 	if !s.admits(w, rt, c) {
@@ -319,12 +377,6 @@ func hungUp(r *http.Request) bool {
 	return r.Context().Err() != nil
 }
 
-// keyLookup is what a key lookup finds: the project and the key itself.
-type keyLookup struct {
-	project *store.Project
-	key     *store.KeyInfo
-}
-
 // membership is what the scoping lookup finds: the project, and the account's
 // role in it.
 type membership struct {
@@ -344,35 +396,17 @@ type signIn struct {
 // browser (Decision 5).
 func (s *Server) identify(w http.ResponseWriter, r *http.Request) (*caller, bool) {
 	if header := r.Header.Get("Authorization"); header != "" {
-		secret, ok := credential(header)
-		if !ok {
-			writeError(w, http.StatusUnauthorized, "unauthorized")
-			return nil, false
-		}
-		// Constant time, because this one compares a whole shared secret
-		// rather than looking a hash up in an index.
-		if s.adminToken != "" &&
-			subtle.ConstantTimeCompare([]byte(secret), []byte(s.adminToken)) == 1 {
-			return &caller{admin: true}, true
-		}
-		found, ok := guardLookup(w, r, "key", func(ctx context.Context) (keyLookup, error) {
-			project, key, err := s.store.KeyBySecret(ctx, secret)
-			return keyLookup{project, key}, err
+		c, ok := guardLookup(w, r, "key", func(ctx context.Context) (*caller, error) {
+			return s.headerCaller(ctx, header)
 		})
 		if !ok {
 			return nil, false
 		}
-		project, key := found.project, found.key
-		if project == nil {
+		if c == nil {
 			writeError(w, http.StatusUnauthorized, "unauthorized")
 			return nil, false
 		}
-		// Here rather than once the request is admitted: the question
-		// last use answers is whether anybody still holds the key, and a
-		// lost key probing what it cannot reach is exactly that
-		// (spec 045 #9).
-		s.keyUses.touch(key.PublicKey, time.Now().UnixNano())
-		return &caller{project: project, key: key}, true
+		return c, true
 	}
 
 	cookie, err := r.Cookie(sessionCookie)
@@ -617,40 +651,164 @@ func (s *Server) sameOrigin(r *http.Request) bool {
 	case http.MethodGet, http.MethodHead, http.MethodOptions:
 		return true
 	}
+	return s.ownOrigin(r, statedOrigin(r))
+}
+
+// statedOrigin is where a browser says a request came from: its `Origin`, or,
+// when that is missing or `null`, its `Referer`. One reading for every check
+// that asks (Decision 30): cookie writes and the public routes alike, though a
+// public route asks only when the request carries an `Origin` (publicBody).
+func statedOrigin(r *http.Request) string {
 	stated := r.Header.Get("Origin")
 	if stated == "" || stated == "null" {
 		stated = r.Header.Get("Referer")
 	}
-	if stated == "" {
+	return stated
+}
+
+// ownOrigin reports whether a stated `Origin` (or `Referer`) names this
+// server: one of the hosts of Decision 23, under a scheme this server can be
+// reached by (Decision 30). Empty, `null`, anything without a host and any
+// scheme but http and https are not ours. Hosts are compared without the port
+// their scheme implies, as a browser writes them.
+//
+// The scheme rule refuses a downgrade and nothing else. Where the server knows
+// it is served over TLS — the connection itself, `X-Forwarded-Proto: https`, or
+// an `https` TRACEPAD_URL for that URL's host name, on any port — an `http://`
+// origin on the same host is a page an on-path attacker can write, and is
+// refused. Where it knows nothing, either scheme is accepted: a TLS proxy that
+// says nothing about itself sends an `https` origin to a plain-HTTP request,
+// and refusing it would break every cookie write from the interface behind
+// it.
+func (s *Server) ownOrigin(r *http.Request, stated string) bool {
+	if stated == "" || stated == "null" {
 		return false
 	}
 	parsed, err := url.Parse(stated)
 	if err != nil || parsed.Host == "" {
 		return false
 	}
+	scheme := strings.ToLower(parsed.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return false
+	}
+	named := withoutDefaultPort(scheme, parsed.Host)
+	secure := overTLS(r)
+	if own := s.configured; own != nil {
+		if strings.EqualFold(named, own.host) {
+			// The operator said what the address is, scheme and all; http
+			// only where they said http and the request is not known to
+			// have arrived over TLS.
+			return scheme == "https" || own.scheme == "http" && !secure
+		}
+		// An https TRACEPAD_URL says TLS fronts that name, on whatever
+		// port an origin spells: `http://host:443` is a page an on-path
+		// attacker answers in plain text, not another address of ours.
+		if own.scheme == "https" && strings.EqualFold(parsed.Hostname(), own.hostname) {
+			secure = true
+		}
+	}
+	// Plain http on the https port is not an address of this site but a
+	// page an on-path attacker answers in plain text; only TRACEPAD_URL,
+	// naming exactly that, makes it one (matched above).
+	if scheme == "http" && parsed.Port() == "443" {
+		return false
+	}
+	// A Host or X-Forwarded-Host is the address the browser typed, so its
+	// port is read under the origin's own scheme: `host:443` is what a TLS
+	// proxy that says nothing else forwards for `https://host`. An `http`
+	// origin it matches is still refused below wherever TLS is known.
 	for _, host := range s.ownHosts(r) {
-		if host != "" && strings.EqualFold(parsed.Host, host) {
-			return true
+		if host != "" && strings.EqualFold(named, withoutDefaultPort(scheme, host)) {
+			return scheme == "https" || !secure
 		}
 	}
 	return false
 }
 
-// ownHosts is every host this request could legitimately have been addressed
-// to (Decision 23).
-func (s *Server) ownHosts(r *http.Request) [3]string {
-	// Only the first value of `X-Forwarded-For`'s sibling: the header is a
-	// list when requests cross more than one proxy, and the first entry is
-	// the one the browser was talking to.
-	forwarded, _, _ := strings.Cut(r.Header.Get("X-Forwarded-Host"), ",")
-
-	configured := ""
-	if origin := s.configuredOrigin(); origin != "" {
-		if parsed, err := url.Parse(origin); err == nil {
-			configured = parsed.Host
-		}
+// withoutDefaultPort writes a host the way a browser writes it in an `Origin`:
+// without the port its scheme implies. `TRACEPAD_URL=https://host:443` and a
+// proxy that passes `Host: host:443` both name the address a browser calls
+// `https://host`, and a comparison of the spellings would refuse every sign-in
+// there. Any other port is a different origin and is left in place.
+func withoutDefaultPort(scheme, host string) string {
+	name, port, err := net.SplitHostPort(host)
+	if err != nil {
+		return host
 	}
-	return [3]string{r.Host, strings.TrimSpace(forwarded), configured}
+	if strings.EqualFold(scheme, "https") && port == "443" || strings.EqualFold(scheme, "http") && port == "80" {
+		if strings.Contains(name, ":") {
+			return "[" + name + "]"
+		}
+		return name
+	}
+	return host
+}
+
+// originRefused is the 403 for an origin that is not this server's, on the
+// public routes and on cookie writes alike. It says what to set, because the
+// commonest way to meet it is not an attack but a proxy that passes neither
+// the address the browser used nor anything the server was told to expect
+// (Decision 23), and the sign-in form is where that shows first.
+const originRefused = "cross-origin request refused: the request's origin is not an address " +
+	"this server knows; set TRACEPAD_URL to the public address, or forward Host / X-Forwarded-Host"
+
+// refuseOrigin answers originRefused, and logs what was compared — once a
+// minute per origin and for at most 64 origins, since a page elsewhere can
+// send these as fast as it likes — so the operator looking at a failed sign-in
+// sees which address to name. One sender cannot silence the line another
+// needs; a sender with a stream of made-up origins can, which is why the 403
+// itself carries the hint too.
+func (s *Server) refuseOrigin(w http.ResponseWriter, r *http.Request) {
+	origin := loggable(loggableOrigin(statedOrigin(r)))
+	if held, ok := s.originLog.allowKey(origin, time.Now()); ok {
+		slog.Warn("a browser request was refused because its origin is none of this server's addresses",
+			"path", loggable(r.URL.Path), "origin", origin, "host", loggable(r.Host),
+			"x_forwarded_host", loggable(r.Header.Get("X-Forwarded-Host")),
+			"x_forwarded_proto", loggable(r.Header.Get("X-Forwarded-Proto")),
+			"tracepad_url", s.configuredOrigin(),
+			"not_logged_since_last", held.sameKey, "not_logged_over_cap", held.overCap)
+	}
+	writeError(w, http.StatusForbidden, originRefused)
+}
+
+// maxLoggedField is how much of a value the sender chose a log line keeps.
+// The limiter bounds how many lines a sender gets; this bounds how long each
+// one is, since a header may run to the server's megabyte.
+const maxLoggedField = 256
+
+// loggable is a value the sender chose, cut to maxLoggedField bytes.
+func loggable(value string) string {
+	if len(value) <= maxLoggedField {
+		return value
+	}
+	return strings.ToValidUTF8(value[:maxLoggedField], "") + "…(truncated)"
+}
+
+// loggableOrigin is what the log may say about a stated origin: its scheme
+// and host and nothing else. When the `Origin` is `null` the stated one is the
+// `Referer`, a whole URL, and the page an invitation link opens carries its
+// token in the query.
+func loggableOrigin(stated string) string {
+	parsed, err := url.Parse(stated)
+	if err != nil || parsed.Host == "" {
+		if stated == "" || stated == "null" {
+			return stated
+		}
+		return "(not a URL)"
+	}
+	return parsed.Scheme + "://" + parsed.Host
+}
+
+// ownHosts is the two hosts a request itself says it was addressed to
+// (Decision 23): its `Host`, and the first value of `X-Forwarded-Host`. The
+// third, TRACEPAD_URL's, is read by ownOrigin with its scheme.
+func (s *Server) ownHosts(r *http.Request) [2]string {
+	// Only the first value: the header is a list when requests cross more
+	// than one proxy, and the first entry is the one the browser was
+	// talking to.
+	forwarded, _, _ := strings.Cut(r.Header.Get("X-Forwarded-Host"), ",")
+	return [2]string{r.Host, strings.TrimSpace(forwarded)}
 }
 
 // --- The cookie -------------------------------------------------------------
@@ -701,12 +859,15 @@ func (s *Server) clearSessionCookie(w http.ResponseWriter, r *http.Request) {
 }
 
 // overTLS reports whether the person is on https, directly or through a proxy
-// that says so.
+// that says so. Only the first value of `X-Forwarded-Proto` counts, as with
+// `X-Forwarded-Host` (ownHosts): behind more than one proxy the header is a
+// list, and its first entry is the scheme the browser used.
 func overTLS(r *http.Request) bool {
 	if r.TLS != nil {
 		return true
 	}
-	return strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
+	proto, _, _ := strings.Cut(r.Header.Get("X-Forwarded-Proto"), ",")
+	return strings.EqualFold(strings.TrimSpace(proto), "https")
 }
 
 // newSessionValue mints the 32 random bytes a cookie carries. The value is in

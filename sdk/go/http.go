@@ -232,7 +232,7 @@ func object(r response) map[string]any {
 
 // maxAge is how long the server said an answer may be trusted. A header that
 // says nothing is zero, not a default of our own: the store sends
-// `Cache-Control: max-age=60` on every prompt (`docs/prompts.md`), and
+// `Cache-Control: private, max-age=60` on every prompt (`docs/prompts.md`), and
 // inventing a window for a server that did not ask for one would cache
 // against its wishes.
 func maxAge(headers http.Header) time.Duration {

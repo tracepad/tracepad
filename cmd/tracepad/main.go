@@ -206,14 +206,26 @@ func serve(args []string) error {
 	errc := make(chan error, 1)
 	go func() { errc <- srv.ListenAndServe() }()
 
-	select {
-	case err := <-errc:
-		return err
-	case <-ctx.Done():
-		slog.Info("shutting down")
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// Five seconds to drain, then Shutdown's own three for the handlers it
+	// interrupted, which leaves two of the ten `docker stop` allows before it
+	// kills for the writer, the sweeper, the aggregator and the store to
+	// close (spec 001 #16). Taken on both ways out: a Serve that failed on
+	// its own leaves the connections it accepted still running handlers,
+	// and the deferred closes above must not run under them.
+	shutdown := func() error {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		return srv.Shutdown(shutdownCtx)
+	}
+	select {
+	case err := <-errc:
+		return errors.Join(err, shutdown())
+	case <-ctx.Done():
+		// A second signal while the stop runs kills the process, as it
+		// would without the handler: the way out when a stop hangs.
+		stop()
+		slog.Info("shutting down")
+		return shutdown()
 	}
 }
 

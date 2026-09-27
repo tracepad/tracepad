@@ -79,14 +79,19 @@ func mediaRows(found *mapping.MediaResult, traces []*model.Trace, rawMedia bool)
 // bytes (#7).
 const mediaCacheControl = "private, max-age=31536000, immutable"
 
-// mediaVary keys a cached body by the credential and the project that read it.
-const mediaVary = "Authorization, Cookie, " + projectHeader
+// credentialVary keys a cached response by the credential and the project that
+// read it: the three things that decide which project a request is about
+// (spec 028 Decision 6). The guard sends it on every route that needs a
+// caller (spec 001 #17).
+const credentialVary = "Authorization, Cookie, " + projectHeader
 
 // mediaSandbox is the policy every body is served under. The bytes are the
 // client's, and a body declared `text/html` or `image/svg+xml` opened as a page
 // on this origin would otherwise run whatever script it carries next to the
-// session cookie (Decision 15).
-const mediaSandbox = "default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'; sandbox"
+// session cookie (Decision 15). It replaces the server-wide policy on these
+// responses rather than sitting beside it, so it carries that policy's
+// `frame-ancestors 'none'` too (spec 001 #14).
+const mediaSandbox = "default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'; sandbox; frame-ancestors 'none'"
 
 // handleGetMedia serves one body to a project that points at it (#7). A hash
 // the project holds no ref to is `404`, exactly as one nobody holds is: a
@@ -126,12 +131,12 @@ func writeMediaBody(w http.ResponseWriter, sha string, file *store.MediaFile) {
 	header := w.Header()
 	header.Set("Content-Type", file.MimeType)
 	header.Set("Content-Length", strconv.Itoa(len(file.Body)))
-	header.Set("Cache-Control", mediaCacheControl)
 	// The answer depends on who asks: a browser that cached a body under one
 	// project must not serve it from the cache under another, which holds no
-	// ref to it (#7).
-	header.Set("Vary", mediaVary)
-	header.Set("X-Content-Type-Options", "nosniff")
+	// ref to it (#7). The Vary that says so is the guard's, sent on every
+	// route that needs a caller (spec 001 #17); only the lifetime is this
+	// handler's.
+	header.Set("Cache-Control", mediaCacheControl)
 	header.Set("Content-Security-Policy", mediaSandbox)
 	if !inlineMedia(file.MimeType) {
 		header.Set("Content-Disposition", `attachment; filename="`+sha[:16]+`"`)

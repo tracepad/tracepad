@@ -297,7 +297,11 @@ location / {
 
 - **`X-Forwarded-Proto: https`** is how the server knows the browser is on
   https, and it then marks the session cookie `Secure`
-  ([accounts.md](accounts.md#signing-in)).
+  ([accounts.md](accounts.md#signing-in)) and refuses writes from an
+  `http://` page on the same name. Configure the proxy to set
+  `X-Forwarded-Proto`, not append to it, as nginx's `proxy_set_header` does:
+  behind more than one proxy the first value counts, and it should never be
+  one a client sent.
 - **`Host` or `X-Forwarded-Host`** carries the name the browser typed. Writes
   from the interface are refused unless their `Origin` is one of this server's
   hosts, and behind a proxy that rewrites `Host` the forwarded one is how it
@@ -356,6 +360,15 @@ volumes:
 
 `docker compose logs tracepad` is where the first run's keys are — and where
 they stay, which is why [the first key is worth rotating](#the-keys-are-printed-once-to-the-log).
+
+## Stopping
+
+A `docker stop` gives the server ten seconds: it drains open requests for five,
+waits up to three more for the handlers it interrupted, closes its database
+and exits. An MCP client's open stream is ended as the stop begins, so it does
+not hold the drain. A second signal while it stops kills the process at once. Those windows are fixed and fit inside the default, so a longer
+`--stop-timeout` (Compose: `stop_grace_period`) changes nothing: a response
+still being written after five seconds is cut off either way.
 
 ## Upgrading, and backing up first
 

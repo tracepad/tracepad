@@ -14,7 +14,7 @@ import (
 // #8, spec 033 #7).
 //
 // A prompt is read per request and changes per deploy. The store already
-// says how long a label may be trusted (`Cache-Control: max-age=60`,
+// says how long a label may be trusted (`Cache-Control: private, max-age=60`,
 // docs/prompts.md), so the cache honours that and nothing else; when the
 // store is away the last answer is served stale, because the reference
 // application must survive a restart of its own observability. With nothing

@@ -138,7 +138,17 @@ export function returnTo(url: URL, fallback = '/dashboard'): string {
 		// to: `?next=/login` after a sign-in is a loop, and `?next=/invite`
 		// lands on a token that has just been spent.
 		const path = target.pathname;
-		if (OUTSIDE_THE_SHELL.includes(path)) return fallback;
+		// Measured decoded and without trailing slashes, so `/%6Cogin` and
+		// `/login/` are `/login`: the router decodes a path before it
+		// matches one and serves both, and the loop is the same loop. A
+		// malformed escape throws, and lands on the fallback below.
+		const bare = decodeURIComponent(path).replace(/\/+$/, '') || '/';
+		if (OUTSIDE_THE_SHELL.includes(bare)) return fallback;
+		// Same origin is not enough on its own: `/.//evil.example/x`
+		// resolves on this origin to the path `//evil.example/x`, which
+		// handed on as a path is a protocol-relative URL to another host
+		// (spec 006 #17). No screen here has an empty first segment.
+		if (path.startsWith('//')) return fallback;
 		return path + target.search;
 	} catch {
 		return fallback;
