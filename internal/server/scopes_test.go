@@ -217,16 +217,24 @@ func TestMintingTakesScopes(t *testing.T) {
 func TestTheLastIngestKeyAsksForTheEcho(t *testing.T) {
 	h := newAccountHarness(t)
 	keys := "/api/v1/projects/" + h.project.ID + "/keys/"
+
+	// The project's only key: what revoking it leaves is a project with no
+	// key at all, and the note says that first (Decision 24).
+	rec := h.call(t, "DELETE", keys+testPublic, nil, asAdmin)
+	if note, _ := decodeJSON[map[string]any](t, rec)["note"].(string); !strings.Contains(note, "leaves the project with none") {
+		t.Errorf("revoking the only key noted %q, want it to say the project is left with none", note)
+	}
+
 	reader := h.mint(t, "read")
 
-	rec := h.call(t, "DELETE", keys+testPublic, nil, asAdmin)
+	rec = h.call(t, "DELETE", keys+testPublic, nil, asAdmin)
 	expectStatus(t, rec, http.StatusOK)
 	preview := decodeJSON[struct {
 		DryRun  bool   `json:"dry_run"`
 		Confirm string `json:"confirm"`
 		Note    string `json:"note"`
 	}](t, rec)
-	if !preview.DryRun || preview.Confirm != h.project.Name || !strings.Contains(preview.Note, "ingest") {
+	if !preview.DryRun || preview.Confirm != h.project.Name || !strings.Contains(preview.Note, "last key that carries ingest") {
 		t.Errorf("revoking the last ingest key answered %+v, want a dry run asking for the name", preview)
 	}
 	if _, still := h.keysOf(t, h.project.ID)[testPublic]; !still {
@@ -387,6 +395,48 @@ func TestTheStreamIsJudgedByTheGuard(t *testing.T) {
 		if got := rec.Header().Get("Cache-Control"); rec.Code != http.StatusOK && got != callerCacheControl {
 			t.Errorf("%s: Cache-Control = %q", w, got)
 		}
+	}
+}
+
+// TestTheStreamReadsNoCookie: an MCP client holds a key, not a session, so the
+// stream reads the header alone. A cookie — from another origin, or one that
+// expired — is refused like no credential at all, with the 401 and the
+// challenge the stream promises, and is neither looked up nor cleared
+// (Decision 21; review of #123).
+func TestTheStreamReadsNoCookie(t *testing.T) {
+	h := mcpHarness(t)
+	owner := h.owner(t)
+	for name, mutate := range map[string]func(*http.Request){
+		"another origin's cookie": func(r *http.Request) {
+			asSession(owner)(r)
+			r.Header.Set("Origin", "https://elsewhere.example")
+		},
+		"this origin's cookie": asSession(owner),
+		"a stale cookie": func(r *http.Request) {
+			r.Header.Del("Authorization")
+			r.AddCookie(&http.Cookie{Name: sessionCookie, Value: "long-gone"})
+		},
+	} {
+		rec := h.mcpCall(t, mcpListTraces, mutate)
+		expectStatus(t, rec, http.StatusUnauthorized)
+		if got := rec.Header().Get("WWW-Authenticate"); got != `Bearer realm="tracepad"` {
+			t.Errorf("%s: WWW-Authenticate = %q, want the Bearer challenge", name, got)
+		}
+		if got := rec.Header().Get("Set-Cookie"); got != "" {
+			t.Errorf("%s: the stream set a cookie: %q", name, got)
+		}
+	}
+}
+
+// TestANewProjectSaysWhatItsFirstKeyMayDo: the first key holds all three
+// scopes (Decision 5), and the answer says so rather than leaving a client to
+// assume it (review of #123).
+func TestANewProjectSaysWhatItsFirstKeyMayDo(t *testing.T) {
+	h := newAccountHarness(t)
+	rec := h.call(t, "POST", "/api/v1/projects", mustJSON(t, map[string]any{"name": "fresh"}), asAdmin, asJSON)
+	expectStatus(t, rec, http.StatusCreated)
+	if got := decodeJSON[minted](t, rec); !slices.Equal(got.Scopes, allScopes) {
+		t.Errorf("a new project's first key = %+v, want all three scopes", got)
 	}
 }
 

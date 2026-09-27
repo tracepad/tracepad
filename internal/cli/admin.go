@@ -440,8 +440,8 @@ func keyName(name string) string {
 // scopesUsage is the usage error for a mint that does not say what the key may
 // do (spec 045 #15): the three words, and what each is for.
 const scopesUsage = "keys create needs --scope: one or more of ingest (send spans, " +
-	"media and scores, fetch a prompt), read (every read of the project's data) and " +
-	"write (every change a key may make), comma-separated"
+	"media and scores), read (every read of the project's data) and write (every " +
+	"change a key may make), comma-separated; any key fetches a prompt"
 
 func (r *run) keysCreate(ctx context.Context, args []string) error {
 	fs := r.flags("keys create")

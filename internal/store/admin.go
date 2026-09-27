@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"fmt"
 	"slices"
-	"strings"
 	"time"
 )
 
@@ -423,24 +422,16 @@ type KeyRevoke struct {
 func (k *KeyRevoke) apply(tx *sql.Tx) error {
 	k.Revoked, k.Last = false, false
 
-	var owner, scopes string
-	err := tx.QueryRow(`SELECT project_id, scopes FROM api_keys WHERE public_key = ?`, k.PublicKey).
-		Scan(&owner, &scopes)
-	if err == sql.ErrNoRows || (err == nil && owner != k.ProjectID) {
+	keys, err := projectKeyScopes(context.Background(), tx, k.ProjectID)
+	if err != nil {
+		return err
+	}
+	if _, ok := keys[k.PublicKey]; !ok {
 		return &Rejection{Kind: RejectNotFound,
 			Message: fmt.Sprintf("this project has no key %q", k.PublicKey)}
 	}
-	if err != nil {
-		return fmt.Errorf("read key: %w", err)
-	}
-	var count, ingest int
-	if err := tx.QueryRow(`SELECT COUNT(*), COUNT(*) FILTER (WHERE ' ' || scopes || ' ' LIKE '% ingest %')
-	                         FROM api_keys WHERE project_id = ?`, k.ProjectID).
-		Scan(&count, &ingest); err != nil {
-		return fmt.Errorf("count project keys: %w", err)
-	}
 
-	k.Last = LastOfItsKind(count, ingest, strings.Fields(scopes))
+	k.Last = LastOfItsKind(keys, k.PublicKey)
 	if k.Last {
 		if _, err := confirmProjectName(tx, k.ProjectID, k.Confirm); err != nil {
 			return err
@@ -458,10 +449,22 @@ func (k *KeyRevoke) apply(tx *sql.Tx) error {
 
 // LastOfItsKind reports whether revoking a key asks for the echo: it is the
 // project's last key (spec 005 #12), or the last that carries `ingest` (spec
-// 045 #11). `count` and `ingest` are the project's keys and those among them
-// that carry `ingest`, the revoked one included.
-func LastOfItsKind(count, ingest int, scopes []string) bool {
-	return count == 1 || ingest == 1 && slices.Contains(scopes, ScopeIngest)
+// 045 #11). `keys` is every key of the project with its scopes, the revoked
+// one included — what ProjectKeyScopes answers, and what the revocation reads
+// again inside its write, so that the preview and the write ask one rule.
+func LastOfItsKind(keys map[string][]string, publicKey string) bool {
+	if len(keys) == 1 {
+		return true
+	}
+	if !slices.Contains(keys[publicKey], ScopeIngest) {
+		return false
+	}
+	for other, scopes := range keys {
+		if other != publicKey && slices.Contains(scopes, ScopeIngest) {
+			return false
+		}
+	}
+	return true
 }
 
 // ProjectUpdate renames a project or moves its retention windows. A window

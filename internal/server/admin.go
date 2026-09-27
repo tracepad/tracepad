@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -321,9 +320,12 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 	if !s.submit(w, r, create) {
 		return
 	}
+	// The first key may do everything (spec 045 #5); saying so is what lets
+	// a client show the lines that fit it without assuming.
 	writeJSON(w, http.StatusCreated, projectResponse(create.Project).
 		put("public_key", keys.PublicKey).
 		put("secret_key", keys.Secret).
+		put("scopes", strings.Fields(store.AllScopes)).
 		put("note", "the secret key is shown only here; only its hash is stored"))
 }
 
@@ -694,8 +696,8 @@ func (s *Server) handleCreateKey(w http.ResponseWriter, r *http.Request) {
 // scopesRequired is the answer to a mint that does not say what the key may do,
 // or says it in a word that is not one of the three (spec 045 #6).
 const scopesRequired = `"scopes" must list what the key may do: one or more of ` +
-	`"ingest" (send spans, media and scores, fetch a prompt), "read" (every read of the ` +
-	`project's data) and "write" (every change a key may make)`
+	`"ingest" (send spans, media and scores), "read" (every read of the ` +
+	`project's data) and "write" (every change a key may make); any key fetches a prompt`
 
 // keyOrigin is who is minting, as the key records it (spec 045 #8). A key
 // never mints (#4), so the guard has left a session or the admin token.
@@ -770,35 +772,28 @@ func (s *Server) handleRevokeKey(w http.ResponseWriter, r *http.Request) {
 	}
 	publicKey := r.PathValue("public_key")
 
-	keys, err := s.store.ProjectKeys(r.Context(), project.ID)
+	keys, err := s.store.ProjectKeyScopes(r.Context(), project.ID)
 	if err != nil {
 		readFailed(w, r, "failed to read the keys", err)
 		return
 	}
-	var revoked *store.KeyInfo
-	ingest := 0
-	for i, key := range keys {
-		if key.PublicKey == publicKey {
-			revoked = &keys[i]
-		}
-		if slices.Contains(key.Scopes, store.ScopeIngest) {
-			ingest++
-		}
-	}
-	if revoked == nil {
+	if _, ok := keys[publicKey]; !ok {
 		writeError(w, http.StatusNotFound, "this project has no key "+publicKey)
 		return
 	}
 
-	// The store decides again inside the write, from the rows as they are
-	// then; this is the same question asked early, only to choose between
-	// previewing and going ahead.
+	// The store decides again inside the write, by the same rule, from the
+	// rows as they are then; this is the same question asked early, only to
+	// choose between previewing and going ahead.
 	confirm := values.Get("confirm")
-	if store.LastOfItsKind(len(keys), ingest, revoked.Scopes) && confirm == "" {
-		note := "this is the project's last key that carries ingest: revoking it stops ingest " +
-			"until another key with the ingest scope is minted"
-		if !slices.Contains(revoked.Scopes, store.ScopeIngest) {
-			note = "this is the project's last key: revoking it leaves the project with none"
+	if store.LastOfItsKind(keys, publicKey) && confirm == "" {
+		// The last key first: what it leaves is a project with none,
+		// whatever it could do (spec 045 #24).
+		note := "this is the project's last key: revoking it leaves the project with none, " +
+			"and ingest stops until another key with the ingest scope is minted"
+		if len(keys) > 1 {
+			note = "this is the project's last key that carries ingest: revoking it stops ingest " +
+				"until another key with the ingest scope is minted"
 		}
 		writeJSON(w, http.StatusOK, object{}.
 			put("dry_run", true).

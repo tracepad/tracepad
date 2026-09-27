@@ -222,6 +222,34 @@ func (s *Store) ProjectKeys(ctx context.Context, projectID string) ([]KeyInfo, e
 	return keys, rows.Err()
 }
 
+// ProjectKeyScopes is every key of a project, public key → scopes: all a
+// revocation needs to know to find the key and to decide whether it is the
+// last of its kind (LastOfItsKind).
+func (s *Store) ProjectKeyScopes(ctx context.Context, projectID string) (map[string][]string, error) {
+	return projectKeyScopes(ctx, s.db, projectID)
+}
+
+// projectKeyScopes reads a project's keys with their scopes, through the pool
+// or inside a write.
+func projectKeyScopes(ctx context.Context, q interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}, projectID string) (map[string][]string, error) {
+	rows, err := q.QueryContext(ctx, `SELECT public_key, scopes FROM api_keys WHERE project_id = ?`, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("read project keys: %w", err)
+	}
+	defer rows.Close()
+	keys := map[string][]string{}
+	for rows.Next() {
+		var publicKey, scopes string
+		if err := rows.Scan(&publicKey, &scopes); err != nil {
+			return nil, err
+		}
+		keys[publicKey] = strings.Fields(scopes)
+	}
+	return keys, rows.Err()
+}
+
 // standing is the minter's relation to a project, most final first: an
 // account that is gone or cannot sign in is that before it is anything else,
 // and an owner has no membership row to read a role from (spec 028 #2).

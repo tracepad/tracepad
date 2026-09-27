@@ -1898,7 +1898,7 @@ export interface components {
              */
             last_used_at: string | null;
         };
-        /** @description What the key may do, in this order: `ingest` (send spans, the Langfuse media channel, write scores, fetch a prompt), `read` (every read of the project's data), `write` (every change a key may make). A key that predates scopes, and a key the server made by itself, holds all three */
+        /** @description What the key may do, in this order: `ingest` (send spans, the Langfuse media channel, write scores), `read` (every read of the project's data), `write` (every change a key may make). A key that predates scopes, and a key the server made by itself, holds all three. Fetching one prompt is open to every key, whatever its scopes */
         KeyScopes: ("ingest" | "read" | "write")[];
         /** @description Who minted a key. `account`: an owner or editor signed in; `admin_token`: the admin token; `startup`: the server itself, for the first-start project or one `TRACEPAD_PROJECTS` declares; `unknown`: the key predates the record */
         KeyMinter: {
@@ -6239,7 +6239,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** @description What the key may do: `ingest` sends spans, uses the Langfuse media channel, writes scores and fetches a prompt; `read` is every read of the project's data; `write` is every change a key may make. Any non-empty combination; duplicates collapse. Missing, empty or an unknown word is a 400 */
+                    /** @description What the key may do: `ingest` sends spans, uses the Langfuse media channel and writes scores; `read` is every read of the project's data; `write` is every change a key may make. Any non-empty combination; duplicates collapse. Missing, empty or an unknown word is a 400 */
                     scopes: ("ingest" | "read" | "write")[];
                     /** @description Which program holds the key. Trimmed; at most 64 characters; no control or bidirectional control characters (422); not unique */
                     name?: string;

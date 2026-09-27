@@ -26,7 +26,7 @@ and never changed afterwards:
 
 | Scope | What a key with it may do |
 |---|---|
-| `ingest` | What a running application does: send spans on both OTLP routes, use the Langfuse media channel, write scores (`POST /api/v1/scores`) and fetch one prompt (`GET /api/v1/prompts/{name}`). |
+| `ingest` | What a running application does: send spans on both OTLP routes, use the Langfuse media channel, write scores (`POST /api/v1/scores`). Fetching one prompt (`GET /api/v1/prompts/{name}`) is open to every key, so an application's `ingest` key covers it without a scope of its own. |
 | `read` | Every read of the project's data, and nothing that changes it. |
 | `write` | Every change a key may make to the project: prompts, datasets and their items, runs, score configs, queues and the work in them — claiming the next item included — retracting a score, deleting traces, the retention windows and user-data erasure. |
 

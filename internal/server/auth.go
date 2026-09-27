@@ -334,7 +334,7 @@ func (s *Server) resolve(w http.ResponseWriter, r *http.Request, rt route) (*cal
 		writeError(w, http.StatusServiceUnavailable, "the API is not available")
 		return nil, false
 	}
-	c, ok := s.identify(w, r)
+	c, ok := s.identify(w, r, rt)
 	if !ok {
 		return nil, false
 	}
@@ -501,11 +501,21 @@ type signIn struct {
 // cookie when both are present: an explicit credential beats an ambient one,
 // which is what keeps a command-line tool's behaviour untouched next to a
 // browser (Decision 5).
-func (s *Server) identify(w http.ResponseWriter, r *http.Request) (*caller, bool) {
+//
+// The stream reads the header and nothing else: a cookie is not what an MCP
+// client holds, and reading one would answer it the cross-origin check's 403,
+// or clear a stale one, where the stream promises a 401 and its challenge
+// (spec 045 #21).
+func (s *Server) identify(w http.ResponseWriter, r *http.Request, rt route) (*caller, bool) {
 	if c := loopbackCaller(r); c != nil {
 		return c, true
 	}
-	if header := r.Header.Get("Authorization"); header != "" {
+	header := r.Header.Get("Authorization")
+	if header == "" && rt.Policy == stream {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return nil, false
+	}
+	if header != "" {
 		c, ok := guardLookup(w, r, "key", func(ctx context.Context) (*caller, error) {
 			return s.headerCaller(ctx, header)
 		})

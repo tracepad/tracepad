@@ -44,7 +44,7 @@ export type Scope = Key['scopes'][number];
 export const SCOPES: { scope: Scope; does: string }[] = [
 	{
 		scope: 'ingest',
-		does: 'send spans, use the Langfuse media channel, write scores, fetch a prompt — what a running application does'
+		does: 'send spans, use the Langfuse media channel, write scores — what a running application does'
 	},
 	{ scope: 'read', does: "every read of the project's data, and nothing that changes it" },
 	{
