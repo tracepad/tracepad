@@ -157,7 +157,7 @@ func (f *sweepFixture) rawSpans(t *testing.T, id int64) []string {
 
 func (f *sweepFixture) erase(t *testing.T, user string, opts ...func(*UserErasure)) ErasureResult {
 	t.Helper()
-	e := UserErasure{ProjectID: f.project.ID, UserID: user, Confirm: user, Chunk: 500, ChunkHours: 1}
+	e := UserErasure{ProjectID: f.project.ID, UserID: user, Confirm: user, Chunk: 500}
 	for _, opt := range opts {
 		opt(&e)
 	}
@@ -470,7 +470,7 @@ func TestAnErasureCutOffIsFinishedByItsRepeat(t *testing.T) {
 		t.Run(fmt.Sprintf("cut off after step %d", step), func(t *testing.T) {
 			f := build(t)
 			cut := errors.New("the client hung up")
-			e := UserErasure{ProjectID: f.project.ID, UserID: "user-a", Confirm: "user-a", Chunk: 500, ChunkHours: 1,
+			e := UserErasure{ProjectID: f.project.ID, UserID: "user-a", Confirm: "user-a", Chunk: 500,
 				after: func(at int) error {
 					if at == step {
 						return cut
@@ -526,7 +526,7 @@ func TestAnErasureCutOffIsFinishedByItsRepeat(t *testing.T) {
 		writer := &failingChunk{jobSubmitter: f.writer, at: 2, err: broken}
 		var late int64
 		// One trace a chunk, so that the second fails with one behind it.
-		e := UserErasure{ProjectID: f.project.ID, UserID: "user-a", Confirm: "user-a", Chunk: 1, ChunkHours: 1,
+		e := UserErasure{ProjectID: f.project.ID, UserID: "user-a", Confirm: "user-a", Chunk: 1,
 			after: func(step int) error {
 				if step == 1 {
 					late = f.ingestOTLP(t, export([]*tracepb.Span{
@@ -941,7 +941,7 @@ func TestAWrongEchoScrubsNothing(t *testing.T) {
 	f := newErasureFixture(t)
 	batch := f.ingestOTLP(t, export([]*tracepb.Span{otlpSpan(t, 1, 1, "user-a", "", "a", nil)}), false, daysAgo(1))
 	_, err := f.store.EraseUserData(t.Context(), f.writer, UserErasure{ProjectID: f.project.ID,
-		UserID: "user-a", Confirm: "user-b", Chunk: 500, ChunkHours: 1})
+		UserID: "user-a", Confirm: "user-b", Chunk: 500})
 	var rejection *Rejection
 	if !errors.As(err, &rejection) || rejection.Kind != RejectInvalid {
 		t.Fatalf("err = %v, want the echo refused", err)
@@ -1043,7 +1043,7 @@ func TestAnErasureOutlivesItsCaller(t *testing.T) {
 	caller, leave := context.WithCancel(t.Context())
 	defer leave()
 	var late int64
-	e := UserErasure{ProjectID: f.project.ID, UserID: "user-a", Confirm: "user-a", Chunk: 500, ChunkHours: 1,
+	e := UserErasure{ProjectID: f.project.ID, UserID: "user-a", Confirm: "user-a", Chunk: 500,
 		after: func(step int) error {
 			switch step {
 			case 1:

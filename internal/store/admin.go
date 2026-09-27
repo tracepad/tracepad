@@ -689,20 +689,21 @@ func (r *ProjectRestore) apply(tx *sql.Tx) error {
 // emptied still counting the traces — and a repeat of the request could not
 // find those hours again, because the traces that named them were gone.
 //
-// The rolls are what bound a chunk now, not the traces alone: a chunk is
-// `Limit` traces or `HourLimit` distinct hours, whichever comes first, and
-// the handler sets the hours to one. A whole-hour recompute of a dense hour
-// is seconds (spec 023 #19's numbers), and a transaction of several would
-// hold the one writer while ingest queued behind it; one is what the
-// aggregator's own jobs already cost.
+// A chunk takes the user's traces in the order they started, whole hours at a
+// time (spec 047 #1): at most `Limit` traces, and past its first hour at most
+// `RollBudget` of what its rolls recompute (#2). In start order a user's hours
+// are contiguous, so each is rolled once — twice for an hour of more than
+// `Limit` traces, which is cut. Taken in arrival order, as before, a chunk kept
+// one hour's worth of the first 500 traces: for a client that exports out of
+// start order, about two traces, one commit and one roll per chunk.
 type UserDataErase struct {
 	ProjectID string
 	UserID    string
 	Confirm   string
 	Limit     int
-	// HourLimit caps the distinct hours one chunk takes traces from, and
-	// so the rolls one transaction performs. Zero is no cap.
-	HourLimit int
+	// RollBudget bounds what the chunk's rolls recompute past its first
+	// hour (spec 047 #2); zero is DeleteRollBudget.
+	RollBudget int64
 	// Now is the clock the freeze is measured against (spec 013 #11): an
 	// hour past the project's retention window is left as it stands. Zero
 	// is the wall clock, not the epoch — measured against 1970 nothing
@@ -715,8 +716,8 @@ type UserDataErase struct {
 	// were re-rolled.
 	Hours []int64
 	// More reports that traces of the user remain after this chunk: the
-	// caller submits another. A chunk cut short by HourLimit is not a
-	// chunk that came back short.
+	// caller submits another. A chunk cut at an hour is not a chunk that
+	// came back short.
 	More bool
 	// CompactionRequested is the stamp of the compaction this chunk asked
 	// for, zero when it deleted nothing (spec 044 #1, #11).
@@ -758,55 +759,60 @@ func (e *UserDataErase) apply(tx *sql.Tx) error {
 	}
 
 	e.Hours, e.More = nil, false
-	rows, err := tx.Query(
-		`SELECT id, timestamp, ingested_at, updated_at FROM traces WHERE project_id = ? AND user_id = ? LIMIT ?`,
-		e.ProjectID, e.UserID, e.Limit)
+	// One trace past the chunk says whether there is more, and whether the
+	// chunk's last hour is whole.
+	rows, err := tx.Query(userTracesByStart, e.ProjectID, e.UserID, e.Limit+1)
 	if err != nil {
 		return fmt.Errorf("select a user's traces: %w", err)
 	}
-	var ids []any
-	updates, ingests := map[string]int64{}, map[string]int64{}
-	seen := map[int64]bool{}
-	scanned := 0
+	type row struct {
+		id                string
+		hour              int64
+		ingested, updated int64
+	}
+	var read []row
+	var hours []int64
 	for rows.Next() {
 		var (
-			id string
+			r row
 			// NULL for a trace no span has reached — one a score
 			// or an item names before its spans arrived. Trace
 			// deletion reads it the same way.
 			timestamp sql.NullInt64
-			ingested  int64
 			updated   sql.NullInt64
 		)
-		if err := rows.Scan(&id, &timestamp, &ingested, &updated); err != nil {
+		if err := rows.Scan(&r.id, &timestamp, &r.ingested, &updated); err != nil {
 			rows.Close()
 			return err
 		}
-		scanned++
-		hour := HourOf(timestamp.Int64)
-		if !seen[hour] {
-			if e.HourLimit > 0 && len(e.Hours) == e.HourLimit {
-				// The hour cap: a trace of a further hour is a later
-				// chunk's. Skipped rather than stopped at, so that a
-				// user whose traces arrived interleaved across hours
-				// still fills the chunk for the hours it has, and
-				// those hours are rolled by this chunk alone rather
-				// than by every chunk that reaches into them.
-				e.More = true
-				continue
-			}
-			seen[hour] = true
-			e.Hours = append(e.Hours, hour)
-		}
-		ids = append(ids, id)
-		updates[id], ingests[id] = updated.Int64, ingested
+		r.hour, r.updated = HourOf(timestamp.Int64), updated.Int64
+		read = append(read, r)
+		hours = append(hours, r.hour)
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
 		return err
 	}
-	if scanned == e.Limit {
-		e.More = true
+	var ids []any
+	updates, ingests := map[string]int64{}, map[string]int64{}
+	if len(read) > 0 {
+		costs, err := rollCosts(context.Background(), tx, e.ProjectID, hours)
+		if err != nil {
+			return err
+		}
+		budget := e.RollBudget
+		if budget == 0 {
+			budget = DeleteRollBudget
+		}
+		end := HourChunks(hours, costs, e.Limit, budget)[0]
+		e.More = end < len(read)
+		for _, r := range read[:end] {
+			if len(e.Hours) == 0 || e.Hours[len(e.Hours)-1] != r.hour {
+				e.Hours = append(e.Hours, r.hour)
+			}
+			ids = append(ids, r.id)
+			updates[r.id], ingests[r.id] = r.updated, r.ingested
+		}
 	}
 	if len(ids) == 0 {
 		// Nothing to delete or to roll; the per-user rows still go
@@ -818,10 +824,8 @@ func (e *UserDataErase) apply(tx *sql.Tx) error {
 	// hanging off the traces, the traces, the orphaned payloads, the search
 	// entries, then one whole `RollHour` per hour this chunk touched, in
 	// this same transaction. The chunks follow `idx_traces_user`, which is
-	// arrival order, so an hour straddles a chunk boundary rarely and is
-	// rolled about once: measured on a 21k-trace user over 699 hours, 738
-	// rolls. The erased user's own summary is not recomputed: it goes
-	// outright, below.
+	// start order, so an hour is rolled by one chunk. The erased user's own
+	// summary is not recomputed: it goes outright, below.
 	//
 	// Before the traces go, what only they lead to: the sessions they
 	// carried and the items cut from them are found through the traces.
@@ -858,6 +862,11 @@ func (e *UserDataErase) apply(tx *sql.Tx) error {
 	// not known in advance.
 	return e.eraseRollup(tx)
 }
+
+// userTracesByStart is a chunk's selection: the user's traces in the order they
+// started, walking `idx_traces_user` (spec 047 #1).
+const userTracesByStart = `SELECT id, timestamp, ingested_at, updated_at FROM traces
+	WHERE project_id = ? AND user_id = ? ORDER BY timestamp LIMIT ?`
 
 // eraseRollup deletes the user's per-user rows and, when that removed any and
 // the chunk has not asked already, asks for the compaction every erasure that

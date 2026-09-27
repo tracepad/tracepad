@@ -31,19 +31,13 @@ import (
 // the project's name, or the user id. An id is a string you paste; a name is a
 // thing you mean, so a typoed or hallucinated target cannot match.
 
-// eraseChunk is how many of a user's traces one erasure transaction removes,
-// and eraseChunkHours how many distinct hours it takes them from, whichever
-// bound comes first. Erasure is synchronous (#7) but not unbounded: the
-// request loops over chunks so that a user with a year of traffic does not
-// hold the writer for the length of a single transaction — and since each
-// chunk re-rolls the hours it empties in that same transaction (spec 023
-// #19), a chunk is one hour's traces: a whole-hour recompute of a dense hour
-// is seconds, which is what the aggregator's own jobs already cost the
-// writer, and a transaction of several would stall ingest for their sum.
-const (
-	eraseChunk      = 500
-	eraseChunkHours = 1
-)
+// eraseChunk is the most of a user's traces one erasure transaction removes.
+// Erasure is synchronous (#7) but not unbounded: the request loops over chunks
+// so that a user with a year of traffic does not hold the writer for the length
+// of a single transaction. Each chunk re-rolls the hours it empties in that
+// same transaction (spec 023 #19), so it takes whole hours in start order
+// within the store's roll budget as well (spec 047 #1, #2).
+const eraseChunk = 500
 
 // authorize is who is asking, as the guard already worked it out (spec 028
 // Decision 7). It reads the request's context and refuses nothing: a handler
@@ -884,12 +878,11 @@ func (s *Server) handleEraseUserData(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	erased, err := s.store.EraseUserData(r.Context(), s.writer, store.UserErasure{
-		ProjectID:  project.ID,
-		UserID:     userID,
-		Confirm:    lookupLabel(values.Get("confirm")),
-		Chunk:      eraseChunk,
-		ChunkHours: eraseChunkHours,
-		Now:        time.Now().UnixNano(),
+		ProjectID: project.ID,
+		UserID:    userID,
+		Confirm:   lookupLabel(values.Get("confirm")),
+		Chunk:     eraseChunk,
+		Now:       time.Now().UnixNano(),
 	})
 	if err != nil {
 		submitFailure(w, err, apiWrite)

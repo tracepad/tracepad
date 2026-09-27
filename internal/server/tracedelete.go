@@ -167,9 +167,22 @@ func (s *Server) handleDeleteTraces(w http.ResponseWriter, r *http.Request) {
 	filter.Limit = limit + 1
 	// The selection is a listing's read, and is bounded as one; the
 	// deletion after it is the writer's (spec 043 #29).
-	var rows []*store.TraceRow
+	// What rolling each of their hours costs is read with them, for the
+	// chunks below (spec 047 #4).
+	var (
+		rows  []*store.TraceRow
+		hours []int64
+		costs map[int64]int64
+	)
 	if !s.readInSlot(w, r, "failed to select the matching traces", func(ctx context.Context) (err error) {
-		rows, err = s.store.Traces(ctx, project.ID, filter)
+		if rows, err = s.store.Traces(ctx, project.ID, filter); err != nil {
+			return err
+		}
+		hours = make([]int64, 0, len(rows))
+		for _, row := range rows[:min(len(rows), limit)] {
+			hours = append(hours, store.HourOf(row.Timestamp))
+		}
+		costs, err = s.store.RollCosts(ctx, project.ID, hours)
 		return err
 	}) {
 		return
@@ -179,18 +192,18 @@ func (s *Server) handleDeleteTraces(w http.ResponseWriter, r *http.Request) {
 		rows = rows[:limit]
 	}
 
-	// Chunks of one hour, at most `TraceDeleteChunk` traces each (#3), each
-	// its own transaction: the rows arrive newest first, so an hour's
-	// traces are contiguous and a chunk ends where the hour does. A client
-	// that hangs up between chunks loses nothing but the answer. The round
-	// ends early at `deleteRoundChunks` (#14) and says so with `more`: the
-	// traces past it are still there, and the next request takes them.
+	// Chunks of whole hours, at most `TraceDeleteChunk` traces and the roll
+	// budget each (#3, spec 047 #4), each its own transaction: the rows
+	// arrive newest first, so an hour's traces are contiguous and a chunk
+	// ends where an hour does. A client that hangs up between chunks loses
+	// nothing but the answer. The round ends early at `deleteRoundChunks`
+	// (#14) and says so with `more`: the traces past it are still there, and
+	// the next request takes them.
 	var deleted store.DeleteCounts
 	var compaction int64
 	now := time.Now().UnixNano()
 	confirm := values.Get("confirm")
 	var chunk []string
-	var hour int64
 	chunks := 0
 	flush := func() bool {
 		if len(chunk) == 0 {
@@ -214,22 +227,19 @@ func (s *Server) handleDeleteTraces(w http.ResponseWriter, r *http.Request) {
 		chunks++
 		return true
 	}
-	for _, row := range rows {
-		at := store.HourOf(row.Timestamp)
-		if len(chunk) > 0 && (at != hour || len(chunk) == store.TraceDeleteChunk) {
-			if !flush() {
-				return
-			}
-			if chunks == deleteRoundChunks {
-				more = true
-				break
-			}
+	start := 0
+	for _, end := range store.HourChunks(hours, costs, store.TraceDeleteChunk, s.deleteRollBudget) {
+		if chunks == deleteRoundChunks {
+			more = true
+			break
 		}
-		hour = at
-		chunk = append(chunk, row.ID)
-	}
-	if !flush() {
-		return
+		for _, row := range rows[start:end] {
+			chunk = append(chunk, row.ID)
+		}
+		start = end
+		if !flush() {
+			return
+		}
 	}
 	// A filter that matched nothing ran no chunk, and so checked no echo:
 	// one empty job checks it inside the transaction like every other
