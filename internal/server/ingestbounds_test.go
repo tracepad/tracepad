@@ -416,7 +416,7 @@ func TestAnOversizedBodyIsStill413UnderTheBudget(t *testing.T) {
 // same rows; 200 tags with repeats keep the first 50 distinct in order
 // (spec 043 #14).
 func TestLabelsAreCutAtIngest(t *testing.T) {
-	long := strings.Repeat("ж", 20_000)
+	long := strings.Repeat("字", 20_000)
 	var tags []string
 	for i := range 200 {
 		tags = append(tags, fmt.Sprintf("t%d", i%80))
@@ -447,7 +447,7 @@ func TestLabelsAreCutAtIngest(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &trace); err != nil {
 		t.Fatal(err)
 	}
-	cut := strings.Repeat("ж", 1000)
+	cut := strings.Repeat("字", 1000)
 	if trace.Name != cut || trace.UserID != cut || len(trace.Observations) != 1 || trace.Observations[0].Model != cut {
 		t.Errorf("name %d, user %d characters, want both cut at 1000", len([]rune(trace.Name)), len([]rune(trace.UserID)))
 	}
