@@ -171,7 +171,7 @@ export interface paths {
         };
         /**
          * Whether this server still needs its first owner
-         * @description The one thing the interface can learn without a credential. While it answers `{"required": true}` the server prints a setup link at every start (good for 24 hours) and every other screen but an invitation redirects to `/setup`. `enabled` is false when the server runs with `TRACEPAD_SETUP=off`: no link is printed, `POST /api/v1/setup` refuses, and the first owner is created with the admin token.
+         * @description The one thing the interface can learn without a credential. While it answers `{"required": true}` the server prints a setup link at every start (good for 24 hours) and every other screen but an invitation redirects to `/setup`. `enabled` is false when the server runs with `TRACEPAD_SETUP=off`: no link is printed, `POST /api/v1/setup` refuses, and the first owner is created with the admin token. `expired` is true when setup is needed and on but no link this start printed still works — past its 24 hours, or never minted because an owner could sign in at start; a restart prints a new one.
          */
         get: operations["getSetup"];
         put?: never;
@@ -2823,6 +2823,7 @@ export interface operations {
                     "application/json": {
                         required: boolean;
                         enabled: boolean;
+                        expired: boolean;
                     };
                 };
             };

@@ -304,18 +304,21 @@ func AdminTokenFile(getenv func(string) string) (string, error) {
 	if path == "" {
 		return "", nil
 	}
-	file, err := os.Open(path)
-	if err != nil {
-		return "", fmt.Errorf("TRACEPAD_ADMIN_TOKEN_FILE: %w", err)
-	}
-	defer file.Close()
-	info, err := file.Stat()
+	// The kind of file is asked before it is opened: opening a named pipe
+	// waits for somebody to write to it, and a start that waits for ever
+	// says nothing at all.
+	info, err := os.Stat(path)
 	if err != nil {
 		return "", fmt.Errorf("TRACEPAD_ADMIN_TOKEN_FILE: %w", err)
 	}
 	if !info.Mode().IsRegular() {
 		return "", fmt.Errorf("TRACEPAD_ADMIN_TOKEN_FILE: %s is not a regular file", path)
 	}
+	file, err := os.Open(path)
+	if err != nil {
+		return "", fmt.Errorf("TRACEPAD_ADMIN_TOKEN_FILE: %w", err)
+	}
+	defer file.Close()
 	raw, err := io.ReadAll(io.LimitReader(file, maxAdminTokenFile+1))
 	if err != nil {
 		return "", fmt.Errorf("TRACEPAD_ADMIN_TOKEN_FILE: %w", err)

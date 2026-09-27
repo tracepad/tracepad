@@ -102,11 +102,19 @@ func newLoginLimiter() *loginLimiter {
 func loginKey(email string) string { return strings.ToLower(strings.TrimSpace(email)) }
 
 // loginAttempt is a reservation: an attempt counted against its email from
-// before the password is compared until the answer is known. Exactly one of
-// failed, succeeded or cancel ends it.
+// before the password is compared until the answer is known. The first of
+// failed, succeeded or cancel ends it and the rest do nothing, so a handler
+// can defer cancel as soon as it holds one — a panic between the two is then
+// an attempt given back rather than one in flight for ever.
+//
+// It remembers the record it was counted on: once that record has been
+// evicted and the email has come back, the record under the key is another
+// attempt's, and this one must not take that one's place in flight.
 type loginAttempt struct {
 	limiter *loginLimiter
 	key     string
+	record  *loginRecord
+	done    bool
 }
 
 // reserve counts an attempt on an email before its password is compared, or
@@ -136,19 +144,26 @@ func (l *loginLimiter) reserve(email string, now time.Time) (*loginAttempt, time
 	record.pending++
 	l.settle(record)
 	l.evict(key)
-	return &loginAttempt{limiter: l, key: key}, 0
+	return &loginAttempt{limiter: l, key: key, record: record}, 0
 }
 
 // failed turns the reservation into a failure.
 func (a *loginAttempt) failed(now time.Time) {
+	if a.done {
+		return
+	}
+	a.done = true
 	l := a.limiter
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.expire(now)
 	// A record evicted while this attempt was in flight comes back: the
-	// failure is real whatever happened to the map meanwhile.
+	// failure is real whatever happened to the map meanwhile. Only its own
+	// record's place in flight is this attempt's to give back.
+	if a.owns() {
+		a.record.pending = max(a.record.pending-1, 0)
+	}
 	record := l.touch(a.key, now)
-	record.pending = max(record.pending-1, 0)
 	record.failures = append(record.failures, now)
 	l.marks.PushBack(failureMark{record: record, at: now})
 	l.settle(record)
@@ -187,14 +202,25 @@ func (a *loginAttempt) cancel() {
 }
 
 func (a *loginAttempt) end(change func(*loginRecord)) {
+	if a.done {
+		return
+	}
+	a.done = true
 	l := a.limiter
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if record, ok := l.entries[a.key]; ok {
-		record.pending = max(record.pending-1, 0)
-		change(record)
-		l.settle(record)
+	if a.owns() {
+		a.record.pending = max(a.record.pending-1, 0)
+		change(a.record)
+		l.settle(a.record)
 	}
+}
+
+// owns reports whether the record under the attempt's key is still the one it
+// was counted on. The caller holds the lock.
+func (a *loginAttempt) owns() bool {
+	record, ok := a.limiter.entries[a.key]
+	return ok && record == a.record
 }
 
 // touch finds or makes an email's record and ages its failures. The caller
@@ -312,4 +338,33 @@ func (s *Server) enterPasswordGate(w http.ResponseWriter, r *http.Request) (*sto
 	w.Header().Set("Retry-After", "1")
 	writeError(w, http.StatusServiceUnavailable, store.ErrPasswordsBusy.Error())
 	return nil, false
+}
+
+// underPasswordGate runs work holding a place at the password gate, and gives
+// the place back however work ends — a panic included: net/http recovers a
+// handler that panics, and a place it had taken would be gone until a restart,
+// a few of them a gate that answers every sign-in 503. It reports false,
+// having answered the client, when the gate turned the request away.
+func (s *Server) underPasswordGate(w http.ResponseWriter, r *http.Request, work func(*store.PasswordSlot)) bool {
+	slot, ok := s.enterPasswordGate(w, r)
+	if !ok {
+		return false
+	}
+	defer slot.Release()
+	work(slot)
+	return true
+}
+
+// hashUnderGate hashes a password whose length the caller has already checked
+// — the one check that answers the person, with a 422 — under a place at the
+// gate, answering 503 or 500 itself.
+func (s *Server) hashUnderGate(w http.ResponseWriter, r *http.Request, password string) ([]byte, bool) {
+	var (
+		hash []byte
+		ok   bool
+	)
+	if !s.underPasswordGate(w, r, func(slot *store.PasswordSlot) { hash, ok = hashPassword(w, slot, password) }) {
+		return nil, false
+	}
+	return hash, ok
 }

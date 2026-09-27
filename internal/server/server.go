@@ -85,6 +85,9 @@ type Server struct {
 	setupExpires time.Time
 	setupOff     bool
 	limiter      *loginLimiter
+	// passwordChanges counts wrong current passwords per account, apart
+	// from the login's count by email (spec 028 #31).
+	passwordChanges *loginLimiter
 	// passwords bounds the bcrypt work in flight, and passwordLog paces
 	// the warning for what it turns away (spec 028 #31).
 	passwords   *store.PasswordGate
@@ -153,28 +156,29 @@ func New(cfg *config.Config, version string, st *store.Store, writer JobWriter, 
 		sessionLife = config.DefaultSessionLife
 	}
 	s := &Server{
-		store:          st,
-		writer:         writer,
-		sweeper:        sweeper,
-		version:        version,
-		storeRaw:       cfg.StoreRaw,
-		maxBodyBytes:   maxBody,
-		responseBudget: budget,
-		mcp:            cfg.MCP,
-		adminToken:     cfg.AdminToken,
-		sessionLife:    sessionLife,
-		setupOff:       cfg.SetupDisabled,
-		limiter:        newLoginLimiter(),
-		passwords:      newPasswordGate(),
-		passwordLog:    &logLimiter{every: time.Minute},
-		handlerGrace:   defaultHandlerGrace,
-		inflatedLog:    &logLimiter{every: time.Minute},
-		originLog:      &logLimiter{every: time.Minute, keys: 64},
-		assets:         ui.Assets(),
-		startedAt:      time.Now(),
-		counters:       newCounters(),
-		keyUses:        newKeyUses(),
-		keyUseEvery:    keyUseFlushEvery,
+		store:           st,
+		writer:          writer,
+		sweeper:         sweeper,
+		version:         version,
+		storeRaw:        cfg.StoreRaw,
+		maxBodyBytes:    maxBody,
+		responseBudget:  budget,
+		mcp:             cfg.MCP,
+		adminToken:      cfg.AdminToken,
+		sessionLife:     sessionLife,
+		setupOff:        cfg.SetupDisabled,
+		limiter:         newLoginLimiter(),
+		passwordChanges: newLoginLimiter(),
+		passwords:       newPasswordGate(),
+		passwordLog:     &logLimiter{every: time.Minute},
+		handlerGrace:    defaultHandlerGrace,
+		inflatedLog:     &logLimiter{every: time.Minute},
+		originLog:       &logLimiter{every: time.Minute, keys: 64},
+		assets:          ui.Assets(),
+		startedAt:       time.Now(),
+		counters:        newCounters(),
+		keyUses:         newKeyUses(),
+		keyUseEvery:     keyUseFlushEvery,
 	}
 	s.setPublicURL(cfg.URL)
 	if st != nil {

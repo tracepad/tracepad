@@ -30,6 +30,11 @@
 	 * link exists, and the first owner comes from the admin token instead.
 	 */
 	let enabled = $state.raw(true);
+	/**
+	 * True when no link this start printed still works — past its 24 hours,
+	 * or never minted — so the form would only be refused (Decision 32).
+	 */
+	let expired = $state.raw(false);
 
 	$effect(() => {
 		auth.stripFragment();
@@ -41,6 +46,7 @@
 			.then((answer) => {
 				required = answer.required;
 				enabled = answer.enabled;
+				expired = answer.expired;
 			})
 			.catch(() => (required = null));
 	});
@@ -66,13 +72,16 @@
 	}
 </script>
 
-{#if required === false || !enabled || !token}
+{#if required === false || !enabled || expired || !token}
 	<Explanation title="Set up">
 		{#if !enabled && required !== false}
 			Setup is turned off on this server (<code>TRACEPAD_SETUP=off</code>). Its first owner is
 			created with the admin token — <code>tracepad accounts create &lt;email&gt; --owner</code> —
 			and the invitation link that prints sets the password.
-		{:else if token}
+		{:else if expired && required !== false}
+			This server's setup link has expired: a link works for 24 hours after the server printed it.
+			Restart the server to have it print a new one.
+		{:else if token || !enabled}
 			This server already has an owner, so there is nothing to set up.
 		{:else}
 			This link carries no setup token. The server prints a complete one at every start until it

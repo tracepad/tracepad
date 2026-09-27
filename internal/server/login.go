@@ -114,7 +114,12 @@ func (s *Server) SetupRequired() (bool, error) {
 // handleGetSetup is the one thing the interface can learn without a
 // credential: whether to show the setup screen or the login form, and whether
 // that screen can do anything — `enabled` is false under TRACEPAD_SETUP=off,
-// where the first owner comes from the admin token instead (Decision 32).
+// where the first owner comes from the admin token instead, and `expired` is
+// true when setup is needed and on but no link printed by this start works any
+// more: it is past its 24 hours, or none was minted because an owner could
+// sign in when the server started. A restart prints a new one either way, and
+// the screen says so before anybody fills in a form the server will refuse
+// (Decision 32). Nothing here is the token, or says what it was.
 func (s *Server) handleGetSetup(w http.ResponseWriter, r *http.Request) {
 	if s.store == nil {
 		writeError(w, http.StatusServiceUnavailable, "the API is not available")
@@ -130,7 +135,11 @@ func (s *Server) handleGetSetup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to read the accounts")
 		return
 	}
-	writeJSON(w, http.StatusOK, object{}.put("required", required).put("enabled", !s.setupOff))
+	expired := required && !s.setupOff && s.currentSetupToken() == ""
+	writeJSON(w, http.StatusOK, object{}.
+		put("required", required).
+		put("enabled", !s.setupOff).
+		put("expired", expired))
 }
 
 // handleSetup creates the first owner and signs it in.
@@ -179,7 +188,11 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	hash, ok := s.readPassword(w, r, request.Password)
+	if err := store.CheckPasswordLength(request.Password); err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	hash, ok := s.hashUnderGate(w, r, request.Password)
 	if !ok {
 		return
 	}
@@ -245,16 +258,20 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Then a place at the password gate. Turned away there, the password
-	// was never compared, so the attempt is given back.
-	slot, ok := s.enterPasswordGate(w, r)
-	if !ok {
-		attempt.cancel()
+	// was never compared, so the attempt is given back — as it is on any
+	// way out that neither failed nor succeeded.
+	defer attempt.cancel()
+	var (
+		account  *store.Account
+		verified bool
+		err      error
+	)
+	if !s.underPasswordGate(w, r, func(slot *store.PasswordSlot) {
+		account, verified, err = s.checkLogin(slot, email, request.Password)
+	}) {
 		return
 	}
-	account, verified, err := s.checkLogin(slot, email, request.Password)
-	slot.Release()
 	if err != nil {
-		attempt.cancel()
 		slog.Error("account lookup failed", "err", err)
 		writeError(w, http.StatusInternalServerError, "failed to read the account")
 		return
@@ -332,12 +349,7 @@ func (s *Server) handleAcceptInvite(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, store.ErrBadToken.Error())
 		return
 	}
-	slot, ok := s.enterPasswordGate(w, r)
-	if !ok {
-		return
-	}
-	hash, ok := hashPassword(w, slot, request.Password)
-	slot.Release()
+	hash, ok := s.hashUnderGate(w, r, request.Password)
 	if !ok {
 		return
 	}
@@ -461,33 +473,40 @@ func (s *Server) handlePatchMe(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, store.ErrWrongPassword.Error())
 		return
 	}
-	// A wrong current password is a guess at the password, so it counts
-	// where a wrong one at the login does, against the account's email
-	// and before the comparison: a session held by somebody else cannot
-	// guess any faster here, nor keep the gate full for everybody signing
-	// in (spec 028 #31).
-	attempt, wait := s.limiter.reserve(account.Email, time.Now())
+	// A wrong current password is a guess at the password, so it is
+	// counted like a login's, before the comparison — but per account and
+	// apart from the login's count: a session held by somebody else cannot
+	// guess faster here nor keep the gate full for everybody signing in,
+	// and a stranger failing at the login cannot stop the person who holds
+	// the session from changing the password they suspect (spec 028 #31).
+	attempt, wait := s.passwordChanges.reserve(account.ID, time.Now())
 	if wait > 0 {
 		w.Header().Set("Retry-After", retryAfterSeconds(wait))
 		writeError(w, http.StatusTooManyRequests,
 			"too many wrong passwords for this account; try again shortly")
 		return
 	}
-	slot, ok := s.enterPasswordGate(w, r)
-	if !ok {
-		attempt.cancel()
+	defer attempt.cancel()
+	var (
+		hash          []byte
+		wrong, hashed bool
+	)
+	if !s.underPasswordGate(w, r, func(slot *store.PasswordSlot) {
+		if !account.Verify(slot, request.Password.Current) {
+			wrong = true
+			return
+		}
+		hash, hashed = hashPassword(w, slot, request.Password.New)
+	}) {
 		return
 	}
-	if !account.Verify(slot, request.Password.Current) {
-		slot.Release()
+	if wrong {
 		attempt.failed(time.Now())
 		writeError(w, http.StatusForbidden, store.ErrWrongPassword.Error())
 		return
 	}
 	attempt.succeeded()
-	hash, ok := hashPassword(w, slot, request.Password.New)
-	slot.Release()
-	if !ok {
+	if !hashed {
 		return
 	}
 	// One job, so that a wrong current password leaves the display name
@@ -731,23 +750,6 @@ func readAccountName(w http.ResponseWriter, raw string) (string, bool) {
 		return "", false
 	}
 	return name, true
-}
-
-// readPassword checks the length and hashes under the password gate,
-// answering 422 itself when the length is wrong and 503 when the gate is full.
-// The length is checked first, so a password that was never going to be
-// accepted does not wait for a place.
-func (s *Server) readPassword(w http.ResponseWriter, r *http.Request, password string) ([]byte, bool) {
-	if err := store.CheckPasswordLength(password); err != nil {
-		writeError(w, http.StatusUnprocessableEntity, err.Error())
-		return nil, false
-	}
-	slot, ok := s.enterPasswordGate(w, r)
-	if !ok {
-		return nil, false
-	}
-	defer slot.Release()
-	return hashPassword(w, slot, password)
 }
 
 // hashPassword hashes a password whose length the caller has already checked

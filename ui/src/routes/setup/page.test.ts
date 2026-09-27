@@ -29,20 +29,39 @@ beforeEach(() => {
 
 describe('the setup screen', () => {
 	it('asks for the first owner while setup is on', async () => {
-		getSetup.mockResolvedValue({ required: true, enabled: true });
+		getSetup.mockResolvedValue({ required: true, enabled: true, expired: false });
 		render(Setup);
 
 		expect(await screen.findByRole('button', { name: 'Create the owner' })).toBeTruthy();
 	});
 
 	it('says setup is off, and how the first owner is made instead', async () => {
-		getSetup.mockResolvedValue({ required: true, enabled: false });
+		getSetup.mockResolvedValue({ required: true, enabled: false, expired: false });
 		token = null;
 		render(Setup);
 
 		const text = await screen.findByText(/Setup is turned off on this server/);
 		expect(text.textContent).toContain('tracepad accounts create');
 		expect(screen.queryByText(/carries no setup token/)).toBeNull();
+		expect(screen.queryByRole('button', { name: 'Create the owner' })).toBeNull();
+	});
+
+	// Off, with an owner already: there is nothing to set up, and nothing
+	// about a link the server never prints.
+	it('with setup off and an owner, says there is nothing to set up', async () => {
+		getSetup.mockResolvedValue({ required: false, enabled: false, expired: false });
+		token = null;
+		render(Setup);
+
+		expect(await screen.findByText(/already has an owner/)).toBeTruthy();
+		expect(screen.queryByText(/carries no setup token/)).toBeNull();
+	});
+
+	it('says an expired link has expired before anybody fills in the form', async () => {
+		getSetup.mockResolvedValue({ required: true, enabled: true, expired: true });
+		render(Setup);
+
+		expect(await screen.findByText(/setup link has expired/)).toBeTruthy();
 		expect(screen.queryByRole('button', { name: 'Create the owner' })).toBeNull();
 	});
 });

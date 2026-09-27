@@ -748,7 +748,8 @@ func TestSetup(t *testing.T) {
 	if answer := decodeJSON[struct {
 		Required bool `json:"required"`
 		Enabled  bool `json:"enabled"`
-	}](t, rec); !answer.Required || !answer.Enabled {
+		Expired  bool `json:"expired"`
+	}](t, rec); !answer.Required || !answer.Enabled || answer.Expired {
 		t.Fatalf("GET /setup = %+v; a server with no owner must say it needs setting up, and can be", answer)
 	}
 	if h.server.SetupURL() == "" || !strings.Contains(h.server.SetupURL(), "/setup#token=") {

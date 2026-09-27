@@ -355,6 +355,11 @@ func TestSetupLinkExpires(t *testing.T) {
 	if got := h.server.SetupURL(); got != "" {
 		t.Errorf("SetupURL = %q after expiry, want none", got)
 	}
+	// The interface can say so before anybody fills in the form.
+	if got := h.call(t, "GET", "/api/v1/setup", nil, anonymous).Body.String(); !strings.Contains(got, `"expired":true`) ||
+		!strings.Contains(got, `"enabled":true`) {
+		t.Errorf("GET /setup = %s after expiry, want expired and enabled", got)
+	}
 	expectError(t, h.call(t, "POST", "/api/v1/setup", mustJSON(t, map[string]any{
 		"token": token, "email": "founder@example.com", "password": testAccountPassword,
 	}), anonymous, asJSON), http.StatusForbidden, "restart the server")
@@ -374,11 +379,9 @@ func TestSetupOff(t *testing.T) {
 	// a link that will never come.
 	rec := h.call(t, "GET", "/api/v1/setup", nil, anonymous)
 	expectStatus(t, rec, 200)
-	if answer := decodeJSON[struct {
-		Required *bool `json:"required"`
-		Enabled  *bool `json:"enabled"`
-	}](t, rec); answer.Required == nil || !*answer.Required || answer.Enabled == nil || *answer.Enabled {
-		t.Errorf("GET /setup = %s, want required and not enabled", rec.Body.String())
+	if got := rec.Body.String(); !strings.Contains(got, `"required":true`) ||
+		!strings.Contains(got, `"enabled":false`) || !strings.Contains(got, `"expired":false`) {
+		t.Errorf("GET /setup = %s, want required, not enabled, not expired", got)
 	}
 	work := h.server.passwords.Spent()
 	expectError(t, h.call(t, "POST", "/api/v1/setup", mustJSON(t, map[string]any{
@@ -407,10 +410,12 @@ func (l *loginLimiter) filed() int {
 }
 
 // TestWrongCurrentPasswordIsAGuess: the current password on PATCH /auth/me is
-// a password guess like a login's, and counts against the same email before
-// the comparison — so a session held by somebody else guesses no faster than
-// the login allows, and twenty at once are five comparisons, not a gate kept
-// full for everybody signing in (spec 028 #31).
+// a password guess like a login's, counted before the comparison — so a
+// session held by somebody else guesses no faster than the login allows, and
+// twenty at once are five comparisons, not a gate kept full for everybody
+// signing in. It is counted per account and apart from the login's count by
+// email: a stranger failing at the login cannot stop the person who holds the
+// session from changing the password (spec 028 #31).
 func TestWrongCurrentPasswordIsAGuess(t *testing.T) {
 	h := newAccountHarness(t)
 	who := h.owner(t)
@@ -445,8 +450,72 @@ func TestWrongCurrentPasswordIsAGuess(t *testing.T) {
 	if spent := h.server.passwords.Spent() - work; spent > loginFailureLimit {
 		t.Errorf("the burst spent %d comparisons, want at most %d", spent, loginFailureLimit)
 	}
-	// The same count as the login's: the email is locked there too, and
-	// the right current password waits like the right login does.
-	expectStatus(t, h.login(t, "owner@example.com", testAccountPassword), http.StatusTooManyRequests)
+	// Locked here, the right current password waits too — and the login,
+	// which is counted apart, is untouched.
 	expectStatus(t, change(testAccountPassword), http.StatusTooManyRequests)
+	expectStatus(t, h.login(t, "owner@example.com", testAccountPassword), http.StatusOK)
+
+	// And the other way round: a stranger locking the login out does not
+	// stop the session's owner changing the password.
+	other := h.account(t, "other@example.com", true)
+	for range loginFailureLimit {
+		h.login(t, "other@example.com", "not the password")
+	}
+	expectStatus(t, h.login(t, "other@example.com", testAccountPassword), http.StatusTooManyRequests)
+	expectStatus(t, h.call(t, "PATCH", "/api/v1/auth/me", mustJSON(t, map[string]any{
+		"password": map[string]any{"current": testAccountPassword, "new": "a brand new password"},
+	}), asSession(other)), http.StatusOK)
+}
+
+// TestAPanicGivesThePlaceBack: whatever runs under the gate, the place comes
+// back when it ends — a panic included, which net/http recovers from and a
+// place taken by hand and given back by hand did not survive.
+func TestAPanicGivesThePlaceBack(t *testing.T) {
+	h := newAccountHarness(t)
+	h.server.passwords = store.NewPasswordGate(1, 0)
+	func() {
+		defer func() { _ = recover() }()
+		h.server.underPasswordGate(httptest.NewRecorder(), httptest.NewRequest("POST", "/", nil),
+			func(*store.PasswordSlot) { panic("a mistake in the code") })
+	}()
+	slot, err := h.server.passwords.Enter(context.Background())
+	if err != nil {
+		t.Fatalf("the place a panic held is gone: %v", err)
+	}
+	slot.Release()
+}
+
+// TestAnAttemptEndsOnlyItsOwnPlace: when an email's record is evicted while
+// an attempt on it is in flight and the email comes back, the record under the
+// key is a newer attempt's. The older one ending must not take the newer one's
+// place in flight — the burst limit would let one more comparison through for
+// each — though its failure still counts.
+func TestAnAttemptEndsOnlyItsOwnPlace(t *testing.T) {
+	l := newLoginLimiter()
+	l.capacity = 1
+	now := time.Now()
+	older, _ := l.reserve("a@x", now)
+	// Another email with a failure outranks a's one attempt in flight, so a
+	// is the record evicted.
+	for range 2 {
+		attempt, _ := l.reserve("b@x", now)
+		attempt.failed(now)
+	}
+	if _, ok := l.entries["a@x"]; ok {
+		t.Fatal("the probe needs a's record evicted")
+	}
+	newer, _ := l.reserve("a@x", now)
+	older.failed(now)
+	record := l.entries["a@x"]
+	if record == nil || record.pending != 1 || len(record.failures) != 1 {
+		t.Fatalf("a's record is %+v, want the newer attempt still in flight and the older one's failure", record)
+	}
+	older.cancel() // ended already: nothing more
+	if record.pending != 1 {
+		t.Error("ending an attempt twice took another's place")
+	}
+	newer.cancel()
+	if record.pending != 0 {
+		t.Error("the newer attempt could not end its own place")
+	}
 }

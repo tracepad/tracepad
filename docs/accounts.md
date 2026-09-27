@@ -69,7 +69,9 @@ password in `docker-compose.yml` is the thing this exists to stop pasting.
 
 `GET /api/v1/setup` answers `{"required": true}` while there is no owner and
 `{"required": false}` afterwards — the one thing the interface can ask without
-a credential.
+a credential. `"expired": true` beside it means no link this start printed
+works any more, so the setup screen says to restart rather than show a form
+the server would refuse.
 
 A deployment that makes its first owner with the admin token instead — a
 script, an API-only install — can switch setup off with `TRACEPAD_SETUP=off`:
@@ -103,7 +105,9 @@ difference between them would be a way to find out who has an account here.
 Five failures for one email inside fifteen minutes and the next answers `429`
 with `Retry-After`; an attempt counts from the moment it arrives, so fifty sent
 at once are still five guesses. A wrong current password when changing it
-counts the same way, against the same email. The count is in memory, so it forgets on a
+counts the same way, per account and apart from the sign-in: five wrong in
+fifteen minutes and the next waits, and nobody failing at the sign-in form can
+stop a signed-in person from changing their password. The count is in memory, so it forgets on a
 restart and can never be the reason somebody cannot sign in tomorrow.
 
 Checking a password is a quarter of a second of CPU, and the routes that do it
