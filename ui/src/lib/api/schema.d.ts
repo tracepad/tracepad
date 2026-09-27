@@ -2969,6 +2969,7 @@ export interface operations {
                 };
             };
             422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };
@@ -3089,6 +3090,7 @@ export interface operations {
                 };
             };
             422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };
@@ -3292,6 +3294,19 @@ export interface operations {
                             busy: number;
                             capacity: number;
                         };
+                        /** @description The limit on password checks per source, for the whole deployment: twenty at once, then one every three seconds */
+                        source_limit?: {
+                            /** @description Sources held now */
+                            tracked: number;
+                            /** @description The most sources held; past it, the one owing least is dropped */
+                            capacity: number;
+                            /** @description Password checks refused since the process started */
+                            refused: number;
+                            /** @description The peers whose X-Forwarded-For is believed (TRACEPAD_TRUSTED_PROXIES), as CIDR ranges */
+                            trusted_proxies: string[];
+                        };
+                        /** @description The source this request counts as: an IPv4 address, or an IPv6 /64 — the peer, or the client a trusted proxy forwarded */
+                        source?: string;
                         response_budget_bytes?: number;
                         /** @description The link between traces and dataset runs, as this project sees it */
                         runs?: {

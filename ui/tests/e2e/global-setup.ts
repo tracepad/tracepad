@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { ADMIN_TOKEN, inviteEditor, PASSWORD, PORT, STATE, type State } from './harness';
+import { ADMIN_TOKEN, inviteEditor, ownAddress, PASSWORD, PORT, STATE, type State } from './harness';
 
 // Boots the real binary on a temp database and fills it from the synthetic
 // OTLP corpus in `testdata/` (spec 006, Testing). Nothing here is mocked: the
@@ -109,7 +109,7 @@ async function createOwner(baseURL: string, link: string): Promise<State['owner'
 	const email = 'owner@e2e.test';
 	const response = await fetch(`${baseURL}/api/v1/setup`, {
 		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
+		headers: { 'Content-Type': 'application/json', 'X-Forwarded-For': ownAddress() },
 		body: JSON.stringify({ token, email, password: PASSWORD, name: 'The Owner' })
 	});
 	if (!response.ok) throw new Error(`setup: ${response.status} ${await response.text()}`);

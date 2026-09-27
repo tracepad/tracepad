@@ -2,6 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import {
 	BCRYPT_WAIT,
 	createProject,
+	fromOwnAddress,
 	inviteNobody,
 	signIn,
 	signInAsOwner,
@@ -417,6 +418,7 @@ test('an account with no projects opens the Account tab from the menu and change
 	// thirty seconds a test gets; slow() gives this one three times that.
 	test.slow();
 	const nobody = await inviteNobody(state().baseURL, 'nobody');
+	await fromOwnAddress(page);
 	await page.goto('/login');
 	await page.getByLabel('Email').fill(nobody.email);
 	await page.getByLabel('Password', { exact: true }).fill(nobody.password);

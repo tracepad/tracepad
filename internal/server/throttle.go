@@ -1,10 +1,13 @@
 package server
 
 import (
+	"container/heap"
 	"container/list"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"runtime"
 	"strconv"
 	"strings"
@@ -17,12 +20,16 @@ import (
 /*
 What an unauthenticated caller can make this server spend on passwords.
 
-Two limits, for two different attacks. The login limiter counts wrong answers
-per email, which is what stops a dictionary run against one account. The
-password gate (store.PasswordGate) bounds how many `bcrypt` computations run at
-once, whoever asks for them, which is what stops a flood of requests — each one
-a quarter of a second of CPU before anything knows who is calling — from taking
-the machine from the ingest and the reads it exists for (spec 028 #31).
+Three limits, for three different attacks. The login limiter counts wrong
+answers per email, which is what stops a dictionary run against one account.
+The password gate (store.PasswordGate) bounds how many `bcrypt` computations
+run at once, whoever asks for them, which is what stops a flood of requests —
+each one a quarter of a second of CPU before anything knows who is calling —
+from taking the machine from the ingest and the reads it exists for (spec 028
+#31). And the source limiter asks, at the gate's door, where the request
+comes from, so that a flood from one address spends one comparison every three
+seconds and the people signing in from anywhere else never meet the gate full
+(spec 046).
 */
 
 // --- The login limiter ------------------------------------------------------
@@ -337,6 +344,15 @@ func newPasswordGate() *store.PasswordGate {
 // being full: nothing is logged or counted, and nothing is written to a
 // connection that is gone.
 func (s *Server) enterPasswordGate(w http.ResponseWriter, r *http.Request) (*store.PasswordSlot, bool) {
+	// The source first (spec 046 #6): every request that would run bcrypt
+	// passes here, whatever its route, so the limit is exact — a source
+	// spends at most its rate in comparisons — and a route added later that
+	// hashes a password is limited without anybody listing it. A caller's
+	// reservation (the email's, the account's) is given back on this way
+	// out as on any other that compared nothing (#8).
+	if !s.admitSource(w, r) {
+		return nil, false
+	}
 	slot, err := s.passwords.Enter(r.Context())
 	if err == nil {
 		return slot, true
@@ -380,4 +396,158 @@ func (s *Server) hashUnderGate(w http.ResponseWriter, r *http.Request, password 
 		return nil, false
 	}
 	return hash, ok
+}
+
+// --- The source limiter -----------------------------------------------------
+
+// The limit on password checks per source (spec 046 #7, #9): twenty at once,
+// then one every three seconds, for at most 32,768 sources. Twenty covers a
+// team arriving at once from one office's NAT; one every three seconds is
+// more than a person types, and at a quarter of a second of bcrypt each, a
+// twelfth of one core for a source that never stops. Constants, as the
+// email's five in fifteen minutes are: they shape what a client meets, and
+// a deployment that wants other numbers has a proxy that can say so.
+const (
+	sourceBurst   = 20
+	sourceEvery   = 3 * time.Second
+	sourceTracked = 32768
+)
+
+// sourceRefused is the one sentence a source over its limit gets, with the
+// seconds its Retry-After carries. "Network" rather than "address": an IPv6
+// source is a /64.
+const sourceRefused = "too many password checks from your network; try again in %d seconds"
+
+// sourceLimiter is GCRA — a token bucket kept as one instant per source, its
+// theoretical arrival time (TAT). A request at now is admitted when
+// max(TAT, now) − now ≤ τ, τ being (burst − 1) × every, and TAT then moves to
+// max(TAT, now) + every. A refused request leaves TAT where it was, so a
+// source that keeps asking gets exactly the sustained rate rather than a
+// lockout it extends itself.
+//
+// Sources are held in a map and in a min-heap by TAT. A source whose TAT is
+// not after now holds a full bucket, which is the same as not being held, so
+// every operation first takes those off the heap: they leave without changing
+// any answer. Past the capacity the source with the least debt goes — the
+// one that would be whole again soonest. Unlike a count in a window, an
+// order by TAT cannot go stale as time passes (spec 028 #31 c's lesson):
+// pushing out a source that owes d takes holding every other one owing more,
+// inside the minute any debt lasts — tens of thousands of admitted checks a
+// minute, against a gate that passes under a thousand.
+//
+// Times are time.Now's, and their differences are the monotonic clock's, so
+// a step of the wall clock neither fills nor drains every bucket at once.
+type sourceLimiter struct {
+	mu       sync.Mutex
+	burst    int
+	every    time.Duration
+	capacity int
+	entries  map[netip.Prefix]*sourceEntry
+	byTAT    sourceHeap
+	refused  int64
+}
+
+type sourceEntry struct {
+	source netip.Prefix
+	tat    time.Time
+	index  int
+}
+
+func newSourceLimiter() *sourceLimiter {
+	return &sourceLimiter{burst: sourceBurst, every: sourceEvery, capacity: sourceTracked,
+		entries: map[netip.Prefix]*sourceEntry{}}
+}
+
+// take spends one of the source's tokens, or reports how long until one is
+// back.
+func (l *sourceLimiter) take(source netip.Prefix, now time.Time) (time.Duration, bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for len(l.byTAT) > 0 && !l.byTAT[0].tat.After(now) {
+		l.drop(heap.Pop(&l.byTAT).(*sourceEntry))
+	}
+	entry := l.entries[source]
+	start := now
+	if entry != nil && entry.tat.After(now) {
+		start = entry.tat
+	}
+	tolerance := time.Duration(l.burst-1) * l.every
+	if owed := start.Sub(now); owed > tolerance {
+		l.refused++
+		return owed - tolerance, false
+	}
+	if entry != nil {
+		entry.tat = start.Add(l.every)
+		heap.Fix(&l.byTAT, entry.index)
+		return 0, true
+	}
+	if len(l.entries) >= l.capacity {
+		l.drop(heap.Pop(&l.byTAT).(*sourceEntry))
+	}
+	entry = &sourceEntry{source: source, tat: start.Add(l.every)}
+	l.entries[source] = entry
+	heap.Push(&l.byTAT, entry)
+	return 0, true
+}
+
+func (l *sourceLimiter) drop(entry *sourceEntry) { delete(l.entries, entry.source) }
+
+// gauges is what /api/v1/system reports: how many sources are held, of how
+// many, and how many requests were refused since the process started.
+func (l *sourceLimiter) gauges() (tracked, capacity int, refused int64) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return len(l.entries), l.capacity, l.refused
+}
+
+// sourceHeap orders sources by TAT, the least debt first.
+type sourceHeap []*sourceEntry
+
+func (h sourceHeap) Len() int           { return len(h) }
+func (h sourceHeap) Less(i, j int) bool { return h[i].tat.Before(h[j].tat) }
+func (h sourceHeap) Swap(i, j int) {
+	h[i], h[j] = h[j], h[i]
+	h[i].index, h[j].index = i, j
+}
+func (h *sourceHeap) Push(x any) {
+	entry := x.(*sourceEntry)
+	entry.index = len(*h)
+	*h = append(*h, entry)
+}
+func (h *sourceHeap) Pop() any {
+	old := *h
+	entry := old[len(old)-1]
+	old[len(old)-1] = nil
+	*h = old[:len(old)-1]
+	return entry
+}
+
+// admitSource spends a token of the request's source, or answers `429` with
+// the seconds until one is back (spec 046 #8), logged at most once a minute
+// per source and for at most sixteen sources a minute, each line with the
+// count it stands for (#10).
+func (s *Server) admitSource(w http.ResponseWriter, r *http.Request) bool {
+	now := time.Now()
+	source := sourceOf(s.clientAddress(r))
+	wait, ok := s.sources.take(source, now)
+	if ok {
+		return true
+	}
+	seconds := ceilSeconds(wait)
+	text := sourceText(source)
+	if held, log := s.sourceLog.Allow(text, now); log {
+		slog.Warn("password checks refused: a source asked for more than its limit",
+			"source", text, "burst", sourceBurst, "every", sourceEvery.String(),
+			"not_logged_since_last", held.SameKey, "not_logged_over_cap", held.OverCap)
+	}
+	w.Header().Set("Retry-After", strconv.Itoa(seconds))
+	writeError(w, http.StatusTooManyRequests, fmt.Sprintf(sourceRefused, seconds))
+	return false
+}
+
+// ceilSeconds is a wait in whole seconds, rounded up and at least one: the
+// client that waits that long finds a token back.
+func ceilSeconds(wait time.Duration) int {
+	seconds := int((wait + time.Second - 1) / time.Second)
+	return max(seconds, 1)
 }

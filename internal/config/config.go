@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"math"
 	"net"
+	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -104,6 +105,12 @@ type Config struct {
 	// published, which the process cannot see — so the plain-HTTP notice at
 	// start is information, not a warning.
 	InContainer bool
+	// TrustedProxies are the peers whose X-Forwarded-For is believed when
+	// the server works out where a request comes from (spec 046 #1, #2).
+	// Nil is the default, loopback; an empty list is TRACEPAD_TRUSTED_PROXIES
+	// =none, which trusts no peer at all. A bare address is its /32 or
+	// /128.
+	TrustedProxies []netip.Prefix
 }
 
 // DefaultMaxBodyBytes is the request body cap when unset (20 MiB).
@@ -228,6 +235,7 @@ var knownEnv = map[string]bool{
 	"TRACEPAD_SETUP":                 true,
 	"TRACEPAD_SESSION_DAYS":          true,
 	"TRACEPAD_IN_CONTAINER":          true,
+	"TRACEPAD_TRUSTED_PROXIES":       true,
 	// The server reads TRACEPAD_URL too since spec 028 #11 — as the host
 	// of the links it prints — but it is still the CLI's "which server",
 	// which is the whole reason there is one variable and not two.
@@ -324,6 +332,10 @@ func Load(args []string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	trusted, err := ParseTrustedProxies(os.Getenv("TRACEPAD_TRUSTED_PROXIES"))
+	if err != nil {
+		return nil, err
+	}
 	cfg := &Config{
 		Listen:              envOr("TRACEPAD_LISTEN", ":4318"),
 		DataDir:             envOr("TRACEPAD_DATA_DIR", defaultDataDir()),
@@ -343,6 +355,7 @@ func Load(args []string) (*Config, error) {
 		SessionLife:         time.Duration(sessionDays) * 24 * time.Hour,
 		URL:                 strings.TrimSpace(os.Getenv("TRACEPAD_URL")),
 		InContainer:         inContainer,
+		TrustedProxies:      trusted,
 	}
 
 	fs := flag.NewFlagSet("tracepad", flag.ContinueOnError)
@@ -360,6 +373,83 @@ func Load(args []string) (*Config, error) {
 
 	warnUnknownEnv()
 	return cfg, nil
+}
+
+// LoopbackProxies is what `loopback`, the default of TRACEPAD_TRUSTED_PROXIES,
+// stands for (spec 046 #1): a proxy on the same host, which is the deployment
+// the docs recommend outside a container. Whoever can connect over loopback
+// already runs code on the machine, so believing what they forward gives
+// nothing away.
+var LoopbackProxies = []netip.Prefix{
+	netip.MustParsePrefix("127.0.0.0/8"),
+	netip.MustParsePrefix("::1/128"),
+}
+
+// ParseTrustedProxies reads TRACEPAD_TRUSTED_PROXIES (spec 046 #1): a
+// comma-separated list of addresses and CIDR ranges, or one of two words —
+// `loopback`, the default when the value is empty, and `none`, which trusts
+// no peer and is returned as an empty, non-nil list. `loopback` may also
+// stand beside other entries. An entry that does not parse refuses to start,
+// named with its position: the list decides whose word the server takes for
+// a client's address, and a typo that silently dropped a proxy would put
+// every client behind it into one bucket.
+func ParseTrustedProxies(value string) ([]netip.Prefix, error) {
+	value = strings.TrimSpace(value)
+	if value == "" || strings.EqualFold(value, "loopback") {
+		return nil, nil
+	}
+	if strings.EqualFold(value, "none") {
+		return []netip.Prefix{}, nil
+	}
+	var list []netip.Prefix
+	for i, raw := range strings.Split(value, ",") {
+		entry := strings.TrimSpace(raw)
+		switch {
+		case strings.EqualFold(entry, "loopback"):
+			list = append(list, LoopbackProxies...)
+			continue
+		case strings.EqualFold(entry, "none"):
+			return nil, fmt.Errorf("TRACEPAD_TRUSTED_PROXIES: entry %d: none trusts no peer, so it stands alone", i+1)
+		case entry == "":
+			return nil, fmt.Errorf("TRACEPAD_TRUSTED_PROXIES: entry %d is empty", i+1)
+		}
+		prefix, err := parseProxyEntry(entry)
+		if err != nil {
+			return nil, fmt.Errorf("TRACEPAD_TRUSTED_PROXIES: entry %d, %q: want an IP address or a CIDR range such as 172.17.0.0/16",
+				i+1, entry)
+		}
+		list = append(list, prefix)
+	}
+	return list, nil
+}
+
+// parseProxyEntry is one address or range, masked to its network: a range
+// written with host bits set (172.17.0.1/16) means the network it names, as
+// every firewall reads it.
+func parseProxyEntry(entry string) (netip.Prefix, error) {
+	if strings.Contains(entry, "/") {
+		prefix, err := netip.ParsePrefix(entry)
+		if err != nil {
+			return netip.Prefix{}, err
+		}
+		if prefix.Addr().Is4In6() {
+			bits := prefix.Bits() - 96
+			if bits < 0 {
+				return netip.Prefix{}, errors.New("an IPv4-mapped range shorter than ::ffff:0:0/96")
+			}
+			prefix = netip.PrefixFrom(prefix.Addr().Unmap(), bits)
+		}
+		return prefix.Masked(), nil
+	}
+	addr, err := netip.ParseAddr(entry)
+	if err != nil {
+		return netip.Prefix{}, err
+	}
+	if addr.Zone() != "" {
+		return netip.Prefix{}, errors.New("an address with a zone")
+	}
+	addr = addr.Unmap()
+	return netip.PrefixFrom(addr, addr.BitLen()), nil
 }
 
 // readAdminToken reads the admin token from TRACEPAD_ADMIN_TOKEN or from the

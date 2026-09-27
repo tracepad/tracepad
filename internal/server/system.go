@@ -335,6 +335,12 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 			put("enabled", s.mcp).
 			put("path", mcpserver.Path).
 			put("protocol_version", mcpserver.ProtocolVersion)).
+		// The limit on password checks per source, the deployment's like
+		// the slots, and the source this very request counts as — the one
+		// question every proxy deployment has to answer, and cannot answer
+		// without asking the server (spec 046 #13).
+		put("source_limit", s.sourceLimitBlock()).
+		put("source", sourceText(sourceOf(s.clientAddress(r)))).
 		put("response_budget_bytes", s.responseBudget).
 		// What retention has done and when it runs next (spec 005 #14).
 		// There is no endpoint to run it now: an immediate sweep would be
@@ -430,4 +436,14 @@ func (s *Server) backupAnswer() any {
 // queue for the endpoint to work.
 type queueReporter interface {
 	QueueDepth() (waiting, capacity int)
+}
+
+// sourceLimitBlock is the per-source limit as /api/v1/system reports it.
+func (s *Server) sourceLimitBlock() object {
+	tracked, capacity, refused := s.sources.gauges()
+	return object{}.
+		put("tracked", tracked).
+		put("capacity", capacity).
+		put("refused", refused).
+		put("trusted_proxies", s.trusted.strings())
 }

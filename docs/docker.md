@@ -358,7 +358,7 @@ traces.example.com {
 }
 ```
 
-Any proxy will do if it does three things, which Caddy does by default and
+Any proxy will do if it does four things, which Caddy does by default and
 nginx needs told:
 
 ```nginx
@@ -383,6 +383,15 @@ location / {
   from the interface are refused unless their `Origin` is one of this server's
   hosts, and behind a proxy that rewrites `Host` the forwarded one is how it
   recognises its own.
+- **`X-Forwarded-For`, appended to** (`$proxy_add_x_forwarded_for` in nginx;
+  Caddy writes it on its own). The server reads it from the right, and only
+  when the connection comes from a proxy it trusts, to learn the client's
+  address. It uses that address to limit how many passwords one client may
+  check, and to list where each session signed in. A proxy on the same host is
+  trusted by default. A container's proxy is not: to the container, the host
+  is the bridge's gateway (`172.17.0.1` on Docker's default network), so name
+  it with `TRACEPAD_TRUSTED_PROXIES`. Otherwise every client counts as one, and
+  the log says so once an hour.
 - **A body limit at least `TRACEPAD_MAX_BODY_BYTES`** (20 MiB by default).
   nginx refuses anything over 1 MiB unless told otherwise, and an exporter's
   large batch is then lost at the proxy with a `413` the server never sees.
@@ -395,8 +404,15 @@ direct listener stays reachable, which is why the port stays on loopback:
 ```sh
 docker run -d --name tracepad -v tracepad:/data -p 127.0.0.1:4318:4318 \
   -e TRACEPAD_URL=https://traces.example.com \
+  -e TRACEPAD_TRUSTED_PROXIES=172.17.0.1 \
   ghcr.io/tracepad/tracepad
 ```
+
+`TRACEPAD_TRUSTED_PROXIES` takes addresses and CIDR ranges, comma-separated
+(`172.17.0.0/16`, `10.0.0.5`, `loopback`), or `none`. On Docker Desktop the
+gateway is another address. `curl` `GET /api/v1/system` through the proxy and
+read `source`: it should be your own address, not the gateway's. Trust only
+the proxy. A trusted address can say any client it likes.
 
 Applications then export to `https://traces.example.com/v1/traces`, and the
 CLI takes the same address as `--url`. The server believes
