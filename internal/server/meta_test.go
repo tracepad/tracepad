@@ -57,6 +57,22 @@ func TestOpenAPIMatchesRouter(t *testing.T) {
 			t.Errorf("%s %s has no description", route.Method, route.Path)
 		}
 	}
+
+	// And the scope a key needs, on every operation, in the table's word
+	// (spec 045 #2, Testing #11).
+	for _, route := range h.server.routes() {
+		var operation struct {
+			Scope string `json:"x-tracepad-scope"`
+		}
+		raw := document.Paths[route.Path][strings.ToLower(route.Method)]
+		if raw == nil || json.Unmarshal(raw, &operation) != nil {
+			continue // reported above
+		}
+		if operation.Scope != route.Scope.String() {
+			t.Errorf("%s %s: x-tracepad-scope = %q, the table says %q",
+				route.Method, route.Path, operation.Scope, route.Scope)
+		}
+	}
 }
 
 // TestSelfDescriptionIsServedWithoutAKey: deciding whether to talk to this

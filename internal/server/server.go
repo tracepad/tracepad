@@ -230,9 +230,9 @@ func New(cfg *config.Config, version string, st *store.Store, writer JobWriter, 
 		mux.HandleFunc(route.Method+" "+route.Path, s.guard(route))
 	}
 	if s.mcp {
-		// Registered outside the table: /mcp is a JSON-RPC transport
-		// rather than an endpoint of this API, so it belongs in
-		// neither the endpoint map nor the OpenAPI document
+		// Guarded like every route, but not one of routes(): /mcp is a
+		// JSON-RPC transport rather than an endpoint of this API, so it
+		// belongs in neither the endpoint map nor the OpenAPI document
 		// (Decision 27). Its tools reach the read API through this
 		// same mux — one implementation of budgets, truncation, auth
 		// and JSON shape (spec 004 #16).

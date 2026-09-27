@@ -1319,7 +1319,7 @@ export interface paths {
         };
         /**
          * List projects
-         * @description The admin token sees every project; a project key sees its own and nothing else.
+         * @description The admin token sees every project; a project key sees its own and nothing else, with `key` on the row saying which key asked and what it may do — any key may call this, whatever its scopes.
          */
         get: operations["listProjects"];
         put?: never;
@@ -1343,7 +1343,7 @@ export interface paths {
         };
         /**
          * One project with its retention windows
-         * @description A soft-deleted project's own key still reaches this one, so that a caller about to restore can see what it is restoring and until when.
+         * @description A soft-deleted project's own key still reaches this one, so that a caller about to restore can see what it is restoring and until when. Any key may call this, whatever its scopes, and a key's answer carries `key`: which key asked and what it may do.
          */
         get: operations["getProject"];
         put?: never;
@@ -1397,7 +1397,7 @@ export interface paths {
         put?: never;
         /**
          * Mint a key pair; the secret is shown once
-         * @description An owner or editor signed in, or the admin token; a project key is answered 403. Several active pairs are what makes rotation zero-downtime: create the new one, move the SDKs, revoke the old. The key records who minted it.
+         * @description An owner or editor signed in, or the admin token; a project key is answered 403. Several active pairs are what makes rotation zero-downtime: create the new one, move the SDKs, revoke the old. The body says what the key may do, which never changes afterwards: to narrow or widen a key, mint another and revoke it. The key records who minted it.
          */
         post: operations["createKey"];
         delete?: never;
@@ -1418,7 +1418,7 @@ export interface paths {
         post?: never;
         /**
          * Revoke one key pair
-         * @description An owner or editor signed in, or the admin token; a project key is answered 403. Revoking a project's last key stops its ingest, so that one is a dry run until `confirm` echoes the project's name.
+         * @description An owner or editor signed in, or the admin token; a project key is answered 403. Revoking a project's last key, or the last one that carries `ingest`, stops its ingest, so that one is a dry run until `confirm` echoes the project's name.
          */
         delete: operations["revokeKey"];
         options?: never;
@@ -1865,6 +1865,12 @@ export interface components {
             role?: "viewer" | "editor" | "owner";
             /** @description Present on every row of a listing asked with `activity=24h`, and absent otherwise: the traces whose timestamp falls in the last 24 hours, from the hourly roll-up behind the watermark and the raw rows past it. A soft-deleted project carries 0 (spec 029 #8) */
             traces_24h?: number;
+            /** @description Present only when a project key asked: which key it is and what it may do, so that a program that met a 403 can learn what it holds */
+            key?: {
+                public_key: string;
+                name: string;
+                scopes: components["schemas"]["KeyScopes"];
+            };
         };
         /** @description A freshly minted key pair. The secret appears here and nowhere else, ever. */
         NewKey: {
@@ -1892,7 +1898,7 @@ export interface components {
              */
             last_used_at: string | null;
         };
-        /** @description What the key may do. Every key holds all three today */
+        /** @description What the key may do, in this order: `ingest` (send spans, the Langfuse media channel, write scores, fetch a prompt), `read` (every read of the project's data), `write` (every change a key may make). A key that predates scopes, and a key the server made by itself, holds all three */
         KeyScopes: ("ingest" | "read" | "write")[];
         /** @description Who minted a key. `account`: an owner or editor signed in; `admin_token`: the admin token; `startup`: the server itself, for the first-start project or one `TRACEPAD_PROJECTS` declares; `unknown`: the key predates the record */
         KeyMinter: {
@@ -2408,9 +2414,11 @@ export interface components {
                 "application/json": components["schemas"]["Error"];
             };
         };
-        /** @description The credentials are good but do not reach this far: an owner account or the admin token is needed, the role in this project is too low, or a cookie request came from another origin */
+        /** @description The credentials are good but do not reach this far: an owner account or the admin token is needed, the role in this project is too low, a project key lacks the scope the operation names in `x-tracepad-scope`, or a cookie request came from another origin */
         Forbidden: {
             headers: {
+                /** @description Only when a project key lacks a scope: `Bearer error="insufficient_scope", scope="<needed>"` (RFC 6750 §3.1) */
+                "WWW-Authenticate"?: string;
                 [name: string]: unknown;
             };
             content: {
@@ -2824,6 +2832,16 @@ export interface operations {
                         endpoints: {
                             method: string;
                             path: string;
+                            /**
+                             * @description Which kinds of caller the route admits
+                             * @enum {string}
+                             */
+                            policy: "public" | "ingest" | "member" | "editor" | "owner" | "session";
+                            /**
+                             * @description What a project key must hold to be admitted: one of its three scopes, `any` key, or `none` whatever its scopes. Sessions and the admin token never consult it
+                             * @enum {string}
+                             */
+                            scope: "any" | "ingest" | "read" | "write" | "none";
                             description: string;
                         }[];
                     };
@@ -6218,9 +6236,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: {
+        requestBody: {
             content: {
                 "application/json": {
+                    /** @description What the key may do: `ingest` sends spans, uses the Langfuse media channel, writes scores and fetches a prompt; `read` is every read of the project's data; `write` is every change a key may make. Any non-empty combination; duplicates collapse. Missing, empty or an unknown word is a 400 */
+                    scopes: ("ingest" | "read" | "write")[];
                     /** @description Which program holds the key. Trimmed; at most 64 characters; no control or bidirectional control characters (422); not unique */
                     name?: string;
                 };
@@ -6259,7 +6279,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The key is gone, or the dry run for the last one */
+            /** @description The key is gone, or the dry run for the last one or the last with `ingest` */
             200: {
                 headers: {
                     [name: string]: unknown;

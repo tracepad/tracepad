@@ -15,13 +15,20 @@ import (
 // parity test fails for a route that declares none, and a six-caller test
 // walks the whole table asserting the matrix status by status — which is what
 // turns "a viewer cannot revoke keys" from a belief into a fact.
+//
+// Since spec 045 a fifth: the scope column is what a project key must hold to
+// be admitted (Decision 2). Declared route by route rather than derived from
+// the policy and the method, because the exceptions — the score a production
+// application writes, the queue read that claims — are exactly the decisions a
+// reviewer should see in the table (Decision 3).
 
-// route is one served path with the one-line description an agent orients by
-// and the policy that says who may call it.
+// route is one served path with the one-line description an agent orients by,
+// the policy that says who may call it, and the scope a key needs.
 type route struct {
 	Method      string
 	Path        string
 	Policy      policy
+	Scope       scope
 	Description string
 	handler     http.HandlerFunc
 }
@@ -71,56 +78,56 @@ func readBoundOf(rt route) readBound {
 
 func (s *Server) routes() []route {
 	return []route{
-		{"GET", "/health", public, "Liveness and version, no authentication required", s.handleHealth},
+		{"GET", "/health", public, scopeAny, "Liveness and version, no authentication required", s.handleHealth},
 
 		// Ingest: the canonical OTLP path and the Langfuse-SDK alias are
 		// one endpoint (spec 002 #2). A project key and nothing else: a
 		// person's browser never writes spans (spec 028 Decision 3).
-		{"POST", "/v1/traces", ingest, "OTLP/HTTP protobuf trace ingest", s.handleTraces},
-		{"POST", "/api/public/otel/v1/traces", ingest, "OTLP ingest under the Langfuse SDK's path", s.handleTraces},
+		{"POST", "/v1/traces", ingest, scopeIngest, "OTLP/HTTP protobuf trace ingest", s.handleTraces},
+		{"POST", "/api/public/otel/v1/traces", ingest, scopeIngest, "OTLP ingest under the Langfuse SDK's path", s.handleTraces},
 		// The Langfuse media channel (spec 041 #9): the SDK asks for an
 		// upload URL, PUTs the bytes there, and reports back. The PUT is
 		// presigned because the SDK sends it no credential — the token in
 		// the URL is the check (Decision 14) — and the body is the picture,
 		// capped at the length the token grants.
-		{"POST", "/api/public/media", ingest, "Langfuse SDK: an upload URL for one media body, or null when it is already stored", s.handleLangfuseMediaUpload},
-		{"PUT", "/api/public/media/{mediaId}/upload", presigned, "Langfuse SDK: the presigned upload of one media body", s.handleLangfuseMediaPut},
-		{"PATCH", "/api/public/media/{mediaId}", ingest, "Langfuse SDK: the report on one media upload", s.handleLangfuseMediaPatch},
-		{"GET", "/api/public/media/{mediaId}", ingest, "Langfuse SDK: one media body's type, size and address", s.handleLangfuseMediaGet},
+		{"POST", "/api/public/media", ingest, scopeIngest, "Langfuse SDK: an upload URL for one media body, or null when it is already stored", s.handleLangfuseMediaUpload},
+		{"PUT", "/api/public/media/{mediaId}/upload", presigned, scopeAny, "Langfuse SDK: the presigned upload of one media body", s.handleLangfuseMediaPut},
+		{"PATCH", "/api/public/media/{mediaId}", ingest, scopeIngest, "Langfuse SDK: the report on one media upload", s.handleLangfuseMediaPatch},
+		{"GET", "/api/public/media/{mediaId}", ingest, scopeIngest, "Langfuse SDK: one media body's type, size and address", s.handleLangfuseMediaGet},
 
 		// Self-description: where an agent that has never seen this API
 		// starts (design §3.2).
-		{"GET", "/api/v1", public, "This endpoint map", s.handleAPIIndex},
-		{"GET", "/api/v1/openapi.json", public, "The OpenAPI 3.1 document for this API", s.handleOpenAPI},
-		{"GET", systemPath, member, "Version, uptime, database size and ingest counters since start", s.handleSystem},
+		{"GET", "/api/v1", public, scopeAny, "This endpoint map", s.handleAPIIndex},
+		{"GET", "/api/v1/openapi.json", public, scopeAny, "The OpenAPI 3.1 document for this API", s.handleOpenAPI},
+		{"GET", systemPath, member, scopeRead, "Version, uptime, database size and ingest counters since start", s.handleSystem},
 
 		// Signing in (spec 028 Decisions 8–10). The three public ones are
 		// the three ways in — the first owner, a password, an invitation
 		// — and the rest are about the person already signed in, which is
 		// what `session` means: a key or the admin token is told "not a
 		// session" rather than "unauthorized".
-		{"GET", "/api/v1/setup", public, "Whether this server still needs its first owner", s.handleGetSetup},
-		{"POST", "/api/v1/setup", public, "Create the first owner from the token the server printed", s.handleSetup},
-		{"POST", "/api/v1/auth/login", public, "Sign in with an email and a password", s.handleLogin},
-		{"POST", "/api/v1/auth/accept-invite", public, "Set a password from an invitation link and sign in", s.handleAcceptInvite},
-		{"POST", "/api/v1/auth/logout", session, "End this session", s.handleLogout},
-		{"GET", "/api/v1/auth/me", session, "The signed-in account and the projects it can reach", s.handleMe},
-		{"PATCH", "/api/v1/auth/me", session, "Change this account's display name or password", s.handlePatchMe},
-		{"GET", "/api/v1/auth/sessions", session, "This account's sessions, the current one marked", s.handleListSessionsOfAccount},
-		{"DELETE", "/api/v1/auth/sessions", session, "End every session of this account but the current one", s.handleEndOtherSessions},
+		{"GET", "/api/v1/setup", public, scopeAny, "Whether this server still needs its first owner", s.handleGetSetup},
+		{"POST", "/api/v1/setup", public, scopeAny, "Create the first owner from the token the server printed", s.handleSetup},
+		{"POST", "/api/v1/auth/login", public, scopeAny, "Sign in with an email and a password", s.handleLogin},
+		{"POST", "/api/v1/auth/accept-invite", public, scopeAny, "Set a password from an invitation link and sign in", s.handleAcceptInvite},
+		{"POST", "/api/v1/auth/logout", session, scopeNone, "End this session", s.handleLogout},
+		{"GET", "/api/v1/auth/me", session, scopeNone, "The signed-in account and the projects it can reach", s.handleMe},
+		{"PATCH", "/api/v1/auth/me", session, scopeNone, "Change this account's display name or password", s.handlePatchMe},
+		{"GET", "/api/v1/auth/sessions", session, scopeNone, "This account's sessions, the current one marked", s.handleListSessionsOfAccount},
+		{"DELETE", "/api/v1/auth/sessions", session, scopeNone, "End every session of this account but the current one", s.handleEndOtherSessions},
 
 		// Traces.
-		{"GET", "/api/v1/traces", member, "List traces newest first, filtered and cursor-paginated", s.handleListTraces},
-		{"GET", "/api/v1/traces/last", member, "The newest trace matching the filters, whole", s.handleLastTrace},
-		{"GET", "/api/v1/traces/{id}", member, "One trace with its observations as a nested tree", s.handleGetTrace},
+		{"GET", "/api/v1/traces", member, scopeRead, "List traces newest first, filtered and cursor-paginated", s.handleListTraces},
+		{"GET", "/api/v1/traces/last", member, scopeRead, "The newest trace matching the filters, whole", s.handleLastTrace},
+		{"GET", "/api/v1/traces/{id}", member, scopeRead, "One trace with its observations as a nested tree", s.handleGetTrace},
 		// Deleting traces (spec 035): a dry run until `confirm` echoes the
 		// trace id, or the project's name for the bulk form.
-		{"DELETE", "/api/v1/traces/{id}", editor, "Delete one trace and everything attached to it", s.handleDeleteTrace},
-		{"DELETE", "/api/v1/traces", editor, "Delete every trace a listing filter matches before `to`, in bounded rounds", s.handleDeleteTraces},
-		{"GET", "/api/v1/observations/{id}/io", member, "The whole input, output and metadata of one observation", s.handleObservationIO},
+		{"DELETE", "/api/v1/traces/{id}", editor, scopeWrite, "Delete one trace and everything attached to it", s.handleDeleteTrace},
+		{"DELETE", "/api/v1/traces", editor, scopeWrite, "Delete every trace a listing filter matches before `to`, in bounded rounds", s.handleDeleteTraces},
+		{"GET", "/api/v1/observations/{id}/io", member, scopeRead, "The whole input, output and metadata of one observation", s.handleObservationIO},
 		// Media (spec 041 #7): one body by its hash, for a project that
 		// points at it; `404` for any other.
-		{"GET", "/api/v1/media/{sha256}", member, "One image or file a payload references, by the SHA-256 of its bytes", s.handleGetMedia},
+		{"GET", "/api/v1/media/{sha256}", member, scopeRead, "One image or file a payload references, by the SHA-256 of its bytes", s.handleGetMedia},
 
 		// The raw archive (spec 019): what arrived, in the order it
 		// arrived, and one body exactly as the client sent it. This is
@@ -131,76 +138,81 @@ func (s *Server) routes() []route {
 		// a project's data out is an operator's act like its windows and
 		// its keys — a viewer reads traces and annotates (spec 044 #6). A
 		// key passes either way.
-		{"GET", "/api/v1/raw", editor, "List the raw export bodies oldest first, cursor-paginated", s.handleListRaw},
-		{"GET", "/api/v1/raw/{id}", editor, "One raw export body, in the Content-Type it was received in", s.handleGetRawBatch},
+		{"GET", "/api/v1/raw", editor, scopeRead, "List the raw export bodies oldest first, cursor-paginated", s.handleListRaw},
+		{"GET", "/api/v1/raw/{id}", editor, scopeRead, "One raw export body, in the Content-Type it was received in", s.handleGetRawBatch},
 
 		// Sessions and statistics.
-		{"GET", "/api/v1/sessions", member, "List sessions by most recent activity, filtered and cursor-paginated", s.handleListSessions},
-		{"GET", "/api/v1/sessions/{id}", member, "One session: its totals and its traces", s.handleGetSession},
-		{"GET", "/api/v1/stats", member, "Counts, errors, cost and latency percentiles per bucket", s.handleStats},
+		{"GET", "/api/v1/sessions", member, scopeRead, "List sessions by most recent activity, filtered and cursor-paginated", s.handleListSessions},
+		{"GET", "/api/v1/sessions/{id}", member, scopeRead, "One session: its totals and its traces", s.handleGetSession},
+		{"GET", "/api/v1/stats", member, scopeRead, "Counts, errors, cost and latency percentiles per bucket", s.handleStats},
 		// Quality beside the traffic (spec 025): a series per score
 		// name over the same seam, the same filters and the same
 		// buckets as the statistics next to it.
-		{"GET", "/api/v1/stats/scores", member, "Score means, rates and category shares per bucket, one series per score name", s.handleScoreTrends},
+		{"GET", "/api/v1/stats/scores", member, scopeRead, "Score means, rates and category shares per bucket, one series per score name", s.handleScoreTrends},
 		// The values the three many-valued filters can take (spec
 		// 027 #2), answered through the same seam: the rollup behind
 		// the watermark and the live scan past it, so a value first
 		// seen a minute ago is already on the list.
-		{"GET", "/api/v1/facets", member, "The environments, releases and trace names in a range, each with its trace count", s.handleFacets},
+		{"GET", "/api/v1/facets", member, scopeRead, "The environments, releases and trace names in a range, each with its trace count", s.handleFacets},
 
 		// Users (spec 023): the rollup one dimension over. The listing
 		// answers from it alone and trails the raw rows by the rollup's
 		// lag; one user merges the live tail and is exact (#4).
-		{"GET", "/api/v1/users", member, "List users by last seen, traffic, cost or errors, cursor-paginated", s.handleListUsers},
-		{"GET", "/api/v1/users/{id}", member, "One user: traffic, sessions, cost, errors and latency", s.handleGetUser},
+		{"GET", "/api/v1/users", member, scopeRead, "List users by last seen, traffic, cost or errors, cursor-paginated", s.handleListUsers},
+		{"GET", "/api/v1/users/{id}", member, scopeRead, "One user: traffic, sessions, cost, errors and latency", s.handleGetUser},
 
 		// Scores (spec 003). Writing one is `member`, not `ingest` and
 		// not `editor`: annotation is a viewer's job — the helper this
 		// spec exists for scores traces and works a queue (spec 028
 		// Decision 3) — and a project key still writes them as before.
-		{"POST", "/api/v1/scores", member, "Write one score or an array of them", s.handleCreateScores},
-		{"GET", "/api/v1/scores", member, "List scores, filtered and cursor-paginated", s.handleListScores},
-		{"GET", "/api/v1/scores/{id}", member, "Fetch one score", s.handleGetScore},
-		{"DELETE", "/api/v1/scores/{id}", member, "Retract one score; no dry run, a re-POST puts it back", s.handleDeleteScore},
+		// For a key it is `ingest`: an end user's thumbs-up is written by
+		// the production application, with the only key it holds (spec
+		// 045 #3).
+		{"POST", "/api/v1/scores", member, scopeIngest, "Write one score or an array of them", s.handleCreateScores},
+		{"GET", "/api/v1/scores", member, scopeRead, "List scores, filtered and cursor-paginated", s.handleListScores},
+		{"GET", "/api/v1/scores/{id}", member, scopeRead, "Fetch one score", s.handleGetScore},
+		{"DELETE", "/api/v1/scores/{id}", member, scopeWrite, "Retract one score; no dry run, a re-POST puts it back", s.handleDeleteScore},
 
-		// Prompts (spec 003) and the version diff (spec 004 #21).
-		{"GET", "/api/v1/prompts", member, "List prompt names with where their labels point", s.handleListPrompts},
-		{"GET", "/api/v1/prompts/{name}", member, "Fetch one prompt by version, by label, or the latest", s.handleGetPrompt},
-		{"POST", "/api/v1/prompts/{name}/versions", editor, "Append a version to a prompt", s.handleCreatePromptVersion},
-		{"GET", "/api/v1/prompts/{name}/versions", member, "List a prompt's versions, newest first", s.handleListPromptVersions},
-		{"GET", "/api/v1/prompts/{name}/diff", member, "Unified diff between two versions of a prompt", s.handlePromptDiff},
-		{"DELETE", "/api/v1/prompts/{name}", editor, "Delete a prompt with every version and label; a dry run until `?confirm=` echoes the name", s.handleDeletePrompt},
-		{"PUT", "/api/v1/prompts/{name}/labels/{label}", editor, "Point a label at a version", s.handlePutPromptLabel},
-		{"DELETE", "/api/v1/prompts/{name}/labels/{label}", editor, "Remove a label", s.handleDeletePromptLabel},
+		// Prompts (spec 003) and the version diff (spec 004 #21). Fetching
+		// one is any key's: an application fetches its prompts at run time
+		// with the key it sends spans with (spec 045 #3).
+		{"GET", "/api/v1/prompts", member, scopeRead, "List prompt names with where their labels point", s.handleListPrompts},
+		{"GET", "/api/v1/prompts/{name}", member, scopeAny, "Fetch one prompt by version, by label, or the latest", s.handleGetPrompt},
+		{"POST", "/api/v1/prompts/{name}/versions", editor, scopeWrite, "Append a version to a prompt", s.handleCreatePromptVersion},
+		{"GET", "/api/v1/prompts/{name}/versions", member, scopeRead, "List a prompt's versions, newest first", s.handleListPromptVersions},
+		{"GET", "/api/v1/prompts/{name}/diff", member, scopeRead, "Unified diff between two versions of a prompt", s.handlePromptDiff},
+		{"DELETE", "/api/v1/prompts/{name}", editor, scopeWrite, "Delete a prompt with every version and label; a dry run until `?confirm=` echoes the name", s.handleDeletePrompt},
+		{"PUT", "/api/v1/prompts/{name}/labels/{label}", editor, scopeWrite, "Point a label at a version", s.handlePutPromptLabel},
+		{"DELETE", "/api/v1/prompts/{name}/labels/{label}", editor, scopeWrite, "Remove a label", s.handleDeletePromptLabel},
 
 		// Datasets, items and runs (spec 014): the cases an eval ran,
 		// versioned, and the container that groups the traces one pass
 		// produced. The store executes nothing; the harness stays the
 		// client's (spec 014 #1).
-		{"GET", "/api/v1/datasets", member, "List datasets by name, cursor-paginated", s.handleListDatasets},
-		{"PUT", "/api/v1/datasets/{name}", editor, "Create a dataset or replace its description and metadata", s.handlePutDataset},
-		{"GET", "/api/v1/datasets/{name}", member, "One dataset: its version and counts", s.handleGetDataset},
-		{"DELETE", "/api/v1/datasets/{name}", editor, "Delete a dataset with its items and runs; a dry run until `?confirm=` echoes the name", s.handleDeleteDataset},
-		{"POST", "/api/v1/datasets/{name}/items", editor, "Add or edit items, one or an array, one version tick for the batch", s.handleCreateItems},
-		{"GET", "/api/v1/datasets/{name}/items", member, "The items at a version, whole, in first-appearance order", s.handleListItems},
-		{"GET", "/api/v1/datasets/{name}/items/{id}", member, "One item as of a version", s.handleGetItem},
-		{"GET", "/api/v1/datasets/{name}/items/{id}/versions", member, "Every row of one item's history, newest first", s.handleListItemVersions},
-		{"DELETE", "/api/v1/datasets/{name}/items/{id}", editor, "Archive an item at a new version", s.handleDeleteItem},
-		{"POST", "/api/v1/datasets/{name}/runs", editor, "Open a run over the dataset at its current or a named version", s.handleCreateRun},
-		{"GET", "/api/v1/datasets/{name}/runs", member, "List a dataset's runs newest first, cursor-paginated", s.handleListRuns},
-		{"GET", "/api/v1/runs", member, "List the project's runs newest first, filtered by dataset and status, cursor-paginated", s.handleListProjectRuns},
-		{"GET", "/api/v1/runs/{id}", member, "One run with its summary: coverage, traffic, scores, models and prompts", s.handleGetRun},
-		{"GET", "/api/v1/runs/{id}/items", member, "The run's items with the attempts it made at each", s.handleRunItems},
-		{"GET", "/api/v1/runs/{a}/compare/{b}", member, "Two runs of one dataset side by side, per score name and per item", s.handleCompareRuns},
-		{"POST", "/api/v1/runs/{id}/finish", editor, "Close a run as finished, or as failed with a reason", s.handleFinishRun},
-		{"DELETE", "/api/v1/runs/{id}", editor, "Delete a run, releasing its traces to the retention window", s.handleDeleteRun},
+		{"GET", "/api/v1/datasets", member, scopeRead, "List datasets by name, cursor-paginated", s.handleListDatasets},
+		{"PUT", "/api/v1/datasets/{name}", editor, scopeWrite, "Create a dataset or replace its description and metadata", s.handlePutDataset},
+		{"GET", "/api/v1/datasets/{name}", member, scopeRead, "One dataset: its version and counts", s.handleGetDataset},
+		{"DELETE", "/api/v1/datasets/{name}", editor, scopeWrite, "Delete a dataset with its items and runs; a dry run until `?confirm=` echoes the name", s.handleDeleteDataset},
+		{"POST", "/api/v1/datasets/{name}/items", editor, scopeWrite, "Add or edit items, one or an array, one version tick for the batch", s.handleCreateItems},
+		{"GET", "/api/v1/datasets/{name}/items", member, scopeRead, "The items at a version, whole, in first-appearance order", s.handleListItems},
+		{"GET", "/api/v1/datasets/{name}/items/{id}", member, scopeRead, "One item as of a version", s.handleGetItem},
+		{"GET", "/api/v1/datasets/{name}/items/{id}/versions", member, scopeRead, "Every row of one item's history, newest first", s.handleListItemVersions},
+		{"DELETE", "/api/v1/datasets/{name}/items/{id}", editor, scopeWrite, "Archive an item at a new version", s.handleDeleteItem},
+		{"POST", "/api/v1/datasets/{name}/runs", editor, scopeWrite, "Open a run over the dataset at its current or a named version", s.handleCreateRun},
+		{"GET", "/api/v1/datasets/{name}/runs", member, scopeRead, "List a dataset's runs newest first, cursor-paginated", s.handleListRuns},
+		{"GET", "/api/v1/runs", member, scopeRead, "List the project's runs newest first, filtered by dataset and status, cursor-paginated", s.handleListProjectRuns},
+		{"GET", "/api/v1/runs/{id}", member, scopeRead, "One run with its summary: coverage, traffic, scores, models and prompts", s.handleGetRun},
+		{"GET", "/api/v1/runs/{id}/items", member, scopeRead, "The run's items with the attempts it made at each", s.handleRunItems},
+		{"GET", "/api/v1/runs/{a}/compare/{b}", member, scopeRead, "Two runs of one dataset side by side, per score name and per item", s.handleCompareRuns},
+		{"POST", "/api/v1/runs/{id}/finish", editor, scopeWrite, "Close a run as finished, or as failed with a reason", s.handleFinishRun},
+		{"DELETE", "/api/v1/runs/{id}", editor, scopeWrite, "Delete a run, releasing its traces to the retention window", s.handleDeleteRun},
 
 		// Score configs (spec 014 #15–#17): what a score's name means,
 		// bound by name and checked on every write that uses it.
-		{"GET", "/api/v1/score-configs", member, "List score configs by name", s.handleListScoreConfigs},
-		{"PUT", "/api/v1/score-configs/{name}", editor, "Create or replace the config that binds a score name", s.handlePutScoreConfig},
-		{"GET", "/api/v1/score-configs/{name}", member, "One score config", s.handleGetScoreConfig},
-		{"DELETE", "/api/v1/score-configs/{name}", editor, "Remove a score config; the scores it admitted stay", s.handleDeleteScoreConfig},
+		{"GET", "/api/v1/score-configs", member, scopeRead, "List score configs by name", s.handleListScoreConfigs},
+		{"PUT", "/api/v1/score-configs/{name}", editor, scopeWrite, "Create or replace the config that binds a score name", s.handlePutScoreConfig},
+		{"GET", "/api/v1/score-configs/{name}", member, scopeRead, "One score config", s.handleGetScoreConfig},
+		{"DELETE", "/api/v1/score-configs/{name}", editor, scopeWrite, "Remove a score config; the scores it admitted stay", s.handleDeleteScoreConfig},
 
 		// Annotation queues (spec 024): what to review, who reviewed
 		// it, and the hand-out that keeps two people off one trace.
@@ -208,20 +220,22 @@ func (s *Server) routes() []route {
 		// what being handed an item means (#5).
 		//
 		// Managing a queue is `editor`; working one is `member`, for the
-		// reason writing a score is (spec 028 Decision 3).
-		{"GET", "/api/v1/queues", member, "List the annotation queues with their progress", s.handleListQueues},
-		{"PUT", "/api/v1/queues/{name}", editor, "Create an annotation queue or replace it whole", s.handlePutQueue},
-		{"GET", "/api/v1/queues/{name}", member, "One queue: its score configs and its counts", s.handleGetQueue},
-		{"DELETE", "/api/v1/queues/{name}", editor, "Delete a queue with its items; a dry run until `?confirm=` echoes the name. The scores stay", s.handleDeleteQueue},
-		{"POST", "/api/v1/queues/{name}/items", editor, "Add one target or an array of them; a target already queued counts as existing", s.handleAddItems},
-		{"POST", "/api/v1/queues/{name}/items/from-traces", editor, "Add the newest traces a listing filter matches, capped by `limit`", s.handleAddItemsFromTraces},
-		{"GET", "/api/v1/queues/{name}/items", member, "The queue's items oldest first, filtered and cursor-paginated", s.handleListQueueItems},
-		{"GET", claimPath, member, "The next item to annotate, claimed for ten minutes", s.handleNextItem},
-		{"GET", "/api/v1/queues/{name}/items/{id}", member, "One item", s.handleGetQueueItem},
-		{"POST", "/api/v1/queues/{name}/items/{id}/complete", member, "Mark an item done; refused unless every score the queue asks for is on its target", s.handleCompleteItem},
-		{"POST", "/api/v1/queues/{name}/items/{id}/skip", member, "Mark an item skipped, with the reason", s.handleSkipItem},
-		{"POST", "/api/v1/queues/{name}/items/{id}/reopen", member, "Return a completed or skipped item to pending", s.handleReopenItem},
-		{"DELETE", "/api/v1/queues/{name}/items/{id}", editor, "Remove one item from the queue", s.handleDeleteQueueItem},
+		// reason writing a score is (spec 028 Decision 3). A key needs
+		// `write` for both, `next` included: a key that changes who is
+		// handed what is not a read-only key (spec 045 #3).
+		{"GET", "/api/v1/queues", member, scopeRead, "List the annotation queues with their progress", s.handleListQueues},
+		{"PUT", "/api/v1/queues/{name}", editor, scopeWrite, "Create an annotation queue or replace it whole", s.handlePutQueue},
+		{"GET", "/api/v1/queues/{name}", member, scopeRead, "One queue: its score configs and its counts", s.handleGetQueue},
+		{"DELETE", "/api/v1/queues/{name}", editor, scopeWrite, "Delete a queue with its items; a dry run until `?confirm=` echoes the name. The scores stay", s.handleDeleteQueue},
+		{"POST", "/api/v1/queues/{name}/items", editor, scopeWrite, "Add one target or an array of them; a target already queued counts as existing", s.handleAddItems},
+		{"POST", "/api/v1/queues/{name}/items/from-traces", editor, scopeWrite, "Add the newest traces a listing filter matches, capped by `limit`", s.handleAddItemsFromTraces},
+		{"GET", "/api/v1/queues/{name}/items", member, scopeRead, "The queue's items oldest first, filtered and cursor-paginated", s.handleListQueueItems},
+		{"GET", claimPath, member, scopeWrite, "The next item to annotate, claimed for ten minutes", s.handleNextItem},
+		{"GET", "/api/v1/queues/{name}/items/{id}", member, scopeRead, "One item", s.handleGetQueueItem},
+		{"POST", "/api/v1/queues/{name}/items/{id}/complete", member, scopeWrite, "Mark an item done; refused unless every score the queue asks for is on its target", s.handleCompleteItem},
+		{"POST", "/api/v1/queues/{name}/items/{id}/skip", member, scopeWrite, "Mark an item skipped, with the reason", s.handleSkipItem},
+		{"POST", "/api/v1/queues/{name}/items/{id}/reopen", member, scopeWrite, "Return a completed or skipped item to pending", s.handleReopenItem},
+		{"DELETE", "/api/v1/queues/{name}/items/{id}", editor, scopeWrite, "Remove one item from the queue", s.handleDeleteQueueItem},
 
 		// Administration (spec 005). Every destructive one is a dry run
 		// until `?confirm=` echoes the name — or the user id — of what
@@ -232,37 +246,40 @@ func (s *Server) routes() []route {
 		// deleting, restoring and renaming one moved to `owner` (spec
 		// 028 Decision 3); its settings — retention, keys, erasure — are
 		// what an editor changes about a project it already has. Its keys
-		// are an editor's and never a key's (`issuer`, spec 045 #4).
-		{"GET", "/api/v1/projects", member, "List projects: all with the admin token, the caller's own with a key or a session", s.handleListProjects},
-		{"POST", "/api/v1/projects", owner, "Create a project and its first key pair", s.handleCreateProject},
-		{"GET", "/api/v1/projects/{id}", member, "One project with its retention windows", s.handleGetProject},
-		{"PATCH", "/api/v1/projects/{id}", editor, "Rename a project (owners) or move its retention windows", s.handlePatchProject},
-		{"DELETE", "/api/v1/projects/{id}", owner, "Soft-delete a project, restorable for seven days", s.handleDeleteProject},
-		{"POST", "/api/v1/projects/{id}/restore", owner, "Undo a soft delete inside its grace window", s.handleRestoreProject},
-		{"GET", "/api/v1/projects/{id}/keys", issuer, "List a project's keys, who minted each and when it was last used; not with a project key", s.handleListKeys},
-		{"POST", "/api/v1/projects/{id}/keys", issuer, "Mint a key pair; the secret is shown once. Not with a project key", s.handleCreateKey},
-		{"DELETE", "/api/v1/projects/{id}/keys/{public_key}", issuer, "Revoke one key pair; not with a project key", s.handleRevokeKey},
-		{"DELETE", "/api/v1/projects/{id}/users/{user_id}/data", editor, "Erase everything stored about one user", s.handleEraseUserData},
-		{"GET", "/api/v1/projects/{id}/members", owner, "Who has a role in this project; owners are not listed", s.handleProjectMembers},
+		// are an editor's and never a key's, whatever its scopes (spec 045
+		// #4); the listing and the read are any key's, which is how a key
+		// learns what it holds (#12).
+		{"GET", "/api/v1/projects", member, scopeAny, "List projects: all with the admin token, the caller's own with a key or a session", s.handleListProjects},
+		{"POST", "/api/v1/projects", owner, scopeNone, "Create a project and its first key pair", s.handleCreateProject},
+		{"GET", "/api/v1/projects/{id}", member, scopeAny, "One project with its retention windows", s.handleGetProject},
+		{"PATCH", "/api/v1/projects/{id}", editor, scopeWrite, "Rename a project (owners) or move its retention windows", s.handlePatchProject},
+		{"DELETE", "/api/v1/projects/{id}", owner, scopeNone, "Soft-delete a project, restorable for seven days", s.handleDeleteProject},
+		{"POST", "/api/v1/projects/{id}/restore", owner, scopeNone, "Undo a soft delete inside its grace window", s.handleRestoreProject},
+		{"GET", "/api/v1/projects/{id}/keys", editor, scopeNone, "List a project's keys, who minted each and when it was last used; not with a project key", s.handleListKeys},
+		{"POST", "/api/v1/projects/{id}/keys", editor, scopeNone, "Mint a key pair; the secret is shown once. Not with a project key", s.handleCreateKey},
+		{"DELETE", "/api/v1/projects/{id}/keys/{public_key}", editor, scopeNone, "Revoke one key pair; not with a project key", s.handleRevokeKey},
+		{"DELETE", "/api/v1/projects/{id}/users/{user_id}/data", editor, scopeWrite, "Erase everything stored about one user", s.handleEraseUserData},
+		{"GET", "/api/v1/projects/{id}/members", owner, scopeNone, "Who has a role in this project; owners are not listed", s.handleProjectMembers},
 
 		// Accounts (spec 028 Decision 12): an owner manages people from
 		// the account side — a person and their projects — and reads
 		// from the project side, which is the route above.
-		{"GET", "/api/v1/accounts", owner, "Every account with its standing and its projects", s.handleListAccounts},
-		{"POST", "/api/v1/accounts", owner, "Invite an account; the link is shown once", s.handleCreateAccount},
-		{"GET", "/api/v1/accounts/{id}", owner, "One account with its projects", s.handleGetAccount},
-		{"PATCH", "/api/v1/accounts/{id}", owner, "Change an account's name, owner standing or disabled flag", s.handlePatchAccount},
-		{"DELETE", "/api/v1/accounts/{id}", owner, "Delete an account; a dry run until `?confirm=` echoes its email", s.handleDeleteAccount},
-		{"POST", "/api/v1/accounts/{id}/invite", owner, "Mint a fresh invitation link; this is also the password reset", s.handleInviteAccount},
-		{"PUT", "/api/v1/accounts/{id}/projects/{project_id}", owner, "Give an account a role in a project", s.handlePutMembership},
-		{"DELETE", "/api/v1/accounts/{id}/projects/{project_id}", owner, "Take a project away from an account", s.handleDeleteMembership},
+		{"GET", "/api/v1/accounts", owner, scopeNone, "Every account with its standing and its projects", s.handleListAccounts},
+		{"POST", "/api/v1/accounts", owner, scopeNone, "Invite an account; the link is shown once", s.handleCreateAccount},
+		{"GET", "/api/v1/accounts/{id}", owner, scopeNone, "One account with its projects", s.handleGetAccount},
+		{"PATCH", "/api/v1/accounts/{id}", owner, scopeNone, "Change an account's name, owner standing or disabled flag", s.handlePatchAccount},
+		{"DELETE", "/api/v1/accounts/{id}", owner, scopeNone, "Delete an account; a dry run until `?confirm=` echoes its email", s.handleDeleteAccount},
+		{"POST", "/api/v1/accounts/{id}/invite", owner, scopeNone, "Mint a fresh invitation link; this is also the password reset", s.handleInviteAccount},
+		{"PUT", "/api/v1/accounts/{id}/projects/{project_id}", owner, scopeNone, "Give an account a role in a project", s.handlePutMembership},
+		{"DELETE", "/api/v1/accounts/{id}/projects/{project_id}", owner, scopeNone, "Take a project away from an account", s.handleDeleteMembership},
 	}
 }
 
 // handleAPIIndex serves the endpoint map. An agent that lands on this API
 // without documentation gets the whole surface in one response, in the order
 // the table declares it (design §3.2), with the policy word that says what it
-// would need to call each one (spec 028, API contract).
+// would need to call each one (spec 028, API contract) and the scope a key
+// would need (spec 045 #2).
 //
 // No authentication, for the same reason as the OpenAPI document: this says
 // what the API is, never what is in it, and a consumer deciding whether to
@@ -279,6 +296,7 @@ func (s *Server) handleAPIIndex(w http.ResponseWriter, r *http.Request) {
 			put("method", route.Method).
 			put("path", route.Path).
 			put("policy", route.Policy.String()).
+			put("scope", route.Scope.String()).
 			put("description", route.Description))
 	}
 	writeJSON(w, http.StatusOK, object{}.

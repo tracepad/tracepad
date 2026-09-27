@@ -30,8 +30,24 @@ type API interface {
 // Loopback calls the server's own handler in process. No socket, no second
 // authentication story: the credential the MCP request arrived with is the
 // credential the read API sees.
+//
+// The request it makes carries the MCP request's context, marked as a
+// loopback's (Looped), so that the server can take the caller it already
+// admitted on the stream from there rather than looking the key up again for
+// every tool call. The header goes too, for a context that carries no caller.
 type Loopback struct {
 	Handler http.Handler
+}
+
+// looped is the context key only a Loopback sets: unexported, so no other
+// package can put it on a context, and a request from the network never
+// carries it.
+type looped struct{}
+
+// Looped reports a request the Loopback made on behalf of a tool call.
+func Looped(ctx context.Context) bool {
+	marked, _ := ctx.Value(looped{}).(bool)
+	return marked
 }
 
 func (l *Loopback) Get(ctx context.Context, path string, query url.Values, credential string) (json.RawMessage, error) {
@@ -41,7 +57,8 @@ func (l *Loopback) Get(ctx context.Context, path string, query url.Values, crede
 	}
 	// The host is a placeholder: nothing routes on it, and the request
 	// never leaves this process.
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://loopback"+target, nil)
+	request, err := http.NewRequestWithContext(context.WithValue(ctx, looped{}, true),
+		http.MethodGet, "http://loopback"+target, nil)
 	if err != nil {
 		return nil, err
 	}

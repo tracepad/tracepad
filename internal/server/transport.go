@@ -4,11 +4,11 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"slices"
 	"sync"
 	"time"
 
 	"github.com/tracepad/tracepad/internal/client"
+	"github.com/tracepad/tracepad/internal/mcpserver"
 )
 
 // The transport's own defences (spec 001 Decisions 14–16): what every response
@@ -68,69 +68,44 @@ const writeTimeout = 5 * time.Minute
 
 // mcpStream serves MCP over streamable HTTP, the one response that is a stream
 // rather than a document: its answer takes as long as the tool it runs, so it
-// has no write deadline. Only for a caller whose `Authorization` is a live
-// project's key that may read, read the way the guard reads it (headerCaller),
-// because the header is what MCP's tools forward to the read API (spec 004
-// #20). Anyone else is answered 401 here, under the ordinary deadline, and so
-// cannot hold a connection open by not reading: no key, a soft-deleted
-// project's key, a key without the read scope, and the admin token, which
-// reaches no data-plane route (spec 028 #3) — each would be refused on every
-// tool call anyway. `WWW-Authenticate` says the credential is a bearer token,
-// so a client that follows the MCP authorization spec asks for a key rather
-// than going looking for OAuth. A store that cannot answer is guardLookup's
-// 503 with Retry-After and without it: the key may be fine, and the client
-// should retry rather than replace it.
+// has no write deadline. It is a route of the guard's table with the policy
+// `stream` and the scope `read` (spec 045 #13), so the guard decides who may
+// open one exactly as it decides every other route: a project key whose
+// project is live and which may read, because every MCP tool is a read of the
+// API (spec 004 #20). Anyone else is refused under the ordinary deadline and so
+// cannot hold a connection open by not reading — no key, the admin token,
+// which reaches no data-plane route (spec 028 #3), and a soft-deleted
+// project's key with `401` and a Bearer challenge; a key without `read` with
+// the guard's `403` and `insufficient_scope`. A store that cannot answer is
+// guardLookup's 503 with Retry-After and no challenge: the key may be fine.
 //
-// The key is looked up again by the guard on each tool call. That is on
-// purpose: the tools reach the read API through the router in this process
-// (mcpserver.Loopback), as a request of their own carrying this one's
-// context, and the guard reads that request's header as it reads any other.
-// It takes no caller from a context, so that there is one way in and one
-// place that decides who is calling; the price is one indexed query.
+// The tools reach the read API through the router in this process
+// (mcpserver.Loopback), as requests of their own carrying this one's context,
+// and the guard takes the caller it admitted here from that context instead of
+// looking the key up again on each tool call (loopbackCaller).
 //
 // The read deadline needs no lifting: net/http clears it once the request body
 // has been read, so a tool call that outlasts ReadTimeout is not cancelled
 // (asserted in TestOnlyAKeyedStreamOutlivesTheWriteDeadline), and lifting it
 // here, before the body is read, would give up the bound on a slow body.
 func (s *Server) mcpStream(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// What the guard sends on every route that needs a caller (spec
-		// 001 #17). An event stream the MCP layer writes sets its own
-		// `no-cache, no-transform`, which a shared cache may not reuse
-		// for a request carrying Authorization either.
-		callerHeaders(w)
-		if s.store == nil {
-			writeError(w, http.StatusServiceUnavailable, "the API is not available")
-			return
-		}
-		header := r.Header.Get("Authorization")
-		c, ok := guardLookup(w, r, "key", func(ctx context.Context) (*caller, error) {
-			return s.headerCaller(ctx, header)
-		})
-		if !ok {
-			return
-		}
-		if c == nil || c.project == nil || c.project.Deleted() || !mayRead(c) {
-			w.Header().Set("WWW-Authenticate", `Bearer realm="tracepad"`)
-			writeError(w, http.StatusUnauthorized, "unauthorized")
-			return
-		}
-		// A writer that cannot take a deadline has none to lift.
-		_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
-		// A stop ends the stream at once rather than after the drain
-		// window: the client reconnects to whatever serves next.
-		ctx, cancel := context.WithCancel(r.Context())
-		defer cancel()
-		defer context.AfterFunc(s.stopping, cancel)()
-		next.ServeHTTP(w, r.WithContext(ctx))
-	})
+	return s.guard(s.mcpRoute(next))
 }
 
-// mayRead reports whether a key may use the read API, which is all MCP's tools
-// are: a key minted for ingest alone is refused here, before its stream lifts
-// a deadline, rather than on every tool call after (spec 045 #1).
-func mayRead(c *caller) bool {
-	return c.key != nil && slices.Contains(c.key.Scopes, "read")
+// mcpRoute is the stream's row of the table. No method: the transport answers
+// the ones it serves and refuses the rest itself, after the guard.
+func (s *Server) mcpRoute(next http.Handler) route {
+	return route{"", mcpserver.Path, stream, scopeRead,
+		"MCP over streamable HTTP", func(w http.ResponseWriter, r *http.Request) {
+			// A writer that cannot take a deadline has none to lift.
+			_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
+			// A stop ends the stream at once rather than after the drain
+			// window: the client reconnects to whatever serves next.
+			ctx, cancel := context.WithCancel(r.Context())
+			defer cancel()
+			defer context.AfterFunc(s.stopping, cancel)()
+			next.ServeHTTP(w, r.WithContext(ctx))
+		}}
 }
 
 // defaultHandlerGrace is how long a stop waits for handlers to return once

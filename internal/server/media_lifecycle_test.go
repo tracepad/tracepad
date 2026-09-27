@@ -142,7 +142,7 @@ func (h *harness) seedTrace(t *testing.T, id string, start int64) {
 // for still uploads (#28).
 func TestLangfuseMediaUploadDiesWithItsKey(t *testing.T) {
 	h := newAdminHarness(t)
-	rec := h.call(t, "POST", "/api/v1/projects/"+h.project.ID+"/keys", nil, asAdmin)
+	rec := h.call(t, "POST", "/api/v1/projects/"+h.project.ID+"/keys", mustJSON(t, map[string]any{"scopes": allScopes}), asAdmin)
 	expectStatus(t, rec, http.StatusCreated)
 	second := decodeJSON[struct {
 		PublicKey string `json:"public_key"`
@@ -205,7 +205,7 @@ func TestLangfuseMediaDeadTokensReadNothing(t *testing.T) {
 // `Expect: 100-continue` hears the refusal and no `100` (#31).
 func TestLangfuseMediaRefusalBeforeTheBody(t *testing.T) {
 	h := newAdminHarness(t)
-	rec := h.call(t, "POST", "/api/v1/projects/"+h.project.ID+"/keys", nil, asAdmin)
+	rec := h.call(t, "POST", "/api/v1/projects/"+h.project.ID+"/keys", mustJSON(t, map[string]any{"scopes": allScopes}), asAdmin)
 	expectStatus(t, rec, http.StatusCreated)
 	second := decodeJSON[struct {
 		PublicKey string `json:"public_key"`

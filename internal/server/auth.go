@@ -5,14 +5,17 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/tracepad/tracepad/internal/logpace"
+	"github.com/tracepad/tracepad/internal/mcpserver"
 	"github.com/tracepad/tracepad/internal/store"
 )
 
@@ -37,10 +40,13 @@ status:
     (Decision 5), and no credential at all is `401`; a key's use is
     recorded here, admitted or refused (spec 045 #9);
  2. cross-origin, for a cookie on an unsafe method (Decision 5);
- 3. the policy against the kind of caller — which is where a key is told
-    it cannot manage keys (spec 045 #4), before a soft-deleted project's
-    key could be told anything else;
- 4. the project the request is about, for a session (Decision 6).
+ 3. the policy against the kind of caller;
+ 4. the project the request is about, for a session (Decision 6), and
+    whether a key's project is still there;
+ 5. the scope a key must hold (spec 045 #13) — which is where a key is told
+    it cannot manage keys (#4), or which scope it lacks (#7). Last, so that a
+    soft-deleted project's key keeps the answers it had before scopes
+    existed, and a session or the admin token never meets a scope at all.
 */
 
 // policy is what a route requires of its caller. It is the whole of the
@@ -84,17 +90,15 @@ const (
 	// told "not a session" rather than "unauthorized", because it is a
 	// perfectly good credential asking a question it cannot have.
 	session
-	// issuer is `editor` without the project key: the three routes that
-	// list, mint and revoke a project's keys (spec 045 #4). An owner or
-	// `editor` session, or the admin token; a key is refused whatever it
-	// may do elsewhere, because a key that mints keys turns one lost key into
-	// as many credentials as its finder wants, each outliving the first
-	// one's revocation. It is its own policy so that the table says which
-	// routes these are, rather than a path comparison in the guard; the
-	// endpoint map calls it `editor`, which is what it is to everyone but a
-	// key. Spec 045's second half moves the key's half of this into the
-	// scope column as `none`.
-	issuer
+	// stream is a project key and nothing else, answered with no write
+	// deadline: the MCP transport, whose response lasts as long as the tool
+	// it runs (spec 001 #15). Every refusal is `401` with a Bearer
+	// challenge, so a client that follows the MCP authorization spec asks
+	// for a key rather than going looking for OAuth. It is not an endpoint
+	// of this API, so neither the endpoint map nor the OpenAPI document
+	// lists it (spec 004 #27); it is in the guard's table all the same, so
+	// that one guard decides its headers, its caller and its scope.
+	stream
 )
 
 // String names a policy for the endpoint map and for test failures.
@@ -106,12 +110,60 @@ func (p policy) String() string {
 		return "ingest"
 	case member:
 		return "member"
-	case editor, issuer:
+	case editor:
 		return "editor"
 	case owner:
 		return "owner"
 	case session:
 		return "session"
+	case stream:
+		return "stream"
+	}
+	return "unset"
+}
+
+// scope is what a route asks of a project key (spec 045 #2): one of the three
+// things a key may be minted to do, or every key, or none. Sessions and the
+// admin token never consult it — the policy and the role decide for them.
+type scope uint8
+
+const (
+	// scopeUnset is the zero value. It admits no key, and the parity test
+	// fails for any route that carries it, as it does for an unset policy.
+	scopeUnset scope = iota
+	// scopeAny admits every key: the public routes, the project listing and
+	// read — how a key learns what it holds (#12) — and fetching one prompt,
+	// which an application does at run time with the key it has (#3).
+	scopeAny
+	// scopeIngest is what a running application does: send spans, use the
+	// Langfuse media channel, write scores (#1, #3).
+	scopeIngest
+	// scopeRead is every read of the project's data, and nothing that
+	// changes it.
+	scopeRead
+	// scopeWrite is every change a key may make to the project.
+	scopeWrite
+	// scopeNone admits no key, whatever its scopes: the session and owner
+	// routes, which the policy already closes to a key, and the three that
+	// list, mint and revoke keys, which only this closes (#4).
+	scopeNone
+)
+
+// String names a scope for the endpoint map, the OpenAPI document, the
+// refusal and test failures. The three a key can hold are spelled as a key's
+// `scopes` spells them.
+func (s scope) String() string {
+	switch s {
+	case scopeAny:
+		return "any"
+	case scopeIngest:
+		return "ingest"
+	case scopeRead:
+		return "read"
+	case scopeWrite:
+		return "write"
+	case scopeNone:
+		return "none"
 	}
 	return "unset"
 }
@@ -125,7 +177,7 @@ type caller struct {
 	project *store.Project
 	// key is the project key's own row, for a key: which key is asking and
 	// what it may do. A handler that names the key — the media upload grant
-	// of spec 041 #28 — reads its public key here, and the scope check of
+	// of spec 041 #28 — reads its public key here, and the scope step of
 	// spec 045 #13 reads its scopes.
 	key *store.KeyInfo
 	// account and session are set together, for a browser cookie.
@@ -195,12 +247,30 @@ func (s *Server) guard(rt route) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Before the caller is known, so a refusal carries them too.
 		callerHeaders(w)
-		c, ok := s.resolve(w, r, rt)
+		refusals := w
+		if rt.Policy == stream {
+			refusals = challenging{w}
+		}
+		c, ok := s.resolve(refusals, r, rt)
 		if !ok {
 			return
 		}
 		rt.handler(w, r.WithContext(withCaller(r.Context(), c)))
 	}
+}
+
+// challenging answers every `401` the guard gives on a stream route with a
+// Bearer challenge (policy `stream`). Only a `401`: a `503` for a store that
+// cannot answer says nothing about the key, and a client that met a challenge
+// there would go looking for another credential over a busy database (spec
+// 043 #1); a scope refusal carries its own.
+type challenging struct{ http.ResponseWriter }
+
+func (c challenging) WriteHeader(status int) {
+	if status == http.StatusUnauthorized {
+		c.Header().Set("WWW-Authenticate", `Bearer realm="tracepad"`)
+	}
+	c.ResponseWriter.WriteHeader(status)
 }
 
 // callerCacheControl is what every response on a route that needs a caller
@@ -215,8 +285,7 @@ func (s *Server) guard(rt route) http.HandlerFunc {
 const callerCacheControl = "private, no-store"
 
 // callerHeaders sends what every response on a route that needs a caller says
-// about caching: the guard's, and the MCP stream's, the one such route outside
-// the table.
+// about caching.
 func callerHeaders(w http.ResponseWriter) {
 	header := w.Header()
 	header.Set("Cache-Control", callerCacheControl)
@@ -225,15 +294,14 @@ func callerHeaders(w http.ResponseWriter) {
 
 // headerCaller is who an `Authorization` header names — the admin token or a
 // project key — or nil when it names nobody. It is the one reading of that
-// header: the guard's, and the MCP stream's (spec 001 #15). An error is the
-// store failing to answer, which is not the key being wrong: both callers run
-// it through guardLookup, which answers that `503` with `Retry-After` and no
-// challenge (spec 043 #1), so no client goes looking for another credential
-// over a busy database.
+// header. An error is the store failing to answer, which is not the key being
+// wrong: the guard runs it through guardLookup, which answers that `503` with
+// `Retry-After` and no challenge (spec 043 #1), so no client goes looking for
+// another credential over a busy database.
 //
 // A soft-deleted project's key still names its project here; what it may
-// reach is the guard's scope's to decide, and the MCP stream refuses it. A key
-// it finds is marked as used, whichever of the two asked (spec 045 #9).
+// reach is the guard's project step's to decide. A key it finds is marked as
+// used (spec 045 #9).
 func (s *Server) headerCaller(ctx context.Context, header string) (*caller, error) {
 	secret, ok := credential(header)
 	if !ok {
@@ -245,7 +313,7 @@ func (s *Server) headerCaller(ctx context.Context, header string) (*caller, erro
 		subtle.ConstantTimeCompare([]byte(secret), []byte(s.adminToken)) == 1 {
 		return &caller{admin: true}, nil
 	}
-	project, key, err := s.store.KeyBySecret(ctx, secret)
+	project, key, err := keyBySecret(s.store, ctx, secret)
 	if err != nil {
 		return nil, err
 	}
@@ -259,7 +327,7 @@ func (s *Server) headerCaller(ctx context.Context, header string) (*caller, erro
 	return &caller{project: project, key: key}, nil
 }
 
-// resolve is steps one to four above. It answers the client itself on every
+// resolve is steps one to five above. It answers the client itself on every
 // refusal, so a handler that runs is a handler whose caller is allowed.
 func (s *Server) resolve(w http.ResponseWriter, r *http.Request, rt route) (*caller, bool) {
 	if s.store == nil {
@@ -280,7 +348,10 @@ func (s *Server) resolve(w http.ResponseWriter, r *http.Request, rt route) (*cal
 	if !s.admits(w, rt, c) {
 		return nil, false
 	}
-	if !s.scope(w, r, rt, c) {
+	if !s.inProject(w, r, rt, c) {
+		return nil, false
+	}
+	if !permits(w, r, rt, c) {
 		return nil, false
 	}
 	// Last, so that only a request that is actually served extends the
@@ -402,6 +473,10 @@ var lookupLog = &logpace.Keyed{Every: time.Minute}
 // projectByID is the store's, a seam for the test that makes it fail.
 var projectByID = (*store.Store).ProjectByID
 
+// keyBySecret is the store's, a seam for the test that counts the lookups an
+// MCP tool call makes.
+var keyBySecret = (*store.Store).KeyBySecret
+
 // hungUp reports a request whose client is gone. A lookup that failed for that
 // reason is no storage failure and has nobody to answer: nothing is logged and
 // nothing is written, as ingest already treats a hang-up (spec 043 #24).
@@ -427,6 +502,9 @@ type signIn struct {
 // which is what keeps a command-line tool's behaviour untouched next to a
 // browser (Decision 5).
 func (s *Server) identify(w http.ResponseWriter, r *http.Request) (*caller, bool) {
+	if c := loopbackCaller(r); c != nil {
+		return c, true
+	}
 	if header := r.Header.Get("Authorization"); header != "" {
 		c, ok := guardLookup(w, r, "key", func(ctx context.Context) (*caller, error) {
 			return s.headerCaller(ctx, header)
@@ -464,6 +542,29 @@ func (s *Server) identify(w http.ResponseWriter, r *http.Request) (*caller, bool
 		return nil, false
 	}
 	return &caller{account: account, session: found}, true
+}
+
+// loopbackCaller is the caller an MCP tool call brings with it: the key the
+// guard admitted on the stream the call arrived on, which the tool's request
+// to the read API carries in its context (mcpserver.Loopback). Only a request
+// the loopback made is read this way — a request from the network starts from
+// a context net/http made, which never says so — and only a key, which is the
+// one caller a stream admits. The copy is the loopback request's own, so that
+// nothing a handler does to it reaches the stream's.
+//
+// One lookup per MCP request rather than one per tool call, and the same
+// caller for both: the stream's scope and the tool's are judged of the same
+// key by the same rule (spec 045 #13).
+func loopbackCaller(r *http.Request) *caller {
+	if !mcpserver.Looped(r.Context()) {
+		return nil
+	}
+	c := callerFrom(r.Context())
+	if !c.isKey() {
+		return nil
+	}
+	copied := *c
+	return &copied
 }
 
 // slide moves a session's expiry forward when it has not been seen for a day,
@@ -527,17 +628,19 @@ func (s *Server) admits(w http.ResponseWriter, rt route, c *caller) bool {
 		}
 		return s.requireAdmin(w, c)
 
-	case member, editor, issuer:
+	case stream:
+		if !c.isKey() {
+			// The admin token reaches no data-plane route, and every MCP
+			// tool is one; a session is not what an MCP client holds.
+			writeError(w, http.StatusUnauthorized, "unauthorized")
+			return false
+		}
+		return true
+
+	case member, editor:
 		if c.isKey() {
-			if rt.Policy == issuer {
-				// Answered the same for a live project's key and a
-				// soft-deleted one's, because it is refused before the
-				// project is looked at (spec 045 #13).
-				writeError(w, http.StatusForbidden, keyRouteRefusal)
-				return false
-			}
-			// A project key is the administrator of its own project
-			// (spec 005 #11), which is both of these.
+			// Both admit a key; what it may do among them is its scopes'
+			// to say (step five, spec 045 #13).
 			return true
 		}
 		if c.admin {
@@ -557,14 +660,14 @@ func (s *Server) admits(w http.ResponseWriter, rt route, c *caller) bool {
 	}
 }
 
-// scope is step four: which project the request is about, and what the account
-// may do there (Decision 6).
+// inProject is step four: which project the request is about, and what the
+// account may do there (Decision 6).
 //
 // A key carries its project and a header cannot move it. The admin token has
 // no project. Only a session needs this, and it takes the project from the
 // path on the routes under `/api/v1/projects` and from `X-Tracepad-Project`
 // everywhere else.
-func (s *Server) scope(w http.ResponseWriter, r *http.Request, rt route, c *caller) bool {
+func (s *Server) inProject(w http.ResponseWriter, r *http.Request, rt route, c *caller) bool {
 	if c.isKey() {
 		// A soft-deleted project's key still reaches the two endpoints
 		// that undo the deletion, and nothing else (spec 005 #10). The
@@ -589,7 +692,7 @@ func (s *Server) scope(w http.ResponseWriter, r *http.Request, rt route, c *call
 		// `/api/v1/projects` that are about no single project, so there
 		// is nothing to scope and no header to ask for.
 		return true
-	case rt.Policy == member || rt.Policy == editor || rt.Policy == issuer:
+	case rt.Policy == member || rt.Policy == editor:
 		id = r.Header.Get(projectHeader)
 		if id == "" {
 			writeError(w, http.StatusBadRequest,
@@ -628,7 +731,7 @@ func (s *Server) scope(w http.ResponseWriter, r *http.Request, rt route, c *call
 		writeError(w, http.StatusNotFound, "no such project")
 		return false
 	}
-	if (rt.Policy == editor || rt.Policy == issuer) && role == store.RoleViewer {
+	if rt.Policy == editor && role == store.RoleViewer {
 		writeError(w, http.StatusForbidden, "your role in this project is viewer")
 		return false
 	}
@@ -653,9 +756,58 @@ func projectRoute(path string) bool {
 	return path == projectRoutePrefix || strings.HasPrefix(path, projectRoutePrefix+"/")
 }
 
-// keyRouteRefusal is what a key on an `issuer` route is told.
+// keyRouteRefusal is what a key on a `none` route is told (spec 045 #4, #7).
+// Only the three key routes reach it: on every other `none` route the policy
+// has already refused the key in terms of what the route needs.
 const keyRouteRefusal = "a project key cannot list, mint or revoke keys; " +
 	"that needs an owner or editor signed in, or the admin token"
+
+// permits is step five: the route's scope against the key's (spec 045 #13).
+// `any` admits every key and `none` refuses every key; a word admits a key
+// that holds it, and otherwise the key is told which it holds and which the
+// route needs, in the body and in RFC 6750's header, so a program can read the
+// scope it lacks without parsing prose (#7). The route's pattern, never the
+// request's path: the ids in it are the caller's, not the rule's.
+//
+// A soft-deleted project's key is dead for everything but reading the project
+// (spec 005 #10), and it is told that rather than which scope it lacks: the
+// answer it had before scopes existed (#13).
+func permits(w http.ResponseWriter, r *http.Request, rt route, c *caller) bool {
+	if !c.isKey() {
+		return true
+	}
+	switch rt.Scope {
+	case scopeAny:
+		return true
+	case scopeNone:
+		writeError(w, http.StatusForbidden, keyRouteRefusal)
+		return false
+	case scopeUnset:
+		// The parity test keeps this from shipping; refusing is the only
+		// safe reading of "nobody said which key may call this".
+		slog.Error("route has no scope", "method", rt.Method, "path", rt.Path)
+		writeError(w, http.StatusInternalServerError, "this route declares no scope")
+		return false
+	}
+	needed := rt.Scope.String()
+	if slices.Contains(c.key.Scopes, needed) {
+		return true
+	}
+	if c.project.Deleted() {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return false
+	}
+	w.Header().Set("WWW-Authenticate", `Bearer error="insufficient_scope", scope="`+needed+`"`)
+	method := rt.Method
+	if method == "" {
+		// The stream is served for every method; its refusal names the
+		// one asked.
+		method = r.Method
+	}
+	writeError(w, http.StatusForbidden, fmt.Sprintf("this key's scopes are %s; %s %s needs %s",
+		strings.Join(c.key.Scopes, ", "), method, rt.Path, needed))
+	return false
+}
 
 // pathScoped reports a route that names its project in the path, which is
 // every route under `/api/v1/projects` but the listing and the create — and
