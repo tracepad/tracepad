@@ -255,9 +255,9 @@ if generations:
 # Payloads carrying a reference are past the compression threshold, so they are
 # read back through the API rather than decoded here; the rest is the tables.
 def api(path):
+    key = os.environ.get("SMOKE_READ_KEY", os.environ["SMOKE_SECRET_KEY"])
     request = urllib.request.Request(
-        os.environ["SMOKE_HOST"] + path,
-        headers={"Authorization": "Bearer " + os.environ.get("SMOKE_READ_KEY", os.environ["SMOKE_SECRET_KEY"])})
+        os.environ["SMOKE_HOST"] + path, headers={"Authorization": "Bearer " + key})
     with urllib.request.urlopen(request) as response:
         return response.read()
 
