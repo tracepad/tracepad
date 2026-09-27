@@ -85,6 +85,17 @@ func (s *Server) handleTraces(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resourceSpans, unreadable := decoded.ResourceSpans, decoded.Unreadable
+	// Counted after decoding and before mapping (spec 043 #10): the body
+	// cap bounds bytes, and this bounds the work — mapping, indexing and
+	// committing cost per span. Refused whole and not archived: a cut
+	// would store traces with an arbitrary half of their spans.
+	if spans := mapping.CountSpans(resourceSpans); spans > s.maxSpans {
+		s.counters.observeOverSpanCap(project.ID)
+		writeError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf(
+			"this export carries %d spans; the server takes at most %d per request (TRACEPAD_MAX_SPANS_PER_REQUEST)",
+			spans, s.maxSpans))
+		return
+	}
 	if len(resourceSpans) == 0 && unreadable == 0 {
 		// Per the OTLP spec an empty batch is a successful no-op; there
 		// is nothing to store and nothing to replay later.
@@ -163,7 +174,7 @@ func (s *Server) handleTraces(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = s.writer.Submit(r.Context(), batch)
+	err = s.submitExport(r.Context(), batch)
 	if errors.Is(err, store.ErrMediaGone) {
 		// A Langfuse upload the walk rewrote a string to was collected
 		// before the write (spec 041 #9). Taken again without resolving,
@@ -174,7 +185,7 @@ func (s *Server) handleTraces(w http.ResponseWriter, r *http.Request) {
 			opts := s.mediaOptions(walk, project)
 			opts.Resolve = nil
 			batch, result = prepare(again, opts)
-			err = s.writer.Submit(r.Context(), batch)
+			err = s.submitExport(r.Context(), batch)
 		}
 	}
 	if err != nil {
@@ -201,6 +212,36 @@ func (s *Server) handleTraces(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeExportResponse(w, result, jsonEncoding)
+}
+
+// submitExport commits an export in slices of at most store.SliceRows rows,
+// each a job of its own submitted once the one before it has committed
+// (spec 043 #11): the only writer is unavailable to every other project for as
+// long as one slice takes, not the whole export, and their jobs queue between
+// the slices. It returns once the last slice has committed — so a `200` still
+// means everything is on disk (spec 002 #15) — or at the first failure, with
+// the slices before it committed; the retry rewrites them, since ingest is an
+// upsert (spec 002 #5), and stores the raw body the last slice carries once.
+//
+// Once the export is cut, every slice is submitted whether or not the client
+// is still there, as the whole export used to be committed after a hang-up:
+// what an export stores does not depend on its client waiting (spec 043 #28).
+// The handler waits for them, so the body's reservation is held for as long
+// as the export is (#13).
+func (s *Server) submitExport(ctx context.Context, batch *store.IngestBatch) error {
+	slices := batch.Slices()
+	if len(slices) == 1 {
+		return s.writer.Submit(ctx, batch)
+	}
+	commit := context.WithoutCancel(ctx)
+	batch.UnknownRuns = batch.UnknownRuns[:0]
+	for _, slice := range slices {
+		if err := s.writer.Submit(commit, slice); err != nil {
+			return err
+		}
+		batch.UnknownRuns = append(batch.UnknownRuns, slice.UnknownRuns...)
+	}
+	return nil
 }
 
 // credential extracts the secret from either scheme. Basic carries
@@ -262,15 +303,15 @@ func decodeFailure(asJSON bool, err error) string {
 //
 // The cap bounds the body twice: the bytes on the wire, and for gzip the bytes
 // they decompress to — the body the parser gets — so a few hundred kilobytes
-// of compressed zeros cannot become hundreds of megabytes (spec 002 #27). It
-// is a per-request bound, not a memory budget: handler concurrency is
-// unbounded, so N simultaneous requests can hold N bodies, and the writer
-// queue (spec 002 #15) only sees a body after it has been read. An aggregate
-// budget belongs with the rate limiting deferred to a later spec.
+// of compressed zeros cannot become hundreds of megabytes (spec 002 #27). The
+// cap bounds one request; what all of them hold at once is the body budget's
+// (spec 043 #13), which the bytes the parser gets are reserved from as they
+// are read, when the route counts against it.
 func readBody(w http.ResponseWriter, r *http.Request, maxBytes int64) ([]byte, error) {
 	limited := http.MaxBytesReader(w, r.Body, maxBytes)
+	hold := holdFrom(r.Context())
 	if !strings.EqualFold(r.Header.Get("Content-Encoding"), "gzip") {
-		return io.ReadAll(limited)
+		return io.ReadAll(budgeted(limited, hold, maxBytes))
 	}
 
 	wire := &countingBody{reader: limited}
@@ -280,7 +321,7 @@ func readBody(w http.ResponseWriter, r *http.Request, maxBytes int64) ([]byte, e
 	}
 	defer gz.Close()
 
-	body, err := io.ReadAll(io.LimitReader(gz, maxBytes+1))
+	body, err := io.ReadAll(io.LimitReader(budgeted(gz, hold, maxBytes), maxBytes+1))
 	if err != nil {
 		return nil, err
 	}

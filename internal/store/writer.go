@@ -27,6 +27,12 @@ const (
 	DefaultCommitWindow = 50 * time.Millisecond
 	DefaultMaxBatch     = 64
 	DefaultQueueDepth   = 256
+	// WindowRows is the other bound of a window (spec 043 #12): it stops
+	// collecting once the rows of its jobs reach this many, so 64 big
+	// ingest slices cannot become one transaction of 64,000 rows. A window
+	// holds at most what it held before the job that crossed the line,
+	// plus that job — under two slices.
+	WindowRows = 1000
 )
 
 // ErrWriterBusy means the submission queue is full. Callers turn it into a
@@ -49,6 +55,21 @@ type WriteJob interface {
 	// be idempotent: a window that fails is retried job by job (see
 	// flush), so one submission can be applied more than once.
 	apply(tx *sql.Tx) error
+}
+
+// weighted is a job that says how many rows it writes, which is what a window
+// is bounded by beside its count of jobs (spec 043 #12). A job that does not
+// say weighs one row.
+type weighted interface {
+	weight() int
+}
+
+// weightOf is a job's weight in its window.
+func weightOf(job WriteJob) int {
+	if w, ok := job.(weighted); ok {
+		return max(1, w.weight())
+	}
+	return 1
 }
 
 // soloJob is a step the writer runs by itself, between commit windows and
@@ -118,6 +139,11 @@ type WriterOptions struct {
 	CommitWindow time.Duration
 	MaxBatch     int
 	QueueDepth   int
+	// Committed, when set, is called on the writer's goroutine after each
+	// transaction commits, with the rows its jobs weighed (spec 043 #12).
+	// A seam for tests — the one place that sees the transactions an
+	// export was cut into — and nil in production.
+	Committed func(rows int)
 }
 
 type submission struct {
@@ -132,6 +158,8 @@ type Writer struct {
 	queue  chan *submission
 	window time.Duration
 	max    int
+	// committed is WriterOptions.Committed.
+	committed func(rows int)
 
 	mu     sync.RWMutex
 	closed bool
@@ -169,11 +197,12 @@ func (s *Store) NewWriter(opts WriterOptions) (*Writer, error) {
 	}
 
 	w := &Writer{
-		store:  s,
-		conn:   conn,
-		queue:  make(chan *submission, opts.QueueDepth),
-		window: opts.CommitWindow,
-		max:    opts.MaxBatch,
+		store:     s,
+		conn:      conn,
+		queue:     make(chan *submission, opts.QueueDepth),
+		window:    opts.CommitWindow,
+		max:       opts.MaxBatch,
+		committed: opts.Committed,
 	}
 	w.wg.Add(1)
 	go w.run()
@@ -249,14 +278,16 @@ func (w *Writer) run() {
 			continue
 		}
 		pending = append(pending[:0], first)
+		rows := weightOf(first.job)
 
 		// A solo step ends the window: what came before it commits first,
-		// then it runs alone, in submission order.
+		// then it runs alone, in submission order. So does a window whose
+		// jobs weigh WindowRows (spec 043 #12).
 		var solo *submission
 		timer := time.NewTimer(w.window)
 		drained := false
 	collect:
-		for len(pending) < w.max {
+		for len(pending) < w.max && rows < WindowRows {
 			select {
 			case sub, ok := <-w.queue:
 				if !ok {
@@ -268,6 +299,7 @@ func (w *Writer) run() {
 					break collect
 				}
 				pending = append(pending, sub)
+				rows += weightOf(sub.job)
 			case <-timer.C:
 				break collect
 			}
@@ -388,6 +420,13 @@ func (w *Writer) commit(pending []*submission) error {
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit write transaction: %w", err)
+	}
+	if w.committed != nil {
+		rows := 0
+		for _, sub := range pending {
+			rows += weightOf(sub.job)
+		}
+		w.committed(rows)
 	}
 	return nil
 }

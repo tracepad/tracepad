@@ -269,7 +269,15 @@ func (s *Server) handleLangfuseMediaPut(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, grant.Length+1))
+	// The body counts against the budget every body does (spec 043 #13).
+	// One the budget cannot hold is refused as the stored state's
+	// refusals are, its answer first and the rest of it drained, so the
+	// SDK reads the 429 it retries.
+	body, err := io.ReadAll(budgeted(http.MaxBytesReader(w, r.Body, grant.Length+1), holdFrom(r.Context()), grant.Length))
+	if errors.Is(err, errBodyBudget) {
+		answerThenDrain(w, r, grant.Length, func() { s.refuseForBudget(w, grant.Project) })
+		return
+	}
 	if err != nil {
 		// Only the cap is a size problem; a client that hung up or a
 		// broken chunked body is not, and the SDK logs what it is told.
@@ -309,8 +317,9 @@ func (s *Server) handleLangfuseMediaPut(w http.ResponseWriter, r *http.Request) 
 
 // uploadDrainTime bounds how long a refused upload's body is read and
 // dropped. A live grant the stored state refuses — a revoked key, a removed
-// trace, the cap — or that a failed lookup could not check is a client that
-// was told to upload, and the SDK retries the 429 or the 503 it reads, not a
+// trace, the cap — whose body the budget could not hold (spec 043 #13), or
+// that a failed lookup could not check is a client that was told to upload,
+// and the SDK retries the 429 or the 503 it reads, not a
 // connection reset under a body the server stopped reading (Decision 31). So
 // the refusal is written and flushed first, and the body read and dropped
 // after it, up to the length the grant declared — which the ask bounded by
@@ -326,16 +335,26 @@ const uploadDrainTime = 10 * time.Second
 // body as closed, and closes the connection after the reply — so there is
 // nothing to drain.
 func refuseUpload(w http.ResponseWriter, r *http.Request, refusal error, length int64) {
+	answerThenDrain(w, r, length, func() {
+		var rejection *store.Rejection
+		if errors.As(refusal, &rejection) {
+			submitFailure(w, refusal, apiWrite)
+		} else {
+			lookupFailed(w, r, "media", refusal)
+		}
+	})
+}
+
+// answerThenDrain writes a refusal of an upload, flushes it, and then reads
+// and drops up to `length` of the body, within uploadDrainTime: the SDK reads
+// the status it can retry rather than a reset (Decision 31). Dropped, the
+// rest of the body costs the budget nothing (spec 043 #13).
+func answerThenDrain(w http.ResponseWriter, r *http.Request, length int64, answer func()) {
 	control := http.NewResponseController(w)
 	// Before the status: otherwise net/http reads what it will of the body
 	// before writing it, and closes the connection past that.
 	_ = control.EnableFullDuplex()
-	var rejection *store.Rejection
-	if errors.As(refusal, &rejection) {
-		submitFailure(w, refusal, apiWrite)
-	} else {
-		lookupFailed(w, r, "media", refusal)
-	}
+	answer()
 	_ = control.Flush()
 	// A recorder in a test takes no deadline; the drain's bound is then its
 	// length alone.

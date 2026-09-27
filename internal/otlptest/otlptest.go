@@ -11,6 +11,7 @@ package otlptest
 import (
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
@@ -865,4 +866,35 @@ func mustHex(s string) []byte {
 		panic("otlptest: bad hex id " + s)
 	}
 	return b
+}
+
+// Bulk builds an export of many small traces, for the tests and benchmarks
+// that are about how much one export carries rather than what a span says:
+// `traces` traces of `spansPerTrace` spans each — a root and its children —
+// every child a generation with a model, token counts and a short prompt and
+// completion, the way an agent's run looks. `seed` goes into every id, so two
+// calls with different seeds share no trace.
+func Bulk(seed, traces, spansPerTrace int) []*tracepb.ResourceSpans {
+	spans := make([]*tracepb.Span, 0, traces*spansPerTrace)
+	for t := range traces {
+		traceID := fmt.Sprintf("%08x%08x%016x", seed, t, 0xb01c)
+		rootID := fmt.Sprintf("%08x%08x", t, 0)
+		start := base + int64(t)*ms
+		for s := range spansPerTrace {
+			if s == 0 {
+				spans = append(spans, span(traceID, rootID, "", "agent-run", start, start+int64(spansPerTrace)*ms,
+					str("langfuse.trace.name", "agent-run"), str("langfuse.user.id", "user-1")))
+				continue
+			}
+			spans = append(spans, span(traceID, fmt.Sprintf("%08x%08x", t, s), rootID, "chat",
+				start+int64(s)*ms, start+int64(s+1)*ms,
+				str("gen_ai.operation.name", "chat"),
+				str("gen_ai.request.model", "gpt-4o-mini"),
+				i64("gen_ai.usage.input_tokens", 120),
+				i64("gen_ai.usage.output_tokens", 40),
+				str("gen_ai.input.messages", `[{"role":"user","content":"look the order up and say whether it shipped"}]`),
+				str("gen_ai.output.messages", `[{"role":"assistant","content":"it shipped on monday and arrives tomorrow"}]`)))
+		}
+	}
+	return Export(spans...)
 }

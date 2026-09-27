@@ -72,8 +72,14 @@ func shaPrefixOf(mediaID string) (string, bool) {
 // already stored is left as it is — its bytes are the same whoever sent them —
 // and a ref is written only while its body exists: a resolved Langfuse id
 // names a body read outside this transaction, which a deletion may have
-// collected since. Ingest writes a ref with its trace, so the ref is settled,
-// and one the Langfuse channel left pending is settled by it. The project's
+// collected since. A ref is pending until its trace is stored, and the trace's
+// arrival settles it (Decision 13): within one transaction that is the same
+// transaction, since the traces are written after the refs, but an export cut
+// into slices writes every ref with its first slice and a trace perhaps with a
+// later one (spec 043 #11). Pending, a ref whose trace never comes — an export
+// that failed half-way and was never retried — is collected by the sweep, as
+// the Langfuse channel's are, instead of holding its body for ever. One the
+// channel left pending is settled the same way. The project's
 // hold is recorded with its first ref, under the type this batch declared
 // (Decision 25). It answers the bodies it recorded a hold of, so that the
 // batch's raw refs do not record them again.
@@ -86,9 +92,9 @@ func writeMedia(tx *sql.Tx, projectID string, bodies []MediaBody, types map[stri
 	for _, ref := range refs {
 		result, err := tx.Exec(
 			`INSERT INTO media_refs (sha256, project_id, trace_id, created_at, pending)
-			 SELECT ?, ?, ?, ?, 0 WHERE EXISTS (SELECT 1 FROM media WHERE sha256 = ?)
-			 ON CONFLICT (sha256, project_id, trace_id) DO UPDATE SET pending = 0`,
-			ref.SHA256, projectID, ref.TraceID, now, ref.SHA256)
+			 SELECT ?, ?, ?, ?, NOT `+traceStoredExpr+` WHERE EXISTS (SELECT 1 FROM media WHERE sha256 = ?)
+			 ON CONFLICT (sha256, project_id, trace_id) DO UPDATE SET pending = MIN(pending, excluded.pending)`,
+			ref.SHA256, projectID, ref.TraceID, now, projectID, ref.TraceID, ref.SHA256)
 		if err != nil {
 			return nil, fmt.Errorf("store media ref %s: %w", ref.SHA256, err)
 		}

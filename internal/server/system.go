@@ -52,6 +52,12 @@ type projectCounters struct {
 	// #21).
 	readsTimedOut    int64
 	readsRefusedBusy int64
+	// exportsOverSpanCap and bodiesRefusedForBudget count the exports
+	// refused for carrying more spans than TRACEPAD_MAX_SPANS_PER_REQUEST
+	// and the bodies refused because the body budget was spent (spec 043
+	// #21).
+	exportsOverSpanCap     int64
+	bodiesRefusedForBudget int64
 }
 
 // counters holds every since-start number the system endpoint reports, kept
@@ -108,6 +114,27 @@ func (c *counters) observeRejectedBatch(projectID string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.forProject(projectID).rejectedBatches++
+}
+
+// observeOverSpanCap records an export refused for its number of spans, which
+// is a rejected batch too (spec 043 #10).
+func (c *counters) observeOverSpanCap(projectID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	project := c.forProject(projectID)
+	project.rejectedBatches++
+	project.exportsOverSpanCap++
+}
+
+// observeBodyRefused records a body the budget could not hold, in the project
+// it was about only; one about no project is counted nowhere, as a read is.
+func (c *counters) observeBodyRefused(projectID string) {
+	if projectID == "" {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.forProject(projectID).bodiesRefusedForBudget++
 }
 
 // observeSDKVersion records an ingestion-version header.
@@ -200,6 +227,8 @@ func (c *counters) snapshot(projectID string) object {
 		put("rejected_batches", project.rejectedBatches).
 		put("unreadable_resource_spans", project.unreadableSpans).
 		put("langfuse_ingestion_versions", versions).
+		put("exports_over_span_cap", project.exportsOverSpanCap).
+		put("bodies_refused_for_budget", project.bodiesRefusedForBudget).
 		put("reads_timed_out", project.readsTimedOut).
 		put("reads_refused_busy", project.readsRefusedBusy)
 }
@@ -288,6 +317,12 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 			put("size_bytes", s.store.FileSize()).
 			put("rows", rows)).
 		put("writer_queue", queue).
+		// Request bodies held in memory now against
+		// TRACEPAD_BODY_BUDGET_BYTES — the deployment's, like the queue
+		// (spec 043 #21).
+		put("body_budget", object{}.
+			put("held_bytes", s.bodies.heldBytes()).
+			put("capacity_bytes", s.bodies.capacityBytes())).
 		// Reads being served now against TRACEPAD_READ_CONCURRENCY — the
 		// deployment's, like the queue (spec 043 #21).
 		put("read_slots", object{}.

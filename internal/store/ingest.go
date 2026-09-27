@@ -40,6 +40,15 @@ type IngestBatch struct {
 	// disagrees with its rows.
 	skipSearchIndex bool
 
+	// mediaTypes, on the slice that carries the raw body, are the types the
+	// whole export declared for its bodies, most of which the first slice
+	// wrote (Slices): the raw refs record a hold under them, as they would
+	// have in one transaction.
+	mediaTypes map[string]string
+	// full says this is a slice with another after it (Slices): it weighs a
+	// whole slice whatever its rows (weight).
+	full bool
+
 	// UnknownRuns is filled by apply: the run id of every trace in the
 	// batch that named a run this project does not have, one entry per
 	// such trace (spec 014 #3). The trace is stored with its columns all
@@ -68,6 +77,122 @@ type RawBatch struct {
 	Body            []byte
 }
 
+// SliceRows is the most rows — traces and observations — one ingest job
+// carries (spec 043 #11): the length of time an export holds the only writer
+// is the length of its largest slice, not of the export.
+const SliceRows = 1000
+
+// Slices cuts a batch into jobs of at most SliceRows rows, to be submitted one
+// after another, each once the one before it has committed (spec 043 #11). A
+// batch that fits is its own one slice, unchanged.
+//
+// A trace travels with its observations. One larger than what is left of a
+// slice goes on in the next, where its row is repeated with nothing but its id:
+// every field left empty leaves the stored one alone (spec 002 #6), while the
+// row still stamps `updated_at`, so the rollup sees the hours the slice
+// changed, and still recomputes the trace's aggregates over what is stored so
+// far (spec 002 #22). Its run is looked up once, by the slice that carries the
+// trace whole. A trace is not started at the end of a slice with no room for
+// one of its observations: a trace row with none would be listed without a
+// time.
+//
+// The first slice carries what spec 041 checks and writes before anything
+// points at it — the bodies the export's traces name, their refs, and the
+// check that a resolved Langfuse id still names a body the project holds. The
+// last carries the raw body, its refs, and the bodies only the raw body names,
+// which a sweep would otherwise find with no ref between the two.
+func (b *IngestBatch) Slices() []*IngestBatch {
+	if len(b.Traces)+len(b.Observations) <= SliceRows {
+		return []*IngestBatch{b}
+	}
+	var (
+		slices []*IngestBatch
+		cur    *IngestBatch
+		rows   int
+	)
+	open := func() {
+		cur = &IngestBatch{ProjectID: b.ProjectID, IngestedAt: b.IngestedAt, skipSearchIndex: b.skipSearchIndex}
+		slices = append(slices, cur)
+		rows = 0
+	}
+	open()
+
+	// Each trace's observations, in the order the batch holds them; one
+	// whose trace the batch does not carry goes last, with no trace row.
+	byTrace := make(map[string][]*model.Observation, len(b.Traces))
+	carried := make(map[string]bool, len(b.Traces))
+	for _, t := range b.Traces {
+		carried[t.ID] = true
+	}
+	var strays []*model.Observation
+	for _, o := range b.Observations {
+		if carried[o.TraceID] {
+			byTrace[o.TraceID] = append(byTrace[o.TraceID], o)
+		} else {
+			strays = append(strays, o)
+		}
+	}
+	for _, t := range b.Traces {
+		observations := byTrace[t.ID]
+		if rows > 0 && rows+min(len(observations), 1)+1 > SliceRows {
+			open()
+		}
+		row := t
+		for {
+			cur.Traces = append(cur.Traces, row)
+			rows++
+			n := min(len(observations), SliceRows-rows)
+			cur.Observations = append(cur.Observations, observations[:n]...)
+			rows += n
+			observations = observations[n:]
+			if len(observations) == 0 {
+				break
+			}
+			open()
+			row = &model.Trace{ID: t.ID}
+		}
+	}
+	for len(strays) > 0 {
+		if rows == SliceRows {
+			open()
+		}
+		n := min(len(strays), SliceRows-rows)
+		cur.Observations = append(cur.Observations, strays[:n]...)
+		rows += n
+		strays = strays[n:]
+	}
+
+	first, last := slices[0], slices[len(slices)-1]
+	named := make(map[string]bool, len(b.MediaRefs))
+	for _, ref := range b.MediaRefs {
+		named[ref.SHA256] = true
+	}
+	for _, body := range b.Media {
+		if named[body.SHA256] {
+			first.Media = append(first.Media, body)
+		} else {
+			last.Media = append(last.Media, body)
+		}
+	}
+	first.MediaRefs, first.Resolved = b.MediaRefs, b.Resolved
+	last.Raw, last.RawMedia, last.mediaTypes = b.Raw, b.RawMedia, declaredTypes(b.Media)
+	for _, slice := range slices[:len(slices)-1] {
+		slice.full = true
+	}
+	return slices
+}
+
+// weight is a slice's rows (spec 043 #12). One with another after it weighs a
+// whole slice, so that it closes its window at once: its export's next slice
+// cannot arrive until it commits, and waiting out the window for it would add
+// the window to every slice.
+func (b *IngestBatch) weight() int {
+	if b.full {
+		return SliceRows
+	}
+	return len(b.Traces) + len(b.Observations)
+}
+
 // Empty reports a batch with nothing to write.
 func (b *IngestBatch) Empty() bool {
 	return len(b.Traces) == 0 && len(b.Observations) == 0 && b.Raw == nil
@@ -90,6 +215,9 @@ func (b *IngestBatch) apply(tx *sql.Tx) error {
 	// The bodies first: every ref below, the raw batch's included, names
 	// a row that has to exist (spec 041 #2).
 	types := declaredTypes(b.Media)
+	if b.mediaTypes != nil {
+		types = b.mediaTypes
+	}
 	held, err := writeMedia(tx, b.ProjectID, b.Media, types, b.MediaRefs, arrived)
 	if err != nil {
 		return err

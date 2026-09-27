@@ -66,12 +66,11 @@
           "400": {"$ref": "#/components/responses/BadRequest"},
           "401": {"$ref": "#/components/responses/Unauthorized"},
           "503": {"$ref": "#/components/responses/ServiceUnavailable"},
-          "413": {"description": "The body exceeded TRACEPAD_MAX_BODY_BYTES",
+          "413": {"description": "The body exceeded TRACEPAD_MAX_BODY_BYTES, on the wire or decompressed; or the export carries more spans than TRACEPAD_MAX_SPANS_PER_REQUEST (`this export carries N spans; the server takes at most M per request (TRACEPAD_MAX_SPANS_PER_REQUEST)`), refused whole with nothing stored. Exporters do not retry it",
             "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
           "415": {"description": "Content-Type is neither application/x-protobuf nor application/json",
             "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
-          "429": {"description": "The write queue is full; retry after the Retry-After delay",
-            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}}
+          "429": {"$ref": "#/components/responses/Busy"}
         }
       }
     },
@@ -93,7 +92,10 @@
           }},
           "400": {"$ref": "#/components/responses/BadRequest"},
           "401": {"$ref": "#/components/responses/Unauthorized"},
-          "503": {"$ref": "#/components/responses/ServiceUnavailable"}
+          "503": {"$ref": "#/components/responses/ServiceUnavailable"},
+          "413": {"description": "As on `/v1/traces`: the body cap, or the span cap",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+          "429": {"$ref": "#/components/responses/Busy"}
         }
       }
     },
@@ -129,7 +131,7 @@
           "401": {"$ref": "#/components/responses/Unauthorized"},
           "403": {"description": "The trace was deleted or erased within the hour and is not stored now: no upload is taken for it",
             "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
-          "429": {"description": "The project has 10,000 uploads waiting for their traces and this one — with an upload URL or without — would be another; `Retry-After: 60`. A trace the project has is never refused",
+          "429": {"description": "The project has 10,000 uploads waiting for their traces and this one — with an upload URL or without — would be another; `Retry-After: 60`. A trace the project has is never refused. The server may also be holding as many request bodies as TRACEPAD_BODY_BUDGET_BYTES allows (`the server is holding as many request bodies as it can; retry shortly`, `Retry-After: 1`), before the body is read whole; retry after `Retry-After`.",
             "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
           "503": {"$ref": "#/components/responses/ServiceUnavailable"}
         }
@@ -155,7 +157,7 @@
             "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
           "413": {"description": "The body is larger than the upload declared",
             "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
-          "429": {"description": "The project has 10,000 uploads waiting for their traces and this one's trace has not arrived; `Retry-After: 60`. Not for the retry of an upload already stored. Decided before the body is read and answered at once, the body then drained up to the length the ask declared and dropped",
+          "429": {"description": "The project has 10,000 uploads waiting for their traces and this one's trace has not arrived; `Retry-After: 60`. Not for the retry of an upload already stored. Decided before the body is read and answered at once, the body then drained up to the length the ask declared and dropped. The server may also be holding as many request bodies as TRACEPAD_BODY_BUDGET_BYTES allows (`the server is holding as many request bodies as it can; retry shortly`, `Retry-After: 1`): that is answered while the body is read, and the rest of it is drained the same way; retry after `Retry-After`.",
             "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}}
         }
       }
@@ -206,7 +208,8 @@
           "204": {"description": "Recorded"},
           "400": {"$ref": "#/components/responses/BadRequest"},
           "401": {"$ref": "#/components/responses/Unauthorized"},
-          "503": {"$ref": "#/components/responses/ServiceUnavailable"}
+          "503": {"$ref": "#/components/responses/ServiceUnavailable"},
+          "429": {"$ref": "#/components/responses/Busy"}
         }
       }
     },
@@ -435,7 +438,9 @@
           "403": {"$ref": "#/components/responses/Forbidden"},
           "422": {"$ref": "#/components/responses/Unprocessable"},
           "409": {"description": "The password changed between checking the current one and writing the new one; sign in again", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
-          "429": {"$ref": "#/components/responses/TooManyRequests"}
+          "429": {"description": "Throttled — too many password changes, or the server is holding as many request bodies as TRACEPAD_BODY_BUDGET_BYTES allows (`the server is holding as many request bodies as it can; retry shortly`); `Retry-After` says for how long",
+            "headers": {"Retry-After": {"schema": {"type": "string"}, "description": "Seconds to wait"}},
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}}
         }
       }
     },
@@ -499,6 +504,12 @@
               "writer_queue": {"type": "object", "properties": {
                 "waiting": {"type": "integer"}, "capacity": {"type": "integer"}
               }},
+              "body_budget": {"type": "object",
+                "description": "Request bodies held in memory now, for the whole deployment, against TRACEPAD_BODY_BUDGET_BYTES; a body whose next 64 KiB does not fit is `429`",
+                "properties": {
+                  "held_bytes": {"type": "integer"}, "capacity_bytes": {"type": "integer"}
+                },
+                "required": ["held_bytes", "capacity_bytes"]},
               "read_slots": {"type": "object",
                 "description": "Reads being served now, for the whole deployment, against TRACEPAD_READ_CONCURRENCY; a read that finds none free waits within its deadline",
                 "properties": {
@@ -541,7 +552,7 @@
                 },
                 "required": ["requested_at", "completed_at"]},
               "counters": {"type": "object",
-                "description": "This project's ingest traffic, and its reads the read bounds refused, since the process started",
+                "description": "This project's ingest traffic, the requests the ingest and read bounds refused, since the process started",
                 "properties": {
                 "since": {"type": "string", "format": "date-time"},
                 "dialects": {"type": "object", "additionalProperties": {"type": "object", "properties": {
@@ -549,9 +560,11 @@
                   "spans_stored": {"type": "integer"},
                   "spans_skipped": {"type": "integer"}
                 }}},
-                "rejected_batches": {"type": "integer"},
+                "rejected_batches": {"type": "integer", "description": "Exports refused before mapping: bodies that did not decode, and exports over the span cap"},
                 "unreadable_resource_spans": {"type": "integer"},
                 "langfuse_ingestion_versions": {"type": "array", "items": {"type": "string"}},
+                "exports_over_span_cap": {"type": "integer", "description": "This project's exports refused with 413 for carrying more spans than TRACEPAD_MAX_SPANS_PER_REQUEST"},
+                "bodies_refused_for_budget": {"type": "integer", "description": "This project's request bodies — exports, JSON API writes, media uploads — refused with 429 because TRACEPAD_BODY_BUDGET_BYTES was spent"},
                 "reads_timed_out": {"type": "integer", "description": "This project's reads the read deadline stopped (TRACEPAD_READ_TIMEOUT)"},
                 "reads_refused_busy": {"type": "integer", "description": "This project's reads refused because no read slot came free before the deadline"}
               }}
@@ -1174,8 +1187,7 @@
           "400": {"$ref": "#/components/responses/BadRequest"},
           "401": {"$ref": "#/components/responses/Unauthorized"},
           "503": {"$ref": "#/components/responses/ServiceUnavailable"},
-          "429": {"description": "The write queue is full; retry after the Retry-After delay",
-            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}}
+          "429": {"$ref": "#/components/responses/Busy"}
         }
       },
       "get": {
@@ -1352,6 +1364,7 @@
           "400": {"$ref": "#/components/responses/BadRequest"},
           "401": {"$ref": "#/components/responses/Unauthorized"},
           "503": {"$ref": "#/components/responses/ServiceUnavailable"},
+          "429": {"$ref": "#/components/responses/Busy"},
           "404": {"$ref": "#/components/responses/NotFound"},
           "409": {
             "description": "`expect_version` disagrees with the name's current state; nothing was written",
@@ -1454,6 +1467,7 @@
           "400": {"$ref": "#/components/responses/BadRequest"},
           "401": {"$ref": "#/components/responses/Unauthorized"},
           "503": {"$ref": "#/components/responses/ServiceUnavailable"},
+          "429": {"$ref": "#/components/responses/Busy"},
           "404": {"$ref": "#/components/responses/NotFound"}
         }
       },
@@ -1511,7 +1525,8 @@
           "200": {"description": "The dataset", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Dataset"}}}},
           "400": {"$ref": "#/components/responses/BadRequest"},
           "401": {"$ref": "#/components/responses/Unauthorized"},
-          "503": {"$ref": "#/components/responses/ServiceUnavailable"}
+          "503": {"$ref": "#/components/responses/ServiceUnavailable"},
+          "429": {"$ref": "#/components/responses/Busy"}
         }
       },
       "get": {
@@ -1573,8 +1588,7 @@
           "503": {"$ref": "#/components/responses/ServiceUnavailable"},
           "413": {"description": "The body exceeded TRACEPAD_MAX_BODY_BYTES",
             "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
-          "429": {"description": "The write queue is full; retry after the Retry-After delay",
-            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}}
+          "429": {"$ref": "#/components/responses/Busy"}
         }
       },
       "get": {
@@ -1692,6 +1706,7 @@
           "400": {"$ref": "#/components/responses/BadRequest"},
           "401": {"$ref": "#/components/responses/Unauthorized"},
           "503": {"$ref": "#/components/responses/ServiceUnavailable"},
+          "429": {"$ref": "#/components/responses/Busy"},
           "404": {"$ref": "#/components/responses/NotFound"},
           "409": {"$ref": "#/components/responses/Conflict"}
         }
@@ -1874,6 +1889,7 @@
           "400": {"$ref": "#/components/responses/BadRequest"},
           "401": {"$ref": "#/components/responses/Unauthorized"},
           "503": {"$ref": "#/components/responses/ServiceUnavailable"},
+          "429": {"$ref": "#/components/responses/Busy"},
           "404": {"$ref": "#/components/responses/NotFound"},
           "409": {"$ref": "#/components/responses/Conflict"}
         }
@@ -1911,7 +1927,8 @@
           "200": {"description": "The config as stored", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ScoreConfig"}}}},
           "400": {"$ref": "#/components/responses/BadRequest"},
           "401": {"$ref": "#/components/responses/Unauthorized"},
-          "503": {"$ref": "#/components/responses/ServiceUnavailable"}
+          "503": {"$ref": "#/components/responses/ServiceUnavailable"},
+          "429": {"$ref": "#/components/responses/Busy"}
         }
       },
       "get": {
@@ -1986,7 +2003,8 @@
           "200": {"description": "The queue was replaced, or the body said what it already said", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AnnotationQueue"}}}},
           "400": {"$ref": "#/components/responses/BadRequest"},
           "401": {"$ref": "#/components/responses/Unauthorized"},
-          "503": {"$ref": "#/components/responses/ServiceUnavailable"}
+          "503": {"$ref": "#/components/responses/ServiceUnavailable"},
+          "429": {"$ref": "#/components/responses/Busy"}
         }
       },
       "get": {
@@ -2046,6 +2064,7 @@
           "400": {"$ref": "#/components/responses/BadRequest"},
           "401": {"$ref": "#/components/responses/Unauthorized"},
           "503": {"$ref": "#/components/responses/ServiceUnavailable"},
+          "429": {"$ref": "#/components/responses/Busy"},
           "404": {"$ref": "#/components/responses/NotFound"}
         }
       },
@@ -2131,6 +2150,7 @@
           "400": {"$ref": "#/components/responses/BadRequest"},
           "401": {"$ref": "#/components/responses/Unauthorized"},
           "503": {"$ref": "#/components/responses/ServiceUnavailable"},
+          "429": {"$ref": "#/components/responses/Busy"},
           "404": {"$ref": "#/components/responses/NotFound"}
         }
       }
@@ -2215,6 +2235,7 @@
           "400": {"$ref": "#/components/responses/BadRequest"},
           "401": {"$ref": "#/components/responses/Unauthorized"},
           "503": {"$ref": "#/components/responses/ServiceUnavailable"},
+          "429": {"$ref": "#/components/responses/Busy"},
           "404": {"$ref": "#/components/responses/NotFound"},
           "409": {"description": "A score the queue asks for is missing, or somebody else completed it first",
             "content": {"application/json": {"schema": {
@@ -2249,6 +2270,7 @@
           "400": {"$ref": "#/components/responses/BadRequest"},
           "401": {"$ref": "#/components/responses/Unauthorized"},
           "503": {"$ref": "#/components/responses/ServiceUnavailable"},
+          "429": {"$ref": "#/components/responses/Busy"},
           "404": {"$ref": "#/components/responses/NotFound"},
           "409": {"$ref": "#/components/responses/Conflict"}
         }
@@ -2272,6 +2294,7 @@
           "400": {"$ref": "#/components/responses/BadRequest"},
           "401": {"$ref": "#/components/responses/Unauthorized"},
           "503": {"$ref": "#/components/responses/ServiceUnavailable"},
+          "429": {"$ref": "#/components/responses/Busy"},
           "404": {"$ref": "#/components/responses/NotFound"}
         }
       }
@@ -2325,6 +2348,7 @@
           "400": {"$ref": "#/components/responses/BadRequest"},
           "401": {"$ref": "#/components/responses/Unauthorized"},
           "503": {"$ref": "#/components/responses/ServiceUnavailable"},
+          "429": {"$ref": "#/components/responses/Busy"},
           "403": {"$ref": "#/components/responses/Forbidden"},
           "404": {"$ref": "#/components/responses/NotFound"},
           "409": {"$ref": "#/components/responses/Conflict"},
@@ -2378,6 +2402,7 @@
           "400": {"$ref": "#/components/responses/BadRequest"},
           "401": {"$ref": "#/components/responses/Unauthorized"},
           "503": {"$ref": "#/components/responses/ServiceUnavailable"},
+          "429": {"$ref": "#/components/responses/Busy"},
           "403": {"$ref": "#/components/responses/Forbidden"},
           "404": {"$ref": "#/components/responses/NotFound"},
           "409": {"$ref": "#/components/responses/Conflict"},
@@ -2460,6 +2485,7 @@
           "400": {"$ref": "#/components/responses/BadRequest"},
           "401": {"$ref": "#/components/responses/Unauthorized"},
           "503": {"$ref": "#/components/responses/ServiceUnavailable"},
+          "429": {"$ref": "#/components/responses/Busy"},
           "403": {"$ref": "#/components/responses/Forbidden"},
           "404": {"$ref": "#/components/responses/NotFound"},
           "409": {"$ref": "#/components/responses/Conflict"},
@@ -2530,6 +2556,7 @@
           "400": {"$ref": "#/components/responses/BadRequest"},
           "401": {"$ref": "#/components/responses/Unauthorized"},
           "503": {"$ref": "#/components/responses/ServiceUnavailable"},
+          "429": {"$ref": "#/components/responses/Busy"},
           "403": {"$ref": "#/components/responses/Forbidden"},
           "409": {"$ref": "#/components/responses/Conflict"}
         }
@@ -2581,6 +2608,7 @@
           "400": {"$ref": "#/components/responses/BadRequest"},
           "401": {"$ref": "#/components/responses/Unauthorized"},
           "503": {"$ref": "#/components/responses/ServiceUnavailable"},
+          "429": {"$ref": "#/components/responses/Busy"},
           "403": {"$ref": "#/components/responses/Forbidden"},
           "404": {"$ref": "#/components/responses/NotFound"},
           "409": {"$ref": "#/components/responses/Conflict"}
@@ -2671,6 +2699,7 @@
           "400": {"$ref": "#/components/responses/BadRequest"},
           "401": {"$ref": "#/components/responses/Unauthorized"},
           "503": {"$ref": "#/components/responses/ServiceUnavailable"},
+          "429": {"$ref": "#/components/responses/Busy"},
           "403": {"$ref": "#/components/responses/Forbidden"},
           "404": {"$ref": "#/components/responses/NotFound"},
           "422": {"$ref": "#/components/responses/Unprocessable"}
@@ -2859,6 +2888,9 @@
       "Conflict": {"description": "The stored state already answers differently: a name that is taken, a project that is already deleted, the last owner being demoted",
         "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "Unprocessable": {"description": "The request is well formed and the values are not: an email that is not one, a password outside 10-72 bytes, a name over 200 characters",
+        "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+      "Busy": {"description": "The server is holding as many request bodies as TRACEPAD_BODY_BUDGET_BYTES allows (`the server is holding as many request bodies as it can; retry shortly`), refused before the body is read whole, or the write queue is full: retry after `Retry-After`",
+        "headers": {"Retry-After": {"schema": {"type": "string"}, "description": "Seconds to wait"}},
         "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "TooManyRequests": {"description": "Throttled; `Retry-After` says for how long",
         "headers": {"Retry-After": {"schema": {"type": "string"}, "description": "Seconds to wait"}},

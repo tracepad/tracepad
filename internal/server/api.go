@@ -197,14 +197,18 @@ func (s *Server) readAPIBody(w http.ResponseWriter, r *http.Request) ([]byte, bo
 	return body, s.bodyRead(w, r, err)
 }
 
-// bodyRead answers the client itself when reading the body failed: 413 for
-// the cap, 400 for anything else. A gzip body that fit on the wire and
-// expanded past the cap is also logged, because to an OTLP exporter a 413 is
-// final — the batch is dropped, and this line is where the operator finds out
-// why (spec 002 #27).
+// bodyRead answers the client itself when reading the body failed: 429 for
+// the body budget (spec 043 #13), 413 for the cap, 400 for anything else. A
+// gzip body that fit on the wire and expanded past the cap is also logged,
+// because to an OTLP exporter a 413 is final — the batch is dropped, and this
+// line is where the operator finds out why (spec 002 #27).
 func (s *Server) bodyRead(w http.ResponseWriter, r *http.Request, err error) bool {
 	if err == nil {
 		return true
+	}
+	if errors.Is(err, errBodyBudget) {
+		s.refuseForBudget(w, callerProject(r))
+		return false
 	}
 	var inflated *inflatedTooLarge
 	if errors.As(err, &inflated) {
@@ -221,6 +225,14 @@ func (s *Server) bodyRead(w http.ResponseWriter, r *http.Request, err error) boo
 	}
 	writeError(w, http.StatusBadRequest, "cannot read request body")
 	return false
+}
+
+// refuseForBudget answers a body the budget could not hold (spec 043 #13) and
+// counts it for the project it was about, if any (#21).
+func (s *Server) refuseForBudget(w http.ResponseWriter, projectID string) {
+	s.counters.observeBodyRefused(projectID)
+	w.Header().Set("Retry-After", "1")
+	writeError(w, http.StatusTooManyRequests, bodyBusy)
 }
 
 // maxPublicBodyBytes caps the body of a route anyone can call (spec 028

@@ -368,6 +368,69 @@ func TestReadBounds(t *testing.T) {
 	}
 }
 
+// The two ingest bounds are validated at start (spec 043 #10, #13, #22): the
+// budget follows the body cap unless set, and a budget smaller than the cap —
+// one that would refuse a body the cap admits on an idle server — refuses to
+// start.
+func TestIngestBounds(t *testing.T) {
+	t.Setenv("TRACEPAD_MAX_SPANS_PER_REQUEST", "")
+	t.Setenv("TRACEPAD_BODY_BUDGET_BYTES", "")
+	t.Setenv("TRACEPAD_MAX_BODY_BYTES", "")
+
+	cfg, err := Load(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.MaxSpansPerRequest != 20000 {
+		t.Errorf("MaxSpansPerRequest = %d, want the documented 20000", cfg.MaxSpansPerRequest)
+	}
+	if cfg.BodyBudgetBytes != 80<<20 {
+		t.Errorf("BodyBudgetBytes = %d, want four times the 20 MiB cap", cfg.BodyBudgetBytes)
+	}
+
+	t.Setenv("TRACEPAD_MAX_BODY_BYTES", "1000000")
+	cfg, err = Load(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.BodyBudgetBytes != 4000000 {
+		t.Errorf("BodyBudgetBytes = %d under a 1 MB cap, want 4 MB", cfg.BodyBudgetBytes)
+	}
+
+	t.Setenv("TRACEPAD_MAX_SPANS_PER_REQUEST", "1")
+	t.Setenv("TRACEPAD_BODY_BUDGET_BYTES", "1000000")
+	cfg, err = Load(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.MaxSpansPerRequest != 1 || cfg.BodyBudgetBytes != 1000000 {
+		t.Errorf("ingest bounds = %d, %d; want the floors 1 and the cap", cfg.MaxSpansPerRequest, cfg.BodyBudgetBytes)
+	}
+
+	for name, value := range map[string]string{
+		"TRACEPAD_MAX_SPANS_PER_REQUEST": "0",
+		"TRACEPAD_BODY_BUDGET_BYTES":     "999999",
+	} {
+		t.Run(name+"="+value, func(t *testing.T) {
+			t.Setenv(name, value)
+			if _, err := Load(nil); err == nil || !strings.Contains(err.Error(), name) {
+				t.Errorf("Load = %v, want a refusal naming %s", err, name)
+			}
+		})
+	}
+	for name, value := range map[string]string{
+		"TRACEPAD_MAX_SPANS_PER_REQUEST": "lots",
+		"TRACEPAD_BODY_BUDGET_BYTES":     "80MiB",
+	} {
+		t.Run(name+"="+value, func(t *testing.T) {
+			t.Setenv(name, value)
+			if _, err := Load(nil); err == nil {
+				t.Errorf("%s=%q must be refused, not defaulted", name, value)
+			}
+		})
+	}
+}
+
 // TRACEPAD_URL is the CLI's "which server" and, since spec 028 #11, the host
 // of the links the server prints.
 func TestPublicURL(t *testing.T) {
