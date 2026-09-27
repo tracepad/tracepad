@@ -24,9 +24,10 @@ const (
 	ScopeWrite  = "write"
 )
 
-// Scopes is the three in their canonical order: the order the schema's CHECK
-// spells every combination in, and the order every answer lists them in.
-var Scopes = []string{ScopeIngest, ScopeRead, ScopeWrite}
+// scopeOrder is the three in their canonical order: the order the schema's
+// CHECK spells every combination in, and the order every answer lists them
+// in. Unexported, so that no importer can change which words a mint accepts.
+var scopeOrder = [...]string{ScopeIngest, ScopeRead, ScopeWrite}
 
 // AllScopes is what a key the server makes by itself may do, and what every
 // key that predates scopes was given (spec 045 #5): the three, spelled as the
@@ -39,13 +40,13 @@ const AllScopes = "ingest read write"
 func CanonicalScopes(words []string) (string, bool) {
 	held := map[string]bool{}
 	for _, word := range words {
-		if !slices.Contains(Scopes, word) {
+		if !slices.Contains(scopeOrder[:], word) {
 			return "", false
 		}
 		held[word] = true
 	}
-	canonical := make([]string, 0, len(Scopes))
-	for _, word := range Scopes {
+	canonical := make([]string, 0, len(scopeOrder))
+	for _, word := range scopeOrder {
 		if held[word] {
 			canonical = append(canonical, word)
 		}

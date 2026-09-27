@@ -372,6 +372,16 @@ func TestKeysCreateAsksWhatTheKeyMayDo(t *testing.T) {
 		t.Errorf("scopes = %v, want both, in the server's order", minted.Scopes)
 	}
 
+	// Repeated, the flag adds rather than replaces: a second --scope that
+	// silently dropped the first would mint a key without ingest.
+	out = h.run(t.Context(), false, "keys", "create", "--scope", "ingest", "--scope", "write")
+	if err := json.Unmarshal([]byte(out.stdout), &minted); err != nil || out.code != ExitOK {
+		t.Fatalf("keys create --scope ingest --scope write = %d %q %v", out.code, out.stdout, err)
+	}
+	if strings.Join(minted.Scopes, ",") != "ingest,write" {
+		t.Errorf("a repeated --scope minted %v, want both", minted.Scopes)
+	}
+
 	// An ingest key is offered to an exporter; a read key is not.
 	out = h.run(t.Context(), true, "keys", "create", "--scope", "ingest")
 	if !strings.Contains(out.stdout, "TRACEPAD_API_KEY=") || !strings.Contains(out.stdout, "LANGFUSE_SECRET_KEY=") {
@@ -379,8 +389,8 @@ func TestKeysCreateAsksWhatTheKeyMayDo(t *testing.T) {
 	}
 	out = h.run(t.Context(), true, "keys", "create", "--scope", "read")
 	if !strings.Contains(out.stdout, "TRACEPAD_API_KEY=") || strings.Contains(out.stdout, "LANGFUSE") ||
-		!strings.Contains(out.stdout, "scopes: read") {
-		t.Errorf("a read key printed:\n%s\nwant its scope and TRACEPAD_API_KEY alone", out.stdout)
+		!strings.Contains(out.stdout, "scopes: read") || !strings.Contains(out.stdout, "public key: tp-pk-") {
+		t.Errorf("a read key printed:\n%s\nwant its public key, its scope and TRACEPAD_API_KEY alone", out.stdout)
 	}
 
 	// A word the server does not know is the server's 400, verbatim.

@@ -756,13 +756,13 @@ once a minute ([admin.md](admin.md#keys)). `keys create --name` says which
 program will hold the key.
 
 `keys create --scope` says what the key may do, and is required: one or more
-of `ingest`, `read` and `write`, comma-separated — `--scope ingest` for a
-production application, `--scope read` for an agent, `--scope
-ingest,read,write` for an eval harness. Without it the command is a usage
-error (exit 2) that lists the three, and sends nothing. The secret is printed
-once, with the lines that fit the scopes: `TRACEPAD_API_KEY` for every key —
-the `tracepad` packages export with it as well as read — and, when the key
-holds `ingest`, the OpenTelemetry header and the `LANGFUSE_*` pair. A key's
+of `ingest`, `read` and `write`, comma-separated or with the flag repeated —
+`--scope ingest` for a production application, `--scope read` for an agent,
+`--scope ingest,read,write` for an eval harness. Without it the command is a
+usage error (exit 2) that lists the three, and sends nothing. The secret is
+printed once, after the public key and the scopes, with the lines that fit
+them: `TRACEPAD_API_KEY` for every key — the `tracepad` packages export with it
+as well as read — and, when the key holds `ingest`, the `LANGFUSE_*` pair. A key's
 scopes never change; to change what a program may do, mint a new key and
 revoke the old.
 

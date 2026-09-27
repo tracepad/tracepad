@@ -200,7 +200,8 @@ TRACEPAD_API_KEY=$TRACEPAD_ADMIN_TOKEN tracepad keys create --scope ingest --nam
 ```
 
 It prints the lines to paste: `TRACEPAD_API_KEY` for the `tracepad` packages,
-and the OpenTelemetry and Langfuse variables for the exporters. The first key
+and the `LANGFUSE_*` pair for a Langfuse SDK; an OpenTelemetry exporter takes
+the same secret as `authorization=Bearer …`. The first key
 stays for you, the CLI and the eval harness — or give each of those a key of
 its own as well ([admin.md](admin.md#keys)).
 

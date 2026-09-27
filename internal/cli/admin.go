@@ -447,18 +447,22 @@ func (r *run) keysCreate(ctx context.Context, args []string) error {
 	fs := r.flags("keys create")
 	project := fs.String("project", "", "")
 	name := fs.String("name", "", "")
-	scope := fs.String("scope", "", "")
+	// Repeatable as well as comma-separated: `--scope ingest --scope read`
+	// is both, not the last one given.
+	var scopes []string
+	fs.Func("scope", "", func(value string) error {
+		for _, word := range strings.Split(value, ",") {
+			if word = strings.TrimSpace(word); word != "" {
+				scopes = append(scopes, word)
+			}
+		}
+		return nil
+	})
 	if _, err := r.parse(fs, args, 0); err != nil {
 		return err
 	}
 	// Asked before the project, so that a mint that says nothing about
 	// what the key may do is refused before any request (spec 045 #6).
-	var scopes []string
-	for _, word := range strings.Split(*scope, ",") {
-		if word = strings.TrimSpace(word); word != "" {
-			scopes = append(scopes, word)
-		}
-	}
 	if len(scopes) == 0 {
 		return usageErrorf("%s", scopesUsage)
 	}
@@ -490,6 +494,9 @@ func (r *run) keysCreate(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	// The public key for every key: it is what `keys rm` and the listing
+	// name the key by, whatever it may do.
+	fmt.Fprintf(r.opt.Stdout, "  public key: %s\n", termsafe.String(created.PublicKey))
 	fmt.Fprintf(r.opt.Stdout, "  scopes: %s\n\n", termsafe.String(strings.Join(created.Scopes, ", ")))
 	// The lines that fit the scopes (spec 045 #14): every key is a
 	// TRACEPAD_API_KEY, which the packages export with as well; only a key

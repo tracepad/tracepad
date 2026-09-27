@@ -92,9 +92,12 @@ const (
 	session
 	// stream is a project key and nothing else, answered with no write
 	// deadline: the MCP transport, whose response lasts as long as the tool
-	// it runs (spec 001 #15). Every refusal is `401` with a Bearer
+	// it runs (spec 001 #15). It reads the `Authorization` header alone; a
+	// caller that is not a live project's key is refused `401` with a Bearer
 	// challenge, so a client that follows the MCP authorization spec asks
-	// for a key rather than going looking for OAuth. It is not an endpoint
+	// for a key rather than going looking for OAuth, while a key without
+	// `read` gets the scope step's `403` and a store that cannot answer the
+	// guard's `503`, neither with that challenge. It is not an endpoint
 	// of this API, so neither the endpoint map nor the OpenAPI document
 	// lists it (spec 004 #27); it is in the guard's table all the same, so
 	// that one guard decides its headers, its caller and its scope.
