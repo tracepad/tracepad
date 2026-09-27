@@ -597,8 +597,9 @@ reason in a comment; adding a dialect should be a table edit.
 ## Commands
 
 - `make gate` — the full gate (format-check + vet + `go test ./...` + the
-  doc-anchor sweep + `svelte-check`, vitest and the API-type drift check). It
-  is what CI runs and what the git **pre-push** hook runs. The Go half is
+  doc-anchor sweep + ruff over the Python + `svelte-check`, vitest and the
+  API-type drift check). It is what CI runs and what the git **pre-push**
+  hook runs, and it needs `uv` for the ruff (`make py-lint`). The Go half is
   bounded by its slowest package, and every package is under ten seconds: the
   suites used to spend most of their time waiting rather than on the code
   under test — the writer's fifty-millisecond commit window on every lone
@@ -612,6 +613,9 @@ reason in a comment; adding a dialect should be a table edit.
   minutes. Both hooks self-install on first run (and on Claude Code session
   start); `make install-hooks` force-reinstalls them. Worktrees share the
   hooks directory, so installing once covers every checkout.
+- `make py-lint` — ruff over `sdk/python` and `scripts/` with the rule set
+  and the version `sdk/python/pyproject.toml` pins, through `uvx` (part of
+  the gate). Without `uv` it stops and says so.
 - `make doc-anchors` — check every anchor in `docs/`, `README.md` and
   `AGENTS.md` against the heading it names (part of the gate);
   `make doc-anchors-self-test` runs the checker over its fixture.

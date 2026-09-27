@@ -49,6 +49,11 @@ jobs:
           node-version-file: ui/package.json
           cache: npm
           cache-dependency-path: ui/package-lock.json
+      # `py-lint` runs the ruff the Python package pins through `uvx`, and the
+      # runner image has no uv (spec 020 #23).
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+        with:
+          version: ${{ env.UV_VERSION }}
       - run: make gate
       # The lock files resolve to the npm registry only, over https, with
       # integrity hashes, and under the names they claim (spec 020 #19, #22).
@@ -247,9 +252,6 @@ jobs:
           uv venv sdk/python/.venv
           uv pip install --python sdk/python/.venv/bin/python -e sdk/python \
             --group sdk/python/pyproject.toml:dev "${floor[@]}"
-      # One rule set for every Python file in the repository, named rather
-      # than discovered: the scripts sit outside the package that configures it.
-      - run: sdk/python/.venv/bin/ruff check --config sdk/python/pyproject.toml sdk/python scripts
       - run: SDK_PYTHON="$PWD/sdk/python/.venv/bin/python" scripts/sdk-test.sh
       # A signal, not a rule (design §8), the same instrument the interface has.
       - run: make sdk-lines

@@ -142,11 +142,25 @@ ui-lines: ## Report the interface's application lines against its budget, and it
 
 # --- The Python package (specs 017, 018) --------------------------------------
 #
-# `uv` is a dev prerequisite of the package half only, the way Node is of the
-# interface: every target above runs without it.
+# `uv` is a dev prerequisite of the package half, the way Node is of the
+# interface: every target above runs without it. The gate needs it for
+# `py-lint` alone.
 
 sdk-test: ## Unit-test the Python package, and end-to-end against a real binary
 	scripts/sdk-test.sh
+
+# One rule set for every Python file in the repository, named rather than
+# discovered: the scripts sit outside the package that configures it. The ruff
+# is the one the package's dev group pins, run through `uvx`, so the gate and a
+# developer's venv lint alike. It is in the gate (spec 020 #23), which makes
+# `uv` a prerequisite of the gate: without it this stops and says so, the way
+# the interface's checks do without the Node they need.
+RUFF_VERSION := $(shell sed -n 's/.*"ruff==\([^"]*\)".*/\1/p' sdk/python/pyproject.toml)
+
+py-lint: ## Lint the Python package and scripts/ with the ruff sdk/python pins (needs uv)
+	@command -v uv >/dev/null || { echo "uv is required here: it runs ruff $(RUFF_VERSION), the version sdk/python/pyproject.toml pins (https://docs.astral.sh/uv/)"; exit 1; }
+	@[ -n "$(RUFF_VERSION)" ] || { echo "py-lint: no \"ruff==<version>\" in sdk/python/pyproject.toml"; exit 1; }
+	uvx ruff@$(RUFF_VERSION) check --config sdk/python/pyproject.toml sdk/python scripts
 
 # The budget spec 017 #1 set, shared with the harness of spec 018; raised for
 # the streaming pass-through (spec 031 #22), for trace deletion (spec 036 #8),
@@ -221,7 +235,7 @@ sdk-notices: ## Fail if a package's copy of LICENSE or NOTICE is not the root's
 		cmp -s "$$(basename $$copy)" "$$copy" || { echo "sdk-notices: $$copy differs from ./$$(basename $$copy); copy it again"; exit 1; }; \
 	done
 
-gate: ensure-hooks format-check vet test sdk-go-unit doc-anchors sdk-notices ui-check ## Full gate: what CI runs, and the git pre-push hook
+gate: ensure-hooks format-check vet test sdk-go-unit doc-anchors sdk-notices py-lint ui-check ## Full gate: what CI runs, and the git pre-push hook
 
 # The pre-commit hook runs this: the checks that are cheap and the tests of
 # what is actually staged. The full gate runs once per push instead of once
@@ -268,7 +282,7 @@ install-hooks: ## (Re)install both hooks
 
 .PHONY: help build build-server dev test vet smoke fixtures format format-check \
 	ui ui-node ui-deps notices ui-types ui-types-check ui-check ui-lines image image-check \
-	e2e sdk-test sdk-lines sdk-go-test sdk-go-unit sdk-go-lines \
+	e2e sdk-test sdk-lines py-lint sdk-go-test sdk-go-unit sdk-go-lines \
 	sdk-js-deps sdk-js-build sdk-js-test sdk-js-lines sdk-notices \
 	doc-anchors doc-anchors-self-test gate precommit \
 	test-staged ui-check-staged ensure-hooks install-hooks
