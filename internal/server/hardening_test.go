@@ -742,6 +742,113 @@ func TestARefusedOriginSaysWhatToSet(t *testing.T) {
 	}
 }
 
+// TestAResponseTheWriteDeadlineCutIsLogged: a response the client did not
+// read before the write deadline is one WARN line — its route and how much of
+// it was written — once a minute per route, for a raw body and for writeJSON
+// alike, and writeJSON does not log it a second time (spec 001 #19).
+func TestAResponseTheWriteDeadlineCutIsLogged(t *testing.T) {
+	h := newHarness(t, &config.Config{Listen: ":0", StoreRaw: true, MaxBodyBytes: config.DefaultMaxBodyBytes},
+		store.WriterOptions{})
+	var (
+		mu     sync.Mutex
+		logged bytes.Buffer
+	)
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&lockedWriter{mu: &mu, out: &logged}, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	lines := func(substring string) []string {
+		mu.Lock()
+		defer mu.Unlock()
+		var found []string
+		for line := range strings.Lines(logged.String()) {
+			if strings.Contains(line, substring) {
+				found = append(found, line)
+			}
+		}
+		return found
+	}
+
+	// Far more than the socket buffers of both ends hold, so the handler's
+	// write is still waiting on the client when the deadline passes.
+	const size = 16 << 20
+	export := fmt.Sprintf(`{"resourceSpans":[{"scopeSpans":[{"spans":[{"traceId":"%032x","spanId":"%016x",`+
+		`"name":"big","startTimeUnixNano":"1700000000000000000","endTimeUnixNano":"1700000001000000000",`+
+		`"attributes":[{"key":"pad","value":{"stringValue":"%s"}}]}]}]}]}`, 1, 1, strings.Repeat("a", size))
+	if response := h.postJSON(t, []byte(export)); response.StatusCode != http.StatusOK {
+		t.Fatalf("the export = %d", response.StatusCode)
+	}
+	listing := decodeJSON[struct {
+		Batches []struct {
+			ID int64 `json:"id"`
+		} `json:"batches"`
+	}](t, h.get(t, "/api/v1/raw"))
+	if len(listing.Batches) != 1 {
+		t.Fatalf("%d raw batches, want 1", len(listing.Batches))
+	}
+
+	finished := make(chan struct{}, 1)
+	serve := func(next http.Handler) *httptest.Server {
+		server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			next.ServeHTTP(w, r)
+			finished <- struct{}{}
+		}))
+		server.Config.WriteTimeout = 300 * time.Millisecond
+		server.Start()
+		t.Cleanup(server.Close)
+		return server
+	}
+	// slowGet asks and does not read, until the handler has returned.
+	slowGet := func(server *httptest.Server, path string) {
+		t.Helper()
+		conn, err := net.Dial("tcp", server.Listener.Addr().String())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer conn.Close()
+		conn.(*net.TCPConn).SetReadBuffer(4 << 10)
+		fmt.Fprintf(conn, "GET %s HTTP/1.1\r\nHost: tracepad\r\nAuthorization: Bearer %s\r\n\r\n", path, testSecret)
+		select {
+		case <-finished:
+		case <-time.After(10 * time.Second):
+			t.Fatalf("the handler of %s was still writing after ten seconds", path)
+		}
+	}
+
+	api := serve(h.server.Handler())
+	path := fmt.Sprintf("/api/v1/raw/%d", listing.Batches[0].ID)
+	slowGet(api, path)
+	cut := lines("a response was cut off")
+	if len(cut) != 1 {
+		t.Fatalf("%d lines for the cut raw body, want 1:\n%s", len(cut), strings.Join(cut, ""))
+	}
+	line := cut[0]
+	if !strings.Contains(line, "level=WARN") || !strings.Contains(line, `route="GET /api/v1/raw/{id}"`) {
+		t.Errorf("the line is not a warning naming the route:\n%s", line)
+	}
+	var written int64
+	if _, err := fmt.Sscan(line[strings.Index(line, "bytes_written=")+len("bytes_written="):], &written); err != nil ||
+		written <= 0 || written >= size {
+		t.Errorf("bytes_written = %d (%v), want part of the %d-byte body:\n%s", written, err, size, line)
+	}
+	// Within the minute the route's next cut is counted, not logged.
+	slowGet(api, path)
+	if n := len(lines("a response was cut off")); n != 1 {
+		t.Errorf("%d lines after a second cut within the minute, want 1", n)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /big", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]string{"pad": strings.Repeat("a", size)})
+	})
+	slowGet(serve(h.server.reportCutResponses(mux)), "/big")
+	if cut := lines(`route="GET /big"`); len(cut) != 1 {
+		t.Errorf("%d lines for the cut JSON body, want 1", len(cut))
+	}
+	if failed := lines("failed to write response"); len(failed) != 0 {
+		t.Errorf("writeJSON logged the cut again:\n%s", strings.Join(failed, ""))
+	}
+}
+
 // TestAMalformedURLIsReportedOnce: TRACEPAD_URL is read when the server is
 // built, so a value that will not parse is said once, not on every sign-in
 // and cookie write that consults it.

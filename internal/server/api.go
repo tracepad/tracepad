@@ -14,6 +14,7 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
+	"os"
 	"regexp"
 	"slices"
 	"strconv"
@@ -643,7 +644,11 @@ func writeEncoded(w http.ResponseWriter, status int, encoded []byte) {
 	// written on its own: appended, it could copy a body of tens of
 	// megabytes to add one byte.
 	if _, err := w.Write(encoded); err != nil {
-		slog.Error("failed to write response", "err", err)
+		// A write the deadline stopped is the transport's line, once a
+		// minute per route (reportCutResponses).
+		if !errors.Is(err, os.ErrDeadlineExceeded) {
+			slog.Error("failed to write response", "err", err)
+		}
 		return
 	}
 	w.Write(newline)

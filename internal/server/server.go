@@ -120,6 +120,9 @@ type Server struct {
 	// origin (spec 028 #30), per origin, so that a page elsewhere posting
 	// once a minute cannot hide the line about the operator's own proxy.
 	originLog *logpace.Keyed
+	// cutLog paces the warning for a response the write deadline cut
+	// short, per route (spec 001 #19).
+	cutLog *logpace.Keyed
 
 	// The web interface (spec 006): the built bundle, nil in a build
 	// without the `ui` tag; the path segments the API owns, so a mistyped
@@ -195,6 +198,7 @@ func New(cfg *config.Config, version string, st *store.Store, writer JobWriter, 
 		handlerGrace:    defaultHandlerGrace,
 		inflatedLog:     &logpace.Keyed{Every: time.Minute},
 		originLog:       &logpace.Keyed{Every: time.Minute, Keys: 64},
+		cutLog:          &logpace.Keyed{Every: time.Minute},
 		assets:          ui.Assets(),
 		startedAt:       time.Now(),
 		counters:        newCounters(),
@@ -248,7 +252,7 @@ func New(cfg *config.Config, version string, st *store.Store, writer JobWriter, 
 		Addr: cfg.Listen,
 		// The headers outermost, so that even the 503 a stop answers
 		// once it has begun waiting carries them (spec 001 #14).
-		Handler:           s.withResponseHeaders(s.running.track(mux)),
+		Handler:           s.withResponseHeaders(s.running.track(s.reportCutResponses(mux))),
 		ReadHeaderTimeout: 10 * time.Second,
 		// ReadTimeout bounds slow-dripping request bodies; IdleTimeout
 		// reaps abandoned keep-alives; WriteTimeout bounds a slow reader
