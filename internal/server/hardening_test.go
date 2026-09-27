@@ -11,9 +11,11 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -742,73 +744,165 @@ func TestARefusedOriginSaysWhatToSet(t *testing.T) {
 	}
 }
 
-// TestLogLimiterByKey: each key once per interval, at most keys of them at a
-// time; a line let through counts only its own key's repeats, and what the
-// cap turned away is told apart, once, with the next line.
-func TestLogLimiterByKey(t *testing.T) {
-	l := &logLimiter{every: time.Minute, keys: 2}
-	start := time.Unix(1_700_000_000, 0)
-	at := func(key string, offset time.Duration) (logHeld, bool) {
-		return l.allowKey(key, start.Add(offset))
-	}
-	expect := func(name string, got logHeld, ok bool, wantOK bool, want logHeld) {
-		t.Helper()
-		if ok != wantOK || got != want {
-			t.Errorf("%s: ok = %v, held = %+v; want ok = %v, held = %+v", name, ok, got, wantOK, want)
-		}
-	}
-	held, ok := at("a", 0)
-	expect("a, first", held, ok, true, logHeld{})
-	held, ok = at("a", time.Second)
-	expect("a, repeated", held, ok, false, logHeld{})
-	held, ok = at("a", 2*time.Second)
-	expect("a, repeated again", held, ok, false, logHeld{})
-	held, ok = at("b", 3*time.Second)
-	expect("b, first: a's repeats are not b's", held, ok, true, logHeld{})
-	held, ok = at("b", 4*time.Second)
-	expect("b, repeated", held, ok, false, logHeld{})
-	held, ok = at("c", 5*time.Second)
-	expect("c, past the cap", held, ok, false, logHeld{})
-	held, ok = at("a", time.Minute)
-	expect("a, next interval", held, ok, true, logHeld{sameKey: 2, overCap: 1})
-	held, ok = at("b", time.Minute+3*time.Second)
-	expect("b, next interval", held, ok, true, logHeld{sameKey: 1})
-	held, ok = at("c", time.Minute+4*time.Second)
-	expect("c, still past the cap", held, ok, false, logHeld{})
-	held, ok = at("c", 2*time.Minute+5*time.Second)
-	expect("c, once there is room", held, ok, true, logHeld{overCap: 1})
-}
-
-// TestReturningKeysAreHeldToTheCap: keys whose interval has passed are held to
-// the same cap as new ones when they come back, so an interval never logs
-// more than keys lines — however the keys are shuffled between intervals.
-func TestReturningKeysAreHeldToTheCap(t *testing.T) {
-	const keys = 64
-	l := &logLimiter{every: time.Minute, keys: keys}
-	start := time.Unix(1_700_000_000, 0)
-	key := func(batch, i int) string { return fmt.Sprintf("https://%d-%d.example", batch, i) }
-	logged := func(from time.Time, batches ...int) int {
-		n := 0
-		for _, batch := range batches {
-			for i := range keys {
-				if _, ok := l.allowKey(key(batch, i), from); ok {
-					n++
-				}
-				// Each key once more within its interval, so it is kept
-				// with something to tell.
-				l.allowKey(key(batch, i), from)
+// TestAResponseTheWriteDeadlineCutIsLogged: a response the client did not
+// read before the write deadline is one WARN line — its route and how much of
+// it was written — once a minute per route, for a raw body and for writeJSON
+// alike, and writeJSON does not log it a second time (spec 001 #19).
+func TestAResponseTheWriteDeadlineCutIsLogged(t *testing.T) {
+	h := newHarness(t, &config.Config{Listen: ":0", StoreRaw: true, MaxBodyBytes: config.DefaultMaxBodyBytes},
+		store.WriterOptions{})
+	var (
+		mu     sync.Mutex
+		logged bytes.Buffer
+	)
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&lockedWriter{mu: &mu, out: &logged}, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	lines := func(substring string) []string {
+		mu.Lock()
+		defer mu.Unlock()
+		var found []string
+		for line := range strings.Lines(logged.String()) {
+			if strings.Contains(line, substring) {
+				found = append(found, line)
 			}
 		}
-		return n
+		return found
 	}
-	if n := logged(start, 0); n != keys {
-		t.Fatalf("the first interval logged %d, want %d", n, keys)
+
+	// Far more than the socket buffers of both ends hold, so the handler's
+	// write is still waiting on the client when the deadline passes.
+	const size = 16 << 20
+	export := fmt.Sprintf(`{"resourceSpans":[{"scopeSpans":[{"spans":[{"traceId":"%032x","spanId":"%016x",`+
+		`"name":"big","startTimeUnixNano":"1700000000000000000","endTimeUnixNano":"1700000001000000000",`+
+		`"attributes":[{"key":"pad","value":{"stringValue":"%s"}}]}]}]}]}`, 1, 1, strings.Repeat("a", size))
+	if response := h.postJSON(t, []byte(export)); response.StatusCode != http.StatusOK {
+		t.Fatalf("the export = %d", response.StatusCode)
 	}
-	// The next interval: 64 new keys, then the first 64 back again.
-	if n := logged(start.Add(time.Minute), 1, 0); n != keys {
-		t.Errorf("an interval of new keys and returning ones logged %d lines, want at most %d", n, keys)
+	listing := decodeJSON[struct {
+		Batches []struct {
+			ID int64 `json:"id"`
+		} `json:"batches"`
+	}](t, h.get(t, "/api/v1/raw"))
+	if len(listing.Batches) != 1 {
+		t.Fatalf("%d raw batches, want 1", len(listing.Batches))
+	}
+
+	finished := make(chan struct{}, 1)
+	serve := func(next http.Handler) *httptest.Server {
+		server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			next.ServeHTTP(w, r)
+			finished <- struct{}{}
+		}))
+		server.Config.WriteTimeout = 300 * time.Millisecond
+		server.Start()
+		t.Cleanup(server.Close)
+		return server
+	}
+	// slowGet asks and does not read, until the handler has returned.
+	slowGet := func(server *httptest.Server, path string) {
+		t.Helper()
+		conn, err := net.Dial("tcp", server.Listener.Addr().String())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer conn.Close()
+		conn.(*net.TCPConn).SetReadBuffer(4 << 10)
+		fmt.Fprintf(conn, "GET %s HTTP/1.1\r\nHost: tracepad\r\nAuthorization: Bearer %s\r\n\r\n", path, testSecret)
+		select {
+		case <-finished:
+		case <-time.After(10 * time.Second):
+			t.Fatalf("the handler of %s was still writing after ten seconds", path)
+		}
+	}
+
+	api := serve(h.server.Handler())
+	path := fmt.Sprintf("/api/v1/raw/%d", listing.Batches[0].ID)
+	slowGet(api, path)
+	cut := lines("a response was cut off")
+	if len(cut) != 1 {
+		t.Fatalf("%d lines for the cut raw body, want 1:\n%s", len(cut), strings.Join(cut, ""))
+	}
+	line := cut[0]
+	if !strings.Contains(line, "level=WARN") || !strings.Contains(line, `route="GET /api/v1/raw/{id}"`) {
+		t.Errorf("the line is not a warning naming the route:\n%s", line)
+	}
+	// Zero is possible: the deadline counts from the request's headers,
+	// and a slow machine may reach it before the handler first writes.
+	// TestCutWriterCountsWhatWasWritten pins the count itself.
+	var written int64
+	if _, err := fmt.Sscan(line[strings.Index(line, "bytes_written=")+len("bytes_written="):], &written); err != nil ||
+		written < 0 || written >= size {
+		t.Errorf("bytes_written = %d (%v), want part of the %d-byte body:\n%s", written, err, size, line)
+	}
+	// Within the minute the route's next cut is counted, not logged.
+	slowGet(api, path)
+	if n := len(lines("a response was cut off")); n != 1 {
+		t.Errorf("%d lines after a second cut within the minute, want 1", n)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /big", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]string{"pad": strings.Repeat("a", size)})
+	})
+	slowGet(serve(h.server.reportCutResponses(mux)), "/big")
+	if cut := lines(`route="GET /big"`); len(cut) != 1 {
+		t.Errorf("%d lines for the cut JSON body, want 1", len(cut))
+	}
+	if failed := lines("failed to write response"); len(failed) != 0 {
+		t.Errorf("writeJSON logged the cut again:\n%s", strings.Join(failed, ""))
 	}
 }
+
+// TestCutWriterCountsWhatWasWritten: the count is what the connection took,
+// and a write or a flush the deadline stopped marks the response cut; any
+// other failure does not.
+func TestCutWriterCountsWhatWasWritten(t *testing.T) {
+	deadline := fmt.Errorf("write tcp: %w", os.ErrDeadlineExceeded)
+	for _, tc := range []struct {
+		name    string
+		under   *deadlineStub
+		flush   bool
+		written int64
+		cut     bool
+	}{
+		{"a write the deadline stopped", &deadlineStub{take: 3, err: deadline}, false, 7, true},
+		{"a flush the deadline stopped", &deadlineStub{take: 4, flushErr: deadline}, true, 8, true},
+		{"a client that hung up", &deadlineStub{take: 3, err: syscall.EPIPE}, false, 7, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := &cutWriter{ResponseWriter: tc.under}
+			c.Write([]byte("four"))
+			tc.under.failing = true
+			c.Write([]byte("four"))
+			if tc.flush {
+				http.NewResponseController(c).Flush()
+			}
+			if c.written != tc.written || c.cut != tc.cut {
+				t.Errorf("written = %d, cut = %v; want %d, %v", c.written, c.cut, tc.written, tc.cut)
+			}
+		})
+	}
+}
+
+// deadlineStub takes whole writes until it is failing, then take bytes of one
+// and err; its flush answers flushErr.
+type deadlineStub struct {
+	httptest.ResponseRecorder
+	failing  bool
+	take     int
+	err      error
+	flushErr error
+}
+
+func (s *deadlineStub) Write(body []byte) (int, error) {
+	if s.failing && s.err != nil {
+		return s.take, s.err
+	}
+	return len(body), nil
+}
+
+func (s *deadlineStub) FlushError() error { return s.flushErr }
 
 // TestAMalformedURLIsReportedOnce: TRACEPAD_URL is read when the server is
 // built, so a value that will not parse is said once, not on every sign-in

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/tracepad/tracepad/internal/config"
+	"github.com/tracepad/tracepad/internal/logpace"
 	"github.com/tracepad/tracepad/internal/mcpserver"
 	"github.com/tracepad/tracepad/internal/store"
 	"github.com/tracepad/tracepad/internal/ui"
@@ -100,7 +101,7 @@ type Server struct {
 	// passwords bounds the bcrypt work in flight, and passwordLog paces
 	// the warning for what it turns away (spec 028 #31).
 	passwords   *store.PasswordGate
-	passwordLog *logLimiter
+	passwordLog *logpace.Keyed
 	// running counts the handlers in flight, and handlerGrace is how long
 	// a stop waits for them once their connections are closed (spec 001
 	// #16).
@@ -114,11 +115,14 @@ type Server struct {
 	stopStreams context.CancelFunc
 	// inflatedLog paces the warning for a gzip body refused after
 	// decompression (spec 002 #27).
-	inflatedLog *logLimiter
+	inflatedLog *logpace.Keyed
 	// originLog paces the warning for a browser request refused for its
 	// origin (spec 028 #30), per origin, so that a page elsewhere posting
 	// once a minute cannot hide the line about the operator's own proxy.
-	originLog *logLimiter
+	originLog *logpace.Keyed
+	// cutLog paces the warning for a response the write deadline cut
+	// short, per route (spec 001 #19).
+	cutLog *logpace.Keyed
 
 	// The web interface (spec 006): the built bundle, nil in a build
 	// without the `ui` tag; the path segments the API owns, so a mistyped
@@ -190,10 +194,11 @@ func New(cfg *config.Config, version string, st *store.Store, writer JobWriter, 
 		limiter:         newLoginLimiter(),
 		passwordChanges: newLoginLimiter(),
 		passwords:       newPasswordGate(),
-		passwordLog:     &logLimiter{every: time.Minute},
+		passwordLog:     &logpace.Keyed{Every: time.Minute},
 		handlerGrace:    defaultHandlerGrace,
-		inflatedLog:     &logLimiter{every: time.Minute},
-		originLog:       &logLimiter{every: time.Minute, keys: 64},
+		inflatedLog:     &logpace.Keyed{Every: time.Minute},
+		originLog:       &logpace.Keyed{Every: time.Minute, Keys: 64},
+		cutLog:          &logpace.Keyed{Every: time.Minute},
 		assets:          ui.Assets(),
 		startedAt:       time.Now(),
 		counters:        newCounters(),
@@ -247,7 +252,7 @@ func New(cfg *config.Config, version string, st *store.Store, writer JobWriter, 
 		Addr: cfg.Listen,
 		// The headers outermost, so that even the 503 a stop answers
 		// once it has begun waiting carries them (spec 001 #14).
-		Handler:           s.withResponseHeaders(s.running.track(mux)),
+		Handler:           s.withResponseHeaders(s.running.track(s.reportCutResponses(mux))),
 		ReadHeaderTimeout: 10 * time.Second,
 		// ReadTimeout bounds slow-dripping request bodies; IdleTimeout
 		// reaps abandoned keep-alives; WriteTimeout bounds a slow reader

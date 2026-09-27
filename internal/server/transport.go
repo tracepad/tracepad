@@ -3,7 +3,9 @@ package server
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -65,6 +67,61 @@ func (s *Server) withResponseHeaders(next http.Handler) http.Handler {
 // file or a raw batch — needs over a link of about half a megabit, and no
 // longer.
 const writeTimeout = 5 * time.Minute
+
+// reportCutResponses logs a response the write deadline cut short (spec 001
+// #19): the client sees its connection drop and the operator would otherwise
+// see nothing. One line a minute per route, saying how much of the response
+// had been written. Here rather than in each writer because the route is the
+// mux's to know — it names it on the request it was handed, which is this one
+// — and a body a handler writes without writeJSON is cut the same way.
+func (s *Server) reportCutResponses(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		watched := &cutWriter{ResponseWriter: w}
+		next.ServeHTTP(watched, r)
+		if !watched.cut {
+			return
+		}
+		if held, ok := s.cutLog.Allow(r.Pattern, time.Now()); ok {
+			slog.Warn("a response was cut off: it was not written before the write deadline",
+				"route", r.Pattern, "bytes_written", watched.written,
+				"not_logged_since_last", held.SameKey)
+		}
+	})
+}
+
+// cutWriter counts what a response wrote and notes a write the deadline
+// stopped. The count is what the connection took: the last few KiB of it may
+// still have been in the server's buffers when the deadline passed.
+type cutWriter struct {
+	http.ResponseWriter
+	written int64
+	cut     bool
+}
+
+func (c *cutWriter) Write(body []byte) (int, error) {
+	n, err := c.ResponseWriter.Write(body)
+	c.written += int64(n)
+	c.note(err)
+	return n, err
+}
+
+// FlushError is where http.ResponseController's Flush stops, so a flush the
+// deadline stopped is seen here too rather than passing under it on the way
+// to the connection.
+func (c *cutWriter) FlushError() error {
+	err := http.NewResponseController(c.ResponseWriter).Flush()
+	c.note(err)
+	return err
+}
+
+func (c *cutWriter) note(err error) {
+	if errors.Is(err, os.ErrDeadlineExceeded) {
+		c.cut = true
+	}
+}
+
+// Unwrap lets http.ResponseController reach the connection's writer.
+func (c *cutWriter) Unwrap() http.ResponseWriter { return c.ResponseWriter }
 
 // mcpStream serves MCP over streamable HTTP, the one response that is a stream
 // rather than a document: its answer takes as long as the tool it runs, so it

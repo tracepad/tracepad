@@ -365,7 +365,7 @@ func logFailure(err error, level slog.Level, message string, args ...any) {
 		if !now {
 			return
 		}
-		args = append(args, "condition", condition, "failed_since_last_line", failed)
+		args = append(args, "condition", condition, "failed_since_last_line", failed.SameKey)
 	}
 	logger().Log(context.Background(), level, message, append([]any{"err", err}, args...)...)
 }

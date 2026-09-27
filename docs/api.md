@@ -1237,7 +1237,9 @@ longer has its connection closed once that work is done, and the client sees
 the connection drop rather than the answer. Nothing in the API is meant to take
 that long, and a bulk deletion removes at most a bounded round of traces per
 request, so repeating one is safe. `/mcp` is a stream and has no such limit,
-for a request with a project key; without one it is `401`.
+for a request with a project key; without one it is `401`. A response the five
+minutes cut short is logged as a warning naming its route and how many bytes
+had been written, at most once a minute per route.
 
 ## Reads under load
 

@@ -420,12 +420,16 @@ func (sw *Sweeper) sweepTraces(ctx context.Context, projectID string, now int64,
 // sweepSessionScores removes a project's expired session-only scores chunk by
 // chunk, within the pass's bound.
 func (sw *Sweeper) sweepSessionScores(ctx context.Context, projectID string, now int64) (int64, error) {
-	var total int64
+	var (
+		total int64
+		after = startOfScores
+	)
 	for range sw.maxChunks {
-		chunk := &sessionScoreSweep{ProjectID: projectID, Now: now, Limit: sw.chunk}
+		chunk := &sessionScoreSweep{ProjectID: projectID, Now: now, Limit: sw.chunk, After: after}
 		if err := sw.writer.Submit(ctx, chunk); err != nil {
 			return total, err
 		}
+		after = chunk.Next
 		total += chunk.Deleted
 		if chunk.Deleted < int64(sw.chunk) {
 			break
@@ -757,9 +761,15 @@ func (r *rawSweep) apply(tx *sql.Tx) error {
 // whose session never arrived; the second is spec 003 #4's "alongside their
 // targets" for a session, and keeps the verdicts of a session a pinned run
 // keeps alive. Served by `idx_scores_session_only` and `idx_traces_session`.
+//
+// It walks the index from a cursor, `(created_at, rowid)`, which a pass moves
+// past each chunk: the scores a live session keeps are passed over once a
+// pass, not once a chunk.
 const expiredSessionScores = `SELECT s.rowid FROM scores s
 	WHERE s.project_id = ? AND s.trace_id IS NULL AND s.created_at < ?
-	  AND NOT EXISTS (SELECT 1 FROM traces t WHERE t.project_id = s.project_id AND t.session_id = s.session_id)`
+	  AND (s.created_at, s.rowid) > (?, ?)
+	  AND NOT EXISTS (SELECT 1 FROM traces t WHERE t.project_id = s.project_id AND t.session_id = s.session_id)
+	ORDER BY s.created_at, s.rowid LIMIT ?`
 
 // sessionScoreSweep deletes one chunk of a project's expired session-only
 // scores. They sit in no rollup (spec 025: a score that names no trace has no
@@ -768,23 +778,55 @@ type sessionScoreSweep struct {
 	ProjectID string
 	Now       int64
 	Limit     int
+	// After is where the chunk starts, the last score the pass's previous
+	// chunk took, or startOfScores. Next is where
+	// the chunk stopped, for the next one to start from. Two fields, not
+	// one moved in place: the writer may apply a job twice, when the
+	// window it was committed in failed.
+	After sessionScoreCursor
 
 	Deleted int64
+	Next    sessionScoreCursor
 }
 
+// sessionScoreCursor is a position in `idx_scores_session_only`: every
+// session-only score at or before it has been deleted or kept this pass.
+type sessionScoreCursor struct {
+	CreatedAt, RowID int64
+}
+
+// startOfScores is the cursor before every score.
+var startOfScores = sessionScoreCursor{math.MinInt64, math.MinInt64}
+
 func (s *sessionScoreSweep) apply(tx *sql.Tx) error {
-	s.Deleted = 0
+	s.Deleted, s.Next = 0, s.After
 	cutoff, sweeping, err := sweepCutoff(tx, s.ProjectID, s.Now, false)
 	if err != nil || !sweeping {
 		return err
 	}
-	result, err := tx.Exec(`DELETE FROM scores WHERE rowid IN (`+expiredSessionScores+` LIMIT ?)`,
-		s.ProjectID, cutoff, s.Limit)
+	// One statement: the chunk's scores go as they are chosen, and the
+	// last of them in the index's order is where the next chunk starts.
+	rows, err := tx.Query(`DELETE FROM scores WHERE rowid IN (`+expiredSessionScores+`)
+		RETURNING rowid, created_at`,
+		s.ProjectID, cutoff, s.After.CreatedAt, s.After.RowID, s.Limit)
 	if err != nil {
 		return fmt.Errorf("sweep session scores: %w", err)
 	}
-	s.Deleted, err = result.RowsAffected()
-	return err
+	defer rows.Close()
+	for rows.Next() {
+		var at sessionScoreCursor
+		if err := rows.Scan(&at.RowID, &at.CreatedAt); err != nil {
+			return fmt.Errorf("sweep session scores: %w", err)
+		}
+		s.Deleted++
+		if at.CreatedAt > s.Next.CreatedAt || at.CreatedAt == s.Next.CreatedAt && at.RowID > s.Next.RowID {
+			s.Next = at
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("sweep session scores: %w", err)
+	}
+	return nil
 }
 
 // payloadSweep removes the orphans the read pass found.

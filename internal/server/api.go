@@ -14,6 +14,7 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
+	"os"
 	"regexp"
 	"slices"
 	"strconv"
@@ -207,10 +208,10 @@ func (s *Server) bodyRead(w http.ResponseWriter, r *http.Request, err error) boo
 	}
 	var inflated *inflatedTooLarge
 	if errors.As(err, &inflated) {
-		if skipped, ok := s.inflatedLog.allow(time.Now()); ok {
+		if skipped, ok := s.inflatedLog.Allow("", time.Now()); ok {
 			slog.Warn("a gzip body expanded past TRACEPAD_MAX_BODY_BYTES after decompression and was refused with 413",
 				"path", r.URL.Path, "wire_bytes_read", inflated.wire, "limit", inflated.limit,
-				"not_logged_since_last", skipped)
+				"not_logged_since_last", skipped.SameKey)
 		}
 	}
 	var tooLarge *http.MaxBytesError
@@ -643,7 +644,11 @@ func writeEncoded(w http.ResponseWriter, status int, encoded []byte) {
 	// written on its own: appended, it could copy a body of tens of
 	// megabytes to add one byte.
 	if _, err := w.Write(encoded); err != nil {
-		slog.Error("failed to write response", "err", err)
+		// A write the deadline stopped is the transport's line, once a
+		// minute per route (reportCutResponses).
+		if !errors.Is(err, os.ErrDeadlineExceeded) {
+			slog.Error("failed to write response", "err", err)
+		}
 		return
 	}
 	w.Write(newline)
