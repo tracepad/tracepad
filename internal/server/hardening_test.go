@@ -11,9 +11,11 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -825,9 +827,12 @@ func TestAResponseTheWriteDeadlineCutIsLogged(t *testing.T) {
 	if !strings.Contains(line, "level=WARN") || !strings.Contains(line, `route="GET /api/v1/raw/{id}"`) {
 		t.Errorf("the line is not a warning naming the route:\n%s", line)
 	}
+	// Zero is possible: the deadline counts from the request's headers,
+	// and a slow machine may reach it before the handler first writes.
+	// TestCutWriterCountsWhatWasWritten pins the count itself.
 	var written int64
 	if _, err := fmt.Sscan(line[strings.Index(line, "bytes_written=")+len("bytes_written="):], &written); err != nil ||
-		written <= 0 || written >= size {
+		written < 0 || written >= size {
 		t.Errorf("bytes_written = %d (%v), want part of the %d-byte body:\n%s", written, err, size, line)
 	}
 	// Within the minute the route's next cut is counted, not logged.
@@ -848,6 +853,56 @@ func TestAResponseTheWriteDeadlineCutIsLogged(t *testing.T) {
 		t.Errorf("writeJSON logged the cut again:\n%s", strings.Join(failed, ""))
 	}
 }
+
+// TestCutWriterCountsWhatWasWritten: the count is what the connection took,
+// and a write or a flush the deadline stopped marks the response cut; any
+// other failure does not.
+func TestCutWriterCountsWhatWasWritten(t *testing.T) {
+	deadline := fmt.Errorf("write tcp: %w", os.ErrDeadlineExceeded)
+	for _, tc := range []struct {
+		name    string
+		under   *deadlineStub
+		flush   bool
+		written int64
+		cut     bool
+	}{
+		{"a write the deadline stopped", &deadlineStub{take: 3, err: deadline}, false, 7, true},
+		{"a flush the deadline stopped", &deadlineStub{take: 4, flushErr: deadline}, true, 8, true},
+		{"a client that hung up", &deadlineStub{take: 3, err: syscall.EPIPE}, false, 7, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := &cutWriter{ResponseWriter: tc.under}
+			c.Write([]byte("four"))
+			tc.under.failing = true
+			c.Write([]byte("four"))
+			if tc.flush {
+				http.NewResponseController(c).Flush()
+			}
+			if c.written != tc.written || c.cut != tc.cut {
+				t.Errorf("written = %d, cut = %v; want %d, %v", c.written, c.cut, tc.written, tc.cut)
+			}
+		})
+	}
+}
+
+// deadlineStub takes whole writes until it is failing, then take bytes of one
+// and err; its flush answers flushErr.
+type deadlineStub struct {
+	httptest.ResponseRecorder
+	failing  bool
+	take     int
+	err      error
+	flushErr error
+}
+
+func (s *deadlineStub) Write(body []byte) (int, error) {
+	if s.failing && s.err != nil {
+		return s.take, s.err
+	}
+	return len(body), nil
+}
+
+func (s *deadlineStub) FlushError() error { return s.flushErr }
 
 // TestAMalformedURLIsReportedOnce: TRACEPAD_URL is read when the server is
 // built, so a value that will not parse is said once, not on every sign-in

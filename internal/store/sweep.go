@@ -422,7 +422,7 @@ func (sw *Sweeper) sweepTraces(ctx context.Context, projectID string, now int64,
 func (sw *Sweeper) sweepSessionScores(ctx context.Context, projectID string, now int64) (int64, error) {
 	var (
 		total int64
-		after sessionScoreCursor
+		after = startOfScores
 	)
 	for range sw.maxChunks {
 		chunk := &sessionScoreSweep{ProjectID: projectID, Now: now, Limit: sw.chunk, After: after}
@@ -765,7 +765,7 @@ func (r *rawSweep) apply(tx *sql.Tx) error {
 // It walks the index from a cursor, `(created_at, rowid)`, which a pass moves
 // past each chunk: the scores a live session keeps are passed over once a
 // pass, not once a chunk.
-const expiredSessionScores = `SELECT s.rowid, s.created_at FROM scores s
+const expiredSessionScores = `SELECT s.rowid FROM scores s
 	WHERE s.project_id = ? AND s.trace_id IS NULL AND s.created_at < ?
 	  AND (s.created_at, s.rowid) > (?, ?)
 	  AND NOT EXISTS (SELECT 1 FROM traces t WHERE t.project_id = s.project_id AND t.session_id = s.session_id)
@@ -779,7 +779,7 @@ type sessionScoreSweep struct {
 	Now       int64
 	Limit     int
 	// After is where the chunk starts, the last score the pass's previous
-	// chunk took; the zero value is the start of the index. Next is where
+	// chunk took, or startOfScores. Next is where
 	// the chunk stopped, for the next one to start from. Two fields, not
 	// one moved in place: the writer may apply a job twice, when the
 	// window it was committed in failed.
@@ -795,33 +795,35 @@ type sessionScoreCursor struct {
 	CreatedAt, RowID int64
 }
 
+// startOfScores is the cursor before every score.
+var startOfScores = sessionScoreCursor{math.MinInt64, math.MinInt64}
+
 func (s *sessionScoreSweep) apply(tx *sql.Tx) error {
 	s.Deleted, s.Next = 0, s.After
 	cutoff, sweeping, err := sweepCutoff(tx, s.ProjectID, s.Now, false)
 	if err != nil || !sweeping {
 		return err
 	}
-	after := s.After
-	if after == (sessionScoreCursor{}) {
-		after = sessionScoreCursor{math.MinInt64, math.MinInt64}
-	}
-	rows, err := tx.Query(expiredSessionScores, s.ProjectID, cutoff, after.CreatedAt, after.RowID, s.Limit)
+	// One statement: the chunk's scores go as they are chosen, and the
+	// last of them in the index's order is where the next chunk starts.
+	rows, err := tx.Query(`DELETE FROM scores WHERE rowid IN (`+expiredSessionScores+`)
+		RETURNING rowid, created_at`,
+		s.ProjectID, cutoff, s.After.CreatedAt, s.After.RowID, s.Limit)
 	if err != nil {
 		return fmt.Errorf("sweep session scores: %w", err)
 	}
-	var ids []any
+	defer rows.Close()
 	for rows.Next() {
-		if err := rows.Scan(&s.Next.RowID, &s.Next.CreatedAt); err != nil {
-			rows.Close()
+		var at sessionScoreCursor
+		if err := rows.Scan(&at.RowID, &at.CreatedAt); err != nil {
 			return fmt.Errorf("sweep session scores: %w", err)
 		}
-		ids = append(ids, s.Next.RowID)
+		s.Deleted++
+		if at.CreatedAt > s.Next.CreatedAt || at.CreatedAt == s.Next.CreatedAt && at.RowID > s.Next.RowID {
+			s.Next = at
+		}
 	}
-	rows.Close()
 	if err := rows.Err(); err != nil {
-		return fmt.Errorf("sweep session scores: %w", err)
-	}
-	if s.Deleted, err = deleteIn(tx, `DELETE FROM scores WHERE rowid IN`, nil, ids); err != nil {
 		return fmt.Errorf("sweep session scores: %w", err)
 	}
 	return nil

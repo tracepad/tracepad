@@ -785,7 +785,7 @@ func TestSessionScoreSweepResumesWhereItsLastChunkStopped(t *testing.T) {
 	if len(chunks) != 4 {
 		t.Fatalf("%d chunks for seven scores two at a time, want 4", len(chunks))
 	}
-	var from sessionScoreCursor
+	from := startOfScores
 	for i, chunk := range chunks {
 		if chunk.After != from {
 			t.Errorf("chunk %d starts at %+v, want where chunk %d stopped, %+v", i+1, chunk.After, i, from)

@@ -101,10 +101,23 @@ type cutWriter struct {
 func (c *cutWriter) Write(body []byte) (int, error) {
 	n, err := c.ResponseWriter.Write(body)
 	c.written += int64(n)
+	c.note(err)
+	return n, err
+}
+
+// FlushError is where http.ResponseController's Flush stops, so a flush the
+// deadline stopped is seen here too rather than passing under it on the way
+// to the connection.
+func (c *cutWriter) FlushError() error {
+	err := http.NewResponseController(c.ResponseWriter).Flush()
+	c.note(err)
+	return err
+}
+
+func (c *cutWriter) note(err error) {
 	if errors.Is(err, os.ErrDeadlineExceeded) {
 		c.cut = true
 	}
-	return n, err
 }
 
 // Unwrap lets http.ResponseController reach the connection's writer.

@@ -358,8 +358,8 @@ func TestIngestCapsTheDecompressedBody(t *testing.T) {
 	// Two bombs inside the minute: one warning, and the second is
 	// counted for the next one to report.
 	// The line after the minute is the one that tells it.
-	next, _ := h.server.inflatedLog.Allow("", time.Now().Add(time.Minute))
-	if held := next.SameKey; held != 1 {
+	next, ok := h.server.inflatedLog.Allow("", time.Now().Add(time.Minute))
+	if held := next.SameKey; !ok || held != 1 {
 		t.Errorf("warnings held back = %d after two refusals in a minute, want 1", held)
 	}
 
