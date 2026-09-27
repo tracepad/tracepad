@@ -1,9 +1,9 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -99,10 +99,9 @@ func (s *Server) handleListRaw(w http.ResponseWriter, r *http.Request) {
 		filter.After = cursor
 	}
 
-	batches, err := s.store.RawBatches(project.ID, filter)
+	batches, err := s.store.RawBatches(r.Context(), project.ID, filter)
 	if err != nil {
-		slog.Error("list raw batches failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to list the raw batches")
+		readFailed(w, r, "failed to list the raw batches", err)
 		return
 	}
 	batches, prev, next := trimPage(batches, limit, backward, raw,
@@ -126,10 +125,9 @@ func (s *Server) handleListRaw(w http.ResponseWriter, r *http.Request) {
 		put("next_cursor", next).
 		put("prev_cursor", prev)
 	if counting {
-		total, err := s.store.CountRawBatches(project.ID, filter, rawCountCap+1)
+		total, err := s.store.CountRawBatches(r.Context(), project.ID, filter, rawCountCap+1)
 		if err != nil {
-			slog.Error("count raw batches failed", "err", err)
-			writeError(w, http.StatusInternalServerError, "failed to count the raw batches")
+			readFailed(w, r, "failed to count the raw batches", err)
 			return
 		}
 		stopped := total > rawCountCap
@@ -159,10 +157,9 @@ func (s *Server) handleGetRawBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	batch, err := s.store.RawBatchBody(project.ID, id)
+	batch, err := s.store.RawBatchBody(r.Context(), project.ID, id)
 	if err != nil {
-		slog.Error("read raw batch failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to read the raw batch")
+		readFailed(w, r, "failed to read the raw batch", err)
 		return
 	}
 	// Another project's id and one the sweeper has taken answer the same
@@ -173,15 +170,24 @@ func (s *Server) handleGetRawBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// As received, with the media put back where ingest factored it out
+	// (spec 041 #8): what leaves through here is the batch the client sent.
+	// Put back before the status is written, which is where a read gives its
+	// slot back (spec 043 #16): the bodies are reads like any other.
+	body := s.inlineRawMedia(r.Context(), project.ID, batch)
+	if r.Context().Err() != nil {
+		// The deadline or a hang-up cut the media reads short: the body
+		// would not be the batch the client sent, so none is sent, and the
+		// read gate answers the deadline (spec 043 #15).
+		return
+	}
 	w.Header().Set("Content-Type", batch.ContentType)
 	w.Header().Set(headerReceivedAt, formatTime(batch.ReceivedAt))
 	if batch.Dialect != "" {
 		w.Header().Set(headerDialect, batch.Dialect)
 	}
 	w.WriteHeader(http.StatusOK)
-	// As received, with the media put back where ingest factored it out
-	// (spec 041 #8): what leaves through here is the batch the client sent.
-	w.Write(s.inlineRawMedia(project.ID, batch))
+	w.Write(body)
 }
 
 // rawFilter reads the window the listing pages over. Half-open like every
@@ -230,8 +236,8 @@ func decodeRawCursor(value string) (*store.RawCursor, error) {
 // (spec 019 #4): whether it is being written, how big it is, the window it
 // covers, and the traces that fall before it — the honest edge of the promise
 // that the data can leave whole.
-func (s *Server) rawBlock(projectID string) (object, error) {
-	summary, err := s.store.RawSummary(projectID)
+func (s *Server) rawBlock(ctx context.Context, projectID string) (object, error) {
+	summary, err := s.store.RawSummary(ctx, projectID)
 	if err != nil {
 		return nil, err
 	}

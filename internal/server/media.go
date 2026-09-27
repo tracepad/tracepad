@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -18,11 +19,11 @@ import (
 
 // mediaOptions is one project's walk: its setting (#6), the Langfuse ids it
 // can resolve (#9), and where a malformed body is reported (edge cases).
-func (s *Server) mediaOptions(project *store.Project) mapping.MediaOptions {
+func (s *Server) mediaOptions(ctx context.Context, project *store.Project) mapping.MediaOptions {
 	return mapping.MediaOptions{
 		Placeholder: project.Media == store.MediaPlaceholder,
 		Resolve: func(mediaID string) (string, int64, bool) {
-			info, err := s.store.MediaByLangfuseID(project.ID, mediaID)
+			info, err := s.store.MediaByLangfuseID(ctx, project.ID, mediaID)
 			if err != nil {
 				slog.Warn("could not resolve a Langfuse media id; the reference is left as sent",
 					"project", project.Name, "media_id", mediaID, "err", err)
@@ -111,10 +112,9 @@ func (s *Server) handleGetMedia(w http.ResponseWriter, r *http.Request) {
 			fmt.Sprintf("a media id is the lower-case hex SHA-256 of the body, got %q", sha))
 		return
 	}
-	file, err := s.store.MediaFor(project.ID, sha)
+	file, err := s.store.MediaFor(r.Context(), project.ID, sha)
 	if err != nil {
-		slog.Error("read media failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to read the media")
+		readFailed(w, r, "failed to read the media", err)
 		return
 	}
 	if file == nil {
@@ -158,7 +158,7 @@ func inlineMedia(mime string) bool {
 // body (#8), so that the one reader whose consumer does not know Tracepad's
 // references — the export — sends a batch that is whole. A body with no
 // reference in it is answered as stored, without being decoded at all.
-func (s *Server) inlineRawMedia(projectID string, batch *store.RawBody) []byte {
+func (s *Server) inlineRawMedia(ctx context.Context, projectID string, batch *store.RawBody) []byte {
 	if !bytes.Contains(batch.Body, []byte(mapping.MediaRefKey)) {
 		return batch.Body
 	}
@@ -171,9 +171,13 @@ func (s *Server) inlineRawMedia(projectID string, batch *store.RawBody) []byte {
 		return batch.Body
 	}
 	changed := mapping.InlineMedia(decoded.ResourceSpans, func(sha string) (string, []byte, bool) {
-		file, err := s.store.MediaFor(projectID, sha)
+		file, err := mediaFor(s.store, ctx, projectID, sha)
 		if err != nil {
-			slog.Warn("could not read media to inline into a raw body", "sha256", sha, "err", err)
+			// A read the deadline or a hang-up ended is not a media
+			// failure, and its caller sends nothing (spec 043 #15).
+			if ctx.Err() == nil {
+				slog.Warn("could not read media to inline into a raw body", "sha256", sha, "err", err)
+			}
 			return "", nil, false
 		}
 		if file == nil {
@@ -189,10 +193,14 @@ func (s *Server) inlineRawMedia(projectID string, batch *store.RawBody) []byte {
 	return whole
 }
 
+// mediaFor is the store's, a seam for the test that holds a raw body's media
+// read past the read deadline.
+var mediaFor = (*store.Store).MediaFor
+
 // mediaBlock is what `GET /api/v1/system` says about media (#11): the
 // project's setting, and the bodies its refs hold with their bytes.
-func (s *Server) mediaBlock(project *store.Project) (object, error) {
-	summary, err := s.store.MediaSummary(project.ID)
+func (s *Server) mediaBlock(ctx context.Context, project *store.Project) (object, error) {
+	summary, err := s.store.MediaSummary(ctx, project.ID)
 	if err != nil {
 		return nil, err
 	}

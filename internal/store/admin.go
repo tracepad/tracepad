@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"time"
@@ -93,10 +94,10 @@ func cutoffFor(days *int, now int64) (int64, bool) {
 // RetentionPreview counts what the given windows would delete from a project
 // right now. It is the same arithmetic the sweeper does, which is what lets
 // the dry run promise something the next pass will keep (spec 005 #8).
-func (s *Store) RetentionPreview(projectID string, retention, raw, stats *int, now int64) (DeleteCounts, error) {
+func (s *Store) RetentionPreview(ctx context.Context, projectID string, retention, raw, stats *int, now int64) (DeleteCounts, error) {
 	var counts DeleteCounts
 	if cutoff, windowed := cutoffFor(retention, now); windowed {
-		expiring, err := s.expiredCounts(projectID, cutoff)
+		expiring, err := s.expiredCounts(ctx, projectID, cutoff)
 		if err != nil {
 			return counts, err
 		}
@@ -108,7 +109,7 @@ func (s *Store) RetentionPreview(projectID string, retention, raw, stats *int, n
 		rawWindow = retention
 	}
 	if cutoff, windowed := cutoffFor(rawWindow, now); windowed {
-		batches, oldest, err := s.expiredRawCounts(projectID, cutoff)
+		batches, oldest, err := s.expiredRawCounts(ctx, projectID, cutoff)
 		if err != nil {
 			return counts, err
 		}
@@ -131,7 +132,7 @@ func (s *Store) RetentionPreview(projectID string, retention, raw, stats *int, n
 	}
 	if traces != "" || raws != "" {
 		var err error
-		if counts.Media, counts.MediaBytes, err = s.mediaFreed(projectID, traces, traceArgs, raws, rawArgs); err != nil {
+		if counts.Media, counts.MediaBytes, err = s.mediaFreed(ctx, projectID, traces, traceArgs, raws, rawArgs); err != nil {
 			return counts, err
 		}
 	}
@@ -141,7 +142,7 @@ func (s *Store) RetentionPreview(projectID string, retention, raw, stats *int, n
 	// my history reach" (spec 013 #6).
 	if stats != nil {
 		if cutoff, windowed := cutoffFor(stats, now); windowed {
-			hours, err := s.expiredStatsHours(projectID, cutoff/1e9)
+			hours, err := s.expiredStatsHours(ctx, projectID, cutoff/1e9)
 			if err != nil {
 				return counts, err
 			}
@@ -152,9 +153,9 @@ func (s *Store) RetentionPreview(projectID string, retention, raw, stats *int, n
 }
 
 // expiredStatsHours counts the rolled hours a stats window would delete.
-func (s *Store) expiredStatsHours(projectID string, cutoffSeconds int64) (int64, error) {
+func (s *Store) expiredStatsHours(ctx context.Context, projectID string, cutoffSeconds int64) (int64, error) {
 	var hours int64
-	if err := s.db.QueryRow(
+	if err := s.db.QueryRowContext(ctx,
 		`SELECT COUNT(DISTINCT hour) FROM stats_hourly WHERE project_id = ? AND hour < ?`,
 		projectID, cutoffSeconds).Scan(&hours); err != nil {
 		return 0, fmt.Errorf("count expiring rolled hours: %w", err)
@@ -164,13 +165,13 @@ func (s *Store) expiredStatsHours(projectID string, cutoffSeconds int64) (int64,
 
 // expiredCounts counts what the trace window would take: the same predicate
 // the sweep uses, pinned traces excluded (spec 014 #13).
-func (s *Store) expiredCounts(projectID string, cutoff int64) (DeleteCounts, error) {
+func (s *Store) expiredCounts(ctx context.Context, projectID string, cutoff int64) (DeleteCounts, error) {
 	var (
 		counts DeleteCounts
 		oldest sql.NullInt64
 	)
 	const expiring = `SELECT id FROM traces t WHERE t.project_id = ? AND t.ingested_at < ? AND ` + notPinned
-	err := s.db.QueryRow(
+	err := s.db.QueryRowContext(ctx,
 		`SELECT COUNT(*), MIN(t.ingested_at) FROM traces t WHERE t.project_id = ? AND t.ingested_at < ? AND `+notPinned,
 		projectID, cutoff).Scan(&counts.Traces, &oldest)
 	if err != nil {
@@ -179,12 +180,12 @@ func (s *Store) expiredCounts(projectID string, cutoff int64) (DeleteCounts, err
 	if oldest.Valid {
 		counts.Oldest = oldest.Int64
 	}
-	if err := s.db.QueryRow(
+	if err := s.db.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM observations WHERE project_id = ? AND trace_id IN (`+expiring+`)`,
 		projectID, projectID, cutoff).Scan(&counts.Observations); err != nil {
 		return counts, fmt.Errorf("count expiring observations: %w", err)
 	}
-	if err := s.db.QueryRow(
+	if err := s.db.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM scores WHERE project_id = ? AND trace_id IN (`+expiring+`)`,
 		projectID, projectID, cutoff).Scan(&counts.Scores); err != nil {
 		return counts, fmt.Errorf("count expiring scores: %w", err)
@@ -192,12 +193,12 @@ func (s *Store) expiredCounts(projectID string, cutoff int64) (DeleteCounts, err
 	return counts, nil
 }
 
-func (s *Store) expiredRawCounts(projectID string, cutoff int64) (int64, int64, error) {
+func (s *Store) expiredRawCounts(ctx context.Context, projectID string, cutoff int64) (int64, int64, error) {
 	var (
 		batches int64
 		oldest  sql.NullInt64
 	)
-	err := s.db.QueryRow(
+	err := s.db.QueryRowContext(ctx,
 		`SELECT COUNT(*), MIN(received_at) FROM raw_batches WHERE project_id = ? AND received_at < ?`,
 		projectID, cutoff).Scan(&batches, &oldest)
 	if err != nil {
@@ -218,19 +219,19 @@ type AffectedRun struct {
 // UserDataPreview counts one user's parsed data: what an erasure request would
 // remove (spec 005 #7). It is the one preview every deletion of traces shares
 // (`tracesPreview`, spec 035 #3), asked about the traces filed under the id.
-func (s *Store) UserDataPreview(projectID, userID string) (DeleteCounts, []AffectedRun, error) {
-	return s.tracesPreview(projectID,
+func (s *Store) UserDataPreview(ctx context.Context, projectID, userID string) (DeleteCounts, []AffectedRun, error) {
+	return s.tracesPreview(ctx, projectID,
 		`SELECT id FROM traces WHERE project_id = ? AND user_id = ?`, projectID, userID)
 }
 
 // ProjectPreview counts everything a project holds: what deleting it will
 // eventually destroy, which is what the operator is being asked to confirm.
-func (s *Store) ProjectPreview(projectID string) (DeleteCounts, error) {
+func (s *Store) ProjectPreview(ctx context.Context, projectID string) (DeleteCounts, error) {
 	var (
 		counts DeleteCounts
 		oldest sql.NullInt64
 	)
-	err := s.db.QueryRow(
+	err := s.db.QueryRowContext(ctx,
 		`SELECT COUNT(*), MIN(ingested_at) FROM traces WHERE project_id = ?`, projectID).
 		Scan(&counts.Traces, &oldest)
 	if err != nil {
@@ -254,7 +255,7 @@ func (s *Store) ProjectPreview(projectID string) (DeleteCounts, error) {
 	} {
 		// The table names are this package's own constants; only the
 		// project id is bound.
-		if err := s.db.QueryRow(
+		if err := s.db.QueryRowContext(ctx,
 			`SELECT COUNT(*) FROM `+table.name+` WHERE project_id = ?`, projectID).
 			Scan(table.count); err != nil {
 			return counts, fmt.Errorf("count a project's %s: %w", table.name, err)
@@ -263,7 +264,7 @@ func (s *Store) ProjectPreview(projectID string) (DeleteCounts, error) {
 	// Every body the project holds, a ref the Langfuse channel wrote for a
 	// trace that never came included: the project stops holding all of them
 	// (spec 041 #11, #27), which is its media figure.
-	summary, err := s.MediaSummary(projectID)
+	summary, err := s.MediaSummary(ctx, projectID)
 	counts.Media, counts.MediaBytes = summary.Count, summary.Bytes
 	return counts, err
 }

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"slices"
@@ -258,7 +259,7 @@ type PromptDelete struct {
 
 func (p *PromptDelete) apply(tx *sql.Tx) error {
 	p.Counts = PromptCounts{}
-	counts, err := promptCounts(tx, p.ProjectID, p.Name)
+	counts, err := promptCounts(context.Background(), tx, p.ProjectID, p.Name)
 	if err != nil {
 		return err
 	}
@@ -287,19 +288,19 @@ func (p *PromptDelete) apply(tx *sql.Tx) error {
 
 // PromptPreview is the dry run's half: what deleting the name would take, or a
 // zero version count when the name is unknown.
-func (s *Store) PromptPreview(projectID, name string) (PromptCounts, error) {
-	return promptCounts(s.db, projectID, name)
+func (s *Store) PromptPreview(ctx context.Context, projectID, name string) (PromptCounts, error) {
+	return promptCounts(ctx, s.db, projectID, name)
 }
 
 // rows is the part of *sql.DB and *sql.Tx both counters need, so the preview
 // and the commit count the same way rather than twice.
 type rows interface {
-	QueryRow(query string, args ...any) *sql.Row
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
-func promptCounts(from rows, projectID, name string) (PromptCounts, error) {
+func promptCounts(ctx context.Context, from rows, projectID, name string) (PromptCounts, error) {
 	var counts PromptCounts
-	if err := from.QueryRow(
+	if err := from.QueryRowContext(ctx,
 		`SELECT (SELECT COUNT(*) FROM prompts WHERE project_id = ? AND name = ?),
 		        (SELECT COUNT(*) FROM prompt_labels WHERE project_id = ? AND name = ?)`,
 		projectID, name, projectID, name).Scan(&counts.Versions, &counts.Labels); err != nil {
@@ -324,11 +325,11 @@ func setPromptLabel(tx *sql.Tx, projectID, name, label string, version int) erro
 
 // Prompt resolves one version of a name, or nil when the name, the version or
 // the label does not exist.
-func (s *Store) Prompt(projectID, name string, selector PromptSelector) (*PromptVersion, error) {
+func (s *Store) Prompt(ctx context.Context, projectID, name string, selector PromptSelector) (*PromptVersion, error) {
 	version := selector.Version
 	switch {
 	case selector.Label != "":
-		err := s.db.QueryRow(
+		err := s.db.QueryRowContext(ctx,
 			`SELECT version FROM prompt_labels WHERE project_id = ? AND name = ? AND label = ?`,
 			projectID, name, selector.Label).Scan(&version)
 		if err == sql.ErrNoRows {
@@ -341,7 +342,7 @@ func (s *Store) Prompt(projectID, name string, selector PromptSelector) (*Prompt
 		// `latest` is computed, never stored (#11): the unqualified GET
 		// and ?label=latest are this one query.
 		var highest sql.NullInt64
-		if err := s.db.QueryRow(`SELECT MAX(version) FROM prompts WHERE project_id = ? AND name = ?`,
+		if err := s.db.QueryRowContext(ctx, `SELECT MAX(version) FROM prompts WHERE project_id = ? AND name = ?`,
 			projectID, name).Scan(&highest); err != nil {
 			return nil, fmt.Errorf("resolve latest version of prompt %s: %w", name, err)
 		}
@@ -357,7 +358,7 @@ func (s *Store) Prompt(projectID, name string, selector PromptSelector) (*Prompt
 		commitMessage sql.NullString
 		body          string
 	)
-	err := s.db.QueryRow(
+	err := s.db.QueryRowContext(ctx,
 		`SELECT type, prompt, config, commit_message, created_at
 		 FROM prompts WHERE project_id = ? AND name = ? AND version = ?`,
 		projectID, name, version).
@@ -373,7 +374,7 @@ func (s *Store) Prompt(projectID, name string, selector PromptSelector) (*Prompt
 	if config.Valid {
 		prompt.Config = []byte(config.String)
 	}
-	labels, err := s.promptLabelsByVersion(projectID, name)
+	labels, err := s.promptLabelsByVersion(ctx, projectID, name)
 	if err != nil {
 		return nil, err
 	}
@@ -390,7 +391,7 @@ func (s *Store) Prompt(projectID, name string, selector PromptSelector) (*Prompt
 // not only the labels of the versions on the page: the map is read whole
 // anyway, and a reader asking "where is production" must not have to page to
 // the version it happens to be on (spec 021 #12).
-func (s *Store) PromptVersions(projectID, name string, limit, afterVersion int, backward bool) ([]PromptVersionSummary, map[string]int, error) {
+func (s *Store) PromptVersions(ctx context.Context, projectID, name string, limit, afterVersion int, backward bool) ([]PromptVersionSummary, map[string]int, error) {
 	comparison, order := "<", "DESC"
 	if backward {
 		comparison, order = ">", "ASC"
@@ -405,7 +406,7 @@ func (s *Store) PromptVersions(projectID, name string, limit, afterVersion int, 
 	query += ` ORDER BY version ` + order + ` LIMIT ?`
 	args = append(args, limit)
 
-	rows, err := s.db.Query(query, args...)
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, nil, fmt.Errorf("list versions of prompt %s: %w", name, err)
 	}
@@ -431,7 +432,7 @@ func (s *Store) PromptVersions(projectID, name string, limit, afterVersion int, 
 	}
 	// One query for the name's labels, not one per version on the page: a
 	// name has a handful of labels and a page has up to 500 versions.
-	labels, err := s.promptLabelsByVersion(projectID, name)
+	labels, err := s.promptLabelsByVersion(ctx, projectID, name)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -452,7 +453,7 @@ func (s *Store) PromptVersions(projectID, name string, limit, afterVersion int, 
 // name to a page the client already read. `backward` walks towards the start
 // of the alphabet, so the listing has a far end and a page before this one
 // (spec 021 #11).
-func (s *Store) Prompts(projectID string, limit int, afterName string, backward bool) ([]PromptSummary, error) {
+func (s *Store) Prompts(ctx context.Context, projectID string, limit int, afterName string, backward bool) ([]PromptSummary, error) {
 	// GROUP BY over the primary key's own order, rather than a correlated
 	// MAX subquery evaluated once per candidate row. `type` and
 	// `created_at` are bare columns beside MAX(version), which SQLite
@@ -472,7 +473,7 @@ func (s *Store) Prompts(projectID string, limit int, afterName string, backward 
 	query += ` GROUP BY name ORDER BY name ` + order + ` LIMIT ?`
 	args = append(args, limit)
 
-	rows, err := s.db.Query(query, args...)
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list prompts: %w", err)
 	}
@@ -498,7 +499,7 @@ func (s *Store) Prompts(projectID string, limit int, afterName string, backward 
 	// The page is a contiguous run of names, so its labels come back in one
 	// query bounded by its first and last name rather than one query per
 	// name.
-	labels, err := s.promptLabelsByName(projectID, out[0].Name, out[len(out)-1].Name)
+	labels, err := s.promptLabelsByName(ctx, projectID, out[0].Name, out[len(out)-1].Name)
 	if err != nil {
 		return nil, err
 	}
@@ -514,8 +515,8 @@ func (s *Store) Prompts(projectID string, limit int, afterName string, backward 
 // points at, alphabetically within a version. A name carries a handful of
 // labels — `production`, `staging` — so reading them all at once is cheaper
 // than asking per version.
-func (s *Store) promptLabelsByVersion(projectID, name string) (map[int][]string, error) {
-	rows, err := s.db.Query(
+func (s *Store) promptLabelsByVersion(ctx context.Context, projectID, name string) (map[int][]string, error) {
+	rows, err := s.db.QueryContext(ctx,
 		`SELECT version, label FROM prompt_labels WHERE project_id = ? AND name = ?
 		 ORDER BY label`, projectID, name)
 	if err != nil {
@@ -539,8 +540,8 @@ func (s *Store) promptLabelsByVersion(projectID, name string) (map[int][]string,
 
 // promptLabelsByName returns the labels of every name in a range, each with
 // the version it points at.
-func (s *Store) promptLabelsByName(projectID, firstName, lastName string) (map[string]map[string]int, error) {
-	rows, err := s.db.Query(
+func (s *Store) promptLabelsByName(ctx context.Context, projectID, firstName, lastName string) (map[string]map[string]int, error) {
+	rows, err := s.db.QueryContext(ctx,
 		`SELECT name, label, version FROM prompt_labels
 		 WHERE project_id = ? AND name >= ? AND name <= ?`, projectID, firstName, lastName)
 	if err != nil {

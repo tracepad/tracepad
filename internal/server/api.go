@@ -97,6 +97,11 @@ var apiWrite = writeKind{
 	logged: "write failed",
 }
 
+// fullRetryAfter is how long a refusal at a bound the project has reached asks
+// the client to wait (spec 041 #31): long enough for the spans in flight to
+// settle the refs that fill it.
+const fullRetryAfter = "60"
+
 // submitFailure renders an outcome the writer already answered with. It is the
 // tail of submit, split out for the handlers that recognise one error of their
 // own before falling back to the shared shapes (spec 028: a wrong current
@@ -115,6 +120,13 @@ func submitFailure(w http.ResponseWriter, err error, kind writeKind) {
 			status = http.StatusNotFound
 		case store.RejectConflict:
 			status = http.StatusConflict
+		case store.RejectForbidden:
+			status = http.StatusForbidden
+		case store.RejectFull:
+			// Room comes back as the refs in flight settle (spec 041
+			// #31); the SDK retries a 429 after this long.
+			status = http.StatusTooManyRequests
+			w.Header().Set("Retry-After", fullRetryAfter)
 		}
 		if len(rejection.Details) == 0 {
 			writeError(w, status, rejection.Message)
@@ -369,19 +381,13 @@ func filterList(values url.Values, name string) ([]string, error) {
 		return nil, nil
 	}
 	items := strings.Split(raw, ",")
-	seen := make(map[string]bool, len(items))
-	list := make([]string, 0, len(items))
-	for _, item := range items {
-		item = strings.TrimSpace(item)
-		if item == "" {
+	for i, item := range items {
+		items[i] = strings.TrimSpace(item)
+		if items[i] == "" {
 			return nil, fmt.Errorf("%s: empty item in list", name)
 		}
-		if seen[item] {
-			continue
-		}
-		seen[item] = true
-		list = append(list, item)
 	}
+	list, over := distinctCapped(items, facetCap)
 	// A list longer than this is a `400`, not a `500` (spec 027 #20). Each
 	// item becomes one bound parameter, and SQLite's limit on those is a few
 	// tens of thousands: without the cap a long enough list reached the
@@ -392,10 +398,30 @@ func filterList(values url.Values, name string) ([]string, error) {
 	// Out of range is an error rather than a silent truncation for the reason
 	// `?limit=5000` is (#18): a client reasoning about a filter it will not
 	// get should be told.
-	if len(list) > facetCap {
+	if over {
 		return nil, fmt.Errorf("%s: at most %d values in a list", name, facetCap)
 	}
 	return list, nil
+}
+
+// distinctCapped keeps the first appearance of each item, in order, and
+// reports whether there are more than limit distinct ones — stopping as soon
+// as there are, so a list of thousands costs what its first limit+1 do. The
+// list filters and `?tag=` share it (spec 027 #20, spec 043 #17).
+func distinctCapped(items []string, limit int) (list []string, over bool) {
+	list = make([]string, 0, min(len(items), limit))
+	seen := make(map[string]bool, cap(list))
+	for _, item := range items {
+		if seen[item] {
+			continue
+		}
+		if len(list) == limit {
+			return nil, true
+		}
+		seen[item] = true
+		list = append(list, item)
+	}
+	return list, false
 }
 
 // pageSize reads `?limit` (#18). Out of range is an error rather than a silent
@@ -603,12 +629,24 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 		writeError(w, http.StatusInternalServerError, "failed to render the response")
 		return
 	}
+	writeEncoded(w, status, encoded)
+}
+
+var newline = []byte{'\n'}
+
+// writeEncoded writes a body already encoded — by writeJSON, or by a handler
+// that renders in a pass of its own, as the trace tree does (spec 043 #18).
+func writeEncoded(w http.ResponseWriter, status int, encoded []byte) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	// The newline json.Encoder ended every answer with before (spec 043 #3).
-	if _, err := w.Write(append(encoded, '\n')); err != nil {
+	// The newline json.Encoder ended every answer with before (spec 043 #3),
+	// written on its own: appended, it could copy a body of tens of
+	// megabytes to add one byte.
+	if _, err := w.Write(encoded); err != nil {
 		slog.Error("failed to write response", "err", err)
+		return
 	}
+	w.Write(newline)
 }
 
 // jsonValue reports whether raw carries a JSON value at all: an absent field

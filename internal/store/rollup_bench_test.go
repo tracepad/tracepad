@@ -135,7 +135,7 @@ func BenchmarkStatsMonth(b *testing.B) {
 	b.Run("live-scan", func(b *testing.B) {
 		for range b.N {
 			var rows int
-			err := s.StatsSamples(project.ID, StatsFilter{
+			err := s.StatsSamples(b.Context(), project.ID, StatsFilter{
 				From: &from, To: &to, GroupBy: GroupByDay,
 			}, func(StatsSample) { rows++ })
 			if err != nil {
@@ -163,7 +163,7 @@ func BenchmarkStatsMonth(b *testing.B) {
 	b.Run("rollup", func(b *testing.B) {
 		for range b.N {
 			var rows int
-			err := s.StatsRollupRows(project.ID,
+			err := s.StatsRollupRows(b.Context(), project.ID,
 				benchStartHourEpoch, benchStartHourEpoch+int64(benchHours)*SecondsPerHour, nil,
 				func(StatsRow) { rows++ })
 			if err != nil {

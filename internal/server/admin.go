@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -196,10 +197,9 @@ func (s *Server) handleListProjects(w http.ResponseWriter, r *http.Request) {
 	)
 	switch {
 	case c.admin:
-		projects, err = s.store.ListProjects(includeDeleted)
+		projects, err = s.store.ListProjects(r.Context(), includeDeleted)
 		if err != nil {
-			slog.Error("list projects failed", "err", err)
-			writeError(w, http.StatusInternalServerError, "failed to read the projects")
+			readFailed(w, r, "failed to read the projects", err)
 			return
 		}
 	case c.isSession():
@@ -208,10 +208,9 @@ func (s *Server) handleListProjects(w http.ResponseWriter, r *http.Request) {
 		// A member's is `me.projects`, which never holds a soft-deleted
 		// one (spec 028, edge cases).
 		if c.account.Owner {
-			projects, err = s.store.ListProjects(includeDeleted)
+			projects, err = s.store.ListProjects(r.Context(), includeDeleted)
 			if err != nil {
-				slog.Error("list projects failed", "err", err)
-				writeError(w, http.StatusInternalServerError, "failed to read the projects")
+				readFailed(w, r, "failed to read the projects", err)
 				return
 			}
 			roles = make(map[string]string, len(projects))
@@ -220,10 +219,9 @@ func (s *Server) handleListProjects(w http.ResponseWriter, r *http.Request) {
 			}
 			break
 		}
-		reachable, err := s.store.Memberships(c.account.ID)
+		reachable, err := s.store.Memberships(r.Context(), c.account.ID)
 		if err != nil {
-			slog.Error("list projects failed", "err", err)
-			writeError(w, http.StatusInternalServerError, "failed to read the projects")
+			readFailed(w, r, "failed to read the projects", err)
 			return
 		}
 		roles = make(map[string]string, len(reachable))
@@ -248,6 +246,14 @@ func (s *Server) handleListProjects(w http.ResponseWriter, r *http.Request) {
 		projects = []*store.Project{c.project}
 	}
 
+	var lastDay map[string]int64
+	if withActivity {
+		var err error
+		if lastDay, err = s.tracesLastDay(r.Context(), projects); err != nil {
+			readFailed(w, r, "failed to read the projects", err)
+			return
+		}
+	}
 	rendered := make([]object, 0, len(projects))
 	for _, project := range projects {
 		body := projectResponse(project)
@@ -255,36 +261,30 @@ func (s *Server) handleListProjects(w http.ResponseWriter, r *http.Request) {
 			body = body.put("role", role)
 		}
 		if withActivity {
-			count, err := s.tracesLastDay(project)
-			if err != nil {
-				slog.Error("count the day's traces failed", "err", err)
-				writeError(w, http.StatusInternalServerError, "failed to read the projects")
-				return
-			}
-			body = body.put("traces_24h", count)
+			body = body.put("traces_24h", lastDay[project.ID])
 		}
 		rendered = append(rendered, body)
 	}
 	writeJSON(w, http.StatusOK, object{}.put("projects", rendered))
 }
 
-// tracesLastDay counts a project's traces of the last 24 hours the way
-// `GET /api/v1/stats` counts them (spec 029 #8): the rolled hours behind the
-// watermark and the raw rows for the tail, so the number costs what one stats
-// call costs and trails live traffic by the same lag. A soft-deleted project
-// is not there as far as a person is concerned, and its count says so.
-func (s *Server) tracesLastDay(project *store.Project) (int64, error) {
-	if project.Deleted() {
-		return 0, nil
+// tracesLastDay counts each project's traces of the last 24 hours (spec 029
+// #8), in one statement for the whole listing: one stats read per project put
+// a listing's cost in its length, and a deployment of many projects past the
+// read deadline, answered with advice to narrow a request that has nothing to
+// narrow (spec 043 #29). The raw rows of the last day are always there — no
+// window is shorter than a day — so the count is the one the stats seam gives.
+// A soft-deleted project is not there as far as a person is concerned, and
+// its count says so.
+func (s *Server) tracesLastDay(ctx context.Context, projects []*store.Project) (map[string]int64, error) {
+	ids := make([]string, 0, len(projects))
+	for _, project := range projects {
+		if !project.Deleted() {
+			ids = append(ids, project.ID)
+		}
 	}
 	now := time.Now()
-	from, to := now.Add(-24*time.Hour).UnixNano(), now.UnixNano()
-	// One bucket for every key: only the count is read, and a day split
-	// over two calendar dates is still one day of traces.
-	var tally bucket
-	err := s.readStats(project, store.StatsFilter{From: &from, To: &to, GroupBy: defaultGroupBy},
-		func(string) *bucket { return &tally })
-	return tally.count, err
+	return s.store.TracesBetween(ctx, ids, now.Add(-24*time.Hour).UnixNano(), now.UnixNano())
 }
 
 // handleCreateProject mints a project and its first key pair. The secret is in
@@ -438,11 +438,13 @@ func (s *Server) handlePatchProject(w http.ResponseWriter, r *http.Request) {
 	confirm := values.Get("confirm")
 	if confirm == "" {
 		retention, rawWindow, statsWindow := update.Windows(project)
-		counts, err := s.store.RetentionPreview(
-			project.ID, retention, rawWindow, statsWindow, time.Now().UnixNano())
-		if err != nil {
-			slog.Error("retention preview failed", "err", err)
-			writeError(w, http.StatusInternalServerError, "failed to read what the new window would delete")
+		var counts store.DeleteCounts
+		if !s.readInSlot(w, r, "failed to read what the new window would delete",
+			func(ctx context.Context) (err error) {
+				counts, err = s.store.RetentionPreview(ctx,
+					project.ID, retention, rawWindow, statsWindow, time.Now().UnixNano())
+				return err
+			}) {
 			return
 		}
 		writeJSON(w, http.StatusOK, dryRun(project.Name, counts,
@@ -490,10 +492,12 @@ func (s *Server) handleDeleteProject(w http.ResponseWriter, r *http.Request) {
 
 	confirm := values.Get("confirm")
 	if confirm == "" {
-		counts, err := s.store.ProjectPreview(project.ID)
-		if err != nil {
-			slog.Error("project preview failed", "err", err)
-			writeError(w, http.StatusInternalServerError, "failed to read what the project holds")
+		var counts store.DeleteCounts
+		if !s.readInSlot(w, r, "failed to read what the project holds",
+			func(ctx context.Context) (err error) {
+				counts, err = s.store.ProjectPreview(ctx, project.ID)
+				return err
+			}) {
 			return
 		}
 		writeJSON(w, http.StatusOK, dryRun(project.Name, counts,
@@ -565,10 +569,9 @@ func (s *Server) handleListKeys(w http.ResponseWriter, r *http.Request) {
 	}
 	// Before the stored times, never after: see `unwritten`.
 	unwritten := s.keyUses.unwritten()
-	keys, err := s.store.ProjectKeys(project.ID)
+	keys, err := s.store.ProjectKeys(r.Context(), project.ID)
 	if err != nil {
-		slog.Error("list keys failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to read the keys")
+		readFailed(w, r, "failed to read the keys", err)
 		return
 	}
 	rendered := make([]object, 0, len(keys))
@@ -731,10 +734,9 @@ func (s *Server) handleRevokeKey(w http.ResponseWriter, r *http.Request) {
 	}
 	publicKey := r.PathValue("public_key")
 
-	keys, err := s.store.ProjectKeyIDs(project.ID)
+	keys, err := s.store.ProjectKeyIDs(r.Context(), project.ID)
 	if err != nil {
-		slog.Error("list keys failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to read the keys")
+		readFailed(w, r, "failed to read the keys", err)
 		return
 	}
 	known := false
@@ -796,10 +798,15 @@ func (s *Server) handleEraseUserData(w http.ResponseWriter, r *http.Request) {
 	// a read that failed would 500 a request that was going to succeed —
 	// the count is what the caller is told, never what the erasure needs.
 	if values.Get("confirm") == "" {
-		counts, runs, err := s.store.UserDataPreview(project.ID, userID)
-		if err != nil {
-			slog.Error("user data preview failed", "err", err)
-			writeError(w, http.StatusInternalServerError, "failed to read what this user's data is")
+		var (
+			counts store.DeleteCounts
+			runs   []store.AffectedRun
+		)
+		if !s.readInSlot(w, r, "failed to read what this user's data is",
+			func(ctx context.Context) (err error) {
+				counts, runs, err = s.store.UserDataPreview(ctx, project.ID, userID)
+				return err
+			}) {
 			return
 		}
 		// Erasure overrides the pin a run puts on its traces (spec 014

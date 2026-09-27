@@ -114,7 +114,7 @@ func (s *Server) handleRunItems(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	run, ok := s.loadRun(w, project.ID, id)
+	run, ok := s.loadRun(w, r, project.ID, id)
 	if !ok {
 		return
 	}
@@ -135,10 +135,9 @@ func (s *Server) handleRunItems(w http.ResponseWriter, r *http.Request) {
 		filter.After = &store.RunItemCursor{Bucket: bucket, Key: parts[1]}
 	}
 
-	items, err := s.store.RunItems(project.ID, run, filter)
+	items, err := s.store.RunItems(r.Context(), project.ID, run, filter)
 	if err != nil {
-		slog.Error("read run items failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to read the run's items")
+		readFailed(w, r, "failed to read the run's items", err)
 		return
 	}
 	items, prev, next := trimPage(items, limit, backward, raw, func(item *store.RunItem) string {
@@ -332,11 +331,11 @@ func (s *Server) handleCompareRuns(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "a run cannot be compared with itself")
 		return
 	}
-	a, ok := s.loadRun(w, project.ID, first)
+	a, ok := s.loadRun(w, r, project.ID, first)
 	if !ok {
 		return
 	}
-	b, ok := s.loadRun(w, project.ID, second)
+	b, ok := s.loadRun(w, r, project.ID, second)
 	if !ok {
 		return
 	}
@@ -348,34 +347,29 @@ func (s *Server) handleCompareRuns(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	summaryA, err := s.store.RunSummary(project.ID, a)
+	summaryA, err := s.store.RunSummary(r.Context(), project.ID, a)
 	if err != nil {
-		slog.Error("read run summary failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to summarize the runs")
+		readFailed(w, r, "failed to summarize the runs", err)
 		return
 	}
-	summaryB, err := s.store.RunSummary(project.ID, b)
+	summaryB, err := s.store.RunSummary(r.Context(), project.ID, b)
 	if err != nil {
-		slog.Error("read run summary failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to summarize the runs")
+		readFailed(w, r, "failed to summarize the runs", err)
 		return
 	}
-	valuesA, err := s.store.RunValues(project.ID, a.ID)
+	valuesA, err := s.store.RunValues(r.Context(), project.ID, a.ID)
 	if err != nil {
-		slog.Error("read run values failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to compare the runs")
+		readFailed(w, r, "failed to compare the runs", err)
 		return
 	}
-	valuesB, err := s.store.RunValues(project.ID, b.ID)
+	valuesB, err := s.store.RunValues(r.Context(), project.ID, b.ID)
 	if err != nil {
-		slog.Error("read run values failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to compare the runs")
+		readFailed(w, r, "failed to compare the runs", err)
 		return
 	}
-	items, err := s.store.CompareItems(project.ID, a, b)
+	items, err := s.store.CompareItems(r.Context(), project.ID, a, b)
 	if err != nil {
-		slog.Error("compare items failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to compare the runs")
+		readFailed(w, r, "failed to compare the runs", err)
 		return
 	}
 

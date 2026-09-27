@@ -134,7 +134,7 @@ func TestCompactionTakesADeletedTraceOutOfTheFile(t *testing.T) {
 	if err := f.sweeper.Pass(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if state, err := f.store.Compaction(); err != nil || state.RequestedAt != 0 {
+	if state, err := f.store.Compaction(t.Context()); err != nil || state.RequestedAt != 0 {
 		t.Fatalf("after the first pass: %+v, %v; want nothing pending", state, err)
 	}
 
@@ -164,7 +164,7 @@ func TestCompactionTakesADeletedTraceOutOfTheFile(t *testing.T) {
 	if err := f.writer.Submit(t.Context(), del); err != nil {
 		t.Fatal(err)
 	}
-	state, err := f.store.Compaction()
+	state, err := f.store.Compaction(t.Context())
 	if err != nil || state.RequestedAt == 0 {
 		t.Fatalf("after a deletion: %+v, %v; want a pending request", state, err)
 	}
@@ -175,7 +175,7 @@ func TestCompactionTakesADeletedTraceOutOfTheFile(t *testing.T) {
 	if held := filesHolding(t, f.store.path, tail); len(held) != 0 {
 		t.Errorf("the deleted trace's text is still in %v after the compaction", held)
 	}
-	state, err = f.store.Compaction()
+	state, err = f.store.Compaction(t.Context())
 	if err != nil || state.RequestedAt != 0 || state.CompletedAt != sweepNow.UnixNano() {
 		t.Errorf("after the pass: %+v, %v; want the request cleared and completed at the pass", state, err)
 	}
@@ -197,7 +197,7 @@ func TestTheRetentionSweepDoesNotAskForACompaction(t *testing.T) {
 	if err := f.store.db.QueryRow(`SELECT count(*) FROM traces`).Scan(&n); err != nil || n != 0 {
 		t.Fatalf("the sweep left %d traces (%v)", n, err)
 	}
-	if state, _ := f.store.Compaction(); state.RequestedAt != 0 {
+	if state, _ := f.store.Compaction(t.Context()); state.RequestedAt != 0 {
 		t.Errorf("the retention sweep requested a compaction: %+v", state)
 	}
 }
@@ -227,7 +227,7 @@ func TestABusyCheckpointLeavesTheRequestPending(t *testing.T) {
 	if done {
 		t.Fatal("the compaction reported done while a reader held the log")
 	}
-	state, _ := f.store.Compaction()
+	state, _ := f.store.Compaction(t.Context())
 	if state.RequestedAt == 0 {
 		t.Fatal("the request was cleared although the checkpoint did not finish")
 	}
@@ -355,7 +355,7 @@ func TestAnErasureOfOnlyTheRollupAsksForACompaction(t *testing.T) {
 	if err := f.writer.Submit(t.Context(), erase); err != nil {
 		t.Fatal(err)
 	}
-	state, _ := f.store.Compaction()
+	state, _ := f.store.Compaction(t.Context())
 	// Stamped on the erasure's own clock, the one it measures everything
 	// else by, not the wall clock beside it.
 	if erase.CompactionRequested != erase.Now || state.RequestedAt != erase.CompactionRequested {
@@ -427,7 +427,7 @@ func TestADeletionWithoutTheCompactionRowStillCommits(t *testing.T) {
 	if err := f.writer.Submit(t.Context(), job); err != nil {
 		t.Fatalf("the deletion failed without the row: %v", err)
 	}
-	if state, _ := f.store.Compaction(); job.CompactionRequested == 0 || state.RequestedAt != job.CompactionRequested {
+	if state, _ := f.store.Compaction(t.Context()); job.CompactionRequested == 0 || state.RequestedAt != job.CompactionRequested {
 		t.Errorf("CompactionRequested = %d, state = %+v; want the row back with the request", job.CompactionRequested, state)
 	}
 }
@@ -482,13 +482,13 @@ func TestACompactionClearsOnlyTheRequestItStartedFrom(t *testing.T) {
 	if err := f.writer.Submit(t.Context(), &compactionDone{Started: 100, At: 300}); err != nil {
 		t.Fatal(err)
 	}
-	if state, _ := f.store.Compaction(); state.RequestedAt != 200 || state.CompletedAt != 300 {
+	if state, _ := f.store.Compaction(t.Context()); state.RequestedAt != 200 || state.CompletedAt != 300 {
 		t.Errorf("a request newer than the compaction: %+v, want it pending and the completion stamped", state)
 	}
 	if err := f.writer.Submit(t.Context(), &compactionDone{Started: 200, At: 400}); err != nil {
 		t.Fatal(err)
 	}
-	if state, _ := f.store.Compaction(); state.RequestedAt != 0 || state.CompletedAt != 400 {
+	if state, _ := f.store.Compaction(t.Context()); state.RequestedAt != 0 || state.CompletedAt != 400 {
 		t.Errorf("the request the compaction started from: %+v, want it cleared", state)
 	}
 }
@@ -503,13 +503,13 @@ func TestARequestSurvivesAClockThatStepsBack(t *testing.T) {
 	if late <= started {
 		t.Fatalf("the later request was stamped %d, not after %d", late, started)
 	}
-	if state, _ := f.store.Compaction(); state.RequestedAt != late {
+	if state, _ := f.store.Compaction(t.Context()); state.RequestedAt != late {
 		t.Errorf("stored %d, the request answered %d: they must be the same stamp", state.RequestedAt, late)
 	}
 	if err := f.writer.Submit(t.Context(), &compactionDone{Started: started, At: 2_000_000}); err != nil {
 		t.Fatal(err)
 	}
-	if state, _ := f.store.Compaction(); state.RequestedAt != late {
+	if state, _ := f.store.Compaction(t.Context()); state.RequestedAt != late {
 		t.Errorf("after the compaction: %+v, want the later request still pending", state)
 	}
 }
@@ -518,7 +518,7 @@ func TestARequestSurvivesAClockThatStepsBack(t *testing.T) {
 // left; a new store has deleted nothing and starts with none (#18).
 func TestOnlyAnUpgradedStoreStartsWithACompactionPending(t *testing.T) {
 	s, path := openTemp(t)
-	if state, _ := s.Compaction(); state.RequestedAt != 0 {
+	if state, _ := s.Compaction(t.Context()); state.RequestedAt != 0 {
 		t.Errorf("a new store: %+v, want nothing pending", state)
 	}
 	pendingAgain(t, s, false)
@@ -529,7 +529,7 @@ func TestOnlyAnUpgradedStoreStartsWithACompactionPending(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer upgraded.Close()
-	if state, _ := upgraded.Compaction(); state.RequestedAt == 0 {
+	if state, _ := upgraded.Compaction(t.Context()); state.RequestedAt == 0 {
 		t.Errorf("an upgraded store: %+v, want the migration's request pending", state)
 	}
 }

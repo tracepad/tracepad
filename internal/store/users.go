@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -263,9 +264,9 @@ func userCountQuery(projectID string, filter UserFilter, cap int) (string, []any
 }
 
 // Users lists a project's users in the order the filter asks for.
-func (s *Store) Users(projectID string, filter UserFilter) ([]*UserRow, error) {
+func (s *Store) Users(ctx context.Context, projectID string, filter UserFilter) ([]*UserRow, error) {
 	query, args := userQuery(projectID, filter)
-	rows, err := s.db.Query(query, args...)
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list users: %w", err)
 	}
@@ -291,10 +292,10 @@ func (s *Store) Users(projectID string, filter UserFilter) ([]*UserRow, error) {
 }
 
 // CountUsers answers "how many users match", stopping at `cap`.
-func (s *Store) CountUsers(projectID string, filter UserFilter, cap int) (int, error) {
+func (s *Store) CountUsers(ctx context.Context, projectID string, filter UserFilter, cap int) (int, error) {
 	query, args := userCountQuery(projectID, filter, cap)
 	var count int
-	if err := s.db.QueryRow(query, args...).Scan(&count); err != nil {
+	if err := s.db.QueryRowContext(ctx, query, args...).Scan(&count); err != nil {
 		return 0, fmt.Errorf("count users: %w", err)
 	}
 	return count, nil
@@ -331,8 +332,8 @@ func scanUserRow(row scanner) (*UserRow, error) {
 // key on it (spec 023 #3) — and it has no notion of a watermark. One user's
 // hours are an index seek, which is what the page can afford and the listing
 // cannot.
-func (s *Store) UserRollup(projectID, userID string, beforeHour int64) (*UserSummary, error) {
-	rows, err := s.db.Query(
+func (s *Store) UserRollup(ctx context.Context, projectID, userID string, beforeHour int64) (*UserSummary, error) {
+	rows, err := s.db.QueryContext(ctx,
 		// Trace-unit rows only: an observation row is one model of one of
 		// those traces, and summing both would count every trace twice.
 		`SELECT hour, count, error_count, total_cost, latency, sessions_started
@@ -387,8 +388,8 @@ func (s *Store) UserRollup(projectID, userID string, beforeHour int64) (*UserSum
 // UserSummaryRow is the stored summary of one user, or nil when there is none.
 // The listing's own row, read by id — what the tests check the recompute
 // against, and nothing on the read path uses.
-func (s *Store) UserSummaryRow(projectID, userID string) (*UserRow, error) {
-	row, err := scanUserRow(s.db.QueryRow(
+func (s *Store) UserSummaryRow(ctx context.Context, projectID, userID string) (*UserRow, error) {
+	row, err := scanUserRow(s.db.QueryRowContext(ctx,
 		`SELECT `+userColumns+` FROM users WHERE project_id = ? AND user_id = ?`,
 		projectID, userID))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -405,9 +406,9 @@ func (s *Store) UserSummaryRow(projectID, userID string) (*UserRow, error) {
 // The instants here are exact rather than hourly, which is the point: a user
 // first seen minutes ago is not in the listing yet, and this page still says
 // when.
-func (s *Store) UserTail(projectID, userID string, fromNanos int64) (*UserSummary, error) {
+func (s *Store) UserTail(ctx context.Context, projectID, userID string, fromNanos int64) (*UserSummary, error) {
 	summary := &UserSummary{UserRow: UserRow{UserID: userID}}
-	rows, err := s.db.Query(
+	rows, err := s.db.QueryContext(ctx,
 		`SELECT error_count > 0, total_cost, latency_ms, timestamp
 		 FROM traces
 		 WHERE project_id = ? AND user_id = ? AND timestamp >= ?`,
@@ -454,7 +455,7 @@ func (s *Store) UserTail(projectID, userID string, fromNanos int64) (*UserSummar
 	// The same predicate the rollup counts by, so that the two halves cannot
 	// count one session twice: a session belongs to the hour its earliest
 	// trace of this user is in, wherever the rest of it falls.
-	if err := s.db.QueryRow(
+	if err := s.db.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM traces t
 		 WHERE `+sessionStartCondition+` AND t.user_id = ? AND t.timestamp >= ?`,
 		projectID, userID, fromNanos).Scan(&summary.Sessions); err != nil {
@@ -502,7 +503,7 @@ const sessionStartCondition = `t.project_id = ?
 // PR #42). Whether a session *started* is still decided over the whole of it:
 // a session that began in staging and continued in production began in
 // staging, on both sides of the seam.
-func (s *Store) UserSessionStarts(projectID, userID string, environment []string, from, to int64, yield func(int64)) error {
+func (s *Store) UserSessionStarts(ctx context.Context, projectID, userID string, environment []string, from, to int64, yield func(int64)) error {
 	query := `SELECT t.timestamp FROM traces t
 	          WHERE ` + sessionStartCondition + `
 	            AND t.user_id = ? AND t.timestamp >= ? AND t.timestamp < ?`
@@ -511,7 +512,7 @@ func (s *Store) UserSessionStarts(projectID, userID string, environment []string
 		query += ` AND ` + clause
 		args = append(args, bound...)
 	}
-	rows, err := s.db.Query(query, args...)
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("read a user's session starts: %w", err)
 	}
@@ -529,7 +530,7 @@ func (s *Store) UserSessionStarts(projectID, userID string, environment []string
 // UsersRollupRows reads one user's rolled rows over a half-open hour range,
 // oldest first — the rolled half of `/stats?user_id=` (spec 023 #6). It is
 // `StatsRollupRows` with the user in the seek, riding `idx_users_hourly_user`.
-func (s *Store) UsersRollupRows(projectID, userID string, fromHour, toHour int64,
+func (s *Store) UsersRollupRows(ctx context.Context, projectID, userID string, fromHour, toHour int64,
 	environment []string, yield func(UserStatsRow)) error {
 	query := `SELECT hour, environment, release, model, count, error_count,
 	                 total_cost, latency, sessions_started
@@ -542,7 +543,7 @@ func (s *Store) UsersRollupRows(projectID, userID string, fromHour, toHour int64
 	}
 	query += ` ORDER BY hour`
 
-	rows, err := s.db.Query(query, args...)
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("read the user rollup: %w", err)
 	}
@@ -570,8 +571,8 @@ func (s *Store) UsersRollupRows(projectID, userID string, fromHour, toHour int64
 
 // UsersRollupHours reports which hours of a project hold per-user rows. The
 // tests ask; nothing on the read path needs it.
-func (s *Store) UsersRollupHours(projectID string) ([]int64, error) {
-	rows, err := s.db.Query(
+func (s *Store) UsersRollupHours(ctx context.Context, projectID string) ([]int64, error) {
+	rows, err := s.db.QueryContext(ctx,
 		`SELECT DISTINCT hour FROM users_hourly WHERE project_id = ? ORDER BY hour`, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("read the rolled user hours: %w", err)

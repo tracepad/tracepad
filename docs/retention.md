@@ -355,7 +355,11 @@ trace by id, or every trace a listing filter matches before a moment
 takes and by the same path — the traces, their observations, payloads,
 scores, search entries and queue items, the hours re-rolled in the same
 transaction, a run's pin overridden — so every promise on this page about
-what outlives what holds for a deletion as it holds for an erasure. The bulk
+what outlives what holds for a deletion as it holds for an erasure. Both void
+the media upload URLs for the traces they remove, and refuse new ones, for the
+hour such a URL lives ([media.md](media.md#the-langfuse-sdks-media-channel)): an upload in
+transit for an erased trace would otherwise store its picture after the
+erasure had answered. The bulk
 form works in rounds of at most a thousand traces and fifty one-hour chunks,
 each chunk a transaction of its own, so a round cut off leaves nothing
 half-deleted and the next request continues. In

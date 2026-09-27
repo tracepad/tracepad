@@ -2,7 +2,6 @@ package server
 
 import (
 	"fmt"
-	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -69,10 +68,9 @@ func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 		filter.After = cursor
 	}
 
-	sessions, err := s.store.Sessions(project.ID, filter)
+	sessions, err := s.store.Sessions(r.Context(), project.ID, filter)
 	if err != nil {
-		slog.Error("list sessions failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to list sessions")
+		readFailed(w, r, "failed to list sessions", err)
 		return
 	}
 
@@ -89,10 +87,9 @@ func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 		put("next_cursor", next).
 		put("prev_cursor", prev)
 	if counting {
-		total, err := s.store.CountSessions(project.ID, filter, countCap+1)
+		total, err := s.store.CountSessions(r.Context(), project.ID, filter, countCap+1)
 		if err != nil {
-			slog.Error("count sessions failed", "err", err)
-			writeError(w, http.StatusInternalServerError, "failed to count sessions")
+			readFailed(w, r, "failed to count sessions", err)
 			return
 		}
 		value, stopped := capped(total)
@@ -189,10 +186,9 @@ func (s *Server) handleGetSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	session, err := s.store.Session(project.ID, id)
+	session, err := s.store.Session(r.Context(), project.ID, id)
 	if err != nil {
-		slog.Error("read session failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to read the session")
+		readFailed(w, r, "failed to read the session", err)
 		return
 	}
 	if session == nil {
@@ -210,10 +206,9 @@ func (s *Server) handleGetSession(w http.ResponseWriter, r *http.Request) {
 		}
 		filter.After = cursor
 	}
-	traces, err := s.store.Traces(project.ID, filter)
+	traces, err := s.store.Traces(r.Context(), project.ID, filter)
 	if err != nil {
-		slog.Error("list session traces failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to list the session's traces")
+		readFailed(w, r, "failed to list the session's traces", err)
 		return
 	}
 

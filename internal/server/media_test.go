@@ -226,7 +226,7 @@ func TestMediaPlaceholderSetting(t *testing.T) {
 		t.Errorf("input = %s, want a reference with stored: false", input)
 	}
 	expectStatus(t, h.get(t, "/api/v1/media/"+hexSHA(picture)), 404)
-	if summary, err := h.store.MediaSummary(h.project.ID); err != nil || summary.Count != 0 {
+	if summary, err := h.store.MediaSummary(t.Context(), h.project.ID); err != nil || summary.Count != 0 {
 		t.Errorf("media under the placeholder setting = %+v, %v", summary, err)
 	}
 }
@@ -235,7 +235,7 @@ func TestMediaPlaceholderSetting(t *testing.T) {
 // project that is the only one to have sent it, is whether it is stored.
 func (h *harness) mediaHeld(t *testing.T, sha string) bool {
 	t.Helper()
-	file, err := h.store.MediaFor(h.project.ID, sha)
+	file, err := h.store.MediaFor(t.Context(), h.project.ID, sha)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -422,7 +422,7 @@ func TestLangfuseMediaUploadSurvivesRestart(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		project, err := st.ProjectByName("test")
+		project, err := st.ProjectByName(t.Context(), "test")
 		if err == nil && project == nil {
 			project, err = st.CreateProject("test", store.KeyPair{PublicKey: testPublic, Secret: testSecret})
 		}

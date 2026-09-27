@@ -66,7 +66,7 @@ func TestOurPackagesExportsLandWhole(t *testing.T) {
 			}
 			expectStatus(t, h.post(t, "/v1/traces", body), http.StatusOK)
 
-			trace, err := h.store.Trace(h.project.ID, tc.trace)
+			trace, err := h.store.Trace(t.Context(), h.project.ID, tc.trace)
 			if err != nil || trace == nil {
 				t.Fatalf("trace = %v, err = %v", trace, err)
 			}
@@ -80,7 +80,7 @@ func TestOurPackagesExportsLandWhole(t *testing.T) {
 				t.Errorf("total_cost = %v, want the cost the provider charged", trace.TotalCost)
 			}
 
-			observations, err := h.store.Observations(h.project.ID, tc.trace, store.WithIO)
+			observations, err := h.store.Observations(t.Context(), h.project.ID, tc.trace, store.WithIO)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -126,7 +126,7 @@ func TestOurPackagesExportsLandWhole(t *testing.T) {
 			if tc.linked == "" {
 				return
 			}
-			linked, err := h.store.Trace(h.project.ID, tc.linked)
+			linked, err := h.store.Trace(t.Context(), h.project.ID, tc.linked)
 			if err != nil || linked == nil {
 				t.Fatalf("linked trace = %v, err = %v", linked, err)
 			}

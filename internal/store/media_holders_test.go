@@ -71,11 +71,11 @@ func TestMediaTypePerProject(t *testing.T) {
 		{f.project.ID, "image/png", daysAgo(3)},
 		{other.ID, "image/webp", daysAgo(1)},
 	} {
-		file, err := f.store.MediaFor(c.project, x.SHA256)
+		file, err := f.store.MediaFor(t.Context(), c.project, x.SHA256)
 		if err != nil || file == nil || file.MimeType != c.mime || len(file.Body) != 4096 {
 			t.Errorf("MediaFor(%s) = %+v, %v; want %s", c.project, file, err, c.mime)
 		}
-		info, err := f.store.MediaByLangfuseID(c.project, MediaIDFor(x.SHA256))
+		info, err := f.store.MediaByLangfuseID(t.Context(), c.project, MediaIDFor(x.SHA256))
 		if err != nil || info == nil {
 			t.Fatalf("MediaByLangfuseID(%s) = %+v, %v", c.project, info, err)
 		}
@@ -120,8 +120,8 @@ func TestMediaHoldersFollowRefs(t *testing.T) {
 	f.checkHolders(t, "a resolved ingest")
 
 	for _, upload := range []*MediaUpload{
-		{ProjectID: f.project.ID, TraceID: hexTrace(4), Body: uploaded, Now: daysAgo(1)},
-		{ProjectID: other.ID, TraceID: hexTrace(5), Body: orphan, Now: daysAgo(3)},
+		uploadOf(f.project.ID, hexTrace(4), "tp-pk-test", uploaded, daysAgo(1)),
+		uploadOf(other.ID, hexTrace(5), "tp-pk-other", orphan, daysAgo(3)),
 	} {
 		if err := f.writer.Submit(t.Context(), upload); err != nil {
 			t.Fatal(err)
@@ -129,8 +129,8 @@ func TestMediaHoldersFollowRefs(t *testing.T) {
 	}
 	f.checkHolders(t, "the upload")
 	add := &MediaRefAdd{ProjectID: f.project.ID, SHA256: uploaded.SHA256, TraceID: hexTrace(6)}
-	if err := f.writer.Submit(t.Context(), add); err != nil || !add.Added {
-		t.Fatalf("null answer = %v, %v", add.Added, err)
+	if err := f.writer.Submit(t.Context(), add); err != nil || !add.Held {
+		t.Fatalf("null answer = %v, %v", add.Held, err)
 	}
 	f.checkHolders(t, "the null answer")
 
@@ -265,13 +265,13 @@ func TestMediaMissingHoldIsRestored(t *testing.T) {
 	if _, err := f.store.db.Exec(`DELETE FROM media_holders WHERE project_id = ?`, b.ID); err != nil {
 		t.Fatal(err)
 	}
-	if file, err := f.store.MediaFor(b.ID, x.SHA256); err != nil || file != nil {
+	if file, err := f.store.MediaFor(t.Context(), b.ID, x.SHA256); err != nil || file != nil {
 		t.Errorf("a ref with no hold read the body: %+v, %v", file, err)
 	}
 	if err := f.sweeper.Pass(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	file, err := f.store.MediaFor(b.ID, x.SHA256)
+	file, err := f.store.MediaFor(t.Context(), b.ID, x.SHA256)
 	if err != nil || file == nil || file.MimeType != "application/octet-stream" {
 		t.Errorf("after the sweep B reads %+v, %v; want its body as application/octet-stream", file, err)
 	}
@@ -311,10 +311,10 @@ func TestMediaStaleHoldIsSwept(t *testing.T) {
 		VALUES (?, ?, 'image/png', 1)`, x.SHA256, b.ID); err != nil {
 		t.Fatal(err)
 	}
-	if file, err := f.store.MediaFor(b.ID, x.SHA256); err != nil || file != nil {
+	if file, err := f.store.MediaFor(t.Context(), b.ID, x.SHA256); err != nil || file != nil {
 		t.Errorf("a hold with no ref read the body: %+v, %v", file, err)
 	}
-	if summary, err := f.store.MediaSummary(b.ID); err != nil || summary.Count != 0 {
+	if summary, err := f.store.MediaSummary(t.Context(), b.ID); err != nil || summary.Count != 0 {
 		t.Errorf("a hold with no ref is counted: %+v, %v", summary, err)
 	}
 	if err := f.sweeper.Pass(t.Context()); err != nil {
@@ -323,7 +323,7 @@ func TestMediaStaleHoldIsSwept(t *testing.T) {
 	if got := f.count(t, `SELECT COUNT(*) FROM media_holders WHERE project_id = ?`, b.ID); got != 0 {
 		t.Errorf("%d stale holds survive the sweep", got)
 	}
-	if file, err := f.store.MediaFor(f.project.ID, x.SHA256); err != nil || file == nil {
+	if file, err := f.store.MediaFor(t.Context(), f.project.ID, x.SHA256); err != nil || file == nil {
 		t.Fatalf("the sweep took the holding project's body: %v", err)
 	}
 	f.checkHolders(t, "the sweep")
@@ -370,14 +370,14 @@ func TestMediaRawOnlyHoldIsScoped(t *testing.T) {
 	if f.count(t, `SELECT COUNT(*) FROM media_refs`) != 0 {
 		t.Fatal("the trace's ref survived the erasure")
 	}
-	if file, err := f.store.MediaFor(b.ID, x.SHA256); err != nil || file == nil {
+	if file, err := f.store.MediaFor(t.Context(), b.ID, x.SHA256); err != nil || file == nil {
 		t.Fatalf("B lost its raw-only body: %v", err)
 	}
 	for _, sha := range []string{x.SHA256, mediaBody(46, 10).SHA256} {
-		if file, err := f.store.MediaFor(f.project.ID, sha); err != nil || file != nil {
+		if file, err := f.store.MediaFor(t.Context(), f.project.ID, sha); err != nil || file != nil {
 			t.Errorf("A read %s: %+v, %v", sha[:8], file, err)
 		}
-		if info, err := f.store.MediaByLangfuseID(f.project.ID, MediaIDFor(sha)); err != nil || info != nil {
+		if info, err := f.store.MediaByLangfuseID(t.Context(), f.project.ID, MediaIDFor(sha)); err != nil || info != nil {
 			t.Errorf("A resolved %s: %+v, %v", sha[:8], info, err)
 		}
 	}
@@ -392,7 +392,7 @@ func TestMediaResolvedHoldGone(t *testing.T) {
 	x := mediaBody(47, 4096)
 	f.arriveWithMedia(t, f.project.ID, hexTrace(1), daysAgo(1), x, false)
 	f.arriveWithMedia(t, b.ID, hexTrace(2), daysAgo(1), x, false)
-	if info, err := f.store.MediaByLangfuseID(b.ID, MediaIDFor(x.SHA256)); err != nil || info == nil {
+	if info, err := f.store.MediaByLangfuseID(t.Context(), b.ID, MediaIDFor(x.SHA256)); err != nil || info == nil {
 		t.Fatalf("B does not hold X before the race: %v", err)
 	}
 	del := &TraceDelete{ProjectID: b.ID, IDs: []string{hexTrace(2)}, Confirm: hexTrace(2)}
@@ -408,14 +408,14 @@ func TestMediaResolvedHoldGone(t *testing.T) {
 	if err := f.writer.Submit(t.Context(), batch); !errors.Is(err, ErrMediaGone) {
 		t.Fatalf("submit = %v, want ErrMediaGone", err)
 	}
-	if file, _ := f.store.MediaFor(b.ID, x.SHA256); file != nil {
+	if file, _ := f.store.MediaFor(t.Context(), b.ID, x.SHA256); file != nil {
 		t.Error("B reads X again without having sent it")
 	}
 	// The same race on the null answer: no ref, and the handler asks for
 	// the bytes.
 	add := &MediaRefAdd{ProjectID: b.ID, SHA256: x.SHA256, TraceID: hexTrace(4)}
-	if err := f.writer.Submit(t.Context(), add); err != nil || add.Added {
-		t.Fatalf("null answer after B's hold went = %v, %v; want no ref", add.Added, err)
+	if err := f.writer.Submit(t.Context(), add); err != nil || add.Held {
+		t.Fatalf("null answer after B's hold went = %v, %v; want the bytes asked for", add.Held, err)
 	}
 	f.checkHolders(t, "the refused writes")
 }
@@ -438,21 +438,21 @@ func TestMediaDeletionCountsAreTheProjects(t *testing.T) {
 
 	// Retention: B's window would take both its traces.
 	thirty := 30
-	preview, err := f.store.RetentionPreview(b.ID, &thirty, nil, nil, sweepNow.UnixNano())
+	preview, err := f.store.RetentionPreview(t.Context(), b.ID, &thirty, nil, nil, sweepNow.UnixNano())
 	if err != nil {
 		t.Fatal(err)
 	}
 	want("retention preview", preview)
 
 	// Erasure: u1 filed both.
-	erasure, _, err := f.store.UserDataPreview(b.ID, "u1")
+	erasure, _, err := f.store.UserDataPreview(t.Context(), b.ID, "u1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	want("erasure preview", erasure)
 
 	// One trace of two: B still holds X through the other.
-	one, _, err := f.store.TracePreview(b.ID, hexTrace(2))
+	one, _, err := f.store.TracePreview(t.Context(), b.ID, hexTrace(2))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -467,7 +467,7 @@ func TestMediaDeletionCountsAreTheProjects(t *testing.T) {
 		t.Errorf("deleting one of B's two traces = %+v, want no body", del.Counts)
 	}
 
-	last, _, err := f.store.TracePreview(b.ID, hexTrace(3))
+	last, _, err := f.store.TracePreview(t.Context(), b.ID, hexTrace(3))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -479,7 +479,7 @@ func TestMediaDeletionCountsAreTheProjects(t *testing.T) {
 	want("confirmed erasure", erase.Counts)
 
 	// A still reads X, and the bytes are still there.
-	if file, err := f.store.MediaFor(f.project.ID, x.SHA256); err != nil || file == nil {
+	if file, err := f.store.MediaFor(t.Context(), f.project.ID, x.SHA256); err != nil || file == nil {
 		t.Fatalf("A lost X: %v", err)
 	}
 	if f.mediaRows(t) != 1 {
@@ -569,7 +569,7 @@ func TestMigration0022FillsTheHolders(t *testing.T) {
 	if wrong != 0 {
 		t.Errorf("%d raw refs name another project than their batch's", wrong)
 	}
-	if file, err := s.MediaFor("p2", y.SHA256); err != nil || file == nil || file.MimeType != "audio/wav" {
+	if file, err := s.MediaFor(t.Context(), "p2", y.SHA256); err != nil || file == nil || file.MimeType != "audio/wav" {
 		t.Errorf("the raw-only hold after the upgrade = %+v, %v", file, err)
 	}
 	checkIntegrity(t, s)

@@ -1,8 +1,8 @@
 package server
 
 import (
+	"context"
 	"fmt"
-	"log/slog"
 	"math"
 	"net/http"
 	"slices"
@@ -132,9 +132,8 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		return b
 	}
 	sessions := carriesSessions(filter)
-	if err := s.readStats(project, filter, at); err != nil {
-		slog.Error("read stats failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to compute the statistics")
+	if err := s.readStats(r.Context(), project, filter, at); err != nil {
+		readFailed(w, r, "failed to compute the statistics", err)
 		return
 	}
 
@@ -184,9 +183,9 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 //
 // A project nobody has rolled has a watermark of zero, so every query is the
 // live scan and the first pass is the backfill.
-func (s *Server) readStats(project *store.Project, filter store.StatsFilter, at func(string) *bucket) error {
+func (s *Server) readStats(ctx context.Context, project *store.Project, filter store.StatsFilter, at func(string) *bucket) error {
 	projectID := project.ID
-	state, err := s.store.RollupState(projectID)
+	state, err := s.store.RollupState(ctx, projectID)
 	if err != nil {
 		return err
 	}
@@ -206,7 +205,7 @@ func (s *Server) readStats(project *store.Project, filter store.StatsFilter, at 
 		// How far back the rollup can speak for is what it holds, not
 		// what the retention window says it should hold: the window can
 		// be lengthened and a sweep cannot be undone (spec 013 #17).
-		oldest, held, err := s.store.OldestRolledHour(projectID)
+		oldest, held, err := s.store.OldestRolledHour(ctx, projectID)
 		if err != nil {
 			return err
 		}
@@ -216,10 +215,10 @@ func (s *Server) readStats(project *store.Project, filter store.StatsFilter, at 
 		}
 	}
 	if rolledTo <= rolledFrom {
-		return s.liveStats(projectID, filter, from, to, at)
+		return s.liveStats(ctx, projectID, filter, from, to, at)
 	}
 
-	if err := s.rolledStats(projectID, filter, rolledFrom, rolledTo, at); err != nil {
+	if err := s.rolledStats(ctx, projectID, filter, rolledFrom, rolledTo, at); err != nil {
 		return err
 	}
 	// The partial hour at the head, and everything from the watermark on.
@@ -228,12 +227,12 @@ func (s *Server) readStats(project *store.Project, filter store.StatsFilter, at 
 	// the seam.
 	head := rolledFrom * int64(time.Second)
 	if from < head {
-		if err := s.liveStats(projectID, filter, from, head, at); err != nil {
+		if err := s.liveStats(ctx, projectID, filter, from, head, at); err != nil {
 			return err
 		}
 	}
 	if tail := rolledTo * int64(time.Second); tail < to {
-		return s.liveStats(projectID, filter, tail, to, at)
+		return s.liveStats(ctx, projectID, filter, tail, to, at)
 	}
 	return nil
 }
@@ -249,7 +248,7 @@ const unbounded = int64(0)
 //
 // With a `user_id` the rows come from `users_hourly` instead — the same tuple
 // with the user in it, so the fold below is the same fold (spec 023 #6).
-func (s *Server) rolledStats(projectID string, filter store.StatsFilter, fromHour, toHour int64, at func(string) *bucket) error {
+func (s *Server) rolledStats(ctx context.Context, projectID string, filter store.StatsFilter, fromHour, toHour int64, at func(string) *bucket) error {
 	wantModel := filter.GroupBy == store.GroupByModel
 	fold := func(row store.StatsRow) *bucket {
 		if (row.Model != "") != wantModel {
@@ -266,7 +265,7 @@ func (s *Server) rolledStats(projectID string, filter store.StatsFilter, fromHou
 		return b
 	}
 	if filter.UserID != "" {
-		return s.store.UsersRollupRows(projectID, filter.UserID, fromHour, toHour,
+		return s.store.UsersRollupRows(ctx, projectID, filter.UserID, fromHour, toHour,
 			filter.Environment, func(row store.UserStatsRow) {
 				if b := fold(row.StatsRow); b != nil {
 					// Only trace-unit rows carry it, and only those
@@ -275,12 +274,12 @@ func (s *Server) rolledStats(projectID string, filter store.StatsFilter, fromHou
 				}
 			})
 	}
-	return s.store.StatsRollupRows(projectID, fromHour, toHour, filter.Environment,
+	return s.store.StatsRollupRows(ctx, projectID, fromHour, toHour, filter.Environment,
 		func(row store.StatsRow) { fold(row) })
 }
 
 // liveStats folds a half-open range of raw rows into the same buckets.
-func (s *Server) liveStats(projectID string, filter store.StatsFilter, from, to int64, at func(string) *bucket) error {
+func (s *Server) liveStats(ctx context.Context, projectID string, filter store.StatsFilter, from, to int64, at func(string) *bucket) error {
 	window := filter
 	window.From, window.To = &from, &to
 	if from == unbounded {
@@ -290,7 +289,7 @@ func (s *Server) liveStats(projectID string, filter store.StatsFilter, from, to 
 		window.To = nil
 	}
 	tokens := carriesTokens(filter)
-	if err := s.store.StatsSamples(projectID, window, func(sample store.StatsSample) {
+	if err := s.store.StatsSamples(ctx, projectID, window, func(sample store.StatsSample) {
 		b := at(sample.Key)
 		b.count++
 		if sample.Errored {
@@ -314,13 +313,13 @@ func (s *Server) liveStats(projectID string, filter store.StatsFilter, from, to 
 	// key whose traces had no observation with a count, so a bucket is
 	// never created here that the scan did not.
 	if tokens {
-		if err := s.store.StatsTokens(projectID, window, func(sum store.StatsTokenSum) {
+		if err := s.store.StatsTokens(ctx, projectID, window, func(sum store.StatsTokenSum) {
 			at(sum.Key).tokens.Add(sum.Tokens)
 		}); err != nil {
 			return err
 		}
 	}
-	return s.liveSessions(projectID, filter, from, to, at)
+	return s.liveSessions(ctx, projectID, filter, from, to, at)
 }
 
 // carriesTokens reports whether an answer to this filter carries `tokens`.
@@ -368,11 +367,11 @@ func tokensObject(t store.Tokens) object {
 // watermark than before it — and, because a bucket exists as soon as anything
 // is put in it, would invent a `count: 0, sessions: 1` bucket for a session
 // whose traces the filter removed (found in review of PR #42).
-func (s *Server) liveSessions(projectID string, filter store.StatsFilter, from, to int64, at func(string) *bucket) error {
+func (s *Server) liveSessions(ctx context.Context, projectID string, filter store.StatsFilter, from, to int64, at func(string) *bucket) error {
 	if !carriesSessions(filter) {
 		return nil
 	}
-	return s.store.UserSessionStarts(projectID, filter.UserID, filter.Environment, from, to,
+	return s.store.UserSessionStarts(ctx, projectID, filter.UserID, filter.Environment, from, to,
 		func(start int64) {
 			at(rollupKey(filter.GroupBy, store.StatsRow{Hour: store.HourOf(start)})).sessions++
 		})

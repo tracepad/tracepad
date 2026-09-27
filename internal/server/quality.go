@@ -1,8 +1,8 @@
 package server
 
 import (
+	"context"
 	"fmt"
-	"log/slog"
 	"math"
 	"net/http"
 	"net/url"
@@ -191,9 +191,8 @@ func (s *Server) handleScoreTrends(w http.ResponseWriter, r *http.Request) {
 		bucket.add(row)
 	}
 
-	if err := s.readScoreTrends(project, filter, fold); err != nil {
-		slog.Error("read score trends failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to compute the score trends")
+	if err := s.readScoreTrends(r.Context(), project, filter, fold); err != nil {
+		readFailed(w, r, "failed to compute the score trends", err)
 		return
 	}
 
@@ -425,10 +424,10 @@ func scoreBucketKey(groupBy string, row store.ScoreStatsRow) string {
 //
 // A project nobody has rolled has a watermark of zero, so every query is the
 // live scan and the first pass is the backfill.
-func (s *Server) readScoreTrends(project *store.Project, filter scoreTrendFilter,
+func (s *Server) readScoreTrends(ctx context.Context, project *store.Project, filter scoreTrendFilter,
 	fold func(store.ScoreStatsRow)) error {
 	projectID := project.ID
-	state, err := s.store.RollupState(projectID)
+	state, err := s.store.RollupState(ctx, projectID)
 	if err != nil {
 		return err
 	}
@@ -448,7 +447,7 @@ func (s *Server) readScoreTrends(project *store.Project, filter scoreTrendFilter
 		// floor is `stats_hourly`'s own oldest row, which is the same
 		// floor for all three tables: one pass writes them together and
 		// one sweep takes them together.
-		oldest, held, err := s.store.OldestRolledHour(projectID)
+		oldest, held, err := s.store.OldestRolledHour(ctx, projectID)
 		if err != nil {
 			return err
 		}
@@ -458,10 +457,10 @@ func (s *Server) readScoreTrends(project *store.Project, filter scoreTrendFilter
 		}
 	}
 	if rolledTo <= rolledFrom {
-		return s.liveScores(projectID, filter, from, to, fold)
+		return s.liveScores(ctx, projectID, filter, from, to, fold)
 	}
 
-	if err := s.store.ScoresRollupRows(projectID, rolledFrom, rolledTo,
+	if err := s.store.ScoresRollupRows(ctx, projectID, rolledFrom, rolledTo,
 		filter.Environment, filter.Name, fold); err != nil {
 		return err
 	}
@@ -471,18 +470,18 @@ func (s *Server) readScoreTrends(project *store.Project, filter scoreTrendFilter
 	// seam.
 	head := rolledFrom * int64(time.Second)
 	if from < head {
-		if err := s.liveScores(projectID, filter, from, head, fold); err != nil {
+		if err := s.liveScores(ctx, projectID, filter, from, head, fold); err != nil {
 			return err
 		}
 	}
 	if tail := rolledTo * int64(time.Second); tail < to {
-		return s.liveScores(projectID, filter, tail, to, fold)
+		return s.liveScores(ctx, projectID, filter, tail, to, fold)
 	}
 	return nil
 }
 
 // liveScores folds a half-open range of raw rows into the same buckets.
-func (s *Server) liveScores(projectID string, filter scoreTrendFilter,
+func (s *Server) liveScores(ctx context.Context, projectID string, filter scoreTrendFilter,
 	from, to int64, fold func(store.ScoreStatsRow)) error {
-	return s.store.ScoreSamples(projectID, from, to, filter.Environment, filter.Name, fold)
+	return s.store.ScoreSamples(ctx, projectID, from, to, filter.Environment, filter.Name, fold)
 }

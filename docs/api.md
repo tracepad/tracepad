@@ -136,7 +136,7 @@ traffic, and `item_id` never appears without `run_id`. See
 | `environment` | The environment a trace ran in, or a comma-separated list matching **any** of them: `?environment=production,staging`. See [Lists](#lists). |
 | `user_id`, `session_id` | Exact match. |
 | `name` | The trace name, or a comma-separated list matching any of them. A trace with no name never matches. See [Lists](#lists). |
-| `tag` | Repeatable; a trace must carry **every** tag given. |
+| `tag` | Repeatable; a trace must carry **every** tag given. At most 50 distinct values — duplicates collapse first — since a trace keeps at most 50 tags; more is a `400` (`tag: at most 50 values`). |
 | `status` | `error` (at least one failed observation) or `ok`. |
 | `min_cost` | Traces whose total cost is at least this. A trace whose client provided no cost has none and never matches. |
 | `q` | Full-text search over what the observations carried. See [Search](#search). |
@@ -394,6 +394,35 @@ An observation whose parent has not arrived yet renders at the root with its
 `parent_observation_id` intact — a trace still being written looks incomplete,
 not empty. `children` is absent for a leaf.
 
+A tree has two bounds, the same on every server because they shape the answer
+a client parses:
+
+- **At most 10,000 observations and 32 MiB of structure.** A larger trace is
+  answered with the longest prefix of its observations, in start-time order,
+  that fits both — the part of the run that happened first — and says what it
+  left out:
+
+  ```json
+  {"id": "…", "observation_count": 10001, "observations_omitted": 1, "observations": […]}
+  ```
+
+  `observations_omitted` is `observation_count` minus the observations in the
+  tree, and is present only when that is more than zero. The 32 MiB counts the
+  observations' own fields — `usage`, `model_parameters` and `cost_details`
+  are what make one heavy; the trace's own fields and metadata are rendered
+  whole. An observation whose parent was left out renders at the root with
+  its `parent_observation_id`, as an orphan does. Every observation is still
+  one `/api/v1/observations/{id}/io` away, and the listing row's
+  `observation_count` still counts all of them.
+- **At most 100 levels deep.** An observation that would sit at depth 101 is
+  detached from its parent and rendered at the root with its
+  `parent_observation_id`, keeping its own children, so a chain of a thousand
+  steps reads as ten chains of a hundred and every observation still appears
+  once. Parsers have nesting limits of their own — Python's is about a
+  thousand levels — and each observation is two of them. A parent cycle,
+  which a client can produce, is broken the same way, at the observation
+  that enters it.
+
 `prompt` is the prompt your client said this observation ran, recorded as sent
 and resolved against no registry: this store may not manage that prompt at
 all, and a label pointing at nothing is still a label. Its `version` is null
@@ -462,7 +491,8 @@ goes, what stays, the ingest race — is in
 
 Every response spends at most **50 KiB** on payloads (`TRACEPAD_RESPONSE_BUDGET_BYTES`
 to change the default, `?budget=` to override per request, between 4096 and
-5242880). The structure of a response is never truncated — only payloads are.
+5242880). The budget never truncates the structure of a response — only
+payloads; a tree's own bounds are in [One trace](#one-trace).
 
 Each expanded observation gets an equal share of what is left. A payload that
 does not fit is cut on a UTF-8 boundary and replaced by a marker:
@@ -1018,6 +1048,13 @@ per attribute dialect, how many were skipped, and every distinct
 `x-langfuse-ingestion-version` seen. The counters are in memory and say so:
 `counters.since` is when they started.
 
+`read_slots` is how many reads are being served now against
+`TRACEPAD_READ_CONCURRENCY`, deployment-wide like the writer queue:
+`{"busy": 3, "capacity": 16}`. Among the counters, `reads_timed_out` and
+`reads_refused_busy` count this project's reads the read deadline stopped and
+the ones that found no slot free before it — see [Reads under
+load](#reads-under-load).
+
 `runs` is the link between traces and eval runs ([datasets.md](datasets.md)):
 `pinned_traces` is how many traces a live run is keeping out of the retention
 sweep — the size of retention's one exception — and `orphan_traces` how many
@@ -1105,6 +1142,40 @@ that long, and a bulk deletion removes at most a bounded round of traces per
 request, so repeating one is safe. `/mcp` is a stream and has no such limit,
 for a request with a project key; without one it is `401`.
 
+## Reads under load
+
+Every read — every `GET` but the handful that need no credential — runs under
+a deadline, `TRACEPAD_READ_TIMEOUT` (20 s by default), and in one of
+`TRACEPAD_READ_CONCURRENCY` slots (twice the processors, at least 4). The
+deadline covers the wait for a slot as well, so one number bounds the whole
+read. Ingest, writes and the credential check take no slot.
+
+| Answer | When | What to do |
+|---|---|---|
+| `503` `{"error": "the server is busy; retry shortly"}`, `Retry-After: 1` | No slot came free before the deadline, or the read spent longer waiting for one than running when the deadline stopped it | Retry after the header |
+| `503` `{"error": "the read took longer than 20s and was stopped; narrow the time range or the filters"}` | The deadline stopped the read while it ran; the number is the setting | Narrow it: the same request would be stopped again, so there is no `Retry-After` |
+
+A slot is given back as soon as the answer's status is written — after the
+work and the rendering, before the download — so a client that reads a large
+body slowly holds its connection, not a slot. A client that hangs up ends its
+read; the query stops with it. The interface gives up on a request after 30 s,
+so a person sees the server's reason first.
+
+Two `GET`s are exceptions. `GET /api/v1/system` runs under the deadline in a
+slot of its own, not one of `TRACEPAD_READ_CONCURRENCY`'s, so it answers — and
+shows the slots taken — when every one of those is; two at once wait for each
+other, and the second may be `503` busy.
+`GET /api/v1/queues/{name}/next` claims an item, which is a write, and is
+bounded as writes are.
+
+The other way round, a write's own reads are reads: the exact count of a queue
+fill from a filter, the dry runs of a bulk trace deletion, a shrinking
+retention window, a project's deletion, a user's erasure and the deletion of
+one trace, dataset or prompt, and the selection each round of a bulk deletion
+works through take a slot and run under the deadline, and answer the same two
+`503`s. The write that follows takes no
+slot.
+
 ## Errors
 
 One shape everywhere:
@@ -1128,7 +1199,7 @@ actually at ([prompts.md](prompts.md#appending-to-the-version-you-meant)):
 | `404` | No such thing in this project. On `traces/last`, the message names the filters that found nothing. |
 | `409` | An observation id that is ambiguous without a `trace_id`; a prompt append whose `expect_version` disagrees with the name's current state. |
 | `500` | The answer could not be rendered — `{"error": "failed to render the response"}`. Never a `200` with an empty body. |
-| `503` | The credentials could not be checked right now — `{"error": "cannot check credentials right now; retry shortly"}` — or a write met a database condition that passes, a full disk or a lock that did not clear — `{"error": "storage is temporarily unavailable; retry shortly"}`. Both carry `Retry-After: 1`. A browser session is not signed out by it. |
+| `503` | The credentials could not be checked right now — `{"error": "cannot check credentials right now; retry shortly"}` — or a read or a write met a database condition that passes, a full disk or a lock that did not clear — `{"error": "storage is temporarily unavailable; retry shortly"}` — or a read found no slot free before its deadline — `{"error": "the server is busy; retry shortly"}`. These carry `Retry-After: 1`. A read the deadline stopped is a `503` without it — see [Reads under load](#reads-under-load). A browser session is not signed out by any of them. |
 
 A number JSON cannot spell — an infinity a store written by an earlier version
 still holds — is rendered as `null`, this API's word for "no number", rather

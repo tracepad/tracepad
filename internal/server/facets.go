@@ -1,7 +1,7 @@
 package server
 
 import (
-	"log/slog"
+	"context"
 	"net/http"
 	"sort"
 	"time"
@@ -97,10 +97,9 @@ func (s *Server) handleFacets(w http.ResponseWriter, r *http.Request) {
 	// what was asked, because a list saying it covers all of history when it
 	// covers what the rollup holds is the kind of claim the counts exist to
 	// make checkable.
-	answered, err := s.readFacets(project.ID, from, to, fold)
+	answered, err := s.readFacets(r.Context(), project.ID, from, to, fold)
 	if err != nil {
-		slog.Error("read the facets failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to read the filter values")
+		readFailed(w, r, "failed to read the filter values", err)
 		return
 	}
 
@@ -155,8 +154,8 @@ func rankFacet(values map[string]int64) ([]object, int) {
 // floor the answer at, "no `from`" really is all of history.
 // It answers with the `from` it actually used: the caller's, raised to the
 // rollup's floor when there is one.
-func (s *Server) readFacets(projectID string, from, to int64, fold func(store.FacetRow)) (int64, error) {
-	state, err := s.store.RollupState(projectID)
+func (s *Server) readFacets(ctx context.Context, projectID string, from, to int64, fold func(store.FacetRow)) (int64, error) {
+	state, err := s.store.RollupState(ctx, projectID)
 	if err != nil {
 		return from, err
 	}
@@ -179,7 +178,7 @@ func (s *Server) readFacets(projectID string, from, to int64, fold func(store.Fa
 		// column at its own `MIN(hour)` instead would not help: the answer
 		// would be just as short, and the two other columns would shrink to
 		// match it for no reason.
-		oldest, held, err := s.store.OldestRolledHour(projectID)
+		oldest, held, err := s.store.OldestRolledHour(ctx, projectID)
 		if err != nil {
 			return from, err
 		}
@@ -199,10 +198,10 @@ func (s *Server) readFacets(projectID string, from, to int64, fold func(store.Fa
 		}
 	}
 	if rolledTo <= rolledFrom {
-		return from, s.store.FacetTail(projectID, from, to, fold)
+		return from, s.store.FacetTail(ctx, projectID, from, to, fold)
 	}
 
-	if err := s.store.FacetRows(projectID, rolledFrom, rolledTo, fold); err != nil {
+	if err := s.store.FacetRows(ctx, projectID, rolledFrom, rolledTo, fold); err != nil {
 		return from, err
 	}
 	// The partial hour at the head, and everything from the watermark on.
@@ -211,12 +210,12 @@ func (s *Server) readFacets(projectID string, from, to int64, fold func(store.Fa
 	// that no listing can reproduce.
 	head := rolledFrom * int64(time.Second)
 	if from < head {
-		if err := s.store.FacetTail(projectID, from, head, fold); err != nil {
+		if err := s.store.FacetTail(ctx, projectID, from, head, fold); err != nil {
 			return from, err
 		}
 	}
 	if tail := rolledTo * int64(time.Second); tail < to {
-		return from, s.store.FacetTail(projectID, tail, to, fold)
+		return from, s.store.FacetTail(ctx, projectID, tail, to, fold)
 	}
 	return from, nil
 }

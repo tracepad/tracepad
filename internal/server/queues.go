@@ -2,8 +2,8 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"fmt"
-	"log/slog"
 	"math"
 	"net/http"
 	"slices"
@@ -144,10 +144,9 @@ func (s *Server) handleListQueues(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	queues, err := s.store.Queues(project.ID)
+	queues, err := s.store.Queues(r.Context(), project.ID)
 	if err != nil {
-		slog.Error("list queues failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to list the queues")
+		readFailed(w, r, "failed to list the queues", err)
 		return
 	}
 	out := make([]queueResponse, 0, len(queues))
@@ -234,7 +233,7 @@ func (s *Server) handleGetQueue(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	queue, ok := s.loadQueue(w, project.ID, name)
+	queue, ok := s.loadQueue(w, r, project.ID, name)
 	if !ok {
 		return
 	}
@@ -256,7 +255,7 @@ func (s *Server) handleDeleteQueue(w http.ResponseWriter, r *http.Request) {
 	}
 	confirm := values.Get("confirm")
 	if confirm == "" {
-		queue, ok := s.loadQueue(w, project.ID, name)
+		queue, ok := s.loadQueue(w, r, project.ID, name)
 		if !ok {
 			return
 		}
@@ -414,10 +413,13 @@ func (s *Server) handleAddItemsFromTraces(w http.ResponseWriter, r *http.Request
 	// leave the caller unable to tell a filter they can finish from one
 	// they cannot. It is a read, so it happens before the job rather than
 	// inside the writer's transaction.
-	matched, err := s.store.CountTraces(project.ID, filter, math.MaxInt32)
-	if err != nil {
-		slog.Error("count the traces to queue failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to count the matching traces")
+	// In a read slot and under the read deadline, as a listing's count is:
+	// it scans like one (spec 043 #29).
+	var matched int
+	if !s.readInSlot(w, r, "failed to count the matching traces", func(ctx context.Context) (err error) {
+		matched, err = s.store.CountTraces(ctx, project.ID, filter, math.MaxInt32)
+		return err
+	}) {
 		return
 	}
 
@@ -477,7 +479,7 @@ func (s *Server) handleListQueueItems(w http.ResponseWriter, r *http.Request) {
 		}
 		filter.Status = status
 	}
-	if _, ok := s.loadQueue(w, project.ID, name); !ok {
+	if _, ok := s.loadQueue(w, r, project.ID, name); !ok {
 		return
 	}
 
@@ -498,10 +500,9 @@ func (s *Server) handleListQueueItems(w http.ResponseWriter, r *http.Request) {
 		filter.After = &seq
 	}
 
-	items, err := s.store.QueueItems(project.ID, name, filter)
+	items, err := s.store.QueueItems(r.Context(), project.ID, name, filter)
 	if err != nil {
-		slog.Error("list queue items failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to list the items")
+		readFailed(w, r, "failed to list the items", err)
 		return
 	}
 	// `trimPage` names the ends by the direction of the *scan*, so it holds
@@ -518,10 +519,9 @@ func (s *Server) handleListQueueItems(w http.ResponseWriter, r *http.Request) {
 	}
 	answer := queueItemListResponse{Queue: name, Items: out, NextCursor: next, PrevCursor: prev}
 	if counting {
-		total, err := s.store.CountQueueItems(project.ID, name, filter, countCap+1)
+		total, err := s.store.CountQueueItems(r.Context(), project.ID, name, filter, countCap+1)
 		if err != nil {
-			slog.Error("count queue items failed", "err", err)
-			writeError(w, http.StatusInternalServerError, "failed to count the items")
+			readFailed(w, r, "failed to count the items", err)
 			return
 		}
 		value, stopped := capped(total)
@@ -540,10 +540,9 @@ func (s *Server) handleGetQueueItem(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	item, err := s.store.QueueItem(project.ID, name, id)
+	item, err := s.store.QueueItem(r.Context(), project.ID, name, id)
 	if err != nil {
-		slog.Error("read queue item failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to read the item")
+		readFailed(w, r, "failed to read the item", err)
 		return
 	}
 	if item == nil {
@@ -738,11 +737,10 @@ func (s *Server) itemTarget(w http.ResponseWriter, r *http.Request) (*store.Proj
 }
 
 // loadQueue reads a queue and answers the 404 itself.
-func (s *Server) loadQueue(w http.ResponseWriter, projectID, name string) (*store.AnnotationQueue, bool) {
-	queue, err := s.store.Queue(projectID, name)
+func (s *Server) loadQueue(w http.ResponseWriter, r *http.Request, projectID, name string) (*store.AnnotationQueue, bool) {
+	queue, err := s.store.Queue(r.Context(), projectID, name)
 	if err != nil {
-		slog.Error("read queue failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to read the queue")
+		readFailed(w, r, "failed to read the queue", err)
 		return nil, false
 	}
 	if queue == nil {

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tracepad/tracepad/internal/model"
 )
@@ -76,7 +77,7 @@ func TestMediaFollowsItsTraces(t *testing.T) {
 		t.Fatalf("%d refs, want one per trace", got)
 	}
 
-	counts, _, err := f.store.TracePreview(f.project.ID, hexTrace(1))
+	counts, _, err := f.store.TracePreview(t.Context(), f.project.ID, hexTrace(1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +92,7 @@ func TestMediaFollowsItsTraces(t *testing.T) {
 		t.Fatalf("deleting one of two traces collected the body: %+v", del.Counts)
 	}
 
-	counts, _, err = f.store.TracePreview(f.project.ID, hexTrace(2))
+	counts, _, err = f.store.TracePreview(t.Context(), f.project.ID, hexTrace(2))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +120,7 @@ func TestMediaRetentionAndRawWindow(t *testing.T) {
 	thirty, sixty := 30, 60
 	f.setRetention(t, f.project.ID, &thirty, &sixty)
 
-	preview, err := f.store.RetentionPreview(f.project.ID, &thirty, &sixty, nil, sweepNow.UnixNano())
+	preview, err := f.store.RetentionPreview(t.Context(), f.project.ID, &thirty, &sixty, nil, sweepNow.UnixNano())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,13 +137,13 @@ func TestMediaRetentionAndRawWindow(t *testing.T) {
 		t.Fatal("the body went while the raw batch that points at it is inside its window")
 	}
 	// The project can still read it: the raw batch is its ref.
-	if file, err := f.store.MediaFor(f.project.ID, body.SHA256); err != nil || file == nil {
+	if file, err := f.store.MediaFor(t.Context(), f.project.ID, body.SHA256); err != nil || file == nil {
 		t.Fatalf("a body held by a raw batch is not readable: %v", err)
 	}
 
 	ten := 10
 	f.setRetention(t, f.project.ID, &thirty, &ten)
-	preview, err = f.store.RetentionPreview(f.project.ID, &thirty, &ten, nil, sweepNow.UnixNano())
+	preview, err = f.store.RetentionPreview(t.Context(), f.project.ID, &thirty, &ten, nil, sweepNow.UnixNano())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +163,7 @@ func TestMediaErasure(t *testing.T) {
 	f := newSweepFixture(t)
 	body := mediaBody(3, 4096)
 	f.arriveWithMedia(t, f.project.ID, hexTrace(1), daysAgo(1), body, false)
-	counts, _, err := f.store.UserDataPreview(f.project.ID, "u1")
+	counts, _, err := f.store.UserDataPreview(t.Context(), f.project.ID, "u1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,12 +189,12 @@ func TestMediaSharedAcrossAPurge(t *testing.T) {
 	own := mediaBody(5, 4500)
 	f.arriveWithMedia(t, f.project.ID, hexTrace(1), daysAgo(3), shared, true)
 	f.arriveWithMedia(t, other.ID, hexTrace(2), daysAgo(3), shared, false)
-	if err := f.writer.Submit(t.Context(), &MediaUpload{ProjectID: f.project.ID, TraceID: hexTrace(9),
-		Body: own, Now: sweepNow.UnixNano()}); err != nil {
+	if err := f.writer.Submit(t.Context(),
+		uploadOf(f.project.ID, hexTrace(9), "tp-pk-test", own, sweepNow.UnixNano())); err != nil {
 		t.Fatal(err)
 	}
 
-	preview, err := f.store.ProjectPreview(f.project.ID)
+	preview, err := f.store.ProjectPreview(t.Context(), f.project.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,7 +216,7 @@ func TestMediaSharedAcrossAPurge(t *testing.T) {
 	if got := f.mediaRows(t); got != 1 {
 		t.Fatalf("%d media rows after the purge, want the shared one", got)
 	}
-	if file, err := f.store.MediaFor(other.ID, shared.SHA256); err != nil || file == nil {
+	if file, err := f.store.MediaFor(t.Context(), other.ID, shared.SHA256); err != nil || file == nil {
 		t.Fatalf("the other project lost the shared body: %v", err)
 	}
 	if got := f.count(t, `SELECT COUNT(*) FROM media_refs WHERE project_id = ?`, f.project.ID); got != 0 {
@@ -231,24 +232,24 @@ func TestMediaScopedByRef(t *testing.T) {
 	body := mediaBody(6, 5000)
 	f.arriveWithMedia(t, f.project.ID, hexTrace(1), daysAgo(1), body, false)
 
-	if file, err := f.store.MediaFor(f.project.ID, body.SHA256); err != nil || file == nil ||
+	if file, err := f.store.MediaFor(t.Context(), f.project.ID, body.SHA256); err != nil || file == nil ||
 		file.MimeType != "image/png" || len(file.Body) != 5000 {
 		t.Fatalf("own body = %+v, %v", file, err)
 	}
-	if file, err := f.store.MediaFor(other.ID, body.SHA256); err != nil || file != nil {
+	if file, err := f.store.MediaFor(t.Context(), other.ID, body.SHA256); err != nil || file != nil {
 		t.Fatalf("another project read the body: %+v, %v", file, err)
 	}
 	id := MediaIDFor(body.SHA256)
 	if len(id) != 22 {
 		t.Fatalf("media id %q is not 22 characters", id)
 	}
-	if info, err := f.store.MediaByLangfuseID(f.project.ID, id); err != nil || info == nil || info.SHA256 != body.SHA256 {
+	if info, err := f.store.MediaByLangfuseID(t.Context(), f.project.ID, id); err != nil || info == nil || info.SHA256 != body.SHA256 {
 		t.Fatalf("own Langfuse id resolved to %+v, %v", info, err)
 	}
-	if info, err := f.store.MediaByLangfuseID(other.ID, id); err != nil || info != nil {
+	if info, err := f.store.MediaByLangfuseID(t.Context(), other.ID, id); err != nil || info != nil {
 		t.Fatalf("another project resolved the Langfuse id: %+v, %v", info, err)
 	}
-	summary, err := f.store.MediaSummary(f.project.ID)
+	summary, err := f.store.MediaSummary(t.Context(), f.project.ID)
 	if err != nil || summary.Count != 1 || summary.Bytes != 5000 {
 		t.Errorf("summary = %+v, %v", summary, err)
 	}
@@ -265,22 +266,22 @@ func TestMediaOrphanRefs(t *testing.T) {
 	settled := mediaBody(11, 4400)
 	resolved := mediaBody(12, 4500)
 	for _, upload := range []*MediaUpload{
-		{ProjectID: f.project.ID, TraceID: hexTrace(1), Body: late, Now: daysAgo(3)},
-		{ProjectID: f.project.ID, TraceID: hexTrace(2), Body: fresh, Now: sweepNow.UnixNano()},
-		{ProjectID: f.project.ID, TraceID: hexTrace(3), Body: settled, Now: daysAgo(3)},
-		{ProjectID: f.project.ID, TraceID: hexTrace(4), Body: resolved, Now: daysAgo(3)},
+		uploadOf(f.project.ID, hexTrace(1), "tp-pk-test", late, daysAgo(3)),
+		uploadOf(f.project.ID, hexTrace(2), "tp-pk-test", fresh, sweepNow.UnixNano()),
+		uploadOf(f.project.ID, hexTrace(3), "tp-pk-test", settled, daysAgo(3)),
+		uploadOf(f.project.ID, hexTrace(4), "tp-pk-test", resolved, daysAgo(3)),
 	} {
 		if err := f.writer.Submit(t.Context(), upload); err != nil {
 			t.Fatal(err)
 		}
 	}
 	// Trace 3 arrives carrying something else (its span overtook the
-	// upload); trace 4 arrives with the upload resolved, which settles the
-	// ref at ingest.
+	// upload); trace 4 arrives with the upload resolved. Either arrival
+	// settles its trace's ref at ingest (#31).
 	f.arriveWithMedia(t, f.project.ID, hexTrace(3), daysAgo(2), mediaBody(13, 4096), false)
 	f.arriveWithMedia(t, f.project.ID, hexTrace(4), daysAgo(2), resolved, false)
-	if got := f.count(t, `SELECT COUNT(*) FROM media_refs WHERE pending = 1`); got != 3 {
-		t.Fatalf("%d pending refs before the sweep, want 3", got)
+	if got := f.count(t, `SELECT COUNT(*) FROM media_refs WHERE pending = 1`); got != 2 {
+		t.Fatalf("%d pending refs before the sweep, want the late one and the fresh one", got)
 	}
 
 	var plan string
@@ -296,11 +297,11 @@ func TestMediaOrphanRefs(t *testing.T) {
 	if err := f.sweeper.Pass(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if file, _ := f.store.MediaFor(f.project.ID, late.SHA256); file != nil {
+	if file, _ := f.store.MediaFor(t.Context(), f.project.ID, late.SHA256); file != nil {
 		t.Error("the ref whose trace never came outlived the grace")
 	}
 	for name, body := range map[string]MediaBody{"inside the grace": fresh, "settled": settled, "resolved": resolved} {
-		if file, _ := f.store.MediaFor(f.project.ID, body.SHA256); file == nil {
+		if file, _ := f.store.MediaFor(t.Context(), f.project.ID, body.SHA256); file == nil {
 			t.Errorf("the ref %s was taken", name)
 		}
 	}
@@ -315,8 +316,10 @@ func TestMediaOrphanRefs(t *testing.T) {
 	}
 }
 
-// A second identical upload for another trace asks for no bytes: the ref is
-// added when the body is there, and refused when it is not.
+// A second identical upload for another trace asks for no bytes when the body
+// is there, and for the bytes when it is not. The ref is written settled for a
+// trace the project has, and pending for a trace not here yet — as old as the
+// bytes are in the project, not as old as the ask (#30).
 func TestMediaRefAdd(t *testing.T) {
 	f := newSweepFixture(t)
 	body := mediaBody(9, 4096)
@@ -324,20 +327,36 @@ func TestMediaRefAdd(t *testing.T) {
 	if err := f.writer.Submit(t.Context(), add); err != nil {
 		t.Fatal(err)
 	}
-	if add.Added {
-		t.Fatal("a ref was added to a body that does not exist")
+	if add.Held {
+		t.Fatal("a body that does not exist is held")
 	}
 	f.arriveWithMedia(t, f.project.ID, hexTrace(2), daysAgo(1), body, false)
-	add = &MediaRefAdd{ProjectID: f.project.ID, SHA256: body.SHA256, TraceID: hexTrace(1)}
-	if err := f.writer.Submit(t.Context(), add); err != nil {
-		t.Fatal(err)
+	delivered := f.count(t, `SELECT MAX(created_at) FROM media_refs WHERE sha256 = ?`, body.SHA256)
+
+	// Half a day after the delivery: well inside the grace, so the date is
+	// the delivery's.
+	add = &MediaRefAdd{ProjectID: f.project.ID, SHA256: body.SHA256, TraceID: hexTrace(1),
+		Now: daysAgo(1) + int64(12*time.Hour)}
+	if err := f.writer.Submit(t.Context(), add); err != nil || !add.Held {
+		t.Fatalf("the null answer for a trace not here = %v, %v", add.Held, err)
 	}
-	if !add.Added {
-		t.Fatal("the ref to a stored body was not added")
+	if got := f.count(t, `SELECT created_at FROM media_refs WHERE sha256 = ? AND trace_id = ? AND pending = 1`,
+		body.SHA256, hexTrace(1)); got != delivered {
+		t.Errorf("the pending ref for a trace not here is from %d, want the delivery's %d", got, delivered)
+	}
+
+	f.arriveWithMedia(t, f.project.ID, hexTrace(3), daysAgo(1), mediaBody(10, 100), false)
+	add = &MediaRefAdd{ProjectID: f.project.ID, SHA256: body.SHA256, TraceID: hexTrace(3)}
+	if err := f.writer.Submit(t.Context(), add); err != nil || !add.Held {
+		t.Fatalf("the null answer for a stored trace = %v, %v", add.Held, err)
+	}
+	if n := f.count(t, `SELECT COUNT(*) FROM media_refs WHERE sha256 = '`+body.SHA256+`'
+	                    AND trace_id = '`+hexTrace(3)+`' AND pending = 0`); n != 1 {
+		t.Errorf("settled refs for the stored trace = %d, want 1", n)
 	}
 	// Idempotent: the SDK retries.
-	if err := f.writer.Submit(t.Context(), add); err != nil || !add.Added {
-		t.Fatalf("a repeated ref = %v, %v", add.Added, err)
+	if err := f.writer.Submit(t.Context(), add); err != nil || !add.Held {
+		t.Fatalf("a repeated ref = %v, %v", add.Held, err)
 	}
 }
 
@@ -348,7 +367,7 @@ func TestMediaFirstTypeWins(t *testing.T) {
 	f.arriveWithMedia(t, f.project.ID, hexTrace(1), daysAgo(1), body, false)
 	body.MimeType = "application/octet-stream"
 	f.arriveWithMedia(t, f.project.ID, hexTrace(2), daysAgo(1), body, false)
-	file, err := f.store.MediaFor(f.project.ID, body.SHA256)
+	file, err := f.store.MediaFor(t.Context(), f.project.ID, body.SHA256)
 	if err != nil || file == nil || file.MimeType != "image/png" {
 		t.Fatalf("stored type = %+v, %v; want the first", file, err)
 	}
@@ -392,7 +411,7 @@ func TestMediaOrphanBodiesPaged(t *testing.T) {
 	found := map[string]bool{}
 	cursor, passes := "", 0
 	for {
-		orphans, next, err := f.store.orphanMedia(cursor, 2)
+		orphans, next, err := f.store.orphanMedia(t.Context(), cursor, 2)
 		if err != nil {
 			t.Fatal(err)
 		}

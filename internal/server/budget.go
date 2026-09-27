@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -127,7 +128,9 @@ func (b payloadBudget) render(value any, traceID, observationID string) any {
 		}
 	}
 	if len(encoded) <= b.share {
-		return value
+		// The bytes it was measured by are the bytes it is written as:
+		// encoded once, not again when the answer is (spec 043 #28).
+		return encodedPayload(encoded)
 	}
 
 	marker := truncation{
@@ -143,6 +146,18 @@ func (b payloadBudget) render(value any, traceID, observationID string) any {
 	}
 	return marker
 }
+
+// encodedPayload is a payload encoding/json has already written, placed in an
+// answer as it is. The bytes are json.Marshal's, escaping included, so they
+// are what encoding the value again would write.
+type encodedPayload []byte
+
+func (p encodedPayload) appendJSON(buffer *bytes.Buffer) error {
+	buffer.Write(p)
+	return nil
+}
+
+func (p encodedPayload) MarshalJSON() ([]byte, error) { return p, nil }
 
 // markerSize is what a marker costs on the wire without its preview.
 func markerSize(marker truncation) int {

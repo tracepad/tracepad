@@ -35,7 +35,7 @@ func TestDeletingATraceTakesWhatHangsOffIt(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	counts, runs, err := f.store.TracePreview(f.project.ID, hexTrace(1))
+	counts, runs, err := f.store.TracePreview(t.Context(), f.project.ID, hexTrace(1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,7 @@ func TestDeletingATraceTakesWhatHangsOffIt(t *testing.T) {
 	}
 	// An id the project does not hold previews as nothing, which is the
 	// handler's 404.
-	if counts, _, err := f.store.TracePreview(f.project.ID, hexTrace(9)); err != nil || counts.Any() {
+	if counts, _, err := f.store.TracePreview(t.Context(), f.project.ID, hexTrace(9)); err != nil || counts.Any() {
 		t.Errorf("preview of an unknown id = %+v, %v; want nothing", counts, err)
 	}
 
@@ -99,7 +99,7 @@ func TestDeletingATraceTakesWhatHangsOffIt(t *testing.T) {
 	assertNoEntries(t, f.store, f.project.ID, hexTrace(1))
 	checkIntegrity(t, f.store)
 	// The run stands, one trace poorer.
-	if pinned, _ := f.store.PinnedTraces(f.project.ID); pinned != 0 {
+	if pinned, _ := f.store.PinnedTraces(t.Context(), f.project.ID); pinned != 0 {
 		t.Errorf("pinned = %d after the deletion, want the run's trace gone", pinned)
 	}
 }
@@ -116,7 +116,7 @@ func TestBulkDeletionSelectsWhatTheListingShows(t *testing.T) {
 	f.arrive(t, f.project.ID, hexTrace(4), daysAgo(1), func(tr *modelTrace) { tr.Environment = "production" })
 
 	filter := TraceFilter{Environment: []string{"staging"}}
-	counts, runs, err := f.store.TraceDeletePreview(f.project.ID, filter)
+	counts, runs, err := f.store.TraceDeletePreview(t.Context(), f.project.ID, filter)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +127,7 @@ func TestBulkDeletionSelectsWhatTheListingShows(t *testing.T) {
 		t.Errorf("oldest = %d, want the oldest staging arrival", counts.Oldest)
 	}
 
-	rows, err := f.store.Traces(f.project.ID, TraceFilter{Environment: []string{"staging"}, Limit: 10})
+	rows, err := f.store.Traces(t.Context(), f.project.ID, TraceFilter{Environment: []string{"staging"}, Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -239,13 +239,13 @@ func TestDeletionCorrectsTheHourAsItCommits(t *testing.T) {
 	if got := rolled(hours[1]); got != 1 {
 		t.Errorf("the live hour was rolled to %d by the deletion, want it left at 1 for the pass", got)
 	}
-	if bob, err := s.UserSummaryRow(project.ID, "bob"); err != nil || bob != nil {
+	if bob, err := s.UserSummaryRow(t.Context(), project.ID, "bob"); err != nil || bob != nil {
 		t.Errorf("bob's summary = %v, %v; want him gone with his only trace", bob, err)
 	}
 	if rows := userRows(t, s, project.ID, "bob", hours[0]); len(rows) != 0 {
 		t.Errorf("bob still has %d rolled rows, want none", len(rows))
 	}
-	alice, err := s.UserSummaryRow(project.ID, "alice")
+	alice, err := s.UserSummaryRow(t.Context(), project.ID, "alice")
 	if err != nil || alice == nil {
 		t.Fatalf("alice's summary = %v, %v; want her kept with her other trace", alice, err)
 	}

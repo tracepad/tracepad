@@ -105,8 +105,8 @@ func (s *Store) AccountByID(ctx context.Context, id string) (*Account, error) {
 // case-insensitive because the column is `COLLATE NOCASE`: a person who
 // capitalised their email in a different mood still signs in to their own
 // account, and the stored spelling stays the one the owner typed.
-func (s *Store) AccountByEmail(email string) (*Account, error) {
-	return s.oneAccount(context.Background(), `SELECT `+accountColumns+` FROM accounts WHERE email = ?`, strings.TrimSpace(email))
+func (s *Store) AccountByEmail(ctx context.Context, email string) (*Account, error) {
+	return s.oneAccount(ctx, `SELECT `+accountColumns+` FROM accounts WHERE email = ?`, strings.TrimSpace(email))
 }
 
 func (s *Store) oneAccount(ctx context.Context, query string, args ...any) (*Account, error) {
@@ -122,8 +122,8 @@ func (s *Store) oneAccount(ctx context.Context, query string, args ...any) (*Acc
 
 // ListAccounts returns every account sorted by email, which is the order the
 // Accounts table shows and the order `tracepad accounts ls` prints.
-func (s *Store) ListAccounts() ([]*Account, error) {
-	rows, err := s.db.Query(`SELECT ` + accountColumns + ` FROM accounts ORDER BY email`)
+func (s *Store) ListAccounts(ctx context.Context) ([]*Account, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT `+accountColumns+` FROM accounts ORDER BY email`)
 	if err != nil {
 		return nil, err
 	}
@@ -155,9 +155,9 @@ const standingOwner = `owner = 1 AND disabled = 0 AND password_hash IS NOT NULL`
 // EnabledOwners counts the owners that can sign in today. It is what decides
 // whether the server still needs setting up (Decision 9) and what "the last
 // owner" is measured against (Decision 2).
-func (s *Store) EnabledOwners() (int, error) {
+func (s *Store) EnabledOwners(ctx context.Context) (int, error) {
 	var n int
-	err := s.db.QueryRow(`SELECT COUNT(*) FROM accounts WHERE ` + standingOwner).Scan(&n)
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM accounts WHERE `+standingOwner).Scan(&n)
 	return n, err
 }
 
@@ -193,9 +193,9 @@ type Member struct {
 // reaches their memberships. Soft-deleted projects are left out of both: they
 // are not there to work in, and the Server tab lists them separately with
 // `?include=deleted` as before (spec 028, edge cases).
-func (s *Store) AccountProjects(account *Account) ([]Membership, error) {
+func (s *Store) AccountProjects(ctx context.Context, account *Account) ([]Membership, error) {
 	if account.Owner {
-		rows, err := s.db.Query(
+		rows, err := s.db.QueryContext(ctx,
 			`SELECT id, name FROM projects WHERE deleted_at IS NULL ORDER BY name, id`)
 		if err != nil {
 			return nil, err
@@ -211,18 +211,18 @@ func (s *Store) AccountProjects(account *Account) ([]Membership, error) {
 		}
 		return projects, rows.Err()
 	}
-	return s.memberships(account.ID)
+	return s.memberships(ctx, account.ID)
 }
 
 // Memberships lists an account's rows in `memberships`, whatever its standing.
 // This is what an owner reads on the Accounts table — the projects a person
 // would have if the owner flag came off — and it is empty for an owner.
-func (s *Store) Memberships(accountID string) ([]Membership, error) {
-	return s.memberships(accountID)
+func (s *Store) Memberships(ctx context.Context, accountID string) ([]Membership, error) {
+	return s.memberships(ctx, accountID)
 }
 
-func (s *Store) memberships(accountID string) ([]Membership, error) {
-	rows, err := s.db.Query(
+func (s *Store) memberships(ctx context.Context, accountID string) ([]Membership, error) {
+	rows, err := s.db.QueryContext(ctx,
 		`SELECT m.project_id, p.name, m.role
 		   FROM memberships m JOIN projects p ON p.id = m.project_id
 		  WHERE m.account_id = ? AND p.deleted_at IS NULL
@@ -244,8 +244,8 @@ func (s *Store) memberships(accountID string) ([]Membership, error) {
 }
 
 // ProjectMembers lists who has a role in one project, by email.
-func (s *Store) ProjectMembers(projectID string) ([]Member, error) {
-	rows, err := s.db.Query(
+func (s *Store) ProjectMembers(ctx context.Context, projectID string) ([]Member, error) {
+	rows, err := s.db.QueryContext(ctx,
 		`SELECT a.id, a.email, a.name, m.role
 		   FROM memberships m JOIN accounts a ON a.id = m.account_id
 		  WHERE m.project_id = ?
@@ -356,8 +356,8 @@ func (s *Store) SessionByCookie(ctx context.Context, value string, now int64) (*
 }
 
 // AccountSessions lists one account's live sessions, newest first.
-func (s *Store) AccountSessions(accountID string, now int64) ([]*AccountSession, error) {
-	rows, err := s.db.Query(
+func (s *Store) AccountSessions(ctx context.Context, accountID string, now int64) ([]*AccountSession, error) {
+	rows, err := s.db.QueryContext(ctx,
 		`SELECT `+sessionColumns+` FROM account_sessions
 		  WHERE account_id = ? AND expires_at > ?
 		  ORDER BY created_at DESC, id`, accountID, now)

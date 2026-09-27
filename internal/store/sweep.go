@@ -224,7 +224,7 @@ func (sw *Sweeper) Pass(ctx context.Context) error {
 		sw.nextRun = start.Add(sw.interval)
 		sw.mu.Unlock()
 	}()
-	projects, err := sw.store.ListProjects(true)
+	projects, err := sw.store.ListProjects(ctx, true)
 	if err != nil {
 		return fmt.Errorf("sweep: list projects: %w", err)
 	}
@@ -264,6 +264,17 @@ func (sw *Sweeper) Pass(ctx context.Context) error {
 	}
 	if media > 0 {
 		freed = true
+	}
+
+	// Removed traces whose uploads no URL can still carry (spec 041 #29).
+	// Not counted as freed: a row per trace, gone within the hour.
+	// On the wall clock, as the rows are stamped and read (#29), not on the
+	// pass's own clock.
+	if err := sw.sweepVoidedUploads(ctx, time.Now().UnixNano()); err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, ErrWriterClosed) {
+			return err
+		}
+		failures = append(failures, fmt.Errorf("voided uploads: %w", err))
 	}
 
 	entries, err := sw.sweepOrphanSearchEntries(ctx)
@@ -414,7 +425,7 @@ func (sw *Sweeper) sweepRawBatches(ctx context.Context, projectID string, now in
 // unreferenced now cannot become referenced later. Only the deletion needs the
 // writer, and it gets one short transaction instead of a table scan inside it.
 func (sw *Sweeper) sweepOrphanPayloads(ctx context.Context) (int64, error) {
-	ids, err := sw.store.orphanPayloads(orphanScanLimit)
+	ids, err := sw.store.orphanPayloads(ctx, orphanScanLimit)
 	if err != nil {
 		return 0, err
 	}
@@ -436,16 +447,17 @@ func (sw *Sweeper) sweepOrphanPayloads(ctx context.Context) (int64, error) {
 // bodies those refs leave. Found by a read outside the writer, like the
 // orphaned payloads; the job re-checks each predicate inside its transaction.
 func (sw *Sweeper) sweepOrphanMedia(ctx context.Context, now int64) (int64, error) {
-	refs, err := sw.store.orphanMediaRefs(now-int64(MediaOrphanGrace), orphanScanLimit)
+	before := now - int64(MediaOrphanGrace)
+	refs, err := sw.store.orphanMediaRefs(ctx, before, orphanScanLimit)
 	if err != nil {
 		return 0, err
 	}
-	bodies, next, err := sw.store.orphanMedia(sw.mediaCursor, orphanScanLimit)
+	bodies, next, err := sw.store.orphanMedia(ctx, sw.mediaCursor, orphanScanLimit)
 	if err != nil {
 		return 0, err
 	}
 	// The holds of the same page out of step with the refs (spec 041 #26).
-	stale, missing, err := sw.store.holdDrift(sw.mediaCursor, next)
+	stale, missing, err := sw.store.holdDrift(ctx, sw.mediaCursor, next)
 	if err != nil {
 		return 0, err
 	}
@@ -453,7 +465,7 @@ func (sw *Sweeper) sweepOrphanMedia(ctx context.Context, now int64) (int64, erro
 	if len(refs) == 0 && len(bodies) == 0 && len(stale) == 0 && len(missing) == 0 {
 		return 0, nil
 	}
-	job := &mediaSweep{Refs: refs, Bodies: bodies, Stale: stale, Missing: missing, Now: now}
+	job := &mediaSweep{Refs: refs, Bodies: bodies, Stale: stale, Missing: missing, Now: now, Before: before}
 	if err := sw.writer.Submit(ctx, job); err != nil {
 		return 0, err
 	}
@@ -471,7 +483,7 @@ func (sw *Sweeper) sweepOrphanMedia(ctx context.Context, now int64) (int64, erro
 // braces, and the only thing that would ever find an entry a hand-edited
 // database left behind.
 func (sw *Sweeper) sweepOrphanSearchEntries(ctx context.Context) (int64, error) {
-	ids, err := sw.store.orphanSearchEntries(orphanScanLimit)
+	ids, err := sw.store.orphanSearchEntries(ctx, orphanScanLimit)
 	if err != nil {
 		return 0, err
 	}
@@ -486,6 +498,21 @@ func (sw *Sweeper) sweepOrphanSearchEntries(ctx context.Context) (int64, error) 
 		logger().Info("collected orphaned search entries", "entries", job.Deleted)
 	}
 	return job.Deleted, nil
+}
+
+// sweepVoidedUploads forgets the traces removed longer ago than an upload
+// URL lives, and the slack, in bounded chunks (spec 041 #29).
+func (sw *Sweeper) sweepVoidedUploads(ctx context.Context, now int64) error {
+	for range sw.maxChunks {
+		chunk := &mediaVoidedSweep{Before: now - int64(MediaUploadWindow+mediaVoidedSlack), Limit: sw.chunk}
+		if err := sw.writer.Submit(ctx, chunk); err != nil {
+			return err
+		}
+		if chunk.Removed < int64(sw.chunk) {
+			return nil
+		}
+	}
+	return nil
 }
 
 // sweepAccounts removes the browser sessions and invitations that have run
@@ -530,8 +557,8 @@ func (sw *Sweeper) count(projectID string, traces, raw int64) {
 // to speed up an hourly maintenance query, and at this product's scale (design
 // §5.6 names the ceiling) the scan is milliseconds. The LIMIT is what keeps
 // the cost bounded if that ever stops being true.
-func (s *Store) orphanPayloads(limit int) ([]int64, error) {
-	rows, err := s.db.Query(
+func (s *Store) orphanPayloads(ctx context.Context, limit int) ([]int64, error) {
+	rows, err := s.db.QueryContext(ctx,
 		`SELECT id FROM payloads
 		 EXCEPT SELECT metadata_id FROM traces WHERE metadata_id IS NOT NULL
 		 EXCEPT SELECT input_id FROM observations WHERE input_id IS NOT NULL

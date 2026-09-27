@@ -335,16 +335,45 @@ func guardLookup[T any](w http.ResponseWriter, r *http.Request, what string, loo
 // and nothing is logged; a database condition is `503` with `Retry-After`,
 // logged once a minute per condition; anything else is `500`.
 func lookupFailed(w http.ResponseWriter, r *http.Request, what string, err error) {
+	answerFailedRead(w, r, what+" lookup failed", "failed to read the "+what, err)
+}
+
+// readFailed answers a read of the store that failed, the way lookupFailed
+// answers a lookup: a request whose context ended — its client hung up, or the
+// read deadline passed (spec 043 #15) — is not answered here, because the read
+// gate answers the deadline and nobody is left to hear the other; a database
+// condition is `503` with `Retry-After`, logged once a minute per condition;
+// anything else is `500` with the message, logged.
+func readFailed(w http.ResponseWriter, r *http.Request, message string, err error) {
+	answerFailedRead(w, r, message, message, err)
+}
+
+// answerFailedRead is the one mapping from a failed read to its answer
+// (spec 043 #24 u, #26): logged as line, answered `500` with message unless
+// the failure was a database condition or the request's context ended.
+func answerFailedRead(w http.ResponseWriter, r *http.Request, line, message string, err error) {
 	if hungUp(r) {
 		return
 	}
 	condition, ok := store.Condition(err)
-	logLookupFailure(what, err, condition)
+	logReadFailure(line, err, condition)
 	if ok {
 		retryLater(w, storageUnavailable)
 		return
 	}
-	writeError(w, http.StatusInternalServerError, "failed to read the "+what)
+	writeError(w, http.StatusInternalServerError, message)
+}
+
+// readAfterWriteFailed answers a read that failed after this request's write
+// committed: `500`, logged, whatever the cause — a `503` with `Retry-After`
+// would ask the client to repeat a write that is already done (spec 043 #28).
+// A client that hung up is answered by nobody.
+func readAfterWriteFailed(w http.ResponseWriter, r *http.Request, message string, err error) {
+	if hungUp(r) {
+		return
+	}
+	slog.Error(message+" after the write committed", "err", err)
+	writeError(w, http.StatusInternalServerError, message)
 }
 
 // logLookupFailure logs a lookup that failed. One that failed for a reason
@@ -352,13 +381,18 @@ func lookupFailed(w http.ResponseWriter, r *http.Request, what string, err error
 // timeout, a full disk, a deadline — is logged once a minute per reason, as
 // the writer logs a condition (spec 043 #24); anything else every time.
 func logLookupFailure(what string, err error, condition string) {
+	logReadFailure(what+" lookup failed", err, condition)
+}
+
+// logReadFailure logs a failed read under line, paced by condition as
+// logLookupFailure says.
+func logReadFailure(line string, err error, condition string) {
 	if condition == "" {
-		slog.Error(what+" lookup failed", "err", err)
+		slog.Error(line, "err", err)
 		return
 	}
 	if failed, now := lookupLog.Allow(condition, time.Now()); now {
-		slog.Error(what+" lookup failed", "err", err, "condition", condition,
-			"failed_since_last_line", failed)
+		slog.Error(line, "err", err, "condition", condition, "failed_since_last_line", failed)
 	}
 }
 

@@ -1,15 +1,13 @@
 package server
 
 import (
-	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
 	"net/http"
 	"net/url"
 	"regexp"
-	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -105,10 +103,9 @@ func (s *Server) handleListTraces(w http.ResponseWriter, r *http.Request) {
 		filter.After = cursor
 	}
 
-	traces, err := s.store.Traces(project.ID, filter)
+	traces, err := s.store.Traces(r.Context(), project.ID, filter)
 	if err != nil {
-		slog.Error("list traces failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to list traces")
+		readFailed(w, r, "failed to list traces", err)
 		return
 	}
 
@@ -125,10 +122,9 @@ func (s *Server) handleListTraces(w http.ResponseWriter, r *http.Request) {
 		for _, row := range traces {
 			ids = append(ids, row.ID)
 		}
-		matches, err = s.store.SearchMatches(project.ID, ids, filter.Search)
+		matches, err = s.store.SearchMatches(r.Context(), project.ID, ids, filter.Search)
 		if err != nil {
-			slog.Error("read the search matches failed", "err", err)
-			writeError(w, http.StatusInternalServerError, "failed to list traces")
+			readFailed(w, r, "failed to list traces", err)
 			return
 		}
 	}
@@ -148,10 +144,9 @@ func (s *Server) handleListTraces(w http.ResponseWriter, r *http.Request) {
 	if counting {
 		// Counted over the filters and not over the page: the cursor is
 		// where the reader is, not what there is.
-		total, err := s.store.CountTraces(project.ID, filter, countCap+1)
+		total, err := s.store.CountTraces(r.Context(), project.ID, filter, countCap+1)
 		if err != nil {
-			slog.Error("count traces failed", "err", err)
-			writeError(w, http.StatusInternalServerError, "failed to count traces")
+			readFailed(w, r, "failed to count traces", err)
 			return
 		}
 		value, stopped := capped(total)
@@ -185,21 +180,20 @@ func (s *Server) handleGetTrace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	trace, err := s.store.Trace(project.ID, id)
+	trace, err := s.store.Trace(r.Context(), project.ID, id)
 	if err != nil {
-		slog.Error("read trace failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to read the trace")
+		readFailed(w, r, "failed to read the trace", err)
 		return
 	}
 	if trace == nil {
 		writeError(w, http.StatusNotFound, fmt.Sprintf("trace %q not found", id))
 		return
 	}
-	body, ok := s.renderTrace(w, project.ID, trace, expand, budget)
+	body, ok := s.renderTrace(w, r, project.ID, trace, expand, budget)
 	if !ok {
 		return
 	}
-	writeJSON(w, http.StatusOK, body)
+	writeEncoded(w, http.StatusOK, body)
 }
 
 // handleLastTrace answers "the last failed trace, whole" in one round trip
@@ -228,10 +222,9 @@ func (s *Server) handleLastTrace(w http.ResponseWriter, r *http.Request) {
 	}
 	filter.Limit = 1
 
-	traces, err := s.store.Traces(project.ID, filter)
+	traces, err := s.store.Traces(r.Context(), project.ID, filter)
 	if err != nil {
-		slog.Error("read last trace failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to read the last trace")
+		readFailed(w, r, "failed to read the last trace", err)
 		return
 	}
 	if len(traces) == 0 {
@@ -244,10 +237,9 @@ func (s *Server) handleLastTrace(w http.ResponseWriter, r *http.Request) {
 	// The listing row carries no metadata (it is a payload); the shortcut
 	// promises the same shape as GET /traces/{id}, so the trace is read
 	// again in full.
-	trace, err := s.store.Trace(project.ID, traces[0].ID)
+	trace, err := s.store.Trace(r.Context(), project.ID, traces[0].ID)
 	if err != nil {
-		slog.Error("read last trace failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to read the last trace")
+		readFailed(w, r, "failed to read the last trace", err)
 		return
 	}
 	if trace == nil {
@@ -255,42 +247,38 @@ func (s *Server) handleLastTrace(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "no trace matches "+describeFilters(values))
 		return
 	}
-	body, ok := s.renderTrace(w, project.ID, trace, expand, budget)
+	body, ok := s.renderTrace(w, r, project.ID, trace, expand, budget)
 	if !ok {
 		return
 	}
-	writeJSON(w, http.StatusOK, body)
+	writeEncoded(w, http.StatusOK, body)
 }
 
 // renderTrace assembles the tree and, when asked, spends the payload budget on
-// it. It answers the client itself on a read failure.
-func (s *Server) renderTrace(w http.ResponseWriter, projectID string, trace *store.TraceRow,
-	expand bool, budgetBytes int) (object, bool) {
-	io := store.SkipIO
-	if expand {
-		io = store.WithIO
-	}
-	observations, err := s.store.Observations(projectID, trace.ID, io)
-	if err != nil {
-		slog.Error("read observations failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to read the observations")
+// it, and returns the answer encoded. It answers the client itself on a
+// failure.
+func (s *Server) renderTrace(w http.ResponseWriter, r *http.Request, projectID string, trace *store.TraceRow,
+	expand bool, budgetBytes int) ([]byte, bool) {
+	nodes, cut, err := s.readTree(r.Context(), projectID, trace.ID)
+	if !treeOK(w, r, err) {
 		return nil, false
 	}
-	roots := buildTree(observations)
+	roots := buildTree(nodes)
+	omitted := omittedCount(trace, len(nodes), cut)
 
-	body := renderTraceDetail(trace, renderNodes(roots, payloadBudget{}, false))
-	if !expand {
-		return body, true
-	}
+	body := renderTraceDetail(trace, treeJSON{roots: roots}, omitted)
 	// The skeleton is measured before any payload is inlined, so what the
 	// payloads get is what is genuinely left of the budget (#6).
-	skeleton, err := json.Marshal(body)
+	skeleton, err := body.MarshalJSON()
 	if err != nil {
 		slog.Error("render trace failed", "err", err)
 		writeError(w, http.StatusInternalServerError, "failed to render the trace")
 		return nil, false
 	}
-	slots := countPayloads(observations)
+	if !expand {
+		return skeleton, true
+	}
+	slots := countPayloads(nodes)
 	budget := newPayloadBudget(budgetBytes, len(skeleton), slots)
 	if !budget.affordable {
 		// A trace wide enough that even bare markers would not fit gets
@@ -311,20 +299,59 @@ func (s *Server) renderTrace(w http.ResponseWriter, projectID string, trace *sto
 					"read payloads one at a time from /api/v1/observations/{id}/io",
 				slots, needed, config.MaxResponseBudgetBytes)
 		}
-		return body.put("expansion", object{}.
+		// The skeleton with one more field: written after the last one
+		// rather than by rendering the tree a second time.
+		expansion, err := object{}.put("expansion", object{}.
 			put("expanded", false).
 			put("payloads", slots).
 			put("budget_needed", needed).
 			put("retryable", retryable).
-			put("reason", reason)), true
+			put("reason", reason)).MarshalJSON()
+		if err != nil {
+			slog.Error("render trace failed", "err", err)
+			writeError(w, http.StatusInternalServerError, "failed to render the trace")
+			return nil, false
+		}
+		skeleton[len(skeleton)-1] = ','
+		return append(skeleton, expansion[1:]...), true
 	}
-	return renderTraceDetail(trace, renderNodes(roots, budget, true)), true
+	body = renderTraceDetail(trace, treeJSON{roots: roots, payloads: &treePayloads{
+		ctx: r.Context(), reader: s.store.PayloadReader(), budget: budget,
+	}}, omitted)
+	encoded, err := body.MarshalJSON()
+	if !treeOK(w, r, err) {
+		return nil, false
+	}
+	return encoded, true
 }
 
-func renderTraceDetail(trace *store.TraceRow, observations []object) object {
-	return renderTraceRow(trace).
-		putSome("metadata", trace.Metadata).
-		put("observations", observations)
+// treeOK reports whether a tree was read or written without error, and
+// answers the client when it was not: a failed read of the store as reads are
+// answered, anything else as a failure to render.
+func treeOK(w http.ResponseWriter, r *http.Request, err error) bool {
+	var unread *storeReadFailed
+	switch {
+	case err == nil:
+		return true
+	case errors.As(err, &unread):
+		readFailed(w, r, "failed to read the observations", unread.err)
+	default:
+		slog.Error("render trace failed", "err", err)
+		writeError(w, http.StatusInternalServerError, "failed to render the trace")
+	}
+	return false
+}
+
+// renderTraceDetail is a trace with its tree. `observations_omitted` says how
+// much of the trace the tree leaves out, and only when it leaves anything out
+// (spec 043 #18); it comes before the tree, so a reader of the stream knows
+// the tree is partial before it reads it.
+func renderTraceDetail(trace *store.TraceRow, observations appender, omitted int) object {
+	body := renderTraceRow(trace).putSome("metadata", trace.Metadata)
+	if omitted > 0 {
+		body = body.put("observations_omitted", omitted)
+	}
+	return body.put("observations", observations)
 }
 
 // renderTraceRow renders the list-row fields of a trace, in the order
@@ -369,122 +396,14 @@ func renderMatch(match *store.TraceMatch) object {
 		put("snippet", match.Snippet)
 }
 
-// observationNode is one span with the spans that named it as their parent.
-type observationNode struct {
-	row      *store.ObservationRow
-	children []*observationNode
-}
-
-// buildTree nests observations under their parents, siblings by start time.
-// Rows arrive already ordered by (start_time, id), so appending preserves that
-// order at every level.
-//
-// A span whose parent is not in this trace renders at the root with its
-// `parent_observation_id` intact: the parent may still be in flight, and
-// hiding the child until it lands would make a live trace look empty (edge
-// cases).
-//
-// A parent cycle is broken rather than merely re-rooted. `parent_span_id` is
-// client bytes stored verbatim (spec 002), so two spans naming each other is
-// something a caller can produce, and a cyclic `children` graph is not a
-// rendering glitch — the renderer recurses into it until the goroutine stack
-// is exhausted, which in Go is a fatal error the server cannot recover from
-// (found in review of PR #5). The cycle's entry node is detached from its
-// parent and rendered at the root, keeping every span visible and the graph
-// finite.
-func buildTree(rows []*store.ObservationRow) []*observationNode {
-	index := make(map[string]*observationNode, len(rows))
-	nodes := make([]*observationNode, 0, len(rows))
-	for _, row := range rows {
-		node := &observationNode{row: row}
-		nodes = append(nodes, node)
-		index[row.ID] = node
-	}
-
-	var roots []*observationNode
-	for _, node := range nodes {
-		parent, nested := index[node.row.ParentObservationID]
-		if !nested || parent == node {
-			roots = append(roots, node)
-			continue
-		}
-		parent.children = append(parent.children, node)
-	}
-
-	// Anything unreachable from a root is in a cycle. Cutting the edge that
-	// leads *into* such a node — rather than only adding it to the roots —
-	// is what makes the result a tree: the node keeps its own children, so
-	// nothing is lost, and its parent no longer points back at it.
-	reachable := make(map[*observationNode]bool, len(nodes))
-	var walk func(*observationNode)
-	walk = func(node *observationNode) {
-		if reachable[node] {
-			return
-		}
-		reachable[node] = true
-		for _, child := range node.children {
-			walk(child)
-		}
-	}
-	for _, root := range roots {
-		walk(root)
-	}
-	for _, node := range nodes {
-		if reachable[node] {
-			continue
-		}
-		if parent, nested := index[node.row.ParentObservationID]; nested {
-			parent.children = slices.DeleteFunc(parent.children,
-				func(child *observationNode) bool { return child == node })
-		}
-		roots = append(roots, node)
-		walk(node)
-	}
-	sort.SliceStable(roots, func(i, j int) bool {
-		if roots[i].row.StartTime != roots[j].row.StartTime {
-			return roots[i].row.StartTime < roots[j].row.StartTime
-		}
-		return roots[i].row.ID < roots[j].row.ID
-	})
-	return roots
-}
-
-// countPayloads counts the payload slots an expanded tree wants to inline —
-// the divisor of the equal share every observation gets (#6).
-//
-// The count has to agree with what renderNode actually emits, which is why it
-// goes through the same asAny: a nil `map[string]any` placed in an `any` is
-// not a nil `any`, so counting metadata by `!= nil` counted a slot for every
-// observation whether it had metadata or not, shrinking everyone's share and
-// truncating payloads that would have fit (found in review of PR #5).
-func countPayloads(rows []*store.ObservationRow) int {
-	slots := 0
-	for _, row := range rows {
-		for _, payload := range []any{row.Input, row.Output, asAny(row.Metadata)} {
-			if payload != nil {
-				slots++
-			}
-		}
-	}
-	return slots
-}
-
-func renderNodes(nodes []*observationNode, budget payloadBudget, expand bool) []object {
-	out := make([]object, 0, len(nodes))
-	for _, node := range nodes {
-		out = append(out, renderNode(node, budget, expand))
-	}
-	return out
-}
-
-// renderNode renders one observation and its subtree. Payloads ride only with
+// renderOwn renders an observation's own fields: everything but its payloads
+// and its children, which the tree writes after them. Payloads ride only with
 // `?expand=io`, metadata included: it is a payload row like the other two, it
 // is what `/observations/{id}/io` returns alongside them (#3), and inlining it
 // unasked would break the promise that a trace of hundreds of observations
 // still fits the budget (Decision 24).
-func renderNode(node *observationNode, budget payloadBudget, expand bool) object {
-	row := node.row
-	out := object{}.
+func renderOwn(row *store.ObservationRow) object {
+	return object{}.
 		put("id", row.ID).
 		putSome("parent_observation_id", row.ParentObservationID).
 		put("type", row.Type).
@@ -502,25 +421,6 @@ func renderNode(node *observationNode, budget payloadBudget, expand bool) object
 		putSome("prompt", renderPromptLink(row)).
 		putSome("input_bytes", row.InputBytes).
 		putSome("output_bytes", row.OutputBytes)
-	if expand {
-		for _, payload := range []struct {
-			key   string
-			value any
-		}{
-			{"input", row.Input},
-			{"output", row.Output},
-			{"metadata", asAny(row.Metadata)},
-		} {
-			if payload.value == nil {
-				continue
-			}
-			out = out.put(payload.key, budget.render(payload.value, row.TraceID, row.ID))
-		}
-	}
-	if len(node.children) > 0 {
-		out = out.put("children", renderNodes(node.children, budget, expand))
-	}
-	return out
 }
 
 // observationTTFT is the wait this observation's caller had: the completion
@@ -596,10 +496,9 @@ func (s *Server) handleObservationIO(w http.ResponseWriter, r *http.Request) {
 		// the answer may be ambiguous. Truncation markers always embed
 		// `trace_id`, so an agent following a marker never lands here
 		// (API contract).
-		candidates, err := s.store.ObservationTraces(project.ID, id)
+		candidates, err := s.store.ObservationTraces(r.Context(), project.ID, id)
 		if err != nil {
-			slog.Error("resolve observation failed", "err", err)
-			writeError(w, http.StatusInternalServerError, "failed to read the observation")
+			readFailed(w, r, "failed to read the observation", err)
 			return
 		}
 		switch len(candidates) {
@@ -616,10 +515,9 @@ func (s *Server) handleObservationIO(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	observation, err := s.store.Observation(project.ID, trace, id)
+	observation, err := s.store.Observation(r.Context(), project.ID, trace, id)
 	if err != nil {
-		slog.Error("read observation failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to read the observation")
+		readFailed(w, r, "failed to read the observation", err)
 		return
 	}
 	if observation == nil {
@@ -664,9 +562,13 @@ func traceFilter(values url.Values) (store.TraceFilter, error) {
 		UserID:    values.Get("user_id"),
 		SessionID: values.Get("session_id"),
 		Version:   values.Get("version"),
-		Tags:      values["tag"],
 		Status:    values.Get("status"),
 	}
+	tags, err := tagFilter(values["tag"])
+	if err != nil {
+		return filter, err
+	}
+	filter.Tags = tags
 	// The three that take a list (spec 027 #1). They are read together
 	// because they are one rule: any of the items, one parameter, one chip.
 	for _, list := range []struct {
@@ -768,6 +670,26 @@ func traceFilter(values url.Values) (store.TraceFilter, error) {
 		filter.MinCost = &cost
 	}
 	return filter, nil
+}
+
+// maxTagFilter is how many distinct tags `?tag=` may name (spec 043 #17).
+// Tags are ANDed — one scan of the trace's tag array per value — and a trace
+// keeps at most 50 distinct tags, so a filter naming more can match nothing;
+// uncapped, each repetition multiplied the scan's cost, and a thousand of them
+// passed SQLite's expression-depth limit and came back `500`.
+const maxTagFilter = 50
+
+// tagFilter reads the repeatable `tag`: duplicates collapse, in the order
+// given, before the cap is counted.
+func tagFilter(given []string) ([]string, error) {
+	if len(given) == 0 {
+		return nil, nil
+	}
+	tags, over := distinctCapped(given, maxTagFilter)
+	if over {
+		return nil, fmt.Errorf("tag: at most %d values", maxTagFilter)
+	}
+	return tags, nil
 }
 
 // parsePrompt reads `name` or `name@version`. A version is a run of digits

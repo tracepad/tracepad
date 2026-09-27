@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
@@ -54,7 +55,7 @@ func (s *Server) mintSetupToken() {
 	if s.store == nil || s.setupOff {
 		return
 	}
-	owners, err := s.store.EnabledOwners()
+	owners, err := s.store.EnabledOwners(context.Background())
 	if err != nil {
 		slog.Error("could not count the owners", "err", err)
 		return
@@ -106,8 +107,8 @@ func (s *Server) SetupURL() string {
 // SetupRequired reports whether this server still needs its first owner. It is
 // asked of the store rather than of the token, because an owner can be created
 // while the process runs and the answer has to change with it.
-func (s *Server) SetupRequired() (bool, error) {
-	owners, err := s.store.EnabledOwners()
+func (s *Server) SetupRequired(ctx context.Context) (bool, error) {
+	owners, err := s.store.EnabledOwners(ctx)
 	return owners == 0, err
 }
 
@@ -129,10 +130,9 @@ func (s *Server) handleGetSetup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	required, err := s.SetupRequired()
+	required, err := s.SetupRequired(r.Context())
 	if err != nil {
-		slog.Error("could not count the owners", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to read the accounts")
+		readFailed(w, r, "failed to read the accounts", err)
 		return
 	}
 	expired := required && !s.setupOff && s.currentSetupToken() == ""
@@ -267,13 +267,12 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		err      error
 	)
 	if !s.underPasswordGate(w, r, func(slot *store.PasswordSlot) {
-		account, verified, err = s.checkLogin(slot, email, request.Password)
+		account, verified, err = s.checkLogin(r, slot, email, request.Password)
 	}) {
 		return
 	}
 	if err != nil {
-		slog.Error("account lookup failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to read the account")
+		readFailed(w, r, "failed to read the account", err)
 		return
 	}
 	if account == nil || account.Disabled || !verified {
@@ -290,8 +289,8 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 // checkLogin looks the account up and compares the password.
-func (s *Server) checkLogin(slot *store.PasswordSlot, email, password string) (*store.Account, bool, error) {
-	account, err := s.store.AccountByEmail(email)
+func (s *Server) checkLogin(r *http.Request, slot *store.PasswordSlot, email, password string) (*store.Account, bool, error) {
+	account, err := s.store.AccountByEmail(r.Context(), email)
 	if err != nil {
 		return nil, false, err
 	}
@@ -389,14 +388,13 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	s.writeMe(w, c.account)
+	s.writeMe(w, r, c.account)
 }
 
-func (s *Server) writeMe(w http.ResponseWriter, account *store.Account) {
-	projects, err := s.store.AccountProjects(account)
+func (s *Server) writeMe(w http.ResponseWriter, r *http.Request, account *store.Account) {
+	projects, err := s.store.AccountProjects(r.Context(), account)
 	if err != nil {
-		slog.Error("could not read the account's projects", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to read the projects")
+		readFailed(w, r, "failed to read the projects", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, object{}.
@@ -543,10 +541,9 @@ func (s *Server) handleListSessionsOfAccount(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	sessions, err := s.store.AccountSessions(c.account.ID, time.Now().UnixNano())
+	sessions, err := s.store.AccountSessions(r.Context(), c.account.ID, time.Now().UnixNano())
 	if err != nil {
-		slog.Error("could not read the sessions", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to read the sessions")
+		readFailed(w, r, "failed to read the sessions", err)
 		return
 	}
 	rendered := make([]object, 0, len(sessions))

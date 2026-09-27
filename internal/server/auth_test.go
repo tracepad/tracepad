@@ -843,7 +843,7 @@ func TestConcurrentSetupMakesOneOwner(t *testing.T) {
 	if created != 1 {
 		t.Errorf("%d of %d attempts created an owner, want exactly one", created, tries)
 	}
-	owners, err := h.store.EnabledOwners()
+	owners, err := h.store.EnabledOwners(t.Context())
 	if err != nil || owners != 1 {
 		t.Errorf("owners = %d, err = %v", owners, err)
 	}

@@ -139,6 +139,8 @@ Server environment:
   TRACEPAD_STORE_RAW              keep raw OTLP bodies for remap/export (default on)
   TRACEPAD_MAX_BODY_BYTES         request body cap in bytes             (default 20971520)
   TRACEPAD_RESPONSE_BUDGET_BYTES  default read response budget          (default 51200)
+  TRACEPAD_READ_TIMEOUT           deadline of one read request          (default 20s)
+  TRACEPAD_READ_CONCURRENCY       reads served at once                  (default 2 per CPU, at least 4)
   TRACEPAD_MCP                    serve MCP at /mcp                     (default on)
   TRACEPAD_SWEEP_INTERVAL         retention sweep cadence               (default 1h)
   TRACEPAD_ROLLUP_INTERVAL        statistics rollup cadence             (default 5m)
@@ -201,6 +203,9 @@ func serve(args []string) error {
 	defer aggregator.Close()
 
 	srv := server.New(cfg, version, st, writer, sweeper)
+	// Sized for the read slots the server took, which is where the
+	// setting's default is settled (spec 043 #16).
+	st.BoundPool(srv.ReadConcurrency())
 	// After the server, because the server is what knows whether this
 	// deployment still needs its first owner and what the link to create
 	// one is (spec 028 #9).
@@ -306,7 +311,7 @@ func checkDeclaredSecrets(log *slog.Logger, st *store.Store, specs []store.Provi
 		if len(spec.SecretKey) >= config.MinSecretLength {
 			continue
 		}
-		existing, err := st.ProjectByName(spec.Name)
+		existing, err := st.ProjectByName(context.Background(), spec.Name)
 		if err != nil {
 			return err
 		}
@@ -396,7 +401,7 @@ func noteSetupOff(log *slog.Logger, cfg *config.Config, srv *server.Server) {
 	if !cfg.SetupDisabled {
 		return
 	}
-	required, err := srv.SetupRequired()
+	required, err := srv.SetupRequired(context.Background())
 	if err != nil || !required {
 		return
 	}

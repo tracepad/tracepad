@@ -413,7 +413,7 @@ func TestComponentsThatDoNotSumAreKept(t *testing.T) {
 	if rec := h.post(t, "/v1/traces", body); rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s, want the export stored", rec.Code, rec.Body)
 	}
-	observations, err := h.store.Observations(h.project.ID, "00112233445566778899aabbccddeeff", store.WithIO)
+	observations, err := h.store.Observations(t.Context(), h.project.ID, "00112233445566778899aabbccddeeff", store.WithIO)
 	if err != nil || len(observations) != 1 {
 		t.Fatalf("observations = %d, %v", len(observations), err)
 	}
@@ -438,7 +438,7 @@ func TestAStringCostStopsNothing(t *testing.T) {
 			CostDetails: map[string]any{"total": "abc"}})
 
 	h.rollTheCorpus(t, time.Unix(statsHour+3*3600, 0))
-	state, err := h.store.RollupState(h.project.ID)
+	state, err := h.store.RollupState(t.Context(), h.project.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -72,7 +72,7 @@ export interface paths {
         put?: never;
         /**
          * Langfuse SDK: an upload URL for one media body, or null when it is already stored
-         * @description The first call of the Langfuse SDK's media channel. `mediaId` is the SDK's own derivation — the first 22 characters of the URL-safe base64 SHA-256 — which the SDK checks. `uploadUrl` is null when this project already holds the body, in which case the named trace's ref is recorded and nothing is sent; a body only another project holds is still asked for, because the bytes are the proof of possession. Under the `placeholder` setting `uploadUrl` is always null and nothing is kept. The body is read leniently: fields a newer SDK adds are ignored.
+         * @description The first call of the Langfuse SDK's media channel. `mediaId` is the SDK's own derivation — the first 22 characters of the URL-safe base64 SHA-256 — which the SDK checks. `uploadUrl` is null when this project already holds the body, in which case nothing is sent and the named trace's ref is recorded: settled if the project has the trace, and otherwise pending, dated as the bytes rather than the ask, until the trace's spans arrive — so the null answer too counts toward the pending cap and can be a 429; a body only another project holds is still asked for, because the bytes are the proof of possession. Under the `placeholder` setting `uploadUrl` is always null and nothing is kept. The body is read leniently: fields a newer SDK adds are ignored.
          */
         post: operations["langfuseMediaUploadURL"];
         delete?: never;
@@ -364,7 +364,7 @@ export interface paths {
         };
         /**
          * One trace with its observations as a nested tree
-         * @description Children are nested inside their parents, siblings ordered by start time. An observation whose parent has not arrived yet renders at the root with its `parent_observation_id` intact. Payloads ride only with `?expand=io`.
+         * @description Children are nested inside their parents, siblings ordered by start time. An observation whose parent has not arrived yet renders at the root with its `parent_observation_id` intact, and so does one that would sit deeper than 100 levels, keeping its own children. A trace past 10,000 observations or 32 MiB of structure is answered with its first observations by start time and `observations_omitted`. Payloads ride only with `?expand=io`.
          */
         get: operations["getTrace"];
         put?: never;
@@ -1699,6 +1699,8 @@ export interface components {
         Trace: components["schemas"]["TraceRow"] & {
             metadata?: Record<string, never>;
             observations: components["schemas"]["Observation"][];
+            /** @description Present only when the tree is a part of the trace: `observation_count` minus the observations rendered. A tree holds the longest prefix of the trace's observations, in start-time order, of at most 10,000 observations and 32 MiB of their own fields; an observation whose parent was left out renders at the root with its `parent_observation_id` */
+            observations_omitted?: number;
             expansion?: components["schemas"]["Expansion"];
         };
         /** @description One span. `children` holds the spans that named it as their parent and is absent for a leaf. */
@@ -2368,7 +2370,7 @@ export interface components {
                 "application/json": components["schemas"]["Error"];
             };
         };
-        /** @description The credentials could not be checked right now, more passwords were being checked at once than the server allows, or a write met a database condition that passes (a full disk, a lock that did not clear); retry after `Retry-After` */
+        /** @description The credentials could not be checked right now, more passwords were being checked at once than the server allows, or a write met a database condition that passes (a full disk, a lock that did not clear), or a read found no free read slot before its deadline (`the server is busy; retry shortly`): retry after `Retry-After`. A read the deadline stopped while it ran (`the read took longer than 20s and was stopped; narrow the time range or the filters`, the number being `TRACEPAD_READ_TIMEOUT`) carries no `Retry-After`: the same request would be stopped again, so narrow it */
         ServiceUnavailable: {
             headers: {
                 /** @description Seconds to wait */
@@ -2637,6 +2639,24 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            /** @description The trace was deleted or erased within the hour and is not stored now: no upload is taken for it */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The project has 10,000 uploads waiting for their traces and this one — with an upload URL or without — would be another; `Retry-After: 60`. A trace the project has is never refused */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             503: components["responses"]["ServiceUnavailable"];
         };
     };
@@ -2665,7 +2685,7 @@ export interface operations {
                 content?: never;
             };
             400: components["responses"]["BadRequest"];
-            /** @description The token is missing, forged, expired, or for another id */
+            /** @description The token is missing, forged, expired, or for another id, and is refused having read nothing; or the key that asked for it has been revoked, or its trace was deleted or erased within the hour, which is decided before the body is read and answered at once, the body then drained up to the length the ask declared and dropped */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -2676,6 +2696,15 @@ export interface operations {
             };
             /** @description The body is larger than the upload declared */
             413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The project has 10,000 uploads waiting for their traces and this one's trace has not arrived; `Retry-After: 60`. Not for the retry of an upload already stored. Decided before the body is read and answered at once, the body then drained up to the length the ask declared and dropped */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3180,6 +3209,11 @@ export interface operations {
                             waiting?: number;
                             capacity?: number;
                         };
+                        /** @description Reads being served now, for the whole deployment, against TRACEPAD_READ_CONCURRENCY; a read that finds none free waits within its deadline */
+                        read_slots?: {
+                            busy: number;
+                            capacity: number;
+                        };
                         response_budget_bytes?: number;
                         /** @description The link between traces and dataset runs, as this project sees it */
                         runs?: {
@@ -3224,7 +3258,7 @@ export interface operations {
                              */
                             completed_at: string | null;
                         };
-                        /** @description This project's ingest traffic since the process started */
+                        /** @description This project's ingest traffic, and its reads the read bounds refused, since the process started */
                         counters: {
                             /** Format: date-time */
                             since?: string;
@@ -3238,6 +3272,10 @@ export interface operations {
                             rejected_batches?: number;
                             unreadable_resource_spans?: number;
                             langfuse_ingestion_versions?: string[];
+                            /** @description This project's reads the read deadline stopped (TRACEPAD_READ_TIMEOUT) */
+                            reads_timed_out?: number;
+                            /** @description This project's reads refused because no read slot came free before the deadline */
+                            reads_refused_busy?: number;
                         };
                     };
                 };
@@ -3261,7 +3299,7 @@ export interface operations {
                 session_id?: string;
                 /** @description The trace name. A comma-separated list matches **any** of them; items are trimmed, duplicates collapse, an empty item is a 400, repeating the parameter is a 400, at most 100 items, and a name containing a comma is not expressible here. A trace with no name never matches. `GET /api/v1/facets` lists the values in a range with their counts */
                 name?: string;
-                /** @description Repeatable; a trace must carry every tag given */
+                /** @description Repeatable; a trace must carry every tag given. At most 50 distinct values, duplicates collapsing first; more is a 400 (`tag: at most 50 values`), since a trace keeps at most 50 tags */
                 tag?: string[];
                 /** @description `error` keeps traces with at least one failed observation, `ok` keeps the rest */
                 status?: "error" | "ok";
@@ -3337,7 +3375,7 @@ export interface operations {
                 session_id?: string;
                 /** @description The trace name. A comma-separated list matches **any** of them; items are trimmed, duplicates collapse, an empty item is a 400, repeating the parameter is a 400, at most 100 items, and a name containing a comma is not expressible here. A trace with no name never matches. `GET /api/v1/facets` lists the values in a range with their counts */
                 name?: string;
-                /** @description Repeatable; a trace must carry every tag given */
+                /** @description Repeatable; a trace must carry every tag given. At most 50 distinct values, duplicates collapsing first; more is a 400 (`tag: at most 50 values`), since a trace keeps at most 50 tags */
                 tag?: string[];
                 /** @description `error` keeps traces with at least one failed observation, `ok` keeps the rest */
                 status?: "error" | "ok";
@@ -3396,6 +3434,7 @@ export interface operations {
                 session_id?: string;
                 /** @description The trace name, or a comma-separated list matching any of them */
                 name?: string;
+                /** @description Repeatable; every tag given. At most 50 distinct values */
                 tag?: string[];
                 status?: "error" | "ok";
                 min_cost?: number;
@@ -5366,7 +5405,7 @@ export interface operations {
                 session_id?: string;
                 /** @description The trace name. A comma-separated list matches **any** of them; items are trimmed, duplicates collapse, an empty item is a 400, repeating the parameter is a 400, at most 100 items, and a name containing a comma is not expressible here. A trace with no name never matches. `GET /api/v1/facets` lists the values in a range with their counts */
                 name?: string;
-                /** @description Repeatable; a trace must carry every tag given */
+                /** @description Repeatable; a trace must carry every tag given. At most 50 distinct values, duplicates collapsing first; more is a 400 (`tag: at most 50 values`), since a trace keeps at most 50 tags */
                 tag?: string[];
                 /** @description `error` keeps traces with at least one failed observation, `ok` keeps the rest */
                 status?: "error" | "ok";

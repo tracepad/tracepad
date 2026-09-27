@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"runtime"
 	"sync"
 	"time"
 
@@ -51,6 +52,14 @@ type Server struct {
 	// responseBudget is the default byte budget a read spends on payloads
 	// (spec 004 #2); `?budget=` overrides it per request.
 	responseBudget int64
+	// readTimeout is the deadline of one read and reads its slots
+	// (spec 043 #15, #16): the read gate's two bounds.
+	readTimeout time.Duration
+	reads       readSlots
+	// systemReads is the one slot `GET /api/v1/system` reads in: a lane
+	// of its own, so the gauge answers while every read slot is taken
+	// and its counts cannot crowd out the rest (spec 043 #27).
+	systemReads readSlots
 	// mcp reports whether /mcp is being served, which `GET /api/v1/system`
 	// publishes because the endpoint map deliberately does not (Decision
 	// 27).
@@ -151,6 +160,14 @@ func New(cfg *config.Config, version string, st *store.Store, writer JobWriter, 
 	if budget <= 0 {
 		budget = config.DefaultResponseBudgetBytes
 	}
+	readTimeout := cfg.ReadTimeout
+	if readTimeout <= 0 {
+		readTimeout = config.DefaultReadTimeout
+	}
+	readConcurrency := cfg.ReadConcurrency
+	if readConcurrency <= 0 {
+		readConcurrency = config.DefaultReadConcurrency(runtime.GOMAXPROCS(0))
+	}
 	sessionLife := cfg.SessionLife
 	if sessionLife <= 0 {
 		sessionLife = config.DefaultSessionLife
@@ -163,6 +180,9 @@ func New(cfg *config.Config, version string, st *store.Store, writer JobWriter, 
 		storeRaw:        cfg.StoreRaw,
 		maxBodyBytes:    maxBody,
 		responseBudget:  budget,
+		readTimeout:     readTimeout,
+		reads:           newReadSlots(readConcurrency),
+		systemReads:     newReadSlots(1),
 		mcp:             cfg.MCP,
 		adminToken:      cfg.AdminToken,
 		sessionLife:     sessionLife,
@@ -196,6 +216,15 @@ func New(cfg *config.Config, version string, st *store.Store, writer JobWriter, 
 	// from it rather than beside it.
 	mux := http.NewServeMux()
 	for _, route := range s.routes() {
+		// Every read but the public ones runs under the read deadline and
+		// in a read slot (spec 043 #15, #16), which the guard enters once
+		// it knows who is asking; routes.go says which are which.
+		switch readBoundOf(route) {
+		case sharedSlots:
+			route.handler = s.readGate(route.handler, s.reads)
+		case ownLane:
+			route.handler = s.readGate(route.handler, s.systemReads)
+		}
 		// The policy column is applied here, once, rather than by each
 		// handler asking for its own credentials (spec 028 Decision 7).
 		mux.HandleFunc(route.Method+" "+route.Path, s.guard(route))

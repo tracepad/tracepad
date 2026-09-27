@@ -2,6 +2,7 @@ package server
 
 import (
 	"compress/gzip"
+	"context"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -145,7 +146,13 @@ func (s *Server) handleTraces(w http.ResponseWriter, r *http.Request) {
 		}
 		return batch, result
 	}
-	batch, result := prepare(decoded, s.mediaOptions(project))
+	// What a batch stores does not depend on whether its client is still
+	// there: the media lookups of the walk run without the request's
+	// cancellation, as they did before reads took a context, and a batch
+	// whose client left maps exactly as one whose client waited
+	// (spec 043 #28). Its write goes on to the writer all the same.
+	walk := context.WithoutCancel(r.Context())
+	batch, result := prepare(decoded, s.mediaOptions(walk, project))
 	if batch.Empty() {
 		// Every span was skipped and raw storage is off: there is
 		// nothing to commit, and the export is still a success. The
@@ -164,7 +171,7 @@ func (s *Server) handleTraces(w http.ResponseWriter, r *http.Request) {
 		// picture — instead of a reference to nothing.
 		again, decodeErr := mapping.DecodeExportBody(received, jsonEncoding)
 		if decodeErr == nil {
-			opts := s.mediaOptions(project)
+			opts := s.mediaOptions(walk, project)
 			opts.Resolve = nil
 			batch, result = prepare(again, opts)
 			err = s.writer.Submit(r.Context(), batch)

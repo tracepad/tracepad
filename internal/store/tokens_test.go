@@ -162,12 +162,12 @@ func TestLiveTokensEqualTheRolledOnes(t *testing.T) {
 			}
 			// The two halves of the live answer, folded the way the
 			// server folds them.
-			if err := s.StatsSamples(project.ID, filter, func(sample StatsSample) {
+			if err := s.StatsSamples(t.Context(), project.ID, filter, func(sample StatsSample) {
 				at(sample.Key).Add(sample.Tokens)
 			}); err != nil {
 				t.Fatal(err)
 			}
-			if err := s.StatsTokens(project.ID, filter, func(sum StatsTokenSum) {
+			if err := s.StatsTokens(t.Context(), project.ID, filter, func(sum StatsTokenSum) {
 				at(sum.Key).Add(sum.Tokens)
 			}); err != nil {
 				t.Fatal(err)
@@ -336,7 +336,7 @@ func TestMigration0018ResetsThePassCutoff(t *testing.T) {
 	}
 	defer s.Close()
 
-	state, err := s.RollupState("p1")
+	state, err := s.RollupState(t.Context(), "p1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -347,7 +347,7 @@ func TestMigration0018ResetsThePassCutoff(t *testing.T) {
 		t.Errorf("rolled_until = %d after 0018, want it untouched", state.RolledUntil)
 	}
 	var rows int
-	err = s.StatsRollupRows("p1", rollupHour, rollupHour+SecondsPerHour, nil, func(row StatsRow) {
+	err = s.StatsRollupRows(t.Context(), "p1", rollupHour, rollupHour+SecondsPerHour, nil, func(row StatsRow) {
 		rows++
 		expectTokens(t, "the pre-0018 row", row.Tokens, Tokens{})
 	})

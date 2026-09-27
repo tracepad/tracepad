@@ -1,8 +1,8 @@
 package server
 
 import (
+	"context"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -63,10 +63,14 @@ func (s *Server) handleDeleteTrace(w http.ResponseWriter, r *http.Request) {
 	// request computes none of it, so a count that failed cannot 500 a
 	// deletion that was going to succeed.
 	if values.Get("confirm") == "" {
-		counts, runs, err := s.store.TracePreview(project.ID, id)
-		if err != nil {
-			slog.Error("trace delete preview failed", "err", err)
-			writeError(w, http.StatusInternalServerError, "failed to read what this trace holds")
+		var (
+			counts store.DeleteCounts
+			runs   []store.AffectedRun
+		)
+		if !s.readInSlot(w, r, "failed to read what this trace holds", func(ctx context.Context) (err error) {
+			counts, runs, err = s.store.TracePreview(ctx, project.ID, id)
+			return err
+		}) {
 			return
 		}
 		if counts.Traces == 0 {
@@ -135,10 +139,14 @@ func (s *Server) handleDeleteTraces(w http.ResponseWriter, r *http.Request) {
 		// Counted exactly rather than at the listing's cap (spec 009 #12):
 		// this is one deliberate act, and "1000+" would leave the operator
 		// unable to tell a filter they can finish from one they cannot.
-		counts, runs, err := s.store.TraceDeletePreview(project.ID, filter)
-		if err != nil {
-			slog.Error("trace delete preview failed", "err", err)
-			writeError(w, http.StatusInternalServerError, "failed to count the matching traces")
+		var (
+			counts store.DeleteCounts
+			runs   []store.AffectedRun
+		)
+		if !s.readInSlot(w, r, "failed to count the matching traces", func(ctx context.Context) (err error) {
+			counts, runs, err = s.store.TraceDeletePreview(ctx, project.ID, filter)
+			return err
+		}) {
 			return
 		}
 		writeJSON(w, http.StatusOK, object{}.
@@ -157,10 +165,13 @@ func (s *Server) handleDeleteTraces(w http.ResponseWriter, r *http.Request) {
 	// the preview, and a set that shrank is not a reason to refuse. One row
 	// past the round says whether there is another.
 	filter.Limit = limit + 1
-	rows, err := s.store.Traces(project.ID, filter)
-	if err != nil {
-		slog.Error("select the traces to delete failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to select the matching traces")
+	// The selection is a listing's read, and is bounded as one; the
+	// deletion after it is the writer's (spec 043 #29).
+	var rows []*store.TraceRow
+	if !s.readInSlot(w, r, "failed to select the matching traces", func(ctx context.Context) (err error) {
+		rows, err = s.store.Traces(ctx, project.ID, filter)
+		return err
+	}) {
 		return
 	}
 	more := len(rows) > limit

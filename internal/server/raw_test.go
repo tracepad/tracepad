@@ -64,7 +64,7 @@ func seedRaw(t *testing.T, h *harness, projectID string, n int, contentType stri
 			t.Fatal(err)
 		}
 	}
-	rows, err := h.store.RawBatches(projectID, store.RawFilter{Limit: n + 1})
+	rows, err := h.store.RawBatches(t.Context(), projectID, store.RawFilter{Limit: n + 1})
 	if err != nil {
 		t.Fatal(err)
 	}

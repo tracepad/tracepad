@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"math"
@@ -284,17 +285,17 @@ type RollupState struct {
 // RollupState reads a project's bookkeeping. A project nobody has rolled
 // answers a zero state rather than an error: it has no history yet, and every
 // caller treats that as "all live".
-func (s *Store) RollupState(projectID string) (RollupState, error) {
-	return rollupState(s.db, projectID)
+func (s *Store) RollupState(ctx context.Context, projectID string) (RollupState, error) {
+	return rollupState(ctx, s.db, projectID)
 }
 
 type querier interface {
-	QueryRow(string, ...any) *sql.Row
+	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
-func rollupState(q querier, projectID string) (RollupState, error) {
+func rollupState(ctx context.Context, q querier, projectID string) (RollupState, error) {
 	var state RollupState
-	err := q.QueryRow(
+	err := q.QueryRowContext(ctx,
 		`SELECT rolled_until, last_pass FROM stats_rollup WHERE project_id = ?`,
 		projectID).Scan(&state.RolledUntil, &state.LastPass)
 	if err == sql.ErrNoRows {
@@ -312,7 +313,7 @@ func rollupState(q querier, projectID string) (RollupState, error) {
 //
 // `environment` filters when set, for the same reason the live scan filters
 // before it groups: a filter is not a grouping.
-func (s *Store) StatsRollupRows(projectID string, fromHour, toHour int64, environment []string, yield func(StatsRow)) error {
+func (s *Store) StatsRollupRows(ctx context.Context, projectID string, fromHour, toHour int64, environment []string, yield func(StatsRow)) error {
 	query := `SELECT hour, environment, release, model, count, error_count, total_cost, latency,
 	                 input_tokens, output_tokens, cache_read_tokens
 	          FROM stats_hourly
@@ -324,7 +325,7 @@ func (s *Store) StatsRollupRows(projectID string, fromHour, toHour int64, enviro
 	}
 	query += ` ORDER BY hour`
 
-	rows, err := s.db.Query(query, args...)
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("read the rollup: %w", err)
 	}
@@ -367,9 +368,9 @@ func (s *Store) StatsRollupRows(projectID string, fromHour, toHour int64, enviro
 //
 // It is a `MIN` over the primary key's leading columns, so it costs an index
 // seek.
-func (s *Store) OldestRolledHour(projectID string) (int64, bool, error) {
+func (s *Store) OldestRolledHour(ctx context.Context, projectID string) (int64, bool, error) {
 	var oldest sql.NullInt64
-	if err := s.db.QueryRow(
+	if err := s.db.QueryRowContext(ctx,
 		`SELECT MIN(hour) FROM stats_hourly WHERE project_id = ?`, projectID).
 		Scan(&oldest); err != nil {
 		return 0, false, fmt.Errorf("read the oldest rolled hour: %w", err)
@@ -379,8 +380,8 @@ func (s *Store) OldestRolledHour(projectID string) (int64, bool, error) {
 
 // StatsRollupHours reports which hours of a project hold rolled rows. The
 // tests and the system endpoint ask; the read path never needs to.
-func (s *Store) StatsRollupHours(projectID string) ([]int64, error) {
-	rows, err := s.db.Query(
+func (s *Store) StatsRollupHours(ctx context.Context, projectID string) ([]int64, error) {
+	rows, err := s.db.QueryContext(ctx,
 		`SELECT DISTINCT hour FROM stats_hourly WHERE project_id = ? ORDER BY hour`, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("read the rolled hours: %w", err)

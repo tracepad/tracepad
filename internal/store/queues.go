@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -574,8 +575,8 @@ type QueueItemFilter struct {
 // Queues lists a project's queues by name, whole: a project has as many
 // queues as it has review programmes, which is a handful (spec 003's
 // reasoning for configs).
-func (s *Store) Queues(projectID string) ([]*AnnotationQueue, error) {
-	rows, err := s.db.Query(
+func (s *Store) Queues(ctx context.Context, projectID string) ([]*AnnotationQueue, error) {
+	rows, err := s.db.QueryContext(ctx,
 		`SELECT `+queueColumns+` FROM annotation_queues q
 		  WHERE q.project_id = ? ORDER BY q.name`, projectID)
 	if err != nil {
@@ -595,8 +596,8 @@ func (s *Store) Queues(projectID string) ([]*AnnotationQueue, error) {
 }
 
 // Queue returns one queue with its counts, or nil when the name has none.
-func (s *Store) Queue(projectID, name string) (*AnnotationQueue, error) {
-	queue, err := scanQueue(s.db.QueryRow(
+func (s *Store) Queue(ctx context.Context, projectID, name string) (*AnnotationQueue, error) {
+	queue, err := scanQueue(s.db.QueryRowContext(ctx,
 		`SELECT `+queueColumns+` FROM annotation_queues q
 		  WHERE q.project_id = ? AND q.name = ?`, projectID, name))
 	if err == sql.ErrNoRows {
@@ -606,9 +607,9 @@ func (s *Store) Queue(projectID, name string) (*AnnotationQueue, error) {
 }
 
 // QueueItems lists one queue's items in `seq` order, oldest first.
-func (s *Store) QueueItems(projectID, name string, filter QueueItemFilter) ([]*AnnotationItem, error) {
+func (s *Store) QueueItems(ctx context.Context, projectID, name string, filter QueueItemFilter) ([]*AnnotationItem, error) {
 	query, args := itemQuery(projectID, name, filter)
-	rows, err := s.db.Query(query, args...)
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list the items of queue %s: %w", name, err)
 	}
@@ -634,11 +635,11 @@ func (s *Store) QueueItems(projectID, name string, filter QueueItemFilter) ([]*A
 }
 
 // CountQueueItems answers "how many match", stopping at cap (spec 009 #4).
-func (s *Store) CountQueueItems(projectID, name string, filter QueueItemFilter, cap int) (int, error) {
+func (s *Store) CountQueueItems(ctx context.Context, projectID, name string, filter QueueItemFilter, cap int) (int, error) {
 	where, args := itemConditions(projectID, name, filter)
 	args = append(args, cap)
 	var count int
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM (SELECT 1 FROM annotation_items WHERE `+
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM (SELECT 1 FROM annotation_items WHERE `+
 		strings.Join(where, " AND ")+` LIMIT ?)`, args...).Scan(&count); err != nil {
 		return 0, fmt.Errorf("count the items of queue %s: %w", name, err)
 	}
@@ -646,8 +647,8 @@ func (s *Store) CountQueueItems(projectID, name string, filter QueueItemFilter, 
 }
 
 // QueueItem returns one item of one queue, or nil when it is not there.
-func (s *Store) QueueItem(projectID, queue, id string) (*AnnotationItem, error) {
-	item, err := scanAnnotationItem(s.db.QueryRow(
+func (s *Store) QueueItem(ctx context.Context, projectID, queue, id string) (*AnnotationItem, error) {
+	item, err := scanAnnotationItem(s.db.QueryRowContext(ctx,
 		`SELECT `+annotationItemColumns+` FROM annotation_items
 		  WHERE project_id = ? AND queue = ? AND id = ?`, projectID, queue, id))
 	if err == sql.ErrNoRows {

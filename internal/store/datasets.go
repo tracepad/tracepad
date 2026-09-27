@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"slices"
@@ -467,7 +468,7 @@ func (d *RunDelete) apply(tx *sql.Tx) error {
 // name is what makes the cursor a keyset, exactly as it is for prompts.
 // Backward pages towards the start of the alphabet; rows still come back in
 // name order either way (spec 009 #2).
-func (s *Store) Datasets(projectID string, limit int, after string, backward bool) ([]*Dataset, error) {
+func (s *Store) Datasets(ctx context.Context, projectID string, limit int, after string, backward bool) ([]*Dataset, error) {
 	comparison, order := ">", "ASC"
 	if backward {
 		comparison, order = "<", "DESC"
@@ -481,7 +482,7 @@ func (s *Store) Datasets(projectID string, limit int, after string, backward boo
 	query += ` ORDER BY d.name ` + order + ` LIMIT ?`
 	args = append(args, limit)
 
-	rows, err := s.db.Query(query, args...)
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list datasets: %w", err)
 	}
@@ -506,8 +507,8 @@ func (s *Store) Datasets(projectID string, limit int, after string, backward boo
 
 // Dataset returns one dataset with its counts, or nil when the name is
 // unknown.
-func (s *Store) Dataset(projectID, name string) (*Dataset, error) {
-	dataset, err := scanDataset(s.db.QueryRow(
+func (s *Store) Dataset(ctx context.Context, projectID, name string) (*Dataset, error) {
+	dataset, err := scanDataset(s.db.QueryRowContext(ctx,
 		`SELECT `+datasetColumns+` FROM datasets d WHERE d.project_id = ? AND d.name = ?`,
 		projectID, name))
 	if err == sql.ErrNoRows {
@@ -519,13 +520,13 @@ func (s *Store) Dataset(projectID, name string) (*Dataset, error) {
 // DatasetPreview counts what deleting a dataset would take (#20), outside
 // any transaction: it is the dry run, and the confirmed job counts again for
 // itself.
-func (s *Store) DatasetPreview(projectID, name string) (*Dataset, DatasetCounts, error) {
-	dataset, err := s.Dataset(projectID, name)
+func (s *Store) DatasetPreview(ctx context.Context, projectID, name string) (*Dataset, DatasetCounts, error) {
+	dataset, err := s.Dataset(ctx, projectID, name)
 	if err != nil || dataset == nil {
 		return nil, DatasetCounts{}, err
 	}
 	counts := DatasetCounts{Items: dataset.ItemCount, Runs: dataset.RunCount}
-	if err := s.db.QueryRow(pinnedByDatasetQuery, projectID, name).Scan(&counts.PinnedTraces); err != nil {
+	if err := s.db.QueryRowContext(ctx, pinnedByDatasetQuery, projectID, name).Scan(&counts.PinnedTraces); err != nil {
 		return nil, counts, fmt.Errorf("count dataset %s pinned traces: %w", name, err)
 	}
 	return dataset, counts, nil
@@ -622,7 +623,7 @@ const itemsAtVersion = `i.dataset_version = (SELECT MAX(dataset_version) FROM da
 
 // DatasetItems lists the live items of a dataset at a version, in `seq`
 // order, whole (#19).
-func (s *Store) DatasetItems(projectID, dataset string, filter DatasetItemFilter) ([]*DatasetItem, error) {
+func (s *Store) DatasetItems(ctx context.Context, projectID, dataset string, filter DatasetItemFilter) ([]*DatasetItem, error) {
 	comparison, order := ">", "ASC"
 	if filter.Backward {
 		comparison, order = "<", "DESC"
@@ -635,7 +636,7 @@ func (s *Store) DatasetItems(projectID, dataset string, filter DatasetItemFilter
 	}
 	args = append(args, filter.Limit)
 
-	rows, err := s.db.Query(
+	rows, err := s.db.QueryContext(ctx,
 		`SELECT `+itemColumns+` FROM dataset_items i WHERE `+strings.Join(where, " AND ")+`
 		 ORDER BY i.seq `+order+` LIMIT ?`, args...)
 	if err != nil {
@@ -662,8 +663,8 @@ func (s *Store) DatasetItems(projectID, dataset string, filter DatasetItemFilter
 
 // DatasetItem returns one live item as of a version, or nil when the item did
 // not exist — or was archived — at that version.
-func (s *Store) DatasetItem(projectID, dataset, itemID string, version int) (*DatasetItem, error) {
-	item, err := scanItem(s.db.QueryRow(
+func (s *Store) DatasetItem(ctx context.Context, projectID, dataset, itemID string, version int) (*DatasetItem, error) {
+	item, err := scanItem(s.db.QueryRowContext(ctx,
 		`SELECT `+itemColumns+` FROM dataset_items i
 		 WHERE i.project_id = ? AND i.dataset = ? AND i.item_id = ? AND `+itemsAtVersion+` AND i.archived = 0`,
 		projectID, dataset, itemID, version))
@@ -676,8 +677,8 @@ func (s *Store) DatasetItem(projectID, dataset, itemID string, version int) (*Da
 // DatasetItemVersions lists every row of one item, newest first, archived
 // rows included (API contract). An item's history is a handful of rows, so it
 // comes back whole.
-func (s *Store) DatasetItemVersions(projectID, dataset, itemID string) ([]*DatasetItem, error) {
-	rows, err := s.db.Query(
+func (s *Store) DatasetItemVersions(ctx context.Context, projectID, dataset, itemID string) ([]*DatasetItem, error) {
+	rows, err := s.db.QueryContext(ctx,
 		`SELECT `+itemColumns+` FROM dataset_items i
 		 WHERE i.project_id = ? AND i.dataset = ? AND i.item_id = ?
 		 ORDER BY i.dataset_version DESC`, projectID, dataset, itemID)
@@ -797,15 +798,15 @@ func runsQuery(projectID string, filter RunFilter) (string, []any) {
 
 // Runs lists a dataset's runs newest first, paged both ways like every other
 // listing (spec 009 #2).
-func (s *Store) Runs(projectID, dataset string, limit int, after *RunCursor, backward bool) ([]*DatasetRun, error) {
-	return s.ListRuns(projectID, RunFilter{Dataset: dataset, Limit: limit, After: after, Backward: backward})
+func (s *Store) Runs(ctx context.Context, projectID, dataset string, limit int, after *RunCursor, backward bool) ([]*DatasetRun, error) {
+	return s.ListRuns(ctx, projectID, RunFilter{Dataset: dataset, Limit: limit, After: after, Backward: backward})
 }
 
 // ListRuns lists runs by the filter, newest first: one dataset's, or the
 // whole project's (spec 016 #2).
-func (s *Store) ListRuns(projectID string, filter RunFilter) ([]*DatasetRun, error) {
+func (s *Store) ListRuns(ctx context.Context, projectID string, filter RunFilter) ([]*DatasetRun, error) {
 	query, args := runsQuery(projectID, filter)
-	rows, err := s.db.Query(query, args...)
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list runs: %w", err)
 	}
@@ -830,10 +831,10 @@ func (s *Store) ListRuns(projectID string, filter RunFilter) ([]*DatasetRun, err
 
 // CountRuns counts the runs a filter matches, up to cap — the capped count of
 // spec 009, over the same conditions the listing is cut from.
-func (s *Store) CountRuns(projectID string, filter RunFilter, cap int) (int, error) {
+func (s *Store) CountRuns(ctx context.Context, projectID string, filter RunFilter, cap int) (int, error) {
 	where, args := runConditions(projectID, filter)
 	var count int
-	if err := s.db.QueryRow(
+	if err := s.db.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM (SELECT 1 FROM dataset_runs WHERE `+strings.Join(where, " AND ")+` LIMIT ?)`,
 		append(args, cap)...).Scan(&count); err != nil {
 		return 0, fmt.Errorf("count runs: %w", err)
@@ -842,8 +843,8 @@ func (s *Store) CountRuns(projectID string, filter RunFilter, cap int) (int, err
 }
 
 // Run returns one run, or nil when the id is unknown.
-func (s *Store) Run(projectID, id string) (*DatasetRun, error) {
-	run, err := scanRun(s.db.QueryRow(
+func (s *Store) Run(ctx context.Context, projectID, id string) (*DatasetRun, error) {
+	run, err := scanRun(s.db.QueryRowContext(ctx,
 		`SELECT `+runColumns+` FROM dataset_runs WHERE project_id = ? AND id = ?`, projectID, id))
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -854,9 +855,9 @@ func (s *Store) Run(projectID, id string) (*DatasetRun, error) {
 // PinnedTraces counts the traces a project's live runs keep out of the sweep
 // (#13), which `GET /api/v1/system` reports so the operator can see the size
 // of the exception.
-func (s *Store) PinnedTraces(projectID string) (int64, error) {
+func (s *Store) PinnedTraces(ctx context.Context, projectID string) (int64, error) {
 	var n int64
-	if err := s.db.QueryRow(pinnedTracesQuery, projectID).Scan(&n); err != nil {
+	if err := s.db.QueryRowContext(ctx, pinnedTracesQuery, projectID).Scan(&n); err != nil {
 		return 0, fmt.Errorf("count pinned traces: %w", err)
 	}
 	return n, nil

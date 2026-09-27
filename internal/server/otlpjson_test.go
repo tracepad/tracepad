@@ -81,7 +81,7 @@ func TestJSONIngestLandsTheSameRows(t *testing.T) {
 // order, so two databases can be compared as text.
 func storedRows(t *testing.T, h *harness) []byte {
 	t.Helper()
-	traces, err := h.store.Traces(h.project.ID, store.TraceFilter{Limit: 500})
+	traces, err := h.store.Traces(t.Context(), h.project.ID, store.TraceFilter{Limit: 500})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,11 +91,11 @@ func storedRows(t *testing.T, h *harness) []byte {
 	}
 	rows := make([]entry, 0, len(traces))
 	for _, row := range traces {
-		trace, err := h.store.Trace(h.project.ID, row.ID)
+		trace, err := h.store.Trace(t.Context(), h.project.ID, row.ID)
 		if err != nil {
 			t.Fatal(err)
 		}
-		observations, err := h.store.Observations(h.project.ID, row.ID, store.WithIO)
+		observations, err := h.store.Observations(t.Context(), h.project.ID, row.ID, store.WithIO)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -203,7 +203,7 @@ func TestJSONIngestAcceptsGzip(t *testing.T) {
 	if batches[0].ContentEncoding != "gzip" || batches[0].ContentType != "application/json" {
 		t.Errorf("raw batch = %+v", batches[0].RawBatchRow)
 	}
-	if trace, _ := h.store.Trace(h.project.ID, "aa11bb22cc33dd44ee55ff6677889900"); trace == nil {
+	if trace, _ := h.store.Trace(t.Context(), h.project.ID, "aa11bb22cc33dd44ee55ff6677889900"); trace == nil {
 		t.Error("the spans of a gzipped JSON export were not stored")
 	}
 }

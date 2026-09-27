@@ -41,12 +41,12 @@ func TestBackwardPageIsTheForwardPageBefore(t *testing.T) {
 	s, project := readStore(t)
 	seedListing(t, s, project.ID, 6)
 
-	first, err := s.Traces(project.ID, TraceFilter{Limit: 2})
+	first, err := s.Traces(t.Context(), project.ID, TraceFilter{Limit: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
 	last := first[len(first)-1]
-	second, err := s.Traces(project.ID, TraceFilter{Limit: 2,
+	second, err := s.Traces(t.Context(), project.ID, TraceFilter{Limit: 2,
 		After: &TraceCursor{Timestamp: last.Timestamp, ID: last.ID}})
 	if err != nil {
 		t.Fatal(err)
@@ -54,7 +54,7 @@ func TestBackwardPageIsTheForwardPageBefore(t *testing.T) {
 
 	// Back from the first row of the second page.
 	head := second[0]
-	back, err := s.Traces(project.ID, TraceFilter{Limit: 2, Backward: true,
+	back, err := s.Traces(t.Context(), project.ID, TraceFilter{Limit: 2, Backward: true,
 		After: &TraceCursor{Timestamp: head.Timestamp, ID: head.ID}})
 	if err != nil {
 		t.Fatal(err)
@@ -81,7 +81,7 @@ func TestOldestPageIsTheTailOfTheListing(t *testing.T) {
 		cursor *TraceCursor
 	)
 	for range 10 {
-		rows, err := s.Traces(project.ID, TraceFilter{Limit: 2, After: cursor})
+		rows, err := s.Traces(t.Context(), project.ID, TraceFilter{Limit: 2, After: cursor})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -93,7 +93,7 @@ func TestOldestPageIsTheTailOfTheListing(t *testing.T) {
 		cursor = &TraceCursor{Timestamp: last.Timestamp, ID: last.ID}
 	}
 
-	oldest, err := s.Traces(project.ID, TraceFilter{Limit: 2, Backward: true})
+	oldest, err := s.Traces(t.Context(), project.ID, TraceFilter{Limit: 2, Backward: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +154,7 @@ func TestCountTracesStopsAtTheCap(t *testing.T) {
 		{"pinned above it", 5, 5},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			got, err := s.CountTraces(project.ID, TraceFilter{}, test.cap)
+			got, err := s.CountTraces(t.Context(), project.ID, TraceFilter{}, test.cap)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -173,7 +173,7 @@ func TestCountTracesObeysTheFilters(t *testing.T) {
 	s, project := readStore(t)
 	seedListing(t, s, project.ID, 6)
 
-	rows, err := s.Traces(project.ID, TraceFilter{Limit: 2})
+	rows, err := s.Traces(t.Context(), project.ID, TraceFilter{Limit: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +183,7 @@ func TestCountTracesObeysTheFilters(t *testing.T) {
 		After: &TraceCursor{Timestamp: last.Timestamp, ID: last.ID},
 	}
 
-	got, err := s.CountTraces(project.ID, filter, 1000)
+	got, err := s.CountTraces(t.Context(), project.ID, filter, 1000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +199,7 @@ func TestCountSessionsCountsSessions(t *testing.T) {
 	s, project := readStore(t)
 	seedListing(t, s, project.ID, 6) // six traces across three session ids
 
-	got, err := s.CountSessions(project.ID, SessionFilter{}, 1000)
+	got, err := s.CountSessions(t.Context(), project.ID, SessionFilter{}, 1000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +207,7 @@ func TestCountSessionsCountsSessions(t *testing.T) {
 		t.Errorf("count = %d, want 3 sessions from 6 traces", got)
 	}
 
-	capped, err := s.CountSessions(project.ID, SessionFilter{}, 2)
+	capped, err := s.CountSessions(t.Context(), project.ID, SessionFilter{}, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,12 +223,12 @@ func TestSessionsPageBothWays(t *testing.T) {
 	s, project := readStore(t)
 	seedListing(t, s, project.ID, 6)
 
-	first, err := s.Sessions(project.ID, SessionFilter{Limit: 2})
+	first, err := s.Sessions(t.Context(), project.ID, SessionFilter{Limit: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
 	last := first[len(first)-1]
-	second, err := s.Sessions(project.ID, SessionFilter{Limit: 2,
+	second, err := s.Sessions(t.Context(), project.ID, SessionFilter{Limit: 2,
 		After: &SessionCursor{LastSeen: last.LastSeen, ID: last.ID}})
 	if err != nil {
 		t.Fatal(err)
@@ -238,7 +238,7 @@ func TestSessionsPageBothWays(t *testing.T) {
 	}
 
 	head := second[0]
-	back, err := s.Sessions(project.ID, SessionFilter{Limit: 2, Backward: true,
+	back, err := s.Sessions(t.Context(), project.ID, SessionFilter{Limit: 2, Backward: true,
 		After: &SessionCursor{LastSeen: head.LastSeen, ID: head.ID}})
 	if err != nil {
 		t.Fatal(err)
