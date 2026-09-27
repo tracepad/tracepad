@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
@@ -155,19 +156,14 @@ func writeMediaBodies(tx *sql.Tx, bodies []MediaBody, now int64) error {
 func writeChannelRef(tx *sql.Tx, projectID, sha, traceID, mimeType string, now int64) (bool, error) {
 	if _, err := tx.Exec(
 		`INSERT INTO media_refs (sha256, project_id, trace_id, created_at, pending)
-		 SELECT ?, ?, ?, ?, NOT EXISTS (SELECT 1 FROM traces WHERE project_id = ? AND id = ?)
+		 SELECT ?, ?, ?, ?, NOT `+traceStoredExpr+`
 		  WHERE EXISTS (SELECT 1 FROM media WHERE sha256 = ?)
 		 ON CONFLICT DO NOTHING`,
 		sha, projectID, traceID, now, projectID, traceID, sha); err != nil {
 		return false, fmt.Errorf("add media ref: %w", err)
 	}
-	var one int
-	err := tx.QueryRow(`SELECT 1 FROM media_refs WHERE sha256 = ? AND project_id = ? AND trace_id = ?`,
-		sha, projectID, traceID).Scan(&one)
-	if err == sql.ErrNoRows {
-		return false, nil
-	}
-	if err != nil {
+	var exists bool
+	if err := tx.QueryRow(`SELECT `+refExistsExpr, sha, projectID, traceID).Scan(&exists); err != nil || !exists {
 		return false, err
 	}
 	return true, holdMedia(tx, projectID, sha, mimeType, now)
@@ -590,41 +586,363 @@ func (s *Store) mediaFreed(projectID, traces string, traceArgs []any, raws strin
 // last ref in this project went since the handler asked may be kept alive by
 // another project's, and pointing at it then would be a hold without the
 // bytes.
+//
+// For a trace the project has, the ref is settled. For one not here yet it is
+// pending, as the upload's would be, and keeps the body until the trace's
+// spans settle it (#30). It is dated as the bytes are in the project — the
+// newest of the project's refs to the body, or the hold's first instant when
+// there is none — but no earlier than an hour inside the grace, so that it
+// outlives the next sweep: naming a hash again, for any trace, extends a body
+// no trace claims by an hour at most, never by the grace. A new pending ref
+// counts toward the cap like the upload's (#31). A trace deleted or erased
+// within the hour gets no ref, as its upload would get none (#29).
 type MediaRefAdd struct {
 	ProjectID string
 	SHA256    string
 	TraceID   string
 	Now       int64
 
-	Added bool
+	// Held is whether the project still held the body inside the write:
+	// false when it was collected since the handler asked, and the bytes
+	// have to be asked for.
+	Held bool
 }
 
+// nullAnswerHold is how long a pending ref the null answer writes keeps its
+// body at least (#30): longer than the sweep's hour, far longer than the
+// seconds the spans take.
+const nullAnswerHold = time.Hour
+
 func (a *MediaRefAdd) apply(tx *sql.Tx) error {
-	a.Added = false
+	a.Held = false
 	hold, err := projectHold(tx, a.ProjectID, a.SHA256)
 	if err != nil || hold == nil {
 		return err
 	}
-	a.Added, err = writeChannelRef(tx, a.ProjectID, a.SHA256, a.TraceID, hold.MimeType, nowOr(a.Now))
+	place, err := refPlaceOf(context.Background(), tx, a.ProjectID, a.SHA256, a.TraceID)
+	if err != nil {
+		return err
+	}
+	now := nowOr(a.Now)
+	// No sooner than an hour inside the grace (#30): the spans the null
+	// answer tells the SDK to send without their bytes are on their way.
+	floor := now - int64(MediaOrphanGrace) + int64(nullAnswerHold)
+	// A trace removed since the handler's check is refused as the check
+	// would have refused it, not answered as held (#29), and a new pending
+	// ref meets the cap.
+	if err := placeRefusal(tx, a.ProjectID, place); err != nil {
+		return err
+	}
+	if place == refWritten {
+		// Named again for its own trace, a ref still pending takes the same
+		// hour a new one would: a ref near the end of its grace would
+		// otherwise go, with the body, right after the answer.
+		if _, err := tx.Exec(`UPDATE media_refs SET created_at = MAX(created_at, ?)
+		                       WHERE sha256 = ? AND project_id = ? AND trace_id = ? AND pending = 1`,
+			floor, a.SHA256, a.ProjectID, a.TraceID); err != nil {
+			return fmt.Errorf("hold media ref %s: %w", a.SHA256, err)
+		}
+		a.Held = true
+		return nil
+	}
+	at := now
+	if place == refPending {
+		var aged int64
+		if err := tx.QueryRow(`SELECT COALESCE(MAX(created_at), ?) FROM media_refs
+		                        WHERE sha256 = ? AND project_id = ?`,
+			hold.CreatedAt, a.SHA256, a.ProjectID).Scan(&aged); err != nil {
+			return fmt.Errorf("read the age of media %s: %w", a.SHA256, err)
+		}
+		at = min(now, max(aged, floor))
+	}
+	a.Held, err = writeChannelRef(tx, a.ProjectID, a.SHA256, a.TraceID, hold.MimeType, at)
 	return err
+}
+
+// traceStoredExpr is whether a project has a trace, the one test of it the
+// channel's refs use: a stored trace settles a ref (Decision 13) and keeps it
+// out of the cap (#31). Its arguments are the project and the trace.
+const traceStoredExpr = `EXISTS (SELECT 1 FROM traces WHERE project_id = ? AND id = ?)`
+
+// refExistsExpr is whether a ref is already written; its arguments are the
+// hash, the project and the trace.
+const refExistsExpr = `EXISTS (SELECT 1 FROM media_refs WHERE sha256 = ? AND project_id = ? AND trace_id = ?)`
+
+// traceVoidedExpr is whether a deletion or an erasure removed a trace within
+// the upload URL's lifetime and the slack (#29); its arguments are the
+// project, the trace and voidedSince. Bounded by the row's age, not by the
+// sweep that forgets it: how often that runs decides only how long the row
+// is kept.
+const traceVoidedExpr = `EXISTS (SELECT 1 FROM media_voided WHERE project_id = ? AND trace_id = ? AND at >= ?)`
+
+// voidedSince is the oldest removal that still voids an upload: on the wall
+// clock, as the removal was stamped.
+func voidedSince() int64 {
+	return time.Now().Add(-(MediaUploadWindow + mediaVoidedSlack)).UnixNano()
+}
+
+// refPlace is where a channel ref to a body for a trace would stand — the one
+// rule the ask, the upload's checks and the null answer share.
+type refPlace int
+
+const (
+	// refWritten: the ref is there already; writing it again adds nothing.
+	refWritten refPlace = iota
+	// refSettled: the trace is stored, so the ref is settled (Decision 13)
+	// and outside the cap (#31) — a trace sent again after its deletion
+	// too, which is seen and deletable like any other.
+	refSettled
+	// refVoid: a deletion or an erasure removed the trace within the hour
+	// and it is not here now; nothing is written for it (#29).
+	refVoid
+	// refPending: a new pending ref, which the cap counts (#31).
+	refPending
+)
+
+// refFactsExpr selects the three facts that place a ref, with refFactsArgs.
+const refFactsExpr = traceStoredExpr + `, ` + refExistsExpr + `, ` + traceVoidedExpr
+
+func refFactsArgs(projectID, sha, traceID string) []any {
+	return []any{projectID, traceID, sha, projectID, traceID, projectID, traceID, voidedSince()}
+}
+
+func placeOf(stored, written, voided bool) refPlace {
+	switch {
+	case written:
+		return refWritten
+	case stored:
+		return refSettled
+	case voided:
+		return refVoid
+	default:
+		return refPending
+	}
+}
+
+// refPlaceOf reads the facts and places the ref.
+func refPlaceOf(ctx context.Context, q ctxQuerier, projectID, sha, traceID string) (refPlace, error) {
+	var stored, written, voided bool
+	if err := q.QueryRowContext(ctx, `SELECT `+refFactsExpr, refFactsArgs(projectID, sha, traceID)...).
+		Scan(&stored, &written, &voided); err != nil {
+		return 0, fmt.Errorf("look up the ref of media %s: %w", sha, err)
+	}
+	return placeOf(stored, written, voided), nil
+}
+
+// MediaUploadWindow is how long an upload URL is good for, and so how long a
+// removed trace's uploads stay void: no URL issued before the removal outlives
+// it (#29), and none is issued after it.
+const MediaUploadWindow = time.Hour
+
+// mediaVoidedSlack is how much longer than the window a removed trace is
+// remembered: a URL's expiry is signed in whole seconds from a clock read
+// before the ask's check, and a removal is stamped as its chunk ends, not as
+// it commits — the rest of a group commit comes after — so a URL the check
+// let through can outlive the stamp's hour by that much (#29). Five minutes,
+// far past any commit a writer finishes, for a trace sent again that waits
+// that much longer for its pictures.
+const mediaVoidedSlack = 5 * time.Minute
+
+// voidUploads records, in the transaction that removes them and before they
+// go, the traces whose uploads are void from now (#29).
+func voidUploads(tx *sql.Tx, projectID string, traceIDs []any, now int64) error {
+	return eachIn(traceIDs, func(batch []any) error {
+		if _, err := tx.Exec(`INSERT OR REPLACE INTO media_voided (project_id, trace_id, at)
+		    SELECT project_id, id, ? FROM traces WHERE project_id = ? AND id IN (`+placeholders(len(batch))+`)`,
+			append([]any{now, projectID}, batch...)...); err != nil {
+			return fmt.Errorf("void the removed traces' uploads: %w", err)
+		}
+		return nil
+	})
+}
+
+// restampVoided moves the rows a removal wrote as its chunk began to now, as
+// the chunk ends: a URL whose ask read the pool while the chunk ran is dated
+// from then, and the row's hour has to start no earlier (#29).
+func restampVoided(tx *sql.Tx, projectID string, stamp int64) error {
+	if _, err := tx.Exec(`UPDATE media_voided SET at = ? WHERE project_id = ? AND at = ?`,
+		time.Now().UnixNano(), projectID, stamp); err != nil {
+		return fmt.Errorf("stamp the removed traces' uploads: %w", err)
+	}
+	return nil
+}
+
+// MaxPendingMediaRefs is how many pending refs one project may have (#31): an
+// upload whose trace has not come. Two orders of magnitude over a hundred
+// pictures a second held for the seconds an export takes. A constant, not a
+// setting.
+const MaxPendingMediaRefs = 10000
+
+// maxPendingMediaRefs is the cap the reads and the jobs count against:
+// MaxPendingMediaRefs, lowered only by this package's tests. It is shared, so
+// a test that changes it must not run in parallel (t.Parallel) with another
+// that uploads.
+var maxPendingMediaRefs = MaxPendingMediaRefs
+
+// placeRefusal is the refusal a ref's place leads to — the one rule the ask,
+// the upload and the null answer share: ErrTraceRemoved for a removed trace
+// that is not here (#29), errPendingFull for a new pending ref past the cap
+// (#31), and nil for a ref written already or a trace the project has.
+func placeRefusal(q querier, projectID string, place refPlace) error {
+	switch place {
+	case refVoid:
+		return ErrTraceRemoved
+	case refPending:
+		return pendingRoom(q, projectID, maxPendingMediaRefs)
+	}
+	return nil
+}
+
+// errPendingFull is the refusal at the cap (#31).
+var errPendingFull = &Rejection{Kind: RejectFull,
+	Message: "too many media uploads are waiting for their traces"}
+
+// pendingRoom refuses one more pending ref when the project already has
+// `limit` of them: a seek on the partial index of 0026, which stops counting
+// there.
+func pendingRoom(q querier, projectID string, limit int) error {
+	var n int
+	if err := q.QueryRow(`SELECT COUNT(*) FROM (SELECT 1 FROM media_refs
+	                       WHERE project_id = ? AND pending = 1 LIMIT ?)`,
+		projectID, limit).Scan(&n); err != nil {
+		return fmt.Errorf("count the pending media refs: %w", err)
+	}
+	if n >= limit {
+		return errPendingFull
+	}
+	return nil
+}
+
+// MediaUploadRoom is the channel POST's check, a read of the pool before any
+// job: ErrTraceRemoved for a trace a deletion or an erasure removed within the
+// hour and not here now (#29) — a URL issued for it would outlive the
+// removal's record — and errPendingFull's rejection when the ref its answer
+// would lead to, the upload's or the null answer's, would be a new pending
+// one past the cap (#31). The guard has settled the project and the key.
+func (s *Store) MediaUploadRoom(ctx context.Context, projectID, sha, traceID string) error {
+	place, err := refPlaceOf(ctx, s.db, projectID, sha, traceID)
+	if err != nil {
+		return err
+	}
+	return placeRefusal(s.db, projectID, place)
+}
+
+// MediaGrant is what an upload URL lets its holder store, as far as the store
+// checks it: for which project, trace and body, and which key asked for it
+// (#28).
+type MediaGrant struct {
+	ProjectID string
+	TraceID   string
+	SHA256    string
+	Key       string
+}
+
+// ErrUploadVoid is the refusal of an upload whose grant no longer stands, and
+// the channel's one answer to a URL it will not take.
+var ErrUploadVoid = &Rejection{Kind: RejectForbidden, Message: "this upload URL is not valid; ask for a new one"}
+
+// ErrTraceRemoved is the refusal of the ask, and of the upload, for a trace a
+// deletion or an erasure removed within the hour and that is not here (#29):
+// no new URL would be taken either.
+var ErrTraceRemoved = &Rejection{Kind: RejectForbidden,
+	Message: "this trace was deleted or erased within the hour; its media is not stored"}
+
+// MediaGrantRefusal checks a grant before its body is read, as the write will
+// check it again: nil when it would be stored now, ErrUploadVoid when the
+// project is gone or the key that asked is no longer the project's (#28),
+// ErrTraceRemoved when its trace was deleted or erased within the hour (#29),
+// and the full rejection
+// when its ref would be a new pending one past the cap (#31). It also answers
+// the project's media setting, under which the upload keeps nothing and the
+// cap does not apply. One statement, and the count only for a ref that would
+// be pending.
+func (s *Store) MediaGrantRefusal(ctx context.Context, g MediaGrant) (media string, refusal error) {
+	return grantRefusal(ctx, s.db, g)
+}
+
+// ctxQuerier is a querier that also takes a context: the pool or the write's
+// transaction.
+type ctxQuerier interface {
+	querier
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func grantRefusal(ctx context.Context, q ctxQuerier, g MediaGrant) (string, error) {
+	var (
+		media                   string
+		gone, alive             bool
+		stored, written, voided bool
+	)
+	args := append([]any{g.Key}, refFactsArgs(g.ProjectID, g.SHA256, g.TraceID)...)
+	err := q.QueryRowContext(ctx, `SELECT p.media, p.deleted_at IS NOT NULL,
+	        EXISTS (SELECT 1 FROM api_keys k WHERE k.public_key = ? AND k.project_id = p.id),
+	        `+refFactsExpr+`
+	   FROM projects p WHERE p.id = ?`, append(args, g.ProjectID)...).
+		Scan(&media, &gone, &alive, &stored, &written, &voided)
+	if err == sql.ErrNoRows {
+		return "", ErrUploadVoid
+	}
+	if err != nil {
+		return "", fmt.Errorf("check an upload grant: %w", err)
+	}
+	place := placeOf(stored, written, voided)
+	if gone || !alive {
+		return media, ErrUploadVoid
+	}
+	// The placeholder setting keeps nothing, so the cap does not apply; a
+	// removed trace is refused under either setting.
+	if media == MediaPlaceholder && place != refVoid {
+		return media, nil
+	}
+	return media, placeRefusal(q, g.ProjectID, place)
 }
 
 // MediaUpload stores one body the Langfuse channel received and the ref of
 // the trace it was sent for (#9), and the project's hold under the type the
 // upload declared (Decision 25).
+//
+// The upload's grant is checked again here, because the handler's checks ran
+// before the body and a revocation, a deletion or a burst of uploads can land
+// in between (#28, #29, #31). A deletion's own transaction drops the refs of
+// the traces it removes and voids their uploads, so an upload is either in
+// before it — and dropped with the trace — or refused after it. A project
+// switched to the placeholder setting since keeps nothing (#6).
 type MediaUpload struct {
-	ProjectID string
-	TraceID   string
-	Body      MediaBody
-	Now       int64
+	Grant MediaGrant
+	Body  MediaBody
+	Now   int64
 }
 
 func (u *MediaUpload) apply(tx *sql.Tx) error {
+	media, err := grantRefusal(context.Background(), tx, u.Grant)
+	if err != nil || media == MediaPlaceholder {
+		return err
+	}
 	now := nowOr(u.Now)
 	if err := writeMediaBodies(tx, []MediaBody{u.Body}, now); err != nil {
 		return err
 	}
-	_, err := writeChannelRef(tx, u.ProjectID, u.Body.SHA256, u.TraceID, u.Body.MimeType, now)
+	_, err = writeChannelRef(tx, u.Grant.ProjectID, u.Body.SHA256, u.Grant.TraceID, u.Body.MimeType, now)
+	return err
+}
+
+// mediaVoidedSweep forgets the removed traces whose uploads no URL can still
+// carry (#29): those removed more than the URL's lifetime, and the slack,
+// ago.
+type mediaVoidedSweep struct {
+	Before int64
+	Limit  int
+
+	Removed int64
+}
+
+func (m *mediaVoidedSweep) apply(tx *sql.Tx) error {
+	result, err := tx.Exec(`DELETE FROM media_voided WHERE (project_id, trace_id) IN
+	    (SELECT project_id, trace_id FROM media_voided WHERE at < ? LIMIT ?)`, m.Before, m.Limit)
+	if err != nil {
+		return fmt.Errorf("forget voided uploads: %w", err)
+	}
+	m.Removed, err = result.RowsAffected()
 	return err
 }
 
@@ -707,11 +1025,14 @@ type MediaOrphan struct {
 }
 
 // mediaSweep settles the pending refs the read pass found: one whose trace
-// has arrived since is kept and no longer pending, one whose trace never came
-// is deleted. It releases the holds the deleted refs leave and any hold the
-// pass found with no ref behind it, restores the holds the pass found missing
-// behind a ref, and then collects the bodies left with no ref, together with
-// any body the pass found with no ref at all.
+// never came, and that is still past the grace, is deleted — a null answer
+// since the read may have given it an hour (#30), and it is kept; one whose
+// trace is stored is kept and no longer pending, a belt for a database edited
+// by hand, since a trace's insert settles its refs (#31). It releases the
+// holds the deleted refs leave and any hold the pass found with no ref behind
+// it, restores the holds the pass found missing behind a ref, and then
+// collects the bodies left with no ref, together with any body the pass found
+// with no ref at all.
 type mediaSweep struct {
 	Refs   []MediaOrphan
 	Bodies []any
@@ -719,6 +1040,8 @@ type mediaSweep struct {
 	// and Missing the pairs with a ref and no holder row.
 	Stale, Missing []MediaHold
 	Now            int64
+	// Before is the grace's edge the read pass used.
+	Before int64
 
 	// Dropped counts the refs deleted, Released and Restored the holds
 	// deleted and written, and Deleted the bodies collected — each what
@@ -733,8 +1056,8 @@ func (m *mediaSweep) apply(tx *sql.Tx) error {
 	for _, ref := range m.Refs {
 		result, err := tx.Exec(
 			`DELETE FROM media_refs WHERE sha256 = ? AND project_id = ? AND trace_id = ? AND pending = 1
-			   AND NOT EXISTS (SELECT 1 FROM traces WHERE project_id = ? AND id = ?)`,
-			ref.SHA256, ref.ProjectID, ref.TraceID, ref.ProjectID, ref.TraceID)
+			   AND created_at < ? AND NOT `+traceStoredExpr,
+			ref.SHA256, ref.ProjectID, ref.TraceID, m.Before, ref.ProjectID, ref.TraceID)
 		if err != nil {
 			return fmt.Errorf("delete orphaned media ref: %w", err)
 		}
@@ -745,8 +1068,9 @@ func (m *mediaSweep) apply(tx *sql.Tx) error {
 			continue
 		}
 		if _, err := tx.Exec(
-			`UPDATE media_refs SET pending = 0 WHERE sha256 = ? AND project_id = ? AND trace_id = ?`,
-			ref.SHA256, ref.ProjectID, ref.TraceID); err != nil {
+			`UPDATE media_refs SET pending = 0 WHERE sha256 = ? AND project_id = ? AND trace_id = ?
+			   AND pending = 1 AND `+traceStoredExpr,
+			ref.SHA256, ref.ProjectID, ref.TraceID, ref.ProjectID, ref.TraceID); err != nil {
 			return fmt.Errorf("settle media ref: %w", err)
 		}
 	}

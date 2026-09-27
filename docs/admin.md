@@ -168,6 +168,10 @@ tracepad keys rm tp-pk-old… --project $ID                 # revoke it
 The token reaches every project, so it needs `--project` as soon as there is
 more than one; with a single project the command finds it by itself.
 
+Revoking a key also voids the media upload URLs it obtained
+([media.md](media.md#the-langfuse-sdks-media-channel)): an upload the key
+had in transit is refused rather than landing after the key is gone.
+
 There is never a window where ingest `401`s. The secret half of a pair is
 returned exactly once, at creation; the store keeps only its SHA-256 hash, so
 there is nothing to show later even to an administrator. The name is optional,
@@ -326,6 +330,9 @@ takes it when its window runs out, or the project goes whole. In between is
 where the mistakes live — an eval harness that exported under the
 application's key, a load test run against production, one trace holding
 something a person should not have typed — and this is the door for those.
+A deletion also voids the media upload URLs for the traces it removes, and
+refuses new ones, for the hour such a URL lives, so a picture in transit cannot land after its trace
+is gone.
 One trace by id, or every trace a [listing filter](api.md#filters) matches:
 `DELETE /api/v1/traces/{id}`, and `DELETE /api/v1/traces?<filters>&to=`. An
 editor's route rather than an administrator's — it is the reader's and the

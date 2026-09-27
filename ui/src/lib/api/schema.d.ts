@@ -72,7 +72,7 @@ export interface paths {
         put?: never;
         /**
          * Langfuse SDK: an upload URL for one media body, or null when it is already stored
-         * @description The first call of the Langfuse SDK's media channel. `mediaId` is the SDK's own derivation — the first 22 characters of the URL-safe base64 SHA-256 — which the SDK checks. `uploadUrl` is null when this project already holds the body, in which case the named trace's ref is recorded and nothing is sent; a body only another project holds is still asked for, because the bytes are the proof of possession. Under the `placeholder` setting `uploadUrl` is always null and nothing is kept. The body is read leniently: fields a newer SDK adds are ignored.
+         * @description The first call of the Langfuse SDK's media channel. `mediaId` is the SDK's own derivation — the first 22 characters of the URL-safe base64 SHA-256 — which the SDK checks. `uploadUrl` is null when this project already holds the body, in which case nothing is sent and the named trace's ref is recorded: settled if the project has the trace, and otherwise pending, dated as the bytes rather than the ask, until the trace's spans arrive — so the null answer too counts toward the pending cap and can be a 429; a body only another project holds is still asked for, because the bytes are the proof of possession. Under the `placeholder` setting `uploadUrl` is always null and nothing is kept. The body is read leniently: fields a newer SDK adds are ignored.
          */
         post: operations["langfuseMediaUploadURL"];
         delete?: never;
@@ -2637,6 +2637,24 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            /** @description The trace was deleted or erased within the hour and is not stored now: no upload is taken for it */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The project has 10,000 uploads waiting for their traces and this one — with an upload URL or without — would be another; `Retry-After: 60`. A trace the project has is never refused */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             503: components["responses"]["ServiceUnavailable"];
         };
     };
@@ -2665,7 +2683,7 @@ export interface operations {
                 content?: never;
             };
             400: components["responses"]["BadRequest"];
-            /** @description The token is missing, forged, expired, or for another id */
+            /** @description The token is missing, forged, expired, or for another id, and is refused having read nothing; or the key that asked for it has been revoked, or its trace was deleted or erased within the hour, which is decided before the body is read and answered at once, the body then drained up to the length the ask declared and dropped */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -2676,6 +2694,15 @@ export interface operations {
             };
             /** @description The body is larger than the upload declared */
             413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The project has 10,000 uploads waiting for their traces and this one's trace has not arrived; `Retry-After: 60`. Not for the retry of an upload already stored. Decided before the body is read and answered at once, the body then drained up to the length the ask declared and dropped */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };

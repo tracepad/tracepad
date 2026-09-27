@@ -266,6 +266,17 @@ func (sw *Sweeper) Pass(ctx context.Context) error {
 		freed = true
 	}
 
+	// Removed traces whose uploads no URL can still carry (spec 041 #29).
+	// Not counted as freed: a row per trace, gone within the hour.
+	// On the wall clock, as the rows are stamped and read (#29), not on the
+	// pass's own clock.
+	if err := sw.sweepVoidedUploads(ctx, time.Now().UnixNano()); err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, ErrWriterClosed) {
+			return err
+		}
+		failures = append(failures, fmt.Errorf("voided uploads: %w", err))
+	}
+
 	entries, err := sw.sweepOrphanSearchEntries(ctx)
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, ErrWriterClosed) {
@@ -436,7 +447,8 @@ func (sw *Sweeper) sweepOrphanPayloads(ctx context.Context) (int64, error) {
 // bodies those refs leave. Found by a read outside the writer, like the
 // orphaned payloads; the job re-checks each predicate inside its transaction.
 func (sw *Sweeper) sweepOrphanMedia(ctx context.Context, now int64) (int64, error) {
-	refs, err := sw.store.orphanMediaRefs(now-int64(MediaOrphanGrace), orphanScanLimit)
+	before := now - int64(MediaOrphanGrace)
+	refs, err := sw.store.orphanMediaRefs(before, orphanScanLimit)
 	if err != nil {
 		return 0, err
 	}
@@ -453,7 +465,7 @@ func (sw *Sweeper) sweepOrphanMedia(ctx context.Context, now int64) (int64, erro
 	if len(refs) == 0 && len(bodies) == 0 && len(stale) == 0 && len(missing) == 0 {
 		return 0, nil
 	}
-	job := &mediaSweep{Refs: refs, Bodies: bodies, Stale: stale, Missing: missing, Now: now}
+	job := &mediaSweep{Refs: refs, Bodies: bodies, Stale: stale, Missing: missing, Now: now, Before: before}
 	if err := sw.writer.Submit(ctx, job); err != nil {
 		return 0, err
 	}
@@ -486,6 +498,21 @@ func (sw *Sweeper) sweepOrphanSearchEntries(ctx context.Context) (int64, error) 
 		logger().Info("collected orphaned search entries", "entries", job.Deleted)
 	}
 	return job.Deleted, nil
+}
+
+// sweepVoidedUploads forgets the traces removed longer ago than an upload
+// URL lives, and the slack, in bounded chunks (spec 041 #29).
+func (sw *Sweeper) sweepVoidedUploads(ctx context.Context, now int64) error {
+	for range sw.maxChunks {
+		chunk := &mediaVoidedSweep{Before: now - int64(MediaUploadWindow+mediaVoidedSlack), Limit: sw.chunk}
+		if err := sw.writer.Submit(ctx, chunk); err != nil {
+			return err
+		}
+		if chunk.Removed < int64(sw.chunk) {
+			return nil
+		}
+	}
+	return nil
 }
 
 // sweepAccounts removes the browser sessions and invitations that have run

@@ -57,6 +57,18 @@ func (r *traceRemoval) apply(tx *sql.Tx) (DeleteCounts, error) {
 	if len(r.ids) == 0 {
 		return counts, nil
 	}
+	// Uploads for these traces are void from now (spec 041 #29): a picture
+	// that landed after its trace was deleted or erased would be stored
+	// under a ref to nothing. Their refs written before go below, with the
+	// rest of their media, in this same transaction.
+	// Stamped as this transaction runs, not as the request began: a URL
+	// issued while the request's earlier chunks ran lives an hour from
+	// then, and the row must outlive it. Written first, while the traces
+	// are there to be read, and stamped again as the chunk ends.
+	voided := time.Now().UnixNano()
+	if err := voidUploads(tx, r.projectID, r.ids, voided); err != nil {
+		return counts, err
+	}
 	payloads, err := referencedPayloads(tx, r.projectID, r.ids)
 	if err != nil {
 		return counts, err
@@ -145,7 +157,10 @@ func (r *traceRemoval) apply(tx *sql.Tx) (DeleteCounts, error) {
 			}
 		}
 	}
-	return counts, recomputeUsers(tx, r.projectID, slices.Sorted(maps.Keys(touched)))
+	if err := recomputeUsers(tx, r.projectID, slices.Sorted(maps.Keys(touched))); err != nil {
+		return counts, err
+	}
+	return counts, restampVoided(tx, r.projectID, voided)
 }
 
 // TraceDelete removes a set of traces and everything attached to them (#3).

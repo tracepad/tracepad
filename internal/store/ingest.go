@@ -179,6 +179,7 @@ func upsertTrace(tx *sql.Tx, projectID string, t *model.Trace, ingestedAt int64,
 	// which is worse than the missing one it replaces. So a delivery that
 	// changes the run says what the item is, including that there is none.
 	var stored sql.NullString
+	var firstIngested int64
 	err = tx.QueryRow(
 		`INSERT INTO traces (project_id, id, name, user_id, session_id, environment,
 		                     release, version, run_id, item_id, tags, metadata_id,
@@ -200,15 +201,27 @@ func upsertTrace(tx *sql.Tx, projectID string, t *model.Trace, ingestedAt int64,
 		                 END,
 		   tags        = COALESCE(excluded.tags, traces.tags),
 		   metadata_id = COALESCE(excluded.metadata_id, traces.metadata_id)
-		 RETURNING name`,
+		 RETURNING name, ingested_at`,
 		projectID, t.ID, nullString(t.Name), nullString(t.UserID), nullString(t.SessionID),
 		nullString(t.Environment), nullString(t.Release), nullString(t.Version),
 		nullString(t.RunID), nullString(t.ItemID),
 		tags, metadataID, ingestedAt, ingestedAt,
 		nullString(t.Environment),
-	).Scan(&stored)
+	).Scan(&stored, &firstIngested)
 	if err != nil {
 		return fmt.Errorf("upsert trace %s: %w", t.ID, err)
+	}
+	// A trace's arrival settles the Langfuse channel's refs to it (spec 041
+	// Decision 13), the ones its spans name and the ones they do not: a
+	// pending ref is an upload whose trace has not come, and only those
+	// count toward the cap (#31). Only a trace this upsert inserted — its
+	// arrival keeps its first stamp — can have one; a seek, usually on
+	// nothing.
+	if firstIngested == ingestedAt {
+		if _, err := tx.Exec(`UPDATE media_refs SET pending = 0
+		                       WHERE project_id = ? AND trace_id = ? AND pending = 1`, projectID, t.ID); err != nil {
+			return fmt.Errorf("settle the media refs of trace %s: %w", t.ID, err)
+		}
 	}
 	if !indexing {
 		return nil

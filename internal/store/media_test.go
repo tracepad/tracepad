@@ -7,6 +7,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tracepad/tracepad/internal/model"
 )
@@ -188,8 +189,8 @@ func TestMediaSharedAcrossAPurge(t *testing.T) {
 	own := mediaBody(5, 4500)
 	f.arriveWithMedia(t, f.project.ID, hexTrace(1), daysAgo(3), shared, true)
 	f.arriveWithMedia(t, other.ID, hexTrace(2), daysAgo(3), shared, false)
-	if err := f.writer.Submit(t.Context(), &MediaUpload{ProjectID: f.project.ID, TraceID: hexTrace(9),
-		Body: own, Now: sweepNow.UnixNano()}); err != nil {
+	if err := f.writer.Submit(t.Context(),
+		uploadOf(f.project.ID, hexTrace(9), "tp-pk-test", own, sweepNow.UnixNano())); err != nil {
 		t.Fatal(err)
 	}
 
@@ -265,22 +266,22 @@ func TestMediaOrphanRefs(t *testing.T) {
 	settled := mediaBody(11, 4400)
 	resolved := mediaBody(12, 4500)
 	for _, upload := range []*MediaUpload{
-		{ProjectID: f.project.ID, TraceID: hexTrace(1), Body: late, Now: daysAgo(3)},
-		{ProjectID: f.project.ID, TraceID: hexTrace(2), Body: fresh, Now: sweepNow.UnixNano()},
-		{ProjectID: f.project.ID, TraceID: hexTrace(3), Body: settled, Now: daysAgo(3)},
-		{ProjectID: f.project.ID, TraceID: hexTrace(4), Body: resolved, Now: daysAgo(3)},
+		uploadOf(f.project.ID, hexTrace(1), "tp-pk-test", late, daysAgo(3)),
+		uploadOf(f.project.ID, hexTrace(2), "tp-pk-test", fresh, sweepNow.UnixNano()),
+		uploadOf(f.project.ID, hexTrace(3), "tp-pk-test", settled, daysAgo(3)),
+		uploadOf(f.project.ID, hexTrace(4), "tp-pk-test", resolved, daysAgo(3)),
 	} {
 		if err := f.writer.Submit(t.Context(), upload); err != nil {
 			t.Fatal(err)
 		}
 	}
 	// Trace 3 arrives carrying something else (its span overtook the
-	// upload); trace 4 arrives with the upload resolved, which settles the
-	// ref at ingest.
+	// upload); trace 4 arrives with the upload resolved. Either arrival
+	// settles its trace's ref at ingest (#31).
 	f.arriveWithMedia(t, f.project.ID, hexTrace(3), daysAgo(2), mediaBody(13, 4096), false)
 	f.arriveWithMedia(t, f.project.ID, hexTrace(4), daysAgo(2), resolved, false)
-	if got := f.count(t, `SELECT COUNT(*) FROM media_refs WHERE pending = 1`); got != 3 {
-		t.Fatalf("%d pending refs before the sweep, want 3", got)
+	if got := f.count(t, `SELECT COUNT(*) FROM media_refs WHERE pending = 1`); got != 2 {
+		t.Fatalf("%d pending refs before the sweep, want the late one and the fresh one", got)
 	}
 
 	var plan string
@@ -315,8 +316,10 @@ func TestMediaOrphanRefs(t *testing.T) {
 	}
 }
 
-// A second identical upload for another trace asks for no bytes: the ref is
-// added when the body is there, and refused when it is not.
+// A second identical upload for another trace asks for no bytes when the body
+// is there, and for the bytes when it is not. The ref is written settled for a
+// trace the project has, and pending for a trace not here yet — as old as the
+// bytes are in the project, not as old as the ask (#30).
 func TestMediaRefAdd(t *testing.T) {
 	f := newSweepFixture(t)
 	body := mediaBody(9, 4096)
@@ -324,20 +327,36 @@ func TestMediaRefAdd(t *testing.T) {
 	if err := f.writer.Submit(t.Context(), add); err != nil {
 		t.Fatal(err)
 	}
-	if add.Added {
-		t.Fatal("a ref was added to a body that does not exist")
+	if add.Held {
+		t.Fatal("a body that does not exist is held")
 	}
 	f.arriveWithMedia(t, f.project.ID, hexTrace(2), daysAgo(1), body, false)
-	add = &MediaRefAdd{ProjectID: f.project.ID, SHA256: body.SHA256, TraceID: hexTrace(1)}
-	if err := f.writer.Submit(t.Context(), add); err != nil {
-		t.Fatal(err)
+	delivered := f.count(t, `SELECT MAX(created_at) FROM media_refs WHERE sha256 = ?`, body.SHA256)
+
+	// Half a day after the delivery: well inside the grace, so the date is
+	// the delivery's.
+	add = &MediaRefAdd{ProjectID: f.project.ID, SHA256: body.SHA256, TraceID: hexTrace(1),
+		Now: daysAgo(1) + int64(12*time.Hour)}
+	if err := f.writer.Submit(t.Context(), add); err != nil || !add.Held {
+		t.Fatalf("the null answer for a trace not here = %v, %v", add.Held, err)
 	}
-	if !add.Added {
-		t.Fatal("the ref to a stored body was not added")
+	if got := f.count(t, `SELECT created_at FROM media_refs WHERE sha256 = ? AND trace_id = ? AND pending = 1`,
+		body.SHA256, hexTrace(1)); got != delivered {
+		t.Errorf("the pending ref for a trace not here is from %d, want the delivery's %d", got, delivered)
+	}
+
+	f.arriveWithMedia(t, f.project.ID, hexTrace(3), daysAgo(1), mediaBody(10, 100), false)
+	add = &MediaRefAdd{ProjectID: f.project.ID, SHA256: body.SHA256, TraceID: hexTrace(3)}
+	if err := f.writer.Submit(t.Context(), add); err != nil || !add.Held {
+		t.Fatalf("the null answer for a stored trace = %v, %v", add.Held, err)
+	}
+	if n := f.count(t, `SELECT COUNT(*) FROM media_refs WHERE sha256 = '`+body.SHA256+`'
+	                    AND trace_id = '`+hexTrace(3)+`' AND pending = 0`); n != 1 {
+		t.Errorf("settled refs for the stored trace = %d, want 1", n)
 	}
 	// Idempotent: the SDK retries.
-	if err := f.writer.Submit(t.Context(), add); err != nil || !add.Added {
-		t.Fatalf("a repeated ref = %v, %v", add.Added, err)
+	if err := f.writer.Submit(t.Context(), add); err != nil || !add.Held {
+		t.Fatalf("a repeated ref = %v, %v", add.Held, err)
 	}
 }
 
