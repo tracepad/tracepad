@@ -391,7 +391,10 @@ location / {
   trusted by default. A container's proxy is not: to the container, the host
   is the bridge's gateway (`172.17.0.1` on Docker's default network), so name
   it with `TRACEPAD_TRUSTED_PROXIES`. Otherwise every client counts as one, and
-  the log says so once an hour.
+  the log says so once an hour. Only this header waits for a trusted proxy:
+  `X-Forwarded-Proto` and `X-Forwarded-Host` describe the sender's own request
+  (its cookie, its origin), and a page elsewhere cannot make a browser send
+  them, while `X-Forwarded-For` picks a limit that other people share.
 - **A body limit at least `TRACEPAD_MAX_BODY_BYTES`** (20 MiB by default).
   nginx refuses anything over 1 MiB unless told otherwise, and an exporter's
   large batch is then lost at the proxy with a `413` the server never sees.
@@ -410,11 +413,15 @@ docker run -d --name tracepad -v tracepad:/data -p 127.0.0.1:4318:4318 \
 
 `TRACEPAD_TRUSTED_PROXIES` takes addresses and CIDR ranges, comma-separated
 (`172.17.0.1`, `10.0.0.0/24`, `loopback`), or `none`. On Docker Desktop the
-gateway is another address. `curl` `GET /api/v1/system` through the proxy and
-read `source`: it should be your own address, not the gateway's. Trust only
+gateway is another address. To check, ask `GET /api/v1/system` through the
+proxy with a project key that holds `read` (`curl -H "Authorization: Bearer
+tp-sk-…" https://traces.example.com/api/v1/system`) and read `source`: it
+should be your own address, not the gateway's. Trust only
 the proxy, not the network it sits on. A trusted address can name any client
 it likes, so trusting the whole bridge (`172.17.0.0/16`) lets every other
-container on it pick its own source.
+container on it pick its own source. A range that holds every address
+(`0.0.0.0/0`, `::/0`) would switch the limit off, and the server does not
+start with one.
 
 Loopback is trusted by default because a proxy on the same host is what the
 docs recommend, but not everything that connects over loopback is a proxy

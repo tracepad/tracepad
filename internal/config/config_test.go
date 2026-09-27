@@ -531,21 +531,24 @@ func TestTrustedProxies(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.TrustedProxies != nil {
-		t.Errorf("unset: %v, want nil (loopback)", cfg.TrustedProxies)
+	if list, _ := ParseTrustedProxies(cfg.TrustedProxies); len(list) != 2 || list[0].String() != "127.0.0.0/8" {
+		t.Errorf("unset: %v, want loopback", list)
+	}
+	if list, err := ParseTrustedProxies("none"); err != nil || list == nil || len(list) != 0 {
+		t.Errorf("none: %v, %v; want an empty list", list, err)
 	}
 
-	t.Setenv("TRACEPAD_TRUSTED_PROXIES", "none")
-	if cfg, err = Load(nil); err != nil || cfg.TrustedProxies == nil || len(cfg.TrustedProxies) != 0 {
-		t.Errorf("none: %v, %v; want an empty list", cfg.TrustedProxies, err)
-	}
-
-	t.Setenv("TRACEPAD_TRUSTED_PROXIES", " 172.17.0.1/16 , 10.0.0.5,loopback, 2001:db8::/32, ::ffff:192.0.2.0/120")
+	value := " 172.17.0.1/16 , 10.0.0.5,loopback, 2001:db8::/32, ::ffff:192.0.2.0/120"
+	t.Setenv("TRACEPAD_TRUSTED_PROXIES", value)
 	if cfg, err = Load(nil); err != nil {
 		t.Fatal(err)
 	}
+	list, err := ParseTrustedProxies(cfg.TrustedProxies)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var got []string
-	for _, prefix := range cfg.TrustedProxies {
+	for _, prefix := range list {
 		got = append(got, prefix.String())
 	}
 	want := "172.17.0.0/16 10.0.0.5/32 127.0.0.0/8 ::1/128 2001:db8::/32 192.0.2.0/24"
@@ -553,7 +556,9 @@ func TestTrustedProxies(t *testing.T) {
 		t.Errorf("parsed %v, want %s", got, want)
 	}
 
-	for _, bad := range []string{"10.0.0.5,proxy.internal", "10.0.0.5,,10.0.0.6", "10.0.0.0/33", "none,10.0.0.5", "fe80::1%eth0"} {
+	for _, bad := range []string{"10.0.0.5,proxy.internal", "10.0.0.5,,10.0.0.6", "10.0.0.0/33", "none,10.0.0.5", "fe80::1%eth0",
+		// Every address: the limit would be off (#17).
+		"0.0.0.0/0", "::/0", "::ffff:0:0/96", "10.0.0.5, 0.0.0.0/0"} {
 		t.Setenv("TRACEPAD_TRUSTED_PROXIES", bad)
 		if _, err := Load(nil); err == nil || !strings.Contains(err.Error(), "TRACEPAD_TRUSTED_PROXIES: entry") {
 			t.Errorf("%q: err = %v, want a refusal naming the entry", bad, err)

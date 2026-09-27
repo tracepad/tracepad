@@ -140,8 +140,8 @@ twenty, and the log says which setting to change
 ([docker.md](docker.md#serving-over-tls)). A TCP relay on loopback — a
 service-mesh sidecar, `ssh -L`, `socat` — is not a proxy that appends: behind
 one, set `TRACEPAD_TRUSTED_PROXIES=none` or name the real proxy, or a client
-can pick its own source. `GET /api/v1/system` shows the
-source your own request counts as.
+can pick its own source. `GET /api/v1/system`, asked with a key that holds
+`read`, shows the source your own request counts as.
 
 An invitation link is checked before its password is hashed, so a request with
 a made-up link costs nothing.

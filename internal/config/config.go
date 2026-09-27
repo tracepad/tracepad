@@ -105,12 +105,14 @@ type Config struct {
 	// published, which the process cannot see — so the plain-HTTP notice at
 	// start is information, not a warning.
 	InContainer bool
-	// TrustedProxies are the peers whose X-Forwarded-For is believed when
-	// the server works out where a request comes from (spec 046 #1, #2).
-	// Nil is the default, loopback; an empty list is TRACEPAD_TRUSTED_PROXIES
-	// =none, which trusts no peer at all. A bare address is its /32 or
-	// /128.
-	TrustedProxies []netip.Prefix
+	// TrustedProxies is TRACEPAD_TRUSTED_PROXIES as written, checked at
+	// Load: the peers whose X-Forwarded-For is believed when the server
+	// works out where a request comes from (spec 046 #1, #2). Empty is the
+	// default, loopback, and `none` trusts no peer. Kept as the text rather
+	// than as a list, so that "the default" and "nobody" cannot be told
+	// apart by whether a slice is nil — a difference any copy loses (#17).
+	// ParseTrustedProxies is the one reading of it.
+	TrustedProxies string
 }
 
 // DefaultMaxBodyBytes is the request body cap when unset (20 MiB).
@@ -332,8 +334,8 @@ func Load(args []string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	trusted, err := ParseTrustedProxies(os.Getenv("TRACEPAD_TRUSTED_PROXIES"))
-	if err != nil {
+	trusted := strings.TrimSpace(os.Getenv("TRACEPAD_TRUSTED_PROXIES"))
+	if _, err := ParseTrustedProxies(trusted); err != nil {
 		return nil, err
 	}
 	cfg := &Config{
@@ -387,16 +389,18 @@ var LoopbackProxies = []netip.Prefix{
 
 // ParseTrustedProxies reads TRACEPAD_TRUSTED_PROXIES (spec 046 #1): a
 // comma-separated list of addresses and CIDR ranges, or one of two words —
-// `loopback`, the default when the value is empty, and `none`, which trusts
-// no peer and is returned as an empty, non-nil list. `loopback` may also
-// stand beside other entries. An entry that does not parse refuses to start,
-// named with its position: the list decides whose word the server takes for
-// a client's address, and a typo that silently dropped a proxy would put
-// every client behind it into one bucket.
+// `loopback`, the default when the value is empty, and `none`, which trusts no
+// peer and is an empty list. `loopback` may also stand beside other entries.
+// An entry that does not parse refuses to start, named with its position: the
+// list decides whose word the server takes for a client's address, and a typo
+// that silently dropped a proxy would put every client behind it into one
+// bucket. So does a range that holds every address — 0.0.0.0/0, ::/0, or
+// ::ffff:0:0/96, which is 0.0.0.0/0 written for IPv6 — since trusting every
+// peer lets every client name its own source, and the limit is off (#17).
 func ParseTrustedProxies(value string) ([]netip.Prefix, error) {
 	value = strings.TrimSpace(value)
 	if value == "" || strings.EqualFold(value, "loopback") {
-		return nil, nil
+		return append([]netip.Prefix(nil), LoopbackProxies...), nil
 	}
 	if strings.EqualFold(value, "none") {
 		return []netip.Prefix{}, nil
@@ -417,6 +421,10 @@ func ParseTrustedProxies(value string) ([]netip.Prefix, error) {
 		if err != nil {
 			return nil, fmt.Errorf("TRACEPAD_TRUSTED_PROXIES: entry %d, %q: want an IP address such as 172.17.0.1, or a CIDR range such as 10.0.0.0/24",
 				i+1, entry)
+		}
+		if prefix.Bits() == 0 {
+			return nil, fmt.Errorf("TRACEPAD_TRUSTED_PROXIES: entry %d, %q: holds every address, so every client could name its own source "+
+				"and the limit on password checks would be off; name the proxies themselves", i+1, entry)
 		}
 		list = append(list, prefix)
 	}

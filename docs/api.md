@@ -1166,7 +1166,8 @@ checks ([accounts.md](accounts.md#signing-in)) — an IPv4 address, or an IPv6
 /64: the connection's peer, or the client a trusted proxy named in
 `X-Forwarded-For`. Behind a proxy, it is how to check that
 `TRACEPAD_TRUSTED_PROXIES` is right: it should be your address, not the
-proxy's. The limit's own counts are not here — they are every tenant's
+proxy's. A NAT64 address (`64:ff9b::/96`) is an IPv4 client and counts as
+itself. The limit's own counts are not here — they are every tenant's
 sign-ins — and a refusal is in the server's log instead.
 
 `runs` is the link between traces and eval runs ([datasets.md](datasets.md)):

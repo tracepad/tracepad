@@ -35,13 +35,16 @@ const maxForwardedHops = 32
 // trustedProxies is the parsed TRACEPAD_TRUSTED_PROXIES.
 type trustedProxies []netip.Prefix
 
-// newTrustedProxies turns the configured list into the one the server reads
-// with: nil is the default, loopback, and an empty list trusts nobody.
-func newTrustedProxies(configured []netip.Prefix) trustedProxies {
-	if configured == nil {
-		return trustedProxies(config.LoopbackProxies)
+// newTrustedProxies reads the configured setting. Load has already refused a
+// value that does not parse, so an error here is a Config built by hand; it
+// fails closed — nobody is trusted, and every client is its own peer.
+func newTrustedProxies(configured string) trustedProxies {
+	list, err := config.ParseTrustedProxies(configured)
+	if err != nil {
+		slog.Error("TRACEPAD_TRUSTED_PROXIES does not parse; trusting no proxy", "err", err)
+		return trustedProxies{}
 	}
-	return trustedProxies(configured)
+	return trustedProxies(list)
 }
 
 func (t trustedProxies) trusts(addr netip.Addr) bool {
@@ -132,8 +135,13 @@ func (s *Server) resolveClient(r *http.Request) netip.Addr {
 		}
 		current = addr
 		if !s.trusted.trusts(current) {
-			if _, more := hops(); more {
-				s.noteUntrustedProxy(current)
+			// A proxy only when somebody is behind it: an address to its
+			// left. An empty or garbled entry there is the client's own
+			// header passed along, not a hop (#17).
+			if next, more := hops(); more {
+				if _, behind := parseForwardedAddress(next); behind {
+					s.noteUntrustedProxy(current)
+				}
 			}
 			return current
 		}
@@ -213,9 +221,22 @@ func sourceOf(addr netip.Addr) netip.Prefix {
 	if addr.Is4() {
 		return netip.PrefixFrom(addr, 32)
 	}
+	// A NAT64 address is an IPv4 client written in IPv6: its /64 is every
+	// IPv4 client of the translator, so the whole address is the source
+	// (#17).
+	if nat64WellKnown.Contains(addr) || nat64Local.Contains(addr) {
+		return netip.PrefixFrom(addr, 128)
+	}
 	prefix, _ := addr.Prefix(64)
 	return prefix
 }
+
+// The NAT64 prefixes (RFC 6052's well-known one, RFC 8215's local-use one),
+// whose addresses carry an IPv4 client in their last 32 bits.
+var (
+	nat64WellKnown = netip.MustParsePrefix("64:ff9b::/96")
+	nat64Local     = netip.MustParsePrefix("64:ff9b:1::/48")
+)
 
 // sourceText is a source as the log and /api/v1/system name it: an IPv4
 // address bare, an IPv6 source as its /64.

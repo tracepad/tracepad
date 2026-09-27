@@ -43,7 +43,7 @@ func TestClientAddress(t *testing.T) {
 		}
 		return out
 	}
-	loopback := newTrustedProxies(nil)
+	loopback := newTrustedProxies("")
 	twoHops := proxies("127.0.0.0/8", "10.0.0.0/8")
 	many := make([]string, 40)
 	for i := range many {
@@ -112,6 +112,15 @@ func TestSourceIsASlash64(t *testing.T) {
 	}
 	if sourceOf(netip.MustParseAddr("203.0.113.7")) == sourceOf(netip.MustParseAddr("203.0.113.8")) {
 		t.Error("two IPv4 addresses are one source")
+	}
+	// A NAT64 address is an IPv4 client: its /64 is every client of the
+	// translator, so the whole address is the source (#17).
+	for _, prefix := range []string{"64:ff9b::", "64:ff9b:1::"} {
+		one := sourceOf(netip.MustParseAddr(prefix + "c000:207"))
+		other := sourceOf(netip.MustParseAddr(prefix + "c000:208"))
+		if one == other {
+			t.Errorf("two IPv4 clients behind %s/64 are one source: %s", prefix, one)
+		}
 	}
 }
 
@@ -450,9 +459,35 @@ func TestAProxyBehindAProxyIsWarnedAbout(t *testing.T) {
 	if text := logs(); strings.Contains(text, "does not trust") {
 		t.Fatalf("a private client behind the trusted proxy was warned about:\n%s", text)
 	}
+	// A private client whose own header was empty or garbled has nothing
+	// behind it either: the entry to its left is no hop (#17).
+	for _, header := range []string{"unknown, 10.0.0.9", ", 10.0.0.9", "not-an-address, 10.0.0.9"} {
+		expectStatus(t, system(from("127.0.0.1:5000"), forwarded(header)), http.StatusOK)
+	}
+	if text := logs(); strings.Contains(text, "does not trust") {
+		t.Fatalf("a private client with a garbled header of its own was called a proxy:\n%s", text)
+	}
 	expectStatus(t, system(from("127.0.0.1:5000"), forwarded("203.0.113.7, 10.0.0.5")), http.StatusOK)
 	if text := logs(); !strings.Contains(text, "proxy=10.0.0.5") {
 		t.Fatalf("the balancer in front of the trusted proxy was not warned about:\n%s", text)
+	}
+}
+
+// TestTheSettingIsTheText: "the default" and "nobody" are two spellings of
+// the setting, not a nil and an empty list that any copy of a Config turns
+// into each other; and a setting built by hand that does not parse trusts
+// nobody rather than everybody (#17).
+func TestTheSettingIsTheText(t *testing.T) {
+	cfg := config.Config{TrustedProxies: "none"}
+	copied := cfg
+	if got := newTrustedProxies(copied.TrustedProxies); len(got) != 0 {
+		t.Errorf("none, copied, trusts %v", got)
+	}
+	if got := newTrustedProxies(""); !got.trusts(netip.MustParseAddr("127.0.0.1")) {
+		t.Error("the default does not trust loopback")
+	}
+	if got := newTrustedProxies("0.0.0.0/0"); len(got) != 0 {
+		t.Errorf("a setting that does not parse trusts %v, want nobody", got)
 	}
 }
 
@@ -462,7 +497,7 @@ func TestAProxyBehindAProxyIsWarnedAbout(t *testing.T) {
 func TestNoneIsNotWarnedAbout(t *testing.T) {
 	h := newHarness(t, &config.Config{
 		Listen: ":0", StoreRaw: true, MaxBodyBytes: config.DefaultMaxBodyBytes,
-		TrustedProxies: []netip.Prefix{},
+		TrustedProxies: "none",
 	}, store.WriterOptions{})
 	logs := recordLogs(t)
 	expectStatus(t, h.call(t, "GET", "/api/v1/system", nil, from("127.0.0.1:5000"), forwarded("203.0.113.7")), http.StatusOK)
@@ -491,7 +526,7 @@ func TestRetryAfterRoundsUp(t *testing.T) {
 // opens a session, and both ask where the request comes from; the second
 // question reads the first answer (#16).
 func TestTheClientIsWorkedOutOnce(t *testing.T) {
-	s := &Server{trusted: newTrustedProxies(nil), proxyLog: &logpace.Keyed{Every: time.Hour, Keys: 8}}
+	s := &Server{trusted: newTrustedProxies(""), proxyLog: &logpace.Keyed{Every: time.Hour, Keys: 8}}
 	r := withClientMemo(httptest.NewRequest("POST", "/", nil))
 	r.RemoteAddr = "127.0.0.1:5000"
 	r.Header.Set("X-Forwarded-For", "203.0.113.7")
@@ -508,7 +543,7 @@ func TestTheClientIsWorkedOutOnce(t *testing.T) {
 func TestSystemReportsTheSource(t *testing.T) {
 	h := newHarness(t, &config.Config{
 		Listen: ":0", StoreRaw: true, MaxBodyBytes: config.DefaultMaxBodyBytes,
-		TrustedProxies: []netip.Prefix{netip.MustParsePrefix("172.17.0.0/16")},
+		TrustedProxies: "172.17.0.0/16",
 	}, store.WriterOptions{})
 	rec := h.call(t, "GET", "/api/v1/system", nil, from("172.17.0.1:5000"), forwarded("2001:db8:1:2::7"))
 	expectStatus(t, rec, http.StatusOK)

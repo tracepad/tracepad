@@ -70,6 +70,7 @@ deadlines, and Decision 22's split between settings and constants).
 | 14 | **2026-09-28** — **Wrong `Bearer` credentials are not limited by source** (spec 028 #31 f and spec 045's out of scope stand) | A key is 32 random characters or more (spec 001 #18), so guessing one is hopeless at any rate. What a flood of wrong keys costs is an indexed read each, under spec 043 #1's deadline, which is the cost of any flood of requests. Limiting it by source would answer a shared NAT's valid exporter `429` because a neighbour's key is wrong, and OTLP exporters retry a `429`. A generic request-rate limit is its own question, with its own measurements. |
 | 15 | **2026-09-28** — **Ingest is not limited by source.** The body budget, the span cap, the writer queue's `429` and the read slots (spec 043) stay what bounds it | Ingest is authenticated, and many exporters share one address: a collector fans a whole fleet into one connection, and a Kubernetes cluster leaves through one NAT. The fair share that matters there is per project or per key, not per address, and spec 043 already defers it as fairness between tenants. |
 | 16 | **2026-09-28** (found in the first review of PR #127) — **The edges of #1, #8, #12 and #13.** (a) **#1's rationale was too broad.** Loopback stays the default, but not everything that connects over loopback is an HTTP proxy that appends: a TCP relay (a service-mesh sidecar, `ssh -L`, `socat`, stunnel, `kubectl port-forward`) passes a remote client's own `X-Forwarded-For` through, and that client then picks its source. The docs say so beside the setting and name the way out: `none`, or the real proxy's address alone. The examples name a gateway address (`172.17.0.1`), not the bridge's range, which would trust every container on it. (b) **The warning of #12 also covers a proxy behind a proxy**: when the walk steps past the trusted hops and stops at an untrusted loopback or private address with more entries to its left, that address is a proxy nobody named — a load balancer in front of a local nginx — and is warned about the same way. A private address with nothing to its left is a client on the network, and is not. (c) **Nothing is warned about under `none`**: the operator chose to trust nobody, and an hourly line telling them to add a proxy is one they could not silence. (d) **`Retry-After` rounds up on every limit**, the email's and the account's included (spec 028 #8, #31): one helper, `waitSeconds`, so a client that waits what it was told is not turned away for waiting 0.4 s too little. (e) **`GET /api/v1/system` reports `source` alone**: `source_limit` goes. (f) **A public route works its client out once**: the address is kept on the request for the session the sign-in opens | (a) The argument "whoever can connect over loopback already runs code on the machine" is true of a local process, not of a relay that carries a remote peer. What such a relay costs is the limit for the clients behind it, which is the server before this spec: the gate still bounds the CPU, and the session list showed a client-chosen address before as well. Changing the default to `none` would instead put every host-proxied deployment into one source, so the default stays and the exception is documented where the setting is. (b) The review's topology — balancer, then nginx on the host — is common, and it put every client into one source with nothing said. The peer check alone could not see it. (c) A warning that cannot be acted on teaches operators to ignore the log. (d) Rounded to the nearest second, a wait of 2.4 s said 2, and the client that obeyed was refused again. (e) The limit's counts are every tenant's sign-in traffic, and the trusted list is the deployment's internal topology, while any project key with `read` can ask for `/system`. `source` is the asker's own, and it is all a proxy check needs. A refusal is in the server's log. (f) Checking a password and then opening a session asked the question twice, and walked the header twice. |
+| 17 | **2026-09-28** (found in the second review of PR #127) — **Four edges of #1, #4 and #16, and three that stay.** (a) **A proxy behind a proxy is one with an address to its left** (amends #16 b): an empty or garbled entry there is the client's own header passed along — `X-Forwarded-For: unknown` from a private client behind the local nginx — and is not warned about. (b) **A range of every address refuses to start**: `0.0.0.0/0`, `::/0`, and `::ffff:0:0/96`, which #1's reading of mapped ranges turns into `0.0.0.0/0`. Narrower ranges, public ones included, are the operator's to name. (c) **The setting is kept as its text**: `Config.TrustedProxies` is the string, read by one function, rather than a nil list for the default and an empty one for `none`. A `Config` built by hand whose value does not parse trusts nobody. (d) **A NAT64 address is its own source** (amends #4): in `64:ff9b::/96` and `64:ff9b:1::/48` the whole address is the source. (e) **`X-Forwarded-Proto` and `X-Forwarded-Host` keep being read from any peer** (spec 028 #23, #30): the list governs `X-Forwarded-For` alone. (f) **On a sign-in the source's token stays after the account's read**, where #11 put it. (g) **A peer address that does not parse is stored as no address**, and such requests share one source | (a) Warned about, the garbled case told the operator to trust a client, which would then name its own source. (b) Trusting every peer lets every client name its own source, so the limit is off, and a line at `INFO` was all that said so. Cloudflare's own ranges are as wide as /13 and /29, so the line is drawn at "everything" and nowhere narrower. (c) Any copy, reset or round trip of a `Config` that turned the empty list into nil turned `none` into `loopback` without a sound. Failing closed on a bad value means a mistake costs clients their own buckets, not the limit. (d) Behind a translator every IPv4 client is `64:ff9b::a.b.c.d`, one /64, and they shared twenty checks. (e) Those two headers describe the sender's own request — the `Secure` flag on its own cookie, the comparison of its own `Origin` — and a page elsewhere cannot make a browser send them, so believing a client about them costs only that client. `X-Forwarded-For` chooses a bucket other people share, which is why it alone waits for a trusted peer. `docs/docker.md` says so beside the four headers. (f) The account read is one indexed lookup beside the request's own HTTP and JSON work. Taking the token before it would mean a second place that charges and a guard against charging twice, for a refusal that is already cheap. (g) The listener is TCP, and net/http always writes `host:port`; only a test double does otherwise. |
 
 ## API contract
 
@@ -97,10 +98,11 @@ password change (#31 b), the gate's `503` (#31 b) and every other status.
   itself and logs through `logpace.Keyed{Every: time.Minute, Keys: 16}` (#10).
   The callers' reservations come back through the deferred `cancel` they
   already hold for a full gate (#8).
-- `internal/config`: `ParseTrustedProxies` reads `TRACEPAD_TRUSTED_PROXIES`
-  into `Config.TrustedProxies`. Nil means the default, loopback; an empty,
-  non-nil list means `none`. A bare address is its /32 or /128, a range is
-  masked to its network, and an IPv4-mapped range is read as IPv4.
+- `internal/config`: `Config.TrustedProxies` is `TRACEPAD_TRUSTED_PROXIES` as
+  written, checked at `Load`; `ParseTrustedProxies` is the one reading of it
+  (#17): empty or `loopback` is loopback, `none` an empty list. A bare address
+  is its /32 or /128, a range is masked to its network, and an IPv4-mapped
+  range is read as IPv4; a range of every address refuses to start.
   `loopback` may stand beside other entries; `none` stands alone.
 - `cmd/tracepad/main.go`: the setting in the help text, and one `INFO` line
   at start with the list in effect.
@@ -141,6 +143,11 @@ password change (#31 b), the gate's `503` (#31 b) and every other status.
   the session list shows the client's address, not the invented left entry.
 - **`/api/v1/system`** (#13, #16): `source` is the forwarded client's /64,
   and nothing of the limit's is reported.
+- **The second review round** (#17): a private client whose own header left
+  an empty or garbled entry to its left is not called a proxy; a range of
+  every address refuses to start; `none`, copied, is still `none`, and a
+  setting built by hand that does not parse trusts nobody; two NAT64
+  clients are two sources.
 - **The review round** (#16): a balancer in front of the trusted local proxy
   is warned about, and a private client behind it is not; nothing is said
   under `none`; `Retry-After` rounds up; a public route works its client out
@@ -180,6 +187,10 @@ password change (#31 b), the gate's `503` (#31 b) and every other status.
   every bucket at once.
 - **An IPv4 client over an IPv6 listener** is read as IPv4 (#2), so it is not
   its own /64 of `::ffff:0:0/96`.
+- **Teredo** (`2001::/32`) carries an IPv4 client too, obfuscated, and its /64
+  is one Teredo server's clients. It is left to #4's /64: the protocol is on
+  its way out, and a client behind it shares at worst with that server's
+  others (#17).
 
 ## Docs to touch
 
