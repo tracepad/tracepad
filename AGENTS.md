@@ -516,6 +516,19 @@ API. This file routes; it does not duplicate what specs and docs say.
   `keys create --scope` print the lines that fit (#14, #15, #23), any key fetches a prompt (#25), and each
   package's end-to-end suite holds an `ingest` key to the production path
   (#16). The ceiling rose to 22,200 (#17).
+- ✅ Spec 046 (rate limiting by source) shipped: a request's source is its
+  TCP peer, or — when the peer is in `TRACEPAD_TRUSTED_PROXIES` (loopback by
+  default, `none` for nobody) — the first untrusted address of
+  `X-Forwarded-For` read from the right; an IPv6 source is its /64 (#1–#4).
+  `clientAddress` in `source.go` is the one reader, for the limit, the session
+  list and the log (#5). Every request that would run bcrypt spends a token
+  of its source at the password gate's door — GCRA, twenty at once and one
+  every three seconds, `429` with `Retry-After`, the email's or account's
+  reservation given back — over at most 32,768 sources evicted by least debt
+  (#6–#11). An untrusted private peer that forwards is warned about, and
+  `/api/v1/system` reports `source` and `source_limit` (#12, #13). Wrong keys
+  and ingest are not limited by source (#14, #15). The Playwright harness
+  signs in from an address of its own per test.
 - ✅ Spec 032 (the Node package) shipped: `tracepad` on npm, source in
   `sdk/js/`, the Python package's surface with promises where Python has
   context managers and the same vocabulary on the wire — `init` adapts to

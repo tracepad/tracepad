@@ -1,6 +1,6 @@
 # Spec 046 — Rate limiting by source: who is asking the server to check a password
 
-**Status:** 🚧 IN PROGRESS
+**Status:** ✅ SHIPPED
 **Sprint:** September 2026
 
 > Spec 028 #31 bounded what an unauthenticated caller can make the server
