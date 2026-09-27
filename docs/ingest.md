@@ -256,9 +256,17 @@ the database and the server its memory:
 - **Bodies in memory: `TRACEPAD_BODY_BUDGET_BYTES`, four times
   `TRACEPAD_MAX_BODY_BYTES` by default (80 MiB).** Every request body the
   server reads — exports, the JSON API, the Langfuse SDK's media uploads —
-  reserves its decompressed bytes from this budget as it is read, in steps of
-  64 KiB, and keeps them until the request is answered — its write committed,
-  whether or not the client is still waiting. A request whose next
+  holds its bytes in this budget until the request is answered, its write
+  committed whether or not the client is still waiting. A body that declares
+  its length and is not compressed reserves that length whole before it is
+  read, so bodies arriving together are admitted whole or refused whole. A
+  gzip body — which the OpenTelemetry Collector sends by default — or a
+  chunked one declares nothing that bounds what it becomes, and reserves its
+  decompressed bytes as it is read, in steps of 64 KiB: several of those
+  arriving together can each hold part of the budget and all be refused, and
+  the exporters' retry backoff, with its jitter, is what spreads them out
+  again. If a Collector's exports keep meeting `429` while the server is not
+  short of memory, raise the budget. A request whose next
   step does not fit is `429` `the server is holding as many request bodies as
   it can; retry shortly`, with `Retry-After: 1`, which every OTLP exporter
   retries; the rest of its body is then read and dropped, so the exporter reads

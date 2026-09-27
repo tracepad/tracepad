@@ -514,9 +514,9 @@ func (s *Server) handlePatchMe(w http.ResponseWriter, r *http.Request) {
 		AccountID: account.ID, Checked: account,
 		NewHash: hash, Keep: c.session.ID, Name: request.Name, Preferences: preferences,
 	}
-	// Waited for whether or not the client stays, as every JSON API write
-	// is (spec 043 #31): its body is counted until the write commits.
-	if err := s.writer.Submit(context.WithoutCancel(r.Context()), change); err != nil {
+	// Waited for as every write with a body is (spec 043 #31): its body is
+	// counted until the write commits.
+	if err := s.writer.Submit(writeContext(r), change); err != nil {
 		if errors.Is(err, store.ErrWrongPassword) {
 			writeError(w, http.StatusForbidden, store.ErrWrongPassword.Error())
 			return

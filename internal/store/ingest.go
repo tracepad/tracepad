@@ -99,10 +99,10 @@ const SliceRows = 1000
 // with no room for one of its observations: a trace row with none would be
 // listed without a time.
 //
-// Each slice carries the media of the traces it writes — their bodies and
-// refs — and the check that a resolved Langfuse id still names a body the
-// project holds (spec 041 #9); the last carries the raw body, its refs, and
-// every body the raw body names (spec 043 #32). The raw batch
+// Each slice carries the refs of the traces it writes, each body in the first
+// slice that names it, and the check that the resolved Langfuse ids its refs
+// name still name bodies the project holds (spec 041 #9); the last carries the
+// raw body, its refs, and every body the raw body names (spec 043 #32, #33). The raw batch
 // is stamped with the last slice's reading (spec 044 #3), so that slice stamps
 // the traces the earlier ones wrote with it too: an erasure finds a trace's
 // batches inside its `[ingested_at, updated_at]`.
@@ -169,13 +169,13 @@ func (b *IngestBatch) Slices() []*IngestBatch {
 		strays = strays[n:]
 	}
 
-	// Each slice carries the media of the traces it writes: their bodies and
-	// refs, in the same transaction as the trace, so a ref is settled when it
-	// is written and a body is never without one between two slices; a body
-	// several slices name is written by each, a conflict that changes
-	// nothing. Every slice checks the resolved Langfuse ids (spec 041 #9),
-	// since a deletion between two slices may collect one. The last also
-	// carries every body the raw body names, beside the raw refs to them.
+	// Each slice carries the refs of the traces it writes, settled in the
+	// same transaction as the trace, and each body in the first slice that
+	// names it — the slices commit in order, so a ref in a later one finds it
+	// stored. A slice checks the resolved Langfuse ids its own refs name
+	// (spec 041 #9). The last also carries every body the raw body names,
+	// beside the raw refs to them, so a deletion between the slices cannot
+	// leave the archived batch pointing at nothing.
 	bodies := make(map[string]MediaBody, len(b.Media))
 	for _, body := range b.Media {
 		if _, seen := bodies[body.SHA256]; !seen {
@@ -186,26 +186,39 @@ func (b *IngestBatch) Slices() []*IngestBatch {
 	for _, ref := range b.MediaRefs {
 		refsOf[ref.TraceID] = append(refsOf[ref.TraceID], ref)
 	}
-	for _, slice := range slices {
-		written := map[string]bool{}
-		carry := func(sha string) {
-			if body, ok := bodies[sha]; ok && !written[sha] {
-				written[sha] = true
+	resolved := make(map[string]bool, len(b.Resolved))
+	for _, sha := range b.Resolved {
+		resolved[sha] = true
+	}
+	stored := map[string]bool{}
+	for i, slice := range slices {
+		named := map[string]bool{}
+		carry := func(sha string, again bool) {
+			if named[sha] || (stored[sha] && !again) {
+				return
+			}
+			if body, ok := bodies[sha]; ok {
+				named[sha] = true
+				stored[sha] = true
 				slice.Media = append(slice.Media, body)
 			}
 		}
+		checked := map[string]bool{}
 		for _, t := range slice.Traces {
 			for _, ref := range refsOf[t.ID] {
 				slice.MediaRefs = append(slice.MediaRefs, ref)
-				carry(ref.SHA256)
+				carry(ref.SHA256, false)
+				if resolved[ref.SHA256] && !checked[ref.SHA256] {
+					checked[ref.SHA256] = true
+					slice.Resolved = append(slice.Resolved, ref.SHA256)
+				}
 			}
 		}
-		if slice == slices[len(slices)-1] {
+		if i == len(slices)-1 {
 			for _, sha := range b.RawMedia {
-				carry(sha)
+				carry(sha, true)
 			}
 		}
-		slice.Resolved = b.Resolved
 	}
 	last := slices[len(slices)-1]
 	last.Raw, last.RawMedia = b.Raw, b.RawMedia
@@ -311,8 +324,11 @@ func (b *IngestBatch) apply(tx *sql.Tx) error {
 			return err
 		}
 		// One primary-key lookup per trace that carries the attribute,
-		// paid only by eval traffic (spec 014 #3).
-		if t.RunID != "" {
+		// paid only by eval traffic (spec 014 #3) — once per trace of an
+		// export: a continued trace written whole again, after a deletion
+		// between two slices, was looked up by the slice before (spec 043
+		// #33).
+		if t.RunID != "" && !b.continued[t.ID] {
 			known, err := runExists(tx, b.ProjectID, t.RunID)
 			if err != nil {
 				return err

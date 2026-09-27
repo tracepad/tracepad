@@ -283,7 +283,11 @@ func (s *Server) handleLangfuseMediaPut(w http.ResponseWriter, r *http.Request) 
 	// One the budget cannot hold is refused as the stored state's
 	// refusals are, its answer first and the rest of it drained, so the
 	// SDK reads the 429 it retries.
-	body, err := io.ReadAll(budgeted(http.MaxBytesReader(w, r.Body, grant.Length+1), holdFrom(r.Context()), grant.Length))
+	err = reserveDeclared(r, holdFrom(r.Context()), grant.Length)
+	var body []byte
+	if err == nil {
+		body, err = io.ReadAll(budgeted(http.MaxBytesReader(w, r.Body, grant.Length+1), holdFrom(r.Context()), grant.Length))
+	}
 	if errors.Is(err, errBodyBudget) {
 		s.refuseBodyForBudget(w, r, grant.Project, grant.Length)
 		return

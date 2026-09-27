@@ -88,25 +88,27 @@ func TestSlicesCutAnExport(t *testing.T) {
 		}
 	}
 
-	// Media travel with the trace that names them, in every slice that
-	// carries it; the raw body's go with the last slice, beside the raw body;
-	// every slice checks the resolved ids.
+	// A trace's refs travel in every slice that carries it; a body goes in
+	// the first slice that names it; the raw body's bodies go with the last
+	// slice, beside the raw body; a slice checks the resolved ids its refs
+	// name.
 	named := batch.Traces[2].ID
 	last := cut[len(cut)-1]
+	firstNaming := -1
 	for i, slice := range cut {
 		carries := slices.ContainsFunc(slice.Traces, func(t *model.Trace) bool { return t.ID == named })
+		if carries && firstNaming < 0 {
+			firstNaming = i
+		}
 		var shas []string
 		for _, body := range slice.Media {
 			shas = append(shas, body.SHA256)
 		}
 		want := []string(nil)
-		if carries {
+		if i == firstNaming || slice == last {
 			want = append(want, "named")
 		}
 		if slice == last {
-			if !carries {
-				want = append(want, "named")
-			}
 			want = append(want, "rawonly")
 		}
 		if !slices.Equal(shas, want) {
@@ -115,12 +117,15 @@ func TestSlicesCutAnExport(t *testing.T) {
 		if refs := len(slice.MediaRefs); (refs == 1) != carries {
 			t.Errorf("slice %d carries %d refs; carries the trace that names the body: %t", i, refs, carries)
 		}
-		if len(slice.Resolved) != 1 {
-			t.Errorf("slice %d checks %d resolved ids, want the export's one", i, len(slice.Resolved))
+		if checks := len(slice.Resolved); (checks == 1) != carries {
+			t.Errorf("slice %d checks %d resolved ids; carries the trace that names it: %t", i, checks, carries)
 		}
 		if (slice.Raw != nil) != (slice == last) || (len(slice.RawMedia) > 0) != (slice == last) {
 			t.Errorf("slice %d of %d: raw %v, raw media %v; want them on the last slice only", i, len(cut), slice.Raw, slice.RawMedia)
 		}
+	}
+	if firstNaming < 0 || firstNaming == len(cut)-1 {
+		t.Fatalf("the trace that names the body starts in slice %d of %d; want it before the last", firstNaming, len(cut))
 	}
 
 	small := bulkBatch("p", 10)
@@ -515,5 +520,88 @@ func TestSlicesCarryObservationsWithoutTheirTrace(t *testing.T) {
 	}
 	if !slices.Equal(got[3:], strays) || len(got) != len(batch.Observations) {
 		t.Errorf("%d observations sliced of %d, want every one, the strays after the trace's own", len(got), len(batch.Observations))
+	}
+}
+
+// A trace cut into three slices takes its body with its first slice, where its
+// ref first appears, and its ref in all three: every ref finds its body stored
+// (spec 043 #33).
+func TestATraceInThreeSlicesStoresItsBodyOnce(t *testing.T) {
+	s, p := openIngestStore(t)
+	batch := bulkBatch(p.ID, 500, 2200)
+	long := batch.Traces[1].ID
+	batch.Media = []MediaBody{{SHA256: "ef", MimeType: "image/png", Body: []byte("png")}}
+	batch.MediaRefs = []MediaRef{{SHA256: "ef", TraceID: long}}
+	cut := batch.Slices()
+	carrying := 0
+	for i, slice := range cut {
+		if !slices.ContainsFunc(slice.Traces, func(t *model.Trace) bool { return t.ID == long }) {
+			continue
+		}
+		carrying++
+		wantBody := carrying == 1
+		if got := len(slice.Media) == 1; got != wantBody {
+			t.Errorf("slice %d, the trace's slice number %d, carries the body: %t, want %t", i, carrying, got, wantBody)
+		}
+		if len(slice.MediaRefs) != 1 {
+			t.Errorf("slice %d carries %d refs, want the trace's one", i, len(slice.MediaRefs))
+		}
+	}
+	if carrying != 3 {
+		t.Fatalf("the trace spans %d slices, want three", carrying)
+	}
+	for _, slice := range cut {
+		tx, err := s.db.Begin()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := slice.apply(tx); err != nil {
+			tx.Rollback()
+			t.Fatal(err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var bodies, refs int
+	if err := s.db.QueryRow(`SELECT (SELECT COUNT(*) FROM media WHERE sha256 = 'ef'),
+	                                (SELECT COUNT(*) FROM media_refs WHERE sha256 = 'ef' AND pending = 0)`).Scan(&bodies, &refs); err != nil {
+		t.Fatal(err)
+	}
+	if bodies != 1 || refs != 1 {
+		t.Errorf("body stored %d times, %d settled refs; want one of each", bodies, refs)
+	}
+}
+
+// A continued trace written whole again after a deletion between slices does
+// not look its run up a second time: the export counts its unknown run once
+// (spec 043 #33).
+func TestAContinuedTraceCountsItsUnknownRunOnce(t *testing.T) {
+	s, p := openIngestStore(t)
+	batch := bulkBatch(p.ID, 1500)
+	batch.Traces[0].RunID = fmt.Sprintf("%032x", 0xdead)
+	cut := batch.Slices()
+	runs := 0
+	for i, slice := range cut {
+		tx, err := s.db.Begin()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := slice.apply(tx); err != nil {
+			tx.Rollback()
+			t.Fatal(err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+		runs += len(slice.UnknownRuns)
+		if i == 0 {
+			if _, err := s.db.Exec(`DELETE FROM traces WHERE project_id = ?`, p.ID); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if runs != 1 {
+		t.Errorf("the export named an unknown run %d times, want once", runs)
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 )
 
@@ -14,9 +15,11 @@ handler concurrency is unbounded, so N requests at once held N bodies and
 their decoded, mapped and re-encoded copies. Every body read into memory now
 reserves its bytes from one budget, `TRACEPAD_BODY_BUDGET_BYTES`:
 
- 1. The reservation is made in steps of bodyStep as the body is read, counting
-    what reaches the reader — the decompressed bytes of a gzip body, whose size
-    nothing declares until it is inflated.
+ 1. A body that declares its length and is not compressed reserves that
+    length whole before it is read (#33). Any other reserves in steps of
+    bodyStep as it is read, counting what reaches the reader — the
+    decompressed bytes of a gzip body, whose size nothing declares until it
+    is inflated.
  2. A request whose next step does not fit fails at once: `429` with
     `Retry-After`, the status every OTLP exporter retries. Nothing waits, so
     nothing can deadlock on half a body.
@@ -109,6 +112,31 @@ func (s *Server) holdBodies(next http.HandlerFunc) http.HandlerFunc {
 func holdFrom(ctx context.Context) *bodyHold {
 	hold, _ := ctx.Value(bodyHoldKey{}).(*bodyHold)
 	return hold
+}
+
+// reserveDeclared reserves, before a byte is read, the whole of a body whose
+// length the request declares and nothing will inflate — all or nothing
+// (spec 043 #33): bodies that arrive together are then admitted whole or
+// refused whole, instead of each holding part of the budget and every one of
+// them refused at its next step. A declared length over `limit` is the cap's
+// final refusal, answered before the budget is asked. A gzip body or one sent
+// in chunks declares nothing that bounds what it becomes, and reserves as it
+// is read.
+func reserveDeclared(r *http.Request, hold *bodyHold, limit int64) error {
+	if r.ContentLength <= 0 {
+		return nil
+	}
+	if r.ContentLength > limit {
+		return &http.MaxBytesError{Limit: limit}
+	}
+	if hold == nil || strings.EqualFold(r.Header.Get("Content-Encoding"), "gzip") {
+		return nil
+	}
+	if !hold.budget.reserve(r.ContentLength) {
+		return errBodyBudget
+	}
+	hold.reserved += r.ContentLength
+	return nil
 }
 
 // errBodyBudget is a body whose next step did not fit the budget.

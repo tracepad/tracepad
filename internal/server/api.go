@@ -75,10 +75,7 @@ func (s *Server) submit(w http.ResponseWriter, r *http.Request, job store.WriteJ
 		writeError(w, http.StatusServiceUnavailable, "writes are not available")
 		return false
 	}
-	// Committed whether or not the client waits, and waited for, so that a
-	// body the job holds stays counted in the body budget until it is
-	// written (spec 043 #31): the writer commits a queued job all the same.
-	err := s.writer.Submit(context.WithoutCancel(r.Context()), job)
+	err := s.writer.Submit(writeContext(r), job)
 	if err == nil {
 		return true
 	}
@@ -228,6 +225,20 @@ func (s *Server) bodyRead(w http.ResponseWriter, r *http.Request, err error) boo
 	}
 	writeError(w, http.StatusBadRequest, "cannot read request body")
 	return false
+}
+
+// writeContext is the context a write waits for its commit under. A request
+// that read a body waits whether or not its client stays, so that the body it
+// holds stays counted in the budget until the job is written (spec 043 #31):
+// the writer commits a queued job all the same. One that read none — a
+// deletion, a bulk round of them — keeps its client's cancellation, and a
+// client that hangs up stops the round at the chunk in progress (spec 043
+// #33).
+func writeContext(r *http.Request) context.Context {
+	if hold := holdFrom(r.Context()); hold != nil && hold.reserved > 0 {
+		return context.WithoutCancel(r.Context())
+	}
+	return r.Context()
 }
 
 // refuseBodyForBudget answers a body the budget could not hold (spec 043 #13)

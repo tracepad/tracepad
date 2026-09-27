@@ -174,7 +174,7 @@ func (s *Server) handleTraces(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = s.submitExport(r.Context(), batch)
+	err = s.submitExport(r.Context(), batch, false)
 	if errors.Is(err, store.ErrMediaGone) {
 		// A Langfuse upload the walk rewrote a string to was collected
 		// before the write (spec 041 #9). Taken again without resolving,
@@ -185,7 +185,9 @@ func (s *Server) handleTraces(w http.ResponseWriter, r *http.Request) {
 			opts := s.mediaOptions(walk, project)
 			opts.Resolve = nil
 			batch, result = prepare(again, opts)
-			err = s.submitExport(r.Context(), batch)
+			// Admitted already: some of its slices may be on disk, and a
+			// full queue must not leave the rest unwritten (spec 043 #33).
+			err = s.submitExport(r.Context(), batch, true)
 		}
 	}
 	if err != nil {
@@ -231,22 +233,24 @@ func (s *Server) handleTraces(w http.ResponseWriter, r *http.Request) {
 // no longer counts. A full queue refuses the first slice only; the ones after
 // it wait for room (#31), since the export is admitted, and a refusal half-way
 // would have its retry write the same slices again into the same queue.
-func (s *Server) submitExport(ctx context.Context, batch *store.IngestBatch) error {
+//
+// An export already admitted — taken again after ErrMediaGone, perhaps with
+// some of its slices on disk — waits for room from its first slice on.
+func (s *Server) submitExport(ctx context.Context, batch *store.IngestBatch, admitted bool) error {
 	commit := context.WithoutCancel(ctx)
 	slices := batch.Slices()
-	if len(slices) == 1 {
-		return s.writer.Submit(commit, batch)
-	}
 	batch.UnknownRuns = batch.UnknownRuns[:0]
 	for i, slice := range slices {
 		submit := s.writer.Submit
-		if i > 0 {
+		if admitted || i > 0 {
 			submit = s.writer.SubmitWaiting
 		}
 		if err := submit(commit, slice); err != nil {
 			return err
 		}
-		batch.UnknownRuns = append(batch.UnknownRuns, slice.UnknownRuns...)
+		if slice != batch {
+			batch.UnknownRuns = append(batch.UnknownRuns, slice.UnknownRuns...)
+		}
 	}
 	return nil
 }
@@ -315,8 +319,11 @@ func decodeFailure(asJSON bool, err error) string {
 // (spec 043 #13), which the bytes the parser gets are reserved from as they
 // are read, when the route counts against it.
 func readBody(w http.ResponseWriter, r *http.Request, maxBytes int64) ([]byte, error) {
-	limited := http.MaxBytesReader(w, r.Body, maxBytes)
 	hold := holdFrom(r.Context())
+	if err := reserveDeclared(r, hold, maxBytes); err != nil {
+		return nil, err
+	}
+	limited := http.MaxBytesReader(w, r.Body, maxBytes)
 	if !strings.EqualFold(r.Header.Get("Content-Encoding"), "gzip") {
 		return io.ReadAll(budgeted(limited, hold, maxBytes))
 	}

@@ -18,6 +18,7 @@ import (
 
 	"github.com/tracepad/tracepad/internal/config"
 	"github.com/tracepad/tracepad/internal/mapping"
+	"github.com/tracepad/tracepad/internal/model"
 	"github.com/tracepad/tracepad/internal/otlptest"
 	"github.com/tracepad/tracepad/internal/store"
 )
@@ -344,14 +345,18 @@ func TestBodyBudget(t *testing.T) {
 	release := make(chan struct{})
 	real := h.server.writer
 	h.server.writer = &stalledWriter{inner: real, release: release}
+	// Each body reserves its declared length (#33); the budget is made the
+	// two of them exactly, so that they spend it.
+	first, second := full(1), full(2)
+	spent := int64(len(first) + len(second))
+	h.server.bodies.capacity = spent
 	held := make(chan *httptest.ResponseRecorder, 2)
-	for seed := range 2 {
-		body := full(seed + 1)
+	for _, body := range [][]byte{first, second} {
 		go func() { held <- h.post(t, "/v1/traces", body) }()
 	}
-	waitUntil(t, func() bool { return h.server.bodies.heldBytes() == 2*bodyCap })
-	if gauge := h.ingestSystem(t, testSecret).BodyBudget; gauge.Held != 2*bodyCap || gauge.Capacity != 2*bodyCap {
-		t.Errorf("body_budget = %+v, want the two bodies held of %d", gauge, 2*bodyCap)
+	waitUntil(t, func() bool { return h.server.bodies.heldBytes() == spent })
+	if gauge := h.ingestSystem(t, testSecret).BodyBudget; gauge.Held != spent || gauge.Capacity != spent {
+		t.Errorf("body_budget = %+v, want the two bodies held of %d", gauge, spent)
 	}
 
 	third := full(3)
@@ -635,6 +640,151 @@ func TestAnUploadLongerThanTheBudgetIsFinal(t *testing.T) {
 	if put.total() != 0 {
 		t.Errorf("read %d bytes of an upload refused for its length, want none", put.total())
 	}
+}
+
+// hangUpAfterFirstDelete lets the first chunk of a bulk deletion commit and
+// then hangs its client up, counting the chunks submitted.
+type hangUpAfterFirstDelete struct {
+	JobWriter
+	hangUp  context.CancelFunc
+	deletes int
+}
+
+func (w *hangUpAfterFirstDelete) Submit(ctx context.Context, job store.WriteJob) error {
+	if _, ok := job.(*store.TraceDelete); !ok {
+		return w.JobWriter.Submit(ctx, job)
+	}
+	w.deletes++
+	err := w.JobWriter.Submit(ctx, job)
+	w.hangUp()
+	return err
+}
+
+// A write that read no body keeps its client's cancellation: a bulk deletion
+// whose client hangs up stops at the chunk in progress, as it did before the
+// body budget (spec 043 #33).
+func TestAHangUpStillStopsABulkDeletion(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	const hour = int64(time.Hour)
+	for i := range 3 {
+		start := seedBase + int64(i)*hour
+		h.seed(t, &model.Trace{ID: traceHex(i + 1), Name: "chat"},
+			&model.Observation{TraceID: traceHex(i + 1), ID: spanHex(i + 1), Type: model.TypeSpan,
+				Level: model.LevelDefault, StartTime: start, EndTime: start + 1000})
+	}
+	ctx, hangUp := context.WithCancel(context.Background())
+	writer := &hangUpAfterFirstDelete{JobWriter: h.server.writer, hangUp: hangUp}
+	h.server.writer = writer
+	to := time.Unix(0, seedBase+10*hour).UTC().Format(time.RFC3339)
+	h.call(t, "DELETE", "/api/v1/traces?to="+to+"&confirm=test", nil, func(r *http.Request) { *r = *r.WithContext(ctx) })
+	// The chunk being handed over when the client left is committed, as it
+	// always was — the writer takes a queued job — and the round stops there.
+	if writer.deletes != 2 {
+		t.Errorf("%d chunks submitted, want the round stopped at the chunk in progress when its client hung up (2)", writer.deletes)
+	}
+	// That chunk commits in the writer's own time; the one after it never
+	// reaches the writer.
+	if n := h.countTraces(t); n < 1 {
+		t.Errorf("%d traces left, want the one the stopped round did not reach", n)
+	}
+}
+
+// mediaGoneOnce answers ErrMediaGone to an export's second slice once, as a
+// deletion between slices would; after that, a full queue refuses every
+// ingest job not submitted to wait.
+type mediaGoneOnce struct {
+	inner *store.Writer
+	mu    sync.Mutex
+	jobs  int
+	gone  bool
+}
+
+func (m *mediaGoneOnce) Submit(ctx context.Context, job store.WriteJob) error {
+	if _, ok := job.(*store.IngestBatch); ok {
+		m.mu.Lock()
+		m.jobs++
+		gone, answer := m.gone, m.jobs == 2 && !m.gone
+		m.gone = m.gone || answer
+		m.mu.Unlock()
+		if answer {
+			return store.ErrMediaGone
+		}
+		if gone {
+			return store.ErrWriterBusy
+		}
+	}
+	return m.inner.Submit(ctx, job)
+}
+
+func (m *mediaGoneOnce) SubmitWaiting(ctx context.Context, job store.WriteJob) error {
+	m.mu.Lock()
+	m.jobs++
+	answer := m.jobs == 2 && !m.gone
+	m.gone = m.gone || answer
+	m.mu.Unlock()
+	if answer {
+		return store.ErrMediaGone
+	}
+	return m.inner.SubmitWaiting(ctx, job)
+}
+
+// An export taken again after ErrMediaGone met it half-way is admitted
+// already: a full queue does not refuse its first slice again, which would
+// leave part of it on disk (spec 043 #33).
+func TestAnExportTakenAgainAfterMediaGoneWaitsForRoom(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	h.server.writer = &mediaGoneOnce{inner: h.writer}
+	expectStatus(t, h.post(t, "/v1/traces", bulkBody(t, 1, 150, 16)), 200)
+	if n := h.countRows(t, h.project.ID, "observations"); n != 2400 {
+		t.Errorf("%d observations, want all 2,400", n)
+	}
+}
+
+// A body that declares its length reserves exactly that, whole, before it is
+// read — a small one does not hold a 64 KiB step — and one that does not fit
+// is refused before a byte of it is read; a declared length over the cap is
+// 413 before the budget is asked (spec 043 #33).
+func TestADeclaredBodyIsReservedWholeBeforeItIsRead(t *testing.T) {
+	const bodyCap = 256 << 10
+	h := newHarness(t, &config.Config{Listen: ":0", StoreRaw: true, MaxBodyBytes: bodyCap,
+		BodyBudgetBytes: bodyCap}, store.WriterOptions{})
+	release := make(chan struct{})
+	h.server.writer = &stalledWriter{inner: h.server.writer, release: release}
+
+	small, big := bulkBody(t, 1, 1, 2), bulkBody(t, 2, 20, 16)
+	// Room for the small one and all but a byte of the big one.
+	h.server.bodies.capacity = int64(len(small) + len(big) - 1)
+	held := make(chan *httptest.ResponseRecorder, 1)
+	go func() { held <- h.post(t, "/v1/traces", small) }()
+	waitUntil(t, func() bool { return h.server.bodies.heldBytes() > 0 })
+	if got := h.server.bodies.heldBytes(); got != int64(len(small)) {
+		t.Errorf("a %d-byte body holds %d bytes of the budget, want exactly its length", len(small), got)
+	}
+
+	// Refused before it is read, then drained: when the drain first reads,
+	// the refusal is already counted.
+	reader := &pausingReader{r: bytes.NewReader(big), pauseAt: 1, paused: make(chan struct{}), resume: make(chan struct{})}
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() { done <- h.post(t, "/v1/traces", big, func(r *http.Request) { r.Body = io.NopCloser(reader) }) }()
+	select {
+	case <-reader.paused:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the body was never read")
+	}
+	refusedFirst := h.ingestSystem(t, testSecret).Counters.RefusedForBody == 1
+	close(reader.resume)
+	rec := refusedWithin(t, func() *httptest.ResponseRecorder { return <-done })
+	expectError(t, rec, http.StatusTooManyRequests, bodyBusy)
+	if !refusedFirst {
+		t.Error("the body was read before it was refused; a declared length is decided on before reading")
+	}
+
+	// Over the cap is final, whatever the budget holds.
+	over := bytes.Repeat([]byte{0}, bodyCap+1)
+	expectStatus(t, h.post(t, "/v1/traces", over), http.StatusRequestEntityTooLarge)
+
+	close(release)
+	expectStatus(t, <-held, 200)
 }
 
 // oneBusyWriter answers ErrWriterBusy to the nth ingest job submitted without
