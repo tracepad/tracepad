@@ -1,10 +1,13 @@
 package store
 
 import (
+	"database/sql/driver"
 	"errors"
 	"strings"
 	"testing"
 	"time"
+
+	"modernc.org/sqlite"
 )
 
 // The upload channel's lifecycle in the store (spec 041 #28–#31): the write
@@ -630,34 +633,51 @@ func TestMediaVoidedSweepOnTheWallClock(t *testing.T) {
 	}
 }
 
-// TestMediaRemovalStampedAsItsChunkEnds: a chunk that runs long — a trigger
-// here makes its trace's deletion slow — stamps its removed traces as it ends,
-// not as it began: an ask that read the pool while the chunk ran is dated from
-// then, and the row's hour must start no earlier (#29).
+// wallClockInSQL is the wall clock as SQL can read it, for a trigger to say
+// when it ran: SQLite's own `'now'` is fixed for a whole statement.
+const wallClockInSQL = "test_wall_clock"
+
+func init() {
+	sqlite.MustRegisterScalarFunction(wallClockInSQL, 0,
+		func(*sqlite.FunctionContext, []driver.Value) (driver.Value, error) {
+			return time.Now().UnixNano(), nil
+		})
+}
+
+// TestMediaRemovalStampedAsItsChunkEnds: a chunk stamps its removed traces as
+// it ends, not as it began: an ask that read the pool while the chunk ran is
+// dated from then, and the row's hour must start no earlier (#29). A trigger
+// on the trace's deletion does some work and then records the clock: stamped
+// as the chunk began, the removal would sit before that reading; as it ends,
+// after it. An order, not a duration — a floor on how long the work takes
+// failed on an idle machine that did it faster.
 func TestMediaRemovalStampedAsItsChunkEnds(t *testing.T) {
 	f := newSweepFixture(t)
 	f.arrive(t, f.project.ID, hexTrace(1), daysAgo(1))
 	for _, statement := range []string{
 		`CREATE TABLE slow (n INTEGER)`,
-		`WITH RECURSIVE c(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM c WHERE n < 1500) INSERT INTO slow SELECT n FROM c`,
-		`CREATE TRIGGER slow_removal AFTER DELETE ON traces
-		   BEGIN SELECT COUNT(*) FROM slow a, slow b; END`,
+		`WITH RECURSIVE c(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM c WHERE n < 500) INSERT INTO slow SELECT n FROM c`,
+		`CREATE TABLE deleted (at INTEGER)`,
+		`CREATE TRIGGER slow_removal AFTER DELETE ON traces BEGIN
+		   SELECT COUNT(*) FROM slow a, slow b;
+		   INSERT INTO deleted VALUES (` + wallClockInSQL + `());
+		 END`,
 	} {
 		if _, err := f.store.db.Exec(statement); err != nil {
 			t.Fatalf("%s: %v", statement, err)
 		}
 	}
-	began := time.Now()
 	if err := f.writer.Submit(t.Context(), &TraceDelete{ProjectID: f.project.ID, IDs: []string{hexTrace(1)},
 		Confirm: hexTrace(1)}); err != nil {
 		t.Fatal(err)
 	}
-	took := time.Since(began)
-	if took < 50*time.Millisecond {
-		t.Fatalf("the slowed chunk took %v; the trigger no longer slows it", took)
+	if n := f.count(t, `SELECT COUNT(*) FROM deleted`); n != 1 {
+		t.Fatalf("the trigger ran %d times, want once inside the chunk", n)
 	}
+	deleted := f.count(t, `SELECT at FROM deleted`)
 	at := f.count(t, `SELECT at FROM media_voided WHERE project_id = ?`, f.project.ID)
-	if stamped := time.Duration(at - began.UnixNano()); stamped < took/2 {
-		t.Errorf("the removal was stamped %v into a chunk of %v; want it stamped as the chunk ends", stamped, took)
+	if at < deleted {
+		t.Errorf("the removal was stamped %v before the chunk deleted the trace; want it stamped as the chunk ends",
+			time.Duration(deleted-at))
 	}
 }
