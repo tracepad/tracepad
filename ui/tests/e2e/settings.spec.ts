@@ -138,6 +138,10 @@ test('a minted key is shown once, and can then be revoked', async ({ page }) => 
 	// Revoking the newer one is not the last-key case, so the server does it
 	// on the first request and the card says so.
 	await rows.last().getByRole('button', { name: 'Revoke' }).click();
+	// The confirmation is a card under the table. Until it renders, the last
+	// "Revoke" on the page is the row's own — and pressing that again closes
+	// the card this was meant to confirm. Wait for the card, then press its.
+	await expect(page.getByRole('heading', { name: /^Revoke tp-pk-/ })).toBeVisible();
 	await page.getByRole('button', { name: 'Revoke', exact: true }).last().click();
 
 	await expect(page.getByText(/Key tp-pk-\w+ revoked\./)).toBeVisible();

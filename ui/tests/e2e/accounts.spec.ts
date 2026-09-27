@@ -257,8 +257,13 @@ test.describe('accounts, from the link the server printed', () => {
 
 		// A user's page is readable and carries no erasure: the endpoint behind
 		// that button is an editor's, wherever the button is put (#15).
+		// A user's link lives in a row of the table: the last link on the
+		// page is the sidebar's Settings until the rows arrive, and clicking
+		// that raced the listing. Wait for a row, then take its link.
 		await page.goto(`${at.base}/users`);
-		await page.getByRole('link').filter({ hasText: /\w/ }).last().click();
+		const userLinks = page.locator('tbody tr').getByRole('link');
+		await expect(userLinks).not.toHaveCount(0);
+		await userLinks.first().click();
 		await expect(page).toHaveURL(/\/users\/.+/);
 		await expect(page.getByRole('button', { name: 'Erase data' })).toHaveCount(0);
 
