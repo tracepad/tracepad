@@ -47,8 +47,17 @@ func TestProjectListingCountsTheDaysTraces(t *testing.T) {
 		TraceID: trace.ID, ID: spanHex(20), Type: model.TypeGeneration,
 		Level: model.LevelDefault, StartTime: live, EndTime: live + 100*ms,
 	})
+	// And one either side of the window's first instant, in an hour the
+	// aggregator rolls whole: only the later one is the day's.
+	for i, at := range []int64{now.Add(-24*time.Hour - time.Minute).UnixNano(), now.Add(-24*time.Hour + time.Minute).UnixNano()} {
+		edge := &model.Trace{ID: traceHex(30 + i), Environment: "production"}
+		h.seed(t, edge, &model.Observation{
+			TraceID: edge.ID, ID: spanHex(30 + i), Type: model.TypeGeneration,
+			Level: model.LevelDefault, StartTime: at, EndTime: at + 100*ms,
+		})
+	}
 	h.rollTheCorpus(t, now)
-	if state, err := h.store.RollupState(h.project.ID); err != nil || state.RolledUntil <= hourAgo(3) {
+	if state, err := h.store.RollupState(t.Context(), h.project.ID); err != nil || state.RolledUntil <= hourAgo(3) {
 		t.Fatalf("watermark = %d (%v); the rolled hour is not behind it and the test proves nothing", state.RolledUntil, err)
 	}
 
@@ -60,8 +69,9 @@ func TestProjectListingCountsTheDaysTraces(t *testing.T) {
 	for _, row := range rows {
 		counts[row.ID] = row.Traces24h
 	}
-	if got := counts[h.project.ID]; got == nil || *got != 4 {
-		t.Errorf("traces_24h = %v, want the three rolled and the one live, not the two of the day before", deref(got))
+	if got := counts[h.project.ID]; got == nil || *got != 5 {
+		t.Errorf("traces_24h = %v, want the three rolled, the one live and the one just inside the window, "+
+			"not the two of the day before or the one just outside", deref(got))
 	}
 	if got := counts[other.ID]; got == nil || *got != 0 {
 		t.Errorf("an idle project's traces_24h = %v, want 0 rather than absent", deref(got))
@@ -74,8 +84,8 @@ func TestProjectListingCountsTheDaysTraces(t *testing.T) {
 	for _, bucket := range h.statsBuckets(t, "/api/v1/stats?group_by=hour&from="+from+"&to="+to) {
 		total += bucket.Count
 	}
-	if total != 4 {
-		t.Errorf("stats over the same day count %d, want the listing's 4", total)
+	if total != 5 {
+		t.Errorf("stats over the same day count %d, want the listing's 5", total)
 	}
 
 	// Without the parameter the listing is exactly what it was.
@@ -93,6 +103,25 @@ func TestProjectListingCountsTheDaysTraces(t *testing.T) {
 	// One value today; anything else is a 400 rather than a silent listing.
 	expectError(t, h.call(t, "GET", "/api/v1/projects?activity=7d", nil, asSession(owner)),
 		http.StatusBadRequest, "activity: only 24h")
+
+	// One statement for the listing counts what the stats seam counts, the
+	// rolled hours and the live tail alike (spec 043 #29).
+	since, until := now.Add(-24*time.Hour).UnixNano(), time.Now().UnixNano()
+	grouped, err := h.store.TracesBetween(t.Context(), []string{h.project.ID, other.ID}, since, until)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, project := range []*store.Project{h.project, other} {
+		var tally bucket
+		if err := h.server.readStats(t.Context(), project,
+			store.StatsFilter{From: &since, To: &until, GroupBy: defaultGroupBy},
+			func(string) *bucket { return &tally }); err != nil {
+			t.Fatal(err)
+		}
+		if grouped[project.ID] != tally.count {
+			t.Errorf("%s: one statement counts %d, the stats seam %d", project.Name, grouped[project.ID], tally.count)
+		}
+	}
 }
 
 // A soft-deleted project is not there as far as a person is concerned, and

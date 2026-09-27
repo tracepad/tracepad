@@ -143,7 +143,7 @@ func TestMediaNamingAHashDoesNotExtendIt(t *testing.T) {
 	if err := f.sweeper.Pass(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if file, _ := f.store.MediaFor(f.project.ID, x.SHA256); file != nil || f.mediaRows(t) != 0 {
+	if file, _ := f.store.MediaFor(t.Context(), f.project.ID, x.SHA256); file != nil || f.mediaRows(t) != 0 {
 		t.Error("naming the hash again kept a body no trace claims past its grace")
 	}
 }
@@ -203,7 +203,7 @@ func TestMediaNullAnswerKeepsTheBody(t *testing.T) {
 	if _, err := f.sweeper.sweepOrphanMedia(t.Context(), sweepNow.UnixNano()); err != nil {
 		t.Fatal(err)
 	}
-	if file, _ := f.store.MediaFor(f.project.ID, x.SHA256); file == nil {
+	if file, _ := f.store.MediaFor(t.Context(), f.project.ID, x.SHA256); file == nil {
 		t.Fatal("deleting the trace that held X lost it before B's spans came")
 	}
 
@@ -245,7 +245,7 @@ func TestMediaPendingCapInTheWrite(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := pendingRoom(f.store.db, f.project.ID, 2); !rejectedAs(err, RejectFull) {
+	if err := pendingRoom(t.Context(), f.store.db, f.project.ID, 2); !rejectedAs(err, RejectFull) {
 		t.Fatalf("pendingRoom at the cap = %v", err)
 	}
 	if err := f.writer.Submit(t.Context(), f.upload(hexTrace(12), mediaBody(52, 300))); !rejectedAs(err, RejectFull) {
@@ -348,11 +348,11 @@ func TestMediaDeletionInChunks(t *testing.T) {
 	}
 	chunk(hexTrace(21))
 	for name, body := range map[string]MediaBody{"taken": taken, "later": later} {
-		if file, _ := f.store.MediaFor(f.project.ID, body.SHA256); file != nil {
+		if file, _ := f.store.MediaFor(t.Context(), f.project.ID, body.SHA256); file != nil {
 			t.Errorf("the %s trace's picture outlived the deletion", name)
 		}
 	}
-	if file, _ := f.store.MediaFor(f.project.ID, kept.SHA256); file == nil {
+	if file, _ := f.store.MediaFor(t.Context(), f.project.ID, kept.SHA256); file == nil {
 		t.Error("the picture of a trace no chunk took was lost")
 	}
 
@@ -588,7 +588,7 @@ func TestMediaSweepSparesARefTheNullAnswerHeld(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := sweepNow.Add(-MediaOrphanGrace).UnixNano()
-	refs, err := f.store.orphanMediaRefs(before, orphanScanLimit)
+	refs, err := f.store.orphanMediaRefs(t.Context(), before, orphanScanLimit)
 	if err != nil || len(refs) != 1 {
 		t.Fatalf("the sweep's read = %v, %v; want the one ref", refs, err)
 	}

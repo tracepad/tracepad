@@ -280,7 +280,7 @@ func TestLastUseIsWrittenOnceAMinute(t *testing.T) {
 
 	stored := func(projectID, publicKey string) *int64 {
 		t.Helper()
-		keys, err := h.store.ProjectKeys(projectID)
+		keys, err := h.store.ProjectKeys(t.Context(), projectID)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -526,7 +526,7 @@ func TestShutdownLosesNoUse(t *testing.T) {
 	cancel()
 	_ = h.server.Shutdown(spent)
 
-	keys, err := h.store.ProjectKeys(h.project.ID)
+	keys, err := h.store.ProjectKeys(t.Context(), h.project.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

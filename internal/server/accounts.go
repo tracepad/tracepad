@@ -42,15 +42,14 @@ func (s *Server) handleListAccounts(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	accounts, err := s.store.ListAccounts()
+	accounts, err := s.store.ListAccounts(r.Context())
 	if err != nil {
-		slog.Error("could not read the accounts", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to read the accounts")
+		readFailed(w, r, "failed to read the accounts", err)
 		return
 	}
 	rendered := make([]object, 0, len(accounts))
 	for _, account := range accounts {
-		body, ok := s.fullAccount(w, account)
+		body, ok := s.fullAccount(w, r, account, false)
 		if !ok {
 			return
 		}
@@ -133,7 +132,7 @@ func (s *Server) handleCreateAccount(w http.ResponseWriter, r *http.Request) {
 	if !s.submit(w, r, create) {
 		return
 	}
-	body, ok := s.fullAccount(w, create.Account)
+	body, ok := s.fullAccount(w, r, create.Account, true)
 	if !ok {
 		return
 	}
@@ -157,7 +156,7 @@ func (s *Server) handleGetAccount(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	body, ok := s.fullAccount(w, account)
+	body, ok := s.fullAccount(w, r, account, false)
 	if !ok {
 		return
 	}
@@ -209,7 +208,7 @@ func (s *Server) handlePatchAccount(w http.ResponseWriter, r *http.Request) {
 	if !s.submit(w, r, update) {
 		return
 	}
-	body, ok := s.fullAccount(w, update.Account)
+	body, ok := s.fullAccount(w, r, update.Account, true)
 	if !ok {
 		return
 	}
@@ -237,16 +236,14 @@ func (s *Server) handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if values.Get("confirm") == "" {
-		memberships, err := s.store.Memberships(account.ID)
+		memberships, err := s.store.Memberships(r.Context(), account.ID)
 		if err != nil {
-			slog.Error("could not read the memberships", "err", err)
-			writeError(w, http.StatusInternalServerError, "failed to read the memberships")
+			readFailed(w, r, "failed to read the memberships", err)
 			return
 		}
-		sessions, err := s.store.AccountSessions(account.ID, time.Now().UnixNano())
+		sessions, err := s.store.AccountSessions(r.Context(), account.ID, time.Now().UnixNano())
 		if err != nil {
-			slog.Error("could not read the sessions", "err", err)
-			writeError(w, http.StatusInternalServerError, "failed to read the sessions")
+			readFailed(w, r, "failed to read the sessions", err)
 			return
 		}
 		// The keys the account minted are not deleted with it (spec 045
@@ -254,10 +251,9 @@ func (s *Server) handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
 		// because this is the moment an owner decides whether to rotate
 		// them.
 		unwritten := s.keyUses.unwritten()
-		minted, err := s.store.KeysMintedBy(account.ID)
+		minted, err := s.store.KeysMintedBy(r.Context(), account.ID)
 		if err != nil {
-			slog.Error("could not read the keys an account minted", "err", err)
-			writeError(w, http.StatusInternalServerError, "failed to read the keys")
+			readFailed(w, r, "failed to read the keys", err)
 			return
 		}
 		keys := make([]object, 0, len(minted))
@@ -270,7 +266,7 @@ func (s *Server) handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
 				put("scopes", one.Key.Scopes).
 				put("last_used_at", lastUsed(one.Key, unwritten)))
 		}
-		body, ok := s.fullAccount(w, account)
+		body, ok := s.fullAccount(w, r, account, false)
 		if !ok {
 			return
 		}
@@ -421,10 +417,9 @@ func (s *Server) handleProjectMembers(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	members, err := s.store.ProjectMembers(project.ID)
+	members, err := s.store.ProjectMembers(r.Context(), project.ID)
 	if err != nil {
-		slog.Error("could not read the members", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to read the members")
+		readFailed(w, r, "failed to read the members", err)
 		return
 	}
 	rendered := make([]object, 0, len(members))
@@ -454,16 +449,29 @@ func (s *Server) account(w http.ResponseWriter, r *http.Request) (*store.Account
 	return account, true
 }
 
+// membershipsOf is the store's, a seam for the test that fails it after a
+// committed write.
+var membershipsOf = (*store.Store).Memberships
+
 // fullAccount is an owner's view of somebody: the standing fields the person
 // themselves has no use for, and the memberships.
 //
 // `pending` is derived rather than stored — it is "has no password yet" — so
 // that there is one fact about an account and not two that can disagree.
-func (s *Server) fullAccount(w http.ResponseWriter, a *store.Account) (object, bool) {
-	memberships, err := s.store.Memberships(a.ID)
+//
+// written says the account was just written by this request: a read that
+// fails after that commit is answered `500`, never the `503` that asks for a
+// retry, because the retry would repeat a write that is already done — an
+// invitation minted twice, or refused as a conflict with its link lost
+// (spec 043 #28).
+func (s *Server) fullAccount(w http.ResponseWriter, r *http.Request, a *store.Account, written bool) (object, bool) {
+	memberships, err := membershipsOf(s.store, r.Context(), a.ID)
 	if err != nil {
-		slog.Error("could not read the memberships", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to read the memberships")
+		if written {
+			readAfterWriteFailed(w, r, "failed to read the memberships", err)
+		} else {
+			readFailed(w, r, "failed to read the memberships", err)
+		}
 		return nil, false
 	}
 	var lastLogin any

@@ -201,7 +201,7 @@ func TestErasureCorrectsTheHoursOfEachChunkAsItCommits(t *testing.T) {
 	}
 	gone := func(when string) {
 		t.Helper()
-		if summary, err := s.UserSummaryRow(project.ID, "forget-me"); err != nil || summary != nil {
+		if summary, err := s.UserSummaryRow(t.Context(), project.ID, "forget-me"); err != nil || summary != nil {
 			t.Errorf("the user's summary %s = %v, %v; want none", when, summary, err)
 		}
 		for _, hour := range hours {
@@ -355,7 +355,7 @@ func TestErasureLeavesAFrozenHourStanding(t *testing.T) {
 			if count != tc.rolled {
 				t.Errorf("the hour rolled %d traces after the erasure, want %d", count, tc.rolled)
 			}
-			if alice, err := s.UserSummaryRow(project.ID, "alice"); err != nil || alice != nil {
+			if alice, err := s.UserSummaryRow(t.Context(), project.ID, "alice"); err != nil || alice != nil {
 				t.Errorf("alice's summary after erasure = %v, %v; want it gone, frozen hour or not", alice, err)
 			}
 		})

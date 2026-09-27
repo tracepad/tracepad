@@ -181,7 +181,7 @@ var ErrMediaGone = errors.New("a resolved media body was collected before the wr
 // its own last ref has gone.
 func mediaStillThere(tx *sql.Tx, projectID string, shas []string) error {
 	for _, sha := range shas {
-		hold, err := projectHold(tx, projectID, sha)
+		hold, err := projectHold(context.Background(), tx, projectID, sha)
 		if err != nil {
 			return err
 		}
@@ -375,10 +375,10 @@ const mediaScope = `SELECT h.mime_type, h.first_at, (SELECT m.size FROM media m 
 
 // projectHold is the one lookup of a project's hold of a body (Decision 26):
 // nil when the project holds none, or the body was collected meanwhile.
-func projectHold(q querier, projectID, sha string) (*MediaInfo, error) {
+func projectHold(ctx context.Context, q querier, projectID, sha string) (*MediaInfo, error) {
 	info := MediaInfo{SHA256: sha}
 	var size sql.NullInt64
-	err := q.QueryRow(mediaScope, sha, projectID).Scan(&info.MimeType, &info.CreatedAt, &size)
+	err := q.QueryRowContext(ctx, mediaScope, sha, projectID).Scan(&info.MimeType, &info.CreatedAt, &size)
 	if err == sql.ErrNoRows || err == nil && !size.Valid {
 		return nil, nil
 	}
@@ -407,9 +407,9 @@ const mediaRead = `SELECT h.mime_type, (SELECT m.body FROM media m WHERE m.sha25
 // MediaFor reads one body for a project, under the project's own type, or nil
 // when the project holds no ref to it — which is also what a body that does
 // not exist looks like, so a hash is not a capability across projects (#7).
-func (s *Store) MediaFor(projectID, sha string) (*MediaFile, error) {
+func (s *Store) MediaFor(ctx context.Context, projectID, sha string) (*MediaFile, error) {
 	var file MediaFile
-	err := s.db.QueryRow(mediaRead, sha, projectID).Scan(&file.MimeType, &file.Body)
+	err := s.db.QueryRowContext(ctx, mediaRead, sha, projectID).Scan(&file.MimeType, &file.Body)
 	if err == sql.ErrNoRows || err == nil && file.Body == nil {
 		return nil, nil
 	}
@@ -433,19 +433,19 @@ type MediaInfo struct {
 // is to it. It decides the Langfuse channel's `uploadUrl: null` (#9): only a
 // project that already holds the bytes skips the upload, because a hash any
 // project could name would otherwise be a way to adopt another's picture.
-func (s *Store) MediaHeld(projectID, sha string) (*MediaInfo, error) {
-	return projectHold(s.db, projectID, sha)
+func (s *Store) MediaHeld(ctx context.Context, projectID, sha string) (*MediaInfo, error) {
+	return projectHold(ctx, s.db, projectID, sha)
 }
 
 // MediaByLangfuseID resolves the SDK's id to a body this project holds (#9):
 // the project's holders in the hash range the id's first sixteen bytes spell,
 // then the whole id compared (Decision 26).
-func (s *Store) MediaByLangfuseID(projectID, mediaID string) (*MediaInfo, error) {
+func (s *Store) MediaByLangfuseID(ctx context.Context, projectID, mediaID string) (*MediaInfo, error) {
 	prefix, ok := shaPrefixOf(mediaID)
 	if !ok {
 		return nil, nil
 	}
-	rows, err := s.db.Query(mediaByID, projectID, prefix, prefix+"g")
+	rows, err := s.db.QueryContext(ctx, mediaByID, projectID, prefix, prefix+"g")
 	if err != nil {
 		return nil, fmt.Errorf("look up media %s: %w", mediaID, err)
 	}
@@ -480,12 +480,12 @@ type mediaReads struct {
 // now has a body for read as the reference: the bodies the trace's refs name,
 // keyed by the SDK's id for them. The stored payload is not rewritten, and
 // the raw archive keeps the string as sent.
-func (m *mediaReads) resolve(s *Store, v any, projectID, traceID string) (any, error) {
+func (m *mediaReads) resolve(ctx context.Context, s *Store, v any, projectID, traceID string) (any, error) {
 	key := [2]string{projectID, traceID}
 	held, asked := m.held[key]
 	if !asked {
 		var err error
-		if held, err = s.traceMediaIDs(projectID, traceID); err != nil {
+		if held, err = s.traceMediaIDs(ctx, projectID, traceID); err != nil {
 			return nil, err
 		}
 		if m.held == nil {
@@ -504,8 +504,8 @@ func (m *mediaReads) resolve(s *Store, v any, projectID, traceID string) (any, e
 }
 
 // traceMediaIDs lists the bodies a trace's refs name, by their Langfuse id.
-func (s *Store) traceMediaIDs(projectID, traceID string) (map[string]MediaInfo, error) {
-	rows, err := s.db.Query(
+func (s *Store) traceMediaIDs(ctx context.Context, projectID, traceID string) (map[string]MediaInfo, error) {
+	rows, err := s.db.QueryContext(ctx,
 		`SELECT m.sha256, m.size FROM media_refs r JOIN media m ON m.sha256 = r.sha256
 		  WHERE r.project_id = ? AND r.trace_id = ?`, projectID, traceID)
 	if err != nil {
@@ -534,9 +534,9 @@ type MediaSummary struct {
 // MediaSummary counts what a project's refs hold: its holds, one per body it
 // points at from a trace or a raw batch (Decisions 25, 26), read through
 // `idx_media_holders_project` and asked the same predicate as every read.
-func (s *Store) MediaSummary(projectID string) (MediaSummary, error) {
+func (s *Store) MediaSummary(ctx context.Context, projectID string) (MediaSummary, error) {
 	var summary MediaSummary
-	err := s.db.QueryRow(
+	err := s.db.QueryRowContext(ctx,
 		`SELECT COUNT(*), COALESCE(SUM(m.size), 0)
 		   FROM media_holders h JOIN media m ON m.sha256 = h.sha256
 		  WHERE h.project_id = ? AND `+holdsBody,
@@ -553,7 +553,7 @@ func (s *Store) MediaSummary(projectID string) (MediaSummary, error) {
 // project keeps the bytes on disk does not enter the figure. `traces` selects
 // trace ids of the project and `raws` raw batch ids of it; either may be
 // empty, which is none.
-func (s *Store) mediaFreed(projectID, traces string, traceArgs []any, raws string, rawArgs []any) (count, size int64, err error) {
+func (s *Store) mediaFreed(ctx context.Context, projectID, traces string, traceArgs []any, raws string, rawArgs []any) (count, size int64, err error) {
 	if traces == "" {
 		traces = `SELECT NULL WHERE 0`
 	}
@@ -562,7 +562,7 @@ func (s *Store) mediaFreed(projectID, traces string, traceArgs []any, raws strin
 	}
 	args := append(append(append([]any{}, traceArgs...), rawArgs...),
 		projectID, projectID, projectID, projectID)
-	err = s.db.QueryRow(
+	err = s.db.QueryRowContext(ctx,
 		`WITH gone(trace_id) AS (`+traces+`), gone_raw(id) AS (`+raws+`)
 		 SELECT COUNT(*), COALESCE(SUM(m.size), 0) FROM media m
 		  WHERE m.sha256 IN (SELECT sha256 FROM media_refs WHERE project_id = ? AND trace_id IN gone
@@ -615,7 +615,7 @@ const nullAnswerHold = time.Hour
 
 func (a *MediaRefAdd) apply(tx *sql.Tx) error {
 	a.Held = false
-	hold, err := projectHold(tx, a.ProjectID, a.SHA256)
+	hold, err := projectHold(context.Background(), tx, a.ProjectID, a.SHA256)
 	if err != nil || hold == nil {
 		return err
 	}
@@ -630,7 +630,7 @@ func (a *MediaRefAdd) apply(tx *sql.Tx) error {
 	// A trace removed since the handler's check is refused as the check
 	// would have refused it, not answered as held (#29), and a new pending
 	// ref meets the cap.
-	if err := placeRefusal(tx, a.ProjectID, place); err != nil {
+	if err := placeRefusal(context.Background(), tx, a.ProjectID, place); err != nil {
 		return err
 	}
 	if place == refWritten {
@@ -783,12 +783,12 @@ var maxPendingMediaRefs = MaxPendingMediaRefs
 // the upload and the null answer share: ErrTraceRemoved for a removed trace
 // that is not here (#29), errPendingFull for a new pending ref past the cap
 // (#31), and nil for a ref written already or a trace the project has.
-func placeRefusal(q querier, projectID string, place refPlace) error {
+func placeRefusal(ctx context.Context, q querier, projectID string, place refPlace) error {
 	switch place {
 	case refVoid:
 		return ErrTraceRemoved
 	case refPending:
-		return pendingRoom(q, projectID, maxPendingMediaRefs)
+		return pendingRoom(ctx, q, projectID, maxPendingMediaRefs)
 	}
 	return nil
 }
@@ -800,9 +800,9 @@ var errPendingFull = &Rejection{Kind: RejectFull,
 // pendingRoom refuses one more pending ref when the project already has
 // `limit` of them: a seek on the partial index of 0026, which stops counting
 // there.
-func pendingRoom(q querier, projectID string, limit int) error {
+func pendingRoom(ctx context.Context, q querier, projectID string, limit int) error {
 	var n int
-	if err := q.QueryRow(`SELECT COUNT(*) FROM (SELECT 1 FROM media_refs
+	if err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM (SELECT 1 FROM media_refs
 	                       WHERE project_id = ? AND pending = 1 LIMIT ?)`,
 		projectID, limit).Scan(&n); err != nil {
 		return fmt.Errorf("count the pending media refs: %w", err)
@@ -824,7 +824,7 @@ func (s *Store) MediaUploadRoom(ctx context.Context, projectID, sha, traceID str
 	if err != nil {
 		return err
 	}
-	return placeRefusal(s.db, projectID, place)
+	return placeRefusal(ctx, s.db, projectID, place)
 }
 
 // MediaGrant is what an upload URL lets its holder store, as far as the store
@@ -894,7 +894,7 @@ func grantRefusal(ctx context.Context, q ctxQuerier, g MediaGrant) (string, erro
 	if media == MediaPlaceholder && place != refVoid {
 		return media, nil
 	}
-	return media, placeRefusal(q, g.ProjectID, place)
+	return media, placeRefusal(ctx, q, g.ProjectID, place)
 }
 
 // MediaUpload stores one body the Langfuse channel received and the ref of
@@ -957,8 +957,8 @@ func nowOr(now int64) int64 {
 // grace (Decision 13) — a seek on the partial index, which holds only those.
 // Read outside the writer like the orphaned payloads are; the job decides each
 // one inside its transaction.
-func (s *Store) orphanMediaRefs(before int64, limit int) ([]MediaOrphan, error) {
-	rows, err := s.db.Query(
+func (s *Store) orphanMediaRefs(ctx context.Context, before int64, limit int) ([]MediaOrphan, error) {
+	rows, err := s.db.QueryContext(ctx,
 		`SELECT sha256, project_id, trace_id FROM media_refs
 		  WHERE pending = 1 AND created_at < ?
 		  LIMIT ?`, before, limit)
@@ -983,8 +983,8 @@ func (s *Store) orphanMediaRefs(before int64, limit int) ([]MediaOrphan, error) 
 // one page of the primary key after the cursor and checks those, and the
 // next pass goes on from where this one stopped, wrapping at the end. It
 // answers the orphans and the cursor to start from next time.
-func (s *Store) orphanMedia(after string, page int) ([]any, string, error) {
-	rows, err := s.db.Query(
+func (s *Store) orphanMedia(ctx context.Context, after string, page int) ([]any, string, error) {
+	rows, err := s.db.QueryContext(ctx,
 		`SELECT sha256,
 		        NOT EXISTS (SELECT 1 FROM media_refs r WHERE r.sha256 = m.sha256)
 		    AND NOT EXISTS (SELECT 1 FROM media_raw_refs rr WHERE rr.sha256 = m.sha256)
@@ -1128,18 +1128,18 @@ type MediaHold struct {
 // one transaction, so only a hand-edited database leaves either: the reads
 // refuse a hold that is not both (Decision 26), and the sweep repairs it so
 // that it does not stay.
-func (s *Store) holdDrift(after, upto string) (stale, missing []MediaHold, err error) {
+func (s *Store) holdDrift(ctx context.Context, after, upto string) (stale, missing []MediaHold, err error) {
 	within := `sha256 > ?`
 	args := []any{after}
 	if upto != "" {
 		within += ` AND sha256 <= ?`
 		args = append(args, upto)
 	}
-	if stale, err = s.holdPairs(`SELECT h.sha256, h.project_id FROM media_holders h
+	if stale, err = s.holdPairs(ctx, `SELECT h.sha256, h.project_id FROM media_holders h
 		  WHERE h.`+within+` AND NOT `+holdsBody, args...); err != nil {
 		return nil, nil, fmt.Errorf("find stale media holds: %w", err)
 	}
-	if missing, err = s.holdPairs(`SELECT x.sha256, x.project_id FROM (
+	if missing, err = s.holdPairs(ctx, `SELECT x.sha256, x.project_id FROM (
 		    SELECT sha256, project_id FROM media_refs WHERE `+within+`
 		    UNION SELECT sha256, project_id FROM media_raw_refs WHERE `+within+`) x
 		  WHERE NOT EXISTS (SELECT 1 FROM media_holders h
@@ -1150,8 +1150,8 @@ func (s *Store) holdDrift(after, upto string) (stale, missing []MediaHold, err e
 	return stale, missing, nil
 }
 
-func (s *Store) holdPairs(query string, args ...any) ([]MediaHold, error) {
-	rows, err := s.db.Query(query, args...)
+func (s *Store) holdPairs(ctx context.Context, query string, args ...any) ([]MediaHold, error) {
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}

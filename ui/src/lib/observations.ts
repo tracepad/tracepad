@@ -78,3 +78,33 @@ export function typeIcon(type: string | undefined): Component {
 export function typeLabel(type: string | undefined): string {
 	return type ?? 'span';
 }
+
+/** An observation as far as counting a tree goes. */
+type Node = { children?: Node[] };
+
+/**
+ * What the tree says above itself when the server cut it (spec 043 #18): a
+ * trace past 10,000 observations or 32 MiB of structure is answered with the
+ * first of them by start time and `observations_omitted`. Null for a whole
+ * tree. What is shown is what the tree holds, counted here rather than taken
+ * from `observation_count`, which the server may have read before the spans
+ * that took the trace past the ceiling (spec 043 #26).
+ */
+export function omittedNotice(
+	trace: { observations: Node[]; observations_omitted?: number } | null | undefined
+): string | null {
+	const omitted = trace?.observations_omitted ?? 0;
+	if (!trace || omitted <= 0) return null;
+	let shown = 0;
+	const stack = [...trace.observations];
+	while (stack.length > 0) {
+		shown++;
+		stack.push(...(stack.pop()!.children ?? []));
+	}
+	const all = shown + omitted;
+	return (
+		`Showing the first ${shown.toLocaleString('en-US')} of ${all.toLocaleString('en-US')} ` +
+		`observations by start time; ${omitted.toLocaleString('en-US')} ` +
+		`${omitted === 1 ? 'is' : 'are'} not shown.`
+	);
+}

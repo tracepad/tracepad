@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -175,10 +176,9 @@ func (s *Server) handleListDatasets(w http.ResponseWriter, r *http.Request) {
 		after = parts[0]
 	}
 
-	datasets, err := s.store.Datasets(project.ID, limit+1, after, backward)
+	datasets, err := s.store.Datasets(r.Context(), project.ID, limit+1, after, backward)
 	if err != nil {
-		slog.Error("list datasets failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to list datasets")
+		readFailed(w, r, "failed to list datasets", err)
 		return
 	}
 	datasets, prev, next := trimPage(datasets, limit, backward, raw,
@@ -234,7 +234,7 @@ func (s *Server) handleGetDataset(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	dataset, ok := s.loadDataset(w, project.ID, name)
+	dataset, ok := s.loadDataset(w, r, project.ID, name)
 	if !ok {
 		return
 	}
@@ -256,10 +256,14 @@ func (s *Server) handleDeleteDataset(w http.ResponseWriter, r *http.Request) {
 	}
 	confirm := values.Get("confirm")
 	if confirm == "" {
-		dataset, counts, err := s.store.DatasetPreview(project.ID, name)
-		if err != nil {
-			slog.Error("dataset preview failed", "err", err)
-			writeError(w, http.StatusInternalServerError, "failed to read what the dataset holds")
+		var (
+			dataset *store.Dataset
+			counts  store.DatasetCounts
+		)
+		if !s.readInSlot(w, r, "failed to read what the dataset holds", func(ctx context.Context) (err error) {
+			dataset, counts, err = s.store.DatasetPreview(ctx, project.ID, name)
+			return err
+		}) {
 			return
 		}
 		if dataset == nil {
@@ -452,7 +456,7 @@ func (s *Server) handleListItems(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	dataset, ok := s.loadDataset(w, project.ID, name)
+	dataset, ok := s.loadDataset(w, r, project.ID, name)
 	if !ok {
 		return
 	}
@@ -476,10 +480,9 @@ func (s *Server) handleListItems(w http.ResponseWriter, r *http.Request) {
 		filter.After = &seq
 	}
 
-	items, err := s.store.DatasetItems(project.ID, name, filter)
+	items, err := s.store.DatasetItems(r.Context(), project.ID, name, filter)
 	if err != nil {
-		slog.Error("list dataset items failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to list the items")
+		readFailed(w, r, "failed to list the items", err)
 		return
 	}
 	items, prev, next := trimPage(items, limit, backward, raw,
@@ -508,7 +511,7 @@ func (s *Server) handleGetItem(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	dataset, ok := s.loadDataset(w, project.ID, name)
+	dataset, ok := s.loadDataset(w, r, project.ID, name)
 	if !ok {
 		return
 	}
@@ -516,10 +519,9 @@ func (s *Server) handleGetItem(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	item, err := s.store.DatasetItem(project.ID, name, id, version)
+	item, err := s.store.DatasetItem(r.Context(), project.ID, name, id, version)
 	if err != nil {
-		slog.Error("read dataset item failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to read the item")
+		readFailed(w, r, "failed to read the item", err)
 		return
 	}
 	if item == nil {
@@ -545,10 +547,9 @@ func (s *Server) handleListItemVersions(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	versions, err := s.store.DatasetItemVersions(project.ID, name, id)
+	versions, err := s.store.DatasetItemVersions(r.Context(), project.ID, name, id)
 	if err != nil {
-		slog.Error("list item versions failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to list the item's versions")
+		readFailed(w, r, "failed to list the item's versions", err)
 		return
 	}
 	if len(versions) == 0 {
@@ -664,7 +665,7 @@ func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if _, ok := s.loadDataset(w, project.ID, name); !ok {
+	if _, ok := s.loadDataset(w, r, project.ID, name); !ok {
 		return
 	}
 	var after *store.RunCursor
@@ -676,10 +677,9 @@ func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	runs, err := s.store.Runs(project.ID, name, limit+1, after, backward)
+	runs, err := s.store.Runs(r.Context(), project.ID, name, limit+1, after, backward)
 	if err != nil {
-		slog.Error("list runs failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to list the runs")
+		readFailed(w, r, "failed to list the runs", err)
 		return
 	}
 	runs, prev, next := trimPage(runs, limit, backward, raw, func(run *store.DatasetRun) string {
@@ -755,10 +755,9 @@ func (s *Server) handleListProjectRuns(w http.ResponseWriter, r *http.Request) {
 		filter.After = after
 	}
 
-	runs, err := s.store.ListRuns(project.ID, filter)
+	runs, err := s.store.ListRuns(r.Context(), project.ID, filter)
 	if err != nil {
-		slog.Error("list runs failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to list the runs")
+		readFailed(w, r, "failed to list the runs", err)
 		return
 	}
 	runs, prev, next := trimPage(runs, limit, backward, raw, func(run *store.DatasetRun) string {
@@ -769,10 +768,9 @@ func (s *Server) handleListProjectRuns(w http.ResponseWriter, r *http.Request) {
 		answer.Runs = append(answer.Runs, renderRun(run))
 	}
 	if counting {
-		total, err := s.store.CountRuns(project.ID, filter, countCap+1)
+		total, err := s.store.CountRuns(r.Context(), project.ID, filter, countCap+1)
 		if err != nil {
-			slog.Error("count runs failed", "err", err)
-			writeError(w, http.StatusInternalServerError, "failed to count the runs")
+			readFailed(w, r, "failed to count the runs", err)
 			return
 		}
 		value, stopped := capped(total)
@@ -811,14 +809,13 @@ func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	run, ok := s.loadRun(w, project.ID, id)
+	run, ok := s.loadRun(w, r, project.ID, id)
 	if !ok {
 		return
 	}
-	summary, err := s.store.RunSummary(project.ID, run)
+	summary, err := s.store.RunSummary(r.Context(), project.ID, run)
 	if err != nil {
-		slog.Error("read run summary failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to summarize the run")
+		readFailed(w, r, "failed to summarize the run", err)
 		return
 	}
 	body := renderRun(run)
@@ -921,11 +918,10 @@ func hexPathValue(w http.ResponseWriter, r *http.Request, name, kind string) (st
 }
 
 // loadDataset reads a dataset and answers the 404 itself.
-func (s *Server) loadDataset(w http.ResponseWriter, projectID, name string) (*store.Dataset, bool) {
-	dataset, err := s.store.Dataset(projectID, name)
+func (s *Server) loadDataset(w http.ResponseWriter, r *http.Request, projectID, name string) (*store.Dataset, bool) {
+	dataset, err := s.store.Dataset(r.Context(), projectID, name)
 	if err != nil {
-		slog.Error("read dataset failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to read the dataset")
+		readFailed(w, r, "failed to read the dataset", err)
 		return nil, false
 	}
 	if dataset == nil {
@@ -936,11 +932,10 @@ func (s *Server) loadDataset(w http.ResponseWriter, projectID, name string) (*st
 }
 
 // loadRun reads a run and answers the 404 itself.
-func (s *Server) loadRun(w http.ResponseWriter, projectID, id string) (*store.DatasetRun, bool) {
-	run, err := s.store.Run(projectID, id)
+func (s *Server) loadRun(w http.ResponseWriter, r *http.Request, projectID, id string) (*store.DatasetRun, bool) {
+	run, err := s.store.Run(r.Context(), projectID, id)
 	if err != nil {
-		slog.Error("read run failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to read the run")
+		readFailed(w, r, "failed to read the run", err)
 		return nil, false
 	}
 	if run == nil {

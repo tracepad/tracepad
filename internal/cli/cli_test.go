@@ -217,7 +217,7 @@ func (h *harness) seed(t *testing.T, trace *model.Trace, observations ...*model.
 
 func (h *harness) projectID(t *testing.T) string {
 	t.Helper()
-	project, err := h.store.ProjectByName("test")
+	project, err := h.store.ProjectByName(t.Context(), "test")
 	if err != nil || project == nil {
 		t.Fatalf("project = %v, err = %v", project, err)
 	}

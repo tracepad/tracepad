@@ -197,7 +197,7 @@ func (s *Server) handleLangfuseMediaUpload(w http.ResponseWriter, r *http.Reques
 		lookupFailed(w, r, "media", err)
 		return
 	}
-	held, err := s.store.MediaHeld(project.ID, sha)
+	held, err := s.store.MediaHeld(r.Context(), project.ID, sha)
 	if err != nil {
 		lookupFailed(w, r, "media", err)
 		return
@@ -382,10 +382,9 @@ func (s *Server) handleLangfuseMediaGet(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	mediaID := r.PathValue("mediaId")
-	info, err := s.store.MediaByLangfuseID(project.ID, mediaID)
+	info, err := s.store.MediaByLangfuseID(r.Context(), project.ID, mediaID)
 	if err != nil {
-		slog.Error("media lookup failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to look the media up")
+		readFailed(w, r, "failed to look the media up", err)
 		return
 	}
 	if info == nil {

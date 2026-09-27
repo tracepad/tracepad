@@ -41,7 +41,7 @@ func TestSessionListingAggregates(t *testing.T) {
 		&model.Observation{TraceID: hexTrace(4), ID: hexSpan(4), Type: model.TypeSpan,
 			Level: model.LevelDefault, StartTime: 9 * day, EndTime: 9 * day})
 
-	rows, err := s.Sessions(project.ID, SessionFilter{Limit: 50})
+	rows, err := s.Sessions(t.Context(), project.ID, SessionFilter{Limit: 50})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +100,7 @@ func TestSessionListingFilters(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			tc.filter.Limit = 50
-			rows, err := s.Sessions(project.ID, tc.filter)
+			rows, err := s.Sessions(t.Context(), project.ID, tc.filter)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -124,7 +124,7 @@ func TestSessionListingWindowNarrowsTheAggregates(t *testing.T) {
 	seedSession(t, s, project.ID, hexTrace(1), "s1", day, model.LevelDefault, 0.25)
 	seedSession(t, s, project.ID, hexTrace(2), "s1", 5*day, model.LevelDefault, 0.75)
 
-	rows, err := s.Sessions(project.ID, SessionFilter{Limit: 50, From: ptr(2 * day)})
+	rows, err := s.Sessions(t.Context(), project.ID, SessionFilter{Limit: 50, From: ptr(2 * day)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +154,7 @@ func TestSessionCursorWalksEveryRow(t *testing.T) {
 		cursor *SessionCursor
 	)
 	for range 10 {
-		rows, err := s.Sessions(project.ID, SessionFilter{Limit: 1, After: cursor})
+		rows, err := s.Sessions(t.Context(), project.ID, SessionFilter{Limit: 1, After: cursor})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -216,7 +216,7 @@ func TestSessionsAreScopedToTheirProject(t *testing.T) {
 	seedSession(t, s, theirs.ID, hexTrace(2), "shared", 2*day, model.LevelError, 9)
 	seedSession(t, s, theirs.ID, hexTrace(3), "theirs-only", 2*day, model.LevelDefault, 0)
 
-	rows, err := s.Sessions(mine.ID, SessionFilter{Limit: 50})
+	rows, err := s.Sessions(t.Context(), mine.ID, SessionFilter{Limit: 50})
 	if err != nil {
 		t.Fatal(err)
 	}

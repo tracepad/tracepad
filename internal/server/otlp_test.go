@@ -114,13 +114,13 @@ type archivedBatch struct {
 
 func archived(t *testing.T, h *harness) []archivedBatch {
 	t.Helper()
-	rows, err := h.store.RawBatches(h.project.ID, store.RawFilter{Limit: 100})
+	rows, err := h.store.RawBatches(t.Context(), h.project.ID, store.RawFilter{Limit: 100})
 	if err != nil {
 		t.Fatal(err)
 	}
 	out := make([]archivedBatch, 0, len(rows))
 	for _, row := range rows {
-		body, err := h.store.RawBatchBody(h.project.ID, row.ID)
+		body, err := h.store.RawBatchBody(t.Context(), h.project.ID, row.ID)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -179,7 +179,7 @@ func TestIngestSurvivesNonFiniteNumbers(t *testing.T) {
 			rec.Code, rec.Body)
 	}
 
-	observations, err := h.store.Observations(h.project.ID, traceID, store.WithIO)
+	observations, err := h.store.Observations(t.Context(), h.project.ID, traceID, store.WithIO)
 	if err != nil || len(observations) != 1 {
 		t.Fatalf("observations = %d, err = %v", len(observations), err)
 	}
@@ -220,7 +220,7 @@ func TestIngestStoresTraceAndObservations(t *testing.T) {
 	}
 
 	const traceID = "4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f"
-	trace, err := h.store.Trace(h.project.ID, traceID)
+	trace, err := h.store.Trace(t.Context(), h.project.ID, traceID)
 	if err != nil || trace == nil {
 		t.Fatalf("trace = %v, err = %v", trace, err)
 	}
@@ -250,7 +250,7 @@ func TestIngestStoresTraceAndObservations(t *testing.T) {
 		t.Errorf("timestamp = %d", trace.Timestamp)
 	}
 
-	observations, err := h.store.Observations(h.project.ID, traceID, store.WithIO)
+	observations, err := h.store.Observations(t.Context(), h.project.ID, traceID, store.WithIO)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -288,7 +288,7 @@ func TestIngestIsIdempotent(t *testing.T) {
 		}
 	}
 
-	trace, err := h.store.Trace(h.project.ID, "4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f")
+	trace, err := h.store.Trace(t.Context(), h.project.ID, "4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f")
 	if err != nil || trace == nil {
 		t.Fatalf("trace = %v, err = %v", trace, err)
 	}
@@ -320,7 +320,7 @@ func TestIngestMergesAcrossBatches(t *testing.T) {
 		}
 	}
 
-	trace, err := h.store.Trace(h.project.ID, "dd44ee55ff6677008899001122aabb33")
+	trace, err := h.store.Trace(t.Context(), h.project.ID, "dd44ee55ff6677008899001122aabb33")
 	if err != nil || trace == nil {
 		t.Fatalf("trace = %v, err = %v", trace, err)
 	}
@@ -337,7 +337,7 @@ func TestIngestMergesAcrossBatches(t *testing.T) {
 	if trace.ObservationCount != 5 || trace.ErrorCount != 2 {
 		t.Errorf("counts = %d observations, %d errors", trace.ObservationCount, trace.ErrorCount)
 	}
-	observations, err := h.store.Observations(h.project.ID, "dd44ee55ff6677008899001122aabb33", store.WithIO)
+	observations, err := h.store.Observations(t.Context(), h.project.ID, "dd44ee55ff6677008899001122aabb33", store.WithIO)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -375,7 +375,7 @@ func TestIngestPartialSuccess(t *testing.T) {
 		t.Fatal("a partial success must carry an ExportTraceServiceResponse body")
 	}
 
-	observations, err := h.store.Observations(h.project.ID, "cc33dd44ee55ff6677008899001122aa", store.WithIO)
+	observations, err := h.store.Observations(t.Context(), h.project.ID, "cc33dd44ee55ff6677008899001122aa", store.WithIO)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -426,7 +426,7 @@ func TestIngestRawStorageCanBeDisabled(t *testing.T) {
 		t.Errorf("raw batches with TRACEPAD_STORE_RAW=off = %d", len(batches))
 	}
 	// Ingest itself still works.
-	if trace, _ := h.store.Trace(h.project.ID, "aa11bb22cc33dd44ee55ff6677889900"); trace == nil {
+	if trace, _ := h.store.Trace(t.Context(), h.project.ID, "aa11bb22cc33dd44ee55ff6677889900"); trace == nil {
 		t.Error("spans should still be stored when raw storage is off")
 	}
 }

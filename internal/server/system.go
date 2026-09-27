@@ -1,7 +1,6 @@
 package server
 
 import (
-	"log/slog"
 	"net/http"
 	"runtime"
 	"sort"
@@ -48,6 +47,11 @@ type projectCounters struct {
 	// so each is logged once per process rather than once per span.
 	orphanTraces int64
 	unknownRuns  map[string]bool
+	// readsTimedOut and readsRefusedBusy count the reads the read gate
+	// stopped at their deadline and refused for want of a slot (spec 043
+	// #21).
+	readsTimedOut    int64
+	readsRefusedBusy int64
 }
 
 // counters holds every since-start number the system endpoint reports, kept
@@ -195,7 +199,9 @@ func (c *counters) snapshot(projectID string) object {
 		put("dialects", dialects).
 		put("rejected_batches", project.rejectedBatches).
 		put("unreadable_resource_spans", project.unreadableSpans).
-		put("langfuse_ingestion_versions", versions)
+		put("langfuse_ingestion_versions", versions).
+		put("reads_timed_out", project.readsTimedOut).
+		put("reads_refused_busy", project.readsRefusedBusy)
 }
 
 // orphanTraces reports one project's count of trace deliveries that named a
@@ -225,10 +231,9 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 	// others held and how many keys they had; cross-project access is what
 	// the admin token of design §6.3 is for, and it does not exist yet
 	// (Decision 33).
-	tables, err := s.store.TableCounts(project.ID)
+	tables, err := s.store.TableCounts(r.Context(), project.ID)
 	if err != nil {
-		slog.Error("read table counts failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to read the database counts")
+		readFailed(w, r, "failed to read the database counts", err)
 		return
 	}
 	rows := object{}
@@ -245,36 +250,32 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 	// #13) — the size of retention's one exception, so the operator sees
 	// why the file did not shrink — beside how many traces named a run
 	// that does not exist (spec 014 #3).
-	pinned, err := s.store.PinnedTraces(project.ID)
+	pinned, err := s.store.PinnedTraces(r.Context(), project.ID)
 	if err != nil {
-		slog.Error("count pinned traces failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to count the pinned traces")
+		readFailed(w, r, "failed to count the pinned traces", err)
 		return
 	}
 
 	// What the archive holds and how far back it reaches (spec 019 #4):
 	// the numbers the export's report ends with, and the ones an operator
 	// deciding whether to shorten `raw_retention_days` needs before.
-	raw, err := s.rawBlock(project.ID)
+	raw, err := s.rawBlock(r.Context(), project.ID)
 	if err != nil {
-		slog.Error("summarise raw batches failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to summarise the raw archive")
+		readFailed(w, r, "failed to summarise the raw archive", err)
 		return
 	}
 
 	// What media costs this project, beside the setting that decides it
 	// (spec 041 #11).
-	media, err := s.mediaBlock(project)
+	media, err := s.mediaBlock(r.Context(), project)
 	if err != nil {
-		slog.Error("summarise media failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to summarise the media")
+		readFailed(w, r, "failed to summarise the media", err)
 		return
 	}
 
-	compaction, err := s.store.Compaction()
+	compaction, err := s.store.Compaction(r.Context())
 	if err != nil {
-		slog.Error("read compaction state failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to read the compaction state")
+		readFailed(w, r, "failed to read the compaction state", err)
 		return
 	}
 
@@ -287,6 +288,11 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 			put("size_bytes", s.store.FileSize()).
 			put("rows", rows)).
 		put("writer_queue", queue).
+		// Reads being served now against TRACEPAD_READ_CONCURRENCY — the
+		// deployment's, like the queue (spec 043 #21).
+		put("read_slots", object{}.
+			put("busy", s.reads.busy()).
+			put("capacity", s.reads.capacity())).
 		// The endpoint map deliberately does not advertise /mcp — it is
 		// a transport, not an endpoint of this API — so this is where a
 		// caller finds out whether it is being served (Decision 27).

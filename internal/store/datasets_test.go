@@ -31,7 +31,7 @@ func (f *sweepFixture) postItems(t *testing.T, dataset string, items ...*Dataset
 // itemsAt reads the ids of the live items at a version, in listing order.
 func (f *sweepFixture) itemsAt(t *testing.T, dataset string, version int) []string {
 	t.Helper()
-	items, err := f.store.DatasetItems(f.project.ID, dataset, DatasetItemFilter{Version: version, Limit: 100})
+	items, err := f.store.DatasetItems(t.Context(), f.project.ID, dataset, DatasetItemFilter{Version: version, Limit: 100})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func (f *sweepFixture) itemsAt(t *testing.T, dataset string, version int) []stri
 
 func (f *sweepFixture) datasetVersion(t *testing.T, name string) int {
 	t.Helper()
-	dataset, err := f.store.Dataset(f.project.ID, name)
+	dataset, err := f.store.Dataset(t.Context(), f.project.ID, name)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,14 +98,14 @@ func TestDatasetVersionClock(t *testing.T) {
 	if rows := f.count(t, `SELECT COUNT(*) FROM dataset_items WHERE dataset = ?`, name); rows != 5 {
 		t.Errorf("rows = %d, want 3 originals + 1 metadata edit + 1 body edit", rows)
 	}
-	old, err := f.store.DatasetItem(f.project.ID, name, itemID(2), 2)
+	old, err := f.store.DatasetItem(t.Context(), f.project.ID, name, itemID(2), 2)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if old == nil || string(old.Input) != `{"q":"two"}` || old.Version != 1 {
 		t.Errorf("item 2 at version 2 = %+v, want the original body written at version 1", old)
 	}
-	current, err := f.store.DatasetItem(f.project.ID, name, itemID(2), 3)
+	current, err := f.store.DatasetItem(t.Context(), f.project.ID, name, itemID(2), 3)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +138,7 @@ func TestDatasetVersionClock(t *testing.T) {
 	if got := f.datasetVersion(t, name); got != 4 {
 		t.Errorf("a refused archive moved the version to %d", got)
 	}
-	dataset, err := f.store.Dataset(f.project.ID, name)
+	dataset, err := f.store.Dataset(t.Context(), f.project.ID, name)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +178,7 @@ func TestEquivalentBodiesDoNotTick(t *testing.T) {
 	if again.Version != 1 || again.Changed != 0 {
 		t.Errorf("equivalent re-post: version %d changed %d, want version 1 and nothing changed", again.Version, again.Changed)
 	}
-	stored, err := f.store.DatasetItem(f.project.ID, name, itemID(1), 1)
+	stored, err := f.store.DatasetItem(t.Context(), f.project.ID, name, itemID(1), 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -250,7 +250,7 @@ func TestItemsAtEveryVersion(t *testing.T) {
 
 	// And an item's history is every row of it, newest first, the
 	// archived one included.
-	history, err := f.store.DatasetItemVersions(f.project.ID, name, itemID(1))
+	history, err := f.store.DatasetItemVersions(t.Context(), f.project.ID, name, itemID(1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -279,7 +279,7 @@ func TestSeqIsStableAcrossEdits(t *testing.T) {
 	}
 	f.postItems(t, name, itemInput(itemID(4), `4`), itemInput(itemID(2), `2b`))
 
-	items, err := f.store.DatasetItems(f.project.ID, name, DatasetItemFilter{Version: 4, Limit: 100})
+	items, err := f.store.DatasetItems(t.Context(), f.project.ID, name, DatasetItemFilter{Version: 4, Limit: 100})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -366,7 +366,7 @@ func TestDatasetEnvelopeAndDeletion(t *testing.T) {
 	}
 	f.arrive(t, f.project.ID, hexTrace(1), daysAgo(1), func(tr *modelTrace) { tr.RunID = run.ID })
 
-	dataset, counts, err := f.store.DatasetPreview(f.project.ID, name)
+	dataset, counts, err := f.store.DatasetPreview(t.Context(), f.project.ID, name)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -378,7 +378,7 @@ func TestDatasetEnvelopeAndDeletion(t *testing.T) {
 	if err := f.writer.Submit(t.Context(), wrong); !rejected(err) {
 		t.Fatalf("a wrong echo: err = %v, want a rejection", err)
 	}
-	if d, _ := f.store.Dataset(f.project.ID, name); d == nil {
+	if d, _ := f.store.Dataset(t.Context(), f.project.ID, name); d == nil {
 		t.Fatal("a wrong echo deleted the dataset")
 	}
 	deletion := &DatasetDelete{ProjectID: f.project.ID, Name: name, Confirm: name}
@@ -461,7 +461,7 @@ func TestRunLifecycleInTheStore(t *testing.T) {
 	if deletion.Released != 2 {
 		t.Errorf("released = %d, want the two traces the run held", deletion.Released)
 	}
-	if run, _ := f.store.Run(f.project.ID, id); run != nil {
+	if run, _ := f.store.Run(t.Context(), f.project.ID, id); run != nil {
 		t.Errorf("the run is still there after its delete")
 	}
 	if got := f.count(t, `SELECT COUNT(*) FROM traces WHERE run_id = ?`, id); got != 2 {
@@ -503,7 +503,7 @@ func TestScoreConfigPutIsDeclarative(t *testing.T) {
 	if err := f.writer.Submit(t.Context(), &ScoreConfigDelete{ProjectID: f.project.ID, Name: "accuracy"}); err != nil {
 		t.Fatal(err)
 	}
-	if c, _ := f.store.ScoreConfig(f.project.ID, "accuracy"); c != nil {
+	if c, _ := f.store.ScoreConfig(t.Context(), f.project.ID, "accuracy"); c != nil {
 		t.Errorf("the config is still there after its delete")
 	}
 }

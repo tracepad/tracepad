@@ -221,7 +221,7 @@ func TestSweepCollectsOrphanPayloads(t *testing.T) {
 	}
 	// And the live one is still readable through its owner.
 	var input any
-	rows, err := f.store.Observations(f.project.ID, hexTrace(1), WithIO)
+	rows, err := f.store.Observations(t.Context(), f.project.ID, hexTrace(1), WithIO)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -557,7 +557,7 @@ func TestAnAbsurdWindowKeepsEverything(t *testing.T) {
 
 	// And the dry run agrees with the sweep, rather than confirming the
 	// same wrong answer.
-	counts, err := f.store.RetentionPreview(f.project.ID, days(200000), nil, nil, sweepNow.UnixNano())
+	counts, err := f.store.RetentionPreview(t.Context(), f.project.ID, days(200000), nil, nil, sweepNow.UnixNano())
 	if err != nil {
 		t.Fatal(err)
 	}

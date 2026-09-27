@@ -131,10 +131,10 @@ func TestFacetRowsEqualTheLiveTail(t *testing.T) {
 	roll(t, s, project.ID, rollupHour)
 
 	rolled := facetsOf(func(yield func(FacetRow)) error {
-		return s.FacetRows(project.ID, rollupHour, rollupHour+SecondsPerHour, yield)
+		return s.FacetRows(t.Context(), project.ID, rollupHour, rollupHour+SecondsPerHour, yield)
 	}, t)
 	live := facetsOf(func(yield func(FacetRow)) error {
-		return s.FacetTail(project.ID, rollupHour*1e9, (rollupHour+SecondsPerHour)*1e9, yield)
+		return s.FacetTail(t.Context(), project.ID, rollupHour*1e9, (rollupHour+SecondsPerHour)*1e9, yield)
 	}, t)
 
 	if len(rolled) == 0 {
@@ -280,7 +280,7 @@ func TestTheNameRollupIsSwept(t *testing.T) {
 	if names := rolledNames(t, s, project.ID, rollupHour); len(names) != 0 {
 		t.Errorf("the window did not reach the name rollup: %v", names)
 	}
-	if hours, err := s.NamesRollupHours(project.ID); err != nil || len(hours) != 0 {
+	if hours, err := s.NamesRollupHours(t.Context(), project.ID); err != nil || len(hours) != 0 {
 		t.Errorf("hours = %v, err = %v; want none left", hours, err)
 	}
 }
@@ -337,7 +337,7 @@ func TestManyValuedFilters(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			tc.filter.Limit = 50
-			rows, err := s.Traces(project.ID, tc.filter)
+			rows, err := s.Traces(t.Context(), project.ID, tc.filter)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -364,7 +364,7 @@ func TestManyValuedEnvironmentOnTheOtherReads(t *testing.T) {
 			StartTime: rollupHour*1e9 + 7e9, EndTime: rollupHour*1e9 + 8e9})
 
 	t.Run("sessions", func(t *testing.T) {
-		rows, err := s.Sessions(project.ID, SessionFilter{
+		rows, err := s.Sessions(t.Context(), project.ID, SessionFilter{
 			Environment: []string{"eval", "staging"}, Limit: 50})
 		if err != nil {
 			t.Fatal(err)
@@ -377,7 +377,7 @@ func TestManyValuedEnvironmentOnTheOtherReads(t *testing.T) {
 	t.Run("the statistics' live half", func(t *testing.T) {
 		keys := map[string]int{}
 		from, to := rollupHour*1e9, (rollupHour+SecondsPerHour)*1e9
-		err := s.StatsSamples(project.ID, StatsFilter{
+		err := s.StatsSamples(t.Context(), project.ID, StatsFilter{
 			From: &from, To: &to, GroupBy: GroupByEnvironment,
 			Environment: []string{"staging", "eval"},
 		}, func(sample StatsSample) { keys[sample.Key]++ })

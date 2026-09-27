@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"strings"
@@ -222,7 +223,7 @@ type ScoreCursor struct {
 }
 
 // Scores lists scores newest first.
-func (s *Store) Scores(projectID string, filter ScoreFilter) ([]*Score, error) {
+func (s *Store) Scores(ctx context.Context, projectID string, filter ScoreFilter) ([]*Score, error) {
 	where := []string{"project_id = ?"}
 	args := []any{projectID}
 	add := func(clause string, values ...any) {
@@ -263,7 +264,7 @@ func (s *Store) Scores(projectID string, filter ScoreFilter) ([]*Score, error) {
 	}
 	args = append(args, filter.Limit)
 
-	rows, err := s.db.Query(
+	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, trace_id, observation_id, session_id, name, data_type, value,
 		        string_value, comment, metadata, timestamp, created_at
 		 FROM scores WHERE `+strings.Join(where, " AND ")+`
@@ -290,8 +291,8 @@ const scoreColumns = `id, trace_id, observation_id, session_id, name, data_type,
 	        string_value, comment, metadata, timestamp, created_at`
 
 // Score returns one score, or nil when it does not exist.
-func (s *Store) Score(projectID, id string) (*Score, error) {
-	rows, err := s.db.Query(
+func (s *Store) Score(ctx context.Context, projectID, id string) (*Score, error) {
+	rows, err := s.db.QueryContext(ctx,
 		`SELECT `+scoreColumns+`
 		 FROM scores WHERE project_id = ? AND id = ?`, projectID, id)
 	if err != nil {

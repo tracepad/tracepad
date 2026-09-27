@@ -158,8 +158,8 @@ func prefixed(alias, columns string) string {
 
 // ProjectKeys lists a project's active keys, oldest first (spec 005 #12), each
 // with its minter's standing in the project as it is now (spec 045 #8).
-func (s *Store) ProjectKeys(projectID string) ([]KeyInfo, error) {
-	rows, err := s.db.Query(`SELECT `+keyColumns+`,
+func (s *Store) ProjectKeys(ctx context.Context, projectID string) ([]KeyInfo, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT `+keyColumns+`,
 	        a.id IS NOT NULL, COALESCE(a.owner, 0), COALESCE(a.disabled, 0), COALESCE(m.role, '')
 	   FROM api_keys k
 	   LEFT JOIN accounts a ON a.id = k.created_by
@@ -193,8 +193,8 @@ func (s *Store) ProjectKeys(projectID string) ([]KeyInfo, error) {
 // ProjectKeyIDs lists the public halves of a project's keys, which is all a
 // revocation needs to know: whether the key is this project's, and whether it
 // is the last one.
-func (s *Store) ProjectKeyIDs(projectID string) ([]string, error) {
-	rows, err := s.db.Query(`SELECT public_key FROM api_keys WHERE project_id = ?`, projectID)
+func (s *Store) ProjectKeyIDs(ctx context.Context, projectID string) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT public_key FROM api_keys WHERE project_id = ?`, projectID)
 	if err != nil {
 		return nil, err
 	}
@@ -237,8 +237,8 @@ type MintedKey struct {
 }
 
 // KeysMintedBy lists the keys an account minted that still exist, oldest first.
-func (s *Store) KeysMintedBy(accountID string) ([]MintedKey, error) {
-	rows, err := s.db.Query(`SELECT p.id, p.name, `+keyColumns+`
+func (s *Store) KeysMintedBy(ctx context.Context, accountID string) ([]MintedKey, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT p.id, p.name, `+keyColumns+`
 	   FROM api_keys k JOIN projects p ON p.id = k.project_id
 	  WHERE k.created_by = ?
 	  ORDER BY k.created_at, k.public_key`, accountID)

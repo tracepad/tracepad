@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -40,6 +41,12 @@ type Config struct {
 	// a scarce resource, so the API respects it by default rather than on
 	// request.
 	ResponseBudgetBytes int64
+	// ReadTimeout is the deadline of one read request, its wait for a read
+	// slot included (spec 043 #15): a read the deadline stops is `503`.
+	ReadTimeout time.Duration
+	// ReadConcurrency is how many reads are served at once (spec 043 #16);
+	// a read that gets no slot before its deadline is `503` "busy".
+	ReadConcurrency int
 	// MCP serves the MCP endpoint at /mcp on the main listener
 	// (spec 004 #14). On by default: it is the reason the read API exists
 	// in this shape.
@@ -121,6 +128,29 @@ const (
 	MaxResponseBudgetBytes     = 5 * 1024 * 1024
 )
 
+// Read bounds (spec 043 #15, #16, #22). The deadline answers before the
+// interface's own 30-second clock gives up, so a person sees the server's
+// reason rather than a network error; its floor is a second, below which an
+// ordinary listing of a busy project would be refused. Its ceiling is
+// under the five minutes the server gives a response to be written
+// (spec 001 #15): past that the transport drops the connection, and the
+// deadline's answer would never arrive (spec 043 #28). Reads are CPU-bound, so
+// the default concurrency is twice the processors, and at least four so that
+// a dashboard's burst of questions on a small machine is served together.
+const (
+	DefaultReadTimeout    = 20 * time.Second
+	MinReadTimeout        = time.Second
+	MaxReadTimeout        = 4 * time.Minute
+	MinReadConcurrency    = 1
+	minDefaultConcurrency = 4
+)
+
+// DefaultReadConcurrency is the read slots of a machine with this many
+// processors: twice as many, at least four.
+func DefaultReadConcurrency(procs int) int {
+	return max(minDefaultConcurrency, 2*procs)
+}
+
 // knownEnv lists every TRACEPAD_* variable the binary understands.
 var knownEnv = map[string]bool{
 	"TRACEPAD_LISTEN":                true,
@@ -129,6 +159,8 @@ var knownEnv = map[string]bool{
 	"TRACEPAD_STORE_RAW":             true,
 	"TRACEPAD_MAX_BODY_BYTES":        true,
 	"TRACEPAD_RESPONSE_BUDGET_BYTES": true,
+	"TRACEPAD_READ_TIMEOUT":          true,
+	"TRACEPAD_READ_CONCURRENCY":      true,
 	"TRACEPAD_MCP":                   true,
 	"TRACEPAD_SWEEP_INTERVAL":        true,
 	"TRACEPAD_ROLLUP_INTERVAL":       true,
@@ -159,6 +191,22 @@ func Load(args []string) (*Config, error) {
 	if budget < MinResponseBudgetBytes || budget > MaxResponseBudgetBytes {
 		return nil, fmt.Errorf("TRACEPAD_RESPONSE_BUDGET_BYTES: want between %d and %d, got %d",
 			MinResponseBudgetBytes, MaxResponseBudgetBytes, budget)
+	}
+	readTimeout, err := parseDuration("TRACEPAD_READ_TIMEOUT", DefaultReadTimeout)
+	if err != nil {
+		return nil, err
+	}
+	if readTimeout < MinReadTimeout || readTimeout > MaxReadTimeout {
+		return nil, fmt.Errorf("TRACEPAD_READ_TIMEOUT: want between %s and %s, got %s",
+			MinReadTimeout, MaxReadTimeout, readTimeout)
+	}
+	readConcurrency, err := parseCount("TRACEPAD_READ_CONCURRENCY", DefaultReadConcurrency(runtime.GOMAXPROCS(0)))
+	if err != nil {
+		return nil, err
+	}
+	if readConcurrency < MinReadConcurrency {
+		return nil, fmt.Errorf("TRACEPAD_READ_CONCURRENCY: want at least %d, got %d",
+			MinReadConcurrency, readConcurrency)
 	}
 	mcp, err := parseOnOff("TRACEPAD_MCP", true)
 	if err != nil {
@@ -198,6 +246,8 @@ func Load(args []string) (*Config, error) {
 		StoreRaw:            storeRaw,
 		MaxBodyBytes:        maxBody,
 		ResponseBudgetBytes: budget,
+		ReadTimeout:         readTimeout,
+		ReadConcurrency:     readConcurrency,
 		MCP:                 mcp,
 		SweepInterval:       sweep,
 		RollupInterval:      rollup,

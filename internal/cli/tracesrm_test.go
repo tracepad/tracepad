@@ -31,7 +31,7 @@ func (h *harness) seedTraces(t *testing.T, from, to int, environment string) {
 
 func (h *harness) traceCount(t *testing.T) int64 {
 	t.Helper()
-	counts, err := h.store.TableCounts(h.projectID(t))
+	counts, err := h.store.TableCounts(t.Context(), h.projectID(t))
 	if err != nil {
 		t.Fatal(err)
 	}

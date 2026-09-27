@@ -1,7 +1,13 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { OBSERVATION_TYPES, TYPE_ICONS, isObservationType, typeIcon } from './observations';
+import {
+	OBSERVATION_TYPES,
+	TYPE_ICONS,
+	isObservationType,
+	omittedNotice,
+	typeIcon
+} from './observations';
 
 /**
  * The tree draws a kind per observation, and this is what keeps the drawing
@@ -41,5 +47,25 @@ describe('the observation type vocabulary', () => {
 		expect(isObservationType('workflow-step')).toBe(false);
 		expect(typeIcon('workflow-step')).toBe(TYPE_ICONS.span);
 		expect(typeIcon(undefined)).toBe(TYPE_ICONS.span);
+	});
+});
+
+describe('the notice above a tree the server cut (spec 043 #18)', () => {
+	const flat = (n: number) => Array.from({ length: n }, () => ({}));
+
+	it('says nothing about a whole tree', () => {
+		expect(omittedNotice(null)).toBeNull();
+		expect(omittedNotice({ observations: flat(3) })).toBeNull();
+		expect(omittedNotice({ observations: flat(3), observations_omitted: 0 })).toBeNull();
+	});
+
+	it('counts what the tree holds, nested or not', () => {
+		expect(omittedNotice({ observations: flat(10_000), observations_omitted: 1 })).toBe(
+			'Showing the first 10,000 of 10,001 observations by start time; 1 is not shown.'
+		);
+		const nested = [{ children: [{}, { children: [{}] }] }, {}];
+		expect(omittedNotice({ observations: nested, observations_omitted: 19 })).toBe(
+			'Showing the first 5 of 24 observations by start time; 19 are not shown.'
+		);
 	});
 });

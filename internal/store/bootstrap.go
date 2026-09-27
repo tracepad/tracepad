@@ -1,6 +1,9 @@
 package store
 
-import "fmt"
+import (
+	"context"
+	"fmt"
+)
 
 // ProvisionSpec is one declaratively provisioned project (spec 001 #9).
 type ProvisionSpec struct {
@@ -33,7 +36,7 @@ func (s *Store) Bootstrap(specs []ProvisionSpec) (*BootstrapResult, error) {
 
 	declared := len(specs) > 0
 	if !declared {
-		n, err := s.CountProjects()
+		n, err := s.CountProjects(context.Background())
 		if err != nil {
 			return nil, err
 		}
@@ -48,7 +51,7 @@ func (s *Store) Bootstrap(specs []ProvisionSpec) (*BootstrapResult, error) {
 	}
 
 	for _, spec := range specs {
-		existing, err := s.ProjectByName(spec.Name)
+		existing, err := s.ProjectByName(context.Background(), spec.Name)
 		if err != nil {
 			return nil, err
 		}

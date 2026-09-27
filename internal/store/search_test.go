@@ -131,7 +131,7 @@ func matchingTraces(t *testing.T, s *Store, projectID, q string) []string {
 	if err != nil {
 		t.Fatalf("ParseSearch(%q): %v", q, err)
 	}
-	rows, err := s.Traces(projectID, TraceFilter{Limit: 100, Search: query})
+	rows, err := s.Traces(t.Context(), projectID, TraceFilter{Limit: 100, Search: query})
 	if err != nil {
 		t.Fatalf("Traces(q=%q): %v", q, err)
 	}
@@ -300,7 +300,7 @@ func TestSearchIndexesTheTextNotTheJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	matches, err := s.SearchMatches(project.ID, []string{hexTrace(1)}, query)
+	matches, err := s.SearchMatches(t.Context(), project.ID, []string{hexTrace(1)}, query)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -666,7 +666,7 @@ func TestSearchMatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	matches, err := s.SearchMatches(project.ID, []string{hexTrace(1)}, query)
+	matches, err := s.SearchMatches(t.Context(), project.ID, []string{hexTrace(1)}, query)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -686,7 +686,7 @@ func TestSearchMatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	named, err := s.SearchMatches(project.ID, []string{hexTrace(1)}, nameQuery)
+	named, err := s.SearchMatches(t.Context(), project.ID, []string{hexTrace(1)}, nameQuery)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -698,7 +698,7 @@ func TestSearchMatch(t *testing.T) {
 	// A page is one statement, and a trace with no hit is simply absent
 	// from what comes back rather than present and empty.
 	page := []string{hexTrace(1), hexTrace(2), hexTrace(3)}
-	over, err := s.SearchMatches(project.ID, page, query)
+	over, err := s.SearchMatches(t.Context(), project.ID, page, query)
 	if err != nil {
 		t.Fatal(err)
 	}

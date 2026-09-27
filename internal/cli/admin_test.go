@@ -152,10 +152,10 @@ func TestEmptyProjectFlagIsRefusedEverywhere(t *testing.T) {
 
 	// Nothing was destroyed on the way: the refusal happened before the
 	// requests those two commands would otherwise have made.
-	if project, _ := h.store.ProjectByName("test"); project.RetentionDays != nil {
+	if project, _ := h.store.ProjectByName(t.Context(), "test"); project.RetentionDays != nil {
 		t.Errorf("retention = %v, want the window untouched", project.RetentionDays)
 	}
-	keys, err := h.store.ProjectKeys(h.projectID(t))
+	keys, err := h.store.ProjectKeys(t.Context(), h.projectID(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +182,7 @@ func TestRetentionSetIsADryRunUntilConfirmed(t *testing.T) {
 	if !strings.Contains(out.stderr, "--yes") {
 		t.Errorf("stderr = %q, want it to name the flag that goes ahead", out.stderr)
 	}
-	if project, _ := h.store.ProjectByName("test"); project.RetentionDays != nil {
+	if project, _ := h.store.ProjectByName(t.Context(), "test"); project.RetentionDays != nil {
 		t.Fatalf("the window moved to %d without a confirmation", *project.RetentionDays)
 	}
 
@@ -190,7 +190,7 @@ func TestRetentionSetIsADryRunUntilConfirmed(t *testing.T) {
 	if out.code != ExitOK {
 		t.Fatalf("retention set --yes exited %d: %s", out.code, out.stderr)
 	}
-	project, _ := h.store.ProjectByName("test")
+	project, _ := h.store.ProjectByName(t.Context(), "test")
 	if project.RetentionDays == nil || *project.RetentionDays != 30 {
 		t.Fatalf("retention = %v, want 30", project.RetentionDays)
 	}
@@ -205,7 +205,7 @@ func TestRetentionSetIsADryRunUntilConfirmed(t *testing.T) {
 	if out.code != ExitOK {
 		t.Fatalf("retention set --forever exited %d: %s", out.code, out.stderr)
 	}
-	if project, _ := h.store.ProjectByName("test"); project.RetentionDays != nil {
+	if project, _ := h.store.ProjectByName(t.Context(), "test"); project.RetentionDays != nil {
 		t.Errorf("retention = %v, want forever", project.RetentionDays)
 	}
 	if strings.Contains(out.stderr, "would") {
@@ -218,7 +218,7 @@ func TestRetentionSetIsADryRunUntilConfirmed(t *testing.T) {
 	if out.code != ExitOK {
 		t.Fatalf("retention set --media exited %d: %s", out.code, out.stderr)
 	}
-	if project, _ := h.store.ProjectByName("test"); project.Media != "placeholder" {
+	if project, _ := h.store.ProjectByName(t.Context(), "test"); project.Media != "placeholder" {
 		t.Errorf("media = %q, want placeholder", project.Media)
 	}
 	if strings.Contains(out.stdout, "sweep") || !strings.Contains(out.stdout, "from the next export") {
@@ -240,7 +240,7 @@ func TestInteractiveConfirmationTypesTheName(t *testing.T) {
 	if !strings.Contains(out.stderr, "nothing was done") {
 		t.Errorf("stderr = %q, want it to say nothing happened", out.stderr)
 	}
-	if project, _ := h.store.ProjectByName("test"); project.RetentionDays != nil {
+	if project, _ := h.store.ProjectByName(t.Context(), "test"); project.RetentionDays != nil {
 		t.Fatalf("a wrong confirmation changed the window anyway")
 	}
 
@@ -252,7 +252,7 @@ func TestInteractiveConfirmationTypesTheName(t *testing.T) {
 	if !strings.Contains(out.stderr, `type "test" to confirm`) {
 		t.Errorf("stderr = %q, want the prompt to name what to type", out.stderr)
 	}
-	project, _ := h.store.ProjectByName("test")
+	project, _ := h.store.ProjectByName(t.Context(), "test")
 	if project.RetentionDays == nil || *project.RetentionDays != 30 {
 		t.Fatalf("retention = %v, want 30", project.RetentionDays)
 	}
@@ -316,7 +316,7 @@ func TestKeyRotationThroughTheCLI(t *testing.T) {
 	if out.code != ExitOK {
 		t.Fatalf("keys rm --yes exited %d: %s", out.code, out.stderr)
 	}
-	keys, err := h.store.ProjectKeys(h.projectID(t))
+	keys, err := h.store.ProjectKeys(t.Context(), h.projectID(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -342,7 +342,7 @@ func TestKeysNeedMoreThanAKey(t *testing.T) {
 			t.Errorf("%v: stderr = %q, want the server's refusal", args, out.stderr)
 		}
 	}
-	if keys, _ := h.store.ProjectKeys(h.projectID(t)); len(keys) != 1 {
+	if keys, _ := h.store.ProjectKeys(t.Context(), h.projectID(t)); len(keys) != 1 {
 		t.Errorf("keys = %+v, want the one there was", keys)
 	}
 }
@@ -367,7 +367,7 @@ func TestProjectDeleteNeedsTheAdminToken(t *testing.T) {
 	if out.code != ExitOK {
 		t.Fatalf("projects rm --yes exited %d: %s", out.code, out.stderr)
 	}
-	project, _ := h.store.ProjectByName("test")
+	project, _ := h.store.ProjectByName(t.Context(), "test")
 	if !project.Deleted() {
 		t.Fatalf("the project was not deleted")
 	}
@@ -403,7 +403,7 @@ func TestProjectDeleteNeedsTheAdminToken(t *testing.T) {
 	if out.code != ExitOK {
 		t.Fatalf("projects restore exited %d: %s", out.code, out.stderr)
 	}
-	if project, _ := h.store.ProjectByName("test"); project.Deleted() {
+	if project, _ := h.store.ProjectByName(t.Context(), "test"); project.Deleted() {
 		t.Errorf("the project is still deleted after a restore")
 	}
 }
@@ -457,7 +457,7 @@ func TestUsersRemoveData(t *testing.T) {
 		t.Errorf("stdout = %q, want the compaction's date", out.stdout)
 	}
 
-	counts, err := h.store.TableCounts(h.projectID(t))
+	counts, err := h.store.TableCounts(t.Context(), h.projectID(t))
 	if err != nil {
 		t.Fatal(err)
 	}

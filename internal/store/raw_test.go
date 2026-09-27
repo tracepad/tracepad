@@ -34,7 +34,7 @@ func TestRawContentTypeOfAPreMigrationRow(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rows, err := s.RawBatches(project.ID, RawFilter{Limit: 10})
+	rows, err := s.RawBatches(t.Context(), project.ID, RawFilter{Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +47,7 @@ func TestRawContentTypeOfAPreMigrationRow(t *testing.T) {
 	if rows[0].SizeBytes != 900 {
 		t.Errorf("size_bytes = %d, want the decoded 900", rows[0].SizeBytes)
 	}
-	batch, err := s.RawBatchBody(project.ID, rows[0].ID)
+	batch, err := s.RawBatchBody(t.Context(), project.ID, rows[0].ID)
 	if err != nil || batch == nil {
 		t.Fatalf("body = %v, err = %v", batch, err)
 	}
@@ -65,7 +65,7 @@ func TestRawSizeIsTheDecodedLength(t *testing.T) {
 		body := []byte(strings.Repeat("x", size))
 		seedRawBatch(t, s, project.ID, &RawBatch{ReceivedAt: int64(i + 1), Body: body})
 	}
-	rows, err := s.RawBatches(project.ID, RawFilter{Limit: 10})
+	rows, err := s.RawBatches(t.Context(), project.ID, RawFilter{Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +92,7 @@ func TestRawCountStopsAtItsCap(t *testing.T) {
 	}
 
 	for _, c := range []struct{ cap, want int }{{3, 3}, {5, 5}, {9, 5}} {
-		got, err := s.CountRawBatches(project.ID, RawFilter{}, c.cap)
+		got, err := s.CountRawBatches(t.Context(), project.ID, RawFilter{}, c.cap)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -103,7 +103,7 @@ func TestRawCountStopsAtItsCap(t *testing.T) {
 	// And the window still bounds it, so a capped count is a count of what
 	// an export would send rather than of what is stored.
 	since, until := int64(2), int64(5)
-	got, err := s.CountRawBatches(project.ID, RawFilter{Since: &since, Until: &until}, 9)
+	got, err := s.CountRawBatches(t.Context(), project.ID, RawFilter{Since: &since, Until: &until}, 9)
 	if err != nil {
 		t.Fatal(err)
 	}

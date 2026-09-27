@@ -71,8 +71,27 @@ func (o object) putSome(key string, value any) object {
 	return append(o, field{key: key, value: value})
 }
 
+// MarshalJSON renders the object in one pass over one buffer (spec 043 #20).
+// A nested object or list of objects is written in place rather than
+// marshalled on its own: the standard encoder re-validates whatever a
+// MarshalJSON returns, so marshalling each level separately re-scanned
+// everything beneath it, and a deep tree cost the square of its depth. Leaves
+// still go through encoding/json, so the bytes are what they always were.
 func (o object) MarshalJSON() ([]byte, error) {
 	var buffer bytes.Buffer
+	if err := o.appendJSON(&buffer); err != nil {
+		return nil, err
+	}
+	return buffer.Bytes(), nil
+}
+
+// appender is a value that writes its own JSON into the response's buffer: a
+// rendered object, or anything built of them.
+type appender interface {
+	appendJSON(buffer *bytes.Buffer) error
+}
+
+func (o object) appendJSON(buffer *bytes.Buffer) error {
 	buffer.WriteByte('{')
 	for i, m := range o {
 		if i > 0 {
@@ -80,7 +99,7 @@ func (o object) MarshalJSON() ([]byte, error) {
 		}
 		key, err := json.Marshal(m.key)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		buffer.Write(key)
 		buffer.WriteByte(':')
@@ -97,14 +116,44 @@ func (o object) MarshalJSON() ([]byte, error) {
 			buffer.WriteString("null")
 			continue
 		}
-		value, err := json.Marshal(m.value)
-		if err != nil {
-			return nil, fmt.Errorf("render %q: %w", m.key, err)
+		if err := appendValue(buffer, m.value); err != nil {
+			return fmt.Errorf("render %q: %w", m.key, err)
 		}
-		buffer.Write(value)
 	}
 	buffer.WriteByte('}')
-	return buffer.Bytes(), nil
+	return nil
+}
+
+// appendValue writes one field's value: an object or a list of them in place,
+// anything else through encoding/json.
+func appendValue(buffer *bytes.Buffer, value any) error {
+	switch v := value.(type) {
+	case appender:
+		return v.appendJSON(buffer)
+	case []object:
+		if v == nil {
+			// What encoding/json writes for a nil slice.
+			buffer.WriteString("null")
+			return nil
+		}
+		buffer.WriteByte('[')
+		for i, item := range v {
+			if i > 0 {
+				buffer.WriteByte(',')
+			}
+			if err := item.appendJSON(buffer); err != nil {
+				return err
+			}
+		}
+		buffer.WriteByte(']')
+		return nil
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	buffer.Write(encoded)
+	return nil
 }
 
 // nonFiniteLog paces the warning for a non-finite number rendered as null,

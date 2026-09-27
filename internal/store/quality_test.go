@@ -121,7 +121,7 @@ func scoreKey(row ScoreStatsRow) string {
 func rolledScoreRows(t *testing.T, s *Store, projectID string, hour int64) map[string]ScoreStatsRow {
 	t.Helper()
 	rows := map[string]ScoreStatsRow{}
-	if err := s.ScoresRollupRows(projectID, hour, hour+SecondsPerHour, nil, "",
+	if err := s.ScoresRollupRows(t.Context(), projectID, hour, hour+SecondsPerHour, nil, "",
 		func(row ScoreStatsRow) { rows[scoreKey(row)] = row }); err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +133,7 @@ func rolledScoreRows(t *testing.T, s *Store, projectID string, hour int64) map[s
 func liveScoreRows(t *testing.T, s *Store, projectID string, from, to int64) map[string]ScoreStatsRow {
 	t.Helper()
 	rows := map[string]ScoreStatsRow{}
-	if err := s.ScoreSamples(projectID, from, to, nil, "", func(sample ScoreStatsRow) {
+	if err := s.ScoreSamples(t.Context(), projectID, from, to, nil, "", func(sample ScoreStatsRow) {
 		row, held := rows[scoreKey(sample)]
 		if !held {
 			row = ScoreStatsRow{Hour: sample.Hour, Environment: sample.Environment,
@@ -327,11 +327,11 @@ func TestAScoreDirtiesItsTraceHour(t *testing.T) {
 	if rows := rolledScoreRows(t, s, project.ID, rollupHour); len(rows) != 0 {
 		t.Fatalf("the first pass wrote %d score rows over a corpus with no scores", len(rows))
 	}
-	before, err := s.RollupState(project.ID)
+	before, err := s.RollupState(t.Context(), project.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if dirty, err := s.dirtyHours(project.ID, before.LastPass, before.RolledUntil); err != nil {
+	if dirty, err := s.dirtyHours(t.Context(), project.ID, before.LastPass, before.RolledUntil); err != nil {
 		t.Fatal(err)
 	} else if len(dirty) != 0 {
 		t.Fatalf("hours %v are dirty before anything changed; the clock is lying", dirty)
@@ -341,7 +341,7 @@ func TestAScoreDirtiesItsTraceHour(t *testing.T) {
 	writeScores(t, s, project.ID, base.UnixNano(),
 		numericScore(1, hexTrace(1), "", nameHallucination, 0.5))
 
-	dirty, err := s.dirtyHours(project.ID, before.LastPass, before.RolledUntil)
+	dirty, err := s.dirtyHours(t.Context(), project.ID, before.LastPass, before.RolledUntil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -752,7 +752,7 @@ func TestStatsRetentionSweepsTheScoreRollup(t *testing.T) {
 	}
 	passAt(t, s, time.Unix(rollupHour, 0).Add(10*24*time.Hour))
 
-	hours, err := s.ScoresRollupHours(project.ID)
+	hours, err := s.ScoresRollupHours(t.Context(), project.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

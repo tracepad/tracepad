@@ -90,7 +90,7 @@ func TestAccountsMigrationAndPurgeCascade(t *testing.T) {
 	account := f.invite(t, "helper@example.com", false,
 		Membership{ProjectID: f.project.ID, Role: RoleViewer})
 
-	memberships, err := f.Memberships(account.ID)
+	memberships, err := f.Memberships(t.Context(), account.ID)
 	if err != nil || len(memberships) != 1 || memberships[0].Name != "test" {
 		t.Fatalf("memberships = %+v, err = %v", memberships, err)
 	}
@@ -107,7 +107,7 @@ func TestAccountsMigrationAndPurgeCascade(t *testing.T) {
 		t.Fatal("the project was not purged, so the cascade was never exercised")
 	}
 
-	memberships, err = f.Memberships(account.ID)
+	memberships, err = f.Memberships(t.Context(), account.ID)
 	if err != nil || len(memberships) != 0 {
 		t.Errorf("memberships = %+v, err = %v; the purge must take them", memberships, err)
 	}
@@ -179,7 +179,7 @@ func TestLastOwnerCannotStandDown(t *testing.T) {
 	// stand down either.
 	second := f.invite(t, "partner@example.com", true)
 	f.submit(t, &AccountUpdate{AccountID: first.ID, Owner: &no, Now: time.Now().UnixNano()})
-	if owners, _ := f.EnabledOwners(); owners != 1 {
+	if owners, _ := f.EnabledOwners(t.Context()); owners != 1 {
 		t.Fatalf("enabled owners = %d, want 1", owners)
 	}
 	err := f.writer.Submit(t.Context(), &AccountUpdate{
@@ -196,7 +196,7 @@ func TestLastOwnerCannotStandDown(t *testing.T) {
 	if _, err := f.db.Exec(`UPDATE accounts SET disabled = 1 WHERE id = ?`, second.ID); err != nil {
 		t.Fatal(err)
 	}
-	if owners, _ := f.EnabledOwners(); owners != 0 {
+	if owners, _ := f.EnabledOwners(t.Context()); owners != 0 {
 		t.Errorf("enabled owners = %d, want a disabled owner to count as none", owners)
 	}
 }
@@ -216,7 +216,7 @@ func TestAPendingOwnerIsNoOwner(t *testing.T) {
 		Email: "partner@example.com", Owner: true,
 		TokenID: SessionID("partner"), ExpiresAt: now + int64(7*24*time.Hour), Now: now,
 	})
-	if owners, _ := f.EnabledOwners(); owners != 1 {
+	if owners, _ := f.EnabledOwners(t.Context()); owners != 1 {
 		t.Fatalf("enabled owners = %d, want only the one who can sign in", owners)
 	}
 
@@ -244,7 +244,7 @@ func TestAPendingOwnerIsNoOwner(t *testing.T) {
 			ExpiresAt: now + int64(30*24*time.Hour), Now: now},
 		TokenID: SessionID("partner"), NewHash: hashOnce(t),
 	})
-	if owners, _ := f.EnabledOwners(); owners != 2 {
+	if owners, _ := f.EnabledOwners(t.Context()); owners != 2 {
 		t.Fatalf("enabled owners = %d, want both", owners)
 	}
 	f.submit(t, &AccountUpdate{AccountID: founder.ID, Owner: &no, Now: time.Now().UnixNano()})
@@ -261,7 +261,7 @@ func TestSetupComesBackForAServerWithNoOwnerWhoCanSignIn(t *testing.T) {
 		TokenID: SessionID("invited"), ExpiresAt: now + int64(7*24*time.Hour), Now: now,
 	})
 
-	if owners, _ := f.EnabledOwners(); owners != 0 {
+	if owners, _ := f.EnabledOwners(t.Context()); owners != 0 {
 		t.Fatalf("enabled owners = %d, want the setup link to keep being printed", owners)
 	}
 	// And setup still works: it promotes the row that is already there
@@ -275,7 +275,7 @@ func TestSetupComesBackForAServerWithNoOwnerWhoCanSignIn(t *testing.T) {
 	if setup.Account == nil || !setup.Account.Owner || setup.Account.Pending {
 		t.Fatalf("account = %+v, want an owner who can sign in", setup.Account)
 	}
-	if owners, _ := f.EnabledOwners(); owners != 1 {
+	if owners, _ := f.EnabledOwners(t.Context()); owners != 1 {
 		t.Errorf("enabled owners = %d after the setup", owners)
 	}
 }
@@ -291,18 +291,18 @@ func TestOwnerPromotionDropsMemberships(t *testing.T) {
 
 	yes, no := true, false
 	f.submit(t, &AccountUpdate{AccountID: helper.ID, Owner: &yes, Now: time.Now().UnixNano()})
-	if rows, _ := f.Memberships(helper.ID); len(rows) != 0 {
+	if rows, _ := f.Memberships(t.Context(), helper.ID); len(rows) != 0 {
 		t.Errorf("memberships = %+v after promotion, want none", rows)
 	}
 	promoted, _ := f.AccountByID(context.Background(), helper.ID)
-	projects, err := f.AccountProjects(promoted)
+	projects, err := f.AccountProjects(t.Context(), promoted)
 	if err != nil || len(projects) != 1 || projects[0].Role != RoleOwner {
 		t.Fatalf("an owner's projects = %+v, err = %v", projects, err)
 	}
 
 	f.submit(t, &AccountUpdate{AccountID: helper.ID, Owner: &no, Now: time.Now().UnixNano()})
 	demoted, _ := f.AccountByID(context.Background(), helper.ID)
-	projects, err = f.AccountProjects(demoted)
+	projects, err = f.AccountProjects(t.Context(), demoted)
 	if err != nil || len(projects) != 0 {
 		t.Errorf("a demoted owner's projects = %+v, want none until it is given some", projects)
 	}
@@ -393,7 +393,7 @@ func TestExpiredSessionsAreRefusedThenSwept(t *testing.T) {
 	if session, _, _ := f.SessionByCookie(context.Background(), "session-for-helper@example.com", now); session != nil {
 		t.Fatal("an expired session must be refused before the sweeper reaches it")
 	}
-	if rows, _ := f.AccountSessions(account.ID, now); len(rows) != 0 {
+	if rows, _ := f.AccountSessions(t.Context(), account.ID, now); len(rows) != 0 {
 		t.Error("an expired session must not be on the account's list either")
 	}
 
@@ -422,7 +422,7 @@ func TestEmailIsCaseInsensitiveAndUnique(t *testing.T) {
 	f := newAccountFixture(t)
 	f.invite(t, "Helper@Example.com", false)
 
-	found, err := f.AccountByEmail("helper@EXAMPLE.COM")
+	found, err := f.AccountByEmail(t.Context(), "helper@EXAMPLE.COM")
 	if err != nil || found == nil {
 		t.Fatalf("account = %v, err = %v; the lookup must ignore case", found, err)
 	}
@@ -462,7 +462,7 @@ func TestProjectRole(t *testing.T) {
 		t.Errorf("role in a project one is not a member of = %q, want none", role)
 	}
 
-	members, err := f.ProjectMembers(f.project.ID)
+	members, err := f.ProjectMembers(t.Context(), f.project.ID)
 	if err != nil || len(members) != 1 || members[0].Email != "helper@example.com" {
 		t.Fatalf("members = %+v, err = %v; owners are not listed", members, err)
 	}

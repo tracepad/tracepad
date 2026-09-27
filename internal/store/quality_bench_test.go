@@ -134,7 +134,7 @@ func BenchmarkScoreTrendsMonth(b *testing.B) {
 	b.Run("live-scan", func(b *testing.B) {
 		for range b.N {
 			var rows int
-			if err := s.ScoreSamples(project.ID, from, to, nil, "hallucination",
+			if err := s.ScoreSamples(b.Context(), project.ID, from, to, nil, "hallucination",
 				func(ScoreStatsRow) { rows++ }); err != nil {
 				b.Fatal(err)
 			}
@@ -160,7 +160,7 @@ func BenchmarkScoreTrendsMonth(b *testing.B) {
 	b.Run("rollup", func(b *testing.B) {
 		for range b.N {
 			var rows int
-			if err := s.ScoresRollupRows(project.ID,
+			if err := s.ScoresRollupRows(b.Context(), project.ID,
 				benchStartHourEpoch, benchStartHourEpoch+int64(benchHours)*SecondsPerHour,
 				nil, "hallucination", func(ScoreStatsRow) { rows++ }); err != nil {
 				b.Fatal(err)

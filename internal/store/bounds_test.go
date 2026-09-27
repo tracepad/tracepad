@@ -239,7 +239,7 @@ func TestTheCountingRule(t *testing.T) {
 
 	totals := map[string]*float64{}
 	for n := 1; n <= 5; n++ {
-		row, err := s.Trace(project.ID, hexTrace(n))
+		row, err := s.Trace(t.Context(), project.ID, hexTrace(n))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -257,7 +257,7 @@ func TestTheCountingRule(t *testing.T) {
 		t.Errorf("trace 5 total_cost = %v, want the string \"0.5\" counted as 0.5", cost)
 	}
 	// Kept as sent, not dropped (spec 002 #11).
-	observations, err := s.Observations(project.ID, hexTrace(2), WithIO)
+	observations, err := s.Observations(t.Context(), project.ID, hexTrace(2), WithIO)
 	if err != nil || len(observations) != 1 || observations[0].CostDetails["total"] != "abc" {
 		t.Fatalf("observation = %+v, %v, want cost_details kept as sent", observations, err)
 	}
@@ -286,7 +286,7 @@ func TestTheCountingRule(t *testing.T) {
 			t.Errorf("%s output = %v, want %d: 1e9+1 is not a count", key, row.Tokens.Output, w.output)
 		}
 	}
-	state, err := s.RollupState(project.ID)
+	state, err := s.RollupState(t.Context(), project.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -475,7 +475,7 @@ func TestAFailureThatIsNotTheHoursStopsThePass(t *testing.T) {
 			if _, err := s.db.Exec(`UPDATE traces SET updated_at = ?`, time.Now().Add(time.Hour).UnixNano()); err != nil {
 				t.Fatal(err)
 			}
-			before, err := s.RollupState(project.ID)
+			before, err := s.RollupState(t.Context(), project.ID)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -495,7 +495,7 @@ func TestAFailureThatIsNotTheHoursStopsThePass(t *testing.T) {
 			if failing.attempts != 1 {
 				t.Errorf("the pass tried %d hours, want it to stop at the first", failing.attempts)
 			}
-			after, err := s.RollupState(project.ID)
+			after, err := s.RollupState(t.Context(), project.ID)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -560,7 +560,7 @@ func (f *heldFixture) pass() error {
 }
 
 func (f *heldFixture) state() RollupState {
-	state, err := f.store.RollupState(f.project.ID)
+	state, err := f.store.RollupState(context.Background(), f.project.ID)
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -683,7 +683,7 @@ func TestAClosedHourThatAlwaysFailsHoldsTheWatermarkABoundedTime(t *testing.T) {
 		if err := aggregator.Pass(context.Background()); err == nil {
 			t.Fatalf("pass %d reported no failure", pass)
 		}
-		state, err := s.RollupState(project.ID)
+		state, err := s.RollupState(t.Context(), project.ID)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -770,7 +770,7 @@ func TestOneFailingHourDoesNotStopThePass(t *testing.T) {
 		if got := count(t, s, project.ID, hours[0]); got != 1 {
 			t.Errorf("the hour before the failure holds %d traces, want it rolled", got)
 		}
-		state, err := s.RollupState(project.ID)
+		state, err := s.RollupState(t.Context(), project.ID)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -795,7 +795,7 @@ func TestOneFailingHourDoesNotStopThePass(t *testing.T) {
 		if err := pass(t, s, nil, time.Unix(hours[2]+2*SecondsPerHour, 0)); err != nil {
 			t.Fatal(err)
 		}
-		before, err := s.RollupState(project.ID)
+		before, err := s.RollupState(t.Context(), project.ID)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -815,7 +815,7 @@ func TestOneFailingHourDoesNotStopThePass(t *testing.T) {
 		if got := count(t, s, project.ID, hours[0]); got != 1 {
 			t.Errorf("the failing hour holds %d traces, want it untouched", got)
 		}
-		after, err := s.RollupState(project.ID)
+		after, err := s.RollupState(t.Context(), project.ID)
 		if err != nil {
 			t.Fatal(err)
 		}

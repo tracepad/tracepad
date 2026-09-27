@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"slices"
@@ -266,9 +267,9 @@ func traceCountQuery(projectID string, filter TraceFilter, cap int) (string, []a
 }
 
 // Traces lists a project's traces newest first.
-func (s *Store) Traces(projectID string, filter TraceFilter) ([]*TraceRow, error) {
+func (s *Store) Traces(ctx context.Context, projectID string, filter TraceFilter) ([]*TraceRow, error) {
 	query, args := traceQuery(projectID, filter)
-	rows, err := s.db.Query(query, args...)
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list traces: %w", err)
 	}
@@ -296,10 +297,10 @@ func (s *Store) Traces(projectID string, filter TraceFilter) ([]*TraceRow, error
 // CountTraces answers "how many match", stopping at `cap`: the count is `cap`
 // exactly when there are at least that many, and the caller says "cap+" rather
 // than pretending to know (spec 009 #4).
-func (s *Store) CountTraces(projectID string, filter TraceFilter, cap int) (int, error) {
+func (s *Store) CountTraces(ctx context.Context, projectID string, filter TraceFilter, cap int) (int, error) {
 	query, args := traceCountQuery(projectID, filter, cap)
 	var count int
-	if err := s.db.QueryRow(query, args...).Scan(&count); err != nil {
+	if err := s.db.QueryRowContext(ctx, query, args...).Scan(&count); err != nil {
 		return 0, fmt.Errorf("count traces: %w", err)
 	}
 	return count, nil
@@ -320,7 +321,7 @@ type SessionRow struct {
 
 // Session returns the roll-up, or nil when the project has no trace filed
 // under that session id.
-func (s *Store) Session(projectID, id string) (*SessionRow, error) {
+func (s *Store) Session(ctx context.Context, projectID, id string) (*SessionRow, error) {
 	// Every aggregate but COUNT is NULL over an empty set, which is the
 	// answer for a session id no trace ever named.
 	var (
@@ -330,7 +331,7 @@ func (s *Store) Session(projectID, id string) (*SessionRow, error) {
 		firstSeen  sql.NullInt64
 		lastSeen   sql.NullInt64
 	)
-	err := s.db.QueryRow(
+	err := s.db.QueryRowContext(ctx,
 		`SELECT COUNT(*), SUM(total_cost), SUM(error_count > 0), MIN(timestamp), MAX(timestamp)
 		 FROM traces WHERE project_id = ? AND session_id = ?`, projectID, id).
 		Scan(&row.TraceCount, &totalCost, &errorCount, &firstSeen, &lastSeen)
@@ -449,9 +450,9 @@ func sessionCountQuery(projectID string, filter SessionFilter, cap int) (string,
 }
 
 // Sessions lists a project's sessions, most recently active first.
-func (s *Store) Sessions(projectID string, filter SessionFilter) ([]*SessionRow, error) {
+func (s *Store) Sessions(ctx context.Context, projectID string, filter SessionFilter) ([]*SessionRow, error) {
 	query, args := sessionQuery(projectID, filter)
-	rows, err := s.db.Query(query, args...)
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list sessions: %w", err)
 	}
@@ -488,10 +489,10 @@ func (s *Store) Sessions(projectID string, filter SessionFilter) ([]*SessionRow,
 }
 
 // CountSessions answers "how many sessions match", stopping at `cap`.
-func (s *Store) CountSessions(projectID string, filter SessionFilter, cap int) (int, error) {
+func (s *Store) CountSessions(ctx context.Context, projectID string, filter SessionFilter, cap int) (int, error) {
 	query, args := sessionCountQuery(projectID, filter, cap)
 	var count int
-	if err := s.db.QueryRow(query, args...).Scan(&count); err != nil {
+	if err := s.db.QueryRowContext(ctx, query, args...).Scan(&count); err != nil {
 		return 0, fmt.Errorf("count sessions: %w", err)
 	}
 	return count, nil
@@ -501,8 +502,8 @@ func (s *Store) CountSessions(projectID string, filter SessionFilter, cap int) (
 // alphabetically. A span id is only unique within its trace (schema 0002), so
 // `/observations/{id}/io` needs this to tell "one obvious answer" from "the
 // caller has to say which trace" (spec 004, API contract).
-func (s *Store) ObservationTraces(projectID, observationID string) ([]string, error) {
-	rows, err := s.db.Query(
+func (s *Store) ObservationTraces(ctx context.Context, projectID, observationID string) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx,
 		`SELECT DISTINCT trace_id FROM observations
 		 WHERE project_id = ? AND id = ? ORDER BY trace_id`, projectID, observationID)
 	if err != nil {
@@ -523,8 +524,8 @@ func (s *Store) ObservationTraces(projectID, observationID string) ([]string, er
 
 // Observation returns one span with its payloads resolved, or nil when the
 // (trace, span) pair does not exist.
-func (s *Store) Observation(projectID, traceID, id string) (*ObservationRow, error) {
-	rows, err := s.db.Query(
+func (s *Store) Observation(ctx context.Context, projectID, traceID, id string) (*ObservationRow, error) {
+	rows, err := s.db.QueryContext(ctx,
 		`SELECT `+observationColumns+`
 		 `+observationFrom+`
 		 WHERE o.project_id = ? AND o.trace_id = ? AND o.id = ?`,
@@ -532,11 +533,21 @@ func (s *Store) Observation(projectID, traceID, id string) (*ObservationRow, err
 	if err != nil {
 		return nil, fmt.Errorf("read observation %s: %w", id, err)
 	}
-	defer rows.Close()
 	if !rows.Next() {
+		rows.Close()
 		return nil, rows.Err()
 	}
-	return s.scanObservation(rows, WithIO, nil)
+	row, err := scanObservation(rows)
+	// Closed before the payloads are read, so the read holds one statement
+	// at a time.
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	if err := s.resolvePayloads(ctx, row, nil); err != nil {
+		return nil, err
+	}
+	return row, nil
 }
 
 // Statistics grouping (spec 004 #8). The first two group traces by when they
@@ -609,9 +620,9 @@ func StatsUnit(groupBy string) string {
 // StatsSamples scans the rows behind a statistics query and hands each to
 // yield. Percentiles are computed exactly by the caller over what arrives
 // here, rather than approximated in SQL (spec 004 #8).
-func (s *Store) StatsSamples(projectID string, filter StatsFilter, yield func(StatsSample)) error {
+func (s *Store) StatsSamples(ctx context.Context, projectID string, filter StatsFilter, yield func(StatsSample)) error {
 	query, args := statsQuery(projectID, filter)
-	rows, err := s.db.Query(query, args...)
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("read stats: %w", err)
 	}
@@ -649,12 +660,12 @@ func (s *Store) StatsSamples(projectID string, filter StatsFilter, yield func(St
 // It reads the same observations the rollup's model cells are made of — the
 // ones that name a model — so a bucket's tokens are the same sum on both
 // sides of the seam.
-func (s *Store) StatsTokens(projectID string, filter StatsFilter, yield func(StatsTokenSum)) error {
+func (s *Store) StatsTokens(ctx context.Context, projectID string, filter StatsFilter, yield func(StatsTokenSum)) error {
 	if filter.GroupBy == GroupByModel {
 		return nil
 	}
 	query, args := statsTokensQuery(projectID, filter)
-	rows, err := s.db.Query(query, args...)
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("read stats tokens: %w", err)
 	}
@@ -814,13 +825,13 @@ type TableCount struct {
 
 // TableCounts counts one project's rows, in a fixed order so the answer is a
 // stable diff between two calls.
-func (s *Store) TableCounts(projectID string) ([]TableCount, error) {
+func (s *Store) TableCounts(ctx context.Context, projectID string) ([]TableCount, error) {
 	out := make([]TableCount, 0, len(countedTables)+1)
 	for _, table := range countedTables {
 		var rows int64
 		// The table names are the package's own constants, never
 		// anything a request carries; only the project id is bound.
-		if err := s.db.QueryRow(`SELECT COUNT(*) FROM `+table+` WHERE project_id = ?`, projectID).
+		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+table+` WHERE project_id = ?`, projectID).
 			Scan(&rows); err != nil {
 			return nil, fmt.Errorf("count %s: %w", table, err)
 		}
@@ -830,7 +841,7 @@ func (s *Store) TableCounts(projectID string) ([]TableCount, error) {
 	// listing, and a count that still included it would be the one place
 	// the deletion did not take (spec 005 #9).
 	var projects int64
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM projects WHERE deleted_at IS NULL`).
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM projects WHERE deleted_at IS NULL`).
 		Scan(&projects); err != nil {
 		return nil, fmt.Errorf("count projects: %w", err)
 	}
@@ -858,4 +869,41 @@ func (s *Store) explainQueryPlan(query string, args ...any) ([]string, error) {
 		out = append(out, detail)
 	}
 	return out, rows.Err()
+}
+
+// TracesBetween counts the traces of each project whose timestamp falls in
+// [from, to): one statement per batch of projects, a seek on
+// idx_traces_timestamp per project, for the project listing's traffic column
+// (spec 029 #8, spec 043 #29). A project with none is absent from the map.
+func (s *Store) TracesBetween(ctx context.Context, projectIDs []string, from, to int64) (map[string]int64, error) {
+	counts := make(map[string]int64, len(projectIDs))
+	ids := make([]any, len(projectIDs))
+	for i, id := range projectIDs {
+		ids[i] = id
+	}
+	err := eachIn(ids, func(batch []any) error {
+		rows, err := s.db.QueryContext(ctx,
+			`SELECT project_id, COUNT(*) FROM traces
+			  WHERE project_id IN (`+placeholders(len(batch))+`)
+			    AND timestamp >= ? AND timestamp < ?
+			  GROUP BY project_id`,
+			// A copy: the batch shares its array with the next one.
+			append(append(make([]any, 0, len(batch)+2), batch...), from, to)...)
+		if err != nil {
+			return fmt.Errorf("count the projects' traces: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var (
+				id    string
+				count int64
+			)
+			if err := rows.Scan(&id, &count); err != nil {
+				return err
+			}
+			counts[id] = count
+		}
+		return rows.Err()
+	})
+	return counts, err
 }

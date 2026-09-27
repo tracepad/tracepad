@@ -365,7 +365,7 @@ func TestAccountsRemoveListsTheKeysItMinted(t *testing.T) {
 	h := newAccountsCLI(t)
 	project := h.projectID(t)
 	h.invite(t, helperEmail, "--project", project+":editor")
-	helper, err := h.store.AccountByEmail(helperEmail)
+	helper, err := h.store.AccountByEmail(t.Context(), helperEmail)
 	if err != nil || helper == nil {
 		t.Fatalf("the invited account: %v", err)
 	}

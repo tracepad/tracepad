@@ -495,7 +495,7 @@ func TestEveryToolMatchesItsEndpoint(t *testing.T) {
 func TestTruncationMarkerIsReachableAsATool(t *testing.T) {
 	h := newHarness(t)
 	huge := strings.Repeat("payload ", 400_000)
-	project, err := h.store.ProjectByName("test")
+	project, err := h.store.ProjectByName(t.Context(), "test")
 	if err != nil {
 		t.Fatal(err)
 	}

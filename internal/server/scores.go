@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -355,10 +354,9 @@ func (s *Server) handleListScores(w http.ResponseWriter, r *http.Request) {
 		filter.After = &store.ScoreCursor{Timestamp: timestamp, ID: parts[1]}
 	}
 
-	scores, err := s.store.Scores(project.ID, filter)
+	scores, err := s.store.Scores(r.Context(), project.ID, filter)
 	if err != nil {
-		slog.Error("list scores failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to list scores")
+		readFailed(w, r, "failed to list scores", err)
 		return
 	}
 
@@ -387,10 +385,9 @@ func (s *Server) handleGetScore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("id")
-	score, err := s.store.Score(project.ID, id)
+	score, err := s.store.Score(r.Context(), project.ID, id)
 	if err != nil {
-		slog.Error("read score failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to read the score")
+		readFailed(w, r, "failed to read the score", err)
 		return
 	}
 	if score == nil {

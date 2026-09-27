@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 )
@@ -138,10 +139,10 @@ func scoreRollupQuery(projectID string, fromHour, toHour int64, environment []st
 }
 
 // ScoresRollupRows reads the stored rows of a half-open hour range.
-func (s *Store) ScoresRollupRows(projectID string, fromHour, toHour int64,
+func (s *Store) ScoresRollupRows(ctx context.Context, projectID string, fromHour, toHour int64,
 	environment []string, name string, yield func(ScoreStatsRow)) error {
 	query, args := scoreRollupQuery(projectID, fromHour, toHour, environment, name)
-	rows, err := s.db.Query(query, args...)
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("read the score rollup: %w", err)
 	}
@@ -210,10 +211,10 @@ func scoreLiveQuery(projectID string, from, to int64, environment []string, name
 // ScoreSamples yields one row per score in a half-open range of *trace*
 // timestamps, shaped as a one-sample rollup row so that the caller folds both
 // halves of the seam with one function.
-func (s *Store) ScoreSamples(projectID string, from, to int64,
+func (s *Store) ScoreSamples(ctx context.Context, projectID string, from, to int64,
 	environment []string, name string, yield func(ScoreStatsRow)) error {
 	query, args := scoreLiveQuery(projectID, from, to, environment, name)
-	rows, err := s.db.Query(query, args...)
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("read the scores of a range: %w", err)
 	}
@@ -251,8 +252,8 @@ func (s *Store) ScoreSamples(projectID string, from, to int64,
 
 // ScoresRollupHours reports which hours of a project hold score rows. The
 // tests ask; nothing on the read path needs it.
-func (s *Store) ScoresRollupHours(projectID string) ([]int64, error) {
-	rows, err := s.db.Query(
+func (s *Store) ScoresRollupHours(ctx context.Context, projectID string) ([]int64, error) {
+	rows, err := s.db.QueryContext(ctx,
 		`SELECT DISTINCT hour FROM scores_hourly WHERE project_id = ? ORDER BY hour`, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("read the rolled score hours: %w", err)
@@ -294,8 +295,8 @@ const dirtyScoreHoursQuery = `SELECT DISTINCT (t.timestamp / 1000000000 / ?) * ?
 	 ORDER BY hour`
 
 // dirtyScoreHours are the hours whose scores changed since the last pass.
-func (s *Store) dirtyScoreHours(projectID string, since int64) ([]int64, error) {
-	rows, err := s.db.Query(dirtyScoreHoursQuery,
+func (s *Store) dirtyScoreHours(ctx context.Context, projectID string, since int64) ([]int64, error) {
+	rows, err := s.db.QueryContext(ctx, dirtyScoreHoursQuery,
 		SecondsPerHour, SecondsPerHour, projectID, since)
 	if err != nil {
 		return nil, fmt.Errorf("find the hours a score touched: %w", err)
@@ -385,7 +386,7 @@ func correctScoreHours(tx *sql.Tx, projectID string, now int64, hours ...int64) 
 	if len(hours) == 0 {
 		return nil
 	}
-	state, err := rollupState(tx, projectID)
+	state, err := rollupState(context.Background(), tx, projectID)
 	if err != nil {
 		return err
 	}

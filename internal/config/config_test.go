@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"flag"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -173,6 +174,74 @@ func TestSessionDays(t *testing.T) {
 	t.Setenv("TRACEPAD_SESSION_DAYS", "a month")
 	if _, err := Load(nil); err == nil {
 		t.Error("a session length that is not a number must be refused, not defaulted")
+	}
+}
+
+// The two read bounds are validated at start: out of range refuses to start,
+// as TRACEPAD_RESPONSE_BUDGET_BYTES does (spec 043 #22).
+func TestReadBounds(t *testing.T) {
+	t.Setenv("TRACEPAD_READ_TIMEOUT", "")
+	t.Setenv("TRACEPAD_READ_CONCURRENCY", "")
+
+	cfg, err := Load(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ReadTimeout != 20*time.Second {
+		t.Errorf("ReadTimeout = %s, want the documented 20s", cfg.ReadTimeout)
+	}
+	if want := max(4, 2*runtime.GOMAXPROCS(0)); cfg.ReadConcurrency != want {
+		t.Errorf("ReadConcurrency = %d, want twice GOMAXPROCS and at least 4, %d", cfg.ReadConcurrency, want)
+	}
+	for procs, want := range map[int]int{1: 4, 2: 4, 3: 6, 16: 32} {
+		if got := DefaultReadConcurrency(procs); got != want {
+			t.Errorf("DefaultReadConcurrency(%d) = %d, want %d", procs, got, want)
+		}
+	}
+
+	t.Setenv("TRACEPAD_READ_TIMEOUT", "1s")
+	t.Setenv("TRACEPAD_READ_CONCURRENCY", "1")
+	cfg, err = Load(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ReadTimeout != time.Second || cfg.ReadConcurrency != 1 {
+		t.Errorf("read bounds = %s, %d; want the floors 1s and 1", cfg.ReadTimeout, cfg.ReadConcurrency)
+	}
+
+	for name, value := range map[string]string{
+		"TRACEPAD_READ_TIMEOUT":     "999ms",
+		"TRACEPAD_READ_CONCURRENCY": "0",
+	} {
+		t.Run(name+"="+value, func(t *testing.T) {
+			t.Setenv(name, value)
+			if _, err := Load(nil); err == nil || !strings.Contains(err.Error(), name) {
+				t.Errorf("Load = %v, want a refusal naming %s", err, name)
+			}
+		})
+	}
+	// Past the five minutes a response has to be written, the transport
+	// would cut the connection before the deadline could answer.
+	t.Setenv("TRACEPAD_READ_TIMEOUT", "4m")
+	if _, err := Load(nil); err != nil {
+		t.Errorf("4m, the ceiling, refused: %v", err)
+	}
+	t.Setenv("TRACEPAD_READ_TIMEOUT", "5m")
+	if _, err := Load(nil); err == nil || !strings.Contains(err.Error(), "TRACEPAD_READ_TIMEOUT") {
+		t.Errorf("Load = %v, want a refusal of a deadline the transport would cut", err)
+	}
+	t.Setenv("TRACEPAD_READ_TIMEOUT", "")
+
+	for name, value := range map[string]string{
+		"TRACEPAD_READ_TIMEOUT":     "twenty seconds",
+		"TRACEPAD_READ_CONCURRENCY": "many",
+	} {
+		t.Run(name+"="+value, func(t *testing.T) {
+			t.Setenv(name, value)
+			if _, err := Load(nil); err == nil {
+				t.Errorf("%s=%q must be refused, not defaulted", name, value)
+			}
+		})
 	}
 }
 

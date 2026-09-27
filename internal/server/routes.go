@@ -26,6 +26,49 @@ type route struct {
 	handler     http.HandlerFunc
 }
 
+// Two GET routes the read gate treats apart (spec 043 #26, #27), named once for
+// the table and for readBoundOf.
+const (
+	systemPath = "/api/v1/system"
+	claimPath  = "/api/v1/queues/{name}/next"
+)
+
+// readBound is how the read gate bounds a route (spec 043 #15, #16).
+type readBound uint8
+
+const (
+	// ungated is every route that is not a read: the public ones, every
+	// write, and the one GET that writes.
+	ungated readBound = iota
+	// sharedSlots is a read: the deadline, and one of the read slots.
+	sharedSlots
+	// ownLane is the deadline and a slot of its own lane, for the read
+	// that reports the slots.
+	ownLane
+)
+
+// readBoundOf says how the gate bounds a route. It sits beside the table so
+// that a route added to it is judged here too: a new GET that writes, or that
+// reports the gate's own gauges, is named in this switch, and every other GET
+// with a credential is a read.
+func readBoundOf(rt route) readBound {
+	if rt.Method != http.MethodGet || rt.Policy == public {
+		return ungated
+	}
+	switch rt.Path {
+	case claimPath:
+		// Handing out the next item claims it through the writer
+		// (spec 024 #5), and a claim the deadline answered would still
+		// commit (spec 043 #26).
+		return ungated
+	case systemPath:
+		// The gauge answers while every read slot is taken, and its
+		// counts take one slot of their own (spec 043 #27).
+		return ownLane
+	}
+	return sharedSlots
+}
+
 func (s *Server) routes() []route {
 	return []route{
 		{"GET", "/health", public, "Liveness and version, no authentication required", s.handleHealth},
@@ -49,7 +92,7 @@ func (s *Server) routes() []route {
 		// starts (design §3.2).
 		{"GET", "/api/v1", public, "This endpoint map", s.handleAPIIndex},
 		{"GET", "/api/v1/openapi.json", public, "The OpenAPI 3.1 document for this API", s.handleOpenAPI},
-		{"GET", "/api/v1/system", member, "Version, uptime, database size and ingest counters since start", s.handleSystem},
+		{"GET", systemPath, member, "Version, uptime, database size and ingest counters since start", s.handleSystem},
 
 		// Signing in (spec 028 Decisions 8–10). The three public ones are
 		// the three ways in — the first owner, a password, an invitation
@@ -173,7 +216,7 @@ func (s *Server) routes() []route {
 		{"POST", "/api/v1/queues/{name}/items", editor, "Add one target or an array of them; a target already queued counts as existing", s.handleAddItems},
 		{"POST", "/api/v1/queues/{name}/items/from-traces", editor, "Add the newest traces a listing filter matches, capped by `limit`", s.handleAddItemsFromTraces},
 		{"GET", "/api/v1/queues/{name}/items", member, "The queue's items oldest first, filtered and cursor-paginated", s.handleListQueueItems},
-		{"GET", "/api/v1/queues/{name}/next", member, "The next item to annotate, claimed for ten minutes", s.handleNextItem},
+		{"GET", claimPath, member, "The next item to annotate, claimed for ten minutes", s.handleNextItem},
 		{"GET", "/api/v1/queues/{name}/items/{id}", member, "One item", s.handleGetQueueItem},
 		{"POST", "/api/v1/queues/{name}/items/{id}/complete", member, "Mark an item done; refused unless every score the queue asks for is on its target", s.handleCompleteItem},
 		{"POST", "/api/v1/queues/{name}/items/{id}/skip", member, "Mark an item skipped, with the reason", s.handleSkipItem},

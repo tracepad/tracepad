@@ -1,8 +1,8 @@
 package server
 
 import (
+	"context"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"net/url"
 	"slices"
@@ -71,10 +71,9 @@ func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
 		filter.After = cursor
 	}
 
-	users, err := s.store.Users(project.ID, filter)
+	users, err := s.store.Users(r.Context(), project.ID, filter)
 	if err != nil {
-		slog.Error("list users failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to list the users")
+		readFailed(w, r, "failed to list the users", err)
 		return
 	}
 
@@ -91,10 +90,9 @@ func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
 		put("next_cursor", next).
 		put("prev_cursor", prev)
 	if counting {
-		total, err := s.store.CountUsers(project.ID, filter, countCap+1)
+		total, err := s.store.CountUsers(r.Context(), project.ID, filter, countCap+1)
 		if err != nil {
-			slog.Error("count users failed", "err", err)
-			writeError(w, http.StatusInternalServerError, "failed to count the users")
+			readFailed(w, r, "failed to count the users", err)
 			return
 		}
 		value, stopped := capped(total)
@@ -164,10 +162,9 @@ func (s *Server) handleGetUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	summary, found, err := s.readUser(project.ID, userID)
+	summary, found, err := s.readUser(r.Context(), project.ID, userID)
 	if err != nil {
-		slog.Error("read user failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to read the user")
+		readFailed(w, r, "failed to read the user", err)
 		return
 	}
 	if !found {
@@ -189,8 +186,8 @@ func (s *Server) handleGetUser(w http.ResponseWriter, r *http.Request) {
 // `last_seen` is nonetheless exact to the second when the tail holds the user,
 // which is the promise Decision 5 makes: a user first seen minutes ago is not
 // in the listing at all, and this page still says when they were.
-func (s *Server) readUser(projectID, userID string) (*store.UserSummary, bool, error) {
-	state, err := s.store.RollupState(projectID)
+func (s *Server) readUser(ctx context.Context, projectID, userID string) (*store.UserSummary, bool, error) {
+	state, err := s.store.RollupState(ctx, projectID)
 	if err != nil {
 		return nil, false, err
 	}
@@ -199,11 +196,11 @@ func (s *Server) readUser(projectID, userID string) (*store.UserSummary, bool, e
 	// on both sides, so that an hour the erasure path re-rolled early cannot
 	// be counted twice. A project nobody has rolled has a watermark of zero,
 	// so the whole of it is live.
-	rolled, err := s.store.UserRollup(projectID, userID, state.RolledUntil)
+	rolled, err := s.store.UserRollup(ctx, projectID, userID, state.RolledUntil)
 	if err != nil {
 		return nil, false, err
 	}
-	tail, err := s.store.UserTail(projectID, userID, state.RolledUntil*int64(time.Second))
+	tail, err := s.store.UserTail(ctx, projectID, userID, state.RolledUntil*int64(time.Second))
 	if err != nil {
 		return nil, false, err
 	}
