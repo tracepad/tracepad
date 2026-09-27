@@ -268,7 +268,9 @@ func (sw *Sweeper) Pass(ctx context.Context) error {
 
 	// Removed traces whose uploads no URL can still carry (spec 041 #29).
 	// Not counted as freed: a row per trace, gone within the hour.
-	if err := sw.sweepVoidedUploads(ctx, start.UnixNano()); err != nil {
+	// On the wall clock, as the rows are stamped and read (#29), not on the
+	// pass's own clock.
+	if err := sw.sweepVoidedUploads(ctx, time.Now().UnixNano()); err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, ErrWriterClosed) {
 			return err
 		}
@@ -445,7 +447,8 @@ func (sw *Sweeper) sweepOrphanPayloads(ctx context.Context) (int64, error) {
 // bodies those refs leave. Found by a read outside the writer, like the
 // orphaned payloads; the job re-checks each predicate inside its transaction.
 func (sw *Sweeper) sweepOrphanMedia(ctx context.Context, now int64) (int64, error) {
-	refs, err := sw.store.orphanMediaRefs(now-int64(MediaOrphanGrace), orphanScanLimit)
+	before := now - int64(MediaOrphanGrace)
+	refs, err := sw.store.orphanMediaRefs(before, orphanScanLimit)
 	if err != nil {
 		return 0, err
 	}
@@ -462,7 +465,7 @@ func (sw *Sweeper) sweepOrphanMedia(ctx context.Context, now int64) (int64, erro
 	if len(refs) == 0 && len(bodies) == 0 && len(stale) == 0 && len(missing) == 0 {
 		return 0, nil
 	}
-	job := &mediaSweep{Refs: refs, Bodies: bodies, Stale: stale, Missing: missing, Now: now}
+	job := &mediaSweep{Refs: refs, Bodies: bodies, Stale: stale, Missing: missing, Now: now, Before: before}
 	if err := sw.writer.Submit(ctx, job); err != nil {
 		return 0, err
 	}

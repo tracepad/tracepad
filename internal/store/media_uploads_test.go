@@ -337,10 +337,11 @@ func TestMediaDeletionInChunks(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// The null answer for a trace chunk 1 took writes no ref either.
+	// The null answer for a trace chunk 1 took is refused in the write, as
+	// the handler's check would have refused it, and writes no ref.
 	add := &MediaRefAdd{ProjectID: f.project.ID, SHA256: kept.SHA256, TraceID: hexTrace(20)}
-	if err := f.writer.Submit(t.Context(), add); err != nil || !add.Held {
-		t.Fatalf("the null answer for a deleted trace = %v, %v", add.Held, err)
+	if err := f.writer.Submit(t.Context(), add); !errors.Is(err, ErrTraceRemoved) {
+		t.Fatalf("the null answer for a deleted trace = %v, %v; want ErrTraceRemoved", add.Held, err)
 	}
 	if n := f.count(t, `SELECT COUNT(*) FROM media_refs WHERE trace_id = ?`, hexTrace(20)); n != 0 {
 		t.Errorf("the null answer wrote %d refs for a deleted trace", n)
@@ -570,5 +571,61 @@ func TestMigration0026SettlesStoredTracesRefs(t *testing.T) {
 		if err != nil || pending != want[0] || settled != want[1] {
 			t.Errorf("trace %s after 0026: %d pending, %d settled (%v), want %v", trace, pending, settled, err, want)
 		}
+	}
+}
+
+// TestMediaSweepSparesARefTheNullAnswerHeld: the sweep's read lists a pending
+// ref past the grace; before its job runs, the SDK names the same picture for
+// the same trace and is told the bytes are held, which gives the ref an hour.
+// The job re-checks the age in its transaction and keeps the ref — still
+// pending, its trace not here — and the body (#30).
+func TestMediaSweepSparesARefTheNullAnswerHeld(t *testing.T) {
+	f := newSweepFixture(t)
+	x := mediaBody(86, 1500)
+	upload := uploadOf(f.project.ID, hexTrace(1), "tp-pk-test", x,
+		sweepNow.Add(-MediaOrphanGrace-time.Hour).UnixNano())
+	if err := f.writer.Submit(t.Context(), upload); err != nil {
+		t.Fatal(err)
+	}
+	before := sweepNow.Add(-MediaOrphanGrace).UnixNano()
+	refs, err := f.store.orphanMediaRefs(before, orphanScanLimit)
+	if err != nil || len(refs) != 1 {
+		t.Fatalf("the sweep's read = %v, %v; want the one ref", refs, err)
+	}
+	add := &MediaRefAdd{ProjectID: f.project.ID, SHA256: x.SHA256, TraceID: hexTrace(1), Now: sweepNow.UnixNano()}
+	if err := f.writer.Submit(t.Context(), add); err != nil || !add.Held {
+		t.Fatalf("the null answer = %v, %v", add.Held, err)
+	}
+	job := &mediaSweep{Refs: refs, Now: sweepNow.UnixNano(), Before: before}
+	if err := f.writer.Submit(t.Context(), job); err != nil {
+		t.Fatal(err)
+	}
+	if job.Dropped != 0 || f.mediaRows(t) != 1 {
+		t.Fatalf("the sweep dropped %d refs and left %d bodies after the null answer held the ref",
+			job.Dropped, f.mediaRows(t))
+	}
+	if pending, settled, err := f.store.MediaRefStates(f.project.ID, hexTrace(1)); err != nil ||
+		pending != 1 || settled != 0 {
+		t.Errorf("the held ref = %d pending, %d settled (%v); want it still waiting for its trace",
+			pending, settled, err)
+	}
+}
+
+// TestMediaVoidedSweepOnTheWallClock: the removal is stamped and read on the
+// wall clock, and the pass forgets rows by it too, not by its own clock — a
+// pass whose clock runs two hours ahead keeps a row that still voids (#29).
+func TestMediaVoidedSweepOnTheWallClock(t *testing.T) {
+	f := newSweepFixture(t)
+	f.arrive(t, f.project.ID, hexTrace(1), daysAgo(1))
+	if err := f.writer.Submit(t.Context(), &TraceDelete{ProjectID: f.project.ID, IDs: []string{hexTrace(1)},
+		Confirm: hexTrace(1)}); err != nil {
+		t.Fatal(err)
+	}
+	ahead := f.store.NewSweeper(f.writer, SweepOptions{Now: func() time.Time { return time.Now().Add(2 * time.Hour) }})
+	if err := ahead.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.MediaUploadRoom(t.Context(), f.project.ID, mediaBody(87, 400).SHA256, hexTrace(1)); !errors.Is(err, ErrTraceRemoved) {
+		t.Errorf("the ask after a pass on a clock two hours ahead = %v, want ErrTraceRemoved", err)
 	}
 }

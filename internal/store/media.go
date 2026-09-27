@@ -629,8 +629,9 @@ func (a *MediaRefAdd) apply(tx *sql.Tx) error {
 	floor := now - int64(MediaOrphanGrace) + int64(nullAnswerHold)
 	switch place {
 	case refVoid:
-		a.Held = true
-		return nil
+		// Removed since the handler's check: refused as the check would
+		// have refused it, not answered as held (#29).
+		return ErrTraceRemoved
 	case refWritten:
 		// Named again for its own trace, a ref still pending takes the same
 		// hour a new one would: a ref near the end of its grace would
@@ -745,12 +746,14 @@ const mediaVoidedSlack = time.Minute
 // voidUploads records, in the transaction that removes them and before they
 // go, the traces whose uploads are void from now (#29).
 func voidUploads(tx *sql.Tx, projectID string, traceIDs []any, now int64) error {
-	if _, err := deleteIn(tx, `INSERT OR REPLACE INTO media_voided (project_id, trace_id, at)
-	    SELECT project_id, id, ? FROM traces WHERE project_id = ? AND id IN`,
-		[]any{now, projectID}, traceIDs); err != nil {
-		return fmt.Errorf("void the removed traces' uploads: %w", err)
-	}
-	return nil
+	return eachIn(traceIDs, func(batch []any) error {
+		if _, err := tx.Exec(`INSERT OR REPLACE INTO media_voided (project_id, trace_id, at)
+		    SELECT project_id, id, ? FROM traces WHERE project_id = ? AND id IN (`+placeholders(len(batch))+`)`,
+			append([]any{now, projectID}, batch...)...); err != nil {
+			return fmt.Errorf("void the removed traces' uploads: %w", err)
+		}
+		return nil
+	})
 }
 
 // MaxPendingMediaRefs is how many pending refs one project may have (#31): an
@@ -1003,11 +1006,14 @@ type MediaOrphan struct {
 }
 
 // mediaSweep settles the pending refs the read pass found: one whose trace
-// has arrived since is kept and no longer pending, one whose trace never came
-// is deleted. It releases the holds the deleted refs leave and any hold the
-// pass found with no ref behind it, restores the holds the pass found missing
-// behind a ref, and then collects the bodies left with no ref, together with
-// any body the pass found with no ref at all.
+// never came, and that is still past the grace, is deleted — a null answer
+// since the read may have given it an hour (#30), and it is kept; one whose
+// trace is stored is kept and no longer pending, a belt for a database edited
+// by hand, since a trace's insert settles its refs (#31). It releases the
+// holds the deleted refs leave and any hold the pass found with no ref behind
+// it, restores the holds the pass found missing behind a ref, and then
+// collects the bodies left with no ref, together with any body the pass found
+// with no ref at all.
 type mediaSweep struct {
 	Refs   []MediaOrphan
 	Bodies []any
@@ -1015,6 +1021,8 @@ type mediaSweep struct {
 	// and Missing the pairs with a ref and no holder row.
 	Stale, Missing []MediaHold
 	Now            int64
+	// Before is the grace's edge the read pass used.
+	Before int64
 
 	// Dropped counts the refs deleted, Released and Restored the holds
 	// deleted and written, and Deleted the bodies collected — each what
@@ -1029,8 +1037,8 @@ func (m *mediaSweep) apply(tx *sql.Tx) error {
 	for _, ref := range m.Refs {
 		result, err := tx.Exec(
 			`DELETE FROM media_refs WHERE sha256 = ? AND project_id = ? AND trace_id = ? AND pending = 1
-			   AND NOT `+traceStoredExpr,
-			ref.SHA256, ref.ProjectID, ref.TraceID, ref.ProjectID, ref.TraceID)
+			   AND created_at < ? AND NOT `+traceStoredExpr,
+			ref.SHA256, ref.ProjectID, ref.TraceID, m.Before, ref.ProjectID, ref.TraceID)
 		if err != nil {
 			return fmt.Errorf("delete orphaned media ref: %w", err)
 		}
@@ -1041,8 +1049,9 @@ func (m *mediaSweep) apply(tx *sql.Tx) error {
 			continue
 		}
 		if _, err := tx.Exec(
-			`UPDATE media_refs SET pending = 0 WHERE sha256 = ? AND project_id = ? AND trace_id = ?`,
-			ref.SHA256, ref.ProjectID, ref.TraceID); err != nil {
+			`UPDATE media_refs SET pending = 0 WHERE sha256 = ? AND project_id = ? AND trace_id = ?
+			   AND pending = 1 AND `+traceStoredExpr,
+			ref.SHA256, ref.ProjectID, ref.TraceID, ref.ProjectID, ref.TraceID); err != nil {
 			return fmt.Errorf("settle media ref: %w", err)
 		}
 	}
