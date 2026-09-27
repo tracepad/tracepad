@@ -193,8 +193,21 @@ func TestSumsSaturate(t *testing.T) {
 		if got := value(sumOf(tc.costs...)); got != tc.want {
 			t.Errorf("AddCost over %v = %v, want %v", tc.costs, got, tc.want)
 		}
+		var sum CostSum
+		for _, cost := range tc.costs {
+			sum.Add(cost)
+		}
+		if got := value(sum.Pointer()); got != tc.want {
+			t.Errorf("CostSum over %v = %v, want %v", tc.costs, got, tc.want)
+		}
 	}
 
+	// A statistics answer sums a cost per sample (spec 043 #24 u): the sum
+	// is a value, so taking it allocates nothing.
+	var perSample CostSum
+	if allocs := testing.AllocsPerRun(1000, func() { perSample.Add(0.25) }); allocs != 0 {
+		t.Errorf("CostSum.Add allocates %v times, want none", allocs)
+	}
 }
 
 // The counting rule (spec 043 #4), read by every reader: a cost counts when

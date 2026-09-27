@@ -398,7 +398,7 @@ func (s *Server) handlePatchMe(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusForbidden, store.ErrWrongPassword.Error())
 			return
 		}
-		s.submitFailure(w, err)
+		submitFailure(w, err, apiWrite)
 		return
 	}
 	writeJSON(w, http.StatusOK, object{}.put("account", accountResponse(change.Account)))
@@ -500,7 +500,7 @@ func (s *Server) signIn(w http.ResponseWriter, r *http.Request, job opensSession
 		case errors.Is(err, store.ErrSetupDone):
 			writeError(w, http.StatusForbidden, store.ErrSetupDone.Error())
 		default:
-			s.submitFailure(w, err)
+			submitFailure(w, err, apiWrite)
 		}
 		return false
 	}

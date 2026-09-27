@@ -204,23 +204,54 @@ func saturatingAdd(a, b int64) int64 {
 	return a + b
 }
 
-// AddCost folds one cost into a sum, nil while nothing has carried one — the
-// addition every rollup and every merge of rollup rows uses (spec 043 #6). The
-// sum holds at the largest finite double instead of reaching an infinity,
+// CostSum folds costs into a sum that knows whether anything carried one —
+// the addition every rollup and every merge of rollup rows uses (spec 043 #6).
+// The sum holds at the largest finite double instead of reaching an infinity,
 // which no encoder can write. A cost that is not a finite number is not a
 // cost: a NaN, or an infinity stored before the counting rule, adds nothing,
-// so a sum of nothing else stays nil — "no data" — rather than becoming a NaN,
-// or a zero where two opposite infinities met. The sum is always one this
-// function returned, so it is finite by construction.
-func AddCost(sum *float64, n float64) *float64 {
+// so a sum of nothing else stays "no data" rather than becoming a NaN, or a
+// zero where two opposite infinities met. The sum is always one Add left, so
+// it is finite by construction. A value, so a sum taken sample by sample
+// allocates nothing (#24 u).
+type CostSum struct {
+	sum  float64
+	some bool
+}
+
+// Add folds one cost into the sum.
+func (c *CostSum) Add(n float64) {
 	if !model.Finite(n) {
-		return sum
+		return
 	}
-	total := n
+	if !c.some {
+		c.sum, c.some = n, true
+		return
+	}
+	c.sum = min(max(c.sum+n, -math.MaxFloat64), math.MaxFloat64)
+}
+
+// Value is the sum, and false while nothing has carried a cost.
+func (c CostSum) Value() (float64, bool) { return c.sum, c.some }
+
+// Pointer is the sum as a row carries it: nil while nothing has carried a
+// cost.
+func (c CostSum) Pointer() *float64 {
+	if !c.some {
+		return nil
+	}
+	sum := c.sum
+	return &sum
+}
+
+// AddCost is CostSum.Add for a sum a row carries, nil while nothing has
+// carried a cost.
+func AddCost(sum *float64, n float64) *float64 {
+	var c CostSum
 	if sum != nil {
-		total = min(max(*sum+n, -math.MaxFloat64), math.MaxFloat64)
+		c = CostSum{sum: *sum, some: true}
 	}
-	return &total
+	c.Add(n)
+	return c.Pointer()
 }
 
 // HourOf is the top of the hour a client timestamp falls in. The rollup

@@ -163,6 +163,105 @@ func TestAFailedLookupOnAConditionIsLoggedOnceAMinute(t *testing.T) {
 	}
 }
 
+// A guard lookup that ran out of its deadline is logged once a minute, as a
+// condition is (spec 043 #24 u): whatever held one lookup past five seconds
+// holds every exporter's retry too. A driver reports it as an interrupt or as
+// the context's error; either way the lookup's context is what expired.
+func TestALookupPastItsDeadlineIsLoggedOnceAMinute(t *testing.T) {
+	var logged bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logged, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	lookupLog = &logpace.Keyed{Every: time.Minute}
+	deadline := credentialDeadline
+	credentialDeadline = time.Millisecond
+	t.Cleanup(func() { credentialDeadline = deadline })
+
+	for _, reported := range []error{context.DeadlineExceeded, errors.New("interrupted (9)"), context.DeadlineExceeded} {
+		rec := httptest.NewRecorder()
+		_, ok := guardLookup(rec, httptest.NewRequest("GET", "/api/v1/traces", nil), "key",
+			func(ctx context.Context) (int, error) {
+				<-ctx.Done()
+				return 0, reported
+			})
+		if ok || rec.Code != http.StatusServiceUnavailable {
+			t.Fatalf("lookup = %v, status %d, want a 503", ok, rec.Code)
+		}
+	}
+	if lines := strings.Count(logged.String(), "lookup failed"); lines != 1 {
+		t.Errorf("logged %d lines for 3 lookups past their deadline, want 1:\n%s", lines, logged.String())
+	}
+	if !strings.Contains(logged.String(), "condition=deadline") {
+		t.Errorf("the line does not say the deadline passed:\n%s", logged.String())
+	}
+}
+
+// A handler's own lookup of the project or account its route names answers a
+// database condition as the guard does (spec 043 #24 u): `503` with
+// `Retry-After`, logged once a minute per condition. Anything else is still a
+// `500` — here the admin token's read of the project it names.
+func TestAHandlersLookupOnAConditionIs503(t *testing.T) {
+	h := newAdminHarness(t)
+	var logged bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logged, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	lookupLog = &logpace.Keyed{Every: time.Minute}
+	t.Cleanup(func() { projectByID = (*store.Store).ProjectByID })
+	failWith := func(err error) {
+		projectByID = func(*store.Store, context.Context, string) (*store.Project, error) { return nil, err }
+	}
+	get := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest("GET", "/api/v1/projects/"+h.project.ID, nil)
+		asAdmin(req)
+		rec := httptest.NewRecorder()
+		h.server.Handler().ServeHTTP(rec, req)
+		return rec
+	}
+
+	failWith(fmt.Errorf("read project: %w", codedError{13})) // SQLITE_FULL
+	for range 3 {
+		rec := get()
+		if rec.Code != http.StatusServiceUnavailable || rec.Header().Get("Retry-After") == "" {
+			t.Fatalf("status %d, Retry-After %q, want 503 with Retry-After",
+				rec.Code, rec.Header().Get("Retry-After"))
+		}
+	}
+	if lines := strings.Count(logged.String(), "condition=SQLITE_FULL"); lines != 1 {
+		t.Errorf("logged %d lines for 3 lookups a full disk failed, want 1:\n%s", lines, logged.String())
+	}
+
+	failWith(errors.New("no such table: projects"))
+	if rec := get(); rec.Code != http.StatusInternalServerError {
+		t.Errorf("status %d for a lookup that failed on its own, want 500", rec.Code)
+	}
+}
+
+// A slide a database condition failed is not logged by the handler (spec 043
+// #24 u): the writer logs the condition once a minute, and a line per request
+// from every signed-in person would bury it. The request still succeeds.
+func TestASlideADatabaseConditionFailedIsNotLogged(t *testing.T) {
+	h := newAccountHarness(t)
+	who := h.owner(t)
+	if err := h.writer.Submit(t.Context(), &store.SessionSlide{
+		SessionID: store.SessionID(who.cookie),
+		ExpiresAt: time.Now().Add(24 * time.Hour).UnixNano(),
+		Now:       time.Now().Add(-2 * sessionSlideAfter).UnixNano(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var logged bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logged, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	h.server.writer = conditionWriter{fmt.Errorf("commit write transaction: %w", codedError{13})}
+
+	expectStatus(t, h.call(t, "GET", "/api/v1/auth/me", nil, asSession(who)), 200)
+	if strings.Contains(logged.String(), "slide") {
+		t.Errorf("a slide the database refused was logged by the handler:\n%s", logged.String())
+	}
+}
+
 // A lookup outside the guard whose client hung up is not a storage failure
 // either (spec 043 #24): nothing answered, nothing logged — here the admin
 // token's own read of the project it names.
@@ -184,6 +283,27 @@ func TestAHangUpDuringAHandlersLookupIsNotAFailure(t *testing.T) {
 	}
 	if strings.Contains(logged.String(), "lookup failed") {
 		t.Errorf("a hang-up was logged as a failed lookup:\n%s", logged.String())
+	}
+}
+
+// Encoding the answer whole before writing it changed nothing a client reads
+// (spec 043 #3, #24 u): the bytes are json.Encoder's — HTML-escaped, with
+// U+2028 escaped, ending in a newline — for a plain value and for an object.
+func TestAnAnswerIsTheBytesTheEncoderWrote(t *testing.T) {
+	for _, body := range []any{
+		map[string]any{"html": "<b>&</b>", "line": "a\u2028b", "n": 1.5},
+		object{}.put("html", "<script>").put("cost", math.Inf(1)).put("list", []int{1, 2}),
+		[]string{"x"},
+	} {
+		var want bytes.Buffer
+		if err := json.NewEncoder(&want).Encode(body); err != nil {
+			t.Fatal(err)
+		}
+		rec := httptest.NewRecorder()
+		writeJSON(rec, http.StatusOK, body)
+		if rec.Body.String() != want.String() {
+			t.Errorf("wrote %q, want %q", rec.Body.String(), want.String())
+		}
 	}
 }
 

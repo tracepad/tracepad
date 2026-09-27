@@ -77,15 +77,31 @@ func (s *Server) submit(w http.ResponseWriter, r *http.Request, job store.WriteJ
 	if err == nil {
 		return true
 	}
-	s.submitFailure(w, err)
+	submitFailure(w, err, apiWrite)
 	return false
+}
+
+// writeKind is what submitFailure's answers call one kind of write: the JSON
+// API's, or an ingest batch's.
+type writeKind struct {
+	// full is the `429` for a full queue; failed the `500` for a write that
+	// failed on its own, and logged the line that goes with it, with attrs.
+	full, failed, logged string
+	attrs                []any
+}
+
+var apiWrite = writeKind{
+	full:   "write queue is full, retry shortly",
+	failed: "failed to store the write",
+	logged: "write failed",
 }
 
 // submitFailure renders an outcome the writer already answered with. It is the
 // tail of submit, split out for the handlers that recognise one error of their
 // own before falling back to the shared shapes (spec 028: a wrong current
-// password, a spent invitation).
-func (s *Server) submitFailure(w http.ResponseWriter, err error) {
+// password, a spent invitation), and for ingest, whose writes fail the same
+// ways (spec 043 #24 u).
+func submitFailure(w http.ResponseWriter, err error, kind writeKind) {
 	var rejection *store.Rejection
 	switch {
 	case errors.As(err, &rejection):
@@ -111,23 +127,27 @@ func (s *Server) submitFailure(w http.ResponseWriter, err error) {
 		}
 		writeJSON(w, status, body)
 	case errors.Is(err, store.ErrWriterBusy):
-		// The same backpressure ingest gives an exporter (spec 002 #15).
+		// Backpressure a client can act on: OTLP exporters retry 429 with
+		// backoff natively (spec 002 #15).
 		w.Header().Set("Retry-After", "1")
-		writeError(w, http.StatusTooManyRequests, "write queue is full, retry shortly")
+		writeError(w, http.StatusTooManyRequests, kind.full)
 	case errors.Is(err, store.ErrWriterClosed):
 		writeError(w, http.StatusServiceUnavailable, "server is shutting down")
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 		// The client hung up; there is nobody left to answer.
 	default:
 		if _, ok := store.Condition(err); ok {
-			// The database's condition, which passes: the status a
-			// client retries, as ingest answers it (spec 043 #2). The
-			// writer has logged it, once a minute.
+			// A lock that did not clear, a full disk, an I/O error: the
+			// database's condition, which passes, so the answer is one
+			// a client retries (spec 043 #2). Everything else is the
+			// write's own and would fail again on every retry — a retry
+			// loop over a poison batch is worse than the loss, so it
+			// stays a 500. The writer has logged it, once a minute.
 			retryLater(w, storageUnavailable)
 			return
 		}
-		slog.Error("write failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to store the write")
+		slog.Error(kind.logged, slices.Concat(kind.attrs, []any{"err", err})...)
+		writeError(w, http.StatusInternalServerError, kind.failed)
 	}
 }
 
@@ -550,8 +570,8 @@ func validName(kind, value string) error {
 // keep. The bytes of a body that encodes are what `json.Encoder` wrote,
 // trailing newline included.
 func writeJSON(w http.ResponseWriter, status int, body any) {
-	var buffer bytes.Buffer
-	if err := json.NewEncoder(&buffer).Encode(body); err != nil {
+	encoded, err := json.Marshal(body)
+	if err != nil {
 		slog.Error("failed to render the response", "type", fmt.Sprintf("%T", body), "err", err)
 		// The handler may have set how long its answer keeps — a prompt
 		// sets a minute — and a failure must not be kept at all.
@@ -564,7 +584,8 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	if _, err := w.Write(buffer.Bytes()); err != nil {
+	// The newline json.Encoder ended every answer with before (spec 043 #3).
+	if _, err := w.Write(append(encoded, '\n')); err != nil {
 		slog.Error("failed to write response", "err", err)
 	}
 }

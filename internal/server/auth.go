@@ -238,8 +238,9 @@ func (s *Server) resolve(w http.ResponseWriter, r *http.Request, rt route) (*cal
 
 // credentialDeadline bounds each lookup the guard makes (spec 043 #1): a
 // lookup that waits for a connection or a lock is a credential the server
-// could not check, and it says so rather than holding the request.
-const credentialDeadline = 5 * time.Second
+// could not check, and it says so rather than holding the request. A variable
+// for the test that runs one out.
+var credentialDeadline = 5 * time.Second
 
 // guardLookup runs one of the guard's lookups under a deadline of its own
 // (spec 043 #1) and reports whether the request may go on. A lookup that
@@ -261,24 +262,55 @@ func guardLookup[T any](w http.ResponseWriter, r *http.Request, what string, loo
 	if hungUp(r) {
 		return zero, false
 	}
-	// A database condition is the same news on every request until it
-	// passes — a lock held past the busy timeout, a full disk — so it is
-	// logged once a minute per condition, as the writer logs it (spec 043
-	// #24); anything else is logged every time.
-	if condition, ok := store.Condition(err); ok {
-		if failed, now := lookupLog.Allow(condition, time.Now()); now {
-			slog.Error(what+" lookup failed", "err", err, "condition", condition,
-				"failed_since_last_line", failed)
-		}
-	} else {
-		slog.Error(what+" lookup failed", "err", err)
+	// A lookup that ran out of its deadline is the same news as a condition:
+	// whatever held it holds the next one too (spec 043 #24 u). A condition
+	// the driver reported as the deadline passed keeps its own name.
+	condition, ok := store.Condition(err)
+	if !ok && ctx.Err() != nil {
+		condition = "deadline"
 	}
+	logLookupFailure(what, err, condition)
 	retryLater(w, "cannot check credentials right now; retry shortly")
 	return zero, false
 }
 
-// lookupLog paces the log line of a guard lookup a database condition failed.
+// lookupFailed answers a handler's own lookup that failed, the way the guard
+// answers its lookups (spec 043 #24 u): a client that hung up gets nothing
+// and nothing is logged; a database condition is `503` with `Retry-After`,
+// logged once a minute per condition; anything else is `500`.
+func lookupFailed(w http.ResponseWriter, r *http.Request, what string, err error) {
+	if hungUp(r) {
+		return
+	}
+	condition, ok := store.Condition(err)
+	logLookupFailure(what, err, condition)
+	if ok {
+		retryLater(w, storageUnavailable)
+		return
+	}
+	writeError(w, http.StatusInternalServerError, "failed to read the "+what)
+}
+
+// logLookupFailure logs a lookup that failed. One that failed for a reason
+// shared by every request until it passes — a lock held past the busy
+// timeout, a full disk, a deadline — is logged once a minute per reason, as
+// the writer logs a condition (spec 043 #24); anything else every time.
+func logLookupFailure(what string, err error, condition string) {
+	if condition == "" {
+		slog.Error(what+" lookup failed", "err", err)
+		return
+	}
+	if failed, now := lookupLog.Allow(condition, time.Now()); now {
+		slog.Error(what+" lookup failed", "err", err, "condition", condition,
+			"failed_since_last_line", failed)
+	}
+}
+
+// lookupLog paces the log line of a lookup a database condition failed.
 var lookupLog = &logpace.Keyed{Every: time.Minute}
+
+// projectByID is the store's, a seam for the test that makes it fail.
+var projectByID = (*store.Store).ProjectByID
 
 // hungUp reports a request whose client is gone. A lookup that failed for that
 // reason is no storage failure and has nobody to answer: nothing is logged and
@@ -383,8 +415,11 @@ func (s *Server) slide(w http.ResponseWriter, r *http.Request, current *store.Ac
 	}); err != nil {
 		// A slide that could not be written is not a reason to refuse the
 		// request: the session is live either way, and the next request
-		// tries again.
-		slog.Warn("could not slide a session", "err", err)
+		// tries again. A database condition is the writer's to log, once a
+		// minute (spec 043 #24 u), and a hang-up is nobody's.
+		if _, condition := store.Condition(err); !condition && !hungUp(r) {
+			slog.Warn("could not slide a session", "err", err)
+		}
 		return
 	}
 	current.ExpiresAt = expires.UnixNano()

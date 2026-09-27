@@ -107,13 +107,9 @@ func (s *Server) target(w http.ResponseWriter, r *http.Request, c *caller, allow
 
 	project := c.project
 	if c.admin {
-		found, err := s.store.ProjectByID(r.Context(), id)
+		found, err := projectByID(s.store, r.Context(), id)
 		if err != nil {
-			if hungUp(r) {
-				return nil, false
-			}
-			slog.Error("project lookup failed", "err", err)
-			writeError(w, http.StatusInternalServerError, "failed to read the project")
+			lookupFailed(w, r, "project", err)
 			return nil, false
 		}
 		if found == nil {
@@ -237,13 +233,9 @@ func (s *Server) handleListProjects(w http.ResponseWriter, r *http.Request) {
 			// for the same row is how two answers to "what is this
 			// project set to" start to disagree. A member's list is a
 			// handful of rows.
-			project, err := s.store.ProjectByID(r.Context(), one.ProjectID)
+			project, err := projectByID(s.store, r.Context(), one.ProjectID)
 			if err != nil {
-				if hungUp(r) {
-					return
-				}
-				slog.Error("project lookup failed", "err", err)
-				writeError(w, http.StatusInternalServerError, "failed to read the projects")
+				lookupFailed(w, r, "project", err)
 				return
 			}
 			if project == nil {

@@ -111,12 +111,12 @@ func (s *Store) migrate() error {
 		// start with nothing in the log looks like a hang (spec 043 #24).
 		logger().Info("applying migration", "migration", name)
 		start := time.Now()
-		changed, err := applyMigration(ctx, conn, name, string(body))
+		written, err := applyMigration(ctx, conn, name, string(body))
 		if err != nil {
 			return err
 		}
 		logger().Info("applied migration", "migration", name,
-			"rows_changed", changed, "took", time.Since(start).Round(time.Millisecond))
+			"rows_written", written, "took", time.Since(start).Round(time.Millisecond))
 	}
 	// Every migration this run's backup guards has committed, so the older
 	// backups stop being the way back from anything: each is a full copy of
@@ -130,8 +130,10 @@ func (s *Store) migrate() error {
 }
 
 // applyMigration runs one file and records it, in a single transaction, and
-// reports how many rows it changed — SQLite's own count of rows the connection
-// inserted, updated or deleted, taken before and after.
+// reports how many rows it wrote — SQLite's own count of rows the connection
+// inserted, updated or deleted, taken before and after. That is every
+// statement's rows, a scratch table's included, not the rows the migration
+// repaired (spec 043 #24 u).
 func applyMigration(ctx context.Context, conn *sql.Conn, name, body string) (int64, error) {
 	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {

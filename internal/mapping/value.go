@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"math"
 	"strconv"
+	"strings"
 
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
 
@@ -330,6 +331,21 @@ func asNumber(v any) (float64, bool) {
 		return n, err == nil && model.Finite(n)
 	}
 	return 0, false
+}
+
+// jsonNumberText reads a string the way the store's counting rule reads a
+// string total (spec 043 #24 u): a number only when its whole text, JSON
+// whitespace aside, is one strict JSON number — SQLite's `json_valid`, not
+// `strconv.ParseFloat`, which also takes `.5`, `+1`, `007` and hexadecimal.
+func jsonNumberText(text string) (float64, bool) {
+	trimmed := strings.Trim(text, " \t\n\r")
+	if trimmed == "" || trimmed[0] != '-' && (trimmed[0] < '0' || trimmed[0] > '9') {
+		return 0, false
+	}
+	if !json.Valid([]byte(trimmed)) {
+		return 0, false
+	}
+	return asNumber(trimmed)
 }
 
 // asInteger coerces an attribute value to a whole number for an INTEGER

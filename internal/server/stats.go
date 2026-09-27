@@ -58,10 +58,10 @@ type bucket struct {
 	key        string
 	count      int64
 	errorCount int64
-	// totalCost is nil while nothing in this bucket carried a cost:
+	// totalCost holds nothing while nothing in this bucket carried a cost:
 	// summing over rows that provided none would report zero where the
 	// truth is "nobody said" (spec 002 #14).
-	totalCost *float64
+	totalCost store.CostSum
 	latency   store.Histogram
 	// tokens are the three sums of spec 031, added the way cost is: a half
 	// that carried none contributes nothing and does not make the sum zero.
@@ -154,8 +154,8 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 			put("key", b.key).
 			put("count", b.count).
 			put("error_count", b.errorCount)
-		if b.totalCost != nil {
-			row = row.put("total_cost", *b.totalCost)
+		if cost, ok := b.totalCost.Value(); ok {
+			row = row.put("total_cost", cost)
 		}
 		if tokens := tokensObject(b.tokens); tokens != nil {
 			row = row.put("tokens", tokens)
@@ -259,7 +259,7 @@ func (s *Server) rolledStats(projectID string, filter store.StatsFilter, fromHou
 		b.count += row.Count
 		b.errorCount += row.ErrorCount
 		if row.TotalCost != nil {
-			b.totalCost = store.AddCost(b.totalCost, *row.TotalCost)
+			b.totalCost.Add(*row.TotalCost)
 		}
 		b.latency.Merge(row.Latency)
 		b.tokens.Add(row.Tokens)
@@ -297,7 +297,7 @@ func (s *Server) liveStats(projectID string, filter store.StatsFilter, from, to 
 			b.errorCount++
 		}
 		if sample.Cost != nil {
-			b.totalCost = store.AddCost(b.totalCost, *sample.Cost)
+			b.totalCost.Add(*sample.Cost)
 		}
 		if sample.LatencyMs != nil {
 			b.latency.Add(*sample.LatencyMs)

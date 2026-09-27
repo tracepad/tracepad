@@ -735,12 +735,12 @@ func mapCost(a *attrs) map[string]any {
 	if len(out) == 0 {
 		return nil
 	}
-	// A total written as a string that is a number is the number, as the
-	// scalar `gen_ai.usage.cost` above already reads one: SQLite's `SUM`
-	// always counted `"0.25"`, and the store's counting rule still does
-	// (spec 043 #24). A string that is not one — "abc" — stays as sent.
+	// A total written as a string that is a number is the number: SQLite's
+	// `SUM` always counted `"0.25"`, and the store's counting rule still does
+	// (spec 043 #24). A string that is not one — "abc", or ".5", which Go
+	// would parse and the rule does not — stays as sent (#24 u).
 	if text, ok := out["total"].(string); ok {
-		if n, valid := asNumber(strings.TrimSpace(text)); valid {
+		if n, valid := jsonNumberText(text); valid {
 			out["total"] = jsonNumber(n)
 		}
 	}

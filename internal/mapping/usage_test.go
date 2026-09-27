@@ -263,7 +263,10 @@ func TestADerivedTotalDoesNotDependOnOrder(t *testing.T) {
 // A total written as a string that is a number is stored as the number (spec
 // 043 #24): the counting rule counts it either way, and a stored number is
 // one every reader reads the same. A string that is not a number stays as
-// sent, and counts as no data.
+// sent, and counts as no data. "A number" is a strict JSON number, as the
+// counting rule reads one (#24 u): a string Go would parse and JSON would
+// not — `.5`, `+1`, `007`, `0x1p-2` — is not one, or the same text would be
+// a cost when it arrives and none once stored.
 func TestANumericStringTotalIsANumber(t *testing.T) {
 	for _, tc := range []struct {
 		sent string
@@ -273,6 +276,15 @@ func TestANumericStringTotalIsANumber(t *testing.T) {
 		{`{"total": " 1.5 "}`, 1.5},
 		{`{"total": "abc"}`, "abc"},
 		{`{"total": "Infinity"}`, "Infinity"},
+		{`{"total": "1e-3"}`, 0.001},
+		{`{"total": "-0.5"}`, -0.5},
+		{`{"total": ".5"}`, ".5"},
+		{`{"total": "+1"}`, "+1"},
+		{`{"total": "007"}`, "007"},
+		{`{"total": "5."}`, "5."},
+		{`{"total": "0x1p-2"}`, "0x1p-2"},
+		{`{"total": "1_000"}`, "1_000"},
+		{`{"total": "\u00a01"}`, "\u00a01"},
 	} {
 		observation := mapping.Map(otlptest.SpanWith("langfuse.observation.cost_details", tc.sent)).Observations[0]
 		if got := observation.CostDetails["total"]; got != tc.want {
