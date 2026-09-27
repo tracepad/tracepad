@@ -186,6 +186,10 @@ type rawBatchRow struct {
 	ContentType     string `json:"content_type"`
 	ContentEncoding string `json:"content_encoding"`
 	SizeBytes       int64  `json:"size_bytes"`
+	// ScrubbedAt is when an erasure rewrote the batch without the erased
+	// spans, null for a batch as received (spec 044 #2) — in the manifest
+	// too, because a rewritten body is no longer what the client sent.
+	ScrubbedAt *string `json:"scrubbed_at"`
 }
 
 type rawListing struct {
@@ -321,6 +325,9 @@ func (r *run) replayOne(ctx context.Context, sink destination, row rawBatchRow,
 
 	summary.Sent++
 	summary.Bytes += int64(len(body))
+	if row.ScrubbedAt != nil {
+		summary.Scrubbed++
+	}
 	if summary.FirstReceivedAt == "" {
 		summary.FirstReceivedAt = row.ReceivedAt
 	}
@@ -353,7 +360,10 @@ type exportSummary struct {
 	Swept int64 `json:"swept"`
 	// PartialSuccess counts the batches a receiver took and reported spans
 	// of its own that it would not keep.
-	PartialSuccess     int64      `json:"partial_success"`
+	PartialSuccess int64 `json:"partial_success"`
+	// Scrubbed counts the batches sent that an erasure had rewritten: each
+	// is the batch as received minus the erased spans (spec 044 #2).
+	Scrubbed           int64      `json:"scrubbed"`
 	FirstReceivedAt    string     `json:"first_received_at"`
 	LastReceivedAt     string     `json:"last_received_at"`
 	LastCursor         string     `json:"last_cursor"`
@@ -426,6 +436,10 @@ func (r *run) reportExport(summary exportSummary, dryRun bool) {
 	if summary.PartialSuccess > 0 {
 		fmt.Fprintf(r.opt.Stdout, "  partial    %d batches the receiver took and reported spans of\n",
 			summary.PartialSuccess)
+	}
+	if summary.Scrubbed > 0 {
+		fmt.Fprintf(r.opt.Stdout, "  scrubbed   %d batches an erasure rewrote without the erased spans\n",
+			summary.Scrubbed)
 	}
 	// The honest edge of the promise (spec 019 #1): a trace older than the
 	// raw window is parsed rows only, and the operator learns it here

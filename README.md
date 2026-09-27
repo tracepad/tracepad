@@ -212,7 +212,7 @@ rather than by hand:
 
 ```sh
 tracepad retention set --days 90       # traces, counted from when they arrived
-tracepad users rm-data user-4711       # one user's traces, not the raw archive
+tracepad users rm-data user-4711       # everything the store holds about one user
 ```
 
 An hourly sweeper removes what has expired, in chunks through the same writer
@@ -221,10 +221,12 @@ survive it: the hourly rollup keeps answering about a window whose traces are
 gone, until you give it a window of its own with `--stats-days`. Projects, keys
 and retention windows are managed over the same API; every destructive call is
 a dry run until you echo the name of what it destroys, and deleting a project
-is undoable for a week. An erasure takes the parsed data and leaves the raw
-OTLP archive and the freed bytes in the file behind; the
+is undoable for a week. An erasure takes the user's data everywhere the store
+holds it — the parsed rows, the scores on their sessions, the dataset items
+cut from their traces and their spans in the raw OTLP archive — and the next
+sweep overwrites the freed bytes; the
 [data-subject section](docs/retention.md#what-this-means-for-a-data-subject-request)
-says what that means and what to do about it. See
+says exactly where its reach ends. See
 [docs/retention.md](docs/retention.md) and [docs/admin.md](docs/admin.md).
 
 ## Images and files

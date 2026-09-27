@@ -278,24 +278,68 @@ longer says how much of what it counts leaves the disk.
 tracepad users rm-data user-4711
 ```
 
-The echo is the user id. The response reports what went, per store. When an
-eval run holds any of the user's traces, the preview names it under
-`affected_runs` — erasure outranks the pin, and the run shows those items as
-missing afterwards ([datasets.md](datasets.md#what-a-run-keeps)).
+The echo is the user id. The erasure takes the traces filed under it with
+everything hanging off them, the scores on their sessions, the dataset items
+cut from them and their spans in the raw OTLP bodies
+([retention.md](retention.md#deleting-a-users-data) has the whole list). The
+dry run counts each before anything happens:
 
-The confirmed answer also says when the rest of the job is done, and what it
-will not reach:
+```json
+{
+  "dry_run": true,
+  "would_delete": {
+    "traces": 12, "observations": 240, "scores": 30, "session_scores": 2,
+    "annotation_items": 1, "dataset_items": 3, "media": 4, "media_bytes": 812003
+  },
+  "oldest": "2026-06-01T09:14:02Z",
+  "affected_runs": [{"id": "…", "dataset": "support-golden", "traces": 2}],
+  "affected_datasets": [{"dataset": "support-golden", "items": 3}],
+  "raw": {"batches_to_scan": 41, "unattributable_batches": 0},
+  "confirm": "user-4711",
+  "note": "the user's spans are removed from the raw batches that hold them …"
+}
+```
+
+- `session_scores` — scores given to one of the user's sessions rather than a
+  trace; a session another user's traces share loses them too.
+- `dataset_items` and `affected_datasets` — the items cut from the user's
+  traces, every version of each: an item that is a verbatim copy of their
+  input and output goes with its history, and each dataset's version advances
+  by one ([datasets.md](datasets.md#where-an-item-came-from)).
+- `affected_runs` — erasure outranks the pin a run puts on its traces, and the
+  run shows those items as missing afterwards
+  ([datasets.md](datasets.md#what-a-run-keeps)).
+- `raw.batches_to_scan` — the raw batches received while the user's traces
+  were arriving, which the erasure decodes and checks for the user's spans.
+  `raw.unattributable_batches` — the batches older than the trace window,
+  which may hold spans of traces the sweep already took and which nothing can
+  attribute to the user any more
+  ([retention.md](retention.md#what-this-means-for-a-data-subject-request)).
+
+The confirmed answer says what went, when the rest of the job is done, and
+what it will not reach:
 
 ```json
 {
   "dry_run": false,
-  "deleted": {"traces": 12, "observations": 240, "scores": 30, "payloads": 480, …},
+  "deleted": {
+    "traces": 12, "observations": 240, "scores": 30, "session_scores": 2,
+    "payloads": 480, "annotation_items": 1, "dataset_items": 3,
+    "media": 5, "media_bytes": 901442,
+    "raw_spans": 252, "raw_batches_rewritten": 38, "raw_batches_deleted": 3
+  },
   "user_id": "user-4711",
   "compaction": {"requested_at": "2026-09-26T10:02:11Z", "expected_by": "2026-09-26T11:00:00Z"},
   "pre_migration_backup": {"created_at": "2026-09-24T08:00:00Z", "remove_after": "2026-10-01T08:00:00Z"}
 }
 ```
 
+- `raw_spans`, `raw_batches_rewritten`, `raw_batches_deleted` — the user's
+  spans taken out of the raw archive, and the batches that held them:
+  rewritten without them, or deleted, when nothing else was in them or a
+  rewrite failed. A rewritten batch is marked `scrubbed_at`
+  ([export.md](export.md#batches-an-erasure-rewrote)). `media` counts the
+  pictures only those spans pointed at as well.
 - `compaction` — the freed space is zeroed as the rows go; the search index
   and the write-ahead log are rewritten by a sweeper pass, and `expected_by`
   is when that pass is due: the next one, or the one after a pass already
@@ -307,14 +351,11 @@ will not reach:
   sweeper pass after that removes it — not before, and not while the server
   is down. The dry run names it too.
 
-**What it does not take.** The raw OTLP bodies are not touched — a batch holds
-many traces — so the user's spans stay readable through `GET /api/v1/raw/{id}`
-and `tracepad export --otlp` until the raw window takes their batches, which by
-default is never; the preview says so in its note. Scores given to one of the
-user's sessions rather than a trace, and dataset items cut from their traces,
-stay as well, and so does the pre-migration backup until its date.
+**What it does not take.** What no id links to the user — a name typed into
+someone else's prompt, an item copied without its source — the raw batches
+older than the trace window, and the pre-migration backup until its date.
 [retention.md](retention.md#what-this-means-for-a-data-subject-request) lists
-each and what to do about it today.
+each.
 
 The **annotation-queue items** pointing at the erased traces go with them
 ([annotation.md](annotation.md)) — an item is a pointer, and the queues keep
@@ -330,16 +371,20 @@ recompute them from. So the account leaves `/api/v1/users` immediately, and
 corrected where they can be, which is the rule
 [retention.md](retention.md#what-outlives-what) states.
 
-The erasure is synchronous and runs in **chunks** — up to five hundred traces
+The erasure is synchronous. The **raw archive goes first**: the batches that
+hold the user's spans are found, decoded and rewritten one writer job each,
+before the parsed rows go, because once those are gone nothing names the
+batches any more; the batches that arrived while the request ran are checked
+last. The parsed rows then go in **chunks** — up to five hundred traces
 of one hour — each one a transaction that leaves the store consistent on its
 own: the chunk's traces go and the hour they occupied is recomputed in the
 same commit, and the writer is held for one chunk at a time so ingest keeps
 flowing between them. A user active in many hours takes many chunks, and a
 long history can take longer than the interface waits; that is safe, because
-a request cut off between chunks — a closed tab, the interface's
-thirty-second clock — destroys nothing half-way: what the committed chunks
-erased is erased and counted as erased, and repeating the call finishes the
-rest. The counts in the answer are the request's own; a repeat reports what
+a request cut off anywhere — a closed tab, the interface's thirty-second
+clock — destroys nothing half-way: what the committed jobs erased is erased
+and counted as erased, and repeating the call finds what is left and finishes
+it. The counts in the answer are the request's own; a repeat reports what
 it erased, not what the interrupted one did.
 
 ## Deleting traces

@@ -46,16 +46,48 @@ type DeleteCounts struct {
 	// omission. Whether another project keeps the bytes does not enter it.
 	Media      int64
 	MediaBytes int64
+	// SessionScores are the scores that name a session and no trace: an
+	// erasure takes those of the erased traces' sessions (spec 044 #7), the
+	// sweep those whose session no trace carries any more (#8).
+	SessionScores int64
+	// DatasetItems are the items an erasure takes because a row of theirs
+	// was cut from an erased trace (spec 044 #9) — items, not rows.
+	DatasetItems int64
+	// RawSpans are the erased spans taken out of the raw batches, and
+	// RawBatchesRewritten and RawBatchesDeleted the batches that held them:
+	// rewritten without them, or deleted — left empty, or a rewrite that
+	// failed (spec 044 #2).
+	RawSpans            int64
+	RawBatchesRewritten int64
+	RawBatchesDeleted   int64
 	// Oldest is the arrival time of the oldest affected row (Unix
 	// nanoseconds), or zero when nothing is affected.
 	Oldest int64
+}
+
+// add sums what two chunks of one request deleted. Oldest is a preview's
+// and is not summed.
+func (c *DeleteCounts) add(o DeleteCounts) {
+	c.Traces += o.Traces
+	c.Observations += o.Observations
+	c.Scores += o.Scores
+	c.Payloads += o.Payloads
+	c.AnnotationItems += o.AnnotationItems
+	c.Media += o.Media
+	c.MediaBytes += o.MediaBytes
+	c.SessionScores += o.SessionScores
+	c.DatasetItems += o.DatasetItems
+	c.RawSpans += o.RawSpans
+	c.RawBatchesRewritten += o.RawBatchesRewritten
+	c.RawBatchesDeleted += o.RawBatchesDeleted
 }
 
 // Any reports whether the operation would remove anything at all.
 func (c DeleteCounts) Any() bool {
 	return c.Traces+c.Observations+c.Scores+c.Payloads+c.RawBatches+
 		c.Prompts+c.PromptLabels+c.APIKeys+
-		c.AnnotationQueues+c.AnnotationItems+c.Media > 0
+		c.AnnotationQueues+c.AnnotationItems+c.Media+
+		c.SessionScores+c.DatasetItems+c.RawSpans > 0
 }
 
 // OptionalDays is a retention window as a PATCH carries it. Absent, cleared
@@ -102,6 +134,18 @@ func (s *Store) RetentionPreview(ctx context.Context, projectID string, retentio
 			return counts, err
 		}
 		counts = expiring
+		// The session-only scores the same pass would take (spec 044 #8):
+		// a session none of whose traces outlives this window loses its
+		// verdicts with them.
+		if err := s.db.QueryRow(
+			`SELECT COUNT(*) FROM scores s
+			  WHERE s.project_id = ? AND s.trace_id IS NULL AND s.created_at < ?
+			    AND NOT EXISTS (SELECT 1 FROM traces t WHERE t.project_id = s.project_id
+			                     AND t.session_id = s.session_id
+			                     AND NOT (t.ingested_at < ? AND `+notPinned+`))`,
+			projectID, cutoff, cutoff).Scan(&counts.SessionScores); err != nil {
+			return counts, fmt.Errorf("count expiring session scores: %w", err)
+		}
 	}
 	// Raw follows the trace window unless it has one of its own (#6).
 	rawWindow := raw
@@ -214,14 +258,6 @@ type AffectedRun struct {
 	ID      string
 	Dataset string
 	Traces  int64
-}
-
-// UserDataPreview counts one user's parsed data: what an erasure request would
-// remove (spec 005 #7). It is the one preview every deletion of traces shares
-// (`tracesPreview`, spec 035 #3), asked about the traces filed under the id.
-func (s *Store) UserDataPreview(ctx context.Context, projectID, userID string) (DeleteCounts, []AffectedRun, error) {
-	return s.tracesPreview(ctx, projectID,
-		`SELECT id FROM traces WHERE project_id = ? AND user_id = ?`, projectID, userID)
 }
 
 // ProjectPreview counts everything a project holds: what deleting it will
@@ -615,10 +651,11 @@ func (r *ProjectRestore) apply(tx *sql.Tx) error {
 	return err
 }
 
-// UserDataErase removes one user's parsed data: the traces filed under the id,
-// their observations, payloads and scores (spec 005 #7). Raw bodies are
-// deliberately untouched, and `docs/retention.md` says so together with what
-// that means for an erasure request.
+// UserDataErase removes one chunk of a user's parsed data: the traces filed
+// under the id, their observations, payloads and scores (spec 005 #7), the
+// session-only scores of their sessions (spec 044 #7) and every version of the
+// dataset items cut from them (#9). It is step 3 of an erasure; the raw
+// batches are the steps around it (`EraseUserData`).
 //
 // One chunk per job, like the sweeper: the caller repeats while `More` says
 // so, so a user with a year of traffic does not hold the writer for the
@@ -665,10 +702,13 @@ type UserDataErase struct {
 	// CompactionRequested is the stamp of the compaction this chunk asked
 	// for, zero when it deleted nothing (spec 044 #1, #11).
 	CompactionRequested int64
+	// IDs are the traces this chunk deleted: the erasure's tail scrubs the
+	// batches that arrived for them while it ran (spec 044 #4).
+	IDs []string
 }
 
 func (e *UserDataErase) apply(tx *sql.Tx) error {
-	e.Counts, e.CompactionRequested = DeleteCounts{}, 0
+	e.Counts, e.CompactionRequested, e.IDs = DeleteCounts{}, 0, nil
 	// The echo is the user id here, not a project name: it is the identity
 	// of what is being destroyed (spec 005 #8).
 	if e.Confirm != e.UserID {
@@ -702,15 +742,18 @@ func (e *UserDataErase) apply(tx *sql.Tx) error {
 	scanned := 0
 	for rows.Next() {
 		var (
-			id        string
-			timestamp int64
+			id string
+			// NULL for a trace no span has reached — one a score
+			// or an item names before its spans arrived. Trace
+			// deletion reads it the same way.
+			timestamp sql.NullInt64
 		)
 		if err := rows.Scan(&id, &timestamp); err != nil {
 			rows.Close()
 			return err
 		}
 		scanned++
-		hour := HourOf(timestamp)
+		hour := HourOf(timestamp.Int64)
 		if !seen[hour] {
 			if e.HourLimit > 0 && len(e.Hours) == e.HourLimit {
 				// The hour cap: a trace of a further hour is a later
@@ -748,12 +791,27 @@ func (e *UserDataErase) apply(tx *sql.Tx) error {
 	// rolled about once: measured on a 21k-trace user over 699 hours, 738
 	// rolls. The erased user's own summary is not recomputed: it goes
 	// outright, below.
+	//
+	// Before the traces go, what only they lead to: the sessions they
+	// carried and the items cut from them are found through the traces.
+	sessionScores, err := deleteSessionScores(tx, e.ProjectID, ids)
+	if err != nil {
+		return err
+	}
+	items, err := deleteSourcedItems(tx, e.ProjectID, ids, e.Now)
+	if err != nil {
+		return err
+	}
 	removal := &traceRemoval{projectID: e.ProjectID, ids: ids, hours: e.Hours,
 		now: e.Now, skipUser: e.UserID}
 	if e.Counts, err = removal.apply(tx); err != nil {
 		return err
 	}
+	e.Counts.SessionScores, e.Counts.DatasetItems = sessionScores, items
 	e.CompactionRequested = removal.compactionAt
+	for _, id := range ids {
+		e.IDs = append(e.IDs, id.(string))
+	}
 
 	// The per-user rollup goes outright, in this same request (spec 023
 	// #10): those rows are *about* the user, and a re-roll would recompute

@@ -278,6 +278,13 @@ A score is counted in the hour of the **trace** it names, so the curve lines up
 with the traffic. Scores that name only a session, and `text` scores, are not on
 a timeline at all. See [quality.md](quality.md).
 
+A score that names only a session goes **with its session**: the retention
+sweep deletes it once it is older than the project's trace window and no trace
+carries its session any more, and erasing a user's data deletes the
+session-only scores of every session the user's traces belonged to — a session
+another user's traces share included ([retention.md](retention.md#deleting-a-users-data)).
+A score that names a trace follows the trace, whatever session it also names.
+
 ## From an annotation queue
 
 A review programme — a named list of traces and the score names a reviewer

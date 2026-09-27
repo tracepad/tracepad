@@ -50,6 +50,11 @@ type IngestBatch struct {
 
 // RawBatch is the request body as received, kept verbatim for replay.
 type RawBatch struct {
+	// ReceivedAt is zero on the way in from ingest: the writer stamps the
+	// batch with the reading it gives the batch's traces (`IngestedAt`), so
+	// a trace's spans arrive in batches inside its own `[ingested_at,
+	// updated_at]` — the window an erasure reads the archive by (spec 044
+	// #3). A caller seeding an archive sets it.
 	ReceivedAt int64
 	Dialect    string
 	// ContentType is the encoding the body is in — the media type the
@@ -94,11 +99,15 @@ func (b *IngestBatch) apply(tx *sql.Tx) error {
 		// column, so one encoding keeps replay unambiguous, and an OTLP
 		// body small enough for the threshold to matter is not a body
 		// worth a special case.
+		received := b.Raw.ReceivedAt
+		if received == 0 {
+			received = arrived
+		}
 		var rawID int64
 		if err := tx.QueryRow(
 			`INSERT INTO raw_batches (project_id, received_at, dialect, content_type, content_encoding, body)
 			 VALUES (?, ?, ?, ?, ?, ?) RETURNING id`,
-			b.ProjectID, b.Raw.ReceivedAt, b.Raw.Dialect,
+			b.ProjectID, received, b.Raw.Dialect,
 			nullString(b.Raw.ContentType), nullString(b.Raw.ContentEncoding),
 			zstdEncoder.EncodeAll(b.Raw.Body, nil),
 		).Scan(&rawID); err != nil {

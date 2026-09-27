@@ -347,6 +347,21 @@ func (sw *Sweeper) sweepProject(ctx context.Context, project *Project, at time.T
 		return removed, err
 	}
 
+	// After the traces: a session-only score goes once no trace carries its
+	// session, and the chunks above may just have taken the last one (spec
+	// 044 #8). A purge takes the scores with the project row.
+	if !purging {
+		scores, err := sw.sweepSessionScores(ctx, project.ID, now)
+		if scores > 0 {
+			removed = true
+			logger().Info("swept session scores past the trace window",
+				"project", project.Name, "scores", scores)
+		}
+		if err != nil {
+			return removed, err
+		}
+	}
+
 	raw, rawDrained, err := sw.sweepRawBatches(ctx, project.ID, now, purging)
 	if raw > 0 {
 		removed = true
@@ -398,6 +413,23 @@ func (sw *Sweeper) sweepTraces(ctx context.Context, projectID string, now int64,
 		}
 	}
 	return total, false, nil
+}
+
+// sweepSessionScores removes a project's expired session-only scores chunk by
+// chunk, within the pass's bound.
+func (sw *Sweeper) sweepSessionScores(ctx context.Context, projectID string, now int64) (int64, error) {
+	var total int64
+	for range sw.maxChunks {
+		chunk := &sessionScoreSweep{ProjectID: projectID, Now: now, Limit: sw.chunk}
+		if err := sw.writer.Submit(ctx, chunk); err != nil {
+			return total, err
+		}
+		total += chunk.Deleted
+		if chunk.Deleted < int64(sw.chunk) {
+			break
+		}
+	}
+	return total, nil
 }
 
 func (sw *Sweeper) sweepRawBatches(ctx context.Context, projectID string, now int64, purge bool) (int64, bool, error) {
@@ -714,6 +746,43 @@ func (r *rawSweep) apply(tx *sql.Tx) error {
 		return fmt.Errorf("sweep raw batches: %w", err)
 	}
 	return nil
+}
+
+// expiredSessionScores selects the session-only scores the trace window has
+// passed (spec 044 #8): received before the cutoff — `created_at`, the
+// server's clock, the one retention counts by (spec 005 #1) — and whose
+// session no trace of the project carries. The first condition bounds a score
+// whose session never arrived; the second is spec 003 #4's "alongside their
+// targets" for a session, and keeps the verdicts of a session a pinned run
+// keeps alive. Served by `idx_scores_session_only` and `idx_traces_session`.
+const expiredSessionScores = `SELECT s.rowid FROM scores s
+	WHERE s.project_id = ? AND s.trace_id IS NULL AND s.created_at < ?
+	  AND NOT EXISTS (SELECT 1 FROM traces t WHERE t.project_id = s.project_id AND t.session_id = s.session_id)`
+
+// sessionScoreSweep deletes one chunk of a project's expired session-only
+// scores. They sit in no rollup (spec 025: a score that names no trace has no
+// hour to be counted in), so nothing is re-rolled.
+type sessionScoreSweep struct {
+	ProjectID string
+	Now       int64
+	Limit     int
+
+	Deleted int64
+}
+
+func (s *sessionScoreSweep) apply(tx *sql.Tx) error {
+	s.Deleted = 0
+	cutoff, sweeping, err := sweepCutoff(tx, s.ProjectID, s.Now, false)
+	if err != nil || !sweeping {
+		return err
+	}
+	result, err := tx.Exec(`DELETE FROM scores WHERE rowid IN (`+expiredSessionScores+` LIMIT ?)`,
+		s.ProjectID, cutoff, s.Limit)
+	if err != nil {
+		return fmt.Errorf("sweep session scores: %w", err)
+	}
+	s.Deleted, err = result.RowsAffected()
+	return err
 }
 
 // payloadSweep removes the orphans the read pass found.

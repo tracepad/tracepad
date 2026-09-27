@@ -149,7 +149,9 @@ trace or a raw batch points at it, and goes with the last one:
 - the retention sweep deletes a trace's refs with the trace, and a raw
   batch's with the batch, each in the same transaction;
 - erasing a user's data and deleting traces delete the refs of the traces they
-  take;
+  take; an erasure also rewrites the raw batches that held the user's spans,
+  and a rewritten batch keeps refs only to the bodies its new body still
+  points at;
 - purging a deleted project deletes every ref it still has.
 
 Each of those collects the bodies nothing points at any more, in the same
@@ -165,9 +167,11 @@ project's media costs:
 ```
 
 Raw bodies outlive traces by design (see [retention.md](retention.md#what-outlives-what)),
-so a picture an erased or deleted trace pointed at stays while a raw batch
-still points at it, and goes when that batch expires — the same archive
-position the rest of the raw body takes.
+so a picture a deleted trace pointed at stays while a raw batch still points
+at it, and goes when that batch expires — the same archive position the rest
+of the raw body takes. An erasure is the exception: it takes the user's spans
+out of the raw batches too, so a picture only their spans pointed at goes in
+the same request.
 
 ## The Langfuse SDK's media channel
 

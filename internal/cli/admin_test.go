@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -409,7 +410,8 @@ func TestProjectDeleteNeedsTheAdminToken(t *testing.T) {
 }
 
 // TestUsersRemoveData is the erasure command: the echo is the user id, and the
-// output says what raw bodies do rather than leaving the operator to assume.
+// output says what happened to the raw archive rather than leaving the
+// operator to assume.
 func TestUsersRemoveData(t *testing.T) {
 	h := newAdminCLI(t)
 	h.seed(t, &model.Trace{ID: traceHex(1), UserID: "u1"},
@@ -423,7 +425,10 @@ func TestUsersRemoveData(t *testing.T) {
 	// the preview has to name the run that will lose it (spec 014 #14).
 	if err := h.writer.Submit(t.Context(), &store.DatasetItemsWrite{
 		ProjectID: h.projectID(t), Dataset: "golden", Now: 1,
-		Items: []*store.DatasetItemInput{{ID: strings.Repeat("d", 32), Input: []byte(`{}`)}},
+		Items: []*store.DatasetItemInput{{ID: strings.Repeat("d", 32), Input: []byte(`{}`)},
+			// Cut from the user's trace: the erasure takes it, and the
+			// preview names the dataset (spec 044 #9).
+			{ID: strings.Repeat("c", 32), Input: []byte(`{}`), SourceTraceID: traceHex(1)}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -448,8 +453,14 @@ func TestUsersRemoveData(t *testing.T) {
 	if !strings.Contains(out.stderr, runID) || !strings.Contains(out.stderr, "golden") {
 		t.Errorf("stderr = %q, want the run that loses a trace named before the echo", out.stderr)
 	}
-	if !strings.Contains(out.stdout, "raw OTLP bodies are not erased") {
-		t.Errorf("stdout = %q, want the raw archive position stated", out.stdout)
+	if !strings.Contains(out.stderr, "golden loses 1 items") {
+		t.Errorf("stderr = %q, want the dataset that loses an item named before the echo", out.stderr)
+	}
+	if !strings.Contains(out.stdout, "removed 0 spans from 0 raw batches, 0 deleted") {
+		t.Errorf("stdout = %q, want what the raw archive lost stated", out.stdout)
+	}
+	if !regexp.MustCompile(`dataset_items\s+1`).MatchString(out.stdout) {
+		t.Errorf("stdout = %q, want the dataset item counted", out.stdout)
 	}
 	// And when the bytes the rows left in the file are overwritten (spec 044
 	// #11).

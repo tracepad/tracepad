@@ -1,14 +1,15 @@
 <script lang="ts">
 	import { api, type DryRun, type Project } from '$lib/api/client.svelte';
+	import { erased } from '$lib/erasure';
 	import ConfirmCard from '../ConfirmCard.svelte';
 	import Card from './Card.svelte';
 	import ViewerNote from './ViewerNote.svelte';
 
-	// Erasing one end user's data (spec 005 #7): the traces filed under that
-	// user id, their observations, payloads and scores. Raw OTLP bodies are
-	// deliberately untouched — they are an archive on their own schedule, and
-	// the server's own note says so in the preview rather than this screen
-	// claiming otherwise.
+	// Erasing one end user's data (spec 005 #7, spec 044 #1): the traces filed
+	// under that user id with what hangs off them, the scores on their
+	// sessions, the dataset items cut from them, and their spans inside the
+	// raw archive. What the erasure cannot reach is the server's to say, in
+	// the preview's note, rather than this screen's.
 	//
 	// The echo here is the user id, because the user is what is being erased.
 
@@ -20,8 +21,7 @@
 	async function erase(confirm?: string): Promise<DryRun | string> {
 		const answer = await api.eraseUserData(current.id, target, confirm);
 		if ('dry_run' in answer && answer.dry_run) return answer as DryRun;
-		const deleted = (answer as { deleted: Record<string, number> }).deleted;
-		return `Erased ${deleted.traces ?? 0} traces belonging to ${target}.`;
+		return erased(target, (answer as { deleted: Record<string, number> }).deleted);
 	}
 </script>
 
@@ -36,7 +36,8 @@
 		<ConfirmCard
 			title="Erase everything about one user"
 			description="Answers a deletion request: every trace filed under this user id, with its
-				observations, payloads and scores."
+				observations, payloads and scores, the scores on its sessions, the dataset items cut from
+				it, and its spans in the raw archive."
 			echoLabel="user id"
 			previewLabel="Show what would go"
 			executeLabel="Erase this user's data"

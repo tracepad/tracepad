@@ -107,6 +107,12 @@
 	 * the operator sees the hole before it opens.
 	 */
 	const runs = $derived(showing?.affected_runs ?? []);
+	/**
+	 * The datasets that would lose items cut from the erased traces, history
+	 * and all (spec 044 #9): the one deletion of dataset items the API makes
+	 * outside a dataset's own delete, so it is named beside the runs.
+	 */
+	const datasets = $derived(showing?.affected_datasets ?? []);
 
 	$effect(() => {
 		if (immediate && ready && showing === null && !busy && !done && !failure) {
@@ -205,6 +211,15 @@
 					{#each runs as run, index (run.id)}{index > 0 ? ', ' : ' '}<span
 							class="whitespace-nowrap">{run.dataset} <code class="font-mono">{run.id.slice(0, 8)}</code
 							> ({count(run.traces)})</span
+						>{/each}.
+				</p>
+			{/if}
+			{#if datasets.length > 0}
+				<p class="text-warn mt-1.5 text-sm">
+					{datasets.length === 1 ? 'A dataset loses' : 'Datasets lose'} the items cut from these, every
+					version:
+					{#each datasets as affected, index (affected.dataset)}{index > 0 ? ', ' : ' '}<span
+							class="whitespace-nowrap">{affected.dataset} ({count(affected.items)})</span
 						>{/each}.
 				</p>
 			{/if}

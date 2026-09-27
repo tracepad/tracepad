@@ -43,6 +43,15 @@ type preview struct {
 	// deletion answers with a `runs` count, and this struct is what reads
 	// every preview.
 	Runs []affectedRun `json:"affected_runs"`
+	// Datasets are the datasets an erasure takes items from (spec 044 #9),
+	// in the shape of the runs.
+	Datasets []affectedDataset `json:"affected_datasets"`
+	// Raw is an erasure's view of the raw archive (spec 044 #3, #5): the
+	// batches it reads, and those nothing can attribute any more.
+	Raw *struct {
+		BatchesToScan         int64 `json:"batches_to_scan"`
+		UnattributableBatches int64 `json:"unattributable_batches"`
+	} `json:"raw"`
 	// Matched is the bulk trace deletion's exact count of what its filter
 	// matches (spec 035 #2): the same number as `would_delete.traces`,
 	// named because it is the one the operator counted on screen.
@@ -68,6 +77,12 @@ type mintedKey struct {
 	// LastUsedAt is null until the key is used, which decodes to the
 	// empty string.
 	LastUsedAt string `json:"last_used_at"`
+}
+
+// affectedDataset is one dataset that loses items to an erasure.
+type affectedDataset struct {
+	Dataset string `json:"dataset"`
+	Items   int64  `json:"items"`
 }
 
 // affectedRun is one run that loses traces to an erasure.
@@ -699,14 +714,18 @@ func (r *run) usersRemoveData(ctx context.Context, rest []string) error {
 	}
 	fmt.Fprintf(r.opt.Stdout, "erased the data of %s\n", termsafe.String(result.UserID))
 	t := newTable(r.opt.Stdout)
-	for _, kind := range []string{"traces", "observations", "scores", "payloads"} {
+	for _, kind := range []string{"traces", "observations", "scores", "session_scores", "payloads",
+		"annotation_items", "dataset_items", "media"} {
 		if count, reported := result.Deleted[kind]; reported {
 			t.row("  "+kind, strconv.FormatInt(count, 10))
 		}
 	}
 	t.flush()
-	fmt.Fprintln(r.opt.Stdout,
-		"\nraw OTLP bodies are not erased; they expire on the raw retention window")
+	// The user's spans in the raw archive (spec 044 #2): every batch that
+	// held one was rewritten without it, or deleted.
+	rewritten, deleted := result.Deleted["raw_batches_rewritten"], result.Deleted["raw_batches_deleted"]
+	fmt.Fprintf(r.opt.Stdout, "\nremoved %d spans from %d raw batches, %d deleted\n",
+		result.Deleted["raw_spans"], rewritten+deleted, deleted)
 	// What the rows left in the file is overwritten by the next pass, and
 	// the one copy of the database an erasure does not rewrite goes on its
 	// own date (spec 044 #11, #12).
@@ -817,6 +836,18 @@ func (r *run) renderPreview(dry preview, what string) {
 	for _, affected := range dry.Runs {
 		fmt.Fprintf(out, "  %-14s %s of %s loses %d\n",
 			"run", termsafe.String(affected.ID), termsafe.String(affected.Dataset), affected.Traces)
+	}
+	// And the history of a dataset item cut from an erased trace, which
+	// nothing else in the API deletes (spec 044 #9).
+	for _, affected := range dry.Datasets {
+		fmt.Fprintf(out, "  %-14s %s loses %d items\n",
+			"dataset", termsafe.String(affected.Dataset), affected.Items)
+	}
+	// What the scrub cannot reach, said before the operator confirms
+	// (spec 044 #5).
+	if dry.Raw != nil && dry.Raw.UnattributableBatches > 0 {
+		fmt.Fprintf(out, "  %-14s %d raw batches older than the trace window\n",
+			"unattributable", dry.Raw.UnattributableBatches)
 	}
 	// What an account deletion leaves behind, and whose rotation is now a
 	// decision for whoever is deleting it (spec 045 #10).

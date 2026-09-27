@@ -47,6 +47,25 @@ describe('the confirm card', () => {
 		expect(screen.getByText(/Reaching back to/)).toBeInTheDocument();
 	});
 
+	it('names the datasets an erasure takes items from, beside the runs', async () => {
+		const { user } = mount({
+			preview: async () => ({
+				...PLAN,
+				would_delete: { traces: 2, dataset_items: 3 },
+				affected_datasets: [
+					{ dataset: 'golden', items: 2 },
+					{ dataset: 'edge-cases', items: 1 }
+				]
+			})
+		});
+
+		await user.click(screen.getByRole('button', { name: 'Preview' }));
+
+		expect(await screen.findByText(/Datasets lose the items cut from these/)).toBeInTheDocument();
+		expect(screen.getByText('golden (2)')).toBeInTheDocument();
+		expect(screen.getByText('edge-cases (1)')).toBeInTheDocument();
+	});
+
 	it('keeps the button shut until the echo is exact', async () => {
 		const { execute, user } = mount();
 		await user.click(screen.getByRole('button', { name: 'Preview' }));

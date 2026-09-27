@@ -31,6 +31,9 @@ type RawBatchRow struct {
 	// SizeBytes is the *decoded* length — what a fetch of the body returns —
 	// and not the zstd length the row occupies.
 	SizeBytes int64
+	// ScrubbedAt is when an erasure rewrote the batch without the erased
+	// spans (spec 044 #2); nil is a batch as received.
+	ScrubbedAt *int64
 }
 
 // RawCursor is the keyset of the last row of a page. `id` is the tiebreak, and
@@ -103,7 +106,7 @@ func rawQuery(projectID string, filter RawFilter) (string, []any) {
 		args = append(args, filter.After.ReceivedAt, filter.After.ID)
 	}
 	args = append(args, filter.Limit)
-	return `SELECT id, received_at, dialect, content_type, content_encoding,
+	return `SELECT id, received_at, dialect, content_type, content_encoding, scrubbed_at,
 	               substr(body, 1, ` + fmt.Sprint(zstdHeaderPrefix) + `)
 	 FROM raw_batches WHERE ` + strings.Join(where, " AND ") + `
 	 ORDER BY received_at ` + order + `, id ` + order + ` LIMIT ?`, args
@@ -124,12 +127,14 @@ func (s *Store) RawBatches(ctx context.Context, projectID string, filter RawFilt
 		var (
 			row                          RawBatchRow
 			dialect, contentType, coding sql.NullString
+			scrubbed                     sql.NullInt64
 			prefix                       []byte
 		)
 		if err := rows.Scan(&row.ID, &row.ReceivedAt, &dialect, &contentType, &coding,
-			&prefix); err != nil {
+			&scrubbed, &prefix); err != nil {
 			return nil, err
 		}
+		row.ScrubbedAt = nullableTime(scrubbed)
 		row.Dialect = dialect.String
 		row.ContentType = rawContentType(contentType)
 		row.ContentEncoding = coding.String
@@ -182,6 +187,9 @@ type RawBody struct {
 	ReceivedAt  int64
 	Dialect     string
 	ContentType string
+	// ScrubbedAt is when an erasure rewrote the batch (spec 044 #2); nil is
+	// a batch as received.
+	ScrubbedAt *int64
 	// Body is the decoded body: gzip was removed at ingest and zstd is
 	// storage, so this is what the client actually posted.
 	Body []byte
@@ -194,12 +202,13 @@ func (s *Store) RawBatchBody(ctx context.Context, projectID string, id int64) (*
 	var (
 		out                  RawBody
 		dialect, contentType sql.NullString
+		scrubbed             sql.NullInt64
 		stored               []byte
 	)
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, received_at, dialect, content_type, body
+		`SELECT id, received_at, dialect, content_type, scrubbed_at, body
 		   FROM raw_batches WHERE project_id = ? AND id = ?`, projectID, id).
-		Scan(&out.ID, &out.ReceivedAt, &dialect, &contentType, &stored)
+		Scan(&out.ID, &out.ReceivedAt, &dialect, &contentType, &scrubbed, &stored)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -208,6 +217,7 @@ func (s *Store) RawBatchBody(ctx context.Context, projectID string, id int64) (*
 	}
 	out.Dialect = dialect.String
 	out.ContentType = rawContentType(contentType)
+	out.ScrubbedAt = nullableTime(scrubbed)
 	body, err := Decompress(CompressionZstd, stored)
 	if err != nil {
 		return nil, fmt.Errorf("read raw batch %d: %w", id, err)
@@ -280,6 +290,15 @@ func (s *Store) RawSummary(ctx context.Context, projectID string) (RawSummary, e
 		return out, fmt.Errorf("count traces before the raw window: %w", err)
 	}
 	return out, nil
+}
+
+// nullableTime is a nullable stamp as a pointer, nil for NULL.
+func nullableTime(v sql.NullInt64) *int64 {
+	if !v.Valid {
+		return nil
+	}
+	at := v.Int64
+	return &at
 }
 
 // rawContentType resolves a stored column into the media type the body is in.

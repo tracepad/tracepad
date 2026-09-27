@@ -21,6 +21,7 @@
 	import { rememberedRange, rememberRange } from '$lib/range.svelte';
 	import UserSessionsTab from '$lib/components/users/UserSessionsTab.svelte';
 	import UserTracesTab from '$lib/components/users/UserTracesTab.svelte';
+	import { erased } from '$lib/erasure';
 	import { cost, count, duration, middleEllipsis, timestamp } from '$lib/format';
 	import { href, project } from '$lib/project.svelte';
 
@@ -168,8 +169,7 @@
 		if (!current) throw new ApiError(0, 'there is no project on screen to erase from');
 		const answer = await api.eraseUserData(current, id, confirm);
 		if ('dry_run' in answer && answer.dry_run) return answer as DryRun;
-		const deleted = (answer as { deleted: Record<string, number> }).deleted;
-		return `Erased ${deleted.traces ?? 0} traces belonging to ${id}.`;
+		return erased(id, (answer as { deleted: Record<string, number> }).deleted);
 	}
 
 	const tabClass = (active: boolean) =>

@@ -437,6 +437,20 @@ Adds each observation's `input`, `output` and `metadata`. Without it, a trace
 of hundreds of observations still fits the response budget; with it, you get
 the shape of every payload in one round trip.
 
+## Erasing a user's data
+
+`DELETE /api/v1/projects/{id}/users/{user_id}/data` — an editor's route, a dry
+run until `?confirm=<user id>`. The dry run's `would_delete` counts `traces`,
+`observations`, `scores`, `session_scores`, `annotation_items`,
+`dataset_items`, `media` and `media_bytes`, and beside it come
+`affected_runs`, `affected_datasets` (`[{dataset, items}]`), `raw`
+(`{batches_to_scan, unattributable_batches}`) and, while one exists,
+`pre_migration_backup`. The confirmed answer's `deleted` adds `payloads`,
+`raw_spans`, `raw_batches_rewritten` and `raw_batches_deleted`, with
+`user_id`, `compaction` (`{requested_at, expected_by}`) and the backup.
+The shapes in full, and what each count means, are in
+[admin.md](admin.md#erasing-a-users-data).
+
 ## Deleting traces
 
 ```sh
@@ -561,10 +575,10 @@ curl … "http://localhost:4318/api/v1/raw?limit=2&count=1"
   "batches": [
     {"id": 1, "received_at": "2026-09-01T00:00:00Z", "dialect": "langfuse",
      "content_type": "application/x-protobuf", "content_encoding": "gzip",
-     "size_bytes": 1274},
+     "size_bytes": 1274, "scrubbed_at": null},
     {"id": 2, "received_at": "2026-09-01T00:00:00.001Z", "dialect": "genai",
      "content_type": "application/json", "content_encoding": "",
-     "size_bytes": 3810}
+     "size_bytes": 3810, "scrubbed_at": "2026-09-26T10:02:11Z"}
   ],
   "next_cursor": "MTc4ODIyMDgwMDAwMTAwMDAwMDoy",
   "prev_cursor": null,
@@ -592,7 +606,9 @@ returns; the row itself is compressed and smaller. `content_type` is what the
 body is in, and a batch stored before schema 0012 reads as
 `application/x-protobuf`, which is the only thing it can be. `dialect` is which
 attribute vocabulary the mapper recognised, and is empty when it claimed
-nothing.
+nothing. `scrubbed_at` is when a user-data erasure rewrote the batch without
+the erased user's spans, and `null` for a batch as received
+([retention.md](retention.md#deleting-a-users-data)).
 
 A cursor and a `since` that contradict each other are a `400` rather than a
 reconciliation: the cursor says where the page starts and so does the window,
@@ -613,6 +629,7 @@ carries:
 | `Content-Type` | The type it was received in, which is what a replay posts it under |
 | `X-Tracepad-Received-At` | RFC 3339 |
 | `X-Tracepad-Dialect` | Absent when the mapper claimed nothing |
+| `X-Tracepad-Scrubbed-At` | RFC 3339; present only on a batch an erasure rewrote — the batch as received minus the erased user's spans |
 
 Like `/observations/{id}/io`, this endpoint is **exempt from the response
 budget**: a cut body is not a smaller batch, it is a broken one.

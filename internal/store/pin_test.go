@@ -140,7 +140,8 @@ func TestUserErasureOverridesThePin(t *testing.T) {
 	f.arrive(t, f.project.ID, hexTrace(1), daysAgo(1), func(tr *modelTrace) { tr.RunID = live; tr.ItemID = itemID(1) })
 	f.arrive(t, f.project.ID, hexTrace(2), daysAgo(1), func(tr *modelTrace) { tr.RunID = live; tr.UserID = "someone-else" })
 
-	counts, runs, err := f.store.UserDataPreview(t.Context(), f.project.ID, "u1")
+	preview, err := f.store.UserDataPreview(t.Context(), f.project.ID, "u1", 0)
+	counts, runs := preview.Counts, preview.Runs
 	if err != nil {
 		t.Fatal(err)
 	}

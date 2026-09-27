@@ -1,0 +1,718 @@
+package store
+
+import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+
+	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
+	tracepb "go.opentelemetry.io/proto/otlp/trace/v1"
+
+	"github.com/tracepad/tracepad/internal/mapping"
+	"github.com/tracepad/tracepad/internal/model"
+)
+
+// An erasure reaches every copy the store holds (spec 044): the raw scrub
+// (#2–#5), the session-only scores (#7, #8) and the dataset items (#9).
+
+// newErasureFixture is a sweep fixture whose migrations were applied long
+// before any trace it writes: the stamps are the current rule's, and a test
+// about a legacy stamp moves the one migration it is about.
+func newErasureFixture(t *testing.T) *sweepFixture {
+	t.Helper()
+	f := newSweepFixture(t)
+	if _, err := f.store.db.Exec(
+		`UPDATE schema_migrations SET applied_at = '2000-01-01T00:00:00.000Z'`); err != nil {
+		t.Fatal(err)
+	}
+	return f
+}
+
+// migratedAt moves when one migration was applied, by the suffix of its file.
+func (f *sweepFixture) migratedAt(t *testing.T, suffix string, at int64) {
+	t.Helper()
+	stamp := time.Unix(0, at).UTC().Format("2006-01-02T15:04:05.000Z")
+	result, err := f.store.db.Exec(`UPDATE schema_migrations SET applied_at = ? WHERE filename LIKE ?`,
+		stamp, "%"+suffix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n, _ := result.RowsAffected(); n != 1 {
+		t.Fatalf("moved %d migrations named *%s, want one", n, suffix)
+	}
+}
+
+// otlpSpan is one span of a trace, filed under a user and a session, carrying
+// a text and, optionally, a picture as a data URL.
+func otlpSpan(t *testing.T, trace, span int, user, session, text string, picture []byte) *tracepb.Span {
+	t.Helper()
+	traceID, _ := hex.DecodeString(hexTrace(trace))
+	spanID, _ := hex.DecodeString(hexSpan(trace*100 + span))
+	attr := func(key, value string) *commonpb.KeyValue {
+		return &commonpb.KeyValue{Key: key, Value: &commonpb.AnyValue{
+			Value: &commonpb.AnyValue_StringValue{StringValue: value}}}
+	}
+	attrs := []*commonpb.KeyValue{attr("user.id", user), attr("langfuse.observation.input", text)}
+	if session != "" {
+		attrs = append(attrs, attr("session.id", session))
+	}
+	if picture != nil {
+		attrs = append(attrs, attr("picture", "data:image/png;base64,"+b64(picture)))
+	}
+	return &tracepb.Span{TraceId: traceID, SpanId: spanID, Name: fmt.Sprintf("span-%d-%d", trace, span),
+		StartTimeUnixNano: 1_000_000_000, EndTimeUnixNano: 2_000_000_000, Attributes: attrs}
+}
+
+// export wraps spans in one ResourceSpans per group.
+func export(groups ...[]*tracepb.Span) []*tracepb.ResourceSpans {
+	var out []*tracepb.ResourceSpans
+	for _, spans := range groups {
+		out = append(out, &tracepb.ResourceSpans{ScopeSpans: []*tracepb.ScopeSpans{{Spans: spans}}})
+	}
+	return out
+}
+
+// ingestOTLP writes an export the way the OTLP handler does — media factored
+// out, mapped, the body archived — and answers the raw batch's id.
+func (f *sweepFixture) ingestOTLP(t *testing.T, resourceSpans []*tracepb.ResourceSpans, asJSON bool, at int64) int64 {
+	t.Helper()
+	var (
+		body []byte
+		err  error
+	)
+	contentType := RawContentTypeProtobuf
+	if asJSON {
+		contentType = mapping.ContentTypeJSON
+		body, err = mapping.EncodeExportRequestJSON(resourceSpans)
+	} else {
+		body, err = mapping.EncodeExportRequest(resourceSpans)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := mapping.DecodeExportBody(body, asJSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+	media := mapping.ExtractMedia(decoded.ResourceSpans, mapping.MediaOptions{})
+	result := mapping.Map(decoded.ResourceSpans)
+	archived := body
+	if media.Any() {
+		if archived, err = decoded.Encode(media.Rewrites); err != nil {
+			t.Fatal(err)
+		}
+	}
+	batch := &IngestBatch{ProjectID: f.project.ID, IngestedAt: at,
+		Traces: result.Traces, Observations: result.Observations,
+		Raw:       &RawBatch{ContentType: contentType, Body: archived},
+		RawMedia:  media.SHAs(),
+		MediaRefs: media.Refs,
+	}
+	for _, b := range media.Bodies {
+		batch.Media = append(batch.Media, *b)
+	}
+	if err := f.writer.Submit(t.Context(), batch); err != nil {
+		t.Fatal(err)
+	}
+	var id int64
+	if err := f.store.db.QueryRow(`SELECT MAX(id) FROM raw_batches`).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+// rawSpans lists the spans a raw batch holds, by name; nil for a batch that is
+// gone.
+func (f *sweepFixture) rawSpans(t *testing.T, id int64) []string {
+	t.Helper()
+	body, err := f.store.RawBatchBody(t.Context(), f.project.ID, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if body == nil {
+		return nil
+	}
+	decoded, err := mapping.DecodeExportBody(body.Body, body.ContentType == mapping.ContentTypeJSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := []string{}
+	for _, rs := range decoded.ResourceSpans {
+		for _, ss := range rs.ScopeSpans {
+			for _, span := range ss.Spans {
+				names = append(names, span.Name)
+			}
+		}
+	}
+	return names
+}
+
+func (f *sweepFixture) erase(t *testing.T, user string, opts ...func(*UserErasure)) ErasureResult {
+	t.Helper()
+	e := UserErasure{ProjectID: f.project.ID, UserID: user, Confirm: user, Chunk: 500, ChunkHours: 1}
+	for _, opt := range opts {
+		opt(&e)
+	}
+	result, err := f.store.EraseUserData(t.Context(), f.writer, e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return result
+}
+
+func b64(body []byte) string { return base64.StdEncoding.EncodeToString(body) }
+
+// The scrub (#2), in both encodings: a batch mixing two users keeps exactly
+// the other user's spans and is marked; one holding only the erased user's
+// is deleted; one holding none is untouched and unmarked; the pictures only
+// the erased spans pointed at are collected, the others stay, and the
+// batch's refs are what its new body references.
+func TestErasureScrubsTheRawBatches(t *testing.T) {
+	for _, asJSON := range []bool{false, true} {
+		t.Run(map[bool]string{false: "protobuf", true: "json"}[asJSON], func(t *testing.T) {
+			f := newErasureFixture(t)
+			theirs, ours := mediaBody(1, 5000).Body, mediaBody(2, 5000).Body
+			at := daysAgo(1)
+			mixed := f.ingestOTLP(t, export(
+				[]*tracepb.Span{
+					otlpSpan(t, 1, 1, "user-a", "", "marker-a-one", theirs),
+					otlpSpan(t, 2, 1, "user-b", "", "marker-b-one", ours),
+				},
+				[]*tracepb.Span{otlpSpan(t, 3, 1, "user-b", "", "marker-b-two", nil)},
+			), asJSON, at)
+			onlyA := f.ingestOTLP(t, export(
+				[]*tracepb.Span{otlpSpan(t, 1, 2, "user-a", "", "marker-a-two", nil)}), asJSON, at+1)
+			onlyB := f.ingestOTLP(t, export(
+				[]*tracepb.Span{otlpSpan(t, 2, 2, "user-b", "", "marker-b-three", nil)}), asJSON, at+2)
+
+			preview, err := f.store.UserDataPreview(t.Context(), f.project.ID, "user-a", sweepNow.UnixNano())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if preview.Raw.BatchesToScan != 2 {
+				t.Errorf("batches to scan = %d, want the two inside the trace's window", preview.Raw.BatchesToScan)
+			}
+
+			result := f.erase(t, "user-a")
+			if c := result.Counts; c.RawSpans != 2 || c.RawBatchesRewritten != 1 || c.RawBatchesDeleted != 1 {
+				t.Errorf("raw counts = %d spans, %d rewritten, %d deleted; want 2, 1, 1",
+					c.RawSpans, c.RawBatchesRewritten, c.RawBatchesDeleted)
+			}
+			if result.Compaction == 0 {
+				t.Error("the erasure asked for no compaction")
+			}
+			if got := f.rawSpans(t, mixed); !slices.Equal(got, []string{"span-2-1", "span-3-1"}) {
+				t.Errorf("the mixed batch holds %v, want the other user's two spans", got)
+			}
+			if got := f.rawSpans(t, onlyA); got != nil {
+				t.Errorf("the batch holding only the erased user's span is still there: %v", got)
+			}
+			if got := f.rawSpans(t, onlyB); !slices.Equal(got, []string{"span-2-2"}) {
+				t.Errorf("the other user's batch holds %v", got)
+			}
+			rows, err := f.store.RawBatches(t.Context(), f.project.ID, RawFilter{Limit: 10})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, row := range rows {
+				if (row.ScrubbedAt != nil) != (row.ID == mixed) {
+					t.Errorf("batch %d scrubbed_at = %v; only the rewritten one is marked", row.ID, row.ScrubbedAt)
+				}
+			}
+			if body, _ := f.store.RawBatchBody(t.Context(), f.project.ID, mixed); body == nil || body.ScrubbedAt == nil {
+				t.Error("the rewritten body does not say it was scrubbed")
+			}
+			for _, body := range f.rawBodies(t) {
+				if bytes.Contains(body, []byte("marker-a")) || bytes.Contains(body, []byte("user-a")) {
+					t.Errorf("a raw body still holds the erased user:\n%.300s", body)
+				}
+			}
+
+			// Media: the erased span's picture is collected, the kept
+			// span's stays, and the batch's refs are its new body's.
+			if n := f.count(t, `SELECT COUNT(*) FROM media WHERE sha256 = ?`, shaHex(theirs)); n != 0 {
+				t.Error("the picture only the erased user's span pointed at is still stored")
+			}
+			if n := f.count(t, `SELECT COUNT(*) FROM media WHERE sha256 = ?`, shaHex(ours)); n != 1 {
+				t.Error("the picture a kept span points at went")
+			}
+			refs, err := queryColumn[string](f.store.db,
+				`SELECT sha256 FROM media_raw_refs WHERE raw_batch_id = ?`, mixed)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(refs) != 1 || refs[0] != shaHex(ours) {
+				t.Errorf("the rewritten batch's refs = %v, want only the kept span's picture", refs)
+			}
+			if n := f.count(t, `SELECT COUNT(*) FROM traces WHERE user_id = 'user-a'`); n != 0 {
+				t.Errorf("%d of the user's traces are left", n)
+			}
+		})
+	}
+}
+
+// rawBodies is every raw body the store holds, decoded.
+func (f *sweepFixture) rawBodies(t *testing.T) [][]byte {
+	t.Helper()
+	stored, err := queryColumn[[]byte](f.store.db, `SELECT body FROM raw_batches`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out [][]byte
+	for _, s := range stored {
+		body, err := Decompress(CompressionZstd, s.([]byte))
+		if err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, body)
+	}
+	return out
+}
+
+func shaHex(body []byte) string {
+	sum := sha256.Sum256(body)
+	return hex.EncodeToString(sum[:])
+}
+
+// A rewrite that fails deletes the batch whole and counts it: the spans must
+// not stay for want of an encoder (#2).
+func TestAFailedRewriteDeletesTheBatch(t *testing.T) {
+	f := newErasureFixture(t)
+	mixed := f.ingestOTLP(t, export([]*tracepb.Span{
+		otlpSpan(t, 1, 1, "user-a", "", "marker-a", nil),
+		otlpSpan(t, 2, 1, "user-b", "", "marker-b", nil),
+	}), false, daysAgo(1))
+	saved := scrubRewrite
+	scrubRewrite = func(*mapping.ExportBody, map[string]bool) ([]byte, int, error) {
+		return nil, 0, errors.New("no encoder")
+	}
+	t.Cleanup(func() { scrubRewrite = saved })
+
+	result := f.erase(t, "user-a")
+	if result.Counts.RawBatchesDeleted != 1 || result.Counts.RawBatchesRewritten != 0 {
+		t.Errorf("deleted %d, rewritten %d; want the failed batch deleted and counted",
+			result.Counts.RawBatchesDeleted, result.Counts.RawBatchesRewritten)
+	}
+	if got := f.rawSpans(t, mixed); got != nil {
+		t.Errorf("the batch whose rewrite failed is still there: %v", got)
+	}
+}
+
+// Two erasures scrubbing one batch at once: the one whose body was computed
+// before the other's rewrite landed is refused, re-reads, and the result
+// holds neither user's spans (#4).
+func TestConcurrentScrubsOfOneBatch(t *testing.T) {
+	f := newErasureFixture(t)
+	batch := f.ingestOTLP(t, export([]*tracepb.Span{
+		otlpSpan(t, 1, 1, "user-a", "", "marker-a", nil),
+		otlpSpan(t, 2, 1, "user-b", "", "marker-b", nil),
+		otlpSpan(t, 3, 1, "user-c", "", "marker-c", nil),
+	}), false, daysAgo(1))
+	a := map[string]bool{hexTrace(1): true}
+	c := map[string]bool{hexTrace(3): true}
+
+	// The first computes its body, then the second lands first.
+	early, err := f.store.planScrub(f.project.ID, batch, a, 0)
+	if err != nil || early == nil {
+		t.Fatalf("plan: %v, %v", early, err)
+	}
+	if _, err := f.store.scrubBatches(t.Context(), f.writer, f.project.ID, []int64{batch}, c, 0); err != nil {
+		t.Fatal(err)
+	}
+	err = f.writer.Submit(t.Context(), early.job)
+	var rejection *Rejection
+	if !errors.As(err, &rejection) || rejection.Kind != RejectConflict {
+		t.Fatalf("a body computed before the other rewrite was not refused: %v", err)
+	}
+	// Refused, it recomputes from what is there now.
+	tally, err := f.store.scrubBatches(t.Context(), f.writer, f.project.ID, []int64{batch}, a, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tally.rewritten != 1 || tally.spans != 1 {
+		t.Errorf("tally = %+v, want the batch rewritten once more, one span", tally)
+	}
+	if got := f.rawSpans(t, batch); !slices.Equal(got, []string{"span-2-1"}) {
+		t.Errorf("the batch holds %v, want only the one neither erasure took", got)
+	}
+}
+
+// The windows (#3): with one clock reading a batch 1 ns before the trace's
+// arrival is not read and one at it is; each legacy stamp opens the side it
+// cannot vouch for.
+func TestTheArrivalWindows(t *testing.T) {
+	f := newErasureFixture(t)
+	arrival := daysAgo(3)
+	f.ingestOTLP(t, export([]*tracepb.Span{otlpSpan(t, 1, 1, "user-a", "", "x", nil)}), false, arrival)
+	later := arrival + int64(time.Hour)
+	f.ingestOTLP(t, export([]*tracepb.Span{otlpSpan(t, 1, 2, "user-a", "", "y", nil)}), false, later)
+	seed := func(at int64) int64 {
+		seedRawBatch(t, f.store, f.project.ID, &RawBatch{ReceivedAt: at, Body: []byte("other")})
+		var id int64
+		if err := f.store.db.QueryRow(`SELECT MAX(id) FROM raw_batches`).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	before := seed(arrival - 1)
+	margin := seed(arrival - int64(60*time.Second))
+	outside := seed(arrival - int64(61*time.Second))
+	after := seed(later + 1)
+	ancient := seed(1)
+
+	candidates := func() []int64 {
+		t.Helper()
+		traces, err := f.store.userTraces(f.project.ID, "user-a")
+		if err != nil {
+			t.Fatal(err)
+		}
+		windows, err := f.store.userWindows(traces)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids, err := f.store.candidateBatches(f.project.ID, windows)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ids
+	}
+	has := func(ids []int64, id int64) bool { return slices.Contains(ids, id) }
+
+	now := candidates()
+	if len(now) != 2 || has(now, before) || has(now, after) {
+		t.Errorf("one clock: candidates %v, want the trace's two batches and nothing 1 ns outside", now)
+	}
+
+	// Arrived before the erasure migration: the batch stamp was the
+	// handler's, earlier by the queue wait.
+	f.migratedAt(t, migrationErasureSuffix, arrival+int64(time.Millisecond))
+	legacy := candidates()
+	if !has(legacy, before) || !has(legacy, margin) || has(legacy, outside) {
+		t.Errorf("legacy stamp: candidates %v, want the 60 s margin and not a nanosecond more", legacy)
+	}
+
+	// Arrived before 0009: `updated_at` said nothing, the window closes
+	// when 0009 was applied.
+	f.migratedAt(t, migrationUpdatedAt, later+int64(time.Millisecond))
+	if got := candidates(); !has(got, after) {
+		t.Errorf("before 0009: candidates %v, want the batch after updated_at", got)
+	}
+
+	// Arrived before 0005: `ingested_at` was the client's, the window
+	// opens at the oldest batch.
+	f.migratedAt(t, migrationIngestedAt, arrival+int64(time.Millisecond))
+	if got := candidates(); !has(got, ancient) {
+		t.Errorf("before 0005: candidates %v, want the project's oldest batch", got)
+	}
+}
+
+// Ingest stamps a batch with the reading its traces get (#3).
+func TestABatchIsStampedWithItsTracesArrival(t *testing.T) {
+	f := newErasureFixture(t)
+	id := f.ingestOTLP(t, export([]*tracepb.Span{otlpSpan(t, 1, 1, "u", "", "x", nil)}), false, 0)
+	var received, ingested int64
+	if err := f.store.db.QueryRow(`SELECT received_at FROM raw_batches WHERE id = ?`, id).Scan(&received); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.db.QueryRow(`SELECT ingested_at FROM traces`).Scan(&ingested); err != nil {
+		t.Fatal(err)
+	}
+	if received != ingested || received == 0 {
+		t.Errorf("received_at %d, ingested_at %d: want one reading", received, ingested)
+	}
+}
+
+// The order (#4): a request cut off after the raw phase or after the parsed
+// one is finished by repeating it, to the state an uninterrupted run leaves;
+// a batch that arrives while it runs is taken by the tail.
+func TestAnErasureCutOffIsFinishedByItsRepeat(t *testing.T) {
+	build := func(t *testing.T) *sweepFixture {
+		f := newErasureFixture(t)
+		for i := range 3 {
+			f.ingestOTLP(t, export([]*tracepb.Span{
+				otlpSpan(t, 1+i, 1, "user-a", "s-a", "marker-a", nil),
+				otlpSpan(t, 10+i, 1, "user-b", "s-b", "marker-b", nil),
+			}), i%2 == 1, daysAgo(3-i))
+		}
+		return f
+	}
+	state := func(t *testing.T, f *sweepFixture) string {
+		t.Helper()
+		ids, err := queryColumn[int64](f.store.db, `SELECT id FROM raw_batches ORDER BY id`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, id := range ids {
+			out = append(out, fmt.Sprint(id, f.rawSpans(t, id.(int64))))
+		}
+		return fmt.Sprint(out, f.count(t, `SELECT COUNT(*) FROM traces`),
+			f.count(t, `SELECT COUNT(*) FROM observations`))
+	}
+	whole := build(t)
+	whole.erase(t, "user-a")
+	want := state(t, whole)
+	for trace := 1; trace <= 3; trace++ {
+		if strings.Contains(want, fmt.Sprintf("span-%d-", trace)) {
+			t.Fatalf("an uninterrupted erasure left the user's spans in the archive: %s", want)
+		}
+	}
+
+	for _, step := range []int{2, 3} {
+		t.Run(fmt.Sprintf("cut off after step %d", step), func(t *testing.T) {
+			f := build(t)
+			cut := errors.New("the client hung up")
+			e := UserErasure{ProjectID: f.project.ID, UserID: "user-a", Confirm: "user-a", Chunk: 500, ChunkHours: 1,
+				after: func(at int) error {
+					if at == step {
+						return cut
+					}
+					return nil
+				}}
+			if _, err := f.store.EraseUserData(t.Context(), f.writer, e); !errors.Is(err, cut) {
+				t.Fatalf("the seam did not stop the request: %v", err)
+			}
+			f.erase(t, "user-a")
+			if got := state(t, f); got != want {
+				t.Errorf("after the repeat:\n%s\nwant\n%s", got, want)
+			}
+		})
+	}
+
+	t.Run("a batch arriving while it runs", func(t *testing.T) {
+		f := build(t)
+		var late int64
+		f.erase(t, "user-a", func(e *UserErasure) {
+			e.after = func(step int) error {
+				if step == 1 {
+					// A late span of a trace the request is erasing,
+					// after the traces were read.
+					late = f.ingestOTLP(t, export([]*tracepb.Span{
+						otlpSpan(t, 1, 9, "user-a", "s-a", "marker-a-late", nil),
+						otlpSpan(t, 10, 9, "user-b", "s-b", "marker-b-late", nil),
+					}), false, 0)
+				}
+				return nil
+			}
+		})
+		if got := f.rawSpans(t, late); !slices.Equal(got, []string{"span-10-9"}) {
+			t.Errorf("the batch that arrived during the erasure holds %v, want the other user's span", got)
+		}
+	})
+}
+
+// The session-only scores (#7): an erasure takes those of the user's
+// sessions, a session shared with another user included, and leaves other
+// sessions' and the other user's trace scores.
+func TestErasureTakesTheSessionScores(t *testing.T) {
+	f := newErasureFixture(t)
+	f.ingestOTLP(t, export([]*tracepb.Span{
+		otlpSpan(t, 1, 1, "user-a", "shared", "a", nil),
+		otlpSpan(t, 2, 1, "user-a", "a-only", "a", nil),
+		otlpSpan(t, 3, 1, "user-b", "shared", "b", nil),
+		otlpSpan(t, 4, 1, "user-b", "b-only", "b", nil),
+	}), false, daysAgo(1))
+	one := 1.0
+	scores := []*Score{
+		{ID: "on-shared", SessionID: "shared", Name: "q", DataType: "numeric", Value: &one, Comment: "verdict"},
+		{ID: "on-a-only", SessionID: "a-only", Name: "q", DataType: "numeric", Value: &one},
+		{ID: "on-b-only", SessionID: "b-only", Name: "q", DataType: "numeric", Value: &one},
+		{ID: "on-b-trace", TraceID: hexTrace(3), Name: "q", DataType: "numeric", Value: &one},
+		{ID: "on-a-trace-and-session", TraceID: hexTrace(1), SessionID: "b-only", Name: "q",
+			DataType: "numeric", Value: &one},
+	}
+	for _, s := range scores {
+		s.Timestamp = daysAgo(1)
+	}
+	if err := f.writer.Submit(t.Context(), &ScoreWrite{ProjectID: f.project.ID, Scores: scores}); err != nil {
+		t.Fatal(err)
+	}
+
+	preview, err := f.store.UserDataPreview(t.Context(), f.project.ID, "user-a", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.Counts.SessionScores != 2 {
+		t.Errorf("the dry run counts %d session scores, want 2", preview.Counts.SessionScores)
+	}
+	result := f.erase(t, "user-a")
+	if result.Counts.SessionScores != 2 || result.Counts.Scores != 1 {
+		t.Errorf("deleted %d session scores and %d trace scores, want 2 and 1",
+			result.Counts.SessionScores, result.Counts.Scores)
+	}
+	left, err := queryColumn[string](f.store.db, `SELECT id FROM scores ORDER BY id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fmt.Sprint(left); got != "[on-b-only on-b-trace]" {
+		t.Errorf("scores left = %s, want the other session's and the other user's trace score", got)
+	}
+}
+
+// The sweep (#8): a session-only score past the window goes when no trace
+// carries its session — including one whose last trace goes in the same pass
+// — and stays while one does; the retention dry run counts what the pass
+// takes.
+func TestRetentionTakesSessionOnlyScores(t *testing.T) {
+	f := newErasureFixture(t)
+	f.ingestOTLP(t, export([]*tracepb.Span{otlpSpan(t, 1, 1, "u", "alive", "x", nil)}), false, daysAgo(1))
+	f.ingestOTLP(t, export([]*tracepb.Span{otlpSpan(t, 2, 1, "u", "expiring", "x", nil)}), false, daysAgo(40))
+	one := 1.0
+	for _, s := range []struct {
+		id, session string
+		age         int
+	}{
+		{"orphan-old", "never-arrived", 40},
+		{"orphan-new", "never-arrived", 1},
+		{"alive-old", "alive", 40},
+		{"expiring-old", "expiring", 40},
+	} {
+		score := &Score{ID: s.id, SessionID: s.session, Name: "q", DataType: "numeric", Value: &one,
+			Timestamp: daysAgo(s.age)}
+		if err := f.writer.Submit(t.Context(), &ScoreWrite{ProjectID: f.project.ID, Scores: []*Score{score}}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.store.db.Exec(`UPDATE scores SET created_at = ? WHERE id = ?`, daysAgo(s.age), s.id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	thirty := 30
+	if _, err := f.store.db.Exec(`UPDATE projects SET retention_days = 30 WHERE id = ?`, f.project.ID); err != nil {
+		t.Fatal(err)
+	}
+	preview, err := f.store.RetentionPreview(t.Context(), f.project.ID, &thirty, nil, nil, sweepNow.UnixNano())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.SessionScores != 2 {
+		t.Errorf("the retention dry run counts %d session scores, want 2", preview.SessionScores)
+	}
+	if err := f.sweeper.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	left, err := queryColumn[string](f.store.db, `SELECT id FROM scores ORDER BY id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fmt.Sprint(left); got != "[alive-old orphan-new]" {
+		t.Errorf("scores left = %s, want the one whose session lives and the one inside the window", got)
+	}
+}
+
+// The dataset items (#9): every row of an item cut from an erased trace goes,
+// the one whose later version dropped the source included; the version ticks
+// once per chunk; an item with no source, or another's, stays; a run of an
+// older version counts the answering traces under unknown; the dry run names
+// the datasets.
+func TestErasureTakesTheDatasetItems(t *testing.T) {
+	f := newErasureFixture(t)
+	f.ingestOTLP(t, export([]*tracepb.Span{
+		otlpSpan(t, 1, 1, "user-a", "", "a", nil),
+		otlpSpan(t, 2, 1, "user-a", "", "a", nil),
+		otlpSpan(t, 3, 1, "user-b", "", "b", nil),
+	}), false, daysAgo(2))
+	item := func(n int) string { return strings.Repeat(fmt.Sprint(n), 32) }
+	write := func(dataset string, items ...*DatasetItemInput) {
+		t.Helper()
+		if err := f.writer.Submit(t.Context(), &DatasetItemsWrite{ProjectID: f.project.ID, Dataset: dataset,
+			Now: 1, Items: items}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("golden",
+		&DatasetItemInput{ID: item(1), Input: []byte(`{"q":"from a"}`), SourceTraceID: hexTrace(1)},
+		&DatasetItemInput{ID: item(2), Input: []byte(`{"q":"from a too"}`), SourceTraceID: hexTrace(2)},
+		&DatasetItemInput{ID: item(3), Input: []byte(`{"q":"from b"}`), SourceTraceID: hexTrace(3)},
+		&DatasetItemInput{ID: item(4), Input: []byte(`{"q":"typed in"}`)})
+	// A curator anonymised item 1 and dropped the source: its earlier row
+	// still names the trace.
+	write("golden", &DatasetItemInput{ID: item(1), Input: []byte(`{"q":"anonymised"}`)})
+	write("other", &DatasetItemInput{ID: item(5), Input: []byte(`{"q":"a again"}`), SourceTraceID: hexTrace(2)})
+	golden, err := f.store.Dataset(t.Context(), f.project.ID, "golden")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A run at this version, answered by the other user's trace for item 1.
+	create := &RunCreate{ProjectID: f.project.ID, Dataset: "golden", ID: strings.Repeat("e", 32), Now: 1}
+	if err := f.writer.Submit(t.Context(), create); err != nil {
+		t.Fatal(err)
+	}
+	f.arrive(t, f.project.ID, hexTrace(9), daysAgo(1), func(tr *model.Trace) {
+		tr.UserID, tr.RunID, tr.ItemID = "user-b", create.Run.ID, item(1)
+	})
+
+	preview, err := f.store.UserDataPreview(t.Context(), f.project.ID, "user-a", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.Counts.DatasetItems != 3 || fmt.Sprint(preview.Datasets) != "[{golden 2} {other 1}]" {
+		t.Errorf("the dry run counts %d items in %v, want 3 in golden (2) and other (1)",
+			preview.Counts.DatasetItems, preview.Datasets)
+	}
+	result := f.erase(t, "user-a")
+	if result.Counts.DatasetItems != 3 {
+		t.Errorf("deleted %d items, want 3", result.Counts.DatasetItems)
+	}
+	left, err := queryColumn[string](f.store.db,
+		`SELECT dataset || ':' || substr(item_id, 1, 1) FROM dataset_items ORDER BY 1`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fmt.Sprint(left); got != "[golden:3 golden:4]" {
+		t.Errorf("items left = %s, want the other user's and the typed-in one, no row of the rest", got)
+	}
+	after, err := f.store.Dataset(t.Context(), f.project.ID, "golden")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Version != golden.Version+1 {
+		t.Errorf("golden's version went %d → %d, want one tick for the chunk", golden.Version, after.Version)
+	}
+	summary, err := f.store.RunSummary(t.Context(), f.project.ID, create.Run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.Items.Unknown != 1 {
+		t.Errorf("the run counts %d unknown traces, want the one that answered the erased item", summary.Items.Unknown)
+	}
+}
+
+// A trace no span has reached has no start time; erasing its user must not
+// fail on it (the case trace deletion already handles).
+func TestErasingATraceWithNoStartTime(t *testing.T) {
+	f := newErasureFixture(t)
+	if err := f.writer.Submit(t.Context(), &IngestBatch{ProjectID: f.project.ID, IngestedAt: daysAgo(1),
+		Traces: []*model.Trace{{ID: hexTrace(1), UserID: "user-a"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if n := f.count(t, `SELECT COUNT(*) FROM traces WHERE timestamp IS NULL`); n != 1 {
+		t.Fatalf("%d traces without a start time, want the one", n)
+	}
+	result := f.erase(t, "user-a")
+	if result.Counts.Traces != 1 {
+		t.Errorf("erased %d traces, want 1", result.Counts.Traces)
+	}
+}
+
+// The echo is checked before anything is destroyed: the raw phase comes
+// first, and must not run for a request the parsed phase would refuse.
+func TestAWrongEchoScrubsNothing(t *testing.T) {
+	f := newErasureFixture(t)
+	batch := f.ingestOTLP(t, export([]*tracepb.Span{otlpSpan(t, 1, 1, "user-a", "", "a", nil)}), false, daysAgo(1))
+	_, err := f.store.EraseUserData(t.Context(), f.writer, UserErasure{ProjectID: f.project.ID,
+		UserID: "user-a", Confirm: "user-b", Chunk: 500, ChunkHours: 1})
+	var rejection *Rejection
+	if !errors.As(err, &rejection) || rejection.Kind != RejectInvalid {
+		t.Fatalf("err = %v, want the echo refused", err)
+	}
+	if got := f.rawSpans(t, batch); len(got) != 1 {
+		t.Errorf("a refused erasure scrubbed the archive: %v", got)
+	}
+}

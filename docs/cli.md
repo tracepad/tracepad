@@ -718,6 +718,13 @@ tracepad retention set --media placeholder
 tracepad users rm-data user-4711
 ```
 
+`users rm-data` prints what went, then the raw archive's line — `removed 252
+spans from 41 raw batches, 3 deleted` — the date the freed bytes are
+overwritten by, and the pre-migration backup when one exists. Its preview
+names the runs and the datasets that lose something, and the raw batches older
+than the trace window that it cannot attribute, when there are any. `export
+--otlp` counts the batches an erasure rewrote as `scrubbed` in its summary.
+
 The `keys` commands take the admin token, because no project key lists, mints
 or revokes keys; with a project key they print the server's `403` and exit 1.
 An owner or editor does the same in the web interface. `keys ls` shows each
