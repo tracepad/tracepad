@@ -14,8 +14,11 @@ import (
 // in either is a change in the diff.
 //
 // The rule is a length and nothing else: composition rules ("one digit, one
-// symbol") measurably make passwords worse, and the ceiling is where `bcrypt`
-// stops reading the input anyway.
+// symbol") measurably make passwords worse. The ceiling is where `bcrypt`
+// stops reading the input, measured the way it measures: in bytes. The
+// library refuses anything longer outright, so a ceiling above it was a
+// password the server accepted as valid and then failed to hash (spec 028
+// #31).
 const (
 	// PasswordCost is the bcrypt work factor. Twelve is about a quarter of
 	// a second on the hardware this runs on, which is the point: a login is
@@ -23,15 +26,18 @@ const (
 	// millions.
 	PasswordCost = 12
 
-	// MinPasswordLength and MaxPasswordLength bound what may be set.
+	// MinPasswordLength and MaxPasswordLength bound what may be set, in
+	// bytes of UTF-8.
 	MinPasswordLength = 10
-	MaxPasswordLength = 128
+	MaxPasswordLength = 72
 )
 
 // ErrPasswordLength is a password outside the bounds above. The message is
-// what the person setting it reads, so it says both ends.
+// what the person setting it reads, so it says both ends — and says bytes,
+// because 72 of them is 72 Latin letters and 36 Cyrillic ones (spec 028 #31).
 var ErrPasswordLength = fmt.Errorf(
-	"a password must be between %d and %d characters", MinPasswordLength, MaxPasswordLength)
+	"a password must be between %d and %d bytes; a character outside plain ASCII takes two to four",
+	MinPasswordLength, MaxPasswordLength)
 
 // passwordCost is the work factor in force: PasswordCost unless a test binary
 // has lowered it (see SetPasswordCost). Read on every hash and every decoy so
@@ -52,15 +58,35 @@ func SetPasswordCost(cost int) (previous int) {
 	return int(passwordCost.Swap(int32(cost)))
 }
 
+// CheckPasswordLength is the rule alone, for a caller that has more to check
+// before it may spend a hash on the answer (an invitation's token).
+func CheckPasswordLength(password string) error {
+	if len(password) < MinPasswordLength || len(password) > MaxPasswordLength {
+		return ErrPasswordLength
+	}
+	return nil
+}
+
 // HashPassword checks the length and hashes. The two are one call because a
 // caller that hashed first and validated afterwards would have spent a quarter
 // of a second on a password it was going to refuse.
 func HashPassword(password string) ([]byte, error) {
-	if len(password) < MinPasswordLength || len(password) > MaxPasswordLength {
-		return nil, ErrPasswordLength
+	if err := CheckPasswordLength(password); err != nil {
+		return nil, err
 	}
+	passwordWork.Add(1)
 	return bcrypt.GenerateFromPassword([]byte(password), int(passwordCost.Load()))
 }
+
+// passwordWork counts the hashes and comparisons spent on requests — never the
+// decoy's one-off construction — so that a test can ask whether a request paid
+// for one without timing it (PasswordWork).
+var passwordWork atomic.Int64
+
+// PasswordWork reports how many password hashes and comparisons this process
+// has spent. It exists for tests: "did this request run bcrypt" is a count,
+// and a stopwatch on a loaded machine answers it wrongly.
+func PasswordWork() int64 { return passwordWork.Load() }
 
 // decoys holds, per work factor, a hash of a password nobody has, compared
 // against when there is no stored hash to compare against.
@@ -113,6 +139,7 @@ func decoy() []byte {
 // a wrong password (Decision 8). It spends the comparison anyway, against the
 // decoy, so that it answers in the same time as well.
 func (a *Account) Verify(password string) bool {
+	passwordWork.Add(1)
 	if a == nil || len(a.hash) == 0 {
 		bcrypt.CompareHashAndPassword(decoy(), []byte(password))
 		return false

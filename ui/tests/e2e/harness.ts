@@ -32,7 +32,7 @@ export type State = {
  * database. No screen takes it any more (spec 028 #14) — it is how this file
  * mints projects and accounts out of band, the way `tracepad accounts` does.
  */
-export const ADMIN_TOKEN = 'e2e-admin-token';
+export const ADMIN_TOKEN = 'e2e-admin-token-00000000000000000000';
 
 /** One password for every fixture account; ten characters is the rule (#1). */
 export const PASSWORD = 'e2e-password';

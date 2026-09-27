@@ -2368,7 +2368,7 @@ export interface components {
                 "application/json": components["schemas"]["Error"];
             };
         };
-        /** @description The credentials could not be checked right now, or a write met a database condition that passes (a full disk, a lock that did not clear); retry after `Retry-After` */
+        /** @description The credentials could not be checked right now, more passwords were being checked at once than the server allows, or a write met a database condition that passes (a full disk, a lock that did not clear); retry after `Retry-After` */
         ServiceUnavailable: {
             headers: {
                 /** @description Seconds to wait */
@@ -2406,7 +2406,7 @@ export interface components {
                 "application/json": components["schemas"]["Error"];
             };
         };
-        /** @description The request is well formed and the values are not: an email that is not one, a password outside 10-128 characters, a name over 200 characters */
+        /** @description The request is well formed and the values are not: an email that is not one, a password outside 10-72 bytes, a name over 200 characters */
         Unprocessable: {
             headers: {
                 [name: string]: unknown;
@@ -2887,6 +2887,7 @@ export interface operations {
                 };
             };
             422: components["responses"]["Unprocessable"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     login: {
@@ -3005,6 +3006,7 @@ export interface operations {
                 };
             };
             422: components["responses"]["Unprocessable"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     logout: {

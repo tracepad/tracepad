@@ -80,7 +80,15 @@ type Server struct {
 	// data race.
 	setupMu    sync.RWMutex
 	setupToken string
-	limiter    *loginLimiter
+	// setupExpires is when setupToken stops opening anything (Decision
+	// 32), and setupOff is TRACEPAD_SETUP=off: no token is minted at all.
+	setupExpires time.Time
+	setupOff     bool
+	limiter      *loginLimiter
+	// passwords bounds the bcrypt work in flight, and passwordLog paces
+	// the warning for what it turns away (spec 028 #31).
+	passwords   *passwordGate
+	passwordLog *logLimiter
 	// running counts the handlers in flight, and handlerGrace is how long
 	// a stop waits for them once their connections are closed (spec 001
 	// #16).
@@ -155,7 +163,10 @@ func New(cfg *config.Config, version string, st *store.Store, writer JobWriter, 
 		mcp:            cfg.MCP,
 		adminToken:     cfg.AdminToken,
 		sessionLife:    sessionLife,
+		setupOff:       cfg.SetupDisabled,
 		limiter:        newLoginLimiter(),
+		passwords:      newPasswordGate(),
+		passwordLog:    &logLimiter{every: time.Minute},
 		handlerGrace:   defaultHandlerGrace,
 		inflatedLog:    &logLimiter{every: time.Minute},
 		originLog:      &logLimiter{every: time.Minute, keys: 64},

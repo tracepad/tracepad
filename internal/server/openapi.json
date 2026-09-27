@@ -276,7 +276,8 @@
             "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
           "415": {"description": "The body is compressed, or not declared `application/json`: a route that takes no credential takes a plain JSON body",
             "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
-          "422": {"$ref": "#/components/responses/Unprocessable"}
+          "422": {"$ref": "#/components/responses/Unprocessable"},
+          "503": {"$ref": "#/components/responses/ServiceUnavailable"}
         }
       }
     },
@@ -339,7 +340,8 @@
             "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
           "415": {"description": "The body is compressed, or not declared `application/json`: a route that takes no credential takes a plain JSON body",
             "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
-          "422": {"$ref": "#/components/responses/Unprocessable"}
+          "422": {"$ref": "#/components/responses/Unprocessable"},
+          "503": {"$ref": "#/components/responses/ServiceUnavailable"}
         }
       }
     },
@@ -2718,7 +2720,7 @@
         "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "Unauthorized": {"description": "The credentials do not resolve to a project",
         "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
-      "ServiceUnavailable": {"description": "The credentials could not be checked right now, or a write met a database condition that passes (a full disk, a lock that did not clear); retry after `Retry-After`",
+      "ServiceUnavailable": {"description": "The credentials could not be checked right now, more passwords were being checked at once than the server allows, or a write met a database condition that passes (a full disk, a lock that did not clear); retry after `Retry-After`",
         "headers": {"Retry-After": {"schema": {"type": "string"}, "description": "Seconds to wait"}},
         "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "NotFound": {"description": "No such thing in this project",
@@ -2727,7 +2729,7 @@
         "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "Conflict": {"description": "The stored state already answers differently: a name that is taken, a project that is already deleted, the last owner being demoted",
         "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
-      "Unprocessable": {"description": "The request is well formed and the values are not: an email that is not one, a password outside 10-128 characters, a name over 200 characters",
+      "Unprocessable": {"description": "The request is well formed and the values are not: an email that is not one, a password outside 10-72 bytes, a name over 200 characters",
         "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "TooManyRequests": {"description": "Throttled; `Retry-After` says for how long",
         "headers": {"Retry-After": {"schema": {"type": "string"}, "description": "Seconds to wait"}},

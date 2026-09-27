@@ -45,12 +45,13 @@ password, and nothing is written down anywhere but this database:
 
   http://localhost:4318/setup#token=…
 
-The link is good until this process stops. Restart to have a new one printed.
+The link is good for 24 hours, or until this process stops. Restart to have a
+new one printed.
 ```
 
 The token is 32 random bytes, minted per start and held **in memory only**: a
-link from yesterday's log file opens nothing today, and if the link is lost,
-restarting prints a new one. It rides in the URL fragment, which browsers never
+link from yesterday's log file opens nothing today, and if the link is lost or
+its 24 hours have passed, restarting prints a new one. It rides in the URL fragment, which browsers never
 send to the server, so it stays out of the access log and out of the history of
 whoever opens it.
 
@@ -70,6 +71,17 @@ password in `docker-compose.yml` is the thing this exists to stop pasting.
 `{"required": false}` afterwards — the one thing the interface can ask without
 a credential.
 
+A deployment that makes its first owner with the admin token instead — a
+script, an API-only install — can switch setup off with `TRACEPAD_SETUP=off`:
+no link is minted or printed, and `POST /api/v1/setup` answers `403`. Create
+the owner with the token:
+
+```sh
+TRACEPAD_API_KEY=$TRACEPAD_ADMIN_TOKEN tracepad accounts create you@example.com --owner
+```
+
+and open the invitation link it prints.
+
 ## Signing in
 
 `POST /api/v1/auth/login` takes `{"email", "password"}` and sets a session
@@ -88,12 +100,24 @@ A wrong email, a wrong password, a disabled account and one that has never
 accepted its invitation all answer the same `401 wrong email or password`. Any
 difference between them would be a way to find out who has an account here.
 Five failures for one email inside fifteen minutes and the next answers `429`
-with `Retry-After`; the count is in memory, so it forgets on a restart and can
-never be the reason somebody cannot sign in tomorrow.
+with `Retry-After`; an attempt counts from the moment it arrives, so fifty sent
+at once are still five guesses. The count is in memory, so it forgets on a
+restart and can never be the reason somebody cannot sign in tomorrow.
 
-Passwords are `bcrypt` at cost 12, between 10 and 128 characters, with no other
-rule: composition rules make passwords worse, and 128 is past where `bcrypt`
-stops reading.
+Checking a password is a quarter of a second of CPU, and the routes that do it
+take requests from anybody, so the server runs only a few at once — half its
+processors, at most four — with a short queue behind them. Past that, the
+answer is `503` with `Retry-After: 1`, and a `WARN` in the log once a minute
+says how many were turned away. A person signing in never meets it; a flood of
+sign-ins cannot take the CPU from ingest and reads. An invitation link is
+checked before its password is hashed, so a request with a made-up link costs
+nothing.
+
+Passwords are `bcrypt` at cost 12, between 10 and 72 **bytes**, with no other
+rule: composition rules make passwords worse, and 72 bytes is where `bcrypt`
+stops reading. That is 72 Latin letters, and fewer of anything outside plain
+ASCII — a Cyrillic letter is two bytes, most emoji four. A longer one is `422`
+with that sentence.
 
 Setup, sign-in and accepting an invitation are the three routes that take a
 body from anybody, so they take a small one: at most 8 KiB of uncompressed
@@ -327,7 +351,8 @@ one in this section.
 |---|---|---|
 | `TRACEPAD_SESSION_DAYS` | `30` | How long a browser session lasts. It slides, so this is "how long since you last opened it", not "how long since you signed in". Minimum 1. |
 | `TRACEPAD_URL` | — | The address your people actually use. The server prints setup and invitation links at its own guess otherwise — the listen address, or the request's `Host` — which is wrong behind a proxy, and its host is one of the three the cross-site check accepts. An `https://` address also tells the server a TLS proxy is in front, which silences its plain-HTTP warning (or, in the image, note) at start ([docker.md](docker.md#serving-over-tls)). |
-| `TRACEPAD_ADMIN_TOKEN` | — | Unchanged from [administration](admin.md), and now also the account routes. |
+| `TRACEPAD_ADMIN_TOKEN` | — | Unchanged from [administration](admin.md), and now also the account routes. At least 32 characters, or the server does not start; `TRACEPAD_ADMIN_TOKEN_FILE` reads it from a file instead. |
+| `TRACEPAD_SETUP` | `on` | `off` mints no setup link and refuses `POST /api/v1/setup`; make the first owner with the admin token. |
 
 Expired sessions and invitations are removed by the
 [retention sweeper](retention.md) on its usual pass. A session that has run out

@@ -143,6 +143,9 @@ Server environment:
   TRACEPAD_SWEEP_INTERVAL         retention sweep cadence               (default 1h)
   TRACEPAD_ROLLUP_INTERVAL        statistics rollup cadence             (default 5m)
   TRACEPAD_ADMIN_TOKEN            bearer token for cross-project admin  (default unset)
+                                  at least 32 characters: openssl rand -hex 32
+  TRACEPAD_ADMIN_TOKEN_FILE       read the admin token from this file   (default unset)
+  TRACEPAD_SETUP                  mint and print the setup link         (default on)
 
 `+cli.Usage)
 }
@@ -199,6 +202,7 @@ func serve(args []string) error {
 	// deployment still needs its first owner and what the link to create
 	// one is (spec 028 #9).
 	printStartup(os.Stdout, boot, cfg.Listen, srv.SetupURL())
+	noteSetupOff(slog.Default(), cfg, srv)
 	warnPlainHTTP(slog.Default(), cfg.Listen, cfg.URL, cfg.InContainer)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -332,12 +336,34 @@ password, and nothing is written down anywhere but this database:
 
   %s
 
-The link is good until this process stops. Restart to have a new one printed.
+The link is good for 24 hours, or until this process stops. Restart to have a
+new one printed.
 
 `, setupURL)
 		return
 	}
 	fmt.Fprintf(w, "\nWeb interface: http://%s/\n\n", host)
+}
+
+// noteSetupOff says, on a server with no owner yet and TRACEPAD_SETUP=off,
+// how the first owner gets made — and warns when nothing can make one (spec
+// 028 #32). A refusal to start would be wrong: the data plane works without
+// an owner, and the admin token can be added by a restart.
+func noteSetupOff(log *slog.Logger, cfg *config.Config, srv *server.Server) {
+	if !cfg.SetupDisabled {
+		return
+	}
+	required, err := srv.SetupRequired()
+	if err != nil || !required {
+		return
+	}
+	if cfg.AdminToken == "" {
+		log.Warn("this server has no owner, TRACEPAD_SETUP=off and no TRACEPAD_ADMIN_TOKEN: " +
+			"nobody can sign in to the interface or manage accounts until one of the two is set")
+		return
+	}
+	log.Info("this server has no owner and setup is off; create the first one with the admin token: " +
+		"tracepad accounts create <email> --owner")
 }
 
 // warnPlainHTTP says so at start when other machines can reach this server

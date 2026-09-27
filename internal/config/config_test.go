@@ -3,17 +3,25 @@ package config
 import (
 	"errors"
 	"flag"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
 
+// Declared secrets long enough to start with (spec 001 #18).
+var (
+	secretA = "tp-sk-a-" + strings.Repeat("0", MinSecretLength)
+	secretB = "tp-sk-b-" + strings.Repeat("1", MinSecretLength)
+)
+
 func TestParseProjects(t *testing.T) {
-	specs, err := ParseProjects("app:tp-pk-a:tp-sk-a, eval:tp-pk-b:tp-sk-b")
+	specs, err := ParseProjects("app:tp-pk-a:" + secretA + ", eval:tp-pk-b:" + secretB)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(specs) != 2 || specs[0].Name != "app" || specs[1].SecretKey != "tp-sk-b" {
+	if len(specs) != 2 || specs[0].Name != "app" || specs[1].SecretKey != secretB {
 		t.Fatalf("specs = %+v", specs)
 	}
 
@@ -23,7 +31,7 @@ func TestParseProjects(t *testing.T) {
 	// A malformed entry is named by its position and never quoted: the
 	// error is logged, and what is malformed is usually the secret
 	// (spec 001 #12).
-	_, err = ParseProjects("app:tp-pk-a:tp-sk-a,eval:tp-pk-b:tp-sk-with:colon")
+	_, err = ParseProjects("app:tp-pk-a:" + secretA + ",eval:tp-pk-b:tp-sk-with:colon")
 	if err == nil {
 		t.Fatal("expected error for an entry with four fields")
 	}
@@ -35,7 +43,7 @@ func TestParseProjects(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "field 2 is empty") || strings.Contains(err.Error(), "tp-sk") {
 		t.Fatalf("error = %v, want field 2 named as empty and no secret", err)
 	}
-	if _, err := ParseProjects("app:p:s,app:p2:s2"); err == nil {
+	if _, err := ParseProjects("app:p:" + secretA + ",app:p2:" + secretB); err == nil {
 		t.Fatal("expected error for duplicate name")
 	}
 	if specs, err := ParseProjects("  "); err != nil || specs != nil {
@@ -123,7 +131,7 @@ func TestSweepIntervalAndAdminToken(t *testing.T) {
 	}
 
 	t.Setenv("TRACEPAD_SWEEP_INTERVAL", "15m")
-	t.Setenv("TRACEPAD_ADMIN_TOKEN", "  secret  ")
+	t.Setenv("TRACEPAD_ADMIN_TOKEN", "  "+longToken+"\n")
 	cfg, err = Load(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -131,7 +139,7 @@ func TestSweepIntervalAndAdminToken(t *testing.T) {
 	if cfg.SweepInterval != 15*time.Minute {
 		t.Errorf("SweepInterval = %s, want 15m", cfg.SweepInterval)
 	}
-	if cfg.AdminToken != "secret" {
+	if cfg.AdminToken != longToken {
 		t.Errorf("AdminToken = %q, want the value without the whitespace a shell leaves behind", cfg.AdminToken)
 	}
 
@@ -142,6 +150,108 @@ func TestSweepIntervalAndAdminToken(t *testing.T) {
 	t.Setenv("TRACEPAD_SWEEP_INTERVAL", "10ms")
 	if _, err := Load(nil); err == nil {
 		t.Error("a sub-second sweep interval is a busy loop, not a configuration")
+	}
+}
+
+// longToken is an admin token of the length `openssl rand -hex 32` prints.
+var longToken = strings.Repeat("ab", 32)
+
+// A secret that owns the deployment, or a project, is refused at start when
+// it is short enough to guess over the network — with the command that makes
+// a good one, and without the value (spec 001 #18).
+func TestShortSecretsRefuseToStart(t *testing.T) {
+	short := "tp-admin-devcheck"
+	t.Setenv("TRACEPAD_ADMIN_TOKEN", short)
+	_, err := Load(nil)
+	if err == nil {
+		t.Fatal("a 17-character admin token must refuse the start")
+	}
+	for _, want := range []string{"TRACEPAD_ADMIN_TOKEN", "17 characters", "at least 32", "openssl rand -hex 32"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %q, want it to say %q", err, want)
+		}
+	}
+	if strings.Contains(err.Error(), short) {
+		t.Errorf("error = %q quotes the token", err)
+	}
+	t.Setenv("TRACEPAD_ADMIN_TOKEN", strings.Repeat("x", MinSecretLength))
+	if _, err := Load(nil); err != nil {
+		t.Errorf("a token of exactly %d characters: %v", MinSecretLength, err)
+	}
+
+	_, err = ParseProjects("app:tp-pk-a:" + secretA + ",eval:tp-pk-b:tp-sk-short")
+	if err == nil {
+		t.Fatal("a short declared secret must refuse the start")
+	}
+	for _, want := range []string{"entry 2", "11 characters", "openssl rand -hex 32"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %q, want it to say %q", err, want)
+		}
+	}
+	if strings.Contains(err.Error(), "tp-sk-short") {
+		t.Errorf("error = %q quotes the secret", err)
+	}
+}
+
+// TRACEPAD_ADMIN_TOKEN_FILE reads the token from a file — a mounted secret —
+// and is one way or the other, never both (spec 001 #18).
+func TestAdminTokenFile(t *testing.T) {
+	t.Setenv("TRACEPAD_ADMIN_TOKEN", "")
+	path := filepath.Join(t.TempDir(), "admin-token")
+	if err := os.WriteFile(path, []byte(longToken+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TRACEPAD_ADMIN_TOKEN_FILE", path)
+	cfg, err := Load(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AdminToken != longToken {
+		t.Errorf("AdminToken = %q, want the file's contents without the newline", cfg.AdminToken)
+	}
+
+	t.Setenv("TRACEPAD_ADMIN_TOKEN", longToken)
+	if _, err := Load(nil); err == nil || !strings.Contains(err.Error(), "both set") {
+		t.Errorf("err = %v, want the two ways refused together", err)
+	}
+	t.Setenv("TRACEPAD_ADMIN_TOKEN", "")
+
+	if err := os.WriteFile(path, []byte("short\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(nil); err == nil || !strings.Contains(err.Error(), "TRACEPAD_ADMIN_TOKEN_FILE") ||
+		strings.Contains(err.Error(), "short\n") {
+		t.Errorf("err = %v, want the short token in the file refused by the variable's name", err)
+	}
+	if err := os.WriteFile(path, []byte("\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(nil); err == nil || !strings.Contains(err.Error(), "empty") {
+		t.Errorf("err = %v, want an empty file refused rather than read as no token", err)
+	}
+	t.Setenv("TRACEPAD_ADMIN_TOKEN_FILE", filepath.Join(t.TempDir(), "missing"))
+	if _, err := Load(nil); err == nil {
+		t.Error("a file that is not there must refuse the start")
+	}
+}
+
+// TRACEPAD_SETUP=off turns the setup endpoint off; on is the default (spec
+// 028 #32).
+func TestSetupSwitch(t *testing.T) {
+	cfg, err := Load(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.SetupDisabled {
+		t.Error("setup must be on by default")
+	}
+	t.Setenv("TRACEPAD_SETUP", "off")
+	if cfg, err = Load(nil); err != nil || !cfg.SetupDisabled {
+		t.Errorf("TRACEPAD_SETUP=off: cfg=%+v err=%v", cfg, err)
+	}
+	t.Setenv("TRACEPAD_SETUP", "sometimes")
+	if _, err := Load(nil); err == nil {
+		t.Error("a switch that is neither on nor off must be refused")
 	}
 }
 

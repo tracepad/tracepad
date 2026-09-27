@@ -220,44 +220,39 @@ func TestLoginAnswersOneSentenceToEveryFailure(t *testing.T) {
 // distinguishable from a real one by a stopwatch — and the throttle counts
 // per email, so one attempt is all that needs (Decision 8).
 //
-// A wall-clock assertion, deliberately loose: what it catches is the
-// difference between running the hash and not running it, which is two orders
-// of magnitude, not the tens of milliseconds a loaded machine adds. That gap
-// only exists at the production cost — at the one TestMain lowered the binary
-// to, a comparison is a millisecond and so is the noise — so this test, alone
-// in the package, runs at cost 12 and pays for it: about a second, most of the
-// suite's remaining runtime.
+// Counted rather than timed: every failure spends exactly one comparison, as
+// the right password does. A stopwatch asked the same question and got the
+// wrong answer whenever the machine was busy.
 func TestLoginSpendsTheComparisonWhateverTheAnswer(t *testing.T) {
-	lowered := store.SetPasswordCost(store.PasswordCost)
-	t.Cleanup(func() { store.SetPasswordCost(lowered) })
-
 	h := newAccountHarness(t)
-	hash, err := store.HashPassword(testAccountPassword)
-	if err != nil {
+	h.owner(t)
+	h.invited(t, "pending@example.com", false)
+	disabled := h.account(t, "disabled@example.com", false)
+	yes := true
+	if err := h.writer.Submit(t.Context(), &store.AccountUpdate{
+		AccountID: disabled.account.ID, Disabled: &yes, Now: time.Now().UnixNano(),
+	}); err != nil {
 		t.Fatal(err)
 	}
-	h.accountWithHash(t, "owner@example.com", true, hash)
-	h.invited(t, "pending@example.com", false)
 
-	// The real comparison, to measure the others against. The decoy is
-	// built on first use, so this also pays for that.
-	known := timeLogin(t, h, "owner@example.com")
-
-	for _, email := range []string{"nobody@example.com", "pending@example.com"} {
-		took := timeLogin(t, h, email)
-		if took < known/4 {
-			t.Errorf("%s answered in %s against %s for an account that exists; "+
-				"the difference is the answer", email, took, known)
+	for _, attempt := range []struct{ email, password string }{
+		{"owner@example.com", "not the password"},
+		{"nobody@example.com", testAccountPassword},
+		{"pending@example.com", testAccountPassword},
+		{"disabled@example.com", testAccountPassword},
+	} {
+		work := store.PasswordWork()
+		expectError(t, h.login(t, attempt.email, attempt.password), http.StatusUnauthorized, wrongCredentials)
+		if spent := store.PasswordWork() - work; spent != 1 {
+			t.Errorf("%s: the failure spent %d comparisons, want one — the difference is the answer",
+				attempt.email, spent)
 		}
 	}
-}
-
-// timeLogin measures one failed sign-in.
-func timeLogin(t *testing.T, h *harness, email string) time.Duration {
-	t.Helper()
-	start := time.Now()
-	expectError(t, h.login(t, email, "not the password"), http.StatusUnauthorized, wrongCredentials)
-	return time.Since(start)
+	work := store.PasswordWork()
+	expectStatus(t, h.login(t, "owner@example.com", testAccountPassword), http.StatusOK)
+	if spent := store.PasswordWork() - work; spent != 1 {
+		t.Errorf("the right password spent %d comparisons, want one", spent)
+	}
 }
 
 // TestSessionCookieAttributes: `HttpOnly` is the reason to use a cookie at all

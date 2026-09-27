@@ -832,6 +832,24 @@ func (i *InviteMint) apply(tx *sql.Tx) error {
 // the person holding a link can act on.
 var ErrBadToken = errors.New("this link is not valid any more")
 
+// InviteTokenLive reports whether an invitation or reset token would be
+// accepted now: known, unexpired, and for an account that is not disabled —
+// what InviteAccept checks, asked without a transaction. It is the question a
+// handler asks before it spends a quarter of a second hashing the password
+// that goes with the token (spec 028 #31); the transaction asks it again,
+// because the answer can change between the two.
+func (s *Store) InviteTokenLive(ctx context.Context, tokenID string, now int64) (bool, error) {
+	var live bool
+	err := s.db.QueryRowContext(ctx,
+		`SELECT EXISTS (SELECT 1 FROM account_tokens t JOIN accounts a ON a.id = t.account_id
+		  WHERE t.id = ? AND t.expires_at > ? AND a.disabled = 0)`,
+		tokenID, now).Scan(&live)
+	if err != nil {
+		return false, fmt.Errorf("read invitation: %w", err)
+	}
+	return live, nil
+}
+
 // InviteAccept spends a token: it sets the password, deletes the token, opens
 // a session and stamps the login. All of it in one transaction, so a token can
 // be spent exactly once however many browsers race for it.

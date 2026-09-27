@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 export const BINARY = process.env.TRACEPAD_BINARY ?? '';
-export const KEY = 'tp-sk-e2e';
+export const KEY = 'tp-sk-e2e-0000000000000000000000000000';
 
 export interface Store {
   host: string;

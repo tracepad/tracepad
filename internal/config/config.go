@@ -3,6 +3,7 @@
 package config
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -60,7 +61,15 @@ type Config struct {
 	// recovery when every owner's password is lost (#16). Unset by
 	// default, which makes those endpoints answer 403 and leaves each
 	// project's own key as the administrator of itself.
+	//
+	// Read from TRACEPAD_ADMIN_TOKEN or from the file TRACEPAD_ADMIN_TOKEN_FILE
+	// names, never both, and at least MinSecretLength characters (spec 001
+	// #18): it creates owner accounts, so it is the deployment.
 	AdminToken string
+	// SetupDisabled is TRACEPAD_SETUP=off: no setup token is minted and
+	// `POST /api/v1/setup` refuses, for a deployment whose first owner is
+	// made with the admin token (spec 028 #32).
+	SetupDisabled bool
 	// SessionLife is how long a browser session lasts (spec 028 #4). It
 	// slides: a request seen more than a day after the last one moves the
 	// expiry forward, so "about once a month" is what a person who opens
@@ -121,6 +130,16 @@ const (
 	MaxResponseBudgetBytes     = 5 * 1024 * 1024
 )
 
+// MinSecretLength is the shortest admin token or declared project secret the
+// server starts with (spec 001 #18). A wrong one is refused in well under a
+// millisecond, so what stops guessing is the size of the space: thirty-two
+// hex characters is 128 bits, which thousands of guesses a second on any
+// number of connections do not exhaust. `openssl rand -hex 32` is 256.
+const MinSecretLength = 32
+
+// generateHint is how every short-secret refusal ends.
+const generateHint = "generate one with: openssl rand -hex 32"
+
 // knownEnv lists every TRACEPAD_* variable the binary understands.
 var knownEnv = map[string]bool{
 	"TRACEPAD_LISTEN":                true,
@@ -133,6 +152,8 @@ var knownEnv = map[string]bool{
 	"TRACEPAD_SWEEP_INTERVAL":        true,
 	"TRACEPAD_ROLLUP_INTERVAL":       true,
 	"TRACEPAD_ADMIN_TOKEN":           true,
+	"TRACEPAD_ADMIN_TOKEN_FILE":      true,
+	"TRACEPAD_SETUP":                 true,
 	"TRACEPAD_SESSION_DAYS":          true,
 	"TRACEPAD_IN_CONTAINER":          true,
 	// The server reads TRACEPAD_URL too since spec 028 #11 — as the host
@@ -191,6 +212,14 @@ func Load(args []string) (*Config, error) {
 		return nil, fmt.Errorf("TRACEPAD_SESSION_DAYS: want at least %d, got %d",
 			MinSessionDays, sessionDays)
 	}
+	adminToken, err := readAdminToken()
+	if err != nil {
+		return nil, err
+	}
+	setup, err := parseOnOff("TRACEPAD_SETUP", true)
+	if err != nil {
+		return nil, err
+	}
 	cfg := &Config{
 		Listen:              envOr("TRACEPAD_LISTEN", ":4318"),
 		DataDir:             envOr("TRACEPAD_DATA_DIR", defaultDataDir()),
@@ -201,7 +230,8 @@ func Load(args []string) (*Config, error) {
 		MCP:                 mcp,
 		SweepInterval:       sweep,
 		RollupInterval:      rollup,
-		AdminToken:          strings.TrimSpace(os.Getenv("TRACEPAD_ADMIN_TOKEN")),
+		AdminToken:          adminToken,
+		SetupDisabled:       !setup,
 		SessionLife:         time.Duration(sessionDays) * 24 * time.Hour,
 		URL:                 strings.TrimSpace(os.Getenv("TRACEPAD_URL")),
 		InContainer:         inContainer,
@@ -222,6 +252,39 @@ func Load(args []string) (*Config, error) {
 
 	warnUnknownEnv()
 	return cfg, nil
+}
+
+// readAdminToken reads the admin token from TRACEPAD_ADMIN_TOKEN or from the
+// file TRACEPAD_ADMIN_TOKEN_FILE names (spec 001 #18). The file is how a secret
+// reaches a container without passing through the environment every `docker
+// inspect` prints — a mounted Docker or Kubernetes secret. Both set is a
+// refusal rather than a precedence rule: which one the operator meant is not
+// something to guess about the credential that owns the deployment.
+//
+// Whitespace around the value is dropped, as a shell or an editor leaves a
+// newline behind. The value is never quoted in an error: it is the secret.
+func readAdminToken() (string, error) {
+	inline := strings.TrimSpace(os.Getenv("TRACEPAD_ADMIN_TOKEN"))
+	path := strings.TrimSpace(os.Getenv("TRACEPAD_ADMIN_TOKEN_FILE"))
+	name, token := "TRACEPAD_ADMIN_TOKEN", inline
+	switch {
+	case inline != "" && path != "":
+		return "", errors.New("TRACEPAD_ADMIN_TOKEN and TRACEPAD_ADMIN_TOKEN_FILE are both set; set one")
+	case path != "":
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return "", fmt.Errorf("TRACEPAD_ADMIN_TOKEN_FILE: %w", err)
+		}
+		name, token = "TRACEPAD_ADMIN_TOKEN_FILE", strings.TrimSpace(string(raw))
+		if token == "" {
+			return "", fmt.Errorf("TRACEPAD_ADMIN_TOKEN_FILE: %s is empty", path)
+		}
+	}
+	if token != "" && len(token) < MinSecretLength {
+		return "", fmt.Errorf("%s: the admin token is %d characters; it creates owner accounts, "+
+			"so it must be at least %d — %s", name, len(token), MinSecretLength, generateHint)
+	}
+	return token, nil
 }
 
 // DBPath returns the path of the SQLite database file.
@@ -388,6 +451,13 @@ func ParseProjects(raw string) ([]ProjectSpec, error) {
 				return nil, fmt.Errorf("TRACEPAD_PROJECTS entry %d: want name:public_key:secret_key, field %d is empty",
 					i+1, f+1)
 			}
+		}
+		// A declared secret is a project key an application sends on
+		// every export; a short one is guessable over the network like a
+		// short admin token (spec 001 #18). Measured, never quoted.
+		if len(fields[2]) < MinSecretLength {
+			return nil, fmt.Errorf("TRACEPAD_PROJECTS entry %d: the secret key is %d characters; want at least %d — %s",
+				i+1, len(fields[2]), MinSecretLength, generateHint)
 		}
 		if seen[fields[0]] {
 			return nil, fmt.Errorf("TRACEPAD_PROJECTS: duplicate project name %q", fields[0])
