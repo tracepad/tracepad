@@ -370,3 +370,55 @@ func TestSubmitWaitingWaitsForRoomAndAStopWakesIt(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// The raw batch of a sliced export lies inside the arrival window of every
+// trace the export carried, as it does for one written in one transaction:
+// an erasure finds a trace's batches by that window (spec 044 #3, spec 043
+// #31).
+func TestASlicedExportsRawBatchIsInsideEveryTracesWindow(t *testing.T) {
+	s, p := openIngestStore(t)
+	batch := bulkBatch(p.ID, 900, 400, 3, 1500, 2)
+	batch.Raw = &RawBatch{Body: []byte("raw")}
+	cut := batch.Slices()
+	if len(cut) < 3 {
+		t.Fatalf("%d slices, want several", len(cut))
+	}
+	for _, slice := range cut {
+		tx, err := s.db.Begin()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := slice.apply(tx); err != nil {
+			tx.Rollback()
+			t.Fatal(err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(2 * time.Millisecond) // each slice its own reading
+	}
+	var received int64
+	if err := s.db.QueryRow(`SELECT received_at FROM raw_batches WHERE project_id = ?`, p.ID).Scan(&received); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := s.db.Query(`SELECT id, ingested_at, updated_at FROM traces WHERE project_id = ?`, p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	n := 0
+	for rows.Next() {
+		var id string
+		var ingested, updated int64
+		if err := rows.Scan(&id, &ingested, &updated); err != nil {
+			t.Fatal(err)
+		}
+		n++
+		if received < ingested || received > updated {
+			t.Errorf("trace %s's window [%d, %d] does not hold its raw batch, received at %d", id, ingested, updated, received)
+		}
+	}
+	if n != len(batch.Traces) {
+		t.Errorf("%d traces, want %d", n, len(batch.Traces))
+	}
+}

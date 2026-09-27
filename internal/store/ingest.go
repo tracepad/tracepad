@@ -51,6 +51,11 @@ type IngestBatch struct {
 	// continued are the traces this slice carries on from an earlier slice
 	// of its export (Slices), which apply touches rather than upserts.
 	continued map[string]bool
+	// stamped, on the slice that carries the raw body, are the export's
+	// traces the earlier slices wrote: apply stamps their `updated_at` with
+	// the reading the raw batch gets, so that each trace's window still
+	// holds the batch its spans arrived in (spec 043 #31, spec 044 #3).
+	stamped []string
 
 	// UnknownRuns is filled by apply: the run id of every trace in the
 	// batch that named a run this project does not have, one entry per
@@ -103,7 +108,10 @@ const SliceRows = 1000
 // points at it — the bodies the export's traces name, their refs, and the
 // check that a resolved Langfuse id still names a body the project holds. The
 // last carries the raw body, its refs, and the bodies only the raw body names,
-// which a sweep would otherwise find with no ref between the two.
+// which a sweep would otherwise find with no ref between the two. The raw batch
+// is stamped with the last slice's reading (spec 044 #3), so that slice stamps
+// the traces the earlier ones wrote with it too: an erasure finds a trace's
+// batches inside its `[ingested_at, updated_at]`.
 func (b *IngestBatch) Slices() []*IngestBatch {
 	if len(b.Traces)+len(b.Observations) <= SliceRows {
 		return []*IngestBatch{b}
@@ -181,6 +189,17 @@ func (b *IngestBatch) Slices() []*IngestBatch {
 	}
 	first.MediaRefs, first.Resolved = b.MediaRefs, b.Resolved
 	last.Raw, last.RawMedia, last.mediaTypes = b.Raw, b.RawMedia, declaredTypes(b.Media)
+	if last.Raw != nil {
+		inLast := make(map[string]bool, len(last.Traces))
+		for _, t := range last.Traces {
+			inLast[t.ID] = true
+		}
+		for _, t := range b.Traces {
+			if !inLast[t.ID] {
+				last.stamped = append(last.stamped, t.ID)
+			}
+		}
+	}
 	for _, slice := range slices[:len(slices)-1] {
 		slice.full = true
 	}
@@ -247,6 +266,9 @@ func (b *IngestBatch) apply(tx *sql.Tx) error {
 			return fmt.Errorf("store raw batch: %w", err)
 		}
 		if err := writeRawMediaRefs(tx, b.ProjectID, rawID, b.RawMedia, types, held, arrived); err != nil {
+			return err
+		}
+		if err := stampSlicedTraces(tx, b.ProjectID, b.stamped, arrived); err != nil {
 			return err
 		}
 	}
@@ -378,6 +400,24 @@ func upsertTrace(tx *sql.Tx, projectID string, t *model.Trace, ingestedAt int64,
 		return nil
 	}
 	return indexTraceName(tx, projectID, t.ID, stored.String)
+}
+
+// stampSlicedTraces sets the `updated_at` of the given traces, a statement per
+// batch of them.
+func stampSlicedTraces(tx *sql.Tx, projectID string, traceIDs []string, now int64) error {
+	for start := 0; start < len(traceIDs); start += 500 {
+		batch := traceIDs[start:min(start+500, len(traceIDs))]
+		args := make([]any, 0, len(batch)+2)
+		args = append(args, now, projectID)
+		for _, id := range batch {
+			args = append(args, id)
+		}
+		if _, err := tx.Exec(`UPDATE traces SET updated_at = ? WHERE project_id = ? AND id IN (`+
+			placeholders(len(batch))+`)`, args...); err != nil {
+			return fmt.Errorf("stamp the traces of a sliced export: %w", err)
+		}
+	}
+	return nil
 }
 
 // touchTrace stamps a stored trace's `updated_at` for a slice that carries it
