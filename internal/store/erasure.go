@@ -628,7 +628,8 @@ type ErasureResult struct {
 //  3. delete the parsed rows chunk by chunk, as before, with the session
 //     scores (#7) and the dataset items (#9);
 //  4. scrub the batches received since step 1 for every trace step 3
-//     deleted.
+//     deleted, and every batch of one step 1 did not know — a trace that
+//     became the user's while the request ran.
 //
 // Raw goes first because once the parsed rows are gone nothing names the
 // batches: a request cut off in step 2 or 3 is finished by repeating it, which
@@ -688,8 +689,12 @@ func (s *Store) EraseUserData(ctx context.Context, writer jobSubmitter, e UserEr
 	}
 	rawDone := time.Now()
 
-	// 3. The parsed rows. Each chunk says when its traces last changed, so
-	// that step 4 reads only what arrived for them while the request ran.
+	// 3. The parsed rows. Each chunk says when its traces arrived and last
+	// changed, so that step 4 reads only what step 2 could not.
+	legacy, err := s.legacyStamps(ctx)
+	if err != nil {
+		return result, err
+	}
 	var late []arrivalWindow
 	deleted := map[string]bool{}
 	chunks := 0
@@ -709,10 +714,20 @@ func (s *Store) EraseUserData(ctx context.Context, writer jobSubmitter, e UserEr
 		result.Counts.add(chunk.Counts)
 		result.Compaction = max(result.Compaction, chunk.CompactionRequested)
 		for i, id := range chunk.IDs {
-			// A trace updated after step 1 read it — minus the margin a
-			// commit can trail its stamp by — received a batch step 2
-			// did not read.
-			if updated := chunk.Updated[i]; updated >= since-stampMargin {
+			updated := chunk.Updated[i]
+			switch {
+			case !erased[id]:
+				// Not the user's when step 1 read them: its first
+				// spans came without the id and a later batch brought
+				// it — a root span ends, and is exported, last. Step 2
+				// read none of its batches, so its whole window.
+				deleted[id] = true
+				late = append(late, legacy.windowOf(
+					erasedTrace{id: id, ingestedAt: chunk.Ingested[i], updateAt: updated}))
+			case updated >= since-stampMargin:
+				// Updated after step 1 read it — minus the margin a
+				// commit can trail its stamp by — it received a batch
+				// step 2 did not read.
 				deleted[id] = true
 				late = append(late, arrivalWindow{from: since - stampMargin, to: updated})
 			}
@@ -730,10 +745,11 @@ func (s *Store) EraseUserData(ctx context.Context, writer jobSubmitter, e UserEr
 	parsedDone := time.Now()
 
 	// 4. The tail: the batches that arrived while the request ran, for the
-	// traces that received one. Usually none.
+	// traces that received one, and every batch of a trace that became the
+	// user's meanwhile. Usually none.
 	recent, err := s.candidateBatches(ctx, e.ProjectID, mergeWindows(late))
 	if err != nil {
-		return result, err
+		return result, errors.Join(failed, err)
 	}
 	tail, err := s.scrubBatches(ctx, writer, e.ProjectID, recent, deleted)
 	if err != nil {

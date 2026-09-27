@@ -551,6 +551,45 @@ func TestAnErasureCutOffIsFinishedByItsRepeat(t *testing.T) {
 	})
 }
 
+// A trace whose first spans came without the user id, and whose id came in a
+// batch after step 1 read the user's traces: step 1 did not know it, step 3
+// deletes it, and every batch of its window goes — the early one received
+// long before the request, not only what arrived while it ran.
+func TestATraceThatBecomesTheUsersMidErasure(t *testing.T) {
+	f := newErasureFixture(t)
+	known := f.ingestOTLP(t, export([]*tracepb.Span{
+		otlpSpan(t, 1, 1, "user-a", "", "marker-a-known", nil)}), false, daysAgo(3))
+	early := f.ingestOTLP(t, export([]*tracepb.Span{
+		otlpSpan(t, 2, 1, "", "", "marker-a-unnamed", nil),
+		otlpSpan(t, 3, 1, "user-b", "", "marker-b", nil),
+	}), false, daysAgo(2))
+	if n := f.count(t, `SELECT COUNT(*) FROM traces WHERE id = ? AND user_id IS NULL`, hexTrace(2)); n != 1 {
+		t.Fatalf("the unnamed trace has a user before its root arrived (%d)", n)
+	}
+	var named int64
+	f.erase(t, "user-a", func(e *UserErasure) {
+		e.after = func(step int) error {
+			if step == 1 {
+				// The root, with the user id, after the traces were read.
+				named = f.ingestOTLP(t, export([]*tracepb.Span{
+					otlpSpan(t, 2, 2, "user-a", "", "marker-a-root", nil),
+					otlpSpan(t, 3, 2, "user-b", "", "marker-b-later", nil),
+				}), false, 0)
+			}
+			return nil
+		}
+	})
+	if got := f.rawSpans(t, known); got != nil {
+		t.Errorf("the known trace's batch holds %v", got)
+	}
+	if got := f.rawSpans(t, early); !slices.Equal(got, []string{"span-3-1"}) {
+		t.Errorf("the batch received before the request holds %v, want only the other user's span", got)
+	}
+	if got := f.rawSpans(t, named); !slices.Equal(got, []string{"span-3-2"}) {
+		t.Errorf("the batch that named the user holds %v, want only the other user's span", got)
+	}
+}
+
 // failingChunk passes every job on but the at-th chunk of an erasure's parsed
 // phase, which it answers with err.
 type failingChunk struct {
