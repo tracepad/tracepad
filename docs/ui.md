@@ -832,14 +832,18 @@ project you last looked at, and are absent when you reach none.
   [retention.md](retention.md#what-outlives-what)) — and beside them the
   project's media setting: store images and files once each, or keep a
   placeholder only ([media.md](media.md#not-keeping-them-the-placeholder-setting)).
-- **API keys** — each key's name and public key, when and by whom it was
-  minted, and when it was last used ("never" until it is); a name field to
-  mint one under, and revocation. A key whose minter can no longer manage keys
+- **API keys** — each key's name, public key and [scopes](api.md#scopes),
+  when and by whom it was minted, and when it was last used ("never" until it
+  is); a form to mint one — a name and a checkbox per scope, `ingest` ticked
+  by default, since wiring an application is the usual reason to mint — and
+  revocation. A key whose minter can no longer manage keys
   in the project — removed, demoted to viewer, disabled or deleted — says so on
   its row, because taking their access away revoked nothing
-  ([admin.md](admin.md#keys)). A minted pair is shown **once**, in both
-  connection formats, exactly as first run prints them; the secret is stored
-  as a hash and the dialog says so rather than implying it can be found again.
+  ([admin.md](admin.md#keys)). A minted pair is shown **once**, with the lines
+  that fit its scopes: `TRACEPAD_API_KEY` for every key, and the OpenTelemetry
+  and Langfuse variables only for a key with `ingest`, so a key that cannot
+  send is never offered to an exporter. The secret is stored as a hash and the
+  dialog says so rather than implying it can be found again.
   Deleting an account on the Server tab lists the keys it minted before it
   asks for the email.
 - **Danger zone** — erasing everything stored about one end user.

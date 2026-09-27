@@ -17,6 +17,10 @@ tracepad export --otlp --to http://collector:4318/v1/traces
 tracepad export --otlp --dir ./tracepad-export
 ```
 
+The command reads this server's archive, so its key needs the `read`
+[scope](api.md#scopes) — a key that holds `read` alone is enough, and the
+right one to hand a backup job.
+
 ## What it can and cannot carry
 
 The archive is bounded by the **raw retention window**
@@ -138,7 +142,7 @@ and any `tp-sk-…` in `OTEL_EXPORTER_OTLP_HEADERS`:
 ```
 $ tracepad export --otlp --to https://otlp.example.com/v1/traces \
     --header "authorization=Bearer $TRACEPAD_API_KEY"
-tracepad: --header Authorization carries a key of your Tracepad that this machine holds (--key, TRACEPAD_API_KEY, TRACEPAD_ADMIN_TOKEN or its _FILE, LANGFUSE_SECRET_KEY or OTEL_EXPORTER_OTLP_HEADERS); the receiver would get admin access to your project. --allow-tracepad-key does not change that: give the receiver its own credentials
+tracepad: --header Authorization carries a key of your Tracepad that this machine holds (--key, TRACEPAD_API_KEY, TRACEPAD_ADMIN_TOKEN or its _FILE, LANGFUSE_SECRET_KEY or OTEL_EXPORTER_OTLP_HEADERS); the receiver would get everything that key may do in your project. --allow-tracepad-key does not change that: give the receiver its own credentials
 ```
 
 An admin token shorter than 16 characters is looked for only as a whole word
@@ -301,6 +305,11 @@ TRACEPAD_URL=http://old:4318 TRACEPAD_API_KEY=tp-sk-old… \
     --header "authorization=Bearer tp-sk-new…"
 ```
 
+The two keys need different [scopes](api.md#scopes): the old server's reads
+its archive, so it needs `read`; the new server's receives spans, so it needs
+`ingest`, and a key minted with `ingest` alone is the one to give the
+receiver.
+
 Everything re-resolves through the receiving server's mapper: the sessions, the
 columns, the payloads, the trace and span ids. Two things to know:
 
@@ -317,7 +326,7 @@ columns, the payloads, the trace and span ids. Two things to know:
 
 The command is a client of two endpoints, and so can anything else be — a
 backup job, a script, a second Tracepad. They are project-scoped reads under the
-project's own keys, with no admin token involved, and to an editor or an owner
+project's own keys that hold `read`, with no admin token involved, and to an editor or an owner
 signed in to the interface. A **viewer** is refused: the archive is the bulk
 way out of a project, every body whole, and taking a project's data out is an
 editor's act, like its retention windows and its keys:

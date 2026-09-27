@@ -11,15 +11,22 @@ required.
 
 ## Endpoints
 
-| Method | Path | Purpose |
-|---|---|---|
-| `GET` | `/api/v1/prompts` | List names, with where their labels point |
-| `GET` | `/api/v1/prompts/{name}` | Fetch one version, by label, by version, or the latest |
-| `POST` | `/api/v1/prompts/{name}/versions` | Append a version |
-| `GET` | `/api/v1/prompts/{name}/versions` | List a name's versions |
-| `PUT` | `/api/v1/prompts/{name}/labels/{label}` | Create or move a label |
-| `DELETE` | `/api/v1/prompts/{name}/labels/{label}` | Remove a label |
-| `DELETE` | `/api/v1/prompts/{name}` | Delete a name with every version and label |
+| Method | Path | Purpose | A key needs |
+|---|---|---|---|
+| `GET` | `/api/v1/prompts` | List names, with where their labels point | `read` |
+| `GET` | `/api/v1/prompts/{name}` | Fetch one version, by label, by version, or the latest | any scope |
+| `POST` | `/api/v1/prompts/{name}/versions` | Append a version | `write` |
+| `GET` | `/api/v1/prompts/{name}/versions` | List a name's versions | `read` |
+| `PUT` | `/api/v1/prompts/{name}/labels/{label}` | Create or move a label | `write` |
+| `DELETE` | `/api/v1/prompts/{name}/labels/{label}` | Remove a label | `write` |
+| `DELETE` | `/api/v1/prompts/{name}` | Delete a name with every version and label | `write` |
+
+The last column is the [scope](api.md#scopes) a key must hold. Fetching one
+prompt takes any key, because an application fetches its prompts at run time
+with the only key it has — an `ingest` key — and it ships the text it fetches
+anyway. Listing the names, a name's versions and the
+[diff between two](api.md#prompt-version-diff) take `read`; every change takes
+`write`.
 
 Prompt and label names match `^[A-Za-z0-9][A-Za-z0-9._-]*$` and are at most 200
 characters — one URL path segment, no escaping. `latest` is reserved as a label
@@ -264,7 +271,8 @@ response = client.messages.create(model=prompt["config"]["model"], messages=mess
 
 Not `m["content"].format(**variables)`: `str.format` reads more than names —
 `{q:>50000000}` pads to a width, `{user.email}` walks an attribute — and the
-body is written by whoever holds the project key, not by the application. The
+body is written by whoever may change prompts — an editor, or a key with
+`write` — not by the application. The
 SDKs substitute names the same way.
 
 Deploying a new prompt is then a label move, not a release.
@@ -290,6 +298,7 @@ button here is one of the requests on this page. See [ui.md](ui.md#prompts).
 | `200` | The read, the label move, the label removal, or the deletion — or its dry run — succeeded. |
 | `400` | Validation: a type mismatch, a malformed name, an unknown field or parameter, `latest` used as a label, a `confirm` that does not echo the name. |
 | `401` | Unknown credentials. |
+| `403` | A key without the scope the route needs ([api.md](api.md#scopes)). |
 | `404` | No such prompt, version or label in this project. |
 | `409` | `expect_version` disagrees with where the name actually is; nothing was written, and the body says where that is. |
 | `413` | The body is over `TRACEPAD_MAX_BODY_BYTES`. |

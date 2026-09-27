@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -16,10 +17,42 @@ import (
 // "which program holds this key, and is it still in use" has an answer before
 // somebody revokes it.
 
-// AllScopes is what every key may do until a mint can choose (spec 045 #5): the
-// canonical spelling of the three scopes, in the order the schema's CHECK
-// lists them.
+// The three things a key may be minted to do (spec 045 #1).
+const (
+	ScopeIngest = "ingest"
+	ScopeRead   = "read"
+	ScopeWrite  = "write"
+)
+
+// scopeOrder is the three in their canonical order: the order the schema's
+// CHECK spells every combination in, and the order every answer lists them
+// in. Unexported, so that no importer can change which words a mint accepts.
+var scopeOrder = [...]string{ScopeIngest, ScopeRead, ScopeWrite}
+
+// AllScopes is what a key the server makes by itself may do, and what every
+// key that predates scopes was given (spec 045 #5): the three, spelled as the
+// column stores them.
 const AllScopes = "ingest read write"
+
+// CanonicalScopes spells a set of scopes as the column stores it — the words
+// in the canonical order, each once — or reports false for a set that is empty
+// or holds a word that is not one of the three (spec 045 #6).
+func CanonicalScopes(words []string) (string, bool) {
+	held := map[string]bool{}
+	for _, word := range words {
+		if !slices.Contains(scopeOrder[:], word) {
+			return "", false
+		}
+		held[word] = true
+	}
+	canonical := make([]string, 0, len(scopeOrder))
+	for _, word := range scopeOrder {
+		if held[word] {
+			canonical = append(canonical, word)
+		}
+	}
+	return strings.Join(canonical, " "), len(canonical) > 0
+}
 
 // How a key came to exist (spec 045 #8).
 const (
@@ -190,24 +223,32 @@ func (s *Store) ProjectKeys(ctx context.Context, projectID string) ([]KeyInfo, e
 	return keys, rows.Err()
 }
 
-// ProjectKeyIDs lists the public halves of a project's keys, which is all a
-// revocation needs to know: whether the key is this project's, and whether it
-// is the last one.
-func (s *Store) ProjectKeyIDs(ctx context.Context, projectID string) ([]string, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT public_key FROM api_keys WHERE project_id = ?`, projectID)
+// ProjectKeyScopes is every key of a project, public key → scopes: all a
+// revocation needs to know to find the key and to decide whether it is the
+// last of its kind (LastOfItsKind).
+func (s *Store) ProjectKeyScopes(ctx context.Context, projectID string) (map[string][]string, error) {
+	return projectKeyScopes(ctx, s.db, projectID)
+}
+
+// projectKeyScopes reads a project's keys with their scopes, through the pool
+// or inside a write.
+func projectKeyScopes(ctx context.Context, q interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}, projectID string) (map[string][]string, error) {
+	rows, err := q.QueryContext(ctx, `SELECT public_key, scopes FROM api_keys WHERE project_id = ?`, projectID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read project keys: %w", err)
 	}
 	defer rows.Close()
-	ids := []string{}
+	keys := map[string][]string{}
 	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
+		var publicKey, scopes string
+		if err := rows.Scan(&publicKey, &scopes); err != nil {
 			return nil, err
 		}
-		ids = append(ids, id)
+		keys[publicKey] = strings.Fields(scopes)
 	}
-	return ids, rows.Err()
+	return keys, rows.Err()
 }
 
 // standing is the minter's relation to a project, most final first: an
@@ -263,8 +304,8 @@ func (s *Store) KeysMintedBy(ctx context.Context, accountID string) ([]MintedKey
 }
 
 // insertKey writes one key with everything the schema refuses to default: its
-// scopes and who made it (spec 045, Data contract).
-func insertKey(tx *sql.Tx, projectID string, keys KeyPair, name string, origin KeyOrigin) error {
+// scopes, spelled canonically, and who made it (spec 045, Data contract).
+func insertKey(tx *sql.Tx, projectID string, keys KeyPair, name, scopes string, origin KeyOrigin) error {
 	hash := sha256.Sum256([]byte(keys.Secret))
 	var createdBy any
 	if origin.AccountID != "" {
@@ -274,7 +315,7 @@ func insertKey(tx *sql.Tx, projectID string, keys KeyPair, name string, origin K
 		`INSERT INTO api_keys (public_key, secret_hash, project_id, name, scopes,
 		                       created_via, created_by, created_by_email)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		keys.PublicKey, hash[:], projectID, name, AllScopes,
+		keys.PublicKey, hash[:], projectID, name, scopes,
 		origin.Via, createdBy, origin.Email); err != nil {
 		return fmt.Errorf("create key for project %s: %w", projectID, err)
 	}

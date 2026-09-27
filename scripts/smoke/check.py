@@ -257,7 +257,7 @@ if generations:
 def api(path):
     request = urllib.request.Request(
         os.environ["SMOKE_HOST"] + path,
-        headers={"Authorization": "Bearer " + os.environ["SMOKE_SECRET_KEY"]})
+        headers={"Authorization": "Bearer " + os.environ.get("SMOKE_READ_KEY", os.environ["SMOKE_SECRET_KEY"])})
     with urllib.request.urlopen(request) as response:
         return response.read()
 

@@ -567,7 +567,7 @@ func TestExportHeadersAreOneValueWhateverTheCase(t *testing.T) {
 }
 
 // A Tracepad key is refused before the first POST, wherever it sits: the
-// receiver would get admin access to the project (spec 019 #14).
+// receiver would get everything that key may do in the project (spec 019 #14).
 func TestExportRefusesToSendATracepadKey(t *testing.T) {
 	h := newHarness(t)
 	seedArchive(t, h, 1)
@@ -584,7 +584,7 @@ func TestExportRefusesToSendATracepadKey(t *testing.T) {
 		{"--to", withUser},
 	} {
 		got := h.run(t.Context(), false, append([]string{"export", "--otlp"}, args...)...)
-		if got.code != ExitFailure || !strings.Contains(got.stderr, "admin access to your project") {
+		if got.code != ExitFailure || !strings.Contains(got.stderr, "everything that key may do in your project") {
 			t.Errorf("%q: exit = %d, stderr = %q, want a refusal", args, got.code, got.stderr)
 		}
 		if strings.Contains(got.stderr, "tp-sk-0123") || strings.Contains(got.stderr, testKey) {
@@ -963,7 +963,9 @@ func TestExportRoundTrip(t *testing.T) {
 	// Minted with the receiver's admin token, which is who mints keys
 	// (spec 045 #4).
 	destination.env["TRACEPAD_API_KEY"] = testAdminToken
-	minted := destination.run(t.Context(), false, "keys", "create", "--json")
+	// The receiving server's key needs ingest and nothing else (spec 045
+	// #16).
+	minted := destination.run(t.Context(), false, "keys", "create", "--scope", "ingest", "--json")
 	destination.env["TRACEPAD_API_KEY"] = testKey
 	if minted.code != ExitOK {
 		t.Fatalf("keys create: exit = %d, stderr = %s", minted.code, minted.stderr)

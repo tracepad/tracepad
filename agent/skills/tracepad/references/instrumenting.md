@@ -52,7 +52,9 @@ Two settings people lose an afternoon to:
 - Wrap each model call in the package's generation block, so the model, the
   token usage, the price, the input and the output land on one observation.
 - Put the key in the service's secret store or its untracked environment,
-  never in a committed file.
+  never in a committed file. A production service's key should hold the
+  `ingest` scope alone — it covers spans, scores and fetching a prompt, and
+  reads nothing. Ask the human for one; do not mint it.
 - A short-lived process — a script, a test, a CLI — must flush before it
   exits: the exporter batches. Python flushes at exit on its own; in Node call
   `await tracepad.flush()`; in Go, `shutdown` is the flush.
@@ -81,7 +83,8 @@ there after half a minute — check, in this order:
 
 1. The process flushed before it exited.
 2. The protocol is HTTP and the endpoint is base-or-path as above.
-3. The key is for the project you are reading with.
+3. The key is for the project you are reading with, and holds `ingest`: a key
+   without it is refused with `403`, which the exporter logs and drops.
 4. The server counted the batch at all — `tracepad system` shows ingest since
    the server started, per dialect, with the spans it skipped.
 

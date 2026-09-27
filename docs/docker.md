@@ -61,7 +61,8 @@ it: whoever can run `docker logs tracepad` — or read the log file under the
 daemon's directory, or receive whatever ships your logs elsewhere — can read
 that key next month. Treat the first key as exposed once it has been copied
 out, and rotate onto one that was never printed: in the web interface, under
-**Settings → Project → API keys**, mint a pair, move your applications onto it,
+**Settings → Project → API keys**, mint a pair — with the `ingest` scope alone
+for an application ([api.md](api.md#scopes)) — move your applications onto it,
 and revoke the printed one. A project key cannot do this for you — no key
 mints or revokes keys — so from a terminal it takes the admin token:
 
@@ -69,7 +70,7 @@ mints or revokes keys — so from a terminal it takes the admin token:
 read -rs TRACEPAD_API_KEY && export TRACEPAD_API_KEY   # paste TRACEPAD_ADMIN_TOKEN
 docker exec -e TRACEPAD_API_KEY tracepad /tracepad projects ls --url http://localhost:4318
 ID=…   # the project's id from that listing: the token reaches every project
-docker exec -e TRACEPAD_API_KEY tracepad /tracepad keys create --project $ID --url http://localhost:4318
+docker exec -e TRACEPAD_API_KEY tracepad /tracepad keys create --project $ID --scope ingest --url http://localhost:4318
 # move your applications onto the new pair, then revoke the printed one
 docker exec -e TRACEPAD_API_KEY tracepad /tracepad keys rm tp-pk-… --project $ID --url http://localhost:4318
 ```
@@ -128,7 +129,7 @@ docker run -d --name tracepad -v tracepad:/data -p 127.0.0.1:4318:4318 \
 export TRACEPAD_API_KEY="$(sed -n 's/^TRACEPAD_ADMIN_TOKEN=//p' tracepad.env)"
 docker exec -e TRACEPAD_API_KEY tracepad /tracepad projects ls --url http://localhost:4318
 ID=…   # the project's id from that listing
-docker exec -e TRACEPAD_API_KEY tracepad /tracepad keys create --project $ID --url http://localhost:4318
+docker exec -e TRACEPAD_API_KEY tracepad /tracepad keys create --project $ID --scope ingest --url http://localhost:4318
 ```
 
 Without one, an owner or editor signed in to the web interface mints a pair

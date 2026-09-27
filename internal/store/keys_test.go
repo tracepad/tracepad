@@ -128,7 +128,7 @@ func TestStandingMovesWithTheAccount(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		f.submit(t, &KeyCreate{ProjectID: f.project.ID, Keys: keys, Name: name, Origin: origin})
+		f.submit(t, &KeyCreate{ProjectID: f.project.ID, Keys: keys, Name: name, Scopes: AllScopes, Origin: origin})
 	}
 	mint("by the editor", OriginAccount(editor))
 	mint("by the owner", OriginAccount(owner))

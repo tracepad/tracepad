@@ -88,6 +88,25 @@ a provider it adopted is the application's to close. Call it where the
 application closes the rest — Go has no exit hook, and every server already
 has that place.
 
+### Which key
+
+The package sends one key for everything it does, so the key's
+[scopes](api.md#scopes) decide which calls go through:
+
+| Calls | The key needs |
+|---|---|
+| The exporter, [`Score`](#scores), [`Prompt`](#prompts) | `ingest` |
+| [`DeleteTrace`, `DeleteTraces`](#deleting-traces) | `write` |
+| The [eval harness](#evals): datasets, runs and their scores | `ingest`, `read`, `write` |
+
+A production application needs nothing but `ingest`, so the key to set as its
+`TRACEPAD_API_KEY` is one minted with that scope alone
+([admin.md](admin.md#keys)); the harness runs under a key of its own that holds
+all three. A call the key does not cover is the server's `403`, message
+included — `this key's scopes are ingest; DELETE /api/v1/traces needs write` —
+an `*HTTPError` from the calls that return errors, and a logged, dropped batch
+from the exporter and the score queue, as a `401` is.
+
 ## Steps
 
 ```go
@@ -387,7 +406,8 @@ kinds, and a trace cannot be cut out of one — and the preview says so in its
 The package is also the harness of [datasets.md](datasets.md): a dataset
 value, a run that pins a version, and a context inside which every span
 carries the run and the case it answered. It runs nothing — the cases are
-your program.
+your program. Its key holds `ingest`, `read` and `write`
+([Which key](#which-key)).
 
 ```go
 golden := tracepad.NewDataset("support-golden")

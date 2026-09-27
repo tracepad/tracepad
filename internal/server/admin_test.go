@@ -225,7 +225,7 @@ func TestRetentionPreviewCountsWhatWouldGo(t *testing.T) {
 func TestKeyRotation(t *testing.T) {
 	h := newAdminHarness(t)
 
-	rec := h.call(t, "POST", "/api/v1/projects/"+h.project.ID+"/keys", nil, asAdmin)
+	rec := h.call(t, "POST", "/api/v1/projects/"+h.project.ID+"/keys", mustJSON(t, map[string]any{"scopes": allScopes}), asAdmin)
 	expectStatus(t, rec, 201)
 	minted := decodeJSON[struct {
 		PublicKey string `json:"public_key"`

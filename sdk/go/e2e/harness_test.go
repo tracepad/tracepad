@@ -31,6 +31,10 @@ import (
 
 const key = "tp-sk-e2e-0000000000000000000000000000"
 
+// adminToken mints keys: that is a person's act or the admin token's, never
+// a key's (spec 045 #4).
+const adminToken = "tp-admin-e2e-00000000000000000000000000"
+
 // store is a running binary, and the read API as a person would call it.
 type store struct {
 	host string
@@ -96,7 +100,8 @@ func boot(binary, dir string) (stop func(), s *store, err error) {
 	cmd.Env = append(os.Environ(),
 		"TRACEPAD_DATA_DIR="+dir,
 		fmt.Sprintf("TRACEPAD_LISTEN=127.0.0.1:%d", port),
-		"TRACEPAD_PROJECTS=e2e:tp-pk-e2e:"+key)
+		"TRACEPAD_PROJECTS=e2e:tp-pk-e2e:"+key,
+		"TRACEPAD_ADMIN_TOKEN="+adminToken)
 	var output bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &output, &output
 	if err := cmd.Start(); err != nil {
@@ -127,6 +132,10 @@ func boot(binary, dir string) (stop func(), s *store, err error) {
 }
 
 func (s *store) try(method, path string, body any) (map[string]any, error) {
+	return s.as(key, method, path, body)
+}
+
+func (s *store) as(token, method, path string, body any) (map[string]any, error) {
 	var payload io.Reader
 	if body != nil {
 		encoded, _ := json.Marshal(body)
@@ -136,7 +145,7 @@ func (s *store) try(method, path string, body any) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+key)
+	req.Header.Set("Authorization", "Bearer "+token)
 	answer, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
@@ -160,6 +169,22 @@ func (s *store) call(method, path string, body any) map[string]any {
 		s.t.Fatal(err)
 	}
 	return answer
+}
+
+// mint is the secret of a new key of the project carrying only scopes.
+func (s *store) mint(scopes ...string) string {
+	s.t.Helper()
+	projects, _ := s.call("GET", "/api/v1/projects", nil)["projects"].([]any)
+	if len(projects) != 1 {
+		s.t.Fatalf("projects = %v, want the one", projects)
+	}
+	id, _ := projects[0].(map[string]any)["id"].(string)
+	minted, err := s.as(adminToken, "POST", "/api/v1/projects/"+id+"/keys", map[string]any{"scopes": scopes})
+	if err != nil {
+		s.t.Fatal(err)
+	}
+	secret, _ := minted["secret_key"].(string)
+	return secret
 }
 
 // trace is the trace with its payloads, once the export has landed.

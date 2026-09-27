@@ -469,8 +469,8 @@ func (k keyCheck) refuse(where, text, bare string) error {
 			}
 		}
 		if !k.allow && strings.Contains(strings.ToLower(candidate), "tp-sk-") {
-			return fmt.Errorf("%s carries a Tracepad project key; the receiver would get admin "+
-				"access to your project. Give it the receiver's own credentials, or pass "+
+			return fmt.Errorf("%s carries a Tracepad project key; the receiver would get everything "+
+				"that key may do in your project. Give it the receiver's own credentials, or pass "+
 				"--allow-tracepad-key if the receiver is a Tracepad server of yours and the key "+
 				"is its own", where)
 		}
@@ -483,8 +483,8 @@ func (k keyCheck) refuse(where, text, bare string) error {
 func ownKeyError(where string) error {
 	return fmt.Errorf("%s carries a key of your Tracepad that this machine holds (--key, "+
 		"TRACEPAD_API_KEY, TRACEPAD_ADMIN_TOKEN or its _FILE, LANGFUSE_SECRET_KEY or OTEL_EXPORTER_OTLP_HEADERS); "+
-		"the receiver would get admin access to your project. --allow-tracepad-key does not "+
-		"change that: give the receiver its own credentials", where)
+		"the receiver would get everything that key may do in your project. "+
+		"--allow-tracepad-key does not change that: give the receiver its own credentials", where)
 }
 
 // readings is text as the receiver might read it: as given, percent-decoded,

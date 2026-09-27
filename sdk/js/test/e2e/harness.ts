@@ -14,10 +14,12 @@ import { join } from 'node:path';
 
 export const BINARY = process.env.TRACEPAD_BINARY ?? '';
 export const KEY = 'tp-sk-e2e-0000000000000000000000000000';
+/** Minting a key is a person's act or the admin token's, never a key's (spec 045 #4). */
+export const ADMIN_TOKEN = 'tp-admin-e2e-00000000000000000000000000';
 
 export interface Store {
   host: string;
-  call(method: string, path: string, body?: unknown): Promise<unknown>;
+  call(method: string, path: string, body?: unknown, token?: string): Promise<unknown>;
   stop(): Promise<void>;
 }
 
@@ -31,6 +33,7 @@ export async function serve(): Promise<Store> {
       TRACEPAD_DATA_DIR: dataDir,
       TRACEPAD_LISTEN: `127.0.0.1:${port}`,
       TRACEPAD_PROJECTS: `e2e:tp-pk-e2e:${KEY}`,
+      TRACEPAD_ADMIN_TOKEN: ADMIN_TOKEN,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -40,10 +43,10 @@ export async function serve(): Promise<Store> {
 
   const store: Store = {
     host,
-    async call(method, path, body) {
+    async call(method, path, body, token = KEY) {
       const answer = await fetch(host + path, {
         method,
-        headers: { Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' },
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: body === undefined ? null : JSON.stringify(body),
       });
       const text = await answer.text();
@@ -62,6 +65,13 @@ export async function serve(): Promise<Store> {
     throw error;
   }
   return store;
+}
+
+/** The secret of a new key of the project carrying only `scopes`. */
+export async function mintKey(store: Store, ...scopes: string[]): Promise<string> {
+  const [project] = ((await store.call('GET', '/api/v1/projects')) as { projects: { id: string }[] }).projects;
+  const minted = await store.call('POST', `/api/v1/projects/${project!.id}/keys`, { scopes }, ADMIN_TOKEN);
+  return (minted as { secret_key: string }).secret_key;
 }
 
 export class HTTPError extends Error {

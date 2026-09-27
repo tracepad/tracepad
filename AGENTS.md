@@ -485,6 +485,24 @@ API. This file routes; it does not duplicate what specs and docs say.
   scores past the window whose session is gone (#8). The byte-scan test is
   the contract: no marker survives in the file, its log or a carved zstd
   frame.
+- ✅ Spec 045 (scoped project keys) shipped: schema 0023 rebuilds
+  `api_keys` with `name`, `scopes`, who minted each key and when it was last
+  used (written once a minute, #9). A key holds a set of three scopes —
+  `ingest`, `read`, `write` — and the route table gained a `Scope` column
+  beside the policy: the guard's fifth step admits a key that holds the
+  route's word, `any` or none, and answers the rest `403` with
+  `WWW-Authenticate: Bearer error="insufficient_scope"` (#2, #7, #13). No key
+  lists, mints or revokes keys, whatever its scopes (#4); a mint must say
+  what the key may do (#6), and every key that predates scopes, or that the
+  server makes itself, holds all three (#5). The endpoint map and the OpenAPI
+  document carry the word (`scope`, `x-tracepad-scope`); a key reads its own
+  scopes on its project's row (#12); revoking the last `ingest` key asks for
+  the echo (#11). `/mcp` is judged by the same guard (`stream`, `read`), and
+  its tools' reads carry the admitted caller rather than looking the key up
+  again (#21). The Keys card mints with checkboxes, the secret dialog and
+  `keys create --scope` print the lines that fit (#14, #15, #23), any key fetches a prompt (#25), and each
+  package's end-to-end suite holds an `ingest` key to the production path
+  (#16). The ceiling rose to 22,200 (#17).
 - ✅ Spec 032 (the Node package) shipped: `tracepad` on npm, source in
   `sdk/js/`, the Python package's surface with promises where Python has
   context managers and the same vocabulary on the wire — `init` adapts to

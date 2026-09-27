@@ -9,6 +9,12 @@
 # is between the package and the mapper of the same commit (spec 017 #12).
 #
 #   scripts/smoke/run.sh
+#   SMOKE_KEY_SCOPES=ingest scripts/smoke/run.sh
+#
+# By default every exporter sends with the project's first key, which holds all
+# three scopes. With SMOKE_KEY_SCOPES=ingest they send with a key minted for
+# ingest alone — what a production application should hold (spec 045 #16) —
+# and only the check reads back with the first one.
 #
 # Set SMOKE_PYTHON to an interpreter that already has requirements.txt
 # installed to skip the environment setup (that is what CI does).
@@ -56,6 +62,10 @@ export SMOKE_PUBLIC_KEY="tp-pk-smoke"
 export SMOKE_SECRET_KEY="tp-sk-smoke-000000000000000000000000"
 export SMOKE_HOST="http://127.0.0.1:$port"
 export SMOKE_OTLP_ENDPOINT="$SMOKE_HOST/v1/traces"
+key_scopes="${SMOKE_KEY_SCOPES:-all}"
+if [ "$key_scopes" = "ingest" ]; then
+    export TRACEPAD_ADMIN_TOKEN="tp-admin-smoke-000000000000000000000000"
+fi
 
 echo "==> starting tracepad on $TRACEPAD_LISTEN"
 "$work/tracepad" serve >"$work/server.log" 2>&1 &
@@ -71,6 +81,21 @@ if ! curl -fsS "$SMOKE_HOST/health" >/dev/null 2>&1; then
     echo "server did not come up:" >&2
     cat "$work/server.log" >&2
     exit 1
+fi
+
+if [ "$key_scopes" = "ingest" ]; then
+    echo "==> minting an ingest-only key for the exporters"
+    export SMOKE_READ_KEY="$SMOKE_SECRET_KEY"
+    project_id="$(curl -fsS -H "Authorization: Bearer $SMOKE_SECRET_KEY" "$SMOKE_HOST/api/v1/projects" |
+        python3 -c 'import json, sys; print(json.load(sys.stdin)["projects"][0]["id"])')"
+    minted="$(curl -fsS -H "Authorization: Bearer $TRACEPAD_ADMIN_TOKEN" -H 'Content-Type: application/json' \
+        -d '{"scopes": ["ingest"], "name": "smoke"}' "$SMOKE_HOST/api/v1/projects/$project_id/keys")"
+    SMOKE_PUBLIC_KEY="$(printf '%s' "$minted" | python3 -c 'import json, sys; print(json.load(sys.stdin)["public_key"])')"
+    SMOKE_SECRET_KEY="$(printf '%s' "$minted" | python3 -c 'import json, sys; print(json.load(sys.stdin)["secret_key"])')"
+    export SMOKE_PUBLIC_KEY SMOKE_SECRET_KEY
+elif [ "$key_scopes" != "all" ]; then
+    echo "SMOKE_KEY_SCOPES must be all or ingest, got $key_scopes" >&2
+    exit 2
 fi
 
 echo "==> exporting with opentelemetry-sdk"

@@ -10,23 +10,27 @@ happens until it is confirmed by name**.
 ## Who may ask
 
 Three kinds of caller reach this surface: a project key, a person signed in
-with an [account](accounts.md), and `TRACEPAD_ADMIN_TOKEN`.
+with an [account](accounts.md), and `TRACEPAD_ADMIN_TOKEN`. What a key may do
+is the [scopes](api.md#scopes) it was minted with — `ingest`, `read`, `write`,
+any combination — so the key's column is three:
 
-| | Project key (`tp-sk-…`) | `viewer` | `editor` | Owner | `TRACEPAD_ADMIN_TOKEN` |
-|---|---|---|---|---|---|
-| Read a project and its windows | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Change its retention | ✅ | ❌ | ✅ | ✅ | ✅ |
-| Create, list and revoke its keys | ❌ | ❌ | ✅ | ✅ | ✅ |
-| Erase a user's data in it | ✅ | ❌ | ✅ | ✅ | ✅ |
-| Anything in another project | ❌ | ❌ | ❌ | ✅ | ✅ |
-| List every project | ❌ | ❌ | ❌ | ✅ | ✅ |
-| Create a project | ❌ | ❌ | ❌ | ✅ | ✅ |
-| Rename a project | ❌ | ❌ | ❌ | ✅ | ✅ |
-| **Delete or restore a project** | ❌ | ❌ | ❌ | ✅ | ✅ |
+| | Key with `ingest` | Key with `read` | Key with `write` | `viewer` | `editor` | Owner | `TRACEPAD_ADMIN_TOKEN` |
+|---|---|---|---|---|---|---|---|
+| Read a project and its windows | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Change its retention | ❌ | ❌ | ✅ | ❌ | ✅ | ✅ | ✅ |
+| Create, list and revoke its keys | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ |
+| Erase a user's data in it | ❌ | ❌ | ✅ | ❌ | ✅ | ✅ | ✅ |
+| Anything in another project | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ |
+| List every project | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ |
+| Create a project | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ |
+| Rename a project | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ |
+| **Delete or restore a project** | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ |
 
-A project's secret key is still the administrator of its own project. That is
-what keeps "retention changes without a restart" true in the default install,
-which has no admin token at all.
+A key that holds `write` is still the administrator of its own project. That
+is what keeps "retention changes without a restart" true in the default
+install, which has no admin token at all — the key it starts with holds all
+three scopes. A key minted for an application holds `ingest` alone and can
+change none of this; one minted for an agent holds `read` and can look at it.
 
 Its keys are the exception: **no project key lists, mints or revokes keys**,
 and it is answered `403` on those three routes. A key that could mint keys
@@ -121,17 +125,17 @@ on stderr and exit code 1.
 
 | Method | Path | |
 |---|---|---|
-| `GET` | `/api/v1/projects` | What the caller can reach: all with the token or an owner, its own with a key, its memberships with a member's session. `?include=deleted` (owner or token). `?activity=24h` adds `traces_24h` to every row — the traces of the last 24 hours, counted the way `/api/v1/stats` counts them; a soft-deleted project carries `0`. Any other value is a `400`. |
+| `GET` | `/api/v1/projects` | What the caller can reach: all with the token or an owner, its own with a key, its memberships with a member's session. A key's row carries `key: {public_key, name, scopes}` — the key itself, whatever its scopes. `?include=deleted` (owner or token). `?activity=24h` adds `traces_24h` to every row — the traces of the last 24 hours, counted the way `/api/v1/stats` counts them; a soft-deleted project carries `0`. Any other value is a `400`. |
 | `POST` | `/api/v1/projects` | Create; the secret is in the response and nowhere else. |
-| `GET` | `/api/v1/projects/{id}` | One project with its windows. |
-| `PATCH` | `/api/v1/projects/{id}` | `name` (owner or token), `retention_days`, `raw_retention_days`, `stats_retention_days`. |
+| `GET` | `/api/v1/projects/{id}` | One project with its windows; for a key, with `key` as above. |
+| `PATCH` | `/api/v1/projects/{id}` | `name` (owner or token), `retention_days`, `raw_retention_days`, `stats_retention_days` (a key needs `write`). |
 | `DELETE` | `/api/v1/projects/{id}` | Soft delete; `202` with the purge date. |
 | `POST` | `/api/v1/projects/{id}/restore` | Undo it inside the grace window. |
-| `GET` | `/api/v1/projects/{id}/keys` | Public keys, who minted each and when it was last used. Not with a project key. |
-| `POST` | `/api/v1/projects/{id}/keys` | Mint a pair, optionally `{"name": …}`. Not with a project key. |
+| `GET` | `/api/v1/projects/{id}/keys` | Public keys, their scopes, who minted each and when it was last used. Not with a project key. |
+| `POST` | `/api/v1/projects/{id}/keys` | Mint a pair: `{"scopes": [...], "name": …}`, the name optional. Not with a project key. |
 | `DELETE` | `/api/v1/projects/{id}/keys/{public_key}` | Revoke one. Not with a project key. |
-| `DELETE` | `/api/v1/projects/{id}/users/{user_id}/data` | Erase one user's parsed data. |
-| `DELETE` | `/api/v1/traces/{id}` | Delete one trace — an editor's route, on the data plane. See [below](#deleting-traces). |
+| `DELETE` | `/api/v1/projects/{id}/users/{user_id}/data` | Erase one user's parsed data (a key needs `write`). |
+| `DELETE` | `/api/v1/traces/{id}` | Delete one trace — an editor's route, on the data plane, and a `write` key's. See [below](#deleting-traces). |
 | `DELETE` | `/api/v1/traces?…&to=` | Delete every trace a listing filter matches before `to`, in rounds. |
 | `GET` | `/api/v1/projects/{id}/members` | Who has a role in this project. See [accounts.md](accounts.md#managing-accounts). |
 
@@ -152,11 +156,21 @@ tracepad projects restore $ID
 ```
 
 The four that move a project in or out of existence — `create`, `rename`, `rm`
-and `restore` — take the admin token; the rest take a project key. The `keys`
-commands take the admin token too.
+and `restore` — take the admin token; `ls` and `show` take any project key.
+The `keys` commands take the admin token too.
 
-`projects create` answers with the project and a fresh key pair. The secret is
-printed once, because only its hash is ever stored:
+`projects show` run with a key names the key and what it may do:
+
+```
+project checkout-service
+  id          9f2c…
+  …
+  key         tp-pk-81c0… (checkout api): ingest
+```
+
+`projects create` answers with the project and a fresh key pair, which holds
+all three scopes. The secret is printed once, because only its hash is ever
+stored:
 
 ```
 project checkout-service created (9f2c…)
@@ -183,7 +197,7 @@ project key manages keys:
 ```sh
 export TRACEPAD_API_KEY=$TRACEPAD_ADMIN_TOKEN
 tracepad projects ls                                      # the project's id
-tracepad keys create --project $ID --name "checkout api"  # mint the new pair
+tracepad keys create --project $ID --scope ingest --name "checkout api"  # mint the new pair
 # move your SDKs onto it
 tracepad keys ls --project $ID                            # wait until the old one goes quiet
 tracepad keys rm tp-pk-old… --project $ID                 # revoke it
@@ -191,6 +205,28 @@ tracepad keys rm tp-pk-old… --project $ID                 # revoke it
 
 The token reaches every project, so it needs `--project` as soon as there is
 more than one; with a single project the command finds it by itself.
+
+Every key is minted with its **scopes** — one or more of `ingest`, `read` and
+`write` ([api.md](api.md#scopes)) — and `POST /api/v1/projects/{id}/keys`
+requires them:
+
+```sh
+curl -X POST -H "Authorization: Bearer $TRACEPAD_ADMIN_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"scopes": ["ingest"], "name": "checkout api"}' \
+  "localhost:4318/api/v1/projects/$ID/keys"
+```
+
+A missing or empty `scopes`, or a word that is not one of the three, is a
+`400` that names them; a word given twice counts once. Mint for the program
+that will hold the key: `ingest` for a production application, `read` for an
+agent or an MCP client, all three for the eval harness or an operator's
+script. **A key's scopes never change.** Widening a key would widen every copy
+of it, the one that got away included; to narrow or widen one, mint a new key
+with the scopes you want, move the program onto it, and revoke the old — the
+same steps as the rotation above. Every key that predates scopes holds all
+three, and so does the key a project is created with; replacing those with
+narrower ones is the rotation to do first.
 
 Revoking a key also voids the media upload URLs it obtained
 ([media.md](media.md#the-langfuse-sdks-media-channel)): an upload the key
@@ -208,7 +244,7 @@ The listing says, for each key, who minted it and when it was last used:
 ```
 PUBLIC KEY           NAME          SCOPES             CREATED              CREATED BY                   LAST USED
 tp-pk-3f9a…          -             ingest,read,write  2026-09-01 08:00:00  server                       2026-09-26 17:41:12
-tp-pk-81c0…          checkout api  ingest,read,write  2026-09-26 17:30:05  ed@example.com (editor)      never
+tp-pk-81c0…          checkout api  ingest             2026-09-26 17:30:05  ed@example.com (editor)      never
 ```
 
 - **Created by** is the account that minted it, with its email as it was then
@@ -231,9 +267,12 @@ longer manage keys in the project, and deleting an account shows the keys it
 minted before it asks for the email. Rotate those deliberately: mint, move,
 revoke.
 
-Revoking a project's **last** key leaves a project that cannot ingest. That is
-allowed — an owner or editor can mint a new pair in the interface, and so can
-the admin token — but it asks for the confirmation first. `TRACEPAD_PROJECTS`
+Revoking a project's **last** key leaves a project that cannot ingest, and so
+does revoking the last key that carries **`ingest`** while `read` or `write`
+keys remain. Both are allowed — an owner or editor can mint a new pair in the
+interface, and so can the admin token — but both ask for the confirmation
+first: the dry run asks for the project's name, and for the last `ingest` key
+its note says that ingest stops until another key with that scope is minted. `TRACEPAD_PROJECTS`
 does not re-add it: on restart it creates the projects it names that do not
 exist and leaves an existing project's keys as they are.
 

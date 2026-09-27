@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
-	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -20,7 +19,6 @@ import (
 
 	"github.com/tracepad/tracepad/internal/config"
 	"github.com/tracepad/tracepad/internal/store"
-	"github.com/tracepad/tracepad/internal/storetest"
 )
 
 // HTTP hardening (spec 001 Decisions 14–17, spec 028 Decisions 29 and 30, spec 003
@@ -897,39 +895,20 @@ func TestTheStreamRefusesWhatTheReadAPIWould(t *testing.T) {
 
 // TestTheStreamWantsAKeyThatMayRead: every MCP tool is a read, so a key minted
 // without the read scope is refused before its stream lifts a deadline, not on
-// each tool call after. No mint can choose scopes yet (spec 045 #5), so the
-// key is narrowed in the database the way a later mint will write it.
+// each tool call after — with the guard's answer, which names the scope it
+// lacks (spec 045 #7, #13).
 func TestTheStreamWantsAKeyThatMayRead(t *testing.T) {
-	captureLogs(t)
-	path := storetest.Path(t)
-	st, err := store.Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { st.Close() })
-	if _, err := st.CreateProject("test", store.KeyPair{PublicKey: testPublic, Secret: testSecret}); err != nil {
-		t.Fatal(err)
-	}
-	db, err := sql.Open("sqlite", path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	if _, err := db.Exec(`UPDATE api_keys SET scopes = 'ingest' WHERE public_key = ?`, testPublic); err != nil {
-		t.Fatal(err)
-	}
-
-	s := New(&config.Config{Listen: ":0", MaxBodyBytes: config.DefaultMaxBodyBytes, MCP: true}, "test", st, nil, nil)
+	h := newAccountHarness(t)
+	ingestOnly := h.mint(t, "ingest").SecretKey
 	var ran bool
-	stream := s.mcpStream(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { ran = true }))
+	stream := h.server.mcpStream(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { ran = true }))
 	r := httptest.NewRequest("POST", "/mcp", strings.NewReader(`{}`))
-	r.Header.Set("Authorization", "Bearer "+testSecret)
+	r.Header.Set("Authorization", "Bearer "+ingestOnly)
 	rec := httptest.NewRecorder()
 	stream.ServeHTTP(rec, r)
-	expectStatus(t, rec, http.StatusUnauthorized)
-	if rec.Header().Get("WWW-Authenticate") == "" || ran {
-		t.Errorf("an ingest-only key: challenge %q, handler ran = %v; want a challenge and nothing run",
-			rec.Header().Get("WWW-Authenticate"), ran)
+	expectError(t, rec, http.StatusForbidden, "this key's scopes are ingest; POST /mcp needs read")
+	if got := rec.Header().Get("WWW-Authenticate"); got != `Bearer error="insufficient_scope", scope="read"` || ran {
+		t.Errorf("an ingest-only key: challenge %q, handler ran = %v; want the scope named and nothing run", got, ran)
 	}
 }
 

@@ -717,11 +717,11 @@ class Api {
 		return this.#json<KeyList>(`/api/v1/projects/${id}/keys`, { signal });
 	}
 
-	/** A name says which program will hold the key (spec 045 #6). */
-	createKey(id: string, name = '') {
+	/** The scopes are required; a name says which program will hold the key (spec 045 #6). */
+	createKey(id: string, scopes: Key['scopes'], name = '') {
 		return this.#json<NewKey>(`/api/v1/projects/${id}/keys`, {
 			method: 'POST',
-			body: name ? { name } : undefined
+			body: name ? { scopes, name } : { scopes }
 		});
 	}
 

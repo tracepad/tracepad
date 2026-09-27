@@ -47,8 +47,9 @@ tracepad health
 ```
 
 - If the key is not set and no Tracepad MCP server is connected, **ask the
-  human** for the URL and the key. Do not look for one in `.env` files, shell
-  history, config files or the database.
+  human** for the URL and a key: scope `read` to look, all three to run evals or
+  change anything (a `403` *… needs X* asks for X). Do not look for one in
+  `.env` files, shell history, config or the database, nor mint one yourself.
 - Never print, echo, log or commit a secret key — not in a command you show,
   not in a file you write. Refer to it as `$TRACEPAD_API_KEY`.
 - A key belongs to one project; everything you read and write is that
@@ -62,7 +63,7 @@ tracepad health
    (no such trace, bad key, server down, or a destructive command stopped at
    its dry run), `2` the command was typed wrong.
 2. **MCP tools, when the client has Tracepad connected.** Same JSON as the
-   CLI. They only read: nothing reachable through MCP writes or deletes.
+   CLI. They only read, with a `read` key: nothing through MCP writes.
 3. **The HTTP API, for what neither covers.** Find the route in `GET /api/v1`
    and its parameters in `GET /api/v1/openapi.json`; send the key as
    `Authorization: Bearer $TRACEPAD_API_KEY`.
@@ -158,9 +159,8 @@ tracepad scores add --trace <trace-id> --name helpful --value 1
 Deleting traces, a prompt, a dataset, a queue or a project, shrinking
 retention, erasing a user's data: each is a dry run until confirmed, and
 **you never confirm on your own initiative.** A few removals have no dry run
-and act at once — revoking a key (unless it is the project's last), deleting a
-run, a score config or a score, removing a prompt label — so ask before
-running those at all, naming what will go.
+and act at once — deleting a run, a score config or a score, removing a
+prompt label — so ask before running those at all, naming what will go.
 
 1. Run the command **without** `--yes` (over the API, without `?confirm=`).
    The server answers with what it would remove: counts per kind, the runs it

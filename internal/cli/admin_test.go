@@ -45,13 +45,17 @@ func TestProjectsListAndShow(t *testing.T) {
 		t.Errorf("projects ls printed:\n%s\nwant the project and its window", out.stdout)
 	}
 
-	// With no --project, one reachable project answers the question itself.
+	// With no --project, one reachable project answers the question itself,
+	// and says what the key it was asked with may do (spec 045 #12, #15).
 	out = h.run(t.Context(), true, "projects", "show")
 	if out.code != ExitOK {
 		t.Fatalf("projects show exited %d: %s", out.code, out.stderr)
 	}
 	if !strings.Contains(out.stdout, "kept forever") {
 		t.Errorf("projects show printed:\n%s\nwant the retention policy spelled out", out.stdout)
+	}
+	if !strings.Contains(out.stdout, "key         tp-pk-test: ingest, read, write") {
+		t.Errorf("projects show printed:\n%s\nwant the key's scopes", out.stdout)
 	}
 
 	// Piped, it is the API's own bytes (spec 004 #1).
@@ -139,7 +143,7 @@ func TestEmptyProjectFlagIsRefusedEverywhere(t *testing.T) {
 	for _, args := range [][]string{
 		{"projects", "show"},
 		{"keys", "ls"},
-		{"keys", "create"},
+		{"keys", "create", "--scope", "read"},
 		{"keys", "rm", "tp-pk-test"},
 		{"retention", "show"},
 		{"retention", "set", "--days", "30", "--yes"},
@@ -274,7 +278,7 @@ func TestKeyRotationThroughTheCLI(t *testing.T) {
 	h := newAdminCLI(t)
 	h.asAdmin()
 
-	out := h.run(t.Context(), false, "keys", "create", "--name", "checkout api")
+	out := h.run(t.Context(), false, "keys", "create", "--scope", "ingest,read,write", "--name", "checkout api")
 	if out.code != ExitOK {
 		t.Fatalf("keys create exited %d: %s", out.code, out.stderr)
 	}
@@ -334,13 +338,75 @@ func TestKeyRotationThroughTheCLI(t *testing.T) {
 	}
 }
 
+// TestKeysCreateAsksWhatTheKeyMayDo: without --scope the mint is a usage
+// error naming the three, before any request; with it the words are sent as
+// given, and what is printed follows what the key may do (spec 045 #14, #15).
+func TestKeysCreateAsksWhatTheKeyMayDo(t *testing.T) {
+	h := newAdminCLI(t)
+	h.asAdmin()
+	for _, args := range [][]string{{"keys", "create"}, {"keys", "create", "--scope", ""},
+		{"keys", "create", "--scope", " , "}, {"keys", "create", "--name", "no scope"}} {
+		out := h.run(t.Context(), true, args...)
+		if out.code != ExitUsage {
+			t.Errorf("%q exited %d, want %d: %s", args, out.code, ExitUsage, out.stderr)
+		}
+		for _, word := range []string{"--scope", "ingest", "read", "write"} {
+			if !strings.Contains(out.stderr, word) {
+				t.Errorf("%q: stderr = %q, want it to name %s", args, out.stderr, word)
+			}
+		}
+	}
+	if keys, _ := h.store.ProjectKeys(t.Context(), h.projectID(t)); len(keys) != 1 {
+		t.Fatalf("keys = %+v, want only the harness's: a usage error mints nothing", keys)
+	}
+
+	out := h.run(t.Context(), false, "keys", "create", "--scope", "read, ingest")
+	var minted struct {
+		PublicKey string   `json:"public_key"`
+		Scopes    []string `json:"scopes"`
+	}
+	if err := json.Unmarshal([]byte(out.stdout), &minted); err != nil || out.code != ExitOK {
+		t.Fatalf("keys create --scope read,ingest = %d %q %v", out.code, out.stdout, err)
+	}
+	if strings.Join(minted.Scopes, ",") != "ingest,read" {
+		t.Errorf("scopes = %v, want both, in the server's order", minted.Scopes)
+	}
+
+	// Repeated, the flag adds rather than replaces: a second --scope that
+	// silently dropped the first would mint a key without ingest.
+	out = h.run(t.Context(), false, "keys", "create", "--scope", "ingest", "--scope", "write")
+	if err := json.Unmarshal([]byte(out.stdout), &minted); err != nil || out.code != ExitOK {
+		t.Fatalf("keys create --scope ingest --scope write = %d %q %v", out.code, out.stdout, err)
+	}
+	if strings.Join(minted.Scopes, ",") != "ingest,write" {
+		t.Errorf("a repeated --scope minted %v, want both", minted.Scopes)
+	}
+
+	// An ingest key is offered to an exporter; a read key is not.
+	out = h.run(t.Context(), true, "keys", "create", "--scope", "ingest")
+	if !strings.Contains(out.stdout, "TRACEPAD_API_KEY=") || !strings.Contains(out.stdout, "LANGFUSE_SECRET_KEY=") {
+		t.Errorf("an ingest key printed:\n%s\nwant the package and Langfuse lines", out.stdout)
+	}
+	out = h.run(t.Context(), true, "keys", "create", "--scope", "read")
+	if !strings.Contains(out.stdout, "TRACEPAD_API_KEY=") || strings.Contains(out.stdout, "LANGFUSE") ||
+		!strings.Contains(out.stdout, "scopes: read") || !strings.Contains(out.stdout, "public key: tp-pk-") {
+		t.Errorf("a read key printed:\n%s\nwant its public key, its scope and TRACEPAD_API_KEY alone", out.stdout)
+	}
+
+	// A word the server does not know is the server's 400, verbatim.
+	out = h.run(t.Context(), true, "keys", "create", "--scope", "admin")
+	if out.code != ExitFailure || !strings.Contains(out.stderr, `"scopes" must list`) {
+		t.Errorf("--scope admin = %d %q, want the server's refusal", out.code, out.stderr)
+	}
+}
+
 // TestKeysNeedMoreThanAKey: every `keys` command run with a project key prints
 // the server's refusal and exits 1, as every refusal does (spec 045 #4).
 func TestKeysNeedMoreThanAKey(t *testing.T) {
 	h := newAdminCLI(t)
 	for _, args := range [][]string{
 		{"keys", "ls"},
-		{"keys", "create", "--name", "mine"},
+		{"keys", "create", "--scope", "ingest", "--name", "mine"},
 		{"keys", "rm", "tp-pk-test", "--yes"},
 	} {
 		out := h.run(t.Context(), false, args...)

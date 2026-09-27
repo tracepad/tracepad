@@ -18,6 +18,25 @@ export TRACEPAD_API_KEY=tp-sk-…
 
 `--url` and `--key` override the environment on any command.
 
+What a command may do is the key's [scopes](api.md#scopes). Everything that
+reads — `traces`, `tail`, `sessions`, `users`, `scores ls`, `scores trend`,
+`stats`, `facets`, `system`, the listings and `show`s of prompts, datasets,
+runs, score configs and queues, `export` — needs `read`; `scores add` needs
+`ingest`; everything that changes something — `traces rm`, `scores rm`,
+`prompts push`, `label` and `rm`, the writes of datasets, runs, score configs
+and queues, `queues next` among them (it claims an item), `retention set`,
+`users rm-data` — needs `write`. `projects ls`, `projects show`,
+`retention show` and `prompts get` work with any key. A key without the scope
+a command needs prints the server's `403` and exits 1:
+
+```
+$ tracepad traces ls
+tracepad: this key's scopes are ingest; GET /api/v1/traces needs read
+```
+
+A key with `read` alone is the one for an agent that only looks; `projects
+show` says what the key in hand holds ([Administration](#administration)).
+
 ## Output
 
 On a terminal you get a table. Anywhere else — a pipe, a file, a subprocess —
@@ -712,7 +731,7 @@ are covered in [admin.md](admin.md), [retention.md](retention.md) and
 
 ```sh
 tracepad projects ls
-tracepad keys create --project $ID --name "checkout api"   # admin token
+tracepad keys create --project $ID --scope ingest --name "checkout api"   # admin token
 tracepad retention set --days 90
 tracepad retention set --media placeholder
 tracepad users rm-data user-4711
@@ -735,6 +754,24 @@ key's name, scopes, creation date, who minted it — `email (standing)`, `admin
 token`, `server` or `unknown` — and when it was last used, which is written
 once a minute ([admin.md](admin.md#keys)). `keys create --name` says which
 program will hold the key.
+
+`keys create --scope` says what the key may do, and is required: one or more
+of `ingest`, `read` and `write`, comma-separated or with the flag repeated —
+`--scope ingest` for a production application, `--scope read` for an agent,
+`--scope ingest,read,write` for an eval harness. Without it the command is a
+usage error (exit 2) that lists the three, and sends nothing. The secret is
+printed once, after the public key and the scopes, with the lines that fit
+them: `TRACEPAD_API_KEY` for every key — the `tracepad` packages export with it
+as well as read — and, when the key holds `ingest`, the `LANGFUSE_*` pair. A key's
+scopes never change; to change what a program may do, mint a new key and
+revoke the old.
+
+`projects show` run with a project key ends with the key itself — its public
+key, its name and its scopes:
+
+```
+  key         tp-pk-81c0… (checkout api): ingest
+```
 
 `retention show` prints the project's media setting beside the three windows,
 and `retention set --media store|placeholder` changes it

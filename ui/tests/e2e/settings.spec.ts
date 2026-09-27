@@ -148,6 +148,60 @@ test('a minted key is shown once, and can then be revoked', async ({ page }) => 
 	await expect(rows).toHaveCount(1);
 });
 
+// What the mint form's default means on the wire (spec 045 #14, Testing #15):
+// the key an owner mints without touching the scopes sends spans and reads
+// nothing, and the server — not the page — is what says so.
+test('an ingest key minted in Settings sends a span and cannot list traces', async ({ page }) => {
+	const own = await createProject('ingestkey');
+	await signInAsOwner(page, own.id);
+	await page.goto('/settings/project');
+
+	await expect(page.getByRole('checkbox', { name: /^ingest/ })).toBeChecked();
+	await page.getByLabel('Which program will hold the new key').fill('production app');
+	await page.getByRole('button', { name: 'Mint a key pair' }).click();
+
+	const dialog = page.getByRole('dialog', { name: 'Your new key pair' });
+	await expect(dialog).toContainText('OTEL_EXPORTER_OTLP_HEADERS');
+	const secret = /TRACEPAD_API_KEY=(tp-sk-\S+)/.exec((await dialog.textContent()) ?? '')?.[1];
+	expect(secret).toBeTruthy();
+	await dialog.getByRole('button', { name: 'I have copied it' }).click();
+	await expect(page.getByRole('row').filter({ hasText: 'production app' })).toContainText('ingest');
+
+	const { baseURL } = state();
+	const at = (BigInt(Date.now()) - 60_000n) * 1_000_000n;
+	const span = await fetch(`${baseURL}/v1/traces`, {
+		method: 'POST',
+		headers: { Authorization: `Bearer ${secret}`, 'Content-Type': 'application/json' },
+		body: JSON.stringify({
+			resourceSpans: [
+				{
+					resource: { attributes: [] },
+					scopeSpans: [
+						{
+							spans: [
+								{
+									traceId: 'a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5',
+									spanId: 'a5a5a5a5a5a5a5a5',
+									name: 'ingest-key',
+									startTimeUnixNano: String(at),
+									endTimeUnixNano: String(at + 1_000_000n)
+								}
+							]
+						}
+					]
+				}
+			]
+		})
+	});
+	expect(span.status).toBe(200);
+
+	const listing = await fetch(`${baseURL}/api/v1/traces`, {
+		headers: { Authorization: `Bearer ${secret}` }
+	});
+	expect(listing.status).toBe(403);
+	expect(((await listing.json()) as { error: string }).error).toContain('needs read');
+});
+
 test("erasing a user's data previews it and echoes the user id", async ({ page }) => {
 	const own = await createProject('erasure');
 	await openProjectTab(page, own.account);

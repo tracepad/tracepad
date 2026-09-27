@@ -10,13 +10,82 @@ response never quietly eats a context window.
 
 Authentication is the same as for ingest — `Authorization: Bearer <secret
 key>` or `Basic base64(<public key>:<secret key>)`. See
-[ingest.md](ingest.md#authentication). No `Content-Type` is required.
+[ingest.md](ingest.md#authentication). No `Content-Type` is required. What a
+key may read or change is its [scopes](#scopes).
 
 A browser sends a session cookie instead, and names the project it is asking
 about with `X-Tracepad-Project`; every route says which of the two — and which
 role — it takes, in one word. See [accounts.md](accounts.md#who-may-do-what).
 An `Authorization` header always wins over a cookie, so nothing below changes
 for a script.
+
+## Scopes
+
+A project key holds one or more of three **scopes**, chosen when it is minted
+and never changed afterwards:
+
+| Scope | What a key with it may do |
+|---|---|
+| `ingest` | What a running application does: send spans on both OTLP routes, use the Langfuse media channel, write scores (`POST /api/v1/scores`). Fetching one prompt (`GET /api/v1/prompts/{name}`) is open to every key, so an application's `ingest` key covers it without a scope of its own. |
+| `read` | Every read of the project's data, and nothing that changes it. |
+| `write` | Every change a key may make to the project: prompts, datasets and their items, runs, score configs, queues and the work in them — claiming the next item included — retracting a score, deleting traces, the retention windows and user-data erasure. |
+
+Any combination is a valid key, so which one to mint follows from the program
+that will hold it:
+
+| Program | Scopes |
+|---|---|
+| A production application: OTLP export, a Langfuse SDK, the `tracepad` packages' tracing, scores and prompt fetch | `ingest` |
+| An agent, the [MCP server](mcp.md), a dashboard, the CLI's read commands, the source of an [export](export.md) | `read` |
+| An online judge that reads traces and writes scores | `ingest`, `read` |
+| The [eval harness](datasets.md), a CI job, an operator's script | `ingest`, `read`, `write` |
+
+Every key that existed before scopes did holds all three, and so do the keys
+the server makes by itself: the first-start project's, those
+`TRACEPAD_PROJECTS` declares, and the key `POST /api/v1/projects` answers
+with. Every other key holds what it was minted with
+([admin.md](admin.md#keys)). No key, whatever its scopes, lists, mints or
+revokes keys.
+
+Every route names the scope it asks of a key — `ingest`, `read`, `write`, or
+`any` for every key, or `none` for no key at all — in the
+[endpoint map](#self-description), and as `x-tracepad-scope` on each operation
+of the OpenAPI document. `any` is the routes that need no credential,
+`GET /api/v1/projects`, `GET /api/v1/projects/{id}` and fetching one prompt;
+`none` is the session and owner routes and the three under
+`/api/v1/projects/{id}/keys`. Two are not what their method suggests:
+`GET /api/v1/queues/{name}/next` is `write`, because it claims an item, and
+`POST /api/v1/scores` is `ingest`, because an end user's thumbs-up is written
+by the application.
+
+A key without the scope a route needs is answered:
+
+```
+HTTP/1.1 403 Forbidden
+WWW-Authenticate: Bearer error="insufficient_scope", scope="read"
+
+{"error": "this key's scopes are ingest; GET /api/v1/traces needs read"}
+```
+
+The header is RFC 6750's, so a program can read the scope it lacks without
+parsing the sentence, and the sentence names the route's pattern, never the
+ids in the request. `403` rather than `401`: the key is good, and a retry will
+not grow a scope. A soft-deleted project's key keeps the answers it had —
+`401` everywhere but reading its project
+([retention.md](retention.md#deleting-a-project)).
+
+A key learns what it holds from its own project: `GET /api/v1/projects` and
+`GET /api/v1/projects/{id}` answer a key with its project's row plus
+
+```json
+"key": {"public_key": "tp-pk-…", "name": "checkout api", "scopes": ["ingest"]}
+```
+
+and `tracepad projects show` prints the same line.
+
+A session and the admin token never meet a scope: the role decides for a
+session ([accounts.md](accounts.md#who-may-do-what)), and the admin token
+reaches what [admin.md](admin.md#who-may-ask) says it does.
 
 ## Finding your way around
 
@@ -28,28 +97,28 @@ returns every endpoint with a one-line description. The machine-readable
 version is [`/api/v1/openapi.json`](#self-description), an OpenAPI 3.1
 document served without authentication.
 
-| Method | Path | Purpose |
-|---|---|---|
-| `GET` | `/api/v1/traces` | List traces, filtered and paginated |
-| `GET` | `/api/v1/traces/{id}` | One trace, observations as a tree |
-| `GET` | `/api/v1/traces/last` | The newest trace matching the filters, whole |
-| `DELETE` | `/api/v1/traces/{id}` | Delete one trace; a dry run until confirmed with its id |
-| `DELETE` | `/api/v1/traces?…&to=` | Delete every trace the filters match before `to`, in rounds; a dry run until confirmed with the project name |
-| `GET` | `/api/v1/observations/{id}/io` | One observation's payloads, whole |
-| `GET` | `/api/v1/sessions` | List sessions by most recent activity |
-| `GET` | `/api/v1/sessions/{id}` | One session: totals and traces |
-| `GET` | `/api/v1/users` | List users by last seen, traffic, cost or errors |
-| `GET` | `/api/v1/users/{id}` | One user: traffic, sessions, cost, errors, latency |
-| `GET` | `/api/v1/runs` | List the project's eval runs, newest first, across datasets |
-| `GET` | `/api/v1/queues` | List the annotation queues with their progress |
-| `GET` | `/api/v1/queues/{name}/next` | The next item to annotate, claimed for ten minutes |
-| `GET` | `/api/v1/stats` | Counts, errors, cost, latency percentiles |
-| `GET` | `/api/v1/prompts/{name}/diff` | Unified diff between two prompt versions |
-| `DELETE` | `/api/v1/prompts/{name}` | Delete a prompt name whole; a dry run until confirmed |
-| `DELETE` | `/api/v1/scores/{id}` | Retract one score; no dry run, a re-POST puts it back |
-| `GET` | `/api/v1/system` | Version, uptime, database size, ingest counters |
-| `GET` | `/api/v1` | This endpoint map |
-| `GET` | `/api/v1/openapi.json` | The OpenAPI document |
+| Method | Path | Purpose | A key needs |
+|---|---|---|---|
+| `GET` | `/api/v1/traces` | List traces, filtered and paginated | `read` |
+| `GET` | `/api/v1/traces/{id}` | One trace, observations as a tree | `read` |
+| `GET` | `/api/v1/traces/last` | The newest trace matching the filters, whole | `read` |
+| `DELETE` | `/api/v1/traces/{id}` | Delete one trace; a dry run until confirmed with its id | `write` |
+| `DELETE` | `/api/v1/traces?…&to=` | Delete every trace the filters match before `to`, in rounds; a dry run until confirmed with the project name | `write` |
+| `GET` | `/api/v1/observations/{id}/io` | One observation's payloads, whole | `read` |
+| `GET` | `/api/v1/sessions` | List sessions by most recent activity | `read` |
+| `GET` | `/api/v1/sessions/{id}` | One session: totals and traces | `read` |
+| `GET` | `/api/v1/users` | List users by last seen, traffic, cost or errors | `read` |
+| `GET` | `/api/v1/users/{id}` | One user: traffic, sessions, cost, errors, latency | `read` |
+| `GET` | `/api/v1/runs` | List the project's eval runs, newest first, across datasets | `read` |
+| `GET` | `/api/v1/queues` | List the annotation queues with their progress | `read` |
+| `GET` | `/api/v1/queues/{name}/next` | The next item to annotate, claimed for ten minutes | `write` |
+| `GET` | `/api/v1/stats` | Counts, errors, cost, latency percentiles | `read` |
+| `GET` | `/api/v1/prompts/{name}/diff` | Unified diff between two prompt versions | `read` |
+| `DELETE` | `/api/v1/prompts/{name}` | Delete a prompt name whole; a dry run until confirmed | `write` |
+| `DELETE` | `/api/v1/scores/{id}` | Retract one score; no dry run, a re-POST puts it back | `write` |
+| `GET` | `/api/v1/system` | Version, uptime, database size, ingest counters | `read` |
+| `GET` | `/api/v1` | This endpoint map | `any` |
+| `GET` | `/api/v1/openapi.json` | The OpenAPI document | `any` |
 
 Scores and prompts have their own pages: [scores.md](scores.md) (score
 configs included), [prompts.md](prompts.md). So do datasets and runs — the
@@ -57,11 +126,13 @@ cases an eval ran and the container that groups the traces one pass produced,
 under `/api/v1/datasets` and `/api/v1/runs`: [datasets.md](datasets.md). So
 does administration — projects, keys, retention windows and user-data erasure
 — under `/api/v1/projects`: [admin.md](admin.md) and
-[retention.md](retention.md). A project key administers its own project there,
-but for its keys: `GET`, `POST` and `DELETE` under `/api/v1/projects/{id}/keys`
-answer a key `403` — `a project key cannot list, mint or revoke keys; that
+[retention.md](retention.md). A project key with the `write` scope
+administers its own project there — retention and erasure — but no key
+manages keys: `GET`, `POST` and `DELETE` under `/api/v1/projects/{id}/keys`
+answer any key `403` — `a project key cannot list, mint or revoke keys; that
 needs an owner or editor signed in, or the admin token` — and the listing says
-who minted each key and when it was last used ([admin.md](admin.md#keys)). And
+what each key may do, who minted it and when it was last used
+([admin.md](admin.md#keys)). And
 so do the annotation queues — what a team
 has decided deserves a human verdict, and who has given one — under
 `/api/v1/queues`: [annotation.md](annotation.md).
@@ -1046,12 +1117,21 @@ did, so both are diffed. Empty when the two versions are identical.
 ## Self-description
 
 `GET /api/v1` returns the endpoint map: every route, a one-line description,
-and the one word that says what calling it takes — `public`, `ingest`,
-`member`, `editor`, `owner` or `session`
-([accounts.md](accounts.md#who-may-do-what)). `GET /api/v1/openapi.json`
+the one word that says what calling it takes — its `policy`: `public`,
+`ingest`, `member`, `editor`, `owner` or `session`
+([accounts.md](accounts.md#who-may-do-what)) — and the `scope` it asks of a
+project key: `any`, `ingest`, `read`, `write` or `none` ([Scopes](#scopes)):
+
+```json
+{"method": "GET", "path": "/api/v1/queues/{name}/next", "policy": "member",
+ "scope": "write", "description": "The next item to annotate, claimed for ten minutes"}
+```
+
+`GET /api/v1/openapi.json`
 returns a hand-authored OpenAPI 3.1 document — the contract itself, not a
 rendering of the code, kept honest by a test that fails when the document and
-the router disagree in either direction. Neither needs a key.
+the router disagree in either direction; each operation carries its scope as
+`x-tracepad-scope`, held to the router the same way. Neither needs a key.
 
 ## System
 

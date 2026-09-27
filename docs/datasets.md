@@ -29,29 +29,35 @@ disagree about what "improved" means.
 
 ## Endpoints
 
-| Method | Path | Purpose |
-|---|---|---|
-| `GET` | `/api/v1/datasets` | List datasets by name |
-| `PUT` | `/api/v1/datasets/{name}` | Create a dataset or replace its description and metadata |
-| `GET` | `/api/v1/datasets/{name}` | One dataset: version and counts |
-| `DELETE` | `/api/v1/datasets/{name}` | Delete it with its items and runs; dry run until `?confirm=` |
-| `POST` | `/api/v1/datasets/{name}/items` | Add or edit items, one or an array |
-| `GET` | `/api/v1/datasets/{name}/items` | The items at a version, whole |
-| `GET` | `/api/v1/datasets/{name}/items/{id}` | One item as of a version |
-| `GET` | `/api/v1/datasets/{name}/items/{id}/versions` | Every row of one item's history |
-| `DELETE` | `/api/v1/datasets/{name}/items/{id}` | Archive an item at a new version |
-| `POST` | `/api/v1/datasets/{name}/runs` | Open a run |
-| `GET` | `/api/v1/datasets/{name}/runs` | List a dataset's runs, newest first |
-| `GET` | `/api/v1/runs` | List the project's runs across every dataset, newest first |
-| `GET` | `/api/v1/runs/{id}` | One run with its summary |
-| `GET` | `/api/v1/runs/{id}/items` | The run's cases with the attempts it made at each |
-| `GET` | `/api/v1/runs/{a}/compare/{b}` | Two runs of one dataset side by side |
-| `POST` | `/api/v1/runs/{id}/finish` | Close a run as finished or failed |
-| `DELETE` | `/api/v1/runs/{id}` | Delete a run, releasing its traces |
+| Method | Path | Purpose | A key needs |
+|---|---|---|---|
+| `GET` | `/api/v1/datasets` | List datasets by name | `read` |
+| `PUT` | `/api/v1/datasets/{name}` | Create a dataset or replace its description and metadata | `write` |
+| `GET` | `/api/v1/datasets/{name}` | One dataset: version and counts | `read` |
+| `DELETE` | `/api/v1/datasets/{name}` | Delete it with its items and runs; dry run until `?confirm=` | `write` |
+| `POST` | `/api/v1/datasets/{name}/items` | Add or edit items, one or an array | `write` |
+| `GET` | `/api/v1/datasets/{name}/items` | The items at a version, whole | `read` |
+| `GET` | `/api/v1/datasets/{name}/items/{id}` | One item as of a version | `read` |
+| `GET` | `/api/v1/datasets/{name}/items/{id}/versions` | Every row of one item's history | `read` |
+| `DELETE` | `/api/v1/datasets/{name}/items/{id}` | Archive an item at a new version | `write` |
+| `POST` | `/api/v1/datasets/{name}/runs` | Open a run | `write` |
+| `GET` | `/api/v1/datasets/{name}/runs` | List a dataset's runs, newest first | `read` |
+| `GET` | `/api/v1/runs` | List the project's runs across every dataset, newest first | `read` |
+| `GET` | `/api/v1/runs/{id}` | One run with its summary | `read` |
+| `GET` | `/api/v1/runs/{id}/items` | The run's cases with the attempts it made at each | `read` |
+| `GET` | `/api/v1/runs/{a}/compare/{b}` | Two runs of one dataset side by side | `read` |
+| `POST` | `/api/v1/runs/{id}/finish` | Close a run as finished or failed | `write` |
+| `DELETE` | `/api/v1/runs/{id}` | Delete a run, releasing its traces | `write` |
 
 Authentication is the same as everywhere: `Authorization: Bearer <secret key>`
 or `Basic base64(<public key>:<secret key>)`. Everything lives inside one
 project; nothing here crosses a project boundary.
+
+The last column is the [scope](api.md#scopes) a key must hold. A harness
+touches all three — it pushes cases and opens runs (`write`), reads the items
+back (`read`), and exports its traces and posts its scores (`ingest`) — so its
+key is minted with `ingest`, `read` and `write`, and the `ingest` key a
+production application holds cannot run it.
 
 The `metadata` of a **dataset** and of a **run** must be a JSON object when it
 is sent at all — these are your own dimensions, keyed, and a bare string or

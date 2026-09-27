@@ -7,9 +7,11 @@ and add `--yes` only on the human's word about that preview.
 
 ## Who may do what
 
-- A **project key** (`tp-sk-…`) reaches one project. Most commands here work
-  with it: retention, erasing a user, deleting traces. Not the keys: no
-  project key lists, mints or revokes keys.
+- A **project key** (`tp-sk-…`) reaches one project, and does there what its
+  scopes allow: `ingest`, `read`, `write`, any combination. Reading the state
+  below takes any key (`system` needs `read`); changing retention, erasing a
+  user and deleting traces take a key with `write`. Not the keys: no project
+  key lists, mints or revokes keys, whatever its scopes.
 - The **admin token** (`TRACEPAD_ADMIN_TOKEN` on the server) reaches every
   project, and is the only credential for creating, renaming or deleting a
   project and for managing accounts. It rides where a key does:
@@ -26,7 +28,7 @@ tracepad system
 ```
 
 `projects show` with a project key is that key's project: its id, name and
-retention windows. `retention show` is the three windows — traces, raw
+retention windows, and a last line naming the key and its scopes. `retention show` is the three windows — traces, raw
 bodies, statistics — in days, or forever.
 
 ## Keys
@@ -36,16 +38,22 @@ act: the `keys` commands answer a project key `403`, and they take the admin
 token, which you do not ask for to get round that. When a task needs a new key
 or a key revoked — a rotation, a leaked key, a new application — tell the human
 to do it in the web interface, under Settings → Project → API keys, where the
-listing also says who minted each key and when it was last used. If they
-choose to run it themselves from a terminal:
+listing also says what each key may do, who minted it and when it was last
+used. Say which scopes the key should hold: `ingest` alone for a production
+application, `read` alone for an agent or an MCP client, all three for an eval
+harness or an operator's script. If they choose to run it themselves from a
+terminal:
 
 ```sh
-TRACEPAD_API_KEY="$TRACEPAD_ADMIN_TOKEN" tracepad keys create --project <project-id> --name "checkout api"
+TRACEPAD_API_KEY="$TRACEPAD_ADMIN_TOKEN" tracepad keys create --project <project-id> --scope ingest --name "checkout api"
 TRACEPAD_API_KEY="$TRACEPAD_ADMIN_TOKEN" tracepad keys rm <public-key> --project <project-id>
 ```
 
-Rotation is mint, move the applications, then revoke — revoking first stops
-whatever still sends with the old key. `keys create` prints the new secret
+`--scope` is required. A key's scopes never change: a key that needs more, or
+less, is a new key minted beside it and the old one revoked. Rotation is mint,
+move the applications, then revoke — revoking first stops whatever still sends
+with the old key; revoking the last key that carries `ingest` stops ingest,
+and asks for the project's name first. `keys create` prints the new secret
 **once**; it is theirs, not something to write into a tracked file, a log or a
 commit message.
 

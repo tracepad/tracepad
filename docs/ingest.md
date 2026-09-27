@@ -76,7 +76,20 @@ Authorization: Basic base64(<public key>:<secret key>)
 ```
 
 Keys are printed when a project is created (see the server's startup output).
-Unknown credentials get `401 {"error": "unauthorized"}`. A key the server
+Unknown credentials get `401 {"error": "unauthorized"}`.
+
+Both routes ask a key for the **`ingest` scope** ([api.md](api.md#scopes)). A
+key minted without it — one for `read` or `write` alone — gets `403` with
+`WWW-Authenticate: Bearer error="insufficient_scope", scope="ingest"`, which an
+exporter does not retry: a retry will not grow a scope. The key a production
+application holds should carry `ingest` and nothing else. It sends spans, uses
+the Langfuse media channel, writes scores and fetches a prompt by name, which
+is all an application does; it cannot read what anybody else sent, and the
+store holds your end users' prompts and outputs. Mint one in the interface
+(Settings → Project → API keys, where `ingest` is ticked by default) or with
+`tracepad keys create --scope ingest` and the admin token
+([admin.md](admin.md#keys)); the first key a project gets holds all three
+scopes, so it can be used for everything while you try things out. A key the server
 could not check — the database did not answer the lookup within five seconds —
 gets `503` with `Retry-After: 1` instead, which an exporter retries: a `401`
 would make it drop the batch.
@@ -189,6 +202,7 @@ everywhere: none was sent, and Tracepad does not estimate one.
 | `200` | Committed to disk. An empty body means everything was accepted; a body carries `partial_success` with the number of skipped spans. |
 | `400` | The body is not a decodable OTLP export. |
 | `401` | Unknown credentials. |
+| `403` | A key without the `ingest` scope ([Authentication](#authentication)). Exporters do not retry it. |
 | `413` | The body is over `TRACEPAD_MAX_BODY_BYTES` — on the wire, or once decompressed. |
 | `415` | `Content-Type` is neither `application/x-protobuf` nor `application/json`. |
 | `429` | The write queue is saturated; retry after the `Retry-After` delay. Standard OTLP exporters do this on their own. |

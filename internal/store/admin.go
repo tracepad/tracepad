@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"slices"
 	"time"
 )
 
@@ -367,7 +368,7 @@ func insertProject(tx *sql.Tx, id, name string, keys KeyPair, origin KeyOrigin) 
 	if err != nil {
 		return nil, fmt.Errorf("create project %q: %w", name, err)
 	}
-	if err := insertKey(tx, id, keys, "", origin); err != nil {
+	if err := insertKey(tx, id, keys, "", AllScopes, origin); err != nil {
 		return nil, err
 	}
 	return project, nil
@@ -379,9 +380,11 @@ func insertProject(tx *sql.Tx, id, name string, keys KeyPair, origin KeyOrigin) 
 type KeyCreate struct {
 	ProjectID string
 	Keys      KeyPair
-	// Name says which program holds the key (spec 045 #6); Origin who
-	// minted it (#8).
+	// Name says which program holds the key (spec 045 #6), Scopes what it
+	// may do, spelled canonically (CanonicalScopes), and Origin who minted
+	// it (#8).
 	Name   string
+	Scopes string
 	Origin KeyOrigin
 
 	CreatedAt string
@@ -395,7 +398,7 @@ func (k *KeyCreate) apply(tx *sql.Tx) error {
 	if project == nil {
 		return &Rejection{Kind: RejectNotFound, Message: "no such project"}
 	}
-	if err := insertKey(tx, k.ProjectID, k.Keys, k.Name, k.Origin); err != nil {
+	if err := insertKey(tx, k.ProjectID, k.Keys, k.Name, k.Scopes, k.Origin); err != nil {
 		return err
 	}
 	return tx.QueryRow(`SELECT created_at FROM api_keys WHERE public_key = ?`, k.Keys.PublicKey).
@@ -404,7 +407,9 @@ func (k *KeyCreate) apply(tx *sql.Tx) error {
 
 // KeyRevoke removes one key pair. Revoking the last one leaves a project that
 // cannot ingest, so it is allowed — a declaratively provisioned deployment
-// re-adds its keys from the environment — but never by accident (#12).
+// re-adds its keys from the environment — but never by accident (#12). The
+// same holds for the last key that carries `ingest`, whatever keys are left
+// beside it (spec 045 #11).
 type KeyRevoke struct {
 	ProjectID string
 	PublicKey string
@@ -417,22 +422,16 @@ type KeyRevoke struct {
 func (k *KeyRevoke) apply(tx *sql.Tx) error {
 	k.Revoked, k.Last = false, false
 
-	var count int
-	if err := tx.QueryRow(`SELECT COUNT(*) FROM api_keys WHERE project_id = ?`, k.ProjectID).
-		Scan(&count); err != nil {
-		return fmt.Errorf("count project keys: %w", err)
+	keys, err := projectKeyScopes(context.Background(), tx, k.ProjectID)
+	if err != nil {
+		return err
 	}
-	var owner string
-	err := tx.QueryRow(`SELECT project_id FROM api_keys WHERE public_key = ?`, k.PublicKey).Scan(&owner)
-	if err == sql.ErrNoRows || (err == nil && owner != k.ProjectID) {
+	if _, ok := keys[k.PublicKey]; !ok {
 		return &Rejection{Kind: RejectNotFound,
 			Message: fmt.Sprintf("this project has no key %q", k.PublicKey)}
 	}
-	if err != nil {
-		return fmt.Errorf("read key: %w", err)
-	}
 
-	k.Last = count == 1
+	k.Last = LastOfItsKind(keys, k.PublicKey)
 	if k.Last {
 		if _, err := confirmProjectName(tx, k.ProjectID, k.Confirm); err != nil {
 			return err
@@ -446,6 +445,26 @@ func (k *KeyRevoke) apply(tx *sql.Tx) error {
 	rows, err := result.RowsAffected()
 	k.Revoked = rows > 0
 	return err
+}
+
+// LastOfItsKind reports whether revoking a key asks for the echo: it is the
+// project's last key (spec 005 #12), or the last that carries `ingest` (spec
+// 045 #11). `keys` is every key of the project with its scopes, the revoked
+// one included — what ProjectKeyScopes answers, and what the revocation reads
+// again inside its write, so that the preview and the write ask one rule.
+func LastOfItsKind(keys map[string][]string, publicKey string) bool {
+	if len(keys) == 1 {
+		return true
+	}
+	if !slices.Contains(keys[publicKey], ScopeIngest) {
+		return false
+	}
+	for other, scopes := range keys {
+		if other != publicKey && slices.Contains(scopes, ScopeIngest) {
+			return false
+		}
+	}
+	return true
 }
 
 // ProjectUpdate renames a project or moves its retention windows. A window

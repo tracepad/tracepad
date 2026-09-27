@@ -48,6 +48,10 @@ Project "default" created. Connect your app with either:
 time it is printable; a lost key is replaced in Settings → Project → API keys,
 or with `tracepad keys create` and the admin token — not recovered.
 
+This first key holds all three of a key's [scopes](api.md#scopes) — `ingest`
+to send, `read` to look, `write` to change — so it works for everything on
+this page.
+
 Underneath it is a second link, which is how you get into the browser
 interface:
 
@@ -184,6 +188,23 @@ It registers an exporter on the `TracerProvider` your application already has
 A `200` from the export means the spans are committed and fsynced, so a
 trace is queryable the moment its exporter's batch returns.
 
+**Before it goes to production, give the application a key of its own** that
+holds `ingest` and nothing else. Every exporter above, the `tracepad` packages'
+scores and prompt fetch included, needs no more — and a key that cannot read
+is a key whose leak exposes nothing your users sent. In the interface it is
+Settings → Project → API keys → mint, where `ingest` is ticked by default;
+from a terminal, with the admin token:
+
+```sh
+TRACEPAD_API_KEY=$TRACEPAD_ADMIN_TOKEN tracepad keys create --scope ingest --name "checkout api"
+```
+
+It prints the lines to paste: `TRACEPAD_API_KEY` for the `tracepad` packages,
+and the `LANGFUSE_*` pair for a Langfuse SDK; an OpenTelemetry exporter takes
+the same secret as `authorization=Bearer …`. The first key
+stays for you, the CLI and the eval harness — or give each of those a key of
+its own as well ([admin.md](admin.md#keys)).
+
 ## 3. Look at them
 
 Three ways, all reading the same API.
@@ -209,7 +230,8 @@ tracepad traces last --error --full   # the last failure, payloads included
 See [cli.md](cli.md).
 
 **An agent.** Point an MCP client at `http://localhost:4318/mcp` with the
-same key, or `curl` the API directly:
+same key — or, better, a key that holds `read` alone, which can look at
+everything and change nothing — or `curl` the API directly:
 
 ```sh
 curl -H "Authorization: Bearer tp-sk-…" \

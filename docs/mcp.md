@@ -20,7 +20,10 @@ truncation, authentication and JSON shape have exactly one implementation.
 ## Connecting
 
 The running server serves MCP at `/mcp` on the same port as everything else,
-over streamable HTTP. Authentication is the same project key:
+over streamable HTTP. Authentication is a project key that holds the `read`
+[scope](api.md#scopes) — and a key minted with `read` alone is the one to give
+an agent: it reads everything the tools show and can change nothing, so the
+guarantee above holds of the credential too, not only of the tools:
 
 ```json
 {
@@ -36,8 +39,12 @@ over streamable HTTP. Authentication is the same project key:
 
 A request without a valid key is answered `401` (with `WWW-Authenticate:
 Bearer`) before it reaches the MCP layer — `initialize` included. So are the
-key of a deleted project, a key without the `read` scope, and the admin token,
-which reaches no project's data. If the server cannot check the key at that moment, the
+key of a deleted project and the admin token, which reaches no project's data.
+A key without `read` — one minted for `ingest` or `write` alone — is refused
+at the same door, as every route refuses it, with `403`,
+`WWW-Authenticate: Bearer error="insufficient_scope", scope="read"` and
+`{"error": "this key's scopes are ingest; POST /mcp needs read"}`. If the
+server cannot check the key at that moment, the
 answer is `503` without the challenge: retry, the key is not the problem.
 When the server stops, open MCP streams are ended at once rather than kept for
 the shutdown's drain, and a client reconnects to whatever serves next.
@@ -62,7 +69,9 @@ over stdio against a running server:
 }
 ```
 
-`--url` and `--key` work as flags too.
+`--url` and `--key` work as flags too. The key needs `read` here as well:
+each tool's request carries it, and a key without `read` has every tool call
+come back with the server's `403` message.
 
 ## Protocol
 

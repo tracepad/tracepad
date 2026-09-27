@@ -11,31 +11,44 @@
 	// (spec 005 #12) and can never be read back, so this dialog says so plainly
 	// instead of pretending the key is somewhere to be found later.
 	//
-	// Both connection formats are here because first run prints both: the
-	// dialog is the same artifact, so the docs teach one shape.
+	// The lines follow the key's scopes (spec 045 #14): every key gets the
+	// variables the Tracepad packages (`TRACEPAD_HOST`), the CLI and the MCP
+	// server (`TRACEPAD_URL`) read, since the packages export with it too; and
+	// only a key that can ingest gets the exporter formats — a `read` key
+	// pasted into an exporter's headers is a mistake this can prevent by not
+	// suggesting it. A pair without scopes is a new project's first, which
+	// holds all three (#5).
 
 	let { pair, onclose }: { pair: NewKey | null; onclose: () => void } = $props();
 
 	const origin = $derived(page.url.origin);
-	const formats = $derived(
-		pair
-			? [
-					{
-						label: 'OpenTelemetry SDK',
-						body:
-							`OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=${origin}/v1/traces\n` +
-							`OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer ${pair.secret_key}"`
-					},
-					{
-						label: 'Langfuse SDK',
-						body:
-							`LANGFUSE_HOST=${origin}\n` +
-							`LANGFUSE_PUBLIC_KEY=${pair.public_key}\n` +
-							`LANGFUSE_SECRET_KEY=${pair.secret_key}`
-					}
-				]
-			: []
-	);
+	const formats = $derived.by(() => {
+		if (!pair) return [];
+		const tracepad = {
+			label: 'Tracepad packages, CLI and MCP',
+			body:
+				`TRACEPAD_HOST=${origin}\n` +
+				`TRACEPAD_URL=${origin}\n` +
+				`TRACEPAD_API_KEY=${pair.secret_key}`
+		};
+		if (pair.scopes && !pair.scopes.includes('ingest')) return [tracepad];
+		return [
+			tracepad,
+			{
+				label: 'OpenTelemetry SDK',
+				body:
+					`OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=${origin}/v1/traces\n` +
+					`OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer ${pair.secret_key}"`
+			},
+			{
+				label: 'Langfuse SDK',
+				body:
+					`LANGFUSE_HOST=${origin}\n` +
+					`LANGFUSE_PUBLIC_KEY=${pair.public_key}\n` +
+					`LANGFUSE_SECRET_KEY=${pair.secret_key}`
+			}
+		];
+	});
 </script>
 
 <Dialog.Root open={pair !== null} onOpenChange={(open) => !open && onclose()}>

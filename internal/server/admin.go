@@ -18,12 +18,13 @@ import (
 // The admin surface (spec 005): projects, keys, retention windows and
 // user-data erasure. Two rules shape every handler in this file.
 //
-// Authorisation (#11): a project's `sk` key is the administrator of its own
-// project — retention, erasure, restore — while anything cross-project needs
+// Authorisation (#11): a project's `sk` key with the `write` scope administers
+// its own project — retention, erasure — while anything cross-project needs
 // `TRACEPAD_ADMIN_TOKEN`. Its keys are the exception: no key lists, mints or
-// revokes keys (spec 045 #4), which the guard enforces. Deleting a project is the exception that needs
-// the token even for one's own: an `sk` lives in application config and CI,
-// and a leaked application credential must not be able to destroy the data.
+// revokes keys, whatever its scopes (spec 045 #4), which the guard enforces.
+// Deleting a project is the exception that needs the token even for one's
+// own: an `sk` lives in application config and CI, and a leaked application
+// credential must not be able to destroy the data.
 //
 // Safety (#8): every destructive endpoint is a dry run until confirmed, and it
 // executes only when `?confirm=` echoes the identity of what is destroyed —
@@ -256,7 +257,7 @@ func (s *Server) handleListProjects(w http.ResponseWriter, r *http.Request) {
 	}
 	rendered := make([]object, 0, len(projects))
 	for _, project := range projects {
-		body := projectResponse(project)
+		body := withOwnKey(projectResponse(project), c)
 		if role, ok := roles[project.ID]; ok {
 			body = body.put("role", role)
 		}
@@ -319,9 +320,12 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 	if !s.submit(w, r, create) {
 		return
 	}
+	// The first key may do everything (spec 045 #5); saying so is what lets
+	// a client show the lines that fit it without assuming.
 	writeJSON(w, http.StatusCreated, projectResponse(create.Project).
 		put("public_key", keys.PublicKey).
 		put("secret_key", keys.Secret).
+		put("scopes", strings.Fields(store.AllScopes)).
 		put("note", "the secret key is shown only here; only its hash is stored"))
 }
 
@@ -341,7 +345,21 @@ func (s *Server) handleGetProject(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	writeJSON(w, http.StatusOK, projectResponse(project))
+	writeJSON(w, http.StatusOK, withOwnKey(projectResponse(project), c))
+}
+
+// withOwnKey adds, for a key, the key itself to its project's row: which key
+// it is and what it may do (spec 045 #12). A program that meets a `403` needs
+// a way to learn what it holds, and the key listing is not one — no key reads
+// it (#4). A key reaches its own project only, so the row is always the key's.
+func withOwnKey(body object, c *caller) object {
+	if !c.isKey() {
+		return body
+	}
+	return body.put("key", object{}.
+		put("public_key", c.key.PublicKey).
+		put("name", c.key.Name).
+		put("scopes", c.key.Scopes))
 }
 
 // handlePatchProject changes a name or a retention window. Renaming is
@@ -615,7 +633,9 @@ func readKeyName(w http.ResponseWriter, raw string) (string, bool) {
 
 // handleCreateKey mints another key pair for a project. Several active pairs
 // are what makes rotation zero-downtime: create, move the SDKs, revoke (#12).
-// The body is optional and carries the key's name (spec 045 #6).
+// The body says what the key may do, which is required, and may name it (spec
+// 045 #6): the scopes are the one decision minting a key is about, so a
+// request that leaves them out cannot mean what it says.
 func (s *Server) handleCreateKey(w http.ResponseWriter, r *http.Request) {
 	c, ok := s.authorize(w, r)
 	if !ok {
@@ -634,13 +654,19 @@ func (s *Server) handleCreateKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var request struct {
-		Name string `json:"name"`
+		Scopes []string `json:"scopes"`
+		Name   string   `json:"name"`
 	}
 	if len(bytes.TrimSpace(body)) > 0 {
 		if err := decodeStrict(body, &request); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+	}
+	scopes, ok := store.CanonicalScopes(request.Scopes)
+	if !ok {
+		writeError(w, http.StatusBadRequest, scopesRequired)
+		return
 	}
 	name, ok := readKeyName(w, request.Name)
 	if !ok {
@@ -652,7 +678,8 @@ func (s *Server) handleCreateKey(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to generate a key pair")
 		return
 	}
-	create := &store.KeyCreate{ProjectID: project.ID, Keys: keys, Name: name, Origin: keyOrigin(c)}
+	create := &store.KeyCreate{ProjectID: project.ID, Keys: keys, Name: name, Scopes: scopes,
+		Origin: keyOrigin(c)}
 	if !s.submit(w, r, create) {
 		return
 	}
@@ -660,11 +687,17 @@ func (s *Server) handleCreateKey(w http.ResponseWriter, r *http.Request) {
 		put("public_key", keys.PublicKey).
 		put("secret_key", keys.Secret).
 		put("name", name).
-		put("scopes", strings.Fields(store.AllScopes)).
+		put("scopes", strings.Fields(scopes)).
 		put("created_at", create.CreatedAt).
 		put("created_by", mintedBy(create.Origin, c.role)).
 		put("note", "the secret key is shown only here; only its hash is stored"))
 }
+
+// scopesRequired is the answer to a mint that does not say what the key may do,
+// or says it in a word that is not one of the three (spec 045 #6).
+const scopesRequired = `"scopes" must list what the key may do: one or more of ` +
+	`"ingest" (send spans, media and scores), "read" (every read of the ` +
+	`project's data) and "write" (every change a key may make); any key fetches a prompt`
 
 // keyOrigin is who is minting, as the key records it (spec 045 #8). A key
 // never mints (#4), so the guard has left a session or the admin token.
@@ -720,7 +753,9 @@ func lastUsed(key store.KeyInfo, unwritten map[string]int64) any {
 }
 
 // handleRevokeKey removes one key pair. Revoking the last one leaves a project
-// that cannot ingest, so that one asks for the echo (#12).
+// that cannot ingest, so that one asks for the echo (#12) — and so does the
+// last one that carries `ingest`, which leaves a project that cannot ingest
+// just the same (spec 045 #11).
 func (s *Server) handleRevokeKey(w http.ResponseWriter, r *http.Request) {
 	c, ok := s.authorize(w, r)
 	if !ok {
@@ -737,27 +772,34 @@ func (s *Server) handleRevokeKey(w http.ResponseWriter, r *http.Request) {
 	}
 	publicKey := r.PathValue("public_key")
 
-	keys, err := s.store.ProjectKeyIDs(r.Context(), project.ID)
+	keys, err := s.store.ProjectKeyScopes(r.Context(), project.ID)
 	if err != nil {
 		readFailed(w, r, "failed to read the keys", err)
 		return
 	}
-	known := false
-	for _, key := range keys {
-		known = known || key == publicKey
-	}
-	if !known {
+	if _, ok := keys[publicKey]; !ok {
 		writeError(w, http.StatusNotFound, "this project has no key "+publicKey)
 		return
 	}
 
+	// The store decides again inside the write, by the same rule, from the
+	// rows as they are then; this is the same question asked early, only to
+	// choose between previewing and going ahead.
 	confirm := values.Get("confirm")
-	if len(keys) == 1 && confirm == "" {
+	if store.LastOfItsKind(keys, publicKey) && confirm == "" {
+		// The last key first: what it leaves is a project with none,
+		// whatever it could do (spec 045 #24).
+		note := "this is the project's last key: revoking it leaves the project with none, " +
+			"and ingest stops until another key with the ingest scope is minted"
+		if len(keys) > 1 {
+			note = "this is the project's last key that carries ingest: revoking it stops ingest " +
+				"until another key with the ingest scope is minted"
+		}
 		writeJSON(w, http.StatusOK, object{}.
 			put("dry_run", true).
 			put("would_delete", object{}.put("api_keys", 1)).
 			put("confirm", project.Name).
-			put("note", "this is the project's last key: revoking it stops ingest until another is created"))
+			put("note", note))
 		return
 	}
 

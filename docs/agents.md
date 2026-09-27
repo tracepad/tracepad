@@ -96,8 +96,9 @@ of it works as it is, with `metadata.version: dev`.
 
 The server serves MCP at `/mcp`, and the binary serves the same tools over
 stdio. Both configuration blocks, and what each tool does, are in
-[mcp.md](mcp.md#connecting). The tools only read: an agent writes and deletes
-through the CLI or the API, where the dry-run ceremony applies.
+[mcp.md](mcp.md#connecting). The tools only read, and take a key with the
+`read` [scope](api.md#scopes): an agent writes and deletes through the CLI or
+the API, where the dry-run ceremony applies.
 
 The skill works without MCP — the CLI is the door it uses first when the agent
 has a shell — and uses the tools when the client has them.
@@ -125,4 +126,6 @@ protects against a typo, not against an agent that has decided to delete.
 The skill closes the gap: the agent runs the dry run, shows the human what it
 would remove, and stops; it adds `--yes` only on the human's word about that
 preview, never on its own initiative. It also never prints or commits a secret
-key, and asks for one rather than hunting for it.
+key, and asks for one rather than hunting for it — the narrowest that does the
+task: `read` for looking, all three scopes for running evals. It never mints or
+revokes a key; that is a person's act.

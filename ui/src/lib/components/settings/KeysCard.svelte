@@ -4,7 +4,7 @@
 	import { said } from '$lib/accounts';
 	import { api, type DryRun, type Key, type NewKey, type Project } from '$lib/api/client.svelte';
 	import { timeOrNever, timestamp } from '$lib/format';
-	import { MAX_KEY_NAME, minter, outlived, tooLong } from '$lib/keys';
+	import { MAX_KEY_NAME, minter, outlived, SCOPES, type Scope, tooLong } from '$lib/keys';
 	import Button from '../Button.svelte';
 	import ConfirmCard from '../ConfirmCard.svelte';
 	import SecretDialog from '../SecretDialog.svelte';
@@ -16,8 +16,8 @@
 	//
 	// The secret appears once, in the dialog, and the list shows public keys
 	// only — because that is all the server has. Revoking asks twice: once here
-	// and, when it is the project's last key, again with the echo the server
-	// demands (spec 005 #12).
+	// and, when it is the project's last key or its last `ingest` key, again
+	// with the echo the server demands (spec 005 #12, spec 045 #11).
 	//
 	// Each row says which program holds the key, who minted it and whether it
 	// is still in use (spec 045 #14): the three things to know before revoking
@@ -39,6 +39,8 @@
 	let minting = $state(false);
 	/** What the next key will be called: which program is going to hold it. */
 	let name = $state('');
+	/** What it may do: `ingest` unless changed — the least a program needs (spec 045 #14). */
+	let scopes = $state<Scope[]>(['ingest']);
 	let failure = $state<string | null>(null);
 	let minted = $state.raw<NewKey | null>(null);
 	/** The key a revocation is being walked through, if any. */
@@ -74,8 +76,11 @@
 		minting = true;
 		failure = null;
 		try {
-			minted = await api.createKey(current.id, name.trim());
+			// In the server's order, whatever order they were ticked in.
+			const chosen = SCOPES.filter((s) => scopes.includes(s.scope)).map((s) => s.scope);
+			minted = await api.createKey(current.id, chosen, name.trim());
 			name = '';
+			scopes = ['ingest'];
 			await list();
 		} catch (cause) {
 			failure = said(cause, 'Failed to mint a key.');
@@ -101,9 +106,9 @@
 
 <Card
 	title="API keys"
-	description="Each pair authenticates ingest and every read. Rotate by minting a new one, moving
-		your exporters over, then revoking the old: the old one's last use says when nothing holds it
-		any more."
+	description="Each pair may do what its scopes say, and a key's scopes never change. Rotate by
+		minting a new one, moving your programs over, then revoking the old: the old one's last use
+		says when nothing holds it any more."
 >
 	{#if readOnly}
 		<ViewerNote what="the keys are not shown and cannot be rotated from here" />
@@ -169,10 +174,7 @@
 			</div>
 		{/if}
 
-		<form
-			class="mt-3 flex flex-wrap gap-1.5"
-			onsubmit={(event) => (event.preventDefault(), mint())}
-		>
+		<form class="mt-3" onsubmit={(event) => (event.preventDefault(), mint())}>
 			<label for="key-name" class="sr-only">Which program will hold the new key</label>
 			<input
 				id="key-name"
@@ -180,10 +182,24 @@
 				autocomplete="off"
 				aria-invalid={tooLong(name) || undefined}
 				placeholder="Which program will hold it, e.g. checkout api"
-				class="border-border bg-canvas placeholder:text-subtle min-w-0 flex-1 rounded-md border
-					px-2 py-1 text-sm"
+				class="border-border bg-canvas placeholder:text-subtle w-full rounded-md border px-2 py-1
+					text-sm"
 			/>
-			<Button type="submit" busy={minting} disabled={tooLong(name)}>
+			{#if tooLong(name)}
+				<p role="alert" class="text-danger mt-1 text-sm">
+					A key's name is at most {MAX_KEY_NAME} characters.
+				</p>
+			{/if}
+			<fieldset class="mt-2">
+				<legend class="text-muted mb-1 text-xs font-medium">What it may do</legend>
+				{#each SCOPES as { scope, does } (scope)}
+					<label class="flex items-start gap-2 py-0.5 text-sm">
+						<input type="checkbox" value={scope} bind:group={scopes} class="mt-0.5 size-4 shrink-0" />
+						<span><span class="font-mono">{scope}</span> <span class="text-muted">— {does}</span></span>
+					</label>
+				{/each}
+			</fieldset>
+			<Button type="submit" class="mt-2" busy={minting} disabled={tooLong(name) || !scopes.length}>
 				{#if minting}
 					<LoaderCircle class="size-4 animate-spin" />
 				{:else}
@@ -192,23 +208,18 @@
 				Mint a key pair
 			</Button>
 		</form>
-		{#if tooLong(name)}
-			<p role="alert" class="text-danger mt-1 text-sm">
-				A key's name is at most {MAX_KEY_NAME} characters.
-			</p>
-		{/if}
 
 		{#if revoking}
 			{@const publicKey = revoking}
 			<div class="mt-3">
 				<ConfirmCard
 					title="Revoke {publicKey}"
-					description="Anything still exporting with this pair stops being able to. If it is the
-						project's last key, ingest stops until another is minted — and the server will ask for
-						the project's name first."
+					description="Anything still using this pair stops being able to. If it is the project's
+						last key, or the last one that can ingest, ingest stops until another is minted — and
+						the server will ask for the project's name first."
 					echoLabel="project name"
 					previewLabel="Revoke"
-					executeLabel="Revoke the last key"
+					executeLabel="Revoke it anyway"
 					subject={publicKey}
 					preview={() => revoke(publicKey)}
 					execute={(confirm) => revoke(publicKey, confirm) as Promise<string>}

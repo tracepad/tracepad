@@ -49,6 +49,10 @@ tracepad retention set --stats-days 730 --yes  # statistics: two years
 tracepad retention set --forever               # back to keeping everything
 ```
 
+`retention show` reads the project, which any key may do. `retention set` is
+`PATCH /api/v1/projects/{id}`, and a key needs the `write`
+[scope](api.md#scopes) for it, as a person needs the `editor` role.
+
 "Keep it essentially forever" is spelled `--forever`, not a very large number
 of days: a window is turned into a nanosecond cutoff, so the day count is
 capped at 36500 rather than allowed to overflow into a date in the future —
@@ -334,7 +338,7 @@ decide: the start after the upgrade does it, and says so in the log.
 ## Deleting a user's data
 
 ```sh
-tracepad users rm-data user-4711
+tracepad users rm-data user-4711     # a key with write
 ```
 
 `DELETE /api/v1/projects/{id}/users/{user_id}/data` erases, synchronously,
@@ -381,7 +385,7 @@ whose spans went.
 ## Deleting traces
 
 ```sh
-tracepad traces rm 4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f
+tracepad traces rm 4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f     # a key with write
 tracepad traces rm --to 2026-09-17T14:02:17Z --env loadtest
 ```
 

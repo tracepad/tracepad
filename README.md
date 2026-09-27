@@ -189,7 +189,8 @@ password, and nothing is written down anywhere but this database:
 ```
 
 People sign in with an email and a password; keys stay what they are, for
-programs. An owner runs the server and invites everyone else into specific
+programs, each minted with the scopes its program needs — `ingest` to send,
+`read` to look, `write` to change ([docs/api.md](docs/api.md#scopes)). An owner runs the server and invites everyone else into specific
 projects as a `viewer` or an `editor` — see
 [docs/accounts.md](docs/accounts.md).
 

@@ -34,3 +34,21 @@ export function tooLong(name: string): boolean {
 export function outlived(by: Minter): boolean {
 	return by.kind === 'account' && by.standing !== 'owner' && by.standing !== 'editor';
 }
+
+export type Scope = Key['scopes'][number];
+
+/**
+ * The three scopes a key may hold, in the server's order, each with the line
+ * that says what it lets a key do (spec 045 #1).
+ */
+export const SCOPES: { scope: Scope; does: string }[] = [
+	{
+		scope: 'ingest',
+		does: 'send spans, use the Langfuse media channel, write scores — what a running application does'
+	},
+	{ scope: 'read', does: "every read of the project's data, and nothing that changes it" },
+	{
+		scope: 'write',
+		does: 'every change a key may make — prompts, datasets, runs, queues, deleting traces, retention, erasure'
+	}
+];

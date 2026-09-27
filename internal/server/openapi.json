@@ -30,6 +30,7 @@
         "tags": ["meta"],
         "summary": "Liveness and version, no authentication required",
         "operationId": "health",
+        "x-tracepad-scope": "any",
         "security": [],
         "responses": {
           "200": {
@@ -49,6 +50,7 @@
         "summary": "OTLP/HTTP trace ingest, protobuf or JSON",
         "description": "The canonical OTLP endpoint. Point any OpenTelemetry SDK at it with `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` and an authorization header. Both OTLP encodings are accepted — `application/x-protobuf` and, per `OTEL_EXPORTER_OTLP_PROTOCOL=http/json`, `application/json` with the ids hex-encoded as the OTLP specification prescribes. The response mirrors the request's encoding. A 200 means the spans are committed and fsynced.",
         "operationId": "ingestTraces",
+        "x-tracepad-scope": "ingest",
         "requestBody": {"required": true, "content": {
           "application/x-protobuf": {"schema": {"type": "string", "format": "binary",
             "description": "An OTLP ExportTraceServiceRequest, optionally gzipped"}},
@@ -79,6 +81,7 @@
         "summary": "OTLP ingest under the Langfuse SDK's path",
         "description": "The same endpoint as `/v1/traces`, at the path a Langfuse SDK sends to. Setting `LANGFUSE_HOST` to a tracepad is the whole migration.",
         "operationId": "ingestTracesLangfuse",
+        "x-tracepad-scope": "ingest",
         "requestBody": {"required": true, "content": {
           "application/x-protobuf": {"schema": {"type": "string", "format": "binary"}},
           "application/json": {"schema": {"type": "object"}}
@@ -100,6 +103,7 @@
         "summary": "Langfuse SDK: an upload URL for one media body, or null when it is already stored",
         "description": "The first call of the Langfuse SDK's media channel. `mediaId` is the SDK's own derivation — the first 22 characters of the URL-safe base64 SHA-256 — which the SDK checks. `uploadUrl` is null when this project already holds the body, in which case nothing is sent and the named trace's ref is recorded: settled if the project has the trace, and otherwise pending, dated as the bytes rather than the ask, until the trace's spans arrive — so the null answer too counts toward the pending cap and can be a 429; a body only another project holds is still asked for, because the bytes are the proof of possession. Under the `placeholder` setting `uploadUrl` is always null and nothing is kept. The body is read leniently: fields a newer SDK adds are ignored.",
         "operationId": "langfuseMediaUploadURL",
+        "x-tracepad-scope": "ingest",
         "requestBody": {"required": true, "content": {"application/json": {"schema": {
           "type": "object",
           "properties": {
@@ -137,6 +141,7 @@
         "summary": "Langfuse SDK: the presigned upload of one media body",
         "description": "Where `uploadUrl` points. Presigned like an object-store URL: the SDK sends no credential here, and the signed `token` names the project, the trace, the hash, the type and the length the upload was granted for. A body that does not match the declared length and SHA-256 — or the `x-amz-checksum-sha256` header when it is sent — is refused and nothing is stored.",
         "operationId": "langfuseMediaPut",
+        "x-tracepad-scope": "any",
         "security": [],
         "parameters": [
           {"name": "mediaId", "in": "path", "required": true, "schema": {"type": "string"}},
@@ -161,6 +166,7 @@
         "summary": "Langfuse SDK: one media body's type, size and address",
         "description": "The Langfuse shape for a body this project holds. `url` is `GET /api/v1/media/{sha256}`, which needs a credential of the project like every read; it never changes, so `urlExpiry` is a year away.",
         "operationId": "langfuseMediaGet",
+        "x-tracepad-scope": "ingest",
         "parameters": [{"name": "mediaId", "in": "path", "required": true, "schema": {"type": "string"}}],
         "responses": {
           "200": {"description": "The body's record", "content": {"application/json": {"schema": {
@@ -185,6 +191,7 @@
         "summary": "Langfuse SDK: the report on one media upload",
         "description": "The SDK's account of how its PUT went. There is no upload state to keep — the PUT stored the body or it did not — so a failure is logged and every report is answered 204.",
         "operationId": "langfuseMediaPatch",
+        "x-tracepad-scope": "ingest",
         "parameters": [{"name": "mediaId", "in": "path", "required": true, "schema": {"type": "string"}}],
         "requestBody": {"required": true, "content": {"application/json": {"schema": {
           "type": "object",
@@ -209,6 +216,7 @@
         "summary": "This endpoint map",
         "description": "Where an agent that has never seen this API starts: every endpoint with a one-line description, plus the link to this document. Needs no key: it says what the API is, never what is in it.",
         "operationId": "apiIndex",
+        "x-tracepad-scope": "any",
         "security": [],
         "responses": {
           "200": {"description": "The endpoint map", "content": {"application/json": {"schema": {
@@ -217,8 +225,13 @@
               "version": {"type": "string"},
               "openapi": {"type": "string"},
               "endpoints": {"type": "array", "items": {"type": "object", "properties": {
-                "method": {"type": "string"}, "path": {"type": "string"}, "description": {"type": "string"}
-              }, "required": ["method", "path", "description"]}}
+                "method": {"type": "string"}, "path": {"type": "string"},
+                "policy": {"type": "string", "enum": ["public", "ingest", "member", "editor", "owner", "session"],
+                  "description": "Which kinds of caller the route admits"},
+                "scope": {"type": "string", "enum": ["any", "ingest", "read", "write", "none"],
+                  "description": "What a project key must hold to be admitted: one of its three scopes, `any` key, or `none` whatever its scopes. Sessions and the admin token never consult it"},
+                "description": {"type": "string"}
+              }, "required": ["method", "path", "policy", "scope", "description"]}}
             },
             "required": ["version", "openapi", "endpoints"]
           }}}},
@@ -231,6 +244,7 @@
         "tags": ["meta"],
         "summary": "The OpenAPI 3.1 document for this API",
         "operationId": "openapi",
+        "x-tracepad-scope": "any",
         "security": [],
         "responses": {
           "200": {"description": "This document", "content": {"application/json": {"schema": {"type": "object"}}}}
@@ -243,6 +257,7 @@
         "summary": "Whether this server still needs its first owner",
         "description": "The one thing the interface can learn without a credential. While it answers `{\"required\": true}` the server prints a setup link at every start (good for 24 hours) and every other screen but an invitation redirects to `/setup`. `enabled` is false when the server runs with `TRACEPAD_SETUP=off`: no link is printed, `POST /api/v1/setup` refuses, and the first owner is created with the admin token. `expired` is true when setup is needed and on but no link this start printed still works — past its 24 hours, or never minted because an owner could sign in at start; a restart prints a new one.",
         "operationId": "getSetup",
+        "x-tracepad-scope": "any",
         "security": [],
         "responses": {
           "200": {"description": "Whether an owner exists", "content": {"application/json": {"schema": {
@@ -258,6 +273,7 @@
         "summary": "Create the first owner from the token the server printed",
         "description": "The token is 32 random bytes minted at each start while no enabled owner exists, kept in memory only and printed in the setup link — so a token from a log file yesterday opens nothing today, and a restart is the recovery if the link was lost. Answers 403 to a wrong token and to a second attempt once an owner exists.",
         "operationId": "setup",
+        "x-tracepad-scope": "any",
         "security": [],
         "requestBody": {"required": true, "content": {"application/json": {"schema": {
           "type": "object",
@@ -293,6 +309,7 @@
         "summary": "Sign in with an email and a password",
         "description": "A wrong email, a wrong password, a disabled account and one that has never accepted its invitation all answer the same 401 with the same sentence: any difference between them is a way to find out who has an account here. Five failures for one email inside fifteen minutes and the next is a 429 with `Retry-After`.",
         "operationId": "login",
+        "x-tracepad-scope": "any",
         "security": [],
         "requestBody": {"required": true, "content": {"application/json": {"schema": {
           "type": "object",
@@ -324,6 +341,7 @@
         "summary": "Set a password from an invitation link and sign in",
         "description": "The token is single-use and good for seven days. Accepting replaces whatever password the account had — which is what makes one path serve both an invitation and a reset — ends its other sessions, and stamps the login.",
         "operationId": "acceptInvite",
+        "x-tracepad-scope": "any",
         "security": [],
         "requestBody": {"required": true, "content": {"application/json": {"schema": {
           "type": "object",
@@ -357,6 +375,7 @@
         "summary": "End this session",
         "description": "Deletes the row and clears the cookie. A project key or the admin token gets 400: this is a question only a session can ask.",
         "operationId": "logout",
+        "x-tracepad-scope": "none",
         "security": [{"sessionCookie": []}],
         "responses": {
           "204": {"description": "Signed out"},
@@ -372,6 +391,7 @@
         "summary": "The signed-in account and the projects it can reach",
         "description": "The one call the interface makes on load. The project list rides in it because the shell needs both at once: for an owner it is every live project with the role `owner`, for everyone else their memberships, sorted by name.",
         "operationId": "me",
+        "x-tracepad-scope": "none",
         "security": [{"sessionCookie": []}],
         "responses": {
           "200": {"description": "Who is signed in and what they can reach", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Me"}}}},
@@ -385,6 +405,7 @@
         "summary": "Change this account's display name, password or preferences",
         "description": "A password change needs the current one and signs every other session of the account out, because changing it is what a person does when they think somebody else has it. `preferences` replaces the stored object whole — validated only as a JSON object of at most 16 KiB; the interface owns its shape.",
         "operationId": "patchMe",
+        "x-tracepad-scope": "none",
         "security": [{"sessionCookie": []}],
         "requestBody": {"required": true, "content": {"application/json": {"schema": {
           "type": "object",
@@ -424,6 +445,7 @@
         "summary": "This account's sessions, the current one marked",
         "description": "The reason sessions are rows: \"sign out everywhere\" is a decision a person makes by looking at the list and recognising which one is the laptop they still have. The id is the row's — sha256 of the cookie — and cannot be turned back into a credential.",
         "operationId": "listAccountSessions",
+        "x-tracepad-scope": "none",
         "security": [{"sessionCookie": []}],
         "responses": {
           "200": {"description": "The live sessions, newest first", "content": {"application/json": {"schema": {
@@ -440,6 +462,7 @@
         "tags": ["auth"],
         "summary": "End every session of this account but the current one",
         "operationId": "endOtherSessions",
+        "x-tracepad-scope": "none",
         "security": [{"sessionCookie": []}],
         "responses": {
           "200": {"description": "How many sessions were ended", "content": {"application/json": {"schema": {
@@ -459,6 +482,7 @@
         "summary": "Version, uptime, database size and ingest counters since start",
         "description": "Self-diagnosis without a metrics stack. The counters are in-memory and cover this process only, which is what `counters.since` says. Row counts and counters are the asking project's own — `payloads` is absent because it cannot be attributed to one, `projects` is how many tenants share this process (naming none of them), and `size_bytes` is the whole deployment's file on disk.",
         "operationId": "system",
+        "x-tracepad-scope": "read",
         "responses": {
           "200": {"description": "What this process knows about itself", "content": {"application/json": {"schema": {
             "type": "object",
@@ -545,6 +569,7 @@
         "summary": "List traces newest first, filtered and cursor-paginated",
         "description": "Rows carry the aggregate columns and never a payload — a listing is for choosing what to fetch. To read one trace whole, follow with `GET /api/v1/traces/{id}`; to go straight to the newest match, use `GET /api/v1/traces/last`.",
         "operationId": "listTraces",
+        "x-tracepad-scope": "read",
         "parameters": [
           {"$ref": "#/components/parameters/From"},
           {"$ref": "#/components/parameters/To"},
@@ -594,6 +619,7 @@
         "summary": "Delete every trace a listing filter matches before `to`, in bounded rounds",
         "description": "The filters are the trace listing's own, with the same names and the same validation, so \"delete what I am looking at\" is one call with no second grammar — and `to` is required, dry run and confirmed alike: it closes the set, so that what was previewed is what is deleted however much ingest flows in between. Without `confirm` it answers with the dry run, counting the match exactly rather than at the listing's cap, naming the eval runs that would lose traces, and stating that raw OTLP bodies are not touched. With `confirm` echoing the project's name it deletes at most `limit` of the newest matches, in chunks of one hour — and at most fifty chunks, whichever bound comes first — each chunk its own transaction re-rolling the hours it emptied, and answers whether there is `more`; repeat the same call while there is. A filter matching nothing is a successful dry run of zero and a successful deletion of nothing. Editor role.",
         "operationId": "deleteTraces",
+        "x-tracepad-scope": "write",
         "parameters": [
           {"$ref": "#/components/parameters/From"},
           {"$ref": "#/components/parameters/To"},
@@ -637,6 +663,7 @@
         "summary": "The newest trace matching the filters, whole",
         "description": "The task shortcut: `?status=error&expand=io` answers \"why did the last run fail\" in one round trip instead of list, filter, get, and one get per observation. Takes every filter of the listing and returns exactly what `GET /api/v1/traces/{id}` returns.",
         "operationId": "lastTrace",
+        "x-tracepad-scope": "read",
         "parameters": [
           {"$ref": "#/components/parameters/From"},
           {"$ref": "#/components/parameters/To"},
@@ -675,6 +702,7 @@
         "summary": "One trace with its observations as a nested tree",
         "description": "Children are nested inside their parents, siblings ordered by start time. An observation whose parent has not arrived yet renders at the root with its `parent_observation_id` intact, and so does one that would sit deeper than 100 levels, keeping its own children. A trace past 10,000 observations or 32 MiB of structure is answered with its first observations by start time and `observations_omitted`. Payloads ride only with `?expand=io`.",
         "operationId": "getTrace",
+        "x-tracepad-scope": "read",
         "parameters": [
           {"name": "id", "in": "path", "required": true,
             "schema": {"type": "string", "pattern": "^[0-9a-f]{32}$"}},
@@ -694,6 +722,7 @@
         "summary": "Delete one trace and everything attached to it",
         "description": "The trace, its observations, scores, payloads, search entries and annotation-queue items, with the hour it started in re-rolled in the same transaction. Raw OTLP bodies are not touched: a raw batch holds many traces, and a trace cannot be cut out of one. Without `confirm` it answers with the dry run, naming the eval runs that would lose the trace; with `confirm` echoing the trace id it deletes. An unknown id is a 404 either way. Editor role.",
         "operationId": "deleteTrace",
+        "x-tracepad-scope": "write",
         "parameters": [
           {"name": "id", "in": "path", "required": true,
             "schema": {"type": "string", "pattern": "^[0-9a-f]{32}$"}},
@@ -719,6 +748,7 @@
         "summary": "The whole input, output and metadata of one observation",
         "description": "The one endpoint no byte budget applies to: it exists to be the `full` target of every truncation marker, and a budget here would recurse. A span id is unique only inside its trace, so pass `?trace_id=` when the same id appears in more than one — every truncation marker already carries the pair.",
         "operationId": "observationIO",
+        "x-tracepad-scope": "read",
         "parameters": [
           {"name": "id", "in": "path", "required": true,
             "schema": {"type": "string", "pattern": "^[0-9a-f]{16}$"}},
@@ -753,6 +783,7 @@
         "summary": "One image or file a payload references, by the SHA-256 of its bytes",
         "description": "Ingest takes images and files out of the payloads and leaves a reference object in their place, `{\"tracepad_media\": \"<sha256>\", \"mime_type\", \"size\"}` — this is where its bytes are. Served only to a project that points at the body, from a trace or from a raw batch; any other hash is 404, so a hash seen in a log is not a capability across projects. Content-addressed, so cached for a year and immutable. Every body is served under a sandboxing Content-Security-Policy and `nosniff`; anything but an image, audio or video is sent as an attachment.",
         "operationId": "media",
+        "x-tracepad-scope": "read",
         "parameters": [
           {"name": "sha256", "in": "path", "required": true,
             "schema": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}
@@ -776,6 +807,7 @@
         "summary": "List the raw export bodies oldest first, cursor-paginated",
         "description": "The archive: every accepted export, kept as it arrived. This is the one listing here whose natural order is forward, because a replay has to preserve arrival order — a receiver that does not upsert by span id must see the spans in the order the world produced them. Follow with `GET /api/v1/raw/{id}` for a body; `tracepad export --otlp` is these two endpoints in a loop. Both are an editor's read: a project key, an editor or an owner — a viewer session is refused, because the archive is the bulk way out of a project.",
         "operationId": "listRawBatches",
+        "x-tracepad-scope": "read",
         "parameters": [
           {"name": "since", "in": "query",
             "schema": {"type": "string", "format": "date-time"},
@@ -818,6 +850,7 @@
         "summary": "One raw export body, in the Content-Type it was received in",
         "description": "The bytes the client posted, gzip already removed. Exempt from the response budget for the reason `/observations/{id}/io` is: a cut body is not a smaller batch, it is a broken one. `X-Tracepad-Received-At` and `X-Tracepad-Dialect` carry what a client needs to name a file or label a manifest without a second request.",
         "operationId": "rawBatch",
+        "x-tracepad-scope": "read",
         "parameters": [
           {"name": "id", "in": "path", "required": true,
             "schema": {"type": "integer", "minimum": 1}}
@@ -848,6 +881,7 @@
         "summary": "List sessions by most recent activity, filtered and cursor-paginated",
         "description": "Aggregated from the traces that named a session; there is no session table. `from`/`to` bound the *traces*, half-open like the trace listing, so a session appears when any of its traces falls in the window and its totals then describe those traces. To read one session's traces, follow with `GET /api/v1/sessions/{id}`.",
         "operationId": "listSessions",
+        "x-tracepad-scope": "read",
         "parameters": [
           {"$ref": "#/components/parameters/From"},
           {"$ref": "#/components/parameters/To"},
@@ -883,6 +917,7 @@
         "summary": "One session: its totals and its traces",
         "description": "A session is not a stored entity but the set of traces that named it. Every aggregate counts traces: `error_count` is how many of the session's traces failed, not how many spans did.",
         "operationId": "getSession",
+        "x-tracepad-scope": "read",
         "parameters": [
           {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}},
           {"$ref": "#/components/parameters/Limit"},
@@ -918,6 +953,7 @@
         "summary": "Counts, errors, cost and latency percentiles per bucket",
         "description": "`unit` says what a bucket counts: grouping by hour, day, environment, release or total counts traces, and grouping by model counts observations, because a trace has no model. Grouped by release, a trace that named none falls in the bucket with the empty key. Grouped by `total`, the whole window is one bucket under the empty key — the same shape as a day bucket, with percentiles merged over every hour in the window — and it takes every filter the other groupings take. An empty range answers with no buckets rather than with fabricated zero rows. Latency percentiles are histogram-based: accurate to a few percent, and stable across the expiry of the raw rows.",
         "operationId": "stats",
+        "x-tracepad-scope": "read",
         "parameters": [
           {"$ref": "#/components/parameters/From"},
           {"$ref": "#/components/parameters/To"},
@@ -971,6 +1007,7 @@
         "summary": "Score means, rates and category shares per bucket, one series per score name",
         "description": "The quality curve beside the traffic one. A score is counted in the hour of the **trace it names** — not in the hour it was graded — and takes that trace's environment, release and model, so the buckets line up with `GET /api/v1/stats`. A score that names no trace, and a `text` score, are not counted at all. Without `name` every score name in the range is a series; with it, one. `targets` says what was counted: grouping by model counts only the scores that name an observation, because a trace-level score has no model to sit under; every other grouping counts each score once. A numeric series carries `mean`, `min` and `max` per bucket, a boolean series the `rate` of true values, and a categorical series the `categories` seen. Answered from the hourly roll-up behind the watermark and from the raw rows for the tail, so it trails live traffic by the same lag as the statistics.",
         "operationId": "scoreTrends",
+        "x-tracepad-scope": "read",
         "parameters": [
           {"$ref": "#/components/parameters/From"},
           {"$ref": "#/components/parameters/To"},
@@ -1008,6 +1045,7 @@
         "summary": "The environments, releases and trace names in a range, each with its trace count",
         "description": "What the three many-valued filters can be set to, for the range in view: the distinct values of `environment`, `release` and `name` among the traces between `from` and `to`, each with the number of traces carrying it, sorted by count descending and then by value. It answers the range and nothing else — the counts do not respect the other filters, so the list does not change as boxes are ticked. At most 100 values per column; `omitted` says how many were left out, rarest first. A trace with no release is not a release, and a trace with no name is not a name. Answered from the hourly roll-up behind the watermark and from the raw rows for the tail, so a value first seen a minute ago is already here.",
         "operationId": "facets",
+        "x-tracepad-scope": "read",
         "parameters": [
           {"name": "from", "in": "query", "schema": {"type": "string", "format": "date-time"},
             "description": "RFC 3339, inclusive. Defaults to the oldest hour the rollup holds, which is also as far back as this endpoint looks: it does not scan the raw traces for hours the rollup no longer covers. A window whose `from` is not before its `to` is a 400"},
@@ -1046,6 +1084,7 @@
         "summary": "List users by last seen, traffic, cost or errors, cursor-paginated",
         "description": "Answered from the per-user rollup alone, so it trails the raw data by up to twice the rollup interval: a user first seen minutes ago is not listed yet, and `GET /api/v1/users/{id}` is exact for any id. Every number counts traces, not observations, and `sessions` counts sessions where they started. Sorting is always descending, with ties broken by `user_id`; a user with no costed trace sorts last under `sort=cost`.",
         "operationId": "listUsers",
+        "x-tracepad-scope": "read",
         "parameters": [
           {"name": "sort", "in": "query",
             "schema": {"type": "string", "enum": ["last_seen", "traces", "cost", "errors"], "default": "last_seen"},
@@ -1085,6 +1124,7 @@
         "summary": "One user: traffic, sessions, cost, errors and latency",
         "description": "The rollup plus the live tail — the traces past the rollup's watermark — so the answer is exact for any id, including one the listing has not caught up with. `404` when neither half has seen it. For this user's activity over time, and the breakdown by environment or model, ask `GET /api/v1/stats?user_id=`.",
         "operationId": "getUser",
+        "x-tracepad-scope": "read",
         "parameters": [
           {"name": "id", "in": "path", "required": true, "schema": {"type": "string"},
             "description": "The user id, as the application set it"}
@@ -1118,6 +1158,7 @@
         "summary": "Write one score or an array of them",
         "description": "An array is all-or-nothing: one transaction, and one 400 naming the first invalid item. A 201 means the rows are on disk. No Content-Type is required.",
         "operationId": "createScores",
+        "x-tracepad-scope": "ingest",
         "requestBody": {"required": true, "content": {"application/json": {"schema": {
           "oneOf": [
             {"$ref": "#/components/schemas/ScoreInput"},
@@ -1141,6 +1182,7 @@
         "tags": ["scores"],
         "summary": "List scores, filtered and cursor-paginated",
         "operationId": "listScores",
+        "x-tracepad-scope": "read",
         "parameters": [
           {"name": "trace_id", "in": "query", "schema": {"type": "string"}},
           {"name": "observation_id", "in": "query", "schema": {"type": "string"}},
@@ -1172,6 +1214,7 @@
         "tags": ["scores"],
         "summary": "Fetch one score",
         "operationId": "getScore",
+        "x-tracepad-scope": "read",
         "parameters": [{"name": "id", "in": "path", "required": true,
           "schema": {"type": "string", "pattern": "^[0-9a-f]{32}$"}}],
         "responses": {
@@ -1187,6 +1230,7 @@
         "summary": "Retract one score; no dry run, a re-POST puts it back",
         "description": "A score is one row, so there is no echo to type: writing the same id again recreates it.",
         "operationId": "deleteScore",
+        "x-tracepad-scope": "write",
         "parameters": [{"name": "id", "in": "path", "required": true,
           "schema": {"type": "string", "pattern": "^[0-9a-f]{32}$"}}],
         "responses": {
@@ -1208,6 +1252,7 @@
         "summary": "List prompt names with where their labels point",
         "description": "Alphabetically by name. `direction` reads towards the start of the alphabet, so both ends of the listing cost what one page costs.",
         "operationId": "listPrompts",
+        "x-tracepad-scope": "read",
         "parameters": [
           {"$ref": "#/components/parameters/Limit"},
           {"$ref": "#/components/parameters/Cursor"},
@@ -1245,6 +1290,7 @@
         "summary": "Fetch one prompt by version, by label, or the latest",
         "description": "With neither `version` nor `label`, the highest version. `latest` is a virtual label meaning the same thing; there is no implicit `production`.",
         "operationId": "getPrompt",
+        "x-tracepad-scope": "any",
         "parameters": [
           {"$ref": "#/components/parameters/PromptName"},
           {"name": "version", "in": "query", "schema": {"type": "integer", "minimum": 1}},
@@ -1263,6 +1309,7 @@
         "summary": "Delete a prompt with every version and label; a dry run until `?confirm=` echoes the name",
         "description": "The name's whole history goes at once — versions are never deleted alone. Traces that ran the prompt keep the name and version they recorded: that is a string pair the client sent, not a reference into this table. Without `confirm` it answers with the counts and changes nothing.",
         "operationId": "deletePrompt",
+        "x-tracepad-scope": "write",
         "parameters": [
           {"$ref": "#/components/parameters/PromptName"},
           {"$ref": "#/components/parameters/ConfirmPromptName"}
@@ -1282,6 +1329,7 @@
         "summary": "Append a version to a prompt",
         "description": "Versions are append-only and numbered inside the write transaction, so parallel creates produce 1..N with no gaps. A name's type is fixed by its first version. `expect_version` makes the append conditional on the name still being where the author left it.",
         "operationId": "createPromptVersion",
+        "x-tracepad-scope": "write",
         "parameters": [{"$ref": "#/components/parameters/PromptName"}],
         "requestBody": {"required": true, "content": {"application/json": {"schema": {
           "type": "object",
@@ -1323,6 +1371,7 @@
         "summary": "List a prompt's versions, newest first",
         "description": "Without the bodies: a version list is for picking and diffing. `labels` is every label of the name with the version it points at — the whole map, not the part of it that falls on this page.",
         "operationId": "listPromptVersions",
+        "x-tracepad-scope": "read",
         "parameters": [
           {"$ref": "#/components/parameters/PromptName"},
           {"$ref": "#/components/parameters/Limit"},
@@ -1363,6 +1412,7 @@
         "summary": "Unified diff between two versions of a prompt",
         "description": "A unified text patch over the pretty-printed `prompt` and `config` of the two versions — the format every consumer already reads. Empty when the two versions are identical.",
         "operationId": "promptDiff",
+        "x-tracepad-scope": "read",
         "parameters": [
           {"$ref": "#/components/parameters/PromptName"},
           {"name": "from", "in": "query", "required": true, "schema": {"type": "integer", "minimum": 1}},
@@ -1392,6 +1442,7 @@
         "summary": "Point a label at a version",
         "description": "The deploy path: promote by moving `production` forward, roll back by moving it back. One row, no new version.",
         "operationId": "putPromptLabel",
+        "x-tracepad-scope": "write",
         "parameters": [{"$ref": "#/components/parameters/PromptName"}, {"$ref": "#/components/parameters/PromptLabel"}],
         "requestBody": {"required": true, "content": {"application/json": {"schema": {
           "type": "object",
@@ -1410,6 +1461,7 @@
         "tags": ["prompts"],
         "summary": "Remove a label",
         "operationId": "deletePromptLabel",
+        "x-tracepad-scope": "write",
         "parameters": [{"$ref": "#/components/parameters/PromptName"}, {"$ref": "#/components/parameters/PromptLabel"}],
         "responses": {
           "200": {"description": "The version the label pointed at", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Label"}}}},
@@ -1425,6 +1477,7 @@
         "tags": ["datasets"],
         "summary": "List datasets by name, cursor-paginated",
         "operationId": "listDatasets",
+        "x-tracepad-scope": "read",
         "parameters": [{"$ref": "#/components/parameters/Limit"}, {"$ref": "#/components/parameters/Cursor"}, {"$ref": "#/components/parameters/Direction"}],
         "responses": {
           "200": {"description": "A page of datasets", "content": {"application/json": {"schema": {
@@ -1448,6 +1501,7 @@
         "summary": "Create a dataset or replace its description and metadata",
         "description": "The envelope only: the items and the version clock are untouched. A dataset also comes into being on the first POST of items to its name.",
         "operationId": "putDataset",
+        "x-tracepad-scope": "write",
         "parameters": [{"$ref": "#/components/parameters/DatasetName"}],
         "requestBody": {"required": true, "content": {"application/json": {"schema": {
           "type": "object",
@@ -1464,6 +1518,7 @@
         "tags": ["datasets"],
         "summary": "One dataset: its version and counts",
         "operationId": "getDataset",
+        "x-tracepad-scope": "read",
         "parameters": [{"$ref": "#/components/parameters/DatasetName"}],
         "responses": {
           "200": {"description": "The dataset", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Dataset"}}}},
@@ -1478,6 +1533,7 @@
         "summary": "Delete a dataset with its items and runs; a dry run until `?confirm=` echoes the name",
         "description": "The one destructive act here: every version of every item and every run go with the dataset, and the traces the runs were pinning return to the retention window — they are not deleted. Without `confirm` it answers with the counts and changes nothing.",
         "operationId": "deleteDataset",
+        "x-tracepad-scope": "write",
         "parameters": [{"$ref": "#/components/parameters/DatasetName"}, {"$ref": "#/components/parameters/ConfirmName"}],
         "responses": {
           "200": {"description": "What went, or the dry run of what would", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/DatasetDeletion"}}}},
@@ -1494,6 +1550,7 @@
         "summary": "Add or edit items, one or an array, one version tick for the batch",
         "description": "All or nothing. The dataset's version advances by exactly one if any item in the batch changed and not at all if none did, so re-posting the same cases is idempotent; `changed` says how many produced a row. An item's id is the idempotency key; an edit is a new row of the same id, and the old one stays readable at every earlier version.",
         "operationId": "createDatasetItems",
+        "x-tracepad-scope": "write",
         "parameters": [{"$ref": "#/components/parameters/DatasetName"}],
         "requestBody": {"required": true, "content": {"application/json": {"schema": {
           "oneOf": [
@@ -1525,6 +1582,7 @@
         "summary": "The items at a version, whole, in first-appearance order",
         "description": "Budget-exempt: the consumer is the harness, and a truncated test case is a different test case. Bounded by `limit` and by the body cap at write time. Default `version` is the current one; a version above it is a 400.",
         "operationId": "listDatasetItems",
+        "x-tracepad-scope": "read",
         "parameters": [
           {"$ref": "#/components/parameters/DatasetName"},
           {"$ref": "#/components/parameters/DatasetVersion"},
@@ -1556,6 +1614,7 @@
         "tags": ["datasets"],
         "summary": "One item as of a version",
         "operationId": "getDatasetItem",
+        "x-tracepad-scope": "read",
         "parameters": [{"$ref": "#/components/parameters/DatasetName"}, {"$ref": "#/components/parameters/ItemID"}, {"$ref": "#/components/parameters/DatasetVersion"}],
         "responses": {
           "200": {"description": "The item", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/DatasetItem"}}}},
@@ -1570,6 +1629,7 @@
         "summary": "Archive an item at a new version",
         "description": "Nothing is destroyed: the item is gone from the current version and still there at every earlier one. A 404 when the item is unknown or already archived at the current version.",
         "operationId": "deleteDatasetItem",
+        "x-tracepad-scope": "write",
         "parameters": [{"$ref": "#/components/parameters/DatasetName"}, {"$ref": "#/components/parameters/ItemID"}],
         "responses": {
           "200": {"description": "The version the archive landed on", "content": {"application/json": {"schema": {
@@ -1590,6 +1650,7 @@
         "summary": "Every row of one item's history, newest first",
         "description": "Archived rows included, each flagged: an edit is a row and a delete is a row.",
         "operationId": "listDatasetItemVersions",
+        "x-tracepad-scope": "read",
         "parameters": [{"$ref": "#/components/parameters/DatasetName"}, {"$ref": "#/components/parameters/ItemID"}],
         "responses": {
           "200": {"description": "The item's history", "content": {"application/json": {"schema": {
@@ -1614,6 +1675,7 @@
         "summary": "Open a run over the dataset at its current or a named version",
         "description": "The run pins the dataset version the harness must fetch its items at, and the response carries it. A client-supplied `id` makes the call retry-safe: a known id answers 200 with the existing run unchanged. The store never executes anything — the harness stamps `tracepad.run_id` and `tracepad.item_id` on the spans it exports, and closes the run with `/finish`.",
         "operationId": "createRun",
+        "x-tracepad-scope": "write",
         "parameters": [{"$ref": "#/components/parameters/DatasetName"}],
         "requestBody": {"required": true, "content": {"application/json": {"schema": {
           "type": "object",
@@ -1638,6 +1700,7 @@
         "tags": ["datasets"],
         "summary": "List a dataset's runs newest first, cursor-paginated",
         "operationId": "listRuns",
+        "x-tracepad-scope": "read",
         "parameters": [
           {"$ref": "#/components/parameters/DatasetName"},
           {"$ref": "#/components/parameters/Limit"},
@@ -1667,6 +1730,7 @@
         "summary": "List the project's runs newest first, filtered by dataset and status, cursor-paginated",
         "description": "Every dataset's runs in one listing, ordered by `(created_at, id)` like the per-dataset one and paged by the same cursor shape. The rows are the run objects without `summary`: a page of runs is for choosing one. `?count=` adds the capped total the filters match.",
         "operationId": "listProjectRuns",
+        "x-tracepad-scope": "read",
         "parameters": [
           {
             "name": "dataset",
@@ -1709,6 +1773,7 @@
         "summary": "One run with its summary",
         "description": "The run object with `summary`: how much of the dataset it covered, what its traffic cost, what its scores came to, and which models and prompts it actually ran. The listing leaves the summary out.",
         "operationId": "getRun",
+        "x-tracepad-scope": "read",
         "parameters": [{"$ref": "#/components/parameters/RunID"}],
         "responses": {
           "200": {"description": "The run and its summary", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/RunWithSummary"}}}},
@@ -1723,6 +1788,7 @@
         "summary": "Delete a run, releasing its traces to the retention window",
         "description": "One row of bookkeeping. The traces it held are not deleted; they stop being pinned and live as long as retention says.",
         "operationId": "deleteRun",
+        "x-tracepad-scope": "write",
         "parameters": [{"$ref": "#/components/parameters/RunID"}],
         "responses": {
           "200": {"description": "The run is gone", "content": {"application/json": {"schema": {
@@ -1746,6 +1812,7 @@
         "summary": "The run's items with the attempts it made at each",
         "description": "The items of the run's dataset version in first-appearance order, each with the traces of the run that answered it. `output` is the trace's root observation's output; `expected_output` and `output` are budgeted and cut with a marker naming where the whole payload lives. `?unknown=true` appends the run's traces that no item of its version accounts for.",
         "operationId": "getRunItems",
+        "x-tracepad-scope": "read",
         "parameters": [
           {"$ref": "#/components/parameters/RunID"},
           {"name": "unknown", "in": "query", "schema": {"type": "string", "enum": ["true", "false"]},
@@ -1770,6 +1837,7 @@
         "summary": "Two runs of one dataset side by side",
         "description": "Per score name: each run's aggregate, the delta between the means, and how many items improved, regressed or stayed — `improved` and `regressed` only for names whose config gives a direction, `changed` for the rest. Then the items, paginated, each with its per-name pair and verdict. Equality is exact. Runs of different datasets, and a run against itself, are a 400.",
         "operationId": "compareRuns",
+        "x-tracepad-scope": "read",
         "parameters": [
           {"name": "a", "in": "path", "required": true, "schema": {"type": "string", "pattern": "^[0-9a-f]{32}$"}},
           {"name": "b", "in": "path", "required": true, "schema": {"type": "string", "pattern": "^[0-9a-f]{32}$"}},
@@ -1792,6 +1860,7 @@
         "summary": "Close a run as finished, or as failed with a reason",
         "description": "The store never infers completion: a run stays `running` until the harness says otherwise. A run closed twice is a 409. Linking does not stop at finish — a late span of a trace that started inside the run still belongs to it.",
         "operationId": "finishRun",
+        "x-tracepad-scope": "write",
         "parameters": [{"$ref": "#/components/parameters/RunID"}],
         "requestBody": {"required": true, "content": {"application/json": {"schema": {
           "type": "object",
@@ -1816,6 +1885,7 @@
         "summary": "List score configs by name",
         "description": "Whole, not paged: a project declares a handful of names.",
         "operationId": "listScoreConfigs",
+        "x-tracepad-scope": "read",
         "responses": {
           "200": {"description": "Every config", "content": {"application/json": {"schema": {
             "type": "object",
@@ -1834,6 +1904,7 @@
         "summary": "Create or replace the config that binds a score name",
         "description": "Declarative: the whole config, every time, and a re-PUT of the same body is a no-op. From then on a score posted under this name must have the config's `data_type`, a numeric value inside `min`/`max`, a categorical value among `categories`; a violating score fails its batch with a 400 naming it. Scores already stored are never re-validated.",
         "operationId": "putScoreConfig",
+        "x-tracepad-scope": "write",
         "parameters": [{"$ref": "#/components/parameters/ScoreConfigName"}],
         "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ScoreConfigInput"}}}},
         "responses": {
@@ -1847,6 +1918,7 @@
         "tags": ["datasets"],
         "summary": "One score config",
         "operationId": "getScoreConfig",
+        "x-tracepad-scope": "read",
         "parameters": [{"$ref": "#/components/parameters/ScoreConfigName"}],
         "responses": {
           "200": {"description": "The config", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ScoreConfig"}}}},
@@ -1860,6 +1932,7 @@
         "tags": ["datasets"],
         "summary": "Remove a score config; the scores it admitted stay",
         "operationId": "deleteScoreConfig",
+        "x-tracepad-scope": "write",
         "parameters": [{"$ref": "#/components/parameters/ScoreConfigName"}],
         "responses": {
           "200": {"description": "The config is gone", "content": {"application/json": {"schema": {
@@ -1878,6 +1951,7 @@
         "summary": "List the annotation queues with their progress",
         "description": "Whole, in name order, with no paging: a project has as many review programmes as somebody named. Each carries the score configs a reviewer must fill and the counts of what is pending, completed and skipped.",
         "operationId": "listQueues",
+        "x-tracepad-scope": "read",
         "responses": {
           "200": {"description": "Every queue", "content": {"application/json": {"schema": {
             "type": "object",
@@ -1896,6 +1970,7 @@
         "summary": "Create an annotation queue or replace it whole",
         "description": "Declarative, like a score config: the body is the queue, and a re-PUT of the same body writes nothing and answers 200. Every name in `score_configs` must already exist, or the call is a 400 naming the missing one. Changing the list later governs the items not yet completed; nothing re-validates what is already done.",
         "operationId": "putQueue",
+        "x-tracepad-scope": "write",
         "parameters": [{"$ref": "#/components/parameters/QueueName"}],
         "requestBody": {"required": true, "content": {"application/json": {"schema": {
           "type": "object",
@@ -1918,6 +1993,7 @@
         "tags": ["queues"],
         "summary": "One queue: its score configs and its counts",
         "operationId": "getQueue",
+        "x-tracepad-scope": "read",
         "parameters": [{"$ref": "#/components/parameters/QueueName"}],
         "responses": {
           "200": {"description": "The queue", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AnnotationQueue"}}}},
@@ -1932,6 +2008,7 @@
         "summary": "Delete a queue with its items; a dry run until `?confirm=` echoes the name",
         "description": "The list goes and the scores written while annotating stay: they are attached to the trace, not to the queue. Without `confirm` it answers with the count and changes nothing.",
         "operationId": "deleteQueue",
+        "x-tracepad-scope": "write",
         "parameters": [{"$ref": "#/components/parameters/QueueName"}, {"$ref": "#/components/parameters/ConfirmQueueName"}],
         "responses": {
           "200": {"description": "What went, or the dry run of what would", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/QueueDeletion"}}}},
@@ -1948,6 +2025,7 @@
         "summary": "Add one target or an array of them; a target already queued counts as existing",
         "description": "All or nothing, and idempotent: a trace or observation the queue already holds comes back as the item it already is, whatever its status, so a retried script does not double the queue. The target need not exist yet — an item may be queued for a trace whose spans are still in flight.",
         "operationId": "addQueueItems",
+        "x-tracepad-scope": "write",
         "parameters": [{"$ref": "#/components/parameters/QueueName"}],
         "requestBody": {"required": true, "content": {"application/json": {"schema": {
           "oneOf": [
@@ -1976,6 +2054,7 @@
         "summary": "The queue's items oldest first, filtered and cursor-paginated",
         "description": "In `seq` order — the order they were added is the order they are worked in — and paging both ways like every other listing.",
         "operationId": "listQueueItems",
+        "x-tracepad-scope": "read",
         "parameters": [
           {"$ref": "#/components/parameters/QueueName"},
           {"name": "status", "in": "query", "schema": {"type": "string", "enum": ["pending", "completed", "skipped"]},
@@ -2013,6 +2092,7 @@
         "summary": "Add the newest traces a listing filter matches, capped by `limit`",
         "description": "The filters are the trace listing's own, with the same names and the same validation, so \"queue what I am looking at\" is one call with no second grammar. The newest `limit` matches are added as trace items; `capped` says more matched than were taken, and a second call with `to=` set at the oldest added continues. With no filter at all it takes the newest `limit` traces of the project.",
         "operationId": "addQueueItemsFromTraces",
+        "x-tracepad-scope": "write",
         "parameters": [
           {"$ref": "#/components/parameters/QueueName"},
           {"$ref": "#/components/parameters/From"},
@@ -2061,6 +2141,7 @@
         "summary": "The next item to annotate, claimed for ten minutes",
         "description": "Hands out the annotator's own unexpired claim if they have one — a reload must not hand a reviewer a different trace mid-verdict — and otherwise the oldest pending item nobody holds, claiming it for ten minutes. The window is a constant, not a setting. `item` is null when nothing is claimable, and `pending` then counts what other people are holding. Any completion, skip or reopen clears the claim; reading an item does not take one.",
         "operationId": "nextQueueItem",
+        "x-tracepad-scope": "write",
         "parameters": [
           {"$ref": "#/components/parameters/QueueName"},
           {"name": "annotator", "in": "query", "required": true, "schema": {"type": "string", "minLength": 1, "maxLength": 200},
@@ -2088,6 +2169,7 @@
         "summary": "One item",
         "description": "A read, and only a read: it takes no claim.",
         "operationId": "getQueueItem",
+        "x-tracepad-scope": "read",
         "parameters": [{"$ref": "#/components/parameters/QueueName"}, {"$ref": "#/components/parameters/ItemID"}],
         "responses": {
           "200": {"description": "The item", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AnnotationItem"}}}},
@@ -2102,6 +2184,7 @@
         "summary": "Remove one item from the queue",
         "description": "No dry run and no echo: a re-add recreates the row, and the scores it was about were never in this table.",
         "operationId": "deleteQueueItem",
+        "x-tracepad-scope": "write",
         "parameters": [{"$ref": "#/components/parameters/QueueName"}, {"$ref": "#/components/parameters/ItemID"}],
         "responses": {
           "200": {"description": "The item is gone", "content": {"application/json": {"schema": {
@@ -2120,6 +2203,7 @@
         "summary": "Mark an item done; refused unless every score the queue asks for is on its target",
         "description": "The queue promised a shape, and *completed* means the shape was filled — checked here, against the scores actually stored, whoever wrote them: a judge's verdict already on the trace counts, which is what lets a reviewer confirm one rather than repeat it. A trace item needs scores that name no observation, and an observation item scores that name its own. A 409 carries `missing` with the names that are not there; a second completion is a 409 naming who got there first.",
         "operationId": "completeQueueItem",
+        "x-tracepad-scope": "write",
         "parameters": [{"$ref": "#/components/parameters/QueueName"}, {"$ref": "#/components/parameters/ItemID"}],
         "requestBody": {"required": true, "content": {"application/json": {"schema": {
           "type": "object",
@@ -2150,6 +2234,7 @@
         "summary": "Mark an item skipped, with the reason",
         "description": "Not every trace deserves a verdict, and the reason is what makes that readable on the queue page afterwards. The claim is released. A *completed* item is refused with a 409 naming who completed it: a skip writes the same columns a completion filled, so it would destroy the record rather than add to it — reopen it first.",
         "operationId": "skipQueueItem",
+        "x-tracepad-scope": "write",
         "parameters": [{"$ref": "#/components/parameters/QueueName"}, {"$ref": "#/components/parameters/ItemID"}],
         "requestBody": {"required": true, "content": {"application/json": {"schema": {
           "type": "object",
@@ -2175,6 +2260,7 @@
         "summary": "Return a completed or skipped item to pending",
         "description": "For the manager who disagrees with a verdict or wants a skip looked at again. An item that is already pending is not refused: what reopening does to it is release the claim, which is what the desk's *Later* asks for. The scores stay where they are — reopening asks for another look, not for a retraction.",
         "operationId": "reopenQueueItem",
+        "x-tracepad-scope": "write",
         "parameters": [{"$ref": "#/components/parameters/QueueName"}, {"$ref": "#/components/parameters/ItemID"}],
         "requestBody": {"required": true, "content": {"application/json": {"schema": {
           "type": "object",
@@ -2196,6 +2282,7 @@
         "summary": "Every account with its standing and its projects",
         "description": "The page an owner opens to answer \"who can see what\", so the projects and roles are on the row rather than behind a click. Sorted by email.",
         "operationId": "listAccounts",
+        "x-tracepad-scope": "none",
         "security": [{"sessionCookie": []}, {"adminToken": []}],
         "responses": {
           "200": {"description": "Every account", "content": {"application/json": {"schema": {
@@ -2214,6 +2301,7 @@
         "summary": "Invite an account; the link is shown once",
         "description": "Creates an account with no password and the single-use link that sets one, good for seven days. The link is in this response and in no other, ever — only its hash is stored — and carrying it to the person is the owner's job: there is no mail here. A token that sets a password means the password never passes through the owner's hands.",
         "operationId": "createAccount",
+        "x-tracepad-scope": "none",
         "security": [{"sessionCookie": []}, {"adminToken": []}],
         "requestBody": {"required": true, "content": {"application/json": {"schema": {
           "type": "object",
@@ -2249,6 +2337,7 @@
         "tags": ["accounts"],
         "summary": "One account with its projects",
         "operationId": "getAccount",
+        "x-tracepad-scope": "none",
         "security": [{"sessionCookie": []}, {"adminToken": []}],
         "parameters": [{"$ref": "#/components/parameters/AccountID"}],
         "responses": {
@@ -2269,6 +2358,7 @@
         "summary": "Change an account's name, owner standing or disabled flag",
         "description": "The last enabled owner cannot be demoted or disabled: 409. Making somebody an owner drops their memberships, because an owner has every project. Disabling ends the account's sessions at once.",
         "operationId": "patchAccount",
+        "x-tracepad-scope": "none",
         "security": [{"sessionCookie": []}, {"adminToken": []}],
         "parameters": [{"$ref": "#/components/parameters/AccountID"}],
         "requestBody": {"required": true, "content": {"application/json": {"schema": {
@@ -2299,6 +2389,7 @@
         "summary": "Delete an account; a dry run until `?confirm=` echoes its email",
         "description": "For people who are gone. It takes their memberships, sessions and invitations and nothing else: a score does not name its author, and the keys it minted keep working, listed in the dry run. Disabling is the reversible way to take access away today.",
         "operationId": "deleteAccount",
+        "x-tracepad-scope": "none",
         "security": [{"sessionCookie": []}, {"adminToken": []}],
         "parameters": [
           {"$ref": "#/components/parameters/AccountID"},
@@ -2322,6 +2413,7 @@
         "summary": "Mint a fresh invitation link; this is also the password reset",
         "description": "Ends the account's sessions and voids any earlier link. The old password goes on working until the new link is used, so an owner cannot lock somebody out by pressing this: the failure mode of a reset is somebody locked out on a Friday.",
         "operationId": "inviteAccount",
+        "x-tracepad-scope": "none",
         "security": [{"sessionCookie": []}, {"adminToken": []}],
         "parameters": [{"$ref": "#/components/parameters/AccountID"}],
         "responses": {
@@ -2348,6 +2440,7 @@
         "summary": "Give an account a role in a project",
         "description": "An owner already has every project, so a membership for one is a 409.",
         "operationId": "putMembership",
+        "x-tracepad-scope": "none",
         "security": [{"sessionCookie": []}, {"adminToken": []}],
         "parameters": [
           {"$ref": "#/components/parameters/AccountID"},
@@ -2378,6 +2471,7 @@
         "summary": "Take a project away from an account",
         "description": "Removing a membership that is not there is not an error: the state the caller asked for is the state that holds.",
         "operationId": "deleteMembership",
+        "x-tracepad-scope": "none",
         "security": [{"sessionCookie": []}, {"adminToken": []}],
         "parameters": [
           {"$ref": "#/components/parameters/AccountID"},
@@ -2397,8 +2491,9 @@
       "get": {
         "tags": ["admin"],
         "summary": "List projects",
-        "description": "The admin token sees every project; a project key sees its own and nothing else.",
+        "description": "The admin token sees every project; a project key sees its own and nothing else, with `key` on the row saying which key asked and what it may do — any key may call this, whatever its scopes.",
         "operationId": "listProjects",
+        "x-tracepad-scope": "any",
         "parameters": [
           {"name": "include", "in": "query", "schema": {"type": "string", "enum": ["deleted"]},
             "description": "`deleted` adds soft-deleted projects with their purge dates. Admin token only."},
@@ -2421,6 +2516,7 @@
         "summary": "Create a project and its first key pair",
         "description": "The secret key is in this response and in no other: only its hash is stored. A name inside another project's grace window is a 409 naming the restorable one.",
         "operationId": "createProject",
+        "x-tracepad-scope": "none",
         "security": [{"adminToken": []}],
         "requestBody": {"required": true, "content": {"application/json": {"schema": {
           "type": "object",
@@ -2443,8 +2539,9 @@
       "get": {
         "tags": ["admin"],
         "summary": "One project with its retention windows",
-        "description": "A soft-deleted project's own key still reaches this one, so that a caller about to restore can see what it is restoring and until when.",
+        "description": "A soft-deleted project's own key still reaches this one, so that a caller about to restore can see what it is restoring and until when. Any key may call this, whatever its scopes, and a key's answer carries `key`: which key asked and what it may do.",
         "operationId": "getProject",
+        "x-tracepad-scope": "any",
         "parameters": [{"$ref": "#/components/parameters/ProjectID"}],
         "responses": {
           "200": {"description": "The project",
@@ -2461,6 +2558,7 @@
         "summary": "Rename a project or move its retention windows",
         "description": "Renaming needs the admin token; the windows are the project's own business. `null` means keep forever. A window that shrinks is destructive: without `confirm` it answers with the preview, and it applies only when `confirm` echoes the project's name.",
         "operationId": "patchProject",
+        "x-tracepad-scope": "write",
         "parameters": [{"$ref": "#/components/parameters/ProjectID"}, {"$ref": "#/components/parameters/Confirm"}],
         "requestBody": {"required": true, "content": {"application/json": {"schema": {
           "type": "object",
@@ -2493,6 +2591,7 @@
         "summary": "Soft-delete a project, restorable for seven days",
         "description": "The keys stop authenticating immediately and the project vanishes from listings; the data is destroyed by the sweeper after a fixed seven-day grace. Admin token only, even for one's own project. Without `confirm` it answers with the preview.",
         "operationId": "deleteProject",
+        "x-tracepad-scope": "none",
         "security": [{"adminToken": []}],
         "parameters": [{"$ref": "#/components/parameters/ProjectID"}, {"$ref": "#/components/parameters/Confirm"}],
         "responses": {
@@ -2515,6 +2614,7 @@
         "summary": "Undo a soft delete inside its grace window",
         "description": "No confirmation: it destroys nothing. Reachable with the project's own key even while deleted, so that a deployment without an admin token can still undo one.",
         "operationId": "restoreProject",
+        "x-tracepad-scope": "none",
         "parameters": [{"$ref": "#/components/parameters/ProjectID"}],
         "responses": {
           "200": {"description": "The project, live again",
@@ -2533,6 +2633,7 @@
         "summary": "List a project's keys, who minted each and when it was last used",
         "description": "An owner or editor signed in, or the admin token; a project key is answered 403, because no key lists, mints or revokes keys. The secrets are not here because they are not anywhere: only their hashes are stored.",
         "operationId": "listKeys",
+        "x-tracepad-scope": "none",
         "security": [{"sessionCookie": []}, {"adminToken": []}],
         "parameters": [{"$ref": "#/components/parameters/ProjectID"}],
         "responses": {
@@ -2550,15 +2651,19 @@
       "post": {
         "tags": ["admin"],
         "summary": "Mint a key pair; the secret is shown once",
-        "description": "An owner or editor signed in, or the admin token; a project key is answered 403. Several active pairs are what makes rotation zero-downtime: create the new one, move the SDKs, revoke the old. The key records who minted it.",
+        "description": "An owner or editor signed in, or the admin token; a project key is answered 403. Several active pairs are what makes rotation zero-downtime: create the new one, move the SDKs, revoke the old. The body says what the key may do, which never changes afterwards: to narrow or widen a key, mint another and revoke it. The key records who minted it.",
         "operationId": "createKey",
+        "x-tracepad-scope": "none",
         "security": [{"sessionCookie": []}, {"adminToken": []}],
         "parameters": [{"$ref": "#/components/parameters/ProjectID"}],
-        "requestBody": {"required": false, "content": {"application/json": {"schema": {
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {
           "type": "object",
           "properties": {
+            "scopes": {"type": "array", "minItems": 1, "items": {"type": "string", "enum": ["ingest", "read", "write"]},
+              "description": "What the key may do: `ingest` sends spans, uses the Langfuse media channel and writes scores; `read` is every read of the project's data; `write` is every change a key may make. Any non-empty combination; duplicates collapse. Missing, empty or an unknown word is a 400"},
             "name": {"type": "string", "maxLength": 64, "description": "Which program holds the key. Trimmed; at most 64 characters; no control or bidirectional control characters (422); not unique"}
           },
+          "required": ["scopes"],
           "additionalProperties": false}}}},
         "responses": {
           "201": {"description": "The new pair, secret included this once",
@@ -2576,8 +2681,9 @@
       "delete": {
         "tags": ["admin"],
         "summary": "Revoke one key pair",
-        "description": "An owner or editor signed in, or the admin token; a project key is answered 403. Revoking a project's last key stops its ingest, so that one is a dry run until `confirm` echoes the project's name.",
+        "description": "An owner or editor signed in, or the admin token; a project key is answered 403. Revoking a project's last key, or the last one that carries `ingest`, stops its ingest, so that one is a dry run until `confirm` echoes the project's name.",
         "operationId": "revokeKey",
+        "x-tracepad-scope": "none",
         "security": [{"sessionCookie": []}, {"adminToken": []}],
         "parameters": [
           {"$ref": "#/components/parameters/ProjectID"},
@@ -2585,7 +2691,7 @@
           {"$ref": "#/components/parameters/Confirm"}
         ],
         "responses": {
-          "200": {"description": "The key is gone, or the dry run for the last one",
+          "200": {"description": "The key is gone, or the dry run for the last one or the last with `ingest`",
             "content": {"application/json": {"schema": {"oneOf": [
               {"$ref": "#/components/schemas/Deletion"},
               {"$ref": "#/components/schemas/DryRun"}]}}}},
@@ -2603,6 +2709,7 @@
         "summary": "Erase everything stored about one user",
         "description": "Erases, synchronously, everything the store holds about the traces filed under the user id: the traces, their observations, payloads and scores, the annotation-queue items pointing at them (`annotation_items`), the session-only scores of the sessions they carried (`session_scores`), every version of the dataset items cut from them (`dataset_items`, with the datasets named under `affected_datasets`), and their spans inside the raw OTLP bodies — each batch that held one is rewritten without it and marked `scrubbed_at`, or deleted when nothing else was in it (`raw_spans`, `raw_batches_rewritten`, `raw_batches_deleted`). The preview's `raw` block counts the batches the erasure will read and those older than the trace window, which nothing can attribute any more. The answer's `compaction` says when the sweeper pass that overwrites what was unlinked is due, and `pre_migration_backup`, while one exists, names the backup the erasure does not rewrite and the day it goes. Without `confirm` it answers with the preview; the echo here is the user id.",
         "operationId": "eraseUserData",
+        "x-tracepad-scope": "write",
         "parameters": [
           {"$ref": "#/components/parameters/ProjectID"},
           {"name": "user_id", "in": "path", "required": true, "schema": {"type": "string"}},
@@ -2627,6 +2734,7 @@
         "summary": "Who has a role in this project; owners are not listed",
         "description": "The project side of the question an owner asks from the account side at `/api/v1/accounts`. Owners are absent because they are not membership rows — the screen says \"and every owner\" rather than pretending they are.",
         "operationId": "projectMembers",
+        "x-tracepad-scope": "none",
         "security": [{"sessionCookie": []}, {"adminToken": []}],
         "parameters": [{"$ref": "#/components/parameters/ProjectID"}],
         "responses": {
@@ -2656,7 +2764,7 @@
   "components": {
     "securitySchemes": {
       "bearerKey": {"type": "http", "scheme": "bearer",
-        "description": "A project's secret key, `tp-sk-…`"},
+        "description": "A project's secret key, `tp-sk-…`. A key holds one or more of three scopes — `ingest`, `read`, `write` — and every operation names the one it asks of a key as `x-tracepad-scope` (`any` for every key, `none` for no key). A key without it is answered 403 with `WWW-Authenticate: Bearer error=\"insufficient_scope\", scope=\"<needed>\"` and a body naming the scopes it holds and the one the route needs"},
       "basicKeys": {"type": "http", "scheme": "basic",
         "description": "`base64(public key:secret key)`, the shape a Langfuse SDK sends"},
       "adminToken": {"type": "http", "scheme": "bearer",
@@ -2744,7 +2852,9 @@
         "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "NotFound": {"description": "No such thing in this project",
         "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
-      "Forbidden": {"description": "The credentials are good but do not reach this far: an owner account or the admin token is needed, the role in this project is too low, or a cookie request came from another origin",
+      "Forbidden": {"description": "The credentials are good but do not reach this far: an owner account or the admin token is needed, the role in this project is too low, a project key lacks the scope the operation names in `x-tracepad-scope`, or a cookie request came from another origin",
+        "headers": {"WWW-Authenticate": {"schema": {"type": "string"},
+          "description": "Only when a project key lacks a scope: `Bearer error=\"insufficient_scope\", scope=\"<needed>\"` (RFC 6750 §3.1)"}},
         "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "Conflict": {"description": "The stored state already answers differently: a name that is taken, a project that is already deleted, the last owner being demoted",
         "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
@@ -3160,7 +3270,15 @@
           "role": {"type": "string", "enum": ["viewer", "editor", "owner"],
             "description": "Present only when a session asked: what this account may do in this project. A project key and the admin token get no role, because a role is what an account has (spec 028 #12)"},
           "traces_24h": {"type": "integer", "minimum": 0,
-            "description": "Present on every row of a listing asked with `activity=24h`, and absent otherwise: the traces whose timestamp falls in the last 24 hours, from the hourly roll-up behind the watermark and the raw rows past it. A soft-deleted project carries 0 (spec 029 #8)"}
+            "description": "Present on every row of a listing asked with `activity=24h`, and absent otherwise: the traces whose timestamp falls in the last 24 hours, from the hourly roll-up behind the watermark and the raw rows past it. A soft-deleted project carries 0 (spec 029 #8)"},
+          "key": {"type": "object",
+            "description": "Present only when a project key asked: which key it is and what it may do, so that a program that met a 403 can learn what it holds",
+            "properties": {
+              "public_key": {"type": "string"},
+              "name": {"type": "string"},
+              "scopes": {"$ref": "#/components/schemas/KeyScopes"}
+            },
+            "required": ["public_key", "name", "scopes"]}
         },
         "required": ["id", "name", "retention_days", "raw_retention_days", "stats_retention_days", "media", "created_at"]
       },
@@ -3194,7 +3312,7 @@
       },
       "KeyScopes": {
         "type": "array",
-        "description": "What the key may do. Every key holds all three today",
+        "description": "What the key may do, in this order: `ingest` (send spans, the Langfuse media channel, write scores), `read` (every read of the project's data), `write` (every change a key may make). A key that predates scopes, and a key the server made by itself, holds all three. Fetching one prompt is open to every key, whatever its scopes",
         "items": {"type": "string", "enum": ["ingest", "read", "write"]}
       },
       "KeyMinter": {

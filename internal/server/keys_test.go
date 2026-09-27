@@ -58,6 +58,18 @@ type minted struct {
 	} `json:"created_by"`
 }
 
+// mint mints a key with the given scopes as the admin token.
+func (h *harness) mint(t *testing.T, scopes ...string) minted {
+	t.Helper()
+	rec := h.call(t, "POST", "/api/v1/projects/"+h.project.ID+"/keys",
+		mustJSON(t, map[string]any{"scopes": scopes}), asAdmin)
+	expectStatus(t, rec, http.StatusCreated)
+	return decodeJSON[minted](t, rec)
+}
+
+// allScopes is a mint body's `scopes` for a key that may do everything.
+var allScopes = []string{"ingest", "read", "write"}
+
 // TestAKeyCannotMintAKey is red without the fix: the harness's key lists,
 // mints and revokes keys on `main`, and a key minted with a key outlives the
 // revocation of the first (Testing #4).
@@ -77,7 +89,7 @@ func TestAKeyCannotMintAKey(t *testing.T) {
 			"a project key cannot list, mint or revoke keys; that needs an owner or editor signed in, or the admin token")
 	}
 	// A body changes nothing: the refusal is the guard's, before any.
-	rec := h.call(t, "POST", keys, mustJSON(t, map[string]any{"name": "mine now"}))
+	rec := h.call(t, "POST", keys, mustJSON(t, map[string]any{"name": "mine now", "scopes": allScopes}))
 	expectStatus(t, rec, http.StatusForbidden)
 
 	if after := h.keysOf(t, h.project.ID); len(after) != len(before) || after[testPublic].PublicKey == "" {
@@ -107,7 +119,7 @@ func TestPeopleAndTheTokenManageKeys(t *testing.T) {
 		{"an editor", asSession(editor), store.MintedByAccount, "editor@example.com", store.RoleEditor},
 		{"the admin token", asAdmin, store.MintedByAdminToken, "", ""},
 	} {
-		rec := h.call(t, "POST", keys, mustJSON(t, map[string]any{"name": "  by " + c.who + "  "}),
+		rec := h.call(t, "POST", keys, mustJSON(t, map[string]any{"name": "  by " + c.who + "  ", "scopes": allScopes}),
 			c.as, inProject(h.project.ID))
 		expectStatus(t, rec, http.StatusCreated)
 		got := decodeJSON[minted](t, rec)
@@ -168,8 +180,8 @@ func TestPeopleAndTheTokenManageKeys(t *testing.T) {
 func TestStandingFollowsTheMinter(t *testing.T) {
 	h := newAccountHarness(t)
 	editor := h.editor(t)
-	rec := h.call(t, "POST", "/api/v1/projects/"+h.project.ID+"/keys", nil, asSession(editor),
-		inProject(h.project.ID))
+	rec := h.call(t, "POST", "/api/v1/projects/"+h.project.ID+"/keys",
+		mustJSON(t, map[string]any{"scopes": []string{"ingest"}}), asSession(editor), inProject(h.project.ID))
 	expectStatus(t, rec, http.StatusCreated)
 	publicKey := decodeJSON[minted](t, rec).PublicKey
 
@@ -200,34 +212,36 @@ func TestStandingFollowsTheMinter(t *testing.T) {
 	}
 }
 
-// TestMintingValidatesTheName: the body is optional, a name is trimmed, at most
-// 64 characters and free of control characters, and nothing else is taken yet
-// (Testing #8, Decision 20).
+// TestMintingValidatesTheName: a name is optional, trimmed, at most 64
+// characters and free of control characters (Testing #8, Decision 20).
 func TestMintingValidatesTheName(t *testing.T) {
 	h := newAccountHarness(t)
 	keys := "/api/v1/projects/" + h.project.ID + "/keys"
+	named := func(name string) []byte {
+		return mustJSON(t, map[string]any{"name": name, "scopes": []string{"read"}})
+	}
 
-	rec := h.call(t, "POST", keys, nil, asAdmin)
+	rec := h.call(t, "POST", keys, mustJSON(t, map[string]any{"scopes": []string{"read"}}), asAdmin)
 	expectStatus(t, rec, http.StatusCreated)
-	if got := decodeJSON[minted](t, rec); got.Name != "" || strings.Join(got.Scopes, " ") != store.AllScopes {
-		t.Errorf("a mint with no body = %+v, want no name and every scope", got)
+	if got := decodeJSON[minted](t, rec); got.Name != "" {
+		t.Errorf("a mint with no name = %+v, want none", got)
 	}
 
 	sixtyFour := strings.Repeat("é", 64)
-	rec = h.call(t, "POST", keys, mustJSON(t, map[string]any{"name": sixtyFour}), asAdmin)
+	rec = h.call(t, "POST", keys, named(sixtyFour), asAdmin)
 	expectStatus(t, rec, http.StatusCreated)
 	if got := decodeJSON[minted](t, rec); got.Name != sixtyFour {
 		t.Errorf("a 64-character name came back as %q", got.Name)
 	}
 
-	rec = h.call(t, "POST", keys, mustJSON(t, map[string]any{"name": sixtyFour + "x"}), asAdmin)
+	rec = h.call(t, "POST", keys, named(sixtyFour+"x"), asAdmin)
 	expectError(t, rec, http.StatusUnprocessableEntity, "at most 64 characters")
 
 	// Characters, not bytes and not UTF-16 units: 64 emoji fit.
 	emoji := strings.Repeat("🔑", 64)
-	rec = h.call(t, "POST", keys, mustJSON(t, map[string]any{"name": emoji}), asAdmin)
+	rec = h.call(t, "POST", keys, named(emoji), asAdmin)
 	expectStatus(t, rec, http.StatusCreated)
-	rec = h.call(t, "POST", keys, mustJSON(t, map[string]any{"name": emoji + "🔑"}), asAdmin)
+	rec = h.call(t, "POST", keys, named(emoji+"🔑"), asAdmin)
 	expectError(t, rec, http.StatusUnprocessableEntity, "at most 64 characters")
 
 	// A character that is not what it looks like is refused, not rendered:
@@ -235,12 +249,9 @@ func TestMintingValidatesTheName(t *testing.T) {
 	// zero-width space, joiner and byte-order mark.
 	for _, name := range []string{"checkout\napi", "tab\there", "line\u2028break",
 		"evil\u202Eipa", "iso\u2066late", "checkout\u200Bapi", "zw\u200Dj", "bom\uFEFF"} {
-		rec = h.call(t, "POST", keys, mustJSON(t, map[string]any{"name": name}), asAdmin)
+		rec = h.call(t, "POST", keys, named(name), asAdmin)
 		expectError(t, rec, http.StatusUnprocessableEntity, "invisible or control character")
 	}
-
-	rec = h.call(t, "POST", keys, mustJSON(t, map[string]any{"scopes": []string{"read"}}), asAdmin)
-	expectStatus(t, rec, http.StatusBadRequest)
 }
 
 // countingWriter counts the key-use jobs that reach the writer.
@@ -372,7 +383,7 @@ func TestAccountDeletionListsTheKeysItMinted(t *testing.T) {
 	secrets := map[string]string{}
 	for _, project := range []*store.Project{h.project, other} {
 		rec := h.call(t, "POST", "/api/v1/projects/"+project.ID+"/keys",
-			mustJSON(t, map[string]any{"name": "app in " + project.Name}),
+			mustJSON(t, map[string]any{"name": "app in " + project.Name, "scopes": allScopes}),
 			asSession(editor), inProject(project.ID))
 		expectStatus(t, rec, http.StatusCreated)
 		secrets[project.ID] = decodeJSON[minted](t, rec).SecretKey

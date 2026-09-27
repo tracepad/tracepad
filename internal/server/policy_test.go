@@ -15,13 +15,15 @@ import (
 The permission matrix, checked (spec 028 Decisions 3 and 7).
 
 A matrix that lives in prose is checked by nobody. This file is the other
-half of the policy column: one test walks the route table and fails for a
-route that declares none, and one hits every non-public route as each of the
-six callers and asserts Decision 3's answer.
+half of the policy and scope columns: one test walks the route table and fails
+for a route that declares no policy, and one hits every non-public route as
+each of the nine callers and asserts Decision 3's answer — and, for the four
+keys, spec 045's (Testing #3).
 
-Six callers times every route is a few hundred cheap requests, and it is what
-turns "a viewer cannot revoke keys" from a belief into a fact — the spec 004
-#33 isolation test, applied to roles.
+Nine callers times every route is several hundred cheap requests, and it is
+what turns "a viewer cannot revoke keys" and "a read key changes nothing" from
+beliefs into facts — the spec 004 #33 isolation test, applied to roles and
+scopes.
 */
 
 // TestEveryRouteHasAPolicy is the parity check. The zero value of `policy` is
@@ -33,26 +35,6 @@ func TestEveryRouteHasAPolicy(t *testing.T) {
 		if rt.Policy == unset {
 			t.Errorf("%s %s declares no policy", rt.Method, rt.Path)
 		}
-	}
-}
-
-// TestKeysAreIssuedByPeople: every route that manages a project's keys declares
-// `issuer`, and nothing else does (spec 045 #4) — so a key route added later
-// with `editor` fails here instead of admitting a project key.
-func TestKeysAreIssuedByPeople(t *testing.T) {
-	h := newAccountHarness(t)
-	issuers := 0
-	for _, rt := range h.server.routes() {
-		keys := strings.HasPrefix(rt.Path, "/api/v1/projects/{id}/keys")
-		if keys != (rt.Policy == issuer) {
-			t.Errorf("%s %s has policy %s", rt.Method, rt.Path, rt.Policy)
-		}
-		if keys {
-			issuers++
-		}
-	}
-	if issuers != 3 {
-		t.Errorf("%d routes manage keys, want the three of spec 045 #4", issuers)
 	}
 }
 
@@ -69,11 +51,16 @@ func TestEndpointMapPublishesThePolicy(t *testing.T) {
 			Method string `json:"method"`
 			Path   string `json:"path"`
 			Policy string `json:"policy"`
+			Scope  string `json:"scope"`
 		} `json:"endpoints"`
 	}](t, rec)
 	if len(listed.Endpoints) != len(h.server.routes()) {
 		t.Fatalf("the map lists %d endpoints, the table has %d",
 			len(listed.Endpoints), len(h.server.routes()))
+	}
+	scopes := map[string]string{}
+	for _, rt := range h.server.routes() {
+		scopes[rt.Method+" "+rt.Path] = rt.Scope.String()
 	}
 	for _, endpoint := range listed.Endpoints {
 		switch endpoint.Policy {
@@ -81,55 +68,108 @@ func TestEndpointMapPublishesThePolicy(t *testing.T) {
 		default:
 			t.Errorf("%s %s has policy %q", endpoint.Method, endpoint.Path, endpoint.Policy)
 		}
+		// Spec 045 #2: the word a key needs, beside the policy.
+		if want := scopes[endpoint.Method+" "+endpoint.Path]; endpoint.Scope != want || want == "unset" {
+			t.Errorf("%s %s has scope %q, want the table's %q", endpoint.Method, endpoint.Path, endpoint.Scope, want)
+		}
 	}
 }
 
-// who is one of the six callers of Decision 7.
+// who is one of the nine callers: spec 028 Decision 7's six, with the project
+// key split into the four keys spec 045 tells apart (Testing #3).
 type who int
 
 const (
 	noCredential who = iota
-	projectKey
+	projectKey       // all three scopes, which is what every key was before
+	ingestKey
+	readKey
+	writeKey
 	deploymentToken
 	viewerSession
 	editorSession
 	ownerSession
 )
 
+var nineCallers = []who{noCredential, projectKey, ingestKey, readKey, writeKey,
+	deploymentToken, viewerSession, editorSession, ownerSession}
+
 func (w who) String() string {
-	return [...]string{"no credential", "a project key", "the admin token",
-		"a viewer session", "an editor session", "an owner session"}[w]
+	return [...]string{"no credential", "a key with all three scopes", "an ingest key", "a read key",
+		"a write key", "the admin token", "a viewer session", "an editor session", "an owner session"}[w]
+}
+
+// isKey reports the four project keys.
+func (w who) isKey() bool { return w >= projectKey && w <= writeKey }
+
+// holds reports whether one of the four keys carries a scope.
+func (w who) holds(word string) bool {
+	switch w {
+	case projectKey:
+		return true
+	case ingestKey:
+		return word == store.ScopeIngest
+	case readKey:
+		return word == store.ScopeRead
+	case writeKey:
+		return word == store.ScopeWrite
+	}
+	return false
 }
 
 // verdict is what the matrix says a caller gets on a route: either the request
-// reaches the handler, or it is refused with a named status.
+// reaches the handler, or it is refused with a named status. `needs` is the
+// scope a key was refused for, which the answer's `WWW-Authenticate` names.
 type verdict struct {
 	status   int
 	fragment string
+	needs    string
 }
 
 var admitted = verdict{}
 
-// decision is Decision 3, as code. `path` is the route's pattern, because two
-// of the rules turn on whether the route is one of the project's own.
-func decision(p policy, w who, path string) verdict {
+// decision is Decision 3, then spec 045 #13's fifth step, as code: the policy
+// against the kind of caller, and for a key the policy admits, the scope
+// against the key's. `rt.Path` is the route's pattern, because two of the rules
+// turn on whether the route is one of the project's own.
+func decision(rt route, w who) verdict {
+	byPolicy := policyDecision(rt.Policy, w, rt.Path)
+	if byPolicy != admitted || !w.isKey() {
+		return byPolicy
+	}
+	switch rt.Scope {
+	case scopeAny:
+		return admitted
+	case scopeNone:
+		// No key manages keys, whatever it may do elsewhere (#4).
+		return verdict{status: http.StatusForbidden, fragment: "cannot list, mint or revoke keys"}
+	}
+	if w.holds(rt.Scope.String()) {
+		return admitted
+	}
+	return verdict{http.StatusForbidden, rt.Method + " " + rt.Path + " needs " + rt.Scope.String(), rt.Scope.String()}
+}
+
+// policyDecision is Decision 3 alone, which is the whole of the answer for
+// every caller but a key.
+func policyDecision(p policy, w who, path string) verdict {
 	if w == noCredential {
-		return verdict{http.StatusUnauthorized, "unauthorized"}
+		return verdict{status: http.StatusUnauthorized, fragment: "unauthorized"}
 	}
 	switch p {
 	case ingest:
 		// A project key and nothing else: a person's browser never writes
 		// spans, and the admin token never touches the data plane.
-		if w == projectKey {
+		if w.isKey() {
 			return admitted
 		}
-		return verdict{http.StatusUnauthorized, "unauthorized"}
+		return verdict{status: http.StatusUnauthorized, fragment: "unauthorized"}
 
 	case session:
 		// A key or the admin token is a perfectly good credential asking
 		// a question it cannot have.
-		if w == projectKey || w == deploymentToken {
-			return verdict{http.StatusBadRequest, "not a session"}
+		if w.isKey() || w == deploymentToken {
+			return verdict{status: http.StatusBadRequest, fragment: "not a session"}
 		}
 		return admitted
 
@@ -137,35 +177,32 @@ func decision(p policy, w who, path string) verdict {
 		if w == deploymentToken || w == ownerSession {
 			return admitted
 		}
-		return verdict{http.StatusForbidden, "owner account"}
+		return verdict{status: http.StatusForbidden, fragment: "owner account"}
 
 	case member:
 		if w == deploymentToken && !projectRoute(path) {
 			// The admin token keeps exactly the powers spec 005 #11
 			// gave it and still reaches no data-plane route.
-			return verdict{http.StatusUnauthorized, "unauthorized"}
+			return verdict{status: http.StatusUnauthorized, fragment: "unauthorized"}
 		}
 		return admitted
 
-	case editor, issuer:
-		if p == issuer && w == projectKey {
-			// No key manages keys, whatever it may do elsewhere
-			// (spec 045 #4).
-			return verdict{http.StatusForbidden, "cannot list, mint or revoke keys"}
-		}
+	case editor:
 		if w == deploymentToken && !projectRoute(path) {
-			return verdict{http.StatusUnauthorized, "unauthorized"}
+			return verdict{status: http.StatusUnauthorized, fragment: "unauthorized"}
 		}
 		if w == viewerSession {
-			return verdict{http.StatusForbidden, "viewer"}
+			return verdict{status: http.StatusForbidden, fragment: "viewer"}
 		}
 		return admitted
 	}
 	return admitted
 }
 
-// TestPermissionMatrix hits every non-public route as each of the six callers
-// and asserts Decision 3 status by status.
+// TestPermissionMatrix hits every non-public route as each of the nine callers
+// and asserts Decision 3 and spec 045's scopes status by status. A scope
+// refusal is asserted by its status, the message's naming of the route and the
+// scope it needs, and the `WWW-Authenticate` header that names the scope too.
 //
 // "Admitted" is asserted rather than a status, because past the guard a route
 // answers whatever it thinks of the request body and the ids in the path: what
@@ -190,6 +227,11 @@ func TestPermissionMatrix(t *testing.T) {
 		store.Membership{ProjectID: h.project.ID, Role: store.RoleViewer})
 
 	viewer, editor, owner := people[0], people[1], people[2]
+	keys := map[who]string{
+		ingestKey: h.mint(t, store.ScopeIngest).SecretKey,
+		readKey:   h.mint(t, store.ScopeRead).SecretKey,
+		writeKey:  h.mint(t, store.ScopeWrite).SecretKey,
+	}
 	for _, rt := range h.server.routes() {
 		if rt.Policy == public || rt.Policy == presigned {
 			continue
@@ -206,11 +248,9 @@ func TestPermissionMatrix(t *testing.T) {
 		}
 		t.Run(rt.Method+" "+rt.Path, func(t *testing.T) {
 			path := fill(rt.Path, h.project.ID, subject.ID)
-			for _, w := range []who{
-				noCredential, projectKey, deploymentToken, viewerSession, editorSession, ownerSession,
-			} {
-				want := decision(rt.Policy, w, rt.Path)
-				rec := h.call(t, rt.Method, path, nil, callerOf(w, owner, editor, viewer),
+			for _, w := range nineCallers {
+				want := decision(rt, w)
+				rec := h.call(t, rt.Method, path, nil, callerOf(w, keys, owner, editor, viewer),
 					inProject(h.project.ID))
 
 				if want == admitted {
@@ -229,18 +269,30 @@ func TestPermissionMatrix(t *testing.T) {
 					t.Errorf("%s: %s %s said %q, want it to mention %q",
 						w, rt.Method, path, message, want.fragment)
 				}
+				challenge := rec.Header().Get("WWW-Authenticate")
+				if want.needs != "" {
+					if wantHeader := `Bearer error="insufficient_scope", scope="` + want.needs + `"`; challenge != wantHeader {
+						t.Errorf("%s: %s %s: WWW-Authenticate = %q, want %q", w, rt.Method, path, challenge, wantHeader)
+					}
+				} else if strings.Contains(challenge, "insufficient_scope") {
+					t.Errorf("%s: %s %s: WWW-Authenticate = %q on a refusal that is not about scope",
+						w, rt.Method, path, challenge)
+				}
 			}
 		})
 	}
 }
 
-// callerOf turns one of the six into the request mutator that is it.
-func callerOf(w who, owner, editor, viewer *signedIn) func(*http.Request) {
+// callerOf turns one of the nine into the request mutator that is it. `keys`
+// holds the secrets of the three narrow keys.
+func callerOf(w who, keys map[who]string, owner, editor, viewer *signedIn) func(*http.Request) {
 	switch w {
 	case noCredential:
 		return anonymous
 	case projectKey:
 		return func(*http.Request) {} // the harness sends the key by default
+	case ingestKey, readKey, writeKey:
+		return asKey(keys[w])
 	case deploymentToken:
 		return asAdmin
 	case viewerSession:
@@ -280,9 +332,8 @@ func fill(pattern, projectID, accountID string) string {
 	}
 	replacements := [][2]string{
 		{"{project_id}", projectID},
-		// A key that is not there: minting one needs no body, so by the
-		// time the revoke route is reached the project has several, and
-		// naming a real one would revoke the harness's own.
+		// A key that is not there: naming a real one would revoke a key
+		// the matrix is still asking with.
 		{"{public_key}", "tp-pk-nothing-by-this-name"},
 		{"{user_id}", "u1"},
 		{"{name}", "nothing-by-this-name"},
@@ -335,6 +386,8 @@ func TestSessionsAreIsolatedByProject(t *testing.T) {
 // TestKeyLoginKeepsWorking is what makes this a change the interface can
 // follow one PR later: every route a key reached before it still reaches —
 // but for the three that manage keys, which no key reaches since spec 045 #4.
+// The harness's key is the server's own, made with all three scopes (#5), as
+// every key that predates scopes was (Testing #5).
 func TestKeyLoginKeepsWorking(t *testing.T) {
 	// Deliberately without an admin token: this is the deployment the
 	// interface has today, and every route it reaches must go on answering.

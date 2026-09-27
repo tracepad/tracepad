@@ -54,7 +54,7 @@ func TestMediaUploadDiesWithItsKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := f.writer.Submit(t.Context(), &KeyCreate{ProjectID: f.project.ID, Keys: second,
+	if err := f.writer.Submit(t.Context(), &KeyCreate{ProjectID: f.project.ID, Keys: second, Scopes: AllScopes,
 		Origin: KeyOrigin{Via: MintedByAdminToken}}); err != nil {
 		t.Fatal(err)
 	}
