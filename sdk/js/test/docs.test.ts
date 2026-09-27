@@ -88,8 +88,11 @@ test('every ```ts example in the docs type-checks against the package', () => {
     types: ['node'],
     skipLibCheck: true,
     noEmit: true,
-    baseUrl: PACKAGE,
-    paths: { tracepad: ['src/index.ts'], 'tracepad/testing': ['src/testing.ts'] },
+    // Absolute, and no `baseUrl`: TypeScript 6 deprecates it and 7 removes it.
+    paths: {
+      tracepad: [join(PACKAGE, 'src/index.ts')],
+      'tracepad/testing': [join(PACKAGE, 'src/testing.ts')],
+    },
   };
   const host = ts.createCompilerHost(options);
   const readFile = host.readFile.bind(host);

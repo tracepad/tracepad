@@ -14,6 +14,10 @@ package="$repo_root/sdk/js"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
+# A Node the package does not support fails here, by name, rather than
+# somewhere in the suite.
+node "$repo_root/scripts/node-engines.mjs" "$package/package.json"
+
 if [ ! -d "$package/node_modules" ]; then
     echo "==> npm ci"
     (cd "$package" && npm ci)
@@ -26,7 +30,11 @@ if [ -z "${SDK_SKIP_E2E:-}" ]; then
 fi
 
 cd "$package"
-echo "==> tsc"
-npx tsc --noEmit
+# TypeScript 7 by its own path: `@typescript/old`, the 6.0 that the
+# `typescript` alias depends on, declares a `tsc` too, and which of the two
+# `node_modules/.bin/tsc` names is npm's choice, not the manifest's (spec 032
+# #19).
+echo "==> tsc $(node node_modules/@typescript/native/bin/tsc --version)"
+node node_modules/@typescript/native/bin/tsc --noEmit
 echo "==> vitest"
 npx vitest run "$@"

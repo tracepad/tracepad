@@ -958,6 +958,13 @@ CodeMirror 6 (the payload surface, imported statically and pinned by exact
 version; there is no `basicSetup` — the extensions are listed by hand in
 `ui/src/lib/components/json/setup.ts`).
 
+It builds with Node 24, the one Node `ui/package.json` names in `engines`:
+the targets below stop at once, naming the version they found, under any
+other. The type check is `svelte-check` on TypeScript 6.0: it imports the
+compiler as a library, which TypeScript 7 has no stable API for yet, so the
+`typescript` package is an alias to 6.0's. The interface moves to 7 when 7.1
+ships that API and `svelte-check` runs on it.
+
 ```sh
 make ui          # build the bundle and stage it for embedding
 make build       # the above, then `go build -tags ui`

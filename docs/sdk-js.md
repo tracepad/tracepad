@@ -14,7 +14,7 @@ way every time. It is the [Python package](sdk-python.md) with promises where
 Python has context managers, and it writes exactly what the Python one
 writes.
 
-Node 20 or newer. Shipped as ESM and CommonJS with type declarations (built by
+Node 22 or newer. Shipped as ESM and CommonJS with type declarations (built by
 `tsup`), so both `import * as tracepad from 'tracepad'` and
 `const tracepad = require('tracepad')` work. `@opentelemetry/api` is a peer
 dependency — the one copy your application and every instrumentation share —
@@ -499,7 +499,7 @@ flushes the scores and then the spans *before* it posts, so `run.get()` on
 the next line is over everything the run produced; a late span still links,
 so a flush that timed out is a number read early rather than a trace lost.
 A `Run` is also `await using`-compatible — disposal is `finish` — for a
-setup with TypeScript 5.2 and Node 20 or newer; disposal cannot see an
+setup with TypeScript 5.2 and Node 22 or newer; disposal cannot see an
 error, so `wrap` is the shape that can `fail`:
 
 ```ts

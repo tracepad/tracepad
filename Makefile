@@ -67,7 +67,19 @@ format-check: ## Fail if any file is unformatted (read-only, used by CI/gate)
 # Node and npm are dev prerequisites of the UI half only (Decision 10): every
 # Go target above runs without them, and so does the whole Go test suite.
 
-ui-deps: ## Install the UI toolchain if node_modules is missing
+# The Node on PATH against a package's `engines` (spec 006 #16, spec 032
+# #19): checked before anything installs or runs, because a wrong one does not
+# refuse — it builds, and fails dozens of unit tests none of which says why.
+# $(call check-node,<directory of the package>)
+define check-node
+	@command -v node >/dev/null || { echo "Node is required here (see $(1)/package.json engines)"; exit 1; }
+	@node scripts/node-engines.mjs $(1)/package.json
+endef
+
+ui-node: ## Fail at once if the Node on PATH is not the one ui/package.json names
+	$(call check-node,$(UI))
+
+ui-deps: ui-node ## Install the UI toolchain if node_modules is missing
 	@if [ ! -d $(UI)/node_modules ]; then \
 		command -v npm >/dev/null || { echo "npm is required to build the web interface (see ui/package.json engines)"; exit 1; }; \
 		cd $(UI) && npm ci; \
@@ -174,6 +186,7 @@ sdk-go-lines: ## Report the Go package's application lines against its budget
 SDK_JS := sdk/js
 
 sdk-js-deps: ## Install the Node package's toolchain if node_modules is missing
+	$(call check-node,$(SDK_JS))
 	@if [ ! -d $(SDK_JS)/node_modules ]; then \
 		command -v npm >/dev/null || { echo "npm is required for the Node package (see sdk/js/package.json engines)"; exit 1; }; \
 		cd $(SDK_JS) && npm ci; \
@@ -254,7 +267,7 @@ install-hooks: ## (Re)install both hooks
 	chmod +x "$(HOOKS_DIR)/pre-push"
 
 .PHONY: help build build-server dev test vet smoke fixtures format format-check \
-	ui ui-deps notices ui-types ui-types-check ui-check ui-lines image image-check \
+	ui ui-node ui-deps notices ui-types ui-types-check ui-check ui-lines image image-check \
 	e2e sdk-test sdk-lines sdk-go-test sdk-go-unit sdk-go-lines \
 	sdk-js-deps sdk-js-build sdk-js-test sdk-js-lines sdk-notices \
 	doc-anchors doc-anchors-self-test gate precommit \

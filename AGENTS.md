@@ -572,7 +572,11 @@ reason in a comment; adding a dialect should be a table edit.
   first when debugging a running server). `npm run dev` inside `ui/` serves
   the interface with hot reload against it.
 - `make build` — binary with the web interface into `./bin`;
-  `make build-server` builds without it and needs no Node.
+  `make build-server` builds without it and needs no Node. The interface
+  builds on Node 24 alone (`engines` in `ui/package.json`): every target that
+  runs its Node checks the version first and stops, naming it, on any other
+  — the gate included, so a machine whose default is another Node switches
+  before it pushes (`nvm use 24`).
 - `make e2e` — boot the real binary on a temp database and run the Playwright
   smoke. Its own CI job, never part of the gate. Fixtures are dated relative to
   now, or read through a window the test names: a fixed instant read through a
@@ -591,7 +595,8 @@ reason in a comment; adding a dialect should be a table edit.
   budget.
 - `make sdk-js-test` — the Node package's type check and unit suite, then
   its end-to-end suite against a binary it builds. `SDK_SKIP_E2E=1` runs the
-  unit half alone. `make sdk-js-lines` reports its budget.
+  unit half alone. `make sdk-js-lines` reports its budget. Any Node from 22,
+  the package's floor; CI runs 22, 24 and 26.
 - `make sdk-go-test` — the Go package's vet and unit suite inside its module,
   then its end-to-end package against a binary it builds; `make sdk-go-unit`
   is the unit half alone, which the gate runs. `make sdk-go-lines` reports
@@ -613,6 +618,16 @@ reason in a comment; adding a dialect should be a table edit.
   command: do not "green" code against a stale test. Intentional behavior
   changes update the test *and* the Decisions log.
 - **Docs ship in the same PR** as the behavior they describe.
+- **Versions come from the registry, not from memory.** Adding a
+  dependency, a tool, an action or a base image — or moving one to a new
+  major — starts from the newest stable release as its registry lists it
+  that day: `npm view <pkg> dist-tags`, `go list -m -versions <module>`,
+  `uvx pip index versions <pkg>` (PyPI), `gh release list -R <owner>/<action>`,
+  the image's tags on its registry. What a model remembers is months behind
+  the registry, commands included. Taking anything but the newest stable is a
+  decision, and goes in the Decisions log of the spec it belongs to with its
+  reason — spec 032 #15 is the example: vitest 3, because 4 broke the
+  resolver of the npm that Node 22 ships.
 - **Trunk-based PR flow**: short-lived branch → PR → squash-merge. PR titles
   follow Conventional Commits (they become the commit history).
 - **Run what you touched, not everything, until the push.** While iterating:

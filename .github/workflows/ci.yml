@@ -51,21 +51,28 @@ jobs:
           cache-dependency-path: ui/package-lock.json
       - run: make gate
       # The lock files resolve to the npm registry only, over https, with
-      # integrity hashes, and under the names they claim (spec 020 #19). The
-      # Node package's one alias is its OpenTelemetry 1.x test double. The
-      # linter is installed from a lock of its own, here and nowhere else: not
-      # resolved afresh on every run, and not part of the interface, whose
-      # install every release build repeats.
+      # integrity hashes, and under the names they claim (spec 020 #19, #22).
+      # The aliases allowed are TypeScript's: `typescript`, the alias to
+      # 6.0's API, and the real 6.x it pulls in as `@typescript/old`, in both;
+      # `@typescript/native`, which is `tsc` 7, in the Node package alone
+      # (spec 006 #16, spec 032 #19); and the Node package's OpenTelemetry
+      # 1.x test double. The linter is installed from a lock of its own, here
+      # and nowhere else: not resolved afresh on every run, and not part of
+      # the interface, whose install every release build repeats.
       - name: The lock files resolve where they claim to
         run: |
           npm ci --prefix tools/lockfile-lint --ignore-scripts --no-audit --no-fund
           lint=(tools/lockfile-lint/node_modules/.bin/lockfile-lint --type npm
                 --allowed-hosts npm --validate-https --validate-integrity
                 --validate-package-names)
+          typescript6=(typescript:@typescript/typescript6 @typescript/old:typescript)
           "${lint[@]}" --path tools/lockfile-lint/package-lock.json
-          "${lint[@]}" --path ui/package-lock.json
+          "${lint[@]}" --path ui/package-lock.json \
+            --allowed-package-name-aliases "${typescript6[@]}"
           "${lint[@]}" --path sdk/js/package-lock.json \
-            --allowed-package-name-aliases sdk-trace-base-v1:@opentelemetry/sdk-trace-base
+            --allowed-package-name-aliases "${typescript6[@]}" \
+              @typescript/native:typescript \
+              sdk-trace-base-v1:@opentelemetry/sdk-trace-base
       # The anchor checker against its own fixture (spec 026 #6, #13).
       # `gate` above runs it over the tree; this run is what says the
       # checker still finds a broken anchor at all: two of the fixture's
@@ -96,6 +103,9 @@ jobs:
           node-version-file: ui/package.json
           cache: npm
           cache-dependency-path: ui/package-lock.json
+      # The Node against `engines` before the install, which would fail
+      # first and less clearly (spec 006 #16).
+      - run: node scripts/node-engines.mjs ui/package.json
       - run: npm ci
         working-directory: ui
       - run: npx playwright install --with-deps chromium
@@ -272,17 +282,17 @@ jobs:
       # A signal, not a rule (design §8), the same instrument the others have.
       - run: make sdk-go-lines
 
-  # The Node package (spec 032 #11): its type check and unit suite on both
-  # ends of the supported range — 20 is the floor and 22 is where the OTel
-  # SDK moves first — and its end-to-end suite against a real binary. Its own
-  # job, like the Python one, because the gate needs neither.
+  # The Node package (spec 032 #11, #19): its type check and unit suite on
+  # every Node line that still gets releases — 22 is the floor, 24 the active
+  # LTS, 26 the current one — and its end-to-end suite against a real binary.
+  # Its own job, like the Python one, because the gate needs neither.
   sdk-js:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        node-version: [20, 22]
+        node-version: [22, 24, 26]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -295,6 +305,8 @@ jobs:
           node-version: ${{ matrix.node-version }}
           cache: npm
           cache-dependency-path: sdk/js/package-lock.json
+      # Before the install, for the reason the e2e job checks first.
+      - run: node scripts/node-engines.mjs sdk/js/package.json
       - run: npm ci
         working-directory: sdk/js
       - run: scripts/sdk-js-test.sh

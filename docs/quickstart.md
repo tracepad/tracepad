@@ -115,7 +115,7 @@ SDK instead of competing with them. See [sdk-python.md](sdk-python.md).
 
 **In Node, the same package.** `tracepad` on npm is the same surface with
 promises where Python has context managers — the same names on the wire, the
-same rules about what throws — for Node 20 and newer:
+same rules about what throws — for Node 22 and newer:
 
 ```sh
 npm install tracepad @opentelemetry/api
