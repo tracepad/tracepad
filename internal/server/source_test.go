@@ -155,9 +155,6 @@ func TestSourceLimiterIsGCRA(t *testing.T) {
 			t.Fatalf("after a rest, request %d of a new burst was refused", i+1)
 		}
 	}
-	if _, _, refused := l.gauges(); refused == 0 {
-		t.Error("refusals are not counted")
-	}
 }
 
 // TestSourceEvictionTakesTheLeastDebt: a source whose bucket is full again
@@ -393,12 +390,9 @@ func TestBehindAProxy(t *testing.T) {
 	}
 }
 
-// TestAnUntrustedProxyIsWarnedAbout: a private peer that forwards is a proxy
-// nobody named, and every client behind it is one source — said once an hour,
-// with the setting to change. A public peer sending the header is a client,
-// and a trusted one is configured: neither is logged (#12).
-func TestAnUntrustedProxyIsWarnedAbout(t *testing.T) {
-	h := newAccountHarness(t)
+// recordLogs sends the server's log to a buffer for the rest of the test.
+func recordLogs(t *testing.T) func() string {
+	t.Helper()
 	var (
 		mu     sync.Mutex
 		logged bytes.Buffer
@@ -406,6 +400,20 @@ func TestAnUntrustedProxyIsWarnedAbout(t *testing.T) {
 	previous := slog.Default()
 	slog.SetDefault(slog.New(slog.NewTextHandler(&lockedWriter{mu: &mu, out: &logged}, nil)))
 	t.Cleanup(func() { slog.SetDefault(previous) })
+	return func() string {
+		mu.Lock()
+		defer mu.Unlock()
+		return logged.String()
+	}
+}
+
+// TestAnUntrustedProxyIsWarnedAbout: a private peer that forwards is a proxy
+// nobody named, and every client behind it is one source — said once an hour,
+// with the setting to change. A public peer sending the header is a client,
+// and a trusted one is configured: neither is logged (#12).
+func TestAnUntrustedProxyIsWarnedAbout(t *testing.T) {
+	h := newAccountHarness(t)
+	logs := recordLogs(t)
 
 	system := func(mutate ...func(*http.Request)) *httptest.ResponseRecorder {
 		return h.call(t, "GET", "/api/v1/system", nil, mutate...)
@@ -417,20 +425,86 @@ func TestAnUntrustedProxyIsWarnedAbout(t *testing.T) {
 	expectStatus(t, system(from("127.0.0.1:5000"), forwarded("198.51.100.2")), http.StatusOK)
 	expectStatus(t, system(from("10.0.0.1:5000")), http.StatusOK)
 
-	mu.Lock()
-	text := logged.String()
-	mu.Unlock()
+	text := logs()
 	if n := strings.Count(text, "a proxy this server does not trust"); n != 1 {
 		t.Fatalf("the warning was logged %d times, want once:\n%s", n, text)
 	}
-	if !strings.Contains(text, "peer=172.17.0.1") || !strings.Contains(text, "TRACEPAD_TRUSTED_PROXIES") {
-		t.Errorf("the warning names neither the peer nor the setting:\n%s", text)
+	if !strings.Contains(text, "proxy=172.17.0.1") || !strings.Contains(text, "TRACEPAD_TRUSTED_PROXIES") {
+		t.Errorf("the warning names neither the proxy nor the setting:\n%s", text)
+	}
+}
+
+// TestAProxyBehindAProxyIsWarnedAbout: a load balancer in front of a local
+// nginx is the peer's peer. The walk steps past the trusted loopback and stops
+// at the balancer — an untrusted private address with the clients still to
+// its left — so every client is the balancer, and that is said too. A private
+// address with nothing to its left is a client on the network, and says
+// nothing (#16).
+func TestAProxyBehindAProxyIsWarnedAbout(t *testing.T) {
+	h := newAccountHarness(t)
+	logs := recordLogs(t)
+	system := func(mutate ...func(*http.Request)) *httptest.ResponseRecorder {
+		return h.call(t, "GET", "/api/v1/system", nil, mutate...)
+	}
+	expectStatus(t, system(from("127.0.0.1:5000"), forwarded("192.168.1.20")), http.StatusOK)
+	if text := logs(); strings.Contains(text, "does not trust") {
+		t.Fatalf("a private client behind the trusted proxy was warned about:\n%s", text)
+	}
+	expectStatus(t, system(from("127.0.0.1:5000"), forwarded("203.0.113.7, 10.0.0.5")), http.StatusOK)
+	if text := logs(); !strings.Contains(text, "proxy=10.0.0.5") {
+		t.Fatalf("the balancer in front of the trusted proxy was not warned about:\n%s", text)
+	}
+}
+
+// TestNoneIsNotWarnedAbout: an operator who set TRACEPAD_TRUSTED_PROXIES=none
+// chose to trust nobody, and a warning telling them to add a proxy every hour
+// is one they could never silence (#16).
+func TestNoneIsNotWarnedAbout(t *testing.T) {
+	h := newHarness(t, &config.Config{
+		Listen: ":0", StoreRaw: true, MaxBodyBytes: config.DefaultMaxBodyBytes,
+		TrustedProxies: []netip.Prefix{},
+	}, store.WriterOptions{})
+	logs := recordLogs(t)
+	expectStatus(t, h.call(t, "GET", "/api/v1/system", nil, from("127.0.0.1:5000"), forwarded("203.0.113.7")), http.StatusOK)
+	expectStatus(t, h.call(t, "GET", "/api/v1/system", nil, from("172.17.0.1:5000"), forwarded("203.0.113.7")), http.StatusOK)
+	if text := logs(); strings.Contains(text, "does not trust") {
+		t.Fatalf("under none, a proxy was warned about:\n%s", text)
+	}
+}
+
+// TestRetryAfterRoundsUp: a client that waits what Retry-After says is not
+// turned away again for waiting too little — 2.4 s is "3", not "2" (#16).
+func TestRetryAfterRoundsUp(t *testing.T) {
+	for wait, want := range map[time.Duration]string{
+		2400 * time.Millisecond: "3",
+		3 * time.Second:         "3",
+		time.Millisecond:        "1",
+		0:                       "1",
+	} {
+		if got := retryAfterSeconds(wait); got != want {
+			t.Errorf("retryAfterSeconds(%s) = %q, want %q", wait, got, want)
+		}
+	}
+}
+
+// TestTheClientIsWorkedOutOnce: a public route checks a password and then
+// opens a session, and both ask where the request comes from; the second
+// question reads the first answer (#16).
+func TestTheClientIsWorkedOutOnce(t *testing.T) {
+	s := &Server{trusted: newTrustedProxies(nil), proxyLog: &logpace.Keyed{Every: time.Hour, Keys: 8}}
+	r := withClientMemo(httptest.NewRequest("POST", "/", nil))
+	r.RemoteAddr = "127.0.0.1:5000"
+	r.Header.Set("X-Forwarded-For", "203.0.113.7")
+	first := s.clientAddress(r)
+	r.Header.Set("X-Forwarded-For", "198.51.100.1")
+	if second := s.clientAddress(r); second != first {
+		t.Errorf("the second question worked the address out again: %s, then %s", first, second)
 	}
 }
 
 // TestSystemReportsTheSource: /api/v1/system says which source the asking
-// request counts as and what the limit holds — the one way to check a proxy
-// deployment without guessing (#13).
+// request counts as — the one way to check a proxy deployment without
+// guessing (#13) — and nothing of the limit's (#16).
 func TestSystemReportsTheSource(t *testing.T) {
 	h := newHarness(t, &config.Config{
 		Listen: ":0", StoreRaw: true, MaxBodyBytes: config.DefaultMaxBodyBytes,
@@ -438,23 +512,16 @@ func TestSystemReportsTheSource(t *testing.T) {
 	}, store.WriterOptions{})
 	rec := h.call(t, "GET", "/api/v1/system", nil, from("172.17.0.1:5000"), forwarded("2001:db8:1:2::7"))
 	expectStatus(t, rec, http.StatusOK)
-	var body struct {
-		Source      string `json:"source"`
-		SourceLimit struct {
-			Tracked        int      `json:"tracked"`
-			Capacity       int      `json:"capacity"`
-			Refused        int64    `json:"refused"`
-			TrustedProxies []string `json:"trusted_proxies"`
-		} `json:"source_limit"`
-	}
+	var body map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if body.Source != "2001:db8:1:2::/64" {
-		t.Errorf("source = %q, want the forwarded client's /64", body.Source)
+	if body["source"] != "2001:db8:1:2::/64" {
+		t.Errorf("source = %v, want the forwarded client's /64", body["source"])
 	}
-	if body.SourceLimit.Capacity != sourceTracked ||
-		len(body.SourceLimit.TrustedProxies) != 1 || body.SourceLimit.TrustedProxies[0] != "172.17.0.0/16" {
-		t.Errorf("source_limit = %+v", body.SourceLimit)
+	// Only the asker's own: the limit's counts are every tenant's, and the
+	// trusted list is the deployment's topology (#16).
+	if _, told := body["source_limit"]; told {
+		t.Error("the system read reports the limit's deployment-wide counts to a project key")
 	}
 }

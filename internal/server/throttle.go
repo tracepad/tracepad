@@ -316,11 +316,14 @@ func (l *loginLimiter) fewest(keep string) *loginRecord {
 
 // retryAfterSeconds renders a wait for the header.
 func retryAfterSeconds(wait time.Duration) string {
-	seconds := int(wait.Round(time.Second) / time.Second)
-	if seconds < 1 {
-		seconds = 1
-	}
-	return strconv.Itoa(seconds)
+	return strconv.Itoa(waitSeconds(wait))
+}
+
+// waitSeconds is a wait in whole seconds, rounded up and at least one: a
+// client that waits that long is not turned away again for waiting too little
+// (spec 046 #16). Rounded to the nearest, a wait of 2.4 s said 2.
+func waitSeconds(wait time.Duration) int {
+	return max(int((wait+time.Second-1)/time.Second), 1)
 }
 
 // --- The password gate ------------------------------------------------------
@@ -444,7 +447,6 @@ type sourceLimiter struct {
 	capacity int
 	entries  map[netip.Prefix]*sourceEntry
 	byTAT    sourceHeap
-	refused  int64
 }
 
 type sourceEntry struct {
@@ -466,14 +468,15 @@ func (l *sourceLimiter) take(source netip.Prefix, now time.Time) (time.Duration,
 	for len(l.byTAT) > 0 && !l.byTAT[0].tat.After(now) {
 		l.drop(heap.Pop(&l.byTAT).(*sourceEntry))
 	}
+	// Every source still held owes something: the ones that did not
+	// were taken off above.
 	entry := l.entries[source]
 	start := now
-	if entry != nil && entry.tat.After(now) {
+	if entry != nil {
 		start = entry.tat
 	}
 	tolerance := time.Duration(l.burst-1) * l.every
 	if owed := start.Sub(now); owed > tolerance {
-		l.refused++
 		return owed - tolerance, false
 	}
 	if entry != nil {
@@ -491,14 +494,6 @@ func (l *sourceLimiter) take(source netip.Prefix, now time.Time) (time.Duration,
 }
 
 func (l *sourceLimiter) drop(entry *sourceEntry) { delete(l.entries, entry.source) }
-
-// gauges is what /api/v1/system reports: how many sources are held, of how
-// many, and how many requests were refused since the process started.
-func (l *sourceLimiter) gauges() (tracked, capacity int, refused int64) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return len(l.entries), l.capacity, l.refused
-}
 
 // sourceHeap orders sources by TAT, the least debt first.
 type sourceHeap []*sourceEntry
@@ -533,7 +528,7 @@ func (s *Server) admitSource(w http.ResponseWriter, r *http.Request) bool {
 	if ok {
 		return true
 	}
-	seconds := ceilSeconds(wait)
+	seconds := waitSeconds(wait)
 	text := sourceText(source)
 	if held, log := s.sourceLog.Allow(text, now); log {
 		slog.Warn("password checks refused: a source asked for more than its limit",
@@ -543,11 +538,4 @@ func (s *Server) admitSource(w http.ResponseWriter, r *http.Request) bool {
 	w.Header().Set("Retry-After", strconv.Itoa(seconds))
 	writeError(w, http.StatusTooManyRequests, fmt.Sprintf(sourceRefused, seconds))
 	return false
-}
-
-// ceilSeconds is a wait in whole seconds, rounded up and at least one: the
-// client that waits that long finds a token back.
-func ceilSeconds(wait time.Duration) int {
-	seconds := int((wait + time.Second - 1) / time.Second)
-	return max(seconds, 1)
 }

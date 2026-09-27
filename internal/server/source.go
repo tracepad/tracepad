@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"net/netip"
@@ -52,7 +53,7 @@ func (t trustedProxies) trusts(addr netip.Addr) bool {
 	return false
 }
 
-// strings is the list as /api/v1/system and the log show it.
+// strings is the list as the log shows it.
 func (t trustedProxies) strings() []string {
 	out := make([]string, 0, len(t))
 	for _, prefix := range t {
@@ -70,20 +71,56 @@ func (s *Server) TrustedProxies() string {
 	return strings.Join(s.trusted.strings(), ",")
 }
 
-// clientAddress is where the request comes from (spec 046 #1, #2): the peer,
-// or, while the peer is a trusted proxy, the next hop to the left in
-// `X-Forwarded-For`. An entry that is not an address stops the walk at the
-// last trusted one, so an invented entry cannot move it further left. An
-// address that could not be read at all is the zero Addr, which is a source
-// of its own.
+// clientMemo holds a request's client address once it has been worked out,
+// for the routes that ask twice (spec 046 #16): a password check, then the
+// session it opens.
+type clientMemo struct {
+	addr netip.Addr
+	done bool
+}
+
+type clientMemoKey struct{}
+
+// withClientMemo gives a request somewhere to keep its client address. A
+// request is served by one goroutine, so the memo needs no lock.
+func withClientMemo(r *http.Request) *http.Request {
+	return r.WithContext(context.WithValue(r.Context(), clientMemoKey{}, &clientMemo{}))
+}
+
+// clientAddress is where the request comes from (spec 046 #1, #2), worked
+// out once for a request that carries a memo.
 func (s *Server) clientAddress(r *http.Request) netip.Addr {
+	memo, _ := r.Context().Value(clientMemoKey{}).(*clientMemo)
+	if memo != nil && memo.done {
+		return memo.addr
+	}
+	addr := s.resolveClient(r)
+	if memo != nil {
+		memo.addr, memo.done = addr, true
+	}
+	return addr
+}
+
+// resolveClient is the peer, or, while the peer is a trusted proxy, the next
+// hop to the left in `X-Forwarded-For`. An entry that is not an address stops
+// the walk at the last trusted one, so an invented entry cannot move it
+// further left. An address that could not be read at all is the zero Addr,
+// which is a source of its own.
+//
+// Where the walk ends on an address that looks like a proxy — the peer, or a
+// hop with more entries to its left — the proxy is one nobody named, and
+// every client behind it is one source: that is warned about (#12, #16).
+func (s *Server) resolveClient(r *http.Request) netip.Addr {
+	lines := r.Header.Values("X-Forwarded-For")
 	peer := peerAddress(r.RemoteAddr)
 	if !s.trusted.trusts(peer) {
-		s.noteUntrustedProxy(r, peer)
+		if len(lines) > 0 {
+			s.noteUntrustedProxy(peer)
+		}
 		return peer
 	}
 	current := peer
-	hops := forwardedHops(r.Header.Values("X-Forwarded-For"))
+	hops := forwardedHops(lines)
 	for range maxForwardedHops {
 		entry, ok := hops()
 		if !ok {
@@ -95,6 +132,9 @@ func (s *Server) clientAddress(r *http.Request) netip.Addr {
 		}
 		current = addr
 		if !s.trusted.trusts(current) {
+			if _, more := hops(); more {
+				s.noteUntrustedProxy(current)
+			}
 			return current
 		}
 	}
@@ -197,22 +237,24 @@ func addressText(addr netip.Addr) string {
 	return addr.String()
 }
 
-// noteUntrustedProxy warns about a proxy nobody named (spec 046 #12): a
-// request carrying `X-Forwarded-For` from a loopback or private peer that is
-// not trusted is almost always a proxy in front of this server — a container
-// bridge's gateway, say — and every client behind it is then one source.
-// A public peer sending the header is a client, and a client inventing
-// headers is not the operator's to be told about. Once an hour per peer, for
-// at most eight peers an hour.
-func (s *Server) noteUntrustedProxy(r *http.Request, peer netip.Addr) {
-	if !peer.IsValid() || !proxyLike(peer) || len(r.Header.Values("X-Forwarded-For")) == 0 {
+// noteUntrustedProxy warns about a proxy nobody named (spec 046 #12, #16):
+// an untrusted loopback or private address that forwards — the peer carrying
+// `X-Forwarded-For`, or a hop with more entries to its left — is almost
+// always a proxy in front of this server, a container bridge's gateway or a
+// load balancer in front of a local nginx, and every client behind it is then
+// one source. A public address that forwards is a client, and a client
+// inventing headers is not the operator's to be told about. Nor is a proxy
+// the operator chose not to trust: under `none` nothing is said. Once an
+// hour per address, for at most eight addresses an hour.
+func (s *Server) noteUntrustedProxy(proxy netip.Addr) {
+	if len(s.trusted) == 0 || !proxy.IsValid() || !proxyLike(proxy) {
 		return
 	}
-	text := peer.String()
+	text := proxy.String()
 	if held, ok := s.proxyLog.Allow(text, time.Now()); ok {
 		slog.Warn("a request arrived through a proxy this server does not trust, so every client behind it counts as one source; "+
 			"add the proxy's address to TRACEPAD_TRUSTED_PROXIES",
-			"peer", text, "trusted_proxies", s.TrustedProxies(),
+			"proxy", text, "trusted_proxies", s.TrustedProxies(),
 			"not_logged_since_last", held.SameKey, "not_logged_over_cap", held.OverCap)
 	}
 }

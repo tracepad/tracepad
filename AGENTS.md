@@ -526,7 +526,8 @@ API. This file routes; it does not duplicate what specs and docs say.
   every three seconds, `429` with `Retry-After`, the email's or account's
   reservation given back — over at most 32,768 sources evicted by least debt
   (#6–#11). An untrusted private peer that forwards is warned about, and
-  `/api/v1/system` reports `source` and `source_limit` (#12, #13). Wrong keys
+  `/api/v1/system` reports the asker's `source` and nothing of the limit's
+  (#12, #13, #16). Wrong keys
   and ingest are not limited by source (#14, #15). The Playwright harness
   signs in from an address of its own per test.
 - ✅ Spec 032 (the Node package) shipped: `tracepad` on npm, source in

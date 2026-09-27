@@ -1162,12 +1162,12 @@ the ones that found no slot free before it — see [Reads under
 load](#reads-under-load).
 
 `source` is the source this request counts as for the limit on password
-checks — an IPv4 address, or an IPv6 /64: the connection's peer, or the client
-a trusted proxy named in `X-Forwarded-For`. Behind a proxy, it is how to check
-that `TRACEPAD_TRUSTED_PROXIES` is right: it should be your address, not the
-proxy's. `source_limit` is that limit, deployment-wide: `tracked` sources held
-of `capacity`, `refused` checks since the process started, and the
-`trusted_proxies` in effect ([accounts.md](accounts.md#signing-in)).
+checks ([accounts.md](accounts.md#signing-in)) — an IPv4 address, or an IPv6
+/64: the connection's peer, or the client a trusted proxy named in
+`X-Forwarded-For`. Behind a proxy, it is how to check that
+`TRACEPAD_TRUSTED_PROXIES` is right: it should be your address, not the
+proxy's. The limit's own counts are not here — they are every tenant's
+sign-ins — and a refusal is in the server's log instead.
 
 `runs` is the link between traces and eval runs ([datasets.md](datasets.md)):
 `pinned_traces` is how many traces a live run is keeping out of the retention

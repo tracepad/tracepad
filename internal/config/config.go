@@ -415,7 +415,7 @@ func ParseTrustedProxies(value string) ([]netip.Prefix, error) {
 		}
 		prefix, err := parseProxyEntry(entry)
 		if err != nil {
-			return nil, fmt.Errorf("TRACEPAD_TRUSTED_PROXIES: entry %d, %q: want an IP address or a CIDR range such as 172.17.0.0/16",
+			return nil, fmt.Errorf("TRACEPAD_TRUSTED_PROXIES: entry %d, %q: want an IP address such as 172.17.0.1, or a CIDR range such as 10.0.0.0/24",
 				i+1, entry)
 		}
 		list = append(list, prefix)

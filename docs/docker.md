@@ -409,10 +409,20 @@ docker run -d --name tracepad -v tracepad:/data -p 127.0.0.1:4318:4318 \
 ```
 
 `TRACEPAD_TRUSTED_PROXIES` takes addresses and CIDR ranges, comma-separated
-(`172.17.0.0/16`, `10.0.0.5`, `loopback`), or `none`. On Docker Desktop the
+(`172.17.0.1`, `10.0.0.0/24`, `loopback`), or `none`. On Docker Desktop the
 gateway is another address. `curl` `GET /api/v1/system` through the proxy and
 read `source`: it should be your own address, not the gateway's. Trust only
-the proxy. A trusted address can say any client it likes.
+the proxy, not the network it sits on. A trusted address can name any client
+it likes, so trusting the whole bridge (`172.17.0.0/16`) lets every other
+container on it pick its own source.
+
+Loopback is trusted by default because a proxy on the same host is what the
+docs recommend, but not everything that connects over loopback is a proxy
+that appends. A TCP relay on loopback passes the client's own
+`X-Forwarded-For` through untouched, and the client then picks its source.
+Examples are a service-mesh sidecar, `ssh -L`, `socat`, stunnel and
+`kubectl port-forward`. If one sits in front of the server, set
+`TRACEPAD_TRUSTED_PROXIES=none`, or name only the real proxy's address.
 
 Applications then export to `https://traces.example.com/v1/traces`, and the
 CLI takes the same address as `--url`. The server believes

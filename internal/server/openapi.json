@@ -518,16 +518,6 @@
                   "busy": {"type": "integer"}, "capacity": {"type": "integer"}
                 },
                 "required": ["busy", "capacity"]},
-              "source_limit": {"type": "object",
-                "description": "The limit on password checks per source, for the whole deployment: twenty at once, then one every three seconds",
-                "properties": {
-                  "tracked": {"type": "integer", "description": "Sources held now"},
-                  "capacity": {"type": "integer", "description": "The most sources held; past it, the one owing least is dropped"},
-                  "refused": {"type": "integer", "description": "Password checks refused since the process started"},
-                  "trusted_proxies": {"type": "array", "items": {"type": "string"},
-                    "description": "The peers whose X-Forwarded-For is believed (TRACEPAD_TRUSTED_PROXIES), as CIDR ranges"}
-                },
-                "required": ["tracked", "capacity", "refused", "trusted_proxies"]},
               "source": {"type": "string",
                 "description": "The source this request counts as: an IPv4 address, or an IPv6 /64 — the peer, or the client a trusted proxy forwarded"},
               "response_budget_bytes": {"type": "integer"},
