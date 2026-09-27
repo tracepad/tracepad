@@ -253,16 +253,16 @@ func TestLoginSpendsTheComparisonWhateverTheAnswer(t *testing.T) {
 		{"pending@example.com", testAccountPassword},
 		{"disabled@example.com", testAccountPassword},
 	} {
-		work := store.PasswordWork()
+		work := h.server.passwords.Spent()
 		expectError(t, h.login(t, attempt.email, attempt.password), http.StatusUnauthorized, wrongCredentials)
-		if spent := store.PasswordWork() - work; spent != 1 {
+		if spent := h.server.passwords.Spent() - work; spent != 1 {
 			t.Errorf("%s: the failure spent %d comparisons, want one — the difference is the answer",
 				attempt.email, spent)
 		}
 	}
-	work := store.PasswordWork()
+	work := h.server.passwords.Spent()
 	expectStatus(t, h.login(t, "owner@example.com", testAccountPassword), http.StatusOK)
-	if spent := store.PasswordWork() - work; spent != 1 {
+	if spent := h.server.passwords.Spent() - work; spent != 1 {
 		t.Errorf("the right password spent %d comparisons, want one", spent)
 	}
 }

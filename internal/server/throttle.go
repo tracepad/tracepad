@@ -37,15 +37,22 @@ const (
 	loginFailureLimit  = 5
 	loginFailureWindow = 15 * time.Minute
 	// loginTrackedEmails bounds the map, so that a run against thousands of
-	// invented addresses is not a way to spend the server's memory. Past
+	// invented addresses is not a way to spend the server's memory — at
+	// most about 4 MB, a 254-byte email and five timestamps apiece. Past
 	// it, the record that counts the fewest attempts goes, the one touched
-	// longest ago among those (evict). To push out an email with n failures,
-	// a caller has to bring every other record to n first: 4096 × 4
-	// comparisons through the password gate for an email one guess from
-	// locked, which at the gate's widest (four at a time, a quarter of a
-	// second each) is seventeen minutes — longer than the window that would
-	// have let the email go anyway (spec 028 #31).
-	loginTrackedEmails = 4096
+	// longest ago among those (evict), and the counts are exact: a failure
+	// leaves its record's count the moment it leaves the window (expire).
+	//
+	// So pushing out an email with c failures takes every other record held
+	// at c or more, inside one window: c × 8192 comparisons in fifteen
+	// minutes. The gate lets through at most four at a time; at a quarter
+	// of a second each that is 14,400 a window, short of the 16,384 even
+	// c = 2 needs, and where bcrypt takes a tenth of a second, 36,000 — c
+	// = 4 then costs 32,768, over thirteen minutes of the whole gate, to
+	// win four guesses the window would have given back two minutes later.
+	// Either way the spray buys fewer guesses than waiting does (spec 028
+	// #31).
+	loginTrackedEmails = 8192
 )
 
 type loginLimiter struct {
@@ -57,6 +64,20 @@ type loginLimiter struct {
 	// touched at the front. Eviction takes the back of the lowest one that
 	// is not empty, in constant time.
 	byCount [loginFailureLimit + 1]*list.List
+	// marks holds every failure recorded in the last window, oldest first,
+	// with the record it was counted on, so that expire can take each one
+	// off its record's count when it ages out — without which a record
+	// kept the count it was filed under when it was last touched, and a
+	// map full of records whose failures had long aged out outranked an
+	// email with live ones (spec 028 #31). It holds at most what the gate
+	// let through in one window.
+	marks *list.List
+}
+
+// failureMark is one failure in marks.
+type failureMark struct {
+	record *loginRecord
+	at     time.Time
 }
 
 // loginRecord is one email: its failures inside the window, and how many
@@ -71,7 +92,7 @@ type loginRecord struct {
 }
 
 func newLoginLimiter() *loginLimiter {
-	l := &loginLimiter{capacity: loginTrackedEmails, entries: map[string]*loginRecord{}}
+	l := &loginLimiter{capacity: loginTrackedEmails, entries: map[string]*loginRecord{}, marks: list.New()}
 	for i := range l.byCount {
 		l.byCount[i] = list.New()
 	}
@@ -99,6 +120,7 @@ func (l *loginLimiter) reserve(email string, now time.Time) (*loginAttempt, time
 	key := loginKey(email)
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	l.expire(now)
 	record := l.touch(key, now)
 	if len(record.failures)+record.pending >= loginFailureLimit {
 		wait := time.Second
@@ -122,13 +144,33 @@ func (a *loginAttempt) failed(now time.Time) {
 	l := a.limiter
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	l.expire(now)
 	// A record evicted while this attempt was in flight comes back: the
 	// failure is real whatever happened to the map meanwhile.
 	record := l.touch(a.key, now)
 	record.pending = max(record.pending-1, 0)
 	record.failures = append(record.failures, now)
+	l.marks.PushBack(failureMark{record: record, at: now})
 	l.settle(record)
 	l.evict(a.key)
+}
+
+// expire takes every failure that has left the window off its record's count,
+// oldest first, and files the record again under what it now counts. A mark
+// whose record has been evicted or forgotten since is dropped: the record it
+// names is not the one the map holds. The caller holds the lock.
+func (l *loginLimiter) expire(now time.Time) {
+	for front := l.marks.Front(); front != nil; front = l.marks.Front() {
+		mark := front.Value.(failureMark)
+		if now.Sub(mark.at) < loginFailureWindow {
+			return
+		}
+		l.marks.Remove(front)
+		if record, ok := l.entries[mark.record.key]; ok && record == mark.record {
+			record.age(now)
+			l.settle(record)
+		}
+	}
 }
 
 // succeeded forgets the email's failures: a person who mistyped twice and then
@@ -197,12 +239,12 @@ func (l *loginLimiter) settle(record *loginRecord) {
 // attempts goes, and among those the one touched longest ago — never keep, the
 // record the caller is working on. The caller holds the lock.
 //
-// Fewest first is the defence. Dropping the whole map when it filled let a
-// caller who had spent four guesses on an email buy four more for 4097
-// invented addresses, one guess each; so did dropping whichever record was
-// oldest, locked out or not (spec 028 #31). A record's count is the one it was
-// filed under when last touched, so failures that have aged out since keep it
-// a little longer than they should: a bound on memory, not a lock on anybody.
+// Fewest first is the defence, and it holds because the counts are exact.
+// Dropping the whole map when it filled let a caller who had spent four
+// guesses on an email buy four more for 4097 invented addresses, one guess
+// each; so did dropping whichever record was oldest, locked out or not; and so
+// did ranking records by a count nothing lowered as their failures aged out
+// (spec 028 #31).
 func (l *loginLimiter) evict(keep string) {
 	for len(l.entries) > l.capacity {
 		victim := l.fewest(keep)

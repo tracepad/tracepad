@@ -285,19 +285,44 @@ func readAdminToken() (string, error) {
 	return token, nil
 }
 
+// maxAdminTokenFile is the most TRACEPAD_ADMIN_TOKEN_FILE may hold. A token is
+// sixty-four characters and a newline; a file far past that is a mount that
+// went to the wrong place, and reading it whole could be reading forever.
+const maxAdminTokenFile = 4 * 1024
+
 // AdminTokenFile reads the admin token from the file TRACEPAD_ADMIN_TOKEN_FILE
-// names, trimmed, or "" when the variable is unset; an unreadable or empty file
-// is an error. getenv is how the caller reads its environment: the server's
-// start (readAdminToken) and the CLI's export guard, which must know every key
-// of this Tracepad the machine holds, read the file the one same way.
+// names, trimmed, or "" when the variable is unset. The file must be a regular
+// one — a symbolic link to one is followed, which is how Kubernetes mounts a
+// secret — of at most 4 KiB, and not empty: a device, a directory or a large
+// file is a path that went wrong, and an error says so instead of reading
+// /dev/zero until memory runs out. getenv is how the caller reads its
+// environment: the server's start (readAdminToken) and the CLI's export
+// guard, which must know every key of this Tracepad the machine holds, read
+// the file the one same way.
 func AdminTokenFile(getenv func(string) string) (string, error) {
 	path := strings.TrimSpace(getenv("TRACEPAD_ADMIN_TOKEN_FILE"))
 	if path == "" {
 		return "", nil
 	}
-	raw, err := os.ReadFile(path)
+	file, err := os.Open(path)
 	if err != nil {
 		return "", fmt.Errorf("TRACEPAD_ADMIN_TOKEN_FILE: %w", err)
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return "", fmt.Errorf("TRACEPAD_ADMIN_TOKEN_FILE: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("TRACEPAD_ADMIN_TOKEN_FILE: %s is not a regular file", path)
+	}
+	raw, err := io.ReadAll(io.LimitReader(file, maxAdminTokenFile+1))
+	if err != nil {
+		return "", fmt.Errorf("TRACEPAD_ADMIN_TOKEN_FILE: %w", err)
+	}
+	if len(raw) > maxAdminTokenFile {
+		return "", fmt.Errorf("TRACEPAD_ADMIN_TOKEN_FILE: %s is larger than %d bytes; it should hold the token alone",
+			path, maxAdminTokenFile)
 	}
 	token := strings.TrimSpace(string(raw))
 	if token == "" {

@@ -37,7 +37,7 @@ func TestLoginBurstStaysInsideTheLimit(t *testing.T) {
 		codes = map[int]int{}
 	)
 	start.Add(1)
-	work := store.PasswordWork()
+	work := h.server.passwords.Spent()
 	for range burst {
 		done.Add(1)
 		go func() {
@@ -56,7 +56,7 @@ func TestLoginBurstStaysInsideTheLimit(t *testing.T) {
 		t.Errorf("%d of %d guesses were compared, want at most %d (codes %v)",
 			codes[http.StatusUnauthorized], burst, loginFailureLimit, codes)
 	}
-	if spent := store.PasswordWork() - work; spent > loginFailureLimit {
+	if spent := h.server.passwords.Spent() - work; spent > loginFailureLimit {
 		t.Errorf("the burst spent %d comparisons, want at most %d", spent, loginFailureLimit)
 	}
 	if codes[http.StatusUnauthorized]+codes[http.StatusTooManyRequests] != burst {
@@ -131,12 +131,63 @@ func TestEmailSprayKeepsTheLockout(t *testing.T) {
 		t.Error("with every entry locked, the one touched longest ago must be the one dropped")
 	}
 
-	// Failures age out of the window, and an aged record is the first to go.
+	// A failure outside the window does not count on the email's next
+	// attempt. (That an aged record is also the first to be evicted is
+	// TestEvictionReadsTheCountNow's.)
 	aged := newLoginLimiter()
 	attempt, _ := aged.reserve("old@x", now.Add(-2*loginFailureWindow))
 	attempt.failed(now.Add(-2 * loginFailureWindow))
 	if _, wait := aged.reserve("old@x", now); wait != 0 {
 		t.Error("a failure outside the window still counts")
+	}
+}
+
+// TestEvictionReadsTheCountNow: a record is ranked for eviction by the
+// failures it has inside the window now, not by the count it was filed under
+// when last touched. Ranked by the stale count, a map filled once with records
+// at four failures — long aged out — outranked an email with three live ones
+// for ever after: three guesses, one request for a new address, and the
+// email's count was gone, before any comparison and whether or not the gate
+// then let that request in.
+func TestEvictionReadsTheCountNow(t *testing.T) {
+	l := newLoginLimiter()
+	then := time.Now().Add(-2 * loginFailureWindow)
+	for i := range loginTrackedEmails {
+		for range loginFailureLimit - 1 {
+			attempt, _ := l.reserve(fmt.Sprintf("stale-%d@example.com", i), then)
+			attempt.failed(then)
+		}
+	}
+	now := time.Now()
+	guess := func(email string) time.Duration {
+		attempt, wait := l.reserve(email, now)
+		if wait == 0 {
+			attempt.failed(now)
+		}
+		return wait
+	}
+	for round := range 3 {
+		for range 3 {
+			if wait := guess("victim@example.com"); wait != 0 && round == 0 {
+				t.Fatal("the first three guesses must be let through")
+			}
+		}
+		// A new address arrives, and the gate turns it away: the
+		// reservation alone is what evicts.
+		attempt, _ := l.reserve(fmt.Sprintf("new-%d@example.com", round), now)
+		if attempt != nil {
+			attempt.cancel()
+		}
+	}
+	// Nine guesses were asked for; five are allowed in a window.
+	if record, ok := l.entries["victim@example.com"]; !ok || len(record.failures) != loginFailureLimit {
+		t.Fatalf("the victim holds %v, want exactly %d failures and a lockout", record, loginFailureLimit)
+	}
+	if _, wait := l.reserve("victim@example.com", now); wait == 0 {
+		t.Error("the victim's lockout was evicted by records whose failures had aged out")
+	}
+	if filed := l.filed(); filed != len(l.entries) || len(l.entries) > loginTrackedEmails {
+		t.Errorf("the limiter holds %d entries (%d filed), want at most %d", len(l.entries), filed, loginTrackedEmails)
 	}
 }
 
@@ -178,24 +229,24 @@ func TestBogusInviteSpendsNoHash(t *testing.T) {
 			anonymous, func(r *http.Request) { r.Header.Set("Origin", "http://"+r.Host) }, asJSON)
 	}
 
-	work := store.PasswordWork()
+	work := h.server.passwords.Spent()
 	for i := range 100 {
 		expectError(t, accept(fmt.Sprintf("no-such-token-%d", i)), http.StatusForbidden, store.ErrBadToken.Error())
 	}
-	if spent := store.PasswordWork() - work; spent != 0 {
+	if spent := h.server.passwords.Spent() - work; spent != 0 {
 		t.Errorf("a hundred bogus tokens spent %d hashes, want none", spent)
 	}
 
 	// The real link still works, and pays for its one hash.
-	work = store.PasswordWork()
+	work = h.server.passwords.Spent()
 	expectStatus(t, accept("token-for-new@example.com"), http.StatusOK)
-	if spent := store.PasswordWork() - work; spent != 1 {
+	if spent := h.server.passwords.Spent() - work; spent != 1 {
 		t.Errorf("accepting an invitation spent %d hashes, want one", spent)
 	}
 	// Spent is spent: the second use is refused before any hash too.
-	work = store.PasswordWork()
+	work = h.server.passwords.Spent()
 	expectStatus(t, accept("token-for-new@example.com"), http.StatusForbidden)
-	if spent := store.PasswordWork() - work; spent != 0 {
+	if spent := h.server.passwords.Spent() - work; spent != 0 {
 		t.Errorf("a spent token spent %d hashes, want none", spent)
 	}
 }
@@ -329,14 +380,14 @@ func TestSetupOff(t *testing.T) {
 	}](t, rec); answer.Required == nil || !*answer.Required || answer.Enabled == nil || *answer.Enabled {
 		t.Errorf("GET /setup = %s, want required and not enabled", rec.Body.String())
 	}
-	work := store.PasswordWork()
+	work := h.server.passwords.Spent()
 	expectError(t, h.call(t, "POST", "/api/v1/setup", mustJSON(t, map[string]any{
 		"token": "anything", "email": "founder@example.com", "password": testAccountPassword,
 	}), anonymous, asJSON), http.StatusForbidden, "TRACEPAD_SETUP=off")
 	// Whatever the body says: the answer comes before it is read.
 	expectError(t, h.call(t, "POST", "/api/v1/setup", []byte(`{"token": `), anonymous, asJSON),
 		http.StatusForbidden, "TRACEPAD_SETUP=off")
-	if store.PasswordWork() != work {
+	if h.server.passwords.Spent() != work {
 		t.Error("a refused setup spent a hash")
 	}
 	// The admin token is the way in instead.
@@ -353,4 +404,49 @@ func (l *loginLimiter) filed() int {
 		n += records.Len()
 	}
 	return n
+}
+
+// TestWrongCurrentPasswordIsAGuess: the current password on PATCH /auth/me is
+// a password guess like a login's, and counts against the same email before
+// the comparison — so a session held by somebody else guesses no faster than
+// the login allows, and twenty at once are five comparisons, not a gate kept
+// full for everybody signing in (spec 028 #31).
+func TestWrongCurrentPasswordIsAGuess(t *testing.T) {
+	h := newAccountHarness(t)
+	who := h.owner(t)
+	h.server.passwords = store.NewPasswordGate(64, 64)
+	change := func(current string) *httptest.ResponseRecorder {
+		return h.call(t, "PATCH", "/api/v1/auth/me", mustJSON(t, map[string]any{
+			"password": map[string]any{"current": current, "new": "a brand new password"},
+		}), asSession(who))
+	}
+
+	const burst = 20
+	var (
+		done  sync.WaitGroup
+		mu    sync.Mutex
+		codes = map[int]int{}
+	)
+	work := h.server.passwords.Spent()
+	for i := range burst {
+		done.Add(1)
+		go func() {
+			defer done.Done()
+			rec := change(fmt.Sprintf("guess number %d", i))
+			mu.Lock()
+			codes[rec.Code]++
+			mu.Unlock()
+		}()
+	}
+	done.Wait()
+	if codes[http.StatusForbidden] > loginFailureLimit || codes[http.StatusForbidden]+codes[http.StatusTooManyRequests] != burst {
+		t.Errorf("codes = %v, want at most %d wrong-password answers and the rest 429", codes, loginFailureLimit)
+	}
+	if spent := h.server.passwords.Spent() - work; spent > loginFailureLimit {
+		t.Errorf("the burst spent %d comparisons, want at most %d", spent, loginFailureLimit)
+	}
+	// The same count as the login's: the email is locked there too, and
+	// the right current password waits like the right login does.
+	expectStatus(t, h.login(t, "owner@example.com", testAccountPassword), http.StatusTooManyRequests)
+	expectStatus(t, change(testAccountPassword), http.StatusTooManyRequests)
 }

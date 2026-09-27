@@ -49,6 +49,9 @@ func TestPasswordGateQueues(t *testing.T) {
 	}
 	second.Release()
 	second.Release() // twice is harmless
+	if g.Spent() != 0 {
+		t.Errorf("Spent = %d with nothing hashed", g.Spent())
+	}
 
 	blocker, _ := g.Enter(context.Background())
 	ctx, cancel := context.WithCancel(context.Background())
@@ -69,12 +72,16 @@ func TestPasswordGateQueues(t *testing.T) {
 
 // TestBcryptNeedsAPlace: the two functions that run bcrypt take a slot only
 // the gate makes, so a caller that forgot the gate does not compile; one that
-// passes nil meets a panic in its first test rather than spending the CPU the
-// gate protects.
+// passes nil, or a slot it already gave back, meets a panic in its first test
+// rather than spending the CPU the gate protects.
 func TestBcryptNeedsAPlace(t *testing.T) {
+	released := anySlot()
+	released.Release()
 	for name, call := range map[string]func(){
-		"HashPassword": func() { _, _ = HashPassword(nil, testAccountPassword) },
-		"Verify":       func() { (&Account{}).Verify(nil, testAccountPassword) },
+		"HashPassword":                      func() { _, _ = HashPassword(nil, testAccountPassword) },
+		"Verify":                            func() { (&Account{}).Verify(nil, testAccountPassword) },
+		"HashPassword on a given-back slot": func() { _, _ = HashPassword(released, testAccountPassword) },
+		"Verify on a given-back slot":       func() { (&Account{}).Verify(released, testAccountPassword) },
 	} {
 		func() {
 			defer func() {
@@ -112,12 +119,10 @@ func TestPasswordChangeSpendsNoBcryptInTheWriter(t *testing.T) {
 		t.Fatalf("err = %v, want a change with nothing checked refused", err)
 	}
 
-	work := PasswordWork()
+	// The job holds no place at the gate, so bcrypt inside it would panic
+	// (TestBcryptNeedsAPlace): that it commits is the proof it spends none.
 	change := &PasswordChange{AccountID: account.ID, Checked: account, NewHash: newHash, Keep: "none"}
 	f.submit(t, change)
-	if spent := PasswordWork() - work; spent != 0 {
-		t.Errorf("the job spent %d bcrypt operations inside the writer, want none", spent)
-	}
 	if !change.Account.Verify(anySlot(), testAccountPassword) {
 		t.Error("the new hash was not stored")
 	}

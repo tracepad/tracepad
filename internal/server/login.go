@@ -332,7 +332,12 @@ func (s *Server) handleAcceptInvite(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, store.ErrBadToken.Error())
 		return
 	}
-	hash, ok := s.readPassword(w, r, request.Password)
+	slot, ok := s.enterPasswordGate(w, r)
+	if !ok {
+		return
+	}
+	hash, ok := hashPassword(w, slot, request.Password)
+	slot.Release()
 	if !ok {
 		return
 	}
@@ -456,15 +461,30 @@ func (s *Server) handlePatchMe(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, store.ErrWrongPassword.Error())
 		return
 	}
+	// A wrong current password is a guess at the password, so it counts
+	// where a wrong one at the login does, against the account's email
+	// and before the comparison: a session held by somebody else cannot
+	// guess any faster here, nor keep the gate full for everybody signing
+	// in (spec 028 #31).
+	attempt, wait := s.limiter.reserve(account.Email, time.Now())
+	if wait > 0 {
+		w.Header().Set("Retry-After", retryAfterSeconds(wait))
+		writeError(w, http.StatusTooManyRequests,
+			"too many wrong passwords for this account; try again shortly")
+		return
+	}
 	slot, ok := s.enterPasswordGate(w, r)
 	if !ok {
+		attempt.cancel()
 		return
 	}
 	if !account.Verify(slot, request.Password.Current) {
 		slot.Release()
+		attempt.failed(time.Now())
 		writeError(w, http.StatusForbidden, store.ErrWrongPassword.Error())
 		return
 	}
+	attempt.succeeded()
 	hash, ok := hashPassword(w, slot, request.Password.New)
 	slot.Release()
 	if !ok {
@@ -730,15 +750,14 @@ func (s *Server) readPassword(w http.ResponseWriter, r *http.Request, password s
 	return hashPassword(w, slot, password)
 }
 
-// hashPassword hashes a password whose length is already known to be good,
-// for a caller that holds its place at the gate.
+// hashPassword hashes a password whose length the caller has already checked
+// — the one check that answers the person, with a 422 — for a caller that
+// holds its place at the gate. The store checks the length again as part of
+// its own contract; failing that here would be a mistake in this file, and it
+// is answered like any other failure to hash.
 func hashPassword(w http.ResponseWriter, slot *store.PasswordSlot, password string) ([]byte, bool) {
 	hash, err := store.HashPassword(slot, password)
 	if err != nil {
-		if errors.Is(err, store.ErrPasswordLength) {
-			writeError(w, http.StatusUnprocessableEntity, err.Error())
-			return nil, false
-		}
 		slog.Error("could not hash a password", "err", err)
 		writeError(w, http.StatusInternalServerError, "failed to store the password")
 		return nil, false

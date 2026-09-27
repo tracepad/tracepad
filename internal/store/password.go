@@ -76,12 +76,15 @@ func CheckPasswordLength(password string) error {
 //
 // It lives here, beside the only two functions that run `bcrypt`, because
 // both take the PasswordSlot only the gate hands out: a caller that forgot the
-// gate does not compile, rather than quietly spending the CPU the gate exists
-// to protect. The server owns the gate — sizing it, and answering a refusal
-// with a `503` — so it is a value and not a package-level variable.
+// gate does not compile, and one that passes nil or a slot it already gave
+// back panics — rather than quietly spending the CPU the gate exists to
+// protect. The server owns the gate — sizing it, and answering a refusal with
+// a `503` — so it is a value and not a package-level variable, and so are its
+// numbers (Spent, Waiting).
 type PasswordGate struct {
 	slots chan struct{}
 	queue chan struct{}
+	spent atomic.Int64
 }
 
 // ErrPasswordsBusy is the gate turning a caller away: the slots and the queue
@@ -99,19 +102,29 @@ func NewPasswordGate(slots, queue int) *PasswordGate {
 func (g *PasswordGate) Slots() int { return cap(g.slots) }
 func (g *PasswordGate) Queue() int { return cap(g.queue) }
 
-// Waiting reports how many callers are queued, for tests.
+// Waiting reports how many callers are queued for a place right now.
 func (g *PasswordGate) Waiting() int { return len(g.queue) }
 
+// Spent reports how many hashes and comparisons this gate has let through —
+// never the decoy's one-off construction. "Did this request run bcrypt" is a
+// count, and a stopwatch on a loaded machine answers it wrongly.
+func (g *PasswordGate) Spent() int64 { return g.spent.Load() }
+
 // PasswordSlot is a place at the gate: what HashPassword and Verify demand, and
-// what only Enter makes. Release gives it back; releasing twice is harmless.
+// what only Enter makes. Release gives it back; releasing twice is harmless,
+// using it after is a panic.
 type PasswordSlot struct {
-	gate *PasswordGate
-	once sync.Once
+	gate     *PasswordGate
+	once     sync.Once
+	released atomic.Bool
 }
 
 // Release gives the place back.
 func (s *PasswordSlot) Release() {
-	s.once.Do(func() { <-s.gate.slots })
+	s.once.Do(func() {
+		s.released.Store(true)
+		<-s.gate.slots
+	})
 }
 
 // Enter takes a place, waiting in the queue if there is room in it. It answers
@@ -138,36 +151,27 @@ func (g *PasswordGate) Enter(ctx context.Context) (*PasswordSlot, error) {
 	}
 }
 
-// held insists on a place at the gate. Reaching bcrypt without one is a
+// spend insists on a place at the gate held right now, and counts the work.
+// Reaching bcrypt without one — nil, or a slot already given back — is a
 // mistake in the code, not in the request, so it is a panic, which a test
 // meets at once.
-func (s *PasswordSlot) held() {
-	if s == nil || s.gate == nil {
-		panic("store: bcrypt without a place at the password gate")
+func (s *PasswordSlot) spend() {
+	if s == nil || s.gate == nil || s.released.Load() {
+		panic("store: bcrypt without a place held at the password gate")
 	}
+	s.gate.spent.Add(1)
 }
 
 // HashPassword checks the length and hashes. The two are one call because a
 // caller that hashed first and validated afterwards would have spent a quarter
 // of a second on a password it was going to refuse.
 func HashPassword(slot *PasswordSlot, password string) ([]byte, error) {
-	slot.held()
 	if err := CheckPasswordLength(password); err != nil {
 		return nil, err
 	}
-	passwordWork.Add(1)
+	slot.spend()
 	return bcrypt.GenerateFromPassword([]byte(password), int(passwordCost.Load()))
 }
-
-// passwordWork counts the hashes and comparisons spent on requests — never the
-// decoy's one-off construction — so that a test can ask whether a request paid
-// for one without timing it (PasswordWork).
-var passwordWork atomic.Int64
-
-// PasswordWork reports how many password hashes and comparisons this process
-// has spent. It exists for tests: "did this request run bcrypt" is a count,
-// and a stopwatch on a loaded machine answers it wrongly.
-func PasswordWork() int64 { return passwordWork.Load() }
 
 // decoys holds, per work factor, a hash of a password nobody has, compared
 // against when there is no stored hash to compare against.
@@ -220,8 +224,7 @@ func decoy() []byte {
 // a wrong password (Decision 8). It spends the comparison anyway, against the
 // decoy, so that it answers in the same time as well.
 func (a *Account) Verify(slot *PasswordSlot, password string) bool {
-	slot.held()
-	passwordWork.Add(1)
+	slot.spend()
 	if a == nil || len(a.hash) == 0 {
 		bcrypt.CompareHashAndPassword(decoy(), []byte(password))
 		return false

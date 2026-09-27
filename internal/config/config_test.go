@@ -222,6 +222,24 @@ func TestAdminTokenFile(t *testing.T) {
 	if _, err := Load(nil); err == nil {
 		t.Error("a file that is not there must refuse the start")
 	}
+	// A path that went to the wrong place is an error, not a read that
+	// never ends: a directory, a device, a file far larger than a token.
+	t.Setenv("TRACEPAD_ADMIN_TOKEN_FILE", t.TempDir())
+	if _, err := Load(nil); err == nil || !strings.Contains(err.Error(), "not a regular file") {
+		t.Errorf("err = %v, want a directory refused", err)
+	}
+	t.Setenv("TRACEPAD_ADMIN_TOKEN_FILE", os.DevNull)
+	if _, err := Load(nil); err == nil || !strings.Contains(err.Error(), "not a regular file") {
+		t.Errorf("err = %v, want a device refused", err)
+	}
+	big := filepath.Join(t.TempDir(), "big")
+	if err := os.WriteFile(big, []byte(longToken+strings.Repeat("\n", maxAdminTokenFile)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TRACEPAD_ADMIN_TOKEN_FILE", big)
+	if _, err := Load(nil); err == nil || !strings.Contains(err.Error(), "larger than") {
+		t.Errorf("err = %v, want a file past 4 KiB refused", err)
+	}
 }
 
 // TRACEPAD_SETUP=off turns the setup endpoint off; on is the default (spec

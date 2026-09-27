@@ -102,7 +102,8 @@ accepted its invitation all answer the same `401 wrong email or password`. Any
 difference between them would be a way to find out who has an account here.
 Five failures for one email inside fifteen minutes and the next answers `429`
 with `Retry-After`; an attempt counts from the moment it arrives, so fifty sent
-at once are still five guesses. The count is in memory, so it forgets on a
+at once are still five guesses. A wrong current password when changing it
+counts the same way, against the same email. The count is in memory, so it forgets on a
 restart and can never be the reason somebody cannot sign in tomorrow.
 
 Checking a password is a quarter of a second of CPU, and the routes that do it

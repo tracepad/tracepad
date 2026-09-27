@@ -832,21 +832,40 @@ func (i *InviteMint) apply(tx *sql.Tx) error {
 var ErrBadToken = errors.New("this link is not valid any more")
 
 // InviteTokenLive reports whether an invitation or reset token would be
-// accepted now: known, unexpired, and for an account that is not disabled —
-// what InviteAccept checks, asked without a transaction. It is the question a
-// handler asks before it spends a quarter of a second hashing the password
-// that goes with the token (spec 028 #31); the transaction asks it again,
-// because the answer can change between the two.
+// accepted now. It is the question a handler asks before it spends a quarter
+// of a second hashing the password that goes with the token (spec 028 #31);
+// the transaction asks it again, because the answer can change between the
+// two — through liveInvitation both times, so the two cannot disagree about
+// what "live" means.
 func (s *Store) InviteTokenLive(ctx context.Context, tokenID string, now int64) (bool, error) {
-	var live bool
-	err := s.db.QueryRowContext(ctx,
-		`SELECT EXISTS (SELECT 1 FROM account_tokens t JOIN accounts a ON a.id = t.account_id
-		  WHERE t.id = ? AND t.expires_at > ? AND a.disabled = 0)`,
-		tokenID, now).Scan(&live)
-	if err != nil {
-		return false, fmt.Errorf("read invitation: %w", err)
+	_, err := liveInvitation(ctx, s.db, tokenID, now)
+	if errors.Is(err, ErrBadToken) {
+		return false, nil
 	}
-	return live, nil
+	return err == nil, err
+}
+
+// rowQuerier is what liveInvitation asks: the database, or a transaction.
+type rowQuerier interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+// liveInvitation is the one statement of which tokens are accepted: known,
+// unexpired, and for an account that exists and is not disabled. It answers
+// the account's id, or ErrBadToken.
+func liveInvitation(ctx context.Context, q rowQuerier, tokenID string, now int64) (string, error) {
+	var accountID string
+	err := q.QueryRowContext(ctx,
+		`SELECT t.account_id FROM account_tokens t JOIN accounts a ON a.id = t.account_id
+		  WHERE t.id = ? AND t.expires_at > ? AND a.disabled = 0`,
+		tokenID, now).Scan(&accountID)
+	if err == sql.ErrNoRows {
+		return "", ErrBadToken
+	}
+	if err != nil {
+		return "", fmt.Errorf("read invitation: %w", err)
+	}
+	return accountID, nil
 }
 
 // InviteAccept spends a token: it sets the password, deletes the token, opens
@@ -862,20 +881,15 @@ type InviteAccept struct {
 }
 
 func (i *InviteAccept) apply(tx *sql.Tx) error {
-	var accountID string
-	err := tx.QueryRow(`SELECT account_id FROM account_tokens WHERE id = ? AND expires_at > ?`,
-		i.TokenID, i.Now).Scan(&accountID)
-	if err == sql.ErrNoRows {
-		return ErrBadToken
-	}
+	accountID, err := liveInvitation(context.Background(), tx, i.TokenID, i.Now)
 	if err != nil {
-		return fmt.Errorf("read invitation: %w", err)
+		return err
 	}
 	account, err := accountByID(tx, accountID)
 	if err != nil {
 		return err
 	}
-	if account == nil || account.Disabled {
+	if account == nil {
 		return ErrBadToken
 	}
 	if _, err := tx.Exec(`DELETE FROM account_tokens WHERE id = ?`, i.TokenID); err != nil {
