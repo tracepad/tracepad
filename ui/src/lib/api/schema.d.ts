@@ -1438,7 +1438,7 @@ export interface paths {
         post?: never;
         /**
          * Erase everything stored about one user
-         * @description Erases the queryable stores synchronously: the traces filed under the user id, their observations, payloads and scores, and the annotation-queue items pointing at those traces — counted under `annotation_items` in both the preview and the answer. The answer's `compaction` says when the sweeper pass that overwrites what was unlinked is due, and `pre_migration_backup`, while one exists, names the backup the erasure does not rewrite and the day it goes. Raw OTLP bodies are not touched — they are an archive expiring on the raw retention window, which docs/retention.md documents together with what that means for an erasure request. Without `confirm` it answers with the preview; the echo here is the user id.
+         * @description Erases, synchronously, everything the store holds about the traces filed under the user id: the traces, their observations, payloads and scores, the annotation-queue items pointing at them (`annotation_items`), the session-only scores of the sessions they carried (`session_scores`), every version of the dataset items cut from them (`dataset_items`, with the datasets named under `affected_datasets`), and their spans inside the raw OTLP bodies — each batch that held one is rewritten without it and marked `scrubbed_at`, or deleted when nothing else was in it (`raw_spans`, `raw_batches_rewritten`, `raw_batches_deleted`). The preview's `raw` block counts the batches the erasure will read and those older than the trace window, which nothing can attribute any more. The answer's `compaction` says when the sweeper pass that overwrites what was unlinked is due, and `pre_migration_backup`, while one exists, names the backup the erasure does not rewrite and the day it goes. Without `confirm` it answers with the preview; the echo here is the user id.
          */
         delete: operations["eraseUserData"];
         options?: never;
@@ -1695,6 +1695,11 @@ export interface components {
             content_encoding: string;
             /** @description The decoded length — what a fetch of the body returns — and not the compressed length the row occupies */
             size_bytes: number;
+            /**
+             * Format: date-time
+             * @description When a user-data erasure rewrote the batch without the erased user's spans; null for a batch as received
+             */
+            scrubbed_at: string | null;
         };
         Trace: components["schemas"]["TraceRow"] & {
             metadata?: Record<string, never>;
@@ -1984,6 +1989,19 @@ export interface components {
                 /** @description How many of the run's traces this erasure would take */
                 traces: number;
             }[];
+            /** @description User-data erasure only: the datasets that would lose items cut from the user's traces, every version of each */
+            affected_datasets?: {
+                dataset: string;
+                /** @description How many of the dataset's items this erasure would take */
+                items: number;
+            }[];
+            /** @description User-data erasure only: the raw archive's side of it */
+            raw?: {
+                /** @description The batches received inside the user's traces' arrival windows, which the erasure decodes; a count, not a decode */
+                batches_to_scan: number;
+                /** @description The batches older than the trace window: they may hold spans of traces the sweep already took, and nothing names their user */
+                unattributable_batches: number;
+            };
             /** @description Send this back as `?confirm=` to make it happen */
             confirm: string;
             note?: string;
@@ -3693,6 +3711,8 @@ export interface operations {
                     "X-Tracepad-Received-At"?: string;
                     /** @description Absent when the mapper claimed nothing */
                     "X-Tracepad-Dialect"?: string;
+                    /** @description Present when a user-data erasure rewrote the batch: the body is the batch as received minus the erased user's spans */
+                    "X-Tracepad-Scrubbed-At"?: string;
                     [name: string]: unknown;
                 };
                 content: {

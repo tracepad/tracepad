@@ -132,8 +132,10 @@ func (s *Server) handleTraces(w http.ResponseWriter, r *http.Request) {
 		batch.Media, batch.MediaRefs, batch.RawMedia = mediaRows(media, result.Traces, rawMedia)
 		if s.storeRaw {
 			batch.Raw = &store.RawBatch{
-				ReceivedAt: time.Now().UnixNano(),
-				Dialect:    result.Dialect,
+				// No ReceivedAt: the writer stamps the batch with the
+				// reading its traces get, one clock for both (spec 044
+				// #3).
+				Dialect: result.Dialect,
 				// As received, never converted (spec 019 #8): a JSON batch
 				// is kept as JSON, and the column is what tells a replay
 				// which it is holding. The parsed media type rather than

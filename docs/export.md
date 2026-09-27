@@ -261,6 +261,17 @@ interleave one manifest. A resume appends to the manifest it left.
 `--header` and `--gzip` apply to `--to` and are refused with `--dir`: a file
 holds the body as it is.
 
+## Batches an erasure rewrote
+
+A user-data erasure takes the erased user's spans out of every raw batch that
+held one ([retention.md](retention.md#deleting-a-users-data)): the batch is
+rewritten without them — every other byte is still the client's — or deleted
+when nothing else was in it. A rewritten batch is no longer what the client
+sent, and says so: its listing row carries `scrubbed_at` (RFC 3339, `null` for
+a batch as received), its body answers `X-Tracepad-Scrubbed-At`, the export
+summary counts the rewritten batches it sent as `scrubbed`, and `--dir` writes
+`scrubbed_at` into `manifest.jsonl` with the rest of the row.
+
 ## Windows and pieces
 
 ```sh

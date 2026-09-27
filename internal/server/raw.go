@@ -23,6 +23,9 @@ import (
 const (
 	headerReceivedAt = "X-Tracepad-Received-At"
 	headerDialect    = "X-Tracepad-Dialect"
+	// headerScrubbedAt says a body is the batch as received minus the spans
+	// an erasure took out, and when (spec 044 #2).
+	headerScrubbedAt = "X-Tracepad-Scrubbed-At"
 )
 
 // The archive's own page and count bounds (spec 019, API contract).
@@ -118,7 +121,10 @@ func (s *Server) handleListRaw(w http.ResponseWriter, r *http.Request) {
 			put("dialect", row.Dialect).
 			put("content_type", row.ContentType).
 			put("content_encoding", row.ContentEncoding).
-			put("size_bytes", row.SizeBytes))
+			put("size_bytes", row.SizeBytes).
+			// When an erasure rewrote the batch without the erased
+			// spans, null for a batch as received (spec 044 #2).
+			put("scrubbed_at", instantOrNull(row.ScrubbedAt)))
 	}
 	answer := object{}.
 		put("batches", rows).
@@ -171,9 +177,10 @@ func (s *Server) handleGetRawBatch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// As received, with the media put back where ingest factored it out
-	// (spec 041 #8): what leaves through here is the batch the client sent.
-	// Put back before the status is written, which is where a read gives its
-	// slot back (spec 043 #16): the bodies are reads like any other.
+	// (spec 041 #8): what leaves through here is the batch the client sent,
+	// minus what an erasure took out of it (spec 044 #2). Put back before
+	// the status is written, which is where a read gives its slot back
+	// (spec 043 #16): the bodies are reads like any other.
 	body := s.inlineRawMedia(r.Context(), project.ID, batch)
 	if r.Context().Err() != nil {
 		// The deadline or a hang-up cut the media reads short: the body
@@ -185,6 +192,9 @@ func (s *Server) handleGetRawBatch(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set(headerReceivedAt, formatTime(batch.ReceivedAt))
 	if batch.Dialect != "" {
 		w.Header().Set(headerDialect, batch.Dialect)
+	}
+	if batch.ScrubbedAt != nil {
+		w.Header().Set(headerScrubbedAt, formatTime(*batch.ScrubbedAt))
 	}
 	w.WriteHeader(http.StatusOK)
 	w.Write(body)

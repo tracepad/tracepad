@@ -297,9 +297,10 @@ func (s *Store) TraceDeletePreview(ctx context.Context, projectID string, filter
 }
 
 // tracesPreview is the one preview behind erasure and both deletions: given
-// a subquery selecting the ids that would go, what hangs off them. Raw bodies
-// are not counted because they are not touched — `docs/retention.md` states
-// that position rather than hiding it. The runs holding any of the traces
+// a subquery selecting the ids that would go, what hangs off them. A trace
+// deletion does not touch raw bodies (spec 035 #3); what an erasure adds —
+// the raw scrub, the session scores, the dataset items — its own preview
+// counts (`UserDataPreview`). The runs holding any of the traces
 // come back beside the counts: a deletion overrides the pin (spec 014 #14,
 // spec 035 #6), and the preview is where that is said.
 func (s *Store) tracesPreview(ctx context.Context, projectID, owned string, args ...any) (DeleteCounts, []AffectedRun, error) {

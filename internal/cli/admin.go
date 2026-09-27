@@ -4,13 +4,17 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"strconv"
 	"strings"
+	"sync/atomic"
 
+	"github.com/tracepad/tracepad/internal/client"
 	"github.com/tracepad/tracepad/internal/store"
 	"github.com/tracepad/tracepad/internal/termsafe"
 )
@@ -43,6 +47,15 @@ type preview struct {
 	// deletion answers with a `runs` count, and this struct is what reads
 	// every preview.
 	Runs []affectedRun `json:"affected_runs"`
+	// Datasets are the datasets an erasure takes items from (spec 044 #9),
+	// in the shape of the runs.
+	Datasets []affectedDataset `json:"affected_datasets"`
+	// Raw is an erasure's view of the raw archive (spec 044 #3, #5): the
+	// batches it reads, and those nothing can attribute any more.
+	Raw *struct {
+		BatchesToScan         int64 `json:"batches_to_scan"`
+		UnattributableBatches int64 `json:"unattributable_batches"`
+	} `json:"raw"`
 	// Matched is the bulk trace deletion's exact count of what its filter
 	// matches (spec 035 #2): the same number as `would_delete.traces`,
 	// named because it is the one the operator counted on screen.
@@ -68,6 +81,12 @@ type mintedKey struct {
 	// LastUsedAt is null until the key is used, which decodes to the
 	// empty string.
 	LastUsedAt string `json:"last_used_at"`
+}
+
+// affectedDataset is one dataset that loses items to an erasure.
+type affectedDataset struct {
+	Dataset string `json:"dataset"`
+	Items   int64  `json:"items"`
 }
 
 // affectedRun is one run that loses traces to an erasure.
@@ -675,10 +694,18 @@ func (r *run) usersRemoveData(ctx context.Context, rest []string) error {
 	path := "/api/v1/projects/" + url.PathEscape(id) +
 		"/users/" + url.PathEscape(positional[0]) + "/data"
 
-	body, err := r.destructive(ctx, http.MethodDelete, path, nil, nil, yes,
+	body, confirmed, err := r.confirmDestructive(ctx, http.MethodDelete, path, nil, nil, yes,
 		"erase the data of user "+positional[0])
 	if err != nil {
 		return err
+	}
+	if confirmed != nil {
+		body, err = confirmErasure(ctx, previewAgain(fs, positional[0]), func(ctx context.Context) (json.RawMessage, error) {
+			return r.api.Send(ctx, http.MethodDelete, path, confirmed, nil)
+		})
+		if err != nil {
+			return err
+		}
 	}
 	if r.wantJSON() {
 		return r.emit(body)
@@ -699,14 +726,25 @@ func (r *run) usersRemoveData(ctx context.Context, rest []string) error {
 	}
 	fmt.Fprintf(r.opt.Stdout, "erased the data of %s\n", termsafe.String(result.UserID))
 	t := newTable(r.opt.Stdout)
-	for _, kind := range []string{"traces", "observations", "scores", "payloads"} {
+	for _, kind := range []string{"traces", "observations", "scores", "session_scores", "payloads",
+		"annotation_items", "dataset_items", "media"} {
 		if count, reported := result.Deleted[kind]; reported {
 			t.row("  "+kind, strconv.FormatInt(count, 10))
 		}
 	}
 	t.flush()
-	fmt.Fprintln(r.opt.Stdout,
-		"\nraw OTLP bodies are not erased; they expire on the raw retention window")
+	// The user's spans in the raw archive (spec 044 #2): every batch that
+	// held one was rewritten without it, or deleted. A server that does not
+	// report it is one that does not erase there, and zeros would say it
+	// looked and found nothing.
+	if spans, reported := result.Deleted["raw_spans"]; reported {
+		rewritten, deleted := result.Deleted["raw_batches_rewritten"], result.Deleted["raw_batches_deleted"]
+		fmt.Fprintf(r.opt.Stdout, "\nremoved %d spans from %d raw batches, %d deleted\n",
+			spans, rewritten+deleted, deleted)
+	} else {
+		fmt.Fprintf(r.opt.Stdout, "\nthe server reported nothing about its raw archive: "+
+			"a server that predates erasing it keeps the user's spans there until the batches expire\n")
+	}
 	// What the rows left in the file is overwritten by the next pass, and
 	// the one copy of the database an erasure does not rewrite goes on its
 	// own date (spec 044 #11, #12).
@@ -719,6 +757,68 @@ func (r *run) usersRemoveData(ctx context.Context, rest []string) error {
 			shortTime(result.Backup.CreatedAt), shortTime(result.Backup.RemoveAfter))
 	}
 	return nil
+}
+
+// confirmErasure sends the confirmed erasure and says what a failure means.
+// The server runs an erasure to completion whether or not anybody waits for
+// it (spec 035 #14), and a long one outlasts this client's wait: once the
+// request is written, no answer is news about the wait, not a failure of the
+// erasure; so is a proxy in front of the server answering 502 or 504 because
+// it stopped waiting too. Before that — a refused connection, a name that does
+// not resolve, a handshake that fails, an interrupt — nothing reached the
+// server, and the error is passed on as it is; so is a refusal the server did
+// send, a 503 included: the server answers that one before erasing anything.
+func confirmErasure(ctx context.Context, again string,
+	send func(context.Context) (json.RawMessage, error)) (json.RawMessage, error) {
+	var written atomic.Bool
+	body, err := send(httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
+		// Per attempt: the transport retries a request whose reused
+		// connection turned out closed, and only the last attempt says
+		// whether the server has it.
+		GetConn: func(string) { written.Store(false) },
+		WroteRequest: func(info httptrace.WroteRequestInfo) {
+			written.Store(info.Err == nil)
+		},
+	}))
+	if err == nil || !written.Load() {
+		return body, err
+	}
+	var refusal *client.Error
+	if errors.As(err, &refusal) && refusal.Status != http.StatusBadGateway &&
+		refusal.Status != http.StatusGatewayTimeout {
+		return body, err
+	}
+	return nil, fmt.Errorf("no answer from the server (%w); the erasure it received runs to the end without one — "+
+		"run `%s` again in a few minutes: its preview shows what is left", err, again)
+}
+
+// previewAgain is the command that asks for the erasure's preview again: the
+// flags the operator gave — the project and the server it went to, never the
+// key — and the user id, each quoted for a shell where it needs it.
+func previewAgain(fs *flag.FlagSet, user string) string {
+	words := []string{"tracepad", "users", "rm-data"}
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "project" || f.Name == "url" {
+			words = append(words, "--"+f.Name, shellWord(f.Value.String()))
+		}
+	})
+	if strings.HasPrefix(user, "-") {
+		// Read as a flag otherwise; the operator's own command needed it.
+		words = append(words, "--")
+	}
+	return strings.Join(append(words, shellWord(user)), " ")
+}
+
+// shellWord quotes a word for a POSIX shell unless it is made only of
+// characters no shell reads specially.
+func shellWord(word string) string {
+	if word != "" && strings.IndexFunc(word, func(r rune) bool {
+		return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' ||
+			strings.ContainsRune("-_.:/@+=,%", r))
+	}) < 0 {
+		return word
+	}
+	return "'" + strings.ReplaceAll(word, "'", `'\''`) + "'"
 }
 
 // destructive runs the two-step contract of spec 005 #8: ask once without a
@@ -817,6 +917,18 @@ func (r *run) renderPreview(dry preview, what string) {
 	for _, affected := range dry.Runs {
 		fmt.Fprintf(out, "  %-14s %s of %s loses %d\n",
 			"run", termsafe.String(affected.ID), termsafe.String(affected.Dataset), affected.Traces)
+	}
+	// And the history of a dataset item cut from an erased trace, which
+	// nothing else in the API deletes (spec 044 #9).
+	for _, affected := range dry.Datasets {
+		fmt.Fprintf(out, "  %-14s %s loses %d items\n",
+			"dataset", termsafe.String(affected.Dataset), affected.Items)
+	}
+	// What the scrub cannot reach, said before the operator confirms
+	// (spec 044 #5).
+	if dry.Raw != nil && dry.Raw.UnattributableBatches > 0 {
+		fmt.Fprintf(out, "  %-14s %d raw batches older than the trace window\n",
+			"unattributable", dry.Raw.UnattributableBatches)
 	}
 	// What an account deletion leaves behind, and whose rotation is now a
 	// decision for whoever is deleting it (spec 045 #10).

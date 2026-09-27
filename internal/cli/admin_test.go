@@ -1,10 +1,19 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"flag"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"regexp"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/tracepad/tracepad/internal/client"
 	"github.com/tracepad/tracepad/internal/model"
 	"github.com/tracepad/tracepad/internal/store"
 )
@@ -409,7 +418,8 @@ func TestProjectDeleteNeedsTheAdminToken(t *testing.T) {
 }
 
 // TestUsersRemoveData is the erasure command: the echo is the user id, and the
-// output says what raw bodies do rather than leaving the operator to assume.
+// output says what happened to the raw archive rather than leaving the
+// operator to assume.
 func TestUsersRemoveData(t *testing.T) {
 	h := newAdminCLI(t)
 	h.seed(t, &model.Trace{ID: traceHex(1), UserID: "u1"},
@@ -423,7 +433,10 @@ func TestUsersRemoveData(t *testing.T) {
 	// the preview has to name the run that will lose it (spec 014 #14).
 	if err := h.writer.Submit(t.Context(), &store.DatasetItemsWrite{
 		ProjectID: h.projectID(t), Dataset: "golden", Now: 1,
-		Items: []*store.DatasetItemInput{{ID: strings.Repeat("d", 32), Input: []byte(`{}`)}},
+		Items: []*store.DatasetItemInput{{ID: strings.Repeat("d", 32), Input: []byte(`{}`)},
+			// Cut from the user's trace: the erasure takes it, and the
+			// preview names the dataset (spec 044 #9).
+			{ID: strings.Repeat("c", 32), Input: []byte(`{}`), SourceTraceID: traceHex(1)}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -448,8 +461,14 @@ func TestUsersRemoveData(t *testing.T) {
 	if !strings.Contains(out.stderr, runID) || !strings.Contains(out.stderr, "golden") {
 		t.Errorf("stderr = %q, want the run that loses a trace named before the echo", out.stderr)
 	}
-	if !strings.Contains(out.stdout, "raw OTLP bodies are not erased") {
-		t.Errorf("stdout = %q, want the raw archive position stated", out.stdout)
+	if !strings.Contains(out.stderr, "golden loses 1 items") {
+		t.Errorf("stderr = %q, want the dataset that loses an item named before the echo", out.stderr)
+	}
+	if !strings.Contains(out.stdout, "removed 0 spans from 0 raw batches, 0 deleted") {
+		t.Errorf("stdout = %q, want what the raw archive lost stated", out.stdout)
+	}
+	if !regexp.MustCompile(`dataset_items\s+1`).MatchString(out.stdout) {
+		t.Errorf("stdout = %q, want the dataset item counted", out.stdout)
 	}
 	// And when the bytes the rows left in the file are overwritten (spec 044
 	// #11).
@@ -489,5 +508,120 @@ func TestAdminCommandUsageErrors(t *testing.T) {
 		if out.code != ExitUsage {
 			t.Errorf("%v exited %d, want 2 (usage): %s", args, out.code, out.stderr)
 		}
+	}
+}
+
+// A confirmed erasure that outlasts the client's wait is still running on the
+// server (spec 035 #14): the command says so and how to see what is left,
+// rather than that the server could not be reached. One that never reached
+// the server says that, and nothing about an erasure running; a refusal the
+// server did send stays that refusal.
+func TestAnUnansweredErasureSaysItIsRunning(t *testing.T) {
+	ask := func(t *testing.T, baseURL string) error {
+		t.Helper()
+		api := &client.Client{BaseURL: baseURL, HTTP: &http.Client{Timeout: 200 * time.Millisecond}}
+		_, err := confirmErasure(t.Context(), "tracepad users rm-data u1", func(ctx context.Context) (json.RawMessage, error) {
+			return api.Send(ctx, http.MethodDelete, "/data", url.Values{"confirm": {"u1"}}, nil)
+		})
+		return err
+	}
+	running := "runs to the end"
+
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	}))
+	defer slow.Close()
+	err := ask(t, slow.URL)
+	if err == nil || !strings.Contains(err.Error(), running) || !strings.Contains(err.Error(), "users rm-data u1") {
+		t.Errorf("an erasure that outlasted the wait: %v", err)
+	}
+
+	gone := httptest.NewServer(http.NotFoundHandler())
+	gone.Close()
+	if err := ask(t, gone.URL); err == nil || strings.Contains(err.Error(), running) ||
+		!strings.Contains(err.Error(), "cannot reach") {
+		t.Errorf("a server that was never reached: %v", err)
+	}
+
+	refusing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{"error":"raw batch 3 was rewritten since it was read"}`))
+	}))
+	defer refusing.Close()
+	var refusal *client.Error
+	if err := ask(t, refusing.URL); !errors.As(err, &refusal) || refusal.Status != http.StatusConflict ||
+		strings.Contains(err.Error(), running) {
+		t.Errorf("a refusal became %v", err)
+	}
+
+	// A proxy in front of the server that stopped waiting too: the request
+	// reached it, and the server behind it runs the erasure on.
+	for _, status := range []int{http.StatusBadGateway, http.StatusGatewayTimeout} {
+		proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(status)
+		}))
+		if err := ask(t, proxy.URL); err == nil || !strings.Contains(err.Error(), running) {
+			t.Errorf("a proxy's %d after the request was sent: %v", status, err)
+		}
+		proxy.Close()
+	}
+	// The server's own 503 comes before anything is erased.
+	unavailable := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error":"writes are not available"}`))
+	}))
+	defer unavailable.Close()
+	if err := ask(t, unavailable.URL); !errors.As(err, &refusal) || strings.Contains(err.Error(), running) {
+		t.Errorf("the server's 503 became %v", err)
+	}
+}
+
+// A server that predates the raw scrub answers no raw counts, and the command
+// says so rather than printing zeros, which would read as an archive checked
+// and found clean.
+func TestAnErasureAnswerWithoutRawCountsSaysSo(t *testing.T) {
+	old := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("confirm") == "" {
+			_, _ = w.Write([]byte(`{"dry_run":true,"would_delete":{"traces":1},"confirm":"u1"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"dry_run":false,"deleted":{"traces":1,"observations":2},"user_id":"u1"}`))
+	}))
+	defer old.Close()
+	h := newAdminCLI(t)
+	out := h.run(t.Context(), true, "users", "rm-data", "--url", old.URL, "--project", "p", "--yes", "u1")
+	if out.code != ExitOK {
+		t.Fatalf("users rm-data exited %d: %s", out.code, out.stderr)
+	}
+	if strings.Contains(out.stdout, "removed 0 spans") ||
+		!strings.Contains(out.stdout, "the server reported nothing about its raw archive") {
+		t.Errorf("stdout = %q", out.stdout)
+	}
+}
+
+// The command the unanswered erasure suggests asks the same server about the
+// same project and user: the flags the operator gave are repeated, the key
+// never is, and a word a shell would split or expand is quoted.
+func TestTheRetryHintRepeatsTheProjectAndQuotes(t *testing.T) {
+	fs := flag.NewFlagSet("users rm-data", flag.ContinueOnError)
+	fs.String("url", "", "")
+	fs.String("key", "", "")
+	fs.String("project", "", "")
+	fs.Bool("yes", false, "")
+	if err := fs.Parse([]string{"--project", "shop eu", "--key", "tp-secret", "--url", "https://t.example:4318", "--yes"}); err != nil {
+		t.Fatal(err)
+	}
+	got := previewAgain(fs, "o'brien $HOME")
+	want := `tracepad users rm-data --project 'shop eu' --url https://t.example:4318 'o'\''brien $HOME'`
+	if got != want {
+		t.Errorf("hint = %s\nwant   %s", got, want)
+	}
+	if bare := previewAgain(flag.NewFlagSet("x", flag.ContinueOnError), "user-4711"); bare != "tracepad users rm-data user-4711" {
+		t.Errorf("hint without flags = %s", bare)
+	}
+	// An id that starts with a dash would be read as a flag.
+	if dashed := previewAgain(flag.NewFlagSet("x", flag.ContinueOnError), "-alice"); dashed != "tracepad users rm-data -- -alice" {
+		t.Errorf("hint for a dashed id = %s", dashed)
 	}
 }

@@ -452,6 +452,9 @@ func (s *Server) handlePatchProject(w http.ResponseWriter, r *http.Request) {
 				put("traces", counts.Traces).
 				put("observations", counts.Observations).
 				put("scores", counts.Scores).
+				// The session-only scores the pass takes with the
+				// sessions' last traces (spec 044 #8).
+				put("session_scores", counts.SessionScores).
 				put("raw_batches", counts.RawBatches).
 				// The rolled hours are named separately because they
 				// are the one thing here the trace sweep spares by
@@ -768,11 +771,10 @@ func (s *Server) handleRevokeKey(w http.ResponseWriter, r *http.Request) {
 		put("public_key", publicKey))
 }
 
-// handleEraseUserData erases everything the queryable stores hold about one
-// user (#7): the traces filed under the id, their observations, payloads and
-// scores. Raw bodies are deliberately untouched — they are an archive on its
-// own schedule, and `docs/retention.md` states that position and its two
-// caveats rather than hiding them.
+// handleEraseUserData erases everything the store holds about one user
+// (spec 005 #7, spec 044 #1): the traces filed under the id with what hangs off
+// them, the session-only scores of their sessions, the dataset items cut from
+// them, and their spans inside the raw batches.
 func (s *Server) handleEraseUserData(w http.ResponseWriter, r *http.Request) {
 	c, ok := s.authorize(w, r)
 	if !ok {
@@ -798,78 +800,118 @@ func (s *Server) handleEraseUserData(w http.ResponseWriter, r *http.Request) {
 	// a read that failed would 500 a request that was going to succeed —
 	// the count is what the caller is told, never what the erasure needs.
 	if values.Get("confirm") == "" {
-		var (
-			counts store.DeleteCounts
-			runs   []store.AffectedRun
-		)
+		var preview store.UserPreview
 		if !s.readInSlot(w, r, "failed to read what this user's data is",
 			func(ctx context.Context) (err error) {
-				counts, runs, err = s.store.UserDataPreview(ctx, project.ID, userID)
+				preview, err = s.store.UserDataPreview(ctx, project.ID, userID, time.Now().UnixNano())
 				return err
 			}) {
 			return
 		}
 		// Erasure overrides the pin a run puts on its traces (spec 014
-		// #14): the runs that will lose traces are named, so the operator
-		// sees the hole before it opens. The echo here is the user id,
-		// because the user is what is being erased (#8). The shape is the
-		// one every deletion of traces answers with (spec 035 #1).
-		preview := deletionPreview(counts, runs, userID,
-			"raw OTLP bodies are not erased; they expire on the raw retention window")
-		if backup := s.backupAnswer(); backup != nil {
-			preview = preview.put("pre_migration_backup", backup)
+		// #14) and the history of a dataset item (spec 044 #9): the runs
+		// and the datasets that will lose something are named, so the
+		// operator sees the hole before it opens. The echo here is the
+		// user id, because the user is what is being erased (#8).
+		answer := object{}.
+			put("dry_run", true).
+			put("would_delete", erasureCounts(preview.Counts, false)).
+			putSome("oldest", oldestTime(preview.Counts)).
+			put("affected_runs", affectedRuns(preview.Runs)).
+			put("affected_datasets", affectedDatasets(preview.Datasets)).
+			put("raw", object{}.
+				put("batches_to_scan", preview.Raw.BatchesToScan).
+				put("unattributable_batches", preview.Raw.UnattributableBatches))
+		backup := s.backupAnswer()
+		if backup != nil {
+			answer = answer.put("pre_migration_backup", backup)
 		}
-		writeJSON(w, http.StatusOK, preview)
+		writeJSON(w, http.StatusOK, answer.
+			put("confirm", userID).
+			put("note", erasureNote(preview.Raw, backup != nil)))
 		return
 	}
 
-	// Every chunk is a transaction that leaves the store consistent on its
-	// own: the traces go, and the hours they occupied are re-rolled in the
-	// same commit (spec 013 #7, spec 023 #19). So a client that hangs up
-	// between chunks — a closed tab, the interface's thirty-second clock
-	// (spec 010 #10) — loses nothing but the answer, and repeating the
-	// request finishes the rest. `Now` is read once: the freeze is a
-	// question about the retention window, and a request is not long
-	// enough to move it.
-	var erased store.DeleteCounts
-	var compaction int64
-	now := time.Now().UnixNano()
-	for {
-		chunk := &store.UserDataErase{
-			ProjectID: project.ID,
-			UserID:    userID,
-			Confirm:   values.Get("confirm"),
-			Limit:     eraseChunk,
-			HourLimit: eraseChunkHours,
-			Now:       now,
-		}
-		if !s.submit(w, r, chunk) {
-			return
-		}
-		erased.Traces += chunk.Counts.Traces
-		erased.Observations += chunk.Counts.Observations
-		erased.Scores += chunk.Counts.Scores
-		erased.Payloads += chunk.Counts.Payloads
-		erased.AnnotationItems += chunk.Counts.AnnotationItems
-		erased.Media += chunk.Counts.Media
-		erased.MediaBytes += chunk.Counts.MediaBytes
-		compaction = max(compaction, chunk.CompactionRequested)
-		if !chunk.More {
-			break
-		}
+	// The erasure runs to completion (spec 035 #14, `EraseUserData`) whether
+	// or not the client stays for the answer: a closed tab or the
+	// interface's thirty-second clock (spec 010 #10) loses the answer and
+	// nothing else. `Now` is read once: the freeze is a question about the
+	// retention window, and a request is not long enough to move it.
+	if s.writer == nil {
+		writeError(w, http.StatusServiceUnavailable, "writes are not available")
+		return
+	}
+	erased, err := s.store.EraseUserData(r.Context(), s.writer, store.UserErasure{
+		ProjectID:  project.ID,
+		UserID:     userID,
+		Confirm:    values.Get("confirm"),
+		Chunk:      eraseChunk,
+		ChunkHours: eraseChunkHours,
+		Now:        time.Now().UnixNano(),
+	})
+	if err != nil {
+		submitFailure(w, err, apiWrite)
+		return
 	}
 
 	answer := object{}.
 		put("dry_run", false).
-		put("deleted", deletedCounts(erased)).
+		put("deleted", erasureCounts(erased.Counts, true)).
 		put("user_id", userID).
-		put("compaction", s.compactionAnswer(compaction))
+		put("compaction", s.compactionAnswer(erased.Compaction))
 	// The one copy of the database the erasure does not rewrite, and the
 	// day it goes (spec 044 #12).
 	if backup := s.backupAnswer(); backup != nil {
 		answer = answer.put("pre_migration_backup", backup)
 	}
 	writeJSON(w, http.StatusOK, answer)
+}
+
+// erasureCounts renders an erasure's counts (spec 044, API contract): what
+// every deletion of traces counts, then what an erasure takes beside the
+// traces — and for a confirmed one, what the raw archive lost. Numbers only:
+// the confirmation card renders every key it is given.
+func erasureCounts(counts store.DeleteCounts, confirmed bool) object {
+	out := wouldDelete(counts)
+	if confirmed {
+		out = deletedCounts(counts)
+	}
+	out = out.
+		put("session_scores", counts.SessionScores).
+		put("dataset_items", counts.DatasetItems)
+	if confirmed {
+		out = out.
+			put("raw_spans", counts.RawSpans).
+			put("raw_batches_rewritten", counts.RawBatchesRewritten).
+			put("raw_batches_deleted", counts.RawBatchesDeleted)
+	}
+	return out
+}
+
+// affectedDatasets renders the datasets an erasure takes items from (spec 044
+// #9), in the shape `affected_runs` has.
+func affectedDatasets(datasets []store.AffectedDataset) []object {
+	out := make([]object, 0, len(datasets))
+	for _, d := range datasets {
+		out = append(out, object{}.put("dataset", d.Dataset).put("items", d.Items))
+	}
+	return out
+}
+
+// erasureNote says in words what the numbers cannot: what happens to the raw
+// archive, what it cannot reach, and the backup (spec 044, API contract).
+func erasureNote(raw store.RawErasure, backup bool) string {
+	note := fmt.Sprintf("the user's spans are removed from the raw batches that hold them "+
+		"(%d to scan); a rewritten batch is marked scrubbed", raw.BatchesToScan)
+	if raw.UnattributableBatches > 0 {
+		note += fmt.Sprintf("; %d raw batches are older than the trace window and may hold spans "+
+			"nothing attributes to a user any more, which the erasure cannot find", raw.UnattributableBatches)
+	}
+	note += "; the freed bytes are overwritten by the next sweep"
+	if backup {
+		note += "; the pre-migration backup keeps a copy until it is removed"
+	}
+	return note
 }
 
 // dryRun renders the preview shape every destructive endpoint answers with

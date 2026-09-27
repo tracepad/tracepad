@@ -163,7 +163,8 @@ func TestMediaErasure(t *testing.T) {
 	f := newSweepFixture(t)
 	body := mediaBody(3, 4096)
 	f.arriveWithMedia(t, f.project.ID, hexTrace(1), daysAgo(1), body, false)
-	counts, _, err := f.store.UserDataPreview(t.Context(), f.project.ID, "u1")
+	preview, err := f.store.UserDataPreview(t.Context(), f.project.ID, "u1", 0)
+	counts := preview.Counts
 	if err != nil {
 		t.Fatal(err)
 	}

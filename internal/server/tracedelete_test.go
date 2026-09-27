@@ -228,6 +228,7 @@ func TestDeleteTracesByFilter(t *testing.T) {
 	// newest, so they are the first chunk.
 	rec = h.call(t, "DELETE", "/api/v1/traces?to="+to+"&confirm="+url.QueryEscape(h.project.Name), nil)
 	expectStatus(t, rec, 200)
+	expectUniqueKeys(t, rec)
 	answer := decodeJSON[deleteAnswer](t, rec)
 	if answer.Deleted["traces"] != countCap || !*answer.More {
 		t.Errorf("the default round = %+v, want %d deleted and more", answer, countCap)

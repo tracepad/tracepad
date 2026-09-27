@@ -453,6 +453,18 @@ dataset was deleted mid-ingest.
 A trace re-delivered with a different `run_id` moves: per-field upsert, last
 delivery wins, the same rule as every other trace field.
 
+## Where an item came from
+
+`source_trace_id` is the one fact the store keeps about where an item was cut
+from, and a user-data erasure reads it: an item any row of which names one of
+the erased user's traces loses **every** row — its history included, the one
+exception to append-only versions besides a run's pin — and the dataset's
+version advances by one ([retention.md](retention.md#deleting-a-users-data)).
+A run of an older version then resolves the item as absent, and its traces
+that answered it count under `unknown`. Keep `source_trace_id` on an item
+copied from a user's trace so that an erasure can reach it; drop it from an
+item you anonymised, to keep that item through one.
+
 ## Deleting a dataset
 
 The one destructive act here. It cascades every run and releases every

@@ -21,6 +21,7 @@
 	import { rememberedRange, rememberRange } from '$lib/range.svelte';
 	import UserSessionsTab from '$lib/components/users/UserSessionsTab.svelte';
 	import UserTracesTab from '$lib/components/users/UserTracesTab.svelte';
+	import { Erasure, erased } from '$lib/erasure';
 	import { cost, count, duration, middleEllipsis, timestamp } from '$lib/format';
 	import { href, project } from '$lib/project.svelte';
 
@@ -63,6 +64,8 @@
 	let missing = $state(false);
 	let failure = $state<string | null>(null);
 	let erasing = $state(false);
+	/** Whether the last confirmed erasure is still running (spec 035 #14). */
+	const erasure = new Erasure();
 
 	/**
 	 * The question this page asks, as a value that compares. Not the objects
@@ -166,10 +169,12 @@
 	async function erase(confirm?: string): Promise<DryRun | string> {
 		const current = project.id;
 		if (!current) throw new ApiError(0, 'there is no project on screen to erase from');
-		const answer = await api.eraseUserData(current, id, confirm);
+		// Still running on the server: the page stays, and says so, rather
+		// than leaving as if the user were gone.
+		const answer = await erasure.ask(id, confirm, () => api.eraseUserData(current, id, confirm));
+		if (typeof answer === 'string') return answer;
 		if ('dry_run' in answer && answer.dry_run) return answer as DryRun;
-		const deleted = (answer as { deleted: Record<string, number> }).deleted;
-		return `Erased ${deleted.traces ?? 0} traces belonging to ${id}.`;
+		return erased(id, (answer as { deleted: Record<string, number> }).deleted);
 	}
 
 	const tabClass = (active: boolean) =>
@@ -215,7 +220,9 @@
 			subject={id}
 			preview={() => erase()}
 			execute={(confirm) => erase(confirm) as Promise<string>}
-			ondone={() => goto(href('/users'))}
+			ondone={() => {
+				if (!erasure.running) goto(href('/users'));
+			}}
 		/>
 	</div>
 {/if}

@@ -206,7 +206,7 @@ const VERSION_HEADER = 'X-Tracepad-Version';
  * budget a slow query spends; it is the line past which "still waiting" is
  * "no answer".
  */
-const REQUEST_TIMEOUT_MS = 30_000;
+export const REQUEST_TIMEOUT_MS = 30_000;
 
 type Query = Record<string, string | string[] | undefined | null>;
 
@@ -997,7 +997,11 @@ class Api {
  */
 function interrupted(cause: unknown): unknown {
 	const name = typeof cause === 'object' && cause !== null && 'name' in cause ? cause.name : '';
-	if (name === 'TimeoutError') return new ApiError(0, 'the server did not answer in time');
+	if (name === 'TimeoutError') {
+		// Marked, because for a request the server runs to completion — an
+		// erasure (spec 035 #14) — "no answer in time" is not a failure.
+		return new ApiError(0, 'the server did not answer in time', { timed_out: true });
+	}
 	if (name === 'AbortError') return cause;
 	return null;
 }

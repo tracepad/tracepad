@@ -445,7 +445,8 @@ func TestMediaDeletionCountsAreTheProjects(t *testing.T) {
 	want("retention preview", preview)
 
 	// Erasure: u1 filed both.
-	erasure, _, err := f.store.UserDataPreview(t.Context(), b.ID, "u1")
+	userPreview, err := f.store.UserDataPreview(t.Context(), b.ID, "u1", 0)
+	erasure := userPreview.Counts
 	if err != nil {
 		t.Fatal(err)
 	}
