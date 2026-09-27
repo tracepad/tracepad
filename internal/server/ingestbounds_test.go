@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -805,6 +806,23 @@ func TestABodyReservedWholeIsNotReadInSteps(t *testing.T) {
 		if stepped == declared {
 			t.Errorf("declared length %t: read in steps %t, want %t", declared, stepped, !declared)
 		}
+	}
+}
+
+// A budget at the largest int64 — the default under a huge body cap — refuses
+// what does not fit rather than wrapping its count negative and admitting
+// everything after it.
+func TestABudgetAtTheLargestInt64DoesNotWrap(t *testing.T) {
+	budget := &bodyBudget{capacity: math.MaxInt64}
+	half := int64(math.MaxInt64/2 + 1)
+	if !budget.reserve(half) {
+		t.Fatal("the first half did not fit an empty budget")
+	}
+	if budget.reserve(half) {
+		t.Error("a second half fit a budget that holds one")
+	}
+	if held := budget.heldBytes(); held != half {
+		t.Errorf("the budget holds %d, want %d", held, half)
 	}
 }
 

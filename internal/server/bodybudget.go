@@ -41,11 +41,13 @@ type bodyBudget struct {
 	capacity int64
 }
 
-// reserve takes n bytes if they fit.
+// reserve takes n bytes if they fit. Compared as what is left, so a capacity
+// near the largest int64 — the default under a huge body cap — cannot wrap the
+// sum negative and admit everything after it.
 func (b *bodyBudget) reserve(n int64) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.held+n > b.capacity {
+	if n > b.capacity-b.held {
 		return false
 	}
 	b.held += n

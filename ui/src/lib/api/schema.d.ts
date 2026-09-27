@@ -3282,7 +3282,7 @@ export interface operations {
                             waiting?: number;
                             capacity?: number;
                         };
-                        /** @description Request bodies held in memory now, for the whole deployment, against TRACEPAD_BODY_BUDGET_BYTES; a body whose next 64 KiB does not fit is `429` */
+                        /** @description Request bodies held in memory now, for the whole deployment, against TRACEPAD_BODY_BUDGET_BYTES. A body that declares its length and is not compressed reserves that length whole before it is read; a gzip or chunked body reserves 64 KiB at a time as it is read. A body that does not fit is `429` */
                         body_budget?: {
                             held_bytes: number;
                             capacity_bytes: number;
