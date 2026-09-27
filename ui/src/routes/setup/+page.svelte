@@ -78,7 +78,9 @@
 		{#if !enabled && required !== false}
 			Setup is turned off on this server (<code>TRACEPAD_SETUP=off</code>). Its first owner is
 			created with the admin token —
-			<code>TRACEPAD_API_KEY=$TRACEPAD_ADMIN_TOKEN tracepad accounts create &lt;email&gt; --owner</code>
+			<code
+				>TRACEPAD_API_KEY=&lt;the admin token&gt; tracepad accounts create &lt;email&gt; --owner</code
+			>
 			— and the invitation link that prints sets the password.
 		{:else if expired && required !== false}
 			No setup link from this start of the server works any more: a link lasts 24 hours after it is

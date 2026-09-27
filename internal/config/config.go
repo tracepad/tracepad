@@ -17,6 +17,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode/utf8"
 )
 
 // Config is the resolved runtime configuration.
@@ -167,6 +168,12 @@ func DefaultReadConcurrency(procs int) int {
 // hex characters is 128 bits, which thousands of guesses a second on any
 // number of connections do not exhaust. `openssl rand -hex 32` is 256.
 const MinSecretLength = 32
+
+// SecretLength is a secret's length as MinSecretLength and every refusal count
+// it: in characters, not bytes — so the rule, the message and the check say
+// the same thing, and a secret outside plain ASCII is held to at least as many
+// bytes as a hex one.
+func SecretLength(secret string) int { return utf8.RuneCountInString(secret) }
 
 // GenerateHint is how every short-secret refusal ends: the admin token's
 // here, and a declared project secret's at the start, where the store says
@@ -329,9 +336,9 @@ func readAdminToken() (string, error) {
 		}
 		name, token = "TRACEPAD_ADMIN_TOKEN_FILE", fromFile
 	}
-	if token != "" && len(token) < MinSecretLength {
+	if token != "" && SecretLength(token) < MinSecretLength {
 		return "", fmt.Errorf("%s: the admin token is %d characters; it creates owner accounts, "+
-			"so it must be at least %d — %s", name, len(token), MinSecretLength, GenerateHint)
+			"so it must be at least %d — %s", name, SecretLength(token), MinSecretLength, GenerateHint)
 	}
 	return token, nil
 }

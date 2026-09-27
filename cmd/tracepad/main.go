@@ -308,7 +308,7 @@ func provisionSpecs(cfg *config.Config) ([]store.ProvisionSpec, error) {
 // The secret is measured, never quoted.
 func checkDeclaredSecrets(log *slog.Logger, st *store.Store, specs []store.ProvisionSpec) error {
 	for i, spec := range specs {
-		if len(spec.SecretKey) >= config.MinSecretLength {
+		if config.SecretLength(spec.SecretKey) >= config.MinSecretLength {
 			continue
 		}
 		existing, err := st.ProjectByName(context.Background(), spec.Name)
@@ -317,7 +317,13 @@ func checkDeclaredSecrets(log *slog.Logger, st *store.Store, specs []store.Provi
 		}
 		if existing == nil {
 			return fmt.Errorf("TRACEPAD_PROJECTS entry %d: the secret key is %d characters; want at least %d — %s",
-				i+1, len(spec.SecretKey), config.MinSecretLength, config.GenerateHint)
+				i+1, config.SecretLength(spec.SecretKey), config.MinSecretLength, config.GenerateHint)
+		}
+		// A project on its way out is skipped by the bootstrap too, and
+		// "mint a new pair in its settings" is no advice for a project
+		// being deleted.
+		if existing.Deleted() {
+			continue
 		}
 		project, key, err := st.KeyBySecret(context.Background(), spec.SecretKey)
 		if err != nil {
@@ -329,7 +335,7 @@ func checkDeclaredSecrets(log *slog.Logger, st *store.Store, specs []store.Provi
 		log.Warn("a key declared in TRACEPAD_PROJECTS is short enough to guess: mint a new pair in the project's "+
 			"settings (or tracepad keys create with the admin token), move the applications onto it, revoke this "+
 			"one, and declare the new secret — openssl rand -hex 32 makes a good one",
-			"entry", i+1, "project", spec.Name, "public_key", key.PublicKey, "length", len(spec.SecretKey))
+			"entry", i+1, "project", spec.Name, "public_key", key.PublicKey, "length", config.SecretLength(spec.SecretKey))
 	}
 	return nil
 }
@@ -411,7 +417,7 @@ func noteSetupOff(log *slog.Logger, cfg *config.Config, srv *server.Server) {
 		return
 	}
 	log.Info("this server has no owner and setup is off; create the first one with the admin token: " +
-		"TRACEPAD_API_KEY=$TRACEPAD_ADMIN_TOKEN tracepad accounts create <email> --owner")
+		"TRACEPAD_API_KEY=<the admin token> tracepad accounts create <email> --owner")
 }
 
 // warnPlainHTTP says so at start when other machines can reach this server

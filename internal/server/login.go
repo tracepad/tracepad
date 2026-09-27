@@ -188,8 +188,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := store.CheckPasswordLength(request.Password); err != nil {
-		writeError(w, http.StatusUnprocessableEntity, err.Error())
+	if !passwordLengthOK(w, request.Password) {
 		return
 	}
 	hash, ok := s.hashUnderGate(w, r, request.Password)
@@ -212,10 +211,12 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 const setupIsOff = "setup is turned off on this server (TRACEPAD_SETUP=off); " +
 	"create the first owner with the admin token: " + createOwnerCommand
 
-// createOwnerCommand is how the first owner is made without the setup link,
-// spelled so that it runs as printed: the CLI reads its credential from
-// TRACEPAD_API_KEY, and the admin token is that credential here.
-const createOwnerCommand = "TRACEPAD_API_KEY=$TRACEPAD_ADMIN_TOKEN tracepad accounts create <email> --owner"
+// createOwnerCommand is how the first owner is made without the setup link.
+// The CLI reads its credential from TRACEPAD_API_KEY, and the admin token is
+// that credential here; it is named as a placeholder rather than as
+// $TRACEPAD_ADMIN_TOKEN, which is empty in a shell whose token lives in
+// TRACEPAD_ADMIN_TOKEN_FILE.
+const createOwnerCommand = "TRACEPAD_API_KEY=<the admin token> tracepad accounts create <email> --owner"
 
 // handleLogin is an email and a password.
 //
@@ -326,8 +327,7 @@ func (s *Server) handleAcceptInvite(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, store.ErrBadToken.Error())
 		return
 	}
-	if err := store.CheckPasswordLength(request.Password); err != nil {
-		writeError(w, http.StatusUnprocessableEntity, err.Error())
+	if !passwordLengthOK(w, request.Password) {
 		return
 	}
 	// The token before the hash (spec 028 #31): hashing first let anyone
@@ -452,8 +452,7 @@ func (s *Server) handlePatchMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := store.CheckPasswordLength(request.Password.New); err != nil {
-		writeError(w, http.StatusUnprocessableEntity, err.Error())
+	if !passwordLengthOK(w, request.Password.New) {
 		return
 	}
 	// Both halves of a password change are bcrypt, and both run here,
@@ -751,6 +750,18 @@ func readAccountName(w http.ResponseWriter, raw string) (string, bool) {
 		return "", false
 	}
 	return name, true
+}
+
+// passwordLengthOK is the one check of a new password's length that answers
+// the person, with a 422 and the rule, on every route that sets one — setup,
+// accepting an invitation, a password change — each before it spends anything
+// else on the password. The store checks again as part of its own contract.
+func passwordLengthOK(w http.ResponseWriter, password string) bool {
+	if err := store.CheckPasswordLength(password); err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err.Error())
+		return false
+	}
+	return true
 }
 
 // hashPassword hashes a password whose length the caller has already checked

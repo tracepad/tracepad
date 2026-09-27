@@ -389,8 +389,10 @@ func TestSetupOff(t *testing.T) {
 	}), anonymous, asJSON), http.StatusForbidden, "TRACEPAD_SETUP=off")
 	// The command it names runs as printed: the CLI's credential is
 	// TRACEPAD_API_KEY, and here that is the admin token.
-	if got := h.call(t, "POST", "/api/v1/setup", mustJSON(t, map[string]any{"token": "x"}), anonymous, asJSON).Body.String(); !strings.Contains(got, "TRACEPAD_API_KEY=$TRACEPAD_ADMIN_TOKEN tracepad accounts create") {
-		t.Errorf("setup-off answer = %s, want the command with its credential", got)
+	if got := decodeJSON[struct {
+		Error string `json:"error"`
+	}](t, h.call(t, "POST", "/api/v1/setup", mustJSON(t, map[string]any{"token": "x"}), anonymous, asJSON)).Error; !strings.Contains(got, "TRACEPAD_API_KEY=<the admin token> tracepad accounts create") {
+		t.Errorf("setup-off answer = %q, want the command with its credential", got)
 	}
 	// Whatever the body says: the answer comes before it is read.
 	expectError(t, h.call(t, "POST", "/api/v1/setup", []byte(`{"token": `), anonymous, asJSON),
@@ -522,5 +524,24 @@ func TestAnAttemptEndsOnlyItsOwnPlace(t *testing.T) {
 	newer.cancel()
 	if record.pending != 0 {
 		t.Error("the newer attempt could not end its own place")
+	}
+
+	// A success clears the email's failures whichever record holds them:
+	// the right password proves it, though the record was made again
+	// while the attempt was in flight.
+	l = newLoginLimiter()
+	l.capacity = 1
+	right, _ := l.reserve("c@x", now)
+	for range 2 {
+		attempt, _ := l.reserve("d@x", now)
+		attempt.failed(now)
+	}
+	for range 3 {
+		attempt, _ := l.reserve("c@x", now)
+		attempt.failed(now)
+	}
+	right.succeeded()
+	if record, ok := l.entries["c@x"]; ok && len(record.failures) != 0 {
+		t.Errorf("a right password left %d failures on the email", len(record.failures))
 	}
 }

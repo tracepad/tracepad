@@ -189,19 +189,33 @@ func (l *loginLimiter) expire(now time.Time) {
 }
 
 // succeeded forgets the email's failures: a person who mistyped twice and then
-// got it right is not somebody to throttle. Other attempts still in flight
-// keep their reservations.
+// got it right is not somebody to throttle. The right password proves it
+// whichever record now holds the email's failures — one evicted while this
+// attempt was in flight and made again carries them too — so those go
+// whatever record it is; only this attempt's own place in flight is given
+// back, and other attempts keep theirs.
 func (a *loginAttempt) succeeded() {
-	a.end(func(record *loginRecord) { record.failures = nil })
+	if a.done {
+		return
+	}
+	a.done = true
+	l := a.limiter
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	record, ok := l.entries[a.key]
+	if !ok {
+		return
+	}
+	if record == a.record {
+		record.pending = max(record.pending-1, 0)
+	}
+	record.failures = nil
+	l.settle(record)
 }
 
 // cancel gives the reservation back: the password was never compared, so the
 // attempt was not one (the password gate turned it away).
 func (a *loginAttempt) cancel() {
-	a.end(func(*loginRecord) {})
-}
-
-func (a *loginAttempt) end(change func(*loginRecord)) {
 	if a.done {
 		return
 	}
@@ -211,7 +225,6 @@ func (a *loginAttempt) end(change func(*loginRecord)) {
 	defer l.mu.Unlock()
 	if a.owns() {
 		a.record.pending = max(a.record.pending-1, 0)
-		change(a.record)
 		l.settle(a.record)
 	}
 }

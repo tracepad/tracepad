@@ -740,11 +740,11 @@ var ErrPasswordChanged = errors.New("the password was changed while this request
 // quarter of a second each, and inside this transaction they held the one
 // writer, and every ingest behind it, for that long (spec 028 #31). What is
 // left in here is the part that has to be: between that read and this write
-// the password can change, so the stored hash must still be byte for byte the
-// one that was checked, or the answer is ErrWrongPassword — a check against a
-// hash that is no longer stored is a check against nothing: the answer is then
-// ErrPasswordChanged, not ErrWrongPassword, because the password the person
-// typed was right when it was checked.
+// the password can change, and a check against a hash that is no longer
+// stored is a check against nothing. So the stored hash must still be byte for
+// byte the one that was checked, or the answer is ErrPasswordChanged — not
+// ErrWrongPassword, because the password the person typed was right when it
+// was checked. ErrWrongPassword is kept for a change with nothing checked.
 type PasswordChange struct {
 	AccountID string
 	// Checked is the account whose stored hash the caller verified the

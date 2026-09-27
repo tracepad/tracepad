@@ -264,7 +264,7 @@
           "properties": {
             "token": {"type": "string"},
             "email": {"type": "string", "maxLength": 254},
-            "password": {"type": "string", "minLength": 10, "maxLength": 128},
+            "password": {"type": "string", "minLength": 10, "maxLength": 72, "description": "10 to 72 bytes of UTF-8 — what bcrypt reads; maxLength counts characters, so a password outside plain ASCII meets the 72-byte limit sooner"},
             "name": {"type": "string", "maxLength": 200, "description": "Trimmed; at most 200 characters"}
           },
           "required": ["token", "email", "password"]
@@ -329,7 +329,7 @@
           "type": "object",
           "properties": {
             "token": {"type": "string"},
-            "password": {"type": "string", "minLength": 10, "maxLength": 128}
+            "password": {"type": "string", "minLength": 10, "maxLength": 72, "description": "10 to 72 bytes of UTF-8 — what bcrypt reads; maxLength counts characters, so a password outside plain ASCII meets the 72-byte limit sooner"}
           },
           "required": ["token", "password"]
         }}}},
@@ -394,7 +394,7 @@
               "type": "object",
               "properties": {
                 "current": {"type": "string"},
-                "new": {"type": "string", "minLength": 10, "maxLength": 128}
+                "new": {"type": "string", "minLength": 10, "maxLength": 72, "description": "10 to 72 bytes of UTF-8 — what bcrypt reads; maxLength counts characters, so a password outside plain ASCII meets the 72-byte limit sooner"}
               },
               "required": ["current", "new"]
             },

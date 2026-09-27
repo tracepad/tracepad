@@ -323,6 +323,10 @@ test('the Server tab belongs to owners', async ({ page }) => {
 });
 
 test('a member changes their own name and password', async ({ page }) => {
+	// A sign-in and a password change are two bcrypt waits of up to
+	// BCRYPT_WAIT each, which a loaded machine can stretch past the default
+	// thirty seconds a test gets; slow() gives this one three times that.
+	test.slow();
 	const own = await createProject('ownaccount');
 	await signIn(page, own.account);
 	await page.goto('/settings/account');
@@ -350,6 +354,10 @@ test('a member changes their own name and password', async ({ page }) => {
 test('an account with no projects opens the Account tab from the menu and changes its password', async ({
 	page
 }) => {
+	// A sign-in and a password change are two bcrypt waits of up to
+	// BCRYPT_WAIT each, which a loaded machine can stretch past the default
+	// thirty seconds a test gets; slow() gives this one three times that.
+	test.slow();
 	const nobody = await inviteNobody(state().baseURL, 'nobody');
 	await page.goto('/login');
 	await page.getByLabel('Email').fill(nobody.email);
@@ -396,6 +404,10 @@ test('the Account tab lands bare from under a project, and Project leads back un
 });
 
 test('a wrong current password is refused in the server’s words', async ({ page }) => {
+	// A sign-in and a password change are two bcrypt waits of up to
+	// BCRYPT_WAIT each, which a loaded machine can stretch past the default
+	// thirty seconds a test gets; slow() gives this one three times that.
+	test.slow();
 	const own = await createProject('badpassword');
 	await signIn(page, own.account);
 	await page.goto('/settings/account');

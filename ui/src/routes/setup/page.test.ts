@@ -43,7 +43,7 @@ describe('the setup screen', () => {
 		const text = await screen.findByText(/Setup is turned off on this server/);
 		// A command that runs as printed: the CLI's credential is
 		// TRACEPAD_API_KEY, and here that is the admin token.
-		expect(text.textContent).toContain('TRACEPAD_API_KEY=$TRACEPAD_ADMIN_TOKEN tracepad accounts create');
+		expect(text.textContent).toContain('TRACEPAD_API_KEY=<the admin token> tracepad accounts create');
 		expect(screen.queryByText(/carries no setup token/)).toBeNull();
 		expect(screen.queryByRole('button', { name: 'Create the owner' })).toBeNull();
 	});

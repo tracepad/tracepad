@@ -181,6 +181,12 @@ func TestShortSecretsRefuseToStart(t *testing.T) {
 	if _, err := Load(nil); err != nil {
 		t.Errorf("a token of exactly %d characters: %v", MinSecretLength, err)
 	}
+	// Characters, as the rule and the message say: eleven letters of
+	// three bytes each are thirty-three bytes and eleven characters.
+	t.Setenv("TRACEPAD_ADMIN_TOKEN", strings.Repeat("\u20ac", 11))
+	if _, err := Load(nil); err == nil || !strings.Contains(err.Error(), "11 characters") {
+		t.Errorf("err = %v, want eleven characters refused as eleven", err)
+	}
 }
 
 // TRACEPAD_ADMIN_TOKEN_FILE reads the token from a file — a mounted secret —

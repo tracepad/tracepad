@@ -2871,6 +2871,7 @@ export interface operations {
                 "application/json": {
                     token: string;
                     email: string;
+                    /** @description 10 to 72 bytes of UTF-8 — what bcrypt reads; maxLength counts characters, so a password outside plain ASCII meets the 72-byte limit sooner */
                     password: string;
                     /** @description Trimmed; at most 200 characters */
                     name?: string;
@@ -2992,6 +2993,7 @@ export interface operations {
             content: {
                 "application/json": {
                     token: string;
+                    /** @description 10 to 72 bytes of UTF-8 — what bcrypt reads; maxLength counts characters, so a password outside plain ASCII meets the 72-byte limit sooner */
                     password: string;
                 };
             };
@@ -3098,6 +3100,7 @@ export interface operations {
                     name?: string;
                     password?: {
                         current: string;
+                        /** @description 10 to 72 bytes of UTF-8 — what bcrypt reads; maxLength counts characters, so a password outside plain ASCII meets the 72-byte limit sooner */
                         new: string;
                     };
                     /** @description Replaces the stored object; `422` for anything but an object, or one over 16 KiB */

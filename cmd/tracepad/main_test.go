@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tracepad/tracepad/internal/store"
 )
@@ -159,5 +160,23 @@ func TestCheckDeclaredSecrets(t *testing.T) {
 	}
 	if logged, err := check(store.ProvisionSpec{Name: "app", PublicKey: "tp-pk-app", SecretKey: long}); err != nil || logged != "" {
 		t.Errorf("a long secret: err=%v log=%q, want neither", err, logged)
+	}
+
+	// A project on its way out: the bootstrap skips it, and so does the
+	// warning — minting a pair in its settings is no advice for it.
+	gone, err := st.CreateProject("gone", store.KeyPair{PublicKey: "tp-pk-gone", Secret: "tp-sk-gone"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer, err := st.NewWriter(store.WriterOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writer.Close()
+	if err := writer.Submit(t.Context(), &store.ProjectDelete{ProjectID: gone.ID, Confirm: "gone", Now: time.Now().UnixNano()}); err != nil {
+		t.Fatal(err)
+	}
+	if logged, err := check(store.ProvisionSpec{Name: "gone", PublicKey: "tp-pk-gone", SecretKey: "tp-sk-gone"}); err != nil || logged != "" {
+		t.Errorf("a short key of a deleted project: err=%v log=%q, want neither", err, logged)
 	}
 }
