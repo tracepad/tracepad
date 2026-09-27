@@ -258,12 +258,14 @@ the database and the server its memory:
   64 KiB, and keeps them until the request is answered. A request whose next
   step does not fit is `429` `the server is holding as many request bodies as
   it can; retry shortly`, with `Retry-After: 1`, which every OTLP exporter
-  retries. The budget counts body bytes, not the heap: a protobuf export at
-  the cap peaked at about {HEAP_RATIO_PB}× its body in heap while it was
-  decoded, mapped and written, a JSON one at about {HEAP_RATIO_JSON}× (measured
-  on a laptop, synthetic spans). Size the budget against a container's memory
-  limit with that in mind. A budget smaller than the body cap refuses to
-  start.
+  retries. The budget counts body bytes, not the heap: while an export is
+  decoded, mapped and written, the heap it takes peaks at roughly 12 to 18
+  times its body for protobuf and 15 to 20 times for JSON — the high end for
+  many small spans, the low end for fewer spans with large payloads (measured
+  on a laptop with synthetic spans, garbage not yet collected included). So
+  the default 80 MiB budget, spent entirely on exports, can mean a gigabyte or
+  more of heap at the peak; size the budget against a container's memory limit
+  with that in mind. A budget smaller than the body cap refuses to start.
 
 `GET /api/v1/system` shows the budget binding — `body_budget` with
 `held_bytes` and `capacity_bytes` — and counts, per project, the exports

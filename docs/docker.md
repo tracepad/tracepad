@@ -303,12 +303,14 @@ out of range refuses to start.
 | `TRACEPAD_MAX_SPANS_PER_REQUEST` | `20000` | Spans one export may carry; an export with more is `413`, refused whole. At least `1`. |
 | `TRACEPAD_BODY_BUDGET_BYTES` | four times `TRACEPAD_MAX_BODY_BYTES` (80 MiB) | Request bodies held in memory at once, counted decompressed; a body that does not fit is `429` with `Retry-After`, which exporters retry. At least `TRACEPAD_MAX_BODY_BYTES`. |
 
-The budget counts body bytes, not the heap: a request holds its body and, while
-it is decoded, mapped and written, several times that — about
-{HEAP_RATIO_PB}× for a protobuf export at the cap, about {HEAP_RATIO_JSON}× for
-a JSON one ([ingest.md](ingest.md#how-much-one-export-may-carry)). With a memory
-limit on the container (`--memory 512m`), keep the budget times that ratio
-well under it, or lower `TRACEPAD_MAX_BODY_BYTES` and the budget with it.
+The budget counts body bytes, not the heap: while an export is decoded,
+mapped and written, its heap peaks at roughly 12 to 18 times its body for
+protobuf and 15 to 20 times for JSON
+([ingest.md](ingest.md#how-much-one-export-may-carry)), so the default 80 MiB
+budget can mean a gigabyte or more at the peak. With a memory limit on the
+container (`--memory 1g`), keep the budget times about 20 under it — for 1 GiB,
+`TRACEPAD_BODY_BUDGET_BYTES=41943040` (40 MiB) with the body cap at its 20 MiB
+default, or lower both.
 
 An OpenTelemetry Collector in front of Tracepad should bound its batches, or
 one export after a burst can pass the span limit and be dropped as a `413`:

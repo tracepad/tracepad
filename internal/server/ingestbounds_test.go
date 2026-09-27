@@ -205,6 +205,9 @@ func TestExportCommitsInSlices(t *testing.T) {
 	if n := h.countTraces(t); n != 1250 {
 		t.Errorf("%d traces, want 1250", n)
 	}
+	if n := h.countRows(t, h.project.ID, "observations"); n != 20000 {
+		t.Errorf("%d observations, want every one of the 20,000 spans", n)
+	}
 	if n := len(archived(t, h)); n != 1 {
 		t.Errorf("%d raw bodies, want one", n)
 	}

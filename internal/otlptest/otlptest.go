@@ -878,7 +878,9 @@ func Bulk(seed, traces, spansPerTrace int) []*tracepb.ResourceSpans {
 	spans := make([]*tracepb.Span, 0, traces*spansPerTrace)
 	for t := range traces {
 		traceID := fmt.Sprintf("%08x%08x%016x", seed, t, 0xb01c)
-		rootID := fmt.Sprintf("%08x%08x", t, 0)
+		// Offset by one: an all-zero span id is not an id, and the mapper
+		// skips it.
+		rootID := fmt.Sprintf("%08x%08x", t+1, 0)
 		start := base + int64(t)*ms
 		for s := range spansPerTrace {
 			if s == 0 {
@@ -886,7 +888,7 @@ func Bulk(seed, traces, spansPerTrace int) []*tracepb.ResourceSpans {
 					str("langfuse.trace.name", "agent-run"), str("langfuse.user.id", "user-1")))
 				continue
 			}
-			spans = append(spans, span(traceID, fmt.Sprintf("%08x%08x", t, s), rootID, "chat",
+			spans = append(spans, span(traceID, fmt.Sprintf("%08x%08x", t+1, s), rootID, "chat",
 				start+int64(s)*ms, start+int64(s+1)*ms,
 				str("gen_ai.operation.name", "chat"),
 				str("gen_ai.request.model", "gpt-4o-mini"),

@@ -81,8 +81,12 @@ func TestTagsDeduplicateAfterTheCut(t *testing.T) {
 }
 
 func TestCountSpans(t *testing.T) {
-	if got := mapping.CountSpans(otlptest.Bulk(1, 7, 3)); got != 21 {
+	bulk := otlptest.Bulk(1, 7, 3)
+	if got := mapping.CountSpans(bulk); got != 21 {
 		t.Errorf("CountSpans = %d, want 21", got)
+	}
+	if result := mapping.Map(bulk); len(result.Observations) != 21 || result.Skipped != 0 {
+		t.Errorf("Bulk maps to %d observations with %d skipped, want every span", len(result.Observations), result.Skipped)
 	}
 	if got := mapping.CountSpans(nil); got != 0 {
 		t.Errorf("CountSpans(nil) = %d", got)
