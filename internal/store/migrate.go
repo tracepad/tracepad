@@ -10,6 +10,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 )
 
 //go:embed migrations/*.sql
@@ -105,10 +106,17 @@ func (s *Store) migrate() error {
 			return err
 		}
 		name := strings.TrimPrefix(path, "migrations/")
-		if err := applyMigration(ctx, conn, name, string(body)); err != nil {
+		// A line before as well as after: a migration that rewrites
+		// rows runs before the server listens, and on a large store a
+		// start with nothing in the log looks like a hang (spec 043 #24).
+		logger().Info("applying migration", "migration", name)
+		start := time.Now()
+		written, err := applyMigration(ctx, conn, name, string(body))
+		if err != nil {
 			return err
 		}
-		logger().Info("applied migration", "migration", name)
+		logger().Info("applied migration", "migration", name,
+			"rows_written", written, "took", time.Since(start).Round(time.Millisecond))
 	}
 	// Every migration this run's backup guards has committed, so the older
 	// backups stop being the way back from anything: each is a full copy of
@@ -121,27 +129,38 @@ func (s *Store) migrate() error {
 	return nil
 }
 
-// applyMigration runs one file and records it, in a single transaction.
-func applyMigration(ctx context.Context, conn *sql.Conn, name, body string) error {
+// applyMigration runs one file and records it, in a single transaction, and
+// reports how many rows it wrote — SQLite's own count of rows the connection
+// inserted, updated or deleted, taken before and after. That is every
+// statement's rows, a scratch table's included, not the rows the migration
+// repaired (spec 043 #24 u).
+func applyMigration(ctx context.Context, conn *sql.Conn, name, body string) (int64, error) {
 	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer tx.Rollback()
 
+	var before, after int64
+	if err := tx.QueryRowContext(ctx, `SELECT total_changes()`).Scan(&before); err != nil {
+		return 0, fmt.Errorf("apply migration %s: %w", name, err)
+	}
 	if _, err := tx.ExecContext(ctx, body); err != nil {
-		return fmt.Errorf("apply migration %s: %w", name, err)
+		return 0, fmt.Errorf("apply migration %s: %w", name, err)
+	}
+	if err := tx.QueryRowContext(ctx, `SELECT total_changes()`).Scan(&after); err != nil {
+		return 0, fmt.Errorf("apply migration %s: %w", name, err)
 	}
 	if err := checkForeignKeys(ctx, tx); err != nil {
-		return fmt.Errorf("apply migration %s: %w", name, err)
+		return 0, fmt.Errorf("apply migration %s: %w", name, err)
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO schema_migrations (filename) VALUES (?)`, name); err != nil {
-		return fmt.Errorf("record migration %s: %w", name, err)
+		return 0, fmt.Errorf("record migration %s: %w", name, err)
 	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit migration %s: %w", name, err)
+		return 0, fmt.Errorf("commit migration %s: %w", name, err)
 	}
-	return nil
+	return after - before, nil
 }
 
 // checkForeignKeys refuses to commit a migration that left a row pointing at

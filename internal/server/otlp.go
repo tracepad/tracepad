@@ -2,7 +2,6 @@ package server
 
 import (
 	"compress/gzip"
-	"context"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -172,20 +171,12 @@ func (s *Server) handleTraces(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err != nil {
-		switch {
-		case errors.Is(err, store.ErrWriterBusy):
-			// Backpressure the exporter can act on: OTLP clients
-			// retry 429 with backoff natively (spec 002 #15).
-			w.Header().Set("Retry-After", "1")
-			writeError(w, http.StatusTooManyRequests, "ingest queue is full, retry shortly")
-		case errors.Is(err, store.ErrWriterClosed):
-			writeError(w, http.StatusServiceUnavailable, "server is shutting down")
-		case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
-			// The client hung up; there is nobody to answer.
-		default:
-			slog.Error("ingest write failed", "project", project.Name, "err", err)
-			writeError(w, http.StatusInternalServerError, "failed to store spans")
-		}
+		submitFailure(w, err, writeKind{
+			full:   "ingest queue is full, retry shortly",
+			failed: "failed to store spans",
+			logged: "ingest write failed",
+			attrs:  []any{"project", project.Name},
+		})
 		return
 	}
 

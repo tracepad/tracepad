@@ -683,7 +683,7 @@ func statsQuery(projectID string, filter StatsFilter) (string, []any) {
 		// the numbers come from the observation.
 		return `SELECT o.model, o.level = 'ERROR',
 		               CASE WHEN o.provided_cost = 1
-		                    THEN json_extract(o.cost_details, '$.total') END,
+		                    THEN ` + costExpr("o.cost_details") + ` END,
 		               CASE WHEN o.start_time > 0 AND o.end_time >= o.start_time
 		                    THEN (o.end_time - o.start_time) / 1000000 END,
 		               ` + tokenColumns("o.usage") + `

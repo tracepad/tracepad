@@ -596,7 +596,7 @@ func rs2slice[T any](v T) []T { return []T{v} }
 // the echo, because shortening a window demands one wherever it is asked from
 // (spec 005 #8).
 func (h *harness) setRetention(projectID string, days int) error {
-	project, err := h.store.ProjectByID(projectID)
+	project, err := h.store.ProjectByID(context.Background(), projectID)
 	if err != nil {
 		return err
 	}

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -95,8 +96,8 @@ func scanAccount(row interface{ Scan(...any) error }) (*Account, error) {
 }
 
 // AccountByID reads one account, or nil when there is none.
-func (s *Store) AccountByID(id string) (*Account, error) {
-	return s.oneAccount(`SELECT `+accountColumns+` FROM accounts WHERE id = ?`, id)
+func (s *Store) AccountByID(ctx context.Context, id string) (*Account, error) {
+	return s.oneAccount(ctx, `SELECT `+accountColumns+` FROM accounts WHERE id = ?`, id)
 }
 
 // AccountByEmail reads one account by its sign-in name. The lookup is
@@ -104,11 +105,11 @@ func (s *Store) AccountByID(id string) (*Account, error) {
 // capitalised their email in a different mood still signs in to their own
 // account, and the stored spelling stays the one the owner typed.
 func (s *Store) AccountByEmail(email string) (*Account, error) {
-	return s.oneAccount(`SELECT `+accountColumns+` FROM accounts WHERE email = ?`, strings.TrimSpace(email))
+	return s.oneAccount(context.Background(), `SELECT `+accountColumns+` FROM accounts WHERE email = ?`, strings.TrimSpace(email))
 }
 
-func (s *Store) oneAccount(query string, args ...any) (*Account, error) {
-	account, err := scanAccount(s.db.QueryRow(query, args...))
+func (s *Store) oneAccount(ctx context.Context, query string, args ...any) (*Account, error) {
+	account, err := scanAccount(s.db.QueryRowContext(ctx, query, args...))
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -264,24 +265,31 @@ func (s *Store) ProjectMembers(projectID string) ([]Member, error) {
 	return out, rows.Err()
 }
 
-// ProjectRole answers what one account may do in one project: `owner` for an
-// owner, the membership's role for a member, and "" for somebody who is
-// neither (Decision 3).
-func (s *Store) ProjectRole(account *Account, projectID string) (string, error) {
-	if account.Owner {
-		return RoleOwner, nil
-	}
+// ProjectWithRole reads one project, or nil if there is none, together with
+// what one account may do in it: `owner` for an owner, the membership's role
+// for a member, and "" for somebody who is neither (Decision 3). One query
+// rather than two, so that the guard's scoping is one lookup under one
+// deadline (spec 043 #24).
+func (s *Store) ProjectWithRole(ctx context.Context, account *Account, projectID string) (*Project, string, error) {
 	var role string
-	err := s.db.QueryRow(
-		`SELECT role FROM memberships WHERE account_id = ? AND project_id = ?`,
-		account.ID, projectID).Scan(&role)
+	project, err := scanProject(withTail{
+		row: s.db.QueryRowContext(ctx,
+			`SELECT `+prefixed("p", projectColumns)+`, COALESCE(m.role, '')
+			   FROM projects p
+			   LEFT JOIN memberships m ON m.project_id = p.id AND m.account_id = ?
+			  WHERE p.id = ?`, account.ID, projectID),
+		tail: []any{&role},
+	})
 	if err == sql.ErrNoRows {
-		return "", nil
+		project, role, err = nil, "", nil
 	}
 	if err != nil {
-		return "", fmt.Errorf("read membership: %w", err)
+		return nil, "", fmt.Errorf("read the project and the membership: %w", err)
 	}
-	return role, nil
+	if account.Owner {
+		role = RoleOwner
+	}
+	return project, role, nil
 }
 
 // AccountSession is one browser's sign-in (Decision 4). The name carries
@@ -323,8 +331,8 @@ func SessionID(value string) string {
 // An expired row answers nil before the sweeper reaches it (spec 028, Data
 // contract): the sweep is a cadence, not a guarantee, and a session that has
 // run out must stop working at the moment it does.
-func (s *Store) SessionByCookie(value string, now int64) (*AccountSession, *Account, error) {
-	session, err := scanSession(s.db.QueryRow(
+func (s *Store) SessionByCookie(ctx context.Context, value string, now int64) (*AccountSession, *Account, error) {
+	session, err := scanSession(s.db.QueryRowContext(ctx,
 		`SELECT `+sessionColumns+` FROM account_sessions WHERE id = ? AND expires_at > ?`,
 		SessionID(value), now))
 	if err == sql.ErrNoRows {
@@ -333,7 +341,7 @@ func (s *Store) SessionByCookie(value string, now int64) (*AccountSession, *Acco
 	if err != nil {
 		return nil, nil, fmt.Errorf("read session: %w", err)
 	}
-	account, err := s.AccountByID(session.AccountID)
+	account, err := s.AccountByID(ctx, session.AccountID)
 	if err != nil {
 		return nil, nil, err
 	}

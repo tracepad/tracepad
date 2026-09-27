@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"fmt"
@@ -129,11 +130,11 @@ var keyBySecretQuery = `SELECT ` + prefixed("p", projectColumns) + `, ` + keyCol
 // may still do: everything is refused during the grace window except reading
 // the project and restoring it (spec 005 #10), so the deletion is undoable in
 // a deployment that has no admin token to undo it with.
-func (s *Store) KeyBySecret(secret string) (*Project, *KeyInfo, error) {
+func (s *Store) KeyBySecret(ctx context.Context, secret string) (*Project, *KeyInfo, error) {
 	hash := sha256.Sum256([]byte(secret))
 	var row keyRow
 	project, err := scanProject(withTail{
-		row:  s.db.QueryRow(keyBySecretQuery, hash[:]),
+		row:  s.db.QueryRowContext(ctx, keyBySecretQuery, hash[:]),
 		tail: row.dest(),
 	})
 	if err == sql.ErrNoRows {

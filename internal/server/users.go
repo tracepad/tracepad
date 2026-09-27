@@ -221,11 +221,7 @@ func (s *Server) readUser(projectID, userID string) (*store.UserSummary, bool, e
 		merged.ErrorCount += tail.ErrorCount
 		merged.Sessions += tail.Sessions
 		if tail.TotalCost != nil {
-			total := *tail.TotalCost
-			if merged.TotalCost != nil {
-				total += *merged.TotalCost
-			}
-			merged.TotalCost = &total
+			merged.TotalCost = store.AddCost(merged.TotalCost, *tail.TotalCost)
 		}
 		merged.Latency.Merge(tail.Latency)
 		first, last := tail.FirstSeen/int64(time.Second), tail.LastSeen/int64(time.Second)

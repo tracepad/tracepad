@@ -4,8 +4,14 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
+	"time"
+
+	"github.com/tracepad/tracepad/internal/model"
+
+	"github.com/tracepad/tracepad/internal/logpace"
 )
 
 // Rendering for the read API (spec 004). Rows are built as ordered key/value
@@ -78,6 +84,19 @@ func (o object) MarshalJSON() ([]byte, error) {
 		}
 		buffer.Write(key)
 		buffer.WriteByte(':')
+		if !finite(m.value) {
+			// The backstop for a number nothing upstream kept finite
+			// — an aggregate stored before the counting rule, a mean
+			// of extreme scores (spec 043 #7). JSON cannot spell an
+			// infinity, and `null` is this API's word for "no number"
+			// (spec 002 #14), which is the truth about one.
+			if skipped, ok := nonFiniteLog.Allow(m.key, time.Now()); ok {
+				slog.Warn("rendered a non-finite number as null",
+					"field", m.key, "since_last_line", skipped)
+			}
+			buffer.WriteString("null")
+			continue
+		}
 		value, err := json.Marshal(m.value)
 		if err != nil {
 			return nil, fmt.Errorf("render %q: %w", m.key, err)
@@ -86,6 +105,22 @@ func (o object) MarshalJSON() ([]byte, error) {
 	}
 	buffer.WriteByte('}')
 	return buffer.Bytes(), nil
+}
+
+// nonFiniteLog paces the warning for a non-finite number rendered as null,
+// one line a minute per field.
+var nonFiniteLog = &logpace.Keyed{Every: time.Minute}
+
+// finite reports whether a field's value is anything but a NaN or an infinity
+// in a float64 or a *float64 — the two shapes a rendered number takes.
+func finite(value any) bool {
+	switch v := value.(type) {
+	case float64:
+		return model.Finite(v)
+	case *float64:
+		return v == nil || model.Finite(*v)
+	}
+	return true
 }
 
 // keys returns the field names, which is what an unknown-field error needs to

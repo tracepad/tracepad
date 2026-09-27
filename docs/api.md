@@ -780,7 +780,9 @@ curl … "http://localhost:4318/api/v1/stats?group_by=day&user_id=user-4821"
 
 Latency percentiles are **histogram-based**: accurate to a few percent, and
 stable across the expiry of the rows they came from. `total_cost` is summed
-only over rows whose client provided a cost and is absent when none did. A
+only over rows whose client provided a cost — a `total` that is a number
+between −10¹² and 10¹² ([ingest.md](ingest.md#where-the-price-comes-from)) —
+and is absent when none did. A
 range with nothing in it comes back with no buckets rather than with
 fabricated zeroes.
 
@@ -791,7 +793,10 @@ observation's `usage` under the first spelling present of a short list —
 `input_tokens`, `prompt_tokens` or `input`; `output_tokens`,
 `completion_tokens` or `output`; `cache_read_input_tokens`,
 `cache_read_tokens` or `input_cached_tokens` — so the OpenAI, Anthropic and
-Langfuse spellings land in the same three numbers. A key is present only when
+Langfuse spellings land in the same three numbers. A count is a number from
+0 to 10⁹; a spelling that holds anything else — a string, a negative number,
+one past that — is not a count, and that class is left out rather than read
+from the next spelling. A key is present only when
 something in the bucket carried that count, and the object is absent when
 none of the three is: a bucket whose calls reported no usage says nothing
 rather than zero. With `user_id` the object is always absent — the per-user
@@ -1093,3 +1098,9 @@ actually at ([prompts.md](prompts.md#appending-to-the-version-you-meant)):
 | `401` | The credentials do not resolve to a project. |
 | `404` | No such thing in this project. On `traces/last`, the message names the filters that found nothing. |
 | `409` | An observation id that is ambiguous without a `trace_id`; a prompt append whose `expect_version` disagrees with the name's current state. |
+| `500` | The answer could not be rendered — `{"error": "failed to render the response"}`. Never a `200` with an empty body. |
+| `503` | The credentials could not be checked right now — `{"error": "cannot check credentials right now; retry shortly"}` — or a write met a database condition that passes, a full disk or a lock that did not clear — `{"error": "storage is temporarily unavailable; retry shortly"}`. Both carry `Retry-After: 1`. A browser session is not signed out by it. |
+
+A number JSON cannot spell — an infinity a store written by an earlier version
+still holds — is rendered as `null`, this API's word for "no number", rather
+than failing the answer.

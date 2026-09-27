@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"testing"
@@ -147,7 +148,7 @@ func TestRetentionRoundTrip(t *testing.T) {
 	if !preview.DryRun || preview.Confirm != "test" {
 		t.Fatalf("preview = %+v, want a dry run asking for the project's name", preview)
 	}
-	if stored, _ := h.store.ProjectByID(h.project.ID); stored.RetentionDays != nil {
+	if stored, _ := h.store.ProjectByID(context.Background(), h.project.ID); stored.RetentionDays != nil {
 		t.Errorf("the preview changed the window to %d; a dry run changes nothing", *stored.RetentionDays)
 	}
 
@@ -155,7 +156,7 @@ func TestRetentionRoundTrip(t *testing.T) {
 	rec = h.send(t, "PATCH", "/api/v1/projects/"+h.project.ID+"?confirm=Test",
 		map[string]any{"retention_days": 90})
 	expectError(t, rec, http.StatusBadRequest, `"test"`)
-	if stored, _ := h.store.ProjectByID(h.project.ID); stored.RetentionDays != nil {
+	if stored, _ := h.store.ProjectByID(context.Background(), h.project.ID); stored.RetentionDays != nil {
 		t.Errorf("a rejected confirmation changed the window anyway")
 	}
 
@@ -163,7 +164,7 @@ func TestRetentionRoundTrip(t *testing.T) {
 	rec = h.send(t, "PATCH", "/api/v1/projects/"+h.project.ID+"?confirm=test",
 		map[string]any{"retention_days": 90})
 	expectStatus(t, rec, 200)
-	stored, _ := h.store.ProjectByID(h.project.ID)
+	stored, _ := h.store.ProjectByID(context.Background(), h.project.ID)
 	if stored.RetentionDays == nil || *stored.RetentionDays != 90 {
 		t.Fatalf("retention = %v, want 90", stored.RetentionDays)
 	}
@@ -171,14 +172,14 @@ func TestRetentionRoundTrip(t *testing.T) {
 	// Growing it destroys nothing, so it needs no ceremony.
 	rec = h.send(t, "PATCH", "/api/v1/projects/"+h.project.ID, map[string]any{"retention_days": 365})
 	expectStatus(t, rec, 200)
-	if stored, _ := h.store.ProjectByID(h.project.ID); *stored.RetentionDays != 365 {
+	if stored, _ := h.store.ProjectByID(context.Background(), h.project.ID); *stored.RetentionDays != 365 {
 		t.Errorf("retention = %v, want the longer window applied without a confirmation", stored.RetentionDays)
 	}
 
 	// And so does clearing it back to forever.
 	rec = h.send(t, "PATCH", "/api/v1/projects/"+h.project.ID, map[string]any{"retention_days": nil})
 	expectStatus(t, rec, 200)
-	if stored, _ := h.store.ProjectByID(h.project.ID); stored.RetentionDays != nil {
+	if stored, _ := h.store.ProjectByID(context.Background(), h.project.ID); stored.RetentionDays != nil {
 		t.Errorf("retention = %v, want null to mean forever", stored.RetentionDays)
 	}
 }
@@ -336,14 +337,14 @@ func TestSoftDeleteAndRestore(t *testing.T) {
 	if preview.WouldDelete["annotation_queues"] != 1 || preview.WouldDelete["annotation_items"] != 1 {
 		t.Errorf("would_delete = %v, want the queue and its item named too", preview.WouldDelete)
 	}
-	if stored, _ := h.store.ProjectByID(h.project.ID); stored.Deleted() {
+	if stored, _ := h.store.ProjectByID(context.Background(), h.project.ID); stored.Deleted() {
 		t.Fatal("the dry run deleted the project")
 	}
 
 	// A wrong echo does nothing either.
 	rec = h.call(t, "DELETE", "/api/v1/projects/"+h.project.ID+"?confirm=tests", nil, asAdmin)
 	expectError(t, rec, http.StatusBadRequest, `"test"`)
-	if stored, _ := h.store.ProjectByID(h.project.ID); stored.Deleted() {
+	if stored, _ := h.store.ProjectByID(context.Background(), h.project.ID); stored.Deleted() {
 		t.Fatal("a rejected confirmation deleted the project")
 	}
 
@@ -737,7 +738,7 @@ func TestRetentionWindowHasACeiling(t *testing.T) {
 		rec := h.send(t, "PATCH", path, map[string]any{field: store.MaxRetentionDays + 1})
 		expectError(t, rec, http.StatusBadRequest, "between 1 and")
 	}
-	stored, _ := h.store.ProjectByID(h.project.ID)
+	stored, _ := h.store.ProjectByID(context.Background(), h.project.ID)
 	if *stored.RetentionDays != 30 {
 		t.Fatalf("retention = %v, want the refused window to have changed nothing", stored.RetentionDays)
 	}
@@ -747,7 +748,7 @@ func TestRetentionWindowHasACeiling(t *testing.T) {
 	expectStatus(t, rec, 200)
 	rec = h.send(t, "PATCH", path, map[string]any{"retention_days": nil})
 	expectStatus(t, rec, 200)
-	if stored, _ := h.store.ProjectByID(h.project.ID); stored.RetentionDays != nil {
+	if stored, _ := h.store.ProjectByID(context.Background(), h.project.ID); stored.RetentionDays != nil {
 		t.Errorf("retention = %v, want null to be how forever is said", stored.RetentionDays)
 	}
 }

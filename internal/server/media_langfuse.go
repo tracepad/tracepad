@@ -211,10 +211,9 @@ func (s *Server) handleLangfuseMediaPut(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusForbidden, errBadUploadToken.Error())
 		return
 	}
-	project, err := s.store.ProjectByID(grant.Project)
+	project, err := projectByID(s.store, r.Context(), grant.Project)
 	if err != nil {
-		slog.Error("project lookup failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to read the project")
+		lookupFailed(w, r, "project", err)
 		return
 	}
 	if project == nil || project.Deleted() {

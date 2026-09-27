@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -282,7 +283,7 @@ func TestSessionCookieAttributes(t *testing.T) {
 	}
 	// The value is the credential and never the row id: what is stored is
 	// its sha256.
-	if _, account, err := h.store.SessionByCookie(cookie.Value, time.Now().UnixNano()); err != nil || account == nil {
+	if _, account, err := h.store.SessionByCookie(context.Background(), cookie.Value, time.Now().UnixNano()); err != nil || account == nil {
 		t.Fatalf("the cookie does not resolve to its session: %v", err)
 	}
 
@@ -343,7 +344,7 @@ func TestSessionSlides(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	before, _, err := h.store.SessionByCookie(who.cookie, time.Now().UnixNano())
+	before, _, err := h.store.SessionByCookie(context.Background(), who.cookie, time.Now().UnixNano())
 	if err != nil || before == nil {
 		t.Fatal("the session should still be live")
 	}
@@ -353,7 +354,7 @@ func TestSessionSlides(t *testing.T) {
 	if sessionCookieOf(rec) == nil {
 		t.Error("a slide must re-set the cookie, or the browser's Max-Age stays where it was")
 	}
-	after, _, _ := h.store.SessionByCookie(who.cookie, time.Now().UnixNano())
+	after, _, _ := h.store.SessionByCookie(context.Background(), who.cookie, time.Now().UnixNano())
 	if after.ExpiresAt <= before.ExpiresAt {
 		t.Errorf("expires_at did not move: %d -> %d", before.ExpiresAt, after.ExpiresAt)
 	}
@@ -361,7 +362,7 @@ func TestSessionSlides(t *testing.T) {
 	// A second request the same day writes nothing more: the once-a-day
 	// rule is what keeps the writer out of every read.
 	expectStatus(t, h.call(t, "GET", "/api/v1/auth/me", nil, asSession(who)), 200)
-	again, _, _ := h.store.SessionByCookie(who.cookie, time.Now().UnixNano())
+	again, _, _ := h.store.SessionByCookie(context.Background(), who.cookie, time.Now().UnixNano())
 	if again.ExpiresAt != after.ExpiresAt {
 		t.Error("a session slid twice in one day")
 	}
@@ -379,7 +380,7 @@ func TestSessionSlides(t *testing.T) {
 		r.Header.Set("Origin", "https://evil.example")
 	})
 	expectStatus(t, rec, http.StatusForbidden)
-	refused, _, _ := h.store.SessionByCookie(who.cookie, time.Now().UnixNano())
+	refused, _, _ := h.store.SessionByCookie(context.Background(), who.cookie, time.Now().UnixNano())
 	if refused.ExpiresAt != again.ExpiresAt {
 		t.Error("a cross-origin request slid the session it was refused for")
 	}

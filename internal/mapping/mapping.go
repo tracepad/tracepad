@@ -538,6 +538,12 @@ func mapCompletionStartTime(a *attrs) int64 {
 	return 0
 }
 
+// The instants an int64 of nanoseconds can hold.
+var (
+	earliestInstant = time.Unix(0, math.MinInt64)
+	latestInstant   = time.Unix(0, math.MaxInt64)
+)
+
 // parseInstant reads the shapes an SDK sends an instant in: an integer of
 // nanoseconds, an RFC 3339 string, and that same string with a layer of JSON
 // quoting still around it — which is what the Langfuse SDK 4.7 emits on the
@@ -576,7 +582,12 @@ func parseInstant(raw any) (int64, bool) {
 			return nanoseconds, true
 		}
 		instant, err := time.Parse(time.RFC3339Nano, text)
-		if err != nil {
+		if err != nil || instant.Before(earliestInstant) || instant.After(latestInstant) {
+			// Outside the years 1678–2262 `UnixNano` is undefined: a
+			// date in the year 3000 came back as an arbitrary
+			// nanosecond count. Not an instant, so it stays in
+			// metadata with every other shape this cannot read
+			// (spec 043 #5).
 			return 0, false
 		}
 		return instant.UnixNano(), true
@@ -700,8 +711,11 @@ func mapUsage(a *attrs) map[string]any {
 	return out
 }
 
-// mapCost returns the client-provided cost, normalized so that a `total` is
-// always present (spec 002 #14: cost is never estimated, only recorded).
+// mapCost returns the client-provided cost, with a `total` derived from the
+// components when none was sent and their sum is finite (spec 002 #14: cost is
+// never estimated, only recorded; spec 043 #5). A sum that is not finite
+// leaves the components as sent and no `total`, which the store counts as no
+// data.
 func mapCost(a *attrs) map[string]any {
 	var out map[string]any
 	if raw, ok := a.lookup(lfObsCostDetails); ok {
@@ -721,18 +735,41 @@ func mapCost(a *attrs) map[string]any {
 	if len(out) == 0 {
 		return nil
 	}
+	// A total written as a string that is a number is the number: SQLite's
+	// `SUM` always counted `"0.25"`, and the store's counting rule still does
+	// (spec 043 #24). A string that is not one — "abc", or ".5", which Go
+	// would parse and the rule does not — stays as sent (#24 u).
+	if text, ok := out["total"].(string); ok {
+		if n, valid := jsonNumberText(text); valid {
+			out["total"] = jsonNumber(n)
+		}
+	}
 	if _, ok := out["total"]; !ok {
 		// The trace list sums one number per observation; deriving it
 		// once here beats teaching every reader the component names.
 		var total float64
 		var hasComponent bool
-		for _, v := range out {
-			if n, ok := asNumber(v); ok {
+		// In key order: with components near the largest double, whether
+		// the sum overflows depends on the order it is taken in, and the
+		// same span must store the same thing on every delivery.
+		keys := make([]string, 0, len(out))
+		for key := range out {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			if n, ok := asNumber(out[key]); ok {
 				total += n
 				hasComponent = true
 			}
 		}
-		if hasComponent {
+		// Each component is finite already, but two near the largest
+		// double sum to an infinity, which the store cannot encode — so
+		// the whole batch failed, one bad span taking every good one
+		// with it (spec 002 #13). No total is derived then: the
+		// components are kept as sent and the cost counts as no data
+		// (spec 043 #5).
+		if hasComponent && model.Finite(total) {
 			out["total"] = jsonNumber(total)
 		}
 	}

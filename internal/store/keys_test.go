@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"strings"
@@ -81,7 +82,7 @@ func TestMigration0023KeepsEveryKey(t *testing.T) {
 			t.Errorf("a key from before 0023 = %+v, want every scope, unknown, never used", key)
 		}
 	}
-	project, key, err := s.KeyBySecret("tp-sk-3")
+	project, key, err := s.KeyBySecret(context.Background(), "tp-sk-3")
 	if err != nil || project == nil || project.ID != "p2" || key.PublicKey != "tp-pk-3" {
 		t.Fatalf("a secret minted before the upgrade resolves to %+v, %+v (%v)", project, key, err)
 	}

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -61,7 +62,7 @@ func TestBootstrapDefaultOnceAndIdempotent(t *testing.T) {
 	}
 
 	// Auth lookup by secret works; wrong secret does not.
-	p, key, err := s.KeyBySecret(secret)
+	p, key, err := s.KeyBySecret(context.Background(), secret)
 	if err != nil || p == nil || p.Name != "default" {
 		t.Fatalf("KeyBySecret: p=%+v err=%v", p, err)
 	}
@@ -71,7 +72,7 @@ func TestBootstrapDefaultOnceAndIdempotent(t *testing.T) {
 		strings.Join(key.Scopes, " ") != AllScopes {
 		t.Fatalf("the first-start key = %+v, want the server's own with every scope", key)
 	}
-	if p, key, _ := s.KeyBySecret("tp-sk-wrong"); p != nil || key != nil {
+	if p, key, _ := s.KeyBySecret(context.Background(), "tp-sk-wrong"); p != nil || key != nil {
 		t.Fatalf("wrong secret resolved to %+v, %+v", p, key)
 	}
 }
@@ -99,7 +100,7 @@ func TestBootstrapDeclarativeIdempotent(t *testing.T) {
 	if len(boot.Created) != 0 {
 		t.Fatalf("re-bootstrap created %+v", boot.Created)
 	}
-	if p, key, _ := s.KeyBySecret("tp-sk-b"); p == nil || p.Name != "eval" ||
+	if p, key, _ := s.KeyBySecret(context.Background(), "tp-sk-b"); p == nil || p.Name != "eval" ||
 		key.CreatedBy.Via != MintedAtStartup {
 		t.Fatalf("declared key does not resolve as the server's own, got %+v, %+v", p, key)
 	}

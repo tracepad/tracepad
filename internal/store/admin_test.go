@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"slices"
 	"strings"
@@ -30,7 +31,7 @@ func TestShrinkingAWindowDemandsTheEchoFromInsideTheTransaction(t *testing.T) {
 	if !strings.Contains(err.Error(), `"test"`) {
 		t.Errorf("err = %v, want it to name the project to echo", err)
 	}
-	if project, _ := f.store.ProjectByID(f.project.ID); project.RetentionDays != nil {
+	if project, _ := f.store.ProjectByID(context.Background(), f.project.ID); project.RetentionDays != nil {
 		t.Errorf("retention = %v after a refused update, want it untouched", project.RetentionDays)
 	}
 
@@ -38,7 +39,7 @@ func TestShrinkingAWindowDemandsTheEchoFromInsideTheTransaction(t *testing.T) {
 	if err := f.writer.Submit(t.Context(), update); err != nil {
 		t.Fatalf("the confirmed update failed: %v", err)
 	}
-	if project, _ := f.store.ProjectByID(f.project.ID); *project.RetentionDays != 30 {
+	if project, _ := f.store.ProjectByID(context.Background(), f.project.ID); *project.RetentionDays != 30 {
 		t.Errorf("retention = %v, want 30", project.RetentionDays)
 	}
 
@@ -59,7 +60,7 @@ func TestRawWindowShrinkIsMeasuredAgainstTheEffectiveOne(t *testing.T) {
 	f := newSweepFixture(t)
 	f.setRetention(t, f.project.ID, days(90), nil)
 
-	project, err := f.store.ProjectByID(f.project.ID)
+	project, err := f.store.ProjectByID(context.Background(), f.project.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +115,7 @@ func TestCreatingADeletedProjectsNameIsRefused(t *testing.T) {
 	if err := f.writer.Submit(t.Context(), &ProjectRestore{ProjectID: f.project.ID}); err != nil {
 		t.Fatal(err)
 	}
-	project, _ := f.store.ProjectByID(f.project.ID)
+	project, _ := f.store.ProjectByID(context.Background(), f.project.ID)
 	if project.Deleted() {
 		t.Errorf("the project is still deleted after a restore")
 	}
@@ -133,7 +134,7 @@ func TestDeletingATwiceDeletedProject(t *testing.T) {
 	if err := f.writer.Submit(t.Context(), second); err == nil {
 		t.Fatal("deleting a deleted project moved its purge date")
 	}
-	project, _ := f.store.ProjectByID(f.project.ID)
+	project, _ := f.store.ProjectByID(context.Background(), f.project.ID)
 	if *project.DeletedAt != sweepNow.UnixNano() {
 		t.Errorf("deleted_at = %d, want the first deletion's %d", *project.DeletedAt, sweepNow.UnixNano())
 	}

@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tracepad/tracepad/internal/logpace"
 	"github.com/tracepad/tracepad/internal/store"
 )
 
@@ -235,6 +236,108 @@ func (s *Server) resolve(w http.ResponseWriter, r *http.Request, rt route) (*cal
 	return c, true
 }
 
+// credentialDeadline bounds each lookup the guard makes (spec 043 #1): a
+// lookup that waits for a connection or a lock is a credential the server
+// could not check, and it says so rather than holding the request. A variable
+// for the test that runs one out.
+var credentialDeadline = 5 * time.Second
+
+// guardLookup runs one of the guard's lookups under a deadline of its own
+// (spec 043 #1) and reports whether the request may go on. A lookup that
+// failed because the client hung up answers nothing and logs nothing — there
+// is no storage failure and nobody to tell, as ingest already treats a hang-up
+// (#24). Any other failure is a credential the server could not check, which is
+// never `401`: an exporter treats `401` as final and drops the batch, and its
+// operator starts checking a key that was never wrong. `503` with
+// `Retry-After` is what an exporter retries, and it is the truth; a cookie
+// behind it was never judged, so it is not cleared.
+func guardLookup[T any](w http.ResponseWriter, r *http.Request, what string, lookup func(context.Context) (T, error)) (T, bool) {
+	ctx, cancel := context.WithTimeout(r.Context(), credentialDeadline)
+	defer cancel()
+	value, err := lookup(ctx)
+	if err == nil {
+		return value, true
+	}
+	var zero T
+	if hungUp(r) {
+		return zero, false
+	}
+	// A lookup that ran out of its deadline is the same news as a condition:
+	// whatever held it holds the next one too (spec 043 #24 u). A condition
+	// the driver reported as the deadline passed keeps its own name.
+	condition, ok := store.Condition(err)
+	if !ok && ctx.Err() != nil {
+		condition = "deadline"
+	}
+	logLookupFailure(what, err, condition)
+	retryLater(w, "cannot check credentials right now; retry shortly")
+	return zero, false
+}
+
+// lookupFailed answers a handler's own lookup that failed, the way the guard
+// answers its lookups (spec 043 #24 u): a client that hung up gets nothing
+// and nothing is logged; a database condition is `503` with `Retry-After`,
+// logged once a minute per condition; anything else is `500`.
+func lookupFailed(w http.ResponseWriter, r *http.Request, what string, err error) {
+	if hungUp(r) {
+		return
+	}
+	condition, ok := store.Condition(err)
+	logLookupFailure(what, err, condition)
+	if ok {
+		retryLater(w, storageUnavailable)
+		return
+	}
+	writeError(w, http.StatusInternalServerError, "failed to read the "+what)
+}
+
+// logLookupFailure logs a lookup that failed. One that failed for a reason
+// shared by every request until it passes — a lock held past the busy
+// timeout, a full disk, a deadline — is logged once a minute per reason, as
+// the writer logs a condition (spec 043 #24); anything else every time.
+func logLookupFailure(what string, err error, condition string) {
+	if condition == "" {
+		slog.Error(what+" lookup failed", "err", err)
+		return
+	}
+	if failed, now := lookupLog.Allow(condition, time.Now()); now {
+		slog.Error(what+" lookup failed", "err", err, "condition", condition,
+			"failed_since_last_line", failed)
+	}
+}
+
+// lookupLog paces the log line of a lookup a database condition failed.
+var lookupLog = &logpace.Keyed{Every: time.Minute}
+
+// projectByID is the store's, a seam for the test that makes it fail.
+var projectByID = (*store.Store).ProjectByID
+
+// hungUp reports a request whose client is gone. A lookup that failed for that
+// reason is no storage failure and has nobody to answer: nothing is logged and
+// nothing is written, as ingest already treats a hang-up (spec 043 #24).
+func hungUp(r *http.Request) bool {
+	return r.Context().Err() != nil
+}
+
+// keyLookup is what a key lookup finds: the project and the key itself.
+type keyLookup struct {
+	project *store.Project
+	key     *store.KeyInfo
+}
+
+// membership is what the scoping lookup finds: the project, and the account's
+// role in it.
+type membership struct {
+	project *store.Project
+	role    string
+}
+
+// signIn is what a session lookup finds: the row and the account behind it.
+type signIn struct {
+	session *store.AccountSession
+	account *store.Account
+}
+
 // identify resolves the credential. An `Authorization` header wins over a
 // cookie when both are present: an explicit credential beats an ambient one,
 // which is what keeps a command-line tool's behaviour untouched next to a
@@ -252,12 +355,14 @@ func (s *Server) identify(w http.ResponseWriter, r *http.Request) (*caller, bool
 			subtle.ConstantTimeCompare([]byte(secret), []byte(s.adminToken)) == 1 {
 			return &caller{admin: true}, true
 		}
-		project, key, err := s.store.KeyBySecret(secret)
-		if err != nil {
-			slog.Error("key lookup failed", "err", err)
-			writeError(w, http.StatusUnauthorized, "unauthorized")
+		found, ok := guardLookup(w, r, "key", func(ctx context.Context) (keyLookup, error) {
+			project, key, err := s.store.KeyBySecret(ctx, secret)
+			return keyLookup{project, key}, err
+		})
+		if !ok {
 			return nil, false
 		}
+		project, key := found.project, found.key
 		if project == nil {
 			writeError(w, http.StatusUnauthorized, "unauthorized")
 			return nil, false
@@ -276,12 +381,14 @@ func (s *Server) identify(w http.ResponseWriter, r *http.Request) (*caller, bool
 		return nil, false
 	}
 	now := time.Now().UnixNano()
-	found, account, err := s.store.SessionByCookie(cookie.Value, now)
-	if err != nil {
-		slog.Error("session lookup failed", "err", err)
-		writeError(w, http.StatusUnauthorized, "unauthorized")
+	in, ok := guardLookup(w, r, "session", func(ctx context.Context) (signIn, error) {
+		found, account, err := s.store.SessionByCookie(ctx, cookie.Value, now)
+		return signIn{found, account}, err
+	})
+	if !ok {
 		return nil, false
 	}
+	found, account := in.session, in.account
 	if found == nil {
 		// Expired, signed out elsewhere, or the account is gone: the
 		// cookie is dead, so it is cleared rather than left to be sent
@@ -308,8 +415,11 @@ func (s *Server) slide(w http.ResponseWriter, r *http.Request, current *store.Ac
 	}); err != nil {
 		// A slide that could not be written is not a reason to refuse the
 		// request: the session is live either way, and the next request
-		// tries again.
-		slog.Warn("could not slide a session", "err", err)
+		// tries again. A database condition is the writer's to log, once a
+		// minute (spec 043 #24 u), and a hang-up is nobody's.
+		if _, condition := store.Condition(err); !condition && !hungUp(r) {
+			slog.Warn("could not slide a session", "err", err)
+		}
 		return
 	}
 	current.ExpiresAt = expires.UnixNano()
@@ -426,18 +536,14 @@ func (s *Server) scope(w http.ResponseWriter, r *http.Request, rt route, c *call
 		return true
 	}
 
-	project, err := s.store.ProjectByID(id)
-	if err != nil {
-		slog.Error("project lookup failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to read the project")
+	found, ok := guardLookup(w, r, "membership", func(ctx context.Context) (membership, error) {
+		project, role, err := s.store.ProjectWithRole(ctx, c.account, id)
+		return membership{project, role}, err
+	})
+	if !ok {
 		return false
 	}
-	role, err := s.store.ProjectRole(c.account, id)
-	if err != nil {
-		slog.Error("membership lookup failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to read the membership")
-		return false
-	}
+	project, role := found.project, found.role
 	if role == "" {
 		// 403 rather than 404 for a project you are not in: ids are
 		// random, so there is nothing to enumerate, and "not a member" is

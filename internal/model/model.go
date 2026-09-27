@@ -3,6 +3,13 @@
 // SQL types so that neither side has to know about the other.
 package model
 
+import "math"
+
+// Finite reports a number JSON can spell and a sum can use: neither a NaN nor
+// an infinity. One test for the mapper, the store's sums and the response
+// writer, which all refuse the same two things (spec 043 #24).
+func Finite(x float64) bool { return !math.IsNaN(x) && !math.IsInf(x, 0) }
+
 // Observation levels. DEFAULT is the value for a span that says nothing about
 // its severity; ERROR is what the trace list counts.
 const (

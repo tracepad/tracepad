@@ -4,8 +4,11 @@ import (
 	"encoding/json"
 	"math"
 	"strconv"
+	"strings"
 
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
+
+	"github.com/tracepad/tracepad/internal/model"
 )
 
 // origin is the level an attribute arrived at. The mapping chains never see
@@ -322,15 +325,28 @@ func asNumber(v any) (float64, bool) {
 	case int64:
 		return float64(value), true
 	case float64:
-		return value, isFinite(value)
+		return value, model.Finite(value)
 	case string:
 		n, err := strconv.ParseFloat(value, 64)
-		return n, err == nil && isFinite(n)
+		return n, err == nil && model.Finite(n)
 	}
 	return 0, false
 }
 
-func isFinite(f float64) bool { return !math.IsNaN(f) && !math.IsInf(f, 0) }
+// jsonNumberText reads a string the way the store's counting rule reads a
+// string total (spec 043 #24 u): a number only when its whole text, JSON
+// whitespace aside, is one strict JSON number — SQLite's `json_valid`, not
+// `strconv.ParseFloat`, which also takes `.5`, `+1`, `007` and hexadecimal.
+func jsonNumberText(text string) (float64, bool) {
+	trimmed := strings.Trim(text, " \t\n\r")
+	if trimmed == "" || trimmed[0] != '-' && (trimmed[0] < '0' || trimmed[0] > '9') {
+		return 0, false
+	}
+	if !json.Valid([]byte(trimmed)) {
+		return 0, false
+	}
+	return asNumber(trimmed)
+}
 
 // asInteger coerces an attribute value to a whole number for an INTEGER
 // column. It accepts the three shapes asNumber does and refuses anything with

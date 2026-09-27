@@ -240,3 +240,55 @@ func TestBareUsageIsReachedPastAGenAICost(t *testing.T) {
 		t.Errorf("cost_details = %v, want the cost where it belongs", observation.CostDetails)
 	}
 }
+
+// A total is derived from the components only when their sum is finite (spec
+// 043 #5), and the sum is taken in key order: near the largest double, whether
+// it overflows depends on the order, and a map's order is random — the same
+// span stored a total on one delivery and none on the next.
+func TestADerivedTotalDoesNotDependOnOrder(t *testing.T) {
+	for range 100 {
+		observation := mapping.Map(otlptest.SpanWith(
+			"langfuse.observation.cost_details", `{"a": 1e308, "b": 1e308, "c": -1e308}`,
+		)).Observations[0]
+		cost := observation.CostDetails
+		if cost["a"] != 1e308 || cost["b"] != 1e308 || cost["c"] != -1e308 {
+			t.Fatalf("cost_details = %v, want the components as sent", cost)
+		}
+		if total, ok := cost["total"]; ok {
+			t.Fatalf("total = %v, want none: a + b overflows before c is added", total)
+		}
+	}
+}
+
+// A total written as a string that is a number is stored as the number (spec
+// 043 #24): the counting rule counts it either way, and a stored number is
+// one every reader reads the same. A string that is not a number stays as
+// sent, and counts as no data. "A number" is a strict JSON number, as the
+// counting rule reads one (#24 u): a string Go would parse and JSON would
+// not — `.5`, `+1`, `007`, `0x1p-2` — is not one, or the same text would be
+// a cost when it arrives and none once stored.
+func TestANumericStringTotalIsANumber(t *testing.T) {
+	for _, tc := range []struct {
+		sent string
+		want any
+	}{
+		{`{"total": "0.25"}`, 0.25},
+		{`{"total": " 1.5 "}`, 1.5},
+		{`{"total": "abc"}`, "abc"},
+		{`{"total": "Infinity"}`, "Infinity"},
+		{`{"total": "1e-3"}`, 0.001},
+		{`{"total": "-0.5"}`, -0.5},
+		{`{"total": ".5"}`, ".5"},
+		{`{"total": "+1"}`, "+1"},
+		{`{"total": "007"}`, "007"},
+		{`{"total": "5."}`, "5."},
+		{`{"total": "0x1p-2"}`, "0x1p-2"},
+		{`{"total": "1_000"}`, "1_000"},
+		{`{"total": "\u00a01"}`, "\u00a01"},
+	} {
+		observation := mapping.Map(otlptest.SpanWith("langfuse.observation.cost_details", tc.sent)).Observations[0]
+		if got := observation.CostDetails["total"]; got != tc.want {
+			t.Errorf("%s: total = %#v, want %#v", tc.sent, got, tc.want)
+		}
+	}
+}

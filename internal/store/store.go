@@ -4,12 +4,14 @@
 package store
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"os"
+	"runtime"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -42,10 +44,17 @@ func Open(path string) (*Store, error) {
 	// new pool connection — busy_timeout must come first so every later
 	// pragma (journal_mode included) already waits out lock contention
 	// instead of failing with SQLITE_BUSY. WAL for concurrent readers with
-	// the single writer; incremental auto_vacuum so retention deletes
-	// return disk space (spec 005 #5). auto_vacuum only takes on a
-	// database with no tables yet, which is why migration 0005 carries the
-	// fallback for a file that predates the pragma.
+	// the single writer.
+	//
+	// auto_vacuum is not here, though retention needs it (spec 005 #5).
+	// The mode is a property of the file, and setting a full or
+	// incremental mode writes the header even when the mode is unchanged —
+	// so as a DSN pragma it began a write transaction on every new pool
+	// connection, which queued behind a long commit, waited out
+	// busy_timeout and failed the request that needed the connection
+	// (spec 043 #1). A fresh file gets the mode once, as it is created
+	// (`createFile`); an existing one is checked at every open
+	// (`ensureIncrementalVacuum`).
 	//
 	// _txlock=immediate makes every transaction take the write lock at
 	// BEGIN. Every transaction this binary opens is a write (migrations,
@@ -61,11 +70,22 @@ func Open(path string) (*Store, error) {
 	// read the file (spec 044 #10). FAST would leave the freed overflow
 	// pages intact. There is no setting to turn it off: a guarantee that
 	// depends on configuration is not one (spec 005 #9).
-	dsn := "file:" + path + "?_txlock=immediate&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)&_pragma=auto_vacuum(INCREMENTAL)&_pragma=synchronous(NORMAL)&_pragma=secure_delete(ON)"
+	dsn := "file:" + path + "?_txlock=immediate&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)&_pragma=synchronous(NORMAL)&_pragma=secure_delete(ON)"
+	if fresh {
+		if err := createFile(path); err != nil {
+			return nil, fmt.Errorf("create %s: %w", path, err)
+		}
+	}
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", path, err)
 	}
+	// The pool keeps what it opens (spec 043 #1). `database/sql` closes all
+	// but two idle connections by default, so every burst of concurrent
+	// requests opened new ones and paid their per-connection pragmas again;
+	// kept, a connection pays them once.
+	db.SetMaxIdleConns(idleConns())
+	db.SetConnMaxIdleTime(5 * time.Minute)
 	s := &Store{db: db, path: path, fresh: fresh}
 	// sql.Open is lazy: real open failures (corrupt file, permissions)
 	// surface from the first statement inside migrate, so the recovery
@@ -103,6 +123,29 @@ func Open(path string) (*Store, error) {
 		return nil, fmt.Errorf("open %s: %w", path, err)
 	}
 	return s, nil
+}
+
+// createFile makes a fresh database file in incremental auto-vacuum mode and
+// WAL, in that order: once WAL has written the file's header the mode can no
+// longer change without a VACUUM, which is what every fresh file used to go
+// through on its first open, when the DSN named the two the other way round.
+func createFile(path string) error {
+	db, err := sql.Open("sqlite", "file:"+path+"?_pragma=auto_vacuum(INCREMENTAL)&_pragma=journal_mode(WAL)")
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	return db.Ping()
+}
+
+// idleConns is how many connections the pool keeps between bursts: one per
+// processor, at least four (spec 043 #24). A connection kept is one whose
+// pragmas are paid; each also keeps its own page cache, so the number is the
+// work the machine can do at once rather than the most a burst ever opened —
+// until #16 bounds the pool and the reads, a burst past it still opens and
+// then closes connections, as before.
+func idleConns() int {
+	return max(4, runtime.GOMAXPROCS(0))
 }
 
 // Close closes the database.
@@ -238,12 +281,13 @@ func (s *Store) CreateProject(name string, keys KeyPair) (*Project, error) {
 // is returned like any other: its name stays reserved through the grace
 // window, so that restore always has its name to come back to (spec 005 #9).
 func (s *Store) ProjectByName(name string) (*Project, error) {
-	return s.oneProject(`SELECT `+projectColumns+` FROM projects WHERE name = ?`, name)
+	return s.oneProject(context.Background(), `SELECT `+projectColumns+` FROM projects WHERE name = ?`, name)
 }
 
-// ProjectByID returns the project or nil if absent, deleted ones included.
-func (s *Store) ProjectByID(id string) (*Project, error) {
-	return s.oneProject(`SELECT `+projectColumns+` FROM projects WHERE id = ?`, id)
+// ProjectByID returns the project or nil if absent, deleted ones included. The
+// guard reads it under a deadline of its own (spec 043 #1).
+func (s *Store) ProjectByID(ctx context.Context, id string) (*Project, error) {
+	return s.oneProject(ctx, `SELECT `+projectColumns+` FROM projects WHERE id = ?`, id)
 }
 
 // ListProjects returns every project, oldest first. Deleted ones are left out
@@ -282,8 +326,8 @@ func (s *Store) CountProjects() (int, error) {
 	return n, err
 }
 
-func (s *Store) oneProject(query string, args ...any) (*Project, error) {
-	project, err := scanProject(s.db.QueryRow(query, args...))
+func (s *Store) oneProject(ctx context.Context, query string, args ...any) (*Project, error) {
+	project, err := scanProject(s.db.QueryRowContext(ctx, query, args...))
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}

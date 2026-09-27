@@ -328,6 +328,13 @@ func upsertObservation(tx *sql.Tx, projectID string, o *model.Observation, index
 // to zero so the trace still has a place in a listing ordered by time. A
 // duration has no such fallback — measured from the epoch it would be some
 // 10^12 ms — and `latency_ms` above is NULL on those same rows (spec 012 #14).
+// The minuend is a positive minimum too: a completion start before 1970 is
+// the same fact as none, and the smallest int64 minus a positive start
+// overflowed into a real that the STRICT column refused, failing the batch
+// (spec 043 #5).
+//
+// `total_cost` sums what the counting rule counts (spec 043 #4), so no string
+// and no value near the largest double reaches the sum.
 //
 // Like every aggregate it is recomputed on each delivery, so a trace whose
 // generations arrive in several batches converges on the earliest completion
@@ -340,7 +347,7 @@ func refreshAggregates(tx *sql.Tx, projectID, traceID string) error {
 		   error_count       = (SELECT COUNT(*) FROM observations o
 		                        WHERE o.project_id = traces.project_id AND o.trace_id = traces.id
 		                          AND o.level = 'ERROR'),
-		   total_cost        = (SELECT CAST(SUM(json_extract(o.cost_details, '$.total')) AS REAL)
+		   total_cost        = (SELECT CAST(SUM(`+costExpr("o.cost_details")+`) AS REAL)
 		                        FROM observations o
 		                        WHERE o.project_id = traces.project_id AND o.trace_id = traces.id
 		                          AND o.provided_cost = 1),
@@ -354,7 +361,7 @@ func refreshAggregates(tx *sql.Tx, projectID, traceID string) error {
 		                        FROM observations o
 		                        WHERE o.project_id = traces.project_id AND o.trace_id = traces.id
 		                          AND o.start_time > 0 AND o.end_time >= o.start_time),
-		   ttft_ms           = (SELECT (MIN(o.completion_start_time)
+		   ttft_ms           = (SELECT (MIN(CASE WHEN o.completion_start_time > 0 THEN o.completion_start_time END)
 		                                - MIN(CASE WHEN o.start_time > 0 THEN o.start_time END)) / 1000000
 		                        FROM observations o
 		                        WHERE o.project_id = traces.project_id AND o.trace_id = traces.id)

@@ -345,7 +345,10 @@ func (s *Store) UserRollup(projectID, userID string, beforeHour int64) (*UserSum
 	defer rows.Close()
 
 	summary := &UserSummary{UserRow: UserRow{UserID: userID}}
-	var held bool
+	var (
+		held      bool
+		totalCost CostSum
+	)
 	for rows.Next() {
 		var (
 			hour, count, errored, sessions int64
@@ -363,11 +366,7 @@ func (s *Store) UserRollup(projectID, userID string, beforeHour int64) (*UserSum
 		summary.ErrorCount += errored
 		summary.Sessions += sessions
 		if cost.Valid {
-			total := cost.Float64
-			if summary.TotalCost != nil {
-				total += *summary.TotalCost
-			}
-			summary.TotalCost = &total
+			totalCost.Add(cost.Float64)
 		}
 		hist, err := decodeHistogram(latency)
 		if err != nil {
@@ -381,6 +380,7 @@ func (s *Store) UserRollup(projectID, userID string, beforeHour int64) (*UserSum
 	if !held {
 		return nil, nil
 	}
+	summary.TotalCost = totalCost.Pointer()
 	return summary, nil
 }
 
@@ -416,6 +416,7 @@ func (s *Store) UserTail(projectID, userID string, fromNanos int64) (*UserSummar
 		return nil, fmt.Errorf("read a user's live tail: %w", err)
 	}
 	defer rows.Close()
+	var totalCost CostSum
 	for rows.Next() {
 		var (
 			errored   int
@@ -431,11 +432,7 @@ func (s *Store) UserTail(projectID, userID string, fromNanos int64) (*UserSummar
 			summary.ErrorCount++
 		}
 		if cost.Valid {
-			total := cost.Float64
-			if summary.TotalCost != nil {
-				total += *summary.TotalCost
-			}
-			summary.TotalCost = &total
+			totalCost.Add(cost.Float64)
 		}
 		if latency.Valid {
 			summary.Latency.Add(latency.Int64)
@@ -450,6 +447,7 @@ func (s *Store) UserTail(projectID, userID string, fromNanos int64) (*UserSummar
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	summary.TotalCost = totalCost.Pointer()
 	if summary.Traces == 0 {
 		return summary, nil
 	}
@@ -629,7 +627,7 @@ func rollUserHour(tx *sql.Tx, projectID string, hour int64) ([]UserStatsRow, err
 		`SELECT t.user_id, t.environment, COALESCE(t.release, ''), o.model,
 		        o.level = 'ERROR',
 		        CASE WHEN o.provided_cost = 1
-		             THEN json_extract(o.cost_details, '$.total') END,
+		             THEN `+costExpr("o.cost_details")+` END,
 		        CASE WHEN o.start_time > 0 AND o.end_time >= o.start_time
 		             THEN (o.end_time - o.start_time) / 1000000 END
 		 FROM observations o

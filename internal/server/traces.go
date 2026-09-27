@@ -529,9 +529,10 @@ func renderNode(node *observationNode, budget payloadBudget, expand bool) object
 // instant and the subtraction is one line.
 //
 // A span that never said when it started has no wait to report, and neither
-// does one that carried no completion start.
+// does one that carried no completion start — or one before 1970, which is the
+// same fact and whose subtraction could overflow (spec 043 #5).
 func observationTTFT(row *store.ObservationRow) *int64 {
-	if row.CompletionStartTime == 0 || row.StartTime <= 0 {
+	if row.CompletionStartTime <= 0 || row.StartTime <= 0 {
 		return nil
 	}
 	ttft := (row.CompletionStartTime - row.StartTime) / int64(time.Millisecond)

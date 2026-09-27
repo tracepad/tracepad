@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -473,7 +474,7 @@ func TestSearchIndexFollowsThePurge(t *testing.T) {
 	if err := f.sweeper.Pass(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if project, _ := f.store.ProjectByID(f.project.ID); project != nil {
+	if project, _ := f.store.ProjectByID(context.Background(), f.project.ID); project != nil {
 		t.Fatalf("the project survived its grace window: %+v", project)
 	}
 	if left := countEntries(t, f.store, f.project.ID); left != 0 {
