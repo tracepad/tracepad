@@ -347,9 +347,20 @@ func (sw *Sweeper) sweepProject(ctx context.Context, project *Project, at time.T
 		return removed, err
 	}
 
+	raw, rawDrained, err := sw.sweepRawBatches(ctx, project.ID, now, purging)
+	if raw > 0 {
+		removed = true
+		sw.count(project.ID, 0, raw)
+	}
+	if err != nil {
+		return removed, err
+	}
+
 	// After the traces: a session-only score goes once no trace carries its
 	// session, and the chunks above may just have taken the last one (spec
-	// 044 #8). A purge takes the scores with the project row.
+	// 044 #8). After the raw archive too, so that this pass's newest job
+	// failing costs no older one its turn. A purge takes the scores with the
+	// project row.
 	if !purging {
 		scores, err := sw.sweepSessionScores(ctx, project.ID, now)
 		if scores > 0 {
@@ -360,15 +371,6 @@ func (sw *Sweeper) sweepProject(ctx context.Context, project *Project, at time.T
 		if err != nil {
 			return removed, err
 		}
-	}
-
-	raw, rawDrained, err := sw.sweepRawBatches(ctx, project.ID, now, purging)
-	if raw > 0 {
-		removed = true
-		sw.count(project.ID, 0, raw)
-	}
-	if err != nil {
-		return removed, err
 	}
 
 	if purging && tracesDrained && rawDrained {

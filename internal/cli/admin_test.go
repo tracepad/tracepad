@@ -553,6 +553,51 @@ func TestAnUnansweredErasureSaysItIsRunning(t *testing.T) {
 		strings.Contains(err.Error(), running) {
 		t.Errorf("a refusal became %v", err)
 	}
+
+	// A proxy in front of the server that stopped waiting too: the request
+	// reached it, and the server behind it runs the erasure on.
+	for _, status := range []int{http.StatusBadGateway, http.StatusGatewayTimeout} {
+		proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(status)
+		}))
+		if err := ask(t, proxy.URL); err == nil || !strings.Contains(err.Error(), running) {
+			t.Errorf("a proxy's %d after the request was sent: %v", status, err)
+		}
+		proxy.Close()
+	}
+	// The server's own 503 comes before anything is erased.
+	unavailable := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error":"writes are not available"}`))
+	}))
+	defer unavailable.Close()
+	if err := ask(t, unavailable.URL); !errors.As(err, &refusal) || strings.Contains(err.Error(), running) {
+		t.Errorf("the server's 503 became %v", err)
+	}
+}
+
+// A server that predates the raw scrub answers no raw counts, and the command
+// says so rather than printing zeros, which would read as an archive checked
+// and found clean.
+func TestAnErasureAnswerWithoutRawCountsSaysSo(t *testing.T) {
+	old := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("confirm") == "" {
+			_, _ = w.Write([]byte(`{"dry_run":true,"would_delete":{"traces":1},"confirm":"u1"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"dry_run":false,"deleted":{"traces":1,"observations":2},"user_id":"u1"}`))
+	}))
+	defer old.Close()
+	h := newAdminCLI(t)
+	out := h.run(t.Context(), true, "users", "rm-data", "--url", old.URL, "--project", "p", "--yes", "u1")
+	if out.code != ExitOK {
+		t.Fatalf("users rm-data exited %d: %s", out.code, out.stderr)
+	}
+	if strings.Contains(out.stdout, "removed 0 spans") ||
+		!strings.Contains(out.stdout, "the server reported nothing about its raw archive") {
+		t.Errorf("stdout = %q", out.stdout)
+	}
 }
 
 // The command the unanswered erasure suggests asks the same server about the
@@ -574,5 +619,9 @@ func TestTheRetryHintRepeatsTheProjectAndQuotes(t *testing.T) {
 	}
 	if bare := previewAgain(flag.NewFlagSet("x", flag.ContinueOnError), "user-4711"); bare != "tracepad users rm-data user-4711" {
 		t.Errorf("hint without flags = %s", bare)
+	}
+	// An id that starts with a dash would be read as a flag.
+	if dashed := previewAgain(flag.NewFlagSet("x", flag.ContinueOnError), "-alice"); dashed != "tracepad users rm-data -- -alice" {
+		t.Errorf("hint for a dashed id = %s", dashed)
 	}
 }

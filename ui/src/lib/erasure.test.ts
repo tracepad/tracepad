@@ -21,16 +21,25 @@ describe('the erasure sentence', () => {
 });
 
 describe('an erasure the screen stopped waiting for', () => {
+	it('is what a proxy that stopped waiting answers too', () => {
+		for (const status of [502, 504]) {
+			expect(stillRunning(new ApiError(status, 'Gateway Timeout'), 'u-1')).toMatch(
+				new RegExp(`a proxy in front of the server stopped waiting \\(${status}\\)`)
+			);
+		}
+	});
+
 	it('is still running on the server, not a failure', () => {
 		const timedOut = new ApiError(0, 'the server did not answer in time', { timed_out: true });
 		expect(stillRunning(timedOut, 'u-1')).toMatch(
-			/No answer within 30 seconds about erasing the data of u-1/
+			/No answer about erasing the data of u-1: this screen stopped waiting after 30 seconds/
 		);
 	});
 
 	it('leaves every other failure a failure', () => {
 		expect(stillRunning(new ApiError(0, 'cannot reach the server'), 'u')).toBeNull();
 		expect(stillRunning(new ApiError(409, 'raw batch 3 was rewritten'), 'u')).toBeNull();
+		expect(stillRunning(new ApiError(503, 'writes are not available'), 'u')).toBeNull();
 		expect(stillRunning(new Error('boom'), 'u')).toBeNull();
 	});
 });

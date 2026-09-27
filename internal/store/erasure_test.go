@@ -590,6 +590,43 @@ func TestATraceThatBecomesTheUsersMidErasure(t *testing.T) {
 	}
 }
 
+// A pass whose session-score sweep fails still sweeps the raw archive: the
+// newer job must not cost the privacy-sensitive store its turn.
+func TestAFailedSessionScoreSweepStillSweepsTheRawArchive(t *testing.T) {
+	f := newErasureFixture(t)
+	f.ingestOTLP(t, export([]*tracepb.Span{otlpSpan(t, 1, 1, "u", "s", "x", nil)}), false, daysAgo(40))
+	if _, err := f.store.db.Exec(`UPDATE projects SET retention_days = 30 WHERE id = ?`, f.project.ID); err != nil {
+		t.Fatal(err)
+	}
+	broken := errors.New("the disk is full")
+	writer := &failingJobs{jobSubmitter: f.writer, fails: func(job WriteJob) bool {
+		_, ok := job.(*sessionScoreSweep)
+		return ok
+	}, err: broken}
+	sweeper := f.store.NewSweeper(writer, SweepOptions{Now: func() time.Time { return sweepNow }})
+	if err := sweeper.Pass(t.Context()); !errors.Is(err, broken) {
+		t.Fatalf("the pass answered %v, want the session-score sweep's failure", err)
+	}
+	if n := f.count(t, `SELECT COUNT(*) FROM raw_batches`); n != 0 {
+		t.Errorf("%d raw batches past the window are left after the pass", n)
+	}
+}
+
+// failingJobs passes every job on but the ones fails picks, which it answers
+// with err.
+type failingJobs struct {
+	jobSubmitter
+	fails func(WriteJob) bool
+	err   error
+}
+
+func (w *failingJobs) Submit(ctx context.Context, job WriteJob) error {
+	if w.fails(job) {
+		return w.err
+	}
+	return w.jobSubmitter.Submit(ctx, job)
+}
+
 // failingChunk passes every job on but the at-th chunk of an erasure's parsed
 // phase, which it answers with err.
 type failingChunk struct {

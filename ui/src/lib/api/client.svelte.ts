@@ -206,7 +206,7 @@ const VERSION_HEADER = 'X-Tracepad-Version';
  * budget a slow query spends; it is the line past which "still waiting" is
  * "no answer".
  */
-const REQUEST_TIMEOUT_MS = 30_000;
+export const REQUEST_TIMEOUT_MS = 30_000;
 
 type Query = Record<string, string | string[] | undefined | null>;
 

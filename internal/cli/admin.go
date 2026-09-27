@@ -734,10 +734,17 @@ func (r *run) usersRemoveData(ctx context.Context, rest []string) error {
 	}
 	t.flush()
 	// The user's spans in the raw archive (spec 044 #2): every batch that
-	// held one was rewritten without it, or deleted.
-	rewritten, deleted := result.Deleted["raw_batches_rewritten"], result.Deleted["raw_batches_deleted"]
-	fmt.Fprintf(r.opt.Stdout, "\nremoved %d spans from %d raw batches, %d deleted\n",
-		result.Deleted["raw_spans"], rewritten+deleted, deleted)
+	// held one was rewritten without it, or deleted. A server that does not
+	// report it is one that does not erase there, and zeros would say it
+	// looked and found nothing.
+	if spans, reported := result.Deleted["raw_spans"]; reported {
+		rewritten, deleted := result.Deleted["raw_batches_rewritten"], result.Deleted["raw_batches_deleted"]
+		fmt.Fprintf(r.opt.Stdout, "\nremoved %d spans from %d raw batches, %d deleted\n",
+			spans, rewritten+deleted, deleted)
+	} else {
+		fmt.Fprintf(r.opt.Stdout, "\nthe server reported nothing about its raw archive: "+
+			"a server that predates erasing it keeps the user's spans there until the batches expire\n")
+	}
 	// What the rows left in the file is overwritten by the next pass, and
 	// the one copy of the database an erasure does not rewrite goes on its
 	// own date (spec 044 #11, #12).
@@ -756,21 +763,29 @@ func (r *run) usersRemoveData(ctx context.Context, rest []string) error {
 // The server runs an erasure to completion whether or not anybody waits for
 // it (spec 035 #14), and a long one outlasts this client's wait: once the
 // request is written, no answer is news about the wait, not a failure of the
-// erasure. Before that — a refused connection, a name that does not resolve, a
-// handshake that fails, an interrupt — nothing reached the server, and the
-// error is passed on as it is; so is a refusal the server did send.
+// erasure; so is a proxy in front of the server answering 502 or 504 because
+// it stopped waiting too. Before that — a refused connection, a name that does
+// not resolve, a handshake that fails, an interrupt — nothing reached the
+// server, and the error is passed on as it is; so is a refusal the server did
+// send, a 503 included: the server answers that one before erasing anything.
 func confirmErasure(ctx context.Context, again string,
 	send func(context.Context) (json.RawMessage, error)) (json.RawMessage, error) {
 	var written atomic.Bool
 	body, err := send(httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
+		// Per attempt: the transport retries a request whose reused
+		// connection turned out closed, and only the last attempt says
+		// whether the server has it.
+		GetConn: func(string) { written.Store(false) },
 		WroteRequest: func(info httptrace.WroteRequestInfo) {
-			if info.Err == nil {
-				written.Store(true)
-			}
+			written.Store(info.Err == nil)
 		},
 	}))
+	if err == nil || !written.Load() {
+		return body, err
+	}
 	var refusal *client.Error
-	if err == nil || !written.Load() || errors.As(err, &refusal) {
+	if errors.As(err, &refusal) && refusal.Status != http.StatusBadGateway &&
+		refusal.Status != http.StatusGatewayTimeout {
 		return body, err
 	}
 	return nil, fmt.Errorf("no answer from the server (%w); the erasure it received runs to the end without one — "+
@@ -787,6 +802,10 @@ func previewAgain(fs *flag.FlagSet, user string) string {
 			words = append(words, "--"+f.Name, shellWord(f.Value.String()))
 		}
 	})
+	if strings.HasPrefix(user, "-") {
+		// Read as a flag otherwise; the operator's own command needed it.
+		words = append(words, "--")
+	}
 	return strings.Join(append(words, shellWord(user)), " ")
 }
 

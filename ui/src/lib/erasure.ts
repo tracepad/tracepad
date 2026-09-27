@@ -1,4 +1,4 @@
-import { ApiError } from '$lib/api/client.svelte';
+import { ApiError, REQUEST_TIMEOUT_MS } from '$lib/api/client.svelte';
 
 // What a confirmed user-data erasure says it did (spec 044): one sentence, the
 // same on Settings and on the user page, built from the server's own counts.
@@ -25,16 +25,26 @@ export function erased(user: string, deleted: Record<string, number>): string {
  * What to say when the screen stopped waiting for a confirmed erasure: the
  * server runs one it received to completion whether or not anybody waits for
  * the answer (spec 035 #14), so the clock running out is news about this
- * screen, not a failure of the erasure. A browser cannot tell whether the
+ * screen, not a failure of the erasure. So is a proxy in front of the server
+ * answering 502 or 504 because it stopped waiting too; a 503 is the server's
+ * own, sent before it erases anything. A browser cannot tell whether the
  * request reached the server, so the sentence does not claim that it did.
  * `null` for any other failure, which is shown as one.
  */
 export function stillRunning(cause: unknown, user: string): string | null {
-	if (!(cause instanceof ApiError) || cause.details.timed_out !== true) return null;
+	if (!(cause instanceof ApiError)) return null;
+	let why: string;
+	if (cause.details.timed_out === true) {
+		why = `this screen stopped waiting after ${REQUEST_TIMEOUT_MS / 1000} seconds`;
+	} else if (cause.status === 502 || cause.status === 504) {
+		why = `a proxy in front of the server stopped waiting (${cause.status})`;
+	} else {
+		return null;
+	}
 	return (
-		`No answer within 30 seconds about erasing the data of ${user}. An erasure the server ` +
-		'received runs to the end even when this screen stops waiting: look the user up again ' +
-		'in a few minutes to see what is left.'
+		`No answer about erasing the data of ${user}: ${why}. An erasure the server received ` +
+		'runs to the end without anybody waiting: look the user up again in a few minutes to ' +
+		'see what is left.'
 	);
 }
 
