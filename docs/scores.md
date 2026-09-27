@@ -9,20 +9,26 @@ with `curl`.
 
 ## Endpoints
 
-| Method | Path | Purpose |
-|---|---|---|
-| `POST` | `/api/v1/scores` | Write one score or an array of them |
-| `GET` | `/api/v1/scores` | List scores, filtered and paginated |
-| `GET` | `/api/v1/scores/{id}` | Fetch one score |
-| `DELETE` | `/api/v1/scores/{id}` | Retract one score — see [Deleting a score](#deleting-a-score) |
-| `PUT` | `/api/v1/score-configs/{name}` | Pin what a score name means — see [Score configs](#score-configs) |
-| `GET` | `/api/v1/score-configs` | List the configs |
-| `GET` | `/api/v1/score-configs/{name}` | One config |
-| `DELETE` | `/api/v1/score-configs/{name}` | Remove a config |
+| Method | Path | Purpose | A key needs |
+|---|---|---|---|
+| `POST` | `/api/v1/scores` | Write one score or an array of them | `ingest` |
+| `GET` | `/api/v1/scores` | List scores, filtered and paginated | `read` |
+| `GET` | `/api/v1/scores/{id}` | Fetch one score | `read` |
+| `DELETE` | `/api/v1/scores/{id}` | Retract one score — see [Deleting a score](#deleting-a-score) | `write` |
+| `PUT` | `/api/v1/score-configs/{name}` | Pin what a score name means — see [Score configs](#score-configs) | `write` |
+| `GET` | `/api/v1/score-configs` | List the configs | `read` |
+| `GET` | `/api/v1/score-configs/{name}` | One config | `read` |
+| `DELETE` | `/api/v1/score-configs/{name}` | Remove a config | `write` |
 
 Authentication is the same as for ingest — `Authorization: Bearer <secret
 key>` or `Basic base64(<public key>:<secret key>)`. See
 [ingest.md](ingest.md#authentication).
+
+The last column is the [scope](api.md#scopes) a key must hold. Writing a score
+is `ingest`, not `write`: an end user's thumbs-up is written by the
+application, with the key it sends spans with. An online judge that reads
+traces and scores them holds `ingest` and `read`; retracting a score and
+changing a config take `write`.
 
 No `Content-Type` is required: `curl -d '{…}'` works as it is.
 
@@ -307,6 +313,7 @@ the weekly review" is a filter over the scores you already have.
 | `200` | The read succeeded. |
 | `400` | Validation: a bad field, an unknown field, an unknown parameter, an invalid cursor, a score its name's config refuses. The message says which. |
 | `401` | Unknown credentials. |
+| `403` | A key without the scope the route needs; the body and `WWW-Authenticate` name it ([api.md](api.md#scopes)). |
 | `404` | No score — or no config — with that id or name in this project. |
 | `413` | The body is over `TRACEPAD_MAX_BODY_BYTES`. |
 | `429` | The write queue is saturated; retry after the `Retry-After` delay. |

@@ -108,6 +108,25 @@ Two consequences worth knowing:
 
 A second `init` is a no-op with a warning.
 
+### Which key
+
+The package sends one key for everything it does, so the key's
+[scopes](api.md#scopes) decide which calls go through:
+
+| Calls | The key needs |
+|---|---|
+| The exporter, [`score`](#scores), [`prompt`](#prompts) | `ingest` |
+| [`deleteTrace`, `deleteTraces`](#deleting-traces) | `write` |
+| The [eval harness](#evals): datasets, runs and their scores | `ingest`, `read`, `write` |
+
+A production application needs nothing but `ingest`, so the key to set as its
+`TRACEPAD_API_KEY` is one minted with that scope alone
+([admin.md](admin.md#keys)); the harness runs under a key of its own that holds
+all three. A call the key does not cover is the server's `403`, message
+included — `this key's scopes are ingest; DELETE /api/v1/traces needs write` —
+a rejection with `TracepadHTTPError` from the calls that reject, and a warning
+and a dropped batch from the exporter and the score queue, as a `401` is.
+
 ## Steps
 
 ```ts
@@ -453,7 +472,8 @@ kinds, and a trace cannot be cut out of one — and the preview says so in its
 The package is also the harness of [datasets.md](datasets.md): a dataset
 object, a run that opens and closes itself, and a block inside which every
 span carries the run and the case it answered. It runs nothing — the cases
-are your program.
+are your program. Its key holds `ingest`, `read` and `write`
+([Which key](#which-key)).
 
 ```ts
 const golden = tracepad.dataset('support-golden');

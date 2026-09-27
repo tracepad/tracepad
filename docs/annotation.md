@@ -25,24 +25,27 @@ has a CLI command and a screen.
 
 ## Endpoints
 
-| Method | Path | Purpose |
-|---|---|---|
-| `GET` | `/api/v1/queues` | Every queue with its progress |
-| `PUT` | `/api/v1/queues/{name}` | Create a queue or replace it whole |
-| `GET` | `/api/v1/queues/{name}` | One queue: its score names and counts |
-| `DELETE` | `/api/v1/queues/{name}` | Delete it with its items; dry run until `?confirm=` |
-| `POST` | `/api/v1/queues/{name}/items` | Add one target or an array of them |
-| `POST` | `/api/v1/queues/{name}/items/from-traces` | Add every trace a listing filter matches, capped |
-| `GET` | `/api/v1/queues/{name}/items` | The items oldest first, filtered and paginated |
-| `GET` | `/api/v1/queues/{name}/next` | The next item to annotate, claimed |
-| `GET` | `/api/v1/queues/{name}/items/{id}` | One item |
-| `POST` | `/api/v1/queues/{name}/items/{id}/complete` | Mark it done |
-| `POST` | `/api/v1/queues/{name}/items/{id}/skip` | Mark it skipped, with the reason |
-| `POST` | `/api/v1/queues/{name}/items/{id}/reopen` | Back to pending — or just release the claim |
-| `DELETE` | `/api/v1/queues/{name}/items/{id}` | Take one item out of the list |
+| Method | Path | Purpose | A key needs |
+|---|---|---|---|
+| `GET` | `/api/v1/queues` | Every queue with its progress | `read` |
+| `PUT` | `/api/v1/queues/{name}` | Create a queue or replace it whole | `write` |
+| `GET` | `/api/v1/queues/{name}` | One queue: its score names and counts | `read` |
+| `DELETE` | `/api/v1/queues/{name}` | Delete it with its items; dry run until `?confirm=` | `write` |
+| `POST` | `/api/v1/queues/{name}/items` | Add one target or an array of them | `write` |
+| `POST` | `/api/v1/queues/{name}/items/from-traces` | Add every trace a listing filter matches, capped | `write` |
+| `GET` | `/api/v1/queues/{name}/items` | The items oldest first, filtered and paginated | `read` |
+| `GET` | `/api/v1/queues/{name}/next` | The next item to annotate, claimed | `write` |
+| `GET` | `/api/v1/queues/{name}/items/{id}` | One item | `read` |
+| `POST` | `/api/v1/queues/{name}/items/{id}/complete` | Mark it done | `write` |
+| `POST` | `/api/v1/queues/{name}/items/{id}/skip` | Mark it skipped, with the reason | `write` |
+| `POST` | `/api/v1/queues/{name}/items/{id}/reopen` | Back to pending — or just release the claim | `write` |
+| `DELETE` | `/api/v1/queues/{name}/items/{id}` | Take one item out of the list | `write` |
 
 Authentication is the same as everywhere: `Authorization: Bearer <secret key>`
-(see [ingest.md](ingest.md#authentication)).
+(see [ingest.md](ingest.md#authentication)). The last column is the
+[scope](api.md#scopes) a key must hold: `next` is `write`, because it claims
+the item it hands out, and the verdicts themselves are scores, which a key
+writes with `ingest`.
 
 ## Declaring a queue
 

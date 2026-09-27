@@ -79,6 +79,25 @@ Two consequences worth knowing:
 
 A second `init` is a no-op with a warning.
 
+### Which key
+
+The package sends one key for everything it does, so the key's
+[scopes](api.md#scopes) decide which calls go through:
+
+| Calls | The key needs |
+|---|---|
+| The exporter, [`score`](#scores), [`prompt`](#prompts) | `ingest` |
+| [`delete_trace`, `delete_traces`](#deleting-traces) | `write` |
+| The [eval harness](#evals): datasets, runs and their scores | `ingest`, `read`, `write` |
+
+A production application needs nothing but `ingest`, so the key to set as its
+`TRACEPAD_API_KEY` is one minted with that scope alone
+([admin.md](admin.md#keys)); the harness runs under a key of its own that holds
+all three. A call the key does not cover is the server's `403`, message
+included — `this key's scopes are ingest; DELETE /api/v1/traces needs write` —
+raised as `TracepadHTTPError` by the calls that raise, and logged and dropped
+by the exporter and the score queue, as a `401` is.
+
 ## Steps
 
 ```python
@@ -339,8 +358,9 @@ a brace that pairs with nothing is left as it is. A message whose content is
 not a string — a list of content parts — is passed on as it is, with no
 substitution inside it. It is not `str.format`: `{q:>12}`, `{user.email}`,
 `{items[0]}` and `{q!r}` are not evaluated — they are placeholders no
-variable names, so they raise. The stored text is written by whoever holds
-the project key, and it must not run in your process. The Node package reads
+variable names, so they raise. The stored text is written by whoever may
+change prompts — an editor, or a key with `write` — and it must not run in
+your process. The Node package reads
 the same text the same way, so a prompt compiled with string variables is one
 prompt in both. Nothing else: a template language is a product, and what the
 store stores is plain text.
@@ -405,7 +425,8 @@ kinds, and a trace cannot be cut out of one — and the preview says so in its
 The package is also the harness of [datasets.md](datasets.md): a dataset
 object, a run that opens and closes itself, and a block inside which every
 span carries the run and the case it answered. It runs nothing — the cases are
-your program.
+your program. Its key holds `ingest`, `read` and `write`
+([Which key](#which-key)).
 
 ```python
 golden = tracepad.dataset("support-golden")

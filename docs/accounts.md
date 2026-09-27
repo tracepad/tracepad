@@ -2,12 +2,13 @@
 
 People sign in; programs use keys.
 
-A project key is a credential an application holds: it is in your SDK's config
-and in your CI, it carries exactly one project, and it can do nearly everything
-to that project. That is the right shape for an exporter and the wrong one for
-a person. A freelancer who should see one project would get the credential that
-also erases its data, and taking it back would mean rotating the key under the
-running application.
+A project key is a credential a program holds: it is in your SDK's config and
+in your CI, it carries exactly one project, and its [scopes](api.md#scopes) —
+`ingest`, `read`, `write` — say what it may do there. That is the right shape
+for an exporter and the wrong one for a person. A freelancer who should see
+one project and score its traces would be handed a secret that reads and
+writes, says nothing about who holds it, and is taken back only by revoking
+it.
 
 So the server has **accounts**: an email, a password, and a role in each
 project. Keys stay what they are — [ingest](ingest.md), the
@@ -200,20 +201,30 @@ none, and neither the CLI nor MCP reads or writes it.
 ## Who may do what
 
 Every route in the API carries one of these, and one check reads it. A test
-walks the whole table as each of the six kinds of caller, so this is the
-contract rather than a description of it.
+walks the whole table as each of nine kinds of caller — no credential, a key
+with all three scopes, a key with each one alone, the admin token, and a
+viewer's, an editor's and an owner's session — so this is the contract rather
+than a description of it.
 
 | Policy | Who gets through |
 |---|---|
 | `public` | Anyone: `GET /api/v1`, `openapi.json`, `/health`, and the three ways in. |
-| `ingest` | A project key, and nothing else. |
-| `member` | A project key, or a session whose account is an owner or has any role in the named project. Every read but the raw archive, plus writing and retracting scores and working a queue. |
-| `editor` | A project key, or an owner or `editor` session. Prompts, datasets, runs, score configs, queues, retention, keys, user-data erasure, and reading the raw archive (`/api/v1/raw`) — the bulk way out of a project, which a viewer does not take — but no project key lists, mints or revokes keys: those three routes answer a key `403`, and an owner or editor session or the admin token manages them. |
+| `ingest` | A project key with the `ingest` scope, and nothing else. |
+| `member` | A project key with the route's scope, or a session whose account is an owner or has any role in the named project. Every read but the raw archive, plus writing and retracting scores and working a queue. |
+| `editor` | A project key with the route's scope, or an owner or `editor` session. Prompts, datasets, runs, score configs, queues, retention, keys, user-data erasure, and reading the raw archive (`/api/v1/raw`) — the bulk way out of a project, which a viewer does not take — but no project key lists, mints or revokes keys: those three routes answer a key `403`, and an owner or editor session or the admin token manages them. |
 | `owner` | `TRACEPAD_ADMIN_TOKEN`, or an owner session. Creating, deleting, restoring and renaming a project; listing every project; everything under `/api/v1/accounts`. |
 | `session` | Only a cookie. A key or the admin token is told `not a session`, which is what it is. |
 
-`GET /api/v1` lists every endpoint with its policy word, so an agent can see
-what a route would need before it calls it.
+A key passes the policy and then its **scope**: every route also names the one
+a key must hold — `ingest`, `read` or `write`, or `any`, or `none` — and a key
+without it is answered `403` with `WWW-Authenticate: Bearer
+error="insufficient_scope"` ([api.md](api.md#scopes)). A session never meets a
+scope: its role decides, as above. The two do not line up one to one, and are
+not meant to: a viewer annotates, so a viewer's session writes scores and
+claims queue items, which for a key are `ingest` and `write`.
+
+`GET /api/v1` lists every endpoint with its policy word and its scope, so an
+agent can see what a route would need before it calls it.
 
 The admin token keeps exactly the reach [administration](admin.md) gave it,
 plus the account routes. It still reaches no data-plane route: the reason it

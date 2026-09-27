@@ -17,6 +17,8 @@ from typing import Any
 
 BINARY = os.environ.get("TRACEPAD_BINARY", "")
 KEY = "tp-sk-e2e-0000000000000000000000000000"
+# Minting a key is a person's act or the admin token's, never a key's (spec 045 #4).
+ADMIN_TOKEN = "tp-admin-e2e-00000000000000000000000000"
 
 
 class Store:
@@ -25,12 +27,12 @@ class Store:
     def __init__(self, host: str) -> None:
         self.host = host
 
-    def call(self, method: str, path: str, body: Any = None) -> Any:
+    def call(self, method: str, path: str, body: Any = None, token: str = KEY) -> Any:
         request = urllib.request.Request(
             self.host + path,
             data=None if body is None else json.dumps(body).encode(),
             method=method,
-            headers={"Authorization": f"Bearer {KEY}"},
+            headers={"Authorization": f"Bearer {token}"},
         )
         with urllib.request.urlopen(request, timeout=10) as answer:
             raw = answer.read()
@@ -47,6 +49,7 @@ def serve(data_dir: str) -> tuple[subprocess.Popen[bytes], Store]:
             "TRACEPAD_DATA_DIR": data_dir,
             "TRACEPAD_LISTEN": f"127.0.0.1:{port}",
             "TRACEPAD_PROJECTS": f"e2e:tp-pk-e2e:{KEY}",
+            "TRACEPAD_ADMIN_TOKEN": ADMIN_TOKEN,
         },
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -60,6 +63,14 @@ def serve(data_dir: str) -> tuple[subprocess.Popen[bytes], Store]:
         process.wait(timeout=10)
         raise
     return process, running
+
+
+def mint_key(store: Store, *scopes: str) -> str:
+    """The secret of a new key of the project carrying only `scopes`."""
+    (project,) = store.call("GET", "/api/v1/projects")["projects"]
+    minted = store.call("POST", f"/api/v1/projects/{project['id']}/keys",
+                        {"scopes": list(scopes)}, token=ADMIN_TOKEN)
+    return str(minted["secret_key"])
 
 
 def free_port() -> int:

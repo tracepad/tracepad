@@ -38,13 +38,17 @@ const KEYS = [
 ];
 
 const listKeys = vi.fn(async () => ({ keys: KEYS }));
-const createKey = vi.fn(async () => ({ public_key: 'tp-pk-new', secret_key: 'tp-sk-new' }));
+const createKey = vi.fn(async (_id: string, scopes: string[]) => ({
+	public_key: 'tp-pk-new',
+	secret_key: 'tp-sk-new',
+	scopes
+}));
 
 vi.mock('$lib/api/client.svelte', () => ({
 	ApiError: class extends Error {},
 	api: {
 		listKeys: (...args: unknown[]) => listKeys(...(args as [])),
-		createKey: (...args: unknown[]) => createKey(...(args as [])),
+		createKey: (...args: unknown[]) => createKey(...(args as [string, string[]])),
 		revokeKey: vi.fn()
 	}
 }));
@@ -79,14 +83,48 @@ describe('the keys card', () => {
 		expect(within(gone).getByText(/can no longer manage keys here/)).toBeTruthy();
 	});
 
-	it('mints a key under the name typed, trimmed', async () => {
+	it('mints an ingest key under the name typed, trimmed, unless told otherwise', async () => {
 		render(KeysCard, { current: PROJECT } as never);
 		const person = userEvent.setup({ pointerEventsCheck: 0 });
 
 		await person.type(await screen.findByLabelText('Which program will hold the new key'), '  billing worker ');
+		expect(screen.getByRole('checkbox', { name: /^ingest/ })).toBeChecked();
+		expect(screen.getByRole('checkbox', { name: /^read/ })).not.toBeChecked();
+		expect(screen.getByRole('checkbox', { name: /^write/ })).not.toBeChecked();
 		await person.click(screen.getByRole('button', { name: 'Mint a key pair' }));
 
-		expect(createKey).toHaveBeenCalledWith('p1', 'billing worker');
+		expect(createKey).toHaveBeenCalledWith('p1', ['ingest'], 'billing worker');
+		// The dialog that follows fits the key: an exporter's lines, since it ingests.
+		expect(await screen.findByText(/OTEL_EXPORTER_OTLP_HEADERS/)).toBeTruthy();
+	});
+
+	it('sends the scopes that are checked, in the server order, and none is not a key', async () => {
+		render(KeysCard, { current: PROJECT } as never);
+		const person = userEvent.setup({ pointerEventsCheck: 0 });
+		const mint = await screen.findByRole('button', { name: 'Mint a key pair' });
+
+		await person.click(screen.getByRole('checkbox', { name: /^ingest/ }));
+		expect(mint).toBeDisabled();
+
+		await person.click(screen.getByRole('checkbox', { name: /^write/ }));
+		await person.click(screen.getByRole('checkbox', { name: /^read/ }));
+		await person.click(mint);
+
+		expect(createKey).toHaveBeenCalledWith('p1', ['read', 'write'], '');
+		// A key that cannot ingest is not offered an exporter's headers.
+		expect(await screen.findByText(/TRACEPAD_API_KEY=tp-sk-new/)).toBeTruthy();
+		expect(screen.queryByText(/OTEL_EXPORTER_OTLP/)).toBeNull();
+	});
+
+	it('says what each scope lets a key do', async () => {
+		render(KeysCard, { current: PROJECT } as never);
+		const line = (scope: RegExp) =>
+			screen.getByRole('checkbox', { name: scope }).closest('label')?.textContent;
+
+		await screen.findByRole('checkbox', { name: /^read/ });
+		expect(line(/^ingest/)).toContain('send spans');
+		expect(line(/^read/)).toContain("every read of the project's data, and nothing that changes it");
+		expect(line(/^write/)).toContain('deleting traces');
 	});
 
 	it('counts a name the way the server does, in characters', async () => {
