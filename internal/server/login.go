@@ -210,7 +210,12 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 // setupIsOff is the answer to a setup request on a server started with
 // TRACEPAD_SETUP=off, and says what to do instead.
 const setupIsOff = "setup is turned off on this server (TRACEPAD_SETUP=off); " +
-	"create the first owner with the admin token: tracepad accounts create <email> --owner"
+	"create the first owner with the admin token: " + createOwnerCommand
+
+// createOwnerCommand is how the first owner is made without the setup link,
+// spelled so that it runs as printed: the CLI reads its credential from
+// TRACEPAD_API_KEY, and the admin token is that credential here.
+const createOwnerCommand = "TRACEPAD_API_KEY=$TRACEPAD_ADMIN_TOKEN tracepad accounts create <email> --owner"
 
 // handleLogin is an email and a password.
 //
@@ -261,18 +266,26 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	// was never compared, so the attempt is given back — as it is on any
 	// way out that neither failed nor succeeded.
 	defer attempt.cancel()
-	var (
-		account  *store.Account
-		verified bool
-		err      error
-	)
-	if !s.underPasswordGate(w, r, func(slot *store.PasswordSlot) {
-		account, verified, err = s.checkLogin(r, slot, email, request.Password)
-	}) {
-		return
-	}
+	// The account is read before a place is taken: a place is for bcrypt,
+	// and a read that waits on a busy database would hold one idle. Every
+	// email is read, known or not, so the order says nothing either.
+	account, err := s.store.AccountByEmail(r.Context(), email)
 	if err != nil {
 		readFailed(w, r, "failed to read the account", err)
+		return
+	}
+	var verified bool
+	if !s.underPasswordGate(w, r, func(slot *store.PasswordSlot) {
+		// Compared whatever the lookup found, because skipping the
+		// comparison is itself an answer: a login that returns in a
+		// millisecond for an unknown address and in a quarter of a
+		// second for a real one has told you which it was (Decision 8).
+		// `Verify` is nil-safe and spends the comparison against a decoy
+		// when there is no stored hash, so every one of the four failures
+		// costs the same — and costs it inside the password gate, like a
+		// real one (spec 028 #31).
+		verified = account.Verify(slot, request.Password)
+	}) {
 		return
 	}
 	if account == nil || account.Disabled || !verified {
@@ -286,22 +299,6 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, object{}.put("account", accountResponse(account)))
-}
-
-// checkLogin looks the account up and compares the password.
-func (s *Server) checkLogin(r *http.Request, slot *store.PasswordSlot, email, password string) (*store.Account, bool, error) {
-	account, err := s.store.AccountByEmail(r.Context(), email)
-	if err != nil {
-		return nil, false, err
-	}
-	// Compared whatever the lookup found, because skipping the comparison
-	// is itself an answer: a login that returns in a millisecond for an
-	// unknown address and in a quarter of a second for a real one has told
-	// you which it was (Decision 8). `Verify` is nil-safe and spends the
-	// comparison against a decoy when there is no stored hash, so every one
-	// of the four failures costs the same — and costs it inside the
-	// password gate, like a real one (spec 028 #31).
-	return account, account.Verify(slot, password), nil
 }
 
 // wrongCredentials is the one sentence every login failure gets.
@@ -521,6 +518,13 @@ func (s *Server) handlePatchMe(w http.ResponseWriter, r *http.Request) {
 	if err := s.writer.Submit(r.Context(), change); err != nil {
 		if errors.Is(err, store.ErrWrongPassword) {
 			writeError(w, http.StatusForbidden, store.ErrWrongPassword.Error())
+			return
+		}
+		// The password typed was right when it was checked; another
+		// change landed before this one could be written. Saying "wrong"
+		// would send the person to retype a password that was correct.
+		if errors.Is(err, store.ErrPasswordChanged) {
+			writeError(w, http.StatusConflict, store.ErrPasswordChanged.Error())
 			return
 		}
 		submitFailure(w, err, apiWrite)

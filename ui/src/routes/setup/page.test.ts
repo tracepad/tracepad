@@ -41,7 +41,9 @@ describe('the setup screen', () => {
 		render(Setup);
 
 		const text = await screen.findByText(/Setup is turned off on this server/);
-		expect(text.textContent).toContain('tracepad accounts create');
+		// A command that runs as printed: the CLI's credential is
+		// TRACEPAD_API_KEY, and here that is the admin token.
+		expect(text.textContent).toContain('TRACEPAD_API_KEY=$TRACEPAD_ADMIN_TOKEN tracepad accounts create');
 		expect(screen.queryByText(/carries no setup token/)).toBeNull();
 		expect(screen.queryByRole('button', { name: 'Create the owner' })).toBeNull();
 	});
@@ -57,11 +59,11 @@ describe('the setup screen', () => {
 		expect(screen.queryByText(/carries no setup token/)).toBeNull();
 	});
 
-	it('says an expired link has expired before anybody fills in the form', async () => {
+	it('says no link works any more before anybody fills in the form', async () => {
 		getSetup.mockResolvedValue({ required: true, enabled: true, expired: true });
 		render(Setup);
 
-		expect(await screen.findByText(/setup link has expired/)).toBeTruthy();
+		expect(await screen.findByText(/No setup link from this start/)).toBeTruthy();
 		expect(screen.queryByRole('button', { name: 'Create the owner' })).toBeNull();
 	});
 });

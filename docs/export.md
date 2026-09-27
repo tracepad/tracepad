@@ -138,7 +138,7 @@ and any `tp-sk-…` in `OTEL_EXPORTER_OTLP_HEADERS`:
 ```
 $ tracepad export --otlp --to https://otlp.example.com/v1/traces \
     --header "authorization=Bearer $TRACEPAD_API_KEY"
-tracepad: --header Authorization carries a key of your Tracepad that this machine holds (--key, TRACEPAD_API_KEY, TRACEPAD_ADMIN_TOKEN, LANGFUSE_SECRET_KEY or OTEL_EXPORTER_OTLP_HEADERS); the receiver would get admin access to your project. --allow-tracepad-key does not change that: give the receiver its own credentials
+tracepad: --header Authorization carries a key of your Tracepad that this machine holds (--key, TRACEPAD_API_KEY, TRACEPAD_ADMIN_TOKEN or its _FILE, LANGFUSE_SECRET_KEY or OTEL_EXPORTER_OTLP_HEADERS); the receiver would get admin access to your project. --allow-tracepad-key does not change that: give the receiver its own credentials
 ```
 
 An admin token shorter than 16 characters is looked for only as a whole word

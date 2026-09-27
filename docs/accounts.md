@@ -114,8 +114,11 @@ Checking a password is a quarter of a second of CPU, and the routes that do it
 take requests from anybody, so the server runs only a few at once — half its
 processors, at most four — with a short queue behind them. Past that, the
 answer is `503` with `Retry-After: 1`, and a `WARN` in the log once a minute
-says how many were turned away. A person signing in never meets it; a flood of
-sign-ins cannot take the CPU from ingest and reads. An invitation link is
+says how many were turned away. A person signing in never meets it in ordinary
+use, and a flood of sign-ins cannot take the CPU from ingest and reads — but
+while such a flood runs, real sign-ins meet that `503` too: the server cannot
+tell the flood from people without a per-source rate limit, which it does not
+have yet. A reverse proxy's rate limit on `/api/v1/auth/` is the remedy today. An invitation link is
 checked before its password is hashed, so a request with a made-up link costs
 nothing.
 
@@ -175,7 +178,7 @@ refused while a project key went on working.
 | | |
 |---|---|
 | `GET /api/v1/auth/me` | The account and every project it can reach, with the role in each. The one call the interface makes on load. |
-| `PATCH /api/v1/auth/me` | Change the display name, the password with `{"password": {"current", "new"}}`, or the preferences with `{"preferences": {…}}` — any of them, together or alone. A password change signs every **other** session out. |
+| `PATCH /api/v1/auth/me` | Change the display name, the password with `{"password": {"current", "new"}}`, or the preferences with `{"preferences": {…}}` — any of them, together or alone. A password change signs every **other** session out. A wrong current password is `403`, and five in fifteen minutes make the next `429`; `409` means another change landed first — sign in again. |
 | `GET /api/v1/auth/sessions` | Where this account is signed in, the current one marked, with the user agent and address of each. |
 | `DELETE /api/v1/auth/sessions` | Sign out everywhere but here. What you press after a laptop goes missing. |
 | `POST /api/v1/auth/logout` | End this session. |

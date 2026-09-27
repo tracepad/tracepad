@@ -412,7 +412,9 @@
           "401": {"$ref": "#/components/responses/Unauthorized"},
           "503": {"$ref": "#/components/responses/ServiceUnavailable"},
           "403": {"$ref": "#/components/responses/Forbidden"},
-          "422": {"$ref": "#/components/responses/Unprocessable"}
+          "422": {"$ref": "#/components/responses/Unprocessable"},
+          "409": {"description": "The password changed between checking the current one and writing the new one; sign in again", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+          "429": {"$ref": "#/components/responses/TooManyRequests"}
         }
       }
     },

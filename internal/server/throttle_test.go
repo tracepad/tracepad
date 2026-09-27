@@ -387,6 +387,11 @@ func TestSetupOff(t *testing.T) {
 	expectError(t, h.call(t, "POST", "/api/v1/setup", mustJSON(t, map[string]any{
 		"token": "anything", "email": "founder@example.com", "password": testAccountPassword,
 	}), anonymous, asJSON), http.StatusForbidden, "TRACEPAD_SETUP=off")
+	// The command it names runs as printed: the CLI's credential is
+	// TRACEPAD_API_KEY, and here that is the admin token.
+	if got := h.call(t, "POST", "/api/v1/setup", mustJSON(t, map[string]any{"token": "x"}), anonymous, asJSON).Body.String(); !strings.Contains(got, "TRACEPAD_API_KEY=$TRACEPAD_ADMIN_TOKEN tracepad accounts create") {
+		t.Errorf("setup-off answer = %s, want the command with its credential", got)
+	}
 	// Whatever the body says: the answer comes before it is read.
 	expectError(t, h.call(t, "POST", "/api/v1/setup", []byte(`{"token": `), anonymous, asJSON),
 		http.StatusForbidden, "TRACEPAD_SETUP=off")

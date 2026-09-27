@@ -482,7 +482,7 @@ func (k keyCheck) refuse(where, text, bare string) error {
 // point, and the synopsis printed under it would bury it.
 func ownKeyError(where string) error {
 	return fmt.Errorf("%s carries a key of your Tracepad that this machine holds (--key, "+
-		"TRACEPAD_API_KEY, TRACEPAD_ADMIN_TOKEN, LANGFUSE_SECRET_KEY or OTEL_EXPORTER_OTLP_HEADERS); "+
+		"TRACEPAD_API_KEY, TRACEPAD_ADMIN_TOKEN or its _FILE, LANGFUSE_SECRET_KEY or OTEL_EXPORTER_OTLP_HEADERS); "+
 		"the receiver would get admin access to your project. --allow-tracepad-key does not "+
 		"change that: give the receiver its own credentials", where)
 }

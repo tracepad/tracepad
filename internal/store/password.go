@@ -80,7 +80,7 @@ func CheckPasswordLength(password string) error {
 // back panics — rather than quietly spending the CPU the gate exists to
 // protect. The server owns the gate — sizing it, and answering a refusal with
 // a `503` — so it is a value and not a package-level variable, and so are its
-// numbers (Spent, Waiting).
+// count (Spent).
 type PasswordGate struct {
 	slots chan struct{}
 	queue chan struct{}
@@ -102,8 +102,8 @@ func NewPasswordGate(slots, queue int) *PasswordGate {
 func (g *PasswordGate) Slots() int { return cap(g.slots) }
 func (g *PasswordGate) Queue() int { return cap(g.queue) }
 
-// Waiting reports how many callers are queued for a place right now.
-func (g *PasswordGate) Waiting() int { return len(g.queue) }
+// waiting reports how many callers are queued for a place right now.
+func (g *PasswordGate) waiting() int { return len(g.queue) }
 
 // Spent reports how many hashes and comparisons this gate has let through —
 // never the decoy's one-off construction. "Did this request run bcrypt" is a
@@ -115,16 +115,14 @@ func (g *PasswordGate) Spent() int64 { return g.spent.Load() }
 // using it after is a panic.
 type PasswordSlot struct {
 	gate     *PasswordGate
-	once     sync.Once
 	released atomic.Bool
 }
 
 // Release gives the place back.
 func (s *PasswordSlot) Release() {
-	s.once.Do(func() {
-		s.released.Store(true)
+	if s.released.CompareAndSwap(false, true) {
 		<-s.gate.slots
-	})
+	}
 }
 
 // Enter takes a place, waiting in the queue if there is room in it. It answers

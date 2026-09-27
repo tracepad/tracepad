@@ -3122,7 +3122,17 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            /** @description The password changed between checking the current one and writing the new one; sign in again */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };

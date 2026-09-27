@@ -727,6 +727,11 @@ func (s *SessionsEnd) apply(tx *sql.Tx) error {
 // that.
 var ErrWrongPassword = errors.New("wrong current password")
 
+// ErrPasswordChanged is a password change whose current password was checked
+// against a hash that is no longer the stored one: another change landed
+// between the check and the write (spec 028 #31).
+var ErrPasswordChanged = errors.New("the password was changed while this request was on its way; sign in again")
+
 // PasswordChange replaces an account's password, and ends every other session
 // of that account (Decision 4).
 //
@@ -737,7 +742,9 @@ var ErrWrongPassword = errors.New("wrong current password")
 // left in here is the part that has to be: between that read and this write
 // the password can change, so the stored hash must still be byte for byte the
 // one that was checked, or the answer is ErrWrongPassword — a check against a
-// hash that is no longer stored is a check against nothing.
+// hash that is no longer stored is a check against nothing: the answer is then
+// ErrPasswordChanged, not ErrWrongPassword, because the password the person
+// typed was right when it was checked.
 type PasswordChange struct {
 	AccountID string
 	// Checked is the account whose stored hash the caller verified the
@@ -766,8 +773,11 @@ func (p *PasswordChange) apply(tx *sql.Tx) error {
 	if account == nil {
 		return &Rejection{Kind: RejectNotFound, Message: "no such account"}
 	}
-	if p.Checked == nil || len(account.hash) == 0 || !bytes.Equal(account.hash, p.Checked.hash) {
+	if p.Checked == nil || len(p.Checked.hash) == 0 {
 		return ErrWrongPassword
+	}
+	if !bytes.Equal(account.hash, p.Checked.hash) {
+		return ErrPasswordChanged
 	}
 	if err := setPassword(tx, account.ID, p.NewHash); err != nil {
 		return err

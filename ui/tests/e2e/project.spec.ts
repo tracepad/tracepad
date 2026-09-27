@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { createProject, FAILING_TRACE, signIn, signInAsOwner, state } from './harness';
+import { BCRYPT_WAIT, createProject, FAILING_TRACE, signIn, signInAsOwner, state } from './harness';
 
 // The project in the URL and the switcher (spec 029, Testing): every screen
 // lives under `/p/{id}`, a bare path redirects to the remembered project, a
@@ -145,7 +145,7 @@ test('a reload stays put, and the login round trip returns to the prefixed path'
 	await page.getByLabel('Email').fill(own.account.email);
 	await page.getByLabel('Password', { exact: true }).fill(own.account.password);
 	await page.getByRole('button', { name: 'Sign in' }).click();
-	await expect(page).toHaveURL(new RegExp(`/p/${own.id}/prompts\\?q=x$`));
+	await expect(page).toHaveURL(new RegExp(`/p/${own.id}/prompts\\?q=x$`), { timeout: BCRYPT_WAIT });
 });
 
 /** The name of the project first run created, which the corpus is in. */

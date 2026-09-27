@@ -32,7 +32,8 @@
 	let enabled = $state.raw(true);
 	/**
 	 * True when no link this start printed still works — past its 24 hours,
-	 * or never minted — so the form would only be refused (Decision 32).
+	 * or never minted because an owner could sign in at the start — so the
+	 * form would only be refused (Decision 32).
 	 */
 	let expired = $state.raw(false);
 
@@ -76,11 +77,13 @@
 	<Explanation title="Set up">
 		{#if !enabled && required !== false}
 			Setup is turned off on this server (<code>TRACEPAD_SETUP=off</code>). Its first owner is
-			created with the admin token — <code>tracepad accounts create &lt;email&gt; --owner</code> —
-			and the invitation link that prints sets the password.
+			created with the admin token —
+			<code>TRACEPAD_API_KEY=$TRACEPAD_ADMIN_TOKEN tracepad accounts create &lt;email&gt; --owner</code>
+			— and the invitation link that prints sets the password.
 		{:else if expired && required !== false}
-			This server's setup link has expired: a link works for 24 hours after the server printed it.
-			Restart the server to have it print a new one.
+			No setup link from this start of the server works any more: a link lasts 24 hours after it is
+			printed, and none is printed when an owner could already sign in at the start. Restart the
+			server to have it print a new one.
 		{:else if token || !enabled}
 			This server already has an owner, so there is nothing to set up.
 		{:else}

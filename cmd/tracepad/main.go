@@ -411,7 +411,7 @@ func noteSetupOff(log *slog.Logger, cfg *config.Config, srv *server.Server) {
 		return
 	}
 	log.Info("this server has no owner and setup is off; create the first one with the admin token: " +
-		"tracepad accounts create <email> --owner")
+		"TRACEPAD_API_KEY=$TRACEPAD_ADMIN_TOKEN tracepad accounts create <email> --owner")
 }
 
 // warnPlainHTTP says so at start when other machines can reach this server

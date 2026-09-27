@@ -232,8 +232,8 @@ and sends nothing. The summary ends with how many traces started before the
 archive begins, which are the ones no export can carry. The receiver's
 credentials go in --header; OTEL_EXPORTER_OTLP_HEADERS is not read. A Tracepad
 key bound for the receiver, in a header or in --to, is refused: the ones this
-machine holds for your Tracepad (--key, TRACEPAD_API_KEY, TRACEPAD_ADMIN_TOKEN,
-LANGFUSE_SECRET_KEY, OTEL_EXPORTER_OTLP_HEADERS) always, any other tp-sk-…
+machine holds for your Tracepad (--key, TRACEPAD_API_KEY, TRACEPAD_ADMIN_TOKEN
+or its _FILE, LANGFUSE_SECRET_KEY, OTEL_EXPORTER_OTLP_HEADERS) always, any other tp-sk-…
 unless --allow-tracepad-key says the receiver is a Tracepad server of yours.
 
 Evals (spec 014). The loop is: declare the configs, push the cases, open the

@@ -36,7 +36,7 @@ func TestPasswordGateQueues(t *testing.T) {
 		close(entered)
 	}()
 	deadline := time.Now().Add(5 * time.Second)
-	for g.Waiting() == 0 && time.Now().Before(deadline) {
+	for g.waiting() == 0 && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
 	}
 	if _, err := g.Enter(context.Background()); !errors.Is(err, ErrPasswordsBusy) {
@@ -59,7 +59,7 @@ func TestPasswordGateQueues(t *testing.T) {
 	if _, err := g.Enter(ctx); !errors.Is(err, context.Canceled) {
 		t.Errorf("err = %v, want the caller's own cancellation", err)
 	}
-	if g.Waiting() != 0 {
+	if g.waiting() != 0 {
 		t.Error("a caller that gave up must leave the queue")
 	}
 	blocker.Release()
@@ -110,8 +110,8 @@ func TestPasswordChangeSpendsNoBcryptInTheWriter(t *testing.T) {
 	err := f.writer.Submit(t.Context(), &PasswordChange{
 		AccountID: account.ID, Checked: &stale, NewHash: newHash, Keep: "none",
 	})
-	if !errors.Is(err, ErrWrongPassword) {
-		t.Fatalf("err = %v, want a stale check refused as a wrong password", err)
+	if !errors.Is(err, ErrPasswordChanged) {
+		t.Fatalf("err = %v, want a stale check refused as a password changed meanwhile", err)
 	}
 	if err := f.writer.Submit(t.Context(), &PasswordChange{
 		AccountID: account.ID, NewHash: newHash, Keep: "none",
