@@ -137,7 +137,7 @@ func (s *Store) RetentionPreview(ctx context.Context, projectID string, retentio
 		// The session-only scores the same pass would take (spec 044 #8):
 		// a session none of whose traces outlives this window loses its
 		// verdicts with them.
-		if err := s.db.QueryRow(
+		if err := s.db.QueryRowContext(ctx,
 			`SELECT COUNT(*) FROM scores s
 			  WHERE s.project_id = ? AND s.trace_id IS NULL AND s.created_at < ?
 			    AND NOT EXISTS (SELECT 1 FROM traces t WHERE t.project_id = s.project_id

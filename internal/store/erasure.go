@@ -62,9 +62,9 @@ type legacyStamps struct {
 	ingestedAt, updatedAt, erasure int64
 }
 
-func (s *Store) legacyStamps() (legacyStamps, error) {
+func (s *Store) legacyStamps(ctx context.Context) (legacyStamps, error) {
 	var out legacyStamps
-	rows, err := s.db.Query(`SELECT filename, applied_at FROM schema_migrations
+	rows, err := s.db.QueryContext(ctx, `SELECT filename, applied_at FROM schema_migrations
 		WHERE filename IN (?, ?) OR filename LIKE ? ESCAPE '\'`,
 		migrationIngestedAt, migrationUpdatedAt, `%\`+migrationErasureSuffix)
 	if err != nil {
@@ -136,8 +136,8 @@ func mergeWindows(windows []arrivalWindow) []arrivalWindow {
 
 // userTraces is step 1: the user's traces with their stamps, through
 // `idx_traces_user`.
-func (s *Store) userTraces(projectID, userID string) ([]erasedTrace, error) {
-	rows, err := s.db.Query(
+func (s *Store) userTraces(ctx context.Context, projectID, userID string) ([]erasedTrace, error) {
+	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, ingested_at, updated_at FROM traces WHERE project_id = ? AND user_id = ?`,
 		projectID, userID)
 	if err != nil {
@@ -160,11 +160,11 @@ func (s *Store) userTraces(projectID, userID string) ([]erasedTrace, error) {
 }
 
 // userWindows is the union of the arrival windows of a user's traces.
-func (s *Store) userWindows(traces []erasedTrace) ([]arrivalWindow, error) {
+func (s *Store) userWindows(ctx context.Context, traces []erasedTrace) ([]arrivalWindow, error) {
 	if len(traces) == 0 {
 		return nil, nil
 	}
-	legacy, err := s.legacyStamps()
+	legacy, err := s.legacyStamps(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -198,13 +198,24 @@ func windowQuery(projectID, what string, windows []arrivalWindow) (string, []any
 		 WHERE r.project_id = ? AND r.received_at BETWEEN windows.from_at AND windows.to_at`, args
 }
 
+// contextQuerier is a database handle's Query under a context, for the
+// helpers that take a querier.
+type contextQuerier struct {
+	ctx context.Context
+	db  *sql.DB
+}
+
+func (q contextQuerier) Query(query string, args ...any) (*sql.Rows, error) {
+	return q.db.QueryContext(q.ctx, query, args...)
+}
+
 // candidateBatches lists the project's batches received inside the windows,
 // oldest first, through `idx_raw_batches_received`.
-func (s *Store) candidateBatches(projectID string, windows []arrivalWindow) ([]int64, error) {
+func (s *Store) candidateBatches(ctx context.Context, projectID string, windows []arrivalWindow) ([]int64, error) {
 	var ids []int64
 	for start := 0; start < len(windows); start += windowGroup {
 		query, args := windowQuery(projectID, "r.id", windows[start:min(start+windowGroup, len(windows))])
-		found, err := queryColumn[int64](s.db, query+` ORDER BY r.received_at, r.id`, args...)
+		found, err := queryColumn[int64](contextQuerier{ctx, s.db}, query+` ORDER BY r.received_at, r.id`, args...)
 		if err != nil {
 			return nil, fmt.Errorf("find the batches to scan: %w", err)
 		}
@@ -218,12 +229,12 @@ func (s *Store) candidateBatches(projectID string, windows []arrivalWindow) ([]i
 // countBatches is candidateBatches as a count, for the dry run: a count and
 // not a decode (spec 044, API contract). The windows are disjoint, so the
 // groups' counts add up.
-func (s *Store) countBatches(projectID string, windows []arrivalWindow) (int64, error) {
+func (s *Store) countBatches(ctx context.Context, projectID string, windows []arrivalWindow) (int64, error) {
 	var total int64
 	for start := 0; start < len(windows); start += windowGroup {
 		query, args := windowQuery(projectID, "COUNT(*)", windows[start:min(start+windowGroup, len(windows))])
 		var n int64
-		if err := s.db.QueryRow(query, args...).Scan(&n); err != nil {
+		if err := s.db.QueryRowContext(ctx, query, args...).Scan(&n); err != nil {
 			return 0, fmt.Errorf("count the batches to scan: %w", err)
 		}
 		total += n
@@ -234,9 +245,9 @@ func (s *Store) countBatches(projectID string, windows []arrivalWindow) (int64, 
 // unattributableBatches is #5 (a): the batches older than the trace window,
 // which hold spans of traces the sweep already took — nothing names their
 // user any more. Zero for a project that keeps its traces for ever.
-func (s *Store) unattributableBatches(projectID string, now int64) (int64, error) {
+func (s *Store) unattributableBatches(ctx context.Context, projectID string, now int64) (int64, error) {
 	var retention sql.NullInt64
-	if err := s.db.QueryRow(`SELECT retention_days FROM projects WHERE id = ?`, projectID).
+	if err := s.db.QueryRowContext(ctx, `SELECT retention_days FROM projects WHERE id = ?`, projectID).
 		Scan(&retention); err != nil {
 		return 0, fmt.Errorf("read the trace window: %w", err)
 	}
@@ -245,7 +256,7 @@ func (s *Store) unattributableBatches(projectID string, now int64) (int64, error
 		return 0, nil
 	}
 	var n int64
-	if err := s.db.QueryRow(
+	if err := s.db.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM raw_batches WHERE project_id = ? AND received_at < ?`,
 		projectID, cutoff).Scan(&n); err != nil {
 		return 0, fmt.Errorf("count the batches older than the trace window: %w", err)
@@ -381,13 +392,13 @@ type scrubPlan struct {
 
 // planScrub reads one batch and computes its scrub: nil when the batch is
 // gone or holds none of the traces, which leaves it untouched and unmarked.
-func (s *Store) planScrub(projectID string, id int64, traces map[string]bool) (*scrubPlan, error) {
+func (s *Store) planScrub(ctx context.Context, projectID string, id int64, traces map[string]bool) (*scrubPlan, error) {
 	var (
 		stored      []byte
 		contentType sql.NullString
 		scrubbed    sql.NullInt64
 	)
-	err := s.db.QueryRow(
+	err := s.db.QueryRowContext(ctx,
 		`SELECT body, content_type, scrubbed_at FROM raw_batches WHERE project_id = ? AND id = ?`,
 		projectID, id).Scan(&stored, &contentType, &scrubbed)
 	if err == sql.ErrNoRows {
@@ -518,7 +529,7 @@ func (s *Store) scrubBatches(ctx context.Context, writer jobSubmitter, projectID
 		for len(ids) > 0 && len(plans) < scrubGroup && held < scrubGroupBytes {
 			id := ids[0]
 			ids = ids[1:]
-			plan, err := s.planScrub(projectID, id, traces)
+			plan, err := s.planScrub(ctx, projectID, id, traces)
 			if err != nil {
 				return tally, err
 			}
@@ -540,7 +551,7 @@ func (s *Store) scrubBatches(ctx context.Context, writer jobSubmitter, projectID
 		for i, plan := range plans {
 			err := errs[i]
 			for attempt := 1; conflict(err) && attempt < scrubAttempts; attempt++ {
-				if plan, err = s.planScrub(projectID, group[i], traces); err != nil {
+				if plan, err = s.planScrub(ctx, projectID, group[i], traces); err != nil {
 					return tally, err
 				}
 				if plan == nil {
@@ -647,7 +658,7 @@ func (s *Store) EraseUserData(ctx context.Context, writer jobSubmitter, e UserEr
 	// 1. The traces and their windows; the moment is kept for step 4.
 	began := time.Now()
 	since := began.UnixNano()
-	traces, err := s.userTraces(e.ProjectID, e.UserID)
+	traces, err := s.userTraces(ctx, e.ProjectID, e.UserID)
 	if err != nil {
 		return result, err
 	}
@@ -656,11 +667,11 @@ func (s *Store) EraseUserData(ctx context.Context, writer jobSubmitter, e UserEr
 	}
 
 	// 2. Their batches.
-	windows, err := s.userWindows(traces)
+	windows, err := s.userWindows(ctx, traces)
 	if err != nil {
 		return result, err
 	}
-	candidates, err := s.candidateBatches(e.ProjectID, windows)
+	candidates, err := s.candidateBatches(ctx, e.ProjectID, windows)
 	if err != nil {
 		return result, err
 	}
@@ -720,7 +731,7 @@ func (s *Store) EraseUserData(ctx context.Context, writer jobSubmitter, e UserEr
 
 	// 4. The tail: the batches that arrived while the request ran, for the
 	// traces that received one. Usually none.
-	recent, err := s.candidateBatches(e.ProjectID, mergeWindows(late))
+	recent, err := s.candidateBatches(ctx, e.ProjectID, mergeWindows(late))
 	if err != nil {
 		return result, err
 	}
@@ -819,12 +830,12 @@ func (s *Store) UserDataPreview(ctx context.Context, projectID, userID string, n
 		return out, err
 	}
 	// The session-only scores of the sessions the traces carried (#7).
-	if err := s.db.QueryRow(userSessionScores, projectID, projectID, userID).
+	if err := s.db.QueryRowContext(ctx, userSessionScores, projectID, projectID, userID).
 		Scan(&out.Counts.SessionScores); err != nil {
 		return out, fmt.Errorf("count the session scores: %w", err)
 	}
 	// The items any row of which names one of the traces (#9).
-	rows, err := s.db.Query(userSourcedItems, projectID, projectID, userID)
+	rows, err := s.db.QueryContext(ctx, userSourcedItems, projectID, projectID, userID)
 	if err != nil {
 		return out, fmt.Errorf("find the dataset items cut from the traces: %w", err)
 	}
@@ -840,18 +851,18 @@ func (s *Store) UserDataPreview(ctx context.Context, projectID, userID string, n
 	if err := rows.Err(); err != nil {
 		return out, err
 	}
-	traces, err := s.userTraces(projectID, userID)
+	traces, err := s.userTraces(ctx, projectID, userID)
 	if err != nil {
 		return out, err
 	}
-	windows, err := s.userWindows(traces)
+	windows, err := s.userWindows(ctx, traces)
 	if err != nil {
 		return out, err
 	}
-	if out.Raw.BatchesToScan, err = s.countBatches(projectID, windows); err != nil {
+	if out.Raw.BatchesToScan, err = s.countBatches(ctx, projectID, windows); err != nil {
 		return out, err
 	}
-	out.Raw.UnattributableBatches, err = s.unattributableBatches(projectID, nowOr(now))
+	out.Raw.UnattributableBatches, err = s.unattributableBatches(ctx, projectID, nowOr(now))
 	return out, err
 }
 

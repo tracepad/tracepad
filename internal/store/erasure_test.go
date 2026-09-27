@@ -320,7 +320,7 @@ func TestConcurrentScrubsOfOneBatch(t *testing.T) {
 	c := map[string]bool{hexTrace(3): true}
 
 	// The first computes its body, then the second lands first.
-	early, err := f.store.planScrub(f.project.ID, batch, a)
+	early, err := f.store.planScrub(t.Context(), f.project.ID, batch, a)
 	if err != nil || early == nil {
 		t.Fatalf("plan: %v, %v", early, err)
 	}
@@ -370,15 +370,15 @@ func TestTheArrivalWindows(t *testing.T) {
 
 	candidates := func() []int64 {
 		t.Helper()
-		traces, err := f.store.userTraces(f.project.ID, "user-a")
+		traces, err := f.store.userTraces(t.Context(), f.project.ID, "user-a")
 		if err != nil {
 			t.Fatal(err)
 		}
-		windows, err := f.store.userWindows(traces)
+		windows, err := f.store.userWindows(t.Context(), traces)
 		if err != nil {
 			t.Fatal(err)
 		}
-		ids, err := f.store.candidateBatches(f.project.ID, windows)
+		ids, err := f.store.candidateBatches(t.Context(), f.project.ID, windows)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -818,11 +818,11 @@ func TestManyWindowsAreAskedInGroups(t *testing.T) {
 		seedRawBatch(t, f.store, f.project.ID, &RawBatch{ReceivedAt: at, Body: []byte("x")})
 		windows = append(windows, arrivalWindow{from: at, to: at})
 	}
-	ids, err := f.store.candidateBatches(f.project.ID, windows)
+	ids, err := f.store.candidateBatches(t.Context(), f.project.ID, windows)
 	if err != nil {
 		t.Fatal(err)
 	}
-	n, err := f.store.countBatches(f.project.ID, windows)
+	n, err := f.store.countBatches(t.Context(), f.project.ID, windows)
 	if err != nil {
 		t.Fatal(err)
 	}
