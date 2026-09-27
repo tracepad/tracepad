@@ -2,7 +2,7 @@ package server
 
 import (
 	"container/list"
-	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"runtime"
@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/tracepad/tracepad/internal/store"
 )
 
 /*
@@ -17,10 +19,10 @@ What an unauthenticated caller can make this server spend on passwords.
 
 Two limits, for two different attacks. The login limiter counts wrong answers
 per email, which is what stops a dictionary run against one account. The
-password gate bounds how many `bcrypt` computations run at once, whoever asks
-for them, which is what stops a flood of requests — each one a quarter of a
-second of CPU before anything knows who is calling — from taking the machine
-from the ingest and the reads it exists for (spec 028 #31).
+password gate (store.PasswordGate) bounds how many `bcrypt` computations run at
+once, whoever asks for them, which is what stops a flood of requests — each one
+a quarter of a second of CPU before anything knows who is calling — from taking
+the machine from the ingest and the reads it exists for (spec 028 #31).
 */
 
 // --- The login limiter ------------------------------------------------------
@@ -36,11 +38,12 @@ const (
 	loginFailureWindow = 15 * time.Minute
 	// loginTrackedEmails bounds the map, so that a run against thousands of
 	// invented addresses is not a way to spend the server's memory. Past
-	// it, the entry touched longest ago is dropped — but an email that is
-	// locked out goes last (evict). To push one out, a caller has to lock
-	// out every other entry first: 4096 × 5 comparisons through the password
-	// gate, which at its widest (four at a time, a quarter of a second
-	// each) is over twenty minutes — longer than the window that would
+	// it, the record that counts the fewest attempts goes, the one touched
+	// longest ago among those (evict). To push out an email with n failures,
+	// a caller has to bring every other record to n first: 4096 × 4
+	// comparisons through the password gate for an email one guess from
+	// locked, which at the gate's widest (four at a time, a quarter of a
+	// second each) is seventeen minutes — longer than the window that would
 	// have let the email go anyway (spec 028 #31).
 	loginTrackedEmails = 4096
 )
@@ -48,10 +51,12 @@ const (
 type loginLimiter struct {
 	mu       sync.Mutex
 	capacity int
-	// entries finds an email's record; order holds the same records,
-	// the most recently touched at the front, for eviction.
-	entries map[string]*list.Element
-	order   *list.List
+	entries  map[string]*loginRecord
+	// byCount[n] holds the records that count n attempts — failures in the
+	// window and attempts in flight, at most the limit — the most recently
+	// touched at the front. Eviction takes the back of the lowest one that
+	// is not empty, in constant time.
+	byCount [loginFailureLimit + 1]*list.List
 }
 
 // loginRecord is one email: its failures inside the window, and how many
@@ -60,10 +65,17 @@ type loginRecord struct {
 	key      string
 	failures []time.Time
 	pending  int
+	// count and element place the record in byCount.
+	count   int
+	element *list.Element
 }
 
 func newLoginLimiter() *loginLimiter {
-	return &loginLimiter{capacity: loginTrackedEmails, entries: map[string]*list.Element{}, order: list.New()}
+	l := &loginLimiter{capacity: loginTrackedEmails, entries: map[string]*loginRecord{}}
+	for i := range l.byCount {
+		l.byCount[i] = list.New()
+	}
+	return l
 }
 
 func loginKey(email string) string { return strings.ToLower(strings.TrimSpace(email)) }
@@ -96,11 +108,12 @@ func (l *loginLimiter) reserve(email string, now time.Time) (*loginAttempt, time
 			// they are about to become failures or to clear the rest.
 			wait = max(loginFailureWindow-now.Sub(record.failures[0]), time.Second)
 		}
-		l.forgetIfEmpty(record)
+		l.settle(record)
 		return nil, wait
 	}
 	record.pending++
-	l.evict(now)
+	l.settle(record)
+	l.evict(key)
 	return &loginAttempt{limiter: l, key: key}, 0
 }
 
@@ -114,48 +127,42 @@ func (a *loginAttempt) failed(now time.Time) {
 	record := l.touch(a.key, now)
 	record.pending = max(record.pending-1, 0)
 	record.failures = append(record.failures, now)
-	l.evict(now)
+	l.settle(record)
+	l.evict(a.key)
 }
 
 // succeeded forgets the email's failures: a person who mistyped twice and then
 // got it right is not somebody to throttle. Other attempts still in flight
 // keep their reservations.
 func (a *loginAttempt) succeeded() {
-	l := a.limiter
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if element, ok := l.entries[a.key]; ok {
-		record := element.Value.(*loginRecord)
-		record.pending = max(record.pending-1, 0)
-		record.failures = nil
-		l.forgetIfEmpty(record)
-	}
+	a.end(func(record *loginRecord) { record.failures = nil })
 }
 
 // cancel gives the reservation back: the password was never compared, so the
-// attempt was not one (the password gate was full).
+// attempt was not one (the password gate turned it away).
 func (a *loginAttempt) cancel() {
+	a.end(func(*loginRecord) {})
+}
+
+func (a *loginAttempt) end(change func(*loginRecord)) {
 	l := a.limiter
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if element, ok := l.entries[a.key]; ok {
-		record := element.Value.(*loginRecord)
+	if record, ok := l.entries[a.key]; ok {
 		record.pending = max(record.pending-1, 0)
-		l.forgetIfEmpty(record)
+		change(record)
+		l.settle(record)
 	}
 }
 
-// touch finds or makes an email's record, ages its failures and moves it to
-// the front. The caller holds the lock.
+// touch finds or makes an email's record and ages its failures. The caller
+// holds the lock, and settles the record once it has changed it.
 func (l *loginLimiter) touch(key string, now time.Time) *loginRecord {
-	element, ok := l.entries[key]
+	record, ok := l.entries[key]
 	if !ok {
-		element = l.order.PushFront(&loginRecord{key: key})
-		l.entries[key] = element
-	} else {
-		l.order.MoveToFront(element)
+		record = &loginRecord{key: key}
+		l.entries[key] = record
 	}
-	record := element.Value.(*loginRecord)
 	record.age(now)
 	return record
 }
@@ -171,44 +178,52 @@ func (r *loginRecord) age(now time.Time) {
 	r.failures = kept
 }
 
-// forgetIfEmpty drops a record that counts nothing. The caller holds the lock.
-func (l *loginLimiter) forgetIfEmpty(record *loginRecord) {
+// settle files a record under what it now counts, at the front of that list,
+// or forgets it when it counts nothing. The caller holds the lock.
+func (l *loginLimiter) settle(record *loginRecord) {
+	if record.element != nil {
+		l.byCount[record.count].Remove(record.element)
+		record.element = nil
+	}
 	if len(record.failures) == 0 && record.pending == 0 {
-		l.remove(record.key)
+		delete(l.entries, record.key)
+		return
 	}
+	record.count = min(len(record.failures)+record.pending, loginFailureLimit)
+	record.element = l.byCount[record.count].PushFront(record)
 }
 
-func (l *loginLimiter) remove(key string) {
-	if element, ok := l.entries[key]; ok {
-		l.order.Remove(element)
-		delete(l.entries, key)
-	}
-}
-
-// evict brings the map back under its bound, from the end touched longest ago:
-// first whatever has aged out, then emails that are not locked out and have no
-// attempt in flight, and only when every record left is one of those, the
-// oldest of them. The caller holds the lock.
+// evict brings the map back under its bound: the record counting the fewest
+// attempts goes, and among those the one touched longest ago — never keep, the
+// record the caller is working on. The caller holds the lock.
 //
-// The order is the defence. Dropping the whole map when it filled — what this
-// did before — gave a locked-out email its five tries back for the price of
-// 4097 invented addresses, one guess each (spec 028 #31).
-func (l *loginLimiter) evict(now time.Time) {
+// Fewest first is the defence. Dropping the whole map when it filled let a
+// caller who had spent four guesses on an email buy four more for 4097
+// invented addresses, one guess each; so did dropping whichever record was
+// oldest, locked out or not (spec 028 #31). A record's count is the one it was
+// filed under when last touched, so failures that have aged out since keep it
+// a little longer than they should: a bound on memory, not a lock on anybody.
+func (l *loginLimiter) evict(keep string) {
 	for len(l.entries) > l.capacity {
-		var victim *loginRecord
-		for element := l.order.Back(); element != nil; element = element.Prev() {
-			record := element.Value.(*loginRecord)
-			record.age(now)
-			if len(record.failures) < loginFailureLimit && record.pending == 0 {
-				victim = record
-				break
+		victim := l.fewest(keep)
+		if victim == nil {
+			return
+		}
+		l.byCount[victim.count].Remove(victim.element)
+		delete(l.entries, victim.key)
+	}
+}
+
+// fewest is the record evict takes: the back of the lowest list, skipping keep.
+func (l *loginLimiter) fewest(keep string) *loginRecord {
+	for _, records := range l.byCount {
+		for element := records.Back(); element != nil; element = element.Prev() {
+			if record := element.Value.(*loginRecord); record.key != keep {
+				return record
 			}
 		}
-		if victim == nil {
-			victim = l.order.Back().Value.(*loginRecord)
-		}
-		l.remove(victim.key)
 	}
+	return nil
 }
 
 // retryAfterSeconds renders a wait for the header.
@@ -222,71 +237,37 @@ func retryAfterSeconds(wait time.Duration) string {
 
 // --- The password gate ------------------------------------------------------
 
-// passwordGate bounds the `bcrypt` computations in flight: a few at once, a
-// short queue behind them, and a `503` for whatever arrives past that. A
-// queue with no bound would only move the exhaustion from the CPU to the
-// connections waiting on it.
-type passwordGate struct {
-	slots chan struct{}
-	queue chan struct{}
-}
-
 // newPasswordGate sizes the gate for this machine: half its processors, at
 // least one and at most four, so that ingest and reads keep at least half the
 // CPU however many passwords are being checked (spec 028 #31). Four at a
 // quarter of a second each is sixteen sign-ins a second, far past what any
 // team does by hand. The queue holds four rounds of that — about a second of
 // waiting — and a sign-in that would wait longer is told to come back.
-func newPasswordGate() *passwordGate {
+func newPasswordGate() *store.PasswordGate {
 	slots := min(max(runtime.GOMAXPROCS(0)/2, 1), 4)
-	return newPasswordGateOf(slots, 4*slots)
+	return store.NewPasswordGate(slots, 4*slots)
 }
 
-func newPasswordGateOf(slots, queue int) *passwordGate {
-	return &passwordGate{slots: make(chan struct{}, slots), queue: make(chan struct{}, queue)}
-}
-
-// enter takes a slot, waiting behind the queue if there is room in it, and
-// returns what gives the slot back. It reports false when the queue is full or
-// the caller gave up while waiting.
-func (g *passwordGate) enter(ctx context.Context) (release func(), ok bool) {
-	release = func() { <-g.slots }
-	select {
-	case g.slots <- struct{}{}:
-		return release, true
-	default:
+// enterPasswordGate takes a place for the request's `bcrypt` work, or answers
+// itself: `503` with `Retry-After` when the gate is full, logged at most once a
+// minute with the count it stands for — an operator should learn that
+// sign-ins are being turned away, and a flood should not learn to fill the
+// log. A caller that gave up while it waited in the queue is not the gate
+// being full: nothing is logged or counted, and nothing is written to a
+// connection that is gone.
+func (s *Server) enterPasswordGate(w http.ResponseWriter, r *http.Request) (*store.PasswordSlot, bool) {
+	slot, err := s.passwords.Enter(r.Context())
+	if err == nil {
+		return slot, true
 	}
-	select {
-	case g.queue <- struct{}{}:
-	default:
+	if !errors.Is(err, store.ErrPasswordsBusy) {
 		return nil, false
-	}
-	defer func() { <-g.queue }()
-	select {
-	case g.slots <- struct{}{}:
-		return release, true
-	case <-ctx.Done():
-		return nil, false
-	}
-}
-
-// passwordBusy is the sentence a request turned away at the gate reads.
-const passwordBusy = "the server is busy checking passwords; try again in a moment"
-
-// enterPasswordGate takes a slot for the request's `bcrypt` work, or answers
-// `503` with `Retry-After` itself. The refusal is logged at most once a minute,
-// with the count it stands for: an operator should learn that sign-ins are
-// being turned away, and a flood should not learn to fill the log.
-func (s *Server) enterPasswordGate(w http.ResponseWriter, r *http.Request) (release func(), ok bool) {
-	release, ok = s.passwords.enter(r.Context())
-	if ok {
-		return release, true
 	}
 	if skipped, log := s.passwordLog.allow(time.Now()); log {
 		slog.Warn("password checks turned away: more were asked for at once than the gate holds",
-			"slots", cap(s.passwords.slots), "queue", cap(s.passwords.queue), "also_turned_away", skipped)
+			"slots", s.passwords.Slots(), "queue", s.passwords.Queue(), "also_turned_away", skipped)
 	}
 	w.Header().Set("Retry-After", "1")
-	writeError(w, http.StatusServiceUnavailable, passwordBusy)
+	writeError(w, http.StatusServiceUnavailable, store.ErrPasswordsBusy.Error())
 	return nil, false
 }

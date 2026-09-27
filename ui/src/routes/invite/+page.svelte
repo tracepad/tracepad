@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { passwordProblem, said } from '$lib/accounts';
+	import { PASSWORD_HINT, passwordProblem, said } from '$lib/accounts';
 	import { api } from '$lib/api/client.svelte';
 	import { auth } from '$lib/auth.svelte';
 	import AuthScreen from '$lib/components/auth/AuthScreen.svelte';
@@ -79,7 +79,7 @@
 			type="password"
 			bind:value={password}
 			autocomplete="new-password"
-			hint="At least 10 characters. There is no other rule."
+			hint={PASSWORD_HINT}
 		/>
 		<Field label="Password again" type="password" bind:value={again} autocomplete="new-password" />
 	</AuthScreen>

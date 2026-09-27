@@ -394,6 +394,12 @@ func TestExportKeepsAHeaderValueAsWritten(t *testing.T) {
 func TestExportHeadersTable(t *testing.T) {
 	const own = "admin-token-12345"
 	basic := func(pair string) string { return "Basic " + base64.StdEncoding.EncodeToString([]byte(pair)) }
+	// The server can read its admin token from a file (spec 001 #18); the
+	// guard reads the same file.
+	tokenFile := filepath.Join(t.TempDir(), "admin-token")
+	if err := os.WriteFile(tokenFile, []byte("a-long-admin-token-0001\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	for _, tc := range []struct {
 		name  string
 		to    string
@@ -466,6 +472,13 @@ func TestExportHeadersTable(t *testing.T) {
 			env:   map[string]string{"TRACEPAD_ADMIN_TOKEN": "a-long-admin-token-0001\n"},
 			flags: []string{"authorization=Bearer a-long-admin-token-0001"}, allow: true,
 			refused: "a key of your Tracepad"},
+		{name: "the admin token from TRACEPAD_ADMIN_TOKEN_FILE",
+			env:   map[string]string{"TRACEPAD_ADMIN_TOKEN_FILE": tokenFile},
+			flags: []string{"authorization=Bearer a-long-admin-token-0001"}, allow: true,
+			refused: "a key of your Tracepad"},
+		{name: "a TRACEPAD_ADMIN_TOKEN_FILE this machine cannot read holds nothing to leak",
+			env:   map[string]string{"TRACEPAD_ADMIN_TOKEN_FILE": tokenFile + ".missing"},
+			flags: []string{"x-env=development"}, want: map[string]string{"X-Env": "development"}},
 		{name: "TRACEPAD_API_KEY when --key overrode it",
 			env:   map[string]string{"TRACEPAD_API_KEY": "tp-sk-prod-0000000000"},
 			flags: []string{"authorization=Bearer tp-sk-prod-0000000000"}, allow: true,

@@ -138,7 +138,11 @@ export async function signIn(page: Page, account: Account) {
 	// Exact: the eye beside the field is labelled "Show the password".
 	await page.getByLabel('Password', { exact: true }).fill(account.password);
 	await page.getByRole('button', { name: 'Sign in' }).click();
-	await expect(page).toHaveURL(/\/p\/[0-9a-f]{32}\/dashboard(\?|$)/);
+	// Twenty seconds, not the default five: a sign-in is a bcrypt comparison
+	// at the production cost, a quarter of a second on an idle machine and
+	// several on one busy with parallel workers and browsers. The binary under
+	// test is the one that ships, so the wait moves rather than the cost.
+	await expect(page).toHaveURL(/\/p\/[0-9a-f]{32}\/dashboard(\?|$)/, { timeout: 20_000 });
 }
 
 /**

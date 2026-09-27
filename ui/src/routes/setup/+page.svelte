@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { passwordProblem, said } from '$lib/accounts';
+	import { PASSWORD_HINT, passwordProblem, said } from '$lib/accounts';
 	import { api } from '$lib/api/client.svelte';
 	import { auth } from '$lib/auth.svelte';
 	import AuthScreen from '$lib/components/auth/AuthScreen.svelte';
@@ -25,6 +25,11 @@
 	let error = $state<string | null>(null);
 	/** Null while the server has not said whether it still needs an owner. */
 	let required = $state.raw<boolean | null>(null);
+	/**
+	 * False when the server runs with `TRACEPAD_SETUP=off` (Decision 32): no
+	 * link exists, and the first owner comes from the admin token instead.
+	 */
+	let enabled = $state.raw(true);
 
 	$effect(() => {
 		auth.stripFragment();
@@ -33,7 +38,10 @@
 	$effect(() => {
 		api
 			.getSetup()
-			.then((answer) => (required = answer.required))
+			.then((answer) => {
+				required = answer.required;
+				enabled = answer.enabled;
+			})
 			.catch(() => (required = null));
 	});
 
@@ -58,9 +66,13 @@
 	}
 </script>
 
-{#if required === false || !token}
+{#if required === false || !enabled || !token}
 	<Explanation title="Set up">
-		{#if token}
+		{#if !enabled && required !== false}
+			Setup is turned off on this server (<code>TRACEPAD_SETUP=off</code>). Its first owner is
+			created with the admin token — <code>tracepad accounts create &lt;email&gt; --owner</code> —
+			and the invitation link that prints sets the password.
+		{:else if token}
 			This server already has an owner, so there is nothing to set up.
 		{:else}
 			This link carries no setup token. The server prints a complete one at every start until it
@@ -90,7 +102,7 @@
 			type="password"
 			bind:value={password}
 			autocomplete="new-password"
-			hint="At least 10 characters. There is no other rule."
+			hint={PASSWORD_HINT}
 		/>
 		<Field
 			label="Password again"

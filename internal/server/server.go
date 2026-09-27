@@ -87,7 +87,7 @@ type Server struct {
 	limiter      *loginLimiter
 	// passwords bounds the bcrypt work in flight, and passwordLog paces
 	// the warning for what it turns away (spec 028 #31).
-	passwords   *passwordGate
+	passwords   *store.PasswordGate
 	passwordLog *logLimiter
 	// running counts the handlers in flight, and handlerGrace is how long
 	// a stop waits for them once their connections are closed (spec 001

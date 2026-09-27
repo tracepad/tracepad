@@ -56,8 +56,16 @@ A wrong token is refused as fast as a wrong key, with no counter of failures —
 the length is what makes guessing it hopeless. To keep it out of the
 environment every `docker inspect` prints, put it in a file and name the file
 with `TRACEPAD_ADMIN_TOKEN_FILE` instead (a mounted Docker or Kubernetes secret,
-say); setting both is refused. A secret key declared in `TRACEPAD_PROJECTS` is
-held to the same 32 characters.
+say); setting both is refused.
+
+A secret key declared in `TRACEPAD_PROJECTS` is held to the same 32
+characters when the declaration creates its project: a short one stops the
+start. For a project that already exists the declaration creates nothing — the
+variable never changes a project's keys — so a longer value there does not
+replace a short key. When the declared secret is still a live key of its
+project, the start goes on and warns, every time, with the way out: mint a new
+pair (below), move the applications onto it, revoke the short one, and declare
+the new secret.
 
 The token is sent in the same header as a key, so the CLI takes it as `--key`
 or `TRACEPAD_API_KEY`:

@@ -1,7 +1,9 @@
 package store
 
 import (
+	"context"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -67,10 +69,89 @@ func CheckPasswordLength(password string) error {
 	return nil
 }
 
+// PasswordGate bounds the `bcrypt` computations in flight: a few at once, a
+// short queue behind them, and a refusal for whatever arrives past that (spec
+// 028 #31). A queue with no bound would only move the exhaustion from the CPU
+// to the connections waiting on it.
+//
+// It lives here, beside the only two functions that run `bcrypt`, because
+// both take the PasswordSlot only the gate hands out: a caller that forgot the
+// gate does not compile, rather than quietly spending the CPU the gate exists
+// to protect. The server owns the gate — sizing it, and answering a refusal
+// with a `503` — so it is a value and not a package-level variable.
+type PasswordGate struct {
+	slots chan struct{}
+	queue chan struct{}
+}
+
+// ErrPasswordsBusy is the gate turning a caller away: the slots and the queue
+// behind them are full.
+var ErrPasswordsBusy = errors.New("the server is busy checking passwords; try again in a moment")
+
+// NewPasswordGate makes a gate of slots places with room for queue callers to
+// wait behind them.
+func NewPasswordGate(slots, queue int) *PasswordGate {
+	return &PasswordGate{slots: make(chan struct{}, max(slots, 1)), queue: make(chan struct{}, max(queue, 0))}
+}
+
+// Slots and Queue report the gate's size, for the log line that says it was
+// full.
+func (g *PasswordGate) Slots() int { return cap(g.slots) }
+func (g *PasswordGate) Queue() int { return cap(g.queue) }
+
+// Waiting reports how many callers are queued, for tests.
+func (g *PasswordGate) Waiting() int { return len(g.queue) }
+
+// PasswordSlot is a place at the gate: what HashPassword and Verify demand, and
+// what only Enter makes. Release gives it back; releasing twice is harmless.
+type PasswordSlot struct {
+	gate *PasswordGate
+	once sync.Once
+}
+
+// Release gives the place back.
+func (s *PasswordSlot) Release() {
+	s.once.Do(func() { <-s.gate.slots })
+}
+
+// Enter takes a place, waiting in the queue if there is room in it. It answers
+// ErrPasswordsBusy when the queue is full, and the context's error when the
+// caller gave up while it waited — which is not the gate being full, and is
+// not to be reported as though it were.
+func (g *PasswordGate) Enter(ctx context.Context) (*PasswordSlot, error) {
+	select {
+	case g.slots <- struct{}{}:
+		return &PasswordSlot{gate: g}, nil
+	default:
+	}
+	select {
+	case g.queue <- struct{}{}:
+	default:
+		return nil, ErrPasswordsBusy
+	}
+	defer func() { <-g.queue }()
+	select {
+	case g.slots <- struct{}{}:
+		return &PasswordSlot{gate: g}, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// held insists on a place at the gate. Reaching bcrypt without one is a
+// mistake in the code, not in the request, so it is a panic, which a test
+// meets at once.
+func (s *PasswordSlot) held() {
+	if s == nil || s.gate == nil {
+		panic("store: bcrypt without a place at the password gate")
+	}
+}
+
 // HashPassword checks the length and hashes. The two are one call because a
 // caller that hashed first and validated afterwards would have spent a quarter
 // of a second on a password it was going to refuse.
-func HashPassword(password string) ([]byte, error) {
+func HashPassword(slot *PasswordSlot, password string) ([]byte, error) {
+	slot.held()
 	if err := CheckPasswordLength(password); err != nil {
 		return nil, err
 	}
@@ -138,7 +219,8 @@ func decoy() []byte {
 // nothing, which is what makes `pending` answer the login with the same 401 as
 // a wrong password (Decision 8). It spends the comparison anyway, against the
 // decoy, so that it answers in the same time as well.
-func (a *Account) Verify(password string) bool {
+func (a *Account) Verify(slot *PasswordSlot, password string) bool {
+	slot.held()
 	passwordWork.Add(1)
 	if a == nil || len(a.hash) == 0 {
 		bcrypt.CompareHashAndPassword(decoy(), []byte(password))

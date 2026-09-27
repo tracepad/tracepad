@@ -749,7 +749,10 @@ class Api {
 
 	/** Whether this server still needs its first owner; askable by anybody. */
 	getSetup(signal?: AbortSignal) {
-		return this.#json<{ required: boolean }>('/api/v1/setup', { anonymous: true, signal });
+		return this.#json<{ required: boolean; enabled: boolean }>('/api/v1/setup', {
+			anonymous: true,
+			signal
+		});
 	}
 
 	/** Creates the first owner from the token the server printed. */

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -726,16 +727,22 @@ func (s *SessionsEnd) apply(tx *sql.Tx) error {
 // that.
 var ErrWrongPassword = errors.New("wrong current password")
 
-// PasswordChange replaces an account's password after checking the current
-// one, and ends every other session of that account (Decision 4).
+// PasswordChange replaces an account's password, and ends every other session
+// of that account (Decision 4).
 //
-// The check is inside the transaction for the ordinary reason: between reading
-// the hash and writing the new one the password can change, and a check
-// against a hash that is no longer stored is a check against nothing.
+// The caller has already compared the password it was given against Checked —
+// the account as it read it — and hashed the new one: both are `bcrypt`, a
+// quarter of a second each, and inside this transaction they held the one
+// writer, and every ingest behind it, for that long (spec 028 #31). What is
+// left in here is the part that has to be: between that read and this write
+// the password can change, so the stored hash must still be byte for byte the
+// one that was checked, or the answer is ErrWrongPassword — a check against a
+// hash that is no longer stored is a check against nothing.
 type PasswordChange struct {
 	AccountID string
-	// Current is the password the caller typed to prove it is them.
-	Current string
+	// Checked is the account whose stored hash the caller verified the
+	// current password against.
+	Checked *Account
 	NewHash []byte
 	// Keep is the caller's own session, which a password change does not
 	// end.
@@ -759,15 +766,7 @@ func (p *PasswordChange) apply(tx *sql.Tx) error {
 	if account == nil {
 		return &Rejection{Kind: RejectNotFound, Message: "no such account"}
 	}
-	// Checked before `Verify`, which would otherwise spend its decoy
-	// comparison here — a quarter of a second holding the one writer, on a
-	// path only a signed-in session reaches and a pending account therefore
-	// cannot. The timing this endpoint could leak is nothing: the caller
-	// already knows whose account it is.
-	if account.Pending {
-		return ErrWrongPassword
-	}
-	if !account.Verify(p.Current) {
+	if p.Checked == nil || len(account.hash) == 0 || !bytes.Equal(account.hash, p.Checked.hash) {
 		return ErrWrongPassword
 	}
 	if err := setPassword(tx, account.ID, p.NewHash); err != nil {

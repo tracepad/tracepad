@@ -28,8 +28,20 @@ const testAccountPassword = "correct horse battery"
 // first to ask. The one test that needs a hash at the production cost makes
 // its own.
 var accountHash = sync.OnceValues(func() ([]byte, error) {
-	return store.HashPassword(testAccountPassword)
+	slot := testSlot()
+	defer slot.Release()
+	return store.HashPassword(slot, testAccountPassword)
 })
+
+// testSlot is a place at a gate of the tests' own, for a test that hashes a
+// password outside any request.
+func testSlot() *store.PasswordSlot {
+	slot, err := store.NewPasswordGate(1, 0).Enter(context.Background())
+	if err != nil {
+		panic(err)
+	}
+	return slot
+}
 
 // newAccountHarness is the ordinary harness with the cross-project token
 // configured — which the six-caller matrix needs and the rest is unaffected
@@ -733,10 +745,11 @@ func TestSetup(t *testing.T) {
 
 	rec := h.call(t, "GET", "/api/v1/setup", nil, anonymous)
 	expectStatus(t, rec, 200)
-	if !decodeJSON[struct {
+	if answer := decodeJSON[struct {
 		Required bool `json:"required"`
-	}](t, rec).Required {
-		t.Fatal("a server with no owner must say it needs setting up")
+		Enabled  bool `json:"enabled"`
+	}](t, rec); !answer.Required || !answer.Enabled {
+		t.Fatalf("GET /setup = %+v; a server with no owner must say it needs setting up, and can be", answer)
 	}
 	if h.server.SetupURL() == "" || !strings.Contains(h.server.SetupURL(), "/setup#token=") {
 		t.Fatalf("SetupURL = %q, want a link with the token in the fragment", h.server.SetupURL())

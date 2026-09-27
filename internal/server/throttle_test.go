@@ -27,7 +27,7 @@ func TestLoginBurstStaysInsideTheLimit(t *testing.T) {
 	h.owner(t)
 	// Wide enough that nothing here is turned away at the gate: the
 	// question is the limiter's.
-	h.server.passwords = newPasswordGateOf(64, 64)
+	h.server.passwords = store.NewPasswordGate(64, 64)
 
 	const burst = 50
 	var (
@@ -91,9 +91,25 @@ func TestEmailSprayKeepsTheLockout(t *testing.T) {
 	if _, wait := l.reserve("victim@example.com", now); wait == 0 {
 		t.Fatal("a spray of invented emails gave a locked-out email its tries back")
 	}
-	if len(l.entries) > loginTrackedEmails || l.order.Len() != len(l.entries) {
-		t.Errorf("the limiter holds %d entries (%d in order), want at most %d",
-			len(l.entries), l.order.Len(), loginTrackedEmails)
+	if filed := l.filed(); len(l.entries) > loginTrackedEmails || filed != len(l.entries) {
+		t.Errorf("the limiter holds %d entries (%d filed), want at most %d",
+			len(l.entries), filed, loginTrackedEmails)
+	}
+
+	// One guess short of locked is kept too: dropping the oldest record,
+	// locked or not, let four guesses and a spray buy four more.
+	l = newLoginLimiter()
+	for range loginFailureLimit - 1 {
+		fail("victim@example.com")
+	}
+	for i := range loginTrackedEmails + 1 {
+		fail(fmt.Sprintf("spray-%d@example.com", i))
+	}
+	if !fail("victim@example.com") {
+		t.Fatal("the fifth attempt must be let through")
+	}
+	if _, wait := l.reserve("victim@example.com", now); wait == 0 {
+		t.Fatal("a spray of invented emails reset an email one guess from locked")
 	}
 
 	// Past the bound with every entry locked, the oldest goes: memory is
@@ -221,15 +237,15 @@ func TestPasswordLongerThanBcryptReads(t *testing.T) {
 func TestPasswordGateTurnsAway(t *testing.T) {
 	h := newAccountHarness(t)
 	h.owner(t)
-	h.server.passwords = newPasswordGateOf(1, 0)
-	release, ok := h.server.passwords.enter(context.Background())
-	if !ok {
+	h.server.passwords = store.NewPasswordGate(1, 0)
+	slot, err := h.server.passwords.Enter(context.Background())
+	if err != nil {
 		t.Fatal("an empty gate must let one in")
 	}
 
 	for range loginFailureLimit + 1 {
 		rec := h.login(t, "owner@example.com", "not the password")
-		expectError(t, rec, http.StatusServiceUnavailable, passwordBusy)
+		expectError(t, rec, http.StatusServiceUnavailable, store.ErrPasswordsBusy.Error())
 		if rec.Header().Get("Retry-After") != "1" {
 			t.Errorf("Retry-After = %q, want 1", rec.Header().Get("Retry-After"))
 		}
@@ -241,54 +257,33 @@ func TestPasswordGateTurnsAway(t *testing.T) {
 	token := strings.TrimPrefix(h.server.SetupURL(), h.server.originForPrint()+"/setup#token=")
 	expectError(t, h.call(t, "POST", "/api/v1/setup", mustJSON(t, map[string]any{
 		"token": token, "email": "founder@example.com", "password": testAccountPassword,
-	}), anonymous, asJSON), http.StatusServiceUnavailable, passwordBusy)
+	}), anonymous, asJSON), http.StatusServiceUnavailable, store.ErrPasswordsBusy.Error())
 
-	release()
+	slot.Release()
 	expectStatus(t, h.login(t, "owner@example.com", testAccountPassword), http.StatusOK)
 }
 
-// TestPasswordGateQueues: behind a full gate there is a short queue, and a
-// request in it goes through when a place frees; one that gives up leaves it.
-func TestPasswordGateQueues(t *testing.T) {
-	g := newPasswordGateOf(1, 1)
-	first, ok := g.enter(context.Background())
-	if !ok {
-		t.Fatal("first")
-	}
-	entered := make(chan func(), 1)
-	go func() {
-		release, ok := g.enter(context.Background())
-		if ok {
-			entered <- release
-		}
-		close(entered)
-	}()
-	// The queue holds one; a third caller, with the queue taken, is
-	// turned away at once.
-	deadline := time.Now().Add(5 * time.Second)
-	for len(g.queue) == 0 && time.Now().Before(deadline) {
-		time.Sleep(time.Millisecond)
-	}
-	if _, ok := g.enter(context.Background()); ok {
-		t.Fatal("a full gate with a full queue must turn the caller away")
-	}
-	first()
-	second, ok := <-entered
-	if !ok {
-		t.Fatal("the queued caller must get the place that freed")
-	}
-	second()
+// TestPasswordGateLetsAGiveUpGo: a caller that hung up while it waited in the
+// queue is not the gate being full. Nothing is logged, nothing counted, and
+// nothing written to a connection that is gone.
+func TestPasswordGateLetsAGiveUpGo(t *testing.T) {
+	h := newAccountHarness(t)
+	h.server.passwords = store.NewPasswordGate(1, 1)
+	slot, _ := h.server.passwords.Enter(context.Background())
+	defer slot.Release()
 
-	blocker, _ := g.enter(context.Background())
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, ok := g.enter(ctx); ok {
-		t.Error("a caller that gave up must not be let in")
+	rec := httptest.NewRecorder()
+	if _, ok := h.server.enterPasswordGate(rec, httptest.NewRequest("POST", "/", nil).WithContext(ctx)); ok {
+		t.Fatal("a caller that gave up must not be let in")
 	}
-	if len(g.queue) != 0 {
-		t.Error("a caller that gave up must leave the queue")
+	if rec.Body.Len() != 0 || rec.Header().Get("Retry-After") != "" {
+		t.Errorf("wrote %q with Retry-After %q to a caller that is gone", rec.Body.String(), rec.Header().Get("Retry-After"))
 	}
-	blocker()
+	if _, log := h.server.passwordLog.allow(time.Now()); !log {
+		t.Error("a caller that gave up used up the gate's log line")
+	}
 }
 
 // TestSetupLinkExpires: the printed link works for a day, not for the life of
@@ -324,10 +319,23 @@ func TestSetupOff(t *testing.T) {
 	if got := h.server.SetupURL(); got != "" {
 		t.Errorf("SetupURL = %q with setup off, want none", got)
 	}
+	// The interface is told, so it can say what to do rather than ask for
+	// a link that will never come.
+	rec := h.call(t, "GET", "/api/v1/setup", nil, anonymous)
+	expectStatus(t, rec, 200)
+	if answer := decodeJSON[struct {
+		Required *bool `json:"required"`
+		Enabled  *bool `json:"enabled"`
+	}](t, rec); answer.Required == nil || !*answer.Required || answer.Enabled == nil || *answer.Enabled {
+		t.Errorf("GET /setup = %s, want required and not enabled", rec.Body.String())
+	}
 	work := store.PasswordWork()
 	expectError(t, h.call(t, "POST", "/api/v1/setup", mustJSON(t, map[string]any{
 		"token": "anything", "email": "founder@example.com", "password": testAccountPassword,
 	}), anonymous, asJSON), http.StatusForbidden, "TRACEPAD_SETUP=off")
+	// Whatever the body says: the answer comes before it is read.
+	expectError(t, h.call(t, "POST", "/api/v1/setup", []byte(`{"token": `), anonymous, asJSON),
+		http.StatusForbidden, "TRACEPAD_SETUP=off")
 	if store.PasswordWork() != work {
 		t.Error("a refused setup spent a hash")
 	}
@@ -335,4 +343,14 @@ func TestSetupOff(t *testing.T) {
 	expectStatus(t, h.call(t, "POST", "/api/v1/accounts",
 		mustJSON(t, map[string]any{"email": "founder@example.com", "owner": true}),
 		asAdmin), http.StatusCreated)
+}
+
+// filed counts the records in the limiter's eviction lists, which must be every
+// record it holds and nothing else.
+func (l *loginLimiter) filed() int {
+	n := 0
+	for _, records := range l.byCount {
+		n += records.Len()
+	}
+	return n
 }

@@ -170,6 +170,9 @@ func serve(args []string) error {
 	if err != nil {
 		return err
 	}
+	if err := checkDeclaredSecrets(slog.Default(), st, specs); err != nil {
+		return err
+	}
 	boot, err := st.Bootstrap(specs)
 	if err != nil {
 		return err
@@ -284,6 +287,46 @@ func provisionSpecs(cfg *config.Config) ([]store.ProvisionSpec, error) {
 		specs = append(specs, store.ProvisionSpec{Name: p.Name, PublicKey: p.PublicKey, SecretKey: p.SecretKey})
 	}
 	return specs, nil
+}
+
+// checkDeclaredSecrets holds a secret declared in TRACEPAD_PROJECTS to the
+// admin token's length (spec 001 #18) — where the length can still be chosen.
+//
+// A declaration that creates a project is refused when it is short: that key
+// does not exist yet, and a longer one in the variable is the whole fix. A
+// declaration for a project that exists creates nothing — the bootstrap never
+// rotates a project's keys (#9) — so refusing it would send the operator to
+// lengthen a value the server then ignores, while the short key stays live
+// and the applications holding the new one get 401s. There the start goes on,
+// and says, when the short secret is still a live key of that project, how to
+// replace it; rotating needs a running server, which a refusal would not give.
+// The secret is measured, never quoted.
+func checkDeclaredSecrets(log *slog.Logger, st *store.Store, specs []store.ProvisionSpec) error {
+	for i, spec := range specs {
+		if len(spec.SecretKey) >= config.MinSecretLength {
+			continue
+		}
+		existing, err := st.ProjectByName(spec.Name)
+		if err != nil {
+			return err
+		}
+		if existing == nil {
+			return fmt.Errorf("TRACEPAD_PROJECTS entry %d: the secret key is %d characters; want at least %d — %s",
+				i+1, len(spec.SecretKey), config.MinSecretLength, config.GenerateHint)
+		}
+		project, key, err := st.KeyBySecret(context.Background(), spec.SecretKey)
+		if err != nil {
+			return err
+		}
+		if project == nil || project.ID != existing.ID {
+			continue
+		}
+		log.Warn("a key declared in TRACEPAD_PROJECTS is short enough to guess: mint a new pair in the project's "+
+			"settings (or tracepad keys create with the admin token), move the applications onto it, revoke this "+
+			"one, and declare the new secret — openssl rand -hex 32 makes a good one",
+			"entry", i+1, "project", spec.Name, "public_key", key.PublicKey, "length", len(spec.SecretKey))
+	}
+	return nil
 }
 
 // printStartup hands the operator ready-to-paste connection env for every

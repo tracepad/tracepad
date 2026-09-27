@@ -267,9 +267,12 @@ docker run -d --name tracepad -v tracepad:/data -p 127.0.0.1:4318:4318 \
 Compose's `secrets:` mounts the same file at `/run/secrets/<name>` for you (see
 [Compose](#compose)). The rest is who has the Docker socket: on that host it is
 as good as root, and it reads this token whatever you do. The same goes for
-`TRACEPAD_PROJECTS`, whose entries carry secret keys. Either kind of secret
-shorter than 32 characters stops the start, with the command above in the
-message.
+`TRACEPAD_PROJECTS`, whose entries carry secret keys. An admin token shorter
+than 32 characters stops the start, and so does a short declared secret for a
+project the start would create, each with the command above in the message. A
+project that already exists keeps the keys it has — the variable never rotates
+them — so a short declared secret that is still its key is a warning at every
+start, saying how to replace it.
 
 `TRACEPAD_LISTEN` is already right, and the way to break it is to set it to
 `127.0.0.1:4318`. Inside a container, loopback is the container's own: the
@@ -380,10 +383,19 @@ services:
 
 secrets:
   tracepad_admin_token:
-    file: ./admin-token     # openssl rand -hex 32 > admin-token; not in git
+    file: ./admin-token     # not in git; made as below
 
 volumes:
   tracepad:
+```
+
+Compose mounts the file as it is on the host, owner and mode included, so make
+it the way the `docker run` example above does — readable by the image's user
+and by nobody else:
+
+```sh
+( umask 077; openssl rand -hex 32 > admin-token )
+sudo chown 65532 admin-token
 ```
 
 `docker compose logs tracepad` is where the first run's keys are — and where

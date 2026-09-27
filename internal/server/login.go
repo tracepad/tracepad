@@ -112,7 +112,9 @@ func (s *Server) SetupRequired() (bool, error) {
 }
 
 // handleGetSetup is the one thing the interface can learn without a
-// credential: whether to show the setup screen or the login form.
+// credential: whether to show the setup screen or the login form, and whether
+// that screen can do anything — `enabled` is false under TRACEPAD_SETUP=off,
+// where the first owner comes from the admin token instead (Decision 32).
 func (s *Server) handleGetSetup(w http.ResponseWriter, r *http.Request) {
 	if s.store == nil {
 		writeError(w, http.StatusServiceUnavailable, "the API is not available")
@@ -128,7 +130,7 @@ func (s *Server) handleGetSetup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to read the accounts")
 		return
 	}
-	writeJSON(w, http.StatusOK, object{}.put("required", required))
+	writeJSON(w, http.StatusOK, object{}.put("required", required).put("enabled", !s.setupOff))
 }
 
 // handleSetup creates the first owner and signs it in.
@@ -142,6 +144,13 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "the API is not available")
 		return
 	}
+	// Before the body is read: whatever it says, the answer is this one
+	// (Decision 32). The router's own limits on a public body (#26) come
+	// earlier still.
+	if s.setupOff {
+		writeError(w, http.StatusForbidden, setupIsOff)
+		return
+	}
 	if _, err := queryParams(r); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -153,10 +162,6 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		Name     string `json:"name"`
 	}
 	if !s.readJSON(w, r, &request) {
-		return
-	}
-	if s.setupOff {
-		writeError(w, http.StatusForbidden, setupIsOff)
 		return
 	}
 	token := s.currentSetupToken()
@@ -241,13 +246,13 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	// Then a place at the password gate. Turned away there, the password
 	// was never compared, so the attempt is given back.
-	release, ok := s.enterPasswordGate(w, r)
+	slot, ok := s.enterPasswordGate(w, r)
 	if !ok {
 		attempt.cancel()
 		return
 	}
-	account, verified, err := s.checkLogin(email, request.Password)
-	release()
+	account, verified, err := s.checkLogin(slot, email, request.Password)
+	slot.Release()
 	if err != nil {
 		attempt.cancel()
 		slog.Error("account lookup failed", "err", err)
@@ -268,7 +273,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 // checkLogin looks the account up and compares the password.
-func (s *Server) checkLogin(email, password string) (*store.Account, bool, error) {
+func (s *Server) checkLogin(slot *store.PasswordSlot, email, password string) (*store.Account, bool, error) {
 	account, err := s.store.AccountByEmail(email)
 	if err != nil {
 		return nil, false, err
@@ -280,7 +285,7 @@ func (s *Server) checkLogin(email, password string) (*store.Account, bool, error
 	// comparison against a decoy when there is no stored hash, so every one
 	// of the four failures costs the same — and costs it inside the
 	// password gate, like a real one (spec 028 #31).
-	return account, account.Verify(password), nil
+	return account, account.Verify(slot, password), nil
 }
 
 // wrongCredentials is the one sentence every login failure gets.
@@ -439,15 +444,29 @@ func (s *Server) handlePatchMe(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	// Both halves of a password change are bcrypt — the new hash here and
-	// the current password's comparison in the job — so the place at the
-	// gate is held across the two.
-	release, ok := s.enterPasswordGate(w, r)
+	// Both halves of a password change are bcrypt, and both run here,
+	// under one place at the gate that is given back before the job waits
+	// for the writer: in the job they held the one writer, and every
+	// ingest behind it, for half a second (spec 028 #31). The current
+	// password is compared against the hash this request read; the job
+	// then refuses unless that hash is still the stored one. A pending
+	// account has no hash and no session to be here with, so it spends
+	// nothing.
+	if account.Pending {
+		writeError(w, http.StatusForbidden, store.ErrWrongPassword.Error())
+		return
+	}
+	slot, ok := s.enterPasswordGate(w, r)
 	if !ok {
 		return
 	}
-	defer release()
-	hash, ok := hashPassword(w, request.Password.New)
+	if !account.Verify(slot, request.Password.Current) {
+		slot.Release()
+		writeError(w, http.StatusForbidden, store.ErrWrongPassword.Error())
+		return
+	}
+	hash, ok := hashPassword(w, slot, request.Password.New)
+	slot.Release()
 	if !ok {
 		return
 	}
@@ -459,7 +478,7 @@ func (s *Server) handlePatchMe(w http.ResponseWriter, r *http.Request) {
 	// changing it is what a person does when they think somebody else has
 	// it.
 	change := &store.PasswordChange{
-		AccountID: account.ID, Current: request.Password.Current,
+		AccountID: account.ID, Checked: account,
 		NewHash: hash, Keep: c.session.ID, Name: request.Name, Preferences: preferences,
 	}
 	if err := s.writer.Submit(r.Context(), change); err != nil {
@@ -703,18 +722,18 @@ func (s *Server) readPassword(w http.ResponseWriter, r *http.Request, password s
 		writeError(w, http.StatusUnprocessableEntity, err.Error())
 		return nil, false
 	}
-	release, ok := s.enterPasswordGate(w, r)
+	slot, ok := s.enterPasswordGate(w, r)
 	if !ok {
 		return nil, false
 	}
-	defer release()
-	return hashPassword(w, password)
+	defer slot.Release()
+	return hashPassword(w, slot, password)
 }
 
 // hashPassword hashes a password whose length is already known to be good,
 // for a caller that holds its place at the gate.
-func hashPassword(w http.ResponseWriter, password string) ([]byte, bool) {
-	hash, err := store.HashPassword(password)
+func hashPassword(w http.ResponseWriter, slot *store.PasswordSlot, password string) ([]byte, bool) {
+	hash, err := store.HashPassword(slot, password)
 	if err != nil {
 		if errors.Is(err, store.ErrPasswordLength) {
 			writeError(w, http.StatusUnprocessableEntity, err.Error())

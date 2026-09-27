@@ -73,8 +73,9 @@ a credential.
 
 A deployment that makes its first owner with the admin token instead — a
 script, an API-only install — can switch setup off with `TRACEPAD_SETUP=off`:
-no link is minted or printed, and `POST /api/v1/setup` answers `403`. Create
-the owner with the token:
+no link is minted or printed, `GET /api/v1/setup` adds `"enabled": false`, and
+`POST /api/v1/setup` answers `403`; the setup screen says so and what to do
+instead. Create the owner with the token:
 
 ```sh
 TRACEPAD_API_KEY=$TRACEPAD_ADMIN_TOKEN tracepad accounts create you@example.com --owner

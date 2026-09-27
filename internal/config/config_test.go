@@ -156,9 +156,11 @@ func TestSweepIntervalAndAdminToken(t *testing.T) {
 // longToken is an admin token of the length `openssl rand -hex 32` prints.
 var longToken = strings.Repeat("ab", 32)
 
-// A secret that owns the deployment, or a project, is refused at start when
-// it is short enough to guess over the network — with the command that makes
-// a good one, and without the value (spec 001 #18).
+// The admin token owns the deployment, so it is refused at start when it is
+// short enough to guess over the network — with the command that makes a good
+// one, and without the value (spec 001 #18). A declared project secret is
+// checked at the start itself, where the store says whether it would create a
+// project (cmd/tracepad).
 func TestShortSecretsRefuseToStart(t *testing.T) {
 	short := "tp-admin-devcheck"
 	t.Setenv("TRACEPAD_ADMIN_TOKEN", short)
@@ -177,19 +179,6 @@ func TestShortSecretsRefuseToStart(t *testing.T) {
 	t.Setenv("TRACEPAD_ADMIN_TOKEN", strings.Repeat("x", MinSecretLength))
 	if _, err := Load(nil); err != nil {
 		t.Errorf("a token of exactly %d characters: %v", MinSecretLength, err)
-	}
-
-	_, err = ParseProjects("app:tp-pk-a:" + secretA + ",eval:tp-pk-b:tp-sk-short")
-	if err == nil {
-		t.Fatal("a short declared secret must refuse the start")
-	}
-	for _, want := range []string{"entry 2", "11 characters", "openssl rand -hex 32"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error = %q, want it to say %q", err, want)
-		}
-	}
-	if strings.Contains(err.Error(), "tp-sk-short") {
-		t.Errorf("error = %q quotes the secret", err)
 	}
 }
 

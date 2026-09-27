@@ -137,8 +137,10 @@ const (
 // number of connections do not exhaust. `openssl rand -hex 32` is 256.
 const MinSecretLength = 32
 
-// generateHint is how every short-secret refusal ends.
-const generateHint = "generate one with: openssl rand -hex 32"
+// GenerateHint is how every short-secret refusal ends: the admin token's
+// here, and a declared project secret's at the start, where the store says
+// whether the declaration creates a project (spec 001 #18).
+const GenerateHint = "generate one with: openssl rand -hex 32"
 
 // knownEnv lists every TRACEPAD_* variable the binary understands.
 var knownEnv = map[string]bool{
@@ -265,24 +267,41 @@ func Load(args []string) (*Config, error) {
 // newline behind. The value is never quoted in an error: it is the secret.
 func readAdminToken() (string, error) {
 	inline := strings.TrimSpace(os.Getenv("TRACEPAD_ADMIN_TOKEN"))
-	path := strings.TrimSpace(os.Getenv("TRACEPAD_ADMIN_TOKEN_FILE"))
 	name, token := "TRACEPAD_ADMIN_TOKEN", inline
-	switch {
-	case inline != "" && path != "":
-		return "", errors.New("TRACEPAD_ADMIN_TOKEN and TRACEPAD_ADMIN_TOKEN_FILE are both set; set one")
-	case path != "":
-		raw, err := os.ReadFile(path)
+	if strings.TrimSpace(os.Getenv("TRACEPAD_ADMIN_TOKEN_FILE")) != "" {
+		if inline != "" {
+			return "", errors.New("TRACEPAD_ADMIN_TOKEN and TRACEPAD_ADMIN_TOKEN_FILE are both set; set one")
+		}
+		fromFile, err := AdminTokenFile(os.Getenv)
 		if err != nil {
-			return "", fmt.Errorf("TRACEPAD_ADMIN_TOKEN_FILE: %w", err)
+			return "", err
 		}
-		name, token = "TRACEPAD_ADMIN_TOKEN_FILE", strings.TrimSpace(string(raw))
-		if token == "" {
-			return "", fmt.Errorf("TRACEPAD_ADMIN_TOKEN_FILE: %s is empty", path)
-		}
+		name, token = "TRACEPAD_ADMIN_TOKEN_FILE", fromFile
 	}
 	if token != "" && len(token) < MinSecretLength {
 		return "", fmt.Errorf("%s: the admin token is %d characters; it creates owner accounts, "+
-			"so it must be at least %d — %s", name, len(token), MinSecretLength, generateHint)
+			"so it must be at least %d — %s", name, len(token), MinSecretLength, GenerateHint)
+	}
+	return token, nil
+}
+
+// AdminTokenFile reads the admin token from the file TRACEPAD_ADMIN_TOKEN_FILE
+// names, trimmed, or "" when the variable is unset; an unreadable or empty file
+// is an error. getenv is how the caller reads its environment: the server's
+// start (readAdminToken) and the CLI's export guard, which must know every key
+// of this Tracepad the machine holds, read the file the one same way.
+func AdminTokenFile(getenv func(string) string) (string, error) {
+	path := strings.TrimSpace(getenv("TRACEPAD_ADMIN_TOKEN_FILE"))
+	if path == "" {
+		return "", nil
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("TRACEPAD_ADMIN_TOKEN_FILE: %w", err)
+	}
+	token := strings.TrimSpace(string(raw))
+	if token == "" {
+		return "", fmt.Errorf("TRACEPAD_ADMIN_TOKEN_FILE: %s is empty", path)
 	}
 	return token, nil
 }
@@ -451,13 +470,6 @@ func ParseProjects(raw string) ([]ProjectSpec, error) {
 				return nil, fmt.Errorf("TRACEPAD_PROJECTS entry %d: want name:public_key:secret_key, field %d is empty",
 					i+1, f+1)
 			}
-		}
-		// A declared secret is a project key an application sends on
-		// every export; a short one is guessable over the network like a
-		// short admin token (spec 001 #18). Measured, never quoted.
-		if len(fields[2]) < MinSecretLength {
-			return nil, fmt.Errorf("TRACEPAD_PROJECTS entry %d: the secret key is %d characters; want at least %d — %s",
-				i+1, len(fields[2]), MinSecretLength, generateHint)
 		}
 		if seen[fields[0]] {
 			return nil, fmt.Errorf("TRACEPAD_PROJECTS: duplicate project name %q", fields[0])
