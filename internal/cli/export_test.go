@@ -963,7 +963,9 @@ func TestExportRoundTrip(t *testing.T) {
 	// Minted with the receiver's admin token, which is who mints keys
 	// (spec 045 #4).
 	destination.env["TRACEPAD_API_KEY"] = testAdminToken
-	minted := destination.run(t.Context(), false, "keys", "create", "--json")
+	// The receiving server's key needs ingest and nothing else (spec 045
+	// #16).
+	minted := destination.run(t.Context(), false, "keys", "create", "--scope", "ingest", "--json")
 	destination.env["TRACEPAD_API_KEY"] = testKey
 	if minted.code != ExitOK {
 		t.Fatalf("keys create: exit = %d, stderr = %s", minted.code, minted.stderr)

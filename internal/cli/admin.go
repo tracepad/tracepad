@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptrace"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -98,6 +99,14 @@ type affectedRun struct {
 
 // projectView is a project as the API renders it.
 type projectView struct {
+	// Key is the key that asked, on its own project's row (spec 045 #12):
+	// which it is and what it may do. Absent for a session or the token.
+	Key *struct {
+		PublicKey string   `json:"public_key"`
+		Name      string   `json:"name"`
+		Scopes    []string `json:"scopes"`
+	} `json:"key"`
+
 	ID               string `json:"id"`
 	Name             string `json:"name"`
 	RetentionDays    *int   `json:"retention_days"`
@@ -428,23 +437,42 @@ func keyName(name string) string {
 	return " (" + termsafe.String(name) + ")"
 }
 
+// scopesUsage is the usage error for a mint that does not say what the key may
+// do (spec 045 #15): the three words, and what each is for.
+const scopesUsage = "keys create needs --scope: one or more of ingest (send spans, " +
+	"media and scores, fetch a prompt), read (every read of the project's data) and " +
+	"write (every change a key may make), comma-separated"
+
 func (r *run) keysCreate(ctx context.Context, args []string) error {
 	fs := r.flags("keys create")
 	project := fs.String("project", "", "")
 	name := fs.String("name", "", "")
+	scope := fs.String("scope", "", "")
 	if _, err := r.parse(fs, args, 0); err != nil {
 		return err
+	}
+	// Asked before the project, so that a mint that says nothing about
+	// what the key may do is refused before any request (spec 045 #6).
+	var scopes []string
+	for _, word := range strings.Split(*scope, ",") {
+		if word = strings.TrimSpace(word); word != "" {
+			scopes = append(scopes, word)
+		}
+	}
+	if len(scopes) == 0 {
+		return usageErrorf("%s", scopesUsage)
 	}
 	id, err := r.projectID(ctx, fs, *project)
 	if err != nil {
 		return err
 	}
 
-	// The name says which program will hold the key (spec 045 #6); the
-	// server trims and bounds it.
-	var request any
+	// The words go as given: which of them the server takes is the
+	// server's to say (spec 004 #1). The name says which program will
+	// hold the key (#6); the server trims and bounds it.
+	request := map[string]any{"scopes": scopes}
 	if *name != "" {
-		request = map[string]string{"name": *name}
+		request["name"] = *name
 	}
 	body, err := r.api.Send(ctx, http.MethodPost,
 		"/api/v1/projects/"+url.PathEscape(id)+"/keys", nil, request)
@@ -455,15 +483,23 @@ func (r *run) keysCreate(ctx context.Context, args []string) error {
 		return r.emit(body)
 	}
 	created, err := decode[struct {
-		PublicKey string `json:"public_key"`
-		SecretKey string `json:"secret_key"`
+		PublicKey string   `json:"public_key"`
+		SecretKey string   `json:"secret_key"`
+		Scopes    []string `json:"scopes"`
 	}](body)
 	if err != nil {
 		return err
 	}
+	fmt.Fprintf(r.opt.Stdout, "  scopes: %s\n\n", termsafe.String(strings.Join(created.Scopes, ", ")))
+	// The lines that fit the scopes (spec 045 #14): every key is a
+	// TRACEPAD_API_KEY, which the packages export with as well; only a key
+	// that may ingest is offered to a Langfuse SDK's exporter.
 	fmt.Fprintf(r.opt.Stdout, "  TRACEPAD_API_KEY=%s\n", termsafe.String(created.SecretKey))
-	fmt.Fprintf(r.opt.Stdout, "  LANGFUSE_PUBLIC_KEY=%s\n", termsafe.String(created.PublicKey))
-	fmt.Fprintf(r.opt.Stdout, "  LANGFUSE_SECRET_KEY=%s\n\n", termsafe.String(created.SecretKey))
+	if slices.Contains(created.Scopes, "ingest") {
+		fmt.Fprintf(r.opt.Stdout, "  LANGFUSE_PUBLIC_KEY=%s\n", termsafe.String(created.PublicKey))
+		fmt.Fprintf(r.opt.Stdout, "  LANGFUSE_SECRET_KEY=%s\n", termsafe.String(created.SecretKey))
+	}
+	fmt.Fprintln(r.opt.Stdout)
 	fmt.Fprintln(r.opt.Stdout,
 		"the secret key is shown only here; move your SDKs onto it, then revoke the old key")
 	return nil
@@ -1013,6 +1049,12 @@ func renderProject(r *run, view projectView) {
 	fmt.Fprintf(r.opt.Stdout, "  statistics  %s\n",
 		window(view.StatsRetentionDays, "kept forever"))
 	fmt.Fprintf(r.opt.Stdout, "  media       %s\n", mediaSetting(view.Media))
+	if key := view.Key; key != nil {
+		// What the credential this command runs with may do, which is the
+		// question a 403 leaves (spec 045 #12, #15).
+		fmt.Fprintf(r.opt.Stdout, "  key         %s%s: %s\n", termsafe.String(key.PublicKey),
+			keyName(key.Name), termsafe.String(strings.Join(key.Scopes, ", ")))
+	}
 	if view.DeletedAt != "" {
 		fmt.Fprintf(r.opt.Stdout, "  deleted     %s\n", shortTime(view.DeletedAt))
 		fmt.Fprintf(r.opt.Stdout, "  purged at   %s\n", shortTime(view.PurgeAt))

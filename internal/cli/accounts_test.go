@@ -375,7 +375,7 @@ func TestAccountsRemoveListsTheKeysItMinted(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := h.writer.Submit(t.Context(), &store.KeyCreate{
-		ProjectID: project, Keys: keys, Name: "helper's script", Origin: store.OriginAccount(helper),
+		ProjectID: project, Keys: keys, Name: "helper's script", Scopes: store.AllScopes, Origin: store.OriginAccount(helper),
 	}); err != nil {
 		t.Fatal(err)
 	}

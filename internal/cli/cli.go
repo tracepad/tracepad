@@ -301,7 +301,8 @@ and asks you to type the name back; --yes answers that for a script:
   tracepad projects rm      <project-id> [--yes]       (admin token)
   tracepad projects restore <project-id>
   tracepad keys ls      [--project ID]                 (admin token)
-  tracepad keys create  [--name NAME] [--project ID]   (admin token)
+  tracepad keys create  --scope ingest[,read,write] [--name NAME] [--project ID]
+                                                       (admin token)
   tracepad keys rm      <public-key> [--project ID] [--yes]
                                                        (admin token)
   tracepad retention show [--project ID]
