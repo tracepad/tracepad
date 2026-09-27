@@ -75,7 +75,10 @@ func (s *Server) submit(w http.ResponseWriter, r *http.Request, job store.WriteJ
 		writeError(w, http.StatusServiceUnavailable, "writes are not available")
 		return false
 	}
-	err := s.writer.Submit(r.Context(), job)
+	// Committed whether or not the client waits, and waited for, so that a
+	// body the job holds stays counted in the body budget until it is
+	// written (spec 043 #31): the writer commits a queued job all the same.
+	err := s.writer.Submit(context.WithoutCancel(r.Context()), job)
 	if err == nil {
 		return true
 	}
@@ -207,7 +210,7 @@ func (s *Server) bodyRead(w http.ResponseWriter, r *http.Request, err error) boo
 		return true
 	}
 	if errors.Is(err, errBodyBudget) {
-		s.refuseForBudget(w, callerProject(r))
+		s.refuseBodyForBudget(w, r, callerProject(r), s.maxBodyBytes)
 		return false
 	}
 	var inflated *inflatedTooLarge
@@ -227,12 +230,22 @@ func (s *Server) bodyRead(w http.ResponseWriter, r *http.Request, err error) boo
 	return false
 }
 
-// refuseForBudget answers a body the budget could not hold (spec 043 #13) and
-// counts it for the project it was about, if any (#21).
-func (s *Server) refuseForBudget(w http.ResponseWriter, projectID string) {
+// refuseBodyForBudget answers a body the budget could not hold (spec 043 #13)
+// and counts it for the project it was about, if any (#21). What the request
+// had reserved is given back first, and the answer is written before the rest
+// of the body — up to `length` — is read and dropped, as a refused media
+// upload's is (spec 041 #31, spec 043 #31): a client still sending would
+// otherwise meet a closed connection instead of the `429` it retries, and the
+// drain costs the budget nothing.
+func (s *Server) refuseBodyForBudget(w http.ResponseWriter, r *http.Request, projectID string, length int64) {
+	if hold := holdFrom(r.Context()); hold != nil {
+		hold.releaseAll()
+	}
 	s.counters.observeBodyRefused(projectID)
-	w.Header().Set("Retry-After", "1")
-	writeError(w, http.StatusTooManyRequests, bodyBusy)
+	answerThenDrain(w, r, length, func() {
+		w.Header().Set("Retry-After", "1")
+		writeError(w, http.StatusTooManyRequests, bodyBusy)
+	})
 }
 
 // maxPublicBodyBytes caps the body of a route anyone can call (spec 028

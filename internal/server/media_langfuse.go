@@ -275,7 +275,7 @@ func (s *Server) handleLangfuseMediaPut(w http.ResponseWriter, r *http.Request) 
 	// SDK reads the 429 it retries.
 	body, err := io.ReadAll(budgeted(http.MaxBytesReader(w, r.Body, grant.Length+1), holdFrom(r.Context()), grant.Length))
 	if errors.Is(err, errBodyBudget) {
-		answerThenDrain(w, r, grant.Length, func() { s.refuseForBudget(w, grant.Project) })
+		s.refuseBodyForBudget(w, r, grant.Project, grant.Length)
 		return
 	}
 	if err != nil {

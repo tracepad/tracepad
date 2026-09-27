@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -336,8 +337,11 @@ func TestBodyBudget(t *testing.T) {
 	if got := rec.Header().Get("Retry-After"); got != "1" {
 		t.Errorf("Retry-After = %q, want 1", got)
 	}
-	if plain.total() > bodyStep {
-		t.Errorf("read %d bytes of a body the budget refused, want at most one step (%d)", plain.total(), bodyStep)
+	// Answered first, then the rest of the body read and dropped, so the
+	// exporter reads the 429 rather than a closed connection; that it kept at
+	// most one step past what fit is TestBudgetReaderStopsAStepPastTheBudget.
+	if plain.total() != int64(len(third)) {
+		t.Errorf("read %d of %d bytes of a refused body, want it drained after the answer", plain.total(), len(third))
 	}
 	rec = refusedWithin(t, func() *httptest.ResponseRecorder {
 		return h.post(t, "/v1/traces", gzipped(t, third), func(r *http.Request) { r.Header.Set("Content-Encoding", "gzip") })
@@ -491,6 +495,187 @@ func refusedWithin(t *testing.T, request func() *httptest.ResponseRecorder) *htt
 		t.Fatal("the request was not refused: it was read whole and is waiting for the writer")
 		return nil
 	}
+}
+
+// A budget reader keeps at most one step past what the budget held: the read
+// that did not fit is the last (spec 043 #13).
+func TestBudgetReaderStopsAStepPastTheBudget(t *testing.T) {
+	budget := &bodyBudget{capacity: 3 * bodyStep}
+	hold := &bodyHold{budget: budget}
+	body := bytes.Repeat([]byte("x"), 10*bodyStep)
+	read, err := io.ReadAll(budgeted(bytes.NewReader(body), hold, int64(len(body))))
+	if !errors.Is(err, errBodyBudget) {
+		t.Fatalf("err = %v, want the budget's", err)
+	}
+	if len(read) > 4*bodyStep {
+		t.Errorf("read %d bytes against a budget of %d, want at most one step past it", len(read), 3*bodyStep)
+	}
+	if budget.heldBytes() != 3*bodyStep {
+		t.Errorf("held %d, want the whole budget", budget.heldBytes())
+	}
+	hold.releaseAll()
+	if budget.heldBytes() != 0 {
+		t.Errorf("held %d after the release", budget.heldBytes())
+	}
+}
+
+// A client that hangs up while its write waits for the writer does not take
+// its body out of the budget: the writer commits the job all the same, and the
+// handler waits for it holding the reservation — for an export and for a JSON
+// API write alike (spec 043 #31).
+func TestAHangUpKeepsTheBodyInTheBudget(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	release := make(chan struct{})
+	h.server.writer = &stalledWriter{inner: h.server.writer, release: release}
+
+	for name, send := range map[string]func(ctx context.Context) *httptest.ResponseRecorder{
+		"export": func(ctx context.Context) *httptest.ResponseRecorder {
+			return h.post(t, "/v1/traces", bulkBody(t, 1, 2, 3), func(r *http.Request) { *r = *r.WithContext(ctx) })
+		},
+		"score": func(ctx context.Context) *httptest.ResponseRecorder {
+			return h.call(t, "POST", "/api/v1/scores", mustJSON(t, []map[string]any{
+				{"trace_id": traceHex(1), "name": "accuracy", "value": 1}}), func(r *http.Request) {
+				r.Header.Set("Content-Type", "application/json")
+				*r = *r.WithContext(ctx)
+			})
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ctx, hangUp := context.WithCancel(context.Background())
+			done := make(chan struct{})
+			go func() { send(ctx); close(done) }()
+			waitUntil(t, func() bool { return h.server.bodies.heldBytes() > 0 })
+			hangUp()
+			select {
+			case <-done:
+				t.Fatal("the handler returned when its client hung up, with its job still queued")
+			case <-time.After(100 * time.Millisecond):
+			}
+			if h.server.bodies.heldBytes() == 0 {
+				t.Error("the body left the budget while its job waited for the writer")
+			}
+			release <- struct{}{}
+			<-done
+			if held := h.server.bodies.heldBytes(); held != 0 {
+				t.Errorf("%d bytes still held after the write", held)
+			}
+		})
+	}
+}
+
+// oneBusyWriter answers ErrWriterBusy to the nth ingest job submitted without
+// waiting, as a full queue would, and passes everything else through.
+type oneBusyWriter struct {
+	inner   *store.Writer
+	mu      sync.Mutex
+	seen    int
+	busyAt  int
+	waiting int
+}
+
+func (b *oneBusyWriter) Submit(ctx context.Context, job store.WriteJob) error {
+	if _, ok := job.(*store.IngestBatch); ok {
+		b.mu.Lock()
+		b.seen++
+		busy := b.seen == b.busyAt
+		b.mu.Unlock()
+		if busy {
+			return store.ErrWriterBusy
+		}
+	}
+	return b.inner.Submit(ctx, job)
+}
+
+func (b *oneBusyWriter) SubmitWaiting(ctx context.Context, job store.WriteJob) error {
+	b.mu.Lock()
+	b.seen++
+	b.waiting++
+	b.mu.Unlock()
+	return b.inner.SubmitWaiting(ctx, job)
+}
+
+// A full queue refuses an export's first slice only: the slices after it wait
+// for room, so an admitted export is not left half written for a retry that
+// meets the same queue (spec 043 #31).
+func TestAFullQueueRefusesOnlyTheFirstSlice(t *testing.T) {
+	body := bulkBody(t, 1, 150, 16) // 2,550 rows: three slices
+
+	h := newHarness(t, nil, store.WriterOptions{})
+	busy := &oneBusyWriter{inner: h.writer, busyAt: 2}
+	h.server.writer = busy
+	expectStatus(t, h.post(t, "/v1/traces", body), 200)
+	if busy.waiting != 2 {
+		t.Errorf("%d slices waited for room, want the two after the first", busy.waiting)
+	}
+	if n := h.countRows(t, h.project.ID, "observations"); n != 2400 {
+		t.Errorf("%d observations, want all 2,400", n)
+	}
+
+	h.server.writer = &oneBusyWriter{inner: h.writer, busyAt: 1}
+	rec := h.post(t, "/v1/traces", bulkBody(t, 2, 150, 16))
+	expectStatus(t, rec, http.StatusTooManyRequests)
+}
+
+// A request the budget refuses gives its reservation back before its body is
+// drained, rather than holding it for as long as the drain takes (spec 043
+// #31).
+func TestARefusedBodyIsDrainedWithoutItsReservation(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	budget := h.server.bodies
+	budget.mu.Lock()
+	budget.held = budget.capacity - bodyStep // one step free
+	budget.mu.Unlock()
+	t.Cleanup(func() {
+		budget.mu.Lock()
+		budget.held = 0
+		budget.mu.Unlock()
+	})
+
+	// The second step does not fit, so the drain starts past it and pauses
+	// just after.
+	body := bulkBody(t, 1, 40, 16)
+	if len(body) < 3*bodyStep {
+		t.Fatalf("a body of %d bytes, want one the drain has to go on reading", len(body))
+	}
+	drain := make(chan struct{})
+	reader := &pausingReader{r: bytes.NewReader(body), pauseAt: 2*bodyStep + 100, paused: make(chan struct{}), resume: drain}
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() { done <- h.post(t, "/v1/traces", body, func(r *http.Request) { r.Body = io.NopCloser(reader) }) }()
+	select {
+	case <-reader.paused:
+	case rec := <-done:
+		t.Fatalf("answered %d without draining the body", rec.Code)
+	case <-time.After(10 * time.Second):
+		t.Fatal("the body was never drained")
+	}
+	if held := budget.heldBytes(); held != budget.capacity-bodyStep {
+		t.Errorf("held %d during the drain, want the refused request's step given back (%d)",
+			held, budget.capacity-bodyStep)
+	}
+	close(drain)
+	expectError(t, <-done, http.StatusTooManyRequests, bodyBusy)
+}
+
+// pausingReader stops once, after pauseAt bytes, until resumed.
+type pausingReader struct {
+	r       io.Reader
+	read    int
+	pauseAt int
+	paused  chan struct{}
+	resume  chan struct{}
+	once    sync.Once
+}
+
+func (p *pausingReader) Read(b []byte) (int, error) {
+	if p.read >= p.pauseAt {
+		p.once.Do(func() { close(p.paused); <-p.resume })
+	}
+	if limit := p.pauseAt - p.read; limit > 0 && len(b) > limit {
+		b = b[:limit]
+	}
+	n, err := p.r.Read(b)
+	p.read += n
+	return n, err
 }
 
 // waitUntil polls a condition another goroutine establishes.

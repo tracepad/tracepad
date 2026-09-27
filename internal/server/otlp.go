@@ -223,25 +223,38 @@ func (s *Server) handleTraces(w http.ResponseWriter, r *http.Request) {
 // the slices before it committed; the retry rewrites them, since ingest is an
 // upsert (spec 002 #5), and stores the raw body the last slice carries once.
 //
-// Once the export is cut, every slice is submitted whether or not the client
-// is still there, as the whole export used to be committed after a hang-up:
-// what an export stores does not depend on its client waiting (spec 043 #28).
-// The handler waits for them, so the body's reservation is held for as long
-// as the export is (#13).
+// Every slice is committed whether or not the client is still there — as the
+// whole export used to be after a hang-up, since what an export stores does not
+// depend on its client waiting (spec 043 #28) — and the handler waits for it,
+// so the body's reservation is held for as long as the export is in memory
+// (#13, #31): a client that hangs up cannot hand the writer a body the budget
+// no longer counts. A full queue refuses the first slice only; the ones after
+// it wait for room (#31), since the export is admitted, and a refusal half-way
+// would have its retry write the same slices again into the same queue.
 func (s *Server) submitExport(ctx context.Context, batch *store.IngestBatch) error {
+	commit := context.WithoutCancel(ctx)
 	slices := batch.Slices()
 	if len(slices) == 1 {
-		return s.writer.Submit(ctx, batch)
+		return s.writer.Submit(commit, batch)
 	}
-	commit := context.WithoutCancel(ctx)
 	batch.UnknownRuns = batch.UnknownRuns[:0]
-	for _, slice := range slices {
-		if err := s.writer.Submit(commit, slice); err != nil {
+	for i, slice := range slices {
+		submit := s.writer.Submit
+		if waiting, ok := s.writer.(waitingWriter); ok && i > 0 {
+			submit = waiting.SubmitWaiting
+		}
+		if err := submit(commit, slice); err != nil {
 			return err
 		}
 		batch.UnknownRuns = append(batch.UnknownRuns, slice.UnknownRuns...)
 	}
 	return nil
+}
+
+// waitingWriter is the part of *store.Writer that waits out a full queue, for
+// the slices of an export after its first (spec 043 #31).
+type waitingWriter interface {
+	SubmitWaiting(ctx context.Context, job store.WriteJob) error
 }
 
 // credential extracts the secret from either scheme. Basic carries

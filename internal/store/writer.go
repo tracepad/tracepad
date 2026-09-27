@@ -164,6 +164,10 @@ type Writer struct {
 	mu     sync.RWMutex
 	closed bool
 	wg     sync.WaitGroup
+	// closing ends when Close begins, and wakes every SubmitWaiting still
+	// waiting for room: a stop does not wait for them.
+	closing   chan struct{}
+	closeOnce sync.Once
 
 	// beforeCommit is a test seam: the only way to hold the writer still
 	// long enough to observe a full queue, since the writer otherwise
@@ -203,6 +207,7 @@ func (s *Store) NewWriter(opts WriterOptions) (*Writer, error) {
 		window:    opts.CommitWindow,
 		max:       opts.MaxBatch,
 		committed: opts.Committed,
+		closing:   make(chan struct{}),
 	}
 	w.wg.Add(1)
 	go w.run()
@@ -248,8 +253,46 @@ func (w *Writer) Submit(ctx context.Context, job WriteJob) error {
 	}
 }
 
+// SubmitWaiting is Submit for a job that continues work already admitted —
+// an export's slice after its first (spec 043 #31): a full queue is waited out
+// rather than refused, since the export's first slice was the one a full queue
+// could turn away, and refusing a later one would leave the export half
+// written for a retry that meets the same queue. How many wait is bounded by
+// the body budget, each holding its body's reservation. A stop wakes them
+// with ErrWriterClosed; ctx ends the wait, and once queued, the wait for the
+// commit, as it does Submit's.
+func (w *Writer) SubmitWaiting(ctx context.Context, job WriteJob) error {
+	sub := &submission{job: job, done: make(chan error, 1)}
+
+	w.mu.RLock()
+	if w.closed {
+		w.mu.RUnlock()
+		return ErrWriterClosed
+	}
+	select {
+	case w.queue <- sub:
+	case <-w.closing:
+		w.mu.RUnlock()
+		return ErrWriterClosed
+	case <-ctx.Done():
+		w.mu.RUnlock()
+		return ctx.Err()
+	}
+	w.mu.RUnlock()
+
+	select {
+	case err := <-sub.done:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 // Close stops the writer after the queued submissions have been committed.
 func (w *Writer) Close() error {
+	// First, and outside the lock: a SubmitWaiting blocked on a full queue
+	// holds the read lock, and has to give it up before the lock is taken.
+	w.closeOnce.Do(func() { close(w.closing) })
 	w.mu.Lock()
 	if w.closed {
 		w.mu.Unlock()

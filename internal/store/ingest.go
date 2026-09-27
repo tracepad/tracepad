@@ -46,8 +46,11 @@ type IngestBatch struct {
 	// have in one transaction.
 	mediaTypes map[string]string
 	// full says this is a slice with another after it (Slices): it weighs a
-	// whole slice whatever its rows (weight).
+	// whole window whatever its rows (weight).
 	full bool
+	// continued are the traces this slice carries on from an earlier slice
+	// of its export (Slices), which apply touches rather than upserts.
+	continued map[string]bool
 
 	// UnknownRuns is filled by apply: the run id of every trace in the
 	// batch that named a run this project does not have, one entry per
@@ -87,14 +90,14 @@ const SliceRows = 1000
 // batch that fits is its own one slice, unchanged.
 //
 // A trace travels with its observations. One larger than what is left of a
-// slice goes on in the next, where its row is repeated with nothing but its id:
-// every field left empty leaves the stored one alone (spec 002 #6), while the
-// row still stamps `updated_at`, so the rollup sees the hours the slice
-// changed, and still recomputes the trace's aggregates over what is stored so
-// far (spec 002 #22). Its run is looked up once, by the slice that carries the
-// trace whole. A trace is not started at the end of a slice with no room for
-// one of its observations: a trace row with none would be listed without a
-// time.
+// slice goes on in the next, which carries it as continued: apply stamps its
+// `updated_at`, so the rollup sees the hours the slice changed, and
+// recomputes its aggregates over what is stored so far (spec 002 #22), without
+// writing its fields and metadata again or looking its run up again. Only
+// were it deleted since the slice before is it written whole, as a late export
+// would write it (spec 043 #31). A trace is not started at the end of a slice
+// with no room for one of its observations: a trace row with none would be
+// listed without a time.
 //
 // The first slice carries what spec 041 checks and writes before anything
 // points at it — the bodies the export's traces name, their refs, and the
@@ -137,9 +140,8 @@ func (b *IngestBatch) Slices() []*IngestBatch {
 		if rows > 0 && rows+min(len(observations), 1)+1 > SliceRows {
 			open()
 		}
-		row := t
 		for {
-			cur.Traces = append(cur.Traces, row)
+			cur.Traces = append(cur.Traces, t)
 			rows++
 			n := min(len(observations), SliceRows-rows)
 			cur.Observations = append(cur.Observations, observations[:n]...)
@@ -149,7 +151,10 @@ func (b *IngestBatch) Slices() []*IngestBatch {
 				break
 			}
 			open()
-			row = &model.Trace{ID: t.ID}
+			if cur.continued == nil {
+				cur.continued = map[string]bool{}
+			}
+			cur.continued[t.ID] = true
 		}
 	}
 	for len(strays) > 0 {
@@ -183,12 +188,12 @@ func (b *IngestBatch) Slices() []*IngestBatch {
 }
 
 // weight is a slice's rows (spec 043 #12). One with another after it weighs a
-// whole slice, so that it closes its window at once: its export's next slice
-// cannot arrive until it commits, and waiting out the window for it would add
-// the window to every slice.
+// whole window, so that it closes its window at once whatever the two bounds
+// are: its export's next slice cannot arrive until it commits, and waiting out
+// the window for it would add the window to every slice.
 func (b *IngestBatch) weight() int {
 	if b.full {
-		return SliceRows
+		return WindowRows
 	}
 	return len(b.Traces) + len(b.Observations)
 }
@@ -249,6 +254,15 @@ func (b *IngestBatch) apply(tx *sql.Tx) error {
 	indexing := !b.skipSearchIndex
 	b.UnknownRuns = b.UnknownRuns[:0]
 	for _, t := range b.Traces {
+		if b.continued[t.ID] {
+			touched, err := touchTrace(tx, b.ProjectID, t.ID, arrived)
+			if err != nil {
+				return err
+			}
+			if touched {
+				continue
+			}
+		}
 		if err := upsertTrace(tx, b.ProjectID, t, arrived, indexing); err != nil {
 			return err
 		}
@@ -364,6 +378,20 @@ func upsertTrace(tx *sql.Tx, projectID string, t *model.Trace, ingestedAt int64,
 		return nil
 	}
 	return indexTraceName(tx, projectID, t.ID, stored.String)
+}
+
+// touchTrace stamps a stored trace's `updated_at` for a slice that carries it
+// on (Slices), and reports whether it was there to stamp.
+func touchTrace(tx *sql.Tx, projectID, traceID string, now int64) (bool, error) {
+	result, err := tx.Exec(`UPDATE traces SET updated_at = ? WHERE project_id = ? AND id = ?`, now, projectID, traceID)
+	if err != nil {
+		return false, fmt.Errorf("touch trace %s: %w", traceID, err)
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("touch trace %s: %w", traceID, err)
+	}
+	return n > 0, nil
 }
 
 // runExists is the run-existence lookup of spec 014 #3: a seek on the primary

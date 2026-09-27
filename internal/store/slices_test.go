@@ -2,8 +2,8 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"reflect"
 	"slices"
 	"sync"
 	"testing"
@@ -32,8 +32,8 @@ func bulkBatch(projectID string, sizes ...int) *IngestBatch {
 }
 
 // An export larger than a slice is cut into slices of at most SliceRows rows,
-// every observation in exactly one, a trace's full row in exactly one and its
-// id alone in every later slice it continues into, and no trace row at the end
+// every observation in exactly one, a trace written in exactly one and carried
+// on as continued in every later slice it goes into, and no trace row at the end
 // of a slice without one of its observations (spec 043 #11). The media go with
 // the first slice, the raw body and what only it names with the last.
 func TestSlicesCutAnExport(t *testing.T) {
@@ -62,20 +62,18 @@ func TestSlicesCutAnExport(t *testing.T) {
 		}
 		observations = append(observations, slice.Observations...)
 		for _, trace := range slice.Traces {
-			if trace.Name != "" {
+			if !slice.continued[trace.ID] {
 				full[trace.ID]++
-			} else if !reflect.DeepEqual(*trace, model.Trace{ID: trace.ID}) {
-				t.Errorf("slice %d repeats trace %s with more than its id: %+v", i, trace.ID, trace)
 			}
 			if !slices.ContainsFunc(slice.Observations, func(o *model.Observation) bool { return o.TraceID == trace.ID }) {
 				t.Errorf("slice %d carries trace %s with none of its observations", i, trace.ID)
 			}
 		}
-		// A slice with another after it weighs a whole slice, so that
+		// A slice with another after it weighs a whole window, so that
 		// its window closes at once; the last weighs its rows.
 		want := rows
 		if i < len(cut)-1 {
-			want = SliceRows
+			want = WindowRows
 		}
 		if slice.weight() != want {
 			t.Errorf("slice %d of %d weighs %d with %d rows, want %d", i, len(cut), slice.weight(), rows, want)
@@ -252,5 +250,123 @@ func TestWriterWindowClosesAtItsWeight(t *testing.T) {
 		if rows >= 2*WindowRows {
 			t.Errorf("a window of %d rows, want under %d: %v", rows, 2*WindowRows, windows)
 		}
+	}
+}
+
+// A trace deleted between two slices of its export is written whole by the
+// slice that carries it on, as a late export would write it — not brought back
+// as a row with its id alone (spec 043 #31). One still there is only stamped.
+func TestAContinuedTraceDeletedBetweenSlicesIsWrittenWhole(t *testing.T) {
+	s, p := openIngestStore(t)
+	batch := bulkBatch(p.ID, 1500)
+	cut := batch.Slices()
+	if len(cut) != 2 || !cut[1].continued[batch.Traces[0].ID] {
+		t.Fatalf("%d slices; want the one trace carried on into a second", len(cut))
+	}
+	apply := func(job *IngestBatch) {
+		t.Helper()
+		tx, err := s.db.Begin()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tx.Rollback()
+		if err := job.apply(tx); err != nil {
+			t.Fatal(err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	apply(cut[0])
+	if _, err := s.db.Exec(`DELETE FROM traces WHERE project_id = ?`, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	apply(cut[1])
+	var name, user, env string
+	var count int
+	if err := s.db.QueryRow(`SELECT name, user_id, environment, observation_count FROM traces WHERE project_id = ?`,
+		p.ID).Scan(&name, &user, &env, &count); err != nil {
+		t.Fatal(err)
+	}
+	if name != "sliced" || user != "u1" {
+		t.Errorf("the trace came back as name %q, user %q; want it written whole", name, user)
+	}
+}
+
+// SubmitWaiting waits out a full queue instead of refusing, and a stop wakes
+// the ones still waiting with ErrWriterClosed rather than leaving them hung,
+// even while the writer is still busy with its commit (spec 043 #31).
+func TestSubmitWaitingWaitsForRoomAndAStopWakesIt(t *testing.T) {
+	s, p := openIngestStore(t)
+	w, err := s.NewWriter(WriterOptions{QueueDepth: 1, MaxBatch: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parked, release := make(chan struct{}, 8), make(chan struct{})
+	w.beforeCommit = func() {
+		parked <- struct{}{}
+		<-release
+	}
+	job := func(i int) *IngestBatch { return batchFor(p.ID, fmt.Sprintf("%032x", i), spanHex(i)) }
+	submit := func(waiting bool, i int) <-chan error {
+		out := make(chan error, 1)
+		go func() {
+			if waiting {
+				out <- w.SubmitWaiting(context.Background(), job(i))
+			} else {
+				out <- w.Submit(context.Background(), job(i))
+			}
+		}()
+		return out
+	}
+
+	first := submit(false, 1)
+	<-parked
+	second := submit(false, 2)
+	waitFor(t, func() bool { return len(w.queue) == 1 })
+	if err := <-submit(false, 3); !errors.Is(err, ErrWriterBusy) {
+		t.Fatalf("Submit into a full queue = %v, want ErrWriterBusy", err)
+	}
+	waiting := submit(true, 4)
+	select {
+	case err := <-waiting:
+		t.Fatalf("SubmitWaiting returned %v with the queue full, want it to wait", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	// Room comes when the writer moves on: the waiting job is taken.
+	release <- struct{}{}
+	if err := <-first; err != nil {
+		t.Fatal(err)
+	}
+	<-parked // the second is committing, the waiting one queued behind it
+	waitFor(t, func() bool { return len(w.queue) == 1 })
+	stranded := submit(true, 5)
+	select {
+	case err := <-stranded:
+		t.Fatalf("SubmitWaiting returned %v with the queue full, want it to wait", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	// A stop wakes the one still waiting at once, with the writer still
+	// holding its commit.
+	closed := make(chan error, 1)
+	go func() { closed <- w.Close() }()
+	select {
+	case err := <-stranded:
+		if !errors.Is(err, ErrWriterClosed) {
+			t.Errorf("a waiting submission woken by a stop = %v, want ErrWriterClosed", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("a stop left a waiting submission hung")
+	}
+	close(release)
+	for name, done := range map[string]<-chan error{"second": second, "waiting": waiting} {
+		if err := <-done; err != nil {
+			t.Errorf("%s submission: %v, want it committed", name, err)
+		}
+	}
+	if err := <-closed; err != nil {
+		t.Fatal(err)
 	}
 }

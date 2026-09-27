@@ -82,7 +82,10 @@ func shaPrefixOf(mediaID string) (string, bool) {
 // channel left pending is settled the same way. The project's
 // hold is recorded with its first ref, under the type this batch declared
 // (Decision 25). It answers the bodies it recorded a hold of, so that the
-// batch's raw refs do not record them again.
+// batch's raw refs in the same transaction do not record them again. An
+// export cut into slices writes its raw refs in its last slice, which records
+// the holds again, a conflict that changes nothing — unless a deletion between
+// the slices released one, which the raw ref then needs back (spec 043 #31).
 func writeMedia(tx *sql.Tx, projectID string, bodies []MediaBody, types map[string]string, refs []MediaRef,
 	now int64) (map[string]bool, error) {
 	if err := writeMediaBodies(tx, bodies, now); err != nil {

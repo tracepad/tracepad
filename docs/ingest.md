@@ -211,9 +211,11 @@ everywhere: none was sent, and Tracepad does not estimate one.
 
 A `200` means the spans are committed and fsynced, not merely queued.
 
-A failure after part of a large export has been written — a `503` or a `429`
-answered between two of its slices ([below](#how-much-one-export-may-carry)) —
-leaves the part written visible until the retry rewrites it. Ingest is an
+A failure after part of a large export has been written — a `503` answered
+between two of its slices ([below](#how-much-one-export-may-carry)) — leaves the
+part written visible until the retry rewrites it. A full write queue refuses an
+export before its first slice only; once it is admitted, its later slices wait
+for room. Ingest is an
 upsert by span id, so the retry converges on exactly the rows an uninterrupted
 export writes, and the raw body is stored once, by the attempt that succeeds.
 
@@ -255,10 +257,12 @@ the database and the server its memory:
   `TRACEPAD_MAX_BODY_BYTES` by default (80 MiB).** Every request body the
   server reads — exports, the JSON API, the Langfuse SDK's media uploads —
   reserves its decompressed bytes from this budget as it is read, in steps of
-  64 KiB, and keeps them until the request is answered. A request whose next
+  64 KiB, and keeps them until the request is answered — its write committed,
+  whether or not the client is still waiting. A request whose next
   step does not fit is `429` `the server is holding as many request bodies as
   it can; retry shortly`, with `Retry-After: 1`, which every OTLP exporter
-  retries. The budget counts body bytes, not the heap: while an export is
+  retries; the rest of its body is then read and dropped, so the exporter reads
+  that answer rather than a closed connection. The budget counts body bytes, not the heap: while an export is
   decoded, mapped and written, the heap it takes peaks at roughly 12 to 18
   times its body for protobuf and 15 to 20 times for JSON — the high end for
   many small spans, the low end for fewer spans with large payloads (measured
