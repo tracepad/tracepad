@@ -99,11 +99,11 @@ const SliceRows = 1000
 // with no room for one of its observations: a trace row with none would be
 // listed without a time.
 //
-// Each slice carries the refs of the traces it writes, each body in the first
-// slice that names it, and the check that the resolved Langfuse ids its refs
-// name still name bodies the project holds (spec 041 #9); the last carries the
-// raw body, its refs, and every body the raw body names (spec 043 #32, #33). The raw batch
-// is stamped with the last slice's reading (spec 044 #3), so that slice stamps
+// Each slice carries the refs of the traces it writes, every body they name,
+// and the check that the resolved Langfuse ids they name still name bodies the
+// project holds (spec 041 #9); the last carries the raw body, its refs, every
+// body it names and the check of every resolved id it names (spec 043 #32,
+// #34). The raw batch is stamped with the last slice's reading (spec 044 #3), so that slice stamps
 // the traces the earlier ones wrote with it too: an erasure finds a trace's
 // batches inside its `[ingested_at, updated_at]`.
 func (b *IngestBatch) Slices() []*IngestBatch {
@@ -170,12 +170,16 @@ func (b *IngestBatch) Slices() []*IngestBatch {
 	}
 
 	// Each slice carries the refs of the traces it writes, settled in the
-	// same transaction as the trace, and each body in the first slice that
-	// names it — the slices commit in order, so a ref in a later one finds it
-	// stored. A slice checks the resolved Langfuse ids its own refs name
-	// (spec 041 #9). The last also carries every body the raw body names,
-	// beside the raw refs to them, so a deletion between the slices cannot
-	// leave the archived batch pointing at nothing.
+	// same transaction as the trace, and every body they name: a body an
+	// earlier slice stored may have been collected since, by a deletion of
+	// the trace that named it there, and a ref is written only beside its
+	// body (spec 043 #34). A body already stored costs the slice one lookup
+	// (writeMediaBodies). A slice checks the resolved Langfuse ids its refs
+	// name (spec 041 #9). The last also carries every body the raw body
+	// names, beside the raw refs to them, and checks every resolved id the
+	// raw body names — the archived body points at the body the id was
+	// resolved to, so one collected since takes the export again
+	// unresolved, as an export in one slice is.
 	bodies := make(map[string]MediaBody, len(b.Media))
 	for _, body := range b.Media {
 		if _, seen := bodies[body.SHA256]; !seen {
@@ -190,33 +194,29 @@ func (b *IngestBatch) Slices() []*IngestBatch {
 	for _, sha := range b.Resolved {
 		resolved[sha] = true
 	}
-	stored := map[string]bool{}
 	for i, slice := range slices {
 		named := map[string]bool{}
-		carry := func(sha string, again bool) {
-			if named[sha] || (stored[sha] && !again) {
+		name := func(sha string) {
+			if named[sha] {
 				return
 			}
+			named[sha] = true
 			if body, ok := bodies[sha]; ok {
-				named[sha] = true
-				stored[sha] = true
 				slice.Media = append(slice.Media, body)
 			}
+			if resolved[sha] {
+				slice.Resolved = append(slice.Resolved, sha)
+			}
 		}
-		checked := map[string]bool{}
 		for _, t := range slice.Traces {
 			for _, ref := range refsOf[t.ID] {
 				slice.MediaRefs = append(slice.MediaRefs, ref)
-				carry(ref.SHA256, false)
-				if resolved[ref.SHA256] && !checked[ref.SHA256] {
-					checked[ref.SHA256] = true
-					slice.Resolved = append(slice.Resolved, ref.SHA256)
-				}
+				name(ref.SHA256)
 			}
 		}
 		if i == len(slices)-1 {
 			for _, sha := range b.RawMedia {
-				carry(sha, true)
+				name(sha)
 			}
 		}
 	}

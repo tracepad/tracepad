@@ -831,7 +831,7 @@ func (s *Server) handleEraseUserData(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	userID := r.PathValue("user_id")
+	userID := lookupLabel(r.PathValue("user_id"))
 	if userID == "" {
 		writeError(w, http.StatusBadRequest, "the user id must not be empty")
 		return
@@ -886,7 +886,7 @@ func (s *Server) handleEraseUserData(w http.ResponseWriter, r *http.Request) {
 	erased, err := s.store.EraseUserData(r.Context(), s.writer, store.UserErasure{
 		ProjectID:  project.ID,
 		UserID:     userID,
-		Confirm:    values.Get("confirm"),
+		Confirm:    lookupLabel(values.Get("confirm")),
 		Chunk:      eraseChunk,
 		ChunkHours: eraseChunkHours,
 		Now:        time.Now().UnixNano(),

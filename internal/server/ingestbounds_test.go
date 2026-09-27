@@ -787,6 +787,27 @@ func TestADeclaredBodyIsReservedWholeBeforeItIsRead(t *testing.T) {
 	expectStatus(t, <-held, 200)
 }
 
+// A body reserved whole before it is read is read as it is, not a step at a
+// time: there is nothing left to cover (spec 043 #34). One without a declared
+// length still goes through the steps.
+func TestABodyReservedWholeIsNotReadInSteps(t *testing.T) {
+	const limit = 1 << 20
+	for _, declared := range []bool{true, false} {
+		hold := &bodyHold{budget: &bodyBudget{capacity: limit}}
+		r := httptest.NewRequest("POST", "/v1/traces", bytes.NewReader(make([]byte, 4*bodyStep)))
+		if !declared {
+			r.ContentLength = -1
+		}
+		if err := reserveDeclared(r, hold, limit); err != nil {
+			t.Fatal(err)
+		}
+		_, stepped := budgeted(r.Body, hold, limit).(*budgetReader)
+		if stepped == declared {
+			t.Errorf("declared length %t: read in steps %t, want %t", declared, stepped, !declared)
+		}
+	}
+}
+
 // oneBusyWriter answers ErrWriterBusy to the nth ingest job submitted without
 // waiting, as a full queue would, and passes everything else through.
 type oneBusyWriter struct {
@@ -911,5 +932,87 @@ func waitUntil(t *testing.T, cond func() bool) {
 			t.Fatal("timed out waiting")
 		}
 		time.Sleep(time.Millisecond)
+	}
+}
+
+// A lookup by a label longer than the bound finds the row ingest stored cut:
+// every trace filter, the user and the session in a path, a score's session
+// and the user an erasure names are cut as ingest cuts them (spec 043 #34).
+// Looked up whole, each matched nothing, and the erasure erased nothing.
+func TestALookupByALongLabelFindsItsCutRow(t *testing.T) {
+	h := newAdminHarness(t)
+	long := func(prefix string) string { return prefix + strings.Repeat("x", 1500) }
+	user, session, tag := long("u"), long("s"), long("t")
+	tags, err := json.Marshal([]string{tag})
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectStatus(t, h.post(t, "/v1/traces", encodeExport(t, otlptest.SpanWith(
+		"langfuse.user.id", user,
+		"langfuse.session.id", session,
+		"langfuse.trace.tags", string(tags),
+		"langfuse.trace.name", long("n"),
+		"langfuse.environment", long("e"),
+		"langfuse.release", long("r"),
+		"langfuse.version", long("v"),
+	))), 200)
+	h.postScore(t, map[string]any{"session_id": session, "name": "helpful", "value": 1})
+
+	count := func(path, key string) int {
+		t.Helper()
+		rec := h.get(t, path)
+		expectStatus(t, rec, 200)
+		listing := decodeJSON[map[string]json.RawMessage](t, rec)
+		var rows []json.RawMessage
+		if err := json.Unmarshal(listing[key], &rows); err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		return len(rows)
+	}
+	for _, query := range []string{
+		"user_id=" + user, "session_id=" + session, "tag=" + tag, "name=" + long("n"),
+		"environment=" + long("e"), "release=" + long("r"), "version=" + long("v"),
+	} {
+		if n := count("/api/v1/traces?"+query, "traces"); n != 1 {
+			t.Errorf("traces by %.12s…: %d, want the one stored cut", query, n)
+		}
+	}
+	if n := count("/api/v1/sessions?user_id="+user, "sessions"); n != 1 {
+		t.Errorf("sessions by the user: %d, want 1", n)
+	}
+	// The user listing answers from the rollup.
+	h.rollTheCorpus(t, time.Now().Add(2*time.Hour))
+	if n := count("/api/v1/users?prefix="+user, "users"); n != 1 {
+		t.Errorf("users by the whole id as a prefix: %d, want 1", n)
+	}
+	if n := count("/api/v1/scores?session_id="+session, "scores"); n != 1 {
+		t.Errorf("scores by the session: %d, want 1", n)
+	}
+	if n := count("/api/v1/sessions/"+session, "traces"); n != 1 {
+		t.Errorf("the session's traces: %d, want 1", n)
+	}
+	expectStatus(t, h.get(t, "/api/v1/users/"+user), 200)
+	if rec := h.get(t, "/api/v1/stats?user_id="+user); rec.Code != 200 || !strings.Contains(rec.Body.String(), `"count":1`) {
+		t.Errorf("stats for the user: %d %s, want its one trace", rec.Code, rec.Body.String())
+	}
+
+	path := "/api/v1/projects/" + h.project.ID + "/users/" + user + "/data"
+	rec := h.call(t, "DELETE", path, nil)
+	expectStatus(t, rec, 200)
+	preview := decodeJSON[struct {
+		WouldDelete map[string]int64 `json:"would_delete"`
+	}](t, rec)
+	if preview.WouldDelete["traces"] != 1 || preview.WouldDelete["session_scores"] != 1 {
+		t.Errorf("would_delete = %v, want the trace and the session's score", preview.WouldDelete)
+	}
+	rec = h.call(t, "DELETE", path+"?confirm="+user, nil)
+	expectStatus(t, rec, 200)
+	if erased := decodeJSON[struct {
+		Deleted map[string]int64 `json:"deleted"`
+	}](t, rec); erased.Deleted["traces"] != 1 {
+		t.Errorf("deleted = %v, want the trace", erased.Deleted)
+	}
+	if n := count("/api/v1/traces", "traces"); n != 0 {
+		t.Errorf("%d traces left after the erasure, want none", n)
 	}
 }

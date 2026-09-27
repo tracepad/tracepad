@@ -34,8 +34,8 @@ func bulkBatch(projectID string, sizes ...int) *IngestBatch {
 // An export larger than a slice is cut into slices of at most SliceRows rows,
 // every observation in exactly one, a trace written in exactly one and carried
 // on as continued in every later slice it goes into, and no trace row at the end
-// of a slice without one of its observations (spec 043 #11). The media go with
-// the first slice, the raw body and what only it names with the last.
+// of a slice without one of its observations (spec 043 #11). A body goes with
+// every slice whose refs name it, the raw body and what it names with the last.
 func TestSlicesCutAnExport(t *testing.T) {
 	// 999 rows, then a trace that has no room for an observation, then one
 	// larger than a slice, then small ones.
@@ -88,10 +88,10 @@ func TestSlicesCutAnExport(t *testing.T) {
 		}
 	}
 
-	// A trace's refs travel in every slice that carries it; a body goes in
-	// the first slice that names it; the raw body's bodies go with the last
-	// slice, beside the raw body; a slice checks the resolved ids its refs
-	// name.
+	// A trace's refs travel in every slice that carries it, with the body
+	// they name; the raw body's bodies go with the last slice, beside the
+	// raw body; a slice checks the resolved ids its refs name, and the last
+	// every one the raw body names.
 	named := batch.Traces[2].ID
 	last := cut[len(cut)-1]
 	firstNaming := -1
@@ -105,7 +105,7 @@ func TestSlicesCutAnExport(t *testing.T) {
 			shas = append(shas, body.SHA256)
 		}
 		want := []string(nil)
-		if i == firstNaming || slice == last {
+		if carries || slice == last {
 			want = append(want, "named")
 		}
 		if slice == last {
@@ -117,8 +117,9 @@ func TestSlicesCutAnExport(t *testing.T) {
 		if refs := len(slice.MediaRefs); (refs == 1) != carries {
 			t.Errorf("slice %d carries %d refs; carries the trace that names the body: %t", i, refs, carries)
 		}
-		if checks := len(slice.Resolved); (checks == 1) != carries {
-			t.Errorf("slice %d checks %d resolved ids; carries the trace that names it: %t", i, checks, carries)
+		if checks := len(slice.Resolved); (checks == 1) != (carries || slice == last) {
+			t.Errorf("slice %d checks %d resolved ids; carries the trace or the raw body that names it: %t",
+				i, checks, carries || slice == last)
 		}
 		if (slice.Raw != nil) != (slice == last) || (len(slice.RawMedia) > 0) != (slice == last) {
 			t.Errorf("slice %d of %d: raw %v, raw media %v; want them on the last slice only", i, len(cut), slice.Raw, slice.RawMedia)
@@ -523,9 +524,9 @@ func TestSlicesCarryObservationsWithoutTheirTrace(t *testing.T) {
 	}
 }
 
-// A trace cut into three slices takes its body with its first slice, where its
-// ref first appears, and its ref in all three: every ref finds its body stored
-// (spec 043 #33).
+// A trace cut into three slices takes its ref and its body in all three, and
+// the body is stored once: the slices after the first find it stored (spec 043
+// #34).
 func TestATraceInThreeSlicesStoresItsBodyOnce(t *testing.T) {
 	s, p := openIngestStore(t)
 	batch := bulkBatch(p.ID, 500, 2200)
@@ -539,9 +540,9 @@ func TestATraceInThreeSlicesStoresItsBodyOnce(t *testing.T) {
 			continue
 		}
 		carrying++
-		wantBody := carrying == 1
-		if got := len(slice.Media) == 1; got != wantBody {
-			t.Errorf("slice %d, the trace's slice number %d, carries the body: %t, want %t", i, carrying, got, wantBody)
+		if len(slice.Media) != 1 {
+			t.Errorf("slice %d, the trace's slice number %d, carries %d bodies, want the one its ref names",
+				i, carrying, len(slice.Media))
 		}
 		if len(slice.MediaRefs) != 1 {
 			t.Errorf("slice %d carries %d refs, want the trace's one", i, len(slice.MediaRefs))
@@ -603,5 +604,101 @@ func TestAContinuedTraceCountsItsUnknownRunOnce(t *testing.T) {
 	}
 	if runs != 1 {
 		t.Errorf("the export named an unknown run %d times, want once", runs)
+	}
+}
+
+// applySlice commits one slice in a transaction of its own, as the writer
+// would.
+func applySlice(t *testing.T, s *Store, job *IngestBatch) error {
+	t.Helper()
+	tx, err := s.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	if err := job.apply(tx); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// collectBetweenSlices does to a body what a deletion of the one trace that
+// names it does: the ref and the project's hold go, and the body with nothing
+// left naming it is collected.
+func collectBetweenSlices(t *testing.T, s *Store, projectID, sha string) {
+	t.Helper()
+	for _, statement := range []string{
+		`DELETE FROM media_refs WHERE project_id = ? AND sha256 = ?`,
+		`DELETE FROM media_holders WHERE project_id = ? AND sha256 = ?`,
+	} {
+		if _, err := s.db.Exec(statement, projectID, sha); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.db.Exec(`DELETE FROM media WHERE sha256 = ?`, sha); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Two traces in different slices point at one body. A deletion between the
+// slices of the trace in the first collects it; the second slice writes it
+// again beside its own ref, rather than a ref that finds no body and is not
+// written (spec 043 #34).
+func TestABodyTwoSlicesNameSurvivesADeletionBetweenThem(t *testing.T) {
+	s, p := openIngestStore(t)
+	batch := bulkBatch(p.ID, 900, 900)
+	early, late := batch.Traces[0].ID, batch.Traces[1].ID
+	batch.Media = []MediaBody{{SHA256: "gh", MimeType: "image/png", Body: []byte("png")}}
+	batch.MediaRefs = []MediaRef{{SHA256: "gh", TraceID: early}, {SHA256: "gh", TraceID: late}}
+	cut := batch.Slices()
+	if len(cut) != 2 {
+		t.Fatalf("%d slices, want the two traces in two", len(cut))
+	}
+	if err := applySlice(t, s, cut[0]); err != nil {
+		t.Fatal(err)
+	}
+	collectBetweenSlices(t, s, p.ID, "gh")
+	if err := applySlice(t, s, cut[1]); err != nil {
+		t.Fatal(err)
+	}
+	var bodies, refs int
+	if err := s.db.QueryRow(`SELECT (SELECT COUNT(*) FROM media WHERE sha256 = 'gh'),
+	                                (SELECT COUNT(*) FROM media_refs WHERE sha256 = 'gh' AND trace_id = ?)`,
+		late).Scan(&bodies, &refs); err != nil {
+		t.Fatal(err)
+	}
+	if bodies != 1 || refs != 1 {
+		t.Errorf("the later trace's body is stored %d times and its ref %d times, want both once", bodies, refs)
+	}
+}
+
+// A resolved Langfuse id that only the raw body names — a span the mapper
+// skipped carried it — is checked by the last slice, where the raw refs are
+// written: the archived body points at the body the id was resolved to, and
+// one collected between the slices refuses the export with ErrMediaGone, to be
+// taken again unresolved, as an export in one slice is (spec 041 #9, spec 043
+// #34).
+func TestAResolvedIdOnlyTheRawBodyNamesIsCheckedByTheLastSlice(t *testing.T) {
+	s, p := openIngestStore(t)
+	if _, err := s.db.Exec(`INSERT INTO media (sha256, mime_type, size, body, created_at) VALUES ('ij', 'image/png', 3, x'706e67', 1)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`INSERT INTO media_holders (sha256, project_id, mime_type, first_at) VALUES ('ij', ?, 'image/png', 1)`, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	batch := bulkBatch(p.ID, 900, 900)
+	batch.Resolved = []string{"ij"}
+	batch.Raw = &RawBatch{Body: []byte("raw")}
+	batch.RawMedia = []string{"ij"}
+	cut := batch.Slices()
+	if len(cut) != 2 {
+		t.Fatalf("%d slices, want two", len(cut))
+	}
+	if err := applySlice(t, s, cut[0]); err != nil {
+		t.Fatal(err)
+	}
+	collectBetweenSlices(t, s, p.ID, "ij")
+	if err := applySlice(t, s, cut[1]); !errors.Is(err, ErrMediaGone) {
+		t.Errorf("the last slice answered %v, want ErrMediaGone", err)
 	}
 }

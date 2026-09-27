@@ -142,8 +142,20 @@ func holdMedia(tx *sql.Tx, projectID, sha, mimeType string, now int64) error {
 	return nil
 }
 
+// writeMediaBodies stores the bodies not stored yet. A body already there is
+// found by its key before its bytes are handed to the statement: an export cut
+// into slices carries a body in every slice that names it (spec 043 #34), and
+// only the first of them writes it.
 func writeMediaBodies(tx *sql.Tx, bodies []MediaBody, now int64) error {
 	for _, body := range bodies {
+		var stored bool
+		if err := tx.QueryRow(`SELECT EXISTS (SELECT 1 FROM media WHERE sha256 = ?)`, body.SHA256).
+			Scan(&stored); err != nil {
+			return fmt.Errorf("find media %s: %w", body.SHA256, err)
+		}
+		if stored {
+			continue
+		}
 		if _, err := tx.Exec(
 			`INSERT INTO media (sha256, mime_type, size, body, created_at) VALUES (?, ?, ?, ?, ?)
 			 ON CONFLICT(sha256) DO NOTHING`,

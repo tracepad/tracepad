@@ -106,7 +106,7 @@ func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
 func userFilter(values url.Values) (store.UserFilter, error) {
 	filter := store.UserFilter{
 		Sort:   values.Get("sort"),
-		Prefix: values.Get("prefix"),
+		Prefix: lookupLabel(values.Get("prefix")),
 	}
 	if filter.Sort == "" {
 		filter.Sort = store.UserSorts[0]
@@ -156,7 +156,7 @@ func (s *Server) handleGetUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	userID := r.PathValue("id")
+	userID := lookupLabel(r.PathValue("id"))
 	if userID == "" {
 		writeError(w, http.StatusBadRequest, "the user id must not be empty")
 		return

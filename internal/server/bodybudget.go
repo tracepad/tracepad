@@ -71,6 +71,9 @@ func (b *bodyBudget) capacityBytes() int64 { return b.capacity }
 type bodyHold struct {
 	budget   *bodyBudget
 	reserved int64
+	// declared is a body reserved whole up front by reserveDeclared: it
+	// has nothing left to cover as it is read.
+	declared bool
 }
 
 // cover grows the reservation to cover `read` bytes, a step at a time, and
@@ -136,6 +139,7 @@ func reserveDeclared(r *http.Request, hold *bodyHold, limit int64) error {
 		return errBodyBudget
 	}
 	hold.reserved += r.ContentLength
+	hold.declared = true
 	return nil
 }
 
@@ -149,9 +153,10 @@ const bodyBusy = "the server is holding as many request bodies as it can; retry 
 // covered once it has been read, so a refused body has read at most one step
 // past what fit. `limit` is the most the body may be; what the reader hands on
 // past it is about to be refused as too large, and is not reserved. A reader
-// for a request with no reservation is returned as it is.
+// for a request with no reservation, or one reserved whole by reserveDeclared —
+// net/http ends it at its declared length — is returned as it is.
 func budgeted(reader io.Reader, hold *bodyHold, limit int64) io.Reader {
-	if hold == nil {
+	if hold == nil || hold.declared {
 		return reader
 	}
 	return &budgetReader{reader: reader, hold: hold, limit: limit}

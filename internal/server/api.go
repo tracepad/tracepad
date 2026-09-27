@@ -21,6 +21,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tracepad/tracepad/internal/mapping"
 	"github.com/tracepad/tracepad/internal/store"
 )
 
@@ -379,6 +380,13 @@ func queryParams(r *http.Request, known ...string) (url.Values, error) {
 	return values, nil
 }
 
+// lookupLabel is a label a request looks something up by — a filter, a user or
+// session in the path, the user an erasure names, the session a score is
+// given — cut as ingest cuts what it stores (spec 043 #14, #34). Looked up
+// whole, a value longer than the bound would match nothing: a filter that
+// comes back empty, an erasure that erases nothing.
+func lookupLabel(value string) string { return mapping.CutLabel(value) }
+
 // filterList reads a filter that takes a comma-separated list — *any of* its
 // items (spec 027 #1) — and answers nothing at all when the parameter is
 // absent.
@@ -399,6 +407,9 @@ func queryParams(r *http.Request, known ...string) (url.Values, error) {
 // A value with a comma in it is not expressible this way, and `docs/api.md`
 // says so: an identifier with a comma in it is a choice its owner made against
 // every tool that will ever list it.
+//
+// Every such list is a list of labels, and each item is cut as ingest cuts
+// what it stores (lookupLabel).
 func filterList(values url.Values, name string) ([]string, error) {
 	given := values[name]
 	if len(given) == 0 {
@@ -419,7 +430,7 @@ func filterList(values url.Values, name string) ([]string, error) {
 	}
 	items := strings.Split(raw, ",")
 	for i, item := range items {
-		items[i] = strings.TrimSpace(item)
+		items[i] = lookupLabel(strings.TrimSpace(item))
 		if items[i] == "" {
 			return nil, fmt.Errorf("%s: empty item in list", name)
 		}

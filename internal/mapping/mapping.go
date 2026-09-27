@@ -113,8 +113,8 @@ func Map(resourceSpans []*tracepb.ResourceSpans) *Result {
 		res.Traces = append(res.Traces, boundLabels(traces[id].finish()))
 	}
 	for _, obs := range res.Observations {
-		obs.Name = cutLabel(obs.Name)
-		obs.Model = cutLabel(obs.Model)
+		obs.Name = CutLabel(obs.Name)
+		obs.Model = CutLabel(obs.Model)
 	}
 	res.SkipReason = summarize(reasons)
 
@@ -157,7 +157,7 @@ const (
 // are one tag, as they would be stored.
 func boundLabels(t *model.Trace) *model.Trace {
 	for _, field := range []*string{&t.Name, &t.UserID, &t.SessionID, &t.Environment, &t.Release, &t.Version} {
-		*field = cutLabel(*field)
+		*field = CutLabel(*field)
 	}
 	if len(t.Tags) == 0 {
 		return t
@@ -165,7 +165,7 @@ func boundLabels(t *model.Trace) *model.Trace {
 	seen := make(map[string]bool, len(t.Tags))
 	tags := make([]string, 0, min(len(t.Tags), MaxTags))
 	for _, tag := range t.Tags {
-		tag = cutLabel(tag)
+		tag = CutLabel(tag)
 		if seen[tag] {
 			continue
 		}
@@ -179,9 +179,10 @@ func boundLabels(t *model.Trace) *model.Trace {
 	return t
 }
 
-// cutLabel cuts a label to MaxLabelLength characters, at a character
-// boundary.
-func cutLabel(s string) string {
+// CutLabel cuts a label to MaxLabelLength characters, at a character
+// boundary. A lookup by a label goes through it too (spec 043 #34): a value
+// stored cut and looked up whole would match nothing.
+func CutLabel(s string) string {
 	if len(s) <= MaxLabelLength {
 		return s
 	}

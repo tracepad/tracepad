@@ -218,6 +218,8 @@ export before its first slice only; once it is admitted, its later slices wait
 for room. Ingest is an
 upsert by span id, so the retry converges on exactly the rows an uninterrupted
 export writes, and the raw body is stored once, by the attempt that succeeds.
+A `500` between two slices is not retried: the part written stays, without
+the raw body, which travels with the last slice.
 
 A span that cannot be mapped — a missing or malformed trace/span id — is
 skipped and counted in `partial_success` rather than failing the whole export.
@@ -387,7 +389,9 @@ Two consequences worth knowing:
   observation's name and model — are cut at 1,000 characters, and a trace
   keeps its first 50 distinct tags in the order they were sent; a repeated tag
   is kept once. The raw body keeps every value as it was sent, and a replay
-  applies the same cut.
+  applies the same cut. A lookup by a label is cut the same way — a filter,
+  a user or session in the path, a user's erasure, a score's `session_id` —
+  so the whole value still finds its row.
 - **Exceptions count as errors.** OTel records a failure as a span *event*,
   not an attribute. Every event is kept under `metadata.events` with its
   attributes intact — stack traces included — and a span carrying an
