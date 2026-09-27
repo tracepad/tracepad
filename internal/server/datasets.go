@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -255,9 +256,14 @@ func (s *Server) handleDeleteDataset(w http.ResponseWriter, r *http.Request) {
 	}
 	confirm := values.Get("confirm")
 	if confirm == "" {
-		dataset, counts, err := s.store.DatasetPreview(r.Context(), project.ID, name)
-		if err != nil {
-			readFailed(w, r, "failed to read what the dataset holds", err)
+		var (
+			dataset *store.Dataset
+			counts  store.DatasetCounts
+		)
+		if !s.readInSlot(w, r, "failed to read what the dataset holds", func(ctx context.Context) (err error) {
+			dataset, counts, err = s.store.DatasetPreview(ctx, project.ID, name)
+			return err
+		}) {
 			return
 		}
 		if dataset == nil {

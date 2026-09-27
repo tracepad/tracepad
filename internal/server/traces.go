@@ -260,14 +260,7 @@ func (s *Server) handleLastTrace(w http.ResponseWriter, r *http.Request) {
 func (s *Server) renderTrace(w http.ResponseWriter, r *http.Request, projectID string, trace *store.TraceRow,
 	expand bool, budgetBytes int) ([]byte, bool) {
 	nodes, cut, err := s.readTree(r.Context(), projectID, trace.ID)
-	var unrendered *treeRenderFailed
-	switch {
-	case errors.As(err, &unrendered):
-		slog.Error("render trace failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to render the trace")
-		return nil, false
-	case err != nil:
-		readFailed(w, r, "failed to read the observations", err)
+	if !treeOK(w, r, err) {
 		return nil, false
 	}
 	roots := buildTree(nodes)
@@ -326,17 +319,27 @@ func (s *Server) renderTrace(w http.ResponseWriter, r *http.Request, projectID s
 		ctx: r.Context(), reader: s.store.PayloadReader(), budget: budget,
 	}}, omitted)
 	encoded, err := body.MarshalJSON()
-	var unread *payloadReadFailed
-	switch {
-	case errors.As(err, &unread):
-		readFailed(w, r, "failed to read the observations", unread.err)
-		return nil, false
-	case err != nil:
-		slog.Error("render trace failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to render the trace")
+	if !treeOK(w, r, err) {
 		return nil, false
 	}
 	return encoded, true
+}
+
+// treeOK reports whether a tree was read or written without error, and
+// answers the client when it was not: a failed read of the store as reads are
+// answered, anything else as a failure to render.
+func treeOK(w http.ResponseWriter, r *http.Request, err error) bool {
+	var unread *storeReadFailed
+	switch {
+	case err == nil:
+		return true
+	case errors.As(err, &unread):
+		readFailed(w, r, "failed to read the observations", unread.err)
+	default:
+		slog.Error("render trace failed", "err", err)
+		writeError(w, http.StatusInternalServerError, "failed to render the trace")
+	}
+	return false
 }
 
 // renderTraceDetail is a trace with its tree. `observations_omitted` says how

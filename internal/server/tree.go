@@ -71,8 +71,7 @@ func (s *Server) readTree(ctx context.Context, projectID, traceID string) (nodes
 				return false
 			}
 			buffer.Reset()
-			if err := renderOwn(row).appendJSON(&buffer); err != nil {
-				renderErr = &treeRenderFailed{err}
+			if renderErr = renderOwn(row).appendJSON(&buffer); renderErr != nil {
 				return false
 			}
 			if size+buffer.Len() > maxTreeBytes {
@@ -88,19 +87,11 @@ func (s *Server) readTree(ctx context.Context, projectID, traceID string) (nodes
 			nodes = append(nodes, &treeNode{row: row, own: bytes.Clone(buffer.Bytes())})
 			return true
 		})
-	if err == nil {
-		err = renderErr
+	if err != nil {
+		return nodes, cut, &storeReadFailed{err}
 	}
-	return nodes, cut, err
+	return nodes, cut, renderErr
 }
-
-// treeRenderFailed is an observation the renderer could not write, told apart
-// from a failed read so that the handler answers it as the rendering failure
-// it is.
-type treeRenderFailed struct{ err error }
-
-func (e *treeRenderFailed) Error() string { return e.err.Error() }
-func (e *treeRenderFailed) Unwrap() error { return e.err }
 
 // omittedCount is what `observations_omitted` says: nothing for a whole tree,
 // and for a cut one the trace's count less what the tree holds — at least one,
@@ -297,17 +288,19 @@ type treePayloads struct {
 	budget payloadBudget
 }
 
-// payloadReadFailed is a payload the store could not read, told apart from a
-// rendering failure so that the handler answers it as a failed read.
-type payloadReadFailed struct{ err error }
+// storeReadFailed is a read of the store that failed while a tree was read or
+// written — its observations, or one of their payloads — told apart from a
+// failure to render, so that the handler answers it as a failed read and
+// anything else as the rendering failure it is.
+type storeReadFailed struct{ err error }
 
-func (e *payloadReadFailed) Error() string { return e.err.Error() }
-func (e *payloadReadFailed) Unwrap() error { return e.err }
+func (e *storeReadFailed) Error() string { return e.err.Error() }
+func (e *storeReadFailed) Unwrap() error { return e.err }
 
 func (p *treePayloads) append(buffer *bytes.Buffer, row *store.ObservationRow, kind store.PayloadKind) error {
 	value, err := readPayload(p.reader, p.ctx, row, kind)
 	if err != nil {
-		return &payloadReadFailed{err}
+		return &storeReadFailed{err}
 	}
 	defer payloadDone()
 	if value == nil {

@@ -63,9 +63,14 @@ func (s *Server) handleDeleteTrace(w http.ResponseWriter, r *http.Request) {
 	// request computes none of it, so a count that failed cannot 500 a
 	// deletion that was going to succeed.
 	if values.Get("confirm") == "" {
-		counts, runs, err := s.store.TracePreview(r.Context(), project.ID, id)
-		if err != nil {
-			readFailed(w, r, "failed to read what this trace holds", err)
+		var (
+			counts store.DeleteCounts
+			runs   []store.AffectedRun
+		)
+		if !s.readInSlot(w, r, "failed to read what this trace holds", func(ctx context.Context) (err error) {
+			counts, runs, err = s.store.TracePreview(ctx, project.ID, id)
+			return err
+		}) {
 			return
 		}
 		if counts.Traces == 0 {

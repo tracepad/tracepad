@@ -1170,9 +1170,10 @@ bounded as writes are.
 
 The other way round, a write's own reads are reads: the exact count of a queue
 fill from a filter, the dry runs of a bulk trace deletion, a shrinking
-retention window, a project's deletion and a user's erasure, and the selection
-each round of a bulk deletion works through take a slot and run under the
-deadline, and answer the same two `503`s. The write that follows takes no
+retention window, a project's deletion, a user's erasure and the deletion of
+one trace, dataset or prompt, and the selection each round of a bulk deletion
+works through take a slot and run under the deadline, and answer the same two
+`503`s. The write that follows takes no
 slot.
 
 ## Errors

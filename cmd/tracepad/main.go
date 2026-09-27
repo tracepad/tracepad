@@ -164,7 +164,6 @@ func serve(args []string) error {
 		return err
 	}
 	defer st.Close()
-	st.BoundPool(cfg.ReadConcurrency)
 
 	specs, err := provisionSpecs(cfg)
 	if err != nil {
@@ -198,6 +197,9 @@ func serve(args []string) error {
 	defer aggregator.Close()
 
 	srv := server.New(cfg, version, st, writer, sweeper)
+	// Sized for the read slots the server took, which is where the
+	// setting's default is settled (spec 043 #16).
+	st.BoundPool(srv.ReadConcurrency())
 	// After the server, because the server is what knows whether this
 	// deployment still needs its first owner and what the link to create
 	// one is (spec 028 #9).

@@ -46,6 +46,10 @@ func newReadSlots(capacity int) readSlots {
 	return make(readSlots, capacity)
 }
 
+// ReadConcurrency is how many reads this server serves at once, the number
+// the store's pool is sized by (spec 043 #16).
+func (s *Server) ReadConcurrency() int { return s.reads.capacity() }
+
 // busy and capacity are the gauge `GET /api/v1/system` reports (#21).
 func (r readSlots) busy() int     { return len(r) }
 func (r readSlots) capacity() int { return cap(r) }
@@ -65,14 +69,7 @@ func (s *Server) readGate(next http.HandlerFunc, slots readSlots) http.HandlerFu
 		ctx, cancel := context.WithTimeout(r.Context(), s.readTimeout)
 		defer cancel()
 		asked := time.Now()
-		select {
-		case slots <- struct{}{}:
-		case <-ctx.Done():
-			if hungUp(r) {
-				return
-			}
-			s.counters.observeRead(callerProject(r), readRefusedBusy)
-			retryLater(w, readBusy)
+		if !s.takeSlot(w, r, ctx, slots) {
 			return
 		}
 		admitted := time.Now()
@@ -88,6 +85,23 @@ func (s *Server) readGate(next http.HandlerFunc, slots readSlots) http.HandlerFu
 		// The deadline stopped the read, and the handler either said
 		// nothing or said `5xx` about a query the deadline interrupted.
 		s.answerStopped(w, r, asked, admitted)
+	}
+}
+
+// takeSlot waits for one of slots within the read's deadline, and reports
+// whether it got one. A read that gets none is answered busy, with
+// `Retry-After`, and counted; one whose client hung up while it waited is
+// answered by nobody (spec 043 #16).
+func (s *Server) takeSlot(w http.ResponseWriter, r *http.Request, ctx context.Context, slots readSlots) bool {
+	select {
+	case slots <- struct{}{}:
+		return true
+	case <-ctx.Done():
+		if !hungUp(r) {
+			s.counters.observeRead(callerProject(r), readRefusedBusy)
+			retryLater(w, readBusy)
+		}
+		return false
 	}
 }
 
@@ -128,19 +142,17 @@ func (s *Server) readInSlot(w http.ResponseWriter, r *http.Request, message stri
 	ctx, cancel := context.WithTimeout(r.Context(), s.readTimeout)
 	defer cancel()
 	asked := time.Now()
-	select {
-	case s.reads <- struct{}{}:
-	case <-ctx.Done():
-		if !hungUp(r) {
-			s.counters.observeRead(callerProject(r), readRefusedBusy)
-			retryLater(w, readBusy)
-		}
+	if !s.takeSlot(w, r, ctx, s.reads) {
 		return false
 	}
 	admitted := time.Now()
-	readAdmitted(ctx)
-	err := read(ctx)
-	<-s.reads
+	err := func() error {
+		// Given back however the read ends, a panic included: a slot
+		// that is never returned is one fewer for every read after.
+		defer func() { <-s.reads }()
+		readAdmitted(ctx)
+		return read(ctx)
+	}()
 	switch {
 	case err == nil:
 		return true

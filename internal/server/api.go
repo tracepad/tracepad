@@ -632,15 +632,21 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 	writeEncoded(w, status, encoded)
 }
 
+var newline = []byte{'\n'}
+
 // writeEncoded writes a body already encoded — by writeJSON, or by a handler
 // that renders in a pass of its own, as the trace tree does (spec 043 #18).
 func writeEncoded(w http.ResponseWriter, status int, encoded []byte) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	// The newline json.Encoder ended every answer with before (spec 043 #3).
-	if _, err := w.Write(append(encoded, '\n')); err != nil {
+	// The newline json.Encoder ended every answer with before (spec 043 #3),
+	// written on its own: appended, it could copy a body of tens of
+	// megabytes to add one byte.
+	if _, err := w.Write(encoded); err != nil {
 		slog.Error("failed to write response", "err", err)
+		return
 	}
+	w.Write(newline)
 }
 
 // jsonValue reports whether raw carries a JSON value at all: an absent field

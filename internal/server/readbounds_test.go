@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -503,6 +504,17 @@ func TestReadsInsideWritesAreBounded(t *testing.T) {
 		"an erasure's dry run": func() *httptest.ResponseRecorder {
 			return h.call(t, "DELETE", "/api/v1/projects/"+h.project.ID+"/users/u1/data", nil)
 		},
+		// Bounded by the one thing they name, which may still be a trace
+		// of millions of observations or a dataset of as many items.
+		"a trace's dry run": func() *httptest.ResponseRecorder {
+			return h.call(t, "DELETE", "/api/v1/traces/"+traceHex(1), nil)
+		},
+		"a dataset's dry run": func() *httptest.ResponseRecorder {
+			return h.call(t, "DELETE", "/api/v1/datasets/golden", nil)
+		},
+		"a prompt's dry run": func() *httptest.ResponseRecorder {
+			return h.call(t, "DELETE", "/api/v1/prompts/summarize", nil)
+		},
 	}
 
 	release := make(chan struct{})
@@ -523,5 +535,33 @@ func TestReadsInsideWritesAreBounded(t *testing.T) {
 		t.Run(name+" is stopped by the deadline", func(t *testing.T) {
 			expectError(t, request(), 503, "the read took longer than 200ms and was stopped")
 		})
+	}
+}
+
+// A read that panics inside a write route's slot gives the slot back: one
+// kept would be one fewer for every read after it (spec 043 #16).
+func TestReadInSlotGivesItsSlotBackOnPanic(t *testing.T) {
+	h := newReadHarness(t, time.Second, 1)
+	req := httptest.NewRequest("DELETE", "/api/v1/traces", nil)
+	func() {
+		defer func() { _ = recover() }()
+		h.server.readInSlot(httptest.NewRecorder(), req, "failed", func(context.Context) error {
+			panic("a bug in a read")
+		})
+	}()
+	if busy := h.server.reads.busy(); busy != 0 {
+		t.Fatalf("%d slot(s) still taken after the read panicked", busy)
+	}
+}
+
+// The server settles the read slots' default, and reports it for the pool to
+// be sized by, whether or not the configuration named a number (spec 043 #16).
+func TestReadConcurrencyIsSettledOnce(t *testing.T) {
+	h := newHarness(t, &config.Config{Listen: ":0", MaxBodyBytes: config.DefaultMaxBodyBytes}, store.WriterOptions{})
+	if got, want := h.server.ReadConcurrency(), config.DefaultReadConcurrency(runtime.GOMAXPROCS(0)); got != want {
+		t.Errorf("ReadConcurrency = %d with none configured, want the default %d", got, want)
+	}
+	if got := newReadHarness(t, time.Second, 3).server.ReadConcurrency(); got != 3 {
+		t.Errorf("ReadConcurrency = %d, want the configured 3", got)
 	}
 }

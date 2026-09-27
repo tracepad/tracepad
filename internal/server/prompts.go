@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -468,9 +469,11 @@ func (s *Server) handleDeletePrompt(w http.ResponseWriter, r *http.Request) {
 
 	confirm := values.Get("confirm")
 	if confirm == "" {
-		counts, err := s.store.PromptPreview(r.Context(), project.ID, name)
-		if err != nil {
-			readFailed(w, r, "failed to read what the prompt holds", err)
+		var counts store.PromptCounts
+		if !s.readInSlot(w, r, "failed to read what the prompt holds", func(ctx context.Context) (err error) {
+			counts, err = s.store.PromptPreview(ctx, project.ID, name)
+			return err
+		}) {
 			return
 		}
 		// A name exists only by having versions, the same rule the version
