@@ -700,7 +700,7 @@ func (r *run) usersRemoveData(ctx context.Context, rest []string) error {
 		return err
 	}
 	if confirmed != nil {
-		body, err = confirmErasure(ctx, positional[0], func(ctx context.Context) (json.RawMessage, error) {
+		body, err = confirmErasure(ctx, previewAgain(fs, positional[0]), func(ctx context.Context) (json.RawMessage, error) {
 			return r.api.Send(ctx, http.MethodDelete, path, confirmed, nil)
 		})
 		if err != nil {
@@ -759,7 +759,7 @@ func (r *run) usersRemoveData(ctx context.Context, rest []string) error {
 // erasure. Before that — a refused connection, a name that does not resolve, a
 // handshake that fails, an interrupt — nothing reached the server, and the
 // error is passed on as it is; so is a refusal the server did send.
-func confirmErasure(ctx context.Context, user string,
+func confirmErasure(ctx context.Context, again string,
 	send func(context.Context) (json.RawMessage, error)) (json.RawMessage, error) {
 	var written atomic.Bool
 	body, err := send(httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
@@ -774,7 +774,32 @@ func confirmErasure(ctx context.Context, user string,
 		return body, err
 	}
 	return nil, fmt.Errorf("no answer from the server (%w); the erasure it received runs to the end without one — "+
-		"run `tracepad users rm-data %s` again in a few minutes: its preview shows what is left", err, user)
+		"run `%s` again in a few minutes: its preview shows what is left", err, again)
+}
+
+// previewAgain is the command that asks for the erasure's preview again: the
+// flags the operator gave — the project and the server it went to, never the
+// key — and the user id, each quoted for a shell where it needs it.
+func previewAgain(fs *flag.FlagSet, user string) string {
+	words := []string{"tracepad", "users", "rm-data"}
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "project" || f.Name == "url" {
+			words = append(words, "--"+f.Name, shellWord(f.Value.String()))
+		}
+	})
+	return strings.Join(append(words, shellWord(user)), " ")
+}
+
+// shellWord quotes a word for a POSIX shell unless it is made only of
+// characters no shell reads specially.
+func shellWord(word string) string {
+	if word != "" && strings.IndexFunc(word, func(r rune) bool {
+		return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' ||
+			strings.ContainsRune("-_.:/@+=,%", r))
+	}) < 0 {
+		return word
+	}
+	return "'" + strings.ReplaceAll(word, "'", `'\''`) + "'"
 }
 
 // destructive runs the two-step contract of spec 005 #8: ask once without a

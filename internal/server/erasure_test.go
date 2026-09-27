@@ -311,3 +311,14 @@ func TestTheRetentionDryRunCountsSessionScores(t *testing.T) {
 	}
 	_ = store.BackupLifetime
 }
+
+// The note names the batches older than the trace window as what the erasure
+// may not find, not as batches it leaves: those holding a pinned trace of the
+// user are scrubbed like any other (spec 044 #5 a).
+func TestTheNoteDoesNotPromiseTheOldBatchesAreLeft(t *testing.T) {
+	note := erasureNote(store.RawErasure{BatchesToScan: 3, UnattributableBatches: 7}, false)
+	if !strings.Contains(note, "7 raw batches are older than the trace window and may hold spans") ||
+		strings.Contains(note, "not scrubbed") {
+		t.Errorf("note = %q", note)
+	}
+}

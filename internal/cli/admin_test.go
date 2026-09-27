@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"flag"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -519,7 +520,7 @@ func TestAnUnansweredErasureSaysItIsRunning(t *testing.T) {
 	ask := func(t *testing.T, baseURL string) error {
 		t.Helper()
 		api := &client.Client{BaseURL: baseURL, HTTP: &http.Client{Timeout: 200 * time.Millisecond}}
-		_, err := confirmErasure(t.Context(), "u1", func(ctx context.Context) (json.RawMessage, error) {
+		_, err := confirmErasure(t.Context(), "tracepad users rm-data u1", func(ctx context.Context) (json.RawMessage, error) {
 			return api.Send(ctx, http.MethodDelete, "/data", url.Values{"confirm": {"u1"}}, nil)
 		})
 		return err
@@ -551,5 +552,27 @@ func TestAnUnansweredErasureSaysItIsRunning(t *testing.T) {
 	if err := ask(t, refusing.URL); !errors.As(err, &refusal) || refusal.Status != http.StatusConflict ||
 		strings.Contains(err.Error(), running) {
 		t.Errorf("a refusal became %v", err)
+	}
+}
+
+// The command the unanswered erasure suggests asks the same server about the
+// same project and user: the flags the operator gave are repeated, the key
+// never is, and a word a shell would split or expand is quoted.
+func TestTheRetryHintRepeatsTheProjectAndQuotes(t *testing.T) {
+	fs := flag.NewFlagSet("users rm-data", flag.ContinueOnError)
+	fs.String("url", "", "")
+	fs.String("key", "", "")
+	fs.String("project", "", "")
+	fs.Bool("yes", false, "")
+	if err := fs.Parse([]string{"--project", "shop eu", "--key", "tp-secret", "--url", "https://t.example:4318", "--yes"}); err != nil {
+		t.Fatal(err)
+	}
+	got := previewAgain(fs, "o'brien $HOME")
+	want := `tracepad users rm-data --project 'shop eu' --url https://t.example:4318 'o'\''brien $HOME'`
+	if got != want {
+		t.Errorf("hint = %s\nwant   %s", got, want)
+	}
+	if bare := previewAgain(flag.NewFlagSet("x", flag.ContinueOnError), "user-4711"); bare != "tracepad users rm-data user-4711" {
+		t.Errorf("hint without flags = %s", bare)
 	}
 }

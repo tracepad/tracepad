@@ -23,7 +23,9 @@ describe('the erasure sentence', () => {
 describe('an erasure the screen stopped waiting for', () => {
 	it('is still running on the server, not a failure', () => {
 		const timedOut = new ApiError(0, 'the server did not answer in time', { timed_out: true });
-		expect(stillRunning(timedOut, 'u-1')).toMatch(/still erasing the data of u-1/);
+		expect(stillRunning(timedOut, 'u-1')).toMatch(
+			/No answer within 30 seconds about erasing the data of u-1/
+		);
 	});
 
 	it('leaves every other failure a failure', () => {
@@ -39,7 +41,7 @@ describe('a screen erasing a user', () => {
 
 	it('stays for an erasure left running, and leaves after a retry that answered', async () => {
 		const erasure = new Erasure();
-		expect(await erasure.ask('u', 'u', timedOut)).toMatch(/still erasing/);
+		expect(await erasure.ask('u', 'u', timedOut)).toMatch(/runs to the end/);
 		expect(erasure.running).toBe(true);
 		expect(await erasure.ask('u', 'u', answered)).toEqual({ dry_run: false, deleted: { traces: 1 } });
 		expect(erasure.running).toBe(false);

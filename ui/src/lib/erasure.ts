@@ -23,15 +23,18 @@ export function erased(user: string, deleted: Record<string, number>): string {
 
 /**
  * What to say when the screen stopped waiting for a confirmed erasure: the
- * server runs it to completion whether or not anybody waits for the answer
- * (spec 035 #14), so the clock running out is news about this screen, not a
- * failure of the erasure. `null` for any other failure, which is shown as one.
+ * server runs one it received to completion whether or not anybody waits for
+ * the answer (spec 035 #14), so the clock running out is news about this
+ * screen, not a failure of the erasure. A browser cannot tell whether the
+ * request reached the server, so the sentence does not claim that it did.
+ * `null` for any other failure, which is shown as one.
  */
 export function stillRunning(cause: unknown, user: string): string | null {
 	if (!(cause instanceof ApiError) || cause.details.timed_out !== true) return null;
 	return (
-		`The server is still erasing the data of ${user}: an erasure runs to the end even when ` +
-		'this screen stops waiting. Look the user up again in a few minutes to see it finished.'
+		`No answer within 30 seconds about erasing the data of ${user}. An erasure the server ` +
+		'received runs to the end even when this screen stops waiting: look the user up again ' +
+		'in a few minutes to see what is left.'
 	);
 }
 

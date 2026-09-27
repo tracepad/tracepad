@@ -904,8 +904,8 @@ func erasureNote(raw store.RawErasure, backup bool) string {
 	note := fmt.Sprintf("the user's spans are removed from the raw batches that hold them "+
 		"(%d to scan); a rewritten batch is marked scrubbed", raw.BatchesToScan)
 	if raw.UnattributableBatches > 0 {
-		note += fmt.Sprintf("; %d raw batches are older than the trace window and nothing says whose "+
-			"spans they hold, so they are not scrubbed", raw.UnattributableBatches)
+		note += fmt.Sprintf("; %d raw batches are older than the trace window and may hold spans "+
+			"nothing attributes to a user any more, which the erasure cannot find", raw.UnattributableBatches)
 	}
 	note += "; the freed bytes are overwritten by the next sweep"
 	if backup {
