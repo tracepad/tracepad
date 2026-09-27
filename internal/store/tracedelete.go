@@ -61,7 +61,10 @@ func (r *traceRemoval) apply(tx *sql.Tx) (DeleteCounts, error) {
 	// that landed after its trace was deleted or erased would be stored
 	// under a ref to nothing. Their refs written before go below, with the
 	// rest of their media, in this same transaction.
-	if err := voidUploads(tx, r.projectID, r.ids, nowOr(r.now)); err != nil {
+	// Stamped as this transaction runs, not as the request began: a URL
+	// issued while the request's earlier chunks ran lives an hour from
+	// then, and the row must outlive it.
+	if err := voidUploads(tx, r.projectID, r.ids, time.Now().UnixNano()); err != nil {
 		return counts, err
 	}
 	payloads, err := referencedPayloads(tx, r.projectID, r.ids)

@@ -355,15 +355,16 @@ func TestMediaDeletionInChunks(t *testing.T) {
 		t.Error("the picture of a trace no chunk took was lost")
 	}
 
-	// The removed traces are remembered for the URL's lifetime, and not
-	// beyond it.
-	if err := f.sweeper.sweepVoidedUploads(t.Context(), sweepNow.Add(MediaUploadWindow-time.Minute).UnixNano()); err != nil {
+	// The removed traces are remembered for the URL's lifetime from the
+	// chunk that removed them — not from the request's clock, which these
+	// chunks set a month back — and not beyond it.
+	if err := f.sweeper.sweepVoidedUploads(t.Context(), time.Now().Add(MediaUploadWindow-time.Minute).UnixNano()); err != nil {
 		t.Fatal(err)
 	}
 	if n := f.count(t, `SELECT COUNT(*) FROM media_voided`); n != 2 {
 		t.Fatalf("voided traces within the hour = %d, want 2", n)
 	}
-	if err := f.sweeper.sweepVoidedUploads(t.Context(), sweepNow.Add(MediaUploadWindow+time.Minute).UnixNano()); err != nil {
+	if err := f.sweeper.sweepVoidedUploads(t.Context(), time.Now().Add(MediaUploadWindow+time.Minute).UnixNano()); err != nil {
 		t.Fatal(err)
 	}
 	if n := f.count(t, `SELECT COUNT(*) FROM media_voided`); n != 0 {
@@ -371,5 +372,38 @@ func TestMediaDeletionInChunks(t *testing.T) {
 	}
 	if err := f.writer.Submit(t.Context(), f.upload(hexTrace(20), taken)); err != nil {
 		t.Errorf("an upload for the trace an hour after its deletion = %v", err)
+	}
+}
+
+// TestMediaResentTraceTakesUploads: a trace deleted and sent again under the
+// same id within the hour is a trace like any other — seen, and deletable —
+// so its upload is stored and the null answer writes its ref settled, as for
+// a trace never deleted: the uploads refused are a removed trace's that is
+// not here (#29).
+func TestMediaResentTraceTakesUploads(t *testing.T) {
+	f := newSweepFixture(t)
+	f.arrive(t, f.project.ID, hexTrace(1), daysAgo(1))
+	if err := f.writer.Submit(t.Context(), &TraceDelete{ProjectID: f.project.ID, IDs: []string{hexTrace(1)},
+		Confirm: hexTrace(1)}); err != nil {
+		t.Fatal(err)
+	}
+	body := mediaBody(70, 800)
+	if err := f.writer.Submit(t.Context(), f.upload(hexTrace(1), body)); !rejectedAs(err, RejectForbidden) {
+		t.Fatalf("an upload for the deleted trace = %v, want a forbidden rejection", err)
+	}
+	f.arrive(t, f.project.ID, hexTrace(1), daysAgo(1))
+	if err := f.writer.Submit(t.Context(), f.upload(hexTrace(1), body)); err != nil {
+		t.Fatalf("an upload for the trace sent again = %v", err)
+	}
+	held := mediaBody(71, 800)
+	if err := f.writer.Submit(t.Context(), f.upload(hexTrace(2), held)); err != nil {
+		t.Fatal(err)
+	}
+	add := &MediaRefAdd{ProjectID: f.project.ID, SHA256: held.SHA256, TraceID: hexTrace(1)}
+	if err := f.writer.Submit(t.Context(), add); err != nil || !add.Held {
+		t.Fatalf("the null answer for the trace sent again = %v, %v", add.Held, err)
+	}
+	if n := f.count(t, `SELECT COUNT(*) FROM media_refs WHERE trace_id = ? AND pending = 0`, hexTrace(1)); n != 2 {
+		t.Errorf("settled refs of the trace sent again = %d, want its upload's and the null answer's", n)
 	}
 }

@@ -183,10 +183,22 @@ func (s *Server) handleLangfuseMediaUpload(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// Only the cap refuses the ask — at it, for a trace the project does not
+	// have, there is no room for the ref either answer would lead to
+	// (Decision 31); the guard has settled the project and the key. A read
+	// of the pool, so a refusal never reaches the writer.
+	if err := s.store.MediaUploadRoom(r.Context(), project.ID, sha, request.TraceID); err != nil {
+		var rejection *store.Rejection
+		if errors.As(err, &rejection) {
+			submitFailure(w, err, apiWrite)
+			return
+		}
+		lookupFailed(w, r, "media", err)
+		return
+	}
 	held, err := s.store.MediaHeld(project.ID, sha)
 	if err != nil {
-		slog.Error("media lookup failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to look the media up")
+		lookupFailed(w, r, "media", err)
 		return
 	}
 	if held != nil {
@@ -201,19 +213,6 @@ func (s *Server) handleLangfuseMediaUpload(w http.ResponseWriter, r *http.Reques
 		// Collected between the read and the write: ask for the bytes.
 	}
 
-	// Only the cap refuses here — at it, for a trace the project does not
-	// have, there is no room (Decision 31); the guard has settled the
-	// project and the key.
-	if err := s.store.MediaUploadRoom(r.Context(), project.ID, sha, request.TraceID); err != nil {
-		var rejection *store.Rejection
-		if errors.As(err, &rejection) {
-			submitFailure(w, err, apiWrite)
-			return
-		}
-		slog.Error("media lookup failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to look the media up")
-		return
-	}
 	// The route admits a project key and nothing else (the `ingest`
 	// policy), and the grant names it.
 	token, err := s.signUpload(uploadGrant{
@@ -329,7 +328,7 @@ const (
 func refuseUpload(w http.ResponseWriter, r *http.Request, refusal error) {
 	var rejection *store.Rejection
 	if !errors.As(refusal, &rejection) {
-		submitFailure(w, refusal, apiWrite)
+		lookupFailed(w, r, "media", refusal)
 		return
 	}
 	control := http.NewResponseController(w)

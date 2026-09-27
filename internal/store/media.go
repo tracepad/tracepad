@@ -621,19 +621,17 @@ func (a *MediaRefAdd) apply(tx *sql.Tx) error {
 	if err != nil || hold == nil {
 		return err
 	}
-	var settled, exists, voided bool
-	if err := tx.QueryRow(`SELECT `+traceStoredExpr+`, `+refExistsExpr+`, `+traceVoidedExpr,
-		a.ProjectID, a.TraceID, a.SHA256, a.ProjectID, a.TraceID, a.ProjectID, a.TraceID).
-		Scan(&settled, &exists, &voided); err != nil {
-		return fmt.Errorf("look up the ref of media %s: %w", a.SHA256, err)
+	place, err := refPlaceOf(context.Background(), tx, a.ProjectID, a.SHA256, a.TraceID)
+	if err != nil {
+		return err
 	}
-	if exists || !settled && voided {
+	if place == refWritten || place == refVoid {
 		a.Held = true
 		return nil
 	}
 	now := nowOr(a.Now)
 	at := now
-	if !settled {
+	if place == refPending {
 		if err := pendingRoom(tx, a.ProjectID, a.limit()); err != nil {
 			return err
 		}
@@ -662,6 +660,54 @@ const refExistsExpr = `EXISTS (SELECT 1 FROM media_refs WHERE sha256 = ? AND pro
 // the upload URL's lifetime (#29); its arguments are the project and the
 // trace.
 const traceVoidedExpr = `EXISTS (SELECT 1 FROM media_voided WHERE project_id = ? AND trace_id = ?)`
+
+// refPlace is where a channel ref to a body for a trace would stand — the one
+// rule the ask, the upload's checks and the null answer share.
+type refPlace int
+
+const (
+	// refWritten: the ref is there already; writing it again adds nothing.
+	refWritten refPlace = iota
+	// refSettled: the trace is stored, so the ref is settled (Decision 13)
+	// and outside the cap (#31) — a trace sent again after its deletion
+	// too, which is seen and deletable like any other.
+	refSettled
+	// refVoid: a deletion or an erasure removed the trace within the hour
+	// and it is not here now; nothing is written for it (#29).
+	refVoid
+	// refPending: a new pending ref, which the cap counts (#31).
+	refPending
+)
+
+// refFactsExpr selects the three facts that place a ref, with refFactsArgs.
+const refFactsExpr = traceStoredExpr + `, ` + refExistsExpr + `, ` + traceVoidedExpr
+
+func refFactsArgs(projectID, sha, traceID string) []any {
+	return []any{projectID, traceID, sha, projectID, traceID, projectID, traceID}
+}
+
+func placeOf(stored, written, voided bool) refPlace {
+	switch {
+	case written:
+		return refWritten
+	case stored:
+		return refSettled
+	case voided:
+		return refVoid
+	default:
+		return refPending
+	}
+}
+
+// refPlaceOf reads the facts and places the ref.
+func refPlaceOf(ctx context.Context, q ctxQuerier, projectID, sha, traceID string) (refPlace, error) {
+	var stored, written, voided bool
+	if err := q.QueryRowContext(ctx, `SELECT `+refFactsExpr, refFactsArgs(projectID, sha, traceID)...).
+		Scan(&stored, &written, &voided); err != nil {
+		return 0, fmt.Errorf("look up the ref of media %s: %w", sha, err)
+	}
+	return placeOf(stored, written, voided), nil
+}
 
 // MediaUploadWindow is how long an upload URL is good for, and so how long a
 // removed trace's uploads stay void: no URL issued before the removal outlives
@@ -726,19 +772,16 @@ func pendingRoom(q querier, projectID string, limit int) error {
 	return nil
 }
 
-// MediaUploadRoom answers whether the channel's POST may sign an upload URL:
-// errPendingFull's rejection when the upload's ref would be a new pending one
-// past the cap (#31). Nothing else refuses a URL the key asking may have: the
-// guard has settled the project and the key, and a trace removed within the
-// hour is refused at the PUT, where the grant is checked.
+// MediaUploadRoom is the channel POST's check, a read of the pool before any
+// job: errPendingFull's rejection when the ref its answer would lead to — the
+// upload's, or the null answer's — would be a new pending one past the cap
+// (#31). Nothing else refuses the ask: the guard has settled the project and
+// the key, and a removed trace is refused at the PUT and gets no ref from the
+// null answer.
 func (s *Store) MediaUploadRoom(ctx context.Context, projectID, sha, traceID string) error {
-	var settled, exists bool
-	if err := s.db.QueryRowContext(ctx, `SELECT `+traceStoredExpr+`, `+refExistsExpr,
-		projectID, traceID, sha, projectID, traceID).Scan(&settled, &exists); err != nil {
-		return fmt.Errorf("look up the ref of media %s: %w", sha, err)
-	}
-	if settled || exists {
-		return nil
+	place, err := refPlaceOf(ctx, s.db, projectID, sha, traceID)
+	if err != nil || place != refPending {
+		return err
 	}
 	return pendingRoom(s.db, projectID, s.maxPendingMediaRefs)
 }
@@ -778,26 +821,27 @@ type ctxQuerier interface {
 
 func grantRefusal(ctx context.Context, q ctxQuerier, g MediaGrant, limit int) (string, error) {
 	var (
-		media               string
-		gone, alive, voided bool
-		settled, refExists  bool
+		media                   string
+		gone, alive             bool
+		stored, written, voided bool
 	)
+	args := append([]any{g.Key}, refFactsArgs(g.ProjectID, g.SHA256, g.TraceID)...)
 	err := q.QueryRowContext(ctx, `SELECT p.media, p.deleted_at IS NOT NULL,
 	        EXISTS (SELECT 1 FROM api_keys k WHERE k.public_key = ? AND k.project_id = p.id),
-	        `+traceVoidedExpr+`, `+traceStoredExpr+`, `+refExistsExpr+`
-	   FROM projects p WHERE p.id = ?`,
-		g.Key, g.ProjectID, g.TraceID, g.ProjectID, g.TraceID, g.SHA256, g.ProjectID, g.TraceID, g.ProjectID).
-		Scan(&media, &gone, &alive, &voided, &settled, &refExists)
+	        `+refFactsExpr+`
+	   FROM projects p WHERE p.id = ?`, append(args, g.ProjectID)...).
+		Scan(&media, &gone, &alive, &stored, &written, &voided)
 	if err == sql.ErrNoRows {
 		return "", ErrUploadVoid
 	}
 	if err != nil {
 		return "", fmt.Errorf("check an upload grant: %w", err)
 	}
-	if gone || !alive || voided {
+	place := placeOf(stored, written, voided)
+	if gone || !alive || place == refVoid {
 		return media, ErrUploadVoid
 	}
-	if media == MediaPlaceholder || settled || refExists {
+	if media == MediaPlaceholder || place != refPending {
 		return media, nil
 	}
 	return media, pendingRoom(q, g.ProjectID, limit)

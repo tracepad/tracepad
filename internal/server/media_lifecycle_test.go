@@ -272,7 +272,7 @@ func TestLangfuseMediaUploadAfterDeletion(t *testing.T) {
 			h := newAdminHarness(t)
 			h.seedTrace(t, probeTrace, seedBase)
 
-			picture, sha, _ := pictureOf(61)
+			picture, sha, hash := pictureOf(61)
 			other, _, otherHash := pictureOf(62)
 			_, forDeleted := h.langfuseAsk(t, picture, probeTrace, testSecret)
 			_, forAnother := h.langfuseAsk(t, other, trace32(3), testSecret)
@@ -300,6 +300,12 @@ func TestLangfuseMediaUploadAfterDeletion(t *testing.T) {
 			}
 			if code := h.langfusePut(t, *forAnother, other, otherHash); code != 200 {
 				t.Errorf("another trace's URL from before the %s = %d, want 200", how, code)
+			}
+			// The trace sent again under its id is here: its upload is taken.
+			h.seedTrace(t, probeTrace, seedBase)
+			_, again := h.langfuseAsk(t, picture, probeTrace, testSecret)
+			if code := h.langfusePut(t, *again, picture, hash); code != 200 {
+				t.Errorf("the URL of a trace sent again after the %s = %d, want 200", how, code)
 			}
 		})
 	}
@@ -359,8 +365,9 @@ func TestLangfuseMediaDeletionInRounds(t *testing.T) {
 	}
 }
 
-// TestLangfuseMediaCapNeverReachesTheWriter: at the cap, the ask and the PUT
-// are refused by reads of the pool, before any job is submitted — with the
+// TestLangfuseMediaCapNeverReachesTheWriter: at the cap, the ask — for an
+// upload URL or the null answer — and the PUT are refused by reads of the
+// pool, before any job is submitted — with the
 // writer closed they still answer 429, where a job would have met a writer
 // shutting down (#31).
 func TestLangfuseMediaCapNeverReachesTheWriter(t *testing.T) {
@@ -384,6 +391,13 @@ func TestLangfuseMediaCapNeverReachesTheWriter(t *testing.T) {
 	if code := h.putRefused(t, *upload, 1000); code != http.StatusTooManyRequests {
 		t.Errorf("the PUT at the cap with the writer closed = %d, want 429", code)
 	}
+	// The null answer for a held picture and a trace not here: the same
+	// read, before any job.
+	rec = h.call(t, "POST", "/api/public/media", mustJSON(t, map[string]any{
+		"traceId": trace32(73), "contentType": "image/png", "contentLength": len(held),
+		"sha256Hash": heldHash, "field": "input",
+	}))
+	expectError(t, rec, http.StatusTooManyRequests, "waiting for their traces")
 }
 
 // TestLangfuseMediaNullAnswerThenSpans: the project holds X; asked for X for a

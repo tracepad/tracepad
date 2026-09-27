@@ -497,10 +497,6 @@ func (sw *Sweeper) sweepOrphanSearchEntries(ctx context.Context) (int64, error) 
 	return job.Deleted, nil
 }
 
-// sweepAccounts removes the browser sessions and invitations that have run
-// out (spec 028 #4). Chunked like everything else here, so a deployment that
-// has been away for a month does not hold the writer for one enormous DELETE;
-// what a pass does not reach, the next one does.
 // sweepVoidedUploads forgets the traces removed longer ago than an upload
 // URL lives, in bounded chunks (spec 041 #29).
 func (sw *Sweeper) sweepVoidedUploads(ctx context.Context, now int64) error {
@@ -516,6 +512,10 @@ func (sw *Sweeper) sweepVoidedUploads(ctx context.Context, now int64) error {
 	return nil
 }
 
+// sweepAccounts removes the browser sessions and invitations that have run
+// out (spec 028 #4). Chunked like everything else here, so a deployment that
+// has been away for a month does not hold the writer for one enormous DELETE;
+// what a pass does not reach, the next one does.
 func (sw *Sweeper) sweepAccounts(ctx context.Context, now int64) (int64, error) {
 	var total int64
 	for range sw.maxChunks {

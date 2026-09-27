@@ -209,7 +209,12 @@ has an hour left — so it keeps the body an hour longer at most. That ref keeps
 the body while the trace's spans are on their way, even if the trace that held
 it is deleted meanwhile. The sweep looks only at the refs the channel wrote
 that are still waiting for their trace, so its cost does not grow with the
-pictures a project keeps, and a project may have at most 10,000 of them.
+pictures a project keeps, and a project may have at most 10,000 of them. A
+waiting ref leaves the count when its trace's spans arrive, or when the sweep
+drops it a day after its upload; so a client whose spans go somewhere else
+meets the cap and stays at it — its uploads for new traces answered `429` —
+until the spans come or its oldest uploads age out, however often the SDK
+retries.
 
 An upload URL names the key that asked for it. Revoking the key voids the URLs
 it obtained, and deleting or erasing a trace voids the URLs for that trace for
@@ -217,8 +222,8 @@ the next hour, the time a URL lives — a picture that landed after its trace
 was gone would be stored under a ref to nothing. The SDK asks for a URL and
 PUTs it in one go, so what this refuses is the uploads in transit for the
 removed traces; the SDK logs them. Uploads for every other trace go on, during
-a deletion as before and after it. A trace sent again under a deleted id
-within that hour has its pictures refused the same way. URLs issued before the
+a deletion as before and after it. A trace sent again under a deleted id is a
+trace like any other, and its uploads are taken. URLs issued before the
 upgrade that introduced this are refused once.
 
 ## In the interface
