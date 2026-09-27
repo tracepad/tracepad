@@ -1,6 +1,6 @@
 # Spec 043 — Ingest and read bounds: what one request may cost everyone else
 
-**Status:** 🚧 IN PROGRESS
+**Status:** ✅ SHIPPED
 **Sprint:** September 2026
 
 > Tracepad is one process with one SQLite writer, one connection pool and one

@@ -418,6 +418,19 @@ API. This file routes; it does not duplicate what specs and docs say.
   and refuses a directory without the marker (#5–#7); `skills show` prints
   it. A drift test asks the binary for its commands, flags, tools and routes
   and fails on any name in the skill the binary does not have (#8).
+- ✅ Spec 043 (ingest and read bounds) shipped: what one request may cost
+  everyone else. A credential that could not be checked and a database
+  condition are `503` with `Retry-After`, never `401` or `500` (#1, #2); a
+  response is encoded before its status (#3); one counting rule for costs and
+  tokens, saturating sums and a `null` backstop, with migration 0025 repairing
+  what was stored (#4–#9). Ingest takes at most `TRACEPAD_MAX_SPANS_PER_REQUEST`
+  spans an export (`413`), commits an export in slices of 1,000 rows with
+  windows weighed in rows, reads every body from `TRACEPAD_BODY_BUDGET_BYTES`
+  (`429`), and cuts labels at 1,000 characters and tags at 50 (#10–#14, #30).
+  Reads run under `TRACEPAD_READ_TIMEOUT` in `TRACEPAD_READ_CONCURRENCY`
+  slots, `?tag=` takes 50 values, and a trace's tree has a node, depth and
+  size ceiling with `observations_omitted` (#15–#20, #25–#29); `/system`
+  shows every bound binding (#21).
 - ✅ Spec 042 (what the packages cost when nothing records, and how long
   they wait) shipped: a span starts with the cheap attributes, and input,
   output, metadata and model parameters are serialised only for a span that
