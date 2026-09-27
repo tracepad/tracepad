@@ -1,6 +1,6 @@
 # Spec 045 — Scoped project keys
 
-**Status:** 🚧 IN PROGRESS
+**Status:** ✅ SHIPPED
 **Sprint:** September 2026
 
 > A project key is its project's administrator (spec 005 #11). The same
