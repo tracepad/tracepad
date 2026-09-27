@@ -111,7 +111,7 @@ func (o object) appendJSON(buffer *bytes.Buffer) error {
 			// (spec 002 #14), which is the truth about one.
 			if skipped, ok := nonFiniteLog.Allow(m.key, time.Now()); ok {
 				slog.Warn("rendered a non-finite number as null",
-					"field", m.key, "since_last_line", skipped)
+					"field", m.key, "since_last_line", skipped.SameKey)
 			}
 			buffer.WriteString("null")
 			continue

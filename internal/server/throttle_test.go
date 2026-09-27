@@ -332,7 +332,7 @@ func TestPasswordGateLetsAGiveUpGo(t *testing.T) {
 	if rec.Body.Len() != 0 || rec.Header().Get("Retry-After") != "" {
 		t.Errorf("wrote %q with Retry-After %q to a caller that is gone", rec.Body.String(), rec.Header().Get("Retry-After"))
 	}
-	if _, log := h.server.passwordLog.allow(time.Now()); !log {
+	if _, log := h.server.passwordLog.Allow("", time.Now()); !log {
 		t.Error("a caller that gave up used up the gate's log line")
 	}
 }

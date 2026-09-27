@@ -466,7 +466,7 @@ func logReadFailure(line string, err error, condition string) {
 		return
 	}
 	if failed, now := lookupLog.Allow(condition, time.Now()); now {
-		slog.Error(line, "err", err, "condition", condition, "failed_since_last_line", failed)
+		slog.Error(line, "err", err, "condition", condition, "failed_since_last_line", failed.SameKey)
 	}
 }
 
@@ -958,13 +958,13 @@ const originRefused = "cross-origin request refused: the request's origin is not
 // itself carries the hint too.
 func (s *Server) refuseOrigin(w http.ResponseWriter, r *http.Request) {
 	origin := loggable(loggableOrigin(statedOrigin(r)))
-	if held, ok := s.originLog.allowKey(origin, time.Now()); ok {
+	if held, ok := s.originLog.Allow(origin, time.Now()); ok {
 		slog.Warn("a browser request was refused because its origin is none of this server's addresses",
 			"path", loggable(r.URL.Path), "origin", origin, "host", loggable(r.Host),
 			"x_forwarded_host", loggable(r.Header.Get("X-Forwarded-Host")),
 			"x_forwarded_proto", loggable(r.Header.Get("X-Forwarded-Proto")),
 			"tracepad_url", s.configuredOrigin(),
-			"not_logged_since_last", held.sameKey, "not_logged_over_cap", held.overCap)
+			"not_logged_since_last", held.SameKey, "not_logged_over_cap", held.OverCap)
 	}
 	writeError(w, http.StatusForbidden, originRefused)
 }

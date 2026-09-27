@@ -357,13 +357,9 @@ func TestIngestCapsTheDecompressedBody(t *testing.T) {
 	expectError(t, h.post(t, "/api/public/otel/v1/traces", bomb, gzipHeader), http.StatusRequestEntityTooLarge, "too large")
 	// Two bombs inside the minute: one warning, and the second is
 	// counted for the next one to report.
-	h.server.inflatedLog.mu.Lock()
-	var held int64
-	if k := h.server.inflatedLog.seen[""]; k != nil {
-		held = k.skipped
-	}
-	h.server.inflatedLog.mu.Unlock()
-	if held != 1 {
+	// The line after the minute is the one that tells it.
+	next, _ := h.server.inflatedLog.Allow("", time.Now().Add(time.Minute))
+	if held := next.SameKey; held != 1 {
 		t.Errorf("warnings held back = %d after two refusals in a minute, want 1", held)
 	}
 
@@ -376,20 +372,4 @@ func TestIngestCapsTheDecompressedBody(t *testing.T) {
 	// The authenticated JSON API shares the reader, and so the bound.
 	expectError(t, h.call(t, "POST", "/api/v1/scores", gzipped(t, make([]byte, limit+1)), gzipHeader),
 		http.StatusRequestEntityTooLarge, "too large")
-}
-
-func TestLogLimiterPacesAndCounts(t *testing.T) {
-	l := &logLimiter{every: time.Minute}
-	start := time.Unix(1_000_000, 0)
-	if skipped, ok := l.allow(start); !ok || skipped != 0 {
-		t.Fatalf("first = (%d, %v), want (0, true)", skipped, ok)
-	}
-	for i := range 3 {
-		if _, ok := l.allow(start.Add(time.Duration(i+1) * time.Second)); ok {
-			t.Fatalf("call %d inside the minute was let through", i+2)
-		}
-	}
-	if skipped, ok := l.allow(start.Add(time.Minute)); !ok || skipped != 3 {
-		t.Fatalf("a minute later = (%d, %v), want (3, true)", skipped, ok)
-	}
 }

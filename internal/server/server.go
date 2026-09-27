@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/tracepad/tracepad/internal/config"
+	"github.com/tracepad/tracepad/internal/logpace"
 	"github.com/tracepad/tracepad/internal/mcpserver"
 	"github.com/tracepad/tracepad/internal/store"
 	"github.com/tracepad/tracepad/internal/ui"
@@ -100,7 +101,7 @@ type Server struct {
 	// passwords bounds the bcrypt work in flight, and passwordLog paces
 	// the warning for what it turns away (spec 028 #31).
 	passwords   *store.PasswordGate
-	passwordLog *logLimiter
+	passwordLog *logpace.Keyed
 	// running counts the handlers in flight, and handlerGrace is how long
 	// a stop waits for them once their connections are closed (spec 001
 	// #16).
@@ -114,11 +115,11 @@ type Server struct {
 	stopStreams context.CancelFunc
 	// inflatedLog paces the warning for a gzip body refused after
 	// decompression (spec 002 #27).
-	inflatedLog *logLimiter
+	inflatedLog *logpace.Keyed
 	// originLog paces the warning for a browser request refused for its
 	// origin (spec 028 #30), per origin, so that a page elsewhere posting
 	// once a minute cannot hide the line about the operator's own proxy.
-	originLog *logLimiter
+	originLog *logpace.Keyed
 
 	// The web interface (spec 006): the built bundle, nil in a build
 	// without the `ui` tag; the path segments the API owns, so a mistyped
@@ -190,10 +191,10 @@ func New(cfg *config.Config, version string, st *store.Store, writer JobWriter, 
 		limiter:         newLoginLimiter(),
 		passwordChanges: newLoginLimiter(),
 		passwords:       newPasswordGate(),
-		passwordLog:     &logLimiter{every: time.Minute},
+		passwordLog:     &logpace.Keyed{Every: time.Minute},
 		handlerGrace:    defaultHandlerGrace,
-		inflatedLog:     &logLimiter{every: time.Minute},
-		originLog:       &logLimiter{every: time.Minute, keys: 64},
+		inflatedLog:     &logpace.Keyed{Every: time.Minute},
+		originLog:       &logpace.Keyed{Every: time.Minute, Keys: 64},
 		assets:          ui.Assets(),
 		startedAt:       time.Now(),
 		counters:        newCounters(),

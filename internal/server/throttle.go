@@ -344,9 +344,9 @@ func (s *Server) enterPasswordGate(w http.ResponseWriter, r *http.Request) (*sto
 	if !errors.Is(err, store.ErrPasswordsBusy) {
 		return nil, false
 	}
-	if skipped, log := s.passwordLog.allow(time.Now()); log {
+	if skipped, log := s.passwordLog.Allow("", time.Now()); log {
 		slog.Warn("password checks turned away: more were asked for at once than the gate holds",
-			"slots", s.passwords.Slots(), "queue", s.passwords.Queue(), "also_turned_away", skipped)
+			"slots", s.passwords.Slots(), "queue", s.passwords.Queue(), "also_turned_away", skipped.SameKey)
 	}
 	w.Header().Set("Retry-After", "1")
 	writeError(w, http.StatusServiceUnavailable, store.ErrPasswordsBusy.Error())
