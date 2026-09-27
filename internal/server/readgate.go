@@ -59,22 +59,30 @@ func readStopped(timeout time.Duration) string {
 }
 
 // readGate wraps one read route's handler; the guard runs it once the caller
-// is resolved.
-func (s *Server) readGate(next http.HandlerFunc) http.HandlerFunc {
+// is resolved. slotted is false for the one read that reports the slots
+// themselves (spec 043 #26): it runs under the deadline and takes none.
+func (s *Server) readGate(next http.HandlerFunc, slotted bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), s.readTimeout)
 		defer cancel()
-		select {
-		case s.reads <- struct{}{}:
-		case <-ctx.Done():
-			if hungUp(r) {
+		asked := time.Now()
+		slots := s.reads
+		if !slotted {
+			slots = nil
+		} else {
+			select {
+			case slots <- struct{}{}:
+			case <-ctx.Done():
+				if hungUp(r) {
+					return
+				}
+				s.counters.observeRead(callerProject(r), readRefusedBusy)
+				retryLater(w, readBusy)
 				return
 			}
-			s.counters.observeRead(callerProject(r), readRefusedBusy)
-			retryLater(w, readBusy)
-			return
 		}
-		gated := &gatedWriter{ResponseWriter: w, ctx: ctx, slots: s.reads}
+		admitted := time.Now()
+		gated := &gatedWriter{ResponseWriter: w, ctx: ctx, slots: slots}
 		defer gated.release()
 		readAdmitted(ctx)
 		next(gated, r.WithContext(ctx))
@@ -83,17 +91,25 @@ func (s *Server) readGate(next http.HandlerFunc) http.HandlerFunc {
 		if hungUp(r) || ctx.Err() == nil || (gated.wrote && !gated.swallowed) {
 			return
 		}
-		// The deadline stopped the read, and the handler either said
-		// nothing or said `5xx` about a query the deadline interrupted.
-		s.counters.observeRead(callerProject(r), readTimedOut)
 		header := w.Header()
-		// Whatever the handler set for an answer it did not give: a
-		// retry hint the deadline's answer must not carry, and caching
-		// headers a failure must not keep.
+		// Whatever the handler set for an answer it did not give: caching
+		// headers a failure must not keep, and a retry hint only the busy
+		// answer carries.
 		header.Del("Retry-After")
 		header.Del("ETag")
 		header.Del("Last-Modified")
 		header.Set("Cache-Control", callerCacheControl)
+		// The deadline stopped the read, and the handler either said
+		// nothing or said `5xx` about a query the deadline interrupted. A
+		// read that spent longer waiting for its slot than running was
+		// slow because the server was busy, not because of what it asked,
+		// and is told so (spec 043, Edge cases).
+		if admitted.Sub(asked) > time.Since(admitted) {
+			s.counters.observeRead(callerProject(r), readRefusedBusy)
+			retryLater(w, readBusy)
+			return
+		}
+		s.counters.observeRead(callerProject(r), readTimedOut)
 		writeError(w, http.StatusServiceUnavailable, readStopped(s.readTimeout))
 	}
 }

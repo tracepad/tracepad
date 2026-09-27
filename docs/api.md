@@ -1152,7 +1152,7 @@ read. Ingest, writes and the credential check take no slot.
 
 | Answer | When | What to do |
 |---|---|---|
-| `503` `{"error": "the server is busy; retry shortly"}`, `Retry-After: 1` | No slot came free before the deadline | Retry after the header |
+| `503` `{"error": "the server is busy; retry shortly"}`, `Retry-After: 1` | No slot came free before the deadline, or the read spent longer waiting for one than running when the deadline stopped it | Retry after the header |
 | `503` `{"error": "the read took longer than 20s and was stopped; narrow the time range or the filters"}` | The deadline stopped the read while it ran; the number is the setting | Narrow it: the same request would be stopped again, so there is no `Retry-After` |
 
 A slot is given back as soon as the answer's status is written — after the
@@ -1160,6 +1160,11 @@ work and the rendering, before the download — so a client that reads a large
 body slowly holds its connection, not a slot. A client that hangs up ends its
 read; the query stops with it. The interface gives up on a request after 30 s,
 so a person sees the server's reason first.
+
+Two `GET`s are exceptions. `GET /api/v1/system` runs under the deadline but
+takes no slot, so it answers — and shows the slots taken — when every one is.
+`GET /api/v1/queues/{name}/next` claims an item, which is a write, and is
+bounded as writes are.
 
 ## Errors
 

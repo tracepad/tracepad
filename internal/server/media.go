@@ -171,9 +171,13 @@ func (s *Server) inlineRawMedia(ctx context.Context, projectID string, batch *st
 		return batch.Body
 	}
 	changed := mapping.InlineMedia(decoded.ResourceSpans, func(sha string) (string, []byte, bool) {
-		file, err := s.store.MediaFor(ctx, projectID, sha)
+		file, err := mediaFor(s.store, ctx, projectID, sha)
 		if err != nil {
-			slog.Warn("could not read media to inline into a raw body", "sha256", sha, "err", err)
+			// A read the deadline or a hang-up ended is not a media
+			// failure, and its caller sends nothing (spec 043 #15).
+			if ctx.Err() == nil {
+				slog.Warn("could not read media to inline into a raw body", "sha256", sha, "err", err)
+			}
 			return "", nil, false
 		}
 		if file == nil {
@@ -188,6 +192,10 @@ func (s *Server) inlineRawMedia(ctx context.Context, projectID string, batch *st
 	}
 	return whole
 }
+
+// mediaFor is the store's, a seam for the test that holds a raw body's media
+// read past the read deadline.
+var mediaFor = (*store.Store).MediaFor
 
 // mediaBlock is what `GET /api/v1/system` says about media (#11): the
 // project's setting, and the bodies its refs hold with their bytes.

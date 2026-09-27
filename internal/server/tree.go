@@ -51,33 +51,54 @@ type treeNode struct {
 
 // readTree reads the prefix of a trace's observations the tree holds, and
 // renders each one's own fields as it arrives, so the maps a heavy observation
-// carries are held once, as bytes.
-func (s *Server) readTree(ctx context.Context, projectID, traceID string) ([]*treeNode, error) {
+// carries are held once, as bytes. cut reports whether the trace goes on past
+// the prefix — the row after the last one kept exists — which the trace's own
+// count, read before the observations, cannot tell of a trace still being
+// written (spec 043 #26).
+func (s *Server) readTree(ctx context.Context, projectID, traceID string) (nodes []*treeNode, cut bool, err error) {
 	var (
-		nodes     []*treeNode
 		size      int
 		renderErr error
 	)
-	err := s.store.TreeObservations(ctx, projectID, traceID, store.MaxTreeObservations,
+	// One row past the ceiling, to learn whether there is one.
+	err = s.store.TreeObservations(ctx, projectID, traceID, store.MaxTreeObservations+1,
 		func(row *store.ObservationRow) bool {
+			if len(nodes) == store.MaxTreeObservations {
+				cut = true
+				return false
+			}
 			var buffer bytes.Buffer
 			if renderErr = renderOwn(row).appendJSON(&buffer); renderErr != nil {
 				return false
 			}
 			if size+buffer.Len() > maxTreeBytes {
+				cut = true
 				return false
 			}
 			size += buffer.Len()
 			// Rendered: what is left of the row is what the tree is
-			// built from and the payloads are read by.
+			// built from and the payloads are read by. The bytes are
+			// kept at their length, not the buffer's capacity, so the
+			// 32 MiB is what the tree holds.
 			row.ModelParameters, row.Usage, row.CostDetails = nil, nil, nil
-			nodes = append(nodes, &treeNode{row: row, own: buffer.Bytes()})
+			nodes = append(nodes, &treeNode{row: row, own: bytes.Clone(buffer.Bytes())})
 			return true
 		})
 	if err == nil {
 		err = renderErr
 	}
-	return nodes, err
+	return nodes, cut, err
+}
+
+// omittedCount is what `observations_omitted` says: nothing for a whole tree,
+// and for a cut one the trace's count less what the tree holds — at least one,
+// since the trace goes on past it even when the count was read before the
+// spans that took it past the ceiling arrived.
+func omittedCount(trace *store.TraceRow, rendered int, cut bool) int {
+	if !cut {
+		return 0
+	}
+	return max(trace.ObservationCount-rendered, 1)
 }
 
 // buildTree nests observations under their parents, siblings by start time.

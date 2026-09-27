@@ -259,13 +259,13 @@ func (s *Server) handleLastTrace(w http.ResponseWriter, r *http.Request) {
 // failure.
 func (s *Server) renderTrace(w http.ResponseWriter, r *http.Request, projectID string, trace *store.TraceRow,
 	expand bool, budgetBytes int) ([]byte, bool) {
-	nodes, err := s.readTree(r.Context(), projectID, trace.ID)
+	nodes, cut, err := s.readTree(r.Context(), projectID, trace.ID)
 	if err != nil {
 		readFailed(w, r, "failed to read the observations", err)
 		return nil, false
 	}
 	roots := buildTree(nodes)
-	omitted := trace.ObservationCount - len(nodes)
+	omitted := omittedCount(trace, len(nodes), cut)
 
 	body := renderTraceDetail(trace, treeJSON{roots: roots}, omitted)
 	// The skeleton is measured before any payload is inlined, so what the
@@ -300,17 +300,25 @@ func (s *Server) renderTrace(w http.ResponseWriter, r *http.Request, projectID s
 					"read payloads one at a time from /api/v1/observations/{id}/io",
 				slots, needed, config.MaxResponseBudgetBytes)
 		}
-		body = body.put("expansion", object{}.
+		// The skeleton with one more field: written after the last one
+		// rather than by rendering the tree a second time.
+		expansion, err := object{}.put("expansion", object{}.
 			put("expanded", false).
 			put("payloads", slots).
 			put("budget_needed", needed).
 			put("retryable", retryable).
-			put("reason", reason))
-	} else {
-		body = renderTraceDetail(trace, treeJSON{roots: roots, payloads: &treePayloads{
-			ctx: r.Context(), reader: s.store.PayloadReader(), budget: budget,
-		}}, omitted)
+			put("reason", reason)).MarshalJSON()
+		if err != nil {
+			slog.Error("render trace failed", "err", err)
+			writeError(w, http.StatusInternalServerError, "failed to render the trace")
+			return nil, false
+		}
+		skeleton[len(skeleton)-1] = ','
+		return append(skeleton, expansion[1:]...), true
 	}
+	body = renderTraceDetail(trace, treeJSON{roots: roots, payloads: &treePayloads{
+		ctx: r.Context(), reader: s.store.PayloadReader(), budget: budget,
+	}}, omitted)
 	encoded, err := body.MarshalJSON()
 	var unread *payloadReadFailed
 	switch {

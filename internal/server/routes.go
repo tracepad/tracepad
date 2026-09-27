@@ -26,6 +26,13 @@ type route struct {
 	handler     http.HandlerFunc
 }
 
+// Two GET routes the read gate treats apart (spec 043 #26), named once for the
+// table and the gate.
+const (
+	systemPath = "/api/v1/system"
+	claimPath  = "/api/v1/queues/{name}/next"
+)
+
 func (s *Server) routes() []route {
 	return []route{
 		{"GET", "/health", public, "Liveness and version, no authentication required", s.handleHealth},
@@ -49,7 +56,7 @@ func (s *Server) routes() []route {
 		// starts (design §3.2).
 		{"GET", "/api/v1", public, "This endpoint map", s.handleAPIIndex},
 		{"GET", "/api/v1/openapi.json", public, "The OpenAPI 3.1 document for this API", s.handleOpenAPI},
-		{"GET", "/api/v1/system", member, "Version, uptime, database size and ingest counters since start", s.handleSystem},
+		{"GET", systemPath, member, "Version, uptime, database size and ingest counters since start", s.handleSystem},
 
 		// Signing in (spec 028 Decisions 8–10). The three public ones are
 		// the three ways in — the first owner, a password, an invitation
@@ -173,7 +180,7 @@ func (s *Server) routes() []route {
 		{"POST", "/api/v1/queues/{name}/items", editor, "Add one target or an array of them; a target already queued counts as existing", s.handleAddItems},
 		{"POST", "/api/v1/queues/{name}/items/from-traces", editor, "Add the newest traces a listing filter matches, capped by `limit`", s.handleAddItemsFromTraces},
 		{"GET", "/api/v1/queues/{name}/items", member, "The queue's items oldest first, filtered and cursor-paginated", s.handleListQueueItems},
-		{"GET", "/api/v1/queues/{name}/next", member, "The next item to annotate, claimed for ten minutes", s.handleNextItem},
+		{"GET", claimPath, member, "The next item to annotate, claimed for ten minutes", s.handleNextItem},
 		{"GET", "/api/v1/queues/{name}/items/{id}", member, "One item", s.handleGetQueueItem},
 		{"POST", "/api/v1/queues/{name}/items/{id}/complete", member, "Mark an item done; refused unless every score the queue asks for is on its target", s.handleCompleteItem},
 		{"POST", "/api/v1/queues/{name}/items/{id}/skip", member, "Mark an item skipped, with the reason", s.handleSkipItem},

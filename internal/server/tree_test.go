@@ -212,6 +212,20 @@ func TestTreeObservationCeiling(t *testing.T) {
 			orphan.ID, orphan.Parent, spanHex(5), spanHex(n))
 	}
 
+	// A trace still being written: its count read before the span that took
+	// it past the ceiling. The tree is cut all the same, and says so.
+	db := h.file(t)
+	if _, err := db.Exec(`UPDATE traces SET observation_count = ? WHERE id = ?`, store.MaxTreeObservations, trace); err != nil {
+		t.Fatal(err)
+	}
+	stale := decodeJSON[treeBody](t, h.get(t, "/api/v1/traces/"+trace))
+	if stale.Omitted == nil || *stale.Omitted != 1 {
+		t.Errorf("with a count read before the last span, observations_omitted = %v, want 1", stale.Omitted)
+	}
+	if _, err := db.Exec(`UPDATE traces SET observation_count = ? WHERE id = ?`, n, trace); err != nil {
+		t.Fatal(err)
+	}
+
 	// The same through the shortcut, which renders exactly as the trace.
 	last := decodeJSON[treeBody](t, h.get(t, "/api/v1/traces/last"))
 	if last.Omitted == nil || *last.Omitted != 1 {
@@ -371,4 +385,49 @@ func referenceTrace(t *testing.T, h *harness, id string, budgetBytes int) []byte
 		t.Fatal(err)
 	}
 	return append(out, '\n')
+}
+
+// A whole tree says nothing omitted even when the trace's count, read a moment
+// before, says more — a deletion between the two reads.
+func TestWholeTreeOmitsNothing(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	trace := traceHex(1)
+	h.seedShape(t, trace, 10, "NULL")
+	if _, err := h.file(t).Exec(`UPDATE traces SET observation_count = 12 WHERE id = ?`, trace); err != nil {
+		t.Fatal(err)
+	}
+	if body := decodeJSON[treeBody](t, h.get(t, "/api/v1/traces/"+trace)); body.Omitted != nil {
+		t.Errorf("observations_omitted = %d on a whole tree", *body.Omitted)
+	}
+}
+
+// An expansion the budget refuses answers the skeleton with one more field,
+// written after it rather than by rendering the tree again: the bytes are the
+// unexpanded answer's up to its closing brace.
+func TestRefusedExpansionIsTheSkeletonAndOneField(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	trace := traceHex(1)
+	spans := treeSpans(trace, 400, func(int) int { return -1 })
+	for i, span := range spans {
+		span.Input = fmt.Sprintf("input %d", i)
+	}
+	h.seedTree(t, trace, spans)
+
+	plain := h.get(t, "/api/v1/traces/"+trace).Body.Bytes()
+	rec := h.get(t, "/api/v1/traces/"+trace+"?expand=io&budget=4096")
+	expectStatus(t, rec, 200)
+	refused := rec.Body.Bytes()
+	head := plain[:len(plain)-2] // without the closing brace and the newline
+	if !bytes.HasPrefix(refused, append(append([]byte{}, head...), []byte(`,"expansion":{"expanded":false,`)...)) {
+		t.Fatalf("the refused expansion is not the skeleton and one field:\n%.200s", refused[len(head)-20:])
+	}
+	var body struct {
+		Expansion struct {
+			Expanded bool `json:"expanded"`
+			Payloads int  `json:"payloads"`
+		} `json:"expansion"`
+	}
+	if err := json.Unmarshal(refused, &body); err != nil || body.Expansion.Payloads != 400 {
+		t.Fatalf("expansion = %+v, %v; want 400 payloads refused", body.Expansion, err)
+	}
 }

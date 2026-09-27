@@ -170,15 +170,24 @@ func (s *Server) handleGetRawBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// As received, with the media put back where ingest factored it out
+	// (spec 041 #8): what leaves through here is the batch the client sent.
+	// Put back before the status is written, which is where a read gives its
+	// slot back (spec 043 #16): the bodies are reads like any other.
+	body := s.inlineRawMedia(r.Context(), project.ID, batch)
+	if r.Context().Err() != nil {
+		// The deadline or a hang-up cut the media reads short: the body
+		// would not be the batch the client sent, so none is sent, and the
+		// read gate answers the deadline (spec 043 #15).
+		return
+	}
 	w.Header().Set("Content-Type", batch.ContentType)
 	w.Header().Set(headerReceivedAt, formatTime(batch.ReceivedAt))
 	if batch.Dialect != "" {
 		w.Header().Set(headerDialect, batch.Dialect)
 	}
 	w.WriteHeader(http.StatusOK)
-	// As received, with the media put back where ingest factored it out
-	// (spec 041 #8): what leaves through here is the batch the client sent.
-	w.Write(s.inlineRawMedia(r.Context(), project.ID, batch))
+	w.Write(body)
 }
 
 // rawFilter reads the window the listing pages over. Half-open like every

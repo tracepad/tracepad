@@ -337,16 +337,7 @@ func guardLookup[T any](w http.ResponseWriter, r *http.Request, what string, loo
 // and nothing is logged; a database condition is `503` with `Retry-After`,
 // logged once a minute per condition; anything else is `500`.
 func lookupFailed(w http.ResponseWriter, r *http.Request, what string, err error) {
-	if hungUp(r) {
-		return
-	}
-	condition, ok := store.Condition(err)
-	logLookupFailure(what, err, condition)
-	if ok {
-		retryLater(w, storageUnavailable)
-		return
-	}
-	writeError(w, http.StatusInternalServerError, "failed to read the "+what)
+	answerFailedRead(w, r, what+" lookup failed", "failed to read the "+what, err)
 }
 
 // readFailed answers a read of the store that failed, the way lookupFailed
@@ -356,17 +347,22 @@ func lookupFailed(w http.ResponseWriter, r *http.Request, what string, err error
 // condition is `503` with `Retry-After`, logged once a minute per condition;
 // anything else is `500` with the message, logged.
 func readFailed(w http.ResponseWriter, r *http.Request, message string, err error) {
+	answerFailedRead(w, r, message, message, err)
+}
+
+// answerFailedRead is the one mapping from a failed read to its answer
+// (spec 043 #24 u, #26): logged as line, answered `500` with message unless
+// the failure was a database condition or the request's context ended.
+func answerFailedRead(w http.ResponseWriter, r *http.Request, line, message string, err error) {
 	if hungUp(r) {
 		return
 	}
-	if condition, ok := store.Condition(err); ok {
-		if failed, now := lookupLog.Allow(condition, time.Now()); now {
-			slog.Error(message, "err", err, "condition", condition, "failed_since_last_line", failed)
-		}
+	condition, ok := store.Condition(err)
+	logReadFailure(line, err, condition)
+	if ok {
 		retryLater(w, storageUnavailable)
 		return
 	}
-	slog.Error(message, "err", err)
 	writeError(w, http.StatusInternalServerError, message)
 }
 
@@ -375,13 +371,18 @@ func readFailed(w http.ResponseWriter, r *http.Request, message string, err erro
 // timeout, a full disk, a deadline — is logged once a minute per reason, as
 // the writer logs a condition (spec 043 #24); anything else every time.
 func logLookupFailure(what string, err error, condition string) {
+	logReadFailure(what+" lookup failed", err, condition)
+}
+
+// logReadFailure logs a failed read under line, paced by condition as
+// logLookupFailure says.
+func logReadFailure(line string, err error, condition string) {
 	if condition == "" {
-		slog.Error(what+" lookup failed", "err", err)
+		slog.Error(line, "err", err)
 		return
 	}
 	if failed, now := lookupLog.Allow(condition, time.Now()); now {
-		slog.Error(what+" lookup failed", "err", err, "condition", condition,
-			"failed_since_last_line", failed)
+		slog.Error(line, "err", err, "condition", condition, "failed_since_last_line", failed)
 	}
 }
 

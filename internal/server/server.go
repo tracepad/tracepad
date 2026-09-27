@@ -200,7 +200,18 @@ func New(cfg *config.Config, version string, st *store.Store, writer JobWriter, 
 		// in a read slot (spec 043 #15, #16), which the guard enters once
 		// it knows who is asking.
 		if route.Method == http.MethodGet && route.Policy != public {
-			route.handler = s.readGate(route.handler)
+			switch route.Path {
+			case claimPath:
+				// A GET that writes: handing out the next item claims it
+				// through the writer (spec 024 #5), and a claim the
+				// deadline answered would still commit (spec 043 #26).
+			case systemPath:
+				// The read that reports the slots takes none, so that it
+				// answers while they are all taken (spec 043 #26).
+				route.handler = s.readGate(route.handler, false)
+			default:
+				route.handler = s.readGate(route.handler, true)
+			}
 		}
 		// The policy column is applied here, once, rather than by each
 		// handler asking for its own credentials (spec 028 Decision 7).

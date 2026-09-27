@@ -35,6 +35,9 @@ func newReadHarness(t *testing.T, timeout time.Duration, slots int) *harness {
 // channel it carries is closed.
 type holdKey struct{}
 
+// stallKey marks a request whose read runs until its deadline stops it.
+type stallKey struct{}
+
 type held struct {
 	entered chan struct{}
 	release chan struct{}
@@ -48,6 +51,10 @@ func holdReads(t *testing.T) {
 		if hold, ok := ctx.Value(holdKey{}).(*held); ok {
 			hold.entered <- struct{}{}
 			<-hold.release
+		}
+		if _, ok := ctx.Value(stallKey{}).(bool); ok {
+			// A query that runs until the deadline stops it.
+			<-ctx.Done()
 		}
 	}
 	t.Cleanup(func() { readAdmitted = previous })
@@ -312,15 +319,19 @@ func TestSystemReportsReadBounds(t *testing.T) {
 	}
 
 	idle := read(testSecret)
-	if idle.ReadSlots.Busy != 1 || idle.ReadSlots.Capacity != 2 {
-		t.Errorf("read_slots = %+v, want the one this read holds of 2", idle.ReadSlots)
+	if idle.ReadSlots.Busy != 0 || idle.ReadSlots.Capacity != 2 {
+		t.Errorf("read_slots = %+v, want none of 2 busy: the system read takes no slot", idle.ReadSlots)
 	}
 
-	// One held past its deadline, then a second: the gauge shows both, a
-	// third read is refused, and the held ones are stopped by the deadline.
+	// Both slots held past their deadline: the gauge still answers and shows
+	// them, a third read is refused, and the held ones are stopped by the
+	// deadline.
 	release := make(chan struct{})
 	first := h.holdRead(t, "/api/v1/traces", testSecret, release)
 	second := h.holdRead(t, "/api/v1/traces", testSecret, release)
+	if full := read(testSecret); full.ReadSlots.Busy != 2 {
+		t.Errorf("read_slots = %+v while both are held, want 2 busy", full.ReadSlots)
+	}
 	expectStatus(t, h.get(t, "/api/v1/traces"), 503)
 	time.Sleep(timeout)
 	close(release)
@@ -335,5 +346,89 @@ func TestSystemReportsReadBounds(t *testing.T) {
 	theirs := read("tp-sk-other")
 	if theirs.Counters.RefusedBusy != 0 || theirs.Counters.TimedOut != 0 {
 		t.Errorf("another project's counters = %+v, want none of this project's refusals", theirs.Counters)
+	}
+}
+
+// A raw body's media are put back before its status is written: they are
+// reads under the deadline and in the slot like any other, and a body the
+// deadline cut short is not sent as the batch the client sent (spec 043 #15,
+// #16; spec 041 #8).
+func TestRawBodyMediaAreReadInsideTheGate(t *testing.T) {
+	const timeout = 200 * time.Millisecond
+	h := newReadHarness(t, timeout, 4)
+	picture := testPicture(15000, 3)
+	expectStatus(t, h.post(t, "/v1/traces", encodeExport(t, imageExport(t, picture))), 200)
+	batches := archived(t, h)
+
+	previous := mediaFor
+	mediaFor = func(st *store.Store, ctx context.Context, projectID, sha string) (*store.MediaFile, error) {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	t.Cleanup(func() { mediaFor = previous })
+
+	rec := h.get(t, "/api/v1/raw/"+itoa(batches[0].ID))
+	expectError(t, rec, 503, "the read took longer than 200ms and was stopped")
+}
+
+// A read stopped by the deadline after spending most of it waiting for a slot
+// was slow because the server was busy: it is told so, with Retry-After, and
+// counted as refused rather than stopped (spec 043, Edge cases; #26).
+func TestReadThatWaitedForItsSlotIsBusy(t *testing.T) {
+	const timeout = 400 * time.Millisecond
+	h := newReadHarness(t, timeout, 1)
+	holdReads(t)
+
+	release := make(chan struct{})
+	first := h.holdRead(t, "/api/v1/traces", testSecret, release)
+	go func() {
+		time.Sleep(timeout * 3 / 4)
+		close(release)
+	}()
+	req := httptest.NewRequest("GET", "/api/v1/traces", nil)
+	req.Header.Set("Authorization", "Bearer "+testSecret)
+	req = req.WithContext(context.WithValue(req.Context(), stallKey{}, true))
+	rec := httptest.NewRecorder()
+	h.server.Handler().ServeHTTP(rec, req)
+	<-first
+
+	expectError(t, rec, 503, "the server is busy; retry shortly")
+	if got := rec.Header().Get("Retry-After"); got != "1" {
+		t.Errorf("Retry-After = %q, want 1", got)
+	}
+	counters := decodeJSON[struct {
+		Counters struct {
+			TimedOut    int64 `json:"reads_timed_out"`
+			RefusedBusy int64 `json:"reads_refused_busy"`
+		} `json:"counters"`
+	}](t, h.get(t, "/api/v1/system")).Counters
+	if counters.RefusedBusy != 1 {
+		t.Errorf("counters = %+v, want the read counted as refused busy", counters)
+	}
+
+	// The same read with nothing to wait for is stopped, and told to narrow.
+	req = httptest.NewRequest("GET", "/api/v1/traces", nil)
+	req.Header.Set("Authorization", "Bearer "+testSecret)
+	req = req.WithContext(context.WithValue(req.Context(), stallKey{}, true))
+	rec = httptest.NewRecorder()
+	h.server.Handler().ServeHTTP(rec, req)
+	expectError(t, rec, 503, "the read took longer than 400ms and was stopped")
+}
+
+// Handing out the next queue item is a GET that writes: it takes no read slot,
+// so a full house of reads does not refuse a claim, and no read deadline can
+// answer a claim that then commits (spec 024 #5; spec 043 #26).
+func TestQueueClaimIsNotAGatedRead(t *testing.T) {
+	h := newReadHarness(t, 200*time.Millisecond, 1)
+	h.putConfigs(t, "quality")
+	expectStatus(t, h.putQueue(t, "review", "quality"), 201)
+	h.addTarget(t, "review", map[string]any{"trace_id": traceHex(1)})
+	holdReads(t)
+
+	release := make(chan struct{})
+	held := h.holdRead(t, "/api/v1/traces", testSecret, release)
+	defer func() { close(release); <-held }()
+	if item := h.next(t, "review", "ann"); item.Item == nil {
+		t.Fatal("the claim handed out nothing while the one read slot was held")
 	}
 }
