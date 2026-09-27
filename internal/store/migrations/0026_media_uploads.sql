@@ -1,11 +1,16 @@
 -- The Langfuse upload channel's lifecycle (spec 041 #29, #31).
 
--- The project's upload generation (#29): every erasure and trace deletion adds
--- one inside its transaction, a grant carries the generation it was issued
--- in, and the upload PUT refuses a grant from an earlier one. A counter, not
--- an instant, so that a clock stepped back cannot void the grants issued
--- after a deletion.
-ALTER TABLE projects ADD COLUMN media_generation INTEGER NOT NULL DEFAULT 0;
+-- The traces a deletion or an erasure removed within an upload URL's lifetime
+-- (#29): the upload PUT refuses a URL for one of them, before the body and in
+-- the write. Written in the transaction that removes the traces, and swept once
+-- older than any URL issued before the removal could be. Unix nanoseconds.
+CREATE TABLE media_voided (
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    trace_id   TEXT NOT NULL,
+    at         INTEGER NOT NULL,
+    PRIMARY KEY (project_id, trace_id)
+) STRICT, WITHOUT ROWID;
+CREATE INDEX idx_media_voided_at ON media_voided(at);
 
 -- The pending refs of one project (#31): the cap counts them without reading
 -- the project's settled refs.

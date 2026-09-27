@@ -266,6 +266,15 @@ func (sw *Sweeper) Pass(ctx context.Context) error {
 		freed = true
 	}
 
+	// Removed traces whose uploads no URL can still carry (spec 041 #29).
+	// Not counted as freed: a row per trace, gone within the hour.
+	if err := sw.sweepVoidedUploads(ctx, start.UnixNano()); err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, ErrWriterClosed) {
+			return err
+		}
+		failures = append(failures, fmt.Errorf("voided uploads: %w", err))
+	}
+
 	entries, err := sw.sweepOrphanSearchEntries(ctx)
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, ErrWriterClosed) {
@@ -492,6 +501,21 @@ func (sw *Sweeper) sweepOrphanSearchEntries(ctx context.Context) (int64, error) 
 // out (spec 028 #4). Chunked like everything else here, so a deployment that
 // has been away for a month does not hold the writer for one enormous DELETE;
 // what a pass does not reach, the next one does.
+// sweepVoidedUploads forgets the traces removed longer ago than an upload
+// URL lives, in bounded chunks (spec 041 #29).
+func (sw *Sweeper) sweepVoidedUploads(ctx context.Context, now int64) error {
+	for range sw.maxChunks {
+		chunk := &mediaVoidedSweep{Before: now - int64(MediaUploadWindow), Limit: sw.chunk}
+		if err := sw.writer.Submit(ctx, chunk); err != nil {
+			return err
+		}
+		if chunk.Removed < int64(sw.chunk) {
+			return nil
+		}
+	}
+	return nil
+}
+
 func (sw *Sweeper) sweepAccounts(ctx context.Context, now int64) (int64, error) {
 	var total int64
 	for range sw.maxChunks {

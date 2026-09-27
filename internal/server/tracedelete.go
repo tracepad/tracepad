@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -182,20 +181,16 @@ func (s *Server) handleDeleteTraces(w http.ResponseWriter, r *http.Request) {
 	var chunk []string
 	var hour int64
 	chunks := 0
-	generations := s.uploadGenerations(r, project.ID)
-	defer generations.finish()
 	flush := func() bool {
 		if len(chunk) == 0 {
 			return true
 		}
 		job := &store.TraceDelete{
 			ProjectID: project.ID, IDs: chunk, Confirm: confirm, ByFilter: true, Now: now,
-			KeepUploads: generations.keep(),
 		}
 		if !s.submit(w, r, job) {
 			return false
 		}
-		generations.removed(job.KeepUploads, job.Counts.Traces)
 		deleted.Traces += job.Counts.Traces
 		deleted.Observations += job.Counts.Observations
 		deleted.Scores += job.Counts.Scores
@@ -234,7 +229,6 @@ func (s *Server) handleDeleteTraces(w http.ResponseWriter, r *http.Request) {
 	}) {
 		return
 	}
-	generations.finish()
 
 	writeJSON(w, http.StatusOK, object{}.
 		put("dry_run", false).
@@ -302,55 +296,4 @@ func affectedRuns(runs []store.AffectedRun) []object {
 			put("traces", run.Traces))
 	}
 	return affected
-}
-
-// uploadGenerations keeps one deleting request to two new upload generations
-// (spec 041 #29), however many chunks it runs: the first chunk that removes
-// traces starts one, voiding every URL issued before the request, and its end
-// starts another when a later chunk removed traces too, voiding those issued
-// while it ran. Between the two, uploads for other traces go on — for seconds,
-// not for every chunk's commit.
-type uploadGenerations struct {
-	s         *Server
-	r         *http.Request
-	projectID string
-	// started is whether a chunk has started a generation; again whether
-	// a later chunk may have removed traces since.
-	started, again bool
-}
-
-func (s *Server) uploadGenerations(r *http.Request, projectID string) *uploadGenerations {
-	return &uploadGenerations{s: s, r: r, projectID: projectID}
-}
-
-// keep is the next chunk's KeepUploads. A chunk that keeps the generation may
-// remove traces — even one whose client hangs up before it answers — so the
-// request will close with one.
-func (g *uploadGenerations) keep() bool {
-	if g.started {
-		g.again = true
-	}
-	return g.started
-}
-
-// removed records a chunk that answered: one that did not keep the generation
-// and removed traces started it.
-func (g *uploadGenerations) removed(kept bool, traces int64) {
-	if !kept && traces > 0 {
-		g.started = true
-	}
-}
-
-// finish starts the closing generation, once. It runs on every way out of the
-// request, a client that hung up included: the chunks it ran are committed,
-// and a URL issued meanwhile could name a trace they took.
-func (g *uploadGenerations) finish() {
-	if !g.again {
-		return
-	}
-	g.again = false
-	ctx := context.WithoutCancel(g.r.Context())
-	if err := g.s.writer.Submit(ctx, &store.MediaGenerationStart{ProjectID: g.projectID}); err != nil {
-		slog.Error("could not void the upload URLs issued during a deletion", "project", g.projectID, "err", err)
-	}
 }

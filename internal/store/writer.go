@@ -382,6 +382,9 @@ func (w *Writer) commit(pending []*submission) error {
 	defer tx.Rollback()
 
 	for _, sub := range pending {
+		if capped, ok := sub.job.(interface{ setPendingCap(int) }); ok {
+			capped.setPendingCap(w.store.maxPendingMediaRefs)
+		}
 		if err := sub.job.apply(tx); err != nil {
 			return err
 		}

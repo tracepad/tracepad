@@ -2674,7 +2674,7 @@ export interface operations {
                 content?: never;
             };
             400: components["responses"]["BadRequest"];
-            /** @description The token is missing, forged, expired, or for another id; or the key that asked for it has been revoked, or the project has deleted or erased traces since it was issued. A missing or forged token is refused having read nothing; the others are decided before the body is read, which is then drained up to 8 MiB and dropped, unless the client sent `Expect: 100-continue` */
+            /** @description The token is missing, forged, expired, or for another id, and is refused having read nothing; or the key that asked for it has been revoked, or its trace was deleted or erased within the hour, which is decided before the body is read and answered at once, the body then drained up to 8 MiB and dropped */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -2692,7 +2692,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description The project has 10,000 uploads waiting for their traces and this one's trace has not arrived; `Retry-After: 60`. Not for the retry of an upload already stored. Decided before the body is read, which is then drained up to 8 MiB and dropped, unless the client sent `Expect: 100-continue` */
+            /** @description The project has 10,000 uploads waiting for their traces and this one's trace has not arrived; `Retry-After: 60`. Not for the retry of an upload already stored. Decided before the body is read and answered at once, the body then drained up to 8 MiB and dropped */
             429: {
                 headers: {
                     [name: string]: unknown;

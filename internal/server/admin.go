@@ -827,22 +827,18 @@ func (s *Server) handleEraseUserData(w http.ResponseWriter, r *http.Request) {
 	var erased store.DeleteCounts
 	var compaction int64
 	now := time.Now().UnixNano()
-	generations := s.uploadGenerations(r, project.ID)
-	defer generations.finish()
 	for {
 		chunk := &store.UserDataErase{
-			ProjectID:   project.ID,
-			UserID:      userID,
-			Confirm:     values.Get("confirm"),
-			Limit:       eraseChunk,
-			HourLimit:   eraseChunkHours,
-			Now:         now,
-			KeepUploads: generations.keep(),
+			ProjectID: project.ID,
+			UserID:    userID,
+			Confirm:   values.Get("confirm"),
+			Limit:     eraseChunk,
+			HourLimit: eraseChunkHours,
+			Now:       now,
 		}
 		if !s.submit(w, r, chunk) {
 			return
 		}
-		generations.removed(chunk.KeepUploads, chunk.Counts.Traces)
 		erased.Traces += chunk.Counts.Traces
 		erased.Observations += chunk.Counts.Observations
 		erased.Scores += chunk.Counts.Scores
@@ -855,7 +851,6 @@ func (s *Server) handleEraseUserData(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 	}
-	generations.finish()
 
 	answer := object{}.
 		put("dry_run", false).

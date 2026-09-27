@@ -46,9 +46,6 @@ type traceRemoval struct {
 	// 023 #10), and a summary rebuilt here would be a user listed again
 	// between a hang-up and the repeat. Empty means nobody is skipped.
 	skipUser string
-	// keepUploads leaves the upload generation alone: a later chunk of a
-	// request that starts one at each end (spec 041 #29).
-	keepUploads bool
 
 	// compactionAt is the stamp of the compaction this removal requested,
 	// zero when it removed nothing.
@@ -60,14 +57,12 @@ func (r *traceRemoval) apply(tx *sql.Tx) (DeleteCounts, error) {
 	if len(r.ids) == 0 {
 		return counts, nil
 	}
-	// Upload URLs issued before now are void (spec 041 #29): a picture that
-	// lands after its trace was deleted or erased would be stored under a
-	// ref to nothing. A new generation, only when there is a trace to
-	// remove.
-	if !r.keepUploads {
-		if err := startMediaGeneration(tx, r.projectID); err != nil {
-			return counts, err
-		}
+	// Uploads for these traces are void from now (spec 041 #29): a picture
+	// that landed after its trace was deleted or erased would be stored
+	// under a ref to nothing. Their refs written before go below, with the
+	// rest of their media, in this same transaction.
+	if err := voidUploads(tx, r.projectID, r.ids, nowOr(r.now)); err != nil {
+		return counts, err
 	}
 	payloads, err := referencedPayloads(tx, r.projectID, r.ids)
 	if err != nil {
@@ -179,11 +174,6 @@ type TraceDelete struct {
 	// Now is the clock the freeze is measured against (spec 013 #11); zero
 	// is the wall clock.
 	Now int64
-	// KeepUploads leaves the project's upload generation alone (spec 041
-	// #29): a later chunk of a request whose first chunk started one, and
-	// whose end will start another (MediaGenerationStart). Every other
-	// removal starts one.
-	KeepUploads bool
 
 	Counts DeleteCounts
 	// Hours are the hours the deleted traces started in; the ones below
@@ -272,8 +262,7 @@ func (d *TraceDelete) apply(tx *sql.Tx) error {
 		}
 		return nil
 	}
-	removal := &traceRemoval{projectID: d.ProjectID, ids: ids, hours: d.Hours, now: d.Now,
-		keepUploads: d.KeepUploads}
+	removal := &traceRemoval{projectID: d.ProjectID, ids: ids, hours: d.Hours, now: d.Now}
 	d.Counts, err = removal.apply(tx)
 	d.CompactionRequested = removal.compactionAt
 	return err
@@ -359,27 +348,4 @@ func (s *Store) tracesPreview(projectID, owned string, args ...any) (DeleteCount
 		runs = append(runs, run)
 	}
 	return counts, runs, rows.Err()
-}
-
-// startMediaGeneration voids every upload URL the project issued before it
-// (spec 041 #29).
-func startMediaGeneration(tx *sql.Tx, projectID string) error {
-	if _, err := tx.Exec(`UPDATE projects SET media_generation = media_generation + 1 WHERE id = ?`,
-		projectID); err != nil {
-		return fmt.Errorf("void earlier upload URLs: %w", err)
-	}
-	return nil
-}
-
-// MediaGenerationStart starts a project's next upload generation on its own:
-// the end of a deleting request that ran more than one chunk (spec 041 #29).
-// Its first chunk started one, so the URLs issued before the request are
-// void from then; this one voids those issued while it ran, which may name
-// a trace a later chunk took. Between the two, uploads for other traces go on.
-type MediaGenerationStart struct {
-	ProjectID string
-}
-
-func (m *MediaGenerationStart) apply(tx *sql.Tx) error {
-	return startMediaGeneration(tx, m.ProjectID)
 }

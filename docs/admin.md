@@ -330,8 +330,9 @@ takes it when its window runs out, or the project goes whole. In between is
 where the mistakes live — an eval harness that exported under the
 application's key, a load test run against production, one trace holding
 something a person should not have typed — and this is the door for those.
-A deletion also voids the media upload URLs the project issued before it, so
-a picture in transit cannot land after its trace is gone.
+A deletion also voids the media upload URLs for the traces it removes, for
+the hour such a URL lives, so a picture in transit cannot land after its trace
+is gone.
 One trace by id, or every trace a [listing filter](api.md#filters) matches:
 `DELETE /api/v1/traces/{id}`, and `DELETE /api/v1/traces?<filters>&to=`. An
 editor's route rather than an administrator's — it is the reader's and the

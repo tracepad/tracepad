@@ -652,11 +652,6 @@ type UserDataErase struct {
 	// would be past the window, and a frozen hour would be recomputed
 	// from what the sweep left of it.
 	Now int64
-	// KeepUploads leaves the project's upload generation alone (spec 041
-	// #29): a later chunk of a request whose first chunk started one, and
-	// whose end will start another (MediaGenerationStart). Every other
-	// removal starts one.
-	KeepUploads bool
 
 	Counts DeleteCounts
 	// Hours are the hours this chunk emptied; the ones below the watermark
@@ -753,7 +748,7 @@ func (e *UserDataErase) apply(tx *sql.Tx) error {
 	// rolls. The erased user's own summary is not recomputed: it goes
 	// outright, below.
 	removal := &traceRemoval{projectID: e.ProjectID, ids: ids, hours: e.Hours,
-		now: e.Now, skipUser: e.UserID, keepUploads: e.KeepUploads}
+		now: e.Now, skipUser: e.UserID}
 	if e.Counts, err = removal.apply(tx); err != nil {
 		return err
 	}
