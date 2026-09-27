@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { signIn as enter, signInAsOwner, state } from './harness';
+import { inviteEditor, signIn as enter, state } from './harness';
 
 // The dashboard over the fixed corpus (spec 007 Testing, spec 034). The
 // window is named explicitly rather than left to the default: the fixtures
@@ -236,18 +236,31 @@ test('a hidden block stays hidden across a reload, and Reset restores it', async
 // lands where it was dropped, and the order is the account's afterwards.
 test('a block dragged by its handle lands above the summary', async ({ page }, testInfo) => {
 	test.skip(testInfo.project.name === 'mobile', 'a drag is a pointer gesture');
-	// As the owner: the arrangement is the account's, and the member's is
-	// being written by the test above, which may run at the same time.
-	await signInAsOwner(page, state().project);
+	// An account of its own: the arrangement is the account's, the member's
+	// is written by the test above and a shared one by any copy of this test
+	// running at the same time, and a drag that starts from someone else's
+	// order is not the drag this test means.
+	const { baseURL, project } = state();
+	const label = `dragger-${Math.random().toString(36).slice(2, 8)}`;
+	await enter(page, await inviteEditor(baseURL, project, label));
 	await page.goto(`/dashboard?${WINDOW}&group_by=day`);
 	// The charts settle the layout; a box measured before they draw is stale.
 	await expect(page.locator('.uplot canvas')).toHaveCount(5);
 	await page.getByRole('button', { name: 'Customize' }).click();
+	// Customize brings in the handles and the quality block, and the blocks
+	// flip into place. An action on a handle still moving is retried, and a
+	// retry scrolls the handle to a different edge each time — which can
+	// leave the summary above the viewport, where no pointer can drop. So
+	// the boxes are read once nothing moves, with nothing scrolled.
+	await expect(page.getByRole('listitem', { name: 'Quality' })).toBeVisible();
+	await page.waitForFunction(() => document.getAnimations().length === 0);
 
 	const handle = page.getByRole('button', { name: 'Move Errors' });
-	await handle.hover();
 	const from = (await handle.boundingBox())!;
 	const to = (await page.getByRole('listitem', { name: 'Summary' }).boundingBox())!;
+	const viewport = page.viewportSize()!;
+	expect(to.y, 'the summary is on screen').toBeGreaterThanOrEqual(0);
+	expect(from.y + from.height, 'the handle is on screen').toBeLessThanOrEqual(viewport.height);
 	await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
 	await page.mouse.down();
 	await page.mouse.move(from.x + from.width / 2 + 8, from.y + from.height / 2 + 8, { steps: 3 });
@@ -266,11 +279,6 @@ test('a block dragged by its handle lands above the summary', async ({ page }, t
 	await page.getByRole('button', { name: 'Done' }).click();
 	await page.reload();
 	await expect(page.locator('.u-title').first()).toHaveText('Errors');
-
-	// Back to the default for the tests that follow.
-	await page.getByRole('button', { name: 'Customize' }).click();
-	await page.getByRole('button', { name: 'Reset' }).click();
-	await expect(blocks.first()).toHaveAttribute('aria-label', 'Summary');
 });
 
 // The remembered window (spec 034 #7): a preset set on the dashboard is the
