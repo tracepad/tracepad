@@ -124,7 +124,10 @@
 						{@const where = standing(row)}
 						<tr class="border-border border-b last:border-b-0">
 							{#if phone.current}
-								<th scope="row" class="px-3 py-1.5 text-left font-normal wrap-anywhere">
+								<!-- A cell, not the row's header: a header is read out before
+								     every cell in the row, and this one holds the whole account.
+								     The buttons carry the email in their names instead. -->
+								<td class="px-3 py-1.5 wrap-anywhere">
 									{row.email}
 									<div class="text-muted text-xs">
 										{#if row.name}{row.name} ·{/if}
@@ -134,7 +137,7 @@
 									<!-- Named, because the column heads that said what "never" and
 									     "none" are about are not there to say it. -->
 									<div class="text-muted text-xs">Projects: {reaches(row)}</div>
-								</th>
+								</td>
 							{:else}
 								<th scope="row" class="px-3 py-1.5 text-left font-normal">{row.email}</th>
 								<td class="text-muted {cell}">{row.name || '—'}</td>
@@ -146,8 +149,14 @@
 							{/if}
 							<td class="px-3 py-1.5">
 								<div class={['flex gap-1.5', phone.current && 'flex-col']}>
-									<Button onclick={() => ((notice = null), (editing = row))}>Edit</Button>
 									<Button
+										aria-label={phone.current ? `Edit ${row.email}` : undefined}
+										onclick={() => ((notice = null), (editing = row))}
+									>
+										Edit
+									</Button>
+									<Button
+										aria-label={phone.current ? `Delete ${row.email}` : undefined}
 										onclick={() => (
 											(notice = null),
 											(survivors = []),

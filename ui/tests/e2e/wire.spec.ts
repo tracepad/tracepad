@@ -46,9 +46,12 @@ test('the listing has a TTFT column beside latency', async ({ page }, info) => {
 	// not the generation's own 388 ms, which the panel shows instead.
 	if (info.project.name === 'mobile') {
 		// A phone has no column for it: it folds under the name beside the
-		// latency, and says which number it is (spec 006 #18).
+		// latency, and says which number it is (spec 006 #18). On the screen,
+		// whole — a value cut to an ellipsis is still in the text content.
 		await expect(page.getByRole('columnheader', { name: 'TTFT' })).toHaveCount(0);
-		await expect(page.locator('tbody').first()).toContainText('TTFT 180 ms');
+		await expect(page.locator('tbody').first().getByText(/TTFT 180 ms/)).toBeInViewport({
+			ratio: 1
+		});
 		return;
 	}
 	await expect(page.getByRole('columnheader', { name: 'TTFT' })).toBeVisible();

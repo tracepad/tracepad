@@ -52,7 +52,7 @@ describe('the queue item table', () => {
 
 		expect(heads()).toEqual(['Target', 'Status', 'Actions']);
 		const target = screen.getByRole('link').closest('td')!;
-		expect(within(target).getByText(/^#2 · grace · /)).toBeInTheDocument();
+		expect(within(target).getByText('#2 ·').parentElement).toHaveTextContent(/^#2 · grace · \S/);
 		expect(within(target).getByText('not a support conversation')).toBeInTheDocument();
 		expect(screen.getAllByText('not a support conversation')).toHaveLength(1);
 	});

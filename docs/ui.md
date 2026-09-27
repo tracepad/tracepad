@@ -937,7 +937,8 @@ scrolling the page, and the trace screen switches between the tree and the
 observation instead of showing both. The trace listing, a queue's items and
 the Accounts card do not scroll at all there: each keeps the columns that say
 which row it is and whether it went wrong — for a trace, the time, the name
-and the errors — and folds the others into a line under the row, so the
+and the errors — and folds the others into lines under the row, which wrap
+between values rather than cut any of them, so the
 environment, the latency, the TTFT and the cost read
 `production · 2.08 s · TTFT 180 ms · $0.0054` under the name, with the user and
 the session, still links, beneath. A queue's *Reopen* and *Remove* become

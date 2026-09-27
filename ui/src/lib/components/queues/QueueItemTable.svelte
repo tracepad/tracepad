@@ -6,8 +6,9 @@
 	import Button from '$lib/components/Button.svelte';
 	import { timestamp } from '$lib/format';
 	import { modified, selecting } from '$lib/peek';
-	import { folded, PHONE } from '$lib/phone';
+	import { PHONE } from '$lib/phone';
 	import { project } from '$lib/project.svelte';
+	import Folded from '../Folded.svelte';
 
 	// A queue's items in `seq` order (spec 024 #11): what is done, by whom,
 	// what was skipped and why. The row opens the trace it points at, because
@@ -100,12 +101,14 @@
 								>{/if}
 						</a>
 						{#if phone.current}
-							<div class="text-muted truncate font-sans">
-								{folded([
-									`#${row.seq}`,
-									row.completed_by,
-									row.completed_at && timestamp(row.completed_at)
-								])}
+							<div class="text-muted font-sans whitespace-normal">
+								<Folded
+									values={[
+										`#${row.seq}`,
+										row.completed_by,
+										row.completed_at && timestamp(row.completed_at)
+									]}
+								/>
 							</div>
 							<!-- The reason is the why, so it gets a line of its own rather
 							     than the end of one that is cut first. -->

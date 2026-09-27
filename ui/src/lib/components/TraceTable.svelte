@@ -4,9 +4,10 @@
 	import type { TraceRow } from '$lib/api/client.svelte';
 	import { ABSENT, cost, duration, timestamp, wait } from '$lib/format';
 	import { modified, selecting } from '$lib/peek';
-	import { folded, PHONE } from '$lib/phone';
+	import { PHONE } from '$lib/phone';
 	import { href } from '$lib/project.svelte';
 	import { highlight, searchTerms } from '$lib/search';
+	import Folded from './Folded.svelte';
 
 	// The listing, one row per trace, mapping 1:1 onto what
 	// `GET /api/v1/traces` returns (Application contract). Nothing is computed
@@ -44,8 +45,8 @@
 	const terms = $derived(searchTerms(search));
 
 	// On a phone the row is when, what and whether it failed, and the other
-	// columns fold under the name: what it ran as and cost on one line, whose
-	// and which session on the next (spec 006 #18).
+	// columns fold under the name: where it ran, how long it took and what it
+	// cost on one line, whose and which session on the next (spec 006 #18).
 	const phone = new MediaQuery(PHONE);
 	const firstToken = (row: TraceRow) =>
 		row.ttft_ms == null ? null : `TTFT ${wait(row.ttft_ms)}`;
@@ -70,19 +71,23 @@
 	// (accessibility floor): colour alone is not a message.
 	const cell = 'truncate px-3 py-1.5';
 	const numeric = 'px-3 py-1.5 text-right tabular-nums';
+	// Each id on a folded line is cut on its own, so a long user id cannot push
+	// the session past the edge, and on a finger it is a 24 px target rather
+	// than a line of small text (spec 006 #15, #18).
+	const foldedLink = 'min-w-0 max-w-full truncate pointer-coarse:py-1';
 </script>
 
 <!-- The user id is a link to their page (spec 023, Application contract). It
      is the second tabbable thing in the row, and deliberately so: "everything
      this account did" is a destination, not a decoration. The row's own click
      still opens the panel, which is why the link stops the event. -->
-{#snippet user(row: TraceRow)}
+{#snippet user(row: TraceRow, fold = false)}
 	{#if row.user_id}
 		<a
 			href={href(`/users/${encodeURIComponent(row.user_id)}`)}
 			onclick={(event) => event.stopPropagation()}
 			title="Everything about {row.user_id}"
-			class="hover:text-fg hover:underline"
+			class={['hover:text-fg hover:underline', fold && foldedLink]}
 		>
 			{row.user_id}
 		</a>
@@ -97,7 +102,7 @@
      the reader is already in that session, and the cell stays the text it was
      (#17). Both stay on a phone's row: the panel's own meta leaves the session
      out below `md`, and a destination a phone cannot reach is not one there. -->
-{#snippet session(row: TraceRow)}
+{#snippet session(row: TraceRow, fold = false)}
 	{#if !row.session_id}
 		{ABSENT}
 	{:else if linkSession}
@@ -105,12 +110,12 @@
 			href={href(`/sessions/${encodeURIComponent(row.session_id)}`)}
 			onclick={(event) => event.stopPropagation()}
 			title="Everything in {row.session_id}"
-			class="hover:text-fg hover:underline"
+			class={['hover:text-fg hover:underline', fold && foldedLink]}
 		>
 			{row.session_id}
 		</a>
 	{:else}
-		{row.session_id}
+		<span class={[fold && foldedLink]}>{row.session_id}</span>
 	{/if}
 {/snippet}
 
@@ -193,19 +198,21 @@
 					{#if phone.current}
 						<td class="max-w-0 px-3 py-1.5">
 							<div class="truncate">{row.name ?? ABSENT}</div>
-							<div class="text-muted truncate text-xs tabular-nums">
-								{folded([
-									row.environment,
-									duration(row.latency_ms),
-									firstToken(row),
-									cost(row.total_cost)
-								])}
+							<div class="text-muted text-xs tabular-nums">
+								<Folded
+									values={[
+										row.environment,
+										duration(row.latency_ms),
+										firstToken(row),
+										cost(row.total_cost)
+									]}
+								/>
 							</div>
 							{#if row.user_id || row.session_id}
-								<div class="text-muted truncate text-xs">
-									{#if row.user_id}{@render user(row)}{/if}
-									{#if row.user_id && row.session_id}·{/if}
-									{#if row.session_id}{@render session(row)}{/if}
+								<div class="text-muted flex flex-wrap items-center gap-x-1 text-xs">
+									{#if row.user_id}{@render user(row, true)}{/if}
+									{#if row.user_id && row.session_id}<span aria-hidden="true">·</span>{/if}
+									{#if row.session_id}{@render session(row, true)}{/if}
 								</div>
 							{/if}
 						</td>

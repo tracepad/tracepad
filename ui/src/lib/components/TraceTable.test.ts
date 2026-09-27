@@ -59,9 +59,15 @@ describe('the trace table', () => {
 		expect(heads()).toEqual(['Time', 'Name', 'Errors']);
 		expect(screen.getByRole('table')).not.toHaveClass('min-w-3xl');
 		const name = screen.getByText('answer-question').closest('td')!;
-		expect(
-			within(name).getByText('production · 2.08 s · TTFT 410 ms · $0.0054')
-		).toBeInTheDocument();
+		// One value to a box, so a line breaks between values and never inside one.
+		const line = within(name).getByText(/^production/).parentElement!;
+		expect(line).toHaveTextContent('production · 2.08 s · TTFT 410 ms · $0.0054');
+		expect([...line.querySelectorAll('span')].map((one) => one.textContent)).toEqual([
+			'production ·',
+			'2.08 s ·',
+			'TTFT 410 ms ·',
+			'$0.0054'
+		]);
 		// The failure is still in words, not a colour on its own.
 		expect(screen.getByText('2 errors')).toBeInTheDocument();
 		// The user and the session are still destinations, once each.

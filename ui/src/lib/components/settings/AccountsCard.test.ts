@@ -5,7 +5,9 @@ import AccountsCard from './AccountsCard.svelte';
 // The Accounts card at the two widths (spec 006 #18). On a phone the row is
 // the email and the two buttons, and what the other columns said folds under
 // the email — named, because the heads that said what "never" and "none" are
-// about are not on the screen to say it.
+// about are not on the screen to say it. The cell is not the row's header
+// there: a header is read before every cell, and this one is the whole
+// account, so the buttons carry the email in their names instead.
 
 vi.mock('$app/state', () => ({ page: { url: new URL('http://tracepad.test/p/p1/settings') } }));
 
@@ -51,13 +53,14 @@ describe('the accounts card', () => {
 		narrow = true;
 		render(AccountsCard);
 
-		const email = await screen.findByRole('rowheader', { name: /ada@example\.com/ });
+		const email = (await screen.findByText('ada@example.com')).closest('td')!;
 		expect(heads()).toEqual(['Email', 'Actions']);
+		expect(screen.queryByRole('rowheader')).not.toBeInTheDocument();
 		expect(within(email).getByText('pending')).toHaveClass('text-warn');
 		expect(email).toHaveTextContent('Ada · pending · last login never');
 		expect(email).toHaveTextContent('Projects: none');
 		const row = email.closest('tr')!;
-		expect(within(row).getByRole('button', { name: 'Edit' })).toBeInTheDocument();
-		expect(within(row).getByRole('button', { name: 'Delete' })).toBeInTheDocument();
+		expect(within(row).getByRole('button', { name: 'Edit ada@example.com' })).toBeInTheDocument();
+		expect(within(row).getByRole('button', { name: 'Delete ada@example.com' })).toBeInTheDocument();
 	});
 });
