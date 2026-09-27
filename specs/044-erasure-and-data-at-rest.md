@@ -1,6 +1,6 @@
 # Spec 044 — Erasure completeness and data at rest
 
-**Status:** 🚧 IN PROGRESS
+**Status:** ✅ SHIPPED
 **Sprint:** September 2026
 
 > User-data erasure (spec 005 #7) promises to take "everything the queryable
