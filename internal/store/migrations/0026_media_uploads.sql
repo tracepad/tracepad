@@ -12,6 +12,14 @@ CREATE TABLE media_voided (
 ) STRICT, WITHOUT ROWID;
 CREATE INDEX idx_media_voided_at ON media_voided(at);
 
+-- A trace's arrival settles its refs from this schema on (#31); before it, a
+-- ref whose trace arrived without naming its body stayed pending until the
+-- day's sweep. Those are settled here, so that they do not count toward the
+-- cap. A walk of the pending refs alone, on their own partial index.
+UPDATE media_refs SET pending = 0
+ WHERE pending = 1
+   AND EXISTS (SELECT 1 FROM traces t WHERE t.project_id = media_refs.project_id AND t.id = media_refs.trace_id);
+
 -- The pending refs of one project (#31): the cap counts them without reading
 -- the project's settled refs, and a trace's arrival settles its own with a
 -- seek.

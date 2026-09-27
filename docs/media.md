@@ -177,7 +177,7 @@ picture sent through the bridge is kept like any other:
 
 | Call | What it does |
 |---|---|
-| `POST /api/public/media` | The SDK asks where to upload, for a `traceId` of 32 lower-case hex digits. `mediaId` is the SDK's own derivation of the hash, which it checks. `uploadUrl` is `null` when this project already holds the body — the second identical picture sends nothing. For a trace that has not arrived its ref then waits for the trace's spans like an upload's, counted as old as the bytes are, not from the ask. `429` with `Retry-After: 60` when the project has 10,000 uploads waiting for their traces and this one would be another; a trace the project already has is never refused. `403` for a trace deleted or erased within the hour that has not been sent again. |
+| `POST /api/public/media` | The SDK asks where to upload, for a `traceId` of 32 lower-case hex digits. `mediaId` is the SDK's own derivation of the hash, which it checks. `uploadUrl` is `null` when this project already holds the body — the second identical picture sends nothing. For a trace that has not arrived its ref then waits for the trace's spans like an upload's, counted as old as the bytes are, not from the ask. `429` with `Retry-After: 60` when the project has 10,000 uploads waiting for their traces and this one would be another; a trace the project already has is never refused. `403` "this trace was deleted or erased within the hour; its media is not stored" for a trace deleted or erased within the hour that is not stored now. |
 | `PUT` the `uploadUrl` | The bytes. The URL is presigned: the SDK sends no credential with this request, so the URL carries a signed token instead, good for an hour — across a restart, because the key it is signed with is kept in the database. The body must match the declared length and SHA-256, or nothing is stored. `403` when the key that asked for the URL has been revoked since, or its trace was deleted or erased within the hour; `429` at the cap above, for an upload whose trace has not arrived — not for the retry of one already stored. Both are decided before the body is read and answered at once; the body is then read to its end, up to the length the `POST` declared, and dropped — as it is after a `503` when the check could not be made — so that the SDK reads the status instead of a reset connection, on a connection it can keep. A client that sent `Expect: 100-continue` hears the refusal before it sends anything. |
 | `PATCH /api/public/media/{mediaId}` | The SDK's report on the upload; a failure is logged. |
 | `GET /api/public/media/{mediaId}` | The Langfuse record of a body, with a `url` to `GET /api/v1/media/{sha256}` — which, like every read, needs a key of the project. |
@@ -223,7 +223,12 @@ was gone would be stored under a ref to nothing. The SDK asks for a URL and
 PUTs it in one go, so what this refuses is the uploads in transit for the
 removed traces; the SDK logs them. Uploads for every other trace go on, during
 a deletion as before and after it. A trace sent again under a deleted id is a
-trace like any other, and its uploads are taken. URLs issued before the
+trace like any other once it is stored, and its uploads are taken from then —
+but the Langfuse SDK uploads a span's pictures before it exports the span, so
+within the hour after the deletion the pictures of such a trace are refused
+while it is not here yet, and its spans show their references unresolved: for
+a trace that is not here, a trace coming back cannot be told from one just
+erased, and the erasure's promise is kept. URLs issued before the
 upgrade that introduced this are refused once.
 
 ## In the interface

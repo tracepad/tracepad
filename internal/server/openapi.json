@@ -123,7 +123,7 @@
           }}}},
           "400": {"$ref": "#/components/responses/BadRequest"},
           "401": {"$ref": "#/components/responses/Unauthorized"},
-          "403": {"description": "The trace was deleted or erased within the hour and has not been sent again: no upload is taken for it",
+          "403": {"description": "The trace was deleted or erased within the hour and is not stored now: no upload is taken for it",
             "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
           "429": {"description": "The project has 10,000 uploads waiting for their traces and this one — with an upload URL or without — would be another; `Retry-After: 60`. A trace the project has is never refused",
             "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},

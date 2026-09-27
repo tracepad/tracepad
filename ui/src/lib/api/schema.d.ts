@@ -2637,7 +2637,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            /** @description The trace was deleted or erased within the hour and has not been sent again: no upload is taken for it */
+            /** @description The trace was deleted or erased within the hour and is not stored now: no upload is taken for it */
             403: {
                 headers: {
                     [name: string]: unknown;

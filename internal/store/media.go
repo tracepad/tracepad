@@ -606,8 +606,6 @@ type MediaRefAdd struct {
 	// false when it was collected since the handler asked, and the bytes
 	// have to be asked for.
 	Held bool
-
-	pendingCap
 }
 
 // nullAnswerHold is how long a pending ref the null answer writes keeps its
@@ -625,14 +623,29 @@ func (a *MediaRefAdd) apply(tx *sql.Tx) error {
 	if err != nil {
 		return err
 	}
-	if place == refWritten || place == refVoid {
+	now := nowOr(a.Now)
+	// No sooner than an hour inside the grace (#30): the spans the null
+	// answer tells the SDK to send without their bytes are on their way.
+	floor := now - int64(MediaOrphanGrace) + int64(nullAnswerHold)
+	switch place {
+	case refVoid:
+		a.Held = true
+		return nil
+	case refWritten:
+		// Named again for its own trace, a ref still pending takes the same
+		// hour a new one would: a ref near the end of its grace would
+		// otherwise go, with the body, right after the answer.
+		if _, err := tx.Exec(`UPDATE media_refs SET created_at = MAX(created_at, ?)
+		                       WHERE sha256 = ? AND project_id = ? AND trace_id = ? AND pending = 1`,
+			floor, a.SHA256, a.ProjectID, a.TraceID); err != nil {
+			return fmt.Errorf("hold media ref %s: %w", a.SHA256, err)
+		}
 		a.Held = true
 		return nil
 	}
-	now := nowOr(a.Now)
 	at := now
 	if place == refPending {
-		if err := pendingRoom(tx, a.ProjectID, a.cap); err != nil {
+		if err := pendingRoom(tx, a.ProjectID, maxPendingMediaRefs); err != nil {
 			return err
 		}
 		var aged int64
@@ -641,7 +654,7 @@ func (a *MediaRefAdd) apply(tx *sql.Tx) error {
 			hold.CreatedAt, a.SHA256, a.ProjectID).Scan(&aged); err != nil {
 			return fmt.Errorf("read the age of media %s: %w", a.SHA256, err)
 		}
-		at = min(now, max(aged, now-int64(MediaOrphanGrace)+int64(nullAnswerHold)))
+		at = min(now, max(aged, floor))
 	}
 	a.Held, err = writeChannelRef(tx, a.ProjectID, a.SHA256, a.TraceID, hold.MimeType, at)
 	return err
@@ -657,9 +670,17 @@ const traceStoredExpr = `EXISTS (SELECT 1 FROM traces WHERE project_id = ? AND i
 const refExistsExpr = `EXISTS (SELECT 1 FROM media_refs WHERE sha256 = ? AND project_id = ? AND trace_id = ?)`
 
 // traceVoidedExpr is whether a deletion or an erasure removed a trace within
-// the upload URL's lifetime (#29); its arguments are the project and the
-// trace.
-const traceVoidedExpr = `EXISTS (SELECT 1 FROM media_voided WHERE project_id = ? AND trace_id = ?)`
+// the upload URL's lifetime and the slack (#29); its arguments are the
+// project, the trace and voidedSince. Bounded by the row's age, not by the
+// sweep that forgets it: how often that runs decides only how long the row
+// is kept.
+const traceVoidedExpr = `EXISTS (SELECT 1 FROM media_voided WHERE project_id = ? AND trace_id = ? AND at >= ?)`
+
+// voidedSince is the oldest removal that still voids an upload: on the wall
+// clock, as the removal was stamped.
+func voidedSince() int64 {
+	return time.Now().Add(-(MediaUploadWindow + mediaVoidedSlack)).UnixNano()
+}
 
 // refPlace is where a channel ref to a body for a trace would stand — the one
 // rule the ask, the upload's checks and the null answer share.
@@ -683,7 +704,7 @@ const (
 const refFactsExpr = traceStoredExpr + `, ` + refExistsExpr + `, ` + traceVoidedExpr
 
 func refFactsArgs(projectID, sha, traceID string) []any {
-	return []any{projectID, traceID, sha, projectID, traceID, projectID, traceID}
+	return []any{projectID, traceID, sha, projectID, traceID, projectID, traceID, voidedSince()}
 }
 
 func placeOf(stored, written, voided bool) refPlace {
@@ -738,12 +759,11 @@ func voidUploads(tx *sql.Tx, projectID string, traceIDs []any, now int64) error 
 // setting.
 const MaxPendingMediaRefs = 10000
 
-// pendingCap is the cap a job counts pending refs against, which the writer
-// hands it from its store before the job runs, as the store's reads take it:
-// the constant, but for the store's own tests.
-type pendingCap struct{ cap int }
-
-func (p *pendingCap) setPendingCap(n int) { p.cap = n }
+// maxPendingMediaRefs is the cap the reads and the jobs count against:
+// MaxPendingMediaRefs, lowered only by this package's tests. It is shared, so
+// a test that changes it must not run in parallel (t.Parallel) with another
+// that uploads.
+var maxPendingMediaRefs = MaxPendingMediaRefs
 
 // errPendingFull is the refusal at the cap (#31).
 var errPendingFull = &Rejection{Kind: RejectFull,
@@ -766,7 +786,7 @@ func pendingRoom(q querier, projectID string, limit int) error {
 }
 
 // MediaUploadRoom is the channel POST's check, a read of the pool before any
-// job: ErrUploadVoid for a trace a deletion or an erasure removed within the
+// job: ErrTraceRemoved for a trace a deletion or an erasure removed within the
 // hour and not here now (#29) — a URL issued for it would outlive the
 // removal's record — and errPendingFull's rejection when the ref its answer
 // would lead to, the upload's or the null answer's, would be a new pending
@@ -777,11 +797,11 @@ func (s *Store) MediaUploadRoom(ctx context.Context, projectID, sha, traceID str
 	case err != nil:
 		return err
 	case place == refVoid:
-		return ErrUploadVoid
+		return ErrTraceRemoved
 	case place != refPending:
 		return nil
 	}
-	return pendingRoom(s.db, projectID, s.maxPendingMediaRefs)
+	return pendingRoom(s.db, projectID, maxPendingMediaRefs)
 }
 
 // MediaGrant is what an upload URL lets its holder store, as far as the store
@@ -798,16 +818,23 @@ type MediaGrant struct {
 // the channel's one answer to a URL it will not take.
 var ErrUploadVoid = &Rejection{Kind: RejectForbidden, Message: "this upload URL is not valid; ask for a new one"}
 
+// ErrTraceRemoved is the refusal of the ask, and of the upload, for a trace a
+// deletion or an erasure removed within the hour and that is not here (#29):
+// no new URL would be taken either.
+var ErrTraceRemoved = &Rejection{Kind: RejectForbidden,
+	Message: "this trace was deleted or erased within the hour; its media is not stored"}
+
 // MediaGrantRefusal checks a grant before its body is read, as the write will
 // check it again: nil when it would be stored now, ErrUploadVoid when the
-// project is gone, the key that asked is no longer the project's (#28) or its
-// trace was deleted or erased within the hour (#29), and the full rejection
+// project is gone or the key that asked is no longer the project's (#28),
+// ErrTraceRemoved when its trace was deleted or erased within the hour (#29),
+// and the full rejection
 // when its ref would be a new pending one past the cap (#31). It also answers
 // the project's media setting, under which the upload keeps nothing and the
 // cap does not apply. One statement, and the count only for a ref that would
 // be pending.
 func (s *Store) MediaGrantRefusal(ctx context.Context, g MediaGrant) (media string, refusal error) {
-	return grantRefusal(ctx, s.db, g, s.maxPendingMediaRefs)
+	return grantRefusal(ctx, s.db, g)
 }
 
 // ctxQuerier is a querier that also takes a context: the pool or the write's
@@ -817,7 +844,7 @@ type ctxQuerier interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
-func grantRefusal(ctx context.Context, q ctxQuerier, g MediaGrant, limit int) (string, error) {
+func grantRefusal(ctx context.Context, q ctxQuerier, g MediaGrant) (string, error) {
 	var (
 		media                   string
 		gone, alive             bool
@@ -836,13 +863,16 @@ func grantRefusal(ctx context.Context, q ctxQuerier, g MediaGrant, limit int) (s
 		return "", fmt.Errorf("check an upload grant: %w", err)
 	}
 	place := placeOf(stored, written, voided)
-	if gone || !alive || place == refVoid {
+	if gone || !alive {
 		return media, ErrUploadVoid
+	}
+	if place == refVoid {
+		return media, ErrTraceRemoved
 	}
 	if media == MediaPlaceholder || place != refPending {
 		return media, nil
 	}
-	return media, pendingRoom(q, g.ProjectID, limit)
+	return media, pendingRoom(q, g.ProjectID, maxPendingMediaRefs)
 }
 
 // MediaUpload stores one body the Langfuse channel received and the ref of
@@ -859,12 +889,10 @@ type MediaUpload struct {
 	Grant MediaGrant
 	Body  MediaBody
 	Now   int64
-
-	pendingCap
 }
 
 func (u *MediaUpload) apply(tx *sql.Tx) error {
-	media, err := grantRefusal(context.Background(), tx, u.Grant, u.cap)
+	media, err := grantRefusal(context.Background(), tx, u.Grant)
 	if err != nil || media == MediaPlaceholder {
 		return err
 	}

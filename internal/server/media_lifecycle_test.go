@@ -333,7 +333,7 @@ func TestLangfuseMediaUploadAfterDeletion(t *testing.T) {
 					"sha256Hash": hash, "field": "input",
 				}))
 			}
-			expectError(t, ask(picture, hash), http.StatusForbidden, "not valid")
+			expectError(t, ask(picture, hash), http.StatusForbidden, "deleted or erased within the hour")
 			if h.mediaHeld(t, sha) {
 				t.Fatal("a voided URL stored its body")
 			}
@@ -342,7 +342,7 @@ func TestLangfuseMediaUploadAfterDeletion(t *testing.T) {
 			}
 			// A picture the project holds is refused for the removed trace
 			// too, and no ref is written for it.
-			expectError(t, ask(other, otherHash), http.StatusForbidden, "not valid")
+			expectError(t, ask(other, otherHash), http.StatusForbidden, "deleted or erased within the hour")
 			if pending, settled := h.refStates(t, probeTrace); pending+settled != 0 {
 				t.Errorf("the ask for a removed trace wrote %d refs", pending+settled)
 			}
