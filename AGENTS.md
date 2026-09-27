@@ -475,7 +475,7 @@ API. This file routes; it does not duplicate what specs and docs say.
   index merged, the free pages drained, the log truncated as a solo writer
   step — with `secure_delete` on (#10, #11); pre-migration backups are 0600
   and expire after seven days, the files owner-only, `/raw` an editor's read
-  (#6, #12, #13). Schema 0026 adds `raw_batches.scrubbed_at`: the erasure
+  (#6, #12, #13). Schema 0028 adds `raw_batches.scrubbed_at`: the erasure
   finds the batches by its traces' arrival windows — ingest now stamps a
   batch with its traces' reading (#3) — and rewrites each without the erased
   spans through the export splice, or deletes it (#2), raw first, then the
