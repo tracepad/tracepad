@@ -120,10 +120,8 @@ func TestMediaHoldersFollowRefs(t *testing.T) {
 	f.checkHolders(t, "a resolved ingest")
 
 	for _, upload := range []*MediaUpload{
-		{ProjectID: f.project.ID, TraceID: hexTrace(4), Body: uploaded, Now: daysAgo(1),
-			Key: "tp-pk-test", Issued: 1, PendingCap: MaxPendingMediaRefs},
-		{ProjectID: other.ID, TraceID: hexTrace(5), Body: orphan, Now: daysAgo(3),
-			Key: "tp-pk-other", Issued: 1, PendingCap: MaxPendingMediaRefs},
+		uploadOf(f.project.ID, hexTrace(4), "tp-pk-test", uploaded, daysAgo(1)),
+		uploadOf(other.ID, hexTrace(5), "tp-pk-other", orphan, daysAgo(3)),
 	} {
 		if err := f.writer.Submit(t.Context(), upload); err != nil {
 			t.Fatal(err)

@@ -59,10 +59,10 @@ func (r *traceRemoval) apply(tx *sql.Tx) (DeleteCounts, error) {
 	}
 	// Upload URLs issued before now are void (spec 041 #29): a picture that
 	// lands after its trace was deleted or erased would be stored under a
-	// ref to nothing. The instant this transaction runs, not the request's
-	// clock, and only when there is a trace to remove.
-	if _, err := tx.Exec(`UPDATE projects SET media_grants_after = MAX(media_grants_after, ?) WHERE id = ?`,
-		time.Now().UnixNano(), r.projectID); err != nil {
+	// ref to nothing. A new generation, only when there is a trace to
+	// remove.
+	if _, err := tx.Exec(`UPDATE projects SET media_generation = media_generation + 1 WHERE id = ?`,
+		r.projectID); err != nil {
 		return counts, fmt.Errorf("void earlier upload URLs: %w", err)
 	}
 	payloads, err := referencedPayloads(tx, r.projectID, r.ids)

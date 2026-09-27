@@ -591,16 +591,22 @@ func (s *Store) mediaFreed(projectID, traces string, traceArgs []any, raws strin
 // another project's, and pointing at it then would be a hold without the
 // bytes.
 //
-// Only for a trace the project has (#30): the ref is then settled. For a trace
-// not here yet it writes nothing — its spans will carry the SDK's string, which
-// ingest resolves to the body and writes the ref for then. A pending ref comes
-// only from delivered bytes, so naming a hash again for a new trace every day
-// cannot keep a body no trace claims alive.
+// For a trace the project has, the ref is settled. For one not here yet it is
+// pending, as the upload's would be, and keeps the body until the trace's
+// spans settle it — but it is as old as the bytes are in the project, not as
+// old as the ask (#30): the newest of the project's refs to the body, or the
+// hold's first instant when there is none. Naming a hash again, for any trace,
+// is never a later delivery, so a body no trace claims still goes one grace
+// after its bytes last came. A new pending ref counts toward the cap like the
+// upload's (#31).
 type MediaRefAdd struct {
 	ProjectID string
 	SHA256    string
 	TraceID   string
 	Now       int64
+	// PendingCap is the project's cap on pending refs; zero is
+	// MaxPendingMediaRefs.
+	PendingCap int
 
 	// Held is whether the project still held the body inside the write:
 	// false when it was collected since the handler asked, and the bytes
@@ -614,33 +620,38 @@ func (a *MediaRefAdd) apply(tx *sql.Tx) error {
 	if err != nil || hold == nil {
 		return err
 	}
-	stored, err := traceStored(tx, a.ProjectID, a.TraceID)
-	if err != nil {
-		return err
+	var settled, exists bool
+	if err := tx.QueryRow(`SELECT `+traceStoredExpr+`, `+refExistsExpr, a.ProjectID, a.TraceID,
+		a.SHA256, a.ProjectID, a.TraceID).Scan(&settled, &exists); err != nil {
+		return fmt.Errorf("look up the ref of media %s: %w", a.SHA256, err)
 	}
-	if !stored {
-		a.Held = true
-		return nil
+	at := nowOr(a.Now)
+	if !settled {
+		if !exists {
+			if err := pendingRoom(tx, a.ProjectID, a.PendingCap); err != nil {
+				return err
+			}
+		}
+		var aged int64
+		if err := tx.QueryRow(`SELECT COALESCE(MAX(created_at), ?) FROM media_refs
+		                        WHERE sha256 = ? AND project_id = ?`,
+			hold.CreatedAt, a.SHA256, a.ProjectID).Scan(&aged); err != nil {
+			return fmt.Errorf("read the age of media %s: %w", a.SHA256, err)
+		}
+		at = min(at, aged)
 	}
-	a.Held, err = writeChannelRef(tx, a.ProjectID, a.SHA256, a.TraceID, hold.MimeType, nowOr(a.Now))
+	a.Held, err = writeChannelRef(tx, a.ProjectID, a.SHA256, a.TraceID, hold.MimeType, at)
 	return err
 }
 
-// traceStored reports whether a project has a trace.
-func traceStored(q querier, projectID, traceID string) (bool, error) {
-	var one int
-	err := q.QueryRow(`SELECT 1 FROM traces WHERE project_id = ? AND id = ?`, projectID, traceID).Scan(&one)
-	if err == sql.ErrNoRows {
-		return false, nil
-	}
-	return err == nil, err
-}
-
-// TraceStored reports whether a project has a trace, for the upload channel's
-// checks before a body is read (#31).
-func (s *Store) TraceStored(projectID, traceID string) (bool, error) {
-	return traceStored(s.db, projectID, traceID)
-}
+// traceStoredExpr and refExistsExpr are what decide whether an upload's ref
+// would be a new pending one (#31): a trace the project has settles it, and a
+// ref already written is not written again. Their arguments are the project
+// and the trace, and the hash, the project and the trace.
+const (
+	traceStoredExpr = `EXISTS (SELECT 1 FROM traces WHERE project_id = ? AND id = ?)`
+	refExistsExpr   = `EXISTS (SELECT 1 FROM media_refs WHERE sha256 = ? AND project_id = ? AND trace_id = ?)`
+)
 
 // MediaRefStates counts one trace's media refs by state: pending, until its
 // spans arrive, and settled.
@@ -662,37 +673,80 @@ func (s *Store) SetMaxPendingMediaRefs(n int) { s.maxPendingMediaRefs = n }
 // MaxPendingMediaRefsOf is the cap this store enforces.
 func (s *Store) MaxPendingMediaRefsOf() int { return s.maxPendingMediaRefs }
 
-// pendingFull reports whether a project has `limit` pending refs already: a
-// seek on the partial index of 0025, which stops counting at the cap.
-func pendingFull(q querier, projectID string, limit int) (bool, error) {
-	var n int
-	err := q.QueryRow(`SELECT COUNT(*) FROM (SELECT 1 FROM media_refs
-	                    WHERE project_id = ? AND pending = 1 LIMIT ?)`, projectID, limit).Scan(&n)
-	return n >= limit, err
-}
+// errPendingFull is the refusal at the cap (#31).
+var errPendingFull = &Rejection{Kind: RejectFull,
+	Message: "too many media uploads are waiting for their traces"}
 
-// MediaPendingFull reports whether a project is at its pending-ref cap.
-func (s *Store) MediaPendingFull(projectID string) (bool, error) {
-	return pendingFull(s.db, projectID, s.maxPendingMediaRefs)
-}
-
-// ErrPendingFull is what the channel answers at the cap (#31).
-const ErrPendingFull = "too many media uploads are waiting for their traces"
-
-// KeyOfProject reports whether a public key is still one of a project's keys:
-// an upload URL dies with the key that asked for it (#28).
-func (s *Store) KeyOfProject(publicKey, projectID string) (bool, error) {
-	return keyOfProject(s.db, publicKey, projectID)
-}
-
-func keyOfProject(q querier, publicKey, projectID string) (bool, error) {
-	var one int
-	err := q.QueryRow(`SELECT 1 FROM api_keys WHERE public_key = ? AND project_id = ?`,
-		publicKey, projectID).Scan(&one)
-	if err == sql.ErrNoRows {
-		return false, nil
+// pendingRoom refuses one more pending ref when the project already has
+// `limit` of them — zero is MaxPendingMediaRefs. A seek on the partial index
+// of 0025, which stops counting at the cap.
+func pendingRoom(q querier, projectID string, limit int) error {
+	if limit <= 0 {
+		limit = MaxPendingMediaRefs
 	}
-	return err == nil, err
+	var n int
+	if err := q.QueryRow(`SELECT COUNT(*) FROM (SELECT 1 FROM media_refs
+	                       WHERE project_id = ? AND pending = 1 LIMIT ?)`, projectID, limit).Scan(&n); err != nil {
+		return fmt.Errorf("count the pending media refs: %w", err)
+	}
+	if n >= limit {
+		return errPendingFull
+	}
+	return nil
+}
+
+// MediaGrant is what an upload URL lets its holder store, as far as the store
+// checks it: for which project, trace and body, which key asked for it, and
+// in which of the project's generations (#28, #29).
+type MediaGrant struct {
+	ProjectID  string
+	TraceID    string
+	SHA256     string
+	Key        string
+	Generation int64
+}
+
+// errUploadVoid is the refusal of an upload whose grant no longer stands.
+var errUploadVoid = &Rejection{Kind: RejectForbidden, Message: "this upload URL is not valid; ask for a new one"}
+
+// MediaGrantRefusal checks a grant before its body is read, as the write will
+// check it again: nil when it would be stored now, errUploadVoid's forbidden
+// rejection when the project is gone, the key that asked is no longer the
+// project's (#28) or a trace deletion or erasure came since (#29), and the
+// full one when its ref would be a new pending one past the cap (#31). It
+// also answers the project's media setting, under which the upload keeps
+// nothing and the cap does not apply. One statement, and the count only for
+// a ref that would be pending.
+func (s *Store) MediaGrantRefusal(g MediaGrant) (media string, refusal error) {
+	return grantRefusal(s.db, g, s.maxPendingMediaRefs)
+}
+
+func grantRefusal(q querier, g MediaGrant, limit int) (string, error) {
+	var (
+		media              string
+		generation         int64
+		gone, alive        bool
+		settled, refExists bool
+	)
+	err := q.QueryRow(`SELECT p.media, p.media_generation, p.deleted_at IS NOT NULL,
+	        EXISTS (SELECT 1 FROM api_keys k WHERE k.public_key = ? AND k.project_id = p.id),
+	        `+traceStoredExpr+`, `+refExistsExpr+`
+	   FROM projects p WHERE p.id = ?`,
+		g.Key, g.ProjectID, g.TraceID, g.SHA256, g.ProjectID, g.TraceID, g.ProjectID).
+		Scan(&media, &generation, &gone, &alive, &settled, &refExists)
+	if err == sql.ErrNoRows {
+		return "", errUploadVoid
+	}
+	if err != nil {
+		return "", fmt.Errorf("check an upload grant: %w", err)
+	}
+	if gone || !alive || g.Generation < generation {
+		return media, errUploadVoid
+	}
+	if media == MediaPlaceholder || settled || refExists {
+		return media, nil
+	}
+	return media, pendingRoom(q, g.ProjectID, limit)
 }
 
 // MediaUpload stores one body the Langfuse channel received and the ref of
@@ -701,60 +755,27 @@ func keyOfProject(q querier, publicKey, projectID string) (bool, error) {
 //
 // The upload's grant is checked again here, because the handler's checks ran
 // before the body and a revocation, an erasure or a burst of uploads can land
-// in between: the key that asked must still be the project's (#28), the grant
-// must postdate the project's last trace deletion (#29), and a ref that would
-// be pending must fit under the cap (#31).
+// in between (#28, #29, #31). A project switched to the placeholder setting
+// since keeps nothing (#6).
 type MediaUpload struct {
-	ProjectID string
-	TraceID   string
-	Body      MediaBody
-	Now       int64
-
-	// Key is the public key that asked for the URL, and Issued when it did
-	// (Unix nanoseconds).
-	Key    string
-	Issued int64
-	// PendingCap is the project's cap on pending refs.
+	Grant MediaGrant
+	Body  MediaBody
+	Now   int64
+	// PendingCap is the project's cap on pending refs; zero is
+	// MaxPendingMediaRefs.
 	PendingCap int
 }
 
-// errUploadVoid is the refusal of an upload whose grant no longer stands.
-var errUploadVoid = &Rejection{Kind: RejectForbidden, Message: "this upload URL is not valid; ask for a new one"}
-
 func (u *MediaUpload) apply(tx *sql.Tx) error {
-	alive, err := keyOfProject(tx, u.Key, u.ProjectID)
-	if err != nil {
+	media, err := grantRefusal(tx, u.Grant, u.PendingCap)
+	if err != nil || media == MediaPlaceholder {
 		return err
-	}
-	if !alive {
-		return errUploadVoid
-	}
-	var after int64
-	if err := tx.QueryRow(`SELECT media_grants_after FROM projects WHERE id = ?`, u.ProjectID).
-		Scan(&after); err != nil {
-		return fmt.Errorf("read the upload watermark: %w", err)
-	}
-	if u.Issued <= after {
-		return errUploadVoid
-	}
-	stored, err := traceStored(tx, u.ProjectID, u.TraceID)
-	if err != nil {
-		return err
-	}
-	if !stored {
-		full, err := pendingFull(tx, u.ProjectID, u.PendingCap)
-		if err != nil {
-			return err
-		}
-		if full {
-			return &Rejection{Kind: RejectFull, Message: ErrPendingFull}
-		}
 	}
 	now := nowOr(u.Now)
 	if err := writeMediaBodies(tx, []MediaBody{u.Body}, now); err != nil {
 		return err
 	}
-	_, err = writeChannelRef(tx, u.ProjectID, u.Body.SHA256, u.TraceID, u.Body.MimeType, now)
+	_, err = writeChannelRef(tx, u.Grant.ProjectID, u.Body.SHA256, u.Grant.TraceID, u.Body.MimeType, now)
 	return err
 }
 

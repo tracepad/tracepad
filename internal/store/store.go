@@ -187,9 +187,9 @@ type Project struct {
 	// payload (spec 041 #6): MediaStore keeps the body, MediaPlaceholder
 	// keeps only a reference that says it was not stored.
 	Media string
-	// MediaGrantsAfter voids the upload URLs issued at or before it (spec
-	// 041 #29), Unix nanoseconds: the last erasure or trace deletion.
-	MediaGrantsAfter int64
+	// MediaGeneration counts the project's erasures and trace deletions:
+	// an upload URL issued in an earlier generation is void (spec 041 #29).
+	MediaGeneration int64
 }
 
 // The two values of a project's media setting (spec 041 #6).
@@ -227,7 +227,7 @@ type KeyPair struct {
 
 // projectColumns is the one SELECT list every project read shares, so a column
 // added to the table is added to every reader at once.
-const projectColumns = `id, name, retention_days, raw_retention_days, stats_retention_days, deleted_at, created_at, media, media_grants_after`
+const projectColumns = `id, name, retention_days, raw_retention_days, stats_retention_days, deleted_at, created_at, media, media_generation`
 
 func scanProject(row interface{ Scan(...any) error }) (*Project, error) {
 	var (
@@ -238,7 +238,7 @@ func scanProject(row interface{ Scan(...any) error }) (*Project, error) {
 		deleted   sql.NullInt64
 	)
 	if err := row.Scan(&p.ID, &p.Name, &retention, &raw, &stats, &deleted, &p.CreatedAt, &p.Media,
-		&p.MediaGrantsAfter); err != nil {
+		&p.MediaGeneration); err != nil {
 		return nil, err
 	}
 	if stats.Valid {

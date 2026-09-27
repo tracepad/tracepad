@@ -97,6 +97,11 @@ var apiWrite = writeKind{
 	logged: "write failed",
 }
 
+// fullRetryAfter is how long a refusal at a bound the project has reached asks
+// the client to wait (spec 041 #31): long enough for the spans in flight to
+// settle the refs that fill it.
+const fullRetryAfter = "60"
+
 // submitFailure renders an outcome the writer already answered with. It is the
 // tail of submit, split out for the handlers that recognise one error of their
 // own before falling back to the shared shapes (spec 028: a wrong current
@@ -115,6 +120,13 @@ func submitFailure(w http.ResponseWriter, err error, kind writeKind) {
 			status = http.StatusNotFound
 		case store.RejectConflict:
 			status = http.StatusConflict
+		case store.RejectForbidden:
+			status = http.StatusForbidden
+		case store.RejectFull:
+			// Room comes back as the refs in flight settle (spec 041
+			// #31); the SDK retries a 429 after this long.
+			status = http.StatusTooManyRequests
+			w.Header().Set("Retry-After", fullRetryAfter)
 		}
 		if len(rejection.Details) == 0 {
 			writeError(w, status, rejection.Message)

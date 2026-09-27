@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -19,26 +20,44 @@ import (
 
 // The upload channel's lifecycle (spec 041 #28–#31): an upload URL dies with
 // the key that asked for it and with any trace deletion after it, a second
-// identical picture writes no pending ref for a trace that is not here, and a
-// project's pending refs are capped. Every refusal of the PUT comes before a
-// byte of its body.
+// identical picture writes a pending ref no younger than its bytes, and a
+// project's pending refs are capped. Every refusal of the PUT is decided
+// before its body is read, and the body is then drained, up to a bound, so
+// that the SDK reads the status rather than a reset.
 
-// putUnread PUTs an endless body at an upload URL and reports the status and
-// how much of the body the server read.
-func (h *harness) putUnread(t *testing.T, upload string) (int, int64) {
+// putRefused PUTs a body of `size` bytes — endless when negative — at an
+// upload URL and answers the status. A refusal decided before the body drains
+// it and nothing more: all of a body up to the bound, keeping the connection,
+// and past it the bound's worth, closing it. An upload that read the body
+// instead answers 413 or 400.
+func (h *harness) putRefused(t *testing.T, upload string, size int64) int {
 	t.Helper()
 	parsed, err := url.Parse(upload)
 	if err != nil {
 		t.Fatal(err)
 	}
-	body := &countingReader{}
+	counted := &countingReader{}
+	var body io.Reader = counted
+	if size >= 0 {
+		body = io.LimitReader(counted, size)
+	}
 	req := httptest.NewRequest("PUT", parsed.RequestURI(), body)
 	rec := httptest.NewRecorder()
 	h.server.Handler().ServeHTTP(rec, req)
 	if rec.Code == http.StatusTooManyRequests && rec.Header().Get("Retry-After") != "60" {
 		t.Errorf("a 429 without Retry-After: 60 (%q)", rec.Header().Get("Retry-After"))
 	}
-	return rec.Code, body.read
+	if rec.Code == http.StatusForbidden || rec.Code == http.StatusTooManyRequests {
+		closed := rec.Header().Get("Connection") == "close"
+		switch {
+		case size < 0 && (counted.read != uploadDrainMax+1 || !closed):
+			t.Errorf("an endless refused body: read %d, closed %v; want %d and closed",
+				counted.read, closed, uploadDrainMax+1)
+		case size >= 0 && (counted.read != size || closed):
+			t.Errorf("a refused body of %d: read %d, closed %v; want all of it and kept", size, counted.read, closed)
+		}
+	}
+	return rec.Code
 }
 
 // pictureOf is a picture with its hex and base64 SHA-256.
@@ -73,8 +92,8 @@ func TestLangfuseMediaUploadDiesWithItsKey(t *testing.T) {
 	expectStatus(t, h.call(t, "DELETE", "/api/v1/projects/"+h.project.ID+"/keys/"+second.PublicKey,
 		nil, asAdmin), 200)
 
-	if code, read := h.putUnread(t, *theirs); code != http.StatusForbidden || read != 0 {
-		t.Errorf("the revoked key's URL = %d after reading %d bytes, want 403 and none", code, read)
+	if code := h.putRefused(t, *theirs, -1); code != http.StatusForbidden {
+		t.Errorf("the revoked key's URL = %d, want 403", code)
 	}
 	if h.mediaHeld(t, sha) {
 		t.Fatal("the revoked key's URL stored its body")
@@ -83,7 +102,7 @@ func TestLangfuseMediaUploadDiesWithItsKey(t *testing.T) {
 		t.Errorf("the live key's URL = %d, want 200", code)
 	}
 
-	// A token signed the old way — valid signature, no key, no instant.
+	// A token signed the old way — valid signature, no key.
 	legacy, err := h.server.signUpload(uploadGrant{
 		Project: h.project.ID, Trace: probeTrace, SHA256: sha, MimeType: "image/png",
 		Length: int64(len(picture)), Expires: time.Now().Add(time.Hour).Unix(),
@@ -92,8 +111,8 @@ func TestLangfuseMediaUploadDiesWithItsKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := "/api/public/media/" + store.MediaIDFor(sha) + "/upload?token=" + url.QueryEscape(legacy)
-	if code, read := h.putUnread(t, path); code != http.StatusForbidden || read != 0 {
-		t.Errorf("a token without its key = %d after reading %d bytes, want 403 and none", code, read)
+	if code := h.putRefused(t, path, -1); code != http.StatusForbidden {
+		t.Errorf("a token without its key = %d, want 403", code)
 	}
 }
 
@@ -126,9 +145,8 @@ func TestLangfuseMediaUploadAfterDeletion(t *testing.T) {
 			}
 
 			for name, upload := range map[string]string{"the deleted trace's": *forDeleted, "another trace's": *forAnother} {
-				if code, read := h.putUnread(t, upload); code != http.StatusForbidden || read != 0 {
-					t.Errorf("%s URL from before the %s = %d after reading %d bytes, want 403 and none",
-						name, how, code, read)
+				if code := h.putRefused(t, upload, -1); code != http.StatusForbidden {
+					t.Errorf("%s URL from before the %s = %d, want 403", name, how, code)
 				}
 			}
 			if h.mediaHeld(t, sha) || h.mediaHeld(t, otherSHA) {
@@ -160,8 +178,9 @@ func TestLangfuseMediaUploadAfterDeletion(t *testing.T) {
 }
 
 // TestLangfuseMediaNullAnswerThenSpans: the project holds X; asked for X for a
-// trace that is not here, it answers null and writes no ref; the trace's
-// spans, carrying the SDK's string, resolve it and settle the ref (#30).
+// trace that is not here, it answers null and writes a pending ref; the
+// trace's spans, carrying the SDK's string, resolve it and settle the ref
+// (#30).
 func TestLangfuseMediaNullAnswerThenSpans(t *testing.T) {
 	h := newHarness(t, nil, store.WriterOptions{})
 	picture, sha, hash := pictureOf(64)
@@ -182,8 +201,8 @@ func TestLangfuseMediaNullAnswerThenSpans(t *testing.T) {
 	if again != nil {
 		t.Fatalf("a second identical picture was asked for: %s", *again)
 	}
-	if p, s := refs(probeTrace); p+s != 0 {
-		t.Fatalf("the null answer wrote %d pending and %d settled refs for a trace not here", p, s)
+	if p, s := refs(probeTrace); p != 1 || s != 0 {
+		t.Fatalf("the null answer wrote %d pending and %d settled refs for a trace not here, want one pending", p, s)
 	}
 
 	reference := "@@@langfuseMedia:type=image/png|id=" + mediaID + "|source=base64_data_uri@@@"
@@ -200,9 +219,10 @@ func TestLangfuseMediaNullAnswerThenSpans(t *testing.T) {
 }
 
 // TestLangfuseMediaPendingCap: at the cap, an ask for a trace the project does
-// not have and the PUT of a URL whose ref would be pending answer 429 with
-// Retry-After, the PUT before its body; an ask for a trace the project has
-// is not refused, and once a trace arrives there is room again (#31).
+// not have — with an upload URL or the null answer — and the PUT of a URL
+// whose ref would be pending answer 429 with Retry-After, the PUT before its
+// body; an ask for a trace the project has is not refused, nor the retry of a
+// PUT that was stored, and once a trace arrives there is room again (#31).
 func TestLangfuseMediaPendingCap(t *testing.T) {
 	h := newHarness(t, nil, store.WriterOptions{})
 	h.store.SetMaxPendingMediaRefs(3)
@@ -236,8 +256,23 @@ func TestLangfuseMediaPendingCap(t *testing.T) {
 	if rec.Header().Get("Retry-After") != "60" {
 		t.Errorf("Retry-After = %q, want 60", rec.Header().Get("Retry-After"))
 	}
-	if code, read := h.putUnread(t, uploads[3]); code != http.StatusTooManyRequests || read != 0 {
-		t.Errorf("the fourth PUT at the cap = %d after reading %d bytes, want 429 and none", code, read)
+	if code := h.putRefused(t, uploads[3], -1); code != http.StatusTooManyRequests {
+		t.Errorf("the fourth PUT at the cap = %d, want 429", code)
+	}
+	// A picture of the SDK's size is drained whole, and the connection kept.
+	if code := h.putRefused(t, uploads[3], 2<<20); code != http.StatusTooManyRequests {
+		t.Errorf("the fourth PUT of 2 MB at the cap = %d, want 429", code)
+	}
+	// The null answer for a trace not here would be a pending ref too.
+	held, _, heldHash := pictureOf(70)
+	rec = h.call(t, "POST", "/api/public/media", mustJSON(t, map[string]any{
+		"traceId": trace32(22), "contentType": "image/png", "contentLength": len(held),
+		"sha256Hash": heldHash, "field": "input",
+	}))
+	expectError(t, rec, http.StatusTooManyRequests, "waiting for their traces")
+	// The SDK's retry of an upload that was stored: its ref is there.
+	if code := h.langfusePut(t, uploads[0], held, heldHash); code != 200 {
+		t.Errorf("a repeated PUT at the cap = %d, want 200", code)
 	}
 
 	// A trace the project has settles its ref, so it is never refused.
