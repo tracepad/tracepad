@@ -440,3 +440,37 @@ func TestQueueClaimIsNotAGatedRead(t *testing.T) {
 		t.Fatal("the claim handed out nothing while the one read slot was held")
 	}
 }
+
+// A read that fails after the request's own write committed is `500`, never
+// the `503` that asks for a retry: retrying an account's creation would be a
+// conflict, and its one invitation link would be lost (spec 043 #28). The
+// same failure on a plain read is the condition's `503`.
+func TestAReadAfterACommittedWriteIsNotRetried(t *testing.T) {
+	h := newAccountHarness(t)
+	owner := h.owner(t)
+	previous := membershipsOf
+	membershipsOf = func(*store.Store, context.Context, string) ([]store.Membership, error) {
+		return nil, fmt.Errorf("read memberships: %w", codedError{5}) // SQLITE_BUSY
+	}
+	t.Cleanup(func() { membershipsOf = previous })
+
+	rec := h.call(t, "POST", "/api/v1/accounts", mustJSON(t, map[string]any{
+		"email": "helper@example.com",
+	}), asSession(owner))
+	expectStatus(t, rec, http.StatusInternalServerError)
+	if got := rec.Header().Get("Retry-After"); got != "" {
+		t.Errorf("Retry-After = %q after a committed write; a retry would repeat it", got)
+	}
+	rec = h.call(t, "GET", "/api/v1/accounts/"+owner.account.ID, nil, asSession(owner))
+	expectError(t, rec, http.StatusServiceUnavailable, "storage is temporarily unavailable")
+}
+
+// The read deadline's ceiling is under the time a response has to be written,
+// or the transport would cut a read before the deadline could answer it
+// (spec 043 #28).
+func TestReadTimeoutCeilingIsUnderTheWriteTimeout(t *testing.T) {
+	if config.MaxReadTimeout >= writeTimeout {
+		t.Errorf("TRACEPAD_READ_TIMEOUT may reach %s, but a response has %s to be written",
+			config.MaxReadTimeout, writeTimeout)
+	}
+}

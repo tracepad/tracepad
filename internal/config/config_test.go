@@ -220,6 +220,18 @@ func TestReadBounds(t *testing.T) {
 			}
 		})
 	}
+	// Past the five minutes a response has to be written, the transport
+	// would cut the connection before the deadline could answer.
+	t.Setenv("TRACEPAD_READ_TIMEOUT", "4m")
+	if _, err := Load(nil); err != nil {
+		t.Errorf("4m, the ceiling, refused: %v", err)
+	}
+	t.Setenv("TRACEPAD_READ_TIMEOUT", "5m")
+	if _, err := Load(nil); err == nil || !strings.Contains(err.Error(), "TRACEPAD_READ_TIMEOUT") {
+		t.Errorf("Load = %v, want a refusal of a deadline the transport would cut", err)
+	}
+	t.Setenv("TRACEPAD_READ_TIMEOUT", "")
+
 	for name, value := range map[string]string{
 		"TRACEPAD_READ_TIMEOUT":     "twenty seconds",
 		"TRACEPAD_READ_CONCURRENCY": "many",

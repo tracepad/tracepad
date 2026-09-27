@@ -49,7 +49,7 @@ func (s *Server) handleListAccounts(w http.ResponseWriter, r *http.Request) {
 	}
 	rendered := make([]object, 0, len(accounts))
 	for _, account := range accounts {
-		body, ok := s.fullAccount(w, r, account)
+		body, ok := s.fullAccount(w, r, account, false)
 		if !ok {
 			return
 		}
@@ -132,7 +132,7 @@ func (s *Server) handleCreateAccount(w http.ResponseWriter, r *http.Request) {
 	if !s.submit(w, r, create) {
 		return
 	}
-	body, ok := s.fullAccount(w, r, create.Account)
+	body, ok := s.fullAccount(w, r, create.Account, true)
 	if !ok {
 		return
 	}
@@ -156,7 +156,7 @@ func (s *Server) handleGetAccount(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	body, ok := s.fullAccount(w, r, account)
+	body, ok := s.fullAccount(w, r, account, false)
 	if !ok {
 		return
 	}
@@ -208,7 +208,7 @@ func (s *Server) handlePatchAccount(w http.ResponseWriter, r *http.Request) {
 	if !s.submit(w, r, update) {
 		return
 	}
-	body, ok := s.fullAccount(w, r, update.Account)
+	body, ok := s.fullAccount(w, r, update.Account, true)
 	if !ok {
 		return
 	}
@@ -266,7 +266,7 @@ func (s *Server) handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
 				put("scopes", one.Key.Scopes).
 				put("last_used_at", lastUsed(one.Key, unwritten)))
 		}
-		body, ok := s.fullAccount(w, r, account)
+		body, ok := s.fullAccount(w, r, account, false)
 		if !ok {
 			return
 		}
@@ -449,15 +449,29 @@ func (s *Server) account(w http.ResponseWriter, r *http.Request) (*store.Account
 	return account, true
 }
 
+// membershipsOf is the store's, a seam for the test that fails it after a
+// committed write.
+var membershipsOf = (*store.Store).Memberships
+
 // fullAccount is an owner's view of somebody: the standing fields the person
 // themselves has no use for, and the memberships.
 //
 // `pending` is derived rather than stored — it is "has no password yet" — so
 // that there is one fact about an account and not two that can disagree.
-func (s *Server) fullAccount(w http.ResponseWriter, r *http.Request, a *store.Account) (object, bool) {
-	memberships, err := s.store.Memberships(r.Context(), a.ID)
+//
+// written says the account was just written by this request: a read that
+// fails after that commit is answered `500`, never the `503` that asks for a
+// retry, because the retry would repeat a write that is already done — an
+// invitation minted twice, or refused as a conflict with its link lost
+// (spec 043 #28).
+func (s *Server) fullAccount(w http.ResponseWriter, r *http.Request, a *store.Account, written bool) (object, bool) {
+	memberships, err := membershipsOf(s.store, r.Context(), a.ID)
 	if err != nil {
-		readFailed(w, r, "failed to read the memberships", err)
+		if written {
+			readAfterWriteFailed(w, r, "failed to read the memberships", err)
+		} else {
+			readFailed(w, r, "failed to read the memberships", err)
+		}
 		return nil, false
 	}
 	var lastLogin any

@@ -231,8 +231,9 @@ func (s *Store) runScoreStats(ctx context.Context, projectID, runID string) ([]R
 	defer rows.Close()
 
 	var (
-		stats  []RunScoreStat
-		byName = map[string]int{}
+		stats       []RunScoreStat
+		byName      = map[string]int{}
+		categorical []int
 	)
 	for rows.Next() {
 		var (
@@ -264,15 +265,21 @@ func (s *Store) runScoreStats(ctx context.Context, projectID, runID string) ([]R
 				stat.Mean, stat.Min, stat.Max = &mean.Float64, &low.Float64, &high.Float64
 			}
 		case ScoreCategorical:
-			distribution, err := s.scoreDistribution(ctx, projectID, runID, name)
-			if err != nil {
-				return nil, err
-			}
-			stat.Distribution = distribution
+			// Counted once the aggregate is read, so the read holds one
+			// statement at a time (spec 043 #28).
+			categorical = append(categorical, index)
 		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
+	}
+	rows.Close()
+	for _, index := range categorical {
+		distribution, err := s.scoreDistribution(ctx, projectID, runID, stats[index].Name)
+		if err != nil {
+			return nil, err
+		}
+		stats[index].Distribution = distribution
 	}
 	if err := s.attachScoreConfigs(ctx, projectID, stats); err != nil {
 		return nil, err

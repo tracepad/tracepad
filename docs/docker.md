@@ -274,14 +274,15 @@ refuses to start.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `TRACEPAD_READ_TIMEOUT` | `20s` | The deadline of one read, its wait for a slot included. A read it stops is `503` "narrow the time range or the filters". At least `1s`. |
+| `TRACEPAD_READ_TIMEOUT` | `20s` | The deadline of one read, its wait for a slot included. A read it stops is `503` "narrow the time range or the filters". From `1s` to `4m`: the server gives a response five minutes to be written, and the deadline's answer has to come first. |
 | `TRACEPAD_READ_CONCURRENCY` | twice the processors, at least `4` | Reads served at once; one that finds no slot before its deadline is `503` "busy" with `Retry-After`. At least `1`. |
 
 Reads are CPU-bound, so more of them at once than there are cores only makes
 each slower and holds more memory. The processors are the container's: with a
 CPU limit (`--cpus 2`), Go counts the limit, not the host. The database pool
-opens at most twice the slots plus eight connections — the writer, background
-jobs, credential checks and ingest take no slot and have that headroom. Keep a
+opens at most two connections for each slot and for the system endpoint's own
+one, one for the writer, and eight more — background jobs, credential checks
+and ingest take no slot and have that headroom. Keep a
 proxy's read timeout (`proxy_read_timeout` in nginx, 60 s by default) above
 `TRACEPAD_READ_TIMEOUT`, so the server's reason reaches the client rather than
 the proxy's. [`GET /api/v1/system`](api.md#system) shows the slots in use and

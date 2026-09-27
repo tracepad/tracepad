@@ -131,12 +131,16 @@ const (
 // Read bounds (spec 043 #15, #16, #22). The deadline answers before the
 // interface's own 30-second clock gives up, so a person sees the server's
 // reason rather than a network error; its floor is a second, below which an
-// ordinary listing of a busy project would be refused. Reads are CPU-bound, so
+// ordinary listing of a busy project would be refused. Its ceiling is
+// under the five minutes the server gives a response to be written
+// (spec 001 #15): past that the transport drops the connection, and the
+// deadline's answer would never arrive (spec 043 #28). Reads are CPU-bound, so
 // the default concurrency is twice the processors, and at least four so that
 // a dashboard's burst of questions on a small machine is served together.
 const (
 	DefaultReadTimeout    = 20 * time.Second
 	MinReadTimeout        = time.Second
+	MaxReadTimeout        = 4 * time.Minute
 	MinReadConcurrency    = 1
 	minDefaultConcurrency = 4
 )
@@ -192,8 +196,9 @@ func Load(args []string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	if readTimeout < MinReadTimeout {
-		return nil, fmt.Errorf("TRACEPAD_READ_TIMEOUT: want at least %s, got %s", MinReadTimeout, readTimeout)
+	if readTimeout < MinReadTimeout || readTimeout > MaxReadTimeout {
+		return nil, fmt.Errorf("TRACEPAD_READ_TIMEOUT: want between %s and %s, got %s",
+			MinReadTimeout, MaxReadTimeout, readTimeout)
 	}
 	readConcurrency, err := parseCount("TRACEPAD_READ_CONCURRENCY", DefaultReadConcurrency(runtime.GOMAXPROCS(0)))
 	if err != nil {

@@ -366,6 +366,18 @@ func answerFailedRead(w http.ResponseWriter, r *http.Request, line, message stri
 	writeError(w, http.StatusInternalServerError, message)
 }
 
+// readAfterWriteFailed answers a read that failed after this request's write
+// committed: `500`, logged, whatever the cause — a `503` with `Retry-After`
+// would ask the client to repeat a write that is already done (spec 043 #28).
+// A client that hung up is answered by nobody.
+func readAfterWriteFailed(w http.ResponseWriter, r *http.Request, message string, err error) {
+	if hungUp(r) {
+		return
+	}
+	slog.Error(message+" after the write committed", "err", err)
+	writeError(w, http.StatusInternalServerError, message)
+}
+
 // logLookupFailure logs a lookup that failed. One that failed for a reason
 // shared by every request until it passes — a lock held past the busy
 // timeout, a full disk, a deadline — is logged once a minute per reason, as

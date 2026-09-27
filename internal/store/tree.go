@@ -12,6 +12,14 @@ import (
 // than this. A constant, not a setting: it shapes the answer a client parses.
 const MaxTreeObservations = 10_000
 
+// treeQuery is the tree's read: a seek on idx_observations_trace, whose order
+// is the tree's (migration 0027).
+const treeQuery = `SELECT ` + observationColumns + `
+		 ` + observationFrom + `
+		 WHERE o.project_id = ? AND o.trace_id = ?
+		 ORDER BY o.start_time, o.id
+		 LIMIT ?`
+
 // TreeObservations reads a trace's observations for its tree: in (start_time,
 // id) order, at most limit of them, without their payloads, each handed to
 // keep as it is scanned. The read stops at the first row keep refuses, so a
@@ -19,12 +27,7 @@ const MaxTreeObservations = 10_000
 // carries the references its payloads are read by (PayloadReader).
 func (s *Store) TreeObservations(ctx context.Context, projectID, traceID string, limit int,
 	keep func(*ObservationRow) bool) error {
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT `+observationColumns+`
-		 `+observationFrom+`
-		 WHERE o.project_id = ? AND o.trace_id = ?
-		 ORDER BY o.start_time, o.id
-		 LIMIT ?`, projectID, traceID, limit)
+	rows, err := s.db.QueryContext(ctx, treeQuery, projectID, traceID, limit)
 	if err != nil {
 		return fmt.Errorf("read observations of %s: %w", traceID, err)
 	}
