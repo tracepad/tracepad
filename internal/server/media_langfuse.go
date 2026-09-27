@@ -73,7 +73,9 @@ func (s *Server) signUpload(grant uploadGrant) (string, error) {
 		base64.RawURLEncoding.EncodeToString(mac.Sum(nil)), nil
 }
 
-var errBadUploadToken = errors.New("this upload URL is not valid; ask for a new one")
+// errBadUploadToken is the channel's one answer to a URL it will not take,
+// whether the token or the stored state refuses it.
+var errBadUploadToken error = store.ErrUploadVoid
 
 // verifyUpload opens a token this server signed; any other is refused.
 func (s *Server) verifyUpload(token string) (*uploadGrant, error) {
@@ -119,9 +121,10 @@ func (g *uploadGrant) refusal(mediaID string, now time.Time) error {
 // handleLangfuseMediaUpload answers the SDK's request for an upload URL.
 //
 // `uploadUrl` is `null` only when this project already holds the body, and
-// nothing is sent. The ref is written then for a trace the project has; for
-// one not here yet it is not, and the trace's spans resolve the SDK's string
-// when they come (Decision 30). A body another project holds is still asked
+// nothing is sent. The ref is written then: settled for a trace the project
+// has, and pending for one not here yet, dated as the bytes are rather than
+// as the ask, which keeps the body until the trace's spans come (Decision 30)
+// — and counts toward the cap, so the null answer too can be a `429`. A body another project holds is still asked
 // for, because skipping the upload on a hash alone would let any project
 // adopt another's picture by naming it — the bytes are the proof of
 // possession.
@@ -193,8 +196,7 @@ func (s *Server) handleLangfuseMediaUpload(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if held != nil {
-		ref := &store.MediaRefAdd{ProjectID: project.ID, SHA256: sha, TraceID: request.TraceID,
-			PendingCap: s.store.MaxPendingMediaRefsOf()}
+		ref := &store.MediaRefAdd{ProjectID: project.ID, SHA256: sha, TraceID: request.TraceID}
 		if !s.submit(w, r, ref) {
 			return
 		}
@@ -205,23 +207,25 @@ func (s *Server) handleLangfuseMediaUpload(w http.ResponseWriter, r *http.Reques
 		// Collected between the read and the write: ask for the bytes.
 	}
 
+	// The generation is the project's as the URL is signed, not as the
+	// guard read it: a deletion in between must not void a URL nobody had
+	// yet (Decision 29). Only the cap refuses here — at it, for a trace the
+	// project does not have, there is no room (Decision 31); the guard has
+	// settled the project and the key.
+	beforeUploadRoom()
+	generation, err := s.store.MediaUploadRoom(r.Context(), project.ID, sha, request.TraceID)
+	if err != nil {
+		submitFailure(w, err, apiWrite)
+		return
+	}
 	// The route admits a project key and nothing else (the `ingest`
-	// policy), and the grant names it. The generation is the one the
-	// project was read in: a deletion since voids the URL, never the other
-	// way round.
-	grant := uploadGrant{
+	// policy), and the grant names it.
+	token, err := s.signUpload(uploadGrant{
 		Project: project.ID, Trace: request.TraceID, SHA256: sha,
 		MimeType: request.ContentType, Length: request.ContentLength,
 		Expires: time.Now().Add(mediaUploadWindow).Unix(),
-		Key:     callerFrom(r.Context()).key.PublicKey, Generation: project.MediaGeneration,
-	}
-	// A URL whose upload would be refused is not issued: at the cap, for a
-	// trace the project does not have, there is no room (Decision 31).
-	if _, refusal := s.store.MediaGrantRefusal(grant.storeGrant()); refusal != nil {
-		submitFailure(w, refusal, apiWrite)
-		return
-	}
-	token, err := s.signUpload(grant)
+		Key:     callerFrom(r.Context()).key.PublicKey, Generation: generation,
+	})
 	if err != nil {
 		slog.Error("could not sign an upload URL", "err", err)
 		writeError(w, http.StatusInternalServerError, "failed to issue an upload URL")
@@ -263,7 +267,7 @@ func (s *Server) handleLangfuseMediaPut(w http.ResponseWriter, r *http.Request) 
 	// still one of its keys (Decision 28), no trace deletion or erasure came
 	// since (Decision 29), and a ref that would be pending has room
 	// (Decision 31). The write asks all of it again.
-	media, refusal := s.store.MediaGrantRefusal(grant.storeGrant())
+	media, refusal := s.store.MediaGrantRefusal(r.Context(), grant.storeGrant())
 	if refusal != nil {
 		drainRefused(w, r)
 		submitFailure(w, refusal, apiWrite)
@@ -299,9 +303,8 @@ func (s *Server) handleLangfuseMediaPut(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	job := &store.MediaUpload{
-		Grant:      grant.storeGrant(),
-		Body:       store.MediaBody{SHA256: grant.SHA256, MimeType: grant.MimeType, Body: body},
-		PendingCap: s.store.MaxPendingMediaRefsOf(),
+		Grant: grant.storeGrant(),
+		Body:  store.MediaBody{SHA256: grant.SHA256, MimeType: grant.MimeType, Body: body},
 	}
 	if !s.submit(w, r, job) {
 		return
@@ -320,8 +323,18 @@ const (
 	uploadDrainTime = 10 * time.Second
 )
 
-// drainRefused reads and drops the body of an upload about to be refused.
+// beforeUploadRoom is a seam for the test that lands a deletion between the
+// guard and the POST's signing.
+var beforeUploadRoom = func() {}
+
+// drainRefused reads and drops the body of an upload about to be refused. A
+// client that sent `Expect: 100-continue` is waiting to be told to send it,
+// and a refusal before the body is exactly what the header asks for: nothing
+// is read, and the server answers without the `100`.
 func drainRefused(w http.ResponseWriter, r *http.Request) {
+	if strings.EqualFold(r.Header.Get("Expect"), "100-continue") {
+		return
+	}
 	// A recorder in a test cannot take a deadline; the drain's bound is
 	// then its length alone.
 	_ = http.NewResponseController(w).SetReadDeadline(time.Now().Add(uploadDrainTime))

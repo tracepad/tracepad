@@ -7,6 +7,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tracepad/tracepad/internal/model"
 )
@@ -332,7 +333,10 @@ func TestMediaRefAdd(t *testing.T) {
 	f.arriveWithMedia(t, f.project.ID, hexTrace(2), daysAgo(1), body, false)
 	delivered := f.count(t, `SELECT MAX(created_at) FROM media_refs WHERE sha256 = ?`, body.SHA256)
 
-	add = &MediaRefAdd{ProjectID: f.project.ID, SHA256: body.SHA256, TraceID: hexTrace(1)}
+	// Half a day after the delivery: well inside the grace, so the date is
+	// the delivery's.
+	add = &MediaRefAdd{ProjectID: f.project.ID, SHA256: body.SHA256, TraceID: hexTrace(1),
+		Now: daysAgo(1) + int64(12*time.Hour)}
 	if err := f.writer.Submit(t.Context(), add); err != nil || !add.Held {
 		t.Fatalf("the null answer for a trace not here = %v, %v", add.Held, err)
 	}

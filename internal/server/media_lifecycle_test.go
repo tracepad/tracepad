@@ -2,9 +2,11 @@ package server
 
 import (
 	"crypto/sha256"
+	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -60,6 +62,38 @@ func (h *harness) putRefused(t *testing.T, upload string, size int64) int {
 	return rec.Code
 }
 
+// sqlOf opens the harness's database beside its store, for what a test reads
+// or seeds that no exported call does.
+func (h *harness) sqlOf(t *testing.T) *sql.DB {
+	t.Helper()
+	db, err := sql.Open("sqlite", "file:"+h.dbPath+"?_pragma=busy_timeout(5000)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	return db
+}
+
+// generation is the project's upload generation.
+func (h *harness) generation(t *testing.T) int64 {
+	t.Helper()
+	var g int64
+	if err := h.sqlOf(t).QueryRow(`SELECT media_generation FROM projects WHERE id = ?`, h.project.ID).Scan(&g); err != nil {
+		t.Fatal(err)
+	}
+	return g
+}
+
+// refStates counts one trace's media refs: pending, and settled.
+func (h *harness) refStates(t *testing.T, trace string) (pending, settled int) {
+	t.Helper()
+	if err := h.sqlOf(t).QueryRow(`SELECT COALESCE(SUM(pending), 0), COALESCE(SUM(1 - pending), 0)
+	   FROM media_refs WHERE project_id = ? AND trace_id = ?`, h.project.ID, trace).Scan(&pending, &settled); err != nil {
+		t.Fatal(err)
+	}
+	return pending, settled
+}
+
 // pictureOf is a picture with its hex and base64 SHA-256.
 func pictureOf(seed byte) (picture []byte, sha, hash string) {
 	picture = testPicture(20000, seed)
@@ -97,6 +131,20 @@ func TestLangfuseMediaUploadDiesWithItsKey(t *testing.T) {
 	}
 	if h.mediaHeld(t, sha) {
 		t.Fatal("the revoked key's URL stored its body")
+	}
+	// A client that waits for 100 Continue is refused without it, having
+	// sent nothing: the refusal is what the header asks for.
+	parsed, err := url.Parse(*theirs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waiting := &countingReader{}
+	req := httptest.NewRequest("PUT", parsed.RequestURI(), waiting)
+	req.Header.Set("Expect", "100-continue")
+	rec = httptest.NewRecorder()
+	h.server.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden || waiting.read != 0 {
+		t.Errorf("an Expect: 100-continue PUT = %d after reading %d bytes, want 403 and none", rec.Code, waiting.read)
 	}
 	if code := h.langfusePut(t, *ours, picture, hash); code != 200 {
 		t.Errorf("the live key's URL = %d, want 200", code)
@@ -188,14 +236,7 @@ func TestLangfuseMediaNullAnswerThenSpans(t *testing.T) {
 	if code := h.langfusePut(t, *upload, picture, hash); code != 200 {
 		t.Fatalf("the first upload = %d", code)
 	}
-	refs := func(trace string) (pending, settled int) {
-		t.Helper()
-		pending, settled, err := h.store.MediaRefStates(h.project.ID, trace)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return pending, settled
-	}
+	refs := func(trace string) (pending, settled int) { return h.refStates(t, trace) }
 
 	mediaID, again := h.langfuseAsk(t, picture, probeTrace, testSecret)
 	if again != nil {
@@ -225,7 +266,6 @@ func TestLangfuseMediaNullAnswerThenSpans(t *testing.T) {
 // PUT that was stored, and once a trace arrives there is room again (#31).
 func TestLangfuseMediaPendingCap(t *testing.T) {
 	h := newHarness(t, nil, store.WriterOptions{})
-	h.store.SetMaxPendingMediaRefs(3)
 
 	// The first for the trace the test's span will carry, so that its
 	// arrival settles that ref.
@@ -244,6 +284,24 @@ func TestLangfuseMediaPendingCap(t *testing.T) {
 		if code := h.langfusePut(t, uploads[i], picture, hash); code != 200 {
 			t.Fatalf("upload %d = %d", i, code)
 		}
+	}
+	// The cap, less the three: refs of the first picture for traces that
+	// have not come.
+	_, filler, _ := pictureOf(70)
+	db := h.sqlOf(t)
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range store.MaxPendingMediaRefs - 3 {
+		if _, err := tx.Exec(`INSERT INTO media_refs (sha256, project_id, trace_id, created_at, pending)
+		                       VALUES (?, ?, ?, ?, 1)`, filler, h.project.ID, fmt.Sprintf("%032x", 1<<20+i),
+			time.Now().UnixNano()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
 	}
 
 	picture, _, _ := pictureOf(80)
@@ -291,5 +349,74 @@ func TestLangfuseMediaPendingCap(t *testing.T) {
 	fourth, _, hash := pictureOf(73)
 	if code := h.langfusePut(t, uploads[3], fourth, hash); code != 200 {
 		t.Errorf("the fourth PUT once there is room = %d, want 200", code)
+	}
+}
+
+// TestLangfuseMediaDeletionInRounds: a deletion over three hours runs three
+// chunks and starts two upload generations, not three — one with its first
+// chunk, voiding the URLs from before it, and one at its end, voiding those
+// issued while it ran — and so does an erasure over three hours (#29).
+func TestLangfuseMediaDeletionInRounds(t *testing.T) {
+	for _, how := range []string{"delete", "erase"} {
+		t.Run(how, func(t *testing.T) {
+			h := newAdminHarness(t)
+			for i := range 3 {
+				start := seedBase + int64(i)*3600*1000*ms
+				h.seed(t, &model.Trace{ID: trace32(40 + i), UserID: "u1"},
+					&model.Observation{TraceID: trace32(40 + i), ID: fmt.Sprintf("%016x", 40+i), Type: model.TypeSpan,
+						Level: model.LevelDefault, StartTime: start, EndTime: start + ms})
+			}
+			picture, _, hash := pictureOf(90)
+			_, before := h.langfuseAsk(t, picture, trace32(50), testSecret)
+			switch how {
+			case "delete":
+				to := url.QueryEscape(formatTime(seedBase + 4*3600*1000*ms))
+				rec := h.call(t, "DELETE", "/api/v1/traces?to="+to+"&confirm="+url.QueryEscape(h.project.Name), nil)
+				expectStatus(t, rec, 200)
+				if got := decodeJSON[deleteAnswer](t, rec); got.Deleted["traces"] != 3 {
+					t.Fatalf("deleted = %+v, want three traces", got)
+				}
+			case "erase":
+				expectStatus(t, h.call(t, "DELETE",
+					"/api/v1/projects/"+h.project.ID+"/users/u1/data?confirm=u1", nil), 200)
+			}
+			if got := h.generation(t); got != 2 {
+				t.Errorf("the generation after three chunks = %d, want 2", got)
+			}
+			if code := h.putRefused(t, *before, -1); code != http.StatusForbidden {
+				t.Errorf("a URL from before the %s = %d, want 403", how, code)
+			}
+			_, after := h.langfuseAsk(t, picture, trace32(50), testSecret)
+			if code := h.langfusePut(t, *after, picture, hash); code != 200 {
+				t.Errorf("a URL asked for after the %s = %d, want 200", how, code)
+			}
+		})
+	}
+}
+
+// TestLangfuseMediaAskAcrossADeletion: a deletion that commits between the
+// guard reading the project and the ask signing its URL neither refuses the
+// ask nor voids the URL it hands out — nobody had it yet (#29).
+func TestLangfuseMediaAskAcrossADeletion(t *testing.T) {
+	h := newAdminHarness(t)
+	h.seed(t, &model.Trace{ID: trace32(60)},
+		&model.Observation{TraceID: trace32(60), ID: fmt.Sprintf("%016x", 60), Type: model.TypeSpan,
+			Level: model.LevelDefault, StartTime: seedBase, EndTime: seedBase + ms})
+	was := beforeUploadRoom
+	t.Cleanup(func() { beforeUploadRoom = was })
+	beforeUploadRoom = func() {
+		beforeUploadRoom = func() {}
+		expectStatus(t, h.call(t, "DELETE", "/api/v1/traces/"+trace32(60)+"?confirm="+trace32(60), nil), 200)
+	}
+	picture, _, hash := pictureOf(91)
+	_, upload := h.langfuseAsk(t, picture, trace32(61), testSecret)
+	if upload == nil {
+		t.Fatal("the ask across a deletion got no URL")
+	}
+	if h.generation(t) != 1 {
+		t.Fatalf("the deletion did not start a generation")
+	}
+	if code := h.langfusePut(t, *upload, picture, hash); code != 200 {
+		t.Errorf("the URL signed after the deletion = %d, want 200", code)
 	}
 }

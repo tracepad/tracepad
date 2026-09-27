@@ -72,7 +72,7 @@ export interface paths {
         put?: never;
         /**
          * Langfuse SDK: an upload URL for one media body, or null when it is already stored
-         * @description The first call of the Langfuse SDK's media channel. `mediaId` is the SDK's own derivation — the first 22 characters of the URL-safe base64 SHA-256 — which the SDK checks. `uploadUrl` is null when this project already holds the body, in which case nothing is sent and the named trace's ref is recorded if the project has the trace — otherwise its spans record it when they arrive; a body only another project holds is still asked for, because the bytes are the proof of possession. Under the `placeholder` setting `uploadUrl` is always null and nothing is kept. The body is read leniently: fields a newer SDK adds are ignored.
+         * @description The first call of the Langfuse SDK's media channel. `mediaId` is the SDK's own derivation — the first 22 characters of the URL-safe base64 SHA-256 — which the SDK checks. `uploadUrl` is null when this project already holds the body, in which case nothing is sent and the named trace's ref is recorded: settled if the project has the trace, and otherwise pending, dated as the bytes rather than the ask, until the trace's spans arrive — so the null answer too counts toward the pending cap and can be a 429; a body only another project holds is still asked for, because the bytes are the proof of possession. Under the `placeholder` setting `uploadUrl` is always null and nothing is kept. The body is read leniently: fields a newer SDK adds are ignored.
          */
         post: operations["langfuseMediaUploadURL"];
         delete?: never;
@@ -2674,7 +2674,7 @@ export interface operations {
                 content?: never;
             };
             400: components["responses"]["BadRequest"];
-            /** @description The token is missing, forged, expired, or for another id; or the key that asked for it has been revoked, or the project has deleted or erased traces since it was issued. A missing or forged token is refused having read nothing; the others are decided before the body is read, which is then drained up to 8 MiB and dropped */
+            /** @description The token is missing, forged, expired, or for another id; or the key that asked for it has been revoked, or the project has deleted or erased traces since it was issued. A missing or forged token is refused having read nothing; the others are decided before the body is read, which is then drained up to 8 MiB and dropped, unless the client sent `Expect: 100-continue` */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -2692,7 +2692,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description The project has 10,000 uploads waiting for their traces and this one's trace has not arrived; `Retry-After: 60`. Not for the retry of an upload already stored. Decided before the body is read, which is then drained up to 8 MiB and dropped */
+            /** @description The project has 10,000 uploads waiting for their traces and this one's trace has not arrived; `Retry-After: 60`. Not for the retry of an upload already stored. Decided before the body is read, which is then drained up to 8 MiB and dropped, unless the client sent `Expect: 100-continue` */
             429: {
                 headers: {
                     [name: string]: unknown;

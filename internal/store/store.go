@@ -29,9 +29,6 @@ type Store struct {
 	// mediaUploadKey signs the Langfuse channel's upload URLs (spec 041,
 	// Decision 22), read — or minted — once at open.
 	mediaUploadKey []byte
-	// maxPendingMediaRefs is the cap on one project's pending refs (spec
-	// 041 #31): MaxPendingMediaRefs, lowered only by tests.
-	maxPendingMediaRefs int
 }
 
 // Open opens (creating if needed) the database at path and applies pending
@@ -89,7 +86,7 @@ func Open(path string) (*Store, error) {
 	// kept, a connection pays them once.
 	db.SetMaxIdleConns(idleConns())
 	db.SetConnMaxIdleTime(5 * time.Minute)
-	s := &Store{db: db, path: path, fresh: fresh, maxPendingMediaRefs: MaxPendingMediaRefs}
+	s := &Store{db: db, path: path, fresh: fresh}
 	// sql.Open is lazy: real open failures (corrupt file, permissions)
 	// surface from the first statement inside migrate, so the recovery
 	// hint naming the DB path and the newest backup belongs here.

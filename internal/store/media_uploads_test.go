@@ -25,6 +25,22 @@ func (f *sweepFixture) upload(traceID string, body MediaBody, generation int64) 
 	return job
 }
 
+// capPending lowers the pending-ref cap for one test.
+func capPending(t *testing.T, n int) {
+	t.Helper()
+	was := maxPendingMediaRefs
+	maxPendingMediaRefs = n
+	t.Cleanup(func() { maxPendingMediaRefs = was })
+}
+
+// MediaRefStates counts one trace's media refs by state: pending, until its
+// spans arrive, and settled.
+func (s *Store) MediaRefStates(projectID, traceID string) (pending, settled int, err error) {
+	err = s.db.QueryRow(`SELECT COALESCE(SUM(pending), 0), COALESCE(SUM(1 - pending), 0)
+	   FROM media_refs WHERE project_id = ? AND trace_id = ?`, projectID, traceID).Scan(&pending, &settled)
+	return pending, settled, err
+}
+
 func rejectedAs(err error, kind string) bool {
 	var rejection *Rejection
 	return errors.As(err, &rejection) && rejection.Kind == kind
@@ -148,9 +164,10 @@ func TestMediaNamingAHashDoesNotExtendIt(t *testing.T) {
 
 // TestMediaNamingAHashDailyDoesNotExtendIt: X is uploaded once, for a trace
 // that never comes; its hash is named every day after for a new trace that
-// never comes either. Each null answer writes a pending ref, and every one of
-// them is as old as the upload, so the sweep a day past the upload collects X
-// though the last ask was an hour ago (#30).
+// never comes either. Each null answer writes a pending ref dated as the
+// upload, or an hour inside the grace when that is later — never as the ask —
+// so the sweep a day past the upload collects X though the last ask was two
+// hours ago (#30).
 func TestMediaNamingAHashDailyDoesNotExtendIt(t *testing.T) {
 	f := newSweepFixture(t)
 	x := mediaBody(43, 1300)
@@ -160,14 +177,15 @@ func TestMediaNamingAHashDailyDoesNotExtendIt(t *testing.T) {
 	if err := f.writer.Submit(t.Context(), job); err != nil {
 		t.Fatal(err)
 	}
-	for i, at := range []int64{daysAgo(3), daysAgo(2), daysAgo(1), sweepNow.Add(-time.Hour).UnixNano()} {
+	for i, at := range []int64{daysAgo(3), daysAgo(2), daysAgo(1), sweepNow.Add(-2 * time.Hour).UnixNano()} {
 		add := &MediaRefAdd{ProjectID: f.project.ID, SHA256: x.SHA256, TraceID: hexTrace(2 + i), Now: at}
 		if err := f.writer.Submit(t.Context(), add); err != nil || !add.Held {
 			t.Fatalf("ask %d = %v, %v", i, add.Held, err)
 		}
 		if got := f.count(t, `SELECT created_at FROM media_refs WHERE sha256 = ? AND trace_id = ? AND pending = 1`,
-			x.SHA256, hexTrace(2+i)); got != t0 {
-			t.Fatalf("ask %d wrote a pending ref from %d, want the upload's %d", i, got, t0)
+			x.SHA256, hexTrace(2+i)); got != max(t0, at-int64(MediaOrphanGrace-time.Hour)) {
+			t.Fatalf("ask %d wrote a pending ref from %d, want the upload's %d or an hour inside the grace",
+				i, got, t0)
 		}
 	}
 	if _, err := f.sweeper.sweepOrphanMedia(t.Context(), sweepNow.UnixNano()); err != nil {
@@ -232,43 +250,34 @@ func TestMediaNullAnswerKeepsTheBody(t *testing.T) {
 // ref would be a new pending one is refused inside the write; one for a trace
 // the project has is not, because its ref is settled, and neither is one whose
 // ref is already there — the SDK's retry of an upload that was stored (#31).
-// A job that names no cap has the constant's.
 func TestMediaPendingCapInTheWrite(t *testing.T) {
 	f := newSweepFixture(t)
-	capped := func(job *MediaUpload) *MediaUpload {
-		job.PendingCap = 2
-		return job
-	}
+	capPending(t, 2)
 	first := mediaBody(50, 300)
 	for i, body := range []MediaBody{first, mediaBody(51, 300)} {
-		if err := f.writer.Submit(t.Context(), capped(f.upload(hexTrace(10+i), body, 0))); err != nil {
+		if err := f.writer.Submit(t.Context(), f.upload(hexTrace(10+i), body, 0)); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := pendingRoom(f.store.db, f.project.ID, 2); !rejectedAs(err, RejectFull) {
+	if err := pendingRoom(f.store.db, f.project.ID); !rejectedAs(err, RejectFull) {
 		t.Fatalf("pendingRoom at the cap = %v", err)
 	}
-	if err := f.writer.Submit(t.Context(), capped(f.upload(hexTrace(12), mediaBody(52, 300), 0))); !rejectedAs(err, RejectFull) {
+	if err := f.writer.Submit(t.Context(), f.upload(hexTrace(12), mediaBody(52, 300), 0)); !rejectedAs(err, RejectFull) {
 		t.Fatalf("a third pending upload = %v, want a full rejection", err)
 	}
-	add := &MediaRefAdd{ProjectID: f.project.ID, SHA256: first.SHA256, TraceID: hexTrace(12), PendingCap: 2}
+	add := &MediaRefAdd{ProjectID: f.project.ID, SHA256: first.SHA256, TraceID: hexTrace(12)}
 	if err := f.writer.Submit(t.Context(), add); !rejectedAs(err, RejectFull) {
 		t.Fatalf("a null answer for a third pending ref = %v, want a full rejection", err)
 	}
 
 	// The retry of the first upload, whose ref is there.
-	if err := f.writer.Submit(t.Context(), capped(f.upload(hexTrace(10), first, 0))); err != nil {
+	if err := f.writer.Submit(t.Context(), f.upload(hexTrace(10), first, 0)); err != nil {
 		t.Fatalf("a repeated upload at the cap = %v", err)
 	}
 	f.arrive(t, f.project.ID, hexTrace(13), daysAgo(1))
-	if err := f.writer.Submit(t.Context(), capped(f.upload(hexTrace(13), mediaBody(53, 300), 0))); err != nil {
+	if err := f.writer.Submit(t.Context(), f.upload(hexTrace(13), mediaBody(53, 300), 0)); err != nil {
 		t.Fatalf("an upload for a stored trace at the cap = %v", err)
 	}
-	// No cap named: ten thousand, far off.
-	if err := f.writer.Submit(t.Context(), f.upload(hexTrace(14), mediaBody(54, 300), 0)); err != nil {
-		t.Fatalf("an upload with the default cap = %v", err)
-	}
-
 	var plan string
 	var id, parent, notused int
 	if err := f.store.db.QueryRow(`EXPLAIN QUERY PLAN SELECT 1 FROM media_refs
@@ -277,5 +286,80 @@ func TestMediaPendingCapInTheWrite(t *testing.T) {
 	}
 	if !strings.Contains(plan, "idx_media_refs_project_pending") {
 		t.Errorf("the cap's count is %q, want a seek on idx_media_refs_project_pending", plan)
+	}
+}
+
+// TestMediaNullAnswerHoldsAnHour: the project has held X for three days, far
+// past the grace, when it asks for X for trace B, not here yet, and is
+// answered without an upload. Dated as the bytes, B's ref would be past the
+// grace already and the next sweep would drop it — with X, once the trace
+// that held it is gone — before B's spans came. It is dated an hour inside
+// the grace instead: X outlives a sweep half an hour on and goes with one an
+// hour on (#30).
+func TestMediaNullAnswerHoldsAnHour(t *testing.T) {
+	f := newSweepFixture(t)
+	x := mediaBody(45, 1500)
+	f.arriveWithMedia(t, f.project.ID, hexTrace(1), daysAgo(3), x, false)
+	add := &MediaRefAdd{ProjectID: f.project.ID, SHA256: x.SHA256, TraceID: hexTrace(2), Now: sweepNow.UnixNano()}
+	if err := f.writer.Submit(t.Context(), add); err != nil || !add.Held {
+		t.Fatalf("the null answer = %v, %v", add.Held, err)
+	}
+	if err := f.writer.Submit(t.Context(), &TraceDelete{ProjectID: f.project.ID, IDs: []string{hexTrace(1)},
+		Confirm: hexTrace(1)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.sweeper.sweepOrphanMedia(t.Context(), sweepNow.Add(30*time.Minute).UnixNano()); err != nil {
+		t.Fatal(err)
+	}
+	if f.mediaRows(t) != 1 {
+		t.Fatal("a sweep half an hour after the null answer took the body B's spans were to claim")
+	}
+	if _, err := f.sweeper.sweepOrphanMedia(t.Context(), sweepNow.Add(61*time.Minute).UnixNano()); err != nil {
+		t.Fatal(err)
+	}
+	if f.mediaRows(t) != 0 {
+		t.Error("the null answer kept a body no trace claims past its hour")
+	}
+}
+
+// TestMediaDeletionChunksKeepTheGeneration: a chunk that keeps the generation
+// removes its traces and leaves it, and MediaGenerationStart starts one on its
+// own — the two ends of a request that runs many chunks (#29).
+func TestMediaDeletionChunksKeepTheGeneration(t *testing.T) {
+	f := newSweepFixture(t)
+	generation := func() int64 {
+		project, err := f.store.ProjectByID(t.Context(), f.project.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return project.MediaGeneration
+	}
+	for i := range 3 {
+		f.arrive(t, f.project.ID, hexTrace(20+i), daysAgo(1))
+	}
+	for i, keep := range []bool{false, true, true} {
+		job := &TraceDelete{ProjectID: f.project.ID, IDs: []string{hexTrace(20 + i)}, Confirm: f.project.Name,
+			ByFilter: true, KeepUploads: keep}
+		if err := f.writer.Submit(t.Context(), job); err != nil || job.Counts.Traces != 1 {
+			t.Fatalf("chunk %d = %d traces, %v", i, job.Counts.Traces, err)
+		}
+	}
+	if generation() != 1 {
+		t.Fatalf("the generation after three chunks, two kept = %d, want 1", generation())
+	}
+	if err := f.writer.Submit(t.Context(), &MediaGenerationStart{ProjectID: f.project.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if generation() != 2 {
+		t.Errorf("the generation after the closing start = %d, want 2", generation())
+	}
+
+	f.arrive(t, f.project.ID, hexTrace(30), daysAgo(1))
+	if err := f.writer.Submit(t.Context(), &UserDataErase{ProjectID: f.project.ID, UserID: "u1",
+		Confirm: "u1", Limit: 500, KeepUploads: true}); err != nil {
+		t.Fatal(err)
+	}
+	if generation() != 2 {
+		t.Errorf("an erasure chunk that keeps the generation moved it to %d", generation())
 	}
 }
