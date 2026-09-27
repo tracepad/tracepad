@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"flag"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -358,6 +359,81 @@ func TestReadBounds(t *testing.T) {
 	for name, value := range map[string]string{
 		"TRACEPAD_READ_TIMEOUT":     "twenty seconds",
 		"TRACEPAD_READ_CONCURRENCY": "many",
+	} {
+		t.Run(name+"="+value, func(t *testing.T) {
+			t.Setenv(name, value)
+			if _, err := Load(nil); err == nil {
+				t.Errorf("%s=%q must be refused, not defaulted", name, value)
+			}
+		})
+	}
+}
+
+// The two ingest bounds are validated at start (spec 043 #10, #13, #22): the
+// budget follows the body cap unless set, and a budget smaller than the cap —
+// one that would refuse a body the cap admits on an idle server — refuses to
+// start.
+func TestIngestBounds(t *testing.T) {
+	t.Setenv("TRACEPAD_MAX_SPANS_PER_REQUEST", "")
+	t.Setenv("TRACEPAD_BODY_BUDGET_BYTES", "")
+	t.Setenv("TRACEPAD_MAX_BODY_BYTES", "")
+
+	cfg, err := Load(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.MaxSpansPerRequest != 20000 {
+		t.Errorf("MaxSpansPerRequest = %d, want the documented 20000", cfg.MaxSpansPerRequest)
+	}
+	if cfg.BodyBudgetBytes != 80<<20 {
+		t.Errorf("BodyBudgetBytes = %d, want four times the 20 MiB cap", cfg.BodyBudgetBytes)
+	}
+
+	t.Setenv("TRACEPAD_MAX_BODY_BYTES", "1000000")
+	cfg, err = Load(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.BodyBudgetBytes != 4000000 {
+		t.Errorf("BodyBudgetBytes = %d under a 1 MB cap, want 4 MB", cfg.BodyBudgetBytes)
+	}
+
+	// Four of a cap this large would not fit an int64: the default holds at
+	// the largest one rather than wrapping negative.
+	t.Setenv("TRACEPAD_MAX_BODY_BYTES", "3000000000000000000")
+	cfg, err = Load(nil)
+	if err != nil {
+		t.Fatalf("an enormous cap with no budget set: %v", err)
+	}
+	if cfg.BodyBudgetBytes != math.MaxInt64 {
+		t.Errorf("BodyBudgetBytes = %d, want the largest int64", cfg.BodyBudgetBytes)
+	}
+	t.Setenv("TRACEPAD_MAX_BODY_BYTES", "1000000")
+
+	t.Setenv("TRACEPAD_MAX_SPANS_PER_REQUEST", "1")
+	t.Setenv("TRACEPAD_BODY_BUDGET_BYTES", "1000000")
+	cfg, err = Load(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.MaxSpansPerRequest != 1 || cfg.BodyBudgetBytes != 1000000 {
+		t.Errorf("ingest bounds = %d, %d; want the floors 1 and the cap", cfg.MaxSpansPerRequest, cfg.BodyBudgetBytes)
+	}
+
+	for name, value := range map[string]string{
+		"TRACEPAD_MAX_SPANS_PER_REQUEST": "0",
+		"TRACEPAD_BODY_BUDGET_BYTES":     "999999",
+	} {
+		t.Run(name+"="+value, func(t *testing.T) {
+			t.Setenv(name, value)
+			if _, err := Load(nil); err == nil || !strings.Contains(err.Error(), name) {
+				t.Errorf("Load = %v, want a refusal naming %s", err, name)
+			}
+		})
+	}
+	for name, value := range map[string]string{
+		"TRACEPAD_MAX_SPANS_PER_REQUEST": "lots",
+		"TRACEPAD_BODY_BUDGET_BYTES":     "80MiB",
 	} {
 		t.Run(name+"="+value, func(t *testing.T) {
 			t.Setenv(name, value)

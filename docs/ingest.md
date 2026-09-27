@@ -203,17 +203,89 @@ everywhere: none was sent, and Tracepad does not estimate one.
 | `400` | The body is not a decodable OTLP export. |
 | `401` | Unknown credentials. |
 | `403` | A key without the `ingest` scope ([Authentication](#authentication)). Exporters do not retry it. |
-| `413` | The body is over `TRACEPAD_MAX_BODY_BYTES` — on the wire, or once decompressed. |
+| `413` | The body is over `TRACEPAD_MAX_BODY_BYTES` — on the wire, or once decompressed — or the export carries more spans than `TRACEPAD_MAX_SPANS_PER_REQUEST`. See [How much one export may carry](#how-much-one-export-may-carry). |
 | `415` | `Content-Type` is neither `application/x-protobuf` nor `application/json`. |
-| `429` | The write queue is saturated; retry after the `Retry-After` delay. Standard OTLP exporters do this on their own. |
+| `429` | The write queue is saturated, or the server is holding as many request bodies as `TRACEPAD_BODY_BUDGET_BYTES` allows; retry after the `Retry-After` delay. Standard OTLP exporters do this on their own. |
 | `500` | The batch could not be stored for a reason of its own, which a retry would meet again; exporters do not retry it. No known client input leads here — one that does is a bug worth reporting. |
 | `503` | The database could not take the batch right now — a lock that did not clear, a full disk, an I/O error — or could not check the key. Carries `Retry-After: 1`, and exporters retry it. |
 
 A `200` means the spans are committed and fsynced, not merely queued.
 
+A failure after part of a large export has been written — a `503` answered
+between two of its slices ([below](#how-much-one-export-may-carry)) — leaves the
+part written visible until the retry rewrites it. A full write queue refuses an
+export before its first slice only; once it is admitted, its later slices wait
+for room. Ingest is an
+upsert by span id, so the retry converges on exactly the rows an uninterrupted
+export writes, and the raw body is stored once, by the attempt that succeeds.
+A `500` between two slices is not retried: the part written stays, without
+the raw body, which travels with the last slice.
+
 A span that cannot be mapped — a missing or malformed trace/span id — is
 skipped and counted in `partial_success` rather than failing the whole export.
 Its bytes are still in the stored raw body, so nothing is lost.
+
+## How much one export may carry
+
+Three bounds keep one request from costing every other project its turn at
+the database and the server its memory:
+
+- **Spans per export: `TRACEPAD_MAX_SPANS_PER_REQUEST`, 20,000 by default.**
+  An export with more is `413` `this export carries N spans; the server takes
+  at most M per request (TRACEPAD_MAX_SPANS_PER_REQUEST)`, refused whole: no
+  span of it is stored and no raw body kept, so no trace ends up with an
+  arbitrary half of its spans. The OpenTelemetry SDKs' batch processors send
+  512 spans at most, and the Collector's `batch` processor 8,192 — but a
+  Collector with no `send_batch_max_size` can pass one incoming request through
+  whole, whatever its size, after a burst. An exporter treats `413` as final
+  and drops the batch, so bound the Collector's batches explicitly:
+
+  ```yaml
+  processors:
+    batch:
+      send_batch_size: 8192
+      send_batch_max_size: 8192   # never more than this in one export
+  ```
+
+  Batching in the exporter instead, as newer Collectors can, the same bound is
+  the OTLP/HTTP exporter's `sending_queue::batch::max_size` (counted in items,
+  which for traces are spans); its default of 0 means no maximum.
+- **Slices.** An export is written in slices of at most 1,000 rows — traces and
+  observations — one after another, and other projects' writes run between
+  them; a trace larger than a slice is spread across consecutive ones. The
+  `200` still comes after the last slice is on disk. What this changes is only
+  what a failure in the middle leaves behind (see [Responses](#responses)).
+- **Bodies in memory: `TRACEPAD_BODY_BUDGET_BYTES`, four times
+  `TRACEPAD_MAX_BODY_BYTES` by default (80 MiB).** Every request body the
+  server reads — exports, the JSON API, the Langfuse SDK's media uploads —
+  holds its bytes in this budget until the request is answered, its write
+  committed whether or not the client is still waiting. A body that declares
+  its length and is not compressed reserves that length whole before it is
+  read, so bodies arriving together are admitted whole or refused whole. A
+  gzip body — which the OpenTelemetry Collector sends by default — or a
+  chunked one declares nothing that bounds what it becomes, and reserves its
+  decompressed bytes as it is read, in steps of 64 KiB: several of those
+  arriving together can each hold part of the budget and all be refused, and
+  the exporters' retry backoff, with its jitter, is what spreads them out
+  again. If a Collector's exports keep meeting `429` while the server is not
+  short of memory, raise the budget. A request whose next
+  step does not fit is `429` `the server is holding as many request bodies as
+  it can; retry shortly`, with `Retry-After: 1`, which every OTLP exporter
+  retries; the rest of its body is then read and dropped, so the exporter reads
+  that answer rather than a closed connection. The budget counts body bytes, not the heap: while an export is
+  decoded, mapped and written, the heap it takes peaks at roughly 12 to 18
+  times its body for protobuf and 15 to 20 times for JSON — the high end for
+  many small spans, the low end for fewer spans with large payloads (measured
+  on a laptop with synthetic spans, garbage not yet collected included). So
+  the default 80 MiB budget, spent entirely on exports, can mean a gigabyte or
+  more of heap at the peak; size the budget against a container's memory limit
+  with that in mind. A budget smaller than the body cap refuses to start.
+
+`GET /api/v1/system` shows the budget binding — `body_budget` with
+`held_bytes` and `capacity_bytes` — and counts, per project, the exports
+refused for their spans (`counters.exports_over_span_cap`, also counted in
+`rejected_batches`) and the bodies refused for the budget
+(`counters.bodies_refused_for_budget`).
 
 ## What is kept, and for how long
 
@@ -312,6 +384,14 @@ Two consequences worth knowing:
   present only when the client sent one; otherwise the UI shows "no data",
   not `$0`. How to send one, for each way in, is
   [below](#where-the-price-comes-from).
+- **Labels are bounded.** The fields a listing shows — the trace's name,
+  user, session, environment, release and version, each tag, and an
+  observation's name and model — are cut at 1,000 characters, and a trace
+  keeps its first 50 distinct tags in the order they were sent; a repeated tag
+  is kept once. The raw body keeps every value as it was sent, and a replay
+  applies the same cut. A lookup by a label is cut the same way — a filter,
+  a user or session in the path, a user's erasure, a score's `session_id` —
+  so the whole value still finds its row.
 - **Exceptions count as errors.** OTel records a failure as a span *event*,
   not an attribute. Every event is kept under `metadata.events` with its
   attributes intact — stack traces included — and a span carrying an
@@ -502,9 +582,11 @@ price on the span at the source, where it is exact and needs no credential.
 |---|---|---|
 | `TRACEPAD_STORE_RAW` | `on` | Keep every accepted body (zstd) so mapping can be replayed later |
 | `TRACEPAD_MAX_BODY_BYTES` | `20971520` | Request body cap, gzip counted decompressed; over it the answer is `413` |
+| `TRACEPAD_MAX_SPANS_PER_REQUEST` | `20000` | Spans one export may carry; over it the answer is `413`. At least `1` |
+| `TRACEPAD_BODY_BUDGET_BYTES` | four times `TRACEPAD_MAX_BODY_BYTES` | Request bodies held in memory at once, counted decompressed; a body that does not fit is `429` with `Retry-After`. At least `TRACEPAD_MAX_BODY_BYTES` |
 
 An exporter treats `413` as final and drops the batch, so a batch over the
-cap is lost, not retried. The server logs each such refusal of a gzip body
+cap — in bytes or in spans — is lost, not retried. The server logs each such refusal of a gzip body
 (`WARN … expanded past TRACEPAD_MAX_BODY_BYTES after decompression`, at most
 one line a minute); if you see it, raise `TRACEPAD_MAX_BODY_BYTES` or make
 the exporter's batches smaller.

@@ -292,6 +292,35 @@ flag you appended to the command line, so a container started with `--listen
 docker run -d -e TRACEPAD_LISTEN=:8080 -p 8080:8080 … ghcr.io/tracepad/tracepad
 ```
 
+### Ingest under load
+
+Two settings size what one export may cost everything else. Neither needs
+tuning on a laptop or a small server; both are checked at start, and a value
+out of range refuses to start.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `TRACEPAD_MAX_SPANS_PER_REQUEST` | `20000` | Spans one export may carry; an export with more is `413`, refused whole. At least `1`. |
+| `TRACEPAD_BODY_BUDGET_BYTES` | four times `TRACEPAD_MAX_BODY_BYTES` (80 MiB — up to about 1.6 GiB of heap at the peak, see below) | Request bodies held in memory at once, counted decompressed; a body that does not fit is `429` with `Retry-After`, which exporters retry. At least `TRACEPAD_MAX_BODY_BYTES`. |
+
+The budget counts body bytes, not the heap: while an export is decoded,
+mapped and written, its heap peaks at roughly 12 to 18 times its body for
+protobuf and 15 to 20 times for JSON
+([ingest.md](ingest.md#how-much-one-export-may-carry)), so the default 80 MiB
+budget can mean a gigabyte or more at the peak. With a memory limit on the
+container (`--memory 1g`), keep the budget times about 20 under it — for 1 GiB,
+`TRACEPAD_BODY_BUDGET_BYTES=41943040` (40 MiB) with the body cap at its 20 MiB
+default, or lower both. **On a small machine, lower `TRACEPAD_BODY_BUDGET_BYTES`**:
+the default is sized for a host with memory to spare, and the budget is what
+bounds the heap ingest can take at once.
+
+An OpenTelemetry Collector in front of Tracepad should bound its batches, or
+one export after a burst can pass the span limit and be dropped as a `413`:
+set the `batch` processor's `send_batch_max_size` — see
+[ingest.md](ingest.md#how-much-one-export-may-carry).
+[`GET /api/v1/system`](api.md#system) shows the budget in use and how often
+each refusal happened.
+
 ### Reads under load
 
 Two settings size what reads may cost everything else. Neither needs tuning on

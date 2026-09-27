@@ -175,6 +175,9 @@ func (in *scoreRequest) validate(now int64) (*store.Score, error) {
 		Timestamp: now,
 	}
 
+	// The session's id as its traces store it (spec 043 #34).
+	score.SessionID = lookupLabel(score.SessionID)
+
 	// An empty string is never a meaningful id; reading it as "absent"
 	// would hide a client's bug rather than report it.
 	for _, target := range []struct {
@@ -309,7 +312,7 @@ func (s *Server) handleListScores(w http.ResponseWriter, r *http.Request) {
 	filter := store.ScoreFilter{
 		TraceID:       values.Get("trace_id"),
 		ObservationID: values.Get("observation_id"),
-		SessionID:     values.Get("session_id"),
+		SessionID:     lookupLabel(values.Get("session_id")),
 		Name:          values.Get("name"),
 		DataType:      values.Get("data_type"),
 		// One row beyond the page tells us whether there is a next one.

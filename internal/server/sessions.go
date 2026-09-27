@@ -117,7 +117,7 @@ func renderSessionRow(row *store.SessionRow) object {
 // half-open like everywhere else, so a session appears when any of its traces
 // falls inside it.
 func sessionFilter(values url.Values) (store.SessionFilter, error) {
-	filter := store.SessionFilter{UserID: values.Get("user_id")}
+	filter := store.SessionFilter{UserID: lookupLabel(values.Get("user_id"))}
 	environment, err := filterList(values, "environment")
 	if err != nil {
 		return filter, err
@@ -180,7 +180,7 @@ func (s *Server) handleGetSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	id := r.PathValue("id")
+	id := lookupLabel(r.PathValue("id"))
 	if id == "" {
 		writeError(w, http.StatusBadRequest, "session id must not be empty")
 		return

@@ -21,6 +21,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tracepad/tracepad/internal/mapping"
 	"github.com/tracepad/tracepad/internal/store"
 )
 
@@ -75,7 +76,7 @@ func (s *Server) submit(w http.ResponseWriter, r *http.Request, job store.WriteJ
 		writeError(w, http.StatusServiceUnavailable, "writes are not available")
 		return false
 	}
-	err := s.writer.Submit(r.Context(), job)
+	err := s.writer.Submit(writeContext(r), job)
 	if err == nil {
 		return true
 	}
@@ -197,14 +198,18 @@ func (s *Server) readAPIBody(w http.ResponseWriter, r *http.Request) ([]byte, bo
 	return body, s.bodyRead(w, r, err)
 }
 
-// bodyRead answers the client itself when reading the body failed: 413 for
-// the cap, 400 for anything else. A gzip body that fit on the wire and
-// expanded past the cap is also logged, because to an OTLP exporter a 413 is
-// final — the batch is dropped, and this line is where the operator finds out
-// why (spec 002 #27).
+// bodyRead answers the client itself when reading the body failed: 429 for
+// the body budget (spec 043 #13), 413 for the cap, 400 for anything else. A
+// gzip body that fit on the wire and expanded past the cap is also logged,
+// because to an OTLP exporter a 413 is final — the batch is dropped, and this
+// line is where the operator finds out why (spec 002 #27).
 func (s *Server) bodyRead(w http.ResponseWriter, r *http.Request, err error) bool {
 	if err == nil {
 		return true
+	}
+	if errors.Is(err, errBodyBudget) {
+		s.refuseBodyForBudget(w, r, callerProject(r), s.maxBodyBytes)
+		return false
 	}
 	var inflated *inflatedTooLarge
 	if errors.As(err, &inflated) {
@@ -221,6 +226,38 @@ func (s *Server) bodyRead(w http.ResponseWriter, r *http.Request, err error) boo
 	}
 	writeError(w, http.StatusBadRequest, "cannot read request body")
 	return false
+}
+
+// writeContext is the context a write waits for its commit under. A request
+// that read a body waits whether or not its client stays, so that the body it
+// holds stays counted in the budget until the job is written (spec 043 #31):
+// the writer commits a queued job all the same. One that read none — a
+// deletion, a bulk round of them — keeps its client's cancellation, and a
+// client that hangs up stops the round at the chunk in progress (spec 043
+// #33).
+func writeContext(r *http.Request) context.Context {
+	if hold := holdFrom(r.Context()); hold != nil && hold.reserved > 0 {
+		return context.WithoutCancel(r.Context())
+	}
+	return r.Context()
+}
+
+// refuseBodyForBudget answers a body the budget could not hold (spec 043 #13)
+// and counts it for the project it was about, if any (#21). What the request
+// had reserved is given back first, and the answer is written before the rest
+// of the body — up to `length` — is read and dropped, as a refused media
+// upload's is (spec 041 #31, spec 043 #31): a client still sending would
+// otherwise meet a closed connection instead of the `429` it retries, and the
+// drain costs the budget nothing.
+func (s *Server) refuseBodyForBudget(w http.ResponseWriter, r *http.Request, projectID string, length int64) {
+	if hold := holdFrom(r.Context()); hold != nil {
+		hold.releaseAll()
+	}
+	s.counters.observeBodyRefused(projectID)
+	answerThenDrain(w, r, length, func() {
+		w.Header().Set("Retry-After", "1")
+		writeError(w, http.StatusTooManyRequests, bodyBusy)
+	})
 }
 
 // maxPublicBodyBytes caps the body of a route anyone can call (spec 028
@@ -343,6 +380,13 @@ func queryParams(r *http.Request, known ...string) (url.Values, error) {
 	return values, nil
 }
 
+// lookupLabel is a label a request looks something up by — a filter, a user or
+// session in the path, the user an erasure names, the session a score is
+// given — cut as ingest cuts what it stores (spec 043 #14, #34). Looked up
+// whole, a value longer than the bound would match nothing: a filter that
+// comes back empty, an erasure that erases nothing.
+func lookupLabel(value string) string { return mapping.CutLabel(value) }
+
 // filterList reads a filter that takes a comma-separated list — *any of* its
 // items (spec 027 #1) — and answers nothing at all when the parameter is
 // absent.
@@ -363,6 +407,9 @@ func queryParams(r *http.Request, known ...string) (url.Values, error) {
 // A value with a comma in it is not expressible this way, and `docs/api.md`
 // says so: an identifier with a comma in it is a choice its owner made against
 // every tool that will ever list it.
+//
+// Every such list is a list of labels, and each item is cut as ingest cuts
+// what it stores (lookupLabel).
 func filterList(values url.Values, name string) ([]string, error) {
 	given := values[name]
 	if len(given) == 0 {
@@ -383,7 +430,7 @@ func filterList(values url.Values, name string) ([]string, error) {
 	}
 	items := strings.Split(raw, ",")
 	for i, item := range items {
-		items[i] = strings.TrimSpace(item)
+		items[i] = lookupLabel(strings.TrimSpace(item))
 		if items[i] == "" {
 			return nil, fmt.Errorf("%s: empty item in list", name)
 		}

@@ -2443,6 +2443,17 @@ export interface components {
                 "application/json": components["schemas"]["Error"];
             };
         };
+        /** @description The server is holding as many request bodies as TRACEPAD_BODY_BUDGET_BYTES allows (`the server is holding as many request bodies as it can; retry shortly`), refused before the body is read whole, or the write queue is full: retry after `Retry-After` */
+        Busy: {
+            headers: {
+                /** @description Seconds to wait */
+                "Retry-After"?: string;
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
         /** @description Throttled; `Retry-After` says for how long */
         TooManyRequests: {
             headers: {
@@ -2570,7 +2581,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            /** @description The body exceeded TRACEPAD_MAX_BODY_BYTES */
+            /** @description The body exceeded TRACEPAD_MAX_BODY_BYTES, on the wire or decompressed; or the export carries more spans than TRACEPAD_MAX_SPANS_PER_REQUEST (`this export carries N spans; the server takes at most M per request (TRACEPAD_MAX_SPANS_PER_REQUEST)`), refused whole with nothing stored. Exporters do not retry it */
             413: {
                 headers: {
                     [name: string]: unknown;
@@ -2588,15 +2599,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description The write queue is full; retry after the Retry-After delay */
-            429: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
+            429: components["responses"]["Busy"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };
@@ -2626,6 +2629,16 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            /** @description As on `/v1/traces`: the body cap, or the span cap */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            429: components["responses"]["Busy"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };
@@ -2674,7 +2687,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description The project has 10,000 uploads waiting for their traces and this one — with an upload URL or without — would be another; `Retry-After: 60`. A trace the project has is never refused */
+            /** @description The project has 10,000 uploads waiting for their traces and this one — with an upload URL or without — would be another; `Retry-After: 60`. A trace the project has is never refused. The server may also be holding as many request bodies as TRACEPAD_BODY_BUDGET_BYTES allows (`the server is holding as many request bodies as it can; retry shortly`, `Retry-After: 1`), before the body is read whole; retry after `Retry-After`. */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -2720,7 +2733,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description The body is larger than the upload declared */
+            /** @description The body is larger than the upload declared; or the upload declared more than the server's body budget now holds at once (TRACEPAD_BODY_BUDGET_BYTES), decided having read nothing — ask for a new upload URL */
             413: {
                 headers: {
                     [name: string]: unknown;
@@ -2729,7 +2742,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description The project has 10,000 uploads waiting for their traces and this one's trace has not arrived; `Retry-After: 60`. Not for the retry of an upload already stored. Decided before the body is read and answered at once, the body then drained up to the length the ask declared and dropped */
+            /** @description The project has 10,000 uploads waiting for their traces and this one's trace has not arrived; `Retry-After: 60`. Not for the retry of an upload already stored. Decided before the body is read and answered at once, the body then drained up to the length the ask declared and dropped. The server may also be holding as many request bodies as TRACEPAD_BODY_BUDGET_BYTES allows (`the server is holding as many request bodies as it can; retry shortly`, `Retry-After: 1`): that is answered while the body is read, and the rest of it is drained the same way; retry after `Retry-After`. */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -2808,6 +2821,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            429: components["responses"]["Busy"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };
@@ -3171,7 +3185,17 @@ export interface operations {
                 };
             };
             422: components["responses"]["Unprocessable"];
-            429: components["responses"]["TooManyRequests"];
+            /** @description Throttled — too many password changes, or the server is holding as many request bodies as TRACEPAD_BODY_BUDGET_BYTES allows (`the server is holding as many request bodies as it can; retry shortly`); `Retry-After` says for how long */
+            429: {
+                headers: {
+                    /** @description Seconds to wait */
+                    "Retry-After"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             503: components["responses"]["ServiceUnavailable"];
         };
     };
@@ -3258,6 +3282,11 @@ export interface operations {
                             waiting?: number;
                             capacity?: number;
                         };
+                        /** @description Request bodies held in memory now, for the whole deployment, against TRACEPAD_BODY_BUDGET_BYTES. A body that declares its length and is not compressed reserves that length whole before it is read; a gzip or chunked body reserves 64 KiB at a time as it is read. A body that does not fit is `429` */
+                        body_budget?: {
+                            held_bytes: number;
+                            capacity_bytes: number;
+                        };
                         /** @description Reads being served now, for the whole deployment, against TRACEPAD_READ_CONCURRENCY; a read that finds none free waits within its deadline */
                         read_slots?: {
                             busy: number;
@@ -3307,7 +3336,7 @@ export interface operations {
                              */
                             completed_at: string | null;
                         };
-                        /** @description This project's ingest traffic, and its reads the read bounds refused, since the process started */
+                        /** @description This project's ingest traffic, the requests the ingest and read bounds refused, since the process started */
                         counters: {
                             /** Format: date-time */
                             since?: string;
@@ -3318,9 +3347,14 @@ export interface operations {
                                     spans_skipped?: number;
                                 };
                             };
+                            /** @description Exports refused before mapping: bodies that did not decode, and exports over the span cap */
                             rejected_batches?: number;
                             unreadable_resource_spans?: number;
                             langfuse_ingestion_versions?: string[];
+                            /** @description This project's exports refused with 413 for carrying more spans than TRACEPAD_MAX_SPANS_PER_REQUEST */
+                            exports_over_span_cap?: number;
+                            /** @description This project's request bodies — exports, JSON API writes, media uploads — refused with 429 because TRACEPAD_BODY_BUDGET_BYTES was spent */
+                            bodies_refused_for_budget?: number;
                             /** @description This project's reads the read deadline stopped (TRACEPAD_READ_TIMEOUT) */
                             reads_timed_out?: number;
                             /** @description This project's reads refused because no read slot came free before the deadline */
@@ -4135,15 +4169,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            /** @description The write queue is full; retry after the Retry-After delay */
-            429: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
+            429: components["responses"]["Busy"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };
@@ -4403,6 +4429,7 @@ export interface operations {
                     };
                 };
             };
+            429: components["responses"]["Busy"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };
@@ -4470,6 +4497,7 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["Busy"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };
@@ -4591,6 +4619,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            429: components["responses"]["Busy"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };
@@ -4710,15 +4739,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description The write queue is full; retry after the Retry-After delay */
-            429: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
+            429: components["responses"]["Busy"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };
@@ -4901,6 +4922,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            429: components["responses"]["Busy"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };
@@ -5113,6 +5135,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            429: components["responses"]["Busy"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };
@@ -5195,6 +5218,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            429: components["responses"]["Busy"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };
@@ -5320,6 +5344,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            429: components["responses"]["Busy"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };
@@ -5438,6 +5463,7 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["Busy"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };
@@ -5508,6 +5534,7 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["Busy"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };
@@ -5647,6 +5674,7 @@ export interface operations {
                     };
                 };
             };
+            429: components["responses"]["Busy"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };
@@ -5684,6 +5712,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            429: components["responses"]["Busy"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };
@@ -5718,6 +5747,7 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["Busy"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };
@@ -5786,6 +5816,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["Unprocessable"];
+            429: components["responses"]["Busy"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };
@@ -5893,6 +5924,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["Unprocessable"];
+            429: components["responses"]["Busy"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };
@@ -5964,6 +5996,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["Unprocessable"];
+            429: components["responses"]["Busy"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };
@@ -6052,6 +6085,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
+            429: components["responses"]["Busy"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };
@@ -6168,6 +6202,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            429: components["responses"]["Busy"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };
@@ -6261,6 +6296,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             422: components["responses"]["Unprocessable"];
+            429: components["responses"]["Busy"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };

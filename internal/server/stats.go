@@ -91,7 +91,7 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	}
 	filter := store.StatsFilter{
 		Environment: environment,
-		UserID:      values.Get("user_id"),
+		UserID:      lookupLabel(values.Get("user_id")),
 		GroupBy:     values.Get("group_by"),
 	}
 	if filter.GroupBy == "" {

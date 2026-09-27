@@ -534,6 +534,8 @@ type stubWriter struct{ err error }
 
 func (s stubWriter) Submit(context.Context, store.WriteJob) error { return s.err }
 
+func (s stubWriter) SubmitWaiting(context.Context, store.WriteJob) error { return s.err }
+
 // A saturated writer answers 429 with Retry-After rather than stalling the
 // exporter or dropping spans silently (spec 002 #15).
 func TestIngestBackpressureReturns429(t *testing.T) {

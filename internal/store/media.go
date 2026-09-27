@@ -73,10 +73,15 @@ func shaPrefixOf(mediaID string) (string, bool) {
 // and a ref is written only while its body exists: a resolved Langfuse id
 // names a body read outside this transaction, which a deletion may have
 // collected since. Ingest writes a ref with its trace, so the ref is settled,
-// and one the Langfuse channel left pending is settled by it. The project's
-// hold is recorded with its first ref, under the type this batch declared
-// (Decision 25). It answers the bodies it recorded a hold of, so that the
-// batch's raw refs do not record them again.
+// and one the Langfuse channel left pending is settled by it — an export cut
+// into slices writes a trace's refs in the slice that writes the trace
+// (spec 043 #32). The project's hold is recorded with its first ref, under
+// the type this batch declared (Decision 25). It answers the bodies it
+// recorded a hold of, so that the
+// batch's raw refs in the same transaction do not record them again. An
+// export cut into slices writes its raw refs in its last slice, which records
+// the holds again, a conflict that changes nothing — unless a deletion between
+// the slices released one, which the raw ref then needs back (spec 043 #31).
 func writeMedia(tx *sql.Tx, projectID string, bodies []MediaBody, types map[string]string, refs []MediaRef,
 	now int64) (map[string]bool, error) {
 	if err := writeMediaBodies(tx, bodies, now); err != nil {
@@ -137,8 +142,20 @@ func holdMedia(tx *sql.Tx, projectID, sha, mimeType string, now int64) error {
 	return nil
 }
 
+// writeMediaBodies stores the bodies not stored yet. A body already there is
+// found by its key before its bytes are handed to the statement: an export cut
+// into slices carries a body in every slice that names it (spec 043 #34), and
+// only the first of them writes it.
 func writeMediaBodies(tx *sql.Tx, bodies []MediaBody, now int64) error {
 	for _, body := range bodies {
+		var stored bool
+		if err := tx.QueryRow(`SELECT EXISTS (SELECT 1 FROM media WHERE sha256 = ?)`, body.SHA256).
+			Scan(&stored); err != nil {
+			return fmt.Errorf("find media %s: %w", body.SHA256, err)
+		}
+		if stored {
+			continue
+		}
 		if _, err := tx.Exec(
 			`INSERT INTO media (sha256, mime_type, size, body, created_at) VALUES (?, ?, ?, ?, ?)
 			 ON CONFLICT(sha256) DO NOTHING`,

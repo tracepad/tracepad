@@ -1070,8 +1070,8 @@ func referencedPayloads(tx *sql.Tx, projectID string, traceIDs []any) ([]any, er
 // different-shaped query on every chunk.
 const inBatch = 500
 
-// deleteIn runs a DELETE whose predicate ends in `IN (…)`, in statements small
-// enough to stay under the bound-parameter limit.
+// deleteIn runs a DELETE — or an UPDATE — whose predicate ends in `IN (…)`,
+// in statements small enough to stay under the bound-parameter limit.
 func deleteIn(tx *sql.Tx, prefix string, lead []any, ids []any) (int64, error) {
 	var total int64
 	err := eachIn(ids, func(batch []any) error {

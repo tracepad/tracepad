@@ -76,6 +76,15 @@ func readBoundOf(rt route) readBound {
 	return sharedSlots
 }
 
+// bodyBudgetedOf says whether a route's body counts against the body budget
+// (spec 043 #13): every route that can carry one — anything but a GET — except
+// the public ones, whose bodies are a few KiB and whose callers nobody has
+// identified (spec 028 #26). It sits beside the table for the reason
+// readBoundOf does.
+func bodyBudgetedOf(rt route) bool {
+	return rt.Method != http.MethodGet && rt.Policy != public
+}
+
 func (s *Server) routes() []route {
 	return []route{
 		{"GET", "/health", public, scopeAny, "Liveness and version, no authentication required", s.handleHealth},

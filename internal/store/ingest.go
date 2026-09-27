@@ -40,6 +40,18 @@ type IngestBatch struct {
 	// disagrees with its rows.
 	skipSearchIndex bool
 
+	// full says this is a slice with another after it (Slices): it weighs a
+	// whole window whatever its rows (weight).
+	full bool
+	// continued are the traces this slice carries on from an earlier slice
+	// of its export (Slices), which apply touches rather than upserts.
+	continued map[string]bool
+	// stamped, on the slice that carries the raw body, are the export's
+	// traces the earlier slices wrote: apply stamps their `updated_at` with
+	// the reading the raw batch gets, so that each trace's window still
+	// holds the batch its spans arrived in (spec 043 #31, spec 044 #3).
+	stamped []string
+
 	// UnknownRuns is filled by apply: the run id of every trace in the
 	// batch that named a run this project does not have, one entry per
 	// such trace (spec 014 #3). The trace is stored with its columns all
@@ -66,6 +78,176 @@ type RawBatch struct {
 	// unwrap two layers.
 	ContentEncoding string
 	Body            []byte
+}
+
+// SliceRows is the most rows — traces and observations — one ingest job
+// carries (spec 043 #11): the length of time an export holds the only writer
+// is the length of its largest slice, not of the export.
+const SliceRows = 1000
+
+// Slices cuts a batch into jobs of at most SliceRows rows, to be submitted one
+// after another, each once the one before it has committed (spec 043 #11). A
+// batch that fits is its own one slice, unchanged.
+//
+// A trace travels with its observations. One larger than what is left of a
+// slice goes on in the next, which carries it as continued: apply stamps its
+// `updated_at`, so the rollup sees the hours the slice changed, and
+// recomputes its aggregates over what is stored so far (spec 002 #22), without
+// writing its fields and metadata again or looking its run up again. Only
+// were it deleted since the slice before is it written whole, as a late export
+// would write it (spec 043 #31). A trace is not started at the end of a slice
+// with no room for one of its observations: a trace row with none would be
+// listed without a time.
+//
+// Each slice carries the refs of the traces it writes, every body they name,
+// and the check that the resolved Langfuse ids they name still name bodies the
+// project holds (spec 041 #9); the last carries the raw body, its refs, every
+// body it names and the check of every resolved id it names (spec 043 #32,
+// #34). The raw batch is stamped with the last slice's reading (spec 044 #3), so that slice stamps
+// the traces the earlier ones wrote with it too: an erasure finds a trace's
+// batches inside its `[ingested_at, updated_at]`.
+func (b *IngestBatch) Slices() []*IngestBatch {
+	if len(b.Traces)+len(b.Observations) <= SliceRows {
+		return []*IngestBatch{b}
+	}
+	var (
+		slices []*IngestBatch
+		cur    *IngestBatch
+		rows   int
+	)
+	open := func() {
+		cur = &IngestBatch{ProjectID: b.ProjectID, IngestedAt: b.IngestedAt, skipSearchIndex: b.skipSearchIndex}
+		slices = append(slices, cur)
+		rows = 0
+	}
+	open()
+
+	// Each trace's observations, in the order the batch holds them; one
+	// whose trace the batch does not carry goes last, with no trace row.
+	byTrace := make(map[string][]*model.Observation, len(b.Traces))
+	carried := make(map[string]bool, len(b.Traces))
+	for _, t := range b.Traces {
+		carried[t.ID] = true
+	}
+	var strays []*model.Observation
+	for _, o := range b.Observations {
+		if carried[o.TraceID] {
+			byTrace[o.TraceID] = append(byTrace[o.TraceID], o)
+		} else {
+			strays = append(strays, o)
+		}
+	}
+	for _, t := range b.Traces {
+		observations := byTrace[t.ID]
+		if rows > 0 && rows+min(len(observations), 1)+1 > SliceRows {
+			open()
+		}
+		for {
+			cur.Traces = append(cur.Traces, t)
+			rows++
+			n := min(len(observations), SliceRows-rows)
+			cur.Observations = append(cur.Observations, observations[:n]...)
+			rows += n
+			observations = observations[n:]
+			if len(observations) == 0 {
+				break
+			}
+			open()
+			if cur.continued == nil {
+				cur.continued = map[string]bool{}
+			}
+			cur.continued[t.ID] = true
+		}
+	}
+	for len(strays) > 0 {
+		if rows == SliceRows {
+			open()
+		}
+		n := min(len(strays), SliceRows-rows)
+		cur.Observations = append(cur.Observations, strays[:n]...)
+		rows += n
+		strays = strays[n:]
+	}
+
+	// Each slice carries the refs of the traces it writes, settled in the
+	// same transaction as the trace, and every body they name: a body an
+	// earlier slice stored may have been collected since, by a deletion of
+	// the trace that named it there, and a ref is written only beside its
+	// body (spec 043 #34). A body already stored costs the slice one lookup
+	// (writeMediaBodies). A slice checks the resolved Langfuse ids its refs
+	// name (spec 041 #9). The last also carries every body the raw body
+	// names, beside the raw refs to them, and checks every resolved id the
+	// raw body names — the archived body points at the body the id was
+	// resolved to, so one collected since takes the export again
+	// unresolved, as an export in one slice is.
+	bodies := make(map[string]MediaBody, len(b.Media))
+	for _, body := range b.Media {
+		if _, seen := bodies[body.SHA256]; !seen {
+			bodies[body.SHA256] = body
+		}
+	}
+	refsOf := make(map[string][]MediaRef, len(b.MediaRefs))
+	for _, ref := range b.MediaRefs {
+		refsOf[ref.TraceID] = append(refsOf[ref.TraceID], ref)
+	}
+	resolved := make(map[string]bool, len(b.Resolved))
+	for _, sha := range b.Resolved {
+		resolved[sha] = true
+	}
+	for i, slice := range slices {
+		named := map[string]bool{}
+		name := func(sha string) {
+			if named[sha] {
+				return
+			}
+			named[sha] = true
+			if body, ok := bodies[sha]; ok {
+				slice.Media = append(slice.Media, body)
+			}
+			if resolved[sha] {
+				slice.Resolved = append(slice.Resolved, sha)
+			}
+		}
+		for _, t := range slice.Traces {
+			for _, ref := range refsOf[t.ID] {
+				slice.MediaRefs = append(slice.MediaRefs, ref)
+				name(ref.SHA256)
+			}
+		}
+		if i == len(slices)-1 {
+			for _, sha := range b.RawMedia {
+				name(sha)
+			}
+		}
+	}
+	last := slices[len(slices)-1]
+	last.Raw, last.RawMedia = b.Raw, b.RawMedia
+	if last.Raw != nil {
+		inLast := make(map[string]bool, len(last.Traces))
+		for _, t := range last.Traces {
+			inLast[t.ID] = true
+		}
+		for _, t := range b.Traces {
+			if !inLast[t.ID] {
+				last.stamped = append(last.stamped, t.ID)
+			}
+		}
+	}
+	for _, slice := range slices[:len(slices)-1] {
+		slice.full = true
+	}
+	return slices
+}
+
+// weight is a slice's rows (spec 043 #12). One with another after it weighs a
+// whole window, so that it closes its window at once whatever the two bounds
+// are: its export's next slice cannot arrive until it commits, and waiting out
+// the window for it would add the window to every slice.
+func (b *IngestBatch) weight() int {
+	if b.full {
+		return WindowRows
+	}
+	return len(b.Traces) + len(b.Observations)
 }
 
 // Empty reports a batch with nothing to write.
@@ -116,17 +298,37 @@ func (b *IngestBatch) apply(tx *sql.Tx) error {
 		if err := writeRawMediaRefs(tx, b.ProjectID, rawID, b.RawMedia, types, held, arrived); err != nil {
 			return err
 		}
+		stamped := make([]any, len(b.stamped))
+		for i, id := range b.stamped {
+			stamped[i] = id
+		}
+		if _, err := deleteIn(tx, `UPDATE traces SET updated_at = ? WHERE project_id = ? AND id IN`,
+			[]any{arrived, b.ProjectID}, stamped); err != nil {
+			return fmt.Errorf("stamp the traces of a sliced export: %w", err)
+		}
 	}
 
 	indexing := !b.skipSearchIndex
 	b.UnknownRuns = b.UnknownRuns[:0]
 	for _, t := range b.Traces {
+		if b.continued[t.ID] {
+			touched, err := touchTrace(tx, b.ProjectID, t.ID, arrived)
+			if err != nil {
+				return err
+			}
+			if touched {
+				continue
+			}
+		}
 		if err := upsertTrace(tx, b.ProjectID, t, arrived, indexing); err != nil {
 			return err
 		}
 		// One primary-key lookup per trace that carries the attribute,
-		// paid only by eval traffic (spec 014 #3).
-		if t.RunID != "" {
+		// paid only by eval traffic (spec 014 #3) — once per trace of an
+		// export: a continued trace written whole again, after a deletion
+		// between two slices, was looked up by the slice before (spec 043
+		// #33).
+		if t.RunID != "" && !b.continued[t.ID] {
 			known, err := runExists(tx, b.ProjectID, t.RunID)
 			if err != nil {
 				return err
@@ -236,6 +438,20 @@ func upsertTrace(tx *sql.Tx, projectID string, t *model.Trace, ingestedAt int64,
 		return nil
 	}
 	return indexTraceName(tx, projectID, t.ID, stored.String)
+}
+
+// touchTrace stamps a stored trace's `updated_at` for a slice that carries it
+// on (Slices), and reports whether it was there to stamp.
+func touchTrace(tx *sql.Tx, projectID, traceID string, now int64) (bool, error) {
+	result, err := tx.Exec(`UPDATE traces SET updated_at = ? WHERE project_id = ? AND id = ?`, now, projectID, traceID)
+	if err != nil {
+		return false, fmt.Errorf("touch trace %s: %w", traceID, err)
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("touch trace %s: %w", traceID, err)
+	}
+	return n > 0, nil
 }
 
 // runExists is the run-existence lookup of spec 014 #3: a seek on the primary

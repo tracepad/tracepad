@@ -26,6 +26,10 @@ import (
 // that is saturated or failing on demand.
 type JobWriter interface {
 	Submit(ctx context.Context, job store.WriteJob) error
+	// SubmitWaiting is Submit for a job that continues admitted work — an
+	// export's slices after its first — and waits out a full queue rather
+	// than refusing (spec 043 #31).
+	SubmitWaiting(ctx context.Context, job store.WriteJob) error
 }
 
 // SweepReporter is the retention sweeper as `GET /api/v1/system` needs it: a
@@ -50,6 +54,10 @@ type Server struct {
 
 	storeRaw     bool
 	maxBodyBytes int64
+	// maxSpans is the most spans one export may carry (spec 043 #10), and
+	// bodies the budget every request body is read from (#13).
+	maxSpans int
+	bodies   *bodyBudget
 	// responseBudget is the default byte budget a read spends on payloads
 	// (spec 004 #2); `?budget=` overrides it per request.
 	responseBudget int64
@@ -160,6 +168,17 @@ func New(cfg *config.Config, version string, st *store.Store, writer JobWriter, 
 		// would, and a zero cap silently 413s every export.
 		maxBody = config.DefaultMaxBodyBytes
 	}
+	maxSpans := cfg.MaxSpansPerRequest
+	if maxSpans <= 0 {
+		maxSpans = config.DefaultMaxSpansPerRequest
+	}
+	// Never below the cap, which config.Load refuses: a budget smaller
+	// than one body would refuse a body the cap admits on an idle server.
+	bodyBudgetBytes := cfg.BodyBudgetBytes
+	if bodyBudgetBytes <= 0 {
+		bodyBudgetBytes = config.DefaultBodyBudgetBytes(maxBody)
+	}
+	bodyBudgetBytes = max(bodyBudgetBytes, maxBody)
 	budget := cfg.ResponseBudgetBytes
 	if budget <= 0 {
 		budget = config.DefaultResponseBudgetBytes
@@ -183,6 +202,8 @@ func New(cfg *config.Config, version string, st *store.Store, writer JobWriter, 
 		version:         version,
 		storeRaw:        cfg.StoreRaw,
 		maxBodyBytes:    maxBody,
+		maxSpans:        maxSpans,
+		bodies:          &bodyBudget{capacity: bodyBudgetBytes},
 		responseBudget:  budget,
 		readTimeout:     readTimeout,
 		reads:           newReadSlots(readConcurrency),
@@ -229,6 +250,11 @@ func New(cfg *config.Config, version string, st *store.Store, writer JobWriter, 
 			route.handler = s.readGate(route.handler, s.reads)
 		case ownLane:
 			route.handler = s.readGate(route.handler, s.systemReads)
+		}
+		// Every body read into memory but a public route's counts against
+		// one budget (spec 043 #13); routes.go says which.
+		if bodyBudgetedOf(route) {
+			route.handler = s.holdBodies(route.handler)
 		}
 		// The policy column is applied here, once, rather than by each
 		// handler asking for its own credentials (spec 028 Decision 7).

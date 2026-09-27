@@ -110,7 +110,11 @@ func Map(resourceSpans []*tracepb.ResourceSpans) *Result {
 	}
 
 	for _, id := range order {
-		res.Traces = append(res.Traces, traces[id].finish())
+		res.Traces = append(res.Traces, boundLabels(traces[id].finish()))
+	}
+	for _, obs := range res.Observations {
+		obs.Name = CutLabel(obs.Name)
+		obs.Model = CutLabel(obs.Model)
 	}
 	res.SkipReason = summarize(reasons)
 
@@ -123,6 +127,73 @@ func Map(resourceSpans []*tracepb.ResourceSpans) *Result {
 		return a.ID < b.ID
 	})
 	return res
+}
+
+// CountSpans is how many spans a decoded export carries, the number
+// TRACEPAD_MAX_SPANS_PER_REQUEST bounds (spec 043 #10): counted before mapping,
+// so a refusal costs no more than the decoding it follows.
+func CountSpans(resourceSpans []*tracepb.ResourceSpans) int {
+	n := 0
+	for _, rs := range resourceSpans {
+		for _, ss := range rs.GetScopeSpans() {
+			n += len(ss.GetSpans())
+		}
+	}
+	return n
+}
+
+// The bounds of the labels a listing shows (spec 043 #14): each is cut at
+// MaxLabelLength characters, and a trace keeps its first MaxTags distinct tags.
+// Constants, not settings: they shape what is stored (#22). The raw body keeps
+// what was sent, and a remap goes through here again.
+const (
+	MaxLabelLength = 1000
+	MaxTags        = 50
+)
+
+// boundLabels applies the label bounds to a merged trace: its name, user,
+// session, environment, release and version, and each of its tags. The tags
+// are cut first and deduplicated after, so two that differ only past the cut
+// are one tag, as they would be stored.
+func boundLabels(t *model.Trace) *model.Trace {
+	for _, field := range []*string{&t.Name, &t.UserID, &t.SessionID, &t.Environment, &t.Release, &t.Version} {
+		*field = CutLabel(*field)
+	}
+	if len(t.Tags) == 0 {
+		return t
+	}
+	seen := make(map[string]bool, len(t.Tags))
+	tags := make([]string, 0, min(len(t.Tags), MaxTags))
+	for _, tag := range t.Tags {
+		tag = CutLabel(tag)
+		if seen[tag] {
+			continue
+		}
+		seen[tag] = true
+		tags = append(tags, tag)
+		if len(tags) == MaxTags {
+			break
+		}
+	}
+	t.Tags = tags
+	return t
+}
+
+// CutLabel cuts a label to MaxLabelLength characters, at a character
+// boundary. A lookup by a label goes through it too (spec 043 #34): a value
+// stored cut and looked up whole would match nothing.
+func CutLabel(s string) string {
+	if len(s) <= MaxLabelLength {
+		return s
+	}
+	n := 0
+	for i := range s {
+		if n == MaxLabelLength {
+			return s[:i]
+		}
+		n++
+	}
+	return s
 }
 
 func flatten(resourceSpans []*tracepb.ResourceSpans) []spanCtx {

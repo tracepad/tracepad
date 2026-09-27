@@ -27,6 +27,12 @@ const (
 	DefaultCommitWindow = 50 * time.Millisecond
 	DefaultMaxBatch     = 64
 	DefaultQueueDepth   = 256
+	// WindowRows is the other bound of a window (spec 043 #12): it stops
+	// collecting once the rows of its jobs reach this many, so 64 big
+	// ingest slices cannot become one transaction of 64,000 rows. A window
+	// holds at most what it held before the job that crossed the line,
+	// plus that job — under two slices.
+	WindowRows = 1000
 )
 
 // ErrWriterBusy means the submission queue is full. Callers turn it into a
@@ -49,6 +55,21 @@ type WriteJob interface {
 	// be idempotent: a window that fails is retried job by job (see
 	// flush), so one submission can be applied more than once.
 	apply(tx *sql.Tx) error
+}
+
+// weighted is a job that says how many rows it writes, which is what a window
+// is bounded by beside its count of jobs (spec 043 #12). A job that does not
+// say weighs one row.
+type weighted interface {
+	weight() int
+}
+
+// weightOf is a job's weight in its window.
+func weightOf(job WriteJob) int {
+	if w, ok := job.(weighted); ok {
+		return max(1, w.weight())
+	}
+	return 1
 }
 
 // soloJob is a step the writer runs by itself, between commit windows and
@@ -118,6 +139,11 @@ type WriterOptions struct {
 	CommitWindow time.Duration
 	MaxBatch     int
 	QueueDepth   int
+	// Committed, when set, is called on the writer's goroutine after each
+	// transaction commits, with the rows its jobs weighed (spec 043 #12).
+	// A seam for tests — the one place that sees the transactions an
+	// export was cut into — and nil in production.
+	Committed func(rows int)
 }
 
 type submission struct {
@@ -132,10 +158,16 @@ type Writer struct {
 	queue  chan *submission
 	window time.Duration
 	max    int
+	// committed is WriterOptions.Committed.
+	committed func(rows int)
 
 	mu     sync.RWMutex
 	closed bool
 	wg     sync.WaitGroup
+	// closing ends when Close begins, and wakes every SubmitWaiting still
+	// waiting for room: a stop does not wait for them.
+	closing   chan struct{}
+	closeOnce sync.Once
 
 	// beforeCommit is a test seam: the only way to hold the writer still
 	// long enough to observe a full queue, since the writer otherwise
@@ -169,11 +201,13 @@ func (s *Store) NewWriter(opts WriterOptions) (*Writer, error) {
 	}
 
 	w := &Writer{
-		store:  s,
-		conn:   conn,
-		queue:  make(chan *submission, opts.QueueDepth),
-		window: opts.CommitWindow,
-		max:    opts.MaxBatch,
+		store:     s,
+		conn:      conn,
+		queue:     make(chan *submission, opts.QueueDepth),
+		window:    opts.CommitWindow,
+		max:       opts.MaxBatch,
+		committed: opts.Committed,
+		closing:   make(chan struct{}),
 	}
 	w.wg.Add(1)
 	go w.run()
@@ -219,8 +253,46 @@ func (w *Writer) Submit(ctx context.Context, job WriteJob) error {
 	}
 }
 
+// SubmitWaiting is Submit for a job that continues work already admitted —
+// an export's slice after its first (spec 043 #31): a full queue is waited out
+// rather than refused, since the export's first slice was the one a full queue
+// could turn away, and refusing a later one would leave the export half
+// written for a retry that meets the same queue. How many wait is bounded by
+// the body budget, each holding its body's reservation. A stop wakes them
+// with ErrWriterClosed; ctx ends the wait, and once queued, the wait for the
+// commit, as it does Submit's.
+func (w *Writer) SubmitWaiting(ctx context.Context, job WriteJob) error {
+	sub := &submission{job: job, done: make(chan error, 1)}
+
+	w.mu.RLock()
+	if w.closed {
+		w.mu.RUnlock()
+		return ErrWriterClosed
+	}
+	select {
+	case w.queue <- sub:
+	case <-w.closing:
+		w.mu.RUnlock()
+		return ErrWriterClosed
+	case <-ctx.Done():
+		w.mu.RUnlock()
+		return ctx.Err()
+	}
+	w.mu.RUnlock()
+
+	select {
+	case err := <-sub.done:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 // Close stops the writer after the queued submissions have been committed.
 func (w *Writer) Close() error {
+	// First, and outside the lock: a SubmitWaiting blocked on a full queue
+	// holds the read lock, and has to give it up before the lock is taken.
+	w.closeOnce.Do(func() { close(w.closing) })
 	w.mu.Lock()
 	if w.closed {
 		w.mu.Unlock()
@@ -249,14 +321,16 @@ func (w *Writer) run() {
 			continue
 		}
 		pending = append(pending[:0], first)
+		rows := weightOf(first.job)
 
 		// A solo step ends the window: what came before it commits first,
-		// then it runs alone, in submission order.
+		// then it runs alone, in submission order. So does a window whose
+		// jobs weigh WindowRows (spec 043 #12).
 		var solo *submission
 		timer := time.NewTimer(w.window)
 		drained := false
 	collect:
-		for len(pending) < w.max {
+		for len(pending) < w.max && rows < WindowRows {
 			select {
 			case sub, ok := <-w.queue:
 				if !ok {
@@ -268,6 +342,7 @@ func (w *Writer) run() {
 					break collect
 				}
 				pending = append(pending, sub)
+				rows += weightOf(sub.job)
 			case <-timer.C:
 				break collect
 			}
@@ -388,6 +463,13 @@ func (w *Writer) commit(pending []*submission) error {
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit write transaction: %w", err)
+	}
+	if w.committed != nil {
+		rows := 0
+		for _, sub := range pending {
+			rows += weightOf(sub.job)
+		}
+		w.committed(rows)
 	}
 	return nil
 }

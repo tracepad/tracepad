@@ -1145,6 +1145,15 @@ per attribute dialect, how many were skipped, and every distinct
 `x-langfuse-ingestion-version` seen. The counters are in memory and say so:
 `counters.since` is when they started.
 
+`body_budget` is how many bytes of request bodies the server holds now
+against `TRACEPAD_BODY_BUDGET_BYTES`, deployment-wide like the writer queue:
+`{"held_bytes": 1310720, "capacity_bytes": 83886080}`. Among the counters,
+`exports_over_span_cap` counts this project's exports refused with `413` for
+carrying more than `TRACEPAD_MAX_SPANS_PER_REQUEST` spans (each is a
+`rejected_batches` too), and `bodies_refused_for_budget` its request bodies —
+exports, JSON API writes, media uploads — refused with `429` because the budget
+was spent ([ingest.md](ingest.md#how-much-one-export-may-carry)).
+
 `read_slots` is how many reads are being served now against
 `TRACEPAD_READ_CONCURRENCY`, deployment-wide like the writer queue:
 `{"busy": 3, "capacity": 16}`. Among the counters, `reads_timed_out` and
@@ -1297,6 +1306,7 @@ actually at ([prompts.md](prompts.md#appending-to-the-version-you-meant)):
 | `401` | The credentials do not resolve to a project. |
 | `404` | No such thing in this project. On `traces/last`, the message names the filters that found nothing. |
 | `409` | An observation id that is ambiguous without a `trace_id`; a prompt append whose `expect_version` disagrees with the name's current state. |
+| `429` | A write's body arrived while the server was holding as many request bodies as `TRACEPAD_BODY_BUDGET_BYTES` allows — `{"error": "the server is holding as many request bodies as it can; retry shortly"}` — or the write queue is full. Both carry `Retry-After`; the same request succeeds once the server has room ([ingest.md](ingest.md#how-much-one-export-may-carry)). |
 | `500` | The answer could not be rendered — `{"error": "failed to render the response"}`. Never a `200` with an empty body. |
 | `503` | The credentials could not be checked right now — `{"error": "cannot check credentials right now; retry shortly"}` — or a read or a write met a database condition that passes, a full disk or a lock that did not clear — `{"error": "storage is temporarily unavailable; retry shortly"}` — or a read found no slot free before its deadline — `{"error": "the server is busy; retry shortly"}`. These carry `Retry-After: 1`. A read the deadline stopped is a `503` without it — see [Reads under load](#reads-under-load). A browser session is not signed out by any of them. |
 

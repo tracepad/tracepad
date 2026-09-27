@@ -559,9 +559,9 @@ func (s *Server) expansion(values url.Values) (bool, int, error) {
 // traceFilter reads the filters the listing and the shortcut share.
 func traceFilter(values url.Values) (store.TraceFilter, error) {
 	filter := store.TraceFilter{
-		UserID:    values.Get("user_id"),
-		SessionID: values.Get("session_id"),
-		Version:   values.Get("version"),
+		UserID:    lookupLabel(values.Get("user_id")),
+		SessionID: lookupLabel(values.Get("session_id")),
+		Version:   lookupLabel(values.Get("version")),
 		Status:    values.Get("status"),
 	}
 	tags, err := tagFilter(values["tag"])
@@ -685,7 +685,11 @@ func tagFilter(given []string) ([]string, error) {
 	if len(given) == 0 {
 		return nil, nil
 	}
-	tags, over := distinctCapped(given, maxTagFilter)
+	cut := make([]string, len(given))
+	for i, tag := range given {
+		cut[i] = lookupLabel(tag)
+	}
+	tags, over := distinctCapped(cut, maxTagFilter)
 	if over {
 		return nil, fmt.Errorf("tag: at most %d values", maxTagFilter)
 	}

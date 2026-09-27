@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net"
 	"net/url"
 	"os"
@@ -39,6 +40,13 @@ type Config struct {
 	// batch processors ship far below it; the cap exists to stop
 	// pathological bodies from ballooning memory.
 	MaxBodyBytes int64
+	// MaxSpansPerRequest is the most spans one export may carry (spec 043
+	// #10); an export with more is refused whole with `413`.
+	MaxSpansPerRequest int
+	// BodyBudgetBytes bounds the request bodies held in memory at once,
+	// counted decompressed (spec 043 #13); a request whose next step does
+	// not fit is `429`. Zero means four times MaxBodyBytes.
+	BodyBudgetBytes int64
 	// ResponseBudgetBytes is the default byte budget a read response
 	// spends on payloads (spec 004 #2). The consumer's context window is
 	// a scarce resource, so the API respects it by default rather than on
@@ -100,6 +108,26 @@ type Config struct {
 
 // DefaultMaxBodyBytes is the request body cap when unset (20 MiB).
 const DefaultMaxBodyBytes = 20 * 1024 * 1024
+
+// Ingest bounds (spec 043 #10, #13, #22). 20,000 spans is far above the 512
+// an OpenTelemetry batch processor sends and the Collector's default batch of
+// 8,192; the body budget is four full bodies, and never less than one, since a
+// budget below the cap would refuse a body the cap admits even on an idle
+// server.
+const (
+	DefaultMaxSpansPerRequest = 20000
+	MinMaxSpansPerRequest     = 1
+	bodyBudgetBodies          = 4
+)
+
+// DefaultBodyBudgetBytes is the body budget for a body cap: four bodies, held
+// at the largest int64 for a cap so large that four of it would not fit one.
+func DefaultBodyBudgetBytes(maxBody int64) int64 {
+	if maxBody > math.MaxInt64/bodyBudgetBodies {
+		return math.MaxInt64
+	}
+	return bodyBudgetBodies * maxBody
+}
 
 // Sweeper cadence bounds (spec 005 #3). The floor exists because the interval
 // is also the delay between passes: a sub-second value is a busy loop holding
@@ -188,6 +216,8 @@ var knownEnv = map[string]bool{
 	"TRACEPAD_STORE_RAW":             true,
 	"TRACEPAD_MAX_BODY_BYTES":        true,
 	"TRACEPAD_RESPONSE_BUDGET_BYTES": true,
+	"TRACEPAD_MAX_SPANS_PER_REQUEST": true,
+	"TRACEPAD_BODY_BUDGET_BYTES":     true,
 	"TRACEPAD_READ_TIMEOUT":          true,
 	"TRACEPAD_READ_CONCURRENCY":      true,
 	"TRACEPAD_MCP":                   true,
@@ -214,6 +244,22 @@ func Load(args []string) (*Config, error) {
 	maxBody, err := parseBytes("TRACEPAD_MAX_BODY_BYTES", DefaultMaxBodyBytes)
 	if err != nil {
 		return nil, err
+	}
+	maxSpans, err := parseCount("TRACEPAD_MAX_SPANS_PER_REQUEST", DefaultMaxSpansPerRequest)
+	if err != nil {
+		return nil, err
+	}
+	if maxSpans < MinMaxSpansPerRequest {
+		return nil, fmt.Errorf("TRACEPAD_MAX_SPANS_PER_REQUEST: want at least %d, got %d",
+			MinMaxSpansPerRequest, maxSpans)
+	}
+	bodyBudget, err := parseBytes("TRACEPAD_BODY_BUDGET_BYTES", DefaultBodyBudgetBytes(maxBody))
+	if err != nil {
+		return nil, err
+	}
+	if bodyBudget < maxBody {
+		return nil, fmt.Errorf("TRACEPAD_BODY_BUDGET_BYTES: want at least TRACEPAD_MAX_BODY_BYTES (%d), got %d",
+			maxBody, bodyBudget)
 	}
 	budget, err := parseBytes("TRACEPAD_RESPONSE_BUDGET_BYTES", DefaultResponseBudgetBytes)
 	if err != nil {
@@ -284,6 +330,8 @@ func Load(args []string) (*Config, error) {
 		Projects:            os.Getenv("TRACEPAD_PROJECTS"),
 		StoreRaw:            storeRaw,
 		MaxBodyBytes:        maxBody,
+		MaxSpansPerRequest:  maxSpans,
+		BodyBudgetBytes:     bodyBudget,
 		ResponseBudgetBytes: budget,
 		ReadTimeout:         readTimeout,
 		ReadConcurrency:     readConcurrency,
