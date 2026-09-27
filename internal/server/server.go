@@ -56,6 +56,10 @@ type Server struct {
 	// (spec 043 #15, #16): the read gate's two bounds.
 	readTimeout time.Duration
 	reads       readSlots
+	// systemReads is the one slot `GET /api/v1/system` reads in: a lane
+	// of its own, so the gauge answers while every read slot is taken
+	// and its counts cannot crowd out the rest (spec 043 #27).
+	systemReads readSlots
 	// mcp reports whether /mcp is being served, which `GET /api/v1/system`
 	// publishes because the endpoint map deliberately does not (Decision
 	// 27).
@@ -167,6 +171,7 @@ func New(cfg *config.Config, version string, st *store.Store, writer JobWriter, 
 		responseBudget: budget,
 		readTimeout:    readTimeout,
 		reads:          newReadSlots(readConcurrency),
+		systemReads:    newReadSlots(1),
 		mcp:            cfg.MCP,
 		adminToken:     cfg.AdminToken,
 		sessionLife:    sessionLife,
@@ -198,20 +203,12 @@ func New(cfg *config.Config, version string, st *store.Store, writer JobWriter, 
 	for _, route := range s.routes() {
 		// Every read but the public ones runs under the read deadline and
 		// in a read slot (spec 043 #15, #16), which the guard enters once
-		// it knows who is asking.
-		if route.Method == http.MethodGet && route.Policy != public {
-			switch route.Path {
-			case claimPath:
-				// A GET that writes: handing out the next item claims it
-				// through the writer (spec 024 #5), and a claim the
-				// deadline answered would still commit (spec 043 #26).
-			case systemPath:
-				// The read that reports the slots takes none, so that it
-				// answers while they are all taken (spec 043 #26).
-				route.handler = s.readGate(route.handler, false)
-			default:
-				route.handler = s.readGate(route.handler, true)
-			}
+		// it knows who is asking; routes.go says which are which.
+		switch readBoundOf(route) {
+		case sharedSlots:
+			route.handler = s.readGate(route.handler, s.reads)
+		case ownLane:
+			route.handler = s.readGate(route.handler, s.systemReads)
 		}
 		// The policy column is applied here, once, rather than by each
 		// handler asking for its own credentials (spec 028 Decision 7).

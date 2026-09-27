@@ -51,18 +51,21 @@ describe('the observation type vocabulary', () => {
 });
 
 describe('the notice above a tree the server cut (spec 043 #18)', () => {
+	const flat = (n: number) => Array.from({ length: n }, () => ({}));
+
 	it('says nothing about a whole tree', () => {
 		expect(omittedNotice(null)).toBeNull();
-		expect(omittedNotice({ observation_count: 3 })).toBeNull();
-		expect(omittedNotice({ observation_count: 3, observations_omitted: 0 })).toBeNull();
+		expect(omittedNotice({ observations: flat(3) })).toBeNull();
+		expect(omittedNotice({ observations: flat(3), observations_omitted: 0 })).toBeNull();
 	});
 
-	it('names what is shown and what is not', () => {
-		expect(omittedNotice({ observation_count: 10_001, observations_omitted: 1 })).toBe(
+	it('counts what the tree holds, nested or not', () => {
+		expect(omittedNotice({ observations: flat(10_000), observations_omitted: 1 })).toBe(
 			'Showing the first 10,000 of 10,001 observations by start time; 1 is not shown.'
 		);
-		expect(omittedNotice({ observation_count: 50, observations_omitted: 19 })).toBe(
-			'Showing the first 31 of 50 observations by start time; 19 are not shown.'
+		const nested = [{ children: [{}, { children: [{}] }] }, {}];
+		expect(omittedNotice({ observations: nested, observations_omitted: 19 })).toBe(
+			'Showing the first 5 of 24 observations by start time; 19 are not shown.'
 		);
 	});
 });

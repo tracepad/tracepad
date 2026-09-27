@@ -58,28 +58,22 @@ func readStopped(timeout time.Duration) string {
 	return fmt.Sprintf("the read took longer than %s and was stopped; narrow the time range or the filters", timeout)
 }
 
-// readGate wraps one read route's handler; the guard runs it once the caller
-// is resolved. slotted is false for the one read that reports the slots
-// themselves (spec 043 #26): it runs under the deadline and takes none.
-func (s *Server) readGate(next http.HandlerFunc, slotted bool) http.HandlerFunc {
+// readGate wraps one read route's handler, reading in the given slots; the
+// guard runs it once the caller is resolved.
+func (s *Server) readGate(next http.HandlerFunc, slots readSlots) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), s.readTimeout)
 		defer cancel()
 		asked := time.Now()
-		slots := s.reads
-		if !slotted {
-			slots = nil
-		} else {
-			select {
-			case slots <- struct{}{}:
-			case <-ctx.Done():
-				if hungUp(r) {
-					return
-				}
-				s.counters.observeRead(callerProject(r), readRefusedBusy)
-				retryLater(w, readBusy)
+		select {
+		case slots <- struct{}{}:
+		case <-ctx.Done():
+			if hungUp(r) {
 				return
 			}
+			s.counters.observeRead(callerProject(r), readRefusedBusy)
+			retryLater(w, readBusy)
+			return
 		}
 		admitted := time.Now()
 		gated := &gatedWriter{ResponseWriter: w, ctx: ctx, slots: slots}

@@ -260,7 +260,13 @@ func (s *Server) handleLastTrace(w http.ResponseWriter, r *http.Request) {
 func (s *Server) renderTrace(w http.ResponseWriter, r *http.Request, projectID string, trace *store.TraceRow,
 	expand bool, budgetBytes int) ([]byte, bool) {
 	nodes, cut, err := s.readTree(r.Context(), projectID, trace.ID)
-	if err != nil {
+	var unrendered *treeRenderFailed
+	switch {
+	case errors.As(err, &unrendered):
+		slog.Error("render trace failed", "err", err)
+		writeError(w, http.StatusInternalServerError, "failed to render the trace")
+		return nil, false
+	case err != nil:
 		readFailed(w, r, "failed to read the observations", err)
 		return nil, false
 	}
@@ -676,17 +682,9 @@ func tagFilter(given []string) ([]string, error) {
 	if len(given) == 0 {
 		return nil, nil
 	}
-	tags := make([]string, 0, min(len(given), maxTagFilter+1))
-	seen := make(map[string]bool, len(tags))
-	for _, tag := range given {
-		if seen[tag] {
-			continue
-		}
-		if len(tags) == maxTagFilter {
-			return nil, fmt.Errorf("tag: at most %d values", maxTagFilter)
-		}
-		seen[tag] = true
-		tags = append(tags, tag)
+	tags, over := distinctCapped(given, maxTagFilter)
+	if over {
+		return nil, fmt.Errorf("tag: at most %d values", maxTagFilter)
 	}
 	return tags, nil
 }

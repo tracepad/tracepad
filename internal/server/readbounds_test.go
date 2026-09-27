@@ -343,6 +343,14 @@ func TestSystemReportsReadBounds(t *testing.T) {
 	if mine.Counters.RefusedBusy != 1 || mine.Counters.TimedOut != 2 {
 		t.Errorf("counters = %+v, want 1 refused busy and 2 timed out", mine.Counters)
 	}
+	// The gauge reads in a lane of its own: one at a time, so a flood of
+	// them cannot take the connections the rest of the server needs.
+	lane := make(chan struct{})
+	gauge := h.holdRead(t, "/api/v1/system", testSecret, lane)
+	expectError(t, h.get(t, "/api/v1/system"), 503, "the server is busy; retry shortly")
+	close(lane)
+	<-gauge
+
 	theirs := read("tp-sk-other")
 	if theirs.Counters.RefusedBusy != 0 || theirs.Counters.TimedOut != 0 {
 		t.Errorf("another project's counters = %+v, want none of this project's refusals", theirs.Counters)

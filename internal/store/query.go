@@ -533,11 +533,21 @@ func (s *Store) Observation(ctx context.Context, projectID, traceID, id string) 
 	if err != nil {
 		return nil, fmt.Errorf("read observation %s: %w", id, err)
 	}
-	defer rows.Close()
 	if !rows.Next() {
+		rows.Close()
 		return nil, rows.Err()
 	}
-	return s.scanObservation(ctx, rows, WithIO, nil)
+	row, err := scanObservation(rows)
+	// Closed before the payloads are read, so the read holds one statement
+	// at a time.
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	if err := s.resolvePayloads(ctx, row, nil); err != nil {
+		return nil, err
+	}
+	return row, nil
 }
 
 // Statistics grouping (spec 004 #8). The first two group traces by when they

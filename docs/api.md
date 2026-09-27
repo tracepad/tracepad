@@ -1161,8 +1161,10 @@ body slowly holds its connection, not a slot. A client that hangs up ends its
 read; the query stops with it. The interface gives up on a request after 30 s,
 so a person sees the server's reason first.
 
-Two `GET`s are exceptions. `GET /api/v1/system` runs under the deadline but
-takes no slot, so it answers — and shows the slots taken — when every one is.
+Two `GET`s are exceptions. `GET /api/v1/system` runs under the deadline in a
+slot of its own, not one of `TRACEPAD_READ_CONCURRENCY`'s, so it answers — and
+shows the slots taken — when every one of those is; two at once wait for each
+other, and the second may be `503` busy.
 `GET /api/v1/queues/{name}/next` claims an item, which is a write, and is
 bounded as writes are.
 

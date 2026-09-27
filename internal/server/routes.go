@@ -26,12 +26,48 @@ type route struct {
 	handler     http.HandlerFunc
 }
 
-// Two GET routes the read gate treats apart (spec 043 #26), named once for the
-// table and the gate.
+// Two GET routes the read gate treats apart (spec 043 #26, #27), named once for
+// the table and for readBoundOf.
 const (
 	systemPath = "/api/v1/system"
 	claimPath  = "/api/v1/queues/{name}/next"
 )
+
+// readBound is how the read gate bounds a route (spec 043 #15, #16).
+type readBound uint8
+
+const (
+	// ungated is every route that is not a read: the public ones, every
+	// write, and the one GET that writes.
+	ungated readBound = iota
+	// sharedSlots is a read: the deadline, and one of the read slots.
+	sharedSlots
+	// ownLane is the deadline and a slot of its own lane, for the read
+	// that reports the slots.
+	ownLane
+)
+
+// readBoundOf says how the gate bounds a route. It sits beside the table so
+// that a route added to it is judged here too: a new GET that writes, or that
+// reports the gate's own gauges, is named in this switch, and every other GET
+// with a credential is a read.
+func readBoundOf(rt route) readBound {
+	if rt.Method != http.MethodGet || rt.Policy == public {
+		return ungated
+	}
+	switch rt.Path {
+	case claimPath:
+		// Handing out the next item claims it through the writer
+		// (spec 024 #5), and a claim the deadline answered would still
+		// commit (spec 043 #26).
+		return ungated
+	case systemPath:
+		// The gauge answers while every read slot is taken, and its
+		// counts take one slot of their own (spec 043 #27).
+		return ownLane
+	}
+	return sharedSlots
+}
 
 func (s *Server) routes() []route {
 	return []route{

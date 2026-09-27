@@ -59,6 +59,9 @@ func (s *Server) readTree(ctx context.Context, projectID, traceID string) (nodes
 	var (
 		size      int
 		renderErr error
+		// One buffer for every row: each one's bytes are kept as a copy
+		// of their own length.
+		buffer bytes.Buffer
 	)
 	// One row past the ceiling, to learn whether there is one.
 	err = s.store.TreeObservations(ctx, projectID, traceID, store.MaxTreeObservations+1,
@@ -67,8 +70,9 @@ func (s *Server) readTree(ctx context.Context, projectID, traceID string) (nodes
 				cut = true
 				return false
 			}
-			var buffer bytes.Buffer
-			if renderErr = renderOwn(row).appendJSON(&buffer); renderErr != nil {
+			buffer.Reset()
+			if err := renderOwn(row).appendJSON(&buffer); err != nil {
+				renderErr = &treeRenderFailed{err}
 				return false
 			}
 			if size+buffer.Len() > maxTreeBytes {
@@ -89,6 +93,14 @@ func (s *Server) readTree(ctx context.Context, projectID, traceID string) (nodes
 	}
 	return nodes, cut, err
 }
+
+// treeRenderFailed is an observation the renderer could not write, told apart
+// from a failed read so that the handler answers it as the rendering failure
+// it is.
+type treeRenderFailed struct{ err error }
+
+func (e *treeRenderFailed) Error() string { return e.err.Error() }
+func (e *treeRenderFailed) Unwrap() error { return e.err }
 
 // omittedCount is what `observations_omitted` says: nothing for a whole tree,
 // and for a cut one the trace's count less what the tree holds — at least one,

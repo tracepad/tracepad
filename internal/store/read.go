@@ -185,7 +185,11 @@ const observationFrom = `FROM observations o
 	        LEFT JOIN payloads i ON i.id = o.input_id
 	        LEFT JOIN payloads u ON u.id = o.output_id`
 
-// Observations returns a trace's spans ordered by start time.
+// Observations returns a trace's spans ordered by start time, with their
+// payloads when io asks. The tree reads through TreeObservations and a
+// PayloadReader; this is the whole read, for checks and tests of what a write
+// stored. Payloads are read once the rows are, so a read never holds its
+// cursor open while it asks for another statement.
 func (s *Store) Observations(ctx context.Context, projectID, traceID string, io IOMode) ([]*ObservationRow, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT `+observationColumns+`
@@ -195,23 +199,31 @@ func (s *Store) Observations(ctx context.Context, projectID, traceID string, io 
 	if err != nil {
 		return nil, fmt.Errorf("read observations of %s: %w", traceID, err)
 	}
-	defer rows.Close()
-
 	var out []*ObservationRow
-	reads := &mediaReads{}
 	for rows.Next() {
-		row, err := s.scanObservation(ctx, rows, io, reads)
+		row, err := scanObservation(rows)
 		if err != nil {
+			rows.Close()
 			return nil, err
 		}
 		out = append(out, row)
 	}
-	return out, rows.Err()
+	rows.Close()
+	if err := rows.Err(); err != nil || !io {
+		return out, err
+	}
+	reads := &mediaReads{}
+	for _, row := range out {
+		if err := s.resolvePayloads(ctx, row, reads); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
 }
 
-// scanObservation reads one row; reads memoises the Langfuse resolution of
-// Decision 21 across the rows of one read, and may be nil.
-func (s *Store) scanObservation(ctx context.Context, rows *sql.Rows, io IOMode, reads *mediaReads) (*ObservationRow, error) {
+// scanObservation reads one row, its payloads left as the references a
+// PayloadReader or resolvePayloads reads them by.
+func scanObservation(rows *sql.Rows) (*ObservationRow, error) {
 	var (
 		row             ObservationRow
 		parent          sql.NullString
@@ -262,24 +274,29 @@ func (s *Store) scanObservation(ctx context.Context, rows *sql.Rows, io IOMode, 
 	if row.CostDetails, err = decodeObject(costDetails); err != nil {
 		return nil, err
 	}
-	if !io {
-		return &row, nil
+	return &row, nil
+}
+
+// resolvePayloads reads an observation's three payloads into it; reads
+// memoises the Langfuse resolution of Decision 21 across the rows of one read,
+// and may be nil.
+func (s *Store) resolvePayloads(ctx context.Context, row *ObservationRow, reads *mediaReads) error {
+	var err error
+	if row.Input, err = s.readPayload(ctx, row.inputID, row.ProjectID, row.TraceID, reads); err != nil {
+		return err
 	}
-	if row.Input, err = s.readPayload(ctx, inputID, row.ProjectID, row.TraceID, reads); err != nil {
-		return nil, err
+	if row.Output, err = s.readPayload(ctx, row.outputID, row.ProjectID, row.TraceID, reads); err != nil {
+		return err
 	}
-	if row.Output, err = s.readPayload(ctx, outputID, row.ProjectID, row.TraceID, reads); err != nil {
-		return nil, err
-	}
-	metadata, err := s.readPayload(ctx, metadataID, row.ProjectID, row.TraceID, reads)
+	metadata, err := s.readPayload(ctx, row.metadataID, row.ProjectID, row.TraceID, reads)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if metadata != nil {
 		object, _ := metadata.(map[string]any)
 		row.Metadata = object
 	}
-	return &row, nil
+	return nil
 }
 
 // FileSize reports the database's footprint on disk: the main file plus the

@@ -30,7 +30,7 @@ func (s *Store) TreeObservations(ctx context.Context, projectID, traceID string,
 	}
 	defer rows.Close()
 	for rows.Next() {
-		row, err := s.scanObservation(ctx, rows, SkipIO, nil)
+		row, err := scanObservation(rows)
 		if err != nil {
 			return err
 		}
