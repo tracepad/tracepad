@@ -16,7 +16,7 @@ import urllib.request
 from typing import Any
 
 BINARY = os.environ.get("TRACEPAD_BINARY", "")
-KEY = "tp-sk-e2e"
+KEY = "tp-sk-e2e-0000000000000000000000000000"
 
 
 class Store:

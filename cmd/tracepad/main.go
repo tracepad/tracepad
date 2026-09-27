@@ -145,6 +145,9 @@ Server environment:
   TRACEPAD_SWEEP_INTERVAL         retention sweep cadence               (default 1h)
   TRACEPAD_ROLLUP_INTERVAL        statistics rollup cadence             (default 5m)
   TRACEPAD_ADMIN_TOKEN            bearer token for cross-project admin  (default unset)
+                                  at least 32 characters: openssl rand -hex 32
+  TRACEPAD_ADMIN_TOKEN_FILE       read the admin token from this file   (default unset)
+  TRACEPAD_SETUP                  mint and print the setup link         (default on)
 
 `+cli.Usage)
 }
@@ -167,6 +170,9 @@ func serve(args []string) error {
 
 	specs, err := provisionSpecs(cfg)
 	if err != nil {
+		return err
+	}
+	if err := checkDeclaredSecrets(slog.Default(), st, specs); err != nil {
 		return err
 	}
 	boot, err := st.Bootstrap(specs)
@@ -204,6 +210,7 @@ func serve(args []string) error {
 	// deployment still needs its first owner and what the link to create
 	// one is (spec 028 #9).
 	printStartup(os.Stdout, boot, cfg.Listen, srv.SetupURL())
+	noteSetupOff(slog.Default(), cfg, srv)
 	warnPlainHTTP(slog.Default(), cfg.Listen, cfg.URL, cfg.InContainer)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -287,6 +294,52 @@ func provisionSpecs(cfg *config.Config) ([]store.ProvisionSpec, error) {
 	return specs, nil
 }
 
+// checkDeclaredSecrets holds a secret declared in TRACEPAD_PROJECTS to the
+// admin token's length (spec 001 #18) — where the length can still be chosen.
+//
+// A declaration that creates a project is refused when it is short: that key
+// does not exist yet, and a longer one in the variable is the whole fix. A
+// declaration for a project that exists creates nothing — the bootstrap never
+// rotates a project's keys (#9) — so refusing it would send the operator to
+// lengthen a value the server then ignores, while the short key stays live
+// and the applications holding the new one get 401s. There the start goes on,
+// and says, when the short secret is still a live key of that project, how to
+// replace it; rotating needs a running server, which a refusal would not give.
+// The secret is measured, never quoted.
+func checkDeclaredSecrets(log *slog.Logger, st *store.Store, specs []store.ProvisionSpec) error {
+	for i, spec := range specs {
+		if config.SecretLength(spec.SecretKey) >= config.MinSecretLength {
+			continue
+		}
+		existing, err := st.ProjectByName(context.Background(), spec.Name)
+		if err != nil {
+			return err
+		}
+		if existing == nil {
+			return fmt.Errorf("TRACEPAD_PROJECTS entry %d: the secret key is %d characters; want at least %d — %s",
+				i+1, config.SecretLength(spec.SecretKey), config.MinSecretLength, config.GenerateHint)
+		}
+		// A project on its way out is skipped by the bootstrap too, and
+		// "mint a new pair in its settings" is no advice for a project
+		// being deleted.
+		if existing.Deleted() {
+			continue
+		}
+		project, key, err := st.KeyBySecret(context.Background(), spec.SecretKey)
+		if err != nil {
+			return err
+		}
+		if project == nil || project.ID != existing.ID {
+			continue
+		}
+		log.Warn("a key declared in TRACEPAD_PROJECTS is short enough to guess: mint a new pair in the project's "+
+			"settings (or tracepad keys create with the admin token), move the applications onto it, revoke this "+
+			"one, and declare the new secret — openssl rand -hex 32 makes a good one",
+			"entry", i+1, "project", spec.Name, "public_key", key.PublicKey, "length", config.SecretLength(spec.SecretKey))
+	}
+	return nil
+}
+
 // printStartup hands the operator ready-to-paste connection env for every
 // project created in this run — both plain OTel and Langfuse-SDK style
 // (spec 001 #9) — and says where the browser interface is.
@@ -337,12 +390,34 @@ password, and nothing is written down anywhere but this database:
 
   %s
 
-The link is good until this process stops. Restart to have a new one printed.
+The link is good for 24 hours, or until this process stops. Restart to have a
+new one printed.
 
 `, setupURL)
 		return
 	}
 	fmt.Fprintf(w, "\nWeb interface: http://%s/\n\n", host)
+}
+
+// noteSetupOff says, on a server with no owner yet and TRACEPAD_SETUP=off,
+// how the first owner gets made — and warns when nothing can make one (spec
+// 028 #32). A refusal to start would be wrong: the data plane works without
+// an owner, and the admin token can be added by a restart.
+func noteSetupOff(log *slog.Logger, cfg *config.Config, srv *server.Server) {
+	if !cfg.SetupDisabled {
+		return
+	}
+	required, err := srv.SetupRequired(context.Background())
+	if err != nil || !required {
+		return
+	}
+	if cfg.AdminToken == "" {
+		log.Warn("this server has no owner, TRACEPAD_SETUP=off and no TRACEPAD_ADMIN_TOKEN: " +
+			"nobody can sign in to the interface or manage accounts until one of the two is set")
+		return
+	}
+	log.Info("this server has no owner and setup is off; create the first one with the admin token: " +
+		"TRACEPAD_API_KEY=<the admin token> tracepad accounts create <email> --owner")
 }
 
 // warnPlainHTTP says so at start when other machines can reach this server

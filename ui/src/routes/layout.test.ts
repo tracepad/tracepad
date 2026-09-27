@@ -65,6 +65,15 @@ describe('a server with no owner yet', () => {
 
 		await expect(load('/setup')).resolves.toBeUndefined();
 	});
+
+	// An owner the admin token invited has no password until the link is
+	// opened, so the server still needs setting up — and under
+	// TRACEPAD_SETUP=off that link is the only way in (spec 028 #32).
+	it('lets an invitation through', async () => {
+		const load = await guard(false, true);
+
+		await expect(load('/invite')).resolves.toBeUndefined();
+	});
 });
 
 describe('a server nobody is signed in to', () => {

@@ -32,7 +32,7 @@ export type State = {
  * database. No screen takes it any more (spec 028 #14) — it is how this file
  * mints projects and accounts out of band, the way `tracepad accounts` does.
  */
-export const ADMIN_TOKEN = 'e2e-admin-token';
+export const ADMIN_TOKEN = 'e2e-admin-token-00000000000000000000';
 
 /** One password for every fixture account; ten characters is the rule (#1). */
 export const PASSWORD = 'e2e-password';
@@ -123,6 +123,15 @@ export async function acceptInvite(baseURL: string, link: string) {
 }
 
 /**
+ * How long to wait for what a click that runs bcrypt shows: a sign-in, a
+ * password set or changed. Twenty seconds, not the default five: bcrypt at
+ * the production cost is a quarter of a second on an idle machine and
+ * several on one busy with parallel workers and browsers. The binary under
+ * test is the one that ships, so the wait moves rather than the cost.
+ */
+export const BCRYPT_WAIT = 20_000;
+
+/**
  * Signs in through the form, which is the one way in (spec 028 #13). The
  * cookie the server sets is the session for the rest of the test, and the
  * form lands on the remembered project's dashboard (spec 029 #3, spec 034
@@ -138,7 +147,7 @@ export async function signIn(page: Page, account: Account) {
 	// Exact: the eye beside the field is labelled "Show the password".
 	await page.getByLabel('Password', { exact: true }).fill(account.password);
 	await page.getByRole('button', { name: 'Sign in' }).click();
-	await expect(page).toHaveURL(/\/p\/[0-9a-f]{32}\/dashboard(\?|$)/);
+	await expect(page).toHaveURL(/\/p\/[0-9a-f]{32}\/dashboard(\?|$)/, { timeout: BCRYPT_WAIT });
 }
 
 /**

@@ -49,11 +49,11 @@ go build -o "$work/tracepad" "$repo_root/cmd/tracepad"
 port="${SMOKE_PORT:-14318}"
 export TRACEPAD_DATA_DIR="$work/data"
 export TRACEPAD_LISTEN="127.0.0.1:$port"
-export TRACEPAD_PROJECTS="smoke:tp-pk-smoke:tp-sk-smoke"
+export TRACEPAD_PROJECTS="smoke:tp-pk-smoke:tp-sk-smoke-000000000000000000000000"
 # Deliberately not TRACEPAD_*: the server warns about unknown variables under
 # that prefix, and the exporters' own settings are not its configuration.
 export SMOKE_PUBLIC_KEY="tp-pk-smoke"
-export SMOKE_SECRET_KEY="tp-sk-smoke"
+export SMOKE_SECRET_KEY="tp-sk-smoke-000000000000000000000000"
 export SMOKE_HOST="http://127.0.0.1:$port"
 export SMOKE_OTLP_ENDPOINT="$SMOKE_HOST/v1/traces"
 

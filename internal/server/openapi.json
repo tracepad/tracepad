@@ -241,14 +241,14 @@
       "get": {
         "tags": ["auth"],
         "summary": "Whether this server still needs its first owner",
-        "description": "The one thing the interface can learn without a credential. While it answers `{\"required\": true}` the server prints a setup link at every start and every other screen redirects to `/setup`.",
+        "description": "The one thing the interface can learn without a credential. While it answers `{\"required\": true}` the server prints a setup link at every start (good for 24 hours) and every other screen but an invitation redirects to `/setup`. `enabled` is false when the server runs with `TRACEPAD_SETUP=off`: no link is printed, `POST /api/v1/setup` refuses, and the first owner is created with the admin token. `expired` is true when setup is needed and on but no link this start printed still works — past its 24 hours, or never minted because an owner could sign in at start; a restart prints a new one.",
         "operationId": "getSetup",
         "security": [],
         "responses": {
           "200": {"description": "Whether an owner exists", "content": {"application/json": {"schema": {
             "type": "object",
-            "properties": {"required": {"type": "boolean"}},
-            "required": ["required"]
+            "properties": {"required": {"type": "boolean"}, "enabled": {"type": "boolean"}, "expired": {"type": "boolean"}},
+            "required": ["required", "enabled", "expired"]
           }}}},
           "400": {"$ref": "#/components/responses/BadRequest"}
         }
@@ -264,7 +264,7 @@
           "properties": {
             "token": {"type": "string"},
             "email": {"type": "string", "maxLength": 254},
-            "password": {"type": "string", "minLength": 10, "maxLength": 128},
+            "password": {"type": "string", "minLength": 10, "maxLength": 72, "description": "10 to 72 bytes of UTF-8 — what bcrypt reads; maxLength counts characters, so a password outside plain ASCII meets the 72-byte limit sooner"},
             "name": {"type": "string", "maxLength": 200, "description": "Trimmed; at most 200 characters"}
           },
           "required": ["token", "email", "password"]
@@ -282,7 +282,8 @@
             "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
           "415": {"description": "The body is compressed, or not declared `application/json`: a route that takes no credential takes a plain JSON body",
             "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
-          "422": {"$ref": "#/components/responses/Unprocessable"}
+          "422": {"$ref": "#/components/responses/Unprocessable"},
+          "503": {"$ref": "#/components/responses/ServiceUnavailable"}
         }
       }
     },
@@ -328,7 +329,7 @@
           "type": "object",
           "properties": {
             "token": {"type": "string"},
-            "password": {"type": "string", "minLength": 10, "maxLength": 128}
+            "password": {"type": "string", "minLength": 10, "maxLength": 72, "description": "10 to 72 bytes of UTF-8 — what bcrypt reads; maxLength counts characters, so a password outside plain ASCII meets the 72-byte limit sooner"}
           },
           "required": ["token", "password"]
         }}}},
@@ -345,7 +346,8 @@
             "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
           "415": {"description": "The body is compressed, or not declared `application/json`: a route that takes no credential takes a plain JSON body",
             "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
-          "422": {"$ref": "#/components/responses/Unprocessable"}
+          "422": {"$ref": "#/components/responses/Unprocessable"},
+          "503": {"$ref": "#/components/responses/ServiceUnavailable"}
         }
       }
     },
@@ -392,7 +394,7 @@
               "type": "object",
               "properties": {
                 "current": {"type": "string"},
-                "new": {"type": "string", "minLength": 10, "maxLength": 128}
+                "new": {"type": "string", "minLength": 10, "maxLength": 72, "description": "10 to 72 bytes of UTF-8 — what bcrypt reads; maxLength counts characters, so a password outside plain ASCII meets the 72-byte limit sooner"}
               },
               "required": ["current", "new"]
             },
@@ -410,7 +412,9 @@
           "401": {"$ref": "#/components/responses/Unauthorized"},
           "503": {"$ref": "#/components/responses/ServiceUnavailable"},
           "403": {"$ref": "#/components/responses/Forbidden"},
-          "422": {"$ref": "#/components/responses/Unprocessable"}
+          "422": {"$ref": "#/components/responses/Unprocessable"},
+          "409": {"description": "The password changed between checking the current one and writing the new one; sign in again", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+          "429": {"$ref": "#/components/responses/TooManyRequests"}
         }
       }
     },
@@ -2733,7 +2737,7 @@
         "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "Unauthorized": {"description": "The credentials do not resolve to a project",
         "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
-      "ServiceUnavailable": {"description": "The credentials could not be checked right now, or a write met a database condition that passes (a full disk, a lock that did not clear), or a read found no free read slot before its deadline (`the server is busy; retry shortly`): retry after `Retry-After`. A read the deadline stopped while it ran (`the read took longer than 20s and was stopped; narrow the time range or the filters`, the number being `TRACEPAD_READ_TIMEOUT`) carries no `Retry-After`: the same request would be stopped again, so narrow it",
+      "ServiceUnavailable": {"description": "The credentials could not be checked right now, more passwords were being checked at once than the server allows, or a write met a database condition that passes (a full disk, a lock that did not clear), or a read found no free read slot before its deadline (`the server is busy; retry shortly`): retry after `Retry-After`. A read the deadline stopped while it ran (`the read took longer than 20s and was stopped; narrow the time range or the filters`, the number being `TRACEPAD_READ_TIMEOUT`) carries no `Retry-After`: the same request would be stopped again, so narrow it",
         "headers": {"Retry-After": {"schema": {"type": "string"}, "description": "Seconds to wait"}},
         "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "NotFound": {"description": "No such thing in this project",
@@ -2742,7 +2746,7 @@
         "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "Conflict": {"description": "The stored state already answers differently: a name that is taken, a project that is already deleted, the last owner being demoted",
         "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
-      "Unprocessable": {"description": "The request is well formed and the values are not: an email that is not one, a password outside 10-128 characters, a name over 200 characters",
+      "Unprocessable": {"description": "The request is well formed and the values are not: an email that is not one, a password outside 10-72 bytes, a name over 200 characters",
         "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "TooManyRequests": {"description": "Throttled; `Retry-After` says for how long",
         "headers": {"Retry-After": {"schema": {"type": "string"}, "description": "Seconds to wait"}},

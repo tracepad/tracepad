@@ -28,8 +28,20 @@ const testAccountPassword = "correct horse battery"
 // first to ask. The one test that needs a hash at the production cost makes
 // its own.
 var accountHash = sync.OnceValues(func() ([]byte, error) {
-	return store.HashPassword(testAccountPassword)
+	slot := testSlot()
+	defer slot.Release()
+	return store.HashPassword(slot, testAccountPassword)
 })
+
+// testSlot is a place at a gate of the tests' own, for a test that hashes a
+// password outside any request.
+func testSlot() *store.PasswordSlot {
+	slot, err := store.NewPasswordGate(1, 0).Enter(context.Background())
+	if err != nil {
+		panic(err)
+	}
+	return slot
+}
 
 // newAccountHarness is the ordinary harness with the cross-project token
 // configured — which the six-caller matrix needs and the rest is unaffected
@@ -220,44 +232,39 @@ func TestLoginAnswersOneSentenceToEveryFailure(t *testing.T) {
 // distinguishable from a real one by a stopwatch — and the throttle counts
 // per email, so one attempt is all that needs (Decision 8).
 //
-// A wall-clock assertion, deliberately loose: what it catches is the
-// difference between running the hash and not running it, which is two orders
-// of magnitude, not the tens of milliseconds a loaded machine adds. That gap
-// only exists at the production cost — at the one TestMain lowered the binary
-// to, a comparison is a millisecond and so is the noise — so this test, alone
-// in the package, runs at cost 12 and pays for it: about a second, most of the
-// suite's remaining runtime.
+// Counted rather than timed: every failure spends exactly one comparison, as
+// the right password does. A stopwatch asked the same question and got the
+// wrong answer whenever the machine was busy.
 func TestLoginSpendsTheComparisonWhateverTheAnswer(t *testing.T) {
-	lowered := store.SetPasswordCost(store.PasswordCost)
-	t.Cleanup(func() { store.SetPasswordCost(lowered) })
-
 	h := newAccountHarness(t)
-	hash, err := store.HashPassword(testAccountPassword)
-	if err != nil {
+	h.owner(t)
+	h.invited(t, "pending@example.com", false)
+	disabled := h.account(t, "disabled@example.com", false)
+	yes := true
+	if err := h.writer.Submit(t.Context(), &store.AccountUpdate{
+		AccountID: disabled.account.ID, Disabled: &yes, Now: time.Now().UnixNano(),
+	}); err != nil {
 		t.Fatal(err)
 	}
-	h.accountWithHash(t, "owner@example.com", true, hash)
-	h.invited(t, "pending@example.com", false)
 
-	// The real comparison, to measure the others against. The decoy is
-	// built on first use, so this also pays for that.
-	known := timeLogin(t, h, "owner@example.com")
-
-	for _, email := range []string{"nobody@example.com", "pending@example.com"} {
-		took := timeLogin(t, h, email)
-		if took < known/4 {
-			t.Errorf("%s answered in %s against %s for an account that exists; "+
-				"the difference is the answer", email, took, known)
+	for _, attempt := range []struct{ email, password string }{
+		{"owner@example.com", "not the password"},
+		{"nobody@example.com", testAccountPassword},
+		{"pending@example.com", testAccountPassword},
+		{"disabled@example.com", testAccountPassword},
+	} {
+		work := h.server.passwords.Spent()
+		expectError(t, h.login(t, attempt.email, attempt.password), http.StatusUnauthorized, wrongCredentials)
+		if spent := h.server.passwords.Spent() - work; spent != 1 {
+			t.Errorf("%s: the failure spent %d comparisons, want one — the difference is the answer",
+				attempt.email, spent)
 		}
 	}
-}
-
-// timeLogin measures one failed sign-in.
-func timeLogin(t *testing.T, h *harness, email string) time.Duration {
-	t.Helper()
-	start := time.Now()
-	expectError(t, h.login(t, email, "not the password"), http.StatusUnauthorized, wrongCredentials)
-	return time.Since(start)
+	work := h.server.passwords.Spent()
+	expectStatus(t, h.login(t, "owner@example.com", testAccountPassword), http.StatusOK)
+	if spent := h.server.passwords.Spent() - work; spent != 1 {
+		t.Errorf("the right password spent %d comparisons, want one", spent)
+	}
 }
 
 // TestSessionCookieAttributes: `HttpOnly` is the reason to use a cookie at all
@@ -738,10 +745,12 @@ func TestSetup(t *testing.T) {
 
 	rec := h.call(t, "GET", "/api/v1/setup", nil, anonymous)
 	expectStatus(t, rec, 200)
-	if !decodeJSON[struct {
+	if answer := decodeJSON[struct {
 		Required bool `json:"required"`
-	}](t, rec).Required {
-		t.Fatal("a server with no owner must say it needs setting up")
+		Enabled  bool `json:"enabled"`
+		Expired  bool `json:"expired"`
+	}](t, rec); !answer.Required || !answer.Enabled || answer.Expired {
+		t.Fatalf("GET /setup = %+v; a server with no owner must say it needs setting up, and can be", answer)
 	}
 	if h.server.SetupURL() == "" || !strings.Contains(h.server.SetupURL(), "/setup#token=") {
 		t.Fatalf("SetupURL = %q, want a link with the token in the fragment", h.server.SetupURL())

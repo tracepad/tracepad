@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import {
+	BCRYPT_WAIT,
 	createProject,
 	inviteNobody,
 	signIn,
@@ -322,6 +323,10 @@ test('the Server tab belongs to owners', async ({ page }) => {
 });
 
 test('a member changes their own name and password', async ({ page }) => {
+	// A sign-in and a password change are two bcrypt waits of up to
+	// BCRYPT_WAIT each, which a loaded machine can stretch past the default
+	// thirty seconds a test gets; slow() gives this one three times that.
+	test.slow();
 	const own = await createProject('ownaccount');
 	await signIn(page, own.account);
 	await page.goto('/settings/account');
@@ -340,7 +345,7 @@ test('a member changes their own name and password', async ({ page }) => {
 	await page.getByLabel('New password again').fill('a-second-password');
 	await page.getByRole('button', { name: 'Change the password' }).click();
 
-	await expect(page.getByText('Every other browser was signed out.')).toBeVisible();
+	await expect(page.getByText('Every other browser was signed out.')).toBeVisible({ timeout: BCRYPT_WAIT });
 });
 
 // The Account tab is about the person and lives bare (spec 029 #14): a member
@@ -349,12 +354,16 @@ test('a member changes their own name and password', async ({ page }) => {
 test('an account with no projects opens the Account tab from the menu and changes its password', async ({
 	page
 }) => {
+	// A sign-in and a password change are two bcrypt waits of up to
+	// BCRYPT_WAIT each, which a loaded machine can stretch past the default
+	// thirty seconds a test gets; slow() gives this one three times that.
+	test.slow();
 	const nobody = await inviteNobody(state().baseURL, 'nobody');
 	await page.goto('/login');
 	await page.getByLabel('Email').fill(nobody.email);
 	await page.getByLabel('Password', { exact: true }).fill(nobody.password);
 	await page.getByRole('button', { name: 'Sign in' }).click();
-	await expect(page).toHaveURL(/\/p$/);
+	await expect(page).toHaveURL(/\/p$/, { timeout: BCRYPT_WAIT });
 	await expect(page.getByText('No projects yet')).toBeVisible();
 
 	await page.getByRole('button', { name: /^Signed in as/ }).click();
@@ -367,7 +376,7 @@ test('an account with no projects opens the Account tab from the menu and change
 	await page.getByLabel('New password', { exact: true }).fill('a-password-of-my-own');
 	await page.getByLabel('New password again').fill('a-password-of-my-own');
 	await page.getByRole('button', { name: 'Change the password' }).click();
-	await expect(page.getByText('Every other browser was signed out.')).toBeVisible();
+	await expect(page.getByText('Every other browser was signed out.')).toBeVisible({ timeout: BCRYPT_WAIT });
 });
 
 // Under a prefix the tab redirects to its bare address, and from there the
@@ -395,6 +404,10 @@ test('the Account tab lands bare from under a project, and Project leads back un
 });
 
 test('a wrong current password is refused in the server’s words', async ({ page }) => {
+	// A sign-in and a password change are two bcrypt waits of up to
+	// BCRYPT_WAIT each, which a loaded machine can stretch past the default
+	// thirty seconds a test gets; slow() gives this one three times that.
+	test.slow();
 	const own = await createProject('badpassword');
 	await signIn(page, own.account);
 	await page.goto('/settings/account');
@@ -404,5 +417,5 @@ test('a wrong current password is refused in the server’s words', async ({ pag
 	await page.getByLabel('New password again').fill('a-long-enough-one');
 	await page.getByRole('button', { name: 'Change the password' }).click();
 
-	await expect(page.getByRole('alert')).toContainText('wrong current password');
+	await expect(page.getByRole('alert')).toContainText('wrong current password', { timeout: BCRYPT_WAIT });
 });

@@ -9,9 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/tracepad/tracepad/internal/logpace"
@@ -930,109 +928,4 @@ func clientIP(r *http.Request) string {
 		return r.RemoteAddr
 	}
 	return host
-}
-
-// --- The login limiter ------------------------------------------------------
-
-// Login throttling (Decision 8): five failures for one email inside fifteen
-// minutes and the sixth is refused, counted in memory.
-//
-// In memory on purpose: this is a speed bump against a dictionary run, not an
-// account lockout, so it costs no write, it forgets on a restart, and it can
-// never be the reason somebody cannot sign in tomorrow.
-const (
-	loginFailureLimit  = 5
-	loginFailureWindow = 15 * time.Minute
-	// loginTrackedEmails bounds the map. A run against thousands of
-	// invented addresses must not be a way to spend the server's memory;
-	// past the bound the oldest-touched entries are dropped, which throttles
-	// nothing that was not already being throttled.
-	loginTrackedEmails = 4096
-)
-
-type loginLimiter struct {
-	mu       sync.Mutex
-	failures map[string][]time.Time
-}
-
-func newLoginLimiter() *loginLimiter {
-	return &loginLimiter{failures: map[string][]time.Time{}}
-}
-
-// retryAfter reports how long an email must wait, or zero when it may try.
-func (l *loginLimiter) retryAfter(email string, now time.Time) time.Duration {
-	key := strings.ToLower(strings.TrimSpace(email))
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	recent := l.recent(key, now)
-	if len(recent) < loginFailureLimit {
-		return 0
-	}
-	// The oldest failure still inside the window is what has to age out.
-	wait := loginFailureWindow - now.Sub(recent[0])
-	if wait < time.Second {
-		wait = time.Second
-	}
-	return wait
-}
-
-// failed records one wrong answer.
-func (l *loginLimiter) failed(email string, now time.Time) {
-	key := strings.ToLower(strings.TrimSpace(email))
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.failures[key] = append(l.recent(key, now), now)
-	if len(l.failures) > loginTrackedEmails {
-		l.prune(now)
-	}
-}
-
-// succeeded forgets an email's failures: a person who mistyped twice and then
-// got it right is not somebody to throttle.
-func (l *loginLimiter) succeeded(email string) {
-	key := strings.ToLower(strings.TrimSpace(email))
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	delete(l.failures, key)
-}
-
-// recent is one email's failures still inside the window. The caller holds the
-// lock.
-func (l *loginLimiter) recent(key string, now time.Time) []time.Time {
-	kept := l.failures[key][:0:0]
-	for _, at := range l.failures[key] {
-		if now.Sub(at) < loginFailureWindow {
-			kept = append(kept, at)
-		}
-	}
-	if len(kept) == 0 {
-		delete(l.failures, key)
-		return nil
-	}
-	l.failures[key] = kept
-	return kept
-}
-
-// prune drops every email whose failures have all aged out. The caller holds
-// the lock.
-func (l *loginLimiter) prune(now time.Time) {
-	for key := range l.failures {
-		l.recent(key, now)
-	}
-	// Still over the bound after aging: the map is being filled faster than
-	// the window empties it, so it is emptied. Everyone gets their five
-	// tries back, which is the failure mode to prefer over unbounded
-	// memory.
-	if len(l.failures) > loginTrackedEmails {
-		clear(l.failures)
-	}
-}
-
-// retryAfterSeconds renders a wait for the header.
-func retryAfterSeconds(wait time.Duration) string {
-	seconds := int(wait.Round(time.Second) / time.Second)
-	if seconds < 1 {
-		seconds = 1
-	}
-	return strconv.Itoa(seconds)
 }

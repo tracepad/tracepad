@@ -29,7 +29,7 @@ import (
 	tracepad "github.com/tracepad/tracepad/sdk/go"
 )
 
-const key = "tp-sk-e2e"
+const key = "tp-sk-e2e-0000000000000000000000000000"
 
 // store is a running binary, and the read API as a person would call it.
 type store struct {

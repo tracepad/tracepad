@@ -3,6 +3,7 @@
 package config
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -14,7 +15,9 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
+	"unicode/utf8"
 )
 
 // Config is the resolved runtime configuration.
@@ -67,7 +70,15 @@ type Config struct {
 	// recovery when every owner's password is lost (#16). Unset by
 	// default, which makes those endpoints answer 403 and leaves each
 	// project's own key as the administrator of itself.
+	//
+	// Read from TRACEPAD_ADMIN_TOKEN or from the file TRACEPAD_ADMIN_TOKEN_FILE
+	// names, never both, and at least MinSecretLength characters (spec 001
+	// #18): it creates owner accounts, so it is the deployment.
 	AdminToken string
+	// SetupDisabled is TRACEPAD_SETUP=off: no setup token is minted and
+	// `POST /api/v1/setup` refuses, for a deployment whose first owner is
+	// made with the admin token (spec 028 #32).
+	SetupDisabled bool
 	// SessionLife is how long a browser session lasts (spec 028 #4). It
 	// slides: a request seen more than a day after the last one moves the
 	// expiry forward, so "about once a month" is what a person who opens
@@ -151,6 +162,24 @@ func DefaultReadConcurrency(procs int) int {
 	return max(minDefaultConcurrency, 2*procs)
 }
 
+// MinSecretLength is the shortest admin token or declared project secret the
+// server starts with (spec 001 #18). A wrong one is refused in well under a
+// millisecond, so what stops guessing is the size of the space: thirty-two
+// hex characters is 128 bits, which thousands of guesses a second on any
+// number of connections do not exhaust. `openssl rand -hex 32` is 256.
+const MinSecretLength = 32
+
+// SecretLength is a secret's length as MinSecretLength and every refusal count
+// it: in characters, not bytes — so the rule, the message and the check say
+// the same thing, and a secret outside plain ASCII is held to at least as many
+// bytes as a hex one.
+func SecretLength(secret string) int { return utf8.RuneCountInString(secret) }
+
+// GenerateHint is how every short-secret refusal ends: the admin token's
+// here, and a declared project secret's at the start, where the store says
+// whether the declaration creates a project (spec 001 #18).
+const GenerateHint = "generate one with: openssl rand -hex 32"
+
 // knownEnv lists every TRACEPAD_* variable the binary understands.
 var knownEnv = map[string]bool{
 	"TRACEPAD_LISTEN":                true,
@@ -165,6 +194,8 @@ var knownEnv = map[string]bool{
 	"TRACEPAD_SWEEP_INTERVAL":        true,
 	"TRACEPAD_ROLLUP_INTERVAL":       true,
 	"TRACEPAD_ADMIN_TOKEN":           true,
+	"TRACEPAD_ADMIN_TOKEN_FILE":      true,
+	"TRACEPAD_SETUP":                 true,
 	"TRACEPAD_SESSION_DAYS":          true,
 	"TRACEPAD_IN_CONTAINER":          true,
 	// The server reads TRACEPAD_URL too since spec 028 #11 — as the host
@@ -239,6 +270,14 @@ func Load(args []string) (*Config, error) {
 		return nil, fmt.Errorf("TRACEPAD_SESSION_DAYS: want at least %d, got %d",
 			MinSessionDays, sessionDays)
 	}
+	adminToken, err := readAdminToken()
+	if err != nil {
+		return nil, err
+	}
+	setup, err := parseOnOff("TRACEPAD_SETUP", true)
+	if err != nil {
+		return nil, err
+	}
 	cfg := &Config{
 		Listen:              envOr("TRACEPAD_LISTEN", ":4318"),
 		DataDir:             envOr("TRACEPAD_DATA_DIR", defaultDataDir()),
@@ -251,7 +290,8 @@ func Load(args []string) (*Config, error) {
 		MCP:                 mcp,
 		SweepInterval:       sweep,
 		RollupInterval:      rollup,
-		AdminToken:          strings.TrimSpace(os.Getenv("TRACEPAD_ADMIN_TOKEN")),
+		AdminToken:          adminToken,
+		SetupDisabled:       !setup,
 		SessionLife:         time.Duration(sessionDays) * 24 * time.Hour,
 		URL:                 strings.TrimSpace(os.Getenv("TRACEPAD_URL")),
 		InContainer:         inContainer,
@@ -272,6 +312,86 @@ func Load(args []string) (*Config, error) {
 
 	warnUnknownEnv()
 	return cfg, nil
+}
+
+// readAdminToken reads the admin token from TRACEPAD_ADMIN_TOKEN or from the
+// file TRACEPAD_ADMIN_TOKEN_FILE names (spec 001 #18). The file is how a secret
+// reaches a container without passing through the environment every `docker
+// inspect` prints — a mounted Docker or Kubernetes secret. Both set is a
+// refusal rather than a precedence rule: which one the operator meant is not
+// something to guess about the credential that owns the deployment.
+//
+// Whitespace around the value is dropped, as a shell or an editor leaves a
+// newline behind. The value is never quoted in an error: it is the secret.
+func readAdminToken() (string, error) {
+	inline := strings.TrimSpace(os.Getenv("TRACEPAD_ADMIN_TOKEN"))
+	name, token := "TRACEPAD_ADMIN_TOKEN", inline
+	if strings.TrimSpace(os.Getenv("TRACEPAD_ADMIN_TOKEN_FILE")) != "" {
+		if inline != "" {
+			return "", errors.New("TRACEPAD_ADMIN_TOKEN and TRACEPAD_ADMIN_TOKEN_FILE are both set; set one")
+		}
+		fromFile, err := AdminTokenFile(os.Getenv)
+		if err != nil {
+			return "", err
+		}
+		name, token = "TRACEPAD_ADMIN_TOKEN_FILE", fromFile
+	}
+	if token != "" && SecretLength(token) < MinSecretLength {
+		return "", fmt.Errorf("%s: the admin token is %d characters; it creates owner accounts, "+
+			"so it must be at least %d — %s", name, SecretLength(token), MinSecretLength, GenerateHint)
+	}
+	return token, nil
+}
+
+// maxAdminTokenFile is the most TRACEPAD_ADMIN_TOKEN_FILE may hold. A token is
+// sixty-four characters and a newline; a file far past that is a mount that
+// went to the wrong place, and reading it whole could be reading forever.
+const maxAdminTokenFile = 4 * 1024
+
+// AdminTokenFile reads the admin token from the file TRACEPAD_ADMIN_TOKEN_FILE
+// names, trimmed, or "" when the variable is unset. The file must be a regular
+// one — a symbolic link to one is followed, which is how Kubernetes mounts a
+// secret — of at most 4 KiB, and not empty: a device, a directory or a large
+// file is a path that went wrong, and an error says so instead of reading
+// /dev/zero until memory runs out. getenv is how the caller reads its
+// environment: the server's start (readAdminToken) and the CLI's export
+// guard, which must know every key of this Tracepad the machine holds, read
+// the file the one same way.
+func AdminTokenFile(getenv func(string) string) (string, error) {
+	path := strings.TrimSpace(getenv("TRACEPAD_ADMIN_TOKEN_FILE"))
+	if path == "" {
+		return "", nil
+	}
+	// Opened without waiting, and asked what it is through what was opened:
+	// a plain open of a named pipe waits for somebody to write to it, and a
+	// start that waits for ever says nothing at all. Asking by name first
+	// and opening afterwards would leave a moment for the name to become a
+	// pipe in between.
+	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return "", fmt.Errorf("TRACEPAD_ADMIN_TOKEN_FILE: %w", err)
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return "", fmt.Errorf("TRACEPAD_ADMIN_TOKEN_FILE: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("TRACEPAD_ADMIN_TOKEN_FILE: %s is not a regular file", path)
+	}
+	raw, err := io.ReadAll(io.LimitReader(file, maxAdminTokenFile+1))
+	if err != nil {
+		return "", fmt.Errorf("TRACEPAD_ADMIN_TOKEN_FILE: %w", err)
+	}
+	if len(raw) > maxAdminTokenFile {
+		return "", fmt.Errorf("TRACEPAD_ADMIN_TOKEN_FILE: %s is larger than %d bytes; it should hold the token alone",
+			path, maxAdminTokenFile)
+	}
+	token := strings.TrimSpace(string(raw))
+	if token == "" {
+		return "", fmt.Errorf("TRACEPAD_ADMIN_TOKEN_FILE: %s is empty", path)
+	}
+	return token, nil
 }
 
 // DBPath returns the path of the SQLite database file.

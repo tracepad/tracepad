@@ -86,8 +86,10 @@ until this deployment has an owner:
   http://localhost:4318/setup#token=…
 ```
 
-Its token is minted per start and held in memory, never on the volume, so a
-`docker restart` prints a new one and a log kept from last week opens nothing.
+Its token is minted per start and held in memory, never on the volume, and it
+works for 24 hours: a `docker restart` prints a new one, and a log kept from
+last week opens nothing. A deployment that makes its first owner with the admin
+token can set `TRACEPAD_SETUP=off`, and no link is minted or printed at all.
 The address in it is the container's own guess; behind a proxy, set
 `TRACEPAD_URL` and the link is printed at the address your people use. See
 [accounts.md](accounts.md).
@@ -116,7 +118,9 @@ owner's or editor's session and the admin token, which is why a deployment you
 cannot afford to lock yourself out of should be started with one:
 
 ```sh
-# tracepad.env holds one line: TRACEPAD_ADMIN_TOKEN=…
+# A token of at least 32 characters, generated rather than invented; a shorter
+# one stops the server from starting.
+( umask 077; printf 'TRACEPAD_ADMIN_TOKEN=%s\n' "$(openssl rand -hex 32)" > tracepad.env )
 docker run -d --name tracepad -v tracepad:/data -p 127.0.0.1:4318:4318 \
   --env-file ./tracepad.env \
   ghcr.io/tracepad/tracepad
@@ -238,16 +242,37 @@ reverse proxy the container can only guess, and the guess is its own address,
 so set it to the address your people type — see
 [Serving over TLS](#serving-over-tls).
 
-`TRACEPAD_ADMIN_TOKEN` is a credential, and **no way of handing it to a
-container keeps it out of `docker inspect`**: `-e`, `--env-file` and Compose's
-`env_file` all end up in the container's configuration, which shows every
-variable in plain text to anyone who can talk to the Docker daemon. What a file
-does buy is keeping the value off the command line — out of your shell's
-history, the host's process list and a `docker-compose.yml` you commit — so use
-one, `chmod 600` it, and keep it out of version control. The rest is who has
-the Docker socket: on that host it is as good as root, and it reads this token
-whatever you do. The same goes for `TRACEPAD_PROJECTS`, whose entries carry
-secret keys.
+`TRACEPAD_ADMIN_TOKEN` is a credential that creates owner accounts, and **no
+environment variable keeps it out of `docker inspect`**: `-e`, `--env-file` and
+Compose's `env_file` all end up in the container's configuration, which shows
+every variable in plain text to anyone who can talk to the Docker daemon. An
+env file does keep the value off the command line — out of your shell's
+history, the host's process list and a `docker-compose.yml` you commit — so if
+you use one, `chmod 600` it and keep it out of version control. What keeps the
+token out of the container's configuration is a file mounted into it, named by
+`TRACEPAD_ADMIN_TOKEN_FILE`; the configuration then shows the path, not the
+token. The server reads the file at start, trims the newline, and refuses to
+start when both variables are set:
+
+```sh
+( umask 077; openssl rand -hex 32 > admin-token )
+# The image runs as uid 65532; the file must be readable by it.
+sudo chown 65532 admin-token
+docker run -d --name tracepad -v tracepad:/data -p 127.0.0.1:4318:4318 \
+  -v "$PWD/admin-token:/run/secrets/tracepad_admin_token:ro" \
+  -e TRACEPAD_ADMIN_TOKEN_FILE=/run/secrets/tracepad_admin_token \
+  ghcr.io/tracepad/tracepad
+```
+
+Compose's `secrets:` mounts the same file at `/run/secrets/<name>` for you (see
+[Compose](#compose)). The rest is who has the Docker socket: on that host it is
+as good as root, and it reads this token whatever you do. The same goes for
+`TRACEPAD_PROJECTS`, whose entries carry secret keys. An admin token shorter
+than 32 characters stops the start, and so does a short declared secret for a
+project the start would create, each with the command above in the message. A
+project that already exists keeps the keys it has — the variable never rotates
+them — so a short declared secret that is still its key is a warning at every
+start, saying how to replace it.
 
 `TRACEPAD_LISTEN` is already right, and the way to break it is to set it to
 `127.0.0.1:4318`. Inside a container, loopback is the container's own: the
@@ -374,10 +399,25 @@ services:
       - "127.0.0.1:4318:4318"
     volumes:
       - tracepad:/data
-    env_file: [.env]        # TRACEPAD_ADMIN_TOKEN and anything else secret; chmod 600, not in git
+    environment:
+      TRACEPAD_ADMIN_TOKEN_FILE: /run/secrets/tracepad_admin_token
+    secrets: [tracepad_admin_token]
+
+secrets:
+  tracepad_admin_token:
+    file: ./admin-token     # not in git; made as below
 
 volumes:
   tracepad:
+```
+
+Compose mounts the file as it is on the host, owner and mode included, so make
+it the way the `docker run` example above does — readable by the image's user
+and by nobody else:
+
+```sh
+( umask 077; openssl rand -hex 32 > admin-token )
+sudo chown 65532 admin-token
 ```
 
 `docker compose logs tracepad` is where the first run's keys are — and where

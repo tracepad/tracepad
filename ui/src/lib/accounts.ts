@@ -4,9 +4,15 @@ import { ApiError, type AccountDetail, type Membership } from '$lib/api/client.s
 // same way (spec 028): what a password has to be, what the server said when it
 // refused, and what standing an account is in.
 
-/** Decision 1: ten characters and a length cap, and no other rule. */
+/**
+ * Decision 1: ten characters and a length cap, and no other rule. The cap is
+ * in bytes of UTF-8, because that is what `bcrypt` reads (Decision 31).
+ */
 export const MIN_PASSWORD = 10;
-export const MAX_PASSWORD = 128;
+export const MAX_PASSWORD_BYTES = 72;
+
+/** What the cap and the floor say, for the hint under a new password. */
+export const PASSWORD_HINT = `At least ${MIN_PASSWORD} characters and at most ${MAX_PASSWORD_BYTES} bytes. There is no other rule.`;
 
 /**
  * What is wrong with a new password and its confirmation, if anything. The
@@ -17,7 +23,9 @@ export function passwordProblem(password: string, again: string): string | null 
 	if (password.length < MIN_PASSWORD) {
 		return `A password is at least ${MIN_PASSWORD} characters. There is no other rule.`;
 	}
-	if (password.length > MAX_PASSWORD) return `A password is at most ${MAX_PASSWORD} characters.`;
+	if (new TextEncoder().encode(password).length > MAX_PASSWORD_BYTES) {
+		return `A password is at most ${MAX_PASSWORD_BYTES} bytes; a character outside plain ASCII takes two to four.`;
+	}
 	if (password !== again) return 'The two passwords do not match.';
 	return null;
 }

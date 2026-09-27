@@ -18,6 +18,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/tracepad/tracepad/internal/config"
 	"github.com/tracepad/tracepad/internal/mapping"
 )
 
@@ -382,7 +383,9 @@ var reservedHeaders = map[string]bool{
 // ownKeys are the keys of this Tracepad the machine running the export holds
 // where the command can see them: the one it reads the archive with (--key or
 // TRACEPAD_API_KEY), TRACEPAD_API_KEY itself when --key overrode it, the
-// server's TRACEPAD_ADMIN_TOKEN, the LANGFUSE_SECRET_KEY an application sends
+// server's TRACEPAD_ADMIN_TOKEN — or the one in the file
+// TRACEPAD_ADMIN_TOKEN_FILE names, read as the server reads it — the
+// LANGFUSE_SECRET_KEY an application sends
 // traces here with, and every `tp-sk-…` in OTEL_EXPORTER_OTLP_HEADERS, which
 // the export does not send but a --header may have copied from. No receiver
 // has a use for any of them. Each is trimmed as the server trims the admin
@@ -390,6 +393,11 @@ var reservedHeaders = map[string]bool{
 func (r *run) ownKeys() []string {
 	candidates := []string{r.key, r.opt.Env("TRACEPAD_API_KEY"), r.opt.Env("TRACEPAD_ADMIN_TOKEN"),
 		r.opt.Env("LANGFUSE_SECRET_KEY")}
+	// A file this machine cannot read holds no key the export could leak
+	// from here, so an error is not a reason to refuse the export.
+	if token, err := config.AdminTokenFile(r.opt.Env); err == nil {
+		candidates = append(candidates, token)
+	}
 	for _, reading := range readings(r.opt.Env("OTEL_EXPORTER_OTLP_HEADERS")) {
 		candidates = append(candidates, tracepadKeys(reading)...)
 	}
@@ -474,7 +482,7 @@ func (k keyCheck) refuse(where, text, bare string) error {
 // point, and the synopsis printed under it would bury it.
 func ownKeyError(where string) error {
 	return fmt.Errorf("%s carries a key of your Tracepad that this machine holds (--key, "+
-		"TRACEPAD_API_KEY, TRACEPAD_ADMIN_TOKEN, LANGFUSE_SECRET_KEY or OTEL_EXPORTER_OTLP_HEADERS); "+
+		"TRACEPAD_API_KEY, TRACEPAD_ADMIN_TOKEN or its _FILE, LANGFUSE_SECRET_KEY or OTEL_EXPORTER_OTLP_HEADERS); "+
 		"the receiver would get admin access to your project. --allow-tracepad-key does not "+
 		"change that: give the receiver its own credentials", where)
 }

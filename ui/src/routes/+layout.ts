@@ -1,5 +1,5 @@
 import { redirect } from '@sveltejs/kit';
-import { auth, LOGIN_ROUTE, OUTSIDE_THE_SHELL, SETUP_ROUTE } from '$lib/auth.svelte';
+import { auth, INVITE_ROUTE, LOGIN_ROUTE, OUTSIDE_THE_SHELL, SETUP_ROUTE } from '$lib/auth.svelte';
 import { bootstrap, needsSetup } from '$lib/session';
 import { theme } from '$lib/theme.svelte';
 import type { LayoutLoad } from './$types';
@@ -25,6 +25,11 @@ let setupRequired = false;
  * sent a person who had just signed out to `/setup`, whose only way onwards
  * is `/login`, which sent them back — a loop nothing but a reload escaped.
  * Once the answer is `false` it is never asked again.
+ *
+ * An invitation is let through even then: an owner the admin token invited
+ * before anybody used the setup link — the only way in under
+ * `TRACEPAD_SETUP=off` (Decision 32) — still has no password until the link
+ * is opened, so the server keeps saying it needs setting up.
  */
 export const load: LayoutLoad = async ({ url }) => {
 	if (!started) {
@@ -36,7 +41,7 @@ export const load: LayoutLoad = async ({ url }) => {
 	const path = url.pathname;
 	if (setupRequired) setupRequired = await needsSetup();
 	if (setupRequired) {
-		if (path !== SETUP_ROUTE) redirect(307, SETUP_ROUTE);
+		if (path !== SETUP_ROUTE && path !== INVITE_ROUTE) redirect(307, SETUP_ROUTE);
 		return;
 	}
 	if (!OUTSIDE_THE_SHELL.includes(path)) {

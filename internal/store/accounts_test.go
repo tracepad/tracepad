@@ -17,7 +17,7 @@ import (
 // testHash is one bcrypt hash for the whole test binary. The cost is 12 by
 // design (Decision 1), which is a quarter of a second: hashing per test would
 // be minutes of the suite spent proving the same thing over and over.
-var testHash = sync.OnceValues(func() ([]byte, error) { return HashPassword(testAccountPassword) })
+var testHash = sync.OnceValues(func() ([]byte, error) { return HashPassword(anySlot(), testAccountPassword) })
 
 const testAccountPassword = "correct horse battery"
 
@@ -121,17 +121,17 @@ func TestAccountsMigrationAndPurgeCascade(t *testing.T) {
 func TestPasswordRoundTrip(t *testing.T) {
 	hash := hashOnce(t)
 	account := &Account{hash: hash}
-	if !account.Verify(testAccountPassword) {
+	if !account.Verify(anySlot(), testAccountPassword) {
 		t.Error("the password does not verify against its own hash")
 	}
-	if account.Verify(testAccountPassword + "!") {
+	if account.Verify(anySlot(), testAccountPassword+"!") {
 		t.Error("a wrong password verified")
 	}
 
 	// An invited account has no password, so nothing verifies — which is
 	// what makes `pending` answer the login with the same 401 as a wrong
 	// password (Decision 8).
-	if (&Account{}).Verify("") {
+	if (&Account{}).Verify(anySlot(), "") {
 		t.Error("an account with no password must verify nothing")
 	}
 
@@ -140,13 +140,13 @@ func TestPasswordRoundTrip(t *testing.T) {
 		t.Errorf("hash prefix = %q, want cost %d", got, PasswordCost)
 	}
 
-	if _, err := HashPassword(strings.Repeat("a", MinPasswordLength-1)); err == nil {
+	if _, err := HashPassword(anySlot(), strings.Repeat("a", MinPasswordLength-1)); err == nil {
 		t.Errorf("a %d-character password was accepted", MinPasswordLength-1)
 	}
-	if _, err := HashPassword(strings.Repeat("a", MaxPasswordLength+1)); err == nil {
+	if _, err := HashPassword(anySlot(), strings.Repeat("a", MaxPasswordLength+1)); err == nil {
 		t.Errorf("a %d-character password was accepted", MaxPasswordLength+1)
 	}
-	if _, err := HashPassword(strings.Repeat("a", MinPasswordLength)); err != nil {
+	if _, err := HashPassword(anySlot(), strings.Repeat("a", MinPasswordLength)); err != nil {
 		t.Errorf("the shortest allowed password was refused: %v", err)
 	}
 }
@@ -362,7 +362,7 @@ func TestInvitationIsSingleUseAndExpires(t *testing.T) {
 		t.Error("a reset must end the account's sessions")
 	}
 	stillThere, _ := f.AccountByID(context.Background(), account.ID)
-	if !stillThere.Verify(testAccountPassword) {
+	if !stillThere.Verify(anySlot(), testAccountPassword) {
 		t.Error("a reset must leave the old password working until the link is used")
 	}
 

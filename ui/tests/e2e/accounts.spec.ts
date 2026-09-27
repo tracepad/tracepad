@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { FAILING_TRACE, PASSWORD } from './harness';
+import { BCRYPT_WAIT, FAILING_TRACE, PASSWORD } from './harness';
 
 // The whole of spec 028 as one story, against a server of its own: the setup
 // link the binary printed creates the first owner, that owner invites a
@@ -116,7 +116,7 @@ async function signIn(page: Page, at: Stand, who: { email: string; password: str
 	await page.getByLabel('Email').fill(who.email);
 	await page.getByLabel('Password', { exact: true }).fill(who.password);
 	await page.getByRole('button', { name: 'Sign in' }).click();
-	await expect(page).toHaveURL(/\/dashboard(\?|$)/);
+	await expect(page).toHaveURL(/\/dashboard(\?|$)/, { timeout: BCRYPT_WAIT });
 }
 
 /**
@@ -178,7 +178,7 @@ test.describe('accounts, from the link the server printed', () => {
 		await page.getByLabel('Password again').fill(OWNER.password);
 		await page.getByRole('button', { name: 'Create the owner' }).click();
 
-		await expect(page).toHaveURL(/\/dashboard(\?|$)/);
+		await expect(page).toHaveURL(/\/dashboard(\?|$)/, { timeout: BCRYPT_WAIT });
 		// The token rode in the fragment and does not survive the screen
 		// (spec 006 #8), nor the back button.
 		expect(page.url()).not.toContain('#token=');
@@ -230,7 +230,7 @@ test.describe('accounts, from the link the server printed', () => {
 		await page.getByLabel('Password', { exact: true }).fill(VIEWER.password);
 		await page.getByLabel('Password again').fill(VIEWER.password);
 		await page.getByRole('button', { name: 'Set the password and sign in' }).click();
-		await expect(page).toHaveURL(/\/dashboard(\?|$)/);
+		await expect(page).toHaveURL(/\/dashboard(\?|$)/, { timeout: BCRYPT_WAIT });
 
 		// The project's traces, which is what the membership is for.
 		await page.goto(`${at.base}/traces`);
@@ -299,6 +299,6 @@ test.describe('accounts, from the link the server printed', () => {
 		await page.getByLabel('Email').fill(VIEWER.email);
 		await page.getByLabel('Password', { exact: true }).fill(VIEWER.password);
 		await page.getByRole('button', { name: 'Sign in' }).click();
-		await expect(page.getByRole('alert')).toContainText('wrong email or password');
+		await expect(page.getByRole('alert')).toContainText('wrong email or password', { timeout: BCRYPT_WAIT });
 	});
 });

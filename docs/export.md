@@ -131,13 +131,14 @@ URL whole — as written, percent-decoded, and with anything base64 decoded — 
 the scheme does not matter: a bearer token, a Basic pair, a query parameter, a
 path segment. The keys of your Tracepad this machine holds are refused
 outright: the one the command reads with (`--key` or `TRACEPAD_API_KEY`),
-`TRACEPAD_API_KEY` even when `--key` overrides it, `TRACEPAD_ADMIN_TOKEN`,
-`LANGFUSE_SECRET_KEY`, and any `tp-sk-…` in `OTEL_EXPORTER_OTLP_HEADERS`:
+`TRACEPAD_API_KEY` even when `--key` overrides it, `TRACEPAD_ADMIN_TOKEN` or
+the token in the file `TRACEPAD_ADMIN_TOKEN_FILE` names, `LANGFUSE_SECRET_KEY`,
+and any `tp-sk-…` in `OTEL_EXPORTER_OTLP_HEADERS`:
 
 ```
 $ tracepad export --otlp --to https://otlp.example.com/v1/traces \
     --header "authorization=Bearer $TRACEPAD_API_KEY"
-tracepad: --header Authorization carries a key of your Tracepad that this machine holds (--key, TRACEPAD_API_KEY, TRACEPAD_ADMIN_TOKEN, LANGFUSE_SECRET_KEY or OTEL_EXPORTER_OTLP_HEADERS); the receiver would get admin access to your project. --allow-tracepad-key does not change that: give the receiver its own credentials
+tracepad: --header Authorization carries a key of your Tracepad that this machine holds (--key, TRACEPAD_API_KEY, TRACEPAD_ADMIN_TOKEN or its _FILE, LANGFUSE_SECRET_KEY or OTEL_EXPORTER_OTLP_HEADERS); the receiver would get admin access to your project. --allow-tracepad-key does not change that: give the receiver its own credentials
 ```
 
 An admin token shorter than 16 characters is looked for only as a whole word

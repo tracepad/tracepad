@@ -1,7 +1,9 @@
 package store
 
 import (
+	"context"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -14,8 +16,11 @@ import (
 // in either is a change in the diff.
 //
 // The rule is a length and nothing else: composition rules ("one digit, one
-// symbol") measurably make passwords worse, and the ceiling is where `bcrypt`
-// stops reading the input anyway.
+// symbol") measurably make passwords worse. The ceiling is where `bcrypt`
+// stops reading the input, measured the way it measures: in bytes. The
+// library refuses anything longer outright, so a ceiling above it was a
+// password the server accepted as valid and then failed to hash (spec 028
+// #31).
 const (
 	// PasswordCost is the bcrypt work factor. Twelve is about a quarter of
 	// a second on the hardware this runs on, which is the point: a login is
@@ -23,15 +28,18 @@ const (
 	// millions.
 	PasswordCost = 12
 
-	// MinPasswordLength and MaxPasswordLength bound what may be set.
+	// MinPasswordLength and MaxPasswordLength bound what may be set, in
+	// bytes of UTF-8.
 	MinPasswordLength = 10
-	MaxPasswordLength = 128
+	MaxPasswordLength = 72
 )
 
 // ErrPasswordLength is a password outside the bounds above. The message is
-// what the person setting it reads, so it says both ends.
+// what the person setting it reads, so it says both ends — and says bytes,
+// because 72 of them is 72 Latin letters and 36 Cyrillic ones (spec 028 #31).
 var ErrPasswordLength = fmt.Errorf(
-	"a password must be between %d and %d characters", MinPasswordLength, MaxPasswordLength)
+	"a password must be between %d and %d bytes; a character outside plain ASCII takes two to four",
+	MinPasswordLength, MaxPasswordLength)
 
 // passwordCost is the work factor in force: PasswordCost unless a test binary
 // has lowered it (see SetPasswordCost). Read on every hash and every decoy so
@@ -52,13 +60,114 @@ func SetPasswordCost(cost int) (previous int) {
 	return int(passwordCost.Swap(int32(cost)))
 }
 
+// CheckPasswordLength is the rule alone, for a caller that has more to check
+// before it may spend a hash on the answer (an invitation's token).
+func CheckPasswordLength(password string) error {
+	if len(password) < MinPasswordLength || len(password) > MaxPasswordLength {
+		return ErrPasswordLength
+	}
+	return nil
+}
+
+// PasswordGate bounds the `bcrypt` computations in flight: a few at once, a
+// short queue behind them, and a refusal for whatever arrives past that (spec
+// 028 #31). A queue with no bound would only move the exhaustion from the CPU
+// to the connections waiting on it.
+//
+// It lives here, beside the only two functions that run `bcrypt`, because
+// both take the PasswordSlot only the gate hands out: a caller that forgot the
+// gate does not compile, and one that passes nil or a slot it already gave
+// back panics — rather than quietly spending the CPU the gate exists to
+// protect. The server owns the gate — sizing it, and answering a refusal with
+// a `503` — so it is a value and not a package-level variable, and so are its
+// count (Spent).
+type PasswordGate struct {
+	slots chan struct{}
+	queue chan struct{}
+	spent atomic.Int64
+}
+
+// ErrPasswordsBusy is the gate turning a caller away: the slots and the queue
+// behind them are full.
+var ErrPasswordsBusy = errors.New("the server is busy checking passwords; try again in a moment")
+
+// NewPasswordGate makes a gate of slots places with room for queue callers to
+// wait behind them.
+func NewPasswordGate(slots, queue int) *PasswordGate {
+	return &PasswordGate{slots: make(chan struct{}, max(slots, 1)), queue: make(chan struct{}, max(queue, 0))}
+}
+
+// Slots and Queue report the gate's size, for the log line that says it was
+// full.
+func (g *PasswordGate) Slots() int { return cap(g.slots) }
+func (g *PasswordGate) Queue() int { return cap(g.queue) }
+
+// waiting reports how many callers are queued for a place right now.
+func (g *PasswordGate) waiting() int { return len(g.queue) }
+
+// Spent reports how many hashes and comparisons this gate has let through —
+// never the decoy's one-off construction. "Did this request run bcrypt" is a
+// count, and a stopwatch on a loaded machine answers it wrongly.
+func (g *PasswordGate) Spent() int64 { return g.spent.Load() }
+
+// PasswordSlot is a place at the gate: what HashPassword and Verify demand, and
+// what only Enter makes. Release gives it back; releasing twice is harmless,
+// using it after is a panic.
+type PasswordSlot struct {
+	gate     *PasswordGate
+	released atomic.Bool
+}
+
+// Release gives the place back.
+func (s *PasswordSlot) Release() {
+	if s.released.CompareAndSwap(false, true) {
+		<-s.gate.slots
+	}
+}
+
+// Enter takes a place, waiting in the queue if there is room in it. It answers
+// ErrPasswordsBusy when the queue is full, and the context's error when the
+// caller gave up while it waited — which is not the gate being full, and is
+// not to be reported as though it were.
+func (g *PasswordGate) Enter(ctx context.Context) (*PasswordSlot, error) {
+	select {
+	case g.slots <- struct{}{}:
+		return &PasswordSlot{gate: g}, nil
+	default:
+	}
+	select {
+	case g.queue <- struct{}{}:
+	default:
+		return nil, ErrPasswordsBusy
+	}
+	defer func() { <-g.queue }()
+	select {
+	case g.slots <- struct{}{}:
+		return &PasswordSlot{gate: g}, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// spend insists on a place at the gate held right now, and counts the work.
+// Reaching bcrypt without one — nil, or a slot already given back — is a
+// mistake in the code, not in the request, so it is a panic, which a test
+// meets at once.
+func (s *PasswordSlot) spend() {
+	if s == nil || s.gate == nil || s.released.Load() {
+		panic("store: bcrypt without a place held at the password gate")
+	}
+	s.gate.spent.Add(1)
+}
+
 // HashPassword checks the length and hashes. The two are one call because a
 // caller that hashed first and validated afterwards would have spent a quarter
 // of a second on a password it was going to refuse.
-func HashPassword(password string) ([]byte, error) {
-	if len(password) < MinPasswordLength || len(password) > MaxPasswordLength {
-		return nil, ErrPasswordLength
+func HashPassword(slot *PasswordSlot, password string) ([]byte, error) {
+	if err := CheckPasswordLength(password); err != nil {
+		return nil, err
 	}
+	slot.spend()
 	return bcrypt.GenerateFromPassword([]byte(password), int(passwordCost.Load()))
 }
 
@@ -112,7 +221,8 @@ func decoy() []byte {
 // nothing, which is what makes `pending` answer the login with the same 401 as
 // a wrong password (Decision 8). It spends the comparison anyway, against the
 // decoy, so that it answers in the same time as well.
-func (a *Account) Verify(password string) bool {
+func (a *Account) Verify(slot *PasswordSlot, password string) bool {
+	slot.spend()
 	if a == nil || len(a.hash) == 0 {
 		bcrypt.CompareHashAndPassword(decoy(), []byte(password))
 		return false

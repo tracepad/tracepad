@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import {
+	BCRYPT_WAIT,
 	FAILING_TRACE,
 	LARGE_PAYLOAD_OBSERVATION,
 	LARGE_PAYLOAD_TRACE,
@@ -41,7 +42,7 @@ test('a wrong password is refused with one sentence', async ({ page }) => {
 	await page.getByRole('button', { name: 'Sign in' }).click();
 
 	// One text for every way of failing, so the form enumerates nobody (#8).
-	await expect(page.getByRole('alert')).toContainText('wrong email or password');
+	await expect(page.getByRole('alert')).toContainText('wrong email or password', { timeout: BCRYPT_WAIT });
 	await expect(page).toHaveURL(/\/login/);
 });
 
@@ -51,7 +52,7 @@ test('an unknown email is refused with the same sentence', async ({ page }) => {
 	await page.getByLabel('Password', { exact: true }).fill('not-the-password');
 	await page.getByRole('button', { name: 'Sign in' }).click();
 
-	await expect(page.getByRole('alert')).toContainText('wrong email or password');
+	await expect(page.getByRole('alert')).toContainText('wrong email or password', { timeout: BCRYPT_WAIT });
 });
 
 test('signing out ends the session and the next screen asks again', async ({ page }) => {

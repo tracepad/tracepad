@@ -171,7 +171,7 @@ export interface paths {
         };
         /**
          * Whether this server still needs its first owner
-         * @description The one thing the interface can learn without a credential. While it answers `{"required": true}` the server prints a setup link at every start and every other screen redirects to `/setup`.
+         * @description The one thing the interface can learn without a credential. While it answers `{"required": true}` the server prints a setup link at every start (good for 24 hours) and every other screen but an invitation redirects to `/setup`. `enabled` is false when the server runs with `TRACEPAD_SETUP=off`: no link is printed, `POST /api/v1/setup` refuses, and the first owner is created with the admin token. `expired` is true when setup is needed and on but no link this start printed still works — past its 24 hours, or never minted because an owner could sign in at start; a restart prints a new one.
          */
         get: operations["getSetup"];
         put?: never;
@@ -2370,7 +2370,7 @@ export interface components {
                 "application/json": components["schemas"]["Error"];
             };
         };
-        /** @description The credentials could not be checked right now, or a write met a database condition that passes (a full disk, a lock that did not clear), or a read found no free read slot before its deadline (`the server is busy; retry shortly`): retry after `Retry-After`. A read the deadline stopped while it ran (`the read took longer than 20s and was stopped; narrow the time range or the filters`, the number being `TRACEPAD_READ_TIMEOUT`) carries no `Retry-After`: the same request would be stopped again, so narrow it */
+        /** @description The credentials could not be checked right now, more passwords were being checked at once than the server allows, or a write met a database condition that passes (a full disk, a lock that did not clear), or a read found no free read slot before its deadline (`the server is busy; retry shortly`): retry after `Retry-After`. A read the deadline stopped while it ran (`the read took longer than 20s and was stopped; narrow the time range or the filters`, the number being `TRACEPAD_READ_TIMEOUT`) carries no `Retry-After`: the same request would be stopped again, so narrow it */
         ServiceUnavailable: {
             headers: {
                 /** @description Seconds to wait */
@@ -2408,7 +2408,7 @@ export interface components {
                 "application/json": components["schemas"]["Error"];
             };
         };
-        /** @description The request is well formed and the values are not: an email that is not one, a password outside 10-128 characters, a name over 200 characters */
+        /** @description The request is well formed and the values are not: an email that is not one, a password outside 10-72 bytes, a name over 200 characters */
         Unprocessable: {
             headers: {
                 [name: string]: unknown;
@@ -2851,6 +2851,8 @@ export interface operations {
                 content: {
                     "application/json": {
                         required: boolean;
+                        enabled: boolean;
+                        expired: boolean;
                     };
                 };
             };
@@ -2869,6 +2871,7 @@ export interface operations {
                 "application/json": {
                     token: string;
                     email: string;
+                    /** @description 10 to 72 bytes of UTF-8 — what bcrypt reads; maxLength counts characters, so a password outside plain ASCII meets the 72-byte limit sooner */
                     password: string;
                     /** @description Trimmed; at most 200 characters */
                     name?: string;
@@ -2916,6 +2919,7 @@ export interface operations {
                 };
             };
             422: components["responses"]["Unprocessable"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     login: {
@@ -2989,6 +2993,7 @@ export interface operations {
             content: {
                 "application/json": {
                     token: string;
+                    /** @description 10 to 72 bytes of UTF-8 — what bcrypt reads; maxLength counts characters, so a password outside plain ASCII meets the 72-byte limit sooner */
                     password: string;
                 };
             };
@@ -3034,6 +3039,7 @@ export interface operations {
                 };
             };
             422: components["responses"]["Unprocessable"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     logout: {
@@ -3094,6 +3100,7 @@ export interface operations {
                     name?: string;
                     password?: {
                         current: string;
+                        /** @description 10 to 72 bytes of UTF-8 — what bcrypt reads; maxLength counts characters, so a password outside plain ASCII meets the 72-byte limit sooner */
                         new: string;
                     };
                     /** @description Replaces the stored object; `422` for anything but an object, or one over 16 KiB */
@@ -3118,7 +3125,17 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            /** @description The password changed between checking the current one and writing the new one; sign in again */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };

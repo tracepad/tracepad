@@ -3,8 +3,10 @@ package main
 import (
 	"bytes"
 	"log/slog"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tracepad/tracepad/internal/store"
 )
@@ -95,5 +97,86 @@ func TestWarnPlainHTTP(t *testing.T) {
 		if !strings.Contains(logged, fix) {
 			t.Errorf("the line should point at %s:\n%s", fix, logged)
 		}
+	}
+}
+
+// A short secret in TRACEPAD_PROJECTS refuses the start only where lengthening
+// it fixes something: an entry that creates a project. For a project that
+// exists the declaration creates nothing — its keys are never rotated from the
+// variable — so the start goes on and says how to replace the key, when the
+// short secret is still one (spec 001 #18).
+func TestCheckDeclaredSecrets(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "tracepad.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	if _, err := st.CreateProject("app", store.KeyPair{PublicKey: "tp-pk-app", Secret: "tp-sk-short"}); err != nil {
+		t.Fatal(err)
+	}
+	long := "tp-sk-" + strings.Repeat("0", 32)
+	check := func(specs ...store.ProvisionSpec) (string, error) {
+		var logged bytes.Buffer
+		err := checkDeclaredSecrets(slog.New(slog.NewTextHandler(&logged, nil)), st, specs)
+		return logged.String(), err
+	}
+
+	// A new project with a short secret: refused, by position, without it.
+	_, err = check(store.ProvisionSpec{Name: "fresh", PublicKey: "tp-pk-fresh", SecretKey: long},
+		store.ProvisionSpec{Name: "new", PublicKey: "tp-pk-new", SecretKey: "tp-sk-tiny"})
+	if err == nil {
+		t.Fatal("a short secret that would create a project must refuse the start")
+	}
+	for _, want := range []string{"entry 2", "10 characters", "at least 32", "openssl rand -hex 32"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %q, want it to say %q", err, want)
+		}
+	}
+	if strings.Contains(err.Error(), "tp-sk-tiny") {
+		t.Errorf("error = %q quotes the secret", err)
+	}
+
+	// An existing project whose short secret is still its key: the start
+	// goes on, and says how to replace it.
+	logged, err := check(store.ProvisionSpec{Name: "app", PublicKey: "tp-pk-app", SecretKey: "tp-sk-short"})
+	if err != nil {
+		t.Fatalf("a short secret for an existing project refused the start: %v", err)
+	}
+	for _, want := range []string{"WARN", "project=app", "public_key=tp-pk-app", "revoke"} {
+		if !strings.Contains(logged, want) {
+			t.Errorf("log = %q, want it to say %q", logged, want)
+		}
+	}
+	if strings.Contains(logged, "tp-sk-short") {
+		t.Errorf("log = %q quotes the secret", logged)
+	}
+
+	// Lengthened in the variable but not rotated: the server cannot tell,
+	// and the short key it cannot see is not one it can warn about by
+	// secret. Nothing is said about a short secret that is no key at all.
+	logged, err = check(store.ProvisionSpec{Name: "app", PublicKey: "tp-pk-app", SecretKey: "tp-sk-other"})
+	if err != nil || logged != "" {
+		t.Errorf("a short secret that is no live key: err=%v log=%q, want neither", err, logged)
+	}
+	if logged, err := check(store.ProvisionSpec{Name: "app", PublicKey: "tp-pk-app", SecretKey: long}); err != nil || logged != "" {
+		t.Errorf("a long secret: err=%v log=%q, want neither", err, logged)
+	}
+
+	// A project on its way out: the bootstrap skips it, and so does the
+	// warning — minting a pair in its settings is no advice for it.
+	gone, err := st.CreateProject("gone", store.KeyPair{PublicKey: "tp-pk-gone", Secret: "tp-sk-gone"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer, err := st.NewWriter(store.WriterOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writer.Close()
+	if err := writer.Submit(t.Context(), &store.ProjectDelete{ProjectID: gone.ID, Confirm: "gone", Now: time.Now().UnixNano()}); err != nil {
+		t.Fatal(err)
+	}
+	if logged, err := check(store.ProvisionSpec{Name: "gone", PublicKey: "tp-pk-gone", SecretKey: "tp-sk-gone"}); err != nil || logged != "" {
+		t.Errorf("a short key of a deleted project: err=%v log=%q, want neither", err, logged)
 	}
 }

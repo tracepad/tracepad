@@ -45,12 +45,13 @@ password, and nothing is written down anywhere but this database:
 
   http://localhost:4318/setup#token=…
 
-The link is good until this process stops. Restart to have a new one printed.
+The link is good for 24 hours, or until this process stops. Restart to have a
+new one printed.
 ```
 
 The token is 32 random bytes, minted per start and held **in memory only**: a
-link from yesterday's log file opens nothing today, and if the link is lost,
-restarting prints a new one. It rides in the URL fragment, which browsers never
+link from yesterday's log file opens nothing today, and if the link is lost or
+its 24 hours have passed, restarting prints a new one. It rides in the URL fragment, which browsers never
 send to the server, so it stays out of the access log and out of the history of
 whoever opens it.
 
@@ -68,7 +69,21 @@ password in `docker-compose.yml` is the thing this exists to stop pasting.
 
 `GET /api/v1/setup` answers `{"required": true}` while there is no owner and
 `{"required": false}` afterwards — the one thing the interface can ask without
-a credential.
+a credential. `"expired": true` beside it means no link this start printed
+works any more, so the setup screen says to restart rather than show a form
+the server would refuse.
+
+A deployment that makes its first owner with the admin token instead — a
+script, an API-only install — can switch setup off with `TRACEPAD_SETUP=off`:
+no link is minted or printed, `GET /api/v1/setup` adds `"enabled": false`, and
+`POST /api/v1/setup` answers `403`; the setup screen says so and what to do
+instead. Create the owner with the token:
+
+```sh
+TRACEPAD_API_KEY=$TRACEPAD_ADMIN_TOKEN tracepad accounts create you@example.com --owner
+```
+
+and open the invitation link it prints.
 
 ## Signing in
 
@@ -88,12 +103,30 @@ A wrong email, a wrong password, a disabled account and one that has never
 accepted its invitation all answer the same `401 wrong email or password`. Any
 difference between them would be a way to find out who has an account here.
 Five failures for one email inside fifteen minutes and the next answers `429`
-with `Retry-After`; the count is in memory, so it forgets on a restart and can
-never be the reason somebody cannot sign in tomorrow.
+with `Retry-After`; an attempt counts from the moment it arrives, so fifty sent
+at once are still five guesses. A wrong current password when changing it
+counts the same way, per account and apart from the sign-in: five wrong in
+fifteen minutes and the next waits, and nobody failing at the sign-in form can
+stop a signed-in person from changing their password. The count is in memory, so it forgets on a
+restart and can never be the reason somebody cannot sign in tomorrow.
 
-Passwords are `bcrypt` at cost 12, between 10 and 128 characters, with no other
-rule: composition rules make passwords worse, and 128 is past where `bcrypt`
-stops reading.
+Checking a password is a quarter of a second of CPU, and the routes that do it
+take requests from anybody, so the server runs only a few at once — half its
+processors, at most four — with a short queue behind them. Past that, the
+answer is `503` with `Retry-After: 1`, and a `WARN` in the log once a minute
+says how many were turned away. A person signing in never meets it in ordinary
+use, and a flood of sign-ins cannot take the CPU from ingest and reads — but
+while such a flood runs, real sign-ins meet that `503` too: the server cannot
+tell the flood from people without a per-source rate limit, which it does not
+have yet. A reverse proxy's rate limit on `/api/v1/auth/` is the remedy today. An invitation link is
+checked before its password is hashed, so a request with a made-up link costs
+nothing.
+
+Passwords are `bcrypt` at cost 12, between 10 and 72 **bytes**, with no other
+rule: composition rules make passwords worse, and 72 bytes is where `bcrypt`
+stops reading. That is 72 Latin letters, and fewer of anything outside plain
+ASCII — a Cyrillic letter is two bytes, most emoji four. A longer one is `422`
+with that sentence.
 
 Setup, sign-in and accepting an invitation are the three routes that take a
 body from anybody, so they take a small one: at most 8 KiB of uncompressed
@@ -145,7 +178,7 @@ refused while a project key went on working.
 | | |
 |---|---|
 | `GET /api/v1/auth/me` | The account and every project it can reach, with the role in each. The one call the interface makes on load. |
-| `PATCH /api/v1/auth/me` | Change the display name, the password with `{"password": {"current", "new"}}`, or the preferences with `{"preferences": {…}}` — any of them, together or alone. A password change signs every **other** session out. |
+| `PATCH /api/v1/auth/me` | Change the display name, the password with `{"password": {"current", "new"}}`, or the preferences with `{"preferences": {…}}` — any of them, together or alone. A password change signs every **other** session out. A wrong current password is `403`, and five in fifteen minutes make the next `429`; `409` means another change landed first — sign in again. |
 | `GET /api/v1/auth/sessions` | Where this account is signed in, the current one marked, with the user agent and address of each. |
 | `DELETE /api/v1/auth/sessions` | Sign out everywhere but here. What you press after a laptop goes missing. |
 | `POST /api/v1/auth/logout` | End this session. |
@@ -327,7 +360,8 @@ one in this section.
 |---|---|---|
 | `TRACEPAD_SESSION_DAYS` | `30` | How long a browser session lasts. It slides, so this is "how long since you last opened it", not "how long since you signed in". Minimum 1. |
 | `TRACEPAD_URL` | — | The address your people actually use. The server prints setup and invitation links at its own guess otherwise — the listen address, or the request's `Host` — which is wrong behind a proxy, and its host is one of the three the cross-site check accepts. An `https://` address also tells the server a TLS proxy is in front, which silences its plain-HTTP warning (or, in the image, note) at start ([docker.md](docker.md#serving-over-tls)). |
-| `TRACEPAD_ADMIN_TOKEN` | — | Unchanged from [administration](admin.md), and now also the account routes. |
+| `TRACEPAD_ADMIN_TOKEN` | — | Unchanged from [administration](admin.md), and now also the account routes. At least 32 characters, or the server does not start; `TRACEPAD_ADMIN_TOKEN_FILE` reads it from a file instead. |
+| `TRACEPAD_SETUP` | `on` | `off` mints no setup link and refuses `POST /api/v1/setup`; make the first owner with the admin token. |
 
 Expired sessions and invitations are removed by the
 [retention sweeper](retention.md) on its usual pass. A session that has run out

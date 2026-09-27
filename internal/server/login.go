@@ -39,14 +39,20 @@ session" before any of these handlers runs.
 // link. Thirty-two random bytes, like a session's value.
 const setupTokenBytes = 32
 
+// setupTokenLife is how long a printed setup link works (Decision 32). A day
+// is "deployed tonight, set up in the morning"; past it, a link still sitting
+// in a log is a standing way to take the deployment, and a restart prints a
+// fresh one for whoever still needs it.
+const setupTokenLife = 24 * time.Hour
+
 // mintSetupToken generates the token for this start, or clears it when the
-// server already has an owner (Decision 9).
+// server already has an owner (Decision 9) or setup is off (Decision 32).
 //
 // In memory and per start, so a token from a log file yesterday opens nothing
 // today, and a restart is the recovery if the link was lost.
 func (s *Server) mintSetupToken() {
 	s.setSetupToken("")
-	if s.store == nil {
+	if s.store == nil || s.setupOff {
 		return
 	}
 	owners, err := s.store.EnabledOwners(context.Background())
@@ -65,10 +71,14 @@ func (s *Server) mintSetupToken() {
 	s.setSetupToken(base64.RawURLEncoding.EncodeToString(raw))
 }
 
-// currentSetupToken reads the token this start minted, or "" once it is spent.
+// currentSetupToken reads the token this start minted, or "" once it is spent
+// or has expired.
 func (s *Server) currentSetupToken() string {
 	s.setupMu.RLock()
 	defer s.setupMu.RUnlock()
+	if s.setupToken == "" || !time.Now().Before(s.setupExpires) {
+		return ""
+	}
 	return s.setupToken
 }
 
@@ -76,6 +86,7 @@ func (s *Server) setSetupToken(value string) {
 	s.setupMu.Lock()
 	defer s.setupMu.Unlock()
 	s.setupToken = value
+	s.setupExpires = time.Now().Add(setupTokenLife)
 }
 
 // SetupURL is the link the operator clicks on a server that has no owner yet,
@@ -102,7 +113,14 @@ func (s *Server) SetupRequired(ctx context.Context) (bool, error) {
 }
 
 // handleGetSetup is the one thing the interface can learn without a
-// credential: whether to show the setup screen or the login form.
+// credential: whether to show the setup screen or the login form, and whether
+// that screen can do anything — `enabled` is false under TRACEPAD_SETUP=off,
+// where the first owner comes from the admin token instead, and `expired` is
+// true when setup is needed and on but no link printed by this start works any
+// more: it is past its 24 hours, or none was minted because an owner could
+// sign in when the server started. A restart prints a new one either way, and
+// the screen says so before anybody fills in a form the server will refuse
+// (Decision 32). Nothing here is the token, or says what it was.
 func (s *Server) handleGetSetup(w http.ResponseWriter, r *http.Request) {
 	if s.store == nil {
 		writeError(w, http.StatusServiceUnavailable, "the API is not available")
@@ -117,7 +135,11 @@ func (s *Server) handleGetSetup(w http.ResponseWriter, r *http.Request) {
 		readFailed(w, r, "failed to read the accounts", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, object{}.put("required", required))
+	expired := required && !s.setupOff && s.currentSetupToken() == ""
+	writeJSON(w, http.StatusOK, object{}.
+		put("required", required).
+		put("enabled", !s.setupOff).
+		put("expired", expired))
 }
 
 // handleSetup creates the first owner and signs it in.
@@ -129,6 +151,13 @@ func (s *Server) handleGetSetup(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	if s.store == nil {
 		writeError(w, http.StatusServiceUnavailable, "the API is not available")
+		return
+	}
+	// Before the body is read: whatever it says, the answer is this one
+	// (Decision 32). The router's own limits on a public body (#26) come
+	// earlier still.
+	if s.setupOff {
+		writeError(w, http.StatusForbidden, setupIsOff)
 		return
 	}
 	if _, err := queryParams(r); err != nil {
@@ -159,7 +188,10 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	hash, ok := readPassword(w, request.Password)
+	if !passwordLengthOK(w, request.Password) {
+		return
+	}
+	hash, ok := s.hashUnderGate(w, r, request.Password)
 	if !ok {
 		return
 	}
@@ -173,6 +205,18 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	s.setSetupToken("")
 	writeJSON(w, http.StatusCreated, object{}.put("account", accountResponse(create.Account)))
 }
+
+// setupIsOff is the answer to a setup request on a server started with
+// TRACEPAD_SETUP=off, and says what to do instead.
+const setupIsOff = "setup is turned off on this server (TRACEPAD_SETUP=off); " +
+	"create the first owner with the admin token: " + createOwnerCommand
+
+// createOwnerCommand is how the first owner is made without the setup link.
+// The CLI reads its credential from TRACEPAD_API_KEY, and the admin token is
+// that credential here; it is named as a placeholder rather than as
+// $TRACEPAD_ADMIN_TOKEN, which is empty in a shell whose token lives in
+// TRACEPAD_ADMIN_TOKEN_FILE.
+const createOwnerCommand = "TRACEPAD_API_KEY=<the admin token> tracepad accounts create <email> --owner"
 
 // handleLogin is an email and a password.
 //
@@ -210,33 +254,47 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	now := time.Now()
-	if wait := s.limiter.retryAfter(email, now); wait > 0 {
+	// The attempt is counted before anything is compared, so a burst
+	// cannot read the same count and all go on to guess (spec 028 #31).
+	attempt, wait := s.limiter.reserve(email, time.Now())
+	if wait > 0 {
 		w.Header().Set("Retry-After", retryAfterSeconds(wait))
 		writeError(w, http.StatusTooManyRequests,
 			"too many sign-in attempts for this email; try again shortly")
 		return
 	}
-
+	// Then a place at the password gate. Turned away there, the password
+	// was never compared, so the attempt is given back — as it is on any
+	// way out that neither failed nor succeeded.
+	defer attempt.cancel()
+	// The account is read before a place is taken: a place is for bcrypt,
+	// and a read that waits on a busy database would hold one idle. Every
+	// email is read, known or not, so the order says nothing either.
 	account, err := s.store.AccountByEmail(r.Context(), email)
 	if err != nil {
 		readFailed(w, r, "failed to read the account", err)
 		return
 	}
-	// Evaluated before the branch rather than inside it, because `||` is
-	// short-circuiting and skipping the comparison is itself an answer: a
-	// login that returns in a millisecond for an unknown address and in a
-	// quarter of a second for a real one has told you which it was
-	// (Decision 8). `Verify` is nil-safe and spends the comparison against
-	// a decoy when there is no stored hash, so every one of these four
-	// failures costs the same.
-	verified := account.Verify(request.Password)
+	var verified bool
+	if !s.underPasswordGate(w, r, func(slot *store.PasswordSlot) {
+		// Compared whatever the lookup found, because skipping the
+		// comparison is itself an answer: a login that returns in a
+		// millisecond for an unknown address and in a quarter of a
+		// second for a real one has told you which it was (Decision 8).
+		// `Verify` is nil-safe and spends the comparison against a decoy
+		// when there is no stored hash, so every one of the four failures
+		// costs the same — and costs it inside the password gate, like a
+		// real one (spec 028 #31).
+		verified = account.Verify(slot, request.Password)
+	}) {
+		return
+	}
 	if account == nil || account.Disabled || !verified {
-		s.limiter.failed(email, now)
+		attempt.failed(time.Now())
 		writeError(w, http.StatusUnauthorized, wrongCredentials)
 		return
 	}
-	s.limiter.succeeded(email)
+	attempt.succeeded()
 
 	if !s.signIn(w, r, &store.SessionOpen{AccountID: account.ID}) {
 		return
@@ -269,12 +327,30 @@ func (s *Server) handleAcceptInvite(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, store.ErrBadToken.Error())
 		return
 	}
-	hash, ok := readPassword(w, request.Password)
+	if !passwordLengthOK(w, request.Password) {
+		return
+	}
+	// The token before the hash (spec 028 #31): hashing first let anyone
+	// with no link at all spend a quarter of a second of the server per
+	// request. A token that is live here is checked again when it is
+	// spent, since it can be spent or voided in between.
+	tokenID := store.SessionID(request.Token)
+	live, err := s.store.InviteTokenLive(r.Context(), tokenID, time.Now().UnixNano())
+	if err != nil {
+		slog.Error("could not read the invitation", "err", err)
+		writeError(w, http.StatusInternalServerError, "failed to read the invitation")
+		return
+	}
+	if !live {
+		writeError(w, http.StatusForbidden, store.ErrBadToken.Error())
+		return
+	}
+	hash, ok := s.hashUnderGate(w, r, request.Password)
 	if !ok {
 		return
 	}
 
-	accept := &store.InviteAccept{TokenID: store.SessionID(request.Token), NewHash: hash}
+	accept := &store.InviteAccept{TokenID: tokenID, NewHash: hash}
 	if !s.signIn(w, r, accept) {
 		return
 	}
@@ -376,8 +452,55 @@ func (s *Server) handlePatchMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	hash, ok := readPassword(w, request.Password.New)
-	if !ok {
+	if !passwordLengthOK(w, request.Password.New) {
+		return
+	}
+	// Both halves of a password change are bcrypt, and both run here,
+	// under one place at the gate that is given back before the job waits
+	// for the writer: in the job they held the one writer, and every
+	// ingest behind it, for half a second (spec 028 #31). The current
+	// password is compared against the hash this request read; the job
+	// then refuses unless that hash is still the stored one. A pending
+	// account has no hash and no session to be here with, so it spends
+	// nothing.
+	if account.Pending {
+		writeError(w, http.StatusForbidden, store.ErrWrongPassword.Error())
+		return
+	}
+	// A wrong current password is a guess at the password, so it is
+	// counted like a login's, before the comparison — but per account and
+	// apart from the login's count: a session held by somebody else cannot
+	// guess faster here nor keep the gate full for everybody signing in,
+	// and a stranger failing at the login cannot stop the person who holds
+	// the session from changing the password they suspect (spec 028 #31).
+	attempt, wait := s.passwordChanges.reserve(account.ID, time.Now())
+	if wait > 0 {
+		w.Header().Set("Retry-After", retryAfterSeconds(wait))
+		writeError(w, http.StatusTooManyRequests,
+			"too many wrong passwords for this account; try again shortly")
+		return
+	}
+	defer attempt.cancel()
+	var (
+		hash          []byte
+		wrong, hashed bool
+	)
+	if !s.underPasswordGate(w, r, func(slot *store.PasswordSlot) {
+		if !account.Verify(slot, request.Password.Current) {
+			wrong = true
+			return
+		}
+		hash, hashed = hashPassword(w, slot, request.Password.New)
+	}) {
+		return
+	}
+	if wrong {
+		attempt.failed(time.Now())
+		writeError(w, http.StatusForbidden, store.ErrWrongPassword.Error())
+		return
+	}
+	attempt.succeeded()
+	if !hashed {
 		return
 	}
 	// One job, so that a wrong current password leaves the display name
@@ -388,12 +511,19 @@ func (s *Server) handlePatchMe(w http.ResponseWriter, r *http.Request) {
 	// changing it is what a person does when they think somebody else has
 	// it.
 	change := &store.PasswordChange{
-		AccountID: account.ID, Current: request.Password.Current,
+		AccountID: account.ID, Checked: account,
 		NewHash: hash, Keep: c.session.ID, Name: request.Name, Preferences: preferences,
 	}
 	if err := s.writer.Submit(r.Context(), change); err != nil {
 		if errors.Is(err, store.ErrWrongPassword) {
 			writeError(w, http.StatusForbidden, store.ErrWrongPassword.Error())
+			return
+		}
+		// The password typed was right when it was checked; another
+		// change landed before this one could be written. Saying "wrong"
+		// would send the person to retype a password that was correct.
+		if errors.Is(err, store.ErrPasswordChanged) {
+			writeError(w, http.StatusConflict, store.ErrPasswordChanged.Error())
 			return
 		}
 		submitFailure(w, err, apiWrite)
@@ -622,15 +752,26 @@ func readAccountName(w http.ResponseWriter, raw string) (string, bool) {
 	return name, true
 }
 
-// readPassword checks the length and hashes, answering 422 itself when the
-// length is wrong.
-func readPassword(w http.ResponseWriter, password string) ([]byte, bool) {
-	hash, err := store.HashPassword(password)
+// passwordLengthOK is the one check of a new password's length that answers
+// the person, with a 422 and the rule, on every route that sets one — setup,
+// accepting an invitation, a password change — each before it spends anything
+// else on the password. The store checks again as part of its own contract.
+func passwordLengthOK(w http.ResponseWriter, password string) bool {
+	if err := store.CheckPasswordLength(password); err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err.Error())
+		return false
+	}
+	return true
+}
+
+// hashPassword hashes a password whose length the caller has already checked
+// — the one check that answers the person, with a 422 — for a caller that
+// holds its place at the gate. The store checks the length again as part of
+// its own contract; failing that here would be a mistake in this file, and it
+// is answered like any other failure to hash.
+func hashPassword(w http.ResponseWriter, slot *store.PasswordSlot, password string) ([]byte, bool) {
+	hash, err := store.HashPassword(slot, password)
 	if err != nil {
-		if errors.Is(err, store.ErrPasswordLength) {
-			writeError(w, http.StatusUnprocessableEntity, err.Error())
-			return nil, false
-		}
 		slog.Error("could not hash a password", "err", err)
 		writeError(w, http.StatusInternalServerError, "failed to store the password")
 		return nil, false

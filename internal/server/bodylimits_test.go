@@ -219,7 +219,7 @@ func TestLoginKeepsNoOverlongKey(t *testing.T) {
 	expectError(t, h.login(t, growing, testAccountPassword), http.StatusUnauthorized, wrongCredentials)
 	h.server.limiter.mu.Lock()
 	defer h.server.limiter.mu.Unlock()
-	for key := range h.server.limiter.failures {
+	for key := range h.server.limiter.entries {
 		if len(key) > maxEmailLength {
 			t.Errorf("the limiter keeps a %d-byte key", len(key))
 		}

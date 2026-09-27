@@ -89,7 +89,18 @@ type Server struct {
 	// data race.
 	setupMu    sync.RWMutex
 	setupToken string
-	limiter    *loginLimiter
+	// setupExpires is when setupToken stops opening anything (Decision
+	// 32), and setupOff is TRACEPAD_SETUP=off: no token is minted at all.
+	setupExpires time.Time
+	setupOff     bool
+	limiter      *loginLimiter
+	// passwordChanges counts wrong current passwords per account, apart
+	// from the login's count by email (spec 028 #31).
+	passwordChanges *loginLimiter
+	// passwords bounds the bcrypt work in flight, and passwordLog paces
+	// the warning for what it turns away (spec 028 #31).
+	passwords   *store.PasswordGate
+	passwordLog *logLimiter
 	// running counts the handlers in flight, and handlerGrace is how long
 	// a stop waits for them once their connections are closed (spec 001
 	// #16).
@@ -162,28 +173,32 @@ func New(cfg *config.Config, version string, st *store.Store, writer JobWriter, 
 		sessionLife = config.DefaultSessionLife
 	}
 	s := &Server{
-		store:          st,
-		writer:         writer,
-		sweeper:        sweeper,
-		version:        version,
-		storeRaw:       cfg.StoreRaw,
-		maxBodyBytes:   maxBody,
-		responseBudget: budget,
-		readTimeout:    readTimeout,
-		reads:          newReadSlots(readConcurrency),
-		systemReads:    newReadSlots(1),
-		mcp:            cfg.MCP,
-		adminToken:     cfg.AdminToken,
-		sessionLife:    sessionLife,
-		limiter:        newLoginLimiter(),
-		handlerGrace:   defaultHandlerGrace,
-		inflatedLog:    &logLimiter{every: time.Minute},
-		originLog:      &logLimiter{every: time.Minute, keys: 64},
-		assets:         ui.Assets(),
-		startedAt:      time.Now(),
-		counters:       newCounters(),
-		keyUses:        newKeyUses(),
-		keyUseEvery:    keyUseFlushEvery,
+		store:           st,
+		writer:          writer,
+		sweeper:         sweeper,
+		version:         version,
+		storeRaw:        cfg.StoreRaw,
+		maxBodyBytes:    maxBody,
+		responseBudget:  budget,
+		readTimeout:     readTimeout,
+		reads:           newReadSlots(readConcurrency),
+		systemReads:     newReadSlots(1),
+		mcp:             cfg.MCP,
+		adminToken:      cfg.AdminToken,
+		sessionLife:     sessionLife,
+		setupOff:        cfg.SetupDisabled,
+		limiter:         newLoginLimiter(),
+		passwordChanges: newLoginLimiter(),
+		passwords:       newPasswordGate(),
+		passwordLog:     &logLimiter{every: time.Minute},
+		handlerGrace:    defaultHandlerGrace,
+		inflatedLog:     &logLimiter{every: time.Minute},
+		originLog:       &logLimiter{every: time.Minute, keys: 64},
+		assets:          ui.Assets(),
+		startedAt:       time.Now(),
+		counters:        newCounters(),
+		keyUses:         newKeyUses(),
+		keyUseEvery:     keyUseFlushEvery,
 	}
 	s.setPublicURL(cfg.URL)
 	if st != nil {
