@@ -320,11 +320,11 @@ func TestConcurrentScrubsOfOneBatch(t *testing.T) {
 	c := map[string]bool{hexTrace(3): true}
 
 	// The first computes its body, then the second lands first.
-	early, err := f.store.planScrub(f.project.ID, batch, a, 0)
+	early, err := f.store.planScrub(f.project.ID, batch, a)
 	if err != nil || early == nil {
 		t.Fatalf("plan: %v, %v", early, err)
 	}
-	if _, err := f.store.scrubBatches(t.Context(), f.writer, f.project.ID, []int64{batch}, c, 0); err != nil {
+	if _, err := f.store.scrubBatches(t.Context(), f.writer, f.project.ID, []int64{batch}, c); err != nil {
 		t.Fatal(err)
 	}
 	err = f.writer.Submit(t.Context(), early.job)
@@ -333,7 +333,7 @@ func TestConcurrentScrubsOfOneBatch(t *testing.T) {
 		t.Fatalf("a body computed before the other rewrite was not refused: %v", err)
 	}
 	// Refused, it recomputes from what is there now.
-	tally, err := f.store.scrubBatches(t.Context(), f.writer, f.project.ID, []int64{batch}, a, 0)
+	tally, err := f.store.scrubBatches(t.Context(), f.writer, f.project.ID, []int64{batch}, a)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -506,7 +506,66 @@ func TestAnErasureCutOffIsFinishedByItsRepeat(t *testing.T) {
 		if got := f.rawSpans(t, late); !slices.Equal(got, []string{"span-10-9"}) {
 			t.Errorf("the batch that arrived during the erasure holds %v, want the other user's span", got)
 		}
+		// Stamped when it was rewritten, which is after it arrived — not
+		// when the request began, which is before.
+		body, err := f.store.RawBatchBody(t.Context(), f.project.ID, late)
+		if err != nil || body == nil || body.ScrubbedAt == nil {
+			t.Fatalf("the late batch's body: %+v, %v", body, err)
+		}
+		if *body.ScrubbedAt < body.ReceivedAt {
+			t.Errorf("scrubbed_at %d is before received_at %d", *body.ScrubbedAt, body.ReceivedAt)
+		}
 	})
+
+	// A chunk of step 3 that fails still leaves step 4 to run for the
+	// chunks before it: their traces are gone, so a repeat cannot find
+	// the batches that arrived for them while the request ran.
+	t.Run("a chunk that fails", func(t *testing.T) {
+		f := build(t)
+		broken := errors.New("the disk is full")
+		writer := &failingChunk{jobSubmitter: f.writer, at: 2, err: broken}
+		var late int64
+		// One trace a chunk, so that the second fails with one behind it.
+		e := UserErasure{ProjectID: f.project.ID, UserID: "user-a", Confirm: "user-a", Chunk: 1, ChunkHours: 1,
+			after: func(step int) error {
+				if step == 1 {
+					late = f.ingestOTLP(t, export([]*tracepb.Span{
+						otlpSpan(t, 1, 9, "user-a", "s-a", "marker-a-late", nil),
+						otlpSpan(t, 2, 9, "user-a", "s-a", "marker-a-late", nil),
+						otlpSpan(t, 3, 9, "user-a", "s-a", "marker-a-late", nil),
+						otlpSpan(t, 10, 9, "user-b", "s-b", "marker-b-late", nil),
+					}), false, 0)
+				}
+				return nil
+			}}
+		if _, err := f.store.EraseUserData(t.Context(), writer, e); !errors.Is(err, broken) {
+			t.Fatalf("the failed chunk is not the answer: %v", err)
+		}
+		if writer.chunks < 2 {
+			t.Fatalf("%d chunks: the erasure needs one to succeed before the one that fails", writer.chunks)
+		}
+		f.erase(t, "user-a")
+		if got := f.rawSpans(t, late); !slices.Equal(got, []string{"span-10-9"}) {
+			t.Errorf("after the repeat the late batch holds %v, want the other user's span", got)
+		}
+	})
+}
+
+// failingChunk passes every job on but the at-th chunk of an erasure's parsed
+// phase, which it answers with err.
+type failingChunk struct {
+	jobSubmitter
+	at, chunks int
+	err        error
+}
+
+func (w *failingChunk) Submit(ctx context.Context, job WriteJob) error {
+	if _, ok := job.(*UserDataErase); ok {
+		if w.chunks++; w.chunks == w.at {
+			return w.err
+		}
+	}
+	return w.jobSubmitter.Submit(ctx, job)
 }
 
 // The session-only scores (#7): an erasure takes those of the user's
@@ -829,5 +888,63 @@ func TestAnErasureOutlivesItsCaller(t *testing.T) {
 	}
 	if got := f.rawSpans(t, late); !slices.Equal(got, []string{"span-2-9"}) {
 		t.Errorf("the batch that arrived during the erasure holds %v", got)
+	}
+}
+
+// TestErasureQueriesSeekTheirIndexes is spec 023's EXPLAIN check for the
+// erasure's lookups: the store never runs ANALYZE, so an index that is not
+// chosen is an index that is not there. The windows seek
+// `idx_raw_batches_received` once each rather than walking the project's
+// whole index; the dataset items go through the partial index #9 promises —
+// a lookup that must not be a walk over every item of the project; the
+// session scores start from the user's traces, not every session.
+func TestErasureQueriesSeekTheirIndexes(t *testing.T) {
+	f := newErasureFixture(t)
+	windows := []arrivalWindow{{from: 1, to: 2}, {from: 5, to: 9}}
+	candidates, candidateArgs := windowQuery(f.project.ID, "r.id", windows)
+	count, countArgs := windowQuery(f.project.ID, "COUNT(*)", windows)
+	sourced := sourcedItems(2)
+	sourcedArgs := []any{f.project.ID, "t1", "t2"}
+
+	for _, tc := range []struct {
+		name  string
+		query string
+		args  []any
+		want  []string
+	}{
+		{"the candidate batches", candidates + ` ORDER BY r.received_at, r.id`, candidateArgs,
+			[]string{"SEARCH r USING COVERING INDEX idx_raw_batches_received (project_id=? AND received_at>? AND received_at<?)"}},
+		{"the batches to scan", count, countArgs,
+			[]string{"SEARCH r USING COVERING INDEX idx_raw_batches_received (project_id=? AND received_at>? AND received_at<?)"}},
+		{"the preview's session scores", userSessionScores, []any{f.project.ID, f.project.ID, "user-a"},
+			[]string{"idx_traces_user (project_id=? AND user_id=?)", "idx_scores_session (project_id=? AND session_id=?)"}},
+		{"the preview's dataset items", userSourcedItems, []any{f.project.ID, f.project.ID, "user-a"},
+			[]string{"idx_traces_user (project_id=? AND user_id=?)", "idx_dataset_items_source (project_id=? AND source_trace_id=?)"}},
+		{"a chunk's sessions", traceSessions(2), []any{f.project.ID, "t1", "t2"},
+			[]string{"SEARCH traces USING"}},
+		{"a chunk's dataset item delete", `DELETE FROM dataset_items WHERE project_id = ? AND (dataset, item_id) IN (` +
+			sourced + `)`, append([]any{f.project.ID}, sourcedArgs...),
+			[]string{"idx_dataset_items_source (project_id=? AND source_trace_id=?)"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			plan, err := f.store.explainQueryPlan(tc.query, tc.args...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			joined := strings.Join(plan, "\n")
+			for _, want := range tc.want {
+				if !strings.Contains(joined, want) {
+					t.Errorf("the plan does not hold %q:\n%s", want, joined)
+				}
+			}
+			for _, line := range plan {
+				scan := strings.HasPrefix(line, "SCAN") && !strings.Contains(line, "CONSTANT ROW") &&
+					!strings.HasPrefix(line, "SCAN windows") && !strings.HasPrefix(line, "SCAN sourced")
+				// A seek on the project alone is a walk over all of it.
+				if scan || strings.HasSuffix(line, "(project_id=?)") {
+					t.Errorf("walks rather than seeks: %q\n%s", line, joined)
+				}
+			}
+		})
 	}
 }

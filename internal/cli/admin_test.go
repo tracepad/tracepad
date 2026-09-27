@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tracepad/tracepad/internal/client"
 	"github.com/tracepad/tracepad/internal/model"
@@ -509,17 +512,44 @@ func TestAdminCommandUsageErrors(t *testing.T) {
 
 // A confirmed erasure that outlasts the client's wait is still running on the
 // server (spec 035 #14): the command says so and how to see what is left,
-// rather than that the server could not be reached. A refusal the server did
-// send stays that refusal.
+// rather than that the server could not be reached. One that never reached
+// the server says that, and nothing about an erasure running; a refusal the
+// server did send stays that refusal.
 func TestAnUnansweredErasureSaysItIsRunning(t *testing.T) {
-	timeout := fmt.Errorf("cannot reach http://x: %w", context.DeadlineExceeded)
-	err := erasureUnanswered(timeout, "u1")
-	if !strings.Contains(err.Error(), "runs to the end") || !strings.Contains(err.Error(), "users rm-data u1") ||
-		!errors.Is(err, context.DeadlineExceeded) {
-		t.Errorf("err = %v", err)
+	ask := func(t *testing.T, baseURL string) error {
+		t.Helper()
+		api := &client.Client{BaseURL: baseURL, HTTP: &http.Client{Timeout: 200 * time.Millisecond}}
+		_, err := confirmErasure(t.Context(), "u1", func(ctx context.Context) (json.RawMessage, error) {
+			return api.Send(ctx, http.MethodDelete, "/data", url.Values{"confirm": {"u1"}}, nil)
+		})
+		return err
 	}
-	refusal := &client.Error{Status: 409, Message: "raw batch 3 was rewritten since it was read"}
-	if got := erasureUnanswered(refusal, "u1"); got != refusal {
-		t.Errorf("a refusal became %v", got)
+	running := "runs to the end"
+
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	}))
+	defer slow.Close()
+	err := ask(t, slow.URL)
+	if err == nil || !strings.Contains(err.Error(), running) || !strings.Contains(err.Error(), "users rm-data u1") {
+		t.Errorf("an erasure that outlasted the wait: %v", err)
+	}
+
+	gone := httptest.NewServer(http.NotFoundHandler())
+	gone.Close()
+	if err := ask(t, gone.URL); err == nil || strings.Contains(err.Error(), running) ||
+		!strings.Contains(err.Error(), "cannot reach") {
+		t.Errorf("a server that was never reached: %v", err)
+	}
+
+	refusing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{"error":"raw batch 3 was rewritten since it was read"}`))
+	}))
+	defer refusing.Close()
+	var refusal *client.Error
+	if err := ask(t, refusing.URL); !errors.As(err, &refusal) || refusal.Status != http.StatusConflict ||
+		strings.Contains(err.Error(), running) {
+		t.Errorf("a refusal became %v", err)
 	}
 }

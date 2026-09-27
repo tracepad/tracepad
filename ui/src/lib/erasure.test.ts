@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ApiError } from '$lib/api/client.svelte';
-import { erased, stillRunning } from './erasure';
+import { Erasure, erased, stillRunning } from './erasure';
 
 describe('the erasure sentence', () => {
 	it('names the traces and what the raw archive lost', () => {
@@ -30,5 +30,31 @@ describe('an erasure the screen stopped waiting for', () => {
 		expect(stillRunning(new ApiError(0, 'cannot reach the server'), 'u')).toBeNull();
 		expect(stillRunning(new ApiError(409, 'raw batch 3 was rewritten'), 'u')).toBeNull();
 		expect(stillRunning(new Error('boom'), 'u')).toBeNull();
+	});
+});
+
+describe('a screen erasing a user', () => {
+	const timedOut = () => Promise.reject(new ApiError(0, 'no answer in time', { timed_out: true }));
+	const answered = () => Promise.resolve({ dry_run: false, deleted: { traces: 1 } });
+
+	it('stays for an erasure left running, and leaves after a retry that answered', async () => {
+		const erasure = new Erasure();
+		expect(await erasure.ask('u', 'u', timedOut)).toMatch(/still erasing/);
+		expect(erasure.running).toBe(true);
+		expect(await erasure.ask('u', 'u', answered)).toEqual({ dry_run: false, deleted: { traces: 1 } });
+		expect(erasure.running).toBe(false);
+	});
+
+	it('treats a preview that timed out as the failure it is', async () => {
+		const erasure = new Erasure();
+		await expect(erasure.ask('u', undefined, timedOut)).rejects.toBeInstanceOf(ApiError);
+		expect(erasure.running).toBe(false);
+	});
+
+	it('passes every other failure on', async () => {
+		const erasure = new Erasure();
+		const refused = () => Promise.reject(new ApiError(409, 'raw batch 3 was rewritten'));
+		await expect(erasure.ask('u', 'u', refused)).rejects.toThrow('raw batch 3');
+		expect(erasure.running).toBe(false);
 	});
 });

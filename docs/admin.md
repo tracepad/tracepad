@@ -315,6 +315,10 @@ dry run counts each before anything happens:
   which may hold spans of traces the sweep already took and which nothing can
   attribute to the user any more
   ([retention.md](retention.md#what-this-means-for-a-data-subject-request)).
+  It is an estimate, not an exact count: it counts every batch received
+  before the window's edge, including ones whose traces a run still keeps,
+  and misses the few later batches of a trace that was open across the edge.
+  Counting exactly would mean decoding the whole archive.
 
 The confirmed answer says what went, when the rest of the job is done, and
 what it will not reach:
@@ -384,9 +388,14 @@ traces spread over a month are 720 of them, and tens of minutes on a busy
 host. The erasure **runs to completion whether or not the client waits for
 it** — a closed tab or the interface's thirty-second clock loses the answer
 and nothing else, and the interface and `tracepad users rm-data` say the
-erasure is still running rather than that it failed. Only a stop of the server cuts it off, and that destroys
+erasure is still running rather than that it failed; a request that never
+reached the server — a refused connection, a failed handshake — says that
+instead. Only a stop of the server cuts it off, and that destroys
 nothing half-way either: what the committed jobs erased is erased, and
-repeating the call finds what is left and finishes it. The counts in the
+repeating the call finds what is left and finishes it. A chunk that fails —
+a full disk, a writer queue full for two minutes — ends the request with
+that error, after the raw batches that arrived meanwhile for the traces the
+finished chunks took have been rewritten too, so a repeat still finishes it. The counts in the
 answer are the request's own; a repeat reports what it erased, not what the
 interrupted one did.
 

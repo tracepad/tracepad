@@ -8,9 +8,11 @@ import (
 	"flag"
 	"fmt"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"strconv"
 	"strings"
+	"sync/atomic"
 
 	"github.com/tracepad/tracepad/internal/client"
 	"github.com/tracepad/tracepad/internal/store"
@@ -698,8 +700,11 @@ func (r *run) usersRemoveData(ctx context.Context, rest []string) error {
 		return err
 	}
 	if confirmed != nil {
-		if body, err = r.api.Send(ctx, http.MethodDelete, path, confirmed, nil); err != nil {
-			return erasureUnanswered(err, positional[0])
+		body, err = confirmErasure(ctx, positional[0], func(ctx context.Context) (json.RawMessage, error) {
+			return r.api.Send(ctx, http.MethodDelete, path, confirmed, nil)
+		})
+		if err != nil {
+			return err
 		}
 	}
 	if r.wantJSON() {
@@ -747,17 +752,28 @@ func (r *run) usersRemoveData(ctx context.Context, rest []string) error {
 	return nil
 }
 
-// erasureUnanswered is what a confirmed erasure that got no answer means. The
-// server runs an erasure to completion whether or not anybody waits for it
-// (spec 035 #14), and a long one outlasts this client's wait: that is news
-// about the wait, not a failure of the erasure. A refusal the server did
-// send is passed on as it is.
-func erasureUnanswered(err error, user string) error {
+// confirmErasure sends the confirmed erasure and says what a failure means.
+// The server runs an erasure to completion whether or not anybody waits for
+// it (spec 035 #14), and a long one outlasts this client's wait: once the
+// request is written, no answer is news about the wait, not a failure of the
+// erasure. Before that — a refused connection, a name that does not resolve, a
+// handshake that fails, an interrupt — nothing reached the server, and the
+// error is passed on as it is; so is a refusal the server did send.
+func confirmErasure(ctx context.Context, user string,
+	send func(context.Context) (json.RawMessage, error)) (json.RawMessage, error) {
+	var written atomic.Bool
+	body, err := send(httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
+		WroteRequest: func(info httptrace.WroteRequestInfo) {
+			if info.Err == nil {
+				written.Store(true)
+			}
+		},
+	}))
 	var refusal *client.Error
-	if errors.As(err, &refusal) {
-		return err
+	if err == nil || !written.Load() || errors.As(err, &refusal) {
+		return body, err
 	}
-	return fmt.Errorf("no answer from the server (%w); an erasure it has started runs to the end without one — "+
+	return nil, fmt.Errorf("no answer from the server (%w); the erasure it received runs to the end without one — "+
 		"run `tracepad users rm-data %s` again in a few minutes: its preview shows what is left", err, user)
 }
 

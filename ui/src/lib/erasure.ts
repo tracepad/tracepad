@@ -34,3 +34,30 @@ export function stillRunning(cause: unknown, user: string): string | null {
 		'this screen stops waiting. Look the user up again in a few minutes to see it finished.'
 	);
 }
+
+/**
+ * A screen's erasure requests, and whether its last confirmed one was left
+ * running on the server — which is when the screen stays where it is rather
+ * than leave as if the user were gone. Per attempt: a retry that answers
+ * clears it, so a screen that stayed for one running erasure still leaves
+ * after the one that finished.
+ */
+export class Erasure {
+	running = false;
+
+	/**
+	 * The call's answer; for a confirmed erasure the screen stopped waiting
+	 * for, the sentence saying it is still running.
+	 */
+	async ask<T>(user: string, confirm: string | undefined, call: () => Promise<T>): Promise<T | string> {
+		if (confirm !== undefined) this.running = false;
+		try {
+			return await call();
+		} catch (cause) {
+			const sentence = confirm === undefined ? null : stillRunning(cause, user);
+			if (sentence === null) throw cause;
+			this.running = true;
+			return sentence;
+		}
+	}
+}

@@ -180,16 +180,22 @@ func (s *Store) userWindows(traces []erasedTrace) ([]arrivalWindow, error) {
 // one round trip each was thousands of them.
 const windowGroup = 200
 
-// windowQuery is the predicate over a group of windows and its arguments.
-func windowQuery(projectID string, windows []arrivalWindow) (string, []any) {
-	terms := make([]string, len(windows))
-	args := make([]any, 0, 1+2*len(windows))
-	args = append(args, projectID)
+// windowQuery selects `what` from the project's batches received inside a
+// group of windows. The windows are a table the batches are joined to, one
+// seek of `idx_raw_batches_received` each: the same ranges as an `OR` of
+// `BETWEEN`s plan as a walk over the project's whole index. CROSS JOIN keeps
+// the windows outside — SQLite takes its operands in the order written.
+func windowQuery(projectID, what string, windows []arrivalWindow) (string, []any) {
+	rows := make([]string, len(windows))
+	args := make([]any, 0, 2*len(windows)+1)
 	for i, w := range windows {
-		terms[i] = "received_at BETWEEN ? AND ?"
+		rows[i] = "(?, ?)"
 		args = append(args, w.from, w.to)
 	}
-	return "project_id = ? AND (" + strings.Join(terms, " OR ") + ")", args
+	args = append(args, projectID)
+	return `WITH windows(from_at, to_at) AS (VALUES ` + strings.Join(rows, ", ") + `)
+		SELECT ` + what + ` FROM windows CROSS JOIN raw_batches r
+		 WHERE r.project_id = ? AND r.received_at BETWEEN windows.from_at AND windows.to_at`, args
 }
 
 // candidateBatches lists the project's batches received inside the windows,
@@ -197,9 +203,8 @@ func windowQuery(projectID string, windows []arrivalWindow) (string, []any) {
 func (s *Store) candidateBatches(projectID string, windows []arrivalWindow) ([]int64, error) {
 	var ids []int64
 	for start := 0; start < len(windows); start += windowGroup {
-		where, args := windowQuery(projectID, windows[start:min(start+windowGroup, len(windows))])
-		found, err := queryColumn[int64](s.db,
-			`SELECT id FROM raw_batches WHERE `+where+` ORDER BY received_at, id`, args...)
+		query, args := windowQuery(projectID, "r.id", windows[start:min(start+windowGroup, len(windows))])
+		found, err := queryColumn[int64](s.db, query+` ORDER BY r.received_at, r.id`, args...)
 		if err != nil {
 			return nil, fmt.Errorf("find the batches to scan: %w", err)
 		}
@@ -216,9 +221,9 @@ func (s *Store) candidateBatches(projectID string, windows []arrivalWindow) ([]i
 func (s *Store) countBatches(projectID string, windows []arrivalWindow) (int64, error) {
 	var total int64
 	for start := 0; start < len(windows); start += windowGroup {
-		where, args := windowQuery(projectID, windows[start:min(start+windowGroup, len(windows))])
+		query, args := windowQuery(projectID, "COUNT(*)", windows[start:min(start+windowGroup, len(windows))])
 		var n int64
-		if err := s.db.QueryRow(`SELECT COUNT(*) FROM raw_batches WHERE `+where, args...).Scan(&n); err != nil {
+		if err := s.db.QueryRow(query, args...).Scan(&n); err != nil {
 			return 0, fmt.Errorf("count the batches to scan: %w", err)
 		}
 		total += n
@@ -267,7 +272,10 @@ type RawScrub struct {
 	// Delete drops the batch instead: nothing is left in it, or its rewrite
 	// failed.
 	Delete bool
-	// Now is the stamp's clock; zero is the wall clock.
+	// Now is the stamp's clock; zero is the wall clock as the job applies.
+	// An erasure leaves it zero: the stamp is when the batch was rewritten,
+	// not when the request began — which a tail batch arrived after, and
+	// which a long erasure leaves minutes behind.
 	Now int64
 
 	// Gone reports a batch that was no longer there.
@@ -373,7 +381,7 @@ type scrubPlan struct {
 
 // planScrub reads one batch and computes its scrub: nil when the batch is
 // gone or holds none of the traces, which leaves it untouched and unmarked.
-func (s *Store) planScrub(projectID string, id int64, traces map[string]bool, now int64) (*scrubPlan, error) {
+func (s *Store) planScrub(projectID string, id int64, traces map[string]bool) (*scrubPlan, error) {
 	var (
 		stored      []byte
 		contentType sql.NullString
@@ -407,7 +415,7 @@ func (s *Store) planScrub(projectID string, id int64, traces map[string]bool, no
 	if held == 0 {
 		return nil, nil
 	}
-	job := &RawScrub{ProjectID: projectID, BatchID: id, Now: now, Expect: nullableTime(scrubbed)}
+	job := &RawScrub{ProjectID: projectID, BatchID: id, Expect: nullableTime(scrubbed)}
 	rewritten, err := scrubRewrite(decoded, traces)
 	if err == nil {
 		// The new body is read back before it is trusted: it must decode,
@@ -493,7 +501,7 @@ func submitPatiently(ctx context.Context, writer jobSubmitter, job WriteJob) err
 // job refused because another rewrite landed first is re-read and recomputed
 // (#4).
 func (s *Store) scrubBatches(ctx context.Context, writer jobSubmitter, projectID string, ids []int64,
-	traces map[string]bool, now int64) (scrubTally, error) {
+	traces map[string]bool) (scrubTally, error) {
 	var tally scrubTally
 	if len(traces) == 0 {
 		return tally, nil
@@ -510,7 +518,7 @@ func (s *Store) scrubBatches(ctx context.Context, writer jobSubmitter, projectID
 		for len(ids) > 0 && len(plans) < scrubGroup && held < scrubGroupBytes {
 			id := ids[0]
 			ids = ids[1:]
-			plan, err := s.planScrub(projectID, id, traces, now)
+			plan, err := s.planScrub(projectID, id, traces)
 			if err != nil {
 				return tally, err
 			}
@@ -532,7 +540,7 @@ func (s *Store) scrubBatches(ctx context.Context, writer jobSubmitter, projectID
 		for i, plan := range plans {
 			err := errs[i]
 			for attempt := 1; conflict(err) && attempt < scrubAttempts; attempt++ {
-				if plan, err = s.planScrub(projectID, group[i], traces, now); err != nil {
+				if plan, err = s.planScrub(projectID, group[i], traces); err != nil {
 					return tally, err
 				}
 				if plan == nil {
@@ -581,8 +589,8 @@ type UserErasure struct {
 	// (spec 023 #19); see UserDataErase.
 	Chunk      int
 	ChunkHours int
-	// Now is the clock the freeze is measured against (spec 013 #11) and
-	// the scrub's stamp; zero is the wall clock.
+	// Now is the clock the freeze is measured against (spec 013 #11); zero
+	// is the wall clock. The scrub stamps each batch as it rewrites it.
 	Now int64
 
 	// after is a test seam, told when each step has finished; an error
@@ -629,7 +637,6 @@ func (s *Store) EraseUserData(ctx context.Context, writer jobSubmitter, e UserEr
 	// that arrived for the traces it had deleted, which a repeat no longer
 	// finds. Only a stop of the server — the writer closing — ends it early.
 	ctx = context.WithoutCancel(ctx)
-	now := nowOr(e.Now)
 	after := func(step int) error {
 		if e.after == nil {
 			return nil
@@ -661,7 +668,7 @@ func (s *Store) EraseUserData(ctx context.Context, writer jobSubmitter, e UserEr
 	for _, t := range traces {
 		erased[t.id] = true
 	}
-	raw, err := s.scrubBatches(ctx, writer, e.ProjectID, candidates, erased, now)
+	raw, err := s.scrubBatches(ctx, writer, e.ProjectID, candidates, erased)
 	if err != nil {
 		return result, err
 	}
@@ -675,11 +682,17 @@ func (s *Store) EraseUserData(ctx context.Context, writer jobSubmitter, e UserEr
 	var late []arrivalWindow
 	deleted := map[string]bool{}
 	chunks := 0
+	var failed error
 	for {
 		chunk := &UserDataErase{ProjectID: e.ProjectID, UserID: e.UserID, Confirm: e.Confirm,
 			Limit: e.Chunk, HourLimit: e.ChunkHours, Now: e.Now}
 		if err := submitPatiently(ctx, writer, chunk); err != nil {
-			return result, err
+			// A chunk that fails ends step 3 and not the request: the
+			// chunks before it deleted traces whose late batches a repeat
+			// can no longer find. Step 4 runs on what they collected, and
+			// the failure is the answer after it.
+			failed = err
+			break
 		}
 		chunks++
 		result.Counts.add(chunk.Counts)
@@ -697,8 +710,10 @@ func (s *Store) EraseUserData(ctx context.Context, writer jobSubmitter, e UserEr
 			break
 		}
 	}
-	if err := after(3); err != nil {
-		return result, err
+	if failed == nil {
+		if err := after(3); err != nil {
+			return result, err
+		}
 	}
 
 	parsedDone := time.Now()
@@ -709,9 +724,9 @@ func (s *Store) EraseUserData(ctx context.Context, writer jobSubmitter, e UserEr
 	if err != nil {
 		return result, err
 	}
-	tail, err := s.scrubBatches(ctx, writer, e.ProjectID, recent, deleted, now)
+	tail, err := s.scrubBatches(ctx, writer, e.ProjectID, recent, deleted)
 	if err != nil {
-		return result, err
+		return result, errors.Join(failed, err)
 	}
 	raw.add(tail)
 
@@ -722,6 +737,9 @@ func (s *Store) EraseUserData(ctx context.Context, writer jobSubmitter, e UserEr
 	result.Counts.MediaBytes += raw.releasedBytes
 	result.Compaction = max(result.Compaction, raw.compaction)
 	result.BatchesRead = len(candidates) + len(recent)
+	if failed != nil {
+		return result, failed
+	}
 	// Counts and durations, never the id (#15).
 	logger().Info("erased a user's data", "project", e.ProjectID,
 		"traces", result.Counts.Traces, "chunks", chunks,
@@ -755,8 +773,44 @@ type UserPreview struct {
 	Raw      RawErasure
 }
 
-// UserDataPreview counts what erasing one user would take: exactly what the
-// confirmed request deletes, and the raw batches it would read.
+// The erasure's lookups by id, named so that TestErasureQueriesSeekTheirIndexes
+// asks EXPLAIN about these very strings: the store never runs ANALYZE, so an
+// index that is not chosen is an index that is not there.
+const (
+	// userSessionScores counts the session-only scores of the sessions a
+	// user's traces carried (#7). The sessions come through
+	// `idx_traces_user`; a `session_id IS NOT NULL` beside the user moved the
+	// planner onto `idx_traces_session`, every session-bearing trace of the
+	// project, and `IN` never matches a NULL anyway.
+	userSessionScores = `SELECT COUNT(*) FROM scores WHERE project_id = ? AND trace_id IS NULL AND session_id IN
+	   (SELECT session_id FROM traces WHERE project_id = ? AND user_id = ?)`
+	// userSourcedItems counts, per dataset, the items any row of which names
+	// one of a user's traces (#9). The rows are found first and grouped
+	// after: a DISTINCT or a GROUP BY over the lookup itself moves the
+	// planner onto an index in the grouping's order — the primary key, every
+	// item of the project — instead of `idx_dataset_items_source`.
+	userSourcedItems = `WITH sourced AS MATERIALIZED (` + sourcedRows + `
+	    (SELECT id FROM traces WHERE project_id = ? AND user_id = ?))
+	  SELECT dataset, COUNT(DISTINCT item_id) FROM sourced GROUP BY dataset ORDER BY dataset`
+	sourcedRows = `SELECT dataset, item_id FROM dataset_items WHERE project_id = ? AND source_trace_id IN`
+)
+
+// traceSessions is the sessions a chunk of n traces carried.
+func traceSessions(n int) string {
+	return `SELECT DISTINCT session_id FROM traces WHERE project_id = ? AND session_id IS NOT NULL AND id IN (` +
+		placeholders(n) + `)`
+}
+
+// sourcedItems is the rows naming one of n traces as their source, an item
+// once per such row; not DISTINCT, for the reason userSourcedItems gives.
+func sourcedItems(n int) string {
+	return sourcedRows + ` (` + placeholders(n) + `)`
+}
+
+// UserDataPreview counts what erasing one user would take, and the raw
+// batches it would read. The counts are what the confirmed request's parsed
+// phase deletes; its answer adds, under `media`, the bodies the raw scrub
+// frees, which a count that does not decode cannot know (Decision 20 n).
 func (s *Store) UserDataPreview(ctx context.Context, projectID, userID string, now int64) (UserPreview, error) {
 	var out UserPreview
 	const owned = `SELECT id FROM traces WHERE project_id = ? AND user_id = ?`
@@ -765,17 +819,12 @@ func (s *Store) UserDataPreview(ctx context.Context, projectID, userID string, n
 		return out, err
 	}
 	// The session-only scores of the sessions the traces carried (#7).
-	if err := s.db.QueryRow(
-		`SELECT COUNT(*) FROM scores WHERE project_id = ? AND trace_id IS NULL AND session_id IN
-		   (SELECT session_id FROM traces WHERE project_id = ? AND user_id = ? AND session_id IS NOT NULL)`,
-		projectID, projectID, userID).Scan(&out.Counts.SessionScores); err != nil {
+	if err := s.db.QueryRow(userSessionScores, projectID, projectID, userID).
+		Scan(&out.Counts.SessionScores); err != nil {
 		return out, fmt.Errorf("count the session scores: %w", err)
 	}
 	// The items any row of which names one of the traces (#9).
-	rows, err := s.db.Query(
-		`SELECT dataset, COUNT(DISTINCT item_id) FROM dataset_items
-		  WHERE project_id = ? AND source_trace_id IN (`+owned+`)
-		  GROUP BY dataset ORDER BY dataset`, projectID, projectID, userID)
+	rows, err := s.db.Query(userSourcedItems, projectID, projectID, userID)
 	if err != nil {
 		return out, fmt.Errorf("find the dataset items cut from the traces: %w", err)
 	}
@@ -813,9 +862,7 @@ func (s *Store) UserDataPreview(ctx context.Context, projectID, userID string, n
 func deleteSessionScores(tx *sql.Tx, projectID string, traceIDs []any) (int64, error) {
 	var sessions []any
 	err := eachIn(traceIDs, func(batch []any) error {
-		found, err := queryColumn[string](tx,
-			`SELECT DISTINCT session_id FROM traces WHERE project_id = ? AND session_id IS NOT NULL AND id IN (`+
-				placeholders(len(batch))+`)`, append([]any{projectID}, batch...)...)
+		found, err := queryColumn[string](tx, traceSessions(len(batch)), append([]any{projectID}, batch...)...)
 		sessions = append(sessions, found...)
 		return err
 	})
@@ -837,20 +884,10 @@ func deleteSourcedItems(tx *sql.Tx, projectID string, traceIDs []any, now int64)
 	var items int64
 	datasets := map[string]bool{}
 	err := eachIn(traceIDs, func(batch []any) error {
-		sourced := `SELECT DISTINCT dataset, item_id FROM dataset_items
-		  WHERE project_id = ? AND source_trace_id IN (` + placeholders(len(batch)) + `)`
-		args := append([]any{projectID}, batch...)
-		found, err := queryColumn[string](tx, `SELECT DISTINCT dataset FROM (`+sourced+`)`, args...)
-		if err != nil {
-			return err
-		}
-		for _, d := range found {
-			datasets[d.(string)] = true
-		}
 		// Every version of each: the rows the source names and the
 		// rows that dropped it alike.
 		rows, err := tx.Query(`DELETE FROM dataset_items WHERE project_id = ? AND (dataset, item_id) IN (`+
-			sourced+`) RETURNING dataset, item_id`, append([]any{projectID}, args...)...)
+			sourcedItems(len(batch))+`) RETURNING dataset, item_id`, append([]any{projectID, projectID}, batch...)...)
 		if err != nil {
 			return err
 		}
@@ -862,6 +899,7 @@ func deleteSourcedItems(tx *sql.Tx, projectID string, traceIDs []any, now int64)
 				return err
 			}
 			gone[key] = true
+			datasets[key[0]] = true
 		}
 		items += int64(len(gone))
 		return rows.Err()

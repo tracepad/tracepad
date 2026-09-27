@@ -479,7 +479,8 @@ where something is deleted every hour rewrites its index once an hour.
 3. **Raw bodies older than the trace window.** With `raw_retention_days`
    longer than `retention_days`, the traces that said whose spans a batch
    holds are gone, and nothing can attribute them; the dry run counts those
-   batches as `raw.unattributable_batches`. If you answer erasure requests,
+   batches as `raw.unattributable_batches` — an estimate, not an exact count
+   ([admin.md](admin.md#erasing-a-users-data)). If you answer erasure requests,
    keep the raw window no longer than the trace window, or run with
    `TRACEPAD_STORE_RAW=off`.
 4. **Anything not linked by id**: a name typed into another user's prompt, a
