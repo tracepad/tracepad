@@ -67,32 +67,28 @@ func (s *Server) signUpload(grant uploadGrant) (string, error) {
 		base64.RawURLEncoding.EncodeToString(mac.Sum(nil)), nil
 }
 
-// errBadUploadToken is the channel's one answer to a URL it will not take,
-// whether the token or the stored state refuses it.
-var errBadUploadToken error = store.ErrUploadVoid
-
 // verifyUpload opens a token this server signed; any other is refused.
 func (s *Server) verifyUpload(token string) (*uploadGrant, error) {
 	encoded, signature, found := strings.Cut(token, ".")
 	if !found {
-		return nil, errBadUploadToken
+		return nil, store.ErrUploadVoid
 	}
 	payload, err := base64.RawURLEncoding.DecodeString(encoded)
 	if err != nil {
-		return nil, errBadUploadToken
+		return nil, store.ErrUploadVoid
 	}
 	given, err := base64.RawURLEncoding.DecodeString(signature)
 	if err != nil {
-		return nil, errBadUploadToken
+		return nil, store.ErrUploadVoid
 	}
 	mac := hmac.New(sha256.New, s.mediaKey)
 	mac.Write(payload)
 	if subtle.ConstantTimeCompare(given, mac.Sum(nil)) != 1 {
-		return nil, errBadUploadToken
+		return nil, store.ErrUploadVoid
 	}
 	var grant uploadGrant
 	if err := json.Unmarshal(payload, &grant); err != nil {
-		return nil, errBadUploadToken
+		return nil, store.ErrUploadVoid
 	}
 	return &grant, nil
 }
@@ -104,7 +100,7 @@ func (g *uploadGrant) refusal(mediaID string, now time.Time) error {
 	// against a revocation, so it is refused (Decision 28): the uploads
 	// in transit across that one upgrade are what it costs.
 	if g.Key == "" || store.MediaIDFor(g.SHA256) != mediaID {
-		return errBadUploadToken
+		return store.ErrUploadVoid
 	}
 	if now.Unix() > g.Expires {
 		return errors.New("this upload URL has expired; ask for a new one")

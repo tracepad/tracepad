@@ -435,14 +435,14 @@ func TestMediaAskForARemovedTrace(t *testing.T) {
 	if err := f.store.MediaUploadRoom(t.Context(), f.project.ID, body.SHA256, hexTrace(2)); err != nil {
 		t.Fatalf("the ask for another trace = %v", err)
 	}
-	// Half a minute past the window, a URL the check let through before
-	// the removal may still be good: the record stays.
+	// Four minutes past the window, a URL the check let through before
+	// the removal's commit may still be good: the record stays.
 	if err := f.sweeper.sweepVoidedUploads(t.Context(),
-		time.Now().Add(MediaUploadWindow+30*time.Second).UnixNano()); err != nil {
+		time.Now().Add(MediaUploadWindow+4*time.Minute).UnixNano()); err != nil {
 		t.Fatal(err)
 	}
 	if err := ask(); !errors.Is(err, ErrTraceRemoved) {
-		t.Fatalf("the ask half a minute past the window = %v, want ErrTraceRemoved", err)
+		t.Fatalf("the ask four minutes past the window = %v, want ErrTraceRemoved", err)
 	}
 	// Past the window and the slack, and no sweep since: the row is still
 	// there, and voids nothing.
@@ -627,5 +627,37 @@ func TestMediaVoidedSweepOnTheWallClock(t *testing.T) {
 	}
 	if err := f.store.MediaUploadRoom(t.Context(), f.project.ID, mediaBody(87, 400).SHA256, hexTrace(1)); !errors.Is(err, ErrTraceRemoved) {
 		t.Errorf("the ask after a pass on a clock two hours ahead = %v, want ErrTraceRemoved", err)
+	}
+}
+
+// TestMediaRemovalStampedAsItsChunkEnds: a chunk that runs long — a trigger
+// here makes its trace's deletion slow — stamps its removed traces as it ends,
+// not as it began: an ask that read the pool while the chunk ran is dated from
+// then, and the row's hour must start no earlier (#29).
+func TestMediaRemovalStampedAsItsChunkEnds(t *testing.T) {
+	f := newSweepFixture(t)
+	f.arrive(t, f.project.ID, hexTrace(1), daysAgo(1))
+	for _, statement := range []string{
+		`CREATE TABLE slow (n INTEGER)`,
+		`WITH RECURSIVE c(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM c WHERE n < 1500) INSERT INTO slow SELECT n FROM c`,
+		`CREATE TRIGGER slow_removal AFTER DELETE ON traces
+		   BEGIN SELECT COUNT(*) FROM slow a, slow b; END`,
+	} {
+		if _, err := f.store.db.Exec(statement); err != nil {
+			t.Fatalf("%s: %v", statement, err)
+		}
+	}
+	began := time.Now()
+	if err := f.writer.Submit(t.Context(), &TraceDelete{ProjectID: f.project.ID, IDs: []string{hexTrace(1)},
+		Confirm: hexTrace(1)}); err != nil {
+		t.Fatal(err)
+	}
+	took := time.Since(began)
+	if took < 50*time.Millisecond {
+		t.Fatalf("the slowed chunk took %v; the trigger no longer slows it", took)
+	}
+	at := f.count(t, `SELECT at FROM media_voided WHERE project_id = ?`, f.project.ID)
+	if stamped := time.Duration(at - began.UnixNano()); stamped < took/2 {
+		t.Errorf("the removal was stamped %v into a chunk of %v; want it stamped as the chunk ends", stamped, took)
 	}
 }

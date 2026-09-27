@@ -627,12 +627,13 @@ func (a *MediaRefAdd) apply(tx *sql.Tx) error {
 	// No sooner than an hour inside the grace (#30): the spans the null
 	// answer tells the SDK to send without their bytes are on their way.
 	floor := now - int64(MediaOrphanGrace) + int64(nullAnswerHold)
-	switch place {
-	case refVoid:
-		// Removed since the handler's check: refused as the check would
-		// have refused it, not answered as held (#29).
-		return ErrTraceRemoved
-	case refWritten:
+	// A trace removed since the handler's check is refused as the check
+	// would have refused it, not answered as held (#29), and a new pending
+	// ref meets the cap.
+	if err := placeRefusal(tx, a.ProjectID, place); err != nil {
+		return err
+	}
+	if place == refWritten {
 		// Named again for its own trace, a ref still pending takes the same
 		// hour a new one would: a ref near the end of its grace would
 		// otherwise go, with the body, right after the answer.
@@ -646,9 +647,6 @@ func (a *MediaRefAdd) apply(tx *sql.Tx) error {
 	}
 	at := now
 	if place == refPending {
-		if err := pendingRoom(tx, a.ProjectID, maxPendingMediaRefs); err != nil {
-			return err
-		}
 		var aged int64
 		if err := tx.QueryRow(`SELECT COALESCE(MAX(created_at), ?) FROM media_refs
 		                        WHERE sha256 = ? AND project_id = ?`,
@@ -738,10 +736,12 @@ const MediaUploadWindow = time.Hour
 
 // mediaVoidedSlack is how much longer than the window a removed trace is
 // remembered: a URL's expiry is signed in whole seconds from a clock read
-// before the ask's check, and a removal is stamped as its chunk runs, not as
-// it commits — so a URL the check let through can outlive the stamp's hour by
-// that much (#29).
-const mediaVoidedSlack = time.Minute
+// before the ask's check, and a removal is stamped as its chunk ends, not as
+// it commits — the rest of a group commit comes after — so a URL the check
+// let through can outlive the stamp's hour by that much (#29). Five minutes,
+// far past any commit a writer finishes, for a trace sent again that waits
+// that much longer for its pictures.
+const mediaVoidedSlack = 5 * time.Minute
 
 // voidUploads records, in the transaction that removes them and before they
 // go, the traces whose uploads are void from now (#29).
@@ -756,6 +756,17 @@ func voidUploads(tx *sql.Tx, projectID string, traceIDs []any, now int64) error 
 	})
 }
 
+// restampVoided moves the rows a removal wrote as its chunk began to now, as
+// the chunk ends: a URL whose ask read the pool while the chunk ran is dated
+// from then, and the row's hour has to start no earlier (#29).
+func restampVoided(tx *sql.Tx, projectID string, stamp int64) error {
+	if _, err := tx.Exec(`UPDATE media_voided SET at = ? WHERE project_id = ? AND at = ?`,
+		time.Now().UnixNano(), projectID, stamp); err != nil {
+		return fmt.Errorf("stamp the removed traces' uploads: %w", err)
+	}
+	return nil
+}
+
 // MaxPendingMediaRefs is how many pending refs one project may have (#31): an
 // upload whose trace has not come. Two orders of magnitude over a hundred
 // pictures a second held for the seconds an export takes. A constant, not a
@@ -767,6 +778,20 @@ const MaxPendingMediaRefs = 10000
 // a test that changes it must not run in parallel (t.Parallel) with another
 // that uploads.
 var maxPendingMediaRefs = MaxPendingMediaRefs
+
+// placeRefusal is the refusal a ref's place leads to — the one rule the ask,
+// the upload and the null answer share: ErrTraceRemoved for a removed trace
+// that is not here (#29), errPendingFull for a new pending ref past the cap
+// (#31), and nil for a ref written already or a trace the project has.
+func placeRefusal(q querier, projectID string, place refPlace) error {
+	switch place {
+	case refVoid:
+		return ErrTraceRemoved
+	case refPending:
+		return pendingRoom(q, projectID, maxPendingMediaRefs)
+	}
+	return nil
+}
 
 // errPendingFull is the refusal at the cap (#31).
 var errPendingFull = &Rejection{Kind: RejectFull,
@@ -796,15 +821,10 @@ func pendingRoom(q querier, projectID string, limit int) error {
 // one past the cap (#31). The guard has settled the project and the key.
 func (s *Store) MediaUploadRoom(ctx context.Context, projectID, sha, traceID string) error {
 	place, err := refPlaceOf(ctx, s.db, projectID, sha, traceID)
-	switch {
-	case err != nil:
+	if err != nil {
 		return err
-	case place == refVoid:
-		return ErrTraceRemoved
-	case place != refPending:
-		return nil
 	}
-	return pendingRoom(s.db, projectID, maxPendingMediaRefs)
+	return placeRefusal(s.db, projectID, place)
 }
 
 // MediaGrant is what an upload URL lets its holder store, as far as the store
@@ -869,13 +889,12 @@ func grantRefusal(ctx context.Context, q ctxQuerier, g MediaGrant) (string, erro
 	if gone || !alive {
 		return media, ErrUploadVoid
 	}
-	if place == refVoid {
-		return media, ErrTraceRemoved
-	}
-	if media == MediaPlaceholder || place != refPending {
+	// The placeholder setting keeps nothing, so the cap does not apply; a
+	// removed trace is refused under either setting.
+	if media == MediaPlaceholder && place != refVoid {
 		return media, nil
 	}
-	return media, pendingRoom(q, g.ProjectID, maxPendingMediaRefs)
+	return media, placeRefusal(q, g.ProjectID, place)
 }
 
 // MediaUpload stores one body the Langfuse channel received and the ref of
