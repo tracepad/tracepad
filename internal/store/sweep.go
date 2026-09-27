@@ -498,10 +498,10 @@ func (sw *Sweeper) sweepOrphanSearchEntries(ctx context.Context) (int64, error) 
 }
 
 // sweepVoidedUploads forgets the traces removed longer ago than an upload
-// URL lives, in bounded chunks (spec 041 #29).
+// URL lives, and the slack, in bounded chunks (spec 041 #29).
 func (sw *Sweeper) sweepVoidedUploads(ctx context.Context, now int64) error {
 	for range sw.maxChunks {
-		chunk := &mediaVoidedSweep{Before: now - int64(MediaUploadWindow), Limit: sw.chunk}
+		chunk := &mediaVoidedSweep{Before: now - int64(MediaUploadWindow+mediaVoidedSlack), Limit: sw.chunk}
 		if err := sw.writer.Submit(ctx, chunk); err != nil {
 			return err
 		}

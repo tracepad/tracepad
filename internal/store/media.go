@@ -632,7 +632,7 @@ func (a *MediaRefAdd) apply(tx *sql.Tx) error {
 	now := nowOr(a.Now)
 	at := now
 	if place == refPending {
-		if err := pendingRoom(tx, a.ProjectID, a.limit()); err != nil {
+		if err := pendingRoom(tx, a.ProjectID, a.cap); err != nil {
 			return err
 		}
 		var aged int64
@@ -711,25 +711,25 @@ func refPlaceOf(ctx context.Context, q ctxQuerier, projectID, sha, traceID strin
 
 // MediaUploadWindow is how long an upload URL is good for, and so how long a
 // removed trace's uploads stay void: no URL issued before the removal outlives
-// it (#29).
+// it (#29), and none is issued after it.
 const MediaUploadWindow = time.Hour
 
-// voidUploads records, in the transaction that removes them, the traces whose
-// uploads are void from now (#29).
+// mediaVoidedSlack is how much longer than the window a removed trace is
+// remembered: a URL's expiry is signed in whole seconds from a clock read
+// before the ask's check, and a removal is stamped as its chunk runs, not as
+// it commits — so a URL the check let through can outlive the stamp's hour by
+// that much (#29).
+const mediaVoidedSlack = time.Minute
+
+// voidUploads records, in the transaction that removes them and before they
+// go, the traces whose uploads are void from now (#29).
 func voidUploads(tx *sql.Tx, projectID string, traceIDs []any, now int64) error {
-	return eachIn(traceIDs, func(batch []any) error {
-		rows := make([]string, len(batch))
-		args := make([]any, 0, 3*len(batch))
-		for i, id := range batch {
-			rows[i] = "(?, ?, ?)"
-			args = append(args, projectID, id, now)
-		}
-		if _, err := tx.Exec(`INSERT INTO media_voided (project_id, trace_id, at) VALUES `+
-			strings.Join(rows, ", ")+` ON CONFLICT DO UPDATE SET at = excluded.at`, args...); err != nil {
-			return fmt.Errorf("void the removed traces' uploads: %w", err)
-		}
-		return nil
-	})
+	if _, err := deleteIn(tx, `INSERT OR REPLACE INTO media_voided (project_id, trace_id, at)
+	    SELECT project_id, id, ? FROM traces WHERE project_id = ? AND id IN`,
+		[]any{now, projectID}, traceIDs); err != nil {
+		return fmt.Errorf("void the removed traces' uploads: %w", err)
+	}
+	return nil
 }
 
 // MaxPendingMediaRefs is how many pending refs one project may have (#31): an
@@ -739,18 +739,11 @@ func voidUploads(tx *sql.Tx, projectID string, traceIDs []any, now int64) error 
 const MaxPendingMediaRefs = 10000
 
 // pendingCap is the cap a job counts pending refs against, which the writer
-// hands it from its store before the job runs: the constant, but for the
-// store's own tests.
+// hands it from its store before the job runs, as the store's reads take it:
+// the constant, but for the store's own tests.
 type pendingCap struct{ cap int }
 
 func (p *pendingCap) setPendingCap(n int) { p.cap = n }
-
-func (p *pendingCap) limit() int {
-	if p.cap <= 0 {
-		return MaxPendingMediaRefs
-	}
-	return p.cap
-}
 
 // errPendingFull is the refusal at the cap (#31).
 var errPendingFull = &Rejection{Kind: RejectFull,
@@ -773,15 +766,20 @@ func pendingRoom(q querier, projectID string, limit int) error {
 }
 
 // MediaUploadRoom is the channel POST's check, a read of the pool before any
-// job: errPendingFull's rejection when the ref its answer would lead to — the
-// upload's, or the null answer's — would be a new pending one past the cap
-// (#31). Nothing else refuses the ask: the guard has settled the project and
-// the key, and a removed trace is refused at the PUT and gets no ref from the
-// null answer.
+// job: ErrUploadVoid for a trace a deletion or an erasure removed within the
+// hour and not here now (#29) — a URL issued for it would outlive the
+// removal's record — and errPendingFull's rejection when the ref its answer
+// would lead to, the upload's or the null answer's, would be a new pending
+// one past the cap (#31). The guard has settled the project and the key.
 func (s *Store) MediaUploadRoom(ctx context.Context, projectID, sha, traceID string) error {
 	place, err := refPlaceOf(ctx, s.db, projectID, sha, traceID)
-	if err != nil || place != refPending {
+	switch {
+	case err != nil:
 		return err
+	case place == refVoid:
+		return ErrUploadVoid
+	case place != refPending:
+		return nil
 	}
 	return pendingRoom(s.db, projectID, s.maxPendingMediaRefs)
 }
@@ -866,7 +864,7 @@ type MediaUpload struct {
 }
 
 func (u *MediaUpload) apply(tx *sql.Tx) error {
-	media, err := grantRefusal(context.Background(), tx, u.Grant, u.limit())
+	media, err := grantRefusal(context.Background(), tx, u.Grant, u.cap)
 	if err != nil || media == MediaPlaceholder {
 		return err
 	}
@@ -879,7 +877,8 @@ func (u *MediaUpload) apply(tx *sql.Tx) error {
 }
 
 // mediaVoidedSweep forgets the removed traces whose uploads no URL can still
-// carry (#29): those removed more than the URL's lifetime ago.
+// carry (#29): those removed more than the URL's lifetime, and the slack,
+// ago.
 type mediaVoidedSweep struct {
 	Before int64
 	Limit  int

@@ -210,6 +210,14 @@ func upsertTrace(tx *sql.Tx, projectID string, t *model.Trace, ingestedAt int64,
 	if err != nil {
 		return fmt.Errorf("upsert trace %s: %w", t.ID, err)
 	}
+	// A trace here settles the Langfuse channel's refs to it (spec 041
+	// Decision 13), the ones its spans name and the ones they do not: a
+	// pending ref is an upload whose trace has not come, and only those
+	// count toward the cap (#31). A seek, usually on nothing.
+	if _, err := tx.Exec(`UPDATE media_refs SET pending = 0
+	                       WHERE project_id = ? AND trace_id = ? AND pending = 1`, projectID, t.ID); err != nil {
+		return fmt.Errorf("settle the media refs of trace %s: %w", t.ID, err)
+	}
 	if !indexing {
 		return nil
 	}

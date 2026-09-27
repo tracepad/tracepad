@@ -355,16 +355,18 @@ func TestMediaDeletionInChunks(t *testing.T) {
 		t.Error("the picture of a trace no chunk took was lost")
 	}
 
-	// The removed traces are remembered for the URL's lifetime from the
-	// chunk that removed them — not from the request's clock, which these
-	// chunks set a month back — and not beyond it.
-	if err := f.sweeper.sweepVoidedUploads(t.Context(), time.Now().Add(MediaUploadWindow-time.Minute).UnixNano()); err != nil {
+	// The removed traces are remembered for the URL's lifetime and the
+	// slack from the chunk that removed them — not from the request's clock,
+	// which these chunks set a month back — and not beyond it.
+	if err := f.sweeper.sweepVoidedUploads(t.Context(),
+		time.Now().Add(MediaUploadWindow+mediaVoidedSlack-10*time.Second).UnixNano()); err != nil {
 		t.Fatal(err)
 	}
 	if n := f.count(t, `SELECT COUNT(*) FROM media_voided`); n != 2 {
-		t.Fatalf("voided traces within the hour = %d, want 2", n)
+		t.Fatalf("voided traces within the hour and the slack = %d, want 2", n)
 	}
-	if err := f.sweeper.sweepVoidedUploads(t.Context(), time.Now().Add(MediaUploadWindow+time.Minute).UnixNano()); err != nil {
+	if err := f.sweeper.sweepVoidedUploads(t.Context(),
+		time.Now().Add(MediaUploadWindow+mediaVoidedSlack+time.Minute).UnixNano()); err != nil {
 		t.Fatal(err)
 	}
 	if n := f.count(t, `SELECT COUNT(*) FROM media_voided`); n != 0 {
@@ -405,5 +407,74 @@ func TestMediaResentTraceTakesUploads(t *testing.T) {
 	}
 	if n := f.count(t, `SELECT COUNT(*) FROM media_refs WHERE trace_id = ? AND pending = 0`, hexTrace(1)); n != 2 {
 		t.Errorf("settled refs of the trace sent again = %d, want its upload's and the null answer's", n)
+	}
+}
+
+// TestMediaAskForARemovedTrace: the ask for a trace a deletion removed, and
+// that is not here, is refused as its upload is — a URL issued then would
+// live an hour from the ask, past the removal's record — and the record
+// outlives the window by the slack, for a URL the ask's check let through
+// just before the removal. A trace sent again is asked for (#29).
+func TestMediaAskForARemovedTrace(t *testing.T) {
+	f := newSweepFixture(t)
+	f.arrive(t, f.project.ID, hexTrace(1), daysAgo(1))
+	if err := f.writer.Submit(t.Context(), &TraceDelete{ProjectID: f.project.ID, IDs: []string{hexTrace(1)},
+		Confirm: hexTrace(1)}); err != nil {
+		t.Fatal(err)
+	}
+	sha := mediaBody(80, 400).SHA256
+	ask := func() error { return f.store.MediaUploadRoom(t.Context(), f.project.ID, sha, hexTrace(1)) }
+	if err := ask(); !errors.Is(err, ErrUploadVoid) {
+		t.Fatalf("the ask for a deleted trace = %v, want ErrUploadVoid", err)
+	}
+	if err := f.store.MediaUploadRoom(t.Context(), f.project.ID, sha, hexTrace(2)); err != nil {
+		t.Fatalf("the ask for another trace = %v", err)
+	}
+	// Half a minute past the window, a URL the check let through before
+	// the removal may still be good: the record stays.
+	if err := f.sweeper.sweepVoidedUploads(t.Context(),
+		time.Now().Add(MediaUploadWindow+30*time.Second).UnixNano()); err != nil {
+		t.Fatal(err)
+	}
+	if err := ask(); !errors.Is(err, ErrUploadVoid) {
+		t.Fatalf("the ask half a minute past the window = %v, want ErrUploadVoid", err)
+	}
+	f.arrive(t, f.project.ID, hexTrace(1), daysAgo(1))
+	if err := ask(); err != nil {
+		t.Errorf("the ask for the trace sent again = %v", err)
+	}
+}
+
+// TestMediaTraceSettlesItsRefs: an upload for a trace not here is pending;
+// the trace arrives with spans that name no picture, and its ref is settled
+// by the arrival, not by the day's sweep — so it leaves the cap, and the next
+// trace's upload has room (#31, Decision 13).
+func TestMediaTraceSettlesItsRefs(t *testing.T) {
+	f := newSweepFixture(t)
+	f.capPending(t, 1)
+	if err := f.writer.Submit(t.Context(), f.upload(hexTrace(1), mediaBody(81, 400))); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.writer.Submit(t.Context(), f.upload(hexTrace(2), mediaBody(82, 400))); !rejectedAs(err, RejectFull) {
+		t.Fatalf("a second pending upload under a cap of one = %v, want a full rejection", err)
+	}
+	f.arrive(t, f.project.ID, hexTrace(1), daysAgo(1))
+	if pending, settled, err := f.store.MediaRefStates(f.project.ID, hexTrace(1)); err != nil ||
+		pending != 0 || settled != 1 {
+		t.Fatalf("the arrived trace's refs = %d pending, %d settled (%v), want its one settled",
+			pending, settled, err)
+	}
+	if err := f.writer.Submit(t.Context(), f.upload(hexTrace(2), mediaBody(82, 400))); err != nil {
+		t.Fatalf("the next trace's upload once the first arrived = %v", err)
+	}
+	var plan string
+	var id, parent, notused int
+	if err := f.store.db.QueryRow(`EXPLAIN QUERY PLAN UPDATE media_refs SET pending = 0
+		  WHERE project_id = ? AND trace_id = ? AND pending = 1`, f.project.ID, hexTrace(1)).
+		Scan(&id, &parent, &notused, &plan); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(plan, "trace_id=?") {
+		t.Errorf("the arrival's settle is %q, want a seek on the project and the trace", plan)
 	}
 }

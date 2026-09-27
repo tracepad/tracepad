@@ -183,10 +183,15 @@ func (s *Server) handleLangfuseMediaUpload(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// Only the cap refuses the ask — at it, for a trace the project does not
-	// have, there is no room for the ref either answer would lead to
-	// (Decision 31); the guard has settled the project and the key. A read
-	// of the pool, so a refusal never reaches the writer.
+	// The URL's hour runs from before the check: a removal the check does
+	// not see is stamped after this, and its record outlives the URL.
+	issued := time.Now()
+	// The ask is refused for a trace a deletion or an erasure removed
+	// within the hour and that is not here (Decision 29), and at the cap
+	// for a trace the project does not have, where there is no room for
+	// the ref either answer would lead to (Decision 31); the guard has
+	// settled the project and the key. A read of the pool, so a refusal
+	// never reaches the writer.
 	if err := s.store.MediaUploadRoom(r.Context(), project.ID, sha, request.TraceID); err != nil {
 		var rejection *store.Rejection
 		if errors.As(err, &rejection) {
@@ -218,7 +223,7 @@ func (s *Server) handleLangfuseMediaUpload(w http.ResponseWriter, r *http.Reques
 	token, err := s.signUpload(uploadGrant{
 		Project: project.ID, Trace: request.TraceID, SHA256: sha,
 		MimeType: request.ContentType, Length: request.ContentLength,
-		Expires: time.Now().Add(store.MediaUploadWindow).Unix(),
+		Expires: issued.Add(store.MediaUploadWindow).Unix(),
 		Key:     callerFrom(r.Context()).key.PublicKey,
 	})
 	if err != nil {
@@ -264,7 +269,7 @@ func (s *Server) handleLangfuseMediaPut(w http.ResponseWriter, r *http.Request) 
 	// has room (Decision 31). The write asks all of it again.
 	media, refusal := s.store.MediaGrantRefusal(r.Context(), grant.storeGrant())
 	if refusal != nil {
-		refuseUpload(w, r, refusal)
+		refuseUpload(w, r, refusal, grant.Length)
 		return
 	}
 
@@ -306,41 +311,40 @@ func (s *Server) handleLangfuseMediaPut(w http.ResponseWriter, r *http.Request) 
 	w.WriteHeader(http.StatusOK)
 }
 
-// uploadDrainMax and uploadDrainTime bound what a refused upload's body costs
-// to read and drop. A live grant the stored state refuses — a revoked key, a
-// removed trace, the cap — is a client that was told to upload, and the SDK
-// retries the 429 it reads, not a connection reset under a body the server
-// stopped reading (Decision 31). So the refusal is written and flushed first,
-// and the body read and dropped after it; past either bound the server stops
-// reading and closes the connection.
-const (
-	uploadDrainMax  = 8 << 20
-	uploadDrainTime = 10 * time.Second
-)
+// uploadDrainTime bounds how long a refused upload's body is read and
+// dropped. A live grant the stored state refuses — a revoked key, a removed
+// trace, the cap — or that a failed lookup could not check is a client that
+// was told to upload, and the SDK retries the 429 or the 503 it reads, not a
+// connection reset under a body the server stopped reading (Decision 31). So
+// the refusal is written and flushed first, and the body read and dropped
+// after it, up to the length the grant declared — which the ask bounded by
+// the API's body limit; past the length or the time the server stops reading
+// and closes the connection.
+const uploadDrainTime = 10 * time.Second
 
-// refuseUpload answers a refusal from the stored state, then drains the body.
-// A failed lookup is answered, and nothing read.
+// refuseUpload answers a refusal from the stored state, or a failed lookup,
+// then drains up to `length` of the body.
 //
 // A client that sent `Expect: 100-continue` hears the refusal before it sends
 // anything: net/http sends no `100` once a final status is written, takes the
 // body as closed, and closes the connection after the reply — so there is
 // nothing to drain.
-func refuseUpload(w http.ResponseWriter, r *http.Request, refusal error) {
-	var rejection *store.Rejection
-	if !errors.As(refusal, &rejection) {
-		lookupFailed(w, r, "media", refusal)
-		return
-	}
+func refuseUpload(w http.ResponseWriter, r *http.Request, refusal error, length int64) {
 	control := http.NewResponseController(w)
 	// Before the status: otherwise net/http reads what it will of the body
 	// before writing it, and closes the connection past that.
 	_ = control.EnableFullDuplex()
-	submitFailure(w, refusal, apiWrite)
+	var rejection *store.Rejection
+	if errors.As(refusal, &rejection) {
+		submitFailure(w, refusal, apiWrite)
+	} else {
+		lookupFailed(w, r, "media", refusal)
+	}
 	_ = control.Flush()
 	// A recorder in a test takes no deadline; the drain's bound is then its
 	// length alone.
 	_ = control.SetReadDeadline(time.Now().Add(uploadDrainTime))
-	_, _ = io.CopyN(io.Discard, r.Body, uploadDrainMax)
+	_, _ = io.CopyN(io.Discard, r.Body, length)
 }
 
 // handleLangfuseMediaPatch takes the SDK's report on an upload. There is no

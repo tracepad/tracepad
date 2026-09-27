@@ -27,8 +27,8 @@ import (
 // identical picture writes a pending ref no younger than its bytes, and a
 // project's pending refs are capped. Every refusal of the PUT is decided
 // before its body is read; a refusal of a live grant is answered and the body
-// then drained, up to a bound, so that the SDK reads the status rather than a
-// reset.
+// then drained, up to the length the grant declared, so that the SDK reads the
+// status rather than a reset.
 
 // put PUTs a body of `size` bytes — endless when negative — at an upload URL
 // and answers the status and how much of the body the server read.
@@ -53,15 +53,23 @@ func (h *harness) put(t *testing.T, upload string, size int64) (int, int64) {
 }
 
 // putRefused PUTs a live grant the stored state refuses and answers the
-// status: the body is drained after the refusal, all of it up to the bound
-// and the bound's worth past it. An upload that read the body instead answers
-// 413 or 400.
+// status: the body is drained after the refusal, all of it up to the length
+// the grant declared and that length's worth past it. An upload that read the
+// body instead answers 413 or 400.
 func (h *harness) putRefused(t *testing.T, upload string, size int64) int {
 	t.Helper()
+	parsed, err := url.Parse(upload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	grant, err := h.server.verifyUpload(parsed.Query().Get("token"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	code, read := h.put(t, upload, size)
-	want := min(size, uploadDrainMax)
+	want := min(size, grant.Length)
 	if size < 0 {
-		want = uploadDrainMax
+		want = grant.Length
 	}
 	if (code == http.StatusForbidden || code == http.StatusTooManyRequests) && read != want {
 		t.Errorf("a refused body of %d: read %d, want %d", size, read, want)
@@ -203,8 +211,10 @@ func TestLangfuseMediaRefusalBeforeTheBody(t *testing.T) {
 		PublicKey string `json:"public_key"`
 		SecretKey string `json:"secret_key"`
 	}](t, rec)
-	picture, _, _ := pictureOf(67)
-	_, upload := h.langfuseAsk(t, picture, probeTrace, second.SecretKey)
+	// Larger than any fixed bound short of the API's body limit: the drain
+	// reads what the grant declared.
+	const size = 12 << 20
+	_, upload := h.langfuseAsk(t, testPicture(size, 67), probeTrace, second.SecretKey)
 	expectStatus(t, h.call(t, "DELETE", "/api/v1/projects/"+h.project.ID+"/keys/"+second.PublicKey,
 		nil, asAdmin), 200)
 	parsed, err := url.Parse(*upload)
@@ -213,40 +223,7 @@ func TestLangfuseMediaRefusalBeforeTheBody(t *testing.T) {
 	}
 	server := httptest.NewServer(h.server.Handler())
 	t.Cleanup(server.Close)
-
-	const size = 2 << 20
-	conn, err := net.Dial("tcp", server.Listener.Addr().String())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer conn.Close()
-	reader := bufio.NewReader(conn)
-	fmt.Fprintf(conn, "PUT %s HTTP/1.1\r\nHost: x\r\nContent-Type: image/png\r\nContent-Length: %d\r\n\r\n",
-		parsed.RequestURI(), size)
-	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
-	refusal, err := http.ReadResponse(reader, nil)
-	if err != nil {
-		t.Fatalf("no answer before the body: %v", err)
-	}
-	if refusal.StatusCode != http.StatusForbidden || refusal.Close {
-		t.Fatalf("the answer before the body = %d, closing %v; want 403 on a kept connection",
-			refusal.StatusCode, refusal.Close)
-	}
-	if _, err := conn.Write(make([]byte, size)); err != nil {
-		t.Fatalf("sending the body after the refusal: %v", err)
-	}
-	// The refusal ends once its body is drained.
-	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
-	if _, err := io.Copy(io.Discard, refusal.Body); err != nil {
-		t.Fatalf("the refusal did not end after the body: %v", err)
-	}
-	// The same connection answers the next request: the body was drained,
-	// not left to close it.
-	fmt.Fprintf(conn, "GET /api/v1/projects HTTP/1.1\r\nHost: x\r\n\r\n")
-	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
-	if _, err := http.ReadResponse(reader, nil); err != nil {
-		t.Errorf("the connection after a drained refusal: %v", err)
-	}
+	refusedOnTheWire(t, server, parsed.RequestURI(), size, http.StatusForbidden)
 
 	waiting, err := net.Dial("tcp", server.Listener.Addr().String())
 	if err != nil {
@@ -262,10 +239,69 @@ func TestLangfuseMediaRefusalBeforeTheBody(t *testing.T) {
 	}
 }
 
+// refusedOnTheWire PUTs `size` bytes to uri on a raw connection: the refusal
+// comes before the body, on a connection kept open; it ends once the body is
+// sent and drained; and the same connection answers the next request.
+func refusedOnTheWire(t *testing.T, server *httptest.Server, uri string, size int, want int) {
+	t.Helper()
+	conn, err := net.Dial("tcp", server.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	reader := bufio.NewReader(conn)
+	fmt.Fprintf(conn, "PUT %s HTTP/1.1\r\nHost: x\r\nContent-Type: image/png\r\nContent-Length: %d\r\n\r\n",
+		uri, size)
+	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	refusal, err := http.ReadResponse(reader, nil)
+	if err != nil {
+		t.Fatalf("no answer before the body: %v", err)
+	}
+	if refusal.StatusCode != want || refusal.Close {
+		t.Fatalf("the answer before the body = %d, closing %v; want %d on a kept connection",
+			refusal.StatusCode, refusal.Close, want)
+	}
+	if _, err := conn.Write(make([]byte, size)); err != nil {
+		t.Fatalf("sending the body after the refusal: %v", err)
+	}
+	// The refusal ends once its body is drained.
+	conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+	if _, err := io.Copy(io.Discard, refusal.Body); err != nil {
+		t.Fatalf("the refusal did not end after the body: %v", err)
+	}
+	// The same connection answers the next request: the body was drained,
+	// not left to close it.
+	fmt.Fprintf(conn, "GET /api/v1/projects HTTP/1.1\r\nHost: x\r\n\r\n")
+	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if _, err := http.ReadResponse(reader, nil); err != nil {
+		t.Errorf("the connection after a drained refusal: %v", err)
+	}
+}
+
+// TestLangfuseMediaLookupFailureDrains: a PUT whose grant the store cannot
+// check hears the failure before its body, and the body is drained like a
+// refusal's: the SDK reads a status it can retry, not a reset (#31).
+func TestLangfuseMediaLookupFailureDrains(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	const size = 1 << 20
+	_, upload := h.langfuseAsk(t, testPicture(size, 68), probeTrace, testSecret)
+	parsed, err := url.Parse(*upload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.sqlOf(t).Exec(`DROP TABLE media_voided`); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(h.server.Handler())
+	t.Cleanup(server.Close)
+	refusedOnTheWire(t, server, parsed.RequestURI(), size, http.StatusInternalServerError)
+}
+
 // TestLangfuseMediaUploadAfterDeletion: deleting a trace — or erasing its
-// user — refuses its upload URLs, before the body, the ones issued before and
-// the ones asked for within the hour after; a URL for another trace, from
-// before or after, uploads. A retention sweep voids nothing (#29).
+// user — refuses its upload URLs issued before, before the body, and the asks
+// for it within the hour after, for a picture the project holds or not; a URL
+// for another trace, from before or after, uploads. A retention sweep voids
+// nothing (#29).
 func TestLangfuseMediaUploadAfterDeletion(t *testing.T) {
 	for _, how := range []string{"delete", "erase"} {
 		t.Run(how, func(t *testing.T) {
@@ -291,15 +327,24 @@ func TestLangfuseMediaUploadAfterDeletion(t *testing.T) {
 			if code := h.putRefused(t, *forDeleted, -1); code != http.StatusForbidden {
 				t.Errorf("the deleted trace's URL from before the %s = %d, want 403", how, code)
 			}
-			_, after := h.langfuseAsk(t, picture, probeTrace, testSecret)
-			if code := h.putRefused(t, *after, -1); code != http.StatusForbidden {
-				t.Errorf("the deleted trace's URL asked for after the %s = %d, want 403", how, code)
+			ask := func(body []byte, hash string) *httptest.ResponseRecorder {
+				return h.call(t, "POST", "/api/public/media", mustJSON(t, map[string]any{
+					"traceId": probeTrace, "contentType": "image/png", "contentLength": len(body),
+					"sha256Hash": hash, "field": "input",
+				}))
 			}
+			expectError(t, ask(picture, hash), http.StatusForbidden, "not valid")
 			if h.mediaHeld(t, sha) {
 				t.Fatal("a voided URL stored its body")
 			}
 			if code := h.langfusePut(t, *forAnother, other, otherHash); code != 200 {
 				t.Errorf("another trace's URL from before the %s = %d, want 200", how, code)
+			}
+			// A picture the project holds is refused for the removed trace
+			// too, and no ref is written for it.
+			expectError(t, ask(other, otherHash), http.StatusForbidden, "not valid")
+			if pending, settled := h.refStates(t, probeTrace); pending+settled != 0 {
+				t.Errorf("the ask for a removed trace wrote %d refs", pending+settled)
 			}
 			// The trace sent again under its id is here: its upload is taken.
 			h.seedTrace(t, probeTrace, seedBase)

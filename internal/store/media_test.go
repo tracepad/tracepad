@@ -276,12 +276,12 @@ func TestMediaOrphanRefs(t *testing.T) {
 		}
 	}
 	// Trace 3 arrives carrying something else (its span overtook the
-	// upload); trace 4 arrives with the upload resolved, which settles the
-	// ref at ingest.
+	// upload); trace 4 arrives with the upload resolved. Either arrival
+	// settles its trace's ref at ingest (#31).
 	f.arriveWithMedia(t, f.project.ID, hexTrace(3), daysAgo(2), mediaBody(13, 4096), false)
 	f.arriveWithMedia(t, f.project.ID, hexTrace(4), daysAgo(2), resolved, false)
-	if got := f.count(t, `SELECT COUNT(*) FROM media_refs WHERE pending = 1`); got != 3 {
-		t.Fatalf("%d pending refs before the sweep, want 3", got)
+	if got := f.count(t, `SELECT COUNT(*) FROM media_refs WHERE pending = 1`); got != 2 {
+		t.Fatalf("%d pending refs before the sweep, want the late one and the fresh one", got)
 	}
 
 	var plan string

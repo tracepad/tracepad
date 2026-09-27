@@ -2637,6 +2637,15 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            /** @description The trace was deleted or erased within the hour and has not been sent again: no upload is taken for it */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description The project has 10,000 uploads waiting for their traces and this one — with an upload URL or without — would be another; `Retry-After: 60`. A trace the project has is never refused */
             429: {
                 headers: {
@@ -2674,7 +2683,7 @@ export interface operations {
                 content?: never;
             };
             400: components["responses"]["BadRequest"];
-            /** @description The token is missing, forged, expired, or for another id, and is refused having read nothing; or the key that asked for it has been revoked, or its trace was deleted or erased within the hour, which is decided before the body is read and answered at once, the body then drained up to 8 MiB and dropped */
+            /** @description The token is missing, forged, expired, or for another id, and is refused having read nothing; or the key that asked for it has been revoked, or its trace was deleted or erased within the hour, which is decided before the body is read and answered at once, the body then drained up to the length the ask declared and dropped */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -2692,7 +2701,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description The project has 10,000 uploads waiting for their traces and this one's trace has not arrived; `Retry-After: 60`. Not for the retry of an upload already stored. Decided before the body is read and answered at once, the body then drained up to 8 MiB and dropped */
+            /** @description The project has 10,000 uploads waiting for their traces and this one's trace has not arrived; `Retry-After: 60`. Not for the retry of an upload already stored. Decided before the body is read and answered at once, the body then drained up to the length the ask declared and dropped */
             429: {
                 headers: {
                     [name: string]: unknown;
