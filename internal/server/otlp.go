@@ -355,21 +355,20 @@ func (l *logLimiter) allowKey(key string, now time.Time) (logHeld, bool) {
 		l.seen = map[string]*logKey{}
 	}
 	limit := max(l.keys, 1)
-	if k, ok := l.seen[key]; ok {
-		if now.Sub(k.at) < l.every {
-			k.skipped++
-			return logHeld{}, false
-		}
-		held := logHeld{sameKey: k.skipped, overCap: l.overCap}
-		k.at, k.skipped, l.overCap = now, 0, 0
-		return held, true
+	k, known := l.seen[key]
+	if known && now.Sub(k.at) < l.every {
+		k.skipped++
+		return logHeld{}, false
 	}
+	// The cap counts the keys logged within the interval, and a key coming
+	// back after its own interval is held to it like a new one: otherwise
+	// yesterday's keys, returning, would double what a minute may log.
 	active := 0
-	for other, k := range l.seen {
+	for other, o := range l.seen {
 		switch {
-		case now.Sub(k.at) < l.every:
+		case now.Sub(o.at) < l.every:
 			active++
-		case k.skipped == 0 || len(l.seen) > 2*limit:
+		case other != key && (o.skipped == 0 || len(l.seen) > 2*limit):
 			// Nothing to tell, or kept long enough: a key that comes
 			// back after this starts its count again.
 			delete(l.seen, other)
@@ -379,8 +378,13 @@ func (l *logLimiter) allowKey(key string, now time.Time) (logHeld, bool) {
 		l.overCap++
 		return logHeld{}, false
 	}
-	l.seen[key] = &logKey{at: now}
 	held := logHeld{overCap: l.overCap}
+	if known {
+		held.sameKey = k.skipped
+		k.at, k.skipped = now, 0
+	} else {
+		l.seen[key] = &logKey{at: now}
+	}
 	l.overCap = 0
 	return held, true
 }

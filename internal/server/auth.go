@@ -377,12 +377,6 @@ func hungUp(r *http.Request) bool {
 	return r.Context().Err() != nil
 }
 
-// keyLookup is what a key lookup finds: the project and the key itself.
-type keyLookup struct {
-	project *store.Project
-	key     *store.KeyInfo
-}
-
 // membership is what the scoping lookup finds: the project, and the account's
 // role in it.
 type membership struct {

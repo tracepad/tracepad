@@ -781,6 +781,37 @@ func TestLogLimiterByKey(t *testing.T) {
 	expect("c, once there is room", held, ok, true, logHeld{overCap: 1})
 }
 
+// TestReturningKeysAreHeldToTheCap: keys whose interval has passed are held to
+// the same cap as new ones when they come back, so an interval never logs
+// more than keys lines — however the keys are shuffled between intervals.
+func TestReturningKeysAreHeldToTheCap(t *testing.T) {
+	const keys = 64
+	l := &logLimiter{every: time.Minute, keys: keys}
+	start := time.Unix(1_700_000_000, 0)
+	key := func(batch, i int) string { return fmt.Sprintf("https://%d-%d.example", batch, i) }
+	logged := func(from time.Time, batches ...int) int {
+		n := 0
+		for _, batch := range batches {
+			for i := range keys {
+				if _, ok := l.allowKey(key(batch, i), from); ok {
+					n++
+				}
+				// Each key once more within its interval, so it is kept
+				// with something to tell.
+				l.allowKey(key(batch, i), from)
+			}
+		}
+		return n
+	}
+	if n := logged(start, 0); n != keys {
+		t.Fatalf("the first interval logged %d, want %d", n, keys)
+	}
+	// The next interval: 64 new keys, then the first 64 back again.
+	if n := logged(start.Add(time.Minute), 1, 0); n != keys {
+		t.Errorf("an interval of new keys and returning ones logged %d lines, want at most %d", n, keys)
+	}
+}
+
 // TestAMalformedURLIsReportedOnce: TRACEPAD_URL is read when the server is
 // built, so a value that will not parse is said once, not on every sign-in
 // and cookie write that consults it.

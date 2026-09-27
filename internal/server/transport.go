@@ -145,8 +145,9 @@ const defaultHandlerGrace = 3 * time.Second
 var errHandlersStuck = errors.New("handlers were still running after the stop's grace period")
 
 // inflight counts the handlers running now, so a stop can wait for them after
-// it has closed their connections. idle is closed each time the count falls
-// to zero, which is what wait waits on.
+// it has closed their connections. idle exists only while a wait is waiting:
+// wait makes it, and the handler that brings the count to zero closes it, so
+// every other request only counts.
 //
 // closed is set when a stop starts waiting, and from then on no handler
 // starts: closing a connection does not stop a goroutine that has already
@@ -169,16 +170,14 @@ func (f *inflight) track(next http.Handler) http.Handler {
 			writeError(w, http.StatusServiceUnavailable, "the server is stopping")
 			return
 		}
-		if f.running == 0 {
-			f.idle = make(chan struct{})
-		}
 		f.running++
 		f.mu.Unlock()
 		defer func() {
 			f.mu.Lock()
 			f.running--
-			if f.running == 0 {
+			if f.running == 0 && f.idle != nil {
 				close(f.idle)
+				f.idle = nil
 			}
 			f.mu.Unlock()
 		}()
@@ -201,6 +200,9 @@ func (f *inflight) wait(ctx context.Context) error {
 	if f.running == 0 {
 		f.mu.Unlock()
 		return nil
+	}
+	if f.idle == nil {
+		f.idle = make(chan struct{})
 	}
 	idle := f.idle
 	f.mu.Unlock()
