@@ -832,13 +832,11 @@ func (s *Server) handleEraseUserData(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Every chunk of the parsed phase is a transaction that leaves the store
-	// consistent on its own, and the raw phase goes first (spec 044 #4): a
-	// client that hangs up — a closed tab, the interface's thirty-second
-	// clock (spec 010 #10) — loses nothing but the answer, and repeating the
-	// request finishes the rest. `Now` is read once: the freeze is a
-	// question about the retention window, and a request is not long
-	// enough to move it.
+	// The erasure runs to completion (spec 035 #14, `EraseUserData`) whether
+	// or not the client stays for the answer: a closed tab or the
+	// interface's thirty-second clock (spec 010 #10) loses the answer and
+	// nothing else. `Now` is read once: the freeze is a question about the
+	// retention window, and a request is not long enough to move it.
 	if s.writer == nil {
 		writeError(w, http.StatusServiceUnavailable, "writes are not available")
 		return
@@ -869,23 +867,18 @@ func (s *Server) handleEraseUserData(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, answer)
 }
 
-// erasureCounts renders an erasure's counts (spec 044, API contract): the
-// preview's, and for a confirmed one the payloads and the raw archive's too.
-// Numbers only — the confirmation card renders every key it is given.
+// erasureCounts renders an erasure's counts (spec 044, API contract): what
+// every deletion of traces counts, then what an erasure takes beside the
+// traces — and for a confirmed one, what the raw archive lost. Numbers only:
+// the confirmation card renders every key it is given.
 func erasureCounts(counts store.DeleteCounts, confirmed bool) object {
-	out := object{}.
-		put("traces", counts.Traces).
-		put("observations", counts.Observations).
-		put("scores", counts.Scores).
-		put("session_scores", counts.SessionScores)
+	out := wouldDelete(counts)
 	if confirmed {
-		out = out.put("payloads", counts.Payloads)
+		out = deletedCounts(counts)
 	}
 	out = out.
-		put("annotation_items", counts.AnnotationItems).
-		put("dataset_items", counts.DatasetItems).
-		put("media", counts.Media).
-		put("media_bytes", counts.MediaBytes)
+		put("session_scores", counts.SessionScores).
+		put("dataset_items", counts.DatasetItems)
 	if confirmed {
 		out = out.
 			put("raw_spans", counts.RawSpans).

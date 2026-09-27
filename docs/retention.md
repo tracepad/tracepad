@@ -370,9 +370,10 @@ the user's traces' arrival windows — from the trace's first arrival to its
 last update, the one clock both are stamped with — decodes each and checks it
 for the user's spans; a batch holding none is left as it was. The dry run's
 `raw.batches_to_scan` is that count. The order is raw first, then the parsed
-rows, then the batches that arrived while the request ran: once the parsed rows
-are gone nothing names the batches any more, so a request cut off anywhere is
-finished by repeating it. A rewritten batch is no longer what the client sent,
+rows, then the batches that arrived for the user's traces while the request
+ran: once the parsed rows are gone nothing names the batches any more. The
+request runs to completion whether or not its client waits for the answer, and
+one cut off by a stop of the server is finished by repeating it. A rewritten batch is no longer what the client sent,
 and says so: `scrubbed_at` on the listing, `X-Tracepad-Scrubbed-At` on the body
 and `scrubbed` in the export summary ([export.md](export.md)). Nothing records
 whose spans went.

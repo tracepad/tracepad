@@ -702,13 +702,15 @@ type UserDataErase struct {
 	// CompactionRequested is the stamp of the compaction this chunk asked
 	// for, zero when it deleted nothing (spec 044 #1, #11).
 	CompactionRequested int64
-	// IDs are the traces this chunk deleted: the erasure's tail scrubs the
-	// batches that arrived for them while it ran (spec 044 #4).
-	IDs []string
+	// IDs are the traces this chunk deleted, and Updated when each last
+	// changed: the erasure's tail scrubs the batches that arrived for them
+	// while it ran (spec 044 #4).
+	IDs     []string
+	Updated []int64
 }
 
 func (e *UserDataErase) apply(tx *sql.Tx) error {
-	e.Counts, e.CompactionRequested, e.IDs = DeleteCounts{}, 0, nil
+	e.Counts, e.CompactionRequested, e.IDs, e.Updated = DeleteCounts{}, 0, nil, nil
 	// The echo is the user id here, not a project name: it is the identity
 	// of what is being destroyed (spec 005 #8).
 	if e.Confirm != e.UserID {
@@ -732,12 +734,13 @@ func (e *UserDataErase) apply(tx *sql.Tx) error {
 
 	e.Hours, e.More = nil, false
 	rows, err := tx.Query(
-		`SELECT id, timestamp FROM traces WHERE project_id = ? AND user_id = ? LIMIT ?`,
+		`SELECT id, timestamp, updated_at FROM traces WHERE project_id = ? AND user_id = ? LIMIT ?`,
 		e.ProjectID, e.UserID, e.Limit)
 	if err != nil {
 		return fmt.Errorf("select a user's traces: %w", err)
 	}
 	var ids []any
+	updates := map[string]int64{}
 	seen := map[int64]bool{}
 	scanned := 0
 	for rows.Next() {
@@ -747,8 +750,9 @@ func (e *UserDataErase) apply(tx *sql.Tx) error {
 			// or an item names before its spans arrived. Trace
 			// deletion reads it the same way.
 			timestamp sql.NullInt64
+			updated   sql.NullInt64
 		)
-		if err := rows.Scan(&id, &timestamp); err != nil {
+		if err := rows.Scan(&id, &timestamp, &updated); err != nil {
 			rows.Close()
 			return err
 		}
@@ -769,6 +773,7 @@ func (e *UserDataErase) apply(tx *sql.Tx) error {
 			e.Hours = append(e.Hours, hour)
 		}
 		ids = append(ids, id)
+		updates[id] = updated.Int64
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
@@ -811,6 +816,7 @@ func (e *UserDataErase) apply(tx *sql.Tx) error {
 	e.CompactionRequested = removal.compactionAt
 	for _, id := range ids {
 		e.IDs = append(e.IDs, id.(string))
+		e.Updated = append(e.Updated, updates[id.(string)])
 	}
 
 	// The per-user rollup goes outright, in this same request (spec 023

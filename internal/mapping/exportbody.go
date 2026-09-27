@@ -39,6 +39,9 @@ func DecodeExportBody(body []byte, asJSON bool) (*ExportBody, error) {
 	return decodeExportProto(body)
 }
 
+// JSON reports whether the body is in the OTLP/JSON encoding.
+func (b *ExportBody) JSON() bool { return b.asJSON }
+
 // Encode writes the body back with the rewritten ResourceSpans in place.
 // Nothing rewritten is the source itself.
 func (b *ExportBody) Encode(rewrites Rewrites) ([]byte, error) {

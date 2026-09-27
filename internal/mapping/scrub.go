@@ -169,19 +169,20 @@ func SpanCount(resourceSpans []*tracepb.ResourceSpans) int {
 	return n
 }
 
-// HoldsTrace reports whether any span of a decoded export belongs to one of
+// TraceSpanCount counts the spans of a decoded export that belong to one of
 // the traces.
-func HoldsTrace(resourceSpans []*tracepb.ResourceSpans, traces map[string]bool) bool {
+func TraceSpanCount(resourceSpans []*tracepb.ResourceSpans, traces map[string]bool) int {
+	n := 0
 	for _, rs := range resourceSpans {
 		for _, ss := range rs.GetScopeSpans() {
 			for _, span := range ss.GetSpans() {
 				if traces[traceID(span.GetTraceId())] {
-					return true
+					n++
 				}
 			}
 		}
 	}
-	return false
+	return n
 }
 
 // MediaReferences lists, once each and in the order first seen, the bodies a

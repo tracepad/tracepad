@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { api, type DryRun, type Project } from '$lib/api/client.svelte';
-	import { erased } from '$lib/erasure';
+	import { erased, stillRunning } from '$lib/erasure';
 	import ConfirmCard from '../ConfirmCard.svelte';
 	import Card from './Card.svelte';
 	import ViewerNote from './ViewerNote.svelte';
@@ -19,7 +19,14 @@
 	const target = $derived(userID.trim());
 
 	async function erase(confirm?: string): Promise<DryRun | string> {
-		const answer = await api.eraseUserData(current.id, target, confirm);
+		let answer;
+		try {
+			answer = await api.eraseUserData(current.id, target, confirm);
+		} catch (cause) {
+			const running = confirm === undefined ? null : stillRunning(cause, target);
+			if (running) return running;
+			throw cause;
+		}
 		if ('dry_run' in answer && answer.dry_run) return answer as DryRun;
 		return erased(target, (answer as { deleted: Record<string, number> }).deleted);
 	}

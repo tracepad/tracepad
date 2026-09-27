@@ -379,13 +379,16 @@ last. The parsed rows then go in **chunks** — up to five hundred traces
 of one hour — each one a transaction that leaves the store consistent on its
 own: the chunk's traces go and the hour they occupied is recomputed in the
 same commit, and the writer is held for one chunk at a time so ingest keeps
-flowing between them. A user active in many hours takes many chunks, and a
-long history can take longer than the interface waits; that is safe, because
-a request cut off anywhere — a closed tab, the interface's thirty-second
-clock — destroys nothing half-way: what the committed jobs erased is erased
-and counted as erased, and repeating the call finds what is left and finishes
-it. The counts in the answer are the request's own; a repeat reports what
-it erased, not what the interrupted one did.
+flowing between them. A user active in many hours takes many chunks: 20 000
+traces spread over a month are 720 of them, and tens of minutes on a busy
+host. The erasure **runs to completion whether or not the client waits for
+it** — a closed tab or the interface's thirty-second clock loses the answer
+and nothing else, and the interface and `tracepad users rm-data` say the
+erasure is still running rather than that it failed. Only a stop of the server cuts it off, and that destroys
+nothing half-way either: what the committed jobs erased is erased, and
+repeating the call finds what is left and finishes it. The counts in the
+answer are the request's own; a repeat reports what it erased, not what the
+interrupted one did.
 
 ## Deleting traces
 

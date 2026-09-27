@@ -1,11 +1,15 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"regexp"
 	"strings"
 	"testing"
 
+	"github.com/tracepad/tracepad/internal/client"
 	"github.com/tracepad/tracepad/internal/model"
 	"github.com/tracepad/tracepad/internal/store"
 )
@@ -500,5 +504,22 @@ func TestAdminCommandUsageErrors(t *testing.T) {
 		if out.code != ExitUsage {
 			t.Errorf("%v exited %d, want 2 (usage): %s", args, out.code, out.stderr)
 		}
+	}
+}
+
+// A confirmed erasure that outlasts the client's wait is still running on the
+// server (spec 035 #14): the command says so and how to see what is left,
+// rather than that the server could not be reached. A refusal the server did
+// send stays that refusal.
+func TestAnUnansweredErasureSaysItIsRunning(t *testing.T) {
+	timeout := fmt.Errorf("cannot reach http://x: %w", context.DeadlineExceeded)
+	err := erasureUnanswered(timeout, "u1")
+	if !strings.Contains(err.Error(), "runs to the end") || !strings.Contains(err.Error(), "users rm-data u1") ||
+		!errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("err = %v", err)
+	}
+	refusal := &client.Error{Status: 409, Message: "raw batch 3 was rewritten since it was read"}
+	if got := erasureUnanswered(refusal, "u1"); got != refusal {
+		t.Errorf("a refusal became %v", got)
 	}
 }

@@ -2,6 +2,7 @@ package store
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -290,8 +291,8 @@ func TestAFailedRewriteDeletesTheBatch(t *testing.T) {
 		otlpSpan(t, 2, 1, "user-b", "", "marker-b", nil),
 	}), false, daysAgo(1))
 	saved := scrubRewrite
-	scrubRewrite = func(*mapping.ExportBody, map[string]bool) ([]byte, int, error) {
-		return nil, 0, errors.New("no encoder")
+	scrubRewrite = func(*mapping.ExportBody, map[string]bool) ([]byte, error) {
+		return nil, errors.New("no encoder")
 	}
 	t.Cleanup(func() { scrubRewrite = saved })
 
@@ -714,5 +715,119 @@ func TestAWrongEchoScrubsNothing(t *testing.T) {
 	}
 	if got := f.rawSpans(t, batch); len(got) != 1 {
 		t.Errorf("a refused erasure scrubbed the archive: %v", got)
+	}
+}
+
+// A batch in the window whose body no longer decodes cannot say whose spans
+// it holds, and is left as it is rather than deleted with everyone else's
+// spans in it (#5 b).
+func TestAnUnreadableBatchIsLeftAlone(t *testing.T) {
+	f := newErasureFixture(t)
+	at := daysAgo(1)
+	f.ingestOTLP(t, export([]*tracepb.Span{otlpSpan(t, 1, 1, "user-a", "", "a", nil)}), false, at)
+	seedRawBatch(t, f.store, f.project.ID, &RawBatch{ReceivedAt: at, ContentType: mapping.ContentTypeJSON,
+		Body: []byte("{not an export")})
+	unreadable := f.count(t, `SELECT MAX(id) FROM raw_batches`)
+
+	f.erase(t, "user-a")
+	if n := f.count(t, `SELECT COUNT(*) FROM raw_batches WHERE id = ?`, unreadable); n != 1 {
+		t.Error("a batch that could not be read was deleted")
+	}
+}
+
+// The tail reads only what arrived for the erased traces while the request
+// ran: other users' recent traffic is not decoded (#4).
+func TestTheTailReadsOnlyTheErasedTracesLateBatches(t *testing.T) {
+	f := newErasureFixture(t)
+	f.ingestOTLP(t, export([]*tracepb.Span{otlpSpan(t, 1, 1, "user-a", "", "a", nil)}), false, daysAgo(2))
+	// Other users' traffic of the last minute: inside the old tail's reach.
+	for i := range 3 {
+		f.ingestOTLP(t, export([]*tracepb.Span{otlpSpan(t, 10+i, 1, "user-b", "", "b", nil)}), false, 0)
+	}
+	result := f.erase(t, "user-a")
+	if result.BatchesRead != 1 {
+		t.Errorf("the erasure read %d batches, want only the one its trace arrived in", result.BatchesRead)
+	}
+}
+
+// Windows are asked about in groups, and a group's answer is every group's.
+func TestManyWindowsAreAskedInGroups(t *testing.T) {
+	f := newErasureFixture(t)
+	var windows []arrivalWindow
+	for i := range 2*windowGroup + 7 {
+		at := int64(1_000_000 * (i + 1))
+		seedRawBatch(t, f.store, f.project.ID, &RawBatch{ReceivedAt: at, Body: []byte("x")})
+		windows = append(windows, arrivalWindow{from: at, to: at})
+	}
+	ids, err := f.store.candidateBatches(f.project.ID, windows)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n, err := f.store.countBatches(f.project.ID, windows)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != len(windows) || n != int64(len(windows)) {
+		t.Errorf("%d candidates, count %d; want %d", len(ids), n, len(windows))
+	}
+}
+
+// busySubmitter answers a full queue a few times before taking the job.
+type busySubmitter struct {
+	busy  int
+	calls int
+}
+
+func (b *busySubmitter) Submit(context.Context, WriteJob) error {
+	b.calls++
+	if b.calls <= b.busy {
+		return ErrWriterBusy
+	}
+	return nil
+}
+
+// A full writer queue makes an erasure's job wait, not the erasure fail: it
+// runs to completion (spec 035 #14).
+func TestAnErasureJobWaitsOutAFullQueue(t *testing.T) {
+	writer := &busySubmitter{busy: 3}
+	if err := submitPatiently(t.Context(), writer, &RawScrub{}); err != nil {
+		t.Fatalf("a queue full three times failed the job: %v", err)
+	}
+	if writer.calls != 4 {
+		t.Errorf("%d submissions, want 4", writer.calls)
+	}
+}
+
+// An erasure runs to completion whether or not its caller stays for the
+// answer (spec 035 #14): a caller that leaves during the parsed phase would
+// otherwise leave behind the batch that arrived for a trace already deleted.
+func TestAnErasureOutlivesItsCaller(t *testing.T) {
+	f := newErasureFixture(t)
+	f.ingestOTLP(t, export([]*tracepb.Span{
+		otlpSpan(t, 1, 1, "user-a", "", "a", nil),
+		otlpSpan(t, 2, 1, "user-b", "", "b", nil),
+	}), false, daysAgo(1))
+	caller, leave := context.WithCancel(t.Context())
+	defer leave()
+	var late int64
+	e := UserErasure{ProjectID: f.project.ID, UserID: "user-a", Confirm: "user-a", Chunk: 500, ChunkHours: 1,
+		after: func(step int) error {
+			switch step {
+			case 1:
+				late = f.ingestOTLP(t, export([]*tracepb.Span{otlpSpan(t, 1, 9, "user-a", "", "late", nil),
+					otlpSpan(t, 2, 9, "user-b", "", "b", nil)}), false, 0)
+			case 2:
+				leave()
+			}
+			return nil
+		}}
+	if _, err := f.store.EraseUserData(caller, f.writer, e); err != nil {
+		t.Fatalf("the erasure stopped with its caller: %v", err)
+	}
+	if n := f.count(t, `SELECT COUNT(*) FROM traces WHERE user_id = 'user-a'`); n != 0 {
+		t.Errorf("%d of the user's traces are left", n)
+	}
+	if got := f.rawSpans(t, late); !slices.Equal(got, []string{"span-2-9"}) {
+		t.Errorf("the batch that arrived during the erasure holds %v", got)
 	}
 }

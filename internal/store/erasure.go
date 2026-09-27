@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -174,42 +175,50 @@ func (s *Store) userWindows(traces []erasedTrace) ([]arrivalWindow, error) {
 	return mergeWindows(windows), nil
 }
 
+// windowGroup is how many windows one query over the archive takes: a user
+// with many short traces over weeks has thousands of disjoint windows, and
+// one round trip each was thousands of them.
+const windowGroup = 200
+
+// windowQuery is the predicate over a group of windows and its arguments.
+func windowQuery(projectID string, windows []arrivalWindow) (string, []any) {
+	terms := make([]string, len(windows))
+	args := make([]any, 0, 1+2*len(windows))
+	args = append(args, projectID)
+	for i, w := range windows {
+		terms[i] = "received_at BETWEEN ? AND ?"
+		args = append(args, w.from, w.to)
+	}
+	return "project_id = ? AND (" + strings.Join(terms, " OR ") + ")", args
+}
+
 // candidateBatches lists the project's batches received inside the windows,
 // oldest first, through `idx_raw_batches_received`.
 func (s *Store) candidateBatches(projectID string, windows []arrivalWindow) ([]int64, error) {
 	var ids []int64
-	for _, w := range windows {
-		rows, err := s.db.Query(
-			`SELECT id FROM raw_batches WHERE project_id = ? AND received_at >= ? AND received_at <= ?
-			  ORDER BY received_at, id`, projectID, w.from, w.to)
+	for start := 0; start < len(windows); start += windowGroup {
+		where, args := windowQuery(projectID, windows[start:min(start+windowGroup, len(windows))])
+		found, err := queryColumn[int64](s.db,
+			`SELECT id FROM raw_batches WHERE `+where+` ORDER BY received_at, id`, args...)
 		if err != nil {
 			return nil, fmt.Errorf("find the batches to scan: %w", err)
 		}
-		for rows.Next() {
-			var id int64
-			if err := rows.Scan(&id); err != nil {
-				rows.Close()
-				return nil, err
-			}
-			ids = append(ids, id)
-		}
-		rows.Close()
-		if err := rows.Err(); err != nil {
-			return nil, err
+		for _, id := range found {
+			ids = append(ids, id.(int64))
 		}
 	}
 	return ids, nil
 }
 
 // countBatches is candidateBatches as a count, for the dry run: a count and
-// not a decode (spec 044, API contract).
+// not a decode (spec 044, API contract). The windows are disjoint, so the
+// groups' counts add up.
 func (s *Store) countBatches(projectID string, windows []arrivalWindow) (int64, error) {
 	var total int64
-	for _, w := range windows {
+	for start := 0; start < len(windows); start += windowGroup {
+		where, args := windowQuery(projectID, windows[start:min(start+windowGroup, len(windows))])
 		var n int64
-		if err := s.db.QueryRow(
-			`SELECT COUNT(*) FROM raw_batches WHERE project_id = ? AND received_at >= ? AND received_at <= ?`,
-			projectID, w.from, w.to).Scan(&n); err != nil {
+		if err := s.db.QueryRow(`SELECT COUNT(*) FROM raw_batches WHERE `+where, args...).Scan(&n); err != nil {
 			return 0, fmt.Errorf("count the batches to scan: %w", err)
 		}
 		total += n
@@ -348,8 +357,9 @@ func (j *RawScrub) replaceRefs(tx *sql.Tx) (mediaDrop, error) {
 
 // scrubRewrite is the rewrite a scrub applies, a variable so that a test can
 // make it fail and see the batch deleted instead (#2).
-var scrubRewrite = func(body *mapping.ExportBody, traces map[string]bool) ([]byte, int, error) {
-	return body.Without(traces)
+var scrubRewrite = func(body *mapping.ExportBody, traces map[string]bool) ([]byte, error) {
+	out, _, err := body.Without(traces)
+	return out, err
 }
 
 // scrubPlan is what the read side decided for one batch.
@@ -378,55 +388,53 @@ func (s *Store) planScrub(projectID string, id int64, traces map[string]bool, no
 	if err != nil {
 		return nil, fmt.Errorf("read raw batch %d: %w", id, err)
 	}
-	job := &RawScrub{ProjectID: projectID, BatchID: id, Now: now}
-	if scrubbed.Valid {
-		expect := scrubbed.Int64
-		job.Expect = &expect
-	}
-	fail := func(spans int, reason error) (*scrubPlan, error) {
-		// The spans must not stay for want of an encoder: the batch goes
-		// whole, and the answer counts it (#2). The log line names the
-		// batch and never the user (#15).
-		logger().Warn("a raw batch could not be rewritten without the erased spans; deleting it whole",
-			"project", projectID, "batch", id, "err", reason)
-		job.Delete = true
-		return &scrubPlan{job: job, spans: spans, fallback: true}, nil
-	}
+	// A body that no longer decompresses or decodes cannot say whose spans
+	// it holds: it is left as it is, like a block ingest could not decode
+	// (#5 b), rather than deleted with everyone else's spans in it. A
+	// candidate is a batch received in a window, not one known to hold the
+	// traces.
 	body, err := Decompress(CompressionZstd, stored)
-	if err != nil {
-		return fail(0, err)
+	var decoded *mapping.ExportBody
+	if err == nil {
+		decoded, err = mapping.DecodeExportBody(body, rawContentType(contentType) == mapping.ContentTypeJSON)
 	}
-	asJSON := rawContentType(contentType) == mapping.ContentTypeJSON
-	decoded, err := mapping.DecodeExportBody(body, asJSON)
 	if err != nil {
-		return fail(0, err)
-	}
-	if !mapping.HoldsTrace(decoded.ResourceSpans, traces) {
+		logger().Warn("a raw batch could not be read to scrub it; it is left as it is",
+			"project", projectID, "batch", id, "err", err)
 		return nil, nil
 	}
-	held := mapping.SpanCount(decoded.ResourceSpans)
-	rewritten, removed, err := scrubRewrite(decoded, traces)
-	if err != nil {
-		return fail(held-mapping.SpanCount(decoded.ResourceSpans), err)
+	held := mapping.TraceSpanCount(decoded.ResourceSpans, traces)
+	if held == 0 {
+		return nil, nil
 	}
-	// The new body is read back before it is trusted: it must decode, and
-	// it must hold none of the traces.
-	again, err := mapping.DecodeExportBody(rewritten, asJSON)
-	if err != nil {
-		return fail(removed, err)
+	job := &RawScrub{ProjectID: projectID, BatchID: id, Now: now, Expect: nullableTime(scrubbed)}
+	rewritten, err := scrubRewrite(decoded, traces)
+	if err == nil {
+		// The new body is read back before it is trusted: it must decode,
+		// and it must hold none of the traces.
+		var again *mapping.ExportBody
+		if again, err = mapping.DecodeExportBody(rewritten, decoded.JSON()); err == nil &&
+			mapping.TraceSpanCount(again.ResourceSpans, traces) > 0 {
+			err = errors.New("the rewritten body still holds an erased span")
+		}
+		if err == nil {
+			if mapping.SpanCount(again.ResourceSpans) == 0 && again.Unreadable == 0 {
+				// Nothing is left in it: a batch with no span is deleted.
+				job.Delete = true
+			} else {
+				job.Body = zstdEncoder.EncodeAll(rewritten, nil)
+				job.Media = mapping.MediaReferences(again.ResourceSpans)
+			}
+			return &scrubPlan{job: job, spans: held}, nil
+		}
 	}
-	if mapping.HoldsTrace(again.ResourceSpans, traces) {
-		return fail(removed, errors.New("the rewritten body still holds an erased span"))
-	}
-	plan := &scrubPlan{job: job, spans: removed}
-	if mapping.SpanCount(again.ResourceSpans) == 0 && again.Unreadable == 0 {
-		// Nothing is left in it: a batch with no span is deleted.
-		job.Delete = true
-		return plan, nil
-	}
-	job.Body = zstdEncoder.EncodeAll(rewritten, nil)
-	job.Media = mapping.MediaReferences(again.ResourceSpans)
-	return plan, nil
+	// The batch holds the spans, and they must not stay for want of an
+	// encoder: it goes whole, and the answer counts it (#2). The log line
+	// names the batch and never the user (#15).
+	logger().Warn("a raw batch could not be rewritten without the erased spans; deleting it whole",
+		"project", projectID, "batch", id, "err", err)
+	job.Delete = true
+	return &scrubPlan{job: job, spans: held, fallback: true}, nil
 }
 
 // scrubTally is what a scrub phase did.
@@ -449,11 +457,36 @@ func (t *scrubTally) add(o scrubTally) {
 // the writer's commit windows instead of each waiting out one of its own: one
 // at a time, a user whose spans sit in two hundred batches paid ten seconds
 // of windows for a few milliseconds of writing. The group is bounded by count
-// and by the bodies it holds in memory.
+// — a few of the queue's slots, so that ingest keeps the rest — and by the
+// bodies it holds in memory.
 const (
-	scrubGroup      = 32
+	scrubGroup      = 8
 	scrubGroupBytes = 16 << 20
 )
+
+// busyWait bounds how long an erasure's job waits for room in a full writer
+// queue, retrying with backoff: an erasure runs to completion (spec 035 #14),
+// and a queue that is full for a moment is ingest's burst, not a reason to
+// stop half-way.
+const busyWait = 2 * time.Minute
+
+// submitPatiently submits one job, retrying while the writer's queue is full.
+func submitPatiently(ctx context.Context, writer jobSubmitter, job WriteJob) error {
+	delay := 10 * time.Millisecond
+	deadline := time.Now().Add(busyWait)
+	for {
+		err := writer.Submit(ctx, job)
+		if !errors.Is(err, ErrWriterBusy) || time.Now().After(deadline) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(delay):
+		}
+		delay = min(2*delay, time.Second)
+	}
+}
 
 // scrubBatches runs the scrub over a list of candidate batches: each is read
 // and decoded here, one writer job is submitted per batch that changes, and a
@@ -492,7 +525,7 @@ func (s *Store) scrubBatches(ctx context.Context, writer jobSubmitter, projectID
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				errs[i] = writer.Submit(ctx, plan.job)
+				errs[i] = submitPatiently(ctx, writer, plan.job)
 			}()
 		}
 		wg.Wait()
@@ -505,7 +538,7 @@ func (s *Store) scrubBatches(ctx context.Context, writer jobSubmitter, projectID
 				if plan == nil {
 					break
 				}
-				err = writer.Submit(ctx, plan.job)
+				err = submitPatiently(ctx, writer, plan.job)
 			}
 			if err != nil {
 				return tally, err
@@ -563,6 +596,9 @@ type ErasureResult struct {
 	// Compaction is the latest compaction the request asked for, zero when
 	// it deleted nothing (spec 044 #17).
 	Compaction int64
+	// BatchesRead is how many raw batches the request decoded: the
+	// candidates of step 2 and the tail of step 4.
+	BatchesRead int
 }
 
 // EraseUserData runs an erasure in the order of #4, and runs it to completion
@@ -588,6 +624,11 @@ func (s *Store) EraseUserData(ctx context.Context, writer jobSubmitter, e UserEr
 		return result, &Rejection{Kind: RejectInvalid, Message: fmt.Sprintf(
 			"confirm must be the user id being erased, %q, to erase their data", e.UserID)}
 	}
+	// It runs to completion (spec 035 #14) whether or not its caller stays
+	// for the answer: cut off in step 3, it would leave behind the batches
+	// that arrived for the traces it had deleted, which a repeat no longer
+	// finds. Only a stop of the server — the writer closing — ends it early.
+	ctx = context.WithoutCancel(ctx)
 	now := nowOr(e.Now)
 	after := func(step int) error {
 		if e.after == nil {
@@ -597,7 +638,8 @@ func (s *Store) EraseUserData(ctx context.Context, writer jobSubmitter, e UserEr
 	}
 
 	// 1. The traces and their windows; the moment is kept for step 4.
-	since := time.Now().UnixNano()
+	began := time.Now()
+	since := began.UnixNano()
 	traces, err := s.userTraces(e.ProjectID, e.UserID)
 	if err != nil {
 		return result, err
@@ -626,19 +668,30 @@ func (s *Store) EraseUserData(ctx context.Context, writer jobSubmitter, e UserEr
 	if err := after(2); err != nil {
 		return result, err
 	}
+	rawDone := time.Now()
 
-	// 3. The parsed rows.
+	// 3. The parsed rows. Each chunk says when its traces last changed, so
+	// that step 4 reads only what arrived for them while the request ran.
+	var late []arrivalWindow
 	deleted := map[string]bool{}
+	chunks := 0
 	for {
 		chunk := &UserDataErase{ProjectID: e.ProjectID, UserID: e.UserID, Confirm: e.Confirm,
 			Limit: e.Chunk, HourLimit: e.ChunkHours, Now: e.Now}
-		if err := writer.Submit(ctx, chunk); err != nil {
+		if err := submitPatiently(ctx, writer, chunk); err != nil {
 			return result, err
 		}
+		chunks++
 		result.Counts.add(chunk.Counts)
 		result.Compaction = max(result.Compaction, chunk.CompactionRequested)
-		for _, id := range chunk.IDs {
-			deleted[id] = true
+		for i, id := range chunk.IDs {
+			// A trace updated after step 1 read it — minus the margin a
+			// commit can trail its stamp by — received a batch step 2
+			// did not read.
+			if updated := chunk.Updated[i]; updated >= since-stampMargin {
+				deleted[id] = true
+				late = append(late, arrivalWindow{from: since - stampMargin, to: updated})
+			}
 		}
 		if !chunk.More {
 			break
@@ -648,8 +701,11 @@ func (s *Store) EraseUserData(ctx context.Context, writer jobSubmitter, e UserEr
 		return result, err
 	}
 
-	// 4. The tail: what arrived while the request ran.
-	recent, err := s.candidateBatches(e.ProjectID, []arrivalWindow{{from: since - stampMargin, to: math.MaxInt64}})
+	parsedDone := time.Now()
+
+	// 4. The tail: the batches that arrived while the request ran, for the
+	// traces that received one. Usually none.
+	recent, err := s.candidateBatches(e.ProjectID, mergeWindows(late))
 	if err != nil {
 		return result, err
 	}
@@ -665,11 +721,15 @@ func (s *Store) EraseUserData(ctx context.Context, writer jobSubmitter, e UserEr
 	result.Counts.Media += raw.released
 	result.Counts.MediaBytes += raw.releasedBytes
 	result.Compaction = max(result.Compaction, raw.compaction)
-	// Counts, never the id (#15).
-	if raw.spans > 0 {
-		logger().Info("erasure removed spans from the raw archive", "project", e.ProjectID,
-			"spans", raw.spans, "batches_rewritten", raw.rewritten, "batches_deleted", raw.deleted)
-	}
+	result.BatchesRead = len(candidates) + len(recent)
+	// Counts and durations, never the id (#15).
+	logger().Info("erased a user's data", "project", e.ProjectID,
+		"traces", result.Counts.Traces, "chunks", chunks,
+		"raw_batches_read", result.BatchesRead, "raw_spans", raw.spans,
+		"raw_batches_rewritten", raw.rewritten, "raw_batches_deleted", raw.deleted,
+		"raw_took", rawDone.Sub(began).Round(time.Millisecond),
+		"parsed_took", parsedDone.Sub(rawDone).Round(time.Millisecond),
+		"tail_took", time.Since(parsedDone).Round(time.Millisecond))
 	return result, nil
 }
 
@@ -774,45 +834,42 @@ func deleteSessionScores(tx *sql.Tx, projectID string, traceIDs []any) (int64, e
 // names one of the traces as its source (#9), and ticks each affected
 // dataset's version once. It answers how many items went.
 func deleteSourcedItems(tx *sql.Tx, projectID string, traceIDs []any, now int64) (int64, error) {
-	type item struct{ dataset, id string }
-	var items []item
+	var items int64
+	datasets := map[string]bool{}
 	err := eachIn(traceIDs, func(batch []any) error {
-		rows, err := tx.Query(
-			`SELECT DISTINCT dataset, item_id FROM dataset_items
-			  WHERE project_id = ? AND source_trace_id IN (`+placeholders(len(batch))+`)`,
-			append([]any{projectID}, batch...)...)
+		sourced := `SELECT DISTINCT dataset, item_id FROM dataset_items
+		  WHERE project_id = ? AND source_trace_id IN (` + placeholders(len(batch)) + `)`
+		args := append([]any{projectID}, batch...)
+		found, err := queryColumn[string](tx, `SELECT DISTINCT dataset FROM (`+sourced+`)`, args...)
+		if err != nil {
+			return err
+		}
+		for _, d := range found {
+			datasets[d.(string)] = true
+		}
+		// Every version of each: the rows the source names and the
+		// rows that dropped it alike.
+		rows, err := tx.Query(`DELETE FROM dataset_items WHERE project_id = ? AND (dataset, item_id) IN (`+
+			sourced+`) RETURNING dataset, item_id`, append([]any{projectID}, args...)...)
 		if err != nil {
 			return err
 		}
 		defer rows.Close()
+		gone := map[[2]string]bool{}
 		for rows.Next() {
-			var it item
-			if err := rows.Scan(&it.dataset, &it.id); err != nil {
+			var key [2]string
+			if err := rows.Scan(&key[0], &key[1]); err != nil {
 				return err
 			}
-			items = append(items, it)
+			gone[key] = true
 		}
+		items += int64(len(gone))
 		return rows.Err()
 	})
 	if err != nil {
-		return 0, fmt.Errorf("find the dataset items cut from the traces: %w", err)
+		return 0, fmt.Errorf("delete the dataset items cut from the traces: %w", err)
 	}
-	seen := map[item]bool{}
-	var datasets []string
-	for _, it := range items {
-		if seen[it] {
-			continue
-		}
-		seen[it] = true
-		if _, err := tx.Exec(`DELETE FROM dataset_items WHERE project_id = ? AND dataset = ? AND item_id = ?`,
-			projectID, it.dataset, it.id); err != nil {
-			return 0, fmt.Errorf("delete dataset item %s: %w", it.id, err)
-		}
-		if !slices.Contains(datasets, it.dataset) {
-			datasets = append(datasets, it.dataset)
-		}
-	}
-	for _, dataset := range datasets {
+	for dataset := range datasets {
 		// One tick per chunk: a harness that caches by version sees that
 		// the set changed (#9).
 		if _, err := tx.Exec(
@@ -821,5 +878,5 @@ func deleteSourcedItems(tx *sql.Tx, projectID string, traceIDs []any, now int64)
 			return 0, fmt.Errorf("advance dataset %s's version: %w", dataset, err)
 		}
 	}
-	return int64(len(seen)), nil
+	return items, nil
 }

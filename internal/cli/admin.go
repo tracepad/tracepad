@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/tracepad/tracepad/internal/client"
 	"github.com/tracepad/tracepad/internal/store"
 	"github.com/tracepad/tracepad/internal/termsafe"
 )
@@ -690,10 +692,15 @@ func (r *run) usersRemoveData(ctx context.Context, rest []string) error {
 	path := "/api/v1/projects/" + url.PathEscape(id) +
 		"/users/" + url.PathEscape(positional[0]) + "/data"
 
-	body, err := r.destructive(ctx, http.MethodDelete, path, nil, nil, yes,
+	body, confirmed, err := r.confirmDestructive(ctx, http.MethodDelete, path, nil, nil, yes,
 		"erase the data of user "+positional[0])
 	if err != nil {
 		return err
+	}
+	if confirmed != nil {
+		if body, err = r.api.Send(ctx, http.MethodDelete, path, confirmed, nil); err != nil {
+			return erasureUnanswered(err, positional[0])
+		}
 	}
 	if r.wantJSON() {
 		return r.emit(body)
@@ -738,6 +745,20 @@ func (r *run) usersRemoveData(ctx context.Context, rest []string) error {
 			shortTime(result.Backup.CreatedAt), shortTime(result.Backup.RemoveAfter))
 	}
 	return nil
+}
+
+// erasureUnanswered is what a confirmed erasure that got no answer means. The
+// server runs an erasure to completion whether or not anybody waits for it
+// (spec 035 #14), and a long one outlasts this client's wait: that is news
+// about the wait, not a failure of the erasure. A refusal the server did
+// send is passed on as it is.
+func erasureUnanswered(err error, user string) error {
+	var refusal *client.Error
+	if errors.As(err, &refusal) {
+		return err
+	}
+	return fmt.Errorf("no answer from the server (%w); an erasure it has started runs to the end without one — "+
+		"run `tracepad users rm-data %s` again in a few minutes: its preview shows what is left", err, user)
 }
 
 // destructive runs the two-step contract of spec 005 #8: ask once without a
