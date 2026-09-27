@@ -742,6 +742,104 @@ func TestRetentionTakesSessionOnlyScores(t *testing.T) {
 	}
 }
 
+// The sweep's session scores walk from a cursor: each chunk starts where the
+// pass's previous one stopped, so the scores a live session keeps — here the
+// oldest ones, which every chunk used to walk again — are passed over once a
+// pass; and what is past the window goes, chunk by chunk, whatever it is kept
+// behind.
+func TestSessionScoreSweepResumesWhereItsLastChunkStopped(t *testing.T) {
+	f := newErasureFixture(t)
+	f.ingestOTLP(t, export([]*tracepb.Span{otlpSpan(t, 1, 1, "u", "alive", "x", nil)}), false, daysAgo(1))
+	one := 1.0
+	score := func(id, session string, age int) {
+		t.Helper()
+		s := &Score{ID: id, SessionID: session, Name: "q", DataType: "numeric", Value: &one, Timestamp: daysAgo(age)}
+		if err := f.writer.Submit(t.Context(), &ScoreWrite{ProjectID: f.project.ID, Scores: []*Score{s}}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.store.db.Exec(`UPDATE scores SET created_at = ? WHERE id = ?`, daysAgo(age), id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for age := 60; age > 50; age-- {
+		score(fmt.Sprintf("kept-%d", age), "alive", age)
+	}
+	for age := 50; age > 43; age-- {
+		score(fmt.Sprintf("gone-%d", age), "never-arrived", age)
+	}
+	score("kept-43", "alive", 43)
+	if _, err := f.store.db.Exec(`UPDATE projects SET retention_days = 30 WHERE id = ?`, f.project.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	var chunks []sessionScoreSweep
+	writer := &watchedJobs{jobSubmitter: f.writer, done: func(job WriteJob) {
+		if chunk, ok := job.(*sessionScoreSweep); ok {
+			chunks = append(chunks, *chunk)
+		}
+	}}
+	sweeper := f.store.NewSweeper(writer, SweepOptions{Chunk: 2, Now: func() time.Time { return sweepNow }})
+	if err := sweeper.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if len(chunks) != 4 {
+		t.Fatalf("%d chunks for seven scores two at a time, want 4", len(chunks))
+	}
+	var from sessionScoreCursor
+	for i, chunk := range chunks {
+		if chunk.After != from {
+			t.Errorf("chunk %d starts at %+v, want where chunk %d stopped, %+v", i+1, chunk.After, i, from)
+		}
+		if chunk.Next == chunk.After {
+			t.Errorf("chunk %d did not move the cursor", i+1)
+		}
+		from = chunk.Next
+	}
+	left, err := queryColumn[string](f.store.db, `SELECT id FROM scores WHERE id LIKE 'gone-%'`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(left) != 0 {
+		t.Errorf("scores past the window left: %v", left)
+	}
+	if n := f.count(t, `SELECT COUNT(*) FROM scores WHERE id LIKE 'kept-%'`); n != 11 {
+		t.Errorf("%d of the live session's 11 scores are left", n)
+	}
+}
+
+// TestSessionScoreSweepSeeksItsCursor is the EXPLAIN half of the test above:
+// the cursor is part of the index seek, not a filter over the rows before it,
+// and the order is the index's, so a chunk reads from where the last stopped.
+func TestSessionScoreSweepSeeksItsCursor(t *testing.T) {
+	f := newErasureFixture(t)
+	plan, err := f.store.explainQueryPlan(expiredSessionScores, f.project.ID, daysAgo(30), daysAgo(50), 7, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(plan, "\n")
+	if !strings.Contains(joined, "idx_scores_session_only (project_id=? AND created_at>? AND created_at<?)") {
+		t.Errorf("the cursor is not part of the index seek:\n%s", joined)
+	}
+	if strings.Contains(joined, "TEMP B-TREE") {
+		t.Errorf("the chunk sorts rather than walking the index:\n%s", joined)
+	}
+}
+
+// watchedJobs passes every job on and shows each one to done once it has
+// been applied.
+type watchedJobs struct {
+	jobSubmitter
+	done func(WriteJob)
+}
+
+func (w *watchedJobs) Submit(ctx context.Context, job WriteJob) error {
+	if err := w.jobSubmitter.Submit(ctx, job); err != nil {
+		return err
+	}
+	w.done(job)
+	return nil
+}
+
 // The dataset items (#9): every row of an item cut from an erased trace goes,
 // the one whose later version dropped the source included; the version ticks
 // once per chunk; an item with no source, or another's, stays; a run of an
