@@ -1,8 +1,10 @@
 <script lang="ts">
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
+	import { MediaQuery } from 'svelte/reactivity';
 	import type { TraceRow } from '$lib/api/client.svelte';
 	import { ABSENT, cost, duration, timestamp, wait } from '$lib/format';
 	import { modified, selecting } from '$lib/peek';
+	import { folded, PHONE } from '$lib/phone';
 	import { href } from '$lib/project.svelte';
 	import { highlight, searchTerms } from '$lib/search';
 
@@ -41,6 +43,13 @@
 
 	const terms = $derived(searchTerms(search));
 
+	// On a phone the row is when, what and whether it failed, and the other
+	// columns fold under the name: what it ran as and cost on one line, whose
+	// and which session on the next (spec 006 #18).
+	const phone = new MediaQuery(PHONE);
+	const firstToken = (row: TraceRow) =>
+		row.ttft_ms == null ? null : `TTFT ${wait(row.ttft_ms)}`;
+
 	/**
 	 * The whole row opens the panel, but the row's cells stay ordinary
 	 * selectable text (spec 008 #15): a click that came out of a selection
@@ -63,27 +72,75 @@
 	const numeric = 'px-3 py-1.5 text-right tabular-nums';
 </script>
 
+<!-- The user id is a link to their page (spec 023, Application contract). It
+     is the second tabbable thing in the row, and deliberately so: "everything
+     this account did" is a destination, not a decoration. The row's own click
+     still opens the panel, which is why the link stops the event. -->
+{#snippet user(row: TraceRow)}
+	{#if row.user_id}
+		<a
+			href={href(`/users/${encodeURIComponent(row.user_id)}`)}
+			onclick={(event) => event.stopPropagation()}
+			title="Everything about {row.user_id}"
+			class="hover:text-fg hover:underline"
+		>
+			{row.user_id}
+		</a>
+	{:else}
+		{ABSENT}
+	{/if}
+{/snippet}
+
+<!-- And the session id is a link to the session (spec 023 #16), built the same
+     way for the same reason: a session is the reading unit, and the trace table
+     is where a reader meets one. The third tab stop in the row — except where
+     the reader is already in that session, and the cell stays the text it was
+     (#17). Both stay on a phone's row: the panel's own meta leaves the session
+     out below `md`, and a destination a phone cannot reach is not one there. -->
+{#snippet session(row: TraceRow)}
+	{#if !row.session_id}
+		{ABSENT}
+	{:else if linkSession}
+		<a
+			href={href(`/sessions/${encodeURIComponent(row.session_id)}`)}
+			onclick={(event) => event.stopPropagation()}
+			title="Everything in {row.session_id}"
+			class="hover:text-fg hover:underline"
+		>
+			{row.session_id}
+		</a>
+	{:else}
+		{row.session_id}
+	{/if}
+{/snippet}
+
 <!-- The table scrolls inside its own box; the page never scrolls sideways
-     (spec 006 #15). -->
+     (spec 006 #15). On a phone it has three columns and nothing to scroll to
+     (#18). -->
 <div class="min-h-0 flex-1 overflow-auto">
-	<table class="w-full min-w-3xl border-collapse text-left">
+	<table class={['w-full border-collapse text-left', !phone.current && 'min-w-3xl']}>
 		<thead class="bg-canvas text-subtle sticky top-0 z-10 text-xs whitespace-nowrap">
 			<tr class="border-border border-b">
-				<th scope="col" class="w-44 px-3 py-2 font-medium">Time</th>
-				<th scope="col" class="px-3 py-2 font-medium">Name</th>
-				<th scope="col" class="w-28 px-3 py-2 font-medium">Environment</th>
-				<th scope="col" class="w-36 px-3 py-2 font-medium">User</th>
-				<th scope="col" class="w-36 px-3 py-2 font-medium">Session</th>
-				<th scope="col" class="w-24 px-3 py-2 text-right font-medium">Cost</th>
-				<th scope="col" class="w-24 px-3 py-2 text-right font-medium">Latency</th>
-				<!-- Beside latency, because they answer the same question from two
-				     ends: how long the whole thing took, and how long the person
-				     waited before anything appeared (spec 012, Application
-				     contract). -->
-				<th scope="col" class="w-24 px-3 py-2 text-right font-medium" title="Time to first token">
-					TTFT
-				</th>
-				<th scope="col" class="w-24 px-3 py-2 font-medium">Errors</th>
+				<th scope="col" class={['px-3 py-2 font-medium', !phone.current && 'w-44']}>Time</th>
+				<!-- `w-full` beside the cell's `max-w-0`: the name takes what the
+				     other two leave and is cut to an ellipsis there, rather than
+				     widening the table past the screen. -->
+				<th scope="col" class={['px-3 py-2 font-medium', phone.current && 'w-full']}>Name</th>
+				{#if !phone.current}
+					<th scope="col" class="w-28 px-3 py-2 font-medium">Environment</th>
+					<th scope="col" class="w-36 px-3 py-2 font-medium">User</th>
+					<th scope="col" class="w-36 px-3 py-2 font-medium">Session</th>
+					<th scope="col" class="w-24 px-3 py-2 text-right font-medium">Cost</th>
+					<th scope="col" class="w-24 px-3 py-2 text-right font-medium">Latency</th>
+					<!-- Beside latency, because they answer the same question from two
+					     ends: how long the whole thing took, and how long the person
+					     waited before anything appeared (spec 012, Application
+					     contract). -->
+					<th scope="col" class="w-24 px-3 py-2 text-right font-medium" title="Time to first token">
+						TTFT
+					</th>
+				{/if}
+				<th scope="col" class={['px-3 py-2 font-medium', !phone.current && 'w-24']}>Errors</th>
 			</tr>
 		</thead>
 		<!-- One `tbody` per trace, because a row that matched a search is two
@@ -133,53 +190,35 @@
 							{timestamp(row.timestamp)}
 						</a>
 					</td>
-					<td class={cell}>{row.name ?? ABSENT}</td>
-					<td class="text-muted {cell}">{row.environment}</td>
-					<td class="text-muted {cell}">
-						<!-- The user id is a link to their page (spec 023, Application
-						     contract). It is the second tabbable thing in the row, and
-						     deliberately so: "everything this account did" is a
-						     destination, not a decoration. The row's own click still
-						     opens the panel, which is why the link stops the event. -->
-						{#if row.user_id}
-							<a
-								href={href(`/users/${encodeURIComponent(row.user_id)}`)}
-								onclick={(event) => event.stopPropagation()}
-								title="Everything about {row.user_id}"
-								class="hover:text-fg hover:underline"
-							>
-								{row.user_id}
-							</a>
-						{:else}
-							{ABSENT}
-						{/if}
-					</td>
-					<td class="text-muted {cell}">
-						<!-- And the session id is a link to the session (spec 023 #16),
-						     built the same way for the same reason: a session is the
-						     reading unit, and the trace table is where a reader meets
-						     one. The third tab stop in the row — except where the
-						     reader is already in that session, and the cell stays the
-						     text it was (#17). -->
-						{#if !row.session_id}
-							{ABSENT}
-						{:else if linkSession}
-							<a
-								href={href(`/sessions/${encodeURIComponent(row.session_id)}`)}
-								onclick={(event) => event.stopPropagation()}
-								title="Everything in {row.session_id}"
-								class="hover:text-fg hover:underline"
-							>
-								{row.session_id}
-							</a>
-						{:else}
-							{row.session_id}
-						{/if}
-					</td>
-					<td class="text-muted {numeric}">{cost(row.total_cost)}</td>
-					<td class="text-muted {numeric}">{duration(row.latency_ms)}</td>
-					<td class="text-muted {numeric}">{wait(row.ttft_ms)}</td>
-					<td class="px-3 py-1.5">
+					{#if phone.current}
+						<td class="max-w-0 px-3 py-1.5">
+							<div class="truncate">{row.name ?? ABSENT}</div>
+							<div class="text-muted truncate text-xs tabular-nums">
+								{folded([
+									row.environment,
+									duration(row.latency_ms),
+									firstToken(row),
+									cost(row.total_cost)
+								])}
+							</div>
+							{#if row.user_id || row.session_id}
+								<div class="text-muted truncate text-xs">
+									{#if row.user_id}{@render user(row)}{/if}
+									{#if row.user_id && row.session_id}·{/if}
+									{#if row.session_id}{@render session(row)}{/if}
+								</div>
+							{/if}
+						</td>
+					{:else}
+						<td class={cell}>{row.name ?? ABSENT}</td>
+						<td class="text-muted {cell}">{row.environment}</td>
+						<td class="text-muted {cell}">{@render user(row)}</td>
+						<td class="text-muted {cell}">{@render session(row)}</td>
+						<td class="text-muted {numeric}">{cost(row.total_cost)}</td>
+						<td class="text-muted {numeric}">{duration(row.latency_ms)}</td>
+						<td class="text-muted {numeric}">{wait(row.ttft_ms)}</td>
+					{/if}
+					<td class="px-3 py-1.5 whitespace-nowrap">
 						{#if row.error_count > 0}
 							<span
 								class="text-danger bg-danger-soft inline-flex items-center gap-1 rounded px-1.5
@@ -205,7 +244,7 @@
 							lit && 'bg-accent-soft'
 						]}
 					>
-						<td class="text-muted px-3 pt-0 pb-1.5 font-mono text-xs" colspan="9">
+						<td class="text-muted px-3 pt-0 pb-1.5 font-mono text-xs" colspan={phone.current ? 3 : 9}>
 							<span class="text-subtle">{row.match.field}</span>
 							{#each highlight(row.match.snippet, terms) as piece, i (i)}
 								{#if piece.hit}<mark class="bg-accent-soft text-fg rounded-sm px-0.5"

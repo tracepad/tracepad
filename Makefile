@@ -135,7 +135,7 @@ e2e: build ## Boot the real binary on a temp database and run the Playwright smo
 
 # The budget is named here as well as defaulted in the script (spec 015 #9), so
 # that the number a build reports is visible in the target that reports it.
-UI_BUDGET := 22700
+UI_BUDGET := 22900
 
 ui-lines: ## Report the interface's application lines against its budget, and its test lines beside them
 	scripts/ui-lines.sh $(UI_BUDGET)

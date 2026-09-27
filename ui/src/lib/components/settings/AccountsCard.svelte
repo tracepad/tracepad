@@ -1,6 +1,7 @@
 <script lang="ts">
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import UserPlus from '@lucide/svelte/icons/user-plus';
+	import { MediaQuery } from 'svelte/reactivity';
 	import { reaches, said, standing } from '$lib/accounts';
 	import {
 		api,
@@ -11,6 +12,7 @@
 		type Project
 	} from '$lib/api/client.svelte';
 	import { timeOrNever } from '$lib/format';
+	import { PHONE } from '$lib/phone';
 	import Button from '../Button.svelte';
 	import ConfirmCard from '../ConfirmCard.svelte';
 	import AccountDialog from './AccountDialog.svelte';
@@ -74,6 +76,14 @@
 	}
 
 	const cell = 'px-3 py-1.5 text-sm';
+
+	/** Colour is never the message on its own (spec 006 #14): the word is there too. */
+	const tone = (where: ReturnType<typeof standing>) =>
+		where === 'disabled' ? 'text-danger' : where === 'pending' ? 'text-warn' : 'text-muted';
+
+	// On a phone the row is the email and the two buttons, stacked; what the
+	// other columns say folds under the email in the same order (spec 006 #18).
+	const phone = new MediaQuery(PHONE);
 </script>
 
 <Card
@@ -94,41 +104,48 @@
 		</p>
 	{:else}
 		<div class="border-border overflow-x-auto rounded-md border">
-			<table class="w-full min-w-3xl border-collapse text-left">
+			<table class={['w-full border-collapse text-left', !phone.current && 'min-w-3xl']}>
 				<thead class="text-subtle text-xs whitespace-nowrap">
 					<tr class="border-border border-b">
 						<th scope="col" class="px-3 py-1.5 font-medium">Email</th>
-						<th scope="col" class="px-3 py-1.5 font-medium">Name</th>
-						<th scope="col" class="px-3 py-1.5 font-medium">Status</th>
-						<th scope="col" class="px-3 py-1.5 font-medium">Last login</th>
-						<th scope="col" class="px-3 py-1.5 font-medium">Projects</th>
-						<th scope="col" class="w-44 px-3 py-1.5 font-medium">Actions</th>
+						{#if !phone.current}
+							<th scope="col" class="px-3 py-1.5 font-medium">Name</th>
+							<th scope="col" class="px-3 py-1.5 font-medium">Status</th>
+							<th scope="col" class="px-3 py-1.5 font-medium">Last login</th>
+							<th scope="col" class="px-3 py-1.5 font-medium">Projects</th>
+						{/if}
+						<th scope="col" class={['px-3 py-1.5 font-medium', !phone.current && 'w-44']}>
+							Actions
+						</th>
 					</tr>
 				</thead>
 				<tbody>
 					{#each accounts as row (row.id)}
 						{@const where = standing(row)}
 						<tr class="border-border border-b last:border-b-0">
-							<th scope="row" class="px-3 py-1.5 text-left font-normal">{row.email}</th>
-							<td class="text-muted {cell}">{row.name || '—'}</td>
-							<td class={cell}>
-								<!-- Colour is never the message on its own (spec 006 #14). -->
-								<span
-									class={where === 'disabled'
-										? 'text-danger'
-										: where === 'pending'
-											? 'text-warn'
-											: 'text-muted'}
-								>
-									{where}
-								</span>
-							</td>
-							<td class="text-muted {cell} tabular-nums whitespace-nowrap">
-								{timeOrNever(row.last_login_at)}
-							</td>
-							<td class="text-muted {cell}">{reaches(row)}</td>
+							{#if phone.current}
+								<th scope="row" class="px-3 py-1.5 text-left font-normal wrap-anywhere">
+									{row.email}
+									<div class="text-muted text-xs">
+										{#if row.name}{row.name} ·{/if}
+										<span class={tone(where)}>{where}</span>
+										· last login <span class="tabular-nums">{timeOrNever(row.last_login_at)}</span>
+									</div>
+									<!-- Named, because the column heads that said what "never" and
+									     "none" are about are not there to say it. -->
+									<div class="text-muted text-xs">Projects: {reaches(row)}</div>
+								</th>
+							{:else}
+								<th scope="row" class="px-3 py-1.5 text-left font-normal">{row.email}</th>
+								<td class="text-muted {cell}">{row.name || '—'}</td>
+								<td class={cell}><span class={tone(where)}>{where}</span></td>
+								<td class="text-muted {cell} tabular-nums whitespace-nowrap">
+									{timeOrNever(row.last_login_at)}
+								</td>
+								<td class="text-muted {cell}">{reaches(row)}</td>
+							{/if}
 							<td class="px-3 py-1.5">
-								<div class="flex gap-1.5">
+								<div class={['flex gap-1.5', phone.current && 'flex-col']}>
 									<Button onclick={() => ((notice = null), (editing = row))}>Edit</Button>
 									<Button
 										onclick={() => (

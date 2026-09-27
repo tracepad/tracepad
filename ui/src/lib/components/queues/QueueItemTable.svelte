@@ -1,8 +1,12 @@
 <script lang="ts">
+	import ListX from '@lucide/svelte/icons/list-x';
+	import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
+	import { MediaQuery } from 'svelte/reactivity';
 	import type { AnnotationItem } from '$lib/api/client.svelte';
 	import Button from '$lib/components/Button.svelte';
 	import { timestamp } from '$lib/format';
 	import { modified, selecting } from '$lib/peek';
+	import { folded, PHONE } from '$lib/phone';
 	import { project } from '$lib/project.svelte';
 
 	// A queue's items in `seq` order (spec 024 #11): what is done, by whom,
@@ -48,19 +52,30 @@
 		})[status] ?? 'text-muted bg-raised';
 
 	const cell = 'truncate px-3 py-1.5';
+
+	// On a phone the row is the target, its status and the two verbs, which
+	// keep their names for a screen reader and lose them on the screen; the
+	// number, who, when and why fold under the target (spec 006 #18).
+	const phone = new MediaQuery(PHONE);
 </script>
 
 <div class="min-h-0 flex-1 overflow-auto">
-	<table class="w-full min-w-3xl table-fixed border-collapse text-left">
+	<table class={['w-full table-fixed border-collapse text-left', !phone.current && 'min-w-3xl']}>
 		<thead class="bg-canvas text-subtle sticky top-0 z-10 text-xs whitespace-nowrap">
 			<tr class="border-border border-b">
-				<th scope="col" class="w-14 px-3 py-2 text-right font-medium">#</th>
+				{#if !phone.current}
+					<th scope="col" class="w-14 px-3 py-2 text-right font-medium">#</th>
+				{/if}
 				<th scope="col" class="px-3 py-2 font-medium">Target</th>
 				<th scope="col" class="w-28 px-3 py-2 font-medium">Status</th>
-				<th scope="col" class="w-32 px-3 py-2 font-medium">By</th>
-				<th scope="col" class="w-44 px-3 py-2 font-medium">When</th>
-				<th scope="col" class="px-3 py-2 font-medium">Skip reason</th>
-				<th scope="col" class="w-40 px-3 py-2"><span class="sr-only">Actions</span></th>
+				{#if !phone.current}
+					<th scope="col" class="w-32 px-3 py-2 font-medium">By</th>
+					<th scope="col" class="w-44 px-3 py-2 font-medium">When</th>
+					<th scope="col" class="px-3 py-2 font-medium">Skip reason</th>
+				{/if}
+				<th scope="col" class={['px-3 py-2', phone.current ? 'w-34' : 'w-40']}>
+					<span class="sr-only">Actions</span>
+				</th>
 			</tr>
 		</thead>
 		<tbody>
@@ -75,24 +90,47 @@
 						lit && 'bg-accent-soft'
 					]}
 				>
-					<td class="text-muted px-3 py-1.5 text-right tabular-nums">{row.seq}</td>
+					{#if !phone.current}
+						<td class="text-muted px-3 py-1.5 text-right tabular-nums">{row.seq}</td>
+					{/if}
 					<td class="{cell} font-mono text-xs">
 						<a href={href(row.id)} aria-current={lit ? 'true' : undefined} title={row.trace_id}>
 							{row.trace_id.slice(0, 12)}…{#if row.observation_id}<span class="text-subtle"
 									>/{row.observation_id.slice(0, 8)}…</span
 								>{/if}
 						</a>
+						{#if phone.current}
+							<div class="text-muted truncate font-sans">
+								{folded([
+									`#${row.seq}`,
+									row.completed_by,
+									row.completed_at && timestamp(row.completed_at)
+								])}
+							</div>
+							<!-- The reason is the why, so it gets a line of its own rather
+							     than the end of one that is cut first. -->
+							{#if row.skip_reason}
+								<div
+									class="text-muted line-clamp-2 font-sans whitespace-normal"
+									title={row.skip_reason}
+								>
+									{row.skip_reason}
+								</div>
+							{/if}
+						{/if}
 					</td>
 					<td class="px-3 py-1.5">
 						<span class="rounded-md px-1.5 py-0.5 text-xs {chip(row.status)}">{row.status}</span>
 					</td>
-					<td class="text-muted {cell}">{row.completed_by ?? '—'}</td>
-					<td class="text-muted px-3 py-1.5 font-mono text-xs whitespace-nowrap tabular-nums">
-						{row.completed_at ? timestamp(row.completed_at) : '—'}
-					</td>
-					<td class="text-muted {cell}" title={row.skip_reason ?? undefined}>
-						{row.skip_reason ?? '—'}
-					</td>
+					{#if !phone.current}
+						<td class="text-muted {cell}">{row.completed_by ?? '—'}</td>
+						<td class="text-muted px-3 py-1.5 font-mono text-xs whitespace-nowrap tabular-nums">
+							{row.completed_at ? timestamp(row.completed_at) : '—'}
+						</td>
+						<td class="text-muted {cell}" title={row.skip_reason ?? undefined}>
+							{row.skip_reason ?? '—'}
+						</td>
+					{/if}
 					<td class="px-3 py-1.5">
 						<!-- The verbs stop the click here: the row opens the trace,
 						     and a Remove that also opened a panel over the item it
@@ -102,9 +140,11 @@
 								<Button
 									variant="ghost"
 									busy={busyID === row.id}
+									aria-label={phone.current ? 'Reopen' : undefined}
+									title={phone.current ? 'Reopen' : undefined}
 									onclick={(event) => (event.stopPropagation(), onreopen(row))}
 								>
-									Reopen
+									{#if phone.current}<RotateCcw class="size-4" />{:else}Reopen{/if}
 								</Button>
 							{/if}
 							<!-- Working an item is a viewer's job and taking it off
@@ -114,9 +154,11 @@
 								<Button
 									variant="ghost"
 									busy={busyID === row.id}
+									aria-label={phone.current ? 'Remove' : undefined}
+									title={phone.current ? 'Remove' : undefined}
 									onclick={(event) => (event.stopPropagation(), onremove(row))}
 								>
-									Remove
+									{#if phone.current}<ListX class="size-4" />{:else}Remove{/if}
 								</Button>
 							{/if}
 						</div>
