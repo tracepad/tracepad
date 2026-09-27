@@ -48,6 +48,15 @@ updates:
       # that builds it. A newer major would type-check what that Node lacks.
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
+      # TypeScript is two packages until 7.1 ships a stable API (spec 006
+      # #16, spec 032 #19): `typescript` is the alias to 6.0's API that
+      # svelte-check, openapi-typescript and tsup import, and moving it to 7
+      # would hand them a compiler they cannot use; `@typescript/native` is
+      # `tsc`, and its next major is a decision, not a weekly update.
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@typescript/native"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: uv
     directory: /sdk/python

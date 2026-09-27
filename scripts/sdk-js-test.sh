@@ -30,7 +30,11 @@ if [ -z "${SDK_SKIP_E2E:-}" ]; then
 fi
 
 cd "$package"
-echo "==> tsc"
-npx tsc --noEmit
+# TypeScript 7 by its own path: `@typescript/old`, the 6.0 that the
+# `typescript` alias depends on, declares a `tsc` too, and which of the two
+# `node_modules/.bin/tsc` names is npm's choice, not the manifest's (spec 032
+# #19).
+echo "==> tsc $(node node_modules/@typescript/native/bin/tsc --version)"
+node node_modules/@typescript/native/bin/tsc --noEmit
 echo "==> vitest"
 npx vitest run "$@"

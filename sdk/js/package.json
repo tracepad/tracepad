@@ -54,7 +54,7 @@
   },
   "scripts": {
     "build": "tsup",
-    "check": "tsc --noEmit",
+    "check": "node node_modules/@typescript/native/bin/tsc --noEmit",
     "test": "vitest run",
     "prepack": "npm run build"
   },
