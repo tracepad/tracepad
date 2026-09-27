@@ -256,6 +256,10 @@ type hangUpOnTheFirstChunk struct {
 	chunks int
 }
 
+func (w *hangUpOnTheFirstChunk) SubmitWaiting(ctx context.Context, job store.WriteJob) error {
+	return w.inner.SubmitWaiting(ctx, job)
+}
+
 func (w *hangUpOnTheFirstChunk) Submit(ctx context.Context, job store.WriteJob) error {
 	if _, ok := job.(*store.UserDataErase); !ok {
 		return w.inner.Submit(ctx, job)

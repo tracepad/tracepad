@@ -269,6 +269,16 @@ func (s *Server) handleLangfuseMediaPut(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// A grant longer than the whole budget — issued before a restart with a
+	// smaller one — could never be read: a final answer, not a 429 its SDK
+	// would retry until the grant expired (spec 043 #32). Decided having read
+	// nothing, like the grant's other refusals.
+	if grant.Length > s.bodies.capacityBytes() {
+		writeError(w, http.StatusRequestEntityTooLarge,
+			fmt.Sprintf("the upload is %d bytes and this server now holds at most %d at once; ask for a new upload URL",
+				grant.Length, s.bodies.capacityBytes()))
+		return
+	}
 	// The body counts against the budget every body does (spec 043 #13).
 	// One the budget cannot hold is refused as the stored state's
 	// refusals are, its answer first and the rest of it drained, so the

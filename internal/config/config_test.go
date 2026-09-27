@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"flag"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -396,6 +397,18 @@ func TestIngestBounds(t *testing.T) {
 	if cfg.BodyBudgetBytes != 4000000 {
 		t.Errorf("BodyBudgetBytes = %d under a 1 MB cap, want 4 MB", cfg.BodyBudgetBytes)
 	}
+
+	// Four of a cap this large would not fit an int64: the default holds at
+	// the largest one rather than wrapping negative.
+	t.Setenv("TRACEPAD_MAX_BODY_BYTES", "3000000000000000000")
+	cfg, err = Load(nil)
+	if err != nil {
+		t.Fatalf("an enormous cap with no budget set: %v", err)
+	}
+	if cfg.BodyBudgetBytes != math.MaxInt64 {
+		t.Errorf("BodyBudgetBytes = %d, want the largest int64", cfg.BodyBudgetBytes)
+	}
+	t.Setenv("TRACEPAD_MAX_BODY_BYTES", "1000000")
 
 	t.Setenv("TRACEPAD_MAX_SPANS_PER_REQUEST", "1")
 	t.Setenv("TRACEPAD_BODY_BUDGET_BYTES", "1000000")

@@ -26,6 +26,10 @@ import (
 // that is saturated or failing on demand.
 type JobWriter interface {
 	Submit(ctx context.Context, job store.WriteJob) error
+	// SubmitWaiting is Submit for a job that continues admitted work — an
+	// export's slices after its first — and waits out a full queue rather
+	// than refusing (spec 043 #31).
+	SubmitWaiting(ctx context.Context, job store.WriteJob) error
 }
 
 // SweepReporter is the retention sweeper as `GET /api/v1/system` needs it: a

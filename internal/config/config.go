@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net"
 	"net/url"
 	"os"
@@ -119,8 +120,12 @@ const (
 	bodyBudgetBodies          = 4
 )
 
-// DefaultBodyBudgetBytes is the body budget for a body cap: four bodies.
+// DefaultBodyBudgetBytes is the body budget for a body cap: four bodies, held
+// at the largest int64 for a cap so large that four of it would not fit one.
 func DefaultBodyBudgetBytes(maxBody int64) int64 {
+	if maxBody > math.MaxInt64/bodyBudgetBodies {
+		return math.MaxInt64
+	}
 	return bodyBudgetBodies * maxBody
 }
 

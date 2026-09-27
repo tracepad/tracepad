@@ -63,6 +63,8 @@ type conditionWriter struct{ err error }
 
 func (w conditionWriter) Submit(context.Context, store.WriteJob) error { return w.err }
 
+func (w conditionWriter) SubmitWaiting(context.Context, store.WriteJob) error { return w.err }
+
 // codedError is the driver's error as the store reads it: a message and a
 // result code.
 type codedError struct{ code int }

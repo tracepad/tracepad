@@ -240,8 +240,8 @@ func (s *Server) submitExport(ctx context.Context, batch *store.IngestBatch) err
 	batch.UnknownRuns = batch.UnknownRuns[:0]
 	for i, slice := range slices {
 		submit := s.writer.Submit
-		if waiting, ok := s.writer.(waitingWriter); ok && i > 0 {
-			submit = waiting.SubmitWaiting
+		if i > 0 {
+			submit = s.writer.SubmitWaiting
 		}
 		if err := submit(commit, slice); err != nil {
 			return err
@@ -249,12 +249,6 @@ func (s *Server) submitExport(ctx context.Context, batch *store.IngestBatch) err
 		batch.UnknownRuns = append(batch.UnknownRuns, slice.UnknownRuns...)
 	}
 	return nil
-}
-
-// waitingWriter is the part of *store.Writer that waits out a full queue, for
-// the slices of an export after its first (spec 043 #31).
-type waitingWriter interface {
-	SubmitWaiting(ctx context.Context, job store.WriteJob) error
 }
 
 // credential extracts the secret from either scheme. Basic carries

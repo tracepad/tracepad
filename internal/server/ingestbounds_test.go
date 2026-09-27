@@ -131,16 +131,31 @@ type failingWriter struct {
 }
 
 func (f *failingWriter) Submit(ctx context.Context, job store.WriteJob) error {
-	if _, ok := job.(*store.IngestBatch); ok {
-		f.mu.Lock()
-		f.seen++
-		fail := f.seen == f.fail
-		f.mu.Unlock()
-		if fail {
-			return fmt.Errorf("commit write transaction: %w", codedError{13}) // SQLITE_FULL
-		}
+	if err := f.failing(job); err != nil {
+		return err
 	}
 	return f.inner.Submit(ctx, job)
+}
+
+func (f *failingWriter) SubmitWaiting(ctx context.Context, job store.WriteJob) error {
+	if err := f.failing(job); err != nil {
+		return err
+	}
+	return f.inner.SubmitWaiting(ctx, job)
+}
+
+// failing counts an ingest job and answers the condition for the nth.
+func (f *failingWriter) failing(job store.WriteJob) error {
+	if _, ok := job.(*store.IngestBatch); !ok {
+		return nil
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.seen++
+	if f.seen == f.fail {
+		return fmt.Errorf("commit write transaction: %w", codedError{13}) // SQLITE_FULL
+	}
+	return nil
 }
 
 // Testing 9: an export of 20,000 spans commits in transactions of at most
@@ -264,6 +279,15 @@ func (h *stalledWriter) Submit(ctx context.Context, job store.WriteJob) error {
 		return ctx.Err()
 	}
 	return h.inner.Submit(ctx, job)
+}
+
+func (h *stalledWriter) SubmitWaiting(ctx context.Context, job store.WriteJob) error {
+	select {
+	case <-h.release:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	return h.inner.SubmitWaiting(ctx, job)
 }
 
 // tallyReader counts what the server reads of a request body.
@@ -560,6 +584,56 @@ func TestAHangUpKeepsTheBodyInTheBudget(t *testing.T) {
 				t.Errorf("%d bytes still held after the write", held)
 			}
 		})
+	}
+}
+
+// A password change — a JSON API write that goes to the writer without the
+// shared submit — waits for its commit holding its body's reservation too
+// (spec 043 #31, #32).
+func TestAHangUpKeepsAPasswordChangeInTheBudget(t *testing.T) {
+	h := newAccountHarness(t)
+	who := h.owner(t)
+	release := make(chan struct{})
+	h.server.writer = &stalledWriter{inner: h.server.writer, release: release}
+
+	ctx, hangUp := context.WithCancel(context.Background())
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		done <- h.call(t, "PATCH", "/api/v1/auth/me", mustJSON(t, map[string]any{
+			"password": map[string]any{"current": testAccountPassword, "new": "a brand new password"},
+		}), asSession(who), func(r *http.Request) { *r = *r.WithContext(ctx) })
+	}()
+	waitUntil(t, func() bool { return h.server.bodies.heldBytes() > 0 })
+	hangUp()
+	select {
+	case <-done:
+		t.Fatal("the handler returned when its client hung up, with its write still queued")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(release)
+	<-done
+	if held := h.server.bodies.heldBytes(); held != 0 {
+		t.Errorf("%d bytes still held after the write", held)
+	}
+}
+
+// An upload URL granted for more than the whole body budget holds — issued
+// before a restart with smaller bounds — is refused for good, having read
+// nothing, rather than with a 429 its SDK would retry until the grant expired
+// (spec 043 #32).
+func TestAnUploadLongerThanTheBudgetIsFinal(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	picture := testPicture(30000, 9)
+	_, upload := h.langfuseAsk(t, picture, probeTrace, testSecret)
+	if upload == nil {
+		t.Fatal("no upload URL")
+	}
+	h.server.bodies.capacity = int64(len(picture)) - 1
+	put := &tallyReader{r: bytes.NewReader(picture)}
+	rec := h.putUpload(t, *upload, put)
+	expectError(t, rec, http.StatusRequestEntityTooLarge, "ask for a new upload URL")
+	if put.total() != 0 {
+		t.Errorf("read %d bytes of an upload refused for its length, want none", put.total())
 	}
 }
 

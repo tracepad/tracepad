@@ -2733,7 +2733,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description The body is larger than the upload declared */
+            /** @description The body is larger than the upload declared; or the upload declared more than the server's body budget now holds at once (TRACEPAD_BODY_BUDGET_BYTES), decided having read nothing — ask for a new upload URL */
             413: {
                 headers: {
                     [name: string]: unknown;

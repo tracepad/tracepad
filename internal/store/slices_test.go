@@ -88,20 +88,38 @@ func TestSlicesCutAnExport(t *testing.T) {
 		}
 	}
 
-	first, last := cut[0], cut[len(cut)-1]
-	if len(first.Media) != 1 || first.Media[0].SHA256 != "named" || len(first.MediaRefs) != 1 ||
-		len(first.Resolved) != 1 || first.Raw != nil {
-		t.Errorf("first slice media = %v, refs %v, resolved %v, raw %v; want the named body, its ref and the check",
-			first.Media, first.MediaRefs, first.Resolved, first.Raw)
-	}
-	if len(last.Media) != 1 || last.Media[0].SHA256 != "rawonly" || last.Raw == nil ||
-		len(last.RawMedia) != 2 || last.mediaTypes["named"] != "image/png" {
-		t.Errorf("last slice media = %v, raw %v, raw media %v, types %v; want the raw body and what only it names",
-			last.Media, last.Raw, last.RawMedia, last.mediaTypes)
-	}
-	for _, middle := range cut[1 : len(cut)-1] {
-		if len(middle.Media)+len(middle.MediaRefs)+len(middle.Resolved)+len(middle.RawMedia) > 0 || middle.Raw != nil {
-			t.Errorf("a middle slice carries media or raw: %+v", middle)
+	// Media travel with the trace that names them, in every slice that
+	// carries it; the raw body's go with the last slice, beside the raw body;
+	// every slice checks the resolved ids.
+	named := batch.Traces[2].ID
+	last := cut[len(cut)-1]
+	for i, slice := range cut {
+		carries := slices.ContainsFunc(slice.Traces, func(t *model.Trace) bool { return t.ID == named })
+		var shas []string
+		for _, body := range slice.Media {
+			shas = append(shas, body.SHA256)
+		}
+		want := []string(nil)
+		if carries {
+			want = append(want, "named")
+		}
+		if slice == last {
+			if !carries {
+				want = append(want, "named")
+			}
+			want = append(want, "rawonly")
+		}
+		if !slices.Equal(shas, want) {
+			t.Errorf("slice %d carries bodies %v, want %v", i, shas, want)
+		}
+		if refs := len(slice.MediaRefs); (refs == 1) != carries {
+			t.Errorf("slice %d carries %d refs; carries the trace that names the body: %t", i, refs, carries)
+		}
+		if len(slice.Resolved) != 1 {
+			t.Errorf("slice %d checks %d resolved ids, want the export's one", i, len(slice.Resolved))
+		}
+		if (slice.Raw != nil) != (slice == last) || (len(slice.RawMedia) > 0) != (slice == last) {
+			t.Errorf("slice %d of %d: raw %v, raw media %v; want them on the last slice only", i, len(cut), slice.Raw, slice.RawMedia)
 		}
 	}
 
@@ -112,9 +130,7 @@ func TestSlicesCutAnExport(t *testing.T) {
 }
 
 // Written slice by slice, an export converges on the rows one transaction
-// writes, and the ref the first slice writes for a trace a later one carries
-// is pending until then — so an export that stops half-way leaves a ref the
-// sweep collects, not one that holds its body for ever (spec 043 #11).
+// writes, and no slice leaves a media ref pending (spec 043 #11, #32).
 func TestSlicesWriteWhatOneTransactionWrites(t *testing.T) {
 	s, p := openIngestStore(t)
 	whole, sliced := bulkBatch(p.ID, 600, 1500, 7), bulkBatch(p.ID, 600, 1500, 7)
@@ -141,25 +157,28 @@ func TestSlicesWriteWhatOneTransactionWrites(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	pending := func() int {
-		var n int
-		if err := s.db.QueryRow(`SELECT pending FROM media_refs WHERE trace_id = ?`, last).Scan(&n); err != nil {
+	refs := func() (pending, settled int) {
+		t.Helper()
+		if err := s.db.QueryRow(`SELECT COALESCE(SUM(pending), 0), COALESCE(SUM(1 - pending), 0) FROM media_refs
+		                          WHERE project_id = ?`, p.ID).Scan(&pending, &settled); err != nil {
 			t.Fatal(err)
 		}
-		return n
+		return pending, settled
 	}
 
 	apply(whole)
 	cut := sliced.Slices()
-	apply(cut[0])
-	if pending() != 1 {
-		t.Error("the ref of a trace no slice has written yet is settled")
-	}
-	for _, slice := range cut[1:] {
+	for i, slice := range cut {
 		apply(slice)
+		// No slice leaves a ref pending: a trace's refs are written with
+		// the trace, so an export never takes room under the Langfuse
+		// channel's cap of pending refs (spec 043 #32).
+		if pending, _ := refs(); pending != 0 {
+			t.Errorf("%d refs pending after slice %d", pending, i)
+		}
 	}
-	if pending() != 0 {
-		t.Error("the ref is still pending after its trace arrived")
+	if _, settled := refs(); settled != 1 {
+		t.Errorf("%d refs settled, want the one", settled)
 	}
 
 	rows := func(projectID string) []string {
@@ -420,5 +439,81 @@ func TestASlicedExportsRawBatchIsInsideEveryTracesWindow(t *testing.T) {
 	}
 	if n != len(batch.Traces) {
 		t.Errorf("%d traces, want %d", n, len(batch.Traces))
+	}
+}
+
+// A body the raw body names is written again by the last slice, beside the raw
+// ref to it: a deletion between two slices that collected it — its one trace
+// ref gone — does not leave the archived batch pointing at nothing (spec 043
+// #32).
+func TestARawBodysMediaSurviveADeletionBetweenSlices(t *testing.T) {
+	s, p := openIngestStore(t)
+	batch := bulkBatch(p.ID, 900, 400, 900)
+	shared := batch.Traces[0].ID
+	batch.Media = []MediaBody{{SHA256: "cd", MimeType: "image/png", Body: []byte("png")}}
+	batch.MediaRefs = []MediaRef{{SHA256: "cd", TraceID: shared}}
+	batch.Raw = &RawBatch{Body: []byte("raw")}
+	batch.RawMedia = []string{"cd"}
+	cut := batch.Slices()
+	if len(cut) < 2 || slices.ContainsFunc(cut[len(cut)-1].Traces, func(t *model.Trace) bool { return t.ID == shared }) {
+		t.Fatal("want the trace that names the body in an earlier slice than the raw body")
+	}
+	apply := func(job *IngestBatch) {
+		t.Helper()
+		tx, err := s.db.Begin()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tx.Rollback()
+		if err := job.apply(tx); err != nil {
+			t.Fatal(err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	apply(cut[0])
+	// What a deletion of the trace does to its media: the ref and the hold
+	// go, and the body with nothing left naming it is collected.
+	for _, statement := range []string{
+		`DELETE FROM media_refs WHERE project_id = '` + p.ID + `'`,
+		`DELETE FROM media_holders WHERE project_id = '` + p.ID + `'`,
+		`DELETE FROM media WHERE sha256 = 'cd'`,
+	} {
+		if _, err := s.db.Exec(statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, slice := range cut[1:] {
+		apply(slice)
+	}
+	var bodies, rawRefs int
+	if err := s.db.QueryRow(`SELECT (SELECT COUNT(*) FROM media WHERE sha256 = 'cd'),
+	                                (SELECT COUNT(*) FROM media_raw_refs WHERE sha256 = 'cd')`).Scan(&bodies, &rawRefs); err != nil {
+		t.Fatal(err)
+	}
+	if bodies != 1 || rawRefs != 1 {
+		t.Errorf("after the deletion the body is stored %d times and the raw batch names it %d times, want both once",
+			bodies, rawRefs)
+	}
+}
+
+// Observations whose trace the batch does not carry — which the mapper never
+// produces, but a batch may hold — are sliced like the rest, with no trace
+// row, rather than dropped.
+func TestSlicesCarryObservationsWithoutTheirTrace(t *testing.T) {
+	batch := bulkBatch("p", 3, 2400)
+	strays := batch.Observations[3:]
+	batch.Traces = batch.Traces[:1]
+	cut := batch.Slices()
+	var got []*model.Observation
+	for i, slice := range cut {
+		if rows := len(slice.Traces) + len(slice.Observations); rows > SliceRows {
+			t.Errorf("slice %d holds %d rows", i, rows)
+		}
+		got = append(got, slice.Observations...)
+	}
+	if !slices.Equal(got[3:], strays) || len(got) != len(batch.Observations) {
+		t.Errorf("%d observations sliced of %d, want every one, the strays after the trace's own", len(got), len(batch.Observations))
 	}
 }

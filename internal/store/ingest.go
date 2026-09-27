@@ -40,11 +40,6 @@ type IngestBatch struct {
 	// disagrees with its rows.
 	skipSearchIndex bool
 
-	// mediaTypes, on the slice that carries the raw body, are the types the
-	// whole export declared for its bodies, most of which the first slice
-	// wrote (Slices): the raw refs record a hold under them, as they would
-	// have in one transaction.
-	mediaTypes map[string]string
 	// full says this is a slice with another after it (Slices): it weighs a
 	// whole window whatever its rows (weight).
 	full bool
@@ -104,11 +99,10 @@ const SliceRows = 1000
 // with no room for one of its observations: a trace row with none would be
 // listed without a time.
 //
-// The first slice carries what spec 041 checks and writes before anything
-// points at it — the bodies the export's traces name, their refs, and the
-// check that a resolved Langfuse id still names a body the project holds. The
-// last carries the raw body, its refs, and the bodies only the raw body names,
-// which a sweep would otherwise find with no ref between the two. The raw batch
+// Each slice carries the media of the traces it writes — their bodies and
+// refs — and the check that a resolved Langfuse id still names a body the
+// project holds (spec 041 #9); the last carries the raw body, its refs, and
+// every body the raw body names (spec 043 #32). The raw batch
 // is stamped with the last slice's reading (spec 044 #3), so that slice stamps
 // the traces the earlier ones wrote with it too: an erasure finds a trace's
 // batches inside its `[ingested_at, updated_at]`.
@@ -175,20 +169,46 @@ func (b *IngestBatch) Slices() []*IngestBatch {
 		strays = strays[n:]
 	}
 
-	first, last := slices[0], slices[len(slices)-1]
-	named := make(map[string]bool, len(b.MediaRefs))
-	for _, ref := range b.MediaRefs {
-		named[ref.SHA256] = true
-	}
+	// Each slice carries the media of the traces it writes: their bodies and
+	// refs, in the same transaction as the trace, so a ref is settled when it
+	// is written and a body is never without one between two slices; a body
+	// several slices name is written by each, a conflict that changes
+	// nothing. Every slice checks the resolved Langfuse ids (spec 041 #9),
+	// since a deletion between two slices may collect one. The last also
+	// carries every body the raw body names, beside the raw refs to them.
+	bodies := make(map[string]MediaBody, len(b.Media))
 	for _, body := range b.Media {
-		if named[body.SHA256] {
-			first.Media = append(first.Media, body)
-		} else {
-			last.Media = append(last.Media, body)
+		if _, seen := bodies[body.SHA256]; !seen {
+			bodies[body.SHA256] = body
 		}
 	}
-	first.MediaRefs, first.Resolved = b.MediaRefs, b.Resolved
-	last.Raw, last.RawMedia, last.mediaTypes = b.Raw, b.RawMedia, declaredTypes(b.Media)
+	refsOf := make(map[string][]MediaRef, len(b.MediaRefs))
+	for _, ref := range b.MediaRefs {
+		refsOf[ref.TraceID] = append(refsOf[ref.TraceID], ref)
+	}
+	for _, slice := range slices {
+		written := map[string]bool{}
+		carry := func(sha string) {
+			if body, ok := bodies[sha]; ok && !written[sha] {
+				written[sha] = true
+				slice.Media = append(slice.Media, body)
+			}
+		}
+		for _, t := range slice.Traces {
+			for _, ref := range refsOf[t.ID] {
+				slice.MediaRefs = append(slice.MediaRefs, ref)
+				carry(ref.SHA256)
+			}
+		}
+		if slice == slices[len(slices)-1] {
+			for _, sha := range b.RawMedia {
+				carry(sha)
+			}
+		}
+		slice.Resolved = b.Resolved
+	}
+	last := slices[len(slices)-1]
+	last.Raw, last.RawMedia = b.Raw, b.RawMedia
 	if last.Raw != nil {
 		inLast := make(map[string]bool, len(last.Traces))
 		for _, t := range last.Traces {
@@ -239,9 +259,6 @@ func (b *IngestBatch) apply(tx *sql.Tx) error {
 	// The bodies first: every ref below, the raw batch's included, names
 	// a row that has to exist (spec 041 #2).
 	types := declaredTypes(b.Media)
-	if b.mediaTypes != nil {
-		types = b.mediaTypes
-	}
 	held, err := writeMedia(tx, b.ProjectID, b.Media, types, b.MediaRefs, arrived)
 	if err != nil {
 		return err
@@ -268,8 +285,13 @@ func (b *IngestBatch) apply(tx *sql.Tx) error {
 		if err := writeRawMediaRefs(tx, b.ProjectID, rawID, b.RawMedia, types, held, arrived); err != nil {
 			return err
 		}
-		if err := stampSlicedTraces(tx, b.ProjectID, b.stamped, arrived); err != nil {
-			return err
+		stamped := make([]any, len(b.stamped))
+		for i, id := range b.stamped {
+			stamped[i] = id
+		}
+		if _, err := deleteIn(tx, `UPDATE traces SET updated_at = ? WHERE project_id = ? AND id IN`,
+			[]any{arrived, b.ProjectID}, stamped); err != nil {
+			return fmt.Errorf("stamp the traces of a sliced export: %w", err)
 		}
 	}
 
@@ -400,24 +422,6 @@ func upsertTrace(tx *sql.Tx, projectID string, t *model.Trace, ingestedAt int64,
 		return nil
 	}
 	return indexTraceName(tx, projectID, t.ID, stored.String)
-}
-
-// stampSlicedTraces sets the `updated_at` of the given traces, a statement per
-// batch of them.
-func stampSlicedTraces(tx *sql.Tx, projectID string, traceIDs []string, now int64) error {
-	for start := 0; start < len(traceIDs); start += 500 {
-		batch := traceIDs[start:min(start+500, len(traceIDs))]
-		args := make([]any, 0, len(batch)+2)
-		args = append(args, now, projectID)
-		for _, id := range batch {
-			args = append(args, id)
-		}
-		if _, err := tx.Exec(`UPDATE traces SET updated_at = ? WHERE project_id = ? AND id IN (`+
-			placeholders(len(batch))+`)`, args...); err != nil {
-			return fmt.Errorf("stamp the traces of a sliced export: %w", err)
-		}
-	}
-	return nil
 }
 
 // touchTrace stamps a stored trace's `updated_at` for a slice that carries it
