@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -158,8 +159,8 @@ func (d *ScoreConfigDelete) apply(tx *sql.Tx) error {
 
 // ScoreConfigs lists a project's configs by name, whole: a project declares a
 // handful of names, and a config is read by nobody but its author.
-func (s *Store) ScoreConfigs(projectID string) ([]*ScoreConfig, error) {
-	rows, err := s.db.Query(
+func (s *Store) ScoreConfigs(ctx context.Context, projectID string) ([]*ScoreConfig, error) {
+	rows, err := s.db.QueryContext(ctx,
 		`SELECT `+scoreConfigColumns+` FROM score_configs WHERE project_id = ? ORDER BY name`, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("list score configs: %w", err)
@@ -178,8 +179,8 @@ func (s *Store) ScoreConfigs(projectID string) ([]*ScoreConfig, error) {
 }
 
 // ScoreConfig returns one config, or nil when the name has none.
-func (s *Store) ScoreConfig(projectID, name string) (*ScoreConfig, error) {
-	config, err := scanScoreConfig(s.db.QueryRow(
+func (s *Store) ScoreConfig(ctx context.Context, projectID, name string) (*ScoreConfig, error) {
+	config, err := scanScoreConfig(s.db.QueryRowContext(ctx,
 		`SELECT `+scoreConfigColumns+` FROM score_configs WHERE project_id = ? AND name = ?`,
 		projectID, name))
 	if err == sql.ErrNoRows {

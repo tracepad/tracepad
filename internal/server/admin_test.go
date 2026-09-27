@@ -298,7 +298,7 @@ func TestRevokingAKeyOfAnotherProject(t *testing.T) {
 	rec := h.call(t, "DELETE", "/api/v1/projects/"+h.project.ID+"/keys/tp-pk-other", nil, asAdmin)
 	expectError(t, rec, http.StatusNotFound, "tp-pk-other")
 
-	keys, err := h.store.ProjectKeys(other.ID)
+	keys, err := h.store.ProjectKeys(t.Context(), other.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -694,7 +694,7 @@ func TestPatchRejectsNonsense(t *testing.T) {
 // asserted is exactly that its data is still on disk.
 func (h *harness) countRows(t *testing.T, projectID, table string) int64 {
 	t.Helper()
-	counts, err := h.store.TableCounts(projectID)
+	counts, err := h.store.TableCounts(t.Context(), projectID)
 	if err != nil {
 		t.Fatal(err)
 	}

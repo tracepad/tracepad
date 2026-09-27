@@ -137,7 +137,7 @@ func (a *Aggregator) LastRun() time.Time {
 // broken state must not stop everyone else's statistics.
 func (a *Aggregator) Pass(ctx context.Context) error {
 	start := a.now()
-	projects, err := a.store.ListProjects(false)
+	projects, err := a.store.ListProjects(ctx, false)
 	if err != nil {
 		return fmt.Errorf("rollup: list projects: %w", err)
 	}
@@ -171,7 +171,7 @@ func (a *Aggregator) Pass(ctx context.Context) error {
 // rollProject is one project's pass: correct what changed, roll forward what
 // closed, then move the watermark. It reports how many hours it wrote.
 func (a *Aggregator) rollProject(ctx context.Context, project *Project, at time.Time) (int, error) {
-	state, err := a.store.RollupState(project.ID)
+	state, err := a.store.RollupState(ctx, project.ID)
 	if err != nil {
 		return 0, err
 	}
@@ -200,7 +200,7 @@ func (a *Aggregator) rollProject(ctx context.Context, project *Project, at time.
 	// (1) and (2): the hours that changed under an already-rolled part of
 	// the timeline. A pass that has never run has nothing behind it.
 	if state.RolledUntil > 0 {
-		dirty, err := a.store.dirtyHours(project.ID, state.LastPass, state.RolledUntil)
+		dirty, err := a.store.dirtyHours(ctx, project.ID, state.LastPass, state.RolledUntil)
 		if err != nil {
 			return rolled, err
 		}
@@ -255,7 +255,7 @@ func (a *Aggregator) rollProject(ctx context.Context, project *Project, at time.
 	// trace, which is what makes the first pass the backfill (#5).
 	from := state.RolledUntil
 	if from == 0 {
-		oldest, ok, err := a.store.oldestTraceHour(project.ID)
+		oldest, ok, err := a.store.oldestTraceHour(ctx, project.ID)
 		if err != nil {
 			return rolled, err
 		}
@@ -277,7 +277,7 @@ func (a *Aggregator) rollProject(ctx context.Context, project *Project, at time.
 		from = oldest
 	}
 
-	hours, err := a.store.hoursWithTraces(project.ID, from, closed, maxHoursPerPass)
+	hours, err := a.store.hoursWithTraces(ctx, project.ID, from, closed, maxHoursPerPass)
 	if err != nil {
 		return rolled, err
 	}
@@ -623,8 +623,8 @@ func (a *Aggregator) sweepRollup(ctx context.Context, project *Project, at time.
 // something else dirties it. Recording each trace's rolled hour would close
 // it, at the price of a write per trace on the ingest path for a shape that
 // needs one span id re-sent with a moved start.
-func (s *Store) dirtyHours(projectID string, since, before int64) ([]int64, error) {
-	rows, err := s.db.Query(
+func (s *Store) dirtyHours(ctx context.Context, projectID string, since, before int64) ([]int64, error) {
+	rows, err := s.db.QueryContext(ctx,
 		`SELECT DISTINCT (o.start_time / 1000000000 / ?) * ? AS hour
 		 FROM observations o
 		 JOIN traces t ON t.project_id = o.project_id AND t.id = o.trace_id
@@ -638,7 +638,7 @@ func (s *Store) dirtyHours(projectID string, since, before int64) ([]int64, erro
 	if err != nil {
 		return nil, err
 	}
-	sessions, err := s.dirtySessionHours(projectID, since)
+	sessions, err := s.dirtySessionHours(ctx, projectID, since)
 	if err != nil {
 		return nil, err
 	}
@@ -647,7 +647,7 @@ func (s *Store) dirtyHours(projectID string, since, before int64) ([]int64, erro
 	// yesterday's traffic today writes only `scores`, so neither of the two
 	// questions above hears of it: `updated_at` belongs to the trace, and
 	// the trace did not move.
-	scores, err := s.dirtyScoreHours(projectID, since)
+	scores, err := s.dirtyScoreHours(ctx, projectID, since)
 	if err != nil {
 		return nil, err
 	}
@@ -684,8 +684,8 @@ func (s *Store) dirtyHours(projectID string, since, before int64) ([]int64, erro
 // `sessions_started` in the old hour until that hour is dirtied by something
 // else. The hour it used to be counted in is no longer derivable from anything
 // stored.
-func (s *Store) dirtySessionHours(projectID string, since int64) ([]int64, error) {
-	rows, err := s.db.Query(dirtySessionHoursQuery,
+func (s *Store) dirtySessionHours(ctx context.Context, projectID string, since int64) ([]int64, error) {
+	rows, err := s.db.QueryContext(ctx, dirtySessionHoursQuery,
 		SecondsPerHour, SecondsPerHour, projectID, projectID, since)
 	if err != nil {
 		return nil, fmt.Errorf("find the hours a changed session touched: %w", err)
@@ -738,11 +738,11 @@ const dirtySessionHoursQuery = `SELECT DISTINCT (other.timestamp / 1000000000 / 
 
 // hoursWithTraces lists the hours of a half-open range that hold anything to
 // roll, oldest first, at most limit of them.
-func (s *Store) hoursWithTraces(projectID string, from, to int64, limit int) ([]int64, error) {
+func (s *Store) hoursWithTraces(ctx context.Context, projectID string, from, to int64, limit int) ([]int64, error) {
 	if from >= to {
 		return nil, nil
 	}
-	rows, err := s.db.Query(
+	rows, err := s.db.QueryContext(ctx,
 		// The floor here is not only the range's: a timestamp before the
 		// epoch would be truncated toward zero by this division while
 		// `HourOf` floors, so the two would disagree about which hour a
@@ -762,9 +762,9 @@ func (s *Store) hoursWithTraces(projectID string, from, to int64, limit int) ([]
 }
 
 // oldestTraceHour is where a backfill starts.
-func (s *Store) oldestTraceHour(projectID string) (int64, bool, error) {
+func (s *Store) oldestTraceHour(ctx context.Context, projectID string) (int64, bool, error) {
 	var oldest sql.NullInt64
-	if err := s.db.QueryRow(
+	if err := s.db.QueryRowContext(ctx,
 		`SELECT MIN(timestamp) FROM traces WHERE project_id = ?`, projectID).
 		Scan(&oldest); err != nil {
 		return 0, false, fmt.Errorf("find the oldest trace: %w", err)

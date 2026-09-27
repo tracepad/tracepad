@@ -50,7 +50,7 @@ func TestSweepSparesLiveRunTraces(t *testing.T) {
 	if got := f.count(t, `SELECT COUNT(*) FROM traces WHERE id = ?`, hexTrace(3)); got != 0 {
 		t.Errorf("an ordinary expired trace survived")
 	}
-	if pinned, _ := f.store.PinnedTraces(f.project.ID); pinned != 1 {
+	if pinned, _ := f.store.PinnedTraces(t.Context(), f.project.ID); pinned != 1 {
 		t.Errorf("pinned = %d, want the one trace the run holds", pinned)
 	}
 
@@ -119,7 +119,7 @@ func TestRetentionPreviewExcludesPinnedTraces(t *testing.T) {
 	f.arrive(t, f.project.ID, hexTrace(1), daysAgo(40), func(tr *modelTrace) { tr.RunID = live })
 	f.arrive(t, f.project.ID, hexTrace(2), daysAgo(40))
 
-	counts, err := f.store.RetentionPreview(f.project.ID, days(30), nil, nil, sweepNow.UnixNano())
+	counts, err := f.store.RetentionPreview(t.Context(), f.project.ID, days(30), nil, nil, sweepNow.UnixNano())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +140,7 @@ func TestUserErasureOverridesThePin(t *testing.T) {
 	f.arrive(t, f.project.ID, hexTrace(1), daysAgo(1), func(tr *modelTrace) { tr.RunID = live; tr.ItemID = itemID(1) })
 	f.arrive(t, f.project.ID, hexTrace(2), daysAgo(1), func(tr *modelTrace) { tr.RunID = live; tr.UserID = "someone-else" })
 
-	counts, runs, err := f.store.UserDataPreview(f.project.ID, "u1")
+	counts, runs, err := f.store.UserDataPreview(t.Context(), f.project.ID, "u1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +162,7 @@ func TestUserErasureOverridesThePin(t *testing.T) {
 		t.Errorf("the pin outranked the erasure")
 	}
 	// The run itself stands; it has one trace fewer.
-	if pinned, _ := f.store.PinnedTraces(f.project.ID); pinned != 1 {
+	if pinned, _ := f.store.PinnedTraces(t.Context(), f.project.ID); pinned != 1 {
 		t.Errorf("pinned = %d after the erasure, want the other user's trace still held", pinned)
 	}
 }
@@ -267,7 +267,7 @@ func TestIngestRecordsTheLinkAndTheOrphan(t *testing.T) {
 	if len(orphan.UnknownRuns) != 1 || orphan.UnknownRuns[0] != unknown {
 		t.Errorf("unknown runs = %v, want the one id nobody created", orphan.UnknownRuns)
 	}
-	row, err := f.store.Trace(f.project.ID, hexTrace(1))
+	row, err := f.store.Trace(t.Context(), f.project.ID, hexTrace(1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -293,7 +293,7 @@ func TestIngestRecordsTheLinkAndTheOrphan(t *testing.T) {
 	if err := f.writer.Submit(t.Context(), link(hexTrace(1), live, itemID(1))); err != nil {
 		t.Fatal(err)
 	}
-	row, _ = f.store.Trace(f.project.ID, hexTrace(1))
+	row, _ = f.store.Trace(t.Context(), f.project.ID, hexTrace(1))
 	if row.RunID != live {
 		t.Errorf("run_id = %q after re-delivery, want the trace moved to %q", row.RunID, live)
 	}
@@ -301,7 +301,7 @@ func TestIngestRecordsTheLinkAndTheOrphan(t *testing.T) {
 	if err := f.writer.Submit(t.Context(), link(hexTrace(1), "", "")); err != nil {
 		t.Fatal(err)
 	}
-	row, _ = f.store.Trace(f.project.ID, hexTrace(1))
+	row, _ = f.store.Trace(t.Context(), f.project.ID, hexTrace(1))
 	if row.RunID != live || row.ItemID != itemID(1) {
 		t.Errorf("a silent delivery cleared the link: run %q item %q", row.RunID, row.ItemID)
 	}
@@ -313,7 +313,7 @@ func TestIngestRecordsTheLinkAndTheOrphan(t *testing.T) {
 	if err := f.writer.Submit(t.Context(), link(hexTrace(1), unknown, "")); err != nil {
 		t.Fatal(err)
 	}
-	row, _ = f.store.Trace(f.project.ID, hexTrace(1))
+	row, _ = f.store.Trace(t.Context(), f.project.ID, hexTrace(1))
 	if row.RunID != unknown || row.ItemID != "" {
 		t.Errorf("moved trace = run %q item %q, want the item to move with the run", row.RunID, row.ItemID)
 	}
@@ -324,7 +324,7 @@ func TestIngestRecordsTheLinkAndTheOrphan(t *testing.T) {
 	if err := f.writer.Submit(t.Context(), link(hexTrace(2), live, "")); err != nil {
 		t.Fatal(err)
 	}
-	row, _ = f.store.Trace(f.project.ID, hexTrace(2))
+	row, _ = f.store.Trace(t.Context(), f.project.ID, hexTrace(2))
 	if row.RunID != live || row.ItemID != itemID(1) {
 		t.Errorf("same-run re-delivery = run %q item %q, want the item kept", row.RunID, row.ItemID)
 	}

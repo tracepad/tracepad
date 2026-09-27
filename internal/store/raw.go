@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"slices"
@@ -109,9 +110,9 @@ func rawQuery(projectID string, filter RawFilter) (string, []any) {
 }
 
 // RawBatches lists a project's raw batches, oldest first.
-func (s *Store) RawBatches(projectID string, filter RawFilter) ([]*RawBatchRow, error) {
+func (s *Store) RawBatches(ctx context.Context, projectID string, filter RawFilter) ([]*RawBatchRow, error) {
 	query, args := rawQuery(projectID, filter)
-	rows, err := s.db.Query(query, args...)
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list raw batches: %w", err)
 	}
@@ -147,7 +148,7 @@ func (s *Store) RawBatches(projectID string, filter RawFilter) ([]*RawBatchRow, 
 	// is a second read of the rows that cost the least to decompress, and
 	// never of the ones that would have cost the most.
 	for _, row := range unsized {
-		size, err := s.rawBodySize(projectID, row.ID)
+		size, err := s.rawBodySize(ctx, projectID, row.ID)
 		if err != nil {
 			return nil, err
 		}
@@ -163,11 +164,11 @@ func (s *Store) RawBatches(projectID string, filter RawFilter) ([]*RawBatchRow, 
 
 // CountRawBatches answers "how many match", stopping at `cap`, the way every
 // other listing's count does (spec 009 #4).
-func (s *Store) CountRawBatches(projectID string, filter RawFilter, cap int) (int, error) {
+func (s *Store) CountRawBatches(ctx context.Context, projectID string, filter RawFilter, cap int) (int, error) {
 	where, args := rawConditions(projectID, filter)
 	args = append(args, cap)
 	var count int
-	if err := s.db.QueryRow(
+	if err := s.db.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM (SELECT 1 FROM raw_batches WHERE `+
 			strings.Join(where, " AND ")+` LIMIT ?)`, args...).Scan(&count); err != nil {
 		return 0, fmt.Errorf("count raw batches: %w", err)
@@ -189,13 +190,13 @@ type RawBody struct {
 // RawBatchBody reads one batch. It returns nil when the id belongs to another
 // project or the sweeper has already taken it — the same answer either way,
 // because a batch that is not this project's does not exist to it.
-func (s *Store) RawBatchBody(projectID string, id int64) (*RawBody, error) {
+func (s *Store) RawBatchBody(ctx context.Context, projectID string, id int64) (*RawBody, error) {
 	var (
 		out                  RawBody
 		dialect, contentType sql.NullString
 		stored               []byte
 	)
-	err := s.db.QueryRow(
+	err := s.db.QueryRowContext(ctx,
 		`SELECT id, received_at, dialect, content_type, body
 		   FROM raw_batches WHERE project_id = ? AND id = ?`, projectID, id).
 		Scan(&out.ID, &out.ReceivedAt, &dialect, &contentType, &stored)
@@ -237,14 +238,14 @@ type RawSummary struct {
 }
 
 // RawSummary reads the archive's counters for one project.
-func (s *Store) RawSummary(projectID string) (RawSummary, error) {
+func (s *Store) RawSummary(ctx context.Context, projectID string) (RawSummary, error) {
 	var (
 		out             RawSummary
 		bytes           sql.NullInt64
 		oldest, newest  sql.NullInt64
 		beforeThreshold any
 	)
-	if err := s.db.QueryRow(
+	if err := s.db.QueryRowContext(ctx,
 		`SELECT COUNT(*), SUM(length(body)), MIN(received_at), MAX(received_at)
 		   FROM raw_batches WHERE project_id = ?`, projectID).
 		Scan(&out.Batches, &bytes, &oldest, &newest); err != nil {
@@ -264,7 +265,7 @@ func (s *Store) RawSummary(projectID string) (RawSummary, error) {
 		// No archive at all: every trace is before the window, which is
 		// exactly what a project with raw storage off has to be told
 		// (spec 019, edge cases).
-		if err := s.db.QueryRow(
+		if err := s.db.QueryRowContext(ctx,
 			`SELECT COUNT(*) FROM traces WHERE project_id = ?`, projectID).
 			Scan(&out.TracesBeforeWindow); err != nil {
 			return out, fmt.Errorf("count traces before the raw window: %w", err)
@@ -273,7 +274,7 @@ func (s *Store) RawSummary(projectID string) (RawSummary, error) {
 	}
 	// `timestamp` is the trace's earliest span start, which is the start
 	// time Decision 1 compares against the batch line.
-	if err := s.db.QueryRow(
+	if err := s.db.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM traces WHERE project_id = ? AND timestamp < ?`,
 		projectID, beforeThreshold).Scan(&out.TracesBeforeWindow); err != nil {
 		return out, fmt.Errorf("count traces before the raw window: %w", err)
@@ -316,9 +317,9 @@ func decodedSize(prefix []byte) (int64, bool) {
 
 // rawBodySize decompresses one body to measure it, for the frames whose header
 // did not say.
-func (s *Store) rawBodySize(projectID string, id int64) (int64, error) {
+func (s *Store) rawBodySize(ctx context.Context, projectID string, id int64) (int64, error) {
 	var stored []byte
-	err := s.db.QueryRow(
+	err := s.db.QueryRowContext(ctx,
 		`SELECT body FROM raw_batches WHERE project_id = ? AND id = ?`, projectID, id).Scan(&stored)
 	if err == sql.ErrNoRows {
 		// Swept between the page and this read: a size of zero is wrong

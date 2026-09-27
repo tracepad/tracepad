@@ -85,7 +85,7 @@ func advance(t *testing.T, s *Store, projectID string, hour int64) {
 func rolledRows(t *testing.T, s *Store, projectID string, hour int64) map[string]StatsRow {
 	t.Helper()
 	rows := map[string]StatsRow{}
-	err := s.StatsRollupRows(projectID, hour, hour+SecondsPerHour, nil, func(row StatsRow) {
+	err := s.StatsRollupRows(t.Context(), projectID, hour, hour+SecondsPerHour, nil, func(row StatsRow) {
 		rows[row.Environment+"|"+row.Release+"|"+row.Model] = row
 	})
 	if err != nil {
@@ -114,7 +114,7 @@ func TestRolledHourEqualsTheLiveScan(t *testing.T) {
 	} {
 		t.Run(tc.groupBy, func(t *testing.T) {
 			live := map[string]*StatsRow{}
-			err := s.StatsSamples(project.ID, StatsFilter{
+			err := s.StatsSamples(t.Context(), project.ID, StatsFilter{
 				From: &from, To: &to, GroupBy: tc.groupBy,
 			}, func(sample StatsSample) {
 				row := live[sample.Key]
@@ -318,14 +318,14 @@ func TestTheWatermarkNeverRegresses(t *testing.T) {
 		}
 	}
 
-	if state, err := s.RollupState(project.ID); err != nil || state.RolledUntil != 0 {
+	if state, err := s.RollupState(t.Context(), project.ID); err != nil || state.RolledUntil != 0 {
 		t.Fatalf("a project nobody rolled reports %+v, %v — want a zero state", state, err)
 	}
 
 	advance(rollupHour, 100)
 	advance(rollupHour-SecondsPerHour, 200)
 
-	state, err := s.RollupState(project.ID)
+	state, err := s.RollupState(t.Context(), project.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

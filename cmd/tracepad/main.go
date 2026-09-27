@@ -139,6 +139,8 @@ Server environment:
   TRACEPAD_STORE_RAW              keep raw OTLP bodies for remap/export (default on)
   TRACEPAD_MAX_BODY_BYTES         request body cap in bytes             (default 20971520)
   TRACEPAD_RESPONSE_BUDGET_BYTES  default read response budget          (default 51200)
+  TRACEPAD_READ_TIMEOUT           deadline of one read request          (default 20s)
+  TRACEPAD_READ_CONCURRENCY       reads served at once                  (default 2 per CPU, at least 4)
   TRACEPAD_MCP                    serve MCP at /mcp                     (default on)
   TRACEPAD_SWEEP_INTERVAL         retention sweep cadence               (default 1h)
   TRACEPAD_ROLLUP_INTERVAL        statistics rollup cadence             (default 5m)
@@ -162,6 +164,7 @@ func serve(args []string) error {
 		return err
 	}
 	defer st.Close()
+	st.BoundPool(cfg.ReadConcurrency)
 
 	specs, err := provisionSpecs(cfg)
 	if err != nil {

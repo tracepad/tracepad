@@ -69,7 +69,7 @@ func TestWriterGroupCommit(t *testing.T) {
 		}
 	}
 
-	trace, err := s.Trace(p.ID, "aa11bb22cc33dd44ee55ff6677889900")
+	trace, err := s.Trace(t.Context(), p.ID, "aa11bb22cc33dd44ee55ff6677889900")
 	if err != nil || trace == nil {
 		t.Fatalf("trace = %v, err = %v", trace, err)
 	}
@@ -182,7 +182,7 @@ func TestWriterIsolatesAFailingBatch(t *testing.T) {
 	if goodErr != nil {
 		t.Errorf("a valid batch sharing the window failed too: %v", goodErr)
 	}
-	observations, err := s.Observations(p.ID, "aa11bb22cc33dd44ee55ff6677889900", WithIO)
+	observations, err := s.Observations(t.Context(), p.ID, "aa11bb22cc33dd44ee55ff6677889900", WithIO)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,7 +228,7 @@ func TestWriterAcknowledgesScoresAfterCommit(t *testing.T) {
 	// Parked at the start of the commit, so the transaction has not run:
 	// an ack now would be a promise the disk has not kept.
 	<-parked
-	score, err := s.Score(p.ID, id)
+	score, err := s.Score(t.Context(), p.ID, id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -240,7 +240,7 @@ func TestWriterAcknowledgesScoresAfterCommit(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatalf("submit: %v", err)
 	}
-	if score, err = s.Score(p.ID, id); err != nil || score == nil {
+	if score, err = s.Score(t.Context(), p.ID, id); err != nil || score == nil {
 		t.Fatalf("score after the ack = %v, err = %v", score, err)
 	}
 }
@@ -283,10 +283,10 @@ func TestWriterCommitsUnlikeJobsTogether(t *testing.T) {
 		}
 	}
 
-	if trace, err := s.Trace(p.ID, traceID); err != nil || trace == nil {
+	if trace, err := s.Trace(t.Context(), p.ID, traceID); err != nil || trace == nil {
 		t.Fatalf("trace = %v, err = %v", trace, err)
 	}
-	if score, err := s.Score(p.ID, "aaaabbbbccccddddeeeeffff00001111"); err != nil || score == nil {
+	if score, err := s.Score(t.Context(), p.ID, "aaaabbbbccccddddeeeeffff00001111"); err != nil || score == nil {
 		t.Fatalf("score = %v, err = %v", score, err)
 	}
 	if prompt.Version != 1 {

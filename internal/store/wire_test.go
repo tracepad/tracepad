@@ -55,7 +55,7 @@ func TestTraceTTFTAggregate(t *testing.T) {
 			}),
 		)
 
-		trace, err := s.Trace(project.ID, id)
+		trace, err := s.Trace(t.Context(), project.ID, id)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -70,7 +70,7 @@ func TestTraceTTFTAggregate(t *testing.T) {
 		seedTrace(t, s, project.ID, wireTrace(id),
 			wireObservation(id, hexSpan(3), model.TypeSpan))
 
-		trace, err := s.Trace(project.ID, id)
+		trace, err := s.Trace(t.Context(), project.ID, id)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -94,7 +94,7 @@ func TestTraceTTFTAggregate(t *testing.T) {
 				o.CompletionStartTime = day + 250_000_000
 			}))
 
-		trace, err := s.Trace(project.ID, id)
+		trace, err := s.Trace(t.Context(), project.ID, id)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -115,7 +115,7 @@ func TestTraceTTFTAggregate(t *testing.T) {
 				o.CompletionStartTime = o.StartTime - 200_000_000
 			}))
 
-		trace, err := s.Trace(project.ID, id)
+		trace, err := s.Trace(t.Context(), project.ID, id)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -138,7 +138,7 @@ func TestTraceTTFTAggregate(t *testing.T) {
 				o.CompletionStartTime = day + 300_000_000
 			}))
 
-		trace, err := s.Trace(project.ID, id)
+		trace, err := s.Trace(t.Context(), project.ID, id)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -164,7 +164,7 @@ func TestObservationWireFields(t *testing.T) {
 		}),
 		wireObservation(id, hexSpan(11), model.TypeTool))
 
-	observations, err := s.Observations(project.ID, id, SkipIO)
+	observations, err := s.Observations(t.Context(), project.ID, id, SkipIO)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +207,7 @@ func TestObservationSizesReachTheSingleRead(t *testing.T) {
 			o.Input = "hello"
 		}))
 
-	observation, err := s.Observation(project.ID, id, hexSpan(12))
+	observation, err := s.Observation(t.Context(), project.ID, id, hexSpan(12))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -280,7 +280,7 @@ func TestWireFilters(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			filter := c.filter
 			filter.Limit = 50
-			rows, err := s.Traces(project.ID, filter)
+			rows, err := s.Traces(t.Context(), project.ID, filter)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -294,7 +294,7 @@ func TestWireFilters(t *testing.T) {
 
 			// The count answers over the same conditions, which is
 			// the half of the pair spec 009 #4 caps.
-			count, err := s.CountTraces(project.ID, filter, 1000)
+			count, err := s.CountTraces(t.Context(), project.ID, filter, 1000)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -314,7 +314,7 @@ func TestWireFilters(t *testing.T) {
 				o.StartTime, o.EndTime = 4*day, 4*day+1
 			}))
 
-		rows, err := s.Traces(project.ID, TraceFilter{Type: model.TypeGeneration, Limit: 50})
+		rows, err := s.Traces(t.Context(), project.ID, TraceFilter{Type: model.TypeGeneration, Limit: 50})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -323,7 +323,7 @@ func TestWireFilters(t *testing.T) {
 				t.Error("type=generation matched a trace whose only model call is an embedding")
 			}
 		}
-		rows, err = s.Traces(project.ID, TraceFilter{Type: model.TypeEmbedding, Limit: 50})
+		rows, err = s.Traces(t.Context(), project.ID, TraceFilter{Type: model.TypeEmbedding, Limit: 50})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -451,7 +451,7 @@ func TestEmbeddingCountsAsAModelCall(t *testing.T) {
 		}),
 	)
 
-	trace, err := s.Trace(project.ID, id)
+	trace, err := s.Trace(t.Context(), project.ID, id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -460,7 +460,7 @@ func TestEmbeddingCountsAsAModelCall(t *testing.T) {
 	}
 
 	models := map[string]bool{}
-	err = s.StatsSamples(project.ID, StatsFilter{GroupBy: GroupByModel}, func(sample StatsSample) {
+	err = s.StatsSamples(t.Context(), project.ID, StatsFilter{GroupBy: GroupByModel}, func(sample StatsSample) {
 		models[sample.Key] = true
 	})
 	if err != nil {
@@ -483,7 +483,7 @@ func TestStatsGroupByRelease(t *testing.T) {
 		wireObservation(hexTrace(61), hexSpan(61), model.TypeSpan))
 
 	buckets := map[string]int{}
-	if err := s.StatsSamples(project.ID, StatsFilter{GroupBy: GroupByRelease},
+	if err := s.StatsSamples(t.Context(), project.ID, StatsFilter{GroupBy: GroupByRelease},
 		func(sample StatsSample) { buckets[sample.Key]++ }); err != nil {
 		t.Fatal(err)
 	}
@@ -686,7 +686,7 @@ func TestMigration0008UpgradesAPopulated0006Database(t *testing.T) {
 
 	// The old rows keep the types they were collapsed to, and answer the
 	// new fields as NULL.
-	observations, err := s.Observations("p1", "old", SkipIO)
+	observations, err := s.Observations(t.Context(), "p1", "old", SkipIO)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -699,7 +699,7 @@ func TestMigration0008UpgradesAPopulated0006Database(t *testing.T) {
 			t.Errorf("%s answered a new field on an old row: %+v", observation.ID, observation)
 		}
 	}
-	trace, err := s.Trace("p1", "old")
+	trace, err := s.Trace(t.Context(), "p1", "old")
 	if err != nil {
 		t.Fatal(err)
 	}

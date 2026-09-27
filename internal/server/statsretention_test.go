@@ -106,7 +106,7 @@ func TestAShortStatsWindowFallsBackToTheLiveScan(t *testing.T) {
 	expectStatus(t, rec, 200)
 	h.rollTheCorpus(t, time.Now())
 
-	if hours, err := h.store.StatsRollupHours(h.project.ID); err != nil {
+	if hours, err := h.store.StatsRollupHours(t.Context(), h.project.ID); err != nil {
 		t.Fatal(err)
 	} else if len(hours) != 0 {
 		t.Fatalf("rolled hours = %v, want the window to have swept them", hours)
@@ -167,7 +167,7 @@ func TestWideningTheStatsWindowDoesNotLeaveAHole(t *testing.T) {
 		map[string]any{"stats_retention_days": 1})
 	expectStatus(t, rec, 200)
 	h.rollTheCorpus(t, time.Now())
-	if hours, err := h.store.StatsRollupHours(h.project.ID); err != nil {
+	if hours, err := h.store.StatsRollupHours(t.Context(), h.project.ID); err != nil {
 		t.Fatal(err)
 	} else if len(hours) != 0 {
 		t.Fatalf("rolled hours = %v, want the window to have swept them", hours)
@@ -365,7 +365,7 @@ func TestPurgingAProjectTakesItsRollup(t *testing.T) {
 	h.seedHour(t, statsHour, 1, 2, "production")
 	h.rollTheCorpus(t, time.Unix(statsHour+3*3600, 0))
 
-	hours, err := h.store.StatsRollupHours(h.project.ID)
+	hours, err := h.store.StatsRollupHours(t.Context(), h.project.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -387,7 +387,7 @@ func TestPurgingAProjectTakesItsRollup(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	hours, err = h.store.StatsRollupHours(h.project.ID)
+	hours, err = h.store.StatsRollupHours(t.Context(), h.project.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

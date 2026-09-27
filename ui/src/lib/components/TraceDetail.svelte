@@ -1,4 +1,5 @@
 <script lang="ts">
+	import ListX from '@lucide/svelte/icons/list-x';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import { untrack } from 'svelte';
@@ -6,6 +7,7 @@
 	import { page } from '$app/state';
 	import { ApiError, api, type Observation, type Trace } from '$lib/api/client.svelte';
 	import { ABSENT } from '$lib/format';
+	import { omittedNotice } from '$lib/observations';
 	import { observationIDs, splitScores } from '$lib/scores';
 	import { Scores } from '$lib/scores.svelte';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
@@ -122,6 +124,11 @@
 	// observation at a time.
 	const refused = $derived(trace?.expansion?.expanded === false);
 
+	// A trace too large for one tree is answered with its first observations
+	// and a count of the rest (spec 043 #18); the tree says so above itself,
+	// so a reader does not take the part for the whole.
+	const omitted = $derived(omittedNotice(trace));
+
 	// What the exporter said about the run as a whole, as opposed to about any
 	// one span. It belongs under the tree because that is the pane that is
 	// about the trace; the pane beside it is about one observation.
@@ -220,6 +227,15 @@
 				pane === 'tree' ? 'flex flex-1' : 'hidden'
 			]}
 		>
+			{#if omitted}
+				<p
+					role="note"
+					class="text-muted bg-raised border-border flex shrink-0 items-start gap-2 border-b px-3 py-2"
+				>
+					<ListX class="mt-0.5 size-4 shrink-0" />
+					{omitted}
+				</p>
+			{/if}
 			<TraceTree
 				observations={roots}
 				selectedID={selected?.id ?? null}

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"slices"
@@ -109,39 +110,39 @@ const itemAtRunVersion = `EXISTS (SELECT 1 FROM dataset_items i
 // rather than kept on the run row: a run's traces go on arriving after it is
 // finished (a late span is still its span), and a stored summary would be
 // wrong in exactly the window somebody is watching.
-func (s *Store) RunSummary(projectID string, run *DatasetRun) (*RunSummary, error) {
+func (s *Store) RunSummary(ctx context.Context, projectID string, run *DatasetRun) (*RunSummary, error) {
 	summary := &RunSummary{}
 	var err error
-	if summary.Items, err = s.runItemCounts(projectID, run); err != nil {
+	if summary.Items, err = s.runItemCounts(ctx, projectID, run); err != nil {
 		return nil, err
 	}
-	if summary.Traces, err = s.runTraceStats(projectID, run.ID); err != nil {
+	if summary.Traces, err = s.runTraceStats(ctx, projectID, run.ID); err != nil {
 		return nil, err
 	}
-	if summary.Scores, err = s.runScoreStats(projectID, run.ID); err != nil {
+	if summary.Scores, err = s.runScoreStats(ctx, projectID, run.ID); err != nil {
 		return nil, err
 	}
-	if summary.Models, summary.Prompts, err = s.runModelsAndPrompts(projectID, run.ID); err != nil {
+	if summary.Models, summary.Prompts, err = s.runModelsAndPrompts(ctx, projectID, run.ID); err != nil {
 		return nil, err
 	}
 	return summary, nil
 }
 
-func (s *Store) runItemCounts(projectID string, run *DatasetRun) (RunItemCounts, error) {
+func (s *Store) runItemCounts(ctx context.Context, projectID string, run *DatasetRun) (RunItemCounts, error) {
 	var counts RunItemCounts
-	if err := s.db.QueryRow(
+	if err := s.db.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM dataset_items i
 		 WHERE i.project_id = ? AND i.dataset = ? AND i.archived = 0 AND `+itemsAtVersion,
 		projectID, run.Dataset, run.DatasetVersion).Scan(&counts.Total); err != nil {
 		return counts, fmt.Errorf("count items of run %s: %w", run.ID, err)
 	}
-	if err := s.db.QueryRow(
+	if err := s.db.QueryRowContext(ctx,
 		`SELECT COUNT(DISTINCT t.item_id) FROM traces t
 		 WHERE `+runTraces+` AND t.item_id IS NOT NULL AND `+itemAtRunVersion,
 		projectID, run.ID, run.Dataset, run.DatasetVersion).Scan(&counts.Covered); err != nil {
 		return counts, fmt.Errorf("count covered items of run %s: %w", run.ID, err)
 	}
-	if err := s.db.QueryRow(
+	if err := s.db.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM traces t
 		 WHERE `+runTraces+` AND (t.item_id IS NULL OR NOT `+itemAtRunVersion+`)`,
 		projectID, run.ID, run.Dataset, run.DatasetVersion).Scan(&counts.Unknown); err != nil {
@@ -151,12 +152,12 @@ func (s *Store) runItemCounts(projectID string, run *DatasetRun) (RunItemCounts,
 	return counts, nil
 }
 
-func (s *Store) runTraceStats(projectID, runID string) (RunTraceStats, error) {
+func (s *Store) runTraceStats(ctx context.Context, projectID, runID string) (RunTraceStats, error) {
 	var (
 		stats RunTraceStats
 		cost  sql.NullFloat64
 	)
-	if err := s.db.QueryRow(
+	if err := s.db.QueryRowContext(ctx,
 		`SELECT COUNT(*), COALESCE(SUM(t.error_count > 0), 0), SUM(t.total_cost)
 		 FROM traces t WHERE `+runTraces,
 		projectID, runID).Scan(&stats.Count, &stats.ErrorCount, &cost); err != nil {
@@ -165,7 +166,7 @@ func (s *Store) runTraceStats(projectID, runID string) (RunTraceStats, error) {
 	if cost.Valid {
 		stats.TotalCost = &cost.Float64
 	}
-	if err := s.db.QueryRow(
+	if err := s.db.QueryRowContext(ctx,
 		`SELECT COALESCE(MAX(attempts), 0) FROM
 		   (SELECT COUNT(*) AS attempts FROM traces t
 		    WHERE `+runTraces+` AND t.item_id IS NOT NULL GROUP BY t.item_id)`,
@@ -175,7 +176,7 @@ func (s *Store) runTraceStats(projectID, runID string) (RunTraceStats, error) {
 
 	// Exact percentiles need the values, and a run's worth of them is a
 	// page of integers. The sort is SQLite's, on the same index scan.
-	rows, err := s.db.Query(
+	rows, err := s.db.QueryContext(ctx,
 		`SELECT t.latency_ms FROM traces t
 		 WHERE `+runTraces+` AND t.latency_ms IS NOT NULL ORDER BY t.latency_ms`,
 		projectID, runID)
@@ -217,8 +218,8 @@ func exactPercentile(sorted []int64, p int) *int64 {
 // grouped by name and data type: a name that carried two types in one run —
 // which #15 allows, since a config is a rule for what comes next — is
 // reported under the type most of its scores used (Decision 30).
-func (s *Store) runScoreStats(projectID, runID string) ([]RunScoreStat, error) {
-	rows, err := s.db.Query(
+func (s *Store) runScoreStats(ctx context.Context, projectID, runID string) ([]RunScoreStat, error) {
+	rows, err := s.db.QueryContext(ctx,
 		`SELECT s.name, s.data_type, COUNT(*), AVG(s.value), MIN(s.value), MAX(s.value)
 		 FROM scores s JOIN traces t ON t.project_id = s.project_id AND t.id = s.trace_id
 		 WHERE `+runTraces+`
@@ -263,7 +264,7 @@ func (s *Store) runScoreStats(projectID, runID string) ([]RunScoreStat, error) {
 				stat.Mean, stat.Min, stat.Max = &mean.Float64, &low.Float64, &high.Float64
 			}
 		case ScoreCategorical:
-			distribution, err := s.scoreDistribution(projectID, runID, name)
+			distribution, err := s.scoreDistribution(ctx, projectID, runID, name)
 			if err != nil {
 				return nil, err
 			}
@@ -273,15 +274,15 @@ func (s *Store) runScoreStats(projectID, runID string) ([]RunScoreStat, error) {
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	if err := s.attachScoreConfigs(projectID, stats); err != nil {
+	if err := s.attachScoreConfigs(ctx, projectID, stats); err != nil {
 		return nil, err
 	}
 	return stats, nil
 }
 
 // scoreDistribution counts one categorical name's values over a run.
-func (s *Store) scoreDistribution(projectID, runID, name string) (map[string]int64, error) {
-	rows, err := s.db.Query(
+func (s *Store) scoreDistribution(ctx context.Context, projectID, runID, name string) (map[string]int64, error) {
+	rows, err := s.db.QueryContext(ctx,
 		`SELECT s.string_value, COUNT(*)
 		 FROM scores s JOIN traces t ON t.project_id = s.project_id AND t.id = s.trace_id
 		 WHERE `+runTraces+` AND s.name = ? AND s.data_type = ? AND s.string_value IS NOT NULL
@@ -322,11 +323,11 @@ func (s *Store) scoreDistribution(projectID, runID, name string) (map[string]int
 // For the same reason a direction only rides a type that has an axis: #16
 // forbids one on `categorical` and `text`, and a config that disagrees with
 // the stored scores must not smuggle one in through the back door.
-func (s *Store) attachScoreConfigs(projectID string, stats []RunScoreStat) error {
+func (s *Store) attachScoreConfigs(ctx context.Context, projectID string, stats []RunScoreStat) error {
 	if len(stats) == 0 {
 		return nil
 	}
-	configs, err := s.ScoreConfigs(projectID)
+	configs, err := s.ScoreConfigs(ctx, projectID)
 	if err != nil {
 		return err
 	}
@@ -348,8 +349,8 @@ func (s *Store) attachScoreConfigs(projectID string, stats []RunScoreStat) error
 
 // runModelsAndPrompts reads what the run actually ran, from its observations
 // rather than from what the harness declared (Decision 12).
-func (s *Store) runModelsAndPrompts(projectID, runID string) ([]string, []PromptRef, error) {
-	rows, err := s.db.Query(
+func (s *Store) runModelsAndPrompts(ctx context.Context, projectID, runID string) ([]string, []PromptRef, error) {
+	rows, err := s.db.QueryContext(ctx,
 		`SELECT DISTINCT o.model FROM observations o
 		 JOIN traces t ON t.project_id = o.project_id AND t.id = o.trace_id
 		 WHERE `+runTraces+` AND o.model IS NOT NULL AND o.model <> ''
@@ -370,7 +371,7 @@ func (s *Store) runModelsAndPrompts(projectID, runID string) ([]string, []Prompt
 		return nil, nil, err
 	}
 
-	promptRows, err := s.db.Query(
+	promptRows, err := s.db.QueryContext(ctx,
 		`SELECT DISTINCT o.prompt_name, o.prompt_version FROM observations o
 		 JOIN traces t ON t.project_id = o.project_id AND t.id = o.trace_id
 		 WHERE `+runTraces+` AND o.prompt_name IS NOT NULL AND o.prompt_name <> ''
@@ -456,15 +457,15 @@ const (
 // RunItems lists the items of the run's dataset version with the attempts the
 // run made at each, in `seq` order, and — with IncludeUnknown — the traces no
 // item of that version accounts for, after them.
-func (s *Store) RunItems(projectID string, run *DatasetRun, filter RunItemFilter) ([]*RunItem, error) {
-	items, err := s.runItemRows(projectID, run, filter)
+func (s *Store) RunItems(ctx context.Context, projectID string, run *DatasetRun, filter RunItemFilter) ([]*RunItem, error) {
+	items, err := s.runItemRows(ctx, projectID, run, filter)
 	if err != nil {
 		return nil, err
 	}
 	if len(items) == 0 {
 		return items, nil
 	}
-	if err := s.attachAttempts(projectID, run.ID, items); err != nil {
+	if err := s.attachAttempts(ctx, projectID, run.ID, items); err != nil {
 		return nil, err
 	}
 	return items, nil
@@ -474,7 +475,7 @@ func (s *Store) RunItems(projectID string, run *DatasetRun, filter RunItemFilter
 // page from the known items and tops it up with unknown ones; backward, it
 // does the same from the other end, so a `prev` page is the mirror of the
 // `next` that produced it.
-func (s *Store) runItemRows(projectID string, run *DatasetRun, filter RunItemFilter) ([]*RunItem, error) {
+func (s *Store) runItemRows(ctx context.Context, projectID string, run *DatasetRun, filter RunItemFilter) ([]*RunItem, error) {
 	first, second := knownItems, unknownItems
 	if filter.Backward {
 		first, second = unknownItems, knownItems
@@ -500,7 +501,7 @@ func (s *Store) runItemRows(projectID string, run *DatasetRun, filter RunItemFil
 				continue
 			}
 		}
-		page, err := s.runItemBucket(projectID, run, bucket, after, filter.Limit-taken, filter.Backward)
+		page, err := s.runItemBucket(ctx, projectID, run, bucket, after, filter.Limit-taken, filter.Backward)
 		if err != nil {
 			return nil, err
 		}
@@ -523,7 +524,7 @@ func (s *Store) runItemRows(projectID string, run *DatasetRun, filter RunItemFil
 // runItemBucket reads one bucket's rows: the dataset's items at the run's
 // version, or the item ids the run's traces named that the version does not
 // have.
-func (s *Store) runItemBucket(projectID string, run *DatasetRun, bucket int,
+func (s *Store) runItemBucket(ctx context.Context, projectID string, run *DatasetRun, bucket int,
 	after *string, limit int, backward bool) ([]*RunItem, error) {
 	comparison, order := ">", "ASC"
 	if backward {
@@ -557,7 +558,7 @@ func (s *Store) runItemBucket(projectID string, run *DatasetRun, bucket int,
 	}
 	args = append(args, limit)
 
-	rows, err := s.db.Query(query, args...)
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list items of run %s: %w", run.ID, err)
 	}
@@ -601,7 +602,7 @@ func RunItemKey(item *RunItem) RunItemCursor {
 // attachAttempts fills a page of items with the run's traces for them: one
 // query for the traces, one for their root observations' outputs and one for
 // their scores, rather than three per row.
-func (s *Store) attachAttempts(projectID, runID string, items []*RunItem) error {
+func (s *Store) attachAttempts(ctx context.Context, projectID, runID string, items []*RunItem) error {
 	byItem := map[string]*RunItem{}
 	ids := make([]any, 0, len(items))
 	for _, item := range items {
@@ -611,7 +612,7 @@ func (s *Store) attachAttempts(projectID, runID string, items []*RunItem) error 
 	placeholders := strings.TrimSuffix(strings.Repeat("?, ", len(ids)), ", ")
 
 	args := append([]any{projectID, runID}, ids...)
-	rows, err := s.db.Query(
+	rows, err := s.db.QueryContext(ctx,
 		`SELECT COALESCE(t.item_id, ''), t.id, t.timestamp, t.error_count, t.total_cost, t.latency_ms
 		 FROM traces t WHERE `+runTraces+`
 		   AND COALESCE(t.item_id, '') IN (`+placeholders+`)
@@ -657,10 +658,10 @@ func (s *Store) attachAttempts(projectID, runID string, items []*RunItem) error 
 	if len(traceIDs) == 0 {
 		return nil
 	}
-	if err := s.attachOutputs(projectID, traceIDs, byTrace); err != nil {
+	if err := s.attachOutputs(ctx, projectID, traceIDs, byTrace); err != nil {
 		return err
 	}
-	return s.attachScores(projectID, traceIDs, byTrace)
+	return s.attachScores(ctx, projectID, traceIDs, byTrace)
 }
 
 // attachOutputs reads each trace's root observation — the earliest starting
@@ -668,10 +669,10 @@ func (s *Store) attachAttempts(projectID, runID string, items []*RunItem) error 
 // puts the answer it produced for a case; a trace whose root carried no output
 // shows null rather than reaching down the tree for something that might be
 // another span's business.
-func (s *Store) attachOutputs(projectID string, traceIDs []any, byTrace map[string]*RunAttempt) error {
+func (s *Store) attachOutputs(ctx context.Context, projectID string, traceIDs []any, byTrace map[string]*RunAttempt) error {
 	placeholders := strings.TrimSuffix(strings.Repeat("?, ", len(traceIDs)), ", ")
 	args := append([]any{projectID}, traceIDs...)
-	rows, err := s.db.Query(
+	rows, err := s.db.QueryContext(ctx,
 		`SELECT trace_id, id, output_id FROM
 		   (SELECT o.trace_id AS trace_id, o.id AS id, o.output_id AS output_id,
 		           ROW_NUMBER() OVER (PARTITION BY o.trace_id
@@ -711,7 +712,7 @@ func (s *Store) attachOutputs(projectID string, traceIDs []any, byTrace map[stri
 			continue
 		}
 		attempt.ObservationID = found.observationID
-		output, err := s.readPayload(found.outputID, projectID, found.traceID, reads)
+		output, err := s.readPayload(ctx, found.outputID, projectID, found.traceID, reads)
 		if err != nil {
 			return err
 		}
@@ -723,10 +724,10 @@ func (s *Store) attachOutputs(projectID string, traceIDs []any, byTrace map[stri
 // attachScores reads the scores of a page's traces. They ride whole: a score
 // is a number and a name, and cutting one would save nothing worth the
 // ambiguity (#19's reasoning, applied to the smaller thing).
-func (s *Store) attachScores(projectID string, traceIDs []any, byTrace map[string]*RunAttempt) error {
+func (s *Store) attachScores(ctx context.Context, projectID string, traceIDs []any, byTrace map[string]*RunAttempt) error {
 	placeholders := strings.TrimSuffix(strings.Repeat("?, ", len(traceIDs)), ", ")
 	args := append([]any{projectID}, traceIDs...)
-	rows, err := s.db.Query(
+	rows, err := s.db.QueryContext(ctx,
 		`SELECT `+scoreColumns+` FROM scores
 		 WHERE project_id = ? AND trace_id IN (`+placeholders+`)
 		 ORDER BY name, timestamp, id`, args...)
@@ -768,12 +769,12 @@ type RunItemValues struct {
 // read at once, not paged: the counts a comparison reports — how many items
 // improved, regressed and stayed — are statements about the pair of runs, and
 // a page cannot produce them (Decision 31).
-func (s *Store) RunValues(projectID, runID string) (*RunItemValues, error) {
+func (s *Store) RunValues(ctx context.Context, projectID, runID string) (*RunItemValues, error) {
 	values := &RunItemValues{
 		Attempted: map[string]bool{},
 		Scores:    map[string]map[string]ItemScore{},
 	}
-	attempted, err := s.db.Query(
+	attempted, err := s.db.QueryContext(ctx,
 		`SELECT DISTINCT t.item_id FROM traces t
 		 WHERE `+runTraces+` AND t.item_id IS NOT NULL`, projectID, runID)
 	if err != nil {
@@ -794,7 +795,7 @@ func (s *Store) RunValues(projectID, runID string) (*RunItemValues, error) {
 	// Ordered by (item, name, time) so the aggregation below is one pass:
 	// the mean accumulates and the newest string is simply the last one
 	// seen.
-	rows, err := s.db.Query(
+	rows, err := s.db.QueryContext(ctx,
 		`SELECT t.item_id, s.name, s.data_type, s.value, s.string_value
 		 FROM scores s JOIN traces t ON t.project_id = s.project_id AND t.id = s.trace_id
 		 WHERE `+runTraces+` AND t.item_id IS NOT NULL
@@ -859,7 +860,7 @@ type CompareItem struct {
 // CompareItems is the union of the two runs' item sets, in `seq` order,
 // restricted to the items at least one of them attempted: a case neither run
 // ran has nothing to compare, and listing it would bury the ones that do.
-func (s *Store) CompareItems(projectID string, a, b *DatasetRun) ([]*CompareItem, error) {
+func (s *Store) CompareItems(ctx context.Context, projectID string, a, b *DatasetRun) ([]*CompareItem, error) {
 	// One select per side, tagged with which side it came from, so that
 	// the group below can say "this item is in a's version and not in b's"
 	// — which is the label the comparison owes a reader whose dataset
@@ -867,7 +868,7 @@ func (s *Store) CompareItems(projectID string, a, b *DatasetRun) ([]*CompareItem
 	const side = `SELECT i.item_id AS item_id, i.seq AS seq, ? AS in_a, ? AS in_b
 		        FROM dataset_items i
 		        WHERE i.project_id = ? AND i.dataset = ? AND ` + itemsAtVersion + ` AND i.archived = 0`
-	rows, err := s.db.Query(
+	rows, err := s.db.QueryContext(ctx,
 		`SELECT u.item_id, MIN(u.seq), MAX(u.in_a), MAX(u.in_b)
 		 FROM (`+side+` UNION ALL `+side+`) u
 		 WHERE EXISTS (SELECT 1 FROM traces t

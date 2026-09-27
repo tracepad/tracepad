@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -181,8 +182,8 @@ func deleteProjectSearchEntries(tx *sql.Tx, projectID string) error {
 // trace-name entry — is gone. The belt to the deletion paths' braces, collected
 // by the sweeper's orphan pass (spec 005 #4, spec 011 data contract), bounded
 // the same way the payload pass is.
-func (s *Store) orphanSearchEntries(limit int) ([]int64, error) {
-	rows, err := s.db.Query(
+func (s *Store) orphanSearchEntries(ctx context.Context, limit int) ([]int64, error) {
+	rows, err := s.db.QueryContext(ctx,
 		`SELECT e.id FROM search_entries e
 		  WHERE (e.observation_id IS NOT NULL AND NOT EXISTS (
 		           SELECT 1 FROM observations o
@@ -264,7 +265,7 @@ type TraceMatch struct {
 // what `searchableField` makes of that field — the leaves of a payload, the
 // indexed prefix of either — because that is the only text the index could
 // have matched.
-func (s *Store) SearchMatches(projectID string, traceIDs []string, query *SearchQuery) (
+func (s *Store) SearchMatches(ctx context.Context, projectID string, traceIDs []string, query *SearchQuery) (
 	map[string]*TraceMatch, error,
 ) {
 	found := make(map[string]*TraceMatch, len(traceIDs))
@@ -279,7 +280,7 @@ func (s *Store) SearchMatches(projectID string, traceIDs []string, query *Search
 	// trace is its best hit.
 	err := eachIn(ids, func(batch []any) error {
 		args := append([]any{query.Match, projectID}, batch...)
-		rows, err := s.db.Query(
+		rows, err := s.db.QueryContext(ctx,
 			`SELECT e.trace_id, e.observation_id, e.field
 			   FROM search_fts JOIN search_entries e ON e.id = search_fts.rowid
 			  WHERE search_fts MATCH ? AND e.project_id = ?
@@ -312,7 +313,7 @@ func (s *Store) SearchMatches(projectID string, traceIDs []string, query *Search
 	}
 
 	for traceID, match := range found {
-		text, err := s.matchedText(projectID, traceID, match.ObservationID, match.Field)
+		text, err := s.matchedText(ctx, projectID, traceID, match.ObservationID, match.Field)
 		if err != nil {
 			return nil, err
 		}
@@ -322,10 +323,10 @@ func (s *Store) SearchMatches(projectID string, traceIDs []string, query *Search
 }
 
 // matchedText reads back the one field the match named.
-func (s *Store) matchedText(projectID, traceID, observationID, field string) (string, error) {
+func (s *Store) matchedText(ctx context.Context, projectID, traceID, observationID, field string) (string, error) {
 	if field == FieldTraceName {
 		var name sql.NullString
-		err := s.db.QueryRow(`SELECT name FROM traces WHERE project_id = ? AND id = ?`,
+		err := s.db.QueryRowContext(ctx, `SELECT name FROM traces WHERE project_id = ? AND id = ?`,
 			projectID, traceID).Scan(&name)
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", nil
@@ -339,7 +340,7 @@ func (s *Store) matchedText(projectID, traceID, observationID, field string) (st
 		outputID   sql.NullInt64
 		metadataID sql.NullInt64
 	)
-	err := s.db.QueryRow(
+	err := s.db.QueryRowContext(ctx,
 		`SELECT name, status_message, input_id, output_id, metadata_id FROM observations
 		  WHERE project_id = ? AND trace_id = ? AND id = ?`,
 		projectID, traceID, observationID).
@@ -356,11 +357,11 @@ func (s *Store) matchedText(projectID, traceID, observationID, field string) (st
 	case FieldStatusMessage:
 		return status.String, nil
 	case FieldInput:
-		return rawPayload(s.db, inputID)
+		return rawPayload(ctx, s.db, inputID)
 	case FieldOutput:
-		return rawPayload(s.db, outputID)
+		return rawPayload(ctx, s.db, outputID)
 	case FieldMetadata:
-		return rawPayload(s.db, metadataID)
+		return rawPayload(ctx, s.db, metadataID)
 	}
 	return "", fmt.Errorf("unknown search field %q", field)
 }
@@ -370,7 +371,7 @@ func (s *Store) matchedText(projectID, traceID, observationID, field string) (st
 // exactly as it did on the way in. Decoding and re-encoding it here would risk
 // a text differing from the stored one by a space or by a key order, and the
 // snippet would then be cut from something that was never searched.
-func rawPayload(db searchDB, id sql.NullInt64) (string, error) {
+func rawPayload(ctx context.Context, db querier, id sql.NullInt64) (string, error) {
 	if !id.Valid {
 		return "", nil
 	}
@@ -378,7 +379,7 @@ func rawPayload(db searchDB, id sql.NullInt64) (string, error) {
 		compression string
 		body        []byte
 	)
-	err := db.QueryRow(`SELECT compression, body FROM payloads WHERE id = ?`, id.Int64).
+	err := db.QueryRowContext(ctx, `SELECT compression, body FROM payloads WHERE id = ?`, id.Int64).
 		Scan(&compression, &body)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
@@ -552,7 +553,7 @@ func backfillTrace(tx *sql.Tx, projectID, traceID string) error {
 			{row.output, &text.Output},
 			{row.metadataOnly, &text.Metadata},
 		} {
-			body, err := rawPayload(tx, payload.id)
+			body, err := rawPayload(context.Background(), tx, payload.id)
 			if err != nil {
 				return err
 			}

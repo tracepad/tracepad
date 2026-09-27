@@ -280,8 +280,8 @@ func (s *Store) CreateProject(name string, keys KeyPair) (*Project, error) {
 // ProjectByName returns the project or nil if absent. A soft-deleted project
 // is returned like any other: its name stays reserved through the grace
 // window, so that restore always has its name to come back to (spec 005 #9).
-func (s *Store) ProjectByName(name string) (*Project, error) {
-	return s.oneProject(context.Background(), `SELECT `+projectColumns+` FROM projects WHERE name = ?`, name)
+func (s *Store) ProjectByName(ctx context.Context, name string) (*Project, error) {
+	return s.oneProject(ctx, `SELECT `+projectColumns+` FROM projects WHERE name = ?`, name)
 }
 
 // ProjectByID returns the project or nil if absent, deleted ones included. The
@@ -293,14 +293,14 @@ func (s *Store) ProjectByID(ctx context.Context, id string) (*Project, error) {
 // ListProjects returns every project, oldest first. Deleted ones are left out
 // unless asked for, which is what makes a deleted project vanish from listings
 // while an admin can still see it and its purge date (spec 005 #9).
-func (s *Store) ListProjects(includeDeleted bool) ([]*Project, error) {
+func (s *Store) ListProjects(ctx context.Context, includeDeleted bool) ([]*Project, error) {
 	query := `SELECT ` + projectColumns + ` FROM projects`
 	if !includeDeleted {
 		query += ` WHERE deleted_at IS NULL`
 	}
 	query += ` ORDER BY created_at, id`
 
-	rows, err := s.db.Query(query)
+	rows, err := s.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -320,9 +320,9 @@ func (s *Store) ListProjects(includeDeleted bool) ([]*Project, error) {
 // CountProjects returns the number of projects, deleted ones included: it
 // answers "is this database empty" for the bootstrap, and a name inside its
 // grace window is still taken.
-func (s *Store) CountProjects() (int, error) {
+func (s *Store) CountProjects(ctx context.Context) (int, error) {
 	var n int
-	err := s.db.QueryRow(`SELECT COUNT(*) FROM projects`).Scan(&n)
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM projects`).Scan(&n)
 	return n, err
 }
 

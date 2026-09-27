@@ -77,7 +77,7 @@ func traceFilterProperties() map[string]*jsonschema.Schema {
 		"user_id":     text("Exact match on the end user the trace was attributed to."),
 		"session_id":  text("Exact match on the session the trace belongs to."),
 		"name":        text("The trace name, or a comma-separated list of them, which keeps traces named any one. A trace with no name never matches; get_facets lists what a range holds."),
-		"tag":         list(text("A tag."), "A trace must carry every tag listed."),
+		"tag":         list(text("A tag."), "A trace must carry every tag listed; at most 50 distinct tags."),
 		"status": oneOf("\"error\" keeps traces with at least one failed observation, \"ok\" keeps the rest.",
 			"error", "ok"),
 		"min_cost": atLeast(0, "Only traces costing at least this much. A trace whose client reported no cost never matches."),
@@ -735,6 +735,9 @@ func traceDetailSchema() *jsonschema.Schema {
 		"observation_count": integer("How many observations it has."),
 		"metadata":          anything("The trace's own metadata."),
 		"observations":      list(&jsonschema.Schema{Ref: "#/$defs/observation"}, "The tree, roots ordered by start time."),
+		"observations_omitted": integer("Present only when the tree is a part of the trace: how many of its " +
+			"observations it leaves out. A tree holds the first 10,000 observations by start time, within 32 MiB " +
+			"of their own fields; one whose parent was left out sits at the root with its parent_observation_id."),
 		"expansion": object(map[string]*jsonschema.Schema{
 			"expanded": &jsonschema.Schema{Type: "boolean",
 				Description: "Always false; the key is absent when the expansion happened."},

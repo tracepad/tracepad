@@ -78,3 +78,23 @@ export function typeIcon(type: string | undefined): Component {
 export function typeLabel(type: string | undefined): string {
 	return type ?? 'span';
 }
+
+/**
+ * What the tree says above itself when the server cut it (spec 043 #18): a
+ * trace past 10,000 observations or 32 MiB of structure is answered with the
+ * first of them by start time and `observations_omitted`. Null for a whole
+ * tree. The numbers are the server's; this only puts them in a sentence.
+ */
+export function omittedNotice(
+	trace: { observation_count: number; observations_omitted?: number } | null | undefined
+): string | null {
+	const omitted = trace?.observations_omitted ?? 0;
+	if (omitted <= 0) return null;
+	const shown = Math.max(0, trace!.observation_count - omitted);
+	const all = trace!.observation_count;
+	return (
+		`Showing the first ${shown.toLocaleString('en-US')} of ${all.toLocaleString('en-US')} ` +
+		`observations by start time; ${omitted.toLocaleString('en-US')} ` +
+		`${omitted === 1 ? 'is' : 'are'} not shown.`
+	);
+}

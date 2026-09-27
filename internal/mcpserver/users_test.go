@@ -15,7 +15,7 @@ import (
 // the rollup, so a pass has to have taken it.
 func rollTheFixture(t *testing.T, h *harness) {
 	t.Helper()
-	project, err := h.store.ProjectByName("test")
+	project, err := h.store.ProjectByName(t.Context(), "test")
 	if err != nil || project == nil {
 		t.Fatalf("project = %v, err = %v", project, err)
 	}

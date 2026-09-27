@@ -288,7 +288,7 @@ func TestExportSkipsABatchSweptUnderIt(t *testing.T) {
 // what retention does to an archive while an export is walking it.
 func sweepRawAway(t *testing.T, h *harness) {
 	t.Helper()
-	project, err := h.store.ProjectByName("test")
+	project, err := h.store.ProjectByName(t.Context(), "test")
 	if err != nil || project == nil {
 		t.Errorf("project = %v, err = %v", project, err)
 		return

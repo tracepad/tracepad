@@ -43,7 +43,7 @@ func TestTheFirstPassBackfills(t *testing.T) {
 	s, project := readStore(t)
 	rollupFixture(t, s, project.ID)
 
-	state, err := s.RollupState(project.ID)
+	state, err := s.RollupState(t.Context(), project.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +54,7 @@ func TestTheFirstPassBackfills(t *testing.T) {
 
 	passAt(t, s, afterTheHour())
 
-	hours, err := s.StatsRollupHours(project.ID)
+	hours, err := s.StatsRollupHours(t.Context(), project.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +68,7 @@ func TestTheFirstPassBackfills(t *testing.T) {
 		t.Errorf("the backfilled hour has %d rows, want the fixture's 5: %v",
 			len(rows), keysOf(rows))
 	}
-	state, err = s.RollupState(project.ID)
+	state, err = s.RollupState(t.Context(), project.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,14 +86,14 @@ func TestTheOpenHourIsLeftToTheLiveTail(t *testing.T) {
 	// A clock inside the fixture's own hour.
 	passAt(t, s, time.Unix(rollupHour+30*60, 0))
 
-	hours, err := s.StatsRollupHours(project.ID)
+	hours, err := s.StatsRollupHours(t.Context(), project.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(hours) != 0 {
 		t.Errorf("rolled %v while the hour was still open", hours)
 	}
-	state, err := s.RollupState(project.ID)
+	state, err := s.RollupState(t.Context(), project.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,14 +188,14 @@ func TestAQuietPassMovesTheCutoffAndNotTheWatermark(t *testing.T) {
 	rollupFixture(t, s, project.ID)
 
 	passAt(t, s, afterTheHour())
-	first, err := s.RollupState(project.ID)
+	first, err := s.RollupState(t.Context(), project.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	later := afterTheHour().Add(2 * time.Hour)
 	passAt(t, s, later)
-	second, err := s.RollupState(project.ID)
+	second, err := s.RollupState(t.Context(), project.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,7 +220,7 @@ func TestHistoryImportedAfterAnEmptyPassIsStillCounted(t *testing.T) {
 
 	// A pass with nothing to do, as happens on every fresh install.
 	passAt(t, s, afterTheHour())
-	state, err := s.RollupState(project.ID)
+	state, err := s.RollupState(t.Context(), project.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,7 +231,7 @@ func TestHistoryImportedAfterAnEmptyPassIsStillCounted(t *testing.T) {
 
 	// Now an import of history, whose hours are behind that pass.
 	rollupFixture(t, s, project.ID)
-	state, err = s.RollupState(project.ID)
+	state, err = s.RollupState(t.Context(), project.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -242,7 +242,7 @@ func TestHistoryImportedAfterAnEmptyPassIsStillCounted(t *testing.T) {
 
 	// And once a pass has rolled it, the watermark covers it and no more.
 	passAt(t, s, afterTheHour())
-	state, err = s.RollupState(project.ID)
+	state, err = s.RollupState(t.Context(), project.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -338,7 +338,7 @@ func TestBackdatedHistoryIsRolledRatherThanFrozen(t *testing.T) {
 	if len(rows) == 0 {
 		t.Fatal("the imported hour was frozen although the rollup had nothing to protect")
 	}
-	state, err := s.RollupState(project.ID)
+	state, err := s.RollupState(t.Context(), project.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -485,7 +485,7 @@ func TestStatsRetentionSweepsTheRollupOnly(t *testing.T) {
 	}
 	passAt(t, s, time.Unix(rollupHour, 0).Add(10*24*time.Hour))
 
-	hours, err := s.StatsRollupHours(project.ID)
+	hours, err := s.StatsRollupHours(t.Context(), project.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

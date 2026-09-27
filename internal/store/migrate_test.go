@@ -108,7 +108,7 @@ func TestMigration0005UpgradesAPopulatedDatabase(t *testing.T) {
 	// retention_days is NULL for every existing row: the 0001 default of 30
 	// never acted, and turning it on retroactively would delete data the
 	// operator never asked us to (spec 005 #2).
-	project, err := s.ProjectByName("app")
+	project, err := s.ProjectByName(t.Context(), "app")
 	if err != nil || project == nil {
 		t.Fatalf("project after upgrade: %+v %v", project, err)
 	}

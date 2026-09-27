@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -299,10 +298,9 @@ func (s *Server) handleGetPrompt(w http.ResponseWriter, r *http.Request) {
 		missing = fmt.Sprintf("prompt %q has no label %q", name, rawLabel)
 	}
 
-	prompt, err := s.store.Prompt(project.ID, name, selector)
+	prompt, err := s.store.Prompt(r.Context(), project.ID, name, selector)
 	if err != nil {
-		slog.Error("read prompt failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to read the prompt")
+		readFailed(w, r, "failed to read the prompt", err)
 		return
 	}
 	if prompt == nil {
@@ -353,10 +351,9 @@ func (s *Server) handleListPromptVersions(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	versions, labels, err := s.store.PromptVersions(project.ID, name, limit+1, after, backward)
+	versions, labels, err := s.store.PromptVersions(r.Context(), project.ID, name, limit+1, after, backward)
 	if err != nil {
-		slog.Error("list prompt versions failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to list the versions")
+		readFailed(w, r, "failed to list the versions", err)
 		return
 	}
 	// A name exists only by having versions, so an empty first page means
@@ -418,10 +415,9 @@ func (s *Server) handleListPrompts(w http.ResponseWriter, r *http.Request) {
 		after = parts[0]
 	}
 
-	prompts, err := s.store.Prompts(project.ID, limit+1, after, backward)
+	prompts, err := s.store.Prompts(r.Context(), project.ID, limit+1, after, backward)
 	if err != nil {
-		slog.Error("list prompts failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to list prompts")
+		readFailed(w, r, "failed to list prompts", err)
 		return
 	}
 
@@ -472,10 +468,9 @@ func (s *Server) handleDeletePrompt(w http.ResponseWriter, r *http.Request) {
 
 	confirm := values.Get("confirm")
 	if confirm == "" {
-		counts, err := s.store.PromptPreview(project.ID, name)
+		counts, err := s.store.PromptPreview(r.Context(), project.ID, name)
 		if err != nil {
-			slog.Error("prompt preview failed", "err", err)
-			writeError(w, http.StatusInternalServerError, "failed to read what the prompt holds")
+			readFailed(w, r, "failed to read what the prompt holds", err)
 			return
 		}
 		// A name exists only by having versions, the same rule the version
@@ -595,10 +590,9 @@ func (s *Server) handlePromptDiff(w http.ResponseWriter, r *http.Request) {
 
 	var loaded [2]*store.PromptVersion
 	for i, version := range versions {
-		prompt, err := s.store.Prompt(project.ID, name, store.PromptSelector{Version: version})
+		prompt, err := s.store.Prompt(r.Context(), project.ID, name, store.PromptSelector{Version: version})
 		if err != nil {
-			slog.Error("read prompt failed", "err", err)
-			writeError(w, http.StatusInternalServerError, "failed to read the prompt")
+			readFailed(w, r, "failed to read the prompt", err)
 			return
 		}
 		if prompt == nil {

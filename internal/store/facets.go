@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"strings"
@@ -67,9 +68,9 @@ var facetRollupQueries = []struct {
 }
 
 // FacetRows reads the rolled values of a half-open hour range.
-func (s *Store) FacetRows(projectID string, fromHour, toHour int64, yield func(FacetRow)) error {
+func (s *Store) FacetRows(ctx context.Context, projectID string, fromHour, toHour int64, yield func(FacetRow)) error {
 	for _, source := range facetRollupQueries {
-		rows, err := s.db.Query(source.query, projectID, fromHour, toHour)
+		rows, err := s.db.QueryContext(ctx, source.query, projectID, fromHour, toHour)
 		if err != nil {
 			return fmt.Errorf("read the %s facet: %w", source.column, err)
 		}
@@ -106,9 +107,9 @@ var facetTailQueries = []struct {
 }
 
 // FacetTail reads the values of a half-open range of trace timestamps.
-func (s *Store) FacetTail(projectID string, from, to int64, yield func(FacetRow)) error {
+func (s *Store) FacetTail(ctx context.Context, projectID string, from, to int64, yield func(FacetRow)) error {
 	for _, source := range facetTailQueries {
-		rows, err := s.db.Query(source.query, projectID, from, to)
+		rows, err := s.db.QueryContext(ctx, source.query, projectID, from, to)
 		if err != nil {
 			return fmt.Errorf("scan the %s facet: %w", source.column, err)
 		}
@@ -197,8 +198,8 @@ func rollNameHour(tx *sql.Tx, projectID string, hour int64) (int, error) {
 
 // NamesRollupHours reports which hours of a project hold name rows. The tests
 // ask; nothing on the read path needs it.
-func (s *Store) NamesRollupHours(projectID string) ([]int64, error) {
-	rows, err := s.db.Query(
+func (s *Store) NamesRollupHours(ctx context.Context, projectID string) ([]int64, error) {
+	rows, err := s.db.QueryContext(ctx,
 		`SELECT DISTINCT hour FROM names_hourly WHERE project_id = ? ORDER BY hour`, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("read the rolled name hours: %w", err)

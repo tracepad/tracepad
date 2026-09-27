@@ -44,9 +44,9 @@ type CompactionState struct {
 }
 
 // Compaction reads the deployment's compaction state.
-func (s *Store) Compaction() (CompactionState, error) {
+func (s *Store) Compaction(ctx context.Context) (CompactionState, error) {
 	var requested, completed, prepared sql.NullInt64
-	err := s.db.QueryRow(`SELECT requested_at, completed_at, prepared_for FROM compaction WHERE id = 1`).
+	err := s.db.QueryRowContext(ctx, `SELECT requested_at, completed_at, prepared_for FROM compaction WHERE id = 1`).
 		Scan(&requested, &completed, &prepared)
 	if errors.Is(err, sql.ErrNoRows) {
 		return CompactionState{}, nil
@@ -178,7 +178,7 @@ func (d *compactionDone) apply(tx *sql.Tx) error {
 // whether it drained the freelist; a checkpoint that stays busy leaves the
 // request for the next pass, which then runs the checkpoint alone.
 func (sw *Sweeper) compact(ctx context.Context) (done, drained bool, err error) {
-	state, err := sw.store.Compaction()
+	state, err := sw.store.Compaction(ctx)
 	if err != nil || state.RequestedAt == 0 {
 		return false, false, err
 	}

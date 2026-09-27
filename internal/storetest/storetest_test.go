@@ -16,7 +16,7 @@ func TestEveryStoreIsMigratedAndItsOwn(t *testing.T) {
 	}
 
 	second := storetest.Open(t)
-	projects, err := second.ListProjects(true)
+	projects, err := second.ListProjects(t.Context(), true)
 	if err != nil {
 		t.Fatal(err)
 	}

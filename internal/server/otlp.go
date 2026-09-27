@@ -145,7 +145,7 @@ func (s *Server) handleTraces(w http.ResponseWriter, r *http.Request) {
 		}
 		return batch, result
 	}
-	batch, result := prepare(decoded, s.mediaOptions(project))
+	batch, result := prepare(decoded, s.mediaOptions(r.Context(), project))
 	if batch.Empty() {
 		// Every span was skipped and raw storage is off: there is
 		// nothing to commit, and the export is still a success. The
@@ -164,7 +164,7 @@ func (s *Server) handleTraces(w http.ResponseWriter, r *http.Request) {
 		// picture — instead of a reference to nothing.
 		again, decodeErr := mapping.DecodeExportBody(received, jsonEncoding)
 		if decodeErr == nil {
-			opts := s.mediaOptions(project)
+			opts := s.mediaOptions(r.Context(), project)
 			opts.Resolve = nil
 			batch, result = prepare(again, opts)
 			err = s.writer.Submit(r.Context(), batch)

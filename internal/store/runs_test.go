@@ -124,7 +124,7 @@ func TestRunSummaryIsHandComputable(t *testing.T) {
 		{trace: hexTrace(5), latencyMs: 200, model: "gpt-5"},
 	})
 
-	summary, err := f.store.RunSummary(f.project.ID, run)
+	summary, err := f.store.RunSummary(t.Context(), f.project.ID, run)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +191,7 @@ func TestRunSummaryTakesDirectionFromTheConfig(t *testing.T) {
 			scores: []*Score{numeric("accuracy", 1), numeric("helpfulness", 1)}},
 	})
 
-	summary, err := f.store.RunSummary(f.project.ID, run)
+	summary, err := f.store.RunSummary(t.Context(), f.project.ID, run)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,7 +220,7 @@ func TestRunItemsCarryTheirAttempts(t *testing.T) {
 		{trace: hexTrace(3), item: itemID(9), latencyMs: 30},
 	})
 
-	items, err := f.store.RunItems(f.project.ID, run, RunItemFilter{Limit: 10})
+	items, err := f.store.RunItems(t.Context(), f.project.ID, run, RunItemFilter{Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -243,7 +243,7 @@ func TestRunItemsCarryTheirAttempts(t *testing.T) {
 		t.Errorf("scores = %+v, want the one score the attempt got", first.Scores)
 	}
 
-	withUnknown, err := f.store.RunItems(f.project.ID, run, RunItemFilter{Limit: 10, IncludeUnknown: true})
+	withUnknown, err := f.store.RunItems(t.Context(), f.project.ID, run, RunItemFilter{Limit: 10, IncludeUnknown: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -272,7 +272,7 @@ func TestRunItemsWalkBothWays(t *testing.T) {
 			cursor *RunItemCursor
 		)
 		for range 10 {
-			page, err := f.store.RunItems(f.project.ID, run, RunItemFilter{
+			page, err := f.store.RunItems(t.Context(), f.project.ID, run, RunItemFilter{
 				Limit: 1, After: cursor, Backward: backward, IncludeUnknown: true})
 			if err != nil {
 				t.Fatal(err)
@@ -320,7 +320,7 @@ func TestCompareItemsIsTheUnionOfWhatWasRun(t *testing.T) {
 		{trace: hexTrace(4), item: itemID(3), latencyMs: 10},
 	})
 
-	items, err := f.store.CompareItems(f.project.ID, first, second)
+	items, err := f.store.CompareItems(t.Context(), f.project.ID, first, second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -342,7 +342,7 @@ func TestCompareItemsIsTheUnionOfWhatWasRun(t *testing.T) {
 		}
 	}
 
-	values, err := f.store.RunValues(f.project.ID, second.ID)
+	values, err := f.store.RunValues(t.Context(), f.project.ID, second.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -367,7 +367,7 @@ func TestItemValueIsTheMeanOfItsAttempts(t *testing.T) {
 			scores: []*Score{numeric("accuracy", 0), categorical("verdict", "fail")}},
 	})
 
-	values, err := f.store.RunValues(f.project.ID, run.ID)
+	values, err := f.store.RunValues(t.Context(), f.project.ID, run.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -380,7 +380,7 @@ func TestItemValueIsTheMeanOfItsAttempts(t *testing.T) {
 		t.Errorf("verdict = %q, want the newest attempt's word", verdict.Text)
 	}
 
-	summary, err := f.store.RunSummary(f.project.ID, run)
+	summary, err := f.store.RunSummary(t.Context(), f.project.ID, run)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -412,7 +412,7 @@ func TestItemMeanCountsOnlyTheNumbers(t *testing.T) {
 			scores: []*Score{numeric("accuracy", 0)}},
 	})
 
-	values, err := f.store.RunValues(f.project.ID, run.ID)
+	values, err := f.store.RunValues(t.Context(), f.project.ID, run.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -425,7 +425,7 @@ func TestItemMeanCountsOnlyTheNumbers(t *testing.T) {
 			*accuracy.Mean)
 	}
 
-	summary, err := f.store.RunSummary(f.project.ID, run)
+	summary, err := f.store.RunSummary(t.Context(), f.project.ID, run)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -364,7 +364,7 @@ export interface paths {
         };
         /**
          * One trace with its observations as a nested tree
-         * @description Children are nested inside their parents, siblings ordered by start time. An observation whose parent has not arrived yet renders at the root with its `parent_observation_id` intact. Payloads ride only with `?expand=io`.
+         * @description Children are nested inside their parents, siblings ordered by start time. An observation whose parent has not arrived yet renders at the root with its `parent_observation_id` intact, and so does one that would sit deeper than 100 levels, keeping its own children. A trace past 10,000 observations or 32 MiB of structure is answered with its first observations by start time and `observations_omitted`. Payloads ride only with `?expand=io`.
          */
         get: operations["getTrace"];
         put?: never;
@@ -1699,6 +1699,8 @@ export interface components {
         Trace: components["schemas"]["TraceRow"] & {
             metadata?: Record<string, never>;
             observations: components["schemas"]["Observation"][];
+            /** @description Present only when the tree is a part of the trace: `observation_count` minus the observations rendered. A tree holds the longest prefix of the trace's observations, in start-time order, of at most 10,000 observations and 32 MiB of their own fields; an observation whose parent was left out renders at the root with its `parent_observation_id` */
+            observations_omitted?: number;
             expansion?: components["schemas"]["Expansion"];
         };
         /** @description One span. `children` holds the spans that named it as their parent and is absent for a leaf. */
@@ -2368,7 +2370,7 @@ export interface components {
                 "application/json": components["schemas"]["Error"];
             };
         };
-        /** @description The credentials could not be checked right now, or a write met a database condition that passes (a full disk, a lock that did not clear); retry after `Retry-After` */
+        /** @description The credentials could not be checked right now, or a write met a database condition that passes (a full disk, a lock that did not clear), or a read found no free read slot before its deadline (`the server is busy; retry shortly`): retry after `Retry-After`. A read the deadline stopped while it ran (`the read took longer than 20s and was stopped; narrow the time range or the filters`, the number being `TRACEPAD_READ_TIMEOUT`) carries no `Retry-After`: the same request would be stopped again, so narrow it */
         ServiceUnavailable: {
             headers: {
                 /** @description Seconds to wait */
@@ -3203,6 +3205,11 @@ export interface operations {
                             waiting?: number;
                             capacity?: number;
                         };
+                        /** @description Reads being served now, for the whole deployment, against TRACEPAD_READ_CONCURRENCY; a read that finds none free waits within its deadline */
+                        read_slots?: {
+                            busy: number;
+                            capacity: number;
+                        };
                         response_budget_bytes?: number;
                         /** @description The link between traces and dataset runs, as this project sees it */
                         runs?: {
@@ -3247,7 +3254,7 @@ export interface operations {
                              */
                             completed_at: string | null;
                         };
-                        /** @description This project's ingest traffic since the process started */
+                        /** @description This project's ingest traffic, and its reads the read bounds refused, since the process started */
                         counters: {
                             /** Format: date-time */
                             since?: string;
@@ -3261,6 +3268,10 @@ export interface operations {
                             rejected_batches?: number;
                             unreadable_resource_spans?: number;
                             langfuse_ingestion_versions?: string[];
+                            /** @description This project's reads the read deadline stopped (TRACEPAD_READ_TIMEOUT) */
+                            reads_timed_out?: number;
+                            /** @description This project's reads refused because no read slot came free before the deadline */
+                            reads_refused_busy?: number;
                         };
                     };
                 };
@@ -3284,7 +3295,7 @@ export interface operations {
                 session_id?: string;
                 /** @description The trace name. A comma-separated list matches **any** of them; items are trimmed, duplicates collapse, an empty item is a 400, repeating the parameter is a 400, at most 100 items, and a name containing a comma is not expressible here. A trace with no name never matches. `GET /api/v1/facets` lists the values in a range with their counts */
                 name?: string;
-                /** @description Repeatable; a trace must carry every tag given */
+                /** @description Repeatable; a trace must carry every tag given. At most 50 distinct values, duplicates collapsing first; more is a 400 (`tag: at most 50 values`), since a trace keeps at most 50 tags */
                 tag?: string[];
                 /** @description `error` keeps traces with at least one failed observation, `ok` keeps the rest */
                 status?: "error" | "ok";
@@ -3360,7 +3371,7 @@ export interface operations {
                 session_id?: string;
                 /** @description The trace name. A comma-separated list matches **any** of them; items are trimmed, duplicates collapse, an empty item is a 400, repeating the parameter is a 400, at most 100 items, and a name containing a comma is not expressible here. A trace with no name never matches. `GET /api/v1/facets` lists the values in a range with their counts */
                 name?: string;
-                /** @description Repeatable; a trace must carry every tag given */
+                /** @description Repeatable; a trace must carry every tag given. At most 50 distinct values, duplicates collapsing first; more is a 400 (`tag: at most 50 values`), since a trace keeps at most 50 tags */
                 tag?: string[];
                 /** @description `error` keeps traces with at least one failed observation, `ok` keeps the rest */
                 status?: "error" | "ok";
@@ -3419,6 +3430,7 @@ export interface operations {
                 session_id?: string;
                 /** @description The trace name, or a comma-separated list matching any of them */
                 name?: string;
+                /** @description Repeatable; every tag given. At most 50 distinct values */
                 tag?: string[];
                 status?: "error" | "ok";
                 min_cost?: number;
@@ -5389,7 +5401,7 @@ export interface operations {
                 session_id?: string;
                 /** @description The trace name. A comma-separated list matches **any** of them; items are trimmed, duplicates collapse, an empty item is a 400, repeating the parameter is a 400, at most 100 items, and a name containing a comma is not expressible here. A trace with no name never matches. `GET /api/v1/facets` lists the values in a range with their counts */
                 name?: string;
-                /** @description Repeatable; a trace must carry every tag given */
+                /** @description Repeatable; a trace must carry every tag given. At most 50 distinct values, duplicates collapsing first; more is a 400 (`tag: at most 50 values`), since a trace keeps at most 50 tags */
                 tag?: string[];
                 /** @description `error` keeps traces with at least one failed observation, `ok` keeps the rest */
                 status?: "error" | "ok";

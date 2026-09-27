@@ -114,7 +114,7 @@ func TestTraceFilters(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			tc.filter.Limit = 50
-			rows, err := s.Traces(project.ID, tc.filter)
+			rows, err := s.Traces(t.Context(), project.ID, tc.filter)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -149,7 +149,7 @@ func TestTraceCursorWalksEveryRow(t *testing.T) {
 		cursor *TraceCursor
 	)
 	for range 10 {
-		rows, err := s.Traces(project.ID, TraceFilter{Limit: 1, After: cursor})
+		rows, err := s.Traces(t.Context(), project.ID, TraceFilter{Limit: 1, After: cursor})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -187,14 +187,14 @@ func TestTimestampSurvivesUnsetStartTimes(t *testing.T) {
 		&model.Observation{TraceID: hexTrace(2), ID: hexSpan(2), Type: model.TypeSpan,
 			Level: model.LevelDefault, StartTime: day, EndTime: day + 1})
 
-	first, err := s.Traces(project.ID, TraceFilter{Limit: 1})
+	first, err := s.Traces(t.Context(), project.ID, TraceFilter{Limit: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(first) != 1 || first[0].ID != hexTrace(2) {
 		t.Fatalf("first page = %v, want the timestamped trace", first)
 	}
-	next, err := s.Traces(project.ID, TraceFilter{Limit: 1,
+	next, err := s.Traces(t.Context(), project.ID, TraceFilter{Limit: 1,
 		After: &TraceCursor{Timestamp: first[0].Timestamp, ID: first[0].ID}})
 	if err != nil {
 		t.Fatal(err)
@@ -217,7 +217,7 @@ func TestSessionRollup(t *testing.T) {
 		&model.Observation{TraceID: hexTrace(2), ID: hexSpan(2), Type: model.TypeSpan,
 			Level: model.LevelError, StartTime: 2 * day, EndTime: 2*day + 1})
 
-	session, err := s.Session(project.ID, "s1")
+	session, err := s.Session(t.Context(), project.ID, "s1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,7 +231,7 @@ func TestSessionRollup(t *testing.T) {
 		t.Errorf("seen = %d..%d, want %d..%d", session.FirstSeen, session.LastSeen, day, 2*day)
 	}
 
-	missing, err := s.Session(project.ID, "nope")
+	missing, err := s.Session(t.Context(), project.ID, "nope")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -251,7 +251,7 @@ func TestObservationTracesFindsAmbiguity(t *testing.T) {
 			&model.Observation{TraceID: hexTrace(i), ID: hexSpan(7), Type: model.TypeSpan,
 				Level: model.LevelDefault, StartTime: day, EndTime: day + 1})
 	}
-	candidates, err := s.ObservationTraces(project.ID, hexSpan(7))
+	candidates, err := s.ObservationTraces(t.Context(), project.ID, hexSpan(7))
 	if err != nil {
 		t.Fatal(err)
 	}

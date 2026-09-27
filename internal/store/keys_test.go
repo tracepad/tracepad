@@ -69,7 +69,7 @@ func TestMigration0023KeepsEveryKey(t *testing.T) {
 	}
 	defer s.Close()
 
-	keys, err := s.ProjectKeys("p1")
+	keys, err := s.ProjectKeys(t.Context(), "p1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +102,7 @@ func TestMigration0023KeepsEveryKey(t *testing.T) {
 	if _, err := s.db.Exec(`DELETE FROM projects WHERE id = 'p1'`); err != nil {
 		t.Fatal(err)
 	}
-	if keys, _ := s.ProjectKeys("p1"); len(keys) != 0 {
+	if keys, _ := s.ProjectKeys(t.Context(), "p1"); len(keys) != 0 {
 		t.Errorf("a purged project's keys = %+v", keys)
 	}
 }
@@ -136,7 +136,7 @@ func TestStandingMovesWithTheAccount(t *testing.T) {
 
 	standings := func() map[string]KeyInfo {
 		t.Helper()
-		keys, err := f.ProjectKeys(f.project.ID)
+		keys, err := f.ProjectKeys(t.Context(), f.project.ID)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -178,7 +178,7 @@ func TestStandingMovesWithTheAccount(t *testing.T) {
 	f.submit(t, &AccountUpdate{AccountID: editor.ID, Disabled: &disabled, Now: time.Now().UnixNano()})
 	expect("disabled", StandingDisabled)
 
-	minted, err := f.KeysMintedBy(editor.ID)
+	minted, err := f.KeysMintedBy(t.Context(), editor.ID)
 	if err != nil || len(minted) != 1 || minted[0].Key.Name != "by the editor" ||
 		minted[0].ProjectID != f.project.ID || minted[0].ProjectName != "test" {
 		t.Fatalf("the keys the editor minted = %+v (%v)", minted, err)
@@ -190,7 +190,7 @@ func TestStandingMovesWithTheAccount(t *testing.T) {
 		t.Errorf("a deleted minter's id = %q, want the reference gone", key.CreatedBy.AccountID)
 	}
 	// Deleting the account took no key with it (#10).
-	if keys, _ := f.ProjectKeys(f.project.ID); len(keys) != 4 {
+	if keys, _ := f.ProjectKeys(t.Context(), f.project.ID); len(keys) != 4 {
 		t.Errorf("keys after the deletion = %d, want all four", len(keys))
 	}
 }
@@ -202,7 +202,7 @@ func TestKeyUseNeverMovesBack(t *testing.T) {
 	f := newAccountFixture(t)
 	used := func() *int64 {
 		t.Helper()
-		keys, err := f.ProjectKeys(f.project.ID)
+		keys, err := f.ProjectKeys(t.Context(), f.project.ID)
 		if err != nil {
 			t.Fatal(err)
 		}

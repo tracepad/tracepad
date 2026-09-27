@@ -79,7 +79,7 @@ func usersFixture(t *testing.T, s *Store, projectID string) {
 func userRows(t *testing.T, s *Store, projectID, userID string, hour int64) map[string]UserStatsRow {
 	t.Helper()
 	rows := map[string]UserStatsRow{}
-	err := s.UsersRollupRows(projectID, userID, hour, hour+SecondsPerHour, nil,
+	err := s.UsersRollupRows(t.Context(), projectID, userID, hour, hour+SecondsPerHour, nil,
 		func(row UserStatsRow) {
 			rows[row.Environment+"|"+row.Release+"|"+row.Model] = row
 		})
@@ -100,7 +100,7 @@ func TestUserHourEqualsALivePerUserScan(t *testing.T) {
 	from, to := rollupHour*1e9, (rollupHour+SecondsPerHour)*1e9
 	for _, user := range []string{"alice", "bob"} {
 		live := map[string]*StatsRow{}
-		err := s.StatsSamples(project.ID, StatsFilter{
+		err := s.StatsSamples(t.Context(), project.ID, StatsFilter{
 			From: &from, To: &to, UserID: user, GroupBy: GroupByEnvironment,
 		}, func(sample StatsSample) {
 			row := live[sample.Key]
@@ -189,7 +189,7 @@ func TestAnonymousTracesProduceNoUserRows(t *testing.T) {
 	if total != 4 {
 		t.Errorf("rolled %d traces per user, want the 4 that named one", total)
 	}
-	users, err := s.Users(project.ID, UserFilter{Limit: 10})
+	users, err := s.Users(t.Context(), project.ID, UserFilter{Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,7 +212,7 @@ func TestUserSummaryEqualsItsHourlyRows(t *testing.T) {
 	roll(t, s, project.ID, rollupHour)
 	roll(t, s, project.ID, rollupHour+SecondsPerHour)
 
-	alice, err := s.UserSummaryRow(project.ID, "alice")
+	alice, err := s.UserSummaryRow(t.Context(), project.ID, "alice")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +235,7 @@ func TestUserSummaryEqualsItsHourlyRows(t *testing.T) {
 	}
 	// The latency is not in the summary table: it is merged out of the hours
 	// themselves, which is what the user page reads.
-	rolled, err := s.UserRollup(project.ID, "alice", rollupHour+2*SecondsPerHour)
+	rolled, err := s.UserRollup(t.Context(), project.ID, "alice", rollupHour+2*SecondsPerHour)
 	if err != nil || rolled == nil {
 		t.Fatalf("no rolled hours for alice: %v", err)
 	}
@@ -260,7 +260,7 @@ func TestTheUserPageDoesNotCountAnHourTwice(t *testing.T) {
 	// hour still in progress.
 	roll(t, s, project.ID, rollupHour)
 
-	rolled, err := s.UserRollup(project.ID, "alice", rollupHour)
+	rolled, err := s.UserRollup(t.Context(), project.ID, "alice", rollupHour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -268,7 +268,7 @@ func TestTheUserPageDoesNotCountAnHourTwice(t *testing.T) {
 		t.Errorf("an hour at or past the watermark was read from the rollup: %+v", rolled.UserRow)
 	}
 	// And below it, the same hour is the rollup's.
-	behind, err := s.UserRollup(project.ID, "alice", rollupHour+SecondsPerHour)
+	behind, err := s.UserRollup(t.Context(), project.ID, "alice", rollupHour+SecondsPerHour)
 	if err != nil || behind == nil {
 		t.Fatalf("the hour behind the watermark is not in the rollup: %v", err)
 	}
@@ -298,7 +298,7 @@ func TestSessionIsCountedOnceInItsFirstHour(t *testing.T) {
 	if second.SessionsStarted != 0 {
 		t.Errorf("second hour started %d sessions, want 0", second.SessionsStarted)
 	}
-	alice, err := s.UserSummaryRow(project.ID, "alice")
+	alice, err := s.UserSummaryRow(t.Context(), project.ID, "alice")
 	if err != nil || alice == nil {
 		t.Fatalf("no summary: %v", err)
 	}
@@ -333,7 +333,7 @@ func TestALaterEarlierTraceMovesTheSessionStart(t *testing.T) {
 	if got := userRows(t, s, project.ID, "alice", rollupHour+SecondsPerHour)["production||"]; got.SessionsStarted != 0 {
 		t.Errorf("the later hour still starts %d sessions, want 0", got.SessionsStarted)
 	}
-	alice, err := s.UserSummaryRow(project.ID, "alice")
+	alice, err := s.UserSummaryRow(t.Context(), project.ID, "alice")
 	if err != nil || alice == nil {
 		t.Fatalf("no summary: %v", err)
 	}
@@ -362,7 +362,7 @@ func TestTheDirtySetReachesTheSessionsOtherHours(t *testing.T) {
 		environment: "production", model: "m", latencyMs: 10,
 		hour: rollupHour, offsetSeconds: 30})
 
-	dirty, err := s.dirtyHours(project.ID, cutoff, rollupHour+2*SecondsPerHour)
+	dirty, err := s.dirtyHours(t.Context(), project.ID, cutoff, rollupHour+2*SecondsPerHour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -395,7 +395,7 @@ func TestAnAnonymousSessionDirtiesNothing(t *testing.T) {
 			environment: "production", model: "m", latencyMs: 10,
 			hour: rollupHour + int64(10+i)*SecondsPerHour, offsetSeconds: 30})
 	}
-	hours, err := s.dirtySessionHours(project.ID, 0)
+	hours, err := s.dirtySessionHours(t.Context(), project.ID, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -410,7 +410,7 @@ func TestAnAnonymousSessionDirtiesNothing(t *testing.T) {
 			environment: "production", model: "m", latencyMs: 10,
 			hour: rollupHour + int64(i)*SecondsPerHour, offsetSeconds: 40})
 	}
-	hours, err = s.dirtySessionHours(project.ID, 0)
+	hours, err = s.dirtySessionHours(t.Context(), project.ID, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -427,7 +427,7 @@ func TestAnAnonymousSessionDirtiesNothing(t *testing.T) {
 	seedUserTrace(t, s, project.ID, userSeed{n: 1, user: "bob", session: "anon",
 		environment: "production", model: "m", latencyMs: 10,
 		hour: rollupHour + 10*SecondsPerHour, offsetSeconds: 30})
-	hours, err = s.dirtySessionHours(project.ID, 0)
+	hours, err = s.dirtySessionHours(t.Context(), project.ID, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -451,7 +451,7 @@ func TestAnAnonymousSessionDirtiesNothing(t *testing.T) {
 	seedUserTrace(t, s, project.ID, userSeed{n: 20, user: "", session: "named",
 		environment: "production", model: "m", latencyMs: 10,
 		hour: rollupHour + 20*SecondsPerHour, offsetSeconds: 30})
-	hours, err = s.dirtySessionHours(project.ID, cutoff)
+	hours, err = s.dirtySessionHours(t.Context(), project.ID, cutoff)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -466,7 +466,7 @@ func TestUserRollIsIdempotent(t *testing.T) {
 	s, project := readStore(t)
 	usersFixture(t, s, project.ID)
 	roll(t, s, project.ID, rollupHour)
-	before, err := s.UserSummaryRow(project.ID, "alice")
+	before, err := s.UserSummaryRow(t.Context(), project.ID, "alice")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -474,7 +474,7 @@ func TestUserRollIsIdempotent(t *testing.T) {
 	// The same spans again, as a retry would send them.
 	usersFixture(t, s, project.ID)
 	roll(t, s, project.ID, rollupHour)
-	after, err := s.UserSummaryRow(project.ID, "alice")
+	after, err := s.UserSummaryRow(t.Context(), project.ID, "alice")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -570,7 +570,7 @@ func TestABackfillFillsAFrozenHoursUserRows(t *testing.T) {
 		t.Errorf("the frozen hour's per-user rows are wrong: %v", keys)
 	}
 	// And the summary the listing pages over, which is their sum.
-	alice, err := s.UserSummaryRow(project.ID, "alice")
+	alice, err := s.UserSummaryRow(t.Context(), project.ID, "alice")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -615,7 +615,7 @@ func TestAFrozenUserHourIsNotRewritten(t *testing.T) {
 	if !slices.Equal(before, after) {
 		t.Errorf("the frozen hour was rewritten: %v, was %v", after, before)
 	}
-	carol, err := s.UserSummaryRow(project.ID, "carol")
+	carol, err := s.UserSummaryRow(t.Context(), project.ID, "carol")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -715,7 +715,7 @@ func TestAFrozenHourKeepsItsUserRows(t *testing.T) {
 	if job.UsersRolled {
 		t.Fatal("the hour was not frozen in the per-user table, so the rows below prove nothing")
 	}
-	alice, err := s.UserSummaryRow(project.ID, "alice")
+	alice, err := s.UserSummaryRow(t.Context(), project.ID, "alice")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -746,14 +746,14 @@ func TestTheSweepOfTheLastRowForgetsTheUser(t *testing.T) {
 	if err := writer.Submit(context.Background(), sweep); err != nil {
 		t.Fatal(err)
 	}
-	bob, err := s.UserSummaryRow(project.ID, "bob")
+	bob, err := s.UserSummaryRow(t.Context(), project.ID, "bob")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if bob != nil {
 		t.Errorf("bob survived the sweep of his only hour: %v", bob)
 	}
-	alice, err := s.UserSummaryRow(project.ID, "alice")
+	alice, err := s.UserSummaryRow(t.Context(), project.ID, "alice")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -778,7 +778,7 @@ func TestAPassSummarizesEveryUserItRolled(t *testing.T) {
 
 	passAt(t, s, time.Unix(rollupHour+4*SecondsPerHour, 0))
 
-	alice, err := s.UserSummaryRow(project.ID, "alice")
+	alice, err := s.UserSummaryRow(t.Context(), project.ID, "alice")
 	if err != nil || alice == nil {
 		t.Fatalf("alice has no summary after a pass: %v", err)
 	}
@@ -789,7 +789,7 @@ func TestAPassSummarizesEveryUserItRolled(t *testing.T) {
 		t.Errorf("alice: window %d..%d, want %d..%d",
 			alice.FirstSeen, alice.LastSeen, rollupHour, rollupHour+SecondsPerHour)
 	}
-	bob, err := s.UserSummaryRow(project.ID, "bob")
+	bob, err := s.UserSummaryRow(t.Context(), project.ID, "bob")
 	if err != nil || bob == nil || bob.Traces != 1 {
 		t.Errorf("bob = %v, err = %v; want one trace", bob, err)
 	}
@@ -811,7 +811,7 @@ func TestAnAlreadyRolledProjectIsBackfilled(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	before, err := s.RollupState(project.ID)
+	before, err := s.RollupState(t.Context(), project.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -825,7 +825,7 @@ func TestAnAlreadyRolledProjectIsBackfilled(t *testing.T) {
 	}
 	passAt(t, s, time.Unix(rollupHour+4*SecondsPerHour, 0))
 
-	users, err := s.Users(project.ID, UserFilter{Limit: 10})
+	users, err := s.Users(t.Context(), project.ID, UserFilter{Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -834,7 +834,7 @@ func TestAnAlreadyRolledProjectIsBackfilled(t *testing.T) {
 	}
 	// And the watermark did not move backwards, which is what keeps
 	// `/api/v1/stats` answering from the rollup throughout (spec 013 #12).
-	after, err := s.RollupState(project.ID)
+	after, err := s.RollupState(t.Context(), project.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -851,7 +851,7 @@ func TestUserListingSortsAndPages(t *testing.T) {
 	roll(t, s, project.ID, rollupHour)
 
 	for _, sortBy := range UserSorts {
-		page, err := s.Users(project.ID, UserFilter{Sort: sortBy, Limit: 10})
+		page, err := s.Users(t.Context(), project.ID, UserFilter{Sort: sortBy, Limit: 10})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -863,7 +863,7 @@ func TestUserListingSortsAndPages(t *testing.T) {
 		var walked []string
 		var cursor *UserCursor
 		for {
-			rows, err := s.Users(project.ID, UserFilter{Sort: sortBy, Limit: 1, After: cursor})
+			rows, err := s.Users(t.Context(), project.ID, UserFilter{Sort: sortBy, Limit: 1, After: cursor})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -879,7 +879,7 @@ func TestUserListingSortsAndPages(t *testing.T) {
 		}
 
 		// And backwards from the last row: the page before it is the first.
-		back, err := s.Users(project.ID, UserFilter{
+		back, err := s.Users(t.Context(), project.ID, UserFilter{
 			Sort: sortBy, Limit: 1, Backward: true,
 			After: &UserCursor{Key: UserCursorKey(sortBy, page[1]), UserID: page[1].UserID},
 		})
@@ -911,7 +911,7 @@ func TestUncostedUsersSortLast(t *testing.T) {
 	var walked []string
 	var cursor *UserCursor
 	for range 4 {
-		rows, err := s.Users(project.ID, UserFilter{Sort: UsersByCost, Limit: 1, After: cursor})
+		rows, err := s.Users(t.Context(), project.ID, UserFilter{Sort: UsersByCost, Limit: 1, After: cursor})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -939,14 +939,14 @@ func TestUserPrefixIsCaseSensitive(t *testing.T) {
 		environment: "production", model: "m", latencyMs: 10, hour: rollupHour, offsetSeconds: 30})
 	roll(t, s, project.ID, rollupHour)
 
-	rows, err := s.Users(project.ID, UserFilter{Prefix: "acme:", Limit: 10})
+	rows, err := s.Users(t.Context(), project.ID, UserFilter{Prefix: "acme:", Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(rows) != 2 {
 		t.Fatalf("prefix acme: matched %d, want the 2 lower-case ones", len(rows))
 	}
-	count, err := s.CountUsers(project.ID, UserFilter{Prefix: "acme:"}, 100)
+	count, err := s.CountUsers(t.Context(), project.ID, UserFilter{Prefix: "acme:"}, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1038,7 +1038,7 @@ func TestTheLiveTailIsExact(t *testing.T) {
 	s, project := readStore(t)
 	usersFixture(t, s, project.ID)
 
-	tail, err := s.UserTail(project.ID, "alice", 0)
+	tail, err := s.UserTail(t.Context(), project.ID, "alice", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1050,7 +1050,7 @@ func TestTheLiveTailIsExact(t *testing.T) {
 		t.Errorf("tail last seen %d, want %d", tail.LastSeen, (rollupHour+30)*1e9)
 	}
 	// Nothing was ever filed under this id.
-	nobody, err := s.UserTail(project.ID, "nobody", 0)
+	nobody, err := s.UserTail(t.Context(), project.ID, "nobody", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1076,7 +1076,7 @@ func TestErasureTakesThePerUserRows(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	alice, err := s.UserSummaryRow(project.ID, "alice")
+	alice, err := s.UserSummaryRow(t.Context(), project.ID, "alice")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1087,7 +1087,7 @@ func TestErasureTakesThePerUserRows(t *testing.T) {
 		t.Errorf("alice still has %d rolled rows", len(rows))
 	}
 	// Bob is untouched: an erasure is about one user.
-	bob, err := s.UserSummaryRow(project.ID, "bob")
+	bob, err := s.UserSummaryRow(t.Context(), project.ID, "bob")
 	if err != nil {
 		t.Fatal(err)
 	}

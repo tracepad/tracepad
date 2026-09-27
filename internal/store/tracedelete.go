@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"maps"
@@ -138,7 +139,7 @@ func (r *traceRemoval) apply(tx *sql.Tx) (DeleteCounts, error) {
 	if now == 0 {
 		now = time.Now().UnixNano()
 	}
-	state, err := rollupState(tx, r.projectID)
+	state, err := rollupState(context.Background(), tx, r.projectID)
 	if err != nil {
 		return counts, err
 	}
@@ -280,8 +281,8 @@ func (d *TraceDelete) apply(tx *sql.Tx) error {
 // itself and what hangs off it, and the run holding it, if one does. A trace
 // the project does not hold counts nothing, which is how the handler knows to
 // answer 404.
-func (s *Store) TracePreview(projectID, id string) (DeleteCounts, []AffectedRun, error) {
-	return s.tracesPreview(projectID,
+func (s *Store) TracePreview(ctx context.Context, projectID, id string) (DeleteCounts, []AffectedRun, error) {
+	return s.tracesPreview(ctx, projectID,
 		`SELECT id FROM traces WHERE project_id = ? AND id = ?`, projectID, id)
 }
 
@@ -289,9 +290,9 @@ func (s *Store) TracePreview(projectID, id string) (DeleteCounts, []AffectedRun,
 // matches would take (#2): exactly, not at the listing's cap, because this is
 // one deliberate act and "1000+" would leave the operator unable to tell a
 // filter they can finish from one they cannot.
-func (s *Store) TraceDeletePreview(projectID string, filter TraceFilter) (DeleteCounts, []AffectedRun, error) {
+func (s *Store) TraceDeletePreview(ctx context.Context, projectID string, filter TraceFilter) (DeleteCounts, []AffectedRun, error) {
 	where, args := traceConditions(projectID, filter)
-	return s.tracesPreview(projectID,
+	return s.tracesPreview(ctx, projectID,
 		`SELECT id FROM traces WHERE `+strings.Join(where, " AND "), args...)
 }
 
@@ -301,12 +302,12 @@ func (s *Store) TraceDeletePreview(projectID string, filter TraceFilter) (Delete
 // that position rather than hiding it. The runs holding any of the traces
 // come back beside the counts: a deletion overrides the pin (spec 014 #14,
 // spec 035 #6), and the preview is where that is said.
-func (s *Store) tracesPreview(projectID, owned string, args ...any) (DeleteCounts, []AffectedRun, error) {
+func (s *Store) tracesPreview(ctx context.Context, projectID, owned string, args ...any) (DeleteCounts, []AffectedRun, error) {
 	var (
 		counts DeleteCounts
 		oldest sql.NullInt64
 	)
-	err := s.db.QueryRow(
+	err := s.db.QueryRowContext(ctx,
 		`SELECT COUNT(*), MIN(ingested_at) FROM traces WHERE project_id = ? AND id IN (`+owned+`)`,
 		append([]any{projectID}, args...)...).Scan(&counts.Traces, &oldest)
 	if err != nil {
@@ -325,7 +326,7 @@ func (s *Store) tracesPreview(projectID, owned string, args ...any) (DeleteCount
 	} {
 		// The table names are this package's own constants; only the
 		// project id and the filter's values are bound.
-		if err := s.db.QueryRow(
+		if err := s.db.QueryRowContext(ctx,
 			`SELECT COUNT(*) FROM `+table.name+` WHERE project_id = ? AND trace_id IN (`+owned+`)`,
 			append([]any{projectID}, args...)...).Scan(table.count); err != nil {
 			return counts, nil, fmt.Errorf("count the %s: %w", table.name, err)
@@ -334,10 +335,10 @@ func (s *Store) tracesPreview(projectID, owned string, args ...any) (DeleteCount
 	// The bodies the project stops holding with these traces (spec 041
 	// #11, #27). Raw batches are not touched here, so a body one of the
 	// project's still names is not counted.
-	if counts.Media, counts.MediaBytes, err = s.mediaFreed(projectID, owned, args, "", nil); err != nil {
+	if counts.Media, counts.MediaBytes, err = s.mediaFreed(ctx, projectID, owned, args, "", nil); err != nil {
 		return counts, nil, err
 	}
-	rows, err := s.db.Query(
+	rows, err := s.db.QueryContext(ctx,
 		`SELECT r.id, r.dataset, COUNT(*) FROM traces t
 		   JOIN dataset_runs r ON r.project_id = t.project_id AND r.id = t.run_id
 		  WHERE t.project_id = ? AND t.id IN (`+owned+`)

@@ -539,7 +539,7 @@ func TestScoreDeleteIsScopedAndShaped(t *testing.T) {
 	expectError(t, h.send(t, "DELETE", "/api/v1/scores/"+id, nil), http.StatusNotFound, "not found")
 
 	// And the stranger's row is still there.
-	if got, err := h.store.Score(other.ID, id); err != nil || got == nil {
+	if got, err := h.store.Score(t.Context(), other.ID, id); err != nil || got == nil {
 		t.Fatalf("score(other) = %v, %v, want it untouched", got, err)
 	}
 }

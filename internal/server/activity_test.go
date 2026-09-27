@@ -48,7 +48,7 @@ func TestProjectListingCountsTheDaysTraces(t *testing.T) {
 		Level: model.LevelDefault, StartTime: live, EndTime: live + 100*ms,
 	})
 	h.rollTheCorpus(t, now)
-	if state, err := h.store.RollupState(h.project.ID); err != nil || state.RolledUntil <= hourAgo(3) {
+	if state, err := h.store.RollupState(t.Context(), h.project.ID); err != nil || state.RolledUntil <= hourAgo(3) {
 		t.Fatalf("watermark = %d (%v); the rolled hour is not behind it and the test proves nothing", state.RolledUntil, err)
 	}
 

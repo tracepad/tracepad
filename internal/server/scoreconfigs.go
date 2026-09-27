@@ -2,7 +2,6 @@ package server
 
 import (
 	"fmt"
-	"log/slog"
 	"net/http"
 	"slices"
 	"time"
@@ -136,10 +135,9 @@ func (s *Server) handleListScoreConfigs(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	configs, err := s.store.ScoreConfigs(project.ID)
+	configs, err := s.store.ScoreConfigs(r.Context(), project.ID)
 	if err != nil {
-		slog.Error("list score configs failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to list the score configs")
+		readFailed(w, r, "failed to list the score configs", err)
 		return
 	}
 	out := make([]scoreConfigResponse, 0, len(configs))
@@ -159,10 +157,9 @@ func (s *Server) handleGetScoreConfig(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	config, err := s.store.ScoreConfig(project.ID, name)
+	config, err := s.store.ScoreConfig(r.Context(), project.ID, name)
 	if err != nil {
-		slog.Error("read score config failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to read the score config")
+		readFailed(w, r, "failed to read the score config", err)
 		return
 	}
 	if config == nil {

@@ -615,6 +615,12 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 		writeError(w, http.StatusInternalServerError, "failed to render the response")
 		return
 	}
+	writeEncoded(w, status, encoded)
+}
+
+// writeEncoded writes a body already encoded — by writeJSON, or by a handler
+// that renders in a pass of its own, as the trace tree does (spec 043 #18).
+func writeEncoded(w http.ResponseWriter, status int, encoded []byte) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	// The newline json.Encoder ended every answer with before (spec 043 #3).

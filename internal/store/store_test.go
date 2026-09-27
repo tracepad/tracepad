@@ -21,7 +21,7 @@ func openTemp(t *testing.T) (*Store, string) {
 
 func TestMigrateFreshAndReopen(t *testing.T) {
 	s, path := openTemp(t)
-	if n, err := s.CountProjects(); err != nil || n != 0 {
+	if n, err := s.CountProjects(t.Context()); err != nil || n != 0 {
 		t.Fatalf("fresh db: n=%d err=%v", n, err)
 	}
 	s.Close()
@@ -105,7 +105,7 @@ func TestBootstrapDeclarativeIdempotent(t *testing.T) {
 		t.Fatalf("declared key does not resolve as the server's own, got %+v, %+v", p, key)
 	}
 	// Declared projects present, no stray "default".
-	if p, _ := s.ProjectByName("default"); p != nil {
+	if p, _ := s.ProjectByName(t.Context(), "default"); p != nil {
 		t.Fatal("default project created despite declarative specs")
 	}
 }
@@ -138,7 +138,7 @@ func TestBackupIncludesWALData(t *testing.T) {
 		t.Fatalf("open backup: %v", err)
 	}
 	defer b.Close()
-	if n, _ := b.CountProjects(); n != 1 {
+	if n, _ := b.CountProjects(t.Context()); n != 1 {
 		t.Fatalf("backup lost WAL data: projects = %d, want 1", n)
 	}
 

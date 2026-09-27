@@ -492,7 +492,7 @@ func TestIngestLinksTracesToTheirRun(t *testing.T) {
 	}
 
 	expectStatus(t, h.post(t, "/v1/traces", fixtureBody(t, "009-eval-run")), http.StatusOK)
-	row, err := h.store.Trace(h.project.ID, "e0a1b2c3d4e5f60718293a4b5c6d7e8f")
+	row, err := h.store.Trace(t.Context(), h.project.ID, "e0a1b2c3d4e5f60718293a4b5c6d7e8f")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -511,7 +511,7 @@ func TestIngestLinksTracesToTheirRun(t *testing.T) {
 	}
 	var attempts int
 	for _, id := range []string{"e0a1b2c3d4e5f60718293a4b5c6d7e8f", "e2c3d4e5f60718293a4b5c6d7e8f90a1"} {
-		row, err := h.store.Trace(h.project.ID, id)
+		row, err := h.store.Trace(t.Context(), h.project.ID, id)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -523,7 +523,7 @@ func TestIngestLinksTracesToTheirRun(t *testing.T) {
 		t.Errorf("attempts of item A = %d, want both traces linked beside each other", attempts)
 	}
 	// The trace that stamped names rather than ids has no link at all.
-	named, _ := h.store.Trace(h.project.ID, "e3d4e5f60718293a4b5c6d7e8f90a1b2")
+	named, _ := h.store.Trace(t.Context(), h.project.ID, "e3d4e5f60718293a4b5c6d7e8f90a1b2")
 	if named.RunID != "" || named.ItemID != "" {
 		t.Errorf("a trace with unusable ids got a link: %q/%q", named.RunID, named.ItemID)
 	}
