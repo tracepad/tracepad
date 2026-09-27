@@ -1,7 +1,12 @@
 package server
 
 import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"testing"
 	"time"
@@ -65,6 +70,7 @@ func TestAnErasureAnswersWithItsCompactionAndTheBackup(t *testing.T) {
 
 	rec = h.call(t, "DELETE", path+"?confirm=erase-me", nil)
 	expectStatus(t, rec, http.StatusOK)
+	expectUniqueKeys(t, rec)
 	answer := decodeJSON[struct {
 		Deleted    map[string]int `json:"deleted"`
 		Compaction struct {
@@ -109,6 +115,7 @@ func TestATraceDeletionAnswersWithItsCompaction(t *testing.T) {
 	h.seed(t, &model.Trace{ID: traceHex(1)})
 	rec := h.call(t, "DELETE", "/api/v1/traces/"+traceHex(1)+"?confirm="+traceHex(1), nil)
 	expectStatus(t, rec, http.StatusOK)
+	expectUniqueKeys(t, rec)
 	answer := decodeJSON[struct {
 		Compaction struct {
 			RequestedAt *time.Time `json:"requested_at"`
@@ -130,6 +137,7 @@ func TestATraceDeletionAnswersWithItsCompaction(t *testing.T) {
 	// migration's), it is not this answer's to report.
 	rec = h.call(t, "DELETE", "/api/v1/projects/"+h.project.ID+"/users/nobody/data?confirm=nobody", nil)
 	expectStatus(t, rec, http.StatusOK)
+	expectUniqueKeys(t, rec)
 	empty := decodeJSON[struct {
 		Compaction struct {
 			RequestedAt *time.Time `json:"requested_at"`
@@ -138,5 +146,53 @@ func TestATraceDeletionAnswersWithItsCompaction(t *testing.T) {
 	}](t, rec)
 	if empty.Compaction.RequestedAt != nil || empty.Compaction.ExpectedBy != nil {
 		t.Errorf("an erasure of nothing answered compaction = %+v, want both null", empty.Compaction)
+	}
+}
+
+// expectUniqueKeys fails when any object in the answer names a key twice.
+// `encoding/json` keeps the last of two and says nothing, so a decoded answer
+// cannot show it; a client in another language may keep the first, and the
+// answer means something else to it.
+func expectUniqueKeys(t *testing.T, rec *httptest.ResponseRecorder) {
+	t.Helper()
+	decoder := json.NewDecoder(bytes.NewReader(rec.Body.Bytes()))
+	var walk func(path string) error
+	walk = func(path string) error {
+		token, err := decoder.Token()
+		if err != nil {
+			return err
+		}
+		switch token {
+		case json.Delim('{'):
+			seen := map[string]bool{}
+			for decoder.More() {
+				key, err := decoder.Token()
+				if err != nil {
+					return err
+				}
+				name := key.(string)
+				if seen[name] {
+					t.Errorf("%s names %q twice: %s", path, name, rec.Body)
+				}
+				seen[name] = true
+				if err := walk(path + "." + name); err != nil {
+					return err
+				}
+			}
+			_, err = decoder.Token()
+			return err
+		case json.Delim('['):
+			for i := 0; decoder.More(); i++ {
+				if err := walk(path + "[]"); err != nil {
+					return err
+				}
+			}
+			_, err = decoder.Token()
+			return err
+		}
+		return nil
+	}
+	if err := walk("$"); err != nil && !errors.Is(err, io.EOF) {
+		t.Fatalf("the answer is not JSON: %v", err)
 	}
 }

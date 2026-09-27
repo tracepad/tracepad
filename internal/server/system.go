@@ -363,15 +363,16 @@ func compactionBlock(state store.CompactionState) object {
 // so asked for nothing — whatever another request left pending is not its
 // answer to give.
 func (s *Server) compactionAnswer(requested int64) object {
-	body := object{}.put("requested_at", nil).put("expected_by", nil)
-	if requested == 0 {
-		return body
+	// Each key once: `object` is a list, and a second `put` of a key writes
+	// it twice rather than replacing it.
+	var requestedAt, expectedBy any
+	if requested != 0 {
+		requestedAt = formatTime(requested)
+		if s.sweeper != nil {
+			expectedBy = formatTime(s.sweeper.ExpectedBy())
+		}
 	}
-	body = body.put("requested_at", formatTime(requested))
-	if s.sweeper != nil {
-		body = body.put("expected_by", formatTime(s.sweeper.ExpectedBy()))
-	}
-	return body
+	return object{}.put("requested_at", requestedAt).put("expected_by", expectedBy)
 }
 
 // backupAnswer names the newest pre-migration backup — the one copy of the
