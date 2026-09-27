@@ -196,8 +196,9 @@ func message(method, params string, notification bool) []byte {
 // `params` missing, null and empty, is either answered by the server or
 // turned away by the transport before dispatch — each case says which — and
 // the server goes on serving. A request that left out the optional `params`
-// used to take the process down. Unauthenticated throughout: that is who
-// could do it.
+// used to take the process down. With a key, since the server answers any
+// request without one 401 before the MCP layer (spec 001 #15) — asserted at
+// the end — so a key holder is who could do it now.
 func TestRequestsWithoutParamsAreAnswered(t *testing.T) {
 	h := newHarness(t)
 
@@ -213,7 +214,7 @@ func TestRequestsWithoutParamsAreAnswered(t *testing.T) {
 		for _, method := range append(append([]string{}, everyRequest...), everyNotification...) {
 			notification := strings.HasPrefix(method, "notifications/")
 			t.Run("older/"+shape+"/"+method, func(t *testing.T) {
-				answer := postMCP(t, h.url, message(method, params, notification), nil)
+				answer := postMCP(t, h.url, message(method, params, notification), withKey())
 				switch {
 				case method == unknownMethod:
 					assertRefused(t, answer, "unsupported")
@@ -308,13 +309,18 @@ func TestRequestsWithoutParamsAreAnswered(t *testing.T) {
 	})
 
 	// The exact request that used to crash the server now lists the tools.
-	answer := postMCP(t, h.url, []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`), nil)
+	answer := postMCP(t, h.url, []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`), withKey())
 	if answer.status != http.StatusOK || !bytes.Contains(answer.body, []byte("get_last_trace")) {
 		t.Fatalf("tools/list without params: %d %s", answer.status, answer.body)
 	}
-	answer = postMCP(t, h.url, []byte(`{"jsonrpc":"2.0","id":2,"method":"ping"}`), nil)
+	answer = postMCP(t, h.url, []byte(`{"jsonrpc":"2.0","id":2,"method":"ping"}`), withKey())
 	if answer.status != http.StatusOK || !bytes.Contains(answer.body, []byte(`"result"`)) {
 		t.Fatalf("ping without params: %d %s", answer.status, answer.body)
+	}
+	// Without a key, the same request never reaches the MCP layer.
+	answer = postMCP(t, h.url, []byte(`{"jsonrpc":"2.0","id":3,"method":"tools/list"}`), nil)
+	if answer.status != http.StatusUnauthorized {
+		t.Fatalf("tools/list without a key: %d %s, want 401", answer.status, answer.body)
 	}
 	// And the rest of the server is still there.
 	if body := h.get(t, "/api/v1/traces"); !bytes.Contains(body, []byte(traceHex(1))) {
@@ -326,10 +332,15 @@ func TestRequestsWithoutParamsAreAnswered(t *testing.T) {
 // the method itself, which the transport checks against the body.
 func newProtocol(method string) http.Header {
 	return http.Header{
+		"Authorization":        {"Bearer " + testKey},
 		"Mcp-Protocol-Version": {mcpserver.ProtocolVersion},
 		"Mcp-Method":           {method},
 	}
 }
+
+// withKey is the least a request needs to reach the MCP layer: the server
+// answers anything without a project key 401 before it (spec 001 #15).
+func withKey() http.Header { return http.Header{"Authorization": {"Bearer " + testKey}} }
 
 // panickingAPI stands in for a tool handler with a bug in it.
 type panickingAPI struct{ bug func(query url.Values) }
@@ -437,24 +448,36 @@ func TestRuntimeErrorPanicKeepsItsMessage(t *testing.T) {
 }
 
 // TestOnlyWellFormedTraceContextIsLogged: trace context reaches the log once
-// per request and only when it is well-formed W3C trace context. The log line
-// is written before any credential is checked, so the malformed cases go in
-// the way an attacker would send them — unauthenticated, older protocol, no
-// headers beyond what the transport requires — and anything that is not
-// trace context — oversized, malformed, a forged log line — is dropped rather
-// than written.
+// per request and only when it is well-formed W3C trace context. A request
+// with no key is answered 401 before the MCP layer and logs none of it (spec
+// 001 #15); past that, the malformed cases go in the way the least privileged
+// caller who can reach the layer would send them — a key and nothing else,
+// older protocol — and anything that is not trace context — oversized,
+// malformed, a forged log line — is dropped rather than written.
 func TestOnlyWellFormedTraceContextIsLogged(t *testing.T) {
 	h := newHarness(t)
 	recorded := captureLog(t)
 
 	const valid = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
-	unauthenticated := func(t *testing.T, traceparent string) {
+	send := func(t *testing.T, traceparent string, header http.Header) mcpAnswer {
 		t.Helper()
 		params, err := json.Marshal(map[string]any{"_meta": map[string]any{"traceparent": traceparent}})
 		if err != nil {
 			t.Fatal(err)
 		}
-		assertServed(t, postMCP(t, h.url, message("tools/list", `,"params":`+string(params), false), nil), false)
+		return postMCP(t, h.url, message("tools/list", `,"params":`+string(params), false), header)
+	}
+	keyed := func(t *testing.T, traceparent string) {
+		t.Helper()
+		assertServed(t, send(t, traceparent, withKey()), false)
+	}
+
+	// No key: 401, and nothing of the trace context in the log.
+	if answer := send(t, valid, nil); answer.status != http.StatusUnauthorized {
+		t.Fatalf("no key: status %d, want 401", answer.status)
+	}
+	if strings.Contains(recorded.String(), valid) {
+		t.Fatalf("a request with no key logged its trace context:\n%s", recorded.String())
 	}
 
 	// Once per request, on the 2026-07-28 path and on the older one.
@@ -463,7 +486,7 @@ func TestOnlyWellFormedTraceContextIsLogged(t *testing.T) {
 		t.Fatalf("logged %d times, want once:\n%s", n, recorded.String())
 	}
 	recorded.Reset()
-	unauthenticated(t, valid)
+	keyed(t, valid)
 	if n := strings.Count(recorded.String(), valid); n != 1 {
 		t.Fatalf("older protocol: logged %d times, want once:\n%s", n, recorded.String())
 	}
@@ -478,7 +501,7 @@ func TestOnlyWellFormedTraceContextIsLogged(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			recorded.Reset()
-			unauthenticated(t, traceparent)
+			keyed(t, traceparent)
 			log := recorded.String()
 			if n := strings.Count(log, later); n != 1 || strings.Contains(log, later+"-") {
 				t.Fatalf("want exactly the first 55 characters, once:\n%.500s", log)
@@ -501,7 +524,7 @@ func TestOnlyWellFormedTraceContextIsLogged(t *testing.T) {
 	for name, traceparent := range invalid {
 		t.Run(name, func(t *testing.T) {
 			recorded.Reset()
-			unauthenticated(t, traceparent)
+			keyed(t, traceparent)
 			if strings.Contains(recorded.String(), "traceparent") {
 				t.Fatalf("malformed trace context reached the log:\n%.500s", recorded.String())
 			}

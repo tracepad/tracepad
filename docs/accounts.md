@@ -98,8 +98,13 @@ stops reading.
 Setup, sign-in and accepting an invitation are the three routes that take a
 body from anybody, so they take a small one: at most 8 KiB of uncompressed
 JSON. A larger body is `413` and a compressed one (`Content-Encoding: gzip`
-or any other) is `415`. A display name is trimmed and then at most 200
-characters, here and wherever else one is set.
+or any other) is `415`. The body must be declared `Content-Type:
+application/json` (`415` otherwise), and a request that carries an `Origin`
+must come from this server's own address (`403` otherwise): together they stop
+a page on another site from posting a form that signs your browser into an
+account of its choosing. The CLI, the SDKs and `curl` send no `Origin` and are
+unaffected. A display name is trimmed and then at most 200 characters, here
+and wherever else one is set.
 
 ### What a session may ask
 
@@ -120,6 +125,14 @@ A request authenticated by cookie with a method other than `GET`, `HEAD` or
 one this server answers to; otherwise `403 cross-origin request refused`.
 Requests carrying an `Authorization` header are exempt, and that header wins
 when both are present: an explicit credential beats an ambient one.
+
+The same `403` on the sign-in form almost always means a proxy in front of the
+server that passes neither the address the browser used (`Host` or
+`X-Forwarded-Host`) nor anything the server was told to expect. The error
+says so, and the server logs a `WARN` naming the origin it was sent and the
+hosts it compared it with, once a minute for each origin. Set `TRACEPAD_URL` to the
+public address, or have the proxy forward `Host`
+([docker.md](docker.md#serving-over-tls)).
 
 Three hosts count as this server's: the request's own `Host`, the first value
 of `X-Forwarded-Host`, and the host of `TRACEPAD_URL`. The last two matter

@@ -314,24 +314,75 @@ func (c *countingBody) Read(p []byte) (int, error) {
 // logLimiter lets one line through per interval and counts the rest, so a
 // burst of refused bombs costs one log line a minute rather than one a
 // request, and the line that does get through says how many it stands for.
+//
+// allowKey paces each key on its own, for a warning that friendly and hostile
+// requests share: one sender repeating itself cannot hold the line another
+// needs, and each line counts only its own key's repeats. keys caps how many
+// keys an interval admits (one when zero), so a sender inventing a new key per
+// request cannot fill the log either; what the cap turned away is counted
+// apart and told with the next line let through.
 type logLimiter struct {
 	mu      sync.Mutex
 	every   time.Duration
-	last    time.Time
+	keys    int
+	seen    map[string]*logKey
+	overCap int64
+}
+
+type logKey struct {
+	at      time.Time
 	skipped int64
+}
+
+// logHeld is what a line let through stands for: its own key's repeats since
+// its last line, and the lines of other keys the cap turned away meanwhile.
+type logHeld struct {
+	sameKey, overCap int64
 }
 
 // allow reports whether to log now and how many were held back since the
 // last line that was.
 func (l *logLimiter) allow(now time.Time) (skipped int64, ok bool) {
+	held, ok := l.allowKey("", now)
+	return held.sameKey, ok
+}
+
+// allowKey is allow for one key among several.
+func (l *logLimiter) allowKey(key string, now time.Time) (logHeld, bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if !l.last.IsZero() && now.Sub(l.last) < l.every {
-		l.skipped++
-		return 0, false
+	if l.seen == nil {
+		l.seen = map[string]*logKey{}
 	}
-	skipped, l.skipped, l.last = l.skipped, 0, now
-	return skipped, true
+	limit := max(l.keys, 1)
+	if k, ok := l.seen[key]; ok {
+		if now.Sub(k.at) < l.every {
+			k.skipped++
+			return logHeld{}, false
+		}
+		held := logHeld{sameKey: k.skipped, overCap: l.overCap}
+		k.at, k.skipped, l.overCap = now, 0, 0
+		return held, true
+	}
+	active := 0
+	for other, k := range l.seen {
+		switch {
+		case now.Sub(k.at) < l.every:
+			active++
+		case k.skipped == 0 || len(l.seen) > 2*limit:
+			// Nothing to tell, or kept long enough: a key that comes
+			// back after this starts its count again.
+			delete(l.seen, other)
+		}
+	}
+	if active >= limit {
+		l.overCap++
+		return logHeld{}, false
+	}
+	l.seen[key] = &logKey{at: now}
+	held := logHeld{overCap: l.overCap}
+	l.overCap = 0
+	return held, true
 }
 
 // writeExportResponse answers with an ExportTraceServiceResponse, carrying

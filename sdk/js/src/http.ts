@@ -138,7 +138,7 @@ export function describe(error: unknown): string {
  * How long the server said this answer may be trusted, in seconds.
  *
  * A header that says nothing is zero, not a default of our own: the store
- * sends `Cache-Control: max-age=60` on every prompt (`docs/prompts.md`), and
+ * sends `Cache-Control: private, max-age=60` on every prompt (`docs/prompts.md`), and
  * inventing a window for a server that did not ask for one would cache
  * against its wishes.
  */

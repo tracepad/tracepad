@@ -86,12 +86,12 @@ func TestInvitationEndToEnd(t *testing.T) {
 	// A password that is too short is a 422 and does not spend the token.
 	rec = h.call(t, "POST", "/api/v1/auth/accept-invite",
 		mustJSON(t, map[string]any{"token": token, "password": "short"}), anonymous,
-		func(r *http.Request) { r.Header.Set("Origin", "http://"+r.Host) })
+		func(r *http.Request) { r.Header.Set("Origin", "http://"+r.Host) }, asJSON)
 	expectStatus(t, rec, http.StatusUnprocessableEntity)
 
 	rec = h.call(t, "POST", "/api/v1/auth/accept-invite",
 		mustJSON(t, map[string]any{"token": token, "password": testAccountPassword}), anonymous,
-		func(r *http.Request) { r.Header.Set("Origin", "http://"+r.Host) })
+		func(r *http.Request) { r.Header.Set("Origin", "http://"+r.Host) }, asJSON)
 	expectStatus(t, rec, 200)
 	cookie := sessionCookieOf(rec)
 	if cookie == nil {
@@ -102,7 +102,7 @@ func TestInvitationEndToEnd(t *testing.T) {
 	// act on.
 	rec = h.call(t, "POST", "/api/v1/auth/accept-invite",
 		mustJSON(t, map[string]any{"token": token, "password": testAccountPassword}), anonymous,
-		func(r *http.Request) { r.Header.Set("Origin", "http://"+r.Host) })
+		func(r *http.Request) { r.Header.Set("Origin", "http://"+r.Host) }, asJSON)
 	expectError(t, rec, http.StatusForbidden, "not valid")
 
 	// The account is live: it can read its project and is not an owner.
@@ -147,7 +147,7 @@ func TestReInviteIsTheReset(t *testing.T) {
 
 	rec = h.call(t, "POST", "/api/v1/auth/accept-invite", mustJSON(t, map[string]any{
 		"token": tokenOf(t, link), "password": "a brand new password",
-	}), anonymous, func(r *http.Request) { r.Header.Set("Origin", "http://"+r.Host) })
+	}), anonymous, func(r *http.Request) { r.Header.Set("Origin", "http://"+r.Host) }, asJSON)
 	expectStatus(t, rec, 200)
 
 	// And now it is the new one.
@@ -394,7 +394,7 @@ func TestAdminTokenIsTheRecovery(t *testing.T) {
 
 	rec = h.call(t, "POST", "/api/v1/auth/accept-invite", mustJSON(t, map[string]any{
 		"token": tokenOf(t, link.InviteURL), "password": "a brand new password",
-	}), anonymous, func(r *http.Request) { r.Header.Set("Origin", "http://"+r.Host) })
+	}), anonymous, func(r *http.Request) { r.Header.Set("Origin", "http://"+r.Host) }, asJSON)
 	expectStatus(t, rec, 200)
 	if sessionCookieOf(rec) == nil {
 		t.Error("the recovery must end with the owner signed in")
@@ -442,7 +442,7 @@ func TestAccountListingShape(t *testing.T) {
 func TestInviteLinkHonoursTheConfiguredURL(t *testing.T) {
 	h := newAccountHarness(t)
 	owner := h.owner(t)
-	h.server.publicURL = "https://traces.example.com"
+	h.server.setPublicURL("https://traces.example.com")
 
 	rec := h.call(t, "POST", "/api/v1/accounts",
 		mustJSON(t, map[string]any{"email": "helper@example.com"}), asSession(owner))
@@ -469,6 +469,6 @@ func TestInvitationExpires(t *testing.T) {
 	}
 	rec := h.call(t, "POST", "/api/v1/auth/accept-invite", mustJSON(t, map[string]any{
 		"token": "stale", "password": testAccountPassword,
-	}), anonymous, func(r *http.Request) { r.Header.Set("Origin", "http://"+r.Host) })
+	}), anonymous, func(r *http.Request) { r.Header.Set("Origin", "http://"+r.Host) }, asJSON)
 	expectError(t, rec, http.StatusForbidden, "not valid")
 }

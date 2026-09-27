@@ -120,9 +120,11 @@ curl -H "Authorization: Bearer tp-sk-…" \
 There is no implicit `production` default: an unqualified fetch means "newest",
 the way every other versioned-artefact tool works.
 
-Responses carry `Cache-Control: max-age=60`, which bounds how long a label move
-takes to reach a client that caches. If you pin a version, you may cache it for
-as long as you like — a version never changes.
+Responses carry `Cache-Control: private, max-age=60`, which bounds how long a
+label move takes to reach a client that caches, with `Vary: Authorization,
+Cookie, X-Tracepad-Project`. `private` keeps a proxy or CDN in front of the
+server from handing one project's prompt to another caller. If you pin a
+version, you may cache it for as long as you like — a version never changes.
 
 ## Labels
 

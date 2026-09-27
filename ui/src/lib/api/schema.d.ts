@@ -2859,7 +2859,15 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
-            403: components["responses"]["Forbidden"];
+            /** @description A wrong or spent token, or an `Origin` that is not this server's */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description The body is over 8 KiB */
             413: {
                 headers: {
@@ -2869,7 +2877,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description The body is compressed: a route that takes no credential takes a plain body */
+            /** @description The body is compressed, or not declared `application/json`: a route that takes no credential takes a plain JSON body */
             415: {
                 headers: {
                     [name: string]: unknown;
@@ -2910,6 +2918,15 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            /** @description The request carries an `Origin` that is not this server's */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description The body is over 8 KiB */
             413: {
                 headers: {
@@ -2919,7 +2936,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description The body is compressed: a route that takes no credential takes a plain body */
+            /** @description The body is compressed, or not declared `application/json`: a route that takes no credential takes a plain JSON body */
             415: {
                 headers: {
                     [name: string]: unknown;
@@ -2960,7 +2977,15 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
-            403: components["responses"]["Forbidden"];
+            /** @description A wrong or spent token, or an `Origin` that is not this server's */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description The body is over 8 KiB */
             413: {
                 headers: {
@@ -2970,7 +2995,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description The body is compressed: a route that takes no credential takes a plain body */
+            /** @description The body is compressed, or not declared `application/json`: a route that takes no credential takes a plain JSON body */
             415: {
                 headers: {
                     [name: string]: unknown;

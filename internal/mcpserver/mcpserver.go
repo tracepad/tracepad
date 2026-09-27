@@ -306,9 +306,11 @@ func traceparentOf(value string) (string, bool) {
 // self-instrumentation is deliberately out of scope, so the request log is
 // where it lands and where it stops.
 //
-// This runs before any credential is checked, so only well-formed trace
-// context is logged: anything else is dropped rather than written, and an
-// unauthenticated caller cannot put arbitrary bytes into the log through it.
+// This runs before the tools check the credential a request carries — over
+// HTTP the server has refused a request with no project key before it gets
+// here (spec 001 #15), but a key is all it takes — so only well-formed trace
+// context is logged: anything else is dropped rather than written, and a
+// caller cannot put arbitrary bytes into the log through it.
 func logTraceContext(next mcp.MethodHandler) mcp.MethodHandler {
 	return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
 		if value, ok := requestMeta(req)[traceparentKey].(string); ok {

@@ -222,7 +222,10 @@ func (m pathMatcher) match(urlPath string) string {
 // dispatches the path before this handler sees it, and with it off the honest
 // answer is still the API's 404 rather than a web page (spec 004 #15).
 func reservedSegments(routes []route) map[string]bool {
-	reserved := map[string]bool{firstSegment(mcpserver.Path): true}
+	// `/.well-known` too: it is where a client asks the server about itself
+	// — an MCP client looking for OAuth metadata after a 401 — and the answer
+	// has to be the API's JSON 404, not the interface's HTML.
+	reserved := map[string]bool{firstSegment(mcpserver.Path): true, ".well-known": true}
 	for _, route := range routes {
 		reserved[firstSegment(route.Path)] = true
 	}

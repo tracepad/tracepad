@@ -34,6 +34,14 @@ over streamable HTTP. Authentication is the same project key:
 }
 ```
 
+A request without a valid key is answered `401` (with `WWW-Authenticate:
+Bearer`) before it reaches the MCP layer — `initialize` included. So are the
+key of a deleted project, a key without the `read` scope, and the admin token,
+which reaches no project's data. If the server cannot check the key at that moment, the
+answer is `503` without the challenge: retry, the key is not the problem.
+When the server stops, open MCP streams are ended at once rather than kept for
+the shutdown's drain, and a client reconnects to whatever serves next.
+
 Set `TRACEPAD_MCP=off` to stop serving it.
 
 For clients that cannot speak remote HTTP, the same binary runs the same tools

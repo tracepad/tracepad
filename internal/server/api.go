@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"maps"
 	"math"
+	"mime"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -216,17 +217,37 @@ func (s *Server) bodyRead(w http.ResponseWriter, r *http.Request, err error) boo
 // so 8 KiB is room for any client and nothing for an attacker.
 const maxPublicBodyBytes = 8 << 10
 
-// smallPlainBody is what the guard puts in front of every public route that
-// can carry a body (spec 028 Decision 26). Those routes run before anything
-// knows who is calling, so they take a few KiB and no Content-Encoding:
-// decompressing is work done for a caller nobody has identified, and the
-// configured cap is sized for trace batches, not for an email and a
-// password. Both refusals come before the handler, and so before a byte of
-// the body is read.
-func smallPlainBody(next http.HandlerFunc) http.HandlerFunc {
+// publicBody is what the guard puts in front of every public route that can
+// carry a body (spec 028 Decisions 26 and 29). Those routes run before anything
+// knows who is calling, and every refusal here comes before the handler, and
+// so before a byte of the body is read:
+//
+//   - a browser request from another origin is 403, read the way the cookie
+//     routes read it: the `Origin`, or the `Referer` when that is `null`
+//     (Decision 30). Only a request that carries an `Origin` is checked, and
+//     a browser sends one on every POST. One without passes whatever its
+//     `Referer` says — the CLI, an SDK, curl — because the check is about a
+//     page someone else wrote making a browser sign in (Decision 29);
+//   - a body that is not declared `application/json` is 415, because the one
+//     body a plain HTML form can send without a preflight that is also valid
+//     JSON is `text/plain`, and no client of these routes sends that;
+//   - a compressed body is 415 and a body over a few KiB is 413 (Decision
+//     26): decompressing is work done for a caller nobody has identified,
+//     and the configured cap is sized for trace batches, not for an email and
+//     a password.
+func (s *Server) publicBody(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Origin") != "" && !s.ownOrigin(r, statedOrigin(r)) {
+			s.refuseOrigin(w, r)
+			return
+		}
 		if !plainEncoding(r) {
 			writeError(w, http.StatusUnsupportedMediaType, "this route takes an uncompressed body")
+			return
+		}
+		if mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err != nil ||
+			mediaType != contentTypeJSON {
+			writeError(w, http.StatusUnsupportedMediaType, "this route takes Content-Type: application/json")
 			return
 		}
 		r.Body = http.MaxBytesReader(w, r.Body, maxPublicBodyBytes)

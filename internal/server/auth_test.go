@@ -158,7 +158,7 @@ func (h *harness) login(t *testing.T, email, password string) *httptest.Response
 	t.Helper()
 	return h.call(t, "POST", "/api/v1/auth/login",
 		mustJSON(t, map[string]any{"email": email, "password": password}),
-		anonymous, func(r *http.Request) { r.Header.Set("Origin", "http://"+r.Host) })
+		anonymous, func(r *http.Request) { r.Header.Set("Origin", "http://"+r.Host) }, asJSON)
 }
 
 // sessionCookieOf reads the cookie a response set, or "" when it set none.
@@ -290,9 +290,11 @@ func TestSessionCookieAttributes(t *testing.T) {
 	behindTLS := h.call(t, "POST", "/api/v1/auth/login",
 		mustJSON(t, map[string]any{"email": "owner@example.com", "password": testAccountPassword}),
 		anonymous, func(r *http.Request) {
-			r.Header.Set("Origin", "http://"+r.Host)
+			// Behind a TLS proxy the browser's origin is https: an http
+			// one would be the downgrade Decision 30 refuses.
+			r.Header.Set("Origin", "https://"+r.Host)
 			r.Header.Set("X-Forwarded-Proto", "https")
-		})
+		}, asJSON)
 	expectStatus(t, behindTLS, 200)
 	if cookie := sessionCookieOf(behindTLS); cookie == nil || !cookie.Secure {
 		t.Errorf("cookie = %+v behind a TLS proxy, want Secure", cookie)
@@ -464,14 +466,14 @@ func TestCrossOriginWriteIsRefused(t *testing.T) {
 
 	// What the operator says people type.
 	who = h.resume(t, who, "configured")
-	h.server.publicURL = "https://tracepad.example.com"
+	h.server.setPublicURL("https://tracepad.example.com")
 	expectStatus(t, behindProxy("https://tracepad.example.com", ""), http.StatusNoContent)
 
 	// And neither of those is a way in for anybody else.
 	who = h.resume(t, who, "stranger")
 	expectError(t, behindProxy("https://evil.example", "traces.example.com"),
 		http.StatusForbidden, "cross-origin")
-	h.server.publicURL = ""
+	h.server.setPublicURL("")
 
 	// A Bearer credential is exempt, and the header wins when both are
 	// present: an explicit credential beats an ambient one.
@@ -748,7 +750,7 @@ func TestSetup(t *testing.T) {
 
 	setup := func(body map[string]any) *httptest.ResponseRecorder {
 		return h.call(t, "POST", "/api/v1/setup", mustJSON(t, body), anonymous,
-			func(r *http.Request) { r.Header.Set("Origin", "http://"+r.Host) })
+			func(r *http.Request) { r.Header.Set("Origin", "http://"+r.Host) }, asJSON)
 	}
 
 	expectStatus(t, setup(map[string]any{
@@ -813,7 +815,7 @@ func TestConcurrentSetupMakesOneOwner(t *testing.T) {
 			defer wait.Done()
 			rec := h.call(t, "POST", "/api/v1/setup", mustJSON(t, map[string]any{
 				"token": token, "email": "founder@example.com", "password": testAccountPassword,
-			}), anonymous, func(r *http.Request) { r.Header.Set("Origin", "http://"+r.Host) })
+			}), anonymous, func(r *http.Request) { r.Header.Set("Origin", "http://"+r.Host) }, asJSON)
 			codes[i] = rec.Code
 		}()
 	}
@@ -848,15 +850,19 @@ func TestSetupLinkHost(t *testing.T) {
 		t.Errorf("SetupURL = %q, want the listen address", got)
 	}
 
-	h.server.publicURL = "https://traces.example.com/"
+	h.server.setPublicURL("https://traces.example.com/")
 	if got := h.server.SetupURL(); !strings.HasPrefix(got, "https://traces.example.com/setup#token=") {
 		t.Errorf("SetupURL = %q, want TRACEPAD_URL to win", got)
 	}
 
 	// A value that will not parse is ignored rather than fatal: it is the
 	// CLI's "which server" as well.
-	h.server.publicURL = "not a url"
+	h.server.setPublicURL("not a url")
 	if got := h.server.SetupURL(); strings.Contains(got, "not a url") {
 		t.Errorf("SetupURL = %q, want the guess when TRACEPAD_URL is not a URL", got)
 	}
 }
+
+// asJSON declares the body JSON, which the three public routes require of a
+// caller (spec 028 Decision 29) and no other route does (spec 003 #19).
+func asJSON(r *http.Request) { r.Header.Set("Content-Type", "application/json") }

@@ -158,16 +158,47 @@ describe('where the login form sends somebody afterwards', () => {
 		}
 	});
 
+	// Each of these resolves on this origin to a path that starts with two
+	// slashes, which handed on as a path is another host (spec 006 #17).
+	it('refuses a path that normalizes into another host', () => {
+		for (const hostile of [
+			'/.//elsewhere.example/x',
+			'/%2e//elsewhere.example/x',
+			'/./\\elsewhere.example/x',
+			'/a/..//elsewhere.example/x'
+		]) {
+			expect(returnTo(at(`?next=${encodeURIComponent(hostile)}`))).toBe('/dashboard');
+		}
+		expect(returnTo(at(`?next=${encodeURIComponent('/traces?x=1')}`))).toBe('/traces?x=1');
+	});
+
 	// Coming back to the login form is a loop, and coming back to an
 	// invitation is a token that has just been spent.
 	it('refuses the screens outside the shell', () => {
-		for (const outside of ['/login', '/setup', '/invite']) {
+		for (const outside of [
+			'/login',
+			'/setup',
+			'/invite',
+			'/login/',
+			'/invite/',
+			'/setup//',
+			// The router decodes a path before it matches it.
+			'/%6Cogin',
+			'/inv%69te',
+			'/%73etup/'
+		]) {
 			expect(returnTo(at(`?next=${encodeURIComponent(outside)}`))).toBe('/dashboard');
 		}
+	});
+
+	it('falls back on a path that does not decode', () => {
+		expect(returnTo(at(`?next=${encodeURIComponent('/traces/%E0%A4%A')}`))).toBe('/dashboard');
 	});
 
 	it('keeps a path that merely looks odd', () => {
 		// A backslash inside the path is not a scheme-relative URL.
 		expect(returnTo(at('?next=%2Ftraces%2Fa%5Cb'))).toContain('/traces/');
+		// An escape that decodes to an ordinary screen is handed on as sent.
+		expect(returnTo(at(`?next=${encodeURIComponent('/traces/a%20b')}`))).toBe('/traces/a%20b');
 	});
 });
