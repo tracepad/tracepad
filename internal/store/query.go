@@ -870,3 +870,39 @@ func (s *Store) explainQueryPlan(query string, args ...any) ([]string, error) {
 	}
 	return out, rows.Err()
 }
+
+// TracesBetween counts the traces of each project whose timestamp falls in
+// [from, to), in one statement: a seek on idx_traces_timestamp per project,
+// for the project listing's traffic column (spec 029 #8, spec 043 #29). A
+// project with none is absent from the map.
+func (s *Store) TracesBetween(ctx context.Context, projectIDs []string, from, to int64) (map[string]int64, error) {
+	counts := make(map[string]int64, len(projectIDs))
+	if len(projectIDs) == 0 {
+		return counts, nil
+	}
+	args := make([]any, 0, len(projectIDs)+2)
+	for _, id := range projectIDs {
+		args = append(args, id)
+	}
+	args = append(args, from, to)
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT project_id, COUNT(*) FROM traces
+		  WHERE project_id IN (?`+strings.Repeat(",?", len(projectIDs)-1)+`)
+		    AND timestamp >= ? AND timestamp < ?
+		  GROUP BY project_id`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("count the projects' traces: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			id    string
+			count int64
+		)
+		if err := rows.Scan(&id, &count); err != nil {
+			return nil, err
+		}
+		counts[id] = count
+	}
+	return counts, rows.Err()
+}

@@ -474,3 +474,54 @@ func TestReadTimeoutCeilingIsUnderTheWriteTimeout(t *testing.T) {
 			config.MaxReadTimeout, writeTimeout)
 	}
 }
+
+// The reads a write route makes — a dry run's counts, the selection a bulk act
+// works through — take a read slot and run under the read deadline, as a
+// listing does: uncounted, enough of them held every connection of the
+// bounded pool for as long as their scans took (spec 043 #29).
+func TestReadsInsideWritesAreBounded(t *testing.T) {
+	const timeout = 200 * time.Millisecond
+	h := newReadHarness(t, timeout, 1)
+	seedCorpus(t, h)
+	h.putConfigs(t, "quality")
+	expectStatus(t, h.putQueue(t, "review", "quality"), 201)
+	holdReads(t)
+
+	requests := map[string]func() *httptest.ResponseRecorder{
+		"the bulk delete's dry run": func() *httptest.ResponseRecorder {
+			return h.call(t, "DELETE", "/api/v1/traces?to=2030-01-01T00:00:00Z", nil)
+		},
+		"the bulk delete's selection": func() *httptest.ResponseRecorder {
+			return h.call(t, "DELETE", "/api/v1/traces?to=2030-01-01T00:00:00Z&confirm=test", nil)
+		},
+		"the queue fill's count": func() *httptest.ResponseRecorder {
+			return h.call(t, "POST", "/api/v1/queues/review/items/from-traces", []byte(`{}`))
+		},
+		"a shrinking window's dry run": func() *httptest.ResponseRecorder {
+			return h.send(t, "PATCH", "/api/v1/projects/"+h.project.ID, map[string]any{"retention_days": 1})
+		},
+		"an erasure's dry run": func() *httptest.ResponseRecorder {
+			return h.call(t, "DELETE", "/api/v1/projects/"+h.project.ID+"/users/u1/data", nil)
+		},
+	}
+
+	release := make(chan struct{})
+	held := h.holdRead(t, "/api/v1/traces", testSecret, release)
+	for name, request := range requests {
+		t.Run(name+" waits for a slot", func(t *testing.T) {
+			expectError(t, request(), 503, "the server is busy; retry shortly")
+		})
+	}
+	close(release)
+	<-held
+
+	// Stopped by the deadline while it runs, it is told to narrow.
+	previous := readAdmitted
+	readAdmitted = func(ctx context.Context) { <-ctx.Done() }
+	t.Cleanup(func() { readAdmitted = previous })
+	for name, request := range requests {
+		t.Run(name+" is stopped by the deadline", func(t *testing.T) {
+			expectError(t, request(), 503, "the read took longer than 200ms and was stopped")
+		})
+	}
+}

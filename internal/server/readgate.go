@@ -85,27 +85,72 @@ func (s *Server) readGate(next http.HandlerFunc, slots readSlots) http.HandlerFu
 		if hungUp(r) || ctx.Err() == nil || (gated.wrote && !gated.swallowed) {
 			return
 		}
-		header := w.Header()
-		// Whatever the handler set for an answer it did not give: caching
-		// headers a failure must not keep, and a retry hint only the busy
-		// answer carries.
-		header.Del("Retry-After")
-		header.Del("ETag")
-		header.Del("Last-Modified")
-		header.Set("Cache-Control", callerCacheControl)
 		// The deadline stopped the read, and the handler either said
-		// nothing or said `5xx` about a query the deadline interrupted. A
-		// read that spent longer waiting for its slot than running was
-		// slow because the server was busy, not because of what it asked,
-		// and is told so (spec 043, Edge cases).
-		if admitted.Sub(asked) > time.Since(admitted) {
+		// nothing or said `5xx` about a query the deadline interrupted.
+		s.answerStopped(w, r, asked, admitted)
+	}
+}
+
+// answerStopped answers a read the deadline stopped. One that spent longer
+// waiting for its slot than running was slow because the server was busy, not
+// because of what it asked, and is told so (spec 043, Edge cases); the other
+// is told to narrow the request.
+func (s *Server) answerStopped(w http.ResponseWriter, r *http.Request, asked, admitted time.Time) {
+	header := w.Header()
+	// Whatever the handler set for an answer it did not give: caching
+	// headers a failure must not keep, and a retry hint only the busy
+	// answer carries.
+	header.Del("Retry-After")
+	header.Del("ETag")
+	header.Del("Last-Modified")
+	header.Set("Cache-Control", callerCacheControl)
+	if admitted.Sub(asked) > time.Since(admitted) {
+		s.counters.observeRead(callerProject(r), readRefusedBusy)
+		retryLater(w, readBusy)
+		return
+	}
+	s.counters.observeRead(callerProject(r), readTimedOut)
+	writeError(w, http.StatusServiceUnavailable, readStopped(s.readTimeout))
+}
+
+/*
+readInSlot runs one read a write route makes — a dry run's counts, the selection
+a bulk act works through — as a read route runs (spec 043 #29): under the read
+deadline and in one of the read slots, taken for the read alone, so the write
+that may follow waits for nothing and holds nothing. A read of this kind scans
+like a listing, and uncounted it could hold every connection of the bounded
+pool for as long as its scan took (#16). It answers the client itself when the
+read does not complete — busy, stopped, or the read's own failure, as message —
+and reports whether it did.
+*/
+func (s *Server) readInSlot(w http.ResponseWriter, r *http.Request, message string,
+	read func(ctx context.Context) error) bool {
+	ctx, cancel := context.WithTimeout(r.Context(), s.readTimeout)
+	defer cancel()
+	asked := time.Now()
+	select {
+	case s.reads <- struct{}{}:
+	case <-ctx.Done():
+		if !hungUp(r) {
 			s.counters.observeRead(callerProject(r), readRefusedBusy)
 			retryLater(w, readBusy)
-			return
 		}
-		s.counters.observeRead(callerProject(r), readTimedOut)
-		writeError(w, http.StatusServiceUnavailable, readStopped(s.readTimeout))
+		return false
 	}
+	admitted := time.Now()
+	readAdmitted(ctx)
+	err := read(ctx)
+	<-s.reads
+	switch {
+	case err == nil:
+		return true
+	case hungUp(r):
+	case ctx.Err() != nil:
+		s.answerStopped(w, r, asked, admitted)
+	default:
+		readFailed(w, r, message, err)
+	}
+	return false
 }
 
 // readAdmitted is told when a read has its slot, before its handler runs — a

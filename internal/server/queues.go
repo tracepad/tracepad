@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"math"
 	"net/http"
@@ -412,9 +413,13 @@ func (s *Server) handleAddItemsFromTraces(w http.ResponseWriter, r *http.Request
 	// leave the caller unable to tell a filter they can finish from one
 	// they cannot. It is a read, so it happens before the job rather than
 	// inside the writer's transaction.
-	matched, err := s.store.CountTraces(r.Context(), project.ID, filter, math.MaxInt32)
-	if err != nil {
-		readFailed(w, r, "failed to count the matching traces", err)
+	// In a read slot and under the read deadline, as a listing's count is:
+	// it scans like one (spec 043 #29).
+	var matched int
+	if !s.readInSlot(w, r, "failed to count the matching traces", func(ctx context.Context) (err error) {
+		matched, err = s.store.CountTraces(ctx, project.ID, filter, math.MaxInt32)
+		return err
+	}) {
 		return
 	}
 

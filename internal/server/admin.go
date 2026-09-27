@@ -246,6 +246,14 @@ func (s *Server) handleListProjects(w http.ResponseWriter, r *http.Request) {
 		projects = []*store.Project{c.project}
 	}
 
+	var lastDay map[string]int64
+	if withActivity {
+		var err error
+		if lastDay, err = s.tracesLastDay(r.Context(), projects); err != nil {
+			readFailed(w, r, "failed to read the projects", err)
+			return
+		}
+	}
 	rendered := make([]object, 0, len(projects))
 	for _, project := range projects {
 		body := projectResponse(project)
@@ -253,35 +261,30 @@ func (s *Server) handleListProjects(w http.ResponseWriter, r *http.Request) {
 			body = body.put("role", role)
 		}
 		if withActivity {
-			count, err := s.tracesLastDay(r.Context(), project)
-			if err != nil {
-				readFailed(w, r, "failed to read the projects", err)
-				return
-			}
-			body = body.put("traces_24h", count)
+			body = body.put("traces_24h", lastDay[project.ID])
 		}
 		rendered = append(rendered, body)
 	}
 	writeJSON(w, http.StatusOK, object{}.put("projects", rendered))
 }
 
-// tracesLastDay counts a project's traces of the last 24 hours the way
-// `GET /api/v1/stats` counts them (spec 029 #8): the rolled hours behind the
-// watermark and the raw rows for the tail, so the number costs what one stats
-// call costs and trails live traffic by the same lag. A soft-deleted project
-// is not there as far as a person is concerned, and its count says so.
-func (s *Server) tracesLastDay(ctx context.Context, project *store.Project) (int64, error) {
-	if project.Deleted() {
-		return 0, nil
+// tracesLastDay counts each project's traces of the last 24 hours (spec 029
+// #8), in one statement for the whole listing: one stats read per project put
+// a listing's cost in its length, and a deployment of many projects past the
+// read deadline, answered with advice to narrow a request that has nothing to
+// narrow (spec 043 #29). The raw rows of the last day are always there — no
+// window is shorter than a day — so the count is the one the stats seam gives.
+// A soft-deleted project is not there as far as a person is concerned, and
+// its count says so.
+func (s *Server) tracesLastDay(ctx context.Context, projects []*store.Project) (map[string]int64, error) {
+	ids := make([]string, 0, len(projects))
+	for _, project := range projects {
+		if !project.Deleted() {
+			ids = append(ids, project.ID)
+		}
 	}
 	now := time.Now()
-	from, to := now.Add(-24*time.Hour).UnixNano(), now.UnixNano()
-	// One bucket for every key: only the count is read, and a day split
-	// over two calendar dates is still one day of traces.
-	var tally bucket
-	err := s.readStats(ctx, project, store.StatsFilter{From: &from, To: &to, GroupBy: defaultGroupBy},
-		func(string) *bucket { return &tally })
-	return tally.count, err
+	return s.store.TracesBetween(ctx, ids, now.Add(-24*time.Hour).UnixNano(), now.UnixNano())
 }
 
 // handleCreateProject mints a project and its first key pair. The secret is in
@@ -435,10 +438,13 @@ func (s *Server) handlePatchProject(w http.ResponseWriter, r *http.Request) {
 	confirm := values.Get("confirm")
 	if confirm == "" {
 		retention, rawWindow, statsWindow := update.Windows(project)
-		counts, err := s.store.RetentionPreview(r.Context(),
-			project.ID, retention, rawWindow, statsWindow, time.Now().UnixNano())
-		if err != nil {
-			readFailed(w, r, "failed to read what the new window would delete", err)
+		var counts store.DeleteCounts
+		if !s.readInSlot(w, r, "failed to read what the new window would delete",
+			func(ctx context.Context) (err error) {
+				counts, err = s.store.RetentionPreview(ctx,
+					project.ID, retention, rawWindow, statsWindow, time.Now().UnixNano())
+				return err
+			}) {
 			return
 		}
 		writeJSON(w, http.StatusOK, dryRun(project.Name, counts,
@@ -486,9 +492,12 @@ func (s *Server) handleDeleteProject(w http.ResponseWriter, r *http.Request) {
 
 	confirm := values.Get("confirm")
 	if confirm == "" {
-		counts, err := s.store.ProjectPreview(r.Context(), project.ID)
-		if err != nil {
-			readFailed(w, r, "failed to read what the project holds", err)
+		var counts store.DeleteCounts
+		if !s.readInSlot(w, r, "failed to read what the project holds",
+			func(ctx context.Context) (err error) {
+				counts, err = s.store.ProjectPreview(ctx, project.ID)
+				return err
+			}) {
 			return
 		}
 		writeJSON(w, http.StatusOK, dryRun(project.Name, counts,
@@ -789,9 +798,15 @@ func (s *Server) handleEraseUserData(w http.ResponseWriter, r *http.Request) {
 	// a read that failed would 500 a request that was going to succeed —
 	// the count is what the caller is told, never what the erasure needs.
 	if values.Get("confirm") == "" {
-		counts, runs, err := s.store.UserDataPreview(r.Context(), project.ID, userID)
-		if err != nil {
-			readFailed(w, r, "failed to read what this user's data is", err)
+		var (
+			counts store.DeleteCounts
+			runs   []store.AffectedRun
+		)
+		if !s.readInSlot(w, r, "failed to read what this user's data is",
+			func(ctx context.Context) (err error) {
+				counts, runs, err = s.store.UserDataPreview(ctx, project.ID, userID)
+				return err
+			}) {
 			return
 		}
 		// Erasure overrides the pin a run puts on its traces (spec 014

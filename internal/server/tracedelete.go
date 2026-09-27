@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -133,9 +134,14 @@ func (s *Server) handleDeleteTraces(w http.ResponseWriter, r *http.Request) {
 		// Counted exactly rather than at the listing's cap (spec 009 #12):
 		// this is one deliberate act, and "1000+" would leave the operator
 		// unable to tell a filter they can finish from one they cannot.
-		counts, runs, err := s.store.TraceDeletePreview(r.Context(), project.ID, filter)
-		if err != nil {
-			readFailed(w, r, "failed to count the matching traces", err)
+		var (
+			counts store.DeleteCounts
+			runs   []store.AffectedRun
+		)
+		if !s.readInSlot(w, r, "failed to count the matching traces", func(ctx context.Context) (err error) {
+			counts, runs, err = s.store.TraceDeletePreview(ctx, project.ID, filter)
+			return err
+		}) {
 			return
 		}
 		writeJSON(w, http.StatusOK, object{}.
@@ -154,9 +160,13 @@ func (s *Server) handleDeleteTraces(w http.ResponseWriter, r *http.Request) {
 	// the preview, and a set that shrank is not a reason to refuse. One row
 	// past the round says whether there is another.
 	filter.Limit = limit + 1
-	rows, err := s.store.Traces(r.Context(), project.ID, filter)
-	if err != nil {
-		readFailed(w, r, "failed to select the matching traces", err)
+	// The selection is a listing's read, and is bounded as one; the
+	// deletion after it is the writer's (spec 043 #29).
+	var rows []*store.TraceRow
+	if !s.readInSlot(w, r, "failed to select the matching traces", func(ctx context.Context) (err error) {
+		rows, err = s.store.Traces(ctx, project.ID, filter)
+		return err
+	}) {
 		return
 	}
 	more := len(rows) > limit
