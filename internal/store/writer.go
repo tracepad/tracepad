@@ -51,6 +51,17 @@ type WriteJob interface {
 	apply(tx *sql.Tx) error
 }
 
+// soloJob is a step the writer runs by itself, between commit windows and
+// outside any transaction: a truncating WAL checkpoint (spec 044 #11), which
+// cannot run inside a transaction and blocks every other writer while it
+// does. Through the writer and not on a second connection, because a second
+// connection doing it is the contention the one-writer rule exists to
+// prevent (spec 003 #24). Its apply is never called.
+type soloJob interface {
+	WriteJob
+	runAlone(ctx context.Context, conn *sql.Conn) error
+}
+
 // Rejection is a write refused for a reason the caller can fix — a prompt
 // version whose type contradicts its name's earlier versions, a label moved
 // onto a version that does not exist. Such checks read stored state, so they
@@ -227,8 +238,14 @@ func (w *Writer) run() {
 		if !ok {
 			return
 		}
+		if w.runSolo(first) {
+			continue
+		}
 		pending = append(pending[:0], first)
 
+		// A solo step ends the window: what came before it commits first,
+		// then it runs alone, in submission order.
+		var solo *submission
 		timer := time.NewTimer(w.window)
 		drained := false
 	collect:
@@ -239,6 +256,10 @@ func (w *Writer) run() {
 					drained = true
 					break collect
 				}
+				if _, isSolo := sub.job.(soloJob); isSolo {
+					solo = sub
+					break collect
+				}
 				pending = append(pending, sub)
 			case <-timer.C:
 				break collect
@@ -247,10 +268,27 @@ func (w *Writer) run() {
 		timer.Stop()
 
 		w.flush(pending)
+		if solo != nil {
+			w.runSolo(solo)
+		}
 		if drained {
 			return
 		}
 	}
+}
+
+// runSolo runs a solo step and answers it, reporting whether sub was one.
+func (w *Writer) runSolo(sub *submission) bool {
+	job, ok := sub.job.(soloJob)
+	if !ok {
+		return false
+	}
+	err := job.runAlone(context.Background(), w.conn)
+	if err != nil {
+		logFailure(err, slog.LevelError, "writer step failed")
+	}
+	sub.done <- err
+	return true
 }
 
 // flush commits one window. If the window fails as a whole, each submission

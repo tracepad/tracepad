@@ -661,10 +661,13 @@ type UserDataErase struct {
 	// caller submits another. A chunk cut short by HourLimit is not a
 	// chunk that came back short.
 	More bool
+	// CompactionRequested is the stamp of the compaction this chunk asked
+	// for, zero when it deleted nothing (spec 044 #1, #11).
+	CompactionRequested int64
 }
 
 func (e *UserDataErase) apply(tx *sql.Tx) error {
-	e.Counts = DeleteCounts{}
+	e.Counts, e.CompactionRequested = DeleteCounts{}, 0
 	// The echo is the user id here, not a project name: it is the identity
 	// of what is being destroyed (spec 005 #8).
 	if e.Confirm != e.UserID {
@@ -733,7 +736,7 @@ func (e *UserDataErase) apply(tx *sql.Tx) error {
 	if len(ids) == 0 {
 		// Nothing to delete or to roll; the per-user rows still go
 		// (below), for a user whose every hour is frozen.
-		return deleteUserRollup(tx, e.ProjectID, e.UserID)
+		return e.eraseRollup(tx)
 	}
 
 	// The body is the one trace deletion shares (spec 035 #3): the rows
@@ -749,6 +752,7 @@ func (e *UserDataErase) apply(tx *sql.Tx) error {
 	if e.Counts, err = removal.apply(tx); err != nil {
 		return err
 	}
+	e.CompactionRequested = removal.compactionAt
 
 	// The per-user rollup goes outright, in this same request (spec 023
 	// #10): those rows are *about* the user, and a re-roll would recompute
@@ -760,7 +764,19 @@ func (e *UserDataErase) apply(tx *sql.Tx) error {
 	// wrong number, between a hang-up and the repeat (review of PR #65).
 	// On every chunk, because deleting is idempotent and the last chunk is
 	// not known in advance.
-	return deleteUserRollup(tx, e.ProjectID, e.UserID)
+	return e.eraseRollup(tx)
+}
+
+// eraseRollup deletes the user's per-user rows and, when that removed any and
+// the chunk has not asked already, asks for the compaction every erasure that
+// deleted something asks for (spec 044 #1): those rows name the user too.
+func (e *UserDataErase) eraseRollup(tx *sql.Tx) error {
+	removed, err := deleteUserRollup(tx, e.ProjectID, e.UserID)
+	if err != nil || removed == 0 || e.CompactionRequested != 0 {
+		return err
+	}
+	e.CompactionRequested, err = requestCompaction(tx, e.Now)
+	return err
 }
 
 // confirmProjectName is Decision 8 in one function: a destructive job executes

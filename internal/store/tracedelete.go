@@ -46,6 +46,10 @@ type traceRemoval struct {
 	// 023 #10), and a summary rebuilt here would be a user listed again
 	// between a hang-up and the repeat. Empty means nobody is skipped.
 	skipUser string
+
+	// compactionAt is the stamp of the compaction this removal requested,
+	// zero when it removed nothing.
+	compactionAt int64
 }
 
 func (r *traceRemoval) apply(tx *sql.Tx) (DeleteCounts, error) {
@@ -97,6 +101,13 @@ func (r *traceRemoval) apply(tx *sql.Tx) (DeleteCounts, error) {
 	// Text that is gone must not remain findable (spec 011 #7).
 	if err := deleteTraceSearchEntries(tx, r.projectID, r.ids); err != nil {
 		return counts, err
+	}
+	// And must not remain in the file: an explicit deletion asks the next
+	// pass to merge the index and truncate the log (spec 044 #11).
+	if counts.Traces > 0 {
+		if r.compactionAt, err = requestCompaction(tx, r.now); err != nil {
+			return counts, err
+		}
 	}
 
 	// The statistics are corrected here, in the transaction that made them
@@ -161,10 +172,13 @@ type TraceDelete struct {
 	// Hours are the hours the deleted traces started in; the ones below
 	// the watermark were re-rolled.
 	Hours []int64
+	// CompactionRequested is the stamp of the compaction this deletion
+	// asked for (spec 044 #11), zero when it deleted nothing.
+	CompactionRequested int64
 }
 
 func (d *TraceDelete) apply(tx *sql.Tx) error {
-	d.Counts, d.Hours = DeleteCounts{}, nil
+	d.Counts, d.Hours, d.CompactionRequested = DeleteCounts{}, nil, 0
 	// The bulk form may hand over nothing: a filter that matches nothing is
 	// still a confirmed request, and its echo is checked here like every
 	// other's (review of PR #74). The single form always names one id.
@@ -243,6 +257,7 @@ func (d *TraceDelete) apply(tx *sql.Tx) error {
 	}
 	removal := &traceRemoval{projectID: d.ProjectID, ids: ids, hours: d.Hours, now: d.Now}
 	d.Counts, err = removal.apply(tx)
+	d.CompactionRequested = removal.compactionAt
 	return err
 }
 

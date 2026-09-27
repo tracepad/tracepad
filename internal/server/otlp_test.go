@@ -31,6 +31,7 @@ const (
 type harness struct {
 	server  *Server
 	store   *store.Store
+	dbPath  string // the database file of store
 	writer  *store.Writer
 	sweeper *store.Sweeper
 	project *store.Project
@@ -46,7 +47,14 @@ func newHarness(t *testing.T, cfg *config.Config, writerOpts store.WriterOptions
 	t.Helper()
 	captureLogs(t)
 
-	st := storetest.Open(t)
+	// Opened here rather than through storetest.Open so that the harness
+	// knows where the file is: the backups a test lays down go beside it.
+	dbPath := storetest.Path(t)
+	st, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
 	project, err := st.CreateProject("test", store.KeyPair{PublicKey: testPublic, Secret: testSecret})
 	if err != nil {
 		t.Fatal(err)
@@ -74,6 +82,7 @@ func newHarness(t *testing.T, cfg *config.Config, writerOpts store.WriterOptions
 	return &harness{
 		server:  New(cfg, "test", st, writer, sweeper),
 		store:   st,
+		dbPath:  dbPath,
 		writer:  writer,
 		sweeper: sweeper,
 		project: project,

@@ -93,7 +93,7 @@ const (
 // near the largest double summed to an infinity that no encoder can write.
 //
 // Every reader uses it: the trace aggregate, the statistics and users rollups
-// and the live statistics scan, and migration 0024, which spells the same
+// and the live statistics scan, and migration 0025, which spells the same
 // expression out (a test holds the two together). `json_valid` is strict JSON,
 // so a text reads as a number only when it is one whole — not `1e5e5`, not
 // `Infinity` — and `BETWEEN` rather than `abs()`, which raises `integer

@@ -90,6 +90,16 @@ type Sweeper struct {
 	// mediaCursor is where the next pass's look for bodies no ref names
 	// starts (spec 041): one page per pass, not the whole table.
 	mediaCursor string
+
+	// running and runStart say a pass is under way, so that a deletion
+	// committed now is told the pass after it (spec 044 #11).
+	running  bool
+	runStart time.Time
+
+	// afterMergeStep is a test seam: it runs after every merge step of a
+	// compaction, which is how a test lands ingest in the middle of one.
+	// Nil in production.
+	afterMergeStep func()
 }
 
 type sweepCounters struct {
@@ -158,6 +168,23 @@ func (sw *Sweeper) Close() error {
 	return nil
 }
 
+// ExpectedBy is when a compaction requested now will have run: the next pass,
+// or — while a pass is under way, which may have read the request state
+// already — the one after it. Never earlier than now: a tick that is late is
+// still due.
+func (sw *Sweeper) ExpectedBy() int64 {
+	sw.mu.Lock()
+	defer sw.mu.Unlock()
+	due := sw.nextRun
+	if sw.running {
+		due = sw.runStart.Add(sw.interval)
+	}
+	if now := sw.now(); due.Before(now) {
+		due = now
+	}
+	return due.UnixNano()
+}
+
 // Status reports the sweeper's state for one project.
 func (sw *Sweeper) Status(projectID string) SweepStatus {
 	sw.mu.Lock()
@@ -185,6 +212,18 @@ func (sw *Sweeper) Status(projectID string) SweepStatus {
 // broken state must not stop everyone else's retention.
 func (sw *Sweeper) Pass(ctx context.Context) error {
 	start := sw.now()
+	sw.mu.Lock()
+	sw.running, sw.runStart = true, start
+	sw.mu.Unlock()
+	// Whatever way the pass ends — finished, failed, cancelled — the ticker
+	// fires again an interval after it began, and that is the pass a
+	// compaction requested now is expected by (spec 044 #19).
+	defer func() {
+		sw.mu.Lock()
+		sw.running = false
+		sw.nextRun = start.Add(sw.interval)
+		sw.mu.Unlock()
+	}()
 	projects, err := sw.store.ListProjects(true)
 	if err != nil {
 		return fmt.Errorf("sweep: list projects: %w", err)
@@ -253,15 +292,29 @@ func (sw *Sweeper) Pass(ctx context.Context) error {
 		freed = true
 	}
 
-	if freed {
-		if err := sw.writer.Submit(ctx, &incrementalVacuum{Pages: vacuumPages}); err != nil {
+	// What an explicit deletion asked for, after this pass's own deletions
+	// so that a purge finished above is compacted in the same pass
+	// (spec 044 #11). A compaction drains the whole freelist; a pass without
+	// one hands back one bounded job's worth of what its own deletions freed.
+	_, drained, err := sw.compact(ctx)
+	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, ErrWriterClosed) {
+			return err
+		}
+		failures = append(failures, fmt.Errorf("compaction: %w", err))
+	}
+	if freed && !drained {
+		if err := sw.drainFreelist(ctx, false); err != nil {
 			failures = append(failures, fmt.Errorf("incremental vacuum: %w", err))
 		}
 	}
 
+	// The newest pre-migration backup, seven days after it was written
+	// (spec 044 #12). Files, not rows: nothing here goes through the writer.
+	sw.store.expireBackups(start)
+
 	sw.mu.Lock()
 	sw.lastRun = start
-	sw.nextRun = start.Add(sw.interval)
 	sw.mu.Unlock()
 
 	return errors.Join(failures...)
@@ -681,6 +734,11 @@ func (p *projectPurge) apply(tx *sql.Tx) error {
 	p.Purged = rows > 0
 	if !p.Purged {
 		return nil
+	}
+	// The project's data went in this pass's chunks and goes here; the
+	// same pass compacts after it (spec 044 #11).
+	if _, err := requestCompaction(tx, p.Now); err != nil {
+		return err
 	}
 	// Nor have `media_refs` and `media_holders` (schemas 0021, 0022): what
 	// is left of them — a ref the Langfuse channel wrote for a trace that

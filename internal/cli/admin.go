@@ -684,8 +684,15 @@ func (r *run) usersRemoveData(ctx context.Context, rest []string) error {
 		return r.emit(body)
 	}
 	result, err := decode[struct {
-		Deleted map[string]int64 `json:"deleted"`
-		UserID  string           `json:"user_id"`
+		Deleted    map[string]int64 `json:"deleted"`
+		UserID     string           `json:"user_id"`
+		Compaction struct {
+			ExpectedBy *string `json:"expected_by"`
+		} `json:"compaction"`
+		Backup *struct {
+			CreatedAt   string `json:"created_at"`
+			RemoveAfter string `json:"remove_after"`
+		} `json:"pre_migration_backup"`
 	}](body)
 	if err != nil {
 		return err
@@ -700,6 +707,17 @@ func (r *run) usersRemoveData(ctx context.Context, rest []string) error {
 	t.flush()
 	fmt.Fprintln(r.opt.Stdout,
 		"\nraw OTLP bodies are not erased; they expire on the raw retention window")
+	// What the rows left in the file is overwritten by the next pass, and
+	// the one copy of the database an erasure does not rewrite goes on its
+	// own date (spec 044 #11, #12).
+	if result.Compaction.ExpectedBy != nil {
+		fmt.Fprintf(r.opt.Stdout, "freed bytes are overwritten by the next sweep, expected by %s\n",
+			shortTime(*result.Compaction.ExpectedBy))
+	}
+	if result.Backup != nil {
+		fmt.Fprintf(r.opt.Stdout, "the pre-migration backup of %s is not rewritten; the first sweep after %s removes it\n",
+			shortTime(result.Backup.CreatedAt), shortTime(result.Backup.RemoveAfter))
+	}
 	return nil
 }
 

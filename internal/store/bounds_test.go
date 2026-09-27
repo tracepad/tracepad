@@ -824,7 +824,7 @@ func TestOneFailingHourDoesNotStopThePass(t *testing.T) {
 // and an agent's trace of three thousand calls at half a million tokens each
 // sums to 1.5e9 in a cell whose count is one. Nulled, the hour kept NULL for
 // ever — none of its observations is out of range, so nothing stamped it.
-func TestMigration0024KeepsHonestAgentSums(t *testing.T) {
+func TestMigration0025KeepsHonestAgentSums(t *testing.T) {
 	path := freshDB(t)
 	s, err := Open(path)
 	if err != nil {
@@ -846,7 +846,7 @@ func TestMigration0024KeepsHonestAgentSums(t *testing.T) {
 	}
 	seedTrace(t, s, project.ID, trace, observations...)
 	passAt(t, s, afterTheHour())
-	if _, err := s.db.Exec(`DELETE FROM schema_migrations WHERE filename = '0024_repair_numbers.sql'`); err != nil {
+	if _, err := s.db.Exec(`DELETE FROM schema_migrations WHERE filename = '0025_repair_numbers.sql'`); err != nil {
 		t.Fatal(err)
 	}
 	s.Close()
@@ -862,12 +862,12 @@ func TestMigration0024KeepsHonestAgentSums(t *testing.T) {
 	}
 }
 
-// Migration 0024 spells out the counting rule the store builds (spec 043 #9):
+// Migration 0025 spells out the counting rule the store builds (spec 043 #9):
 // the same cost expression, and every token key with the same range. Two
 // copies of one rule are held together here, or the repair would count what
 // the store does not.
-func TestMigration0024SpellsTheCountingRule(t *testing.T) {
-	body, err := migrationFS.ReadFile("migrations/0024_repair_numbers.sql")
+func TestMigration0025SpellsTheCountingRule(t *testing.T) {
+	body, err := migrationFS.ReadFile("migrations/0025_repair_numbers.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -895,9 +895,9 @@ func TestMigration0024SpellsTheCountingRule(t *testing.T) {
 // The repair (spec 043 #9): a database whose aggregates an earlier version
 // poisoned — an infinite trace total, a string total summed to zero, infinite
 // and negative sums in the rollup, a frozen cell nothing can recompute — comes
-// out of migration 0024 and one pass with the numbers a fresh ingest of the
+// out of migration 0025 and one pass with the numbers a fresh ingest of the
 // same spans produces, and the frozen cell NULL.
-func TestMigration0024RepairsPoisonedNumbers(t *testing.T) {
+func TestMigration0025RepairsPoisonedNumbers(t *testing.T) {
 	at := afterTheHour()
 	frozenHour := rollupHour - 30*24*SecondsPerHour
 	seedAll := func(t *testing.T, s *Store, projectID string) {
@@ -954,7 +954,7 @@ func TestMigration0024RepairsPoisonedNumbers(t *testing.T) {
 		fmt.Sprintf(`INSERT INTO stats_hourly (project_id, hour, environment, release, model, count, error_count,
 		                                       total_cost, latency, input_tokens, output_tokens, cache_read_tokens)
 		             VALUES ('%s', %d, 'production', '', '', 3, 0, 9e999, '[]', -3, 5, 9223372036854775807)`, poisoned.ID, frozenHour),
-		`DELETE FROM schema_migrations WHERE filename = '0024_repair_numbers.sql'`,
+		`DELETE FROM schema_migrations WHERE filename = '0025_repair_numbers.sql'`,
 	} {
 		if _, err := s.db.Exec(statement); err != nil {
 			t.Fatalf("%s: %v", statement, err)
@@ -968,7 +968,7 @@ func TestMigration0024RepairsPoisonedNumbers(t *testing.T) {
 		t.Fatalf("migrate: %v", err)
 	}
 	defer s.Close()
-	t.Logf("migration 0024 over the fixture took %v", time.Since(start).Round(time.Millisecond))
+	t.Logf("migration 0025 over the fixture took %v", time.Since(start).Round(time.Millisecond))
 	passAt(t, s, at)
 
 	for _, query := range []string{

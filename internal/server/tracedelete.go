@@ -89,7 +89,8 @@ func (s *Server) handleDeleteTrace(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, object{}.
 		put("dry_run", false).
 		put("deleted", deletedCounts(job.Counts)).
-		put("id", id))
+		put("id", id).
+		put("compaction", s.compactionAnswer(job.CompactionRequested)))
 }
 
 // handleDeleteTraces is DELETE /api/v1/traces?<filters>&to= (#2, #4, #5).
@@ -174,6 +175,7 @@ func (s *Server) handleDeleteTraces(w http.ResponseWriter, r *http.Request) {
 	// ends early at `deleteRoundChunks` (#14) and says so with `more`: the
 	// traces past it are still there, and the next request takes them.
 	var deleted store.DeleteCounts
+	var compaction int64
 	now := time.Now().UnixNano()
 	confirm := values.Get("confirm")
 	var chunk []string
@@ -196,6 +198,7 @@ func (s *Server) handleDeleteTraces(w http.ResponseWriter, r *http.Request) {
 		deleted.AnnotationItems += job.Counts.AnnotationItems
 		deleted.Media += job.Counts.Media
 		deleted.MediaBytes += job.Counts.MediaBytes
+		compaction = max(compaction, job.CompactionRequested)
 		chunk = nil
 		chunks++
 		return true
@@ -230,7 +233,8 @@ func (s *Server) handleDeleteTraces(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, object{}.
 		put("dry_run", false).
 		put("deleted", deletedCounts(deleted)).
-		put("more", more))
+		put("more", more).
+		put("compaction", s.compactionAnswer(compaction)))
 }
 
 // deletionPreview renders the dry run of a deletion of traces — one trace's,

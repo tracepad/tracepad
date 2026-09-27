@@ -428,7 +428,7 @@ export interface paths {
         };
         /**
          * List the raw export bodies oldest first, cursor-paginated
-         * @description The archive: every accepted export, kept as it arrived. This is the one listing here whose natural order is forward, because a replay has to preserve arrival order — a receiver that does not upsert by span id must see the spans in the order the world produced them. Follow with `GET /api/v1/raw/{id}` for a body; `tracepad export --otlp` is these two endpoints in a loop.
+         * @description The archive: every accepted export, kept as it arrived. This is the one listing here whose natural order is forward, because a replay has to preserve arrival order — a receiver that does not upsert by span id must see the spans in the order the world produced them. Follow with `GET /api/v1/raw/{id}` for a body; `tracepad export --otlp` is these two endpoints in a loop. Both are an editor's read: a project key, an editor or an owner — a viewer session is refused, because the archive is the bulk way out of a project.
          */
         get: operations["listRawBatches"];
         put?: never;
@@ -1438,7 +1438,7 @@ export interface paths {
         post?: never;
         /**
          * Erase everything stored about one user
-         * @description Erases the queryable stores synchronously: the traces filed under the user id, their observations, payloads and scores, and the annotation-queue items pointing at those traces — counted under `annotation_items` in both the preview and the answer. Raw OTLP bodies are not touched — they are an archive expiring on the raw retention window, which docs/retention.md documents together with what that means for an erasure request. Without `confirm` it answers with the preview; the echo here is the user id.
+         * @description Erases the queryable stores synchronously: the traces filed under the user id, their observations, payloads and scores, and the annotation-queue items pointing at those traces — counted under `annotation_items` in both the preview and the answer. The answer's `compaction` says when the sweeper pass that overwrites what was unlinked is due, and `pre_migration_backup`, while one exists, names the backup the erasure does not rewrite and the day it goes. Raw OTLP bodies are not touched — they are an archive expiring on the raw retention window, which docs/retention.md documents together with what that means for an erasure request. Without `confirm` it answers with the preview; the echo here is the user id.
          */
         delete: operations["eraseUserData"];
         options?: never;
@@ -1985,6 +1985,28 @@ export interface components {
             /** @description Send this back as `?confirm=` to make it happen */
             confirm: string;
             note?: string;
+            /** @description User-data erasure only, and only while a backup exists */
+            pre_migration_backup?: components["schemas"]["PreMigrationBackup"];
+        };
+        /** @description The compaction this deletion asked for: the sweeper pass that overwrites what it unlinked. Both null when it deleted nothing and so asked for nothing. */
+        Compaction: {
+            /** Format: date-time */
+            requested_at: string | null;
+            /**
+             * Format: date-time
+             * @description When the pass that runs it is due: the next one, or the one after a pass already under way; never earlier than the answer
+             */
+            expected_by: string | null;
+        };
+        /** @description The newest copy of the database the server wrote before an upgrade, which an erasure does not rewrite, and when the sweeper removes it */
+        PreMigrationBackup: {
+            /** Format: date-time */
+            created_at: string;
+            /**
+             * Format: date-time
+             * @description Seven days after `created_at`; the first sweeper pass after it removes the file — not before, and not while the server is down
+             */
+            remove_after: string;
         };
         /** @description What a confirmed destructive request actually removed */
         Deletion: {
@@ -1993,6 +2015,12 @@ export interface components {
             deleted: {
                 [key: string]: number;
             };
+            /** @description User-data erasure only */
+            user_id?: string;
+            /** @description User-data erasure only */
+            compaction?: components["schemas"]["Compaction"];
+            /** @description User-data erasure only, and only while a backup exists */
+            pre_migration_backup?: components["schemas"]["PreMigrationBackup"];
         };
         /** @description What deleting one trace removed */
         TraceDeletion: {
@@ -2003,6 +2031,7 @@ export interface components {
                 [key: string]: number;
             };
             id: string;
+            compaction: components["schemas"]["Compaction"];
         };
         /** @description What one round of a deletion by filter removed */
         TracesDeletion: {
@@ -2014,6 +2043,7 @@ export interface components {
             };
             /** @description Traces matching the filter remain; repeat the same call */
             more: boolean;
+            compaction: components["schemas"]["Compaction"];
         };
         /** @description A named, versioned set of test cases. `version` advances by one on every write that changes the item set; `item_count` is the live items at that version. */
         Dataset: {
@@ -3151,6 +3181,19 @@ export interface operations {
                             count: number;
                             /** @description Their decoded size */
                             bytes: number;
+                        };
+                        /** @description The deployment's compaction: after an erasure, a trace deletion or a project's purge, the next sweeper pass merges the search index, drains the freelist and truncates the write-ahead log, so what the deletion unlinked is overwritten rather than left in the file */
+                        compaction?: {
+                            /**
+                             * Format: date-time
+                             * @description The latest request still pending; null when none is
+                             */
+                            requested_at: string | null;
+                            /**
+                             * Format: date-time
+                             * @description When one last finished; null before the first
+                             */
+                            completed_at: string | null;
                         };
                         /** @description This project's ingest traffic since the process started */
                         counters: {

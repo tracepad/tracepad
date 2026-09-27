@@ -1339,6 +1339,10 @@ func (r *run) system(ctx context.Context, args []string) error {
 			Enabled bool   `json:"enabled"`
 			Path    string `json:"path"`
 		} `json:"mcp"`
+		Compaction struct {
+			RequestedAt *string `json:"requested_at"`
+			CompletedAt *string `json:"completed_at"`
+		} `json:"compaction"`
 		Raw struct {
 			Enabled            bool    `json:"enabled"`
 			Batches            int64   `json:"batches"`
@@ -1370,6 +1374,15 @@ func (r *run) system(ctx context.Context, args []string) error {
 		info.WriterQueue.Waiting, info.WriterQueue.Capacity)
 	if info.MCP.Path != "" {
 		fmt.Fprintf(r.opt.Stdout, "  mcp        %s at %s\n", enabled(info.MCP.Enabled), termsafe.String(info.MCP.Path))
+	}
+	// Whether what an explicit deletion unlinked is still waiting for the
+	// pass that overwrites it (spec 044 #11).
+	switch {
+	case info.Compaction.RequestedAt != nil:
+		fmt.Fprintf(r.opt.Stdout, "  compaction pending since %s, runs with the next sweep\n",
+			shortTime(*info.Compaction.RequestedAt))
+	case info.Compaction.CompletedAt != nil:
+		fmt.Fprintf(r.opt.Stdout, "  compaction last completed %s\n", shortTime(*info.Compaction.CompletedAt))
 	}
 
 	// This project's rows, not the deployment's (spec 004 Decision 33);

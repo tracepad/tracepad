@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/tracepad/tracepad/internal/mcpserver"
+	"github.com/tracepad/tracepad/internal/store"
 )
 
 // Self-diagnosability (design §3.4, spec 004 #10): the numbers an agent needs
@@ -270,6 +271,13 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	compaction, err := s.store.Compaction()
+	if err != nil {
+		slog.Error("read compaction state failed", "err", err)
+		writeError(w, http.StatusInternalServerError, "failed to read the compaction state")
+		return
+	}
+
 	body := object{}.
 		put("version", s.version).
 		put("go_version", runtime.Version()).
@@ -298,6 +306,11 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 			put("orphan_traces", s.counters.orphanTraces(project.ID))).
 		put("raw", raw).
 		put("media", media).
+		// Whether an explicit deletion is still waiting for the pass that
+		// overwrites what it unlinked, and when one last finished
+		// (spec 044 #11). The deployment's, not the project's: one file,
+		// one compaction, and neither stamp names anybody.
+		put("compaction", compactionBlock(compaction)).
 		// The counters are since this process started and say so: an
 		// honest process-lifetime number now beats a metrics subsystem
 		// later (#10). They are this project's, for the same reason the
@@ -328,6 +341,46 @@ func (s *Server) sweeperStatus(projectID string) object {
 		return body.put("last_run", nil)
 	}
 	return body.put("last_run", formatTime(status.LastRun))
+}
+
+// compactionBlock renders the deployment's compaction state for `/system`:
+// each stamp RFC 3339, or null for none.
+func compactionBlock(state store.CompactionState) object {
+	return object{}.
+		put("requested_at", formatInstant(state.RequestedAt)).
+		put("completed_at", formatInstant(state.CompletedAt))
+}
+
+// compactionAnswer is what the confirmed answer of an explicit deletion says
+// about the compaction *it* asked for (spec 044 #11): when it asked, and the
+// pass that will have run it. Both null when this request deleted nothing and
+// so asked for nothing — whatever another request left pending is not its
+// answer to give.
+func (s *Server) compactionAnswer(requested int64) object {
+	body := object{}.put("requested_at", nil).put("expected_by", nil)
+	if requested == 0 {
+		return body
+	}
+	body = body.put("requested_at", formatTime(requested))
+	if s.sweeper != nil {
+		body = body.put("expected_by", formatTime(s.sweeper.ExpectedBy()))
+	}
+	return body
+}
+
+// backupAnswer names the newest pre-migration backup — the one copy of the
+// database an erasure does not reach — with the moment after which the
+// sweeper's next pass removes it (spec 044 #12). "After", not "at": a pass
+// runs on its interval, and not at all while the server is down. Nil when
+// there is none, and the field is then absent.
+func (s *Server) backupAnswer() any {
+	backup := s.store.PreMigrationBackup()
+	if backup == nil {
+		return nil
+	}
+	return object{}.
+		put("created_at", formatTime(backup.CreatedAt)).
+		put("remove_after", formatTime(backup.RemoveAfter))
 }
 
 // queueReporter is the part of *store.Writer the system endpoint needs. The

@@ -83,9 +83,13 @@ func (s *Server) routes() []route {
 		// arrived, and one body exactly as the client sent it. This is
 		// what `tracepad export --otlp` replays, and what any other
 		// client — a script, a backup job, a second Tracepad — reads to
-		// take the data out (#2, #9).
-		{"GET", "/api/v1/raw", member, "List the raw export bodies oldest first, cursor-paginated", s.handleListRaw},
-		{"GET", "/api/v1/raw/{id}", member, "One raw export body, in the Content-Type it was received in", s.handleGetRawBatch},
+		// take the data out (#2, #9). `editor`, not `member`: the archive
+		// is the bulk way out of a project, every body whole, and taking
+		// a project's data out is an operator's act like its windows and
+		// its keys — a viewer reads traces and annotates (spec 044 #6). A
+		// key passes either way.
+		{"GET", "/api/v1/raw", editor, "List the raw export bodies oldest first, cursor-paginated", s.handleListRaw},
+		{"GET", "/api/v1/raw/{id}", editor, "One raw export body, in the Content-Type it was received in", s.handleGetRawBatch},
 
 		// Sessions and statistics.
 		{"GET", "/api/v1/sessions", member, "List sessions by most recent activity, filtered and cursor-paginated", s.handleListSessions},
