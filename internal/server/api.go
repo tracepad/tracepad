@@ -251,7 +251,7 @@ const minBodyOverCap = 2*(maxItemsPerWrite+1) + 1
 
 // arrayScan is what scanArray says of the first array of a body.
 type arrayScan struct {
-	count    int  // its top-level values: the commas between them plus one, 0 for none
+	count    int  // its top-level values: the commas between them plus one, 0 for none — exact for a well-formed array
 	closed   bool // its closing bracket was reached
 	trailing bool // something but white space follows the closing bracket
 }

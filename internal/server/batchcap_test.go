@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"runtime"
 	"strings"
@@ -85,15 +86,23 @@ func TestBatchWritesThatAreNotOneArrayKeepTheirAnswers(t *testing.T) {
 
 // heldBy runs f and reports its error, its allocations and the bytes it
 // allocated, which for a body of 20 MiB is the difference between holding
-// nothing per value and holding a copy of it.
+// nothing per value and holding a copy of it. The counters are the process's,
+// so whatever else is allocating during the window is in them: f is measured
+// three times and the least is kept. A background allocation lands in one
+// window; an answer that allocates per value lands in every one.
 func heldBy(f func() error) (err error, allocs float64, held uint64) {
-	var before, after runtime.MemStats
-	allocs = testing.AllocsPerRun(1, func() {
-		runtime.ReadMemStats(&before)
-		err = f()
-		runtime.ReadMemStats(&after)
-	})
-	return err, allocs, after.TotalAlloc - before.TotalAlloc
+	allocs, held = math.MaxFloat64, math.MaxUint64
+	for range 3 {
+		var before, after runtime.MemStats
+		mallocs := testing.AllocsPerRun(1, func() {
+			runtime.ReadMemStats(&before)
+			err = f()
+			runtime.ReadMemStats(&after)
+		})
+		allocs = min(allocs, mallocs)
+		held = min(held, after.TotalAlloc-before.TotalAlloc)
+	}
+	return err, allocs, held
 }
 
 // An over-cap array costs no memory per value to answer (spec 043 #36), in

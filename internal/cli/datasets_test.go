@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"github.com/tracepad/tracepad/internal/client"
 	"github.com/tracepad/tracepad/internal/model"
 	"github.com/tracepad/tracepad/internal/store"
 )
@@ -227,7 +229,7 @@ func TestDatasetsPushPlacesAFailedWriteInTheFile(t *testing.T) {
 		badCase int
 		want    []string
 	}{
-		"in the first write": {1, []string{"item at index 1", "in the write of cases 0–2 of the file, the first of 3 writes; nothing is written"}},
+		"in the first write": {1, []string{"item at index 1", "in the write of cases 0–2 of the file, the first of 3 writes; the server refused it, so nothing of the file is written"}},
 		"in the second":      {4, []string{"item at index 1", "in the write of cases 3–5 of the file; an index in this message counts from case 3", "the first 3 cases are written, at version 1", "adds the ones without an id a second time"}},
 		"alone in the last":  {6, []string{"in the write of case 6 of the file", "the first 6 cases are written, at version 2"}},
 	} {
@@ -248,6 +250,64 @@ func TestDatasetsPushPlacesAFailedWriteInTheFile(t *testing.T) {
 	got := h.run(t.Context(), true, "datasets", "push", "fail-small", "--file", casesFile(t, 2, map[int]bool{1: true}, nil))
 	if got.code != ExitFailure || strings.Contains(got.stderr, "of the file") {
 		t.Errorf("one write = %+v, want the server's own error", got)
+	}
+}
+
+// What the error says of the write that failed depends on what came back: a
+// 4xx is the server refusing it whole, and a connection that dropped or timed
+// out is a write that may have been committed — and the message that says
+// nothing is written must not be said of that.
+func TestPushFailureSaysWhatItKnowsOfTheFailingWrite(t *testing.T) {
+	refused := &client.Error{Status: 400, Message: "item at index 1: \"input\" is required"}
+	dropped := errors.New("Post: connection reset by peer")
+	unavailable := &client.Error{Status: 503, Message: "storage is temporarily unavailable; retry shortly"}
+	const unknown = "whether this write itself landed is not known"
+	const nothing = "nothing of the file is written"
+	for name, c := range map[string]struct {
+		err        error
+		start, end int
+		want, not  string
+	}{
+		"refused, the first write":     {refused, 0, 3, nothing, unknown},
+		"dropped, the first write":     {dropped, 0, 3, unknown, nothing},
+		"unavailable, the first write": {unavailable, 0, 3, unknown, nothing},
+		"refused, a later write":       {refused, 3, 6, "the first 3 cases are written, at version 2", unknown},
+		"dropped, a later write":       {dropped, 3, 6, unknown, nothing},
+		"a later write of one case":    {dropped, 6, 7, "in the write of case 6 of the file", nothing},
+	} {
+		got := pushFailure(c.err, 3, c.start, c.end, 2).Error()
+		if !strings.Contains(got, c.want) || strings.Contains(got, c.not) || !strings.HasPrefix(got, c.err.Error()) {
+			t.Errorf("%s: %q, want it to say %q and not %q", name, got, c.want, c.not)
+		}
+	}
+	if got := pushFailure(refused, 1, 0, 2, 0); got != error(refused) {
+		t.Errorf("a file one write carried: %v, want the server's own error", got)
+	}
+}
+
+// The id is read as the server reads it: a key named twice with different case
+// is the last, a null is no id, and `ID` is the id.
+func TestRefuseRepeatedIDsReadsTheIDAsTheServerDoes(t *testing.T) {
+	cases := func(lines ...string) []json.RawMessage {
+		var items []json.RawMessage
+		for _, line := range lines {
+			items = append(items, json.RawMessage(line))
+		}
+		return items
+	}
+	for name, c := range map[string]struct {
+		items []json.RawMessage
+		want  string
+	}{
+		"a null after the id is none":  {cases(`{"id":"a","input":1}`, `{"id":"a","ID":null,"input":2}`), ""},
+		"the last key of a name wins":  {cases(`{"id":"a","input":1}`, `{"ID":"a","id":"b","input":2}`), ""},
+		"the id in another case":       {cases(`{"id":"a","input":1}`, `{"ID":"a","input":2}`), "index 1 repeats id a of the case at index 0"},
+		"an empty id and a missing id": {cases(`{"id":"","input":1}`, `{"id":"","input":2}`, `{"input":3}`), ""},
+	} {
+		err := refuseRepeatedIDs(c.items)
+		if (c.want == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), c.want)) {
+			t.Errorf("%s: err = %v, want %q", name, err, c.want)
+		}
 	}
 }
 

@@ -287,11 +287,11 @@ items listing reads oldest first, which is the order they are worked in.
 datasets push takes a .jsonl (one case per line) or a .json array and sends it
 as one batch, which is one version tick, or, past the 10,000 cases one request
 takes, as one batch per 10,000, each a tick of its own if it changes anything;
-it prints the version it landed on and how many cases changed. datasets show --json walks every page, so it is the
-dataset's export. runs create --json answers with the whole run, so a script
-reads both the id and the version it pinned. runs ls without a dataset lists
-the whole project's runs, newest first. runs compare lists the items whose
-verdict is not "same"; --all lists them all.
+it prints the version it landed on and how many cases changed. datasets show
+--json walks every page, so it is the dataset's export. runs create --json
+answers with the whole run, so a script reads both the id and the version it
+pinned. runs ls without a dataset lists the whole project's runs, newest first.
+runs compare lists the items whose verdict is not "same"; --all lists them all.
 
 Administration (spec 005). Every destructive command shows what it would do
 and asks you to type the name back; --yes answers that for a script:

@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"net/url"
@@ -10,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/tracepad/tracepad/internal/client"
 	"github.com/tracepad/tracepad/internal/store"
 	"github.com/tracepad/tracepad/internal/termsafe"
 )
@@ -324,23 +326,34 @@ func (r *run) datasetsPush(ctx context.Context, args []string) error {
 // pushFailure says where in the file a write of a split push failed. The
 // server counts its indexes from the first case of the write it was sent —
 // and names none for a write of one case — so the range is what places the
-// error in the file; the writes before it are committed and stay so.
+// error in the file; the writes before it are committed and stay so. What is
+// said of the failing write itself depends on what came back: a 4xx is the
+// server refusing it, whole, and a connection that dropped or timed out is a
+// write that may have been committed.
 func pushFailure(err error, writes, start, end, version int) error {
 	if writes == 1 {
 		return err
 	}
+	var answered *client.Error
+	refused := errors.As(err, &answered) && answered.Status >= 400 && answered.Status < 500
 	span := fmt.Sprintf("cases %d–%d", start, end-1)
 	if end-start == 1 {
 		span = fmt.Sprintf("case %d", start)
 	}
+	landed := "; whether this write itself landed is not known"
+	if refused {
+		landed = ""
+	}
 	if start == 0 {
-		return fmt.Errorf("%w (in the write of %s of the file, the first of %d writes; nothing is written)",
-			err, span, writes)
+		if refused {
+			landed = "; the server refused it, so nothing of the file is written"
+		}
+		return fmt.Errorf("%w (in the write of %s of the file, the first of %d writes%s)", err, span, writes, landed)
 	}
 	return fmt.Errorf("%w (in the write of %s of the file; an index in this message counts from case %d; "+
-		"the first %d cases are written, at version %d; "+
+		"the first %d cases are written, at version %d%s; "+
 		"pushing the file again adds the ones without an id a second time)",
-		err, span, start, start, version)
+		err, span, start, start, version, landed)
 }
 
 // itemsWritten is what POST …/items answers, and what push answers for a
@@ -363,16 +376,18 @@ var itemsPerWrite = store.MaxItemsPerWrite
 func refuseRepeatedIDs(items []json.RawMessage) error {
 	seen := make(map[string]int, len(items))
 	for i, item := range items {
+		// A pointer, as the server reads the id: a key named twice with
+		// different case is the last one, and a null is no id.
 		var fields struct {
-			ID string `json:"id"`
+			ID *string `json:"id"`
 		}
-		if json.Unmarshal(item, &fields) != nil || fields.ID == "" {
+		if json.Unmarshal(item, &fields) != nil || fields.ID == nil || *fields.ID == "" {
 			continue
 		}
-		if first, repeated := seen[fields.ID]; repeated {
-			return fmt.Errorf("the case at index %d repeats id %s of the case at index %d", i, fields.ID, first)
+		if first, repeated := seen[*fields.ID]; repeated {
+			return fmt.Errorf("the case at index %d repeats id %s of the case at index %d", i, *fields.ID, first)
 		}
-		seen[fields.ID] = i
+		seen[*fields.ID] = i
 	}
 	return nil
 }
