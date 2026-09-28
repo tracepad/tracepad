@@ -167,3 +167,8 @@ export function savedMessage(answer: Pick<ItemsWritten, 'version' | 'changed'>):
 export function trim(value: number): string {
 	return String(Number(value.toFixed(4)));
 }
+
+/** What a score name is, as its table says it: its type, and which way is better when it has a direction. */
+export function scoreType(score: { data_type: string; direction?: string | null }): string {
+	return score.direction ? `${score.data_type} · ${score.direction}` : score.data_type;
+}

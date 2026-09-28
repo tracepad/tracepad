@@ -8,12 +8,14 @@
 	import { api, type ComparedItem, type RunComparison } from '$lib/api/client.svelte';
 	import Button from '$lib/components/Button.svelte';
 	import CompareItemDetail from '$lib/components/evals/CompareItemDetail.svelte';
+	import Folded from '$lib/components/Folded.svelte';
 	import StatusChip from '$lib/components/evals/StatusChip.svelte';
 	import VerdictChip from '$lib/components/evals/VerdictChip.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import PaginationBar from '$lib/components/PaginationBar.svelte';
 	import PeekPanel from '$lib/components/PeekPanel.svelte';
-	import { changedOnly, compareHref, deltaText, scoreText, short, trim } from '$lib/evals';
+	import { changedOnly, compareHref, deltaText, scoreText, scoreType, short, trim } from '$lib/evals';
+	import { Fold } from '$lib/fold.svelte';
 	import { ABSENT, cost, count, duration } from '$lib/format';
 	import { asPage, Listing, UrlSpot, Walk } from '$lib/listing.svelte';
 	import { freshSearch } from '$lib/page';
@@ -95,30 +97,69 @@
 		});
 	}
 
-	/** One side's aggregate for a name: its mean, or its distribution as words. */
-	function side(score: RunComparison['scores'][number], which: 'a' | 'b'): string {
+	/** One side's aggregate for a name: its mean, or its distribution as words, one per label. */
+	function sideOf(score: RunComparison['scores'][number], which: 'a' | 'b'): string[] {
 		const value = score[which];
-		if (!value) return ABSENT;
+		if (!value) return [ABSENT];
 		if (value.distribution) {
-			return Object.entries(value.distribution)
-				.map(([word, n]) => `${word} ${n}`)
-				.join(', ');
+			return Object.entries(value.distribution).map(([word, n]) => `${word} ${n}`);
 		}
-		return value.mean == null ? ABSENT : trim(value.mean);
+		return [value.mean == null ? ABSENT : trim(value.mean)];
 	}
 
 	/** The counts a name reports: improved/regressed for a directed one, changed otherwise. */
-	function moved(score: RunComparison['scores'][number]): string {
+	function moved(score: RunComparison['scores'][number]): string[] {
 		if (score.improved !== undefined || score.regressed !== undefined) {
-			return `${score.improved ?? 0} improved · ${score.regressed ?? 0} regressed · ${score.same} same`;
+			return [`${score.improved ?? 0} improved`, `${score.regressed ?? 0} regressed`, `${score.same} same`];
 		}
-		return `${score.changed ?? 0} changed · ${score.same} same`;
+		return [`${score.changed ?? 0} changed`, `${score.same} same`];
 	}
+
+	// In a box narrower than a table its rows fold (spec 006 #24). A score is
+	// its name and its delta, with its type, the two sides and how many cases
+	// moved under the name; a case is its item and its scores, one per line,
+	// with `#seq` and which run attempted it under the item. The numbers are
+	// the unfolded tables' widths and their `min-width`: the cases' grows by a
+	// column per score name.
+	const scoring = new Fold(608);
+	const casing = new Fold(() => 312 + 112 * names.length);
+	const scoresNarrow = $derived(scoring.narrow);
+	const casesNarrow = $derived(casing.narrow);
 
 	const card = 'border-border bg-surface min-w-0 rounded-lg border';
 	const head = 'text-subtle border-border border-b px-3 py-2 text-xs font-medium';
 	const numeric = 'px-3 py-1.5 text-right tabular-nums';
 </script>
+
+<!-- One label of a distribution is cut at 6 rem in a column of its own, and
+     at its cell's width where the cell is the box's (spec 006 #24). -->
+{#snippet side(score: RunComparison['scores'][number], which: 'a' | 'b', stacked = false)}
+	{@const pieces = sideOf(score, which)}
+	{#each pieces as piece, i (i)}<span
+			class={['inline-block truncate align-bottom', stacked ? 'max-w-full' : 'max-w-24']}
+			title={piece}
+			>{piece}{i < pieces.length - 1 ? ',' : ''}</span
+		>{' '}{/each}
+{/snippet}
+
+<!-- A label is what a program named, so each value is cut to its cell rather
+     than pushed past it (spec 006 #22, #24). -->
+{#snippet outcome(score: ComparedItem['scores'][string] | undefined)}
+	{#if score}
+		<span class="tabular-nums">
+			<span class="inline-block max-w-full truncate align-bottom" title={scoreText(score.a)}>
+				{scoreText(score.a)}
+			</span>
+			→
+			<span class="inline-block max-w-full truncate align-bottom" title={scoreText(score.b)}>
+				{scoreText(score.b)}
+			</span>
+		</span>
+		<VerdictChip verdict={score.verdict} />
+	{:else}
+		<span class="text-subtle">{ABSENT}</span>
+	{/if}
+{/snippet}
 
 <svelte:head><title>Compare · Runs · Tracepad</title></svelte:head>
 
@@ -240,9 +281,15 @@
 						<tbody>
 							{#each metadata as [key, pair] (key)}
 								<tr class="border-border border-t first:border-t-0">
-									<td class="text-subtle px-3 py-1 font-mono">{key}</td>
-									<td class="truncate px-3 py-1 font-mono" title={JSON.stringify(pair.a)}>{JSON.stringify(pair.a) ?? ABSENT}</td>
-									<td class="truncate px-3 py-1 font-mono" title={JSON.stringify(pair.b)}>{JSON.stringify(pair.b) ?? ABSENT}</td>
+									<td class="text-subtle max-w-40 truncate px-3 py-1 font-mono" title={key}>{key}</td>
+									{#each [pair.a, pair.b] as value, i (i)}
+										{@const text = JSON.stringify(value) ?? ABSENT}
+										<!-- Wrapped, so it is not cut to a word, and capped, so a document
+										     held in a value is not the whole card. -->
+										<td class="px-3 py-1 font-mono">
+											<div class="line-clamp-6 wrap-anywhere" title={text}>{text}</div>
+										</td>
+									{/each}
 								</tr>
 							{/each}
 						</tbody>
@@ -255,29 +302,48 @@
 				{#if compared.scores.length === 0}
 					<p class="text-subtle px-3 py-4 text-center text-sm">Neither run carries a score</p>
 				{:else}
-					<div class="overflow-x-auto">
-						<table class="w-full min-w-lg border-collapse text-left text-sm">
+					<div bind:contentRect={scoring.rect} class="overflow-x-auto">
+						<table class="w-full border-collapse text-left text-sm" style:min-width={scoring.min}>
 							<thead class="text-subtle text-xs whitespace-nowrap">
 								<tr class="border-border border-b">
 									<th scope="col" class="px-3 py-1.5 font-medium">Name</th>
-									<th scope="col" class="w-32 px-3 py-1.5 font-medium">Type</th>
-									<th scope="col" class="w-32 px-3 py-1.5 text-right font-medium">A</th>
-									<th scope="col" class="w-32 px-3 py-1.5 text-right font-medium">B</th>
+									{#if !scoresNarrow}
+										<th scope="col" class="w-32 px-3 py-1.5 font-medium">Type</th>
+										<th scope="col" class="w-44 px-3 py-1.5 text-right font-medium">A</th>
+										<th scope="col" class="w-44 px-3 py-1.5 text-right font-medium">B</th>
+									{/if}
 									<th scope="col" class="w-20 px-3 py-1.5 text-right font-medium">Delta</th>
-									<th scope="col" class="w-64 px-3 py-1.5 font-medium">Moved</th>
+									{#if !scoresNarrow}
+										<th scope="col" class="w-64 px-3 py-1.5 font-medium">Moved</th>
+									{/if}
 								</tr>
 							</thead>
 							<tbody>
 								{#each compared.scores as score (score.name)}
-									<tr class="border-border border-b last:border-b-0">
-										<td class="px-3 py-1.5 font-medium">{score.name}</td>
-										<td class="text-muted px-3 py-1.5">{score.data_type}{score.direction ? ` · ${score.direction}` : ''}</td>
-										<td class={numeric}>{side(score, 'a')}</td>
-										<td class={numeric}>{side(score, 'b')}</td>
+									{@const type = scoreType(score)}
+									<tr class={['border-border border-b last:border-b-0', scoresNarrow && 'align-top']}>
+										{#if scoresNarrow}
+											<td class="max-w-0 px-3 py-1.5">
+												<div class="truncate font-medium" title={score.name}>{score.name}</div>
+												<div class="tabular-nums">{@render side(score, 'a', true)} → {@render side(score, 'b', true)}</div>
+												<div class="text-muted text-xs tabular-nums">
+													<Folded values={[type, ...moved(score)]} />
+												</div>
+											</td>
+										{:else}
+											<td class="max-w-0 min-w-32 truncate px-3 py-1.5 font-medium" title={score.name}>
+												{score.name}
+											</td>
+											<td class="text-muted px-3 py-1.5">{type}</td>
+											<td class={[numeric, 'min-w-30']}>{@render side(score, 'a')}</td>
+											<td class={[numeric, 'min-w-30']}>{@render side(score, 'b')}</td>
+										{/if}
 										<td class={[numeric, (score.delta ?? 0) > 0 && score.direction === 'higher' && 'text-ok', (score.delta ?? 0) < 0 && score.direction === 'higher' && 'text-danger']}>
 											{deltaText(score.delta)}
 										</td>
-										<td class="text-muted px-3 py-1.5 text-xs tabular-nums">{moved(score)}</td>
+										{#if !scoresNarrow}
+											<td class="text-muted px-3 py-1.5 text-xs tabular-nums">{moved(score).join(' · ')}</td>
+										{/if}
 									</tr>
 								{/each}
 							</tbody>
@@ -288,16 +354,25 @@
 		</div>
 
 		{#if listing.rows.length > 0 || !listing.newest}
-			<div class="min-h-0 shrink-0 overflow-x-auto">
-				<table aria-label="Cases" class="w-full min-w-2xl table-fixed border-collapse text-left">
+			<div bind:contentRect={casing.rect} class="min-h-0 shrink-0 overflow-x-auto">
+				<table
+					aria-label="Cases"
+					class="w-full table-fixed border-collapse text-left"
+					style:min-width={casing.min}
+				>
 					<thead class="bg-canvas text-subtle text-xs whitespace-nowrap">
 						<tr class="border-border border-b">
-							<th scope="col" class="w-14 px-3 py-2 text-right font-medium">#</th>
-							<th scope="col" class="w-28 px-3 py-2 font-medium">Item</th>
-							<th scope="col" class="w-36 px-3 py-2 font-medium">In</th>
-							{#each names as name (name)}
-								<th scope="col" class="px-3 py-2 font-medium">{name}</th>
-							{/each}
+							{#if casesNarrow}
+								<th scope="col" class="w-28 px-3 py-2 font-medium">Item</th>
+								{#if names.length > 0}<th scope="col" class="px-3 py-2 font-medium">Scores</th>{/if}
+							{:else}
+								<th scope="col" class="w-14 px-3 py-2 text-right font-medium">#</th>
+								<th scope="col" class="w-28 px-3 py-2 font-medium">Item</th>
+								<th scope="col" class="w-36 px-3 py-2 font-medium">In</th>
+								{#each names as name (name)}
+									<th scope="col" class="truncate px-3 py-2 font-medium" title={name}>{name}</th>
+								{/each}
+							{/if}
 						</tr>
 					</thead>
 					<tbody>
@@ -306,10 +381,13 @@
 							<tr
 								class={[
 									'border-border hover:bg-raised border-b transition-colors duration-100',
-									lit && 'bg-accent-soft'
+									lit && 'bg-accent-soft',
+									casesNarrow && 'align-top'
 								]}
 							>
-								<td class="text-muted px-3 py-1.5 text-right tabular-nums">{row.seq}</td>
+								{#if !casesNarrow}
+									<td class="text-muted px-3 py-1.5 text-right tabular-nums">{row.seq}</td>
+								{/if}
 								<td class="truncate px-3 py-1.5 font-mono text-xs">
 									<a
 										href={peekSearch(page.url.searchParams, { peek: row.id })}
@@ -323,19 +401,32 @@
 									>
 										{short(row.id)}
 									</a>
+									{#if casesNarrow}
+										<!-- The cell is `truncate`, which is `nowrap` too. -->
+										<div class="text-muted font-sans whitespace-normal tabular-nums">
+											<Folded values={[`#${row.seq}`, row.in.replaceAll('_', ' ')]} />
+										</div>
+									{/if}
 								</td>
-								<td class="text-muted px-3 py-1.5 text-xs">{row.in.replaceAll('_', ' ')}</td>
-								{#each names as name (name)}
-									{@const score = row.scores[name]}
-									<td class="px-3 py-1.5 text-xs">
-										{#if score}
-											<span class="tabular-nums">{scoreText(score.a)} → {scoreText(score.b)}</span>
-											<VerdictChip verdict={score.verdict} />
-										{:else}
-											<span class="text-subtle">{ABSENT}</span>
-										{/if}
-									</td>
-								{/each}
+								{#if casesNarrow}
+									{#if names.length > 0}
+										<td class="px-3 py-1.5 text-xs">
+											<ul class="space-y-0.5">
+												{#each names as name (name)}
+													<li class="flex flex-wrap items-center gap-x-2">
+														<span class="text-subtle max-w-full min-w-0 truncate" title={name}>{name}</span>
+														{@render outcome(row.scores[name])}
+													</li>
+												{/each}
+											</ul>
+										</td>
+									{/if}
+								{:else}
+									<td class="text-muted px-3 py-1.5 text-xs">{row.in.replaceAll('_', ' ')}</td>
+									{#each names as name (name)}
+										<td class="px-3 py-1.5 text-xs">{@render outcome(row.scores[name])}</td>
+									{/each}
+								{/if}
 							</tr>
 						{/each}
 					</tbody>

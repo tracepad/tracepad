@@ -940,18 +940,24 @@ filters live in a popover, tables scroll inside their own box rather than
 scrolling the page, and the trace screen switches between the tree and the
 observation instead of showing both. The project's listings — traces, sessions, users,
 prompts, datasets and their items, runs and their items, queues and their
-items, score configs, and the Accounts card — do not scroll at all there:
+items, score configs, the Accounts, Projects and API keys cards, the
+Stats screen's and a user's breakdowns, a run's scores and a comparison's scores and cases — do not
+scroll at all there (the Quality screen's breakdowns do not fold: at 240 px they fit
+any box, and one with a longer label scrolls in its own box):
 each keeps the columns that say which row it is and whether it went wrong —
 for a trace, the time, the name and the errors — and folds the others into
 lines under the row, which wrap between values rather than cut any of them,
 so the environment, the latency, the TTFT and the cost read
 `production · 2.08 s · TTFT 180 ms · $0.0054` under the name, with the user
 and the session, still links, beneath, and a session's traces read
-`14 traces · $0.1742`. A queue's *Reopen* and *Remove* become icons there, and
-an account's *Edit* and *Delete* stack beside it. A listing folds on a desktop
+`14 traces · $0.1742`. A breakdown keeps its key, its count and its errors
+with their bars, and puts the cost and the tokens under the key; a compared
+case lists its scores one per line under *Scores*. A queue's *Reopen* and
+*Remove* become icons there, and an account's *Edit* and *Delete* and a
+project's *Settings* and *Delete* stack beside it. A listing folds on a desktop
 too wherever its box is narrower than the whole table — a narrow window or a
 tablet beside the sidebar, or a session's traces inside the peek panel —
-because the width it answers to is its box's, not the screen's, and in rem, so a larger default font size folds it earlier. A long id or name is cut to its column, with the whole of it on hover, rather than widening the table past the width it folds at. A screen's own header keeps its 48 px as
+because the width it answers to is its box's, not the screen's, and in rem, so a larger default font size folds it earlier. A long id or name that a program gave is cut to its column, with the whole of it on hover, rather than widening the table past the width it folds at; what a person typed (an API key's or a project's name) wraps, and in a table's whole layout an ordinary value (a timestamp, a key, an id) is not torn across lines: where the table would need more room for that, it folds earlier. A screen's own header keeps its 48 px as
 a floor rather than a height: at a phone's width, what it carries beside the
 title — a breadcrumb, an identifier, a count — takes a second line under it,
 and the screen's controls stay on the first one. Wider than that it is the

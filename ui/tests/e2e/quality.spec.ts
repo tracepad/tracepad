@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { createProject, section, signIn as enter, state } from './harness';
+import { createProject, section, sideways, signIn as enter, state } from './harness';
 
 // The Quality screens (spec 025, Testing — e2e), against the real binary.
 //
@@ -347,4 +347,8 @@ test('375 px never scrolls the page sideways', async ({ page }) => {
 	await page.goto(`/quality?${WINDOW}&group_by=day&name=hallucination`);
 	await expect(page.locator('.uplot canvas').first()).toBeVisible();
 	expect(await overflow()).toBeLessThanOrEqual(0);
+	// Nor does a breakdown in its own box: its width is its own (spec 006 #24).
+	const tables = page.locator('main table').filter({ has: page.locator('thead') });
+	await expect(tables.first()).toBeVisible();
+	for (const table of await tables.all()) expect(await sideways(table)).toBeLessThanOrEqual(0);
 });

@@ -8,6 +8,7 @@
 	import { said } from '$lib/accounts';
 	import { auth } from '$lib/auth.svelte';
 	import { api, type DryRun, type Project } from '$lib/api/client.svelte';
+	import { Fold } from '$lib/fold.svelte';
 	import { timestamp } from '$lib/format';
 	import { switchTarget, under } from '$lib/project.svelte';
 	import { refresh } from '$lib/session';
@@ -110,6 +111,20 @@
 		notice = `${target.name} is deleted; it can be restored until its purge date.`;
 		return notice;
 	}
+
+	/** How long a project keeps its traces, as its settings put it. */
+	const retention = (row: Project) =>
+		row.retention_days === null
+			? 'Keep forever'
+			: `${row.retention_days} ${row.retention_days === 1 ? 'day' : 'days'}`;
+
+	// In a box narrower than the table the row is the project's name and its
+	// verbs, stacked; its id, retention and status fold under the name (spec
+	// 006 #24), in a plain cell for the reason the Accounts card gives (#18),
+	// so the buttons carry the name. The number is the unfolded table's width
+	// and its `min-width`.
+	const fold = new Fold(704);
+	const narrow = $derived(fold.narrow);
 </script>
 
 <Card
@@ -129,54 +144,61 @@
 			Reading the projects
 		</p>
 	{:else}
-		<div class="border-border overflow-x-auto rounded-md border">
-			<table class="w-full min-w-2xl border-collapse text-left">
+		<div bind:contentRect={fold.rect} class="border-border overflow-x-auto rounded-md border">
+			<table class="w-full border-collapse text-left" style:min-width={fold.min}>
 				<thead class="text-subtle text-xs whitespace-nowrap">
 					<tr class="border-border border-b">
 						<th scope="col" class="px-3 py-1.5 font-medium">Name</th>
-						<th scope="col" class="px-3 py-1.5 font-medium">Id</th>
-						<th scope="col" class="px-3 py-1.5 font-medium">Retention</th>
-						<th scope="col" class="px-3 py-1.5 font-medium">Status</th>
-						<th scope="col" class="w-48 px-3 py-1.5 font-medium">Actions</th>
+						{#if !narrow}
+							<th scope="col" class="px-3 py-1.5 font-medium">Id</th>
+							<th scope="col" class="px-3 py-1.5 font-medium">Retention</th>
+							<th scope="col" class="px-3 py-1.5 font-medium">Status</th>
+						{/if}
+						<th scope="col" class={['px-3 py-1.5 font-medium', !narrow && 'w-48']}>Actions</th>
 					</tr>
 				</thead>
 				<tbody>
 					{#each projects as row (row.id)}
-						<tr class="border-border border-b last:border-b-0">
-							<th scope="row" class="px-3 py-1.5 text-left font-normal">
-								{#if row.deleted_at}
-									{row.name}
-								{:else}
-									<a href={settings(row)} class="hover:text-accent">{row.name}</a>
-								{/if}
-							</th>
-							<td class="text-muted px-3 py-1.5 font-mono text-xs">{row.id}</td>
-							<td class="text-muted px-3 py-1.5 text-sm">
-								{row.retention_days === null
-									? 'Keep forever'
-									: `${row.retention_days} ${row.retention_days === 1 ? 'day' : 'days'}`}
-							</td>
-							<td class="px-3 py-1.5 text-sm">
-								{#if row.deleted_at}
-									<!-- Colour is never the message on its own. -->
-									<span class="text-danger">Deleted, purged {timestamp(row.purge_at)}</span>
-								{:else}
-									<span class="text-muted">Live</span>
-								{/if}
-							</td>
+						<tr class={['border-border border-b last:border-b-0', narrow && 'align-top']}>
+							{#if narrow}
+								<td class="px-3 py-1.5 wrap-anywhere">
+									{@render name(row)}
+									<div class="text-muted font-mono text-xs break-all">{row.id}</div>
+									<!-- Each piece is one line or is cut, never torn: the purge time
+									     stays whole (spec 006 #24). -->
+									<div class="text-muted text-xs">
+										<span class="inline-block max-w-full truncate align-bottom">{retention(row)} ·</span>
+										{@render status(row, true)}
+									</div>
+								</td>
+							{:else}
+								<th scope="row" class="min-w-40 px-3 py-1.5 text-left font-normal wrap-anywhere">
+									{@render name(row)}
+								</th>
+								<td class="text-muted px-3 py-1.5 font-mono text-xs whitespace-nowrap">{row.id}</td>
+								<td class="text-muted px-3 py-1.5 text-sm">{retention(row)}</td>
+								<td class="px-3 py-1.5 text-sm">{@render status(row)}</td>
+							{/if}
 							<td class="px-3 py-1.5">
 								{#if row.deleted_at}
-									<Button onclick={() => restore(row)}>
+									<Button
+										aria-label={narrow ? `Restore ${row.name}` : undefined}
+										onclick={() => restore(row)}
+									>
 										<RotateCcw class="size-4" />
 										Restore
 									</Button>
 								{:else}
-									<div class="flex items-center gap-1">
-										<Button onclick={() => goto(settings(row))}>
+									<div class={['flex gap-1', narrow ? 'flex-col items-start' : 'items-center']}>
+										<Button
+											aria-label={narrow ? `Settings of ${row.name}` : undefined}
+											onclick={() => goto(settings(row))}
+										>
 											<SlidersHorizontal class="size-4" />
 											Settings
 										</Button>
 										<Button
+											aria-label={narrow ? `Delete ${row.name}` : undefined}
 											variant="ghost"
 											onclick={() => (
 												(notice = null), (deleting = deleting?.id === row.id ? null : row)
@@ -224,5 +246,24 @@
 		</p>
 	</div>
 </Card>
+
+{#snippet name(row: Project)}
+	{#if row.deleted_at}
+		{row.name}
+	{:else}
+		<a href={settings(row)} class="hover:text-accent">{row.name}</a>
+	{/if}
+{/snippet}
+
+{#snippet status(row: Project, stacked = false)}
+	{@const text = row.deleted_at ? `Deleted, purged ${timestamp(row.purge_at)}` : 'Live'}
+	<!-- Colour is never the message on its own. -->
+	<span
+		class={[row.deleted_at ? 'text-danger' : 'text-muted', stacked && 'inline-block max-w-full truncate align-bottom']}
+		title={stacked ? text : undefined}
+	>
+		{text}
+	</span>
+{/snippet}
 
 <NewProjectDialog open={creating} onclose={closed} oncreated={(created) => (made = created)} />
