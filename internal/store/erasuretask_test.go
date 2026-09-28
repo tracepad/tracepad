@@ -7,7 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -57,26 +59,50 @@ func TestASecondRequestAnswersTheRunningErasure(t *testing.T) {
 }
 
 // The record forgets the person when the erasure ends, done or failed (#9):
-// no user id in the row, no tail, and the failure's sentence without the id
-// even when the error quoted it.
+// no user id in the row, no tail, and a failure said as its phase and a cause
+// from a fixed list, never the error's own text, whatever it held (#32). The
+// server's log has the error, unless it names the user (spec 044 #15).
 func TestAnEndedErasureForgetsTheUser(t *testing.T) {
+	const unexpected = "the parsed phase failed: an unexpected error, which the server's log has"
 	for _, tc := range []struct {
 		name, user string
 		fail       error
+		want       string
+		// log is what the server's log does with the error: "whole", or
+		// "withheld" for one that names the user; unchecked when empty.
+		log string
 	}{
 		{name: "done"},
-		{name: "failed", fail: errors.New("the disk is full")},
-		// An error that names the user is not kept, in either form (#27).
-		{name: "failed naming the user", user: "user-a", fail: errors.New(`a chunk refused "user-a" twice`)},
-		{name: "failed quoting the user", user: `we"ird`, fail: fmt.Errorf("a chunk refused %q", `we"ird`)},
+		// Words that read like a cause are still only the error's.
+		{name: "failed with any text", fail: errors.New("the disk is full"), want: unexpected, log: "whole"},
+		{name: "failed with a condition", fail: fmt.Errorf("commit: %w", codedError{13}),
+			want: "the parsed phase failed: the disk is full", log: "whole"},
+		{name: "failed naming the user", user: "user-a", fail: errors.New(`a chunk refused "user-a" twice`),
+			want: unexpected, log: "withheld"},
+		{name: "failed quoting the user", user: `we"ird`, fail: fmt.Errorf("a chunk refused %q", `we"ird`),
+			want: unexpected, log: "withheld"},
+		// Forms of the id no check of the text would find.
+		{name: "failed escaping the user", user: "zoë/7", fail: fmt.Errorf("GET /users/%s: refused",
+			url.PathEscape("zoë/7")), want: unexpected},
+		{name: "failed encoding the user", user: "zoë", fail: fmt.Errorf("a chunk refused %s", `"zo\u00eb"`),
+			want: unexpected},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			was := busyWait
+			busyWait = 50 * time.Millisecond
+			t.Cleanup(func() { busyWait = was })
+			var logged bytes.Buffer
+			old := logger
+			logger = func() *slog.Logger { return slog.New(slog.NewTextHandler(&logged, nil)) }
+			t.Cleanup(func() { logger = old })
 			f := newErasureFixture(t)
 			user := cmp.Or(tc.user, "user-a")
 			f.ingestOTLP(t, export([]*tracepb.Span{otlpSpan(t, 1, 1, user, "", "a", nil)}), false, daysAgo(1))
 			var writer jobSubmitter = f.writer
 			if tc.fail != nil {
-				writer = &failingChunk{jobSubmitter: f.writer, at: 1, err: tc.fail}
+				// Every try of the chunks: a condition is retried (#16).
+				writer = &failingJobs{jobSubmitter: f.writer, err: tc.fail,
+					fails: func(job WriteJob) bool { _, chunk := job.(*UserDataErase); return chunk }}
 			}
 			e := f.startErasure(t, user)
 			if e.UserID != user {
@@ -95,15 +121,21 @@ func TestAnEndedErasureForgetsTheUser(t *testing.T) {
 			if n := f.count(t, `SELECT COUNT(*) FROM erasure_tail`); n != 0 {
 				t.Errorf("%d tail rows are left", n)
 			}
+			if tc.fail == nil {
+				return
+			}
+			if got.State != ErasureFailed || got.Error != tc.want {
+				t.Errorf("the erasure is %s with %q, want failed with %q", got.State, got.Error, tc.want)
+			}
+			out := logged.String()
+			whole := strings.Contains(out, tc.fail.Error()) || strings.Contains(out, strconv.Quote(tc.fail.Error()))
+			quoted := strconv.Quote(user)
+			named := strings.Contains(out, user) || strings.Contains(out, quoted[1:len(quoted)-1])
 			switch {
-			case tc.fail == nil:
-			case tc.user == "":
-				if got.State != ErasureFailed || got.Error != tc.fail.Error() {
-					t.Errorf("the erasure is %s with %q, want failed with the chunk's error", got.State, got.Error)
-				}
-			case got.State != ErasureFailed || strings.Contains(got.Error, "ird") ||
-				strings.Contains(got.Error, "user-a") || !strings.Contains(got.Error, "parsed phase failed"):
-				t.Errorf("the erasure is %s with %q, want failed, the phase named and the user not", got.State, got.Error)
+			case tc.log == "whole" && !whole:
+				t.Errorf("the log %q does not hold the error %q", out, tc.fail.Error())
+			case tc.log == "withheld" && named:
+				t.Errorf("the log names the user: %q", out)
 			}
 		})
 	}
@@ -394,12 +426,13 @@ func TestAFailedTailIsLeftToTheNextStart(t *testing.T) {
 type brokenTail struct {
 	jobSubmitter
 	parsed, failed bool
+	err            error
 }
 
 func (w *brokenTail) Submit(ctx context.Context, job WriteJob) error {
 	if _, scrub := job.(*RawScrub); scrub && w.parsed {
 		w.failed = true
-		return errors.New("the disk is broken")
+		return cmp.Or(w.err, errors.New("the disk is broken"))
 	}
 	err := w.jobSubmitter.Submit(ctx, job)
 	if chunk, ok := job.(*UserDataErase); ok && err == nil && !chunk.More {
@@ -550,7 +583,7 @@ func TestAnErasureThatGivesUpSaysWhatItsTailFailedWith(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got.State != ErasureFailed || !strings.HasPrefix(got.Error, "3 starts ended before the erasure did") ||
-		!strings.Contains(got.Error, "its tail last failed with: ") || !strings.Contains(got.Error, "the disk is broken") {
+		!strings.HasSuffix(got.Error, "; its tail last failed with: "+causeRawBatch) {
 		t.Errorf("the erasure ended %s with %q, want failed with its starts and what its tail said", got.State, got.Error)
 	}
 }
@@ -708,8 +741,7 @@ func TestAGiveUpSaysWhatTheLastTailFailedWith(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.State != ErasureFailed || !strings.HasPrefix(got.Error, capSentence+"; its tail last failed with: ") ||
-		!strings.Contains(got.Error, "the disk is broken") {
+	if got.State != ErasureFailed || got.Error != capSentence+"; its tail last failed with: "+causeRawBatch {
 		t.Errorf("the erasure ended %s with %q, want failed with what its last tail said", got.State, got.Error)
 	}
 }
@@ -789,5 +821,92 @@ func TestAGiveUpAfterATailThatRanDropsNothing(t *testing.T) {
 	}
 	if !strings.Contains(logged.String(), "tail_windows_dropped=0") {
 		t.Errorf("the give-up logs %q, want no windows dropped", logged.String())
+	}
+}
+
+// Each source of an erasure's failures has its cause in the list (#32), and
+// anything else is the one that sends an operator to the log.
+func TestAFailureIsSaidAsACauseFromTheList(t *testing.T) {
+	for _, tc := range []struct {
+		err  error
+		want string
+	}{
+		{fmt.Errorf("commit: %w", codedError{13}), causeFull},
+		{fmt.Errorf("read: %w", codedError{5 | 2<<8}), causeBusy},
+		{codedError{6}, causeBusy},
+		{fmt.Errorf("rewrite raw batch 7: %w", codedError{10 | 4<<8}), causeIO},
+		{codedError{7}, causeMemory},
+		{codedError{14}, causeOpen},
+		{fmt.Errorf("a chunk: %w", context.Canceled), causeStopped},
+		{ErrWriterClosed, causeStopped},
+		{ErrWriterBusy, causeQueue},
+		{fmt.Errorf("%w 7: %w", errRawBatch, errors.New("replace the refs: boom")), causeRawBatch},
+		{&Rejection{Kind: RejectConflict, Message: "raw batch 7 was rewritten since it was read"}, causeRawBatch},
+		// A condition inside a raw batch's failure is the condition.
+		{fmt.Errorf("%w 7: %w", errRawBatch, codedError{13}), causeFull},
+		{context.DeadlineExceeded, causeTimeout},
+		{errors.New(`chunk limit 0 is not positive for "user-4711"`), causeOther},
+	} {
+		if got := failureCause(tc.err); got != tc.want {
+			t.Errorf("failureCause(%v) = %q, want %q", tc.err, got, tc.want)
+		}
+	}
+}
+
+// A run's error reaches the worker's log line whole, or withheld when it
+// names the user, and still unwraps to what it was (#32, spec 044 #15).
+func TestARunErrorIsLoggedWithoutTheUser(t *testing.T) {
+	named := &erasureError{err: fmt.Errorf("the tail: %w", fmt.Errorf("refused %q", "user-4711")), userID: "user-4711"}
+	if strings.Contains(named.Error(), "4711") {
+		t.Errorf("a run error names the user: %q", named.Error())
+	}
+	plain := &erasureError{err: fmt.Errorf("the tail: %w", context.Canceled), userID: "user-4711"}
+	if plain.Error() != "the tail: context canceled" || !errors.Is(plain, context.Canceled) {
+		t.Errorf("a run error reads %q, want it whole and unwrapping", plain.Error())
+	}
+}
+
+// The error a run answers the worker with, for its log line, does not name
+// the user even when the failure did (#32): a tail that failed is such a run.
+func TestAFailedTailAnswersWithoutTheUser(t *testing.T) {
+	f := newErasureFixture(t)
+	f.ingestOTLP(t, export([]*tracepb.Span{otlpSpan(t, 1, 1, "user-a", "", "a", nil)}), false, daysAgo(1))
+	e := f.startErasure(t, "user-a")
+	broken := &brokenTail{jobSubmitter: f.writer, err: fmt.Errorf("refused %q", "user-a")}
+	_, err := f.store.runErasure(t.Context(), broken, e.ID, EraserOptions{after: func(step int) error {
+		if step == 1 {
+			f.ingestOTLP(t, export([]*tracepb.Span{otlpSpan(t, 1, 9, "user-a", "", "late", nil)}), false, 0)
+		}
+		return nil
+	}})
+	if err == nil || !broken.failed {
+		t.Fatalf("the tail did not fail: %v", err)
+	}
+	if strings.Contains(err.Error(), "user-a") {
+		t.Errorf("the run answers %q, naming the user", err.Error())
+	}
+}
+
+// A raw phase that fails ends the erasure with the phase and a cause, and the
+// end's log line has the error itself (#32).
+func TestAFailedRawPhaseIsLoggedWhole(t *testing.T) {
+	f := newErasureFixture(t)
+	f.ingestOTLP(t, export([]*tracepb.Span{otlpSpan(t, 1, 1, "user-a", "", "a", nil)}), false, daysAgo(1))
+	var logged bytes.Buffer
+	old := logger
+	logger = func() *slog.Logger { return slog.New(slog.NewTextHandler(&logged, nil)) }
+	t.Cleanup(func() { logger = old })
+	writer := &failingJobs{jobSubmitter: f.writer, err: errors.New("replace the media refs: boom"),
+		fails: func(job WriteJob) bool { _, scrub := job.(*RawScrub); return scrub }}
+	e := f.startErasure(t, "user-a")
+	if _, err := f.store.runErasure(t.Context(), writer, e.ID, EraserOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.erasureOf(t, "user-a"); got.State != ErasureFailed ||
+		got.Error != "the raw phase failed: "+causeRawBatch {
+		t.Errorf("the erasure is %s with %q, want failed in its raw phase", got.State, got.Error)
+	}
+	if !strings.Contains(logged.String(), "replace the media refs: boom") {
+		t.Errorf("the log %q does not hold the error", logged.String())
 	}
 }

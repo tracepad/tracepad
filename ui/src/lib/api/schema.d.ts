@@ -2094,7 +2094,7 @@ export interface components {
             compaction: components["schemas"]["Compaction"];
             /** @description Only while a backup exists */
             pre_migration_backup?: components["schemas"]["PreMigrationBackup"];
-            /** @description Why a failed erasure failed; it never names the user */
+            /** @description Why a failed erasure failed: the phase and a cause from a fixed list, never the error's own text (the server's log has it) */
             error: string | null;
         };
         /** @description The compaction this deletion asked for: the sweeper pass that overwrites what it unlinked. Both null when it deleted nothing and so asked for nothing. */

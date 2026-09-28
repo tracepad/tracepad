@@ -703,8 +703,10 @@ func TestAStoppedErasureResumesFromItsPhase(t *testing.T) {
 		if writer.chunks < 2 {
 			t.Fatalf("%d chunks: the erasure needs one to succeed before the one that fails", writer.chunks)
 		}
-		if got := f.erasureOf(t, "user-a"); got.State != ErasureFailed || got.Error != broken.Error() {
-			t.Fatalf("the erasure is %s (%q), want failed with the chunk's error", got.State, got.Error)
+		// The record says the phase and a cause, not the error's text (#32).
+		if got := f.erasureOf(t, "user-a"); got.State != ErasureFailed ||
+			got.Error != "the parsed phase failed: an unexpected error, which the server's log has" {
+			t.Fatalf("the erasure is %s (%q), want failed in its parsed phase", got.State, got.Error)
 		}
 		spans := f.rawSpans(t, late)
 		for trace := 1; trace <= 3; trace++ {

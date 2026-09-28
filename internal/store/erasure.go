@@ -550,7 +550,7 @@ func (s *Store) scrubBatches(ctx context.Context, writer jobSubmitter, projectID
 				err = submitErasureJob(ctx, writer, p.job)
 			}
 			if err != nil {
-				return err
+				return fmt.Errorf("%w %d: %w", errRawBatch, group[i], err)
 			}
 		}
 	}
@@ -663,6 +663,11 @@ func (s *Store) runErasure(ctx context.Context, writer jobSubmitter, id string, 
 		return run, nil
 	}
 	e := begin.Erasure
+	defer func() {
+		if err != nil {
+			err = &erasureError{err: err, userID: e.UserID}
+		}
+	}()
 	if begin.GaveUp {
 		s.erasures.announceEnd()
 		logger().Error("an erasure was interrupted by every start it was given and has failed; "+
@@ -712,7 +717,9 @@ func (s *Store) runErasure(ctx context.Context, writer jobSubmitter, id string, 
 			// repeat can no longer find. Step 4 runs on what they
 			// stored, and the failure is the end after it (#16).
 			failed = err
-			step := &erasureStep{ID: e.ID, Phase: phaseTail, Error: failureSentence(err, e.UserID, phaseParsed)}
+			step := &erasureStep{ID: e.ID, Phase: phaseTail, Error: failureSentence(err, phaseParsed)}
+			logger().Error("a chunk of an erasure failed; its tail runs, and it ends failed",
+				"erasure", e.ID, "cause", failureCause(err), "err", loggable(err, e.UserID))
 			if err := submitErasureJob(ctx, writer, step); err != nil {
 				return run, err
 			}
@@ -732,7 +739,7 @@ func (s *Store) runErasure(ctx context.Context, writer jobSubmitter, id string, 
 	// last one still gives up (#27), with what the tail said (#29).
 	if err := s.erasureTail(ctx, writer, e, &run); err != nil {
 		if !stopped(ctx, err) {
-			said := &erasureStep{ID: e.ID, TailFailure: failureSentence(err, e.UserID, phaseTail)}
+			said := &erasureStep{ID: e.ID, TailFailure: failureCause(err)}
 			if serr := submitErasureJob(ctx, writer, said); serr != nil {
 				logger().Warn("a failed tail's error is not recorded", "erasure", e.ID, "err", serr)
 			}
@@ -845,7 +852,7 @@ func (s *Store) endErasure(ctx context.Context, writer jobSubmitter, e *Erasure,
 	run erasureRun, began time.Time) error {
 	end := &erasureEnd{ID: e.ID}
 	if failed != nil {
-		end.Error = failureSentence(failed, e.UserID, phase)
+		end.Error = failureSentence(failed, phase)
 	}
 	if err := submitErasureJob(ctx, writer, end); err != nil {
 		return err
@@ -870,7 +877,13 @@ func (s *Store) endErasure(ctx context.Context, writer jobSubmitter, e *Erasure,
 	// The state it ended in, not this run's view: an erasure whose failure
 	// an earlier start recorded ends failed from a run that met none (#28).
 	if end.Erasure.State == ErasureFailed {
-		logger().Error("an erasure failed", append(args, "err", end.Erasure.Error)...)
+		// The record's sentence, and the error itself where this run met it
+		// (#32).
+		args = append(args, "sentence", end.Erasure.Error)
+		if failed != nil {
+			args = append(args, "err", loggable(failed, e.UserID))
+		}
+		logger().Error("an erasure failed", args...)
 		return nil
 	}
 	logger().Info("erased a user's data", args...)

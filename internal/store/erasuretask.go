@@ -750,17 +750,78 @@ func stopped(ctx context.Context, err error) bool {
 // errRunStopped is a run the test seam stopped, as a stop of the server would.
 var errRunStopped = errors.New("the erasure's run was stopped")
 
-// failureSentence is the error an erasure ends with, never naming the user it
-// erased (#9, #27): an error that carries the id — as it is, or quoted the
-// way a refusal quotes the echo it was given — is kept as the phase it
-// failed in and nothing more. Editing the id out would miss a form it was
-// escaped into, and a short id would take unrelated words with it.
-func failureSentence(err error, userID, phase string) string {
-	sentence := err.Error()
-	quoted := strconv.Quote(userID)
-	if userID != "" && (strings.Contains(sentence, userID) ||
-		strings.Contains(sentence, quoted[1:len(quoted)-1])) {
-		return fmt.Sprintf("a job of the %s phase failed with an error that named the user, which is not kept", phase)
-	}
-	return sentence
+// The causes an erasure's record gives for a failure, a fixed list (#32): the
+// record keeps what an operator acts on and nothing an error's text happened
+// to carry, whatever form a user id took in it. The error itself goes to the
+// server's log.
+const (
+	causeStopped  = "the server stopped"
+	causeQueue    = "the write queue stayed full"
+	causeFull     = "the disk is full"
+	causeBusy     = "the database is busy"
+	causeIO       = "the disk could not be read or written"
+	causeMemory   = "the server ran out of memory"
+	causeOpen     = "the database file could not be opened"
+	causeRawBatch = "a raw batch could not be rewritten"
+	causeTimeout  = "an operation took too long"
+	causeOther    = "an unexpected error, which the server's log has"
+)
+
+// conditionCauses are the database's conditions (spec 043 #2) as causes.
+var conditionCauses = map[string]string{
+	"SQLITE_FULL":     causeFull,
+	"SQLITE_BUSY":     causeBusy,
+	"SQLITE_LOCKED":   causeBusy,
+	"SQLITE_IOERR":    causeIO,
+	"SQLITE_NOMEM":    causeMemory,
+	"SQLITE_CANTOPEN": causeOpen,
 }
+
+// errRawBatch marks a scrub of a raw batch that failed after its retries.
+var errRawBatch = errors.New("a raw batch could not be rewritten")
+
+// failureCause is the cause the record gives for err, from the list above.
+func failureCause(err error) string {
+	name, condition := Condition(err)
+	switch {
+	case condition && conditionCauses[name] != "":
+		return conditionCauses[name]
+	case errors.Is(err, context.Canceled) || errors.Is(err, ErrWriterClosed) || errors.Is(err, errRunStopped):
+		return causeStopped
+	case errors.Is(err, ErrWriterBusy):
+		return causeQueue
+	case errors.Is(err, errRawBatch) || conflict(err):
+		return causeRawBatch
+	case errors.Is(err, context.DeadlineExceeded):
+		return causeTimeout
+	}
+	return causeOther
+}
+
+// failureSentence is the error an erasure ends with: the phase that failed and
+// its cause, never the error's own text (#9, #32).
+func failureSentence(err error, phase string) string {
+	return fmt.Sprintf("the %s phase failed: %s", phase, failureCause(err))
+}
+
+// loggable is an erasure's error as the server's log line gives it: whole,
+// unless it names the user — as it is, or quoted the way a refusal quotes the
+// echo it was given — which no log line does (spec 044 #15, #27 c).
+func loggable(err error, userID string) string {
+	text := err.Error()
+	quoted := strconv.Quote(userID)
+	if userID != "" && (strings.Contains(text, userID) || strings.Contains(text, quoted[1:len(quoted)-1])) {
+		return "an error that named the user, which is not logged"
+	}
+	return text
+}
+
+// erasureError is a run's error on its way to the worker's log line, which
+// does not name the user either.
+type erasureError struct {
+	err    error
+	userID string
+}
+
+func (e *erasureError) Error() string { return loggable(e.err, e.userID) }
+func (e *erasureError) Unwrap() error { return e.err }

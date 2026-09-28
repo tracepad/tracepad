@@ -3546,7 +3546,7 @@
           "deleted": {"type": "object", "additionalProperties": {"type": "integer"}},
           "compaction": {"$ref": "#/components/schemas/Compaction"},
           "pre_migration_backup": {"$ref": "#/components/schemas/PreMigrationBackup", "description": "Only while a backup exists"},
-          "error": {"type": ["string", "null"], "description": "Why a failed erasure failed; it never names the user"}
+          "error": {"type": ["string", "null"], "description": "Why a failed erasure failed: the phase and a cause from a fixed list, never the error's own text (the server's log has it)"}
         },
         "required": ["id", "state", "phase", "user_id", "dry_run", "created_at", "started_at", "finished_at", "progress", "deleted", "compaction", "error"]
       },
