@@ -13,11 +13,13 @@ CREATE TABLE erasures (
     finished_at     INTEGER,
     since           INTEGER,                             -- step 1's moment (spec 044 #20 c)
     now             INTEGER NOT NULL,                    -- the freeze clock, read once (spec 013 #11)
-    attempts        INTEGER NOT NULL DEFAULT 0,          -- starts, a restart's included (#12)
+    attempts        INTEGER NOT NULL DEFAULT 0,          -- starts a crash cut off (#12, #27)
+    run             TEXT,                                -- the start that counted last (#29)
     traces_at_start INTEGER,                             -- step 1's count
     counts          TEXT NOT NULL DEFAULT '{}',          -- the `deleted` keys, as committed
     compaction      INTEGER NOT NULL DEFAULT 0,          -- the latest compaction it asked for
-    error           TEXT
+    error           TEXT,
+    last_failure    TEXT                                 -- what a failed tail said (#29)
 ) STRICT;
 CREATE INDEX idx_erasures_project ON erasures(project_id, created_at DESC);
 -- One erasure of a user at a time (#11): the id is kept only while it runs.

@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -515,5 +516,156 @@ func TestAnErasureThatEndsFailedIsLoggedAsOne(t *testing.T) {
 	}
 	if out := logged.String(); !strings.Contains(out, "an erasure failed") || strings.Contains(out, "erased a user's data") {
 		t.Errorf("the log says %q, want the failure", out)
+	}
+}
+
+// A tail that fails at every start ends the erasure with what it failed with,
+// not only with the count of its starts (#29): the cause is the operator's
+// to act on, and a log line is gone by the time anyone reads the record.
+func TestAnErasureThatGivesUpSaysWhatItsTailFailedWith(t *testing.T) {
+	f := newErasureFixture(t)
+	f.ingestOTLP(t, export([]*tracepb.Span{otlpSpan(t, 1, 1, "user-a", "", "a", nil)}), false, daysAgo(1))
+	e := f.startErasure(t, "user-a")
+	_, err := f.store.runErasure(t.Context(), &brokenTail{jobSubmitter: f.writer}, e.ID,
+		EraserOptions{after: func(step int) error {
+			if step == 1 {
+				f.ingestOTLP(t, export([]*tracepb.Span{otlpSpan(t, 1, 9, "user-a", "", "late", nil)}), false, 0)
+			}
+			return nil
+		}})
+	if err == nil {
+		t.Fatal("the first run's tail did not fail")
+	}
+	for range erasureAttempts {
+		if _, err := f.store.runErasure(t.Context(), &brokenTail{jobSubmitter: f.writer, parsed: true}, e.ID,
+			EraserOptions{}); err == nil {
+			t.Fatal("a resumed tail did not fail")
+		}
+	}
+	if _, err := f.store.runErasure(t.Context(), f.writer, e.ID, EraserOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := f.store.Erasure(t.Context(), f.project.ID, e.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.State != ErasureFailed || !strings.HasPrefix(got.Error, "3 starts ended before the erasure did") ||
+		!strings.Contains(got.Error, "its tail last failed with: ") || !strings.Contains(got.Error, "the disk is broken") {
+		t.Errorf("the erasure ended %s with %q, want failed with its starts and what its tail said", got.State, got.Error)
+	}
+}
+
+// A stop that ends the wait for room in a full queue ends a run that recorded
+// no start, and its pause takes back none (#29): the starts on the row are the
+// crashes before it.
+func TestAStopBeforeTheStartKeepsTheCrashesCounted(t *testing.T) {
+	f := newErasureFixture(t)
+	e := f.startErasure(t, "user-a")
+	for range 2 {
+		if err := f.writer.Submit(t.Context(), &erasureBegin{ID: e.ID}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	writer := &stopWhileQueueFull{jobSubmitter: f.writer, stop: cancel}
+	if _, err := f.store.runErasure(ctx, writer, e.ID, EraserOptions{}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("the run was not stopped: %v", err)
+	}
+	if got := f.erasureOf(t, "user-a"); got.attempts != 2 {
+		t.Errorf("the erasure has %d starts counted, want the two crashes", got.attempts)
+	}
+}
+
+// stopWhileQueueFull answers the start with a full queue, and the worker's
+// stop comes while the run waits for room.
+type stopWhileQueueFull struct {
+	jobSubmitter
+	stop context.CancelFunc
+}
+
+func (w *stopWhileQueueFull) Submit(ctx context.Context, job WriteJob) error {
+	if _, ok := job.(*erasureBegin); ok {
+		w.stop()
+		return ErrWriterBusy
+	}
+	return w.jobSubmitter.Submit(ctx, job)
+}
+
+// A worker that could not read the next erasure started none, and a request
+// still wakes it (#29): it is not a failed run, to wait out a whole poll.
+func TestAWorkerThatCouldNotReadStillWakes(t *testing.T) {
+	f := newErasureFixture(t)
+	var logged bytes.Buffer
+	var mu sync.Mutex
+	old := logger
+	logger = func() *slog.Logger {
+		return slog.New(slog.NewTextHandler(&lockedWriter{w: &logged, mu: &mu}, nil))
+	}
+	t.Cleanup(func() { logger = old })
+	if _, err := f.store.db.Exec(`ALTER TABLE erasures RENAME TO erasures_away`); err != nil {
+		t.Fatal(err)
+	}
+	worker := f.store.NewEraser(f.writer, EraserOptions{Poll: time.Hour})
+	worker.Start()
+	defer worker.Close()
+	waitFor(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return strings.Contains(logged.String(), "could not read the next erasure")
+	})
+	if _, err := f.store.db.Exec(`ALTER TABLE erasures_away RENAME TO erasures`); err != nil {
+		t.Fatal(err)
+	}
+	e := f.startErasure(t, "user-a")
+	waitFor(t, func() bool {
+		got, err := f.store.Erasure(t.Context(), f.project.ID, e.ID)
+		return err == nil && got != nil && got.State == ErasureDone
+	})
+}
+
+type lockedWriter struct {
+	w  *bytes.Buffer
+	mu *sync.Mutex
+}
+
+func (l *lockedWriter) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.w.Write(p)
+}
+
+// The end's log line says how long each phase of the run took (spec 047 #5,
+// #29), and not a phase an earlier start finished.
+func TestTheEndLogsEachPhaseTheRunWentThrough(t *testing.T) {
+	f := newErasureFixture(t)
+	f.ingestOTLP(t, export([]*tracepb.Span{otlpSpan(t, 1, 1, "user-a", "", "a", nil)}), false, daysAgo(1))
+	var logged bytes.Buffer
+	old := logger
+	logger = func() *slog.Logger { return slog.New(slog.NewTextHandler(&logged, nil)) }
+	t.Cleanup(func() { logger = old })
+	whole := f.startErasure(t, "user-a")
+	if _, err := f.store.runErasure(t.Context(), f.writer, whole.ID, EraserOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"raw_took=", "parsed_took=", "tail_took="} {
+		if !strings.Contains(logged.String(), key) {
+			t.Errorf("the end's line %q has no %s", logged.String(), key)
+		}
+	}
+
+	logged.Reset()
+	resumed := f.startErasure(t, "user-b")
+	for _, job := range []WriteJob{&erasureBegin{ID: resumed.ID}, &erasureStep{ID: resumed.ID, Phase: phaseTail}} {
+		if err := f.writer.Submit(t.Context(), job); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := f.store.runErasure(t.Context(), f.writer, resumed.ID, EraserOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if out := logged.String(); !strings.Contains(out, "tail_took=") || strings.Contains(out, "raw_took=") ||
+		strings.Contains(out, "parsed_took=") {
+		t.Errorf("a run resumed in its tail logs %q, want its tail's time only", out)
 	}
 }

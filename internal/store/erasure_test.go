@@ -1224,11 +1224,42 @@ func (b *busySubmitter) Submit(context.Context, WriteJob) error {
 // runs to its end (spec 047 #16).
 func TestAnErasureJobWaitsOutAFullQueue(t *testing.T) {
 	writer := &busySubmitter{busy: 3}
-	if err := submitPatiently(t.Context(), writer, &RawScrub{}); err != nil {
+	if err := submitErasureJob(t.Context(), writer, &RawScrub{}); err != nil {
 		t.Fatalf("a queue full three times failed the job: %v", err)
 	}
 	if writer.calls != 4 {
 		t.Errorf("%d submissions, want 4", writer.calls)
+	}
+}
+
+// flakySubmitter answers a busy database for a while, and a full queue after.
+type flakySubmitter struct {
+	began time.Time
+	calls int
+}
+
+func (f *flakySubmitter) Submit(context.Context, WriteJob) error {
+	f.calls++
+	if time.Since(f.began) < 200*time.Millisecond {
+		return fmt.Errorf("commit write transaction: %w", codedError{5})
+	}
+	return ErrWriterBusy
+}
+
+// A job that meets a condition and then a full queue is retried within one
+// bound, not a bound for each (spec 047 #29): a loop for the queue inside a
+// loop for the conditions retried for up to twice as long as #16 says.
+func TestAnErasureJobIsRetriedWithinOneBound(t *testing.T) {
+	was := busyWait
+	busyWait = 300 * time.Millisecond
+	t.Cleanup(func() { busyWait = was })
+	writer := &flakySubmitter{began: time.Now()}
+	err := submitErasureJob(t.Context(), writer, &RawScrub{})
+	if !errors.Is(err, ErrWriterBusy) {
+		t.Fatalf("gave up with %v, want the full queue it met last", err)
+	}
+	if took := time.Since(writer.began); took > busyWait+200*time.Millisecond {
+		t.Errorf("gave up after %s, want about %s", took, busyWait)
 	}
 }
 

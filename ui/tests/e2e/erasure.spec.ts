@@ -139,3 +139,28 @@ test("a user's page shows an erasure under way, across a reload, until it ends",
 		timeout: 10_000
 	});
 });
+
+test("a user's page whose erasure answer was lost shows the data gone once it ended", async ({
+	page
+}) => {
+	const own = await createProject('erasure-lost');
+	await traffic(own, 'lost-e2e', 12);
+	await signIn(page, own.account);
+	// The server erases and answers; a proxy in front of it gives up first.
+	await page.route(/\/users\/[^/]+\/data\?.*confirm=/, async (route) => {
+		const answer = await route.fetch();
+		expect(answer.status()).toBe(200);
+		await route.fulfill({ status: 504, body: 'Gateway Timeout' });
+	});
+	await page.goto('/users/lost-e2e');
+
+	await page.getByRole('button', { name: 'Erase data' }).click();
+	await page.getByRole('button', { name: 'Show what would go' }).click();
+	await page.getByRole('textbox', { name: /Type the user id/ }).fill('lost-e2e');
+	await page.getByRole('button', { name: 'Erase this user’s data' }).click();
+
+	await expect(page.getByText(/The server may have accepted the erasure/)).toBeVisible();
+	// It ended, so no listing names the user any more (spec 047 #9): the page
+	// reads the user again instead, and finds nothing filed under it (#29).
+	await expect(page.getByRole('heading', { name: /Nothing is filed under/ })).toBeVisible();
+});

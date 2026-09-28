@@ -78,6 +78,8 @@
 	let missing = $state(false);
 	let failure = $state<string | null>(null);
 	let erasing = $state(false);
+	/** Bumped to read the user again: an erasure may have ended unseen (#29). */
+	let reread = $state(0);
 	/**
 	 * The erasure of this user under way, if any: the dialog's, or one the
 	 * project's erasures name on the way in, so a reload still shows it (spec
@@ -89,11 +91,16 @@
 	// An editor's page asks whether this user is being erased: the project's
 	// erasures name their user while they run and only then (spec 047 #9,
 	// #14), so the listing is the one indexed read that answers it (#27). A
-	// viewer may not read it, and is offered no erasure.
+	// viewer may not read it, and is offered no erasure. The effect follows
+	// the values, not the project's record: that is read again whenever the
+	// account's projects are, and each run forgets what the page followed
+	// (#29).
+	const projectID = $derived(project.id);
+	const editable = $derived(project.editor);
 	$effect(() => {
 		const who = id;
-		const current = project.id;
-		if (!project.editor || !current) return;
+		const current = projectID;
+		if (!editable || !current) return;
 		const controller = new AbortController();
 		void untrack(() => findRunning(current, who, controller.signal));
 		return () => {
@@ -117,7 +124,7 @@
 	 * screen that carries two listings' state in its URL beside its own
 	 * (found in the second review of PR #42).
 	 */
-	const asked = $derived(`${id}|${viewed.from ?? ''}|${viewed.to ?? ''}|${bucket}`);
+	const asked = $derived(`${id}|${viewed.from ?? ''}|${viewed.to ?? ''}|${bucket}|${reread}`);
 
 	$effect(() => {
 		// The stamp is the whole subscription; everything else is read
@@ -203,14 +210,16 @@
 	 * #8), rendered by the card Settings uses — one card, one contract. On
 	 * success there is no user left to be on, so the page leaves.
 	 */
-	/** Follows this user's erasure when one is under way. */
+	/** Follows this user's erasure when one is under way, and says whether. */
 	async function findRunning(current: string, who: string, signal?: AbortSignal) {
 		try {
 			const { erasures } = await api.erasures(current, signal);
 			const running = erasures.find((one) => one.user_id === who && !ended(one));
 			if (running && !signal?.aborted) watch.follow(current, running);
+			return running !== undefined;
 		} catch {
 			// The banner is a courtesy; the page is the user's data.
+			return false;
 		}
 	}
 
@@ -226,11 +235,21 @@
 				confirm === undefined ? undefined : ERASE_WAIT_SECONDS
 			);
 		} catch (cause) {
-			// Accepted or not, this page follows it if it was (spec 047 #27).
+			// Accepted or not, this page follows it if it runs (spec 047 #27).
+			// One that ended already names no one (#9): the user's data is
+			// read again, and is gone if it did (#29).
 			const sentence =
-				confirm === undefined ? null : unanswered(cause, id, 'this page shows it if it did');
+				confirm === undefined
+					? null
+					: unanswered(
+							cause,
+							id,
+							"this page shows it while it runs, or the user's data gone once it has ended"
+						);
 			if (sentence === null) throw cause;
-			void findRunning(current, id);
+			void findRunning(current, id).then((found) => {
+				if (!found) reread++;
+			});
 			throw new ApiError(0, sentence);
 		}
 		if (answer.dry_run) return answer as DryRun;

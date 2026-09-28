@@ -481,10 +481,11 @@ that named those batches are gone. A clean stop does not count against the
 erasure; a crash does, and so does a run that failed where the next could
 succeed — a tail that could not be read, an end that could not be written,
 retried a minute later. After three of those the next start only rewrites
-those batches and ends the erasure `failed` rather than trying for ever. A job that
-fails with a condition of the database — a full disk, a lock that did not
-clear — is retried for up to two minutes; any other failure ends the erasure
-`failed`, after the tail has run for the chunks that committed. Repeating
+those batches and ends the erasure `failed` rather than trying for ever, with
+what the tail last failed with in its error if it did. A job that meets a
+full write queue or a condition of the database — a full disk, a lock that
+did not clear — is retried for up to two minutes; any other failure ends the
+erasure `failed`, after the tail has run for the chunks that committed. Repeating
 the request then finds what is left and finishes it.
 
 ## Deleting traces

@@ -482,29 +482,12 @@ const (
 	scrubGroupBytes = 16 << 20
 )
 
-// busyWait bounds how long an erasure's job waits for room in a full writer
-// queue, retrying with backoff: an erasure runs to its end (spec 047 #16),
-// and a queue that is full for a moment is ingest's burst, not a reason to
-// stop half-way.
-const busyWait = 2 * time.Minute
-
-// submitPatiently submits one job, retrying while the writer's queue is full.
-func submitPatiently(ctx context.Context, writer jobSubmitter, job WriteJob) error {
-	delay := 10 * time.Millisecond
-	deadline := time.Now().Add(busyWait)
-	for {
-		err := writer.Submit(ctx, job)
-		if !errors.Is(err, ErrWriterBusy) || time.Now().After(deadline) {
-			return err
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(delay):
-		}
-		delay = min(2*delay, time.Second)
-	}
-}
+// busyWait bounds how long an erasure's job is retried — for room in a full
+// writer queue, or past a condition of the database — with backoff: an
+// erasure runs to its end (spec 047 #16), and a queue that is full for a
+// moment is ingest's burst, not a reason to stop half-way. A variable for
+// the tests.
+var busyWait = 2 * time.Minute
 
 // scrubBatches runs the scrub over a list of candidate batches: each is read
 // and decoded here, one writer job is submitted per batch that changes, and a
@@ -600,6 +583,20 @@ type erasureRun struct {
 	// batchesRead is how many raw batches the run decoded: the candidates
 	// of step 2 and the tail of step 4.
 	batchesRead int
+	// took is how long each phase this run went through took; a phase an
+	// earlier start finished is not in it (#29).
+	took map[string]time.Duration
+}
+
+// timed records how long a phase took, from `from` until now, and answers
+// now for the next phase to count from.
+func (r *erasureRun) timed(phase string, from time.Time) time.Time {
+	now := time.Now()
+	if r.took == nil {
+		r.took = map[string]time.Duration{}
+	}
+	r.took[phase] = now.Sub(from)
+	return now
 }
 
 // runErasure runs one erasure from its phase to its end, in the order of
@@ -642,17 +639,23 @@ func (s *Store) runErasure(ctx context.Context, writer jobSubmitter, id string, 
 	// crash cut off counts toward the erasure's last one. Before the start
 	// is submitted, since a stop can end the wait for it while the writer
 	// still commits it (#28); the writer's queue is in order, so the pause
-	// lands after it, and it does nothing to an erasure that is not running.
+	// lands after it. It takes back the start this run recorded and no
+	// other: a stop can also end the wait for room in a full queue, before
+	// the start was handed to the writer at all (#29).
+	token, err := randomHex(16)
+	if err != nil {
+		return run, err
+	}
 	defer func() {
 		if err != nil && ctx.Err() != nil {
 			pause, cancel := context.WithTimeout(context.WithoutCancel(ctx), pauseTime)
 			defer cancel()
-			if perr := writer.Submit(pause, &erasurePause{ID: id}); perr != nil {
+			if perr := writer.Submit(pause, &erasurePause{ID: id, Run: token}); perr != nil {
 				logger().Warn("a stopped erasure's start stays counted", "erasure", id, "err", perr)
 			}
 		}
 	}()
-	begin := &erasureBegin{ID: id}
+	begin := &erasureBegin{ID: id, Run: token}
 	if err := submitErasureJob(ctx, writer, begin); err != nil {
 		return run, err
 	}
@@ -673,6 +676,7 @@ func (s *Store) runErasure(ctx context.Context, writer jobSubmitter, id string, 
 	}
 
 	began := time.Now()
+	mark := began
 	phase := e.Phase
 	// The traces step 1 read; nil when this run resumed after it, and the
 	// chunks then scrub the whole window of any trace that changed since.
@@ -690,6 +694,7 @@ func (s *Store) runErasure(ctx context.Context, writer jobSubmitter, id string, 
 		if err := submitErasureJob(ctx, writer, &erasureStep{ID: e.ID, Phase: phaseParsed}); err != nil {
 			return run, err
 		}
+		mark = run.timed(phaseRaw, mark)
 		if err := after(2); err != nil {
 			return run, err
 		}
@@ -714,6 +719,7 @@ func (s *Store) runErasure(ctx context.Context, writer jobSubmitter, id string, 
 		} else if err := after(3); err != nil {
 			return run, err
 		}
+		mark = run.timed(phaseParsed, mark)
 	}
 
 	// 4. The tail: the batches that arrived while the erasure ran, for the
@@ -723,10 +729,17 @@ func (s *Store) runErasure(ctx context.Context, writer jobSubmitter, id string, 
 	// drops its windows, and the batches they name hold spans of traces
 	// already gone, which nothing else can find again (#28). The erasure
 	// stays running in its tail; the starts it takes are counted, and the
-	// last one still gives up (#27).
+	// last one still gives up (#27), with what the tail said (#29).
 	if err := s.erasureTail(ctx, writer, e, &run); err != nil {
+		if !stopped(ctx, err) {
+			said := &erasureStep{ID: e.ID, TailFailure: failureSentence(err, e.UserID, phaseTail)}
+			if serr := submitErasureJob(ctx, writer, said); serr != nil {
+				logger().Warn("a failed tail's error is not recorded", "erasure", e.ID, "err", serr)
+			}
+		}
 		return run, fmt.Errorf("the tail: %w", err)
 	}
+	run.timed(phaseTail, mark)
 	return run, s.endErasure(ctx, writer, e, failed, phaseParsed, run, began)
 }
 
@@ -845,6 +858,12 @@ func (s *Store) endErasure(ctx context.Context, writer jobSubmitter, e *Erasure,
 		"traces", counts.Traces, "chunks", run.chunks, "raw_batches_read", run.batchesRead,
 		"raw_spans", counts.RawSpans, "raw_batches_rewritten", counts.RawBatchesRewritten,
 		"raw_batches_deleted", counts.RawBatchesDeleted, "took", time.Since(began).Round(time.Millisecond)}
+	// Each phase this run went through, in their order (spec 047 #5, #29).
+	for _, phase := range []string{phaseRaw, phaseParsed, phaseTail} {
+		if took, ok := run.took[phase]; ok {
+			args = append(args, phase+"_took", took.Round(time.Millisecond))
+		}
+	}
 	// The state it ended in, not this run's view: an erasure whose failure
 	// an earlier start recorded ends failed from a run that met none (#28).
 	if end.Erasure.State == ErasureFailed {

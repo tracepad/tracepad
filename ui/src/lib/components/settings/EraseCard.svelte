@@ -71,8 +71,10 @@
 	}
 
 	async function list() {
+		const asked = projectID;
 		try {
-			recent = (await api.erasures(current.id)).erasures;
+			const { erasures } = await api.erasures(asked);
+			if (asked === projectID) recent = erasures;
 		} catch {
 			// The listing is what is on the side; the erasure itself is the
 			// card's, and a listing that failed leaves the last one standing.
@@ -80,12 +82,22 @@
 	}
 
 	// The listing, on the way in and while anything in it is still running;
-	// and once more when the erasure this card follows ends.
+	// and once more when the erasure this card follows ends. Another project
+	// is another card's worth: what this one followed is forgotten (#29). It
+	// follows the values, not the record, which is read again with the
+	// account's projects.
+	const projectID = $derived(current.id);
+	const viewer = $derived(readOnly);
 	$effect(() => {
-		if (readOnly) return;
-		void current.id;
+		if (viewer) return;
+		void projectID;
 		void list();
-		return () => watch.stop();
+		return () => {
+			watch.forget();
+			following = false;
+			erasing = '';
+			recent = [];
+		};
 	});
 	// Not while the card follows its own erasure: that one is read every
 	// tick already, and the listing is read again when it ends (#28).

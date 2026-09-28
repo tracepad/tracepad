@@ -71,26 +71,28 @@ type Erasure struct {
 
 	since, now int64
 	attempts   int
+	// lastFailure is what the latest tail that failed said (#29).
+	lastFailure string
 }
 
 // Ended reports an erasure that is done or failed.
 func (e *Erasure) Ended() bool { return e.State == ErasureDone || e.State == ErasureFailed }
 
 const erasureColumns = `id, project_id, user_id, state, phase, created_at, started_at, finished_at,
-	since, now, attempts, traces_at_start, counts, compaction, error`
+	since, now, attempts, traces_at_start, counts, compaction, error, last_failure`
 
 func scanErasure(row interface{ Scan(...any) error }) (*Erasure, error) {
 	var (
 		e                           Erasure
-		user, phase, failure        sql.NullString
+		user, phase, failure, last  sql.NullString
 		started, finished, since, n sql.NullInt64
 		counts                      string
 	)
 	if err := row.Scan(&e.ID, &e.ProjectID, &user, &e.State, &phase, &e.CreatedAt, &started, &finished,
-		&since, &e.now, &e.attempts, &n, &counts, &e.Compaction, &failure); err != nil {
+		&since, &e.now, &e.attempts, &n, &counts, &e.Compaction, &failure, &last); err != nil {
 		return nil, err
 	}
-	e.UserID, e.Phase, e.Error = user.String, phase.String, failure.String
+	e.UserID, e.Phase, e.Error, e.lastFailure = user.String, phase.String, failure.String, last.String
 	e.StartedAt, e.FinishedAt, e.since = started.Int64, finished.Int64, since.Int64
 	if n.Valid {
 		e.TracesAtStart = &n.Int64
@@ -246,9 +248,13 @@ func (j *erasureStart) apply(tx *sql.Tx) error {
 // does only its tail, with the failure recorded (#27): the chunks that
 // committed deleted traces whose late batches no repeat can find again, so
 // they are scrubbed before the erasure gives up. A tail that is cut off too
-// is dropped, and the erasure ends failed at its next start.
+// is dropped, and the erasure ends failed at its next start. The sentence it
+// ends with carries what its tail last failed with, if one did (#29).
+//
+// Run names this start on the row, so that the pause of a stop takes back
+// this start and no other (#29).
 type erasureBegin struct {
-	ID string
+	ID, Run string
 
 	Erasure *Erasure
 	// Gone reports an erasure that is not there or is over; GaveUp one
@@ -269,6 +275,9 @@ func (j *erasureBegin) apply(tx *sql.Tx) error {
 	}
 	now := time.Now().UnixNano()
 	interrupted := fmt.Sprintf("%d starts ended before the erasure did", erasureAttempts)
+	if e.lastFailure != "" {
+		interrupted += "; its tail last failed with: " + e.lastFailure
+	}
 	if e.attempts > erasureAttempts {
 		if err := tx.QueryRow(`SELECT COUNT(*) FROM erasure_tail WHERE erasure_id = ?`, j.ID).Scan(&j.Dropped); err != nil {
 			return err
@@ -281,11 +290,11 @@ func (j *erasureBegin) apply(tx *sql.Tx) error {
 	if e.attempts == erasureAttempts {
 		phase, failure = phaseTail, interrupted
 	}
-	if _, err := tx.Exec(`UPDATE erasures SET state = ?, attempts = attempts + 1,
+	if _, err := tx.Exec(`UPDATE erasures SET state = ?, attempts = attempts + 1, run = ?,
 		started_at = COALESCE(started_at, ?), since = COALESCE(since, ?),
 		phase = CASE WHEN ? != '' THEN ? ELSE COALESCE(phase, ?) END,
 		error = COALESCE(error, NULLIF(?, ''))
-		WHERE id = ?`, ErasureRunning, now, now, failure, phase, phase, failure, j.ID); err != nil {
+		WHERE id = ?`, ErasureRunning, j.Run, now, now, failure, phase, phase, failure, j.ID); err != nil {
 		return fmt.Errorf("start erasure %s: %w", j.ID, err)
 	}
 	j.Erasure, err = txErasure(tx, j.ID)
@@ -294,12 +303,15 @@ func (j *erasureBegin) apply(tx *sql.Tx) error {
 
 // erasurePause gives back the start of a run the worker's stop ended (#17,
 // #27): a clean stop is not a crash, and an erasure longer than a few
-// deploys must not run out of starts for them.
-type erasurePause struct{ ID string }
+// deploys must not run out of starts for them. Only the start its run
+// recorded: a stop that came while the start still waited for a full queue
+// ended a run that counted nothing, and the count on the row is the crashes
+// before it (#29).
+type erasurePause struct{ ID, Run string }
 
 func (j *erasurePause) apply(tx *sql.Tx) error {
-	_, err := tx.Exec(`UPDATE erasures SET attempts = MAX(attempts - 1, 0) WHERE id = ? AND state = ?`,
-		j.ID, ErasureRunning)
+	_, err := tx.Exec(`UPDATE erasures SET attempts = MAX(attempts - 1, 0), run = NULL
+		WHERE id = ? AND state = ? AND run = ?`, j.ID, ErasureRunning, j.Run)
 	return err
 }
 
@@ -309,12 +321,15 @@ func (j *erasurePause) apply(tx *sql.Tx) error {
 const pauseTime = time.Second
 
 // erasureStep records what a phase learned outside a job of its own: step 1's
-// count, which a resume does not overwrite, and the move to the tail after a
-// chunk failed, with the failure the erasure will end with (#16).
+// count, which a resume does not overwrite, the move to the tail after a
+// chunk failed, with the failure the erasure will end with (#16), and what a
+// tail that failed said, which the erasure ends with only if it gives up
+// (#29).
 type erasureStep struct {
 	ID            string
 	TracesAtStart *int64
 	Phase, Error  string
+	TailFailure   string
 }
 
 func (j *erasureStep) apply(tx *sql.Tx) error {
@@ -323,8 +338,9 @@ func (j *erasureStep) apply(tx *sql.Tx) error {
 		counted = *j.TracesAtStart
 	}
 	_, err := tx.Exec(`UPDATE erasures SET traces_at_start = COALESCE(traces_at_start, ?),
-		phase = COALESCE(NULLIF(?, ''), phase), error = COALESCE(error, NULLIF(?, ''))
-		WHERE id = ? AND state = ?`, counted, j.Phase, j.Error, j.ID, ErasureRunning)
+		phase = COALESCE(NULLIF(?, ''), phase), error = COALESCE(error, NULLIF(?, '')),
+		last_failure = COALESCE(NULLIF(?, ''), last_failure)
+		WHERE id = ? AND state = ?`, counted, j.Phase, j.Error, j.TailFailure, j.ID, ErasureRunning)
 	return err
 }
 
@@ -348,7 +364,7 @@ func finishErasure(tx *sql.Tx, id, failure string, now int64) (*Erasure, error) 
 	result, err := tx.Exec(`UPDATE erasures SET
 		error = COALESCE(error, NULLIF(?, '')),
 		state = CASE WHEN COALESCE(error, NULLIF(?, '')) IS NULL THEN ? ELSE ? END,
-		phase = NULL, user_id = NULL, finished_at = ?
+		phase = NULL, user_id = NULL, finished_at = ?, run = NULL, last_failure = NULL
 		WHERE id = ? AND state IN (?, ?)`,
 		failure, failure, ErasureDone, ErasureFailed, now, id, ErasureQueued, ErasureRunning)
 	if err != nil {
@@ -567,25 +583,30 @@ func (er *Eraser) Start() {
 	go func() {
 		defer close(er.done)
 		for {
-			id, err := er.store.nextErasure(ctx)
-			if err == nil && id != "" {
-				if _, err = er.store.runErasure(ctx, er.writer, id, er.opts); err == nil {
-					continue
-				}
-			}
-			if ctx.Err() != nil {
-				return
-			}
 			wake := er.store.erasures.wake
-			if err != nil {
-				// Left running: a later start takes it again, and the
-				// last one gives up (#12, #27). Not at once, and not
-				// for a request that wakes the worker: the erasure
-				// would be taken first each time, spend a start on
-				// the same failure and hold every queued one behind
-				// it (#28).
-				logger().Error("an erasure stopped before it ended", "erasure", id, "err", err)
-				wake = nil
+			id, err := er.store.nextErasure(ctx)
+			switch {
+			case ctx.Err() != nil:
+				return
+			case err != nil:
+				// Nothing was started: a request that wakes the
+				// worker may find the database answering again (#29).
+				logger().Error("could not read the next erasure", "err", err)
+			case id != "":
+				if _, err := er.store.runErasure(ctx, er.writer, id, er.opts); err == nil {
+					continue
+				} else if ctx.Err() != nil {
+					return
+				} else {
+					// Left running: a later start takes it again,
+					// and the last one gives up (#12, #27). Not at
+					// once, and not for a request that wakes the
+					// worker: the erasure would be taken first each
+					// time, spend a start on the same failure and
+					// hold every queued one behind it (#28).
+					logger().Error("an erasure stopped before it ended", "erasure", id, "err", err)
+					wake = nil
+				}
 			}
 			select {
 			case <-ctx.Done():
@@ -625,14 +646,24 @@ func (s *Store) nextErasure(ctx context.Context) (string, error) {
 
 // submitErasureJob submits one of an erasure's jobs, waiting out a full queue
 // (spec 044 #20 h) and retrying a job that failed with a database condition
-// (spec 043 #2) with backoff, for as long (#16): a full disk or a busy
-// database passes, and nobody watches a background task to retry it by hand.
+// (spec 043 #2) with backoff, the two within one bound of two minutes (#16,
+// #29): a full disk or a busy database passes, and nobody watches a
+// background task to retry it by hand. A full queue is tried again sooner
+// than a condition, which takes longer to clear.
 func submitErasureJob(ctx context.Context, writer jobSubmitter, job WriteJob) error {
-	delay := 100 * time.Millisecond
+	busy, condition := 10*time.Millisecond, 100*time.Millisecond
 	deadline := time.Now().Add(busyWait)
 	for {
-		err := submitPatiently(ctx, writer, job)
-		if _, condition := Condition(err); !condition || time.Now().After(deadline) {
+		err := writer.Submit(ctx, job)
+		var delay time.Duration
+		if errors.Is(err, ErrWriterBusy) {
+			delay, busy = busy, min(2*busy, time.Second)
+		} else if _, ok := Condition(err); ok {
+			delay, condition = condition, min(2*condition, 10*time.Second)
+		} else {
+			return err
+		}
+		if time.Now().After(deadline) {
 			return err
 		}
 		select {
@@ -640,7 +671,6 @@ func submitErasureJob(ctx context.Context, writer jobSubmitter, job WriteJob) er
 			return ctx.Err()
 		case <-time.After(delay):
 		}
-		delay = min(2*delay, 10*time.Second)
 	}
 }
 
