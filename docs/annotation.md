@@ -97,10 +97,13 @@ curl -H "Authorization: Bearer tp-sk-…" \
 {"ids": ["c0ffee00c0ffee00c0ffee00c0ffee00"], "added": 1, "existing": 0}
 ```
 
-An array works too, all-or-nothing. Adding a target the queue already holds
-answers with the item it already is and counts it as `existing`, whatever its
-status — which is what makes a script safe to retry. `observation_id` beside
-`trace_id` queues that step rather than the whole run.
+An array works too, all-or-nothing, up to 1,000 targets: an add of more is a
+`400` (`an add takes at most 1000 targets; use items/from-traces for a filter`),
+refused before any target is looked at, and a filter is what `from-traces` is
+for. Adding a target the queue already holds answers with the item it already
+is and counts it as `existing`, whatever its status — which is what makes a
+script safe to retry. `observation_id` beside `trace_id` queues that step
+rather than the whole run.
 
 The target does not have to exist yet: an item may be queued for a trace whose
 spans are still in flight, exactly as a score may be written about one.
