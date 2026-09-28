@@ -287,6 +287,14 @@ describe('the dataset', () => {
     expect(calls).toEqual([]);
   });
 
+  test('putItems reads a null id as none, not as a repeated one', async () => {
+    const calls = fakeFetch(() => ({ body: { version: 1, changed: 1 } }));
+    tracepad.init({ host: HOST, key: KEY, export: false });
+    const cases = Array.from({ length: 10_001 }, (_, n) => ({ id: null, input: n }));
+    await tracepad.dataset('golden').putItems(cases as unknown as tracepad.Item[]);
+    expect(calls).toHaveLength(2);
+  });
+
   test('putItems sends an empty list for the server to refuse', async () => {
     const calls = fakeFetch(() => ({ status: 400, body: { error: 'no items in the request' } }));
     tracepad.init({ host: HOST, key: KEY, export: false });

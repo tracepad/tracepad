@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/tracepad/tracepad/internal/store"
 	"github.com/tracepad/tracepad/internal/termsafe"
 )
 
@@ -260,6 +261,13 @@ func (r *run) datasetsPush(ctx context.Context, args []string) error {
 		return err
 	}
 	name := rest[0]
+	// A file that goes out in several writes is checked before anything is
+	// sent, the description included (#34 (c)).
+	if len(items) > maxItemsPerWrite {
+		if err := refuseRepeatedIDs(items); err != nil {
+			return err
+		}
+	}
 	if description != "" {
 		if _, err := r.api.Send(ctx, "PUT", "/api/v1/datasets/"+url.PathEscape(name), nil,
 			map[string]any{"description": description}); err != nil {
@@ -271,11 +279,6 @@ func (r *run) datasetsPush(ctx context.Context, args []string) error {
 	// a file sent item by item would leave a version per case and no way to
 	// name the state the file describes (#5). A file longer than one request
 	// takes goes as the fewest writes that carry it (#34).
-	if len(items) > maxItemsPerWrite {
-		if err := refuseRepeatedIDs(items); err != nil {
-			return err
-		}
-	}
 	var written itemsWritten
 	writes := 0
 	for start := 0; start < len(items); start += maxItemsPerWrite {
@@ -283,7 +286,8 @@ func (r *run) datasetsPush(ctx context.Context, args []string) error {
 		body, err := r.api.Post(ctx, "/api/v1/datasets/"+url.PathEscape(name)+"/items", chunk)
 		if err != nil {
 			if start > 0 {
-				return fmt.Errorf("%w (the first %d cases are written, at version %d)",
+				return fmt.Errorf("%w (the first %d cases are written, at version %d; "+
+					"pushing the file again adds the ones without an id a second time)",
 					err, start, written.Version)
 			}
 			return err
@@ -326,7 +330,7 @@ type itemsWritten struct {
 
 // maxItemsPerWrite is the most items the server takes in one POST …/items
 // (spec 014 #34).
-const maxItemsPerWrite = 10_000
+const maxItemsPerWrite = store.MaxItemsPerWrite
 
 // refuseRepeatedIDs checks a file that goes out in several writes: one
 // request refuses an id given twice, and split across two the second would

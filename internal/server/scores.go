@@ -80,6 +80,9 @@ func (s *Server) handleCreateScores(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if refuseOverItemCap(w, body, "scores") {
+		return
+	}
 	requests, err := decodeScores(body)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -88,9 +91,6 @@ func (s *Server) handleCreateScores(w http.ResponseWriter, r *http.Request) {
 	if len(requests) == 0 {
 		// Nothing to write is a client bug, not a no-op (edge cases).
 		writeError(w, http.StatusBadRequest, "no scores in the request")
-		return
-	}
-	if refuseOverItemCap(w, len(requests), "scores") {
 		return
 	}
 

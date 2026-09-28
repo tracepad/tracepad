@@ -113,7 +113,8 @@ const MAX_ITEMS_PER_WRITE = 10_000;
 function refuseRepeatedIds(body: Json[]): void {
   const seen = new Map<unknown, number>();
   body.forEach((item, index) => {
-    if (item.id === undefined) return;
+    // A null id is no id: the server generates one, as it does for none.
+    if (item.id === undefined || item.id === null) return;
     const first = seen.get(item.id);
     if (first !== undefined) {
       throw new Error(`tracepad: putItems: the item at index ${index} repeats id ${String(item.id)} of the item at index ${first}`);

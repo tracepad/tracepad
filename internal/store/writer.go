@@ -34,6 +34,10 @@ const (
 	// plus that job — under two slices. A job that weighs more than
 	// WindowRows by itself joins no window: it commits alone (#35).
 	WindowRows = 1000
+	// MaxItemsPerWrite bounds the rows of one array write — scores, dataset
+	// items — so that a job's weight has a ceiling (spec 043 #36): the
+	// server refuses a longer array, and the CLI splits a longer file.
+	MaxItemsPerWrite = 10_000
 )
 
 // commitsAlone is the weight of a job whose rows cannot be counted before it

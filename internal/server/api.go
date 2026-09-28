@@ -192,23 +192,30 @@ func (s *Server) readJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 	return true
 }
 
-// maxItemsPerWrite bounds the rows of one array write — scores, dataset items
-// (spec 043 #36). The body cap bounds bytes, and half a million minimal scores
-// fit in it; each array is one transaction, so its count is how long it holds
-// the only writer. 10,000 commits in under a second, and is a hundred times
-// the batch the SDKs send scores in.
-const maxItemsPerWrite = 10_000
+// maxItemsPerWrite bounds the rows of one array write (spec 043 #36). The
+// body cap bounds bytes, and half a million minimal scores fit in it; each
+// array is one transaction, so its count is how long it holds the only
+// writer. 10,000 commits in under a second, and is a hundred times the batch
+// the SDKs send scores in.
+const maxItemsPerWrite = store.MaxItemsPerWrite
 
-// refuseOverItemCap answers 413 for an array over maxItemsPerWrite, naming the
-// count and the cap. It runs before any item is validated and before anything
-// is queued: the count is the refusal, whatever the rows hold.
-func refuseOverItemCap(w http.ResponseWriter, count int, kind string) bool {
-	if count <= maxItemsPerWrite {
+// refuseOverItemCap answers 413 for a body that is one JSON array of more
+// than maxItemsPerWrite values, naming the count and the cap. The values are
+// counted before any of them is decoded into a request, so the count is the
+// answer whatever they hold. A body of any other shape, or one that is not a
+// single well-formed array, is not counted: the strict decode after this
+// answers it as it always has.
+func refuseOverItemCap(w http.ResponseWriter, body []byte, kind string) bool {
+	if trimmed := bytes.TrimLeft(body, " \t\r\n"); len(trimmed) == 0 || trimmed[0] != '[' {
+		return false
+	}
+	var rows []json.RawMessage
+	if json.Unmarshal(body, &rows) != nil || len(rows) <= maxItemsPerWrite {
 		return false
 	}
 	writeError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf(
 		"this request carries %d %s; the server takes at most %d per request — send them in batches",
-		count, kind, maxItemsPerWrite))
+		len(rows), kind, maxItemsPerWrite))
 	return true
 }
 

@@ -158,11 +158,7 @@ func TestDatasetsPushSendsALongFileInWritesTheServerTakes(t *testing.T) {
 		t.Fatal(err)
 	}
 	asJSON := h.run(t.Context(), false, "datasets", "push", "golden", "--file", path)
-	written, err := decode[struct {
-		IDs     []string `json:"ids"`
-		Version int      `json:"version"`
-		Changed int      `json:"changed"`
-	}](json.RawMessage(asJSON.stdout))
+	written, err := decode[itemsWritten](json.RawMessage(asJSON.stdout))
 	// The cases carry no ids, so the second push adds them all again.
 	if err != nil || len(written.IDs) != 20_001 || written.Version != 6 || written.Changed != 20_001 {
 		t.Fatalf("json push = %d ids, version %d, changed %d, err %v", len(written.IDs), written.Version, written.Changed, err)
@@ -173,7 +169,12 @@ func TestDatasetsPushSendsALongFileInWritesTheServerTakes(t *testing.T) {
 	// is sent.
 	lines[3] = fmt.Sprintf(`{"id": %q, "input": 3}`, cliItemID(1))
 	lines[10_000] = fmt.Sprintf(`{"id": %q, "input": 10000}`, cliItemID(1))
-	got = h.pushCases(t, "golden", strings.Join(lines, "\n"), ".jsonl")
+	// --description included: nothing is sent.
+	path = filepath.Join(t.TempDir(), "repeated.jsonl")
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got = h.run(t.Context(), true, "datasets", "push", "golden", "--file", path, "--description", "changed")
 	if got.code != ExitFailure || !strings.Contains(got.stderr, "the case at index 10000 repeats id "+cliItemID(1)+" of the case at index 3") {
 		t.Fatalf("repeated id = %+v", got)
 	}
@@ -182,6 +183,9 @@ func TestDatasetsPushSendsALongFileInWritesTheServerTakes(t *testing.T) {
 	}](json.RawMessage(h.run(t.Context(), false, "datasets", "show", "golden").stdout))
 	if err != nil || shown.Version != 6 {
 		t.Errorf("version = %d after a refused file, want 6 (err %v)", shown.Version, err)
+	}
+	if got := h.run(t.Context(), false, "datasets", "ls"); strings.Contains(got.stdout, `"changed"`) {
+		t.Errorf("a refused file changed the description: %s", got.stdout)
 	}
 }
 

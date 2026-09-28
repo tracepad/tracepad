@@ -307,6 +307,9 @@ func (s *Server) handleCreateItems(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if refuseOverItemCap(w, body, "items") {
+		return
+	}
 	requests, err := decodeItems(body)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -314,9 +317,6 @@ func (s *Server) handleCreateItems(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(requests) == 0 {
 		writeError(w, http.StatusBadRequest, "no items in the request")
-		return
-	}
-	if refuseOverItemCap(w, len(requests), "items") {
 		return
 	}
 
