@@ -21,6 +21,15 @@ const (
 	sqliteCantOpen = 14
 )
 
+// Primary codes that are not conditions — they do not pass on their own —
+// but that an erasure names as a cause, since an operator acts on them
+// (spec 047 #32).
+const (
+	sqliteReadOnly = 8
+	sqliteCorrupt  = 11
+	sqliteNotADB   = 26
+)
+
 var conditionNames = map[int]string{
 	sqliteBusy:     "SQLITE_BUSY",
 	sqliteLocked:   "SQLITE_LOCKED",
@@ -35,12 +44,22 @@ var conditionNames = map[int]string{
 // driver's error is recognised by the one method it carries, `Code() int`,
 // anywhere in the chain.
 func Condition(err error) (string, bool) {
-	var coded interface{ Code() int }
-	if !errors.As(err, &coded) {
+	code, ok := sqliteCode(err)
+	if !ok {
 		return "", false
 	}
-	name, ok := conditionNames[coded.Code()&0xff]
+	name, ok := conditionNames[code]
 	return name, ok
+}
+
+// sqliteCode is the primary result code of the driver's error in err's
+// chain, its extended code folded in, and whether there is one.
+func sqliteCode(err error) (int, bool) {
+	var coded interface{ Code() int }
+	if !errors.As(err, &coded) {
+		return 0, false
+	}
+	return coded.Code() & 0xff, true
 }
 
 // conditionLog paces the log lines of commits a database condition failed:

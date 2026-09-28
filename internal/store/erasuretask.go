@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -642,7 +641,8 @@ func (er *Eraser) Start() {
 				// nor at once: taken first each time, it would spend a
 				// start on the same failure and hold every erasure
 				// behind it (#28, #30).
-				logger().Error("an erasure stopped before it ended", "erasure", id, "err", err)
+				logger().Error("an erasure stopped before it ended", "erasure", id,
+					"cause", failureCause(err), "err", err)
 				resting[id] = time.Now().Add(er.opts.poll())
 				continue
 			}
@@ -774,22 +774,18 @@ const (
 	causeOther    = "an unexpected error, which the server's log has"
 )
 
-// SQLite's primary codes of the failures an operator acts on that do not pass
-// on their own, and so are not conditions (spec 043 #2).
-const (
-	sqliteReadOnly = 8
-	sqliteCorrupt  = 11
-	sqliteNotADB   = 26
-)
-
-// conditionCauses are the database's conditions (spec 043 #2) as causes.
-var conditionCauses = map[string]string{
-	"SQLITE_FULL":     causeFull,
-	"SQLITE_BUSY":     causeBusy,
-	"SQLITE_LOCKED":   causeBusy,
-	"SQLITE_IOERR":    causeIO,
-	"SQLITE_NOMEM":    causeMemory,
-	"SQLITE_CANTOPEN": causeOpen,
+// sqliteCauses are SQLite's primary codes as causes: the conditions (spec
+// 043 #2), and two failures that do not pass but an operator acts on.
+var sqliteCauses = map[int]string{
+	sqliteFull:     causeFull,
+	sqliteBusy:     causeBusy,
+	sqliteLocked:   causeBusy,
+	sqliteIOErr:    causeIO,
+	sqliteNoMem:    causeMemory,
+	sqliteCantOpen: causeOpen,
+	sqliteReadOnly: causeReadOnly,
+	sqliteCorrupt:  causeDamaged,
+	sqliteNotADB:   causeDamaged,
 }
 
 // errRawBatch marks a scrub of a raw batch that failed after its retries, or
@@ -798,15 +794,10 @@ var errRawBatch = errors.New("a raw batch could not be rewritten")
 
 // failureCause is the cause the record gives for err, from the list above.
 func failureCause(err error) string {
-	name, condition := Condition(err)
-	var coded interface{ Code() int }
+	if code, ok := sqliteCode(err); ok && sqliteCauses[code] != "" {
+		return sqliteCauses[code]
+	}
 	switch {
-	case condition && conditionCauses[name] != "":
-		return conditionCauses[name]
-	case errors.As(err, &coded) && coded.Code()&0xff == sqliteReadOnly:
-		return causeReadOnly
-	case errors.As(err, &coded) && (coded.Code()&0xff == sqliteCorrupt || coded.Code()&0xff == sqliteNotADB):
-		return causeDamaged
 	case errors.Is(err, ErrWriterBusy):
 		return causeQueue
 	case errors.Is(err, errRawBatch):
@@ -821,54 +812,129 @@ func failureSentence(cause, phase string) string {
 	return fmt.Sprintf("the %s phase failed: %s", phase, cause)
 }
 
-// logFailure logs an erasure's failure where it was met, once (#32): the
+// reportFailure logs an erasure's failure where it was met, once (#32): the
 // cause the record gives, and the error itself as loggable leaves it. Every
-// line of the store's that gives an erasure's error goes through here.
-func (e *Erasure) logFailure(message, cause string, err error) {
+// line of the store's that gives an erasure's failure goes through here.
+func (e *Erasure) reportFailure(message, cause string, err error) {
 	logger().Error(message, "erasure", e.ID, "cause", cause, "err", loggable(err, e.UserID))
 }
 
 // loggable is an erasure's error as the server's log line gives it: whole,
-// unless it names the user, which no log line does (spec 044 #15, #27 c) —
-// as it is, quoted the way a refusal quotes the echo it was given, escaped
-// for a URL, or encoded in a JSON string, with its letters past ASCII
-// escaped or not, and those past the first plane as surrogate pairs (#32).
-// Letters are compared without their case, which an escape's hex digits may
-// be written in either of. The id counts where it stands as a word of its
-// own, so that a short id does not withhold every error that holds its
-// letters; one that is a whole word of the error still does, which is the
-// safe side.
+// unless it names the user, which no log line does (spec 044 #15, #32).
+//
+// The store's own words never hold the id (#32); what may is text from
+// elsewhere — the decoder's on a batch, a driver's, a refusal's echo. That
+// text is read as it stands and decoded: %XX sequences, Go's and JSON's
+// escapes (\n, \", \uXXXX with its surrogate pairs, \UXXXXXXXX, \xXX), a +
+// as a space, each over again for text escaped twice. The id is looked for
+// as it is in each reading, without case, as a word of its own. An encoding
+// that changes the id's bytes themselves — base64, a hex dump — is out of
+// the check's reach: it is a defence in depth behind the store's own words.
 func loggable(err error, userID string) string {
 	text := err.Error()
 	if userID == "" {
 		return text
 	}
-	inner := func(s string) string { return s[1 : len(s)-1] }
-	encoded, _ := json.Marshal(userID)
-	folded := strings.ToLower(text)
-	for _, form := range []string{userID, inner(strconv.Quote(userID)), inner(strconv.QuoteToASCII(userID)),
-		url.PathEscape(userID), url.QueryEscape(userID), inner(string(encoded)), jsonASCII(userID)} {
-		if holdsWord(folded, strings.ToLower(form)) {
+	id := strings.ToLower(userID)
+	for _, reading := range readings(text) {
+		if holdsWord(strings.ToLower(reading), id) {
 			return "an error that named the user, which is not logged"
 		}
 	}
 	return text
 }
 
-// jsonASCII is s as a JSON string escapes it when it writes ASCII only: \u
-// and four hex digits a letter, and a surrogate pair past the first plane.
-func jsonASCII(s string) string {
-	var b strings.Builder
-	for _, r := range s {
-		switch {
-		case r < utf8.RuneSelf:
-			b.WriteRune(r)
-		case r > 0xffff:
-			high, low := utf16.EncodeRune(r)
-			fmt.Fprintf(&b, `\u%04x\u%04x`, high, low)
-		default:
-			fmt.Fprintf(&b, `\u%04x`, r)
+// readings are text as it stands and decoded: %XX sequences and escapes,
+// again while that changes it, each with + read as a space too.
+func readings(text string) []string {
+	out := []string{text}
+	for range 3 {
+		next := unescape(unpercent(out[len(out)-1]))
+		if next == out[len(out)-1] {
+			break
 		}
+		out = append(out, next)
+	}
+	for _, reading := range out[:len(out):len(out)] {
+		if strings.Contains(reading, "+") {
+			out = append(out, strings.ReplaceAll(reading, "+", " "))
+		}
+	}
+	return out
+}
+
+// unpercent decodes every %XX in text and leaves anything else as it is.
+func unpercent(text string) string {
+	if !strings.Contains(text, "%") {
+		return text
+	}
+	var b strings.Builder
+	for i := 0; i < len(text); i++ {
+		if text[i] == '%' && i+2 < len(text) {
+			if v, err := strconv.ParseUint(text[i+1:i+3], 16, 8); err == nil {
+				b.WriteByte(byte(v))
+				i += 2
+				continue
+			}
+		}
+		b.WriteByte(text[i])
+	}
+	return b.String()
+}
+
+// unescape decodes Go's and JSON's backslash escapes in text, a JSON
+// surrogate pair into the letter it stands for, and leaves anything else as
+// it is.
+func unescape(text string) string {
+	if !strings.Contains(text, `\`) {
+		return text
+	}
+	simple := map[byte]string{'n': "\n", 't': "\t", 'r': "\r", 'b': "\b", 'f': "\f", 'v': "\v", 'a': "\a",
+		'"': `"`, '\'': "'", '\\': `\`, '/': "/", '0': "\x00"}
+	hex := func(s string) (rune, bool) {
+		v, err := strconv.ParseUint(s, 16, 32)
+		return rune(v), err == nil
+	}
+	var b strings.Builder
+	for i := 0; i < len(text); i++ {
+		if text[i] != '\\' || i+1 >= len(text) {
+			b.WriteByte(text[i])
+			continue
+		}
+		c := text[i+1]
+		switch {
+		case simple[c] != "":
+			b.WriteString(simple[c])
+			i++
+			continue
+		case c == 'x' && i+3 < len(text):
+			if r, ok := hex(text[i+2 : i+4]); ok {
+				b.WriteByte(byte(r))
+				i += 3
+				continue
+			}
+		case c == 'u' && i+5 < len(text):
+			if r, ok := hex(text[i+2 : i+6]); ok {
+				i += 5
+				if utf16.IsSurrogate(r) && i+6 < len(text) && text[i+1] == '\\' && text[i+2] == 'u' {
+					if low, ok := hex(text[i+3 : i+7]); ok {
+						if pair := utf16.DecodeRune(r, low); pair != utf8.RuneError {
+							r = pair
+							i += 6
+						}
+					}
+				}
+				b.WriteRune(r)
+				continue
+			}
+		case c == 'U' && i+9 < len(text):
+			if r, ok := hex(text[i+2 : i+10]); ok {
+				b.WriteRune(r)
+				i += 9
+				continue
+			}
+		}
+		b.WriteByte(text[i])
 	}
 	return b.String()
 }

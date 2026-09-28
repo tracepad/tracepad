@@ -443,13 +443,28 @@ type reportsItsFailure interface {
 	failureReported() bool
 }
 
-// lost logs one write that did not commit.
+// lost logs one write that did not commit. A job that logs its own failures
+// is left to do so — its error may quote what it holds (spec 047 #32) — but a
+// database condition it met still counts in the paced line, which gives the
+// condition and not the job's words: a full disk is news whoever met it.
 func lost(sub *submission, err error) {
 	if reports(sub.job) {
+		if code, ok := sqliteCode(err); ok {
+			if _, condition := conditionNames[code]; condition {
+				logFailure(bareCondition(code), slog.LevelError, "write commit failed")
+			}
+		}
 		return
 	}
 	logFailure(err, slog.LevelError, "write commit failed")
 }
+
+// bareCondition is a database condition without the words of the error that
+// carried it.
+type bareCondition int
+
+func (c bareCondition) Error() string { return conditionNames[int(c)] }
+func (c bareCondition) Code() int     { return int(c) }
 
 func reports(job WriteJob) bool {
 	reporter, ok := job.(reportsItsFailure)
