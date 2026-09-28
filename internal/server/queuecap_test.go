@@ -7,14 +7,20 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tracepad/tracepad/internal/config"
 	"github.com/tracepad/tracepad/internal/store"
 )
 
-// A queue add takes at most maxItemsPerAdd targets (spec 024 #4), and answers
+// A queue add takes at most maxItemsPerAdd targets (spec 024 #25), and answers
 // an add of more with a 400 and the text it always had. What changed is the
 // order (spec 024 #25): the targets are counted before any is decoded, so the
 // answer costs no memory per target, as the answer to a batch of scores does
 // (spec 043 #36).
+// The most `{},` targets a body under the default body cap holds, the `[` and
+// the closing bracket counted: what a request of that size can carry to the
+// decoder.
+const queueCapTargets = (config.DefaultMaxBodyBytes - 2) / 3
+
 const queueAddOverTheLimit = "an add takes at most 1000 targets; use items/from-traces for a filter"
 
 func TestQueueAddKeepsItsLimitAndItsAnswer(t *testing.T) {
@@ -52,6 +58,10 @@ func TestQueueAddKeepsItsLimitAndItsAnswer(t *testing.T) {
 			t.Errorf("%s in an add over the limit = %d %s, want the limit's own answer", name, rec.Code, rec.Body)
 		}
 	}
+	// The count wins over a malformed middle (spec 024 #25): the limit's
+	// targets and a comma before the bracket are counted as one more.
+	stray := []byte(`[` + strings.Repeat(`{"trace_id":"`+traceHex(1)+`"},`, maxItemsPerAdd) + `]`)
+	expectError(t, h.call(t, "POST", "/api/v1/queues/review/items", stray), http.StatusBadRequest, queueAddOverTheLimit)
 	if got := h.queueCounts(t, "review"); got.Pending != maxItemsPerAdd {
 		t.Errorf("pending = %d, want a refused add to have written nothing", got.Pending)
 	}
@@ -69,10 +79,11 @@ func TestQueueAddKeepsItsLimitAndItsAnswer(t *testing.T) {
 }
 
 // The three shapes an over-long add can arrive in, at the size of the body
-// cap: 20 MiB of `{},` is seven million targets, and decoding them to count
-// them cost 600 MB and seven million allocations before the 400.
+// cap: 20 MiB of `{},` is seven million targets (queueCapTargets, the most
+// that fit under the cap), and decoding them to count them cost 600 MB and
+// seven million allocations before the 400.
 func TestQueueAddOverTheLimitIsAnsweredWithoutMemoryPerTarget(t *testing.T) {
-	whole := append([]byte("["), bytes.Repeat([]byte("{},"), 7<<20)...)
+	whole := append([]byte("["), bytes.Repeat([]byte("{},"), queueCapTargets)...)
 	whole[len(whole)-1] = ']'
 	for name, c := range map[string]struct {
 		body []byte
@@ -80,7 +91,7 @@ func TestQueueAddOverTheLimitIsAnsweredWithoutMemoryPerTarget(t *testing.T) {
 	}{
 		"counted": {whole, func(err error) bool {
 			var over *overItemCap
-			return errors.As(err, &over) && over.count == 7<<20
+			return errors.As(err, &over) && over.count == queueCapTargets
 		}},
 		"with a value after it": {append(bytes.Clone(whole), " 0"...), func(err error) bool { return errors.Is(err, errTrailingValue) }},
 		"cut short":             {whole[:len(whole)-1], func(err error) bool { return errors.Is(err, errMalformedBody) }},
@@ -136,10 +147,10 @@ func TestQueueAddScansOnlyABodyThatCanBeOverItsLimit(t *testing.T) {
 	}
 }
 
-// What a queue add of the size of the body cap costs to answer, on the three
-// bodies of the test above.
+// What a queue add of the size of the body cap costs to answer, on the counted
+// body of the test above (the other two shapes end the same scan sooner).
 func BenchmarkQueueAddOverTheLimit20MiB(b *testing.B) {
-	whole := append([]byte("["), bytes.Repeat([]byte("{},"), 7<<20)...)
+	whole := append([]byte("["), bytes.Repeat([]byte("{},"), queueCapTargets)...)
 	whole[len(whole)-1] = ']'
 	b.SetBytes(int64(len(whole)))
 	b.ReportAllocs()

@@ -5550,7 +5550,15 @@ export interface operations {
                     };
                 };
             };
-            400: components["responses"]["BadRequest"];
+            /** @description The body is not a target or an array of targets, or the array holds more than 1,000 (`an add takes at most 1000 targets; use items/from-traces for a filter`), refused whole with nothing added: an add over the limit gets that answer whatever a target holds, and it is a `400` here, not the `413` of scores and dataset items */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             429: components["responses"]["Busy"];

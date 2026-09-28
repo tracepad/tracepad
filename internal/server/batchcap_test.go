@@ -336,8 +336,9 @@ func zeros20MiB() []byte {
 }
 
 // The cap the API describes is the cap it applies (spec 043 #36): both array
-// writes say `maxItems` in the OpenAPI document, which the clients are written
-// against, and it is maxItemsPerWrite.
+// writes and the queue add say `maxItems` in the OpenAPI document, which the
+// clients are written against, and it is the limit the server applies:
+// maxItemsPerWrite, or maxItemsPerAdd for the queue (spec 024 #25).
 func TestOpenAPIDescribesTheItemCap(t *testing.T) {
 	var document struct {
 		Paths map[string]map[string]struct {
@@ -355,15 +356,19 @@ func TestOpenAPIDescribesTheItemCap(t *testing.T) {
 	if err := json.Unmarshal(openAPIDocument, &document); err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range []string{"/api/v1/scores", "/api/v1/datasets/{name}/items"} {
+	for path, limit := range map[string]int{
+		"/api/v1/scores":                maxItemsPerWrite,
+		"/api/v1/datasets/{name}/items": maxItemsPerWrite,
+		"/api/v1/queues/{name}/items":   maxItemsPerAdd,
+	} {
 		described := 0
 		for _, alternative := range document.Paths[path]["post"].RequestBody.Content["application/json"].Schema.OneOf {
 			if alternative.MaxItems != nil {
 				described = *alternative.MaxItems
 			}
 		}
-		if described != maxItemsPerWrite {
-			t.Errorf("openapi.json says POST %s takes at most %d, the server takes %d", path, described, maxItemsPerWrite)
+		if described != limit {
+			t.Errorf("openapi.json says POST %s takes at most %d, the server takes %d", path, described, limit)
 		}
 	}
 }
