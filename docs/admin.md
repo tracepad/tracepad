@@ -414,13 +414,13 @@ another.
 - `error` — why a `failed` erasure failed: the phase and a cause from a fixed
   list, such as `the parsed phase failed: the disk is full`. An erasure that
   ran out of starts says `3 starts ended before the erasure did`, followed by
-  `; its tail last failed with: ` and a cause when a tail failed. The error
-  itself is in the server's log, on the line of the phase that met it, next
-  to the erasure's id, cut to 512 bytes. A log line never names the user: an
-  error whose text holds the user id — as it is, percent-encoded, or with
-  backslash escapes — is logged as `an error that named the user, which is
-  not logged`, and the cause on the line is what there is to go on. The
-  record never carries an error's own text, so it cannot name the user.
+  `; its tail last failed with: ` and a cause when a tail failed. The record
+  never carries an error's own text, so it cannot name the user. Nor does the
+  erasure's log: its lines never carry an error's text, only its cause, type
+  and position — the erasure's id, the phase, the raw batch when it is one's,
+  the Go types of the error (`types=*json.SyntaxError`) and SQLite's code
+  (`sqlite=13`) when there is one. That is what there is to go on; there is
+  no setting that gives the text.
 
 `GET /api/v1/projects/{id}/erasures/{erasure_id}` reads one erasure, and
 `GET /api/v1/projects/{id}/erasures` the project's hundred, those under way

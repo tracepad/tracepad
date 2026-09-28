@@ -417,13 +417,19 @@ func (w *Writer) flush(pending []*submission) {
 	}
 	// A database condition is left to the retries below: a write they
 	// commit is not lost, and one they cannot commit is logged as lost
-	// (spec 043 #24). Anything else says why the window came apart — but
-	// not a failure of a job whose words the writer does not log, which the
-	// retry below finds again and answers with a line of its own (spec 047
-	// #32).
-	if _, condition := Condition(err); !condition && !redactedByItsJob(err) {
-		logFailure(err, slog.LevelWarn, "write window failed, retrying jobs individually",
-			"jobs", len(pending))
+	// (spec 043 #24). Anything else says why the window came apart — for a
+	// job whose words the writer does not log, without them (spec 047 #32).
+	if _, condition := Condition(err); !condition {
+		if id, redacted := redactedCulprit(err); redacted {
+			// Without the error, and without the retry's finding it again:
+			// one that commits alone leaves this the only trace of why the
+			// window came apart.
+			logRedacted(slog.LevelWarn, "write window failed, retrying jobs individually", id, err,
+				"jobs", len(pending))
+		} else {
+			logFailure(err, slog.LevelWarn, "write window failed, retrying jobs individually",
+				"jobs", len(pending))
+		}
 	}
 	for _, sub := range pending {
 		one := []*submission{sub}
@@ -470,22 +476,30 @@ func lost(sub *submission, err error) {
 	if id, redacted := redacts(sub.job); redacted {
 		if code, ok := sqliteCode(err); ok {
 			if _, condition := conditionNames[code]; condition {
-				logFailure(bareCondition(code), slog.LevelError, "write commit failed", "erasure", id)
+				// Not labelled with the erasure: the pacing counts the
+				// condition's failures of every job.
+				logFailure(bareCondition(code), slog.LevelError, "write commit failed")
 				return
 			}
 		}
-		level := slog.LevelError
-		if rejected(err) {
-			level = slog.LevelInfo
-		}
-		logger().Log(context.Background(), level, "a write of an erasure did not commit; the erasure logs its error",
-			"erasure", id, "cause", failureCause(err))
+		logRedacted(slog.LevelError, "a write of an erasure did not commit", id, err)
 		return
 	}
 	if reports(sub.job) {
 		return
 	}
 	logFailure(err, slog.LevelError, "write commit failed")
+}
+
+// logRedacted is a line for a failure whose error the writer does not give:
+// what it was a step of, and the cause. At Info for a refusal, as a failed
+// write of any job is logged, and at level for anything else.
+func logRedacted(level slog.Level, message, id string, err error, args ...any) {
+	if rejected(err) {
+		level = slog.LevelInfo
+	}
+	logger().Log(context.Background(), level, message,
+		append(append([]any{"erasure", id}, failureFacts(err)...), args...)...)
 }
 
 // bareCondition is a database condition without the words of the error that
@@ -509,15 +523,14 @@ type failedJob struct {
 func (f *failedJob) Error() string { return f.err.Error() }
 func (f *failedJob) Unwrap() error { return f.err }
 
-// redactedByItsJob reports a window's failure that a job whose words the
-// writer does not log caused.
-func redactedByItsJob(err error) bool {
+// redactedCulprit is the id a window's failure is a step of, when a job
+// whose words the writer does not log caused it.
+func redactedCulprit(err error) (string, bool) {
 	var failed *failedJob
 	if !errors.As(err, &failed) {
-		return false
+		return "", false
 	}
-	_, redacted := redacts(failed.job)
-	return redacted
+	return redacts(failed.job)
 }
 
 // logFailure reports a failed commit, demoting a rejection: a caller asking

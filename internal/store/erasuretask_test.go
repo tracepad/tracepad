@@ -17,7 +17,6 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
-	"unicode/utf8"
 
 	tracepb "go.opentelemetry.io/proto/otlp/trace/v1"
 
@@ -67,31 +66,26 @@ func TestASecondRequestAnswersTheRunningErasure(t *testing.T) {
 // The record forgets the person when the erasure ends, done or failed (#9):
 // no user id in the row, no tail, and a failure said as its phase and a cause
 // from a fixed list, never the error's own text, whatever it held (#32). The
-// server's log has the error, unless it names the user (spec 044 #15).
+// server's log has the failure's cause, types and position, and no text
+// either.
 func TestAnEndedErasureForgetsTheUser(t *testing.T) {
 	const unexpected = "the parsed phase failed: an unexpected error, which the server's log has"
 	for _, tc := range []struct {
 		name, user string
 		fail       error
 		want       string
-		// log is what the server's log does with the error: "whole", or
-		// "withheld" for one that names the user; unchecked when empty.
-		log string
 	}{
 		{name: "done"},
 		// Words that read like a cause are still only the error's.
-		{name: "failed with any text", fail: errors.New("the disk is full"), want: unexpected, log: "whole"},
+		{name: "failed with any text", fail: errors.New("the disk is full"), want: unexpected},
 		{name: "failed with a condition", fail: fmt.Errorf("commit: %w", codedError{13}),
-			want: "the parsed phase failed: the disk is full", log: "whole"},
+			want: "the parsed phase failed: the disk is full"},
 		{name: "failed naming the user", user: "user-a", fail: errors.New(`a chunk refused "user-a" twice`),
-			want: unexpected, log: "withheld"},
+			want: unexpected},
 		{name: "failed quoting the user", user: `we"ird`, fail: fmt.Errorf("a chunk refused %q", `we"ird`),
-			want: unexpected, log: "withheld"},
-		// Forms of the id no check of the text would find.
+			want: unexpected},
 		{name: "failed escaping the user", user: "zoë/7", fail: fmt.Errorf("GET /users/%s: refused",
-			url.PathEscape("zoë/7")), want: unexpected, log: "withheld"},
-		{name: "failed encoding the user", user: "zoë", fail: fmt.Errorf("a chunk refused %s", `"zo\u00eb"`),
-			want: unexpected, log: "withheld"},
+			url.PathEscape("zoë/7")), want: unexpected},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			was := busyWait
@@ -133,18 +127,12 @@ func TestAnEndedErasureForgetsTheUser(t *testing.T) {
 			if got.State != ErasureFailed || got.Error != tc.want {
 				t.Errorf("the erasure is %s with %q, want failed with %q", got.State, got.Error, tc.want)
 			}
-			// Logged once, where it was met, and not again on the end's line.
+			// The log says what failed and where, once, and not the text.
 			out := logged.String()
-			whole := strings.Count(out, "err="+strconv.Quote(tc.fail.Error()))
-			switch {
-			case tc.log == "whole" && whole != 1:
-				t.Errorf("the log holds the error %q %d times, want once: %q", tc.fail.Error(), whole, out)
-			case tc.log == "withheld" && (strings.Contains(out, strconv.Quote(tc.fail.Error())) ||
-				!strings.Contains(out, "named the user")):
-				t.Errorf("the log gives the error that names the user: %q", out)
-			}
-			if !strings.Contains(out, "err=\"the parsed phase failed: ") {
-				t.Errorf("the end's line does not give the record's sentence as err: %q", out)
+			if strings.Count(out, "the parsed phase of an erasure failed") != 1 || !strings.Contains(out, "phase=parsed") ||
+				!strings.Contains(out, "types=") || strings.Contains(out, tc.fail.Error()) ||
+				strings.Contains(out, strconv.Quote(tc.fail.Error())) {
+				t.Errorf("the log %q, want the parsed phase's failure once, with its types and not its text", out)
 			}
 		})
 	}
@@ -864,129 +852,6 @@ func TestAFailureIsSaidAsACauseFromTheList(t *testing.T) {
 	}
 }
 
-// A run's error reaches the worker's log line whole, or withheld when it
-// names the user, and still unwraps to what it was (#32, spec 044 #15).
-func TestARunErrorIsLoggedWithoutTheUser(t *testing.T) {
-	named := &erasureError{err: fmt.Errorf("the tail: %w", fmt.Errorf("refused %q", "user-4711")), userID: "user-4711"}
-	if strings.Contains(named.Error(), "4711") {
-		t.Errorf("a run error names the user: %q", named.Error())
-	}
-	plain := &erasureError{err: fmt.Errorf("the tail: %w", context.Canceled), userID: "user-4711"}
-	if plain.Error() != "the tail: context canceled" || !errors.Is(plain, context.Canceled) {
-		t.Errorf("a run error reads %q, want it whole and unwrapping", plain.Error())
-	}
-}
-
-// The error a run answers the worker with, for its log line, does not name
-// the user even when the failure did (#32): a tail that failed is such a run.
-func TestAFailedTailAnswersWithoutTheUser(t *testing.T) {
-	f := newErasureFixture(t)
-	f.ingestOTLP(t, export([]*tracepb.Span{otlpSpan(t, 1, 1, "user-a", "", "a", nil)}), false, daysAgo(1))
-	e := f.startErasure(t, "user-a")
-	broken := &brokenTail{jobSubmitter: f.writer, err: fmt.Errorf("refused %q", "user-a")}
-	_, err := f.store.runErasure(t.Context(), broken, e.ID, EraserOptions{after: func(step int) error {
-		if step == 1 {
-			f.ingestOTLP(t, export([]*tracepb.Span{otlpSpan(t, 1, 9, "user-a", "", "late", nil)}), false, 0)
-		}
-		return nil
-	}})
-	if err == nil || !broken.failed {
-		t.Fatalf("the tail did not fail: %v", err)
-	}
-	if strings.Contains(err.Error(), "user-a") {
-		t.Errorf("the run answers %q, naming the user", err.Error())
-	}
-}
-
-// A raw phase that fails ends the erasure with the phase and a cause, and the
-// raw phase's own line has the error itself (#32).
-func TestAFailedRawPhaseIsLoggedWhole(t *testing.T) {
-	f := newErasureFixture(t)
-	f.ingestOTLP(t, export([]*tracepb.Span{otlpSpan(t, 1, 1, "user-a", "", "a", nil)}), false, daysAgo(1))
-	var logged bytes.Buffer
-	old := logger
-	logger = func() *slog.Logger { return slog.New(slog.NewTextHandler(&logged, nil)) }
-	t.Cleanup(func() { logger = old })
-	writer := &failingJobs{jobSubmitter: f.writer, err: errors.New("replace the media refs: boom"),
-		fails: func(job WriteJob) bool { _, scrub := job.(*RawScrub); return scrub }}
-	e := f.startErasure(t, "user-a")
-	if _, err := f.store.runErasure(t.Context(), writer, e.ID, EraserOptions{}); err != nil {
-		t.Fatal(err)
-	}
-	if got := f.erasureOf(t, "user-a"); got.State != ErasureFailed ||
-		got.Error != "the raw phase failed: "+causeRawBatch {
-		t.Errorf("the erasure is %s with %q, want failed in its raw phase", got.State, got.Error)
-	}
-	if !strings.Contains(logged.String(), "replace the media refs: boom") {
-		t.Errorf("the log %q does not hold the error", logged.String())
-	}
-}
-
-// The log withholds an error that names the user in any of the forms it
-// takes, where the id stands as a word of its own (#32): a short id does not
-// withhold every error that holds its letters. One that is a whole word of an
-// error still withholds it — "1" and "sqlite error 1" — which is the safe
-// side, and known.
-func TestTheLogWithholdsTheUserAsAWord(t *testing.T) {
-	for _, tc := range []struct {
-		user, text string
-		withheld   bool
-	}{
-		{"user-4711", `refused "user-4711"`, true},
-		{"user-4711", "no such user-47110", false},
-		{"a", "read raw batch 7: database is locked", false},
-		{"1", "sqlite error 13", false},
-		{"1", "sqlite error 1", true},
-		{`we"ird`, `a chunk refused "we\"ird"`, true},
-		{"zoë/7", "GET /users/zo%C3%AB%2F7: refused", true},
-		{"zoë 7", "GET /users?id=zo%C3%AB+7: refused", true},
-		{"zoë", `a chunk refused "zo\u00eb"`, true},
-		// An escape's hex digits in either case, and past the first plane
-		// a JSON surrogate pair.
-		{"zoë", `a chunk refused "zo\u00EB"`, true},
-		{"zoë/7", "GET /users/zo%c3%ab%2f7: refused", true},
-		{"zoë😀", `a chunk refused "zo\u00eb\ud83d\ude00"`, true},
-		// An end of the id that is not a letter or a digit is a boundary
-		// itself.
-		{"@bob", "refused x@bob", true},
-		{"-7", "refused user-7", true},
-		{"#42", "issue#42 refused", true},
-		{"bob", "refused bobby", false},
-		{"", "anything", false},
-	} {
-		got := loggable(errors.New(tc.text), tc.user)
-		if withheld := got != tc.text; withheld != tc.withheld {
-			t.Errorf("loggable(%q, %q) = %q, want withheld %v", tc.text, tc.user, got, tc.withheld)
-		}
-	}
-}
-
-// A raw phase whose end is not written still has its error in the log: it is
-// logged where it was met, not on the end's line (#32).
-func TestARawFailureIsLoggedThoughItsEndIsNot(t *testing.T) {
-	f := newErasureFixture(t)
-	f.ingestOTLP(t, export([]*tracepb.Span{otlpSpan(t, 1, 1, "user-a", "", "a", nil)}), false, daysAgo(1))
-	var logged bytes.Buffer
-	old := logger
-	logger = func() *slog.Logger { return slog.New(slog.NewTextHandler(&logged, nil)) }
-	t.Cleanup(func() { logger = old })
-	writer := &failingJobs{jobSubmitter: f.writer, err: errors.New("replace the media refs: boom"),
-		fails: func(job WriteJob) bool {
-			switch job.(type) {
-			case *RawScrub, *erasureEnd:
-				return true
-			}
-			return false
-		}}
-	e := f.startErasure(t, "user-a")
-	if _, err := f.store.runErasure(t.Context(), writer, e.ID, EraserOptions{}); err == nil {
-		t.Fatal("the end was written")
-	}
-	if !strings.Contains(logged.String(), "replace the media refs: boom") {
-		t.Errorf("the log %q does not hold the raw phase's error", logged.String())
-	}
-}
-
 // A batch that cannot be read to plan its scrub is a raw batch that could not
 // be rewritten, not an unexpected error (#32).
 func TestABatchThatCannotBeReadIsARawBatchCause(t *testing.T) {
@@ -1074,37 +939,16 @@ func TestTheWriterLeavesAnErasureJobsFailureToIt(t *testing.T) {
 
 	mu.Lock()
 	defer mu.Unlock()
-	for _, line := range []string{"write commit failed", "write window failed", "4711"} {
+	for _, line := range []string{"write commit failed", "4711", "confirm is not the user id"} {
 		if strings.Contains(logged.String(), line) {
 			t.Errorf("the writer's log gives %q: %q", line, logged.String())
 		}
 	}
-}
-
-// A tail that fails is logged once, on its own line with its cause, and the
-// worker's line says only that the tail failed (#32).
-func TestAFailedTailIsLoggedOnceWithItsCause(t *testing.T) {
-	f := newErasureFixture(t)
-	f.ingestOTLP(t, export([]*tracepb.Span{otlpSpan(t, 1, 1, "user-a", "", "a", nil)}), false, daysAgo(1))
-	var logged bytes.Buffer
-	old := logger
-	logger = func() *slog.Logger { return slog.New(slog.NewTextHandler(&logged, nil)) }
-	t.Cleanup(func() { logger = old })
-	e := f.startErasure(t, "user-a")
-	_, err := f.store.runErasure(t.Context(), &brokenTail{jobSubmitter: f.writer}, e.ID,
-		EraserOptions{after: func(step int) error {
-			if step == 1 {
-				f.ingestOTLP(t, export([]*tracepb.Span{otlpSpan(t, 1, 9, "user-a", "", "late", nil)}), false, 0)
-			}
-			return nil
-		}})
-	if err == nil || err.Error() != "the tail failed: "+causeRawBatch {
-		t.Fatalf("the run answered %v, want that the tail failed and its cause", err)
-	}
-	out := logged.String()
-	if !strings.Contains(out, "msg=\"the tail of an erasure failed") || !strings.Contains(out, "cause=\""+causeRawBatch) ||
-		strings.Count(out, "the disk is broken") != 1 {
-		t.Errorf("the log %q, want the tail's error once, on the tail's line with its cause", out)
+	// The window that came apart is still said, without the error: what it
+	// was a step of, and the cause (#32).
+	if out := logged.String(); !strings.Contains(out, "write window failed") ||
+		!strings.Contains(out, "erasure=4f0c9d3e8a1b2c3d4e5f60718293a4b5") || !strings.Contains(out, "cause=") {
+		t.Errorf("the writer's log %q has no line for the window with the erasure and the cause", out)
 	}
 }
 
@@ -1119,89 +963,6 @@ func TestTheCapSentenceIsTheOneDocumented(t *testing.T) {
 		if !strings.Contains(string(body), capSentence) {
 			t.Errorf("%s does not give %q", path, capSentence)
 		}
-	}
-}
-
-// Text from elsewhere is decoded before the id is looked for (#32): an
-// escaped separator beside the id is a separator, a path escaped around its
-// slashes is the path, and a JSON string written as ASCII is its letters.
-func TestTheLogReadsTheErrorDecoded(t *testing.T) {
-	for _, tc := range []struct {
-		user, text string
-		withheld   bool
-	}{
-		{"user-a", `refused "x\nuser-a"`, true},
-		{"user-a", `refused "x\tuser-a"`, true},
-		{"user-a", "ids=bob%2Cuser-a", true},
-		{"zoë/7", "GET /users/zo%C3%AB/7", true},
-		{`a"😀`, `refused "a\"\ud83d\ude00"`, true},
-		// Escaped twice: JSON inside Go's %q.
-		{"zoë", `refused "\"zo\\u00eb\""`, true},
-		{"zoë 7", "GET /users?id=zo%C3%AB+7", true},
-		{"a+b", "refused a+b", true},
-		// Decoding makes no word of what was not one.
-		{"user-a", "refused user-ab", false},
-		{"1", `sqlite error 13 at \x31\x33`, false},
-		// A percent-encoded backslash before an escape letter is a backslash
-		// and a letter, not a control character.
-		{`CORP\alice`, "GET /users/CORP%5Calice: refused", true},
-		{`dom\tom`, "GET /u/dom%5Ctom", true},
-		{`dom\bob`, "GET /u/dom%5Cbob", true},
-		{`CORP\nick`, "GET /users/CORP%5Cnick", true},
-		{`CORP\alice`, `refused "CORP\\alice"`, true},
-	} {
-		got := loggable(errors.New(tc.text), tc.user)
-		if withheld := got != tc.text; withheld != tc.withheld {
-			t.Errorf("loggable(%q, %q) = %q, want withheld %v", tc.text, tc.user, got, tc.withheld)
-		}
-	}
-}
-
-// A tail's sentence is not taken for an error that names the user, whatever
-// the id (#32): "the tail failed: the disk is full" names no user "full".
-func TestATailsSentenceIsNotCheckedForTheUser(t *testing.T) {
-	was := busyWait
-	busyWait = 50 * time.Millisecond
-	t.Cleanup(func() { busyWait = was })
-	f := newErasureFixture(t)
-	f.ingestOTLP(t, export([]*tracepb.Span{otlpSpan(t, 1, 1, "full", "", "a", nil)}), false, daysAgo(1))
-	e := f.startErasure(t, "full")
-	broken := &brokenTail{jobSubmitter: f.writer, err: fmt.Errorf("rewrite: %w", codedError{13})}
-	_, err := f.store.runErasure(t.Context(), broken, e.ID, EraserOptions{after: func(step int) error {
-		if step == 1 {
-			f.ingestOTLP(t, export([]*tracepb.Span{otlpSpan(t, 1, 9, "full", "", "late", nil)}), false, 0)
-		}
-		return nil
-	}})
-	if err == nil || err.Error() != "the tail failed: "+causeFull {
-		t.Errorf("the run answered %v, want the tail's sentence", err)
-	}
-}
-
-// The worker's line gives the cause of a run's failure with its error, as
-// every line that gives an erasure's error does (#32).
-func TestTheWorkersLineGivesTheCause(t *testing.T) {
-	f := newErasureFixture(t)
-	var logged bytes.Buffer
-	var mu sync.Mutex
-	old := logger
-	logger = func() *slog.Logger { return slog.New(slog.NewTextHandler(&lockedWriter{w: &logged, mu: &mu}, nil)) }
-	t.Cleanup(func() { logger = old })
-	writer := &failingJobs{jobSubmitter: f.writer, err: errors.New("the end could not be written"),
-		fails: func(job WriteJob) bool { _, end := job.(*erasureEnd); return end }}
-	worker := f.store.NewEraser(writer, EraserOptions{Poll: time.Hour})
-	worker.Start()
-	defer worker.Close()
-	f.startErasure(t, "user-a")
-	waitFor(t, func() bool {
-		mu.Lock()
-		defer mu.Unlock()
-		return strings.Contains(logged.String(), "an erasure stopped before it ended")
-	})
-	mu.Lock()
-	defer mu.Unlock()
-	if !strings.Contains(logged.String(), `cause="`+causeOther+`"`) {
-		t.Errorf("the worker's line %q gives no cause", logged.String())
 	}
 }
 
@@ -1228,55 +989,8 @@ func TestTheWriterStillCountsAnErasureJobsCondition(t *testing.T) {
 	}
 	out := logged.String()
 	if !strings.Contains(out, "write commit failed") || !strings.Contains(out, "condition=SQLITE_FULL") ||
-		strings.Contains(out, "4711") {
-		t.Errorf("the writer's log %q, want the condition and not the job's words", out)
-	}
-}
-
-// The check costs little on text made to make it costly (#32): a run of %25,
-// which every round of decoding halves, and a long run of escapes. The
-// readings are few, and the text is read no further than maxScanned.
-func TestTheLogsCheckIsBounded(t *testing.T) {
-	for _, text := range []string{
-		strings.Repeat("%25", 171),  // 513 bytes of %25
-		strings.Repeat("%25", 8192), // 24 KiB, past what is read
-		strings.Repeat(`\\`, 8192),  // escapes of escapes
-		strings.Repeat(`%5C%5C+`, 4096),
-	} {
-		began := time.Now()
-		got := readings(text)
-		loggable(errors.New(text), "user-4711")
-		if took := time.Since(began); took > time.Second {
-			t.Errorf("a text of %d bytes took %s", len(text), took)
-		}
-		if len(got) > 30 {
-			t.Errorf("a text of %d bytes has %d readings, want at most 30", len(text), len(got))
-		}
-	}
-	// Past what is read the check does not look, and past what is logged an
-	// id would not be given.
-	far := strings.Repeat("x", maxScanned) + " user-4711"
-	if got := loggable(errors.New(far), "user-4711"); strings.Contains(got, "named the user") {
-		t.Errorf("the check read past maxScanned: %q", got)
-	}
-}
-
-// What the log gives of an erasure's error is cut, on a character, and an id
-// that starts inside the cut and ends past it is not given in part (#32).
-func TestTheLogCutsTheErrorButNotTheIDs(t *testing.T) {
-	long := strings.Repeat("é", 400) + " refused user-4711 twice"
-	got := loggable(errors.New(long), "someone")
-	if !strings.HasSuffix(got, "…(truncated)") || !utf8.ValidString(got) || len(got) > maxLogged+len("…(truncated)") {
-		t.Errorf("a long error is logged as %d bytes: %q", len(got), got)
-	}
-	// user-4711 starts at byte 810, past the cut; the id that starts inside
-	// it — at byte 500 — and ends past it is withheld whole.
-	straddling := strings.Repeat("x", maxLogged-3) + " user-4711 and more"
-	if got := loggable(errors.New(straddling), "user-4711"); strings.Contains(got, "4711") || !strings.Contains(got, "named the user") {
-		t.Errorf("an id across the cut is logged in part: %q", got)
-	}
-	if got := loggable(errors.New(strings.Repeat("y", 100)), ""); len(got) != 100 {
-		t.Errorf("a short error was cut: %q", got)
+		strings.Contains(out, "4711") || strings.Contains(out, "erasure=") {
+		t.Errorf("the writer's log %q, want the condition, not the job's words and not one erasure's label", out)
 	}
 }
 
@@ -1348,11 +1062,15 @@ func TestARefusalOfAnErasureIsLoggedAsRoutine(t *testing.T) {
 	logger = func() *slog.Logger { return slog.New(slog.NewTextHandler(&logged, nil)) }
 	t.Cleanup(func() { logger = old })
 	e := &Erasure{ID: "4f0c9d3e8a1b2c3d4e5f60718293a4b5", UserID: "user-a"}
-	e.reportFailure("a chunk of an erasure failed", causeOther, &Rejection{Kind: RejectNotFound, Message: "no such project"})
-	e.reportFailure("a chunk of an erasure failed", causeFull, fmt.Errorf("commit: %w", codedError{13}))
+	e.reportFailure("a step failed", phaseParsed, &Rejection{Kind: RejectNotFound, Message: "no such project"})
+	e.reportFailure("a step failed", phaseParsed, fmt.Errorf("commit: %w", codedError{13}))
+	// A scrub that gave up on its conflicts ends the erasure failed: not routine.
+	e.reportFailure("a step failed", phaseRaw, &rawBatchError{id: 7,
+		err: &Rejection{Kind: RejectConflict, Message: "raw batch 7 was rewritten since it was read"}})
 	lines := strings.Split(strings.TrimSpace(logged.String()), "\n")
-	if len(lines) != 2 || !strings.Contains(lines[0], "level=INFO") || !strings.Contains(lines[1], "level=ERROR") {
-		t.Errorf("the log %q, want the refusal at INFO and the disk at ERROR", logged.String())
+	if len(lines) != 3 || !strings.Contains(lines[0], "level=INFO") || !strings.Contains(lines[1], "level=ERROR") ||
+		!strings.Contains(lines[2], "level=ERROR") {
+		t.Errorf("the log %q, want the purge at INFO and the disk and the conflict at ERROR", logged.String())
 	}
 }
 
@@ -1396,7 +1114,238 @@ func TestAnAbandonedErasureWriteIsStillLogged(t *testing.T) {
 	defer mu.Unlock()
 	out := logged.String()
 	if !strings.Contains(out, "erasure=4f0c9d3e8a1b2c3d4e5f60718293a4b5") || !strings.Contains(out, "level=INFO") ||
-		strings.Contains(out, "4711") {
-		t.Errorf("the writer's line %q, want the erasure, INFO for the refusal, and no user", out)
+		strings.Contains(out, "4711") || strings.Contains(out, "logs its error") {
+		t.Errorf("the writer's line %q, want the erasure, INFO for the refusal, no user, and no promise", out)
+	}
+}
+
+// failsOnceRedacted fails the first time it is applied, in a window, and
+// commits alone after.
+type failsOnceRedacted struct{ tries *atomic.Int32 }
+
+func (f failsOnceRedacted) apply(*sql.Tx) error {
+	if f.tries.Add(1) == 1 {
+		return errors.New("a constraint the window hit")
+	}
+	return nil
+}
+
+func (failsOnceRedacted) failureRedacted() (string, bool) {
+	return "4f0c9d3e8a1b2c3d4e5f60718293a4b5", true
+}
+
+// A job of an erasure that fails a window and commits alone leaves the line
+// of the window, without the error, the only trace of why it came apart (#32).
+func TestAWindowAnErasureJobBrokeIsStillSaid(t *testing.T) {
+	f := newErasureFixture(t)
+	var logged bytes.Buffer
+	var mu sync.Mutex
+	old := logger
+	logger = func() *slog.Logger { return slog.New(slog.NewTextHandler(&lockedWriter{w: &logged, mu: &mu}, nil)) }
+	t.Cleanup(func() { logger = old })
+	w, err := f.store.NewWriter(WriterOptions{CommitWindow: 50 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	var commits atomic.Int32
+	parked, release := make(chan struct{}), make(chan struct{})
+	w.beforeCommit = func() {
+		if commits.Add(1) == 1 {
+			close(parked)
+			<-release
+		}
+	}
+	first := make(chan error, 1)
+	go func() { first <- w.Submit(context.Background(), &erasureSweep{}) }()
+	<-parked
+	var tries atomic.Int32
+	answers := make(chan error, 2)
+	go func() { answers <- w.Submit(context.Background(), failsOnceRedacted{&tries}) }()
+	go func() { answers <- w.Submit(context.Background(), &erasureSweep{}) }()
+	waitFor(t, func() bool { return len(w.queue) == 2 })
+	close(release)
+	<-first
+	for range 2 {
+		if err := <-answers; err != nil {
+			t.Fatalf("a job of the window failed alone: %v", err)
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	out := logged.String()
+	if !strings.Contains(out, "write window failed") || !strings.Contains(out, "erasure=4f0c9d3e8a1b2c3d4e5f60718293a4b5") ||
+		strings.Contains(out, "a constraint the window hit") {
+		t.Errorf("the writer's log %q, want the window's line with the erasure and not the error", out)
+	}
+}
+
+// The task's jobs are the ones whose failure the writer does not give (#32),
+// and each answers the erasure it is a step of; the same jobs outside a task
+// are not.
+func TestTheTasksJobsRedactTheirFailure(t *testing.T) {
+	const id = "4f0c9d3e8a1b2c3d4e5f60718293a4b5"
+	for _, tc := range []struct {
+		name     string
+		job      WriteJob
+		redacted bool
+	}{
+		{"a chunk", &UserDataErase{Erasure: &chunkErasure{ID: id}}, true},
+		{"a chunk on its own", &UserDataErase{}, false},
+		{"a scrub", &RawScrub{ErasureID: id}, true},
+		{"a scrub on its own", &RawScrub{}, false},
+		{"a start", &erasureBegin{ID: id}, true},
+		{"a step", &erasureStep{ID: id}, true},
+		{"an end", &erasureEnd{ID: id}, true},
+		{"a pause", &erasurePause{ID: id}, true},
+	} {
+		got, redacted := redacts(tc.job)
+		if redacted != tc.redacted || (redacted && got != id) {
+			t.Errorf("%s: redacts = (%q, %v), want (%q, %v)", tc.name, got, redacted, id, tc.redacted)
+		}
+	}
+}
+
+// A conflict on a scrub that is retried, and a retry whose batch can no
+// longer be read, fail as a raw batch's and read as one (#32).
+func TestARetryThatCannotReadItsBatchIsARawBatchFailure(t *testing.T) {
+	f := newErasureFixture(t)
+	f.ingestOTLP(t, export([]*tracepb.Span{otlpSpan(t, 1, 1, "user-a", "", "a", nil)}), false, daysAgo(1))
+	id := f.count(t, `SELECT MAX(id) FROM raw_batches`)
+	writer := &conflictThenBreak{jobSubmitter: f.writer, db: f.store.db}
+	err := f.store.scrubBatches(t.Context(), writer, &Erasure{ProjectID: f.project.ID}, []int64{id},
+		map[string]bool{hexTrace(1): true})
+	if err == nil || !errors.Is(err, errRawBatch) || !strings.HasPrefix(err.Error(), "raw batch ") ||
+		strings.Contains(err.Error(), "rewritten 7") {
+		t.Fatalf("the retry answered %v, want a raw batch's failure that reads as one", err)
+	}
+	if got := failureCause(err); got != causeRawBatch {
+		t.Errorf("the failure is said as %q, want %q", got, causeRawBatch)
+	}
+}
+
+// conflictThenBreak answers a scrub with a conflict and takes the table the
+// retry reads its batch from away.
+type conflictThenBreak struct {
+	jobSubmitter
+	db *sql.DB
+}
+
+func (w *conflictThenBreak) Submit(ctx context.Context, job WriteJob) error {
+	if _, ok := job.(*RawScrub); ok {
+		if _, err := w.db.Exec(`ALTER TABLE raw_batches RENAME TO raw_batches_away`); err != nil {
+			return err
+		}
+		return &Rejection{Kind: RejectConflict, Message: "raw batch was rewritten since it was read"}
+	}
+	return w.jobSubmitter.Submit(ctx, job)
+}
+
+// The parsed phase's failure line says so, and a tail's cause that cannot be
+// recorded is a warning, as it was (#32).
+func TestTheParsedPhaseAndTheUnrecordedCauseAreSaidAsWhatTheyAre(t *testing.T) {
+	f := newErasureFixture(t)
+	f.ingestOTLP(t, export([]*tracepb.Span{otlpSpan(t, 1, 1, "user-a", "", "a", nil)}), false, daysAgo(1))
+	var logged bytes.Buffer
+	old := logger
+	logger = func() *slog.Logger { return slog.New(slog.NewTextHandler(&logged, nil)) }
+	t.Cleanup(func() { logger = old })
+	was := busyWait
+	busyWait = 20 * time.Millisecond
+	t.Cleanup(func() { busyWait = was })
+
+	e := f.startErasure(t, "user-a")
+	if _, err := f.store.runErasure(t.Context(), &failingChunk{jobSubmitter: f.writer, at: 1,
+		err: errors.New("the chunk broke")}, e.ID, EraserOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if out := logged.String(); !strings.Contains(out, "the parsed phase of an erasure failed") ||
+		strings.Contains(out, "a chunk of an erasure failed") {
+		t.Errorf("the log %q, want the parsed phase's failure said as one", out)
+	}
+
+	logged.Reset()
+	f.ingestOTLP(t, export([]*tracepb.Span{otlpSpan(t, 2, 1, "user-b", "", "b", nil)}), false, daysAgo(1))
+	e = f.startErasure(t, "user-b")
+	broken := &brokenTail{jobSubmitter: f.writer}
+	noCause := &failingJobs{jobSubmitter: broken, err: errors.New("the cause could not be written"),
+		fails: func(job WriteJob) bool { step, ok := job.(*erasureStep); return ok && step.TailFailure != "" }}
+	_, err := f.store.runErasure(t.Context(), noCause, e.ID, EraserOptions{after: func(step int) error {
+		if step == 1 {
+			f.ingestOTLP(t, export([]*tracepb.Span{otlpSpan(t, 2, 9, "user-b", "", "late", nil)}), false, 0)
+		}
+		return nil
+	}})
+	if err == nil {
+		t.Fatal("the tail did not fail")
+	}
+	if out := logged.String(); !strings.Contains(out, "level=WARN msg=\"a failed tail's cause is not recorded\"") {
+		t.Errorf("the log %q, want the unrecorded cause at WARN", out)
+	}
+}
+
+// What a line says of a failure is its cause, the Go types of the error and of
+// what it wraps, SQLite's code, the kind of a refusal and the batch — names of
+// the code and numbers, not words (#32).
+func TestFailureFactsAreTypesAndCodesNotText(t *testing.T) {
+	facts := func(err error) string { return fmt.Sprint(failureFacts(err)...) }
+	got := fmt.Sprint(failureFacts(fmt.Errorf("commit the words of %q: %w", "someone", codedError{13})))
+	for _, want := range []string{"cause", causeFull, "types", "store.codedError", "sqlite", "13"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("facts of a full disk %q lack %q", got, want)
+		}
+	}
+	if strings.Contains(got, "someone") || strings.Contains(got, "fmt.wrapError") {
+		t.Errorf("facts of a full disk %q hold text or a plain wrapper", got)
+	}
+	got = facts(&rawBatchError{id: 7, err: &Rejection{Kind: RejectConflict, Message: "words"}})
+	for _, want := range []string{"store.rawBatchError", "store.Rejection", "refusal", RejectConflict, "batch", "7"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("facts of a conflict %q lack %q", got, want)
+		}
+	}
+	if strings.Contains(got, "words") {
+		t.Errorf("facts of a conflict %q hold the refusal's words", got)
+	}
+	// However deep the chain, the names are few.
+	deep := errors.New("bottom")
+	for range 30 {
+		deep = &rawBatchError{id: 1, err: deep}
+	}
+	if n := strings.Count(errorTypes(deep), ">"); n > 7 {
+		t.Errorf("a chain of 31 errors is named with %d separators, want at most 7", n)
+	}
+}
+
+// The worker's line says where the run stopped and the facts of its failure,
+// and never what the error said (#32).
+func TestTheWorkersLineGivesThePhaseAndTheFacts(t *testing.T) {
+	f := newErasureFixture(t)
+	var logged bytes.Buffer
+	var mu sync.Mutex
+	old := logger
+	logger = func() *slog.Logger { return slog.New(slog.NewTextHandler(&lockedWriter{w: &logged, mu: &mu}, nil)) }
+	t.Cleanup(func() { logger = old })
+	writer := &failingJobs{jobSubmitter: f.writer, err: errors.New("the end could not be written"),
+		fails: func(job WriteJob) bool { _, end := job.(*erasureEnd); return end }}
+	worker := f.store.NewEraser(writer, EraserOptions{Poll: time.Hour})
+	worker.Start()
+	defer worker.Close()
+	f.startErasure(t, "user-a")
+	waitFor(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return strings.Contains(logged.String(), "an erasure stopped before it ended")
+	})
+	mu.Lock()
+	defer mu.Unlock()
+	out := logged.String()
+	for _, want := range []string{`cause="` + causeOther + `"`, "phase=end", "types=", "store.runError"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the worker's line %q lacks %q", out, want)
+		}
+	}
+	if strings.Contains(out, "the end could not be written") {
+		t.Errorf("the worker's line gives the error's words: %q", out)
 	}
 }

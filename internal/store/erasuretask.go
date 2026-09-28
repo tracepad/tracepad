@@ -9,13 +9,9 @@ import (
 	"log/slog"
 	"maps"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
-	"unicode"
-	"unicode/utf16"
-	"unicode/utf8"
 )
 
 // An erasure is a task (spec 047 #6): the confirmed request records one and
@@ -627,7 +623,7 @@ func (er *Eraser) Start() {
 			case err != nil:
 				// Nothing was started: a request that wakes the
 				// worker may find the database answering again (#29).
-				logger().Error("could not read the next erasure", "err", err)
+				logger().Error("could not read the next erasure", failureFacts(err)...)
 			case id != "":
 				_, err := er.store.runErasure(ctx, er.writer, id, er.opts)
 				if ctx.Err() != nil {
@@ -642,8 +638,7 @@ func (er *Eraser) Start() {
 				// nor at once: taken first each time, it would spend a
 				// start on the same failure and hold every erasure
 				// behind it (#28, #30).
-				logger().Error("an erasure stopped before it ended", "erasure", id,
-					"cause", failureCause(err), "err", err)
+				logger().Error("an erasure stopped before it ended", runFacts(id, err)...)
 				resting[id] = time.Now().Add(er.opts.poll())
 				continue
 			}
@@ -793,6 +788,18 @@ var sqliteCauses = map[int]string{
 // a batch that could not be read to plan it.
 var errRawBatch = errors.New(causeRawBatch)
 
+// rawBatchError is a failure of one raw batch's scrub: the batch, and what
+// went wrong with it. It is errRawBatch to errors.Is, and reads as what it
+// is, not as a sentence with a number after it (#32).
+type rawBatchError struct {
+	id  int64
+	err error
+}
+
+func (e *rawBatchError) Error() string        { return fmt.Sprintf("raw batch %d: %v", e.id, e.err) }
+func (e *rawBatchError) Unwrap() error        { return e.err }
+func (e *rawBatchError) Is(target error) bool { return target == errRawBatch }
+
 // failureCause is the cause the record gives for err, from the list above.
 func failureCause(err error) string {
 	if code, ok := sqliteCode(err); ok && sqliteCauses[code] != "" {
@@ -813,250 +820,98 @@ func failureSentence(cause, phase string) string {
 	return fmt.Sprintf("the %s phase failed: %s", phase, cause)
 }
 
-// reportFailure logs an erasure's failure where it was met, once (#32): the
-// cause the record gives, and the error itself as loggable leaves it. Every
-// line of the store's that gives an erasure's failure goes through here.
-func (e *Erasure) reportFailure(message, cause string, err error) {
-	// A refusal is routine, as the writer has always logged it: a project
-	// purged while its erasure ran is no incident.
+// reportFailure logs an erasure's failure where it was met, once (#32): what
+// failed, in what phase, and the facts of the failure — never its text.
+// Every line of the store's that gives an erasure's failure goes through here
+// or through failureFacts.
+func (e *Erasure) reportFailure(message, phase string, err error) {
+	// A project purged while its erasure ran is no incident, and its refusal
+	// is routine, as the writer has always logged one. Another refusal is
+	// not: a scrub that gave up on its conflicts ends the erasure failed.
 	level := slog.LevelError
-	if rejected(err) {
+	if purged(err) {
 		level = slog.LevelInfo
 	}
-	logger().Log(context.Background(), level, message, "erasure", e.ID, "cause", cause,
-		"err", loggable(err, e.UserID))
+	logger().Log(context.Background(), level, message,
+		append([]any{"erasure", e.ID, "phase", phase}, failureFacts(err)...)...)
 }
 
-// loggable is an erasure's error as the server's log line gives it: whole,
-// unless it names the user, which no log line does (spec 044 #15, #32).
-//
-// The store's own words never hold the id (#32); what may is text from
-// elsewhere — the decoder's on a batch, a driver's, a refusal's echo. That
-// text is read as it stands and decoded: %XX sequences, Go's and JSON's
-// escapes (\n, \", \uXXXX with its surrogate pairs, \UXXXXXXXX, \xXX), a +
-// as a space, each over again for text escaped twice. The id is looked for
-// as it is in each reading, without case, as a word of its own. An encoding
-// that changes the id's bytes themselves — base64, a hex dump — is out of
-// the check's reach: it is a defence in depth behind the store's own words.
-func loggable(err error, userID string) string {
-	text := err.Error()
-	if userID == "" {
-		return cutLogged(text)
+// failureFacts are what a log line says of a failure of an erasure's (#32):
+// the cause the record gives, the Go types of the error and of what it wraps,
+// SQLite's code when there is one, the kind of a refusal, and the raw batch
+// it was about. Never the error's text, which may quote what it holds — an
+// erasure's user, whatever the form — and which nothing filters: there is no
+// text to filter.
+func failureFacts(err error) []any {
+	facts := []any{"cause", failureCause(err), "types", errorTypes(err)}
+	var coded interface{ Code() int }
+	if errors.As(err, &coded) {
+		facts = append(facts, "sqlite", coded.Code())
 	}
-	// What the log could hold of the text is cut to maxLogged, so an id
-	// that starts inside that cut and ends past it would be logged in part;
-	// the text is read as far as maxScanned, and the id is found whole
-	// wherever it stands in that.
-	scanned := text
-	if len(scanned) > maxScanned {
-		scanned = scanned[:maxScanned]
+	var refusal *Rejection
+	if errors.As(err, &refusal) {
+		facts = append(facts, "refusal", refusal.Kind)
 	}
-	id := strings.ToLower(userID)
-	for _, reading := range readings(scanned) {
-		if holdsWord(strings.ToLower(reading), id) {
-			return "an error that named the user, which is not logged"
-		}
+	var batch *rawBatchError
+	if errors.As(err, &batch) {
+		facts = append(facts, "batch", batch.id)
 	}
-	return cutLogged(text)
+	return facts
 }
 
-// What an erasure's error may be in the log, and how much of it the check
-// reads (#32): the decoder's words may quote a batch, and the server's
-// megabyte is not for a log line. The check reads more than the log gives.
-const (
-	maxLogged  = 512
-	maxScanned = 16 << 10
-)
-
-// cutLogged is text cut to maxLogged bytes, on a character.
-func cutLogged(text string) string {
-	if len(text) <= maxLogged {
-		return text
-	}
-	return strings.ToValidUTF8(text[:maxLogged], "") + "…(truncated)"
-}
-
-// readings are text as it stands and every way of decoding it: %XX
-// sequences, backslash escapes, either alone or after the other — a %5C is
-// a backslash that an escape letter after it must not be read with — for a
-// few rounds, and each with + read as a space too. The rounds are few and
-// each decoder only shortens the text, so however it is built the cost is
-// bounded: at most 15 readings and 30 with the +.
-func readings(text string) []string {
-	out := []string{text}
-	seen := map[string]bool{text: true}
-	frontier := out
-	for range 3 {
-		var next []string
-		for _, reading := range frontier {
-			for _, decode := range [...]func(string) string{unpercent, unescape} {
-				if decoded := decode(reading); !seen[decoded] {
-					seen[decoded] = true
-					out = append(out, decoded)
-					next = append(next, decoded)
-				}
-			}
-		}
-		frontier = next
-	}
-	for _, reading := range out[:len(out):len(out)] {
-		if strings.Contains(reading, "+") {
-			out = append(out, strings.ReplaceAll(reading, "+", " "))
-		}
-	}
-	return out
-}
-
-// unpercent decodes every %XX in text and leaves anything else as it is.
-func unpercent(text string) string {
-	if !strings.Contains(text, "%") {
-		return text
-	}
-	var b strings.Builder
-	for i := 0; i < len(text); i++ {
-		if text[i] == '%' && i+2 < len(text) {
-			if v, err := strconv.ParseUint(text[i+1:i+3], 16, 8); err == nil {
-				b.WriteByte(byte(v))
-				i += 2
-				continue
-			}
-		}
-		b.WriteByte(text[i])
-	}
-	return b.String()
-}
-
-// simpleEscape is the character a one-letter backslash escape stands for, or
-// "" when there is none.
-func simpleEscape(c byte) string {
-	switch c {
-	case 'n':
-		return "\n"
-	case 't':
-		return "\t"
-	case 'r':
-		return "\r"
-	case 'b':
-		return "\b"
-	case 'f':
-		return "\f"
-	case 'v':
-		return "\v"
-	case 'a':
-		return "\a"
-	case '"':
-		return `"`
-	case '\'':
-		return "'"
-	case '\\':
-		return `\`
-	case '/':
-		return "/"
-	case '0':
-		return "\x00"
-	}
-	return ""
-}
-
-// unescape decodes Go's and JSON's backslash escapes in text, a JSON
-// surrogate pair into the letter it stands for, and leaves anything else as
-// it is.
-func unescape(text string) string {
-	if !strings.Contains(text, `\`) {
-		return text
-	}
-	hex := func(s string) (rune, bool) {
-		v, err := strconv.ParseUint(s, 16, 32)
-		return rune(v), err == nil
-	}
-	var b strings.Builder
-	for i := 0; i < len(text); i++ {
-		if text[i] != '\\' || i+1 >= len(text) {
-			b.WriteByte(text[i])
+// errorTypes names the Go types of err and of what it wraps, the plain
+// wrappers left out, breadth first and at most eight: `*json.SyntaxError`,
+// `*store.Rejection`. A type is a name of the code, never a value.
+func errorTypes(err error) string {
+	var names []string
+	queue := []error{err}
+	for len(queue) > 0 && len(names) < 8 {
+		next := queue[0]
+		queue = queue[1:]
+		if next == nil {
 			continue
 		}
-		c := text[i+1]
-		switch {
-		case simpleEscape(c) != "":
-			b.WriteString(simpleEscape(c))
-			i++
-			continue
-		case c == 'x' && i+3 < len(text):
-			if r, ok := hex(text[i+2 : i+4]); ok {
-				b.WriteByte(byte(r))
-				i += 3
-				continue
-			}
-		case c == 'u' && i+5 < len(text):
-			if r, ok := hex(text[i+2 : i+6]); ok {
-				i += 5
-				if utf16.IsSurrogate(r) && i+6 < len(text) && text[i+1] == '\\' && text[i+2] == 'u' {
-					if low, ok := hex(text[i+3 : i+7]); ok {
-						if pair := utf16.DecodeRune(r, low); pair != utf8.RuneError {
-							r = pair
-							i += 6
-						}
-					}
-				}
-				b.WriteRune(r)
-				continue
-			}
-		case c == 'U' && i+9 < len(text):
-			if r, ok := hex(text[i+2 : i+10]); ok {
-				b.WriteRune(r)
-				i += 9
-				continue
-			}
+		switch name := fmt.Sprintf("%T", next); name {
+		case "*fmt.wrapError", "*fmt.wrapErrors", "*errors.joinError":
+		default:
+			names = append(names, name)
 		}
-		b.WriteByte(text[i])
-	}
-	return b.String()
-}
-
-// holdsWord reports whether word stands in text as a word of its own: an end
-// of it that is a letter or a digit has none beside it. An end that is
-// neither, such as the @ of "@bob", is a boundary itself.
-func holdsWord(text, word string) bool {
-	if word == "" {
-		return false
-	}
-	first, _ := utf8.DecodeRuneInString(word)
-	last, _ := utf8.DecodeLastRuneInString(word)
-	for from := 0; ; {
-		at := strings.Index(text[from:], word)
-		if at < 0 {
-			return false
+		switch wrapped := next.(type) {
+		case interface{ Unwrap() error }:
+			queue = append(queue, wrapped.Unwrap())
+		case interface{ Unwrap() []error }:
+			queue = append(queue, wrapped.Unwrap()...)
 		}
-		at += from
-		before, _ := utf8.DecodeLastRuneInString(text[:at])
-		after, _ := utf8.DecodeRuneInString(text[at+len(word):])
-		if !(isWordRune(first) && isWordRune(before)) && !(isWordRune(last) && isWordRune(after)) {
-			return true
-		}
-		from = at + 1
 	}
+	return strings.Join(names, " > ")
 }
 
-func isWordRune(r rune) bool {
-	return r != utf8.RuneError && (unicode.IsLetter(r) || unicode.IsDigit(r))
-}
-
-// erasureError is a run's error on its way to the worker's log line, which
-// does not name the user either. One already logged where it was met says
-// only what failed, so that the error is given once (#32).
-type erasureError struct {
-	err    error
-	userID string
-	said   string
-}
-
-func (e *erasureError) Error() string {
-	if e.said != "" {
-		return e.said
+// runFacts are the facts of a run that stopped before its erasure ended, and
+// the phase it stopped in.
+func runFacts(id string, err error) []any {
+	facts := append([]any{"erasure", id}, failureFacts(err)...)
+	var run *runError
+	if errors.As(err, &run) {
+		facts = append(facts, "phase", run.phase)
 	}
-	return loggable(e.err, e.userID)
+	return facts
 }
-func (e *erasureError) Unwrap() error { return e.err }
+
+// purged reports the refusal of a chunk or a scrub whose project is gone.
+func purged(err error) bool {
+	var rejection *Rejection
+	return errors.As(err, &rejection) && rejection.Kind == RejectNotFound
+}
+
+// runError is a run's failure with the phase it met it in, for the worker's
+// log line, which gives where a run stopped and never what its error said.
+type runError struct {
+	phase string
+	err   error
+}
+
+func (e *runError) Error() string { return e.err.Error() }
+func (e *runError) Unwrap() error { return e.err }
 
 // An erasure's jobs do not have their errors logged by the writer (#32): its
 // "write commit failed" line would give an error's text whole, and a refusal
