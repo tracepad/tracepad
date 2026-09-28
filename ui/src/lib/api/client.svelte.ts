@@ -755,7 +755,7 @@ class Api {
 		});
 	}
 
-	/** The project's erasures, newest first, at most a hundred (spec 047 #14). */
+	/** The project's erasures, those under way first, at most a hundred (spec 047 #14, #28). */
 	erasures(id: string, signal?: AbortSignal) {
 		return this.#json<{ erasures: Erasure[] }>(`/api/v1/projects/${id}/erasures`, { signal });
 	}

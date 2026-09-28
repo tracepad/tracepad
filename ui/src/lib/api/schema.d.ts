@@ -1454,8 +1454,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * The project's erasures, newest first, at most 100
-         * @description Running, queued and finished erasures, not paginated. A finished erasure is kept 30 days after it ends, and its `user_id` is null: the record forgets the user when the erasure ends. While one is queued or running, it names the user.
+         * The project's erasures, those under way first, then newest first, at most 100
+         * @description Queued and running erasures first, then finished ones newest first, not paginated. A finished erasure is kept 30 days after it ends, and its `user_id` is null: the record forgets the user when the erasure ends. While one is queued or running, it names the user.
          */
         get: operations["listErasures"];
         put?: never;

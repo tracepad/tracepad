@@ -1,10 +1,13 @@
 package store
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -344,4 +347,173 @@ func (w *clockOfChunks) Submit(ctx context.Context, job WriteJob) error {
 		w.clocks = append(w.clocks, chunk.Now)
 	}
 	return w.jobSubmitter.Submit(ctx, job)
+}
+
+// A tail that fails leaves the erasure running in its tail, with the windows
+// it has yet to scrub, for the next start (#28): ending it would drop them,
+// and the batches they name hold spans of traces already gone.
+func TestAFailedTailIsLeftToTheNextStart(t *testing.T) {
+	f := newErasureFixture(t)
+	f.ingestOTLP(t, export([]*tracepb.Span{otlpSpan(t, 1, 1, "user-a", "", "a", nil),
+		otlpSpan(t, 2, 1, "user-b", "", "b", nil)}), false, daysAgo(1))
+	var late int64
+	e := f.startErasure(t, "user-a")
+	broken := &brokenTail{jobSubmitter: f.writer}
+	_, err := f.store.runErasure(t.Context(), broken, e.ID, EraserOptions{after: func(step int) error {
+		if step == 1 {
+			late = f.ingestOTLP(t, export([]*tracepb.Span{otlpSpan(t, 1, 9, "user-a", "", "late", nil),
+				otlpSpan(t, 2, 9, "user-b", "", "b", nil)}), false, 0)
+		}
+		return nil
+	}})
+	if err == nil || !broken.failed {
+		t.Fatalf("a run whose tail failed answered %v (the tail failed: %v)", err, broken.failed)
+	}
+	got := f.erasureOf(t, "user-a")
+	if got.State != ErasureRunning || got.Phase != phaseTail || got.UserID != "user-a" {
+		t.Fatalf("after its tail failed the erasure is %s in %q of %q, want running in its tail", got.State,
+			got.Phase, got.UserID)
+	}
+	if n := f.count(t, `SELECT COUNT(*) FROM erasure_tail`); n == 0 {
+		t.Fatal("the tail's windows were dropped")
+	}
+	if _, err := f.store.runErasure(t.Context(), f.writer, e.ID, EraserOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.erasureOf(t, "user-a"); got.State != ErasureDone {
+		t.Errorf("the next start ended it %s (%q), want done", got.State, got.Error)
+	}
+	if spans := f.rawSpans(t, late); !slices.Equal(spans, []string{"span-2-9"}) {
+		t.Errorf("the late batch holds %v, want only the other user's span", spans)
+	}
+}
+
+// brokenTail fails the scrubs that come after the last chunk, the way a disk
+// that went bad mid-erasure fails them.
+type brokenTail struct {
+	jobSubmitter
+	parsed, failed bool
+}
+
+func (w *brokenTail) Submit(ctx context.Context, job WriteJob) error {
+	if _, scrub := job.(*RawScrub); scrub && w.parsed {
+		w.failed = true
+		return errors.New("the disk is broken")
+	}
+	err := w.jobSubmitter.Submit(ctx, job)
+	if chunk, ok := job.(*UserDataErase); ok && err == nil && !chunk.More {
+		w.parsed = true
+	}
+	return err
+}
+
+// A run that fails is not taken again at the next wake (#28): a request for
+// another user wakes the worker, and it must not spend the failed erasure's
+// starts on the same failure, nor hold the queue behind it.
+func TestAFailedRunIsNotRetakenOnEveryWake(t *testing.T) {
+	f := newErasureFixture(t)
+	writer := &failingJobs{jobSubmitter: f.writer, err: errors.New("the disk is broken"),
+		fails: func(job WriteJob) bool { _, end := job.(*erasureEnd); return end }}
+	worker := f.store.NewEraser(writer, EraserOptions{Poll: time.Hour})
+	worker.Start()
+	defer worker.Close()
+	e := f.startErasure(t, "user-a")
+	waitFor(t, func() bool {
+		got := f.erasureOf(t, "user-a")
+		return got.attempts == 1 && got.Phase == phaseTail
+	})
+	time.Sleep(50 * time.Millisecond)
+	for _, user := range []string{"user-b", "user-c", "user-d"} {
+		if _, err := f.store.StartErasure(t.Context(), f.writer, UserErasure{ProjectID: f.project.ID,
+			UserID: user, Confirm: user}); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	got, err := f.store.Erasure(t.Context(), f.project.ID, e.ID)
+	if err != nil || got.attempts != 1 {
+		t.Errorf("after three wakes the failed erasure has %d starts (%v), want its one", got.attempts, err)
+	}
+}
+
+// A stop that ends the wait for the start while the writer still commits it
+// gives the start back too (#28).
+func TestAStopWhileTheStartIsQueuedGivesItBack(t *testing.T) {
+	f := newErasureFixture(t)
+	e := f.startErasure(t, "user-a")
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	writer := &stopAfterBegin{jobSubmitter: f.writer, stop: cancel}
+	if _, err := f.store.runErasure(ctx, writer, e.ID, EraserOptions{}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("the run was not stopped: %v", err)
+	}
+	if got := f.erasureOf(t, "user-a"); got.State != ErasureRunning || got.attempts != 0 {
+		t.Errorf("the erasure is %s with %d starts counted, want running and none", got.State, got.attempts)
+	}
+}
+
+// stopAfterBegin commits the start and then answers as a stop that ended the
+// wait for it does.
+type stopAfterBegin struct {
+	jobSubmitter
+	stop context.CancelFunc
+}
+
+func (w *stopAfterBegin) Submit(ctx context.Context, job WriteJob) error {
+	if _, ok := job.(*erasureBegin); ok {
+		if err := w.jobSubmitter.Submit(context.WithoutCancel(ctx), job); err != nil {
+			return err
+		}
+		w.stop()
+		return ctx.Err()
+	}
+	return w.jobSubmitter.Submit(ctx, job)
+}
+
+// The listing puts erasures under way first (#28): one that waits behind a
+// hundred newer records is still in it.
+func TestTheListingPutsErasuresUnderWayFirst(t *testing.T) {
+	f := newErasureFixture(t)
+	waiting := f.startErasure(t, "user-waiting")
+	for i := range ErasureListed + 1 {
+		user := fmt.Sprintf("user-%d", i)
+		done := f.startErasure(t, user)
+		if _, err := f.store.runErasure(t.Context(), f.writer, done.ID, EraserOptions{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	listed, err := f.store.Erasures(t.Context(), f.project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != ErasureListed || listed[0].ID != waiting.ID || listed[1].CreatedAt < listed[2].CreatedAt {
+		t.Errorf("the listing has %d, first %s, want %d with the queued %s first and the rest newest first",
+			len(listed), listed[0].ID, ErasureListed, waiting.ID)
+	}
+}
+
+// An erasure that ends failed is logged as a failure, even from a run that met
+// no failure of its own: the one an earlier start recorded (#28).
+func TestAnErasureThatEndsFailedIsLoggedAsOne(t *testing.T) {
+	f := newErasureFixture(t)
+	e := f.startErasure(t, "user-a")
+	if err := f.writer.Submit(t.Context(), &erasureBegin{ID: e.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.writer.Submit(t.Context(), &erasureStep{ID: e.ID, Phase: phaseTail, Error: "the disk is broken"}); err != nil {
+		t.Fatal(err)
+	}
+	var logged bytes.Buffer
+	old := logger
+	logger = func() *slog.Logger { return slog.New(slog.NewTextHandler(&logged, nil)) }
+	t.Cleanup(func() { logger = old })
+	if _, err := f.store.runErasure(t.Context(), f.writer, e.ID, EraserOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.erasureOf(t, "user-a"); got.State != ErasureFailed {
+		t.Fatalf("the erasure ended %s, want failed", got.State)
+	}
+	if out := logged.String(); !strings.Contains(out, "an erasure failed") || strings.Contains(out, "erased a user's data") {
+		t.Errorf("the log says %q, want the failure", out)
+	}
 }

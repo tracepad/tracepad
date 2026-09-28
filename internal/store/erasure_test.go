@@ -361,7 +361,7 @@ func TestConcurrentScrubsOfOneBatch(t *testing.T) {
 	if err != nil || early == nil {
 		t.Fatalf("plan: %v, %v", early, err)
 	}
-	if _, err := f.store.scrubBatches(t.Context(), f.writer, f.project.ID, []int64{batch}, c, ""); err != nil {
+	if err := f.store.scrubBatches(t.Context(), f.writer, f.project.ID, []int64{batch}, c, ""); err != nil {
 		t.Fatal(err)
 	}
 	err = f.writer.Submit(t.Context(), early.job)
@@ -370,12 +370,8 @@ func TestConcurrentScrubsOfOneBatch(t *testing.T) {
 		t.Fatalf("a body computed before the other rewrite was not refused: %v", err)
 	}
 	// Refused, it recomputes from what is there now.
-	tally, err := f.store.scrubBatches(t.Context(), f.writer, f.project.ID, []int64{batch}, a, "")
-	if err != nil {
+	if err := f.store.scrubBatches(t.Context(), f.writer, f.project.ID, []int64{batch}, a, ""); err != nil {
 		t.Fatal(err)
-	}
-	if tally.rewritten != 1 || tally.spans != 1 {
-		t.Errorf("tally = %+v, want the batch rewritten once more, one span", tally)
 	}
 	if got := f.rawSpans(t, batch); !slices.Equal(got, []string{"span-2-1"}) {
 		t.Errorf("the batch holds %v, want only the one neither erasure took", got)
@@ -590,7 +586,7 @@ func TestAStoppedErasureResumesFromItsPhase(t *testing.T) {
 			t.Fatal(err)
 		}
 		got := f.erasureOf(t, "user-a")
-		if got.State != ErasureFailed || got.Error != "interrupted by 3 restarts" || got.UserID != "" {
+		if got.State != ErasureFailed || got.Error != "3 starts ended before the erasure did" || got.UserID != "" {
 			t.Errorf("after three interrupted starts the erasure is %s (%q) of %q, want failed, "+
 				"interrupted, and of no one", got.State, got.Error, got.UserID)
 		}
@@ -649,7 +645,7 @@ func TestAStoppedErasureResumesFromItsPhase(t *testing.T) {
 				t.Fatal(err)
 			}
 			got := f.erasureOf(t, "user-a")
-			if got.State != ErasureFailed || got.Error != "interrupted by 3 restarts" || got.UserID != "" {
+			if got.State != ErasureFailed || got.Error != "3 starts ended before the erasure did" || got.UserID != "" {
 				t.Errorf("the erasure is %s (%q) of %q, want failed, interrupted, and of no one",
 					got.State, got.Error, got.UserID)
 			}

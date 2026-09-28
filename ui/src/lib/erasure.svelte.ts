@@ -104,6 +104,12 @@ export class ErasureWatch {
 		if (!ended(erasure)) this.#next();
 	}
 
+	/** Stops reading, and forgets the erasure: the screen is about another user now. */
+	forget() {
+		this.stop();
+		this.current = null;
+	}
+
 	/** Stops reading; what is on screen stays. */
 	stop() {
 		clearTimeout(this.#timer);

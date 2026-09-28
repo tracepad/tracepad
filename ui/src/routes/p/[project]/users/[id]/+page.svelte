@@ -98,7 +98,9 @@
 		void untrack(() => findRunning(current, who, controller.signal));
 		return () => {
 			controller.abort();
-			watch.stop();
+			// The page is reused for the next user's id: what it followed
+			// was this user's erasure, not that one's (spec 047 #28).
+			watch.forget();
 		};
 	});
 

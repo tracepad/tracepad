@@ -206,10 +206,18 @@ func TestAStopAnswersARequestWaitingForAnErasure(t *testing.T) {
 	held.Start()
 	h.seed(t, &model.Trace{ID: traceHex(1), UserID: "erase-me"})
 
-	answered := make(chan *httptest.ResponseRecorder)
+	// When the answer came, taken as it comes: the worker's own stop may
+	// spend its second trying to give its start back through this writer,
+	// which never answers, and that is no wait of the request's.
+	type answer struct {
+		rec *httptest.ResponseRecorder
+		at  time.Time
+	}
+	answered := make(chan answer, 1)
 	go func() {
-		answered <- h.call(t, "DELETE",
+		rec := h.call(t, "DELETE",
 			"/api/v1/projects/"+h.project.ID+"/users/erase-me/data?confirm=erase-me&wait=30", nil)
+		answered <- answer{rec, time.Now()}
 	}()
 	// The request is waiting once its erasure is recorded.
 	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(10 * time.Millisecond) {
@@ -224,11 +232,11 @@ func TestAStopAnswersARequestWaitingForAnErasure(t *testing.T) {
 	stopped := time.Now()
 	held.Close()
 	select {
-	case rec := <-answered:
-		if took := time.Since(stopped); took > time.Second {
+	case got := <-answered:
+		if took := got.at.Sub(stopped); took > 500*time.Millisecond {
 			t.Errorf("the waiting request was answered %v after the stop", took)
 		}
-		expectStatus(t, rec, http.StatusAccepted)
+		expectStatus(t, got.rec, http.StatusAccepted)
 	case <-time.After(5 * time.Second):
 		t.Fatal("the waiting request was not answered when the worker stopped")
 	}

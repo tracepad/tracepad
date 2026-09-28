@@ -754,7 +754,7 @@ exits 0 at once:
 tracepad users rm-data user-4711 --yes --no-wait
 # erasure 4f0c9d3e8a1b2c3d4e5f60718293a4b5 queued; tracepad users erasure 4f0c9d3e8a1b2c3d4e5f60718293a4b5
 tracepad users erasure 4f0c9d3e8a1b2c3d4e5f60718293a4b5
-tracepad users erasures        # the project's last hundred, newest first
+tracepad users erasures        # the project's hundred, those under way first
 ```
 
 Leaving the command stops the watching, not the erasure. If the connection

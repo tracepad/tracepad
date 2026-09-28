@@ -196,3 +196,16 @@ describe('a confirmed erasure with no answer', () => {
 		expect(unanswered(new Error('boom'), 'u', where)).toBeNull();
 	});
 });
+
+describe('a screen that moves to another user', () => {
+	it('forgets the erasure it followed, and reads it no more', async () => {
+		vi.useFakeTimers();
+		const watch = new ErasureWatch();
+		watch.follow('p', erasure());
+		watch.forget();
+		expect(watch.current).toBeNull();
+		expect(watch.running).toBe(false);
+		await vi.advanceTimersByTimeAsync(5 * ERASURE_POLL_MS);
+		expect(getErasure).not.toHaveBeenCalled();
+	});
+});

@@ -536,8 +536,8 @@ ended, except in the answer to the request that started it.
 
 `GET /api/v1/projects/{id}/erasures/{erasure_id}` reads one erasure, `404` for
 one that is unknown, another project's, or removed 30 days after it ended.
-`GET /api/v1/projects/{id}/erasures` is the project's last hundred, newest
-first, as `{"erasures": [...]}`. Both are an editor's, or a `write` key's, like
+`GET /api/v1/projects/{id}/erasures` is the project's hundred, those queued or
+running first and then the newest, as `{"erasures": [...]}`. Both are an editor's, or a `write` key's, like
 the erasure. The shapes in full, and what each count means, are in
 [admin.md](admin.md#erasing-a-users-data).
 

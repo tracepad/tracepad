@@ -135,7 +135,7 @@ on stderr and exit code 1.
 | `POST` | `/api/v1/projects/{id}/keys` | Mint a pair: `{"scopes": [...], "name": …}`, the name optional. Not with a project key. |
 | `DELETE` | `/api/v1/projects/{id}/keys/{public_key}` | Revoke one. Not with a project key. |
 | `DELETE` | `/api/v1/projects/{id}/users/{user_id}/data` | Erase one user's data: a task, answered `202` or, within `?wait=`, `200` (a key needs `write`). |
-| `GET` | `/api/v1/projects/{id}/erasures` | The project's erasures, newest first (a key needs `write`). |
+| `GET` | `/api/v1/projects/{id}/erasures` | The project's erasures, those under way first (a key needs `write`). |
 | `GET` | `/api/v1/projects/{id}/erasures/{erasure_id}` | One erasure (a key needs `write`). |
 | `DELETE` | `/api/v1/traces/{id}` | Delete one trace — an editor's route, on the data plane, and a `write` key's. See [below](#deleting-traces). |
 | `DELETE` | `/api/v1/traces?…&to=` | Delete every trace a listing filter matches before `to`, in rounds. |
@@ -415,7 +415,8 @@ another.
   user.
 
 `GET /api/v1/projects/{id}/erasures/{erasure_id}` reads one erasure, and
-`GET /api/v1/projects/{id}/erasures` the project's last hundred, newest first
+`GET /api/v1/projects/{id}/erasures` the project's hundred, those under way
+first and then the newest
 — both for an editor, or a key with `write`, like the erasure itself.
 `tracepad users erasure <id>` and `tracepad users erasures` print them.
 
@@ -477,7 +478,9 @@ of the server** interrupts it without waiting: every job commits its progress
 with it, so the next start **resumes** the erasure from its phase — including
 the tail, which a repeat of the request could not finish, because the traces
 that named those batches are gone. A clean stop does not count against the
-erasure; a crash does, and after three of them the next start only rewrites
+erasure; a crash does, and so does a run that failed where the next could
+succeed — a tail that could not be read, an end that could not be written,
+retried a minute later. After three of those the next start only rewrites
 those batches and ends the erasure `failed` rather than trying for ever. A job that
 fails with a condition of the database — a full disk, a lock that did not
 clear — is retried for up to two minutes; any other failure ends the erasure

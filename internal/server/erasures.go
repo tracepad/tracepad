@@ -41,7 +41,10 @@ func erasureLocation(projectID, id string) string {
 // record's while it runs and null once it has ended (#9), except in the
 // answer to the request that started it, which names it: that caller knows
 // the id anyway.
-func (s *Server) erasureResource(e *store.Erasure, requested string) object {
+//
+// backup is the answer's `pre_migration_backup`, read once per request: a
+// listing renders a hundred of these, and it is the same file for all.
+func (s *Server) erasureResource(e *store.Erasure, requested string, backup any) object {
 	var user, phase, started, finished, failure, traces any
 	switch {
 	case requested != "":
@@ -81,7 +84,7 @@ func (s *Server) erasureResource(e *store.Erasure, requested string) object {
 		put("compaction", s.compactionAnswer(e.Compaction))
 	// The one copy of the database the erasure does not rewrite, and the
 	// day it goes (spec 044 #12).
-	if backup := s.backupAnswer(); backup != nil {
+	if backup != nil {
 		answer = answer.put("pre_migration_backup", backup)
 	}
 	return answer.put("error", failure)
@@ -96,9 +99,9 @@ func (s *Server) startErasure(w http.ResponseWriter, r *http.Request, project *s
 		writeError(w, http.StatusServiceUnavailable, "writes are not available")
 		return
 	}
-	// `Now` is read once and kept with the erasure: the freeze is a
-	// question about the retention window, and a resume keeps the first
-	// start's view of it.
+	// `Now` is kept with the erasure: the freeze is a question about the
+	// retention window, and a chunk asks it of the later of this clock and
+	// its own (spec 047 #27 d).
 	e, err := s.store.StartErasure(r.Context(), s.writer, store.UserErasure{
 		ProjectID: project.ID,
 		UserID:    userID,
@@ -125,7 +128,7 @@ func (s *Server) startErasure(w http.ResponseWriter, r *http.Request, project *s
 		status = http.StatusOK
 	}
 	w.Header().Set("Location", erasureLocation(project.ID, e.ID))
-	writeJSON(w, status, s.erasureResource(e, userID))
+	writeJSON(w, status, s.erasureResource(e, userID, s.backupAnswer()))
 }
 
 // handleGetErasure is one erasure of the project (#14).
@@ -155,11 +158,12 @@ func (s *Server) handleGetErasure(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "no such erasure")
 		return
 	}
-	writeJSON(w, http.StatusOK, s.erasureResource(e, ""))
+	writeJSON(w, http.StatusOK, s.erasureResource(e, "", s.backupAnswer()))
 }
 
-// handleListErasures is the project's erasures, newest first, at most a
-// hundred and not paginated (#14): what the Settings card shows after a reload.
+// handleListErasures is the project's erasures, those under way first and then
+// newest first, at most a hundred and not paginated (#14, #28): what the
+// Settings card and the user page look in after a reload.
 func (s *Server) handleListErasures(w http.ResponseWriter, r *http.Request) {
 	c, ok := s.authorize(w, r)
 	if !ok {
@@ -181,8 +185,9 @@ func (s *Server) handleListErasures(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rendered := make([]object, 0, len(erasures))
+	backup := s.backupAnswer()
 	for _, e := range erasures {
-		rendered = append(rendered, s.erasureResource(e, ""))
+		rendered = append(rendered, s.erasureResource(e, "", backup))
 	}
 	writeJSON(w, http.StatusOK, object{}.put("erasures", rendered))
 }

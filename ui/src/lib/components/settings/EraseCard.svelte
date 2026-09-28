@@ -87,7 +87,9 @@
 		void list();
 		return () => watch.stop();
 	});
-	const listed = $derived(recent.some((one) => !ended(one)));
+	// Not while the card follows its own erasure: that one is read every
+	// tick already, and the listing is read again when it ends (#28).
+	const listed = $derived(recent.some((one) => !ended(one)) && !watch.running);
 	$effect(() => {
 		if (!listed) return;
 		const timer = setInterval(() => void list(), ERASURE_POLL_MS);

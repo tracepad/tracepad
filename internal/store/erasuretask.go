@@ -268,7 +268,7 @@ func (j *erasureBegin) apply(tx *sql.Tx) error {
 		return nil
 	}
 	now := time.Now().UnixNano()
-	interrupted := fmt.Sprintf("interrupted by %d restarts", erasureAttempts)
+	interrupted := fmt.Sprintf("%d starts ended before the erasure did", erasureAttempts)
 	if e.attempts > erasureAttempts {
 		if err := tx.QueryRow(`SELECT COUNT(*) FROM erasure_tail WHERE erasure_id = ?`, j.ID).Scan(&j.Dropped); err != nil {
 			return err
@@ -410,11 +410,13 @@ func (s *Store) Erasure(ctx context.Context, projectID, id string) (*Erasure, er
 	return e, err
 }
 
-// Erasures lists a project's erasures, newest first, at most ErasureListed
-// (#14).
+// Erasures lists a project's erasures, at most ErasureListed: those queued or
+// running first, then the rest newest first (#14, #28). An erasure under way
+// is what a screen looks for in the listing, and it is never past the cut.
 func (s *Store) Erasures(ctx context.Context, projectID string) ([]*Erasure, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT `+erasureColumns+` FROM erasures
-		WHERE project_id = ? ORDER BY created_at DESC, id LIMIT ?`, projectID, ErasureListed)
+		WHERE project_id = ? ORDER BY state IN (?, ?) DESC, created_at DESC, id LIMIT ?`,
+		projectID, ErasureQueued, ErasureRunning, ErasureListed)
 	if err != nil {
 		return nil, err
 	}
@@ -516,10 +518,21 @@ func (e *erasureSignals) announceEnd() {
 type EraserOptions struct {
 	// Chunk bounds the traces of one transaction of the parsed phase.
 	Chunk int
+	// Poll is how long an idle worker waits before it looks for work it
+	// was not woken for, and how long one waits after a run that failed;
+	// zero is a minute.
+	Poll time.Duration
 
 	// after is a test seam, told when each step has finished; an error
 	// stops the run there, the way a stop of the server does.
 	after func(step int) error
+}
+
+func (o EraserOptions) poll() time.Duration {
+	if o.Poll <= 0 {
+		return erasurePoll
+	}
+	return o.Poll
 }
 
 // Eraser is the erasure worker (#10): one erasure at a time, a resumed one
@@ -563,16 +576,22 @@ func (er *Eraser) Start() {
 			if ctx.Err() != nil {
 				return
 			}
+			wake := er.store.erasures.wake
 			if err != nil {
-				// Left running: the next start takes it again, and
-				// the third gives up (#12).
+				// Left running: a later start takes it again, and the
+				// last one gives up (#12, #27). Not at once, and not
+				// for a request that wakes the worker: the erasure
+				// would be taken first each time, spend a start on
+				// the same failure and hold every queued one behind
+				// it (#28).
 				logger().Error("an erasure stopped before it ended", "erasure", id, "err", err)
+				wake = nil
 			}
 			select {
 			case <-ctx.Done():
 				return
-			case <-er.store.erasures.wake:
-			case <-time.After(erasurePoll):
+			case <-wake:
+			case <-time.After(er.opts.poll()):
 			}
 		}
 	}()

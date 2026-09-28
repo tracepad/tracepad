@@ -306,7 +306,8 @@ func (r *run) usersErasure(ctx context.Context, args []string) error {
 	return nil
 }
 
-// usersErasures lists the project's erasures, newest first (spec 047 #14).
+// usersErasures lists the project's erasures, those under way first (spec 047
+// #14, #28).
 func (r *run) usersErasures(ctx context.Context, args []string) error {
 	fs := r.flags("users erasures")
 	project := fs.String("project", "", "")
