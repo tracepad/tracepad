@@ -37,14 +37,24 @@ test('the type filter narrows the listing and survives a reload', async ({ page 
 	await expect(page.getByRole('button', { name: /Remove filter Type: tool/ })).toBeVisible();
 });
 
-test('the listing has a TTFT column beside latency', async ({ page }) => {
+test('the listing has a TTFT column beside latency', async ({ page }, info) => {
 	await signIn(page);
 	await page.goto('/traces?type=tool');
 
-	await expect(page.getByRole('columnheader', { name: 'TTFT' })).toBeVisible();
 	// The trace's TTFT is the *earliest* completion start among its
 	// observations minus its own start — 180 ms here, from the tool call —
 	// not the generation's own 388 ms, which the panel shows instead.
+	if (info.project.name === 'mobile') {
+		// A phone has no column for it: it folds under the name beside the
+		// latency, and says which number it is (spec 006 #18). On the screen,
+		// whole — a value cut to an ellipsis is still in the text content.
+		await expect(page.getByRole('columnheader', { name: 'TTFT' })).toHaveCount(0);
+		await expect(page.locator('tbody').first().getByText(/TTFT 180 ms/)).toBeInViewport({
+			ratio: 1
+		});
+		return;
+	}
+	await expect(page.getByRole('columnheader', { name: 'TTFT' })).toBeVisible();
 	await expect(page.locator('tbody').first()).toContainText('180 ms');
 });
 

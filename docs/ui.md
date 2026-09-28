@@ -934,7 +934,15 @@ install depends on and which the end-to-end suite asserts.
 The layout is usable on a phone: the sidebar becomes a two-row top bar, the
 filters live in a popover, tables scroll inside their own box rather than
 scrolling the page, and the trace screen switches between the tree and the
-observation instead of showing both. A screen's own header keeps its 48 px as
+observation instead of showing both. The trace listing, a queue's items and
+the Accounts card do not scroll at all there: each keeps the columns that say
+which row it is and whether it went wrong — for a trace, the time, the name
+and the errors — and folds the others into lines under the row, which wrap
+between values rather than cut any of them, so the
+environment, the latency, the TTFT and the cost read
+`production · 2.08 s · TTFT 180 ms · $0.0054` under the name, with the user and
+the session, still links, beneath. A queue's *Reopen* and *Remove* become
+icons there, and an account's *Edit* and *Delete* stack beside it. A screen's own header keeps its 48 px as
 a floor rather than a height: at a phone's width, what it carries beside the
 title — a breadcrumb, an identifier, a count — takes a second line under it,
 and the screen's controls stay on the first one. Wider than that it is the
