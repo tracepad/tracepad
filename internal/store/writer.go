@@ -417,8 +417,10 @@ func (w *Writer) flush(pending []*submission) {
 	}
 	// A database condition is left to the retries below: a write they
 	// commit is not lost, and one they cannot commit is logged as lost
-	// (spec 043 #24). Anything else says why the window came apart.
-	if _, condition := Condition(err); !condition {
+	// (spec 043 #24). Anything else says why the window came apart — but
+	// not a failure whose job logs it itself, which the retry below finds
+	// again and leaves to that job (spec 047 #32).
+	if _, condition := Condition(err); !condition && !reportedByItsJob(err) {
 		logFailure(err, slog.LevelWarn, "write window failed, retrying jobs individually",
 			"jobs", len(pending))
 	}
@@ -443,10 +445,31 @@ type reportsItsFailure interface {
 
 // lost logs one write that did not commit.
 func lost(sub *submission, err error) {
-	if job, ok := sub.job.(reportsItsFailure); ok && job.failureReported() {
+	if reports(sub.job) {
 		return
 	}
 	logFailure(err, slog.LevelError, "write commit failed")
+}
+
+func reports(job WriteJob) bool {
+	reporter, ok := job.(reportsItsFailure)
+	return ok && reporter.failureReported()
+}
+
+// failedJob is a window's failure with the job whose apply failed it.
+type failedJob struct {
+	job WriteJob
+	err error
+}
+
+func (f *failedJob) Error() string { return f.err.Error() }
+func (f *failedJob) Unwrap() error { return f.err }
+
+// reportedByItsJob reports a window's failure that a job which logs its own
+// failures caused.
+func reportedByItsJob(err error) bool {
+	var failed *failedJob
+	return errors.As(err, &failed) && reports(failed.job)
 }
 
 // logFailure reports a failed commit, demoting a rejection: a caller asking
@@ -485,7 +508,7 @@ func (w *Writer) commit(pending []*submission) error {
 
 	for _, sub := range pending {
 		if err := sub.job.apply(tx); err != nil {
-			return err
+			return &failedJob{job: sub.job, err: err}
 		}
 	}
 	if err := tx.Commit(); err != nil {

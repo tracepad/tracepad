@@ -8,10 +8,12 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -846,6 +848,10 @@ func TestAFailureIsSaidAsACauseFromTheList(t *testing.T) {
 			&Rejection{Kind: RejectConflict, Message: "raw batch 7 was rewritten since it was read"}), causeRawBatch},
 		// A condition inside a raw batch's failure is the condition.
 		{fmt.Errorf("%w 7: %w", errRawBatch, codedError{13}), causeFull},
+		// Not conditions — they do not pass — but an operator acts on them.
+		{fmt.Errorf("commit: %w", codedError{8}), causeReadOnly},
+		{codedError{11}, causeDamaged},
+		{codedError{26}, causeDamaged},
 		{errors.New(`chunk limit 0 is not positive for "user-4711"`), causeOther},
 	} {
 		if got := failureCause(tc.err); got != tc.want {
@@ -889,7 +895,7 @@ func TestAFailedTailAnswersWithoutTheUser(t *testing.T) {
 }
 
 // A raw phase that fails ends the erasure with the phase and a cause, and the
-// end's log line has the error itself (#32).
+// raw phase's own line has the error itself (#32).
 func TestAFailedRawPhaseIsLoggedWhole(t *testing.T) {
 	f := newErasureFixture(t)
 	f.ingestOTLP(t, export([]*tracepb.Span{otlpSpan(t, 1, 1, "user-a", "", "a", nil)}), false, daysAgo(1))
@@ -931,6 +937,17 @@ func TestTheLogWithholdsTheUserAsAWord(t *testing.T) {
 		{"zoë/7", "GET /users/zo%C3%AB%2F7: refused", true},
 		{"zoë 7", "GET /users?id=zo%C3%AB+7: refused", true},
 		{"zoë", `a chunk refused "zo\u00eb"`, true},
+		// An escape's hex digits in either case, and past the first plane
+		// a JSON surrogate pair.
+		{"zoë", `a chunk refused "zo\u00EB"`, true},
+		{"zoë/7", "GET /users/zo%c3%ab%2f7: refused", true},
+		{"zoë😀", `a chunk refused "zo\u00eb\ud83d\ude00"`, true},
+		// An end of the id that is not a letter or a digit is a boundary
+		// itself.
+		{"@bob", "refused x@bob", true},
+		{"-7", "refused user-7", true},
+		{"#42", "issue#42 refused", true},
+		{"bob", "refused bobby", false},
 		{"", "anything", false},
 	} {
 		got := loggable(errors.New(tc.text), tc.user)
@@ -977,5 +994,121 @@ func TestABatchThatCannotBeReadIsARawBatchCause(t *testing.T) {
 	err := f.store.scrubBatches(t.Context(), f.writer, f.project.ID, []int64{1}, map[string]bool{"t": true}, "")
 	if err == nil || failureCause(err) != causeRawBatch {
 		t.Errorf("a batch that could not be read failed with %v, said as %q", err, failureCause(err))
+	}
+}
+
+// The writer leaves an erasure's failed job to the erasure, which logs it
+// through loggable (#32): its "write commit failed" line — and the line of a
+// window the job took down — would give the error whole, and a chunk's
+// refusal quotes the user. Both of the writer's paths: a window of the one
+// job, and a window of several that is retried one job at a time.
+func TestTheWriterLeavesAnErasureJobsFailureToIt(t *testing.T) {
+	f := newErasureFixture(t)
+	var logged bytes.Buffer
+	var mu sync.Mutex
+	old := logger
+	logger = func() *slog.Logger { return slog.New(slog.NewTextHandler(&lockedWriter{w: &logged, mu: &mu}, nil)) }
+	t.Cleanup(func() { logger = old })
+	refused := func() *UserDataErase {
+		return &UserDataErase{ProjectID: f.project.ID, UserID: "user-4711", Confirm: "someone else", Limit: 1,
+			Erasure: &chunkErasure{ID: "4f0c9d3e8a1b2c3d4e5f60718293a4b5"}}
+	}
+	var rejection *Rejection
+
+	alone, err := f.store.NewWriter(WriterOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer alone.Close()
+	if err := alone.Submit(t.Context(), refused()); !errors.As(err, &rejection) {
+		t.Fatalf("a refused chunk answered %v, want its refusal", err)
+	}
+
+	window, err := f.store.NewWriter(WriterOptions{CommitWindow: 50 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var commits atomic.Int32
+	parked, release := make(chan struct{}), make(chan struct{})
+	window.beforeCommit = func() {
+		if commits.Add(1) == 1 {
+			close(parked)
+			<-release
+		}
+	}
+	defer window.Close()
+	first := make(chan error, 1)
+	go func() { first <- window.Submit(context.Background(), &erasureSweep{}) }()
+	<-parked
+	answers := make(chan error, 2)
+	go func() { answers <- window.Submit(context.Background(), refused()) }()
+	go func() { answers <- window.Submit(context.Background(), &erasureSweep{}) }()
+	waitFor(t, func() bool { return len(window.queue) == 2 })
+	close(release)
+	if err := <-first; err != nil {
+		t.Fatal(err)
+	}
+	failed := 0
+	for range 2 {
+		if err := <-answers; err != nil {
+			if !errors.As(err, &rejection) {
+				t.Fatalf("a job answered %v", err)
+			}
+			failed++
+		}
+	}
+	// The parked window, the window of two, and the two alone.
+	if failed != 1 || commits.Load() != 4 {
+		t.Fatalf("%d refused after %d commits, want the chunk alone after a window of two", failed,
+			commits.Load())
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	for _, line := range []string{"write commit failed", "write window failed", "4711"} {
+		if strings.Contains(logged.String(), line) {
+			t.Errorf("the writer's log gives %q: %q", line, logged.String())
+		}
+	}
+}
+
+// A tail that fails is logged once, on its own line with its cause, and the
+// worker's line says only that the tail failed (#32).
+func TestAFailedTailIsLoggedOnceWithItsCause(t *testing.T) {
+	f := newErasureFixture(t)
+	f.ingestOTLP(t, export([]*tracepb.Span{otlpSpan(t, 1, 1, "user-a", "", "a", nil)}), false, daysAgo(1))
+	var logged bytes.Buffer
+	old := logger
+	logger = func() *slog.Logger { return slog.New(slog.NewTextHandler(&logged, nil)) }
+	t.Cleanup(func() { logger = old })
+	e := f.startErasure(t, "user-a")
+	_, err := f.store.runErasure(t.Context(), &brokenTail{jobSubmitter: f.writer}, e.ID,
+		EraserOptions{after: func(step int) error {
+			if step == 1 {
+				f.ingestOTLP(t, export([]*tracepb.Span{otlpSpan(t, 1, 9, "user-a", "", "late", nil)}), false, 0)
+			}
+			return nil
+		}})
+	if err == nil || err.Error() != "the tail failed: "+causeRawBatch {
+		t.Fatalf("the run answered %v, want that the tail failed and its cause", err)
+	}
+	out := logged.String()
+	if !strings.Contains(out, "msg=\"the tail of an erasure failed") || !strings.Contains(out, "cause=\""+causeRawBatch) ||
+		strings.Count(out, "the disk is broken") != 1 {
+		t.Errorf("the log %q, want the tail's error once, on the tail's line with its cause", out)
+	}
+}
+
+// The docs and the API's description give the cap's sentence as the code
+// builds it, so that a change to the number of starts is a change to them.
+func TestTheCapSentenceIsTheOneDocumented(t *testing.T) {
+	for _, path := range []string{"../../docs/admin.md", "../server/openapi.json"} {
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(body), capSentence) {
+			t.Errorf("%s does not give %q", path, capSentence)
+		}
 	}
 }

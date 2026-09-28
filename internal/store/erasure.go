@@ -695,9 +695,9 @@ func (s *Store) runErasure(ctx context.Context, writer jobSubmitter, id string, 
 			// Nothing parsed is gone yet: there is no tail to read. The
 			// error is logged here, where it was met, and not after an end
 			// that may not be written (#32).
-			logger().Error("the raw phase of an erasure failed; it ends failed",
-				"erasure", e.ID, "cause", failureCause(err), "err", loggable(err, e.UserID))
-			return run, s.endErasure(ctx, writer, e, err, phaseRaw, run, began)
+			cause := failureCause(err)
+			e.logFailure("the raw phase of an erasure failed; it ends failed", cause, err)
+			return run, s.endErasure(ctx, writer, e, cause, phaseRaw, run, began)
 		}
 		// Step 2 is whole: a stop from here on resumes with the chunks.
 		if err := submitErasureJob(ctx, writer, &erasureStep{ID: e.ID, Phase: phaseParsed}); err != nil {
@@ -710,7 +710,7 @@ func (s *Store) runErasure(ctx context.Context, writer jobSubmitter, id string, 
 		phase = phaseParsed
 	}
 
-	var failed error
+	var failed string
 	if phase == phaseParsed {
 		if err := s.erasureParsed(ctx, writer, e, known, opts.Chunk, &run); err != nil {
 			if stopped(ctx, err) {
@@ -720,10 +720,9 @@ func (s *Store) runErasure(ctx context.Context, writer jobSubmitter, id string, 
 			// chunks before it deleted traces whose late batches a
 			// repeat can no longer find. Step 4 runs on what they
 			// stored, and the failure is the end after it (#16).
-			failed = err
-			step := &erasureStep{ID: e.ID, Phase: phaseTail, Error: failureSentence(err, phaseParsed)}
-			logger().Error("a chunk of an erasure failed; its tail runs, and it ends failed",
-				"erasure", e.ID, "cause", failureCause(err), "err", loggable(err, e.UserID))
+			failed = failureCause(err)
+			step := &erasureStep{ID: e.ID, Phase: phaseTail, Error: failureSentence(failed, phaseParsed)}
+			e.logFailure("a chunk of an erasure failed; its tail runs, and it ends failed", failed, err)
 			if err := submitErasureJob(ctx, writer, step); err != nil {
 				return run, err
 			}
@@ -742,13 +741,19 @@ func (s *Store) runErasure(ctx context.Context, writer jobSubmitter, id string, 
 	// stays running in its tail; the starts it takes are counted, and the
 	// last one still gives up (#27), with what the tail said (#29).
 	if err := s.erasureTail(ctx, writer, e, &run); err != nil {
-		if !stopped(ctx, err) {
-			said := &erasureStep{ID: e.ID, TailFailure: failureCause(err)}
-			if serr := submitErasureJob(ctx, writer, said); serr != nil {
-				logger().Warn("a failed tail's error is not recorded", "erasure", e.ID, "err", serr)
-			}
+		if stopped(ctx, err) {
+			return run, fmt.Errorf("the tail: %w", err)
 		}
-		return run, fmt.Errorf("the tail: %w", err)
+		// Logged here, where it was met, with its cause; the worker's line
+		// says only that the tail failed (#32).
+		cause := failureCause(err)
+		e.logFailure("the tail of an erasure failed; a later start takes it again", cause, err)
+		said := &erasureStep{ID: e.ID, TailFailure: cause}
+		if serr := submitErasureJob(ctx, writer, said); serr != nil {
+			e.logFailure("a failed tail's cause is not recorded", failureCause(serr), serr)
+		}
+		return run, &erasureError{err: fmt.Errorf("the tail: %w", err), userID: e.UserID,
+			said: "the tail failed: " + cause}
 	}
 	if err := submitErasureJob(ctx, writer, &erasureStep{ID: e.ID, TailDone: true}); err != nil {
 		return run, err
@@ -852,10 +857,10 @@ func (s *Store) erasureTail(ctx context.Context, writer jobSubmitter, e *Erasure
 
 // endErasure records the end — done, or failed with the sentence of what
 // failed — and tells whoever waits for it.
-func (s *Store) endErasure(ctx context.Context, writer jobSubmitter, e *Erasure, failed error, phase string,
+func (s *Store) endErasure(ctx context.Context, writer jobSubmitter, e *Erasure, failed, phase string,
 	run erasureRun, began time.Time) error {
 	end := &erasureEnd{ID: e.ID}
-	if failed != nil {
+	if failed != "" {
 		end.Error = failureSentence(failed, phase)
 	}
 	if err := submitErasureJob(ctx, writer, end); err != nil {

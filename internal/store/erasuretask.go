@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 	"unicode"
+	"unicode/utf16"
 	"unicode/utf8"
 )
 
@@ -767,8 +768,18 @@ const (
 	causeIO       = "the disk could not be read or written"
 	causeMemory   = "the server ran out of memory"
 	causeOpen     = "the database file could not be opened"
+	causeReadOnly = "the database is read-only"
+	causeDamaged  = "the database file is damaged"
 	causeRawBatch = "a raw batch could not be rewritten"
 	causeOther    = "an unexpected error, which the server's log has"
+)
+
+// SQLite's primary codes of the failures an operator acts on that do not pass
+// on their own, and so are not conditions (spec 043 #2).
+const (
+	sqliteReadOnly = 8
+	sqliteCorrupt  = 11
+	sqliteNotADB   = 26
 )
 
 // conditionCauses are the database's conditions (spec 043 #2) as causes.
@@ -788,9 +799,14 @@ var errRawBatch = errors.New("a raw batch could not be rewritten")
 // failureCause is the cause the record gives for err, from the list above.
 func failureCause(err error) string {
 	name, condition := Condition(err)
+	var coded interface{ Code() int }
 	switch {
 	case condition && conditionCauses[name] != "":
 		return conditionCauses[name]
+	case errors.As(err, &coded) && coded.Code()&0xff == sqliteReadOnly:
+		return causeReadOnly
+	case errors.As(err, &coded) && (coded.Code()&0xff == sqliteCorrupt || coded.Code()&0xff == sqliteNotADB):
+		return causeDamaged
 	case errors.Is(err, ErrWriterBusy):
 		return causeQueue
 	case errors.Is(err, errRawBatch):
@@ -801,18 +817,27 @@ func failureCause(err error) string {
 
 // failureSentence is the error an erasure ends with: the phase that failed and
 // its cause, never the error's own text (#9, #32).
-func failureSentence(err error, phase string) string {
-	return fmt.Sprintf("the %s phase failed: %s", phase, failureCause(err))
+func failureSentence(cause, phase string) string {
+	return fmt.Sprintf("the %s phase failed: %s", phase, cause)
+}
+
+// logFailure logs an erasure's failure where it was met, once (#32): the
+// cause the record gives, and the error itself as loggable leaves it. Every
+// line of the store's that gives an erasure's error goes through here.
+func (e *Erasure) logFailure(message, cause string, err error) {
+	logger().Error(message, "erasure", e.ID, "cause", cause, "err", loggable(err, e.UserID))
 }
 
 // loggable is an erasure's error as the server's log line gives it: whole,
 // unless it names the user, which no log line does (spec 044 #15, #27 c) —
 // as it is, quoted the way a refusal quotes the echo it was given, escaped
-// for a URL, or encoded in a JSON string, with or without its letters past
-// ASCII escaped (#32). The id counts where it stands
-// as a word of its own, so that a short id does not withhold every error that
-// holds its letters; one that is a whole word of the error still does, which
-// is the safe side.
+// for a URL, or encoded in a JSON string, with its letters past ASCII
+// escaped or not, and those past the first plane as surrogate pairs (#32).
+// Letters are compared without their case, which an escape's hex digits may
+// be written in either of. The id counts where it stands as a word of its
+// own, so that a short id does not withhold every error that holds its
+// letters; one that is a whole word of the error still does, which is the
+// safe side.
 func loggable(err error, userID string) string {
 	text := err.Error()
 	if userID == "" {
@@ -820,19 +845,44 @@ func loggable(err error, userID string) string {
 	}
 	inner := func(s string) string { return s[1 : len(s)-1] }
 	encoded, _ := json.Marshal(userID)
+	folded := strings.ToLower(text)
 	for _, form := range []string{userID, inner(strconv.Quote(userID)), inner(strconv.QuoteToASCII(userID)),
-		url.PathEscape(userID), url.QueryEscape(userID), inner(string(encoded))} {
-		if holdsWord(text, form) {
+		url.PathEscape(userID), url.QueryEscape(userID), inner(string(encoded)), jsonASCII(userID)} {
+		if holdsWord(folded, strings.ToLower(form)) {
 			return "an error that named the user, which is not logged"
 		}
 	}
 	return text
 }
 
-// holdsWord reports whether word stands in text with no letter or digit on
-// either side.
+// jsonASCII is s as a JSON string escapes it when it writes ASCII only: \u
+// and four hex digits a letter, and a surrogate pair past the first plane.
+func jsonASCII(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r < utf8.RuneSelf:
+			b.WriteRune(r)
+		case r > 0xffff:
+			high, low := utf16.EncodeRune(r)
+			fmt.Fprintf(&b, `\u%04x\u%04x`, high, low)
+		default:
+			fmt.Fprintf(&b, `\u%04x`, r)
+		}
+	}
+	return b.String()
+}
+
+// holdsWord reports whether word stands in text as a word of its own: an end
+// of it that is a letter or a digit has none beside it. An end that is
+// neither, such as the @ of "@bob", is a boundary itself.
 func holdsWord(text, word string) bool {
-	for from := 0; word != ""; {
+	if word == "" {
+		return false
+	}
+	first, _ := utf8.DecodeRuneInString(word)
+	last, _ := utf8.DecodeLastRuneInString(word)
+	for from := 0; ; {
 		at := strings.Index(text[from:], word)
 		if at < 0 {
 			return false
@@ -840,12 +890,11 @@ func holdsWord(text, word string) bool {
 		at += from
 		before, _ := utf8.DecodeLastRuneInString(text[:at])
 		after, _ := utf8.DecodeRuneInString(text[at+len(word):])
-		if !isWordRune(before) && !isWordRune(after) {
+		if !(isWordRune(first) && isWordRune(before)) && !(isWordRune(last) && isWordRune(after)) {
 			return true
 		}
 		from = at + 1
 	}
-	return false
 }
 
 func isWordRune(r rune) bool {
@@ -853,11 +902,29 @@ func isWordRune(r rune) bool {
 }
 
 // erasureError is a run's error on its way to the worker's log line, which
-// does not name the user either.
+// does not name the user either. One already logged where it was met says
+// only what failed, so that the error is given once (#32).
 type erasureError struct {
 	err    error
 	userID string
+	said   string
 }
 
-func (e *erasureError) Error() string { return loggable(e.err, e.userID) }
+func (e *erasureError) Error() string {
+	if e.said != "" {
+		return e.said
+	}
+	return loggable(e.err, e.userID)
+}
 func (e *erasureError) Unwrap() error { return e.err }
+
+// An erasure's jobs log their own failures, through loggable (#32): the
+// writer's "write commit failed" line would give an error's text whole, and a
+// refusal of a chunk quotes the user it erases. A chunk or a scrub of the
+// erasure task is one; the same jobs outside it are not.
+func (j *UserDataErase) failureReported() bool { return j.Erasure != nil }
+func (j *RawScrub) failureReported() bool      { return j.ErasureID != "" }
+func (j *erasureBegin) failureReported() bool  { return true }
+func (j *erasureStep) failureReported() bool   { return true }
+func (j *erasureEnd) failureReported() bool    { return true }
+func (j *erasurePause) failureReported() bool  { return true }
