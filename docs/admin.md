@@ -418,13 +418,15 @@ The erasure is synchronous. The **raw archive goes first**: the batches that
 hold the user's spans are found, decoded and rewritten one writer job each,
 before the parsed rows go, because once those are gone nothing names the
 batches any more; the batches that arrived while the request ran are checked
-last. The parsed rows then go in **chunks** — up to five hundred traces
-of one hour — each one a transaction that leaves the store consistent on its
-own: the chunk's traces go and the hour they occupied is recomputed in the
-same commit, and the writer is held for one chunk at a time so ingest keeps
-flowing between them. A user active in many hours takes many chunks: 20 000
-traces spread over a month are 720 of them, and tens of minutes on a busy
-host. The erasure **runs to completion whether or not the client waits for
+last. The parsed rows then go in **chunks** — up to five hundred traces,
+taken in the order they started, whole hours at a time — each one a
+transaction that leaves the store consistent on its own: the chunk's traces
+go and the hours they occupied are recomputed in the same commit, each hour
+once (an hour holding more than five hundred of the user's traces once per
+chunk it spans), and the writer is held for one chunk at a time so ingest keeps flowing
+between them. A chunk takes as many hours as are light to recompute; a dense
+hour is a chunk of its own. 20 000 traces spread over a month are about sixty
+chunks, and seconds rather than minutes. The erasure **runs to completion whether or not the client waits for
 it** — a closed tab or the interface's thirty-second clock loses the answer
 and nothing else, and the interface and `tracepad users rm-data` say the
 erasure is still running rather than that it failed; a request that never
@@ -499,10 +501,11 @@ thousand), and the echo is the **project name**, the one retention shrinking
 already uses for the same act by another door.
 
 A confirmed request deletes **one round**: the newest `limit` matches
-(1–1000, default 1000), in chunks of at most five hundred traces of one hour,
-each chunk its own transaction — and at most fifty such chunks, whichever
-bound comes first, so a set spread thinly over many hours does not run past
-the interface's clock — and answers
+(1–1000, default 1000), in chunks of whole hours — at most five hundred
+traces, and as many hours as are light to recompute — each chunk its own
+transaction, and at most fifty such chunks, whichever bound comes first, so a
+set spread thinly over many dense hours does not run past the interface's
+clock — and answers
 `{"dry_run": false, "deleted": {…}, "more": true}` — repeat the same call
 while `more` is true. A request that ran for minutes is one the interface's
 thirty-second clock would cut off every time, leaving the operator with an

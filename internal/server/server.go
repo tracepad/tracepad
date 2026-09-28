@@ -124,6 +124,10 @@ type Server struct {
 	// #16).
 	running      inflight
 	handlerGrace time.Duration
+	// deleteRollBudget bounds what one chunk of a bulk deletion re-rolls
+	// (spec 047 #4); a field so that a test can make every hour a chunk.
+	// Zero is the store's DeleteRollBudget.
+	deleteRollBudget int64
 	// stopping ends when a stop begins, and with it every MCP stream
 	// (mcpStream): a client holding its event stream open would otherwise
 	// keep the drain waiting for its whole window. Nothing else is tied to

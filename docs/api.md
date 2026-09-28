@@ -564,7 +564,7 @@ the same validation, and **requires `to`** — dry run and confirmed alike, a
 deleted, however much ingest flows in between. The dry run adds `matched`,
 the exact count (the listing's own stops at a thousand), and its echo is the
 **project name**. A confirmed request deletes **one round** — the newest
-`limit` matches, 1–1000 and 1000 by default, in chunks of one hour, and at
+`limit` matches, 1–1000 and 1000 by default, in chunks of whole hours, and at
 most fifty chunks — and answers `{"dry_run": false, "deleted": {…}, "more":
 true, "compaction": {…}}`; repeat the same call while `more` is true. Nothing is recounted on the way, a filter that
 matches nothing is a successful dry run of zero and a successful deletion of

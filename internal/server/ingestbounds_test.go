@@ -673,6 +673,10 @@ func TestAHangUpStillStopsABulkDeletion(t *testing.T) {
 			&model.Observation{TraceID: traceHex(i + 1), ID: spanHex(i + 1), Type: model.TypeSpan,
 				Level: model.LevelDefault, StartTime: start, EndTime: start + 1000})
 	}
+	// Three chunks: the hours rolled, and a budget of one for what a chunk
+	// re-rolls past its first hour (spec 047 #4), so each hour is its own.
+	h.rollTheCorpus(t, time.Unix(0, seedBase+10*hour))
+	h.server.deleteRollBudget = 1
 	ctx, hangUp := context.WithCancel(context.Background())
 	writer := &hangUpAfterFirstDelete{JobWriter: h.server.writer, hangUp: hangUp}
 	h.server.writer = writer

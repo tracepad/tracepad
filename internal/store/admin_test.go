@@ -144,7 +144,7 @@ func TestDeletingATwiceDeletedProject(t *testing.T) {
 // re-roll of spec 013 #7 rides inside the chunk's own transaction, so a
 // request cut off between chunks leaves no hour counting traces that are
 // gone — and a repeat, which only sees the traces that remain, has nothing
-// to miss. The chunk here straddles an hour, and the user is not written
+// to miss. The chunk here cuts an hour, and the user is not written
 // back into the per-user tables by the roll of that hour (review of PR
 // #65): between a hang-up and the repeat they are gone from the listing,
 // as `docs/admin.md` promises. The last hour sits at the watermark, and
@@ -193,7 +193,7 @@ func TestErasureCorrectsTheHoursOfEachChunkAsItCommits(t *testing.T) {
 	erase := func() *UserDataErase {
 		t.Helper()
 		chunk := &UserDataErase{ProjectID: project.ID, UserID: "forget-me",
-			Confirm: "forget-me", Limit: 3, Now: (rollupHour + 3*SecondsPerHour) * 1e9}
+			Confirm: "forget-me", Limit: 1, Now: (rollupHour + 3*SecondsPerHour) * 1e9}
 		if err := writer.Submit(t.Context(), chunk); err != nil {
 			t.Fatal(err)
 		}
@@ -212,17 +212,18 @@ func TestErasureCorrectsTheHoursOfEachChunkAsItCommits(t *testing.T) {
 	}
 
 	// One chunk, as a request that hung up after it would leave things:
-	// the first hour's two traces and one of the second's.
+	// one of the first hour's two traces — a chunk of one cuts the hour
+	// (spec 047 #1), so the hour is left holding the user's other trace.
 	first := erase()
-	if first.Counts.Traces != 3 || len(first.Hours) != 2 || !first.More {
-		t.Fatalf("first chunk = %d traces over hours %v, more %v; want 3 over two hours with more to come",
+	if first.Counts.Traces != 1 || len(first.Hours) != 1 || !first.More {
+		t.Fatalf("first chunk = %d traces over hours %v, more %v; want 1 over one hour with more to come",
 			first.Counts.Traces, first.Hours, first.More)
 	}
-	if got := rolled(hours[0]); got != 1 {
-		t.Errorf("hour %d rolled %d traces after its chunk committed, want the bystander's 1", hours[0], got)
+	if got := rolled(hours[0]); got != 2 {
+		t.Errorf("hour %d rolled %d traces with one of the user's erased, want 2", hours[0], got)
 	}
-	if got := rolled(hours[1]); got != 2 {
-		t.Errorf("hour %d rolled %d traces with one of the user's erased, want 2", hours[1], got)
+	if got := rolled(hours[1]); got != 3 {
+		t.Errorf("hour %d rolled %d traces before any of its own were erased, want 3", hours[1], got)
 	}
 	if got := rolled(hours[2]); got != 3 {
 		t.Errorf("hour %d rolled %d traces before any of its own were erased, want 3", hours[2], got)
@@ -245,62 +246,164 @@ func TestErasureCorrectsTheHoursOfEachChunkAsItCommits(t *testing.T) {
 	gone("after the erasure")
 }
 
-// TestAnEraseChunkIsBoundedInHours (spec 023 #19): the rolls are what a
-// chunk now costs, so a chunk is capped in distinct hours as well as in
-// traces, and a chunk cut short by the cap says there is more. The traces
-// arrive interleaved across hours, and the cap skips the hours beyond it
-// rather than stopping at the first of them (second review of PR #65): a
-// chunk holds everything the window has for its hours, so each hour is
-// rolled by one chunk and not by every chunk that reaches into it.
-func TestAnEraseChunkIsBoundedInHours(t *testing.T) {
-	s, project := readStore(t)
-	// Three hours, arriving round-robin: hour 0, 1, 2, 0, 1, 2, 0.
-	for i := range 7 {
-		seedUserTrace(t, s, project.ID, userSeed{n: i + 1, user: "sparse", session: "s",
-			environment: "production", model: "claude-sonnet-5", latencyMs: 50,
-			hour: rollupHour + int64(i%3)*SecondsPerHour, offsetSeconds: int64(i)})
+// TestAnEraseChunkTakesWholeHoursInStartOrder (spec 047 #1, #2): the traces
+// arrive round-robin across three hours, and a chunk still takes them hour by
+// hour in the order they started — every trace of an hour in one chunk, so
+// each hour is rolled once. A chunk is bounded by its traces and, past its
+// first hour, by what its rolls recompute; an hour of more traces than the
+// chunk holds is cut, and a chunk cut short by either bound says there is
+// more.
+func TestAnEraseChunkTakesWholeHoursInStartOrder(t *testing.T) {
+	hour := func(i int) int64 { return rollupHour + int64(i)*SecondsPerHour }
+	seed := func(t *testing.T) (*Store, *Project) {
+		t.Helper()
+		s, project := readStore(t)
+		// Hour 0, 1, 2, 0, 1, 2, 0: three traces in hour 0, two in each
+		// of the others, none arriving in the order it started.
+		for i := range 7 {
+			seedUserTrace(t, s, project.ID, userSeed{n: i + 1, user: "sparse", session: "s",
+				environment: "production", model: "claude-sonnet-5", latencyMs: 50,
+				hour: hour(i % 3), offsetSeconds: int64(i)})
+		}
+		// Rolled and behind the watermark, so each hour costs its rows.
+		for i := range 3 {
+			roll(t, s, project.ID, hour(i))
+		}
+		advance(t, s, project.ID, hour(2))
+		return s, project
+	}
+	erase := func(t *testing.T, s *Store, project *Project, limit int, budget int64) []*UserDataErase {
+		t.Helper()
+		writer, err := s.NewWriter(quickWrites)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer writer.Close()
+		var chunks []*UserDataErase
+		for {
+			chunk := &UserDataErase{ProjectID: project.ID, UserID: "sparse", Confirm: "sparse",
+				Limit: limit, RollBudget: budget}
+			if err := writer.Submit(t.Context(), chunk); err != nil {
+				t.Fatal(err)
+			}
+			chunks = append(chunks, chunk)
+			if !chunk.More {
+				return chunks
+			}
+		}
+	}
+	shape := func(chunks []*UserDataErase) (traces []int64, hours [][]int64, more []bool) {
+		for _, chunk := range chunks {
+			traces = append(traces, chunk.Counts.Traces)
+			hours = append(hours, chunk.Hours)
+			more = append(more, chunk.More)
+		}
+		return traces, hours, more
+	}
+	for _, tc := range []struct {
+		name   string
+		limit  int
+		budget int64
+		traces []int64
+		hours  [][]int64
+	}{
+		{"one chunk holds them all", 100, 0, []int64{7}, [][]int64{{hour(0), hour(1), hour(2)}}},
+		{"the traces bound, at an hour", 4, 0, []int64{3, 4},
+			[][]int64{{hour(0)}, {hour(1), hour(2)}}},
+		{"the roll budget bound, past the first hour", 100, 1, []int64{3, 2, 2},
+			[][]int64{{hour(0)}, {hour(1)}, {hour(2)}}},
+		{"an hour larger than a chunk is cut", 2, 0, []int64{2, 1, 2, 2},
+			[][]int64{{hour(0)}, {hour(0)}, {hour(1)}, {hour(2)}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, project := seed(t)
+			traces, hours, more := shape(erase(t, s, project, tc.limit, tc.budget))
+			if !slices.Equal(traces, tc.traces) || !slices.EqualFunc(hours, tc.hours, slices.Equal) {
+				t.Errorf("chunks took %v traces in hours %v, want %v in %v", traces, hours, tc.traces, tc.hours)
+			}
+			for i, m := range more {
+				if m != (i < len(more)-1) {
+					t.Errorf("more = %v, want every chunk but the last to say so", more)
+					break
+				}
+			}
+		})
 	}
 
+	// And a chunk of no size is a mistake, not a size: it would say
+	// `More` for ever.
+	s, project := seed(t)
 	writer, err := s.NewWriter(quickWrites)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer writer.Close()
-	var chunks []*UserDataErase
-	for {
-		chunk := &UserDataErase{ProjectID: project.ID, UserID: "sparse", Confirm: "sparse",
-			Limit: 100, HourLimit: 2}
-		if err := writer.Submit(t.Context(), chunk); err != nil {
-			t.Fatal(err)
-		}
-		chunks = append(chunks, chunk)
-		if !chunk.More {
-			break
-		}
-	}
-	var got []int64
-	for _, chunk := range chunks {
-		got = append(got, chunk.Counts.Traces)
-	}
-	// The first chunk: every trace of hours 0 and 1 (five of them), the
-	// third hour's two skipped; the second: those two, and nothing more.
-	if want := []int64{5, 2}; !slices.Equal(got, want) {
-		t.Fatalf("chunks took %v traces, want %v: two hours at a time, whole", got, want)
-	}
-	if !chunks[0].More || chunks[1].More {
-		t.Errorf("more = %v %v, want the capped chunk to say so and the last not to",
-			chunks[0].More, chunks[1].More)
-	}
-	if len(chunks[0].Hours) != 2 || len(chunks[1].Hours) != 1 {
-		t.Errorf("hours = %v and %v, want two then one", chunks[0].Hours, chunks[1].Hours)
-	}
-
-	// And a chunk of no size is a mistake, not a size: it would say
-	// `More` for ever.
 	err = writer.Submit(t.Context(), &UserDataErase{ProjectID: project.ID, UserID: "sparse",
 		Confirm: "sparse", Limit: 0})
 	if err == nil || rejected(err) {
 		t.Errorf("a zero limit came back %v, want a storage error", err)
+	}
+}
+
+// TestAnEraseChunkFollowsATraceThatStartsEarlier (spec 047 #1): a late span
+// can move a trace's start into an hour an earlier chunk already took. The
+// next chunk reads the start as it stands, so the trace is taken there and
+// that hour is rolled again, left counting only the bystander.
+func TestAnEraseChunkFollowsATraceThatStartsEarlier(t *testing.T) {
+	s, project := readStore(t)
+	hour := func(i int) int64 { return rollupHour + int64(i)*SecondsPerHour }
+	for i, seed := range []userSeed{
+		{user: "moving", hour: hour(0)}, {user: "keep", hour: hour(0)},
+		{user: "moving", hour: hour(1)}, {user: "moving", hour: hour(2)},
+	} {
+		seed.n, seed.session, seed.environment, seed.model, seed.latencyMs, seed.offsetSeconds =
+			i+1, "s", "production", "claude-sonnet-5", 50, int64(i)
+		seedUserTrace(t, s, project.ID, seed)
+	}
+	for i := range 3 {
+		roll(t, s, project.ID, hour(i))
+	}
+	advance(t, s, project.ID, hour(2))
+	writer, err := s.NewWriter(quickWrites)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writer.Close()
+	erase := func() *UserDataErase {
+		t.Helper()
+		chunk := &UserDataErase{ProjectID: project.ID, UserID: "moving", Confirm: "moving", Limit: 1,
+			Now: (rollupHour + 4*SecondsPerHour) * 1e9}
+		if err := writer.Submit(t.Context(), chunk); err != nil {
+			t.Fatal(err)
+		}
+		return chunk
+	}
+	if first := erase(); !slices.Equal(first.Hours, []int64{hour(0)}) {
+		t.Fatalf("the first chunk took hours %v, want the first", first.Hours)
+	}
+	// The trace of the last hour now starts in the first.
+	if _, err := s.db.Exec(`UPDATE traces SET timestamp = ? WHERE id = ?`,
+		(hour(0)+30)*1e9, hexTrace(4)); err != nil {
+		t.Fatal(err)
+	}
+	if second := erase(); !slices.Equal(second.Hours, []int64{hour(0)}) || second.Counts.Traces != 1 {
+		t.Errorf("the second chunk took %d traces in hours %v, want the moved one in the first hour",
+			second.Counts.Traces, second.Hours)
+	}
+	for erase().More {
+	}
+	var left int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM traces WHERE user_id = 'moving'`).Scan(&left); err != nil || left != 0 {
+		t.Errorf("%d of the user's traces left (%v)", left, err)
+	}
+	var counted int64
+	for _, row := range rolledRows(t, s, project.ID, hour(0)) {
+		if row.Model == "" {
+			counted += row.Count
+		}
+	}
+	if counted != 1 {
+		t.Errorf("the first hour counts %d traces, want the bystander's 1", counted)
 	}
 }
 

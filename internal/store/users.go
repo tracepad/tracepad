@@ -481,12 +481,18 @@ func (s *Store) UserTail(ctx context.Context, projectID, userID string, fromNano
 // without the `+`, 0.01 s with it. `TestSessionStartSeeksTheSessionIndex`
 // asserts the plan so that "simplifying" it away fails a test rather than a
 // deployment (found in review of PR #42).
+//
+// The `+` on `x.user_id` settles the other choice the subquery offers:
+// `idx_traces_user` and `idx_traces_session` both answer its two equalities,
+// and with no statistics SQLite breaks the tie by the order the indexes were
+// created in. Migration 0029 recreated the first after the second, which
+// flipped it (spec 047 #1); the session is the narrower of the two.
 const sessionStartCondition = `t.project_id = ?
 	   AND t.user_id IS NOT NULL AND t.user_id != '' AND t.session_id IS NOT NULL
 	   AND NOT EXISTS (
 	         SELECT 1 FROM traces x
 	          WHERE x.project_id = t.project_id AND x.session_id = t.session_id
-	            AND x.user_id = t.user_id
+	            AND +x.user_id = t.user_id
 	            AND +(x.timestamp < t.timestamp
 	                  OR (x.timestamp = t.timestamp AND x.id < t.id)))`
 

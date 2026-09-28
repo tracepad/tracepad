@@ -281,9 +281,9 @@ func TestAnErasureCutOffBetweenChunksLeavesNoHourDirty(t *testing.T) {
 	h := newHarness(t, nil, store.WriterOptions{})
 
 	// More traces than one chunk takes, over two hours, a bystander in
-	// each. Seeded in one batch, in hour order: the chunks follow the
-	// user index, which is arrival order, so the first chunk is exactly
-	// the first hour's five hundred.
+	// each. The chunks follow the user index, which is start order (spec
+	// 047 #1), so the first chunk is exactly the first hour's five
+	// hundred.
 	first, second := statsHour, statsHour+3600
 	batch := &store.IngestBatch{ProjectID: h.project.ID}
 	add := func(n int, hour int64, user string) {

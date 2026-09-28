@@ -107,8 +107,8 @@ discovered:
 2. **Erasing a user's data, and deleting traces, corrects the hours it can
    reach.** The rolled hours the erased or deleted traces occupied are
    recomputed in the same transaction that deletes them — both run in chunks
-   of up to five hundred traces of one hour, and each chunk commits with its
-   hour already corrected — so the counts drop before the request answers,
+   of up to five hundred traces in whole hours, and each chunk commits with
+   its hours already corrected — so the counts drop before the request answers,
    and a request cut off between chunks leaves no hour counting traces that
    are gone. Hours already frozen are not recomputed: the project-wide
    aggregates carry no user id and no prompt or completion text — they are
@@ -403,7 +403,7 @@ the media upload URLs for the traces they remove, and refuse new ones, for the
 hour such a URL lives ([media.md](media.md#the-langfuse-sdks-media-channel)): an upload in
 transit for an erased trace would otherwise store its picture after the
 erasure had answered. The bulk
-form works in rounds of at most a thousand traces and fifty one-hour chunks,
+form works in rounds of at most a thousand traces and fifty chunks of whole hours,
 each chunk a transaction of its own, so a round cut off leaves nothing
 half-deleted and the next request continues. In
 particular the raw OTLP bodies are **not** touched, for the structural

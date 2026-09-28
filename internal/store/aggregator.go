@@ -709,6 +709,11 @@ func (s *Store) dirtySessionHours(ctx context.Context, projectID string, since i
 // timestamp — a client's bytes gone wrong rather than a time — would name an
 // hour the roll does not use. Such a trace is left to the live scan, exactly as
 // `hoursWithTraces` leaves it.
+//
+// The `+` on the user-id terms is the same kind of guard: they are a range on
+// `idx_traces_user`, which would walk every trace with a user, and without
+// statistics SQLite picks between that and the `IN` by the order the indexes
+// were created in (spec 047 #1).
 // Both halves are restricted to traces that carry a user id, and that is
 // correctness-preserving rather than a trade: `sessionStartCondition` ignores
 // an anonymous trace entirely — it requires `t.user_id` non-empty and matches
@@ -728,7 +733,7 @@ func (s *Store) dirtySessionHours(ctx context.Context, projectID string, since i
 const dirtySessionHoursQuery = `SELECT DISTINCT (other.timestamp / 1000000000 / ?) * ? AS hour
 	 FROM traces other
 	 WHERE other.project_id = ? AND +other.timestamp >= 0
-	   AND other.user_id IS NOT NULL AND other.user_id != ''
+	   AND +other.user_id IS NOT NULL AND +other.user_id != ''
 	   AND other.session_id IN (
 	         SELECT t.session_id FROM traces t
 	          WHERE t.project_id = ? AND t.updated_at > ?
