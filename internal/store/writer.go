@@ -418,7 +418,7 @@ func (w *Writer) flush(pending []*submission) {
 	// A database condition is left to the retries below: a write they
 	// commit is not lost, and one they cannot commit is logged as lost
 	// (spec 043 #24). Anything else says why the window came apart — for a
-	// job whose words the writer does not log, without them (spec 047 #32).
+	// job whose words the writer does not log, without them (spec 047 #33).
 	if _, condition := Condition(err); !condition {
 		if id, redacted := redactedCulprit(err); redacted {
 			// Without the error, and without the retry's finding it again:
@@ -451,9 +451,9 @@ type reportsItsFailure interface {
 }
 
 // redactsItsFailure is a job whose error the writer does not put in its log:
-// the error may quote what the job holds — an erasure's user (spec 047 #32) —
-// so the job's owner logs it, through a check of its own. It answers the id
-// of what it is a step of, which the writer's line names in its place.
+// the error may quote what the job holds — an erasure's user (spec 047 #33) —
+// so the writer gives the facts of the failure and not its text. It answers
+// the id of what it is a step of, which the writer's line names.
 type redactsItsFailure interface {
 	failureRedacted() (id string, redacted bool)
 }
@@ -498,8 +498,7 @@ func logRedacted(level slog.Level, message, id string, err error, args ...any) {
 	if rejected(err) {
 		level = slog.LevelInfo
 	}
-	logger().Log(context.Background(), level, message,
-		append(append([]any{"erasure", id}, failureFacts(err)...), args...)...)
+	logFacts(level, message, err, append([]any{"erasure", id}, args...)...)
 }
 
 // bareCondition is a database condition without the words of the error that

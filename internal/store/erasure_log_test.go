@@ -21,7 +21,7 @@ import (
 )
 
 // What an erasure writes to the log carries no text of an error (spec 047
-// #32): an error's text may quote what it holds, an erasure's user among it,
+// #33): an error's text may quote what it holds, an erasure's user among it,
 // in any form, and a filter of text is a list of the forms someone thought
 // of. So the lines give the cause, the Go types of the error, SQLite's code
 // and the position — and this test is the invariant: every way an erasure
@@ -90,13 +90,30 @@ func leaks(log, id string) []string {
 	return found
 }
 
+// waitLine waits for a line of the log that a goroutine writes.
+func waitLine(t *testing.T, log func() string, message string) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for !strings.Contains(log(), message) {
+		if time.Now().After(deadline) {
+			t.Fatalf("the log has no %q: %q", message, log())
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 // erasureLogPath is one way an erasure's failure reaches the log: it runs
 // and answers the message the log must hold, so that a path that logs nothing
 // does not pass for one that leaks nothing.
 type erasureLogPath struct {
 	name    string
 	message []string
-	run     func(t *testing.T, f *sweepFixture, id string, fail error)
+	// once is a path that takes nothing from the id or the error, which one
+	// run of stands for all.
+	once bool
+	// run takes the log as a function, for a path whose line a goroutine
+	// writes and that must not stop that goroutine before it has.
+	run func(t *testing.T, f *sweepFixture, id string, fail error, log func() string)
 }
 
 func erasureLogPaths() []erasureLogPath {
@@ -121,8 +138,8 @@ func erasureLogPaths() []erasureLogPath {
 		}
 	}
 	return []erasureLogPath{
-		{"the raw phase", []string{"the raw phase of an erasure failed", "an erasure failed"},
-			func(t *testing.T, f *sweepFixture, id string, fail error) {
+		{"the raw phase", []string{"the raw phase of an erasure failed", "an erasure failed"}, false,
+			func(t *testing.T, f *sweepFixture, id string, fail error, log func() string) {
 				e := f.startErasure(t, id)
 				writer := &failingJobs{jobSubmitter: f.writer, err: fail,
 					fails: func(job WriteJob) bool { step, ok := job.(*erasureStep); return ok && step.TracesAtStart != nil }}
@@ -130,8 +147,8 @@ func erasureLogPaths() []erasureLogPath {
 					t.Fatal(err)
 				}
 			}},
-		{"the parsed phase", []string{"the parsed phase of an erasure failed", "an erasure failed"},
-			func(t *testing.T, f *sweepFixture, id string, fail error) {
+		{"the parsed phase", []string{"the parsed phase of an erasure failed", "an erasure failed"}, false,
+			func(t *testing.T, f *sweepFixture, id string, fail error, log func() string) {
 				e := f.startErasure(t, id)
 				writer := &failingJobs{jobSubmitter: f.writer, err: fail,
 					fails: func(job WriteJob) bool { _, chunk := job.(*UserDataErase); return chunk }}
@@ -139,8 +156,8 @@ func erasureLogPaths() []erasureLogPath {
 					t.Fatal(err)
 				}
 			}},
-		{"the tail and its unrecorded cause", []string{"the tail of an erasure failed", "a failed tail's cause is not recorded"},
-			func(t *testing.T, f *sweepFixture, id string, fail error) {
+		{"the tail and its unrecorded cause", []string{"the tail of an erasure failed", "a failed tail's cause is not recorded"}, false,
+			func(t *testing.T, f *sweepFixture, id string, fail error, log func() string) {
 				tailOf(t, f, id, func(inner jobSubmitter) jobSubmitter {
 					return &failingJobs{jobSubmitter: inner, err: fail, fails: func(job WriteJob) bool {
 						switch j := job.(type) {
@@ -153,14 +170,14 @@ func erasureLogPaths() []erasureLogPath {
 					}}
 				})
 			}},
-		{"a scrub retried after a conflict", []string{"the tail of an erasure failed"},
-			func(t *testing.T, f *sweepFixture, id string, fail error) {
+		{"a scrub retried after a conflict", []string{"the tail of an erasure failed"}, false,
+			func(t *testing.T, f *sweepFixture, id string, fail error, log func() string) {
 				tailOf(t, f, id, func(inner jobSubmitter) jobSubmitter {
 					return &conflictsThenFails{jobSubmitter: inner, err: fail}
 				})
 			}},
-		{"a batch that cannot be read", []string{"could not be read to scrub it"},
-			func(t *testing.T, f *sweepFixture, id string, fail error) {
+		{"a batch that cannot be read", []string{"could not be read to scrub it"}, false,
+			func(t *testing.T, f *sweepFixture, id string, fail error, log func() string) {
 				// The decoder's own words: it quotes the value it refused.
 				quoted, _ := json.Marshal(id)
 				seedRawBatch(t, f.store, f.project.ID, &RawBatch{ReceivedAt: daysAgo(1), ContentType: mapping.ContentTypeJSON,
@@ -171,19 +188,41 @@ func erasureLogPaths() []erasureLogPath {
 					t.Fatal(err)
 				}
 			}},
-		{"the worker", []string{"an erasure stopped before it ended"},
-			func(t *testing.T, f *sweepFixture, id string, fail error) {
+		{"the worker", []string{"an erasure stopped before it ended"}, false,
+			func(t *testing.T, f *sweepFixture, id string, fail error, log func() string) {
 				writer := &failingJobs{jobSubmitter: f.writer, err: fail,
 					fails: func(job WriteJob) bool { _, end := job.(*erasureEnd); return end }}
 				worker := f.store.NewEraser(writer, EraserOptions{Poll: time.Hour})
 				worker.Start()
 				defer worker.Close()
 				f.startErasure(t, id)
-				waitFor(t, func() bool { return f.erasureOf(t, id).attempts == 1 && f.erasureOf(t, id).Phase == phaseTail })
-				time.Sleep(50 * time.Millisecond)
+				waitLine(t, log, "an erasure stopped before it ended")
 			}},
-		{"the worker that cannot read", []string{"could not read the next erasure"},
-			func(t *testing.T, f *sweepFixture, id string, fail error) {
+		{"a batch deleted whole for want of a rewrite", []string{"deleting it whole"}, false,
+			func(t *testing.T, f *sweepFixture, id string, fail error, log func() string) {
+				f.ingestOTLP(t, export([]*tracepb.Span{otlpSpan(t, 1, 1, "someone-else", "", "a", nil)}), false, daysAgo(1))
+				batch := f.count(t, `SELECT MAX(id) FROM raw_batches`)
+				saved := scrubRewrite
+				scrubRewrite = func(*mapping.ExportBody, map[string]bool) ([]byte, error) { return nil, fail }
+				t.Cleanup(func() { scrubRewrite = saved })
+				e := &Erasure{ID: "4f0c9d3e8a1b2c3d4e5f60718293a4b5", ProjectID: f.project.ID, UserID: id}
+				plan, err := f.store.planScrub(t.Context(), e, batch, map[string]bool{hexTrace(1): true})
+				if err != nil || plan == nil || !plan.job.Delete {
+					t.Fatalf("the batch was not planned to be deleted whole: %v, %v", plan, err)
+				}
+			}},
+		{"a start that fails", []string{"an erasure stopped before it ended"}, false,
+			func(t *testing.T, f *sweepFixture, id string, fail error, log func() string) {
+				writer := &failingJobs{jobSubmitter: f.writer, err: fail,
+					fails: func(job WriteJob) bool { _, begin := job.(*erasureBegin); return begin }}
+				worker := f.store.NewEraser(writer, EraserOptions{Poll: time.Hour})
+				worker.Start()
+				defer worker.Close()
+				f.startErasure(t, id)
+				waitLine(t, log, "an erasure stopped before it ended")
+			}},
+		{"the worker that cannot read", []string{"could not read the next erasure"}, true,
+			func(t *testing.T, f *sweepFixture, id string, fail error, log func() string) {
 				// The driver's own words: a table it cannot find.
 				if _, err := f.store.db.Exec(`ALTER TABLE erasures RENAME TO erasures_away`); err != nil {
 					t.Fatal(err)
@@ -192,10 +231,10 @@ func erasureLogPaths() []erasureLogPath {
 				worker := f.store.NewEraser(f.writer, EraserOptions{Poll: time.Hour})
 				worker.Start()
 				defer worker.Close()
-				time.Sleep(100 * time.Millisecond)
+				waitLine(t, log, "could not read the next erasure")
 			}},
-		{"a stop whose pause is refused", []string{"a stopped erasure's start stays counted"},
-			func(t *testing.T, f *sweepFixture, id string, fail error) {
+		{"a stop whose pause is refused", []string{"a stopped erasure's start stays counted"}, false,
+			func(t *testing.T, f *sweepFixture, id string, fail error, log func() string) {
 				ctx, cancel := context.WithCancel(t.Context())
 				defer cancel()
 				e := f.startErasure(t, id)
@@ -204,8 +243,8 @@ func erasureLogPaths() []erasureLogPath {
 					t.Fatal("the run was not stopped")
 				}
 			}},
-		{"a write whose submitter left", []string{"a write of an erasure did not commit"},
-			func(t *testing.T, f *sweepFixture, id string, fail error) {
+		{"a write whose submitter left", []string{"a write of an erasure did not commit"}, false,
+			func(t *testing.T, f *sweepFixture, id string, fail error, log func() string) {
 				w, err := f.store.NewWriter(WriterOptions{})
 				if err != nil {
 					t.Fatal(err)
@@ -223,11 +262,12 @@ func erasureLogPaths() []erasureLogPath {
 				cancel()
 				<-gone
 				close(release)
-				// The writer commits, fails and logs after the submitter has left.
-				time.Sleep(100 * time.Millisecond)
+				// The writer commits, fails and logs after the submitter has
+				// left: the test waits for the line.
+				waitLine(t, log, "a write of an erasure did not commit")
 			}},
-		{"a window of three", []string{"write window failed", "a write of an erasure did not commit"},
-			func(t *testing.T, f *sweepFixture, id string, fail error) {
+		{"a window of three", []string{"write window failed", "a write of an erasure did not commit"}, false,
+			func(t *testing.T, f *sweepFixture, id string, fail error, log func() string) {
 				w, err := f.store.NewWriter(WriterOptions{CommitWindow: 50 * time.Millisecond})
 				if err != nil {
 					t.Fatal(err)
@@ -256,6 +296,7 @@ func erasureLogPaths() []erasureLogPath {
 				for range 3 {
 					<-answers
 				}
+				waitLine(t, log, "write window failed")
 			}},
 	}
 }
@@ -313,7 +354,7 @@ func (w *stopsThenRefusesPause) Submit(ctx context.Context, job WriteJob) error 
 }
 
 // The user an erasure erases, and the words of the errors it meets, never
-// reach its log lines (#32). Each path, each id, an error of plain words and
+// reach its log lines (#33). Each path, each id, an error of plain words and
 // one that is SQLite's.
 func TestNoErasureLineQuotesAnErrorOrItsUser(t *testing.T) {
 	was := busyWait
@@ -322,6 +363,9 @@ func TestNoErasureLineQuotesAnErrorOrItsUser(t *testing.T) {
 	for _, path := range erasureLogPaths() {
 		for n, id := range hostileIDs() {
 			for _, coded := range []bool{false, true} {
+				if path.once && (n > 0 || coded) {
+					continue
+				}
 				name := fmt.Sprintf("%s/id %d/coded %v", path.name, n, coded)
 				t.Run(name, func(t *testing.T) {
 					var logged bytes.Buffer
@@ -336,15 +380,32 @@ func TestNoErasureLineQuotesAnErrorOrItsUser(t *testing.T) {
 					if coded {
 						fail = fmt.Errorf("%w: %w", fail, codedError{11})
 					}
-					path.run(t, f, id, fail)
+					path.run(t, f, id, fail, func() string {
+						mu.Lock()
+						defer mu.Unlock()
+						return logged.String()
+					})
 
-					mu.Lock()
-					out := logged.String()
-					mu.Unlock()
-					for _, message := range path.message {
-						if !strings.Contains(out, message) {
-							t.Errorf("the log has no %q: %q", message, out)
+					// The lines a goroutine writes are waited for, not slept on.
+					var out string
+					deadline := time.Now().Add(3 * time.Second)
+					for {
+						mu.Lock()
+						out = logged.String()
+						mu.Unlock()
+						missing := ""
+						for _, message := range path.message {
+							if !strings.Contains(out, message) {
+								missing = message
+							}
 						}
+						if missing == "" {
+							break
+						}
+						if time.Now().After(deadline) {
+							t.Fatalf("the log has no %q: %q", missing, out)
+						}
+						time.Sleep(5 * time.Millisecond)
 					}
 					if found := leaks(out, id); len(found) > 0 {
 						t.Errorf("the log gives %s:\n%s", strings.Join(found, ", "), out)
@@ -352,5 +413,153 @@ func TestNoErasureLineQuotesAnErrorOrItsUser(t *testing.T) {
 				})
 			}
 		}
+	}
+}
+
+// runWindow submits jobs to a writer in one window, the first parked in its
+// commit so that the rest queue behind it, and answers what each returned.
+func runWindow(t *testing.T, w *Writer, first WriteJob, rest ...WriteJob) []error {
+	t.Helper()
+	var commits int
+	var mu sync.Mutex
+	parked, release := make(chan struct{}), make(chan struct{})
+	w.beforeCommit = func() {
+		mu.Lock()
+		commits++
+		leading := commits == 1
+		mu.Unlock()
+		if leading {
+			close(parked)
+			<-release
+		}
+	}
+	answers := make(chan error, len(rest)+1)
+	go func() { answers <- w.Submit(context.Background(), first) }()
+	<-parked
+	for _, job := range rest {
+		go func() { answers <- w.Submit(context.Background(), job) }()
+	}
+	waitFor(t, func() bool { return len(w.queue) == len(rest) })
+	close(release)
+	out := make([]error, 0, len(rest)+1)
+	for range len(rest) + 1 {
+		out = append(out, <-answers)
+	}
+	return out
+}
+
+// The levels of what an erasure writes hold (#33): a refusal of the writer is
+// Info, as it has always been; the refusal of a project that is gone is Info
+// on the erasure's own line; a conflict that ends the erasure failed, and
+// anything else, is an Error — a window that came apart, a Warn.
+func TestTheLevelsOfAnErasuresLines(t *testing.T) {
+	refusal := &Rejection{Kind: RejectInvalid, Message: "words"}
+	broken := errors.New("words")
+	for _, tc := range []struct {
+		name   string
+		fail   error
+		window bool
+		want   string
+	}{
+		{"a refused write", refusal, false, "level=INFO msg=\"a write of an erasure did not commit\""},
+		{"a broken write", broken, false, "level=ERROR msg=\"a write of an erasure did not commit\""},
+		{"a window a refusal took down", refusal, true, "level=INFO msg=\"write window failed"},
+		{"a window a broken job took down", broken, true, "level=WARN msg=\"write window failed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newErasureFixture(t)
+			var logged bytes.Buffer
+			var mu sync.Mutex
+			old := logger
+			logger = func() *slog.Logger { return slog.New(slog.NewTextHandler(&lockedWriter{w: &logged, mu: &mu}, nil)) }
+			t.Cleanup(func() { logger = old })
+			w, err := f.store.NewWriter(WriterOptions{CommitWindow: 50 * time.Millisecond})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer w.Close()
+			if tc.window {
+				runWindow(t, w, &erasureSweep{}, hostileJob{err: tc.fail}, &erasureSweep{})
+			} else if err := w.Submit(t.Context(), hostileJob{err: tc.fail}); err == nil {
+				t.Fatal("the job did not fail")
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			if !strings.Contains(logged.String(), tc.want) {
+				t.Errorf("the log %q, want %q", logged.String(), tc.want)
+			}
+		})
+	}
+}
+
+// A tail that fails is said by the tail's own line, and the worker does not
+// say it again (#33): the erasure's line, and the writer's for the write.
+func TestATailFailureIsNotSaidAgainByTheWorker(t *testing.T) {
+	f := newErasureFixture(t)
+	f.ingestOTLP(t, export([]*tracepb.Span{otlpSpan(t, 1, 1, "user-a", "", "a", nil)}), false, daysAgo(1))
+	var logged bytes.Buffer
+	var mu sync.Mutex
+	old := logger
+	logger = func() *slog.Logger { return slog.New(slog.NewTextHandler(&lockedWriter{w: &logged, mu: &mu}, nil)) }
+	t.Cleanup(func() { logger = old })
+	worker := f.store.NewEraser(&brokenTail{jobSubmitter: f.writer}, EraserOptions{Poll: time.Hour,
+		after: func(step int) error {
+			if step == 1 {
+				f.ingestOTLP(t, export([]*tracepb.Span{otlpSpan(t, 1, 9, "user-a", "", "late", nil)}), false, 0)
+			}
+			return nil
+		}})
+	worker.Start()
+	f.startErasure(t, "user-a")
+	waitLine(t, func() string { mu.Lock(); defer mu.Unlock(); return logged.String() },
+		"the tail of an erasure failed")
+	// Close waits for the worker to go past the run that failed.
+	worker.Close()
+	mu.Lock()
+	defer mu.Unlock()
+	out := logged.String()
+	if strings.Count(out, "the tail of an erasure failed") != 1 || strings.Contains(out, "an erasure stopped before it ended") {
+		t.Errorf("the log %q, want the tail's failure said once and not again by the worker", out)
+	}
+}
+
+// A start that fails says where the run stopped: the start (#33).
+func TestAFailedStartIsSaidWithItsPhase(t *testing.T) {
+	f := newErasureFixture(t)
+	var logged bytes.Buffer
+	var mu sync.Mutex
+	old := logger
+	logger = func() *slog.Logger { return slog.New(slog.NewTextHandler(&lockedWriter{w: &logged, mu: &mu}, nil)) }
+	t.Cleanup(func() { logger = old })
+	writer := &failingJobs{jobSubmitter: f.writer, err: errors.New("the start could not be written"),
+		fails: func(job WriteJob) bool { _, begin := job.(*erasureBegin); return begin }}
+	worker := f.store.NewEraser(writer, EraserOptions{Poll: time.Hour})
+	worker.Start()
+	defer worker.Close()
+	f.startErasure(t, "user-a")
+	log := func() string { mu.Lock(); defer mu.Unlock(); return logged.String() }
+	waitLine(t, log, "an erasure stopped before it ended")
+	if out := log(); !strings.Contains(out, "phase=start") {
+		t.Errorf("the worker's line %q has no phase=start", out)
+	}
+}
+
+// A decoder's failure names the erasure whose scrub met it (#33).
+func TestAScrubsLinesNameTheErasure(t *testing.T) {
+	f := newErasureFixture(t)
+	var logged bytes.Buffer
+	old := logger
+	logger = func() *slog.Logger { return slog.New(slog.NewTextHandler(&logged, nil)) }
+	t.Cleanup(func() { logger = old })
+	seedRawBatch(t, f.store, f.project.ID, &RawBatch{ReceivedAt: daysAgo(1), ContentType: mapping.ContentTypeJSON,
+		Body: []byte("{not an export")})
+	batch := f.count(t, `SELECT MAX(id) FROM raw_batches`)
+	e := &Erasure{ID: "4f0c9d3e8a1b2c3d4e5f60718293a4b5", ProjectID: f.project.ID, UserID: "user-a"}
+	if _, err := f.store.planScrub(t.Context(), e, batch, map[string]bool{hexTrace(1): true}); err != nil {
+		t.Fatal(err)
+	}
+	if out := logged.String(); !strings.Contains(out, "erasure=4f0c9d3e8a1b2c3d4e5f60718293a4b5") ||
+		!strings.Contains(out, "batch=") {
+		t.Errorf("the scrub's line %q does not name the erasure and the batch", out)
 	}
 }

@@ -114,7 +114,7 @@ describe('where an erasure is', () => {
 				'u'
 			)
 		).toBe(
-			"The erasure of u's data failed: the disk is full. Before it did, it erased 2 traces belonging to u."
+			"The erasure of u's data could not finish — the disk is full. Before that, it erased 2 traces belonging to u."
 		);
 	});
 });
@@ -131,7 +131,7 @@ describe('a confirmed erasure', () => {
 	it('that failed within the wait is a failure', () => {
 		expect(() =>
 			settle('p', 'u', erasure({ state: 'failed', phase: null, error: 'boom' }), new ErasureWatch())
-		).toThrow(/failed: boom/);
+		).toThrow(/could not finish — boom/);
 	});
 
 	it('that runs on is followed every two seconds until it ends, and then left alone', async () => {

@@ -55,8 +55,9 @@ export function stage(erasure: Pick<Erasure, 'state' | 'phase' | 'progress'>): s
 export function describe(erasure: Erasure, user: string): string {
 	if (erasure.state === 'done') return erased(user, erasure.deleted);
 	if (erasure.state === 'failed') {
-		const before = erased(user, erasure.deleted).replace(/^Erased/, 'Before it did, it erased');
-		return `The erasure of ${user}'s data failed: ${erasure.error ?? 'the server gave no reason'}. ${before}`;
+		const before = erased(user, erasure.deleted).replace(/^Erased/, 'Before that, it erased');
+		// The error says its own phase ("the parsed phase failed: …").
+		return `The erasure of ${user}'s data could not finish — ${erasure.error ?? 'the server gave no reason'}. ${before}`;
 	}
 	return `Erasure in progress — ${stage(erasure)}`;
 }

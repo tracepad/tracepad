@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"slices"
 	"strings"
@@ -435,9 +436,9 @@ func (s *Store) planScrub(ctx context.Context, e *Erasure, id int64, traces map[
 	}
 	if err != nil {
 		// The decoder's words may quote what the batch holds: the line says
-		// what failed and where, not what it said (#32).
-		logger().Warn("a raw batch could not be read to scrub it; it is left as it is",
-			append([]any{"project", projectID, "batch", id}, failureFacts(err)...)...)
+		// what failed and where, not what it said (#33).
+		logFacts(slog.LevelWarn, "a raw batch could not be read to scrub it; it is left as it is", err,
+			"erasure", e.ID, "project", projectID, "batch", id)
 		return nil, nil
 	}
 	held := mapping.TraceSpanCount(decoded.ResourceSpans, traces)
@@ -468,8 +469,8 @@ func (s *Store) planScrub(ctx context.Context, e *Erasure, id int64, traces map[
 	// The batch holds the spans, and they must not stay for want of an
 	// encoder: it goes whole, and the answer counts it (#2). The log line
 	// names the batch and never the user (#15).
-	logger().Warn("a raw batch could not be rewritten without the erased spans; deleting it whole",
-		append([]any{"project", projectID, "batch", id}, failureFacts(err)...)...)
+	logFacts(slog.LevelWarn, "a raw batch could not be rewritten without the erased spans; deleting it whole", err,
+		"erasure", e.ID, "project", projectID, "batch", id)
 	job.Delete = true
 	return &scrubPlan{job: job, spans: held, fallback: true}, nil
 }
@@ -649,15 +650,20 @@ func (s *Store) runErasure(ctx context.Context, writer jobSubmitter, id string, 
 	if err != nil {
 		return run, err
 	}
-	// Where the run is, for the line that says where it stopped (#32).
+	// Where the run is, for the line that says where it stopped (#33): from
+	// the start, which may fail too.
 	where := "start"
+	defer func() {
+		if err != nil {
+			err = &runError{phase: where, err: err}
+		}
+	}()
 	defer func() {
 		if err != nil && ctx.Err() != nil {
 			pause, cancel := context.WithTimeout(context.WithoutCancel(ctx), pauseTime)
 			defer cancel()
 			if perr := writer.Submit(pause, &erasurePause{ID: id, Run: token}); perr != nil {
-				logger().Warn("a stopped erasure's start stays counted",
-					append([]any{"erasure", id}, failureFacts(perr)...)...)
+				logFacts(slog.LevelWarn, "a stopped erasure's start stays counted", perr, "erasure", id)
 			}
 		}
 	}()
@@ -669,11 +675,6 @@ func (s *Store) runErasure(ctx context.Context, writer jobSubmitter, id string, 
 		return run, nil
 	}
 	e := begin.Erasure
-	defer func() {
-		if err != nil {
-			err = &runError{phase: where, err: err}
-		}
-	}()
 	if begin.GaveUp {
 		s.erasures.announceEnd()
 		logger().Error("an erasure was interrupted by every start it was given and has failed; "+
@@ -701,7 +702,7 @@ func (s *Store) runErasure(ctx context.Context, writer jobSubmitter, id string, 
 			}
 			// Nothing parsed is gone yet: there is no tail to read. The
 			// error is logged here, where it was met, and not after an end
-			// that may not be written (#32).
+			// that may not be written (#33).
 			e.reportFailure("the raw phase of an erasure failed; its failed end is being recorded", phaseRaw, err)
 			where = "end"
 			return run, s.endErasure(ctx, writer, e, failureCause(err), phaseRaw, run, began)
@@ -754,14 +755,13 @@ func (s *Store) runErasure(ctx context.Context, writer jobSubmitter, id string, 
 			return run, err
 		}
 		// Logged here, where it was met; the worker's line says where the
-		// run stopped and the facts of its failure, as this one does (#32).
+		// run stopped and the facts of its failure, as this one does (#33).
 		e.reportFailure("the tail of an erasure failed; a later start takes it again", phaseTail, err)
 		said := &erasureStep{ID: e.ID, TailFailure: failureCause(err)}
 		if serr := submitErasureJob(ctx, writer, said); serr != nil {
-			logger().Warn("a failed tail's cause is not recorded",
-				append([]any{"erasure", e.ID}, failureFacts(serr)...)...)
+			logFacts(slog.LevelWarn, "a failed tail's cause is not recorded", serr, "erasure", e.ID)
 		}
-		return run, err
+		return run, &reportedError{err: err}
 	}
 	where = "end"
 	if err := submitErasureJob(ctx, writer, &erasureStep{ID: e.ID, TailDone: true}); err != nil {
@@ -896,7 +896,7 @@ func (s *Store) endErasure(ctx context.Context, writer jobSubmitter, e *Erasure,
 	// an earlier start recorded ends failed from a run that met none (#28).
 	if end.Erasure.State == ErasureFailed {
 		// The record's sentence; the error itself was logged where it was
-		// met, once (#32).
+		// met, once (#33).
 		logger().Error("an erasure failed", append(args, "err", end.Erasure.Error)...)
 		return nil
 	}
