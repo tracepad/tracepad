@@ -691,11 +691,12 @@ func (r *ProjectRestore) apply(tx *sql.Tx) error {
 //
 // A chunk takes the user's traces in the order they started, whole hours at a
 // time (spec 047 #1): its first hour always, and each next one while the chunk
-// stays within `Limit` traces and `RollBudget` of what its rolls recompute
+// stays within `Limit` traces and `RollBudget` of what it costs the writer
 // (#2). In start order a user's hours
 // are contiguous, so each is rolled by the one chunk that takes it — or, for
 // an hour holding more than `Limit` of the user's traces, which is cut, by
-// each of the ⌈n / Limit⌉ chunks it spans. Taken in arrival order, as before, a chunk kept
+// each of the ⌈n / Limit⌉ chunks it spans, and an hour a late span moved a
+// trace into again by the chunk that takes that trace. Taken in arrival order, as before, a chunk kept
 // one hour's worth of the first 500 traces: for a client that exports out of
 // start order, about two traces, one commit and one roll per chunk.
 type UserDataErase struct {
@@ -703,9 +704,10 @@ type UserDataErase struct {
 	UserID    string
 	Confirm   string
 	Limit     int
-	// RollBudget bounds what the chunk's rolls recompute, its first hour
-	// included, though the first hour is taken whatever it costs (spec 047
-	// #2); zero is DeleteRollBudget.
+	// RollBudget bounds what the chunk costs the writer — the rolls of its
+	// hours and the deletion of its traces, its first hour included, though
+	// the first hour is taken whatever it costs (spec 047 #2, #22); zero is
+	// DeleteRollBudget.
 	RollBudget int64
 	// Now is the clock the freeze is measured against (spec 013 #11): an
 	// hour past the project's retention window is left as it stands. Zero
@@ -803,9 +805,9 @@ func (e *UserDataErase) apply(tx *sql.Tx) error {
 		return err
 	}
 	var ids []any
-	updates, ingests := map[string]int64{}, map[string]int64{}
+	var chunk []row
 	if len(read) > 0 {
-		cost, err := rollCosts(context.Background(), tx, e.ProjectID)
+		cost, err := rollCosts(context.Background(), tx, e.ProjectID, e.RollBudget, true)
 		if err != nil {
 			return err
 		}
@@ -815,19 +817,18 @@ func (e *UserDataErase) apply(tx *sql.Tx) error {
 		if err != nil {
 			return err
 		}
-		end := ends[0]
-		e.More = end < len(read)
+		chunk = read[:ends[0]]
+		e.More = len(chunk) < len(read)
 		// Once each: a trace with no start time reads as hour 0 and sorts
 		// before one that started before the epoch, so the same hour can
 		// come back later in the run.
 		rolled := map[int64]bool{}
-		for _, r := range read[:end] {
+		for _, r := range chunk {
 			if !rolled[r.hour] {
 				rolled[r.hour] = true
 				e.Hours = append(e.Hours, r.hour)
 			}
 			ids = append(ids, r.id)
-			updates[r.id], ingests[r.id] = r.updated, r.ingested
 		}
 	}
 	if len(ids) == 0 {
@@ -840,8 +841,10 @@ func (e *UserDataErase) apply(tx *sql.Tx) error {
 	// hanging off the traces, the traces, the orphaned payloads, the search
 	// entries, then one whole `RollHour` per hour this chunk touched, in
 	// this same transaction. The chunks follow `idx_traces_user`, which is
-	// start order, so an hour is rolled by one chunk. The erased user's own
-	// summary is not recomputed: it goes outright, below.
+	// start order, so an hour is rolled by the chunk that takes it — and
+	// again by each later chunk that reaches into it: an hour cut at `Limit`,
+	// or one a trace moved into when a late span started it earlier. The
+	// erased user's own summary is not recomputed: it goes outright, below.
 	//
 	// Before the traces go, what only they lead to: the sessions they
 	// carried and the items cut from them are found through the traces.
@@ -860,10 +863,10 @@ func (e *UserDataErase) apply(tx *sql.Tx) error {
 	}
 	e.Counts.SessionScores, e.Counts.DatasetItems = sessionScores, items
 	e.CompactionRequested = removal.compactionAt
-	for _, id := range ids {
-		e.IDs = append(e.IDs, id.(string))
-		e.Ingested = append(e.Ingested, ingests[id.(string)])
-		e.Updated = append(e.Updated, updates[id.(string)])
+	for _, r := range chunk {
+		e.IDs = append(e.IDs, r.id)
+		e.Ingested = append(e.Ingested, r.ingested)
+		e.Updated = append(e.Updated, r.updated)
 	}
 
 	// The per-user rollup goes outright, in this same request (spec 023

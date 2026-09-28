@@ -209,17 +209,17 @@ func (s *Server) handleDeleteTraces(w http.ResponseWriter, r *http.Request) {
 	var compaction int64
 	now := time.Now().UnixNano()
 	confirm := values.Get("confirm")
-	var chunk []string
-	chunks := 0
-	flush := func() bool {
-		if len(chunk) == 0 {
-			return true
-		}
+	start := 0
+	for _, end := range ends {
 		job := &store.TraceDelete{
-			ProjectID: project.ID, IDs: chunk, Confirm: confirm, ByFilter: true, Now: now,
+			ProjectID: project.ID, Confirm: confirm, ByFilter: true, Now: now,
 		}
+		for _, row := range rows[start:end] {
+			job.IDs = append(job.IDs, row.ID)
+		}
+		start = end
 		if !s.submit(w, r, job) {
-			return false
+			return
 		}
 		deleted.Traces += job.Counts.Traces
 		deleted.Observations += job.Counts.Observations
@@ -229,25 +229,12 @@ func (s *Server) handleDeleteTraces(w http.ResponseWriter, r *http.Request) {
 		deleted.Media += job.Counts.Media
 		deleted.MediaBytes += job.Counts.MediaBytes
 		compaction = max(compaction, job.CompactionRequested)
-		chunk = nil
-		chunks++
-		return true
-	}
-	start := 0
-	for _, end := range ends {
-		for _, row := range rows[start:end] {
-			chunk = append(chunk, row.ID)
-		}
-		start = end
-		if !flush() {
-			return
-		}
 	}
 	// A filter that matched nothing ran no chunk, and so checked no echo:
 	// one empty job checks it inside the transaction like every other
 	// confirmed request's, so a wrong project name is a 400 whether or not
 	// the range holds anything (review of PR #74).
-	if chunks == 0 && !s.submit(w, r, &store.TraceDelete{
+	if len(ends) == 0 && !s.submit(w, r, &store.TraceDelete{
 		ProjectID: project.ID, Confirm: confirm, ByFilter: true, Now: now,
 	}) {
 		return

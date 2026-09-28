@@ -596,10 +596,9 @@ type UserErasure struct {
 	ProjectID string
 	UserID    string
 	Confirm   string
-	// Chunk and RollBudget bound one transaction of the parsed phase
-	// (spec 047 #1, #2); see UserDataErase. A zero budget is DeleteRollBudget.
-	Chunk      int
-	RollBudget int64
+	// Chunk bounds the traces of one transaction of the parsed phase, and
+	// DeleteRollBudget what it costs (spec 047 #1, #2); see UserDataErase.
+	Chunk int
 	// Now is the clock the freeze is measured against (spec 013 #11); zero
 	// is the wall clock. The scrub stamps each batch as it rewrites it.
 	Now int64
@@ -701,7 +700,7 @@ func (s *Store) EraseUserData(ctx context.Context, writer jobSubmitter, e UserEr
 	var failed error
 	for {
 		chunk := &UserDataErase{ProjectID: e.ProjectID, UserID: e.UserID, Confirm: e.Confirm,
-			Limit: e.Chunk, RollBudget: e.RollBudget, Now: e.Now}
+			Limit: e.Chunk, Now: e.Now}
 		if err := submitPatiently(ctx, writer, chunk); err != nil {
 			// A chunk that fails ends step 3 and not the request: the
 			// chunks before it deleted traces whose late batches a repeat

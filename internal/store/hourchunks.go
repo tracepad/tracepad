@@ -65,7 +65,10 @@ func HourChunks(hours, deletes []int64, cost func(hour int64) (int64, error), li
 				end = start + limit
 				break
 			}
-			if taken > 0 && taken+size > limit {
+			if taken > 0 && (taken+size > limit || spent >= budget) {
+				// Full, in traces or in cost: the next hour is the
+				// next chunk's, and pricing it here would be spent
+				// for nothing.
 				break
 			}
 			hourCost, err := cost(hours[end])
@@ -90,17 +93,30 @@ func HourChunks(hours, deletes []int64, cost func(hour int64) (int64, error), li
 
 // rollCosts answers what rolling an hour of a project would recompute, for
 // HourChunks: its traces, weighed by traceRollWeight, and their observations,
-// counted from the rows themselves, so an hour the aggregator has not seen yet costs what it holds.
+// counted from the rows themselves, so an hour the aggregator has not seen yet
+// costs what it holds. The count stops once the hour is past budget — enough
+// traces to outweigh it on their own — since HourChunks needs no more than
+// that, and a dense hour would otherwise cost a scan of its every trace to
+// learn it does not fit (spec 047 #24).
+//
 // An hour at or past the watermark is not rolled (spec 023 #19) and costs
-// nothing. The watermark is read once; each hour is counted when first asked.
-func rollCosts(ctx context.Context, q ctxQuerier, projectID string) (func(hour int64) (int64, error), error) {
+// nothing, when the watermark read is the one the rolls will obey: inside the
+// transaction that rolls. A caller that prices before its jobs run — a bulk
+// round — prices every hour, since the aggregator may move the watermark past
+// an hour before the chunk that holds it commits. The watermark is read once;
+// each hour is counted when first asked.
+func rollCosts(ctx context.Context, q ctxQuerier, projectID string, budget int64, inTransaction bool) (func(hour int64) (int64, error), error) {
 	state, err := rollupState(ctx, q, projectID)
 	if err != nil {
 		return nil, err
 	}
+	if budget <= 0 {
+		budget = DeleteRollBudget
+	}
+	rows := budget/traceRollWeight + 1
 	known := map[int64]int64{}
 	return func(hour int64) (int64, error) {
-		if hour >= state.RolledUntil {
+		if inTransaction && hour >= state.RolledUntil {
 			return 0, nil
 		}
 		if cost, ok := known[hour]; ok {
@@ -108,7 +124,7 @@ func rollCosts(ctx context.Context, q ctxQuerier, projectID string) (func(hour i
 		}
 		var cost int64
 		if err := q.QueryRowContext(ctx, rollCostQuery, projectID,
-			hour*1_000_000_000, (hour+SecondsPerHour)*1_000_000_000).Scan(&cost); err != nil {
+			hour*1_000_000_000, (hour+SecondsPerHour)*1_000_000_000, rows).Scan(&cost); err != nil {
 			return 0, fmt.Errorf("count what rolling hour %d recomputes: %w", hour, err)
 		}
 		known[hour] = cost
@@ -117,14 +133,17 @@ func rollCosts(ctx context.Context, q ctxQuerier, projectID string) (func(hour i
 }
 
 // rollCostQuery weighs an hour's traces and their observations through
-// `idx_traces_timestamp`, the range the roll itself reads.
-var rollCostQuery = fmt.Sprintf(`SELECT %d * COUNT(*) + COALESCE(SUM(observation_count), 0) FROM traces
-	WHERE project_id = ? AND timestamp >= ? AND timestamp < ?`, traceRollWeight)
+// `idx_traces_timestamp`, the range the roll itself reads, stopping after as
+// many traces as its last argument: every row of the range matches, so the
+// limit bounds the scan and not only the answer.
+var rollCostQuery = fmt.Sprintf(`SELECT %d * COUNT(*) + COALESCE(SUM(observation_count), 0)
+	FROM (SELECT observation_count FROM traces
+	       WHERE project_id = ? AND timestamp >= ? AND timestamp < ? LIMIT ?)`, traceRollWeight)
 
 // DeletionChunks is HourChunks for a caller outside a transaction: the rounds
 // of a bulk trace deletion, which cut their chunks before submitting them.
 func (s *Store) DeletionChunks(ctx context.Context, projectID string, hours, deletes []int64, limit int, budget int64, chunks int) ([]int, error) {
-	cost, err := rollCosts(ctx, s.db, projectID)
+	cost, err := rollCosts(ctx, s.db, projectID, budget, false)
 	if err != nil {
 		return nil, err
 	}

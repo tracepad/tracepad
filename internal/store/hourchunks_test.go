@@ -63,7 +63,7 @@ func TestHourChunks(t *testing.T) {
 	}
 	asked := 0
 	count := func(int64) (int64, error) { asked++; return 10, nil }
-	if _, err := HourChunks(hours[:3], nil, count, 500, 10, 0); err != nil {
+	if _, err := HourChunks(hours[:3], nil, count, 500, 15, 0); err != nil {
 		t.Fatal(err)
 	}
 	if asked != 5 {
@@ -81,7 +81,7 @@ func TestHourChunks(t *testing.T) {
 	// hours those consider, however long the run it read (spec 047 #22).
 	for _, tc := range []struct{ chunks, ends, asked int }{{1, 1, 2}, {3, 3, 6}} {
 		asked = 0
-		ends, err := HourChunks(hours, nil, count, 500, 10, tc.chunks)
+		ends, err := HourChunks(hours, nil, count, 500, 15, tc.chunks)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -89,6 +89,13 @@ func TestHourChunks(t *testing.T) {
 			t.Errorf("%d chunks of a thousand hours: %d ends, %d costs asked; want %d and %d",
 				tc.chunks, len(ends), asked, tc.ends, tc.asked)
 		}
+	}
+
+	// A first hour that spends the whole budget ends its chunk without
+	// pricing the next.
+	asked = 0
+	if _, err := HourChunks(hours, nil, count, 500, 10, 1); err != nil || asked != 1 {
+		t.Errorf("a first hour at the budget asked %d costs (%v), want its own only", asked, err)
 	}
 
 	// A first hour cut at the limit ends its chunk without a price.
@@ -111,7 +118,7 @@ func TestAnEraseChunkSeeksTheUsersHours(t *testing.T) {
 	}{
 		{"the chunk's traces", userTracesByStart, []any{project.ID, "u", 501},
 			"SEARCH traces USING INDEX idx_traces_user (project_id=? AND user_id=?)"},
-		{"an hour's roll cost", rollCostQuery, []any{project.ID, 1, 2},
+		{"an hour's roll cost", rollCostQuery, []any{project.ID, 1, 2, 1201},
 			"SEARCH traces USING INDEX idx_traces_timestamp (project_id=? AND timestamp>? AND timestamp<?)"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -159,8 +166,22 @@ func TestARollCostsWhatTheRollReads(t *testing.T) {
 	if err := writer.Submit(t.Context(), batch); err != nil {
 		t.Fatal(err)
 	}
+	// Ten traces with nothing under them in the hour after, at the
+	// watermark.
+	late := &IngestBatch{ProjectID: project.ID}
+	for i := range 10 {
+		id := fmt.Sprintf("%032x", 100+i)
+		begin := (rollupHour+SecondsPerHour+60)*1_000_000_000 + int64(i)
+		late.Traces = append(late.Traces, &model.Trace{ID: id, Name: "run"})
+		late.Observations = append(late.Observations, &model.Observation{TraceID: id,
+			ID: fmt.Sprintf("%016x", 100+i), Type: model.TypeSpan, Level: model.LevelDefault,
+			StartTime: begin, EndTime: begin + 1})
+	}
+	if err := writer.Submit(t.Context(), late); err != nil {
+		t.Fatal(err)
+	}
 	advance(t, s, project.ID, rollupHour)
-	cost, err := rollCosts(t.Context(), s.db, project.ID)
+	cost, err := rollCosts(t.Context(), s.db, project.ID, 0, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,6 +190,28 @@ func TestARollCostsWhatTheRollReads(t *testing.T) {
 		t.Errorf("the hour costs %d (%v), want its trace's weight and its 30 observations, %d", got, err, want)
 	}
 	if got, err := cost(rollupHour + SecondsPerHour); err != nil || got != 0 {
-		t.Errorf("the hour at the watermark costs %d (%v), want 0", got, err)
+		t.Errorf("in the rolling transaction the hour at the watermark costs %d (%v), want 0", got, err)
+	}
+
+	// Priced before the jobs run, as a bulk round is, the hour at the
+	// watermark costs what it holds: the aggregator may move the
+	// watermark past it before its chunk commits (spec 047 #24).
+	ahead, err := rollCosts(t.Context(), s.db, project.ID, 0, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := ahead(rollupHour + SecondsPerHour); err != nil || got != 10*(traceRollWeight+1) {
+		t.Errorf("priced ahead, the hour at the watermark costs %d (%v), want its ten traces, %d",
+			got, err, 10*(traceRollWeight+1))
+	}
+
+	// The count stops once the hour is past the budget: with room for
+	// two traces, the third outweighs it and the rest are not read.
+	capped, err := rollCosts(t.Context(), s.db, project.ID, 2*traceRollWeight+traceRollWeight/2, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := capped(rollupHour + SecondsPerHour); err != nil || got != 3*(traceRollWeight+1) {
+		t.Errorf("a capped count is %d (%v), want three traces read, %d", got, err, 3*(traceRollWeight+1))
 	}
 }
