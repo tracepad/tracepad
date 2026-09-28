@@ -56,7 +56,7 @@ describe('the sessions', () => {
 	});
 
 	it('are the whole table in a box as wide as it', () => {
-		boxWidth(672);
+		boxWidth(688);
 		render(SessionTable, { rows: [SESSION] });
 
 		expect(heads()).toHaveLength(6);

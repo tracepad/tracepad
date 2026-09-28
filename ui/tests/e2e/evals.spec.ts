@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { createProject, section, sideways, signIn as enter, state } from './harness';
+import { clipped, createProject, foldsAt, section, sideways, signIn as enter, state } from './harness';
 
 // The Evals screens (spec 016, Testing — e2e), against the real binary. The
 // corpus is not enough here: the suite creates a dataset, its items and a run
@@ -280,11 +280,14 @@ test('the compare page renders header and verdicts, the toggle hides same, swap 
 	await expect(page).toHaveURL(new RegExp(`/runs/${RUN_B}/compare/${RUN_A}`));
 });
 
-test('two ticked runs of one dataset make Compare a link', async ({ page }) => {
+test('two ticked runs of one dataset make Compare a link', async ({ page }, testInfo) => {
 	await signIn(page);
 	await page.goto('/runs');
 	// The dataset is a column on a desktop and a link under the name on a
 	// phone (spec 006 #22): a link either way.
+	if (testInfo.project.name !== 'mobile') {
+		await expect(page.getByRole('columnheader', { name: 'Dataset' })).toBeVisible();
+	}
 	await expect(page.getByRole('link', { name: DATASET }).first()).toBeVisible();
 	await expect(page.getByRole('link', { name: 'Compare' })).toHaveCount(0);
 
@@ -510,5 +513,26 @@ test('on a phone the eval listings fold rather than scroll', async ({ page }, te
 		await expect(table.locator('tbody tr').first()).toBeVisible();
 		await expect(table.locator('thead th'), path).toHaveText([...heads]);
 		expect(await sideways(table), path).toBeLessThanOrEqual(0);
+		expect(await clipped(table), path).toEqual([]);
+	}
+});
+
+// Spec 006 #22: on a desktop each table has all its columns from its own
+// width — the runs' 896 px, the runs of one dataset's 720, the datasets' 880
+// and so on — and folds under it, however the window got that size.
+test('the eval tables fold at their own widths on a desktop', async ({ page }, testInfo) => {
+	test.skip(testInfo.project.name === 'mobile', 'a desktop window is the test');
+	await signIn(page);
+	for (const [path, table, box, columns] of [
+		['/datasets', page.locator('main table').first(), 880, 6],
+		[`/datasets/${DATASET}`, page.locator('main table').first(), 672, 5],
+		[`/datasets/${DATASET}?tab=runs`, page.locator('main table').first(), 720, 6],
+		['/runs', page.locator('main table').first(), 896, 7],
+		[`/runs/${RUN_A}`, page.getByRole('table', { name: 'Items' }), 672, 4],
+		['/score-configs', page.locator('main table').first(), 912, 6]
+	] as const) {
+		await page.goto(path);
+		await expect(table.locator('tbody tr').first(), path).toBeVisible();
+		await foldsAt(page, table, box, columns);
 	}
 });

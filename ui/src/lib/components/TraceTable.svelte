@@ -71,7 +71,11 @@
 
 	// A trace with a failing observation says so in words as well as in colour
 	// (accessibility floor): colour alone is not a message.
-	const cell = 'truncate px-3 py-1.5';
+	// `max-w-0` bounds a cell at the width its column is given, whatever it holds:
+	// without it a UUID for a user and another for a session widen the table far
+	// past its `min-width` (spec 006 #22). The `min-w` beside it is the least the
+	// column is worth reading at.
+	const cell = 'max-w-0 truncate px-3 py-1.5';
 	const numeric = 'px-3 py-1.5 text-right tabular-nums';
 	// Each id on a folded line is cut on its own, so a long user id cannot push
 	// the session past the edge, and on a finger it is a 24 px target rather
@@ -83,13 +87,13 @@
      is the second tabbable thing in the row, and deliberately so: "everything
      this account did" is a destination, not a decoration. The row's own click
      still opens the panel, which is why the link stops the event. -->
-{#snippet user(row: TraceRow, fold = false)}
+{#snippet user(row: TraceRow, stacked = false)}
 	{#if row.user_id}
 		<a
 			href={href(`/users/${encodeURIComponent(row.user_id)}`)}
 			onclick={(event) => event.stopPropagation()}
 			title="Everything about {row.user_id}"
-			class={['hover:text-fg hover:underline', fold && foldedLink]}
+			class={['hover:text-fg hover:underline', stacked && foldedLink]}
 		>
 			{row.user_id}
 		</a>
@@ -104,7 +108,7 @@
      the reader is already in that session, and the cell stays the text it was
      (#17). Both stay on a folded row: the panel's own meta leaves the session
      out below `md`, and a destination a phone cannot reach is not one there. -->
-{#snippet session(row: TraceRow, fold = false)}
+{#snippet session(row: TraceRow, stacked = false)}
 	{#if !row.session_id}
 		{ABSENT}
 	{:else if linkSession}
@@ -112,19 +116,19 @@
 			href={href(`/sessions/${encodeURIComponent(row.session_id)}`)}
 			onclick={(event) => event.stopPropagation()}
 			title="Everything in {row.session_id}"
-			class={['hover:text-fg hover:underline', fold && foldedLink]}
+			class={['hover:text-fg hover:underline', stacked && foldedLink]}
 		>
 			{row.session_id}
 		</a>
 	{:else}
-		<span class={[fold && foldedLink]}>{row.session_id}</span>
+		<span class={[stacked && foldedLink]}>{row.session_id}</span>
 	{/if}
 {/snippet}
 
 <!-- The table scrolls inside its own box; the page never scrolls sideways
      (spec 006 #15). In a box narrower than itself it has three columns and
      nothing to scroll to (#18, #22). -->
-<div bind:clientWidth={fold.box} class="min-h-0 flex-1 overflow-auto">
+<div bind:contentRect={fold.rect} class="min-h-0 flex-1 overflow-auto">
 	<table
 		class="w-full border-collapse text-left"
 		style:min-width={fold.min}
@@ -222,10 +226,10 @@
 							{/if}
 						</td>
 					{:else}
-						<td class={cell}>{row.name ?? ABSENT}</td>
-						<td class="text-muted {cell}">{row.environment}</td>
-						<td class="text-muted {cell}">{@render user(row)}</td>
-						<td class="text-muted {cell}">{@render session(row)}</td>
+						<td class={[cell, 'min-w-48']}>{row.name ?? ABSENT}</td>
+						<td class="text-muted {cell} min-w-20">{row.environment}</td>
+						<td class="text-muted {cell} min-w-20">{@render user(row)}</td>
+						<td class="text-muted {cell} min-w-20">{@render session(row)}</td>
 						<td class="text-muted {numeric}">{cost(row.total_cost)}</td>
 						<td class="text-muted {numeric}">{duration(row.latency_ms)}</td>
 						<td class="text-muted {numeric}">{wait(row.ttft_ms)}</td>

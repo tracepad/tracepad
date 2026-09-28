@@ -30,7 +30,7 @@
 
 <!-- The table scrolls inside its own box; the page never scrolls sideways
      (spec 006 #15), and folds in a box narrower than itself (#22). -->
-<div bind:clientWidth={fold.box} class="min-h-0 flex-1 overflow-auto">
+<div bind:contentRect={fold.rect} class="min-h-0 flex-1 overflow-auto">
 	<table class="w-full border-collapse text-left" style:min-width={fold.min}>
 		<thead class="bg-canvas text-subtle sticky top-0 z-10 text-xs whitespace-nowrap">
 			<tr class="border-border border-b">
@@ -50,7 +50,7 @@
 		<tbody>
 			{#each rows as row (row.user_id)}
 				<tr class="border-border hover:bg-raised border-b transition-colors duration-100">
-					<td class={['px-3 py-1.5', narrow && 'max-w-0']}>
+					<td class={['max-w-0 px-3 py-1.5', !narrow && 'min-w-48']}>
 						<div class="flex min-w-0 items-center gap-1 font-mono">
 							<!-- Cut in the middle, not at the end: two ids that share a
 							     long prefix are told apart by their tails, and the whole

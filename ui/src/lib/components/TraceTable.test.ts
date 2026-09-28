@@ -1,4 +1,5 @@
 import { render, screen, within } from '@testing-library/svelte';
+import { tick } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TraceRow } from '$lib/api/client.svelte';
 import TraceTable from './TraceTable.svelte';
@@ -50,7 +51,7 @@ describe('the trace table', () => {
 			'TTFT',
 			'Errors'
 		]);
-		expect(screen.getByRole('table')).toHaveStyle({ minWidth: '896px' });
+		expect(screen.getByRole('table')).toHaveStyle({ minWidth: '56rem' });
 		expect(screen.getByRole('link', { name: 'user-1137' })).toBeInTheDocument();
 	});
 
@@ -117,6 +118,31 @@ describe('the trace table by its box', () => {
 		render(TraceTable, { rows: [ROW] });
 
 		expect(heads()).toHaveLength(9);
-		expect(screen.getByRole('table')).toHaveStyle({ minWidth: '896px' });
+		expect(screen.getByRole('table')).toHaveStyle({ minWidth: '56rem' });
+	});
+
+	// The table's columns are rem, so its width is: a reader whose default is
+	// 20 px has a table 1,120 px wide, and a 1,000 px box folds it.
+	it('folds at the table\'s width in rem, for a reader with a larger default size', () => {
+		document.documentElement.style.fontSize = '20px';
+		boxWidth(1000);
+		render(TraceTable, { rows: [ROW] });
+
+		expect(heads()).toEqual(['Time', 'Name', 'Errors']);
+		document.documentElement.style.fontSize = '';
+	});
+
+	it('folds and unfolds as its box is resized after it is on the screen', async () => {
+		boxWidth(1200);
+		render(TraceTable, { rows: [ROW] });
+		expect(heads()).toHaveLength(9);
+
+		boxWidth(600);
+		await tick();
+		expect(heads()).toEqual(['Time', 'Name', 'Errors']);
+
+		boxWidth(1200);
+		await tick();
+		expect(heads()).toHaveLength(9);
 	});
 });

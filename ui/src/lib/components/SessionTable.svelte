@@ -40,13 +40,13 @@
 	// session and whether any of it failed; how many traces, what they cost
 	// and when it began fold under the id (spec 006 #22). The number is the
 	// unfolded table's width and its `min-width`.
-	const fold = new Fold(672);
+	const fold = new Fold(688);
 	const narrow = $derived(fold.narrow);
 </script>
 
 <!-- The table scrolls inside its own box; the page never scrolls sideways
      (spec 006 #15), and folds in a box narrower than itself (#22). -->
-<div bind:clientWidth={fold.box} class="min-h-0 flex-1 overflow-auto">
+<div bind:contentRect={fold.rect} class="min-h-0 flex-1 overflow-auto">
 	<table class="w-full border-collapse text-left" style:min-width={fold.min}>
 		<thead class="bg-canvas text-subtle sticky top-0 z-10 text-xs whitespace-nowrap">
 			<tr class="border-border border-b">
@@ -101,7 +101,7 @@
 							</div>
 						</td>
 					{:else}
-						<td class="truncate px-3 py-1.5 font-mono">{row.id}</td>
+						<td class="max-w-0 min-w-48 truncate px-3 py-1.5 font-mono" title={row.id}>{row.id}</td>
 						<td class="text-muted {numeric}">{count(row.trace_count)}</td>
 					{/if}
 					<td class="px-3 py-1.5 whitespace-nowrap">

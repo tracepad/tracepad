@@ -105,7 +105,7 @@
 			Reading the accounts
 		</p>
 	{:else}
-		<div bind:clientWidth={fold.box} class="border-border overflow-x-auto rounded-md border">
+		<div bind:contentRect={fold.rect} class="border-border overflow-x-auto rounded-md border">
 			<table
 				class="w-full border-collapse text-left"
 				style:min-width={fold.min}

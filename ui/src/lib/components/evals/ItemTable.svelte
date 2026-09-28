@@ -48,7 +48,7 @@
 	const narrow = $derived(fold.narrow);
 </script>
 
-<div bind:clientWidth={fold.box} class="min-h-0 flex-1 overflow-auto">
+<div bind:contentRect={fold.rect} class="min-h-0 flex-1 overflow-auto">
 	<table class="w-full table-fixed border-collapse text-left" style:min-width={fold.min}>
 		<thead class="bg-canvas text-subtle sticky top-0 z-10 text-xs whitespace-nowrap">
 			<tr class="border-border border-b">
@@ -87,13 +87,14 @@
 						</a>
 					</td>
 					{#if narrow}
+						{@const expected = preview(row.expected_output)}
 						<td class="px-3 py-1.5 text-xs">
 							<div class="text-muted truncate font-mono" title={preview(row.input, 400)}>
 								{preview(row.input)}
 							</div>
-							{#if preview(row.expected_output)}
+							{#if expected}
 								<div class="text-subtle truncate font-mono" title={preview(row.expected_output, 400)}>
-									→ {preview(row.expected_output)}
+									→ {expected}
 								</div>
 							{/if}
 							<div class="text-muted tabular-nums">

@@ -41,7 +41,7 @@
 
 	let creating = $state(false);
 
-	const cell = 'truncate px-3 py-1.5';
+	const cell = 'max-w-0 truncate px-3 py-1.5';
 	const numeric = 'px-3 py-1.5 text-right tabular-nums';
 
 	// In a box narrower than the table a row is the dataset's name, and what
@@ -68,7 +68,7 @@
 
 <ListingShell {listing} noun="dataset" back="first">
 	{#snippet table()}
-		<div bind:clientWidth={fold.box} class="min-h-0 flex-1 overflow-auto">
+		<div bind:contentRect={fold.rect} class="min-h-0 flex-1 overflow-auto">
 			<table class="w-full border-collapse text-left" style:min-width={fold.min}>
 				<thead class="bg-canvas text-subtle sticky top-0 z-10 text-xs whitespace-nowrap">
 					<tr class="border-border border-b">
@@ -85,7 +85,7 @@
 				<tbody>
 					{#each listing.rows as row (row.name)}
 						<tr class="border-border hover:bg-raised border-b transition-colors duration-100">
-							<td class={[cell, 'font-medium', narrow && 'max-w-0']}>
+							<td class={[cell, 'font-medium']} title={row.name}>
 								<a href={href(`/datasets/${encodeURIComponent(row.name)}`)} class="hover:text-accent">
 									{row.name}
 								</a>
@@ -106,7 +106,7 @@
 								{/if}
 							</td>
 							{#if !narrow}
-								<td class="text-muted {cell}">{row.description ?? '—'}</td>
+								<td class="text-muted {cell} min-w-40" title={row.description ?? undefined}>{row.description ?? '—'}</td>
 								<td class="text-muted {numeric}">v{row.version}</td>
 								<td class="text-muted {numeric}">{count(row.item_count)}</td>
 								<td class="text-muted {numeric}">{count(row.run_count)}</td>

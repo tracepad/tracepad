@@ -951,7 +951,7 @@ and the session, still links, beneath, and a session's traces read
 an account's *Edit* and *Delete* stack beside it. A listing folds on a desktop
 too wherever its box is narrower than the whole table — a narrow window or a
 tablet beside the sidebar, or a session's traces inside the peek panel —
-because the width it answers to is its box's, not the screen's. A screen's own header keeps its 48 px as
+because the width it answers to is its box's, not the screen's, and in rem, so a larger default font size folds it earlier. A long id or name is cut to its column, with the whole of it on hover, rather than widening the table past the width it folds at. A screen's own header keeps its 48 px as
 a floor rather than a height: at a phone's width, what it carries beside the
 title — a breadcrumb, an identifier, a count — takes a second line under it,
 and the screen's controls stay on the first one. Wider than that it is the

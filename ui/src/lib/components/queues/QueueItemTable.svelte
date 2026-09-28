@@ -62,7 +62,7 @@
 	const narrow = $derived(fold.narrow);
 </script>
 
-<div bind:clientWidth={fold.box} class="min-h-0 flex-1 overflow-auto">
+<div bind:contentRect={fold.rect} class="min-h-0 flex-1 overflow-auto">
 	<table
 		class="w-full table-fixed border-collapse text-left"
 		style:min-width={fold.min}

@@ -25,7 +25,7 @@
 	);
 </script>
 
-<div class={['flex gap-2', stacked ? 'flex-col items-start gap-1' : 'items-center']} {title}>
+<div class={['flex', stacked ? 'flex-col items-start gap-1' : 'items-center gap-2']} {title}>
 	<div
 		class={[
 			'bg-raised h-1.5 overflow-hidden rounded-full',

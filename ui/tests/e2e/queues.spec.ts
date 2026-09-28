@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
-import { createProject, sideways, signIn as enter, state, WIRE_TRACE } from './harness';
+import { clipped, createProject, foldsAt, sideways, signIn as enter, state, WIRE_TRACE } from './harness';
 
 // The annotation loop end to end (spec 024, Testing — e2e), against the real
 // binary: declare a queue, fill it by hand and by filter, work it at the desk,
@@ -107,13 +107,18 @@ test('a queue is declared over the two configs, and starts empty', async ({ page
 	await expect(page.getByText('This queue is empty')).toBeVisible();
 
 	// On a phone the listing is the queue's name and its progress, the scores
-	// it asks for folded under the name, and it fits its box (spec 006 #22).
-	if (test.info().project.name !== 'mobile') return;
+	// it asks for folded under the name, and it fits its box (spec 006 #22);
+	// on a desktop it has its four columns from 752 px, and no fewer.
 	await page.goto('/queues');
 	const table = page.locator('main table');
+	if (test.info().project.name !== 'mobile') {
+		await foldsAt(page, table, 752, 4);
+		return;
+	}
 	await expect(table.locator('thead th')).toHaveText(['Name', 'Progress']);
 	await expect(page.getByRole('row').filter({ hasText: QUEUE })).toContainText('accuracy');
 	expect(await sideways(table)).toBeLessThanOrEqual(0);
+	expect(await clipped(table)).toEqual([]);
 });
 
 test('one trace goes in by hand and the rest by filter', async ({ page }) => {

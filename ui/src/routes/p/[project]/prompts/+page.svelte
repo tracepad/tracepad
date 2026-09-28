@@ -35,7 +35,7 @@
 	const publish = 'tracepad prompts push support --file prompt.json --label production';
 	const fetch = 'tracepad.prompt("support", label="production")';
 
-	const cell = 'truncate px-3 py-1.5';
+	const cell = 'max-w-0 truncate px-3 py-1.5';
 
 	// In a box narrower than the table a row is the prompt's name and its
 	// labels — which version is live is what a reader here is after — and the
@@ -62,7 +62,7 @@
 
 <ListingShell {listing} noun="prompt" back="first">
 	{#snippet table()}
-		<div bind:clientWidth={fold.box} class="min-h-0 flex-1 overflow-auto">
+		<div bind:contentRect={fold.rect} class="min-h-0 flex-1 overflow-auto">
 			<table class="w-full border-collapse text-left" style:min-width={fold.min}>
 				<thead class="bg-canvas text-subtle sticky top-0 z-10 text-xs whitespace-nowrap">
 					<tr class="border-border border-b">
@@ -80,7 +80,7 @@
 				<tbody>
 					{#each listing.rows as row (row.name)}
 						<tr class="border-border hover:bg-raised border-b transition-colors duration-100">
-							<td class={[cell, 'font-medium', narrow && 'max-w-0']}>
+							<td class={[cell, 'font-medium']} title={row.name}>
 								<a href={href(`/prompts/${encodeURIComponent(row.name)}`)} class="hover:text-accent">
 									{row.name}
 								</a>

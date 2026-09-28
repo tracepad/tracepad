@@ -48,13 +48,13 @@
 		ticked = on ? [...ticked, run.id] : ticked.filter((id) => id !== run.id);
 	}
 
-	const cell = 'truncate px-3 py-1.5';
+	const cell = 'max-w-0 truncate px-3 py-1.5';
 
 	// In a box narrower than the table the row is its tick, its name and how it
 	// stands; the dataset, the version and when it ran fold under the name
 	// (spec 006 #22). The number is the unfolded table's width and its
 	// `min-width`.
-	const fold = new Fold(880);
+	const fold = new Fold(() => (withDataset ? 896 : 720));
 	const narrow = $derived(fold.narrow);
 </script>
 
@@ -84,7 +84,7 @@
 
 <!-- The table scrolls inside its own box; the page never scrolls sideways
      (spec 006 #15), and folds in a box narrower than itself (#22). -->
-<div bind:clientWidth={fold.box} class="min-h-0 flex-1 overflow-auto">
+<div bind:contentRect={fold.rect} class="min-h-0 flex-1 overflow-auto">
 	<table class="w-full border-collapse text-left" style:min-width={fold.min}>
 		<thead class="bg-canvas text-subtle sticky top-0 z-10 text-xs whitespace-nowrap">
 			<tr class="border-border border-b">
@@ -92,7 +92,7 @@
 				{#if !narrow}
 					<th scope="col" class="w-44 px-3 py-2 font-medium">Created</th>
 					{#if withDataset}
-						<th scope="col" class="w-44 px-3 py-2 font-medium">Dataset</th>
+						<th scope="col" class="w-56 px-3 py-2 font-medium">Dataset</th>
 					{/if}
 				{/if}
 				<th scope="col" class={['px-3 py-2 font-medium', narrow && 'w-full']}>Name</th>
@@ -158,13 +158,13 @@
 							</a>
 						</td>
 						{#if withDataset}
-							<td class="text-muted {cell}">
+							<td class="text-muted {cell} min-w-24" title={row.dataset}>
 								<a href={href(`/datasets/${encodeURIComponent(row.dataset)}`)} class="hover:text-fg">
 									{row.dataset}
 								</a>
 							</td>
 						{/if}
-						<td class={cell}>
+						<td class={[cell, 'min-w-48']} title={row.name ?? row.id}>
 							<a href={href(`/runs/${row.id}`)} class="hover:text-accent">{row.name ?? short(row.id)}</a>
 						</td>
 						<td class="text-muted px-3 py-1.5 text-right tabular-nums">v{row.dataset_version}</td>

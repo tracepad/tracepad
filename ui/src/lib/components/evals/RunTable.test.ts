@@ -77,9 +77,22 @@ describe('in a narrow box', () => {
 	});
 
 	it('keeps every column in a box as wide as the table', () => {
-		boxWidth(880);
+		boxWidth(896);
 		render(RunTable, { rows: [a], withDataset: true } as never);
 
 		expect(screen.getAllByRole('columnheader')).toHaveLength(7);
+	});
+
+	// The runs of one dataset have no Dataset column, so their table is narrower
+	// and keeps its columns in a narrower box.
+	it('folds at 720 px without the Dataset column, not at 896', () => {
+		boxWidth(720);
+		const { unmount } = render(RunTable, { rows: [a] } as never);
+		expect(screen.getAllByRole('columnheader')).toHaveLength(6);
+		unmount();
+
+		boxWidth(719);
+		render(RunTable, { rows: [a] } as never);
+		expect(screen.getAllByRole('columnheader')).toHaveLength(3);
 	});
 });

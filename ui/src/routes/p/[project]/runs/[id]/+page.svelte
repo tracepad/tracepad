@@ -359,7 +359,7 @@
 
 		<ListingShell {listing} noun="item" back="first">
 			{#snippet table()}
-				<div bind:clientWidth={fold.box} class="min-h-0 shrink-0 overflow-x-auto">
+				<div bind:contentRect={fold.rect} class="min-h-0 shrink-0 overflow-x-auto">
 					<table
 						aria-label="Items"
 						class="w-full table-fixed border-collapse text-left"
@@ -406,7 +406,9 @@
 										</a>
 										{#if row.unknown}<span class="text-warn ml-1">unknown</span>{/if}
 										{#if narrow}
-											<div class="text-muted font-sans tabular-nums">
+											<!-- The cell is `truncate`, which is `nowrap` too: a line meant
+											     to wrap between its values says so again. -->
+											<div class="text-muted font-sans whitespace-normal tabular-nums">
 												<Folded
 													values={[
 														row.seq == null ? null : `#${row.seq}`,

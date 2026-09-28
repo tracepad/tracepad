@@ -71,7 +71,7 @@
 		'tracepad score-configs push accuracy --file accuracy.json\n' +
 		'# accuracy.json: {"data_type": "numeric", "direction": "higher", "min": 0, "max": 1}';
 
-	const cell = 'truncate px-3 py-1.5';
+	const cell = 'max-w-0 truncate px-3 py-1.5';
 
 	// In a box narrower than the table a row is the config's name and its two
 	// verbs, stacked; its type, direction, what it admits and its description
@@ -126,7 +126,7 @@
 		{failure}
 	</p>
 {:else if configs && configs.length > 0}
-	<div bind:clientWidth={fold.box} class="min-h-0 flex-1 overflow-auto">
+	<div bind:contentRect={fold.rect} class="min-h-0 flex-1 overflow-auto">
 		<table class="w-full border-collapse text-left" style:min-width={fold.min}>
 			<thead class="bg-canvas text-subtle sticky top-0 z-10 text-xs whitespace-nowrap">
 				<tr class="border-border border-b">
@@ -156,11 +156,11 @@
 								{/if}
 							</td>
 						{:else}
-							<td class="{cell} font-medium">{config.name}</td>
+							<td class="{cell} font-medium" title={config.name}>{config.name}</td>
 							<td class="text-muted {cell}">{config.data_type}</td>
 							<td class="text-muted {cell}">{config.direction ?? '—'}</td>
 							<td class="text-muted {cell} tabular-nums" title={admits(config)}>{admits(config)}</td>
-							<td class="text-muted {cell}">{config.description ?? '—'}</td>
+							<td class="text-muted {cell} min-w-40" title={config.description ?? undefined}>{config.description ?? '—'}</td>
 						{/if}
 						<td class="px-3 py-1.5">
 							<div class={['flex justify-end gap-1.5', narrow && 'flex-col items-stretch']}>

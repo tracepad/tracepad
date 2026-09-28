@@ -50,13 +50,13 @@
 		'# score the trace, then: tracepad queues complete weekly-review <item> --annotator ada'
 	].join('\n');
 
-	const cell = 'truncate px-3 py-1.5';
+	const cell = 'max-w-0 truncate px-3 py-1.5';
 
 	// In a box narrower than the table a row is the queue's name and how far
 	// along it is; the description and the scores it asks for fold under the
 	// name (spec 006 #22). The number is the unfolded table's width and its
 	// `min-width`.
-	const fold = new Fold(736);
+	const fold = new Fold(752);
 	const narrow = $derived(fold.narrow);
 </script>
 
@@ -89,7 +89,7 @@
 		{failure}
 	</p>
 {:else if queues && queues.length > 0}
-	<div bind:clientWidth={fold.box} class="min-h-0 flex-1 overflow-auto">
+	<div bind:contentRect={fold.rect} class="min-h-0 flex-1 overflow-auto">
 		<table class="w-full border-collapse text-left" style:min-width={fold.min}>
 			<thead class="bg-canvas text-subtle sticky top-0 z-10 text-xs whitespace-nowrap">
 				<tr class="border-border border-b">
@@ -124,17 +124,18 @@
 								</div>
 							</td>
 						{:else}
-							<td class="{cell} font-medium">
+							<td class="{cell} font-medium" title={queue.name}>
 								<a href={href(`/queues/${encodeURIComponent(queue.name)}`)} class="hover:text-accent">
 									{queue.name}
 								</a>
 							</td>
-							<td class="text-muted {cell}">{queue.description || '—'}</td>
-							<td class="px-3 py-1.5">
+							<td class="text-muted {cell} min-w-40" title={queue.description}>{queue.description || '—'}</td>
+							<td class="max-w-0 px-3 py-1.5">
 								<div class="flex flex-wrap gap-1">
 									{#each queue.score_configs as name (name)}
 										<span
-											class="border-border bg-surface text-muted rounded-md border px-1.5 py-0.5 text-xs"
+											class="border-border bg-surface text-muted max-w-full truncate rounded-md border px-1.5 py-0.5 text-xs"
+											title={name}
 										>
 											{name}
 										</span>
