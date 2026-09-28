@@ -7,14 +7,7 @@
 	import { untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import {
-		ApiError,
-		api,
-		type DryRun,
-		type Erasure,
-		type Stats,
-		type User
-	} from '$lib/api/client.svelte';
+	import { ApiError, api, type DryRun, type Stats, type User } from '$lib/api/client.svelte';
 	import { presetRange, readBucket, readRange, type Range } from '$lib/api/range';
 	import { breakdown, buildSeries, type StatsBucket } from '$lib/api/stats';
 	import { readTab, USER_TABS, userPageSearch } from '$lib/api/users';
@@ -28,14 +21,7 @@
 	import { rememberedRange, rememberRange } from '$lib/range.svelte';
 	import UserSessionsTab from '$lib/components/users/UserSessionsTab.svelte';
 	import UserTracesTab from '$lib/components/users/UserTracesTab.svelte';
-	import {
-		ERASE_WAIT_SECONDS,
-		ErasureWatch,
-		describe,
-		ended,
-		settle,
-		unanswered
-	} from '$lib/erasure.svelte';
+	import { ErasureWatch, confirmErasure, describe, ended } from '$lib/erasure.svelte';
 	import { cost, count, duration, middleEllipsis, timestamp } from '$lib/format';
 	import { href, project } from '$lib/project.svelte';
 
@@ -235,40 +221,33 @@
 		}
 	}
 
+	/** The user the dialog's erasure was answered for, while the page was theirs. */
+	let answeredFor = '';
+
 	async function erase(confirm?: string): Promise<DryRun | string> {
-		const current = project.id;
+		const current = projectID;
 		if (!current) throw new ApiError(0, 'there is no project on screen to erase from');
-		let answer: DryRun | Erasure;
-		try {
-			answer = await api.eraseUserData(
-				current,
-				id,
-				confirm,
-				confirm === undefined ? undefined : ERASE_WAIT_SECONDS
-			);
-		} catch (cause) {
-			// Accepted or not, this page follows it if it runs (spec 047 #27).
-			// One that ended already names no one (#9): the user's data is
-			// read again, and is gone if it did (#29).
-			const sentence =
-				confirm === undefined
-					? null
-					: unanswered(
-							cause,
-							id,
-							"this page shows it while it runs, or the user's data gone once it has ended"
-						);
-			if (sentence === null) throw cause;
-			const who = id;
-			void findRunning(current, who).then((found) => {
-				if (!found && onScreen(current, who)) reread++;
-			});
-			throw new ApiError(0, sentence);
-		}
-		if (answer.dry_run) return answer as DryRun;
-		// Still running on the server: the page stays, and says how far it
-		// is, rather than leaving as if the user were gone.
-		return settle(current, id, answer as Erasure, watch);
+		const who = id;
+		if (confirm === undefined) return (await api.eraseUserData(current, who)) as DryRun;
+		// Accepted or not, this page follows it if it runs (spec 047 #27).
+		// One that ended already names no one (#9): the user's data is read
+		// again, and is gone if it did (#29). Still running on the server,
+		// the page stays and says how far it is, rather than leaving as if
+		// the user were gone; and an answer that comes back to another
+		// user's page is not that page's (#31).
+		return confirmErasure({
+			project: current,
+			user: who,
+			confirm,
+			watch,
+			where: "this page shows it while it runs, or the user's data gone once it has ended",
+			still: () => onScreen(current, who),
+			lost: () =>
+				void findRunning(current, who).then((found) => {
+					if (!found && onScreen(current, who)) reread++;
+				}),
+			answered: () => (answeredFor = who)
+		});
 	}
 
 	const tabClass = (active: boolean) =>
@@ -315,7 +294,8 @@
 			preview={() => erase()}
 			execute={(confirm) => erase(confirm) as Promise<string>}
 			ondone={() => {
-				if (!watch.running) goto(href('/users'));
+				// Not from another user's page the erasure's answer came back to.
+				if (!watch.running && answeredFor === id) goto(href('/users'));
 			}}
 		/>
 	</div>

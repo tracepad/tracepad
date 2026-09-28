@@ -731,13 +731,21 @@ func (r *run) users(ctx context.Context, args []string) error {
 // erasuresCommand is the command that lists the project's erasures: the flags
 // the operator gave — the project and the server it went to, never the key —
 // each quoted for a shell where it needs it.
-func erasuresCommand(fs *flag.FlagSet) string {
-	words := []string{"tracepad", "users", "erasures"}
+func erasuresCommand(fs *flag.FlagSet) string { return usersCommand(fs, "erasures") }
+
+// usersCommand is a `users` subcommand to run next, with the --project and
+// --url the operator gave and before its arguments, where the flag parser
+// reads them (spec 047 #31).
+func usersCommand(fs *flag.FlagSet, sub string, args ...string) string {
+	words := []string{"tracepad", "users", sub}
 	fs.Visit(func(f *flag.Flag) {
 		if f.Name == "project" || f.Name == "url" {
 			words = append(words, "--"+f.Name, shellWord(f.Value.String()))
 		}
 	})
+	for _, arg := range args {
+		words = append(words, shellWord(arg))
+	}
 	return strings.Join(words, " ")
 }
 

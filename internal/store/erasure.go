@@ -739,6 +739,9 @@ func (s *Store) runErasure(ctx context.Context, writer jobSubmitter, id string, 
 		}
 		return run, fmt.Errorf("the tail: %w", err)
 	}
+	if err := submitErasureJob(ctx, writer, &erasureStep{ID: e.ID, TailDone: true}); err != nil {
+		return run, err
+	}
 	run.timed(phaseTail, mark)
 	return run, s.endErasure(ctx, writer, e, failed, phaseParsed, run, began)
 }

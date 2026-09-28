@@ -728,8 +728,38 @@ func TestRemoveDataWatchesTheErasureToItsEnd(t *testing.T) {
 	out = h.run(t.Context(), true, "users", "rm-data", "--url", server.URL, "--project", "p", "--yes",
 		"--no-wait", "u1")
 	if out.code != ExitOK || reads.Load() != 0 ||
-		out.stdout != "erasure 4f0c9d3e8a1b2c3d4e5f60718293a4b5 queued; tracepad users erasure 4f0c9d3e8a1b2c3d4e5f60718293a4b5\n" {
+		out.stdout != "erasure 4f0c9d3e8a1b2c3d4e5f60718293a4b5 queued; tracepad users erasure --project p --url "+
+			server.URL+" 4f0c9d3e8a1b2c3d4e5f60718293a4b5\n" {
 		t.Errorf("--no-wait exited %d after %d reads: %q", out.code, reads.Load(), out.stdout)
+	}
+}
+
+// A watch the server refuses ends with the command that shows the erasure
+// later, for the same project on the same server (spec 047 #31).
+func TestAWatchThatEndsSaysHowToLookAgain(t *testing.T) {
+	defer func(poll time.Duration) { erasurePoll = poll }(erasurePoll)
+	erasurePoll = time.Millisecond
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodDelete && r.URL.Query().Get("confirm") == "":
+			_, _ = w.Write([]byte(`{"dry_run":true,"would_delete":{"traces":3},"confirm":"u1"}`))
+		case r.Method == http.MethodDelete:
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte(`{"id":"4f0c9d3e8a1b2c3d4e5f60718293a4b5","state":"queued","phase":null,` +
+				`"progress":{"traces_at_start":null,"traces_deleted":0},"deleted":{}}`))
+		default:
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"error":"this key may not read erasures"}`))
+		}
+	}))
+	t.Cleanup(server.Close)
+	h := newAdminCLI(t)
+	out := h.run(t.Context(), true, "users", "rm-data", "--url", server.URL, "--project", "p", "--yes", "u1")
+	want := "the erasure goes on on the server: tracepad users erasure --project p --url " + server.URL +
+		" 4f0c9d3e8a1b2c3d4e5f60718293a4b5"
+	if out.code != ExitFailure || !strings.Contains(out.stderr, want) {
+		t.Errorf("a refused watch exited %d: %s\nwant %s", out.code, out.stderr, want)
 	}
 }
 
@@ -821,5 +851,10 @@ func TestTheRetryHintRepeatsTheProjectAndQuotes(t *testing.T) {
 	}
 	if bare := erasuresCommand(flag.NewFlagSet("x", flag.ContinueOnError)); bare != "tracepad users erasures" {
 		t.Errorf("hint without flags = %s", bare)
+	}
+	// The hint for one erasure carries them too, before its id (#31).
+	if one := usersCommand(fs, "erasure", "4f0c"); one !=
+		`tracepad users erasure --project 'shop eu' --url https://t.example:4318 4f0c` {
+		t.Errorf("hint for one erasure = %s", one)
 	}
 }

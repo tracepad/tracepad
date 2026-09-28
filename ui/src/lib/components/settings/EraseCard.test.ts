@@ -69,6 +69,30 @@ describe('the erase card', () => {
 		expect(erasures).toHaveBeenLastCalledWith('p2');
 	});
 
+	it("leaves an answer alone that came back after the card's project changed", async () => {
+		const user = userEvent.setup();
+		let answer: (value: unknown) => void = () => {};
+		eraseUserData.mockImplementationOnce(async (_project, who) => ({
+			dry_run: true,
+			would_delete: { traces: 1 },
+			confirm: who
+		}));
+		eraseUserData.mockImplementationOnce(
+			() => new Promise((resolve) => (answer = resolve)) as never
+		);
+		const { rerender } = render(EraseCard, { current: { id: 'p1', name: 'checkout' } } as never);
+		await user.type(screen.getByLabelText('User id'), 'user-4711');
+		await user.click(screen.getByRole('button', { name: 'Show what would go' }));
+		await user.type(await screen.findByRole('textbox', { name: /Type the user id/ }), 'user-4711');
+		await user.click(screen.getByRole('button', { name: "Erase this user's data" }));
+
+		await rerender({ current: { id: 'p2', name: 'search' } } as never);
+		answer(RUNNING);
+
+		expect(await screen.findByText(/runs on the server\.$/)).toBeInTheDocument();
+		expect(screen.queryByTestId('erasure-progress')).toBeNull();
+	});
+
 	it('keeps following it when its project is read again', async () => {
 		const { rerender } = await startErasure();
 

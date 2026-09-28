@@ -1,4 +1,4 @@
-import { api, ApiError, type Erasure } from '$lib/api/client.svelte';
+import { api, ApiError, type DryRun, type Erasure } from '$lib/api/client.svelte';
 import { count } from '$lib/format';
 
 // A user-data erasure (spec 044) is a task on the server (spec 047 #6): the
@@ -126,14 +126,21 @@ export class ErasureWatch {
 		const followed = this.current;
 		if (followed === null) return;
 		this.#reading = new AbortController();
+		const signal = this.#reading.signal;
 		try {
-			this.current = await api.erasure(this.#project, followed.id, this.#reading.signal);
+			const read = await api.erasure(this.#project, followed.id, signal);
+			// Stopped, or following another, while the answer was on its way
+			// (#31): the answer is the old one's.
+			if (signal.aborted) return;
+			this.current = read;
 		} catch (cause) {
-			if (cause instanceof DOMException && cause.name === 'AbortError') return;
-			// Gone — its project purged, or its record removed — is the end
-			// of following it, and of saying it runs (#27). Anything else is
-			// tried again on the next tick: the erasure goes on either way.
-			if (cause instanceof ApiError && cause.status === 404) {
+			if (signal.aborted || (cause instanceof DOMException && cause.name === 'AbortError')) return;
+			// Gone — its project purged, or its record removed — or refused,
+			// its role taken away, is the end of following it, and of saying
+			// it runs (#27, #31): the server would answer the same again.
+			// Anything else — no answer, a 5xx — is tried again on the next
+			// tick: the erasure goes on either way.
+			if (cause instanceof ApiError && cause.status >= 400 && cause.status < 500) {
 				this.current = null;
 				return;
 			}
@@ -151,13 +158,55 @@ export function settle(
 	project: string,
 	user: string,
 	erasure: Erasure,
-	watch: ErasureWatch
+	watch: ErasureWatch | null
 ): string {
-	watch.follow(project, erasure);
+	watch?.follow(project, erasure);
 	if (erasure.state === 'failed') throw new ApiError(0, describe(erasure, user));
 	if (erasure.state === 'done') return erased(user, erasure.deleted);
+	if (watch === null) return `The erasure of ${user}'s data runs on the server.`;
 	return (
 		`The erasure of ${user}'s data runs on the server; this dialog follows it, and closing it ` +
 		'stops nothing.'
 	);
+}
+
+/** One confirmed erasure as a screen asks for it (#18, #27, #31). */
+export interface Confirmation {
+	project: string;
+	user: string;
+	confirm: string;
+	watch: ErasureWatch;
+	/** Where the erasure of a lost answer can be seen, for its sentence. */
+	where: string;
+	/**
+	 * Whether the screen is still about this user of this project: the wait
+	 * is twenty seconds, and a page is reused for the next user's id.
+	 */
+	still: () => boolean;
+	/** What the screen does after an answer that was lost, while still. */
+	lost?: () => void;
+	/** What the screen does with the answer, while still, before it follows it. */
+	answered?: (erasure: Erasure) => void;
+}
+
+/**
+ * The confirmed request of both erase dialogs: asked with the dialog's wait,
+ * a lost answer said as one, and the answer followed only by a screen still
+ * about it — one that moved on is told the sentence and follows nothing, so
+ * it never names its own user with another's erasure (#31).
+ */
+export async function confirmErasure(c: Confirmation): Promise<string> {
+	let answer: DryRun | Erasure;
+	try {
+		answer = await api.eraseUserData(c.project, c.user, c.confirm, ERASE_WAIT_SECONDS);
+	} catch (cause) {
+		const sentence = unanswered(cause, c.user, c.where);
+		if (sentence === null) throw cause;
+		if (c.still()) c.lost?.();
+		throw new ApiError(0, sentence);
+	}
+	const erasure = answer as Erasure;
+	if (!c.still()) return settle(c.project, c.user, erasure, null);
+	c.answered?.(erasure);
+	return settle(c.project, c.user, erasure, c.watch);
 }

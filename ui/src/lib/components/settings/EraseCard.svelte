@@ -1,14 +1,12 @@
 <script lang="ts">
-	import { ApiError, api, type DryRun, type Erasure, type Project } from '$lib/api/client.svelte';
+	import { api, type DryRun, type Erasure, type Project } from '$lib/api/client.svelte';
 	import {
-		ERASE_WAIT_SECONDS,
 		ERASURE_POLL_MS,
 		ErasureWatch,
+		confirmErasure,
 		describe,
 		ended,
-		settle,
-		stage,
-		unanswered
+		stage
 	} from '$lib/erasure.svelte';
 	import { count, relative } from '$lib/format';
 	import ConfirmCard from '../ConfirmCard.svelte';
@@ -44,30 +42,24 @@
 
 	async function erase(confirm?: string): Promise<DryRun | string> {
 		const user = target;
-		let answer: DryRun | Erasure;
-		try {
-			answer = await api.eraseUserData(
-				current.id,
-				user,
-				confirm,
-				confirm === undefined ? undefined : ERASE_WAIT_SECONDS
-			);
-		} catch (cause) {
-			// Accepted or not, the listing below says (spec 047 #27).
-			const sentence =
-				confirm === undefined ? null : unanswered(cause, user, 'the list below shows whether it did');
-			if (sentence === null) throw cause;
-			void list();
-			throw new ApiError(0, sentence);
-		}
-		if (answer.dry_run) return answer as DryRun;
-		erasing = user;
-		following = !ended(answer as Erasure);
-		try {
-			return settle(current.id, user, answer as Erasure, watch);
-		} finally {
-			void list();
-		}
+		const project = projectID;
+		if (confirm === undefined) return (await api.eraseUserData(project, user)) as DryRun;
+		// Accepted or not, the listing below says (spec 047 #27); an answer
+		// that comes back to another project's card is not this card's (#31).
+		return confirmErasure({
+			project,
+			user,
+			confirm,
+			watch,
+			where: 'the list below shows whether it did',
+			still: () => project === projectID,
+			lost: () => void list(),
+			answered: (erasure) => {
+				erasing = user;
+				following = !ended(erasure);
+				void list();
+			}
+		});
 	}
 
 	async function list() {

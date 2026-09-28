@@ -3,6 +3,7 @@ import type { Erasure } from './api/client.svelte';
 import {
 	ERASURE_POLL_MS,
 	ErasureWatch,
+	confirmErasure,
 	describe as say,
 	erased,
 	settle,
@@ -15,6 +16,7 @@ import { ApiError } from './api/client.svelte';
 // while it runs on the server (spec 047 #18).
 
 const getErasure = vi.fn();
+const eraseUserData = vi.fn();
 
 vi.mock('./api/client.svelte', () => ({
 	ApiError: class ApiError extends Error {
@@ -26,7 +28,10 @@ vi.mock('./api/client.svelte', () => ({
 			super(message);
 		}
 	},
-	api: { erasure: (...args: unknown[]) => getErasure(...args) }
+	api: {
+		erasure: (...args: unknown[]) => getErasure(...args),
+		eraseUserData: (...args: unknown[]) => eraseUserData(...args)
+	}
 }));
 
 function erasure(overrides: Partial<Erasure> = {}): Erasure {
@@ -47,7 +52,10 @@ function erasure(overrides: Partial<Erasure> = {}): Erasure {
 	} as Erasure;
 }
 
-beforeEach(() => getErasure.mockReset());
+beforeEach(() => {
+	getErasure.mockReset();
+	eraseUserData.mockReset();
+});
 afterEach(() => vi.useRealTimers());
 
 describe('the erasure sentence', () => {
@@ -207,5 +215,85 @@ describe('a screen that moves to another user', () => {
 		expect(watch.running).toBe(false);
 		await vi.advanceTimersByTimeAsync(5 * ERASURE_POLL_MS);
 		expect(getErasure).not.toHaveBeenCalled();
+	});
+});
+
+describe('an answer that comes back late', () => {
+	it('is not taken for the erasure the watch follows now', async () => {
+		vi.useFakeTimers();
+		const watch = new ErasureWatch();
+		let answer: (value: Erasure) => void = () => {};
+		getErasure.mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)));
+		watch.follow('p', erasure({ id: 'a'.repeat(32) }));
+		await vi.advanceTimersByTimeAsync(ERASURE_POLL_MS);
+		watch.follow('p', erasure({ id: 'b'.repeat(32) }));
+		answer(erasure({ id: 'a'.repeat(32), phase: 'tail' }));
+		await vi.advanceTimersByTimeAsync(0);
+		expect(watch.current?.id).toBe('b'.repeat(32));
+		getErasure.mockResolvedValue(erasure({ id: 'b'.repeat(32) }));
+		await vi.advanceTimersByTimeAsync(ERASURE_POLL_MS);
+		// One read of the one it follows: no second loop.
+		expect(getErasure).toHaveBeenCalledTimes(2);
+	});
+
+	it('stops being followed once the server refuses to show it', async () => {
+		vi.useFakeTimers();
+		const watch = new ErasureWatch();
+		watch.follow('p', erasure());
+		getErasure.mockRejectedValueOnce(new ApiError(403, 'this role may not read erasures'));
+		await vi.advanceTimersByTimeAsync(ERASURE_POLL_MS);
+		expect(watch.running).toBe(false);
+		await vi.advanceTimersByTimeAsync(5 * ERASURE_POLL_MS);
+		expect(getErasure).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe('the confirmed request', () => {
+	const ask = (still: boolean, watch: ErasureWatch) => {
+		const lost = vi.fn();
+		const answered = vi.fn();
+		const said = confirmErasure({
+			project: 'p',
+			user: 'u',
+			confirm: 'u',
+			watch,
+			where: 'look',
+			still: () => still,
+			lost,
+			answered
+		});
+		return { said, lost, answered };
+	};
+
+	it('is followed by the screen it was asked from', async () => {
+		vi.useFakeTimers();
+		eraseUserData.mockResolvedValueOnce(erasure({ state: 'queued', phase: null }));
+		const watch = new ErasureWatch();
+		const { said, answered } = ask(true, watch);
+		await expect(said).resolves.toMatch(/this dialog follows it/);
+		expect(answered).toHaveBeenCalledOnce();
+		expect(watch.running).toBe(true);
+		expect(eraseUserData).toHaveBeenCalledWith('p', 'u', 'u', 20);
+		watch.stop();
+	});
+
+	it('is said, and followed by no one, on a screen that moved on', async () => {
+		eraseUserData.mockResolvedValueOnce(erasure({ state: 'queued', phase: null }));
+		const watch = new ErasureWatch();
+		const { said, answered } = ask(false, watch);
+		await expect(said).resolves.toBe("The erasure of u's data runs on the server.");
+		expect(answered).not.toHaveBeenCalled();
+		expect(watch.current).toBeNull();
+	});
+
+	it('that got no answer is looked for only by a screen still about it', async () => {
+		const timedOut = new ApiError(0, 'the server did not answer in time', { timed_out: true });
+		eraseUserData.mockRejectedValue(timedOut);
+		const here = ask(true, new ErasureWatch());
+		await expect(here.said).rejects.toThrow(/may have accepted the erasure; look\./);
+		expect(here.lost).toHaveBeenCalledOnce();
+		const gone = ask(false, new ErasureWatch());
+		await expect(gone.said).rejects.toThrow(/may have accepted/);
+		expect(gone.lost).not.toHaveBeenCalled();
 	});
 });

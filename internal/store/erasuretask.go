@@ -337,12 +337,16 @@ const pauseTime = time.Second
 // count, which a resume does not overwrite, the move to the tail after a
 // chunk failed, with the failure the erasure will end with (#16), and what a
 // tail that failed said, which the erasure ends with only if it gives up
-// (#29).
+// (#29). TailDone is a tail that ran to its end: its windows are scrubbed and
+// go, and so does what an earlier one failed with, so an end that is not
+// written leaves a give-up nothing to call dropped and nothing stale to say
+// (#31).
 type erasureStep struct {
 	ID            string
 	TracesAtStart *int64
 	Phase, Error  string
 	TailFailure   string
+	TailDone      bool
 }
 
 func (j *erasureStep) apply(tx *sql.Tx) error {
@@ -350,10 +354,17 @@ func (j *erasureStep) apply(tx *sql.Tx) error {
 	if j.TracesAtStart != nil {
 		counted = *j.TracesAtStart
 	}
-	_, err := tx.Exec(`UPDATE erasures SET traces_at_start = COALESCE(traces_at_start, ?),
+	result, err := tx.Exec(`UPDATE erasures SET traces_at_start = COALESCE(traces_at_start, ?),
 		phase = COALESCE(NULLIF(?, ''), phase), error = COALESCE(error, NULLIF(?, '')),
-		last_failure = COALESCE(NULLIF(?, ''), last_failure)
-		WHERE id = ? AND state = ?`, counted, j.Phase, j.Error, j.TailFailure, j.ID, ErasureRunning)
+		last_failure = CASE WHEN ? THEN NULL ELSE COALESCE(NULLIF(?, ''), last_failure) END
+		WHERE id = ? AND state = ?`, counted, j.Phase, j.Error, j.TailDone, j.TailFailure, j.ID, ErasureRunning)
+	if err != nil || !j.TailDone {
+		return err
+	}
+	if n, err := result.RowsAffected(); err != nil || n == 0 {
+		return err
+	}
+	_, err = tx.Exec(`DELETE FROM erasure_tail WHERE erasure_id = ?`, j.ID)
 	return err
 }
 

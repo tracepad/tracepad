@@ -186,6 +186,15 @@
 		</Button>
 	{:else}
 		<div class="border-border bg-surface mt-3 rounded-md border p-3">
+			<!-- A user-data erasure's dry run says when one of that user is under
+			     way, before the counts it is shrinking (spec 047 #13, #31). -->
+			{#if showing.running}
+				<p class="text-warn mb-1.5 text-sm" data-testid="erasure-running">
+					An erasure of this user is under way — {showing.running.phase ?? showing.running.state},
+					<code class="font-mono">{showing.running.id.slice(0, 8)}</code>. The counts below shrink
+					as it goes, and confirming follows it rather than starting another.
+				</p>
+			{/if}
 			<p class="text-subtle text-xs font-medium">This would delete</p>
 			{#if nothing}
 				<p class="text-muted mt-1 text-sm">Nothing — there is no data to remove.</p>

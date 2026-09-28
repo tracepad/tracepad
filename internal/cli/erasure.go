@@ -125,12 +125,12 @@ func (r *run) usersRemoveData(ctx context.Context, rest []string) error {
 		if r.wantJSON() {
 			return r.emit(body)
 		}
-		fmt.Fprintf(r.opt.Stdout, "erasure %s %s; tracepad users erasure %s\n",
-			termsafe.String(erasure.ID), termsafe.String(erasure.State), termsafe.String(erasure.ID))
+		fmt.Fprintf(r.opt.Stdout, "erasure %s %s; %s\n", termsafe.String(erasure.ID),
+			termsafe.String(erasure.State), termsafe.String(usersCommand(fs, "erasure", erasure.ID)))
 		return nil
 	}
 	if !erasure.ended() {
-		if body, err = r.watchErasure(ctx, id, erasure); err != nil {
+		if body, err = r.watchErasure(ctx, id, erasure, usersCommand(fs, "erasure", erasure.ID)); err != nil {
 			return err
 		}
 		if erasure, err = decode[erasureView](body); err != nil {
@@ -154,8 +154,9 @@ func (r *run) usersRemoveData(ctx context.Context, rest []string) error {
 }
 
 // watchErasure reads a running erasure until it ends, saying on stderr where
-// it is each time that changes.
-func (r *run) watchErasure(ctx context.Context, projectID string, erasure erasureView) (json.RawMessage, error) {
+// it is each time that changes; look is the command that shows it later.
+func (r *run) watchErasure(ctx context.Context, projectID string, erasure erasureView,
+	look string) (json.RawMessage, error) {
 	said := ""
 	for {
 		if stage := erasure.progress(); stage != said {
@@ -164,8 +165,7 @@ func (r *run) watchErasure(ctx context.Context, projectID string, erasure erasur
 		}
 		select {
 		case <-ctx.Done():
-			return nil, fmt.Errorf("stopped watching; the erasure goes on on the server: tracepad users erasure %s",
-				erasure.ID)
+			return nil, fmt.Errorf("stopped watching; the erasure goes on on the server: %s", look)
 		case <-time.After(erasurePoll):
 		}
 		body, err := r.api.Get(ctx, erasurePath(projectID, erasure.ID), nil)
@@ -177,7 +177,7 @@ func (r *run) watchErasure(ctx context.Context, projectID string, erasure erasur
 			if transient(err) && ctx.Err() == nil {
 				continue
 			}
-			return nil, fmt.Errorf("%w; the erasure goes on on the server: tracepad users erasure %s", err, erasure.ID)
+			return nil, fmt.Errorf("%w; the erasure goes on on the server: %s", err, look)
 		}
 		if erasure, err = decode[erasureView](body); err != nil {
 			return nil, err

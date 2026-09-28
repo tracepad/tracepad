@@ -738,3 +738,56 @@ func TestAFailedErasureDoesNotHoldUpTheQueue(t *testing.T) {
 			got.attempts, err)
 	}
 }
+
+// A last start whose tail ran to its end and whose end was not written leaves
+// the give-up nothing to call dropped and nothing stale to say (#31): the
+// windows were scrubbed, and an earlier tail's failure is not this one's.
+func TestAGiveUpAfterATailThatRanDropsNothing(t *testing.T) {
+	f := newErasureFixture(t)
+	f.ingestOTLP(t, export([]*tracepb.Span{otlpSpan(t, 1, 1, "user-a", "", "a", nil)}), false, daysAgo(1))
+	e := f.startErasure(t, "user-a")
+	var late int64
+	_, err := f.store.runErasure(t.Context(), f.writer, e.ID, EraserOptions{after: func(step int) error {
+		switch step {
+		case 1:
+			late = f.ingestOTLP(t, export([]*tracepb.Span{otlpSpan(t, 1, 9, "user-a", "", "late", nil)}), false, 0)
+		case 3:
+			return errors.New("the process died")
+		}
+		return nil
+	}})
+	if err == nil {
+		t.Fatal("the run did not stop after its chunks")
+	}
+	for _, job := range []WriteJob{&erasureStep{ID: e.ID, TailFailure: "an older tail failed"},
+		&erasureBegin{ID: e.ID}, &erasureBegin{ID: e.ID}} {
+		if err := f.writer.Submit(t.Context(), job); err != nil {
+			t.Fatal(err)
+		}
+	}
+	noEnd := &failingJobs{jobSubmitter: f.writer, err: errors.New("the disk is broken"),
+		fails: func(job WriteJob) bool { _, end := job.(*erasureEnd); return end }}
+	if _, err := f.store.runErasure(t.Context(), noEnd, e.ID, EraserOptions{}); err == nil {
+		t.Fatal("the last start's end was written")
+	}
+	if spans := f.rawSpans(t, late); len(spans) != 0 {
+		t.Fatalf("the last start's tail left %v", spans)
+	}
+	var logged bytes.Buffer
+	old := logger
+	logger = func() *slog.Logger { return slog.New(slog.NewTextHandler(&logged, nil)) }
+	t.Cleanup(func() { logger = old })
+	if _, err := f.store.runErasure(t.Context(), f.writer, e.ID, EraserOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := f.store.Erasure(t.Context(), f.project.ID, e.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.State != ErasureFailed || got.Error != capSentence {
+		t.Errorf("the erasure ended %s with %q, want failed with %q alone", got.State, got.Error, capSentence)
+	}
+	if !strings.Contains(logged.String(), "tail_windows_dropped=0") {
+		t.Errorf("the give-up logs %q, want no windows dropped", logged.String())
+	}
+}
