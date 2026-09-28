@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { createProject, signIn as enter, state } from './harness';
+import { createProject, section, signIn as enter, state } from './harness';
 
 // The Evals screens (spec 016, Testing — e2e), against the real binary. The
 // corpus is not enough here: the suite creates a dataset, its items and a run
@@ -162,12 +162,13 @@ test.beforeEach(async () => {
 
 test('the section appears and navigates', async ({ page }) => {
 	await signIn(page);
-	const nav = page.getByRole('navigation', { name: 'Sections' });
-	await expect(nav.getByText('Evals')).toBeVisible();
-	await nav.getByRole('link', { name: 'Datasets' }).click();
+	const datasets = await section(page, 'Datasets');
+	await expect(page.getByText('Evals', { exact: true })).toBeVisible();
+	await datasets.click();
 
 	await expect(page).toHaveURL(/\/datasets$/);
-	await expect(nav.getByRole('link', { name: 'Datasets' })).toHaveAttribute('aria-current', 'page');
+	await expect(await section(page, 'Datasets')).toHaveAttribute('aria-current', 'page');
+	await page.keyboard.press('Escape');
 	await page.getByRole('link', { name: DATASET }).click();
 	await expect(page).toHaveURL(new RegExp(`/datasets/${DATASET}$`));
 	await expect(page.getByRole('heading', { name: DATASET })).toBeVisible();

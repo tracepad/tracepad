@@ -4,6 +4,7 @@ import {
 	createProject,
 	fromOwnAddress,
 	inviteNobody,
+	section,
 	signIn,
 	signInAsOwner,
 	state,
@@ -348,7 +349,7 @@ test('a project made elsewhere is a way in too', async ({ page }) => {
 	// Made after the sign-in, and reached without a reload: the sidebar, the
 	// tab — every step a navigation inside the shell.
 	const other = await createProject('outofband');
-	await page.getByRole('link', { name: 'Settings' }).click();
+	await (await section(page, 'Settings')).click();
 	await page.getByRole('tab', { name: 'Server' }).click();
 	await expect(page).toHaveURL(new RegExp(`/p/${own.id}/settings/server$`));
 

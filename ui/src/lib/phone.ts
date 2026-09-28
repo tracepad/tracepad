@@ -1,7 +1,7 @@
 import { ABSENT } from './format';
 
 /**
- * Below `md` — the width at which the sidebar becomes a top bar — a listing
+ * Below `md` — the width at which the sidebar becomes a tab bar — a listing
  * keeps the columns that say which row it is and whether it went wrong, and
  * folds the rest into lines under the row (spec 006 #18). Written the way
  * Tailwind writes `max-md`, so the two partition the width with no gap

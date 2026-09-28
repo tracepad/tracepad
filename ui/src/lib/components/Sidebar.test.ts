@@ -1,5 +1,6 @@
-import { render, screen } from '@testing-library/svelte';
-import { describe, expect, it, vi } from 'vitest';
+import { render, screen, within } from '@testing-library/svelte';
+import userEvent from '@testing-library/user-event';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import Sidebar from './Sidebar.svelte';
 
 // The sidebar's first section (spec 016 #1): a labelled group whose label is
@@ -33,6 +34,16 @@ vi.mock('$lib/auth.svelte', () => ({
 	LOGIN_ROUTE: '/login'
 }));
 vi.mock('$lib/session', () => ({ end: vi.fn() }));
+
+// The desktop column unless a test asks for a phone: the one media query
+// answers for the width and for reduced motion alike, so a phone's sheet
+// also opens without a transition.
+let narrow = false;
+beforeEach(() => {
+	narrow = false;
+	window.matchMedia = (query: string) =>
+		({ matches: narrow, media: query, addEventListener() {}, removeEventListener() {} }) as never;
+});
 
 describe('the Evals section', () => {
 	it('renders the group with its five children as links and the label as text', () => {
@@ -127,5 +138,75 @@ describe('the project', () => {
 		render(Sidebar);
 
 		expect(screen.getByRole('button', { name: 'Switch project' })).toHaveTextContent('demo');
+	});
+});
+
+// Spec 006 #20: on a phone the four screens a page at night opens are tabs
+// under the thumb, and *More* holds the rest in a sheet. *More* keeps its name
+// and is lit while one of its screens is on show; the sheet lights the screen.
+describe('on a phone', () => {
+	// The body lock a closed sheet leaves behind for 24ms is jsdom's to
+	// measure, not the reader's (see `tests/setup.ts`).
+	const person = () => userEvent.setup({ pointerEventsCheck: 0 });
+	const tabs = () =>
+		within(screen.getByRole('navigation', { name: 'Sections' }))
+			.getAllByRole('link')
+			.map((link) => link.textContent?.trim());
+
+	it('has four tabs and More, and nothing else until More opens', () => {
+		narrow = true;
+		url.current = new URL(`http://tracepad.test/p/${PROJECT}/traces`);
+		render(Sidebar);
+
+		expect(tabs()).toEqual(['Dashboard', 'Traces', 'Sessions', 'Users']);
+		expect(screen.getByRole('link', { name: 'Traces' })).toHaveAttribute('aria-current', 'page');
+		const more = screen.getByRole('button', { name: 'More' });
+		expect(more).not.toHaveAttribute('aria-current');
+		expect(screen.queryByRole('link', { name: 'Prompts' })).not.toBeInTheDocument();
+		expect(screen.getByRole('button', { name: 'Switch project' })).toHaveTextContent('demo');
+	});
+
+	it('lights More, still named More, on a screen it holds, and the screen in the sheet', async () => {
+		narrow = true;
+		url.current = new URL(`http://tracepad.test/p/${PROJECT}/runs/abc`);
+		render(Sidebar);
+
+		const more = screen.getByRole('button', { name: 'More' });
+		expect(more).toHaveAttribute('aria-current', 'true');
+		expect(more).toHaveTextContent('More');
+		expect(screen.queryAllByRole('link', { current: 'page' })).toHaveLength(0);
+
+		await person().click(more);
+		const sheet = screen.getByRole('navigation', { name: 'More sections' });
+		const names = within(sheet)
+			.getAllByRole('link')
+			.map((link) => link.textContent?.trim());
+		expect(names).toEqual([
+			'Prompts',
+			'Datasets',
+			'Runs',
+			'Score configs',
+			'Queues',
+			'Quality',
+			'Settings'
+		]);
+		expect(within(sheet).getByText('Evals')).toBeInTheDocument();
+		const runs = within(sheet).getByRole('link', { name: 'Runs' });
+		expect(runs).toHaveAttribute('aria-current', 'page');
+		expect(runs).toHaveAttribute('href', `/p/${PROJECT}/runs`);
+	});
+
+	it('closes the sheet on Escape and hands focus back to More', async () => {
+		narrow = true;
+		url.current = new URL(`http://tracepad.test/p/${PROJECT}/traces`);
+		render(Sidebar);
+
+		const more = screen.getByRole('button', { name: 'More' });
+		await person().click(more);
+		expect(screen.getByRole('dialog', { name: 'More' })).toBeInTheDocument();
+		await person().keyboard('{Escape}');
+
+		expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+		expect(more).toHaveFocus();
 	});
 });

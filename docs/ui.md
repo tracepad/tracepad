@@ -931,7 +931,11 @@ Everything the page needs is inside the binary — fonts included. The
 interface makes **no request to any external origin**, which an air-gapped
 install depends on and which the end-to-end suite asserts.
 
-The layout is usable on a phone: the sidebar becomes a two-row top bar, the
+The layout is usable on a phone. The sidebar becomes a slim bar on top —
+the product, the project and the account — and a tab bar at the bottom with
+*Dashboard*, *Traces*, *Sessions*, *Users* and *More*; *More* opens a sheet
+with every other section, and lights up while one of them is on screen. The
+sheet closes on Escape, a tap outside it or a swipe down from its grip. The
 filters live in a popover, tables scroll inside their own box rather than
 scrolling the page, and the trace screen switches between the tree and the
 observation instead of showing both. The trace listing, a queue's items and
