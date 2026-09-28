@@ -758,10 +758,11 @@ func (e *UserDataErase) apply(tx *sql.Tx) error {
 func (e *UserDataErase) erase(tx *sql.Tx) error {
 	e.Counts, e.CompactionRequested, e.IDs, e.Ingested, e.Updated = DeleteCounts{}, 0, nil, nil, nil
 	// The echo is the user id here, not a project name: it is the identity
-	// of what is being destroyed (spec 005 #8).
+	// of what is being destroyed (spec 005 #8). The request's refusal names
+	// it to whoever sent it (StartErasure); a chunk's, on the erasure's own
+	// path, does not (spec 047 #32).
 	if e.Confirm != e.UserID {
-		return &Rejection{Kind: RejectInvalid, Message: fmt.Sprintf(
-			"confirm must be the user id being erased, %q, to erase their data", e.UserID)}
+		return &Rejection{Kind: RejectInvalid, Message: "a chunk's confirm is not the user id it erases"}
 	}
 	project, err := projectByID(tx, e.ProjectID)
 	if err != nil {

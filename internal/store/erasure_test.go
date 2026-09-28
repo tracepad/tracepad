@@ -357,11 +357,11 @@ func TestConcurrentScrubsOfOneBatch(t *testing.T) {
 	c := map[string]bool{hexTrace(3): true}
 
 	// The first computes its body, then the second lands first.
-	early, err := f.store.planScrub(t.Context(), f.project.ID, batch, a)
+	early, err := f.store.planScrub(t.Context(), &Erasure{ProjectID: f.project.ID}, batch, a)
 	if err != nil || early == nil {
 		t.Fatalf("plan: %v, %v", early, err)
 	}
-	if err := f.store.scrubBatches(t.Context(), f.writer, f.project.ID, []int64{batch}, c, ""); err != nil {
+	if err := f.store.scrubBatches(t.Context(), f.writer, &Erasure{ProjectID: f.project.ID}, []int64{batch}, c); err != nil {
 		t.Fatal(err)
 	}
 	err = f.writer.Submit(t.Context(), early.job)
@@ -370,7 +370,7 @@ func TestConcurrentScrubsOfOneBatch(t *testing.T) {
 		t.Fatalf("a body computed before the other rewrite was not refused: %v", err)
 	}
 	// Refused, it recomputes from what is there now.
-	if err := f.store.scrubBatches(t.Context(), f.writer, f.project.ID, []int64{batch}, a, ""); err != nil {
+	if err := f.store.scrubBatches(t.Context(), f.writer, &Erasure{ProjectID: f.project.ID}, []int64{batch}, a); err != nil {
 		t.Fatal(err)
 	}
 	if got := f.rawSpans(t, batch); !slices.Equal(got, []string{"span-2-1"}) {
@@ -703,8 +703,10 @@ func TestAStoppedErasureResumesFromItsPhase(t *testing.T) {
 		if writer.chunks < 2 {
 			t.Fatalf("%d chunks: the erasure needs one to succeed before the one that fails", writer.chunks)
 		}
-		if got := f.erasureOf(t, "user-a"); got.State != ErasureFailed || got.Error != broken.Error() {
-			t.Fatalf("the erasure is %s (%q), want failed with the chunk's error", got.State, got.Error)
+		// The record says the phase and a cause, not the error's text (#32).
+		if got := f.erasureOf(t, "user-a"); got.State != ErasureFailed ||
+			got.Error != "the parsed phase failed: an unexpected error, whose type the server's log has" {
+			t.Fatalf("the erasure is %s (%q), want failed in its parsed phase", got.State, got.Error)
 		}
 		spans := f.rawSpans(t, late)
 		for trace := 1; trace <= 3; trace++ {

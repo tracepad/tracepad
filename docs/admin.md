@@ -411,8 +411,16 @@ another.
   or running. When it ends, the id is cleared in the same statement, and
   from then on `user_id` is `null` everywhere but in the answer to the request
   that started it. The record itself goes 30 days after the end.
-- `error` — why a `failed` erasure failed, in a sentence that never names the
-  user.
+- `error` — why a `failed` erasure failed: the phase and a cause from a fixed
+  list, such as `the parsed phase failed: the disk is full`. An erasure that
+  ran out of starts says `3 starts ended before the erasure did`, followed by
+  `; its tail last failed with: ` and a cause when a tail failed. The record
+  never carries an error's own text, so it cannot name the user. Nor does the
+  erasure's log: its lines never carry an error's text, only its cause, type
+  and position — the erasure's id, the phase, the raw batch when it is one's,
+  the Go types of the error (`types=*json.SyntaxError`) and SQLite's code
+  (`sqlite=13`) when there is one. That is what there is to go on; there is
+  no setting that gives the text.
 
 `GET /api/v1/projects/{id}/erasures/{erasure_id}` reads one erasure, and
 `GET /api/v1/projects/{id}/erasures` the project's hundred, those under way

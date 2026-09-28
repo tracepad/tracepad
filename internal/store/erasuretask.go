@@ -6,9 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -623,7 +623,7 @@ func (er *Eraser) Start() {
 			case err != nil:
 				// Nothing was started: a request that wakes the
 				// worker may find the database answering again (#29).
-				logger().Error("could not read the next erasure", "err", err)
+				logFacts(slog.LevelError, "could not read the next erasure", err)
 			case id != "":
 				_, err := er.store.runErasure(ctx, er.writer, id, er.opts)
 				if ctx.Err() != nil {
@@ -638,7 +638,7 @@ func (er *Eraser) Start() {
 				// nor at once: taken first each time, it would spend a
 				// start on the same failure and hold every erasure
 				// behind it (#28, #30).
-				logger().Error("an erasure stopped before it ended", "erasure", id, "err", err)
+				logRun(id, err)
 				resting[id] = time.Now().Add(er.opts.poll())
 				continue
 			}
@@ -750,17 +750,204 @@ func stopped(ctx context.Context, err error) bool {
 // errRunStopped is a run the test seam stopped, as a stop of the server would.
 var errRunStopped = errors.New("the erasure's run was stopped")
 
-// failureSentence is the error an erasure ends with, never naming the user it
-// erased (#9, #27): an error that carries the id — as it is, or quoted the
-// way a refusal quotes the echo it was given — is kept as the phase it
-// failed in and nothing more. Editing the id out would miss a form it was
-// escaped into, and a short id would take unrelated words with it.
-func failureSentence(err error, userID, phase string) string {
-	sentence := err.Error()
-	quoted := strconv.Quote(userID)
-	if userID != "" && (strings.Contains(sentence, userID) ||
-		strings.Contains(sentence, quoted[1:len(quoted)-1])) {
-		return fmt.Sprintf("a job of the %s phase failed with an error that named the user, which is not kept", phase)
-	}
-	return sentence
+// The causes an erasure's record gives for a failure, a fixed list (#32): the
+// record keeps what an operator acts on and nothing an error's text happened
+// to carry, whatever form a user id took in it. The server's log gives the
+// error's types and code beside its cause, and no text either (#33).
+//
+// A stop of the server is not among them: a run the stop ended records no
+// failure, and resumes. Nor is a deadline: nothing on the path has one.
+const (
+	causeQueue    = "the write queue stayed full"
+	causeFull     = "the disk is full"
+	causeBusy     = "the database is busy"
+	causeIO       = "the disk could not be read or written"
+	causeMemory   = "the server ran out of memory"
+	causeOpen     = "the database file could not be opened"
+	causeReadOnly = "the database is read-only"
+	causeDamaged  = "the database file is damaged"
+	causeRawBatch = "a raw batch could not be rewritten"
+	causeOther    = "an unexpected error, whose type the server's log has"
+)
+
+// sqliteCauses are SQLite's primary codes as causes: the conditions (spec
+// 043 #2), and two failures that do not pass but an operator acts on.
+var sqliteCauses = map[int]string{
+	sqliteFull:     causeFull,
+	sqliteBusy:     causeBusy,
+	sqliteLocked:   causeBusy,
+	sqliteIOErr:    causeIO,
+	sqliteNoMem:    causeMemory,
+	sqliteCantOpen: causeOpen,
+	sqliteReadOnly: causeReadOnly,
+	sqliteCorrupt:  causeDamaged,
+	sqliteNotADB:   causeDamaged,
 }
+
+// errRawBatch marks a scrub of a raw batch that failed after its retries, or
+// a batch that could not be read to plan it.
+var errRawBatch = errors.New(causeRawBatch)
+
+// rawBatchError is a failure of one raw batch's scrub: the batch, and what
+// went wrong with it. It is errRawBatch to errors.Is, and reads as what it
+// is, not as a sentence with a number after it (#33).
+type rawBatchError struct {
+	id  int64
+	err error
+}
+
+func (e *rawBatchError) Error() string        { return fmt.Sprintf("raw batch %d: %v", e.id, e.err) }
+func (e *rawBatchError) Unwrap() error        { return e.err }
+func (e *rawBatchError) Is(target error) bool { return target == errRawBatch }
+
+// failureCause is the cause the record gives for err, from the list above.
+func failureCause(err error) string {
+	if code, ok := sqliteCode(err); ok && sqliteCauses[code] != "" {
+		return sqliteCauses[code]
+	}
+	switch {
+	case errors.Is(err, ErrWriterBusy):
+		return causeQueue
+	case errors.Is(err, errRawBatch):
+		return causeRawBatch
+	}
+	return causeOther
+}
+
+// failureSentence is the error an erasure ends with: the phase that failed and
+// its cause, never the error's own text (#9, #32).
+func failureSentence(cause, phase string) string {
+	return fmt.Sprintf("the %s phase failed: %s", phase, cause)
+}
+
+// reportFailure logs an erasure's failure where it was met, once (#33): what
+// failed, in what phase, and the facts of the failure — never its text.
+// Every line of the store's that gives an erasure's failure goes through here
+// or through failureFacts.
+func (e *Erasure) reportFailure(message, phase string, err error) {
+	// A project purged while its erasure ran is no incident, and its refusal
+	// is routine, as the writer has always logged one. Another refusal is
+	// not: a scrub that gave up on its conflicts ends the erasure failed.
+	level := slog.LevelError
+	if purged(err) {
+		level = slog.LevelInfo
+	}
+	logFacts(level, message, err, "erasure", e.ID, "phase", phase)
+}
+
+// logFacts is a line about a failure that gives its facts, and never its text
+// (#33): what the caller says of where, then the cause, the types, the code.
+// Every line the store writes about an erasure's failure is one.
+func logFacts(level slog.Level, message string, err error, where ...any) {
+	logger().Log(context.Background(), level, message, append(where, failureFacts(err)...)...)
+}
+
+// failureFacts are what a log line says of a failure of an erasure's (#33):
+// the cause the record gives, the Go types of the error and of what it wraps,
+// SQLite's code when there is one, the kind of a refusal, and the raw batch
+// it was about. Never the error's text, which may quote what it holds — an
+// erasure's user, whatever the form — and which nothing filters: there is no
+// text to filter.
+func failureFacts(err error) []any {
+	facts := []any{"cause", failureCause(err), "types", errorTypes(err)}
+	var coded interface{ Code() int }
+	if errors.As(err, &coded) {
+		facts = append(facts, "sqlite", coded.Code())
+	}
+	var refusal *Rejection
+	if errors.As(err, &refusal) {
+		facts = append(facts, "refusal", refusal.Kind)
+	}
+	var batch *rawBatchError
+	if errors.As(err, &batch) {
+		facts = append(facts, "batch", batch.id)
+	}
+	return facts
+}
+
+// errorTypes names the Go types of err and of what it wraps, breadth first
+// and at most eight: `*json.SyntaxError`, `*store.Rejection`. The plain
+// wrappers are left out, and the store's own, whose content the line gives in
+// its phase and its batch. A type is a name of the code, never a value.
+func errorTypes(err error) string {
+	var names []string
+	queue := []error{err}
+	for len(queue) > 0 && len(names) < 8 {
+		next := queue[0]
+		queue = queue[1:]
+		if next == nil {
+			continue
+		}
+		switch name := fmt.Sprintf("%T", next); name {
+		case "*fmt.wrapError", "*fmt.wrapErrors", "*errors.joinError",
+			"*store.runError", "*store.reportedError", "*store.failedJob", "*store.rawBatchError":
+		default:
+			names = append(names, name)
+		}
+		switch wrapped := next.(type) {
+		case interface{ Unwrap() error }:
+			queue = append(queue, wrapped.Unwrap())
+		case interface{ Unwrap() []error }:
+			queue = append(queue, wrapped.Unwrap()...)
+		}
+	}
+	return strings.Join(names, " > ")
+}
+
+// logRun is the worker's line for a run that stopped before its erasure
+// ended: the erasure, the phase it stopped in, and the facts of its failure.
+// One a phase already logged where it met it, a tail's, is not said again.
+func logRun(id string, err error) {
+	var reported *reportedError
+	if errors.As(err, &reported) {
+		return
+	}
+	where := []any{"erasure", id}
+	var run *runError
+	if errors.As(err, &run) {
+		where = append(where, "phase", run.phase)
+	}
+	logFacts(slog.LevelError, "an erasure stopped before it ended", err, where...)
+}
+
+// reportedError is a failure the phase that met it has logged already, for
+// the worker not to say again (#33).
+type reportedError struct{ err error }
+
+func (e *reportedError) Error() string { return e.err.Error() }
+func (e *reportedError) Unwrap() error { return e.err }
+
+// purged reports the refusal of a chunk or a scrub whose project is gone.
+func purged(err error) bool {
+	var rejection *Rejection
+	return errors.As(err, &rejection) && rejection.Kind == RejectNotFound
+}
+
+// runError is a run's failure with the phase it met it in, for the worker's
+// log line, which gives where a run stopped and never what its error said.
+type runError struct {
+	phase string
+	err   error
+}
+
+func (e *runError) Error() string { return e.err.Error() }
+func (e *runError) Unwrap() error { return e.err }
+
+// An erasure's jobs do not have their errors logged by the writer (#33): its
+// "write commit failed" line would give an error's text whole, and a refusal
+// of a chunk quoted the user it erases. The erasure and the writer both say
+// the facts of a failure and never its text, and the writer says only that
+// the write did not commit. A chunk or a scrub of the erasure task is one;
+// the same jobs outside it are not.
+func (j *UserDataErase) failureRedacted() (string, bool) {
+	if j.Erasure == nil {
+		return "", false
+	}
+	return j.Erasure.ID, true
+}
+
+func (j *RawScrub) failureRedacted() (string, bool)     { return j.ErasureID, j.ErasureID != "" }
+func (j *erasureBegin) failureRedacted() (string, bool) { return j.ID, true }
+func (j *erasureStep) failureRedacted() (string, bool)  { return j.ID, true }
+func (j *erasureEnd) failureRedacted() (string, bool)   { return j.ID, true }
+func (j *erasurePause) failureRedacted() (string, bool) { return j.ID, true }

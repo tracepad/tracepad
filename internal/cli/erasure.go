@@ -143,7 +143,7 @@ func (r *run) usersRemoveData(ctx context.Context, rest []string) error {
 				return err
 			}
 		}
-		return fmt.Errorf("the erasure %s failed: %s", erasure.ID, failure(erasure.Error))
+		return fmt.Errorf("the erasure %s could not finish — %s", erasure.ID, failure(erasure.Error))
 	}
 	if r.wantJSON() {
 		return r.emit(body)

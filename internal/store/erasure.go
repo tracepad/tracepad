@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"slices"
 	"strings"
@@ -407,7 +408,8 @@ type scrubPlan struct {
 
 // planScrub reads one batch and computes its scrub: nil when the batch is
 // gone or holds none of the traces, which leaves it untouched and unmarked.
-func (s *Store) planScrub(ctx context.Context, projectID string, id int64, traces map[string]bool) (*scrubPlan, error) {
+func (s *Store) planScrub(ctx context.Context, e *Erasure, id int64, traces map[string]bool) (*scrubPlan, error) {
+	projectID := e.ProjectID
 	var (
 		stored      []byte
 		contentType sql.NullString
@@ -433,8 +435,10 @@ func (s *Store) planScrub(ctx context.Context, projectID string, id int64, trace
 		decoded, err = mapping.DecodeExportBody(body, rawContentType(contentType) == mapping.ContentTypeJSON)
 	}
 	if err != nil {
-		logger().Warn("a raw batch could not be read to scrub it; it is left as it is",
-			"project", projectID, "batch", id, "err", err)
+		// The decoder's words may quote what the batch holds: the line says
+		// what failed and where, not what it said (#33).
+		logFacts(slog.LevelWarn, "a raw batch could not be read to scrub it; it is left as it is", err,
+			"erasure", e.ID, "project", projectID, "batch", id)
 		return nil, nil
 	}
 	held := mapping.TraceSpanCount(decoded.ResourceSpans, traces)
@@ -465,8 +469,8 @@ func (s *Store) planScrub(ctx context.Context, projectID string, id int64, trace
 	// The batch holds the spans, and they must not stay for want of an
 	// encoder: it goes whole, and the answer counts it (#2). The log line
 	// names the batch and never the user (#15).
-	logger().Warn("a raw batch could not be rewritten without the erased spans; deleting it whole",
-		"project", projectID, "batch", id, "err", err)
+	logFacts(slog.LevelWarn, "a raw batch could not be rewritten without the erased spans; deleting it whole", err,
+		"erasure", e.ID, "project", projectID, "batch", id)
 	job.Delete = true
 	return &scrubPlan{job: job, spans: held, fallback: true}, nil
 }
@@ -493,17 +497,17 @@ var busyWait = 2 * time.Minute
 // and decoded here, one writer job is submitted per batch that changes, and a
 // job refused because another rewrite landed first is re-read and recomputed
 // (#4).
-func (s *Store) scrubBatches(ctx context.Context, writer jobSubmitter, projectID string, ids []int64,
-	traces map[string]bool, erasureID string) error {
+func (s *Store) scrubBatches(ctx context.Context, writer jobSubmitter, e *Erasure, ids []int64,
+	traces map[string]bool) error {
 	if len(traces) == 0 {
 		return nil
 	}
 	// Each job adds what it did to the erasure's row as it commits
 	// (spec 047 #12).
 	plan := func(id int64) (*scrubPlan, error) {
-		p, err := s.planScrub(ctx, projectID, id, traces)
+		p, err := s.planScrub(ctx, e, id, traces)
 		if p != nil {
-			p.job.ErasureID, p.job.Spans = erasureID, int64(p.spans)
+			p.job.ErasureID, p.job.Spans = e.ID, int64(p.spans)
 		}
 		return p, err
 	}
@@ -521,7 +525,7 @@ func (s *Store) scrubBatches(ctx context.Context, writer jobSubmitter, projectID
 			ids = ids[1:]
 			p, err := plan(id)
 			if err != nil {
-				return err
+				return &rawBatchError{id: id, err: err}
 			}
 			if p != nil {
 				group, plans = append(group, id), append(plans, p)
@@ -542,7 +546,7 @@ func (s *Store) scrubBatches(ctx context.Context, writer jobSubmitter, projectID
 			err := errs[i]
 			for attempt := 1; conflict(err) && attempt < scrubAttempts; attempt++ {
 				if p, err = plan(group[i]); err != nil {
-					return err
+					return &rawBatchError{id: group[i], err: err}
 				}
 				if p == nil {
 					break
@@ -550,7 +554,7 @@ func (s *Store) scrubBatches(ctx context.Context, writer jobSubmitter, projectID
 				err = submitErasureJob(ctx, writer, p.job)
 			}
 			if err != nil {
-				return err
+				return &rawBatchError{id: group[i], err: err}
 			}
 		}
 	}
@@ -646,12 +650,20 @@ func (s *Store) runErasure(ctx context.Context, writer jobSubmitter, id string, 
 	if err != nil {
 		return run, err
 	}
+	// Where the run is, for the line that says where it stopped (#33): from
+	// the start, which may fail too.
+	where := "start"
+	defer func() {
+		if err != nil {
+			err = &runError{phase: where, err: err}
+		}
+	}()
 	defer func() {
 		if err != nil && ctx.Err() != nil {
 			pause, cancel := context.WithTimeout(context.WithoutCancel(ctx), pauseTime)
 			defer cancel()
 			if perr := writer.Submit(pause, &erasurePause{ID: id, Run: token}); perr != nil {
-				logger().Warn("a stopped erasure's start stays counted", "erasure", id, "err", perr)
+				logFacts(slog.LevelWarn, "a stopped erasure's start stays counted", perr, "erasure", id)
 			}
 		}
 	}()
@@ -682,13 +694,18 @@ func (s *Store) runErasure(ctx context.Context, writer jobSubmitter, id string, 
 	// chunks then scrub the whole window of any trace that changed since.
 	var known map[string]bool
 	if phase == phaseRaw {
+		where = phaseRaw
 		var err error
 		if known, err = s.erasureRaw(ctx, writer, e, after, &run); err != nil {
 			if stopped(ctx, err) {
 				return run, err
 			}
-			// Nothing parsed is gone yet: there is no tail to read.
-			return run, s.endErasure(ctx, writer, e, err, phaseRaw, run, began)
+			// Nothing parsed is gone yet: there is no tail to read. The
+			// error is logged here, where it was met, and not after an end
+			// that may not be written (#33).
+			e.reportFailure("the raw phase of an erasure failed; its failed end is being recorded", phaseRaw, err)
+			where = "end"
+			return run, s.endErasure(ctx, writer, e, failureCause(err), phaseRaw, run, began)
 		}
 		// Step 2 is whole: a stop from here on resumes with the chunks.
 		if err := submitErasureJob(ctx, writer, &erasureStep{ID: e.ID, Phase: phaseParsed}); err != nil {
@@ -701,8 +718,9 @@ func (s *Store) runErasure(ctx context.Context, writer jobSubmitter, id string, 
 		phase = phaseParsed
 	}
 
-	var failed error
+	var failed string
 	if phase == phaseParsed {
+		where = phaseParsed
 		if err := s.erasureParsed(ctx, writer, e, known, opts.Chunk, &run); err != nil {
 			if stopped(ctx, err) {
 				return run, err
@@ -711,8 +729,9 @@ func (s *Store) runErasure(ctx context.Context, writer jobSubmitter, id string, 
 			// chunks before it deleted traces whose late batches a
 			// repeat can no longer find. Step 4 runs on what they
 			// stored, and the failure is the end after it (#16).
-			failed = err
-			step := &erasureStep{ID: e.ID, Phase: phaseTail, Error: failureSentence(err, e.UserID, phaseParsed)}
+			failed = failureCause(err)
+			step := &erasureStep{ID: e.ID, Phase: phaseTail, Error: failureSentence(failed, phaseParsed)}
+			e.reportFailure("the parsed phase of an erasure failed; its tail runs, and it ends failed", phaseParsed, err)
 			if err := submitErasureJob(ctx, writer, step); err != nil {
 				return run, err
 			}
@@ -730,15 +749,21 @@ func (s *Store) runErasure(ctx context.Context, writer jobSubmitter, id string, 
 	// already gone, which nothing else can find again (#28). The erasure
 	// stays running in its tail; the starts it takes are counted, and the
 	// last one still gives up (#27), with what the tail said (#29).
+	where = phaseTail
 	if err := s.erasureTail(ctx, writer, e, &run); err != nil {
-		if !stopped(ctx, err) {
-			said := &erasureStep{ID: e.ID, TailFailure: failureSentence(err, e.UserID, phaseTail)}
-			if serr := submitErasureJob(ctx, writer, said); serr != nil {
-				logger().Warn("a failed tail's error is not recorded", "erasure", e.ID, "err", serr)
-			}
+		if stopped(ctx, err) {
+			return run, err
 		}
-		return run, fmt.Errorf("the tail: %w", err)
+		// Logged here, where it was met; the worker's line says where the
+		// run stopped and the facts of its failure, as this one does (#33).
+		e.reportFailure("the tail of an erasure failed; a later start takes it again", phaseTail, err)
+		said := &erasureStep{ID: e.ID, TailFailure: failureCause(err)}
+		if serr := submitErasureJob(ctx, writer, said); serr != nil {
+			logFacts(slog.LevelWarn, "a failed tail's cause is not recorded", serr, "erasure", e.ID)
+		}
+		return run, &reportedError{err: err}
 	}
+	where = "end"
 	if err := submitErasureJob(ctx, writer, &erasureStep{ID: e.ID, TailDone: true}); err != nil {
 		return run, err
 	}
@@ -776,7 +801,7 @@ func (s *Store) erasureRaw(ctx context.Context, writer jobSubmitter, e *Erasure,
 		erased[t.id] = true
 	}
 	run.batchesRead += len(candidates)
-	return erased, s.scrubBatches(ctx, writer, e.ProjectID, candidates, erased, e.ID)
+	return erased, s.scrubBatches(ctx, writer, e, candidates, erased)
 }
 
 // erasureParsed is step 3: the chunks, until one says there is no more. Each
@@ -836,16 +861,16 @@ func (s *Store) erasureTail(ctx context.Context, writer jobSubmitter, e *Erasure
 		return err
 	}
 	run.batchesRead += len(recent)
-	return s.scrubBatches(ctx, writer, e.ProjectID, recent, traces, e.ID)
+	return s.scrubBatches(ctx, writer, e, recent, traces)
 }
 
 // endErasure records the end — done, or failed with the sentence of what
 // failed — and tells whoever waits for it.
-func (s *Store) endErasure(ctx context.Context, writer jobSubmitter, e *Erasure, failed error, phase string,
+func (s *Store) endErasure(ctx context.Context, writer jobSubmitter, e *Erasure, failed, phase string,
 	run erasureRun, began time.Time) error {
 	end := &erasureEnd{ID: e.ID}
-	if failed != nil {
-		end.Error = failureSentence(failed, e.UserID, phase)
+	if failed != "" {
+		end.Error = failureSentence(failed, phase)
 	}
 	if err := submitErasureJob(ctx, writer, end); err != nil {
 		return err
@@ -870,6 +895,8 @@ func (s *Store) endErasure(ctx context.Context, writer jobSubmitter, e *Erasure,
 	// The state it ended in, not this run's view: an erasure whose failure
 	// an earlier start recorded ends failed from a run that met none (#28).
 	if end.Erasure.State == ErasureFailed {
+		// The record's sentence; the error itself was logged where it was
+		// met, once (#33).
 		logger().Error("an erasure failed", append(args, "err", end.Erasure.Error)...)
 		return nil
 	}

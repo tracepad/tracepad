@@ -720,7 +720,7 @@ func TestRemoveDataWatchesTheErasureToItsEnd(t *testing.T) {
 
 	server, _ = fakeErasures(t, "running", "failed")
 	out = h.run(t.Context(), true, "users", "rm-data", "--url", server.URL, "--project", "p", "--yes", "u1")
-	if out.code != ExitFailure || !strings.Contains(out.stderr, "the disk is full") {
+	if out.code != ExitFailure || !strings.Contains(out.stderr, "could not finish — the disk is full") {
 		t.Errorf("a failed erasure exited %d: %s", out.code, out.stderr)
 	}
 
