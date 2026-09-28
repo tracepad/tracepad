@@ -167,29 +167,35 @@ func (s *Server) handleDeleteTraces(w http.ResponseWriter, r *http.Request) {
 	filter.Limit = limit + 1
 	// The selection is a listing's read, and is bounded as one; the
 	// deletion after it is the writer's (spec 043 #29).
-	// The chunks are cut with the read, from what rolling each hour costs
-	// (spec 047 #4).
+	// The chunks are cut with the read, from what rolling each hour costs,
+	// and only as many as a round runs (spec 047 #4, #22).
 	var (
 		rows []*store.TraceRow
 		ends []int
+		more bool
 	)
 	if !s.readInSlot(w, r, "failed to select the matching traces", func(ctx context.Context) (err error) {
 		if rows, err = s.store.Traces(ctx, project.ID, filter); err != nil {
 			return err
 		}
-		var hours, deletes []int64
-		for _, row := range rows[:min(len(rows), limit)] {
+		if more = len(rows) > limit; more {
+			rows = rows[:limit]
+		}
+		hours := make([]int64, 0, len(rows))
+		deletes := make([]int64, 0, len(rows))
+		for _, row := range rows {
 			hours = append(hours, store.HourOf(row.Timestamp))
 			deletes = append(deletes, store.TraceDeleteCost(row.ObservationCount))
 		}
-		ends, err = s.store.DeletionChunks(ctx, project.ID, hours, deletes, store.TraceDeleteChunk, s.deleteRollBudget)
+		ends, err = s.store.DeletionChunks(ctx, project.ID, hours, deletes,
+			store.TraceDeleteChunk, s.deleteRollBudget, deleteRoundChunks)
 		return err
 	}) {
 		return
 	}
-	more := len(rows) > limit
-	if more {
-		rows = rows[:limit]
+	// A round that ended at `deleteRoundChunks` left traces for the next.
+	if len(ends) > 0 && ends[len(ends)-1] < len(rows) {
+		more = true
 	}
 
 	// Chunks of whole hours, at most `TraceDeleteChunk` traces and the roll
@@ -229,10 +235,6 @@ func (s *Server) handleDeleteTraces(w http.ResponseWriter, r *http.Request) {
 	}
 	start := 0
 	for _, end := range ends {
-		if chunks == deleteRoundChunks {
-			more = true
-			break
-		}
 		for _, row := range rows[start:end] {
 			chunk = append(chunk, row.ID)
 		}

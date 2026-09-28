@@ -42,14 +42,16 @@ func TraceDeleteCost(observations int) int64 {
 // next hour only while the chunk stays within limit traces and its total
 // cost — its hours' rolls and its traces' deletion, the first hour included —
 // within budget. A budget of zero or less is DeleteRollBudget. It answers
-// where each chunk ends.
-func HourChunks(hours, deletes []int64, cost func(hour int64) (int64, error), limit int, budget int64) ([]int, error) {
+// where each chunk ends, for at most chunks of them (all when zero or less):
+// a caller that submits one chunk, or a round of fifty, has no use for the
+// cost of the hours past them.
+func HourChunks(hours, deletes []int64, cost func(hour int64) (int64, error), limit int, budget int64, chunks int) ([]int, error) {
 	limit = max(limit, 1)
 	if budget <= 0 {
 		budget = DeleteRollBudget
 	}
 	var ends []int
-	for start := 0; start < len(hours); {
+	for start := 0; start < len(hours) && (chunks <= 0 || len(ends) < chunks); {
 		end, taken, spent := start, 0, int64(0)
 		for end < len(hours) {
 			next := end
@@ -57,6 +59,12 @@ func HourChunks(hours, deletes []int64, cost func(hour int64) (int64, error), li
 				next++
 			}
 			size := next - end
+			if taken == 0 && size > limit {
+				// A first hour of more than a chunk is cut, whatever
+				// it costs: the chunk ends in it.
+				end = start + limit
+				break
+			}
 			if taken > 0 && taken+size > limit {
 				break
 			}
@@ -69,12 +77,7 @@ func HourChunks(hours, deletes []int64, cost func(hour int64) (int64, error), li
 					hourCost += d
 				}
 			}
-			if taken == 0 {
-				if size > limit {
-					end = start + limit
-					break
-				}
-			} else if spent+hourCost > budget {
+			if taken > 0 && spent+hourCost > budget {
 				break
 			}
 			end, taken, spent = next, taken+size, spent+hourCost
@@ -120,10 +123,10 @@ var rollCostQuery = fmt.Sprintf(`SELECT %d * COUNT(*) + COALESCE(SUM(observation
 
 // DeletionChunks is HourChunks for a caller outside a transaction: the rounds
 // of a bulk trace deletion, which cut their chunks before submitting them.
-func (s *Store) DeletionChunks(ctx context.Context, projectID string, hours, deletes []int64, limit int, budget int64) ([]int, error) {
+func (s *Store) DeletionChunks(ctx context.Context, projectID string, hours, deletes []int64, limit int, budget int64, chunks int) ([]int, error) {
 	cost, err := rollCosts(ctx, s.db, projectID)
 	if err != nil {
 		return nil, err
 	}
-	return HourChunks(hours, deletes, cost, limit, budget)
+	return HourChunks(hours, deletes, cost, limit, budget, chunks)
 }

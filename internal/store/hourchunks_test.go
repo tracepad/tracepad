@@ -37,7 +37,7 @@ func TestHourChunks(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cost := func(hour int64) (int64, error) { return tc.costs[hour], nil }
-			got, err := HourChunks(tc.hours, nil, cost, tc.limit, tc.budget)
+			got, err := HourChunks(tc.hours, nil, cost, tc.limit, tc.budget, 0)
 			if err != nil || !slices.Equal(got, tc.ends) {
 				t.Errorf("chunks end at %v (%v), want %v", got, err, tc.ends)
 			}
@@ -47,10 +47,10 @@ func TestHourChunks(t *testing.T) {
 	// What deleting the chunk's own traces costs counts as well: two light
 	// hours, each one trace too heavy to share a chunk.
 	free := func(int64) (int64, error) { return 0, nil }
-	if got, err := HourChunks([]int64{1, 2}, []int64{6, 6}, free, 500, 10); err != nil || !slices.Equal(got, []int{1, 2}) {
+	if got, err := HourChunks([]int64{1, 2}, []int64{6, 6}, free, 500, 10, 0); err != nil || !slices.Equal(got, []int{1, 2}) {
 		t.Errorf("heavy traces end at %v (%v), want a chunk each", got, err)
 	}
-	if got, err := HourChunks([]int64{1, 2}, nil, free, 500, 10); err != nil || !slices.Equal(got, []int{2}) {
+	if got, err := HourChunks([]int64{1, 2}, nil, free, 500, 10, 0); err != nil || !slices.Equal(got, []int{2}) {
 		t.Errorf("light traces end at %v (%v), want one chunk", got, err)
 	}
 
@@ -63,18 +63,38 @@ func TestHourChunks(t *testing.T) {
 	}
 	asked := 0
 	count := func(int64) (int64, error) { asked++; return 10, nil }
-	if _, err := HourChunks(hours[:3], nil, count, 500, 10); err != nil {
+	if _, err := HourChunks(hours[:3], nil, count, 500, 10, 0); err != nil {
 		t.Fatal(err)
 	}
 	if asked != 5 {
 		t.Errorf("asked %d costs for three hours of one chunk each, want 5", asked)
 	}
 	asked = 0
-	if _, err := HourChunks(hours, nil, count, 1, 1000); err != nil {
+	if _, err := HourChunks(hours, nil, count, 2, 1000, 0); err != nil {
 		t.Fatal(err)
 	}
 	if asked != 1000 {
-		t.Errorf("asked %d costs for chunks of one trace, want one a chunk, 1000", asked)
+		t.Errorf("asked %d costs for chunks of two traces, want each hour once, 1000", asked)
+	}
+
+	// A caller that runs one chunk, or a round of a few, prices only the
+	// hours those consider, however long the run it read (spec 047 #22).
+	for _, tc := range []struct{ chunks, ends, asked int }{{1, 1, 2}, {3, 3, 6}} {
+		asked = 0
+		ends, err := HourChunks(hours, nil, count, 500, 10, tc.chunks)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(ends) != tc.ends || asked != tc.asked {
+			t.Errorf("%d chunks of a thousand hours: %d ends, %d costs asked; want %d and %d",
+				tc.chunks, len(ends), asked, tc.ends, tc.asked)
+		}
+	}
+
+	// A first hour cut at the limit ends its chunk without a price.
+	asked = 0
+	if _, err := HourChunks([]int64{1, 1, 1, 2}, nil, count, 2, 10, 1); err != nil || asked != 0 {
+		t.Errorf("a cut first hour asked %d costs (%v), want none", asked, err)
 	}
 }
 

@@ -422,7 +422,8 @@ last. The parsed rows then go in **chunks** — up to five hundred traces,
 taken in the order they started, whole hours at a time — each one a
 transaction that leaves the store consistent on its own: the chunk's traces
 go and the hours they occupied are recomputed in the same commit, each hour
-once, and the writer is held for one chunk at a time so ingest keeps flowing
+once (an hour holding more than five hundred of the user's traces once per
+chunk it spans), and the writer is held for one chunk at a time so ingest keeps flowing
 between them. A chunk takes as many hours as are light to recompute; a dense
 hour is a chunk of its own. 20 000 traces spread over a month are about sixty
 chunks, and seconds rather than minutes. The erasure **runs to completion whether or not the client waits for

@@ -693,8 +693,9 @@ func (r *ProjectRestore) apply(tx *sql.Tx) error {
 // time (spec 047 #1): its first hour always, and each next one while the chunk
 // stays within `Limit` traces and `RollBudget` of what its rolls recompute
 // (#2). In start order a user's hours
-// are contiguous, so each is rolled once — twice for an hour of more than
-// `Limit` traces, which is cut. Taken in arrival order, as before, a chunk kept
+// are contiguous, so each is rolled by the one chunk that takes it — or, for
+// an hour holding more than `Limit` of the user's traces, which is cut, by
+// each of the ⌈n / Limit⌉ chunks it spans. Taken in arrival order, as before, a chunk kept
 // one hour's worth of the first 500 traces: for a client that exports out of
 // start order, about two traces, one commit and one roll per chunk.
 type UserDataErase struct {
@@ -804,7 +805,9 @@ func (e *UserDataErase) apply(tx *sql.Tx) error {
 		if err != nil {
 			return err
 		}
-		ends, err := HourChunks(hours, deletes, cost, e.Limit, e.RollBudget)
+		// One chunk is this job: the hours past it are the next job's to
+		// price, against what the store holds then.
+		ends, err := HourChunks(hours, deletes, cost, e.Limit, e.RollBudget, 1)
 		if err != nil {
 			return err
 		}
