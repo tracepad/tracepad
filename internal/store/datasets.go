@@ -165,6 +165,10 @@ type DatasetItemsWrite struct {
 	Changed int
 }
 
+// weight is the items the write carries (spec 043 #35): an array has no
+// count cap, and a body at the cap is hundreds of thousands of them.
+func (w *DatasetItemsWrite) weight() int { return len(w.Items) }
+
 func (w *DatasetItemsWrite) apply(tx *sql.Tx) error {
 	w.Version, w.Changed = 0, 0
 
@@ -303,6 +307,10 @@ type DatasetDelete struct {
 	// Counts is what went, filled by apply.
 	Counts DatasetCounts
 }
+
+// weight is a whole window and more: the cascade takes every version of every
+// item and every run, which nothing counts before it runs (spec 043 #35).
+func (d *DatasetDelete) weight() int { return commitsAlone }
 
 func (d *DatasetDelete) apply(tx *sql.Tx) error {
 	d.Counts = DatasetCounts{}

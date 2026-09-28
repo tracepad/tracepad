@@ -193,6 +193,11 @@ type TraceDelete struct {
 	CompactionRequested int64
 }
 
+// weight is the traces the delete names (spec 043 #35): a floor, since each
+// takes its observations, scores and index entries with it, which nothing
+// counts before the delete runs.
+func (d *TraceDelete) weight() int { return len(d.IDs) }
+
 func (d *TraceDelete) apply(tx *sql.Tx) error {
 	d.Counts, d.Hours, d.CompactionRequested = DeleteCounts{}, nil, 0
 	// The bulk form may hand over nothing: a filter that matches nothing is
