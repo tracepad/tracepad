@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"slices"
 	"strconv"
@@ -790,7 +791,7 @@ var sqliteCauses = map[int]string{
 
 // errRawBatch marks a scrub of a raw batch that failed after its retries, or
 // a batch that could not be read to plan it.
-var errRawBatch = errors.New("a raw batch could not be rewritten")
+var errRawBatch = errors.New(causeRawBatch)
 
 // failureCause is the cause the record gives for err, from the list above.
 func failureCause(err error) string {
@@ -816,7 +817,14 @@ func failureSentence(cause, phase string) string {
 // cause the record gives, and the error itself as loggable leaves it. Every
 // line of the store's that gives an erasure's failure goes through here.
 func (e *Erasure) reportFailure(message, cause string, err error) {
-	logger().Error(message, "erasure", e.ID, "cause", cause, "err", loggable(err, e.UserID))
+	// A refusal is routine, as the writer has always logged it: a project
+	// purged while its erasure ran is no incident.
+	level := slog.LevelError
+	if rejected(err) {
+		level = slog.LevelInfo
+	}
+	logger().Log(context.Background(), level, message, "erasure", e.ID, "cause", cause,
+		"err", loggable(err, e.UserID))
 }
 
 // loggable is an erasure's error as the server's log line gives it: whole,
@@ -833,27 +841,63 @@ func (e *Erasure) reportFailure(message, cause string, err error) {
 func loggable(err error, userID string) string {
 	text := err.Error()
 	if userID == "" {
-		return text
+		return cutLogged(text)
+	}
+	// What the log could hold of the text is cut to maxLogged, so an id
+	// that starts inside that cut and ends past it would be logged in part;
+	// the text is read as far as maxScanned, and the id is found whole
+	// wherever it stands in that.
+	scanned := text
+	if len(scanned) > maxScanned {
+		scanned = scanned[:maxScanned]
 	}
 	id := strings.ToLower(userID)
-	for _, reading := range readings(text) {
+	for _, reading := range readings(scanned) {
 		if holdsWord(strings.ToLower(reading), id) {
 			return "an error that named the user, which is not logged"
 		}
 	}
-	return text
+	return cutLogged(text)
 }
 
-// readings are text as it stands and decoded: %XX sequences and escapes,
-// again while that changes it, each with + read as a space too.
+// What an erasure's error may be in the log, and how much of it the check
+// reads (#32): the decoder's words may quote a batch, and the server's
+// megabyte is not for a log line. The check reads more than the log gives.
+const (
+	maxLogged  = 512
+	maxScanned = 16 << 10
+)
+
+// cutLogged is text cut to maxLogged bytes, on a character.
+func cutLogged(text string) string {
+	if len(text) <= maxLogged {
+		return text
+	}
+	return strings.ToValidUTF8(text[:maxLogged], "") + "…(truncated)"
+}
+
+// readings are text as it stands and every way of decoding it: %XX
+// sequences, backslash escapes, either alone or after the other — a %5C is
+// a backslash that an escape letter after it must not be read with — for a
+// few rounds, and each with + read as a space too. The rounds are few and
+// each decoder only shortens the text, so however it is built the cost is
+// bounded: at most 15 readings and 30 with the +.
 func readings(text string) []string {
 	out := []string{text}
+	seen := map[string]bool{text: true}
+	frontier := out
 	for range 3 {
-		next := unescape(unpercent(out[len(out)-1]))
-		if next == out[len(out)-1] {
-			break
+		var next []string
+		for _, reading := range frontier {
+			for _, decode := range [...]func(string) string{unpercent, unescape} {
+				if decoded := decode(reading); !seen[decoded] {
+					seen[decoded] = true
+					out = append(out, decoded)
+					next = append(next, decoded)
+				}
+			}
 		}
-		out = append(out, next)
+		frontier = next
 	}
 	for _, reading := range out[:len(out):len(out)] {
 		if strings.Contains(reading, "+") {
@@ -882,6 +926,38 @@ func unpercent(text string) string {
 	return b.String()
 }
 
+// simpleEscape is the character a one-letter backslash escape stands for, or
+// "" when there is none.
+func simpleEscape(c byte) string {
+	switch c {
+	case 'n':
+		return "\n"
+	case 't':
+		return "\t"
+	case 'r':
+		return "\r"
+	case 'b':
+		return "\b"
+	case 'f':
+		return "\f"
+	case 'v':
+		return "\v"
+	case 'a':
+		return "\a"
+	case '"':
+		return `"`
+	case '\'':
+		return "'"
+	case '\\':
+		return `\`
+	case '/':
+		return "/"
+	case '0':
+		return "\x00"
+	}
+	return ""
+}
+
 // unescape decodes Go's and JSON's backslash escapes in text, a JSON
 // surrogate pair into the letter it stands for, and leaves anything else as
 // it is.
@@ -889,8 +965,6 @@ func unescape(text string) string {
 	if !strings.Contains(text, `\`) {
 		return text
 	}
-	simple := map[byte]string{'n': "\n", 't': "\t", 'r': "\r", 'b': "\b", 'f': "\f", 'v': "\v", 'a': "\a",
-		'"': `"`, '\'': "'", '\\': `\`, '/': "/", '0': "\x00"}
 	hex := func(s string) (rune, bool) {
 		v, err := strconv.ParseUint(s, 16, 32)
 		return rune(v), err == nil
@@ -903,8 +977,8 @@ func unescape(text string) string {
 		}
 		c := text[i+1]
 		switch {
-		case simple[c] != "":
-			b.WriteString(simple[c])
+		case simpleEscape(c) != "":
+			b.WriteString(simpleEscape(c))
 			i++
 			continue
 		case c == 'x' && i+3 < len(text):
@@ -984,13 +1058,20 @@ func (e *erasureError) Error() string {
 }
 func (e *erasureError) Unwrap() error { return e.err }
 
-// An erasure's jobs log their own failures, through loggable (#32): the
-// writer's "write commit failed" line would give an error's text whole, and a
-// refusal of a chunk quotes the user it erases. A chunk or a scrub of the
-// erasure task is one; the same jobs outside it are not.
-func (j *UserDataErase) failureReported() bool { return j.Erasure != nil }
-func (j *RawScrub) failureReported() bool      { return j.ErasureID != "" }
-func (j *erasureBegin) failureReported() bool  { return true }
-func (j *erasureStep) failureReported() bool   { return true }
-func (j *erasureEnd) failureReported() bool    { return true }
-func (j *erasurePause) failureReported() bool  { return true }
+// An erasure's jobs do not have their errors logged by the writer (#32): its
+// "write commit failed" line would give an error's text whole, and a refusal
+// of a chunk quoted the user it erases. The erasure logs the error, through
+// loggable, and the writer says only that the write did not commit. A chunk
+// or a scrub of the erasure task is one; the same jobs outside it are not.
+func (j *UserDataErase) failureRedacted() (string, bool) {
+	if j.Erasure == nil {
+		return "", false
+	}
+	return j.Erasure.ID, true
+}
+
+func (j *RawScrub) failureRedacted() (string, bool)     { return j.ErasureID, j.ErasureID != "" }
+func (j *erasureBegin) failureRedacted() (string, bool) { return j.ID, true }
+func (j *erasureStep) failureRedacted() (string, bool)  { return j.ID, true }
+func (j *erasureEnd) failureRedacted() (string, bool)   { return j.ID, true }
+func (j *erasurePause) failureRedacted() (string, bool) { return j.ID, true }

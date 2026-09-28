@@ -418,9 +418,10 @@ func (w *Writer) flush(pending []*submission) {
 	// A database condition is left to the retries below: a write they
 	// commit is not lost, and one they cannot commit is logged as lost
 	// (spec 043 #24). Anything else says why the window came apart — but
-	// not a failure whose job logs it itself, which the retry below finds
-	// again and leaves to that job (spec 047 #32).
-	if _, condition := Condition(err); !condition && !reportedByItsJob(err) {
+	// not a failure of a job whose words the writer does not log, which the
+	// retry below finds again and answers with a line of its own (spec 047
+	// #32).
+	if _, condition := Condition(err); !condition && !redactedByItsJob(err) {
 		logFailure(err, slog.LevelWarn, "write window failed, retrying jobs individually",
 			"jobs", len(pending))
 	}
@@ -443,17 +444,45 @@ type reportsItsFailure interface {
 	failureReported() bool
 }
 
+// redactsItsFailure is a job whose error the writer does not put in its log:
+// the error may quote what the job holds — an erasure's user (spec 047 #32) —
+// so the job's owner logs it, through a check of its own. It answers the id
+// of what it is a step of, which the writer's line names in its place.
+type redactsItsFailure interface {
+	failureRedacted() (id string, redacted bool)
+}
+
+func redacts(job WriteJob) (string, bool) {
+	redacting, ok := job.(redactsItsFailure)
+	if !ok {
+		return "", false
+	}
+	return redacting.failureRedacted()
+}
+
 // lost logs one write that did not commit. A job that logs its own failures
-// is left to do so — its error may quote what it holds (spec 047 #32) — but a
-// database condition it met still counts in the paced line, which gives the
-// condition and not the job's words: a full disk is news whoever met it.
+// (the aggregator's hour) is left to do so. One that redacts its failure gets
+// a line without the error, so that a failure whose submitter has gone is
+// still one the log has: the cause and what it was a step of; and a database
+// condition it met counts in the paced line, which gives the condition and
+// not the job's words, since a full disk is news whoever met it.
 func lost(sub *submission, err error) {
-	if reports(sub.job) {
+	if id, redacted := redacts(sub.job); redacted {
 		if code, ok := sqliteCode(err); ok {
 			if _, condition := conditionNames[code]; condition {
-				logFailure(bareCondition(code), slog.LevelError, "write commit failed")
+				logFailure(bareCondition(code), slog.LevelError, "write commit failed", "erasure", id)
+				return
 			}
 		}
+		level := slog.LevelError
+		if rejected(err) {
+			level = slog.LevelInfo
+		}
+		logger().Log(context.Background(), level, "a write of an erasure did not commit; the erasure logs its error",
+			"erasure", id, "cause", failureCause(err))
+		return
+	}
+	if reports(sub.job) {
 		return
 	}
 	logFailure(err, slog.LevelError, "write commit failed")
@@ -480,11 +509,15 @@ type failedJob struct {
 func (f *failedJob) Error() string { return f.err.Error() }
 func (f *failedJob) Unwrap() error { return f.err }
 
-// reportedByItsJob reports a window's failure that a job which logs its own
-// failures caused.
-func reportedByItsJob(err error) bool {
+// redactedByItsJob reports a window's failure that a job whose words the
+// writer does not log caused.
+func redactedByItsJob(err error) bool {
 	var failed *failedJob
-	return errors.As(err, &failed) && reports(failed.job)
+	if !errors.As(err, &failed) {
+		return false
+	}
+	_, redacted := redacts(failed.job)
+	return redacted
 }
 
 // logFailure reports a failed commit, demoting a rejection: a caller asking

@@ -17,6 +17,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	tracepb "go.opentelemetry.io/proto/otlp/trace/v1"
 
@@ -1141,6 +1142,13 @@ func TestTheLogReadsTheErrorDecoded(t *testing.T) {
 		// Decoding makes no word of what was not one.
 		{"user-a", "refused user-ab", false},
 		{"1", `sqlite error 13 at \x31\x33`, false},
+		// A percent-encoded backslash before an escape letter is a backslash
+		// and a letter, not a control character.
+		{`CORP\alice`, "GET /users/CORP%5Calice: refused", true},
+		{`dom\tom`, "GET /u/dom%5Ctom", true},
+		{`dom\bob`, "GET /u/dom%5Cbob", true},
+		{`CORP\nick`, "GET /users/CORP%5Cnick", true},
+		{`CORP\alice`, `refused "CORP\\alice"`, true},
 	} {
 		got := loggable(errors.New(tc.text), tc.user)
 		if withheld := got != tc.text; withheld != tc.withheld {
@@ -1204,7 +1212,7 @@ type failsInside struct{}
 func (failsInside) apply(*sql.Tx) error {
 	return fmt.Errorf("rewrite the batch of user-4711: %w", codedError{13})
 }
-func (failsInside) failureReported() bool { return true }
+func (failsInside) failureRedacted() (string, bool) { return "4f0c9d3e8a1b2c3d4e5f60718293a4b5", true }
 
 // A condition an erasure's job met still reaches the writer's paced line —
 // the condition, not the job's words (#32).
@@ -1222,5 +1230,173 @@ func TestTheWriterStillCountsAnErasureJobsCondition(t *testing.T) {
 	if !strings.Contains(out, "write commit failed") || !strings.Contains(out, "condition=SQLITE_FULL") ||
 		strings.Contains(out, "4711") {
 		t.Errorf("the writer's log %q, want the condition and not the job's words", out)
+	}
+}
+
+// The check costs little on text made to make it costly (#32): a run of %25,
+// which every round of decoding halves, and a long run of escapes. The
+// readings are few, and the text is read no further than maxScanned.
+func TestTheLogsCheckIsBounded(t *testing.T) {
+	for _, text := range []string{
+		strings.Repeat("%25", 171),  // 513 bytes of %25
+		strings.Repeat("%25", 8192), // 24 KiB, past what is read
+		strings.Repeat(`\\`, 8192),  // escapes of escapes
+		strings.Repeat(`%5C%5C+`, 4096),
+	} {
+		began := time.Now()
+		got := readings(text)
+		loggable(errors.New(text), "user-4711")
+		if took := time.Since(began); took > time.Second {
+			t.Errorf("a text of %d bytes took %s", len(text), took)
+		}
+		if len(got) > 30 {
+			t.Errorf("a text of %d bytes has %d readings, want at most 30", len(text), len(got))
+		}
+	}
+	// Past what is read the check does not look, and past what is logged an
+	// id would not be given.
+	far := strings.Repeat("x", maxScanned) + " user-4711"
+	if got := loggable(errors.New(far), "user-4711"); strings.Contains(got, "named the user") {
+		t.Errorf("the check read past maxScanned: %q", got)
+	}
+}
+
+// What the log gives of an erasure's error is cut, on a character, and an id
+// that starts inside the cut and ends past it is not given in part (#32).
+func TestTheLogCutsTheErrorButNotTheIDs(t *testing.T) {
+	long := strings.Repeat("é", 400) + " refused user-4711 twice"
+	got := loggable(errors.New(long), "someone")
+	if !strings.HasSuffix(got, "…(truncated)") || !utf8.ValidString(got) || len(got) > maxLogged+len("…(truncated)") {
+		t.Errorf("a long error is logged as %d bytes: %q", len(got), got)
+	}
+	// user-4711 starts at byte 810, past the cut; the id that starts inside
+	// it — at byte 500 — and ends past it is withheld whole.
+	straddling := strings.Repeat("x", maxLogged-3) + " user-4711 and more"
+	if got := loggable(errors.New(straddling), "user-4711"); strings.Contains(got, "4711") || !strings.Contains(got, "named the user") {
+		t.Errorf("an id across the cut is logged in part: %q", got)
+	}
+	if got := loggable(errors.New(strings.Repeat("y", 100)), ""); len(got) != 100 {
+		t.Errorf("a short error was cut: %q", got)
+	}
+}
+
+// failsReported is a job whose owner logs its failure, as the aggregator's
+// hour does, failing inside the writer's transaction.
+type failsReported struct{ err error }
+
+func (f failsReported) apply(*sql.Tx) error { return f.err }
+func (failsReported) failureReported() bool { return true }
+
+// The writer's own rules for a job that reports its failure stay as they were
+// before the erasure's (#32): the window it took down is still warned of, and
+// a condition it met adds no line of the writer's — the job's owner said it.
+func TestTheWriterKeepsItsRulesForAJobThatReportsItself(t *testing.T) {
+	f := newErasureFixture(t)
+	conditionLog = &logpace.Keyed{Every: time.Minute}
+	var logged bytes.Buffer
+	var mu sync.Mutex
+	old := logger
+	logger = func() *slog.Logger { return slog.New(slog.NewTextHandler(&lockedWriter{w: &logged, mu: &mu}, nil)) }
+	t.Cleanup(func() { logger = old })
+
+	window, err := f.store.NewWriter(WriterOptions{CommitWindow: 50 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer window.Close()
+	var commits atomic.Int32
+	parked, release := make(chan struct{}), make(chan struct{})
+	window.beforeCommit = func() {
+		if commits.Add(1) == 1 {
+			close(parked)
+			<-release
+		}
+	}
+	first := make(chan error, 1)
+	go func() { first <- window.Submit(context.Background(), &erasureSweep{}) }()
+	<-parked
+	answers := make(chan error, 2)
+	go func() {
+		answers <- window.Submit(context.Background(), failsReported{errors.New("the hour is broken")})
+	}()
+	go func() { answers <- window.Submit(context.Background(), &erasureSweep{}) }()
+	waitFor(t, func() bool { return len(window.queue) == 2 })
+	close(release)
+	<-first
+	<-answers
+	<-answers
+	if err := window.Submit(context.Background(), failsReported{codedError{13}}); err == nil {
+		t.Fatal("a job that met a condition did not fail")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	out := logged.String()
+	if !strings.Contains(out, "write window failed") {
+		t.Errorf("the writer did not warn of the window a reporting job took down: %q", out)
+	}
+	if strings.Contains(out, "write commit failed") || strings.Contains(out, "condition=") {
+		t.Errorf("the writer logged a reporting job's failure, which its owner does: %q", out)
+	}
+}
+
+// A refusal is routine: an erasure whose project was purged while it ran gets
+// its refusal logged at Info, as the writer always logged it, not as an error
+// (#32).
+func TestARefusalOfAnErasureIsLoggedAsRoutine(t *testing.T) {
+	var logged bytes.Buffer
+	old := logger
+	logger = func() *slog.Logger { return slog.New(slog.NewTextHandler(&logged, nil)) }
+	t.Cleanup(func() { logger = old })
+	e := &Erasure{ID: "4f0c9d3e8a1b2c3d4e5f60718293a4b5", UserID: "user-a"}
+	e.reportFailure("a chunk of an erasure failed", causeOther, &Rejection{Kind: RejectNotFound, Message: "no such project"})
+	e.reportFailure("a chunk of an erasure failed", causeFull, fmt.Errorf("commit: %w", codedError{13}))
+	lines := strings.Split(strings.TrimSpace(logged.String()), "\n")
+	if len(lines) != 2 || !strings.Contains(lines[0], "level=INFO") || !strings.Contains(lines[1], "level=ERROR") {
+		t.Errorf("the log %q, want the refusal at INFO and the disk at ERROR", logged.String())
+	}
+}
+
+// A write of an erasure that fails after its submitter has given up — the
+// context ended while the window was committing — is still in the log, as a
+// line without the error: the run never sees it (#32).
+func TestAnAbandonedErasureWriteIsStillLogged(t *testing.T) {
+	f := newErasureFixture(t)
+	var logged bytes.Buffer
+	var mu sync.Mutex
+	old := logger
+	logger = func() *slog.Logger { return slog.New(slog.NewTextHandler(&lockedWriter{w: &logged, mu: &mu}, nil)) }
+	t.Cleanup(func() { logger = old })
+	w, err := f.store.NewWriter(WriterOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	parked, release := make(chan struct{}), make(chan struct{})
+	w.beforeCommit = func() {
+		close(parked)
+		<-release
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	gone := make(chan error, 1)
+	job := &UserDataErase{ProjectID: f.project.ID, UserID: "user-4711", Confirm: "other", Limit: 1,
+		Erasure: &chunkErasure{ID: "4f0c9d3e8a1b2c3d4e5f60718293a4b5"}}
+	go func() { gone <- w.Submit(ctx, job) }()
+	<-parked
+	cancel()
+	if err := <-gone; !errors.Is(err, context.Canceled) {
+		t.Fatalf("the abandoned submission answered %v", err)
+	}
+	close(release)
+	waitFor(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return strings.Contains(logged.String(), "did not commit")
+	})
+	mu.Lock()
+	defer mu.Unlock()
+	out := logged.String()
+	if !strings.Contains(out, "erasure=4f0c9d3e8a1b2c3d4e5f60718293a4b5") || !strings.Contains(out, "level=INFO") ||
+		strings.Contains(out, "4711") {
+		t.Errorf("the writer's line %q, want the erasure, INFO for the refusal, and no user", out)
 	}
 }

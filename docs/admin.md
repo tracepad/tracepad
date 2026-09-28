@@ -416,8 +416,11 @@ another.
   ran out of starts says `3 starts ended before the erasure did`, followed by
   `; its tail last failed with: ` and a cause when a tail failed. The error
   itself is in the server's log, on the line of the phase that met it, next
-  to the erasure's id. The record never carries an error's own text, so it
-  cannot name the user.
+  to the erasure's id, cut to 512 bytes. A log line never names the user: an
+  error whose text holds the user id — as it is, percent-encoded, or with
+  backslash escapes — is logged as `an error that named the user, which is
+  not logged`, and the cause on the line is what there is to go on. The
+  record never carries an error's own text, so it cannot name the user.
 
 `GET /api/v1/projects/{id}/erasures/{erasure_id}` reads one erasure, and
 `GET /api/v1/projects/{id}/erasures` the project's hundred, those under way
