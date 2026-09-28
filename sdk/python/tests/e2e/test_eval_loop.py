@@ -119,6 +119,16 @@ def test_the_same_cases_again_change_nothing(store: Store) -> None:
     assert {item.dataset_version for item in stored} == {first_version}
 
 
+def test_more_items_than_a_request_takes_are_written_in_two(store: Store) -> None:
+    # The package's chunk is the number the server takes (spec 018 #15).
+    tracepad.init(store.host, KEY)
+
+    version, changed = tracepad.dataset("over-the-cap").put_items(
+        [{"input": n} for n in range(10_001)])
+
+    assert (version, changed) == (2, 10_001)
+
+
 def test_a_run_that_raised_is_closed_as_failed(store: Store) -> None:
     tracepad.init(store.host, KEY)
     golden = tracepad.dataset("failing")

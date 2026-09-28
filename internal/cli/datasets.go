@@ -263,7 +263,8 @@ func (r *run) datasetsPush(ctx context.Context, args []string) error {
 	name := rest[0]
 	// A file that goes out in several writes is checked before anything is
 	// sent, the description included (#34 (c)).
-	if len(items) > maxItemsPerWrite {
+	writes := (len(items) + itemsPerWrite - 1) / itemsPerWrite
+	if writes > 1 {
 		if err := refuseRepeatedIDs(items); err != nil {
 			return err
 		}
@@ -279,28 +280,28 @@ func (r *run) datasetsPush(ctx context.Context, args []string) error {
 	// a file sent item by item would leave a version per case and no way to
 	// name the state the file describes (#5). A file longer than one request
 	// takes goes as the fewest writes that carry it (#34).
-	var written itemsWritten
-	writes := 0
-	for start := 0; start < len(items); start += maxItemsPerWrite {
-		chunk := items[start:min(start+maxItemsPerWrite, len(items))]
-		body, err := r.api.Post(ctx, "/api/v1/datasets/"+url.PathEscape(name)+"/items", chunk)
+	var (
+		written itemsWritten
+		answer  json.RawMessage // the server's own, for a file one write carried
+	)
+	for start := 0; start < len(items); start += itemsPerWrite {
+		end := min(start+itemsPerWrite, len(items))
+		body, err := r.api.Post(ctx, "/api/v1/datasets/"+url.PathEscape(name)+"/items", items[start:end])
 		if err != nil {
-			if start > 0 {
-				return fmt.Errorf("%w (the first %d cases are written, at version %d; "+
-					"pushing the file again adds the ones without an id a second time)",
-					err, start, written.Version)
-			}
-			return err
+			return pushFailure(err, writes, start, end, written.Version)
 		}
-		answer, err := decode[itemsWritten](body)
+		this, err := decode[itemsWritten](body)
 		if err != nil {
 			return err
 		}
-		written.IDs = append(written.IDs, answer.IDs...)
-		written.Version, written.Changed = answer.Version, written.Changed+answer.Changed
-		writes++
+		written.IDs = append(written.IDs, this.IDs...)
+		written.Version, written.Changed = this.Version, written.Changed+this.Changed
+		answer = body
 	}
 	if r.wantJSON() {
+		if writes == 1 {
+			return r.emit(answer)
+		}
 		encoded, err := json.Marshal(written)
 		if err != nil {
 			return err
@@ -320,6 +321,28 @@ func (r *run) datasetsPush(ctx context.Context, args []string) error {
 	return nil
 }
 
+// pushFailure says where in the file a write of a split push failed. The
+// server counts its indexes from the first case of the write it was sent —
+// and names none for a write of one case — so the range is what places the
+// error in the file; the writes before it are committed and stay so.
+func pushFailure(err error, writes, start, end, version int) error {
+	if writes == 1 {
+		return err
+	}
+	span := fmt.Sprintf("cases %d–%d", start, end-1)
+	if end-start == 1 {
+		span = fmt.Sprintf("case %d", start)
+	}
+	if start == 0 {
+		return fmt.Errorf("%w (in the write of %s of the file, the first of %d writes; nothing is written)",
+			err, span, writes)
+	}
+	return fmt.Errorf("%w (in the write of %s of the file; an index in this message counts from case %d; "+
+		"the first %d cases are written, at version %d; "+
+		"pushing the file again adds the ones without an id a second time)",
+		err, span, start, start, version)
+}
+
 // itemsWritten is what POST …/items answers, and what push answers for a
 // file it sent as several writes: every id, the last version, every change.
 type itemsWritten struct {
@@ -328,9 +351,10 @@ type itemsWritten struct {
 	Changed int      `json:"changed"`
 }
 
-// maxItemsPerWrite is the most items the server takes in one POST …/items
-// (spec 014 #34).
-const maxItemsPerWrite = store.MaxItemsPerWrite
+// itemsPerWrite is the most cases push sends in one POST …/items, which is
+// the most the server takes (spec 014 #34). A variable so that the tests of
+// how a file is split can use a small one; one test runs on the real number.
+var itemsPerWrite = store.MaxItemsPerWrite
 
 // refuseRepeatedIDs checks a file that goes out in several writes: one
 // request refuses an id given twice, and split across two the second would

@@ -131,6 +131,13 @@ describe.skipIf(!BINARY)('the harness against a real binary', () => {
     expect(new Set(stored.map((item) => item.version))).toEqual(new Set([firstVersion]));
   });
 
+  test('more items than a request takes are written in two', async () => {
+    // The package's chunk is the number the server takes (spec 032 #21).
+    tracepad.init({ host: store.host, key: KEY });
+    const items = Array.from({ length: 10_001 }, (_, n) => ({ input: n }));
+    expect(await tracepad.dataset('over-the-cap').putItems(items)).toEqual([2, 10_001]);
+  });
+
   test('a run that threw inside wrap is closed as failed', async () => {
     tracepad.init({ host: store.host, key: KEY });
     const golden = tracepad.dataset('failing');

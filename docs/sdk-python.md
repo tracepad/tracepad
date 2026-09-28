@@ -445,7 +445,7 @@ print(run.get()["summary"])
 |---|---|
 | `dataset(name)` | A `Dataset`. No request is made here — it is a name. |
 | `Dataset.create(description=…, metadata=…)` | Create it, or replace those two. |
-| `Dataset.put_items(items)` | One batch, one version tick → `(version, changed)`. A longer list than the 10,000 items one request takes goes as consecutive writes of 10,000, each its own version: the answer is the last version and the sum of the changes, a write that fails leaves the ones before it in place, and an id the list gives twice is refused before anything is sent. |
+| `Dataset.put_items(items)` | One batch, one version tick → `(version, changed)`. A longer list than the 10,000 items one request takes goes as consecutive writes of 10,000, each ticking the version if it changes anything: the answer is the last version and the sum of the changes, a write that fails leaves the ones before it in place, and an id the list gives twice is refused before anything is sent. |
 | `Dataset.items(version=…)` | A generator of `Item`s over every page, whole. |
 | `Dataset.run(name, *, metadata=…, id=…, dataset_version=…)` | Opens a `Run`. |
 | `Dataset.runs()`, `Run.get()`, `Run.items(unknown=…, limit=…)`, `compare(a, b)` | The server's JSON as `dict`s — no number is computed here. A run's items inline their payloads and are budget-checked, so that listing pages at the server's own size unless you name one. |

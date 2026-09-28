@@ -284,6 +284,39 @@ func zeros20MiB() []byte {
 	return body
 }
 
+// The cap the API describes is the cap it applies (spec 043 #36): both array
+// writes say `maxItems` in the OpenAPI document, which the clients are written
+// against, and it is maxItemsPerWrite.
+func TestOpenAPIDescribesTheItemCap(t *testing.T) {
+	var document struct {
+		Paths map[string]map[string]struct {
+			RequestBody struct {
+				Content map[string]struct {
+					Schema struct {
+						OneOf []struct {
+							MaxItems *int `json:"maxItems"`
+						} `json:"oneOf"`
+					} `json:"schema"`
+				} `json:"content"`
+			} `json:"requestBody"`
+		} `json:"paths"`
+	}
+	if err := json.Unmarshal(openAPIDocument, &document); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"/api/v1/scores", "/api/v1/datasets/{name}/items"} {
+		described := 0
+		for _, alternative := range document.Paths[path]["post"].RequestBody.Content["application/json"].Schema.OneOf {
+			if alternative.MaxItems != nil {
+				described = *alternative.MaxItems
+			}
+		}
+		if described != maxItemsPerWrite {
+			t.Errorf("openapi.json says POST %s takes at most %d, the server takes %d", path, described, maxItemsPerWrite)
+		}
+	}
+}
+
 // The cap is inclusive and refuses whole: an array at the cap is written, one
 // over it writes nothing.
 func TestBatchWritesAtTheCapAreWritten(t *testing.T) {

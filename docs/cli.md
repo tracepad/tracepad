@@ -591,7 +591,9 @@ unchanged at version 12
 ```
 
 A file of more than 10,000 cases — the most one request takes — goes as the
-fewest writes of up to 10,000 that carry it, each its own version; the line
+fewest writes of up to 10,000 that carry it — a write that changes something
+is a version of its own, and one that changes nothing leaves the version
+where it was; the line
 ends `sent as N writes`, and `--json` answers the one shape a single write
 has, with every id, the last version and the sum of the changes. A write that
 fails says how many cases before it are written; pushing the file again

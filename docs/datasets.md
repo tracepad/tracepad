@@ -167,7 +167,8 @@ and never otherwise.
   is a `413` (`this request carries N items; the server takes at most 10000
   per request — send them in batches`) and writes nothing. The SDKs' item
   push and `tracepad datasets push` send a longer list as consecutive writes
-  of 10,000, each its own tick.
+  of 10,000, so a write that changes something is a tick of its own, and one
+  that changes nothing is not.
 - A `POST` whose items all say what is stored already writes nothing and
   leaves the version where it was: `"changed": 0`. Equality is on the JSON
   value of `input`, `expected_output` and `metadata` plus the source pair:

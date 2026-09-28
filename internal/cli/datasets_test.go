@@ -138,54 +138,128 @@ func TestDatasetsPushTakesBothFileShapes(t *testing.T) {
 	}
 }
 
-// A file longer than the 10,000 items one request takes goes as consecutive
-// writes, each its own version (spec 014 #34); the answer is the last version
-// and the sum of the changes, in the one shape a single write has.
-func TestDatasetsPushSendsALongFileInWritesTheServerTakes(t *testing.T) {
-	h := newHarness(t)
+// casesFile writes n cases as a JSONL file; a case with no input is the one
+// the server refuses, and `ids` names the cases that carry an id.
+func casesFile(t *testing.T, n int, noInput map[int]bool, ids map[int]string) string {
+	t.Helper()
 	var lines []string
-	for i := range 20_001 {
-		lines = append(lines, fmt.Sprintf(`{"input": %d}`, i))
-	}
-	cases := strings.Join(lines, "\n")
-
-	got := h.pushCases(t, "golden", cases, ".jsonl")
-	if got.code != ExitOK || !strings.Contains(got.stdout, "version 3: 20001 items changed, 20001 in the batch, sent as 3 writes") {
-		t.Fatalf("push = %+v", got)
+	for i := range n {
+		fields := []string{fmt.Sprintf(`"input": %d`, i)}
+		if noInput[i] {
+			fields = nil
+		}
+		if id, ok := ids[i]; ok {
+			fields = append(fields, fmt.Sprintf(`"id": %q`, id))
+		}
+		lines = append(lines, "{"+strings.Join(fields, ", ")+"}")
 	}
 	path := filepath.Join(t.TempDir(), "cases.jsonl")
-	if err := os.WriteFile(path, []byte(cases), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	asJSON := h.run(t.Context(), false, "datasets", "push", "golden", "--file", path)
-	written, err := decode[itemsWritten](json.RawMessage(asJSON.stdout))
-	// The cases carry no ids, so the second push adds them all again.
-	if err != nil || len(written.IDs) != 20_001 || written.Version != 6 || written.Changed != 20_001 {
-		t.Fatalf("json push = %d ids, version %d, changed %d, err %v", len(written.IDs), written.Version, written.Changed, err)
-	}
-
-	// One request refuses an id given twice; split, the second would quietly
-	// become an edit of the first — so the file is refused before anything
-	// is sent.
-	lines[3] = fmt.Sprintf(`{"id": %q, "input": 3}`, cliItemID(1))
-	lines[10_000] = fmt.Sprintf(`{"id": %q, "input": 10000}`, cliItemID(1))
-	// --description included: nothing is sent.
-	path = filepath.Join(t.TempDir(), "repeated.jsonl")
 	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got = h.run(t.Context(), true, "datasets", "push", "golden", "--file", path, "--description", "changed")
-	if got.code != ExitFailure || !strings.Contains(got.stderr, "the case at index 10000 repeats id "+cliItemID(1)+" of the case at index 3") {
+	return path
+}
+
+// smallWrites makes a write carry three cases, so that how a file is split
+// takes a handful of cases to test rather than tens of thousands.
+func smallWrites(t *testing.T) {
+	t.Helper()
+	was := itemsPerWrite
+	itemsPerWrite = 3
+	t.Cleanup(func() { itemsPerWrite = was })
+}
+
+// A file longer than a request takes goes as consecutive writes (spec 014
+// #34); the answer is the last version and the sum of the changes, in the one
+// shape a single write has.
+func TestDatasetsPushSendsALongFileInSeveralWrites(t *testing.T) {
+	smallWrites(t)
+	h := newHarness(t)
+	path := casesFile(t, 7, nil, nil)
+
+	got := h.run(t.Context(), true, "datasets", "push", "golden", "--file", path)
+	if got.code != ExitOK || !strings.Contains(got.stdout, "version 3: 7 items changed, 7 in the batch, sent as 3 writes") {
+		t.Fatalf("push = %+v", got)
+	}
+	// The cases carry no ids, so the second push adds them all again.
+	asJSON := h.run(t.Context(), false, "datasets", "push", "golden", "--file", path)
+	written, err := decode[itemsWritten](json.RawMessage(asJSON.stdout))
+	if err != nil || len(written.IDs) != 7 || written.Version != 6 || written.Changed != 7 {
+		t.Fatalf("json push = %d ids, version %d, changed %d, err %v", len(written.IDs), written.Version, written.Changed, err)
+	}
+	// A file one write carries is answered as it always was.
+	if got := h.run(t.Context(), true, "datasets", "push", "small", "--file", casesFile(t, 2, nil, nil)); !strings.Contains(got.stdout, "version 1: 2 items changed, 2 in the batch\n") {
+		t.Errorf("one write = %+v, want no mention of writes", got)
+	}
+}
+
+// One request refuses an id given twice; split, the second would quietly
+// become an edit of the first — so the file is refused before anything is
+// sent, and the description with it.
+func TestDatasetsPushRefusesARepeatedIDBeforeAnythingIsSent(t *testing.T) {
+	smallWrites(t)
+	h := newHarness(t)
+	h.pushCases(t, "golden", jsonlCases, ".jsonl")
+	path := casesFile(t, 5, nil, map[int]string{1: cliItemID(9), 4: cliItemID(9)})
+
+	got := h.run(t.Context(), true, "datasets", "push", "golden", "--file", path, "--description", "changed")
+	if got.code != ExitFailure || !strings.Contains(got.stderr, "the case at index 4 repeats id "+cliItemID(9)+" of the case at index 1") {
 		t.Fatalf("repeated id = %+v", got)
 	}
 	shown, err := decode[struct {
 		Version int `json:"version"`
 	}](json.RawMessage(h.run(t.Context(), false, "datasets", "show", "golden").stdout))
-	if err != nil || shown.Version != 6 {
-		t.Errorf("version = %d after a refused file, want 6 (err %v)", shown.Version, err)
+	if err != nil || shown.Version != 1 {
+		t.Errorf("version = %d after a refused file, want 1 (err %v)", shown.Version, err)
 	}
 	if got := h.run(t.Context(), false, "datasets", "ls"); strings.Contains(got.stdout, `"changed"`) {
 		t.Errorf("a refused file changed the description: %s", got.stdout)
+	}
+}
+
+// The server counts its indexes from the first case of the write it was sent,
+// and names none for a write of one case: the error says which cases of the
+// file the write was, and what is written before it.
+func TestDatasetsPushPlacesAFailedWriteInTheFile(t *testing.T) {
+	smallWrites(t)
+	h := newHarness(t)
+	for name, c := range map[string]struct {
+		badCase int
+		want    []string
+	}{
+		"in the first write": {1, []string{"item at index 1", "in the write of cases 0–2 of the file, the first of 3 writes; nothing is written"}},
+		"in the second":      {4, []string{"item at index 1", "in the write of cases 3–5 of the file; an index in this message counts from case 3", "the first 3 cases are written, at version 1", "adds the ones without an id a second time"}},
+		"alone in the last":  {6, []string{"in the write of case 6 of the file", "the first 6 cases are written, at version 2"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := casesFile(t, 7, map[int]bool{c.badCase: true}, nil)
+			got := h.run(t.Context(), true, "datasets", "push", "fail-"+strings.ReplaceAll(name, " ", "-"), "--file", path)
+			if got.code != ExitFailure {
+				t.Fatalf("push = %+v", got)
+			}
+			for _, want := range c.want {
+				if !strings.Contains(got.stderr, want) {
+					t.Errorf("stderr = %q, want it to say %q", got.stderr, want)
+				}
+			}
+		})
+	}
+	// A file one write carries is refused as the server says it, and no more.
+	got := h.run(t.Context(), true, "datasets", "push", "fail-small", "--file", casesFile(t, 2, map[int]bool{1: true}, nil))
+	if got.code != ExitFailure || strings.Contains(got.stderr, "of the file") {
+		t.Errorf("one write = %+v, want the server's own error", got)
+	}
+}
+
+// The cap the command splits at is the cap the server takes: one case over it
+// is two writes, against a real server, on the real number (spec 014 #34).
+func TestDatasetsPushSplitsAtTheNumberTheServerTakes(t *testing.T) {
+	h := newHarness(t)
+	path := casesFile(t, itemsPerWrite+1, nil, nil)
+
+	got := h.run(t.Context(), true, "datasets", "push", "golden", "--file", path)
+	if got.code != ExitOK || !strings.Contains(got.stdout, "version 2: 10001 items changed, 10001 in the batch, sent as 2 writes") {
+		t.Fatalf("push = %+v", got)
 	}
 }
 
