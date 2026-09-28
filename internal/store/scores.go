@@ -54,6 +54,10 @@ type ScoreWrite struct {
 	Scores    []*Score
 }
 
+// weight is the scores the write carries (spec 043 #35): an array has no
+// count cap, and a body at the cap is hundreds of thousands of them.
+func (s *ScoreWrite) weight() int { return len(s.Scores) }
+
 // apply upserts every score by (project_id, id). A re-POST with the same id
 // replaces the row wholesale — a correction is a re-POST, not a delete and an
 // insert (#3), so `created_at` moves to the receive time of the newest

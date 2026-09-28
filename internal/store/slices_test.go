@@ -278,6 +278,96 @@ func TestWriterWindowClosesAtItsWeight(t *testing.T) {
 	}
 }
 
+// A write that carries rows weighs them, not one (spec 043 #35): an array of
+// scores or dataset items has no count cap, and weighing one it let a window
+// take 64 of them whole.
+func TestAJobWeighsTheRowsItCarries(t *testing.T) {
+	scores := make([]*Score, 700)
+	items := make([]*DatasetItemInput, 1200)
+	targets := make([]QueueTarget, 300)
+	for _, c := range []struct {
+		job  WriteJob
+		want int
+	}{
+		{&ScoreWrite{Scores: scores}, 700},
+		{&DatasetItemsWrite{Items: items}, 1200},
+		{&QueueItemsAdd{Targets: targets}, 300},
+		{&QueueItemsFromTraces{Limit: 1000}, 1000},
+		{&TraceDelete{IDs: []string{"a", "b", "c"}}, 3},
+		{&ScoreDelete{ID: "a"}, 1},
+	} {
+		if got := weightOf(c.job); got != c.want {
+			t.Errorf("%T weighs %d, want %d", c.job, got, c.want)
+		}
+	}
+}
+
+// Big writes that are not ingest close their windows too (spec 043 #35):
+// sixteen score arrays of 600 queued behind a held writer commit at most two to
+// a transaction, where weighing one each they committed all sixteen in one.
+func TestAWindowOfScoreWritesClosesAtItsWeight(t *testing.T) {
+	s, p := openIngestStore(t)
+	var mu sync.Mutex
+	var windows []int
+	w, err := s.NewWriter(WriterOptions{CommitWindow: 100 * time.Millisecond, Committed: func(rows int) {
+		mu.Lock()
+		defer mu.Unlock()
+		windows = append(windows, rows)
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	parked, release := make(chan struct{}, 1), make(chan struct{})
+	w.beforeCommit = func() {
+		select {
+		case parked <- struct{}{}:
+			<-release
+		default:
+		}
+	}
+
+	go func() {
+		if err := w.Submit(context.Background(), batchFor(p.ID, fmt.Sprintf("%032x", 1), spanHex(1))); err != nil {
+			t.Error(err)
+		}
+	}()
+	<-parked
+
+	one := 1.0
+	var wg sync.WaitGroup
+	for i := range 16 {
+		job := &ScoreWrite{ProjectID: p.ID, Scores: make([]*Score, 600)}
+		for j := range job.Scores {
+			job.Scores[j] = &Score{ID: fmt.Sprintf("s-%d-%d", i, j), SessionID: "sess", Name: "q",
+				DataType: "numeric", Value: &one, Timestamp: 1}
+		}
+		wg.Go(func() {
+			if err := w.Submit(context.Background(), job); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	waitFor(t, func() bool { return len(w.queue) == 16 })
+	close(release)
+	wg.Wait()
+
+	// Counted in transactions, not in the weights Committed reports: those
+	// are what is under test, and weighing one each they summed to 16.
+	mu.Lock()
+	defer mu.Unlock()
+	if got := len(windows) - 1; got < 8 {
+		t.Errorf("sixteen writes of 600 committed in %d transactions, want at least 8: %v", got, windows)
+	}
+	var stored int
+	if err := s.db.QueryRow(`SELECT count(*) FROM scores WHERE project_id = ?`, p.ID).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored != 16*600 {
+		t.Errorf("%d scores stored, want %d", stored, 16*600)
+	}
+}
+
 // A trace deleted between two slices of its export is written whole by the
 // slice that carries it on, as a late export would write it — not brought back
 // as a row with its id alone (spec 043 #31). One still there is only stamped.

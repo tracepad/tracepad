@@ -58,8 +58,8 @@ type WriteJob interface {
 }
 
 // weighted is a job that says how many rows it writes, which is what a window
-// is bounded by beside its count of jobs (spec 043 #12). A job that does not
-// say weighs one row.
+// is bounded by beside its count of jobs (spec 043 #12, #35). A job that does
+// not say weighs one row.
 type weighted interface {
 	weight() int
 }

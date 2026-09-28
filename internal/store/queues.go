@@ -208,6 +208,9 @@ type QueueItemsAdd struct {
 	Existing int
 }
 
+// weight is the targets the add names, up to 1,000 (spec 043 #35).
+func (a *QueueItemsAdd) weight() int { return len(a.Targets) }
+
 func (a *QueueItemsAdd) apply(tx *sql.Tx) error {
 	a.Items, a.Added, a.Existing = nil, 0, 0
 	if err := requireQueue(tx, a.ProjectID, a.Queue); err != nil {
@@ -270,6 +273,9 @@ type QueueItemsFromTraces struct {
 	Existing int
 	Capped   bool
 }
+
+// weight is the most items the add may write, its Limit (spec 043 #35).
+func (f *QueueItemsFromTraces) weight() int { return f.Limit }
 
 func (f *QueueItemsFromTraces) apply(tx *sql.Tx) error {
 	f.Added, f.Existing, f.Capped = 0, 0, false
