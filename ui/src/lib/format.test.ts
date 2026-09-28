@@ -4,6 +4,7 @@ import {
 	bytes,
 	cost,
 	count,
+	counted,
 	duration,
 	elapsed,
 	relative,
@@ -79,6 +80,15 @@ describe('count', () => {
 		expect(count(12345)).toBe('12,345');
 		expect(count(0)).toBe('0');
 		expect(count(undefined)).toBe(ABSENT);
+	});
+});
+
+describe('counted', () => {
+	it('names what it counts, one or many, and is absent when the count is', () => {
+		expect(counted(1, 'trace')).toBe('1 trace');
+		expect(counted(0, 'trace')).toBe('0 traces');
+		expect(counted(12345, 'session')).toBe('12,345 sessions');
+		expect(counted(null, 'trace')).toBe(ABSENT);
 	});
 });
 

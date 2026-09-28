@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { createProject, section, signIn as enter, state } from './harness';
+import { createProject, section, sideways, signIn as enter, state } from './harness';
 
 // The Evals screens (spec 016, Testing — e2e), against the real binary. The
 // corpus is not enough here: the suite creates a dataset, its items and a run
@@ -283,7 +283,9 @@ test('the compare page renders header and verdicts, the toggle hides same, swap 
 test('two ticked runs of one dataset make Compare a link', async ({ page }) => {
 	await signIn(page);
 	await page.goto('/runs');
-	await expect(page.getByRole('columnheader', { name: 'Dataset' })).toBeVisible();
+	// The dataset is a column on a desktop and a link under the name on a
+	// phone (spec 006 #22): a link either way.
+	await expect(page.getByRole('link', { name: DATASET }).first()).toBeVisible();
 	await expect(page.getByRole('link', { name: 'Compare' })).toHaveCount(0);
 
 	const boxes = page.getByRole('checkbox');
@@ -488,5 +490,25 @@ test('no screen scrolls the page sideways', async ({ page }) => {
 			return root.scrollWidth - root.clientWidth;
 		});
 		expect(overflow, path).toBeLessThanOrEqual(0);
+	}
+});
+
+// Spec 006 #22: on a phone every eval listing folds to the width it is given —
+// the columns that name a row stay, the rest go under it — and none of them
+// scrolls sideways in its own box either.
+test('on a phone the eval listings fold rather than scroll', async ({ page }, testInfo) => {
+	test.skip(testInfo.project.name !== 'mobile', 'the narrow width is the test');
+	await signIn(page);
+	for (const [path, table, heads] of [
+		['/datasets', page.locator('main table').first(), ['Name']],
+		[`/datasets/${DATASET}`, page.locator('main table').first(), ['Id', 'Input']],
+		['/runs', page.locator('main table').first(), ['Compare', 'Name', 'Status']],
+		[`/runs/${RUN_A}`, page.getByRole('table', { name: 'Items' }), ['Item', 'Scores']],
+		['/score-configs', page.locator('main table').first(), ['Name', 'Actions']]
+	] as const) {
+		await page.goto(path);
+		await expect(table.locator('tbody tr').first()).toBeVisible();
+		await expect(table.locator('thead th'), path).toHaveText([...heads]);
+		expect(await sideways(table), path).toBeLessThanOrEqual(0);
 	}
 });

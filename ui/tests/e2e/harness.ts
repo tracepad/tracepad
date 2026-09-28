@@ -260,3 +260,15 @@ export async function section(page: Page, name: string): Promise<Locator> {
 	const sheet = page.getByRole('navigation', { name: 'More sections' });
 	return sheet.getByRole('link', { name, exact: true });
 }
+
+/**
+ * How far a table's own box would scroll sideways: 0 once a listing folds to
+ * fit it (spec 006 #22). The box is the nearest ancestor that scrolls.
+ */
+export async function sideways(table: Locator): Promise<number> {
+	return table.evaluate((node) => {
+		let box = node.parentElement;
+		while (box && getComputedStyle(box).overflowX === 'visible') box = box.parentElement;
+		return box ? box.scrollWidth - box.clientWidth : 0;
+	});
+}

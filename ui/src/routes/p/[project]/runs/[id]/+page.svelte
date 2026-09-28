@@ -16,6 +16,7 @@
 	import Button from '$lib/components/Button.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import CopyButton from '$lib/components/CopyButton.svelte';
+	import Folded from '$lib/components/Folded.svelte';
 	import RunItemDetail from '$lib/components/evals/RunItemDetail.svelte';
 	import StatusChip from '$lib/components/evals/StatusChip.svelte';
 	import Summary from '$lib/components/evals/Summary.svelte';
@@ -25,7 +26,8 @@
 	import TraceDetail from '$lib/components/TraceDetail.svelte';
 	import TracePeekMeta from '$lib/components/TracePeekMeta.svelte';
 	import { compareHref, NO_ITEM, runItemKey, scoreText, short } from '$lib/evals';
-	import { count, timestamp } from '$lib/format';
+	import { Fold } from '$lib/fold.svelte';
+	import { count, counted, timestamp } from '$lib/format';
 	import { asPage, Listing, UrlSpot, Walk } from '$lib/listing.svelte';
 	import { freshSearch } from '$lib/page';
 	import { project } from '$lib/project.svelte';
@@ -213,6 +215,13 @@
 	let deleting = $state(false);
 
 	const fieldClass = 'border-border bg-canvas text-fg rounded-md border px-2 py-1 text-sm';
+
+	// In a box narrower than the items' table a row is the case and its
+	// scores; its number and how many attempts it took fold under the case
+	// (spec 006 #22). The number is the unfolded table's width and its
+	// `min-width`.
+	const fold = new Fold(672);
+	const narrow = $derived(fold.narrow);
 </script>
 
 <svelte:head><title>{run?.name ?? 'Run'} · Runs · Tracepad</title></svelte:head>
@@ -350,13 +359,21 @@
 
 		<ListingShell {listing} noun="item" back="first">
 			{#snippet table()}
-				<div class="min-h-0 shrink-0 overflow-x-auto">
-					<table aria-label="Items" class="w-full min-w-2xl table-fixed border-collapse text-left">
+				<div bind:clientWidth={fold.box} class="min-h-0 shrink-0 overflow-x-auto">
+					<table
+						aria-label="Items"
+						class="w-full table-fixed border-collapse text-left"
+						style:min-width={fold.min}
+					>
 						<thead class="bg-canvas text-subtle text-xs whitespace-nowrap">
 							<tr class="border-border border-b">
-								<th scope="col" class="w-14 px-3 py-2 text-right font-medium">#</th>
-								<th scope="col" class="w-28 px-3 py-2 font-medium">Item</th>
-								<th scope="col" class="w-24 px-3 py-2 text-right font-medium">Attempts</th>
+								{#if !narrow}
+									<th scope="col" class="w-14 px-3 py-2 text-right font-medium">#</th>
+								{/if}
+								<th scope="col" class={['px-3 py-2 font-medium', narrow ? 'w-32' : 'w-28']}>Item</th>
+								{#if !narrow}
+									<th scope="col" class="w-24 px-3 py-2 text-right font-medium">Attempts</th>
+								{/if}
 								<th scope="col" class="px-3 py-2 font-medium">Scores</th>
 							</tr>
 						</thead>
@@ -369,7 +386,9 @@
 										lit && 'bg-accent-soft'
 									]}
 								>
-									<td class="text-muted px-3 py-1.5 text-right tabular-nums">{row.seq ?? '—'}</td>
+									{#if !narrow}
+										<td class="text-muted px-3 py-1.5 text-right tabular-nums">{row.seq ?? '—'}</td>
+									{/if}
 									<td class="truncate px-3 py-1.5 font-mono text-xs">
 										<!-- Enter opens the panel, as a click does; ⌘-click gets a
 										     link to this same view with the case open. -->
@@ -386,8 +405,20 @@
 											{row.id === NO_ITEM ? 'no item' : short(row.id)}
 										</a>
 										{#if row.unknown}<span class="text-warn ml-1">unknown</span>{/if}
+										{#if narrow}
+											<div class="text-muted font-sans tabular-nums">
+												<Folded
+													values={[
+														row.seq == null ? null : `#${row.seq}`,
+														counted(row.attempts.length, 'attempt')
+													]}
+												/>
+											</div>
+										{/if}
 									</td>
-									<td class="text-muted px-3 py-1.5 text-right tabular-nums">{row.attempts.length}</td>
+									{#if !narrow}
+										<td class="text-muted px-3 py-1.5 text-right tabular-nums">{row.attempts.length}</td>
+									{/if}
 									<td class="px-3 py-1.5">
 										<ul class="flex flex-wrap gap-1.5">
 											{#each values(row) as [name, value] (name)}

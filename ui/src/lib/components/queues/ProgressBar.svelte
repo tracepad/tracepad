@@ -8,7 +8,16 @@
 	// skipped item is finished with and is not a verdict, and a bar that
 	// counted the two the same would say a queue nobody judged is complete.
 
-	let { queue, wide = false }: { queue: AnnotationQueue; wide?: boolean } = $props();
+	let {
+		queue,
+		wide = false,
+		stacked = false
+	}: {
+		queue: AnnotationQueue;
+		wide?: boolean;
+		/** The count under the bar, for a folded listing's narrow column (spec 006 #22). */
+		stacked?: boolean;
+	} = $props();
 
 	const at = $derived(progress(queue));
 	const title = $derived(
@@ -16,7 +25,7 @@
 	);
 </script>
 
-<div class="flex items-center gap-2" {title}>
+<div class={['flex gap-2', stacked ? 'flex-col items-start gap-1' : 'items-center']} {title}>
 	<div
 		class={[
 			'bg-raised h-1.5 overflow-hidden rounded-full',

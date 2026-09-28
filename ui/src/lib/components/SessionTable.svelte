@@ -1,9 +1,11 @@
 <script lang="ts">
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import type { SessionRow } from '$lib/api/client.svelte';
-	import { ABSENT, cost, count, timestamp } from '$lib/format';
+	import { Fold } from '$lib/fold.svelte';
+	import { ABSENT, cost, count, counted, timestamp } from '$lib/format';
 	import { modified, selecting } from '$lib/peek';
 	import { href } from '$lib/project.svelte';
+	import Folded from './Folded.svelte';
 
 	// The session listing, one row per session, mapping 1:1 onto what
 	// `GET /api/v1/sessions` returns. Every number counts traces, which is what
@@ -33,20 +35,31 @@
 	}
 
 	const numeric = 'px-3 py-1.5 text-right tabular-nums';
+
+	// In a box narrower than the table the row is when it was last seen, which
+	// session and whether any of it failed; how many traces, what they cost
+	// and when it began fold under the id (spec 006 #22). The number is the
+	// unfolded table's width and its `min-width`.
+	const fold = new Fold(672);
+	const narrow = $derived(fold.narrow);
 </script>
 
 <!-- The table scrolls inside its own box; the page never scrolls sideways
-     (spec 006 #15). -->
-<div class="min-h-0 flex-1 overflow-auto">
-	<table class="w-full min-w-2xl border-collapse text-left">
+     (spec 006 #15), and folds in a box narrower than itself (#22). -->
+<div bind:clientWidth={fold.box} class="min-h-0 flex-1 overflow-auto">
+	<table class="w-full border-collapse text-left" style:min-width={fold.min}>
 		<thead class="bg-canvas text-subtle sticky top-0 z-10 text-xs whitespace-nowrap">
 			<tr class="border-border border-b">
-				<th scope="col" class="w-44 px-3 py-2 font-medium">Last seen</th>
-				<th scope="col" class="px-3 py-2 font-medium">Session</th>
-				<th scope="col" class="w-24 px-3 py-2 text-right font-medium">Traces</th>
-				<th scope="col" class="w-28 px-3 py-2 font-medium">Errors</th>
-				<th scope="col" class="w-24 px-3 py-2 text-right font-medium">Cost</th>
-				<th scope="col" class="w-44 px-3 py-2 font-medium">First seen</th>
+				<th scope="col" class={['px-3 py-2 font-medium', !narrow && 'w-44']}>Last seen</th>
+				<th scope="col" class={['px-3 py-2 font-medium', narrow && 'w-full']}>Session</th>
+				{#if !narrow}
+					<th scope="col" class="w-24 px-3 py-2 text-right font-medium">Traces</th>
+				{/if}
+				<th scope="col" class={['px-3 py-2 font-medium', !narrow && 'w-28']}>Errors</th>
+				{#if !narrow}
+					<th scope="col" class="w-24 px-3 py-2 text-right font-medium">Cost</th>
+					<th scope="col" class="w-44 px-3 py-2 font-medium">First seen</th>
+				{/if}
 			</tr>
 		</thead>
 		<tbody>
@@ -77,9 +90,21 @@
 							{timestamp(row.last_seen)}
 						</a>
 					</td>
-					<td class="truncate px-3 py-1.5 font-mono">{row.id}</td>
-					<td class="text-muted {numeric}">{count(row.trace_count)}</td>
-					<td class="px-3 py-1.5">
+					{#if narrow}
+						<td class="max-w-0 px-3 py-1.5">
+							<div class="truncate font-mono">{row.id}</div>
+							<div class="text-muted text-xs tabular-nums">
+								<Folded values={[counted(row.trace_count, 'trace'), cost(row.total_cost)]} />
+							</div>
+							<div class="text-muted text-xs tabular-nums">
+								<Folded values={[`first seen ${timestamp(row.first_seen)}`]} />
+							</div>
+						</td>
+					{:else}
+						<td class="truncate px-3 py-1.5 font-mono">{row.id}</td>
+						<td class="text-muted {numeric}">{count(row.trace_count)}</td>
+					{/if}
+					<td class="px-3 py-1.5 whitespace-nowrap">
 						{#if row.error_count > 0}
 							<!-- Colour is never the message on its own. -->
 							<span
@@ -94,10 +119,12 @@
 							<span class="text-subtle text-xs">{ABSENT}</span>
 						{/if}
 					</td>
-					<td class="text-muted {numeric}">{cost(row.total_cost)}</td>
-					<td class="text-muted px-3 py-1.5 font-mono text-xs whitespace-nowrap tabular-nums">
-						{timestamp(row.first_seen)}
-					</td>
+					{#if !narrow}
+						<td class="text-muted {numeric}">{cost(row.total_cost)}</td>
+						<td class="text-muted px-3 py-1.5 font-mono text-xs whitespace-nowrap tabular-nums">
+							{timestamp(row.first_seen)}
+						</td>
+					{/if}
 				</tr>
 			{/each}
 		</tbody>

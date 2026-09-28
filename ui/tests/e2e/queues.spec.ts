@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
-import { createProject, signIn as enter, state, WIRE_TRACE } from './harness';
+import { createProject, sideways, signIn as enter, state, WIRE_TRACE } from './harness';
 
 // The annotation loop end to end (spec 024, Testing — e2e), against the real
 // binary: declare a queue, fill it by hand and by filter, work it at the desk,
@@ -105,6 +105,15 @@ test('a queue is declared over the two configs, and starts empty', async ({ page
 
 	await expect(page).toHaveURL(new RegExp(`/queues/${QUEUE}$`));
 	await expect(page.getByText('This queue is empty')).toBeVisible();
+
+	// On a phone the listing is the queue's name and its progress, the scores
+	// it asks for folded under the name, and it fits its box (spec 006 #22).
+	if (test.info().project.name !== 'mobile') return;
+	await page.goto('/queues');
+	const table = page.locator('main table');
+	await expect(table.locator('thead th')).toHaveText(['Name', 'Progress']);
+	await expect(page.getByRole('row').filter({ hasText: QUEUE })).toContainText('accuracy');
+	expect(await sideways(table)).toBeLessThanOrEqual(0);
 });
 
 test('one trace goes in by hand and the rest by filter', async ({ page }) => {

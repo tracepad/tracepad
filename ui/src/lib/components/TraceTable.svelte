@@ -1,10 +1,9 @@
 <script lang="ts">
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
-	import { MediaQuery } from 'svelte/reactivity';
 	import type { TraceRow } from '$lib/api/client.svelte';
 	import { ABSENT, cost, duration, timestamp, wait } from '$lib/format';
 	import { modified, selecting } from '$lib/peek';
-	import { PHONE } from '$lib/phone';
+	import { Fold } from '$lib/fold.svelte';
 	import { href } from '$lib/project.svelte';
 	import { highlight, searchTerms } from '$lib/search';
 	import Folded from './Folded.svelte';
@@ -44,10 +43,13 @@
 
 	const terms = $derived(searchTerms(search));
 
-	// On a phone the row is when, what and whether it failed, and the other
-	// columns fold under the name: where it ran, how long it took and what it
-	// cost on one line, whose and which session on the next (spec 006 #18).
-	const phone = new MediaQuery(PHONE);
+	// In a box narrower than the table the row is when, what and whether it
+	// failed, and the other columns fold under the name: where it ran, how
+	// long it took and what it cost on one line, whose and which session on
+	// the next (spec 006 #18, #22). The number is the unfolded table's width and
+	// its `min-width`: nine columns at the widths their usual values take.
+	const fold = new Fold(896);
+	const narrow = $derived(fold.narrow);
 	const firstToken = (row: TraceRow) =>
 		row.ttft_ms == null ? null : `TTFT ${wait(row.ttft_ms)}`;
 
@@ -100,7 +102,7 @@
      way for the same reason: a session is the reading unit, and the trace table
      is where a reader meets one. The third tab stop in the row — except where
      the reader is already in that session, and the cell stays the text it was
-     (#17). Both stay on a phone's row: the panel's own meta leaves the session
+     (#17). Both stay on a folded row: the panel's own meta leaves the session
      out below `md`, and a destination a phone cannot reach is not one there. -->
 {#snippet session(row: TraceRow, fold = false)}
 	{#if !row.session_id}
@@ -120,18 +122,21 @@
 {/snippet}
 
 <!-- The table scrolls inside its own box; the page never scrolls sideways
-     (spec 006 #15). On a phone it has three columns and nothing to scroll to
-     (#18). -->
-<div class="min-h-0 flex-1 overflow-auto">
-	<table class={['w-full border-collapse text-left', !phone.current && 'min-w-3xl']}>
+     (spec 006 #15). In a box narrower than itself it has three columns and
+     nothing to scroll to (#18, #22). -->
+<div bind:clientWidth={fold.box} class="min-h-0 flex-1 overflow-auto">
+	<table
+		class="w-full border-collapse text-left"
+		style:min-width={fold.min}
+	>
 		<thead class="bg-canvas text-subtle sticky top-0 z-10 text-xs whitespace-nowrap">
 			<tr class="border-border border-b">
-				<th scope="col" class={['px-3 py-2 font-medium', !phone.current && 'w-44']}>Time</th>
+				<th scope="col" class={['px-3 py-2 font-medium', !narrow && 'w-44']}>Time</th>
 				<!-- `w-full` beside the cell's `max-w-0`: the name takes what the
 				     other two leave and is cut to an ellipsis there, rather than
 				     widening the table past the screen. -->
-				<th scope="col" class={['px-3 py-2 font-medium', phone.current && 'w-full']}>Name</th>
-				{#if !phone.current}
+				<th scope="col" class={['px-3 py-2 font-medium', narrow && 'w-full']}>Name</th>
+				{#if !narrow}
 					<th scope="col" class="w-28 px-3 py-2 font-medium">Environment</th>
 					<th scope="col" class="w-36 px-3 py-2 font-medium">User</th>
 					<th scope="col" class="w-36 px-3 py-2 font-medium">Session</th>
@@ -145,7 +150,7 @@
 						TTFT
 					</th>
 				{/if}
-				<th scope="col" class={['px-3 py-2 font-medium', !phone.current && 'w-24']}>Errors</th>
+				<th scope="col" class={['px-3 py-2 font-medium', !narrow && 'w-24']}>Errors</th>
 			</tr>
 		</thead>
 		<!-- One `tbody` per trace, because a row that matched a search is two
@@ -195,7 +200,7 @@
 							{timestamp(row.timestamp)}
 						</a>
 					</td>
-					{#if phone.current}
+					{#if narrow}
 						<td class="max-w-0 px-3 py-1.5">
 							<div class="truncate">{row.name ?? ABSENT}</div>
 							<div class="text-muted text-xs tabular-nums">
@@ -251,7 +256,7 @@
 							lit && 'bg-accent-soft'
 						]}
 					>
-						<td class="text-muted px-3 pt-0 pb-1.5 font-mono text-xs" colspan={phone.current ? 3 : 9}>
+						<td class="text-muted px-3 pt-0 pb-1.5 font-mono text-xs" colspan={narrow ? 3 : 9}>
 							<span class="text-subtle">{row.match.field}</span>
 							{#each highlight(row.match.snippet, terms) as piece, i (i)}
 								{#if piece.hit}<mark class="bg-accent-soft text-fg rounded-sm px-0.5"

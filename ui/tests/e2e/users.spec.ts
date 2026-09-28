@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { createProject, signIn as enter, state } from './harness';
+import { createProject, sideways, signIn as enter, state } from './harness';
 
 // The Users screens (spec 023, Testing — e2e), against the real binary.
 //
@@ -356,4 +356,24 @@ test('375 px never scrolls the page sideways', async ({ page }) => {
 	await page.goto(`/users/${encodeURIComponent(ALICE)}`);
 	await expect(page.locator('dt').filter({ hasText: /^Traces$/ })).toBeVisible();
 	expect(await overflow()).toBeLessThanOrEqual(0);
+});
+
+// Spec 006 #22: a listing folds by the width of its own box, not the screen's.
+// On a phone the user and the errors stay and the rest folds under the id; in
+// a desktop window of 1,000 px the column leaves the table 792 px, which the
+// users' seven columns do not fit and the sessions' six do.
+test('the users fold on a phone and in a narrow desktop window', async ({ page }, testInfo) => {
+	if (testInfo.project.name === 'desktop') await page.setViewportSize({ width: 1000, height: 800 });
+	await signIn(page);
+	await page.goto('/users');
+
+	const table = page.locator('main table');
+	await expect(table.locator('thead th')).toHaveText(['User', 'Errors']);
+	const alice = page.getByRole('row').filter({ hasText: 'alice@e2e' });
+	await expect(alice).toContainText('2 traces · 1 session · $0.8000');
+	expect(await sideways(table)).toBeLessThanOrEqual(0);
+
+	if (testInfo.project.name !== 'desktop') return;
+	await page.goto('/sessions');
+	await expect(page.locator('main table thead th')).toHaveCount(6);
 });

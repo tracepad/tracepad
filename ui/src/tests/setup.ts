@@ -2,6 +2,29 @@ import '@testing-library/jest-dom/vitest';
 import { cleanup } from '@testing-library/svelte';
 import { afterAll, afterEach } from 'vitest';
 
+// jsdom lays nothing out, so it has no ResizeObserver, and `bind:clientWidth`
+// makes one. A box that never resizes is what jsdom's layout is anyway; a test
+// that needs a width gives the element one (`clientWidth` reads 0 otherwise).
+globalThis.ResizeObserver ??= class {
+	observe() {}
+	unobserve() {}
+	disconnect() {}
+};
+
+// Nor has it `matchMedia`, and every listing asks it whether this is a phone
+// until its box is measured (spec 006 #22). The default answer is a desktop
+// that did not ask for less motion; a test about a phone assigns its own.
+window.matchMedia ??= ((query: string) => ({
+	matches: false,
+	media: query,
+	onchange: null,
+	addEventListener() {},
+	removeEventListener() {},
+	addListener() {},
+	removeListener() {},
+	dispatchEvent: () => false
+})) as typeof window.matchMedia;
+
 // Components mounted by one test must not still be in the document when the
 // next one queries it.
 afterEach(cleanup);

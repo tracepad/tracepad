@@ -8,6 +8,7 @@
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import NewQueueDialog from '$lib/components/queues/NewQueueDialog.svelte';
 	import ProgressBar from '$lib/components/queues/ProgressBar.svelte';
+	import { Fold } from '$lib/fold.svelte';
 	import { count } from '$lib/format';
 	import { href, project } from '$lib/project.svelte';
 
@@ -50,6 +51,13 @@
 	].join('\n');
 
 	const cell = 'truncate px-3 py-1.5';
+
+	// In a box narrower than the table a row is the queue's name and how far
+	// along it is; the description and the scores it asks for fold under the
+	// name (spec 006 #22). The number is the unfolded table's width and its
+	// `min-width`.
+	const fold = new Fold(736);
+	const narrow = $derived(fold.narrow);
 </script>
 
 <svelte:head><title>Queues · Tracepad</title></svelte:head>
@@ -81,37 +89,60 @@
 		{failure}
 	</p>
 {:else if queues && queues.length > 0}
-	<div class="min-h-0 flex-1 overflow-auto">
-		<table class="w-full min-w-2xl border-collapse text-left">
+	<div bind:clientWidth={fold.box} class="min-h-0 flex-1 overflow-auto">
+		<table class="w-full border-collapse text-left" style:min-width={fold.min}>
 			<thead class="bg-canvas text-subtle sticky top-0 z-10 text-xs whitespace-nowrap">
 				<tr class="border-border border-b">
-					<th scope="col" class="w-56 px-3 py-2 font-medium">Name</th>
-					<th scope="col" class="px-3 py-2 font-medium">Description</th>
-					<th scope="col" class="w-64 px-3 py-2 font-medium">Scores</th>
-					<th scope="col" class="w-52 px-3 py-2 font-medium">Progress</th>
+					<th scope="col" class={['px-3 py-2 font-medium', !narrow && 'w-56']}>Name</th>
+					{#if !narrow}
+						<th scope="col" class="px-3 py-2 font-medium">Description</th>
+						<th scope="col" class="w-64 px-3 py-2 font-medium">Scores</th>
+					{/if}
+					<th scope="col" class={['px-3 py-2 font-medium', narrow ? 'w-32' : 'w-52']}>Progress</th>
 				</tr>
 			</thead>
 			<tbody>
 				{#each queues as queue (queue.name)}
 					<tr class="border-border hover:bg-raised border-b transition-colors duration-100">
-						<td class="{cell} font-medium">
-							<a href={href(`/queues/${encodeURIComponent(queue.name)}`)} class="hover:text-accent">
-								{queue.name}
-							</a>
-						</td>
-						<td class="text-muted {cell}">{queue.description || '—'}</td>
-						<td class="px-3 py-1.5">
-							<div class="flex flex-wrap gap-1">
-								{#each queue.score_configs as name (name)}
-									<span
-										class="border-border bg-surface text-muted rounded-md border px-1.5 py-0.5 text-xs"
-									>
-										{name}
-									</span>
-								{/each}
-							</div>
-						</td>
-						<td class="px-3 py-1.5"><ProgressBar {queue} /></td>
+						{#if narrow}
+							<td class="max-w-0 px-3 py-1.5">
+								<a
+									href={href(`/queues/${encodeURIComponent(queue.name)}`)}
+									class="hover:text-accent block truncate font-medium"
+								>
+									{queue.name}
+								</a>
+								{#if queue.description}
+									<div class="text-muted truncate text-xs">{queue.description}</div>
+								{/if}
+								<div class="mt-0.5 flex flex-wrap gap-1">
+									{#each queue.score_configs as name (name)}
+										<span class="border-border bg-surface text-muted rounded-md border px-1 text-xs">
+											{name}
+										</span>
+									{/each}
+								</div>
+							</td>
+						{:else}
+							<td class="{cell} font-medium">
+								<a href={href(`/queues/${encodeURIComponent(queue.name)}`)} class="hover:text-accent">
+									{queue.name}
+								</a>
+							</td>
+							<td class="text-muted {cell}">{queue.description || '—'}</td>
+							<td class="px-3 py-1.5">
+								<div class="flex flex-wrap gap-1">
+									{#each queue.score_configs as name (name)}
+										<span
+											class="border-border bg-surface text-muted rounded-md border px-1.5 py-0.5 text-xs"
+										>
+											{name}
+										</span>
+									{/each}
+								</div>
+							</td>
+						{/if}
+						<td class="px-3 py-1.5"><ProgressBar {queue} stacked={narrow} /></td>
 					</tr>
 				{/each}
 			</tbody>

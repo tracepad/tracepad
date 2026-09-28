@@ -1,6 +1,7 @@
 import { render, screen, within } from '@testing-library/svelte';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import AccountsCard from './AccountsCard.svelte';
+import { boxWidth } from '../../../tests/box';
 
 // The Accounts card at the two widths (spec 006 #18). On a phone the row is
 // the email and the two buttons, and what the other columns said folds under
@@ -38,6 +39,7 @@ beforeEach(() => {
 	window.matchMedia = (query: string) =>
 		({ matches: narrow, media: query, addEventListener() {}, removeEventListener() {} }) as never;
 });
+afterEach(() => vi.restoreAllMocks());
 
 const heads = () => screen.getAllByRole('columnheader').map((one) => one.textContent?.trim());
 
@@ -62,5 +64,23 @@ describe('the accounts card', () => {
 		const row = email.closest('tr')!;
 		expect(within(row).getByRole('button', { name: 'Edit ada@example.com' })).toBeInTheDocument();
 		expect(within(row).getByRole('button', { name: 'Delete ada@example.com' })).toBeInTheDocument();
+	});
+});
+
+describe('the accounts card by its box', () => {
+	it('folds in a box narrower than the table, on a wide screen (#22)', async () => {
+		boxWidth(700);
+		render(AccountsCard);
+
+		await screen.findByText('ada@example.com');
+		expect(heads()).toEqual(['Email', 'Actions']);
+	});
+
+	it('keeps every column in the card a desktop gives it', async () => {
+		boxWidth(730);
+		render(AccountsCard);
+
+		await screen.findByText('ada@example.com');
+		expect(heads()).toHaveLength(6);
 	});
 });

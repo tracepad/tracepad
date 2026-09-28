@@ -1,12 +1,11 @@
 <script lang="ts">
 	import ListX from '@lucide/svelte/icons/list-x';
 	import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
-	import { MediaQuery } from 'svelte/reactivity';
 	import type { AnnotationItem } from '$lib/api/client.svelte';
 	import Button from '$lib/components/Button.svelte';
 	import { timestamp } from '$lib/format';
 	import { modified, selecting } from '$lib/peek';
-	import { PHONE } from '$lib/phone';
+	import { Fold } from '$lib/fold.svelte';
 	import { project } from '$lib/project.svelte';
 	import Folded from '../Folded.svelte';
 
@@ -54,27 +53,33 @@
 
 	const cell = 'truncate px-3 py-1.5';
 
-	// On a phone the row is the target, its status and the two verbs, which
-	// keep their names for a screen reader and lose them on the screen; the
-	// number, who, when and why fold under the target (spec 006 #18).
-	const phone = new MediaQuery(PHONE);
+	// In a box narrower than the table the row is the target, its status and
+	// the two verbs, which keep their names for a screen reader and lose them
+	// on the screen; the number, who, when and why fold under the target
+	// (spec 006 #18, #22). The number is the unfolded table's width and
+	// its `min-width`; the layout is fixed, so the columns take what they are given.
+	const fold = new Fold(768);
+	const narrow = $derived(fold.narrow);
 </script>
 
-<div class="min-h-0 flex-1 overflow-auto">
-	<table class={['w-full table-fixed border-collapse text-left', !phone.current && 'min-w-3xl']}>
+<div bind:clientWidth={fold.box} class="min-h-0 flex-1 overflow-auto">
+	<table
+		class="w-full table-fixed border-collapse text-left"
+		style:min-width={fold.min}
+	>
 		<thead class="bg-canvas text-subtle sticky top-0 z-10 text-xs whitespace-nowrap">
 			<tr class="border-border border-b">
-				{#if !phone.current}
+				{#if !narrow}
 					<th scope="col" class="w-14 px-3 py-2 text-right font-medium">#</th>
 				{/if}
 				<th scope="col" class="px-3 py-2 font-medium">Target</th>
 				<th scope="col" class="w-28 px-3 py-2 font-medium">Status</th>
-				{#if !phone.current}
+				{#if !narrow}
 					<th scope="col" class="w-32 px-3 py-2 font-medium">By</th>
 					<th scope="col" class="w-44 px-3 py-2 font-medium">When</th>
 					<th scope="col" class="px-3 py-2 font-medium">Skip reason</th>
 				{/if}
-				<th scope="col" class={['px-3 py-2', phone.current ? 'w-34' : 'w-40']}>
+				<th scope="col" class={['px-3 py-2', narrow ? 'w-34' : 'w-40']}>
 					<span class="sr-only">Actions</span>
 				</th>
 			</tr>
@@ -91,7 +96,7 @@
 						lit && 'bg-accent-soft'
 					]}
 				>
-					{#if !phone.current}
+					{#if !narrow}
 						<td class="text-muted px-3 py-1.5 text-right tabular-nums">{row.seq}</td>
 					{/if}
 					<td class="{cell} font-mono text-xs">
@@ -100,7 +105,7 @@
 									>/{row.observation_id.slice(0, 8)}…</span
 								>{/if}
 						</a>
-						{#if phone.current}
+						{#if narrow}
 							<div class="text-muted font-sans whitespace-normal">
 								<Folded
 									values={[
@@ -125,7 +130,7 @@
 					<td class="px-3 py-1.5">
 						<span class="rounded-md px-1.5 py-0.5 text-xs {chip(row.status)}">{row.status}</span>
 					</td>
-					{#if !phone.current}
+					{#if !narrow}
 						<td class="text-muted {cell}">{row.completed_by ?? '—'}</td>
 						<td class="text-muted px-3 py-1.5 font-mono text-xs whitespace-nowrap tabular-nums">
 							{row.completed_at ? timestamp(row.completed_at) : '—'}
@@ -143,11 +148,11 @@
 								<Button
 									variant="ghost"
 									busy={busyID === row.id}
-									aria-label={phone.current ? 'Reopen' : undefined}
-									title={phone.current ? 'Reopen' : undefined}
+									aria-label={narrow ? 'Reopen' : undefined}
+									title={narrow ? 'Reopen' : undefined}
 									onclick={(event) => (event.stopPropagation(), onreopen(row))}
 								>
-									{#if phone.current}<RotateCcw class="size-4" />{:else}Reopen{/if}
+									{#if narrow}<RotateCcw class="size-4" />{:else}Reopen{/if}
 								</Button>
 							{/if}
 							<!-- Working an item is a viewer's job and taking it off
@@ -157,11 +162,11 @@
 								<Button
 									variant="ghost"
 									busy={busyID === row.id}
-									aria-label={phone.current ? 'Remove' : undefined}
-									title={phone.current ? 'Remove' : undefined}
+									aria-label={narrow ? 'Remove' : undefined}
+									title={narrow ? 'Remove' : undefined}
 									onclick={(event) => (event.stopPropagation(), onremove(row))}
 								>
-									{#if phone.current}<ListX class="size-4" />{:else}Remove{/if}
+									{#if narrow}<ListX class="size-4" />{:else}Remove{/if}
 								</Button>
 							{/if}
 						</div>
