@@ -260,3 +260,58 @@ export async function section(page: Page, name: string): Promise<Locator> {
 	const sheet = page.getByRole('navigation', { name: 'More sections' });
 	return sheet.getByRole('link', { name, exact: true });
 }
+
+/**
+ * How far a table's own box would scroll sideways: 0 once a listing folds to
+ * fit it (spec 006 #22). The box is the nearest ancestor that scrolls.
+ */
+export async function sideways(table: Locator): Promise<number> {
+	return table.evaluate((node) => {
+		let box = node.parentElement;
+		while (box && getComputedStyle(box).overflowX === 'visible') box = box.parentElement;
+		return box ? box.scrollWidth - box.clientWidth : 0;
+	});
+}
+
+/** The column the sidebar takes from a desktop window (`w-52`), so a table's box is the window less this. */
+const SIDEBAR = 208;
+
+/**
+ * A table at its own width and one rem under it (spec 006 #22): in a box
+ * of `box` px it has all `columns` and no sideways scroll, in one 16 px
+ * narrower it has folded, and widening it again brings them back. The window
+ * is resized *after* the table is on the screen, which is what a resized
+ * window, or a tablet turned round, does to it. Desktop only: a phone has no
+ * sidebar to subtract.
+ */
+export async function foldsAt(page: Page, table: Locator, box: number, columns: number) {
+	const window = (px: number) => page.setViewportSize({ width: px + SIDEBAR, height: 800 });
+	await window(box);
+	await expect(table.locator('thead th')).toHaveCount(columns);
+	expect(await sideways(table)).toBeLessThanOrEqual(0);
+
+	await window(box - 16);
+	await expect(table.locator('thead th')).not.toHaveCount(columns);
+	expect(await sideways(table)).toBeLessThanOrEqual(0);
+
+	await window(box + 16);
+	await expect(table.locator('thead th')).toHaveCount(columns);
+	expect(await sideways(table)).toBeLessThanOrEqual(0);
+}
+
+/**
+ * Whether any folded line in the table is cut short of what it says: a line
+ * meant to wrap between its values that is clipped instead. `sideways` cannot
+ * see it, since clipped content adds nothing to a box's scroll width.
+ */
+export async function clipped(table: Locator): Promise<string[]> {
+	return table.evaluate((node) =>
+		[...node.querySelectorAll<HTMLElement>('tbody span[title]')]
+			.filter((one) => {
+				const cell = one.closest('td')!;
+				const room = cell.getBoundingClientRect().right - parseFloat(getComputedStyle(cell).paddingRight);
+				return one.scrollWidth > one.clientWidth || one.getBoundingClientRect().right > room + 1;
+			})
+			.map((one) => one.title)
+	);
+}

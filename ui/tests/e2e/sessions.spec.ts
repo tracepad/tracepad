@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { signIn as enter, state } from './harness';
+import { clipped, sideways, signIn as enter, state } from './harness';
 
 // Sessions, end to end against the real binary and the endpoint spec 007 added
 // (Testing): the listing's aggregates, the session view, and a trace opened
@@ -138,4 +138,21 @@ test('an empty listing explains what a session is', async ({ page }) => {
 	await expect(page.getByText('No session matches these filters')).toBeVisible();
 	await page.getByRole('button', { name: 'Clear filters' }).click();
 	await expect(page.getByText('session-77')).toBeVisible();
+});
+
+// Spec 006 #22: on a phone a session is when it was last seen, its id and
+// whether any of it failed; how many traces, their cost and when it began
+// fold under the id, and nothing scrolls sideways.
+test('on a phone the sessions fold rather than scroll', async ({ page }, testInfo) => {
+	test.skip(testInfo.project.name !== 'mobile', 'the narrow width is the test');
+	await signIn(page);
+	await page.goto('/sessions');
+
+	const table = page.locator('main table');
+	await expect(table.locator('thead th')).toHaveText(['Last seen', 'Session', 'Errors']);
+	const row = page.getByRole('row').filter({ hasText: 'session-77' });
+	await expect(row).toContainText(/\d+ traces? · \$/);
+	await expect(row).toContainText('first seen');
+	expect(await sideways(table)).toBeLessThanOrEqual(0);
+	expect(await clipped(table)).toEqual([]);
 });

@@ -1,7 +1,9 @@
 import { render, screen, within } from '@testing-library/svelte';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { tick } from 'svelte';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TraceRow } from '$lib/api/client.svelte';
 import TraceTable from './TraceTable.svelte';
+import { boxWidth } from '../../tests/box';
 
 // The trace listing at the two widths it has (spec 006 #18): every column on a
 // screen with room for them, and on a phone the three that say when, what and
@@ -48,7 +50,7 @@ describe('the trace table', () => {
 			'TTFT',
 			'Errors'
 		]);
-		expect(screen.getByRole('table')).toHaveClass('min-w-3xl');
+		expect(screen.getByRole('table')).toHaveStyle({ minWidth: '56rem' });
 		expect(screen.getByRole('link', { name: 'user-1137' })).toBeInTheDocument();
 	});
 
@@ -57,7 +59,7 @@ describe('the trace table', () => {
 		render(TraceTable, { rows: [ROW] });
 
 		expect(heads()).toEqual(['Time', 'Name', 'Errors']);
-		expect(screen.getByRole('table')).not.toHaveClass('min-w-3xl');
+		expect(screen.getByRole('table').style.minWidth).toBe('');
 		const name = screen.getByText('answer-question').closest('td')!;
 		// One value to a box, so a line breaks between values and never inside one.
 		const line = within(name).getByText(/^production/).parentElement!;
@@ -94,5 +96,56 @@ describe('the trace table', () => {
 		render(TraceTable, { rows: [matched], search: 'password' });
 
 		expect(screen.getByText('input').closest('td')).toHaveAttribute('colspan', '3');
+	});
+});
+
+// The width is the box's, not the screen's (#22): a desktop listing beside
+// the sidebar or inside the peek panel can be narrower than its table, and
+// folds the same.
+describe('the trace table by its box', () => {
+	// Whatever the test did to the root, the next one finds it as it was.
+	afterEach(() => {
+		document.documentElement.style.fontSize = '';
+	});
+
+	it('folds in a box narrower than the table, on a wide screen', () => {
+		boxWidth(895);
+		render(TraceTable, { rows: [ROW] });
+
+		expect(heads()).toEqual(['Time', 'Name', 'Errors']);
+		expect(screen.getByRole('table').style.minWidth).toBe('');
+	});
+
+	it('keeps every column in a box as wide as the table, whatever the screen', () => {
+		narrow = true;
+		boxWidth(896);
+		render(TraceTable, { rows: [ROW] });
+
+		expect(heads()).toHaveLength(9);
+		expect(screen.getByRole('table')).toHaveStyle({ minWidth: '56rem' });
+	});
+
+	// The table's columns are rem, so its width is: a reader whose default is
+	// 20 px has a table 1,120 px wide, and a 1,000 px box folds it.
+	it('folds at the table\'s width in rem, for a reader with a larger default size', () => {
+		document.documentElement.style.fontSize = '20px';
+		boxWidth(1000);
+		render(TraceTable, { rows: [ROW] });
+
+		expect(heads()).toEqual(['Time', 'Name', 'Errors']);
+	});
+
+	it('folds and unfolds as its box is resized after it is on the screen', async () => {
+		boxWidth(1200);
+		render(TraceTable, { rows: [ROW] });
+		expect(heads()).toHaveLength(9);
+
+		boxWidth(600);
+		await tick();
+		expect(heads()).toEqual(['Time', 'Name', 'Errors']);
+
+		boxWidth(1200);
+		await tick();
+		expect(heads()).toHaveLength(9);
 	});
 });

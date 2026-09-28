@@ -2,6 +2,7 @@ import { render, screen } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import type { Run } from '$lib/api/client.svelte';
+import { boxWidth } from '../../../tests/box';
 import RunTable from './RunTable.svelte';
 
 // The checkboxes that are the second way into a comparison (spec 016 #11).
@@ -54,5 +55,42 @@ describe('ticking two runs', () => {
 		expect(screen.getByText('Tick two runs to compare them')).toBeInTheDocument();
 		// The one still on screen keeps its tick, so the reader has one to go on.
 		expect(screen.getByRole('checkbox')).toBeChecked();
+	});
+});
+
+// Spec 006 #22: in a box narrower than the table a run is its tick, its name
+// and how it stands; the dataset, still a link, the version and when it ran
+// fold under the name, and the name is the row's link.
+describe('in a narrow box', () => {
+	it('keeps the tick, the name and the status, and folds the rest under the name', () => {
+		boxWidth(390);
+		render(RunTable, { rows: [a], withDataset: true } as never);
+
+		const heads = screen.getAllByRole('columnheader').map((one) => one.textContent?.trim());
+		expect(heads).toEqual(['Compare', 'Name', 'Status']);
+		expect(screen.getByRole('link', { name: `run ${a.id}` })).toHaveAttribute('href', `/runs/${a.id}`);
+		expect(screen.getByRole('link', { name: 'golden' })).toHaveAttribute('href', '/datasets/golden');
+		expect(screen.getByText(/^v1 ·/).parentElement).toHaveTextContent(/^v1 · \S.* · finished \S/);
+		expect(screen.getAllByRole('checkbox')).toHaveLength(1);
+	});
+
+	it('keeps every column in a box as wide as the table', () => {
+		boxWidth(896);
+		render(RunTable, { rows: [a], withDataset: true } as never);
+
+		expect(screen.getAllByRole('columnheader')).toHaveLength(7);
+	});
+
+	// The runs of one dataset have no Dataset column, so their table is narrower
+	// and keeps its columns in a narrower box.
+	it('folds at 720 px without the Dataset column, not at 896', () => {
+		boxWidth(720);
+		const { unmount } = render(RunTable, { rows: [a] } as never);
+		expect(screen.getAllByRole('columnheader')).toHaveLength(6);
+		unmount();
+
+		boxWidth(719);
+		render(RunTable, { rows: [a] } as never);
+		expect(screen.getAllByRole('columnheader')).toHaveLength(3);
 	});
 });

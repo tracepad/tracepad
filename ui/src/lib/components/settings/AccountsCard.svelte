@@ -1,7 +1,6 @@
 <script lang="ts">
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import UserPlus from '@lucide/svelte/icons/user-plus';
-	import { MediaQuery } from 'svelte/reactivity';
 	import { reaches, said, standing } from '$lib/accounts';
 	import {
 		api,
@@ -12,7 +11,7 @@
 		type Project
 	} from '$lib/api/client.svelte';
 	import { timeOrNever } from '$lib/format';
-	import { PHONE } from '$lib/phone';
+	import { Fold } from '$lib/fold.svelte';
 	import Button from '../Button.svelte';
 	import ConfirmCard from '../ConfirmCard.svelte';
 	import AccountDialog from './AccountDialog.svelte';
@@ -81,9 +80,12 @@
 	const tone = (where: ReturnType<typeof standing>) =>
 		where === 'disabled' ? 'text-danger' : where === 'pending' ? 'text-warn' : 'text-muted';
 
-	// On a phone the row is the email and the two buttons, stacked; what the
-	// other columns say folds under the email in the same order (spec 006 #18).
-	const phone = new MediaQuery(PHONE);
+	// In a box narrower than the table the row is the email and the two
+	// buttons, stacked; what the other columns say folds under the email in
+	// the same order (spec 006 #18, #22). The number is the unfolded table's width
+	// and its `min-width`, which the Server tab's card has on a desktop.
+	const fold = new Fold(704);
+	const narrow = $derived(fold.narrow);
 </script>
 
 <Card
@@ -103,18 +105,21 @@
 			Reading the accounts
 		</p>
 	{:else}
-		<div class="border-border overflow-x-auto rounded-md border">
-			<table class={['w-full border-collapse text-left', !phone.current && 'min-w-3xl']}>
+		<div bind:contentRect={fold.rect} class="border-border overflow-x-auto rounded-md border">
+			<table
+				class="w-full border-collapse text-left"
+				style:min-width={fold.min}
+			>
 				<thead class="text-subtle text-xs whitespace-nowrap">
 					<tr class="border-border border-b">
 						<th scope="col" class="px-3 py-1.5 font-medium">Email</th>
-						{#if !phone.current}
+						{#if !narrow}
 							<th scope="col" class="px-3 py-1.5 font-medium">Name</th>
 							<th scope="col" class="px-3 py-1.5 font-medium">Status</th>
 							<th scope="col" class="px-3 py-1.5 font-medium">Last login</th>
 							<th scope="col" class="px-3 py-1.5 font-medium">Projects</th>
 						{/if}
-						<th scope="col" class={['px-3 py-1.5 font-medium', !phone.current && 'w-44']}>
+						<th scope="col" class={['px-3 py-1.5 font-medium', !narrow && 'w-44']}>
 							Actions
 						</th>
 					</tr>
@@ -123,7 +128,7 @@
 					{#each accounts as row (row.id)}
 						{@const where = standing(row)}
 						<tr class="border-border border-b last:border-b-0">
-							{#if phone.current}
+							{#if narrow}
 								<!-- A cell, not the row's header: a header is read out before
 								     every cell in the row, and this one holds the whole account.
 								     The buttons carry the email in their names instead. -->
@@ -148,15 +153,15 @@
 								<td class="text-muted {cell}">{reaches(row)}</td>
 							{/if}
 							<td class="px-3 py-1.5">
-								<div class={['flex gap-1.5', phone.current && 'flex-col']}>
+								<div class={['flex gap-1.5', narrow && 'flex-col']}>
 									<Button
-										aria-label={phone.current ? `Edit ${row.email}` : undefined}
+										aria-label={narrow ? `Edit ${row.email}` : undefined}
 										onclick={() => ((notice = null), (editing = row))}
 									>
 										Edit
 									</Button>
 									<Button
-										aria-label={phone.current ? `Delete ${row.email}` : undefined}
+										aria-label={narrow ? `Delete ${row.email}` : undefined}
 										onclick={() => (
 											(notice = null),
 											(survivors = []),

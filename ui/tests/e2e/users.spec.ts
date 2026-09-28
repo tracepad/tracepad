@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { createProject, signIn as enter, state } from './harness';
+import { clipped, createProject, foldsAt, sideways, signIn as enter, state } from './harness';
 
 // The Users screens (spec 023, Testing — e2e), against the real binary.
 //
@@ -11,6 +11,12 @@ import { createProject, signIn as enter, state } from './harness';
 
 const ALICE = 'alice@e2e';
 const BOB = 'bob@e2e';
+// What a program that keys users and sessions by UUID sends, and a name to go
+// with it that is longer than any column: none of it may widen a listing past
+// its own width (spec 006 #22).
+const CAROL = '7d444840-9dc0-11d1-b245-5ffdce74fad2';
+const CAROL_SESSION = '0d8f2c9a-5b1e-4f6a-9c3d-7e2b8a1f4c60';
+const LONG_NAME = 'checkout-assistant-conversation-turn-with-a-long-name';
 /**
  * Two hours in the past, so both are closed from the aggregator's first pass —
  * and relative to now, on the hour, as `filters.spec.ts` does: the page opens
@@ -85,6 +91,7 @@ type Span = {
 	at: bigint;
 	cost: number;
 	environment: string;
+	name?: string;
 };
 
 function exportOf(spans: Span[]): Uint8Array {
@@ -92,7 +99,7 @@ function exportOf(spans: Span[]): Uint8Array {
 		bytes(2, [
 			...bytes(1, hex(span.trace)),
 			...bytes(2, hex(span.trace.slice(0, 16))),
-			...text(5, 'answer'),
+			...text(5, span.name ?? 'answer'),
 			...fixed64(7, span.at),
 			...fixed64(8, span.at + 700_000_000n),
 			...bytes(9, attribute('user.id', span.user)),
@@ -150,9 +157,11 @@ function seed(): Promise<void> {
 			{ trace: 'a0'.padEnd(32, '1'), user: ALICE, session: 'sess-a', at: HOUR_A + 10_000_000_000n, cost: 0.4, environment: 'production' },
 			{ trace: 'a1'.padEnd(32, '2'), user: ALICE, session: 'sess-a', at: HOUR_A + 20_000_000_000n, cost: 0.4, environment: 'staging' },
 			// Bob: one trace, later, cheap — so last seen and cost disagree.
-			{ trace: 'b0'.padEnd(32, '3'), user: BOB, session: 'sess-b', at: HOUR_B + 10_000_000_000n, cost: 0.001, environment: 'production' }
+			{ trace: 'b0'.padEnd(32, '3'), user: BOB, session: 'sess-b', at: HOUR_B + 10_000_000_000n, cost: 0.001, environment: 'production' },
+			// Carol: the earliest and the cheapest, so she is last under both sorts.
+			{ trace: 'c0'.padEnd(32, '4'), user: CAROL, session: CAROL_SESSION, at: HOUR_A - 2n * HOUR, cost: 0.0005, environment: 'production', name: LONG_NAME }
 		]);
-		await rolled(2);
+		await rolled(3);
 	})();
 	return seeded;
 }
@@ -356,4 +365,59 @@ test('375 px never scrolls the page sideways', async ({ page }) => {
 	await page.goto(`/users/${encodeURIComponent(ALICE)}`);
 	await expect(page.locator('dt').filter({ hasText: /^Traces$/ })).toBeVisible();
 	expect(await overflow()).toBeLessThanOrEqual(0);
+});
+
+// Spec 006 #22: a listing folds by the width of its own box, not the screen's.
+// On a phone the user and the errors stay and the rest folds under the id; in
+// a desktop window of 1,000 px the column leaves the table 792 px, which the
+// users' seven columns do not fit and the sessions' six do.
+test('the users fold on a phone and in a narrow desktop window', async ({ page }, testInfo) => {
+	if (testInfo.project.name === 'desktop') await page.setViewportSize({ width: 1000, height: 800 });
+	await signIn(page);
+	await page.goto('/users');
+
+	const table = page.locator('main table');
+	await expect(table.locator('thead th')).toHaveText(['User', 'Errors']);
+	const alice = page.getByRole('row').filter({ hasText: 'alice@e2e' });
+	await expect(alice).toContainText('2 traces · 1 session · $0.8000');
+	expect(await sideways(table)).toBeLessThanOrEqual(0);
+	expect(await clipped(table)).toEqual([]);
+
+	if (testInfo.project.name !== 'desktop') return;
+	await page.goto('/sessions');
+	await expect(page.locator('main table thead th')).toHaveCount(6);
+});
+
+// Spec 006 #22: a table has its own width whatever its cells hold. With a UUID
+// for the user and another for the session, and a name longer than its
+// column, the traces, the sessions and the users still have all their columns
+// from their widths — 896, 720 and 848 px — and none scrolls.
+async function listingsAtTheirWidths(page: Page) {
+	await signIn(page);
+	for (const [path, box, columns, seen] of [
+		['/traces', 896, 9, CAROL_SESSION],
+		['/sessions', 720, 6, CAROL_SESSION],
+		['/users', 848, 7, CAROL.slice(0, 13)]
+	] as const) {
+		await page.goto(path);
+		const table = page.locator('main table');
+		await expect(table.getByText(seen).first(), path).toBeVisible();
+		await foldsAt(page, table, box, columns);
+	}
+}
+
+test('UUID ids and a long name leave the listings at their own widths', async ({ page }, testInfo) => {
+	test.skip(testInfo.project.name === 'mobile', 'a desktop window is the test');
+	await listingsAtTheirWidths(page);
+});
+
+// The same in Russian, whose dates are longer than the English ones the widths
+// were first measured in: the sessions need 713 px there, not 688.
+test.describe('in a Russian locale', () => {
+	test.use({ locale: 'ru-RU' });
+
+	test('the listings keep their columns from their widths', async ({ page }, testInfo) => {
+		test.skip(testInfo.project.name === 'mobile', 'a desktop window is the test');
+		await listingsAtTheirWidths(page);
+	});
 });

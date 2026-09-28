@@ -6,9 +6,11 @@
 	import Button from '$lib/components/Button.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import CopyButton from '$lib/components/CopyButton.svelte';
+	import Folded from '$lib/components/Folded.svelte';
 	import ScoreConfigDialog from '$lib/components/evals/ScoreConfigDialog.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import { trim } from '$lib/evals';
+	import { Fold } from '$lib/fold.svelte';
 	import { count } from '$lib/format';
 	import { project } from '$lib/project.svelte';
 
@@ -69,7 +71,14 @@
 		'tracepad score-configs push accuracy --file accuracy.json\n' +
 		'# accuracy.json: {"data_type": "numeric", "direction": "higher", "min": 0, "max": 1}';
 
-	const cell = 'truncate px-3 py-1.5';
+	const cell = 'max-w-0 truncate px-3 py-1.5';
+
+	// In a box narrower than the table a row is the config's name and its two
+	// verbs, stacked; its type, direction, what it admits and its description
+	// fold under the name (spec 006 #22). The number is the unfolded table's
+	// width and its `min-width`.
+	const fold = new Fold(912);
+	const narrow = $derived(fold.narrow);
 </script>
 
 <svelte:head><title>Score configs · Tracepad</title></svelte:head>
@@ -117,28 +126,46 @@
 		{failure}
 	</p>
 {:else if configs && configs.length > 0}
-	<div class="min-h-0 flex-1 overflow-auto">
-		<table class="w-full min-w-2xl border-collapse text-left">
+	<div bind:contentRect={fold.rect} class="min-h-0 flex-1 overflow-auto">
+		<table class="w-full border-collapse text-left" style:min-width={fold.min}>
 			<thead class="bg-canvas text-subtle sticky top-0 z-10 text-xs whitespace-nowrap">
 				<tr class="border-border border-b">
-					<th scope="col" class="w-48 px-3 py-2 font-medium">Name</th>
-					<th scope="col" class="w-28 px-3 py-2 font-medium">Type</th>
-					<th scope="col" class="w-28 px-3 py-2 font-medium">Direction</th>
-					<th scope="col" class="w-64 px-3 py-2 font-medium">Admits</th>
-					<th scope="col" class="px-3 py-2 font-medium">Description</th>
-					<th scope="col" class="w-40 px-3 py-2"><span class="sr-only">Actions</span></th>
+					<th scope="col" class={['px-3 py-2 font-medium', !narrow && 'w-48']}>Name</th>
+					{#if !narrow}
+						<th scope="col" class="w-28 px-3 py-2 font-medium">Type</th>
+						<th scope="col" class="w-28 px-3 py-2 font-medium">Direction</th>
+						<th scope="col" class="w-64 px-3 py-2 font-medium">Admits</th>
+						<th scope="col" class="px-3 py-2 font-medium">Description</th>
+					{/if}
+					<th scope="col" class={['px-3 py-2', narrow ? 'w-24' : 'w-40']}>
+						<span class="sr-only">Actions</span>
+					</th>
 				</tr>
 			</thead>
 			<tbody>
 				{#each configs as config (config.name)}
 					<tr class="border-border hover:bg-raised border-b transition-colors duration-100">
-						<td class="{cell} font-medium">{config.name}</td>
-						<td class="text-muted {cell}">{config.data_type}</td>
-						<td class="text-muted {cell}">{config.direction ?? '—'}</td>
-						<td class="text-muted {cell} tabular-nums" title={admits(config)}>{admits(config)}</td>
-						<td class="text-muted {cell}">{config.description ?? '—'}</td>
+						{#if narrow}
+							<td class="max-w-0 px-3 py-1.5">
+								<div class="truncate font-medium" title={config.name}>{config.name}</div>
+								<div class="text-muted text-xs tabular-nums">
+									<Folded values={[config.data_type, config.direction, admits(config)]} />
+								</div>
+								{#if config.description}
+									<div class="text-muted truncate text-xs" title={config.description}>
+										{config.description}
+									</div>
+								{/if}
+							</td>
+						{:else}
+							<td class="{cell} font-medium" title={config.name}>{config.name}</td>
+							<td class="text-muted {cell}">{config.data_type}</td>
+							<td class="text-muted {cell}">{config.direction ?? '—'}</td>
+							<td class="text-muted {cell} tabular-nums" title={admits(config)}>{admits(config)}</td>
+							<td class="text-muted {cell} min-w-40" title={config.description ?? undefined}>{config.description ?? '—'}</td>
+						{/if}
 						<td class="px-3 py-1.5">
-							<div class="flex justify-end gap-1.5">
+							<div class={['flex justify-end gap-1.5', narrow && 'flex-col items-stretch']}>
 								{#if project.editor}
 									<Button onclick={() => open(config)}>Edit</Button>
 									<Button variant="ghost" onclick={() => (deleting = config)}>Remove</Button>

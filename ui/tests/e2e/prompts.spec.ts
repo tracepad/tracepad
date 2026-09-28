@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { createProject, section, signIn as enter, state } from './harness';
+import { clipped, createProject, foldsAt, section, sideways, signIn as enter, state } from './harness';
 
 // The Prompts screens (spec 021, Testing — e2e) against the real binary. The
 // corpus is seeded through the API in a project of its own (spec 016 #18),
@@ -87,6 +87,29 @@ test('the sidebar leads to the listing, and the row carries its label', async ({
 	// The chip says where production points, which is still the first version.
 	await expect(row.getByText('production')).toBeVisible();
 	await expect(row).toContainText('v1');
+});
+
+// Spec 006 #22: on a phone a prompt is its name and its labels — which version
+// is live — and the type, latest version and date fold under the name.
+test('on a phone the prompts fold rather than scroll', async ({ page }, testInfo) => {
+	test.skip(testInfo.project.name !== 'mobile', 'the narrow width is the test');
+	await signIn(page);
+	await page.goto('/prompts');
+
+	const table = page.locator('main table');
+	await expect(table.locator('thead th')).toHaveText(['Name', 'Labels']);
+	await expect(page.getByRole('row').filter({ hasText: CHAT })).toContainText(/chat · v2 · updated/);
+	expect(await sideways(table)).toBeLessThanOrEqual(0);
+	expect(await clipped(table)).toEqual([]);
+});
+
+// Spec 006 #22: on a desktop the five columns are there from 672 px, and not
+// after they have been left for a narrower window.
+test('the prompts fold at their own width on a desktop', async ({ page }, testInfo) => {
+	test.skip(testInfo.project.name === 'mobile', 'a desktop window is the test');
+	await signIn(page);
+	await page.goto('/prompts');
+	await foldsAt(page, page.locator('main table'), 672, 5);
 });
 
 test('the prompt page opens on the latest version with its list beside it', async ({ page }) => {

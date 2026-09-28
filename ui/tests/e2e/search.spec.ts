@@ -42,7 +42,9 @@ test('clicking a match opens the panel on the observation that matched', async (
 	await signIn(page);
 	await page.goto('/traces?q=password');
 
-	await page.locator('tbody tr').first().click();
+	// The name's cell, not the middle of the row: where that falls is where the
+	// widths happen to put a column, and a link's cell is not the row's.
+	await page.locator('tbody tr').first().getByRole('cell').nth(1).click();
 
 	await expect(page).toHaveURL(new RegExp(`peek=${CHAT_TRACE}`));
 	await expect(page).toHaveURL(new RegExp(`obs=${CHAT_GENERATION}`));

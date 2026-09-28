@@ -2,6 +2,7 @@ import { render, screen, within } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AnnotationItem } from '$lib/api/client.svelte';
 import QueueItemTable from './QueueItemTable.svelte';
+import { boxWidth } from '../../../tests/box';
 
 // A queue's items at the two widths (spec 006 #18): on a phone the row is the
 // target, its status and the two verbs, and who, when and why fold under the
@@ -70,5 +71,15 @@ describe('the queue item table', () => {
 		expect(given.onremove).toHaveBeenCalledWith(SKIPPED);
 		// The verbs are not a click on the row.
 		expect(given.onopen).not.toHaveBeenCalled();
+	});
+});
+
+describe('the queue item table by its box', () => {
+	it('folds in a box narrower than the table, on a wide screen (#22)', () => {
+		boxWidth(640);
+		render(QueueItemTable, props());
+
+		expect(heads()).toEqual(['Target', 'Status', 'Actions']);
+		expect(screen.getByRole('button', { name: 'Reopen' })).not.toHaveTextContent('Reopen');
 	});
 });

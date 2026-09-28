@@ -74,6 +74,15 @@ export function count(value: number | null | undefined): string {
 }
 
 /**
+ * A count with what it counts — `1 trace`, `12 traces` — for a folded line,
+ * where no column header says it (spec 006 #22). Absent when the count is.
+ */
+export function counted(value: number | null | undefined, noun: string): string {
+	if (value == null || !Number.isFinite(value)) return ABSENT;
+	return `${count(value)} ${value === 1 ? noun : `${noun}s`}`;
+}
+
+/**
  * Payload sizes, as the truncation markers report them (spec 004 #2). The unit
  * is the one a person reads on a "load the full 240 KB" button, so it is
  * decimal and never fractional past one digit.
