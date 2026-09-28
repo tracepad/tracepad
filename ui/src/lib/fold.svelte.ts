@@ -39,15 +39,14 @@ export class Fold {
 		return this.#whole();
 	}
 
-	get narrow(): boolean {
+	/** Worked out once per change of the box, not once per read: it asks the document how big a rem is. */
+	narrow = $derived.by(() => {
 		const box = this.rect?.width;
 		return box ? box < (this.whole / REM) * root() : this.#phone.current;
-	}
+	});
 
 	/** The table's `min-width`: its whole width unfolded, nothing folded. */
-	get min(): string | undefined {
-		return this.narrow ? undefined : `${this.whole / REM}rem`;
-	}
+	min = $derived(this.narrow ? undefined : `${this.whole / REM}rem`);
 }
 
 /** The size of a rem here, in px; a document that has not laid out reads the default. */

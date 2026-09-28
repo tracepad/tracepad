@@ -91,7 +91,9 @@
 								</a>
 								{#if narrow}
 									{#if row.description}
-										<div class="text-muted truncate text-xs font-normal">{row.description}</div>
+										<div class="text-muted truncate text-xs font-normal" title={row.description}>
+											{row.description}
+										</div>
 									{/if}
 									<div class="text-muted text-xs font-normal whitespace-normal tabular-nums">
 										<Folded

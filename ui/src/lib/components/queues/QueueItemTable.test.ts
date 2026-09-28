@@ -1,5 +1,5 @@
 import { render, screen, within } from '@testing-library/svelte';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AnnotationItem } from '$lib/api/client.svelte';
 import QueueItemTable from './QueueItemTable.svelte';
 import { boxWidth } from '../../../tests/box';
@@ -17,7 +17,6 @@ beforeEach(() => {
 	window.matchMedia = (query: string) =>
 		({ matches: narrow, media: query, addEventListener() {}, removeEventListener() {} }) as never;
 });
-afterEach(() => vi.restoreAllMocks());
 
 const SKIPPED = {
 	id: 'item-2',

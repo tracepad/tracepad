@@ -1,5 +1,5 @@
 import { render, screen, within } from '@testing-library/svelte';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import AccountsCard from './AccountsCard.svelte';
 import { boxWidth } from '../../../tests/box';
 
@@ -39,7 +39,6 @@ beforeEach(() => {
 	window.matchMedia = (query: string) =>
 		({ matches: narrow, media: query, addEventListener() {}, removeEventListener() {} }) as never;
 });
-afterEach(() => vi.restoreAllMocks());
 
 const heads = () => screen.getAllByRole('columnheader').map((one) => one.textContent?.trim());
 

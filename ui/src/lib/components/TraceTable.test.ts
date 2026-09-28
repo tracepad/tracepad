@@ -19,7 +19,6 @@ beforeEach(() => {
 	window.matchMedia = (query: string) =>
 		({ matches: narrow, media: query, addEventListener() {}, removeEventListener() {} }) as never;
 });
-afterEach(() => vi.restoreAllMocks());
 
 const ROW = {
 	id: 'aa11bb22cc33dd44ee55ff6600112233',
@@ -104,6 +103,11 @@ describe('the trace table', () => {
 // the sidebar or inside the peek panel can be narrower than its table, and
 // folds the same.
 describe('the trace table by its box', () => {
+	// Whatever the test did to the root, the next one finds it as it was.
+	afterEach(() => {
+		document.documentElement.style.fontSize = '';
+	});
+
 	it('folds in a box narrower than the table, on a wide screen', () => {
 		boxWidth(895);
 		render(TraceTable, { rows: [ROW] });
@@ -129,7 +133,6 @@ describe('the trace table by its box', () => {
 		render(TraceTable, { rows: [ROW] });
 
 		expect(heads()).toEqual(['Time', 'Name', 'Errors']);
-		document.documentElement.style.fontSize = '';
 	});
 
 	it('folds and unfolds as its box is resized after it is on the screen', async () => {

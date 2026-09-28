@@ -127,13 +127,18 @@
 						<!-- The name is the row's link here: the timestamp that was
 						     one folds under it, with the dataset, still a link. -->
 						<td class="max-w-0 px-3 py-1.5">
-							<a href={href(`/runs/${row.id}`)} title={row.id} class="hover:text-accent block truncate">
+							<a
+								href={href(`/runs/${row.id}`)}
+								title={row.name ?? row.id}
+								class="hover:text-accent block truncate"
+							>
 								{row.name ?? short(row.id)}
 							</a>
 							{#if withDataset}
 								<a
 									href={href(`/datasets/${encodeURIComponent(row.dataset)}`)}
 									class="text-muted hover:text-fg block truncate text-xs"
+									title={row.dataset}
 								>
 									{row.dataset}
 								</a>

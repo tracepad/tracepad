@@ -147,12 +147,14 @@
 					<tr class="border-border hover:bg-raised border-b transition-colors duration-100">
 						{#if narrow}
 							<td class="max-w-0 px-3 py-1.5">
-								<div class="truncate font-medium">{config.name}</div>
+								<div class="truncate font-medium" title={config.name}>{config.name}</div>
 								<div class="text-muted text-xs tabular-nums">
 									<Folded values={[config.data_type, config.direction, admits(config)]} />
 								</div>
 								{#if config.description}
-									<div class="text-muted truncate text-xs">{config.description}</div>
+									<div class="text-muted truncate text-xs" title={config.description}>
+										{config.description}
+									</div>
 								{/if}
 							</td>
 						{:else}

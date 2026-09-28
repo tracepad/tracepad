@@ -206,7 +206,7 @@
 					</td>
 					{#if narrow}
 						<td class="max-w-0 px-3 py-1.5">
-							<div class="truncate">{row.name ?? ABSENT}</div>
+							<div class="truncate" title={row.name ?? undefined}>{row.name ?? ABSENT}</div>
 							<div class="text-muted text-xs tabular-nums">
 								<Folded
 									values={[
@@ -226,8 +226,8 @@
 							{/if}
 						</td>
 					{:else}
-						<td class={[cell, 'min-w-48']}>{row.name ?? ABSENT}</td>
-						<td class="text-muted {cell} min-w-20">{row.environment}</td>
+						<td class={[cell, 'min-w-48']} title={row.name ?? undefined}>{row.name ?? ABSENT}</td>
+						<td class="text-muted {cell} min-w-20" title={row.environment}>{row.environment}</td>
 						<td class="text-muted {cell} min-w-20">{@render user(row)}</td>
 						<td class="text-muted {cell} min-w-20">{@render session(row)}</td>
 						<td class="text-muted {numeric}">{cost(row.total_cost)}</td>
@@ -260,7 +260,9 @@
 							lit && 'bg-accent-soft'
 						]}
 					>
-						<td class="text-muted px-3 pt-0 pb-1.5 font-mono text-xs" colspan={narrow ? 3 : 9}>
+						<!-- A match is a piece of somebody's text: a URL or an id in it has no
+						     place to break, so it may break anywhere rather than widen the table. -->
+						<td class="text-muted px-3 pt-0 pb-1.5 font-mono text-xs wrap-anywhere" colspan={narrow ? 3 : 9}>
 							<span class="text-subtle">{row.match.field}</span>
 							{#each highlight(row.match.snippet, terms) as piece, i (i)}
 								{#if piece.hit}<mark class="bg-accent-soft text-fg rounded-sm px-0.5"

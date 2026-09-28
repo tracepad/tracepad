@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { createProject, foldsAt, sideways, signIn as enter, state } from './harness';
+import { clipped, createProject, foldsAt, sideways, signIn as enter, state } from './harness';
 
 // The Users screens (spec 023, Testing — e2e), against the real binary.
 //
@@ -381,6 +381,7 @@ test('the users fold on a phone and in a narrow desktop window', async ({ page }
 	const alice = page.getByRole('row').filter({ hasText: 'alice@e2e' });
 	await expect(alice).toContainText('2 traces · 1 session · $0.8000');
 	expect(await sideways(table)).toBeLessThanOrEqual(0);
+	expect(await clipped(table)).toEqual([]);
 
 	if (testInfo.project.name !== 'desktop') return;
 	await page.goto('/sessions');
@@ -390,13 +391,12 @@ test('the users fold on a phone and in a narrow desktop window', async ({ page }
 // Spec 006 #22: a table has its own width whatever its cells hold. With a UUID
 // for the user and another for the session, and a name longer than its
 // column, the traces, the sessions and the users still have all their columns
-// from their widths — 896, 688 and 848 px — and none scrolls.
-test('UUID ids and a long name leave the listings at their own widths', async ({ page }, testInfo) => {
-	test.skip(testInfo.project.name === 'mobile', 'a desktop window is the test');
+// from their widths — 896, 720 and 848 px — and none scrolls.
+async function listingsAtTheirWidths(page: Page) {
 	await signIn(page);
 	for (const [path, box, columns, seen] of [
 		['/traces', 896, 9, CAROL_SESSION],
-		['/sessions', 688, 6, CAROL_SESSION],
+		['/sessions', 720, 6, CAROL_SESSION],
 		['/users', 848, 7, CAROL.slice(0, 13)]
 	] as const) {
 		await page.goto(path);
@@ -404,4 +404,20 @@ test('UUID ids and a long name leave the listings at their own widths', async ({
 		await expect(table.getByText(seen).first(), path).toBeVisible();
 		await foldsAt(page, table, box, columns);
 	}
+}
+
+test('UUID ids and a long name leave the listings at their own widths', async ({ page }, testInfo) => {
+	test.skip(testInfo.project.name === 'mobile', 'a desktop window is the test');
+	await listingsAtTheirWidths(page);
+});
+
+// The same in Russian, whose dates are longer than the English ones the widths
+// were first measured in: the sessions need 713 px there, not 688.
+test.describe('in a Russian locale', () => {
+	test.use({ locale: 'ru-RU' });
+
+	test('the listings keep their columns from their widths', async ({ page }, testInfo) => {
+		test.skip(testInfo.project.name === 'mobile', 'a desktop window is the test');
+		await listingsAtTheirWidths(page);
+	});
 });

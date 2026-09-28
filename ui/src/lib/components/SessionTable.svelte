@@ -40,7 +40,7 @@
 	// session and whether any of it failed; how many traces, what they cost
 	// and when it began fold under the id (spec 006 #22). The number is the
 	// unfolded table's width and its `min-width`.
-	const fold = new Fold(688);
+	const fold = new Fold(720);
 	const narrow = $derived(fold.narrow);
 </script>
 
@@ -92,13 +92,13 @@
 					</td>
 					{#if narrow}
 						<td class="max-w-0 px-3 py-1.5">
-							<div class="truncate font-mono">{row.id}</div>
+							<div class="truncate font-mono" title={row.id}>{row.id}</div>
 							<div class="text-muted text-xs tabular-nums">
 								<Folded values={[counted(row.trace_count, 'trace'), cost(row.total_cost)]} />
 							</div>
-							<div class="text-muted text-xs tabular-nums">
-								<Folded values={[`first seen ${timestamp(row.first_seen)}`]} />
-							</div>
+							<!-- Not a `Folded` line: this column is the narrowest on a phone, and
+							     a value of its own is cut where a line of text is not. -->
+							<div class="text-muted text-xs tabular-nums">first seen {timestamp(row.first_seen)}</div>
 						</td>
 					{:else}
 						<td class="max-w-0 min-w-48 truncate px-3 py-1.5 font-mono" title={row.id}>{row.id}</td>

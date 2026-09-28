@@ -109,15 +109,21 @@
 								<a
 									href={href(`/queues/${encodeURIComponent(queue.name)}`)}
 									class="hover:text-accent block truncate font-medium"
+									title={queue.name}
 								>
 									{queue.name}
 								</a>
 								{#if queue.description}
-									<div class="text-muted truncate text-xs">{queue.description}</div>
+									<div class="text-muted truncate text-xs" title={queue.description}>
+										{queue.description}
+									</div>
 								{/if}
 								<div class="mt-0.5 flex flex-wrap gap-1">
 									{#each queue.score_configs as name (name)}
-										<span class="border-border bg-surface text-muted rounded-md border px-1 text-xs">
+										<span
+											class="border-border bg-surface text-muted max-w-full truncate rounded-md border px-1 text-xs"
+											title={name}
+										>
 											{name}
 										</span>
 									{/each}

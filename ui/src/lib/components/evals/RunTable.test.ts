@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import type { Run } from '$lib/api/client.svelte';
 import { boxWidth } from '../../../tests/box';
 import RunTable from './RunTable.svelte';
@@ -62,8 +62,6 @@ describe('ticking two runs', () => {
 // and how it stands; the dataset, still a link, the version and when it ran
 // fold under the name, and the name is the row's link.
 describe('in a narrow box', () => {
-	afterEach(() => vi.restoreAllMocks());
-
 	it('keeps the tick, the name and the status, and folds the rest under the name', () => {
 		boxWidth(390);
 		render(RunTable, { rows: [a], withDataset: true } as never);

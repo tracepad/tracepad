@@ -76,7 +76,12 @@
 								/>
 							</div>
 							<div class="text-muted text-xs tabular-nums">
-								<Folded values={[`last seen ${timestamp(row.last_seen)}`]} />
+								<Folded
+									values={[
+										`last seen ${timestamp(row.last_seen)}`,
+										`first seen ${timestamp(row.first_seen)}`
+									]}
+								/>
 							</div>
 						{/if}
 					</td>

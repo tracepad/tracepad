@@ -1,5 +1,5 @@
 import { render, screen } from '@testing-library/svelte';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { DatasetItem, SessionRow, UserRow } from '$lib/api/client.svelte';
 import { boxWidth } from '../../tests/box';
 import ItemTable from './evals/ItemTable.svelte';
@@ -13,7 +13,6 @@ import UserTable from './UserTable.svelte';
 
 vi.mock('$lib/project.svelte', () => ({ href: (path: string) => path }));
 
-afterEach(() => vi.restoreAllMocks());
 
 const heads = () => screen.getAllByRole('columnheader').map((one) => one.textContent?.trim());
 
@@ -56,7 +55,7 @@ describe('the sessions', () => {
 	});
 
 	it('are the whole table in a box as wide as it', () => {
-		boxWidth(688);
+		boxWidth(720);
 		render(SessionTable, { rows: [SESSION] });
 
 		expect(heads()).toHaveLength(6);

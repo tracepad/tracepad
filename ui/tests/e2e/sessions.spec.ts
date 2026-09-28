@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { sideways, signIn as enter, state } from './harness';
+import { clipped, sideways, signIn as enter, state } from './harness';
 
 // Sessions, end to end against the real binary and the endpoint spec 007 added
 // (Testing): the listing's aggregates, the session view, and a trace opened
@@ -154,4 +154,5 @@ test('on a phone the sessions fold rather than scroll', async ({ page }, testInf
 	await expect(row).toContainText(/\d+ traces? · \$/);
 	await expect(row).toContainText('first seen');
 	expect(await sideways(table)).toBeLessThanOrEqual(0);
+	expect(await clipped(table)).toEqual([]);
 });

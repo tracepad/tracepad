@@ -277,7 +277,7 @@ export async function sideways(table: Locator): Promise<number> {
 const SIDEBAR = 208;
 
 /**
- * A table at its own width and one rem under it (spec 006 #22, #24): in a box
+ * A table at its own width and one rem under it (spec 006 #22): in a box
  * of `box` px it has all `columns` and no sideways scroll, in one 16 px
  * narrower it has folded, and widening it again brings them back. The window
  * is resized *after* the table is on the screen, which is what a resized
