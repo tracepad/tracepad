@@ -1,6 +1,6 @@
 # Spec 047 — Erasure at scale: chunks that follow the hours, and an erasure that answers at once
 
-**Status:** 🚧 IN PROGRESS
+**Status:** ✅ SHIPPED
 **Sprint:** September 2026
 
 > Spec 044 made an erasure reach every copy the store holds, and measured

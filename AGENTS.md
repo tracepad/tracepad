@@ -530,6 +530,19 @@ API. This file routes; it does not duplicate what specs and docs say.
   (#12, #13, #16). Wrong keys
   and ingest are not limited by source (#14, #15). The Playwright harness
   signs in from an address of its own per test.
+- ✅ Spec 047 (erasure at scale) shipped. PR 1: schema 0029 puts the start
+  in `idx_traces_user`, and a chunk takes the user's traces in start order,
+  whole hours at a time, within `DeleteRollBudget` of what its rolls and
+  deletes cost the writer; bulk deletion's rounds cut the same way through
+  `HourChunks` (#1–#5, #20–#25). PR 2: an erasure is a task (#6). Schema 0030
+  adds `erasures` and `erasure_tail`; the confirmed request answers `202`
+  with the resource, or `200` within `?wait=` (#7, #8), and one worker
+  (`Eraser`, `internal/store/erasuretask.go`) runs erasures one at a time, a
+  resumed one first (#10, #12). Every scrub job and chunk commits its counts,
+  tail and phase with it; the row forgets the user id in the statement that
+  ends it and goes after 30 days (#9, #15). `GET …/erasures` and
+  `…/erasures/{id}` are `write` routes (#14); the interface waits 20 s and
+  follows the rest, `users rm-data` waits 30 s and polls (#18).
 - ✅ Spec 032 (the Node package) shipped: `tracepad` on npm, source in
   `sdk/js/`, the Python package's surface with promises where Python has
   context managers and the same vocabulary on the wire — `init` adapts to
