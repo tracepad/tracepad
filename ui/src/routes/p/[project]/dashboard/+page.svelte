@@ -4,6 +4,7 @@
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import SlidersHorizontal from '@lucide/svelte/icons/sliders-horizontal';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
+	import { MediaQuery } from 'svelte/reactivity';
 	import type { Action, ActionReturn } from 'svelte/action';
 	import { flip } from 'svelte/animate';
 	import {
@@ -52,6 +53,7 @@
 	} from '$lib/dashboard';
 	import { cost, count, duration, relative, timestamp } from '$lib/format';
 	import { dashboard, setDashboard } from '$lib/preferences.svelte';
+	import { STILL } from '$lib/phone';
 	import { href, project } from '$lib/project.svelte';
 	import { rememberedRange, rememberRange } from '$lib/range.svelte';
 
@@ -240,7 +242,8 @@
 	// --- Customize (Decision 8, Decision 9) ---------------------------------
 
 	/** No flip while dragging for a person who asked for less motion. */
-	const flipDurationMs = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 150;
+	const still = new MediaQuery(STILL);
+	const flipDurationMs = $derived(still.current ? 0 : 150);
 	/**
 	 * The blocks on screen as the drag zone holds them; a drag in progress
 	 * reorders this copy. The quality block is not drawn while the window

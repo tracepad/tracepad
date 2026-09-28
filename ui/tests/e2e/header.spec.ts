@@ -39,9 +39,10 @@ async function signIn(page: Page) {
 }
 
 async function header(page: Page) {
-	await expect(page.locator('header h1')).toBeVisible();
+	await expect(page.locator('main header h1')).toBeVisible();
 	return page.evaluate(() => {
-		const bar = document.querySelector('header') as HTMLElement;
+		// The screen's own header, not the phone's bar above it (spec 006 #20).
+		const bar = document.querySelector('main header') as HTMLElement;
 		const top = (selector: string) => {
 			const found = bar.querySelector(selector);
 			return found ? found.getBoundingClientRect().top : null;
@@ -147,10 +148,10 @@ test.describe('a trace at 900 px', () => {
 	test('the timestamp stays on one line and the bar stays one row tall', async ({ page }) => {
 		await enter(page, await sow());
 		await page.goto(`/traces/${TRACE}`);
-		await expect(page.locator('header h1')).toHaveText('answer-question');
+		await expect(page.locator('main header h1')).toHaveText('answer-question');
 
 		const bar = await page.evaluate(() => {
-			const header = document.querySelector('header') as HTMLElement;
+			const header = document.querySelector('main header') as HTMLElement;
 			const meta = header.querySelector('h1 + div') as HTMLElement;
 			// The timestamp is the meta's first span, after the breadcrumb
 			// link: the release and the two ids that follow are what may be

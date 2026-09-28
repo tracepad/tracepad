@@ -8,6 +8,7 @@
 	import { MediaQuery } from 'svelte/reactivity';
 	import { cubicOut } from 'svelte/easing';
 	import { fly } from 'svelte/transition';
+	import { STILL } from '$lib/phone';
 
 	// The panel a listing opens a row in (spec 008). It is chrome only: a
 	// header of controls over whatever body the caller renders, which is the
@@ -52,7 +53,7 @@
 	// beside the listing (#5): "beside" needs room for both, and below `lg`
 	// there is none.
 	const narrow = new MediaQuery('(max-width: 63.99rem)');
-	const still = new MediaQuery('(prefers-reduced-motion: reduce)');
+	const still = new MediaQuery(STILL);
 	// Motion on a state change, inside the 100–200 ms band of spec 006 #6;
 	// reduced motion makes it an instant swap rather than a slower one (#11).
 	const slide = $derived(still.current ? 0 : 160);

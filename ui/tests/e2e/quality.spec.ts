@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { createProject, signIn as enter, state } from './harness';
+import { createProject, section, signIn as enter, state } from './harness';
 
 // The Quality screens (spec 025, Testing — e2e), against the real binary.
 //
@@ -197,7 +197,7 @@ test.beforeEach(async () => {
 
 test('the overview shows a card per score name, with points', async ({ page }) => {
 	await signIn(page);
-	await page.getByRole('link', { name: 'Quality' }).click();
+	await (await section(page, 'Quality')).click();
 	await expect(page).toHaveURL(/\/quality$/);
 
 	await page.goto(`/quality?${WINDOW}&group_by=day`);

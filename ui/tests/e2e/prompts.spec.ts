@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { createProject, signIn as enter, state } from './harness';
+import { createProject, section, signIn as enter, state } from './harness';
 
 // The Prompts screens (spec 021, Testing — e2e) against the real binary. The
 // corpus is seeded through the API in a project of its own (spec 016 #18),
@@ -76,11 +76,11 @@ test.beforeEach(async () => {
 
 test('the sidebar leads to the listing, and the row carries its label', async ({ page }) => {
 	await signIn(page);
-	const nav = page.getByRole('navigation', { name: 'Sections' });
-	await nav.getByRole('link', { name: 'Prompts' }).click();
+	await (await section(page, 'Prompts')).click();
 
 	await expect(page).toHaveURL(/\/prompts$/);
-	await expect(nav.getByRole('link', { name: 'Prompts' })).toHaveAttribute('aria-current', 'page');
+	await expect(await section(page, 'Prompts')).toHaveAttribute('aria-current', 'page');
+	await page.keyboard.press('Escape');
 	const row = page.locator('tbody tr').filter({ hasText: CHAT });
 	await expect(row).toContainText('chat');
 	await expect(row).toContainText('v2');
