@@ -23,7 +23,9 @@ export function swipeDown(
 		let travel = 0;
 
 		function down(event: PointerEvent) {
-			if (event.pointerType === 'mouse' || !(event.target as Element).closest(handle)) return;
+			// One finger drags; a second one on the grip meanwhile is ignored.
+			if (start || event.pointerType === 'mouse') return;
+			if (!(event.target as Element).closest(handle)) return;
 			start = { y: event.clientY, id: event.pointerId };
 			travel = 0;
 			node.style.transition = '';

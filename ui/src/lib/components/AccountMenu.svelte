@@ -13,7 +13,10 @@
 	// project on screen, because that is the one thing about an account that
 	// changes what the rest of the window does.
 
-	/** Up from the column's foot; down from a phone's bar on top (spec 006 #20). */
+	/**
+	 * Up from the column's foot; down from a phone's bar on top (spec 006 #20),
+	 * lined up with the bar's right end, where the button is.
+	 */
 	let { side = 'top' }: { side?: 'top' | 'bottom' } = $props();
 
 	const role = $derived(project.role);
@@ -58,7 +61,7 @@
 	<DropdownMenu.Portal>
 		<DropdownMenu.Content
 			{side}
-			align="start"
+			align={side === 'top' ? 'start' : 'end'}
 			sideOffset={4}
 			class="border-border bg-canvas shadow-overlay z-50 min-w-44 rounded-md border p-1"
 		>

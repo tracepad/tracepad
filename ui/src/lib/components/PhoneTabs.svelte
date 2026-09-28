@@ -5,11 +5,12 @@
 	import { cubicOut } from 'svelte/easing';
 	import { MediaQuery } from 'svelte/reactivity';
 	import { fade, fly } from 'svelte/transition';
+	import { untrack } from 'svelte';
 	import { page } from '$app/state';
 	import { api } from '$lib/api/client.svelte';
 	import { STILL } from '$lib/phone';
 	import { href } from '$lib/project.svelte';
-	import { active, isGroup, ITEMS, SECTIONS, type Group, type Item } from '$lib/sections';
+	import { active, ITEMS, MORE, TABS, type Item } from '$lib/sections';
 	import { swipeDown } from '$lib/swipe';
 	import NavList from './NavList.svelte';
 	import ThemeToggle from './ThemeToggle.svelte';
@@ -18,14 +19,18 @@
 	// and *More* for the rest in a sheet. After `main` in the document as on
 	// the screen, so Tab reaches the page before the bar.
 
-	const tabs = ITEMS.filter((item) => item.tab);
-	/** The column without the tabbed screens, its group kept. */
-	const rest = SECTIONS.flatMap((section): (Item | Group)[] => {
-		if (!isGroup(section)) return section.tab ? [] : [section];
-		return [{ ...section, children: section.children.filter((child) => !child.tab) }];
-	});
-
 	let open = $state(false);
+	/**
+	 * Closed by leaving for another screen, whose own focus comes first: the
+	 * sheet must not hand it back to *More* when it finishes closing. Escape,
+	 * the backdrop and the close button do return it there.
+	 */
+	let leaving = false;
+
+	function leave() {
+		leaving = true;
+		open = false;
+	}
 
 	const still = new MediaQuery(STILL);
 	const slide = $derived(still.current ? 0 : 200);
@@ -41,7 +46,7 @@
 	const path = $derived(page.url.pathname);
 	$effect(() => {
 		void path;
-		open = false;
+		untrack(() => open && leave());
 	});
 
 	const tab =
@@ -57,9 +62,9 @@
 <nav
 	aria-label="Sections"
 	class="border-border bg-surface grid shrink-0 border-t"
-	style:grid-template-columns="repeat({tabs.length + 1}, minmax(0, 1fr))"
+	style:grid-template-columns="repeat({TABS.length + 1}, minmax(0, 1fr))"
 >
-	{#each tabs as item (item.href)}
+	{#each TABS as item (item.href)}
 		{@const lit = active(item.href)}
 		<a
 			href={href(item.href)}
@@ -70,7 +75,7 @@
 		</a>
 	{/each}
 
-	<Dialog.Root bind:open>
+	<Dialog.Root bind:open onOpenChange={(next) => next && (leaving = false)}>
 		<Dialog.Trigger
 			aria-current={tucked ? 'true' : undefined}
 			class={[tab, tucked ? 'text-accent font-medium' : 'text-muted hover:text-fg']}
@@ -89,7 +94,10 @@
 					{/if}
 				{/snippet}
 			</Dialog.Overlay>
-			<Dialog.Content forceMount>
+			<Dialog.Content
+				forceMount
+				onCloseAutoFocus={(event) => leaving && event.preventDefault()}
+			>
 				{#snippet child({ props, open: shown })}
 					{#if shown}
 						<!-- A sheet from the bottom, closed by Escape, the backdrop,
@@ -115,7 +123,7 @@
 								</div>
 							</div>
 							<nav aria-label="More sections" class="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
-								<NavList sections={rest} touch onnavigate={() => (open = false)} />
+								<NavList sections={MORE} touch onnavigate={leave} />
 							</nav>
 							<div class="border-border flex shrink-0 items-center gap-2 border-t px-3 py-1.5">
 								<span class="text-subtle font-mono text-xs" title="Server version">

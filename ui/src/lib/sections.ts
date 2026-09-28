@@ -76,3 +76,12 @@ export const active = (path: string) => within(page.url.pathname).startsWith(pat
 export const ITEMS: Item[] = SECTIONS.flatMap((section) =>
 	isGroup(section) ? section.children : [section]
 );
+
+/** A phone's tabs (spec 006 #20), in the column's order. */
+export const TABS: Item[] = ITEMS.filter((item) => item.tab);
+
+/** What a phone's *More* holds: the column without its tabs, the group kept. */
+export const MORE: (Item | Group)[] = SECTIONS.flatMap((section): (Item | Group)[] => {
+	if (!isGroup(section)) return section.tab ? [] : [section];
+	return [{ ...section, children: section.children.filter((child) => !child.tab) }];
+});

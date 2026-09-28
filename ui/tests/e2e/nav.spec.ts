@@ -16,7 +16,7 @@ test('a desktop keeps the column and has no More', async ({ page }, testInfo) =>
 
 	const nav = page.getByRole('navigation', { name: 'Sections', exact: true });
 	await expect(nav.getByRole('link')).toHaveCount(11);
-	await expect(page.getByRole('button', { name: 'More' })).toHaveCount(0);
+	await expect(page.getByRole('button', { name: 'More', exact: true })).toHaveCount(0);
 });
 
 test('a phone has four tabs under the page and the rest in More', async ({ page }, testInfo) => {
@@ -56,7 +56,9 @@ test('a phone has four tabs under the page and the rest in More', async ({ page 
 	await queues.click();
 	await expect(page).toHaveURL(/\/queues$/);
 	await expect(page.getByRole('dialog')).toHaveCount(0);
-	const more = nav.getByRole('button', { name: 'More' });
+	// Gone by a link, the sheet leaves the focus to the new screen.
+	const more = nav.getByRole('button', { name: 'More', exact: true });
+	await expect(more).not.toBeFocused();
 	await expect(more).toHaveAttribute('aria-current', 'true');
 	await expect(more).toHaveText('More');
 	await expect(await section(page, 'Queues')).toHaveAttribute('aria-current', 'page');
@@ -69,7 +71,7 @@ test('a phone has four tabs under the page and the rest in More', async ({ page 
 test('a swipe down the grip closes the sheet, a short one does not', async ({ page }, testInfo) => {
 	test.skip(testInfo.project.name !== 'mobile', 'the sheet is the narrow shape');
 	await signIn(page);
-	await page.getByRole('button', { name: 'More' }).click();
+	await page.getByRole('button', { name: 'More', exact: true }).click();
 	const sheet = page.getByRole('dialog', { name: 'More' });
 	await expect(sheet).toBeVisible();
 

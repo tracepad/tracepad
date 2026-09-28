@@ -1,6 +1,8 @@
-import { render, screen, within } from '@testing-library/svelte';
+import { render, screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
+import { tick } from 'svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { here } from '../../tests/url.svelte';
 import PhoneBar from './PhoneBar.svelte';
 import PhoneTabs from './PhoneTabs.svelte';
 
@@ -10,19 +12,20 @@ import PhoneTabs from './PhoneTabs.svelte';
 // the screen.
 
 const PROJECT = vi.hoisted(() => 'a'.repeat(32));
-const url = { current: new URL(`http://tracepad.test/p/${PROJECT}/runs/abc`) };
-
 vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
-vi.mock('$app/state', () => ({
-	page: {
-		get url() {
-			return url.current;
-		},
-		get params() {
-			return { project: PROJECT };
+vi.mock('$app/state', async () => {
+	const { here } = await import('../../tests/url.svelte');
+	return {
+		page: {
+			get url() {
+				return here.url;
+			},
+			get params() {
+				return { project: PROJECT };
+			}
 		}
-	}
-}));
+	};
+});
 vi.mock('$lib/api/client.svelte', () => ({ api: { version: '0.0.0-test', listProjects: vi.fn() } }));
 vi.mock('$lib/auth.svelte', () => ({
 	auth: {
@@ -52,7 +55,7 @@ describe('on a phone', () => {
 			.map((link) => link.textContent?.trim());
 
 	it('has four tabs and More, and nothing else until More opens', () => {
-		url.current = new URL(`http://tracepad.test/p/${PROJECT}/traces`);
+		here.url = new URL(`http://tracepad.test/p/${PROJECT}/traces`);
 		render(PhoneTabs);
 
 		expect(tabs()).toEqual(['Dashboard', 'Traces', 'Sessions', 'Users']);
@@ -63,7 +66,7 @@ describe('on a phone', () => {
 	});
 
 	it('lights More, still named More, on a screen it holds, and the screen in the sheet', async () => {
-		url.current = new URL(`http://tracepad.test/p/${PROJECT}/runs/abc`);
+		here.url = new URL(`http://tracepad.test/p/${PROJECT}/runs/abc`);
 		render(PhoneTabs);
 
 		const more = screen.getByRole('button', { name: 'More' });
@@ -92,7 +95,7 @@ describe('on a phone', () => {
 	});
 
 	it('closes the sheet on Escape and hands focus back to More', async () => {
-		url.current = new URL(`http://tracepad.test/p/${PROJECT}/traces`);
+		here.url = new URL(`http://tracepad.test/p/${PROJECT}/traces`);
 		render(PhoneTabs);
 
 		const more = screen.getByRole('button', { name: 'More' });
@@ -104,8 +107,36 @@ describe('on a phone', () => {
 		expect(more).toHaveFocus();
 	});
 
+	it('stays open while the screen rewrites its own query', async () => {
+		here.url = new URL(`http://tracepad.test/p/${PROJECT}/traces`);
+		render(PhoneTabs);
+
+		await person().click(screen.getByRole('button', { name: 'More' }));
+		here.url = new URL(`http://tracepad.test/p/${PROJECT}/traces?page=2`);
+		await tick();
+
+		expect(screen.getByRole('dialog', { name: 'More' })).toBeInTheDocument();
+	});
+
+	it('closes on another screen and leaves the focus to it, not to More', async () => {
+		here.url = new URL(`http://tracepad.test/p/${PROJECT}/traces`);
+		render(PhoneTabs);
+
+		const more = screen.getByRole('button', { name: 'More' });
+		await person().click(more);
+		// Opened, the sheet takes the focus in a frame of its own.
+		const sheet = screen.getByRole('dialog', { name: 'More' });
+		await waitFor(() => expect(sheet.contains(document.activeElement)).toBe(true));
+		// Back, say: the path moves without a tap in the sheet.
+		here.url = new URL(`http://tracepad.test/p/${PROJECT}/sessions`);
+		await tick();
+
+		expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+		expect(more).not.toHaveFocus();
+	});
+
 	it('closes the sheet on the tap of a link, not when the screen arrives', async () => {
-		url.current = new URL(`http://tracepad.test/p/${PROJECT}/traces`);
+		here.url = new URL(`http://tracepad.test/p/${PROJECT}/traces`);
 		render(PhoneTabs);
 
 		await person().click(screen.getByRole('button', { name: 'More' }));
@@ -115,6 +146,23 @@ describe('on a phone', () => {
 		await person().click(within(sheet).getByRole('link', { name: 'Queues' }));
 
 		expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+		expect(screen.getByRole('button', { name: 'More' })).not.toHaveFocus();
+	});
+
+	it('stays open on a link opened elsewhere, a new tab', async () => {
+		here.url = new URL(`http://tracepad.test/p/${PROJECT}/traces`);
+		render(PhoneTabs);
+
+		await person().click(screen.getByRole('button', { name: 'More' }));
+		const sheet = screen.getByRole('navigation', { name: 'More sections' });
+		const queues = within(sheet).getByRole('link', { name: 'Queues' });
+		queues.addEventListener('click', (event) => event.preventDefault());
+		const user = person();
+		await user.keyboard('{Meta>}');
+		await user.click(queues);
+		await user.keyboard('{/Meta}');
+
+		expect(screen.getByRole('dialog', { name: 'More' })).toBeInTheDocument();
 	});
 });
 

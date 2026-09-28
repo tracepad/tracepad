@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { modified } from '$lib/peek';
 	import { href } from '$lib/project.svelte';
 	import { active, isGroup, type Group, type Item } from '$lib/sections';
 
@@ -13,7 +14,10 @@
 	}: {
 		sections: (Item | Group)[];
 		touch?: boolean;
-		/** A link followed: the sheet closes on the tap rather than on arrival. */
+		/**
+		 * A link followed here, the sheet closes on the tap rather than on
+		 * arrival; one opened elsewhere — a new tab — leaves this page as it is.
+		 */
 		onnavigate?: () => void;
 	} = $props();
 
@@ -34,7 +38,7 @@
 		<a
 			href={href(entry.href)}
 			aria-current={on ? 'page' : undefined}
-			onclick={onnavigate}
+			onclick={(event) => !modified(event) && onnavigate?.()}
 			class={[link, indented && !touch && 'ml-3', on ? lit : dim]}
 		>
 			<Glyph class={touch ? 'size-4.5 shrink-0' : 'size-4 shrink-0'} />
