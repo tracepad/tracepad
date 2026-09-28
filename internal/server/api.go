@@ -472,7 +472,11 @@ func decodeStrict(data []byte, v any) error {
 	if err := decoder.Decode(v); err != nil {
 		return decodeError(err)
 	}
-	if decoder.More() {
+	// Anything after the value but white space is more than one value. Not
+	// decoder.More(): it answers whether an array or object being read has
+	// another element, and takes a `]` or `}` for the end of one nobody
+	// opened, so `{"input":1}]` passed.
+	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
 		return errTrailingValue
 	}
 	return nil
