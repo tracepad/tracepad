@@ -26,6 +26,9 @@ type sweepFixture struct {
 	writer  *Writer
 	sweeper *Sweeper
 	project *Project
+	// erasures are the ids of the erasures the fixture recorded, oldest
+	// first.
+	erasures []string
 }
 
 func newSweepFixture(t *testing.T) *sweepFixture {

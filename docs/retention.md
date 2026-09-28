@@ -341,9 +341,8 @@ decide: the start after the upgrade does it, and says so in the log.
 tracepad users rm-data user-4711     # a key with write
 ```
 
-`DELETE /api/v1/projects/{id}/users/{user_id}/data` erases, synchronously,
-everything the store holds about the traces filed under one user id, and
-answers with the counts:
+`DELETE /api/v1/projects/{id}/users/{user_id}/data` erases everything the
+store holds about the traces filed under one user id:
 
 - the traces, their observations, payloads, scores, search entries and the
   annotation-queue items pointing at them, and the user's per-user
@@ -375,12 +374,27 @@ last update, the one clock both are stamped with — decodes each and checks it
 for the user's spans; a batch holding none is left as it was. The dry run's
 `raw.batches_to_scan` is that count. The order is raw first, then the parsed
 rows, then the batches that arrived for the user's traces while the request
-ran: once the parsed rows are gone nothing names the batches any more. The
-request runs to completion whether or not its client waits for the answer, and
-one cut off by a stop of the server is finished by repeating it. A rewritten batch is no longer what the client sent,
+ran: once the parsed rows are gone nothing names the batches any more. A
+rewritten batch is no longer what the client sent,
 and says so: `scrubbed_at` on the listing, `X-Tracepad-Scrubbed-At` on the body
 and `scrubbed` in the export summary ([export.md](export.md)). Nothing records
 whose spans went.
+
+**An erasure is accepted, then runs.** The confirmed request checks what can
+refuse it, records the erasure and answers `202 Accepted` with where to watch
+it; `?wait=` up to 30 seconds answers `200` instead when the erasure ends in
+that time, which a user of a few traces does. The server runs one erasure at a
+time, and its record says how far it is: the phase, and how many of the
+traces it found are gone. Watch it with `GET
+/api/v1/projects/{id}/erasures/{erasure_id}`, `tracepad users erasure <id>`,
+or the Settings screen's erase card, which lists the erasures of the last 30
+days. A **restart** does not lose it: every step commits its progress with
+it, and the next start resumes the erasure from its phase — the batches that
+arrived for traces it had already deleted included, which a repeat of the
+request could not find. The **record forgets the user**: it holds the user id
+only while the erasure is queued or running, clears it in the statement that
+ends it, and is itself removed by the sweeper 30 days later. What stays in
+between is that an erasure ran, when, and what it took.
 
 ## Deleting traces
 

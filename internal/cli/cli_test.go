@@ -82,6 +82,10 @@ func newHarnessConfigured(t *testing.T, token string, storeRaw bool) *harness {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { writer.Close() })
+	// A confirmed erasure is the worker's to run (spec 047 #6).
+	eraser := st.NewEraser(writer, store.EraserOptions{})
+	eraser.Start()
+	t.Cleanup(func() { eraser.Close() })
 
 	cfg := &config.Config{Listen: ":0", StoreRaw: storeRaw, MaxBodyBytes: config.DefaultMaxBodyBytes,
 		AdminToken: token}

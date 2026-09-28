@@ -2739,20 +2739,69 @@
     "/api/v1/projects/{id}/users/{user_id}/data": {
       "delete": {
         "tags": ["admin"],
-        "summary": "Erase everything stored about one user",
-        "description": "Erases, synchronously, everything the store holds about the traces filed under the user id: the traces, their observations, payloads and scores, the annotation-queue items pointing at them (`annotation_items`), the session-only scores of the sessions they carried (`session_scores`), every version of the dataset items cut from them (`dataset_items`, with the datasets named under `affected_datasets`), and their spans inside the raw OTLP bodies — each batch that held one is rewritten without it and marked `scrubbed_at`, or deleted when nothing else was in it (`raw_spans`, `raw_batches_rewritten`, `raw_batches_deleted`). The preview's `raw` block counts the batches the erasure will read and those older than the trace window, which nothing can attribute any more. The answer's `compaction` says when the sweeper pass that overwrites what was unlinked is due, and `pre_migration_backup`, while one exists, names the backup the erasure does not rewrite and the day it goes. Without `confirm` it answers with the preview; the echo here is the user id.",
+        "summary": "Erase everything stored about one user: accepted as a task, or answered once it ends within `wait`",
+        "description": "Erases everything the store holds about the traces filed under the user id: the traces, their observations, payloads and scores, the annotation-queue items pointing at them (`annotation_items`), the session-only scores of the sessions they carried (`session_scores`), every version of the dataset items cut from them (`dataset_items`, with the datasets named under `affected_datasets`), and their spans inside the raw OTLP bodies — each batch that held one is rewritten without it and marked `scrubbed_at`, or deleted when nothing else was in it (`raw_spans`, `raw_batches_rewritten`, `raw_batches_deleted`). Without `confirm` it answers with the preview, synchronously; the echo here is the user id. The preview's `raw` block counts the batches the erasure will read and those older than the trace window, which nothing can attribute any more, and `running` names an erasure of the user that is under way. Confirmed, it is a task: everything that can refuse it is checked first and records nothing, then the erasure is recorded and the answer is `202 Accepted` with the erasure and a `Location` to watch it at. With `wait`, the request waits up to that many seconds and answers `200` with the same body when the erasure ended meanwhile. A second request for a user whose erasure is queued or running answers that erasure. One erasure runs at a time per server, and a stop of the server resumes it on the next start.",
         "operationId": "eraseUserData",
         "x-tracepad-scope": "write",
         "parameters": [
           {"$ref": "#/components/parameters/ProjectID"},
           {"name": "user_id", "in": "path", "required": true, "schema": {"type": "string"}},
-          {"$ref": "#/components/parameters/Confirm"}
+          {"$ref": "#/components/parameters/Confirm"},
+          {"name": "wait", "in": "query", "schema": {"type": "integer", "minimum": 0, "maximum": 30, "default": 0},
+            "description": "Confirmed erasures only: seconds to wait for the erasure to end before answering `202`. Out of range, or not a whole number, is a 400"}
         ],
         "responses": {
-          "200": {"description": "What was erased, or the dry run of what would be",
+          "200": {"description": "The dry run of what would be erased, or the erasure, which ended within `wait`",
+            "headers": {"Location": {"schema": {"type": "string"}, "description": "Confirmed only: where the erasure is read"}},
             "content": {"application/json": {"schema": {"oneOf": [
-              {"$ref": "#/components/schemas/Deletion"},
+              {"$ref": "#/components/schemas/Erasure"},
               {"$ref": "#/components/schemas/DryRun"}]}}}},
+          "202": {"description": "The erasure, accepted and still queued or running",
+            "headers": {"Location": {"schema": {"type": "string"}, "description": "Where the erasure is read"}},
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Erasure"}}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "503": {"$ref": "#/components/responses/ServiceUnavailable"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
+    "/api/v1/projects/{id}/erasures": {
+      "get": {
+        "tags": ["admin"],
+        "summary": "The project's erasures, those under way first, then newest first, at most 100",
+        "description": "Queued and running erasures first, then finished ones newest first, not paginated. A finished erasure is kept 30 days after it ends, and its `user_id` is null: the record forgets the user when the erasure ends. While one is queued or running, it names the user.",
+        "operationId": "listErasures",
+        "x-tracepad-scope": "write",
+        "parameters": [{"$ref": "#/components/parameters/ProjectID"}],
+        "responses": {
+          "200": {"description": "The erasures", "content": {"application/json": {"schema": {
+            "type": "object",
+            "properties": {"erasures": {"type": "array", "items": {"$ref": "#/components/schemas/Erasure"}}},
+            "required": ["erasures"]
+          }}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "503": {"$ref": "#/components/responses/ServiceUnavailable"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
+    "/api/v1/projects/{id}/erasures/{erasure_id}": {
+      "get": {
+        "tags": ["admin"],
+        "summary": "One erasure: its state, phase, progress and counts",
+        "description": "What the `Location` of a confirmed erasure points at. An unknown id, one removed 30 days after it ended, and one of another project are all a 404.",
+        "operationId": "getErasure",
+        "x-tracepad-scope": "write",
+        "parameters": [
+          {"$ref": "#/components/parameters/ProjectID"},
+          {"name": "erasure_id", "in": "path", "required": true, "schema": {"type": "string", "pattern": "^[0-9a-f]{32}$"}}
+        ],
+        "responses": {
+          "200": {"description": "The erasure", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Erasure"}}}},
           "400": {"$ref": "#/components/responses/BadRequest"},
           "401": {"$ref": "#/components/responses/Unauthorized"},
           "503": {"$ref": "#/components/responses/ServiceUnavailable"},
@@ -3462,9 +3511,42 @@
             "required": ["batches_to_scan", "unattributable_batches"]},
           "confirm": {"type": "string", "description": "Send this back as `?confirm=` to make it happen"},
           "note": {"type": "string"},
-          "pre_migration_backup": {"$ref": "#/components/schemas/PreMigrationBackup", "description": "User-data erasure only, and only while a backup exists"}
+          "pre_migration_backup": {"$ref": "#/components/schemas/PreMigrationBackup", "description": "User-data erasure only, and only while a backup exists"},
+          "running": {"type": "object",
+            "description": "User-data erasure only, and only while an erasure of the user is queued or running",
+            "properties": {
+              "id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+              "state": {"type": "string", "enum": ["queued", "running"]},
+              "phase": {"type": ["string", "null"], "enum": ["raw", "parsed", "tail", null]}
+            },
+            "required": ["id", "state", "phase"]}
         },
         "required": ["dry_run", "would_delete", "confirm"]
+      },
+      "Erasure": {
+        "type": "object",
+        "description": "A user-data erasure: accepted, then run by the server's one erasure worker in three phases — the raw archive, the parsed rows, and the tail of batches that arrived while it ran. Its counts are what has been committed so far, and it resumes from its phase after a restart",
+        "properties": {
+          "id": {"type": "string", "pattern": "^[0-9a-f]{32}$", "description": "Random, never derived from the user id"},
+          "state": {"type": "string", "enum": ["queued", "running", "done", "failed"]},
+          "phase": {"type": ["string", "null"], "enum": ["raw", "parsed", "tail", null], "description": "While running; null otherwise"},
+          "user_id": {"type": ["string", "null"], "description": "While queued or running, and in the answer to the request that started it; null once it has ended"},
+          "dry_run": {"const": false},
+          "created_at": {"type": "string", "format": "date-time"},
+          "started_at": {"type": ["string", "null"], "format": "date-time"},
+          "finished_at": {"type": ["string", "null"], "format": "date-time"},
+          "progress": {"type": "object",
+            "properties": {
+              "traces_at_start": {"type": ["integer", "null"], "description": "The user's traces when the erasure first read them; null before"},
+              "traces_deleted": {"type": "integer"}
+            },
+            "required": ["traces_at_start", "traces_deleted"]},
+          "deleted": {"type": "object", "additionalProperties": {"type": "integer"}},
+          "compaction": {"$ref": "#/components/schemas/Compaction"},
+          "pre_migration_backup": {"$ref": "#/components/schemas/PreMigrationBackup", "description": "Only while a backup exists"},
+          "error": {"type": ["string", "null"], "description": "Why a failed erasure failed; it never names the user"}
+        },
+        "required": ["id", "state", "phase", "user_id", "dry_run", "created_at", "started_at", "finished_at", "progress", "deleted", "compaction", "error"]
       },
       "Compaction": {
         "type": "object",
@@ -3489,10 +3571,7 @@
         "description": "What a confirmed destructive request actually removed",
         "properties": {
           "dry_run": {"const": false},
-          "deleted": {"type": "object", "additionalProperties": {"type": "integer"}},
-          "user_id": {"type": "string", "description": "User-data erasure only"},
-          "compaction": {"$ref": "#/components/schemas/Compaction", "description": "User-data erasure only"},
-          "pre_migration_backup": {"$ref": "#/components/schemas/PreMigrationBackup", "description": "User-data erasure only, and only while a backup exists"}
+          "deleted": {"type": "object", "additionalProperties": {"type": "integer"}}
         },
         "required": ["dry_run", "deleted"]
       },

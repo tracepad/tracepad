@@ -66,6 +66,21 @@ describe('the confirm card', () => {
 		expect(screen.getByText('edge-cases (1)')).toBeInTheDocument();
 	});
 
+	it('says an erasure of the user is under way before the counts it shrinks', async () => {
+		const { user } = mount({
+			preview: async () => ({
+				...PLAN,
+				running: { id: '0badc0ffee0badc0ffee0badc0ffee00', state: 'running', phase: 'parsed' }
+			})
+		});
+
+		await user.click(screen.getByRole('button', { name: 'Preview' }));
+
+		expect(await screen.findByTestId('erasure-running')).toHaveTextContent(
+			'An erasure of this user is under way — parsed, 0badc0ff. The counts below shrink as it goes'
+		);
+	});
+
 	it('keeps the button shut until the echo is exact', async () => {
 		const { execute, user } = mount();
 		await user.click(screen.getByRole('button', { name: 'Preview' }));
@@ -102,9 +117,7 @@ describe('the confirm card', () => {
 
 		await user.click(screen.getByRole('button', { name: 'Preview' }));
 
-		expect(await screen.findByRole('alert')).toHaveTextContent(
-			'confirm must be the project name'
-		);
+		expect(await screen.findByRole('alert')).toHaveTextContent('confirm must be the project name');
 	});
 
 	it('drops a plan once it stops describing what is on screen', async () => {

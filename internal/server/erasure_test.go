@@ -161,7 +161,7 @@ func TestTheByteScan(t *testing.T) {
 		t.Fatal("the scan finds the marker nowhere before the erasure; it would pass vacuously")
 	}
 
-	rec := h.call(t, "DELETE", "/api/v1/projects/"+h.project.ID+"/users/"+userA+"/data?confirm="+userA, nil)
+	rec := h.call(t, "DELETE", "/api/v1/projects/"+h.project.ID+"/users/"+userA+"/data?wait=30&confirm="+userA, nil)
 	expectStatus(t, rec, http.StatusOK)
 	if err := h.sweeper.Pass(t.Context()); err != nil {
 		t.Fatal(err)
@@ -234,7 +234,7 @@ func TestTheErasureAnswersWithEveryCount(t *testing.T) {
 		t.Errorf("confirm %q, note %q", preview.Confirm, preview.Note)
 	}
 
-	rec = h.call(t, "DELETE", path+"?confirm=user-a", nil)
+	rec = h.call(t, "DELETE", path+"?wait=30&confirm=user-a", nil)
 	expectStatus(t, rec, http.StatusOK)
 	answer := decodeJSON[struct {
 		Deleted map[string]int64 `json:"deleted"`
@@ -255,7 +255,7 @@ func TestARewrittenBatchIsMarked(t *testing.T) {
 		markedSpan(t, 1, 1, "user-a", "s", "a", nil),
 		markedSpan(t, 2, 2, "user-b", "s", "b", nil))
 	h.postExport(t, false, markedSpan(t, 2, 3, "user-b", "s", "b", nil))
-	rec := h.call(t, "DELETE", "/api/v1/projects/"+h.project.ID+"/users/user-a/data?confirm=user-a", nil)
+	rec := h.call(t, "DELETE", "/api/v1/projects/"+h.project.ID+"/users/user-a/data?confirm=user-a&wait=30", nil)
 	expectStatus(t, rec, http.StatusOK)
 
 	rec = h.get(t, "/api/v1/raw")
@@ -289,7 +289,7 @@ func TestARewrittenBatchIsMarked(t *testing.T) {
 func TestErasingATraceWithNoStartTimeAnswers200(t *testing.T) {
 	h := newAdminHarness(t)
 	h.seed(t, &model.Trace{ID: traceHex(1), UserID: "empty"})
-	rec := h.call(t, "DELETE", "/api/v1/projects/"+h.project.ID+"/users/empty/data?confirm=empty", nil)
+	rec := h.call(t, "DELETE", "/api/v1/projects/"+h.project.ID+"/users/empty/data?confirm=empty&wait=30", nil)
 	expectStatus(t, rec, http.StatusOK)
 	if got := h.countTraces(t); got != 0 {
 		t.Errorf("%d traces left, want none", got)

@@ -1027,7 +1027,7 @@ func TestALookupByALongLabelFindsItsCutRow(t *testing.T) {
 	if preview.WouldDelete["traces"] != 1 || preview.WouldDelete["session_scores"] != 1 {
 		t.Errorf("would_delete = %v, want the trace and the session's score", preview.WouldDelete)
 	}
-	rec = h.call(t, "DELETE", path+"?confirm="+user, nil)
+	rec = h.call(t, "DELETE", path+"?wait=30&confirm="+user, nil)
 	expectStatus(t, rec, 200)
 	if erased := decodeJSON[struct {
 		Deleted map[string]int64 `json:"deleted"`

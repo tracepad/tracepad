@@ -68,7 +68,7 @@ func TestAnErasureAnswersWithItsCompactionAndTheBackup(t *testing.T) {
 		t.Errorf("the preview's backup = %+v, want written %v and removed a week later", preview.Backup, written)
 	}
 
-	rec = h.call(t, "DELETE", path+"?confirm=erase-me", nil)
+	rec = h.call(t, "DELETE", path+"?wait=30&confirm=erase-me", nil)
 	expectStatus(t, rec, http.StatusOK)
 	expectUniqueKeys(t, rec)
 	answer := decodeJSON[struct {
@@ -135,7 +135,7 @@ func TestATraceDeletionAnswersWithItsCompaction(t *testing.T) {
 	// A confirmed erasure that found nothing asked for nothing, and says so —
 	// although a request is pending (this deletion's above, and the
 	// migration's), it is not this answer's to report.
-	rec = h.call(t, "DELETE", "/api/v1/projects/"+h.project.ID+"/users/nobody/data?confirm=nobody", nil)
+	rec = h.call(t, "DELETE", "/api/v1/projects/"+h.project.ID+"/users/nobody/data?confirm=nobody&wait=30", nil)
 	expectStatus(t, rec, http.StatusOK)
 	expectUniqueKeys(t, rec)
 	empty := decodeJSON[struct {

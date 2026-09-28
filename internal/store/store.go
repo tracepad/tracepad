@@ -29,6 +29,9 @@ type Store struct {
 	// mediaUploadKey signs the Langfuse channel's upload URLs (spec 041,
 	// Decision 22), read — or minted — once at open.
 	mediaUploadKey []byte
+	// erasures is how an erasure request wakes the worker and a waiting
+	// one hears it end (spec 047 #7, #10).
+	erasures *erasureSignals
 }
 
 // Open opens (creating if needed) the database at path and applies pending
@@ -86,7 +89,7 @@ func Open(path string) (*Store, error) {
 	// kept, a connection pays them once.
 	db.SetMaxIdleConns(idleConns())
 	db.SetConnMaxIdleTime(5 * time.Minute)
-	s := &Store{db: db, path: path, fresh: fresh}
+	s := &Store{db: db, path: path, fresh: fresh, erasures: newErasureSignals()}
 	// sql.Open is lazy: real open failures (corrupt file, permissions)
 	// surface from the first statement inside migrate, so the recovery
 	// hint naming the DB path and the newest backup belongs here.

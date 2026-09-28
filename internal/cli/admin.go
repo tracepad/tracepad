@@ -4,18 +4,14 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"net/http"
-	"net/http/httptrace"
 	"net/url"
 	"slices"
 	"strconv"
 	"strings"
-	"sync/atomic"
 
-	"github.com/tracepad/tracepad/internal/client"
 	"github.com/tracepad/tracepad/internal/store"
 	"github.com/tracepad/tracepad/internal/termsafe"
 )
@@ -72,6 +68,13 @@ type preview struct {
 	// account minted them (spec 045 #10). Not in `would_delete`: the
 	// deletion does not take them.
 	Keys []mintedKey `json:"keys"`
+	// Running is an erasure of the user under way (spec 047 #13): the
+	// counts above are shrinking under it.
+	Running *struct {
+		ID    string `json:"id"`
+		State string `json:"state"`
+		Phase string `json:"phase"`
+	} `json:"running"`
 }
 
 // mintedKey is one key an account minted, as its deletion preview lists it.
@@ -717,139 +720,33 @@ func (r *run) users(ctx context.Context, args []string) error {
 		return r.usersShow(ctx, rest)
 	case "rm-data":
 		return r.usersRemoveData(ctx, rest)
+	case "erasure":
+		return r.usersErasure(ctx, rest)
+	case "erasures":
+		return r.usersErasures(ctx, rest)
 	}
-	return usageErrorf("users takes ls, show or rm-data, got %q", sub)
+	return usageErrorf("users takes ls, show, rm-data, erasure or erasures, got %q", sub)
 }
 
-func (r *run) usersRemoveData(ctx context.Context, rest []string) error {
-	var yes bool
-	fs := r.flags("users rm-data")
-	project := fs.String("project", "", "")
-	fs.BoolVar(&yes, "yes", false, "")
-	positional, err := r.parse(fs, rest, 1)
-	if err != nil {
-		return err
-	}
-	id, err := r.projectID(ctx, fs, *project)
-	if err != nil {
-		return err
-	}
-	path := "/api/v1/projects/" + url.PathEscape(id) +
-		"/users/" + url.PathEscape(positional[0]) + "/data"
+// erasuresCommand is the command that lists the project's erasures: the flags
+// the operator gave — the project and the server it went to, never the key —
+// each quoted for a shell where it needs it.
+func erasuresCommand(fs *flag.FlagSet) string { return usersCommand(fs, "erasures") }
 
-	body, confirmed, err := r.confirmDestructive(ctx, http.MethodDelete, path, nil, nil, yes,
-		"erase the data of user "+positional[0])
-	if err != nil {
-		return err
-	}
-	if confirmed != nil {
-		body, err = confirmErasure(ctx, previewAgain(fs, positional[0]), func(ctx context.Context) (json.RawMessage, error) {
-			return r.api.Send(ctx, http.MethodDelete, path, confirmed, nil)
-		})
-		if err != nil {
-			return err
-		}
-	}
-	if r.wantJSON() {
-		return r.emit(body)
-	}
-	result, err := decode[struct {
-		Deleted    map[string]int64 `json:"deleted"`
-		UserID     string           `json:"user_id"`
-		Compaction struct {
-			ExpectedBy *string `json:"expected_by"`
-		} `json:"compaction"`
-		Backup *struct {
-			CreatedAt   string `json:"created_at"`
-			RemoveAfter string `json:"remove_after"`
-		} `json:"pre_migration_backup"`
-	}](body)
-	if err != nil {
-		return err
-	}
-	fmt.Fprintf(r.opt.Stdout, "erased the data of %s\n", termsafe.String(result.UserID))
-	t := newTable(r.opt.Stdout)
-	for _, kind := range []string{"traces", "observations", "scores", "session_scores", "payloads",
-		"annotation_items", "dataset_items", "media"} {
-		if count, reported := result.Deleted[kind]; reported {
-			t.row("  "+kind, strconv.FormatInt(count, 10))
-		}
-	}
-	t.flush()
-	// The user's spans in the raw archive (spec 044 #2): every batch that
-	// held one was rewritten without it, or deleted. A server that does not
-	// report it is one that does not erase there, and zeros would say it
-	// looked and found nothing.
-	if spans, reported := result.Deleted["raw_spans"]; reported {
-		rewritten, deleted := result.Deleted["raw_batches_rewritten"], result.Deleted["raw_batches_deleted"]
-		fmt.Fprintf(r.opt.Stdout, "\nremoved %d spans from %d raw batches, %d deleted\n",
-			spans, rewritten+deleted, deleted)
-	} else {
-		fmt.Fprintf(r.opt.Stdout, "\nthe server reported nothing about its raw archive: "+
-			"a server that predates erasing it keeps the user's spans there until the batches expire\n")
-	}
-	// What the rows left in the file is overwritten by the next pass, and
-	// the one copy of the database an erasure does not rewrite goes on its
-	// own date (spec 044 #11, #12).
-	if result.Compaction.ExpectedBy != nil {
-		fmt.Fprintf(r.opt.Stdout, "freed bytes are overwritten by the next sweep, expected by %s\n",
-			shortTime(*result.Compaction.ExpectedBy))
-	}
-	if result.Backup != nil {
-		fmt.Fprintf(r.opt.Stdout, "the pre-migration backup of %s is not rewritten; the first sweep after %s removes it\n",
-			shortTime(result.Backup.CreatedAt), shortTime(result.Backup.RemoveAfter))
-	}
-	return nil
-}
-
-// confirmErasure sends the confirmed erasure and says what a failure means.
-// The server runs an erasure to completion whether or not anybody waits for
-// it (spec 035 #14), and a long one outlasts this client's wait: once the
-// request is written, no answer is news about the wait, not a failure of the
-// erasure; so is a proxy in front of the server answering 502 or 504 because
-// it stopped waiting too. Before that — a refused connection, a name that does
-// not resolve, a handshake that fails, an interrupt — nothing reached the
-// server, and the error is passed on as it is; so is a refusal the server did
-// send, a 503 included: the server answers that one before erasing anything.
-func confirmErasure(ctx context.Context, again string,
-	send func(context.Context) (json.RawMessage, error)) (json.RawMessage, error) {
-	var written atomic.Bool
-	body, err := send(httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
-		// Per attempt: the transport retries a request whose reused
-		// connection turned out closed, and only the last attempt says
-		// whether the server has it.
-		GetConn: func(string) { written.Store(false) },
-		WroteRequest: func(info httptrace.WroteRequestInfo) {
-			written.Store(info.Err == nil)
-		},
-	}))
-	if err == nil || !written.Load() {
-		return body, err
-	}
-	var refusal *client.Error
-	if errors.As(err, &refusal) && refusal.Status != http.StatusBadGateway &&
-		refusal.Status != http.StatusGatewayTimeout {
-		return body, err
-	}
-	return nil, fmt.Errorf("no answer from the server (%w); the erasure it received runs to the end without one — "+
-		"run `%s` again in a few minutes: its preview shows what is left", err, again)
-}
-
-// previewAgain is the command that asks for the erasure's preview again: the
-// flags the operator gave — the project and the server it went to, never the
-// key — and the user id, each quoted for a shell where it needs it.
-func previewAgain(fs *flag.FlagSet, user string) string {
-	words := []string{"tracepad", "users", "rm-data"}
+// usersCommand is a `users` subcommand to run next, with the --project and
+// --url the operator gave and before its arguments, where the flag parser
+// reads them (spec 047 #31).
+func usersCommand(fs *flag.FlagSet, sub string, args ...string) string {
+	words := []string{"tracepad", "users", sub}
 	fs.Visit(func(f *flag.Flag) {
 		if f.Name == "project" || f.Name == "url" {
 			words = append(words, "--"+f.Name, shellWord(f.Value.String()))
 		}
 	})
-	if strings.HasPrefix(user, "-") {
-		// Read as a flag otherwise; the operator's own command needed it.
-		words = append(words, "--")
+	for _, arg := range args {
+		words = append(words, shellWord(arg))
 	}
-	return strings.Join(append(words, shellWord(user)), " ")
+	return strings.Join(words, " ")
 }
 
 // shellWord quotes a word for a POSIX shell unless it is made only of
@@ -982,6 +879,14 @@ func (r *run) renderPreview(dry preview, what string) {
 	}
 	if dry.Note != "" {
 		fmt.Fprintf(out, "%s\n", termsafe.Text(dry.Note))
+	}
+	if running := dry.Running; running != nil {
+		stage := running.Phase
+		if stage == "" {
+			stage = running.State
+		}
+		fmt.Fprintf(out, "an erasure of this user is running: %s (%s)\n",
+			termsafe.String(running.ID), termsafe.String(stage))
 	}
 }
 

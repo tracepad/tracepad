@@ -78,6 +78,9 @@ tracepad users rm-data <user-id>
 Everything stored about one end user — their traces with everything attached,
 and their rows in the statistics. It is a request someone is entitled to make;
 it is also irreversible. Look at the user first, then the dry run, then stop.
+Confirmed, the server runs it as a task and the command waits for its end,
+printing progress; `tracepad users erasures` lists what ran and what is still
+running.
 
 ## Deleting traces
 

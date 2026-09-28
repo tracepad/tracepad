@@ -42,6 +42,8 @@ export type SessionRow = components['schemas']['SessionRow'];
 export type UserRow = components['schemas']['UserRow'];
 /** What a destructive request answers before it is confirmed (spec 005 #8). */
 export type DryRun = components['schemas']['DryRun'];
+/** A user-data erasure, which runs as a task on the server (spec 047 #8). */
+export type Erasure = components['schemas']['Erasure'];
 /** What deleting one trace removed (spec 035 #1). */
 export type TraceDeletion = components['schemas']['TraceDeletion'];
 /** What one round of a deletion by filter removed, and whether there is more (spec 035 #4). */
@@ -733,11 +735,29 @@ class Api {
 		);
 	}
 
-	eraseUserData(id: string, userID: string, confirm?: string) {
-		return this.#json<DryRun | { dry_run: false; deleted: Record<string, number> }>(
+	/**
+	 * The dry run, or with the echo the erasure itself: answered once it has
+	 * ended within `wait` seconds, and still queued or running otherwise
+	 * (spec 047 #7).
+	 */
+	eraseUserData(id: string, userID: string, confirm?: string, wait?: number) {
+		const seconds = confirm === undefined || wait === undefined ? undefined : String(wait);
+		return this.#json<DryRun | Erasure>(
 			`/api/v1/projects/${id}/users/${encodeURIComponent(userID)}/data`,
-			{ method: 'DELETE', query: { confirm } }
+			{ method: 'DELETE', query: { confirm, wait: seconds } }
 		);
+	}
+
+	/** One erasure, as it is now (spec 047 #14). */
+	erasure(id: string, erasureID: string, signal?: AbortSignal) {
+		return this.#json<Erasure>(`/api/v1/projects/${id}/erasures/${encodeURIComponent(erasureID)}`, {
+			signal
+		});
+	}
+
+	/** The project's erasures, those under way first, at most a hundred (spec 047 #14, #28). */
+	erasures(id: string, signal?: AbortSignal) {
+		return this.#json<{ erasures: Erasure[] }>(`/api/v1/projects/${id}/erasures`, { signal });
 	}
 
 	// --- signing in (spec 028 #8, #9, #10) ---------------------------------
@@ -998,8 +1018,8 @@ class Api {
 function interrupted(cause: unknown): unknown {
 	const name = typeof cause === 'object' && cause !== null && 'name' in cause ? cause.name : '';
 	if (name === 'TimeoutError') {
-		// Marked, because for a request the server runs to completion — an
-		// erasure (spec 035 #14) — "no answer in time" is not a failure.
+		// Marked, because for a confirmed erasure "no answer in time" does
+		// not say whether the server recorded it (spec 047 #27).
 		return new ApiError(0, 'the server did not answer in time', { timed_out: true });
 	}
 	if (name === 'AbortError') return cause;

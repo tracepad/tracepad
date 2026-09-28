@@ -540,7 +540,7 @@ func TestEraseUserData(t *testing.T) {
 		t.Fatalf("a rejected confirmation erased data anyway")
 	}
 
-	rec = h.call(t, "DELETE", path+"?confirm=erase-me", nil)
+	rec = h.call(t, "DELETE", path+"?wait=30&confirm=erase-me", nil)
 	expectStatus(t, rec, 200)
 	erased := decodeJSON[struct {
 		DryRun  bool           `json:"dry_run"`

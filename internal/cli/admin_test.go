@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -577,77 +579,237 @@ func TestAdminCommandUsageErrors(t *testing.T) {
 	}
 }
 
-// A confirmed erasure that outlasts the client's wait is still running on the
-// server (spec 035 #14): the command says so and how to see what is left,
-// rather than that the server could not be reached. One that never reached
-// the server says that, and nothing about an erasure running; a refusal the
-// server did send stays that refusal.
-func TestAnUnansweredErasureSaysItIsRunning(t *testing.T) {
+// A confirmed erasure whose answer is lost after the request was written may
+// have been accepted (spec 047 #18): the command says where to look, rather
+// than that the server could not be reached. One that never reached the
+// server says that, and nothing about an erasure; a refusal the server did
+// send stays that refusal.
+func TestALostErasureAnswerPointsAtTheListing(t *testing.T) {
 	ask := func(t *testing.T, baseURL string) error {
 		t.Helper()
 		api := &client.Client{BaseURL: baseURL, HTTP: &http.Client{Timeout: 200 * time.Millisecond}}
-		_, err := confirmErasure(t.Context(), "tracepad users rm-data u1", func(ctx context.Context) (json.RawMessage, error) {
+		_, err := confirmErasure(t.Context(), "tracepad users erasures", func(ctx context.Context) (json.RawMessage, error) {
 			return api.Send(ctx, http.MethodDelete, "/data", url.Values{"confirm": {"u1"}}, nil)
 		})
 		return err
 	}
-	running := "runs to the end"
+	accepted := "may have accepted the erasure"
 
 	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		<-r.Context().Done()
 	}))
 	defer slow.Close()
 	err := ask(t, slow.URL)
-	if err == nil || !strings.Contains(err.Error(), running) || !strings.Contains(err.Error(), "users rm-data u1") {
-		t.Errorf("an erasure that outlasted the wait: %v", err)
+	if err == nil || !strings.Contains(err.Error(), accepted) || !strings.Contains(err.Error(), "tracepad users erasures") {
+		t.Errorf("an answer that never came: %v", err)
 	}
 
 	gone := httptest.NewServer(http.NotFoundHandler())
 	gone.Close()
-	if err := ask(t, gone.URL); err == nil || strings.Contains(err.Error(), running) ||
+	if err := ask(t, gone.URL); err == nil || strings.Contains(err.Error(), accepted) ||
 		!strings.Contains(err.Error(), "cannot reach") {
 		t.Errorf("a server that was never reached: %v", err)
 	}
 
 	refusing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusConflict)
-		_, _ = w.Write([]byte(`{"error":"raw batch 3 was rewritten since it was read"}`))
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"confirm must be the user id being erased"}`))
 	}))
 	defer refusing.Close()
 	var refusal *client.Error
-	if err := ask(t, refusing.URL); !errors.As(err, &refusal) || refusal.Status != http.StatusConflict ||
-		strings.Contains(err.Error(), running) {
+	if err := ask(t, refusing.URL); !errors.As(err, &refusal) || refusal.Status != http.StatusBadRequest ||
+		strings.Contains(err.Error(), accepted) {
 		t.Errorf("a refusal became %v", err)
 	}
 
-	// A proxy in front of the server that stopped waiting too: the request
-	// reached it, and the server behind it runs the erasure on.
+	// A proxy in front of the server that stopped waiting: the request
+	// reached it, and the server behind it may have recorded it.
 	for _, status := range []int{http.StatusBadGateway, http.StatusGatewayTimeout} {
 		proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(status)
 		}))
-		if err := ask(t, proxy.URL); err == nil || !strings.Contains(err.Error(), running) {
+		if err := ask(t, proxy.URL); err == nil || !strings.Contains(err.Error(), accepted) {
 			t.Errorf("a proxy's %d after the request was sent: %v", status, err)
 		}
 		proxy.Close()
 	}
-	// The server's own 503 comes before anything is erased.
+	// The server's own 503 comes before anything is recorded.
 	unavailable := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		_, _ = w.Write([]byte(`{"error":"writes are not available"}`))
 	}))
 	defer unavailable.Close()
-	if err := ask(t, unavailable.URL); !errors.As(err, &refusal) || strings.Contains(err.Error(), running) {
+	if err := ask(t, unavailable.URL); !errors.As(err, &refusal) || strings.Contains(err.Error(), accepted) {
 		t.Errorf("the server's 503 became %v", err)
+	}
+}
+
+// fakeErasures is a server whose erasure of u1 answers the confirmed request
+// with 202 and then reads as each of states in turn, one per GET.
+func fakeErasures(t *testing.T, states ...string) (*httptest.Server, *atomic.Int32) {
+	t.Helper()
+	var reads, blips atomic.Int32
+	resource := func(state, phase string, deleted int) string {
+		phaseJSON, errorJSON := "null", "null"
+		if phase != "" {
+			phaseJSON = `"` + phase + `"`
+		}
+		if state == "failed" {
+			errorJSON = `"the disk is full"`
+		}
+		return fmt.Sprintf(`{"id":"4f0c9d3e8a1b2c3d4e5f60718293a4b5","state":%q,"phase":%s,"user_id":null,`+
+			`"dry_run":false,"created_at":"2026-10-02T09:00:00Z","progress":{"traces_at_start":3,"traces_deleted":%d},`+
+			`"deleted":{"traces":%d,"raw_spans":%d,"raw_batches_rewritten":1,"raw_batches_deleted":0},`+
+			`"compaction":{"requested_at":null,"expected_by":null},"error":%s}`,
+			state, phaseJSON, deleted, deleted, 2*deleted, errorJSON)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodDelete && r.URL.Query().Get("confirm") == "":
+			_, _ = w.Write([]byte(`{"dry_run":true,"would_delete":{"traces":3},"confirm":"u1",` +
+				`"running":{"id":"0badc0ffee0badc0ffee0badc0ffee00","state":"running","phase":"parsed"}}`))
+		case r.Method == http.MethodDelete:
+			if r.URL.Query().Get("wait") != "30" && r.URL.Query().Get("wait") != "" {
+				t.Errorf("wait = %q", r.URL.Query().Get("wait"))
+			}
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte(resource("queued", "", 0)))
+		case reads.Load() == 0 && blips.Add(1) <= 2:
+			// Two reads the server was too busy for, before any answer.
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"error":"the server is busy; retry shortly"}`))
+		default:
+			n := int(reads.Add(1)) - 1
+			state := states[min(n, len(states)-1)]
+			phase, deleted := "", 3
+			if state == "running" {
+				phase, deleted = "parsed", n+1
+			}
+			_, _ = w.Write([]byte(resource(state, phase, deleted)))
+		}
+	}))
+	t.Cleanup(server.Close)
+	return server, &reads
+}
+
+// An erasure not over within the wait is watched to its end, its progress on
+// stderr one line per change; a failed one exits 1 with its sentence;
+// --no-wait prints where to look instead (spec 047 #18).
+func TestRemoveDataWatchesTheErasureToItsEnd(t *testing.T) {
+	defer func(poll time.Duration) { erasurePoll = poll }(erasurePoll)
+	erasurePoll = time.Millisecond
+	h := newAdminCLI(t)
+
+	server, _ := fakeErasures(t, "running", "running", "running", "done")
+	out := h.run(t.Context(), true, "users", "rm-data", "--url", server.URL, "--project", "p", "--yes", "u1")
+	if out.code != ExitOK {
+		t.Fatalf("users rm-data exited %d: %s", out.code, out.stderr)
+	}
+	for _, line := range []string{"an erasure of this user is running: 0badc0ffee0badc0ffee0badc0ffee00 (parsed)",
+		"erasing: queued\n", "erasing: parsed 1/3 traces\n", "erasing: parsed 2/3 traces\n",
+		"erasing: parsed 3/3 traces\n"} {
+		if !strings.Contains(out.stderr, line) {
+			t.Errorf("stderr = %q, want %q", out.stderr, line)
+		}
+	}
+	if !strings.Contains(out.stdout, "erased the data of u1") ||
+		!strings.Contains(out.stdout, "removed 6 spans from 1 raw batches, 0 deleted") {
+		t.Errorf("stdout = %q, want the end's counts", out.stdout)
+	}
+
+	server, _ = fakeErasures(t, "running", "failed")
+	out = h.run(t.Context(), true, "users", "rm-data", "--url", server.URL, "--project", "p", "--yes", "u1")
+	if out.code != ExitFailure || !strings.Contains(out.stderr, "the disk is full") {
+		t.Errorf("a failed erasure exited %d: %s", out.code, out.stderr)
+	}
+
+	server, reads := fakeErasures(t, "done")
+	out = h.run(t.Context(), true, "users", "rm-data", "--url", server.URL, "--project", "p", "--yes",
+		"--no-wait", "u1")
+	if out.code != ExitOK || reads.Load() != 0 ||
+		out.stdout != "erasure 4f0c9d3e8a1b2c3d4e5f60718293a4b5 queued; tracepad users erasure --project p --url "+
+			server.URL+" 4f0c9d3e8a1b2c3d4e5f60718293a4b5\n" {
+		t.Errorf("--no-wait exited %d after %d reads: %q", out.code, reads.Load(), out.stdout)
+	}
+}
+
+// A watch the server refuses ends with the command that shows the erasure
+// later, for the same project on the same server (spec 047 #31).
+func TestAWatchThatEndsSaysHowToLookAgain(t *testing.T) {
+	defer func(poll time.Duration) { erasurePoll = poll }(erasurePoll)
+	erasurePoll = time.Millisecond
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodDelete && r.URL.Query().Get("confirm") == "":
+			_, _ = w.Write([]byte(`{"dry_run":true,"would_delete":{"traces":3},"confirm":"u1"}`))
+		case r.Method == http.MethodDelete:
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte(`{"id":"4f0c9d3e8a1b2c3d4e5f60718293a4b5","state":"queued","phase":null,` +
+				`"progress":{"traces_at_start":null,"traces_deleted":0},"deleted":{}}`))
+		default:
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"error":"this key may not read erasures"}`))
+		}
+	}))
+	t.Cleanup(server.Close)
+	h := newAdminCLI(t)
+	out := h.run(t.Context(), true, "users", "rm-data", "--url", server.URL, "--project", "p", "--yes", "u1")
+	want := "the erasure goes on on the server: tracepad users erasure --project p --url " + server.URL +
+		" 4f0c9d3e8a1b2c3d4e5f60718293a4b5"
+	if out.code != ExitFailure || !strings.Contains(out.stderr, want) {
+		t.Errorf("a refused watch exited %d: %s\nwant %s", out.code, out.stderr, want)
+	}
+}
+
+// `users erasure` and `users erasures` read what the server records, the user
+// id only while an erasure runs (spec 047 #9, #14).
+func TestUsersErasures(t *testing.T) {
+	h := newAdminCLI(t)
+	h.seed(t, &model.Trace{ID: traceHex(1), UserID: "u1"},
+		&model.Observation{TraceID: traceHex(1), ID: spanHex(1), Type: model.TypeSpan,
+			Level: model.LevelDefault, StartTime: seedBase, EndTime: seedBase + ms})
+	out := h.run(t.Context(), true, "users", "erasures")
+	if out.code != ExitOK || !strings.Contains(out.stdout, "no erasures") {
+		t.Fatalf("users erasures before any exited %d: %q %s", out.code, out.stdout, out.stderr)
+	}
+	if out = h.run(t.Context(), true, "users", "rm-data", "--yes", "u1"); out.code != ExitOK {
+		t.Fatalf("users rm-data exited %d: %s", out.code, out.stderr)
+	}
+	erasures, err := h.store.Erasures(t.Context(), h.projectID(t))
+	if err != nil || len(erasures) != 1 {
+		t.Fatalf("erasures = %v, %v", erasures, err)
+	}
+	id := erasures[0].ID
+	out = h.run(t.Context(), true, "users", "erasures")
+	if out.code != ExitOK || !strings.Contains(out.stdout, id) || !strings.Contains(out.stdout, "done") ||
+		strings.Contains(out.stdout, "u1") {
+		t.Errorf("users erasures exited %d: %q, want the ended erasure naming no one", out.code, out.stdout)
+	}
+	out = h.run(t.Context(), true, "users", "erasure", id)
+	if out.code != ExitOK || !strings.Contains(out.stdout, "erasure "+id) ||
+		!regexp.MustCompile(`traces\s+1`).MatchString(out.stdout) || strings.Contains(out.stdout, "user ") {
+		t.Errorf("users erasure exited %d: %q", out.code, out.stdout)
+	}
+	if out = h.run(t.Context(), true, "users", "erasure", strings.Repeat("0", 32)); out.code != ExitFailure {
+		t.Errorf("an unknown erasure exited %d: %s", out.code, out.stderr)
 	}
 }
 
 // A server that predates the raw scrub answers no raw counts, and the command
 // says so rather than printing zeros, which would read as an archive checked
-// and found clean.
+// and found clean. Nor does it know `wait`, which it refuses before it erases
+// anything: the command asks again without it, and reads the answer as the
+// end, with or without --no-wait (spec 047 #30).
 func TestAnErasureAnswerWithoutRawCountsSaysSo(t *testing.T) {
 	old := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Has("wait") {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":"unknown query parameter \"wait\" (accepted: confirm)"}`))
+			return
+		}
 		if r.URL.Query().Get("confirm") == "" {
 			_, _ = w.Write([]byte(`{"dry_run":true,"would_delete":{"traces":1},"confirm":"u1"}`))
 			return
@@ -664,11 +826,15 @@ func TestAnErasureAnswerWithoutRawCountsSaysSo(t *testing.T) {
 		!strings.Contains(out.stdout, "the server reported nothing about its raw archive") {
 		t.Errorf("stdout = %q", out.stdout)
 	}
+	out = h.run(t.Context(), true, "users", "rm-data", "--url", old.URL, "--project", "p", "--yes", "--no-wait", "u1")
+	if out.code != ExitOK || !strings.Contains(out.stdout, "erased the data of u1") {
+		t.Errorf("--no-wait exited %d: %q %s", out.code, out.stdout, out.stderr)
+	}
 }
 
-// The command the unanswered erasure suggests asks the same server about the
-// same project and user: the flags the operator gave are repeated, the key
-// never is, and a word a shell would split or expand is quoted.
+// The command a lost erasure answer suggests asks the same server about the
+// same project: the flags the operator gave are repeated, the key never is,
+// and a word a shell would split or expand is quoted.
 func TestTheRetryHintRepeatsTheProjectAndQuotes(t *testing.T) {
 	fs := flag.NewFlagSet("users rm-data", flag.ContinueOnError)
 	fs.String("url", "", "")
@@ -678,16 +844,17 @@ func TestTheRetryHintRepeatsTheProjectAndQuotes(t *testing.T) {
 	if err := fs.Parse([]string{"--project", "shop eu", "--key", "tp-secret", "--url", "https://t.example:4318", "--yes"}); err != nil {
 		t.Fatal(err)
 	}
-	got := previewAgain(fs, "o'brien $HOME")
-	want := `tracepad users rm-data --project 'shop eu' --url https://t.example:4318 'o'\''brien $HOME'`
+	got := erasuresCommand(fs)
+	want := `tracepad users erasures --project 'shop eu' --url https://t.example:4318`
 	if got != want {
 		t.Errorf("hint = %s\nwant   %s", got, want)
 	}
-	if bare := previewAgain(flag.NewFlagSet("x", flag.ContinueOnError), "user-4711"); bare != "tracepad users rm-data user-4711" {
+	if bare := erasuresCommand(flag.NewFlagSet("x", flag.ContinueOnError)); bare != "tracepad users erasures" {
 		t.Errorf("hint without flags = %s", bare)
 	}
-	// An id that starts with a dash would be read as a flag.
-	if dashed := previewAgain(flag.NewFlagSet("x", flag.ContinueOnError), "-alice"); dashed != "tracepad users rm-data -- -alice" {
-		t.Errorf("hint for a dashed id = %s", dashed)
+	// The hint for one erasure carries them too, before its id (#31).
+	if one := usersCommand(fs, "erasure", "4f0c"); one !=
+		`tracepad users erasure --project 'shop eu' --url https://t.example:4318 4f0c` {
+		t.Errorf("hint for one erasure = %s", one)
 	}
 }

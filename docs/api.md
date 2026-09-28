@@ -516,10 +516,29 @@ run until `?confirm=<user id>`. The dry run's `would_delete` counts `traces`,
 `dataset_items`, `media` and `media_bytes`, and beside it come
 `affected_runs`, `affected_datasets` (`[{dataset, items}]`), `raw`
 (`{batches_to_scan, unattributable_batches}`) and, while one exists,
-`pre_migration_backup`. The confirmed answer's `deleted` adds `payloads`,
-`raw_spans`, `raw_batches_rewritten` and `raw_batches_deleted`, with
-`user_id`, `compaction` (`{requested_at, expected_by}`) and the backup.
-The shapes in full, and what each count means, are in
+`pre_migration_backup`, and `running` (`{id, state, phase}`) while an
+erasure of the user is under way.
+
+Confirmed, an erasure is a task. Whatever can refuse it refuses first and
+records nothing; then it answers **`202 Accepted`** with the erasure and
+`Location: /api/v1/projects/{id}/erasures/{erasure_id}`. `?wait=<seconds>`,
+from 0 to 30 (0 by default, anything else a `400`), holds the answer until the
+erasure ends or the time is up, and answers **`200`** with the same body when
+it ended. A second request for a user whose erasure is queued or running
+answers that erasure. The erasure resource is `{id, state, phase, user_id,
+dry_run: false, created_at, started_at, finished_at, progress:
+{traces_at_start, traces_deleted}, deleted, compaction, pre_migration_backup,
+error}`: `state` is `queued`, `running`, `done` or `failed`; `phase` is `raw`,
+`parsed` or `tail` while it runs; `deleted` adds `payloads`, `raw_spans`,
+`raw_batches_rewritten` and `raw_batches_deleted` to the dry run's counts and
+says what has been committed so far. `user_id` is `null` once the erasure has
+ended, except in the answer to the request that started it.
+
+`GET /api/v1/projects/{id}/erasures/{erasure_id}` reads one erasure, `404` for
+one that is unknown, another project's, or removed 30 days after it ended.
+`GET /api/v1/projects/{id}/erasures` is the project's hundred, those queued or
+running first and then the newest, as `{"erasures": [...]}`. Both are an editor's, or a `write` key's, like
+the erasure. The shapes in full, and what each count means, are in
 [admin.md](admin.md#erasing-a-users-data).
 
 ## Deleting traces

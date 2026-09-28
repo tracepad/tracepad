@@ -2,11 +2,9 @@ package server
 
 import (
 	"context"
-	"net/http/httptest"
 	"testing"
 	"time"
 
-	"github.com/tracepad/tracepad/internal/config"
 	"github.com/tracepad/tracepad/internal/model"
 	"github.com/tracepad/tracepad/internal/store"
 )
@@ -235,7 +233,7 @@ func TestErasingAUserCorrectsTheRolledHours(t *testing.T) {
 	}
 
 	rec := h.send(t, "DELETE",
-		"/api/v1/projects/"+h.project.ID+"/users/forget-me/data?confirm=forget-me", nil)
+		"/api/v1/projects/"+h.project.ID+"/users/forget-me/data?confirm=forget-me&wait=30", nil)
 	expectStatus(t, rec, 200)
 
 	// The rollup is corrected in the same request that promised the data is
@@ -246,37 +244,36 @@ func TestErasingAUserCorrectsTheRolledHours(t *testing.T) {
 	}
 }
 
-// hangUpOnTheFirstChunk is the client of spec 010 #10 as the writer sees it:
-// the first erase chunk commits — the writer never abandons a job whose
-// caller has — but the request's context is cancelled before it is answered,
-// and the handler learns of the chunk only that its client is gone.
-type hangUpOnTheFirstChunk struct {
-	inner  JobWriter
-	cancel context.CancelFunc
-	chunks int
+// stopAfterTheFirstChunk is a stop of the server as the erasure worker sees
+// it: the first erase chunk commits — the writer never abandons a job whose
+// caller has — and the worker is told the writer is closing, so the erasure
+// stays running for the next start (spec 047 #17). stopped says so.
+type stopAfterTheFirstChunk struct {
+	inner   JobWriter
+	chunks  int
+	stopped chan struct{}
 }
 
-func (w *hangUpOnTheFirstChunk) SubmitWaiting(ctx context.Context, job store.WriteJob) error {
-	return w.inner.SubmitWaiting(ctx, job)
-}
-
-func (w *hangUpOnTheFirstChunk) Submit(ctx context.Context, job store.WriteJob) error {
+func (w *stopAfterTheFirstChunk) Submit(ctx context.Context, job store.WriteJob) error {
 	if _, ok := job.(*store.UserDataErase); !ok {
 		return w.inner.Submit(ctx, job)
 	}
 	w.chunks++
+	if w.chunks > 1 {
+		return store.ErrWriterClosed
+	}
 	if err := w.inner.Submit(context.Background(), job); err != nil {
 		return err
 	}
-	w.cancel()
-	return context.Canceled
+	close(w.stopped)
+	return store.ErrWriterClosed
 }
 
-// A client that hangs up between chunks — a closed tab, the interface's
-// thirty-second clock — leaves every hour the committed chunks emptied
-// already corrected, and a repeat of the request finishes the rest with no
-// hour left counting traces that are gone (spec 023 #19; found in review of
-// PR #61).
+// A stop between chunks leaves every hour the committed chunks emptied already
+// corrected, and the erasure resumed on the next start finishes the rest with
+// no hour left counting traces that are gone (spec 023 #19, spec 047 #12;
+// found in review of PR #61, when a client hanging up was the way an erasure
+// was cut off).
 func TestAnErasureCutOffBetweenChunksLeavesNoHourDirty(t *testing.T) {
 	h := newHarness(t, nil, store.WriterOptions{})
 
@@ -295,7 +292,7 @@ func TestAnErasureCutOffBetweenChunksLeavesNoHourDirty(t *testing.T) {
 			Level: model.LevelDefault, StartTime: start, EndTime: start + 50*ms})
 	}
 	n := 0
-	for range eraseChunk {
+	for range store.DefaultEraseChunk {
 		n++
 		add(n, first, "forget-me")
 	}
@@ -313,22 +310,26 @@ func TestAnErasureCutOffBetweenChunksLeavesNoHourDirty(t *testing.T) {
 	h.rollTheCorpus(t, time.Unix(second+3*3600, 0))
 
 	before := h.statsBuckets(t, "/api/v1/stats?group_by=hour")
-	if len(before) != 2 || before[0].Count != eraseChunk+1 || before[1].Count != 51 {
-		t.Fatalf("buckets = %+v, want %d and 51", before, eraseChunk+1)
+	if len(before) != 2 || before[0].Count != store.DefaultEraseChunk+1 || before[1].Count != 51 {
+		t.Fatalf("buckets = %+v, want %d and 51", before, store.DefaultEraseChunk+1)
 	}
 
-	// The same server over the same store, with the client that hangs up.
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	writer := &hangUpOnTheFirstChunk{inner: h.writer, cancel: cancel}
-	cfg := &config.Config{Listen: ":0", StoreRaw: true, MaxBodyBytes: config.DefaultMaxBodyBytes}
-	server := New(cfg, "test", h.store, writer, h.sweeper)
+	// The same store, with a worker the stop comes to after one chunk.
+	h.eraser.Close()
+	writer := &stopAfterTheFirstChunk{inner: h.writer, stopped: make(chan struct{})}
+	stopping := h.store.NewEraser(writer, store.EraserOptions{})
+	stopping.Start()
 	path := "/api/v1/projects/" + h.project.ID + "/users/forget-me/data?confirm=forget-me"
-	req := httptest.NewRequest("DELETE", path, nil).WithContext(ctx)
-	req.Header.Set("Authorization", "Bearer "+testSecret)
-	server.Handler().ServeHTTP(httptest.NewRecorder(), req)
+	rec := h.call(t, "DELETE", path, nil)
+	expectStatus(t, rec, 202)
+	select {
+	case <-writer.stopped:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the erasure's first chunk never came")
+	}
+	stopping.Close()
 	if writer.chunks != 1 {
-		t.Fatalf("the handler submitted %d chunks after its client hung up, want 1", writer.chunks)
+		t.Fatalf("the worker submitted %d chunks after the stop, want 1", writer.chunks)
 	}
 
 	// The first hour's traces are gone, and so is their count: the chunk
@@ -345,14 +346,21 @@ func TestAnErasureCutOffBetweenChunksLeavesNoHourDirty(t *testing.T) {
 		t.Errorf("buckets = %+v after the hang-up, want 1 and 51", cut)
 	}
 
-	// The repeat sees only the traces that remain, and that is enough.
-	rec := h.call(t, "DELETE", path, nil)
+	// The next start resumes it, and finds only the traces that remain;
+	// that is enough. The request of the stopped one answers the same
+	// erasure (#11).
+	resumed := h.store.NewEraser(h.writer, store.EraserOptions{})
+	resumed.Start()
+	defer resumed.Close()
+	rec = h.call(t, "DELETE", path+"&wait=30", nil)
 	expectStatus(t, rec, 200)
 	erased := decodeJSON[struct {
+		State   string         `json:"state"`
 		Deleted map[string]int `json:"deleted"`
 	}](t, rec)
-	if erased.Deleted["traces"] != 50 {
-		t.Errorf("the repeat erased %d traces, want the 50 that were left", erased.Deleted["traces"])
+	if erased.State != store.ErasureDone || erased.Deleted["traces"] != store.DefaultEraseChunk+50 {
+		t.Errorf("the resumed erasure is %s with %d traces, want done with all %d",
+			erased.State, erased.Deleted["traces"], store.DefaultEraseChunk+50)
 	}
 	after := h.statsBuckets(t, "/api/v1/stats?group_by=hour")
 	if len(after) != 2 || after[0].Count != 1 || after[1].Count != 1 {

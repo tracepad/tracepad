@@ -21,7 +21,7 @@
 	import { rememberedRange, rememberRange } from '$lib/range.svelte';
 	import UserSessionsTab from '$lib/components/users/UserSessionsTab.svelte';
 	import UserTracesTab from '$lib/components/users/UserTracesTab.svelte';
-	import { Erasure, erased } from '$lib/erasure';
+	import { ErasureWatch, confirmErasure, describe, ended } from '$lib/erasure.svelte';
 	import { cost, count, duration, middleEllipsis, timestamp } from '$lib/format';
 	import { href, project } from '$lib/project.svelte';
 
@@ -64,8 +64,38 @@
 	let missing = $state(false);
 	let failure = $state<string | null>(null);
 	let erasing = $state(false);
-	/** Whether the last confirmed erasure is still running (spec 035 #14). */
-	const erasure = new Erasure();
+	/** Bumped to read the user again: an erasure may have ended unseen (#29). */
+	let reread = $state(0);
+	/**
+	 * The erasure of this user under way, if any: the dialog's, or one the
+	 * project's erasures name on the way in, so a reload still shows it (spec
+	 * 047 #18, #27). The page stays while it runs, rather than leave as if the user
+	 * were gone.
+	 */
+	const watch = new ErasureWatch();
+
+	// An editor's page asks whether this user is being erased: the project's
+	// erasures name their user while they run and only then (spec 047 #9,
+	// #14), so the listing is the one indexed read that answers it (#27). A
+	// viewer may not read it, and is offered no erasure. The effect follows
+	// the values, not the project's record: that is read again whenever the
+	// account's projects are, and each run forgets what the page followed
+	// (#29).
+	const projectID = $derived(project.id);
+	const editable = $derived(project.editor);
+	$effect(() => {
+		const who = id;
+		const current = projectID;
+		if (!editable || !current) return;
+		const controller = new AbortController();
+		void untrack(() => findRunning(current, who, controller.signal));
+		return () => {
+			controller.abort();
+			// The page is reused for the next user's id: what it followed
+			// was this user's erasure, not that one's (spec 047 #28).
+			watch.forget();
+		};
+	});
 
 	/**
 	 * The question this page asks, as a value that compares. Not the objects
@@ -80,7 +110,14 @@
 	 * screen that carries two listings' state in its URL beside its own
 	 * (found in the second review of PR #42).
 	 */
-	const asked = $derived(`${id}|${viewed.from ?? ''}|${viewed.to ?? ''}|${bucket}`);
+	const asked = $derived(`${id}|${viewed.from ?? ''}|${viewed.to ?? ''}|${bucket}|${reread}`);
+
+	// An erasure the page followed to its end took the data on screen: it is
+	// read again, and is gone if the erasure was done (spec 047 #30).
+	const followedEnded = $derived(watch.current !== null && ended(watch.current));
+	$effect(() => {
+		if (followedEnded) untrack(() => reread++);
+	});
 
 	$effect(() => {
 		// The stamp is the whole subscription; everything else is read
@@ -166,15 +203,51 @@
 	 * #8), rendered by the card Settings uses — one card, one contract. On
 	 * success there is no user left to be on, so the page leaves.
 	 */
+	/** Whether the page is still about this user of this project. */
+	const onScreen = (current: string, who: string) => current === projectID && who === id;
+
+	/** Follows this user's erasure when one is under way, and says whether. */
+	async function findRunning(current: string, who: string, signal?: AbortSignal) {
+		try {
+			const { erasures } = await api.erasures(current, signal);
+			const running = erasures.find((one) => one.user_id === who && !ended(one));
+			// The page may be another user's by now, and what it follows
+			// is its own (spec 047 #30).
+			if (running && !signal?.aborted && onScreen(current, who)) watch.follow(current, running);
+			return running !== undefined;
+		} catch {
+			// The banner is a courtesy; the page is the user's data.
+			return false;
+		}
+	}
+
+	/** The user the dialog's erasure was answered for, while the page was theirs. */
+	let answeredFor = '';
+
 	async function erase(confirm?: string): Promise<DryRun | string> {
-		const current = project.id;
+		const current = projectID;
 		if (!current) throw new ApiError(0, 'there is no project on screen to erase from');
-		// Still running on the server: the page stays, and says so, rather
-		// than leaving as if the user were gone.
-		const answer = await erasure.ask(id, confirm, () => api.eraseUserData(current, id, confirm));
-		if (typeof answer === 'string') return answer;
-		if ('dry_run' in answer && answer.dry_run) return answer as DryRun;
-		return erased(id, (answer as { deleted: Record<string, number> }).deleted);
+		const who = id;
+		if (confirm === undefined) return (await api.eraseUserData(current, who)) as DryRun;
+		// Accepted or not, this page follows it if it runs (spec 047 #27).
+		// One that ended already names no one (#9): the user's data is read
+		// again, and is gone if it did (#29). Still running on the server,
+		// the page stays and says how far it is, rather than leaving as if
+		// the user were gone; and an answer that comes back to another
+		// user's page is not that page's (#31).
+		return confirmErasure({
+			project: current,
+			user: who,
+			confirm,
+			watch,
+			where: "this page shows it while it runs, or the user's data gone once it has ended",
+			still: () => onScreen(current, who),
+			lost: () =>
+				void findRunning(current, who).then((found) => {
+					if (!found && onScreen(current, who)) reread++;
+				}),
+			answered: () => (answeredFor = who)
+		});
 	}
 
 	const tabClass = (active: boolean) =>
@@ -221,10 +294,27 @@
 			preview={() => erase()}
 			execute={(confirm) => erase(confirm) as Promise<string>}
 			ondone={() => {
-				if (!erasure.running) goto(href('/users'));
+				// Not from another user's page the erasure's answer came back to.
+				if (!watch.running && answeredFor === id) goto(href('/users'));
 			}}
 		/>
 	</div>
+{/if}
+
+{#if watch.current}
+	<!-- An erasure of this user under way, or how it ended while the page was
+	     open (spec 047 #13, #18). -->
+	<p
+		role="status"
+		data-testid="erasure-progress"
+		class={[
+			'border-border flex items-center gap-2 border-b px-4 py-2 text-sm',
+			watch.current.state === 'failed' ? 'text-danger bg-danger-soft' : 'bg-surface'
+		]}
+	>
+		{#if watch.running}<LoaderCircle class="size-4 shrink-0 animate-spin" />{/if}
+		{describe(watch.current, id)}
+	</p>
 {/if}
 
 {#if failure}

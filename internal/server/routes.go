@@ -267,7 +267,11 @@ func (s *Server) routes() []route {
 		{"GET", "/api/v1/projects/{id}/keys", editor, scopeNone, "List a project's keys, who minted each and when it was last used; not with a project key", s.handleListKeys},
 		{"POST", "/api/v1/projects/{id}/keys", editor, scopeNone, "Mint a key pair; the secret is shown once. Not with a project key", s.handleCreateKey},
 		{"DELETE", "/api/v1/projects/{id}/keys/{public_key}", editor, scopeNone, "Revoke one key pair; not with a project key", s.handleRevokeKey},
-		{"DELETE", "/api/v1/projects/{id}/users/{user_id}/data", editor, scopeWrite, "Erase everything stored about one user", s.handleEraseUserData},
+		{"DELETE", "/api/v1/projects/{id}/users/{user_id}/data", editor, scopeWrite, "Erase everything stored about one user: accepted as a task, or answered once it ends within `wait`", s.handleEraseUserData},
+		// Watching an erasure belongs to whoever may start one, and the
+		// listing names the user while one runs (spec 047 #14).
+		{"GET", "/api/v1/projects/{id}/erasures", editor, scopeWrite, "The project's erasures, those under way first, then newest first, at most 100", s.handleListErasures},
+		{"GET", "/api/v1/projects/{id}/erasures/{erasure_id}", editor, scopeWrite, "One erasure: its state, phase, progress and counts", s.handleGetErasure},
 		{"GET", "/api/v1/projects/{id}/members", owner, scopeNone, "Who has a role in this project; owners are not listed", s.handleProjectMembers},
 
 		// Accounts (spec 028 Decision 12): an owner manages people from

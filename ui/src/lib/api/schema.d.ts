@@ -1437,10 +1437,50 @@ export interface paths {
         put?: never;
         post?: never;
         /**
-         * Erase everything stored about one user
-         * @description Erases, synchronously, everything the store holds about the traces filed under the user id: the traces, their observations, payloads and scores, the annotation-queue items pointing at them (`annotation_items`), the session-only scores of the sessions they carried (`session_scores`), every version of the dataset items cut from them (`dataset_items`, with the datasets named under `affected_datasets`), and their spans inside the raw OTLP bodies — each batch that held one is rewritten without it and marked `scrubbed_at`, or deleted when nothing else was in it (`raw_spans`, `raw_batches_rewritten`, `raw_batches_deleted`). The preview's `raw` block counts the batches the erasure will read and those older than the trace window, which nothing can attribute any more. The answer's `compaction` says when the sweeper pass that overwrites what was unlinked is due, and `pre_migration_backup`, while one exists, names the backup the erasure does not rewrite and the day it goes. Without `confirm` it answers with the preview; the echo here is the user id.
+         * Erase everything stored about one user: accepted as a task, or answered once it ends within `wait`
+         * @description Erases everything the store holds about the traces filed under the user id: the traces, their observations, payloads and scores, the annotation-queue items pointing at them (`annotation_items`), the session-only scores of the sessions they carried (`session_scores`), every version of the dataset items cut from them (`dataset_items`, with the datasets named under `affected_datasets`), and their spans inside the raw OTLP bodies — each batch that held one is rewritten without it and marked `scrubbed_at`, or deleted when nothing else was in it (`raw_spans`, `raw_batches_rewritten`, `raw_batches_deleted`). Without `confirm` it answers with the preview, synchronously; the echo here is the user id. The preview's `raw` block counts the batches the erasure will read and those older than the trace window, which nothing can attribute any more, and `running` names an erasure of the user that is under way. Confirmed, it is a task: everything that can refuse it is checked first and records nothing, then the erasure is recorded and the answer is `202 Accepted` with the erasure and a `Location` to watch it at. With `wait`, the request waits up to that many seconds and answers `200` with the same body when the erasure ended meanwhile. A second request for a user whose erasure is queued or running answers that erasure. One erasure runs at a time per server, and a stop of the server resumes it on the next start.
          */
         delete: operations["eraseUserData"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{id}/erasures": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The project's erasures, those under way first, then newest first, at most 100
+         * @description Queued and running erasures first, then finished ones newest first, not paginated. A finished erasure is kept 30 days after it ends, and its `user_id` is null: the record forgets the user when the erasure ends. While one is queued or running, it names the user.
+         */
+        get: operations["listErasures"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{id}/erasures/{erasure_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One erasure: its state, phase, progress and counts
+         * @description What the `Location` of a confirmed erasure points at. An unknown id, one removed 30 days after it ended, and one of another project are all a 404.
+         */
+        get: operations["getErasure"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -2013,6 +2053,49 @@ export interface components {
             note?: string;
             /** @description User-data erasure only, and only while a backup exists */
             pre_migration_backup?: components["schemas"]["PreMigrationBackup"];
+            /** @description User-data erasure only, and only while an erasure of the user is queued or running */
+            running?: {
+                id: string;
+                /** @enum {string} */
+                state: "queued" | "running";
+                /** @enum {string|null} */
+                phase: "raw" | "parsed" | "tail" | null;
+            };
+        };
+        /** @description A user-data erasure: accepted, then run by the server's one erasure worker in three phases — the raw archive, the parsed rows, and the tail of batches that arrived while it ran. Its counts are what has been committed so far, and it resumes from its phase after a restart */
+        Erasure: {
+            /** @description Random, never derived from the user id */
+            id: string;
+            /** @enum {string} */
+            state: "queued" | "running" | "done" | "failed";
+            /**
+             * @description While running; null otherwise
+             * @enum {string|null}
+             */
+            phase: "raw" | "parsed" | "tail" | null;
+            /** @description While queued or running, and in the answer to the request that started it; null once it has ended */
+            user_id: string | null;
+            /** @constant */
+            dry_run: false;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            started_at: string | null;
+            /** Format: date-time */
+            finished_at: string | null;
+            progress: {
+                /** @description The user's traces when the erasure first read them; null before */
+                traces_at_start: number | null;
+                traces_deleted: number;
+            };
+            deleted: {
+                [key: string]: number;
+            };
+            compaction: components["schemas"]["Compaction"];
+            /** @description Only while a backup exists */
+            pre_migration_backup?: components["schemas"]["PreMigrationBackup"];
+            /** @description Why a failed erasure failed; it never names the user */
+            error: string | null;
         };
         /** @description The compaction this deletion asked for: the sweeper pass that overwrites what it unlinked. Both null when it deleted nothing and so asked for nothing. */
         Compaction: {
@@ -2041,12 +2124,6 @@ export interface components {
             deleted: {
                 [key: string]: number;
             };
-            /** @description User-data erasure only */
-            user_id?: string;
-            /** @description User-data erasure only */
-            compaction?: components["schemas"]["Compaction"];
-            /** @description User-data erasure only, and only while a backup exists */
-            pre_migration_backup?: components["schemas"]["PreMigrationBackup"];
         };
         /** @description What deleting one trace removed */
         TraceDeletion: {
@@ -6340,6 +6417,8 @@ export interface operations {
             query?: {
                 /** @description The name of the project — or the id of the user — being destroyed. Without it the endpoint changes nothing and answers with a preview; a value that does not match is a 400 that also changes nothing. */
                 confirm?: components["parameters"]["Confirm"];
+                /** @description Confirmed erasures only: seconds to wait for the erasure to end before answering `202`. Out of range, or not a whole number, is a 400 */
+                wait?: number;
             };
             header?: never;
             path: {
@@ -6350,13 +6429,83 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description What was erased, or the dry run of what would be */
+            /** @description The dry run of what would be erased, or the erasure, which ended within `wait` */
+            200: {
+                headers: {
+                    /** @description Confirmed only: where the erasure is read */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Erasure"] | components["schemas"]["DryRun"];
+                };
+            };
+            /** @description The erasure, accepted and still queued or running */
+            202: {
+                headers: {
+                    /** @description Where the erasure is read */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Erasure"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listErasures: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["ProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The erasures */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Deletion"] | components["schemas"]["DryRun"];
+                    "application/json": {
+                        erasures: components["schemas"]["Erasure"][];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getErasure: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["ProjectID"];
+                erasure_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The erasure */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Erasure"];
                 };
             };
             400: components["responses"]["BadRequest"];

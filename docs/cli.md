@@ -25,7 +25,7 @@ runs, score configs and queues, `export` — needs `read`; `scores add` needs
 `ingest`; everything that changes something — `traces rm`, `scores rm`,
 `prompts push`, `label` and `rm`, the writes of datasets, runs, score configs
 and queues, `queues next` among them (it claims an item), `retention set`,
-`users rm-data` — needs `write`. `projects ls`, `projects show`,
+`users rm-data`, `users erasure` and `users erasures` — needs `write`. `projects ls`, `projects show`,
 `retention show` and `prompts get` work with any key. A key without the scope
 a command needs prints the server's `403` and exits 1:
 
@@ -740,12 +740,30 @@ tracepad users rm-data user-4711
 `users rm-data` prints what went, then the raw archive's line — `removed 252
 spans from 41 raw batches, 3 deleted` — the date the freed bytes are
 overwritten by, and the pre-migration backup when one exists. Its preview
-names the runs and the datasets that lose something, and the raw batches older
-than the trace window that it cannot attribute, when there are any. An
-erasure of a long history can outlast the command's one-minute wait; the
-server finishes it all the same, and the command says so rather than that the
-server could not be reached — running it again shows what is left. `export
---otlp` counts the batches an erasure rewrote as `scrubbed` in its summary.
+names the runs and the datasets that lose something, the raw batches older
+than the trace window that it cannot attribute, when there are any, and an
+erasure of the user already under way — `an erasure of this user is running:
+4f0c… (parsed)`. The server runs an erasure as a task: the command asks it to
+answer within 30 seconds, and when the erasure takes longer it watches it,
+printing where it is to stderr as that changes — `erasing: parsed 5123/20000
+traces` — and the lines above once it ends. A failed erasure prints why and
+exits 1. `--no-wait` prints the erasure's id and how to look at it, and
+exits 0 at once:
+
+```sh
+tracepad users rm-data user-4711 --yes --no-wait
+# erasure 4f0c9d3e8a1b2c3d4e5f60718293a4b5 queued; tracepad users erasure 4f0c9d3e8a1b2c3d4e5f60718293a4b5
+tracepad users erasure 4f0c9d3e8a1b2c3d4e5f60718293a4b5
+tracepad users erasures        # the project's hundred, those under way first
+```
+
+Leaving the command stops the watching, not the erasure. If the connection
+is lost after the request went out, the command cannot know whether the
+server took it, and says to run `tracepad users erasures` to see. An ended
+erasure names no one: its record forgets the user id when it ends. A server
+from before erasures were tasks does not know the 30 seconds; the command asks
+it again without them and prints its answer, which is the end, `--no-wait` or
+not. `export --otlp` counts the batches an erasure rewrote as `scrubbed` in its summary.
 
 The `keys` commands take the admin token, because no project key lists, mints
 or revokes keys; with a project key they print the server's `403` and exit 1.

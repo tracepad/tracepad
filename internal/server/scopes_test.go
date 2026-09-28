@@ -86,7 +86,8 @@ var keyScopesOfTheSpec = map[string][]string{
 		"GET /api/v1/queues/{name}/next", "POST /api/v1/queues/{name}/items/{id}/complete",
 		"POST /api/v1/queues/{name}/items/{id}/skip", "POST /api/v1/queues/{name}/items/{id}/reopen",
 		"DELETE /api/v1/queues/{name}/items/{id}", "PATCH /api/v1/projects/{id}",
-		"DELETE /api/v1/projects/{id}/users/{user_id}/data",
+		"DELETE /api/v1/projects/{id}/users/{user_id}/data", "GET /api/v1/projects/{id}/erasures",
+		"GET /api/v1/projects/{id}/erasures/{erasure_id}",
 	},
 	"any": {
 		"GET /health", "PUT /api/public/media/{mediaId}/upload", "GET /api/v1", "GET /api/v1/openapi.json",
@@ -120,8 +121,8 @@ func TestKeyScopesMatchTheSpec(t *testing.T) {
 			want[rt] = word
 		}
 	}
-	if len(want) != 100 {
-		t.Errorf("the golden list has %d routes, the spec's table 100", len(want))
+	if len(want) != 102 {
+		t.Errorf("the golden list has %d routes, the spec's table 102", len(want))
 	}
 	served := map[string]bool{}
 	for _, rt := range h.server.routes() {

@@ -155,17 +155,54 @@ func (f *sweepFixture) rawSpans(t *testing.T, id int64) []string {
 	return names
 }
 
-func (f *sweepFixture) erase(t *testing.T, user string, opts ...func(*UserErasure)) ErasureResult {
+// erasedUser is what erasing a user ended with, and what the run read.
+type erasedUser struct {
+	*Erasure
+	BatchesRead int
+}
+
+// erase records an erasure of the user and runs it to its end here, as the
+// worker would, and expects it done.
+func (f *sweepFixture) erase(t *testing.T, user string, opts ...func(*EraserOptions)) erasedUser {
 	t.Helper()
-	e := UserErasure{ProjectID: f.project.ID, UserID: user, Confirm: user, Chunk: 500}
+	o := EraserOptions{Chunk: 500}
 	for _, opt := range opts {
-		opt(&e)
+		opt(&o)
 	}
-	result, err := f.store.EraseUserData(t.Context(), f.writer, e)
+	run, err := f.store.runErasure(t.Context(), f.writer, f.startErasure(t, user).ID, o)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return result
+	ended := f.erasureOf(t, user)
+	if ended.State != ErasureDone {
+		t.Fatalf("the erasure ended %s: %s", ended.State, ended.Error)
+	}
+	return erasedUser{Erasure: ended, BatchesRead: run.batchesRead}
+}
+
+// startErasure records an erasure of the user, as a confirmed request does.
+func (f *sweepFixture) startErasure(t *testing.T, user string) *Erasure {
+	t.Helper()
+	e, err := f.store.StartErasure(t.Context(), f.writer, UserErasure{ProjectID: f.project.ID,
+		UserID: user, Confirm: user})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.erasures = append(f.erasures, e.ID)
+	return e
+}
+
+// erasureOf reads the fixture's latest erasure, which is the user's.
+func (f *sweepFixture) erasureOf(t *testing.T, user string) *Erasure {
+	t.Helper()
+	if len(f.erasures) == 0 {
+		t.Fatalf("no erasure of %s was recorded", user)
+	}
+	e, err := f.store.Erasure(t.Context(), f.project.ID, f.erasures[len(f.erasures)-1])
+	if err != nil || e == nil {
+		t.Fatalf("the erasure of %s: %v, %v", user, e, err)
+	}
+	return e
 }
 
 func b64(body []byte) string { return base64.StdEncoding.EncodeToString(body) }
@@ -324,7 +361,7 @@ func TestConcurrentScrubsOfOneBatch(t *testing.T) {
 	if err != nil || early == nil {
 		t.Fatalf("plan: %v, %v", early, err)
 	}
-	if _, err := f.store.scrubBatches(t.Context(), f.writer, f.project.ID, []int64{batch}, c); err != nil {
+	if err := f.store.scrubBatches(t.Context(), f.writer, f.project.ID, []int64{batch}, c, ""); err != nil {
 		t.Fatal(err)
 	}
 	err = f.writer.Submit(t.Context(), early.job)
@@ -333,12 +370,8 @@ func TestConcurrentScrubsOfOneBatch(t *testing.T) {
 		t.Fatalf("a body computed before the other rewrite was not refused: %v", err)
 	}
 	// Refused, it recomputes from what is there now.
-	tally, err := f.store.scrubBatches(t.Context(), f.writer, f.project.ID, []int64{batch}, a)
-	if err != nil {
+	if err := f.store.scrubBatches(t.Context(), f.writer, f.project.ID, []int64{batch}, a, ""); err != nil {
 		t.Fatal(err)
-	}
-	if tally.rewritten != 1 || tally.spans != 1 {
-		t.Errorf("tally = %+v, want the batch rewritten once more, one span", tally)
 	}
 	if got := f.rawSpans(t, batch); !slices.Equal(got, []string{"span-2-1"}) {
 		t.Errorf("the batch holds %v, want only the one neither erasure took", got)
@@ -430,10 +463,12 @@ func TestABatchIsStampedWithItsTracesArrival(t *testing.T) {
 	}
 }
 
-// The order (#4): a request cut off after the raw phase or after the parsed
-// one is finished by repeating it, to the state an uninterrupted run leaves;
-// a batch that arrives while it runs is taken by the tail.
-func TestAnErasureCutOffIsFinishedByItsRepeat(t *testing.T) {
+// The order (#4), and the resume (spec 047 #12): an erasure stopped in any
+// phase — the worker's stop, or the writer closing under it — resumes from
+// that phase on the next start and ends where an uninterrupted run does, with
+// the same counts; the batch that arrived for a trace deleted before the stop
+// is scrubbed by the resumed tail, which a repeat of the request never could.
+func TestAStoppedErasureResumesFromItsPhase(t *testing.T) {
 	build := func(t *testing.T) *sweepFixture {
 		f := newErasureFixture(t)
 		for i := range 3 {
@@ -443,6 +478,16 @@ func TestAnErasureCutOffIsFinishedByItsRepeat(t *testing.T) {
 			}), i%2 == 1, daysAgo(3-i))
 		}
 		return f
+	}
+	// A late span of each of the user's traces, after step 1 read them.
+	var late int64
+	arrive := func(t *testing.T, f *sweepFixture) {
+		late = f.ingestOTLP(t, export([]*tracepb.Span{
+			otlpSpan(t, 1, 9, "user-a", "s-a", "marker-a-late", nil),
+			otlpSpan(t, 2, 9, "user-a", "s-a", "marker-a-late", nil),
+			otlpSpan(t, 3, 9, "user-a", "s-a", "marker-a-late", nil),
+			otlpSpan(t, 10, 9, "user-b", "s-b", "marker-b-late", nil),
+		}), false, 0)
 	}
 	state := func(t *testing.T, f *sweepFixture) string {
 		t.Helper()
@@ -457,48 +502,168 @@ func TestAnErasureCutOffIsFinishedByItsRepeat(t *testing.T) {
 		return fmt.Sprint(out, f.count(t, `SELECT COUNT(*) FROM traces`),
 			f.count(t, `SELECT COUNT(*) FROM observations`))
 	}
+	// One trace a chunk, so that a stop can fall between two of them.
 	whole := build(t)
-	whole.erase(t, "user-a")
-	want := state(t, whole)
-	for trace := 1; trace <= 3; trace++ {
-		if strings.Contains(want, fmt.Sprintf("span-%d-", trace)) {
-			t.Fatalf("an uninterrupted erasure left the user's spans in the archive: %s", want)
+	counts := whole.erase(t, "user-a", func(o *EraserOptions) {
+		o.Chunk = 1
+		o.after = func(step int) error {
+			if step == 1 {
+				arrive(t, whole)
+			}
+			return nil
 		}
+	}).Counts
+	want := state(t, whole)
+	if strings.Contains(want, "span-1-") || strings.Contains(want, "span-2-") || strings.Contains(want, "span-3-") {
+		t.Fatalf("an uninterrupted erasure left the user's spans in the archive: %s", want)
 	}
 
-	for _, step := range []int{2, 3} {
-		t.Run(fmt.Sprintf("cut off after step %d", step), func(t *testing.T) {
+	stop := errors.New("the server is stopping")
+	for _, tc := range []struct {
+		name, phase string
+		at, chunk   int
+		tail        bool
+	}{
+		{name: "after step 1", phase: phaseRaw, at: 1},
+		{name: "after step 2", phase: phaseParsed, at: 2},
+		{name: "between two chunks", phase: phaseParsed, chunk: 2},
+		{name: "in the tail", phase: phaseTail, tail: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			f := build(t)
-			cut := errors.New("the client hung up")
-			e := UserErasure{ProjectID: f.project.ID, UserID: "user-a", Confirm: "user-a", Chunk: 500,
-				after: func(at int) error {
-					if at == step {
-						return cut
+			writer := &stoppingWriter{jobSubmitter: f.writer, chunk: tc.chunk, tail: tc.tail}
+			e := f.startErasure(t, "user-a")
+			_, err := f.store.runErasure(t.Context(), writer, e.ID, EraserOptions{Chunk: 1,
+				after: func(step int) error {
+					if step == 1 {
+						arrive(t, f)
+					}
+					if step == tc.at {
+						return stop
 					}
 					return nil
-				}}
-			if _, err := f.store.EraseUserData(t.Context(), f.writer, e); !errors.Is(err, cut) {
-				t.Fatalf("the seam did not stop the request: %v", err)
+				}})
+			if !errors.Is(err, stop) && !errors.Is(err, ErrWriterClosed) {
+				t.Fatalf("the run was not stopped: %v", err)
 			}
-			f.erase(t, "user-a")
-			if got := state(t, f); got != want {
-				t.Errorf("after the repeat:\n%s\nwant\n%s", got, want)
+			if got := f.erasureOf(t, "user-a"); got.State != ErasureRunning || got.Phase != tc.phase {
+				t.Fatalf("stopped, the erasure is %s in %q, want running in %q", got.State, got.Phase, tc.phase)
+			}
+
+			if _, err := f.store.runErasure(t.Context(), f.writer, e.ID, EraserOptions{Chunk: 1}); err != nil {
+				t.Fatal(err)
+			}
+			got := f.erasureOf(t, "user-a")
+			if got.State != ErasureDone {
+				t.Fatalf("resumed, the erasure ended %s: %s", got.State, got.Error)
+			}
+			if got.Counts != counts {
+				t.Errorf("resumed, it counts %+v, want an uninterrupted run's %+v", got.Counts, counts)
+			}
+			if after := state(t, f); after != want {
+				t.Errorf("after the resume:\n%s\nwant\n%s", after, want)
+			}
+			if spans := f.rawSpans(t, late); !slices.Equal(spans, []string{"span-10-9"}) {
+				t.Errorf("the batch that arrived during the erasure holds %v, want the other user's span", spans)
+			}
+		})
+	}
+
+	// A start that a restart interrupts counts (spec 047 #12): three are
+	// all an erasure gets, so one that brings the server down each time
+	// does not do so for ever.
+	t.Run("three interrupted starts", func(t *testing.T) {
+		f := build(t)
+		e := f.startErasure(t, "user-a")
+		for range erasureAttempts {
+			_, err := f.store.runErasure(t.Context(), f.writer, e.ID, EraserOptions{
+				after: func(int) error { return stop }})
+			if !errors.Is(err, stop) {
+				t.Fatalf("the run was not stopped: %v", err)
+			}
+		}
+		if _, err := f.store.runErasure(t.Context(), f.writer, e.ID, EraserOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		got := f.erasureOf(t, "user-a")
+		if got.State != ErasureFailed || got.Error != "3 starts ended before the erasure did" || got.UserID != "" {
+			t.Errorf("after three interrupted starts the erasure is %s (%q) of %q, want failed, "+
+				"interrupted, and of no one", got.State, got.Error, got.UserID)
+		}
+	})
+
+	// The start after the third crash is the last and does only the tail
+	// (spec 047 #27): the chunks that committed deleted traces whose late
+	// batch no repeat can find, so it is scrubbed before the erasure fails.
+	// A tail that crashes too is dropped at the start after it.
+	for _, crashTail := range []bool{false, true} {
+		t.Run(fmt.Sprintf("the last start, its tail crashing %v", crashTail), func(t *testing.T) {
+			f := build(t)
+			e := f.startErasure(t, "user-a")
+			// Crash one: after the first chunk. Two and three: at the
+			// first chunk of the resumed run, which deletes nothing.
+			for crash := 1; crash <= erasureAttempts; crash++ {
+				writer := &stoppingWriter{jobSubmitter: f.writer, chunk: min(crash, 2)}
+				_, err := f.store.runErasure(t.Context(), writer, e.ID, EraserOptions{Chunk: 1,
+					after: func(step int) error {
+						if step == 1 {
+							arrive(t, f)
+						}
+						return nil
+					}})
+				if !errors.Is(err, ErrWriterClosed) {
+					t.Fatalf("crash %d did not stop the run: %v", crash, err)
+				}
+			}
+			deleted := 0
+			for trace := 1; trace <= 3; trace++ {
+				if f.count(t, `SELECT COUNT(*) FROM traces WHERE id = ?`, hexTrace(trace)) == 0 {
+					deleted = trace
+				}
+			}
+			if deleted == 0 || !slices.Contains(f.rawSpans(t, late), fmt.Sprintf("span-%d-9", deleted)) {
+				t.Fatalf("the crashes left trace %d deleted and the late batch %v; the test needs both",
+					deleted, f.rawSpans(t, late))
+			}
+
+			var last jobSubmitter = f.writer
+			if crashTail {
+				last = &failingJobs{jobSubmitter: f.writer, err: ErrWriterClosed, fails: func(job WriteJob) bool {
+					_, scrub := job.(*RawScrub)
+					return scrub
+				}}
+			}
+			_, err := f.store.runErasure(t.Context(), last, e.ID, EraserOptions{Chunk: 1})
+			if crashTail {
+				if !errors.Is(err, ErrWriterClosed) {
+					t.Fatalf("the tail's crash did not stop the run: %v", err)
+				}
+				if _, err := f.store.runErasure(t.Context(), f.writer, e.ID, EraserOptions{Chunk: 1}); err != nil {
+					t.Fatal(err)
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			got := f.erasureOf(t, "user-a")
+			if got.State != ErasureFailed || got.Error != "3 starts ended before the erasure did" || got.UserID != "" {
+				t.Errorf("the erasure is %s (%q) of %q, want failed, interrupted, and of no one",
+					got.State, got.Error, got.UserID)
+			}
+			if n := f.count(t, `SELECT COUNT(*) FROM erasure_tail`); n != 0 {
+				t.Errorf("%d tail rows are left", n)
+			}
+			if left := slices.Contains(f.rawSpans(t, late), fmt.Sprintf("span-%d-9", deleted)); left != crashTail {
+				t.Errorf("the deleted trace's late span is left %v, want %v", left, crashTail)
 			}
 		})
 	}
 
 	t.Run("a batch arriving while it runs", func(t *testing.T) {
 		f := build(t)
-		var late int64
-		f.erase(t, "user-a", func(e *UserErasure) {
-			e.after = func(step int) error {
+		f.erase(t, "user-a", func(o *EraserOptions) {
+			o.after = func(step int) error {
 				if step == 1 {
-					// A late span of a trace the request is erasing,
-					// after the traces were read.
-					late = f.ingestOTLP(t, export([]*tracepb.Span{
-						otlpSpan(t, 1, 9, "user-a", "s-a", "marker-a-late", nil),
-						otlpSpan(t, 10, 9, "user-b", "s-b", "marker-b-late", nil),
-					}), false, 0)
+					arrive(t, f)
 				}
 				return nil
 			}
@@ -507,7 +672,7 @@ func TestAnErasureCutOffIsFinishedByItsRepeat(t *testing.T) {
 			t.Errorf("the batch that arrived during the erasure holds %v, want the other user's span", got)
 		}
 		// Stamped when it was rewritten, which is after it arrived — not
-		// when the request began, which is before.
+		// when the erasure began, which is before.
 		body, err := f.store.RawBatchBody(t.Context(), f.project.ID, late)
 		if err != nil || body == nil || body.ScrubbedAt == nil {
 			t.Fatalf("the late batch's body: %+v, %v", body, err)
@@ -517,38 +682,70 @@ func TestAnErasureCutOffIsFinishedByItsRepeat(t *testing.T) {
 		}
 	})
 
-	// A chunk of step 3 that fails still leaves step 4 to run for the
-	// chunks before it: their traces are gone, so a repeat cannot find
-	// the batches that arrived for them while the request ran.
+	// A chunk of step 3 that fails ends the erasure failed (spec 047 #16),
+	// after step 4 has run for the chunks before it: their traces are
+	// gone, so a repeat cannot find the batches that arrived for them
+	// while it ran. The repeat finishes the rest.
 	t.Run("a chunk that fails", func(t *testing.T) {
 		f := build(t)
-		broken := errors.New("the disk is full")
+		broken := errors.New("the disk is broken")
 		writer := &failingChunk{jobSubmitter: f.writer, at: 2, err: broken}
-		var late int64
-		// One trace a chunk, so that the second fails with one behind it.
-		e := UserErasure{ProjectID: f.project.ID, UserID: "user-a", Confirm: "user-a", Chunk: 1,
+		e := f.startErasure(t, "user-a")
+		if _, err := f.store.runErasure(t.Context(), writer, e.ID, EraserOptions{Chunk: 1,
 			after: func(step int) error {
 				if step == 1 {
-					late = f.ingestOTLP(t, export([]*tracepb.Span{
-						otlpSpan(t, 1, 9, "user-a", "s-a", "marker-a-late", nil),
-						otlpSpan(t, 2, 9, "user-a", "s-a", "marker-a-late", nil),
-						otlpSpan(t, 3, 9, "user-a", "s-a", "marker-a-late", nil),
-						otlpSpan(t, 10, 9, "user-b", "s-b", "marker-b-late", nil),
-					}), false, 0)
+					arrive(t, f)
 				}
 				return nil
-			}}
-		if _, err := f.store.EraseUserData(t.Context(), writer, e); !errors.Is(err, broken) {
-			t.Fatalf("the failed chunk is not the answer: %v", err)
+			}}); err != nil {
+			t.Fatalf("a failed erasure is not a stopped run: %v", err)
 		}
 		if writer.chunks < 2 {
 			t.Fatalf("%d chunks: the erasure needs one to succeed before the one that fails", writer.chunks)
+		}
+		if got := f.erasureOf(t, "user-a"); got.State != ErasureFailed || got.Error != broken.Error() {
+			t.Fatalf("the erasure is %s (%q), want failed with the chunk's error", got.State, got.Error)
+		}
+		spans := f.rawSpans(t, late)
+		for trace := 1; trace <= 3; trace++ {
+			left := f.count(t, `SELECT COUNT(*) FROM traces WHERE id = ?`, hexTrace(trace)) == 1
+			if slices.Contains(spans, fmt.Sprintf("span-%d-9", trace)) != left {
+				t.Errorf("trace %d is left %v, and the late batch holds %v", trace, left, spans)
+			}
 		}
 		f.erase(t, "user-a")
 		if got := f.rawSpans(t, late); !slices.Equal(got, []string{"span-10-9"}) {
 			t.Errorf("after the repeat the late batch holds %v, want the other user's span", got)
 		}
 	})
+}
+
+// stoppingWriter passes every job on but the chunk-th chunk of the parsed
+// phase, or with tail the first scrub after the last chunk, which it answers
+// as a writer closed under it does.
+type stoppingWriter struct {
+	jobSubmitter
+	chunk          int
+	tail           bool
+	chunks         int
+	parsed, closed bool
+}
+
+func (w *stoppingWriter) Submit(ctx context.Context, job WriteJob) error {
+	chunk, isChunk := job.(*UserDataErase)
+	if isChunk {
+		w.chunks++
+	}
+	_, isScrub := job.(*RawScrub)
+	if w.closed || isChunk && w.chunks == w.chunk || isScrub && w.tail && w.parsed {
+		w.closed = true
+		return ErrWriterClosed
+	}
+	err := w.jobSubmitter.Submit(ctx, job)
+	if isChunk && err == nil && !chunk.More {
+		w.parsed = true
+	}
+	return err
 }
 
 // A trace whose first spans came without the user id, and whose id came in a
@@ -567,8 +764,8 @@ func TestATraceThatBecomesTheUsersMidErasure(t *testing.T) {
 		t.Fatalf("the unnamed trace has a user before its root arrived (%d)", n)
 	}
 	var named int64
-	f.erase(t, "user-a", func(e *UserErasure) {
-		e.after = func(step int) error {
+	f.erase(t, "user-a", func(o *EraserOptions) {
+		o.after = func(step int) error {
 			if step == 1 {
 				// The root, with the user id, after the traces were read.
 				named = f.ingestOTLP(t, export([]*tracepb.Span{
@@ -940,14 +1137,18 @@ func TestErasingATraceWithNoStartTime(t *testing.T) {
 func TestAWrongEchoScrubsNothing(t *testing.T) {
 	f := newErasureFixture(t)
 	batch := f.ingestOTLP(t, export([]*tracepb.Span{otlpSpan(t, 1, 1, "user-a", "", "a", nil)}), false, daysAgo(1))
-	_, err := f.store.EraseUserData(t.Context(), f.writer, UserErasure{ProjectID: f.project.ID,
-		UserID: "user-a", Confirm: "user-b", Chunk: 500})
+	_, err := f.store.StartErasure(t.Context(), f.writer, UserErasure{ProjectID: f.project.ID,
+		UserID: "user-a", Confirm: "user-b"})
 	var rejection *Rejection
 	if !errors.As(err, &rejection) || rejection.Kind != RejectInvalid {
 		t.Fatalf("err = %v, want the echo refused", err)
 	}
 	if got := f.rawSpans(t, batch); len(got) != 1 {
 		t.Errorf("a refused erasure scrubbed the archive: %v", got)
+	}
+	// A refusal records nothing (spec 047 #6).
+	if n := f.count(t, `SELECT COUNT(*) FROM erasures`); n != 0 {
+		t.Errorf("a refused erasure left %d records", n)
 	}
 }
 
@@ -1020,10 +1221,10 @@ func (b *busySubmitter) Submit(context.Context, WriteJob) error {
 }
 
 // A full writer queue makes an erasure's job wait, not the erasure fail: it
-// runs to completion (spec 035 #14).
+// runs to its end (spec 047 #16).
 func TestAnErasureJobWaitsOutAFullQueue(t *testing.T) {
 	writer := &busySubmitter{busy: 3}
-	if err := submitPatiently(t.Context(), writer, &RawScrub{}); err != nil {
+	if err := submitErasureJob(t.Context(), writer, &RawScrub{}); err != nil {
 		t.Fatalf("a queue full three times failed the job: %v", err)
 	}
 	if writer.calls != 4 {
@@ -1031,37 +1232,34 @@ func TestAnErasureJobWaitsOutAFullQueue(t *testing.T) {
 	}
 }
 
-// An erasure runs to completion whether or not its caller stays for the
-// answer (spec 035 #14): a caller that leaves during the parsed phase would
-// otherwise leave behind the batch that arrived for a trace already deleted.
-func TestAnErasureOutlivesItsCaller(t *testing.T) {
-	f := newErasureFixture(t)
-	f.ingestOTLP(t, export([]*tracepb.Span{
-		otlpSpan(t, 1, 1, "user-a", "", "a", nil),
-		otlpSpan(t, 2, 1, "user-b", "", "b", nil),
-	}), false, daysAgo(1))
-	caller, leave := context.WithCancel(t.Context())
-	defer leave()
-	var late int64
-	e := UserErasure{ProjectID: f.project.ID, UserID: "user-a", Confirm: "user-a", Chunk: 500,
-		after: func(step int) error {
-			switch step {
-			case 1:
-				late = f.ingestOTLP(t, export([]*tracepb.Span{otlpSpan(t, 1, 9, "user-a", "", "late", nil),
-					otlpSpan(t, 2, 9, "user-b", "", "b", nil)}), false, 0)
-			case 2:
-				leave()
-			}
-			return nil
-		}}
-	if _, err := f.store.EraseUserData(caller, f.writer, e); err != nil {
-		t.Fatalf("the erasure stopped with its caller: %v", err)
+// flakySubmitter answers a busy database for a while, and a full queue after.
+type flakySubmitter struct {
+	began time.Time
+	calls int
+}
+
+func (f *flakySubmitter) Submit(context.Context, WriteJob) error {
+	f.calls++
+	if time.Since(f.began) < 200*time.Millisecond {
+		return fmt.Errorf("commit write transaction: %w", codedError{5})
 	}
-	if n := f.count(t, `SELECT COUNT(*) FROM traces WHERE user_id = 'user-a'`); n != 0 {
-		t.Errorf("%d of the user's traces are left", n)
+	return ErrWriterBusy
+}
+
+// A job that meets a condition and then a full queue is retried within one
+// bound, not a bound for each (spec 047 #29): a loop for the queue inside a
+// loop for the conditions retried for up to twice as long as #16 says.
+func TestAnErasureJobIsRetriedWithinOneBound(t *testing.T) {
+	was := busyWait
+	busyWait = 300 * time.Millisecond
+	t.Cleanup(func() { busyWait = was })
+	writer := &flakySubmitter{began: time.Now()}
+	err := submitErasureJob(t.Context(), writer, &RawScrub{})
+	if !errors.Is(err, ErrWriterBusy) {
+		t.Fatalf("gave up with %v, want the full queue it met last", err)
 	}
-	if got := f.rawSpans(t, late); !slices.Equal(got, []string{"span-2-9"}) {
-		t.Errorf("the batch that arrived during the erasure holds %v", got)
+	if took := time.Since(writer.began); took > busyWait+200*time.Millisecond {
+		t.Errorf("gave up after %s, want about %s", took, busyWait)
 	}
 }
 
@@ -1099,6 +1297,10 @@ func TestErasureQueriesSeekTheirIndexes(t *testing.T) {
 		{"a chunk's dataset item delete", `DELETE FROM dataset_items WHERE project_id = ? AND (dataset, item_id) IN (` +
 			sourced + `)`, append([]any{f.project.ID}, sourcedArgs...),
 			[]string{"idx_dataset_items_source (project_id=? AND source_trace_id=?)"}},
+		// The worker's look for work reads the erasures under way, not
+		// every record of the last 30 days (spec 047 #30).
+		{"the next erasure", nextErasureQuery(0), nil, []string{"idx_erasures_state"}},
+		{"the next erasure but the resting", nextErasureQuery(2), []any{"a", "b"}, []string{"idx_erasures_state"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			plan, err := f.store.explainQueryPlan(tc.query, tc.args...)
