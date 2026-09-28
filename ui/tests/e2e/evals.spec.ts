@@ -163,7 +163,10 @@ test.beforeEach(async () => {
 test('the section appears and navigates', async ({ page }) => {
 	await signIn(page);
 	const datasets = await section(page, 'Datasets');
-	await expect(page.getByText('Evals', { exact: true })).toBeVisible();
+	// The group's heading, in whichever list holds the link: the column, or
+	// on a phone the *More* sheet.
+	const menu = datasets.locator('xpath=ancestor::nav[1]');
+	await expect(menu.getByText('Evals', { exact: true })).toBeVisible();
 	await datasets.click();
 
 	await expect(page).toHaveURL(/\/datasets$/);

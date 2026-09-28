@@ -8,9 +8,13 @@
 	import { project } from '$lib/project.svelte';
 	import { end } from '$lib/session';
 
-	// Who is signed in, at the bottom of the sidebar (spec 028 #14). The
-	// caption is the role in the project on screen, because that is the one
-	// thing about an account that changes what the rest of the window does.
+	// Who is signed in, at the foot of the column and at the end of a phone's
+	// bar on top (spec 028 #14, spec 006 #20). The caption is the role in the
+	// project on screen, because that is the one thing about an account that
+	// changes what the rest of the window does.
+
+	/** Up from the column's foot; down from a phone's bar on top (spec 006 #20). */
+	let { side = 'top' }: { side?: 'top' | 'bottom' } = $props();
 
 	const role = $derived(project.role);
 
@@ -37,10 +41,10 @@
 					gap-1.5 rounded-md px-2 py-1 transition-colors duration-100 md:w-full md:max-w-none"
 			>
 				<UserRound class="text-subtle size-4 shrink-0" />
-				<!-- On a phone the sidebar is one bar across the top and every
-				     row of it is height the listing under it does not get
-				     (spec 006 #15), so this is the icon alone there and the
-				     name and role on a desktop, where the column has room. -->
+				<!-- On a phone this sits in the 48 px bar on top, where every
+				     pixel is one the listing does not get (spec 006 #20), so it
+				     is the icon alone there and the name and role on a desktop,
+				     where the column has room. -->
 				<span class="hidden min-w-0 flex-1 text-left md:block">
 					<span class="block truncate text-sm">{auth.displayName}</span>
 					{#if role}
@@ -53,7 +57,7 @@
 	</DropdownMenu.Trigger>
 	<DropdownMenu.Portal>
 		<DropdownMenu.Content
-			side="top"
+			{side}
 			align="start"
 			sideOffset={4}
 			class="border-border bg-canvas shadow-overlay z-50 min-w-44 rounded-md border p-1"

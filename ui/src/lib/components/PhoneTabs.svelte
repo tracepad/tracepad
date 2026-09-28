@@ -7,42 +7,40 @@
 	import { fade, fly } from 'svelte/transition';
 	import { page } from '$app/state';
 	import { api } from '$lib/api/client.svelte';
-	import { href, switcher } from '$lib/project.svelte';
+	import { STILL } from '$lib/phone';
+	import { href } from '$lib/project.svelte';
 	import { active, isGroup, ITEMS, SECTIONS, type Group, type Item } from '$lib/sections';
 	import { swipeDown } from '$lib/swipe';
-	import AccountMenu from './AccountMenu.svelte';
 	import NavList from './NavList.svelte';
-	import ProjectSwitcher from './ProjectSwitcher.svelte';
 	import ThemeToggle from './ThemeToggle.svelte';
 
-	// The phone's navigation (spec 006 #20): a 48px bar on top for the
-	// product, the project and the account, and a tab bar under the thumb —
-	// the four screens a page at night opens, and *More* for the rest in a
-	// sheet. The listing gets the height between them.
+	// A phone's tabs, under the page (spec 006 #20): the sections marked `tab`,
+	// and *More* for the rest in a sheet. After `main` in the document as on
+	// the screen, so Tab reaches the page before the bar.
 
-	/** The screens a tab holds; everything else is in *More*. */
-	const TABS = ['/dashboard', '/traces', '/sessions', '/users'];
-
-	const tabs = ITEMS.filter((item) => TABS.includes(item.href));
+	const tabs = ITEMS.filter((item) => item.tab);
 	/** The column without the tabbed screens, its group kept. */
 	const rest = SECTIONS.flatMap((section): (Item | Group)[] => {
-		if (!isGroup(section)) return TABS.includes(section.href) ? [] : [section];
-		return [{ ...section, children: section.children.filter((c) => !TABS.includes(c.href)) }];
+		if (!isGroup(section)) return section.tab ? [] : [section];
+		return [{ ...section, children: section.children.filter((child) => !child.tab) }];
 	});
 
 	let open = $state(false);
 
-	const still = new MediaQuery('(prefers-reduced-motion: reduce)');
+	const still = new MediaQuery(STILL);
 	const slide = $derived(still.current ? 0 : 200);
 	/**
 	 * *More* is lit while one of its screens is on show, and keeps its name:
 	 * a tab renamed after the screen reads as a fifth destination.
 	 */
-	const tucked = $derived(ITEMS.some((item) => !TABS.includes(item.href) && active(item.href)));
+	const tucked = $derived(ITEMS.some((item) => !item.tab && active(item.href)));
 
-	// A link followed is the sheet's job done.
+	// Another screen is the sheet's job done, however it was reached. The
+	// path, not the URL: a screen that rewrites its own query — a page turned,
+	// a filter — is still the same screen, and must not shut a sheet open over it.
+	const path = $derived(page.url.pathname);
 	$effect(() => {
-		void page.url.pathname;
+		void path;
 		open = false;
 	});
 
@@ -56,20 +54,10 @@
 	{label}
 {/snippet}
 
-<header class="border-border bg-surface flex h-12 shrink-0 items-center gap-2 border-b pr-1 pl-3">
-	<span class="shrink-0 text-lg font-semibold tracking-tight">Tracepad</span>
-	<div class="flex min-w-0 flex-1 items-center">
-		<ProjectSwitcher bind:open={switcher.open} />
-	</div>
-	<AccountMenu />
-</header>
-
-<!-- Under the page, visually: `order-last` puts the bar below `main` in the
-     shell's column, while the document keeps the navigation before the
-     content, where a screen reader's landmarks expect it. -->
 <nav
 	aria-label="Sections"
-	class="border-border bg-surface order-last grid shrink-0 grid-cols-5 border-t"
+	class="border-border bg-surface grid shrink-0 border-t"
+	style:grid-template-columns="repeat({tabs.length + 1}, minmax(0, 1fr))"
 >
 	{#each tabs as item (item.href)}
 		{@const lit = active(item.href)}
@@ -105,10 +93,10 @@
 				{#snippet child({ props, open: shown })}
 					{#if shown}
 						<!-- A sheet from the bottom, closed by Escape, the backdrop,
-						     the close button or a swipe down from its grip. -->
+						     the close button, a link or a swipe down from its grip. -->
 						<div
 							{...props}
-							{@attach swipeDown(() => (open = false), '[data-grip]')}
+							{@attach swipeDown(() => (open = false), '[data-grip]', still.current)}
 							transition:fly={{ y: '100%', duration: slide, easing: cubicOut, opacity: 1 }}
 							class="border-border bg-surface shadow-overlay fixed inset-x-0 bottom-0 z-50 flex
 								max-h-[85dvh] flex-col rounded-t-xl border-t outline-none"
@@ -127,7 +115,7 @@
 								</div>
 							</div>
 							<nav aria-label="More sections" class="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
-								<NavList sections={rest} />
+								<NavList sections={rest} touch onnavigate={() => (open = false)} />
 							</nav>
 							<div class="border-border flex shrink-0 items-center gap-2 border-t px-3 py-1.5">
 								<span class="text-subtle font-mono text-xs" title="Server version">

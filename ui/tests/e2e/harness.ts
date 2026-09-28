@@ -249,10 +249,14 @@ export const WIRE_GUARDRAIL = 'e1e2e3e4e5e6e7e8';
  */
 export async function section(page: Page, name: string): Promise<Locator> {
 	const nav = page.getByRole('navigation', { name: 'Sections', exact: true });
-	await expect(nav).toBeVisible();
+	// The tabs and *More* render together, so once one link is up all are.
+	await expect(nav.getByRole('link').first()).toBeVisible();
 	const link = nav.getByRole('link', { name, exact: true });
-	if (await link.count()) return link;
-	await nav.getByRole('button', { name: 'More' }).click();
+	const more = nav.getByRole('button', { name: 'More', exact: true });
+	// A desktop's column holds every section, and a phone's bar its tabs: a
+	// name that is in neither fails on the link, not on a *More* that is not there.
+	if ((await link.count()) || !(await more.count())) return link;
+	await more.click();
 	const sheet = page.getByRole('navigation', { name: 'More sections' });
 	return sheet.getByRole('link', { name, exact: true });
 }

@@ -13,7 +13,13 @@ import type { Component } from 'svelte';
 import { page } from '$app/state';
 import { within } from '$lib/project.svelte';
 
-export type Item = { href: string; label: string; icon: Component<{ class?: string }> };
+export type Item = {
+	href: string;
+	label: string;
+	icon: Component<{ class?: string }>;
+	/** A tab of its own on a phone rather than a row in *More* (spec 006 #20). */
+	tab?: true;
+};
 /** A labelled group of items (spec 016 #1): the label is not a link. */
 export type Group = { label: string; children: Item[] };
 
@@ -21,17 +27,19 @@ export type Group = { label: string; children: Item[] };
  * Navigation as data: spec 007 added three screens by adding three rows,
  * and spec 016 adds its first *section* — three screens that are one topic,
  * grouped under a label so a seven-item column says what four of them have
- * in common (#1). A group is a row too; the list nests once.
+ * in common (#1). A group is a row too; the list nests once. The four marked
+ * `tab` are a phone's tabs (spec 006 #20): the front page and the three
+ * places a failure is read.
  */
 export const SECTIONS: (Item | Group)[] = [
 	// First, because it is the door (spec 034 #1): the screen that was
 	// Stats, seventh, is the project's front page.
-	{ href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-	{ href: '/traces', label: 'Traces', icon: ListTree },
-	{ href: '/sessions', label: 'Sessions', icon: MessagesSquare },
+	{ href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, tab: true },
+	{ href: '/traces', label: 'Traces', icon: ListTree, tab: true },
+	{ href: '/sessions', label: 'Sessions', icon: MessagesSquare, tab: true },
 	// Between the two screens it joins (spec 023 #8): a user is a set of
 	// sessions, and the user page is the dashboard for one of them.
-	{ href: '/users', label: 'Users', icon: Users },
+	{ href: '/users', label: 'Users', icon: Users, tab: true },
 	// Top level, not under *Evals* (spec 021 #1): a prompt is what the
 	// application ships, and filing it under the test loop would say it
 	// belongs to the eval nouns.

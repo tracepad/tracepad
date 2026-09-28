@@ -36,10 +36,24 @@ test('a phone has four tabs under the page and the rest in More', async ({ page 
 	const main = (await page.locator('main').boundingBox())!;
 	expect(main.y).toBeLessThanOrEqual(48);
 	expect(main.y + main.height).toBeLessThanOrEqual(bar.y + 1);
+	// And in the document as on the screen, so Tab reaches the page first.
+	const after = await page.evaluate(() => {
+		const main = document.querySelector('main')!;
+		const tabs = document.querySelector('nav[aria-label="Sections"]')!;
+		return !!(main.compareDocumentPosition(tabs) & Node.DOCUMENT_POSITION_FOLLOWING);
+	});
+	expect(after).toBe(true);
 
 	// A screen *More* holds: the tab is lit and keeps its name, and the sheet
 	// lights the screen.
-	await (await section(page, 'Queues')).click();
+	// Open, the sheet keeps the focus: Tab goes round it and not out of it.
+	const queues = await section(page, 'Queues');
+	for (let i = 0; i < 12; i++) await page.keyboard.press('Tab');
+	const inside = await page.evaluate(
+		() => !!document.activeElement?.closest('[role="dialog"]')
+	);
+	expect(inside).toBe(true);
+	await queues.click();
 	await expect(page).toHaveURL(/\/queues$/);
 	await expect(page.getByRole('dialog')).toHaveCount(0);
 	const more = nav.getByRole('button', { name: 'More' });
