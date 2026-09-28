@@ -428,6 +428,7 @@ func (s *Server) handleAddItemsFromTraces(w http.ResponseWriter, r *http.Request
 		Queue:     name,
 		Filter:    filter,
 		Limit:     limit,
+		Matched:   matched,
 		Now:       time.Now().UnixNano(),
 	}
 	if !s.submit(w, r, write) {

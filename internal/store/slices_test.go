@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"slices"
@@ -211,47 +212,71 @@ func TestSlicesWriteWhatOneTransactionWrites(t *testing.T) {
 	}
 }
 
+// heldWriter is a writer whose first commit waits for release, so that the
+// jobs submitted meanwhile queue up and the windows they form can be read, in
+// transactions and in the rows Committed reports for each (spec 043 #12).
+type heldWriter struct {
+	*Writer
+	mu      sync.Mutex
+	windows []int
+	release chan struct{}
+}
+
+func newHeldWriter(t *testing.T, s *Store, p *Project) *heldWriter {
+	t.Helper()
+	h := &heldWriter{release: make(chan struct{})}
+	w, err := s.NewWriter(WriterOptions{CommitWindow: 100 * time.Millisecond, Committed: func(rows int) {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		h.windows = append(h.windows, rows)
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { w.Close() })
+	h.Writer = w
+	parked := make(chan struct{}, 1)
+	w.beforeCommit = func() {
+		select {
+		case parked <- struct{}{}:
+			<-h.release
+		default:
+		}
+	}
+	go func() {
+		if err := w.Submit(context.Background(), batchFor(p.ID, fmt.Sprintf("%032x", 1), spanHex(1))); err != nil {
+			t.Error(err)
+		}
+	}()
+	<-parked
+	return h
+}
+
+// submitAll submits the jobs at once, releases the writer when all of them are
+// queued, and returns each one's answer and the windows after the held one.
+func (h *heldWriter) submitAll(t *testing.T, jobs ...WriteJob) ([]error, []int) {
+	t.Helper()
+	errs := make([]error, len(jobs))
+	var wg sync.WaitGroup
+	for i, job := range jobs {
+		wg.Go(func() { errs[i] = h.Submit(context.Background(), job) })
+		// One at a time into the queue, so the windows follow this order.
+		waitFor(t, func() bool { return len(h.queue) == i+1 })
+	}
+	close(h.release)
+	wg.Wait()
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return errs, slices.Clone(h.windows[1:])
+}
+
 // A window closes at WindowRows as well as at MaxBatch jobs (spec 043 #12):
 // sixteen big jobs queued behind a held writer commit two to a transaction, not
 // all sixteen in one.
 func TestWriterWindowClosesAtItsWeight(t *testing.T) {
 	s, p := openIngestStore(t)
-	var mu sync.Mutex
-	var windows []int
-	w, err := s.NewWriter(WriterOptions{CommitWindow: 100 * time.Millisecond, Committed: func(rows int) {
-		mu.Lock()
-		defer mu.Unlock()
-		windows = append(windows, rows)
-	}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer w.Close()
-	parked, release := make(chan struct{}, 1), make(chan struct{})
-	w.beforeCommit = func() {
-		select {
-		case parked <- struct{}{}:
-			<-release
-		default:
-		}
-	}
-
-	submit := func(jobs []*IngestBatch) {
-		var wg sync.WaitGroup
-		for _, job := range jobs {
-			wg.Go(func() {
-				if err := w.Submit(context.Background(), job); err != nil {
-					t.Error(err)
-				}
-			})
-		}
-		wg.Wait()
-	}
-	hold := batchFor(p.ID, fmt.Sprintf("%032x", 1), spanHex(1))
-	go submit([]*IngestBatch{hold})
-	<-parked
-
-	var big []*IngestBatch
+	h := newHeldWriter(t, s, p)
+	var big []WriteJob
 	for i := range 16 {
 		job := bulkBatch(p.ID, 599)
 		job.Traces[0].ID = fmt.Sprintf("%032x", 0xb16000+i)
@@ -260,18 +285,14 @@ func TestWriterWindowClosesAtItsWeight(t *testing.T) {
 		}
 		big = append(big, job)
 	}
-	done := make(chan struct{})
-	go func() { submit(big); close(done) }()
-	waitFor(t, func() bool { return len(w.queue) == 16 })
-	close(release)
-	<-done
-
-	mu.Lock()
-	defer mu.Unlock()
-	if len(windows) < 2 {
-		t.Fatalf("windows = %v", windows)
+	errs, windows := h.submitAll(t, big...)
+	if err := errors.Join(errs...); err != nil {
+		t.Fatal(err)
 	}
-	for _, rows := range windows[1:] {
+	if len(windows) == 0 {
+		t.Fatal("no windows after the held one")
+	}
+	for _, rows := range windows {
 		if rows >= 2*WindowRows {
 			t.Errorf("a window of %d rows, want under %d: %v", rows, 2*WindowRows, windows)
 		}
@@ -280,24 +301,30 @@ func TestWriterWindowClosesAtItsWeight(t *testing.T) {
 
 // A write that carries rows weighs them, not one (spec 043 #35): an array of
 // scores or dataset items has no count cap, and weighing one it let a window
-// take 64 of them whole.
+// take 64 of them whole. A delete whose cascade nothing counts commits alone;
+// a job of a row or a few still weighs one.
 func TestAJobWeighsTheRowsItCarries(t *testing.T) {
-	scores := make([]*Score, 700)
-	items := make([]*DatasetItemInput, 1200)
-	targets := make([]QueueTarget, 300)
 	for _, c := range []struct {
 		job  WriteJob
 		want int
 	}{
-		{&ScoreWrite{Scores: scores}, 700},
-		{&DatasetItemsWrite{Items: items}, 1200},
-		{&QueueItemsAdd{Targets: targets}, 300},
-		{&QueueItemsFromTraces{Limit: 1000}, 1000},
+		{&ScoreWrite{Scores: make([]*Score, 700)}, 700},
+		{&DatasetItemsWrite{Items: make([]*DatasetItemInput, 1200)}, 1200},
+		{&QueueItemsAdd{Targets: make([]QueueTarget, 300)}, 300},
+		{&QueueItemsFromTraces{Limit: 1000, Matched: 2}, 2},
+		{&QueueItemsFromTraces{Limit: 500, Matched: 40000}, 500},
+		{&QueueItemsFromTraces{Limit: 1000}, 1},
 		{&TraceDelete{IDs: []string{"a", "b", "c"}}, 3},
+		{&TraceDelete{ByFilter: true}, 1},
+		{&UserDataErase{Limit: 500}, 500},
+		{&DatasetDelete{Name: "d"}, WindowRows + 1},
+		{&QueueDelete{Name: "q"}, WindowRows + 1},
 		{&ScoreDelete{ID: "a"}, 1},
+		{&QueueNext{}, 1},
+		{&PromptVersionWrite{}, 1},
 	} {
 		if got := weightOf(c.job); got != c.want {
-			t.Errorf("%T weighs %d, want %d", c.job, got, c.want)
+			t.Errorf("%T%+v weighs %d, want %d", c.job, c.job, got, c.want)
 		}
 	}
 }
@@ -307,57 +334,25 @@ func TestAJobWeighsTheRowsItCarries(t *testing.T) {
 // a transaction, where weighing one each they committed all sixteen in one.
 func TestAWindowOfScoreWritesClosesAtItsWeight(t *testing.T) {
 	s, p := openIngestStore(t)
-	var mu sync.Mutex
-	var windows []int
-	w, err := s.NewWriter(WriterOptions{CommitWindow: 100 * time.Millisecond, Committed: func(rows int) {
-		mu.Lock()
-		defer mu.Unlock()
-		windows = append(windows, rows)
-	}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer w.Close()
-	parked, release := make(chan struct{}, 1), make(chan struct{})
-	w.beforeCommit = func() {
-		select {
-		case parked <- struct{}{}:
-			<-release
-		default:
-		}
-	}
-
-	go func() {
-		if err := w.Submit(context.Background(), batchFor(p.ID, fmt.Sprintf("%032x", 1), spanHex(1))); err != nil {
-			t.Error(err)
-		}
-	}()
-	<-parked
-
+	h := newHeldWriter(t, s, p)
 	one := 1.0
-	var wg sync.WaitGroup
+	var jobs []WriteJob
 	for i := range 16 {
 		job := &ScoreWrite{ProjectID: p.ID, Scores: make([]*Score, 600)}
 		for j := range job.Scores {
 			job.Scores[j] = &Score{ID: fmt.Sprintf("s-%d-%d", i, j), SessionID: "sess", Name: "q",
 				DataType: "numeric", Value: &one, Timestamp: 1}
 		}
-		wg.Go(func() {
-			if err := w.Submit(context.Background(), job); err != nil {
-				t.Error(err)
-			}
-		})
+		jobs = append(jobs, job)
 	}
-	waitFor(t, func() bool { return len(w.queue) == 16 })
-	close(release)
-	wg.Wait()
-
+	errs, windows := h.submitAll(t, jobs...)
+	if err := errors.Join(errs...); err != nil {
+		t.Fatal(err)
+	}
 	// Counted in transactions, not in the weights Committed reports: those
 	// are what is under test, and weighing one each they summed to 16.
-	mu.Lock()
-	defer mu.Unlock()
-	if got := len(windows) - 1; got < 8 {
-		t.Errorf("sixteen writes of 600 committed in %d transactions, want at least 8: %v", got, windows)
+	if len(windows) < 8 {
+		t.Errorf("sixteen writes of 600 committed in %d transactions, want at least 8: %v", len(windows), windows)
 	}
 	var stored int
 	if err := s.db.QueryRow(`SELECT count(*) FROM scores WHERE project_id = ?`, p.ID).Scan(&stored); err != nil {
@@ -365,6 +360,41 @@ func TestAWindowOfScoreWritesClosesAtItsWeight(t *testing.T) {
 	}
 	if stored != 16*600 {
 		t.Errorf("%d scores stored, want %d", stored, 16*600)
+	}
+}
+
+// weighedJob is a job of a given weight that runs do.
+type weighedJob struct {
+	rows int
+	do   func(tx *sql.Tx) error
+}
+
+func (j *weighedJob) weight() int            { return j.rows }
+func (j *weighedJob) apply(tx *sql.Tx) error { return j.do(tx) }
+
+// A job heavier than a window commits alone (spec 043 #35). A window that
+// fails is retried job by job, and the one that failed it is applied again: a
+// score array the size of a body cap, refused by a score config at its last
+// item, would run twice over, and a small job ahead of it would wait for both.
+// Alone, it is applied once and refused once.
+func TestAJobHeavierThanAWindowCommitsAlone(t *testing.T) {
+	s, p := openIngestStore(t)
+	h := newHeldWriter(t, s, p)
+	applied := 0
+	small := &weighedJob{rows: 1, do: func(*sql.Tx) error { return nil }}
+	heavy := &weighedJob{rows: 5 * WindowRows, do: func(*sql.Tx) error {
+		applied++
+		return &Rejection{Kind: RejectInvalid, Message: "score 499999 does not fit its config"}
+	}}
+	errs, windows := h.submitAll(t, small, heavy)
+	if errs[0] != nil || errs[1] == nil {
+		t.Fatalf("answers %v, want the small job committed and the heavy one refused", errs)
+	}
+	if applied != 1 {
+		t.Errorf("the heavy job was applied %d times, want once", applied)
+	}
+	if want := []int{1}; !slices.Equal(windows, want) {
+		t.Errorf("committed windows %v, want %v: the small job by itself", windows, want)
 	}
 }
 

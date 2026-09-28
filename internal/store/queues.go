@@ -167,6 +167,10 @@ type QueueDelete struct {
 	Items int64
 }
 
+// weight is a whole window and more: the cascade takes every item the queue
+// holds, however many adds filled it (spec 043 #35).
+func (d *QueueDelete) weight() int { return commitsAlone }
+
 func (d *QueueDelete) apply(tx *sql.Tx) error {
 	d.Items = 0
 	queue, err := queueByName(tx, d.ProjectID, d.Name)
@@ -264,7 +268,11 @@ type QueueItemsFromTraces struct {
 	Filter    TraceFilter
 	// Limit is how many traces may be added, 1–1000.
 	Limit int
-	Now   int64
+	// Matched is how many traces the filter matched when the handler
+	// counted them, before the job: what the add is weighed by when it is
+	// under Limit. More may arrive before it runs; the weight is an estimate.
+	Matched int
+	Now     int64
 
 	// Added, Existing and Capped are filled by apply. Capped says the
 	// filter matched more than Limit, which is what tells the caller a
@@ -274,8 +282,9 @@ type QueueItemsFromTraces struct {
 	Capped   bool
 }
 
-// weight is the most items the add may write, its Limit (spec 043 #35).
-func (f *QueueItemsFromTraces) weight() int { return f.Limit }
+// weight is the items the add expects to write: the traces the filter matched,
+// at most its Limit (spec 043 #35).
+func (f *QueueItemsFromTraces) weight() int { return min(f.Limit, f.Matched) }
 
 func (f *QueueItemsFromTraces) apply(tx *sql.Tx) error {
 	f.Added, f.Existing, f.Capped = 0, 0, false

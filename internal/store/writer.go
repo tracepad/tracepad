@@ -31,9 +31,15 @@ const (
 	// collecting once the rows of its jobs reach this many, so 64 big
 	// ingest slices cannot become one transaction of 64,000 rows. A window
 	// holds at most what it held before the job that crossed the line,
-	// plus that job — under two slices.
+	// plus that job — under two slices. A job that weighs more than
+	// WindowRows by itself joins no window: it commits alone (#35).
 	WindowRows = 1000
 )
+
+// commitsAlone is the weight of a job whose rows cannot be counted before it
+// runs and have no bound — a delete that takes a whole dataset or queue with
+// it. It is over WindowRows, so the job commits alone (spec 043 #35).
+const commitsAlone = WindowRows + 1
 
 // ErrWriterBusy means the submission queue is full. Callers turn it into a
 // 429 with Retry-After, which OTLP exporters retry natively (spec 002 #15).
@@ -312,10 +318,17 @@ func (w *Writer) run() {
 	defer w.wg.Done()
 
 	pending := make([]*submission, 0, w.max)
+	// next is a job heavier than a window, carried over from the window it
+	// would have joined to start the next one, alone.
+	var next *submission
 	for {
-		first, ok := <-w.queue
-		if !ok {
-			return
+		first := next
+		next = nil
+		if first == nil {
+			var ok bool
+			if first, ok = <-w.queue; !ok {
+				return
+			}
 		}
 		if w.runSolo(first) {
 			continue
@@ -325,7 +338,11 @@ func (w *Writer) run() {
 
 		// A solo step ends the window: what came before it commits first,
 		// then it runs alone, in submission order. So does a window whose
-		// jobs weigh WindowRows (spec 043 #12).
+		// jobs weigh WindowRows (spec 043 #12), and so does a job heavier
+		// than a window (#35): a window that fails is retried job by job, so
+		// a heavy job that failed a shared window would run twice over, and
+		// the jobs ahead of it would wait for both. Such a job that starts a
+		// window weighs too much to collect anything behind it.
 		var solo *submission
 		timer := time.NewTimer(w.window)
 		drained := false
@@ -339,6 +356,10 @@ func (w *Writer) run() {
 				}
 				if _, isSolo := sub.job.(soloJob); isSolo {
 					solo = sub
+					break collect
+				}
+				if weightOf(sub.job) > WindowRows {
+					next = sub
 					break collect
 				}
 				pending = append(pending, sub)

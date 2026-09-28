@@ -730,6 +730,10 @@ type UserDataErase struct {
 	Updated  []int64
 }
 
+// weight is the traces the chunk may take, its Limit (spec 043 #35): a floor,
+// as a trace delete's is, since each takes its observations and scores with it.
+func (e *UserDataErase) weight() int { return e.Limit }
+
 func (e *UserDataErase) apply(tx *sql.Tx) error {
 	e.Counts, e.CompactionRequested, e.IDs, e.Ingested, e.Updated = DeleteCounts{}, 0, nil, nil, nil
 	// The echo is the user id here, not a project name: it is the identity
