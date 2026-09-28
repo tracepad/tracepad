@@ -32,7 +32,8 @@ const (
 	// ingest slices cannot become one transaction of 64,000 rows. A window
 	// holds at most what it held before the job that crossed the line,
 	// plus that job — under two slices. A job that weighs more than
-	// WindowRows by itself joins no window: it commits alone (#35).
+	// WindowRows by itself joins no window: it commits alone (#35, and
+	// see solitary).
 	WindowRows = 1000
 	// MaxItemsPerWrite is the most rows the API takes in one array of scores
 	// or of dataset items (spec 043 #36): the server refuses a longer one,
@@ -41,10 +42,31 @@ const (
 	MaxItemsPerWrite = 10_000
 )
 
-// commitsAlone is the weight of a job whose rows cannot be counted before it
-// runs and have no bound — a delete that takes a whole dataset or queue with
-// it. It is over WindowRows, so the job commits alone (spec 043 #35).
-const commitsAlone = WindowRows + 1
+// solitary is a job that commits alone, whatever it weighs: a delete whose
+// rows nothing counts before it runs (spec 043 #35), and every background
+// job (#37). It joins no window and collects none behind it, so it holds no
+// other write's acknowledgement in its transaction.
+type solitary interface {
+	commitsAlone()
+}
+
+// classify is a job's weight in its window and whether it commits alone: a
+// solitary job does, and so does one heavier than a window by its weight
+// (spec 043 #35, #37).
+func classify(job WriteJob) (weight int, lone bool) {
+	weight = weightOf(job)
+	_, marked := job.(solitary)
+	return weight, marked || weight > WindowRows
+}
+
+// background is embedded by the jobs of the retention sweeper and of the
+// maintenance passes that remove or recompute rows in bulk: a chunk of a
+// sweep, a merge step, a vacuum, an hour's roll, a batch of user summaries.
+// However its chunk is bounded, such a job changes more pages than a
+// foreground write, so it commits alone (spec 043 #37).
+type background struct{}
+
+func (background) commitsAlone() {}
 
 // ErrWriterBusy means the submission queue is full. Callers turn it into a
 // 429 with Retry-After, which OTLP exporters retry natively (spec 002 #15).
@@ -63,8 +85,12 @@ var ErrWriterClosed = errors.New("writer is closed")
 type WriteJob interface {
 	// apply issues the job's statements inside the writer's transaction.
 	// It is unexported so that SQL stays inside this package, and it must
-	// be idempotent: a window that fails is retried job by job (see
-	// flush), so one submission can be applied more than once.
+	// be idempotent: a window is applied again when one of its jobs fails
+	// by itself, each job in a savepoint, and one that fails as a whole — at
+	// COMMIT, or on a database condition — is retried job by job (see
+	// commit and flush), so one submission can be applied more than once.
+	// A job that fails by itself is rolled back alone, and committed once
+	// are the others.
 	apply(tx *sql.Tx) error
 }
 
@@ -139,10 +165,24 @@ const (
 
 func (r *Rejection) Error() string { return r.Message }
 
+// routineRefusals are the refusals a job returns as a plain error rather than
+// a *Rejection: a link used twice, a race for the first owner, a password
+// typed wrong, a media body collected before the write. They are traffic, not
+// incidents, like any rejection.
+var routineRefusals = []error{ErrBadToken, ErrSetupDone, ErrWrongPassword, ErrPasswordChanged, ErrMediaGone}
+
 // rejected reports an error the caller caused rather than a storage failure.
 func rejected(err error) bool {
 	var rejection *Rejection
-	return errors.As(err, &rejection)
+	if errors.As(err, &rejection) {
+		return true
+	}
+	for _, routine := range routineRefusals {
+		if errors.Is(err, routine) {
+			return true
+		}
+	}
+	return false
 }
 
 // WriterOptions tunes the group-commit writer. Zero fields take defaults.
@@ -151,9 +191,11 @@ type WriterOptions struct {
 	MaxBatch     int
 	QueueDepth   int
 	// Committed, when set, is called on the writer's goroutine after each
-	// transaction commits, with the rows its jobs weighed (spec 043 #12).
-	// A seam for tests — the one place that sees the transactions an
-	// export was cut into — and nil in production.
+	// transaction commits, with the rows the jobs it committed weighed
+	// (spec 043 #12): a job refused inside the window is not counted, and
+	// a job that commits alone weighs what its weight says — one, for a delete
+	// of a whole history. A seam for tests — the one place that sees the
+	// transactions an export was cut into — and nil in production.
 	Committed func(rows int)
 }
 
@@ -323,8 +365,8 @@ func (w *Writer) run() {
 	defer w.wg.Done()
 
 	pending := make([]*submission, 0, w.max)
-	// next is a job heavier than a window, carried over from the window it
-	// would have joined to start the next one, alone.
+	// next is a job that commits alone, carried over from the window it
+	// would have joined to start the next one.
 	var next *submission
 	for {
 		first := next
@@ -339,20 +381,23 @@ func (w *Writer) run() {
 			continue
 		}
 		pending = append(pending[:0], first)
-		rows := weightOf(first.job)
+		rows, lone := classify(first.job)
 
 		// A solo step ends the window: what came before it commits first,
 		// then it runs alone, in submission order. So does a window whose
-		// jobs weigh WindowRows (spec 043 #12), and so does a job heavier
-		// than a window (#35): a window that fails is retried job by job, so
-		// a heavy job that failed a shared window would run twice over, and
-		// the jobs ahead of it would wait for both. Such a job that starts a
-		// window weighs too much to collect anything behind it.
+		// jobs weigh WindowRows (spec 043 #12), and so does a job that
+		// commits alone (#35, #37): behind others it starts the next window,
+		// and starting one it collects nothing behind it.
 		var solo *submission
-		timer := time.NewTimer(w.window)
+		var timer *time.Timer
+		var expired <-chan time.Time
+		if !lone {
+			timer = time.NewTimer(w.window)
+			expired = timer.C
+		}
 		drained := false
 	collect:
-		for len(pending) < w.max && rows < WindowRows {
+		for !lone && len(pending) < w.max && rows < WindowRows {
 			select {
 			case sub, ok := <-w.queue:
 				if !ok {
@@ -363,18 +408,20 @@ func (w *Writer) run() {
 					solo = sub
 					break collect
 				}
-				weight := weightOf(sub.job)
-				if weight > WindowRows {
+				weight, subLone := classify(sub.job)
+				if subLone {
 					next = sub
 					break collect
 				}
 				pending = append(pending, sub)
 				rows += weight
-			case <-timer.C:
+			case <-expired:
 				break collect
 			}
 		}
-		timer.Stop()
+		if timer != nil {
+			timer.Stop()
+		}
 
 		w.flush(pending)
 		if solo != nil {
@@ -400,18 +447,24 @@ func (w *Writer) runSolo(sub *submission) bool {
 	return true
 }
 
-// flush commits one window. If the window fails as a whole, each submission
-// is retried alone: a job that violates a constraint — or that the write
-// transaction refuses (a *Rejection) — must not take its neighbours down with
-// it, and a genuine storage failure simply fails them all again, one by one.
+// flush commits one window. A job that fails inside it — a constraint it
+// violates, a *Rejection — is rolled back alone and answered with its error,
+// and the window commits the others (spec 043 #38). If the window fails as a
+// whole — at BEGIN, at COMMIT, on a database condition, after which SQLite may
+// have rolled the transaction back itself, or when a savepoint cannot be taken
+// or rolled back to — each submission is retried alone: a genuine storage
+// failure simply fails them all again, one by one, and a write the retries
+// commit is not lost.
 func (w *Writer) flush(pending []*submission) {
-	err := w.commit(pending)
+	refused, err := w.commit(pending)
 	if err == nil {
-		answer(pending, nil)
+		for i, sub := range pending {
+			settle(sub, refused[i])
+		}
 		return
 	}
 	if len(pending) == 1 {
-		lost(pending[0], err)
+		lost(pending[0], err, "write commit failed")
 		answer(pending, err)
 		return
 	}
@@ -433,13 +486,24 @@ func (w *Writer) flush(pending []*submission) {
 	}
 	for _, sub := range pending {
 		one := []*submission{sub}
-		if err := w.commit(one); err != nil {
-			lost(sub, err)
+		refused, err := w.commit(one)
+		if err != nil {
+			lost(sub, err, "write commit failed")
 			answer(one, err)
 			continue
 		}
-		answer(one, nil)
+		settle(sub, refused[0])
 	}
+}
+
+// settle answers one job of a transaction that did not fail: nil if the job
+// committed, its own error if it was refused — rolled back to its savepoint,
+// or, alone, with its transaction.
+func settle(sub *submission, refused error) {
+	if refused != nil {
+		lost(sub, refused, "write refused")
+	}
+	sub.done <- refused
 }
 
 // reportsItsFailure is a job whose caller logs its failure itself, with what
@@ -466,13 +530,15 @@ func redacts(job WriteJob) (string, bool) {
 	return redacting.failureRedacted()
 }
 
-// lost logs one write that did not commit. A job that logs its own failures
-// (the aggregator's hour) is left to do so. One that redacts its failure gets
-// a line without the error, so that a failure whose submitter has gone is
-// still one the log has: the cause and what it was a step of; and a database
-// condition it met counts in the paced line, which gives the condition and
-// not the job's words, since a full disk is news whoever met it.
-func lost(sub *submission, err error) {
+// lost logs one write that did not commit: "write commit failed" for one whose
+// transaction failed, "write refused" for one that failed by itself (spec 043
+// #37). A job that logs its own failures (the aggregator's hour) is left to do
+// so. One that redacts its failure gets a line without the error, so that a
+// failure whose submitter has gone is still one the log has: the cause and what
+// it was a step of; and a database condition it met counts in the paced line,
+// which gives the condition and not the job's words, since a full disk is news
+// whoever met it.
+func lost(sub *submission, err error, message string) {
 	if id, redacted := redacts(sub.job); redacted {
 		if code, ok := sqliteCode(err); ok {
 			if _, condition := conditionNames[code]; condition {
@@ -488,7 +554,7 @@ func lost(sub *submission, err error) {
 	if reports(sub.job) {
 		return
 	}
-	logFailure(err, slog.LevelError, "write commit failed")
+	logFailure(err, slog.LevelError, message)
 }
 
 // logRedacted is a line for a failure whose error the writer does not give:
@@ -555,33 +621,143 @@ func logFailure(err error, level slog.Level, message string, args ...any) {
 	logger().Log(context.Background(), level, message, append([]any{"err", err}, args...)...)
 }
 
-func (w *Writer) commit(pending []*submission) error {
+// commit applies a window in one transaction and commits it. A window of two
+// jobs or more is applied plainly first, as it always was: when no job fails,
+// it costs what it cost before savepoints, whatever the jobs are. When one
+// fails by itself, the transaction is rolled back and the window applied again
+// with each job in a savepoint, the failing one rolled back to its own and the
+// others committed. That second pass is the last: what fails the window as a
+// whole there — a condition, a savepoint that cannot be rolled back to — comes
+// back as the window's error, and flush retries its jobs one by one. refused
+// holds, at its index, the error of a job that failed by itself, nil for every
+// job that committed; a window in which every job is refused commits nothing
+// (spec 043 #38).
+func (w *Writer) commit(pending []*submission) (refused []error, err error) {
 	if w.beforeCommit != nil {
 		w.beforeCommit()
 	}
-	ctx := context.Background()
-	tx, err := w.conn.BeginTx(ctx, nil)
+	if len(pending) == 1 {
+		return w.commitWindow(pending, false)
+	}
+	first, err := w.commitWindow(pending, false)
+	if !errors.Is(err, errJobFailed) {
+		return first, err
+	}
+	refused, err = w.commitWindow(pending, true)
+	if err == nil {
+		for i, failed := range first {
+			if failed != nil && refused[i] == nil {
+				explainReplay(pending[i], failed)
+			}
+		}
+	}
+	return refused, err
+}
+
+// errJobFailed says a job of a window applied plainly failed by itself: the
+// window is to be applied again with each job in a savepoint. The job's own
+// error comes with it, in refused, at the job's index.
+var errJobFailed = errors.New("a job of the window failed by itself")
+
+// explainReplay says why a window was applied twice when it did not show:
+// a job failed the first pass and was committed by the second, which leaves no
+// refusal to log. It names the job's type and gives its error, unless the job
+// redacts its failure, whose words the writer does not log (spec 047 #33): its
+// line has the facts of the error and what the job was a step of.
+func explainReplay(sub *submission, failed error) {
+	const message = "a job failed its window's first pass and passed the second"
+	job := fmt.Sprintf("%T", sub.job)
+	if id, redacted := redacts(sub.job); redacted {
+		logRedacted(slog.LevelWarn, message, id, failed, "job", job)
+		return
+	}
+	logger().Warn(message, "job", job, "err", failed)
+}
+
+// commitWindow applies the window in one transaction and commits what was not
+// refused, each job of a window of many in a savepoint if savepoints is set. A
+// window of one job takes none: its failure discards the transaction, which
+// holds nothing else. Without savepoints a job that fails by itself stops the
+// pass, and errJobFailed comes back with its error in refused. The other
+// returned error is what fails the window as a whole: BEGIN, COMMIT, a
+// savepoint that cannot be taken or rolled back to, and a database condition
+// in any apply.
+func (w *Writer) commitWindow(pending []*submission, savepoints bool) (refused []error, err error) {
+	tx, err := w.conn.BeginTx(context.Background(), nil)
 	if err != nil {
-		return fmt.Errorf("begin write transaction: %w", err)
+		return nil, fmt.Errorf("begin write transaction: %w", err)
 	}
 	defer tx.Rollback()
 
-	for _, sub := range pending {
-		if err := sub.job.apply(tx); err != nil {
-			return &failedJob{job: sub.job, err: err}
+	many := len(pending) > 1
+	refused = make([]error, len(pending))
+	written := false
+	for i, sub := range pending {
+		own, err := applyOne(tx, sub.job, many && savepoints)
+		if err != nil {
+			// With the job it was met at, for a line that names what a job
+			// whose words the writer does not log was a step of (spec 047 #33).
+			return nil, &failedJob{job: sub.job, err: err}
+		}
+		if own == nil {
+			written = true
+			continue
+		}
+		refused[i] = own
+		if many && !savepoints {
+			return refused, errJobFailed
 		}
 	}
+	if !written {
+		return refused, nil
+	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit write transaction: %w", err)
+		return nil, fmt.Errorf("commit write transaction: %w", err)
 	}
 	if w.committed != nil {
 		rows := 0
-		for _, sub := range pending {
-			rows += weightOf(sub.job)
+		for i, sub := range pending {
+			if refused[i] == nil {
+				rows += weightOf(sub.job)
+			}
 		}
 		w.committed(rows)
 	}
-	return nil
+	return refused, nil
+}
+
+// applyOne applies one job, inside a savepoint if it is to be rolled back
+// alone. own is the job's own failure, the job rolled back to its savepoint, or
+// left to the caller to discard with its transaction; windowErr fails the
+// window as a whole. A database condition is the window's: SQLite may already
+// have rolled the whole transaction back for one, and there is no savepoint
+// left to return to.
+func applyOne(tx *sql.Tx, job WriteJob, savepoint bool) (own, windowErr error) {
+	if savepoint {
+		if _, err := tx.Exec(`SAVEPOINT job`); err != nil {
+			return nil, fmt.Errorf("open a job's savepoint: %w", err)
+		}
+	}
+	err := job.apply(tx)
+	if err != nil {
+		if _, condition := Condition(err); condition {
+			return nil, err
+		}
+		if savepoint {
+			// The job's own error stays out of the window's: the window's is
+			// logged, and a job that reports its failure itself — one whose
+			// error names a user (spec 044 #15) — is logged by its caller alone.
+			if _, rollback := tx.Exec(`ROLLBACK TO job`); rollback != nil {
+				return nil, fmt.Errorf("roll back to a job's savepoint: %w", rollback)
+			}
+		}
+	}
+	if savepoint {
+		if _, release := tx.Exec(`RELEASE job`); release != nil {
+			return nil, fmt.Errorf("release a job's savepoint: %w", release)
+		}
+	}
+	return err, nil
 }
 
 func answer(pending []*submission, err error) {

@@ -212,6 +212,7 @@ func (s *Store) NamesRollupHours(ctx context.Context, projectID string) ([]int64
 // window is `stats_retention_days` and there is no knob of its own, because
 // all four tables are one rollup (spec 027, config additions).
 type namesRollupSweep struct {
+	background
 	ProjectID string
 	Before    int64
 

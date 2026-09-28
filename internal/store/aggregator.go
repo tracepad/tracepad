@@ -797,6 +797,7 @@ func scanHours(rows *sql.Rows) ([]int64, error) {
 // Bounded like every other deletion this store does, so a long-disabled
 // window turned on does not hold the writer for one transaction.
 type statsRollupSweep struct {
+	background
 	ProjectID string
 	Before    int64
 

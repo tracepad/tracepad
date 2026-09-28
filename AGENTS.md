@@ -571,7 +571,7 @@ API. This file routes; it does not duplicate what specs and docs say.
 |---|---|
 | Any feature | Its spec in `specs/` (spec-first — see Process below) |
 | Storage, schema, migrations | `internal/store/`, spec 001 |
-| Write pipeline (group commit) | `internal/store/writer.go`, spec 002 #15, spec 003 #9 — every durable write is a `WriteJob` |
+| Write pipeline (group commit) | `internal/store/writer.go`, spec 002 #15, #31, spec 003 #9, spec 043 #12, #35, #37, #38 — every durable write is a `WriteJob`, and its `apply` must be idempotent: a window can apply a job more than once |
 | HTTP surface | `internal/server/` |
 | OTLP ingest | `internal/server/otlp.go`, `docs/ingest.md`, spec 002 |
 | Scores & prompts | `internal/server/scores.go`, `prompts.go`, `docs/scores.md`, `docs/prompts.md`, spec 003 — a version is never edited and never deleted alone; `PromptDelete` in `internal/store/prompts.go` takes a name whole, and the echo is checked inside its transaction (spec 021 #7). A score is the opposite: `ScoreDelete` takes one row with no echo at all, because a re-POST with the same id puts it back (spec 022 #6) |

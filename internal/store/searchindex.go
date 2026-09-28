@@ -211,6 +211,7 @@ func (s *Store) orphanSearchEntries(ctx context.Context, limit int) ([]int64, er
 
 // searchEntrySweep removes the orphans that pass found.
 type searchEntrySweep struct {
+	background
 	IDs     []int64
 	Deleted int64
 }

@@ -947,6 +947,7 @@ func (u *MediaUpload) apply(tx *sql.Tx) error {
 // carry (#29): those removed more than the URL's lifetime, and the slack,
 // ago.
 type mediaVoidedSweep struct {
+	background
 	Before int64
 	Limit  int
 
@@ -1051,6 +1052,7 @@ type MediaOrphan struct {
 // collects the bodies left with no ref, together with any body the pass found
 // with no ref at all.
 type mediaSweep struct {
+	background
 	Refs   []MediaOrphan
 	Bodies []any
 	// Stale are holder rows the pass found with no ref of their project,

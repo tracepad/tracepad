@@ -405,6 +405,7 @@ func finishErasure(tx *sql.Tx, id, failure string, now int64) (*Erasure, error) 
 
 // erasureSweep removes the finished erasures past ErasureKept (#15).
 type erasureSweep struct {
+	background
 	Before int64
 
 	Removed int64

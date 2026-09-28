@@ -85,6 +85,7 @@ func requestCompaction(tx *sql.Tx, now int64) (int64, error) {
 // a merge did anything through the connection's change count: a delta of two
 // or more is work done, less is a merge with nothing left to merge.
 type ftsMerge struct {
+	background
 	Pages  int
 	Worked bool
 }

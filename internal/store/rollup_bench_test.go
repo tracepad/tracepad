@@ -85,7 +85,10 @@ func seedMonth(b *testing.B) (*Store, *Project) {
 // The two commit windows are measured because a pass is many small jobs, and
 // a job's cost is its SQL plus its wait for the group-commit flush. Which of
 // the two dominates decides whether a long backfill is worth tuning, and
-// guessing at it would be the kind of claim this project does not make.
+// guessing at it would be the kind of claim this project does not make. An
+// hour's roll and a batch of user summaries commit alone (spec 043 #37) and
+// wait for no window, so the two variants differ only in what still shares
+// one: the stamps a pass leaves.
 func BenchmarkRollupPass(b *testing.B) {
 	for _, window := range []struct {
 		name   string

@@ -167,9 +167,9 @@ type QueueDelete struct {
 	Items int64
 }
 
-// weight is a whole window and more: the cascade takes every item the queue
-// holds, however many adds filled it (spec 043 #35).
-func (d *QueueDelete) weight() int { return commitsAlone }
+// commitsAlone: the cascade takes every item the queue holds, however many adds
+// filled it, so the delete commits alone (spec 043 #35).
+func (d *QueueDelete) commitsAlone() {}
 
 func (d *QueueDelete) apply(tx *sql.Tx) error {
 	d.Items = 0

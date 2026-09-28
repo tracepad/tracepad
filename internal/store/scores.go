@@ -52,6 +52,11 @@ type Score struct {
 type ScoreWrite struct {
 	ProjectID string
 	Scores    []*Score
+
+	// stamped[i] says apply stamped Scores[i].CreatedAt itself, as opposed to
+	// the caller, so that a second application of the write — the window was
+	// applied again — stamps its own commit time and not the first one's.
+	stamped []bool
 }
 
 // weight is the scores the write carries (spec 043 #35): an array has no
@@ -102,8 +107,11 @@ func (s *ScoreWrite) apply(tx *sql.Tx) error {
 	// left alone.
 	receivedAt := time.Now().UnixNano()
 
+	if s.stamped == nil {
+		s.stamped = make([]bool, len(s.Scores))
+	}
 	var vacated []int64
-	for _, score := range s.Scores {
+	for i, score := range s.Scores {
 		// Read before the upsert overwrites it: afterwards nothing names the
 		// hour this score is leaving (spec 025 #20).
 		hour, moved, err := vacatedScoreHour(tx, s.ProjectID, score.ID, score.TraceID)
@@ -113,8 +121,9 @@ func (s *ScoreWrite) apply(tx *sql.Tx) error {
 		if moved {
 			vacated = append(vacated, hour)
 		}
-		if score.CreatedAt == 0 {
+		if score.CreatedAt == 0 || s.stamped[i] {
 			score.CreatedAt = receivedAt
+			s.stamped[i] = true
 		}
 		_, err = tx.Exec(
 			`INSERT INTO scores (
