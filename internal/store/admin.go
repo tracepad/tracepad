@@ -736,6 +736,10 @@ type UserDataErase struct {
 
 // weight is the traces the chunk may take, its Limit (spec 043 #35): a floor,
 // as a trace delete's is, since each takes its observations and scores with it.
+// The roll budget (spec 047 #2, #22) can only make a chunk smaller than its
+// Limit, never larger, so the floor holds. The budget bounds the chunk's own
+// share of the transaction; the window may add up to WindowRows of other
+// jobs beside it, as it does beside any job of this weight.
 func (e *UserDataErase) weight() int { return e.Limit }
 
 func (e *UserDataErase) apply(tx *sql.Tx) error {
