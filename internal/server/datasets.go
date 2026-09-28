@@ -316,6 +316,9 @@ func (s *Server) handleCreateItems(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "no items in the request")
 		return
 	}
+	if refuseOverItemCap(w, len(requests), "items") {
+		return
+	}
 
 	write := &store.DatasetItemsWrite{
 		ProjectID: project.ID,

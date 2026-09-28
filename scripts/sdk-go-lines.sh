@@ -8,7 +8,8 @@
 # and a budget per spec would be a budget per PR; spec 036 #8 raised it to
 # 2,100 for trace deletion, spec 040 #13 to 2,350 for `tracepadtest`, spec
 # 042 #6 to 2,450 for the cost and bounds, #11 and #12 to 2,500 for its review,
-# and spec 033 #18 to 2,575 for the key and the path.
+# spec 033 #18 to 2,575 for the key and the path, and spec 033 #19 to 2,600
+# for writing a long item list in batches.
 #
 # What it counts is the application — `tracepadtest` and the hook it opens
 # under internal/ included; the tests, the e2e package and the programs
@@ -20,7 +21,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BUDGET="${1:-2575}"
+BUDGET="${1:-2600}"
 
 cd "$ROOT"
 

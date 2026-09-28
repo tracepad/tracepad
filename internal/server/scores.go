@@ -90,6 +90,9 @@ func (s *Server) handleCreateScores(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "no scores in the request")
 		return
 	}
+	if refuseOverItemCap(w, len(requests), "scores") {
+		return
+	}
 
 	now := time.Now().UnixNano()
 	write := &store.ScoreWrite{ProjectID: project.ID, Scores: make([]*store.Score, 0, len(requests))}

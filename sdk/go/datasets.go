@@ -3,6 +3,7 @@ package tracepad
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"iter"
 	"net/url"
 	"strconv"
@@ -72,20 +73,53 @@ func (d *Dataset) Create(ctx context.Context, description string, metadata any) 
 	return object(answer), nil
 }
 
+// maxItemsPerWrite is the most items one POST …/items takes (spec 014 #34).
+const maxItemsPerWrite = 10_000
+
 // PutItems pushes the cases whole and reports the version and how many
 // changed. The same cases again write nothing and leave the version where
-// it was (changed == 0), so this belongs at the top of every CI run.
+// it was (changed == 0), so this belongs at the top of every CI run. A list
+// longer than the 10,000 items one request takes is sent as consecutive
+// writes of that many, each its own version (spec 018 #15): version is the
+// last one's, changed the sum, and a failure leaves the writes before it in
+// place.
 func (d *Dataset) PutItems(ctx context.Context, items []Item) (version, changed int, err error) {
 	if items == nil {
 		items = []Item{}
 	}
-	answer, err := post(ctx, d.path+"/items", items)
-	if err != nil {
-		return 0, 0, err
+	if len(items) > maxItemsPerWrite {
+		if err := refuseRepeatedIDs(items); err != nil {
+			return 0, 0, err
+		}
 	}
-	v, _ := answer["version"].(float64)
-	n, _ := answer["changed"].(float64)
-	return int(v), int(n), nil
+	// An empty list is sent all the same: the server says what is wrong.
+	for start := 0; start < max(len(items), 1); start += maxItemsPerWrite {
+		answer, err := post(ctx, d.path+"/items", items[start:min(start+maxItemsPerWrite, len(items))])
+		if err != nil {
+			return 0, 0, err
+		}
+		v, _ := answer["version"].(float64)
+		n, _ := answer["changed"].(float64)
+		version, changed = int(v), changed+int(n)
+	}
+	return version, changed, nil
+}
+
+// refuseRepeatedIDs checks a list that goes out in several writes: one
+// request refuses an id given twice, and split across two the second would
+// quietly become an edit of the first.
+func refuseRepeatedIDs(items []Item) error {
+	seen := make(map[string]int, len(items))
+	for i, item := range items {
+		if item.ID == "" {
+			continue
+		}
+		if first, repeated := seen[item.ID]; repeated {
+			return fmt.Errorf("tracepad: PutItems: the item at index %d repeats id %s of the item at index %d", i, item.ID, first)
+		}
+		seen[item.ID] = i
+	}
+	return nil
 }
 
 // CurrentVersion asks Items for the dataset as it is now rather than at a

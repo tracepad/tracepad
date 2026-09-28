@@ -264,6 +264,36 @@ describe('the dataset', () => {
     expect(Object.keys((calls[0]!.body as unknown[])[0] as object)).toEqual(['id', 'input', 'expected_output']);
   });
 
+  test('putItems sends a long list in writes the server takes, in order', async () => {
+    // The server takes at most 10,000 items a request (spec 014 #34).
+    const answers = [{ version: 5, changed: 10_000 }, { version: 5, changed: 0 }, { version: 6, changed: 1 }];
+    const calls = fakeFetch(() => ({ body: answers.shift() }));
+    tracepad.init({ host: HOST, key: KEY, export: false });
+    const cases = Array.from({ length: 20_001 }, (_, n) => ({ input: n }));
+    expect(await tracepad.dataset('golden').putItems(cases)).toEqual([6, 10_001]);
+    expect(calls.map((c) => (c.body as unknown[]).length)).toEqual([10_000, 10_000, 1]);
+    expect(calls.flatMap((c) => c.body as unknown[])).toEqual(cases);
+  });
+
+  test('putItems refuses a long list that repeats an id, sending nothing', async () => {
+    // One request would be refused whole for it; split, the second would
+    // quietly become an edit of the first.
+    const calls = fakeFetch(() => ({ body: { version: 1, changed: 1 } }));
+    tracepad.init({ host: HOST, key: KEY, export: false });
+    const cases: tracepad.Item[] = Array.from({ length: 10_001 }, (_, n) => ({ input: n }));
+    cases[3]!.id = 'a';
+    cases[10_000]!.id = 'a';
+    await expect(tracepad.dataset('golden').putItems(cases)).rejects.toThrow(/index 10000 .* index 3/);
+    expect(calls).toEqual([]);
+  });
+
+  test('putItems sends an empty list for the server to refuse', async () => {
+    const calls = fakeFetch(() => ({ status: 400, body: { error: 'no items in the request' } }));
+    tracepad.init({ host: HOST, key: KEY, export: false });
+    await expect(tracepad.dataset('golden').putItems([])).rejects.toThrow(/no items/);
+    expect(calls.map((c) => c.body)).toEqual([[]]);
+  });
+
   test('create, runs and delete are the endpoints, and the name is echoed', async () => {
     const calls = fakeFetch(() => ({ body: { runs: [{ id: 'r' }], next_cursor: null } }));
     tracepad.init({ host: HOST, key: KEY, export: false });

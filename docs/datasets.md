@@ -163,7 +163,11 @@ and never otherwise.
 
 - A batch is **one tick**, however many items it carries. `version` in the
   response is the dataset's version after the write, `changed` is how many
-  items produced a row.
+  items produced a row. A batch holds at most **10,000** items; a longer one
+  is a `413` (`this request carries N items; the server takes at most 10000
+  per request — send them in batches`) and writes nothing. The SDKs' item
+  push and `tracepad datasets push` send a longer list as consecutive writes
+  of 10,000, each its own tick.
 - A `POST` whose items all say what is stored already writes nothing and
   leaves the version where it was: `"changed": 0`. Equality is on the JSON
   value of `input`, `expected_output` and `metadata` plus the source pair:
@@ -695,5 +699,5 @@ deleting a run says what happens to its traces before it happens.
 | `401` | Unknown credentials. |
 | `404` | No such dataset, item, or run in this project; an item already archived at the current version. |
 | `409` | A run closed twice; a run id that already exists in another dataset. |
-| `413` | The body is over `TRACEPAD_MAX_BODY_BYTES`. |
+| `413` | The body is over `TRACEPAD_MAX_BODY_BYTES`, or an array holds more than 10,000 items. |
 | `429` | The write queue is saturated; retry after the `Retry-After` delay. |

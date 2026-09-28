@@ -138,6 +138,53 @@ func TestDatasetsPushTakesBothFileShapes(t *testing.T) {
 	}
 }
 
+// A file longer than the 10,000 items one request takes goes as consecutive
+// writes, each its own version (spec 014 #34); the answer is the last version
+// and the sum of the changes, in the one shape a single write has.
+func TestDatasetsPushSendsALongFileInWritesTheServerTakes(t *testing.T) {
+	h := newHarness(t)
+	var lines []string
+	for i := range 20_001 {
+		lines = append(lines, fmt.Sprintf(`{"input": %d}`, i))
+	}
+	cases := strings.Join(lines, "\n")
+
+	got := h.pushCases(t, "golden", cases, ".jsonl")
+	if got.code != ExitOK || !strings.Contains(got.stdout, "version 3: 20001 items changed, 20001 in the batch, sent as 3 writes") {
+		t.Fatalf("push = %+v", got)
+	}
+	path := filepath.Join(t.TempDir(), "cases.jsonl")
+	if err := os.WriteFile(path, []byte(cases), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	asJSON := h.run(t.Context(), false, "datasets", "push", "golden", "--file", path)
+	written, err := decode[struct {
+		IDs     []string `json:"ids"`
+		Version int      `json:"version"`
+		Changed int      `json:"changed"`
+	}](json.RawMessage(asJSON.stdout))
+	// The cases carry no ids, so the second push adds them all again.
+	if err != nil || len(written.IDs) != 20_001 || written.Version != 6 || written.Changed != 20_001 {
+		t.Fatalf("json push = %d ids, version %d, changed %d, err %v", len(written.IDs), written.Version, written.Changed, err)
+	}
+
+	// One request refuses an id given twice; split, the second would quietly
+	// become an edit of the first — so the file is refused before anything
+	// is sent.
+	lines[3] = fmt.Sprintf(`{"id": %q, "input": 3}`, cliItemID(1))
+	lines[10_000] = fmt.Sprintf(`{"id": %q, "input": 10000}`, cliItemID(1))
+	got = h.pushCases(t, "golden", strings.Join(lines, "\n"), ".jsonl")
+	if got.code != ExitFailure || !strings.Contains(got.stderr, "the case at index 10000 repeats id "+cliItemID(1)+" of the case at index 3") {
+		t.Fatalf("repeated id = %+v", got)
+	}
+	shown, err := decode[struct {
+		Version int `json:"version"`
+	}](json.RawMessage(h.run(t.Context(), false, "datasets", "show", "golden").stdout))
+	if err != nil || shown.Version != 6 {
+		t.Errorf("version = %d after a refused file, want 6 (err %v)", shown.Version, err)
+	}
+}
+
 // `datasets show --json` is the dataset's export, so it walks every page: a
 // file that looks complete and is not would be worse than no export at all.
 func TestDatasetsShowJSONWalksEveryPage(t *testing.T) {

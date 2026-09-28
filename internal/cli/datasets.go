@@ -269,28 +269,83 @@ func (r *run) datasetsPush(ctx context.Context, args []string) error {
 
 	// One POST for the batch, because the version clock ticks once for it:
 	// a file sent item by item would leave a version per case and no way to
-	// name the state the file describes (#5).
-	body, err := r.api.Post(ctx, "/api/v1/datasets/"+url.PathEscape(name)+"/items", items)
-	if err != nil {
-		return err
+	// name the state the file describes (#5). A file longer than one request
+	// takes goes as the fewest writes that carry it (#34).
+	if len(items) > maxItemsPerWrite {
+		if err := refuseRepeatedIDs(items); err != nil {
+			return err
+		}
+	}
+	var written itemsWritten
+	writes := 0
+	for start := 0; start < len(items); start += maxItemsPerWrite {
+		chunk := items[start:min(start+maxItemsPerWrite, len(items))]
+		body, err := r.api.Post(ctx, "/api/v1/datasets/"+url.PathEscape(name)+"/items", chunk)
+		if err != nil {
+			if start > 0 {
+				return fmt.Errorf("%w (the first %d cases are written, at version %d)",
+					err, start, written.Version)
+			}
+			return err
+		}
+		answer, err := decode[itemsWritten](body)
+		if err != nil {
+			return err
+		}
+		written.IDs = append(written.IDs, answer.IDs...)
+		written.Version, written.Changed = answer.Version, written.Changed+answer.Changed
+		writes++
 	}
 	if r.wantJSON() {
-		return r.emit(body)
-	}
-	written, err := decode[struct {
-		IDs     []string `json:"ids"`
-		Version int      `json:"version"`
-		Changed int      `json:"changed"`
-	}](body)
-	if err != nil {
-		return err
+		encoded, err := json.Marshal(written)
+		if err != nil {
+			return err
+		}
+		return r.emit(encoded)
 	}
 	if written.Changed == 0 {
 		fmt.Fprintf(r.opt.Stdout, "unchanged at version %d\n", written.Version)
 		return nil
 	}
-	fmt.Fprintf(r.opt.Stdout, "version %d: %s changed, %d in the batch\n",
+	fmt.Fprintf(r.opt.Stdout, "version %d: %s changed, %d in the batch",
 		written.Version, plural(written.Changed, "item"), len(written.IDs))
+	if writes > 1 {
+		fmt.Fprintf(r.opt.Stdout, ", sent as %d writes", writes)
+	}
+	fmt.Fprintln(r.opt.Stdout)
+	return nil
+}
+
+// itemsWritten is what POST …/items answers, and what push answers for a
+// file it sent as several writes: every id, the last version, every change.
+type itemsWritten struct {
+	IDs     []string `json:"ids"`
+	Version int      `json:"version"`
+	Changed int      `json:"changed"`
+}
+
+// maxItemsPerWrite is the most items the server takes in one POST …/items
+// (spec 014 #34).
+const maxItemsPerWrite = 10_000
+
+// refuseRepeatedIDs checks a file that goes out in several writes: one
+// request refuses an id given twice, and split across two the second would
+// quietly become an edit of the first. A case that is not an object is left
+// for the server to refuse.
+func refuseRepeatedIDs(items []json.RawMessage) error {
+	seen := make(map[string]int, len(items))
+	for i, item := range items {
+		var fields struct {
+			ID string `json:"id"`
+		}
+		if json.Unmarshal(item, &fields) != nil || fields.ID == "" {
+			continue
+		}
+		if first, repeated := seen[fields.ID]; repeated {
+			return fmt.Errorf("the case at index %d repeats id %s of the case at index %d", i, fields.ID, first)
+		}
+		seen[fields.ID] = i
+	}
 	return nil
 }
 

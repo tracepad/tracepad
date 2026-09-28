@@ -99,7 +99,9 @@ tracepad runs finish <run-id>
   `GET /api/v1/openapi.json`. Unknown fields are refused by name.
 - `datasets push` is one batch and one version tick, and an unchanged file
   changes nothing. Give each case an `id` derived from its natural key, so a
-  second push edits instead of duplicating.
+  second push edits instead of duplicating. A request takes at most 10,000
+  items (or scores); `push` sends a longer file as several writes, one tick
+  each.
 - `runs create --json` answers with the run's id and the dataset version it
   pinned. Between `create` and `finish`, the application runs each case with
   the run id and the case id stamped on its trace, and posts its scores.

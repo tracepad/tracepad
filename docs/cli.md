@@ -590,6 +590,14 @@ version 12: 3 items changed, 200 in the batch
 unchanged at version 12
 ```
 
+A file of more than 10,000 cases — the most one request takes — goes as the
+fewest writes of up to 10,000 that carry it, each its own version; the line
+ends `sent as N writes`, and `--json` answers the one shape a single write
+has, with every id, the last version and the sum of the changes. A write that
+fails says how many cases before it are written; pushing the file again
+finishes the job when every case carries an `id`. An `id` the file gives twice
+is refused before anything is sent.
+
 `runs ls` without a dataset reads `GET /api/v1/runs` — the whole project's
 runs, newest first, with a dataset column the per-dataset table has no need
 of. With one it reads that dataset's own listing.

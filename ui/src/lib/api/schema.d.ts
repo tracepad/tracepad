@@ -611,7 +611,7 @@ export interface paths {
         put?: never;
         /**
          * Write one score or an array of them
-         * @description An array is all-or-nothing: one transaction, and one 400 naming the first invalid item. A 201 means the rows are on disk. No Content-Type is required.
+         * @description An array is all-or-nothing: one transaction, and one 400 naming the first invalid item. An array holds at most 10,000 scores; a longer one is a 413 before any item is validated, and a client sends it in batches. A 201 means the rows are on disk. No Content-Type is required.
          */
         post: operations["createScores"];
         delete?: never;
@@ -807,7 +807,7 @@ export interface paths {
         put?: never;
         /**
          * Add or edit items, one or an array, one version tick for the batch
-         * @description All or nothing. The dataset's version advances by exactly one if any item in the batch changed and not at all if none did, so re-posting the same cases is idempotent; `changed` says how many produced a row. An item's id is the idempotency key; an edit is a new row of the same id, and the old one stays readable at every earlier version.
+         * @description All or nothing. The dataset's version advances by exactly one if any item in the batch changed and not at all if none did, so re-posting the same cases is idempotent; `changed` says how many produced a row. An array holds at most 10,000 items; a longer one is a 413 before any item is validated, and a client sends it as several writes, each its own version. An item's id is the idempotency key; an edit is a new row of the same id, and the old one stays readable at every earlier version.
          */
         post: operations["createDatasetItems"];
         delete?: never;
@@ -4250,6 +4250,15 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            /** @description The body exceeded TRACEPAD_MAX_BODY_BYTES, or the array holds more than 10,000 scores (`this request carries N scores; the server takes at most 10000 per request — send them in batches`), refused whole with nothing stored */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             429: components["responses"]["Busy"];
             503: components["responses"]["ServiceUnavailable"];
         };
@@ -4811,7 +4820,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            /** @description The body exceeded TRACEPAD_MAX_BODY_BYTES */
+            /** @description The body exceeded TRACEPAD_MAX_BODY_BYTES, or the array holds more than 10,000 items (`this request carries N items; the server takes at most 10000 per request — send them in batches`), refused whole with nothing stored */
             413: {
                 headers: {
                     [name: string]: unknown;

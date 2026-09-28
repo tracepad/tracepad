@@ -192,6 +192,26 @@ func (s *Server) readJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 	return true
 }
 
+// maxItemsPerWrite bounds the rows of one array write — scores, dataset items
+// (spec 043 #36). The body cap bounds bytes, and half a million minimal scores
+// fit in it; each array is one transaction, so its count is how long it holds
+// the only writer. 10,000 commits in under a second, and is a hundred times
+// the batch the SDKs send scores in.
+const maxItemsPerWrite = 10_000
+
+// refuseOverItemCap answers 413 for an array over maxItemsPerWrite, naming the
+// count and the cap. It runs before any item is validated and before anything
+// is queued: the count is the refusal, whatever the rows hold.
+func refuseOverItemCap(w http.ResponseWriter, count int, kind string) bool {
+	if count <= maxItemsPerWrite {
+		return false
+	}
+	writeError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf(
+		"this request carries %d %s; the server takes at most %d per request — send them in batches",
+		count, kind, maxItemsPerWrite))
+	return true
+}
+
 // readAPIBody reads and size-caps a request body (spec 003, API contract).
 func (s *Server) readAPIBody(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
 	body, err := readBody(w, r, s.maxBodyBytes)

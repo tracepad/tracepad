@@ -1173,13 +1173,13 @@
       "post": {
         "tags": ["scores"],
         "summary": "Write one score or an array of them",
-        "description": "An array is all-or-nothing: one transaction, and one 400 naming the first invalid item. A 201 means the rows are on disk. No Content-Type is required.",
+        "description": "An array is all-or-nothing: one transaction, and one 400 naming the first invalid item. An array holds at most 10,000 scores; a longer one is a 413 before any item is validated, and a client sends it in batches. A 201 means the rows are on disk. No Content-Type is required.",
         "operationId": "createScores",
         "x-tracepad-scope": "ingest",
         "requestBody": {"required": true, "content": {"application/json": {"schema": {
           "oneOf": [
             {"$ref": "#/components/schemas/ScoreInput"},
-            {"type": "array", "items": {"$ref": "#/components/schemas/ScoreInput"}}
+            {"type": "array", "items": {"$ref": "#/components/schemas/ScoreInput"}, "maxItems": 10000}
           ]
         }}}},
         "responses": {
@@ -1191,6 +1191,8 @@
           "400": {"$ref": "#/components/responses/BadRequest"},
           "401": {"$ref": "#/components/responses/Unauthorized"},
           "503": {"$ref": "#/components/responses/ServiceUnavailable"},
+          "413": {"description": "The body exceeded TRACEPAD_MAX_BODY_BYTES, or the array holds more than 10,000 scores (`this request carries N scores; the server takes at most 10000 per request — send them in batches`), refused whole with nothing stored",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
           "429": {"$ref": "#/components/responses/Busy"}
         }
       },
@@ -1567,14 +1569,14 @@
       "post": {
         "tags": ["datasets"],
         "summary": "Add or edit items, one or an array, one version tick for the batch",
-        "description": "All or nothing. The dataset's version advances by exactly one if any item in the batch changed and not at all if none did, so re-posting the same cases is idempotent; `changed` says how many produced a row. An item's id is the idempotency key; an edit is a new row of the same id, and the old one stays readable at every earlier version.",
+        "description": "All or nothing. The dataset's version advances by exactly one if any item in the batch changed and not at all if none did, so re-posting the same cases is idempotent; `changed` says how many produced a row. An array holds at most 10,000 items; a longer one is a 413 before any item is validated, and a client sends it as several writes, each its own version. An item's id is the idempotency key; an edit is a new row of the same id, and the old one stays readable at every earlier version.",
         "operationId": "createDatasetItems",
         "x-tracepad-scope": "write",
         "parameters": [{"$ref": "#/components/parameters/DatasetName"}],
         "requestBody": {"required": true, "content": {"application/json": {"schema": {
           "oneOf": [
             {"$ref": "#/components/schemas/DatasetItemInput"},
-            {"type": "array", "items": {"$ref": "#/components/schemas/DatasetItemInput"}}
+            {"type": "array", "items": {"$ref": "#/components/schemas/DatasetItemInput"}, "maxItems": 10000}
           ]
         }}}},
         "responses": {
@@ -1590,7 +1592,7 @@
           "400": {"$ref": "#/components/responses/BadRequest"},
           "401": {"$ref": "#/components/responses/Unauthorized"},
           "503": {"$ref": "#/components/responses/ServiceUnavailable"},
-          "413": {"description": "The body exceeded TRACEPAD_MAX_BODY_BYTES",
+          "413": {"description": "The body exceeded TRACEPAD_MAX_BODY_BYTES, or the array holds more than 10,000 items (`this request carries N items; the server takes at most 10000 per request — send them in batches`), refused whole with nothing stored",
             "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
           "429": {"$ref": "#/components/responses/Busy"}
         }

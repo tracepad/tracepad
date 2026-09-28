@@ -86,6 +86,46 @@ def test_put_items_sends_dicts_and_items_as_one_body(store: Store) -> None:
     assert body == [{"id": CASE, "input": {"q": 1}}, {"id": OTHER, "input": {"q": 2}}]
 
 
+def test_put_items_sends_a_long_list_in_writes_the_server_takes(store: Store) -> None:
+    # The server takes at most 10,000 items a request (spec 014 #34): a
+    # longer list goes as consecutive writes, in order, each its own version.
+    store.answers["/api/v1/datasets/golden/items"] = [
+        {"ids": [], "version": 5, "changed": 10_000},
+        {"ids": [], "version": 5, "changed": 0},
+        {"ids": [], "version": 6, "changed": 1},
+    ]
+    cases = [{"input": n} for n in range(20_001)]
+
+    version, changed = tracepad.dataset("golden").put_items(cases)
+
+    assert (version, changed) == (6, 10_001)
+    assert [len(body) for _, _, body, _ in store.calls] == [10_000, 10_000, 1]
+    assert [item for _, _, body, _ in store.calls for item in body] == cases
+
+
+def test_put_items_refuses_a_long_list_that_repeats_an_id(store: Store) -> None:
+    # One request would have been refused whole for it; split, the second
+    # would silently become an edit of the first.
+    cases = [{"input": n} for n in range(10_001)]
+    cases[3]["id"] = CASE
+    cases[10_000]["id"] = CASE
+
+    with pytest.raises(ValueError, match=r"index 10000 .* index 3"):
+        tracepad.dataset("golden").put_items(cases)
+
+    assert store.calls == []
+
+
+def test_put_items_sends_an_empty_list_for_the_server_to_refuse(store: Store) -> None:
+    store.answers["/api/v1/datasets/golden/items"] = TracepadHTTPError(
+        400, '{"error": "no items in the request"}')
+
+    with pytest.raises(TracepadHTTPError, match="no items"):
+        tracepad.dataset("golden").put_items([])
+
+    assert [body for _, _, body, _ in store.calls] == [[]]
+
+
 def test_items_follow_the_cursor_to_the_end(store: Store) -> None:
     # The rows are the store's own shape: it calls the version `version`, and
     # sends fields an `Item` has no room for.

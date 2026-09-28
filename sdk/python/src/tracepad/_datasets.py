@@ -69,11 +69,22 @@ class Dataset:
         """Push the cases whole, and report `(version, changed)`.
 
         The same cases again write nothing and leave the version where it was
-        (`changed == 0`), so this belongs at the top of every CI run.
+        (`changed == 0`), so this belongs at the top of every CI run. A list
+        longer than the 10,000 items one request takes is sent as consecutive
+        writes of that many, each its own version (spec 018 #15): `version` is
+        the last one's, `changed` the sum, and a failure leaves the writes
+        before it in place.
         """
         body = [item if isinstance(item, dict) else item.body() for item in items]
-        answer = self._call("POST", "/items", body=body)
-        return int(answer["version"]), int(answer["changed"])
+        if len(body) > MAX_ITEMS_PER_WRITE:
+            _refuse_repeated_ids(body)
+        version = changed = 0
+        # An empty list is sent all the same: the server says what is wrong.
+        for start in range(0, max(len(body), 1), MAX_ITEMS_PER_WRITE):
+            answer = self._call("POST", "/items", body=body[start:start + MAX_ITEMS_PER_WRITE])
+            version = int(answer["version"])
+            changed += int(answer["changed"])
+        return version, changed
 
     def items(self, version: int | None = None) -> Iterator[Item]:
         """The cases at a version — the run's, not "the current one"."""
@@ -103,6 +114,25 @@ class Dataset:
 
     def _call(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
         return request(_config.current(), method, self._path + path, **kwargs).body or {}
+
+
+#: The most items one `POST …/items` takes (spec 014 #34).
+MAX_ITEMS_PER_WRITE = 10_000
+
+
+def _refuse_repeated_ids(body: list[dict[str, Any]]) -> None:
+    """One request refuses an id given twice; split across two, the second
+    would quietly become an edit of the first. So the whole list is checked
+    before any of it is sent."""
+    seen: dict[str, int] = {}
+    for index, item in enumerate(body):
+        id = item.get("id")
+        if id is None:
+            continue
+        if id in seen:
+            raise ValueError(f"tracepad: put_items: the item at index {index} "
+                             f"repeats id {id} of the item at index {seen[id]}")
+        seen[id] = index
 
 
 def dataset(name: str) -> Dataset:
