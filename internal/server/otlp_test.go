@@ -34,6 +34,7 @@ type harness struct {
 	dbPath  string // the database file of store
 	writer  *store.Writer
 	sweeper *store.Sweeper
+	eraser  *store.Eraser
 	project *store.Project
 	// arrival is the IngestedAt h.seed stamps, in Unix nanoseconds. Zero
 	// leaves it to the store, which is the wall clock: fine for a test that
@@ -79,12 +80,19 @@ func newHarness(t *testing.T, cfg *config.Config, writerOpts store.WriterOptions
 	// The sweeper is built but never started: the tests that care drive a
 	// pass by hand, and the rest must not have rows disappear under them.
 	sweeper := st.NewSweeper(writer, store.SweepOptions{Interval: cfg.SweepInterval})
+	// The erasure worker runs, as it does in a server: a confirmed erasure
+	// is a task it takes (spec 047 #6), and a test that waits for one asks
+	// with `?wait=`. Closed before the writer, as the server closes it.
+	eraser := st.NewEraser(writer, store.EraserOptions{})
+	eraser.Start()
+	t.Cleanup(func() { eraser.Close() })
 	return &harness{
 		server:  New(cfg, "test", st, writer, sweeper),
 		store:   st,
 		dbPath:  dbPath,
 		writer:  writer,
 		sweeper: sweeper,
+		eraser:  eraser,
 		project: project,
 	}
 }

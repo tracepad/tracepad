@@ -421,7 +421,7 @@ func TestErasureRemovesTheUserFromTheRollup(t *testing.T) {
 	userCorpus(t, h)
 
 	rec := h.call(t, "DELETE",
-		"/api/v1/projects/"+h.project.ID+"/users/alice/data?confirm=alice", nil)
+		"/api/v1/projects/"+h.project.ID+"/users/alice/data?confirm=alice&wait=30", nil)
 	expectStatus(t, rec, 200)
 
 	expectStatus(t, h.get(t, "/api/v1/users/alice"), 404)

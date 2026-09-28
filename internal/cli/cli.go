@@ -309,7 +309,9 @@ and asks you to type the name back; --yes answers that for a script:
   tracepad retention set  [--days N | --forever] [--raw-days N | --raw-follow]
                           [--stats-days N | --stats-forever]
                           [--media store|placeholder] [--project ID] [--yes]
-  tracepad users rm-data  <user-id> [--project ID] [--yes]
+  tracepad users rm-data  <user-id> [--project ID] [--yes] [--no-wait]
+  tracepad users erasure  <erasure-id> [--project ID]
+  tracepad users erasures [--project ID]
 
 No project key lists, mints or revokes keys (spec 045): the keys commands take
 the admin token, and an owner or editor can do the same in the web interface,

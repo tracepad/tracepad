@@ -143,7 +143,7 @@ func TestUsersRejectsAnUnknownSubcommand(t *testing.T) {
 	if got.code != ExitUsage {
 		t.Fatalf("exit = %d, want %d (stderr: %s)", got.code, ExitUsage, got.stderr)
 	}
-	if !strings.Contains(got.stderr, "ls, show or rm-data") {
-		t.Errorf("stderr = %q, want it to name the three subcommands", got.stderr)
+	if !strings.Contains(got.stderr, "ls, show, rm-data, erasure or erasures") {
+		t.Errorf("stderr = %q, want it to name the five subcommands", got.stderr)
 	}
 }

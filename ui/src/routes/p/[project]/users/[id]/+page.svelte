@@ -7,7 +7,14 @@
 	import { untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { ApiError, api, type DryRun, type Stats, type User } from '$lib/api/client.svelte';
+	import {
+		ApiError,
+		api,
+		type DryRun,
+		type Erasure,
+		type Stats,
+		type User
+	} from '$lib/api/client.svelte';
 	import { presetRange, readBucket, readRange, type Range } from '$lib/api/range';
 	import { breakdown, buildSeries, type StatsBucket } from '$lib/api/stats';
 	import { readTab, USER_TABS, userPageSearch } from '$lib/api/users';
@@ -21,7 +28,7 @@
 	import { rememberedRange, rememberRange } from '$lib/range.svelte';
 	import UserSessionsTab from '$lib/components/users/UserSessionsTab.svelte';
 	import UserTracesTab from '$lib/components/users/UserTracesTab.svelte';
-	import { Erasure, erased } from '$lib/erasure';
+	import { ERASE_WAIT_SECONDS, ErasureWatch, describe, settle } from '$lib/erasure.svelte';
 	import { cost, count, duration, middleEllipsis, timestamp } from '$lib/format';
 	import { href, project } from '$lib/project.svelte';
 
@@ -64,8 +71,37 @@
 	let missing = $state(false);
 	let failure = $state<string | null>(null);
 	let erasing = $state(false);
-	/** Whether the last confirmed erasure is still running (spec 035 #14). */
-	const erasure = new Erasure();
+	/**
+	 * The erasure of this user under way, if any: the dialog's, or one the
+	 * dry run names on the way in, so a reload still shows it (spec 047 #13,
+	 * #18). The page stays while it runs, rather than leave as if the user
+	 * were gone.
+	 */
+	const watch = new ErasureWatch();
+
+	// An editor's page asks the server whether this user is being erased:
+	// the dry run says so (#13), and the erasure's own resource says how far.
+	// A viewer may not ask either (spec 047 #14), and is offered no erasure.
+	$effect(() => {
+		const who = id;
+		const current = project.id;
+		if (!project.editor || !current) return;
+		const controller = new AbortController();
+		void untrack(async () => {
+			try {
+				const preview = await api.eraseUserData(current, who);
+				const running = (preview as DryRun).running;
+				if (controller.signal.aborted || !running) return;
+				watch.follow(current, await api.erasure(current, running.id, controller.signal));
+			} catch {
+				// The banner is a courtesy; the page is the user's data.
+			}
+		});
+		return () => {
+			controller.abort();
+			watch.stop();
+		};
+	});
 
 	/**
 	 * The question this page asks, as a value that compares. Not the objects
@@ -169,12 +205,16 @@
 	async function erase(confirm?: string): Promise<DryRun | string> {
 		const current = project.id;
 		if (!current) throw new ApiError(0, 'there is no project on screen to erase from');
-		// Still running on the server: the page stays, and says so, rather
-		// than leaving as if the user were gone.
-		const answer = await erasure.ask(id, confirm, () => api.eraseUserData(current, id, confirm));
-		if (typeof answer === 'string') return answer;
-		if ('dry_run' in answer && answer.dry_run) return answer as DryRun;
-		return erased(id, (answer as { deleted: Record<string, number> }).deleted);
+		const answer = await api.eraseUserData(
+			current,
+			id,
+			confirm,
+			confirm === undefined ? undefined : ERASE_WAIT_SECONDS
+		);
+		if (answer.dry_run) return answer as DryRun;
+		// Still running on the server: the page stays, and says how far it
+		// is, rather than leaving as if the user were gone.
+		return settle(current, id, answer as Erasure, watch);
 	}
 
 	const tabClass = (active: boolean) =>
@@ -221,10 +261,26 @@
 			preview={() => erase()}
 			execute={(confirm) => erase(confirm) as Promise<string>}
 			ondone={() => {
-				if (!erasure.running) goto(href('/users'));
+				if (!watch.running) goto(href('/users'));
 			}}
 		/>
 	</div>
+{/if}
+
+{#if watch.current}
+	<!-- An erasure of this user under way, or how it ended while the page was
+	     open (spec 047 #13, #18). -->
+	<p
+		role="status"
+		data-testid="erasure-progress"
+		class={[
+			'border-border flex items-center gap-2 border-b px-4 py-2 text-sm',
+			watch.current.state === 'failed' ? 'text-danger bg-danger-soft' : 'bg-surface'
+		]}
+	>
+		{#if watch.running}<LoaderCircle class="size-4 shrink-0 animate-spin" />{/if}
+		{describe(watch.current, id)}
+	</p>
 {/if}
 
 {#if failure}

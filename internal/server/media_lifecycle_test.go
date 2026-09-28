@@ -321,7 +321,7 @@ func TestLangfuseMediaUploadAfterDeletion(t *testing.T) {
 				expectStatus(t, h.call(t, "DELETE", "/api/v1/traces/"+probeTrace+"?confirm="+probeTrace, nil), 200)
 			case "erase":
 				expectStatus(t, h.call(t, "DELETE",
-					"/api/v1/projects/"+h.project.ID+"/users/u1/data?confirm=u1", nil), 200)
+					"/api/v1/projects/"+h.project.ID+"/users/u1/data?confirm=u1&wait=30", nil), 200)
 			}
 
 			if code := h.putRefused(t, *forDeleted, -1); code != http.StatusForbidden {
@@ -393,7 +393,7 @@ func TestLangfuseMediaDeletionInRounds(t *testing.T) {
 				}
 			case "erase":
 				expectStatus(t, h.call(t, "DELETE",
-					"/api/v1/projects/"+h.project.ID+"/users/u1/data?confirm=u1", nil), 200)
+					"/api/v1/projects/"+h.project.ID+"/users/u1/data?confirm=u1&wait=30", nil), 200)
 			}
 			var voided int
 			if err := h.sqlOf(t).QueryRow(`SELECT COUNT(*) FROM media_voided WHERE project_id = ?`,

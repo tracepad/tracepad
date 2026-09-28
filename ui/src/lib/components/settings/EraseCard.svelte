@@ -1,6 +1,15 @@
 <script lang="ts">
-	import { api, type DryRun, type Project } from '$lib/api/client.svelte';
-	import { Erasure, erased } from '$lib/erasure';
+	import { api, type DryRun, type Erasure, type Project } from '$lib/api/client.svelte';
+	import {
+		ERASE_WAIT_SECONDS,
+		ERASURE_POLL_MS,
+		ErasureWatch,
+		describe,
+		ended,
+		settle,
+		stage
+	} from '$lib/erasure.svelte';
+	import { count, relative } from '$lib/format';
 	import ConfirmCard from '../ConfirmCard.svelte';
 	import Card from './Card.svelte';
 	import ViewerNote from './ViewerNote.svelte';
@@ -12,22 +21,71 @@
 	// the preview's note, rather than this screen's.
 	//
 	// The echo here is the user id, because the user is what is being erased.
+	// A confirmed erasure is a task on the server (spec 047 #6): answered at
+	// once when it is small, followed here while it runs, and listed below
+	// with the project's others, so a reload still shows what is running
+	// (#14, #18).
 
 	let { current, readOnly = false }: { current: Project; readOnly?: boolean } = $props();
 
 	let userID = $state('');
 	const target = $derived(userID.trim());
+	/** The user the followed erasure is of: the field may have moved on. */
+	let erasing = $state('');
+	/**
+	 * Whether the erasure outlasted the dialog's wait, and so has a line of
+	 * its own here; one that ended within it is the dialog's sentence.
+	 */
+	let following = $state(false);
 
-	const erasure = new Erasure();
+	const watch = new ErasureWatch();
+	let recent = $state.raw<Erasure[]>([]);
 
 	async function erase(confirm?: string): Promise<DryRun | string> {
-		const answer = await erasure.ask(target, confirm, () =>
-			api.eraseUserData(current.id, target, confirm)
+		const user = target;
+		const answer = await api.eraseUserData(
+			current.id,
+			user,
+			confirm,
+			confirm === undefined ? undefined : ERASE_WAIT_SECONDS
 		);
-		if (typeof answer === 'string') return answer;
-		if ('dry_run' in answer && answer.dry_run) return answer as DryRun;
-		return erased(target, (answer as { deleted: Record<string, number> }).deleted);
+		if (answer.dry_run) return answer as DryRun;
+		erasing = user;
+		following = !ended(answer as Erasure);
+		try {
+			return settle(current.id, user, answer as Erasure, watch);
+		} finally {
+			void list();
+		}
 	}
+
+	async function list() {
+		try {
+			recent = (await api.erasures(current.id)).erasures;
+		} catch {
+			// The listing is what is on the side; the erasure itself is the
+			// card's, and a listing that failed leaves the last one standing.
+		}
+	}
+
+	// The listing, on the way in and while anything in it is still running;
+	// and once more when the erasure this card follows ends.
+	$effect(() => {
+		if (readOnly) return;
+		void current.id;
+		void list();
+		return () => watch.stop();
+	});
+	const listed = $derived(recent.some((one) => !ended(one)));
+	$effect(() => {
+		if (!listed) return;
+		const timer = setInterval(() => void list(), ERASURE_POLL_MS);
+		return () => clearInterval(timer);
+	});
+	const followed = $derived(watch.current);
+	$effect(() => {
+		if (followed && ended(followed)) void list();
+	});
 </script>
 
 <Card
@@ -63,5 +121,46 @@
 					px-2 py-1 font-mono text-sm"
 			/>
 		</ConfirmCard>
+
+		{#if following && followed}
+			<p
+				role="status"
+				class={['mt-3 text-sm', { 'text-muted': !ended(followed) }, {
+					'text-ok': followed.state === 'done'
+				}, { 'text-danger': followed.state === 'failed' }]}
+				data-testid="erasure-progress"
+			>
+				{describe(followed, erasing)}
+			</p>
+		{/if}
+
+		{#if recent.length > 0}
+			<div class="mt-4">
+				<h4 class="text-subtle text-xs font-medium">Erasures of the last 30 days</h4>
+				<ul class="divide-border mt-1 divide-y text-sm" aria-label="Recent erasures">
+					{#each recent as one (one.id)}
+						<li class="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 py-1.5">
+							<code class="font-mono text-xs" title={one.id}>{one.id.slice(0, 8)}</code>
+							<span class={one.state === 'failed' ? 'text-danger' : ended(one) ? 'text-muted' : ''}>
+								{stage(one)}
+							</span>
+							<span class="text-muted tabular-nums">
+								{count(one.deleted.traces ?? 0)}
+								{(one.deleted.traces ?? 0) === 1 ? 'trace' : 'traces'}
+							</span>
+							<!-- The record names the user only while the erasure runs
+							     (spec 047 #9). -->
+							{#if one.user_id}
+								<span class="font-mono text-xs">{one.user_id}</span>
+							{/if}
+							<span class="text-subtle ml-auto text-xs">{relative(one.created_at)}</span>
+							{#if one.error}
+								<span class="text-danger basis-full text-xs">{one.error}</span>
+							{/if}
+						</li>
+					{/each}
+				</ul>
+			</div>
+		{/if}
 	{/if}
 </Card>

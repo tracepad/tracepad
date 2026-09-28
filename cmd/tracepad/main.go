@@ -204,6 +204,14 @@ func serve(args []string) error {
 	aggregator.Start()
 	defer aggregator.Close()
 
+	// The erasure worker writes through it too (spec 047 #10), and resumes
+	// at once an erasure the last stop interrupted (#12). A stop cancels it
+	// first thing, below: it does not wait for an erasure, which commits
+	// its progress with every job and resumes on the next start (#17).
+	eraser := st.NewEraser(writer, store.EraserOptions{})
+	eraser.Start()
+	defer eraser.Close()
+
 	srv := server.New(cfg, version, st, writer, sweeper)
 	// Sized for the read slots the server took, which is where the
 	// setting's default is settled (spec 043 #16).
@@ -231,6 +239,7 @@ func serve(args []string) error {
 	// its own leaves the connections it accepted still running handlers,
 	// and the deferred closes above must not run under them.
 	shutdown := func() error {
+		eraser.Close()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		return srv.Shutdown(shutdownCtx)

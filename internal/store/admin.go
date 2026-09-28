@@ -674,7 +674,7 @@ func (r *ProjectRestore) apply(tx *sql.Tx) error {
 // under the id, their observations, payloads and scores (spec 005 #7), the
 // session-only scores of their sessions (spec 044 #7) and every version of the
 // dataset items cut from them (#9). It is step 3 of an erasure; the raw
-// batches are the steps around it (`EraseUserData`).
+// batches are the steps around it (`runErasure`).
 //
 // One chunk per job, like the sweeper: the caller repeats while `More` says
 // so, so a user with a year of traffic does not hold the writer for the
@@ -713,6 +713,10 @@ type UserDataErase struct {
 	// would be past the window, and a frozen hour would be recomputed
 	// from what the sweep left of it.
 	Now int64
+	// Erasure is the erasure the chunk is a step of, whose row it records
+	// its counts and its tail on as it commits (spec 047 #12); nil for a
+	// chunk run on its own.
+	Erasure *chunkErasure
 
 	Counts DeleteCounts
 	// Hours are the hours this chunk emptied; the ones below the watermark
@@ -743,6 +747,13 @@ type UserDataErase struct {
 func (e *UserDataErase) weight() int { return e.Limit }
 
 func (e *UserDataErase) apply(tx *sql.Tx) error {
+	if err := e.erase(tx); err != nil || e.Erasure == nil {
+		return err
+	}
+	return e.Erasure.record(tx, e)
+}
+
+func (e *UserDataErase) erase(tx *sql.Tx) error {
 	e.Counts, e.CompactionRequested, e.IDs, e.Ingested, e.Updated = DeleteCounts{}, 0, nil, nil, nil
 	// The echo is the user id here, not a project name: it is the identity
 	// of what is being destroyed (spec 005 #8).

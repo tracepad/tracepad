@@ -123,8 +123,8 @@ is a number rather than a guess.
   forward and the totals shrink with it. A user whose last row goes leaves the
   listing entirely.
 - **Erasure.** `DELETE /api/v1/projects/{id}/users/{user_id}/data` deletes the
-  user's rows in both tables outright, in the same request that erases their
-  traces — see [admin.md](admin.md#erasing-a-users-data). They are *about*
+  user's rows in both tables outright, with each chunk of their traces the
+  erasure deletes — see [admin.md](admin.md#erasing-a-users-data). They are *about*
   the user, so they go rather than being recomputed: for an hour past the trace
   retention window there is nothing left to recompute them from. The
   project-wide `stats_hourly` for such a frozen hour goes on counting the

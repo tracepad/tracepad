@@ -104,6 +104,7 @@ bulk deletion), spec 043 (read slots, `WithoutCancel`, background contexts
 | 23 | **2026-09-28** (found in the second review of PR #131) — **A chunk prices the hours it considers, and a round the chunks it runs.** Amends #22 (b). `HourChunks` stops after as many chunks as its caller will run: an erasure job one, a bulk round `deleteRoundChunks`. #22 (b) held within a chunk only. The cut still ran over the whole read (501 rows for an erasure, 1,000 for a round), and after #22 (a) every hour it considered cost a scan of that hour's traces. So a user whose traces are spread thin over hundreds of hours made each chunk price hundreds of hours inside the writer's transaction, and a round could run the read slot past its deadline pricing hours it would never delete. A first hour cut at the limit is cut before it is priced. #1's "twice for a cut first hour" is corrected: an hour holding n > `Limit` of the user's traces is rolled by each of the ⌈n / `Limit`⌉ chunks it spans. Not changed: pricing an hour reads its trace rows (`observation_count` is not in `idx_traces_timestamp`), and the roll that follows reads the same rows and every observation under them. A trace costs a roll about 94 µs and a row lookup a few, and #22 (f)'s figures were measured with the pricing inside the transaction. Measured again, twice each, at a load average of 3–6, with a third profile: a user of 2,000 traces spread over 673 of the 720 hours, among 20,000 others'. That user took 7.9 s in 22 chunks, p50 135 ms, p99 158 ms. The first corpus took 22.0 s and 21.8 s in 59 chunks, p50 176 and 172 ms, p99 334 and 224 ms. The agent profile took 41.7 s and 39.9 s in 210 and 208 chunks, p50 112 ms both times, p99 299 and 149 ms. The medians hold from run to run and the tail does not: with 59 chunks the p99 is the second-slowest chunk, and one run of each dense profile put it over 250 ms. | The first review's thread on this was answered as fixed, and it was fixed only inside a chunk; the measured corpora never had a chunk consider more than about twenty hours. A covering index for the price would be one more index on `traces` to save a small share of a chunk. |
 | 24 | **2026-09-28** (found in the third review of PR #131) — **A price is capped, read where the rolls will read the watermark, and not asked of an hour that cannot fit.** Amends #22 (a), (e) and #23. (a) An hour's count stops once it has read enough traces to outweigh the budget on their own, `budget / 25 + 1` of them. Every row of the hour's range of `idx_traces_timestamp` matches, so the `LIMIT` bounds the scan and not only the answer. An hour that reaches the cap is past the budget, which is all the cut needs to know. (b) An hour at or past the watermark costs nothing only when it is priced inside the transaction that rolls, as an erasure chunk's are. A bulk round prices before its jobs run, and the aggregator may move the watermark past an hour before the chunk that holds it commits, so a round prices every hour. (c) Once a chunk's cost has reached the budget, the next hour is not priced: it cannot fit. (d) Corrects #22 (e): the users whose summaries a chunk recomputes are bounded by the budget past the first hour only. The first hour is taken whatever it costs, and its users are bounded by nothing, as before this spec. (e) `UserErasure` no longer carries a budget, since no caller set one; the job's `RollBudget` stays as the tests' seam. (f) Measured once more, at a load average of 2–5. The sparse user took 8.0 s, p50 135 ms, p99 168 ms. The first corpus took 21.6 s, p50 164 ms, p99 221 ms. The agent profile took 40.9 s, p50 113 ms, p99 406 ms. Over four runs of the agent profile its p99 was 239, 299, 149 and 406 ms, while its p50 stayed at 110–113 ms. The time is taken inside the job's `apply`, before the commit, so the tail is not the commit's checkpoint; what it is was not found | (a) A round priced up to about 51 hours in its read slot, and on a project of tens of thousands of traces an hour each price was that many row lookups, so a round that worked before could run out its read deadline and answer 503 before deleting anything. Inside an erasure chunk a dense first hour was scanned whole to learn a number past the budget. (b) Priced ahead at zero, an hour that became rollable before its chunk ran was rolled with nothing counting it, and a chunk of 500 traces over many such hours was bounded by nothing, which one hour a chunk had been. (c) A dense first hour made each job price, and then drop, the hour after it, and the next job priced it again. (d) The spec is the oracle, and it claimed a bound that the first hour escapes. |
 | 25 | **2026-09-28** (found in the fourth review of PR #131) — **What the wider index costs ingest, and the edges of the cut.** (a) Migration 0029's `idx_traces_user (project_id, user_id, timestamp)` is maintained by the `UPDATE` that sets a trace's `timestamp` on every export that touches it, anonymous traces included, where the old index was touched only when `user_id` changed. Measured by ingesting 40,000 traces, each in two exports of one span so the second updates a trace that is there, a quarter of them anonymous, at a load average of 3–4: 41.0 s and 40.1 s with the old index, 41.9 s and 42.1 s with the new, **3.4 %** more. (b) A trace with no start time reads as hour 0, as it did before this spec: its chunk prices and rolls an empty hour, a range with no rows, once. (c) `HourChunks` answers an error, not a panic, when the deletion costs it is given do not match the traces. (d) A round's pricing does not read the watermark it does not obey (#24 b). (e) Specs 023 #20 and 035 #19 say the budget counts the deletion of the chunk's own traces as well as its rolls | (a) The same `UPDATE` already maintains `idx_traces_timestamp` on that column and runs five subqueries over the trace's observations, so one more entry is a small share of it, and the erasure it pays for went from 19 minutes to 22 seconds. (b) Pricing and rolling an empty hour cost next to nothing, and the chunk's hours are a set. (c) A mismatch is a programmer's mistake, and inside the writer's `apply` a panic would take the transaction down with it. (e) #22 (a) added the deletion term, and the amended specs are read on their own. |
+| 26 | **2026-09-28** (found in implementing PR 2) — **How PR 2 carried out #6–#19.** (a) **The tail is rows, not a column.** The chunks store their tail in `erasure_tail (erasure_id, trace_id, arrived_from, arrived_to)`, one row per trace, instead of `tail_windows` on the erasure's row: the tail's scrub picks the erased spans out of a batch by their trace ids, and windows alone do not carry them. A trace a late span brought back and a later chunk deleted again keeps one row whose window covers both. The rows go in the transaction that ends the erasure, with the user id (#9). The data contract below is amended. (b) **A resume into the parsed phase does not know step 1's traces.** Their list is not stored, so after a resume a chunk reads the whole arrival window of every trace that changed since step 1, as it does for a trace step 1 did not know. The tail reads more batches than an uninterrupted run would, and scrubs the same spans. (c) **Two small jobs of the erasure's own.** Step 1's count is written by a job after step 1 (a resume keeps the first), and the move from `raw` to `parsed` by a job after step 2, because the raw phase can end without a job when no batch held a span. The move to `tail` is in the last chunk's transaction. (d) **#16 retries jobs.** A job failing with a database condition is retried with backoff for up to two minutes; a read outside the writer that fails ends the erasure failed, like any failure that is not a condition. (e) **A stop answers the waiting requests.** The worker's stop is the first thing a stop does (#17), and a request holding its answer under `?wait` is answered `202` at once when the worker stops, rather than holding the drain for the rest of its wait. (f) `Location` is sent with the `200` as well. The two `GET` routes, like the `DELETE`, reach a live project only. The chunk size moved from the request (`UserErasure.Chunk`) to the worker's options, since the worker is what runs the chunks. (g) **The error sentence never names the user**: an error that quotes the user id — a refusal quotes the echo — has it replaced by "the user" before it is stored. (h) The user page asks an editor's dry run on the way in, to find `running` (#13) and follow it; a viewer is offered no erasure and asks nothing. | (a) A tail that could name windows but not traces would scrub nothing, or would have to guess whose spans a batch holds. (b) Storing step 1's list would keep up to every trace id of the person on the row for the length of the erasure, to save reads of batches the erasure already cleaned. (c) The phase has to move when its work is whole, and a phase that did no work has no job to move it in. (d) A condition is a property of the writer's transaction, which a retry repeats whole; a read is repeated by the resume. (e) Thirty seconds of a stop's ten would be spent waiting for an answer the stop is about to make unchangeable. (g) #9 applies to what the row keeps, whatever the error says. |
 
 ## API contract
 
@@ -198,14 +199,18 @@ scope matrix (spec 045) and the six-caller matrix cover the new routes.
 - `UserDataErase`: `HourLimit` is replaced by the budget of #2 (`RollBudget`
   on the job, zero meaning the `DeleteRollBudget` constant), and `HourChunks`
   is the one rule that cuts a run of traces ordered by hour, for both
-  callers. In PR 2 it gains `ErasureID`: when
-  set, `apply` adds its counts, `traces_deleted` and tail windows to the
-  `erasures` row in the same transaction (#12).
+  callers. In PR 2 it gains `Erasure` (the erasure's id, step 1's moment and
+  the traces step 1 read): when set, `apply` adds its counts and
+  `traces_deleted` to the `erasures` row, and its tail to `erasure_tail`, in
+  the same transaction (#12, #26 a).
 - `RawScrub`: gains `ErasureID`, and adds its tally to the row the same way.
-- `EraseUserData` becomes `(*Store).runErasure(ctx, writer, id)`, run by the
-  worker. `StartErasure(ctx, writer, UserErasure) (Erasure, error)` inserts
+- `EraseUserData` becomes `(*Store).runErasure(ctx, writer, id, options)`,
+  run by the worker, `(*Store).NewEraser(writer, EraserOptions)` with
+  `Start` and `Close`. `StartErasure(ctx, writer, UserErasure) (Erasure, error)` inserts
   or finds (#11) and wakes the worker. `Erasure(ctx, projectID, id)` and
-  `Erasures(ctx, projectID)` read.
+  `Erasures(ctx, projectID)` read, `RunningErasure(ctx, projectID, userID)`
+  answers the dry run's `running`, and `AwaitErasure(ctx, projectID, id,
+  wait)` holds a request for its end.
 - `TraceDelete` is unchanged. The server's round builder cuts its rows with
   one new store call, `DeletionChunks(ctx, projectID, hours, deletes, limit,
   budget, chunks)`, in the round's read slot, pricing only the hours of the
@@ -222,7 +227,7 @@ DROP INDEX idx_traces_user;
 CREATE INDEX idx_traces_user ON traces(project_id, user_id, timestamp);
 ```
 
-The `erasures` migration (PR 2, numbered when it lands):
+`0030_erasures` (PR 2):
 
 ```sql
 CREATE TABLE erasures (
@@ -239,7 +244,6 @@ CREATE TABLE erasures (
     attempts        INTEGER NOT NULL DEFAULT 0,
     traces_at_start INTEGER,
     counts          TEXT NOT NULL DEFAULT '{}',          -- the `deleted` keys
-    tail_windows    TEXT NOT NULL DEFAULT '[]',          -- merged [from, to] pairs
     compaction      INTEGER NOT NULL DEFAULT 0,
     error           TEXT
 ) STRICT;
@@ -248,6 +252,14 @@ CREATE UNIQUE INDEX idx_erasures_running ON erasures(project_id, user_id)
     WHERE user_id IS NOT NULL;                           -- #11, enforced
 CREATE INDEX idx_erasures_state ON erasures(state, created_at)
     WHERE state IN ('queued', 'running');
+-- #26 (a): the tail, one row per trace, gone when the erasure ends.
+CREATE TABLE erasure_tail (
+    erasure_id   TEXT NOT NULL REFERENCES erasures(id) ON DELETE CASCADE,
+    trace_id     TEXT NOT NULL,
+    arrived_from INTEGER NOT NULL,
+    arrived_to   INTEGER NOT NULL,
+    PRIMARY KEY (erasure_id, trace_id)
+) STRICT, WITHOUT ROWID;
 ```
 
 Measured in PR 1 (#21): 12.4 s for the index rebuild on a synthetic file

@@ -641,6 +641,6 @@ func TestUserDataPreviewNamesAffectedRuns(t *testing.T) {
 		t.Errorf("the erasure preview took the `runs` key: %s", rec.Body.String())
 	}
 
-	expectStatus(t, h.send(t, "DELETE", "/api/v1/projects/"+h.project.ID+"/users/u1/data?confirm=u1", nil), http.StatusOK)
+	expectStatus(t, h.send(t, "DELETE", "/api/v1/projects/"+h.project.ID+"/users/u1/data?confirm=u1&wait=30", nil), http.StatusOK)
 	expectError(t, h.get(t, "/api/v1/traces/"+traceHex(1)), http.StatusNotFound, "not found")
 }

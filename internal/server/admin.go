@@ -31,14 +31,6 @@ import (
 // the project's name, or the user id. An id is a string you paste; a name is a
 // thing you mean, so a typoed or hallucinated target cannot match.
 
-// eraseChunk is the most of a user's traces one erasure transaction removes.
-// Erasure is synchronous (#7) but not unbounded: the request loops over chunks
-// so that a user with a year of traffic does not hold the writer for the length
-// of a single transaction. Each chunk re-rolls the hours it empties in that
-// same transaction (spec 023 #19), so it takes whole hours in start order
-// within the store's roll budget as well (spec 047 #1, #2).
-const eraseChunk = 500
-
 // authorize is who is asking, as the guard already worked it out (spec 028
 // Decision 7). It reads the request's context and refuses nothing: a handler
 // that runs is a handler whose caller the policy admitted.
@@ -810,13 +802,19 @@ func (s *Server) handleRevokeKey(w http.ResponseWriter, r *http.Request) {
 // handleEraseUserData erases everything the store holds about one user
 // (spec 005 #7, spec 044 #1): the traces filed under the id with what hangs off
 // them, the session-only scores of their sessions, the dataset items cut from
-// them, and their spans inside the raw batches.
+// them, and their spans inside the raw batches. Its dry run answers here; a
+// confirmed erasure is a task (spec 047 #6, `startErasure`).
 func (s *Server) handleEraseUserData(w http.ResponseWriter, r *http.Request) {
 	c, ok := s.authorize(w, r)
 	if !ok {
 		return
 	}
-	values, err := queryParams(r, "confirm")
+	values, err := queryParams(r, "confirm", "wait")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	wait, err := eraseWait(values.Get("wait"))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -836,9 +834,15 @@ func (s *Server) handleEraseUserData(w http.ResponseWriter, r *http.Request) {
 	// a read that failed would 500 a request that was going to succeed —
 	// the count is what the caller is told, never what the erasure needs.
 	if values.Get("confirm") == "" {
-		var preview store.UserPreview
+		var (
+			preview store.UserPreview
+			running *store.Erasure
+		)
 		if !s.readInSlot(w, r, "failed to read what this user's data is",
 			func(ctx context.Context) (err error) {
+				if running, err = s.store.RunningErasure(ctx, project.ID, userID); err != nil {
+					return err
+				}
 				preview, err = s.store.UserDataPreview(ctx, project.ID, userID, time.Now().UnixNano())
 				return err
 			}) {
@@ -862,44 +866,24 @@ func (s *Server) handleEraseUserData(w http.ResponseWriter, r *http.Request) {
 		if backup != nil {
 			answer = answer.put("pre_migration_backup", backup)
 		}
+		// An erasure of the user under way, before the counts it is
+		// shrinking (spec 047 #13).
+		if running != nil {
+			var phase any
+			if running.Phase != "" {
+				phase = running.Phase
+			}
+			answer = answer.put("running", object{}.
+				put("id", running.ID).
+				put("state", running.State).
+				put("phase", phase))
+		}
 		writeJSON(w, http.StatusOK, answer.
 			put("confirm", userID).
 			put("note", erasureNote(preview.Raw, backup != nil)))
 		return
 	}
-
-	// The erasure runs to completion (spec 035 #14, `EraseUserData`) whether
-	// or not the client stays for the answer: a closed tab or the
-	// interface's thirty-second clock (spec 010 #10) loses the answer and
-	// nothing else. `Now` is read once: the freeze is a question about the
-	// retention window, and a request is not long enough to move it.
-	if s.writer == nil {
-		writeError(w, http.StatusServiceUnavailable, "writes are not available")
-		return
-	}
-	erased, err := s.store.EraseUserData(r.Context(), s.writer, store.UserErasure{
-		ProjectID: project.ID,
-		UserID:    userID,
-		Confirm:   lookupLabel(values.Get("confirm")),
-		Chunk:     eraseChunk,
-		Now:       time.Now().UnixNano(),
-	})
-	if err != nil {
-		submitFailure(w, err, apiWrite)
-		return
-	}
-
-	answer := object{}.
-		put("dry_run", false).
-		put("deleted", erasureCounts(erased.Counts, true)).
-		put("user_id", userID).
-		put("compaction", s.compactionAnswer(erased.Compaction))
-	// The one copy of the database the erasure does not rewrite, and the
-	// day it goes (spec 044 #12).
-	if backup := s.backupAnswer(); backup != nil {
-		answer = answer.put("pre_migration_backup", backup)
-	}
-	writeJSON(w, http.StatusOK, answer)
+	s.startErasure(w, r, project, userID, lookupLabel(values.Get("confirm")), wait)
 }
 
 // erasureCounts renders an erasure's counts (spec 044, API contract): what

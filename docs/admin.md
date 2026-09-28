@@ -134,7 +134,9 @@ on stderr and exit code 1.
 | `GET` | `/api/v1/projects/{id}/keys` | Public keys, their scopes, who minted each and when it was last used. Not with a project key. |
 | `POST` | `/api/v1/projects/{id}/keys` | Mint a pair: `{"scopes": [...], "name": …}`, the name optional. Not with a project key. |
 | `DELETE` | `/api/v1/projects/{id}/keys/{public_key}` | Revoke one. Not with a project key. |
-| `DELETE` | `/api/v1/projects/{id}/users/{user_id}/data` | Erase one user's parsed data (a key needs `write`). |
+| `DELETE` | `/api/v1/projects/{id}/users/{user_id}/data` | Erase one user's data: a task, answered `202` or, within `?wait=`, `200` (a key needs `write`). |
+| `GET` | `/api/v1/projects/{id}/erasures` | The project's erasures, newest first (a key needs `write`). |
+| `GET` | `/api/v1/projects/{id}/erasures/{erasure_id}` | One erasure (a key needs `write`). |
 | `DELETE` | `/api/v1/traces/{id}` | Delete one trace — an editor's route, on the data plane, and a `write` key's. See [below](#deleting-traces). |
 | `DELETE` | `/api/v1/traces?…&to=` | Delete every trace a listing filter matches before `to`, in rounds. |
 | `GET` | `/api/v1/projects/{id}/members` | Who has a role in this project. See [accounts.md](accounts.md#managing-accounts). |
@@ -359,23 +361,63 @@ dry run counts each before anything happens:
   and misses the few later batches of a trace that was open across the edge.
   Counting exactly would mean decoding the whole archive.
 
-The confirmed answer says what went, when the rest of the job is done, and
-what it will not reach:
+While an erasure of the user is under way, the dry run says so before its
+counts, which are shrinking under it: `"running": {"id": "4f0c…", "state":
+"running", "phase": "parsed"}`, and `tracepad users rm-data` prints `an
+erasure of this user is running: 4f0c… (parsed)`.
+
+Confirmed, an erasure is **a task**. Everything that can refuse it — the
+role or the key's scope, a deleted project, a wrong echo, a server that is
+not taking writes — refuses first and records nothing; then the erasure is
+recorded and the answer is `202 Accepted`, with the erasure as the body and a
+`Location` to read it at. `?wait=<seconds>`, up to 30, holds the answer that
+long for the erasure to end, and answers `200` with the same body when it did:
+a user of a few traces is erased in one round trip. The interface waits 20
+seconds, `tracepad users rm-data` 30, and both follow a longer one to its end
+(`--no-wait` prints its id instead). A second request for a user whose
+erasure is queued or running answers that erasure rather than starting
+another.
 
 ```json
 {
+  "id": "4f0c9d3e8a1b2c3d4e5f60718293a4b5",
+  "state": "done",
+  "phase": null,
+  "user_id": "user-4711",
   "dry_run": false,
+  "created_at": "2026-09-26T10:02:09Z",
+  "started_at": "2026-09-26T10:02:09Z",
+  "finished_at": "2026-09-26T10:02:11Z",
+  "progress": {"traces_at_start": 12, "traces_deleted": 12},
   "deleted": {
     "traces": 12, "observations": 240, "scores": 30, "session_scores": 2,
     "payloads": 480, "annotation_items": 1, "dataset_items": 3,
     "media": 5, "media_bytes": 901442,
     "raw_spans": 252, "raw_batches_rewritten": 38, "raw_batches_deleted": 3
   },
-  "user_id": "user-4711",
   "compaction": {"requested_at": "2026-09-26T10:02:11Z", "expected_by": "2026-09-26T11:00:00Z"},
-  "pre_migration_backup": {"created_at": "2026-09-24T08:00:00Z", "remove_after": "2026-10-01T08:00:00Z"}
+  "pre_migration_backup": {"created_at": "2026-09-24T08:00:00Z", "remove_after": "2026-10-01T08:00:00Z"},
+  "error": null
 }
 ```
+
+- `state` — `queued`, `running`, `done` or `failed`; `phase` — `raw`,
+  `parsed` or `tail` while it runs, the three steps below.
+- `progress` — `traces_at_start` is how many traces the user had when the
+  erasure first read them, and `traces_deleted` how many are gone so far.
+  `deleted` counts what has been committed so far, and is the whole once the
+  erasure is `done`.
+- `user_id` — the erasure's record holds the user id only while it is queued
+  or running. When it ends, the id is cleared in the same statement, and
+  from then on `user_id` is `null` everywhere but in the answer to the request
+  that started it. The record itself goes 30 days after the end.
+- `error` — why a `failed` erasure failed, in a sentence that never names the
+  user.
+
+`GET /api/v1/projects/{id}/erasures/{erasure_id}` reads one erasure, and
+`GET /api/v1/projects/{id}/erasures` the project's last hundred, newest first
+— both for an editor, or a key with `write`, like the erasure itself.
+`tracepad users erasure <id>` and `tracepad users erasures` print them.
 
 - `raw_spans`, `raw_batches_rewritten`, `raw_batches_deleted` — the user's
   spans taken out of the raw archive, and the batches that held them:
@@ -406,39 +448,40 @@ their shape with shorter lists. Both the dry run and the answer count them
 under `annotation_items`, beside the traces and the scores. The verdicts
 already given are scores on those traces and go with the traces.
 
-The user's rows in the **per-user rollup** ([users.md](users.md)) go in the
-same request, outright rather than by recomputation: they are about the user,
+The user's rows in the **per-user rollup** ([users.md](users.md)) go with the
+first chunk of their traces, outright rather than by recomputation: they are about the user,
 and for an hour past the trace-retention window there would be nothing left to
 recompute them from. So the account leaves `/api/v1/users` immediately, and
 `GET /api/v1/users/{id}` answers `404`. The project-wide statistics are
 corrected where they can be, which is the rule
 [retention.md](retention.md#what-outlives-what) states.
 
-The erasure is synchronous. The **raw archive goes first**: the batches that
-hold the user's spans are found, decoded and rewritten one writer job each,
-before the parsed rows go, because once those are gone nothing names the
-batches any more; the batches that arrived while the request ran are checked
-last. The parsed rows then go in **chunks** — up to five hundred traces,
-taken in the order they started, whole hours at a time — each one a
-transaction that leaves the store consistent on its own: the chunk's traces
-go and the hours they occupied are recomputed in the same commit, each hour
-once (an hour holding more than five hundred of the user's traces once per
-chunk it spans), and the writer is held for one chunk at a time so ingest keeps flowing
-between them. A chunk takes as many hours as are light to recompute; a dense
-hour is a chunk of its own. 20 000 traces spread over a month are about sixty
-chunks, and seconds rather than minutes. The erasure **runs to completion whether or not the client waits for
-it** — a closed tab or the interface's thirty-second clock loses the answer
-and nothing else, and the interface and `tracepad users rm-data` say the
-erasure is still running rather than that it failed; a request that never
-reached the server — a refused connection, a failed handshake — says that
-instead. Only a stop of the server cuts it off, and that destroys
-nothing half-way either: what the committed jobs erased is erased, and
-repeating the call finds what is left and finishes it. A chunk that fails —
-a full disk, a writer queue full for two minutes — ends the request with
-that error, after the raw batches that arrived meanwhile for the traces the
-finished chunks took have been rewritten too, so a repeat still finishes it. The counts in the
-answer are the request's own; a repeat reports what it erased, not what the
-interrupted one did.
+One erasure runs at a time on a server; the others wait, oldest first. The
+**raw archive goes first**: the batches that hold the user's spans are found,
+decoded and rewritten one writer job each, before the parsed rows go, because
+once those are gone nothing names the batches any more. The parsed rows then
+go in **chunks** — up to five hundred traces, taken in the order they
+started, whole hours at a time — each one a transaction that leaves the store
+consistent on its own: the chunk's traces go and the hours they occupied are
+recomputed in the same commit, each hour once (an hour holding more than five
+hundred of the user's traces once per chunk it spans), and the writer is held
+for one chunk at a time so ingest keeps flowing between them. A chunk takes
+as many hours as are light to recompute; a dense hour is a chunk of its own.
+20 000 traces spread over a month are about sixty chunks, and seconds rather
+than minutes. Last, the **tail**: the raw batches that arrived for the erased
+traces while the erasure ran are rewritten too.
+
+Nobody has to wait for it. A closed tab or a client that gives up loses the
+answer and nothing else, and the erasure's record says where it is. A **stop
+of the server** interrupts it without waiting: every job commits its progress
+with it, so the next start **resumes** the erasure from its phase — including
+the tail, which a repeat of the request could not finish, because the traces
+that named those batches are gone. An erasure that three starts in a row
+could not finish is ended `failed` rather than tried for ever. A job that
+fails with a condition of the database — a full disk, a lock that did not
+clear — is retried for up to two minutes; any other failure ends the erasure
+`failed`, after the tail has run for the chunks that committed. Repeating
+the request then finds what is left and finishes it.
 
 ## Deleting traces
 

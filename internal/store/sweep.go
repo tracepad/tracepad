@@ -324,6 +324,15 @@ func (sw *Sweeper) Pass(ctx context.Context) error {
 	// (spec 044 #12). Files, not rows: nothing here goes through the writer.
 	sw.store.expireBackups(start)
 
+	// The records of erasures that ended more than 30 days ago (spec 047
+	// #15), last: they name no one, and nothing above waits for them.
+	if err := sw.writer.Submit(ctx, &erasureSweep{Before: start.Add(-ErasureKept).UnixNano()}); err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, ErrWriterClosed) {
+			return err
+		}
+		failures = append(failures, fmt.Errorf("finished erasures: %w", err))
+	}
+
 	sw.mu.Lock()
 	sw.lastRun = start
 	sw.mu.Unlock()
