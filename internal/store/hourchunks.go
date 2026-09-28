@@ -46,6 +46,9 @@ func TraceDeleteCost(observations int) int64 {
 // a caller that submits one chunk, or a round of fifty, has no use for the
 // cost of the hours past them.
 func HourChunks(hours, deletes []int64, cost func(hour int64) (int64, error), limit int, budget int64, chunks int) ([]int, error) {
+	if deletes != nil && len(deletes) != len(hours) {
+		return nil, fmt.Errorf("cut deletion chunks: %d deletion costs for %d traces", len(deletes), len(hours))
+	}
 	limit = max(limit, 1)
 	if budget <= 0 {
 		budget = DeleteRollBudget
@@ -103,12 +106,15 @@ func HourChunks(hours, deletes []int64, cost func(hour int64) (int64, error), li
 // nothing, when the watermark read is the one the rolls will obey: inside the
 // transaction that rolls. A caller that prices before its jobs run — a bulk
 // round — prices every hour, since the aggregator may move the watermark past
-// an hour before the chunk that holds it commits. The watermark is read once;
-// each hour is counted when first asked.
+// an hour before the chunk that holds it commits. The watermark is read once,
+// and only where it is obeyed; each hour is counted when first asked.
 func rollCosts(ctx context.Context, q ctxQuerier, projectID string, budget int64, inTransaction bool) (func(hour int64) (int64, error), error) {
-	state, err := rollupState(ctx, q, projectID)
-	if err != nil {
-		return nil, err
+	var state RollupState
+	if inTransaction {
+		var err error
+		if state, err = rollupState(ctx, q, projectID); err != nil {
+			return nil, err
+		}
 	}
 	if budget <= 0 {
 		budget = DeleteRollBudget

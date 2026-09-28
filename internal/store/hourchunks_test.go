@@ -98,6 +98,12 @@ func TestHourChunks(t *testing.T) {
 		t.Errorf("a first hour at the budget asked %d costs (%v), want its own only", asked, err)
 	}
 
+	// Deletion costs that do not match the traces are a mistake, answered
+	// as an error rather than a panic inside the writer's transaction.
+	if _, err := HourChunks([]int64{1, 2}, []int64{6}, free, 500, 10, 0); err == nil {
+		t.Error("one deletion cost for two traces was accepted")
+	}
+
 	// A first hour cut at the limit ends its chunk without a price.
 	asked = 0
 	if _, err := HourChunks([]int64{1, 1, 1, 2}, nil, count, 2, 10, 1); err != nil || asked != 0 {
