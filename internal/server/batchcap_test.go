@@ -83,71 +83,140 @@ func TestBatchWritesThatAreNotOneArrayKeepTheirAnswers(t *testing.T) {
 	}
 }
 
-// Counting an array costs no memory per value (spec 043 #36): a 20 MiB body
-// of ten million zeros — the most values the default body cap holds — is
-// refused without a copy of its values, where decoding them into
-// json.RawMessage cost 1.6 GB and ten million allocations a request, outside
-// the body budget.
-func TestBatchWritesOverTheCapAreCountedWithoutMemoryPerValue(t *testing.T) {
-	body := zeros20MiB()
+// heldBy runs f and reports its error, its allocations and the bytes it
+// allocated, which for a body of 20 MiB is the difference between holding
+// nothing per value and holding a copy of it.
+func heldBy(f func() error) (err error, allocs float64, held uint64) {
 	var before, after runtime.MemStats
-	var err error
-	allocs := testing.AllocsPerRun(1, func() {
+	allocs = testing.AllocsPerRun(1, func() {
 		runtime.ReadMemStats(&before)
-		_, err = decodeBatch[scoreRequest](body, "score")
+		err = f()
 		runtime.ReadMemStats(&after)
 	})
-	var over *overItemCap
-	if !errors.As(err, &over) || over.count != 10<<20 {
-		t.Fatalf("err = %v, want the cap naming %d values", err, 10<<20)
-	}
-	if allocs > 100 {
-		t.Errorf("counting took %v allocations, want a handful", allocs)
-	}
-	if held := after.TotalAlloc - before.TotalAlloc; held > 1<<20 {
-		t.Errorf("counting allocated %d bytes, want under 1 MiB for any number of values", held)
-	}
+	return err, allocs, after.TotalAlloc - before.TotalAlloc
 }
 
-// A body too short to hold more values than the cap is not counted: the
-// SDKs' batches of 100 scores pay for one decode, not two.
-func TestBatchWritesUnderTheLengthBoundAreNotCounted(t *testing.T) {
-	short := []byte("[" + strings.Repeat("0,", maxItemsPerWrite) + "0]")
-	if len(short) != 2*(maxItemsPerWrite+1)+1 {
-		t.Fatalf("len = %d", len(short))
-	}
-	under := []byte("[" + strings.Repeat("0,", maxItemsPerWrite-1) + "0]")
-	if n := arrayLength(under); n != 0 {
-		t.Errorf("a body under the bound was counted: %d", n)
-	}
-	if n := arrayLength(short); n != maxItemsPerWrite+1 {
-		t.Errorf("the shortest body over the cap counts %d, want %d", n, maxItemsPerWrite+1)
-	}
-}
-
-// The count is of top-level values: a comma, a bracket or an escaped quote
-// inside a string, and the values nested in an object or an array, are not
-// values of the batch.
-func TestArrayLengthCountsTopLevelValuesOnly(t *testing.T) {
-	const tricky = `{"a":"x,]\\\"[}, {","b":[1,{"c":","},[2,3]],"d":null}`
-	repeat := func(value string, n int) []byte {
-		return []byte("[" + strings.TrimSuffix(strings.Repeat(value+" ,\n", n), " ,\n") + "]")
-	}
+// An over-cap array costs no memory per value to answer (spec 043 #36), in
+// each of the three shapes it can arrive in. A 20 MiB body of ten million
+// zeros is the most values the default body cap holds. Decoding the values to
+// count them cost 1.6 GB and ten million allocations a request; decoding the
+// array before noticing a value after it cost 3.2 GB and 42 million; and
+// handing a cut-short array to the decoder copied the body, 67 MB — all of
+// it outside the body budget.
+func TestBatchWritesOverTheCapAreAnsweredWithoutMemoryPerValue(t *testing.T) {
+	whole := zeros20MiB()
 	for name, c := range map[string]struct {
 		body []byte
-		want int
+		want func(error) bool
 	}{
-		"objects with punctuation in strings": {repeat(tricky, maxItemsPerWrite+1), maxItemsPerWrite + 1},
-		"nested arrays":                       {repeat(`[1,[2,3],"4,5"]`, maxItemsPerWrite+1), maxItemsPerWrite + 1},
-		"strings":                             {repeat(`"\\\","`, maxItemsPerWrite+1), maxItemsPerWrite + 1},
-		"one long string":                     {[]byte(`["` + strings.Repeat(",", 3*maxItemsPerWrite) + `"]`), 1},
-		"an empty array, padded":              {[]byte("[" + strings.Repeat(" ", 3*maxItemsPerWrite) + "]"), 0},
-		"an object":                           {[]byte(`{"a":"` + strings.Repeat(",", 3*maxItemsPerWrite) + `"}`), 0},
-		"not well-formed":                     {repeat(`0`, maxItemsPerWrite+1)[1:], 0},
+		"counted": {whole, func(err error) bool {
+			var over *overItemCap
+			return errors.As(err, &over) && over.count == 10<<20
+		}},
+		"with a value after it": {append(bytes.Clone(whole), " 0"...), func(err error) bool { return errors.Is(err, errTrailingValue) }},
+		"cut short":             {whole[:len(whole)-1], func(err error) bool { return errors.Is(err, errMalformedBody) }},
 	} {
-		if got := arrayLength(c.body); got != c.want {
-			t.Errorf("%s: %d values, want %d", name, got, c.want)
+		t.Run(name, func(t *testing.T) {
+			err, allocs, held := heldBy(func() error {
+				_, err := decodeBatch[scoreRequest](c.body, "score")
+				return err
+			})
+			if !c.want(err) {
+				t.Fatalf("err = %v", err)
+			}
+			if allocs > 100 {
+				t.Errorf("answering took %v allocations, want a handful", allocs)
+			}
+			if held > 1<<20 {
+				t.Errorf("answering allocated %d bytes, want under 1 MiB for any number of values", held)
+			}
+		})
+	}
+}
+
+// A body too short to hold more values than the cap is not scanned: the
+// SDKs' batches of 100 scores pay for one decode, not two. The shortest body
+// over the cap, 10,001 one-byte values, is exactly as long as the bound.
+func TestBatchWritesUnderTheLengthBoundAreNotScanned(t *testing.T) {
+	zeros := func(n int) []byte { return []byte("[" + strings.Repeat("0,", n-1) + "0]") }
+	if len(zeros(maxItemsPerWrite+1)) != minBodyOverCap {
+		t.Fatalf("len = %d, want %d", len(zeros(maxItemsPerWrite+1)), minBodyOverCap)
+	}
+	if rows, err := decodeBatch[json.RawMessage](zeros(maxItemsPerWrite), "row"); err != nil || len(rows) != maxItemsPerWrite {
+		t.Errorf("at the cap: %d rows, err %v", len(rows), err)
+	}
+	var over *overItemCap
+	if _, err := decodeBatch[json.RawMessage](zeros(maxItemsPerWrite+1), "row"); !errors.As(err, &over) || over.count != maxItemsPerWrite+1 {
+		t.Errorf("the shortest body over the cap: err = %v", err)
+	}
+}
+
+// The scan follows strings and nesting: a bracket, a comma or an escaped
+// quote inside a string, and the values nested in an object or an array, are
+// neither the array's end nor values of the batch — before the value that
+// follows the array as much as inside it.
+func TestScanArrayFollowsStringsAndNesting(t *testing.T) {
+	repeat := func(value string, n int) string {
+		return "[" + strings.TrimSuffix(strings.Repeat(value+" ,\n", n), " ,\n") + "]"
+	}
+	n := maxItemsPerWrite + 1
+	for name, value := range map[string]string{
+		"a closing bracket in a string":        `"]"`,
+		"an escaped quote, then a bracket":     `"\"]"`,
+		"an escaped backslash ends the string": `"\\"`,
+		"escapes, then a bracket":              `"\\\"]"`,
+		"a bracket, a brace and a comma":       `"x,]}[{, "`,
+		"punctuation in an object":             `{"a":"x,]\\\"[}, {","b":[1,{"c":","},[2,3]],"d":null}`,
+		"nested arrays":                        `[1,[2,3],"4,5"]`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			for tail, want := range map[string]arrayScan{
+				"":     {count: n, closed: true},
+				"  \n": {count: n, closed: true},
+				" 0":   {count: n, closed: true, trailing: true},
+				" ]":   {count: n, closed: true, trailing: true},
+				` "]"`: {count: n, closed: true, trailing: true},
+				" [0]": {count: n, closed: true, trailing: true},
+			} {
+				if got := scanArray([]byte(repeat(value, n) + tail)); got != want {
+					t.Errorf("tail %q: %+v, want %+v", tail, got, want)
+				}
+			}
+			// Through the reader: the count, or the value after the array.
+			var over *overItemCap
+			if _, err := decodeBatch[json.RawMessage]([]byte(repeat(value, n)), "row"); !errors.As(err, &over) || over.count != n {
+				t.Errorf("counted: err = %v", err)
+			}
+			if _, err := decodeBatch[json.RawMessage]([]byte(repeat(value, n)+" 0"), "row"); !errors.Is(err, errTrailingValue) {
+				t.Errorf("with a value after it: err = %v", err)
+			}
+		})
+	}
+	for name, c := range map[string]struct {
+		body string
+		want arrayScan
+	}{
+		"one long string":        {`["` + strings.Repeat(",", 3*maxItemsPerWrite) + `"]`, arrayScan{count: 1, closed: true}},
+		"an empty array, padded": {"[" + strings.Repeat(" ", 3*maxItemsPerWrite) + "]", arrayScan{closed: true}},
+		"never closed":           {repeat("0", n)[:len(repeat("0", n))-1], arrayScan{count: 0}},
+		"closed by a string":     {`["` + strings.Repeat("]", 3*maxItemsPerWrite), arrayScan{}},
+	} {
+		if got := scanArray([]byte(c.body)); got != c.want {
+			t.Errorf("%s: %+v, want %+v", name, got, c.want)
 		}
+	}
+}
+
+// A closed array over the cap is refused by its count whatever is wrong in
+// its middle: the count wins over the malformedness (spec 003 #28).
+func TestBatchWritesOverTheCapWithABrokenMiddleAreCounted(t *testing.T) {
+	for _, route := range batchRoutes() {
+		t.Run(route.kind, func(t *testing.T) {
+			h := newHarness(t, nil, store.WriterOptions{})
+			body := []byte("[" + strings.Repeat("0,", maxItemsPerWrite) + "@,,]")
+			expectError(t, h.call(t, "POST", route.path, body), http.StatusRequestEntityTooLarge,
+				"this request carries "+fmt.Sprint(maxItemsPerWrite+3)+" "+route.kind)
+		})
 	}
 }
 
@@ -158,6 +227,53 @@ func BenchmarkItemCapCount20MiBZeros(b *testing.B) {
 	for b.Loop() {
 		if _, err := decodeBatch[scoreRequest](body, "score"); err == nil {
 			b.Fatal("not refused")
+		}
+	}
+}
+
+// The two bodies an over-cap array's cost is measured on: ten million zeros
+// with a value after the array, and the same array cut short. Neither may
+// cost memory per value (spec 043 #36).
+func BenchmarkBatchDecodeOverCapWithTail20MiB(b *testing.B) {
+	body := append(zeros20MiB(), " 0"...)
+	b.SetBytes(int64(len(body)))
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, err := decodeBatch[scoreRequest](body, "score"); err == nil {
+			b.Fatal("not refused")
+		}
+	}
+}
+
+func BenchmarkBatchDecodeOverCapTruncated20MiB(b *testing.B) {
+	body := zeros20MiB()
+	body = body[:len(body)-1]
+	b.SetBytes(int64(len(body)))
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, err := decodeBatch[scoreRequest](body, "score"); err == nil {
+			b.Fatal("not refused")
+		}
+	}
+}
+
+// What every array write of an SDK pays: a batch of 100 scores long enough
+// (about 33 KB) to be past the length below which nothing is counted.
+func BenchmarkBatchDecode100Scores33KB(b *testing.B) {
+	batch := make([]map[string]any, 100)
+	for i := range batch {
+		batch[i] = map[string]any{"trace_id": scoreTraceID, "name": "helpfulness", "value": float64(i),
+			"comment": strings.Repeat("a reason, in words. ", 12)}
+	}
+	body, err := json.Marshal(batch)
+	if err != nil || len(body) < 2*(maxItemsPerWrite+1)+1 {
+		b.Fatalf("body = %d bytes, err %v", len(body), err)
+	}
+	b.SetBytes(int64(len(body)))
+	b.ReportAllocs()
+	for b.Loop() {
+		if scores, err := decodeBatch[scoreRequest](body, "score"); err != nil || len(scores) != 100 {
+			b.Fatal(err)
 		}
 	}
 }
