@@ -555,10 +555,19 @@ func TestTrustedProxies(t *testing.T) {
 	if strings.Join(got, " ") != want {
 		t.Errorf("parsed %v, want %s", got, want)
 	}
+	// The widest ranges a real fleet of proxies has pass: an /8, and
+	// Cloudflare's /13 and /29 (#18).
+	for _, wide := range []string{"10.0.0.0/8", "104.16.0.0/13", "2a06:98c0::/29", "2400::/16"} {
+		if _, err := ParseTrustedProxies(wide); err != nil {
+			t.Errorf("%s: %v, want it accepted", wide, err)
+		}
+	}
 
 	for _, bad := range []string{"10.0.0.5,proxy.internal", "10.0.0.5,,10.0.0.6", "10.0.0.0/33", "none,10.0.0.5", "fe80::1%eth0",
 		// Every address: the limit would be off (#17).
-		"0.0.0.0/0", "::/0", "::ffff:0:0/96", "10.0.0.5, 0.0.0.0/0"} {
+		"0.0.0.0/0", "::/0", "::ffff:0:0/96", "10.0.0.5, 0.0.0.0/0",
+		// Nor split into halves, nor wider than one network's proxies (#18).
+		"0.0.0.0/1,128.0.0.0/1", "::/1,8000::/1", "10.0.0.0/7", "2000::/3", "::ffff:10.0.0.0/103"} {
 		t.Setenv("TRACEPAD_TRUSTED_PROXIES", bad)
 		if _, err := Load(nil); err == nil || !strings.Contains(err.Error(), "TRACEPAD_TRUSTED_PROXIES: entry") {
 			t.Errorf("%q: err = %v, want a refusal naming the entry", bad, err)

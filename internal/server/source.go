@@ -56,8 +56,8 @@ func (t trustedProxies) trusts(addr netip.Addr) bool {
 	return false
 }
 
-// strings is the list as the log shows it.
-func (t trustedProxies) strings() []string {
+// texts is the list as the log shows it.
+func (t trustedProxies) texts() []string {
 	out := make([]string, 0, len(t))
 	for _, prefix := range t {
 		out = append(out, prefix.String())
@@ -71,7 +71,7 @@ func (s *Server) TrustedProxies() string {
 	if len(s.trusted) == 0 {
 		return "none"
 	}
-	return strings.Join(s.trusted.strings(), ",")
+	return strings.Join(s.trusted.texts(), ",")
 }
 
 // clientMemo holds a request's client address once it has been worked out,
@@ -117,8 +117,13 @@ func (s *Server) resolveClient(r *http.Request) netip.Addr {
 	lines := r.Header.Values("X-Forwarded-For")
 	peer := peerAddress(r.RemoteAddr)
 	if !s.trusted.trusts(peer) {
-		if len(lines) > 0 {
-			s.noteUntrustedProxy(peer)
+		// A proxy forwards an address; a header with none in it — empty,
+		// `unknown`, garbled — is a client's own, and a client is not to
+		// be trusted on the warning's word (#18, as #17 a for a hop).
+		if rightmost, ok := forwardedHops(lines)(); ok {
+			if _, forwards := parseForwardedAddress(rightmost); forwards {
+				s.noteUntrustedProxy(peer)
+			}
 		}
 		return peer
 	}
@@ -238,13 +243,14 @@ var (
 	nat64Local     = netip.MustParsePrefix("64:ff9b:1::/48")
 )
 
-// sourceText is a source as the log and /api/v1/system name it: an IPv4
-// address bare, an IPv6 source as its /64.
+// sourceText is a source as the log and /api/v1/system name it: a whole
+// address bare — IPv4, or a NAT64 client — and an IPv6 /64 as its prefix
+// (#18).
 func sourceText(source netip.Prefix) string {
 	switch {
 	case !source.IsValid():
 		return "unknown"
-	case source.Addr().Is4():
+	case source.Bits() == source.Addr().BitLen():
 		return source.Addr().String()
 	}
 	return source.String()

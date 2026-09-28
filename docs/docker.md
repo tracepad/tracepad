@@ -419,9 +419,10 @@ tp-sk-…" https://traces.example.com/api/v1/system`) and read `source`: it
 should be your own address, not the gateway's. Trust only
 the proxy, not the network it sits on. A trusted address can name any client
 it likes, so trusting the whole bridge (`172.17.0.0/16`) lets every other
-container on it pick its own source. A range that holds every address
-(`0.0.0.0/0`, `::/0`) would switch the limit off, and the server does not
-start with one.
+container on it pick its own source. A range wider than one network's
+proxies could be — shorter than `/8` for IPv4 or `/16` for IPv6, `0.0.0.0/0`
+above all — would let clients name their own sources and switch the limit off,
+and the server does not start with one.
 
 Loopback is trusted by default because a proxy on the same host is what the
 docs recommend, but not everything that connects over loopback is a proxy

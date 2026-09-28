@@ -523,7 +523,8 @@ func (h *sourceHeap) Pop() any {
 // count it stands for (#10).
 func (s *Server) admitSource(w http.ResponseWriter, r *http.Request) bool {
 	now := time.Now()
-	source := sourceOf(s.clientAddress(r))
+	client := s.clientAddress(r)
+	source := sourceOf(client)
 	wait, ok := s.sources.take(source, now)
 	if ok {
 		return true
@@ -531,9 +532,16 @@ func (s *Server) admitSource(w http.ResponseWriter, r *http.Request) bool {
 	seconds := waitSeconds(wait)
 	text := sourceText(source)
 	if held, log := s.sourceLog.Allow(text, now); log {
-		slog.Warn("password checks refused: a source asked for more than its limit",
-			"source", text, "burst", sourceBurst, "every", sourceEvery.String(),
-			"not_logged_since_last", held.SameKey, "not_logged_over_cap", held.OverCap)
+		attrs := []any{"source", text, "burst", sourceBurst, "every", sourceEvery.String(),
+			"not_logged_since_last", held.SameKey, "not_logged_over_cap", held.OverCap}
+		// A source that is itself a trusted proxy forwarded no client:
+		// every client behind it is this one source, which is a proxy's
+		// setting to fix, not a flood (#18). nginx needs telling.
+		if s.trusted.trusts(client) {
+			attrs = append(attrs, "hint", "this source is a trusted proxy that sent no client address in X-Forwarded-For, "+
+				"so every client behind it counts as this one source; configure the proxy to append X-Forwarded-For")
+		}
+		slog.Warn("password checks refused: a source asked for more than its limit", attrs...)
 	}
 	w.Header().Set("Retry-After", strconv.Itoa(seconds))
 	writeError(w, http.StatusTooManyRequests, fmt.Sprintf(sourceRefused, seconds))

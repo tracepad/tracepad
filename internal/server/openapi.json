@@ -519,7 +519,7 @@
                 },
                 "required": ["busy", "capacity"]},
               "source": {"type": "string",
-                "description": "The source this request counts as: an IPv4 address, or an IPv6 /64 — the peer, or the client a trusted proxy forwarded"},
+                "description": "The source this request counts as: a whole address (IPv4, or an IPv6 NAT64 client), or an IPv6 /64 — the peer, or the client a trusted proxy forwarded"},
               "response_budget_bytes": {"type": "integer"},
               "runs": {"type": "object",
                 "description": "The link between traces and dataset runs, as this project sees it",

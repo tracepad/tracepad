@@ -396,7 +396,7 @@ one in this section.
 | `TRACEPAD_URL` | — | The address your people actually use. The server prints setup and invitation links at its own guess otherwise — the listen address, or the request's `Host` — which is wrong behind a proxy, and its host is one of the three the cross-site check accepts. An `https://` address also tells the server a TLS proxy is in front, which silences its plain-HTTP warning (or, in the image, note) at start ([docker.md](docker.md#serving-over-tls)). |
 | `TRACEPAD_ADMIN_TOKEN` | — | Unchanged from [administration](admin.md), and now also the account routes. At least 32 characters, or the server does not start; `TRACEPAD_ADMIN_TOKEN_FILE` reads it from a file instead. |
 | `TRACEPAD_SETUP` | `on` | `off` mints no setup link and refuses `POST /api/v1/setup`; make the first owner with the admin token. |
-| `TRACEPAD_TRUSTED_PROXIES` | `loopback` | The proxies whose `X-Forwarded-For` the server believes when it works out a client's address: IP addresses and CIDR ranges, comma-separated, and `loopback` for `127.0.0.0/8` and `::1`. `none` trusts no proxy. An entry that does not parse stops the start. |
+| `TRACEPAD_TRUSTED_PROXIES` | `loopback` | The proxies whose `X-Forwarded-For` the server believes when it works out a client's address: IP addresses and CIDR ranges, comma-separated, and `loopback` for `127.0.0.0/8` and `::1`. `none` trusts no proxy. An entry that does not parse, or a range wider than `/8` (IPv4) or `/16` (IPv6), stops the start. |
 
 Expired sessions and invitations are removed by the
 [retention sweeper](retention.md) on its usual pass. A session that has run out

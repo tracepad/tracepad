@@ -110,6 +110,11 @@ func TestSourceIsASlash64(t *testing.T) {
 	if got := sourceText(sourceOf(netip.MustParseAddr("203.0.113.7"))); got != "203.0.113.7" {
 		t.Errorf("sourceText = %q, want the bare address", got)
 	}
+	// A whole IPv6 address — a NAT64 client — is spelled bare too, as the
+	// contract says: an address, or a /64 (#18).
+	if got := sourceText(sourceOf(netip.MustParseAddr("64:ff9b::c000:207"))); got != "64:ff9b::c000:207" {
+		t.Errorf("sourceText = %q, want the bare NAT64 address", got)
+	}
 	if sourceOf(netip.MustParseAddr("203.0.113.7")) == sourceOf(netip.MustParseAddr("203.0.113.8")) {
 		t.Error("two IPv4 addresses are one source")
 	}
@@ -430,6 +435,11 @@ func TestAnUntrustedProxyIsWarnedAbout(t *testing.T) {
 	for range 3 {
 		expectStatus(t, system(from("172.17.0.1:5000"), forwarded("203.0.113.7")), http.StatusOK)
 	}
+	// A header with no address in it is a client's own: nothing was
+	// forwarded, and the peer is not called a proxy (#18).
+	for _, header := range []string{"unknown", "", "not-an-address", "203.0.113.7, unknown"} {
+		expectStatus(t, system(from("172.17.0.3:5000"), forwarded(header)), http.StatusOK)
+	}
 	expectStatus(t, system(from("203.0.113.8:5000"), forwarded("198.51.100.1")), http.StatusOK)
 	expectStatus(t, system(from("127.0.0.1:5000"), forwarded("198.51.100.2")), http.StatusOK)
 	expectStatus(t, system(from("10.0.0.1:5000")), http.StatusOK)
@@ -440,6 +450,37 @@ func TestAnUntrustedProxyIsWarnedAbout(t *testing.T) {
 	}
 	if !strings.Contains(text, "proxy=172.17.0.1") || !strings.Contains(text, "TRACEPAD_TRUSTED_PROXIES") {
 		t.Errorf("the warning names neither the proxy nor the setting:\n%s", text)
+	}
+	if strings.Contains(text, "172.17.0.3") {
+		t.Errorf("a peer whose header held no address was called a proxy:\n%s", text)
+	}
+}
+
+// TestARefusedTrustedProxySaysWhy: a trusted proxy that forwards no client —
+// nginx without proxy_set_header X-Forwarded-For — makes every client behind
+// it one source, and the refusal says that is the proxy's to fix. A client
+// refused for its own sake gets no such hint (#18).
+func TestARefusedTrustedProxySaysWhy(t *testing.T) {
+	h := newAccountHarness(t)
+	logs := recordLogs(t)
+	h.server.sources = newSourceLimiter()
+	h.server.sources.burst, h.server.sources.every = 1, time.Hour
+	login := func(mutate ...func(*http.Request)) {
+		h.call(t, "POST", "/api/v1/auth/login",
+			mustJSON(t, map[string]any{"email": "nobody@example.com", "password": "not the password"}),
+			append([]func(*http.Request){anonymous, asJSON}, mutate...)...)
+	}
+	for range 2 {
+		login(from("203.0.113.9:1"))
+	}
+	if text := logs(); !strings.Contains(text, "source=203.0.113.9") || strings.Contains(text, "hint=") {
+		t.Fatalf("a client refused for its own sake: want the refusal and no hint:\n%s", text)
+	}
+	for range 2 {
+		login(from("127.0.0.1:1"))
+	}
+	if text := logs(); !strings.Contains(text, "source=127.0.0.1") || !strings.Contains(text, "append X-Forwarded-For") {
+		t.Fatalf("a trusted proxy that forwarded nobody was refused without saying why:\n%s", text)
 	}
 }
 

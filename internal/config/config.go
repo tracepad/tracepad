@@ -377,14 +377,16 @@ func Load(args []string) (*Config, error) {
 	return cfg, nil
 }
 
-// LoopbackProxies is what `loopback`, the default of TRACEPAD_TRUSTED_PROXIES,
+// loopbackProxies is what `loopback`, the default of TRACEPAD_TRUSTED_PROXIES,
 // stands for (spec 046 #1): a proxy on the same host, which is the deployment
-// the docs recommend outside a container. Whoever can connect over loopback
-// already runs code on the machine, so believing what they forward gives
-// nothing away.
-var LoopbackProxies = []netip.Prefix{
-	netip.MustParsePrefix("127.0.0.0/8"),
-	netip.MustParsePrefix("::1/128"),
+// the docs recommend outside a container. A TCP relay on loopback is the
+// exception the docs name (#16). A fresh list each time, so that no caller
+// can change the default by appending to it (#18).
+func loopbackProxies() []netip.Prefix {
+	return []netip.Prefix{
+		netip.MustParsePrefix("127.0.0.0/8"),
+		netip.MustParsePrefix("::1/128"),
+	}
 }
 
 // ParseTrustedProxies reads TRACEPAD_TRUSTED_PROXIES (spec 046 #1): a
@@ -400,7 +402,7 @@ var LoopbackProxies = []netip.Prefix{
 func ParseTrustedProxies(value string) ([]netip.Prefix, error) {
 	value = strings.TrimSpace(value)
 	if value == "" || strings.EqualFold(value, "loopback") {
-		return append([]netip.Prefix(nil), LoopbackProxies...), nil
+		return loopbackProxies(), nil
 	}
 	if strings.EqualFold(value, "none") {
 		return []netip.Prefix{}, nil
@@ -410,7 +412,7 @@ func ParseTrustedProxies(value string) ([]netip.Prefix, error) {
 		entry := strings.TrimSpace(raw)
 		switch {
 		case strings.EqualFold(entry, "loopback"):
-			list = append(list, LoopbackProxies...)
+			list = append(list, loopbackProxies()...)
 			continue
 		case strings.EqualFold(entry, "none"):
 			return nil, fmt.Errorf("TRACEPAD_TRUSTED_PROXIES: entry %d: none trusts no peer, so it stands alone", i+1)
@@ -422,13 +424,26 @@ func ParseTrustedProxies(value string) ([]netip.Prefix, error) {
 			return nil, fmt.Errorf("TRACEPAD_TRUSTED_PROXIES: entry %d, %q: want an IP address such as 172.17.0.1, or a CIDR range such as 10.0.0.0/24",
 				i+1, entry)
 		}
-		if prefix.Bits() == 0 {
-			return nil, fmt.Errorf("TRACEPAD_TRUSTED_PROXIES: entry %d, %q: holds every address, so every client could name its own source "+
-				"and the limit on password checks would be off; name the proxies themselves", i+1, entry)
+		if prefix.Bits() < widestProxyRange(prefix.Addr()) {
+			return nil, fmt.Errorf("TRACEPAD_TRUSTED_PROXIES: entry %d, %q: wider than any one network's proxies (at most /%d), "+
+				"so clients could name their own sources and the limit on password checks would be off; name the proxies themselves",
+				i+1, entry, widestProxyRange(prefix.Addr()))
 		}
 		list = append(list, prefix)
 	}
 	return list, nil
+}
+
+// widestProxyRange is the shortest prefix a trusted range may have (spec 046
+// #18): an IPv4 /8, the largest block one organisation holds, and an IPv6
+// /16. Cloudflare's widest ranges are a /13 and a /29. A wider one trusts
+// peers no deployment's proxies are among, and a list of them — 0.0.0.0/1 and
+// 128.0.0.0/1 — trusts every peer, which switches the limit off.
+func widestProxyRange(addr netip.Addr) int {
+	if addr.Is4() {
+		return 8
+	}
+	return 16
 }
 
 // parseProxyEntry is one address or range, masked to its network: a range
