@@ -358,12 +358,13 @@ func (w *Writer) run() {
 					solo = sub
 					break collect
 				}
-				if weightOf(sub.job) > WindowRows {
+				weight := weightOf(sub.job)
+				if weight > WindowRows {
 					next = sub
 					break collect
 				}
 				pending = append(pending, sub)
-				rows += weightOf(sub.job)
+				rows += weight
 			case <-timer.C:
 				break collect
 			}

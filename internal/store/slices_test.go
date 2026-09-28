@@ -319,6 +319,7 @@ func TestAJobWeighsTheRowsItCarries(t *testing.T) {
 		{&UserDataErase{Limit: 500}, 500},
 		{&DatasetDelete{Name: "d"}, WindowRows + 1},
 		{&QueueDelete{Name: "q"}, WindowRows + 1},
+		{&PromptDelete{Name: "p"}, WindowRows + 1},
 		{&ScoreDelete{ID: "a"}, 1},
 		{&QueueNext{}, 1},
 		{&PromptVersionWrite{}, 1},
