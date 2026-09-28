@@ -769,10 +769,17 @@ func TestUsersErasures(t *testing.T) {
 
 // A server that predates the raw scrub answers no raw counts, and the command
 // says so rather than printing zeros, which would read as an archive checked
-// and found clean.
+// and found clean. Nor does it know `wait`, which it refuses before it erases
+// anything: the command asks again without it, and reads the answer as the
+// end, with or without --no-wait (spec 047 #30).
 func TestAnErasureAnswerWithoutRawCountsSaysSo(t *testing.T) {
 	old := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Has("wait") {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":"unknown query parameter \"wait\" (accepted: confirm)"}`))
+			return
+		}
 		if r.URL.Query().Get("confirm") == "" {
 			_, _ = w.Write([]byte(`{"dry_run":true,"would_delete":{"traces":1},"confirm":"u1"}`))
 			return
@@ -788,6 +795,10 @@ func TestAnErasureAnswerWithoutRawCountsSaysSo(t *testing.T) {
 	if strings.Contains(out.stdout, "removed 0 spans") ||
 		!strings.Contains(out.stdout, "the server reported nothing about its raw archive") {
 		t.Errorf("stdout = %q", out.stdout)
+	}
+	out = h.run(t.Context(), true, "users", "rm-data", "--url", old.URL, "--project", "p", "--yes", "--no-wait", "u1")
+	if out.code != ExitOK || !strings.Contains(out.stdout, "erased the data of u1") {
+		t.Errorf("--no-wait exited %d: %q %s", out.code, out.stdout, out.stderr)
 	}
 }
 

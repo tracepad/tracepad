@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -274,11 +276,19 @@ func (j *erasureBegin) apply(tx *sql.Tx) error {
 		return nil
 	}
 	now := time.Now().UnixNano()
-	interrupted := fmt.Sprintf("%d starts ended before the erasure did", erasureAttempts)
+	interrupted := capSentence
 	if e.lastFailure != "" {
 		interrupted += "; its tail last failed with: " + e.lastFailure
 	}
 	if e.attempts > erasureAttempts {
+		// The last start wrote the cap's sentence before its own tail
+		// ran; what that tail failed with is newer (#30). A chunk's
+		// failure stays what the erasure ends with.
+		if strings.HasPrefix(e.Error, capSentence) {
+			if _, err := tx.Exec(`UPDATE erasures SET error = NULL WHERE id = ?`, j.ID); err != nil {
+				return err
+			}
+		}
 		if err := tx.QueryRow(`SELECT COUNT(*) FROM erasure_tail WHERE erasure_id = ?`, j.ID).Scan(&j.Dropped); err != nil {
 			return err
 		}
@@ -314,6 +324,9 @@ func (j *erasurePause) apply(tx *sql.Tx) error {
 		WHERE id = ? AND state = ? AND run = ?`, j.ID, ErasureRunning, j.Run)
 	return err
 }
+
+// capSentence is the error of an erasure that ran out of starts (#27, #28).
+var capSentence = fmt.Sprintf("%d starts ended before the erasure did", erasureAttempts)
 
 // pauseTime bounds the one write a clean stop makes for its erasure: the
 // stop's own budget is ten seconds (spec 001 #16), and a pause that does not
@@ -582,9 +595,17 @@ func (er *Eraser) Start() {
 	er.stopped = er.store.erasures.started()
 	go func() {
 		defer close(er.done)
+		// The erasures whose run failed here, and when each may be
+		// taken again: every other erasure goes before them, and each
+		// waits its poll interval (#28, #30).
+		resting := map[string]time.Time{}
 		for {
 			wake := er.store.erasures.wake
-			id, err := er.store.nextErasure(ctx)
+			delay := er.opts.poll()
+			id, err := er.store.nextErasure(ctx, slices.Collect(maps.Keys(resting)))
+			if err == nil && id == "" {
+				id, delay = due(resting, delay)
+			}
 			switch {
 			case ctx.Err() != nil:
 				return
@@ -593,26 +614,28 @@ func (er *Eraser) Start() {
 				// worker may find the database answering again (#29).
 				logger().Error("could not read the next erasure", "err", err)
 			case id != "":
-				if _, err := er.store.runErasure(ctx, er.writer, id, er.opts); err == nil {
-					continue
-				} else if ctx.Err() != nil {
+				_, err := er.store.runErasure(ctx, er.writer, id, er.opts)
+				if ctx.Err() != nil {
 					return
-				} else {
-					// Left running: a later start takes it again,
-					// and the last one gives up (#12, #27). Not at
-					// once, and not for a request that wakes the
-					// worker: the erasure would be taken first each
-					// time, spend a start on the same failure and
-					// hold every queued one behind it (#28).
-					logger().Error("an erasure stopped before it ended", "erasure", id, "err", err)
-					wake = nil
 				}
+				if err == nil {
+					delete(resting, id)
+					continue
+				}
+				// Left running: a later start takes it again, and the
+				// last one gives up (#12, #27). Not before the others,
+				// nor at once: taken first each time, it would spend a
+				// start on the same failure and hold every erasure
+				// behind it (#28, #30).
+				logger().Error("an erasure stopped before it ended", "erasure", id, "err", err)
+				resting[id] = time.Now().Add(er.opts.poll())
+				continue
 			}
 			select {
 			case <-ctx.Done():
 				return
 			case <-wake:
-			case <-time.After(er.opts.poll()):
+			case <-time.After(delay):
 			}
 		}
 	}()
@@ -632,16 +655,48 @@ func (er *Eraser) Close() error {
 	return nil
 }
 
+// due is the resting erasure to take now, the one due first, or else how long
+// until it is due, within the poll interval.
+func due(resting map[string]time.Time, poll time.Duration) (string, time.Duration) {
+	first := ""
+	for id, at := range resting {
+		if first == "" || at.Before(resting[first]) {
+			first = id
+		}
+	}
+	if first == "" {
+		return "", poll
+	}
+	if wait := time.Until(resting[first]); wait > 0 {
+		return "", min(wait, poll)
+	}
+	return first, poll
+}
+
 // nextErasure is the erasure the worker takes next: a running one — a stop
-// interrupted it — before any queued, oldest first (#10, #12).
-func (s *Store) nextErasure(ctx context.Context) (string, error) {
+// interrupted it — before any queued, oldest first (#10, #12); none of those
+// resting after a failed run (#30). The states are written out: the partial
+// index is used only for a query that names its condition's literals.
+func (s *Store) nextErasure(ctx context.Context, resting []string) (string, error) {
+	args := make([]any, 0, len(resting))
+	for _, id := range resting {
+		args = append(args, id)
+	}
 	var id string
-	err := s.db.QueryRowContext(ctx, `SELECT id FROM erasures WHERE state IN (?, ?)
-		ORDER BY state = ? DESC, created_at LIMIT 1`, ErasureQueued, ErasureRunning, ErasureRunning).Scan(&id)
+	err := s.db.QueryRowContext(ctx, nextErasureQuery(len(resting)), args...).Scan(&id)
 	if err == sql.ErrNoRows {
 		return "", nil
 	}
 	return id, err
+}
+
+// nextErasureQuery is nextErasure's query with n resting erasures to pass.
+func nextErasureQuery(n int) string {
+	query := `SELECT id FROM erasures WHERE state IN ('queued', 'running')`
+	if n > 0 {
+		query += ` AND id NOT IN (?` + strings.Repeat(`, ?`, n-1) + `)`
+	}
+	return query + ` ORDER BY state = 'running' DESC, created_at LIMIT 1`
 }
 
 // submitErasureJob submits one of an erasure's jobs, waiting out a full queue

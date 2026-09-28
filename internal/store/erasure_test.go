@@ -1297,6 +1297,10 @@ func TestErasureQueriesSeekTheirIndexes(t *testing.T) {
 		{"a chunk's dataset item delete", `DELETE FROM dataset_items WHERE project_id = ? AND (dataset, item_id) IN (` +
 			sourced + `)`, append([]any{f.project.ID}, sourcedArgs...),
 			[]string{"idx_dataset_items_source (project_id=? AND source_trace_id=?)"}},
+		// The worker's look for work reads the erasures under way, not
+		// every record of the last 30 days (spec 047 #30).
+		{"the next erasure", nextErasureQuery(0), nil, []string{"idx_erasures_state"}},
+		{"the next erasure but the resting", nextErasureQuery(2), []any{"a", "b"}, []string{"idx_erasures_state"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			plan, err := f.store.explainQueryPlan(tc.query, tc.args...)

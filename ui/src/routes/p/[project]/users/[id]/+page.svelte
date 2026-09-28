@@ -126,6 +126,13 @@
 	 */
 	const asked = $derived(`${id}|${viewed.from ?? ''}|${viewed.to ?? ''}|${bucket}|${reread}`);
 
+	// An erasure the page followed to its end took the data on screen: it is
+	// read again, and is gone if the erasure was done (spec 047 #30).
+	const followedEnded = $derived(watch.current !== null && ended(watch.current));
+	$effect(() => {
+		if (followedEnded) untrack(() => reread++);
+	});
+
 	$effect(() => {
 		// The stamp is the whole subscription; everything else is read
 		// untracked, in this effect's own run and before the first await.
@@ -210,12 +217,17 @@
 	 * #8), rendered by the card Settings uses — one card, one contract. On
 	 * success there is no user left to be on, so the page leaves.
 	 */
+	/** Whether the page is still about this user of this project. */
+	const onScreen = (current: string, who: string) => current === projectID && who === id;
+
 	/** Follows this user's erasure when one is under way, and says whether. */
 	async function findRunning(current: string, who: string, signal?: AbortSignal) {
 		try {
 			const { erasures } = await api.erasures(current, signal);
 			const running = erasures.find((one) => one.user_id === who && !ended(one));
-			if (running && !signal?.aborted) watch.follow(current, running);
+			// The page may be another user's by now, and what it follows
+			// is its own (spec 047 #30).
+			if (running && !signal?.aborted && onScreen(current, who)) watch.follow(current, running);
 			return running !== undefined;
 		} catch {
 			// The banner is a courtesy; the page is the user's data.
@@ -247,8 +259,9 @@
 							"this page shows it while it runs, or the user's data gone once it has ended"
 						);
 			if (sentence === null) throw cause;
-			void findRunning(current, id).then((found) => {
-				if (!found) reread++;
+			const who = id;
+			void findRunning(current, who).then((found) => {
+				if (!found && onScreen(current, who)) reread++;
 			});
 			throw new ApiError(0, sentence);
 		}

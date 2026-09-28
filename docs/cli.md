@@ -760,8 +760,10 @@ tracepad users erasures        # the project's hundred, those under way first
 Leaving the command stops the watching, not the erasure. If the connection
 is lost after the request went out, the command cannot know whether the
 server took it, and says to run `tracepad users erasures` to see. An ended
-erasure names no one: its record forgets the user id when it ends. `export
---otlp` counts the batches an erasure rewrote as `scrubbed` in its summary.
+erasure names no one: its record forgets the user id when it ends. A server
+from before erasures were tasks does not know the 30 seconds; the command asks
+it again without them and prints its answer, which is the end, `--no-wait` or
+not. `export --otlp` counts the batches an erasure rewrote as `scrubbed` in its summary.
 
 The `keys` commands take the admin token, because no project key lists, mints
 or revokes keys; with a project key they print the server's `403` and exit 1.

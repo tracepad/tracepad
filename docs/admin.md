@@ -480,7 +480,7 @@ the tail, which a repeat of the request could not finish, because the traces
 that named those batches are gone. A clean stop does not count against the
 erasure; a crash does, and so does a run that failed where the next could
 succeed — a tail that could not be read, an end that could not be written,
-retried a minute later. After three of those the next start only rewrites
+retried a minute later, after every other erasure waiting. After three of those the next start only rewrites
 those batches and ends the erasure `failed` rather than trying for ever, with
 what the tail last failed with in its error if it did. A job that meets a
 full write queue or a condition of the database — a full disk, a lock that

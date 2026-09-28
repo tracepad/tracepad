@@ -9,6 +9,7 @@ import (
 	"net/http/httptrace"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -101,7 +102,15 @@ func (r *run) usersRemoveData(ctx context.Context, rest []string) error {
 			confirmed.Set("wait", erasureWait)
 		}
 		body, err = confirmErasure(ctx, erasuresCommand(fs), func(ctx context.Context) (json.RawMessage, error) {
-			return r.api.Send(ctx, http.MethodDelete, path, confirmed, nil)
+			body, err := r.api.Send(ctx, http.MethodDelete, path, confirmed, nil)
+			// A server from before erasures were tasks refuses `wait`,
+			// before it erases anything, and answers the end without
+			// it (spec 047 #30).
+			if predatesWait(err) {
+				confirmed.Del("wait")
+				body, err = r.api.Send(ctx, http.MethodDelete, path, confirmed, nil)
+			}
+			return body, err
 		})
 		if err != nil {
 			return err
@@ -111,7 +120,8 @@ func (r *run) usersRemoveData(ctx context.Context, rest []string) error {
 	if err != nil {
 		return err
 	}
-	if confirmed != nil && noWait {
+	// An answer with no id is an older server's, and the end (#30).
+	if confirmed != nil && noWait && erasure.ID != "" {
 		if r.wantJSON() {
 			return r.emit(body)
 		}
@@ -176,6 +186,13 @@ func (r *run) watchErasure(ctx context.Context, projectID string, erasure erasur
 			return body, nil
 		}
 	}
+}
+
+// predatesWait reports the refusal of a server that does not know `wait`.
+func predatesWait(err error) bool {
+	var refusal *client.Error
+	return errors.As(err, &refusal) && refusal.Status == http.StatusBadRequest &&
+		strings.HasPrefix(refusal.Message, `unknown query parameter "wait"`)
 }
 
 // transient reports a failed read worth another: no answer at all, or the

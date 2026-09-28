@@ -90,6 +90,12 @@ test("a user's page shows an erasure under way, across a reload, until it ends",
 	const own = await createProject('erasure-reload');
 	await traffic(own, 'reload-e2e', 40);
 	const { baseURL } = state();
+	// The user as the page reads it before the erasure takes it.
+	const before = await (
+		await fetch(`${baseURL}/api/v1/users/reload-e2e`, {
+			headers: { Authorization: `Bearer ${own.key}` }
+		})
+	).json();
 	const started = await fetch(
 		`${baseURL}/api/v1/projects/${own.id}/users/reload-e2e/data?confirm=reload-e2e&wait=0`,
 		{ method: 'DELETE', headers: { Authorization: `Bearer ${own.key}` } }
@@ -97,9 +103,14 @@ test("a user's page shows an erasure under way, across a reload, until it ends",
 	expect(started.status).toBe(202);
 	const { id } = (await started.json()) as { id: string };
 
-	// The page's two reads say "running" until the test lets them through:
-	// the listing it finds the erasure in, and the erasure it follows.
+	// The page's reads say "running" until the test lets them through: the
+	// listing it finds the erasure in, the erasure it follows, and the user,
+	// still there.
 	let held = true;
+	await page.route(/\/api\/v1\/users\/reload-e2e(\?|$)/, async (route) => {
+		if (held) await route.fulfill({ json: before });
+		else await route.continue();
+	});
 	await page.route(new RegExp(`/projects/${own.id}/erasures$`), async (route) => {
 		const answer = await route.fetch();
 		const body = await answer.json();
@@ -138,6 +149,8 @@ test("a user's page shows an erasure under way, across a reload, until it ends",
 	await expect(banner).toHaveText(/Erased 40 traces belonging to reload-e2e/, {
 		timeout: 10_000
 	});
+	// The data on screen went with it: the page reads the user again (#30).
+	await expect(page.getByRole('heading', { name: /Nothing is filed under/ })).toBeVisible();
 });
 
 test("a user's page whose erasure answer was lost shows the data gone once it ended", async ({
