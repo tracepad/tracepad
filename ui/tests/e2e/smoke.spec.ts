@@ -2,6 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import {
 	BCRYPT_WAIT,
 	FAILING_TRACE,
+	fromOwnAddress,
 	LARGE_PAYLOAD_OBSERVATION,
 	LARGE_PAYLOAD_TRACE,
 	signIn as enter,
@@ -36,6 +37,7 @@ test('a session outlives the navigation', async ({ page }) => {
 });
 
 test('a wrong password is refused with one sentence', async ({ page }) => {
+	await fromOwnAddress(page);
 	await page.goto('/login');
 	await page.getByLabel('Email').fill(state().member.email);
 	await page.getByLabel('Password', { exact: true }).fill('not-the-password');
@@ -47,6 +49,7 @@ test('a wrong password is refused with one sentence', async ({ page }) => {
 });
 
 test('an unknown email is refused with the same sentence', async ({ page }) => {
+	await fromOwnAddress(page);
 	await page.goto('/login');
 	await page.getByLabel('Email').fill('nobody@e2e.test');
 	await page.getByLabel('Password', { exact: true }).fill('not-the-password');

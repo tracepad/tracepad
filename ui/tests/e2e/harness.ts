@@ -116,10 +116,31 @@ export async function acceptInvite(baseURL: string, link: string) {
 	if (!token) throw new Error(`no #token= in the invitation link: ${link}`);
 	const response = await fetch(`${baseURL}/api/v1/auth/accept-invite`, {
 		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
+		headers: { 'Content-Type': 'application/json', 'X-Forwarded-For': ownAddress() },
 		body: JSON.stringify({ token, password: PASSWORD })
 	});
 	if (!response.ok) throw new Error(`accept the invitation: ${response.status}`);
+}
+
+/**
+ * An address of its own, for a page or a request that checks a password.
+ * The server counts password checks per source (spec 046) and reads the
+ * source from `X-Forwarded-For` when the peer is a loopback proxy, which it
+ * trusts by default. Every test connects from 127.0.0.1, so without this the
+ * whole suite would be one source, and its hundreds of sign-ins would meet
+ * the limit a flood from one address meets. With it each sign-in arrives from
+ * an address of its own, as the people of a real deployment do. The range is
+ * 198.18.0.0/15, set aside for testing (RFC 2544); two tests that draw the
+ * same one share twenty checks, which is more than either makes.
+ */
+export function ownAddress(): string {
+	const n = Math.floor(Math.random() * 2 ** 17);
+	return `198.${18 + (n >> 16)}.${(n >> 8) & 255}.${n & 255}`;
+}
+
+/** Sends every request of the page from an address of its own (ownAddress). */
+export async function fromOwnAddress(page: Page) {
+	await page.setExtraHTTPHeaders({ 'X-Forwarded-For': ownAddress() });
 }
 
 /**
@@ -142,6 +163,7 @@ export const BCRYPT_WAIT = 20_000;
  * does; the one suite about the prefix itself asserts the `/p/{id}` shapes.
  */
 export async function signIn(page: Page, account: Account) {
+	await fromOwnAddress(page);
 	await page.goto('/login');
 	await page.getByLabel('Email').fill(account.email);
 	// Exact: the eye beside the field is labelled "Show the password".

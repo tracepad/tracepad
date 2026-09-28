@@ -110,6 +110,15 @@ type Server struct {
 	// the warning for what it turns away (spec 028 #31).
 	passwords   *store.PasswordGate
 	passwordLog *logpace.Keyed
+	// trusted is TRACEPAD_TRUSTED_PROXIES, whose X-Forwarded-For says
+	// where a request comes from (spec 046 #1, #2); sources limits the
+	// password checks each source may ask for, sourceLog paces the warning
+	// for what it refuses, and proxyLog the one about a proxy nobody named
+	// (#7, #10, #12).
+	trusted   trustedProxies
+	sources   *sourceLimiter
+	sourceLog *logpace.Keyed
+	proxyLog  *logpace.Keyed
 	// running counts the handlers in flight, and handlerGrace is how long
 	// a stop waits for them once their connections are closed (spec 001
 	// #16).
@@ -216,6 +225,10 @@ func New(cfg *config.Config, version string, st *store.Store, writer JobWriter, 
 		passwordChanges: newLoginLimiter(),
 		passwords:       newPasswordGate(),
 		passwordLog:     &logpace.Keyed{Every: time.Minute},
+		trusted:         newTrustedProxies(cfg.TrustedProxies),
+		sources:         newSourceLimiter(),
+		sourceLog:       &logpace.Keyed{Every: time.Minute, Keys: 16},
+		proxyLog:        &logpace.Keyed{Every: time.Hour, Keys: 8},
 		handlerGrace:    defaultHandlerGrace,
 		inflatedLog:     &logpace.Keyed{Every: time.Minute},
 		originLog:       &logpace.Keyed{Every: time.Minute, Keys: 64},

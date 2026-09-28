@@ -301,7 +301,10 @@ func (s *Server) publicBody(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		r.Body = http.MaxBytesReader(w, r.Body, maxPublicBodyBytes)
-		next(w, r)
+		// These are the routes that check a password and then open a
+		// session, and both ask where the request comes from: it is
+		// worked out once (spec 046 #16).
+		next(w, withClientMemo(r))
 	}
 }
 

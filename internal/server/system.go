@@ -335,6 +335,12 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 			put("enabled", s.mcp).
 			put("path", mcpserver.Path).
 			put("protocol_version", mcpserver.ProtocolVersion)).
+		// The source this very request counts as for the limit on password
+		// checks — the one question every proxy deployment has to answer,
+		// and cannot answer without asking the server. Only the asker's own:
+		// the limit's counts are every tenant's sign-ins, and the list of
+		// trusted proxies is the deployment's topology (spec 046 #13, #16).
+		put("source", sourceText(sourceOf(s.clientAddress(r)))).
 		put("response_budget_bytes", s.responseBudget).
 		// What retention has done and when it runs next (spec 005 #14).
 		// There is no endpoint to run it now: an immediate sweep would be

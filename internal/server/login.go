@@ -618,7 +618,7 @@ func (s *Server) signIn(w http.ResponseWriter, r *http.Request, job opensSession
 		SessionID: store.SessionID(value),
 		ExpiresAt: expires.UnixNano(),
 		UserAgent: trimUserAgent(r.Header.Get("User-Agent")),
-		IP:        clientIP(r),
+		IP:        addressText(s.clientAddress(r)),
 		Now:       at.UnixNano(),
 	}
 

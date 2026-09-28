@@ -116,12 +116,35 @@ take requests from anybody, so the server runs only a few at once — half its
 processors, at most four — with a short queue behind them. Past that, the
 answer is `503` with `Retry-After: 1`, and a `WARN` in the log once a minute
 says how many were turned away. A person signing in never meets it in ordinary
-use, and a flood of sign-ins cannot take the CPU from ingest and reads — but
-while such a flood runs, real sign-ins meet that `503` too: the server cannot
-tell the flood from people without a per-source rate limit, which it does not
-have yet. A reverse proxy's rate limit on `/api/v1/auth/` is the remedy today. An invitation link is
-checked before its password is hashed, so a request with a made-up link costs
-nothing.
+use, and a flood of sign-ins cannot take the CPU from ingest and reads.
+
+Each source may also ask for only so many of those checks: **twenty at once,
+then one every three seconds**. Past that, the answer is `429 too many password
+checks from your network; try again in N seconds`, with `Retry-After: N`. A
+source is an IPv4 address, or an IPv6 /64 (one machine is given a whole /64). A
+flood from one source therefore costs the server one check every three seconds,
+and people signing in from anywhere else never meet it. The limit covers every
+request that checks a password — signing in, setup, accepting an invitation,
+changing a password — and nothing that is refused before a check: an email
+already locked out, a made-up invitation link, an over-long email. A request
+the source limit refuses gives back its place in the email's five. What the
+limit cannot stop is a flood from many sources at once, a botnet or a whole
+IPv6 /48. Then the gate above still keeps ingest and reads running, and real
+sign-ins meet its `503` for as long as the flood lasts.
+
+Behind a reverse proxy, every request arrives from the proxy. The server takes
+the client's address from `X-Forwarded-For` only when the proxy is one it
+trusts: loopback by default, or whatever `TRACEPAD_TRUSTED_PROXIES` lists. If
+the proxy is not trusted, everybody behind it is one source and shares those
+twenty, and the log says which setting to change
+([docker.md](docker.md#serving-over-tls)). A TCP relay on loopback — a
+service-mesh sidecar, `ssh -L`, `socat` — is not a proxy that appends: behind
+one, set `TRACEPAD_TRUSTED_PROXIES=none` or name the real proxy, or a client
+can pick its own source. `GET /api/v1/system`, asked with a key that holds
+`read`, shows the source your own request counts as.
+
+An invitation link is checked before its password is hashed, so a request with
+a made-up link costs nothing.
 
 Passwords are `bcrypt` at cost 12, between 10 and 72 **bytes**, with no other
 rule: composition rules make passwords worse, and 72 bytes is where `bcrypt`
@@ -180,7 +203,7 @@ refused while a project key went on working.
 |---|---|
 | `GET /api/v1/auth/me` | The account and every project it can reach, with the role in each. The one call the interface makes on load. |
 | `PATCH /api/v1/auth/me` | Change the display name, the password with `{"password": {"current", "new"}}`, or the preferences with `{"preferences": {…}}` — any of them, together or alone. A password change signs every **other** session out. A wrong current password is `403`, and five in fifteen minutes make the next `429`; `409` means another change landed first — sign in again. |
-| `GET /api/v1/auth/sessions` | Where this account is signed in, the current one marked, with the user agent and address of each. |
+| `GET /api/v1/auth/sessions` | Where this account is signed in, the current one marked, with the user agent and address of each: the client's own address, which behind a proxy the server reads only from a proxy it trusts (`TRACEPAD_TRUSTED_PROXIES`). |
 | `DELETE /api/v1/auth/sessions` | Sign out everywhere but here. What you press after a laptop goes missing. |
 | `POST /api/v1/auth/logout` | End this session. |
 
@@ -373,6 +396,7 @@ one in this section.
 | `TRACEPAD_URL` | — | The address your people actually use. The server prints setup and invitation links at its own guess otherwise — the listen address, or the request's `Host` — which is wrong behind a proxy, and its host is one of the three the cross-site check accepts. An `https://` address also tells the server a TLS proxy is in front, which silences its plain-HTTP warning (or, in the image, note) at start ([docker.md](docker.md#serving-over-tls)). |
 | `TRACEPAD_ADMIN_TOKEN` | — | Unchanged from [administration](admin.md), and now also the account routes. At least 32 characters, or the server does not start; `TRACEPAD_ADMIN_TOKEN_FILE` reads it from a file instead. |
 | `TRACEPAD_SETUP` | `on` | `off` mints no setup link and refuses `POST /api/v1/setup`; make the first owner with the admin token. |
+| `TRACEPAD_TRUSTED_PROXIES` | `loopback` | The proxies whose `X-Forwarded-For` the server believes when it works out a client's address: IP addresses and CIDR ranges, comma-separated, and `loopback` for `127.0.0.0/8` and `::1`. `none` trusts no proxy. An entry that does not parse, or a range wider than `/8` (IPv4) or `/16` (IPv6), stops the start. |
 
 Expired sessions and invitations are removed by the
 [retention sweeper](retention.md) on its usual pass. A session that has run out

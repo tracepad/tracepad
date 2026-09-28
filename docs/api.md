@@ -1161,6 +1161,15 @@ was spent ([ingest.md](ingest.md#how-much-one-export-may-carry)).
 the ones that found no slot free before it — see [Reads under
 load](#reads-under-load).
 
+`source` is the source this request counts as for the limit on password
+checks ([accounts.md](accounts.md#signing-in)) — an address, or an IPv6 /64:
+the connection's peer, or the client a trusted proxy named in
+`X-Forwarded-For`. Behind a proxy, it is how to check that
+`TRACEPAD_TRUSTED_PROXIES` is right: it should be your address, not the
+proxy's. An IPv4 address is its own source, and so is a NAT64 address
+(`64:ff9b::/96`), which is an IPv4 client written in IPv6. The limit's own counts are not here — they are every tenant's
+sign-ins — and a refusal is in the server's log instead.
+
 `runs` is the link between traces and eval runs ([datasets.md](datasets.md)):
 `pinned_traces` is how many traces a live run is keeping out of the retention
 sweep — the size of retention's one exception — and `orphan_traces` how many

@@ -2969,6 +2969,7 @@ export interface operations {
                 };
             };
             422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };
@@ -3089,6 +3090,7 @@ export interface operations {
                 };
             };
             422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };
@@ -3292,6 +3294,8 @@ export interface operations {
                             busy: number;
                             capacity: number;
                         };
+                        /** @description The source this request counts as: a whole address (IPv4, or an IPv6 NAT64 client), or an IPv6 /64 — the peer, or the client a trusted proxy forwarded */
+                        source?: string;
                         response_budget_bytes?: number;
                         /** @description The link between traces and dataset runs, as this project sees it */
                         runs?: {

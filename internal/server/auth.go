@@ -1076,21 +1076,3 @@ func newSessionValue() (string, error) {
 	}
 	return base64.RawURLEncoding.EncodeToString(raw), nil
 }
-
-// clientIP is what the session list shows beside a user agent. Behind a proxy
-// this is the proxy unless it forwards; the first hop of `X-Forwarded-For` is
-// the best guess there is, and it is shown to a person deciding whether they
-// recognise a session rather than used for any decision of ours.
-func clientIP(r *http.Request) string {
-	if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
-		first, _, _ := strings.Cut(forwarded, ",")
-		if first = strings.TrimSpace(first); first != "" {
-			return first
-		}
-	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
-}

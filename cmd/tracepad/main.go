@@ -148,6 +148,8 @@ Server environment:
                                   at least 32 characters: openssl rand -hex 32
   TRACEPAD_ADMIN_TOKEN_FILE       read the admin token from this file   (default unset)
   TRACEPAD_SETUP                  mint and print the setup link         (default on)
+  TRACEPAD_TRUSTED_PROXIES        proxies whose X-Forwarded-For counts  (default loopback)
+                                  addresses and CIDR ranges, or none
 
 `+cli.Usage)
 }
@@ -212,6 +214,10 @@ func serve(args []string) error {
 	printStartup(os.Stdout, boot, cfg.Listen, srv.SetupURL())
 	noteSetupOff(slog.Default(), cfg, srv)
 	warnPlainHTTP(slog.Default(), cfg.Listen, cfg.URL, cfg.InContainer)
+	// Once, so that "whose X-Forwarded-For does this server believe" is
+	// in the log beside the address it listens on (spec 046 #1).
+	slog.Info("client addresses: X-Forwarded-For is read from these proxies",
+		"trusted_proxies", srv.TrustedProxies())
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { BCRYPT_WAIT, FAILING_TRACE, PASSWORD } from './harness';
+import { BCRYPT_WAIT, FAILING_TRACE, fromOwnAddress, PASSWORD } from './harness';
 
 // The whole of spec 028 as one story, against a server of its own: the setup
 // link the binary printed creates the first owner, that owner invites a
@@ -112,6 +112,7 @@ async function seed(at: Stand) {
 
 /** Signs in through the form, on this file's own server. */
 async function signIn(page: Page, at: Stand, who: { email: string; password: string }) {
+	await fromOwnAddress(page);
 	await page.goto(`${at.base}/login`);
 	await page.getByLabel('Email').fill(who.email);
 	await page.getByLabel('Password', { exact: true }).fill(who.password);
@@ -171,6 +172,7 @@ test.describe('accounts, from the link the server printed', () => {
 		await expect(guard.getByRole('button', { name: 'Create the owner' })).toHaveCount(0);
 		await guard.close();
 
+		await fromOwnAddress(page);
 		await page.goto(at.setup);
 		await page.getByLabel('Display name').fill('The Founder');
 		await page.getByLabel('Email').fill(OWNER.email);
@@ -187,6 +189,7 @@ test.describe('accounts, from the link the server printed', () => {
 
 		// And the link is spent: the token still parses, but the server has an
 		// owner now, so there is nothing to set up.
+		await fromOwnAddress(page);
 		await page.goto(at.setup);
 		await expect(page.getByText('already has an owner')).toBeVisible();
 		// Without a token at all it says the other thing, and both point at
@@ -226,6 +229,7 @@ test.describe('accounts, from the link the server printed', () => {
 	// the owner's from the test before is gone.
 	test('the viewer accepts in another browser and sees a viewer’s interface', async ({ page }) => {
 		const at = stand as Stand;
+		await fromOwnAddress(page);
 		await page.goto(invitation.replace(/^http:\/\/[^/]+/, at.base));
 		await page.getByLabel('Password', { exact: true }).fill(VIEWER.password);
 		await page.getByLabel('Password again').fill(VIEWER.password);
