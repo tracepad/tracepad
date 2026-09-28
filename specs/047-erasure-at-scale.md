@@ -100,6 +100,7 @@ bulk deletion), spec 043 (read slots, `WithoutCancel`, background contexts
 | 19 | **2026-09-28** — **The contract changes now, without a synchronous mode.** Before the beta the API may change (REPOS.md), and the interface and the CLI are updated in the same PR. A client that expected `200` gets `202` and the resource, whose `deleted` it can read after polling. `wait` stands in for the synchronous answer where it fits | A `?sync=true` would keep a request that holds a connection for the erasure's length, the thing this spec removes, for a client that does not exist yet. |
 | 20 | **2026-09-28** (found in implementing PR 1) — **The session queries say which index they mean.** With no `ANALYZE`, SQLite breaks a tie between two indexes that answer the same equalities by the order they were created in. `idx_traces_user` and `idx_traces_session` both answer the correlated subquery of `sessionStartCondition` (`x.session_id = t.session_id AND x.user_id = t.user_id`), and `dirtySessionHoursQuery` could walk `idx_traces_user` as a range on `user_id` instead of seeking `idx_traces_session` once per changed session. Migration 0029 recreates the user index after the session index, which flipped both choices to the user index. Both now write the user-id terms with a unary `+` (`+x.user_id = t.user_id`, `+other.user_id IS NOT NULL AND +other.user_id != ''`), so the plan no longer depends on the order the indexes were created in; `TestSessionStartSeeksTheSessionIndex` holds it. The queries that filter one user by time (the user page's live tail and session starts, `?user_id=` statistics and the capped trace count) now seek `idx_traces_user` on `(user_id, timestamp)` instead of walking the project's hour range, which is the index working as intended | The dirty-session query runs on every aggregator pass. Walking every trace with a user there is a scan of most of the table, five minutes apart, the shape spec 023's review of PR #42 removed once already. A plan that held only because of the order two migrations ran in is not a plan anyone chose. |
 | 21 | **2026-09-28** (measured in PR 1) — **What PR 1 measured, and the budget it set.** The synthetic user of 044 #20 (l) again, in a fresh store: 400 batches, each holding 50 of the user's traces and 50 of 200 other users', two spans a trace, start times spread over 30 days and shuffled within each batch, every closed hour rolled. On a laptop at a load average of 4–38, shared with other work: erasing the user's **20,000 traces took 19.4 s end to end**, 400 raw batches read, **42 chunks** (10,664 before), 719 chunk-hours for the 719 hours the user touched, so every hour was rolled once. A chunk's transaction took 235 ms at p50, 287 ms at p99 and 415 ms at most, measured inside the writer. That is above #5's 250 ms at p99: one whole-hour roll cost 6.5 ms on average here, 38.9 µs per unit the budget counts, so the rolls are about 120 ms of a chunk and deleting its ~480 traces with their observations is the rest, a cost the 500-trace bound has always carried and this spec does not change. **`DeleteRollBudget` is 5,000**, about 200 ms of rolls at the measured rate. It does not bind on this corpus, whose hours are light, and it is what keeps a chunk of dense hours from adding seconds. #5's 60 s and ~100 chunks hold. Migration 0029 on a synthetic file of 1,000,000 traces (801 MB) took 12.4 s, 0.8 s of it CPU and the rest disk, at a load average of 36; like every migration it runs once, before the server listens, and is logged (043 #24 m) | The 19 minutes of 044 #20 (l) were 10,664 commits and 10,664 rolls. The same work in start order is 42 of the one and 719 of the other. The budget comes from the measured rate, not a guess, and a first hour is always taken whatever it costs. A dense hour on its own costs a chunk what it cost before. |
+| 22 | **2026-09-28** (found in the first review of PR #131, measured again) — **What the budget counts, and when.** Amends #2 and #21's budget. (a) A chunk's cost is the rolls of its hours plus the deletion of its own traces. An hour's roll costs `25 × traces + observations` over the hour's range of `idx_traces_timestamp`, counted from the rows, not from `stats_hourly`. Deleting a trace costs `25 + 3 × its observations`. (b) An hour's cost is asked only of the hours a chunk considers, once each, and the watermark is read once a chunk. (c) The budget counts the whole chunk, its first hour included; the first hour is taken whatever it costs. A budget of zero or less, on the job or on the server, is `DeleteRollBudget`, now **30,000**. (d) A chunk rolls each hour once, even when a trace with no start time (hour 0) and one that started before the epoch interleave in the start order. (e) Not counted: the per-user summaries the chunk's rolls touch are recomputed once a chunk (spec 023 #3), over every user of its hours. Their number is at most the traces of those hours, which the budget caps: 1,200 users at the most, some 25–70 ms at spec 023's 20–60 ms per thousand, in the worst case of one trace per user. Before, a dense hour's users were bounded by nothing. (f) Measured at a load average of 2–16, with the same corpus as #21 and with an agent profile of 5,000 of the user's traces and 5,000 others', 200 spans a trace and one model call: the first took 21.7 s in 59 chunks, p50 166 ms, p99 218 ms, at most 332 ms; the agent profile took 40.3 s in 207 chunks, p50 110 ms, p99 239 ms, at most 535 ms. Every hour was rolled once in both. A unit cost about 4 µs on both corpora: a trace about 94 µs of a roll, an observation 4, and deleting one of the chunk's own observations about 13. Weighed by traces alone, one unit was 34 µs on the first corpus and 4.5 on the second | (a) A roll reads every observation of the hour's traces through the join and filters by model only afterwards. `stats_hourly` counts the traces and the observations with a model, so an agent run of 200 spans and one model call looked 50 times cheaper than it was. An hour the aggregator has not rolled since its traces arrived (an import of history, late spans) has no rows there, or old ones, and it looked free while the roll read it whole. Unweighted, a budget that suited one corpus rolled the other an hour a chunk: 591 chunks for 5,000 agent traces, most of the time in commit windows. Without the deletion term, the agent profile's p99 was 496 ms, and the rolls were a third of it. (b) A chunk inside the writer's transaction read the counts of every hour of its 501 rows to use a few. (c) The comments had said "past its first hour", and the code and #2 both meant the whole chunk. Two meanings for zero was one refactor away from a server that rolls one hour a chunk again. (d) Rolling one hour twice in a transaction is harmless but paid twice. (e) Counting users would take a read per chunk for a number the budget already caps. (f) The first review asked for the p99 on an agent's traffic, not only on the light traces #21 measured. |
 
 ## API contract
 
@@ -202,9 +203,9 @@ scope matrix (spec 045) and the six-caller matrix cover the new routes.
   worker. `StartErasure(ctx, writer, UserErasure) (Erasure, error)` inserts
   or finds (#11) and wakes the worker. `Erasure(ctx, projectID, id)` and
   `Erasures(ctx, projectID)` read.
-- `TraceDelete` is unchanged. The server's round builder groups hours by the
-  budget (#4), reading the hour counts through one new store call
-  (`RollCosts(ctx, projectID, hours)`) in the round's read slot.
+- `TraceDelete` is unchanged. The server's round builder cuts its rows with
+  one new store call, `DeletionChunks(ctx, projectID, hours, limit, budget)`,
+  in the round's read slot (#4, #22).
 - The sweeper removes finished erasures past 30 days (#15), as its last
   job of a pass.
 
@@ -262,11 +263,11 @@ of 1,000,000 traces, logged like every migration (043 #24 m).
 
 PR 1:
 - EXPLAIN: the chunk's selection seeks `idx_traces_user (project_id=? AND
-  user_id=?)` in index order with no temp B-tree. The density read seeks
-  `stats_hourly`'s key.
-- A user whose traces arrived in shuffled start order across 50 hours, each
-  hour rolled: the erasure takes `⌈traces / 500⌉ + (cut hours)` chunks, not
-  one per hour. Every hour is rolled once (a roll counter seam). A client
+  user_id=?)` in index order with no temp B-tree. An hour's cost reads the
+  hour's range of `idx_traces_timestamp`.
+- A user whose traces arrived round-robin across three hours, each hour
+  rolled: the chunks take whole hours, and each hour is in exactly one
+  chunk's `Hours`, so it is rolled once. A client
   hang-up after chunk k leaves no hour counting an erased trace (023 #19's
   test, kept green).
 - The budget: with `RollBudget` set low on the job, a chunk of dense hours
@@ -274,8 +275,11 @@ PR 1:
   always taken.
 - A trace whose start moves earlier between chunks is still erased, and its
   new hour rolled.
-- Bulk deletion: 300 traces over 118 hours delete in ≤ 3 chunks, and the
-  round's `more` is unchanged.
+- An hour's cost is its traces and every observation they hold, counted from
+  the rows before any roll (#22); an hour at the watermark costs nothing; a
+  cost is asked only of the hours a chunk considers.
+- Bulk deletion: sixty light hours delete in one chunk, and dense ones still
+  stop at `deleteRoundChunks` with `more`.
 - Mutation: back to arrival order, the chunk-count test fails.
 
 PR 2:

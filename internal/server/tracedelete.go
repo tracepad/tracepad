@@ -167,22 +167,22 @@ func (s *Server) handleDeleteTraces(w http.ResponseWriter, r *http.Request) {
 	filter.Limit = limit + 1
 	// The selection is a listing's read, and is bounded as one; the
 	// deletion after it is the writer's (spec 043 #29).
-	// What rolling each of their hours costs is read with them, for the
-	// chunks below (spec 047 #4).
+	// The chunks are cut with the read, from what rolling each hour costs
+	// (spec 047 #4).
 	var (
-		rows  []*store.TraceRow
-		hours []int64
-		costs map[int64]int64
+		rows []*store.TraceRow
+		ends []int
 	)
 	if !s.readInSlot(w, r, "failed to select the matching traces", func(ctx context.Context) (err error) {
 		if rows, err = s.store.Traces(ctx, project.ID, filter); err != nil {
 			return err
 		}
-		hours = make([]int64, 0, len(rows))
+		var hours, deletes []int64
 		for _, row := range rows[:min(len(rows), limit)] {
 			hours = append(hours, store.HourOf(row.Timestamp))
+			deletes = append(deletes, store.TraceDeleteCost(row.ObservationCount))
 		}
-		costs, err = s.store.RollCosts(ctx, project.ID, hours)
+		ends, err = s.store.DeletionChunks(ctx, project.ID, hours, deletes, store.TraceDeleteChunk, s.deleteRollBudget)
 		return err
 	}) {
 		return
@@ -228,7 +228,7 @@ func (s *Server) handleDeleteTraces(w http.ResponseWriter, r *http.Request) {
 		return true
 	}
 	start := 0
-	for _, end := range store.HourChunks(hours, costs, store.TraceDeleteChunk, s.deleteRollBudget) {
+	for _, end := range ends {
 		if chunks == deleteRoundChunks {
 			more = true
 			break

@@ -690,8 +690,9 @@ func (r *ProjectRestore) apply(tx *sql.Tx) error {
 // find those hours again, because the traces that named them were gone.
 //
 // A chunk takes the user's traces in the order they started, whole hours at a
-// time (spec 047 #1): at most `Limit` traces, and past its first hour at most
-// `RollBudget` of what its rolls recompute (#2). In start order a user's hours
+// time (spec 047 #1): its first hour always, and each next one while the chunk
+// stays within `Limit` traces and `RollBudget` of what its rolls recompute
+// (#2). In start order a user's hours
 // are contiguous, so each is rolled once — twice for an hour of more than
 // `Limit` traces, which is cut. Taken in arrival order, as before, a chunk kept
 // one hour's worth of the first 500 traces: for a client that exports out of
@@ -701,8 +702,9 @@ type UserDataErase struct {
 	UserID    string
 	Confirm   string
 	Limit     int
-	// RollBudget bounds what the chunk's rolls recompute past its first
-	// hour (spec 047 #2); zero is DeleteRollBudget.
+	// RollBudget bounds what the chunk's rolls recompute, its first hour
+	// included, though the first hour is taken whatever it costs (spec 047
+	// #2); zero is DeleteRollBudget.
 	RollBudget int64
 	// Now is the clock the freeze is measured against (spec 013 #11): an
 	// hour past the project's retention window is left as it stands. Zero
@@ -771,23 +773,25 @@ func (e *UserDataErase) apply(tx *sql.Tx) error {
 		ingested, updated int64
 	}
 	var read []row
-	var hours []int64
+	var hours, deletes []int64
 	for rows.Next() {
 		var (
 			r row
 			// NULL for a trace no span has reached — one a score
 			// or an item names before its spans arrived. Trace
 			// deletion reads it the same way.
-			timestamp sql.NullInt64
-			updated   sql.NullInt64
+			timestamp    sql.NullInt64
+			updated      sql.NullInt64
+			observations int
 		)
-		if err := rows.Scan(&r.id, &timestamp, &r.ingested, &updated); err != nil {
+		if err := rows.Scan(&r.id, &timestamp, &r.ingested, &updated, &observations); err != nil {
 			rows.Close()
 			return err
 		}
 		r.hour, r.updated = HourOf(timestamp.Int64), updated.Int64
 		read = append(read, r)
 		hours = append(hours, r.hour)
+		deletes = append(deletes, TraceDeleteCost(observations))
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
@@ -796,18 +800,23 @@ func (e *UserDataErase) apply(tx *sql.Tx) error {
 	var ids []any
 	updates, ingests := map[string]int64{}, map[string]int64{}
 	if len(read) > 0 {
-		costs, err := rollCosts(context.Background(), tx, e.ProjectID, hours)
+		cost, err := rollCosts(context.Background(), tx, e.ProjectID)
 		if err != nil {
 			return err
 		}
-		budget := e.RollBudget
-		if budget == 0 {
-			budget = DeleteRollBudget
+		ends, err := HourChunks(hours, deletes, cost, e.Limit, e.RollBudget)
+		if err != nil {
+			return err
 		}
-		end := HourChunks(hours, costs, e.Limit, budget)[0]
+		end := ends[0]
 		e.More = end < len(read)
+		// Once each: a trace with no start time reads as hour 0 and sorts
+		// before one that started before the epoch, so the same hour can
+		// come back later in the run.
+		rolled := map[int64]bool{}
 		for _, r := range read[:end] {
-			if len(e.Hours) == 0 || e.Hours[len(e.Hours)-1] != r.hour {
+			if !rolled[r.hour] {
+				rolled[r.hour] = true
 				e.Hours = append(e.Hours, r.hour)
 			}
 			ids = append(ids, r.id)
@@ -865,7 +874,7 @@ func (e *UserDataErase) apply(tx *sql.Tx) error {
 
 // userTracesByStart is a chunk's selection: the user's traces in the order they
 // started, walking `idx_traces_user` (spec 047 #1).
-const userTracesByStart = `SELECT id, timestamp, ingested_at, updated_at FROM traces
+const userTracesByStart = `SELECT id, timestamp, ingested_at, updated_at, observation_count FROM traces
 	WHERE project_id = ? AND user_id = ? ORDER BY timestamp LIMIT ?`
 
 // eraseRollup deletes the user's per-user rows and, when that removed any and

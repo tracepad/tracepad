@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -321,11 +322,29 @@ func TestARoundIsBoundedInChunksToo(t *testing.T) {
 	})
 	t.Run("light hours", func(t *testing.T) {
 		h, path := seed(t)
+		counted := &countedDeletes{JobWriter: h.server.writer}
+		h.server.writer = counted
 		rec := h.call(t, "DELETE", path, nil)
 		expectStatus(t, rec, 200)
 		answer := decodeJSON[deleteAnswer](t, rec)
 		if answer.Deleted["traces"] != hours || answer.More == nil || *answer.More {
 			t.Errorf("the round = %+v, want all %d traces and no more", answer, hours)
 		}
+		if counted.deletes != 1 {
+			t.Errorf("%d chunks for %d light hours, want them in one", counted.deletes, hours)
+		}
 	})
+}
+
+// countedDeletes counts the deletion chunks submitted through it.
+type countedDeletes struct {
+	JobWriter
+	deletes int
+}
+
+func (w *countedDeletes) Submit(ctx context.Context, job store.WriteJob) error {
+	if _, ok := job.(*store.TraceDelete); ok {
+		w.deletes++
+	}
+	return w.JobWriter.Submit(ctx, job)
 }

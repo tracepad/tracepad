@@ -424,7 +424,7 @@ transaction that leaves the store consistent on its own: the chunk's traces
 go and the hours they occupied are recomputed in the same commit, each hour
 once, and the writer is held for one chunk at a time so ingest keeps flowing
 between them. A chunk takes as many hours as are light to recompute; a dense
-hour is a chunk of its own. 20 000 traces spread over a month are about forty
+hour is a chunk of its own. 20 000 traces spread over a month are about sixty
 chunks, and seconds rather than minutes. The erasure **runs to completion whether or not the client waits for
 it** — a closed tab or the interface's thirty-second clock loses the answer
 and nothing else, and the interface and `tracepad users rm-data` say the

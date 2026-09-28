@@ -345,6 +345,68 @@ func TestAnEraseChunkTakesWholeHoursInStartOrder(t *testing.T) {
 	}
 }
 
+// TestAnEraseChunkFollowsATraceThatStartsEarlier (spec 047 #1): a late span
+// can move a trace's start into an hour an earlier chunk already took. The
+// next chunk reads the start as it stands, so the trace is taken there and
+// that hour is rolled again, left counting only the bystander.
+func TestAnEraseChunkFollowsATraceThatStartsEarlier(t *testing.T) {
+	s, project := readStore(t)
+	hour := func(i int) int64 { return rollupHour + int64(i)*SecondsPerHour }
+	for i, seed := range []userSeed{
+		{user: "moving", hour: hour(0)}, {user: "keep", hour: hour(0)},
+		{user: "moving", hour: hour(1)}, {user: "moving", hour: hour(2)},
+	} {
+		seed.n, seed.session, seed.environment, seed.model, seed.latencyMs, seed.offsetSeconds =
+			i+1, "s", "production", "claude-sonnet-5", 50, int64(i)
+		seedUserTrace(t, s, project.ID, seed)
+	}
+	for i := range 3 {
+		roll(t, s, project.ID, hour(i))
+	}
+	advance(t, s, project.ID, hour(2))
+	writer, err := s.NewWriter(quickWrites)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writer.Close()
+	erase := func() *UserDataErase {
+		t.Helper()
+		chunk := &UserDataErase{ProjectID: project.ID, UserID: "moving", Confirm: "moving", Limit: 1,
+			Now: (rollupHour + 4*SecondsPerHour) * 1e9}
+		if err := writer.Submit(t.Context(), chunk); err != nil {
+			t.Fatal(err)
+		}
+		return chunk
+	}
+	if first := erase(); !slices.Equal(first.Hours, []int64{hour(0)}) {
+		t.Fatalf("the first chunk took hours %v, want the first", first.Hours)
+	}
+	// The trace of the last hour now starts in the first.
+	if _, err := s.db.Exec(`UPDATE traces SET timestamp = ? WHERE id = ?`,
+		(hour(0)+30)*1e9, hexTrace(4)); err != nil {
+		t.Fatal(err)
+	}
+	if second := erase(); !slices.Equal(second.Hours, []int64{hour(0)}) || second.Counts.Traces != 1 {
+		t.Errorf("the second chunk took %d traces in hours %v, want the moved one in the first hour",
+			second.Counts.Traces, second.Hours)
+	}
+	for erase().More {
+	}
+	var left int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM traces WHERE user_id = 'moving'`).Scan(&left); err != nil || left != 0 {
+		t.Errorf("%d of the user's traces left (%v)", left, err)
+	}
+	var counted int64
+	for _, row := range rolledRows(t, s, project.ID, hour(0)) {
+		if row.Model == "" {
+			counted += row.Count
+		}
+	}
+	if counted != 1 {
+		t.Errorf("the first hour counts %d traces, want the bystander's 1", counted)
+	}
+}
+
 // TestErasureLeavesAFrozenHourStanding (spec 013 #11): the roll inside the
 // chunk obeys the freeze, and it is the erasure's clock that measures it —
 // an hour past the retention window keeps its totals, the same hour inside
