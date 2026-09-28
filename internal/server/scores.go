@@ -1,7 +1,6 @@
 package server
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -80,12 +79,9 @@ func (s *Server) handleCreateScores(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if refuseOverItemCap(w, body, "scores") {
-		return
-	}
-	requests, err := decodeScores(body)
+	requests, err := decodeBatch[scoreRequest](body, "score")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeBatchError(w, err)
 		return
 	}
 	if len(requests) == 0 {
@@ -126,30 +122,6 @@ func (s *Server) handleCreateScores(w http.ResponseWriter, r *http.Request) {
 	//
 	// 201 only now: the transaction is committed and fsynced (#9).
 	writeJSON(w, http.StatusCreated, scoreIDsResponse{IDs: ids})
-}
-
-// decodeScores reads the body as either one score or an array of them, keeping
-// the strictness of a single object in both shapes (#17).
-func decodeScores(body []byte) ([]*scoreRequest, error) {
-	// TrimLeft on the bytes, not on a string copy of them: the body can be
-	// megabytes, and all that is needed is its first meaningful character.
-	if trimmed := bytes.TrimLeft(body, " \t\r\n"); len(trimmed) > 0 && trimmed[0] == '[' {
-		var requests []*scoreRequest
-		if err := decodeStrict(body, &requests); err != nil {
-			return nil, err
-		}
-		for i, request := range requests {
-			if request == nil {
-				return nil, fmt.Errorf("score at index %d is null", i)
-			}
-		}
-		return requests, nil
-	}
-	var request scoreRequest
-	if err := decodeStrict(body, &request); err != nil {
-		return nil, err
-	}
-	return []*scoreRequest{&request}, nil
 }
 
 // itemError names which item of an array POST was refused; a single object

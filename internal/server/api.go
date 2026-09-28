@@ -199,24 +199,108 @@ func (s *Server) readJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 // the SDKs send scores in.
 const maxItemsPerWrite = store.MaxItemsPerWrite
 
-// refuseOverItemCap answers 413 for a body that is one JSON array of more
-// than maxItemsPerWrite values, naming the count and the cap. The values are
-// counted before any of them is decoded into a request, so the count is the
-// answer whatever they hold. A body of any other shape, or one that is not a
-// single well-formed array, is not counted: the strict decode after this
-// answers it as it always has.
-func refuseOverItemCap(w http.ResponseWriter, body []byte, kind string) bool {
+// decodeBatch reads a write's body as one object or an array of them — the
+// shape every batch write takes — with the strictness of a single object in
+// both (spec 003 #17). An array of more than maxItemsPerWrite values is an
+// *overItemCap, decided by counting before any value is decoded into a T, so
+// the count is the answer whatever the values hold. A body of any other
+// shape, or one that is not a single well-formed array, is not counted, and
+// the strict decode answers it as it always has. noun names one value in the
+// messages: "score", "item".
+func decodeBatch[T any](body []byte, noun string) ([]*T, error) {
 	if trimmed := bytes.TrimLeft(body, " \t\r\n"); len(trimmed) == 0 || trimmed[0] != '[' {
-		return false
+		var one T
+		if err := decodeStrict(body, &one); err != nil {
+			return nil, err
+		}
+		return []*T{&one}, nil
 	}
-	var rows []json.RawMessage
-	if json.Unmarshal(body, &rows) != nil || len(rows) <= maxItemsPerWrite {
-		return false
+	if count := arrayLength(body); count > maxItemsPerWrite {
+		return nil, &overItemCap{count: count, kind: noun + "s"}
 	}
-	writeError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf(
-		"this request carries %d %s; the server takes at most %d per request — send them in batches",
-		len(rows), kind, maxItemsPerWrite))
-	return true
+	var batch []*T
+	if err := decodeStrict(body, &batch); err != nil {
+		return nil, err
+	}
+	for i, value := range batch {
+		if value == nil {
+			return nil, fmt.Errorf("%s at index %d is null", noun, i)
+		}
+	}
+	return batch, nil
+}
+
+// arrayLength counts the values of a body that is one well-formed JSON
+// array, and answers 0 for any other body — or for one too short to hold
+// more than maxItemsPerWrite values: n values take at least 2n+1 bytes, n
+// one-byte values, n−1 commas and two brackets, so a body under
+// 2(maxItemsPerWrite+1)+1 bytes is not counted at all. A longer one is
+// validated and then scanned once for the commas between its top-level
+// values, holding nothing: a 20 MiB array of ten million zeros costs no
+// memory per value and about a tenth of a second (spec 043 #36).
+func arrayLength(body []byte) int {
+	trimmed := bytes.TrimLeft(body, " \t\r\n")
+	if len(body) < 2*(maxItemsPerWrite+1)+1 || len(trimmed) == 0 || trimmed[0] != '[' || !json.Valid(body) {
+		return 0
+	}
+	depth, commas, values := 0, 0, false
+	inString, escaped := false, false
+	for _, c := range body {
+		switch {
+		case inString:
+			switch {
+			case escaped:
+				escaped = false
+			case c == '\\':
+				escaped = true
+			case c == '"':
+				inString = false
+			}
+			continue
+		case c == ' ' || c == '\t' || c == '\r' || c == '\n':
+			continue
+		}
+		if depth == 1 && c != ',' && c != ']' {
+			values = true
+		}
+		switch c {
+		case '"':
+			inString = true
+		case '[', '{':
+			depth++
+		case ']', '}':
+			depth--
+		case ',':
+			if depth == 1 {
+				commas++
+			}
+		}
+	}
+	if !values {
+		return 0
+	}
+	return commas + 1
+}
+
+// overItemCap is an array write over maxItemsPerWrite: a 413, not a 400.
+type overItemCap struct {
+	count int
+	kind  string
+}
+
+func (e *overItemCap) Error() string {
+	return fmt.Sprintf("this request carries %d %s; the server takes at most %d per request — send them in batches",
+		e.count, e.kind, maxItemsPerWrite)
+}
+
+// writeBatchError answers a body decodeBatch refused.
+func writeBatchError(w http.ResponseWriter, err error) {
+	status := http.StatusBadRequest
+	var over *overItemCap
+	if errors.As(err, &over) {
+		status = http.StatusRequestEntityTooLarge
+	}
+	writeError(w, status, err.Error())
 }
 
 // readAPIBody reads and size-caps a request body (spec 003, API contract).

@@ -1,9 +1,13 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/tracepad/tracepad/internal/store"
@@ -77,6 +81,91 @@ func TestBatchWritesThatAreNotOneArrayKeepTheirAnswers(t *testing.T) {
 			expectError(t, rec, http.StatusBadRequest, c.want)
 		}
 	}
+}
+
+// Counting an array costs no memory per value (spec 043 #36): a 20 MiB body
+// of ten million zeros — the most values the default body cap holds — is
+// refused without a copy of its values, where decoding them into
+// json.RawMessage cost 1.6 GB and ten million allocations a request, outside
+// the body budget.
+func TestBatchWritesOverTheCapAreCountedWithoutMemoryPerValue(t *testing.T) {
+	body := zeros20MiB()
+	var before, after runtime.MemStats
+	var err error
+	allocs := testing.AllocsPerRun(1, func() {
+		runtime.ReadMemStats(&before)
+		_, err = decodeBatch[scoreRequest](body, "score")
+		runtime.ReadMemStats(&after)
+	})
+	var over *overItemCap
+	if !errors.As(err, &over) || over.count != 10<<20 {
+		t.Fatalf("err = %v, want the cap naming %d values", err, 10<<20)
+	}
+	if allocs > 100 {
+		t.Errorf("counting took %v allocations, want a handful", allocs)
+	}
+	if held := after.TotalAlloc - before.TotalAlloc; held > 1<<20 {
+		t.Errorf("counting allocated %d bytes, want under 1 MiB for any number of values", held)
+	}
+}
+
+// A body too short to hold more values than the cap is not counted: the
+// SDKs' batches of 100 scores pay for one decode, not two.
+func TestBatchWritesUnderTheLengthBoundAreNotCounted(t *testing.T) {
+	short := []byte("[" + strings.Repeat("0,", maxItemsPerWrite) + "0]")
+	if len(short) != 2*(maxItemsPerWrite+1)+1 {
+		t.Fatalf("len = %d", len(short))
+	}
+	under := []byte("[" + strings.Repeat("0,", maxItemsPerWrite-1) + "0]")
+	if n := arrayLength(under); n != 0 {
+		t.Errorf("a body under the bound was counted: %d", n)
+	}
+	if n := arrayLength(short); n != maxItemsPerWrite+1 {
+		t.Errorf("the shortest body over the cap counts %d, want %d", n, maxItemsPerWrite+1)
+	}
+}
+
+// The count is of top-level values: a comma, a bracket or an escaped quote
+// inside a string, and the values nested in an object or an array, are not
+// values of the batch.
+func TestArrayLengthCountsTopLevelValuesOnly(t *testing.T) {
+	const tricky = `{"a":"x,]\\\"[}, {","b":[1,{"c":","},[2,3]],"d":null}`
+	repeat := func(value string, n int) []byte {
+		return []byte("[" + strings.TrimSuffix(strings.Repeat(value+" ,\n", n), " ,\n") + "]")
+	}
+	for name, c := range map[string]struct {
+		body []byte
+		want int
+	}{
+		"objects with punctuation in strings": {repeat(tricky, maxItemsPerWrite+1), maxItemsPerWrite + 1},
+		"nested arrays":                       {repeat(`[1,[2,3],"4,5"]`, maxItemsPerWrite+1), maxItemsPerWrite + 1},
+		"strings":                             {repeat(`"\\\","`, maxItemsPerWrite+1), maxItemsPerWrite + 1},
+		"one long string":                     {[]byte(`["` + strings.Repeat(",", 3*maxItemsPerWrite) + `"]`), 1},
+		"an empty array, padded":              {[]byte("[" + strings.Repeat(" ", 3*maxItemsPerWrite) + "]"), 0},
+		"an object":                           {[]byte(`{"a":"` + strings.Repeat(",", 3*maxItemsPerWrite) + `"}`), 0},
+		"not well-formed":                     {repeat(`0`, maxItemsPerWrite+1)[1:], 0},
+	} {
+		if got := arrayLength(c.body); got != c.want {
+			t.Errorf("%s: %d values, want %d", name, got, c.want)
+		}
+	}
+}
+
+func BenchmarkItemCapCount20MiBZeros(b *testing.B) {
+	body := zeros20MiB()
+	b.SetBytes(int64(len(body)))
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, err := decodeBatch[scoreRequest](body, "score"); err == nil {
+			b.Fatal("not refused")
+		}
+	}
+}
+
+func zeros20MiB() []byte {
+	body := append([]byte("["), bytes.Repeat([]byte("0,"), 10<<20)...)
+	body[len(body)-1] = ']'
+	return body
 }
 
 // The cap is inclusive and refuses whole: an array at the cap is written, one

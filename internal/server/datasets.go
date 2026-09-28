@@ -1,7 +1,6 @@
 package server
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -307,12 +306,9 @@ func (s *Server) handleCreateItems(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if refuseOverItemCap(w, body, "items") {
-		return
-	}
-	requests, err := decodeItems(body)
+	requests, err := decodeBatch[itemRequest](body, "item")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeBatchError(w, err)
 		return
 	}
 	if len(requests) == 0 {
@@ -358,28 +354,6 @@ func (s *Server) handleCreateItems(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, itemsWrittenResponse{IDs: ids, Version: write.Version, Changed: write.Changed})
-}
-
-// decodeItems reads the body as one item or an array of them, as strictly in
-// both shapes (spec 003 #17).
-func decodeItems(body []byte) ([]*itemRequest, error) {
-	if trimmed := bytes.TrimLeft(body, " \t\r\n"); len(trimmed) > 0 && trimmed[0] == '[' {
-		var requests []*itemRequest
-		if err := decodeStrict(body, &requests); err != nil {
-			return nil, err
-		}
-		for i, request := range requests {
-			if request == nil {
-				return nil, fmt.Errorf("item at index %d is null", i)
-			}
-		}
-		return requests, nil
-	}
-	var request itemRequest
-	if err := decodeStrict(body, &request); err != nil {
-		return nil, err
-	}
-	return []*itemRequest{&request}, nil
 }
 
 // indexedError names which item of an array was refused; a single object

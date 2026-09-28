@@ -283,14 +283,18 @@ describe('the dataset', () => {
     const cases: tracepad.Item[] = Array.from({ length: 10_001 }, (_, n) => ({ input: n }));
     cases[3]!.id = 'a';
     cases[10_000]!.id = 'a';
-    await expect(tracepad.dataset('golden').putItems(cases)).rejects.toThrow(/index 10000 .* index 3/);
+    // The module's error, as everything else it rejects with (spec 032 #21).
+    const refusal = tracepad.dataset('golden').putItems(cases);
+    await expect(refusal).rejects.toThrow(/index 10000 .* index 3/);
+    await expect(refusal).rejects.toBeInstanceOf(tracepad.TracepadError);
     expect(calls).toEqual([]);
   });
 
-  test('putItems reads a null id as none, not as a repeated one', async () => {
+  test('putItems compares only string ids: null is none, the rest is the server\'s to refuse', async () => {
     const calls = fakeFetch(() => ({ body: { version: 1, changed: 1 } }));
     tracepad.init({ host: HOST, key: KEY, export: false });
-    const cases = Array.from({ length: 10_001 }, (_, n) => ({ id: null, input: n }));
+    const ids = [null, null, '', '', 7, 7];
+    const cases = Array.from({ length: 10_001 }, (_, n) => ({ id: ids[n], input: n }));
     await tracepad.dataset('golden').putItems(cases as unknown as tracepad.Item[]);
     expect(calls).toHaveLength(2);
   });
