@@ -20,50 +20,52 @@ import (
 
 // DeleteCounts is what a destructive operation would remove, or did. Zero
 // fields are reported as zero rather than omitted: "nothing of this kind" is
-// an answer a caller acts on.
+// an answer a caller acts on. The json names are how an erasure's record
+// stores what it has committed (spec 047 #12, #27): the type itself, so a
+// count added here is stored with it.
 type DeleteCounts struct {
-	Traces       int64
-	Observations int64
-	Scores       int64
-	Payloads     int64
-	RawBatches   int64
+	Traces       int64 `json:"traces,omitempty"`
+	Observations int64 `json:"observations,omitempty"`
+	Scores       int64 `json:"scores,omitempty"`
+	Payloads     int64 `json:"payloads,omitempty"`
+	RawBatches   int64 `json:"raw_batches,omitempty"`
 	// StatsHours is how many rolled hours a stats window would delete
 	// (spec 013 #6). It is counted separately because it is the one thing
 	// here that survives the trace sweep.
-	StatsHours   int64
-	Prompts      int64
-	PromptLabels int64
-	APIKeys      int64
+	StatsHours   int64 `json:"stats_hours,omitempty"`
+	Prompts      int64 `json:"prompts,omitempty"`
+	PromptLabels int64 `json:"prompt_labels,omitempty"`
+	APIKeys      int64 `json:"api_keys,omitempty"`
 	// AnnotationQueues and AnnotationItems are spec 024's two stores.
 	// Counted because a destruction preview is what says how big the hole
 	// will be before it opens (spec 005 #8): the erasure takes the items
 	// pointing at the erased traces, and deleting a project takes both.
-	AnnotationQueues int64
-	AnnotationItems  int64
+	AnnotationQueues int64 `json:"annotation_queues,omitempty"`
+	AnnotationItems  int64 `json:"annotation_items,omitempty"`
 	// Media and MediaBytes are the bodies the project would stop holding —
 	// those none of its traces or raw batches staying behind points at —
 	// and their decoded bytes (spec 041 #11, #27): a preview that hid a
 	// hundred megabytes of pictures would be a preview that lies by
 	// omission. Whether another project keeps the bytes does not enter it.
-	Media      int64
-	MediaBytes int64
+	Media      int64 `json:"media,omitempty"`
+	MediaBytes int64 `json:"media_bytes,omitempty"`
 	// SessionScores are the scores that name a session and no trace: an
 	// erasure takes those of the erased traces' sessions (spec 044 #7), the
 	// sweep those whose session no trace carries any more (#8).
-	SessionScores int64
+	SessionScores int64 `json:"session_scores,omitempty"`
 	// DatasetItems are the items an erasure takes because a row of theirs
 	// was cut from an erased trace (spec 044 #9) — items, not rows.
-	DatasetItems int64
+	DatasetItems int64 `json:"dataset_items,omitempty"`
 	// RawSpans are the erased spans taken out of the raw batches, and
 	// RawBatchesRewritten and RawBatchesDeleted the batches that held them:
 	// rewritten without them, or deleted — left empty, or a rewrite that
 	// failed (spec 044 #2).
-	RawSpans            int64
-	RawBatchesRewritten int64
-	RawBatchesDeleted   int64
+	RawSpans            int64 `json:"raw_spans,omitempty"`
+	RawBatchesRewritten int64 `json:"raw_batches_rewritten,omitempty"`
+	RawBatchesDeleted   int64 `json:"raw_batches_deleted,omitempty"`
 	// Oldest is the arrival time of the oldest affected row (Unix
 	// nanoseconds), or zero when nothing is affected.
-	Oldest int64
+	Oldest int64 `json:"oldest,omitempty"`
 }
 
 // add sums what two chunks of one request deleted. Oldest is a preview's

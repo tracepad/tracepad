@@ -658,8 +658,7 @@ type erasureRun struct {
 // It answers an error only for a run that stopped before the erasure ended —
 // the worker stopping, or the end not recorded — and leaves the erasure
 // running for the next start. A failure of the erasure itself ends it failed.
-func (s *Store) runErasure(ctx context.Context, writer jobSubmitter, id string, opts EraserOptions) (erasureRun, error) {
-	var run erasureRun
+func (s *Store) runErasure(ctx context.Context, writer jobSubmitter, id string, opts EraserOptions) (run erasureRun, err error) {
 	after := func(step int) error {
 		if opts.after == nil {
 			return nil
@@ -682,10 +681,22 @@ func (s *Store) runErasure(ctx context.Context, writer jobSubmitter, id string, 
 	e := begin.Erasure
 	if begin.GaveUp {
 		s.erasures.announceEnd()
-		logger().Error("an erasure was interrupted by every start it was given and has failed",
-			"erasure", e.ID, "project", e.ProjectID, "starts", erasureAttempts)
+		logger().Error("an erasure was interrupted by every start it was given and has failed; "+
+			"the batches that arrived for its deleted traces while it ran are not scrubbed",
+			"erasure", id, "starts", erasureAttempts+1, "tail_windows_dropped", begin.Dropped)
 		return run, nil
 	}
+	// A clean stop of the worker gives the start back (#27): only a start a
+	// crash cut off counts toward the erasure's last one.
+	defer func() {
+		if err != nil && ctx.Err() != nil {
+			pause, cancel := context.WithTimeout(context.WithoutCancel(ctx), pauseTime)
+			defer cancel()
+			if perr := writer.Submit(pause, &erasurePause{ID: id}); perr != nil {
+				logger().Warn("a stopped erasure's start stays counted", "erasure", id, "err", perr)
+			}
+		}
+	}()
 	if e.attempts > 1 {
 		logger().Info("resuming an erasure", "erasure", e.ID, "project", e.ProjectID,
 			"phase", e.Phase, "start", e.attempts)
@@ -703,7 +714,7 @@ func (s *Store) runErasure(ctx context.Context, writer jobSubmitter, id string, 
 				return run, err
 			}
 			// Nothing parsed is gone yet: there is no tail to read.
-			return run, s.endErasure(ctx, writer, e, err, run, began)
+			return run, s.endErasure(ctx, writer, e, err, phaseRaw, run, began)
 		}
 		// Step 2 is whole: a stop from here on resumes with the chunks.
 		if err := submitErasureJob(ctx, writer, &erasureStep{ID: e.ID, Phase: phaseParsed}); err != nil {
@@ -726,7 +737,7 @@ func (s *Store) runErasure(ctx context.Context, writer jobSubmitter, id string, 
 			// repeat can no longer find. Step 4 runs on what they
 			// stored, and the failure is the end after it (#16).
 			failed = err
-			step := &erasureStep{ID: e.ID, Phase: phaseTail, Error: failureSentence(err, e.UserID)}
+			step := &erasureStep{ID: e.ID, Phase: phaseTail, Error: failureSentence(err, e.UserID, phaseParsed)}
 			if err := submitErasureJob(ctx, writer, step); err != nil {
 				return run, err
 			}
@@ -738,13 +749,14 @@ func (s *Store) runErasure(ctx context.Context, writer jobSubmitter, id string, 
 	// 4. The tail: the batches that arrived while the erasure ran, for the
 	// traces that received one, and every batch of a trace that became the
 	// user's meanwhile. Usually none.
+	failedIn := phaseParsed
 	if err := s.erasureTail(ctx, writer, e, &run); err != nil {
 		if stopped(ctx, err) {
 			return run, err
 		}
-		failed = errors.Join(failed, err)
+		failed, failedIn = errors.Join(failed, err), phaseTail
 	}
-	return run, s.endErasure(ctx, writer, e, failed, run, began)
+	return run, s.endErasure(ctx, writer, e, failed, failedIn, run, began)
 }
 
 // erasureRaw is steps 1 and 2: the user's traces, and the batches of their
@@ -792,7 +804,11 @@ func (s *Store) erasureParsed(ctx context.Context, writer jobSubmitter, e *Erasu
 	}
 	for {
 		chunk := &UserDataErase{ProjectID: e.ProjectID, UserID: e.UserID, Confirm: e.UserID,
-			Limit: limit, Now: e.now,
+			// The freeze clock never goes back (spec 013 #11), and goes
+			// forward with the chunks: an erasure that waited in the queue
+			// or across a stop must not judge a swept hour by the day it
+			// was recorded (#27).
+			Limit: limit, Now: max(e.now, time.Now().UnixNano()),
 			Erasure: &chunkErasure{ID: e.ID, Since: e.since, Known: known, Legacy: legacy}}
 		if err := submitErasureJob(ctx, writer, chunk); err != nil {
 			return err
@@ -840,11 +856,11 @@ func (s *Store) erasureTail(ctx context.Context, writer jobSubmitter, e *Erasure
 
 // endErasure records the end — done, or failed with the sentence of what
 // failed — and tells whoever waits for it.
-func (s *Store) endErasure(ctx context.Context, writer jobSubmitter, e *Erasure, failed error,
+func (s *Store) endErasure(ctx context.Context, writer jobSubmitter, e *Erasure, failed error, phase string,
 	run erasureRun, began time.Time) error {
 	end := &erasureEnd{ID: e.ID}
 	if failed != nil {
-		end.Error = failureSentence(failed, e.UserID)
+		end.Error = failureSentence(failed, e.UserID, phase)
 	}
 	if err := submitErasureJob(ctx, writer, end); err != nil {
 		return err

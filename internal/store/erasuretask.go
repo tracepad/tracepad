@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -94,42 +95,10 @@ func scanErasure(row interface{ Scan(...any) error }) (*Erasure, error) {
 	if n.Valid {
 		e.TracesAtStart = &n.Int64
 	}
-	var stored storedCounts
-	if err := json.Unmarshal([]byte(counts), &stored); err != nil {
+	if err := json.Unmarshal([]byte(counts), &e.Counts); err != nil {
 		return nil, fmt.Errorf("read erasure %s's counts: %w", e.ID, err)
 	}
-	e.Counts = stored.counts()
 	return &e, nil
-}
-
-// storedCounts is the `counts` column: the resource's `deleted` keys.
-type storedCounts struct {
-	Traces              int64 `json:"traces,omitempty"`
-	Observations        int64 `json:"observations,omitempty"`
-	Scores              int64 `json:"scores,omitempty"`
-	SessionScores       int64 `json:"session_scores,omitempty"`
-	Payloads            int64 `json:"payloads,omitempty"`
-	AnnotationItems     int64 `json:"annotation_items,omitempty"`
-	DatasetItems        int64 `json:"dataset_items,omitempty"`
-	Media               int64 `json:"media,omitempty"`
-	MediaBytes          int64 `json:"media_bytes,omitempty"`
-	RawSpans            int64 `json:"raw_spans,omitempty"`
-	RawBatchesRewritten int64 `json:"raw_batches_rewritten,omitempty"`
-	RawBatchesDeleted   int64 `json:"raw_batches_deleted,omitempty"`
-}
-
-func (s storedCounts) counts() DeleteCounts {
-	return DeleteCounts{Traces: s.Traces, Observations: s.Observations, Scores: s.Scores,
-		SessionScores: s.SessionScores, Payloads: s.Payloads, AnnotationItems: s.AnnotationItems,
-		DatasetItems: s.DatasetItems, Media: s.Media, MediaBytes: s.MediaBytes, RawSpans: s.RawSpans,
-		RawBatchesRewritten: s.RawBatchesRewritten, RawBatchesDeleted: s.RawBatchesDeleted}
-}
-
-func storeCounts(c DeleteCounts) storedCounts {
-	return storedCounts{Traces: c.Traces, Observations: c.Observations, Scores: c.Scores,
-		SessionScores: c.SessionScores, Payloads: c.Payloads, AnnotationItems: c.AnnotationItems,
-		DatasetItems: c.DatasetItems, Media: c.Media, MediaBytes: c.MediaBytes, RawSpans: c.RawSpans,
-		RawBatchesRewritten: c.RawBatchesRewritten, RawBatchesDeleted: c.RawBatchesDeleted}
 }
 
 func txErasure(tx *sql.Tx, id string) (*Erasure, error) {
@@ -152,13 +121,12 @@ func recordProgress(tx *sql.Tx, id string, counts DeleteCounts, compaction int64
 	if err != nil {
 		return false, fmt.Errorf("read erasure %s: %w", id, err)
 	}
-	var sum storedCounts
-	if err := json.Unmarshal([]byte(stored), &sum); err != nil {
+	var total DeleteCounts
+	if err := json.Unmarshal([]byte(stored), &total); err != nil {
 		return false, fmt.Errorf("read erasure %s's counts: %w", id, err)
 	}
-	total := sum.counts()
 	total.add(counts)
-	encoded, err := json.Marshal(storeCounts(total))
+	encoded, err := json.Marshal(total)
 	if err != nil {
 		return false, err
 	}
@@ -271,18 +239,26 @@ func (j *erasureStart) apply(tx *sql.Tx) error {
 
 // erasureBegin is a start of an erasure by the worker, the first or a
 // resume: it counts the attempt, and fixes step 1's moment the first time
-// (#12). An erasure started three times already ends failed instead.
+// (#12). A start is counted until the run ends or stops cleanly
+// (erasurePause), so what the count holds is the starts a crash cut off.
+//
+// After erasureAttempts of those, the next start is the erasure's last and
+// does only its tail, with the failure recorded (#27): the chunks that
+// committed deleted traces whose late batches no repeat can find again, so
+// they are scrubbed before the erasure gives up. A tail that is cut off too
+// is dropped, and the erasure ends failed at its next start.
 type erasureBegin struct {
 	ID string
 
 	Erasure *Erasure
 	// Gone reports an erasure that is not there or is over; GaveUp one
-	// this start ended.
+	// this start ended, and Dropped the tail windows it ended without.
 	Gone, GaveUp bool
+	Dropped      int64
 }
 
 func (j *erasureBegin) apply(tx *sql.Tx) error {
-	j.Erasure, j.Gone, j.GaveUp = nil, false, false
+	j.Erasure, j.Gone, j.GaveUp, j.Dropped = nil, false, false, 0
 	e, err := txErasure(tx, j.ID)
 	if err != nil {
 		return err
@@ -292,19 +268,45 @@ func (j *erasureBegin) apply(tx *sql.Tx) error {
 		return nil
 	}
 	now := time.Now().UnixNano()
-	if e.attempts >= erasureAttempts {
+	interrupted := fmt.Sprintf("interrupted by %d restarts", erasureAttempts)
+	if e.attempts > erasureAttempts {
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM erasure_tail WHERE erasure_id = ?`, j.ID).Scan(&j.Dropped); err != nil {
+			return err
+		}
 		j.GaveUp = true
-		j.Erasure, err = finishErasure(tx, j.ID, fmt.Sprintf("interrupted by %d restarts", erasureAttempts), now)
+		j.Erasure, err = finishErasure(tx, j.ID, interrupted, now)
 		return err
 	}
+	phase, failure := phaseRaw, ""
+	if e.attempts == erasureAttempts {
+		phase, failure = phaseTail, interrupted
+	}
 	if _, err := tx.Exec(`UPDATE erasures SET state = ?, attempts = attempts + 1,
-		started_at = COALESCE(started_at, ?), since = COALESCE(since, ?), phase = COALESCE(phase, ?)
-		WHERE id = ?`, ErasureRunning, now, now, phaseRaw, j.ID); err != nil {
+		started_at = COALESCE(started_at, ?), since = COALESCE(since, ?),
+		phase = CASE WHEN ? != '' THEN ? ELSE COALESCE(phase, ?) END,
+		error = COALESCE(error, NULLIF(?, ''))
+		WHERE id = ?`, ErasureRunning, now, now, failure, phase, phase, failure, j.ID); err != nil {
 		return fmt.Errorf("start erasure %s: %w", j.ID, err)
 	}
 	j.Erasure, err = txErasure(tx, j.ID)
 	return err
 }
+
+// erasurePause gives back the start of a run the worker's stop ended (#17,
+// #27): a clean stop is not a crash, and an erasure longer than a few
+// deploys must not run out of starts for them.
+type erasurePause struct{ ID string }
+
+func (j *erasurePause) apply(tx *sql.Tx) error {
+	_, err := tx.Exec(`UPDATE erasures SET attempts = MAX(attempts - 1, 0) WHERE id = ? AND state = ?`,
+		j.ID, ErasureRunning)
+	return err
+}
+
+// pauseTime bounds the one write a clean stop makes for its erasure: the
+// stop's own budget is ten seconds (spec 001 #16), and a pause that does not
+// land leaves the start counted, which is the safe side.
+const pauseTime = time.Second
 
 // erasureStep records what a phase learned outside a job of its own: step 1's
 // count, which a resume does not overwrite, and the move to the tail after a
@@ -633,12 +635,17 @@ func stopped(ctx context.Context, err error) bool {
 // errRunStopped is a run the test seam stopped, as a stop of the server would.
 var errRunStopped = errors.New("the erasure's run was stopped")
 
-// failureSentence is the error an erasure ends with, without the id of the
-// user it erased (#9) — a refusal quotes the echo it was given.
-func failureSentence(err error, userID string) string {
+// failureSentence is the error an erasure ends with, never naming the user it
+// erased (#9, #27): an error that carries the id — as it is, or quoted the
+// way a refusal quotes the echo it was given — is kept as the phase it
+// failed in and nothing more. Editing the id out would miss a form it was
+// escaped into, and a short id would take unrelated words with it.
+func failureSentence(err error, userID, phase string) string {
 	sentence := err.Error()
-	if userID != "" {
-		sentence = strings.ReplaceAll(sentence, userID, "the user")
+	quoted := strconv.Quote(userID)
+	if userID != "" && (strings.Contains(sentence, userID) ||
+		strings.Contains(sentence, quoted[1:len(quoted)-1])) {
+		return fmt.Sprintf("a job of the %s phase failed with an error that named the user, which is not kept", phase)
 	}
 	return sentence
 }

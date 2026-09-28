@@ -28,7 +28,14 @@
 	import { rememberedRange, rememberRange } from '$lib/range.svelte';
 	import UserSessionsTab from '$lib/components/users/UserSessionsTab.svelte';
 	import UserTracesTab from '$lib/components/users/UserTracesTab.svelte';
-	import { ERASE_WAIT_SECONDS, ErasureWatch, describe, settle } from '$lib/erasure.svelte';
+	import {
+		ERASE_WAIT_SECONDS,
+		ErasureWatch,
+		describe,
+		ended,
+		settle,
+		unanswered
+	} from '$lib/erasure.svelte';
 	import { cost, count, duration, middleEllipsis, timestamp } from '$lib/format';
 	import { href, project } from '$lib/project.svelte';
 
@@ -73,30 +80,22 @@
 	let erasing = $state(false);
 	/**
 	 * The erasure of this user under way, if any: the dialog's, or one the
-	 * dry run names on the way in, so a reload still shows it (spec 047 #13,
-	 * #18). The page stays while it runs, rather than leave as if the user
+	 * project's erasures name on the way in, so a reload still shows it (spec
+	 * 047 #18, #27). The page stays while it runs, rather than leave as if the user
 	 * were gone.
 	 */
 	const watch = new ErasureWatch();
 
-	// An editor's page asks the server whether this user is being erased:
-	// the dry run says so (#13), and the erasure's own resource says how far.
-	// A viewer may not ask either (spec 047 #14), and is offered no erasure.
+	// An editor's page asks whether this user is being erased: the project's
+	// erasures name their user while they run and only then (spec 047 #9,
+	// #14), so the listing is the one indexed read that answers it (#27). A
+	// viewer may not read it, and is offered no erasure.
 	$effect(() => {
 		const who = id;
 		const current = project.id;
 		if (!project.editor || !current) return;
 		const controller = new AbortController();
-		void untrack(async () => {
-			try {
-				const preview = await api.eraseUserData(current, who);
-				const running = (preview as DryRun).running;
-				if (controller.signal.aborted || !running) return;
-				watch.follow(current, await api.erasure(current, running.id, controller.signal));
-			} catch {
-				// The banner is a courtesy; the page is the user's data.
-			}
-		});
+		void untrack(() => findRunning(current, who, controller.signal));
 		return () => {
 			controller.abort();
 			watch.stop();
@@ -202,15 +201,36 @@
 	 * #8), rendered by the card Settings uses — one card, one contract. On
 	 * success there is no user left to be on, so the page leaves.
 	 */
+	/** Follows this user's erasure when one is under way. */
+	async function findRunning(current: string, who: string, signal?: AbortSignal) {
+		try {
+			const { erasures } = await api.erasures(current, signal);
+			const running = erasures.find((one) => one.user_id === who && !ended(one));
+			if (running && !signal?.aborted) watch.follow(current, running);
+		} catch {
+			// The banner is a courtesy; the page is the user's data.
+		}
+	}
+
 	async function erase(confirm?: string): Promise<DryRun | string> {
 		const current = project.id;
 		if (!current) throw new ApiError(0, 'there is no project on screen to erase from');
-		const answer = await api.eraseUserData(
-			current,
-			id,
-			confirm,
-			confirm === undefined ? undefined : ERASE_WAIT_SECONDS
-		);
+		let answer: DryRun | Erasure;
+		try {
+			answer = await api.eraseUserData(
+				current,
+				id,
+				confirm,
+				confirm === undefined ? undefined : ERASE_WAIT_SECONDS
+			);
+		} catch (cause) {
+			// Accepted or not, this page follows it if it was (spec 047 #27).
+			const sentence =
+				confirm === undefined ? null : unanswered(cause, id, 'this page shows it if it did');
+			if (sentence === null) throw cause;
+			void findRunning(current, id);
+			throw new ApiError(0, sentence);
+		}
 		if (answer.dry_run) return answer as DryRun;
 		// Still running on the server: the page stays, and says how far it
 		// is, rather than leaving as if the user were gone.

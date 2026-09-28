@@ -648,7 +648,7 @@ func TestALostErasureAnswerPointsAtTheListing(t *testing.T) {
 // with 202 and then reads as each of states in turn, one per GET.
 func fakeErasures(t *testing.T, states ...string) (*httptest.Server, *atomic.Int32) {
 	t.Helper()
-	var reads atomic.Int32
+	var reads, blips atomic.Int32
 	resource := func(state, phase string, deleted int) string {
 		phaseJSON, errorJSON := "null", "null"
 		if phase != "" {
@@ -675,6 +675,10 @@ func fakeErasures(t *testing.T, states ...string) (*httptest.Server, *atomic.Int
 			}
 			w.WriteHeader(http.StatusAccepted)
 			_, _ = w.Write([]byte(resource("queued", "", 0)))
+		case reads.Load() == 0 && blips.Add(1) <= 2:
+			// Two reads the server was too busy for, before any answer.
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"error":"the server is busy; retry shortly"}`))
 		default:
 			n := int(reads.Add(1)) - 1
 			state := states[min(n, len(states)-1)]

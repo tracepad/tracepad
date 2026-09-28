@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { api, type DryRun, type Erasure, type Project } from '$lib/api/client.svelte';
+	import { ApiError, api, type DryRun, type Erasure, type Project } from '$lib/api/client.svelte';
 	import {
 		ERASE_WAIT_SECONDS,
 		ERASURE_POLL_MS,
@@ -7,7 +7,8 @@
 		describe,
 		ended,
 		settle,
-		stage
+		stage,
+		unanswered
 	} from '$lib/erasure.svelte';
 	import { count, relative } from '$lib/format';
 	import ConfirmCard from '../ConfirmCard.svelte';
@@ -43,12 +44,22 @@
 
 	async function erase(confirm?: string): Promise<DryRun | string> {
 		const user = target;
-		const answer = await api.eraseUserData(
-			current.id,
-			user,
-			confirm,
-			confirm === undefined ? undefined : ERASE_WAIT_SECONDS
-		);
+		let answer: DryRun | Erasure;
+		try {
+			answer = await api.eraseUserData(
+				current.id,
+				user,
+				confirm,
+				confirm === undefined ? undefined : ERASE_WAIT_SECONDS
+			);
+		} catch (cause) {
+			// Accepted or not, the listing below says (spec 047 #27).
+			const sentence =
+				confirm === undefined ? null : unanswered(cause, user, 'the list below shows whether it did');
+			if (sentence === null) throw cause;
+			void list();
+			throw new ApiError(0, sentence);
+		}
 		if (answer.dry_run) return answer as DryRun;
 		erasing = user;
 		following = !ended(answer as Erasure);

@@ -476,8 +476,9 @@ answer and nothing else, and the erasure's record says where it is. A **stop
 of the server** interrupts it without waiting: every job commits its progress
 with it, so the next start **resumes** the erasure from its phase — including
 the tail, which a repeat of the request could not finish, because the traces
-that named those batches are gone. An erasure that three starts in a row
-could not finish is ended `failed` rather than tried for ever. A job that
+that named those batches are gone. A clean stop does not count against the
+erasure; a crash does, and after three of them the next start only rewrites
+those batches and ends the erasure `failed` rather than trying for ever. A job that
 fails with a condition of the database — a full disk, a lock that did not
 clear — is retried for up to two minutes; any other failure ends the erasure
 `failed`, after the tail has run for the chunks that committed. Repeating

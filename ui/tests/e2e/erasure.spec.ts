@@ -33,8 +33,13 @@ async function traffic(own: Project, user: string, traces: number) {
 	});
 	const response = await fetch(`${baseURL}/v1/traces`, {
 		method: 'POST',
-		headers: { Authorization: `Bearer ${own.key}`, 'Content-Type': 'application/json' },
-		body: JSON.stringify({ resourceSpans: [{ resource: { attributes: [] }, scopeSpans: [{ spans }] }] })
+		headers: {
+			Authorization: `Bearer ${own.key}`,
+			'Content-Type': 'application/json'
+		},
+		body: JSON.stringify({
+			resourceSpans: [{ resource: { attributes: [] }, scopeSpans: [{ spans }] }]
+		})
 	});
 	if (!response.ok) throw new Error(`POST /v1/traces: ${response.status} ${await response.text()}`);
 }
@@ -64,9 +69,12 @@ test('an erasure that outlasts the dialog is followed to its end, and listed', a
 	await expect(page.getByText(/runs on the server; this dialog follows it/)).toBeVisible();
 	const progress = page.getByTestId('erasure-progress');
 	await expect(progress).toHaveText(/Erasure in progress|Erased 300 traces/);
-	await expect(progress).toHaveText('Erased 300 traces belonging to erase-e2e, and 300 spans from 1 raw batch.', {
-		timeout: 20_000
-	});
+	await expect(progress).toHaveText(
+		'Erased 300 traces belonging to erase-e2e, and 300 spans from 1 raw batch.',
+		{
+			timeout: 20_000
+		}
+	);
 
 	// The listing has it, done, and names no one now that it is over.
 	const listed = page.getByRole('list', { name: 'Recent erasures' });
@@ -76,7 +84,9 @@ test('an erasure that outlasts the dialog is followed to its end, and listed', a
 	await expect(listed).not.toContainText('erase-e2e');
 });
 
-test("a user's page shows an erasure under way, across a reload, until it ends", async ({ page }) => {
+test("a user's page shows an erasure under way, across a reload, until it ends", async ({
+	page
+}) => {
 	const own = await createProject('erasure-reload');
 	await traffic(own, 'reload-e2e', 40);
 	const { baseURL } = state();
@@ -87,19 +97,30 @@ test("a user's page shows an erasure under way, across a reload, until it ends",
 	expect(started.status).toBe(202);
 	const { id } = (await started.json()) as { id: string };
 
-	// The page's two reads say "running" until the test lets them through.
+	// The page's two reads say "running" until the test lets them through:
+	// the listing it finds the erasure in, and the erasure it follows.
 	let held = true;
-	await page.route(/\/users\/reload-e2e\/data$/, async (route) => {
+	await page.route(new RegExp(`/projects/${own.id}/erasures$`), async (route) => {
 		const answer = await route.fetch();
 		const body = await answer.json();
-		if (held) body.running = { id, state: 'running', phase: 'parsed' };
+		if (held) {
+			for (const one of body.erasures) {
+				if (one.id === id)
+					Object.assign(one, { state: 'running', phase: 'parsed', user_id: 'reload-e2e' });
+			}
+		}
 		await route.fulfill({ response: answer, json: body });
 	});
 	await page.route(new RegExp(`/erasures/${id}$`), async (route) => {
 		const answer = await route.fetch();
 		const body = await answer.json();
 		if (held) {
-			Object.assign(body, { state: 'running', phase: 'parsed', user_id: 'reload-e2e', finished_at: null });
+			Object.assign(body, {
+				state: 'running',
+				phase: 'parsed',
+				user_id: 'reload-e2e',
+				finished_at: null
+			});
 			body.progress = { traces_at_start: 40, traces_deleted: 16 };
 		}
 		await route.fulfill({ response: answer, json: body });
@@ -114,5 +135,7 @@ test("a user's page shows an erasure under way, across a reload, until it ends",
 
 	// Let the real server answer: the next read finds it ended.
 	held = false;
-	await expect(banner).toHaveText(/Erased 40 traces belonging to reload-e2e/, { timeout: 10_000 });
+	await expect(banner).toHaveText(/Erased 40 traces belonging to reload-e2e/, {
+		timeout: 10_000
+	});
 });

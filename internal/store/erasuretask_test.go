@@ -1,8 +1,11 @@
 package store
 
 import (
+	"cmp"
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -54,27 +57,31 @@ func TestASecondRequestAnswersTheRunningErasure(t *testing.T) {
 // even when the error quoted it.
 func TestAnEndedErasureForgetsTheUser(t *testing.T) {
 	for _, tc := range []struct {
-		name string
-		fail error
+		name, user string
+		fail       error
 	}{
 		{name: "done"},
-		{name: "failed", fail: errors.New(`a chunk refused "user-a" twice`)},
+		{name: "failed", fail: errors.New("the disk is full")},
+		// An error that names the user is not kept, in either form (#27).
+		{name: "failed naming the user", user: "user-a", fail: errors.New(`a chunk refused "user-a" twice`)},
+		{name: "failed quoting the user", user: `we"ird`, fail: fmt.Errorf("a chunk refused %q", `we"ird`)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newErasureFixture(t)
-			f.ingestOTLP(t, export([]*tracepb.Span{otlpSpan(t, 1, 1, "user-a", "", "a", nil)}), false, daysAgo(1))
+			user := cmp.Or(tc.user, "user-a")
+			f.ingestOTLP(t, export([]*tracepb.Span{otlpSpan(t, 1, 1, user, "", "a", nil)}), false, daysAgo(1))
 			var writer jobSubmitter = f.writer
 			if tc.fail != nil {
 				writer = &failingChunk{jobSubmitter: f.writer, at: 1, err: tc.fail}
 			}
-			e := f.startErasure(t, "user-a")
-			if e.UserID != "user-a" {
+			e := f.startErasure(t, user)
+			if e.UserID != user {
 				t.Fatalf("a queued erasure is of %q, want the user", e.UserID)
 			}
 			if _, err := f.store.runErasure(t.Context(), writer, e.ID, EraserOptions{}); err != nil {
 				t.Fatal(err)
 			}
-			got := f.erasureOf(t, "user-a")
+			got := f.erasureOf(t, user)
 			if got.UserID != "" || got.Phase != "" || got.FinishedAt == 0 {
 				t.Errorf("ended, the erasure is of %q in %q, finished at %d", got.UserID, got.Phase, got.FinishedAt)
 			}
@@ -84,8 +91,15 @@ func TestAnEndedErasureForgetsTheUser(t *testing.T) {
 			if n := f.count(t, `SELECT COUNT(*) FROM erasure_tail`); n != 0 {
 				t.Errorf("%d tail rows are left", n)
 			}
-			if tc.fail != nil && (got.State != ErasureFailed || got.Error != `a chunk refused "the user" twice`) {
-				t.Errorf("the erasure is %s with %q, want failed without the id", got.State, got.Error)
+			switch {
+			case tc.fail == nil:
+			case tc.user == "":
+				if got.State != ErasureFailed || got.Error != tc.fail.Error() {
+					t.Errorf("the erasure is %s with %q, want failed with the chunk's error", got.State, got.Error)
+				}
+			case got.State != ErasureFailed || strings.Contains(got.Error, "ird") ||
+				strings.Contains(got.Error, "user-a") || !strings.Contains(got.Error, "parsed phase failed"):
+				t.Errorf("the erasure is %s with %q, want failed, the phase named and the user not", got.State, got.Error)
 			}
 		})
 	}
@@ -238,6 +252,96 @@ func (w *holdingChunk) Submit(ctx context.Context, job WriteJob) error {
 		close(w.held)
 		<-ctx.Done()
 		return ctx.Err()
+	}
+	return w.jobSubmitter.Submit(ctx, job)
+}
+
+// A clean stop gives the start back (#27): an erasure longer than a few
+// deploys is resumed by each start after them, not failed by the fourth.
+func TestACleanStopDoesNotCountAsAnInterruption(t *testing.T) {
+	f := newErasureFixture(t)
+	f.ingestOTLP(t, export([]*tracepb.Span{otlpSpan(t, 1, 1, "user-a", "", "a", nil)}), false, daysAgo(1))
+	e := f.startErasure(t, "user-a")
+	for range erasureAttempts + 2 {
+		ctx, cancel := context.WithCancel(t.Context())
+		writer := &stopOnChunk{jobSubmitter: f.writer, stop: cancel}
+		if _, err := f.store.runErasure(ctx, writer, e.ID, EraserOptions{}); !errors.Is(err, context.Canceled) {
+			t.Fatalf("the run was not stopped: %v", err)
+		}
+		cancel()
+		if got := f.erasureOf(t, "user-a"); got.attempts != 0 || got.State != ErasureRunning {
+			t.Fatalf("after a clean stop the erasure is %s with %d starts counted, want running and none",
+				got.State, got.attempts)
+		}
+	}
+	if _, err := f.store.runErasure(t.Context(), f.writer, e.ID, EraserOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.erasureOf(t, "user-a"); got.State != ErasureDone || got.Counts.Traces != 1 {
+		t.Errorf("the erasure ended %s (%q) with %d traces, want done with one", got.State, got.Error, got.Counts.Traces)
+	}
+}
+
+// stopOnChunk is the worker's stop arriving while a chunk is submitted: the
+// context ends, and the chunk with it.
+type stopOnChunk struct {
+	jobSubmitter
+	stop context.CancelFunc
+}
+
+func (w *stopOnChunk) Submit(ctx context.Context, job WriteJob) error {
+	if _, ok := job.(*UserDataErase); ok {
+		w.stop()
+		return ctx.Err()
+	}
+	return w.jobSubmitter.Submit(ctx, job)
+}
+
+// The freeze clock goes forward with the chunks (#27): an erasure recorded long
+// ago judges a swept hour by now, not by the day it was recorded; one whose
+// stored clock is ahead of the wall's keeps it.
+func TestAChunkFreezesByTheLaterOfTheTwoClocks(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		stored int64
+		ahead  bool
+	}{
+		{name: "recorded long ago", stored: 1},
+		{name: "a clock that went back", stored: time.Now().Add(time.Hour).UnixNano(), ahead: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newErasureFixture(t)
+			f.ingestOTLP(t, export([]*tracepb.Span{otlpSpan(t, 1, 1, "user-a", "", "a", nil)}), false, daysAgo(1))
+			e := f.startErasure(t, "user-a")
+			if _, err := f.store.db.Exec(`UPDATE erasures SET now = ? WHERE id = ?`, tc.stored, e.ID); err != nil {
+				t.Fatal(err)
+			}
+			writer := &clockOfChunks{jobSubmitter: f.writer}
+			before := time.Now().UnixNano()
+			if _, err := f.store.runErasure(t.Context(), writer, e.ID, EraserOptions{}); err != nil {
+				t.Fatal(err)
+			}
+			switch {
+			case len(writer.clocks) == 0:
+				t.Fatal("no chunk ran")
+			case tc.ahead && writer.clocks[0] != tc.stored:
+				t.Errorf("the chunk froze by %d, want the stored clock %d, which is later", writer.clocks[0], tc.stored)
+			case !tc.ahead && writer.clocks[0] < before:
+				t.Errorf("the chunk froze by %d, before the run began at %d", writer.clocks[0], before)
+			}
+		})
+	}
+}
+
+// clockOfChunks records the freeze clock of every chunk it passes on.
+type clockOfChunks struct {
+	jobSubmitter
+	clocks []int64
+}
+
+func (w *clockOfChunks) Submit(ctx context.Context, job WriteJob) error {
+	if chunk, ok := job.(*UserDataErase); ok {
+		w.clocks = append(w.clocks, chunk.Now)
 	}
 	return w.jobSubmitter.Submit(ctx, job)
 }

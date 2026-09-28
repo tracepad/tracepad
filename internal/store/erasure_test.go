@@ -596,6 +596,72 @@ func TestAStoppedErasureResumesFromItsPhase(t *testing.T) {
 		}
 	})
 
+	// The start after the third crash is the last and does only the tail
+	// (spec 047 #27): the chunks that committed deleted traces whose late
+	// batch no repeat can find, so it is scrubbed before the erasure fails.
+	// A tail that crashes too is dropped at the start after it.
+	for _, crashTail := range []bool{false, true} {
+		t.Run(fmt.Sprintf("the last start, its tail crashing %v", crashTail), func(t *testing.T) {
+			f := build(t)
+			e := f.startErasure(t, "user-a")
+			// Crash one: after the first chunk. Two and three: at the
+			// first chunk of the resumed run, which deletes nothing.
+			for crash := 1; crash <= erasureAttempts; crash++ {
+				writer := &stoppingWriter{jobSubmitter: f.writer, chunk: min(crash, 2)}
+				_, err := f.store.runErasure(t.Context(), writer, e.ID, EraserOptions{Chunk: 1,
+					after: func(step int) error {
+						if step == 1 {
+							arrive(t, f)
+						}
+						return nil
+					}})
+				if !errors.Is(err, ErrWriterClosed) {
+					t.Fatalf("crash %d did not stop the run: %v", crash, err)
+				}
+			}
+			deleted := 0
+			for trace := 1; trace <= 3; trace++ {
+				if f.count(t, `SELECT COUNT(*) FROM traces WHERE id = ?`, hexTrace(trace)) == 0 {
+					deleted = trace
+				}
+			}
+			if deleted == 0 || !slices.Contains(f.rawSpans(t, late), fmt.Sprintf("span-%d-9", deleted)) {
+				t.Fatalf("the crashes left trace %d deleted and the late batch %v; the test needs both",
+					deleted, f.rawSpans(t, late))
+			}
+
+			var last jobSubmitter = f.writer
+			if crashTail {
+				last = &failingJobs{jobSubmitter: f.writer, err: ErrWriterClosed, fails: func(job WriteJob) bool {
+					_, scrub := job.(*RawScrub)
+					return scrub
+				}}
+			}
+			_, err := f.store.runErasure(t.Context(), last, e.ID, EraserOptions{Chunk: 1})
+			if crashTail {
+				if !errors.Is(err, ErrWriterClosed) {
+					t.Fatalf("the tail's crash did not stop the run: %v", err)
+				}
+				if _, err := f.store.runErasure(t.Context(), f.writer, e.ID, EraserOptions{Chunk: 1}); err != nil {
+					t.Fatal(err)
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			got := f.erasureOf(t, "user-a")
+			if got.State != ErasureFailed || got.Error != "interrupted by 3 restarts" || got.UserID != "" {
+				t.Errorf("the erasure is %s (%q) of %q, want failed, interrupted, and of no one",
+					got.State, got.Error, got.UserID)
+			}
+			if n := f.count(t, `SELECT COUNT(*) FROM erasure_tail`); n != 0 {
+				t.Errorf("%d tail rows are left", n)
+			}
+			if left := slices.Contains(f.rawSpans(t, late), fmt.Sprintf("span-%d-9", deleted)); left != crashTail {
+				t.Errorf("the deleted trace's late span is left %v, want %v", left, crashTail)
+			}
+		})
+	}
+
 	t.Run("a batch arriving while it runs", func(t *testing.T) {
 		f := build(t)
 		f.erase(t, "user-a", func(o *EraserOptions) {

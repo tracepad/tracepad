@@ -160,6 +160,13 @@ func (r *run) watchErasure(ctx context.Context, projectID string, erasure erasur
 		}
 		body, err := r.api.Get(ctx, erasurePath(projectID, erasure.ID), nil)
 		if err != nil {
+			// A read that did not arrive — the network, a busy server —
+			// is read again on the next tick: the erasure goes on either
+			// way, and a script must not read a blip as "not erased"
+			// (spec 047 #27). A refusal is the answer.
+			if transient(err) && ctx.Err() == nil {
+				continue
+			}
 			return nil, fmt.Errorf("%w; the erasure goes on on the server: tracepad users erasure %s", err, erasure.ID)
 		}
 		if erasure, err = decode[erasureView](body); err != nil {
@@ -169,6 +176,13 @@ func (r *run) watchErasure(ctx context.Context, projectID string, erasure erasur
 			return body, nil
 		}
 	}
+}
+
+// transient reports a failed read worth another: no answer at all, or the
+// server's 5xx. A 4xx is the server's refusal and would be answered again.
+func transient(err error) bool {
+	var refusal *client.Error
+	return !errors.As(err, &refusal) || refusal.Status >= 500
 }
 
 // renderErased prints what an erasure took: the counts, the raw archive, and
