@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"net/url"
@@ -10,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/tracepad/tracepad/internal/client"
+	"github.com/tracepad/tracepad/internal/store"
 	"github.com/tracepad/tracepad/internal/termsafe"
 )
 
@@ -260,6 +263,14 @@ func (r *run) datasetsPush(ctx context.Context, args []string) error {
 		return err
 	}
 	name := rest[0]
+	// A file that goes out in several writes is checked before anything is
+	// sent, the description included (#34 (c)).
+	writes := (len(items) + itemsPerWrite - 1) / itemsPerWrite
+	if writes > 1 {
+		if err := refuseRepeatedIDs(items); err != nil {
+			return err
+		}
+	}
 	if description != "" {
 		if _, err := r.api.Send(ctx, "PUT", "/api/v1/datasets/"+url.PathEscape(name), nil,
 			map[string]any{"description": description}); err != nil {
@@ -269,28 +280,139 @@ func (r *run) datasetsPush(ctx context.Context, args []string) error {
 
 	// One POST for the batch, because the version clock ticks once for it:
 	// a file sent item by item would leave a version per case and no way to
-	// name the state the file describes (#5).
-	body, err := r.api.Post(ctx, "/api/v1/datasets/"+url.PathEscape(name)+"/items", items)
-	if err != nil {
-		return err
+	// name the state the file describes (#5). A file longer than one request
+	// takes goes as the fewest writes that carry it (#34).
+	var (
+		written itemsWritten
+		answer  json.RawMessage // the server's own, for a file one write carried
+	)
+	for start := 0; start < len(items); start += itemsPerWrite {
+		end := min(start+itemsPerWrite, len(items))
+		body, err := r.api.Post(ctx, "/api/v1/datasets/"+url.PathEscape(name)+"/items", items[start:end])
+		if err != nil {
+			return pushFailure(err, writes, start, end, written.Version)
+		}
+		this, err := decode[itemsWritten](body)
+		if err != nil {
+			return unreadableAnswer(err, writes, start, end, written.Version)
+		}
+		written.IDs = append(written.IDs, this.IDs...)
+		written.Version, written.Changed = this.Version, written.Changed+this.Changed
+		answer = body
 	}
 	if r.wantJSON() {
-		return r.emit(body)
-	}
-	written, err := decode[struct {
-		IDs     []string `json:"ids"`
-		Version int      `json:"version"`
-		Changed int      `json:"changed"`
-	}](body)
-	if err != nil {
-		return err
+		if writes == 1 {
+			return r.emit(answer)
+		}
+		encoded, err := json.Marshal(written)
+		if err != nil {
+			return err
+		}
+		return r.emit(encoded)
 	}
 	if written.Changed == 0 {
 		fmt.Fprintf(r.opt.Stdout, "unchanged at version %d\n", written.Version)
 		return nil
 	}
-	fmt.Fprintf(r.opt.Stdout, "version %d: %s changed, %d in the batch\n",
+	fmt.Fprintf(r.opt.Stdout, "version %d: %s changed, %d in the batch",
 		written.Version, plural(written.Changed, "item"), len(written.IDs))
+	if writes > 1 {
+		fmt.Fprintf(r.opt.Stdout, ", sent as %d writes", writes)
+	}
+	fmt.Fprintln(r.opt.Stdout)
+	return nil
+}
+
+// caseSpan names the cases of the file a write carried, counted from 0 as the
+// server counts its indexes.
+func caseSpan(start, end int) string {
+	if end-start == 1 {
+		return fmt.Sprintf("case %d", start)
+	}
+	return fmt.Sprintf("cases %d–%d", start, end-1)
+}
+
+// pushFailure says where in the file a write of a split push failed. The
+// server counts its indexes from the first case of the write it was sent —
+// and names none for a write of one case — so the range is what places the
+// error in the file; the writes before it are committed and stay so. What is
+// said of the failing write itself depends on what came back: a 4xx is the
+// server refusing it whole, and a connection that dropped or timed out is a
+// write that may have been committed.
+func pushFailure(err error, writes, start, end, version int) error {
+	if writes == 1 {
+		return err
+	}
+	var answered *client.Error
+	refused := errors.As(err, &answered) && answered.Status >= 400 && answered.Status < 500
+	span := caseSpan(start, end)
+	landed := "; whether this write itself landed is not known"
+	if refused {
+		landed = ""
+	}
+	if start == 0 {
+		if refused {
+			landed = "; the server refused it, so nothing of the file is written"
+		}
+		return fmt.Errorf("%w (in the write of %s of the file, the first of %d writes%s)", err, span, writes, landed)
+	}
+	return fmt.Errorf("%w (in the write of %s of the file; an index in this message counts from case %d; "+
+		"the first %d cases are written, at version %d%s; "+
+		"pushing the file again adds the ones without an id a second time)",
+		err, span, start, start, version, landed)
+}
+
+// unreadableAnswer says what a push knows when the server accepted a write
+// and its answer could not be read: a 2xx is a write that landed, and what
+// the answer would have carried — the ids and the version — is what is lost.
+func unreadableAnswer(err error, writes, start, end, version int) error {
+	if writes == 1 {
+		return err
+	}
+	span := caseSpan(start, end)
+	if start == 0 {
+		return fmt.Errorf("%w (the server accepted the write of %s of the file, the first of %d writes, and its "+
+			"answer could not be read; those cases are written, at a version this push did not read; "+
+			"pushing the file again adds the ones without an id a second time)", err, span, writes)
+	}
+	return fmt.Errorf("%w (the server accepted the write of %s of the file, and its answer could not be read; "+
+		"those cases and the %d before them are written, the last version this push read being %d; "+
+		"pushing the file again adds the ones without an id a second time)", err, span, start, version)
+}
+
+// itemsWritten is what POST …/items answers, and what push answers for a
+// file it sent as several writes: every id, the last version, every change.
+type itemsWritten struct {
+	IDs     []string `json:"ids"`
+	Version int      `json:"version"`
+	Changed int      `json:"changed"`
+}
+
+// itemsPerWrite is the most cases push sends in one POST …/items, which is
+// the most the server takes (spec 014 #34). A variable so that the tests of
+// how a file is split can use a small one; one test runs on the real number.
+var itemsPerWrite = store.MaxItemsPerWrite
+
+// refuseRepeatedIDs checks a file that goes out in several writes: one
+// request refuses an id given twice, and split across two the second would
+// quietly become an edit of the first. A case that is not an object is left
+// for the server to refuse.
+func refuseRepeatedIDs(items []json.RawMessage) error {
+	seen := make(map[string]int, len(items))
+	for i, item := range items {
+		// A pointer, as the server reads the id: a key named twice with
+		// different case is the last one, and a null is no id.
+		var fields struct {
+			ID *string `json:"id"`
+		}
+		if json.Unmarshal(item, &fields) != nil || fields.ID == nil || *fields.ID == "" {
+			continue
+		}
+		if first, repeated := seen[*fields.ID]; repeated {
+			return fmt.Errorf("the case at index %d repeats id %s of the case at index %d", i, termsafe.String(*fields.ID), first)
+		}
+		seen[*fields.ID] = i
+	}
 	return nil
 }
 

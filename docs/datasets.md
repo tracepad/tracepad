@@ -163,7 +163,12 @@ and never otherwise.
 
 - A batch is **one tick**, however many items it carries. `version` in the
   response is the dataset's version after the write, `changed` is how many
-  items produced a row.
+  items produced a row. A batch holds at most **10,000** items; a longer one
+  is a `413` (`this request carries N items; the server takes at most 10000
+  per request — send them in batches`) and writes nothing. The SDKs' item
+  push and `tracepad datasets push` send a longer list as consecutive writes
+  of 10,000, so a write that changes something is a tick of its own, and one
+  that changes nothing is not.
 - A `POST` whose items all say what is stored already writes nothing and
   leaves the version where it was: `"changed": 0`. Equality is on the JSON
   value of `input`, `expected_output` and `metadata` plus the source pair:
@@ -624,9 +629,10 @@ Every step above is a command, and the CLI is nothing but a client of the API
 # 1. Declare what the score names mean. Idempotent.
 tracepad score-configs push accuracy --file accuracy.json
 
-# 2. Push the cases: a .jsonl (one case per line) or a .json array, one batch,
-#    one version tick. Re-running an unchanged file prints "unchanged at
-#    version 12" and writes nothing.
+# 2. Push the cases: a .jsonl (one case per line) or a .json array, one batch
+#    (up to 10,000 cases; a longer file is several writes), one version tick.
+#    Re-running an unchanged file prints "unchanged at version 12" and writes
+#    nothing.
 tracepad datasets push support-golden --file cases.jsonl
 # → version 12: 3 items changed, 200 in the batch
 
@@ -695,5 +701,5 @@ deleting a run says what happens to its traces before it happens.
 | `401` | Unknown credentials. |
 | `404` | No such dataset, item, or run in this project; an item already archived at the current version. |
 | `409` | A run closed twice; a run id that already exists in another dataset. |
-| `413` | The body is over `TRACEPAD_MAX_BODY_BYTES`. |
+| `413` | The body is over `TRACEPAD_MAX_BODY_BYTES`, or an array holds more than 10,000 items. |
 | `429` | The write queue is saturated; retry after the `Retry-After` delay. |

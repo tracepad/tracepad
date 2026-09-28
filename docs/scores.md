@@ -125,7 +125,10 @@ as it is ([quality.md](quality.md#the-lag)).
 ### Batches
 
 An array is all-or-nothing: one transaction, and one `400` naming the first
-item it refused.
+item it refused. It holds at most **10,000** scores; a longer one is a `413`
+(`this request carries N scores; the server takes at most 10000 per request —
+send them in batches`), refused before any item is looked at, with nothing
+written. The SDKs send scores in batches of 100.
 
 ```sh
 curl -H "Authorization: Bearer tp-sk-…" http://localhost:4318/api/v1/scores -d '[
@@ -315,7 +318,7 @@ the weekly review" is a filter over the scores you already have.
 | `401` | Unknown credentials. |
 | `403` | A key without the scope the route needs; the body and `WWW-Authenticate` name it ([api.md](api.md#scopes)). |
 | `404` | No score — or no config — with that id or name in this project. |
-| `413` | The body is over `TRACEPAD_MAX_BODY_BYTES`. |
+| `413` | The body is over `TRACEPAD_MAX_BODY_BYTES`, or an array holds more than 10,000 scores. |
 | `429` | The write queue is saturated; retry after the `Retry-After` delay. |
 
 A `201` means the score is on disk, not merely queued — the same guarantee a

@@ -192,6 +192,150 @@ func (s *Server) readJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 	return true
 }
 
+// maxItemsPerWrite bounds the rows of one array write (spec 043 #36). The
+// body cap bounds bytes, and half a million minimal scores fit in it; each
+// array is one transaction, so its count is how long it holds the only
+// writer. 10,000 commits in under a second, and is a hundred times the batch
+// the SDKs send scores in.
+const maxItemsPerWrite = store.MaxItemsPerWrite
+
+// decodeBatch reads a write's body as one object or an array of them — the
+// shape every batch write takes — with the strictness of a single object in
+// both (spec 003 #17). What an array is judged on before any value is
+// decoded into a T is one scan of its bytes (scanArray): an array that never
+// closes is malformed, a value after it is more than one JSON value, and one
+// of more than maxItemsPerWrite values is an *overItemCap. So the answer to
+// such a body is by its shape and its count, whatever the values hold, and
+// costs no memory per value. Only a body that can be over the cap is
+// scanned: one of at least minBodyOverCap bytes with at least
+// maxItemsPerWrite commas, since more than that many values are separated by
+// at least that many. Any other body — the batches an SDK sends, and every
+// body of another shape — goes to the strict decode, whose cost is bounded by
+// the cap. noun names one value in the messages: "score", "item".
+func decodeBatch[T any](body []byte, noun string) ([]*T, error) {
+	trimmed := bytes.TrimLeft(body, " \t\r\n")
+	if len(trimmed) == 0 || trimmed[0] != '[' {
+		var one T
+		if err := decodeStrict(body, &one); err != nil {
+			return nil, err
+		}
+		return []*T{&one}, nil
+	}
+	if len(trimmed) >= minBodyOverCap && bytes.Count(trimmed, []byte{','}) >= maxItemsPerWrite {
+		switch scan := scanBody(trimmed); {
+		case !scan.closed:
+			return nil, errMalformedBody
+		case scan.trailing:
+			return nil, errTrailingValue
+		case scan.count > maxItemsPerWrite:
+			return nil, &overItemCap{count: scan.count, kind: noun + "s"}
+		}
+	}
+	var batch []*T
+	if err := decodeStrict(body, &batch); err != nil {
+		return nil, err
+	}
+	for i, value := range batch {
+		if value == nil {
+			return nil, fmt.Errorf("%s at index %d is null", noun, i)
+		}
+	}
+	return batch, nil
+}
+
+// scanBody is scanArray, a variable so that a test can count the scans: that
+// an ordinary batch is not scanned is a promise of spec 043 #36, and the
+// answers are the same whether it was or not.
+var scanBody = scanArray
+
+// minBodyOverCap is the length below which an array cannot hold more than
+// maxItemsPerWrite values: n values take at least 2n+1 bytes — n one-byte
+// values, n−1 commas and two brackets — so a shorter body is not scanned.
+// An SDK's batch of 100 scores is most often under it, and pays nothing.
+const minBodyOverCap = 2*(maxItemsPerWrite+1) + 1
+
+// arrayScan is what scanArray says of the first array of a body.
+type arrayScan struct {
+	count    int  // its top-level values: the commas between them plus one, 0 for none — exact for a well-formed array
+	closed   bool // its closing bracket was reached
+	trailing bool // something but white space follows the closing bracket
+}
+
+// scanArray reads a body that starts with '[' once, byte by byte, holding
+// nothing: it follows strings — a bracket, a comma or an escaped quote inside
+// one is not structure — and the depth of brackets and braces, counts the
+// commas of the first level, and stops at the bracket that closes the array.
+// It is not a validator: an array whose middle is malformed is counted all
+// the same, and a count over the cap wins over the malformedness (spec 003
+// #28). A 20 MiB array of ten million zeros is scanned in about 55 ms and a
+// few dozen bytes (spec 043 #36).
+func scanArray(body []byte) arrayScan {
+	var scan arrayScan
+	depth, commas := 1, 0
+	sawValue, inString, escaped := false, false, false
+	for i := 1; i < len(body); i++ {
+		c := body[i]
+		if inString {
+			switch {
+			case escaped:
+				escaped = false
+			case c == '\\':
+				escaped = true
+			case c == '"':
+				inString = false
+			}
+			continue
+		}
+		if c == ' ' || c == '\t' || c == '\r' || c == '\n' {
+			continue
+		}
+		if depth == 1 && c != ',' && c != ']' {
+			sawValue = true
+		}
+		switch c {
+		case '"':
+			inString = true
+		case '[', '{':
+			depth++
+		case ']', '}':
+			if depth--; depth == 0 {
+				scan.closed = true
+				scan.trailing = len(bytes.TrimLeft(body[i+1:], " \t\r\n")) > 0
+				if sawValue {
+					scan.count = commas + 1
+				}
+				return scan
+			}
+		case ',':
+			if depth == 1 {
+				commas++
+			}
+		}
+	}
+	return scan
+}
+
+// overItemCap is an array write over maxItemsPerWrite: a 413, not a 400.
+type overItemCap struct {
+	count int
+	kind  string
+}
+
+func (e *overItemCap) Error() string {
+	return fmt.Sprintf("this request carries %d %s; the server takes at most %d per request — send them in batches",
+		e.count, e.kind, maxItemsPerWrite)
+}
+
+// writeBatchError answers a body decodeBatch refused.
+func writeBatchError(w http.ResponseWriter, err error) {
+	status := http.StatusBadRequest
+	var over *overItemCap
+	if errors.As(err, &over) {
+		status = http.StatusRequestEntityTooLarge
+	}
+	writeError(w, status, err.Error())
+}
+
 // readAPIBody reads and size-caps a request body (spec 003, API contract).
 func (s *Server) readAPIBody(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
 	body, err := readBody(w, r, s.maxBodyBytes)
@@ -333,11 +477,21 @@ func decodeStrict(data []byte, v any) error {
 	if err := decoder.Decode(v); err != nil {
 		return decodeError(err)
 	}
-	if decoder.More() {
-		return errors.New("the body must carry exactly one JSON value")
+	// Anything after the value but white space is more than one value. Not
+	// decoder.More(): it answers whether an array or object being read has
+	// another element, and takes a `]` or `}` for the end of one nobody
+	// opened, so `{"input":1}]` passed.
+	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
+		return errTrailingValue
 	}
 	return nil
 }
+
+// What a body that is not one JSON value of the shape asked for is answered.
+var (
+	errTrailingValue = errors.New("the body must carry exactly one JSON value")
+	errMalformedBody = errors.New("malformed JSON body")
+)
 
 // decodeError turns encoding/json's internal wording into a message written
 // for whoever sent the body.
@@ -353,7 +507,7 @@ func decodeError(err error) error {
 	if errors.As(err, &typeError) && typeError.Field != "" {
 		return fmt.Errorf("field %q is a %s, want %s", typeError.Field, typeError.Value, typeError.Type)
 	}
-	return errors.New("malformed JSON body")
+	return errMalformedBody
 }
 
 // queryParams returns the request's query after refusing any parameter the

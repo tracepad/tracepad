@@ -9,8 +9,9 @@
 # lines on types that Python spends on nothing — and spec 032 #16 raised it
 # to 1,900 for the harness, spec 036 #8 to 2,000 for trace deletion, spec
 # 040 #13 to 2,200 for `tracepad/testing`, spec 042 #6 to 2,250 for the cost
-# and bounds, #12 to 2,275 for its review, and spec 032 #17 to 2,300 for the
-# key and the path.
+# and bounds, #12 to 2,275 for its review, spec 032 #17 to 2,300 for the
+# key and the path, and spec 032 #21 to 2,325 for writing a long item list
+# in batches.
 #
 # What it counts is the application; the tests are reported beside it under
 # no ceiling at all (design §8, amended; spec 010 #7).
@@ -19,7 +20,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BUDGET="${1:-2300}"
+BUDGET="${1:-2325}"
 
 cd "$ROOT"
 

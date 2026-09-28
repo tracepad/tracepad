@@ -496,7 +496,7 @@ console.log((await run.get()).summary);
 |---|---|
 | `dataset(name)` | A `Dataset`. No request is made here — it is a name. |
 | `Dataset.create({ description, metadata })` | Create it, or replace those two. |
-| `Dataset.putItems(items)` | One batch, one version tick → `[version, changed]`. Only an item's own fields go on the wire, so a row `items()` yielded can be pushed back as it is. |
+| `Dataset.putItems(items)` | One batch, one version tick → `[version, changed]`. Only an item's own fields go on the wire, so a row `items()` yielded can be pushed back as it is. A longer list than the 10,000 items one request takes goes as consecutive writes of 10,000, each ticking the version if it changes anything: the answer is the last version and the sum of the changes, a write that fails leaves the ones before it in place, and an id the list gives twice is refused before anything is sent. An index in the server's message about a write that fails counts from the first item of that write, not of the list. Items are counted, not bytes: a write of 10,000 large items can still be over `TRACEPAD_MAX_BODY_BYTES` and be refused with `413`, and such a list has to be cut into smaller ones by hand. |
 | `Dataset.items(version)` | An async iterable of items over every page, whole. |
 | `Dataset.run(name, { metadata, id, datasetVersion })` | Opens a `Run`. |
 | `Dataset.runs()`, `Run.get()`, `Run.items({ unknown, limit })`, `compare(a, b)` | The server's JSON as plain objects — no number is computed here. A run's items inline their payloads and are budget-checked, so that listing pages at the server's own size unless you name one. |

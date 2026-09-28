@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -77,6 +78,12 @@ func (fs *fakeStore) paths() []string {
 	return out
 }
 
+func (fs *fakeStore) recorded() []call {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	return slices.Clone(fs.calls)
+}
+
 func (fs *fakeStore) last() call {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
@@ -126,6 +133,64 @@ func TestPutItemsSendsOneBody(t *testing.T) {
 	}
 	if !reflect.DeepEqual(fs.last().body, want) {
 		t.Errorf("body = %v", fs.last().body)
+	}
+}
+
+// The server takes at most 10,000 items a request (spec 014 #34): a longer
+// list goes as consecutive writes, in order, each its own version.
+func TestPutItemsSendsALongListInWritesTheServerTakes(t *testing.T) {
+	_, fs := harness(t)
+	fs.answer("/api/v1/datasets/golden/items",
+		map[string]any{"version": 5, "changed": 10_000},
+		map[string]any{"version": 5, "changed": 0},
+		map[string]any{"version": 6, "changed": 1})
+	items := make([]Item, 20_001)
+	for n := range items {
+		items[n] = Item{Input: float64(n)}
+	}
+	version, changed, err := NewDataset("golden").PutItems(context.Background(), items)
+	if err != nil || version != 6 || changed != 10_001 {
+		t.Fatalf("version %d, changed %d, err %v", version, changed, err)
+	}
+	var sizes []int
+	var sent []any
+	for _, c := range fs.recorded() {
+		sizes = append(sizes, len(c.body.([]any)))
+		sent = append(sent, c.body.([]any)...)
+	}
+	if !reflect.DeepEqual(sizes, []int{10_000, 10_000, 1}) {
+		t.Errorf("sizes = %v", sizes)
+	}
+	for n, item := range sent {
+		if item.(map[string]any)["input"] != float64(n) {
+			t.Fatalf("item %d went out as %v: the order is the list's", n, item)
+		}
+	}
+}
+
+// One request would be refused whole for a repeated id; split, the second
+// would quietly become an edit of the first.
+func TestPutItemsRefusesALongListThatRepeatsAnID(t *testing.T) {
+	_, fs := harness(t)
+	items := make([]Item, 10_001)
+	items[3].ID, items[10_000].ID = caseID, caseID
+	_, _, err := NewDataset("golden").PutItems(context.Background(), items)
+	if err == nil || !strings.Contains(err.Error(), "index 10000 repeats id "+caseID+" of the item at index 3") {
+		t.Fatalf("err = %v", err)
+	}
+	if calls := fs.recorded(); len(calls) != 0 {
+		t.Errorf("sent %d requests, want none", len(calls))
+	}
+}
+
+func TestPutItemsSendsAnEmptyListForTheServerToRefuse(t *testing.T) {
+	_, fs := harness(t)
+	fs.answer("/api/v1/datasets/golden/items", http.StatusBadRequest)
+	if _, _, err := NewDataset("golden").PutItems(context.Background(), nil); err == nil {
+		t.Fatal("an empty list was not refused")
+	}
+	if calls := fs.recorded(); len(calls) != 1 || !reflect.DeepEqual(calls[0].body, []any{}) {
+		t.Errorf("calls = %v", calls)
 	}
 }
 

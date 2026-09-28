@@ -581,14 +581,29 @@ tracepad score-configs rm accuracy
 
 `datasets push` takes a `.jsonl` — one case per line, which is the shape a
 dataset is edited by hand in — or a `.json` array, which is the shape a script
-generates. Either way it is **one** batch on the wire, because the dataset's
-version advances once per write: a file sent case by case would leave a version
-per case and no number that names the file. It prints where it landed:
+generates. Either way it is **one** batch on the wire — up to the 10,000 cases
+one request takes; a longer file is several writes, below — because the
+dataset's version advances once per write: a file sent case by case would leave
+a version per case and no number that names the file. It prints where it
+landed:
 
 ```
 version 12: 3 items changed, 200 in the batch
 unchanged at version 12
 ```
+
+A file of more than 10,000 cases — the most one request takes — goes as the
+fewest writes of up to 10,000 that carry it — a write that changes something
+is a version of its own, and one that changes nothing leaves the version
+where it was; the line
+ends `sent as N writes`, and `--json` answers the one shape a single write
+has, with every id, the last version and the sum of the changes. A write that
+fails says how many cases before it are written; pushing the file again
+finishes the job when every case carries an `id`. An `id` the file gives twice
+is refused before anything is sent, `--description` included. The split counts
+cases, not bytes: a write of 10,000 large cases can still be over
+`TRACEPAD_MAX_BODY_BYTES` and be refused with `413`, and such a file has to be
+cut into smaller files by hand.
 
 `runs ls` without a dataset reads `GET /api/v1/runs` — the whole project's
 runs, newest first, with a dataset column the per-dataset table has no need

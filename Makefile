@@ -186,8 +186,9 @@ sdk-go-unit: ## The Go package's vet and unit tests alone (part of the gate)
 
 # The budget spec 033 #11 set, raised for the harness (spec 033 #17), for
 # trace deletion (spec 036 #8), for `tracepadtest` (spec 040 #13), for the
-# cost and bounds of spec 042, and for the key and the path (spec 033 #18).
-SDK_GO_BUDGET := 2575
+# cost and bounds of spec 042, for the key and the path (spec 033 #18), and for
+# writing a long item list in batches (spec 033 #19).
+SDK_GO_BUDGET := 2600
 
 sdk-go-lines: ## Report the Go package's application lines against its budget
 	scripts/sdk-go-lines.sh $(SDK_GO_BUDGET)
@@ -214,9 +215,10 @@ sdk-js-test: ## Type-check and unit-test the Node package, and end-to-end agains
 
 # The budget spec 032 #11 set, shared with the harness of the same spec;
 # raised for the harness (spec 032 #16), for trace deletion (spec 036 #8), for
-# `tracepad/testing` (spec 040 #13), for the cost and bounds of spec 042, and
-# for the key and the path (spec 032 #17).
-SDK_JS_BUDGET := 2300
+# `tracepad/testing` (spec 040 #13), for the cost and bounds of spec 042, for
+# the key and the path (spec 032 #17), and for writing a long item list in
+# batches (spec 032 #21).
+SDK_JS_BUDGET := 2325
 
 sdk-js-lines: ## Report the Node package's application lines against its budget
 	scripts/sdk-js-lines.sh $(SDK_JS_BUDGET)

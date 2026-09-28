@@ -85,6 +85,20 @@ func aRun(t *testing.T, ctx context.Context, name string) (map[string]any, map[s
 	return got, traces
 }
 
+// One item more than a request takes is written in two, against the real
+// binary: the package's chunk is the number the server takes (spec 033 #19).
+func TestMoreItemsThanARequestTakesAreWrittenInTwo(t *testing.T) {
+	serve(t)
+	items := make([]tracepad.Item, 10_001)
+	for n := range items {
+		items[n] = tracepad.Item{Input: map[string]any{"n": n}}
+	}
+	version, changed, err := tracepad.NewDataset("over-the-cap").PutItems(context.Background(), items)
+	if err != nil || version != 2 || changed != 10_001 {
+		t.Errorf("version %d, changed %d, err %v; want two writes, two versions", version, changed, err)
+	}
+}
+
 func TestTheWholeLoop(t *testing.T) {
 	s := serve(t)
 	ctx := context.Background()
