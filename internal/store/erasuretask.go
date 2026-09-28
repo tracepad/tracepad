@@ -7,11 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
 
 // An erasure is a task (spec 047 #6): the confirmed request records one and
@@ -754,8 +757,10 @@ var errRunStopped = errors.New("the erasure's run was stopped")
 // record keeps what an operator acts on and nothing an error's text happened
 // to carry, whatever form a user id took in it. The error itself goes to the
 // server's log.
+//
+// A stop of the server is not among them: a run the stop ended records no
+// failure, and resumes. Nor is a deadline: nothing on the path has one.
 const (
-	causeStopped  = "the server stopped"
 	causeQueue    = "the write queue stayed full"
 	causeFull     = "the disk is full"
 	causeBusy     = "the database is busy"
@@ -763,7 +768,6 @@ const (
 	causeMemory   = "the server ran out of memory"
 	causeOpen     = "the database file could not be opened"
 	causeRawBatch = "a raw batch could not be rewritten"
-	causeTimeout  = "an operation took too long"
 	causeOther    = "an unexpected error, which the server's log has"
 )
 
@@ -777,7 +781,8 @@ var conditionCauses = map[string]string{
 	"SQLITE_CANTOPEN": causeOpen,
 }
 
-// errRawBatch marks a scrub of a raw batch that failed after its retries.
+// errRawBatch marks a scrub of a raw batch that failed after its retries, or
+// a batch that could not be read to plan it.
 var errRawBatch = errors.New("a raw batch could not be rewritten")
 
 // failureCause is the cause the record gives for err, from the list above.
@@ -786,14 +791,10 @@ func failureCause(err error) string {
 	switch {
 	case condition && conditionCauses[name] != "":
 		return conditionCauses[name]
-	case errors.Is(err, context.Canceled) || errors.Is(err, ErrWriterClosed) || errors.Is(err, errRunStopped):
-		return causeStopped
 	case errors.Is(err, ErrWriterBusy):
 		return causeQueue
-	case errors.Is(err, errRawBatch) || conflict(err):
+	case errors.Is(err, errRawBatch):
 		return causeRawBatch
-	case errors.Is(err, context.DeadlineExceeded):
-		return causeTimeout
 	}
 	return causeOther
 }
@@ -805,15 +806,50 @@ func failureSentence(err error, phase string) string {
 }
 
 // loggable is an erasure's error as the server's log line gives it: whole,
-// unless it names the user — as it is, or quoted the way a refusal quotes the
-// echo it was given — which no log line does (spec 044 #15, #27 c).
+// unless it names the user, which no log line does (spec 044 #15, #27 c) —
+// as it is, quoted the way a refusal quotes the echo it was given, escaped
+// for a URL, or encoded in a JSON string, with or without its letters past
+// ASCII escaped (#32). The id counts where it stands
+// as a word of its own, so that a short id does not withhold every error that
+// holds its letters; one that is a whole word of the error still does, which
+// is the safe side.
 func loggable(err error, userID string) string {
 	text := err.Error()
-	quoted := strconv.Quote(userID)
-	if userID != "" && (strings.Contains(text, userID) || strings.Contains(text, quoted[1:len(quoted)-1])) {
-		return "an error that named the user, which is not logged"
+	if userID == "" {
+		return text
+	}
+	inner := func(s string) string { return s[1 : len(s)-1] }
+	encoded, _ := json.Marshal(userID)
+	for _, form := range []string{userID, inner(strconv.Quote(userID)), inner(strconv.QuoteToASCII(userID)),
+		url.PathEscape(userID), url.QueryEscape(userID), inner(string(encoded))} {
+		if holdsWord(text, form) {
+			return "an error that named the user, which is not logged"
+		}
 	}
 	return text
+}
+
+// holdsWord reports whether word stands in text with no letter or digit on
+// either side.
+func holdsWord(text, word string) bool {
+	for from := 0; word != ""; {
+		at := strings.Index(text[from:], word)
+		if at < 0 {
+			return false
+		}
+		at += from
+		before, _ := utf8.DecodeLastRuneInString(text[:at])
+		after, _ := utf8.DecodeRuneInString(text[at+len(word):])
+		if !isWordRune(before) && !isWordRune(after) {
+			return true
+		}
+		from = at + 1
+	}
+	return false
+}
+
+func isWordRune(r rune) bool {
+	return r != utf8.RuneError && (unicode.IsLetter(r) || unicode.IsDigit(r))
 }
 
 // erasureError is a run's error on its way to the worker's log line, which

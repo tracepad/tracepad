@@ -83,9 +83,9 @@ func TestAnEndedErasureForgetsTheUser(t *testing.T) {
 			want: unexpected, log: "withheld"},
 		// Forms of the id no check of the text would find.
 		{name: "failed escaping the user", user: "zoë/7", fail: fmt.Errorf("GET /users/%s: refused",
-			url.PathEscape("zoë/7")), want: unexpected},
+			url.PathEscape("zoë/7")), want: unexpected, log: "withheld"},
 		{name: "failed encoding the user", user: "zoë", fail: fmt.Errorf("a chunk refused %s", `"zo\u00eb"`),
-			want: unexpected},
+			want: unexpected, log: "withheld"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			was := busyWait
@@ -127,15 +127,18 @@ func TestAnEndedErasureForgetsTheUser(t *testing.T) {
 			if got.State != ErasureFailed || got.Error != tc.want {
 				t.Errorf("the erasure is %s with %q, want failed with %q", got.State, got.Error, tc.want)
 			}
+			// Logged once, where it was met, and not again on the end's line.
 			out := logged.String()
-			whole := strings.Contains(out, tc.fail.Error()) || strings.Contains(out, strconv.Quote(tc.fail.Error()))
-			quoted := strconv.Quote(user)
-			named := strings.Contains(out, user) || strings.Contains(out, quoted[1:len(quoted)-1])
+			whole := strings.Count(out, "err="+strconv.Quote(tc.fail.Error()))
 			switch {
-			case tc.log == "whole" && !whole:
-				t.Errorf("the log %q does not hold the error %q", out, tc.fail.Error())
-			case tc.log == "withheld" && named:
-				t.Errorf("the log names the user: %q", out)
+			case tc.log == "whole" && whole != 1:
+				t.Errorf("the log holds the error %q %d times, want once: %q", tc.fail.Error(), whole, out)
+			case tc.log == "withheld" && (strings.Contains(out, strconv.Quote(tc.fail.Error())) ||
+				!strings.Contains(out, "named the user")):
+				t.Errorf("the log gives the error that names the user: %q", out)
+			}
+			if !strings.Contains(out, "err=\"the parsed phase failed: ") {
+				t.Errorf("the end's line does not give the record's sentence as err: %q", out)
 			}
 		})
 	}
@@ -837,14 +840,12 @@ func TestAFailureIsSaidAsACauseFromTheList(t *testing.T) {
 		{fmt.Errorf("rewrite raw batch 7: %w", codedError{10 | 4<<8}), causeIO},
 		{codedError{7}, causeMemory},
 		{codedError{14}, causeOpen},
-		{fmt.Errorf("a chunk: %w", context.Canceled), causeStopped},
-		{ErrWriterClosed, causeStopped},
 		{ErrWriterBusy, causeQueue},
 		{fmt.Errorf("%w 7: %w", errRawBatch, errors.New("replace the refs: boom")), causeRawBatch},
-		{&Rejection{Kind: RejectConflict, Message: "raw batch 7 was rewritten since it was read"}, causeRawBatch},
+		{fmt.Errorf("%w 7: %w", errRawBatch,
+			&Rejection{Kind: RejectConflict, Message: "raw batch 7 was rewritten since it was read"}), causeRawBatch},
 		// A condition inside a raw batch's failure is the condition.
 		{fmt.Errorf("%w 7: %w", errRawBatch, codedError{13}), causeFull},
-		{context.DeadlineExceeded, causeTimeout},
 		{errors.New(`chunk limit 0 is not positive for "user-4711"`), causeOther},
 	} {
 		if got := failureCause(tc.err); got != tc.want {
@@ -908,5 +909,73 @@ func TestAFailedRawPhaseIsLoggedWhole(t *testing.T) {
 	}
 	if !strings.Contains(logged.String(), "replace the media refs: boom") {
 		t.Errorf("the log %q does not hold the error", logged.String())
+	}
+}
+
+// The log withholds an error that names the user in any of the forms it
+// takes, where the id stands as a word of its own (#32): a short id does not
+// withhold every error that holds its letters. One that is a whole word of an
+// error still withholds it — "1" and "sqlite error 1" — which is the safe
+// side, and known.
+func TestTheLogWithholdsTheUserAsAWord(t *testing.T) {
+	for _, tc := range []struct {
+		user, text string
+		withheld   bool
+	}{
+		{"user-4711", `refused "user-4711"`, true},
+		{"user-4711", "no such user-47110", false},
+		{"a", "read raw batch 7: database is locked", false},
+		{"1", "sqlite error 13", false},
+		{"1", "sqlite error 1", true},
+		{`we"ird`, `a chunk refused "we\"ird"`, true},
+		{"zoë/7", "GET /users/zo%C3%AB%2F7: refused", true},
+		{"zoë 7", "GET /users?id=zo%C3%AB+7: refused", true},
+		{"zoë", `a chunk refused "zo\u00eb"`, true},
+		{"", "anything", false},
+	} {
+		got := loggable(errors.New(tc.text), tc.user)
+		if withheld := got != tc.text; withheld != tc.withheld {
+			t.Errorf("loggable(%q, %q) = %q, want withheld %v", tc.text, tc.user, got, tc.withheld)
+		}
+	}
+}
+
+// A raw phase whose end is not written still has its error in the log: it is
+// logged where it was met, not on the end's line (#32).
+func TestARawFailureIsLoggedThoughItsEndIsNot(t *testing.T) {
+	f := newErasureFixture(t)
+	f.ingestOTLP(t, export([]*tracepb.Span{otlpSpan(t, 1, 1, "user-a", "", "a", nil)}), false, daysAgo(1))
+	var logged bytes.Buffer
+	old := logger
+	logger = func() *slog.Logger { return slog.New(slog.NewTextHandler(&logged, nil)) }
+	t.Cleanup(func() { logger = old })
+	writer := &failingJobs{jobSubmitter: f.writer, err: errors.New("replace the media refs: boom"),
+		fails: func(job WriteJob) bool {
+			switch job.(type) {
+			case *RawScrub, *erasureEnd:
+				return true
+			}
+			return false
+		}}
+	e := f.startErasure(t, "user-a")
+	if _, err := f.store.runErasure(t.Context(), writer, e.ID, EraserOptions{}); err == nil {
+		t.Fatal("the end was written")
+	}
+	if !strings.Contains(logged.String(), "replace the media refs: boom") {
+		t.Errorf("the log %q does not hold the raw phase's error", logged.String())
+	}
+}
+
+// A batch that cannot be read to plan its scrub is a raw batch that could not
+// be rewritten, not an unexpected error (#32).
+func TestABatchThatCannotBeReadIsARawBatchCause(t *testing.T) {
+	f := newErasureFixture(t)
+	if _, err := f.store.db.Exec(`ALTER TABLE raw_batches RENAME TO raw_batches_away`); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = f.store.db.Exec(`ALTER TABLE raw_batches_away RENAME TO raw_batches`) })
+	err := f.store.scrubBatches(t.Context(), f.writer, f.project.ID, []int64{1}, map[string]bool{"t": true}, "")
+	if err == nil || failureCause(err) != causeRawBatch {
+		t.Errorf("a batch that could not be read failed with %v, said as %q", err, failureCause(err))
 	}
 }

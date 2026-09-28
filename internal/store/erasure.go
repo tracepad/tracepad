@@ -521,7 +521,7 @@ func (s *Store) scrubBatches(ctx context.Context, writer jobSubmitter, projectID
 			ids = ids[1:]
 			p, err := plan(id)
 			if err != nil {
-				return err
+				return fmt.Errorf("%w %d: %w", errRawBatch, id, err)
 			}
 			if p != nil {
 				group, plans = append(group, id), append(plans, p)
@@ -542,7 +542,7 @@ func (s *Store) scrubBatches(ctx context.Context, writer jobSubmitter, projectID
 			err := errs[i]
 			for attempt := 1; conflict(err) && attempt < scrubAttempts; attempt++ {
 				if p, err = plan(group[i]); err != nil {
-					return err
+					return fmt.Errorf("%w %d: %w", errRawBatch, group[i], err)
 				}
 				if p == nil {
 					break
@@ -692,7 +692,11 @@ func (s *Store) runErasure(ctx context.Context, writer jobSubmitter, id string, 
 			if stopped(ctx, err) {
 				return run, err
 			}
-			// Nothing parsed is gone yet: there is no tail to read.
+			// Nothing parsed is gone yet: there is no tail to read. The
+			// error is logged here, where it was met, and not after an end
+			// that may not be written (#32).
+			logger().Error("the raw phase of an erasure failed; it ends failed",
+				"erasure", e.ID, "cause", failureCause(err), "err", loggable(err, e.UserID))
 			return run, s.endErasure(ctx, writer, e, err, phaseRaw, run, began)
 		}
 		// Step 2 is whole: a stop from here on resumes with the chunks.
@@ -877,13 +881,9 @@ func (s *Store) endErasure(ctx context.Context, writer jobSubmitter, e *Erasure,
 	// The state it ended in, not this run's view: an erasure whose failure
 	// an earlier start recorded ends failed from a run that met none (#28).
 	if end.Erasure.State == ErasureFailed {
-		// The record's sentence, and the error itself where this run met it
-		// (#32).
-		args = append(args, "sentence", end.Erasure.Error)
-		if failed != nil {
-			args = append(args, "err", loggable(failed, e.UserID))
-		}
-		logger().Error("an erasure failed", args...)
+		// The record's sentence; the error itself was logged where it was
+		// met, once (#32).
+		logger().Error("an erasure failed", append(args, "err", end.Erasure.Error)...)
 		return nil
 	}
 	logger().Info("erased a user's data", args...)

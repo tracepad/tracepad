@@ -412,9 +412,12 @@ another.
   from then on `user_id` is `null` everywhere but in the answer to the request
   that started it. The record itself goes 30 days after the end.
 - `error` — why a `failed` erasure failed: the phase and a cause from a fixed
-  list, such as `the parsed phase failed: the disk is full`. The error itself
-  is in the server's log, on the erasure's line, next to its id. The record
-  never carries an error's own text, so it cannot name the user.
+  list, such as `the parsed phase failed: the disk is full`. An erasure that
+  ran out of starts says `3 starts ended before the erasure did`, followed by
+  `; its tail last failed with: ` and a cause when a tail failed. The error
+  itself is in the server's log, on the line of the phase that met it, next
+  to the erasure's id. The record never carries an error's own text, so it
+  cannot name the user.
 
 `GET /api/v1/projects/{id}/erasures/{erasure_id}` reads one erasure, and
 `GET /api/v1/projects/{id}/erasures` the project's hundred, those under way
