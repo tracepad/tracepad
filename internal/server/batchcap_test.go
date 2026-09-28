@@ -143,10 +143,10 @@ func TestBatchWritesOverTheCapAreAnsweredWithoutMemoryPerValue(t *testing.T) {
 	}
 }
 
-// A body too short to hold more values than the cap is not scanned: the
-// SDKs' batches of 100 scores pay for one decode, not two. The shortest body
-// over the cap, 10,001 one-byte values, is exactly as long as the bound.
-func TestBatchWritesUnderTheLengthBoundAreNotScanned(t *testing.T) {
+// The shortest body over the cap, 10,001 one-byte values, is exactly as long
+// as the bound under which a body is not looked at; one value fewer is at
+// the cap and is written.
+func TestBatchWritesAtTheLengthBoundAreCounted(t *testing.T) {
 	zeros := func(n int) []byte { return []byte("[" + strings.Repeat("0,", n-1) + "0]") }
 	if len(zeros(maxItemsPerWrite+1)) != minBodyOverCap {
 		t.Fatalf("len = %d, want %d", len(zeros(maxItemsPerWrite+1)), minBodyOverCap)
@@ -157,6 +157,48 @@ func TestBatchWritesUnderTheLengthBoundAreNotScanned(t *testing.T) {
 	var over *overItemCap
 	if _, err := decodeBatch[json.RawMessage](zeros(maxItemsPerWrite+1), "row"); !errors.As(err, &over) || over.count != maxItemsPerWrite+1 {
 		t.Errorf("the shortest body over the cap: err = %v", err)
+	}
+}
+
+// Only a body that can be over the cap is scanned (spec 043 #36): at least
+// 2n+1 bytes for n values and at least n commas. The answers are the same
+// whether a body was scanned or not, so this counts the scans; without it,
+// deleting either gate would fail nothing and make every batch of an SDK pay
+// for a pass over its bytes again.
+func TestOnlyABodyThatCanBeOverTheCapIsScanned(t *testing.T) {
+	var scans int
+	was := scanBody
+	scanBody = func(body []byte) arrayScan { scans++; return was(body) }
+	t.Cleanup(func() { scanBody = was })
+
+	batch := make([]map[string]any, 100)
+	for i := range batch {
+		batch[i] = map[string]any{"trace_id": scoreTraceID, "name": "helpfulness", "value": float64(i),
+			"comment": strings.Repeat("a reason, in words. ", 12)}
+	}
+	scoresBatch, err := json.Marshal(batch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	zeros := func(n int) []byte { return []byte("[" + strings.Repeat("0,", n-1) + "0]") }
+	for name, c := range map[string]struct {
+		body  []byte
+		scans int
+	}{
+		"shorter than any array over the cap":        {zeros(maxItemsPerWrite), 0},
+		"an SDK's batch of 100 scores, 33 KB":        {scoresBatch, 0},
+		"long, with few commas":                      {[]byte(`["` + strings.Repeat("x", 30_000) + `","y"]`), 0},
+		"an object":                                  {[]byte(`{"input":1}`), 0},
+		"short, with commas inside one string":       {[]byte(`["` + strings.Repeat(",", 12_000) + `"]`), 0},
+		"the shortest array over the cap":            {zeros(maxItemsPerWrite + 1), 1},
+		"commas inside a string count, and widen it": {[]byte(`["` + strings.Repeat(",", 20_000) + `"]`), 1},
+		"more values than the cap":                   {zeros(3 * maxItemsPerWrite), 1},
+	} {
+		scans = 0
+		_, _ = decodeBatch[json.RawMessage](c.body, "row")
+		if scans != c.scans {
+			t.Errorf("%s: scanned %d times, want %d", name, scans, c.scans)
+		}
 	}
 }
 

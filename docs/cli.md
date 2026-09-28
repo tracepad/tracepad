@@ -581,9 +581,11 @@ tracepad score-configs rm accuracy
 
 `datasets push` takes a `.jsonl` — one case per line, which is the shape a
 dataset is edited by hand in — or a `.json` array, which is the shape a script
-generates. Either way it is **one** batch on the wire, because the dataset's
-version advances once per write: a file sent case by case would leave a version
-per case and no number that names the file. It prints where it landed:
+generates. Either way it is **one** batch on the wire — up to the 10,000 cases
+one request takes; a longer file is several writes, below — because the
+dataset's version advances once per write: a file sent case by case would leave
+a version per case and no number that names the file. It prints where it
+landed:
 
 ```
 version 12: 3 items changed, 200 in the batch

@@ -4,9 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"unicode/utf8"
 
@@ -308,6 +311,66 @@ func TestRefuseRepeatedIDsReadsTheIDAsTheServerDoes(t *testing.T) {
 		if (c.want == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), c.want)) {
 			t.Errorf("%s: err = %v, want %q", name, err, c.want)
 		}
+	}
+}
+
+// An id from the file that repeats is printed as the rest of this file prints
+// what it did not write itself: with control bytes made visible.
+func TestRefuseRepeatedIDsPrintsTheIDSafely(t *testing.T) {
+	item := json.RawMessage(`{"id":"\u001b[31mred\u0007","input":1}`)
+	err := refuseRepeatedIDs([]json.RawMessage{item, item})
+	if err == nil || !strings.Contains(err.Error(), "repeats id") {
+		t.Fatalf("err = %v", err)
+	}
+	if strings.ContainsAny(err.Error(), "\x1b\x07") {
+		t.Errorf("the error carries raw control bytes: %q", err)
+	}
+}
+
+// A 2xx is a write that landed. When its answer cannot be read the push says
+// which cases were accepted and what it does not know, and not a bare decode
+// error that reads as "nothing was pushed" and invites a re-run.
+func TestDatasetsPushSaysWhatItKnowsWhenAnAnswerCannotBeRead(t *testing.T) {
+	smallWrites(t)
+	var posts atomic.Int32
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := posts.Add(1)
+		w.WriteHeader(http.StatusCreated)
+		switch n {
+		case 1:
+			_, _ = w.Write([]byte(`{"ids":["a","b","c"],"version":1,"changed":3}`))
+		default:
+			_, _ = w.Write([]byte(`{"ids":["d"`)) // cut short: the status said it was written
+		}
+	}))
+	t.Cleanup(fake.Close)
+	h := &harness{env: map[string]string{"TRACEPAD_URL": fake.URL, "TRACEPAD_API_KEY": testKey}}
+
+	got := h.run(t.Context(), true, "datasets", "push", "golden", "--file", casesFile(t, 7, nil, nil))
+	if got.code != ExitFailure || posts.Load() != 2 {
+		t.Fatalf("push = %+v after %d writes, want a failure on the second", got, posts.Load())
+	}
+	for _, want := range []string{
+		"the server accepted the write of cases 3–5 of the file, and its answer could not be read",
+		"those cases and the 3 before them are written, the last version this push read being 1",
+		"adds the ones without an id a second time",
+	} {
+		if !strings.Contains(got.stderr, want) {
+			t.Errorf("stderr = %q, want it to say %q", got.stderr, want)
+		}
+	}
+
+	// The first write's answer, unread: nothing before it, and it is written.
+	posts.Store(1) // the fake's next answer is the unreadable one
+	got = h.run(t.Context(), true, "datasets", "push", "golden", "--file", casesFile(t, 7, nil, nil))
+	if !strings.Contains(got.stderr, "the server accepted the write of cases 0–2 of the file, the first of 3 writes, and its answer could not be read") {
+		t.Errorf("first write: stderr = %q", got.stderr)
+	}
+	// A file one write carried keeps the bare error: there is no range to give.
+	posts.Store(1)
+	got = h.run(t.Context(), true, "datasets", "push", "golden", "--file", casesFile(t, 2, nil, nil))
+	if got.code != ExitFailure || strings.Contains(got.stderr, "the server accepted") {
+		t.Errorf("one write: %+v, want the bare error", got)
 	}
 }
 

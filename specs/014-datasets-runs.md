@@ -524,7 +524,7 @@ Truncation markers in `get_run_items` pass through and feed
 
 ## Config additions
 
-None. `TRACEPAD_MAX_BODY_BYTES` bounds item batches as it bounds every body.
+None. `TRACEPAD_MAX_BODY_BYTES` bounds item batches as it bounds every body, and a batch holds at most 10,000 items, a constant (#34).
 
 ## Out of scope (later specs)
 

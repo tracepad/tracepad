@@ -629,9 +629,10 @@ Every step above is a command, and the CLI is nothing but a client of the API
 # 1. Declare what the score names mean. Idempotent.
 tracepad score-configs push accuracy --file accuracy.json
 
-# 2. Push the cases: a .jsonl (one case per line) or a .json array, one batch,
-#    one version tick. Re-running an unchanged file prints "unchanged at
-#    version 12" and writes nothing.
+# 2. Push the cases: a .jsonl (one case per line) or a .json array, one batch
+#    (up to 10,000 cases; a longer file is several writes), one version tick.
+#    Re-running an unchanged file prints "unchanged at version 12" and writes
+#    nothing.
 tracepad datasets push support-golden --file cases.jsonl
 # → version 12: 3 items changed, 200 in the batch
 

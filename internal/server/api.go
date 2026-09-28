@@ -222,7 +222,7 @@ func decodeBatch[T any](body []byte, noun string) ([]*T, error) {
 		return []*T{&one}, nil
 	}
 	if len(trimmed) >= minBodyOverCap && bytes.Count(trimmed, []byte{','}) >= maxItemsPerWrite {
-		switch scan := scanArray(trimmed); {
+		switch scan := scanBody(trimmed); {
 		case !scan.closed:
 			return nil, errMalformedBody
 		case scan.trailing:
@@ -242,6 +242,11 @@ func decodeBatch[T any](body []byte, noun string) ([]*T, error) {
 	}
 	return batch, nil
 }
+
+// scanBody is scanArray, a variable so that a test can count the scans: that
+// an ordinary batch is not scanned is a promise of spec 043 #36, and the
+// answers are the same whether it was or not.
+var scanBody = scanArray
 
 // minBodyOverCap is the length below which an array cannot hold more than
 // maxItemsPerWrite values: n values take at least 2n+1 bytes — n one-byte

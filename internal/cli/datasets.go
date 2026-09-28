@@ -294,7 +294,7 @@ func (r *run) datasetsPush(ctx context.Context, args []string) error {
 		}
 		this, err := decode[itemsWritten](body)
 		if err != nil {
-			return err
+			return unreadableAnswer(err, writes, start, end, written.Version)
 		}
 		written.IDs = append(written.IDs, this.IDs...)
 		written.Version, written.Changed = this.Version, written.Changed+this.Changed
@@ -323,12 +323,21 @@ func (r *run) datasetsPush(ctx context.Context, args []string) error {
 	return nil
 }
 
+// caseSpan names the cases of the file a write carried, counted from 0 as the
+// server counts its indexes.
+func caseSpan(start, end int) string {
+	if end-start == 1 {
+		return fmt.Sprintf("case %d", start)
+	}
+	return fmt.Sprintf("cases %d–%d", start, end-1)
+}
+
 // pushFailure says where in the file a write of a split push failed. The
 // server counts its indexes from the first case of the write it was sent —
 // and names none for a write of one case — so the range is what places the
 // error in the file; the writes before it are committed and stay so. What is
 // said of the failing write itself depends on what came back: a 4xx is the
-// server refusing it, whole, and a connection that dropped or timed out is a
+// server refusing it whole, and a connection that dropped or timed out is a
 // write that may have been committed.
 func pushFailure(err error, writes, start, end, version int) error {
 	if writes == 1 {
@@ -336,10 +345,7 @@ func pushFailure(err error, writes, start, end, version int) error {
 	}
 	var answered *client.Error
 	refused := errors.As(err, &answered) && answered.Status >= 400 && answered.Status < 500
-	span := fmt.Sprintf("cases %d–%d", start, end-1)
-	if end-start == 1 {
-		span = fmt.Sprintf("case %d", start)
-	}
+	span := caseSpan(start, end)
 	landed := "; whether this write itself landed is not known"
 	if refused {
 		landed = ""
@@ -354,6 +360,24 @@ func pushFailure(err error, writes, start, end, version int) error {
 		"the first %d cases are written, at version %d%s; "+
 		"pushing the file again adds the ones without an id a second time)",
 		err, span, start, start, version, landed)
+}
+
+// unreadableAnswer says what a push knows when the server accepted a write
+// and its answer could not be read: a 2xx is a write that landed, and what
+// the answer would have carried — the ids and the version — is what is lost.
+func unreadableAnswer(err error, writes, start, end, version int) error {
+	if writes == 1 {
+		return err
+	}
+	span := caseSpan(start, end)
+	if start == 0 {
+		return fmt.Errorf("%w (the server accepted the write of %s of the file, the first of %d writes, and its "+
+			"answer could not be read; those cases are written, at a version this push did not read; "+
+			"pushing the file again adds the ones without an id a second time)", err, span, writes)
+	}
+	return fmt.Errorf("%w (the server accepted the write of %s of the file, and its answer could not be read; "+
+		"those cases and the %d before them are written, the last version this push read being %d; "+
+		"pushing the file again adds the ones without an id a second time)", err, span, start, version)
 }
 
 // itemsWritten is what POST …/items answers, and what push answers for a
@@ -385,7 +409,7 @@ func refuseRepeatedIDs(items []json.RawMessage) error {
 			continue
 		}
 		if first, repeated := seen[*fields.ID]; repeated {
-			return fmt.Errorf("the case at index %d repeats id %s of the case at index %d", i, *fields.ID, first)
+			return fmt.Errorf("the case at index %d repeats id %s of the case at index %d", i, termsafe.String(*fields.ID), first)
 		}
 		seen[*fields.ID] = i
 	}
