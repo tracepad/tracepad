@@ -1,7 +1,17 @@
 import { expect, test, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { clipped, createProject, foldsAt, openDialog, section, sideways, signIn as enter, state } from './harness';
+import {
+	clipped,
+	createProject,
+	foldsAt,
+	openDialog,
+	overlapping,
+	section,
+	sideways,
+	signIn as enter,
+	state
+} from './harness';
 
 // The Evals screens (spec 016, Testing — e2e), against the real binary. The
 // corpus is not enough here: the suite creates a dataset, its items and a run
@@ -524,6 +534,59 @@ test('on a phone the eval listings fold rather than scroll', async ({ page }, te
 		await expect(table.locator('thead th'), path).toHaveText([...heads]);
 		expect(await sideways(table), path).toBeLessThanOrEqual(0);
 		expect(await clipped(table), path).toEqual([]);
+	}
+});
+
+// Spec 006 #27: the run's header has a select that names another run beside a
+// button, and neither sits on the breadcrumbs, the dataset or the status, at
+// the width of a small phone, a phone, a tablet beside its sidebar and a
+// desktop. The runs it lists are named at length, which is what widens a
+// select, and the title keeps room. Under 1,360 px the controls are a row of their
+// own, and it is there, disabled, while the run loads.
+test('the run header does not lay its controls over its title and breadcrumbs', async ({ page }) => {
+	await signIn(page);
+	const hex = () => Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
+	const dataset = `header-${hex().slice(0, 6)}`;
+	await must('POST', `/api/v1/datasets/${dataset}/items`, [{ id: hex(), input: { question: 'q' } }]);
+	const run = hex();
+	await must('POST', `/api/v1/datasets/${dataset}/runs`, { id: run, name: 'the run on screen' });
+	for (const [i, id] of [hex(), hex()].entries()) {
+		await must('POST', `/api/v1/datasets/${dataset}/runs`, {
+			id,
+			name: `${'a-run-whose-name-is-as-long-as-a-prompt-'.repeat(2)}${i}`
+		});
+	}
+
+	// The run comes back late, so the header is seen before and after it.
+	await page.route(`**/api/v1/runs/${run}*`, async (route) => {
+		await new Promise((done) => setTimeout(done, 800));
+		await route.continue();
+	});
+	await page.goto(`/runs/${run}`);
+	const header = page.locator('header').filter({ has: page.getByRole('heading', { level: 1 }) });
+	const select = header.getByLabel('Compare with another run');
+	await expect(select).toBeVisible();
+	await expect(select).toBeDisabled();
+	const widths = [320, 390, 820, 1000, 1100, 1280, 1360, 1440];
+	for (const width of widths) {
+		await page.setViewportSize({ width, height: 900 });
+		const bar = (await header.boundingBox())!;
+		const own = (await select.boundingBox())!;
+		expect(own.y + own.height, `${width} while it loads`).toBeLessThanOrEqual(bar.y + bar.height);
+	}
+	await expect(select).toBeEnabled();
+	await expect(select.locator('option')).toHaveCount(3);
+
+	for (const width of widths) {
+		await page.setViewportSize({ width, height: 900 });
+		await expect(select, `${width}`).toBeVisible();
+		expect(await overlapping(header), `${width}`).toEqual([]);
+		// The select is inside the window, and the title has room to be read.
+		const box = (await select.boundingBox())!;
+		expect(box.x, `${width}`).toBeGreaterThanOrEqual(0);
+		expect(box.x + box.width, `${width}`).toBeLessThanOrEqual(width);
+		expect((await header.getByRole('heading', { level: 1 }).boundingBox())!.width, `${width}`).toBeGreaterThan(100);
+		expect(await sideways(header), `${width}`).toBeLessThanOrEqual(0);
 	}
 });
 
