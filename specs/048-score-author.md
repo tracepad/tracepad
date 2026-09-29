@@ -1,6 +1,6 @@
 # Spec 048 — Who scored it: the author of a score
 
-**Status:** 🚧 IN PROGRESS
+**Status:** ✅ SHIPPED
 **Sprint:** September 2026
 
 > A score says what someone thought of a trace, and since spec 028 the server
