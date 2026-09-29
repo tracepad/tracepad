@@ -1,7 +1,10 @@
 package server
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/tracepad/tracepad/internal/store"
@@ -86,5 +89,89 @@ func TestArraysOverTheirLimitAreCounted(t *testing.T) {
 	// Each route kept to its own counter.
 	if got := h.batchCapCounters(t, testSecret); got != (batchCapCounters{Scores: 1, DatasetItems: 1, QueueAdds: 1}) {
 		t.Errorf("counters = %+v, want one each", got)
+	}
+}
+
+// A body refused for its shape is not refused for its length, even when it is
+// long enough to be scanned (spec 043 #36, #40): an array that never closes or
+// is followed by another value, with as many commas as the cap has values,
+// takes the scan's 400 and moves no counter.
+func TestScannedBodiesRefusedForTheirShapeAreNotCounted(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	h.putConfigs(t, "accuracy")
+	expectStatus(t, h.putQueue(t, "review", "accuracy"), 201)
+
+	for _, route := range []struct {
+		name, path string
+		limit      int
+	}{
+		{"scores", "/api/v1/scores", maxItemsPerWrite},
+		{"dataset items", "/api/v1/datasets/capped/items", maxItemsPerWrite},
+		{"queue targets", "/api/v1/queues/review/items", maxItemsPerAdd},
+	} {
+		zeros := func(n int) string { return "[" + strings.Repeat("0,", n-1) + "0]" }
+		unclosed := "[" + strings.Repeat("0,", route.limit+5)
+		trailing := zeros(route.limit+1) + " 1"
+		for name, body := range map[string]string{"never closed": unclosed, "a value after the array": trailing} {
+			if len(body) < minBodyOver(route.limit) || strings.Count(body, ",") < route.limit {
+				t.Fatalf("%s/%s: %d bytes and %d commas would skip the scan", route.name, name, len(body), strings.Count(body, ","))
+			}
+			expectStatus(t, h.call(t, "POST", route.path, []byte(body)), http.StatusBadRequest)
+		}
+	}
+	if got := h.batchCapCounters(t, testSecret); got != (batchCapCounters{}) {
+		t.Errorf("counters after bodies refused for their shape = %+v, want none", got)
+	}
+}
+
+// The limits the /system documentation names are the limits the server
+// applies, as the documented maxItems are (TestOpenAPIDescribesTheItemCap): a
+// changed cap fails here rather than leaving the old number in the document.
+func TestOpenAPINamesTheLimitsOfTheCounters(t *testing.T) {
+	var document any
+	if err := json.Unmarshal(openAPIDocument, &document); err != nil {
+		t.Fatal(err)
+	}
+	var find func(node any, key string) map[string]any
+	find = func(node any, key string) map[string]any {
+		switch n := node.(type) {
+		case map[string]any:
+			if v, ok := n[key].(map[string]any); ok {
+				return v
+			}
+			for _, child := range n {
+				if found := find(child, key); found != nil {
+					return found
+				}
+			}
+		case []any:
+			for _, child := range n {
+				if found := find(child, key); found != nil {
+					return found
+				}
+			}
+		}
+		return nil
+	}
+	thousands := func(n int) string {
+		s := fmt.Sprint(n)
+		for i := len(s) - 3; i > 0; i -= 3 {
+			s = s[:i] + "," + s[i:]
+		}
+		return s
+	}
+	for key, limit := range map[string]int{
+		"scores_over_row_cap":        maxItemsPerWrite,
+		"dataset_items_over_row_cap": maxItemsPerWrite,
+		"queue_adds_over_target_cap": maxItemsPerAdd,
+	} {
+		counter := find(document, key)
+		if counter == nil {
+			t.Errorf("openapi.json describes no %s", key)
+			continue
+		}
+		if description, _ := counter["description"].(string); !strings.Contains(description, "more than "+thousands(limit)+" ") {
+			t.Errorf("%s says %q, the server takes at most %d", key, description, limit)
+		}
 	}
 }

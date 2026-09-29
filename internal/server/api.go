@@ -334,10 +334,8 @@ func (e *overItemCap) Error() string {
 // #40).
 func (s *Server) writeBatchError(w http.ResponseWriter, projectID string, kind batchKind, err error) {
 	status := http.StatusBadRequest
-	var over *overItemCap
-	if errors.As(err, &over) {
+	if s.countOverBatchCap(projectID, kind, err) {
 		status = http.StatusRequestEntityTooLarge
-		s.counters.observeOverBatchCap(projectID, kind)
 	}
 	writeError(w, status, err.Error())
 }

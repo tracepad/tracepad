@@ -300,10 +300,7 @@ func (s *Server) handleAddItems(w http.ResponseWriter, r *http.Request) {
 	}
 	requests, err := decodeTargets(body)
 	if err != nil {
-		var over *overItemCap
-		if errors.As(err, &over) {
-			s.counters.observeOverBatchCap(project.ID, batchQueueTargets)
-		}
+		s.countOverBatchCap(project.ID, batchQueueTargets, err)
 		writeError(w, http.StatusBadRequest, queueAddRefusal(err))
 		return
 	}

@@ -3442,7 +3442,7 @@ export interface operations {
                             reads_refused_busy?: number;
                             /** @description This project's POST /api/v1/scores arrays refused with 413 for carrying more than 10,000 scores */
                             scores_over_row_cap?: number;
-                            /** @description This project's dataset item arrays refused with 413 for carrying more than 10,000 items */
+                            /** @description This project's POST /api/v1/datasets/{name}/items arrays refused with 413 for carrying more than 10,000 items */
                             dataset_items_over_row_cap?: number;
                             /** @description This project's queue adds refused with 400 for carrying more than 1,000 targets */
                             queue_adds_over_target_cap?: number;
