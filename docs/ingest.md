@@ -99,9 +99,14 @@ would make it drop the batch.
 **OpenTelemetry SDK** — nothing but environment:
 
 ```sh
+export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
 export OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://localhost:4318/v1/traces
 export OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer tp-sk-…"
 ```
+
+The protocol line is not optional: Tracepad has no gRPC receiver, and an SDK
+left to its own default may choose gRPC — the application reports nothing and
+the trace list stays empty. `http/json` works too ([below](#the-json-encoding)).
 
 **Langfuse SDK** — point it at Tracepad instead of Langfuse:
 
@@ -169,8 +174,8 @@ Two of those lines are the ones people lose an afternoon to:
   the path is not written out.
 
 A day of prompts is a lot of traces to have arrive beside your application's,
-so give them an environment of their own — the filter, the stats and the
-retention policy are all per environment:
+so give them an environment of their own — the filter and the statistics are
+per environment (retention is per project):
 
 ```sh
 export OTEL_RESOURCE_ATTRIBUTES=deployment.environment=claude-code

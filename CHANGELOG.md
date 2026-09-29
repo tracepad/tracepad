@@ -1,0 +1,84 @@
+# Changelog
+
+All notable changes to Tracepad are recorded here. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
+follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — with the
+reading of "before 1.0" that the [README](README.md#what-beta-means) spells out.
+
+The server, the CLI and the web interface are one binary and one version. The
+Python, Node and Go packages are versioned on their own and are listed under
+their own headings.
+
+## [Unreleased]
+
+The first release, **0.1.0**, is the beta, and everything below ships in it.
+From the next release on, this section lists what changed since the previous
+one.
+
+### Added
+
+#### Server
+
+- OTLP/HTTP ingest (`/v1/traces`, protobuf and JSON, gzip) and the Langfuse
+  SDK's endpoints, into an embedded SQLite database: one binary, one data
+  directory, migrations applied on start. Raw export bodies are kept for
+  replay.
+- The attribute mapping for the OpenTelemetry GenAI conventions, Langfuse's
+  and Tracepad's own, with the wire columns filters need (`release`, `version`,
+  observation `type`, prompt, time to first token) and media taken out of
+  payloads and stored once.
+- The read API under `/api/v1` — flat JSON, cursor pagination both ways with an
+  optional exact count, byte budgets with truncation markers, full-text search
+  over what observations carried, facets — described by `GET /api/v1` and an
+  OpenAPI document.
+- Scores, prompts (versions, movable labels), datasets, runs and their
+  comparison, score configs, annotation queues, per-user rollups and quality
+  trends.
+- Hourly statistics that outlive the traces they summarize, with token and
+  cost breakdowns.
+- Projects with scoped keys (`ingest`, `read`, `write`), accounts with email
+  and password sign-in, owner/editor/viewer roles, invitations, and an admin
+  token for administration.
+- Retention windows per project (traces, raw bodies, statistics), an hourly
+  sweeper, trace deletion with a dry run, and user-data erasure that reaches
+  the raw archive, dataset items and the freed pages. Deleting a project is
+  undoable for a week.
+- Bounds on what one request may cost (body, spans per request, read
+  concurrency and timeout), and rate limiting by source.
+- Export of the raw archive to any OTLP receiver or to a directory, resumably.
+
+#### CLI, MCP and the agent skill
+
+- `tracepad` subcommands over the read API — traces, sessions, stats, scores,
+  prompts, datasets, runs, queues, projects, keys, retention, export — that
+  print JSON when piped.
+- An MCP server at `/mcp` and over stdio (`tracepad mcp`), read-only.
+- A skill for coding agents that ships inside the binary
+  (`tracepad skills install`).
+
+#### Web interface
+
+- Traces, sessions, users, stats and dashboard, prompts, scores, evals
+  (datasets, runs, comparison), annotation queues and settings, with the
+  project in every address and a peek panel over any listing.
+- JSON payloads in an editor surface with folding and search, images shown in
+  place, and a phone-width layout.
+
+#### Packages
+
+- **Python** (`tracepad` on PyPI), **Node** (`tracepad` on npm) and **Go**
+  (`github.com/tracepad/tracepad/sdk/go`): an exporter added to the
+  OpenTelemetry provider the application already has, `observe`/generation
+  helpers, scores and prompts over the REST API, an eval harness, trace
+  deletion, and test helpers for asserting on an application's instrumentation.
+  They read `TRACEPAD_URL` and `TRACEPAD_API_KEY`; the earlier name
+  `TRACEPAD_HOST` is a deprecated synonym.
+
+#### Distribution
+
+- Release archives for Linux, macOS and Windows on amd64 and arm64 with
+  checksums and build-provenance attestations, and a multi-architecture image
+  on `ghcr.io/tracepad/tracepad`. See [docs/install.md](docs/install.md) and
+  [docs/docker.md](docs/docker.md).
+
+[Unreleased]: https://github.com/tracepad/tracepad/commits/main

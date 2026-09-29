@@ -136,8 +136,12 @@ Flags of serve:
   --data-dir path    data directory             (env TRACEPAD_DATA_DIR)
 
 Server environment:
-  TRACEPAD_STORE_RAW              keep raw OTLP bodies for remap/export (default on)
+  TRACEPAD_STORE_RAW              keep raw OTLP bodies for export       (default on)
+  TRACEPAD_PROJECTS               name:public_key:secret_key,… to declare projects at start
+  TRACEPAD_URL                    address people reach the server at (links it prints; CLI target)
   TRACEPAD_MAX_BODY_BYTES         request body cap in bytes             (default 20971520)
+  TRACEPAD_MAX_SPANS_PER_REQUEST  spans one export may carry            (default 20000)
+  TRACEPAD_BODY_BUDGET_BYTES      request bodies held in memory at once (default 4x the body cap)
   TRACEPAD_RESPONSE_BUDGET_BYTES  default read response budget          (default 51200)
   TRACEPAD_READ_TIMEOUT           deadline of one read request          (default 20s)
   TRACEPAD_READ_CONCURRENCY       reads served at once                  (default 2 per CPU, at least 4)
@@ -148,6 +152,7 @@ Server environment:
                                   at least 32 characters: openssl rand -hex 32
   TRACEPAD_ADMIN_TOKEN_FILE       read the admin token from this file   (default unset)
   TRACEPAD_SETUP                  mint and print the setup link         (default on)
+  TRACEPAD_SESSION_DAYS           days a browser sign-in lasts          (default 30)
   TRACEPAD_TRUSTED_PROXIES        proxies whose X-Forwarded-For counts  (default loopback)
                                   addresses and CIDR ranges, or none
 
@@ -393,7 +398,8 @@ func printStartup(w io.Writer, boot *store.BootstrapResult, listen, setupURL str
 		fmt.Fprintf(w, `
 Project %q created%s
 
-  # OpenTelemetry SDK
+  # OpenTelemetry SDK (the protocol line is not optional: Tracepad has no gRPC)
+  OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
   OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://%s/v1/traces
   OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer %s"
 

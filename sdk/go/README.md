@@ -15,8 +15,9 @@ OTel API already has: a `context.Context` in, a `context.Context` out.
 go get github.com/tracepad/tracepad/sdk/go
 ```
 
-Go 1.25+. Three dependencies: `go.opentelemetry.io/otel`,
-`go.opentelemetry.io/otel/sdk` and the OTLP/HTTP trace exporter.
+Go 1.25+. Four dependencies: `go.opentelemetry.io/otel`,
+`go.opentelemetry.io/otel/trace`, `go.opentelemetry.io/otel/sdk` and the OTLP/HTTP
+trace exporter.
 
 ## Point an application at a store
 
@@ -31,7 +32,8 @@ defer shutdown(ctx)
 ```
 
 `TRACEPAD_URL` and `TRACEPAD_API_KEY` are the two variables it reads;
-`TRACEPAD_ENVIRONMENT` and `TRACEPAD_RELEASE` are the two it can also use. If
+`TRACEPAD_ENVIRONMENT`, `TRACEPAD_RELEASE` and `TRACEPAD_EXPORT_TIMEOUT` are the
+ones it can also use. If
 the application already has a `TracerProvider` — `otelhttp`, another SDK —
 `Init` registers an exporter on it rather than replacing it.
 

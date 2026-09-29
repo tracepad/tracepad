@@ -47,6 +47,8 @@ func TestPrintStartupPrintsOnlyGeneratedSecrets(t *testing.T) {
 	}
 	for _, want := range []string{
 		`Project "default" created. Connect your app with either:`,
+		// No gRPC receiver: an exporter left to its default reports nothing.
+		"OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf",
 		"Bearer tp-sk-generated",
 		"LANGFUSE_SECRET_KEY=tp-sk-generated",
 		`Project "app" created from TRACEPAD_PROJECTS.`,

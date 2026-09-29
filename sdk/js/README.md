@@ -29,6 +29,8 @@ const answer = tracepad.observe(async (question: string) => {
 
 Node 22 or newer; ESM and CommonJS, with types. Built by `tsup`.
 
-The whole surface — `init`, `observe`, `span`, `event`, `generation` with
-streams, `update`, `updateTrace`, `score`, `prompt`, `flush` — is documented in
+Tracing (`init`, `observe`, `span`, `event`, `generation` with streams,
+`update`, `updateTrace`, `spanProcessor`), scores and prompts, datasets and
+runs with comparison, trace deletion, the error classes and the `tracepad/testing`
+helpers are documented in
 [docs/sdk-js.md](https://github.com/tracepad/tracepad/blob/main/docs/sdk-js.md).

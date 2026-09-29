@@ -4,10 +4,37 @@ A lightweight, self-hosted store and viewer for LLM and agent application
 traces. Single binary, embedded database, OTLP-native ingestion — point any
 OpenTelemetry-instrumented app at it and browse your traces.
 
-**Status: pre-release.** Under active development; not ready for use yet.
+**Status: beta.** Tracepad runs real workloads, and what is stable and what may
+still change before 1.0 is written down in [What beta means](#what-beta-means).
 
 New here? [docs/quickstart.md](docs/quickstart.md) goes from nothing to a
-trace on screen.
+trace on screen. Changes are listed in [CHANGELOG.md](CHANGELOG.md), and
+[CONTRIBUTING.md](CONTRIBUTING.md) is the way in for a patch.
+
+## What beta means
+
+**Stable — these change only by addition, or with a deprecation that keeps the
+old form working for at least one release and says so in the
+[changelog](CHANGELOG.md):**
+
+- **The HTTP API under `/api/v1`** and the OTLP ingest endpoints: endpoints,
+  fields and filters are added; a documented one is not renamed or removed. The
+  CLI's JSON output is that API's bytes, so it is as stable as the API.
+- **The data on disk.** Schema migrations run on start and only go forward; the
+  server copies the database beside itself (`tracepad.db.pre-<migration>.bak`)
+  before applying one. A downgrade is not supported, so back up before an
+  upgrade ([docs/install.md](docs/install.md#upgrading)).
+- **The Python, Node and Go packages** follow [semantic versioning](https://semver.org/):
+  a patch release does not break you, a `0.x` minor release may, and the
+  changelog says where.
+
+**May still change before 1.0:** the tables the CLI prints for people, the
+layout of the web interface, the set of MCP tools, how the attribute mapping
+reads conventions that are still moving (the OpenTelemetry GenAI ones), and the
+defaults of a fresh install.
+
+**Support** is best effort from a small team: issues are read, fixes go into
+the newest release only ([SECURITY.md](SECURITY.md#supported-versions)).
 
 ## Getting it
 
@@ -26,8 +53,10 @@ serving it to anyone else is a job for a TLS proxy in front
 Or as a binary: the archives for Linux, macOS and Windows on
 [Releases](https://github.com/tracepad/tracepad/releases) — one file, nothing
 to install alongside it. Both carry the web interface; both keep everything in
-one directory you choose. See [docs/docker.md](docs/docker.md) for the volume,
-the permissions and upgrades.
+one directory you choose. [docs/install.md](docs/install.md) covers the binary
+(verifying the download, running it as a service, upgrading, backing up) and
+[docs/docker.md](docs/docker.md) the image (the volume, the permissions,
+upgrades).
 
 From a checkout, `make build` produces the same binary and `make image` the
 same image.
@@ -41,10 +70,11 @@ nothing else to run. Past that you are looking for a platform on a column
 store — ClickHouse and its neighbours — and the honest answer is that this is
 not that.
 
-Rough figures, measured on a synthetic corpus of about 2,000 traces:
+Rough figures, measured on a synthetic corpus of about 2,000 traces (the binary
+size is that of the current build; the other four date from 2026-08-30 and have
+not been re-measured since):
 
-- **Binary** — 15.6 MiB on `darwin/arm64`, 6.2 MiB gzipped; about half a MiB
-  more for `linux/amd64`.
+- **Binary** — 19.4 MiB on `darwin/arm64`, 7.6 MiB gzipped.
 - **Memory** — ~27 MiB resident at rest, ~63 MiB under ingest.
 - **Ingest** — ~1,900 spans/s from one sequential client, which is headroom
   rather than the ceiling: the envelope above is set by what the file and the
@@ -75,9 +105,14 @@ under the Langfuse SDK's path. Connecting an instrumented application is an
 endpoint and a header:
 
 ```sh
+export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
 export OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://localhost:4318/v1/traces
 export OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer tp-sk-…"
 ```
+
+The first line is not optional: Tracepad has no gRPC receiver, and an SDK left
+to its own default may choose gRPC — the application runs, reports nothing and
+the trace list stays empty.
 
 In Python and in Node there is also a package — a thin layer over the same
 OpenTelemetry SDK, which adds an exporter to the provider your application
@@ -100,6 +135,7 @@ context out (`go get github.com/tracepad/tracepad/sdk/go`).
 
 See [docs/ingest.md](docs/ingest.md) for the endpoints, the auth schemes, the
 attribute conventions Tracepad understands, and the ingest configuration,
+[docs/configuration.md](docs/configuration.md) for every environment variable,
 [docs/sdk-python.md](docs/sdk-python.md) for the Python package,
 [docs/sdk-js.md](docs/sdk-js.md) for the Node one and
 [docs/sdk-go.md](docs/sdk-go.md) for the Go one.

@@ -9,7 +9,8 @@
 	// would say nothing about what to do next.
 
 	const snippet = $derived(
-		`OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=${page.url.origin}/v1/traces\n` +
+		'OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf\n' +
+			`OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=${page.url.origin}/v1/traces\n` +
 			'OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer <your project key>"'
 	);
 </script>

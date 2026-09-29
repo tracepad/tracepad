@@ -1,0 +1,61 @@
+name: Bug report
+description: Something does not work the way the documentation says it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time. Please **remove anything private** — keys,
+        prompts, completions, user ids — from what you paste below. For a
+        security problem, use the private route in
+        [SECURITY.md](https://github.com/tracepad/tracepad/blob/main/SECURITY.md)
+        instead.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `tracepad version`, or the image tag, or the package version.
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where does it happen?
+      multiple: true
+      options:
+        - Ingest (sending traces)
+        - Web interface
+        - CLI
+        - MCP server
+        - Read API
+        - Python package
+        - Node package
+        - Go package
+        - Docker image or release archive
+        - Documentation
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce it
+      description: Commands, a request, or a small OTLP body. The shorter the better.
+      render: shell
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Operating system, how you run Tracepad (binary, Docker, Compose), the SDK and its version, anything between the application and the server (a proxy).
+  - type: textarea
+    id: logs
+    attributes:
+      label: Server log
+      description: The lines around the problem, from the terminal, `docker logs` or `journalctl`.
+      render: text

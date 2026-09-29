@@ -1,0 +1,24 @@
+name: Question
+description: Something the documentation does not answer.
+labels: [question]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please look through the [docs](https://github.com/tracepad/tracepad/tree/main/docs)
+        first — [quickstart](https://github.com/tracepad/tracepad/blob/main/docs/quickstart.md)
+        and [ingest](https://github.com/tracepad/tracepad/blob/main/docs/ingest.md)
+        cover most first-run questions. If they do not answer yours, that is a
+        documentation bug worth knowing about.
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question
+      description: What you are trying to do, what you tried, and what you saw.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `tracepad version`, or the image tag.
