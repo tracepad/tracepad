@@ -51,6 +51,9 @@ type Aggregator struct {
 	// beforeProject is a test seam, told which project a pass is about to
 	// roll; a panic in it is a fault in the roll of that project.
 	beforeProject func(*Project)
+	// panics counts the passes in a row a project's roll panicked in outside
+	// an hour, which the hours' own holding does not see.
+	panics panicLedger
 
 	store    *Store
 	writer   jobSubmitter
@@ -150,9 +153,16 @@ func (a *Aggregator) Pass(ctx context.Context) error {
 	var failures []error
 	var rolled int
 	for _, project := range projects {
+		if a.panics.skip(project.ID) {
+			continue
+		}
 		hours, err := try("stats rollup of a project", func() (int, error) {
 			return a.rollProject(ctx, project, start)
 		})
+		if a.panics.settle(project.ID, err) {
+			logger().Error("statistics gave up on a project whose roll panicked in every pass; it is left out until the server restarts",
+				"project", project.Name, "passes", maxHeldPasses)
+		}
 		rolled += hours
 		if err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, ErrWriterClosed) {

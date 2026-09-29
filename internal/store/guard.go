@@ -1,9 +1,11 @@
 package store
 
 import (
+	"errors"
 	"fmt"
 	"runtime"
 	"runtime/debug"
+	"sync"
 )
 
 // PanicError is what a panic in a write job or in a background worker's pass
@@ -64,4 +66,38 @@ func try[T any](where string, fn func() (T, error)) (T, error) {
 		return err
 	})
 	return out, err
+}
+
+// panicLedger counts, per project, the passes in a row whose part for that
+// project panicked. A project that panics maxHeldPasses times in a row is left
+// out until the process restarts, as a failing hour is given up on after the
+// same number (spec 043 #8, #42): a bug in the code that reads its data would
+// otherwise log a stack every tick for ever. A pass in which it does not panic
+// starts the count again.
+type panicLedger struct {
+	mu   sync.Mutex
+	runs map[string]int
+}
+
+// skip says the project has been given up on.
+func (l *panicLedger) skip(id string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.runs[id] >= maxHeldPasses
+}
+
+// settle records how a project's part of a pass ended, and reports whether it
+// has just been given up on.
+func (l *panicLedger) settle(id string, err error) (gaveUp bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if !errors.As(err, new(*PanicError)) {
+		delete(l.runs, id)
+		return false
+	}
+	if l.runs == nil {
+		l.runs = map[string]int{}
+	}
+	l.runs[id]++
+	return l.runs[id] == maxHeldPasses
 }

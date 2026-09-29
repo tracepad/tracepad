@@ -97,7 +97,9 @@ type Sweeper struct {
 	// beforeProject is a test seam, told which project a pass is about to
 	// sweep; a panic in it is a fault in the sweep of that project.
 	beforeProject func(*Project)
-	runStart      time.Time
+	// panics counts the passes in a row a project's sweep panicked in.
+	panics   panicLedger
+	runStart time.Time
 
 	// afterMergeStep is a test seam: it runs after every merge step of a
 	// compaction, which is how a test lands ingest in the middle of one.
@@ -235,9 +237,16 @@ func (sw *Sweeper) Pass(ctx context.Context) error {
 	var freed bool
 	var failures []error
 	for _, project := range projects {
+		if sw.panics.skip(project.ID) {
+			continue
+		}
 		removed, err := try("retention sweep of a project", func() (bool, error) {
 			return sw.sweepProject(ctx, project, start)
 		})
+		if sw.panics.settle(project.ID, err) {
+			logger().Error("retention gave up on a project whose sweep panicked in every pass; it is left out until the server restarts",
+				"project", project.Name, "passes", maxHeldPasses)
+		}
 		if removed {
 			freed = true
 		}

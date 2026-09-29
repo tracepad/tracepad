@@ -452,15 +452,17 @@ command works from a load balancer, a systemd unit or your own script:
 tracepad health --url http://tracepad.internal:4318
 ```
 
-A bug in one background job does not stop the server. The writer, the retention
-sweeper, the statistics rollup and the erasure worker recover from a panic in
-the job or pass they are running: an `ERROR` line, `a panic was recovered`,
-says where and carries the stack; the write that hit it is answered with an
-error and rolled back alone, and the others in its window commit; one project's
-sweep or roll that panics costs that project's alone, and the next tick tries
-again; an erasure is taken again after its poll. The line
-never carries the panic's own words. If you see it, the stack is what to
-report.
+A bug in one write or one background pass does not stop the server. The
+writer recovers a panic in a job it is applying, and the retention sweeper, the
+statistics rollup and the erasure worker recover one in a project's, an hour's
+or a run's work: an `ERROR` line, `a panic was recovered`, says where and
+carries the stack; the write that hit it is answered with an error and refused
+alone, and the others in its window commit; the next tick tries the project
+again, and gives up on one that panics three passes in a row until the next
+start. The line never carries the panic's own words, so the stack is what to
+report. A panic anywhere else — the writer's own loop, the WAL checkpoint —
+ends the process, as a Go program's does; run the server under something that
+restarts it, such as `restart: unless-stopped` below.
 
 ## Compose
 

@@ -237,3 +237,65 @@ func TestAPanicInOneProjectsRollDoesNotStopTheRest(t *testing.T) {
 		t.Error("the pass did not finish: its last run never moved")
 	}
 }
+
+// A nil job is refused where it is submitted: the writer's loop never calls a
+// method on one (spec 043 #42).
+func TestANilJobIsRefusedAtSubmit(t *testing.T) {
+	s, p := openIngestStore(t)
+	w, err := s.NewWriter(WriterOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	if err := w.Submit(t.Context(), nil); err == nil {
+		t.Error("Submit(nil) was accepted")
+	}
+	if err := w.SubmitWaiting(t.Context(), nil); err == nil {
+		t.Error("SubmitWaiting(nil) was accepted")
+	}
+	if err := w.Submit(t.Context(), batchFor(p.ID, fmt.Sprintf("%032x", 11), spanHex(11))); err != nil {
+		t.Errorf("a write after the refusals: %v", err)
+	}
+}
+
+// A project whose part of the pass panics in every pass is given up on after
+// maxHeldPasses, as a failing hour is (spec 043 #8, #42); one that recovers
+// starts the count again.
+func TestAProjectThatPanicsInEveryPassIsGivenUp(t *testing.T) {
+	logged := captureLog(t)
+	s, _ := openIngestStore(t)
+	w, err := s.NewWriter(WriterOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	sw := s.NewSweeper(w, SweepOptions{})
+	swept := 0
+	sw.beforeProject = func(*Project) {
+		swept++
+		panic("this project's data")
+	}
+	for range maxHeldPasses + 3 {
+		_ = sw.Pass(t.Context())
+	}
+	if swept != maxHeldPasses {
+		t.Errorf("the project was swept %d times, want %d and then left out", swept, maxHeldPasses)
+	}
+	if !strings.Contains(logged(), "retention gave up on a project") {
+		t.Errorf("giving up was not logged:\n%s", logged())
+	}
+
+	// A pass that does not panic starts the count again.
+	var ledger panicLedger
+	panicked := &PanicError{Where: "x"}
+	for range maxHeldPasses - 1 {
+		ledger.settle("p", panicked)
+	}
+	ledger.settle("p", nil)
+	for range maxHeldPasses - 1 {
+		ledger.settle("p", panicked)
+	}
+	if ledger.skip("p") {
+		t.Error("a project that recovered in between was given up on")
+	}
+}
