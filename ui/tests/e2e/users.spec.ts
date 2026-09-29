@@ -373,7 +373,8 @@ test('375 px never scrolls the page sideways', async ({ page }) => {
 // Spec 006 #22: a listing folds by the width of its own box, not the screen's.
 // On a phone the user and the errors stay and the rest folds under the id; in
 // a desktop window of 1,000 px the column leaves the table 792 px, which the
-// users' seven columns do not fit and the sessions' six do.
+// users' eight columns do not fit and neither do the sessions' seven, since
+// the Tokens column (spec 049 #20) took the sessions from 720 px to 816.
 test('the users fold on a phone and in a narrow desktop window', async ({ page }, testInfo) => {
 	if (testInfo.project.name === 'desktop') await page.setViewportSize({ width: 1000, height: 800 });
 	await signIn(page);
@@ -388,19 +389,19 @@ test('the users fold on a phone and in a narrow desktop window', async ({ page }
 
 	if (testInfo.project.name !== 'desktop') return;
 	await page.goto('/sessions');
-	await expect(page.locator('main table thead th')).toHaveCount(6);
+	await expect(page.locator('main table thead th')).toHaveText(['Last seen', 'Session', 'Errors']);
 });
 
 // Spec 006 #22: a table has its own width whatever its cells hold. With a UUID
 // for the user and another for the session, and a name longer than its
 // column, the traces, the sessions and the users still have all their columns
-// from their widths — 896, 720 and 848 px — and none scrolls.
+// from their widths — 992, 816 and 944 px — and none scrolls.
 async function listingsAtTheirWidths(page: Page) {
 	await signIn(page);
 	for (const [path, box, columns, seen] of [
-		['/traces', 896, 9, CAROL_SESSION],
-		['/sessions', 720, 6, CAROL_SESSION],
-		['/users', 848, 7, CAROL.slice(0, 13)]
+		['/traces', 992, 10, CAROL_SESSION],
+		['/sessions', 816, 7, CAROL_SESSION],
+		['/users', 944, 8, CAROL.slice(0, 13)]
 	] as const) {
 		await page.goto(path);
 		const table = page.locator('main table');
