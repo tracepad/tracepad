@@ -71,6 +71,11 @@ export interface AuthorLabel {
 
 const GONE = new Set(['removed', 'disabled', 'deleted', 'revoked']);
 
+/** Whether a standing says the person or the key is no longer here (spec 048 #4). */
+export function isGone(standing: string | undefined): boolean {
+	return standing !== undefined && GONE.has(standing);
+}
+
 /**
  * Who wrote it (spec 048 #10), or null for a score from before the server
  * recorded authors, which shows nothing rather than a guess (#6). An account
@@ -80,7 +85,7 @@ const GONE = new Set(['removed', 'disabled', 'deleted', 'revoked']);
 export function scoreAuthor(score: Score): AuthorLabel | null {
 	const author = score.author;
 	if (!author) return null;
-	const gone = GONE.has(author.standing);
+	const gone = isGone(author.standing);
 	const title = [author.email, gone ? author.standing : ''].filter(Boolean).join(' · ') || undefined;
 	if (author.kind === 'key') {
 		return { text: `key ${author.name || author.id}`, title, gone };

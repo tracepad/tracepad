@@ -3480,9 +3480,11 @@
           "added_at": {"type": "string", "format": "date-time"},
           "claimed_by": {"type": "string", "description": "Who `next` handed it to; absent when nothing holds it. A key's reviewer by the name it sent; a signed-in one by the account's display name, else its email for an editor or an owner, else `a member`, or `a deleted account`"},
           "claimed_by_account": {"type": "string", "description": "The account id of a signed-in reviewer holding it"},
+          "claimed_by_standing": {"type": "string", "enum": ["owner", "editor", "viewer", "removed", "disabled", "deleted"], "description": "That account's standing in the project now, as a score author's"},
           "claimed_until": {"type": "string", "format": "date-time", "description": "When the claim expires and the item is claimable again"},
           "completed_by": {"type": "string", "description": "Who completed or skipped it, named as `claimed_by` is"},
           "completed_by_account": {"type": "string", "description": "The account id of a signed-in reviewer who completed or skipped it"},
+          "completed_by_standing": {"type": "string", "enum": ["owner", "editor", "viewer", "removed", "disabled", "deleted"], "description": "That account's standing in the project now: a role, or removed, disabled, deleted"},
           "completed_at": {"type": "string", "format": "date-time"},
           "skip_reason": {"type": "string"}
         },

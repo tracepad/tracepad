@@ -112,13 +112,18 @@ func TestANamelessAccountsEmailIsNotInTheQueue(t *testing.T) {
 			t.Errorf("a viewer is not told who at %s: %s", path, rec.Body.String())
 		}
 	}
-	// The refusal a second completion gets is read by whoever asks.
+	// The refusal a second completion gets names the finisher as the listing
+	// does, for whoever is refused: a member to a viewer, the email to an
+	// editor.
 	rec := h.call(t, "POST", "/api/v1/queues/review/items/"+first+"/complete",
-		[]byte(`{}`), h.asMember(editor)...)
-	expectError(t, rec, http.StatusConflict, "another member")
+		[]byte(`{}`), h.asMember(viewer)...)
+	expectError(t, rec, http.StatusConflict, "completed by a member")
 	if strings.Contains(rec.Body.String(), "quiet@example.com") {
-		t.Errorf("the refusal names the email: %s", rec.Body.String())
+		t.Errorf("the refusal names the email to a viewer: %s", rec.Body.String())
 	}
+	rec = h.call(t, "POST", "/api/v1/queues/review/items/"+first+"/skip",
+		[]byte(`{"reason":"x"}`), h.asMember(editor)...)
+	expectError(t, rec, http.StatusConflict, "completed by quiet@example.com")
 
 	rec = h.call(t, "GET", "/api/v1/queues/review/items/"+first, nil, h.asMember(editor)...)
 	if item := decodeJSON[queueItemResponse](t, rec); item.CompletedBy != "quiet@example.com" ||
@@ -184,7 +189,45 @@ func TestADeletedReviewerIsSaidSo(t *testing.T) {
 		nil, asSession(owner)), http.StatusNoContent)
 
 	rec := h.call(t, "GET", "/api/v1/queues/review/items/"+first, nil, h.asMember(owner)...)
-	if item := decodeJSON[queueItemResponse](t, rec); item.CompletedBy != "a deleted account" {
-		t.Errorf("completed_by = %q, want a deleted account", item.CompletedBy)
+	if item := decodeJSON[queueItemResponse](t, rec); item.CompletedBy != "a deleted account" ||
+		item.CompletedByStanding != store.StandingDeleted {
+		t.Errorf("completed_by = %q (%q), want a deleted account", item.CompletedBy, item.CompletedByStanding)
+	}
+}
+
+// TestAReviewerWhoIsGoneSaysWhy: the queue gives a reviewer's standing as the
+// scores block gives an author's (spec 048 #4): removed and disabled are said,
+// and a reviewer still in the project carries their role.
+func TestAReviewerWhoIsGoneSaysWhy(t *testing.T) {
+	h := newAccountHarness(t)
+	first, second := h.reviewQueue(t)
+	owner := h.owner(t)
+	bob := h.account(t, "bob@example.com", false, store.Membership{ProjectID: h.project.ID, Role: store.RoleEditor})
+	cleo := h.account(t, "cleo@example.com", false, store.Membership{ProjectID: h.project.ID, Role: store.RoleEditor})
+	h.postScore(t, map[string]any{"trace_id": traceHex(1), "name": "accuracy", "value": 1})
+	h.postScore(t, map[string]any{"trace_id": traceHex(2), "name": "accuracy", "value": 1})
+	for who, item := range map[*signedIn]string{bob: first, cleo: second} {
+		expectStatus(t, h.call(t, "POST", "/api/v1/queues/review/items/"+item+"/complete",
+			[]byte(`{}`), h.asMember(who)...), http.StatusOK)
+	}
+	standings := func() map[string]string {
+		rec := h.call(t, "GET", "/api/v1/queues/review/items", nil, h.asMember(owner)...)
+		out := map[string]string{}
+		for _, item := range decodeJSON[queueItemListResponse](t, rec).Items {
+			out[item.ID] = item.CompletedByStanding
+		}
+		return out
+	}
+	if got := standings(); got[first] != store.RoleEditor || got[second] != store.RoleEditor {
+		t.Errorf("standings = %v, want both editors", got)
+	}
+	expectStatus(t, h.call(t, "DELETE", "/api/v1/accounts/"+bob.account.ID+"/projects/"+h.project.ID,
+		nil, asSession(owner)), http.StatusNoContent)
+	yes := true
+	if err := h.writer.Submit(t.Context(), &store.AccountUpdate{AccountID: cleo.account.ID, Disabled: &yes}); err != nil {
+		t.Fatal(err)
+	}
+	if got := standings(); got[first] != store.StandingRemoved || got[second] != store.StandingDisabled {
+		t.Errorf("standings = %v, want removed and disabled", got)
 	}
 }

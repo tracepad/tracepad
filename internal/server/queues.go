@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"math"
 	"net/http"
 	"slices"
@@ -97,13 +98,15 @@ type queueItemResponse struct {
 	// ClaimedBy and CompletedBy say who, readably: the name a key's
 	// reviewer sent, or an account's name rendered for this reader (spec 048
 	// #15, #5). The account fields carry the id of a signed-in reviewer.
-	ClaimedBy          string `json:"claimed_by,omitempty"`
-	ClaimedByAccount   string `json:"claimed_by_account,omitempty"`
-	ClaimedUntil       string `json:"claimed_until,omitempty"`
-	CompletedBy        string `json:"completed_by,omitempty"`
-	CompletedByAccount string `json:"completed_by_account,omitempty"`
-	CompletedAt        string `json:"completed_at,omitempty"`
-	SkipReason         string `json:"skip_reason,omitempty"`
+	ClaimedBy           string `json:"claimed_by,omitempty"`
+	ClaimedByAccount    string `json:"claimed_by_account,omitempty"`
+	ClaimedByStanding   string `json:"claimed_by_standing,omitempty"`
+	ClaimedUntil        string `json:"claimed_until,omitempty"`
+	CompletedBy         string `json:"completed_by,omitempty"`
+	CompletedByAccount  string `json:"completed_by_account,omitempty"`
+	CompletedByStanding string `json:"completed_by_standing,omitempty"`
+	CompletedAt         string `json:"completed_at,omitempty"`
+	SkipReason          string `json:"skip_reason,omitempty"`
 }
 
 type queueItemListResponse struct {
@@ -622,7 +625,7 @@ func (s *Server) handleCompleteItem(w http.ResponseWriter, r *http.Request) {
 		ProjectID: project.ID, Queue: name, ID: id,
 		Reviewer: reviewer, Now: time.Now().UnixNano(),
 	}
-	if !s.submit(w, r, write) {
+	if !s.submitFinishing(w, r, write, &write.Finished, false) {
 		return
 	}
 	writeJSON(w, http.StatusOK, s.renderWritten(r, write.Item))
@@ -651,7 +654,7 @@ func (s *Server) handleSkipItem(w http.ResponseWriter, r *http.Request) {
 		ProjectID: project.ID, Queue: name, ID: id,
 		Reviewer: reviewer, Reason: request.Reason, Now: time.Now().UnixNano(),
 	}
-	if !s.submit(w, r, write) {
+	if !s.submitFinishing(w, r, write, &write.Finished, true) {
 		return
 	}
 	writeJSON(w, http.StatusOK, s.renderWritten(r, write.Item))
@@ -800,70 +803,112 @@ func renderQueue(queue *store.AnnotationQueue) queueResponse {
 	}
 }
 
-// renderQueueItems renders a page of items for this reader, naming the
-// accounts that hold or finished them (spec 048 #15): the display name, else
-// the email for a reader who may see it (#5), else "a member"; "a deleted
-// account" for one that is gone. One read for the page.
+// renderQueueItems renders items for this reader, naming the accounts that
+// hold or finished them (spec 048 #15) with their standing now (#4): one
+// read for the page, and none for the caller's own account, which the guard
+// already resolved — so a desk's own `next`, `complete` and `skip` read
+// nothing more.
 func (s *Server) renderQueueItems(ctx context.Context, c *caller, items ...*store.AnnotationItem) ([]queueItemResponse, error) {
-	var ids []string
+	accounts := map[string]store.ReviewerAccount{}
+	if c.isSession() && c.project != nil {
+		accounts[c.account.ID] = store.ReviewerAccount{
+			Name: c.account.Name, Email: c.account.Email, Standing: c.role}
+	}
+	missing := map[string]struct{}{}
 	for _, item := range items {
 		for _, id := range []string{item.ClaimedByAccount, item.CompletedByAccount} {
-			if id != "" && !slices.Contains(ids, id) {
-				ids = append(ids, id)
+			if _, known := accounts[id]; id != "" && !known {
+				missing[id] = struct{}{}
 			}
 		}
 	}
-	accounts, err := s.store.ReviewerAccounts(ctx, ids)
-	if err != nil {
-		return nil, err
+	if len(missing) > 0 {
+		read, err := s.store.ReviewerAccounts(ctx, c.project.ID, slices.Collect(maps.Keys(missing)))
+		if err != nil {
+			return nil, err
+		}
+		maps.Copy(accounts, read)
 	}
 	out := make([]queueItemResponse, 0, len(items))
 	for _, item := range items {
-		rendered := renderQueueItem(item)
-		if item.ClaimedByAccount != "" {
-			rendered.ClaimedBy = reviewerName(accounts, item.ClaimedByAccount, c)
-		}
-		if item.CompletedByAccount != "" {
-			rendered.CompletedBy = reviewerName(accounts, item.CompletedByAccount, c)
-		}
-		out = append(out, rendered)
+		out = append(out, renderQueueItemFor(item, accounts, c))
 	}
 	return out, nil
 }
 
 // renderWritten renders the item a committed write answers with. The write is
-// on disk, so a failure to read the names answers the item with "a member"
-// rather than a 500 over a change that happened.
+// on disk, so a failure to read the names answers the item with every account
+// unnamed rather than a 500 over a change that happened.
 func (s *Server) renderWritten(r *http.Request, item *store.AnnotationItem) queueItemResponse {
-	out, err := s.renderQueueItems(r.Context(), callerFrom(r.Context()), item)
+	c := callerFrom(r.Context())
+	out, err := s.renderQueueItems(r.Context(), c, item)
 	if err == nil {
 		return out[0]
 	}
 	slog.Warn("could not read who holds a queue item after writing it", "item", item.ID, "err", err)
+	return renderQueueItemFor(item, nil, c)
+}
+
+// submitFinishing is submit for a completion or a skip, whose refusal on an
+// item somebody completed names them. An account is named here, for this
+// reader, by the rule the listing follows — never by the store, which does
+// not know who is reading (spec 048 #15).
+func (s *Server) submitFinishing(w http.ResponseWriter, r *http.Request, job store.WriteJob,
+	finished **store.AnnotationItem, skipping bool) bool {
+	if s.writer == nil {
+		writeError(w, http.StatusServiceUnavailable, "writes are not available")
+		return false
+	}
+	err := s.writer.Submit(writeContext(r), job)
+	if err == nil {
+		return true
+	}
+	var rejection *store.Rejection
+	if item := *finished; item != nil && item.CompletedByAccount != "" && errors.As(err, &rejection) {
+		rendered := s.renderWritten(r, item)
+		*rejection = *store.CompletedRefusal(item, rendered.CompletedBy, skipping)
+	}
+	submitFailure(w, err, apiWrite)
+	return false
+}
+
+// How a reader is told about an account it may not name (spec 048 #5), and
+// one that no longer exists.
+const (
+	anonymousMember = "a member"
+	deletedAccount  = "a deleted account"
+)
+
+// renderQueueItemFor renders one item, naming its accounts from `accounts` —
+// an id missing from it is an account that was deleted, or, with a nil map,
+// one the read could not name.
+func renderQueueItemFor(item *store.AnnotationItem, accounts map[string]store.ReviewerAccount, c *caller) queueItemResponse {
 	rendered := renderQueueItem(item)
 	if item.ClaimedByAccount != "" {
-		rendered.ClaimedBy = anonymousMember
+		rendered.ClaimedBy, rendered.ClaimedByStanding = reviewer(accounts, item.ClaimedByAccount, c)
 	}
 	if item.CompletedByAccount != "" {
-		rendered.CompletedBy = anonymousMember
+		rendered.CompletedBy, rendered.CompletedByStanding = reviewer(accounts, item.CompletedByAccount, c)
 	}
 	return rendered
 }
 
-// anonymousMember is an account whose name a reader may not see (spec 048 #5).
-const anonymousMember = "a member"
-
-func reviewerName(accounts map[string]store.ReviewerAccount, id string, c *caller) string {
+// reviewer is an account's name for this reader — the display name, else the
+// email for an editor or an owner, else "a member" — and its standing.
+func reviewer(accounts map[string]store.ReviewerAccount, id string, c *caller) (string, string) {
+	if accounts == nil {
+		return anonymousMember, ""
+	}
 	account, ok := accounts[id]
 	switch {
 	case !ok:
-		return "a deleted account"
+		return deletedAccount, store.StandingDeleted
 	case strings.TrimSpace(account.Name) != "":
-		return account.Name
+		return account.Name, account.Standing
 	case seesAuthorEmail(c):
-		return account.Email
+		return account.Email, account.Standing
 	}
-	return anonymousMember
+	return anonymousMember, account.Standing
 }
 
 func renderQueueItem(item *store.AnnotationItem) queueItemResponse {

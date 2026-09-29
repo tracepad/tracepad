@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import type { AnnotationQueue, Score, ScoreConfig } from './api/client.svelte';
-import { changed, deskBody, deskFields, progress, queueProblem, queueable, unfilled } from './queues';
+import type { AnnotationItem, AnnotationQueue, Score, ScoreConfig } from './api/client.svelte';
+import {
+	changed,
+	deskBody,
+	deskFields,
+	finisher,
+	progress,
+	queueProblem,
+	queueable,
+	unfilled
+} from './queues';
 
 // The rules of spec 024 that are not DOM nodes: the New-queue gate, how far a
 // queue has got, the desk's prefilled form and its completeness rule, and what
@@ -184,5 +193,32 @@ describe('what the traces listing may queue', () => {
 
 	it('says what it can when the count could not be taken', () => {
 		expect(queueable(null).blocked).toBeNull();
+	});
+});
+
+describe('who finished with an item (spec 048 #18)', () => {
+	const item = (extra: Partial<AnnotationItem>): AnnotationItem => ({
+		id: 'a'.repeat(32),
+		trace_id: 'b'.repeat(32),
+		status: 'completed',
+		seq: 1,
+		added_at: '2026-09-29T10:00:00Z',
+		...extra
+	});
+
+	it('is the name the server gave, muted with the reason when they are gone', () => {
+		expect(finisher(item({ completed_by: 'Ada', completed_by_standing: 'editor' }))).toEqual({
+			text: 'Ada',
+			title: undefined,
+			gone: false
+		});
+		expect(finisher(item({ completed_by: 'Bob', completed_by_standing: 'removed' }))).toEqual({
+			text: 'Bob',
+			title: 'removed',
+			gone: true
+		});
+		// A key's reviewer has no standing, and is simply its name.
+		expect(finisher(item({ completed_by: 'judge' }))?.gone).toBe(false);
+		expect(finisher(item({ status: 'pending' }))).toBeNull();
 	});
 });

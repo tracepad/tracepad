@@ -197,9 +197,20 @@ test('the author is named, and the email is an editor\'s to read', async ({ page
 	await page.getByRole('button', { name: 'Save' }).click();
 
 	const { account } = await project();
-	const author = page.getByRole('button', { name: /verdict/ }).getByText(`by ${account.email}`);
+	const chip = page.getByRole('button', { name: /verdict/ });
+	const author = chip.getByText(`by ${account.email}`);
 	await expect(author).toBeVisible();
 	await expect(author).toHaveAttribute('title', account.email);
+
+	// On a phone the author gives way, not the verdict (spec 048 #10): the
+	// value is whole, and it is the author that is cut.
+	for (const width of [375, 390]) {
+		await page.setViewportSize({ width, height: 800 });
+		const value = chip.getByText('correct', { exact: true });
+		await expect(value).toBeVisible();
+		const cut = await value.evaluate((el) => el.scrollWidth > el.clientWidth);
+		expect(cut, `the value is cut at ${width} px`).toBe(false);
+	}
 });
 
 test('a viewer reads the author without the email', async ({ page }) => {

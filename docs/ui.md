@@ -442,7 +442,9 @@ declare one, because a queue may only name a config that exists.
 progress bar, plus *Start annotating* and *Delete*. Under it, the items in the
 order they were added, which is the order they are worked in: position,
 target, status, who finished with it, when, and the skip reason. `?status=`
-narrows it. A row opens **the trace** in the peek panel — that is what an item
+narrows it, and *Mine* (`?account=me`) keeps the items you hold or finished.
+Who finished with an item is named as a score's author is — muted, with the
+reason in the tooltip, when they are no longer in the project. A row opens **the trace** in the peek panel — that is what an item
 points at — and an item that names an observation opens on it. *Reopen* puts a
 completed or skipped item back in the queue; *Remove* takes it out of the list
 and touches no score. *Delete* is the echo ceremony every destructive act

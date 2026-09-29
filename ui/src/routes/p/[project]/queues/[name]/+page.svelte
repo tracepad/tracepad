@@ -123,6 +123,32 @@
 		);
 	}
 
+	/** *Mine*: the items this account holds or finished (spec 048 #15). */
+	function mine(on: boolean) {
+		const next = { ...filters, account: on ? 'me' : undefined };
+		goto(
+			href(
+				`/queues/${encodeURIComponent(name)}`,
+				freshSearch(queueItemSearch(next), page.url.searchParams)
+			),
+			{ keepFocus: true }
+		);
+	}
+
+	/**
+	 * Who an `account=` filter is about, by the name the server gave the rows
+	 * it matched; an id no row names yet is just "one reviewer".
+	 */
+	const accountLabel = $derived.by(() => {
+		const id = filters.account;
+		if (!id || id === 'me') return null;
+		const row = listing.rows.find(
+			(one) => one.completed_by_account === id || one.claimed_by_account === id
+		);
+		const named = row?.completed_by_account === id ? row.completed_by : row?.claimed_by;
+		return `by ${named ?? 'one reviewer'}`;
+	});
+
 	let busyID = $state.raw<string | null>(null);
 	let deleting = $state(false);
 
@@ -231,10 +257,17 @@
 		{#if filters.annotator}
 			<span class="text-subtle text-xs">by {filters.annotator}</span>
 		{/if}
-		{#if filters.account}
-			<span class="text-subtle text-xs">
-				{filters.account === 'me' ? 'yours' : 'by one account'}
-			</span>
+		<label class="text-subtle flex items-center gap-1.5 text-xs">
+			<input
+				type="checkbox"
+				name="mine"
+				checked={filters.account === 'me'}
+				onchange={(event) => mine(event.currentTarget.checked)}
+			/>
+			Mine
+		</label>
+		{#if accountLabel}
+			<span class="text-subtle text-xs">{accountLabel}</span>
 		{/if}
 	</div>
 

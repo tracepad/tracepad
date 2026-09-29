@@ -151,9 +151,14 @@
 					{#if author}
 						<!-- Beside the chip, which says what kind of judgement
 						     it is; this says whose (spec 048 #10). An author who
-						     is gone is muted, not hidden: the judgement stands. -->
+						     is gone is muted, not hidden: the judgement stands.
+						     On a narrow row it is what gives way, long before the
+						     value does: the verdict is what the row is for. -->
 						<span
-							class={['max-w-40 shrink-0 truncate text-xs', author.gone ? 'text-subtle' : 'text-muted']}
+							class={[
+								'max-w-40 min-w-0 shrink-[100] truncate text-xs',
+								author.gone ? 'text-subtle' : 'text-muted'
+							]}
 							title={author.title}
 						>
 							{author.text}

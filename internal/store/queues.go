@@ -448,23 +448,23 @@ type QueueItemComplete struct {
 	Reviewer  Reviewer
 	Now       int64
 
-	// Item is the row after the write, filled by apply.
-	Item *AnnotationItem
+	// Item is the row after the write, filled by apply. Finished is the row
+	// as it stood when the write was refused because somebody had already
+	// completed it, so that the handler can name them for its reader (spec
+	// 048 #15).
+	Item     *AnnotationItem
+	Finished *AnnotationItem
 }
 
 func (c *QueueItemComplete) apply(tx *sql.Tx) error {
-	c.Item = nil
+	c.Item, c.Finished = nil, nil
 	item, queue, err := itemForWrite(tx, c.ProjectID, c.Queue, c.ID)
 	if err != nil {
 		return err
 	}
 	if item.Status == ItemCompleted {
-		by, err := finishedBy(tx, item)
-		if err != nil {
-			return err
-		}
-		return &Rejection{Kind: RejectConflict, Message: fmt.Sprintf(
-			"item %s was already completed by %s", item.ID, by)}
+		c.Finished = item
+		return CompletedRefusal(item, orSomebody(item.CompletedBy), false)
 	}
 	missing, err := missingScores(tx, c.ProjectID, queue.ScoreConfigs, item)
 	if err != nil {
@@ -510,22 +510,20 @@ type QueueItemSkip struct {
 	Reason    string
 	Now       int64
 
-	Item *AnnotationItem
+	// Item and Finished as QueueItemComplete's.
+	Item     *AnnotationItem
+	Finished *AnnotationItem
 }
 
 func (s *QueueItemSkip) apply(tx *sql.Tx) error {
-	s.Item = nil
+	s.Item, s.Finished = nil, nil
 	item, _, err := itemForWrite(tx, s.ProjectID, s.Queue, s.ID)
 	if err != nil {
 		return err
 	}
 	if item.Status == ItemCompleted {
-		by, err := finishedBy(tx, item)
-		if err != nil {
-			return err
-		}
-		return &Rejection{Kind: RejectConflict, Message: fmt.Sprintf(
-			"item %s was completed by %s; reopen it before skipping it", item.ID, by)}
+		s.Finished = item
+		return CompletedRefusal(item, orSomebody(item.CompletedBy), true)
 	}
 	// The skipper is written to `completed_by`: the column says who
 	// finished with the item, and a skip is one of the two ways to.
@@ -971,61 +969,68 @@ func missingScores(tx *sql.Tx, projectID string, configs []string, item *Annotat
 	return missing, nil
 }
 
-// finishedBy names who finished with an item, for a refusal any member may
-// read: a key's reviewer by the name it sent, an account by its display name
-// — never its email, which is an editor's to read (spec 048 #5) — and
-// "another member" for an account that has none.
-func finishedBy(tx *sql.Tx, item *AnnotationItem) (string, error) {
-	if item.CompletedByAccount == "" {
-		if item.CompletedBy == "" {
-			return "somebody", nil
-		}
-		return item.CompletedBy, nil
+// CompletedRefusal is the 409 a completion or a skip gets on an item somebody
+// has completed, naming them as `who`. The store names a key's reviewer by the
+// name it sent; an account is named by the handler, for its reader, by the rule
+// the listing follows (spec 048 #15), from the refused job's Finished.
+func CompletedRefusal(item *AnnotationItem, who string, skipping bool) *Rejection {
+	if skipping {
+		return &Rejection{Kind: RejectConflict, Message: fmt.Sprintf(
+			"item %s was completed by %s; reopen it before skipping it", item.ID, who)}
 	}
-	account, err := accountByID(tx, item.CompletedByAccount)
-	if err != nil {
-		return "", err
+	return &Rejection{Kind: RejectConflict, Message: fmt.Sprintf(
+		"item %s was already completed by %s", item.ID, who)}
+}
+
+func orSomebody(annotator string) string {
+	if annotator == "" {
+		return "somebody"
 	}
-	switch {
-	case account == nil:
-		return "a deleted account", nil
-	case strings.TrimSpace(account.Name) != "":
-		return account.Name, nil
-	}
-	return "another member", nil
+	return annotator
 }
 
 // ReviewerAccount is what a queue item's reader needs of an account that
-// holds or finished it: how to call it (spec 048 #15).
+// holds or finished it (spec 048 #15): how to call it, and its standing in
+// the project now, as a score's author has (#4).
 type ReviewerAccount struct {
-	Name  string
-	Email string
+	Name     string
+	Email    string
+	Standing string
 }
 
-// ReviewerAccounts reads the accounts behind a page of items, by id. An id
-// that is not in the answer belongs to an account that was deleted.
-func (s *Store) ReviewerAccounts(ctx context.Context, ids []string) (map[string]ReviewerAccount, error) {
+// ReviewerAccounts reads the accounts behind a page of items, by id, with
+// their standing in the project. An id that is not in the answer belongs to an
+// account that was deleted.
+func (s *Store) ReviewerAccounts(ctx context.Context, projectID string, ids []string) (map[string]ReviewerAccount, error) {
 	out := map[string]ReviewerAccount{}
 	if len(ids) == 0 {
 		return out, nil
 	}
-	args := make([]any, 0, len(ids))
+	args := []any{projectID}
 	for _, id := range ids {
 		args = append(args, id)
 	}
 	placeholders := strings.TrimSuffix(strings.Repeat("?, ", len(ids)), ", ")
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, name, email FROM accounts WHERE id IN (`+placeholders+`)`, args...)
+		`SELECT a.id, a.name, a.email, a.owner, a.disabled, COALESCE(m.role, '')
+		   FROM accounts a
+		   LEFT JOIN memberships m ON m.account_id = a.id AND m.project_id = ?
+		  WHERE a.id IN (`+placeholders+`)`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("read the reviewers' accounts: %w", err)
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var id string
-		var account ReviewerAccount
-		if err := rows.Scan(&id, &account.Name, &account.Email); err != nil {
+		var (
+			id              string
+			account         ReviewerAccount
+			owner, disabled bool
+			role            string
+		)
+		if err := rows.Scan(&id, &account.Name, &account.Email, &owner, &disabled, &role); err != nil {
 			return nil, err
 		}
+		account.Standing = standing(true, owner, disabled, role)
 		out[id] = account
 	}
 	return out, rows.Err()

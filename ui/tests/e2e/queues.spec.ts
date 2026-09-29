@@ -366,6 +366,19 @@ test('a second refusal replaces the first, at the top and at the controls', asyn
 	await must('DELETE', '/api/v1/queues/two-refusals?confirm=two-refusals');
 });
 
+// *Mine* is `account=me` (spec 048 #15): the items this account finished, by
+// the account and not by a name, and the author of the desk's verdicts is who
+// completed them.
+test('mine keeps the items this account finished', async ({ page }) => {
+	await signIn(page);
+	await page.goto(`/queues/${QUEUE}?status=completed`);
+	await expect(page.getByRole('row')).toHaveCount(3); // the head and the two done
+	await page.getByLabel('Mine').check();
+	await expect(page).toHaveURL(/account=me/);
+	await expect(page.getByRole('row')).toHaveCount(3);
+	await expect(page.getByRole('row').nth(1)).toContainText((await project()).account.email);
+});
+
 test('a completed item is reopened from the queue page', async ({ page }) => {
 	await signIn(page);
 	await page.goto(`/queues/${QUEUE}?status=completed`);

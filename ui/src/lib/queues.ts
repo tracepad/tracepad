@@ -1,6 +1,6 @@
-import type { AnnotationQueue, Score, ScoreConfig, ScoreInput } from './api/client.svelte';
+import type { AnnotationItem, AnnotationQueue, Score, ScoreConfig, ScoreInput } from './api/client.svelte';
 import { count } from './format';
-import { OTHER, formOfScore, scoreBody, scoreProblem, typeOf, type ScoreForm } from './scores';
+import { OTHER, formOfScore, isGone, scoreBody, scoreProblem, typeOf, type ScoreForm } from './scores';
 
 // Everything about an annotation queue that is not a DOM node (spec 024): how
 // far a queue has got, what the New-queue form refuses, the form the desk
@@ -196,4 +196,16 @@ export function queueable(total: { value: number; capped: boolean } | null) {
 		};
 	}
 	return { label: `${count(total.value)} traces`, blocked: null };
+}
+
+/**
+ * Who finished with an item, as the queue page shows it (spec 048 #15): the
+ * name the server rendered for this reader, muted with the reason when the
+ * account is no longer here — the rule the author of a score follows (#10).
+ */
+export function finisher(item: AnnotationItem): { text: string; title?: string; gone: boolean } | null {
+	if (!item.completed_by) return null;
+	const standing = item.completed_by_standing;
+	const gone = isGone(standing);
+	return { text: item.completed_by, title: gone ? standing : undefined, gone };
 }

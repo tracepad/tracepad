@@ -179,8 +179,15 @@ For an account, `claimed_by_account` and `completed_by_account` carry its id,
 and `claimed_by` and `completed_by` name it for whoever reads: its display
 name, else its email for an editor or an owner, else `a member` — the rule the
 [author of a score](scores.md#who-wrote-a-score) follows — or
-`a deleted account` once it is gone. A second completion's `409` names the
-first finisher the same way, without the email.
+`a deleted account` once it is gone. `claimed_by_standing` and
+`completed_by_standing` say where that account stands in the project now — a
+role, or `removed`, `disabled`, `deleted` — and the queue page mutes one that is
+gone. A second completion's `409` names the first finisher the same way, for
+whoever it refuses.
+
+Work a desk did before the server held reviewers by account stays under the
+name it typed: `annotator=` finds it, `account=` does not, and a claim that was
+in flight when the server was upgraded simply expires within its ten minutes.
 
 ### Posting the verdict
 

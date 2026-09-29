@@ -2013,6 +2013,11 @@ export interface components {
             /** @description The account id of a signed-in reviewer holding it */
             claimed_by_account?: string;
             /**
+             * @description That account's standing in the project now, as a score author's
+             * @enum {string}
+             */
+            claimed_by_standing?: "owner" | "editor" | "viewer" | "removed" | "disabled" | "deleted";
+            /**
              * Format: date-time
              * @description When the claim expires and the item is claimable again
              */
@@ -2021,6 +2026,11 @@ export interface components {
             completed_by?: string;
             /** @description The account id of a signed-in reviewer who completed or skipped it */
             completed_by_account?: string;
+            /**
+             * @description That account's standing in the project now: a role, or removed, disabled, deleted
+             * @enum {string}
+             */
+            completed_by_standing?: "owner" | "editor" | "viewer" | "removed" | "disabled" | "deleted";
             /** Format: date-time */
             completed_at?: string;
             skip_reason?: string;
