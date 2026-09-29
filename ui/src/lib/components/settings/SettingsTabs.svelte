@@ -4,7 +4,8 @@
 	import { page } from '$app/state';
 	import { auth } from '$lib/auth.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
-	import { project, under, within } from '$lib/project.svelte';
+	import { project, under } from '$lib/project.svelte';
+	import { within } from '$lib/paths';
 
 	// Settings was one screen while one credential unlocked all of it. Three
 	// tabs are three audiences (spec 028 #14): this project, this account, and

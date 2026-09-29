@@ -1,5 +1,6 @@
 import { error, redirect } from '@sveltejs/kit';
-import { bareTarget, within } from '$lib/project.svelte';
+import { bareTarget } from '$lib/project.svelte';
+import { within } from '$lib/paths';
 import type { PageLoad } from './$types';
 
 // A bare path — `/traces?status=error`, from a bookmark, a chat, or a `next=`

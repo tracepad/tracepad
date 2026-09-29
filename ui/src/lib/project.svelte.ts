@@ -3,6 +3,8 @@ import type { Membership } from '$lib/api/client.svelte';
 import { auth } from '$lib/auth.svelte';
 import { CURSOR, DIRECTION } from '$lib/page';
 import { OBS, PEEK, TRACE } from '$lib/peek';
+import { PREFIX, under, within } from '$lib/paths';
+import { SCREENS } from '$lib/screens';
 
 // Which project is on screen: the one in the URL (spec 029 #2). Every screen
 // inside the shell lives under `/p/{id}` (#1), so the answer is a route
@@ -17,9 +19,6 @@ import { OBS, PEEK, TRACE } from '$lib/peek';
 // where the person was — and never on another person's project.
 
 const STORAGE_PREFIX = 'tracepad.project.';
-
-/** Where every screen inside the shell lives. */
-const PREFIX = '/p';
 
 class CurrentProject {
 	/**
@@ -72,14 +71,6 @@ class CurrentProject {
 }
 
 /**
- * A path under a project: `under('/traces', id)` is `/p/{id}/traces`, with any
- * query the path carries left where it is.
- */
-export function under(path: string, id: string): string {
-	return `${PREFIX}/${id}${path}`;
-}
-
-/**
  * The one way the interface writes a link (#2): the path under the project on
  * screen, plus a query if one is given. Every row link, every `goto`, the
  * sidebar and the settings tabs go through here, so the prefix has one place
@@ -104,34 +95,11 @@ export function bareTarget(path: string, search = ''): string {
 }
 
 /**
- * The path with the project prefix taken off, which is what "which screen is
- * this" compares: `/p/{id}/settings/server` reads as `/settings/server`. A path
- * with no prefix is returned as it is.
- */
-export function within(pathname: string): string {
-	const match = /^\/p\/[^/]+(\/.*)?$/.exec(pathname);
-	if (!match) return pathname;
-	return match[1] ?? '/';
-}
-
-/**
- * The sections a switch keeps (#6): the first path segment under the prefix.
+ * The segments a switch keeps (#6): every screen the navigation lists
+ * (`screens.ts`), so a screen added there is kept without being named again.
  * `stats` stays for its redirect to the dashboard (spec 034 #1).
  */
-const SECTIONS = new Set([
-	'dashboard',
-	'traces',
-	'sessions',
-	'users',
-	'stats',
-	'prompts',
-	'datasets',
-	'runs',
-	'score-configs',
-	'queues',
-	'quality',
-	'settings'
-]);
+const KEPT_SEGMENTS = new Set([...SCREENS.map((screen) => screen.href.slice(1)), 'stats']);
 
 /**
  * Where switching to another project lands (#6): the same section, and for
@@ -149,7 +117,7 @@ const SECTIONS = new Set([
 export function switchTarget(url: URL, id: string): string {
 	if (within(url.pathname) === url.pathname) return under('/dashboard', id);
 	const segments = within(url.pathname).split('/').filter(Boolean);
-	const section = segments[0] && SECTIONS.has(segments[0]) ? segments[0] : 'dashboard';
+	const section = segments[0] && KEPT_SEGMENTS.has(segments[0]) ? segments[0] : 'dashboard';
 	const kept = section === 'settings' && segments[1] ? `/${section}/${segments[1]}` : `/${section}`;
 	const query = new URLSearchParams(url.search);
 	for (const key of [CURSOR, DIRECTION, PEEK, TRACE, OBS]) query.delete(key);
@@ -177,6 +145,7 @@ function write(name: string, value: string) {
 	}
 }
 
+export { under };
 export const project = new CurrentProject();
 
 /**
