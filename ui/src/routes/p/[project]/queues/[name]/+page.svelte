@@ -113,7 +113,9 @@
 
 	/** A status filter is a fresh listing: first page, same size. */
 	function narrow(status: string) {
-		const next = status === '' ? {} : { ...filters, status: status as never };
+		// *Any* drops the status and nothing else: *Mine* is a filter of its
+		// own, and a status change must not quietly undo it.
+		const next = { ...filters, status: status === '' ? undefined : (status as never) };
 		goto(
 			href(
 				`/queues/${encodeURIComponent(name)}`,

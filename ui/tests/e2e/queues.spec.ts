@@ -377,6 +377,12 @@ test('mine keeps the items this account finished', async ({ page }) => {
 	await expect(page).toHaveURL(/account=me/);
 	await expect(page.getByRole('row')).toHaveCount(3);
 	await expect(page.getByRole('row').nth(1)).toContainText((await project()).account.email);
+
+	// *Any* drops the status and leaves *Mine* where it was.
+	await page.getByLabel('Status').selectOption('');
+	await expect(page).not.toHaveURL(/status=/);
+	await expect(page).toHaveURL(/account=me/);
+	await expect(page.getByLabel('Mine')).toBeChecked();
 });
 
 test('a completed item is reopened from the queue page', async ({ page }) => {

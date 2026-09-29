@@ -270,7 +270,8 @@ paging is the same keyset both ways as every other listing
 ([api.md](api.md#paging)).
 
 `annotator=` is "what has this program got", by the name it sends: the items
-it completed or skipped, and the pending ones it is holding a claim on. So
+it completed or skipped, and the pending ones it is holding a claim on — one
+that has not expired, since an expired claim is anybody's `next`. So
 `?status=pending&annotator=ada` is ada's desk right now, and
 `?status=completed&annotator=ada` is her work. `account=` asks the same of a
 signed-in person, by account id — `account=me` is the account asking, which a

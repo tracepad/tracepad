@@ -448,23 +448,18 @@ type QueueItemComplete struct {
 	Reviewer  Reviewer
 	Now       int64
 
-	// Item is the row after the write, filled by apply. Finished is the row
-	// as it stood when the write was refused because somebody had already
-	// completed it, so that the handler can name them for its reader (spec
-	// 048 #15).
-	Item     *AnnotationItem
-	Finished *AnnotationItem
+	// Item is the row after the write, filled by apply.
+	Item *AnnotationItem
 }
 
 func (c *QueueItemComplete) apply(tx *sql.Tx) error {
-	c.Item, c.Finished = nil, nil
+	c.Item = nil
 	item, queue, err := itemForWrite(tx, c.ProjectID, c.Queue, c.ID)
 	if err != nil {
 		return err
 	}
 	if item.Status == ItemCompleted {
-		c.Finished = item
-		return CompletedRefusal(item, orSomebody(item.CompletedBy), false)
+		return &AlreadyCompleted{Item: item}
 	}
 	missing, err := missingScores(tx, c.ProjectID, queue.ScoreConfigs, item)
 	if err != nil {
@@ -510,20 +505,17 @@ type QueueItemSkip struct {
 	Reason    string
 	Now       int64
 
-	// Item and Finished as QueueItemComplete's.
-	Item     *AnnotationItem
-	Finished *AnnotationItem
+	Item *AnnotationItem
 }
 
 func (s *QueueItemSkip) apply(tx *sql.Tx) error {
-	s.Item, s.Finished = nil, nil
+	s.Item = nil
 	item, _, err := itemForWrite(tx, s.ProjectID, s.Queue, s.ID)
 	if err != nil {
 		return err
 	}
 	if item.Status == ItemCompleted {
-		s.Finished = item
-		return CompletedRefusal(item, orSomebody(item.CompletedBy), true)
+		return &AlreadyCompleted{Item: item, Skipping: true}
 	}
 	// The skipper is written to `completed_by`: the column says who
 	// finished with the item, and a skip is one of the two ways to.
@@ -553,7 +545,6 @@ type QueueItemReopen struct {
 	ProjectID string
 	Queue     string
 	ID        string
-	Reviewer  Reviewer
 
 	Item *AnnotationItem
 }
@@ -613,6 +604,9 @@ type QueueItemFilter struct {
 	// one by id (spec 048 #15).
 	Annotator string
 	Account   string
+	// Now is the instant a claim is judged against: a pending item is the
+	// reviewer's only while their claim has not expired (spec 048 #19).
+	Now int64
 	// Limit caps the rows returned; the caller asks for one more than the
 	// page size to learn whether another page exists.
 	Limit int
@@ -790,15 +784,19 @@ func itemConditions(projectID, queue string, filter QueueItemFilter) ([]string, 
 		// alone made `status=pending&annotator=ada` answer "ada has
 		// nothing open" for a queue ada is working through, which is a
 		// well-formed answer to a different question (spec 003 #23).
+		//
+		// Holding means a claim that has not expired (spec 048 #19): one
+		// that has is anybody's `next`, and listing it as theirs would say
+		// otherwise.
 		where = append(where,
-			"(completed_by = ? OR (status = ? AND claimed_by = ?))")
-		args = append(args, filter.Annotator, ItemPending, filter.Annotator)
+			"(completed_by = ? OR (status = ? AND claimed_by = ? AND claimed_until > ?))")
+		args = append(args, filter.Annotator, ItemPending, filter.Annotator, filter.Now)
 	}
 	if filter.Account != "" {
 		// The same question of a signed-in reviewer, by the account.
 		where = append(where,
-			"(completed_by_account = ? OR (status = ? AND claimed_by_account = ?))")
-		args = append(args, filter.Account, ItemPending, filter.Account)
+			"(completed_by_account = ? OR (status = ? AND claimed_by_account = ? AND claimed_until > ?))")
+		args = append(args, filter.Account, ItemPending, filter.Account, filter.Now)
 	}
 	return where, args
 }
@@ -969,17 +967,31 @@ func missingScores(tx *sql.Tx, projectID string, configs []string, item *Annotat
 	return missing, nil
 }
 
-// CompletedRefusal is the 409 a completion or a skip gets on an item somebody
-// has completed, naming them as `who`. The store names a key's reviewer by the
-// name it sent; an account is named by the handler, for its reader, by the rule
-// the listing follows (spec 048 #15), from the refused job's Finished.
-func CompletedRefusal(item *AnnotationItem, who string, skipping bool) *Rejection {
-	if skipping {
+// AlreadyCompleted refuses a completion or a skip of an item somebody has
+// completed (#7, Decision 18). It carries the item so that the handler can name
+// who completed it for the reader it answers — which the store does not know
+// (spec 048 #18) — and unwraps to the Rejection that names a key's reviewer by
+// the name it sent, for any caller that names nobody.
+type AlreadyCompleted struct {
+	Item     *AnnotationItem
+	Skipping bool
+}
+
+func (a *AlreadyCompleted) Error() string { return a.Refusal("").Message }
+func (a *AlreadyCompleted) Unwrap() error { return a.Refusal("") }
+
+// Refusal is the 409 naming the finisher as `who`; empty is the name the
+// item's reviewer sent, or "somebody".
+func (a *AlreadyCompleted) Refusal(who string) *Rejection {
+	if who == "" {
+		who = orSomebody(a.Item.CompletedBy)
+	}
+	if a.Skipping {
 		return &Rejection{Kind: RejectConflict, Message: fmt.Sprintf(
-			"item %s was completed by %s; reopen it before skipping it", item.ID, who)}
+			"item %s was completed by %s; reopen it before skipping it", a.Item.ID, who)}
 	}
 	return &Rejection{Kind: RejectConflict, Message: fmt.Sprintf(
-		"item %s was already completed by %s", item.ID, who)}
+		"item %s was already completed by %s", a.Item.ID, who)}
 }
 
 func orSomebody(annotator string) string {
@@ -1010,12 +1022,11 @@ func (s *Store) ReviewerAccounts(ctx context.Context, projectID string, ids []st
 	for _, id := range ids {
 		args = append(args, id)
 	}
-	placeholders := strings.TrimSuffix(strings.Repeat("?, ", len(ids)), ", ")
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT a.id, a.name, a.email, a.owner, a.disabled, COALESCE(m.role, '')
 		   FROM accounts a
 		   LEFT JOIN memberships m ON m.account_id = a.id AND m.project_id = ?
-		  WHERE a.id IN (`+placeholders+`)`, args...)
+		  WHERE a.id IN (`+placeholders(len(ids))+`)`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("read the reviewers' accounts: %w", err)
 	}

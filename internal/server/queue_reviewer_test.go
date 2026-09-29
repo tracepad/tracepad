@@ -123,7 +123,15 @@ func TestANamelessAccountsEmailIsNotInTheQueue(t *testing.T) {
 	}
 	rec = h.call(t, "POST", "/api/v1/queues/review/items/"+first+"/skip",
 		[]byte(`{"reason":"x"}`), h.asMember(editor)...)
-	expectError(t, rec, http.StatusConflict, "completed by quiet@example.com")
+	expectError(t, rec, http.StatusConflict, "item "+first+" was completed by quiet@example.com; reopen it before skipping it")
+	// The same two answers the other way round: the format of both refusals
+	// is the store's, and only the name is the reader's.
+	rec = h.call(t, "POST", "/api/v1/queues/review/items/"+first+"/complete",
+		[]byte(`{}`), h.asMember(editor)...)
+	expectError(t, rec, http.StatusConflict, "item "+first+" was already completed by quiet@example.com")
+	rec = h.call(t, "POST", "/api/v1/queues/review/items/"+first+"/skip",
+		[]byte(`{"reason":"x"}`), h.asMember(viewer)...)
+	expectError(t, rec, http.StatusConflict, "item "+first+" was completed by a member; reopen it before skipping it")
 
 	rec = h.call(t, "GET", "/api/v1/queues/review/items/"+first, nil, h.asMember(editor)...)
 	if item := decodeJSON[queueItemResponse](t, rec); item.CompletedBy != "quiet@example.com" ||

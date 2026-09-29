@@ -472,7 +472,8 @@ func (s *Server) handleListQueueItems(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	filter := store.QueueItemFilter{Annotator: values.Get("annotator"), Account: values.Get("account")}
+	filter := store.QueueItemFilter{Annotator: values.Get("annotator"), Account: values.Get("account"),
+		Now: time.Now().UnixNano()}
 	if filter.Account == "me" {
 		// Who "me" is needs an account: a key's reviewer is a name, and
 		// `annotator=` asks for it (spec 048 #15).
@@ -625,7 +626,7 @@ func (s *Server) handleCompleteItem(w http.ResponseWriter, r *http.Request) {
 		ProjectID: project.ID, Queue: name, ID: id,
 		Reviewer: reviewer, Now: time.Now().UnixNano(),
 	}
-	if !s.submitFinishing(w, r, write, &write.Finished, false) {
+	if !s.submitRefusing(w, r, write, s.alreadyCompleted(w, r)) {
 		return
 	}
 	writeJSON(w, http.StatusOK, s.renderWritten(r, write.Item))
@@ -654,7 +655,7 @@ func (s *Server) handleSkipItem(w http.ResponseWriter, r *http.Request) {
 		ProjectID: project.ID, Queue: name, ID: id,
 		Reviewer: reviewer, Reason: request.Reason, Now: time.Now().UnixNano(),
 	}
-	if !s.submitFinishing(w, r, write, &write.Finished, true) {
+	if !s.submitRefusing(w, r, write, s.alreadyCompleted(w, r)) {
 		return
 	}
 	writeJSON(w, http.StatusOK, s.renderWritten(r, write.Item))
@@ -668,13 +669,12 @@ func (s *Server) handleReopenItem(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	reviewer, ok := s.reviewerBody(w, r)
-	if !ok {
+	// Reopen stores nobody (#7), but a key still says who asks, as the
+	// contract of spec 024 #6 has it, and a session still sends no name.
+	if _, ok := s.reviewerBody(w, r); !ok {
 		return
 	}
-	write := &store.QueueItemReopen{
-		ProjectID: project.ID, Queue: name, ID: id, Reviewer: reviewer,
-	}
+	write := &store.QueueItemReopen{ProjectID: project.ID, Queue: name, ID: id}
 	if !s.submit(w, r, write) {
 		return
 	}
@@ -804,13 +804,26 @@ func renderQueue(queue *store.AnnotationQueue) queueResponse {
 }
 
 // renderQueueItems renders items for this reader, naming the accounts that
-// hold or finished them (spec 048 #15) with their standing now (#4): one
-// read for the page, and none for the caller's own account, which the guard
-// already resolved — so a desk's own `next`, `complete` and `skip` read
-// nothing more.
+// hold or finished them (spec 048 #15) with their standing now (#4).
 func (s *Server) renderQueueItems(ctx context.Context, c *caller, items ...*store.AnnotationItem) ([]queueItemResponse, error) {
+	accounts, err := s.reviewerAccounts(ctx, c, items)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]queueItemResponse, 0, len(items))
+	for _, item := range items {
+		out = append(out, renderQueueItemFor(item, accounts, true, c))
+	}
+	return out, nil
+}
+
+// reviewerAccounts reads the accounts behind items: one read for a page, and
+// none for the caller's own account, which the guard already resolved — so a
+// desk's own `next`, `complete` and `skip` read nothing more. On an error the
+// map still holds the caller.
+func (s *Server) reviewerAccounts(ctx context.Context, c *caller, items []*store.AnnotationItem) (map[string]store.ReviewerAccount, error) {
 	accounts := map[string]store.ReviewerAccount{}
-	if c.isSession() && c.project != nil {
+	if c.isSession() {
 		accounts[c.account.ID] = store.ReviewerAccount{
 			Name: c.account.Name, Email: c.account.Email, Standing: c.role}
 	}
@@ -822,54 +835,46 @@ func (s *Server) renderQueueItems(ctx context.Context, c *caller, items ...*stor
 			}
 		}
 	}
-	if len(missing) > 0 {
-		read, err := s.store.ReviewerAccounts(ctx, c.project.ID, slices.Collect(maps.Keys(missing)))
-		if err != nil {
-			return nil, err
-		}
-		maps.Copy(accounts, read)
+	if len(missing) == 0 {
+		return accounts, nil
 	}
-	out := make([]queueItemResponse, 0, len(items))
-	for _, item := range items {
-		out = append(out, renderQueueItemFor(item, accounts, c))
+	read, err := s.store.ReviewerAccounts(ctx, c.project.ID, slices.Collect(maps.Keys(missing)))
+	if err != nil {
+		return accounts, err
 	}
-	return out, nil
+	maps.Copy(accounts, read)
+	return accounts, nil
 }
 
 // renderWritten renders the item a committed write answers with. The write is
-// on disk, so a failure to read the names answers the item with every account
-// unnamed rather than a 500 over a change that happened.
+// on disk, so a failure to read the names answers with the accounts it could
+// not read unnamed — the caller's own still named — rather than a 500 over a
+// change that happened.
 func (s *Server) renderWritten(r *http.Request, item *store.AnnotationItem) queueItemResponse {
 	c := callerFrom(r.Context())
-	out, err := s.renderQueueItems(r.Context(), c, item)
-	if err == nil {
-		return out[0]
+	accounts, err := s.reviewerAccounts(r.Context(), c, []*store.AnnotationItem{item})
+	if err != nil {
+		slog.Warn("could not read who holds a queue item after writing it", "item", item.ID, "err", err)
 	}
-	slog.Warn("could not read who holds a queue item after writing it", "item", item.ID, "err", err)
-	return renderQueueItemFor(item, nil, c)
+	return renderQueueItemFor(item, accounts, err == nil, c)
 }
 
-// submitFinishing is submit for a completion or a skip, whose refusal on an
-// item somebody completed names them. An account is named here, for this
-// reader, by the rule the listing follows — never by the store, which does
-// not know who is reading (spec 048 #15).
-func (s *Server) submitFinishing(w http.ResponseWriter, r *http.Request, job store.WriteJob,
-	finished **store.AnnotationItem, skipping bool) bool {
-	if s.writer == nil {
-		writeError(w, http.StatusServiceUnavailable, "writes are not available")
-		return false
-	}
-	err := s.writer.Submit(writeContext(r), job)
-	if err == nil {
+// alreadyCompleted answers a completion or a skip of an item somebody has
+// completed (#7): the store refuses it, and the name of who completed it is
+// the one this reader is given everywhere else (spec 048 #18).
+func (s *Server) alreadyCompleted(w http.ResponseWriter, r *http.Request) func(error) bool {
+	return func(err error) bool {
+		var done *store.AlreadyCompleted
+		if !errors.As(err, &done) {
+			return false
+		}
+		who := ""
+		if done.Item.CompletedByAccount != "" {
+			who = s.renderWritten(r, done.Item).CompletedBy
+		}
+		submitFailure(w, done.Refusal(who), apiWrite)
 		return true
 	}
-	var rejection *store.Rejection
-	if item := *finished; item != nil && item.CompletedByAccount != "" && errors.As(err, &rejection) {
-		rendered := s.renderWritten(r, item)
-		*rejection = *store.CompletedRefusal(item, rendered.CompletedBy, skipping)
-	}
-	submitFailure(w, err, apiWrite)
-	return false
 }
 
 // How a reader is told about an account it may not name (spec 048 #5), and
@@ -879,28 +884,28 @@ const (
 	deletedAccount  = "a deleted account"
 )
 
-// renderQueueItemFor renders one item, naming its accounts from `accounts` —
-// an id missing from it is an account that was deleted, or, with a nil map,
-// one the read could not name.
-func renderQueueItemFor(item *store.AnnotationItem, accounts map[string]store.ReviewerAccount, c *caller) queueItemResponse {
+// renderQueueItemFor renders one item, naming its accounts from `accounts`.
+// With `complete`, an id missing from it is an account that was deleted;
+// without, it is one the read could not name.
+func renderQueueItemFor(item *store.AnnotationItem, accounts map[string]store.ReviewerAccount, complete bool, c *caller) queueItemResponse {
 	rendered := renderQueueItem(item)
 	if item.ClaimedByAccount != "" {
-		rendered.ClaimedBy, rendered.ClaimedByStanding = reviewer(accounts, item.ClaimedByAccount, c)
+		rendered.ClaimedBy, rendered.ClaimedByStanding = reviewer(accounts, complete, item.ClaimedByAccount, c)
 	}
 	if item.CompletedByAccount != "" {
-		rendered.CompletedBy, rendered.CompletedByStanding = reviewer(accounts, item.CompletedByAccount, c)
+		rendered.CompletedBy, rendered.CompletedByStanding = reviewer(accounts, complete, item.CompletedByAccount, c)
 	}
 	return rendered
 }
 
 // reviewer is an account's name for this reader — the display name, else the
-// email for an editor or an owner, else "a member" — and its standing.
-func reviewer(accounts map[string]store.ReviewerAccount, id string, c *caller) (string, string) {
-	if accounts == nil {
-		return anonymousMember, ""
-	}
+// email for an editor or an owner, else "a member" — and its standing. The one
+// place a queue names an account (spec 048 #18).
+func reviewer(accounts map[string]store.ReviewerAccount, complete bool, id string, c *caller) (string, string) {
 	account, ok := accounts[id]
 	switch {
+	case !ok && !complete:
+		return anonymousMember, ""
 	case !ok:
 		return deletedAccount, store.StandingDeleted
 	case strings.TrimSpace(account.Name) != "":
