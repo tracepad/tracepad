@@ -20,19 +20,42 @@
 	// was 48px and the description was an ellipsis, and where nothing about
 	// the screen is short of room. Above the breakpoint the row is the row it
 	// always was.
-	let { title, meta, actions }: { title: string; meta?: Snippet; actions?: Snippet } = $props();
+	//
+	// `stackBelow` (spec 006 #27): under 1,360 px — the only value — the actions
+	// take a row of their own, and the title and the meta wrap as a pair.
+	let {
+		title,
+		meta,
+		actions,
+		stackBelow
+	}: { title: string; meta?: Snippet; actions?: Snippet; stackBelow?: 1360 } = $props();
+	const stack = $derived(stackBelow === 1360);
 </script>
 
-<header class="border-border flex min-h-12 shrink-0 items-center gap-3 border-b px-4">
-	<div class="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1 sm:flex-nowrap">
+<header
+	class={[
+		'border-border flex min-h-12 shrink-0 items-center gap-3 border-b px-4',
+		stack && 'flex-wrap gap-y-1 py-1.5 min-[1360px]:flex-nowrap min-[1360px]:py-0'
+	]}
+>
+	<div
+		class={[
+			'flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1',
+			stack ? 'min-[1360px]:flex-nowrap' : 'sm:flex-nowrap'
+		]}
+	>
 		<!-- The title truncates before anything moves: a long queue name is not
 		     a reason to push the two verbs of the screen off the edge. -->
 		<h1 class="min-w-0 truncate text-lg font-semibold tracking-tight">{title}</h1>
 		{#if meta}
-			<div class="text-subtle flex min-w-0 items-center gap-2 text-sm">{@render meta()}</div>
+			<div class={['text-subtle flex min-w-0 items-center gap-2 text-sm', stack && 'flex-wrap gap-y-0.5']}>
+				{@render meta()}
+			</div>
 		{/if}
 	</div>
 	{#if actions}
-		<div class="flex items-center gap-1.5">{@render actions()}</div>
+		<div class={['flex items-center gap-1.5', stack && 'w-full justify-end min-[1360px]:w-auto']}>
+			{@render actions()}
+		</div>
 	{/if}
 </header>

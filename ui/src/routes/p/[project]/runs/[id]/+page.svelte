@@ -226,7 +226,7 @@
 
 <svelte:head><title>{run?.name ?? 'Run'} · Runs · Tracepad</title></svelte:head>
 
-<PageHeader title={run?.name ?? (run ? short(run.id) : 'Run')}>
+<PageHeader title={run?.name ?? (run ? short(run.id) : 'Run')} stackBelow={1360}>
 	{#snippet meta()}
 		<a href={href('/runs')} class="hover:text-fg flex items-center gap-0.5 whitespace-nowrap">
 			<ChevronLeft class="size-3.5" />
@@ -241,7 +241,9 @@
 			>
 				{run.dataset}@{run.dataset_version}
 			</a>
-			<StatusChip status={run.status} since={run.created_at} {now} />
+			<span class="shrink-0 whitespace-nowrap">
+				<StatusChip status={run.status} since={run.created_at} {now} />
+			</span>
 			<span class="hidden font-mono whitespace-nowrap sm:inline">{timestamp(run.created_at)}</span>
 			{#if run.finished_at}
 				<span class="hidden font-mono whitespace-nowrap md:inline">→ {timestamp(run.finished_at)}</span>
@@ -251,35 +253,37 @@
 		{/if}
 	{/snippet}
 	{#snippet actions()}
-		{#if run}
-			<label class="text-subtle flex items-center gap-1.5 text-xs whitespace-nowrap">
-				Compare with
-				<select
-					id="compare-with"
-					name="compare-with"
-					class={fieldClass}
-					aria-label="Compare with another run"
-					value=""
-					onchange={(event) => {
-						if (event.currentTarget.value) goto(href(compareHref(id, event.currentTarget.value)));
-					}}
-				>
-					<option value="">{others.length === 0 ? 'no other run' : '…'}</option>
-					{#each others as other (other.id)}
-						<option value={other.id}>
-							{other.name ?? short(other.id)} · v{other.dataset_version} · {other.status}
-						</option>
-					{/each}
-				</select>
-			</label>
-			<!-- Reading and comparing runs is every role's; deleting one is an
-			     editor's (spec 028 #15). -->
-			{#if project.editor}
-				<Button aria-label="Delete run" onclick={() => (deleting = true)}>
-					<Trash2 class="size-4" />
-					<span class="hidden sm:inline">Delete</span>
-				</Button>
-			{/if}
+		<!-- Drawn while the run loads too, disabled, so the page does not jump when
+		     it arrives (spec 006 #27). The select shows a placeholder, whatever the
+		     runs it lists are called. -->
+		<label class="text-subtle flex min-w-0 flex-1 items-center gap-1.5 text-xs whitespace-nowrap min-[1360px]:flex-none">
+			Compare with
+			<select
+				id="compare-with"
+				name="compare-with"
+				class={[fieldClass, 'min-w-0 flex-1 min-[1360px]:w-52 min-[1360px]:flex-none']}
+				aria-label="Compare with another run"
+				disabled={!run}
+				value=""
+				onchange={(event) => {
+					if (event.currentTarget.value) goto(href(compareHref(id, event.currentTarget.value)));
+				}}
+			>
+				<option value="">{run && others.length === 0 ? 'no other run' : '…'}</option>
+				{#each others as other (other.id)}
+					<option value={other.id}>
+						{other.name ?? short(other.id)} · v{other.dataset_version} · {other.status}
+					</option>
+				{/each}
+			</select>
+		</label>
+		<!-- Reading and comparing runs is every role's; deleting one is an
+		     editor's (spec 028 #15). -->
+		{#if project.editor}
+			<Button aria-label="Delete run" disabled={!run} onclick={() => (deleting = true)}>
+				<Trash2 class="size-4" />
+				<span class="hidden sm:inline">Delete</span>
+			</Button>
 		{/if}
 	{/snippet}
 </PageHeader>

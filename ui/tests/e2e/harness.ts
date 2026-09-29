@@ -286,10 +286,47 @@ export async function section(page: Page, name: string): Promise<Locator> {
  * fit it (spec 006 #22). The box is the nearest ancestor that scrolls.
  */
 export async function sideways(table: Locator): Promise<number> {
-	return table.evaluate((node) => {
+	return table.evaluate(async (node) => {
+		// A table folds when its box reports the new width, a frame after the window
+		// was resized; two frames later what it measures is what it settled on.
+		await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
 		let box = node.parentElement;
 		while (box && getComputedStyle(box).overflowX === 'visible') box = box.parentElement;
 		return box ? box.scrollWidth - box.clientWidth : 0;
+	});
+}
+
+/**
+ * The pairs of things in a header whose boxes cross: a title, a breadcrumb, a
+ * chip, a select or a button that sits on another one (spec 006 #27). A box
+ * inside another is not a crossing, and an element with no size takes no room.
+ */
+export async function overlapping(header: Locator): Promise<string[]> {
+	return header.evaluate(async (node) => {
+		await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+		const leaves = [...node.querySelectorAll<HTMLElement>('h1, a, button, select, label, span')].filter(
+			(one) => {
+				const box = one.getBoundingClientRect();
+				return box.width > 2 && box.height > 2;
+			}
+		);
+		const name = (one: HTMLElement) => {
+			const box = one.getBoundingClientRect();
+			const at = `${Math.round(box.left)}-${Math.round(box.right)} x ${Math.round(box.top)}-${Math.round(box.bottom)}`;
+			return `${one.tagName.toLowerCase()} "${(one.textContent ?? '').trim().slice(0, 20)}" [${at}]`;
+		};
+		const crossing: string[] = [];
+		for (const [i, a] of leaves.entries()) {
+			for (const b of leaves.slice(i + 1)) {
+				if (a.contains(b) || b.contains(a)) continue;
+				const one = a.getBoundingClientRect();
+				const two = b.getBoundingClientRect();
+				if (one.left < two.right - 1 && two.left < one.right - 1 && one.top < two.bottom - 1 && two.top < one.bottom - 1) {
+					crossing.push(`${name(a)} x ${name(b)}`);
+				}
+			}
+		}
+		return crossing;
 	});
 }
 
