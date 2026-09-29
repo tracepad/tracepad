@@ -119,7 +119,9 @@ otherwise — on Windows too, so the default there is
 
 Everything the server knows is in `tracepad.db` and its `-wal` and `-shm`
 companions: traces, scores, prompts, the raw OTLP archive, images, accounts and
-keys (hashed). There is no second store to keep in step with it. Beside it, an
+keys (hashed). There is no second store to keep in step with it. Beside it is
+`tracepad.db.lock`, which a running server holds so that a second one on the same
+directory refuses to start, and an
 upgrade that applies a migration leaves `tracepad.db.pre-<migration>.bak`
 ([below](#upgrading)).
 
