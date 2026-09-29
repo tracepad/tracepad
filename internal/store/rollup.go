@@ -404,6 +404,7 @@ func (s *Store) StatsRollupHours(ctx context.Context, projectID string) ([]int64
 // re-delivery is routine and a delta double-counts every retried span
 // (spec 013 #3).
 type statsRoll struct {
+	background
 	ProjectID string
 	Hour      int64
 	// Now is the clock the freeze of Decision 11 is measured against

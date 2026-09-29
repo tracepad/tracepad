@@ -257,9 +257,10 @@ type PromptDelete struct {
 	Counts PromptCounts
 }
 
-// weight is a whole window and more: the name's whole history goes, however
-// many versions it holds, and nothing counts them before it runs (spec 043 #35).
-func (p *PromptDelete) weight() int { return commitsAlone }
+// commitsAlone: the name's whole history goes, however many versions it holds,
+// and nothing counts them before it runs, so the delete commits alone (spec
+// 043 #35).
+func (p *PromptDelete) commitsAlone() {}
 
 func (p *PromptDelete) apply(tx *sql.Tx) error {
 	p.Counts = PromptCounts{}

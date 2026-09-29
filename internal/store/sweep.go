@@ -637,6 +637,7 @@ func (s *Store) orphanPayloads(ctx context.Context, limit int) ([]int64, error) 
 // deletion decided on stale state is the one mistake retention cannot take
 // back (spec 003 Decision 20).
 type traceSweep struct {
+	background
 	ProjectID string
 	Now       int64
 	// Purge ignores the retention window and takes everything, for a
@@ -644,8 +645,8 @@ type traceSweep struct {
 	Purge bool
 	Limit int
 
-	// Filled by apply. Assigned rather than accumulated: a window that
-	// fails is retried job by job, so apply can run more than once.
+	// Filled by apply. Assigned rather than accumulated: apply is idempotent
+	// and may run again, as any job's may (spec 043 #38).
 	Traces       int64
 	Observations int64
 	Scores       int64
@@ -722,6 +723,7 @@ func (t *traceSweep) apply(tx *sql.Tx) error {
 // feeds many traces with different fates, so the traces it fed being gone says
 // nothing about it.
 type rawSweep struct {
+	background
 	ProjectID string
 	Now       int64
 	Purge     bool
@@ -784,6 +786,7 @@ const expiredSessionScores = `SELECT s.rowid FROM scores s
 // scores. They sit in no rollup (spec 025: a score that names no trace has no
 // hour to be counted in), so nothing is re-rolled.
 type sessionScoreSweep struct {
+	background
 	ProjectID string
 	Now       int64
 	Limit     int
@@ -840,6 +843,7 @@ func (s *sessionScoreSweep) apply(tx *sql.Tx) error {
 
 // payloadSweep removes the orphans the read pass found.
 type payloadSweep struct {
+	background
 	IDs     []int64
 	Deleted int64
 }
@@ -862,6 +866,7 @@ func (p *payloadSweep) apply(tx *sql.Tx) error {
 // out. The window is checked against the stored row inside the transaction:
 // the restore that would make this wrong is one HTTP request away.
 type projectPurge struct {
+	background
 	ProjectID string
 	Now       int64
 	Purged    bool
@@ -904,7 +909,10 @@ func (p *projectPurge) apply(tx *sql.Tx) error {
 // incrementalVacuum hands freed pages back to the filesystem. It runs as a
 // job like everything else: the pragma takes the write lock, and taking it on
 // a second connection is exactly what the one-writer rule exists to prevent.
-type incrementalVacuum struct{ Pages int }
+type incrementalVacuum struct {
+	background
+	Pages int
+}
 
 func (v *incrementalVacuum) apply(tx *sql.Tx) error {
 	if _, err := tx.Exec(fmt.Sprintf(`PRAGMA incremental_vacuum(%d)`, v.Pages)); err != nil {

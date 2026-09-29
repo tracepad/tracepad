@@ -854,6 +854,7 @@ func recomputeUsers(tx *sql.Tx, projectID string, userIDs []string) error {
 // main's 1.4 s; batched here it is back inside the noise (found by the
 // measurement spec 023's Testing asks for).
 type usersSummary struct {
+	background
 	ProjectID string
 	UserIDs   []string
 }
@@ -905,6 +906,7 @@ func deleteUserRollup(tx *sql.Tx, projectID, userID string) (int64, error) {
 //
 // One chunk per job, like every other deletion this store does.
 type usersRollupSweep struct {
+	background
 	ProjectID string
 	Before    int64
 

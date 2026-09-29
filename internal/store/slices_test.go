@@ -1,11 +1,20 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"log/slog"
+	"maps"
+	"path/filepath"
+	"reflect"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -264,7 +273,18 @@ func (h *heldWriter) submitAll(t *testing.T, jobs ...WriteJob) ([]error, []int) 
 		waitFor(t, func() bool { return len(h.queue) == i+1 })
 	}
 	close(h.release)
-	wg.Wait()
+	answered := make(chan struct{})
+	go func() { wg.Wait(); close(answered) }()
+	select {
+	case <-answered:
+	case <-time.After(2 * time.Minute):
+		// Long enough for a loaded machine or a race build, and short of the
+		// test binary's own timeout, so that a writer that never answers is
+		// a failure with its windows to show and not a hang.
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		t.Fatalf("the writer had not answered every job after 2 minutes; windows so far %v", h.windows)
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return errs, slices.Clone(h.windows[1:])
@@ -305,27 +325,194 @@ func TestWriterWindowClosesAtItsWeight(t *testing.T) {
 // a job of a row or a few still weighs one.
 func TestAJobWeighsTheRowsItCarries(t *testing.T) {
 	for _, c := range []struct {
-		job  WriteJob
-		want int
+		job   WriteJob
+		want  int
+		alone bool
 	}{
-		{&ScoreWrite{Scores: make([]*Score, 700)}, 700},
-		{&DatasetItemsWrite{Items: make([]*DatasetItemInput, 1200)}, 1200},
-		{&QueueItemsAdd{Targets: make([]QueueTarget, 300)}, 300},
-		{&QueueItemsFromTraces{Limit: 1000, Matched: 2}, 2},
-		{&QueueItemsFromTraces{Limit: 500, Matched: 40000}, 500},
-		{&QueueItemsFromTraces{Limit: 1000}, 1},
-		{&TraceDelete{IDs: []string{"a", "b", "c"}}, 3},
-		{&TraceDelete{ByFilter: true}, 1},
-		{&UserDataErase{Limit: 500}, 500},
-		{&DatasetDelete{Name: "d"}, WindowRows + 1},
-		{&QueueDelete{Name: "q"}, WindowRows + 1},
-		{&PromptDelete{Name: "p"}, WindowRows + 1},
-		{&ScoreDelete{ID: "a"}, 1},
-		{&QueueNext{}, 1},
-		{&PromptVersionWrite{}, 1},
+		{&ScoreWrite{Scores: make([]*Score, 700)}, 700, false},
+		{&DatasetItemsWrite{Items: make([]*DatasetItemInput, 1200)}, 1200, true},
+		{&QueueItemsAdd{Targets: make([]QueueTarget, 300)}, 300, false},
+		{&QueueItemsFromTraces{Limit: 1000, Matched: 2}, 2, false},
+		{&QueueItemsFromTraces{Limit: 500, Matched: 40000}, 500, false},
+		{&QueueItemsFromTraces{Limit: 1000}, 1, false},
+		{&TraceDelete{IDs: []string{"a", "b", "c"}}, 3, false},
+		{&TraceDelete{ByFilter: true}, 1, false},
+		{&UserDataErase{Limit: 500}, 500, false},
+		{&DatasetDelete{Name: "d"}, 1, true},
+		{&QueueDelete{Name: "q"}, 1, true},
+		{&PromptDelete{Name: "p"}, 1, true},
+		{&ScoreDelete{ID: "a"}, 1, false},
+		{&QueueNext{}, 1, false},
+		{&PromptVersionWrite{}, 1, false},
+		{&statsRollupAdvance{}, 1, false},
+		{&RawScrub{}, 1, false},
 	} {
 		if got := weightOf(c.job); got != c.want {
 			t.Errorf("%T%+v weighs %d, want %d", c.job, c.job, got, c.want)
+		}
+		if got := alone(c.job); got != c.alone {
+			t.Errorf("%T%+v commits alone: %v, want %v", c.job, c.job, got, c.alone)
+		}
+	}
+}
+
+// alone reports whether a job commits alone.
+func alone(job WriteJob) bool {
+	_, lone := classify(job)
+	return lone
+}
+
+// Every job the store submits is classified (spec 043 #35, #37): it either
+// commits alone or shares windows, and the choice is written down here, so a
+// new job cannot take the default by forgetting a marker. The types are found
+// in the source: every one with an `apply(tx *sql.Tx) error` method. The test
+// enforces that a decision was made, not that it was the right one, and it does
+// not see a job that gets its apply by embedding another.
+func TestEveryWriteJobIsClassified(t *testing.T) {
+	commitsAlone := []WriteJob{
+		&AccountSweep{},
+		&statsRollupSweep{},
+		&ftsMerge{},
+		&DatasetDelete{},
+		&erasureSweep{},
+		&namesRollupSweep{},
+		&mediaVoidedSweep{},
+		&mediaSweep{},
+		&PromptDelete{},
+		&scoresRollupSweep{},
+		&QueueDelete{},
+		&statsRoll{},
+		&searchEntrySweep{},
+		&traceSweep{},
+		&rawSweep{},
+		&sessionScoreSweep{},
+		&payloadSweep{},
+		&projectPurge{},
+		&incrementalVacuum{},
+		&usersSummary{},
+		&usersRollupSweep{},
+	}
+	sharesWindows := []WriteJob{
+		&AccountCreate{},
+		&AccountUpdate{},
+		&AccountDelete{},
+		&MembershipPut{},
+		&MembershipDelete{},
+		&SessionOpen{},
+		&SessionSlide{},
+		&SessionsEnd{},
+		&PasswordChange{},
+		&InviteMint{},
+		&InviteAccept{},
+		&SetupOwner{},
+		&ProjectCreate{},
+		&KeyCreate{},
+		&KeyRevoke{},
+		&ProjectUpdate{},
+		&ProjectDelete{},
+		&ProjectRestore{},
+		&UserDataErase{},
+		&compactionPrepared{},
+		&compactionDone{},
+		&DatasetUpsert{},
+		&DatasetItemsWrite{},
+		&DatasetItemArchive{},
+		&RunCreate{},
+		&RunFinish{},
+		&RunDelete{},
+		&RawScrub{},
+		&erasureStart{},
+		&erasureBegin{},
+		&erasurePause{},
+		&erasureStep{},
+		&erasureEnd{},
+		&IngestBatch{},
+		&KeyUse{},
+		&MediaRefAdd{},
+		&MediaUpload{},
+		&PromptVersionWrite{},
+		&PromptLabelWrite{},
+		&QueuePut{},
+		&QueueItemsAdd{},
+		&QueueItemsFromTraces{},
+		&QueueNext{},
+		&QueueItemComplete{},
+		&QueueItemSkip{},
+		&QueueItemReopen{},
+		&QueueItemDelete{},
+		&statsRollupAdvance{},
+		&ScoreConfigPut{},
+		&ScoreConfigDelete{},
+		&ScoreWrite{},
+		&ScoreDelete{},
+		&TraceDelete{},
+	}
+
+	// Steps the writer runs by itself, outside any transaction (soloJob).
+	runsOutsideATransaction := []WriteJob{&walCheckpoint{}}
+
+	listed := map[string]bool{}
+	for _, job := range runsOutsideATransaction {
+		listed[reflect.TypeOf(job).Elem().Name()] = true
+		if _, ok := job.(soloJob); !ok {
+			t.Errorf("%T is listed as a step the writer runs by itself and is no soloJob", job)
+		}
+	}
+	for _, job := range commitsAlone {
+		listed[reflect.TypeOf(job).Elem().Name()] = true
+		if !alone(job) {
+			t.Errorf("%T is listed as committing alone and does not", job)
+		}
+	}
+	for _, job := range sharesWindows {
+		listed[reflect.TypeOf(job).Elem().Name()] = true
+		if alone(job) {
+			t.Errorf("%T is listed as sharing windows and commits alone", job)
+		}
+	}
+
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := map[string]bool{}
+	for _, file := range files {
+		if strings.HasSuffix(file, "_test.go") {
+			continue
+		}
+		parsed, err := parser.ParseFile(token.NewFileSet(), file, nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, decl := range parsed.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Recv == nil || fn.Name.Name != "apply" || !appliesInATransaction(fn.Type) {
+				continue
+			}
+			recv := fn.Recv.List[0].Type
+			if star, ok := recv.(*ast.StarExpr); ok {
+				recv = star.X
+			}
+			switch generic := recv.(type) { // a type with parameters: name[T], name[T, U]
+			case *ast.IndexExpr:
+				recv = generic.X
+			case *ast.IndexListExpr:
+				recv = generic.X
+			}
+			if name, ok := recv.(*ast.Ident); ok {
+				found[name.Name] = true
+			}
+		}
+	}
+	for name := range found {
+		if !listed[name] {
+			t.Errorf("%s is a WriteJob no list here classifies: does it commit alone (embed background, or "+
+				"implement solitary) or share windows?", name)
+		}
+	}
+	for name := range listed {
+		if !found[name] {
+			t.Errorf("%s is listed here and is no WriteJob of the package", name)
 		}
 	}
 }
@@ -373,11 +560,9 @@ type weighedJob struct {
 func (j *weighedJob) weight() int            { return j.rows }
 func (j *weighedJob) apply(tx *sql.Tx) error { return j.do(tx) }
 
-// A job heavier than a window commits alone (spec 043 #35). A window that
-// fails is retried job by job, and the one that failed it is applied again: a
-// score array the size of a body cap, refused by a score config at its last
-// item, would run twice over, and a small job ahead of it would wait for both.
-// Alone, it is applied once and refused once.
+// A job heavier than a window commits alone (spec 043 #35): behind a small job
+// it waits for the next window rather than joining that one, so its rows are
+// a transaction of their own, and a refusal of its own is refused once.
 func TestAJobHeavierThanAWindowCommitsAlone(t *testing.T) {
 	s, p := openIngestStore(t)
 	h := newHeldWriter(t, s, p)
@@ -396,6 +581,639 @@ func TestAJobHeavierThanAWindowCommitsAlone(t *testing.T) {
 	}
 	if want := []int{1}; !slices.Equal(windows, want) {
 		t.Errorf("committed windows %v, want %v: the small job by itself", windows, want)
+	}
+}
+
+// probeWindow makes a table a window's jobs write to, and jobs that write a
+// row of it — or fail after writing one, in the way named — counting each
+// apply.
+type probeWindow struct {
+	s       *Store
+	applied map[string]int
+	// savepoint says, for each application of a job made by watching(), whether
+	// it ran inside a savepoint named job.
+	savepoint []bool
+	mu        sync.Mutex
+}
+
+func newProbeWindow(t *testing.T, s *Store) *probeWindow {
+	t.Helper()
+	// The child's reference is checked at COMMIT, not at the insert: a job
+	// that writes an orphan applies cleanly and fails the window's commit. A
+	// row named poison rolls the whole transaction back from its trigger, as
+	// SQLite may itself, and leaves no savepoint to return to.
+	for _, stmt := range []string{
+		`CREATE TABLE probe (id TEXT PRIMARY KEY)`,
+		`CREATE TRIGGER probe_poison BEFORE INSERT ON probe WHEN NEW.id = 'poison'
+		   BEGIN SELECT RAISE(ROLLBACK, 'poisoned'); END`,
+		`CREATE TABLE probe_parent (id TEXT PRIMARY KEY)`,
+		`CREATE TABLE probe_child (id TEXT PRIMARY KEY,
+		   parent TEXT REFERENCES probe_parent(id) DEFERRABLE INITIALLY DEFERRED)`,
+	} {
+		if _, err := s.db.Exec(stmt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return &probeWindow{s: s, applied: map[string]int{}}
+}
+
+// job writes id and then fails with fail, if it is not nil.
+func (p *probeWindow) job(id string, fail error) WriteJob {
+	return &weighedJob{rows: 1, do: func(tx *sql.Tx) error {
+		p.mu.Lock()
+		p.applied[id]++
+		p.mu.Unlock()
+		if _, err := tx.Exec(`INSERT OR IGNORE INTO probe (id) VALUES (?)`, id); err != nil {
+			return err
+		}
+		return fail
+	}}
+}
+
+// watching writes id and notes whether it was applied inside a savepoint:
+// `ROLLBACK TO job` succeeds only where one is open. It writes id again after,
+// since what it rolled back was its own row.
+func (p *probeWindow) watching(id string) WriteJob {
+	return &weighedJob{rows: 1, do: func(tx *sql.Tx) error {
+		p.mu.Lock()
+		p.applied[id]++
+		p.mu.Unlock()
+		insert := func() error {
+			_, err := tx.Exec(`INSERT OR IGNORE INTO probe (id) VALUES (?)`, id)
+			return err
+		}
+		if err := insert(); err != nil {
+			return err
+		}
+		_, err := tx.Exec(`ROLLBACK TO job`)
+		p.mu.Lock()
+		p.savepoint = append(p.savepoint, err == nil)
+		p.mu.Unlock()
+		if err == nil {
+			return insert()
+		}
+		return nil
+	}}
+}
+
+// orphan writes a child whose parent does not exist, which fails at COMMIT.
+func (p *probeWindow) orphan(id string) WriteJob {
+	return &weighedJob{rows: 1, do: func(tx *sql.Tx) error {
+		p.mu.Lock()
+		p.applied[id]++
+		p.mu.Unlock()
+		_, err := tx.Exec(`INSERT OR IGNORE INTO probe_child (id, parent) VALUES (?, 'none')`, id)
+		return err
+	}}
+}
+
+func (p *probeWindow) stored(t *testing.T) []string {
+	t.Helper()
+	rows, err := p.s.db.Query(`SELECT id FROM probe ORDER BY id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+// A window with a job that fails by itself is applied again, each job in a
+// savepoint (spec 043 #38): the failing job is rolled back alone — what it
+// wrote before it failed is gone — and answered with its error, and the jobs
+// beside it commit in that second pass, once each. The first pass had
+// stopped at the failing job, so the job after it is applied once and the
+// one before it twice: the price of a clean window costing what it always
+// cost.
+func TestAJobThatFailsInAWindowRollsBackAlone(t *testing.T) {
+	s, p := openIngestStore(t)
+	probe := newProbeWindow(t, s)
+	h := newHeldWriter(t, s, p)
+	rejection := &Rejection{Kind: RejectNotFound, Message: `queue "gone" not found`}
+	errs, windows := h.submitAll(t, probe.watching("a"), probe.job("refused", rejection), probe.job("b", nil))
+
+	if errs[0] != nil || !errors.Is(errs[1], rejection) || errs[2] != nil {
+		t.Fatalf("answers %v, want the middle job refused and the others committed", errs)
+	}
+	if want := map[string]int{"a": 2, "refused": 2, "b": 1}; !maps.Equal(probe.applied, want) {
+		t.Errorf("applied %v, want %v: two passes up to the refused job, one for the job after it", probe.applied, want)
+	}
+	if want := []bool{false, true}; !slices.Equal(probe.savepoint, want) {
+		t.Errorf("a ran inside a savepoint: %v, want %v: not in the first pass, in the second", probe.savepoint, want)
+	}
+	if got, want := probe.stored(t), []string{"a", "b"}; !slices.Equal(got, want) {
+		t.Errorf("stored %v, want %v: the refused job's row rolled back", got, want)
+	}
+	if want := []int{2}; !slices.Equal(windows, want) {
+		t.Errorf("committed windows %v, want %v: one window, the refused job not in it", windows, want)
+	}
+}
+
+// A clean window is applied once, plainly (spec 043 #38): no savepoint, no
+// second pass. Counted in applications, which a savepoint or a second pass
+// would raise.
+func TestACleanWindowIsAppliedOnce(t *testing.T) {
+	s, p := openIngestStore(t)
+	probe := newProbeWindow(t, s)
+	h := newHeldWriter(t, s, p)
+	errs, windows := h.submitAll(t, probe.job("a", nil), probe.watching("b"), probe.job("c", nil))
+	if err := errors.Join(errs...); err != nil {
+		t.Fatal(err)
+	}
+	if want := map[string]int{"a": 1, "b": 1, "c": 1}; !maps.Equal(probe.applied, want) {
+		t.Errorf("applied %v, want each once", probe.applied)
+	}
+	if want := []bool{false}; !slices.Equal(probe.savepoint, want) {
+		t.Errorf("b ran inside a savepoint: %v, want %v: none in a clean window", probe.savepoint, want)
+	}
+	if want := []int{3}; !slices.Equal(windows, want) {
+		t.Errorf("committed windows %v, want %v", windows, want)
+	}
+}
+
+// A job that fails the first pass and passes the second is committed, and the
+// window's replay is logged once, by the job's type (spec 043 #38): nothing was
+// refused, so nothing else would say why the window was applied twice. The line
+// carries the first pass's error, unless the job redacts its failure, whose
+// words are not the writer's to print (spec 047 #33) and whose line names what
+// it was a step of.
+func TestAReplayNothingRefusedIsExplained(t *testing.T) {
+	flaky := func(text string) func(*sql.Tx) error {
+		var mu sync.Mutex
+		calls := 0
+		return func(*sql.Tx) error {
+			mu.Lock()
+			defer mu.Unlock()
+			if calls++; calls == 1 {
+				return errors.New(text)
+			}
+			return nil
+		}
+	}
+	for _, c := range []struct {
+		name     string
+		job      WriteJob
+		text     string
+		wantText bool
+	}{
+		{"a job", &weighedJob{rows: 1, do: flaky("transient fluke")}, "transient fluke", true},
+		{"a job that reports its own failure",
+			&reportedJob{weighedJob{rows: 1, do: flaky("the hour is broken")}}, "the hour is broken", false},
+		{"a job that redacts its failure",
+			&redactedJob{weighedJob{rows: 1, do: flaky("user-7f3a9c was not found")}}, "user-7f3a9c", false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			log := captureLog(t)
+
+			s, p := openIngestStore(t)
+			probe := newProbeWindow(t, s)
+			h := newHeldWriter(t, s, p)
+			errs, windows := h.submitAll(t, probe.job("a", nil), c.job, probe.job("b", nil))
+			if err := errors.Join(errs...); err != nil {
+				t.Fatalf("answers %v, want every job committed by the second pass", errs)
+			}
+			if want := []int{3}; !slices.Equal(windows, want) {
+				t.Errorf("committed windows %v, want %v", windows, want)
+			}
+			text := log()
+			if n := strings.Count(text, "first pass and passed the second"); n != 1 {
+				t.Errorf("%d lines about the replay, want one:\n%s", n, text)
+			}
+			if want := fmt.Sprintf("%T", c.job); !strings.Contains(text, want) {
+				t.Errorf("the line does not name the job's type %s:\n%s", want, text)
+			}
+			if strings.Contains(text, c.text) != c.wantText {
+				t.Errorf("the line carries the error: %v, want %v:\n%s", strings.Contains(text, c.text), c.wantText, text)
+			}
+			if strings.Contains(text, "write refused") {
+				t.Errorf("a job nothing refused was logged as refused:\n%s", text)
+			}
+		})
+	}
+}
+
+// A score written in a window that is applied again is stamped by the
+// application that commits, not the first (spec 043 #38, spec 025 #23): the
+// rollup asks `created_at > last_pass`, which is sound only if the stamp and
+// the commit are the same moment to within a margin. A caller's own stamp is
+// left alone by both applications.
+func TestAReplayedScoreIsStampedByTheApplicationThatCommits(t *testing.T) {
+	s, p := openIngestStore(t)
+	probe := newProbeWindow(t, s)
+	h := newHeldWriter(t, s, p)
+	one := 1.0
+	own := int64(1_700_000_000_000_000_000)
+	stamped := &Score{ID: "stamped", SessionID: "sess", Name: "q", DataType: "numeric", Value: &one, Timestamp: 1}
+	dated := &Score{ID: "dated", SessionID: "sess", Name: "q", DataType: "numeric", Value: &one, Timestamp: 1, CreatedAt: own}
+	// The job that sends the window back notes the clock as it fails, once
+	// the scores ahead of it have been applied for the first time.
+	var failedAt time.Time
+	refusal := &weighedJob{rows: 1, do: func(*sql.Tx) error {
+		if failedAt.IsZero() {
+			time.Sleep(20 * time.Millisecond)
+			failedAt = time.Now()
+		}
+		return &Rejection{Kind: RejectNotFound, Message: "gone"}
+	}}
+	errs, windows := h.submitAll(t, &ScoreWrite{ProjectID: p.ID, Scores: []*Score{stamped, dated}}, refusal, probe.job("b", nil))
+	if errs[0] != nil || !rejected(errs[1]) || errs[2] != nil {
+		t.Fatalf("answers %v, want the scores committed and the middle job refused", errs)
+	}
+	if want := []int{3}; !slices.Equal(windows, want) {
+		t.Errorf("committed windows %v, want %v", windows, want)
+	}
+	stored := func(id string) int64 {
+		var at int64
+		if err := s.db.QueryRow(`SELECT created_at FROM scores WHERE project_id = ? AND id = ?`, p.ID, id).Scan(&at); err != nil {
+			t.Fatal(err)
+		}
+		return at
+	}
+	if at := stored("stamped"); at <= failedAt.UnixNano() {
+		t.Errorf("created_at %d is behind the refusal's clock %d: the first application's stamp, not the commit's", at, failedAt.UnixNano())
+	}
+	if at := stored("dated"); at != own {
+		t.Errorf("the caller's own stamp became %d, want %d", at, own)
+	}
+	if stamped.CreatedAt != 0 {
+		t.Errorf("the caller's score was stamped with %d, want it left as it was", stamped.CreatedAt)
+	}
+}
+
+// A refusal a job returns as a plain error, a link used twice or a media body
+// collected before the write, is routine traffic and is logged at info, like a
+// *Rejection; any other error a job fails with is logged as an error
+// (spec 043 #37).
+func TestARoutineRefusalIsLoggedAtInfo(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		err   error
+		level string
+	}{
+		{"a media body collected", ErrMediaGone, "INFO"},
+		{"a link used twice", ErrBadToken, "INFO"},
+		{"a second owner", ErrSetupDone, "INFO"},
+		{"a wrong password", ErrWrongPassword, "INFO"},
+		{"a password changed under the request", fmt.Errorf("wrapped: %w", ErrPasswordChanged), "INFO"},
+		{"an error nobody expected", errors.New("boom"), "ERROR"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			log := captureLog(t)
+
+			s, p := openIngestStore(t)
+			h := newHeldWriter(t, s, p)
+			refused := &weighedJob{rows: 1, do: func(*sql.Tx) error { return c.err }}
+			errs, _ := h.submitAll(t, refused)
+			if !errors.Is(errs[0], c.err) {
+				t.Fatalf("answer %v, want the job's error", errs[0])
+			}
+			// The line about the refusal, and no other: opening the store logs
+			// its migrations at info into the same buffer.
+			var line string
+			for _, l := range strings.Split(log(), "\n") {
+				if strings.Contains(l, "write refused") {
+					line = l
+				}
+			}
+			if !strings.Contains(line, "level="+c.level) {
+				t.Errorf("want a %s line saying the write was refused, got %q", c.level, line)
+			}
+		})
+	}
+}
+
+// A failure the second pass meets that the first did not is not a reason for a
+// third (spec 043 #38): a job that passed the first pass and fails the second
+// is refused there, alone, like the one that sent the window back; and one
+// that fails the window as a whole in the second pass — its transaction
+// rolled back by a trigger, so that its savepoint is gone — sends the window to
+// be retried job by job, which is the last step. Neither loops.
+func TestASecondPassThatFailsDoesNotLoop(t *testing.T) {
+	s, p := openIngestStore(t)
+	probe := newProbeWindow(t, s)
+	h := newHeldWriter(t, s, p)
+
+	// flaky passes the first pass and fails the second, in which the
+	// refused job ahead of it has already been rolled back to its savepoint.
+	var passes int
+	var mu sync.Mutex
+	flaky := &weighedJob{rows: 1, do: func(tx *sql.Tx) error {
+		mu.Lock()
+		passes++
+		n := passes
+		mu.Unlock()
+		if n > 1 {
+			return &Rejection{Kind: RejectInvalid, Message: "flaky: not this time"}
+		}
+		_, err := tx.Exec(`INSERT OR IGNORE INTO probe (id) VALUES ('flaky')`)
+		return err
+	}}
+	refusal := &Rejection{Kind: RejectNotFound, Message: "always"}
+	errs, windows := h.submitAll(t, flaky, probe.job("refused", refusal), probe.job("b", nil))
+	if !rejected(errs[0]) || !errors.Is(errs[1], refusal) || errs[2] != nil {
+		t.Fatalf("answers %v, want the flaky and the refused job refused, and b committed", errs)
+	}
+	if got, want := probe.stored(t), []string{"b"}; !slices.Equal(got, want) {
+		t.Errorf("stored %v, want %v", got, want)
+	}
+	if want := []int{1}; !slices.Equal(windows, want) {
+		t.Errorf("committed windows %v, want %v: the second pass, with b alone in it", windows, want)
+	}
+	if want := map[string]int{"refused": 2, "b": 1}; !maps.Equal(probe.applied, want) {
+		t.Errorf("applied %v, want %v", probe.applied, want)
+	}
+}
+
+// The other kind: a job the first pass never reached takes the second pass's
+// transaction with it, and the window falls to the one-by-one retry, once.
+func TestAWindowThatBreaksInItsSecondPassIsRetriedOnceJobByJob(t *testing.T) {
+	s, p := openIngestStore(t)
+	probe := newProbeWindow(t, s)
+	h := newHeldWriter(t, s, p)
+	refusal := &Rejection{Kind: RejectNotFound, Message: "always"}
+	errs, windows := h.submitAll(t, probe.job("a", nil), probe.job("refused", refusal), probe.job("poison", nil))
+
+	if errs[0] != nil || !errors.Is(errs[1], refusal) || errs[2] == nil || !strings.Contains(errs[2].Error(), "poisoned") {
+		t.Fatalf("answers %v, want a committed, refused refused, poison refused by its trigger", errs)
+	}
+	// a: first pass, second pass, alone. refused: the same. poison: never in
+	// the first pass, then the second pass, then alone.
+	if want := map[string]int{"a": 3, "refused": 3, "poison": 2}; !maps.Equal(probe.applied, want) {
+		t.Errorf("applied %v, want %v", probe.applied, want)
+	}
+	if got, want := probe.stored(t), []string{"a"}; !slices.Equal(got, want) {
+		t.Errorf("stored %v, want %v", got, want)
+	}
+	if want := []int{1}; !slices.Equal(windows, want) {
+		t.Errorf("committed windows %v, want %v: a, alone", windows, want)
+	}
+}
+
+// An ingest slice that fails in the middle of a window, its trace already
+// written, is rolled back to its savepoint in the second pass with what it
+// wrote (spec 043 #38): its trace is gone, the jobs beside it commit in that
+// pass, and the slice is answered with its error.
+func TestAnIngestSliceThatFailsInAWindowIsRolledBackAlone(t *testing.T) {
+	s, p := openIngestStore(t)
+	probe := newProbeWindow(t, s)
+	// The span is inserted after its trace, so the slice fails with a row
+	// already written.
+	if _, err := s.db.Exec(`CREATE TRIGGER span_poison BEFORE INSERT ON observations
+	    WHEN NEW.id = 'poisoned-span' BEGIN SELECT RAISE(ABORT, 'poisoned span'); END`); err != nil {
+		t.Fatal(err)
+	}
+	h := newHeldWriter(t, s, p)
+	traceID := fmt.Sprintf("%032x", 0x5eed)
+	slice := batchFor(p.ID, traceID, "poisoned-span")
+	errs, windows := h.submitAll(t, probe.job("a", nil), slice, probe.job("b", nil))
+
+	if errs[0] != nil || errs[1] == nil || !strings.Contains(errs[1].Error(), "poisoned span") || errs[2] != nil {
+		t.Fatalf("answers %v, want the slice failed and the others committed", errs)
+	}
+	if want := []int{2}; !slices.Equal(windows, want) {
+		t.Errorf("committed windows %v, want %v: a and b, in one window", windows, want)
+	}
+	if got, want := probe.stored(t), []string{"a", "b"}; !slices.Equal(got, want) {
+		t.Errorf("stored %v, want %v", got, want)
+	}
+	var traces int
+	if err := s.db.QueryRow(`SELECT count(*) FROM traces WHERE project_id = ? AND id = ?`, p.ID, traceID).Scan(&traces); err != nil {
+		t.Fatal(err)
+	}
+	if traces != 0 {
+		t.Errorf("the failed slice's trace is stored: %d rows", traces)
+	}
+}
+
+// A job that fails by itself alone in its window is refused the same way as
+// one beside others (spec 043 #37): what it wrote is rolled back, not
+// committed with it, and the line says the write was refused, not that a
+// commit failed.
+func TestALoneJobThatFailsIsRefused(t *testing.T) {
+	log := captureLog(t)
+
+	s, p := openIngestStore(t)
+	probe := newProbeWindow(t, s)
+	h := newHeldWriter(t, s, p)
+	rejection := &Rejection{Kind: RejectInvalid, Message: "echo does not match"}
+	errs, windows := h.submitAll(t, probe.job("alone", rejection))
+	if !errors.Is(errs[0], rejection) {
+		t.Fatalf("answer %v, want the rejection", errs[0])
+	}
+	if got := probe.stored(t); len(got) != 0 {
+		t.Errorf("stored %v: the refused job's row was committed", got)
+	}
+	if len(windows) != 0 {
+		t.Errorf("committed windows %v, want none", windows)
+	}
+	if text := log(); !strings.Contains(text, "write refused") || strings.Contains(text, "write commit failed") {
+		t.Errorf("the line for a refused lone job:\n%s", text)
+	}
+}
+
+// appliesInATransaction reports the signature of a WriteJob's apply:
+// `(*sql.Tx) error`, one parameter and no result but the error.
+func appliesInATransaction(sig *ast.FuncType) bool {
+	if sig.Params.NumFields() != 1 || sig.Results.NumFields() != 1 {
+		return false
+	}
+	star, ok := sig.Params.List[0].Type.(*ast.StarExpr)
+	if !ok {
+		return false
+	}
+	tx, ok := star.X.(*ast.SelectorExpr)
+	if !ok || tx.Sel.Name != "Tx" {
+		return false
+	}
+	result, ok := sig.Results.List[0].Type.(*ast.Ident)
+	return ok && result.Name == "error"
+}
+
+// A solitary job commits alone whatever it weighs (spec 043 #37): behind other
+// jobs it starts the next window, and it collects nothing behind it. Four
+// queued jobs, the third of them solitary, commit in three windows — the two
+// before it, it, and the one after it.
+func TestASolitaryJobCommitsAloneBesideJobsOfWeightOne(t *testing.T) {
+	s, p := openIngestStore(t)
+	h := newHeldWriter(t, s, p)
+	fine := func() WriteJob { return &weighedJob{rows: 1, do: func(*sql.Tx) error { return nil }} }
+	background := &backgroundJob{weighedJob{rows: 1, do: func(*sql.Tx) error { return nil }}}
+	errs, windows := h.submitAll(t, fine(), fine(), background, fine())
+	if err := errors.Join(errs...); err != nil {
+		t.Fatal(err)
+	}
+	if want := []int{2, 1, 1}; !slices.Equal(windows, want) {
+		t.Errorf("committed windows %v, want %v: two, the solitary job by itself, and the last", windows, want)
+	}
+}
+
+// backgroundJob is a job of weight one that commits alone.
+type backgroundJob struct {
+	weighedJob
+}
+
+func (*backgroundJob) commitsAlone() {}
+
+// A window in which every job is refused commits nothing (spec 043 #37): the
+// transaction is rolled back, as a lone refused job's is, and the writer's
+// account of what it committed does not count it.
+func TestAWindowOfRefusedJobsCommitsNothing(t *testing.T) {
+	s, p := openIngestStore(t)
+	h := newHeldWriter(t, s, p)
+	refused := func(name string) WriteJob {
+		return &weighedJob{rows: 1, do: func(*sql.Tx) error {
+			return &Rejection{Kind: RejectNotFound, Message: name + " not found"}
+		}}
+	}
+	errs, windows := h.submitAll(t, refused("a"), refused("b"), refused("c"))
+	for i, err := range errs {
+		if !rejected(err) {
+			t.Errorf("job %d answered %v, want its rejection", i, err)
+		}
+	}
+	if len(windows) != 0 {
+		t.Errorf("committed windows %v, want none", windows)
+	}
+}
+
+// An ingest slice whose media body was collected before the write is refused
+// like any job (spec 043 #38): ErrMediaGone comes back as it is, the window
+// goes on and commits the others, and nothing of the slice is left in the
+// transaction — not its trace, not its observation, not its media.
+func TestAnIngestSliceRefusedForItsMediaIsRefusedAlone(t *testing.T) {
+	log := captureLog(t)
+
+	s, p := openIngestStore(t)
+	probe := newProbeWindow(t, s)
+	h := newHeldWriter(t, s, p)
+	traceID := fmt.Sprintf("%032x", 0x6011)
+	bodySHA := strings.Repeat("ab", 32)
+	slice := batchFor(p.ID, traceID, "gone-span")
+	slice.Media = []MediaBody{{SHA256: bodySHA, MimeType: "image/png", Body: []byte("png")}}
+	// A body the project never held: the check finds no hold and refuses.
+	slice.Resolved = []string{strings.Repeat("cd", 32)}
+
+	errs, windows := h.submitAll(t, probe.job("a", nil), slice, probe.job("b", nil))
+	if errs[0] != nil || errs[1] != ErrMediaGone || errs[2] != nil {
+		t.Fatalf("answers %v, want the slice refused with ErrMediaGone and the others committed", errs)
+	}
+	if want := []int{2}; !slices.Equal(windows, want) {
+		t.Errorf("committed windows %v, want %v", windows, want)
+	}
+	for table, query := range map[string]string{
+		"traces":       `SELECT count(*) FROM traces WHERE id = '` + traceID + `'`,
+		"observations": `SELECT count(*) FROM observations WHERE trace_id = '` + traceID + `'`,
+		"media":        `SELECT count(*) FROM media WHERE sha256 = '` + bodySHA + `'`,
+	} {
+		var n int
+		if err := s.db.QueryRow(query).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		if n != 0 {
+			t.Errorf("%d rows of the refused slice in %s", n, table)
+		}
+	}
+	if text := log(); strings.Contains(text, "write window failed") {
+		t.Errorf("a slice refused for its media failed its window:\n%s", text)
+	}
+}
+
+// reportedJob is a job whose caller logs its failure itself.
+type reportedJob struct{ weighedJob }
+
+func (j *reportedJob) failureReported() bool { return true }
+
+// redactedJob is a job whose failure the writer does not put in its log, as a
+// job of an erasure's is (spec 047 #33).
+type redactedJob struct{ weighedJob }
+
+func (j *redactedJob) failureRedacted() (string, bool) {
+	return "4f0c9d3e8a1b2c3d4e5f60718293a4b5", true
+}
+
+// sharesAWindow is a job of weight one that does nothing and commits with
+// whatever window it is in: the neighbour of a job under test, where an
+// erasure's sweep, which commits alone, would leave it a window of its own.
+func sharesAWindow() WriteJob {
+	return &weighedJob{rows: 1, do: func(*sql.Tx) error { return nil }}
+}
+
+// A job whose caller logs its failure is not logged by the writer when it is
+// refused inside a window either (spec 043 #38, spec 044 #15): its error may
+// name a user, and the one line about it is its caller's.
+func TestAJobRefusedInAWindowThatReportsItsFailureIsNotLogged(t *testing.T) {
+	log := captureLog(t)
+
+	s, p := openIngestStore(t)
+	probe := newProbeWindow(t, s)
+	h := newHeldWriter(t, s, p)
+	secret := &reportedJob{weighedJob{rows: 1, do: func(*sql.Tx) error {
+		return &Rejection{Kind: RejectInvalid, Message: "confirm must be user-7f3a9c, the user whose data this erases"}
+	}}}
+	errs, _ := h.submitAll(t, probe.job("a", nil), secret, probe.job("b", nil))
+	if errs[0] != nil || errs[1] == nil || errs[2] != nil {
+		t.Fatalf("answers %v, want the middle job refused and the others committed", errs)
+	}
+	if text := log(); strings.Contains(text, "write refused") ||
+		strings.Contains(text, "write commit failed") || strings.Contains(text, "user-7f3a9c") {
+		t.Errorf("the writer logged a job whose caller reports it:\n%s", text)
+	}
+}
+
+// What fails a window as a whole is still retried job by job (spec 043 #38):
+// a database condition in an apply, after which SQLite may have rolled the
+// transaction back itself, a job that rolled it back so that its savepoint is
+// gone, and a failed COMMIT. The jobs that did not fail it commit alone —
+// applied again for every pass the window had got to them in — and the one
+// that did is answered with the failure.
+func TestAWindowThatFailsAsAWholeIsRetriedJobByJob(t *testing.T) {
+	full := codedError{13} // SQLITE_FULL
+	for _, c := range []struct {
+		name    string
+		fails   func(p *probeWindow) WriteJob
+		is      func(error) bool
+		applied map[string]int
+	}{
+		// The window stops at the condition: the job after it is applied
+		// only when the writer retries it.
+		{"a database condition in an apply", func(p *probeWindow) WriteJob { return p.job("failing", full) },
+			func(err error) bool { _, ok := Condition(err); return ok },
+			map[string]int{"a": 2, "failing": 2, "b": 1}},
+		// The first pass stops at the job, the second finds no savepoint to
+		// return to, and the retry applies each alone.
+		{"a savepoint that cannot be rolled back to", func(p *probeWindow) WriteJob { return p.job("poison", nil) },
+			func(err error) bool { return err != nil && strings.Contains(err.Error(), "poisoned") },
+			map[string]int{"a": 3, "poison": 3, "b": 1}},
+		{"a failed commit", func(p *probeWindow) WriteJob { return p.orphan("failing") },
+			func(err error) bool { return err != nil && strings.Contains(err.Error(), "commit write transaction") },
+			map[string]int{"a": 2, "failing": 2, "b": 2}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			s, p := openIngestStore(t)
+			probe := newProbeWindow(t, s)
+			h := newHeldWriter(t, s, p)
+			errs, windows := h.submitAll(t, probe.job("a", nil), c.fails(probe), probe.job("b", nil))
+
+			if errs[0] != nil || !c.is(errs[1]) || errs[2] != nil {
+				t.Fatalf("answers %v, want the middle job failed and the others committed", errs)
+			}
+			if !maps.Equal(probe.applied, c.applied) {
+				t.Errorf("applied %v, want %v", probe.applied, c.applied)
+			}
+			if got, want := probe.stored(t), []string{"a", "b"}; !slices.Equal(got, want) {
+				t.Errorf("stored %v, want %v", got, want)
+			}
+			if want := []int{1, 1}; !slices.Equal(windows, want) {
+				t.Errorf("committed windows %v, want %v: the two others, each alone", windows, want)
+			}
+		})
 	}
 }
 
@@ -821,5 +1639,21 @@ func TestAResolvedIdOnlyTheRawBodyNamesIsCheckedByTheLastSlice(t *testing.T) {
 	collectBetweenSlices(t, s, p.ID, "ij")
 	if err := applySlice(t, s, cut[1]); !errors.Is(err, ErrMediaGone) {
 		t.Errorf("the last slice answered %v, want ErrMediaGone", err)
+	}
+}
+
+// captureLog swaps the package logger for one that writes to a buffer until the
+// test ends, and answers what has been written.
+func captureLog(t *testing.T) func() string {
+	t.Helper()
+	var logged bytes.Buffer
+	var mu sync.Mutex
+	previous := logger
+	logger = func() *slog.Logger { return slog.New(slog.NewTextHandler(&lockedWriter{w: &logged, mu: &mu}, nil)) }
+	t.Cleanup(func() { logger = previous })
+	return func() string {
+		mu.Lock()
+		defer mu.Unlock()
+		return logged.String()
 	}
 }

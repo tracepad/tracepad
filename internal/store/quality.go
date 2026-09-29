@@ -422,6 +422,7 @@ func correctScoreHours(tx *sql.Tx, projectID string, now int64, hours ...int64) 
 // window is `stats_retention_days` and there is no knob of its own, because
 // all three tables are one rollup (spec 025, config additions).
 type scoresRollupSweep struct {
+	background
 	ProjectID string
 	Before    int64
 

@@ -998,6 +998,7 @@ func (s *SetupOwner) apply(tx *sql.Tx) error {
 // the retention sweeper's pass, once per pass rather than once per project:
 // an account belongs to the deployment and not to a project (spec 005).
 type AccountSweep struct {
+	background
 	Now   int64
 	Limit int
 

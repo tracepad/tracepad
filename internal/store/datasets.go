@@ -308,9 +308,10 @@ type DatasetDelete struct {
 	Counts DatasetCounts
 }
 
-// weight is a whole window and more: the cascade takes every version of every
-// item and every run, which nothing counts before it runs (spec 043 #35).
-func (d *DatasetDelete) weight() int { return commitsAlone }
+// commitsAlone: the cascade takes every version of every item and every run,
+// which nothing counts before it runs, so the delete commits alone (spec 043
+// #35).
+func (d *DatasetDelete) commitsAlone() {}
 
 func (d *DatasetDelete) apply(tx *sql.Tx) error {
 	d.Counts = DatasetCounts{}

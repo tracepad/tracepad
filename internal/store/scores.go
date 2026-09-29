@@ -113,8 +113,11 @@ func (s *ScoreWrite) apply(tx *sql.Tx) error {
 		if moved {
 			vacated = append(vacated, hour)
 		}
-		if score.CreatedAt == 0 {
-			score.CreatedAt = receivedAt
+		// Kept off the caller's Score, so that an application that runs again
+		// (a window sent back, spec 043 #38) stamps afresh.
+		createdAt := score.CreatedAt
+		if createdAt == 0 {
+			createdAt = receivedAt
 		}
 		_, err = tx.Exec(
 			`INSERT INTO scores (
@@ -136,7 +139,7 @@ func (s *ScoreWrite) apply(tx *sql.Tx) error {
 			s.ProjectID, score.ID, nullString(score.TraceID), nullString(score.ObservationID),
 			nullString(score.SessionID), score.Name, score.DataType, nullFloat(score.Value),
 			nullText(score.StringValue), nullString(score.Comment), nullJSON(score.Metadata),
-			score.Timestamp, score.CreatedAt,
+			score.Timestamp, createdAt,
 		)
 		if err != nil {
 			return fmt.Errorf("upsert score %s: %w", score.ID, err)

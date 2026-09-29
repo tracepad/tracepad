@@ -912,11 +912,11 @@ func TestTheWriterLeavesAnErasureJobsFailureToIt(t *testing.T) {
 	}
 	defer window.Close()
 	first := make(chan error, 1)
-	go func() { first <- window.Submit(context.Background(), &erasureSweep{}) }()
+	go func() { first <- window.Submit(context.Background(), sharesAWindow()) }()
 	<-parked
 	answers := make(chan error, 2)
 	go func() { answers <- window.Submit(context.Background(), refused()) }()
-	go func() { answers <- window.Submit(context.Background(), &erasureSweep{}) }()
+	go func() { answers <- window.Submit(context.Background(), sharesAWindow()) }()
 	waitFor(t, func() bool { return len(window.queue) == 2 })
 	close(release)
 	if err := <-first; err != nil {
@@ -931,9 +931,10 @@ func TestTheWriterLeavesAnErasureJobsFailureToIt(t *testing.T) {
 			failed++
 		}
 	}
-	// The parked window, the window of two, and the two alone.
-	if failed != 1 || commits.Load() != 4 {
-		t.Fatalf("%d refused after %d commits, want the chunk alone after a window of two", failed,
+	// The parked window and the window of two: the chunk is refused in the
+	// window's second pass, with a savepoint, and its neighbour committed.
+	if failed != 1 || commits.Load() != 2 {
+		t.Fatalf("%d refused after %d commits, want the chunk refused inside a window of two", failed,
 			commits.Load())
 	}
 
@@ -944,11 +945,12 @@ func TestTheWriterLeavesAnErasureJobsFailureToIt(t *testing.T) {
 			t.Errorf("the writer's log gives %q: %q", line, logged.String())
 		}
 	}
-	// The window that came apart is still said, without the error: what it
-	// was a step of, and the cause (#33).
-	if out := logged.String(); !strings.Contains(out, "write window failed") ||
+	// What refused inside the window is still said, without the error: what
+	// it was a step of, and the cause (#33), once for the chunk refused alone
+	// and once for the chunk refused inside the window.
+	if out := logged.String(); strings.Count(out, "a write of an erasure did not commit") != 2 ||
 		!strings.Contains(out, "erasure=4f0c9d3e8a1b2c3d4e5f60718293a4b5") || !strings.Contains(out, "cause=") {
-		t.Errorf("the writer's log %q has no line for the window with the erasure and the cause", out)
+		t.Errorf("the writer's log %q has no line for each refusal with the erasure and the cause", out)
 	}
 }
 
@@ -1002,8 +1004,9 @@ func (f failsReported) apply(*sql.Tx) error { return f.err }
 func (failsReported) failureReported() bool { return true }
 
 // The writer's own rules for a job that reports its failure stay as they were
-// before the erasure's (#33): the window it took down is still warned of, and
-// a condition it met adds no line of the writer's — the job's owner said it.
+// before the erasure's (#33): a job of a window that fails by itself is refused
+// there, and the writer says nothing of it, nor of a condition it met — the
+// job's owner said it. No window came apart, so no line says one did.
 func TestTheWriterKeepsItsRulesForAJobThatReportsItself(t *testing.T) {
 	f := newErasureFixture(t)
 	conditionLog = &logpace.Keyed{Every: time.Minute}
@@ -1027,13 +1030,13 @@ func TestTheWriterKeepsItsRulesForAJobThatReportsItself(t *testing.T) {
 		}
 	}
 	first := make(chan error, 1)
-	go func() { first <- window.Submit(context.Background(), &erasureSweep{}) }()
+	go func() { first <- window.Submit(context.Background(), sharesAWindow()) }()
 	<-parked
 	answers := make(chan error, 2)
 	go func() {
 		answers <- window.Submit(context.Background(), failsReported{errors.New("the hour is broken")})
 	}()
-	go func() { answers <- window.Submit(context.Background(), &erasureSweep{}) }()
+	go func() { answers <- window.Submit(context.Background(), sharesAWindow()) }()
 	waitFor(t, func() bool { return len(window.queue) == 2 })
 	close(release)
 	<-first
@@ -1045,10 +1048,11 @@ func TestTheWriterKeepsItsRulesForAJobThatReportsItself(t *testing.T) {
 	mu.Lock()
 	defer mu.Unlock()
 	out := logged.String()
-	if !strings.Contains(out, "write window failed") {
-		t.Errorf("the writer did not warn of the window a reporting job took down: %q", out)
+	if strings.Contains(out, "write window failed") {
+		t.Errorf("the writer warned of a window that did not come apart: %q", out)
 	}
-	if strings.Contains(out, "write commit failed") || strings.Contains(out, "condition=") {
+	if strings.Contains(out, "write commit failed") || strings.Contains(out, "write refused") ||
+		strings.Contains(out, "condition=") {
 		t.Errorf("the writer logged a reporting job's failure, which its owner does: %q", out)
 	}
 }
@@ -1134,8 +1138,9 @@ func (failsOnceRedacted) failureRedacted() (string, bool) {
 	return "4f0c9d3e8a1b2c3d4e5f60718293a4b5", true
 }
 
-// A job of an erasure that fails a window and commits alone leaves the line
-// of the window, without the error, the only trace of why it came apart (#33).
+// A job of an erasure that fails a window's first pass and is committed by the
+// second leaves the writer's line of the replay, without the error, the only
+// trace of why the window was applied twice (#33).
 func TestAWindowAnErasureJobBrokeIsStillSaid(t *testing.T) {
 	f := newErasureFixture(t)
 	var logged bytes.Buffer
@@ -1157,12 +1162,12 @@ func TestAWindowAnErasureJobBrokeIsStillSaid(t *testing.T) {
 		}
 	}
 	first := make(chan error, 1)
-	go func() { first <- w.Submit(context.Background(), &erasureSweep{}) }()
+	go func() { first <- w.Submit(context.Background(), sharesAWindow()) }()
 	<-parked
 	var tries atomic.Int32
 	answers := make(chan error, 2)
 	go func() { answers <- w.Submit(context.Background(), failsOnceRedacted{&tries}) }()
-	go func() { answers <- w.Submit(context.Background(), &erasureSweep{}) }()
+	go func() { answers <- w.Submit(context.Background(), sharesAWindow()) }()
 	waitFor(t, func() bool { return len(w.queue) == 2 })
 	close(release)
 	<-first
@@ -1174,9 +1179,9 @@ func TestAWindowAnErasureJobBrokeIsStillSaid(t *testing.T) {
 	mu.Lock()
 	defer mu.Unlock()
 	out := logged.String()
-	if !strings.Contains(out, "write window failed") || !strings.Contains(out, "erasure=4f0c9d3e8a1b2c3d4e5f60718293a4b5") ||
-		strings.Contains(out, "a constraint the window hit") {
-		t.Errorf("the writer's log %q, want the window's line with the erasure and not the error", out)
+	if !strings.Contains(out, "first pass and passed the second") ||
+		!strings.Contains(out, "erasure=4f0c9d3e8a1b2c3d4e5f60718293a4b5") || strings.Contains(out, "a constraint the window hit") {
+		t.Errorf("the writer's log %q, want the replay's line with the erasure and not the error", out)
 	}
 }
 
