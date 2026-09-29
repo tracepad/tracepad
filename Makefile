@@ -247,9 +247,12 @@ doc-anchors: ## Check every anchor in docs/, README.md and AGENTS.md against its
 doc-anchors-self-test: ## Assert the anchor checker against its fixture
 	scripts/doc-anchors.sh --self-test
 
-sdk-notices: ## Fail if a package's copy of LICENSE or NOTICE is not the root's
-	@for copy in sdk/js/LICENSE sdk/js/NOTICE sdk/python/LICENSE sdk/python/NOTICE sdk/go/NOTICE; do \
-		cmp -s "$$(basename $$copy)" "$$copy" || { echo "sdk-notices: $$copy differs from ./$$(basename $$copy); copy it again"; exit 1; }; \
+sdk-notices: ## Fail if a package's copy of LICENSE is not the root's, or of NOTICE is not sdk/NOTICE
+	@for copy in sdk/js/LICENSE sdk/python/LICENSE; do \
+		cmp -s LICENSE "$$copy" || { echo "sdk-notices: $$copy differs from ./LICENSE; copy it again"; exit 1; }; \
+	done
+	@for copy in sdk/js/NOTICE sdk/python/NOTICE sdk/go/NOTICE; do \
+		cmp -s sdk/NOTICE "$$copy" || { echo "sdk-notices: $$copy differs from sdk/NOTICE; copy it again"; exit 1; }; \
 	done
 
 gate: ensure-hooks format-check vet test sdk-go-unit sdk-py-unit sdk-js-unit doc-anchors sdk-notices py-lint ui-check ## Full gate: what CI runs, and the git pre-push hook
