@@ -161,18 +161,18 @@ export function changed(field: DeskField, configs: ScoreConfig[]): boolean {
  * What the desk posts for one field: spec 022's own body, stamped with where
  * the verdict came from (#6). `source: "annotation"` beside spec 022's
  * `"web"` keeps the chip on the trace honest about which surface wrote it,
- * and the queue and the annotator are how "who said this" is read back.
+ * and the queue says which programme. Who said it is the score's author,
+ * which the server records (spec 048 #15): the desk names nobody.
  */
 export function deskBody(
 	field: DeskField,
 	configs: ScoreConfig[],
 	target: { trace_id?: string; observation_id?: string },
-	by: { queue: string; annotator: string }
+	queue: string
 ): ScoreInput {
 	const body = scoreBody(target, field.form, configs, field.existing, {
 		source: 'annotation',
-		queue: by.queue,
-		annotator: by.annotator
+		queue
 	});
 	// A correction carries the row's own id; a new score carries the one this
 	// field was built with, so posting it twice writes one row.

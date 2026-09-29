@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"net/http"
 	"slices"
@@ -93,11 +94,16 @@ type queueItemResponse struct {
 	Status        string `json:"status"`
 	Seq           int64  `json:"seq"`
 	AddedAt       string `json:"added_at"`
-	ClaimedBy     string `json:"claimed_by,omitempty"`
-	ClaimedUntil  string `json:"claimed_until,omitempty"`
-	CompletedBy   string `json:"completed_by,omitempty"`
-	CompletedAt   string `json:"completed_at,omitempty"`
-	SkipReason    string `json:"skip_reason,omitempty"`
+	// ClaimedBy and CompletedBy say who, readably: the name a key's
+	// reviewer sent, or an account's name rendered for this reader (spec 048
+	// #15, #5). The account fields carry the id of a signed-in reviewer.
+	ClaimedBy          string `json:"claimed_by,omitempty"`
+	ClaimedByAccount   string `json:"claimed_by_account,omitempty"`
+	ClaimedUntil       string `json:"claimed_until,omitempty"`
+	CompletedBy        string `json:"completed_by,omitempty"`
+	CompletedByAccount string `json:"completed_by_account,omitempty"`
+	CompletedAt        string `json:"completed_at,omitempty"`
+	SkipReason         string `json:"skip_reason,omitempty"`
 }
 
 type queueItemListResponse struct {
@@ -130,7 +136,7 @@ type skipRequest struct {
 
 // queueItemFilters is every filter the item listing accepts, held to
 // `openapi.json` by the interface's parity test (spec 016 #13).
-var queueItemFilters = []string{"status", "annotator"}
+var queueItemFilters = []string{"status", "annotator", "account"}
 
 // handleListQueues lists the project's queues by name, whole: a project has as
 // many review programmes as somebody named, which is the reasoning spec 003
@@ -463,7 +469,17 @@ func (s *Server) handleListQueueItems(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	filter := store.QueueItemFilter{Annotator: values.Get("annotator")}
+	filter := store.QueueItemFilter{Annotator: values.Get("annotator"), Account: values.Get("account")}
+	if filter.Account == "me" {
+		// Who "me" is needs an account: a key's reviewer is a name, and
+		// `annotator=` asks for it (spec 048 #15).
+		c := callerFrom(r.Context())
+		if !c.isSession() {
+			writeError(w, http.StatusBadRequest, `account=me needs a signed-in account; a key's reviewer is asked for by annotator=`)
+			return
+		}
+		filter.Account = c.account.ID
+	}
 	if status := values.Get("status"); status != "" {
 		// A spelling outside the vocabulary is a 400 rather than an
 		// empty listing: "nothing is done" would be a well-formed answer
@@ -509,9 +525,10 @@ func (s *Server) handleListQueueItems(w http.ResponseWriter, r *http.Request) {
 		func(item *store.AnnotationItem) string {
 			return encodeCursor(strconv.FormatInt(item.Seq, 10))
 		})
-	out := make([]queueItemResponse, 0, len(items))
-	for _, item := range items {
-		out = append(out, renderQueueItem(item))
+	out, err := s.renderQueueItems(r.Context(), callerFrom(r.Context()), items...)
+	if err != nil {
+		readFailed(w, r, "failed to read who holds the items", err)
+		return
 	}
 	answer := queueItemListResponse{Queue: name, Items: out, NextCursor: next, PrevCursor: prev}
 	if counting {
@@ -545,7 +562,12 @@ func (s *Server) handleGetQueueItem(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, fmt.Sprintf("queue %q has no item %s", name, id))
 		return
 	}
-	writeJSON(w, http.StatusOK, renderQueueItem(item))
+	out, err := s.renderQueueItems(r.Context(), callerFrom(r.Context()), item)
+	if err != nil {
+		readFailed(w, r, "failed to read who holds the item", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out[0])
 }
 
 // handleNextItem hands out the item to work on and claims it for ten minutes
@@ -561,7 +583,7 @@ func (s *Server) handleNextItem(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	annotator, err := annotatorName(values.Get("annotator"))
+	reviewer, err := reviewerOf(callerFrom(r.Context()), values.Get("annotator"))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -569,7 +591,7 @@ func (s *Server) handleNextItem(w http.ResponseWriter, r *http.Request) {
 	write := &store.QueueNext{
 		ProjectID: project.ID,
 		Queue:     name,
-		Annotator: annotator,
+		Reviewer:  reviewer,
 		Now:       time.Now().UnixNano(),
 	}
 	if !s.submit(w, r, write) {
@@ -577,7 +599,7 @@ func (s *Server) handleNextItem(w http.ResponseWriter, r *http.Request) {
 	}
 	answer := nextResponse{Pending: write.Pending}
 	if write.Item != nil {
-		rendered := renderQueueItem(write.Item)
+		rendered := s.renderWritten(r, write.Item)
 		answer.Item = &rendered
 	}
 	writeJSON(w, http.StatusOK, answer)
@@ -592,18 +614,18 @@ func (s *Server) handleCompleteItem(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	annotator, ok := s.annotatorBody(w, r)
+	reviewer, ok := s.reviewerBody(w, r)
 	if !ok {
 		return
 	}
 	write := &store.QueueItemComplete{
 		ProjectID: project.ID, Queue: name, ID: id,
-		Annotator: annotator, Now: time.Now().UnixNano(),
+		Reviewer: reviewer, Now: time.Now().UnixNano(),
 	}
 	if !s.submit(w, r, write) {
 		return
 	}
-	writeJSON(w, http.StatusOK, renderQueueItem(write.Item))
+	writeJSON(w, http.StatusOK, s.renderWritten(r, write.Item))
 }
 
 // handleSkipItem marks an item skipped with the reason (#7).
@@ -620,19 +642,19 @@ func (s *Server) handleSkipItem(w http.ResponseWriter, r *http.Request) {
 	if !s.readJSON(w, r, &request) {
 		return
 	}
-	annotator, err := annotatorName(request.Annotator)
+	reviewer, err := reviewerOf(callerFrom(r.Context()), request.Annotator)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	write := &store.QueueItemSkip{
 		ProjectID: project.ID, Queue: name, ID: id,
-		Annotator: annotator, Reason: request.Reason, Now: time.Now().UnixNano(),
+		Reviewer: reviewer, Reason: request.Reason, Now: time.Now().UnixNano(),
 	}
 	if !s.submit(w, r, write) {
 		return
 	}
-	writeJSON(w, http.StatusOK, renderQueueItem(write.Item))
+	writeJSON(w, http.StatusOK, s.renderWritten(r, write.Item))
 }
 
 // handleReopenItem returns a completed or skipped item to pending (#7), and
@@ -643,17 +665,17 @@ func (s *Server) handleReopenItem(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	annotator, ok := s.annotatorBody(w, r)
+	reviewer, ok := s.reviewerBody(w, r)
 	if !ok {
 		return
 	}
 	write := &store.QueueItemReopen{
-		ProjectID: project.ID, Queue: name, ID: id, Annotator: annotator,
+		ProjectID: project.ID, Queue: name, ID: id, Reviewer: reviewer,
 	}
 	if !s.submit(w, r, write) {
 		return
 	}
-	writeJSON(w, http.StatusOK, renderQueueItem(write.Item))
+	writeJSON(w, http.StatusOK, s.renderWritten(r, write.Item))
 }
 
 // handleDeleteItem removes one item, with none of the queue deletion's
@@ -674,27 +696,44 @@ func (s *Server) handleDeleteQueueItem(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, object{}.put("id", id))
 }
 
-// annotatorBody reads the `{annotator}` every finishing write carries (#6).
-func (s *Server) annotatorBody(w http.ResponseWriter, r *http.Request) (string, bool) {
+// reviewerBody reads the body of complete and reopen: `{annotator}` from a
+// key, `{}` from a session (#6, spec 048 #15).
+func (s *Server) reviewerBody(w http.ResponseWriter, r *http.Request) (store.Reviewer, bool) {
 	if _, err := queryParams(r); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
-		return "", false
+		return store.Reviewer{}, false
 	}
 	var request annotatorRequest
 	if !s.readJSON(w, r, &request) {
-		return "", false
+		return store.Reviewer{}, false
 	}
-	annotator, err := annotatorName(request.Annotator)
+	reviewer, err := reviewerOf(callerFrom(r.Context()), request.Annotator)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
-		return "", false
+		return store.Reviewer{}, false
 	}
-	return annotator, true
+	return reviewer, true
 }
 
-// annotatorName checks the name a client sends. The store has no users and
-// this spec does not invent them (#6): what a small team needs is a name it
-// can read "who said this" off, and a name is what this checks.
+// reviewerOf is who works an item (spec 048 #15). A signed-in reviewer is the
+// account, held by its id: a display name is neither unique nor stable, and
+// the server knows who is asking. So a session sends no `annotator`, and one
+// that does is told so rather than having its string quietly dropped. A key
+// works for a program that has a name and no account, and sends it (#6).
+func reviewerOf(c *caller, annotator string) (store.Reviewer, error) {
+	if c.isSession() {
+		if annotator != "" {
+			return store.Reviewer{}, fmt.Errorf(
+				"annotator is for a project key's reviewer; a signed-in reviewer is the account, so send none")
+		}
+		return store.Reviewer{Account: c.account.ID}, nil
+	}
+	name, err := annotatorName(annotator)
+	return store.Reviewer{Name: name}, err
+}
+
+// annotatorName checks the name a key's reviewer sends (#6): what a program
+// working a queue needs is a name a team can read "who said this" off.
 func annotatorName(value string) (string, error) {
 	if value == "" {
 		return "", fmt.Errorf("annotator is required: it is what completed_by will say")
@@ -761,6 +800,72 @@ func renderQueue(queue *store.AnnotationQueue) queueResponse {
 	}
 }
 
+// renderQueueItems renders a page of items for this reader, naming the
+// accounts that hold or finished them (spec 048 #15): the display name, else
+// the email for a reader who may see it (#5), else "a member"; "a deleted
+// account" for one that is gone. One read for the page.
+func (s *Server) renderQueueItems(ctx context.Context, c *caller, items ...*store.AnnotationItem) ([]queueItemResponse, error) {
+	var ids []string
+	for _, item := range items {
+		for _, id := range []string{item.ClaimedByAccount, item.CompletedByAccount} {
+			if id != "" && !slices.Contains(ids, id) {
+				ids = append(ids, id)
+			}
+		}
+	}
+	accounts, err := s.store.ReviewerAccounts(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]queueItemResponse, 0, len(items))
+	for _, item := range items {
+		rendered := renderQueueItem(item)
+		if item.ClaimedByAccount != "" {
+			rendered.ClaimedBy = reviewerName(accounts, item.ClaimedByAccount, c)
+		}
+		if item.CompletedByAccount != "" {
+			rendered.CompletedBy = reviewerName(accounts, item.CompletedByAccount, c)
+		}
+		out = append(out, rendered)
+	}
+	return out, nil
+}
+
+// renderWritten renders the item a committed write answers with. The write is
+// on disk, so a failure to read the names answers the item with "a member"
+// rather than a 500 over a change that happened.
+func (s *Server) renderWritten(r *http.Request, item *store.AnnotationItem) queueItemResponse {
+	out, err := s.renderQueueItems(r.Context(), callerFrom(r.Context()), item)
+	if err == nil {
+		return out[0]
+	}
+	slog.Warn("could not read who holds a queue item after writing it", "item", item.ID, "err", err)
+	rendered := renderQueueItem(item)
+	if item.ClaimedByAccount != "" {
+		rendered.ClaimedBy = anonymousMember
+	}
+	if item.CompletedByAccount != "" {
+		rendered.CompletedBy = anonymousMember
+	}
+	return rendered
+}
+
+// anonymousMember is an account whose name a reader may not see (spec 048 #5).
+const anonymousMember = "a member"
+
+func reviewerName(accounts map[string]store.ReviewerAccount, id string, c *caller) string {
+	account, ok := accounts[id]
+	switch {
+	case !ok:
+		return "a deleted account"
+	case strings.TrimSpace(account.Name) != "":
+		return account.Name
+	case seesAuthorEmail(c):
+		return account.Email
+	}
+	return anonymousMember
+}
+
 func renderQueueItem(item *store.AnnotationItem) queueItemResponse {
 	rendered := queueItemResponse{
 		ID:            item.ID,
@@ -772,6 +877,10 @@ func renderQueueItem(item *store.AnnotationItem) queueItemResponse {
 		ClaimedBy:     item.ClaimedBy,
 		CompletedBy:   item.CompletedBy,
 		SkipReason:    item.SkipReason,
+		// The ids of a signed-in reviewer; the names above are rendered
+		// for the reader by renderQueueItems.
+		ClaimedByAccount:   item.ClaimedByAccount,
+		CompletedByAccount: item.CompletedByAccount,
 	}
 	if item.ClaimedUntil != 0 {
 		rendered.ClaimedUntil = formatTime(item.ClaimedUntil)

@@ -2008,15 +2008,19 @@ export interface components {
             seq: number;
             /** Format: date-time */
             added_at: string;
-            /** @description Who `next` handed it to; absent when nothing holds it */
+            /** @description Who `next` handed it to; absent when nothing holds it. A key's reviewer by the name it sent; a signed-in one by the account's display name, else its email for an editor or an owner, else `a member`, or `a deleted account` */
             claimed_by?: string;
+            /** @description The account id of a signed-in reviewer holding it */
+            claimed_by_account?: string;
             /**
              * Format: date-time
              * @description When the claim expires and the item is claimable again
              */
             claimed_until?: string;
-            /** @description Who completed or skipped it */
+            /** @description Who completed or skipped it, named as `claimed_by` is */
             completed_by?: string;
+            /** @description The account id of a signed-in reviewer who completed or skipped it */
+            completed_by_account?: string;
             /** Format: date-time */
             completed_at?: string;
             skip_reason?: string;
@@ -5501,8 +5505,10 @@ export interface operations {
             query?: {
                 /** @description Keeps items in one state. A spelling outside the list is a 400 */
                 status?: "pending" | "completed" | "skipped";
-                /** @description Keeps the items this name has: the ones it completed or skipped, and the pending ones it is holding a claim on. `completed_by` is empty on a pending item, so matching it alone would answer "nothing open" for somebody who is working through the queue */
+                /** @description Keeps the items a key's reviewer has, by the name it sent: the ones it completed or skipped, and the pending ones it is holding a claim on. `completed_by` is empty on a pending item, so matching it alone would answer "nothing open" for somebody who is working through the queue */
                 annotator?: string;
+                /** @description The same for a signed-in reviewer, by account id, or `me` for the account asking (a key is refused: it has no account) */
+                account?: string;
                 /** @description Out of range is a 400, not a silent clamp */
                 limit?: components["parameters"]["Limit"];
                 /** @description The opaque `next_cursor` or `prev_cursor` of a previous page */
@@ -5666,9 +5672,9 @@ export interface operations {
     };
     nextQueueItem: {
         parameters: {
-            query: {
-                /** @description Who is asking. Written to `claimed_by`, and to `completed_by` when they finish */
-                annotator: string;
+            query?: {
+                /** @description Who is asking, for a project key: the name written to `claimed_by`, and to `completed_by` when they finish. Required with a key; refused from a signed-in session, whose reviewer is the account itself and is held by its id */
+                annotator?: string;
             };
             header?: never;
             path: {
@@ -5770,7 +5776,8 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    annotator: string;
+                    /** @description The reviewer's name, for a project key, where it is required; a signed-in session sends none */
+                    annotator?: string;
                 };
             };
         };
@@ -5818,7 +5825,8 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    annotator: string;
+                    /** @description The reviewer's name, for a project key, where it is required; a signed-in session sends none */
+                    annotator?: string;
                     /** @description Why it was skipped; shown on the queue page */
                     reason?: string;
                 };
@@ -5856,7 +5864,8 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    annotator: string;
+                    /** @description The reviewer's name, for a project key, where it is required; a signed-in session sends none */
+                    annotator?: string;
                 };
             };
         };

@@ -30,9 +30,10 @@ Deliverables, two PRs (the last commit of PR 2 flips the status):
   filters it, the MCP `list_scores` tool returns and filters it, the account
   deletion dry run counts it. `openapi.json`, `schema.d.ts` and the docs
   follow.
-- **PR 2 — the author on screen** (Decisions 10–11): the scores block on the
-  trace, observation and session pages names the author beside the source
-  chip. The annotation desk stops asking a signed-in person for a name.
+- **PR 2 — the author on screen** (Decisions 10–11, 14–16): the scores block
+  on the trace, observation and session pages names the author beside the
+  source chip. A signed-in reviewer's claim and completion are held by the
+  account (schema 0032), and the desk names nobody.
 
 Not here (Decision 12 and *Out of scope*): grouping quality trends by author,
 agreement between annotators, who may overwrite whose score, an audit trail of
@@ -63,6 +64,8 @@ an end user).
 | 12 | **2026-09-29** — **Quality trends do not group by author.** `scores_hourly` gains no author dimension and `group_by=author` is not offered (spec 025's out of scope stands) | A per-author series multiplies the rollup by the team's size for a question nobody has asked yet. When it is asked, the scores themselves are kept, so the dimension can be added and re-rolled like any rollup column (spec 013 #4) without losing history. |
 | 13 | **2026-09-29** — **Cost, measured.** On a copy of a demo store (1,574 scores beside 34,176 observations), every score given an author, half accounts and half keys, then vacuumed: the table grows from 270 KB to 377 KB, **68 bytes a score** on a row of about 172; `idx_scores_author` is 184 KB, **117 bytes a score**, since it carries the project, the author and the listing's whole key. About 185 bytes a score in all: a million scores cost about 185 MB more. The write reads nothing new, the caller being resolved already. A page of 50 from the listing, which gains three `LEFT JOIN`s by primary key and keeps its index (`idx_scores_timestamp`, `idx_scores_name`, `idx_scores_author` by filter), went from 85 to 155 µs at the median and from 0.58 to 0.84 ms at p99 | Scores are few next to spans, and the index is the price of paging one author's scores in the listing's order. What matters more than the bytes is that the columns can only ever be filled at write time. |
 | 14 | **2026-09-29** — **A gone author's tooltip says why.** On the scores block, the tooltip of a muted author (#10) is the standing — `removed`, `disabled`, `deleted`, `revoked` — after the email where the reader may see one. The desk's two end-to-end tests about naming the reviewer (changing the name mid-item, dismissing the name dialog) go with the dialog they tested, which a signed-in desk no longer opens (#11) | Muted alone says "something is different" and not what; the word is the reason, and it costs nothing. The dialog is still there for a desk with no account behind it, which the signed-in interface never is, so its tests would exercise a screen nobody reaches. |
+| 15 | **2026-09-29** — *Owner decision; amends #11 and spec 024 #6.* **A signed-in reviewer is held by the account.** Schema 0032 adds `claimed_by_account` and `completed_by_account` to `annotation_items`, plain account ids beside the free-text `claimed_by` and `completed_by`, one of each pair per row (`CHECK`). A session's `next`, `complete`, `skip` and `reopen` send no `annotator`: the server takes the account from the caller, and a session that sends one is refused with a `400` that says why. A key still sends `annotator`, required, and is held by that name. Reads render `claimed_by` and `completed_by` of an account for the reader, by #5's rule — the display name, else the email for an editor or an owner, else `a member`, or `a deleted account` — and carry the id as `claimed_by_account` and `completed_by_account`. A second completion's `409` names the first finisher the same way, never by email. The listing takes `account=ID\|me` beside `annotator=`; `me` needs a session. The CLI's `queues items` takes `--account` | The review of #11 found what keying a claim on a display name costs: two accounts called the same shared one claim; an account with no name signed with its email, which then sat in `claimed_by`, `completed_by` and the scores' `metadata.annotator` for every member to read, against #5; a name over 200 bytes was a `400` and a dead desk; a rename left the item held under the old name for ten minutes. All four come from the client making up the identity the server already knows. A key has no account, so its reviewer stays the name it sends. |
+| 16 | **2026-09-29** — **The desk writes no `annotator` into a score's metadata, and keeps no name of its own.** The desk's scores carry `{"source": "annotation", "queue": …}`; who wrote them is their author (#1). The browser-kept name, its dialog and the *needs a name* screen go: every page of the interface requires a session, so they were unreachable. One `accountName` helper names an account for the shell and for the author chip | The author is the answer to "who said this", recorded by the server; a second, client-written copy in the metadata was the place the email leaked. Code nobody can reach is code nobody tests, and with the claim on the account there is nothing left for it to do. |
 
 ## Schema
 
@@ -150,6 +153,14 @@ null
   an empty page, not an error; paging with the cursor; the query plan uses
   `idx_scores_author`.
 - **Account deletion dry run** (#7) counts across two projects.
+- **Queue reviewers (#15)**: two accounts with one display name take two
+  items and each gets its own back; a rename keeps the item held; an account
+  with no name completes an item, and a viewer reads `a member` — never the
+  email — in the listing, the item and the second completion's `409`, while
+  an editor reads the email; a session sending `annotator` is a `400` on
+  `next`, `skip` and `reopen`; `account=me` for a session and a `400` for a
+  key; a deleted reviewer reads `a deleted account`; a store from 0031 keeps
+  its names, and the `CHECK` refuses a name and an account on one row.
 - **E2E (PR 2)**: an editor scores a trace and sees `by NAME`; a viewer sees
   the name without the email; the desk completes an item without asking for a
   name when signed in.

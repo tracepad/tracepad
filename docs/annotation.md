@@ -166,12 +166,21 @@ holds. When nothing is claimable the answer is `{"item": null, "pending": N}`,
 and `pending` is then what other people are holding — come back, the claims
 expire.
 
-`annotator` is a name the client sends, 1–200 characters: a signature, so
-that a team can read "who said this" on the queue. The web desk sends the
-signed-in account's name and asks for nothing. A program working a queue with
-a key has a name but no account, so it stays free text. Who wrote each verdict
-is also on the score itself, as its [author](scores.md#who-wrote-a-score),
-which the server records and nobody types.
+**Who is asking** depends on the credential. A program working the queue with
+a key sends `annotator`, a name of 1–200 characters: it has a name and no
+account, and the name is what holds its claim and what `claimed_by` and
+`completed_by` say. A person signed in to the web interface sends nothing —
+the server holds their claim and their completion by their **account**, and a
+session that sends `annotator` is refused with a `400` rather than having it
+quietly dropped. So two people with the same display name are two reviewers,
+and renaming yourself mid-item keeps the item in your hands.
+
+For an account, `claimed_by_account` and `completed_by_account` carry its id,
+and `claimed_by` and `completed_by` name it for whoever reads: its display
+name, else its email for an editor or an owner, else `a member` — the rule the
+[author of a score](scores.md#who-wrote-a-score) follows — or
+`a deleted account` once it is gone. A second completion's `409` names the
+first finisher the same way, without the email.
 
 ### Posting the verdict
 
@@ -249,13 +258,16 @@ curl -H "Authorization: Bearer tp-sk-…" \
 ```
 
 Items come back oldest first, in the order they were added, which is the order
-they are worked in. `?status=` and `?annotator=` narrow it; paging is the same
-keyset both ways as every other listing ([api.md](api.md#paging)).
+they are worked in. `?status=`, `?annotator=` and `?account=` narrow it;
+paging is the same keyset both ways as every other listing
+([api.md](api.md#paging)).
 
-`annotator=` is "what has this person got": the items they completed or
-skipped, and the pending ones they are holding a claim on. So
+`annotator=` is "what has this program got", by the name it sends: the items
+it completed or skipped, and the pending ones it is holding a claim on. So
 `?status=pending&annotator=ada` is ada's desk right now, and
-`?status=completed&annotator=ada` is her work.
+`?status=completed&annotator=ada` is her work. `account=` asks the same of a
+signed-in person, by account id — `account=me` is the account asking, which a
+key does not have.
 
 The **verdicts** are read where every score is read — filtered by name, by
 target, or by time:
@@ -265,10 +277,13 @@ curl -H "Authorization: Bearer tp-sk-…" \
   "http://localhost:4318/api/v1/scores?name=accuracy&trace_id=4f8c…"
 ```
 
-A score written from a queue carries `metadata.queue` and
-`metadata.annotator`, so "everything ada decided in the weekly review" is a
-filter over the scores you already have — and the chip on the trace says
-`annotation` where a judge's says `api` and a reader's says `web`.
+A score written from the desk carries `metadata.queue`, and its
+[author](scores.md#who-wrote-a-score) is the account that wrote it, so
+"everything ada decided in the weekly review" is a filter over the scores you
+already have (`?author=`) — and the chip on the trace says `annotation` where
+a judge's says `api` and a reader's says `web`. A script can stamp its own
+`metadata.annotator`, as the example above does; the server reads nothing
+from it.
 
 ## The same loop from the command line
 

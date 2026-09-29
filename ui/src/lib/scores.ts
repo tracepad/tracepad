@@ -1,6 +1,6 @@
 import type { Score, ScoreConfig, ScoreInput } from './api/client.svelte';
 import type { DataType } from './api/score-configs';
-import { ABSENT } from './format';
+import { ABSENT, accountName } from './format';
 
 // Everything about a score that is not a DOM node (spec 022): how a value
 // reads for each of the four types, where a score says it came from, how one
@@ -85,8 +85,7 @@ export function scoreAuthor(score: Score): AuthorLabel | null {
 	if (author.kind === 'key') {
 		return { text: `key ${author.name || author.id}`, title, gone };
 	}
-	const name = author.name.trim() || author.email || 'a member';
-	return { text: `by ${name}`, title, gone };
+	return { text: `by ${accountName(author, 'a member')}`, title, gone };
 }
 
 /**
@@ -301,9 +300,9 @@ export function scoreBody(
 	/**
 	 * What to write into `metadata`, when the caller has something to say
 	 * about where the verdict came from. The annotation desk does
-	 * (spec 024 #6): a score it writes says which queue and which annotator,
-	 * on a new row and on a correction alike, because the reviewer *is* now
-	 * the author. Left out, this is spec 022's own stamp on a new score and
+	 * (spec 024 #6): a score it writes says which queue, on a new row and on
+	 * a correction alike; who wrote it is the score's author, which the server
+	 * records (spec 048 #15). Left out, this is spec 022's own stamp on a new score and
 	 * the row's own metadata on a correction.
 	 */
 	stamp?: Record<string, unknown>

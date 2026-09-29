@@ -4,7 +4,7 @@
 // the same parity test (spec 016 #13).
 
 /** Every filter the item listing accepts. */
-export const QUEUE_ITEM_FILTERS = ['status', 'annotator'] as const;
+export const QUEUE_ITEM_FILTERS = ['status', 'annotator', 'account'] as const;
 
 export type QueueItemFilterName = (typeof QUEUE_ITEM_FILTERS)[number];
 
@@ -15,7 +15,10 @@ export type ItemStatus = (typeof ITEM_STATUSES)[number];
 /** The filter state of the screen: absent means "not filtering on this". */
 export type QueueItemFilters = {
 	status?: ItemStatus;
+	/** A key's reviewer, by the name it signs with. */
 	annotator?: string;
+	/** A signed-in reviewer, by account id, or `me` (spec 048 #15). */
+	account?: string;
 };
 
 /** Reads the filters out of a URL, so every view of a queue is a link. */
@@ -27,6 +30,8 @@ export function readQueueItemFilters(params: URLSearchParams): QueueItemFilters 
 	}
 	const annotator = params.get('annotator')?.trim();
 	if (annotator) filters.annotator = annotator;
+	const account = params.get('account')?.trim();
+	if (account) filters.account = account;
 	return filters;
 }
 

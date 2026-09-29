@@ -450,12 +450,12 @@ wears, and its note says the part that matters: the scores written while
 annotating stay.
 
 **The desk** (`/queues/{name}/annotate`) is the point of the section: read,
-judge, next, with nothing to navigate. It signs verdicts with the signed-in
-account's name, or its email when it has none, and asks nobody who they are:
-the header shows the name and does not offer to change it, because reviewing
-as somebody else is signing in as them. Every score it writes has the account
-as its [author](scores.md#who-wrote-a-score) as well. Then the trace on the
-left, exactly as every other screen shows it, and on the right
+judge, next, with nothing to navigate. Who is reviewing is who is signed in:
+the server holds the claim and the completion by the account, the desk asks
+nobody for a name, and the header shows yours without offering to change it,
+because reviewing as somebody else is signing in as them. Every score it
+writes has the account as its [author](scores.md#who-wrote-a-score). Then the
+trace on the left, exactly as every other screen shows it, and on the right
 one control per score the queue asks for, built by the same rule the *Score*
 dialog uses: the config decides the field.
 

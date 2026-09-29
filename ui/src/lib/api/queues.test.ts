@@ -54,6 +54,7 @@ describe('filters in the URL', () => {
 		const filters = readQueueItemFilters(new URLSearchParams('status=skipped&annotator=ada'));
 
 		expect(filters).toEqual({ status: 'skipped', annotator: 'ada' });
+		expect(readQueueItemFilters(new URLSearchParams('account=me'))).toEqual({ account: 'me' });
 		expect(queueItemSearch(filters)).toBe('?status=skipped&annotator=ada');
 	});
 

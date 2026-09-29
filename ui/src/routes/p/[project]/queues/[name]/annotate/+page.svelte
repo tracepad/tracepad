@@ -15,12 +15,11 @@
 		type ScoreInput,
 		type Trace
 	} from '$lib/api/client.svelte';
-	import { annotator } from '$lib/annotator.svelte';
 	import Button from '$lib/components/Button.svelte';
-	import AnnotatorDialog from '$lib/components/queues/AnnotatorDialog.svelte';
 	import DeskForm from '$lib/components/queues/DeskForm.svelte';
 	import TraceDetail from '$lib/components/TraceDetail.svelte';
 	import { count } from '$lib/format';
+	import { auth } from '$lib/auth.svelte';
 	import { href } from '$lib/project.svelte';
 	import { progress } from '$lib/queues';
 	import { Scores } from '$lib/scores.svelte';
@@ -47,29 +46,14 @@
 	let busy = $state(false);
 	let failure = $state<string | null>(null);
 	let missing = $state.raw<string[]>([]);
-	let naming = $state(false);
 
-	// The name is asked for once and kept in the browser (#6). Until there is
-	// one there is nothing to claim an item as — and the dialog can be
-	// dismissed, so "nobody has said" is a state of the page and not merely a
-	// dialog that is open (found in review).
-	$effect(() => {
-		if (annotator.name === null) naming = true;
-	});
-
-	/** Whether anybody has said who they are; the desk opens once this flips. */
-	const anonymous = $derived(annotator.name === null);
-
+	// Who is reviewing is who is signed in (spec 048 #15): the server holds
+	// the claim by the account, so the desk names nobody and asks nothing. The
+	// queue's name is the one dependency; `start` runs untracked so that what
+	// it reads does not restart it.
 	$effect(() => {
 		const wanted = name;
-		if (anonymous) return;
 		const controller = new AbortController();
-		// The dependency is the *boolean*, and `start` runs untracked: changing
-		// who is reviewing from the header must not restart the desk. It did —
-		// `next` under the new name skipped the item still claimed by the old
-		// one and handed out a different trace, throwing away a filled form and
-		// leaving the abandoned item locked for ten minutes (found in review).
-		// The name is a signature, and signing differently is not a new session.
 		untrack(() => void start(wanted, controller.signal));
 		return () => controller.abort();
 	});
@@ -100,7 +84,7 @@
 	 * visible.
 	 */
 	async function take(signal?: AbortSignal) {
-		const answer = await api.nextQueueItem(name, annotator.name ?? '', signal);
+		const answer = await api.nextQueueItem(name, signal);
 		if (signal?.aborted) return;
 		item = answer.item;
 		pending = answer.pending;
@@ -184,14 +168,14 @@
 			// The scores that changed, then the completion: a queue over a
 			// target somebody has already judged completes without a write.
 			for (const body of bodies) await api.createScore(body);
-			await api.completeQueueItem(name, current.id, annotator.name ?? '');
+			await api.completeQueueItem(name, current.id);
 		});
 	}
 
 	function skip(reason: string) {
 		const current = item;
 		if (!current) return;
-		void act(() => api.skipQueueItem(name, current.id, annotator.name ?? '', reason));
+		void act(() => api.skipQueueItem(name, current.id, reason));
 	}
 
 	/** *Later*: the claim goes so nobody waits out its ten minutes (#16). */
@@ -200,7 +184,7 @@
 		if (!current) return;
 		busy = true;
 		api
-			.reopenQueueItem(name, current.id, annotator.name ?? '')
+			.reopenQueueItem(name, current.id)
 			.catch(() => {
 				// The claim expires on its own; leaving is what was asked for.
 			})
@@ -211,21 +195,6 @@
 </script>
 
 <svelte:head><title>Annotating {name} · Tracepad</title></svelte:head>
-
-<AnnotatorDialog open={naming} onclose={() => (naming = false)} />
-
-{#snippet nobody()}
-	<div class="flex flex-1 items-start justify-center overflow-auto p-8">
-		<div class="max-w-lg">
-			<h2 class="font-medium">The desk needs a name to sign with</h2>
-			<p class="text-muted mt-1">
-				Every verdict you complete is written down beside it, so the team can see who said
-				what. It stays in this browser.
-			</p>
-			<Button class="mt-3" variant="primary" onclick={() => (naming = true)}>Say who you are</Button>
-		</div>
-	</div>
-{/snippet}
 
 <header class="border-border flex h-12 shrink-0 items-center gap-3 border-b px-4">
 	<a
@@ -247,19 +216,11 @@
 		</span>
 	{/if}
 	<div class="ml-auto flex items-center gap-1.5">
-		{#if annotator.fromAccount}
-			<!-- The account's own name (spec 048 #11): who is reviewing is who
-			     is signed in, and changing it is signing in as somebody else. -->
-			<span class="text-muted max-w-48 truncate text-sm" title="Reviewing as your account">
-				{annotator.name}
-			</span>
-		{:else}
-			<!-- Changeable from the header (#12): a shared machine is where the
-			     wrong name gets written into forty verdicts. -->
-			<Button onclick={() => (naming = true)} title="Change who is reviewing">
-				{annotator.name ?? 'Who?'}
-			</Button>
-		{/if}
+		<!-- The account's own name (spec 048 #15): who is reviewing is who is
+		     signed in, and changing it is signing in as somebody else. -->
+		<span class="text-muted max-w-48 truncate text-sm" title="Reviewing as your account">
+			{auth.displayName}
+		</span>
 	</div>
 </header>
 
@@ -273,12 +234,7 @@
 	</p>
 {/if}
 
-{#if annotator.name === null}
-	<!-- Before the spinner, not after it: with nobody to claim as, `start`
-	     never runs and a page that only ever cleared `loading` inside it sat
-	     on "Taking the next item" for ever once the dialog was dismissed. -->
-	{@render nobody()}
-{:else if loading}
+{#if loading}
 	<div class="text-subtle flex flex-1 items-center justify-center gap-2">
 		<LoaderCircle class="size-4 animate-spin" />
 		Taking the next item
@@ -322,7 +278,6 @@
 						{configs}
 						names={queue.score_configs}
 						scores={onTarget}
-						annotator={annotator.name ?? ''}
 						{missing}
 						{busy}
 						onsave={complete}

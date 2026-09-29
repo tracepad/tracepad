@@ -1,5 +1,6 @@
 import { goto } from '$app/navigation';
 import type { Account, Me, Membership } from '$lib/api/client.svelte';
+import { accountName } from '$lib/format';
 
 // Who is signed in (spec 028 #13). There is no credential in this file any
 // more: the session is an `HttpOnly` cookie the browser holds and no script can
@@ -50,8 +51,7 @@ class Auth {
 	/** What to call somebody: the name they chose, else the name they sign in with. */
 	get displayName() {
 		const account = this.#me?.account;
-		if (!account) return '';
-		return account.name.trim() || account.email;
+		return account ? accountName(account) : '';
 	}
 
 	adopt(me: Me) {

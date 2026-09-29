@@ -151,7 +151,7 @@ func TestNextTakesAClaimThatRanOut(t *testing.T) {
 	f.enqueue(t, "review", hexTrace(1))
 
 	at := sweepNow.UnixNano()
-	taken := &QueueNext{ProjectID: f.project.ID, Queue: "review", Annotator: "ada", Now: at}
+	taken := &QueueNext{ProjectID: f.project.ID, Queue: "review", Reviewer: Reviewer{Name: "ada"}, Now: at}
 	if err := f.writer.Submit(t.Context(), taken); err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +161,7 @@ func TestNextTakesAClaimThatRanOut(t *testing.T) {
 
 	// A second annotator, one second before the claim runs out: nothing to
 	// take, and `pending` says the queue is not empty, somebody is on it.
-	early := &QueueNext{ProjectID: f.project.ID, Queue: "review", Annotator: "bob",
+	early := &QueueNext{ProjectID: f.project.ID, Queue: "review", Reviewer: Reviewer{Name: "bob"},
 		Now: at + int64(ClaimTTL) - int64(1e9)}
 	if err := f.writer.Submit(t.Context(), early); err != nil {
 		t.Fatal(err)
@@ -173,7 +173,7 @@ func TestNextTakesAClaimThatRanOut(t *testing.T) {
 
 	// One second after: the item is claimable, and claiming it moves the
 	// deadline to the new holder's.
-	late := &QueueNext{ProjectID: f.project.ID, Queue: "review", Annotator: "bob",
+	late := &QueueNext{ProjectID: f.project.ID, Queue: "review", Reviewer: Reviewer{Name: "bob"},
 		Now: at + int64(ClaimTTL) + int64(1e9)}
 	if err := f.writer.Submit(t.Context(), late); err != nil {
 		t.Fatal(err)

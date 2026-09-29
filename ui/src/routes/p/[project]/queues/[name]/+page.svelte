@@ -14,7 +14,6 @@
 		type Trace
 	} from '$lib/api/client.svelte';
 	import { ITEM_STATUSES, readQueueItemFilters, queueItemSearch } from '$lib/api/queues';
-	import { annotator } from '$lib/annotator.svelte';
 	import Button from '$lib/components/Button.svelte';
 	import CopyButton from '$lib/components/CopyButton.svelte';
 	import ListingShell from '$lib/components/ListingShell.svelte';
@@ -132,10 +131,8 @@
 		busyID = item.id;
 		try {
 			if (what === 'reopen') {
-				// The annotator is the signature on the act, and the desk has
-				// already asked for one; a manager who has not annotated yet
-				// signs as the interface.
-				await api.reopenQueueItem(name, item.id, annotator.name ?? 'web');
+				// Signed as the account, by the server (spec 048 #15).
+				await api.reopenQueueItem(name, item.id);
 			} else {
 				await api.deleteQueueItem(name, item.id);
 				if (peekID === item.id) peek(null);
@@ -233,6 +230,11 @@
 		</label>
 		{#if filters.annotator}
 			<span class="text-subtle text-xs">by {filters.annotator}</span>
+		{/if}
+		{#if filters.account}
+			<span class="text-subtle text-xs">
+				{filters.account === 'me' ? 'yours' : 'by one account'}
+			</span>
 		{/if}
 	</div>
 

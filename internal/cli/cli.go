@@ -269,8 +269,8 @@ the queue, fill it, take the next item, post the scores, complete:
                                    [--min-cost C] [--release R] [--version V]
                                    [--type T] [--prompt N[@V]] [--limit N])
   tracepad queues items    <name> [--status pending|completed|skipped]
-                                  [--annotator A] [--limit N] [--cursor C]
-                                  [--newer] [--total]
+                                  [--annotator A] [--account ID]
+                                  [--limit N] [--cursor C] [--newer] [--total]
   tracepad queues next     <name> --annotator A
   tracepad queues complete <name> <item-id> --annotator A
   tracepad queues skip     <name> <item-id> --annotator A [--reason R]
