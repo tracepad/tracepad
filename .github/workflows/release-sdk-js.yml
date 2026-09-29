@@ -77,4 +77,21 @@ jobs:
       # Trusted publishing needs npm 11.5 or newer, which the runner's Node
       # may or may not bundle; one exact version rather than `latest`.
       - run: npm install -g npm@11.20.0 # zizmor: ignore[adhoc-packages] -- npm itself, one exact version
-      - run: npm publish package/*.tgz --provenance --access public --ignore-scripts
+      # A version with a hyphen is a pre-release (`0.1.0-rc.1`), and npm 11
+      # refuses to publish one without a tag: "You must specify a tag using
+      # --tag when publishing a prerelease version". `next` keeps it off
+      # `latest`, which `npm install tracepad` follows; a release goes to
+      # `latest` as before. Read from the tarball being published, the same
+      # one `build` made from the version the tag was checked against.
+      - name: The dist-tag this version goes under
+        id: tag
+        run: |
+          version="$(tar -xzOf package/*.tgz package/package.json | jq -r .version)"
+          case "$version" in
+            *-*) echo "tag=next" >> "$GITHUB_OUTPUT" ;;
+            *) echo "tag=latest" >> "$GITHUB_OUTPUT" ;;
+          esac
+          echo "publishing $version"
+      - run: npm publish package/*.tgz --provenance --access public --ignore-scripts --tag "$DIST_TAG"
+        env:
+          DIST_TAG: ${{ steps.tag.outputs.tag }}
