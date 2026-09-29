@@ -216,8 +216,9 @@ func (s *Server) handlePatchAccount(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleDeleteAccount removes a person who is gone. It takes their
-// memberships, sessions and invitations and nothing else: a score does not
-// name its author, and nothing else in the database references an account.
+// memberships, sessions and invitations and nothing else: the scores they
+// wrote keep the name and email copied onto them (spec 048 #7), and the keys
+// they minted keep working (spec 045 #10).
 //
 // Disabling is the reversible way to take access away today; this is the other
 // one, so it wears the echo (spec 005 #8) and the echo is the email.
@@ -266,6 +267,13 @@ func (s *Server) handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
 				put("scopes", one.Key.Scopes).
 				put("last_used_at", lastUsed(one.Key, unwritten)))
 		}
+		// Counted for the same reason (spec 048 #7): the scores stay, with
+		// the account's name and email on them.
+		authored, err := s.store.ScoresAuthoredBy(r.Context(), account.ID)
+		if err != nil {
+			readFailed(w, r, "failed to count the scores", err)
+			return
+		}
 		body, ok := s.fullAccount(w, r, account, false)
 		if !ok {
 			return
@@ -274,6 +282,9 @@ func (s *Server) handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
 		if len(keys) > 0 {
 			note += "; the keys it minted keep working until they are revoked"
 		}
+		if authored > 0 {
+			note += "; the scores it wrote keep its name and email"
+		}
 		writeJSON(w, http.StatusOK, object{}.
 			put("dry_run", true).
 			put("account", body).
@@ -281,6 +292,7 @@ func (s *Server) handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
 				put("memberships", len(memberships)).
 				put("sessions", len(sessions))).
 			put("keys", keys).
+			put("scores_authored", authored).
 			put("confirm", account.Email).
 			put("note", note))
 		return

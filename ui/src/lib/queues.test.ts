@@ -26,6 +26,7 @@ const configs = [
 
 const score = (extra: Partial<Score>): Score => ({
 	id: 'a'.repeat(32),
+	author: null,
 	trace_id: 'b'.repeat(32),
 	name: 'accuracy',
 	data_type: 'numeric',

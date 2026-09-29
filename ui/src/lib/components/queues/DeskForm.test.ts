@@ -84,6 +84,7 @@ describe('the completeness rule, client-side', () => {
 			{
 				id: 'a'.repeat(32),
 				trace_id: item.trace_id,
+				author: null,
 				name: 'accuracy',
 				data_type: 'numeric',
 				value: 0.5,
@@ -93,6 +94,7 @@ describe('the completeness rule, client-side', () => {
 			{
 				id: 'b'.repeat(32),
 				trace_id: item.trace_id,
+				author: null,
 				name: 'tone',
 				data_type: 'categorical',
 				string_value: 'warm',
@@ -113,6 +115,7 @@ describe('the completeness rule, client-side', () => {
 			{
 				id: 'a'.repeat(32),
 				trace_id: item.trace_id,
+				author: null,
 				name: 'accuracy',
 				data_type: 'numeric',
 				value: 0.5,

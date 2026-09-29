@@ -22,6 +22,7 @@ vi.mock('$lib/api/client.svelte', () => ({
 
 const score = (id: string, trace: string): Score => ({
 	id,
+	author: null,
 	trace_id: trace,
 	name: 'accuracy',
 	data_type: 'numeric',

@@ -438,6 +438,7 @@ func register(server *mcp.Server, api API) {
 			"session_id":     text("Only scores about this session."),
 			"name":           text("Only scores filed under this name, e.g. \"helpfulness\"."),
 			"data_type":      oneOf("Only scores of this type.", "numeric", "boolean", "categorical", "text"),
+			"author":         text("Only scores this author wrote: an account id or a public key from a score's `author.id`, or \"me\" for the key this server runs with."),
 			"from":           timestamp("Only scores at or after this RFC 3339 instant."),
 			"to":             timestamp("Only scores strictly before this RFC 3339 instant."),
 		})),
@@ -454,7 +455,13 @@ func register(server *mcp.Server, api API) {
 				"comment":        text("Free text: a judge's rationale, a reviewer's note."),
 				"timestamp":      timestamp("When the graded interaction happened."),
 				"created_at":     timestamp("When the score was written."),
-			}, "id", "name", "data_type", "timestamp", "created_at"), "The page, newest first."),
+				"author": orNull(object(map[string]*jsonschema.Schema{
+					"kind":     oneOf("An account (a person, in the web interface) or a project key (a program).", "account", "key"),
+					"id":       text("The account's id, or the key's public key."),
+					"name":     text("The account's display name, or the key's name. May be empty."),
+					"standing": text("The account's role in the project, or removed, disabled, deleted; a key's active or revoked."),
+				}, "kind", "id", "name", "standing"), "Who wrote the score, and so who stands behind its value; null on a score written before the server recorded authors."),
+			}, "id", "name", "data_type", "timestamp", "created_at", "author"), "The page, newest first."),
 			"next_cursor": text("Pass back as `cursor` for the next page."),
 		}, "scores"),
 	}, t.listScores)
@@ -895,6 +902,7 @@ type listScoresInput struct {
 	SessionID     string `json:"session_id"`
 	Name          string `json:"name"`
 	DataType      string `json:"data_type"`
+	Author        string `json:"author"`
 	From          string `json:"from"`
 	To            string `json:"to"`
 }
@@ -906,6 +914,7 @@ func (t *toolset) listScores(ctx context.Context, req *mcp.CallToolRequest, in l
 	set(query, "session_id", in.SessionID)
 	set(query, "name", in.Name)
 	set(query, "data_type", in.DataType)
+	set(query, "author", in.Author)
 	set(query, "from", in.From)
 	set(query, "to", in.To)
 	return t.call(ctx, req, "/api/v1/scores", in.pagingInput.apply(query), summarizeScores)

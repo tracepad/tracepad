@@ -439,6 +439,9 @@ func TestEveryToolMatchesItsEndpoint(t *testing.T) {
 			"/api/v1/prompts/support?label=production"},
 		{"list_scores", map[string]any{"trace_id": traceHex(1)},
 			"/api/v1/scores?trace_id=" + traceHex(1)},
+		// `me` is the key the stream was opened with, for the tool as for
+		// the endpoint (spec 048 #9).
+		{"list_scores", map[string]any{"author": "me"}, "/api/v1/scores?author=me"},
 		{"get_stats", map[string]any{"group_by": "model"}, "/api/v1/stats?group_by=model"},
 		{"get_stats", map[string]any{"group_by": "total"}, "/api/v1/stats?group_by=total"},
 		{"list_datasets", map[string]any{}, "/api/v1/datasets"},
@@ -846,5 +849,16 @@ func TestMCPCannotWriteAnything(t *testing.T) {
 		}
 		t.Fatalf("the MCP API seam offers %v; it must offer Get and nothing else, "+
 			"or the read-only guarantee stops being structural", methods)
+	}
+}
+
+// TestListScoresNamesTheAuthor: the scores the harness wrote with its key come
+// back as that key's, and `me` finds them (spec 048 #9).
+func TestListScoresNamesTheAuthor(t *testing.T) {
+	h := newHarness(t)
+	h.connect(t)
+	structured := h.callRaw(t, "list_scores", map[string]any{"author": "me"})
+	if !bytes.Contains(structured, []byte(`"author":{"kind":"key"`)) {
+		t.Errorf("the key's own scores do not name it: %s", structured)
 	}
 }

@@ -1210,6 +1210,7 @@
           {"name": "session_id", "in": "query", "schema": {"type": "string"}},
           {"name": "name", "in": "query", "schema": {"type": "string"}},
           {"name": "data_type", "in": "query", "schema": {"type": "string", "enum": ["numeric", "boolean", "categorical", "text"]}},
+          {"name": "author", "in": "query", "description": "The scores one author wrote: an account id, a public key, or `me` for the caller itself", "schema": {"type": "string"}},
           {"$ref": "#/components/parameters/From"},
           {"$ref": "#/components/parameters/To"},
           {"$ref": "#/components/parameters/Limit"},
@@ -2422,7 +2423,7 @@
       "delete": {
         "tags": ["accounts"],
         "summary": "Delete an account; a dry run until `?confirm=` echoes its email",
-        "description": "For people who are gone. It takes their memberships, sessions and invitations and nothing else: a score does not name its author, and the keys it minted keep working, listed in the dry run. Disabling is the reversible way to take access away today.",
+        "description": "For people who are gone. It takes their memberships, sessions and invitations and nothing else: the scores it wrote keep its name and email, counted in the dry run as `scores_authored`, and the keys it minted keep working, listed in the dry run. Disabling is the reversible way to take access away today.",
         "operationId": "deleteAccount",
         "x-tracepad-scope": "none",
         "security": [{"sessionCookie": []}, {"adminToken": []}],
@@ -3081,10 +3082,11 @@
               "required": ["project_id", "project_name", "public_key", "name", "scopes", "last_used_at"]
             }
           },
+          "scores_authored": {"type": "integer", "description": "The scores the account wrote, in every project. Not in `would_delete`: they stay, with its name and email on them"},
           "confirm": {"type": "string", "description": "The exact string `?confirm=` must carry: the account's email"},
           "note": {"type": "string"}
         },
-        "required": ["dry_run", "account", "would_delete", "keys", "confirm"]
+        "required": ["dry_run", "account", "would_delete", "keys", "scores_authored", "confirm"]
       },
       "TraceRow": {
         "type": "object",
@@ -3322,9 +3324,25 @@
           "comment": {"type": "string"},
           "metadata": {},
           "timestamp": {"type": "string", "format": "date-time"},
-          "created_at": {"type": "string", "format": "date-time"}
+          "created_at": {"type": "string", "format": "date-time"},
+          "author": {
+            "description": "Who wrote the score: the credential the write came with, stamped by the server. The last writer is the author. null on a score written before the server recorded authors",
+            "oneOf": [{"$ref": "#/components/schemas/ScoreAuthor"}, {"type": "null"}]
+          }
         },
-        "required": ["id", "name", "data_type", "timestamp", "created_at"]
+        "required": ["id", "name", "data_type", "timestamp", "created_at", "author"]
+      },
+      "ScoreAuthor": {
+        "type": "object",
+        "description": "An account or a project key, as it was named when it wrote, with its standing in the score's project now",
+        "properties": {
+          "kind": {"type": "string", "enum": ["account", "key"]},
+          "id": {"type": "string", "description": "The account's id, or the key's public key"},
+          "name": {"type": "string", "description": "The account's display name now, or the one it had when it wrote once it is gone or has none; the key's name when it wrote. May be empty"},
+          "email": {"type": "string", "description": "The account's email when it wrote. Present only for a signed-in editor or owner, and never for a key"},
+          "standing": {"type": "string", "enum": ["owner", "editor", "viewer", "removed", "disabled", "deleted", "active", "revoked"], "description": "An account: its role in the project, or removed, disabled, deleted. A key: active or revoked"}
+        },
+        "required": ["kind", "id", "name", "standing"]
       },
       "Prompt": {
         "type": "object",

@@ -58,6 +58,14 @@ func boolean(description string) *jsonschema.Schema {
 	return &jsonschema.Schema{Type: "boolean", Description: description}
 }
 
+// orNull is a schema that also admits null: a field the API always sends,
+// null when there is nothing to say.
+func orNull(schema *jsonschema.Schema, description string) *jsonschema.Schema {
+	schema.Types, schema.Type = []string{schema.Type, "null"}, ""
+	schema.Description = description
+	return schema
+}
+
 // anything is a value the API returns verbatim — whatever the client logged.
 func anything(description string) *jsonschema.Schema {
 	return &jsonschema.Schema{Description: description}

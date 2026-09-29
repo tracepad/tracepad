@@ -386,6 +386,11 @@ own message — which names the offending item — and dropped: a scoring failur
 must not fail the request that produced the trace. Pass `id` for the
 [idempotency](scores.md#idempotency-and-corrections) the API offers.
 
+The server records the key the package sends with as the score's
+[author](scores.md#who-wrote-a-score): give the key a name that says which
+program it is, and put anything finer — the judge's model, the run — in the
+score's `metadata`.
+
 `await tracepad.flush({ timeout: 10_000 })` drains the queue and then the span
 processors, within the one budget: it resolves when the budget runs out, with
 a warning, and the export finishes in the background. `init` registers a `beforeExit` listener that calls it, so a
