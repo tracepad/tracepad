@@ -833,7 +833,7 @@ func (r *run) renderPreview(dry preview, what string) {
 		fmt.Fprintf(out, "  %-14s %d\n", termsafe.String(kind), dry.WouldDelete[kind])
 	}
 	if dry.OldestIngested != "" {
-		fmt.Fprintf(out, "  %-14s %s\n", "oldest ingested", shortTime(dry.OldestIngested))
+		fmt.Fprintf(out, "  %-14s %s\n", "oldest arrival", shortTime(dry.OldestIngested))
 	}
 	// A dataset deletion counts its own three things rather than a table of
 	// stores, and the third is the one that matters: the traces its runs

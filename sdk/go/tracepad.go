@@ -148,7 +148,11 @@ func Init(ctx context.Context, opts ...Option) (shutdown func(context.Context) e
 		d.log().Warn("tracepad.Init has already run; this call is a no-op")
 		return d.shutdown, nil
 	}
-	c, err := resolve(o.host, o.key, o.environment, o.release)
+	log := d.log()
+	if o.logger != nil {
+		log = o.logger
+	}
+	c, err := resolveWith(log, o.host, o.key, o.environment, o.release)
 	if err != nil {
 		return nil, err
 	}
@@ -472,5 +476,5 @@ func reset() {
 	warnedKinds.Lock()
 	clear(warnedKinds.seen)
 	warnedKinds.Unlock()
-	hostWarned = sync.Once{}
+	hostWarned.Store(false)
 }

@@ -82,7 +82,7 @@ def test_the_environment_supplies_host_and_key(monkeypatch: pytest.MonkeyPatch) 
 def test_tracepad_host_is_a_deprecated_synonym_for_tracepad_url(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    # Spec 017 #23: the CLI and the server say TRACEPAD_URL; the old name still
+    # Spec 017 #21: the CLI and the server say TRACEPAD_URL; the old name still
     # works, says so once, and loses to the new one.
     monkeypatch.setenv("TRACEPAD_URL", "http://from-url:4318/")
     monkeypatch.setenv("TRACEPAD_HOST", "http://from-host:4318")

@@ -10,6 +10,7 @@ implementation would be a second set of answers.
 from __future__ import annotations
 
 import os
+import threading
 from dataclasses import dataclass, field
 
 from ._errors import TracepadConfigError
@@ -84,6 +85,7 @@ def resolve_timeout(argument: float | None) -> float | None:
 
 
 _host_warned = False
+_host_warned_lock = threading.Lock()
 
 
 def _pick_host(argument: str | None) -> str:
@@ -97,13 +99,20 @@ def _pick_host(argument: str | None) -> str:
     if url:
         return url
     legacy = os.environ.get("TRACEPAD_HOST", "").strip()
-    if legacy and not _host_warned:
-        _host_warned = True
+    if legacy and _first_host_warning():
         logger.warning(
             "tracepad: TRACEPAD_HOST is deprecated; "
             "set TRACEPAD_URL, which the CLI and the server read too"
         )
     return legacy
+
+
+def _first_host_warning() -> bool:
+    """True for the one caller that gets to warn, however many resolve at once."""
+    global _host_warned
+    with _host_warned_lock:
+        first, _host_warned = not _host_warned, True
+    return first
 
 
 def _pick(argument: str | None, variable: str) -> str:

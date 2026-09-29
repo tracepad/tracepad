@@ -7,13 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -71,8 +72,14 @@ const redacted = "[redacted]"
 // resolve builds a config, failing with ErrConfig when the two required
 // values are nowhere.
 func resolve(host, key, environment, release string) (config, error) {
+	return resolveWith(def.log(), host, key, environment, release)
+}
+
+// resolveWith is resolve with the logger the deprecation warning goes to: the
+// one Init was handed, which is not stored until the configuration is known.
+func resolveWith(log *slog.Logger, host, key, environment, release string) (config, error) {
 	c := config{
-		host:        strings.TrimRight(pickHost(host), "/"),
+		host:        strings.TrimRight(pickHost(log, host), "/"),
 		key:         pick(key, "TRACEPAD_API_KEY"),
 		environment: pick(environment, "TRACEPAD_ENVIRONMENT"),
 		release:     pick(release, "TRACEPAD_RELEASE"),
@@ -94,7 +101,7 @@ func resolve(host, key, environment, release string) (config, error) {
 // pickHost is the option, then TRACEPAD_URL — the name the CLI and the server
 // read too (spec 033 #20) — then TRACEPAD_HOST, this package's first name for
 // it, which still works and says once that it is going away.
-func pickHost(given string) string {
+func pickHost(log *slog.Logger, given string) string {
 	if given != "" {
 		return strings.TrimSpace(given)
 	}
@@ -103,15 +110,15 @@ func pickHost(given string) string {
 	}
 	legacy := strings.TrimSpace(os.Getenv("TRACEPAD_HOST"))
 	if legacy != "" {
-		hostWarned.Do(func() {
-			def.log().Warn("TRACEPAD_HOST is deprecated; set TRACEPAD_URL, which the CLI and the server read too")
-		})
+		if hostWarned.CompareAndSwap(false, true) {
+			log.Warn("TRACEPAD_HOST is deprecated; set TRACEPAD_URL, which the CLI and the server read too")
+		}
 	}
 	return legacy
 }
 
 // hostWarned makes the TRACEPAD_HOST warning once a process; reset re-arms it.
-var hostWarned sync.Once
+var hostWarned atomic.Bool
 
 func pick(given, variable string) string {
 	if given != "" {

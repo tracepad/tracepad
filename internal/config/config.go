@@ -245,6 +245,14 @@ var knownEnv = map[string]bool{
 	"TRACEPAD_API_KEY": true,
 }
 
+// deprecatedEnv names the variables that were read once, are not any more, and
+// still turn up in a shared .env: the server says what replaced them at Info,
+// not as the typo warning an unknown name gets.
+var deprecatedEnv = map[string]string{
+	// The packages' first name for the store's address (spec 017 #21).
+	"TRACEPAD_HOST": "TRACEPAD_URL",
+}
+
 // Load resolves configuration from env and the given flag arguments.
 func Load(args []string) (*Config, error) {
 	storeRaw, err := parseOnOff("TRACEPAD_STORE_RAW", true)
@@ -690,11 +698,8 @@ func defaultDataDir() string {
 func warnUnknownEnv() {
 	for _, kv := range os.Environ() {
 		name, _, _ := strings.Cut(kv, "=")
-		if name == "TRACEPAD_HOST" {
-			// The packages' first name for the store's address (spec 017 #21),
-			// still read by them: a shared .env carries it to the server too.
-			slog.Warn("TRACEPAD_HOST is the packages' deprecated name for TRACEPAD_URL; the server does not read it",
-				"name", name)
+		if now, ok := deprecatedEnv[name]; ok {
+			slog.Info("deprecated environment variable, not read by the server", "name", name, "use", now)
 		} else if strings.HasPrefix(name, "TRACEPAD_") && !knownEnv[name] {
 			slog.Warn("unknown TRACEPAD_* environment variable", "name", name)
 		}

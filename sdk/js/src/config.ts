@@ -79,7 +79,8 @@ export function exportTimeout(millis: number | undefined): number | undefined {
 
 let hostWarned = false;
 
-/** Forget that the deprecated-host warning was given — for the tests. */
+/** Forget that the deprecated-host warning was given; `tracepad/testing`'s
+ * `reset` calls it, and the package's index does not export it. */
 export function rearmHostWarning(): void {
   hostWarned = false;
 }
@@ -88,7 +89,7 @@ export function rearmHostWarning(): void {
  * (spec 032 #23) — then TRACEPAD_HOST, this package's first name for it: it
  * still works, and says once that it is going away. */
 function pickHost(argument: string | undefined): string {
-  if (argument !== undefined) return argument.trim();
+  if (argument != null) return argument.trim();
   const url = (process.env.TRACEPAD_URL ?? '').trim();
   if (url) return url;
   const legacy = (process.env.TRACEPAD_HOST ?? '').trim();

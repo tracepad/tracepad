@@ -213,6 +213,8 @@ describe('configuration', () => {
       'tracepad: TRACEPAD_HOST is deprecated; set TRACEPAD_URL, which the CLI and the server read too',
     ]);
     expect(resolve({ host: 'http://argument:4318' }).host).toBe('http://argument:4318');
+    // An untyped caller's null falls back to the environment, as `??` had it.
+    expect(resolve({ host: null as unknown as string }).host).toBe('http://from-host:4318');
   });
 
   test('the logger override takes the warnings', () => {

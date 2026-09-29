@@ -481,8 +481,8 @@ func TestInContainer(t *testing.T) {
 }
 
 // TRACEPAD_HOST is the packages' deprecated name for TRACEPAD_URL (spec 017
-// #21): a shared .env carries it to the server, which says what it is
-// instead of calling it a typo, and still calls a real typo one.
+// #21): a shared .env carries it to the server, which says what replaced it
+// at Info instead of calling it a typo, and still calls a real typo one.
 func TestWarnUnknownEnvNamesTheDeprecatedHost(t *testing.T) {
 	var logs bytes.Buffer
 	previous := slog.Default()
@@ -494,7 +494,7 @@ func TestWarnUnknownEnvNamesTheDeprecatedHost(t *testing.T) {
 	warnUnknownEnv()
 
 	out := logs.String()
-	if !strings.Contains(out, "deprecated name for TRACEPAD_URL") || strings.Contains(out, "unknown TRACEPAD_* environment variable\" name=TRACEPAD_HOST") {
+	if !strings.Contains(out, "deprecated environment variable") || strings.Contains(out, "unknown TRACEPAD_* environment variable\" name=TRACEPAD_HOST") {
 		t.Errorf("TRACEPAD_HOST: %s", out)
 	}
 	if !strings.Contains(out, "unknown TRACEPAD_* environment variable\" name=TRACEPAD_LISTNE") {

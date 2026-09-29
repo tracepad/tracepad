@@ -360,3 +360,25 @@ func TestURLIsTheHostVariableAndHostIsTheDeprecatedSynonym(t *testing.T) {
 		t.Errorf("an argument beats both: host = %q", c.host)
 	}
 }
+
+// The warning goes to the logger Init was handed, not to the default one it
+// falls back to before the options are applied.
+func TestDeprecatedHostWarningUsesTheInitLogger(t *testing.T) {
+	fresh(t)
+	defaults := &bytes.Buffer{}
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(defaults, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	t.Setenv("TRACEPAD_HOST", "http://from-host:4318")
+	t.Setenv("TRACEPAD_API_KEY", testKey)
+	logs := &bytes.Buffer{}
+
+	_, err := Init(context.Background(), WithExport(false), WithTracerProvider(sdktrace.NewTracerProvider()),
+		WithLogger(slog.New(slog.NewTextHandler(logs, nil))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(logs.String(), "TRACEPAD_HOST is deprecated") || defaults.Len() != 0 {
+		t.Errorf("configured logger = %q, default logger = %q", logs, defaults)
+	}
+}

@@ -12,7 +12,7 @@
 import { type ProxyTracerProvider, type TracerProvider, trace } from '@opentelemetry/api';
 import { afterEach, beforeEach, vi } from 'vitest';
 
-import { adopt, rearmHostWarning } from '../src/config.js';
+import { adopt } from '../src/config.js';
 import { setLogger } from '../src/log.js';
 import { type Capture, capture, reset } from '../src/testing.js';
 import { FOLLOWER } from '../src/tracing.js';
@@ -39,7 +39,6 @@ export function fresh(): void {
       delete process.env[variable];
     }
     warnings.length = 0;
-    rearmHostWarning();
     reset();
     setLogger(intoWarnings);
   });
