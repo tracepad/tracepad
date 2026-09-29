@@ -538,7 +538,7 @@ func (s *Store) scrubBatches(ctx context.Context, writer jobSubmitter, e *Erasur
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				errs[i] = submitErasureJob(ctx, writer, planned.job)
+				errs[i] = guard("erasure scrub", func() error { return submitErasureJob(ctx, writer, planned.job) })
 			}()
 		}
 		wg.Wait()
@@ -665,6 +665,15 @@ func (s *Store) runErasure(ctx context.Context, writer jobSubmitter, id string, 
 			if perr := writer.Submit(pause, &erasurePause{ID: id, Run: token}); perr != nil {
 				logFacts(slog.LevelWarn, "a stopped erasure's start stays counted", perr, "erasure", id)
 			}
+		}
+	}()
+	// Registered last, so that it runs first: a panic becomes the run's error
+	// before the two above look at err, and the line that reports the run
+	// still names its phase and gives a stopped run's start back (spec 043
+	// #42). The erasure's id is in the label; it is a random token, not a user.
+	defer func() {
+		if value := recover(); value != nil {
+			err = recovered("erasure "+id, value)
 		}
 	}()
 	begin := &erasureBegin{ID: id, Run: token}

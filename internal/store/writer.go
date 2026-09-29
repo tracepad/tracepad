@@ -202,6 +202,12 @@ type WriterOptions struct {
 type submission struct {
 	job  WriteJob
 	done chan error
+	// weight and lone are the job's, asked of it by the caller in Submit —
+	// on the caller's goroutine, where a fault in the job's own accessor is the
+	// caller's, and not on the writer's, where it would end the process
+	// (spec 043 #42).
+	weight int
+	lone   bool
 }
 
 // Writer is the single writer goroutine.
@@ -282,6 +288,7 @@ func (w *Writer) QueueDepth() (waiting, capacity int) {
 // *Rejection; the handler renders it rather than retrying it.
 func (w *Writer) Submit(ctx context.Context, job WriteJob) error {
 	sub := &submission{job: job, done: make(chan error, 1)}
+	sub.weight, sub.lone = classify(job)
 
 	w.mu.RLock()
 	if w.closed {
@@ -316,6 +323,7 @@ func (w *Writer) Submit(ctx context.Context, job WriteJob) error {
 // commit, as it does Submit's.
 func (w *Writer) SubmitWaiting(ctx context.Context, job WriteJob) error {
 	sub := &submission{job: job, done: make(chan error, 1)}
+	sub.weight, sub.lone = classify(job)
 
 	w.mu.RLock()
 	if w.closed {
@@ -381,7 +389,7 @@ func (w *Writer) run() {
 			continue
 		}
 		pending = append(pending[:0], first)
-		rows, lone := classify(first.job)
+		rows, lone := first.weight, first.lone
 
 		// A solo step ends the window: what came before it commits first,
 		// then it runs alone, in submission order. So does a window whose
@@ -408,7 +416,7 @@ func (w *Writer) run() {
 					solo = sub
 					break collect
 				}
-				weight, subLone := classify(sub.job)
+				weight, subLone := sub.weight, sub.lone
 				if subLone {
 					next = sub
 					break collect
@@ -441,12 +449,33 @@ func (w *Writer) runSolo(sub *submission) bool {
 	}
 	// A step runs outside any window, so pass does not see it: a step of a
 	// job that redacts its failure is wrapped here (spec 047 #36).
-	err := failedAt(sub.job, job.runAlone(context.Background(), w.conn))
-	if err != nil {
+	err := guardJob("write step", sub.job, func() error {
+		return job.runAlone(context.Background(), w.conn)
+	})
+	if isPanic(err) {
+		w.resetConn()
+	}
+	err = failedAt(sub.job, err)
+	if err != nil && !isPanic(err) {
 		logFailure(err, slog.LevelError, "writer step failed")
 	}
 	sub.done <- err
 	return true
+}
+
+// resetConn returns the writer's connection to a state a window can begin in
+// after a step that panicked on it: a transaction the step left open is rolled
+// back, and a fresh one must begin. A connection that cannot is one every
+// later write would fail on while the process looked well, so the writer ends
+// the process instead, with why (spec 043 #42). A PRAGMA a step changed is not
+// looked for: the only step, the checkpoint, changes none.
+func (w *Writer) resetConn() {
+	ctx := context.Background()
+	_, _ = w.conn.ExecContext(ctx, `ROLLBACK`) // refused when nothing is open, which is the answer wanted
+	if _, err := w.conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
+		panic(fmt.Sprintf("the writer's connection cannot begin a transaction after a step panicked on it: %v", err))
+	}
+	_, _ = w.conn.ExecContext(ctx, `ROLLBACK`)
 }
 
 // flush commits one window. A job that fails inside it — a constraint it
@@ -617,6 +646,9 @@ func failedByWindow(pending []*submission, err error) error {
 // log has; a database condition it met counts in the paced line, which gives
 // the condition and not the job, since a full disk is news whoever met it.
 func lost(sub *submission, err error, message string) {
+	if isPanic(err) {
+		return // logged where it was recovered, with its stack
+	}
 	if _, redacted := asJobFailure(err); redacted {
 		if _, condition := Condition(err); !condition {
 			message = "a write of an erasure did not commit"
@@ -703,13 +735,16 @@ func (w *Writer) commit(pending []*submission) (refused []error, err error) {
 		w.beforeCommit()
 	}
 	if len(pending) == 1 {
-		return w.pass(pending, false)
+		return w.pass(pending, false, nil)
 	}
-	first, err := w.pass(pending, false)
+	first, err := w.pass(pending, false, nil)
 	if !errors.Is(err, errJobFailed) {
 		return first, err
 	}
-	refused, err = w.pass(pending, true)
+	// A job that panicked is not applied again: it is known to panic, its
+	// partial writes went with the first pass's transaction, and the jobs
+	// beside it do not wait on running it twice (spec 043 #42).
+	refused, err = w.pass(pending, true, first)
 	if err == nil {
 		for i, failed := range first {
 			if failed != nil && refused[i] == nil {
@@ -726,8 +761,8 @@ func (w *Writer) commit(pending []*submission) (refused []error, err error) {
 // refusal by the job it refused, the window's failure by the job it was met at,
 // and one that no job met, a BEGIN or a COMMIT, by every erasure the window
 // holds a job of.
-func (w *Writer) pass(pending []*submission, savepoints bool) ([]error, error) {
-	refused, at, err := w.commitWindow(pending, savepoints)
+func (w *Writer) pass(pending []*submission, savepoints bool, skip []error) ([]error, error) {
+	refused, at, err := w.commitWindow(pending, savepoints, skip)
 	for i, own := range refused {
 		refused[i] = failedAt(pending[i].job, own)
 	}
@@ -772,7 +807,7 @@ func explainReplay(sub *submission, failed error) {
 // savepoint that cannot be taken or rolled back to, and a database condition
 // in any apply; at is the index of the job it was met at, -1 for BEGIN and
 // COMMIT, which fail no job in particular.
-func (w *Writer) commitWindow(pending []*submission, savepoints bool) (refused []error, at int, err error) {
+func (w *Writer) commitWindow(pending []*submission, savepoints bool, skip []error) (refused []error, at int, err error) {
 	tx, err := w.conn.BeginTx(context.Background(), nil)
 	if err != nil {
 		return nil, -1, fmt.Errorf("begin write transaction: %w", err)
@@ -783,6 +818,10 @@ func (w *Writer) commitWindow(pending []*submission, savepoints bool) (refused [
 	refused = make([]error, len(pending))
 	written := false
 	for i, sub := range pending {
+		if skip != nil && isPanic(skip[i]) {
+			refused[i] = skip[i]
+			continue
+		}
 		own, err := applyOne(tx, sub.job, many && savepoints)
 		if err != nil {
 			return nil, i, err
@@ -806,7 +845,7 @@ func (w *Writer) commitWindow(pending []*submission, savepoints bool) (refused [
 		rows := 0
 		for i, sub := range pending {
 			if refused[i] == nil {
-				rows += weightOf(sub.job)
+				rows += sub.weight
 			}
 		}
 		w.committed(rows)
@@ -826,7 +865,7 @@ func applyOne(tx *sql.Tx, job WriteJob, savepoint bool) (own, windowErr error) {
 			return nil, fmt.Errorf("open a job's savepoint: %w", err)
 		}
 	}
-	err := job.apply(tx)
+	err := guardJob("write job", job, func() error { return job.apply(tx) })
 	if err != nil {
 		if _, condition := Condition(err); condition {
 			return nil, err

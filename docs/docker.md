@@ -452,6 +452,16 @@ command works from a load balancer, a systemd unit or your own script:
 tracepad health --url http://tracepad.internal:4318
 ```
 
+A bug in one background job does not stop the server. The writer, the retention
+sweeper, the statistics rollup and the erasure worker recover from a panic in
+the job or pass they are running: an `ERROR` line, `a panic was recovered`,
+says where and carries the stack; the write that hit it is answered with an
+error and rolled back alone, and the others in its window commit; one project's
+sweep or roll that panics costs that project's alone, and the next tick tries
+again; an erasure is taken again after its poll. The line
+never carries the panic's own words. If you see it, the stack is what to
+report.
+
 ## Compose
 
 ```yaml

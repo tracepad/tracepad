@@ -161,7 +161,10 @@ func submitFailure(w http.ResponseWriter, err error, kind writeKind) {
 			retryLater(w, storageUnavailable)
 			return
 		}
-		slog.Error(kind.logged, slices.Concat(kind.attrs, []any{"err", err})...)
+		var panicked *store.PanicError
+		if !errors.As(err, &panicked) { // a recovered panic is logged, with its stack, where it was recovered
+			slog.Error(kind.logged, slices.Concat(kind.attrs, []any{"err", err})...)
+		}
 		writeError(w, http.StatusInternalServerError, kind.failed)
 	}
 }

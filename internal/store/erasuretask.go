@@ -614,7 +614,11 @@ func (er *Eraser) Start() {
 		for {
 			wake := er.store.erasures.wake
 			delay := er.opts.poll()
-			id, err := er.store.nextErasure(ctx, slices.Collect(maps.Keys(resting)))
+			var id string
+			err := guard("erasure worker", func() (err error) {
+				id, err = er.store.nextErasure(ctx, slices.Collect(maps.Keys(resting)))
+				return err
+			})
 			if err == nil && id == "" {
 				id, delay = due(resting, delay)
 			}
@@ -626,7 +630,10 @@ func (er *Eraser) Start() {
 				// worker may find the database answering again (#29).
 				logFacts(slog.LevelError, "could not read the next erasure", err)
 			case id != "":
-				_, err := er.store.runErasure(ctx, er.writer, id, er.opts)
+				err := guard("erasure worker", func() error {
+					_, err := er.store.runErasure(ctx, er.writer, id, er.opts)
+					return err
+				})
 				if ctx.Err() != nil {
 					return
 				}
