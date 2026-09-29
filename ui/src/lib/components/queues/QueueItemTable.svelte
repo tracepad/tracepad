@@ -4,6 +4,7 @@
 	import type { AnnotationItem } from '$lib/api/client.svelte';
 	import Button from '$lib/components/Button.svelte';
 	import { timestamp } from '$lib/format';
+	import { finisher } from '$lib/queues';
 	import { modified, selecting } from '$lib/peek';
 	import { Fold } from '$lib/fold.svelte';
 	import { project } from '$lib/project.svelte';
@@ -87,6 +88,7 @@
 		<tbody>
 			{#each rows as row (row.id)}
 				{@const lit = row.id === selectedID}
+				{@const by = finisher(row)}
 				<!-- svelte-ignore a11y_click_events_have_key_events -->
 				<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 				<tr
@@ -110,7 +112,7 @@
 								<Folded
 									values={[
 										`#${row.seq}`,
-										row.completed_by,
+										by && (by.gone ? `${by.text} (${by.title})` : by.text),
 										row.completed_at && timestamp(row.completed_at)
 									]}
 								/>
@@ -131,7 +133,9 @@
 						<span class="rounded-md px-1.5 py-0.5 text-xs {chip(row.status)}">{row.status}</span>
 					</td>
 					{#if !narrow}
-						<td class="text-muted {cell}">{row.completed_by ?? '—'}</td>
+						<td class={[cell, by?.gone ? 'text-subtle' : 'text-muted']} title={by?.title}>
+							{by?.text ?? '—'}
+						</td>
 						<td class="text-muted px-3 py-1.5 font-mono text-xs whitespace-nowrap tabular-nums">
 							{row.completed_at ? timestamp(row.completed_at) : '—'}
 						</td>

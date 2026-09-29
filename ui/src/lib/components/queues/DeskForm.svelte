@@ -25,7 +25,6 @@
 		names,
 		/** The scores already on this item's target, from the trace's own read. */
 		scores,
-		annotator,
 		/** Names the server refused the last completion for, marked at their control. */
 		missing = [],
 		busy = false,
@@ -38,7 +37,6 @@
 		configs: ScoreConfig[];
 		names: string[];
 		scores: Score[];
-		annotator: string;
 		missing?: string[];
 		busy?: boolean;
 		/** The bodies to post, in queue order; empty when nothing changed. */
@@ -78,7 +76,7 @@
 	function save() {
 		const bodies = fields
 			.filter((field) => changed(field, configs))
-			.map((field) => deskBody(field, configs, target, { queue, annotator }));
+			.map((field) => deskBody(field, configs, target, queue));
 		onsave(bodies);
 	}
 

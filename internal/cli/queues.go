@@ -300,6 +300,7 @@ func (r *run) queuesItems(ctx context.Context, args []string) error {
 	var (
 		status    string
 		annotator string
+		account   string
 		cursor    string
 		limit     int
 		newer     bool
@@ -308,6 +309,7 @@ func (r *run) queuesItems(ctx context.Context, args []string) error {
 	fs := r.flags("queues items")
 	fs.StringVar(&status, "status", "", "")
 	fs.StringVar(&annotator, "annotator", "", "")
+	fs.StringVar(&account, "account", "", "")
 	fs.StringVar(&cursor, "cursor", "", "")
 	fs.IntVar(&limit, "limit", 0, "")
 	// One direction flag, not two: this listing reads oldest first, so its
@@ -322,6 +324,7 @@ func (r *run) queuesItems(ctx context.Context, args []string) error {
 	query := url.Values{}
 	addSome(query, "status", status)
 	addSome(query, "annotator", annotator)
+	addSome(query, "account", account)
 	if err := addCursor(query, fs, cursor); err != nil {
 		return err
 	}

@@ -543,6 +543,20 @@ API. This file routes; it does not duplicate what specs and docs say.
   ends it and goes after 30 days (#9, #15). `GET …/erasures` and
   `…/erasures/{id}` are `write` routes (#14); the interface waits 20 s and
   follows the rest, `users rm-data` waits 30 s and polls (#18).
+- ✅ Spec 048 (who scored it) shipped. PR 1: schema 0031 gives `scores` an
+  author — the account or the key the write came with, stamped by the server
+  and never taken from the body (#1) — as four plain columns with a copy of
+  the name and email, so deleting an account or revoking a key takes nothing
+  (#2, #7). The last writer is the author (#3). Reads carry `author` with its
+  standing computed now (#4); the email is an editor's or an owner's to read
+  (#5, `seesAuthorEmail`); rows from before are `null` (#6). `?author=ID|me`,
+  `scores ls --author` and `list_scores` narrow to one author (#9); the account
+  deletion's dry run counts `scores_authored`. PR 2: the scores block names the
+  author beside the source (#10, `scoreAuthor`). Schema 0032 holds a signed-in
+  reviewer's queue claim and completion by account id (#15): a session sends no
+  `annotator`, the server names the account for each reader through one
+  `reviewer` function with its standing (#18), and the desk asks nobody for a
+  name (#16). Work from before 0032 stays under the typed name (#17).
 - ✅ Spec 032 (the Node package) shipped: `tracepad` on npm, source in
   `sdk/js/`, the Python package's surface with promises where Python has
   context managers and the same vocabulary on the wire — `init` adapts to

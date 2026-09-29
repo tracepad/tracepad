@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"slices"
@@ -230,12 +231,13 @@ func TestNoRouteReachesAnotherProjectsRows(t *testing.T) {
 
 	editor, viewer := h.editor(t), h.viewer(t)
 	callers := []struct {
-		name   string
-		mutate []func(*http.Request)
+		name    string
+		mutate  []func(*http.Request)
+		session bool
 	}{
-		{"a key of A", nil},
-		{"an editor of A", []func(*http.Request){asSession(editor), inProject(h.project.ID)}},
-		{"a viewer of A", []func(*http.Request){asSession(viewer), inProject(h.project.ID)}},
+		{"a key of A", nil, false},
+		{"an editor of A", []func(*http.Request){asSession(editor), inProject(h.project.ID)}, true},
+		{"a viewer of A", []func(*http.Request){asSession(viewer), inProject(h.project.ID)}, true},
 	}
 
 	// Two passes: first every route that cannot make the caller a row of B's
@@ -262,9 +264,19 @@ func TestNoRouteReachesAnotherProjectsRows(t *testing.T) {
 	}
 	walk := func(routes []route, strict bool) {
 		for _, rt := range routes {
-			path, _ := b.fill(rt.Path)
+			keyPath, _ := b.fill(rt.Path)
 			for _, caller := range callers {
-				rec := h.call(t, rt.Method, path, b.bodyFor(rt), append(caller.mutate, asJSON)...)
+				// A signed-in reviewer names nobody (spec 048 #15): the
+				// annotator a key sends is a 400 from a session, which would
+				// prove nothing about isolation.
+				path, payload := keyPath, b.bodyFor(rt)
+				if caller.session {
+					path = strings.TrimSuffix(path, "?annotator=ada")
+					if bytes.Contains(payload, []byte(`"annotator"`)) {
+						payload = []byte(`{}`)
+					}
+				}
+				rec := h.call(t, rt.Method, path, payload, append(caller.mutate, asJSON)...)
 				body := rec.Body.String()
 				for _, marker := range b.markers {
 					if strings.Contains(body, marker) && !strings.Contains(path, marker) {

@@ -181,3 +181,12 @@ export function elapsed(from: string | null | undefined, to: string | null | und
 function round(value: number, digits: number): string {
 	return String(Number(value.toFixed(digits)));
 }
+
+/**
+ * What to call an account: the name it chose, else the email it signs in with
+ * when the reader may see one, else `fallback`. One rule for the shell's own
+ * name and for the author of a score (spec 048 #10), so the two cannot drift.
+ */
+export function accountName(who: { name: string; email?: string }, fallback = ''): string {
+	return who.name.trim() || who.email || fallback;
+}

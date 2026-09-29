@@ -72,6 +72,14 @@ func (s *Server) apiProject(w http.ResponseWriter, r *http.Request) (*store.Proj
 // submit hands a job to the group-commit writer and renders every outcome but
 // success, so a handler's happy path is the line after it (#9).
 func (s *Server) submit(w http.ResponseWriter, r *http.Request, job store.WriteJob) bool {
+	return s.submitRefusing(w, r, job, nil)
+}
+
+// submitRefusing is submit for a handler that answers one refusal of its own:
+// `refused` renders the response and reports true for an error it recognises,
+// and every other outcome takes the shared shapes.
+func (s *Server) submitRefusing(w http.ResponseWriter, r *http.Request, job store.WriteJob,
+	refused func(error) bool) bool {
 	if s.writer == nil {
 		writeError(w, http.StatusServiceUnavailable, "writes are not available")
 		return false
@@ -80,7 +88,9 @@ func (s *Server) submit(w http.ResponseWriter, r *http.Request, job store.WriteJ
 	if err == nil {
 		return true
 	}
-	submitFailure(w, err, apiWrite)
+	if refused == nil || !refused(err) {
+		submitFailure(w, err, apiWrite)
+	}
 	return false
 }
 

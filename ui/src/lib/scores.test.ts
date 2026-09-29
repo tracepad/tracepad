@@ -13,6 +13,7 @@ import {
 	observationIDs,
 	refusedField,
 	scoreBody,
+	scoreAuthor,
 	scoreProblem,
 	scoreSource,
 	scoreValue,
@@ -84,6 +85,56 @@ describe('where a score says it came from', () => {
 		expect(scoreSource(score({ metadata: {} }))).toBe(API_SOURCE);
 		expect(scoreSource(score({ metadata: { source: '' } }))).toBe(API_SOURCE);
 		expect(scoreSource(score({ metadata: { source: { name: 'judge' } } }))).toBe(API_SOURCE);
+	});
+});
+
+describe('who wrote it (spec 048 #10)', () => {
+	const author = (extra: Partial<NonNullable<Score['author']>>): Score['author'] => ({
+		kind: 'account',
+		id: 'acc1',
+		name: 'Ada',
+		standing: 'editor',
+		...extra
+	});
+
+	it('names an account, with the email as the tooltip when the reader may see it', () => {
+		expect(scoreAuthor(score({ author: author({ email: 'ada@example.com' }) }))).toEqual({
+			text: 'by Ada',
+			title: 'ada@example.com',
+			gone: false
+		});
+		expect(scoreAuthor(score({ author: author({}) }))).toEqual({ text: 'by Ada', gone: false });
+	});
+
+	it('reads an account with no name as its email, or as a member without one', () => {
+		expect(scoreAuthor(score({ author: author({ name: '', email: 'ada@example.com' }) }))?.text).toBe(
+			'by ada@example.com'
+		);
+		expect(scoreAuthor(score({ author: author({ name: ' ' }) }))?.text).toBe('by a member');
+	});
+
+	it('names a key as a key', () => {
+		expect(
+			scoreAuthor(score({ author: author({ kind: 'key', id: 'tp-pk-1', name: 'judge', standing: 'active' }) }))
+		).toEqual({ text: 'key judge', gone: false });
+		expect(
+			scoreAuthor(score({ author: author({ kind: 'key', id: 'tp-pk-1', name: '', standing: 'active' }) }))?.text
+		).toBe('key tp-pk-1');
+	});
+
+	it('mutes an author who is gone and says why', () => {
+		for (const standing of ['removed', 'disabled', 'deleted', 'revoked'] as const) {
+			const label = scoreAuthor(score({ author: author({ standing }) }));
+			expect(label?.gone).toBe(true);
+			expect(label?.title).toBe(standing);
+		}
+		expect(scoreAuthor(score({ author: author({ standing: 'deleted', email: 'ada@example.com' }) }))?.title).toBe(
+			'ada@example.com · deleted'
+		);
+	});
+
+	it('says nothing for a score from before authors were recorded', () => {
+		expect(scoreAuthor(score())).toBeNull();
 	});
 });
 

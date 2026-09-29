@@ -2098,7 +2098,9 @@
           {"name": "status", "in": "query", "schema": {"type": "string", "enum": ["pending", "completed", "skipped"]},
             "description": "Keeps items in one state. A spelling outside the list is a 400"},
           {"name": "annotator", "in": "query", "schema": {"type": "string", "maxLength": 200},
-            "description": "Keeps the items this name has: the ones it completed or skipped, and the pending ones it is holding a claim on. `completed_by` is empty on a pending item, so matching it alone would answer \"nothing open\" for somebody who is working through the queue"},
+            "description": "Keeps the items a key's reviewer has, by the name it sent: the ones it completed or skipped, and the pending ones it is holding a claim on. `completed_by` is empty on a pending item, so matching it alone would answer \"nothing open\" for somebody who is working through the queue"},
+          {"name": "account", "in": "query", "schema": {"type": "string"},
+            "description": "The same for a signed-in reviewer, by account id, or `me` for the account asking (a key is refused: it has no account)"},
           {"$ref": "#/components/parameters/Limit"},
           {"$ref": "#/components/parameters/Cursor"},
           {"$ref": "#/components/parameters/Direction"},
@@ -2183,8 +2185,8 @@
         "x-tracepad-scope": "write",
         "parameters": [
           {"$ref": "#/components/parameters/QueueName"},
-          {"name": "annotator", "in": "query", "required": true, "schema": {"type": "string", "minLength": 1, "maxLength": 200},
-            "description": "Who is asking. Written to `claimed_by`, and to `completed_by` when they finish"}
+          {"name": "annotator", "in": "query", "schema": {"type": "string", "minLength": 1, "maxLength": 200},
+            "description": "Who is asking, for a project key: the name written to `claimed_by`, and to `completed_by` when they finish. Required with a key; refused from a signed-in session, whose reviewer is the account itself and is held by its id"}
         ],
         "responses": {
           "200": {"description": "The item to work on, or nothing to work on", "content": {"application/json": {"schema": {
@@ -2246,8 +2248,8 @@
         "parameters": [{"$ref": "#/components/parameters/QueueName"}, {"$ref": "#/components/parameters/ItemID"}],
         "requestBody": {"required": true, "content": {"application/json": {"schema": {
           "type": "object",
-          "properties": {"annotator": {"type": "string", "minLength": 1, "maxLength": 200}},
-          "required": ["annotator"]
+          "properties": {"annotator": {"type": "string", "minLength": 1, "maxLength": 200,
+            "description": "The reviewer's name, for a project key, where it is required; a signed-in session sends none"}}
         }}}},
         "responses": {
           "200": {"description": "The completed item", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AnnotationItem"}}}},
@@ -2279,10 +2281,10 @@
         "requestBody": {"required": true, "content": {"application/json": {"schema": {
           "type": "object",
           "properties": {
-            "annotator": {"type": "string", "minLength": 1, "maxLength": 200},
+            "annotator": {"type": "string", "minLength": 1, "maxLength": 200,
+              "description": "The reviewer's name, for a project key, where it is required; a signed-in session sends none"},
             "reason": {"type": "string", "description": "Why it was skipped; shown on the queue page"}
-          },
-          "required": ["annotator"]
+          }
         }}}},
         "responses": {
           "200": {"description": "The skipped item", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AnnotationItem"}}}},
@@ -2305,8 +2307,8 @@
         "parameters": [{"$ref": "#/components/parameters/QueueName"}, {"$ref": "#/components/parameters/ItemID"}],
         "requestBody": {"required": true, "content": {"application/json": {"schema": {
           "type": "object",
-          "properties": {"annotator": {"type": "string", "minLength": 1, "maxLength": 200}},
-          "required": ["annotator"]
+          "properties": {"annotator": {"type": "string", "minLength": 1, "maxLength": 200,
+            "description": "The reviewer's name, for a project key, where it is required; a signed-in session sends none"}}
         }}}},
         "responses": {
           "200": {"description": "The item, pending again", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AnnotationItem"}}}},
@@ -3484,9 +3486,13 @@
           "status": {"type": "string", "enum": ["pending", "completed", "skipped"]},
           "seq": {"type": "integer", "description": "Its place in the queue, monotonic per queue and never reused"},
           "added_at": {"type": "string", "format": "date-time"},
-          "claimed_by": {"type": "string", "description": "Who `next` handed it to; absent when nothing holds it"},
+          "claimed_by": {"type": "string", "description": "Who `next` handed it to; absent when nothing holds it. A key's reviewer by the name it sent; a signed-in one by the account's display name, else its email for an editor or an owner, else `a member`, or `a deleted account`"},
+          "claimed_by_account": {"type": "string", "description": "The account id of a signed-in reviewer holding it"},
+          "claimed_by_standing": {"type": "string", "enum": ["owner", "editor", "viewer", "removed", "disabled", "deleted"], "description": "That account's standing in the project now, as a score author's"},
           "claimed_until": {"type": "string", "format": "date-time", "description": "When the claim expires and the item is claimable again"},
-          "completed_by": {"type": "string", "description": "Who completed or skipped it"},
+          "completed_by": {"type": "string", "description": "Who completed or skipped it, named as `claimed_by` is"},
+          "completed_by_account": {"type": "string", "description": "The account id of a signed-in reviewer who completed or skipped it"},
+          "completed_by_standing": {"type": "string", "enum": ["owner", "editor", "viewer", "removed", "disabled", "deleted"], "description": "That account's standing in the project now: a role, or removed, disabled, deleted"},
           "completed_at": {"type": "string", "format": "date-time"},
           "skip_reason": {"type": "string"}
         },

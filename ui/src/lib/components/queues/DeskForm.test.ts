@@ -45,7 +45,6 @@ function desk(scores: Score[] = [], missing: string[] = [], names = ['accuracy',
 			configs,
 			names,
 			scores,
-			annotator: 'ada',
 			missing,
 			onsave,
 			onskip,
@@ -130,8 +129,7 @@ describe('the completeness rule, client-side', () => {
 		expect(posted.map((body) => body.name)).toEqual(['tone']);
 		expect(posted[0].metadata).toEqual({
 			source: 'annotation',
-			queue: 'weekly',
-			annotator: 'ada'
+			queue: 'weekly'
 		});
 	});
 });

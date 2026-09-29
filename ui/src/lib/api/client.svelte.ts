@@ -515,9 +515,9 @@ class Api {
 	//
 	// One method per endpoint of the spec's API contract, in the shapes the
 	// CLI uses: the screens add no verb of their own. `next` is a GET that
-	// claims — being handed an item *is* the claim (#5) — and the three
-	// finishing writes carry the annotator, because the store has no users
-	// and this spec does not invent them (#6).
+	// claims — being handed an item *is* the claim (#5). The interface is
+	// always signed in, and a signed-in reviewer is the account, held by the
+	// server by its id (spec 048 #15): nothing here names who is asking.
 
 	/** Whole, not paged: a project has as many queues as review programmes. */
 	listQueues(signal?: AbortSignal) {
@@ -568,24 +568,21 @@ class Api {
 	}
 
 	/** The item to work on, claimed for ten minutes; null when there is none. */
-	nextQueueItem(name: string, annotator: string, signal?: AbortSignal) {
-		return this.#json<NextItem>(`/api/v1/queues/${encodeURIComponent(name)}/next`, {
-			query: { annotator },
-			signal
-		});
+	nextQueueItem(name: string, signal?: AbortSignal) {
+		return this.#json<NextItem>(`/api/v1/queues/${encodeURIComponent(name)}/next`, { signal });
 	}
 
 	/** Refused with `missing` until the queue's scores are on the target (#7). */
-	completeQueueItem(name: string, id: string, annotator: string) {
-		return this.#finishItem(name, id, 'complete', { annotator });
+	completeQueueItem(name: string, id: string) {
+		return this.#finishItem(name, id, 'complete', {});
 	}
 
-	skipQueueItem(name: string, id: string, annotator: string, reason: string) {
-		return this.#finishItem(name, id, 'skip', { annotator, reason });
+	skipQueueItem(name: string, id: string, reason: string) {
+		return this.#finishItem(name, id, 'skip', { reason });
 	}
 
-	reopenQueueItem(name: string, id: string, annotator: string) {
-		return this.#finishItem(name, id, 'reopen', { annotator });
+	reopenQueueItem(name: string, id: string) {
+		return this.#finishItem(name, id, 'reopen', {});
 	}
 
 	/** One row out of the list; a re-add recreates it, so no ceremony (#8). */

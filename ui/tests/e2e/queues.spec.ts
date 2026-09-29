@@ -155,19 +155,18 @@ test('one trace goes in by hand and the rest by filter', async ({ page }) => {
 	await expect(page.getByRole('progressbar')).toHaveAttribute('aria-valuemax', String(TRACES));
 });
 
-test('the desk asks who is reviewing, refuses Complete until both scores are set, and moves on', async ({
+test('the desk signs as the account, refuses Complete until both scores are set, and moves on', async ({
 	page
 }) => {
 	await signIn(page);
 	await page.goto(`/queues/${QUEUE}`);
 	await page.getByRole('button', { name: 'Start annotating' }).click();
 
-	// Once, and kept in the browser.
-	await page.getByLabel('Name').fill('ada');
-	await page.getByRole('button', { name: 'Start' }).click();
-	// Exact: "metadata" contains "ada", and the trace beside the form has a
-	// button for copying it.
-	await expect(page.getByRole('button', { name: 'ada', exact: true })).toBeVisible();
+	// Nobody is asked who they are: the reviewer is who is signed in, and the
+	// header says so without offering to change it (spec 048 #11).
+	const { account } = await project();
+	await expect(page.getByTitle('Reviewing as your account')).toHaveText(account.email);
+	await expect(page.getByLabel('Name')).toHaveCount(0);
 
 	// The trace on the left, the queue's two scores on the right, each built
 	// by the rule its config gives.
@@ -215,8 +214,10 @@ test('the verdicts are on the trace, and say they came from the queue', async ({
 
 	const accuracy = page.getByRole('button', { name: /accuracy/ });
 	await expect(accuracy).toContainText('0.9');
-	// The chip is honest about which surface wrote it (#6).
+	// The chip is honest about which surface wrote it (#6), and names who
+	// (spec 048 #10): the account the desk signed as.
 	await expect(accuracy).toContainText('annotation');
+	await expect(accuracy).toContainText(`by ${(await project()).account.email}`);
 	await expect(page.getByRole('button', { name: /tone/ })).toContainText('warm');
 });
 
@@ -232,8 +233,6 @@ test('an observation item opens the desk on that observation', async ({ page }) 
 
 	await signIn(page);
 	await page.goto('/queues/one-step/annotate');
-	await page.getByLabel('Name').fill('ada');
-	await page.getByRole('button', { name: 'Start' }).click();
 
 	await expect(page).toHaveURL(new RegExp(`obs=${GENERATION}`));
 	// The panel is on that observation, not on the trace's first span.
@@ -248,35 +247,6 @@ test('an observation item opens the desk on that observation', async ({ page }) 
 		new RegExp(`obs=${GENERATION}`)
 	);
 	await must('DELETE', '/api/v1/queues/one-step?confirm=one-step');
-});
-
-// Found in review: the desk's effect depended on the annotator's name, so
-// changing it restarted `start()` — `next` under the new name skipped the item
-// still claimed by the old one and handed out a different trace.
-test('changing who is reviewing keeps the item in hand', async ({ page }) => {
-	await must('PUT', '/api/v1/queues/two-names', { score_configs: ['accuracy'] });
-	await must('POST', '/api/v1/queues/two-names/items', [
-		{ trace_id: TRACE },
-		{ trace_id: OTHER_TRACE }
-	]);
-
-	await signIn(page);
-	await page.goto('/queues/two-names/annotate');
-	await page.getByLabel('Name').fill('ada');
-	await page.getByRole('button', { name: 'Start' }).click();
-	await expect(page.getByTitle('Its place in the queue')).toHaveText('#1');
-	await page.getByLabel('accuracy', { exact: true }).fill('0.7');
-
-	await page.getByRole('button', { name: 'ada', exact: true }).click();
-	await page.getByLabel('Name').fill('bob');
-	await page.getByRole('button', { name: 'Start' }).click();
-
-	// The same item, and the same half-filled form: a signature changed, not a
-	// session.
-	await expect(page.getByRole('button', { name: 'bob', exact: true })).toBeVisible();
-	await expect(page.getByTitle('Its place in the queue')).toHaveText('#1');
-	await expect(page.getByLabel('accuracy', { exact: true })).toHaveValue('0.7');
-	await must('DELETE', '/api/v1/queues/two-names?confirm=two-names');
 });
 
 // Found in review: the desk posted new scores with no id, so a retry after a
@@ -311,8 +281,6 @@ test('a retry after a failed completion writes one score, not two', async ({ pag
 
 	await signIn(page);
 	await page.goto('/queues/retry/annotate');
-	await page.getByLabel('Name').fill('ada');
-	await page.getByRole('button', { name: 'Start' }).click();
 	await page.getByLabel('accuracy', { exact: true }).fill('0.25');
 
 	await page.getByRole('button', { name: /Complete/ }).click();
@@ -349,9 +317,6 @@ test('the desk prefills from a verdict already on the trace', async ({ page }) =
 
 	await signIn(page);
 	await page.goto('/queues/second-look/annotate');
-	// The name lives in the browser, and each test starts in a fresh one.
-	await page.getByLabel('Name').fill('ada');
-	await page.getByRole('button', { name: 'Start' }).click();
 
 	await expect(page.getByText('already scored')).toBeVisible();
 	await expect(page.getByLabel('accuracy', { exact: true })).toHaveValue('0.9');
@@ -386,8 +351,6 @@ test('a second refusal replaces the first, at the top and at the controls', asyn
 
 	await signIn(page);
 	await page.goto('/queues/two-refusals/annotate');
-	await page.getByLabel('Name').fill('ada');
-	await page.getByRole('button', { name: 'Start' }).click();
 
 	await page.getByLabel('accuracy', { exact: true }).fill('0.9');
 	await page.getByLabel('tone', { exact: true }).selectOption('warm');
@@ -403,21 +366,23 @@ test('a second refusal replaces the first, at the top and at the controls', asyn
 	await must('DELETE', '/api/v1/queues/two-refusals?confirm=two-refusals');
 });
 
-// Found in review: the dialog can be dismissed, and with nobody to claim as
-// `start` never runs — the desk sat on its spinner for ever.
-test('dismissing the name dialog leaves a way back in, not a spinner', async ({ page }) => {
+// *Mine* is `account=me` (spec 048 #15): the items this account finished, by
+// the account and not by a name, and the author of the desk's verdicts is who
+// completed them.
+test('mine keeps the items this account finished', async ({ page }) => {
 	await signIn(page);
-	await page.goto(`/queues/${QUEUE}/annotate`);
-	await page.getByLabel('Name').press('Escape');
+	await page.goto(`/queues/${QUEUE}?status=completed`);
+	await expect(page.getByRole('row')).toHaveCount(3); // the head and the two done
+	await page.getByLabel('Mine').check();
+	await expect(page).toHaveURL(/account=me/);
+	await expect(page.getByRole('row')).toHaveCount(3);
+	await expect(page.getByRole('row').nth(1)).toContainText((await project()).account.email);
 
-	await expect(page.getByText('Taking the next item')).toHaveCount(0);
-	await expect(page.getByText('The desk needs a name to sign with')).toBeVisible();
-
-	// And it is a way back in, not only a message.
-	await page.getByRole('button', { name: 'Say who you are' }).click();
-	await page.getByLabel('Name').fill('cleo');
-	await page.getByRole('button', { name: 'Start' }).click();
-	await expect(page.getByRole('button', { name: 'cleo', exact: true })).toBeVisible();
+	// *Any* drops the status and leaves *Mine* where it was.
+	await page.getByLabel('Status').selectOption('');
+	await expect(page).not.toHaveURL(/status=/);
+	await expect(page).toHaveURL(/account=me/);
+	await expect(page.getByLabel('Mine')).toBeChecked();
 });
 
 test('a completed item is reopened from the queue page', async ({ page }) => {
@@ -464,8 +429,6 @@ test('the desk fits a phone', async ({ page }) => {
 	await page.setViewportSize({ width: 375, height: 720 });
 	await signIn(page);
 	await page.goto('/queues/on-a-phone/annotate');
-	await page.getByLabel('Name').fill('ada');
-	await page.getByRole('button', { name: 'Start' }).click();
 
 	await expect(page.getByLabel('accuracy', { exact: true })).toBeVisible();
 	const overflow = await page.evaluate(

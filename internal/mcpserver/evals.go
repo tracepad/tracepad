@@ -219,27 +219,33 @@ func registerQueues(server *mcp.Server, t *toolset) {
 			"who did it, or why something was skipped. " +
 			"Returns a page of items oldest first: the trace (and the observation, when the item is about one), " +
 			"the status, who completed or skipped it and when, and the skip reason. " +
-			"Pass status to see one state, or annotator to see one person's work. " +
+			"Pass status to see one state, annotator to see a program's work by the name it signs with, " +
+			"or account to see a signed-in person's by their account id. " +
 			"Does NOT return the verdicts themselves: those are scores on the traces — call list_scores with a trace_id.",
 		InputSchema: object(walkProperties(pagingProperties(map[string]*jsonschema.Schema{
 			"name":      matching(namePattern, "The queue's name."),
 			"status":    oneOf("Keep items in one state.", "pending", "completed", "skipped"),
-			"annotator": text("Keep the items this name completed or skipped."),
+			"annotator": text("Keep the items a program working the queue with a key completed, skipped or holds, by the name it sent."),
+			"account":   text("Keep the items a signed-in person completed, skipped or holds, by account id (completed_by_account)."),
 		}), true), "name"),
 		OutputSchema: object(map[string]*jsonschema.Schema{
 			"queue": text("The queue's name."),
 			"items": list(object(map[string]*jsonschema.Schema{
-				"id":             text("The item's id."),
-				"trace_id":       text("The trace it points at."),
-				"observation_id": text("The observation inside it, when the item is about one."),
-				"status":         oneOf("Where it stands.", "pending", "completed", "skipped"),
-				"seq":            integer("Its place in the queue, in the order items were added."),
-				"added_at":       timestamp("When it was queued."),
-				"claimed_by":     text("Who is working on it right now, if anybody."),
-				"claimed_until":  timestamp("When that claim expires."),
-				"completed_by":   text("Who completed or skipped it."),
-				"completed_at":   timestamp("When they did."),
-				"skip_reason":    text("Why it was skipped."),
+				"id":                    text("The item's id."),
+				"trace_id":              text("The trace it points at."),
+				"observation_id":        text("The observation inside it, when the item is about one."),
+				"status":                oneOf("Where it stands.", "pending", "completed", "skipped"),
+				"seq":                   integer("Its place in the queue, in the order items were added."),
+				"added_at":              timestamp("When it was queued."),
+				"claimed_by":            text("Who is working on it right now, if anybody."),
+				"claimed_by_account":    text("The account id of a signed-in person holding it."),
+				"claimed_by_standing":   oneOf("That account's standing in the project now: a role, or removed, disabled, deleted.", "owner", "editor", "viewer", "removed", "disabled", "deleted"),
+				"claimed_until":         timestamp("When that claim expires."),
+				"completed_by":          text("Who completed or skipped it."),
+				"completed_by_account":  text("The account id of a signed-in person who did."),
+				"completed_by_standing": oneOf("That account's standing in the project now: a role, or removed, disabled, deleted.", "owner", "editor", "viewer", "removed", "disabled", "deleted"),
+				"completed_at":          timestamp("When they did."),
+				"skip_reason":           text("Why it was skipped."),
 			}, "id", "trace_id", "status", "seq", "added_at"), "The page, oldest first."),
 			"next_cursor": text("Pass back as `cursor` for the next page; null on the last."),
 			"prev_cursor": text("Pass back as `cursor` with `direction=prev`; null on the first."),
@@ -261,6 +267,7 @@ type getQueueItemsInput struct {
 	Name      string `json:"name"`
 	Status    string `json:"status"`
 	Annotator string `json:"annotator"`
+	Account   string `json:"account"`
 }
 
 func (t *toolset) getQueueItems(ctx context.Context, req *mcp.CallToolRequest,
@@ -268,6 +275,7 @@ func (t *toolset) getQueueItems(ctx context.Context, req *mcp.CallToolRequest,
 	query := url.Values{}
 	set(query, "status", in.Status)
 	set(query, "annotator", in.Annotator)
+	set(query, "account", in.Account)
 	return t.call(ctx, req, "/api/v1/queues/"+url.PathEscape(in.Name)+"/items",
 		in.walkInput.apply(in.pagingInput.apply(query)), summarizeQueueItems)
 }

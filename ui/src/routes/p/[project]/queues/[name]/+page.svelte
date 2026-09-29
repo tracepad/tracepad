@@ -14,7 +14,6 @@
 		type Trace
 	} from '$lib/api/client.svelte';
 	import { ITEM_STATUSES, readQueueItemFilters, queueItemSearch } from '$lib/api/queues';
-	import { annotator } from '$lib/annotator.svelte';
 	import Button from '$lib/components/Button.svelte';
 	import CopyButton from '$lib/components/CopyButton.svelte';
 	import ListingShell from '$lib/components/ListingShell.svelte';
@@ -114,7 +113,9 @@
 
 	/** A status filter is a fresh listing: first page, same size. */
 	function narrow(status: string) {
-		const next = status === '' ? {} : { ...filters, status: status as never };
+		// *Any* drops the status and nothing else: *Mine* is a filter of its
+		// own, and a status change must not quietly undo it.
+		const next = { ...filters, status: status === '' ? undefined : (status as never) };
 		goto(
 			href(
 				`/queues/${encodeURIComponent(name)}`,
@@ -124,6 +125,32 @@
 		);
 	}
 
+	/** *Mine*: the items this account holds or finished (spec 048 #15). */
+	function mine(on: boolean) {
+		const next = { ...filters, account: on ? 'me' : undefined };
+		goto(
+			href(
+				`/queues/${encodeURIComponent(name)}`,
+				freshSearch(queueItemSearch(next), page.url.searchParams)
+			),
+			{ keepFocus: true }
+		);
+	}
+
+	/**
+	 * Who an `account=` filter is about, by the name the server gave the rows
+	 * it matched; an id no row names yet is just "one reviewer".
+	 */
+	const accountLabel = $derived.by(() => {
+		const id = filters.account;
+		if (!id || id === 'me') return null;
+		const row = listing.rows.find(
+			(one) => one.completed_by_account === id || one.claimed_by_account === id
+		);
+		const named = row?.completed_by_account === id ? row.completed_by : row?.claimed_by;
+		return `by ${named ?? 'one reviewer'}`;
+	});
+
 	let busyID = $state.raw<string | null>(null);
 	let deleting = $state(false);
 
@@ -132,10 +159,8 @@
 		busyID = item.id;
 		try {
 			if (what === 'reopen') {
-				// The annotator is the signature on the act, and the desk has
-				// already asked for one; a manager who has not annotated yet
-				// signs as the interface.
-				await api.reopenQueueItem(name, item.id, annotator.name ?? 'web');
+				// Signed as the account, by the server (spec 048 #15).
+				await api.reopenQueueItem(name, item.id);
 			} else {
 				await api.deleteQueueItem(name, item.id);
 				if (peekID === item.id) peek(null);
@@ -233,6 +258,18 @@
 		</label>
 		{#if filters.annotator}
 			<span class="text-subtle text-xs">by {filters.annotator}</span>
+		{/if}
+		<label class="text-subtle flex items-center gap-1.5 text-xs">
+			<input
+				type="checkbox"
+				name="mine"
+				checked={filters.account === 'me'}
+				onchange={(event) => mine(event.currentTarget.checked)}
+			/>
+			Mine
+		</label>
+		{#if accountLabel}
+			<span class="text-subtle text-xs">{accountLabel}</span>
 		{/if}
 	</div>
 

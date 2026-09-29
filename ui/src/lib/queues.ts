@@ -1,6 +1,6 @@
-import type { AnnotationQueue, Score, ScoreConfig, ScoreInput } from './api/client.svelte';
+import type { AnnotationItem, AnnotationQueue, Score, ScoreConfig, ScoreInput } from './api/client.svelte';
 import { count } from './format';
-import { OTHER, formOfScore, scoreBody, scoreProblem, typeOf, type ScoreForm } from './scores';
+import { OTHER, formOfScore, isGone, scoreBody, scoreProblem, typeOf, type ScoreForm } from './scores';
 
 // Everything about an annotation queue that is not a DOM node (spec 024): how
 // far a queue has got, what the New-queue form refuses, the form the desk
@@ -161,18 +161,18 @@ export function changed(field: DeskField, configs: ScoreConfig[]): boolean {
  * What the desk posts for one field: spec 022's own body, stamped with where
  * the verdict came from (#6). `source: "annotation"` beside spec 022's
  * `"web"` keeps the chip on the trace honest about which surface wrote it,
- * and the queue and the annotator are how "who said this" is read back.
+ * and the queue says which programme. Who said it is the score's author,
+ * which the server records (spec 048 #15): the desk names nobody.
  */
 export function deskBody(
 	field: DeskField,
 	configs: ScoreConfig[],
 	target: { trace_id?: string; observation_id?: string },
-	by: { queue: string; annotator: string }
+	queue: string
 ): ScoreInput {
 	const body = scoreBody(target, field.form, configs, field.existing, {
 		source: 'annotation',
-		queue: by.queue,
-		annotator: by.annotator
+		queue
 	});
 	// A correction carries the row's own id; a new score carries the one this
 	// field was built with, so posting it twice writes one row.
@@ -196,4 +196,16 @@ export function queueable(total: { value: number; capped: boolean } | null) {
 		};
 	}
 	return { label: `${count(total.value)} traces`, blocked: null };
+}
+
+/**
+ * Who finished with an item, as the queue page shows it (spec 048 #15): the
+ * name the server rendered for this reader, muted with the reason when the
+ * account is no longer here — the rule the author of a score follows (#10).
+ */
+export function finisher(item: AnnotationItem): { text: string; title?: string; gone: boolean } | null {
+	if (!item.completed_by) return null;
+	const standing = item.completed_by_standing;
+	const gone = isGone(standing);
+	return { text: item.completed_by, title: gone ? standing : undefined, gone };
 }

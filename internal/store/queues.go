@@ -69,6 +69,20 @@ type QueueCounts struct {
 // Total is how many items the queue holds in any state.
 func (c QueueCounts) Total() int64 { return c.Pending + c.Completed + c.Skipped }
 
+// Reviewer is who works an item (spec 048 #15): a signed-in account, held by
+// its id, or the name a program working the queue with a key sends (spec 024
+// #6). Exactly one of the two is set.
+type Reviewer struct {
+	Account string
+	Name    string
+}
+
+// columns binds a reviewer to the item's pair of columns — the name, and
+// the account — as NULL where it is not that kind.
+func (r Reviewer) columns() (name, account any) {
+	return nullString(r.Name), nullString(r.Account)
+}
+
 // AnnotationItem is one trace, or one observation of a trace, waiting for a
 // verdict (#2).
 type AnnotationItem struct {
@@ -81,12 +95,17 @@ type AnnotationItem struct {
 	Status        string
 	Seq           int64
 	AddedAt       int64
-	ClaimedBy     string
+	// ClaimedBy and CompletedBy are the name a key's reviewer sent;
+	// ClaimedByAccount and CompletedByAccount the account id of a signed-in
+	// one (spec 048 #15). At most one of each pair is set.
+	ClaimedBy        string
+	ClaimedByAccount string
 	// ClaimedUntil is zero when nothing holds the item.
-	ClaimedUntil int64
-	CompletedBy  string
-	CompletedAt  int64
-	SkipReason   string
+	ClaimedUntil       int64
+	CompletedBy        string
+	CompletedByAccount string
+	CompletedAt        int64
+	SkipReason         string
 }
 
 // QueueTarget is what an add names: one trace, or one observation of it.
@@ -351,7 +370,7 @@ func (f *QueueItemsFromTraces) apply(tx *sql.Tx) error {
 type QueueNext struct {
 	ProjectID string
 	Queue     string
-	Annotator string
+	Reviewer  Reviewer
 	Now       int64
 
 	// Item is what was handed out, nil when nothing is claimable, and
@@ -373,12 +392,18 @@ func (n *QueueNext) apply(tx *sql.Tx) error {
 		return fmt.Errorf("count the pending items of queue %s: %w", n.Queue, err)
 	}
 
+	// Held by the account for a signed-in reviewer, whatever it is called
+	// now; by the name for a key's (spec 048 #15).
+	holder, value := "claimed_by", n.Reviewer.Name
+	if n.Reviewer.Account != "" {
+		holder, value = "claimed_by_account", n.Reviewer.Account
+	}
 	item, err := oneItem(tx,
 		`SELECT `+annotationItemColumns+` FROM annotation_items
 		  WHERE project_id = ? AND queue = ? AND status = ?
-		    AND claimed_by = ? AND claimed_until > ?
+		    AND `+holder+` = ? AND claimed_until > ?
 		  ORDER BY seq LIMIT 1`,
-		n.ProjectID, n.Queue, ItemPending, n.Annotator, n.Now)
+		n.ProjectID, n.Queue, ItemPending, value, n.Now)
 	if err != nil {
 		return err
 	}
@@ -394,13 +419,14 @@ func (n *QueueNext) apply(tx *sql.Tx) error {
 		}
 	}
 	until := n.Now + int64(ClaimTTL)
+	name, account := n.Reviewer.columns()
 	if _, err := tx.Exec(
-		`UPDATE annotation_items SET claimed_by = ?, claimed_until = ?
+		`UPDATE annotation_items SET claimed_by = ?, claimed_by_account = ?, claimed_until = ?
 		  WHERE project_id = ? AND id = ?`,
-		n.Annotator, until, n.ProjectID, item.ID); err != nil {
+		name, account, until, n.ProjectID, item.ID); err != nil {
 		return fmt.Errorf("claim item %s: %w", item.ID, err)
 	}
-	item.ClaimedBy, item.ClaimedUntil = n.Annotator, until
+	item.ClaimedBy, item.ClaimedByAccount, item.ClaimedUntil = n.Reviewer.Name, n.Reviewer.Account, until
 	n.Item = item
 	return nil
 }
@@ -419,7 +445,7 @@ type QueueItemComplete struct {
 	ProjectID string
 	Queue     string
 	ID        string
-	Annotator string
+	Reviewer  Reviewer
 	Now       int64
 
 	// Item is the row after the write, filled by apply.
@@ -433,8 +459,7 @@ func (c *QueueItemComplete) apply(tx *sql.Tx) error {
 		return err
 	}
 	if item.Status == ItemCompleted {
-		return &Rejection{Kind: RejectConflict, Message: fmt.Sprintf(
-			"item %s was already completed by %s", item.ID, orSomebody(item.CompletedBy))}
+		return &AlreadyCompleted{Item: item}
 	}
 	missing, err := missingScores(tx, c.ProjectID, queue.ScoreConfigs, item)
 	if err != nil {
@@ -451,12 +476,13 @@ func (c *QueueItemComplete) apply(tx *sql.Tx) error {
 			Details: map[string]any{"missing": missing},
 		}
 	}
+	name, account := c.Reviewer.columns()
 	if _, err := tx.Exec(
 		`UPDATE annotation_items
-		    SET status = ?, completed_by = ?, completed_at = ?, skip_reason = NULL,
-		        claimed_by = NULL, claimed_until = NULL
+		    SET status = ?, completed_by = ?, completed_by_account = ?, completed_at = ?,
+		        skip_reason = NULL, claimed_by = NULL, claimed_by_account = NULL, claimed_until = NULL
 		  WHERE project_id = ? AND id = ?`,
-		ItemCompleted, c.Annotator, c.Now, c.ProjectID, item.ID); err != nil {
+		ItemCompleted, name, account, c.Now, c.ProjectID, item.ID); err != nil {
 		return fmt.Errorf("complete item %s: %w", item.ID, err)
 	}
 	c.Item, err = itemByID(tx, c.ProjectID, c.Queue, c.ID)
@@ -475,7 +501,7 @@ type QueueItemSkip struct {
 	ProjectID string
 	Queue     string
 	ID        string
-	Annotator string
+	Reviewer  Reviewer
 	Reason    string
 	Now       int64
 
@@ -489,18 +515,17 @@ func (s *QueueItemSkip) apply(tx *sql.Tx) error {
 		return err
 	}
 	if item.Status == ItemCompleted {
-		return &Rejection{Kind: RejectConflict, Message: fmt.Sprintf(
-			"item %s was completed by %s; reopen it before skipping it",
-			item.ID, orSomebody(item.CompletedBy))}
+		return &AlreadyCompleted{Item: item, Skipping: true}
 	}
 	// The skipper is written to `completed_by`: the column says who
 	// finished with the item, and a skip is one of the two ways to.
+	name, account := s.Reviewer.columns()
 	if _, err := tx.Exec(
 		`UPDATE annotation_items
-		    SET status = ?, completed_by = ?, completed_at = ?, skip_reason = ?,
-		        claimed_by = NULL, claimed_until = NULL
+		    SET status = ?, completed_by = ?, completed_by_account = ?, completed_at = ?,
+		        skip_reason = ?, claimed_by = NULL, claimed_by_account = NULL, claimed_until = NULL
 		  WHERE project_id = ? AND id = ?`,
-		ItemSkipped, s.Annotator, s.Now, nullString(s.Reason), s.ProjectID, item.ID); err != nil {
+		ItemSkipped, name, account, s.Now, nullString(s.Reason), s.ProjectID, item.ID); err != nil {
 		return fmt.Errorf("skip item %s: %w", item.ID, err)
 	}
 	s.Item, err = itemByID(tx, s.ProjectID, s.Queue, s.ID)
@@ -520,7 +545,6 @@ type QueueItemReopen struct {
 	ProjectID string
 	Queue     string
 	ID        string
-	Annotator string
 
 	Item *AnnotationItem
 }
@@ -533,8 +557,8 @@ func (r *QueueItemReopen) apply(tx *sql.Tx) error {
 	}
 	if _, err := tx.Exec(
 		`UPDATE annotation_items
-		    SET status = ?, completed_by = NULL, completed_at = NULL, skip_reason = NULL,
-		        claimed_by = NULL, claimed_until = NULL
+		    SET status = ?, completed_by = NULL, completed_by_account = NULL, completed_at = NULL,
+		        skip_reason = NULL, claimed_by = NULL, claimed_by_account = NULL, claimed_until = NULL
 		  WHERE project_id = ? AND id = ?`,
 		ItemPending, r.ProjectID, item.ID); err != nil {
 		return fmt.Errorf("reopen item %s: %w", item.ID, err)
@@ -575,8 +599,14 @@ func (d *QueueItemDelete) apply(tx *sql.Tx) error {
 // QueueItemFilter narrows an item listing (#8). The zero value lists the
 // queue's items oldest first, which is the order they are worked in.
 type QueueItemFilter struct {
-	Status    string
+	Status string
+	// Annotator is a key's reviewer by the name it sent; Account a signed-in
+	// one by id (spec 048 #15).
 	Annotator string
+	Account   string
+	// Now is the instant a claim is judged against: a pending item is the
+	// reviewer's only while their claim has not expired (spec 048 #19).
+	Now int64
 	// Limit caps the rows returned; the caller asks for one more than the
 	// page size to learn whether another page exists.
 	Limit int
@@ -687,7 +717,8 @@ const statusCount = `SELECT COUNT(*) FROM annotation_items i
 	 WHERE i.project_id = q.project_id AND i.queue = q.name AND i.status = `
 
 const annotationItemColumns = `id, queue, trace_id, observation_id, status, seq, added_at,
-	        claimed_by, claimed_until, completed_by, completed_at, skip_reason`
+	        claimed_by, claimed_by_account, claimed_until, completed_by, completed_by_account,
+	        completed_at, skip_reason`
 
 func scanQueue(row scanner) (*AnnotationQueue, error) {
 	var (
@@ -716,14 +747,16 @@ func scanAnnotationItem(row scanner) (*AnnotationItem, error) {
 		item          AnnotationItem
 		observationID sql.NullString
 		claimedBy     sql.NullString
+		claimedByAcct sql.NullString
 		claimedUntil  sql.NullInt64
 		completedBy   sql.NullString
+		completedAcct sql.NullString
 		completedAt   sql.NullInt64
 		skipReason    sql.NullString
 	)
 	if err := row.Scan(&item.ID, &item.Queue, &item.TraceID, &observationID, &item.Status,
-		&item.Seq, &item.AddedAt, &claimedBy, &claimedUntil,
-		&completedBy, &completedAt, &skipReason); err != nil {
+		&item.Seq, &item.AddedAt, &claimedBy, &claimedByAcct, &claimedUntil,
+		&completedBy, &completedAcct, &completedAt, &skipReason); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, err
 		}
@@ -732,6 +765,7 @@ func scanAnnotationItem(row scanner) (*AnnotationItem, error) {
 	item.ObservationID, item.ClaimedBy = observationID.String, claimedBy.String
 	item.ClaimedUntil, item.CompletedBy = claimedUntil.Int64, completedBy.String
 	item.CompletedAt, item.SkipReason = completedAt.Int64, skipReason.String
+	item.ClaimedByAccount, item.CompletedByAccount = claimedByAcct.String, completedAcct.String
 	return &item, nil
 }
 
@@ -750,9 +784,19 @@ func itemConditions(projectID, queue string, filter QueueItemFilter) ([]string, 
 		// alone made `status=pending&annotator=ada` answer "ada has
 		// nothing open" for a queue ada is working through, which is a
 		// well-formed answer to a different question (spec 003 #23).
+		//
+		// Holding means a claim that has not expired (spec 048 #19): one
+		// that has is anybody's `next`, and listing it as theirs would say
+		// otherwise.
 		where = append(where,
-			"(completed_by = ? OR (status = ? AND claimed_by = ?))")
-		args = append(args, filter.Annotator, ItemPending, filter.Annotator)
+			"(completed_by = ? OR (status = ? AND claimed_by = ? AND claimed_until > ?))")
+		args = append(args, filter.Annotator, ItemPending, filter.Annotator, filter.Now)
+	}
+	if filter.Account != "" {
+		// The same question of a signed-in reviewer, by the account.
+		where = append(where,
+			"(completed_by_account = ? OR (status = ? AND claimed_by_account = ? AND claimed_until > ?))")
+		args = append(args, filter.Account, ItemPending, filter.Account, filter.Now)
 	}
 	return where, args
 }
@@ -923,9 +967,82 @@ func missingScores(tx *sql.Tx, projectID string, configs []string, item *Annotat
 	return missing, nil
 }
 
+// AlreadyCompleted refuses a completion or a skip of an item somebody has
+// completed (#7, Decision 18). It carries the item so that the handler can name
+// who completed it for the reader it answers — which the store does not know
+// (spec 048 #18) — and unwraps to the Rejection that names a key's reviewer by
+// the name it sent, for any caller that names nobody.
+type AlreadyCompleted struct {
+	Item     *AnnotationItem
+	Skipping bool
+}
+
+func (a *AlreadyCompleted) Error() string { return a.Refusal("").Message }
+func (a *AlreadyCompleted) Unwrap() error { return a.Refusal("") }
+
+// Refusal is the 409 naming the finisher as `who`; empty is the name the
+// item's reviewer sent, or "somebody".
+func (a *AlreadyCompleted) Refusal(who string) *Rejection {
+	if who == "" {
+		who = orSomebody(a.Item.CompletedBy)
+	}
+	if a.Skipping {
+		return &Rejection{Kind: RejectConflict, Message: fmt.Sprintf(
+			"item %s was completed by %s; reopen it before skipping it", a.Item.ID, who)}
+	}
+	return &Rejection{Kind: RejectConflict, Message: fmt.Sprintf(
+		"item %s was already completed by %s", a.Item.ID, who)}
+}
+
 func orSomebody(annotator string) string {
 	if annotator == "" {
 		return "somebody"
 	}
 	return annotator
+}
+
+// ReviewerAccount is what a queue item's reader needs of an account that
+// holds or finished it (spec 048 #15): how to call it, and its standing in
+// the project now, as a score's author has (#4).
+type ReviewerAccount struct {
+	Name     string
+	Email    string
+	Standing string
+}
+
+// ReviewerAccounts reads the accounts behind a page of items, by id, with
+// their standing in the project. An id that is not in the answer belongs to an
+// account that was deleted.
+func (s *Store) ReviewerAccounts(ctx context.Context, projectID string, ids []string) (map[string]ReviewerAccount, error) {
+	out := map[string]ReviewerAccount{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	args := []any{projectID}
+	for _, id := range ids {
+		args = append(args, id)
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT a.id, a.name, a.email, a.owner, a.disabled, COALESCE(m.role, '')
+		   FROM accounts a
+		   LEFT JOIN memberships m ON m.account_id = a.id AND m.project_id = ?
+		  WHERE a.id IN (`+placeholders(len(ids))+`)`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("read the reviewers' accounts: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			id              string
+			account         ReviewerAccount
+			owner, disabled bool
+			role            string
+		)
+		if err := rows.Scan(&id, &account.Name, &account.Email, &owner, &disabled, &role); err != nil {
+			return nil, err
+		}
+		account.Standing = standing(true, owner, disabled, role)
+		out[id] = account
+	}
+	return out, rows.Err()
 }

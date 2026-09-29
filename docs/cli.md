@@ -682,7 +682,10 @@ and adds nothing, so a filter is safe to re-run.
 
 `queues next` claims the item it hands out for ten minutes, and hands the same
 one back on a second call from the same `--annotator` — a script that crashes
-and restarts resumes rather than skipping. `queues complete` is refused until
+and restarts resumes rather than skipping. `--annotator` is the name a
+program signs with; a person working the queue from the web interface is held
+by their account instead, and `queues items --account ID` finds their items
+([annotation.md](annotation.md#taking-an-item)). `queues complete` is refused until
 every score the queue names is on the item's target, whoever wrote it: post
 them with `scores add` first. `queues reopen` on an item that is already
 pending simply releases the claim.
